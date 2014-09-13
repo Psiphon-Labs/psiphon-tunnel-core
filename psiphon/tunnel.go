@@ -35,7 +35,7 @@ import (
 // and an SSH session built on top of that transport.
 type Tunnel struct {
 	serverEntry *ServerEntry
-	conn        *InterruptibleConn
+	conn        *Conn
 	sshClient   *ssh.Client
 }
 
@@ -74,20 +74,20 @@ func EstablishTunnel(tunnel *Tunnel) (err error) {
 		return fmt.Errorf("server does not have sufficient capabilities")
 	}
 	port := tunnel.serverEntry.SshPort
-	interruptibleConn, err := NewInterruptibleConn(0, CONNECTION_CANDIDATE_TIMEOUT, "")
+	conn, err := NewConn(0, CONNECTION_CANDIDATE_TIMEOUT, "")
 	if err != nil {
 		return err
 	}
-	var conn net.Conn
-	conn = interruptibleConn
+	var netConn net.Conn
+	netConn = conn
 	if obfuscatedSshCapable {
 		port = tunnel.serverEntry.SshObfuscatedPort
-		conn, err = NewObfuscatedSshConn(interruptibleConn, tunnel.serverEntry.SshObfuscatedKey)
+		netConn, err = NewObfuscatedSshConn(conn, tunnel.serverEntry.SshObfuscatedKey)
 		if err != nil {
 			return err
 		}
 	}
-	err = interruptibleConn.Connect(tunnel.serverEntry.IpAddress, port)
+	err = conn.Connect(tunnel.serverEntry.IpAddress, port)
 	if err != nil {
 		return err
 	}
@@ -113,7 +113,7 @@ func EstablishTunnel(tunnel *Tunnel) (err error) {
 	}
 	// The folowing is adapted from ssh.Dial(), here using a custom conn
 	sshAddress := strings.Join([]string{tunnel.serverEntry.IpAddress, ":", strconv.Itoa(tunnel.serverEntry.SshPort)}, "")
-	sshConn, sshChans, sshReqs, err := ssh.NewClientConn(conn, sshAddress, sshClientConfig)
+	sshConn, sshChans, sshReqs, err := ssh.NewClientConn(netConn, sshAddress, sshClientConfig)
 	if err != nil {
 		return err
 	}
