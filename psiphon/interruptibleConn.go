@@ -61,11 +61,11 @@ func NewInterruptibleConn(readTimeout, writeTimeout time.Duration, deviceName st
 	if deviceName != "" {
 		// TODO: requires root, which we won't have on Android in VpnService mode
 		//       an alternative may be to use http://golang.org/pkg/syscall/#UnixRights to
-		//       send the fd to the main Android process which received the fd with
+		//       send the fd to the main Android process which receives the fd with
 		//       http://developer.android.com/reference/android/net/LocalSocket.html#getAncillaryFileDescriptors%28%29
-		//       and then call
+		//       and then calls
 		//       http://developer.android.com/reference/android/net/VpnService.html#protect%28int%29.
-		//       See for example:
+		//       See, for example:
 		//       https://code.google.com/p/ics-openvpn/source/browse/main/src/main/java/de/blinkt/openvpn/core/OpenVpnManagementThread.java#164
 		const SO_BINDTODEVICE = 0x19 // only defined for Linux
 		err = syscall.SetsockoptString(socketFd, syscall.SOL_SOCKET, SO_BINDTODEVICE, deviceName)
@@ -83,7 +83,7 @@ func NewInterruptibleConn(readTimeout, writeTimeout time.Duration, deviceName st
 func (interruptibleConn *InterruptibleConn) Connect(ipAddress string, port int) (err error) {
 	// TODO: domain name resolution (for meek)
 	var addr [4]byte
-	copy(addr[:], net.ParseIP(ipAddress)[:4])
+	copy(addr[:], net.ParseIP(ipAddress).To4())
 	sockAddr := syscall.SockaddrInet4{Addr: addr, Port: port}
 	err = syscall.Connect(interruptibleConn.socketFd, &sockAddr)
 	if err != nil {

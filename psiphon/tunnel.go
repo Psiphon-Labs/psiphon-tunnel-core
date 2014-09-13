@@ -24,6 +24,7 @@ import (
 	"code.google.com/p/go.crypto/ssh"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -67,12 +68,12 @@ func EstablishTunnel(tunnel *Tunnel) (err error) {
 	}
 	// First connect the transport
 	// TODO: meek
-	sshCapable := Contains(tunnel.serverEntry.capabilities, "SSH")
-	obfuscatedSshCapable := Contains(tunnel.serverEntry.capabilities, "OSSH")
+	sshCapable := Contains(tunnel.serverEntry.Capabilities, "SSH")
+	obfuscatedSshCapable := false //Contains(tunnel.serverEntry.Capabilities, "OSSH")
 	if !sshCapable && !obfuscatedSshCapable {
-		return errors.New("server does not have sufficient capabilities")
+		return fmt.Errorf("server does not have sufficient capabilities")
 	}
-	port := tunnel.serverEntry.sshPort
+	port := tunnel.serverEntry.SshPort
 	interruptibleConn, err := NewInterruptibleConn(0, CONNECTION_CANDIDATE_TIMEOUT, "")
 	if err != nil {
 		return err
@@ -80,18 +81,18 @@ func EstablishTunnel(tunnel *Tunnel) (err error) {
 	var conn net.Conn
 	conn = interruptibleConn
 	if obfuscatedSshCapable {
-		port = tunnel.serverEntry.sshObfuscatedPort
-		conn, err = NewObfuscatedSshConn(interruptibleConn, tunnel.serverEntry.sshObfuscatedKey)
+		port = tunnel.serverEntry.SshObfuscatedPort
+		conn, err = NewObfuscatedSshConn(interruptibleConn, tunnel.serverEntry.SshObfuscatedKey)
 		if err != nil {
 			return err
 		}
 	}
-	err = interruptibleConn.Connect(tunnel.serverEntry.ipAddress, port)
+	err = interruptibleConn.Connect(tunnel.serverEntry.IpAddress, port)
 	if err != nil {
 		return err
 	}
 	// Now establish the SSH session
-	expectedPublicKey, err := base64.StdEncoding.DecodeString(tunnel.serverEntry.sshHostKey)
+	expectedPublicKey, err := base64.StdEncoding.DecodeString(tunnel.serverEntry.SshHostKey)
 	if err != nil {
 		return err
 	}
@@ -104,14 +105,14 @@ func EstablishTunnel(tunnel *Tunnel) (err error) {
 		},
 	}
 	sshClientConfig := &ssh.ClientConfig{
-		User: tunnel.serverEntry.sshUsername,
+		User: tunnel.serverEntry.SshUsername,
 		Auth: []ssh.AuthMethod{
-			ssh.Password(tunnel.serverEntry.sshPassword),
+			ssh.Password(tunnel.serverEntry.SshPassword),
 		},
 		HostKeyCallback: sshCertChecker.CheckHostKey,
 	}
 	// The folowing is adapted from ssh.Dial(), here using a custom conn
-	sshAddress := strings.Join([]string{tunnel.serverEntry.ipAddress, ":", strconv.Itoa(tunnel.serverEntry.sshPort)}, "")
+	sshAddress := strings.Join([]string{tunnel.serverEntry.IpAddress, ":", strconv.Itoa(tunnel.serverEntry.SshPort)}, "")
 	sshConn, sshChans, sshReqs, err := ssh.NewClientConn(conn, sshAddress, sshClientConfig)
 	if err != nil {
 		return err

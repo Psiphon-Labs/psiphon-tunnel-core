@@ -40,12 +40,12 @@ func establishTunnelWorker(
 	waitGroup *sync.WaitGroup, candidateQueue chan *Tunnel, firstEstablishedTunnel chan *Tunnel) {
 	defer waitGroup.Done()
 	for tunnel := range candidateQueue {
-		log.Printf("Connecting to %s...", tunnel.serverEntry.ipAddress)
+		log.Printf("Connecting to %s...", tunnel.serverEntry.IpAddress)
 		err := EstablishTunnel(tunnel)
 		if err != nil {
-			log.Printf("failed to connect to %s: %s", tunnel.serverEntry.ipAddress, err)
+			log.Printf("failed to connect to %s: %s", tunnel.serverEntry.IpAddress, err)
 		} else {
-			log.Printf("success connecting to %s", tunnel.serverEntry.ipAddress)
+			log.Printf("success connecting to %s", tunnel.serverEntry.IpAddress)
 			select {
 			case firstEstablishedTunnel <- tunnel:
 			default:
@@ -70,9 +70,9 @@ func runTunnel(config *Config) error {
 		return fmt.Errorf("failed to fetch remote server list: %s", err)
 	}
 	log.Printf("establishing tunnel")
-	candidateList := make([]*Tunnel, len(serverList))
+	candidateList := make([]*Tunnel, 0)
 	for _, serverEntry := range serverList {
-		candidateList = append(candidateList, &Tunnel{serverEntry: &serverEntry})
+		candidateList = append(candidateList, &Tunnel{serverEntry: serverEntry})
 	}
 	waitGroup := new(sync.WaitGroup)
 	candidateQueue := make(chan *Tunnel)
