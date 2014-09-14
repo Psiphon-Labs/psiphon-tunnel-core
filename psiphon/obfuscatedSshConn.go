@@ -183,24 +183,24 @@ func (conn *ObfuscatedSshConn) readServerIdentification(buffer []byte) (n int, e
 // The payload for SSH_MSG_NEWKEYS is one byte, the packet type, value 21.
 func (conn *ObfuscatedSshConn) updateState(buffer []byte) (err error) {
 	// Use of conn.clientMessageBuffer allows protocol message boundaries to cross Write() calls
-	switch conn.state {
-	case OBFUSCATION_STATE_SEND_CLIENT_SEED_MESSAGE:
+	if conn.state == OBFUSCATION_STATE_SEND_CLIENT_SEED_MESSAGE {
 		_, err = conn.Conn.Write(conn.obfuscator.ConsumeSeedMessage())
 		if err != nil {
 			return err
 		}
 		conn.state = OBFUSCATION_STATE_CLIENT_IDENTIFICATION_LINE
+	}
+	conn.clientMessageBuffer = append(conn.clientMessageBuffer, buffer...)
+	switch conn.state {
 	case OBFUSCATION_STATE_CLIENT_IDENTIFICATION_LINE:
-		conn.clientMessageBuffer = append(conn.clientMessageBuffer, buffer...)
-		line := bytes.SplitN(conn.clientMessageBuffer, []byte("\r\n"), 1)
-		if len(line) > 1 {
+		lines := bytes.SplitN(conn.clientMessageBuffer, []byte("\r\n"), 2)
+		if len(lines) > 1 {
 			// TODO: efficiency...?
-			conn.clientMessageBuffer = conn.clientMessageBuffer[len(line[0]):]
+			conn.clientMessageBuffer = conn.clientMessageBuffer[len(lines[0])+2:]
 			conn.state = OBFUSCATION_STATE_CLIENT_KEX_PACKETS
 		}
 	case OBFUSCATION_STATE_CLIENT_KEX_PACKETS:
 		const SSH_MSG_NEWKEYS = 21
-		conn.clientMessageBuffer = append(conn.clientMessageBuffer, buffer...)
 		const PREFIX_LENGTH = 5 // uint32 + byte
 		for len(conn.clientMessageBuffer) >= PREFIX_LENGTH {
 			// This parsing repeats for a single packet sent over multiple Write() calls
@@ -219,7 +219,7 @@ func (conn *ObfuscatedSshConn) updateState(buffer []byte) (err error) {
 			}
 			if payloadLength > 1 {
 				packetType := conn.clientMessageBuffer[PREFIX_LENGTH]
-				if packetType == SSH_MSG_NEWKEYS {
+				if int(packetType) == SSH_MSG_NEWKEYS {
 					conn.state = OBFUSCATION_STATE_FINISHED
 					conn.clientMessageBuffer = nil
 					break
