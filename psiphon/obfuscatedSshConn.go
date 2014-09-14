@@ -22,6 +22,7 @@ package psiphon
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 )
