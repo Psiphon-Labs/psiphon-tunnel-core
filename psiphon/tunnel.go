@@ -69,7 +69,7 @@ func EstablishTunnel(tunnel *Tunnel) (err error) {
 	// First connect the transport
 	// TODO: meek
 	sshCapable := Contains(tunnel.serverEntry.Capabilities, "SSH")
-	obfuscatedSshCapable := false //Contains(tunnel.serverEntry.Capabilities, "OSSH")
+	obfuscatedSshCapable := Contains(tunnel.serverEntry.Capabilities, "OSSH")
 	if !sshCapable && !obfuscatedSshCapable {
 		return fmt.Errorf("server does not have sufficient capabilities")
 	}
