@@ -22,7 +22,6 @@ package psiphon
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"io"
 	"net"
 )
@@ -78,7 +77,7 @@ func (conn *ObfuscatedSshConn) Read(buffer []byte) (n int, err error) {
 	} else {
 		n, err = conn.Conn.Read(buffer)
 		if conn.state != OBFUSCATION_STATE_FINISHED {
-			conn.obfuscator.ObfuscateServerToClient(buffer)
+			conn.obfuscator.ObfuscateServerToClient(buffer[:n])
 		}
 	}
 	return
@@ -126,6 +125,7 @@ func (conn *ObfuscatedSshConn) readServerIdentification(buffer []byte) (n int, e
 	if conn.serverIdentificationBuffer == nil {
 		for {
 			conn.serverIdentificationBuffer = make([]byte, 0, 512)
+			// TODO: use bufio.Reader?
 			var readBuffer [1]byte
 			var validLine = false
 			for len(conn.serverIdentificationBuffer) < cap(conn.serverIdentificationBuffer) {
@@ -204,22 +204,17 @@ func (conn *ObfuscatedSshConn) updateState(buffer []byte) (err error) {
 		const PREFIX_LENGTH = 5 // uint32 + byte
 		for len(conn.clientMessageBuffer) >= PREFIX_LENGTH {
 			// This parsing repeats for a single packet sent over multiple Write() calls
-			var packetLength uint32
-			reader := bytes.NewReader(conn.clientMessageBuffer)
-			err = binary.Read(reader, binary.BigEndian, &packetLength)
-			if err != nil {
-				return err
-			}
 			// TODO: handle malformed packet [lengths]
-			paddingLength := conn.clientMessageBuffer[PREFIX_LENGTH-1]
+			packetLength := binary.BigEndian.Uint32(conn.clientMessageBuffer[0:4])
+			paddingLength := uint32(conn.clientMessageBuffer[PREFIX_LENGTH-1])
 			payloadLength := packetLength - uint32(paddingLength) - 1
 			messageLength := PREFIX_LENGTH + packetLength - 1
 			if uint32(len(conn.clientMessageBuffer)) < messageLength {
 				break
 			}
 			if payloadLength > 1 {
-				packetType := conn.clientMessageBuffer[PREFIX_LENGTH]
-				if int(packetType) == SSH_MSG_NEWKEYS {
+				packetType := uint32(conn.clientMessageBuffer[PREFIX_LENGTH])
+				if packetType == SSH_MSG_NEWKEYS {
 					conn.state = OBFUSCATION_STATE_FINISHED
 					conn.clientMessageBuffer = nil
 					break
