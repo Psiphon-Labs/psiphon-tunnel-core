@@ -24,6 +24,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"log"
 	"net"
 )
 
@@ -93,7 +94,11 @@ func (conn *ObfuscatedSshConn) Write(buffer []byte) (n int, err error) {
 		if err != nil {
 			return
 		}
-		conn.obfuscator.ObfuscateClientToServer(buffer)
+		// Don't overwrite original buffer
+		obfuscatedBuffer := make([]byte, len(buffer))
+		copy(obfuscatedBuffer, buffer)
+		conn.obfuscator.ObfuscateClientToServer(obfuscatedBuffer)
+		return conn.Conn.Write(obfuscatedBuffer)
 	}
 	return conn.Conn.Write(buffer)
 }
@@ -145,6 +150,7 @@ func (conn *ObfuscatedSshConn) readServerIdentification(buffer []byte) (n int, e
 				return 0, errors.New("invalid server identity line")
 			}
 			if bytes.HasPrefix(conn.serverIdentificationBuffer, []byte("SSH-")) {
+				log.Printf("DEBUG server version string %s", string(conn.serverIdentificationBuffer))
 				break
 			}
 		}
@@ -215,6 +221,7 @@ func (conn *ObfuscatedSshConn) updateState(buffer []byte) (err error) {
 			}
 			if payloadLength > 1 {
 				packetType := uint32(conn.clientMessageBuffer[PREFIX_LENGTH])
+				log.Printf("DEBUG packetType %d", packetType)
 				if packetType == SSH_MSG_NEWKEYS {
 					conn.state = OBFUSCATION_STATE_FINISHED
 					conn.clientMessageBuffer = nil
