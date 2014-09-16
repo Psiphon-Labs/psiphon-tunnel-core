@@ -118,6 +118,7 @@ func EstablishTunnel(tunnel *Tunnel) (err error) {
 		return err
 	}
 	sshClient := ssh.NewClient(sshConn, sshChans, sshReqs)
+	tunnel.conn = conn
 	tunnel.sshClient = sshClient
 	return nil
 }
