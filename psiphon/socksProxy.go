@@ -34,8 +34,8 @@ import (
 type SocksServer struct {
 	tunnel        *Tunnel
 	failureSignal chan bool
-	listener      pt.SocksListener
-	waitGroup     sync.WaitGroup
+	listener      *pt.SocksListener
+	waitGroup     *sync.WaitGroup
 }
 
 // NewSocksServer initializes, but does not start, a SocksServer.
@@ -52,6 +52,8 @@ func (server *SocksServer) Run() error {
 		return err
 	}
 	log.Printf("local SOCKS proxy running on port %s", listener.Addr())
+	server.listener = listener
+	server.waitGroup = new(sync.WaitGroup)
 	server.waitGroup.Add(1)
 	go server.acceptSocksConnections()
 	return nil
