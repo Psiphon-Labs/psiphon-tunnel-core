@@ -75,7 +75,7 @@ func runTunnel(config *Config) error {
 		candidateList = append(candidateList, &Tunnel{serverEntry: serverEntry})
 	}
 	waitGroup := new(sync.WaitGroup)
-	candidateQueue := make(chan *Tunnel)
+	candidateQueue := make(chan *Tunnel, len(candidateList))
 	firstEstablishedTunnel := make(chan *Tunnel, 1)
 	timeout := time.After(ESTABLISH_TUNNEL_TIMEOUT)
 	for i := 0; i < CONNECTION_WORKER_POOL_SIZE; i++ {
@@ -88,7 +88,7 @@ func runTunnel(config *Config) error {
 	close(candidateQueue)
 	var establishedTunnel *Tunnel
 	select {
-	case establishedTunnel := <-firstEstablishedTunnel:
+	case establishedTunnel = <-firstEstablishedTunnel:
 		defer establishedTunnel.Close()
 	case <-timeout:
 		return errors.New("timeout establishing tunnel")
