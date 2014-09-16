@@ -65,10 +65,12 @@ type ObfuscatedSshConn struct {
 }
 
 const (
-	MAX_SERVER_LINE_LENGTH   = 1024
-	SSH_PACKET_PREFIX_LENGTH = 5          // uint32 + byte
-	SSH_MAX_PACKET_LENGTH    = 256 * 1024 // OpenSSH max packet length
-	SSH_MSG_NEWKEYS          = 21
+	SSH_MAX_SERVER_LINE_LENGTH = 1024
+	SSH_PACKET_PREFIX_LENGTH   = 5          // uint32 + byte
+	SSH_MAX_PACKET_LENGTH      = 256 * 1024 // OpenSSH max packet length
+	SSH_MSG_NEWKEYS            = 21
+	SSH_MAX_PADDING_LENGTH     = 255 // RFC 4253 sec. 6
+	SSH_PADDING_MULTIPLE       = 16  // Default cipher block size
 )
 
 // NewObfuscatedSshConn creates a new ObfuscatedSshConn. The underlying
@@ -157,7 +159,7 @@ func (conn *ObfuscatedSshConn) readAndTransform(buffer []byte) (n int, err error
 				// TODO: use bufio.BufferedReader? less redundant string searching?
 				var oneByte [1]byte
 				var validLine = false
-				for len(conn.readBuffer) < MAX_SERVER_LINE_LENGTH {
+				for len(conn.readBuffer) < SSH_MAX_SERVER_LINE_LENGTH {
 					_, err := io.ReadFull(conn.Conn, oneByte[:])
 					if err != nil {
 						return 0, err
@@ -245,6 +247,11 @@ func (conn *ObfuscatedSshConn) readAndTransform(buffer []byte) (n int, err error
 // m is 0 as no MAC ha yet been negotiated.
 // http://www.ietf.org/rfc/rfc4253.txt sec 7.3, 12:
 // The payload for SSH_MSG_NEWKEYS is one byte, the packet type, value 21.
+//
+// SSH packet padding values are transformed to achive random, variable length
+// padding during the KEX phase as a partial defense against traffic analysis.
+// (The transformer can do this since only the payload and not the padding of
+// these packets is authenticated in the "exchange hash").
 func (conn *ObfuscatedSshConn) transformAndWrite(buffer []byte) (err error) {
 	if conn.writeState == OBFUSCATION_WRITE_STATE_SEND_CLIENT_SEED_MESSAGE {
 		_, err = conn.Conn.Write(conn.obfuscator.ConsumeSeedMessage())
@@ -266,12 +273,11 @@ func (conn *ObfuscatedSshConn) transformAndWrite(buffer []byte) (err error) {
 		}
 	case OBFUSCATION_WRITE_STATE_CLIENT_KEX_PACKETS:
 		for len(conn.writeBuffer) >= SSH_PACKET_PREFIX_LENGTH {
-			_, _, payloadLength, messageLength := getSshPacketPrefix(conn.writeBuffer)
+			packetLength, paddingLength, payloadLength, messageLength := getSshPacketPrefix(conn.writeBuffer)
 			if len(conn.writeBuffer) < messageLength {
 				// We don't have the complete packet yet
 				break
 			}
-			// TODO: transform padding to implement random, variable length padding in KEX phase
 			messageBuffer = append([]byte(nil), conn.writeBuffer[:messageLength]...)
 			conn.writeBuffer = conn.writeBuffer[messageLength:]
 			if payloadLength > 0 {
@@ -279,6 +285,23 @@ func (conn *ObfuscatedSshConn) transformAndWrite(buffer []byte) (err error) {
 				if packetType == SSH_MSG_NEWKEYS {
 					conn.writeState = OBFUSCATION_WRITE_STATE_FINISHED
 				}
+			}
+			// Padding transformation
+			// See RFC 4253 sec. 6 for constraints
+			possiblePaddings := (SSH_MAX_PADDING_LENGTH - paddingLength) / SSH_PADDING_MULTIPLE
+			if possiblePaddings > 0 {
+				selectedPadding, err := MakeSecureRandomInt(possiblePaddings)
+				if err != nil {
+					return err
+				}
+				extraPaddingLength := selectedPadding * SSH_PADDING_MULTIPLE
+				extraPadding, err := MakeSecureRandomBytes(extraPaddingLength)
+				if err != nil {
+					return err
+				}
+				setSshPacketPrefix(
+					messageBuffer, packetLength+extraPaddingLength, paddingLength+extraPaddingLength)
+				messageBuffer = append(messageBuffer, extraPadding...)
 			}
 		}
 	case OBFUSCATION_WRITE_STATE_FINISHED:
@@ -310,4 +333,9 @@ func getSshPacketPrefix(buffer []byte) (packetLength, paddingLength, payloadLeng
 	payloadLength = packetLength - paddingLength - 1
 	messageLength = SSH_PACKET_PREFIX_LENGTH + packetLength - 1
 	return
+}
+
+func setSshPacketPrefix(buffer []byte, packetLength, paddingLength int) {
+	binary.BigEndian.PutUint32(buffer, uint32(packetLength))
+	buffer[SSH_PACKET_PREFIX_LENGTH-1] = byte(paddingLength)
 }
