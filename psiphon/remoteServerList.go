@@ -37,17 +37,16 @@ import (
 // entries. As it may be downloaded from various sources, it is digitally
 // signed so that the data may be authenticated.
 type RemoteServerList struct {
-	data                   string `json:"data"`
-	signingPublicKeyDigest string `json:"signingPublicKeyDigest"`
-	signature              string `json:"signature"`
+	Data                   string `json:"data"`
+	SigningPublicKeyDigest string `json:"signingPublicKeyDigest"`
+	Signature              string `json:"signature"`
 }
 
 // FetchRemoteServerList downloads a remote server list JSON record from
 // config.RemoteServerListUrl; validates its digital signature using the
 // public key config.RemoteServerListSignaturePublicKey; and parses the
 // data field into ServerEntry records.
-func FetchRemoteServerList(config *Config) (serverList []ServerEntry, err error) {
-	serverList = make([]ServerEntry, 0)
+func FetchRemoteServerList(config *Config) (serverList []*ServerEntry, err error) {
 	httpClient := http.Client{
 		Timeout: FETCH_REMOTE_SERVER_LIST_TIMEOUT,
 	}
@@ -69,7 +68,8 @@ func FetchRemoteServerList(config *Config) (serverList []ServerEntry, err error)
 	if err != nil {
 		return nil, err
 	}
-	for _, hexEncodedServerListItem := range strings.Split(remoteServerList.data, "\n") {
+	serverList = make([]*ServerEntry, 0)
+	for _, hexEncodedServerListItem := range strings.Split(remoteServerList.Data, "\n") {
 		decodedServerListItem, err := hex.DecodeString(hexEncodedServerListItem)
 		if err != nil {
 			return nil, err
@@ -84,7 +84,7 @@ func FetchRemoteServerList(config *Config) (serverList []ServerEntry, err error)
 		if err != nil {
 			return nil, err
 		}
-		serverList = append(serverList, serverEntry)
+		serverList = append(serverList, &serverEntry)
 	}
 	return serverList, nil
 }
@@ -102,19 +102,18 @@ func validateRemoteServerList(config *Config, remoteServerList *RemoteServerList
 	if !ok {
 		return errors.New("unexpected RemoteServerListSignaturePublicKey key type")
 	}
-	signature, err := base64.StdEncoding.DecodeString(remoteServerList.signature)
+	signature, err := base64.StdEncoding.DecodeString(remoteServerList.Signature)
 	if err != nil {
 		return err
 	}
 	// TODO: can detect if signed with different key --
 	// match digest(publicKey) against remoteServerList.signingPublicKeyDigest
 	hash := sha256.New()
-	hash.Write([]byte(remoteServerList.data))
+	hash.Write([]byte(remoteServerList.Data))
 	digest := hash.Sum(nil)
 	err = rsa.VerifyPKCS1v15(rsaPublicKey, crypto.SHA256, digest, signature)
 	if err != nil {
 		return err
 	}
-
 	return nil
 }

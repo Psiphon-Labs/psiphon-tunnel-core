@@ -27,14 +27,14 @@ import (
 	"time"
 )
 
-// InterruptibleConn is a network connection that:
+// Conn is a customized network connection that:
 // - can be interrupted while connecting;
 // - turns on TCP keep alive;
 // - implements idle read/write timeouts;
 // - supports sending a signal to a channel when it disconnects;
 // - can be bound to a specific system device (for Android VpnService
 //   routing compatibility, for example).
-type InterruptibleConn struct {
+type Conn struct {
 	net.Conn
 	socketFd            int
 	needCloseSocketFd   bool
@@ -44,11 +44,11 @@ type InterruptibleConn struct {
 	writeTimeout        time.Duration
 }
 
-// NewInterruptibleConn creates a new, configured InterruptibleConn. Unlike Dial
+// NewConn creates a new, configured Conn. Unlike standard Dial
 // functions, this does not return a connected net.Conn. Call the Connect function
 // to complete the connection establishment. To implement device binding and
 // interruptible connecting, the lower-level syscall APIs are used.
-func NewInterruptibleConn(readTimeout, writeTimeout time.Duration, deviceName string) (*InterruptibleConn, error) {
+func NewConn(readTimeout, writeTimeout time.Duration, deviceName string) (*Conn, error) {
 	socketFd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
 	if err != nil {
 		return nil, err
@@ -61,17 +61,17 @@ func NewInterruptibleConn(readTimeout, writeTimeout time.Duration, deviceName st
 	if deviceName != "" {
 		// TODO: requires root, which we won't have on Android in VpnService mode
 		//       an alternative may be to use http://golang.org/pkg/syscall/#UnixRights to
-		//       send the fd to the main Android process which received the fd with
+		//       send the fd to the main Android process which receives the fd with
 		//       http://developer.android.com/reference/android/net/LocalSocket.html#getAncillaryFileDescriptors%28%29
-		//       and then call
+		//       and then calls
 		//       http://developer.android.com/reference/android/net/VpnService.html#protect%28int%29.
-		//       See for example:
+		//       See, for example:
 		//       https://code.google.com/p/ics-openvpn/source/browse/main/src/main/java/de/blinkt/openvpn/core/OpenVpnManagementThread.java#164
 		const SO_BINDTODEVICE = 0x19 // only defined for Linux
 		err = syscall.SetsockoptString(socketFd, syscall.SOL_SOCKET, SO_BINDTODEVICE, deviceName)
 		return nil, err
 	}
-	return &InterruptibleConn{
+	return &Conn{
 		socketFd:          socketFd,
 		needCloseSocketFd: true,
 		readTimeout:       readTimeout,
@@ -80,23 +80,23 @@ func NewInterruptibleConn(readTimeout, writeTimeout time.Duration, deviceName st
 
 // Connect establishes a connection to the specified host. The sequence of
 // syscalls in this implementation are taken from: https://code.google.com/p/go/issues/detail?id=6966
-func (interruptibleConn *InterruptibleConn) Connect(ipAddress string, port int) (err error) {
+func (conn *Conn) Connect(ipAddress string, port int) (err error) {
 	// TODO: domain name resolution (for meek)
 	var addr [4]byte
-	copy(addr[:], net.ParseIP(ipAddress)[:4])
+	copy(addr[:], net.ParseIP(ipAddress).To4())
 	sockAddr := syscall.SockaddrInet4{Addr: addr, Port: port}
-	err = syscall.Connect(interruptibleConn.socketFd, &sockAddr)
+	err = syscall.Connect(conn.socketFd, &sockAddr)
 	if err != nil {
 		return err
 	}
-	file := os.NewFile(uintptr(interruptibleConn.socketFd), "")
+	file := os.NewFile(uintptr(conn.socketFd), "")
 	defer file.Close()
-	conn, err := net.FileConn(file)
+	fileConn, err := net.FileConn(file)
 	if err != nil {
 		return err
 	}
-	interruptibleConn.Conn = conn
-	interruptibleConn.needCloseSocketFd = false
+	conn.Conn = fileConn
+	conn.needCloseSocketFd = false
 	return nil
 }
 
@@ -104,67 +104,67 @@ func (interruptibleConn *InterruptibleConn) Connect(ipAddress string, port int) 
 // when the connection terminates. This function returns an error
 // if the connection is already disconnected (and would never send
 // the signal).
-func (interruptibleConn *InterruptibleConn) SetDisconnectionSignal(disconnectionSignal chan bool) (err error) {
-	if interruptibleConn.isDisconnected {
+func (conn *Conn) SetDisconnectionSignal(disconnectionSignal chan bool) (err error) {
+	if conn.isDisconnected {
 		return errors.New("connection is already disconnected")
 	}
-	interruptibleConn.disconnectionSignal = disconnectionSignal
+	conn.disconnectionSignal = disconnectionSignal
 	return nil
 }
 
 // Close terminates down an established (net.Conn) or establishing (socketFd) connection.
-func (interruptibleConn *InterruptibleConn) Close() (err error) {
-	if interruptibleConn.needCloseSocketFd {
-		err = syscall.Close(interruptibleConn.socketFd)
-		interruptibleConn.needCloseSocketFd = false
+func (conn *Conn) Close() (err error) {
+	if conn.needCloseSocketFd {
+		err = syscall.Close(conn.socketFd)
+		conn.needCloseSocketFd = false
 	}
-	if interruptibleConn.Conn != nil {
-		err = interruptibleConn.Conn.Close()
+	if conn.Conn != nil {
+		err = conn.Conn.Close()
 	}
-	if interruptibleConn.disconnectionSignal != nil {
+	if conn.disconnectionSignal != nil {
 		select {
-		case interruptibleConn.disconnectionSignal <- true:
+		case conn.disconnectionSignal <- true:
 		default:
 		}
 	}
-	interruptibleConn.isDisconnected = true
+	conn.isDisconnected = true
 	return err
 }
 
 // Read wraps standard Read to add an idle timeout. The connection
 // is explicitly terminated on timeout.
-func (interruptibleConn *InterruptibleConn) Read(buffer []byte) (n int, err error) {
-	if interruptibleConn.Conn == nil {
+func (conn *Conn) Read(buffer []byte) (n int, err error) {
+	if conn.Conn == nil {
 		return 0, errors.New("not connected")
 	}
-	if interruptibleConn.readTimeout != 0 {
-		err = interruptibleConn.Conn.SetReadDeadline(time.Now().Add(interruptibleConn.readTimeout))
+	if conn.readTimeout != 0 {
+		err = conn.Conn.SetReadDeadline(time.Now().Add(conn.readTimeout))
 		if err != nil {
 			return 0, err
 		}
 	}
-	n, err = interruptibleConn.Conn.Read(buffer)
+	n, err = conn.Conn.Read(buffer)
 	if err != nil {
-		interruptibleConn.Close()
+		conn.Close()
 	}
 	return
 }
 
 // Write wraps standard Write to add an idle timeout The connection
 // is explicitly terminated on timeout.
-func (interruptibleConn *InterruptibleConn) Write(buffer []byte) (n int, err error) {
-	if interruptibleConn.Conn == nil {
+func (conn *Conn) Write(buffer []byte) (n int, err error) {
+	if conn.Conn == nil {
 		return 0, errors.New("not connected")
 	}
-	if interruptibleConn.writeTimeout != 0 {
-		err = interruptibleConn.Conn.SetWriteDeadline(time.Now().Add(interruptibleConn.writeTimeout))
+	if conn.writeTimeout != 0 {
+		err = conn.Conn.SetWriteDeadline(time.Now().Add(conn.writeTimeout))
 		if err != nil {
 			return 0, err
 		}
 	}
-	n, err = interruptibleConn.Conn.Write(buffer)
+	n, err = conn.Conn.Write(buffer)
 	if err != nil {
-		interruptibleConn.Close()
+		conn.Close()
 	}
 	return
 }

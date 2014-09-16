@@ -24,21 +24,21 @@ package psiphon
 // several protocols. ServerEntry are JSON records downloaded from
 // various sources.
 type ServerEntry struct {
-	ipAddress                     string   `json:"ipAddress"`
-	webServerPort                 string   `json:"webServerPort"` // not an int
-	webServerSecret               string   `json:"webServerSecret"`
-	webServerCertificate          string   `json:"webServerCertificate"`
-	sshPort                       int      `json:"sshPort"`
-	sshUsername                   string   `json:"sshUsername"`
-	sshPassword                   string   `json:"sshPassword"`
-	sshHostKey                    string   `json:"sshHostKey"`
-	sshObfuscatedPort             int      `json:"sshObfuscatedPort"`
-	sshObfuscatedKey              string   `json:"sshObfuscatedKey"`
-	capabilities                  []string `json:"capabilities"`
-	region                        string   `json:"region"`
-	meekServerPort                int      `json:"meekServerPort"`
-	meekCookieEncryptionPublicKey string   `json:"meekCookieEncryptionPublicKey"`
-	meekObfuscatedKey             string   `json:"meekObfuscatedKey"`
-	meekFrontingDomain            string   `json:"meekFrontingDomain"`
-	meekFrontingHost              string   `json:"meekFrontingHost"`
+	IpAddress                     string   `json:"ipAddress"`
+	WebServerPort                 string   `json:"webServerPort"` // not an int
+	WebServerSecret               string   `json:"webServerSecret"`
+	WebServerCertificate          string   `json:"webServerCertificate"`
+	SshPort                       int      `json:"sshPort"`
+	SshUsername                   string   `json:"sshUsername"`
+	SshPassword                   string   `json:"sshPassword"`
+	SshHostKey                    string   `json:"sshHostKey"`
+	SshObfuscatedPort             int      `json:"sshObfuscatedPort"`
+	SshObfuscatedKey              string   `json:"sshObfuscatedKey"`
+	Capabilities                  []string `json:"capabilities"`
+	Region                        string   `json:"region"`
+	MeekServerPort                int      `json:"meekServerPort"`
+	MeekCookieEncryptionPublicKey string   `json:"meekCookieEncryptionPublicKey"`
+	MeekObfuscatedKey             string   `json:"meekObfuscatedKey"`
+	MeekFrontingDomain            string   `json:"meekFrontingDomain"`
+	MeekFrontingHost              string   `json:"meekFrontingHost"`
 }

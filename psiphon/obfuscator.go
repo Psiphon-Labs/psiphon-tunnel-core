@@ -58,23 +58,26 @@ func NewObfuscator(keyword string) (obfuscator *Obfuscator, err error) {
 	if err != nil {
 		return nil, err
 	}
-	obfuscator.clientToServerCipher, err = rc4.NewCipher(clientToServerKey)
-	if err != nil {
-		return nil, err
-	}
 	serverToClientKey, err := deriveKey(seed, []byte(keyword), []byte(OBFUSCATE_SERVER_TO_CLIENT_IV))
 	if err != nil {
 		return nil, err
 	}
-	obfuscator.serverToClientCipher, err = rc4.NewCipher(serverToClientKey)
+	clientToServerCipher, err := rc4.NewCipher(clientToServerKey)
 	if err != nil {
 		return nil, err
 	}
-	obfuscator.seedMessage, err = makeSeedMessage(seed, obfuscator.clientToServerCipher)
+	serverToClientCipher, err := rc4.NewCipher(serverToClientKey)
 	if err != nil {
 		return nil, err
 	}
-	return
+	seedMessage, err := makeSeedMessage(seed, clientToServerCipher)
+	if err != nil {
+		return nil, err
+	}
+	return &Obfuscator{
+		seedMessage:          seedMessage,
+		clientToServerCipher: clientToServerCipher,
+		serverToClientCipher: serverToClientCipher}, nil
 }
 
 // ConsumeSeedMessage returns the seed message created in NewObfuscator,
