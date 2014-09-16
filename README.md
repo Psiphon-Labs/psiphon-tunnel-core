@@ -14,7 +14,6 @@ Status
 This project is currently at the proof-of-concept stage. Current production Psiphon client code is available at our [main repository](https://bitbucket.org/psiphon/psiphon-circumvention-system).
 
 ### TODO
-* SSH variable length random padding in KEX phase
 * more test cases
 * integrate meek-client
 * add config options
