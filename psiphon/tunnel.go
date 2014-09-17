@@ -30,11 +30,17 @@ import (
 	"strings"
 )
 
+const (
+	PROTOCOL_SSH            = "SSH"
+	PROTOCOL_OBFUSCATED_SSH = "OSSH"
+)
+
 // Tunnel is a connection to a Psiphon server. An established
 // tunnel includes a network connection to the specified server
 // and an SSH session built on top of that transport.
 type Tunnel struct {
 	serverEntry *ServerEntry
+	protocol    string
 	conn        *Conn
 	sshClient   *ssh.Client
 	isClosed    bool
@@ -68,11 +74,12 @@ func EstablishTunnel(tunnel *Tunnel) (err error) {
 	}
 	// First connect the transport
 	// TODO: meek
-	sshCapable := Contains(tunnel.serverEntry.Capabilities, "SSH")
-	obfuscatedSshCapable := Contains(tunnel.serverEntry.Capabilities, "OSSH")
+	sshCapable := Contains(tunnel.serverEntry.Capabilities, PROTOCOL_SSH)
+	obfuscatedSshCapable := Contains(tunnel.serverEntry.Capabilities, PROTOCOL_OBFUSCATED_SSH)
 	if !sshCapable && !obfuscatedSshCapable {
 		return fmt.Errorf("server does not have sufficient capabilities")
 	}
+	tunnel.protocol = PROTOCOL_SSH
 	port := tunnel.serverEntry.SshPort
 	conn, err := NewConn(0, CONNECTION_CANDIDATE_TIMEOUT, "")
 	if err != nil {
@@ -81,6 +88,7 @@ func EstablishTunnel(tunnel *Tunnel) (err error) {
 	var netConn net.Conn
 	netConn = conn
 	if obfuscatedSshCapable {
+		tunnel.protocol = PROTOCOL_OBFUSCATED_SSH
 		port = tunnel.serverEntry.SshObfuscatedPort
 		netConn, err = NewObfuscatedSshConn(conn, tunnel.serverEntry.SshObfuscatedKey)
 		if err != nil {

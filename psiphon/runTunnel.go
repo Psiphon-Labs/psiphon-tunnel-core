@@ -59,6 +59,8 @@ func establishTunnelWorker(
 			log.Printf("success connecting to %s", tunnel.serverEntry.IpAddress)
 			select {
 			case firstEstablishedTunnel <- tunnel:
+				log.Printf("selected connection to %s using %s",
+					tunnel.serverEntry.IpAddress, tunnel.protocol)
 			default:
 				tunnel.Close()
 			}
