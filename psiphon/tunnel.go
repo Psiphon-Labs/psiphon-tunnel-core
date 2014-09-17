@@ -37,6 +37,7 @@ type Tunnel struct {
 	serverEntry *ServerEntry
 	conn        *Conn
 	sshClient   *ssh.Client
+	isClosed    bool
 }
 
 // Close terminates the tunnel SSH client session and the
@@ -44,12 +45,11 @@ type Tunnel struct {
 func (tunnel *Tunnel) Close() {
 	if tunnel.sshClient != nil {
 		tunnel.sshClient.Close()
-		tunnel.sshClient = nil
 	}
 	if tunnel.conn != nil {
 		tunnel.conn.Close()
-		tunnel.conn = nil
 	}
+	tunnel.isClosed = true
 }
 
 // EstablishTunnel first makes a network transport connection to the
