@@ -68,12 +68,15 @@ func (server *SocksServer) Close() {
 
 func socksConnectionHandler(tunnel *Tunnel, localSocksConn *pt.SocksConn) (err error) {
 	defer localSocksConn.Close()
-	remoteAddr := localSocksConn.Req.Target
-	remoteSshForward, err := tunnel.sshClient.Dial("tcp", remoteAddr)
+	remoteSshForward, err := tunnel.sshClient.Dial("tcp", localSocksConn.Req.Target)
 	if err != nil {
 		return err
 	}
 	defer remoteSshForward.Close()
+	err = localSocksConn.Grant(&net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0})
+	if err != nil {
+		return err
+	}
 	// TODO: page view stats would be done here
 	// TODO: poll quit signal (x, ok := <-ch)
 	waitGroup := new(sync.WaitGroup)
