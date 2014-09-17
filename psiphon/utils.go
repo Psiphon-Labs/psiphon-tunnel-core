@@ -25,6 +25,18 @@ import (
 	"math/big"
 )
 
+// IsSignalled returns true when the signal channel yields
+// a value. To be used with the idiom in which a shared
+// channel is closed to broadcast a signal.
+func IsSignalled(signal chan bool) bool {
+	select {
+	case <-signal:
+		return true
+	default:
+	}
+	return false
+}
+
 // Contains is a helper function that returns true
 // if the target string is in the list.
 func Contains(list []string, target string) bool {
