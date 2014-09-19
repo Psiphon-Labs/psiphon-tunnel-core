@@ -83,7 +83,7 @@ func socksConnectionHandler(tunnel *Tunnel, localSocksConn *pt.SocksConn) (err e
 	waitGroup.Add(1)
 	go func() {
 		defer waitGroup.Done()
-		_, err = io.Copy(localSocksConn, remoteSshForward)
+		_, err := io.Copy(localSocksConn, remoteSshForward)
 		if err != nil {
 			log.Printf("ssh port forward downstream error: %s", err)
 		}

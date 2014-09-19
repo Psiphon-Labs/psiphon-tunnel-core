@@ -37,40 +37,28 @@ import (
 // if there's not already an established tunnel. This function is to be used in a pool
 // of goroutines.
 func establishTunnelWorker(
-	waitGroup *sync.WaitGroup, candidateQueue chan *Tunnel,
-	broadcastStopWorkers chan bool, firstEstablishedTunnel chan *Tunnel) {
+	waitGroup *sync.WaitGroup,
+	candidateServerEntries chan *ServerEntry,
+	broadcastStopWorkers chan bool,
+	pendingConns *PendingConns,
+	establishedTunnels chan *Tunnel) {
+
 	defer waitGroup.Done()
-	for tunnel := range candidateQueue {
+	for serverEntry := range candidateServerEntries {
 		// Note: don't receive from candidateQueue and broadcastStopWorkers in the same
 		// select, since we want to prioritize receiving the stop signal
 		if IsSignalled(broadcastStopWorkers) {
 			return
 		}
-		log.Printf("connecting to %s", tunnel.serverEntry.IpAddress)
-		err := EstablishTunnel(tunnel)
+		log.Printf("connecting to %s", serverEntry.IpAddress)
+		tunnel, err := EstablishTunnel(serverEntry, pendingConns)
 		if err != nil {
-			if tunnel.isClosed {
-				log.Printf("cancelled connection to %s", tunnel.serverEntry.IpAddress)
-			} else {
-				log.Printf("failed to connect to %s: %s", tunnel.serverEntry.IpAddress, err)
-			}
+			// TODO: distingush case where conn is interrupted?
+			log.Printf("failed to connect to %s: %s", serverEntry.IpAddress, err)
 		} else {
-			// Need to re-check broadcastStopWorkers signal before sending
-			// in case firstEstablishedTunnel has been closed
-			// TODO: race condition? may panic if so
-			if !IsSignalled(broadcastStopWorkers) {
-				select {
-				case firstEstablishedTunnel <- tunnel:
-					log.Printf("selected connection to %s using %s",
-						tunnel.serverEntry.IpAddress, tunnel.protocol)
-					// Leave tunnel open
-					return
-				default:
-				}
-			}
-			log.Printf("discard connection to %s", tunnel.serverEntry.IpAddress)
+			log.Printf("successfully connected to %s", serverEntry.IpAddress)
+			establishedTunnels <- tunnel
 		}
-		tunnel.Close()
 	}
 }
 
@@ -89,53 +77,57 @@ func runTunnel(config *Config) error {
 		return fmt.Errorf("failed to fetch remote server list: %s", err)
 	}
 	log.Printf("establishing tunnel")
-	candidateList := make([]*Tunnel, 0)
-	for _, serverEntry := range serverList {
-		candidateList = append(candidateList, &Tunnel{serverEntry: serverEntry})
-	}
 	waitGroup := new(sync.WaitGroup)
-	candidateQueue := make(chan *Tunnel, len(candidateList))
-	firstEstablishedTunnel := make(chan *Tunnel, 1)
+	candidateServerEntries := make(chan *ServerEntry)
+	pendingConns := new(PendingConns)
+	establishedTunnels := make(chan *Tunnel, len(serverList))
 	timeout := time.After(ESTABLISH_TUNNEL_TIMEOUT)
 	broadcastStopWorkers := make(chan bool)
 	for i := 0; i < CONNECTION_WORKER_POOL_SIZE; i++ {
 		waitGroup.Add(1)
-		go establishTunnelWorker(waitGroup, candidateQueue, broadcastStopWorkers, firstEstablishedTunnel)
+		go establishTunnelWorker(
+			waitGroup, candidateServerEntries, broadcastStopWorkers,
+			pendingConns, establishedTunnels)
 	}
-	for _, tunnel := range candidateList {
-		candidateQueue <- tunnel
-	}
-	close(candidateQueue)
-	var establishedTunnel *Tunnel
-	select {
-	case establishedTunnel = <-firstEstablishedTunnel:
-		defer establishedTunnel.Close()
-		close(firstEstablishedTunnel)
-	case <-timeout:
-		return errors.New("timeout establishing tunnel")
-	}
-	log.Printf("stopping workers")
-	close(broadcastStopWorkers)
-	for _, candidate := range candidateList {
-		if candidate != establishedTunnel {
-			// Interrupt any partial connections in progress, so that
-			// the worker will terminate immediately
-			candidate.Close()
+	var selectedTunnel *Tunnel
+	for _, serverEntry := range serverList {
+		select {
+		case candidateServerEntries <- serverEntry:
+		case selectedTunnel = <-establishedTunnels:
+			defer selectedTunnel.Close()
+			log.Printf("selected connection to %s", selectedTunnel.serverEntry.IpAddress)
+		case <-timeout:
+			return errors.New("timeout establishing tunnel")
+		}
+		if selectedTunnel != nil {
+			break
 		}
 	}
-	// TODO: can start SOCKS before synchronizing work group
+	log.Printf("tunnel established")
+	close(candidateServerEntries)
+	close(broadcastStopWorkers)
+	// Interrupt any partial connections in progress, so that
+	// the worker will terminate immediately
+	pendingConns.Interrupt()
 	waitGroup.Wait()
-	if establishedTunnel != nil {
-		// Don't hold references to candidates while running tunnel
-		candidateList = nil
-		candidateQueue = nil
+	// Drain any excess tunnels
+	close(establishedTunnels)
+	for tunnel := range establishedTunnels {
+		log.Printf("discard connection to %s", tunnel.serverEntry.IpAddress)
+		tunnel.Close()
+	}
+	// Don't hold references to candidates while running tunnel
+	candidateServerEntries = nil
+	pendingConns = nil
+	// TODO: can start SOCKS before synchronizing work group
+	if selectedTunnel != nil {
 		stopTunnelSignal := make(chan bool)
-		err = establishedTunnel.conn.SetDisconnectionSignal(stopTunnelSignal)
+		err = selectedTunnel.conn.SetClosedSignal(stopTunnelSignal)
 		if err != nil {
-			return fmt.Errorf("failed to set disconnection signal: %s", err)
+			return fmt.Errorf("failed to set closed signal: %s", err)
 		}
 		log.Printf("starting local SOCKS proxy")
-		socksServer := NewSocksServer(establishedTunnel, stopTunnelSignal)
+		socksServer := NewSocksServer(selectedTunnel, stopTunnelSignal)
 		if err != nil {
 			return fmt.Errorf("error initializing local SOCKS proxy: %s", err)
 		}
@@ -144,7 +136,7 @@ func runTunnel(config *Config) error {
 			return fmt.Errorf("error running local SOCKS proxy: %s", err)
 		}
 		defer socksServer.Close()
-		log.Printf("monitoring for failure")
+		log.Printf("monitoring tunnel")
 		<-stopTunnelSignal
 	}
 	return nil
