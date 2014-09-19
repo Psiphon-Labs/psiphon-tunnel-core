@@ -30,25 +30,25 @@ import (
 	"strings"
 )
 
+const (
+	PROTOCOL_SSH            = "SSH"
+	PROTOCOL_OBFUSCATED_SSH = "OSSH"
+)
+
 // Tunnel is a connection to a Psiphon server. An established
 // tunnel includes a network connection to the specified server
 // and an SSH session built on top of that transport.
 type Tunnel struct {
 	serverEntry *ServerEntry
+	protocol    string
 	conn        *Conn
 	sshClient   *ssh.Client
 }
 
-// Close terminates the tunnel SSH client session and the
-// underlying network transport.
+// Close terminates the tunnel.
 func (tunnel *Tunnel) Close() {
-	if tunnel.sshClient != nil {
-		tunnel.sshClient.Close()
-		tunnel.sshClient = nil
-	}
 	if tunnel.conn != nil {
 		tunnel.conn.Close()
-		tunnel.conn = nil
 	}
 }
 
@@ -59,42 +59,42 @@ func (tunnel *Tunnel) Close() {
 // Depending on the server's capabilities, the connection may use
 // plain SSH over TCP, obfuscated SSH over TCP, or obfuscated SSH over
 // HTTP (meek protocol).
-func EstablishTunnel(tunnel *Tunnel) (err error) {
-	if tunnel.conn != nil {
-		return errors.New("tunnel already connected")
-	}
-	if tunnel.sshClient != nil {
-		return errors.New("ssh client already established")
-	}
+func EstablishTunnel(serverEntry *ServerEntry, pendingConns *PendingConns) (tunnel *Tunnel, err error) {
 	// First connect the transport
 	// TODO: meek
-	sshCapable := Contains(tunnel.serverEntry.Capabilities, "SSH")
-	obfuscatedSshCapable := Contains(tunnel.serverEntry.Capabilities, "OSSH")
+	sshCapable := Contains(serverEntry.Capabilities, PROTOCOL_SSH)
+	obfuscatedSshCapable := Contains(serverEntry.Capabilities, PROTOCOL_OBFUSCATED_SSH)
 	if !sshCapable && !obfuscatedSshCapable {
-		return fmt.Errorf("server does not have sufficient capabilities")
+		return nil, fmt.Errorf("server does not have sufficient capabilities")
 	}
-	port := tunnel.serverEntry.SshPort
-	conn, err := NewConn(0, CONNECTION_CANDIDATE_TIMEOUT, "")
+	selectedProtocol := PROTOCOL_SSH
+	port := serverEntry.SshPort
+	if obfuscatedSshCapable {
+		selectedProtocol = PROTOCOL_OBFUSCATED_SSH
+		port = serverEntry.SshObfuscatedPort
+	}
+	conn, err := Dial(serverEntry.IpAddress, port, 0, CONNECTION_CANDIDATE_TIMEOUT, pendingConns)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	defer func() {
+		pendingConns.Remove(conn)
+		if err != nil {
+			conn.Close()
+		}
+	}()
 	var netConn net.Conn
 	netConn = conn
 	if obfuscatedSshCapable {
-		port = tunnel.serverEntry.SshObfuscatedPort
-		netConn, err = NewObfuscatedSshConn(conn, tunnel.serverEntry.SshObfuscatedKey)
+		netConn, err = NewObfuscatedSshConn(conn, serverEntry.SshObfuscatedKey)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	err = conn.Connect(tunnel.serverEntry.IpAddress, port)
-	if err != nil {
-		return err
-	}
 	// Now establish the SSH session
-	expectedPublicKey, err := base64.StdEncoding.DecodeString(tunnel.serverEntry.SshHostKey)
+	expectedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.SshHostKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	sshCertChecker := &ssh.CertChecker{
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
@@ -105,19 +105,18 @@ func EstablishTunnel(tunnel *Tunnel) (err error) {
 		},
 	}
 	sshClientConfig := &ssh.ClientConfig{
-		User: tunnel.serverEntry.SshUsername,
+		User: serverEntry.SshUsername,
 		Auth: []ssh.AuthMethod{
-			ssh.Password(tunnel.serverEntry.SshPassword),
+			ssh.Password(serverEntry.SshPassword),
 		},
 		HostKeyCallback: sshCertChecker.CheckHostKey,
 	}
 	// The folowing is adapted from ssh.Dial(), here using a custom conn
-	sshAddress := strings.Join([]string{tunnel.serverEntry.IpAddress, ":", strconv.Itoa(tunnel.serverEntry.SshPort)}, "")
+	sshAddress := strings.Join([]string{serverEntry.IpAddress, ":", strconv.Itoa(serverEntry.SshPort)}, "")
 	sshConn, sshChans, sshReqs, err := ssh.NewClientConn(netConn, sshAddress, sshClientConfig)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	sshClient := ssh.NewClient(sshConn, sshChans, sshReqs)
-	tunnel.sshClient = sshClient
-	return nil
+	return &Tunnel{serverEntry, selectedProtocol, conn, sshClient}, nil
 }

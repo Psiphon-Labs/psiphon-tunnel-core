@@ -34,8 +34,8 @@ import (
 type SocksServer struct {
 	tunnel        *Tunnel
 	failureSignal chan bool
-	listener      pt.SocksListener
-	waitGroup     sync.WaitGroup
+	listener      *pt.SocksListener
+	waitGroup     *sync.WaitGroup
 }
 
 // NewSocksServer initializes, but does not start, a SocksServer.
@@ -52,6 +52,8 @@ func (server *SocksServer) Run() error {
 		return err
 	}
 	log.Printf("local SOCKS proxy running on port %s", listener.Addr())
+	server.listener = listener
+	server.waitGroup = new(sync.WaitGroup)
 	server.waitGroup.Add(1)
 	go server.acceptSocksConnections()
 	return nil
@@ -66,19 +68,22 @@ func (server *SocksServer) Close() {
 
 func socksConnectionHandler(tunnel *Tunnel, localSocksConn *pt.SocksConn) (err error) {
 	defer localSocksConn.Close()
-	remoteAddr := localSocksConn.Req.Target
-	remoteSshForward, err := tunnel.sshClient.Dial("tcp", remoteAddr)
+	remoteSshForward, err := tunnel.sshClient.Dial("tcp", localSocksConn.Req.Target)
 	if err != nil {
 		return err
 	}
 	defer remoteSshForward.Close()
+	err = localSocksConn.Grant(&net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0})
+	if err != nil {
+		return err
+	}
 	// TODO: page view stats would be done here
 	// TODO: poll quit signal (x, ok := <-ch)
 	waitGroup := new(sync.WaitGroup)
 	waitGroup.Add(1)
 	go func() {
 		defer waitGroup.Done()
-		_, err = io.Copy(localSocksConn, remoteSshForward)
+		_, err := io.Copy(localSocksConn, remoteSshForward)
 		if err != nil {
 			log.Printf("ssh port forward downstream error: %s", err)
 		}

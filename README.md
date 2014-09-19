@@ -14,6 +14,7 @@ Status
 This project is currently at the proof-of-concept stage. Current production Psiphon client code is available at our [main repository](https://bitbucket.org/psiphon/psiphon-circumvention-system).
 
 ### TODO
+* psiphon.Conn for Windows
 * more test cases
 * integrate meek-client
 * add config options
