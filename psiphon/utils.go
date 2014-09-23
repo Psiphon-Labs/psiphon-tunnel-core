@@ -22,7 +22,9 @@ package psiphon
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"math/big"
+	"runtime"
 )
 
 // IsSignalled returns true when the signal channel yields
@@ -70,4 +72,11 @@ func MakeSecureRandomBytes(length int) ([]byte, error) {
 		return nil, errors.New("insufficient random bytes")
 	}
 	return randomBytes, nil
+}
+
+// ContextError prefixes an error message with the current function name
+func ContextError(err error) error {
+	pc, _, _, _ := runtime.Caller(1)
+	funcName := runtime.FuncForPC(pc).Name()
+	return fmt.Errorf("%s: %s", funcName, err)
 }

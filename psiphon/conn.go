@@ -105,7 +105,6 @@ func Dial(
 // if the connection is already closed (and would never send
 // the signal).
 func (conn *Conn) SetClosedSignal(closedSignal chan bool) (err error) {
-	// TEMP **** needs comments
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 	if conn.isClosed {
