@@ -15,7 +15,6 @@ This project is currently at the proof-of-concept stage. Current production Psip
 
 ### TODO (proof-of-concept)
 
-* StoreServerEntry must assign top rank - 1
 * use ContextError in more places
 * add Psiphon web requests: handshake/connected/etc.
 * psiphon.Conn for Windows

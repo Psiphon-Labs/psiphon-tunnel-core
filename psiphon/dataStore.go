@@ -98,36 +98,36 @@ func serverEntryExists(transaction *sql.Tx, ipAddress string) bool {
 }
 
 // StoreServerEntry adds the server entry to the data store. A newly
-// stored (or re-stored) server entry is assigned the top rank for
-// cycle order. When replaceIfExists is true, an existing server entry
-// record is overwritten; otherwise, the existing record is unchanged.
-// TODO: should be assigned top rank - 1!
+// stored (or re-stored) server entry is assigned the next-to-top rank
+// for cycle order (the previous top ranked entry is promoted). The
+// purpose of this is to keep the last selected server as the top
+// ranked server.
+// When replaceIfExists is true, an existing server entry record is
+// overwritten; otherwise, the existing record is unchanged.
 func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
-	insert := "insert or ignore "
-	if replaceIfExists {
-		insert = "insert or replace "
-	}
-	insert += `
-    into serverEntry (id, data, rank)
-    values (?, ?, (select coalesce(max(rank), 0)+1 from serverEntry));
-    `
 	return transactionWithRetry(func(transaction *sql.Tx) error {
 		serverEntryExists := serverEntryExists(transaction, serverEntry.IpAddress)
-		statement, err := transaction.Prepare(insert)
+		if serverEntryExists && !replaceIfExists {
+			return nil
+		}
+		// TODO: also skip updates if replaceIfExists but 'data' has not changed
+		_, err := transaction.Exec(`
+            update serverEntry set rank = rank + 1
+                where id = (select id from serverEntry order by rank desc limit 1);
+            `)
 		if err != nil {
 			return ContextError(err)
 		}
-		defer statement.Close()
 		data, err := json.Marshal(serverEntry)
 		if err != nil {
 			return ContextError(err)
 		}
-		_, err = statement.Exec(serverEntry.IpAddress, data)
-		if err != nil {
-			return ContextError(err)
-		}
+		_, err = transaction.Exec(`
+            insert or replace into serverEntry (id, data, rank)
+            values (?, ?, (select coalesce(max(rank)-1, 0) from serverEntry));
+            `, serverEntry.IpAddress, data)
+		// TODO: log after commit
 		if !serverEntryExists {
-			// TODO: log after commit
 			log.Printf("stored server %s", serverEntry.IpAddress)
 		}
 		return nil
@@ -138,18 +138,12 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 // server entry. This server entry will be the first candidate in
 // a subsequent tunnel establishment.
 func PromoteServerEntry(ipAddress string) error {
-	update := `
-    update serverEntry
-    set rank = (select MAX(rank)+1 from serverEntry)
-    where id = ?;
-    `
 	return transactionWithRetry(func(transaction *sql.Tx) error {
-		statement, err := transaction.Prepare(update)
-		if err != nil {
-			return ContextError(err)
-		}
-		defer statement.Close()
-		_, err = statement.Exec(ipAddress)
+		_, err := transaction.Exec(`
+            update serverEntry
+            set rank = (select MAX(rank)+1 from serverEntry)
+            where id = ?;
+            `, ipAddress)
 		if err != nil {
 			return ContextError(err)
 		}
