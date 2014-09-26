@@ -231,8 +231,9 @@ func buildRequestUrl(session *Session, path string, extraParams ...*ExtraParam) 
 	return requestUrl.String()
 }
 
-// doGetRequest makes a tunneled HTTPS request, validating the
-// server using the server entry web server certificate.
+// doGetRequest makes a tunneled HTTPS request, validating the server using the server
+// entry web server certificate. This function discards its http.Client after a single
+// use -- it is not intended for making many requests.
 func doGetRequest(session *Session, requestUrl string) (responseBody []byte, err error) {
 	proxyUrl, err := url.Parse(fmt.Sprintf("http://%s", session.localHttpProxyAddress))
 	if err != nil {
@@ -245,7 +246,22 @@ func doGetRequest(session *Session, requestUrl string) (responseBody []byte, err
 	}
 	certPool := x509.NewCertPool()
 	certPool.AddCert(certificate)
-	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: certPool}, Proxy: proxy}
+	// Copy default transport for its timeout values
+	transport := new(http.Transport)
+	*transport = *http.DefaultTransport.(*http.Transport)
+	// ****** SECURITY ISSUE ******
+	// TODO: temporarily using InsecureSkipVerify to work around hostname verification error:
+	// "x509: cannot validate certificate for " + h.Host + " because it doesn't contain any IP SANs"
+	// Notes:
+	// - Since Psiphon server self-signed certs don't have IP SANs, we need to disable that part
+	// of verification. We can't add IP SANs.
+	// - We can't easily supply a custom TLS dialer (e.g., such as https://github.com/getlantern/tlsdialer)
+	// since the dialer has to deal with HTTP proxying before talkng TLS. See:
+	// dialConn in http://golang.org/src/pkg/net/http/transport.go
+	// - Mitigating factor: the InsecureSkipVerify TLS is done through the secure, authenticated tunnel
+	// and terminates at the tunnel server host.
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true, RootCAs: certPool}
+	transport.Proxy = proxy
 	httpClient := &http.Client{Transport: transport}
 	response, err := httpClient.Get(requestUrl)
 	if err != nil {

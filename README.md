@@ -15,24 +15,22 @@ This project is currently at the proof-of-concept stage. Current production Psip
 
 ### TODO (proof-of-concept)
 
+* replace InsecureSkipVerify work-around for IP SANs issue (see serverApi.go) 
+* shutdown results in log noise: "use of closed network connection"
 * region preference
-* overlap between httpProxy.go and socksProxy.go: refactor?
 * use ContextError in more places
 * psiphon.Conn for Windows
 * build/test on Android and iOS
 * integrate meek-client
-* disconnect all local SOCKS clients when tunnel disconnected
+* disconnect all local proxy clients when tunnel disconnected
+* add connection and idle timeouts to proxied connections where appropriate
 * log levels
 
 ### TODO (future)
 
-* SSH keepalive (+ hook into disconnectedSignal)
-* SSH compression?
+* SSH keepalive
+* SSH compression
 * preemptive reconnect functionality
-* add config options
-  * protocol preference
-  * whether to try multiple protocols for each server (currently only tries one protocol per server)
-  * platform (for upgrade download)
 * implement page view stats
 * implement local traffic stats (e.g., to display bytes sent/received
 * control interface (w/ event messages)?
@@ -41,10 +39,13 @@ This project is currently at the proof-of-concept stage. Current production Psip
 * support upgrades
   * download entire client
   * download core component only
+* support protocol preference
+* try multiple protocols for each server (currently only tries one protocol per server)
 * consider ability to multiplex across multiple tunnel sessions
-* support a "pushedNetworkConfig"
-  * server can push preferred/optimized settings; client should use over defaults
+* support a config pushed by the network
+  * server can push preferred/optimized settings; client should prefer over defaults
   * e.g., etablish worker pool size; multiplex tunnel pool size
+* overlap between httpProxy.go and socksProxy.go: refactor?
 
 Licensing
 --------------------------------------------------------------------------------

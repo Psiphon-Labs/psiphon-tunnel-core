@@ -49,12 +49,17 @@ func NewHttpProxy(tunnel *Tunnel, failureSignal chan bool) (proxy *HttpProxy, er
 	tunneledDialer := func(_, targetAddress string) (conn net.Conn, err error) {
 		return tunnel.sshClient.Dial("tcp", targetAddress)
 	}
+	// Copy default transport for its timeout values
+	transport := new(http.Transport)
+	*transport = *http.DefaultTransport.(*http.Transport)
+	transport.Dial = tunneledDialer
+	transport.Proxy = nil
 	proxy = &HttpProxy{
 		tunnel:        tunnel,
 		failureSignal: failureSignal,
 		listener:      listener,
 		waitGroup:     new(sync.WaitGroup),
-		httpRelay:     &http.Transport{Dial: tunneledDialer},
+		httpRelay:     transport,
 	}
 	proxy.waitGroup.Add(1)
 	go proxy.serveHttpRequests()
