@@ -21,6 +21,9 @@ package psiphon
 
 import (
 	"crypto/rand"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -55,7 +58,7 @@ func Contains(list []string, target string) bool {
 func MakeSecureRandomInt(max int) (int, error) {
 	randomInt, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
 	if err != nil {
-		return 0, err
+		return 0, ContextError(err)
 	}
 	return int(randomInt.Uint64()), nil
 }
@@ -66,10 +69,10 @@ func MakeSecureRandomBytes(length int) ([]byte, error) {
 	randomBytes := make([]byte, length)
 	n, err := rand.Read(randomBytes)
 	if err != nil {
-		return nil, err
+		return nil, ContextError(err)
 	}
 	if n != length {
-		return nil, errors.New("insufficient random bytes")
+		return nil, ContextError(errors.New("insufficient random bytes"))
 	}
 	return randomBytes, nil
 }
@@ -79,4 +82,24 @@ func ContextError(err error) error {
 	pc, _, _, _ := runtime.Caller(1)
 	funcName := runtime.FuncForPC(pc).Name()
 	return fmt.Errorf("%s: %s", funcName, err)
+}
+
+func MakeSessionId() (id string, err error) {
+	randomId, err := MakeSecureRandomBytes(PSIPHON_API_CLIENT_SESSION_ID_LENGTH)
+	if err != nil {
+		return "", ContextError(err)
+	}
+	return hex.EncodeToString(randomId), nil
+}
+
+func DecodeCertificate(encodedCertificate string) (certificate *x509.Certificate, err error) {
+	derEncodedCertificate, err := base64.StdEncoding.DecodeString(encodedCertificate)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	certificate, err = x509.ParseCertificate(derEncodedCertificate)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	return certificate, nil
 }

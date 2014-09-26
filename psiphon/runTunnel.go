@@ -130,7 +130,7 @@ func runTunnel(config *Config) error {
 	// Don't hold references to candidates while running tunnel
 	candidateServerEntries = nil
 	pendingConns = nil
-	// TODO: can start SOCKS before synchronizing work group
+	// TODO: could start local proxies, etc., before synchronizing work group
 	if selectedTunnel != nil {
 		log.Printf("tunnel established")
 		PromoteServerEntry(selectedTunnel.serverEntry.IpAddress)
@@ -140,15 +140,23 @@ func runTunnel(config *Config) error {
 			return fmt.Errorf("failed to set closed signal: %s", err)
 		}
 		log.Printf("starting local SOCKS proxy")
-		socksServer := NewSocksServer(selectedTunnel, stopTunnelSignal)
+		socksProxy, err := NewSocksProxy(selectedTunnel, stopTunnelSignal)
 		if err != nil {
 			return fmt.Errorf("error initializing local SOCKS proxy: %s", err)
 		}
-		err = socksServer.Run()
+		defer socksProxy.Close()
+		log.Printf("starting local HTTP proxy")
+		httpProxy, err := NewHttpProxy(selectedTunnel, stopTunnelSignal)
 		if err != nil {
-			return fmt.Errorf("error running local SOCKS proxy: %s", err)
+			return fmt.Errorf("error initializing local HTTP proxy: %s", err)
 		}
-		defer socksServer.Close()
+		defer httpProxy.Close()
+		log.Printf("starting session")
+		localHttpProxyAddress := httpProxy.listener.Addr().String()
+		_, err = NewSession(config, selectedTunnel, localHttpProxyAddress)
+		if err != nil {
+			return fmt.Errorf("error starting session: %s", err)
+		}
 		log.Printf("monitoring tunnel")
 		<-stopTunnelSignal
 	}

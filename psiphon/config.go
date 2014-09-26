@@ -26,11 +26,14 @@ import (
 )
 
 type Config struct {
+	LogFilename                        string
 	PropagationChannelId               string
 	SponsorId                          string
 	RemoteServerListUrl                string
 	RemoteServerListSignaturePublicKey string
-	LogFilename                        string
+	ClientVersion                      int
+	ClientPlatform                     string
+	TunnelWholeDevice                  int
 }
 
 // LoadConfig reads, and parse, and validates a JSON format Psiphon config

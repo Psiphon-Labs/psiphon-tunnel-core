@@ -15,8 +15,9 @@ This project is currently at the proof-of-concept stage. Current production Psip
 
 ### TODO (proof-of-concept)
 
+* region preference
+* overlap between httpProxy.go and socksProxy.go: refactor?
 * use ContextError in more places
-* add Psiphon web requests: handshake/connected/etc.
 * psiphon.Conn for Windows
 * build/test on Android and iOS
 * integrate meek-client
@@ -25,12 +26,12 @@ This project is currently at the proof-of-concept stage. Current production Psip
 
 ### TODO (future)
 
-* add a HTTP proxy (chain to SOCKS)
 * SSH keepalive (+ hook into disconnectedSignal)
 * SSH compression?
+* preemptive reconnect functionality
 * add config options
-  * protocol preference; whether to try multiple protocols for each server
-  * region preference
+  * protocol preference
+  * whether to try multiple protocols for each server (currently only tries one protocol per server)
   * platform (for upgrade download)
 * implement page view stats
 * implement local traffic stats (e.g., to display bytes sent/received

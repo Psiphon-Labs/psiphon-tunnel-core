@@ -46,6 +46,9 @@ func initDataStore() {
             (id text not null primary key,
              data blob not null,
              rank integer not null unique);
+        create table if not exists keyValue
+            (key text not null,
+             value text not null);
         `
 		db, err := sql.Open("sqlite3", DATA_STORE_FILENAME)
 		if err != nil {
@@ -249,4 +252,57 @@ func HasServerEntries() bool {
 		log.Printf("stored servers: %d", count)
 	}
 	return err == nil && count > 0
+}
+
+// GetServerEntryIpAddresses returns an array containing
+// all stored server IP addresses.
+func GetServerEntryIpAddresses() (ipAddresses []string, err error) {
+	initDataStore()
+	ipAddresses = make([]string, 0)
+	rows, err := singleton.db.Query("select id from serverEntry;")
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ipAddress string
+		err = rows.Scan(&ipAddress)
+		if err != nil {
+			return nil, ContextError(err)
+		}
+		ipAddresses = append(ipAddresses, ipAddress)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, ContextError(err)
+	}
+	return ipAddresses, nil
+}
+
+// SetKeyValue stores a key/value pair.
+func SetKeyValue(key, value string) error {
+	return transactionWithRetry(func(transaction *sql.Tx) error {
+		_, err := transaction.Exec(`
+            insert or replace into keyValue (key, value)
+            values (?, ?);
+            `, key, value)
+		if err != nil {
+			return ContextError(err)
+		}
+		return nil
+	})
+}
+
+// GetLastConnected retrieves a key/value pair. If not found,
+// it returns an empty string value.
+func GetKeyValue(key string) (value string, err error) {
+	initDataStore()
+	rows := singleton.db.QueryRow("select value from keyValue where key = ?;", key)
+	err = rows.Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", ContextError(err)
+	}
+	return value, nil
 }

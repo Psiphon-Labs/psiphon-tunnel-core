@@ -19,6 +19,13 @@
 
 package psiphon
 
+import (
+	"bytes"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+)
+
 // ServerEntry represents a Psiphon server. It contains information
 // about how to estalish a tunnel connection to the server through
 // several protocols. ServerEntry are JSON records downloaded from
@@ -41,4 +48,24 @@ type ServerEntry struct {
 	MeekObfuscatedKey             string   `json:"meekObfuscatedKey"`
 	MeekFrontingDomain            string   `json:"meekFrontingDomain"`
 	MeekFrontingHost              string   `json:"meekFrontingHost"`
+}
+
+// DecodeServerEntry extracts server entries from the encoding
+// used by remote server lists and Psiphon server handshake requests.
+func DecodeServerEntry(encodedServerEntry string) (serverEntry *ServerEntry, err error) {
+	hexDecodedServerEntry, err := hex.DecodeString(encodedServerEntry)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	// Skip past legacy format (4 space delimited fields) and just parse the JSON config
+	fields := bytes.SplitN(hexDecodedServerEntry, []byte(" "), 5)
+	if len(fields) != 5 {
+		return nil, ContextError(errors.New("invalid encoded server entry"))
+	}
+	serverEntry = new(ServerEntry)
+	err = json.Unmarshal(fields[4], &serverEntry)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	return serverEntry, nil
 }
