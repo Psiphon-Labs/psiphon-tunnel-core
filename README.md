@@ -13,37 +13,39 @@ Status
 
 This project is currently at the proof-of-concept stage. Current production Psiphon client code is available at our [main repository](https://bitbucket.org/psiphon/psiphon-circumvention-system).
 
-### TODO
+### TODO (proof-of-concept)
+
+* replace InsecureSkipVerify work-around for IP SANs issue (see serverApi.go) 
+* shutdown results in log noise: "use of closed network connection"
+* region preference
+* use ContextError in more places
 * psiphon.Conn for Windows
-* more test cases
+* build/test on Android and iOS
 * integrate meek-client
-* add config options
-  * protocol preference; whether to try multiple protocols for each server
-  * region preference
-  * platform (for upgrade download)
-* SSH keepalive (+ hook into disconnectedSignal)
-* SSH compression?
-*  local SOCKS
-  * disconnect all local clients when tunnel disconnected
-  * use InterruptableConn?
-* run fetchRemoteServerList in parallel when already have entries
-* add a HTTP proxy (chain to SOCKS)
-* persist server entries
-* add Psiphon web requests: handshake/connected/etc.
+* disconnect all local proxy clients when tunnel disconnected
+* add connection and idle timeouts to proxied connections where appropriate
+* log levels
+
+### TODO (future)
+
+* SSH keepalive
+* SSH compression
+* preemptive reconnect functionality
 * implement page view stats
 * implement local traffic stats (e.g., to display bytes sent/received
-* build/test on Android and iOS
 * control interface (w/ event messages)?
 * VpnService compatibility
 * upstream proxy support
 * support upgrades
   * download entire client
   * download core component only
+* support protocol preference
+* try multiple protocols for each server (currently only tries one protocol per server)
 * consider ability to multiplex across multiple tunnel sessions
-* support a "pushedNetworkConfig"
-  * server can push preferred/optimized settings; client should use over defaults
+* support a config pushed by the network
+  * server can push preferred/optimized settings; client should prefer over defaults
   * e.g., etablish worker pool size; multiplex tunnel pool size
-
+* overlap between httpProxy.go and socksProxy.go: refactor?
 
 Licensing
 --------------------------------------------------------------------------------

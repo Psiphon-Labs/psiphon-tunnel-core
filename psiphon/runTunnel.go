@@ -57,9 +57,19 @@ func establishTunnelWorker(
 			log.Printf("failed to connect to %s: %s", serverEntry.IpAddress, err)
 		} else {
 			log.Printf("successfully connected to %s", serverEntry.IpAddress)
-			establishedTunnels <- tunnel
+			select {
+			case establishedTunnels <- tunnel:
+			default:
+				discardTunnel(tunnel)
+			}
 		}
 	}
+}
+
+func discardTunnel(tunnel *Tunnel) {
+	log.Printf("discard connection to %s", tunnel.serverEntry.IpAddress)
+	PromoteServerEntry(tunnel.serverEntry.IpAddress)
+	tunnel.Close()
 }
 
 // runTunnel establishes a tunnel session and runs local proxies that make use of
@@ -70,17 +80,11 @@ func establishTunnelWorker(
 // connections in parallel, and this process is stopped once the first tunnel
 // is established.
 func runTunnel(config *Config) error {
-	log.Printf("fetching remote server list")
-	// TODO: fetch in parallel goroutine (if have local server entries)
-	serverList, err := FetchRemoteServerList(config)
-	if err != nil {
-		return fmt.Errorf("failed to fetch remote server list: %s", err)
-	}
 	log.Printf("establishing tunnel")
 	waitGroup := new(sync.WaitGroup)
 	candidateServerEntries := make(chan *ServerEntry)
 	pendingConns := new(PendingConns)
-	establishedTunnels := make(chan *Tunnel, len(serverList))
+	establishedTunnels := make(chan *Tunnel, 1)
 	timeout := time.After(ESTABLISH_TUNNEL_TIMEOUT)
 	broadcastStopWorkers := make(chan bool)
 	for i := 0; i < CONNECTION_WORKER_POOL_SIZE; i++ {
@@ -89,21 +93,25 @@ func runTunnel(config *Config) error {
 			waitGroup, candidateServerEntries, broadcastStopWorkers,
 			pendingConns, establishedTunnels)
 	}
+	// TODO: add a throttle after each full cycle?
+	// Note: errors fall through to ensure worker and channel cleanup
 	var selectedTunnel *Tunnel
-	for _, serverEntry := range serverList {
+	cycler, err := NewServerEntryCycler()
+	for selectedTunnel == nil && err == nil {
+		serverEntry, err := cycler.Next()
+		if err != nil {
+			break
+		}
 		select {
 		case candidateServerEntries <- serverEntry:
 		case selectedTunnel = <-establishedTunnels:
 			defer selectedTunnel.Close()
 			log.Printf("selected connection to %s", selectedTunnel.serverEntry.IpAddress)
 		case <-timeout:
-			return errors.New("timeout establishing tunnel")
-		}
-		if selectedTunnel != nil {
-			break
+			err = errors.New("timeout establishing tunnel")
 		}
 	}
-	log.Printf("tunnel established")
+	cycler.Close()
 	close(candidateServerEntries)
 	close(broadcastStopWorkers)
 	// Interrupt any partial connections in progress, so that
@@ -113,33 +121,46 @@ func runTunnel(config *Config) error {
 	// Drain any excess tunnels
 	close(establishedTunnels)
 	for tunnel := range establishedTunnels {
-		log.Printf("discard connection to %s", tunnel.serverEntry.IpAddress)
-		tunnel.Close()
+		discardTunnel(tunnel)
+	}
+	// Note: end of error fall through
+	if err != nil {
+		return fmt.Errorf("failed to establish tunnel: %s", err)
 	}
 	// Don't hold references to candidates while running tunnel
 	candidateServerEntries = nil
 	pendingConns = nil
-	// TODO: can start SOCKS before synchronizing work group
+	// TODO: could start local proxies, etc., before synchronizing work group
 	if selectedTunnel != nil {
+		log.Printf("tunnel established")
+		PromoteServerEntry(selectedTunnel.serverEntry.IpAddress)
 		stopTunnelSignal := make(chan bool)
 		err = selectedTunnel.conn.SetClosedSignal(stopTunnelSignal)
 		if err != nil {
 			return fmt.Errorf("failed to set closed signal: %s", err)
 		}
 		log.Printf("starting local SOCKS proxy")
-		socksServer := NewSocksServer(selectedTunnel, stopTunnelSignal)
+		socksProxy, err := NewSocksProxy(selectedTunnel, stopTunnelSignal)
 		if err != nil {
 			return fmt.Errorf("error initializing local SOCKS proxy: %s", err)
 		}
-		err = socksServer.Run()
+		defer socksProxy.Close()
+		log.Printf("starting local HTTP proxy")
+		httpProxy, err := NewHttpProxy(selectedTunnel, stopTunnelSignal)
 		if err != nil {
-			return fmt.Errorf("error running local SOCKS proxy: %s", err)
+			return fmt.Errorf("error initializing local HTTP proxy: %s", err)
 		}
-		defer socksServer.Close()
+		defer httpProxy.Close()
+		log.Printf("starting session")
+		localHttpProxyAddress := httpProxy.listener.Addr().String()
+		_, err = NewSession(config, selectedTunnel, localHttpProxyAddress)
+		if err != nil {
+			return fmt.Errorf("error starting session: %s", err)
+		}
 		log.Printf("monitoring tunnel")
 		<-stopTunnelSignal
 	}
-	return nil
+	return err
 }
 
 // RunTunnelForever executes the main loop of the Psiphon client. It establishes
@@ -156,10 +177,25 @@ func RunTunnelForever(config *Config) {
 		// TODO
 		//log.SetOutput(ioutil.Discard)
 	}
+	// TODO: unlike existing Psiphon clients, this code
+	// always makes the fetch remote server list request
+	go func() {
+		for {
+			err := FetchRemoteServerList(config)
+			if err != nil {
+				log.Printf("failed to fetch remote server list: %s", err)
+				time.Sleep(FETCH_REMOTE_SERVER_LIST_RETRY_TIMEOUT)
+			} else {
+				time.Sleep(FETCH_REMOTE_SERVER_LIST_STALE_TIMEOUT)
+			}
+		}
+	}()
 	for {
-		err := runTunnel(config)
-		if err != nil {
-			log.Printf("error: %s", err)
+		if HasServerEntries() {
+			err := runTunnel(config)
+			if err != nil {
+				log.Printf("run tunnel error: %s", err)
+			}
 		}
 		time.Sleep(1 * time.Second)
 	}

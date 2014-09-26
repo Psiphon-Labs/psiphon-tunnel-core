@@ -25,10 +25,10 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -46,65 +46,58 @@ type RemoteServerList struct {
 // config.RemoteServerListUrl; validates its digital signature using the
 // public key config.RemoteServerListSignaturePublicKey; and parses the
 // data field into ServerEntry records.
-func FetchRemoteServerList(config *Config) (serverList []*ServerEntry, err error) {
+func FetchRemoteServerList(config *Config) (err error) {
+	log.Printf("fetching remote server list")
 	httpClient := http.Client{
 		Timeout: FETCH_REMOTE_SERVER_LIST_TIMEOUT,
 	}
 	response, err := httpClient.Get(config.RemoteServerListUrl)
 	if err != nil {
-		return nil, err
+		return ContextError(err)
 	}
 	defer response.Body.Close()
 	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		return nil, err
+		return ContextError(err)
 	}
 	var remoteServerList *RemoteServerList
 	err = json.Unmarshal(body, &remoteServerList)
 	if err != nil {
-		return nil, err
+		return ContextError(err)
 	}
 	err = validateRemoteServerList(config, remoteServerList)
 	if err != nil {
-		return nil, err
+		return ContextError(err)
 	}
-	serverList = make([]*ServerEntry, 0)
-	for _, hexEncodedServerListItem := range strings.Split(remoteServerList.Data, "\n") {
-		decodedServerListItem, err := hex.DecodeString(hexEncodedServerListItem)
+	for _, encodedServerEntry := range strings.Split(remoteServerList.Data, "\n") {
+		serverEntry, err := DecodeServerEntry(encodedServerEntry)
 		if err != nil {
-			return nil, err
+			return ContextError(err)
 		}
-		// Skip past legacy format (4 space delimited fields) and just parse the JSON config
-		fields := strings.SplitN(string(decodedServerListItem), " ", 5)
-		if len(fields) != 5 {
-			return nil, errors.New("invalid remote server list item")
-		}
-		var serverEntry ServerEntry
-		err = json.Unmarshal([]byte(fields[4]), &serverEntry)
+		err = StoreServerEntry(serverEntry, true)
 		if err != nil {
-			return nil, err
+			return ContextError(err)
 		}
-		serverList = append(serverList, &serverEntry)
 	}
-	return serverList, nil
+	return nil
 }
 
 func validateRemoteServerList(config *Config, remoteServerList *RemoteServerList) (err error) {
 	derEncodedPublicKey, err := base64.StdEncoding.DecodeString(config.RemoteServerListSignaturePublicKey)
 	if err != nil {
-		return err
+		return ContextError(err)
 	}
 	publicKey, err := x509.ParsePKIXPublicKey(derEncodedPublicKey)
 	if err != nil {
-		return err
+		return ContextError(err)
 	}
 	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
 	if !ok {
-		return errors.New("unexpected RemoteServerListSignaturePublicKey key type")
+		return ContextError(errors.New("unexpected RemoteServerListSignaturePublicKey key type"))
 	}
 	signature, err := base64.StdEncoding.DecodeString(remoteServerList.Signature)
 	if err != nil {
-		return err
+		return ContextError(err)
 	}
 	// TODO: can detect if signed with different key --
 	// match digest(publicKey) against remoteServerList.signingPublicKeyDigest
@@ -113,7 +106,7 @@ func validateRemoteServerList(config *Config, remoteServerList *RemoteServerList
 	digest := hash.Sum(nil)
 	err = rsa.VerifyPKCS1v15(rsaPublicKey, crypto.SHA256, digest, signature)
 	if err != nil {
-		return err
+		return ContextError(err)
 	}
 	return nil
 }
