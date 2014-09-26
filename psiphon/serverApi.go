@@ -254,9 +254,9 @@ func doGetRequest(session *Session, requestUrl string) (responseBody []byte, err
 	// "x509: cannot validate certificate for " + h.Host + " because it doesn't contain any IP SANs"
 	// Notes:
 	// - Since Psiphon server self-signed certs don't have IP SANs, we need to disable that part
-	// of verification. We can't add IP SANs.
+	// of verification. The client has to be able to handle existing server certificates.
 	// - We can't easily supply a custom TLS dialer (e.g., such as https://github.com/getlantern/tlsdialer)
-	// since the dialer has to deal with HTTP proxying before talkng TLS. See:
+	// since the dialer has to deal with HTTP proxying before talking TLS. See:
 	// dialConn in http://golang.org/src/pkg/net/http/transport.go
 	// - Mitigating factor: the InsecureSkipVerify TLS is done through the secure, authenticated tunnel
 	// and terminates at the tunnel server host.
