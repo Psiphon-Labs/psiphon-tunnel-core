@@ -98,10 +98,11 @@ func (session *Session) doHandshakeRequest() error {
 		return ContextError(err)
 	}
 	// Skip legacy format lines and just parse the JSON config line
+	configLinePrefix := []byte("Config: ")
 	var configLine []byte
 	for _, line := range bytes.Split(responseBody, []byte("\n")) {
-		if bytes.HasPrefix(line, []byte("Config: ")) {
-			configLine = line
+		if bytes.HasPrefix(line, configLinePrefix) {
+			configLine = line[len(configLinePrefix):]
 			break
 		}
 	}
@@ -112,17 +113,17 @@ func (session *Session) doHandshakeRequest() error {
 	// - 'preemptive_reconnect_lifetime_milliseconds' is currently unused
 	// - 'ssh_session_id' is ignored; client session ID is used instead
 	var handshakeConfig struct {
-		homepages            []string `json:homepages`
-		upgradeClientVersion string   `json:upgrade_client_version`
-		pageViewRegexes      []string `json:page_view_regexes`
-		httpsRequestRegexes  []string `json:https_request_regexes`
-		encodedServerList    []string `json:encoded_server_list`
+		Homepages            []string            `json:"homepages"`
+		UpgradeClientVersion string              `json:"upgrade_client_version"`
+		PageViewRegexes      []map[string]string `json:"page_view_regexes"`
+		HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
+		EncodedServerList    []string            `json:"encoded_server_list"`
 	}
 	err = json.Unmarshal(configLine, &handshakeConfig)
 	if err != nil {
 		return ContextError(err)
 	}
-	for _, encodedServerEntry := range handshakeConfig.encodedServerList {
+	for _, encodedServerEntry := range handshakeConfig.EncodedServerList {
 		serverEntry, err := DecodeServerEntry(encodedServerEntry)
 		if err != nil {
 			return ContextError(err)
@@ -134,20 +135,20 @@ func (session *Session) doHandshakeRequest() error {
 	}
 	// TODO: formally communicate the sponsor and upgrade info to an
 	// outer client via some control interface.
-	for _, homepage := range handshakeConfig.homepages {
+	for _, homepage := range handshakeConfig.Homepages {
 		log.Printf("homepage: %s", homepage)
 	}
-	upgradeClientVersion, err := strconv.Atoi(handshakeConfig.upgradeClientVersion)
+	upgradeClientVersion, err := strconv.Atoi(handshakeConfig.UpgradeClientVersion)
 	if err != nil {
 		return ContextError(err)
 	}
 	if upgradeClientVersion > session.config.ClientVersion {
 		log.Printf("upgrade available to client version: %d", upgradeClientVersion)
 	}
-	for _, pageViewRegex := range handshakeConfig.pageViewRegexes {
+	for _, pageViewRegex := range handshakeConfig.PageViewRegexes {
 		log.Printf("page view regex: %s", pageViewRegex)
 	}
-	for _, httpsRequestRegex := range handshakeConfig.httpsRequestRegexes {
+	for _, httpsRequestRegex := range handshakeConfig.HttpsRequestRegexes {
 		log.Printf("HTTPS regex: %s", httpsRequestRegex)
 	}
 	return nil
@@ -164,6 +165,9 @@ func (session *Session) doConnectedRequest() error {
 	lastConnected, err := GetKeyValue(DATA_STORE_LAST_CONNECTED_KEY)
 	if err != nil {
 		return ContextError(err)
+	}
+	if lastConnected == "" {
+		lastConnected = "None"
 	}
 	url := buildRequestUrl(
 		session,
@@ -251,6 +255,9 @@ func doGetRequest(session *Session, requestUrl string) (responseBody []byte, err
 	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		return nil, ContextError(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		return nil, ContextError(fmt.Errorf("HTTP GET request failed with response code: %d", response.StatusCode))
 	}
 	return body, nil
 }
