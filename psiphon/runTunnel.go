@@ -50,7 +50,8 @@ func establishTunnelWorker(
 		if IsSignalled(broadcastStopWorkers) {
 			return
 		}
-		log.Printf("connecting to %s", serverEntry.IpAddress)
+		log.Printf("connecting to %s in region %s",
+			serverEntry.IpAddress, serverEntry.Region)
 		tunnel, err := EstablishTunnel(serverEntry, pendingConns)
 		if err != nil {
 			// TODO: distingush case where conn is interrupted?
@@ -96,9 +97,10 @@ func runTunnel(config *Config) error {
 	// TODO: add a throttle after each full cycle?
 	// Note: errors fall through to ensure worker and channel cleanup
 	var selectedTunnel *Tunnel
-	cycler, err := NewServerEntryCycler()
+	cycler, err := NewServerEntryCycler(config.EgressRegion)
 	for selectedTunnel == nil && err == nil {
-		serverEntry, err := cycler.Next()
+		var serverEntry *ServerEntry
+		serverEntry, err = cycler.Next() // don't mask err here, we want to reference it after the loop
 		if err != nil {
 			break
 		}
@@ -191,7 +193,7 @@ func RunTunnelForever(config *Config) {
 		}
 	}()
 	for {
-		if HasServerEntries() {
+		if HasServerEntries(config.EgressRegion) {
 			err := runTunnel(config)
 			if err != nil {
 				log.Printf("run tunnel error: %s", err)
