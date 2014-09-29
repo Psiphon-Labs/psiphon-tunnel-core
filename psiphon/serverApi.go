@@ -21,27 +21,25 @@ package psiphon
 
 import (
 	"bytes"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
-	"net/url"
 	"strconv"
 )
 
 // Session is a utility struct which holds all of the data associated
 // with a Psiphon session. In addition to the established tunnel, this
-// includes the session ID (used for Psiphon API requests) and the
-// address to use to make tunnelled HTTPS API requests.
+// includes the session ID (used for Psiphon API requests) and a http
+// client configured to make tunnelled Psiphon API requests.
 type Session struct {
-	sessionId             string
-	config                *Config
-	tunnel                *Tunnel
-	localHttpProxyAddress string
+	sessionId          string
+	config             *Config
+	tunnel             *Tunnel
+	psiphonHttpsClient *http.Client
 }
 
 // NewSession makes tunnelled handshake and connected requests to the
@@ -53,11 +51,15 @@ func NewSession(config *Config, tunnel *Tunnel, localHttpProxyAddress string) (s
 	if err != nil {
 		return nil, ContextError(err)
 	}
+	psiphonHttpsClient, err := makePsiphonHttpsClient(tunnel, localHttpProxyAddress)
+	if err != nil {
+		return nil, ContextError(err)
+	}
 	session = &Session{
-		sessionId:             sessionId,
-		config:                config,
-		tunnel:                tunnel,
-		localHttpProxyAddress: localHttpProxyAddress,
+		sessionId:          sessionId,
+		config:             config,
+		tunnel:             tunnel,
+		psiphonHttpsClient: psiphonHttpsClient,
 	}
 	// Sending two seperate requests is a legacy from when the handshake was
 	// performed before a tunnel was established and the connect was performed
@@ -92,8 +94,8 @@ func (session *Session) doHandshakeRequest() error {
 	for _, ipAddress := range serverEntryIpAddresses {
 		extraParams = append(extraParams, &ExtraParam{"known_server", ipAddress})
 	}
-	url := buildRequestUrl(session, "handshake", extraParams...)
-	responseBody, err := doGetRequest(session, url)
+	url := session.buildRequestUrl("handshake", extraParams...)
+	responseBody, err := session.doGetRequest(url)
 	if err != nil {
 		return ContextError(err)
 	}
@@ -169,12 +171,11 @@ func (session *Session) doConnectedRequest() error {
 	if lastConnected == "" {
 		lastConnected = "None"
 	}
-	url := buildRequestUrl(
-		session,
+	url := session.buildRequestUrl(
 		"connected",
 		&ExtraParam{"session_id", session.sessionId},
 		&ExtraParam{"last_connected", lastConnected})
-	responseBody, err := doGetRequest(session, url)
+	responseBody, err := session.doGetRequest(url)
 	if err != nil {
 		return ContextError(err)
 	}
@@ -197,9 +198,11 @@ type ExtraParam struct{ name, value string }
 // buildRequestUrl makes a URL containing all the common parameters
 // that are included with Psiphon API requests. These common parameters
 // are used for statistics.
-func buildRequestUrl(session *Session, path string, extraParams ...*ExtraParam) string {
+func (session *Session) buildRequestUrl(path string, extraParams ...*ExtraParam) string {
 	var requestUrl bytes.Buffer
-	requestUrl.WriteString("https://")
+	// Note: don't prefix with HTTPS scheme, see comment in doGetRequest.
+	// e.g., don't do this: requestUrl.WriteString("https://")
+	requestUrl.WriteString("http://")
 	requestUrl.WriteString(session.tunnel.serverEntry.IpAddress)
 	requestUrl.WriteString(":")
 	requestUrl.WriteString(session.tunnel.serverEntry.WebServerPort)
@@ -231,39 +234,9 @@ func buildRequestUrl(session *Session, path string, extraParams ...*ExtraParam) 
 	return requestUrl.String()
 }
 
-// doGetRequest makes a tunneled HTTPS request, validating the server using the server
-// entry web server certificate. This function discards its http.Client after a single
-// use -- it is not intended for making many requests.
-func doGetRequest(session *Session, requestUrl string) (responseBody []byte, err error) {
-	proxyUrl, err := url.Parse(fmt.Sprintf("http://%s", session.localHttpProxyAddress))
-	if err != nil {
-		return nil, ContextError(err)
-	}
-	proxy := http.ProxyURL(proxyUrl)
-	certificate, err := DecodeCertificate(session.tunnel.serverEntry.WebServerCertificate)
-	if err != nil {
-		return nil, ContextError(err)
-	}
-	certPool := x509.NewCertPool()
-	certPool.AddCert(certificate)
-	// Copy default transport for its timeout values
-	transport := new(http.Transport)
-	*transport = *http.DefaultTransport.(*http.Transport)
-	// ****** SECURITY ISSUE ******
-	// TODO: temporarily using InsecureSkipVerify to work around hostname verification error:
-	// "x509: cannot validate certificate for " + h.Host + " because it doesn't contain any IP SANs"
-	// Notes:
-	// - Since Psiphon server self-signed certs don't have IP SANs, we need to disable that part
-	// of verification. The client has to be able to handle existing server certificates.
-	// - We can't easily supply a custom TLS dialer (e.g., such as https://github.com/getlantern/tlsdialer)
-	// since the dialer has to deal with HTTP proxying before talking TLS. See:
-	// dialConn in http://golang.org/src/pkg/net/http/transport.go
-	// - Mitigating factor: the InsecureSkipVerify TLS is done through the secure, authenticated tunnel
-	// and terminates at the tunnel server host.
-	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true, RootCAs: certPool}
-	transport.Proxy = proxy
-	httpClient := &http.Client{Transport: transport}
-	response, err := httpClient.Get(requestUrl)
+// doGetRequest makes a tunneled HTTPS request and returns the response body.
+func (session *Session) doGetRequest(requestUrl string) (responseBody []byte, err error) {
+	response, err := session.psiphonHttpsClient.Get(requestUrl)
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -276,4 +249,31 @@ func doGetRequest(session *Session, requestUrl string) (responseBody []byte, err
 		return nil, ContextError(fmt.Errorf("HTTP GET request failed with response code: %d", response.StatusCode))
 	}
 	return body, nil
+}
+
+// makeHttpsClient creates a Psiphon HTTPS client that uses the local http proxy to tunnel
+// requests and which validates the web server using the Psiphon server entry web server certificate.
+// This is not a general purpose HTTPS client.
+// As the custom dialer makes an explicit TLS connection, URLs submitted to the returned
+// http.Client should use the "http://" scheme. Otherwise http.Transport will try to do another TLS
+// handshake inside the explicit TLS session.
+func makePsiphonHttpsClient(tunnel *Tunnel, localHttpProxyAddress string) (httpsClient *http.Client, err error) {
+	certificate, err := DecodeCertificate(tunnel.serverEntry.WebServerCertificate)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	dialer := func(network, addr string) (net.Conn, error) {
+		customTLSConfig := &CustomTLSConfig{
+			sendServerName:          false,
+			verifyLegacyCertificate: certificate,
+			httpProxyAddress:        localHttpProxyAddress,
+		}
+		return CustomTLSDial(network, addr, customTLSConfig)
+	}
+	// Copy default transport for its timeout values
+	transport := new(http.Transport)
+	*transport = *http.DefaultTransport.(*http.Transport)
+	transport.Dial = dialer
+	transport.Proxy = nil
+	return &http.Client{Transport: transport}, nil
 }

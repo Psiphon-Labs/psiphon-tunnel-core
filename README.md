@@ -15,7 +15,6 @@ This project is currently at the proof-of-concept stage. Current production Psip
 
 ### TODO (proof-of-concept)
 
-* replace InsecureSkipVerify work-around for IP SANs issue (see serverApi.go) 
 * shutdown results in log noise: "use of closed network connection"
 * region preference
 * use ContextError in more places
