@@ -44,8 +44,9 @@ func initDataStore() {
 		const schema = `
         create table if not exists serverEntry
             (id text not null primary key,
-             data blob not null,
-             rank integer not null unique);
+             rank integer not null unique,
+             region text not null,
+             data blob not null);
         create table if not exists keyValue
             (key text not null,
              value text not null);
@@ -126,9 +127,9 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 			return ContextError(err)
 		}
 		_, err = transaction.Exec(`
-            insert or replace into serverEntry (id, data, rank)
-            values (?, ?, (select coalesce(max(rank)-1, 0) from serverEntry));
-            `, serverEntry.IpAddress, data)
+            insert or replace into serverEntry (id, rank, region, data)
+            values (?, (select coalesce(max(rank)-1, 0) from serverEntry), ?, ?);
+            `, serverEntry.IpAddress, serverEntry.Region, data)
 		// TODO: log after commit
 		if !serverEntryExists {
 			log.Printf("stored server %s", serverEntry.IpAddress)
@@ -157,15 +158,16 @@ func PromoteServerEntry(ipAddress string) error {
 // ServerEntryCycler is used to continuously iterate over
 // stored server entries in rank order.
 type ServerEntryCycler struct {
+	region      string
 	transaction *sql.Tx
 	cursor      *sql.Rows
 	isReset     bool
 }
 
 // NewServerEntryCycler creates a new ServerEntryCycler
-func NewServerEntryCycler() (cycler *ServerEntryCycler, err error) {
+func NewServerEntryCycler(region string) (cycler *ServerEntryCycler, err error) {
 	initDataStore()
-	cycler = new(ServerEntryCycler)
+	cycler = &ServerEntryCycler{region: region}
 	err = cycler.Reset()
 	if err != nil {
 		return nil, err
@@ -181,7 +183,15 @@ func (cycler *ServerEntryCycler) Reset() error {
 	if err != nil {
 		return ContextError(err)
 	}
-	cursor, err := transaction.Query("select * from serverEntry order by rank desc;")
+	var cursor *sql.Rows
+	if cycler.region == "" {
+		cursor, err = transaction.Query(
+			"select data from serverEntry order by rank desc;")
+	} else {
+		cursor, err = transaction.Query(
+			"select data from serverEntry where region = ? order by rank desc;",
+			cycler.region)
+	}
 	if err != nil {
 		transaction.Rollback()
 		return ContextError(err)
@@ -227,10 +237,8 @@ func (cycler *ServerEntryCycler) Next() (serverEntry *ServerEntry, err error) {
 		}
 	}
 	cycler.isReset = false
-	var id string
 	var data []byte
-	var rank int64
-	err = cycler.cursor.Scan(&id, &data, &rank)
+	err = cycler.cursor.Scan(&data)
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -243,13 +251,22 @@ func (cycler *ServerEntryCycler) Next() (serverEntry *ServerEntry, err error) {
 }
 
 // HasServerEntries returns true if the data store contains at
-// least one server entry.
-func HasServerEntries() bool {
+// least one server entry (for the specified region, in not blank).
+func HasServerEntries(region string) bool {
 	initDataStore()
+	var err error
 	var count int
-	err := singleton.db.QueryRow("select count(*) from serverEntry;").Scan(&count)
-	if err == nil {
-		log.Printf("stored servers: %d", count)
+	if region == "" {
+		err = singleton.db.QueryRow("select count(*) from serverEntry;").Scan(&count)
+		if err == nil {
+			log.Printf("stored servers: %d", count)
+		}
+	} else {
+		err = singleton.db.QueryRow(
+			"select count(*) from serverEntry where region = ?;", region).Scan(&count)
+		if err == nil {
+			log.Printf("stored servers for region %s: %d", region, count)
+		}
 	}
 	return err == nil && count > 0
 }

@@ -34,6 +34,7 @@ type Config struct {
 	ClientVersion                      int
 	ClientPlatform                     string
 	TunnelWholeDevice                  int
+	EgressRegion                       string
 }
 
 // LoadConfig reads, and parse, and validates a JSON format Psiphon config
