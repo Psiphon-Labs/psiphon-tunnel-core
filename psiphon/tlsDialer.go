@@ -77,7 +77,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strings"
 	"time"
@@ -220,8 +219,6 @@ func CustomTLSDialWithDialer(dialer *net.Dialer, network, addr string, config *C
 		}()
 		err = <-errChannel
 	}
-
-	log.Printf("TEMP tlsDialer establishConnection done: %+v", conn.ConnectionState())
 
 	if err == nil && config.verifyLegacyCertificate != nil {
 		err = verifyLegacyCertificate(conn, config.verifyLegacyCertificate)

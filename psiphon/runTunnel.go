@@ -67,21 +67,19 @@ func establishTunnelWorker(
 	}
 }
 
+// discardTunnel is used to dispose of a successful connection that is
+// no longer required (another tunnel has already been selected). Since
+// the connection was successful, the server entry is still promoted.
 func discardTunnel(tunnel *Tunnel) {
 	log.Printf("discard connection to %s", tunnel.serverEntry.IpAddress)
 	PromoteServerEntry(tunnel.serverEntry.IpAddress)
 	tunnel.Close()
 }
 
-// runTunnel establishes a tunnel session and runs local proxies that make use of
-// that tunnel. The tunnel connection is monitored and this function returns an
-// error when the tunnel unexpectedly disconnects.
-// fetchRemoteServerList is used to obtain a fresh list of servers to attempt
-// to connect to. A worker pool of goroutines is used to attempt several tunnel
-// connections in parallel, and this process is stopped once the first tunnel
-// is established.
-func runTunnel(config *Config) error {
-	log.Printf("establishing tunnel")
+// establishTunnel coordinates a worker pool of goroutines to attempt several
+// tunnel connections in parallel, and this process is stopped once the first
+// tunnel is established.
+func establishTunnel(config *Config) (tunnel *Tunnel, err error) {
 	waitGroup := new(sync.WaitGroup)
 	candidateServerEntries := make(chan *ServerEntry)
 	pendingConns := new(PendingConns)
@@ -95,7 +93,7 @@ func runTunnel(config *Config) error {
 			pendingConns, establishedTunnels)
 	}
 	// TODO: add a throttle after each full cycle?
-	// Note: errors fall through to ensure worker and channel cleanup
+	// Note: errors fall through to ensure worker and channel cleanup (is started, at least)
 	var selectedTunnel *Tunnel
 	cycler, err := NewServerEntryCycler(config.EgressRegion)
 	for selectedTunnel == nil && err == nil {
@@ -107,7 +105,6 @@ func runTunnel(config *Config) error {
 		select {
 		case candidateServerEntries <- serverEntry:
 		case selectedTunnel = <-establishedTunnels:
-			defer selectedTunnel.Close()
 			log.Printf("selected connection to %s", selectedTunnel.serverEntry.IpAddress)
 		case <-timeout:
 			err = errors.New("timeout establishing tunnel")
@@ -116,57 +113,74 @@ func runTunnel(config *Config) error {
 	cycler.Close()
 	close(candidateServerEntries)
 	close(broadcastStopWorkers)
-	// Interrupt any partial connections in progress, so that
-	// the worker will terminate immediately
-	pendingConns.Interrupt()
-	waitGroup.Wait()
-	// Drain any excess tunnels
-	close(establishedTunnels)
-	for tunnel := range establishedTunnels {
-		discardTunnel(tunnel)
-	}
+	// Clean up is now asynchronous since Windows doesn't support interruptible connections
+	go func() {
+		// Interrupt any partial connections in progress, so that
+		// the worker will terminate immediately
+		pendingConns.Interrupt()
+		waitGroup.Wait()
+		// Drain any excess tunnels
+		close(establishedTunnels)
+		for tunnel := range establishedTunnels {
+			discardTunnel(tunnel)
+		}
+		// Note: only call this PromoteServerEntry after all discards so the selected
+		// tunnel is the top ranked
+		if selectedTunnel != nil {
+			PromoteServerEntry(selectedTunnel.serverEntry.IpAddress)
+		}
+	}()
 	// Note: end of error fall through
 	if err != nil {
-		return fmt.Errorf("failed to establish tunnel: %s", err)
+		return nil, ContextError(err)
 	}
-	// Don't hold references to candidates while running tunnel
-	candidateServerEntries = nil
-	pendingConns = nil
-	// TODO: could start local proxies, etc., before synchronizing work group
-	if selectedTunnel != nil {
-		log.Printf("tunnel established")
-		PromoteServerEntry(selectedTunnel.serverEntry.IpAddress)
-		stopTunnelSignal := make(chan bool)
-		err = selectedTunnel.conn.SetClosedSignal(stopTunnelSignal)
-		if err != nil {
-			return fmt.Errorf("failed to set closed signal: %s", err)
-		}
-		log.Printf("starting local SOCKS proxy")
-		socksProxy, err := NewSocksProxy(selectedTunnel, stopTunnelSignal)
-		if err != nil {
-			return fmt.Errorf("error initializing local SOCKS proxy: %s", err)
-		}
-		defer socksProxy.Close()
-		log.Printf("starting local HTTP proxy")
-		httpProxy, err := NewHttpProxy(selectedTunnel, stopTunnelSignal)
-		if err != nil {
-			return fmt.Errorf("error initializing local HTTP proxy: %s", err)
-		}
-		defer httpProxy.Close()
-		log.Printf("starting session")
-		localHttpProxyAddress := httpProxy.listener.Addr().String()
-		_, err = NewSession(config, selectedTunnel, localHttpProxyAddress)
-		if err != nil {
-			return fmt.Errorf("error starting session: %s", err)
-		}
-		log.Printf("monitoring tunnel")
-		<-stopTunnelSignal
+	return selectedTunnel, nil
+}
+
+// runTunnel establishes a tunnel session and runs local proxies that make use of
+// that tunnel. The tunnel connection is monitored and this function returns an
+// error when the tunnel unexpectedly disconnects.
+func runTunnel(config *Config) error {
+	log.Printf("establishing tunnel")
+	tunnel, err := establishTunnel(config)
+	if err != nil {
+		return ContextError(err)
 	}
-	return err
+	defer tunnel.Close()
+	// TODO: could start local proxies, etc., before synchronizing work group is establishTunnel
+	log.Printf("running tunnel")
+	stopTunnelSignal := make(chan bool)
+	err = tunnel.conn.SetClosedSignal(stopTunnelSignal)
+	if err != nil {
+		return fmt.Errorf("failed to set closed signal: %s", err)
+	}
+	log.Printf("starting local SOCKS proxy")
+	socksProxy, err := NewSocksProxy(tunnel, stopTunnelSignal)
+	if err != nil {
+		return fmt.Errorf("error initializing local SOCKS proxy: %s", err)
+	}
+	defer socksProxy.Close()
+	log.Printf("starting local HTTP proxy")
+	httpProxy, err := NewHttpProxy(tunnel, stopTunnelSignal)
+	if err != nil {
+		return fmt.Errorf("error initializing local HTTP proxy: %s", err)
+	}
+	defer httpProxy.Close()
+	log.Printf("starting session")
+	localHttpProxyAddress := httpProxy.listener.Addr().String()
+	_, err = NewSession(config, tunnel, localHttpProxyAddress)
+	if err != nil {
+		return fmt.Errorf("error starting session: %s", err)
+	}
+	log.Printf("monitoring tunnel")
+	<-stopTunnelSignal
+	return nil
 }
 
 // RunTunnelForever executes the main loop of the Psiphon client. It establishes
 // a tunnel and reconnects when the tunnel unexpectedly disconnects.
+// FetchRemoteServerList is used to obtain a fresh list of servers to attempt
+// to connect to.
 func RunTunnelForever(config *Config) {
 	if config.LogFilename != "" {
 		logFile, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)

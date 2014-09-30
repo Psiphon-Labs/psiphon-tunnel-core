@@ -15,9 +15,9 @@ This project is currently at the proof-of-concept stage. Current production Psip
 
 ### TODO (proof-of-concept)
 
+* investigate "psiphon.transactionWithRetry: database is locked" errors 
 * shutdown results in log noise: "use of closed network connection"
 * use ContextError in more places
-* psiphon.Conn for Windows
 * build/test on Android and iOS
 * integrate meek-client
 * disconnect all local proxy clients when tunnel disconnected

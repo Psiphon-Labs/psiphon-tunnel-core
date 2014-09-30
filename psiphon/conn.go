@@ -22,9 +22,7 @@ package psiphon
 import (
 	"errors"
 	"net"
-	"os"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -37,15 +35,15 @@ import (
 //   routing compatibility, for example).
 type Conn struct {
 	net.Conn
-	mutex        sync.Mutex
-	socketFd     int
-	isClosed     bool
-	closedSignal chan bool
-	readTimeout  time.Duration
-	writeTimeout time.Duration
+	mutex         sync.Mutex
+	interruptible interruptibleConn
+	isClosed      bool
+	closedSignal  chan bool
+	readTimeout   time.Duration
+	writeTimeout  time.Duration
 }
 
-// NewConn creates a new, connected Conn. The connection can be interrupted
+// Dial creates a new, connected Conn. The connection can be interrupted
 // using pendingConns.interrupt(): the new Conn is added to pendingConns
 // before the socket connect beings. The caller is responsible for removing the
 // returned Conn from pendingConns.
@@ -57,45 +55,9 @@ func Dial(
 	readTimeout, writeTimeout time.Duration,
 	pendingConns *PendingConns) (conn *Conn, err error) {
 
-	socketFd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+	conn, err = interruptibleDial(ipAddress, port, readTimeout, writeTimeout, pendingConns)
 	if err != nil {
-		return nil, err
-	}
-	err = syscall.SetsockoptInt(socketFd, syscall.IPPROTO_TCP, syscall.TCP_KEEPALIVE, TCP_KEEP_ALIVE_PERIOD_SECONDS)
-	if err != nil {
-		syscall.Close(socketFd)
-		return nil, err
-	}
-	/*
-		// TODO: requires root, which we won't have on Android in VpnService mode
-		//       an alternative may be to use http://golang.org/pkg/syscall/#UnixRights to
-		//       send the fd to the main Android process which receives the fd with
-		//       http://developer.android.com/reference/android/net/LocalSocket.html#getAncillaryFileDescriptors%28%29
-		//       and then calls
-		//       http://developer.android.com/reference/android/net/VpnService.html#protect%28int%29.
-		//       See, for example:
-		//       https://code.google.com/p/ics-openvpn/source/browse/main/src/main/java/de/blinkt/openvpn/core/OpenVpnManagementThread.java#164
-		const SO_BINDTODEVICE = 0x19 // only defined for Linux
-		err = syscall.SetsockoptString(socketFd, syscall.SOL_SOCKET, SO_BINDTODEVICE, deviceName)
-	*/
-	conn = &Conn{
-		socketFd:     socketFd,
-		readTimeout:  readTimeout,
-		writeTimeout: writeTimeout}
-	pendingConns.Add(conn)
-	// TODO: domain name resolution (for meek)
-	var addr [4]byte
-	copy(addr[:], net.ParseIP(ipAddress).To4())
-	sockAddr := syscall.SockaddrInet4{Addr: addr, Port: port}
-	err = syscall.Connect(conn.socketFd, &sockAddr)
-	if err != nil {
-		return nil, err
-	}
-	file := os.NewFile(uintptr(conn.socketFd), "")
-	defer file.Close()
-	conn.Conn, err = net.FileConn(file)
-	if err != nil {
-		return nil, err
+		return nil, ContextError(err)
 	}
 	return conn, nil
 }
@@ -123,7 +85,7 @@ func (conn *Conn) Close() (err error) {
 	conn.mutex.Lock()
 	if !conn.isClosed {
 		if conn.Conn == nil {
-			err = syscall.Close(conn.socketFd)
+			err = interruptibleClose(conn.interruptible)
 		} else {
 			err = conn.Conn.Close()
 		}
