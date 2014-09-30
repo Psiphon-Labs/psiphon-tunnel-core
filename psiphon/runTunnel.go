@@ -110,7 +110,9 @@ func establishTunnel(config *Config) (tunnel *Tunnel, err error) {
 			err = errors.New("timeout establishing tunnel")
 		}
 	}
-	cycler.Close()
+	if cycler != nil {
+		cycler.Close()
+	}
 	close(candidateServerEntries)
 	close(broadcastStopWorkers)
 	// Clean up is now asynchronous since Windows doesn't support interruptible connections
