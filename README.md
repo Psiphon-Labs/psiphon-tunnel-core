@@ -15,9 +15,8 @@ This project is currently at the proof-of-concept stage. Current production Psip
 
 ### TODO (proof-of-concept)
 
-* shutdown results in log noise: "use of closed network connection"
+* log noise: "use of closed network connection"; "psiphon.relayPortForward: ...: i/o timeout"
 * use ContextError in more places
-* psiphon.Conn for Windows
 * build/test on Android and iOS
 * integrate meek-client
 * disconnect all local proxy clients when tunnel disconnected

@@ -1,3 +1,5 @@
+// +build windows
+
 /*
  * Copyright (c) 2014, Psiphon Inc.
  * All rights reserved.
@@ -20,21 +22,30 @@
 package psiphon
 
 import (
+	"fmt"
+	"net"
 	"time"
 )
 
-const (
-	DATA_STORE_FILENAME                    = "psiphon.db"
-	FETCH_REMOTE_SERVER_LIST_TIMEOUT       = 5 * time.Second
-	TUNNEL_CONNECT_TIMEOUT                 = 15 * time.Second
-	TUNNEL_READ_TIMEOUT                    = 0 * time.Second
-	TUNNEL_WRITE_TIMEOUT                   = 5 * time.Second
-	TUNNEL_TCP_KEEP_ALIVE_PERIOD_SECONDS   = 60
-	ESTABLISH_TUNNEL_TIMEOUT               = 60 * time.Second
-	CONNECTION_WORKER_POOL_SIZE            = 10
-	HTTP_PROXY_READ_TIMEOUT                = 1 * time.Second
-	HTTP_PROXY_WRITE_TIMEOUT               = 10 * time.Second
-	FETCH_REMOTE_SERVER_LIST_RETRY_TIMEOUT = 5 * time.Second
-	FETCH_REMOTE_SERVER_LIST_STALE_TIMEOUT = 6 * time.Hour
-	PSIPHON_API_CLIENT_SESSION_ID_LENGTH   = 16
-)
+type interruptibleConn struct {
+}
+
+func interruptibleDial(
+	ipAddress string, port int,
+	connectTimeout, readTimeout, writeTimeout time.Duration,
+	pendingConns *PendingConns) (conn *Conn, err error) {
+	// Note: using net.Dial(); interruptible connections not supported on Windows
+	netConn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ipAddress, port), connectTimeout)
+	if err != nil {
+		return nil, err
+	}
+	conn = &Conn{
+		Conn:         netConn,
+		readTimeout:  readTimeout,
+		writeTimeout: writeTimeout}
+	return conn, nil
+}
+
+func interruptibleClose(interruptible interruptibleConn) error {
+	panic("interruptibleClose not supported on Windows")
+}
