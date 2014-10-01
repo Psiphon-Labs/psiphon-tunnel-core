@@ -98,7 +98,8 @@ func establishTunnel(config *Config) (tunnel *Tunnel, err error) {
 	cycler, err := NewServerEntryCycler(config.EgressRegion)
 	for selectedTunnel == nil && err == nil {
 		var serverEntry *ServerEntry
-		serverEntry, err = cycler.Next() // don't mask err here, we want to reference it after the loop
+		// Note: don't mask err here, we want to reference it after the loop
+		serverEntry, err = cycler.Next()
 		if err != nil {
 			break
 		}

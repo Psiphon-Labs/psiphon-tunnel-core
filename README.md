@@ -15,8 +15,7 @@ This project is currently at the proof-of-concept stage. Current production Psip
 
 ### TODO (proof-of-concept)
 
-* investigate "psiphon.transactionWithRetry: database is locked" errors 
-* shutdown results in log noise: "use of closed network connection"
+* log noise: "use of closed network connection"; "psiphon.relayPortForward: ...: i/o timeout"
 * use ContextError in more places
 * build/test on Android and iOS
 * integrate meek-client
