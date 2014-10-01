@@ -55,7 +55,7 @@ func initDataStore() {
         `
 		db, err := sql.Open(
 			"sqlite3",
-			fmt.Sprintf("file:%s?cache=shared&mode=rwc", DATA_STORE_FILENAME))
+			fmt.Sprintf("file:%s?cache=private&mode=rwc", DATA_STORE_FILENAME))
 		if err != nil {
 			log.Fatal("initDataStore failed to open database: %s", err)
 		}
