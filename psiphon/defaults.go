@@ -26,10 +26,12 @@ import (
 const (
 	DATA_STORE_FILENAME                    = "psiphon.db"
 	FETCH_REMOTE_SERVER_LIST_TIMEOUT       = 5 * time.Second
-	CONNECTION_CANDIDATE_TIMEOUT           = 10 * time.Second
+	TUNNEL_CONNECT_TIMEOUT                 = 15 * time.Second
+	TUNNEL_READ_TIMEOUT                    = 0 * time.Second
+	TUNNEL_WRITE_TIMEOUT                   = 5 * time.Second
+	TUNNEL_TCP_KEEP_ALIVE_PERIOD_SECONDS   = 60
 	ESTABLISH_TUNNEL_TIMEOUT               = 60 * time.Second
 	CONNECTION_WORKER_POOL_SIZE            = 10
-	TCP_KEEP_ALIVE_PERIOD_SECONDS          = 60
 	HTTP_PROXY_READ_TIMEOUT                = 1 * time.Second
 	HTTP_PROXY_WRITE_TIMEOUT               = 10 * time.Second
 	FETCH_REMOTE_SERVER_LIST_RETRY_TIMEOUT = 5 * time.Second

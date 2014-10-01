@@ -22,6 +22,7 @@
 package psiphon
 
 import (
+	"errors"
 	"net"
 	"os"
 	"syscall"
@@ -34,14 +35,15 @@ type interruptibleConn struct {
 
 func interruptibleDial(
 	ipAddress string, port int,
-	readTimeout, writeTimeout time.Duration,
+	connectTimeout, readTimeout, writeTimeout time.Duration,
 	pendingConns *PendingConns) (conn *Conn, err error) {
 
 	socketFd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
 	if err != nil {
 		return nil, err
 	}
-	err = syscall.SetsockoptInt(socketFd, syscall.IPPROTO_TCP, syscall.TCP_KEEPALIVE, TCP_KEEP_ALIVE_PERIOD_SECONDS)
+	err = syscall.SetsockoptInt(
+		socketFd, syscall.IPPROTO_TCP, syscall.TCP_KEEPALIVE, TUNNEL_TCP_KEEP_ALIVE_PERIOD_SECONDS)
 	if err != nil {
 		syscall.Close(socketFd)
 		return nil, err
@@ -68,7 +70,18 @@ func interruptibleDial(
 	var addr [4]byte
 	copy(addr[:], net.ParseIP(ipAddress).To4())
 	sockAddr := syscall.SockaddrInet4{Addr: addr, Port: port}
-	err = syscall.Connect(conn.interruptible.socketFd, &sockAddr)
+	if connectTimeout != 0 {
+		errChannel := make(chan error, 2)
+		time.AfterFunc(connectTimeout, func() {
+			errChannel <- errors.New("connect timeout")
+		})
+		go func() {
+			errChannel <- syscall.Connect(conn.interruptible.socketFd, &sockAddr)
+		}()
+		err = <-errChannel
+	} else {
+		err = syscall.Connect(conn.interruptible.socketFd, &sockAddr)
+	}
 	if err != nil {
 		return nil, err
 	}

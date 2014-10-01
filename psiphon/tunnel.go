@@ -73,7 +73,10 @@ func EstablishTunnel(serverEntry *ServerEntry, pendingConns *PendingConns) (tunn
 		selectedProtocol = PROTOCOL_OBFUSCATED_SSH
 		port = serverEntry.SshObfuscatedPort
 	}
-	conn, err := Dial(serverEntry.IpAddress, port, 0, CONNECTION_CANDIDATE_TIMEOUT, pendingConns)
+	conn, err := Dial(
+		serverEntry.IpAddress, port,
+		TUNNEL_CONNECT_TIMEOUT, TUNNEL_READ_TIMEOUT, TUNNEL_WRITE_TIMEOUT,
+		pendingConns)
 	if err != nil {
 		return nil, err
 	}

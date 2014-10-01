@@ -43,19 +43,21 @@ type Conn struct {
 	writeTimeout  time.Duration
 }
 
-// Dial creates a new, connected Conn. The connection can be interrupted
-// using pendingConns.interrupt(): the new Conn is added to pendingConns
-// before the socket connect beings. The caller is responsible for removing the
-// returned Conn from pendingConns.
+// Dial creates a new, connected Conn. The connection may be interrupted
+// using pendingConns.interrupt(): on platforms that support this, the new
+// Conn is added to pendingConns before the socket connect begins.
+// The caller is responsible for removing any Conns added to pendingConns,
+// even when Dial returns an error.
 // To implement device binding and interruptible connecting, the lower-level
 // syscall APIs are used. The sequence of syscalls in this implementation are
 // taken from: https://code.google.com/p/go/issues/detail?id=6966
+// connectTimeout is rounded up to the nearest second on some platforms.
 func Dial(
 	ipAddress string, port int,
-	readTimeout, writeTimeout time.Duration,
+	connectTimeout, readTimeout, writeTimeout time.Duration,
 	pendingConns *PendingConns) (conn *Conn, err error) {
 
-	conn, err = interruptibleDial(ipAddress, port, readTimeout, writeTimeout, pendingConns)
+	conn, err = interruptibleDial(ipAddress, port, connectTimeout, readTimeout, writeTimeout, pendingConns)
 	if err != nil {
 		return nil, ContextError(err)
 	}
