@@ -29,7 +29,7 @@ const (
 	TUNNEL_CONNECT_TIMEOUT                 = 15 * time.Second
 	TUNNEL_READ_TIMEOUT                    = 0 * time.Second
 	TUNNEL_WRITE_TIMEOUT                   = 5 * time.Second
-	TUNNEL_TCP_KEEP_ALIVE_PERIOD_SECONDS   = 60
+	TUNNEL_SSH_KEEP_ALIVE_PERIOD           = 60 * time.Second
 	ESTABLISH_TUNNEL_TIMEOUT               = 60 * time.Second
 	CONNECTION_WORKER_POOL_SIZE            = 10
 	HTTP_PROXY_READ_TIMEOUT                = 1 * time.Second

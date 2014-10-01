@@ -25,9 +25,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -39,14 +41,18 @@ const (
 // tunnel includes a network connection to the specified server
 // and an SSH session built on top of that transport.
 type Tunnel struct {
-	serverEntry *ServerEntry
-	protocol    string
-	conn        *Conn
-	sshClient   *ssh.Client
+	serverEntry      *ServerEntry
+	protocol         string
+	conn             *Conn
+	sshClient        *ssh.Client
+	sshKeepAliveQuit chan struct{}
 }
 
 // Close terminates the tunnel.
 func (tunnel *Tunnel) Close() {
+	if tunnel.sshKeepAliveQuit != nil {
+		close(tunnel.sshKeepAliveQuit)
+	}
 	if tunnel.conn != nil {
 		tunnel.conn.Close()
 	}
@@ -121,5 +127,24 @@ func EstablishTunnel(serverEntry *ServerEntry, pendingConns *PendingConns) (tunn
 		return nil, err
 	}
 	sshClient := ssh.NewClient(sshConn, sshChans, sshReqs)
-	return &Tunnel{serverEntry, selectedProtocol, conn, sshClient}, nil
+	sshKeepAliveQuit := make(chan struct{})
+	sshKeepAliveTicker := time.NewTicker(TUNNEL_SSH_KEEP_ALIVE_PERIOD)
+	go func() {
+		for {
+			select {
+			case <-sshKeepAliveTicker.C:
+				_, _, err := sshClient.SendRequest("keepalive@openssh.com", true, nil)
+				if err != nil {
+					log.Printf("ssh keep alive failed: %s", err)
+					// TODO: call Tunnel.Close()?
+					sshKeepAliveTicker.Stop()
+					conn.Close()
+				}
+			case <-sshKeepAliveQuit:
+				sshKeepAliveTicker.Stop()
+				return
+			}
+		}
+	}()
+	return &Tunnel{serverEntry, selectedProtocol, conn, sshClient, sshKeepAliveQuit}, nil
 }
