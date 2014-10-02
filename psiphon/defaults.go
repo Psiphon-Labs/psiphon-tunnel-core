@@ -24,6 +24,7 @@ import (
 )
 
 const (
+	VERSION                                  = "0.1"
 	DATA_STORE_FILENAME                      = "psiphon.db"
 	FETCH_REMOTE_SERVER_LIST_TIMEOUT         = 5 * time.Second
 	TUNNEL_CONNECT_TIMEOUT                   = 15 * time.Second
