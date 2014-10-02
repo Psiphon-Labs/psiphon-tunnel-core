@@ -44,14 +44,14 @@ func NewHttpProxy(tunnel *Tunnel, failureSignal chan bool) (proxy *HttpProxy, er
 	if err != nil {
 		return nil, err
 	}
-	tunneledDialer := func(_, targetAddress string) (conn net.Conn, err error) {
+	tunnelledDialer := func(_, targetAddress string) (conn net.Conn, err error) {
 		return tunnel.sshClient.Dial("tcp", targetAddress)
 	}
-	// Copy default transport for its timeout values
-	transport := new(http.Transport)
-	*transport = *http.DefaultTransport.(*http.Transport)
-	transport.Dial = tunneledDialer
-	transport.Proxy = nil
+	transport := &http.Transport{
+		Dial:                  tunnelledDialer,
+		MaxIdleConnsPerHost:   HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
+		ResponseHeaderTimeout: HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
+	}
 	proxy = &HttpProxy{
 		tunnel:        tunnel,
 		failureSignal: failureSignal,
@@ -177,9 +177,7 @@ func (proxy *HttpProxy) serveHttpRequests() {
 	defer proxy.listener.Close()
 	defer proxy.waitGroup.Done()
 	httpServer := &http.Server{
-		Handler:      proxy,
-		ReadTimeout:  HTTP_PROXY_READ_TIMEOUT,
-		WriteTimeout: HTTP_PROXY_WRITE_TIMEOUT,
+		Handler: proxy,
 	}
 	// Note: will be interrupted by listener.Close() call made by proxy.Close()
 	err := httpServer.Serve(proxy.listener)

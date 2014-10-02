@@ -24,17 +24,17 @@ import (
 )
 
 const (
-	DATA_STORE_FILENAME                    = "psiphon.db"
-	FETCH_REMOTE_SERVER_LIST_TIMEOUT       = 5 * time.Second
-	TUNNEL_CONNECT_TIMEOUT                 = 15 * time.Second
-	TUNNEL_READ_TIMEOUT                    = 0 * time.Second
-	TUNNEL_WRITE_TIMEOUT                   = 5 * time.Second
-	TUNNEL_SSH_KEEP_ALIVE_PERIOD           = 60 * time.Second
-	ESTABLISH_TUNNEL_TIMEOUT               = 60 * time.Second
-	CONNECTION_WORKER_POOL_SIZE            = 10
-	HTTP_PROXY_READ_TIMEOUT                = 1 * time.Second
-	HTTP_PROXY_WRITE_TIMEOUT               = 10 * time.Second
-	FETCH_REMOTE_SERVER_LIST_RETRY_TIMEOUT = 5 * time.Second
-	FETCH_REMOTE_SERVER_LIST_STALE_TIMEOUT = 6 * time.Hour
-	PSIPHON_API_CLIENT_SESSION_ID_LENGTH   = 16
+	DATA_STORE_FILENAME                      = "psiphon.db"
+	FETCH_REMOTE_SERVER_LIST_TIMEOUT         = 5 * time.Second
+	TUNNEL_CONNECT_TIMEOUT                   = 15 * time.Second
+	TUNNEL_READ_TIMEOUT                      = 0 * time.Second
+	TUNNEL_WRITE_TIMEOUT                     = 5 * time.Second
+	TUNNEL_SSH_KEEP_ALIVE_PERIOD             = 60 * time.Second
+	ESTABLISH_TUNNEL_TIMEOUT                 = 60 * time.Second
+	CONNECTION_WORKER_POOL_SIZE              = 10
+	HTTP_PROXY_ORIGIN_SERVER_TIMEOUT         = 15 * time.Second
+	FETCH_REMOTE_SERVER_LIST_RETRY_TIMEOUT   = 5 * time.Second
+	FETCH_REMOTE_SERVER_LIST_STALE_TIMEOUT   = 6 * time.Hour
+	PSIPHON_API_CLIENT_SESSION_ID_LENGTH     = 16
+	HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST = 50
 )
