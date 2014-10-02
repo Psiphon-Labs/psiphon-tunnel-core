@@ -15,16 +15,17 @@ This project is currently at the proof-of-concept stage. Current production Psip
 
 ### TODO (proof-of-concept)
 
-* log noise: "use of closed network connection"; "psiphon.relayPortForward: ...: i/o timeout"
+* prefilter entries by capability; don't log "server does not have sufficient capabilities"
+* log noise: "use of closed network connection"
 * use ContextError in more places
 * build/test on Android and iOS
 * integrate meek-client
 * disconnect all local proxy clients when tunnel disconnected
 * add connection and idle timeouts to proxied connections where appropriate
-* log levels
 
 ### TODO (future)
 
+* SOCKS5 support
 * SSH compression
 * preemptive reconnect functionality
 * implement page view stats

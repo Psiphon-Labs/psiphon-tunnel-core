@@ -25,7 +25,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -135,7 +134,7 @@ func EstablishTunnel(serverEntry *ServerEntry, pendingConns *PendingConns) (tunn
 			case <-sshKeepAliveTicker.C:
 				_, _, err := sshClient.SendRequest("keepalive@openssh.com", true, nil)
 				if err != nil {
-					log.Printf("ssh keep alive failed: %s", err)
+					Notice(NOTICE_ALERT, "ssh keep alive failed: %s", err)
 					// TODO: call Tunnel.Close()?
 					sshKeepAliveTicker.Stop()
 					conn.Close()

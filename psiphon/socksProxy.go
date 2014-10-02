@@ -22,7 +22,6 @@ package psiphon
 import (
 	socks "git.torproject.org/pluggable-transports/goptlib.git"
 	"io"
-	"log"
 	"net"
 	"sync"
 )
@@ -53,7 +52,7 @@ func NewSocksProxy(tunnel *Tunnel, failureSignal chan bool) (proxy *SocksProxy, 
 		waitGroup:     new(sync.WaitGroup)}
 	proxy.waitGroup.Add(1)
 	go proxy.acceptSocksConnections()
-	log.Printf("local SOCKS proxy running at address %s", proxy.listener.Addr().String())
+	Notice(NOTICE_SOCKS_PROXY, "local SOCKS proxy running at address %s", proxy.listener.Addr().String())
 	return proxy, nil
 }
 
@@ -89,12 +88,12 @@ func relayPortForward(local, remote net.Conn) {
 		defer waitGroup.Done()
 		_, err := io.Copy(local, remote)
 		if err != nil {
-			log.Printf("%s", ContextError(err))
+			Notice(NOTICE_ALERT, "%s", ContextError(err))
 		}
 	}()
 	_, err := io.Copy(remote, local)
 	if err != nil {
-		log.Printf("%s", ContextError(err))
+		Notice(NOTICE_ALERT, "%s", ContextError(err))
 	}
 	waitGroup.Wait()
 }
@@ -106,7 +105,7 @@ func (proxy *SocksProxy) acceptSocksConnections() {
 		// Note: will be interrupted by listener.Close() call made by proxy.Close()
 		socksConnection, err := proxy.listener.AcceptSocks()
 		if err != nil {
-			log.Printf("SOCKS proxy accept error: %s", err)
+			Notice(NOTICE_ALERT, "SOCKS proxy accept error: %s", err)
 			if e, ok := err.(net.Error); ok && !e.Temporary() {
 				select {
 				case proxy.failureSignal <- true:
@@ -121,9 +120,9 @@ func (proxy *SocksProxy) acceptSocksConnections() {
 		go func() {
 			err := socksConnectionHandler(proxy.tunnel, socksConnection)
 			if err != nil {
-				log.Printf("%s", err)
+				Notice(NOTICE_ALERT, "%s", ContextError(err))
 			}
 		}()
 	}
-	log.Printf("SOCKS proxy stopped")
+	Notice(NOTICE_SOCKS_PROXY, "SOCKS proxy stopped")
 }

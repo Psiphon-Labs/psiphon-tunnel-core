@@ -28,7 +28,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"strings"
 )
@@ -47,7 +46,7 @@ type RemoteServerList struct {
 // public key config.RemoteServerListSignaturePublicKey; and parses the
 // data field into ServerEntry records.
 func FetchRemoteServerList(config *Config) (err error) {
-	log.Printf("fetching remote server list")
+	Notice(NOTICE_INFO, "fetching remote server list")
 	httpClient := http.Client{
 		Timeout: FETCH_REMOTE_SERVER_LIST_TIMEOUT,
 	}

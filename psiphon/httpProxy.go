@@ -22,7 +22,6 @@ package psiphon
 import (
 	"errors"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -62,7 +61,7 @@ func NewHttpProxy(tunnel *Tunnel, failureSignal chan bool) (proxy *HttpProxy, er
 	}
 	proxy.waitGroup.Add(1)
 	go proxy.serveHttpRequests()
-	log.Printf("local HTTP proxy running at address %s", proxy.listener.Addr().String())
+	Notice(NOTICE_HTTP_PROXY, "local HTTP proxy running at address %s", proxy.listener.Addr().String())
 	return proxy, nil
 }
 
@@ -93,20 +92,20 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 		hijacker, _ := responseWriter.(http.Hijacker)
 		conn, _, err := hijacker.Hijack()
 		if err != nil {
-			log.Print(ContextError(err))
+			Notice(NOTICE_ALERT, "%s", ContextError(err))
 			http.Error(responseWriter, "", http.StatusInternalServerError)
 			return
 		}
 		go func() {
 			err := httpConnectHandler(proxy.tunnel, conn, request.URL.Host)
 			if err != nil {
-				log.Printf("%s", err)
+				Notice(NOTICE_ALERT, "%s", ContextError(err))
 			}
 		}()
 		return
 	}
 	if !request.URL.IsAbs() {
-		log.Print(ContextError(errors.New("no domain in request URL")))
+		Notice(NOTICE_ALERT, "%s", ContextError(errors.New("no domain in request URL")))
 		http.Error(responseWriter, "", http.StatusInternalServerError)
 		return
 	}
@@ -119,7 +118,7 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 	// Relay the HTTP request and get the response
 	response, err := proxy.httpRelay.RoundTrip(request)
 	if err != nil {
-		log.Print(ContextError(err))
+		Notice(NOTICE_ALERT, "%s", ContextError(err))
 		http.Error(responseWriter, "", http.StatusInternalServerError)
 		return
 	}
@@ -140,7 +139,7 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 	responseWriter.WriteHeader(response.StatusCode)
 	_, err = io.Copy(responseWriter, response.Body)
 	if err != nil {
-		log.Print(ContextError(err))
+		Notice(NOTICE_ALERT, "%s", ContextError(err))
 		http.Error(responseWriter, "", http.StatusInternalServerError)
 		return
 	}
@@ -187,8 +186,8 @@ func (proxy *HttpProxy) serveHttpRequests() {
 		case proxy.failureSignal <- true:
 		default:
 		}
-		log.Printf("HTTP proxy server error: %s", err)
+		Notice(NOTICE_ALERT, "%s", ContextError(err))
 		return
 	}
-	log.Printf("HTTP proxy stopped")
+	Notice(NOTICE_HTTP_PROXY, "HTTP proxy stopped")
 }

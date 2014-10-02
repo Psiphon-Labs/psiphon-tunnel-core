@@ -50,14 +50,13 @@ func establishTunnelWorker(
 		if IsSignalled(broadcastStopWorkers) {
 			return
 		}
-		log.Printf("connecting to %s in region %s",
-			serverEntry.IpAddress, serverEntry.Region)
+		Notice(NOTICE_INFO, "connecting to %s in region %s", serverEntry.IpAddress, serverEntry.Region)
 		tunnel, err := EstablishTunnel(serverEntry, pendingConns)
 		if err != nil {
 			// TODO: distingush case where conn is interrupted?
-			log.Printf("failed to connect to %s: %s", serverEntry.IpAddress, err)
+			Notice(NOTICE_INFO, "failed to connect to %s: %s", serverEntry.IpAddress, err)
 		} else {
-			log.Printf("successfully connected to %s", serverEntry.IpAddress)
+			Notice(NOTICE_INFO, "successfully connected to %s", serverEntry.IpAddress)
 			select {
 			case establishedTunnels <- tunnel:
 			default:
@@ -71,7 +70,7 @@ func establishTunnelWorker(
 // no longer required (another tunnel has already been selected). Since
 // the connection was successful, the server entry is still promoted.
 func discardTunnel(tunnel *Tunnel) {
-	log.Printf("discard connection to %s", tunnel.serverEntry.IpAddress)
+	Notice(NOTICE_INFO, "discard connection to %s", tunnel.serverEntry.IpAddress)
 	PromoteServerEntry(tunnel.serverEntry.IpAddress)
 	tunnel.Close()
 }
@@ -106,7 +105,7 @@ func establishTunnel(config *Config) (tunnel *Tunnel, err error) {
 		select {
 		case candidateServerEntries <- serverEntry:
 		case selectedTunnel = <-establishedTunnels:
-			log.Printf("selected connection to %s", selectedTunnel.serverEntry.IpAddress)
+			Notice(NOTICE_INFO, "selected connection to %s", selectedTunnel.serverEntry.IpAddress)
 		case <-timeout:
 			err = errors.New("timeout establishing tunnel")
 		}
@@ -144,39 +143,38 @@ func establishTunnel(config *Config) (tunnel *Tunnel, err error) {
 // that tunnel. The tunnel connection is monitored and this function returns an
 // error when the tunnel unexpectedly disconnects.
 func runTunnel(config *Config) error {
-	log.Printf("establishing tunnel")
+	Notice(NOTICE_INFO, "establishing tunnel")
 	tunnel, err := establishTunnel(config)
 	if err != nil {
 		return ContextError(err)
 	}
 	defer tunnel.Close()
 	// TODO: could start local proxies, etc., before synchronizing work group is establishTunnel
-	log.Printf("running tunnel")
 	stopTunnelSignal := make(chan bool)
 	err = tunnel.conn.SetClosedSignal(stopTunnelSignal)
 	if err != nil {
 		return fmt.Errorf("failed to set closed signal: %s", err)
 	}
-	log.Printf("starting local SOCKS proxy")
 	socksProxy, err := NewSocksProxy(tunnel, stopTunnelSignal)
 	if err != nil {
 		return fmt.Errorf("error initializing local SOCKS proxy: %s", err)
 	}
 	defer socksProxy.Close()
-	log.Printf("starting local HTTP proxy")
 	httpProxy, err := NewHttpProxy(tunnel, stopTunnelSignal)
 	if err != nil {
 		return fmt.Errorf("error initializing local HTTP proxy: %s", err)
 	}
 	defer httpProxy.Close()
-	log.Printf("starting session")
+	Notice(NOTICE_INFO, "starting session")
 	localHttpProxyAddress := httpProxy.listener.Addr().String()
 	_, err = NewSession(config, tunnel, localHttpProxyAddress)
 	if err != nil {
 		return fmt.Errorf("error starting session: %s", err)
 	}
-	log.Printf("monitoring tunnel")
+	Notice(NOTICE_TUNNEL, "tunnel started")
+	Notice(NOTICE_INFO, "monitoring tunnel")
 	<-stopTunnelSignal
+	Notice(NOTICE_TUNNEL, "tunnel stopped")
 	return nil
 }
 
@@ -188,7 +186,7 @@ func RunTunnelForever(config *Config) {
 	if config.LogFilename != "" {
 		logFile, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
-			log.Fatalf("error opening log file: %s", err)
+			Fatal("error opening log file: %s", err)
 		}
 		defer logFile.Close()
 		log.SetOutput(logFile)
@@ -202,7 +200,7 @@ func RunTunnelForever(config *Config) {
 		for {
 			err := FetchRemoteServerList(config)
 			if err != nil {
-				log.Printf("failed to fetch remote server list: %s", err)
+				Notice(NOTICE_ALERT, "failed to fetch remote server list: %s", err)
 				time.Sleep(FETCH_REMOTE_SERVER_LIST_RETRY_TIMEOUT)
 			} else {
 				time.Sleep(FETCH_REMOTE_SERVER_LIST_STALE_TIMEOUT)
@@ -213,7 +211,7 @@ func RunTunnelForever(config *Config) {
 		if HasServerEntries(config.EgressRegion) {
 			err := runTunnel(config)
 			if err != nil {
-				log.Printf("run tunnel error: %s", err)
+				Notice(NOTICE_ALERT, "run tunnel error: %s", err)
 			}
 		}
 		time.Sleep(1 * time.Second)

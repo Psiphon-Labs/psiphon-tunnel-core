@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -138,20 +137,20 @@ func (session *Session) doHandshakeRequest() error {
 	// TODO: formally communicate the sponsor and upgrade info to an
 	// outer client via some control interface.
 	for _, homepage := range handshakeConfig.Homepages {
-		log.Printf("homepage: %s", homepage)
+		Notice(NOTICE_HOMEPAGE, homepage)
 	}
 	upgradeClientVersion, err := strconv.Atoi(handshakeConfig.UpgradeClientVersion)
 	if err != nil {
 		return ContextError(err)
 	}
 	if upgradeClientVersion > session.config.ClientVersion {
-		log.Printf("upgrade available to client version: %d", upgradeClientVersion)
+		Notice(NOTICE_UPGRADE, "%d", upgradeClientVersion)
 	}
 	for _, pageViewRegex := range handshakeConfig.PageViewRegexes {
-		log.Printf("page view regex: %s", pageViewRegex)
+		Notice(NOTICE_PAGE_VIEW_REGEX, "%s %s", pageViewRegex["regex"], pageViewRegex["replace"])
 	}
 	for _, httpsRequestRegex := range handshakeConfig.HttpsRequestRegexes {
-		log.Printf("HTTPS regex: %s", httpsRequestRegex)
+		Notice(NOTICE_HTTPS_REGEX, "%s %s", httpsRequestRegex["regex"], httpsRequestRegex["replace"])
 	}
 	return nil
 }
