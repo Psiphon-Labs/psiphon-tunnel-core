@@ -25,9 +25,7 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
-	"unicode"
 )
 
 // HttpProxy is a HTTP server that relays HTTP requests through
@@ -84,6 +82,11 @@ func (proxy *HttpProxy) Close() {
 // Copyright (c) 2014 JianjunMao
 // The MIT License (MIT)
 //
+// https://golang.org/src/pkg/net/http/httputil/reverseproxy.go
+// Copyright 2011 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+//
 func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
 	if request.Method == "CONNECT" {
 		hijacker, _ := responseWriter.(http.Hijacker)
@@ -106,19 +109,12 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 		http.Error(responseWriter, "", http.StatusInternalServerError)
 		return
 	}
-	// Transform request struct before using as input to relayed request:
-	// Scheme: must be lower case.
-	// RequestURI: cleared as docs state "It is an error to set this
-	// field in an HTTP client request".
-	// Accept-Encoding: removed to allow Go's RoundTripper to do its own
-	// encoding.
-	// Connection (and the bogus Proxy-Connection): inputs to the proxy
-	// only and not to be passed along.
-	request.URL.Scheme = strings.Map(unicode.ToLower, request.URL.Scheme)
+	// Transform request struct before using as input to relayed request
+	request.Close = false
 	request.RequestURI = ""
-	request.Header.Del("Accept-Encoding")
-	request.Header.Del("Proxy-Connection")
-	request.Header.Del("Connection")
+	for _, key := range hopHeaders {
+		request.Header.Del(key)
+	}
 	// Relay the HTTP request and get the response
 	response, err := proxy.httpRelay.RoundTrip(request)
 	if err != nil {
@@ -127,7 +123,10 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 		return
 	}
 	defer response.Body.Close()
-	// Relay the remote response headers (first removing any proxy server headers)
+	// Relay the remote response headers
+	for _, key := range hopHeaders {
+		response.Header.Del(key)
+	}
 	for key, _ := range responseWriter.Header() {
 		responseWriter.Header().Del(key)
 	}
@@ -144,6 +143,19 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 		http.Error(responseWriter, "", http.StatusInternalServerError)
 		return
 	}
+}
+
+// Hop-by-hop headers. These are removed when sent to the backend.
+// http://www.w3.org/Protocols/rfc2616/rfc2616-sec13.html
+var hopHeaders = []string{
+	"Connection",
+	"Keep-Alive",
+	"Proxy-Authenticate",
+	"Proxy-Authorization",
+	"Te", // canonicalized version of "TE"
+	"Trailers",
+	"Transfer-Encoding",
+	"Upgrade",
 }
 
 func httpConnectHandler(tunnel *Tunnel, localHttpConn net.Conn, target string) (err error) {
