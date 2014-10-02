@@ -262,18 +262,19 @@ func makePsiphonHttpsClient(tunnel *Tunnel, localHttpProxyAddress string) (https
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	dialer := func(network, addr string) (net.Conn, error) {
+	customDialer := func(network, addr string) (net.Conn, error) {
 		customTLSConfig := &CustomTLSConfig{
 			sendServerName:          false,
 			verifyLegacyCertificate: certificate,
 			httpProxyAddress:        localHttpProxyAddress,
 		}
-		return CustomTLSDial(network, addr, customTLSConfig)
+		return CustomTLSDialWithDialer(
+			&net.Dialer{Timeout: PSIPHON_API_SERVER_TIMEOUT},
+			network, addr, customTLSConfig)
 	}
-	// Copy default transport for its timeout values
-	transport := new(http.Transport)
-	*transport = *http.DefaultTransport.(*http.Transport)
-	transport.Dial = dialer
-	transport.Proxy = nil
+	transport := &http.Transport{
+		Dial: customDialer,
+		ResponseHeaderTimeout: PSIPHON_API_SERVER_TIMEOUT,
+	}
 	return &http.Client{Transport: transport}, nil
 }

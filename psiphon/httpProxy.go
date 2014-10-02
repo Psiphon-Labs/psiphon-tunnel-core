@@ -45,6 +45,7 @@ func NewHttpProxy(tunnel *Tunnel, failureSignal chan bool) (proxy *HttpProxy, er
 		return nil, err
 	}
 	tunnelledDialer := func(_, targetAddress string) (conn net.Conn, err error) {
+		// TODO: connect timeout?
 		return tunnel.sshClient.Dial("tcp", targetAddress)
 	}
 	transport := &http.Transport{
