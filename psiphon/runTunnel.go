@@ -194,6 +194,7 @@ func RunTunnelForever(config *Config) {
 		// TODO
 		//log.SetOutput(ioutil.Discard)
 	}
+	Notice(NOTICE_VERSION, VERSION)
 	// TODO: unlike existing Psiphon clients, this code
 	// always makes the fetch remote server list request
 	go func() {
