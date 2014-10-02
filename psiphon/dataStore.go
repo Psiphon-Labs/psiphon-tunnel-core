@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	sqlite3 "github.com/mattn/go-sqlite3"
-	"log"
 	"sync"
 	"time"
 )
@@ -57,11 +56,11 @@ func initDataStore() {
 			"sqlite3",
 			fmt.Sprintf("file:%s?cache=private&mode=rwc", DATA_STORE_FILENAME))
 		if err != nil {
-			log.Fatal("initDataStore failed to open database: %s", err)
+			Fatal("initDataStore failed to open database: %s", err)
 		}
 		_, err = db.Exec(schema)
 		if err != nil {
-			log.Fatal("initDataStore failed to initialize schema: %s", err)
+			Fatal("initDataStore failed to initialize schema: %s", err)
 		}
 		singleton.db = db
 	})
@@ -151,9 +150,9 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 		if err != nil {
 			return err
 		}
-		// TODO: log after commit
+		// TODO: post notice after commit
 		if !serverEntryExists {
-			log.Printf("stored server %s", serverEntry.IpAddress)
+			Notice(NOTICE_INFO, "stored server %s", serverEntry.IpAddress)
 		}
 		return nil
 	})
@@ -281,13 +280,13 @@ func HasServerEntries(region string) bool {
 	if region == "" {
 		err = singleton.db.QueryRow("select count(*) from serverEntry;").Scan(&count)
 		if err == nil {
-			log.Printf("servers: %d", count)
+			Notice(NOTICE_INFO, "servers: %d", count)
 		}
 	} else {
 		err = singleton.db.QueryRow(
 			"select count(*) from serverEntry where region = ?;", region).Scan(&count)
 		if err == nil {
-			log.Printf("servers for region %s: %d", region, count)
+			Notice(NOTICE_INFO, "servers for region %s: %d", region, count)
 		}
 	}
 	return err == nil && count > 0
