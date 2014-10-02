@@ -25,7 +25,6 @@ This project is currently at the proof-of-concept stage. Current production Psip
 
 ### TODO (future)
 
-* SSH keepalive
 * SSH compression
 * preemptive reconnect functionality
 * implement page view stats

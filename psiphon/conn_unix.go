@@ -42,12 +42,6 @@ func interruptibleDial(
 	if err != nil {
 		return nil, err
 	}
-	err = syscall.SetsockoptInt(
-		socketFd, syscall.IPPROTO_TCP, syscall.TCP_KEEPALIVE, TUNNEL_TCP_KEEP_ALIVE_PERIOD_SECONDS)
-	if err != nil {
-		syscall.Close(socketFd)
-		return nil, err
-	}
 	/*
 		// TODO: requires root, which we won't have on Android in VpnService mode
 		//       an alternative may be to use http://golang.org/pkg/syscall/#UnixRights to
