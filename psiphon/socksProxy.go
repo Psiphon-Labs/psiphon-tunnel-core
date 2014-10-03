@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"fmt"
 	socks "git.torproject.org/pluggable-transports/goptlib.git"
 	"io"
 	"net"
@@ -40,8 +41,8 @@ type SocksProxy struct {
 // NewSocksProxy initializes a new SOCKS server. It begins listening for
 // connections, starts a goroutine that runs an accept loop, and returns
 // leaving the accept loop running.
-func NewSocksProxy(tunnel *Tunnel, failureSignal chan bool) (proxy *SocksProxy, err error) {
-	listener, err := socks.ListenSocks("tcp", "127.0.0.1:0")
+func NewSocksProxy(listenPort int, tunnel *Tunnel, failureSignal chan bool) (proxy *SocksProxy, err error) {
+	listener, err := socks.ListenSocks("tcp", fmt.Sprintf("127.0.0.1:%d", listenPort))
 	if err != nil {
 		return nil, err
 	}

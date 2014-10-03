@@ -155,12 +155,12 @@ func runTunnel(config *Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to set closed signal: %s", err)
 	}
-	socksProxy, err := NewSocksProxy(tunnel, stopTunnelSignal)
+	socksProxy, err := NewSocksProxy(config.LocalSocksProxyPort, tunnel, stopTunnelSignal)
 	if err != nil {
 		return fmt.Errorf("error initializing local SOCKS proxy: %s", err)
 	}
 	defer socksProxy.Close()
-	httpProxy, err := NewHttpProxy(tunnel, stopTunnelSignal)
+	httpProxy, err := NewHttpProxy(config.LocalHttpProxyPort, tunnel, stopTunnelSignal)
 	if err != nil {
 		return fmt.Errorf("error initializing local HTTP proxy: %s", err)
 	}

@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -38,8 +39,8 @@ type HttpProxy struct {
 }
 
 // NewHttpProxy initializes and runs a new HTTP proxy server.
-func NewHttpProxy(tunnel *Tunnel, failureSignal chan bool) (proxy *HttpProxy, err error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+func NewHttpProxy(listenPort int, tunnel *Tunnel, failureSignal chan bool) (proxy *HttpProxy, err error) {
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", listenPort))
 	if err != nil {
 		return nil, err
 	}
