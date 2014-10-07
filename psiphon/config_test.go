@@ -19,6 +19,13 @@
 
 package psiphon
 
+/*
+NOTE: This test suite is probably overkill for such a simple file. It also
+probably shouldn't be doing error type checking, and especially not checking
+for particular JSON package errors. This is our first test file and mostly
+intended to be something to learn from and derive other test sets.
+*/
+
 import (
 	"encoding/json"
 	"errors"
