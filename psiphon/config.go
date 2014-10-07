@@ -51,6 +51,8 @@ func LoadConfig(filename string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// These fields are required; the rest are optional
 	if config.PropagationChannelId == "" {
 		return nil, errors.New("propagation channel ID is missing from the configuration file")
 	}
