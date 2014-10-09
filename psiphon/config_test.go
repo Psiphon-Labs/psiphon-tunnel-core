@@ -68,6 +68,22 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadPath() {
 	suite.NotNil(err, "error should be set")
 }
 
+// Tests good config file path
+func (suite *ConfigTestSuite) Test_LoadConfig_GoodPath() {
+	filename := filepath.Join(_TEST_DIR, "good.json")
+	writeConfigFile(filename, `{"PropagationChannelId": "xyz", "SponsorId": "xyz", "RemoteServerListUrl": "xyz", "RemoteServerListSignaturePublicKey": "xyz"}`)
+
+	// Use absolute path
+	abspath, _ := filepath.Abs(filename)
+	_, err := LoadConfig(abspath)
+	suite.Nil(err, "error should not be set")
+
+	// Use relative path
+	suite.False(filepath.IsAbs(filename))
+	_, err = LoadConfig(filename)
+	suite.Nil(err, "error should not be set")
+}
+
 // Tests non-JSON file contents
 func (suite *ConfigTestSuite) Test_LoadConfig_BadFileContents() {
 	filename := filepath.Join(_TEST_DIR, "junk.json")
