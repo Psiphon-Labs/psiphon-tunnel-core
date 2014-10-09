@@ -32,14 +32,14 @@ import (
 // the tunnel SSH client.
 type HttpProxy struct {
 	tunnel        *Tunnel
-	failureSignal chan bool
+	stoppedSignal chan struct{}
 	listener      net.Listener
 	waitGroup     *sync.WaitGroup
 	httpRelay     *http.Transport
 }
 
 // NewHttpProxy initializes and runs a new HTTP proxy server.
-func NewHttpProxy(listenPort int, tunnel *Tunnel, failureSignal chan bool) (proxy *HttpProxy, err error) {
+func NewHttpProxy(listenPort int, tunnel *Tunnel, stoppedSignal chan struct{}) (proxy *HttpProxy, err error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", listenPort))
 	if err != nil {
 		return nil, err
@@ -55,7 +55,7 @@ func NewHttpProxy(listenPort int, tunnel *Tunnel, failureSignal chan bool) (prox
 	}
 	proxy = &HttpProxy{
 		tunnel:        tunnel,
-		failureSignal: failureSignal,
+		stoppedSignal: stoppedSignal,
 		listener:      listener,
 		waitGroup:     new(sync.WaitGroup),
 		httpRelay:     transport,
@@ -184,7 +184,7 @@ func (proxy *HttpProxy) serveHttpRequests() {
 	err := httpServer.Serve(proxy.listener)
 	if err != nil {
 		select {
-		case proxy.failureSignal <- true:
+		case proxy.stoppedSignal <- *new(struct{}):
 		default:
 		}
 		Notice(NOTICE_ALERT, "%s", ContextError(err))

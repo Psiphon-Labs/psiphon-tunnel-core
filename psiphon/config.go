@@ -35,6 +35,7 @@ type Config struct {
 	ClientPlatform                     string
 	TunnelWholeDevice                  int
 	EgressRegion                       string
+	TunnelProtocol                     string
 	LocalSocksProxyPort                int
 	LocalHttpProxyPort                 int
 }
@@ -65,5 +66,12 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.RemoteServerListSignaturePublicKey == "" {
 		return nil, errors.New("remote server list signature public key is missing from the configuration file")
 	}
+
+	if config.TunnelProtocol != "" {
+		if !Contains(SupportedTunnelProtocols, config.TunnelProtocol) {
+			return nil, errors.New("invalid tunnel protocol")
+		}
+	}
+
 	return &config, nil
 }

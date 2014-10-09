@@ -17,9 +17,9 @@ This project is currently at the proof-of-concept stage. Current production Psip
 
 * prefilter entries by capability; don't log "server does not have sufficient capabilities"
 * log noise: "use of closed network connection"
+* log noise(?): 'Unsolicited response received on idle HTTP channel starting with "H"'
 * use ContextError in more places
 * build/test on Android and iOS
-* integrate meek-client
 * disconnect all local proxy clients when tunnel disconnected
 * add connection and idle timeouts to proxied connections where appropriate
 

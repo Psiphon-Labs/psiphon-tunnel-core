@@ -90,76 +90,75 @@ func (timeoutError) Temporary() bool { return true }
 
 // CustomTLSConfig contains parameters to determine the behavior
 // of CustomTLSDial.
-// httpProxyAddress - use the specified HTTP proxy (HTTP CONNECT) if not blank
-// sendServerName - use SNI (tlsdialer functionality)
-// verifyLegacyCertificate - special case self-signed server certificate
-//   case. Ignores IP SANs and basic constraints. No certificate chain. Just
-//   checks that the server presented the specified certificate.
-// tlsConfig - a tls.Config use in the non-verifyLegacyCertificate case.
 type CustomTLSConfig struct {
-	httpProxyAddress        string
-	sendServerName          bool
-	verifyLegacyCertificate *x509.Certificate
-	tlsConfig               *tls.Config
+	// Dial is the network connection dialer. TLS is layered on
+	// top of a new network connection created with dialer.
+	Dial Dialer
+	// Timeout is and optional timeout for combined network
+	// connection dial and TLS handshake.
+	Timeout time.Duration
+	// FrontingAddr overrides the "addr" input to Dial when specified
+	FrontingAddr string
+	// HttpProxyAddress specifies an HTTP proxy to be used
+	// (with HTTP CONNECT).
+	HttpProxyAddress string
+	// SendServerName specifies whether to use SNI
+	// (tlsdialer functionality)
+	SendServerName bool
+	// VerifyLegacyCertificate is a special case self-signed server
+	// certificate case. Ignores IP SANs and basic constraints. No
+	// certificate chain. Just checks that the server presented the
+	// specified certificate.
+	VerifyLegacyCertificate *x509.Certificate
+	// TlsConfig is a tls.Config to use in the
+	// non-verifyLegacyCertificate case.
+	TlsConfig *tls.Config
 }
 
-// tlsdialer:
-// Like crypto/tls.Dial, but with the ability to control whether or not to
-// send the ServerName extension in client handshakes through the sendServerName
-// flag.
-//
-// Note - if sendServerName is false, the VerifiedChains field on the
-// connection's ConnectionState will never get populated.
-func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, error) {
-	return CustomTLSDialWithDialer(new(net.Dialer), network, addr, config)
-}
-
-// tlsdialer:
-// Like crypto/tls.DialWithDialer, but with the ability to control whether or
-// not to send the ServerName extension in client handshakes through the
-// sendServerName flag.
-//
-// Note - if sendServerName is false, the VerifiedChains field on the
-// connection's ConnectionState will never get populated.
-func CustomTLSDialWithDialer(dialer *net.Dialer, network, addr string, config *CustomTLSConfig) (*tls.Conn, error) {
-	// We want the Timeout and Deadline values from dialer to cover the
-	// whole process: TCP connection and TLS handshake. This means that we
-	// also need to start our own timers now.
-	timeout := dialer.Timeout
-
-	if !dialer.Deadline.IsZero() {
-		deadlineTimeout := dialer.Deadline.Sub(time.Now())
-		if timeout == 0 || deadlineTimeout < timeout {
-			timeout = deadlineTimeout
-		}
+func NewCustomTLSDialer(config *CustomTLSConfig) Dialer {
+	return func(network, addr string) (net.Conn, error) {
+		return CustomTLSDial(network, addr, config)
 	}
+}
 
+// CustomTLSDialWithDialer is a customized replacement for tls.Dial.
+// Based on tlsdialer.DialWithDialer which is based on crypto/tls.DialWithDialer.
+//
+// tlsdialer comment:
+//   Note - if sendServerName is false, the VerifiedChains field on the
+//   connection's ConnectionState will never get populated.
+func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, error) {
 	var errChannel chan error
 
-	if timeout != 0 {
+	if config.Timeout != 0 {
 		errChannel = make(chan error, 2)
-		time.AfterFunc(timeout, func() {
+		time.AfterFunc(config.Timeout, func() {
 			errChannel <- timeoutError{}
 		})
 	}
 
 	dialAddr := addr
-	if config.httpProxyAddress != "" {
-		dialAddr = config.httpProxyAddress
+	if config.HttpProxyAddress != "" {
+		dialAddr = config.HttpProxyAddress
 	}
 
-	rawConn, err := dialer.Dial(network, dialAddr)
+	rawConn, err := config.Dial(network, dialAddr)
 	if err != nil {
 		return nil, err
 	}
 
-	colonPos := strings.LastIndex(addr, ":")
-	if colonPos == -1 {
-		colonPos = len(addr)
+	tlsAddr := addr
+	if config.FrontingAddr != "" {
+		tlsAddr = config.FrontingAddr
 	}
-	hostname := addr[:colonPos]
 
-	tlsConfig := config.tlsConfig
+	colonPos := strings.LastIndex(tlsAddr, ":")
+	if colonPos == -1 {
+		colonPos = len(tlsAddr)
+	}
+	hostname := tlsAddr[:colonPos]
+
+	tlsConfig := config.TlsConfig
 	if tlsConfig == nil {
 		tlsConfig = &tls.Config{}
 	}
@@ -172,11 +171,11 @@ func CustomTLSDialWithDialer(dialer *net.Dialer, network, addr string, config *C
 		serverName = hostname
 	}
 
-	// copy config so we can tweak it
+	// Copy config so we can tweak it
 	tlsConfigCopy := new(tls.Config)
 	*tlsConfigCopy = *tlsConfig
 
-	if config.sendServerName {
+	if config.SendServerName {
 		// Set the ServerName and rely on the usual logic in
 		// tls.Conn.Handshake() to do its verification
 		tlsConfigCopy.ServerName = serverName
@@ -190,10 +189,10 @@ func CustomTLSDialWithDialer(dialer *net.Dialer, network, addr string, config *C
 
 	establishConnection := func(rawConn net.Conn, conn *tls.Conn) error {
 		// TODO: use the proxy request/response code from net/http/transport.go
-		if config.httpProxyAddress != "" {
+		if config.HttpProxyAddress != "" {
 			connectRequest := fmt.Sprintf(
 				"CONNECT %s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n\r\n",
-				addr, hostname)
+				tlsAddr, hostname)
 			_, err := rawConn.Write([]byte(connectRequest))
 			if err != nil {
 				return err
@@ -211,7 +210,7 @@ func CustomTLSDialWithDialer(dialer *net.Dialer, network, addr string, config *C
 		return conn.Handshake()
 	}
 
-	if timeout == 0 {
+	if config.Timeout == 0 {
 		err = establishConnection(rawConn, conn)
 	} else {
 		go func() {
@@ -220,9 +219,9 @@ func CustomTLSDialWithDialer(dialer *net.Dialer, network, addr string, config *C
 		err = <-errChannel
 	}
 
-	if err == nil && config.verifyLegacyCertificate != nil {
-		err = verifyLegacyCertificate(conn, config.verifyLegacyCertificate)
-	} else if err == nil && !config.sendServerName && !tlsConfig.InsecureSkipVerify {
+	if err == nil && config.VerifyLegacyCertificate != nil {
+		err = verifyLegacyCertificate(conn, config.VerifyLegacyCertificate)
+	} else if err == nil && !config.SendServerName && !tlsConfig.InsecureSkipVerify {
 		// Manually verify certificates
 		err = verifyServerCerts(conn, serverName, tlsConfigCopy)
 	}

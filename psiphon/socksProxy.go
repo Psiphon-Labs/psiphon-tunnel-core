@@ -33,7 +33,7 @@ import (
 // forward.
 type SocksProxy struct {
 	tunnel        *Tunnel
-	failureSignal chan bool
+	stoppedSignal chan struct{}
 	listener      *socks.SocksListener
 	waitGroup     *sync.WaitGroup
 }
@@ -41,14 +41,14 @@ type SocksProxy struct {
 // NewSocksProxy initializes a new SOCKS server. It begins listening for
 // connections, starts a goroutine that runs an accept loop, and returns
 // leaving the accept loop running.
-func NewSocksProxy(listenPort int, tunnel *Tunnel, failureSignal chan bool) (proxy *SocksProxy, err error) {
+func NewSocksProxy(listenPort int, tunnel *Tunnel, stoppedSignal chan struct{}) (proxy *SocksProxy, err error) {
 	listener, err := socks.ListenSocks("tcp", fmt.Sprintf("127.0.0.1:%d", listenPort))
 	if err != nil {
 		return nil, err
 	}
 	proxy = &SocksProxy{
 		tunnel:        tunnel,
-		failureSignal: failureSignal,
+		stoppedSignal: stoppedSignal,
 		listener:      listener,
 		waitGroup:     new(sync.WaitGroup)}
 	proxy.waitGroup.Add(1)
@@ -109,7 +109,7 @@ func (proxy *SocksProxy) acceptSocksConnections() {
 			Notice(NOTICE_ALERT, "SOCKS proxy accept error: %s", err)
 			if e, ok := err.(net.Error); ok && !e.Temporary() {
 				select {
-				case proxy.failureSignal <- true:
+				case proxy.stoppedSignal <- *new(struct{}):
 				default:
 				}
 				// Fatal error, stop the proxy

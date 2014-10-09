@@ -37,21 +37,24 @@ import (
 // if there's not already an established tunnel. This function is to be used in a pool
 // of goroutines.
 func establishTunnelWorker(
-	waitGroup *sync.WaitGroup,
+	tunnelProtocol, sessionId string,
+	workerWaitGroup *sync.WaitGroup,
 	candidateServerEntries chan *ServerEntry,
-	broadcastStopWorkers chan bool,
+	broadcastStopWorkers chan struct{},
 	pendingConns *PendingConns,
 	establishedTunnels chan *Tunnel) {
 
-	defer waitGroup.Done()
+	defer workerWaitGroup.Done()
 	for serverEntry := range candidateServerEntries {
 		// Note: don't receive from candidateQueue and broadcastStopWorkers in the same
 		// select, since we want to prioritize receiving the stop signal
-		if IsSignalled(broadcastStopWorkers) {
+		select {
+		case <-broadcastStopWorkers:
 			return
+		default:
 		}
 		Notice(NOTICE_INFO, "connecting to %s in region %s", serverEntry.IpAddress, serverEntry.Region)
-		tunnel, err := EstablishTunnel(serverEntry, pendingConns)
+		tunnel, err := EstablishTunnel(tunnelProtocol, sessionId, serverEntry, pendingConns)
 		if err != nil {
 			// TODO: distingush case where conn is interrupted?
 			Notice(NOTICE_INFO, "failed to connect to %s: %s", serverEntry.IpAddress, err)
@@ -78,17 +81,18 @@ func discardTunnel(tunnel *Tunnel) {
 // establishTunnel coordinates a worker pool of goroutines to attempt several
 // tunnel connections in parallel, and this process is stopped once the first
 // tunnel is established.
-func establishTunnel(config *Config) (tunnel *Tunnel, err error) {
-	waitGroup := new(sync.WaitGroup)
+func establishTunnel(config *Config, sessionId string) (tunnel *Tunnel, err error) {
+	workerWaitGroup := new(sync.WaitGroup)
 	candidateServerEntries := make(chan *ServerEntry)
 	pendingConns := new(PendingConns)
 	establishedTunnels := make(chan *Tunnel, 1)
 	timeout := time.After(ESTABLISH_TUNNEL_TIMEOUT)
-	broadcastStopWorkers := make(chan bool)
+	broadcastStopWorkers := make(chan struct{})
 	for i := 0; i < CONNECTION_WORKER_POOL_SIZE; i++ {
-		waitGroup.Add(1)
+		workerWaitGroup.Add(1)
 		go establishTunnelWorker(
-			waitGroup, candidateServerEntries, broadcastStopWorkers,
+			config.TunnelProtocol, sessionId,
+			workerWaitGroup, candidateServerEntries, broadcastStopWorkers,
 			pendingConns, establishedTunnels)
 	}
 	// TODO: add a throttle after each full cycle?
@@ -120,7 +124,7 @@ func establishTunnel(config *Config) (tunnel *Tunnel, err error) {
 		// Interrupt any partial connections in progress, so that
 		// the worker will terminate immediately
 		pendingConns.Interrupt()
-		waitGroup.Wait()
+		workerWaitGroup.Wait()
 		// Drain any excess tunnels
 		close(establishedTunnels)
 		for tunnel := range establishedTunnels {
@@ -144,13 +148,19 @@ func establishTunnel(config *Config) (tunnel *Tunnel, err error) {
 // error when the tunnel unexpectedly disconnects.
 func runTunnel(config *Config) error {
 	Notice(NOTICE_INFO, "establishing tunnel")
-	tunnel, err := establishTunnel(config)
+	sessionId, err := MakeSessionId()
+	if err != nil {
+		return ContextError(err)
+	}
+	tunnel, err := establishTunnel(config, sessionId)
 	if err != nil {
 		return ContextError(err)
 	}
 	defer tunnel.Close()
-	// TODO: could start local proxies, etc., before synchronizing work group is establishTunnel
-	stopTunnelSignal := make(chan bool)
+	// Tunnel connection and local proxies will send signals to this channel
+	// when they close or stop. Signal senders should not block. Allows at
+	// least one stop signal to be sent before there is a receiver.
+	stopTunnelSignal := make(chan struct{}, 1)
 	err = tunnel.conn.SetClosedSignal(stopTunnelSignal)
 	if err != nil {
 		return fmt.Errorf("failed to set closed signal: %s", err)
@@ -167,7 +177,7 @@ func runTunnel(config *Config) error {
 	defer httpProxy.Close()
 	Notice(NOTICE_INFO, "starting session")
 	localHttpProxyAddress := httpProxy.listener.Addr().String()
-	_, err = NewSession(config, tunnel, localHttpProxyAddress)
+	_, err = NewSession(config, tunnel, localHttpProxyAddress, sessionId)
 	if err != nil {
 		return fmt.Errorf("error starting session: %s", err)
 	}
@@ -190,9 +200,6 @@ func RunTunnelForever(config *Config) {
 		}
 		defer logFile.Close()
 		log.SetOutput(logFile)
-	} else {
-		// TODO
-		//log.SetOutput(ioutil.Discard)
 	}
 	Notice(NOTICE_VERSION, VERSION)
 	// TODO: unlike existing Psiphon clients, this code

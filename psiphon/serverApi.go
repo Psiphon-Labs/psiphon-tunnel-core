@@ -45,11 +45,11 @@ type Session struct {
 // Psiphon server and returns a Session struct, initialized with the
 // session ID, for use with subsequent Psiphon server API requests (e.g.,
 // periodic status requests).
-func NewSession(config *Config, tunnel *Tunnel, localHttpProxyAddress string) (session *Session, err error) {
-	sessionId, err := MakeSessionId()
-	if err != nil {
-		return nil, ContextError(err)
-	}
+func NewSession(
+	config *Config,
+	tunnel *Tunnel,
+	localHttpProxyAddress, sessionId string) (session *Session, err error) {
+
 	psiphonHttpsClient, err := makePsiphonHttpsClient(tunnel, localHttpProxyAddress)
 	if err != nil {
 		return nil, ContextError(err)
@@ -261,18 +261,16 @@ func makePsiphonHttpsClient(tunnel *Tunnel, localHttpProxyAddress string) (https
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	customDialer := func(network, addr string) (net.Conn, error) {
-		customTLSConfig := &CustomTLSConfig{
-			sendServerName:          false,
-			verifyLegacyCertificate: certificate,
-			httpProxyAddress:        localHttpProxyAddress,
-		}
-		return CustomTLSDialWithDialer(
-			&net.Dialer{Timeout: PSIPHON_API_SERVER_TIMEOUT},
-			network, addr, customTLSConfig)
-	}
+	dialer := NewCustomTLSDialer(
+		&CustomTLSConfig{
+			Dial:                    new(net.Dialer).Dial,
+			Timeout:                 PSIPHON_API_SERVER_TIMEOUT,
+			HttpProxyAddress:        localHttpProxyAddress,
+			SendServerName:          false,
+			VerifyLegacyCertificate: certificate,
+		})
 	transport := &http.Transport{
-		Dial: customDialer,
+		Dial: dialer,
 		ResponseHeaderTimeout: PSIPHON_API_SERVER_TIMEOUT,
 	}
 	return &http.Client{Transport: transport}, nil
