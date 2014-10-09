@@ -20,11 +20,9 @@
 package main
 
 import (
-	"psiphon"
+	//"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"testing"
 )
 
 func TestPsiphon(t *testing.T) {
-	var config psiphon.Config
-	// TODO: put a test config here
-	psiphon.RunTunnelForever(&config)
 }

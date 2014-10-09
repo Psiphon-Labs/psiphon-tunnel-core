@@ -37,7 +37,7 @@ import (
 )
 
 const (
-	_TEST_DIR = "testfiles"
+	_TEST_DIR = "./testfiles"
 )
 
 type ConfigTestSuite struct {

@@ -22,7 +22,7 @@ package main
 import (
 	"flag"
 	"log"
-	"psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
 
 func main() {
