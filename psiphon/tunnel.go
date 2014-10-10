@@ -34,8 +34,8 @@ import (
 const (
 	TUNNEL_PROTOCOL_SSH            = "SSH"
 	TUNNEL_PROTOCOL_OBFUSCATED_SSH = "OSSH"
-	TUNNEL_PROTOCOL_UNFRONTED_MEEK = "UNFRONTED-MEEK"
-	TUNNEL_PROTOCOL_FRONTED_MEEK   = "FRONTED-MEEK"
+	TUNNEL_PROTOCOL_UNFRONTED_MEEK = "UNFRONTED-MEEK-OSSH"
+	TUNNEL_PROTOCOL_FRONTED_MEEK   = "FRONTED-MEEK-OSSH"
 )
 
 // This is a list of supported tunnel protocols, in default preference order
@@ -83,15 +83,19 @@ func EstablishTunnel(
 	pendingConns *PendingConns) (tunnel *Tunnel, err error) {
 	// Select the protocol
 	var selectedProtocol string
+	// TODO: properly handle protocols (e.g. FRONTED-MEEK-OSSH) vs. capabilities (e.g., {FRONTED-MEEK, OSSH})
+	// for now, the code is simply assuming that MEEK capabilities imply OSSH capability.
 	if requiredProtocol != "" {
-		if !Contains(serverEntry.Capabilities, requiredProtocol) {
+		requiredCapability := strings.TrimSuffix(requiredProtocol, "-OSSH")
+		if !Contains(serverEntry.Capabilities, requiredCapability) {
 			return nil, ContextError(fmt.Errorf("server does not have required capability"))
 		}
 		selectedProtocol = requiredProtocol
 	} else {
 		// Order of SupportedTunnelProtocols is default preference order
 		for _, protocol := range SupportedTunnelProtocols {
-			if Contains(serverEntry.Capabilities, protocol) {
+			requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
+			if Contains(serverEntry.Capabilities, requiredCapability) {
 				selectedProtocol = protocol
 				break
 			}
