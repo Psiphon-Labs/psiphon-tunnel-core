@@ -70,6 +70,7 @@ func NewHttpProxy(listenPort int, tunnel *Tunnel, stoppedSignal chan struct{}) (
 func (proxy *HttpProxy) Close() {
 	proxy.listener.Close()
 	proxy.waitGroup.Wait()
+	proxy.httpRelay.CloseIdleConnections()
 }
 
 // ServeHTTP receives HTTP requests and proxies them. CONNECT requests
