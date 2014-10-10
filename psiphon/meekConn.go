@@ -220,6 +220,7 @@ func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
 	if meek.closed() {
 		return 0, ContextError(errors.New("meek connection is closed"))
 	}
+	n = len(buffer)
 	// The data to send is split into MAX_SEND_PAYLOAD_LENGTH chunks as
 	// this is the most that will be sent per HTTP request.
 	for len(buffer) > 0 {
@@ -237,7 +238,7 @@ func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
 			return 0, ContextError(errors.New("meek connection has closed"))
 		}
 	}
-	return len(buffer), nil
+	return n, nil
 }
 
 // Stub implementation of net.Conn.LocalAddr
@@ -325,10 +326,13 @@ func (meek *MeekConn) readPayload(receivedPayload io.ReadCloser) (totalSize int6
 			return 0, ContextError(err)
 		}
 		totalSize += n
-		if n > 0 {
+		if readBuffer.Len() > 0 {
 			meek.availableReadBuffer <- readBuffer
 		} else {
 			meek.emptyReadBuffer <- readBuffer
+		}
+		if n == 0 {
+			break
 		}
 	}
 	return totalSize, nil
