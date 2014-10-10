@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -182,7 +181,8 @@ func EstablishTunnel(
 		HostKeyCallback: sshCertChecker.CheckHostKey,
 	}
 	// The folowing is adapted from ssh.Dial(), here using a custom conn
-	sshAddress := strings.Join([]string{serverEntry.IpAddress, ":", strconv.Itoa(serverEntry.SshPort)}, "")
+	// The sshAddress is passed through to host key verification callbacks; we don't use it.
+	sshAddress := ""
 	sshClientConn, sshChans, sshReqs, err := ssh.NewClientConn(sshConn, sshAddress, sshClientConfig)
 	if err != nil {
 		return nil, ContextError(err)
