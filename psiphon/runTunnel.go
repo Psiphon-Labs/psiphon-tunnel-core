@@ -87,7 +87,7 @@ func establishTunnel(config *Config, sessionId string) (tunnel *Tunnel, err erro
 	establishedTunnels := make(chan *Tunnel, 1)
 	timeout := time.After(ESTABLISH_TUNNEL_TIMEOUT)
 	broadcastStopWorkers := make(chan struct{})
-	for i := 0; i < CONNECTION_WORKER_POOL_SIZE; i++ {
+	for i := 0; i < config.ConnectionWorkerPoolSize; i++ {
 		workerWaitGroup.Add(1)
 		go establishTunnelWorker(
 			config.TunnelProtocol, sessionId,

@@ -38,6 +38,7 @@ type Config struct {
 	TunnelProtocol                     string
 	LocalSocksProxyPort                int
 	LocalHttpProxyPort                 int
+	ConnectionWorkerPoolSize           int
 }
 
 // LoadConfig reads, and parse, and validates a JSON format Psiphon config
@@ -71,6 +72,10 @@ func LoadConfig(filename string) (*Config, error) {
 		if !Contains(SupportedTunnelProtocols, config.TunnelProtocol) {
 			return nil, errors.New("invalid tunnel protocol")
 		}
+	}
+
+	if config.ConnectionWorkerPoolSize == 0 {
+		config.ConnectionWorkerPoolSize = CONNECTION_WORKER_POOL_SIZE
 	}
 
 	return &config, nil
