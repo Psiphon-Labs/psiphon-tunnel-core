@@ -84,12 +84,16 @@ func interruptibleDial(
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	ipAddr, err := net.ResolveIPAddr("ip", host)
+	// TODO: IPv6 support
+	var ip [4]byte
+	ipAddrs, err := net.LookupIP(host)
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	var ip [4]byte
-	copy(ip[:], ipAddr.IP)
+	if len(ipAddrs) < 1 {
+		return nil, ContextError(errors.New("no ip address"))
+	}
+	copy(ip[:], ipAddrs[0].To4())
 	// Connect the socket
 	sockAddr := syscall.SockaddrInet4{Addr: ip, Port: port}
 	if connectTimeout != 0 {
