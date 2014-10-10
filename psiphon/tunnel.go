@@ -100,6 +100,8 @@ func EstablishTunnel(
 			return nil, ContextError(fmt.Errorf("server does not have any supported capabilities"))
 		}
 	}
+	Notice(NOTICE_INFO, "connecting to %s in region %s using %s",
+		serverEntry.IpAddress, serverEntry.Region, selectedProtocol)
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
 	port := 0

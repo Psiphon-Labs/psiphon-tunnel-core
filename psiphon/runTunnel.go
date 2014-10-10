@@ -53,7 +53,6 @@ func establishTunnelWorker(
 			return
 		default:
 		}
-		Notice(NOTICE_INFO, "connecting to %s in region %s", serverEntry.IpAddress, serverEntry.Region)
 		tunnel, err := EstablishTunnel(tunnelProtocol, sessionId, serverEntry, pendingConns)
 		if err != nil {
 			// TODO: distingush case where conn is interrupted?
