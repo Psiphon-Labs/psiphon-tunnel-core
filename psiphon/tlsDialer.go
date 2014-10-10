@@ -143,6 +143,8 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, er
 	dialAddr := addr
 	if config.HttpProxyAddress != "" {
 		dialAddr = config.HttpProxyAddress
+	} else if config.FrontingAddr != "" {
+		dialAddr = config.FrontingAddr
 	}
 
 	rawConn, err := config.Dial(network, dialAddr)
@@ -150,16 +152,16 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, er
 		return nil, err
 	}
 
-	tlsAddr := addr
+	targetAddr := addr
 	if config.FrontingAddr != "" {
-		tlsAddr = config.FrontingAddr
+		targetAddr = config.FrontingAddr
 	}
 
-	colonPos := strings.LastIndex(tlsAddr, ":")
+	colonPos := strings.LastIndex(targetAddr, ":")
 	if colonPos == -1 {
-		colonPos = len(tlsAddr)
+		colonPos = len(targetAddr)
 	}
-	hostname := tlsAddr[:colonPos]
+	hostname := targetAddr[:colonPos]
 
 	tlsConfig := config.TlsConfig
 	if tlsConfig == nil {
@@ -195,7 +197,7 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, er
 		if config.HttpProxyAddress != "" {
 			connectRequest := fmt.Sprintf(
 				"CONNECT %s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n\r\n",
-				tlsAddr, hostname)
+				targetAddr, hostname)
 			_, err := rawConn.Write([]byte(connectRequest))
 			if err != nil {
 				return err
