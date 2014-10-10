@@ -77,9 +77,9 @@ func TrimError(err error) error {
 
 // ContextError prefixes an error message with the current function name
 func ContextError(err error) error {
-	pc, _, _, _ := runtime.Caller(1)
+	pc, _, line, _ := runtime.Caller(1)
 	funcName := runtime.FuncForPC(pc).Name()
-	return fmt.Errorf("%s: %s", funcName, err)
+	return fmt.Errorf("%s#%d: %s", funcName, line, err)
 }
 
 func MakeSessionId() (id string, err error) {
