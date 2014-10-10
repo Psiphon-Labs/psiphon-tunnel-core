@@ -128,8 +128,11 @@ func NewCustomTLSDialer(config *CustomTLSConfig) Dialer {
 //   Note - if sendServerName is false, the VerifiedChains field on the
 //   connection's ConnectionState will never get populated.
 func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, error) {
-	var errChannel chan error
 
+	// We want the Timeout and Deadline values from dialer to cover the
+	// whole process: TCP connection and TLS handshake. This means that we
+	// also need to start our own timers now.
+	var errChannel chan error
 	if config.Timeout != 0 {
 		errChannel = make(chan error, 2)
 		time.AfterFunc(config.Timeout, func() {
