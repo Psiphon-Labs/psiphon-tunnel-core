@@ -65,6 +65,16 @@ func MakeSecureRandomBytes(length int) ([]byte, error) {
 	return randomBytes, nil
 }
 
+// TrimError removes the middle of over-long error message strings
+func TrimError(err error) error {
+	const MAX_LEN = 100
+	message := fmt.Sprintf("%s", err)
+	if len(message) > MAX_LEN {
+		return errors.New(message[:MAX_LEN/2] + "..." + message[len(message)-MAX_LEN/2:])
+	}
+	return err
+}
+
 // ContextError prefixes an error message with the current function name
 func ContextError(err error) error {
 	pc, _, _, _ := runtime.Caller(1)

@@ -237,7 +237,8 @@ func (session *Session) buildRequestUrl(path string, extraParams ...*ExtraParam)
 func (session *Session) doGetRequest(requestUrl string) (responseBody []byte, err error) {
 	response, err := session.psiphonHttpsClient.Get(requestUrl)
 	if err != nil {
-		return nil, ContextError(err)
+		// Trim this error since it may include long URLs
+		return nil, ContextError(TrimError(err))
 	}
 	defer response.Body.Close()
 	body, err := ioutil.ReadAll(response.Body)
