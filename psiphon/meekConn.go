@@ -101,7 +101,7 @@ func NewMeekConn(
 			&CustomTLSConfig{
 				Dial:           directDialer,
 				Timeout:        connectTimeout,
-				FrontingAddr:   serverEntry.MeekFrontingDomain,
+				FrontingAddr:   fmt.Sprintf("%s:%d", serverEntry.MeekFrontingDomain, 443),
 				SendServerName: false,
 			})
 	} else {
