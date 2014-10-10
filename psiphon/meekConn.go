@@ -125,7 +125,7 @@ func NewMeekConn(
 		ResponseHeaderTimeout: TUNNEL_WRITE_TIMEOUT,
 	}
 	// The main loop of a MeekConn is run in the relay() goroutine.
-	// A MeekConn net.Conn concurrency semantics:
+	// A MeekConn implements net.Conn concurrency semantics:
 	// "Multiple goroutines may invoke methods on a Conn simultaneously."
 	//
 	// Write() calls and relay() are synchronized with the writeQueue channel. Write sends
