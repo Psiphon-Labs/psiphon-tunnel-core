@@ -401,7 +401,7 @@ func makeCookie(serverEntry *ServerEntry, sessionId string) (cookie *http.Cookie
 	// different. This is true even if the sets overlap. For example, a sender can use the same nonce for two
 	// different messages if the messages are sent to two different public keys."
 	var publicKey [32]byte
-	publicKeyLen, err := base64.StdEncoding.Decode([]byte(serverEntry.MeekCookieEncryptionPublicKey), publicKey[:])
+	publicKeyLen, err := base64.StdEncoding.Decode(publicKey[:], []byte(serverEntry.MeekCookieEncryptionPublicKey))
 	if err != nil {
 		return nil, ContextError(err)
 	}
