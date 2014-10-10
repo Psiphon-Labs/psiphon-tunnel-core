@@ -400,15 +400,13 @@ func makeCookie(serverEntry *ServerEntry, sessionId string) (cookie *http.Cookie
 	// "There is no harm in having the same nonce for different messages if the {sender, receiver} sets are
 	// different. This is true even if the sets overlap. For example, a sender can use the same nonce for two
 	// different messages if the messages are sent to two different public keys."
+	var nonce [24]byte
 	var publicKey [32]byte
-	publicKeyLen, err := base64.StdEncoding.Decode(publicKey[:], []byte(serverEntry.MeekCookieEncryptionPublicKey))
+	decodedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.MeekCookieEncryptionPublicKey)
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	if publicKeyLen != len(publicKey) {
-		return nil, ContextError(errors.New("invalid NaCl public key"))
-	}
-	var nonce [24]byte
+	copy(publicKey[:], decodedPublicKey)
 	ephemeralPublicKey, ephemeralPrivateKey, err := box.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, ContextError(err)
