@@ -40,7 +40,6 @@ This project is currently at the proof-of-concept stage. Current production Psip
 * support upgrades
   * download entire client
   * download core component only
-* support protocol preference
 * try multiple protocols for each server (currently only tries one protocol per server)
 * consider ability to multiplex across multiple tunnel sessions
 * support a config pushed by the network

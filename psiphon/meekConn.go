@@ -440,8 +440,8 @@ func makeCookie(serverEntry *ServerEntry, sessionId string) (cookie *http.Cookie
 	obfuscator.ObfuscateClientToServer(obfuscatedCookie[seedLen:])
 	// Format the HTTP cookie
 	// The format is <random letter 'A'-'Z'>=<base64 data>, which is intended to match common cookie formats.
-	A := int([]byte("A")[0])
-	Z := int([]byte("Z")[0])
+	A := int('A')
+	Z := int('Z')
 	letterIndex, err := MakeSecureRandomInt(Z - A)
 	if err != nil {
 		return nil, ContextError(err)
