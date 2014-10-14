@@ -15,14 +15,7 @@ This project is currently at the proof-of-concept stage. Current production Psip
 
 ### TODO (proof-of-concept)
 
-* pendingConns lifecycle issue: MeekConn's dialer uses the establishTunnel pendingConns, which means there's
-  a chance that the asynchronous pendingConns.Interrupt() by establishTunnel will close a meek HTTPS conn. Also,
-  MeekConn is holding a reference to this pendingConns long after establishTunnel finishes.
-  fix: MeekConn should keep its own PendingConns for underlying HTTPS connections; MeekConn should go into the
-  establish pendingConns and when it closes, it should in turn close its own pendingConns.
-  ...And the same for serverApi.
-* ResponseHeaderTimeout is not sufficient to detect dead tunneled web requests
-  fix: use DirectDialer with all timeouts set, use dedicated pendingConns (see above)
+* PendingConns: is interrupting connection establishment worth the extra code complexity?
 * prefilter entries by capability; don't log "server does not have sufficient capabilities"
 * log noise: "use of closed network connection"
 * log noise(?): 'Unsolicited response received on idle HTTP channel starting with "H"'
@@ -36,8 +29,11 @@ This project is currently at the proof-of-concept stage. Current production Psip
 * SOCKS5 support
 * SSH compression
 * preemptive reconnect functionality
+  * unfronted meek almost makes this obsolete, since meek sessions survive underlying
+     HTTP transport socket disconnects. The client could prefer unfronted meek protocol
+     when handshake returns a preemptive_reconnect_lifetime_milliseconds.
 * implement page view stats
-* implement local traffic stats (e.g., to display bytes sent/received
+* implement local traffic stats (e.g., to display bytes sent/received)
 * control interface (w/ event messages)?
 * VpnService compatibility
 * upstream proxy support

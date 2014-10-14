@@ -66,6 +66,7 @@ const (
 type MeekConn struct {
 	url                 *url.URL
 	cookie              *http.Cookie
+	pendingConns        *PendingConns
 	transport           *http.Transport
 	mutex               sync.Mutex
 	isClosed            bool
@@ -85,12 +86,16 @@ type MeekConn struct {
 // useFronting assumes caller has already checked server entry capabilities.
 func NewMeekConn(
 	serverEntry *ServerEntry, sessionId string, useFronting bool,
-	connectTimeout, readTimeout, writeTimeout time.Duration,
-	pendingConns *PendingConns) (meek *MeekConn, err error) {
+	connectTimeout, readTimeout, writeTimeout time.Duration) (meek *MeekConn, err error) {
 	// Configure transport
+	// Note: MeekConn has its own PendingConns to manage the underlying HTTP transport connections,
+	// which may be interrupted on MeekConn.Close(). This code previously used the establishTunnel
+	// pendingConns here, but that was a lifecycle mismatch: we don't want to abort HTTP transport
+	// connections while MeekConn is still in use
+	pendingConns := new(PendingConns)
+	directDialer := NewDirectDialer(connectTimeout, readTimeout, writeTimeout, pendingConns)
 	var host string
 	var dialer Dialer
-	directDialer := NewDirectDialer(connectTimeout, readTimeout, writeTimeout, pendingConns)
 	if useFronting {
 		// In this case, host is not what is dialed but is what ends up in the HTTP Host header
 		host = serverEntry.MeekFrontingHost
@@ -142,6 +147,7 @@ func NewMeekConn(
 	meek = &MeekConn{
 		url:                 url,
 		cookie:              cookie,
+		pendingConns:        pendingConns,
 		transport:           transport,
 		broadcastClosed:     make(chan struct{}),
 		relayWaitGroup:      new(sync.WaitGroup),
@@ -175,9 +181,12 @@ func (meek *MeekConn) Close() (err error) {
 	meek.mutex.Lock()
 	defer meek.mutex.Unlock()
 	if !meek.isClosed {
-		// TODO: meek.transport.CancelRequest() for current request?
 		close(meek.broadcastClosed)
 		meek.relayWaitGroup.Wait()
+		meek.pendingConns.Interrupt()
+		// TODO: meek.transport.CancelRequest() for current in-flight request?
+		// (pendingConns will abort establishing connections, but not established
+		// persistent connections)
 		meek.transport.CloseIdleConnections()
 		meek.isClosed = true
 		select {

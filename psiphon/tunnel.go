@@ -131,11 +131,13 @@ func EstablishTunnel(
 	if useMeek {
 		conn, err = NewMeekConn(
 			serverEntry, sessionId, useFronting,
-			TUNNEL_CONNECT_TIMEOUT, TUNNEL_READ_TIMEOUT, TUNNEL_WRITE_TIMEOUT,
-			pendingConns)
+			TUNNEL_CONNECT_TIMEOUT, TUNNEL_READ_TIMEOUT, TUNNEL_WRITE_TIMEOUT)
 		if err != nil {
 			return nil, ContextError(err)
 		}
+		// TODO: MeekConn doesn't go into pendingConns since there's no direct connection to
+		// interrupt; underlying HTTP connections may be candidates for interruption, but only
+		// after relay starts polling...
 	} else {
 		conn, err = DirectDial(
 			fmt.Sprintf("%s:%d", serverEntry.IpAddress, port),
