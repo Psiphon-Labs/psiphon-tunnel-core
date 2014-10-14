@@ -22,7 +22,6 @@
 package psiphon
 
 import (
-	"fmt"
 	"net"
 	"time"
 )
@@ -48,4 +47,5 @@ func interruptibleDial(
 
 func interruptibleClose(interruptible interruptibleConn) error {
 	Fatal("interruptibleClose not supported on Windows")
+	return nil
 }
