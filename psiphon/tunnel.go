@@ -26,15 +26,24 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	PROTOCOL_SSH            = "SSH"
-	PROTOCOL_OBFUSCATED_SSH = "OSSH"
+	TUNNEL_PROTOCOL_SSH            = "SSH"
+	TUNNEL_PROTOCOL_OBFUSCATED_SSH = "OSSH"
+	TUNNEL_PROTOCOL_UNFRONTED_MEEK = "UNFRONTED-MEEK-OSSH"
+	TUNNEL_PROTOCOL_FRONTED_MEEK   = "FRONTED-MEEK-OSSH"
 )
+
+// This is a list of supported tunnel protocols, in default preference order
+var SupportedTunnelProtocols = []string{
+	TUNNEL_PROTOCOL_FRONTED_MEEK,
+	TUNNEL_PROTOCOL_UNFRONTED_MEEK,
+	TUNNEL_PROTOCOL_OBFUSCATED_SSH,
+	TUNNEL_PROTOCOL_SSH,
+}
 
 // Tunnel is a connection to a Psiphon server. An established
 // tunnel includes a network connection to the specified server
@@ -42,7 +51,7 @@ const (
 type Tunnel struct {
 	serverEntry      *ServerEntry
 	protocol         string
-	conn             *Conn
+	conn             Conn
 	sshClient        *ssh.Client
 	sshKeepAliveQuit chan struct{}
 }
@@ -64,50 +73,104 @@ func (tunnel *Tunnel) Close() {
 // Depending on the server's capabilities, the connection may use
 // plain SSH over TCP, obfuscated SSH over TCP, or obfuscated SSH over
 // HTTP (meek protocol).
-func EstablishTunnel(serverEntry *ServerEntry, pendingConns *PendingConns) (tunnel *Tunnel, err error) {
-	// First connect the transport
-	// TODO: meek
-	sshCapable := Contains(serverEntry.Capabilities, PROTOCOL_SSH)
-	obfuscatedSshCapable := Contains(serverEntry.Capabilities, PROTOCOL_OBFUSCATED_SSH)
-	if !sshCapable && !obfuscatedSshCapable {
-		return nil, fmt.Errorf("server does not have sufficient capabilities")
+// When requiredProtocol is not blank, that protocol is used. Otherwise,
+// the first protocol in SupportedTunnelProtocols that's also in the
+// server capabilities is used.
+func EstablishTunnel(
+	requiredProtocol, sessionId string,
+	serverEntry *ServerEntry,
+	pendingConns *PendingConns) (tunnel *Tunnel, err error) {
+	// Select the protocol
+	var selectedProtocol string
+	// TODO: properly handle protocols (e.g. FRONTED-MEEK-OSSH) vs. capabilities (e.g., {FRONTED-MEEK, OSSH})
+	// for now, the code is simply assuming that MEEK capabilities imply OSSH capability.
+	if requiredProtocol != "" {
+		requiredCapability := strings.TrimSuffix(requiredProtocol, "-OSSH")
+		if !Contains(serverEntry.Capabilities, requiredCapability) {
+			return nil, ContextError(fmt.Errorf("server does not have required capability"))
+		}
+		selectedProtocol = requiredProtocol
+	} else {
+		// Order of SupportedTunnelProtocols is default preference order
+		for _, protocol := range SupportedTunnelProtocols {
+			requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
+			if Contains(serverEntry.Capabilities, requiredCapability) {
+				selectedProtocol = protocol
+				break
+			}
+		}
+		if selectedProtocol == "" {
+			return nil, ContextError(fmt.Errorf("server does not have any supported capabilities"))
+		}
 	}
-	selectedProtocol := PROTOCOL_SSH
-	port := serverEntry.SshPort
-	if obfuscatedSshCapable {
-		selectedProtocol = PROTOCOL_OBFUSCATED_SSH
+	Notice(NOTICE_INFO, "connecting to %s in region %s using %s",
+		serverEntry.IpAddress, serverEntry.Region, selectedProtocol)
+	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
+	// So depending on which protocol is used, multiple layers are initialized.
+	port := 0
+	useMeek := false
+	useFronting := false
+	useObfuscatedSsh := false
+	switch selectedProtocol {
+	case TUNNEL_PROTOCOL_FRONTED_MEEK:
+		useMeek = true
+		useFronting = true
+		useObfuscatedSsh = true
+	case TUNNEL_PROTOCOL_UNFRONTED_MEEK:
+		useMeek = true
+		useObfuscatedSsh = true
 		port = serverEntry.SshObfuscatedPort
+	case TUNNEL_PROTOCOL_OBFUSCATED_SSH:
+		useObfuscatedSsh = true
+		port = serverEntry.SshObfuscatedPort
+	case TUNNEL_PROTOCOL_SSH:
+		port = serverEntry.SshPort
 	}
-	conn, err := Dial(
-		serverEntry.IpAddress, port,
-		TUNNEL_CONNECT_TIMEOUT, TUNNEL_READ_TIMEOUT, TUNNEL_WRITE_TIMEOUT,
-		pendingConns)
-	if err != nil {
-		return nil, err
+	// Create the base transport: meek or direct connection
+	var conn Conn
+	if useMeek {
+		conn, err = NewMeekConn(
+			serverEntry, sessionId, useFronting,
+			TUNNEL_CONNECT_TIMEOUT, TUNNEL_READ_TIMEOUT, TUNNEL_WRITE_TIMEOUT)
+		if err != nil {
+			return nil, ContextError(err)
+		}
+		// TODO: MeekConn doesn't go into pendingConns since there's no direct connection to
+		// interrupt; underlying HTTP connections may be candidates for interruption, but only
+		// after relay starts polling...
+	} else {
+		conn, err = DirectDial(
+			fmt.Sprintf("%s:%d", serverEntry.IpAddress, port),
+			TUNNEL_CONNECT_TIMEOUT, TUNNEL_READ_TIMEOUT, TUNNEL_WRITE_TIMEOUT,
+			pendingConns)
+		if err != nil {
+			return nil, ContextError(err)
+		}
 	}
 	defer func() {
-		pendingConns.Remove(conn)
+		// Cleanup on error
 		if err != nil {
 			conn.Close()
 		}
 	}()
-	var netConn net.Conn
-	netConn = conn
-	if obfuscatedSshCapable {
-		netConn, err = NewObfuscatedSshConn(conn, serverEntry.SshObfuscatedKey)
+	// Add obfuscated SSH layer
+	var sshConn net.Conn
+	sshConn = conn
+	if useObfuscatedSsh {
+		sshConn, err = NewObfuscatedSshConn(conn, serverEntry.SshObfuscatedKey)
 		if err != nil {
-			return nil, err
+			return nil, ContextError(err)
 		}
 	}
-	// Now establish the SSH session
+	// Now establish the SSH session over the sshConn transport
 	expectedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.SshHostKey)
 	if err != nil {
-		return nil, err
+		return nil, ContextError(err)
 	}
 	sshCertChecker := &ssh.CertChecker{
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
 			if !bytes.Equal(expectedPublicKey, publicKey.Marshal()) {
-				return errors.New("unexpected host public key")
+				return ContextError(errors.New("unexpected host public key"))
 			}
 			return nil
 		},
@@ -120,12 +183,14 @@ func EstablishTunnel(serverEntry *ServerEntry, pendingConns *PendingConns) (tunn
 		HostKeyCallback: sshCertChecker.CheckHostKey,
 	}
 	// The folowing is adapted from ssh.Dial(), here using a custom conn
-	sshAddress := strings.Join([]string{serverEntry.IpAddress, ":", strconv.Itoa(serverEntry.SshPort)}, "")
-	sshConn, sshChans, sshReqs, err := ssh.NewClientConn(netConn, sshAddress, sshClientConfig)
+	// The sshAddress is passed through to host key verification callbacks; we don't use it.
+	sshAddress := ""
+	sshClientConn, sshChans, sshReqs, err := ssh.NewClientConn(sshConn, sshAddress, sshClientConfig)
 	if err != nil {
-		return nil, err
+		return nil, ContextError(err)
 	}
-	sshClient := ssh.NewClient(sshConn, sshChans, sshReqs)
+	sshClient := ssh.NewClient(sshClientConn, sshChans, sshReqs)
+	// Run a goroutine to periodically execute SSH keepalive
 	sshKeepAliveQuit := make(chan struct{})
 	sshKeepAliveTicker := time.NewTicker(TUNNEL_SSH_KEEP_ALIVE_PERIOD)
 	go func() {
@@ -145,5 +210,11 @@ func EstablishTunnel(serverEntry *ServerEntry, pendingConns *PendingConns) (tunn
 			}
 		}
 	}()
-	return &Tunnel{serverEntry, selectedProtocol, conn, sshClient, sshKeepAliveQuit}, nil
+	return &Tunnel{
+			serverEntry:      serverEntry,
+			protocol:         selectedProtocol,
+			conn:             conn,
+			sshClient:        sshClient,
+			sshKeepAliveQuit: sshKeepAliveQuit},
+		nil
 }

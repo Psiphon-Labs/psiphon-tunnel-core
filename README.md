@@ -15,11 +15,12 @@ This project is currently at the proof-of-concept stage. Current production Psip
 
 ### TODO (proof-of-concept)
 
+* PendingConns: is interrupting connection establishment worth the extra code complexity?
 * prefilter entries by capability; don't log "server does not have sufficient capabilities"
 * log noise: "use of closed network connection"
+* log noise(?): 'Unsolicited response received on idle HTTP channel starting with "H"'
 * use ContextError in more places
 * build/test on Android and iOS
-* integrate meek-client
 * disconnect all local proxy clients when tunnel disconnected
 * add connection and idle timeouts to proxied connections where appropriate
 
@@ -28,8 +29,11 @@ This project is currently at the proof-of-concept stage. Current production Psip
 * SOCKS5 support
 * SSH compression
 * preemptive reconnect functionality
+  * unfronted meek almost makes this obsolete, since meek sessions survive underlying
+     HTTP transport socket disconnects. The client could prefer unfronted meek protocol
+     when handshake returns a preemptive_reconnect_lifetime_milliseconds.
 * implement page view stats
-* implement local traffic stats (e.g., to display bytes sent/received
+* implement local traffic stats (e.g., to display bytes sent/received)
 * control interface (w/ event messages)?
 * VpnService compatibility
 * upstream proxy support

@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"strconv"
 )
@@ -38,6 +37,7 @@ type Session struct {
 	sessionId          string
 	config             *Config
 	tunnel             *Tunnel
+	pendingConns       *PendingConns
 	psiphonHttpsClient *http.Client
 }
 
@@ -45,12 +45,13 @@ type Session struct {
 // Psiphon server and returns a Session struct, initialized with the
 // session ID, for use with subsequent Psiphon server API requests (e.g.,
 // periodic status requests).
-func NewSession(config *Config, tunnel *Tunnel, localHttpProxyAddress string) (session *Session, err error) {
-	sessionId, err := MakeSessionId()
-	if err != nil {
-		return nil, ContextError(err)
-	}
-	psiphonHttpsClient, err := makePsiphonHttpsClient(tunnel, localHttpProxyAddress)
+func NewSession(
+	config *Config,
+	tunnel *Tunnel,
+	localHttpProxyAddress, sessionId string) (session *Session, err error) {
+
+	pendingConns := new(PendingConns)
+	psiphonHttpsClient, err := makePsiphonHttpsClient(tunnel, pendingConns, localHttpProxyAddress)
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -58,6 +59,7 @@ func NewSession(config *Config, tunnel *Tunnel, localHttpProxyAddress string) (s
 		sessionId:          sessionId,
 		config:             config,
 		tunnel:             tunnel,
+		pendingConns:       pendingConns,
 		psiphonHttpsClient: psiphonHttpsClient,
 	}
 	// Sending two seperate requests is a legacy from when the handshake was
@@ -237,7 +239,8 @@ func (session *Session) buildRequestUrl(path string, extraParams ...*ExtraParam)
 func (session *Session) doGetRequest(requestUrl string) (responseBody []byte, err error) {
 	response, err := session.psiphonHttpsClient.Get(requestUrl)
 	if err != nil {
-		return nil, ContextError(err)
+		// Trim this error since it may include long URLs
+		return nil, ContextError(TrimError(err))
 	}
 	defer response.Body.Close()
 	body, err := ioutil.ReadAll(response.Body)
@@ -256,23 +259,34 @@ func (session *Session) doGetRequest(requestUrl string) (responseBody []byte, er
 // As the custom dialer makes an explicit TLS connection, URLs submitted to the returned
 // http.Client should use the "http://" scheme. Otherwise http.Transport will try to do another TLS
 // handshake inside the explicit TLS session.
-func makePsiphonHttpsClient(tunnel *Tunnel, localHttpProxyAddress string) (httpsClient *http.Client, err error) {
+func makePsiphonHttpsClient(
+	tunnel *Tunnel,
+	pendingConns *PendingConns,
+	localHttpProxyAddress string) (httpsClient *http.Client, err error) {
+
 	certificate, err := DecodeCertificate(tunnel.serverEntry.WebServerCertificate)
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	customDialer := func(network, addr string) (net.Conn, error) {
-		customTLSConfig := &CustomTLSConfig{
-			sendServerName:          false,
-			verifyLegacyCertificate: certificate,
-			httpProxyAddress:        localHttpProxyAddress,
-		}
-		return CustomTLSDialWithDialer(
-			&net.Dialer{Timeout: PSIPHON_API_SERVER_TIMEOUT},
-			network, addr, customTLSConfig)
-	}
+	// Note: This use of readTimeout will tear down persistent HTTP connections, which is not the
+	// intended purpose. The readTimeout is to abort NewSession when the Psiphon server responds to
+	// handshake/connected requests but fails to deliver the response body (e.g., ResponseHeaderTimeout
+	// is not sufficient to timeout this case).
+	directDialer := NewDirectDialer(
+		PSIPHON_API_SERVER_TIMEOUT,
+		PSIPHON_API_SERVER_TIMEOUT,
+		PSIPHON_API_SERVER_TIMEOUT,
+		pendingConns)
+	dialer := NewCustomTLSDialer(
+		&CustomTLSConfig{
+			Dial:                    directDialer,
+			Timeout:                 PSIPHON_API_SERVER_TIMEOUT,
+			HttpProxyAddress:        localHttpProxyAddress,
+			SendServerName:          false,
+			VerifyLegacyCertificate: certificate,
+		})
 	transport := &http.Transport{
-		Dial: customDialer,
+		Dial: dialer,
 		ResponseHeaderTimeout: PSIPHON_API_SERVER_TIMEOUT,
 	}
 	return &http.Client{Transport: transport}, nil

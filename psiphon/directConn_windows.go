@@ -22,7 +22,6 @@
 package psiphon
 
 import (
-	"fmt"
 	"net"
 	"time"
 )
@@ -31,15 +30,15 @@ type interruptibleConn struct {
 }
 
 func interruptibleDial(
-	ipAddress string, port int,
+	addr string,
 	connectTimeout, readTimeout, writeTimeout time.Duration,
-	pendingConns *PendingConns) (conn *Conn, err error) {
+	pendingConns *PendingConns) (conn *DirectConn, err error) {
 	// Note: using net.Dial(); interruptible connections not supported on Windows
-	netConn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ipAddress, port), connectTimeout)
+	netConn, err := net.DialTimeout("tcp", addr, connectTimeout)
 	if err != nil {
-		return nil, err
+		return nil, ContextError(err)
 	}
-	conn = &Conn{
+	conn = &DirectConn{
 		Conn:         netConn,
 		readTimeout:  readTimeout,
 		writeTimeout: writeTimeout}
@@ -47,5 +46,6 @@ func interruptibleDial(
 }
 
 func interruptibleClose(interruptible interruptibleConn) error {
-	panic("interruptibleClose not supported on Windows")
+	Fatal("interruptibleClose not supported on Windows")
+	return nil
 }

@@ -46,19 +46,24 @@ type Obfuscator struct {
 	serverToClientCipher *rc4.Cipher
 }
 
+type ObfuscatorParams struct {
+	Keyword    string
+	MaxPadding int
+}
+
 // NewObfuscator creates a new Obfuscator, initializes it with
 // a seed message, derives client and server keys, and creates
 // RC4 stream ciphers to obfuscate data.
-func NewObfuscator(keyword string) (obfuscator *Obfuscator, err error) {
+func NewObfuscator(params *ObfuscatorParams) (obfuscator *Obfuscator, err error) {
 	seed, err := MakeSecureRandomBytes(OBFUSCATE_SEED_LENGTH)
 	if err != nil {
 		return nil, err
 	}
-	clientToServerKey, err := deriveKey(seed, []byte(keyword), []byte(OBFUSCATE_CLIENT_TO_SERVER_IV))
+	clientToServerKey, err := deriveKey(seed, []byte(params.Keyword), []byte(OBFUSCATE_CLIENT_TO_SERVER_IV))
 	if err != nil {
 		return nil, err
 	}
-	serverToClientKey, err := deriveKey(seed, []byte(keyword), []byte(OBFUSCATE_SERVER_TO_CLIENT_IV))
+	serverToClientKey, err := deriveKey(seed, []byte(params.Keyword), []byte(OBFUSCATE_SERVER_TO_CLIENT_IV))
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +75,11 @@ func NewObfuscator(keyword string) (obfuscator *Obfuscator, err error) {
 	if err != nil {
 		return nil, err
 	}
-	seedMessage, err := makeSeedMessage(seed, clientToServerCipher)
+	maxPadding := OBFUSCATE_MAX_PADDING
+	if params.MaxPadding > 0 {
+		maxPadding = params.MaxPadding
+	}
+	seedMessage, err := makeSeedMessage(maxPadding, seed, clientToServerCipher)
 	if err != nil {
 		return nil, err
 	}
@@ -115,8 +124,8 @@ func deriveKey(seed, keyword, iv []byte) ([]byte, error) {
 	return digest[0:OBFUSCATE_KEY_LENGTH], nil
 }
 
-func makeSeedMessage(seed []byte, clientToServerCipher *rc4.Cipher) ([]byte, error) {
-	paddingLength, err := MakeSecureRandomInt(OBFUSCATE_MAX_PADDING)
+func makeSeedMessage(maxPadding int, seed []byte, clientToServerCipher *rc4.Cipher) ([]byte, error) {
+	paddingLength, err := MakeSecureRandomInt(maxPadding)
 	if err != nil {
 		return nil, err
 	}

@@ -30,18 +30,6 @@ import (
 	"runtime"
 )
 
-// IsSignalled returns true when the signal channel yields
-// a value. To be used with the idiom in which a shared
-// channel is closed to broadcast a signal.
-func IsSignalled(signal chan bool) bool {
-	select {
-	case <-signal:
-		return true
-	default:
-	}
-	return false
-}
-
 // Contains is a helper function that returns true
 // if the target string is in the list.
 func Contains(list []string, target string) bool {
@@ -77,11 +65,21 @@ func MakeSecureRandomBytes(length int) ([]byte, error) {
 	return randomBytes, nil
 }
 
+// TrimError removes the middle of over-long error message strings
+func TrimError(err error) error {
+	const MAX_LEN = 100
+	message := fmt.Sprintf("%s", err)
+	if len(message) > MAX_LEN {
+		return errors.New(message[:MAX_LEN/2] + "..." + message[len(message)-MAX_LEN/2:])
+	}
+	return err
+}
+
 // ContextError prefixes an error message with the current function name
 func ContextError(err error) error {
-	pc, _, _, _ := runtime.Caller(1)
+	pc, _, line, _ := runtime.Caller(1)
 	funcName := runtime.FuncForPC(pc).Name()
-	return fmt.Errorf("%s: %s", funcName, err)
+	return fmt.Errorf("%s#%d: %s", funcName, line, err)
 }
 
 func MakeSessionId() (id string, err error) {

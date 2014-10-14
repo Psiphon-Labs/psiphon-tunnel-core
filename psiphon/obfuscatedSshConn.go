@@ -55,6 +55,11 @@ const (
 // transformations, and performs minimal parsing of the SSH protocol to
 // determine when to stop obfuscation (after the first SSH_MSG_NEWKEYS is
 // sent by the client and received from the server).
+//
+// WARNING: doesn't fully conform to net.Conn concurrency semantics: there's
+// no synchronization of access to the read/writeBuffers, so concurrent
+// calls to one of Read or Write will result in undefined behavior.
+//
 type ObfuscatedSshConn struct {
 	net.Conn
 	obfuscator  *Obfuscator
@@ -77,7 +82,7 @@ const (
 // conn must be used for SSH client traffic and must have transferred
 // no traffic.
 func NewObfuscatedSshConn(conn net.Conn, obfuscationKeyword string) (*ObfuscatedSshConn, error) {
-	obfuscator, err := NewObfuscator(obfuscationKeyword)
+	obfuscator, err := NewObfuscator(&ObfuscatorParams{Keyword: obfuscationKeyword})
 	if err != nil {
 		return nil, err
 	}
