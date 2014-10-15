@@ -21,7 +21,7 @@ package psiphon
 
 import (
 	"fmt"
-        socks "github.com/Psiphon-Inc/goptlib"
+	socks "github.com/Psiphon-Inc/goptlib"
 	"io"
 	"net"
 	"sync"
