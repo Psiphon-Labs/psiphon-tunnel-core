@@ -191,8 +191,8 @@ func (meek *MeekConn) Close() (err error) {
 	defer meek.mutex.Unlock()
 	if !meek.isClosed {
 		close(meek.broadcastClosed)
-		meek.relayWaitGroup.Wait()
 		meek.pendingConns.Interrupt()
+		meek.relayWaitGroup.Wait()
 		// TODO: meek.transport.CancelRequest() for current in-flight request?
 		// (pendingConns will abort establishing connections, but not established
 		// persistent connections)
@@ -313,6 +313,8 @@ func (meek *MeekConn) replaceSendBuffer(sendBuffer *bytes.Buffer) {
 // There's a geometric increase, up to a maximum, in the polling interval when
 // no data is exchanged. Only one HTTP request is in flight at a time.
 func (meek *MeekConn) relay() {
+	// Note: meek.Close() calls here in relay() are made asynchronously
+	// (using goroutines) since Close() will wait on this WaitGroup.
 	defer meek.relayWaitGroup.Done()
 	interval := MIN_POLL_INTERVAL
 	var sendPayload = make([]byte, MAX_SEND_PAYLOAD_LENGTH)
@@ -334,20 +336,20 @@ func (meek *MeekConn) relay() {
 			meek.replaceSendBuffer(sendBuffer)
 			if err != nil {
 				Notice(NOTICE_ALERT, "%s", ContextError(err))
-				meek.Close()
+				go meek.Close()
 				return
 			}
 		}
 		receivedPayload, err := meek.roundTrip(sendPayload[:sendPayloadSize])
 		if err != nil {
 			Notice(NOTICE_ALERT, "%s", ContextError(err))
-			meek.Close()
+			go meek.Close()
 			return
 		}
 		receivedPayloadSize, err := meek.readPayload(receivedPayload)
 		if err != nil {
 			Notice(NOTICE_ALERT, "%s", ContextError(err))
-			meek.Close()
+			go meek.Close()
 			return
 		}
 		if receivedPayloadSize > 0 || sendPayloadSize > 0 {
