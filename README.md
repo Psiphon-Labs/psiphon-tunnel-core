@@ -32,6 +32,7 @@ This project is currently at the proof-of-concept stage. Current production Psip
   * unfronted meek almost makes this obsolete, since meek sessions survive underlying
      HTTP transport socket disconnects. The client could prefer unfronted meek protocol
      when handshake returns a preemptive_reconnect_lifetime_milliseconds.
+* split tunnel support
 * implement page view stats
 * implement local traffic stats (e.g., to display bytes sent/received)
 * control interface (w/ event messages)?
