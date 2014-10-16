@@ -46,7 +46,7 @@ const (
 	MEEK_PROTOCOL_VERSION      = 1
 	MEEK_COOKIE_MAX_PADDING    = 32
 	MAX_SEND_PAYLOAD_LENGTH    = 65536
-	FULL_RECEIVE_BUFFER_LENGTH = 2097152
+	FULL_RECEIVE_BUFFER_LENGTH = 4194304
 	READ_PAYLOAD_CHUNK_LENGTH  = 65536
 	MIN_POLL_INTERVAL          = 100 * time.Millisecond
 	MAX_POLL_INTERVAL          = 5 * time.Second
@@ -154,6 +154,7 @@ func NewMeekConn(
 		cookie:               cookie,
 		pendingConns:         pendingConns,
 		transport:            transport,
+		isClosed:             false,
 		broadcastClosed:      make(chan struct{}),
 		relayWaitGroup:       new(sync.WaitGroup),
 		emptyReceiveBuffer:   make(chan *bytes.Buffer, 1),
