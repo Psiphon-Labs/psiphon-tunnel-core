@@ -41,7 +41,7 @@ type interruptibleConn struct {
 func interruptibleDial(
 	addr string,
 	connectTimeout, readTimeout, writeTimeout time.Duration,
-	pendingConns *PendingConns) (conn *DirectConn, err error) {
+	pendingConns *Conns) (conn *DirectConn, err error) {
 	// Create a socket and then, before connecting, add a DirectConn with
 	// the unconnected socket to pendingConns. This allows pendingConns to
 	// abort connections in progress.

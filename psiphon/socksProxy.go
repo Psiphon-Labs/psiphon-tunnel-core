@@ -36,6 +36,7 @@ type SocksProxy struct {
 	stoppedSignal chan struct{}
 	listener      *socks.SocksListener
 	waitGroup     *sync.WaitGroup
+	openConns     *Conns
 }
 
 // NewSocksProxy initializes a new SOCKS server. It begins listening for
@@ -50,7 +51,9 @@ func NewSocksProxy(listenPort int, tunnel *Tunnel, stoppedSignal chan struct{}) 
 		tunnel:        tunnel,
 		stoppedSignal: stoppedSignal,
 		listener:      listener,
-		waitGroup:     new(sync.WaitGroup)}
+		waitGroup:     new(sync.WaitGroup),
+		openConns:     new(Conns),
+	}
 	proxy.waitGroup.Add(1)
 	go proxy.acceptSocksConnections()
 	Notice(NOTICE_SOCKS_PROXY, "local SOCKS proxy running at address %s", proxy.listener.Addr().String())
@@ -62,10 +65,13 @@ func NewSocksProxy(listenPort int, tunnel *Tunnel, stoppedSignal chan struct{}) 
 func (proxy *SocksProxy) Close() {
 	proxy.listener.Close()
 	proxy.waitGroup.Wait()
+	proxy.openConns.CloseAll()
 }
 
-func socksConnectionHandler(tunnel *Tunnel, localSocksConn *socks.SocksConn) (err error) {
+func (proxy *SocksProxy) socksConnectionHandler(tunnel *Tunnel, localSocksConn *socks.SocksConn) (err error) {
 	defer localSocksConn.Close()
+	defer proxy.openConns.Remove(localSocksConn)
+	proxy.openConns.Add(localSocksConn)
 	remoteSshForward, err := tunnel.sshClient.Dial("tcp", localSocksConn.Req.Target)
 	if err != nil {
 		return ContextError(err)
@@ -119,7 +125,7 @@ func (proxy *SocksProxy) acceptSocksConnections() {
 			continue
 		}
 		go func() {
-			err := socksConnectionHandler(proxy.tunnel, socksConnection)
+			err := proxy.socksConnectionHandler(proxy.tunnel, socksConnection)
 			if err != nil {
 				Notice(NOTICE_ALERT, "%s", ContextError(err))
 			}

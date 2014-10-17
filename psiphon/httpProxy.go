@@ -36,7 +36,7 @@ type HttpProxy struct {
 	listener      net.Listener
 	waitGroup     *sync.WaitGroup
 	httpRelay     *http.Transport
-	openConns     map[net.Conn]bool
+	openConns     *Conns
 }
 
 // NewHttpProxy initializes and runs a new HTTP proxy server.
@@ -60,7 +60,7 @@ func NewHttpProxy(listenPort int, tunnel *Tunnel, stoppedSignal chan struct{}) (
 		listener:      listener,
 		waitGroup:     new(sync.WaitGroup),
 		httpRelay:     transport,
-		openConns:     make(map[net.Conn]bool),
+		openConns:     new(Conns),
 	}
 	proxy.waitGroup.Add(1)
 	go proxy.serveHttpRequests()
@@ -73,7 +73,7 @@ func (proxy *HttpProxy) Close() {
 	proxy.listener.Close()
 	proxy.waitGroup.Wait()
 	// Close local->proxy persistent connections
-	proxy.closeOpenConns()
+	proxy.openConns.CloseAll()
 	// Close idle proxy->origin persistent connections
 	// TODO: also close active connections
 	proxy.httpRelay.CloseIdleConnections()
@@ -181,8 +181,8 @@ var hopHeaders = []string{
 
 func (proxy *HttpProxy) httpConnectHandler(tunnel *Tunnel, localHttpConn net.Conn, target string) (err error) {
 	defer localHttpConn.Close()
-	defer proxy.removeOpenConn(localHttpConn)
-	proxy.addOpenConn(localHttpConn)
+	defer proxy.openConns.Remove(localHttpConn)
+	proxy.openConns.Add(localHttpConn)
 	remoteSshForward, err := tunnel.sshClient.Dial("tcp", target)
 	if err != nil {
 		return ContextError(err)
@@ -205,27 +205,12 @@ func (proxy *HttpProxy) httpConnectHandler(tunnel *Tunnel, localHttpConn net.Con
 func (proxy *HttpProxy) httpConnStateCallback(conn net.Conn, connState http.ConnState) {
 	switch connState {
 	case http.StateNew:
-		proxy.addOpenConn(conn)
+		proxy.openConns.Add(conn)
 	case http.StateActive, http.StateIdle:
 		// No action
 	case http.StateHijacked, http.StateClosed:
-		proxy.removeOpenConn(conn)
+		proxy.openConns.Remove(conn)
 	}
-}
-
-func (proxy *HttpProxy) addOpenConn(conn net.Conn) {
-	proxy.openConns[conn] = true
-}
-
-func (proxy *HttpProxy) removeOpenConn(conn net.Conn) {
-	delete(proxy.openConns, conn)
-}
-
-func (proxy *HttpProxy) closeOpenConns() {
-	for conn, _ := range proxy.openConns {
-		conn.Close()
-	}
-	proxy.openConns = make(map[net.Conn]bool)
 }
 
 func (proxy *HttpProxy) serveHttpRequests() {

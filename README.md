@@ -21,12 +21,10 @@ This project is currently at the proof-of-concept stage. Current production Psip
 * log noise(?): 'Unsolicited response received on idle HTTP channel starting with "H"'
 * use ContextError in more places
 * build/test on Android and iOS
-* disconnect all local proxy clients when tunnel disconnected
-* add connection and idle timeouts to proxied connections where appropriate
+* reconnection busy loop when no network available (ex. close laptop)
 
 ### TODO (future)
 
-* SOCKS5 support
 * SSH compression
 * preemptive reconnect functionality
   * unfronted meek almost makes this obsolete, since meek sessions survive underlying

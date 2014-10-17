@@ -79,7 +79,7 @@ func (tunnel *Tunnel) Close() {
 func EstablishTunnel(
 	requiredProtocol, sessionId string,
 	serverEntry *ServerEntry,
-	pendingConns *PendingConns) (tunnel *Tunnel, err error) {
+	pendingConns *Conns) (tunnel *Tunnel, err error) {
 	// Select the protocol
 	var selectedProtocol string
 	// TODO: properly handle protocols (e.g. FRONTED-MEEK-OSSH) vs. capabilities (e.g., {FRONTED-MEEK, OSSH})

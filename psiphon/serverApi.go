@@ -37,7 +37,7 @@ type Session struct {
 	sessionId          string
 	config             *Config
 	tunnel             *Tunnel
-	pendingConns       *PendingConns
+	pendingConns       *Conns
 	psiphonHttpsClient *http.Client
 }
 
@@ -50,7 +50,7 @@ func NewSession(
 	tunnel *Tunnel,
 	localHttpProxyAddress, sessionId string) (session *Session, err error) {
 
-	pendingConns := new(PendingConns)
+	pendingConns := new(Conns)
 	psiphonHttpsClient, err := makePsiphonHttpsClient(tunnel, pendingConns, localHttpProxyAddress)
 	if err != nil {
 		return nil, ContextError(err)
@@ -260,8 +260,7 @@ func (session *Session) doGetRequest(requestUrl string) (responseBody []byte, er
 // http.Client should use the "http://" scheme. Otherwise http.Transport will try to do another TLS
 // handshake inside the explicit TLS session.
 func makePsiphonHttpsClient(
-	tunnel *Tunnel,
-	pendingConns *PendingConns,
+	tunnel *Tunnel, pendingConns *Conns,
 	localHttpProxyAddress string) (httpsClient *http.Client, err error) {
 
 	certificate, err := DecodeCertificate(tunnel.serverEntry.WebServerCertificate)

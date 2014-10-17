@@ -45,7 +45,7 @@ type DirectConn struct {
 // NewDirectDialer creates a DirectDialer.
 func NewDirectDialer(
 	connectTimeout, readTimeout, writeTimeout time.Duration,
-	pendingConns *PendingConns) Dialer {
+	pendingConns *Conns) Dialer {
 
 	return func(network, addr string) (net.Conn, error) {
 		if network != "tcp" {
@@ -59,13 +59,13 @@ func NewDirectDialer(
 }
 
 // DirectDial creates a new, connected DirectConn. The connection may be
-// interrupted using pendingConns.interrupt(): on platforms that support this,
+// interrupted using pendingConns.CloseAll(): on platforms that support this,
 // the new DirectConn is added to pendingConns before the socket connect begins
 // and removed from pendingConns once the connect succeeds or fails.
 func DirectDial(
 	addr string,
 	connectTimeout, readTimeout, writeTimeout time.Duration,
-	pendingConns *PendingConns) (conn *DirectConn, err error) {
+	pendingConns *Conns) (conn *DirectConn, err error) {
 
 	conn, err = interruptibleDial(addr, connectTimeout, readTimeout, writeTimeout, pendingConns)
 	if err != nil {

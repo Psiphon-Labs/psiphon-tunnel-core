@@ -67,7 +67,7 @@ const (
 type MeekConn struct {
 	url                  *url.URL
 	cookie               *http.Cookie
-	pendingConns         *PendingConns
+	pendingConns         *Conns
 	transport            *http.Transport
 	mutex                sync.Mutex
 	isClosed             bool
@@ -96,7 +96,7 @@ func NewMeekConn(
 	// which may be interrupted on MeekConn.Close(). This code previously used the establishTunnel
 	// pendingConns here, but that was a lifecycle mismatch: we don't want to abort HTTP transport
 	// connections while MeekConn is still in use
-	pendingConns := new(PendingConns)
+	pendingConns := new(Conns)
 	directDialer := NewDirectDialer(connectTimeout, readTimeout, writeTimeout, pendingConns)
 	var host string
 	var dialer Dialer
@@ -192,11 +192,11 @@ func (meek *MeekConn) Close() (err error) {
 	defer meek.mutex.Unlock()
 	if !meek.isClosed {
 		close(meek.broadcastClosed)
-		meek.pendingConns.Interrupt()
+		meek.pendingConns.CloseAll()
 		meek.relayWaitGroup.Wait()
 		// TODO: meek.transport.CancelRequest() for current in-flight request?
-		// (pendingConns will abort establishing connections, but not established
-		// persistent connections)
+		// (currently pendingConns will abort establishing connections, but not
+		// established persistent connections)
 		meek.transport.CloseIdleConnections()
 		meek.isClosed = true
 		select {

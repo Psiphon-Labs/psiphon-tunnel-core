@@ -42,34 +42,34 @@ type Conn interface {
 	SetClosedSignal(closedSignal chan struct{}) (err error)
 }
 
-// PendingConns is a synchronized list of Conns that is used to coordinate
-// interrupting a set of goroutines establishing connections.
-type PendingConns struct {
+// Conns is a synchronized list of Conns that is used to coordinate
+// interrupting a set of goroutines establishing connections, or
+// close a set of open connections, etc.
+type Conns struct {
 	mutex sync.Mutex
-	conns []Conn
+	conns map[net.Conn]bool
 }
 
-func (pendingConns *PendingConns) Add(conn Conn) {
-	pendingConns.mutex.Lock()
-	defer pendingConns.mutex.Unlock()
-	pendingConns.conns = append(pendingConns.conns, conn)
-}
-
-func (pendingConns *PendingConns) Remove(conn Conn) {
-	pendingConns.mutex.Lock()
-	defer pendingConns.mutex.Unlock()
-	for index, pendingConn := range pendingConns.conns {
-		if conn == pendingConn {
-			pendingConns.conns = append(pendingConns.conns[:index], pendingConns.conns[index+1:]...)
-			break
-		}
+func (conns *Conns) Add(conn net.Conn) {
+	conns.mutex.Lock()
+	defer conns.mutex.Unlock()
+	if conns.conns == nil {
+		conns.conns = make(map[net.Conn]bool)
 	}
+	conns.conns[conn] = true
 }
 
-func (pendingConns *PendingConns) Interrupt() {
-	pendingConns.mutex.Lock()
-	defer pendingConns.mutex.Unlock()
-	for _, conn := range pendingConns.conns {
+func (conns *Conns) Remove(conn net.Conn) {
+	conns.mutex.Lock()
+	defer conns.mutex.Unlock()
+	delete(conns.conns, conn)
+}
+
+func (conns *Conns) CloseAll() {
+	conns.mutex.Lock()
+	defer conns.mutex.Unlock()
+	for conn, _ := range conns.conns {
 		conn.Close()
 	}
+	conns.conns = make(map[net.Conn]bool)
 }

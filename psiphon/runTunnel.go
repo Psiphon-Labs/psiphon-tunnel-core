@@ -41,7 +41,7 @@ func establishTunnelWorker(
 	workerWaitGroup *sync.WaitGroup,
 	candidateServerEntries chan *ServerEntry,
 	broadcastStopWorkers chan struct{},
-	pendingConns *PendingConns,
+	pendingConns *Conns,
 	establishedTunnels chan *Tunnel) {
 
 	defer workerWaitGroup.Done()
@@ -83,7 +83,7 @@ func discardTunnel(tunnel *Tunnel) {
 func establishTunnel(config *Config, sessionId string) (tunnel *Tunnel, err error) {
 	workerWaitGroup := new(sync.WaitGroup)
 	candidateServerEntries := make(chan *ServerEntry)
-	pendingConns := new(PendingConns)
+	pendingConns := new(Conns)
 	establishedTunnels := make(chan *Tunnel, 1)
 	timeout := time.After(ESTABLISH_TUNNEL_TIMEOUT)
 	broadcastStopWorkers := make(chan struct{})
@@ -122,7 +122,7 @@ func establishTunnel(config *Config, sessionId string) (tunnel *Tunnel, err erro
 	go func() {
 		// Interrupt any partial connections in progress, so that
 		// the worker will terminate immediately
-		pendingConns.Interrupt()
+		pendingConns.CloseAll()
 		workerWaitGroup.Wait()
 		// Drain any excess tunnels
 		close(establishedTunnels)
