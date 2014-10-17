@@ -32,7 +32,7 @@ type interruptibleConn struct {
 func interruptibleDial(
 	addr string,
 	connectTimeout, readTimeout, writeTimeout time.Duration,
-	pendingConns *PendingConns) (conn *DirectConn, err error) {
+	pendingConns *Conns) (conn *DirectConn, err error) {
 	// Note: using net.Dial(); interruptible connections not supported on Windows
 	netConn, err := net.DialTimeout("tcp", addr, connectTimeout)
 	if err != nil {
