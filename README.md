@@ -37,7 +37,7 @@ Setup
     }
     ```
 
-* Replace each `<placeholder>` with a value from your Psiphon network. The Psiphon server-side stack is open source and can be found in our  [Psiphon 3 repository](repository). If you would like to use the Psiphon Inc. network, contact [developer-support@psiphon.ca](developer-support@psiphon.ca).
+* Replace each `<placeholder>` with a value from your Psiphon network. The Psiphon server-side stack is open source and can be found in our  [Psiphon 3 repository](https://bitbucket.org/psiphon/psiphon-circumvention-system). If you would like to use the Psiphon Inc. network, contact <developer-support@psiphon.ca>.
 * The project builds and runs on Android. At this time, Android support is in the developer branch of Go, so build Go from source and use the Android NDK to build android/arm target support. See the sample AndroidApp README [COMING SOON] for more information about building the Go binary, along with a sample Android app that uses it.
 
 Roadmap
