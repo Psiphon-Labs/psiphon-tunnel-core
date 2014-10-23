@@ -21,7 +21,8 @@ Setup
 * Note that the `psiphon` package is imported using the absolute path `github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon`; without further local configuration, `go` will use this version of the code and not the local copy in the repository.
 * This project builds and runs on recent versions of Windows, Linux, and Mac OS X.
 * Run `./psiphon-tunnel-core --config psiphon.config` where the config file looks like this:
-    ```json
+
+    ```
     {
         "PropagationChannelId" : "<placeholder>",
         "SponsorId" : "<placeholder>",
@@ -35,6 +36,7 @@ Setup
         "ConnectionWorkerPoolSize" : 10
     }
     ```
+
 * Replace each `<placeholder>` with a value from your Psiphon network. The Psiphon server-side stack is open source and can be found in our  [Psiphon 3 repository](repository). If you would like to use the Psiphon Inc. network, contact [developer-support@psiphon.ca](developer-support@psiphon.ca).
 * The project builds and runs on Android. At this time, Android support is in the developer branch of Go, so build Go from source and use the Android NDK to build android/arm target support. See the sample AndroidApp README [COMING SOON] for more information about building the Go binary, along with a sample Android app that uses it.
 
