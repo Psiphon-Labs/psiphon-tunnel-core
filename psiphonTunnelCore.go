@@ -21,8 +21,8 @@ package main
 
 import (
 	"flag"
+	psiphon "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"log"
-	"psiphon"
 )
 
 func main() {
