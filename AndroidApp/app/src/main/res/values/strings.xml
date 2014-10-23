@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">Psibot</string>
+    <string name="foreground_service_notification_content_title">Psibot is running</string>
+    <string name="action_email_log">Email Log</string>
+
+</resources>
