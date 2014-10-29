@@ -127,11 +127,15 @@ func EstablishTunnel(
 		port = serverEntry.SshPort
 	}
 	// Create the base transport: meek or direct connection
+	dialConfig := &DialConfig{
+		ConnectTimeout: TUNNEL_CONNECT_TIMEOUT,
+		ReadTimeout:    TUNNEL_READ_TIMEOUT,
+		WriteTimeout:   TUNNEL_WRITE_TIMEOUT,
+		PendingConns:   pendingConns,
+	}
 	var conn Conn
 	if useMeek {
-		conn, err = NewMeekConn(
-			serverEntry, sessionId, useFronting,
-			TUNNEL_CONNECT_TIMEOUT, TUNNEL_READ_TIMEOUT, TUNNEL_WRITE_TIMEOUT)
+		conn, err = DialMeek(serverEntry, sessionId, useFronting, dialConfig)
 		if err != nil {
 			return nil, ContextError(err)
 		}
@@ -139,10 +143,7 @@ func EstablishTunnel(
 		// interrupt; underlying HTTP connections may be candidates for interruption, but only
 		// after relay starts polling...
 	} else {
-		conn, err = DirectDial(
-			fmt.Sprintf("%s:%d", serverEntry.IpAddress, port),
-			TUNNEL_CONNECT_TIMEOUT, TUNNEL_READ_TIMEOUT, TUNNEL_WRITE_TIMEOUT,
-			pendingConns)
+		conn, err = DialTCP(fmt.Sprintf("%s:%d", serverEntry.IpAddress, port), dialConfig)
 		if err != nil {
 			return nil, ContextError(err)
 		}

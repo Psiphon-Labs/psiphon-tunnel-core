@@ -39,6 +39,8 @@ type Config struct {
 	LocalSocksProxyPort                int
 	LocalHttpProxyPort                 int
 	ConnectionWorkerPoolSize           int
+	BindToDeviceServiceAddress         string
+	BindToDeviceDnsServer              string
 }
 
 // LoadConfig reads, and parse, and validates a JSON format Psiphon config

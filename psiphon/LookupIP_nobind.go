@@ -1,4 +1,4 @@
-// +build windows
+// +build !android !linux
 
 /*
  * Copyright (c) 2014, Psiphon Inc.
@@ -23,29 +23,13 @@ package psiphon
 
 import (
 	"net"
-	"time"
 )
 
-type interruptibleConn struct {
-}
-
-func interruptibleDial(
-	addr string,
-	connectTimeout, readTimeout, writeTimeout time.Duration,
-	pendingConns *Conns) (conn *DirectConn, err error) {
-	// Note: using net.Dial(); interruptible connections not supported on Windows
-	netConn, err := net.DialTimeout("tcp", addr, connectTimeout)
-	if err != nil {
-		return nil, ContextError(err)
+// LookupIP resolves a hostname. When BindToDevice is not required, it
+// simply uses net.LookuIP.
+func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
+	if config.BindToDeviceServiceAddr != "" {
+		Fatal("LookupIP with bind not supported on this platform")
 	}
-	conn = &DirectConn{
-		Conn:         netConn,
-		readTimeout:  readTimeout,
-		writeTimeout: writeTimeout}
-	return conn, nil
-}
-
-func interruptibleClose(interruptible interruptibleConn) error {
-	Fatal("interruptibleClose not supported on Windows")
-	return nil
+	return net.LookupIP(host)
 }

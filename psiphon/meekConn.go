@@ -82,22 +82,25 @@ type MeekConn struct {
 	fullSendBuffer       chan *bytes.Buffer
 }
 
-// NewMeekConn returns an initialized meek connection. A meek connection is
+// DialMeek returns an initialized meek connection. A meek connection is
 // an HTTP session which does not depend on an underlying socket connection (although
 // persistent HTTP connections are used for performance). This function does not
 // wait for the connection to be "established" before returning. A goroutine
 // is spawned which will eventually start HTTP polling.
 // useFronting assumes caller has already checked server entry capabilities.
-func NewMeekConn(
-	serverEntry *ServerEntry, sessionId string, useFronting bool,
-	connectTimeout, readTimeout, writeTimeout time.Duration) (meek *MeekConn, err error) {
+func DialMeek(
+	serverEntry *ServerEntry, sessionId string,
+	useFronting bool, config *DialConfig) (meek *MeekConn, err error) {
 	// Configure transport
 	// Note: MeekConn has its own PendingConns to manage the underlying HTTP transport connections,
 	// which may be interrupted on MeekConn.Close(). This code previously used the establishTunnel
 	// pendingConns here, but that was a lifecycle mismatch: we don't want to abort HTTP transport
 	// connections while MeekConn is still in use
 	pendingConns := new(Conns)
-	directDialer := NewDirectDialer(connectTimeout, readTimeout, writeTimeout, pendingConns)
+	// Use a copy of DialConfig with the meek pendingConns
+	configCopy := new(DialConfig)
+	*configCopy = *config
+	configCopy.PendingConns = pendingConns
 	var host string
 	var dialer Dialer
 	if useFronting {
@@ -108,15 +111,15 @@ func NewMeekConn(
 		//  - disables SNI -- SNI breaks fronting when used with CDNs that support SNI on the server side.
 		dialer = NewCustomTLSDialer(
 			&CustomTLSConfig{
-				Dial:           directDialer,
-				Timeout:        connectTimeout,
+				Dial:           NewTCPDialer(configCopy),
+				Timeout:        configCopy.ConnectTimeout,
 				FrontingAddr:   fmt.Sprintf("%s:%d", serverEntry.MeekFrontingDomain, 443),
 				SendServerName: false,
 			})
 	} else {
 		// In this case, host is both what is dialed and what ends up in the HTTP Host header
 		host = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
-		dialer = directDialer
+		dialer = NewTCPDialer(configCopy)
 	}
 	// Scheme is always "http". Otherwise http.Transport will try to do another TLS
 	// handshake inside the explicit TLS session (in fronting mode).
@@ -480,7 +483,7 @@ func makeCookie(serverEntry *ServerEntry, sessionId string) (cookie *http.Cookie
 	copy(encryptedCookie[32:], box)
 	// Obfuscate the encrypted data
 	obfuscator, err := NewObfuscator(
-		&ObfuscatorParams{Keyword: serverEntry.MeekObfuscatedKey, MaxPadding: MEEK_COOKIE_MAX_PADDING})
+		&ObfuscatorConfig{Keyword: serverEntry.MeekObfuscatedKey, MaxPadding: MEEK_COOKIE_MAX_PADDING})
 	if err != nil {
 		return nil, ContextError(err)
 	}

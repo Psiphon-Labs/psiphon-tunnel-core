@@ -26,48 +26,36 @@ import (
 	"time"
 )
 
-// DirectConn is a customized network connection that:
+// TCPConn is a customized TCP connection that:
 // - can be interrupted while connecting;
 // - implements idle read/write timeouts;
 // - can be bound to a specific system device (for Android VpnService
 //   routing compatibility, for example).
 // - implements the psiphon.Conn interface
-type DirectConn struct {
+type TCPConn struct {
 	net.Conn
 	mutex         sync.Mutex
 	isClosed      bool
 	closedSignal  chan struct{}
-	interruptible interruptibleConn
+	interruptible interruptibleTCPSocket
 	readTimeout   time.Duration
 	writeTimeout  time.Duration
 }
 
-// NewDirectDialer creates a DirectDialer.
-func NewDirectDialer(
-	connectTimeout, readTimeout, writeTimeout time.Duration,
-	pendingConns *Conns) Dialer {
-
+// NewTCPDialer creates a TCPDialer.
+func NewTCPDialer(config *DialConfig) Dialer {
 	return func(network, addr string) (net.Conn, error) {
 		if network != "tcp" {
-			Fatal("unsupported network type in NewDirectDialer")
+			Fatal("unsupported network type in NewTCPDialer")
 		}
-		return DirectDial(
-			addr,
-			connectTimeout, readTimeout, writeTimeout,
-			pendingConns)
+		return DialTCP(addr, config)
 	}
 }
 
-// DirectDial creates a new, connected DirectConn. The connection may be
-// interrupted using pendingConns.CloseAll(): on platforms that support this,
-// the new DirectConn is added to pendingConns before the socket connect begins
-// and removed from pendingConns once the connect succeeds or fails.
-func DirectDial(
-	addr string,
-	connectTimeout, readTimeout, writeTimeout time.Duration,
-	pendingConns *Conns) (conn *DirectConn, err error) {
+// TCPConn creates a new, connected TCPConn.
+func DialTCP(addr string, config *DialConfig) (conn *TCPConn, err error) {
 
-	conn, err = interruptibleDial(addr, connectTimeout, readTimeout, writeTimeout, pendingConns)
+	conn, err = interruptibleTCPDial(addr, config)
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -75,7 +63,7 @@ func DirectDial(
 }
 
 // SetClosedSignal implements psiphon.Conn.SetClosedSignal
-func (conn *DirectConn) SetClosedSignal(closedSignal chan struct{}) (err error) {
+func (conn *TCPConn) SetClosedSignal(closedSignal chan struct{}) (err error) {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 	if conn.isClosed {
@@ -85,14 +73,14 @@ func (conn *DirectConn) SetClosedSignal(closedSignal chan struct{}) (err error) 
 	return nil
 }
 
-// Close terminates a connected (net.Conn) or connecting (socketFd) DirectConn.
+// Close terminates a connected (net.Conn) or connecting (socketFd) TCPConn.
 // A mutex is required to support psiphon.Conn.SetClosedSignal concurrency semantics.
-func (conn *DirectConn) Close() (err error) {
+func (conn *TCPConn) Close() (err error) {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 	if !conn.isClosed {
 		if conn.Conn == nil {
-			err = interruptibleClose(conn.interruptible)
+			err = interruptibleTCPClose(conn.interruptible)
 		} else {
 			err = conn.Conn.Close()
 		}
@@ -107,7 +95,7 @@ func (conn *DirectConn) Close() (err error) {
 
 // Read wraps standard Read to add an idle timeout. The connection
 // is explicitly closed on timeout.
-func (conn *DirectConn) Read(buffer []byte) (n int, err error) {
+func (conn *TCPConn) Read(buffer []byte) (n int, err error) {
 	// Note: no mutex on the conn.readTimeout access
 	if conn.readTimeout != 0 {
 		err = conn.Conn.SetReadDeadline(time.Now().Add(conn.readTimeout))
@@ -124,7 +112,7 @@ func (conn *DirectConn) Read(buffer []byte) (n int, err error) {
 
 // Write wraps standard Write to add an idle timeout The connection
 // is explicitly closed on timeout.
-func (conn *DirectConn) Write(buffer []byte) (n int, err error) {
+func (conn *TCPConn) Write(buffer []byte) (n int, err error) {
 	// Note: no mutex on the conn.writeTimeout access
 	if conn.writeTimeout != 0 {
 		err = conn.Conn.SetWriteDeadline(time.Now().Add(conn.writeTimeout))
@@ -140,16 +128,19 @@ func (conn *DirectConn) Write(buffer []byte) (n int, err error) {
 }
 
 // Override implementation of net.Conn.SetDeadline
-func (conn *DirectConn) SetDeadline(t time.Time) error {
-	return ContextError(errors.New("not supported"))
+func (conn *TCPConn) SetDeadline(t time.Time) error {
+	Fatal("net.Conn SetDeadline not supported")
+	return nil
 }
 
 // Override implementation of net.Conn.SetReadDeadline
-func (conn *DirectConn) SetReadDeadline(t time.Time) error {
-	return ContextError(errors.New("not supported"))
+func (conn *TCPConn) SetReadDeadline(t time.Time) error {
+	Fatal("net.Conn SetReadDeadline not supported")
+	return nil
 }
 
 // Override implementation of net.Conn.SetWriteDeadline
-func (conn *DirectConn) SetWriteDeadline(t time.Time) error {
-	return ContextError(errors.New("not supported"))
+func (conn *TCPConn) SetWriteDeadline(t time.Time) error {
+	Fatal("net.Conn SetWriteDeadline not supported")
+	return nil
 }
