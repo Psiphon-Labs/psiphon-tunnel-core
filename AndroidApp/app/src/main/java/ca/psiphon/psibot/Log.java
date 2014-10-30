@@ -59,7 +59,6 @@ public class Log {
         if (message == null) {
             message = "(null)";
         }
-
         final Entry entry = new Entry(message);
 
         // Update the in-memory entry list on the UI thread (also

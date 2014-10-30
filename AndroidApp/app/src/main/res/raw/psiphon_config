@@ -9,6 +9,6 @@
     "EgressRegion" : "",
     "TunnelProtocol" : "",
     "ConnectionWorkerPoolSize" : 10,
-    "BindToDeviceServiceAddress" : "@/psibot/socketProtector",
+    "BindToDeviceServiceAddress" : "",
     "BindToDeviceDnsServer" : "8.8.4.4"
 }
