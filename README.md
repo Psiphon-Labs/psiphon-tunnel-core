@@ -51,7 +51,6 @@ Roadmap
 * log noise: "use of closed network connection"
 * log noise(?): 'Unsolicited response received on idle HTTP channel starting with "H"'
 * use ContextError in more places
-* build/test on Android and iOS
 * reconnection busy loop when no network available (ex. close laptop)
 
 ### TODO (future)
@@ -67,7 +66,6 @@ Roadmap
 * implement page view stats
 * implement local traffic stats (e.g., to display bytes sent/received)
 * control interface (w/ event messages)?
-* VpnService compatibility
 * upstream proxy support
 * support upgrades
   * download entire client

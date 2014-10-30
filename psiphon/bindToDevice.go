@@ -37,7 +37,7 @@ import (
 // setsockopt(SO_BINDTODEVICE). This socket options requires root, which is
 // why this is delegated to a remote service.
 func bindToDevice(socketFd int, config *DialConfig) error {
-	addr, err := net.ResolveUnixAddr("unix", config.BindToDeviceServiceAddr)
+	addr, err := net.ResolveUnixAddr("unix", config.BindToDeviceServiceAddress)
 	if err != nil {
 		return ContextError(err)
 	}

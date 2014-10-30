@@ -19,7 +19,7 @@ Status
 Native libraries
 --------------------------------------------------------------------------------
 
-`app\src\main\jniLibs\<platform>\libtun2socks.so` is built from the Psiphon fork of badvpn. Source code is here: [https://bitbucket.org/psiphon/psiphon-circumvention-system/src/default/Android/badvpn/](https://bitbucket.org/psiphon/psiphon-circumvention-system/src/default/Android/badvpn/).
+`app\src\main\jniLibs\<platform>\libtun2socks.so` is built from the Psiphon fork of badvpn. Source code is here: [https://bitbucket.org/psiphon/psiphon-circumvention-system/src/default/Android/badvpn/](https://bitbucket.org/psiphon/psiphon-circumvention-system/src/default/Android/badvpn/). The source was modified to change the package name to `ca.psiphon.psibot`.
 
 Go client binary and config file
 --------------------------------------------------------------------------------

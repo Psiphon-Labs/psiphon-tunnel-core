@@ -62,14 +62,14 @@ public class Service extends VpnService {
         mThread = new Thread(new Runnable() {
             @Override
             public void run() {
+                CountDownLatch tunnelStartedSignal = new CountDownLatch(1);
                 SocketProtector socketProtector = new SocketProtector(Service.this);
-                Client client = new Client(Service.this);
+                Client client = new Client(Service.this, tunnelStartedSignal);
                 try {
                     socketProtector.start();
                     // TODO: what if client local proxies unbind? in this case it's better if Go client keeps its proxies up permanently.
                     // TODO: monitor tunnel messages and update notification UI when re-connecting, etc.
-                    CountDownLatch tunnelStartedSignal = new CountDownLatch(1);
-                    client.start(tunnelStartedSignal);
+                    client.start();
                     while (true) {
                         if (tunnelStartedSignal.await(100, TimeUnit.MILLISECONDS)) {
                             break;

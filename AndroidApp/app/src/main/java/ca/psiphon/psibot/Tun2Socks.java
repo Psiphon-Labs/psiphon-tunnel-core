@@ -95,8 +95,7 @@ public class Tun2Socks {
 
     private native static void terminateTun2Socks();
     
-    static
-    {
+    static {
         System.loadLibrary("tun2socks");
     }
 }

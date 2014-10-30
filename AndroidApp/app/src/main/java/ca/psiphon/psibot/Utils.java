@@ -36,7 +36,6 @@ import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.zip.ZipInputStream;
 
 
 public class Utils {
@@ -78,10 +77,16 @@ public class Utils {
     public static void writeRawResourceFile(
             Context context, int resId, File file, boolean setExecutable) throws IOException {
         file.delete();
+        // TODO: is this compression redundant?
+        /*
         InputStream zippedAsset = context.getResources().openRawResource(resId);
         ZipInputStream zipStream = new ZipInputStream(zippedAsset);
         zipStream.getNextEntry();
         Utils.copyStream(zipStream, new FileOutputStream(file));
+        */
+        Utils.copyStream(
+                context.getResources().openRawResource(resId),
+                new FileOutputStream(file));
         if (setExecutable && !file.setExecutable(true)) {
             throw new IOException("failed to set file as executable");
         }

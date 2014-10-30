@@ -37,7 +37,8 @@ import (
 // if there's not already an established tunnel. This function is to be used in a pool
 // of goroutines.
 func establishTunnelWorker(
-	tunnelProtocol, sessionId string,
+	config *Config,
+	sessionId string,
 	workerWaitGroup *sync.WaitGroup,
 	candidateServerEntries chan *ServerEntry,
 	broadcastStopWorkers chan struct{},
@@ -53,7 +54,7 @@ func establishTunnelWorker(
 			return
 		default:
 		}
-		tunnel, err := EstablishTunnel(tunnelProtocol, sessionId, serverEntry, pendingConns)
+		tunnel, err := EstablishTunnel(config, sessionId, serverEntry, pendingConns)
 		if err != nil {
 			// TODO: distingush case where conn is interrupted?
 			Notice(NOTICE_INFO, "failed to connect to %s: %s", serverEntry.IpAddress, err)
@@ -90,7 +91,7 @@ func establishTunnel(config *Config, sessionId string) (tunnel *Tunnel, err erro
 	for i := 0; i < config.ConnectionWorkerPoolSize; i++ {
 		workerWaitGroup.Add(1)
 		go establishTunnelWorker(
-			config.TunnelProtocol, sessionId,
+			config, sessionId,
 			workerWaitGroup, candidateServerEntries, broadcastStopWorkers,
 			pendingConns, establishedTunnels)
 	}

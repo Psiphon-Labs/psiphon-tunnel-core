@@ -54,16 +54,35 @@ public class SocketProtector {
             public void run() {
                 String stoppingMessage = "socket protector stopping";
                 try {
-                    LocalSocket socket = mLocalServerSocket.accept();
-                    // TODO: need to do a read()?
-                    for (FileDescriptor fileDescriptor : socket.getAncillaryFileDescriptors()) {
-                        protectSocket(fileDescriptor);
+                    while (true) {
+                        LocalSocket socket = mLocalServerSocket.accept();
+                        try {
+                            // Client must send a '0' byte, along with the out-of-band file descriptors
+                            if (0 != socket.getInputStream().read()) {
+                                throw new Utils.PsibotError("unexpected socket protector request");
+                            }
+                            // Response of '0' indicates no error
+                            int response = 0;
+                            for (FileDescriptor fileDescriptor : socket.getAncillaryFileDescriptors()) {
+                                try {
+                                    protectSocket(fileDescriptor);
+                                } catch (Utils.PsibotError e) {
+                                    Log.addEntry("socket protector: " + e.getMessage());
+                                    response = 1;
+                                    break;
+                                }
+                            }
+                            socket.getOutputStream().write(response);
+                        } finally {
+                            socket.close();
+                        }
                     }
                 } catch (Utils.PsibotError e) {
                     stoppingMessage += ": " + e.getMessage();
                 } catch (IOException e) {
                     stoppingMessage += ": " + e.getMessage();
                 }
+                // TODO: stop service if exiting due to error?
                 Log.addEntry(stoppingMessage);
             }
         });

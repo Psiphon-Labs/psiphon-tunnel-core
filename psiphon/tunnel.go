@@ -77,19 +77,20 @@ func (tunnel *Tunnel) Close() {
 // the first protocol in SupportedTunnelProtocols that's also in the
 // server capabilities is used.
 func EstablishTunnel(
-	requiredProtocol, sessionId string,
+	config *Config,
+	sessionId string,
 	serverEntry *ServerEntry,
 	pendingConns *Conns) (tunnel *Tunnel, err error) {
 	// Select the protocol
 	var selectedProtocol string
 	// TODO: properly handle protocols (e.g. FRONTED-MEEK-OSSH) vs. capabilities (e.g., {FRONTED-MEEK, OSSH})
 	// for now, the code is simply assuming that MEEK capabilities imply OSSH capability.
-	if requiredProtocol != "" {
-		requiredCapability := strings.TrimSuffix(requiredProtocol, "-OSSH")
+	if config.TunnelProtocol != "" {
+		requiredCapability := strings.TrimSuffix(config.TunnelProtocol, "-OSSH")
 		if !Contains(serverEntry.Capabilities, requiredCapability) {
 			return nil, ContextError(fmt.Errorf("server does not have required capability"))
 		}
-		selectedProtocol = requiredProtocol
+		selectedProtocol = config.TunnelProtocol
 	} else {
 		// Order of SupportedTunnelProtocols is default preference order
 		for _, protocol := range SupportedTunnelProtocols {
@@ -128,10 +129,12 @@ func EstablishTunnel(
 	}
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
-		ConnectTimeout: TUNNEL_CONNECT_TIMEOUT,
-		ReadTimeout:    TUNNEL_READ_TIMEOUT,
-		WriteTimeout:   TUNNEL_WRITE_TIMEOUT,
-		PendingConns:   pendingConns,
+		ConnectTimeout:             TUNNEL_CONNECT_TIMEOUT,
+		ReadTimeout:                TUNNEL_READ_TIMEOUT,
+		WriteTimeout:               TUNNEL_WRITE_TIMEOUT,
+		PendingConns:               pendingConns,
+		BindToDeviceServiceAddress: config.BindToDeviceServiceAddress,
+		BindToDeviceDnsServer:      config.BindToDeviceDnsServer,
 	}
 	var conn Conn
 	if useMeek {

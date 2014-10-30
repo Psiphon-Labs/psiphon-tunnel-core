@@ -38,7 +38,7 @@ const DNS_PORT = 53
 // socket, binds it to the device, and makes an explicit DNS request
 // to the specified DNS resolver.
 func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
-	if config.BindToDeviceServiceAddr != "" {
+	if config.BindToDeviceServiceAddress != "" {
 		return bindLookupIP(host, config)
 	}
 	return net.LookupIP(host)

@@ -8,5 +8,7 @@
     "LocalSocksProxyPort" : 0,
     "EgressRegion" : "",
     "TunnelProtocol" : "",
-    "ConnectionWorkerPoolSize" : 10
+    "ConnectionWorkerPoolSize" : 10,
+    "BindToDeviceServiceAddress" : "@/psibot/socketProtector",
+    "BindToDeviceDnsServer" : "8.8.4.4"
 }
