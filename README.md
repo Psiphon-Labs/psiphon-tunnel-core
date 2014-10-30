@@ -38,7 +38,7 @@ Setup
     ```
 
 * Replace each `<placeholder>` with a value from your Psiphon network. The Psiphon server-side stack is open source and can be found in our  [Psiphon 3 repository](https://bitbucket.org/psiphon/psiphon-circumvention-system). If you would like to use the Psiphon Inc. network, contact <developer-support@psiphon.ca>.
-* The project builds and runs on Android. At this time, Android support is in the developer branch of Go, so build Go from source and use the Android NDK to build android/arm target support. See the sample AndroidApp README [COMING SOON] for more information about building the Go binary, along with a sample Android app that uses it.
+* The project builds and runs on Android. At this time, Android support is in the developer branch of Go, so build Go from source and use the Android NDK to build android/arm target support. See the sample [AndroidApp README](AndroidApp/README.md) for more information about building the Go binary, along with a sample Android app that uses it.
 
 Roadmap
 --------------------------------------------------------------------------------
@@ -51,7 +51,6 @@ Roadmap
 * log noise: "use of closed network connection"
 * log noise(?): 'Unsolicited response received on idle HTTP channel starting with "H"'
 * use ContextError in more places
-* build/test on Android and iOS
 * reconnection busy loop when no network available (ex. close laptop)
 
 ### TODO (future)
@@ -67,7 +66,6 @@ Roadmap
 * implement page view stats
 * implement local traffic stats (e.g., to display bytes sent/received)
 * control interface (w/ event messages)?
-* VpnService compatibility
 * upstream proxy support
 * support upgrades
   * download entire client

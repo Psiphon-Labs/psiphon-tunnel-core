@@ -82,7 +82,7 @@ const (
 // conn must be used for SSH client traffic and must have transferred
 // no traffic.
 func NewObfuscatedSshConn(conn net.Conn, obfuscationKeyword string) (*ObfuscatedSshConn, error) {
-	obfuscator, err := NewObfuscator(&ObfuscatorParams{Keyword: obfuscationKeyword})
+	obfuscator, err := NewObfuscator(&ObfuscatorConfig{Keyword: obfuscationKeyword})
 	if err != nil {
 		return nil, err
 	}

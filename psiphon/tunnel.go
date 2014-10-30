@@ -77,19 +77,20 @@ func (tunnel *Tunnel) Close() {
 // the first protocol in SupportedTunnelProtocols that's also in the
 // server capabilities is used.
 func EstablishTunnel(
-	requiredProtocol, sessionId string,
+	config *Config,
+	sessionId string,
 	serverEntry *ServerEntry,
 	pendingConns *Conns) (tunnel *Tunnel, err error) {
 	// Select the protocol
 	var selectedProtocol string
 	// TODO: properly handle protocols (e.g. FRONTED-MEEK-OSSH) vs. capabilities (e.g., {FRONTED-MEEK, OSSH})
 	// for now, the code is simply assuming that MEEK capabilities imply OSSH capability.
-	if requiredProtocol != "" {
-		requiredCapability := strings.TrimSuffix(requiredProtocol, "-OSSH")
+	if config.TunnelProtocol != "" {
+		requiredCapability := strings.TrimSuffix(config.TunnelProtocol, "-OSSH")
 		if !Contains(serverEntry.Capabilities, requiredCapability) {
 			return nil, ContextError(fmt.Errorf("server does not have required capability"))
 		}
-		selectedProtocol = requiredProtocol
+		selectedProtocol = config.TunnelProtocol
 	} else {
 		// Order of SupportedTunnelProtocols is default preference order
 		for _, protocol := range SupportedTunnelProtocols {
@@ -127,11 +128,17 @@ func EstablishTunnel(
 		port = serverEntry.SshPort
 	}
 	// Create the base transport: meek or direct connection
+	dialConfig := &DialConfig{
+		ConnectTimeout:             TUNNEL_CONNECT_TIMEOUT,
+		ReadTimeout:                TUNNEL_READ_TIMEOUT,
+		WriteTimeout:               TUNNEL_WRITE_TIMEOUT,
+		PendingConns:               pendingConns,
+		BindToDeviceServiceAddress: config.BindToDeviceServiceAddress,
+		BindToDeviceDnsServer:      config.BindToDeviceDnsServer,
+	}
 	var conn Conn
 	if useMeek {
-		conn, err = NewMeekConn(
-			serverEntry, sessionId, useFronting,
-			TUNNEL_CONNECT_TIMEOUT, TUNNEL_READ_TIMEOUT, TUNNEL_WRITE_TIMEOUT)
+		conn, err = DialMeek(serverEntry, sessionId, useFronting, dialConfig)
 		if err != nil {
 			return nil, ContextError(err)
 		}
@@ -139,10 +146,7 @@ func EstablishTunnel(
 		// interrupt; underlying HTTP connections may be candidates for interruption, but only
 		// after relay starts polling...
 	} else {
-		conn, err = DirectDial(
-			fmt.Sprintf("%s:%d", serverEntry.IpAddress, port),
-			TUNNEL_CONNECT_TIMEOUT, TUNNEL_READ_TIMEOUT, TUNNEL_WRITE_TIMEOUT,
-			pendingConns)
+		conn, err = DialTCP(fmt.Sprintf("%s:%d", serverEntry.IpAddress, port), dialConfig)
 		if err != nil {
 			return nil, ContextError(err)
 		}

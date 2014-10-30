@@ -271,14 +271,16 @@ func makePsiphonHttpsClient(
 	// intended purpose. The readTimeout is to abort NewSession when the Psiphon server responds to
 	// handshake/connected requests but fails to deliver the response body (e.g., ResponseHeaderTimeout
 	// is not sufficient to timeout this case).
-	directDialer := NewDirectDialer(
-		PSIPHON_API_SERVER_TIMEOUT,
-		PSIPHON_API_SERVER_TIMEOUT,
-		PSIPHON_API_SERVER_TIMEOUT,
-		pendingConns)
+	tcpDialer := NewTCPDialer(
+		&DialConfig{
+			ConnectTimeout: PSIPHON_API_SERVER_TIMEOUT,
+			ReadTimeout:    PSIPHON_API_SERVER_TIMEOUT,
+			WriteTimeout:   PSIPHON_API_SERVER_TIMEOUT,
+			PendingConns:   pendingConns,
+		})
 	dialer := NewCustomTLSDialer(
 		&CustomTLSConfig{
-			Dial:                    directDialer,
+			Dial:                    tcpDialer,
 			Timeout:                 PSIPHON_API_SERVER_TIMEOUT,
 			HttpProxyAddress:        localHttpProxyAddress,
 			SendServerName:          false,

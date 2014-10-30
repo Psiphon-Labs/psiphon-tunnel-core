@@ -22,7 +22,33 @@ package psiphon
 import (
 	"net"
 	"sync"
+	"time"
 )
+
+// DialConfig contains parameters to determine the behavior
+// of a Psiphon dialer (TCPDial, MeekDial, etc.)
+type DialConfig struct {
+	ConnectTimeout time.Duration
+	ReadTimeout    time.Duration
+	WriteTimeout   time.Duration
+
+	// PendingConns is used to interrupt dials in progress.
+	// The dial may be interrupted using PendingConns.CloseAll(): on platforms
+	// that support this, the new conn is added to pendingConns before the network
+	// connect begins and removed from pendingConns once the connect succeeds or fails.
+	PendingConns *Conns
+
+	// BindToDevice parameters are used to exclude connections and
+	// associated DNS requests from VPN routing.
+	// When BindToDeviceServiceAddress is not blank, any underlying socket is
+	// submitted to the device binding service at that address before connecting.
+	// The service should bind the socket to a device so that it doesn't route
+	// through a VPN interface. This service is also used to bind UDP sockets used
+	// for DNS requests, in which case BindToDeviceDnsServer is used as the
+	// DNS server.
+	BindToDeviceServiceAddress string
+	BindToDeviceDnsServer      string
+}
 
 // Dialer is a custom dialer compatible with http.Transport.Dial.
 type Dialer func(string, string) (net.Conn, error)
