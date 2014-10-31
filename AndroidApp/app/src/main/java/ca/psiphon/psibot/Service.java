@@ -148,6 +148,7 @@ public class Service extends VpnService {
         Locale previousLocale = Locale.getDefault();
         ParcelFileDescriptor vpnInterfaceFileDescriptor = null;
 
+        final String errorMessage = "establishVpn failed";
         try {
             String subnet = Utils.getPrivateAddressSubnet(privateIpAddress);
             int prefixLength = Utils.getPrivateAddressPrefixLength(privateIpAddress);
@@ -174,11 +175,11 @@ public class Service extends VpnService {
                 throw new Utils.PsibotError("application is not prepared or is revoked");
             }
         } catch(IllegalArgumentException e) {
-            throw new Utils.PsibotError(e);
+            throw new Utils.PsibotError(errorMessage, e);
         } catch(IllegalStateException e) {
-            throw new Utils.PsibotError(e);
+            throw new Utils.PsibotError(errorMessage, e);
         } catch(SecurityException e) {
-            throw new Utils.PsibotError(e);
+            throw new Utils.PsibotError(errorMessage, e);
         } finally {
             // Restore the original locale.
             Locale.setDefault(previousLocale);

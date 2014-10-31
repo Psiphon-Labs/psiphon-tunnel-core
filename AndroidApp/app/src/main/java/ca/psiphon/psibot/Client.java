@@ -22,8 +22,13 @@ package ca.psiphon.psibot;
 import android.content.Context;
 import android.os.Build;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -120,11 +125,16 @@ public class Client {
         if (0 != Build.CPU_ABI.compareTo("armeabi-v7a")) {
             throw new Utils.PsibotError("no client binary for this CPU");
         }
+        final String errorMessage = "failed to prepare client files";
         try {
             Utils.writeRawResourceFile(mContext, R.raw.psiphon_tunnel_core_arm, mExecutableFile, true);
-            Utils.writeRawResourceFile(mContext, R.raw.psiphon_config, mConfigFile, false);
+            writeConfigFile(mContext, mConfigFile);
         } catch (IOException e) {
-            throw new Utils.PsibotError("failed to prepare client files", e);
+            throw new Utils.PsibotError(errorMessage, e);
+        } catch (JSONException e) {
+            throw new Utils.PsibotError(errorMessage, e);
+        } catch (Utils.PsibotError e) {
+            throw new Utils.PsibotError(errorMessage, e);
         }
     }
 
@@ -162,5 +172,31 @@ public class Client {
         } else if (line.contains(tunnelStarted)) {
             mTunnelStartedSignal.countDown();
         }
+    }
+
+    private void writeConfigFile(Context context, File configFile)
+            throws IOException, JSONException, Utils.PsibotError {
+        // If we can obtain a DNS resolver for the active network,
+        // prefer that for DNS resolution in BindToDevice mode.
+        String dnsResolver = null;
+        try {
+            dnsResolver = Utils.getFirstActiveNetworkDnsResolver(context);
+        } catch (Utils.PsibotError e) {
+            Log.addEntry("failed to get active network DNS resolver: " + e.getMessage());
+            // Proceed with default value in config file
+        }
+
+        // Load settings from the raw resource JSON config file and
+        // update as necessary. Then write JSON to disk for the Go client.
+        String configFileContents = Utils.readInputStreamToString(
+                context.getResources().openRawResource(R.raw.psiphon_config));
+        JSONObject json = new JSONObject(configFileContents);
+        json.put("BindToDeviceServiceAddress", "@" + SocketProtector.SOCKET_PROTECTOR_ADDRESS);
+        if (dnsResolver != null) {
+            json.put("BindToDeviceDnsServer", dnsResolver);
+        }
+        Utils.copyStream(
+                new ByteArrayInputStream(json.toString().getBytes("UTF-8")),
+                new FileOutputStream(configFile));
     }
 }
