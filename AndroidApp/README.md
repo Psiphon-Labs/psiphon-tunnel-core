@@ -12,9 +12,7 @@ Status
 --------------------------------------------------------------------------------
 
 * Incomplete
-  * Android app code builds but is not tested.
-  * Go client builds and runs (tested via adb shell).
-  * Go client support for protect sockets (VpnService) must be implemented.
+  * Android app builds and runs but it is not yet stable.
 
 Native libraries
 --------------------------------------------------------------------------------
