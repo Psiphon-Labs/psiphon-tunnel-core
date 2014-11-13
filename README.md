@@ -45,13 +45,21 @@ Roadmap
 
 ### TODO (proof-of-concept)
 
-* fail-over to new server on "ssh: rejected: administratively prohibited (open failed)" error?
+* Android app
+  * open home pages
+  * Go binary PIE, or use a Go library and JNI
+  * settings UI (e.g., region selection)
+* reconnection busy loop when no network available (ex. close laptop); should wait for network connectivity
+* sometimes fails to promptly detect loss of connection after device sleep
+* continuity and performance
+  * always-on local proxies
+  * multiplex across simultaneous tunnels
+  * monitor health of tunnels; for example fail-over to new server on "ssh: rejected: administratively prohibited (open failed)" error?
 * PendingConns: is interrupting connection establishment worth the extra code complexity?
 * prefilter entries by capability; don't log "server does not have sufficient capabilities"
 * log noise: "use of closed network connection"
 * log noise(?): 'Unsolicited response received on idle HTTP channel starting with "H"'
 * use ContextError in more places
-* reconnection busy loop when no network available (ex. close laptop)
 
 ### TODO (future)
 
@@ -71,7 +79,6 @@ Roadmap
   * download entire client
   * download core component only
 * try multiple protocols for each server (currently only tries one protocol per server)
-* consider ability to multiplex across multiple tunnel sessions
 * support a config pushed by the network
   * server can push preferred/optimized settings; client should prefer over defaults
   * e.g., etablish worker pool size; multiplex tunnel pool size

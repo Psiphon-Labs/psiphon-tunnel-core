@@ -23,14 +23,13 @@ package psiphon
 
 import (
 	"net"
-	"time"
 )
 
 type interruptibleTCPSocket struct {
 }
 
-func interruptibleTCPDial(addr string, config *TCPConfig) (conn *TCPConn, err error) {
-	if config.BindToDeviceServiceAddr != "" {
+func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err error) {
+	if config.BindToDeviceServiceAddress != "" {
 		Fatal("psiphon.interruptibleTCPDial with bind not supported on Windows")
 	}
 	// Note: using standard net.Dial(); interruptible connections not supported on Windows
