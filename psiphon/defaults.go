@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	VERSION                                  = "0.0.2"
+	VERSION                                  = "0.0.3"
 	DATA_STORE_FILENAME                      = "psiphon.db"
 	FETCH_REMOTE_SERVER_LIST_TIMEOUT         = 5 * time.Second
 	TUNNEL_CONNECT_TIMEOUT                   = 15 * time.Second
@@ -39,4 +39,5 @@ const (
 	PSIPHON_API_CLIENT_SESSION_ID_LENGTH     = 16
 	PSIPHON_API_SERVER_TIMEOUT               = 20 * time.Second
 	HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST = 50
+	ESTABLISH_TUNNEL_PAUSE_PERIOD            = 10 * time.Second
 )

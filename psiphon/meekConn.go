@@ -91,6 +91,7 @@ type MeekConn struct {
 func DialMeek(
 	serverEntry *ServerEntry, sessionId string,
 	useFronting bool, config *DialConfig) (meek *MeekConn, err error) {
+
 	// Configure transport
 	// Note: MeekConn has its own PendingConns to manage the underlying HTTP transport connections,
 	// which may be interrupted on MeekConn.Close(). This code previously used the establishTunnel
@@ -121,6 +122,7 @@ func DialMeek(
 		host = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
 		dialer = NewTCPDialer(configCopy)
 	}
+
 	// Scheme is always "http". Otherwise http.Transport will try to do another TLS
 	// handshake inside the explicit TLS session (in fronting mode).
 	url := &url.URL{
@@ -132,10 +134,12 @@ func DialMeek(
 	if err != nil {
 		return nil, ContextError(err)
 	}
+	// TODO: also use http.Client, with its Timeout field?
 	transport := &http.Transport{
 		Dial: dialer,
 		ResponseHeaderTimeout: TUNNEL_WRITE_TIMEOUT,
 	}
+
 	// The main loop of a MeekConn is run in the relay() goroutine.
 	// A MeekConn implements net.Conn concurrency semantics:
 	// "Multiple goroutines may invoke methods on a Conn simultaneously."
@@ -312,7 +316,7 @@ func (meek *MeekConn) replaceSendBuffer(sendBuffer *bytes.Buffer) {
 	}
 }
 
-// relay sends and receives tunnelled traffic (payload). An HTTP request is
+// relay sends and receives tunneled traffic (payload). An HTTP request is
 // triggered when data is in the write queue or at a polling interval.
 // There's a geometric increase, up to a maximum, in the polling interval when
 // no data is exchanged. Only one HTTP request is in flight at a time.
@@ -448,6 +452,7 @@ type meekCookieData struct {
 // In unfronted meek mode, the cookie is visible over the adversary network, so the
 // cookie is encrypted and obfuscated.
 func makeCookie(serverEntry *ServerEntry, sessionId string) (cookie *http.Cookie, err error) {
+
 	// Make the JSON data
 	serverAddress := fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
 	cookieData := &meekCookieData{
@@ -459,6 +464,7 @@ func makeCookie(serverEntry *ServerEntry, sessionId string) (cookie *http.Cookie
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
 	// Encrypt the JSON data
 	// NaCl box is used for encryption. The peer public key comes from the server entry.
 	// Nonce is always all zeros, and is not sent in the cookie (the server also uses an all-zero nonce).
@@ -481,6 +487,7 @@ func makeCookie(serverEntry *ServerEntry, sessionId string) (cookie *http.Cookie
 	encryptedCookie := make([]byte, 32+len(box))
 	copy(encryptedCookie[0:32], ephemeralPublicKey[0:32])
 	copy(encryptedCookie[32:], box)
+
 	// Obfuscate the encrypted data
 	obfuscator, err := NewObfuscator(
 		&ObfuscatorConfig{Keyword: serverEntry.MeekObfuscatedKey, MaxPadding: MEEK_COOKIE_MAX_PADDING})
@@ -491,6 +498,7 @@ func makeCookie(serverEntry *ServerEntry, sessionId string) (cookie *http.Cookie
 	seedLen := len(obfuscatedCookie)
 	obfuscatedCookie = append(obfuscatedCookie, encryptedCookie...)
 	obfuscator.ObfuscateClientToServer(obfuscatedCookie[seedLen:])
+
 	// Format the HTTP cookie
 	// The format is <random letter 'A'-'Z'>=<base64 data>, which is intended to match common cookie formats.
 	A := int('A')

@@ -149,7 +149,7 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, er
 
 	rawConn, err := config.Dial(network, dialAddr)
 	if err != nil {
-		return nil, err
+		return nil, ContextError(err)
 	}
 
 	targetAddr := addr
@@ -200,13 +200,13 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, er
 				targetAddr, hostname)
 			_, err := rawConn.Write([]byte(connectRequest))
 			if err != nil {
-				return err
+				return ContextError(err)
 			}
 			expectedResponse := []byte("HTTP/1.1 200 OK\r\n\r\n")
 			readBuffer := make([]byte, len(expectedResponse))
 			_, err = io.ReadFull(rawConn, readBuffer)
 			if err != nil {
-				return err
+				return ContextError(err)
 			}
 			if !bytes.Equal(readBuffer, expectedResponse) {
 				return fmt.Errorf("unexpected HTTP proxy response: %s", string(readBuffer))
@@ -233,7 +233,7 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, er
 
 	if err != nil {
 		rawConn.Close()
-		return nil, err
+		return nil, ContextError(err)
 	}
 
 	return conn, nil
@@ -242,10 +242,10 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, er
 func verifyLegacyCertificate(conn *tls.Conn, expectedCertificate *x509.Certificate) error {
 	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) < 1 {
-		return errors.New("no certificate to verify")
+		return ContextError(errors.New("no certificate to verify"))
 	}
 	if !bytes.Equal(certs[0].Raw, expectedCertificate.Raw) {
-		return errors.New("unexpected certificate")
+		return ContextError(errors.New("unexpected certificate"))
 	}
 	return nil
 }
@@ -266,6 +266,10 @@ func verifyServerCerts(conn *tls.Conn, serverName string, config *tls.Config) er
 		}
 		opts.Intermediates.AddCert(cert)
 	}
+
 	_, err := certs[0].Verify(opts)
-	return err
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
 }

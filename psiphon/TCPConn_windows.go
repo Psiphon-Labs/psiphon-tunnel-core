@@ -22,29 +22,52 @@
 package psiphon
 
 import (
+	"errors"
 	"net"
 )
 
+// interruptibleTCPSocket simulates interruptible semantics on Windows. A call
+// to interruptibleTCPClose doesn't actually interrupt a connect in progress,
+// but abandons a dial that's running in a goroutine.
+// Interruptible semantics are required by the controller for timely component
+// state changes.
+// TODO: implement true interruptible semantics on Windows; use syscall and
+// a HANDLE similar to how TCPConn_unix uses a file descriptor?
 type interruptibleTCPSocket struct {
+	errChannel chan error
 }
 
 func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err error) {
 	if config.BindToDeviceServiceAddress != "" {
 		Fatal("psiphon.interruptibleTCPDial with bind not supported on Windows")
 	}
-	// Note: using standard net.Dial(); interruptible connections not supported on Windows
-	netConn, err := net.DialTimeout("tcp", addr, config.ConnectTimeout)
+
+	conn = &TCPConn{
+		interruptible: interruptibleTCPSocket{errChannel: make(chan error, 2)},
+		readTimeout:   config.ReadTimeout,
+		writeTimeout:  config.WriteTimeout}
+	config.PendingConns.Add(conn)
+
+	// Call the blocking Dial in a goroutine
+	var netConn net.Conn
+	go func() {
+		var err error
+		netConn, err = net.DialTimeout("tcp", addr, config.ConnectTimeout)
+		errChannel <- err
+	}()
+
+	// Block until Dial completes (or times out) or until interrupt
+	err = <-errChannel
+	config.PendingConns.Remove(conn)
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	conn = &TCPConn{
-		Conn:         netConn,
-		readTimeout:  config.ReadTimeout,
-		writeTimeout: config.WriteTimeout}
+	conn.Conn = netConn
+
 	return conn, nil
 }
 
 func interruptibleTCPClose(interruptible interruptibleTCPSocket) error {
-	Fatal("psiphon.interruptibleTCPClose not supported on Windows")
+	interruptible <- errors.New("socket interrupted")
 	return nil
 }
