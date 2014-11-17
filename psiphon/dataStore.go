@@ -50,7 +50,7 @@ func initDataStore() {
              data blob not null);
 	    create table if not exists serverEntryProtocol
 	        (serverEntryId text not null,
-	         protocol text not null)
+	         protocol text not null);
         create table if not exists keyValue
             (key text not null,
              value text not null);
@@ -159,7 +159,7 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 			requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
 			if Contains(serverEntry.Capabilities, requiredCapability) {
 				_, err = transaction.Exec(`
-		            insert or ignore into serverEntryProtocol (id, protocol)
+		            insert or ignore into serverEntryProtocol (serverEntryId, protocol)
 		            values (?, ?);
 		            `, serverEntry.IpAddress, protocol)
 				if err != nil {
@@ -306,7 +306,8 @@ func makeServerEntryWhereClause(
 		} else {
 			whereClause += " where"
 		}
-		whereClause += " exists (select 1 from serverEntryProtocol where protocol = ?)"
+		whereClause +=
+			" exists (select 1 from serverEntryProtocol where protocol = ? and serverEntryId = serverEntry.id)"
 		whereParams = append(whereParams, protocol)
 	}
 	if len(excludeIds) > 0 {
