@@ -33,6 +33,7 @@ const (
 	TUNNEL_SSH_KEEP_ALIVE_PERIOD             = 60 * time.Second
 	ESTABLISH_TUNNEL_TIMEOUT                 = 60 * time.Second
 	CONNECTION_WORKER_POOL_SIZE              = 10
+	TUNNEL_POOL_SIZE                         = 1
 	HTTP_PROXY_ORIGIN_SERVER_TIMEOUT         = 15 * time.Second
 	FETCH_REMOTE_SERVER_LIST_RETRY_TIMEOUT   = 5 * time.Second
 	FETCH_REMOTE_SERVER_LIST_STALE_TIMEOUT   = 6 * time.Hour

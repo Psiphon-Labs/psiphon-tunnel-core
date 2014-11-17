@@ -87,5 +87,9 @@ func LoadConfig(filename string) (*Config, error) {
 		config.ConnectionWorkerPoolSize = CONNECTION_WORKER_POOL_SIZE
 	}
 
+	if config.TunnelPoolSize == 0 {
+		config.TunnelPoolSize = TUNNEL_POOL_SIZE
+	}
+
 	return &config, nil
 }
