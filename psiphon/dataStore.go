@@ -234,12 +234,10 @@ func (iterator *ServerEntryIterator) Reset() error {
 		return ContextError(err)
 	}
 	var cursor *sql.Rows
-	query := "select data from serverEntry"
 	whereClause, whereParams := makeServerEntryWhereClause(
 		iterator.region, iterator.protocol, iterator.excludeIds)
-	query += whereClause
-	query += " order by rank desc;"
-	cursor, err = transaction.Query(query, whereParams)
+	query := "select data from serverEntry" + whereClause + " order by rank desc;"
+	cursor, err = transaction.Query(query, whereParams...)
 	if err != nil {
 		transaction.Rollback()
 		return ContextError(err)
@@ -292,10 +290,9 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 }
 
 func makeServerEntryWhereClause(
-	region, protocol string, excludeIds []string) (whereClause string, whereParams []string) {
-
+	region, protocol string, excludeIds []string) (whereClause string, whereParams []interface{}) {
 	whereClause = ""
-	whereParams = make([]string, 0)
+	whereParams = make([]interface{}, 0)
 	if region != "" {
 		whereClause += " where region = ?"
 		whereParams = append(whereParams, region)
@@ -335,10 +332,9 @@ func makeServerEntryWhereClause(
 func HasServerEntries(region, protocol string) bool {
 	initDataStore()
 	var count int
-	query := "select count(*) from serverEntry"
 	whereClause, whereParams := makeServerEntryWhereClause(region, protocol, nil)
-	query += whereClause
-	err := singleton.db.QueryRow(query, whereParams).Scan(&count)
+	query := "select count(*) from serverEntry" + whereClause
+	err := singleton.db.QueryRow(query, whereParams...).Scan(&count)
 
 	if region == "" {
 		region = "(any)"
