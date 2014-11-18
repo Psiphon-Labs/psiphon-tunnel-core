@@ -34,7 +34,12 @@ import (
 // TODO: implement true interruptible semantics on Windows; use syscall and
 // a HANDLE similar to how TCPConn_unix uses a file descriptor?
 type interruptibleTCPSocket struct {
-	errChannel chan error
+	results chan *interruptibleDialResult
+}
+
+type interruptibleDialResult struct {
+	netConn net.Conn
+	err     error
 }
 
 func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err error) {
@@ -43,31 +48,30 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	}
 
 	conn = &TCPConn{
-		interruptible: interruptibleTCPSocket{errChannel: make(chan error, 2)},
+		interruptible: interruptibleTCPSocket{results: make(chan *interruptibleDialResult, 2)},
 		readTimeout:   config.ReadTimeout,
 		writeTimeout:  config.WriteTimeout}
 	config.PendingConns.Add(conn)
 
 	// Call the blocking Dial in a goroutine
-	var netConn net.Conn
+	results := conn.interruptible.results
 	go func() {
-		var err error
-		netConn, err = net.DialTimeout("tcp", addr, config.ConnectTimeout)
-		conn.interruptible.errChannel <- err
+		netConn, err := net.DialTimeout("tcp", addr, config.ConnectTimeout)
+		results <- &interruptibleDialResult{netConn, err}
 	}()
 
 	// Block until Dial completes (or times out) or until interrupt
-	err = <-conn.interruptible.errChannel
+	result := <-conn.interruptible.results
 	config.PendingConns.Remove(conn)
-	if err != nil {
-		return nil, ContextError(err)
+	if result.err != nil {
+		return nil, ContextError(result.err)
 	}
-	conn.Conn = netConn
+	conn.Conn = result.netConn
 
 	return conn, nil
 }
 
 func interruptibleTCPClose(interruptible interruptibleTCPSocket) error {
-	interruptible.errChannel <- errors.New("socket interrupted")
+	interruptible.results <- &interruptibleDialResult{nil, errors.New("socket interrupted")}
 	return nil
 }
