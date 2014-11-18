@@ -66,15 +66,12 @@ func NewController(config *Config) (controller *Controller) {
 		runWaitGroup:      new(sync.WaitGroup),
 		// establishedTunnels and failedTunnels buffer sizes are large enough to
 		// receive full pools of tunnels without blocking. Senders should not block.
-		establishedTunnels:        make(chan *Tunnel, config.TunnelPoolSize),
-		failedTunnels:             make(chan *Tunnel, config.TunnelPoolSize),
-		tunnels:                   make([]*Tunnel, 0),
-		operateWaitGroup:          new(sync.WaitGroup),
-		isEstablishing:            false,
-		establishWaitGroup:        new(sync.WaitGroup),
-		stopEstablishingBroadcast: make(chan struct{}),
-		candidateServerEntries:    make(chan *ServerEntry),
-		pendingConns:              new(Conns),
+		establishedTunnels: make(chan *Tunnel, config.TunnelPoolSize),
+		failedTunnels:      make(chan *Tunnel, config.TunnelPoolSize),
+		tunnels:            make([]*Tunnel, 0),
+		operateWaitGroup:   new(sync.WaitGroup),
+		isEstablishing:     false,
+		pendingConns:       new(Conns),
 	}
 }
 
@@ -489,11 +486,16 @@ func (controller *Controller) startEstablishing() {
 // for the group to halt. pendingConns is used to interrupt any worker
 // blocked on a socket connect.
 func (controller *Controller) stopEstablishing() {
+	if !controller.isEstablishing {
+		return
+	}
 	Notice(NOTICE_INFO, "stop establishing")
 	// Note: on Windows, interruptibleTCPClose doesn't really interrupt socket connects
 	// and may leave goroutines running for a time after the Wait call.
 	controller.pendingConns.CloseAll()
 	close(controller.stopEstablishingBroadcast)
+	// Note: establishCandidateGenerator closes controller.candidateServerEntries
+	// (as it may be sending to that channel).
 	controller.establishWaitGroup.Wait()
 
 	controller.isEstablishing = false
@@ -509,8 +511,10 @@ func (controller *Controller) establishCandidateGenerator() {
 	defer controller.establishWaitGroup.Done()
 loop:
 	for {
-		//** note race condition (exclude will exclude servers that fail while running establish)
-		//** also a race that can result in dup tunnels?
+		// Note: it's possible that an active tunnel in excludeServerEntries will
+		// fail during this iteration of server entries and in that case the
+		// cooresponding server will not be retried (within the same iteration).
+		// !TODO! is there also a race that can result in multiple tunnels to the same server
 		excludeServerEntries := controller.getActiveTunnelServerEntries()
 		iterator, err := NewServerEntryIterator(
 			controller.config.EgressRegion, controller.config.TunnelProtocol, excludeServerEntries)
@@ -552,6 +556,7 @@ loop:
 			break loop
 		}
 	}
+	close(controller.candidateServerEntries)
 	Notice(NOTICE_INFO, "stopped candidate generator")
 }
 
