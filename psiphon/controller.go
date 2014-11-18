@@ -448,7 +448,10 @@ func (controller *Controller) dialWithTunnel(remoteAddr string) (conn net.Conn, 
 		}
 		return nil, ContextError(err)
 	}
-	return &TunneledConn{Conn: sshPortForward}, nil
+	return &TunneledConn{
+			Conn:   sshPortForward,
+			tunnel: tunnel},
+		nil
 }
 
 // startEstablishing creates a pool of worker goroutines which will
