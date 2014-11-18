@@ -203,13 +203,15 @@ loop:
 			Notice(NOTICE_INFO, "established tunnel: %s", establishedTunnel.serverEntry.IpAddress)
 			// !TODO! design issue: activateTunnel makes tunnel avail for port forward *before* operates does handshake
 			// solution(?) distinguish between two stages or states: connected, and then active.
-			if !controller.activateTunnel(establishedTunnel) {
-				controller.discardTunnel(establishedTunnel)
-				controller.stopEstablishing()
-			} else {
+			if controller.activateTunnel(establishedTunnel) {
 				Notice(NOTICE_INFO, "active tunnel: %s", establishedTunnel.serverEntry.IpAddress)
 				controller.operateWaitGroup.Add(1)
 				go controller.operateTunnel(establishedTunnel)
+			} else {
+				controller.discardTunnel(establishedTunnel)
+			}
+			if controller.isFullyEstablished() {
+				controller.stopEstablishing()
 			}
 
 		case <-controller.shutdownBroadcast:
@@ -256,6 +258,13 @@ func (controller *Controller) activateTunnel(tunnel *Tunnel) bool {
 	controller.tunnels = append(controller.tunnels, tunnel)
 	Notice(NOTICE_TUNNEL, "%d tunnels", len(controller.tunnels))
 	return true
+}
+
+// isFullyEstablished indicates if the pool of active tunnels is full.
+func (controller *Controller) isFullyEstablished() bool {
+	controller.tunnelMutex.Lock()
+	defer controller.tunnelMutex.Unlock()
+	return len(controller.tunnels) >= controller.config.TunnelPoolSize
 }
 
 // terminateTunnel removes a tunnel from the pool of active tunnels
