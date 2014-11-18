@@ -91,5 +91,9 @@ func LoadConfig(filename string) (*Config, error) {
 		config.TunnelPoolSize = TUNNEL_POOL_SIZE
 	}
 
+	if config.PortForwardFailureThreshold == 0 {
+		config.PortForwardFailureThreshold = PORT_FORWARD_FAILURE_THRESHOLD
+	}
+
 	return &config, nil
 }
