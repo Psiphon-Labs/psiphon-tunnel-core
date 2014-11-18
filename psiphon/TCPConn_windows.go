@@ -53,11 +53,11 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	go func() {
 		var err error
 		netConn, err = net.DialTimeout("tcp", addr, config.ConnectTimeout)
-		errChannel <- err
+		conn.interruptible.errChannel <- err
 	}()
 
 	// Block until Dial completes (or times out) or until interrupt
-	err = <-errChannel
+	err = <-conn.interruptible.errChannel
 	config.PendingConns.Remove(conn)
 	if err != nil {
 		return nil, ContextError(err)
@@ -68,6 +68,6 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 }
 
 func interruptibleTCPClose(interruptible interruptibleTCPSocket) error {
-	interruptible <- errors.New("socket interrupted")
+	interruptible.errChannel <- errors.New("socket interrupted")
 	return nil
 }
