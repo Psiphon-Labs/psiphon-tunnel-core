@@ -23,7 +23,7 @@ package psiphon
 
 import (
 	"errors"
-	dns "github.com/miekg/dns"
+	dns "github.com/Psiphon-Inc/dns"
 	"net"
 	"os"
 	"syscall"
