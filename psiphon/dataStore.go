@@ -24,7 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	sqlite3 "github.com/mattn/go-sqlite3"
+	sqlite3 "github.com/Psiphon-Inc/go-sqlite3"
 	"strings"
 	"sync"
 	"time"
