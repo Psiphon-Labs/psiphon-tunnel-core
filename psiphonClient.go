@@ -20,9 +20,21 @@
 package main
 
 import (
-	//"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
-	"testing"
+	"flag"
+	psiphon "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"log"
 )
 
-func TestPsiphon(t *testing.T) {
+func main() {
+	var configFilename string
+	flag.StringVar(&configFilename, "config", "", "configuration file")
+	flag.Parse()
+	if configFilename == "" {
+		log.Fatalf("configuration file is required")
+	}
+	config, err := psiphon.LoadConfig(configFilename)
+	if err != nil {
+		log.Fatalf("error loading configuration file: %s", err)
+	}
+	psiphon.RunForever(config)
 }

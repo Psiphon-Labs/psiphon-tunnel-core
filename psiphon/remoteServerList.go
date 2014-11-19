@@ -45,20 +45,35 @@ type RemoteServerList struct {
 // config.RemoteServerListUrl; validates its digital signature using the
 // public key config.RemoteServerListSignaturePublicKey; and parses the
 // data field into ServerEntry records.
-func FetchRemoteServerList(config *Config) (err error) {
+func FetchRemoteServerList(config *Config, pendingConns *Conns) (err error) {
 	Notice(NOTICE_INFO, "fetching remote server list")
-	httpClient := http.Client{
-		Timeout: FETCH_REMOTE_SERVER_LIST_TIMEOUT,
+
+	// Note: pendingConns may be used to interrupt the fetch remote server list
+	// request. BindToDevice may be used to exclude requests from VPN routing.
+	dialConfig := &DialConfig{
+		PendingConns:               pendingConns,
+		BindToDeviceServiceAddress: config.BindToDeviceServiceAddress,
+		BindToDeviceDnsServer:      config.BindToDeviceDnsServer,
 	}
+	transport := &http.Transport{
+		Dial: NewTCPDialer(dialConfig),
+	}
+	httpClient := http.Client{
+		Timeout:   FETCH_REMOTE_SERVER_LIST_TIMEOUT,
+		Transport: transport,
+	}
+
 	response, err := httpClient.Get(config.RemoteServerListUrl)
 	if err != nil {
 		return ContextError(err)
 	}
 	defer response.Body.Close()
+
 	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		return ContextError(err)
 	}
+
 	var remoteServerList *RemoteServerList
 	err = json.Unmarshal(body, &remoteServerList)
 	if err != nil {
@@ -68,6 +83,7 @@ func FetchRemoteServerList(config *Config) (err error) {
 	if err != nil {
 		return ContextError(err)
 	}
+
 	for _, encodedServerEntry := range strings.Split(remoteServerList.Data, "\n") {
 		serverEntry, err := DecodeServerEntry(encodedServerEntry)
 		if err != nil {

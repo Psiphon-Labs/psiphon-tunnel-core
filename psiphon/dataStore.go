@@ -24,7 +24,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	sqlite3 "github.com/mattn/go-sqlite3"
+	sqlite3 "github.com/Psiphon-Inc/go-sqlite3"
+	"strings"
 	"sync"
 	"time"
 )
@@ -47,6 +48,9 @@ func initDataStore() {
              rank integer not null unique,
              region text not null,
              data blob not null);
+	    create table if not exists serverEntryProtocol
+	        (serverEntryId text not null,
+	         protocol text not null);
         create table if not exists keyValue
             (key text not null,
              value text not null);
@@ -130,7 +134,6 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 		if serverEntryExists && !replaceIfExists {
 			return nil
 		}
-		// TODO: also skip updates if replaceIfExists but 'data' has not changed
 		_, err := transaction.Exec(`
             update serverEntry set rank = rank + 1
                 where id = (select id from serverEntry order by rank desc limit 1);
@@ -149,6 +152,20 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
             `, serverEntry.IpAddress, serverEntry.Region, data)
 		if err != nil {
 			return err
+		}
+		for _, protocol := range SupportedTunnelProtocols {
+			// Note: for meek, the capabilities are FRONTED-MEEK and UNFRONTED-MEEK
+			// and the additonal OSSH service is assumed to be available internally.
+			requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
+			if Contains(serverEntry.Capabilities, requiredCapability) {
+				_, err = transaction.Exec(`
+		            insert or ignore into serverEntryProtocol (serverEntryId, protocol)
+		            values (?, ?);
+		            `, serverEntry.IpAddress, protocol)
+				if err != nil {
+					return err
+				}
+			}
 		}
 		// TODO: post notice after commit
 		if !serverEntryExists {
@@ -176,90 +193,91 @@ func PromoteServerEntry(ipAddress string) error {
 	})
 }
 
-// ServerEntryCycler is used to continuously iterate over
+// ServerEntryIterator is used to iterate over
 // stored server entries in rank order.
-type ServerEntryCycler struct {
+type ServerEntryIterator struct {
 	region      string
+	protocol    string
+	excludeIds  []string
 	transaction *sql.Tx
 	cursor      *sql.Rows
-	isReset     bool
 }
 
-// NewServerEntryCycler creates a new ServerEntryCycler
-func NewServerEntryCycler(region string) (cycler *ServerEntryCycler, err error) {
+// NewServerEntryIterator creates a new NewServerEntryIterator
+func NewServerEntryIterator(
+	region, protocol string,
+	excludeServerEntries []*ServerEntry) (iterator *ServerEntryIterator, err error) {
+
 	initDataStore()
-	cycler = &ServerEntryCycler{region: region}
-	err = cycler.Reset()
+	excludeIds := make([]string, len(excludeServerEntries))
+	for index, serverEntry := range excludeServerEntries {
+		excludeIds[index] = serverEntry.IpAddress
+	}
+	iterator = &ServerEntryIterator{
+		region:     region,
+		protocol:   protocol,
+		excludeIds: excludeIds,
+	}
+	err = iterator.Reset()
 	if err != nil {
 		return nil, err
 	}
-	return cycler, nil
+	return iterator, nil
 }
 
-// Reset a ServerEntryCycler to the start of its cycle. The next
+// Reset a NewServerEntryIterator to the start of its cycle. The next
 // call to Next will return the first server entry.
-func (cycler *ServerEntryCycler) Reset() error {
-	cycler.Close()
+func (iterator *ServerEntryIterator) Reset() error {
+	iterator.Close()
 	transaction, err := singleton.db.Begin()
 	if err != nil {
 		return ContextError(err)
 	}
 	var cursor *sql.Rows
-	if cycler.region == "" {
-		cursor, err = transaction.Query(
-			"select data from serverEntry order by rank desc;")
-	} else {
-		cursor, err = transaction.Query(
-			"select data from serverEntry where region = ? order by rank desc;",
-			cycler.region)
-	}
+	whereClause, whereParams := makeServerEntryWhereClause(
+		iterator.region, iterator.protocol, iterator.excludeIds)
+	query := "select data from serverEntry" + whereClause + " order by rank desc;"
+	cursor, err = transaction.Query(query, whereParams...)
 	if err != nil {
 		transaction.Rollback()
 		return ContextError(err)
 	}
-	cycler.isReset = true
-	cycler.transaction = transaction
-	cycler.cursor = cursor
+	iterator.transaction = transaction
+	iterator.cursor = cursor
 	return nil
 }
 
-// Close cleans up resources associated with a ServerEntryCycler.
-func (cycler *ServerEntryCycler) Close() {
-	if cycler.cursor != nil {
-		cycler.cursor.Close()
+// Close cleans up resources associated with a ServerEntryIterator.
+func (iterator *ServerEntryIterator) Close() {
+	if iterator.cursor != nil {
+		iterator.cursor.Close()
 	}
-	cycler.cursor = nil
-	if cycler.transaction != nil {
-		cycler.transaction.Rollback()
+	iterator.cursor = nil
+	if iterator.transaction != nil {
+		iterator.transaction.Rollback()
 	}
-	cycler.transaction = nil
+	iterator.transaction = nil
 }
 
-// Next returns the next server entry, by rank, for a ServerEntryCycler. When
-// the ServerEntryCycler has worked through all known server entries, Next will
-// call Reset and start over and return the first server entry again.
-func (cycler *ServerEntryCycler) Next() (serverEntry *ServerEntry, err error) {
+// Next returns the next server entry, by rank, for a ServerEntryIterator.
+// Returns nil with no error when there is no next item.
+func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error) {
 	defer func() {
 		if err != nil {
-			cycler.Close()
+			iterator.Close()
 		}
 	}()
-	for !cycler.cursor.Next() {
-		err = cycler.cursor.Err()
+	if !iterator.cursor.Next() {
+		err = iterator.cursor.Err()
 		if err != nil {
 			return nil, ContextError(err)
 		}
-		if cycler.isReset {
-			return nil, ContextError(errors.New("no server entries"))
-		}
-		err = cycler.Reset()
-		if err != nil {
-			return nil, ContextError(err)
-		}
+		// There is no next item
+		return nil, nil
 	}
-	cycler.isReset = false
+
 	var data []byte
-	err = cycler.cursor.Scan(&data)
+	err = iterator.cursor.Scan(&data)
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -271,24 +289,62 @@ func (cycler *ServerEntryCycler) Next() (serverEntry *ServerEntry, err error) {
 	return serverEntry, nil
 }
 
-// HasServerEntries returns true if the data store contains at
-// least one server entry (for the specified region, in not blank).
-func HasServerEntries(region string) bool {
-	initDataStore()
-	var err error
-	var count int
-	if region == "" {
-		err = singleton.db.QueryRow("select count(*) from serverEntry;").Scan(&count)
-		if err == nil {
-			Notice(NOTICE_INFO, "servers: %d", count)
-		}
-	} else {
-		err = singleton.db.QueryRow(
-			"select count(*) from serverEntry where region = ?;", region).Scan(&count)
-		if err == nil {
-			Notice(NOTICE_INFO, "servers for region %s: %d", region, count)
-		}
+func makeServerEntryWhereClause(
+	region, protocol string, excludeIds []string) (whereClause string, whereParams []interface{}) {
+	whereClause = ""
+	whereParams = make([]interface{}, 0)
+	if region != "" {
+		whereClause += " where region = ?"
+		whereParams = append(whereParams, region)
 	}
+	if protocol != "" {
+		if len(whereClause) > 0 {
+			whereClause += " and"
+		} else {
+			whereClause += " where"
+		}
+		whereClause +=
+			" exists (select 1 from serverEntryProtocol where protocol = ? and serverEntryId = serverEntry.id)"
+		whereParams = append(whereParams, protocol)
+	}
+	if len(excludeIds) > 0 {
+		if len(whereClause) > 0 {
+			whereClause += " and"
+		} else {
+			whereClause += " where"
+		}
+		whereClause += " id in ("
+		for index, id := range excludeIds {
+			if index > 0 {
+				whereClause += ", "
+			}
+			whereClause += "?"
+			whereParams = append(whereParams, id)
+		}
+		whereClause += ")"
+	}
+	return whereClause, whereParams
+}
+
+// HasServerEntries returns true if the data store contains at
+// least one server entry (for the specified region and/or protocol,
+// when not blank).
+func HasServerEntries(region, protocol string) bool {
+	initDataStore()
+	var count int
+	whereClause, whereParams := makeServerEntryWhereClause(region, protocol, nil)
+	query := "select count(*) from serverEntry" + whereClause
+	err := singleton.db.QueryRow(query, whereParams...).Scan(&count)
+
+	if region == "" {
+		region = "(any)"
+	}
+	if protocol == "" {
+		protocol = "(any)"
+	}
+	Notice(NOTICE_INFO, "servers for region %s and protocol %s: %d",
+		region, protocol, count)
+
 	return err == nil && count > 0
 }
 

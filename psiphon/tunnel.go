@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"code.google.com/p/go.crypto/ssh"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -49,11 +50,14 @@ var SupportedTunnelProtocols = []string{
 // tunnel includes a network connection to the specified server
 // and an SSH session built on top of that transport.
 type Tunnel struct {
-	serverEntry      *ServerEntry
-	protocol         string
-	conn             Conn
-	sshClient        *ssh.Client
-	sshKeepAliveQuit chan struct{}
+	serverEntry             *ServerEntry
+	sessionId               string
+	protocol                string
+	conn                    Conn
+	sshClient               *ssh.Client
+	sshKeepAliveQuit        chan struct{}
+	portForwardFailures     chan int
+	portForwardFailureTotal int
 }
 
 // Close terminates the tunnel.
@@ -77,20 +81,18 @@ func (tunnel *Tunnel) Close() {
 // the first protocol in SupportedTunnelProtocols that's also in the
 // server capabilities is used.
 func EstablishTunnel(
-	config *Config,
-	sessionId string,
-	serverEntry *ServerEntry,
-	pendingConns *Conns) (tunnel *Tunnel, err error) {
+	controller *Controller, serverEntry *ServerEntry) (tunnel *Tunnel, err error) {
+
 	// Select the protocol
 	var selectedProtocol string
 	// TODO: properly handle protocols (e.g. FRONTED-MEEK-OSSH) vs. capabilities (e.g., {FRONTED-MEEK, OSSH})
 	// for now, the code is simply assuming that MEEK capabilities imply OSSH capability.
-	if config.TunnelProtocol != "" {
-		requiredCapability := strings.TrimSuffix(config.TunnelProtocol, "-OSSH")
+	if controller.config.TunnelProtocol != "" {
+		requiredCapability := strings.TrimSuffix(controller.config.TunnelProtocol, "-OSSH")
 		if !Contains(serverEntry.Capabilities, requiredCapability) {
 			return nil, ContextError(fmt.Errorf("server does not have required capability"))
 		}
-		selectedProtocol = config.TunnelProtocol
+		selectedProtocol = controller.config.TunnelProtocol
 	} else {
 		// Order of SupportedTunnelProtocols is default preference order
 		for _, protocol := range SupportedTunnelProtocols {
@@ -106,6 +108,7 @@ func EstablishTunnel(
 	}
 	Notice(NOTICE_INFO, "connecting to %s in region %s using %s",
 		serverEntry.IpAddress, serverEntry.Region, selectedProtocol)
+
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
 	port := 0
@@ -127,14 +130,23 @@ func EstablishTunnel(
 	case TUNNEL_PROTOCOL_SSH:
 		port = serverEntry.SshPort
 	}
+
+	// Generate a session Id for the Psiphon server API. This is generated now so
+	// that it can be sent with the SSH password payload, which helps the server
+	// associate client geo location, used in server API stats, with the session ID.
+	sessionId, err := MakeSessionId()
+	if err != nil {
+		return nil, ContextError(err)
+	}
+
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
 		ConnectTimeout:             TUNNEL_CONNECT_TIMEOUT,
 		ReadTimeout:                TUNNEL_READ_TIMEOUT,
 		WriteTimeout:               TUNNEL_WRITE_TIMEOUT,
-		PendingConns:               pendingConns,
-		BindToDeviceServiceAddress: config.BindToDeviceServiceAddress,
-		BindToDeviceDnsServer:      config.BindToDeviceDnsServer,
+		PendingConns:               controller.pendingConns,
+		BindToDeviceServiceAddress: controller.config.BindToDeviceServiceAddress,
+		BindToDeviceDnsServer:      controller.config.BindToDeviceDnsServer,
 	}
 	var conn Conn
 	if useMeek {
@@ -157,6 +169,7 @@ func EstablishTunnel(
 			conn.Close()
 		}
 	}()
+
 	// Add obfuscated SSH layer
 	var sshConn net.Conn
 	sshConn = conn
@@ -166,6 +179,7 @@ func EstablishTunnel(
 			return nil, ContextError(err)
 		}
 	}
+
 	// Now establish the SSH session over the sshConn transport
 	expectedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.SshHostKey)
 	if err != nil {
@@ -179,10 +193,18 @@ func EstablishTunnel(
 			return nil
 		},
 	}
+	sshPasswordPayload, err := json.Marshal(
+		struct {
+			SessionId   string `json:"SessionId"`
+			SshPassword string `json:"SshPassword"`
+		}{sessionId, serverEntry.SshPassword})
+	if err != nil {
+		return nil, ContextError(err)
+	}
 	sshClientConfig := &ssh.ClientConfig{
 		User: serverEntry.SshUsername,
 		Auth: []ssh.AuthMethod{
-			ssh.Password(serverEntry.SshPassword),
+			ssh.Password(string(sshPasswordPayload)),
 		},
 		HostKeyCallback: sshCertChecker.CheckHostKey,
 	}
@@ -194,6 +216,7 @@ func EstablishTunnel(
 		return nil, ContextError(err)
 	}
 	sshClient := ssh.NewClient(sshClientConn, sshChans, sshReqs)
+
 	// Run a goroutine to periodically execute SSH keepalive
 	sshKeepAliveQuit := make(chan struct{})
 	sshKeepAliveTicker := time.NewTicker(TUNNEL_SSH_KEEP_ALIVE_PERIOD)
@@ -214,11 +237,16 @@ func EstablishTunnel(
 			}
 		}
 	}()
+
 	return &Tunnel{
 			serverEntry:      serverEntry,
+			sessionId:        sessionId,
 			protocol:         selectedProtocol,
 			conn:             conn,
 			sshClient:        sshClient,
-			sshKeepAliveQuit: sshKeepAliveQuit},
+			sshKeepAliveQuit: sshKeepAliveQuit,
+			// portForwardFailures buffer size is large enough to receive the thresold number
+			// of failure reports without blocking. Senders can drop failures without blocking.
+			portForwardFailures: make(chan int, controller.config.PortForwardFailureThreshold)},
 		nil
 }
