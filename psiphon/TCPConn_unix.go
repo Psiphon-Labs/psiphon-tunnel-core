@@ -39,6 +39,7 @@ type interruptibleTCPSocket struct {
 // syscall APIs are used. The sequence of syscalls in this implementation are
 // taken from: https://code.google.com/p/go/issues/detail?id=6966
 func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err error) {
+
 	// Create a socket and then, before connecting, add a TCPConn with
 	// the unconnected socket to pendingConns. This allows pendingConns to
 	// abort connections in progress.
@@ -52,6 +53,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 			syscall.Close(socketFd)
 		}
 	}()
+
 	// Note: this step is not interruptible
 	if config.BindToDeviceServiceAddress != "" {
 		err = bindToDevice(socketFd, config)
@@ -59,6 +61,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 			return nil, ContextError(err)
 		}
 	}
+
 	// Get the remote IP and port, resolving a domain name if necessary
 	host, strPort, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -78,12 +81,14 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	// TODO: IPv6 support
 	var ip [4]byte
 	copy(ip[:], ipAddrs[0].To4())
+
 	// Enable interruption
 	conn = &TCPConn{
 		interruptible: interruptibleTCPSocket{socketFd: socketFd},
 		readTimeout:   config.ReadTimeout,
 		writeTimeout:  config.WriteTimeout}
 	config.PendingConns.Add(conn)
+
 	// Connect the socket
 	// TODO: adjust the timeout to account for time spent resolving hostname
 	sockAddr := syscall.SockaddrInet4{Addr: ip, Port: port}
@@ -103,6 +108,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
 	// Convert the syscall socket to a net.Conn
 	file := os.NewFile(uintptr(conn.interruptible.socketFd), "")
 	defer file.Close()

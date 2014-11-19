@@ -41,6 +41,8 @@ type Config struct {
 	ConnectionWorkerPoolSize           int
 	BindToDeviceServiceAddress         string
 	BindToDeviceDnsServer              string
+	TunnelPoolSize                     int
+	PortForwardFailureThreshold        int
 }
 
 // LoadConfig reads, and parse, and validates a JSON format Psiphon config
@@ -48,36 +50,49 @@ type Config struct {
 func LoadConfig(filename string) (*Config, error) {
 	fileContents, err := ioutil.ReadFile(filename)
 	if err != nil {
-		return nil, err
+		return nil, ContextError(err)
 	}
 	var config Config
 	err = json.Unmarshal(fileContents, &config)
 	if err != nil {
-		return nil, err
+		return nil, ContextError(err)
 	}
 
 	// These fields are required; the rest are optional
 	if config.PropagationChannelId == "" {
-		return nil, errors.New("propagation channel ID is missing from the configuration file")
+		return nil, ContextError(
+			errors.New("propagation channel ID is missing from the configuration file"))
 	}
 	if config.SponsorId == "" {
-		return nil, errors.New("sponsor ID is missing from the configuration file")
+		return nil, ContextError(
+			errors.New("sponsor ID is missing from the configuration file"))
 	}
 	if config.RemoteServerListUrl == "" {
-		return nil, errors.New("remote server list URL is missing from the configuration file")
+		return nil, ContextError(
+			errors.New("remote server list URL is missing from the configuration file"))
 	}
 	if config.RemoteServerListSignaturePublicKey == "" {
-		return nil, errors.New("remote server list signature public key is missing from the configuration file")
+		return nil, ContextError(
+			errors.New("remote server list signature public key is missing from the configuration file"))
 	}
 
 	if config.TunnelProtocol != "" {
 		if !Contains(SupportedTunnelProtocols, config.TunnelProtocol) {
-			return nil, errors.New("invalid tunnel protocol")
+			return nil, ContextError(
+				errors.New("invalid tunnel protocol"))
 		}
 	}
 
 	if config.ConnectionWorkerPoolSize == 0 {
 		config.ConnectionWorkerPoolSize = CONNECTION_WORKER_POOL_SIZE
+	}
+
+	if config.TunnelPoolSize == 0 {
+		config.TunnelPoolSize = TUNNEL_POOL_SIZE
+	}
+
+	if config.PortForwardFailureThreshold == 0 {
+		config.PortForwardFailureThreshold = PORT_FORWARD_FAILURE_THRESHOLD
 	}
 
 	return &config, nil

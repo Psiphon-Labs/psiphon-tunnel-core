@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -98,4 +99,23 @@ func (conns *Conns) CloseAll() {
 		conn.Close()
 	}
 	conns.conns = make(map[net.Conn]bool)
+}
+
+// Relay sends to remoteConn bytes received from localConn,
+// and sends to localConn bytes received from remoteConn.
+func Relay(localConn, remoteConn net.Conn) {
+	copyWaitGroup := new(sync.WaitGroup)
+	copyWaitGroup.Add(1)
+	go func() {
+		defer copyWaitGroup.Done()
+		_, err := io.Copy(localConn, remoteConn)
+		if err != nil {
+			Notice(NOTICE_ALERT, "%s", ContextError(err))
+		}
+	}()
+	_, err := io.Copy(remoteConn, localConn)
+	if err != nil {
+		Notice(NOTICE_ALERT, "%s", ContextError(err))
+	}
+	copyWaitGroup.Wait()
 }

@@ -36,5 +36,5 @@ func main() {
 	if err != nil {
 		log.Fatalf("error loading configuration file: %s", err)
 	}
-	psiphon.RunTunnelForever(config)
+	psiphon.RunForever(config)
 }

@@ -31,39 +31,39 @@ import (
 // HttpProxy is a HTTP server that relays HTTP requests through
 // the tunnel SSH client.
 type HttpProxy struct {
-	tunnel        *Tunnel
-	stoppedSignal chan struct{}
-	listener      net.Listener
-	waitGroup     *sync.WaitGroup
-	httpRelay     *http.Transport
-	openConns     *Conns
+	controller     *Controller
+	listener       net.Listener
+	serveWaitGroup *sync.WaitGroup
+	httpRelay      *http.Transport
+	openConns      *Conns
 }
 
 // NewHttpProxy initializes and runs a new HTTP proxy server.
-func NewHttpProxy(listenPort int, tunnel *Tunnel, stoppedSignal chan struct{}) (proxy *HttpProxy, err error) {
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", listenPort))
+func NewHttpProxy(controller *Controller) (proxy *HttpProxy, err error) {
+	listener, err := net.Listen(
+		"tcp", fmt.Sprintf("127.0.0.1:%d", controller.config.LocalHttpProxyPort))
 	if err != nil {
-		return nil, err
+		return nil, ContextError(err)
 	}
-	tunnelledDialer := func(_, targetAddress string) (conn net.Conn, err error) {
+	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
 		// TODO: connect timeout?
-		return tunnel.sshClient.Dial("tcp", targetAddress)
+		return controller.dialWithTunnel(addr)
 	}
+	// TODO: also use http.Client, with its Timeout field?
 	transport := &http.Transport{
-		Dial:                  tunnelledDialer,
+		Dial:                  tunneledDialer,
 		MaxIdleConnsPerHost:   HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
 		ResponseHeaderTimeout: HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
 	}
 	proxy = &HttpProxy{
-		tunnel:        tunnel,
-		stoppedSignal: stoppedSignal,
-		listener:      listener,
-		waitGroup:     new(sync.WaitGroup),
-		httpRelay:     transport,
-		openConns:     new(Conns),
+		controller:     controller,
+		listener:       listener,
+		serveWaitGroup: new(sync.WaitGroup),
+		httpRelay:      transport,
+		openConns:      new(Conns),
 	}
-	proxy.waitGroup.Add(1)
-	go proxy.serveHttpRequests()
+	proxy.serveWaitGroup.Add(1)
+	go proxy.serve()
 	Notice(NOTICE_HTTP_PROXY, "local HTTP proxy running at address %s", proxy.listener.Addr().String())
 	return proxy, nil
 }
@@ -71,7 +71,7 @@ func NewHttpProxy(listenPort int, tunnel *Tunnel, stoppedSignal chan struct{}) (
 // Close terminates the HTTP server.
 func (proxy *HttpProxy) Close() {
 	proxy.listener.Close()
-	proxy.waitGroup.Wait()
+	proxy.serveWaitGroup.Wait()
 	// Close local->proxy persistent connections
 	proxy.openConns.CloseAll()
 	// Close idle proxy->origin persistent connections
@@ -105,7 +105,7 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 			return
 		}
 		go func() {
-			err := proxy.httpConnectHandler(proxy.tunnel, conn, request.URL.Host)
+			err := proxy.httpConnectHandler(conn, request.URL.Host)
 			if err != nil {
 				Notice(NOTICE_ALERT, "%s", ContextError(err))
 			}
@@ -117,12 +117,14 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 		http.Error(responseWriter, "", http.StatusInternalServerError)
 		return
 	}
+
 	// Transform request struct before using as input to relayed request
 	request.Close = false
 	request.RequestURI = ""
 	for _, key := range hopHeaders {
 		request.Header.Del(key)
 	}
+
 	// Relay the HTTP request and get the response
 	response, err := proxy.httpRelay.RoundTrip(request)
 	if err != nil {
@@ -131,6 +133,7 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 		return
 	}
 	defer response.Body.Close()
+
 	// Relay the remote response headers
 	for _, key := range hopHeaders {
 		response.Header.Del(key)
@@ -143,6 +146,7 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 			responseWriter.Header().Add(key, value)
 		}
 	}
+
 	// Relay the response code and body
 	responseWriter.WriteHeader(response.StatusCode)
 	_, err = io.Copy(responseWriter, response.Body)
@@ -179,20 +183,20 @@ var hopHeaders = []string{
 	"Upgrade",
 }
 
-func (proxy *HttpProxy) httpConnectHandler(tunnel *Tunnel, localHttpConn net.Conn, target string) (err error) {
-	defer localHttpConn.Close()
-	defer proxy.openConns.Remove(localHttpConn)
-	proxy.openConns.Add(localHttpConn)
-	remoteSshForward, err := tunnel.sshClient.Dial("tcp", target)
+func (proxy *HttpProxy) httpConnectHandler(localConn net.Conn, target string) (err error) {
+	defer localConn.Close()
+	defer proxy.openConns.Remove(localConn)
+	proxy.openConns.Add(localConn)
+	remoteConn, err := proxy.controller.dialWithTunnel(target)
 	if err != nil {
 		return ContextError(err)
 	}
-	defer remoteSshForward.Close()
-	_, err = localHttpConn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+	defer remoteConn.Close()
+	_, err = localConn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 	if err != nil {
 		return ContextError(err)
 	}
-	relayPortForward(localHttpConn, remoteSshForward)
+	Relay(localConn, remoteConn)
 	return nil
 }
 
@@ -213,9 +217,9 @@ func (proxy *HttpProxy) httpConnStateCallback(conn net.Conn, connState http.Conn
 	}
 }
 
-func (proxy *HttpProxy) serveHttpRequests() {
+func (proxy *HttpProxy) serve() {
 	defer proxy.listener.Close()
-	defer proxy.waitGroup.Done()
+	defer proxy.serveWaitGroup.Done()
 	httpServer := &http.Server{
 		Handler:   proxy,
 		ConnState: proxy.httpConnStateCallback,
@@ -223,10 +227,7 @@ func (proxy *HttpProxy) serveHttpRequests() {
 	// Note: will be interrupted by listener.Close() call made by proxy.Close()
 	err := httpServer.Serve(proxy.listener)
 	if err != nil {
-		select {
-		case proxy.stoppedSignal <- *new(struct{}):
-		default:
-		}
+		proxy.controller.SignalFailure()
 		Notice(NOTICE_ALERT, "%s", ContextError(err))
 	}
 	Notice(NOTICE_HTTP_PROXY, "HTTP proxy stopped")

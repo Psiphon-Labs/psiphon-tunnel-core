@@ -58,11 +58,13 @@ func bindLookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
 	// config.BindToDeviceDnsServer must be an IP address
 	ipAddr := net.ParseIP(config.BindToDeviceDnsServer)
 	if ipAddr == nil {
 		return nil, ContextError(errors.New("invalid IP address"))
 	}
+
 	// TODO: IPv6 support
 	var ip [4]byte
 	copy(ip[:], ipAddr.To4())
@@ -72,6 +74,7 @@ func bindLookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
 	// Convert the syscall socket to a net.Conn, for use in the dns package
 	file := os.NewFile(uintptr(socketFd), "")
 	defer file.Close()
@@ -79,9 +82,11 @@ func bindLookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
 	// Set DNS query timeouts, using the ConnectTimeout from the overall Dial
 	conn.SetReadDeadline(time.Now().Add(config.ConnectTimeout))
 	conn.SetWriteDeadline(time.Now().Add(config.ConnectTimeout))
+
 	// Make the DNS query
 	// TODO: make interruptible?
 	dnsConn := &dns.Conn{Conn: conn}
@@ -90,6 +95,8 @@ func bindLookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 	query.SetQuestion(dns.Fqdn(host), dns.TypeA)
 	query.RecursionDesired = true
 	dnsConn.WriteMsg(query)
+
+	// Process the response
 	response, err := dnsConn.ReadMsg()
 	if err != nil {
 		return nil, ContextError(err)
