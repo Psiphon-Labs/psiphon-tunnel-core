@@ -35,7 +35,8 @@ Setup
         "TunnelProtocol" : "",
         "ConnectionWorkerPoolSize" : 10,
         "TunnelPoolSize" : 1,
-        "PortForwardFailureThreshold" : 10
+        "PortForwardFailureThreshold" : 10,
+        "UpstreamHttpProxyAddress" : ""
     }
     ```
 
@@ -50,7 +51,6 @@ Roadmap
 * requirements for integrating with Windows client
   * split tunnel support
   * implement page view and bytes transferred stats
-  * upstream proxy support
   * resumable download of client upgrades
 * Android app
   * open home pages

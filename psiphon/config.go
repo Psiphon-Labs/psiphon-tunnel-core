@@ -43,6 +43,7 @@ type Config struct {
 	BindToDeviceDnsServer              string
 	TunnelPoolSize                     int
 	PortForwardFailureThreshold        int
+	UpstreamHttpProxyAddress           string
 }
 
 // LoadConfig reads, and parse, and validates a JSON format Psiphon config

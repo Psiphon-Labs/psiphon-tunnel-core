@@ -62,8 +62,15 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 		}
 	}
 
+	// When using an upstream HTTP proxy, first connect to the proxy,
+	// then use HTTP CONNECT to connect to the original destination.
+	dialAddr := addr
+	if config.UpstreamHttpProxyAddress != "" {
+		dialAddr = config.UpstreamHttpProxyAddress
+	}
+
 	// Get the remote IP and port, resolving a domain name if necessary
-	host, strPort, err := net.SplitHostPort(addr)
+	host, strPort, err := net.SplitHostPort(dialAddr)
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -88,6 +95,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 		readTimeout:   config.ReadTimeout,
 		writeTimeout:  config.WriteTimeout}
 	config.PendingConns.Add(conn)
+	defer config.PendingConns.Remove(conn)
 
 	// Connect the socket
 	// TODO: adjust the timeout to account for time spent resolving hostname
@@ -104,7 +112,6 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	} else {
 		err = syscall.Connect(conn.interruptible.socketFd, &sockAddr)
 	}
-	config.PendingConns.Remove(conn)
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -116,6 +123,16 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
+	// Going through upstream HTTP proxy
+	if config.UpstreamHttpProxyAddress != "" {
+		// This call can be interrupted by closing the pending conn
+		err := HttpProxyConnect(conn, addr)
+		if err != nil {
+			return nil, ContextError(err)
+		}
+	}
+
 	return conn, nil
 }
 

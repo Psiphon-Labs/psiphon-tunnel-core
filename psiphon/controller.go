@@ -108,6 +108,9 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 		Notice(NOTICE_ALERT, "controller shutdown due to failure")
 	}
 
+	// Note: in addition to establish(), this pendingConns will interrupt
+	// FetchRemoteServerList
+	controller.pendingConns.CloseAll()
 	close(controller.shutdownBroadcast)
 	controller.runWaitGroup.Wait()
 
@@ -133,8 +136,9 @@ func (controller *Controller) remoteServerListFetcher() {
 	// always makes the fetch remote server list request
 loop:
 	for {
-		// TODO: FetchRemoteServerList should abort immediately on shutdownBroadcast
-		err := FetchRemoteServerList(controller.config)
+		// TODO: FetchRemoteServerList should have its own pendingConns,
+		// otherwise it may needlessly abort when establish is stopped.
+		err := FetchRemoteServerList(controller.config, controller.pendingConns)
 		var duration time.Duration
 		if err != nil {
 			Notice(NOTICE_ALERT, "failed to fetch remote server list: %s", err)
