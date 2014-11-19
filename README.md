@@ -33,7 +33,9 @@ Setup
         "LocalSocksProxyPort" : 0,
         "EgressRegion" : "",
         "TunnelProtocol" : "",
-        "ConnectionWorkerPoolSize" : 10
+        "ConnectionWorkerPoolSize" : 10,
+        "TunnelPoolSize" : 1,
+        "PortForwardFailureThreshold" : 10
     }
     ```
 
@@ -43,23 +45,21 @@ Setup
 Roadmap
 --------------------------------------------------------------------------------
 
-### TODO (proof-of-concept)
+### TODO (short-term)
 
+* requirements for integrating with Windows client
+  * split tunnel support
+  * implement page view and bytes transferred stats
+  * upstream proxy support
+  * resumable download of client upgrades
 * Android app
   * open home pages
   * Go binary PIE, or use a Go library and JNI
   * settings UI (e.g., region selection)
-* reconnection busy loop when no network available (ex. close laptop); should wait for network connectivity
 * sometimes fails to promptly detect loss of connection after device sleep
-* continuity and performance
-  * always-on local proxies
-  * multiplex across simultaneous tunnels
-  * monitor health of tunnels; for example fail-over to new server on "ssh: rejected: administratively prohibited (open failed)" error?
 * PendingConns: is interrupting connection establishment worth the extra code complexity?
-* prefilter entries by capability; don't log "server does not have sufficient capabilities"
 * log noise: "use of closed network connection"
 * log noise(?): 'Unsolicited response received on idle HTTP channel starting with "H"'
-* use ContextError in more places
 
 ### TODO (future)
 
@@ -70,19 +70,14 @@ Roadmap
   * unfronted meek almost makes this obsolete, since meek sessions survive underlying
      HTTP transport socket disconnects. The client could prefer unfronted meek protocol
      when handshake returns a preemptive_reconnect_lifetime_milliseconds.
-* split tunnel support
-* implement page view stats
+  * could also be accomplished with TunnelPoolSize > 1 and staggaring the establishment times
 * implement local traffic stats (e.g., to display bytes sent/received)
-* control interface (w/ event messages)?
-* upstream proxy support
-* support upgrades
-  * download entire client
-  * download core component only
+* more formal control interface (w/ event messages)?
+* support upgrading core only
 * try multiple protocols for each server (currently only tries one protocol per server)
 * support a config pushed by the network
   * server can push preferred/optimized settings; client should prefer over defaults
-  * e.g., etablish worker pool size; multiplex tunnel pool size
-* overlap between httpProxy.go and socksProxy.go: refactor?
+  * e.g., etablish worker pool size; tunnel pool size
 
 Licensing
 --------------------------------------------------------------------------------
