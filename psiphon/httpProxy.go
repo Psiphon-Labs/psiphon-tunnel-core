@@ -31,7 +31,7 @@ import (
 // HttpProxy is a HTTP server that relays HTTP requests through
 // the tunnel SSH client.
 type HttpProxy struct {
-	controller     *Controller
+	tunneler       Tunneler
 	listener       net.Listener
 	serveWaitGroup *sync.WaitGroup
 	httpRelay      *http.Transport
@@ -39,15 +39,15 @@ type HttpProxy struct {
 }
 
 // NewHttpProxy initializes and runs a new HTTP proxy server.
-func NewHttpProxy(controller *Controller) (proxy *HttpProxy, err error) {
+func NewHttpProxy(config *Config, tunneler Tunneler) (proxy *HttpProxy, err error) {
 	listener, err := net.Listen(
-		"tcp", fmt.Sprintf("127.0.0.1:%d", controller.config.LocalHttpProxyPort))
+		"tcp", fmt.Sprintf("127.0.0.1:%d", config.LocalHttpProxyPort))
 	if err != nil {
 		return nil, ContextError(err)
 	}
 	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
 		// TODO: connect timeout?
-		return controller.dialWithTunnel(addr)
+		return tunneler.Dial(addr)
 	}
 	// TODO: also use http.Client, with its Timeout field?
 	transport := &http.Transport{
@@ -56,7 +56,7 @@ func NewHttpProxy(controller *Controller) (proxy *HttpProxy, err error) {
 		ResponseHeaderTimeout: HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
 	}
 	proxy = &HttpProxy{
-		controller:     controller,
+		tunneler:       tunneler,
 		listener:       listener,
 		serveWaitGroup: new(sync.WaitGroup),
 		httpRelay:      transport,
@@ -187,7 +187,7 @@ func (proxy *HttpProxy) httpConnectHandler(localConn net.Conn, target string) (e
 	defer localConn.Close()
 	defer proxy.openConns.Remove(localConn)
 	proxy.openConns.Add(localConn)
-	remoteConn, err := proxy.controller.dialWithTunnel(target)
+	remoteConn, err := proxy.tunneler.Dial(target)
 	if err != nil {
 		return ContextError(err)
 	}
@@ -227,7 +227,7 @@ func (proxy *HttpProxy) serve() {
 	// Note: will be interrupted by listener.Close() call made by proxy.Close()
 	err := httpServer.Serve(proxy.listener)
 	if err != nil {
-		proxy.controller.SignalFailure()
+		proxy.tunneler.SignalFailure()
 		Notice(NOTICE_ALERT, "%s", ContextError(err))
 	}
 	Notice(NOTICE_HTTP_PROXY, "HTTP proxy stopped")

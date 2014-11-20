@@ -31,7 +31,7 @@ import (
 // the tunnel SSH client and relays traffic through the port
 // forward.
 type SocksProxy struct {
-	controller     *Controller
+	tunneler       Tunneler
 	listener       *socks.SocksListener
 	serveWaitGroup *sync.WaitGroup
 	openConns      *Conns
@@ -40,14 +40,14 @@ type SocksProxy struct {
 // NewSocksProxy initializes a new SOCKS server. It begins listening for
 // connections, starts a goroutine that runs an accept loop, and returns
 // leaving the accept loop running.
-func NewSocksProxy(controller *Controller) (proxy *SocksProxy, err error) {
+func NewSocksProxy(config *Config, tunneler Tunneler) (proxy *SocksProxy, err error) {
 	listener, err := socks.ListenSocks(
-		"tcp", fmt.Sprintf("127.0.0.1:%d", controller.config.LocalSocksProxyPort))
+		"tcp", fmt.Sprintf("127.0.0.1:%d", config.LocalSocksProxyPort))
 	if err != nil {
 		return nil, ContextError(err)
 	}
 	proxy = &SocksProxy{
-		controller:     controller,
+		tunneler:       tunneler,
 		listener:       listener,
 		serveWaitGroup: new(sync.WaitGroup),
 		openConns:      new(Conns),
@@ -70,7 +70,7 @@ func (proxy *SocksProxy) socksConnectionHandler(localConn *socks.SocksConn) (err
 	defer localConn.Close()
 	defer proxy.openConns.Remove(localConn)
 	proxy.openConns.Add(localConn)
-	remoteConn, err := proxy.controller.dialWithTunnel(localConn.Req.Target)
+	remoteConn, err := proxy.tunneler.Dial(localConn.Req.Target)
 	if err != nil {
 		return ContextError(err)
 	}
@@ -92,7 +92,7 @@ func (proxy *SocksProxy) serve() {
 		if err != nil {
 			Notice(NOTICE_ALERT, "SOCKS proxy accept error: %s", err)
 			if e, ok := err.(net.Error); ok && !e.Temporary() {
-				proxy.controller.SignalFailure()
+				proxy.tunneler.SignalFailure()
 				// Fatal error, stop the proxy
 				break
 			}
