@@ -31,6 +31,15 @@ import (
 	"time"
 )
 
+// Tunneler specifies the interface required by components that use a tunnel.
+// Components which use this interface may be services by a single Tunnel instance,
+// or a Controller which manages a pool of tunnels, or any other object which
+// implements Tunneler.
+type Tunneler interface {
+	Dial(remoteAddr string) (conn net.Conn, err error)
+	SignalFailure()
+}
+
 const (
 	TUNNEL_PROTOCOL_SSH            = "SSH"
 	TUNNEL_PROTOCOL_OBFUSCATED_SSH = "OSSH"
@@ -81,18 +90,18 @@ func (tunnel *Tunnel) Close() {
 // the first protocol in SupportedTunnelProtocols that's also in the
 // server capabilities is used.
 func EstablishTunnel(
-	controller *Controller, serverEntry *ServerEntry) (tunnel *Tunnel, err error) {
+	config *Config, pendingConns *Conns, serverEntry *ServerEntry) (tunnel *Tunnel, err error) {
 
 	// Select the protocol
 	var selectedProtocol string
 	// TODO: properly handle protocols (e.g. FRONTED-MEEK-OSSH) vs. capabilities (e.g., {FRONTED-MEEK, OSSH})
 	// for now, the code is simply assuming that MEEK capabilities imply OSSH capability.
-	if controller.config.TunnelProtocol != "" {
-		requiredCapability := strings.TrimSuffix(controller.config.TunnelProtocol, "-OSSH")
+	if config.TunnelProtocol != "" {
+		requiredCapability := strings.TrimSuffix(config.TunnelProtocol, "-OSSH")
 		if !Contains(serverEntry.Capabilities, requiredCapability) {
 			return nil, ContextError(fmt.Errorf("server does not have required capability"))
 		}
-		selectedProtocol = controller.config.TunnelProtocol
+		selectedProtocol = config.TunnelProtocol
 	} else {
 		// Order of SupportedTunnelProtocols is default preference order
 		for _, protocol := range SupportedTunnelProtocols {
@@ -144,9 +153,9 @@ func EstablishTunnel(
 		ConnectTimeout:             TUNNEL_CONNECT_TIMEOUT,
 		ReadTimeout:                TUNNEL_READ_TIMEOUT,
 		WriteTimeout:               TUNNEL_WRITE_TIMEOUT,
-		PendingConns:               controller.pendingConns,
-		BindToDeviceServiceAddress: controller.config.BindToDeviceServiceAddress,
-		BindToDeviceDnsServer:      controller.config.BindToDeviceDnsServer,
+		PendingConns:               pendingConns,
+		BindToDeviceServiceAddress: config.BindToDeviceServiceAddress,
+		BindToDeviceDnsServer:      config.BindToDeviceDnsServer,
 	}
 	var conn Conn
 	if useMeek {
@@ -247,6 +256,19 @@ func EstablishTunnel(
 			sshKeepAliveQuit: sshKeepAliveQuit,
 			// portForwardFailures buffer size is large enough to receive the thresold number
 			// of failure reports without blocking. Senders can drop failures without blocking.
-			portForwardFailures: make(chan int, controller.config.PortForwardFailureThreshold)},
+			portForwardFailures: make(chan int, config.PortForwardFailureThreshold)},
 		nil
+}
+
+// Dial establishes a port forward connection through the tunnel
+func (tunnel *Tunnel) Dial(remoteAddr string) (conn net.Conn, err error) {
+	// TODO: should this track port forward failures as in Controller.DialWithTunnel?
+	return tunnel.sshClient.Dial("tcp", remoteAddr)
+}
+
+// SignalFailure notifies the tunnel that an associated component has failed.
+// This will terminate the tunnel.
+func (tunnel *Tunnel) SignalFailure() {
+	Notice(NOTICE_ALERT, "tunnel received failure signal")
+	tunnel.Close()
 }

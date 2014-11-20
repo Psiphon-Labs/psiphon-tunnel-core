@@ -84,13 +84,13 @@ func NewController(config *Config) (controller *Controller) {
 // - a local SOCKS proxy that port forwards through the pool of tunnels
 // - a local HTTP proxy that port forwards through the pool of tunnels
 func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
-	socksProxy, err := NewSocksProxy(controller)
+	socksProxy, err := NewSocksProxy(controller.config, controller)
 	if err != nil {
 		Notice(NOTICE_ALERT, "error initializing local SOCKS proxy: %s", err)
 		return
 	}
 	defer socksProxy.Close()
-	httpProxy, err := NewHttpProxy(controller)
+	httpProxy, err := NewHttpProxy(controller.config, controller)
 	if err != nil {
 		Notice(NOTICE_ALERT, "error initializing local SOCKS proxy: %s", err)
 		return
@@ -117,7 +117,7 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	Notice(NOTICE_INFO, "exiting controller")
 }
 
-// SignalFailure notifies the controller than a component has failed.
+// SignalFailure notifies the controller that an associated component has failed.
 // This will terminate the controller.
 func (controller *Controller) SignalFailure() {
 	select {
@@ -441,15 +441,15 @@ func (conn *TunneledConn) Write(buffer []byte) (n int, err error) {
 	return
 }
 
-// dialWithTunnel selects an active tunnel and establishes a port forward
+// DialWithTunnel selects an active tunnel and establishes a port forward
 // connection through the selected tunnel. Failure to connect is considered
 // a port foward failure, for the purpose of monitoring tunnel health.
-func (controller *Controller) dialWithTunnel(remoteAddr string) (conn net.Conn, err error) {
+func (controller *Controller) Dial(remoteAddr string) (conn net.Conn, err error) {
 	tunnel := controller.getNextActiveTunnel()
 	if tunnel == nil {
 		return nil, ContextError(errors.New("no active tunnels"))
 	}
-	sshPortForward, err := tunnel.sshClient.Dial("tcp", remoteAddr)
+	tunnelConn, err := tunnel.Dial(remoteAddr)
 	if err != nil {
 		// TODO: conditional on type of error or error message?
 		select {
@@ -459,7 +459,7 @@ func (controller *Controller) dialWithTunnel(remoteAddr string) (conn net.Conn, 
 		return nil, ContextError(err)
 	}
 	return &TunneledConn{
-			Conn:   sshPortForward,
+			Conn:   tunnelConn,
 			tunnel: tunnel},
 		nil
 }
@@ -576,7 +576,8 @@ func (controller *Controller) establishTunnelWorker() {
 			return
 		default:
 		}
-		tunnel, err := EstablishTunnel(controller, serverEntry)
+		tunnel, err := EstablishTunnel(
+			controller.config, controller.pendingConns, serverEntry)
 		if err != nil {
 			// TODO: distingush case where conn is interrupted?
 			Notice(NOTICE_INFO, "failed to connect to %s: %s", serverEntry.IpAddress, err)
