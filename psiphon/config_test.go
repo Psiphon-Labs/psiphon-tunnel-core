@@ -27,13 +27,11 @@ intended to be something to learn from and derive other test sets.
 */
 
 import (
-	"encoding/json"
-	"errors"
-	"github.com/stretchr/testify/suite"
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/suite"
 )
 
 const (
@@ -90,8 +88,6 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadFileContents() {
 	writeConfigFile(filename, "**ohhi**")
 	_, err := LoadConfig(filename)
 	suite.NotNil(err, "error should be set")
-	// TODO: Is it worthwhile to test error types?
-	suite.Equal(reflect.TypeOf(json.SyntaxError{}).Name(), reflect.TypeOf(err).Elem().Name())
 }
 
 // Tests config file with JSON contents that don't match our structure
@@ -102,25 +98,21 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 	writeConfigFile(filename, `{"f1": 11, "f2": "two"}`)
 	_, err := LoadConfig(filename)
 	suite.NotNil(err, "error should be set")
-	suite.Equal(reflect.TypeOf(errors.New("")).Elem().Name(), reflect.TypeOf(err).Elem().Name())
 
 	// Has one of our required fields, but wrong type
 	writeConfigFile(filename, `{"PropagationChannelId": 11, "f2": "two"}`)
 	_, err = LoadConfig(filename)
 	suite.NotNil(err, "error should be set")
-	suite.Equal(reflect.TypeOf(json.UnmarshalTypeError{}).Name(), reflect.TypeOf(err).Elem().Name())
 
 	// Has one of our required fields, but null
 	writeConfigFile(filename, `{"PropagationChannelId": null, "f2": "two"}`)
 	_, err = LoadConfig(filename)
 	suite.NotNil(err, "error should be set")
-	suite.Equal(reflect.TypeOf(errors.New("")).Elem().Name(), reflect.TypeOf(err).Elem().Name())
 
 	// Has one of our required fields, but empty string
 	writeConfigFile(filename, `{"PropagationChannelId": "", "f2": "two"}`)
 	_, err = LoadConfig(filename)
 	suite.NotNil(err, "error should be set")
-	suite.Equal(reflect.TypeOf(errors.New("")).Elem().Name(), reflect.TypeOf(err).Elem().Name())
 
 	// Has all of our required fields, but no optional fields
 	writeConfigFile(filename, `{"PropagationChannelId": "xyz", "SponsorId": "xyz", "RemoteServerListUrl": "xyz", "RemoteServerListSignaturePublicKey": "xyz"}`)
@@ -132,7 +124,6 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 	writeConfigFile(filename, `{"ClientVersion": "string, not int", "PropagationChannelId": "xyz", "SponsorId": "xyz", "RemoteServerListUrl": "xyz", "RemoteServerListSignaturePublicKey": "xyz"}`)
 	_, err = LoadConfig(filename)
 	suite.NotNil(err, "error should be set")
-	suite.Equal(reflect.TypeOf(json.UnmarshalTypeError{}).Name(), reflect.TypeOf(err).Elem().Name())
 
 	// Has null for optional field
 	writeConfigFile(filename, `{"ClientVersion": null, "PropagationChannelId": "xyz", "SponsorId": "xyz", "RemoteServerListUrl": "xyz", "RemoteServerListSignaturePublicKey": "xyz"}`)
