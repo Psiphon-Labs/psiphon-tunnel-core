@@ -441,7 +441,7 @@ func (conn *TunneledConn) Write(buffer []byte) (n int, err error) {
 	return
 }
 
-// DialWithTunnel selects an active tunnel and establishes a port forward
+// Dial selects an active tunnel and establishes a port forward
 // connection through the selected tunnel. Failure to connect is considered
 // a port foward failure, for the purpose of monitoring tunnel health.
 func (controller *Controller) Dial(remoteAddr string) (conn net.Conn, err error) {
