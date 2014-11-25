@@ -26,6 +26,7 @@ package psiphon
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -417,7 +418,7 @@ type TunneledConn struct {
 
 func (conn *TunneledConn) Read(buffer []byte) (n int, err error) {
 	n, err = conn.Conn.Read(buffer)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		// Report 1 new failure. Won't block; assumes the receiver
 		// has a sufficient buffer for the threshold number of reports.
 		// TODO: conditional on type of error or error message?
@@ -431,7 +432,7 @@ func (conn *TunneledConn) Read(buffer []byte) (n int, err error) {
 
 func (conn *TunneledConn) Write(buffer []byte) (n int, err error) {
 	n, err = conn.Conn.Write(buffer)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		// Same as TunneledConn.Read()
 		select {
 		case conn.tunnel.portForwardFailures <- 1:
@@ -441,7 +442,7 @@ func (conn *TunneledConn) Write(buffer []byte) (n int, err error) {
 	return
 }
 
-// DialWithTunnel selects an active tunnel and establishes a port forward
+// Dial selects an active tunnel and establishes a port forward
 // connection through the selected tunnel. Failure to connect is considered
 // a port foward failure, for the purpose of monitoring tunnel health.
 func (controller *Controller) Dial(remoteAddr string) (conn net.Conn, err error) {
