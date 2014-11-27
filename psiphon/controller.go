@@ -380,6 +380,9 @@ func (controller *Controller) operateTunnel(tunnel *Tunnel) {
 		select {
 		case failures := <-tunnel.portForwardFailures:
 			tunnel.portForwardFailureTotal += failures
+			Notice(
+				NOTICE_INFO, "port forward failures for %s: %d",
+				tunnel.serverEntry.IpAddress, tunnel.portForwardFailureTotal)
 			if tunnel.portForwardFailureTotal > controller.config.PortForwardFailureThreshold {
 				err = errors.New("tunnel exceeded port forward failure threshold")
 			}

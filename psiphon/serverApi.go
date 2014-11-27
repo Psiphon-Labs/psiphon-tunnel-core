@@ -141,12 +141,15 @@ func (session *Session) doHandshakeRequest() error {
 	if upgradeClientVersion > session.config.ClientVersion {
 		Notice(NOTICE_UPGRADE, "%d", upgradeClientVersion)
 	}
-	for _, pageViewRegex := range handshakeConfig.PageViewRegexes {
-		Notice(NOTICE_PAGE_VIEW_REGEX, "%s %s", pageViewRegex["regex"], pageViewRegex["replace"])
-	}
-	for _, httpsRequestRegex := range handshakeConfig.HttpsRequestRegexes {
-		Notice(NOTICE_HTTPS_REGEX, "%s %s", httpsRequestRegex["regex"], httpsRequestRegex["replace"])
-	}
+	// TODO: remove regex notices -- regexes will be used internally
+	/*
+		for _, pageViewRegex := range handshakeConfig.PageViewRegexes {
+			Notice(NOTICE_PAGE_VIEW_REGEX, "%s %s", pageViewRegex["regex"], pageViewRegex["replace"])
+		}
+		for _, httpsRequestRegex := range handshakeConfig.HttpsRequestRegexes {
+			Notice(NOTICE_HTTPS_REGEX, "%s %s", httpsRequestRegex["regex"], httpsRequestRegex["replace"])
+		}
+	*/
 	return nil
 }
 
