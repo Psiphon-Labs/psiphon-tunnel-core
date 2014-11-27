@@ -32,7 +32,7 @@ import (
 )
 
 // Tunneler specifies the interface required by components that use a tunnel.
-// Components which use this interface may be services by a single Tunnel instance,
+// Components which use this interface may be serviced by a single Tunnel instance,
 // or a Controller which manages a pool of tunnels, or any other object which
 // implements Tunneler.
 type Tunneler interface {
