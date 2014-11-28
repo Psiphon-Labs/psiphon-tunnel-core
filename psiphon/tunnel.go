@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -61,22 +62,13 @@ var SupportedTunnelProtocols = []string{
 type Tunnel struct {
 	serverEntry             *ServerEntry
 	sessionId               string
+	sessionStarted          int32
 	protocol                string
 	conn                    Conn
 	sshClient               *ssh.Client
 	sshKeepAliveQuit        chan struct{}
 	portForwardFailures     chan int
 	portForwardFailureTotal int
-}
-
-// Close terminates the tunnel.
-func (tunnel *Tunnel) Close() {
-	if tunnel.sshKeepAliveQuit != nil {
-		close(tunnel.sshKeepAliveQuit)
-	}
-	if tunnel.conn != nil {
-		tunnel.conn.Close()
-	}
 }
 
 // EstablishTunnel first makes a network transport connection to the
@@ -258,6 +250,24 @@ func EstablishTunnel(
 			// of failure reports without blocking. Senders can drop failures without blocking.
 			portForwardFailures: make(chan int, config.PortForwardFailureThreshold)},
 		nil
+}
+
+// Close terminates the tunnel.
+func (tunnel *Tunnel) Close() {
+	if tunnel.sshKeepAliveQuit != nil {
+		close(tunnel.sshKeepAliveQuit)
+	}
+	if tunnel.conn != nil {
+		tunnel.conn.Close()
+	}
+}
+
+func (tunnel *Tunnel) IsSessionStarted() bool {
+	return atomic.LoadInt32(&tunnel.sessionStarted) == 1
+}
+
+func (tunnel *Tunnel) SetSessionStarted() {
+	atomic.StoreInt32(&tunnel.sessionStarted, 1)
 }
 
 // Dial establishes a port forward connection through the tunnel

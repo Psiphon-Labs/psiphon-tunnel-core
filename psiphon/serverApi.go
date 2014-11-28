@@ -67,6 +67,9 @@ func NewSession(config *Config, tunnel *Tunnel) (session *Session, err error) {
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
+	tunnel.SetSessionStarted()
+
 	return session, nil
 }
 

@@ -203,9 +203,7 @@ loop:
 		// solution(?) target MIN(CountServerEntries(region, protocol), TunnelPoolSize)
 		case establishedTunnel := <-controller.establishedTunnels:
 			Notice(NOTICE_INFO, "established tunnel: %s", establishedTunnel.serverEntry.IpAddress)
-			// !TODO! design issue: activateTunnel makes tunnel avail for port forward *before* operates does handshake
-			// solution(?) distinguish between two stages or states: connected, and then active.
-			if controller.activateTunnel(establishedTunnel) {
+			if controller.registerTunnel(establishedTunnel) {
 				Notice(NOTICE_INFO, "active tunnel: %s", establishedTunnel.serverEntry.IpAddress)
 				controller.operateWaitGroup.Add(1)
 				go controller.operateTunnel(establishedTunnel)
@@ -247,15 +245,22 @@ func (controller *Controller) discardTunnel(tunnel *Tunnel) {
 	tunnel.Close()
 }
 
-// activateTunnel adds the connected tunnel to the pool of active tunnels
-// which are used for port forwarding. Returns true if the pool has an empty
-// slot and false if the pool is full (caller should discard the tunnel).
-func (controller *Controller) activateTunnel(tunnel *Tunnel) bool {
+// registerTunnel adds the connected tunnel to the pool of active tunnels
+// which are candidates for port forwarding. Returns true if the pool has an
+// empty slot and false if the pool is full (caller should discard the tunnel).
+func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
-	// !TODO! double check not already a tunnel to this server
 	if len(controller.tunnels) >= controller.config.TunnelPoolSize {
 		return false
+	}
+	// Perform a fail-safe check just in case we've established
+	// a duplicate connection.
+	for _, activeTunnel := range controller.tunnels {
+		if activeTunnel.serverEntry.IpAddress == tunnel.serverEntry.IpAddress {
+			Notice(NOTICE_ALERT, "duplicate tunnel: %s", tunnel.serverEntry.IpAddress)
+			return false
+		}
 	}
 	controller.tunnels = append(controller.tunnels, tunnel)
 	Notice(NOTICE_TUNNEL, "%d tunnels", len(controller.tunnels))
@@ -310,13 +315,18 @@ func (controller *Controller) terminateAllTunnels() {
 func (controller *Controller) getNextActiveTunnel() (tunnel *Tunnel) {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
-	if len(controller.tunnels) == 0 {
-		return nil
+	for i := len(controller.tunnels); i >= 0; i-- {
+		tunnel = controller.tunnels[controller.nextTunnel]
+		controller.nextTunnel =
+			(controller.nextTunnel + 1) % len(controller.tunnels)
+		// A tunnel must[*] have started its session (performed the server
+		// API handshake sequence) before it may be used for tunneling traffic
+		// [*]currently not enforced by the server, but may be in the future.
+		if tunnel.IsSessionStarted() {
+			return tunnel
+		}
 	}
-	tunnel = controller.tunnels[controller.nextTunnel]
-	controller.nextTunnel =
-		(controller.nextTunnel + 1) % len(controller.tunnels)
-	return tunnel
+	return nil
 }
 
 // getActiveTunnelServerEntries lists the Server Entries for
@@ -522,7 +532,8 @@ loop:
 		// Note: it's possible that an active tunnel in excludeServerEntries will
 		// fail during this iteration of server entries and in that case the
 		// cooresponding server will not be retried (within the same iteration).
-		// !TODO! is there also a race that can result in multiple tunnels to the same server
+		// TODO: is there also a race that can result in multiple tunnels to the same
+		// server? (if there is, registerTunnel will reject the duplicate instance.)
 		excludeServerEntries := controller.getActiveTunnelServerEntries()
 		iterator, err := NewServerEntryIterator(
 			controller.config.EgressRegion, controller.config.TunnelProtocol, excludeServerEntries)
