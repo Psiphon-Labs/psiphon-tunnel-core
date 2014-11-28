@@ -315,7 +315,7 @@ func (controller *Controller) terminateAllTunnels() {
 func (controller *Controller) getNextActiveTunnel() (tunnel *Tunnel) {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
-	for i := len(controller.tunnels); i >= 0; i-- {
+	for i := len(controller.tunnels); i > 0; i-- {
 		tunnel = controller.tunnels[controller.nextTunnel]
 		controller.nextTunnel =
 			(controller.nextTunnel + 1) % len(controller.tunnels)
