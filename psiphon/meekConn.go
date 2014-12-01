@@ -21,7 +21,6 @@ package psiphon
 
 import (
 	"bytes"
-	"code.google.com/p/go.crypto/nacl/box"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -33,6 +32,8 @@ import (
 	"net/url"
 	"sync"
 	"time"
+
+	"code.google.com/p/go.crypto/nacl/box"
 )
 
 // MeekConn is based on meek-client.go from Tor and Psiphon:

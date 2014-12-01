@@ -21,7 +21,6 @@ package psiphon
 
 import (
 	"bytes"
-	"code.google.com/p/go.crypto/ssh"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -30,6 +29,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"code.google.com/p/go.crypto/ssh"
 )
 
 // Tunneler specifies the interface required by components that use a tunnel.
@@ -281,4 +282,10 @@ func (tunnel *Tunnel) Dial(remoteAddr string) (conn net.Conn, err error) {
 func (tunnel *Tunnel) SignalFailure() {
 	Notice(NOTICE_ALERT, "tunnel received failure signal")
 	tunnel.Close()
+}
+
+// GetServerID provides a unique identifier for the server the tunnel connects to.
+// This ID is consistent between multiple tunnels connected to that server.
+func (tunnel *Tunnel) GetServerID() string {
+	return tunnel.serverEntry.IpAddress
 }

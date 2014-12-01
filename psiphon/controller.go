@@ -30,6 +30,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/stats"
 )
 
 // Controller is a tunnel lifecycle coordinator. It manages lists of servers to
@@ -83,8 +85,10 @@ func NewController(config *Config) (controller *Controller) {
 // - a local SOCKS proxy that port forwards through the pool of tunnels
 // - a local HTTP proxy that port forwards through the pool of tunnels
 func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
-
 	Notice(NOTICE_VERSION, VERSION)
+
+	stats.Start()
+	defer stats.Stop()
 
 	socksProxy, err := NewSocksProxy(controller.config, controller)
 	if err != nil {
@@ -476,10 +480,12 @@ func (controller *Controller) Dial(remoteAddr string) (conn net.Conn, err error)
 		}
 		return nil, ContextError(err)
 	}
-	return &TunneledConn{
-			Conn:   tunnelConn,
-			tunnel: tunnel},
-		nil
+
+	conn = &TunneledConn{
+		Conn:   stats.NewStatsConn(tunnelConn, tunnel.GetServerID()),
+		tunnel: tunnel}
+
+	return
 }
 
 // startEstablishing creates a pool of worker goroutines which will
