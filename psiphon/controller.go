@@ -27,9 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
-	"os"
 	"sync"
 	"time"
 )
@@ -85,6 +83,9 @@ func NewController(config *Config) (controller *Controller) {
 // - a local SOCKS proxy that port forwards through the pool of tunnels
 // - a local HTTP proxy that port forwards through the pool of tunnels
 func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
+
+	Notice(NOTICE_VERSION, VERSION)
+
 	socksProxy, err := NewSocksProxy(controller.config, controller)
 	if err != nil {
 		Notice(NOTICE_ALERT, "error initializing local SOCKS proxy: %s", err)
@@ -608,24 +609,4 @@ func (controller *Controller) establishTunnelWorker() {
 		}
 	}
 	Notice(NOTICE_INFO, "stopped establish worker")
-}
-
-// RunForever executes the main loop of the Psiphon client. It launches
-// the controller with a shutdown that is never signaled.
-func RunForever(config *Config) {
-
-	if config.LogFilename != "" {
-		logFile, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-		if err != nil {
-			Fatal("error opening log file: %s", err)
-		}
-		defer logFile.Close()
-		log.SetOutput(logFile)
-	}
-
-	Notice(NOTICE_VERSION, VERSION)
-
-	controller := NewController(config)
-	shutdownBroadcast := make(chan struct{})
-	controller.Run(shutdownBroadcast)
 }

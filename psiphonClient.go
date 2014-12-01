@@ -23,9 +23,13 @@ import (
 	"flag"
 	psiphon "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"log"
+	"os"
+	"os/signal"
+	"sync"
 )
 
 func main() {
+
 	var configFilename string
 	flag.StringVar(&configFilename, "config", "", "configuration file")
 	flag.Parse()
@@ -36,5 +40,30 @@ func main() {
 	if err != nil {
 		log.Fatalf("error loading configuration file: %s", err)
 	}
-	psiphon.RunForever(config)
+
+	if config.LogFilename != "" {
+		logFile, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			log.Fatalf("error opening log file: %s", err)
+		}
+		defer logFile.Close()
+		log.SetOutput(logFile)
+	}
+
+	controller := psiphon.NewController(config)
+	shutdownBroadcast := make(chan struct{})
+	controllerWaitGroup := new(sync.WaitGroup)
+	controllerWaitGroup.Add(1)
+	go func() {
+		defer controllerWaitGroup.Done()
+		controller.Run(shutdownBroadcast)
+	}()
+
+	systemStopSignal := make(chan os.Signal, 1)
+	signal.Notify(systemStopSignal, os.Interrupt, os.Kill)
+	<-systemStopSignal
+
+	psiphon.Notice(psiphon.NOTICE_INFO, "shutdown by system")
+	close(shutdownBroadcast)
+	controllerWaitGroup.Wait()
 }
