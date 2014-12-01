@@ -204,19 +204,11 @@ type ServerEntryIterator struct {
 }
 
 // NewServerEntryIterator creates a new NewServerEntryIterator
-func NewServerEntryIterator(
-	region, protocol string,
-	excludeServerEntries []*ServerEntry) (iterator *ServerEntryIterator, err error) {
-
+func NewServerEntryIterator(region, protocol string) (iterator *ServerEntryIterator, err error) {
 	initDataStore()
-	excludeIds := make([]string, len(excludeServerEntries))
-	for index, serverEntry := range excludeServerEntries {
-		excludeIds[index] = serverEntry.IpAddress
-	}
 	iterator = &ServerEntryIterator{
-		region:     region,
-		protocol:   protocol,
-		excludeIds: excludeIds,
+		region:   region,
+		protocol: protocol,
 	}
 	err = iterator.Reset()
 	if err != nil {
@@ -235,7 +227,7 @@ func (iterator *ServerEntryIterator) Reset() error {
 	}
 	var cursor *sql.Rows
 	whereClause, whereParams := makeServerEntryWhereClause(
-		iterator.region, iterator.protocol, iterator.excludeIds)
+		iterator.region, iterator.protocol, nil)
 	query := "select data from serverEntry" + whereClause + " order by rank desc;"
 	cursor, err = transaction.Query(query, whereParams...)
 	if err != nil {

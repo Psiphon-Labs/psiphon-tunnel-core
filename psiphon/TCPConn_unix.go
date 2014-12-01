@@ -106,11 +106,11 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 			errChannel <- errors.New("connect timeout")
 		})
 		go func() {
-			errChannel <- syscall.Connect(conn.interruptible.socketFd, &sockAddr)
+			errChannel <- syscall.Connect(socketFd, &sockAddr)
 		}()
 		err = <-errChannel
 	} else {
-		err = syscall.Connect(conn.interruptible.socketFd, &sockAddr)
+		err = syscall.Connect(socketFd, &sockAddr)
 	}
 	if err != nil {
 		return nil, ContextError(err)

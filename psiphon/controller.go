@@ -27,9 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
-	"os"
 	"sync"
 	"time"
 )
@@ -85,6 +83,9 @@ func NewController(config *Config) (controller *Controller) {
 // - a local SOCKS proxy that port forwards through the pool of tunnels
 // - a local HTTP proxy that port forwards through the pool of tunnels
 func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
+
+	Notice(NOTICE_VERSION, VERSION)
+
 	socksProxy, err := NewSocksProxy(controller.config, controller)
 	if err != nil {
 		Notice(NOTICE_ALERT, "error initializing local SOCKS proxy: %s", err)
@@ -203,9 +204,7 @@ loop:
 		// solution(?) target MIN(CountServerEntries(region, protocol), TunnelPoolSize)
 		case establishedTunnel := <-controller.establishedTunnels:
 			Notice(NOTICE_INFO, "established tunnel: %s", establishedTunnel.serverEntry.IpAddress)
-			// !TODO! design issue: activateTunnel makes tunnel avail for port forward *before* operates does handshake
-			// solution(?) distinguish between two stages or states: connected, and then active.
-			if controller.activateTunnel(establishedTunnel) {
+			if controller.registerTunnel(establishedTunnel) {
 				Notice(NOTICE_INFO, "active tunnel: %s", establishedTunnel.serverEntry.IpAddress)
 				controller.operateWaitGroup.Add(1)
 				go controller.operateTunnel(establishedTunnel)
@@ -247,15 +246,22 @@ func (controller *Controller) discardTunnel(tunnel *Tunnel) {
 	tunnel.Close()
 }
 
-// activateTunnel adds the connected tunnel to the pool of active tunnels
-// which are used for port forwarding. Returns true if the pool has an empty
-// slot and false if the pool is full (caller should discard the tunnel).
-func (controller *Controller) activateTunnel(tunnel *Tunnel) bool {
+// registerTunnel adds the connected tunnel to the pool of active tunnels
+// which are candidates for port forwarding. Returns true if the pool has an
+// empty slot and false if the pool is full (caller should discard the tunnel).
+func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
-	// !TODO! double check not already a tunnel to this server
 	if len(controller.tunnels) >= controller.config.TunnelPoolSize {
 		return false
+	}
+	// Perform a final check just in case we've established
+	// a duplicate connection.
+	for _, activeTunnel := range controller.tunnels {
+		if activeTunnel.serverEntry.IpAddress == tunnel.serverEntry.IpAddress {
+			Notice(NOTICE_ALERT, "duplicate tunnel: %s", tunnel.serverEntry.IpAddress)
+			return false
+		}
 	}
 	controller.tunnels = append(controller.tunnels, tunnel)
 	Notice(NOTICE_TUNNEL, "%d tunnels", len(controller.tunnels))
@@ -310,26 +316,31 @@ func (controller *Controller) terminateAllTunnels() {
 func (controller *Controller) getNextActiveTunnel() (tunnel *Tunnel) {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
-	if len(controller.tunnels) == 0 {
-		return nil
+	for i := len(controller.tunnels); i > 0; i-- {
+		tunnel = controller.tunnels[controller.nextTunnel]
+		controller.nextTunnel =
+			(controller.nextTunnel + 1) % len(controller.tunnels)
+		// A tunnel must[*] have started its session (performed the server
+		// API handshake sequence) before it may be used for tunneling traffic
+		// [*]currently not enforced by the server, but may be in the future.
+		if tunnel.IsSessionStarted() {
+			return tunnel
+		}
 	}
-	tunnel = controller.tunnels[controller.nextTunnel]
-	controller.nextTunnel =
-		(controller.nextTunnel + 1) % len(controller.tunnels)
-	return tunnel
+	return nil
 }
 
-// getActiveTunnelServerEntries lists the Server Entries for
-// all the active tunnels. This is used to exclude those servers
-// from the set of candidates to establish connections to.
-func (controller *Controller) getActiveTunnelServerEntries() (serverEntries []*ServerEntry) {
+// isActiveTunnelServerEntries is used to check if there's already
+// an existing tunnel to a candidate server.
+func (controller *Controller) isActiveTunnelServerEntry(serverEntry *ServerEntry) bool {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
-	serverEntries = make([]*ServerEntry, 0)
 	for _, activeTunnel := range controller.tunnels {
-		serverEntries = append(serverEntries, activeTunnel.serverEntry)
+		if activeTunnel.serverEntry.IpAddress == serverEntry.IpAddress {
+			return true
+		}
 	}
-	return serverEntries
+	return false
 }
 
 // operateTunnel starts a Psiphon session (handshake, etc.) on a newly
@@ -372,6 +383,9 @@ func (controller *Controller) operateTunnel(tunnel *Tunnel) {
 		err = fmt.Errorf("error starting session for %s: %s", tunnel.serverEntry.IpAddress, err)
 	}
 
+	// Tunnel may now be used for port forwarding
+	tunnel.SetSessionStarted()
+
 	// Promote this successful tunnel to first rank so it's one
 	// of the first candidates next time establish runs.
 	PromoteServerEntry(tunnel.serverEntry.IpAddress)
@@ -380,6 +394,9 @@ func (controller *Controller) operateTunnel(tunnel *Tunnel) {
 		select {
 		case failures := <-tunnel.portForwardFailures:
 			tunnel.portForwardFailureTotal += failures
+			Notice(
+				NOTICE_INFO, "port forward failures for %s: %d",
+				tunnel.serverEntry.IpAddress, tunnel.portForwardFailureTotal)
 			if tunnel.portForwardFailureTotal > controller.config.PortForwardFailureThreshold {
 				err = errors.New("tunnel exceeded port forward failure threshold")
 			}
@@ -519,10 +536,8 @@ loop:
 		// Note: it's possible that an active tunnel in excludeServerEntries will
 		// fail during this iteration of server entries and in that case the
 		// cooresponding server will not be retried (within the same iteration).
-		// !TODO! is there also a race that can result in multiple tunnels to the same server
-		excludeServerEntries := controller.getActiveTunnelServerEntries()
 		iterator, err := NewServerEntryIterator(
-			controller.config.EgressRegion, controller.config.TunnelProtocol, excludeServerEntries)
+			controller.config.EgressRegion, controller.config.TunnelProtocol)
 		if err != nil {
 			Notice(NOTICE_ALERT, "failed to iterate over candidates: %s", err)
 			controller.SignalFailure()
@@ -577,6 +592,10 @@ func (controller *Controller) establishTunnelWorker() {
 			return
 		default:
 		}
+		// There may already be a tunnel to this candidate. If so, skip it.
+		if controller.isActiveTunnelServerEntry(serverEntry) {
+			continue
+		}
 		tunnel, err := EstablishTunnel(
 			controller.config, controller.pendingConns, serverEntry)
 		if err != nil {
@@ -594,24 +613,4 @@ func (controller *Controller) establishTunnelWorker() {
 		}
 	}
 	Notice(NOTICE_INFO, "stopped establish worker")
-}
-
-// RunForever executes the main loop of the Psiphon client. It launches
-// the controller with a shutdown that it never signaled.
-func RunForever(config *Config) {
-
-	if config.LogFilename != "" {
-		logFile, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-		if err != nil {
-			Fatal("error opening log file: %s", err)
-		}
-		defer logFile.Close()
-		log.SetOutput(logFile)
-	}
-
-	Notice(NOTICE_VERSION, VERSION)
-
-	controller := NewController(config)
-	shutdownBroadcast := make(chan struct{})
-	controller.Run(shutdownBroadcast)
 }
