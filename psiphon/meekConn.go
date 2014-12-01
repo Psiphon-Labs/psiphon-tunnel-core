@@ -325,14 +325,16 @@ func (meek *MeekConn) relay() {
 	// (using goroutines) since Close() will wait on this WaitGroup.
 	defer meek.relayWaitGroup.Done()
 	interval := MIN_POLL_INTERVAL
+	timeout := time.NewTimer(interval)
 	var sendPayload = make([]byte, MAX_SEND_PAYLOAD_LENGTH)
 	for {
+		timeout.Reset(interval)
 		// Block until there is payload to send or it is time to poll
 		var sendBuffer *bytes.Buffer
 		select {
 		case sendBuffer = <-meek.partialSendBuffer:
 		case sendBuffer = <-meek.fullSendBuffer:
-		case <-time.After(interval):
+		case <-timeout.C:
 			// In the polling case, send an empty payload
 		case <-meek.broadcastClosed:
 			return
