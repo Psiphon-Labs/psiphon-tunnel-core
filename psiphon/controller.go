@@ -383,6 +383,9 @@ func (controller *Controller) operateTunnel(tunnel *Tunnel) {
 		err = fmt.Errorf("error starting session for %s: %s", tunnel.serverEntry.IpAddress, err)
 	}
 
+	// Tunnel may now be used for port forwarding
+	tunnel.SetSessionStarted()
+
 	// Promote this successful tunnel to first rank so it's one
 	// of the first candidates next time establish runs.
 	PromoteServerEntry(tunnel.serverEntry.IpAddress)
