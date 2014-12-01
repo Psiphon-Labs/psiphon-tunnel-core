@@ -611,7 +611,7 @@ func (controller *Controller) establishTunnelWorker() {
 }
 
 // RunForever executes the main loop of the Psiphon client. It launches
-// the controller with a shutdown that it never signaled.
+// the controller with a shutdown that is never signaled.
 func RunForever(config *Config) {
 
 	if config.LogFilename != "" {
