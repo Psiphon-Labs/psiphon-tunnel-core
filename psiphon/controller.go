@@ -255,7 +255,7 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 	if len(controller.tunnels) >= controller.config.TunnelPoolSize {
 		return false
 	}
-	// Perform a fail-safe check just in case we've established
+	// Perform a final check just in case we've established
 	// a duplicate connection.
 	for _, activeTunnel := range controller.tunnels {
 		if activeTunnel.serverEntry.IpAddress == tunnel.serverEntry.IpAddress {
@@ -330,17 +330,17 @@ func (controller *Controller) getNextActiveTunnel() (tunnel *Tunnel) {
 	return nil
 }
 
-// getActiveTunnelServerEntries lists the Server Entries for
-// all the active tunnels. This is used to exclude those servers
-// from the set of candidates to establish connections to.
-func (controller *Controller) getActiveTunnelServerEntries() (serverEntries []*ServerEntry) {
+// isActiveTunnelServerEntries is used to check if there's already
+// an existing tunnel to a candidate server.
+func (controller *Controller) isActiveTunnelServerEntry(serverEntry *ServerEntry) bool {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
-	serverEntries = make([]*ServerEntry, 0)
 	for _, activeTunnel := range controller.tunnels {
-		serverEntries = append(serverEntries, activeTunnel.serverEntry)
+		if activeTunnel.serverEntry.IpAddress == serverEntry.IpAddress {
+			return true
+		}
 	}
-	return serverEntries
+	return false
 }
 
 // operateTunnel starts a Psiphon session (handshake, etc.) on a newly
@@ -533,11 +533,8 @@ loop:
 		// Note: it's possible that an active tunnel in excludeServerEntries will
 		// fail during this iteration of server entries and in that case the
 		// cooresponding server will not be retried (within the same iteration).
-		// TODO: is there also a race that can result in multiple tunnels to the same
-		// server? (if there is, registerTunnel will reject the duplicate instance.)
-		excludeServerEntries := controller.getActiveTunnelServerEntries()
 		iterator, err := NewServerEntryIterator(
-			controller.config.EgressRegion, controller.config.TunnelProtocol, excludeServerEntries)
+			controller.config.EgressRegion, controller.config.TunnelProtocol)
 		if err != nil {
 			Notice(NOTICE_ALERT, "failed to iterate over candidates: %s", err)
 			controller.SignalFailure()
@@ -591,6 +588,10 @@ func (controller *Controller) establishTunnelWorker() {
 		case <-controller.stopEstablishingBroadcast:
 			return
 		default:
+		}
+		// There may already be a tunnel to this candidate. If so, skip it.
+		if controller.isActiveTunnelServerEntry(serverEntry) {
+			continue
 		}
 		tunnel, err := EstablishTunnel(
 			controller.config, controller.pendingConns, serverEntry)
