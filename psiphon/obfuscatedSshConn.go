@@ -304,6 +304,7 @@ func (conn *ObfuscatedSshConn) transformAndWrite(buffer []byte) (err error) {
 			// See RFC 4253 sec. 6 for constraints
 			possiblePaddings := (SSH_MAX_PADDING_LENGTH - paddingLength) / SSH_PADDING_MULTIPLE
 			if possiblePaddings > 0 {
+				// selectedPadding is integer in range [0, possiblePaddings)
 				selectedPadding, err := MakeSecureRandomInt(possiblePaddings)
 				if err != nil {
 					return ContextError(err)
