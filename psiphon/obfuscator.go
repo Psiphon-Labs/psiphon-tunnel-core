@@ -125,7 +125,8 @@ func deriveKey(seed, keyword, iv []byte) ([]byte, error) {
 }
 
 func makeSeedMessage(maxPadding int, seed []byte, clientToServerCipher *rc4.Cipher) ([]byte, error) {
-	paddingLength, err := MakeSecureRandomInt(maxPadding)
+	// paddingLength is integer in range [0, maxPadding]
+	paddingLength, err := MakeSecureRandomInt(maxPadding + 1)
 	if err != nil {
 		return nil, ContextError(err)
 	}

@@ -515,7 +515,8 @@ func makeCookie(serverEntry *ServerEntry, sessionId string) (cookie *http.Cookie
 	// The format is <random letter 'A'-'Z'>=<base64 data>, which is intended to match common cookie formats.
 	A := int('A')
 	Z := int('Z')
-	letterIndex, err := MakeSecureRandomInt(Z - A)
+	// letterIndex is integer in range [int('A'), int('Z')]
+	letterIndex, err := MakeSecureRandomInt(Z - A + 1)
 	if err != nil {
 		return nil, ContextError(err)
 	}
