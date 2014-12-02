@@ -22,7 +22,6 @@ package psiphon
 import (
 	"fmt"
 	socks "github.com/Psiphon-Inc/goptlib"
-	"io"
 	"net"
 	"sync"
 )
@@ -32,30 +31,29 @@ import (
 // the tunnel SSH client and relays traffic through the port
 // forward.
 type SocksProxy struct {
-	tunnel        *Tunnel
-	stoppedSignal chan struct{}
-	listener      *socks.SocksListener
-	waitGroup     *sync.WaitGroup
-	openConns     *Conns
+	tunneler       Tunneler
+	listener       *socks.SocksListener
+	serveWaitGroup *sync.WaitGroup
+	openConns      *Conns
 }
 
 // NewSocksProxy initializes a new SOCKS server. It begins listening for
 // connections, starts a goroutine that runs an accept loop, and returns
 // leaving the accept loop running.
-func NewSocksProxy(listenPort int, tunnel *Tunnel, stoppedSignal chan struct{}) (proxy *SocksProxy, err error) {
-	listener, err := socks.ListenSocks("tcp", fmt.Sprintf("127.0.0.1:%d", listenPort))
+func NewSocksProxy(config *Config, tunneler Tunneler) (proxy *SocksProxy, err error) {
+	listener, err := socks.ListenSocks(
+		"tcp", fmt.Sprintf("127.0.0.1:%d", config.LocalSocksProxyPort))
 	if err != nil {
-		return nil, err
+		return nil, ContextError(err)
 	}
 	proxy = &SocksProxy{
-		tunnel:        tunnel,
-		stoppedSignal: stoppedSignal,
-		listener:      listener,
-		waitGroup:     new(sync.WaitGroup),
-		openConns:     new(Conns),
+		tunneler:       tunneler,
+		listener:       listener,
+		serveWaitGroup: new(sync.WaitGroup),
+		openConns:      new(Conns),
 	}
-	proxy.waitGroup.Add(1)
-	go proxy.acceptSocksConnections()
+	proxy.serveWaitGroup.Add(1)
+	go proxy.serve()
 	Notice(NOTICE_SOCKS_PROXY, "local SOCKS proxy running at address %s", proxy.listener.Addr().String())
 	return proxy, nil
 }
@@ -64,60 +62,37 @@ func NewSocksProxy(listenPort int, tunnel *Tunnel, stoppedSignal chan struct{}) 
 // goroutine to complete.
 func (proxy *SocksProxy) Close() {
 	proxy.listener.Close()
-	proxy.waitGroup.Wait()
+	proxy.serveWaitGroup.Wait()
 	proxy.openConns.CloseAll()
 }
 
-func (proxy *SocksProxy) socksConnectionHandler(tunnel *Tunnel, localSocksConn *socks.SocksConn) (err error) {
-	defer localSocksConn.Close()
-	defer proxy.openConns.Remove(localSocksConn)
-	proxy.openConns.Add(localSocksConn)
-	remoteSshForward, err := tunnel.sshClient.Dial("tcp", localSocksConn.Req.Target)
+func (proxy *SocksProxy) socksConnectionHandler(localConn *socks.SocksConn) (err error) {
+	defer localConn.Close()
+	defer proxy.openConns.Remove(localConn)
+	proxy.openConns.Add(localConn)
+	remoteConn, err := proxy.tunneler.Dial(localConn.Req.Target)
 	if err != nil {
 		return ContextError(err)
 	}
-	defer remoteSshForward.Close()
-	err = localSocksConn.Grant(&net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0})
+	defer remoteConn.Close()
+	err = localConn.Grant(&net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0})
 	if err != nil {
 		return ContextError(err)
 	}
-	relayPortForward(localSocksConn, remoteSshForward)
+	Relay(localConn, remoteConn)
 	return nil
 }
 
-// relayPortForward is also used by HttpProxy
-func relayPortForward(local, remote net.Conn) {
-	// TODO: page view stats would be done here
-	// TODO: interrupt and stop on proxy.Close()
-	waitGroup := new(sync.WaitGroup)
-	waitGroup.Add(1)
-	go func() {
-		defer waitGroup.Done()
-		_, err := io.Copy(local, remote)
-		if err != nil {
-			Notice(NOTICE_ALERT, "%s", ContextError(err))
-		}
-	}()
-	_, err := io.Copy(remote, local)
-	if err != nil {
-		Notice(NOTICE_ALERT, "%s", ContextError(err))
-	}
-	waitGroup.Wait()
-}
-
-func (proxy *SocksProxy) acceptSocksConnections() {
+func (proxy *SocksProxy) serve() {
 	defer proxy.listener.Close()
-	defer proxy.waitGroup.Done()
+	defer proxy.serveWaitGroup.Done()
 	for {
 		// Note: will be interrupted by listener.Close() call made by proxy.Close()
 		socksConnection, err := proxy.listener.AcceptSocks()
 		if err != nil {
 			Notice(NOTICE_ALERT, "SOCKS proxy accept error: %s", err)
 			if e, ok := err.(net.Error); ok && !e.Temporary() {
-				select {
-				case proxy.stoppedSignal <- *new(struct{}):
-				default:
-				}
+				proxy.tunneler.SignalFailure()
 				// Fatal error, stop the proxy
 				break
 			}
@@ -125,7 +100,7 @@ func (proxy *SocksProxy) acceptSocksConnections() {
 			continue
 		}
 		go func() {
-			err := proxy.socksConnectionHandler(proxy.tunnel, socksConnection)
+			err := proxy.socksConnectionHandler(socksConnection)
 			if err != nil {
 				Notice(NOTICE_ALERT, "%s", ContextError(err))
 			}

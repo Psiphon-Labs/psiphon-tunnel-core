@@ -22,29 +22,72 @@
 package psiphon
 
 import (
+	"errors"
 	"net"
 )
 
+// interruptibleTCPSocket simulates interruptible semantics on Windows. A call
+// to interruptibleTCPClose doesn't actually interrupt a connect in progress,
+// but abandons a dial that's running in a goroutine.
+// Interruptible semantics are required by the controller for timely component
+// state changes.
+// TODO: implement true interruptible semantics on Windows; use syscall and
+// a HANDLE similar to how TCPConn_unix uses a file descriptor?
 type interruptibleTCPSocket struct {
+	results chan *interruptibleDialResult
+}
+
+type interruptibleDialResult struct {
+	netConn net.Conn
+	err     error
 }
 
 func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err error) {
 	if config.BindToDeviceServiceAddress != "" {
 		Fatal("psiphon.interruptibleTCPDial with bind not supported on Windows")
 	}
-	// Note: using standard net.Dial(); interruptible connections not supported on Windows
-	netConn, err := net.DialTimeout("tcp", addr, config.ConnectTimeout)
-	if err != nil {
-		return nil, ContextError(err)
-	}
+
 	conn = &TCPConn{
-		Conn:         netConn,
-		readTimeout:  config.ReadTimeout,
-		writeTimeout: config.WriteTimeout}
+		interruptible: interruptibleTCPSocket{results: make(chan *interruptibleDialResult, 2)},
+		readTimeout:   config.ReadTimeout,
+		writeTimeout:  config.WriteTimeout}
+	config.PendingConns.Add(conn)
+
+	// Call the blocking Dial in a goroutine
+	results := conn.interruptible.results
+	go func() {
+
+		// When using an upstream HTTP proxy, first connect to the proxy,
+		// then use HTTP CONNECT to connect to the original destination.
+		dialAddr := addr
+		if config.UpstreamHttpProxyAddress != "" {
+			dialAddr = config.UpstreamHttpProxyAddress
+		}
+
+		netConn, err := net.DialTimeout("tcp", dialAddr, config.ConnectTimeout)
+
+		if config.UpstreamHttpProxyAddress != "" {
+			err := HttpProxyConnect(netConn, addr)
+			if err != nil {
+				netConn = nil
+			}
+		}
+
+		results <- &interruptibleDialResult{netConn, err}
+	}()
+
+	// Block until Dial completes (or times out) or until interrupt
+	result := <-conn.interruptible.results
+	config.PendingConns.Remove(conn)
+	if result.err != nil {
+		return nil, ContextError(result.err)
+	}
+	conn.Conn = result.netConn
+
 	return conn, nil
 }
 
 func interruptibleTCPClose(interruptible interruptibleTCPSocket) error {
-	Fatal("psiphon.interruptibleTCPClose not supported on Windows")
+	interruptible.results <- &interruptibleDialResult{nil, errors.New("socket interrupted")}
 	return nil
 }

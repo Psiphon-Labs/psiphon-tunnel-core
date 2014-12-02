@@ -39,6 +39,7 @@ type interruptibleTCPSocket struct {
 // syscall APIs are used. The sequence of syscalls in this implementation are
 // taken from: https://code.google.com/p/go/issues/detail?id=6966
 func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err error) {
+
 	// Create a socket and then, before connecting, add a TCPConn with
 	// the unconnected socket to pendingConns. This allows pendingConns to
 	// abort connections in progress.
@@ -52,6 +53,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 			syscall.Close(socketFd)
 		}
 	}()
+
 	// Note: this step is not interruptible
 	if config.BindToDeviceServiceAddress != "" {
 		err = bindToDevice(socketFd, config)
@@ -59,8 +61,16 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 			return nil, ContextError(err)
 		}
 	}
+
+	// When using an upstream HTTP proxy, first connect to the proxy,
+	// then use HTTP CONNECT to connect to the original destination.
+	dialAddr := addr
+	if config.UpstreamHttpProxyAddress != "" {
+		dialAddr = config.UpstreamHttpProxyAddress
+	}
+
 	// Get the remote IP and port, resolving a domain name if necessary
-	host, strPort, err := net.SplitHostPort(addr)
+	host, strPort, err := net.SplitHostPort(dialAddr)
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -78,12 +88,15 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	// TODO: IPv6 support
 	var ip [4]byte
 	copy(ip[:], ipAddrs[0].To4())
+
 	// Enable interruption
 	conn = &TCPConn{
 		interruptible: interruptibleTCPSocket{socketFd: socketFd},
 		readTimeout:   config.ReadTimeout,
 		writeTimeout:  config.WriteTimeout}
 	config.PendingConns.Add(conn)
+	defer config.PendingConns.Remove(conn)
+
 	// Connect the socket
 	// TODO: adjust the timeout to account for time spent resolving hostname
 	sockAddr := syscall.SockaddrInet4{Addr: ip, Port: port}
@@ -93,16 +106,16 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 			errChannel <- errors.New("connect timeout")
 		})
 		go func() {
-			errChannel <- syscall.Connect(conn.interruptible.socketFd, &sockAddr)
+			errChannel <- syscall.Connect(socketFd, &sockAddr)
 		}()
 		err = <-errChannel
 	} else {
-		err = syscall.Connect(conn.interruptible.socketFd, &sockAddr)
+		err = syscall.Connect(socketFd, &sockAddr)
 	}
-	config.PendingConns.Remove(conn)
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
 	// Convert the syscall socket to a net.Conn
 	file := os.NewFile(uintptr(conn.interruptible.socketFd), "")
 	defer file.Close()
@@ -110,6 +123,16 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
+	// Going through upstream HTTP proxy
+	if config.UpstreamHttpProxyAddress != "" {
+		// This call can be interrupted by closing the pending conn
+		err := HttpProxyConnect(conn, addr)
+		if err != nil {
+			return nil, ContextError(err)
+		}
+	}
+
 	return conn, nil
 }
 

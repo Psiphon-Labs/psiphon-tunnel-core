@@ -20,6 +20,9 @@
 package psiphon
 
 import (
+	"bytes"
+	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -28,6 +31,12 @@ import (
 // DialConfig contains parameters to determine the behavior
 // of a Psiphon dialer (TCPDial, MeekDial, etc.)
 type DialConfig struct {
+
+	// UpstreamHttpProxyAddress specifies an HTTP proxy to connect through
+	// (the proxy must support HTTP CONNECT). The address may be a hostname
+	// or IP address and must include a port number.
+	UpstreamHttpProxyAddress string
+
 	ConnectTimeout time.Duration
 	ReadTimeout    time.Duration
 	WriteTimeout   time.Duration
@@ -98,4 +107,55 @@ func (conns *Conns) CloseAll() {
 		conn.Close()
 	}
 	conns.conns = make(map[net.Conn]bool)
+}
+
+// Relay sends to remoteConn bytes received from localConn,
+// and sends to localConn bytes received from remoteConn.
+func Relay(localConn, remoteConn net.Conn) {
+	copyWaitGroup := new(sync.WaitGroup)
+	copyWaitGroup.Add(1)
+	go func() {
+		defer copyWaitGroup.Done()
+		_, err := io.Copy(localConn, remoteConn)
+		if err != nil {
+			Notice(NOTICE_ALERT, "Relay failed: %s", ContextError(err))
+		}
+	}()
+	_, err := io.Copy(remoteConn, localConn)
+	if err != nil {
+		Notice(NOTICE_ALERT, "Relay failed: %s", ContextError(err))
+	}
+	copyWaitGroup.Wait()
+}
+
+// HttpProxyConnect establishes a HTTP CONNECT tunnel to addr through
+// an established network connection to an HTTP proxy. It is assumed that
+// no payload bytes have been sent through the connection to the proxy.
+func HttpProxyConnect(rawConn net.Conn, addr string) (err error) {
+	hostname, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	// TODO: use the proxy request/response code from net/http/transport.go?
+	connectRequest := fmt.Sprintf(
+		"CONNECT %s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n\r\n",
+		addr, hostname)
+	_, err = rawConn.Write([]byte(connectRequest))
+	if err != nil {
+		return ContextError(err)
+	}
+
+	expectedResponse := []byte("HTTP/1.1 200 OK\r\n\r\n")
+	readBuffer := make([]byte, len(expectedResponse))
+	_, err = io.ReadFull(rawConn, readBuffer)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	if !bytes.Equal(readBuffer, expectedResponse) {
+		return fmt.Errorf("unexpected HTTP proxy response: %s", string(readBuffer))
+	}
+
+	return nil
 }

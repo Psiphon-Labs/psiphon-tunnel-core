@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"strconv"
 )
@@ -32,12 +33,10 @@ import (
 // Session is a utility struct which holds all of the data associated
 // with a Psiphon session. In addition to the established tunnel, this
 // includes the session ID (used for Psiphon API requests) and a http
-// client configured to make tunnelled Psiphon API requests.
+// client configured to make tunneled Psiphon API requests.
 type Session struct {
-	sessionId          string
 	config             *Config
 	tunnel             *Tunnel
-	pendingConns       *Conns
 	psiphonHttpsClient *http.Client
 }
 
@@ -45,21 +44,15 @@ type Session struct {
 // Psiphon server and returns a Session struct, initialized with the
 // session ID, for use with subsequent Psiphon server API requests (e.g.,
 // periodic status requests).
-func NewSession(
-	config *Config,
-	tunnel *Tunnel,
-	localHttpProxyAddress, sessionId string) (session *Session, err error) {
+func NewSession(config *Config, tunnel *Tunnel) (session *Session, err error) {
 
-	pendingConns := new(Conns)
-	psiphonHttpsClient, err := makePsiphonHttpsClient(tunnel, pendingConns, localHttpProxyAddress)
+	psiphonHttpsClient, err := makePsiphonHttpsClient(tunnel)
 	if err != nil {
 		return nil, ContextError(err)
 	}
 	session = &Session{
-		sessionId:          sessionId,
 		config:             config,
 		tunnel:             tunnel,
-		pendingConns:       pendingConns,
 		psiphonHttpsClient: psiphonHttpsClient,
 	}
 	// Sending two seperate requests is a legacy from when the handshake was
@@ -74,6 +67,7 @@ func NewSession(
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
 	return session, nil
 }
 
@@ -148,12 +142,15 @@ func (session *Session) doHandshakeRequest() error {
 	if upgradeClientVersion > session.config.ClientVersion {
 		Notice(NOTICE_UPGRADE, "%d", upgradeClientVersion)
 	}
-	for _, pageViewRegex := range handshakeConfig.PageViewRegexes {
-		Notice(NOTICE_PAGE_VIEW_REGEX, "%s %s", pageViewRegex["regex"], pageViewRegex["replace"])
-	}
-	for _, httpsRequestRegex := range handshakeConfig.HttpsRequestRegexes {
-		Notice(NOTICE_HTTPS_REGEX, "%s %s", httpsRequestRegex["regex"], httpsRequestRegex["replace"])
-	}
+	// TODO: remove regex notices -- regexes will be used internally
+	/*
+		for _, pageViewRegex := range handshakeConfig.PageViewRegexes {
+			Notice(NOTICE_PAGE_VIEW_REGEX, "%s %s", pageViewRegex["regex"], pageViewRegex["replace"])
+		}
+		for _, httpsRequestRegex := range handshakeConfig.HttpsRequestRegexes {
+			Notice(NOTICE_HTTPS_REGEX, "%s %s", httpsRequestRegex["regex"], httpsRequestRegex["replace"])
+		}
+	*/
 	return nil
 }
 
@@ -174,7 +171,7 @@ func (session *Session) doConnectedRequest() error {
 	}
 	url := session.buildRequestUrl(
 		"connected",
-		&ExtraParam{"session_id", session.sessionId},
+		&ExtraParam{"session_id", session.tunnel.sessionId},
 		&ExtraParam{"last_connected", lastConnected})
 	responseBody, err := session.doGetRequest(url)
 	if err != nil {
@@ -210,7 +207,7 @@ func (session *Session) buildRequestUrl(path string, extraParams ...*ExtraParam)
 	requestUrl.WriteString("/")
 	requestUrl.WriteString(path)
 	requestUrl.WriteString("?client_session_id=")
-	requestUrl.WriteString(session.sessionId)
+	requestUrl.WriteString(session.tunnel.sessionId)
 	requestUrl.WriteString("&server_secret=")
 	requestUrl.WriteString(session.tunnel.serverEntry.WebServerSecret)
 	requestUrl.WriteString("&propagation_channel_id=")
@@ -253,36 +250,24 @@ func (session *Session) doGetRequest(requestUrl string) (responseBody []byte, er
 	return body, nil
 }
 
-// makeHttpsClient creates a Psiphon HTTPS client that uses the local http proxy to tunnel
-// requests and which validates the web server using the Psiphon server entry web server certificate.
+// makeHttpsClient creates a Psiphon HTTPS client that tunnels requests and which validates
+// the web server using the Psiphon server entry web server certificate.
 // This is not a general purpose HTTPS client.
 // As the custom dialer makes an explicit TLS connection, URLs submitted to the returned
 // http.Client should use the "http://" scheme. Otherwise http.Transport will try to do another TLS
 // handshake inside the explicit TLS session.
-func makePsiphonHttpsClient(
-	tunnel *Tunnel, pendingConns *Conns,
-	localHttpProxyAddress string) (httpsClient *http.Client, err error) {
-
+func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error) {
 	certificate, err := DecodeCertificate(tunnel.serverEntry.WebServerCertificate)
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	// Note: This use of readTimeout will tear down persistent HTTP connections, which is not the
-	// intended purpose. The readTimeout is to abort NewSession when the Psiphon server responds to
-	// handshake/connected requests but fails to deliver the response body (e.g., ResponseHeaderTimeout
-	// is not sufficient to timeout this case).
-	tcpDialer := NewTCPDialer(
-		&DialConfig{
-			ConnectTimeout: PSIPHON_API_SERVER_TIMEOUT,
-			ReadTimeout:    PSIPHON_API_SERVER_TIMEOUT,
-			WriteTimeout:   PSIPHON_API_SERVER_TIMEOUT,
-			PendingConns:   pendingConns,
-		})
+	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
+		return tunnel.sshClient.Dial("tcp", addr)
+	}
 	dialer := NewCustomTLSDialer(
 		&CustomTLSConfig{
-			Dial:                    tcpDialer,
+			Dial:                    tunneledDialer,
 			Timeout:                 PSIPHON_API_SERVER_TIMEOUT,
-			HttpProxyAddress:        localHttpProxyAddress,
 			SendServerName:          false,
 			VerifyLegacyCertificate: certificate,
 		})
@@ -290,5 +275,8 @@ func makePsiphonHttpsClient(
 		Dial: dialer,
 		ResponseHeaderTimeout: PSIPHON_API_SERVER_TIMEOUT,
 	}
-	return &http.Client{Transport: transport}, nil
+	return &http.Client{
+		Transport: transport,
+		Timeout:   PSIPHON_API_SERVER_TIMEOUT,
+	}, nil
 }

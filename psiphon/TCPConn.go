@@ -54,7 +54,6 @@ func NewTCPDialer(config *DialConfig) Dialer {
 
 // TCPConn creates a new, connected TCPConn.
 func DialTCP(addr string, config *DialConfig) (conn *TCPConn, err error) {
-
 	conn, err = interruptibleTCPDial(addr, config)
 	if err != nil {
 		return nil, ContextError(err)
