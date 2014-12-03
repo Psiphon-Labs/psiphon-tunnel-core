@@ -264,7 +264,7 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 		}
 	}
 	controller.tunnels = append(controller.tunnels, tunnel)
-	Notice(NOTICE_TUNNEL, "%d tunnels", len(controller.tunnels))
+	Notice(NOTICE_TUNNELS, "%d", len(controller.tunnels))
 	return true
 }
 
@@ -292,7 +292,7 @@ func (controller *Controller) terminateTunnel(tunnel *Tunnel) {
 				controller.nextTunnel = 0
 			}
 			activeTunnel.Close()
-			Notice(NOTICE_TUNNEL, "%d tunnels", len(controller.tunnels))
+			Notice(NOTICE_TUNNELS, "%d", len(controller.tunnels))
 			break
 		}
 	}
@@ -308,7 +308,7 @@ func (controller *Controller) terminateAllTunnels() {
 	}
 	controller.tunnels = make([]*Tunnel, 0)
 	controller.nextTunnel = 0
-	Notice(NOTICE_TUNNEL, "%d tunnels", len(controller.tunnels))
+	Notice(NOTICE_TUNNELS, "%d", len(controller.tunnels))
 }
 
 // getNextActiveTunnel returns the next tunnel from the pool of active

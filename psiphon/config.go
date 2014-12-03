@@ -22,7 +22,6 @@ package psiphon
 import (
 	"encoding/json"
 	"errors"
-	"io/ioutil"
 )
 
 type Config struct {
@@ -46,15 +45,11 @@ type Config struct {
 	UpstreamHttpProxyAddress           string
 }
 
-// LoadConfig reads, and parse, and validates a JSON format Psiphon config
-// file and returns a Config struct populated with config values.
-func LoadConfig(filename string) (*Config, error) {
-	fileContents, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return nil, ContextError(err)
-	}
+// LoadConfig parses and validates a JSON format Psiphon config JSON
+// string and returns a Config struct populated with config values.
+func LoadConfig(configJson []byte) (*Config, error) {
 	var config Config
-	err = json.Unmarshal(fileContents, &config)
+	err := json.Unmarshal(configJson, &config)
 	if err != nil {
 		return nil, ContextError(err)
 	}
