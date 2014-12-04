@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -71,8 +72,14 @@ func NewSession(config *Config, tunnel *Tunnel) (session *Session, err error) {
 	return session, nil
 }
 
-func (session *Session) DoStatusRequest() {
-	// TODO: implement (required for page view stats)
+func (session *Session) DoStatusRequest(payload json.Marshaler) error {
+	payloadJson, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	url := session.buildRequestUrl("status")
+	err = session.doPostRequest(url, "application/json", bytes.NewReader(payloadJson))
+	return err
 }
 
 // doHandshakeRequest performs the handshake API request. The handshake
@@ -142,15 +149,9 @@ func (session *Session) doHandshakeRequest() error {
 	if upgradeClientVersion > session.config.ClientVersion {
 		Notice(NOTICE_UPGRADE, "%d", upgradeClientVersion)
 	}
-	// TODO: remove regex notices -- regexes will be used internally
-	/*
-		for _, pageViewRegex := range handshakeConfig.PageViewRegexes {
-			Notice(NOTICE_PAGE_VIEW_REGEX, "%s %s", pageViewRegex["regex"], pageViewRegex["replace"])
-		}
-		for _, httpsRequestRegex := range handshakeConfig.HttpsRequestRegexes {
-			Notice(NOTICE_HTTPS_REGEX, "%s %s", httpsRequestRegex["regex"], httpsRequestRegex["replace"])
-		}
-	*/
+	session.tunnel.SetStatsRegexps(MakeRegexps(
+		handshakeConfig.PageViewRegexes,
+		handshakeConfig.HttpsRequestRegexes))
 	return nil
 }
 
@@ -248,6 +249,20 @@ func (session *Session) doGetRequest(requestUrl string) (responseBody []byte, er
 		return nil, ContextError(fmt.Errorf("HTTP GET request failed with response code: %d", response.StatusCode))
 	}
 	return body, nil
+}
+
+// doPostRequest makes a tunneled HTTPS POST request.
+func (session *Session) doPostRequest(requestUrl string, bodyType string, body io.Reader) (err error) {
+	response, err := session.psiphonHttpsClient.Post(requestUrl, bodyType, body)
+	if err != nil {
+		// Trim this error since it may include long URLs
+		return ContextError(TrimError(err))
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return ContextError(fmt.Errorf("HTTP POST request failed with response code: %d", response.StatusCode))
+	}
+	return
 }
 
 // makeHttpsClient creates a Psiphon HTTPS client that tunnels requests and which validates

@@ -30,8 +30,6 @@ import (
 	"net"
 	"sync"
 	"time"
-
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/stats"
 )
 
 // Controller is a tunnel lifecycle coordinator. It manages lists of servers to
@@ -87,8 +85,8 @@ func NewController(config *Config) (controller *Controller) {
 func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	Notice(NOTICE_VERSION, VERSION)
 
-	stats.Start()
-	defer stats.Stop()
+	Start()
+	defer Stop()
 
 	socksProxy, err := NewSocksProxy(controller.config, controller)
 	if err != nil {
@@ -382,7 +380,7 @@ func (controller *Controller) operateTunnel(tunnel *Tunnel) {
 
 	Notice(NOTICE_INFO, "starting session for %s", tunnel.serverEntry.IpAddress)
 	// TODO: NewSession server API calls may block shutdown
-	_, err = NewSession(controller.config, tunnel)
+	session, err := NewSession(controller.config, tunnel)
 	if err != nil {
 		err = fmt.Errorf("error starting session for %s: %s", tunnel.serverEntry.IpAddress, err)
 	}
@@ -393,6 +391,8 @@ func (controller *Controller) operateTunnel(tunnel *Tunnel) {
 	// Promote this successful tunnel to first rank so it's one
 	// of the first candidates next time establish runs.
 	PromoteServerEntry(tunnel.serverEntry.IpAddress)
+
+	statsTimer := time.NewTimer(NextSendPeriod())
 
 	for err == nil {
 		select {
@@ -413,6 +413,17 @@ func (controller *Controller) operateTunnel(tunnel *Tunnel) {
 		case <-controller.shutdownBroadcast:
 			Notice(NOTICE_INFO, "shutdown operate tunnel")
 			return
+
+		case <-statsTimer.C:
+			payload := GetForServer(tunnel.serverEntry.IpAddress)
+			if payload != nil {
+				err := session.DoStatusRequest(payload)
+				if err != nil {
+					Notice(NOTICE_ALERT, "DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
+					PutBack(tunnel.serverEntry.IpAddress, payload)
+				}
+			}
+			statsTimer.Reset(NextSendPeriod())
 		}
 	}
 
@@ -481,8 +492,10 @@ func (controller *Controller) Dial(remoteAddr string) (conn net.Conn, err error)
 		return nil, ContextError(err)
 	}
 
+	statsConn := NewStatsConn(tunnelConn, tunnel.ServerID(), tunnel.StatsRegexps())
+
 	conn = &TunneledConn{
-		Conn:   stats.NewStatsConn(tunnelConn, tunnel.GetServerID()),
+		Conn:   statsConn,
 		tunnel: tunnel}
 
 	return

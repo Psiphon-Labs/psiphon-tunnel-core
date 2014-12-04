@@ -70,6 +70,7 @@ type Tunnel struct {
 	sshKeepAliveQuit        chan struct{}
 	portForwardFailures     chan int
 	portForwardFailureTotal int
+	regexps                 *Regexps
 }
 
 // EstablishTunnel first makes a network transport connection to the
@@ -284,8 +285,16 @@ func (tunnel *Tunnel) SignalFailure() {
 	tunnel.Close()
 }
 
-// GetServerID provides a unique identifier for the server the tunnel connects to.
+// ServerID provides a unique identifier for the server the tunnel connects to.
 // This ID is consistent between multiple tunnels connected to that server.
-func (tunnel *Tunnel) GetServerID() string {
+func (tunnel *Tunnel) ServerID() string {
 	return tunnel.serverEntry.IpAddress
+}
+
+func (tunnel *Tunnel) StatsRegexps() *Regexps {
+	return tunnel.regexps
+}
+
+func (tunnel *Tunnel) SetStatsRegexps(regexps *Regexps) {
+	tunnel.regexps = regexps
 }

@@ -17,9 +17,9 @@
  *
  */
 
-// Package stats conts and keeps track of session stats. These per-domain bytes
-// transferred and total bytes transferred.
-package stats
+// Package stats counts and keeps track of session stats. These are per-domain
+// bytes transferred and total bytes transferred.
+package psiphon
 
 /*
 Assumption: The same connection will not be used to access different hostnames
@@ -44,17 +44,23 @@ type StatsConn struct {
 	serverID   string
 	hostname   string
 	firstWrite bool
+	regexps    *Regexps
 }
 
-func NewStatsConn(nextConn net.Conn, serverID string) *StatsConn {
+// NewStatsConn creates a StatsConn. serverID can be anything that uniquely
+// identifies the server; it will be passed to GetForServer() when retrieving
+// the accumulated stats.
+func NewStatsConn(nextConn net.Conn, serverID string, regexps *Regexps) *StatsConn {
 	return &StatsConn{
 		Conn:       nextConn,
+		serverID:   serverID,
 		firstWrite: true,
+		regexps:    regexps,
 	}
 }
 
-// Called when requests are being written out through the tunnel to the remote
-// server.
+// Write is called when requests are being written out through the tunnel to
+// the remote server.
 func (conn *StatsConn) Write(buffer []byte) (n int, err error) {
 	// First pass the data down the chain.
 	n, err = conn.Conn.Write(buffer)
@@ -71,23 +77,33 @@ func (conn *StatsConn) Write(buffer []byte) (n int, err error) {
 			bufferReader := bufio.NewReader(bytes.NewReader(buffer))
 			httpReq, httpErr := http.ReadRequest(bufferReader)
 			if httpErr == nil {
-				conn.hostname = httpReq.Host
+				// Get the hostname value that will be stored in stats by
+				// regexing the real hostname.
+				conn.hostname = regexHostname(httpReq.Host, conn.regexps)
 			}
 		}
 
-		recordStat(statsUpdate{conn.serverID, conn.hostname, n, 0})
+		recordStat(statsUpdate{
+			conn.serverID,
+			conn.hostname,
+			int64(n),
+			0})
 	}
 
 	return
 }
 
-// Called when responses to requests are being read from the remote server.
+// Read is called when responses to requests are being read from the remote server.
 func (conn *StatsConn) Read(buffer []byte) (n int, err error) {
 	n, err = conn.Conn.Read(buffer)
 
 	// Count bytes without checking the error condition. It could happen that the
 	// buffer was partially read and then an error occurred.
-	recordStat(statsUpdate{conn.serverID, conn.hostname, 0, n})
+	recordStat(statsUpdate{
+		conn.serverID,
+		conn.hostname,
+		0,
+		int64(n)})
 
 	return
 }
