@@ -31,11 +31,12 @@ import (
 // HttpProxy is a HTTP server that relays HTTP requests through
 // the tunnel SSH client.
 type HttpProxy struct {
-	tunneler       Tunneler
-	listener       net.Listener
-	serveWaitGroup *sync.WaitGroup
-	httpRelay      *http.Transport
-	openConns      *Conns
+	tunneler               Tunneler
+	listener               net.Listener
+	serveWaitGroup         *sync.WaitGroup
+	httpRelay              *http.Transport
+	openConns              *Conns
+	stopListeningBroadcast chan struct{}
 }
 
 // NewHttpProxy initializes and runs a new HTTP proxy server.
@@ -56,11 +57,12 @@ func NewHttpProxy(config *Config, tunneler Tunneler) (proxy *HttpProxy, err erro
 		ResponseHeaderTimeout: HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
 	}
 	proxy = &HttpProxy{
-		tunneler:       tunneler,
-		listener:       listener,
-		serveWaitGroup: new(sync.WaitGroup),
-		httpRelay:      transport,
-		openConns:      new(Conns),
+		tunneler:               tunneler,
+		listener:               listener,
+		serveWaitGroup:         new(sync.WaitGroup),
+		httpRelay:              transport,
+		openConns:              new(Conns),
+		stopListeningBroadcast: make(chan struct{}),
 	}
 	proxy.serveWaitGroup.Add(1)
 	go proxy.serve()
@@ -70,6 +72,7 @@ func NewHttpProxy(config *Config, tunneler Tunneler) (proxy *HttpProxy, err erro
 
 // Close terminates the HTTP server.
 func (proxy *HttpProxy) Close() {
+	close(proxy.stopListeningBroadcast)
 	proxy.listener.Close()
 	proxy.serveWaitGroup.Wait()
 	// Close local->proxy persistent connections
@@ -226,9 +229,16 @@ func (proxy *HttpProxy) serve() {
 	}
 	// Note: will be interrupted by listener.Close() call made by proxy.Close()
 	err := httpServer.Serve(proxy.listener)
-	if err != nil {
-		proxy.tunneler.SignalFailure()
-		Notice(NOTICE_ALERT, "%s", ContextError(err))
+	// Can't check for the exact error that Close() will cause in Accept(),
+	// (see: https://code.google.com/p/go/issues/detail?id=4373). So using an
+	// explicit stop signal to stop gracefully.
+	select {
+	case <-proxy.stopListeningBroadcast:
+	default:
+		if err != nil {
+			proxy.tunneler.SignalFailure()
+			Notice(NOTICE_ALERT, "%s", ContextError(err))
+		}
 	}
 	Notice(NOTICE_HTTP_PROXY, "HTTP proxy stopped")
 }

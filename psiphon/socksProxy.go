@@ -31,10 +31,11 @@ import (
 // the tunnel SSH client and relays traffic through the port
 // forward.
 type SocksProxy struct {
-	tunneler       Tunneler
-	listener       *socks.SocksListener
-	serveWaitGroup *sync.WaitGroup
-	openConns      *Conns
+	tunneler               Tunneler
+	listener               *socks.SocksListener
+	serveWaitGroup         *sync.WaitGroup
+	openConns              *Conns
+	stopListeningBroadcast chan struct{}
 }
 
 // NewSocksProxy initializes a new SOCKS server. It begins listening for
@@ -47,10 +48,11 @@ func NewSocksProxy(config *Config, tunneler Tunneler) (proxy *SocksProxy, err er
 		return nil, ContextError(err)
 	}
 	proxy = &SocksProxy{
-		tunneler:       tunneler,
-		listener:       listener,
-		serveWaitGroup: new(sync.WaitGroup),
-		openConns:      new(Conns),
+		tunneler:               tunneler,
+		listener:               listener,
+		serveWaitGroup:         new(sync.WaitGroup),
+		openConns:              new(Conns),
+		stopListeningBroadcast: make(chan struct{}),
 	}
 	proxy.serveWaitGroup.Add(1)
 	go proxy.serve()
@@ -61,6 +63,7 @@ func NewSocksProxy(config *Config, tunneler Tunneler) (proxy *SocksProxy, err er
 // Close terminates the listener and waits for the accept loop
 // goroutine to complete.
 func (proxy *SocksProxy) Close() {
+	close(proxy.stopListeningBroadcast)
 	proxy.listener.Close()
 	proxy.serveWaitGroup.Wait()
 	proxy.openConns.CloseAll()
@@ -86,15 +89,24 @@ func (proxy *SocksProxy) socksConnectionHandler(localConn *socks.SocksConn) (err
 func (proxy *SocksProxy) serve() {
 	defer proxy.listener.Close()
 	defer proxy.serveWaitGroup.Done()
+loop:
 	for {
 		// Note: will be interrupted by listener.Close() call made by proxy.Close()
 		socksConnection, err := proxy.listener.AcceptSocks()
+		// Can't check for the exact error that Close() will cause in Accept(),
+		// (see: https://code.google.com/p/go/issues/detail?id=4373). So using an
+		// explicit stop signal to stop gracefully.
+		select {
+		case <-proxy.stopListeningBroadcast:
+			break loop
+		default:
+		}
 		if err != nil {
 			Notice(NOTICE_ALERT, "SOCKS proxy accept error: %s", err)
 			if e, ok := err.(net.Error); ok && !e.Temporary() {
 				proxy.tunneler.SignalFailure()
 				// Fatal error, stop the proxy
-				break
+				break loop
 			}
 			// Temporary error, keep running
 			continue

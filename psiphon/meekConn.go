@@ -44,7 +44,7 @@ import (
 // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/default/go/meek-client/meek-client.go
 
 const (
-	MEEK_PROTOCOL_VERSION      = 1
+	MEEK_PROTOCOL_VERSION      = 2
 	MEEK_COOKIE_MAX_PADDING    = 32
 	MAX_SEND_PAYLOAD_LENGTH    = 65536
 	FULL_RECEIVE_BUFFER_LENGTH = 4194304
@@ -435,6 +435,14 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadClos
 	if response.StatusCode != http.StatusOK {
 		return nil, ContextError(fmt.Errorf("http request failed %d", response.StatusCode))
 	}
+        // observe response cookies for meek session key token.
+        // Once found it must be used for all consecutive requests made to the server
+        for _, c := range response.Cookies() {
+            if meek.cookie.Name == c.Name {
+                meek.cookie.Value = c.Value
+                break
+            }
+        }
 	return response.Body, nil
 }
 
@@ -444,14 +452,16 @@ type meekCookieData struct {
 	MeekProtocolVersion int    `json:"v"`
 }
 
-// makeCookie creates the cookie to be sent with all meek HTTP requests.
+// makeCookie creates the cookie to be sent with initial meek HTTP request.
 // The purpose of the cookie is to send the following to the server:
 //   ServerAddress -- the Psiphon Server address the meek server should relay to
 //   SessionID -- the Psiphon session ID (used by meek server to relay geolocation
 //     information obtained from the CDN through to the Psiphon Server)
 //   MeekProtocolVersion -- tells the meek server that this client understands
 //     the latest protocol.
-// The entire cookie also acts as an meek/HTTP session ID.
+// The server will create a session using these values and send the session ID
+// back to the client via Set-Cookie header. Client must use that value with
+// all consequent HTTP requests
 // In unfronted meek mode, the cookie is visible over the adversary network, so the
 // cookie is encrypted and obfuscated.
 func makeCookie(serverEntry *ServerEntry, sessionId string) (cookie *http.Cookie, err error) {
@@ -506,7 +516,8 @@ func makeCookie(serverEntry *ServerEntry, sessionId string) (cookie *http.Cookie
 	// The format is <random letter 'A'-'Z'>=<base64 data>, which is intended to match common cookie formats.
 	A := int('A')
 	Z := int('Z')
-	letterIndex, err := MakeSecureRandomInt(Z - A)
+	// letterIndex is integer in range [int('A'), int('Z')]
+	letterIndex, err := MakeSecureRandomInt(Z - A + 1)
 	if err != nil {
 		return nil, ContextError(err)
 	}

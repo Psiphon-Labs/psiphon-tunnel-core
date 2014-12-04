@@ -42,7 +42,7 @@ func Contains(list []string, target string) bool {
 }
 
 // MakeSecureRandomInt is a helper function that wraps
-// crypto/rand.Int.
+// crypto/rand.Int, which returns a uniform random value in [0, max).
 func MakeSecureRandomInt(max int) (int, error) {
 	randomInt, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
 	if err != nil {
