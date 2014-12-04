@@ -21,7 +21,7 @@ package main
 
 import (
 	"flag"
-	psiphon "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"io/ioutil"
 	"log"
 	"os"

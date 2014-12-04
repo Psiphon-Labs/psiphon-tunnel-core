@@ -75,9 +75,11 @@ func Start(configJson string, listener Listener) error {
 }
 
 func Stop() {
-	close(shutdownBroadcast)
-	controllerWaitGroup.Wait()
-	controller = nil
-	shutdownBroadcast = nil
-	controllerWaitGroup = nil
+	if controller != nil {
+		close(shutdownBroadcast)
+		controllerWaitGroup.Wait()
+		controller = nil
+		shutdownBroadcast = nil
+		controllerWaitGroup = nil
+	}
 }

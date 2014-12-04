@@ -5,7 +5,8 @@ Overview
 --------------------------------------------------------------------------------
 
 Psiphon Library for Android enables you to easily embed Psiphon in your Android
-app.
+app. The Psiphon Library for Android is implemented in Go and follows the standard
+conventions for using a Go library in an Android app.
 
 Status
 --------------------------------------------------------------------------------
@@ -15,15 +16,15 @@ Status
 Building From Source
 --------------------------------------------------------------------------------
 
-Review Go Android documentation:
-* [Main README](https://code.google.com/p/go/source/browse/README?repo=mobile)
+Follow Go Android documentation:
+* [Overview README](https://code.google.com/p/go/source/browse/README?repo=mobile)
 * [Sample JNI App README](https://code.google.com/p/go/source/browse/example/libhello/README?repo=mobile)
 * [gobind documentation](http://godoc.org/golang.org/x/mobile/cmd/gobind)
 
 ```
 /AndroidLibrary
   README.md                - this file
-  gojni.so                 - build binary output
+  libgojni.so              - build binary output
   /psi
     psi.go                 - main library source
   /go_psi
@@ -37,11 +38,13 @@ Review Go Android documentation:
     main.go                - stub main package for library
 ```
 
+NOTE: may change after Go 1.4 is released.
+
 * Requires Go 1.4 or later
   * At this time, android/arm support is not yet released but.
   * Install Go from source. The Android instructions are here:
 [https://code.google.com/p/go/source/browse/README?repo=mobile](https://code.google.com/p/go/source/browse/README?repo=mobile).
-  * In summary, download and install the Android NDK, use a script to make a standalone toolchain, and use that toolchain to build android/arm support within the Go source install. Then cross compile as usual.
+  * In summary, download and install the Android NDK, use a script to make a [standalone toolchain](https://developer.android.com/tools/sdk/ndk/index.html#Docs), and use that toolchain to build android/arm support within the Go source install. Then cross compile as usual.
 * `$GOPATH/bin/gobind -lang=go github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary/psi > go_psi/go_psi.go`
 * `$GOPATH/bin/gobind -lang=java github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary/psi > java_psi/go/psi/Psi.java`
 * In `/libpsi` `CGO_ENABLED=1 GOOS=android GOARCH=arm GOARM=7 go build -ldflags="-shared"` and copy output file to `gojni.so`
@@ -49,6 +52,7 @@ Review Go Android documentation:
 Using
 --------------------------------------------------------------------------------
 
+1. Build from source or use the provided shared object binary and Java source files
 1. Add Go/Java integration files `java_golang/go/*.java` to your `$src/go`
 1. Add `java_psi/go/psi/Psi.java` to your `$src/go/psi`
 1. Add `gojni.so

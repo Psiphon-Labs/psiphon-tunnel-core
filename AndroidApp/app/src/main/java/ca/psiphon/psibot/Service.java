@@ -64,12 +64,12 @@ public class Service extends VpnService {
             public void run() {
                 CountDownLatch tunnelStartedSignal = new CountDownLatch(1);
                 SocketProtector socketProtector = new SocketProtector(Service.this);
-                Client client = new Client(Service.this, tunnelStartedSignal);
+                Psiphon psiphon = new Psiphon(Service.this, tunnelStartedSignal);
                 try {
                     socketProtector.start();
                     // TODO: what if client local proxies unbind? in this case it's better if Go client keeps its proxies up permanently.
                     // TODO: monitor tunnel messages and update notification UI when re-connecting, etc.
-                    client.start();
+                    psiphon.start();
                     while (true) {
                         if (tunnelStartedSignal.await(100, TimeUnit.MILLISECONDS)) {
                             break;
@@ -78,7 +78,7 @@ public class Service extends VpnService {
                             throw new Utils.PsibotError("stopped while waiting tunnel");
                         }
                     }
-                    int localSocksProxyPort = client.getLocalSocksProxyPort();
+                    int localSocksProxyPort = psiphon.getLocalSocksProxyPort();
                     runVpn(localSocksProxyPort);
                     mStopSignal.await();
                 } catch (Utils.PsibotError e) {
@@ -87,7 +87,7 @@ public class Service extends VpnService {
                     Thread.currentThread().interrupt();
                 }
                 stopVpn();
-                client.stop();
+                psiphon.stop();
                 socketProtector.stop();
                 stopSelf();
             }
@@ -172,7 +172,7 @@ public class Service extends VpnService {
 
             if (vpnInterfaceFileDescriptor == null) {
                 // as per http://developer.android.com/reference/android/net/VpnService.Builder.html#establish%28%29
-                throw new Utils.PsibotError("application is not prepared or is revoked");
+                throw new Utils.PsibotError(errorMessage + ": application is not prepared or is revoked");
             }
         } catch(IllegalArgumentException e) {
             throw new Utils.PsibotError(errorMessage, e);
