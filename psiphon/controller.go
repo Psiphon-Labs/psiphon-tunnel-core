@@ -85,8 +85,8 @@ func NewController(config *Config) (controller *Controller) {
 func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	Notice(NOTICE_VERSION, VERSION)
 
-	Start()
-	defer Stop()
+	Stats_Start()
+	defer Stats_Stop()
 
 	socksProxy, err := NewSocksProxy(controller.config, controller)
 	if err != nil {
@@ -411,18 +411,13 @@ func (controller *Controller) operateTunnel(tunnel *Tunnel) {
 			err = errors.New("tunnel closed unexpectedly")
 
 		case <-controller.shutdownBroadcast:
+			// Send final stats
+			sendStats(tunnel, session, true)
 			Notice(NOTICE_INFO, "shutdown operate tunnel")
 			return
 
 		case <-statsTimer.C:
-			payload := GetForServer(tunnel.serverEntry.IpAddress)
-			if payload != nil {
-				err := session.DoStatusRequest(payload)
-				if err != nil {
-					Notice(NOTICE_ALERT, "DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
-					PutBack(tunnel.serverEntry.IpAddress, payload)
-				}
-			}
+			sendStats(tunnel, session, false)
 			statsTimer.Reset(NextSendPeriod())
 		}
 	}
@@ -436,6 +431,18 @@ func (controller *Controller) operateTunnel(tunnel *Tunnel) {
 		case controller.failedTunnels <- tunnel:
 		default:
 			controller.terminateTunnel(tunnel)
+		}
+	}
+}
+
+// sendStats is a helper for sending session stats to the server.
+func sendStats(tunnel *Tunnel, session *Session, final bool) {
+	payload := GetForServer(tunnel.serverEntry.IpAddress)
+	if payload != nil {
+		err := session.DoStatusRequest(payload, final)
+		if err != nil {
+			Notice(NOTICE_ALERT, "DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
+			PutBack(tunnel.serverEntry.IpAddress, payload)
 		}
 	}
 }

@@ -26,8 +26,12 @@ type regexpReplace struct {
 	replace string
 }
 
+// Regexps holds the regular expressions and replacement strings used for
+// transforming URLs and hostnames into a stats-appropriate forms.
 type Regexps []regexpReplace
 
+// MakeRegexps takes the raw string-map form of the regex-replace pairs
+// returned by the server handshake and turns them into a usable object.
 func MakeRegexps(pageViewRegexes, httpsRequestRegexes []map[string]string) *Regexps {
 	regexps := make(Regexps, 0)
 
@@ -57,6 +61,8 @@ func MakeRegexps(pageViewRegexes, httpsRequestRegexes []map[string]string) *Rege
 	return &regexps
 }
 
+// regexHostname processes hostname through the given regexps and returns the
+// string that should be used for stats.
 func regexHostname(hostname string, regexps *Regexps) (statsHostname string) {
 	statsHostname = "(OTHER)"
 	for _, rr := range *regexps {

@@ -43,7 +43,7 @@ func TestStatsTestSuite(t *testing.T) {
 }
 
 func (suite *StatsTestSuite) SetupTest() {
-	Start()
+	Stats_Start()
 
 	re := make(Regexps, 0)
 	suite.httpClient = &http.Client{
@@ -55,7 +55,7 @@ func (suite *StatsTestSuite) SetupTest() {
 
 func (suite *StatsTestSuite) TearDownTest() {
 	suite.httpClient = nil
-	Stop()
+	Stats_Stop()
 }
 
 func makeStatsDialer(serverID string, regexps *Regexps) func(network, addr string) (conn net.Conn, err error) {
@@ -73,7 +73,7 @@ func makeStatsDialer(serverID string, regexps *Regexps) func(network, addr strin
 				return nil, err
 			}
 		default:
-			err = errors.New("Using an unsupported testing network type")
+			err = errors.New("using an unsupported testing network type")
 			return
 		}
 
@@ -85,12 +85,12 @@ func makeStatsDialer(serverID string, regexps *Regexps) func(network, addr strin
 
 func (suite *StatsTestSuite) Test_StartStop() {
 	// Make sure Start and Stop calls don't crash
-	Start()
-	Start()
-	Stop()
-	Stop()
-	Start()
-	Stop()
+	Stats_Start()
+	Stats_Start()
+	Stats_Stop()
+	Stats_Stop()
+	Stats_Start()
+	Stats_Stop()
 }
 
 func (suite *StatsTestSuite) Test_NextSendPeriod() {
@@ -126,9 +126,9 @@ func (suite *StatsTestSuite) Test_GetForServer() {
 	payload = GetForServer(_SERVER_ID)
 	suite.NotNil(payload, "should receive valid payload for valid server ID")
 
-	payloadJson, err := json.Marshal(payload)
-	var parsedJson interface{}
-	err = json.Unmarshal(payloadJson, &parsedJson)
+	payloadJSON, err := json.Marshal(payload)
+	var parsedJSON interface{}
+	err = json.Unmarshal(payloadJSON, &parsedJSON)
 	suite.Nil(err, "payload JSON should parse successfully")
 
 	// After we retrieve the stats for a server, they should be cleared out of the tracked stats
@@ -234,7 +234,7 @@ func (suite *StatsTestSuite) Test_Regex() {
 	expectedHostnames.Add("replacement")
 
 	hostnames := make([]interface{}, 0)
-	for hostname, _ := range payload.hostnameToStats {
+	for hostname := range payload.hostnameToStats {
 		hostnames = append(hostnames, hostname)
 	}
 
@@ -251,7 +251,7 @@ func (suite *StatsTestSuite) Test_recordStat() {
 	// release it.
 	allStats.statsMutex.Lock()
 	stat := statsUpdate{"test", "test", 1, 1}
-	for i := 0; i < _CHANNEL_CAPACITY*2; i += 1 {
+	for i := 0; i < _CHANNEL_CAPACITY*2; i++ {
 		recordStat(stat)
 	}
 	allStats.statsMutex.Unlock()

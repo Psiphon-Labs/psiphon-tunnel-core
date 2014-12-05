@@ -291,10 +291,12 @@ func (tunnel *Tunnel) ServerID() string {
 	return tunnel.serverEntry.IpAddress
 }
 
+// StatsRegexps gets the Regexps used for the statistics for this tunnel.
 func (tunnel *Tunnel) StatsRegexps() *Regexps {
 	return tunnel.regexps
 }
 
+// SetStatsRegexps sets the Regexps used for the statistics for this tunnel.
 func (tunnel *Tunnel) SetStatsRegexps(regexps *Regexps) {
 	tunnel.regexps = regexps
 }

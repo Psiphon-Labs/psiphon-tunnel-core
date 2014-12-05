@@ -72,13 +72,25 @@ func NewSession(config *Config, tunnel *Tunnel) (session *Session, err error) {
 	return session, nil
 }
 
-func (session *Session) DoStatusRequest(payload json.Marshaler) error {
-	payloadJson, err := json.Marshal(payload)
+// DoStatusRequest makes a /status request to the server, sending session stats.
+// final should be true if this is the last such request before disconnecting.
+func (session *Session) DoStatusRequest(statsPayload json.Marshaler, final bool) error {
+	statsPayloadJSON, err := json.Marshal(statsPayload)
 	if err != nil {
 		return err
 	}
-	url := session.buildRequestUrl("status")
-	err = session.doPostRequest(url, "application/json", bytes.NewReader(payloadJson))
+
+	connected := "1"
+	if final {
+		connected = "0"
+	}
+
+	url := session.buildRequestUrl(
+		"status",
+		&ExtraParam{"session_id", session.tunnel.sessionId},
+		&ExtraParam{"connected", connected})
+
+	err = session.doPostRequest(url, "application/json", bytes.NewReader(statsPayloadJSON))
 	return err
 }
 

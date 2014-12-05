@@ -63,15 +63,16 @@ func newServerStats() *serverStats {
 // allStats is the root object that holds stats for all servers and all hosts,
 // as well as the mutex to access them, the channel to update them, etc.
 var allStats struct {
-	serverIDtoStats map[string]*serverStats
-	statsMutex      sync.RWMutex
-	stopSignal      chan struct{}
-	statsChan       chan []statsUpdate
+	serverIDtoStats    map[string]*serverStats
+	statsMutex         sync.RWMutex
+	stopSignal         chan struct{}
+	statsChan          chan []statsUpdate
+	processorWaitGroup sync.WaitGroup
 }
 
 // Start initializes and begins stats collection. Must be called once, when the
 // application starts.
-func Start() {
+func Stats_Start() {
 	if allStats.stopSignal != nil {
 		return
 	}
@@ -80,14 +81,16 @@ func Start() {
 	allStats.stopSignal = make(chan struct{})
 	allStats.statsChan = make(chan []statsUpdate, _CHANNEL_CAPACITY)
 
+	allStats.processorWaitGroup.Add(1)
 	go processStats()
 }
 
 // Stop ends stats collection. Must be called once, before the application
 // terminates.
-func Stop() {
+func Stats_Stop() {
 	if allStats.stopSignal != nil {
 		close(allStats.stopSignal)
+		allStats.processorWaitGroup.Wait()
 		allStats.stopSignal = nil
 	}
 }
@@ -122,6 +125,8 @@ func recordStat(newStat statsUpdate) {
 // processStats is a goro started by Start() and runs until Stop(). It collects
 // stats provided by StatsConn.
 func processStats() {
+	defer allStats.processorWaitGroup.Done()
+
 	for {
 		select {
 		case statSlice := <-allStats.statsChan:
@@ -188,21 +193,19 @@ func (ss serverStats) MarshalJSON() ([]byte, error) {
 	out := make(map[string]interface{})
 
 	var padding []byte
-	padding_size, err := MakeSecureRandomInt(256)
+	paddingSize, err := MakeSecureRandomInt(256)
 	// In case of randomness fail, we're going to proceed with zero padding.
 	// TODO: Is this okay?
 	if err != nil {
 		Notice(NOTICE_ALERT, "stats.serverStats.MarshalJSON: MakeSecureRandomInt failed")
 		padding = make([]byte, 0)
 	} else {
-		padding, err = MakeSecureRandomBytes(padding_size)
+		padding, err = MakeSecureRandomBytes(paddingSize)
 		if err != nil {
 			Notice(NOTICE_ALERT, "stats.serverStats.MarshalJSON: MakeSecureRandomBytes failed")
 			padding = make([]byte, 0)
 		}
 	}
-
-	out["padding"] = base64.StdEncoding.EncodeToString(padding)
 
 	hostBytes := make(map[string]int64)
 	bytesTransferred := int64(0)
@@ -215,6 +218,16 @@ func (ss serverStats) MarshalJSON() ([]byte, error) {
 
 	out["bytes_transferred"] = bytesTransferred
 	out["host_bytes"] = hostBytes
+
+	// Print the notice before adding the padding, since it's not interesting
+	noticeJSON, _ := json.Marshal(out)
+	Notice(NOTICE_INFO, "sending stats: %s %s", noticeJSON, err)
+
+	out["padding"] = base64.StdEncoding.EncodeToString(padding)
+
+	// We're not using these fields, but the server requires them
+	out["page_views"] = make([]string, 0)
+	out["https_requests"] = make([]string, 0)
 
 	return json.Marshal(out)
 }
