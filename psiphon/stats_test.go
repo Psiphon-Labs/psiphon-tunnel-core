@@ -252,7 +252,7 @@ func (suite *StatsTestSuite) Test_recordStat() {
 	allStats.statsMutex.Lock()
 	stat := statsUpdate{"test", "test", 1, 1}
 	for i := 0; i < _CHANNEL_CAPACITY*2; i++ {
-		recordStat(stat)
+		recordStat(&stat)
 	}
 	allStats.statsMutex.Unlock()
 }

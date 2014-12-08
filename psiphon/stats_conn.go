@@ -83,7 +83,7 @@ func (conn *StatsConn) Write(buffer []byte) (n int, err error) {
 			}
 		}
 
-		recordStat(statsUpdate{
+		recordStat(&statsUpdate{
 			conn.serverID,
 			conn.hostname,
 			int64(n),
@@ -99,7 +99,7 @@ func (conn *StatsConn) Read(buffer []byte) (n int, err error) {
 
 	// Count bytes without checking the error condition. It could happen that the
 	// buffer was partially read and then an error occurred.
-	recordStat(statsUpdate{
+	recordStat(&statsUpdate{
 		conn.serverID,
 		conn.hostname,
 		0,

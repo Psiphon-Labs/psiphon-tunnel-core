@@ -77,7 +77,7 @@ func NewSession(config *Config, tunnel *Tunnel) (session *Session, err error) {
 func (session *Session) DoStatusRequest(statsPayload json.Marshaler, final bool) error {
 	statsPayloadJSON, err := json.Marshal(statsPayload)
 	if err != nil {
-		return err
+		return ContextError(err)
 	}
 
 	connected := "1"
@@ -91,7 +91,7 @@ func (session *Session) DoStatusRequest(statsPayload json.Marshaler, final bool)
 		&ExtraParam{"connected", connected})
 
 	err = session.doPostRequest(url, "application/json", bytes.NewReader(statsPayloadJSON))
-	return err
+	return ContextError(err)
 }
 
 // doHandshakeRequest performs the handshake API request. The handshake

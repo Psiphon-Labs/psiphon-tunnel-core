@@ -34,8 +34,9 @@ import (
 // a small amount of memory (< 1KB, probably), but we should still probably add
 // some kind of stale-stats cleanup.
 
-// TODO: What size should this be?
-var _CHANNEL_CAPACITY = 20
+// _CHANNEL_CAPACITY is the size of the channel that connections use to send stats
+// bundles to the collector/processor.
+var _CHANNEL_CAPACITY = 1000
 
 // Per-host/domain stats.
 // Note that the bytes we're counting are the ones going into the tunnel, so do
@@ -66,7 +67,7 @@ var allStats struct {
 	serverIDtoStats    map[string]*serverStats
 	statsMutex         sync.RWMutex
 	stopSignal         chan struct{}
-	statsChan          chan []statsUpdate
+	statsChan          chan []*statsUpdate
 	processorWaitGroup sync.WaitGroup
 }
 
@@ -79,7 +80,7 @@ func Stats_Start() {
 
 	allStats.serverIDtoStats = make(map[string]*serverStats)
 	allStats.stopSignal = make(chan struct{})
-	allStats.statsChan = make(chan []statsUpdate, _CHANNEL_CAPACITY)
+	allStats.statsChan = make(chan []*statsUpdate, _CHANNEL_CAPACITY)
 
 	allStats.processorWaitGroup.Add(1)
 	go processStats()
@@ -104,10 +105,12 @@ type statsUpdate struct {
 	numBytesReceived int64
 }
 
-// recordStats makes sure the given stats update is added to the global collection.
-// Guaranteed to not block.
-func recordStat(newStat statsUpdate) {
-	statSlice := []statsUpdate{newStat}
+// recordStats makes sure the given stats update is added to the global
+// collection. Guaranteed to not block.
+// Callers of this function should assume that it "takes control" of the
+// statsUpdate object.
+func recordStat(newStat *statsUpdate) {
+	statSlice := []*statsUpdate{newStat}
 	// Priority: Don't block connections when updating stats. We can't just
 	// write to the statsChan, since that will block if it's full. We could
 	// launch a goroutine for each update, but that seems like  unnecessary
@@ -192,6 +195,8 @@ func NextSendPeriod() (duration time.Duration) {
 func (ss serverStats) MarshalJSON() ([]byte, error) {
 	out := make(map[string]interface{})
 
+	// Add a random amount of padding to help prevent stats updates from being
+	// a predictable size (which often happens when the connection is quiet).
 	var padding []byte
 	paddingSize, err := MakeSecureRandomInt(256)
 	// In case of randomness fail, we're going to proceed with zero padding.
@@ -221,7 +226,7 @@ func (ss serverStats) MarshalJSON() ([]byte, error) {
 
 	// Print the notice before adding the padding, since it's not interesting
 	noticeJSON, _ := json.Marshal(out)
-	Notice(NOTICE_INFO, "sending stats: %s %s", noticeJSON, err)
+	Notice(NOTICE_INFO, "sending stats: %s", noticeJSON)
 
 	out["padding"] = base64.StdEncoding.EncodeToString(padding)
 
@@ -245,9 +250,9 @@ func GetForServer(serverID string) (payload *serverStats) {
 
 // PutBack re-adds a set of server stats to the collection.
 func PutBack(serverID string, ss *serverStats) {
-	statSlice := make([]statsUpdate, 0, len(ss.hostnameToStats))
+	statSlice := make([]*statsUpdate, 0, len(ss.hostnameToStats))
 	for hostname, hoststats := range ss.hostnameToStats {
-		statSlice = append(statSlice, statsUpdate{
+		statSlice = append(statSlice, &statsUpdate{
 			serverID:         serverID,
 			hostname:         hostname,
 			numBytesSent:     hoststats.numBytesSent,
