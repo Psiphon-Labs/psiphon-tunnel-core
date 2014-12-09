@@ -531,18 +531,18 @@ func (controller *Controller) stopEstablishing() {
 // servers with higher rank are priority candidates.
 func (controller *Controller) establishCandidateGenerator() {
 	defer controller.establishWaitGroup.Done()
+
+	iterator, err := NewServerEntryIterator(
+		controller.config.EgressRegion, controller.config.TunnelProtocol)
+	if err != nil {
+		Notice(NOTICE_ALERT, "failed to iterate over candidates: %s", err)
+		controller.SignalFailure()
+		return
+	}
+	defer iterator.Close()
+
 loop:
 	for {
-		// Note: it's possible that an active tunnel in excludeServerEntries will
-		// fail during this iteration of server entries and in that case the
-		// cooresponding server will not be retried (within the same iteration).
-		iterator, err := NewServerEntryIterator(
-			controller.config.EgressRegion, controller.config.TunnelProtocol)
-		if err != nil {
-			Notice(NOTICE_ALERT, "failed to iterate over candidates: %s", err)
-			controller.SignalFailure()
-			break loop
-		}
 		for {
 			serverEntry, err := iterator.Next()
 			if err != nil {
@@ -562,7 +562,8 @@ loop:
 				break loop
 			}
 		}
-		iterator.Close()
+		iterator.Reset()
+
 		// After a complete iteration of candidate servers, pause before iterating again.
 		// This helps avoid some busy wait loop conditions, and also allows some time for
 		// network conditions to change.
