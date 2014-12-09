@@ -50,9 +50,10 @@ func initDataStore() {
              data blob not null);
 	    create table if not exists serverEntryProtocol
 	        (serverEntryId text not null,
-	         protocol text not null);
+	         protocol text not null,
+	         primary key (serverEntryId, protocol));
         create table if not exists keyValue
-            (key text not null,
+            (key text not null primary key,
              value text not null);
 		pragma journal_mode=WAL;
         `
@@ -153,15 +154,21 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 		if err != nil {
 			return err
 		}
+		_, err = transaction.Exec(`
+            delete from serverEntryProtocol where serverEntryId = ?;
+            `, serverEntry.IpAddress)
+		if err != nil {
+			return err
+		}
 		for _, protocol := range SupportedTunnelProtocols {
 			// Note: for meek, the capabilities are FRONTED-MEEK and UNFRONTED-MEEK
 			// and the additonal OSSH service is assumed to be available internally.
 			requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
 			if Contains(serverEntry.Capabilities, requiredCapability) {
 				_, err = transaction.Exec(`
-		            insert or ignore into serverEntryProtocol (serverEntryId, protocol)
-		            values (?, ?);
-		            `, serverEntry.IpAddress, protocol)
+                    insert into serverEntryProtocol (serverEntryId, protocol)
+                    values (?, ?);
+                    `, serverEntry.IpAddress, protocol)
 				if err != nil {
 					return err
 				}
