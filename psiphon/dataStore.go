@@ -48,14 +48,14 @@ func initDataStore() {
              rank integer not null unique,
              region text not null,
              data blob not null);
-	    create table if not exists serverEntryProtocol
-	        (serverEntryId text not null,
-	         protocol text not null,
-	         primary key (serverEntryId, protocol));
+        create table if not exists serverEntryProtocol
+            (serverEntryId text not null,
+             protocol text not null,
+             primary key (serverEntryId, protocol));
         create table if not exists keyValue
             (key text not null primary key,
              value text not null);
-		pragma journal_mode=WAL;
+        pragma journal_mode=WAL;
         `
 		db, err := sql.Open(
 			"sqlite3",
@@ -115,27 +115,35 @@ func transactionWithRetry(updater func(*sql.Tx) error) error {
 
 // serverEntryExists returns true if a serverEntry with the
 // given ipAddress id already exists.
-func serverEntryExists(transaction *sql.Tx, ipAddress string) bool {
+func serverEntryExists(transaction *sql.Tx, ipAddress string) (bool, error) {
 	query := "select count(*) from serverEntry where id  = ?;"
 	var count int
 	err := singleton.db.QueryRow(query, ipAddress).Scan(&count)
-	return err == nil && count > 0
+	if err != nil {
+		return false, ContextError(err)
+	}
+	return count > 0, nil
 }
 
-// StoreServerEntry adds the server entry to the data store. A newly
-// stored (or re-stored) server entry is assigned the next-to-top rank
-// for cycle order (the previous top ranked entry is promoted). The
-// purpose of this is to keep the last selected server as the top
-// ranked server.
+// StoreServerEntry adds the server entry to the data store.
+// A newly stored (or re-stored) server entry is assigned the next-to-top
+// rank for iteration order (the previous top ranked entry is promoted). The
+// purpose of inserting at next-to-top is to keep the last selected server
+// as the top ranked server. Note, server candidates are iterated in decending
+// rank order, so the largest rank is top rank.
 // When replaceIfExists is true, an existing server entry record is
 // overwritten; otherwise, the existing record is unchanged.
 func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 	return transactionWithRetry(func(transaction *sql.Tx) error {
-		serverEntryExists := serverEntryExists(transaction, serverEntry.IpAddress)
+		serverEntryExists, err := serverEntryExists(transaction, serverEntry.IpAddress)
+		if err != nil {
+			return ContextError(err)
+		}
 		if serverEntryExists && !replaceIfExists {
+			// Nothing more to do
 			return nil
 		}
-		_, err := transaction.Exec(`
+		_, err = transaction.Exec(`
             update serverEntry set rank = rank + 1
                 where id = (select id from serverEntry order by rank desc limit 1);
             `)
@@ -182,9 +190,10 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 	})
 }
 
-// PromoteServerEntry assigns the top cycle rank to the specified
-// server entry. This server entry will be the first candidate in
-// a subsequent tunnel establishment.
+// PromoteServerEntry assigns the top rank (one more than current
+// max rank) to the specified server entry. Server candidates are
+// iterated in decending rank order, so this server entry will be
+// the first candidate in a subsequent tunnel establishment.
 func PromoteServerEntry(ipAddress string) error {
 	return transactionWithRetry(func(transaction *sql.Tx) error {
 		_, err := transaction.Exec(`
@@ -335,6 +344,11 @@ func HasServerEntries(region, protocol string) bool {
 	query := "select count(*) from serverEntry" + whereClause
 	err := singleton.db.QueryRow(query, whereParams...).Scan(&count)
 
+	if err != nil {
+		Notice(NOTICE_ALERT, "HasServerEntries failed: %s", err)
+		return false
+	}
+
 	if region == "" {
 		region = "(any)"
 	}
@@ -344,7 +358,7 @@ func HasServerEntries(region, protocol string) bool {
 	Notice(NOTICE_INFO, "servers for region %s and protocol %s: %d",
 		region, protocol, count)
 
-	return err == nil && count > 0
+	return count > 0
 }
 
 // GetServerEntryIpAddresses returns an array containing
@@ -386,7 +400,7 @@ func SetKeyValue(key, value string) error {
 	})
 }
 
-// GetLastConnected retrieves a key/value pair. If not found,
+// GetKeyValue retrieves the value for a given key. If not found,
 // it returns an empty string value.
 func GetKeyValue(key string) (value string, err error) {
 	initDataStore()
