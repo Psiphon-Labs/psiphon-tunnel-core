@@ -26,6 +26,7 @@ import (
 
 type Config struct {
 	LogFilename                        string
+	DataStoreFilename                  string
 	PropagationChannelId               string
 	SponsorId                          string
 	RemoteServerListUrl                string
@@ -70,6 +71,10 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	if config.RemoteServerListSignaturePublicKey == "" {
 		return nil, ContextError(
 			errors.New("remote server list signature public key is missing from the configuration file"))
+	}
+
+	if config.DataStoreFilename == "" {
+		config.DataStoreFilename = DATA_STORE_FILENAME
 	}
 
 	if config.TunnelProtocol != "" {

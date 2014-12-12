@@ -37,10 +37,15 @@ type dataStore struct {
 
 var singleton dataStore
 
-// initDataStore initializes the singleton instance of dataStore. This
+// InitDataStore initializes the singleton instance of dataStore. This
 // function uses a sync.Once and is safe for use by concurrent goroutines.
 // The underlying sql.DB connection pool is also safe.
-func initDataStore() {
+//
+// Note: the sync.Once was more useful when initDataStore was private and
+// called on-demand by the public functions below. Now we require an explicit
+// InitDataStore() call with the filename passed in. The on-demand calls
+// have been replaced by checkInitDataStore() to assert that Init was called.
+func InitDataStore(filename string) (err error) {
 	singleton.init.Do(func() {
 		const schema = `
         create table if not exists serverEntry
@@ -56,18 +61,29 @@ func initDataStore() {
              value text not null);
 		pragma journal_mode=WAL;
         `
-		db, err := sql.Open(
+		var db *sql.DB
+		db, err = sql.Open(
 			"sqlite3",
-			fmt.Sprintf("file:%s?cache=private&mode=rwc", DATA_STORE_FILENAME))
+			fmt.Sprintf("file:%s?cache=private&mode=rwc", filename))
 		if err != nil {
-			Fatal("initDataStore failed to open database: %s", err)
+			// Note: intending to set the err return value for InitDataStore
+			err = fmt.Errorf("initDataStore failed to open database: %s", err)
+			return
 		}
 		_, err = db.Exec(schema)
 		if err != nil {
-			Fatal("initDataStore failed to initialize schema: %s", err)
+			err = fmt.Errorf("initDataStore failed to initialize schema: %s", err)
+			return
 		}
 		singleton.db = db
 	})
+	return err
+}
+
+func checkInitDataStore() {
+	if singleton.db == nil {
+		panic("checkInitDataStore: datastore not initialized")
+	}
 }
 
 func canRetry(err error) bool {
@@ -81,7 +97,7 @@ func canRetry(err error) bool {
 // transactionWithRetry will retry a write transaction if sqlite3
 // reports a table is locked by another writer.
 func transactionWithRetry(updater func(*sql.Tx) error) error {
-	initDataStore()
+	checkInitDataStore()
 	for i := 0; i < 10; i++ {
 		if i > 0 {
 			// Delay on retry
@@ -205,7 +221,7 @@ type ServerEntryIterator struct {
 
 // NewServerEntryIterator creates a new NewServerEntryIterator
 func NewServerEntryIterator(region, protocol string) (iterator *ServerEntryIterator, err error) {
-	initDataStore()
+	checkInitDataStore()
 	iterator = &ServerEntryIterator{
 		region:   region,
 		protocol: protocol,
@@ -322,7 +338,7 @@ func makeServerEntryWhereClause(
 // least one server entry (for the specified region and/or protocol,
 // when not blank).
 func HasServerEntries(region, protocol string) bool {
-	initDataStore()
+	checkInitDataStore()
 	var count int
 	whereClause, whereParams := makeServerEntryWhereClause(region, protocol, nil)
 	query := "select count(*) from serverEntry" + whereClause
@@ -343,7 +359,7 @@ func HasServerEntries(region, protocol string) bool {
 // GetServerEntryIpAddresses returns an array containing
 // all stored server IP addresses.
 func GetServerEntryIpAddresses() (ipAddresses []string, err error) {
-	initDataStore()
+	checkInitDataStore()
 	ipAddresses = make([]string, 0)
 	rows, err := singleton.db.Query("select id from serverEntry;")
 	if err != nil {
@@ -382,7 +398,7 @@ func SetKeyValue(key, value string) error {
 // GetLastConnected retrieves a key/value pair. If not found,
 // it returns an empty string value.
 func GetKeyValue(key string) (value string, err error) {
-	initDataStore()
+	checkInitDataStore()
 	rows := singleton.db.QueryRow("select value from keyValue where key = ?;", key)
 	err = rows.Scan(&value)
 	if err == sql.ErrNoRows {

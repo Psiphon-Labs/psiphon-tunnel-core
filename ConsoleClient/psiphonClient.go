@@ -21,12 +21,13 @@ package main
 
 import (
 	"flag"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
 	"sync"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
 
 func main() {
@@ -44,6 +45,11 @@ func main() {
 	config, err := psiphon.LoadConfig(configFileContents)
 	if err != nil {
 		log.Fatalf("error processing configuration file: %s", err)
+	}
+
+	err = psiphon.InitDataStore(config.DataStoreFilename)
+	if err != nil {
+		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
 	if config.LogFilename != "" {

@@ -26,9 +26,10 @@ package psi
 
 import (
 	"fmt"
-	psiphon "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"log"
 	"sync"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
 
 type Listener interface {
@@ -58,6 +59,11 @@ func Start(configJson string, listener Listener) error {
 	config, err := psiphon.LoadConfig([]byte(configJson))
 	if err != nil {
 		return fmt.Errorf("error loading configuration file: %s", err)
+	}
+
+	err = psiphon.InitDataStore(config.DataStoreFilename)
+	if err != nil {
+		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
 	log.SetOutput(&logRelay{listener: listener})
