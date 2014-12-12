@@ -83,8 +83,10 @@ func NewController(config *Config) (controller *Controller) {
 // - a local SOCKS proxy that port forwards through the pool of tunnels
 // - a local HTTP proxy that port forwards through the pool of tunnels
 func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
-
 	Notice(NOTICE_VERSION, VERSION)
+
+	Stats_Start()
+	defer Stats_Stop()
 
 	socksProxy, err := NewSocksProxy(controller.config, controller)
 	if err != nil {
@@ -378,7 +380,7 @@ func (controller *Controller) operateTunnel(tunnel *Tunnel) {
 
 	Notice(NOTICE_INFO, "starting session for %s", tunnel.serverEntry.IpAddress)
 	// TODO: NewSession server API calls may block shutdown
-	_, err = NewSession(controller.config, tunnel)
+	session, err := NewSession(controller.config, tunnel)
 	if err != nil {
 		err = fmt.Errorf("error starting session for %s: %s", tunnel.serverEntry.IpAddress, err)
 	}
@@ -389,6 +391,8 @@ func (controller *Controller) operateTunnel(tunnel *Tunnel) {
 	// Promote this successful tunnel to first rank so it's one
 	// of the first candidates next time establish runs.
 	PromoteServerEntry(tunnel.serverEntry.IpAddress)
+
+	statsTimer := time.NewTimer(NextSendPeriod())
 
 	for err == nil {
 		select {
@@ -407,8 +411,14 @@ func (controller *Controller) operateTunnel(tunnel *Tunnel) {
 			err = errors.New("tunnel closed unexpectedly")
 
 		case <-controller.shutdownBroadcast:
+			// Send final stats
+			sendStats(tunnel, session, true)
 			Notice(NOTICE_INFO, "shutdown operate tunnel")
 			return
+
+		case <-statsTimer.C:
+			sendStats(tunnel, session, false)
+			statsTimer.Reset(NextSendPeriod())
 		}
 	}
 
@@ -421,6 +431,18 @@ func (controller *Controller) operateTunnel(tunnel *Tunnel) {
 		case controller.failedTunnels <- tunnel:
 		default:
 			controller.terminateTunnel(tunnel)
+		}
+	}
+}
+
+// sendStats is a helper for sending session stats to the server.
+func sendStats(tunnel *Tunnel, session *Session, final bool) {
+	payload := GetForServer(tunnel.serverEntry.IpAddress)
+	if payload != nil {
+		err := session.DoStatusRequest(payload, final)
+		if err != nil {
+			Notice(NOTICE_ALERT, "DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
+			PutBack(tunnel.serverEntry.IpAddress, payload)
 		}
 	}
 }
@@ -476,10 +498,14 @@ func (controller *Controller) Dial(remoteAddr string) (conn net.Conn, err error)
 		}
 		return nil, ContextError(err)
 	}
-	return &TunneledConn{
-			Conn:   tunnelConn,
-			tunnel: tunnel},
-		nil
+
+	statsConn := NewStatsConn(tunnelConn, tunnel.ServerID(), tunnel.StatsRegexps())
+
+	conn = &TunneledConn{
+		Conn:   statsConn,
+		tunnel: tunnel}
+
+	return
 }
 
 // startEstablishing creates a pool of worker goroutines which will
@@ -531,18 +557,18 @@ func (controller *Controller) stopEstablishing() {
 // servers with higher rank are priority candidates.
 func (controller *Controller) establishCandidateGenerator() {
 	defer controller.establishWaitGroup.Done()
+
+	iterator, err := NewServerEntryIterator(
+		controller.config.EgressRegion, controller.config.TunnelProtocol)
+	if err != nil {
+		Notice(NOTICE_ALERT, "failed to iterate over candidates: %s", err)
+		controller.SignalFailure()
+		return
+	}
+	defer iterator.Close()
+
 loop:
 	for {
-		// Note: it's possible that an active tunnel in excludeServerEntries will
-		// fail during this iteration of server entries and in that case the
-		// cooresponding server will not be retried (within the same iteration).
-		iterator, err := NewServerEntryIterator(
-			controller.config.EgressRegion, controller.config.TunnelProtocol)
-		if err != nil {
-			Notice(NOTICE_ALERT, "failed to iterate over candidates: %s", err)
-			controller.SignalFailure()
-			break loop
-		}
 		for {
 			serverEntry, err := iterator.Next()
 			if err != nil {
@@ -562,7 +588,8 @@ loop:
 				break loop
 			}
 		}
-		iterator.Close()
+		iterator.Reset()
+
 		// After a complete iteration of candidate servers, pause before iterating again.
 		// This helps avoid some busy wait loop conditions, and also allows some time for
 		// network conditions to change.

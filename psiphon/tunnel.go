@@ -21,7 +21,6 @@ package psiphon
 
 import (
 	"bytes"
-	"code.google.com/p/go.crypto/ssh"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -30,6 +29,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"code.google.com/p/go.crypto/ssh"
 )
 
 // Tunneler specifies the interface required by components that use a tunnel.
@@ -69,6 +70,7 @@ type Tunnel struct {
 	sshKeepAliveQuit        chan struct{}
 	portForwardFailures     chan int
 	portForwardFailureTotal int
+	regexps                 *Regexps
 }
 
 // EstablishTunnel first makes a network transport connection to the
@@ -281,4 +283,20 @@ func (tunnel *Tunnel) Dial(remoteAddr string) (conn net.Conn, err error) {
 func (tunnel *Tunnel) SignalFailure() {
 	Notice(NOTICE_ALERT, "tunnel received failure signal")
 	tunnel.Close()
+}
+
+// ServerID provides a unique identifier for the server the tunnel connects to.
+// This ID is consistent between multiple tunnels connected to that server.
+func (tunnel *Tunnel) ServerID() string {
+	return tunnel.serverEntry.IpAddress
+}
+
+// StatsRegexps gets the Regexps used for the statistics for this tunnel.
+func (tunnel *Tunnel) StatsRegexps() *Regexps {
+	return tunnel.regexps
+}
+
+// SetStatsRegexps sets the Regexps used for the statistics for this tunnel.
+func (tunnel *Tunnel) SetStatsRegexps(regexps *Regexps) {
+	tunnel.regexps = regexps
 }
