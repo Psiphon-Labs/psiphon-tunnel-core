@@ -50,21 +50,14 @@ public class Utils {
     public static class PsibotError extends Exception {
         private static final long serialVersionUID = 1L;
 
-        public PsibotError() {
-            super();
-        }
-
         public PsibotError(String message) {
             super(message);
         }
 
         public PsibotError(String message, Throwable cause) {
-            super(message, cause);
+            super(message + ": " + cause.getMessage());
         }
 
-        public PsibotError(Throwable cause) {
-            super(cause);
-        }
     }
 
     public static void writeRawResourceFile(

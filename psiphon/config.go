@@ -22,11 +22,11 @@ package psiphon
 import (
 	"encoding/json"
 	"errors"
-	"io/ioutil"
 )
 
 type Config struct {
 	LogFilename                        string
+	DataStoreFilename                  string
 	PropagationChannelId               string
 	SponsorId                          string
 	RemoteServerListUrl                string
@@ -46,15 +46,11 @@ type Config struct {
 	UpstreamHttpProxyAddress           string
 }
 
-// LoadConfig reads, and parse, and validates a JSON format Psiphon config
-// file and returns a Config struct populated with config values.
-func LoadConfig(filename string) (*Config, error) {
-	fileContents, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return nil, ContextError(err)
-	}
+// LoadConfig parses and validates a JSON format Psiphon config JSON
+// string and returns a Config struct populated with config values.
+func LoadConfig(configJson []byte) (*Config, error) {
 	var config Config
-	err = json.Unmarshal(fileContents, &config)
+	err := json.Unmarshal(configJson, &config)
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -75,6 +71,10 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.RemoteServerListSignaturePublicKey == "" {
 		return nil, ContextError(
 			errors.New("remote server list signature public key is missing from the configuration file"))
+	}
+
+	if config.DataStoreFilename == "" {
+		config.DataStoreFilename = DATA_STORE_FILENAME
 	}
 
 	if config.TunnelProtocol != "" {

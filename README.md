@@ -28,6 +28,7 @@ Setup
         "SponsorId" : "<placeholder>",
         "RemoteServerListUrl" : "<placeholder>",
         "RemoteServerListSignaturePublicKey" : "<placeholder>",
+        "DataStoreFilename" : "",
         "LogFilename" : "",
         "LocalHttpProxyPort" : 0,
         "LocalSocksProxyPort" : 0,
