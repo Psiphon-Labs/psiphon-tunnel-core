@@ -20,11 +20,13 @@
 package ca.psiphon.psibot;
 
 import android.app.Application;
+import go.Go;
 
 public class App extends Application {
 
     @Override
     public void onCreate() {
+        Go.init(this.getApplicationContext());
         Log.initialize();
     }
 }
