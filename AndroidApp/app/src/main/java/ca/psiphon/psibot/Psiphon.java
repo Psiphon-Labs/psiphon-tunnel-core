@@ -46,10 +46,12 @@ public class Psiphon extends Psi.Listener.Stub {
 
     @Override
     public void Message(String line) {
+        line = line.trim();
+
+        android.util.Log.d("PSIPHON", line);
+
         parseLine(line);
-        // TODO: parse and use the Go client timestamp
-        // Don't display the first 20 characters: the Go client log timestamp
-        Log.addEntry(line.substring(20));
+        Log.addEntry(line);
     }
 
     public void start() throws Utils.PsibotError {
