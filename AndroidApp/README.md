@@ -23,4 +23,4 @@ Psiphon Android Library and config file
 
 Uses the [Psiphon Android Library](../AndroidLibrary/README.md).
 
-In `app\src\main\res\raw\psiphon_config`, placeholders must be replaced with valid values.
+`app\src\main\res\raw\psiphon_config_stub` and its placeholder values must be replaced with `app\src\main\res\raw\psiphon_config` and valid configuration values.
