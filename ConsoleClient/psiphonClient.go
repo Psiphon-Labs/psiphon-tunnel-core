@@ -47,9 +47,9 @@ func main() {
 		log.Fatalf("error processing configuration file: %s", err)
 	}
 
-	err = psiphon.InitDataStore(config.DataStoreFilename)
+	err = psiphon.InitDataStore(config)
 	if err != nil {
-		return fmt.Errorf("error initializing datastore: %s", err)
+		log.Fatalf("error initializing datastore: %s", err)
 	}
 
 	if config.LogFilename != "" {

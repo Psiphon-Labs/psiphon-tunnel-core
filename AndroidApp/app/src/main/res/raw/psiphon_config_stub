@@ -3,7 +3,8 @@
     "SponsorId" : "<placeholder>",
     "RemoteServerListUrl" : "<placeholder>",
     "RemoteServerListSignaturePublicKey" : "<placeholder>",
-    "DataStoreFilename" : "/data/data/ca.psiphon.psibot/psiphon.db",
+    "DataStoreDirectory" : "",
+    "DataStoreTempDirectory" : "",
     "LogFilename" : "",
     "LocalHttpProxyPort" : 0,
     "LocalSocksProxyPort" : 0,
@@ -13,6 +14,5 @@
     "TunnelPoolSize" : 1,
     "PortForwardFailureThreshold" : 10,
     "UpstreamHttpProxyAddress" : "",
-    "BindToDeviceServiceAddress" : "",
     "BindToDeviceDnsServer" : "8.8.4.4"
 }

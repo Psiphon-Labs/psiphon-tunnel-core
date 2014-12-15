@@ -32,17 +32,21 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
 
-type Listener interface {
-	Message(message string)
+type PsiphonProvider interface {
+	Notice(message string)
+
+	// TODO: return 'error'; at the moment gobind doesn't
+	// work with interface function return values.
+	BindToDevice(fileDescriptor int)
 }
 
 type logRelay struct {
-	listener Listener
+	provider PsiphonProvider
 }
 
 func (lr *logRelay) Write(p []byte) (n int, err error) {
 	// TODO: buffer incomplete lines
-	lr.listener.Message(string(p))
+	lr.provider.Notice(string(p))
 	return len(p), nil
 }
 
@@ -50,7 +54,7 @@ var controller *psiphon.Controller
 var shutdownBroadcast chan struct{}
 var controllerWaitGroup *sync.WaitGroup
 
-func Start(configJson string, listener Listener) error {
+func Start(configJson string, provider PsiphonProvider) error {
 
 	if controller != nil {
 		return fmt.Errorf("already started")
@@ -61,12 +65,14 @@ func Start(configJson string, listener Listener) error {
 		return fmt.Errorf("error loading configuration file: %s", err)
 	}
 
-	err = psiphon.InitDataStore(config.DataStoreFilename)
+	err = psiphon.InitDataStore(config)
 	if err != nil {
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
-	log.SetOutput(&logRelay{listener: listener})
+	log.SetOutput(&logRelay{provider: provider})
+
+	config.BindToDeviceProvider = provider
 
 	controller = psiphon.NewController(config)
 	shutdownBroadcast = make(chan struct{})

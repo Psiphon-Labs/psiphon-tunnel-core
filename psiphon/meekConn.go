@@ -33,7 +33,7 @@ import (
 	"sync"
 	"time"
 
-	"code.google.com/p/go.crypto/nacl/box"
+	"golang.org/x/crypto/nacl/box"
 )
 
 // MeekConn is based on meek-client.go from Tor and Psiphon:

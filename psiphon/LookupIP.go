@@ -38,7 +38,7 @@ const DNS_PORT = 53
 // socket, binds it to the device, and makes an explicit DNS request
 // to the specified DNS resolver.
 func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
-	if config.BindToDeviceServiceAddress != "" {
+	if config.BindToDeviceProvider != nil {
 		return bindLookupIP(host, config)
 	}
 	return net.LookupIP(host)
@@ -54,10 +54,9 @@ func bindLookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 		return nil, ContextError(err)
 	}
 	defer syscall.Close(socketFd)
-	err = bindToDevice(socketFd, config)
-	if err != nil {
-		return nil, ContextError(err)
-	}
+
+	// TODO: check BindToDevice result
+	config.BindToDeviceProvider.BindToDevice(socketFd)
 
 	// config.BindToDeviceDnsServer must be an IP address
 	ipAddr := net.ParseIP(config.BindToDeviceDnsServer)
@@ -84,8 +83,10 @@ func bindLookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 	}
 
 	// Set DNS query timeouts, using the ConnectTimeout from the overall Dial
-	conn.SetReadDeadline(time.Now().Add(config.ConnectTimeout))
-	conn.SetWriteDeadline(time.Now().Add(config.ConnectTimeout))
+	if config.ConnectTimeout != 0 {
+		conn.SetReadDeadline(time.Now().Add(config.ConnectTimeout))
+		conn.SetWriteDeadline(time.Now().Add(config.ConnectTimeout))
+	}
 
 	// Make the DNS query
 	// TODO: make interruptible?
