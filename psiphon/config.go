@@ -39,11 +39,11 @@ type Config struct {
 	LocalSocksProxyPort                int
 	LocalHttpProxyPort                 int
 	ConnectionWorkerPoolSize           int
-	BindToDeviceServiceAddress         string
-	BindToDeviceDnsServer              string
 	TunnelPoolSize                     int
 	PortForwardFailureThreshold        int
 	UpstreamHttpProxyAddress           string
+	BindToDeviceProvider               DeviceBinder
+	BindToDeviceDnsServer              string
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON
@@ -94,6 +94,10 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	if config.PortForwardFailureThreshold == 0 {
 		config.PortForwardFailureThreshold = PORT_FORWARD_FAILURE_THRESHOLD
+	}
+
+	if config.BindToDeviceProvider != nil {
+		return nil, ContextError(errors.New("interface must be set at runtime"))
 	}
 
 	return &config, nil

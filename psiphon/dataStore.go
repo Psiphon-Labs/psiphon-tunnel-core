@@ -24,10 +24,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	sqlite3 "github.com/Psiphon-Inc/go-sqlite3"
 	"strings"
 	"sync"
 	"time"
+
+	sqlite3 "github.com/Psiphon-Inc/go-sqlite3"
 )
 
 type dataStore struct {

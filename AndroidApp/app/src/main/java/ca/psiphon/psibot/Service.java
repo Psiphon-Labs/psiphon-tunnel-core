@@ -63,11 +63,8 @@ public class Service extends VpnService {
             @Override
             public void run() {
                 CountDownLatch tunnelStartedSignal = new CountDownLatch(1);
-                SocketProtector socketProtector = new SocketProtector(Service.this);
                 Psiphon psiphon = new Psiphon(Service.this, tunnelStartedSignal);
                 try {
-                    socketProtector.start();
-                    // TODO: what if client local proxies unbind? in this case it's better if Go client keeps its proxies up permanently.
                     // TODO: monitor tunnel messages and update notification UI when re-connecting, etc.
                     psiphon.start();
                     while (true) {
@@ -88,7 +85,6 @@ public class Service extends VpnService {
                 }
                 stopVpn();
                 psiphon.stop();
-                socketProtector.stop();
                 stopSelf();
             }
         });

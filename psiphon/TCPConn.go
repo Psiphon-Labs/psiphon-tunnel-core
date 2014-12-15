@@ -46,7 +46,7 @@ type TCPConn struct {
 func NewTCPDialer(config *DialConfig) Dialer {
 	return func(network, addr string) (net.Conn, error) {
 		if network != "tcp" {
-			Fatal("unsupported network type in NewTCPDialer")
+			return nil, errors.New("unsupported network type in NewTCPDialer")
 		}
 		return DialTCP(addr, config)
 	}
@@ -128,18 +128,15 @@ func (conn *TCPConn) Write(buffer []byte) (n int, err error) {
 
 // Override implementation of net.Conn.SetDeadline
 func (conn *TCPConn) SetDeadline(t time.Time) error {
-	Fatal("net.Conn SetDeadline not supported")
-	return nil
+	return errors.New("net.Conn SetDeadline not supported")
 }
 
 // Override implementation of net.Conn.SetReadDeadline
 func (conn *TCPConn) SetReadDeadline(t time.Time) error {
-	Fatal("net.Conn SetReadDeadline not supported")
-	return nil
+	return errors.New("net.Conn SetReadDeadline not supported")
 }
 
 // Override implementation of net.Conn.SetWriteDeadline
 func (conn *TCPConn) SetWriteDeadline(t time.Time) error {
-	Fatal("net.Conn SetWriteDeadline not supported")
-	return nil
+	return errors.New("net.Conn SetWriteDeadline not supported")
 }

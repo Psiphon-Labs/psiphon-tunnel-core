@@ -49,14 +49,21 @@ type DialConfig struct {
 
 	// BindToDevice parameters are used to exclude connections and
 	// associated DNS requests from VPN routing.
-	// When BindToDeviceServiceAddress is not blank, any underlying socket is
-	// submitted to the device binding service at that address before connecting.
+	// When BindToDeviceProvider is set, any underlying socket is
+	// submitted to the device binding servicebefore connecting.
 	// The service should bind the socket to a device so that it doesn't route
 	// through a VPN interface. This service is also used to bind UDP sockets used
 	// for DNS requests, in which case BindToDeviceDnsServer is used as the
 	// DNS server.
-	BindToDeviceServiceAddress string
-	BindToDeviceDnsServer      string
+	BindToDeviceProvider  DeviceBinder
+	BindToDeviceDnsServer string
+}
+
+// DeviceBinder defines the interface to the external BindToDevice provider
+type DeviceBinder interface {
+	// TODO: return 'error'; currently no return value due to
+	// Android Library limitation.
+	BindToDevice(fileDescriptor int)
 }
 
 // Dialer is a custom dialer compatible with http.Transport.Dial.

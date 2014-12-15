@@ -54,12 +54,9 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 		}
 	}()
 
-	// Note: this step is not interruptible
-	if config.BindToDeviceServiceAddress != "" {
-		err = bindToDevice(socketFd, config)
-		if err != nil {
-			return nil, ContextError(err)
-		}
+	if config.BindToDeviceProvider != nil {
+		// TODO: check BindToDevice result
+		config.BindToDeviceProvider.BindToDevice(socketFd)
 	}
 
 	// When using an upstream HTTP proxy, first connect to the proxy,

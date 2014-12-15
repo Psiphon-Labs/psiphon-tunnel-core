@@ -22,14 +22,15 @@
 package psiphon
 
 import (
+	"errors"
 	"net"
 )
 
 // LookupIP resolves a hostname. When BindToDevice is not required, it
 // simply uses net.LookuIP.
 func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
-	if config.BindToDeviceServiceAddress != "" {
-		Fatal("LookupIP with bind not supported on this platform")
+	if config.BindToDeviceProvider != nil {
+		return nil, errors.New("LookupIP with bind not supported on this platform")
 	}
 	return net.LookupIP(host)
 }

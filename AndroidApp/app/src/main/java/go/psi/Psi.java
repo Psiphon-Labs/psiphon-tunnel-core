@@ -9,11 +9,13 @@ import go.Seq;
 public abstract class Psi {
     private Psi() {} // uninstantiable
     
-    public interface Listener extends go.Seq.Object {
-        public void Message(String message);
+    public interface PsiphonProvider extends go.Seq.Object {
+        public void BindToDevice(long fileDescriptor);
         
-        public static abstract class Stub implements Listener {
-            static final String DESCRIPTOR = "go.psi.Listener";
+        public void Notice(String message);
+        
+        public static abstract class Stub implements PsiphonProvider {
+            static final String DESCRIPTOR = "go.psi.PsiphonProvider";
             
             private final go.Seq.Ref ref;
             public Stub() {
@@ -24,9 +26,14 @@ public abstract class Psi {
             
             public void call(int code, go.Seq in, go.Seq out) {
                 switch (code) {
-                case Proxy.CALL_Message: {
+                case Proxy.CALL_BindToDevice: {
+                    long param_fileDescriptor = in.readInt();
+                    this.BindToDevice(param_fileDescriptor);
+                    return;
+                }
+                case Proxy.CALL_Notice: {
                     String param_message = in.readUTF16();
-                    this.Message(param_message);
+                    this.Notice(param_message);
                     return;
                 }
                 default:
@@ -35,7 +42,7 @@ public abstract class Psi {
             }
         }
         
-        static final class Proxy implements Listener {
+        static final class Proxy implements PsiphonProvider {
             static final String DESCRIPTOR = Stub.DESCRIPTOR;
         
             private go.Seq.Ref ref;
@@ -48,23 +55,32 @@ public abstract class Psi {
                 throw new RuntimeException("cycle: cannot call proxy");
             }
         
-            public void Message(String message) {
+            public void BindToDevice(long fileDescriptor) {
+                go.Seq _in = new go.Seq();
+                go.Seq _out = new go.Seq();
+                _in.writeRef(ref);
+                _in.writeInt(fileDescriptor);
+                Seq.send(DESCRIPTOR, CALL_BindToDevice, _in, _out);
+            }
+            
+            public void Notice(String message) {
                 go.Seq _in = new go.Seq();
                 go.Seq _out = new go.Seq();
                 _in.writeRef(ref);
                 _in.writeUTF16(message);
-                Seq.send(DESCRIPTOR, CALL_Message, _in, _out);
+                Seq.send(DESCRIPTOR, CALL_Notice, _in, _out);
             }
             
-            static final int CALL_Message = 0x10a;
+            static final int CALL_BindToDevice = 0x10a;
+            static final int CALL_Notice = 0x20a;
         }
     }
     
-    public static void Start(String configJson, Listener listener) throws Exception {
+    public static void Start(String configJson, PsiphonProvider provider) throws Exception {
         go.Seq _in = new go.Seq();
         go.Seq _out = new go.Seq();
         _in.writeUTF16(configJson);
-        _in.writeRef(listener.ref());
+        _in.writeRef(provider.ref());
         Seq.send(DESCRIPTOR, CALL_Start, _in, _out);
         String _err = _out.readUTF16();
         if (_err != null) {

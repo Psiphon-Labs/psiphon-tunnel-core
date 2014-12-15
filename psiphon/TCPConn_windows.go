@@ -43,7 +43,7 @@ type interruptibleDialResult struct {
 }
 
 func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err error) {
-	if config.BindToDeviceServiceAddress != "" {
+	if config.BindToDevice != nil {
 		Fatal("psiphon.interruptibleTCPDial with bind not supported on Windows")
 	}
 

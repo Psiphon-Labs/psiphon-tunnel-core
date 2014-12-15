@@ -20,10 +20,12 @@
 package ca.psiphon.psibot;
 
 import android.content.Context;
+import android.net.VpnService;
 
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.Set;
@@ -31,27 +33,35 @@ import java.util.concurrent.CountDownLatch;
 
 import go.psi.Psi;
 
-public class Psiphon extends Psi.Listener.Stub {
+public class Psiphon extends Psi.PsiphonProvider.Stub {
 
-    private final Context mContext;
+    private final VpnService mVpnService;
     private final CountDownLatch mTunnelStartedSignal;
     private int mLocalSocksProxyPort;
     private int mLocalHttpProxyPort;
     private Set<String> mHomePages;
 
-    public Psiphon(Context context, CountDownLatch tunnelStartedSignal) {
-        mContext = context;
+    public Psiphon(VpnService vpnService, CountDownLatch tunnelStartedSignal) {
+        mVpnService = vpnService;
         mTunnelStartedSignal = tunnelStartedSignal;
     }
 
+    // PsiphonProvider.Notice
     @Override
-    public void Message(String line) {
-        line = line.trim();
+    public void Notice(String message) {
+        message = message.trim();
 
-        android.util.Log.d("PSIPHON", line);
+        android.util.Log.d("PSIPHON", message);
+        parseMessage(message);
+        Log.addEntry(message);
+    }
 
-        parseLine(line);
-        Log.addEntry(line);
+    // PsiphonProvider.BindToDevice
+    @Override
+    public void BindToDevice(long fileDescriptor) {
+        // TODO: return result; currently no return value due to
+        // Android Library limitation.
+        mVpnService.protect((int)fileDescriptor);
     }
 
     public void start() throws Utils.PsibotError {
@@ -62,7 +72,7 @@ public class Psiphon extends Psi.Listener.Stub {
         mHomePages = new HashSet<String>();
 
         try {
-            Psi.Start(loadConfig(mContext), this);
+            Psi.Start(loadConfig(mVpnService), this);
         } catch (Exception e) {
             throw new Utils.PsibotError("failed to start Psiphon", e);
         }
@@ -105,28 +115,31 @@ public class Psiphon extends Psi.Listener.Stub {
         String configFileContents = Utils.readInputStreamToString(
                 context.getResources().openRawResource(R.raw.psiphon_config));
         JSONObject json = new JSONObject(configFileContents);
-        json.put("BindToDeviceServiceAddress", "@" + SocketProtector.SOCKET_PROTECTOR_ADDRESS);
+
         if (dnsResolver != null) {
             json.put("BindToDeviceDnsServer", dnsResolver);
         }
 
+        String dataStoreFilename = new File(mVpnService.getFilesDir(), "psiphon.db").getPath();
+        json.put("DataStoreFilename", dataStoreFilename);
+
         return json.toString();
     }
 
-    private synchronized void parseLine(String line) {
+    private synchronized void parseMessage(String message) {
         // TODO: this is based on temporary log line formats
         final String socksProxy = "SOCKS-PROXY local SOCKS proxy running at address 127.0.0.1:";
         final String httpProxy = "HTTP-PROXY local HTTP proxy running at address 127.0.0.1:";
         final String homePage = "HOMEPAGE ";
         final String tunnelStarted = "TUNNELS 1";
         int index;
-        if (-1 != (index = line.indexOf(socksProxy))) {
-            mLocalSocksProxyPort = Integer.parseInt(line.substring(index + socksProxy.length()));
-        } else if (-1 != (index = line.indexOf(httpProxy))) {
-            mLocalHttpProxyPort = Integer.parseInt(line.substring(index + httpProxy.length()));
-        } else if (-1 != (index = line.indexOf(homePage))) {
-            mHomePages.add(line.substring(index + homePage.length()));
-        } else if (line.contains(tunnelStarted)) {
+        if (-1 != (index = message.indexOf(socksProxy))) {
+            mLocalSocksProxyPort = Integer.parseInt(message.substring(index + socksProxy.length()));
+        } else if (-1 != (index = message.indexOf(httpProxy))) {
+            mLocalHttpProxyPort = Integer.parseInt(message.substring(index + httpProxy.length()));
+        } else if (-1 != (index = message.indexOf(homePage))) {
+            mHomePages.add(message.substring(index + homePage.length()));
+        } else if (message.contains(tunnelStarted)) {
             mTunnelStartedSignal.countDown();
         }
     }

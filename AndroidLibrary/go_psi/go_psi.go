@@ -10,28 +10,35 @@ import (
 )
 
 const (
-	proxyListenerDescriptor  = "go.psi.Listener"
-	proxyListenerMessageCode = 0x10a
+	proxyPsiphonProviderDescriptor       = "go.psi.PsiphonProvider"
+	proxyPsiphonProviderBindToDeviceCode = 0x10a
+	proxyPsiphonProviderNoticeCode       = 0x20a
 )
 
-type proxyListener seq.Ref
+type proxyPsiphonProvider seq.Ref
 
-func (p *proxyListener) Message(message string) {
+func (p *proxyPsiphonProvider) BindToDevice(fileDescriptor int) {
+	out := new(seq.Buffer)
+	out.WriteInt(fileDescriptor)
+	seq.Transact((*seq.Ref)(p), proxyPsiphonProviderBindToDeviceCode, out)
+}
+
+func (p *proxyPsiphonProvider) Notice(message string) {
 	out := new(seq.Buffer)
 	out.WriteUTF16(message)
-	seq.Transact((*seq.Ref)(p), proxyListenerMessageCode, out)
+	seq.Transact((*seq.Ref)(p), proxyPsiphonProviderNoticeCode, out)
 }
 
 func proxy_Start(out, in *seq.Buffer) {
 	param_configJson := in.ReadUTF16()
-	var param_listener psi.Listener
-	param_listener_ref := in.ReadRef()
-	if param_listener_ref.Num < 0 {
-		param_listener = param_listener_ref.Get().(psi.Listener)
+	var param_provider psi.PsiphonProvider
+	param_provider_ref := in.ReadRef()
+	if param_provider_ref.Num < 0 {
+		param_provider = param_provider_ref.Get().(psi.PsiphonProvider)
 	} else {
-		param_listener = (*proxyListener)(param_listener_ref)
+		param_provider = (*proxyPsiphonProvider)(param_provider_ref)
 	}
-	err := psi.Start(param_configJson, param_listener)
+	err := psi.Start(param_configJson, param_provider)
 	if err == nil {
 		out.WriteUTF16("")
 	} else {

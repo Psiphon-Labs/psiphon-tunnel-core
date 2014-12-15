@@ -49,7 +49,7 @@ func main() {
 
 	err = psiphon.InitDataStore(config.DataStoreFilename)
 	if err != nil {
-		return fmt.Errorf("error initializing datastore: %s", err)
+		log.Fatalf("error initializing datastore: %s", err)
 	}
 
 	if config.LogFilename != "" {

@@ -13,6 +13,5 @@
     "TunnelPoolSize" : 1,
     "PortForwardFailureThreshold" : 10,
     "UpstreamHttpProxyAddress" : "",
-    "BindToDeviceServiceAddress" : "",
     "BindToDeviceDnsServer" : "8.8.4.4"
 }
