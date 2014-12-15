@@ -30,7 +30,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"code.google.com/p/go.crypto/ssh"
+	"golang.org/x/crypto/ssh"
 )
 
 // Tunneler specifies the interface required by components that use a tunnel.
@@ -144,12 +144,12 @@ func EstablishTunnel(
 
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
-		ConnectTimeout:             TUNNEL_CONNECT_TIMEOUT,
-		ReadTimeout:                TUNNEL_READ_TIMEOUT,
-		WriteTimeout:               TUNNEL_WRITE_TIMEOUT,
-		PendingConns:               pendingConns,
-		BindToDeviceServiceAddress: config.BindToDeviceServiceAddress,
-		BindToDeviceDnsServer:      config.BindToDeviceDnsServer,
+		ConnectTimeout:        TUNNEL_CONNECT_TIMEOUT,
+		ReadTimeout:           TUNNEL_READ_TIMEOUT,
+		WriteTimeout:          TUNNEL_WRITE_TIMEOUT,
+		PendingConns:          pendingConns,
+		BindToDeviceProvider:  config.BindToDeviceProvider,
+		BindToDeviceDnsServer: config.BindToDeviceDnsServer,
 	}
 	var conn Conn
 	if useMeek {

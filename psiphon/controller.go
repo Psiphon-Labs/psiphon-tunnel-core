@@ -182,7 +182,7 @@ func (controller *Controller) runTunnels() {
 			break
 		}
 		// TODO: replace polling with signal
-		timeout := time.After(1 * time.Second)
+		timeout := time.After(5 * time.Second)
 		select {
 		case <-timeout:
 		case <-controller.shutdownBroadcast:

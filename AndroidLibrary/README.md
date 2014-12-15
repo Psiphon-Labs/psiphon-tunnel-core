@@ -52,10 +52,10 @@ NOTE: may change after Go 1.4 is released.
 Using
 --------------------------------------------------------------------------------
 
-1. Build from source or use the provided shared object binary and Java source files
+1. Build from source or use the [provided shared object binary](TODO: link to release) and Java source files
 1. Add Go/Java integration files `java_golang/go/*.java` to your `$src/go`
 1. Add `java_psi/go/psi/Psi.java` to your `$src/go/psi`
-1. Add `gojni.so
+1. Add `libgojni.so` to your Android app
 
 NOTE: may change to Psiphon-specific library name and init.
 

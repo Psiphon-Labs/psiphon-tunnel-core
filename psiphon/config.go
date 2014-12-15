@@ -22,11 +22,13 @@ package psiphon
 import (
 	"encoding/json"
 	"errors"
+	"os"
 )
 
 type Config struct {
 	LogFilename                        string
-	DataStoreFilename                  string
+	DataStoreDirectory                 string
+	DataStoreTempDirectory             string
 	PropagationChannelId               string
 	SponsorId                          string
 	RemoteServerListUrl                string
@@ -39,11 +41,11 @@ type Config struct {
 	LocalSocksProxyPort                int
 	LocalHttpProxyPort                 int
 	ConnectionWorkerPoolSize           int
-	BindToDeviceServiceAddress         string
-	BindToDeviceDnsServer              string
 	TunnelPoolSize                     int
 	PortForwardFailureThreshold        int
 	UpstreamHttpProxyAddress           string
+	BindToDeviceProvider               DeviceBinder
+	BindToDeviceDnsServer              string
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON
@@ -73,8 +75,11 @@ func LoadConfig(configJson []byte) (*Config, error) {
 			errors.New("remote server list signature public key is missing from the configuration file"))
 	}
 
-	if config.DataStoreFilename == "" {
-		config.DataStoreFilename = DATA_STORE_FILENAME
+	if config.DataStoreDirectory == "" {
+		config.DataStoreDirectory, err = os.Getwd()
+		if err != nil {
+			return nil, ContextError(err)
+		}
 	}
 
 	if config.TunnelProtocol != "" {
@@ -94,6 +99,10 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	if config.PortForwardFailureThreshold == 0 {
 		config.PortForwardFailureThreshold = PORT_FORWARD_FAILURE_THRESHOLD
+	}
+
+	if config.BindToDeviceProvider != nil {
+		return nil, ContextError(errors.New("interface must be set at runtime"))
 	}
 
 	return &config, nil

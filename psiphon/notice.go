@@ -40,7 +40,3 @@ const (
 func Notice(prefix, format string, args ...interface{}) {
 	log.Printf("%s %s", prefix, fmt.Sprintf(format, args...))
 }
-
-func Fatal(format string, args ...interface{}) {
-	log.Printf("FATAL %s", fmt.Sprintf(format, args...))
-}
