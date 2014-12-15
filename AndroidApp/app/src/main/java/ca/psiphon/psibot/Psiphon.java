@@ -25,7 +25,6 @@ import android.net.VpnService;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.Set;
@@ -120,8 +119,11 @@ public class Psiphon extends Psi.PsiphonProvider.Stub {
             json.put("BindToDeviceDnsServer", dnsResolver);
         }
 
-        String dataStoreFilename = new File(mVpnService.getFilesDir(), "psiphon.db").getPath();
-        json.put("DataStoreFilename", dataStoreFilename);
+        // On Android, these directories must be set to the app private storage area.
+        // The Psiphon library won't be able to use its current working directory
+        // and the standard temporary directories do not exist.
+        json.put("DataStoreDirectory", mVpnService.getFilesDir());
+        json.put("DataStoreTempDirectory", mVpnService.getCacheDir());
 
         return json.toString();
     }

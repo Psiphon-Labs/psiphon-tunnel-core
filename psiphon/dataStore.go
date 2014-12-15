@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -46,9 +47,32 @@ var singleton dataStore
 // called on-demand by the public functions below. Now we require an explicit
 // InitDataStore() call with the filename passed in. The on-demand calls
 // have been replaced by checkInitDataStore() to assert that Init was called.
-func InitDataStore(filename string) (err error) {
+func InitDataStore(config *Config) (err error) {
 	singleton.init.Do(func() {
-		const schema = `
+		filename := filepath.Join(config.DataStoreDirectory, DATA_STORE_FILENAME)
+		var db *sql.DB
+		db, err = sql.Open(
+			"sqlite3",
+			fmt.Sprintf("file:%s?cache=private&mode=rwc", filename))
+		if err != nil {
+			// Note: intending to set the err return value for InitDataStore
+			err = fmt.Errorf("initDataStore failed to open database: %s", err)
+			return
+		}
+		initialization := "pragma journal_mode=WAL;\n"
+		if config.DataStoreTempDirectory != "" {
+			// On some platforms (e.g., Android), the standard temporary directories expected
+			// by sqlite (see unixGetTempname in aggregate sqlite3.c) may not be present.
+			// In that case, sqlite tries to use the current working directory; but this may
+			// be "/" (again, on Android) which is not writable.
+			// Instead of setting the process current working directory from this library,
+			// use the deprecated temp_store_directory pragma to force use of a specified
+			// temporary directory: https://www.sqlite.org/pragma.html#pragma_temp_store_directory.
+			// TODO: is there another way to restrict writing of temporary files? E.g. temp_store=3?
+			initialization += fmt.Sprintf(
+				"pragma temp_store_directory=\"%s\";\n", config.DataStoreDirectory)
+		}
+		initialization += `
         create table if not exists serverEntry
             (id text not null primary key,
              rank integer not null unique,
@@ -61,20 +85,10 @@ func InitDataStore(filename string) (err error) {
         create table if not exists keyValue
             (key text not null primary key,
              value text not null);
-        pragma journal_mode=WAL;
         `
-		var db *sql.DB
-		db, err = sql.Open(
-			"sqlite3",
-			fmt.Sprintf("file:%s?cache=private&mode=rwc", filename))
+		_, err = db.Exec(initialization)
 		if err != nil {
-			// Note: intending to set the err return value for InitDataStore
-			err = fmt.Errorf("initDataStore failed to open database: %s", err)
-			return
-		}
-		_, err = db.Exec(schema)
-		if err != nil {
-			err = fmt.Errorf("initDataStore failed to initialize schema: %s", err)
+			err = fmt.Errorf("initDataStore failed to initialize: %s", err)
 			return
 		}
 		singleton.db = db
