@@ -30,7 +30,7 @@ import (
 // simply uses net.LookuIP.
 func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 	if config.BindToDeviceProvider != nil {
-		return nil, errors.New("LookupIP with bind not supported on this platform")
+		return nil, ContextError(errors.New("LookupIP with bind not supported on this platform"))
 	}
 	return net.LookupIP(host)
 }
