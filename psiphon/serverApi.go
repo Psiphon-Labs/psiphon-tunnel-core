@@ -92,7 +92,7 @@ func (session *Session) DoStatusRequest(statsPayload json.Marshaler, final bool)
 
 	err = session.doPostRequest(url, "application/json", bytes.NewReader(statsPayloadJSON))
 	if err != nil {
-		return nil, ContextError(err)
+		return ContextError(err)
 	}
 
 	return nil
