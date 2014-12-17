@@ -91,7 +91,11 @@ func (session *Session) DoStatusRequest(statsPayload json.Marshaler, final bool)
 		&ExtraParam{"connected", connected})
 
 	err = session.doPostRequest(url, "application/json", bytes.NewReader(statsPayloadJSON))
-	return ContextError(err)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	return nil
 }
 
 // doHandshakeRequest performs the handshake API request. The handshake

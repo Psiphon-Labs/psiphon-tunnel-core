@@ -38,11 +38,8 @@ Follow Go Android documentation:
     main.go                - stub main package for library
 ```
 
-NOTE: may change after Go 1.4 is released.
-
-* Requires Go 1.4 or later
-  * At this time, android/arm support is not yet released but.
-  * Install Go from source. The Android instructions are here:
+* Requires Go 1.4 or later.
+* Install Go from source. The Android instructions are here:
 [https://code.google.com/p/go/source/browse/README?repo=mobile](https://code.google.com/p/go/source/browse/README?repo=mobile).
   * In summary, download and install the Android NDK, use a script to make a [standalone toolchain](https://developer.android.com/tools/sdk/ndk/index.html#Docs), and use that toolchain to build android/arm support within the Go source install. Then cross compile as usual.
 * `$GOPATH/bin/gobind -lang=go github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary/psi > go_psi/go_psi.go`
@@ -52,7 +49,7 @@ NOTE: may change after Go 1.4 is released.
 Using
 --------------------------------------------------------------------------------
 
-1. Build from source or use the [provided shared object binary](TODO: link to release) and Java source files
+1. Build the shared object library from source or use the [binary release](https://github.com/Psiphon-Labs/psiphon-tunnel-core/releases) and Java source files
 1. Add Go/Java integration files `java_golang/go/*.java` to your `$src/go`
 1. Add `java_psi/go/psi/Psi.java` to your `$src/go/psi`
 1. Add `libgojni.so` to your Android app
