@@ -77,6 +77,9 @@ func TrimError(err error) error {
 
 // ContextError prefixes an error message with the current function name
 func ContextError(err error) error {
+	if err == nil {
+		return nil
+	}
 	pc, _, line, _ := runtime.Caller(1)
 	funcName := runtime.FuncForPC(pc).Name()
 	return fmt.Errorf("%s#%d: %s", funcName, line, err)
