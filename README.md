@@ -16,7 +16,7 @@ This project is currently at the proof-of-concept stage. Current production Psip
 Setup
 --------------------------------------------------------------------------------
 
-* Go 1.3 (or higher) is required.
+* Go 1.4 (or higher) is required.
 * In this repository, run `go build` to make the `psiphon-tunnel-core` binary.
 * Note that the `psiphon` package is imported using the absolute path `github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon`; without further local configuration, `go` will use this version of the code and not the local copy in the repository.
 * This project builds and runs on recent versions of Windows, Linux, and Mac OS X.
@@ -43,25 +43,23 @@ Setup
     ```
 
 * Replace each `<placeholder>` with a value from your Psiphon network. The Psiphon server-side stack is open source and can be found in our  [Psiphon 3 repository](https://bitbucket.org/psiphon/psiphon-circumvention-system). If you would like to use the Psiphon Inc. network, contact <developer-support@psiphon.ca>.
-* The project builds and runs on Android. At this time, Android support is in the developer branch of Go, so build Go from source and use the Android NDK to build android/arm target support. See the sample [AndroidApp README](AndroidApp/README.md) for more information about building the Go binary, along with a sample Android app that uses it.
+* The project builds and runs on Android. See the [AndroidLibrary README](AndroidLibrary/README.md) for more information about building the Go component, and the [AndroidApp README](AndroidApp/README.md) for a sample Android app that uses it.
 
 Roadmap
 --------------------------------------------------------------------------------
 
 ### TODO (short-term)
 
+* sometimes fails to promptly detect loss of connection after device sleep
 * requirements for integrating with Windows client
   * split tunnel support
-  * implement page view and bytes transferred stats
   * resumable download of client upgrades
 * Android app
   * open home pages
-  * Go binary PIE, or use a Go library and JNI
   * settings UI (e.g., region selection)
-* sometimes fails to promptly detect loss of connection after device sleep
-* PendingConns: is interrupting connection establishment worth the extra code complexity?
-* log noise: "use of closed network connection"
-* log noise(?): 'Unsolicited response received on idle HTTP channel starting with "H"'
+* log noise
+  * "use of closed network connection"
+  * 'Unsolicited response received on idle HTTP channel starting with "H"'
 
 ### TODO (future)
 
@@ -72,7 +70,7 @@ Roadmap
   * unfronted meek almost makes this obsolete, since meek sessions survive underlying
      HTTP transport socket disconnects. The client could prefer unfronted meek protocol
      when handshake returns a preemptive_reconnect_lifetime_milliseconds.
-  * could also be accomplished with TunnelPoolSize > 1 and staggaring the establishment times
+  * could also be accomplished with TunnelPoolSize > 1 and staggering the establishment times
 * implement local traffic stats (e.g., to display bytes sent/received)
 * more formal control interface (w/ event messages)?
 * support upgrading core only
