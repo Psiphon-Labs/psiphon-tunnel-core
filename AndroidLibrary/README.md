@@ -46,6 +46,27 @@ Follow Go Android documentation:
 * `$GOPATH/bin/gobind -lang=java github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary/psi > java_psi/go/psi/Psi.java`
 * In `/libpsi` `CGO_ENABLED=1 GOOS=android GOARCH=arm GOARM=7 go build -ldflags="-shared"` and copy output file to `gojni.so`
 
+### Building with Docker
+
+Create the build image:
+
+```bash
+# While in the same directory as the Dockerfile...
+$ sudo docker build -t psibuild .
+# That will take a long time to complete.
+# After it's done, you'll have an image called "psibuild". Check with...
+$ sudo docker images
+```
+
+To do the build:
+
+```bash
+$ sudo docker run -v $GOPATH/src:/src psibuild /bin/bash -c 'cd /src/github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary && ./make.bash'
+```
+
+When that command completes, the compiled library will be located at `libs/armeabi-v7a/libgojni.so`.
+
+
 Using
 --------------------------------------------------------------------------------
 
