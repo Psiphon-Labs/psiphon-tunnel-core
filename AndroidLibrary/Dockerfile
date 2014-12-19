@@ -15,7 +15,7 @@ RUN echo "debconf shared/accepted-oracle-license-v1-1 select true" | debconf-set
     libncurses5:i386 libstdc++6:i386 zlib1g:i386 && \
   add-apt-repository ppa:webupd8team/java && \
   apt-get update && \
-  apt-get -y install oracle-java6-installer
+  apt-get -y install oracle-java7-installer
 
 # Install Ant.
 RUN echo "INSTALLING ANT" && \

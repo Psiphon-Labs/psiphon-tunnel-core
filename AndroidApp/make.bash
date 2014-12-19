@@ -11,6 +11,6 @@ ANDROID_APP=$PWD
 
 # Build library
 (cd ../AndroidLibrary && ./make.bash)
-mkdir -p app/src/main/jniLibs/armeabi-v7a && cp -f ../AndroidLibrary/libgojni.so app/src/main/jniLibs/armeabi-v7a
+mkdir -p app/src/main/jniLibs/armeabi-v7a && cp -f ../AndroidLibrary/libs/armeabi-v7a/libgojni.so app/src/main/jniLibs/armeabi-v7a
 
 gradle clean build
