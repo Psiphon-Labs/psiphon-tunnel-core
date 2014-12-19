@@ -22,66 +22,97 @@ package ca.psiphon.psibot;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.VpnService;
 import android.os.ParcelFileDescriptor;
+import android.preference.PreferenceManager;
 
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class Service extends VpnService {
+public class Service extends VpnService
+        implements SharedPreferences.OnSharedPreferenceChangeListener {
 
     // Note: assumes only one instance of Service
     private static AtomicBoolean mIsRunning = new AtomicBoolean();
 
-    private Thread mThread;
-    private CountDownLatch mStopSignal;
-
     public static boolean isRunning() {
         return mIsRunning.get();
     }
+
+    private Thread mThread;
+    private CountDownLatch mInterruptSignal;
+    private AtomicBoolean mStopFlag;
 
     @Override
     public void onCreate() {
         mIsRunning.set(true);
         startForeground(R.string.foregroundServiceNotificationId, makeForegroundNotification());
         startWorking();
+        PreferenceManager.getDefaultSharedPreferences(this).
+                registerOnSharedPreferenceChangeListener(this);
     }
 
     @Override
     public void onDestroy() {
+        PreferenceManager.getDefaultSharedPreferences(this).
+                unregisterOnSharedPreferenceChangeListener(this);
         stopWorking();
         stopForeground(true);
         mIsRunning.set(false);
     }
 
+    @Override
+    public synchronized void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+        if (!mIsRunning.get()) {
+            return;
+        }
+        // An interrupt without setting stop will restart Psiphon, using the newest preferences.
+        interruptWorking();
+    }
+
     private void startWorking() {
         stopWorking();
-        mStopSignal = new CountDownLatch(1);
+        mInterruptSignal = new CountDownLatch(1);
+        mStopFlag = new AtomicBoolean(false);
         mThread = new Thread(new Runnable() {
             @Override
             public void run() {
                 CountDownLatch tunnelStartedSignal = new CountDownLatch(1);
                 Psiphon psiphon = new Psiphon(Service.this, tunnelStartedSignal);
-                try {
-                    // TODO: monitor tunnel messages and update notification UI when re-connecting, etc.
-                    psiphon.start();
-                    while (true) {
-                        if (tunnelStartedSignal.await(100, TimeUnit.MILLISECONDS)) {
-                            break;
+                // An interrupt with mStopFlag=false will cause Psiphon to restart without stopping
+                // the service thread or VPN; this is to apply new preferences to the Psiphon config.
+                // (The VPN is restarted if the preferred SOCKS proxy port changes.)
+                int localSocksProxyPort = -1;
+                while (!mStopFlag.get()) {
+                    try {
+                        // TODO: monitor tunnel messages and update notification UI when re-connecting, etc.
+                        psiphon.start();
+                        while (true) {
+                            if (tunnelStartedSignal.await(100, TimeUnit.MILLISECONDS)) {
+                                break;
+                            }
+                            if (mInterruptSignal.await(0, TimeUnit.MILLISECONDS)) {
+                                throw new Utils.PsibotError("interrupted while waiting tunnel");
+                            }
                         }
-                        if (mStopSignal.await(0, TimeUnit.MILLISECONDS)) {
-                            throw new Utils.PsibotError("stopped while waiting tunnel");
+                        // [Re]start the VPN when the local SOCKS proxy port changes. Leave the
+                        // VPN up when other preferences change; only Psiphon restarts in this case.
+                        if (psiphon.getLocalSocksProxyPort() != localSocksProxyPort) {
+                            if (localSocksProxyPort != -1) {
+                                stopVpn();
+                            }
+                            localSocksProxyPort = psiphon.getLocalSocksProxyPort();
+                            runVpn(localSocksProxyPort);
                         }
+                        mInterruptSignal.await();
+                    } catch (Utils.PsibotError e) {
+                        Log.addEntry("Service failed: " + e.getMessage());
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
                     }
-                    int localSocksProxyPort = psiphon.getLocalSocksProxyPort();
-                    runVpn(localSocksProxyPort);
-                    mStopSignal.await();
-                } catch (Utils.PsibotError e) {
-                    Log.addEntry("Service failed: " + e.getMessage());
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
                 }
                 stopVpn();
                 psiphon.stop();
@@ -91,10 +122,22 @@ public class Service extends VpnService {
         mThread.start();
     }
 
-    private void stopWorking() {
-        if (mStopSignal != null) {
-            mStopSignal.countDown();
+    private void interruptWorking() {
+        if (mInterruptSignal == null) {
+            return;
         }
+        CountDownLatch currentSignal = mInterruptSignal;
+        // This is the new interrupt signal for when work resumes
+        mInterruptSignal = new CountDownLatch(1);
+        // Interrupt work
+        currentSignal.countDown();
+    }
+
+    private void stopWorking() {
+        if (mStopFlag != null) {
+            mStopFlag.set(true);
+        }
+        interruptWorking();
         if (mThread != null) {
             try {
                 mThread.join();
@@ -102,7 +145,8 @@ public class Service extends VpnService {
                 Thread.currentThread().interrupt();
             }
         }
-        mStopSignal = null;
+        mInterruptSignal = null;
+        mStopFlag = null;
         mThread = null;
     }
 
@@ -201,7 +245,7 @@ public class Service extends VpnService {
                 new Notification.Builder(this)
                         .setContentIntent(pendingIntent)
                         .setContentTitle(getString(R.string.foreground_service_notification_content_title))
-                        .setSmallIcon(R.drawable.ic_launcher);
+                        .setSmallIcon(R.drawable.ic_notification);
 
         return notificationBuilder.build();
     }

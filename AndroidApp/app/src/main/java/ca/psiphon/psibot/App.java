@@ -20,6 +20,8 @@
 package ca.psiphon.psibot;
 
 import android.app.Application;
+import android.preference.PreferenceManager;
+
 import go.Go;
 
 public class App extends Application {
@@ -28,5 +30,6 @@ public class App extends Application {
     public void onCreate() {
         Go.init(this.getApplicationContext());
         Log.initialize();
+        PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
     }
 }
