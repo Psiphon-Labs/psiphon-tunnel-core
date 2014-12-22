@@ -54,9 +54,16 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        int id = item.getItemId();
-        if (id == R.id.action_email_log) {
+        switch (item.getItemId()) {
+        case R.id.action_email_log:
             Log.composeEmail(this);
+            return true;
+        case R.id.action_settings:
+            startActivity(new Intent(this, SettingsActivity.class));
+            return true;
+        case R.id.action_quit:
+            stopVpnService();
+            finish();
             return true;
         }
         return super.onOptionsItemSelected(item);
@@ -82,6 +89,13 @@ public class MainActivity extends Activity {
 
     protected void startVpnService() {
         startService(new Intent(this, Service.class));
+    }
+
+    protected void stopVpnService() {
+        // Note: Tun2Socks.stop() closes the VpnService file descriptor.
+        // This is necessary in order to stop the VpnService while running.
+        Tun2Socks.stop();
+        stopService(new Intent(this, Service.class));
     }
 
     @Override

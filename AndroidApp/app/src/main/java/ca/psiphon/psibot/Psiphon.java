@@ -20,7 +20,9 @@
 package ca.psiphon.psibot;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.net.VpnService;
+import android.preference.PreferenceManager;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -124,6 +126,48 @@ public class Psiphon extends Psi.PsiphonProvider.Stub {
         // and the standard temporary directories do not exist.
         json.put("DataStoreDirectory", mVpnService.getFilesDir());
         json.put("DataStoreTempDirectory", mVpnService.getCacheDir());
+
+        // User-specified settings.
+        // Note: currently, validation is not comprehensive, and related errors are
+        // not directly parsed.
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        json.put("EgressRegion",
+                preferences.getString(
+                        context.getString(R.string.preferenceEgressRegion),
+                        context.getString(R.string.preferenceEgressRegionDefaultValue)));
+        json.put("TunnelProtocol",
+                preferences.getString(
+                        context.getString(R.string.preferenceTunnelProtocol),
+                        context.getString(R.string.preferenceTunnelProtocolDefaultValue)));
+        json.put("UpstreamHttpProxyAddress",
+                preferences.getString(
+                        context.getString(R.string.preferenceUpstreamHttpProxyAddress),
+                        context.getString(R.string.preferenceUpstreamHttpProxyAddressDefaultValue)));
+        json.put("LocalHttpProxyPort",
+                Integer.parseInt(
+                        preferences.getString(
+                                context.getString(R.string.preferenceLocalHttpProxyPort),
+                                context.getString(R.string.preferenceLocalHttpProxyPortDefaultValue))));
+        json.put("LocalSocksProxyPort",
+                Integer.parseInt(
+                        preferences.getString(
+                                context.getString(R.string.preferenceLocalSocksProxyPort),
+                                context.getString(R.string.preferenceLocalSocksProxyPortDefaultValue))));
+        json.put("ConnectionWorkerPoolSize",
+                Integer.parseInt(
+                        preferences.getString(
+                                context.getString(R.string.preferenceConnectionWorkerPoolSize),
+                                context.getString(R.string.preferenceConnectionWorkerPoolSizeDefaultValue))));
+        json.put("TunnelPoolSize",
+                Integer.parseInt(
+                        preferences.getString(
+                                context.getString(R.string.preferenceTunnelPoolSize),
+                                context.getString(R.string.preferenceTunnelPoolSizeDefaultValue))));
+        json.put("PortForwardFailureThreshold",
+                Integer.parseInt(
+                        preferences.getString(
+                                context.getString(R.string.preferencePortForwardFailureThreshold),
+                                context.getString(R.string.preferencePortForwardFailureThresholdDefaultValue))));
 
         return json.toString();
     }
