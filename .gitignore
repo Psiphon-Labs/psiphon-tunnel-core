@@ -1,5 +1,5 @@
 # Exclude test config files from source control
-/AndroidApp/app/src/main/res/raw/psiphon_config
+psiphon_config
 psiphon.config
 psiphon.db*
 
