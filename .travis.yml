@@ -3,5 +3,9 @@ go:
  - 1.4
  - tip
 
+install:
+ - sudo apt-get install libx11-dev
+ - sudo apt-get install libgles2-mesa-dev
+
 script:
  - go test -v ./...
