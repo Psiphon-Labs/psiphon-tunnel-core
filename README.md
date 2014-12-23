@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/Psiphon-Labs/psiphon-tunnel-core.png)](https://travis-ci.org/Psiphon-Labs/psiphon-tunnel-core)
+
 Psiphon 3 Tunnel Core README
 ================================================================================
 
@@ -56,7 +58,6 @@ Roadmap
   * resumable download of client upgrades
 * Android app
   * open home pages
-  * settings UI (e.g., region selection)
 * log noise
   * "use of closed network connection"
   * 'Unsolicited response received on idle HTTP channel starting with "H"'
