@@ -19,145 +19,135 @@
 
 package psiphon
 
-/*
-NOTE: This test suite is probably overkill for such a simple file. It also
-probably shouldn't be doing error type checking, and especially not checking
-for particular JSON package errors. This is our first test file and mostly
-intended to be something to learn from and derive other test sets.
-*/
-
 import (
-	"os"
-	"path/filepath"
+	"encoding/json"
+	"io/ioutil"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
 )
 
 const (
-	_TEST_DIR = "./testfiles"
+	_README              = "../README.md"
+	_README_CONFIG_BEGIN = "<!--BEGIN-SAMPLE-CONFIG-->"
+	_README_CONFIG_END   = "<!--END-SAMPLE-CONFIG-->"
 )
 
 type ConfigTestSuite struct {
 	suite.Suite
+	confStubBlob      []byte
+	requiredFields    []string
+	nonRequiredFields []string
 }
 
-func (suite *ConfigTestSuite) SetupTest() {
-	os.Mkdir(_TEST_DIR, 0777)
-}
+func (suite *ConfigTestSuite) SetupSuite() {
+	readmeBlob, _ := ioutil.ReadFile(_README)
+	readmeString := string(readmeBlob)
+	readmeString = readmeString[strings.Index(readmeString, _README_CONFIG_BEGIN)+len(_README_CONFIG_BEGIN) : strings.Index(readmeString, _README_CONFIG_END)]
+	readmeString = strings.TrimSpace(readmeString)
+	readmeString = strings.Trim(readmeString, "`")
 
-func (suite *ConfigTestSuite) TearDownTest() {
-	os.RemoveAll(_TEST_DIR)
+	suite.confStubBlob = []byte(readmeString)
+
+	var obj map[string]interface{}
+	json.Unmarshal(suite.confStubBlob, &obj)
+	for k, v := range obj {
+		if v == "<placeholder>" {
+			suite.requiredFields = append(suite.requiredFields, k)
+		} else {
+			suite.nonRequiredFields = append(suite.nonRequiredFields, k)
+		}
+	}
 }
 
 func TestConfigTestSuite(t *testing.T) {
 	suite.Run(t, new(ConfigTestSuite))
 }
 
-func writeConfigFile(filename string, contents string) {
-	configFile, _ := os.Create(filename)
-	configFile.WriteString(contents)
-	configFile.Close()
-}
-
-// Tests bad config file path
-func (suite *ConfigTestSuite) Test_LoadConfig_BadPath() {
-	_, err := LoadConfig("BAADPATH")
-	suite.NotNil(err, "error should be set")
-}
-
-// Tests good config file path
-func (suite *ConfigTestSuite) Test_LoadConfig_GoodPath() {
-	filename := filepath.Join(_TEST_DIR, "good.json")
-	writeConfigFile(filename, `{"PropagationChannelId": "xyz", "SponsorId": "xyz", "RemoteServerListUrl": "xyz", "RemoteServerListSignaturePublicKey": "xyz"}`)
-
-	// Use absolute path
-	abspath, _ := filepath.Abs(filename)
-	_, err := LoadConfig(abspath)
-	suite.Nil(err, "error should not be set")
-
-	// Use relative path
-	suite.False(filepath.IsAbs(filename))
-	_, err = LoadConfig(filename)
-	suite.Nil(err, "error should not be set")
+// Tests good config
+func (suite *ConfigTestSuite) Test_LoadConfig_BasicGood() {
+	_, err := LoadConfig(suite.confStubBlob)
+	suite.Nil(err, "a basic config should succeed")
 }
 
 // Tests non-JSON file contents
 func (suite *ConfigTestSuite) Test_LoadConfig_BadFileContents() {
-	filename := filepath.Join(_TEST_DIR, "junk.json")
-	writeConfigFile(filename, "**ohhi**")
-	_, err := LoadConfig(filename)
-	suite.NotNil(err, "error should be set")
+	_, err := LoadConfig([]byte(`this is not JSON`))
+	suite.NotNil(err, "bytes that are not JSON at all should give an error")
 }
 
 // Tests config file with JSON contents that don't match our structure
 func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
-	filename := filepath.Join(_TEST_DIR, "other.json")
+	var testObj map[string]interface{}
+	var testObjJSON []byte
 
-	// Has none of our fields
-	writeConfigFile(filename, `{"f1": 11, "f2": "two"}`)
-	_, err := LoadConfig(filename)
-	suite.NotNil(err, "error should be set")
+	// JSON with none of our fields
+	_, err := LoadConfig([]byte(`{"f1": 11, "f2": "two"}`))
+	suite.NotNil(err, "JSON with none of our fields should fail")
 
-	// Has one of our required fields, but wrong type
-	writeConfigFile(filename, `{"PropagationChannelId": 11, "f2": "two"}`)
-	_, err = LoadConfig(filename)
-	suite.NotNil(err, "error should be set")
+	// Missing a required field
+	json.Unmarshal(suite.confStubBlob, &testObj)
+	delete(testObj, suite.requiredFields[0])
+	testObjJSON, _ = json.Marshal(testObj)
+	_, err = LoadConfig(testObjJSON)
+	suite.NotNil(err, "JSON with one of our required fields missing should fail")
 
-	// Has one of our required fields, but null
-	writeConfigFile(filename, `{"PropagationChannelId": null, "f2": "two"}`)
-	_, err = LoadConfig(filename)
-	suite.NotNil(err, "error should be set")
+	// Bad type for required field
+	json.Unmarshal(suite.confStubBlob, &testObj)
+	testObj[suite.requiredFields[0]] = false // basically guessing a wrong type
+	testObjJSON, _ = json.Marshal(testObj)
+	_, err = LoadConfig(testObjJSON)
+	suite.NotNil(err, "JSON with one of our required fields with the wrong type should fail")
 
-	// Has one of our required fields, but empty string
-	writeConfigFile(filename, `{"PropagationChannelId": "", "f2": "two"}`)
-	_, err = LoadConfig(filename)
-	suite.NotNil(err, "error should be set")
+	// One of our required fields is null
+	json.Unmarshal(suite.confStubBlob, &testObj)
+	testObj[suite.requiredFields[0]] = nil
+	testObjJSON, _ = json.Marshal(testObj)
+	_, err = LoadConfig(testObjJSON)
+	suite.NotNil(err, "JSON with one of our required fields set to null should fail")
 
-	// Has all of our required fields, but no optional fields
-	writeConfigFile(filename, `{"PropagationChannelId": "xyz", "SponsorId": "xyz", "RemoteServerListUrl": "xyz", "RemoteServerListSignaturePublicKey": "xyz"}`)
-	config, err := LoadConfig(filename)
-	suite.Nil(err, "should be no error")
-	suite.Equal("xyz", config.PropagationChannelId)
+	// One of our required fields is an empty string
+	json.Unmarshal(suite.confStubBlob, &testObj)
+	testObj[suite.requiredFields[0]] = ""
+	testObjJSON, _ = json.Marshal(testObj)
+	_, err = LoadConfig(testObjJSON)
+	suite.NotNil(err, "JSON with one of our required fields set to an empty string should fail")
 
 	// Has incorrect type for optional field
-	writeConfigFile(filename, `{"ClientVersion": "string, not int", "PropagationChannelId": "xyz", "SponsorId": "xyz", "RemoteServerListUrl": "xyz", "RemoteServerListSignaturePublicKey": "xyz"}`)
-	_, err = LoadConfig(filename)
-	suite.NotNil(err, "error should be set")
-
-	// Has null for optional field
-	writeConfigFile(filename, `{"ClientVersion": null, "PropagationChannelId": "xyz", "SponsorId": "xyz", "RemoteServerListUrl": "xyz", "RemoteServerListSignaturePublicKey": "xyz"}`)
-	config, err = LoadConfig(filename)
-	suite.Nil(err, "should be no error")
-	suite.Equal(0, config.ClientVersion)
+	json.Unmarshal(suite.confStubBlob, &testObj)
+	testObj[suite.nonRequiredFields[0]] = false // basically guessing a wrong type
+	testObjJSON, _ = json.Marshal(testObj)
+	_, err = LoadConfig(testObjJSON)
+	suite.NotNil(err, "JSON with one of our optional fields with the wrong type should fail")
 }
 
 // Tests config file with JSON contents that don't match our structure
 func (suite *ConfigTestSuite) Test_LoadConfig_GoodJson() {
-	filename := filepath.Join(_TEST_DIR, "good.json")
+	var testObj map[string]interface{}
+	var testObjJSON []byte
+
+	// TODO: Test that the config actually gets the values we expect?
 
 	// Has all of our required fields, but no optional fields
-	writeConfigFile(filename, `{"PropagationChannelId": "pci", "SponsorId": "si", "RemoteServerListUrl": "rslu", "RemoteServerListSignaturePublicKey": "rslspk"}`)
-	config, err := LoadConfig(filename)
-	suite.Nil(err, "should be no error")
-	suite.Equal("pci", config.PropagationChannelId)
-	suite.Equal("si", config.SponsorId)
-	suite.Equal("rslu", config.RemoteServerListUrl)
-	suite.Equal("rslspk", config.RemoteServerListSignaturePublicKey)
+	json.Unmarshal(suite.confStubBlob, &testObj)
+	for i := range suite.nonRequiredFields {
+		delete(testObj, suite.nonRequiredFields[i])
+	}
+	testObjJSON, _ = json.Marshal(testObj)
+	_, err := LoadConfig(testObjJSON)
+	suite.Nil(err, "JSON with good values for our required fields but no optional fields should succeed")
 
 	// Has all of our required fields, and all optional fields
-	writeConfigFile(filename, `{"PropagationChannelId": "pci", "SponsorId": "si", "RemoteServerListUrl": "rslu", "RemoteServerListSignaturePublicKey": "rslspk", "LogFilename": "lf", "ClientVersion": 12, "ClientPlatform": "cp", "TunnelWholeDevice": 34, "EgressRegion": "er", "LocalSocksProxyPort": 56, "LocalHttpProxyPort": 78}`)
-	config, err = LoadConfig(filename)
-	suite.Nil(err, "should be no error")
-	suite.Equal("pci", config.PropagationChannelId)
-	suite.Equal("si", config.SponsorId)
-	suite.Equal("rslu", config.RemoteServerListUrl)
-	suite.Equal("rslspk", config.RemoteServerListSignaturePublicKey)
-	suite.Equal("lf", config.LogFilename)
-	suite.Equal(12, config.ClientVersion)
-	suite.Equal("cp", config.ClientPlatform)
-	suite.Equal(34, config.TunnelWholeDevice)
-	suite.Equal("er", config.EgressRegion)
-	suite.Equal(56, config.LocalSocksProxyPort)
-	suite.Equal(78, config.LocalHttpProxyPort)
+	_, err = LoadConfig(suite.confStubBlob)
+	suite.Nil(err, "JSON with all good values for required and optional fields should succeed")
+
+	// Has null for optional fields
+	json.Unmarshal(suite.confStubBlob, &testObj)
+	for i := range suite.nonRequiredFields {
+		testObj[suite.nonRequiredFields[i]] = nil
+	}
+	testObjJSON, _ = json.Marshal(testObj)
+	_, err = LoadConfig(testObjJSON)
+	suite.Nil(err, "JSON with null for optional values should succeed")
 }
