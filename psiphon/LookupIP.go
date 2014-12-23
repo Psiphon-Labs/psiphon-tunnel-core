@@ -33,7 +33,7 @@ import (
 const DNS_PORT = 53
 
 // LookupIP resolves a hostname. When BindToDevice is not required, it
-// simply uses net.LookuIP.
+// simply uses net.LookupIP.
 // When BindToDevice is required, LookupIP explicitly creates a UDP
 // socket, binds it to the device, and makes an explicit DNS request
 // to the specified DNS resolver.
@@ -49,6 +49,13 @@ func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 // The sequence of syscalls in this implementation are taken from:
 // https://code.google.com/p/go/issues/detail?id=6966
 func bindLookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
+
+	// When the input host is an IP address, echo it back
+	ipAddr := net.ParseIP(host)
+	if ipAddr != nil {
+		return []net.IP{ipAddr}, nil
+	}
+
 	socketFd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, 0)
 	if err != nil {
 		return nil, ContextError(err)
@@ -59,7 +66,7 @@ func bindLookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 	config.BindToDeviceProvider.BindToDevice(socketFd)
 
 	// config.BindToDeviceDnsServer must be an IP address
-	ipAddr := net.ParseIP(config.BindToDeviceDnsServer)
+	ipAddr = net.ParseIP(config.BindToDeviceDnsServer)
 	if ipAddr == nil {
 		return nil, ContextError(errors.New("invalid IP address"))
 	}
