@@ -6,6 +6,7 @@ go:
 install:
  - sudo apt-get install libx11-dev
  - sudo apt-get install libgles2-mesa-dev
+ - go get -t -d -v ./... && go build -v ./...
 
 script:
  - go test -v ./...
