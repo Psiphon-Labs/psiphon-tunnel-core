@@ -24,6 +24,7 @@ Setup
 * This project builds and runs on recent versions of Windows, Linux, and Mac OS X.
 * Run `./psiphon-tunnel-core --config psiphon.config` where the config file looks like this:
 
+<!--BEGIN-SAMPLE-CONFIG-->
     ```
     {
         "PropagationChannelId" : "<placeholder>",
@@ -43,6 +44,7 @@ Setup
         "UpstreamHttpProxyAddress" : ""
     }
     ```
+<!--END-SAMPLE-CONFIG-->
 
 * Replace each `<placeholder>` with a value from your Psiphon network. The Psiphon server-side stack is open source and can be found in our  [Psiphon 3 repository](https://bitbucket.org/psiphon/psiphon-circumvention-system). If you would like to use the Psiphon Inc. network, contact <developer-support@psiphon.ca>.
 * The project builds and runs on Android. See the [AndroidLibrary README](AndroidLibrary/README.md) for more information about building the Go component, and the [AndroidApp README](AndroidApp/README.md) for a sample Android app that uses it.
