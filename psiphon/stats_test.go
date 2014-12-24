@@ -31,7 +31,9 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
-var _SERVER_ID = "myserverid"
+const (
+	_SERVER_ID = "myserverid"
+)
 
 type StatsTestSuite struct {
 	suite.Suite

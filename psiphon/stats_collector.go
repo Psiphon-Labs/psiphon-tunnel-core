@@ -36,7 +36,9 @@ import (
 
 // _CHANNEL_CAPACITY is the size of the channel that connections use to send stats
 // bundles to the collector/processor.
-var _CHANNEL_CAPACITY = 1000
+const (
+	_CHANNEL_CAPACITY = 1000
+)
 
 // Per-host/domain stats.
 // Note that the bytes we're counting are the ones going into the tunnel, so do
