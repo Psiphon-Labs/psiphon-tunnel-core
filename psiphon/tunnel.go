@@ -222,8 +222,8 @@ func EstablishTunnel(
 
 	// Run a goroutine to periodically execute SSH keepalive
 	sshKeepAliveQuit := make(chan struct{})
-	sshKeepAliveTicker := time.NewTicker(TUNNEL_SSH_KEEP_ALIVE_PERIOD)
 	go func() {
+		sshKeepAliveTicker := time.NewTicker(TUNNEL_SSH_KEEP_ALIVE_PERIOD)
 		for {
 			select {
 			case <-sshKeepAliveTicker.C:
@@ -258,6 +258,7 @@ func EstablishTunnel(
 func (tunnel *Tunnel) Close() {
 	if tunnel.sshKeepAliveQuit != nil {
 		close(tunnel.sshKeepAliveQuit)
+		tunnel.sshKeepAliveQuit = nil
 	}
 	if tunnel.conn != nil {
 		tunnel.conn.Close()
