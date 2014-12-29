@@ -36,7 +36,9 @@ import (
 
 // _CHANNEL_CAPACITY is the size of the channel that connections use to send stats
 // bundles to the collector/processor.
-var _CHANNEL_CAPACITY = 1000
+const (
+	_CHANNEL_CAPACITY = 1000
+)
 
 // Per-host/domain stats.
 // Note that the bytes we're counting are the ones going into the tunnel, so do
@@ -105,24 +107,15 @@ type statsUpdate struct {
 	numBytesReceived int64
 }
 
-// recordStats makes sure the given stats update is added to the global
-// collection. Guaranteed to not block.
+// recordStats adds the given stats update is added to the global collection.
 // Callers of this function should assume that it "takes control" of the
 // statsUpdate object.
 func recordStat(newStat *statsUpdate) {
+	// This function has the potential to block, if statsChan gets full. The
+	// intention is that we give statsChan a big enough buffer that it doesn't
+	// block in normal circumstances
 	statSlice := []*statsUpdate{newStat}
-	// Priority: Don't block connections when updating stats. We can't just
-	// write to the statsChan, since that will block if it's full. We could
-	// launch a goroutine for each update, but that seems like  unnecessary
-	// overhead. So we'll try to write to the channel, and launch a goro if it
-	// fails.
-	select {
-	case allStats.statsChan <- statSlice:
-	default:
-		go func() {
-			allStats.statsChan <- statSlice
-		}()
-	}
+	allStats.statsChan <- statSlice
 }
 
 // processStats is a goro started by Start() and runs until Stop(). It collects

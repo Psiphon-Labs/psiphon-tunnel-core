@@ -63,4 +63,4 @@ RUN echo "INSTALLING GO" && \
   ./all.bash && \
   CC_FOR_TARGET=$NDK_ROOT/bin/arm-linux-androideabi-gcc GOOS=android GOARCH=arm GOARM=7 ./make.bash
 
-WORKDIR $GOPATH/src/golang.org/x/mobile
+WORKDIR $GOPATH/src
