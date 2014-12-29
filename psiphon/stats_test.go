@@ -22,6 +22,7 @@ package psiphon
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"testing"
@@ -105,11 +106,11 @@ func (suite *StatsTestSuite) Test_NextSendPeriod() {
 
 func (suite *StatsTestSuite) Test_StatsConn() {
 	resp, err := suite.httpClient.Get("http://example.com/index.html")
-	suite.Nil(err, "basic HTTP requests should succeed (1)")
+	suite.Nil(err, "basic HTTP requests should succeed")
 	resp.Body.Close()
 
-	resp, err = suite.httpClient.Get("http://example.org/index.html")
-	suite.Nil(err, "basic HTTP requests should succeed (1)")
+	resp, err = suite.httpClient.Get("https://example.org/index.html")
+	suite.Nil(err, "basic HTTPS requests should succeed")
 	resp.Body.Close()
 }
 
@@ -212,37 +213,43 @@ func (suite *StatsTestSuite) Test_Regex() {
 		},
 	}
 
-	// No subdomain, so won't match regex
-	resp, err := suite.httpClient.Get("http://example.com/index.html")
-	suite.Nil(err)
-	resp.Body.Close()
+	// Using both HTTP and HTTPS will help us to exercise both methods of hostname parsing
+	for _, scheme := range []string{"http", "https"} {
+		// No subdomain, so won't match regex
+		url := fmt.Sprintf("%s://example.com/index.html", scheme)
+		resp, err := suite.httpClient.Get(url)
+		suite.Nil(err)
+		resp.Body.Close()
 
-	// Will match the first regex
-	resp, err = suite.httpClient.Get("http://www.example.com/index.html")
-	suite.Nil(err)
-	resp.Body.Close()
+		// Will match the first regex
+		url = fmt.Sprintf("%s://www.example.com/index.html", scheme)
+		resp, err = suite.httpClient.Get(url)
+		suite.Nil(err)
+		resp.Body.Close()
 
-	// Will match the second regex
-	resp, err = suite.httpClient.Get("http://example.org/index.html")
-	suite.Nil(err)
-	resp.Body.Close()
+		// Will match the second regex
+		url = fmt.Sprintf("%s://example.org/index.html", scheme)
+		resp, err = suite.httpClient.Get(url)
+		suite.Nil(err)
+		resp.Body.Close()
 
-	payload := GetForServer(_SERVER_ID)
-	suite.NotNil(payload, "should get stats because we made HTTP reqs")
+		payload := GetForServer(_SERVER_ID)
+		suite.NotNil(payload, "should get stats because we made HTTP reqs; %s", scheme)
 
-	expectedHostnames := mapset.NewSet()
-	expectedHostnames.Add("(OTHER)")
-	expectedHostnames.Add("example.com")
-	expectedHostnames.Add("replacement")
+		expectedHostnames := mapset.NewSet()
+		expectedHostnames.Add("(OTHER)")
+		expectedHostnames.Add("example.com")
+		expectedHostnames.Add("replacement")
 
-	hostnames := make([]interface{}, 0)
-	for hostname := range payload.hostnameToStats {
-		hostnames = append(hostnames, hostname)
+		hostnames := make([]interface{}, 0)
+		for hostname := range payload.hostnameToStats {
+			hostnames = append(hostnames, hostname)
+		}
+
+		actualHostnames := mapset.NewSetFromSlice(hostnames)
+
+		suite.Equal(expectedHostnames, actualHostnames, "post-regex hostnames should be processed as expecteds; %s", scheme)
 	}
-
-	actualHostnames := mapset.NewSetFromSlice(hostnames)
-
-	suite.Equal(expectedHostnames, actualHostnames, "post-regex hostnames should be processed as expecteds")
 }
 
 func (suite *StatsTestSuite) Test_recordStat() {
@@ -254,4 +261,101 @@ func (suite *StatsTestSuite) Test_recordStat() {
 	for i := 0; i < _CHANNEL_CAPACITY*2; i++ {
 		recordStat(&stat)
 	}
+}
+
+func (suite *StatsTestSuite) Test_getTLSHostname() {
+	// TODO: Create a more robust/antagonistic set of negative tests.
+	// We can write raw TCP to simulate any arbitrary degree of "almost looks
+	// like a TLS handshake".
+	// These tests are basically just checking for crashes.
+	//
+	// An easier way to construct valid client-hello messages (but not malicious ones)
+	// would be to use the clientHelloMsg struct and marshal function from:
+	// https://github.com/golang/go/blob/master/src/crypto/tls/handshake_messages.go
+
+	// TODO: Talk to a local TCP server instead of spamming example.com
+
+	dialer := makeStatsDialer(_SERVER_ID, nil)
+
+	// Data too short
+	conn, err := dialer("tcp", "example.com:80")
+	suite.Nil(err)
+	b := []byte(`my bytes`)
+	n, err := conn.Write(b)
+	suite.Nil(err)
+	suite.Equal(len(b), n)
+	err = conn.Close()
+	suite.Nil(err)
+
+	// Data long enough, but wrong first byte
+	conn, err = dialer("tcp", "example.com:80")
+	suite.Nil(err)
+	b = []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	n, err = conn.Write(b)
+	suite.Nil(err)
+	suite.Equal(len(b), n)
+	err = conn.Close()
+	suite.Nil(err)
+
+	// Data long enough, correct first byte
+	conn, err = dialer("tcp", "example.com:80")
+	suite.Nil(err)
+	b = []byte{22, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	n, err = conn.Write(b)
+	suite.Nil(err)
+	suite.Equal(len(b), n)
+	err = conn.Close()
+	suite.Nil(err)
+
+	// Correct until after SSL version
+	conn, err = dialer("tcp", "example.com:80")
+	suite.Nil(err)
+	b = []byte{22, 3, 1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	n, err = conn.Write(b)
+	suite.Nil(err)
+	suite.Equal(len(b), n)
+	err = conn.Close()
+	suite.Nil(err)
+
+	plaintextLen := byte(70)
+
+	// Correct until after plaintext length
+	conn, err = dialer("tcp", "example.com:80")
+	suite.Nil(err)
+	b = []byte{22, 3, 1, 0, plaintextLen, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	n, err = conn.Write(b)
+	suite.Nil(err)
+	suite.Equal(len(b), n)
+	err = conn.Close()
+	suite.Nil(err)
+
+	// Correct until after handshake type
+	conn, err = dialer("tcp", "example.com:80")
+	suite.Nil(err)
+	b = []byte{22, 3, 1, 0, plaintextLen, 1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	n, err = conn.Write(b)
+	suite.Nil(err)
+	suite.Equal(len(b), n)
+	err = conn.Close()
+	suite.Nil(err)
+
+	// Correct until after handshake length
+	conn, err = dialer("tcp", "example.com:80")
+	suite.Nil(err)
+	b = []byte{22, 3, 1, 0, plaintextLen, 1, 0, 0, plaintextLen - 4, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	n, err = conn.Write(b)
+	suite.Nil(err)
+	suite.Equal(len(b), n)
+	err = conn.Close()
+	suite.Nil(err)
+
+	// Correct until after protocol version
+	conn, err = dialer("tcp", "example.com:80")
+	suite.Nil(err)
+	b = []byte{22, 3, 1, 0, plaintextLen, 1, 0, 0, plaintextLen - 4, 3, 3, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	n, err = conn.Write(b)
+	suite.Nil(err)
+	suite.Equal(len(b), n)
+	err = conn.Close()
+	suite.Nil(err)
 }

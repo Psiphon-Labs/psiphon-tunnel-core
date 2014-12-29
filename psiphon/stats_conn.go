@@ -30,12 +30,7 @@ Assumption: Enough of the first HTTP will be present in the first Write() call
 		- If this turns out to not be generally true we will need to add buffering.
 */
 
-import (
-	"bufio"
-	"bytes"
-	"net"
-	"net/http"
-)
+import "net"
 
 // StatsConn is to be used as an intermediate link in a chain of net.Conn objects.
 // It inspects requests and responses and derives stats from them.
@@ -73,13 +68,11 @@ func (conn *StatsConn) Write(buffer []byte) (n int, err error) {
 		if conn.firstWrite {
 			conn.firstWrite = false
 
-			// Check if this is a HTTP request
-			bufferReader := bufio.NewReader(bytes.NewReader(buffer))
-			httpReq, httpErr := http.ReadRequest(bufferReader)
-			if httpErr == nil {
+			hostname, ok := getHostname(buffer)
+			if ok {
 				// Get the hostname value that will be stored in stats by
 				// regexing the real hostname.
-				conn.hostname = regexHostname(httpReq.Host, conn.regexps)
+				conn.hostname = regexHostname(hostname, conn.regexps)
 			}
 		}
 
