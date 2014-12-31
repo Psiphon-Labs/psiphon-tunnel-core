@@ -32,7 +32,9 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
-var _SERVER_ID = "myserverid"
+const (
+	_SERVER_ID = "myserverid"
+)
 
 type StatsTestSuite struct {
 	suite.Suite
@@ -252,16 +254,13 @@ func (suite *StatsTestSuite) Test_Regex() {
 
 func (suite *StatsTestSuite) Test_recordStat() {
 	// The normal operation of this function will get exercised during the
-	// other tests, but there is a code branch that only gets hit when the
-	// allStats.statsChan is filled. To make sure we fill the channel, we will
-	// lock the stats access mutex, try to record a bunch of stats, and then
-	// release it.
-	allStats.statsMutex.Lock()
+	// other tests. Here we will quickly record more stats updates than the
+	// channel capacity. The test is just that this function returns, and doesn't
+	// crash or block forever.
 	stat := statsUpdate{"test", "test", 1, 1}
 	for i := 0; i < _CHANNEL_CAPACITY*2; i++ {
 		recordStat(&stat)
 	}
-	allStats.statsMutex.Unlock()
 }
 
 func (suite *StatsTestSuite) Test_getTLSHostname() {
