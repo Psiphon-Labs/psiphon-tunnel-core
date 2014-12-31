@@ -25,6 +25,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime/pprof"
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
@@ -33,8 +34,13 @@ import (
 func main() {
 
 	var configFilename string
-	flag.StringVar(&configFilename, "config", "", "configuration file")
+	flag.StringVar(&configFilename, "config", "", "configuration input file")
+
+	var profileFilename string
+	flag.StringVar(&profileFilename, "profile", "", "CPU profile output file")
+
 	flag.Parse()
+
 	if configFilename == "" {
 		log.Fatalf("configuration file is required")
 	}
@@ -45,6 +51,15 @@ func main() {
 	config, err := psiphon.LoadConfig(configFileContents)
 	if err != nil {
 		log.Fatalf("error processing configuration file: %s", err)
+	}
+
+	if profileFilename != "" {
+		profileFile, err := os.Create(profileFilename)
+		if err != nil {
+			log.Fatalf("error opening profile file: %s", err)
+		}
+		pprof.StartCPUProfile(profileFile)
+		defer pprof.StopCPUProfile()
 	}
 
 	err = psiphon.InitDataStore(config)
