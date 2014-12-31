@@ -46,8 +46,6 @@ func TestStatsTestSuite(t *testing.T) {
 }
 
 func (suite *StatsTestSuite) SetupTest() {
-	Stats_Start()
-
 	re := make(Regexps, 0)
 	suite.httpClient = &http.Client{
 		Transport: &http.Transport{
@@ -58,7 +56,6 @@ func (suite *StatsTestSuite) SetupTest() {
 
 func (suite *StatsTestSuite) TearDownTest() {
 	suite.httpClient = nil
-	Stats_Stop()
 }
 
 func makeStatsDialer(serverID string, regexps *Regexps) func(network, addr string) (conn net.Conn, err error) {
@@ -84,16 +81,6 @@ func makeStatsDialer(serverID string, regexps *Regexps) func(network, addr strin
 		err = nil
 		return
 	}
-}
-
-func (suite *StatsTestSuite) Test_StartStop() {
-	// Make sure Start and Stop calls don't crash
-	Stats_Start()
-	Stats_Start()
-	Stats_Stop()
-	Stats_Stop()
-	Stats_Start()
-	Stats_Stop()
 }
 
 func (suite *StatsTestSuite) Test_NextSendPeriod() {
@@ -249,17 +236,6 @@ func (suite *StatsTestSuite) Test_Regex() {
 		actualHostnames := mapset.NewSetFromSlice(hostnames)
 
 		suite.Equal(expectedHostnames, actualHostnames, "post-regex hostnames should be processed as expecteds; %s", scheme)
-	}
-}
-
-func (suite *StatsTestSuite) Test_recordStat() {
-	// The normal operation of this function will get exercised during the
-	// other tests. Here we will quickly record more stats updates than the
-	// channel capacity. The test is just that this function returns, and doesn't
-	// crash or block forever.
-	stat := statsUpdate{"test", "test", 1, 1}
-	for i := 0; i < _CHANNEL_CAPACITY*2; i++ {
-		recordStat(&stat)
 	}
 }
 

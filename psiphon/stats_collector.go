@@ -34,12 +34,6 @@ import (
 // a small amount of memory (< 1KB, probably), but we should still probably add
 // some kind of stale-stats cleanup.
 
-// _CHANNEL_CAPACITY is the size of the channel that connections use to send stats
-// bundles to the collector/processor.
-const (
-	_CHANNEL_CAPACITY = 1000
-)
-
 // Per-host/domain stats.
 // Note that the bytes we're counting are the ones going into the tunnel, so do
 // not include transport overhead.
@@ -64,42 +58,13 @@ func newServerStats() *serverStats {
 }
 
 // allStats is the root object that holds stats for all servers and all hosts,
-// as well as the mutex to access them, the channel to update them, etc.
-var allStats struct {
-	serverIDtoStats    map[string]*serverStats
-	statsMutex         sync.RWMutex
-	stopSignal         chan struct{}
-	statsChan          chan []*statsUpdate
-	processorWaitGroup sync.WaitGroup
-}
+// as well as the mutex to access them.
+var allStats = struct {
+	statsMutex      sync.RWMutex
+	serverIDtoStats map[string]*serverStats
+}{serverIDtoStats: make(map[string]*serverStats)}
 
-// Start initializes and begins stats collection. Must be called once, when the
-// application starts.
-func Stats_Start() {
-	if allStats.stopSignal != nil {
-		return
-	}
-
-	allStats.serverIDtoStats = make(map[string]*serverStats)
-	allStats.stopSignal = make(chan struct{})
-	allStats.statsChan = make(chan []*statsUpdate, _CHANNEL_CAPACITY)
-
-	allStats.processorWaitGroup.Add(1)
-	go processStats()
-}
-
-// Stop ends stats collection. Must be called once, before the application
-// terminates.
-func Stats_Stop() {
-	if allStats.stopSignal != nil {
-		close(allStats.stopSignal)
-		allStats.processorWaitGroup.Wait()
-		allStats.stopSignal = nil
-	}
-}
-
-// Instances of statsUpdate will be sent through the connection-to-collector
-// channel.
+// statsUpdate contains new stats counts to be aggregated.
 type statsUpdate struct {
 	serverID         string
 	hostname         string
@@ -107,64 +72,34 @@ type statsUpdate struct {
 	numBytesReceived int64
 }
 
-// recordStats adds the given stats update is added to the global collection.
+// recordStats makes sure the given stats update is added to the global
+// collection. Guaranteed to not block.
 // Callers of this function should assume that it "takes control" of the
 // statsUpdate object.
-func recordStat(newStat *statsUpdate) {
-	// This function has the potential to block, if statsChan gets full. The
-	// intention is that we give statsChan a big enough buffer that it doesn't
-	// block in normal circumstances
-	statSlice := []*statsUpdate{newStat}
-	allStats.statsChan <- statSlice
-}
+func recordStat(stat *statsUpdate) {
+	allStats.statsMutex.Lock()
+	defer allStats.statsMutex.Unlock()
 
-// processStats is a goro started by Start() and runs until Stop(). It collects
-// stats provided by StatsConn.
-func processStats() {
-	defer allStats.processorWaitGroup.Done()
-
-	for {
-		select {
-		case statSlice := <-allStats.statsChan:
-			allStats.statsMutex.Lock()
-
-			for _, stat := range statSlice {
-				if stat.hostname == "" {
-					stat.hostname = "(OTHER)"
-				}
-
-				storedServerStats := allStats.serverIDtoStats[stat.serverID]
-				if storedServerStats == nil {
-					storedServerStats = newServerStats()
-					allStats.serverIDtoStats[stat.serverID] = storedServerStats
-				}
-
-				storedHostStats := storedServerStats.hostnameToStats[stat.hostname]
-				if storedHostStats == nil {
-					storedHostStats = newHostStats()
-					storedServerStats.hostnameToStats[stat.hostname] = storedHostStats
-				}
-
-				storedHostStats.numBytesSent += stat.numBytesSent
-				storedHostStats.numBytesReceived += stat.numBytesReceived
-
-				//fmt.Println("server:", stat.serverID, "host:", stat.hostname, "sent:", storedHostStats.numBytesSent, "received:", storedHostStats.numBytesReceived)
-			}
-
-			allStats.statsMutex.Unlock()
-
-		default:
-			// Note that we only checking the stopSignal in the default case. This is
-			// because we don't want the statsChan to fill and block the connections
-			// sending to it. The connections have their own signals, so they will
-			// stop themselves, we will drain the channel, and then we will stop.
-			select {
-			case <-allStats.stopSignal:
-				return
-			default:
-			}
-		}
+	if stat.hostname == "" {
+		stat.hostname = "(OTHER)"
 	}
+
+	storedServerStats := allStats.serverIDtoStats[stat.serverID]
+	if storedServerStats == nil {
+		storedServerStats = newServerStats()
+		allStats.serverIDtoStats[stat.serverID] = storedServerStats
+	}
+
+	storedHostStats := storedServerStats.hostnameToStats[stat.hostname]
+	if storedHostStats == nil {
+		storedHostStats = newHostStats()
+		storedServerStats.hostnameToStats[stat.hostname] = storedHostStats
+	}
+
+	storedHostStats.numBytesSent += stat.numBytesSent
+	storedHostStats.numBytesReceived += stat.numBytesReceived
+
+	//fmt.Println("server:", stat.serverID, "host:", stat.hostname, "sent:", storedHostStats.numBytesSent, "received:", storedHostStats.numBytesReceived)
 }
 
 // NextSendPeriod returns the amount of time that should be waited before the
@@ -243,15 +178,13 @@ func GetForServer(serverID string) (payload *serverStats) {
 
 // PutBack re-adds a set of server stats to the collection.
 func PutBack(serverID string, ss *serverStats) {
-	statSlice := make([]*statsUpdate, 0, len(ss.hostnameToStats))
 	for hostname, hoststats := range ss.hostnameToStats {
-		statSlice = append(statSlice, &statsUpdate{
-			serverID:         serverID,
-			hostname:         hostname,
-			numBytesSent:     hoststats.numBytesSent,
-			numBytesReceived: hoststats.numBytesReceived,
-		})
+		recordStat(
+			&statsUpdate{
+				serverID:         serverID,
+				hostname:         hostname,
+				numBytesSent:     hoststats.numBytesSent,
+				numBytesReceived: hoststats.numBytesReceived,
+			})
 	}
-
-	allStats.statsChan <- statSlice
 }
