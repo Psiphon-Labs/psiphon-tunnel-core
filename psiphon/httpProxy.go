@@ -66,7 +66,7 @@ func NewHttpProxy(config *Config, tunneler Tunneler) (proxy *HttpProxy, err erro
 	}
 	proxy.serveWaitGroup.Add(1)
 	go proxy.serve()
-	Notice(NOTICE_HTTP_PROXY, "local HTTP proxy running at address %s", proxy.listener.Addr().String())
+	Notice(NOTICE_HTTP_PROXY_PORT, "%d", proxy.listener.Addr().(*net.TCPAddr).Port)
 	return proxy, nil
 }
 
@@ -240,5 +240,5 @@ func (proxy *HttpProxy) serve() {
 			Notice(NOTICE_ALERT, "%s", ContextError(err))
 		}
 	}
-	Notice(NOTICE_HTTP_PROXY, "HTTP proxy stopped")
+	Notice(NOTICE_INFO, "HTTP proxy stopped")
 }

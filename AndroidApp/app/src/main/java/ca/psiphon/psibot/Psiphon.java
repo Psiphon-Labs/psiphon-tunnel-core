@@ -173,9 +173,9 @@ public class Psiphon extends Psi.PsiphonProvider.Stub {
     }
 
     private synchronized void parseMessage(String message) {
-        // TODO: this is based on temporary log line formats
-        final String socksProxy = "SOCKS-PROXY local SOCKS proxy running at address 127.0.0.1:";
-        final String httpProxy = "HTTP-PROXY local HTTP proxy running at address 127.0.0.1:";
+        // TODO: this is based on tentative log line formats
+        final String socksProxy = "SOCKS-PROXY-PORT ";
+        final String httpProxy = "HTTP-PROXY-PORT ";
         final String homePage = "HOMEPAGE ";
         final String tunnelStarted = "TUNNELS 1";
         int index;
