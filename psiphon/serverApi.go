@@ -158,12 +158,8 @@ func (session *Session) doHandshakeRequest() error {
 	for _, homepage := range handshakeConfig.Homepages {
 		Notice(NOTICE_HOMEPAGE, homepage)
 	}
-	upgradeClientVersion, err := strconv.Atoi(handshakeConfig.UpgradeClientVersion)
-	if err != nil {
-		return ContextError(err)
-	}
-	if upgradeClientVersion > session.config.ClientVersion {
-		Notice(NOTICE_UPGRADE, "%d", upgradeClientVersion)
+	if handshakeConfig.UpgradeClientVersion != "" {
+		Notice(NOTICE_UPGRADE, "%s", handshakeConfig.UpgradeClientVersion)
 	}
 	session.tunnel.SetStatsRegexps(MakeRegexps(
 		handshakeConfig.PageViewRegexes,
@@ -232,7 +228,7 @@ func (session *Session) buildRequestUrl(path string, extraParams ...*ExtraParam)
 	requestUrl.WriteString("&sponsor_id=")
 	requestUrl.WriteString(session.config.SponsorId)
 	requestUrl.WriteString("&client_version=")
-	requestUrl.WriteString(strconv.Itoa(session.config.ClientVersion))
+	requestUrl.WriteString(session.config.ClientVersion)
 	// TODO: client_tunnel_core_version
 	requestUrl.WriteString("&relay_protocol=")
 	requestUrl.WriteString(session.tunnel.protocol)

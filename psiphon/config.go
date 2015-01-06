@@ -33,7 +33,7 @@ type Config struct {
 	SponsorId                          string
 	RemoteServerListUrl                string
 	RemoteServerListSignaturePublicKey string
-	ClientVersion                      int
+	ClientVersion                      string
 	ClientPlatform                     string
 	TunnelWholeDevice                  int
 	EgressRegion                       string
