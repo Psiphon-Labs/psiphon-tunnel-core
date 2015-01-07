@@ -89,6 +89,10 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		}
 	}
 
+	if config.ClientVersion == "" {
+		config.ClientVersion = "0"
+	}
+
 	if config.ConnectionWorkerPoolSize == 0 {
 		config.ConnectionWorkerPoolSize = CONNECTION_WORKER_POOL_SIZE
 	}
