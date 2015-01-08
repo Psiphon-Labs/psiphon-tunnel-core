@@ -33,7 +33,7 @@ type Config struct {
 	SponsorId                          string
 	RemoteServerListUrl                string
 	RemoteServerListSignaturePublicKey string
-	ClientVersion                      int
+	ClientVersion                      string
 	ClientPlatform                     string
 	TunnelWholeDevice                  int
 	EgressRegion                       string
@@ -87,6 +87,10 @@ func LoadConfig(configJson []byte) (*Config, error) {
 			return nil, ContextError(
 				errors.New("invalid tunnel protocol"))
 		}
+	}
+
+	if config.ClientVersion == "" {
+		config.ClientVersion = "0"
 	}
 
 	if config.ConnectionWorkerPoolSize == 0 {

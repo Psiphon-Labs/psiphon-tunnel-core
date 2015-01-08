@@ -56,7 +56,7 @@ func NewSocksProxy(config *Config, tunneler Tunneler) (proxy *SocksProxy, err er
 	}
 	proxy.serveWaitGroup.Add(1)
 	go proxy.serve()
-	Notice(NOTICE_SOCKS_PROXY, "local SOCKS proxy running at address %s", proxy.listener.Addr().String())
+	Notice(NOTICE_SOCKS_PROXY_PORT, "%d", proxy.listener.Addr().(*net.TCPAddr).Port)
 	return proxy, nil
 }
 
@@ -118,5 +118,5 @@ loop:
 			}
 		}()
 	}
-	Notice(NOTICE_SOCKS_PROXY, "SOCKS proxy stopped")
+	Notice(NOTICE_INFO, "SOCKS proxy stopped")
 }
