@@ -1,7 +1,7 @@
 // +build windows
 
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -42,11 +42,15 @@ type interruptibleDialResult struct {
 	err     error
 }
 
+// interruptibleTCPDial establishes a TCP network connection. A conn is added
+// to config.PendingConns before blocking on network IO, which enables interruption.
+// The caller is responsible for removing an established conn from PendingConns.
 func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err error) {
 	if config.BindToDeviceProvider != nil {
 		return nil, ContextError(errors.New("psiphon.interruptibleTCPDial with bind not supported on Windows"))
 	}
 
+	// Enable interruption
 	conn = &TCPConn{
 		interruptible: interruptibleTCPSocket{results: make(chan *interruptibleDialResult, 2)},
 		readTimeout:   config.ReadTimeout,
@@ -78,7 +82,6 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 
 	// Block until Dial completes (or times out) or until interrupt
 	result := <-conn.interruptible.results
-	config.PendingConns.Remove(conn)
 	if result.err != nil {
 		return nil, ContextError(result.err)
 	}

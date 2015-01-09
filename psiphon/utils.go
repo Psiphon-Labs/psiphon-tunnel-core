@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -23,7 +23,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -83,14 +82,6 @@ func ContextError(err error) error {
 	pc, _, line, _ := runtime.Caller(1)
 	funcName := runtime.FuncForPC(pc).Name()
 	return fmt.Errorf("%s#%d: %s", funcName, line, err)
-}
-
-func MakeSessionId() (id string, err error) {
-	randomId, err := MakeSecureRandomBytes(PSIPHON_API_CLIENT_SESSION_ID_LENGTH)
-	if err != nil {
-		return "", ContextError(err)
-	}
-	return hex.EncodeToString(randomId), nil
 }
 
 func DecodeCertificate(encodedCertificate string) (certificate *x509.Certificate, err error) {

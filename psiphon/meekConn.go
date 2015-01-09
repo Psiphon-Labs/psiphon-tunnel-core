@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -99,10 +99,12 @@ func DialMeek(
 	// pendingConns here, but that was a lifecycle mismatch: we don't want to abort HTTP transport
 	// connections while MeekConn is still in use
 	pendingConns := new(Conns)
+
 	// Use a copy of DialConfig with the meek pendingConns
-	configCopy := new(DialConfig)
-	*configCopy = *config
-	configCopy.PendingConns = pendingConns
+	meekConfig := new(DialConfig)
+	*meekConfig = *config
+	meekConfig.PendingConns = pendingConns
+
 	var host string
 	var dialer Dialer
 	if useFronting {
@@ -113,15 +115,15 @@ func DialMeek(
 		//  - disables SNI -- SNI breaks fronting when used with CDNs that support SNI on the server side.
 		dialer = NewCustomTLSDialer(
 			&CustomTLSConfig{
-				Dial:           NewTCPDialer(configCopy),
-				Timeout:        configCopy.ConnectTimeout,
+				Dial:           NewTCPDialer(meekConfig),
+				Timeout:        meekConfig.ConnectTimeout,
 				FrontingAddr:   fmt.Sprintf("%s:%d", serverEntry.MeekFrontingDomain, 443),
 				SendServerName: false,
 			})
 	} else {
 		// In this case, host is both what is dialed and what ends up in the HTTP Host header
 		host = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
-		dialer = NewTCPDialer(configCopy)
+		dialer = NewTCPDialer(meekConfig)
 	}
 
 	// Scheme is always "http". Otherwise http.Transport will try to do another TLS
@@ -177,6 +179,10 @@ func DialMeek(
 	meek.emptySendBuffer <- new(bytes.Buffer)
 	meek.relayWaitGroup.Add(1)
 	go meek.relay()
+
+	// Enable interruption
+	config.PendingConns.Add(meek)
+
 	return meek, nil
 }
 

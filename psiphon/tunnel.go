@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -27,7 +27,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -39,7 +39,14 @@ import (
 // implements Tunneler.
 type Tunneler interface {
 	Dial(remoteAddr string) (conn net.Conn, err error)
-	SignalFailure()
+	SignalComponentFailure()
+}
+
+// TunnerOwner specifies the interface required by Tunnel to notify its
+// owner when it has failed. The owner may, as in the case of the Controller,
+// remove the tunnel from its list of active tunnels.
+type TunnelOwner interface {
+	SignalTunnelFailure(tunnel *Tunnel)
 }
 
 const (
@@ -61,16 +68,15 @@ var SupportedTunnelProtocols = []string{
 // tunnel includes a network connection to the specified server
 // and an SSH session built on top of that transport.
 type Tunnel struct {
-	serverEntry             *ServerEntry
-	sessionId               string
-	sessionStarted          int32
-	protocol                string
-	conn                    Conn
-	sshClient               *ssh.Client
-	sshKeepAliveQuit        chan struct{}
-	portForwardFailures     chan int
-	portForwardFailureTotal int
-	regexps                 *Regexps
+	serverEntry              *ServerEntry
+	session                  *Session
+	protocol                 string
+	conn                     Conn
+	sshClient                *ssh.Client
+	operateWaitGroup         *sync.WaitGroup
+	shutdownOperateBroadcast chan struct{}
+	portForwardFailures      chan int
+	portForwardFailureTotal  int
 }
 
 // EstablishTunnel first makes a network transport connection to the
@@ -84,16 +90,101 @@ type Tunnel struct {
 // the first protocol in SupportedTunnelProtocols that's also in the
 // server capabilities is used.
 func EstablishTunnel(
-	config *Config, pendingConns *Conns, serverEntry *ServerEntry) (tunnel *Tunnel, err error) {
+	config *Config,
+	pendingConns *Conns,
+	serverEntry *ServerEntry,
+	tunnelOwner TunnelOwner) (tunnel *Tunnel, err error) {
 
-	// Select the protocol
-	var selectedProtocol string
+	selectedProtocol, err := selectProtocol(config, serverEntry)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	Notice(NOTICE_INFO, "connecting to %s in region %s using %s",
+		serverEntry.IpAddress, serverEntry.Region, selectedProtocol)
+
+	// Generate a session Id for the Psiphon server API. This is generated now so
+	// that it can be sent with the SSH password payload, which helps the server
+	// associate client geo location, used in server API stats, with the session ID.
+	sessionId, err := MakeSessionId()
+	if err != nil {
+		return nil, ContextError(err)
+	}
+
+	// Build transport layers and establish SSH connection
+	conn, sshClient, err := dialSsh(config, pendingConns, serverEntry, selectedProtocol, sessionId)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+
+	// Cleanup on error
+	defer func() {
+		if err != nil {
+			conn.Close()
+		}
+	}()
+
+	// The tunnel is now connected
+	tunnel = &Tunnel{
+		serverEntry:              serverEntry,
+		protocol:                 selectedProtocol,
+		conn:                     conn,
+		sshClient:                sshClient,
+		operateWaitGroup:         new(sync.WaitGroup),
+		shutdownOperateBroadcast: make(chan struct{}),
+		// portForwardFailures buffer size is large enough to receive the thresold number
+		// of failure reports without blocking. Senders can drop failures without blocking.
+		portForwardFailures: make(chan int, config.PortForwardFailureThreshold)}
+
+	// Create a new Psiphon API session for this tunnel
+	Notice(NOTICE_INFO, "starting session for %s", tunnel.serverEntry.IpAddress)
+	tunnel.session, err = NewSession(config, tunnel, sessionId)
+	if err != nil {
+		return nil, ContextError(fmt.Errorf("error starting session for %s: %s", tunnel.serverEntry.IpAddress, err))
+	}
+
+	// Now that network operations are complete, cancel interruptibility
+	pendingConns.Remove(conn)
+
+	// Promote this successful tunnel to first rank so it's one
+	// of the first candidates next time establish runs.
+	PromoteServerEntry(tunnel.serverEntry.IpAddress)
+
+	// Spawn the operateTunnel goroutine, which monitors the tunnel and handles periodic stats updates.
+	tunnel.operateWaitGroup.Add(1)
+	go tunnel.operateTunnel(config, tunnelOwner)
+
+	return tunnel, nil
+}
+
+// Close stops operating the tunnel and closes the underlying connection.
+// Note: unlike Conn, this currently only supports a single to Close().
+func (tunnel *Tunnel) Close() {
+	close(tunnel.shutdownOperateBroadcast)
+	tunnel.operateWaitGroup.Wait()
+	tunnel.conn.Close()
+}
+
+// Dial establishes a port forward connection through the tunnel
+func (tunnel *Tunnel) Dial(remoteAddr string) (conn net.Conn, err error) {
+	// TODO: should this track port forward failures as in Controller.DialWithTunnel?
+	return tunnel.sshClient.Dial("tcp", remoteAddr)
+}
+
+// SignalComponentFailure notifies the tunnel that an associated component has failed.
+// This will terminate the tunnel.
+func (tunnel *Tunnel) SignalComponentFailure() {
+	Notice(NOTICE_ALERT, "tunnel received component failure signal")
+	tunnel.Close()
+}
+
+// selectProtocol is a helper that picks the tunnel protocol
+func selectProtocol(config *Config, serverEntry *ServerEntry) (selectedProtocol string, err error) {
 	// TODO: properly handle protocols (e.g. FRONTED-MEEK-OSSH) vs. capabilities (e.g., {FRONTED-MEEK, OSSH})
 	// for now, the code is simply assuming that MEEK capabilities imply OSSH capability.
 	if config.TunnelProtocol != "" {
 		requiredCapability := strings.TrimSuffix(config.TunnelProtocol, "-OSSH")
 		if !Contains(serverEntry.Capabilities, requiredCapability) {
-			return nil, ContextError(fmt.Errorf("server does not have required capability"))
+			return "", ContextError(fmt.Errorf("server does not have required capability"))
 		}
 		selectedProtocol = config.TunnelProtocol
 	} else {
@@ -106,11 +197,16 @@ func EstablishTunnel(
 			}
 		}
 		if selectedProtocol == "" {
-			return nil, ContextError(fmt.Errorf("server does not have any supported capabilities"))
+			return "", ContextError(fmt.Errorf("server does not have any supported capabilities"))
 		}
 	}
-	Notice(NOTICE_INFO, "connecting to %s in region %s using %s",
-		serverEntry.IpAddress, serverEntry.Region, selectedProtocol)
+	return selectedProtocol, nil
+}
+
+// dialSsh is a helper that builds the transport layers and establishes the SSH connection
+func dialSsh(
+	config *Config, pendingConns *Conns, serverEntry *ServerEntry,
+	selectedProtocol, sessionId string) (conn Conn, sshClient *ssh.Client, err error) {
 
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
@@ -134,14 +230,6 @@ func EstablishTunnel(
 		port = serverEntry.SshPort
 	}
 
-	// Generate a session Id for the Psiphon server API. This is generated now so
-	// that it can be sent with the SSH password payload, which helps the server
-	// associate client geo location, used in server API stats, with the session ID.
-	sessionId, err := MakeSessionId()
-	if err != nil {
-		return nil, ContextError(err)
-	}
-
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
 		ConnectTimeout:        TUNNEL_CONNECT_TIMEOUT,
@@ -151,25 +239,23 @@ func EstablishTunnel(
 		BindToDeviceProvider:  config.BindToDeviceProvider,
 		BindToDeviceDnsServer: config.BindToDeviceDnsServer,
 	}
-	var conn Conn
 	if useMeek {
 		conn, err = DialMeek(serverEntry, sessionId, useFronting, dialConfig)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, nil, ContextError(err)
 		}
-		// TODO: MeekConn doesn't go into pendingConns since there's no direct connection to
-		// interrupt; underlying HTTP connections may be candidates for interruption, but only
-		// after relay starts polling...
 	} else {
 		conn, err = DialTCP(fmt.Sprintf("%s:%d", serverEntry.IpAddress, port), dialConfig)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, nil, ContextError(err)
 		}
 	}
+
+	cleanupConn := conn
 	defer func() {
 		// Cleanup on error
 		if err != nil {
-			conn.Close()
+			cleanupConn.Close()
 		}
 	}()
 
@@ -179,14 +265,14 @@ func EstablishTunnel(
 	if useObfuscatedSsh {
 		sshConn, err = NewObfuscatedSshConn(conn, serverEntry.SshObfuscatedKey)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, nil, ContextError(err)
 		}
 	}
 
 	// Now establish the SSH session over the sshConn transport
 	expectedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.SshHostKey)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, nil, ContextError(err)
 	}
 	sshCertChecker := &ssh.CertChecker{
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
@@ -202,7 +288,7 @@ func EstablishTunnel(
 			SshPassword string `json:"SshPassword"`
 		}{sessionId, serverEntry.SshPassword})
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, nil, ContextError(err)
 	}
 	sshClientConfig := &ssh.ClientConfig{
 		User: serverEntry.SshUsername,
@@ -216,88 +302,98 @@ func EstablishTunnel(
 	sshAddress := ""
 	sshClientConn, sshChans, sshReqs, err := ssh.NewClientConn(sshConn, sshAddress, sshClientConfig)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, nil, ContextError(err)
 	}
-	sshClient := ssh.NewClient(sshClientConn, sshChans, sshReqs)
+	sshClient = ssh.NewClient(sshClientConn, sshChans, sshReqs)
 
-	// Run a goroutine to periodically execute SSH keepalive
-	sshKeepAliveQuit := make(chan struct{})
-	go func() {
-		sshKeepAliveTicker := time.NewTicker(TUNNEL_SSH_KEEP_ALIVE_PERIOD)
-		for {
-			select {
-			case <-sshKeepAliveTicker.C:
-				_, _, err := sshClient.SendRequest("keepalive@openssh.com", true, nil)
-				if err != nil {
-					Notice(NOTICE_ALERT, "ssh keep alive failed: %s", err)
-					// TODO: call Tunnel.Close()?
-					sshKeepAliveTicker.Stop()
-					conn.Close()
-				}
-			case <-sshKeepAliveQuit:
-				sshKeepAliveTicker.Stop()
-				return
+	return conn, sshClient, nil
+}
+
+// operateTunnel periodically sends stats updates to the Psiphon API and
+// monitors the tunnel for failures:
+//
+// 1. Overall tunnel failure: the tunnel sends a signal to the ClosedSignal
+// channel on keep-alive failure and other transport I/O errors. In case
+// of such a failure, the tunnel is marked as failed.
+//
+// 2. Tunnel port forward failures: the tunnel connection may stay up but
+// the client may still fail to establish port forwards due to server load
+// and other conditions. After a threshold number of such failures, the
+// overall tunnel is marked as failed.
+//
+// TODO: currently, any connect (dial), read, or write error associated with
+// a port forward is counted as a failure. It may be important to differentiate
+// between failures due to Psiphon server conditions and failures due to the
+// origin/target server (in the latter case, the tunnel is healthy). Here are
+// some typical error messages to consider matching against (or ignoring):
+//
+// - "ssh: rejected: administratively prohibited (open failed)"
+// - "ssh: rejected: connect failed (Connection timed out)"
+// - "write tcp ... broken pipe"
+// - "read tcp ... connection reset by peer"
+// - "ssh: unexpected packet in response to channel open: <nil>"
+//
+func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
+	defer tunnel.operateWaitGroup.Done()
+
+	tunnelClosedSignal := make(chan struct{}, 1)
+	err := tunnel.conn.SetClosedSignal(tunnelClosedSignal)
+	if err != nil {
+		err = fmt.Errorf("failed to set closed signal: %s", err)
+	}
+
+	// Note: not using a Ticker since NextSendPeriod() is not a fixed time period
+	statsTimer := time.NewTimer(NextSendPeriod())
+	defer statsTimer.Stop()
+
+	sshKeepAliveTicker := time.NewTicker(TUNNEL_SSH_KEEP_ALIVE_PERIOD)
+	defer sshKeepAliveTicker.Stop()
+
+	for err == nil {
+		select {
+		case <-statsTimer.C:
+			sendStats(tunnel, false)
+			statsTimer.Reset(NextSendPeriod())
+
+		case <-sshKeepAliveTicker.C:
+			_, _, err := tunnel.sshClient.SendRequest("keepalive@openssh.com", true, nil)
+			err = fmt.Errorf("ssh keep alive failed: %s", err)
+
+		case failures := <-tunnel.portForwardFailures:
+			// Note: no mutex on portForwardFailureTotal; only referenced here
+			tunnel.portForwardFailureTotal += failures
+			Notice(
+				NOTICE_INFO, "port forward failures for %s: %d",
+				tunnel.serverEntry.IpAddress, tunnel.portForwardFailureTotal)
+			if tunnel.portForwardFailureTotal > config.PortForwardFailureThreshold {
+				err = errors.New("tunnel exceeded port forward failure threshold")
 			}
+
+		case <-tunnelClosedSignal:
+			err = errors.New("tunnel closed unexpectedly")
+
+		case <-tunnel.shutdownOperateBroadcast:
+			// Send final stats
+			sendStats(tunnel, true)
+			Notice(NOTICE_INFO, "shutdown operate tunnel")
+			return
 		}
-	}()
-
-	return &Tunnel{
-			serverEntry:      serverEntry,
-			sessionId:        sessionId,
-			protocol:         selectedProtocol,
-			conn:             conn,
-			sshClient:        sshClient,
-			sshKeepAliveQuit: sshKeepAliveQuit,
-			// portForwardFailures buffer size is large enough to receive the thresold number
-			// of failure reports without blocking. Senders can drop failures without blocking.
-			portForwardFailures: make(chan int, config.PortForwardFailureThreshold)},
-		nil
-}
-
-// Close terminates the tunnel.
-func (tunnel *Tunnel) Close() {
-	if tunnel.sshKeepAliveQuit != nil {
-		close(tunnel.sshKeepAliveQuit)
-		tunnel.sshKeepAliveQuit = nil
 	}
-	if tunnel.conn != nil {
-		tunnel.conn.Close()
+
+	if err != nil {
+		Notice(NOTICE_ALERT, "operate tunnel error for %s: %s", tunnel.serverEntry.IpAddress, err)
+		tunnelOwner.SignalTunnelFailure(tunnel)
 	}
 }
 
-func (tunnel *Tunnel) IsSessionStarted() bool {
-	return atomic.LoadInt32(&tunnel.sessionStarted) == 1
-}
-
-func (tunnel *Tunnel) SetSessionStarted() {
-	atomic.StoreInt32(&tunnel.sessionStarted, 1)
-}
-
-// Dial establishes a port forward connection through the tunnel
-func (tunnel *Tunnel) Dial(remoteAddr string) (conn net.Conn, err error) {
-	// TODO: should this track port forward failures as in Controller.DialWithTunnel?
-	return tunnel.sshClient.Dial("tcp", remoteAddr)
-}
-
-// SignalFailure notifies the tunnel that an associated component has failed.
-// This will terminate the tunnel.
-func (tunnel *Tunnel) SignalFailure() {
-	Notice(NOTICE_ALERT, "tunnel received failure signal")
-	tunnel.Close()
-}
-
-// ServerID provides a unique identifier for the server the tunnel connects to.
-// This ID is consistent between multiple tunnels connected to that server.
-func (tunnel *Tunnel) ServerID() string {
-	return tunnel.serverEntry.IpAddress
-}
-
-// StatsRegexps gets the Regexps used for the statistics for this tunnel.
-func (tunnel *Tunnel) StatsRegexps() *Regexps {
-	return tunnel.regexps
-}
-
-// SetStatsRegexps sets the Regexps used for the statistics for this tunnel.
-func (tunnel *Tunnel) SetStatsRegexps(regexps *Regexps) {
-	tunnel.regexps = regexps
+// sendStats is a helper for sending session stats to the server.
+func sendStats(tunnel *Tunnel, final bool) {
+	payload := GetForServer(tunnel.serverEntry.IpAddress)
+	if payload != nil {
+		err := tunnel.session.DoStatusRequest(payload, final)
+		if err != nil {
+			Notice(NOTICE_ALERT, "DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
+			PutBack(tunnel.serverEntry.IpAddress, payload)
+		}
+	}
 }

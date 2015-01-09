@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,25 +37,40 @@ import (
 // includes the session ID (used for Psiphon API requests) and a http
 // client configured to make tunneled Psiphon API requests.
 type Session struct {
-	config             *Config
-	tunnel             *Tunnel
+	sessionId          string
+	baseRequestUrl     string
 	psiphonHttpsClient *http.Client
+	statsRegexps       *Regexps
+	statsServerId      string
+}
+
+// MakeSessionId creates a new session ID. Making the session ID is not done
+// in NewSession as the transport needs to send the ID in the SSH credentials
+// before the tunnel is established; and NewSession performs a handshake on
+// an established tunnel.
+func MakeSessionId() (sessionId string, err error) {
+	randomId, err := MakeSecureRandomBytes(PSIPHON_API_CLIENT_SESSION_ID_LENGTH)
+	if err != nil {
+		return "", ContextError(err)
+	}
+	return hex.EncodeToString(randomId), nil
 }
 
 // NewSession makes tunnelled handshake and connected requests to the
 // Psiphon server and returns a Session struct, initialized with the
 // session ID, for use with subsequent Psiphon server API requests (e.g.,
 // periodic status requests).
-func NewSession(config *Config, tunnel *Tunnel) (session *Session, err error) {
+func NewSession(config *Config, tunnel *Tunnel, sessionId string) (session *Session, err error) {
 
 	psiphonHttpsClient, err := makePsiphonHttpsClient(tunnel)
 	if err != nil {
 		return nil, ContextError(err)
 	}
 	session = &Session{
-		config:             config,
-		tunnel:             tunnel,
+		sessionId:          sessionId,
+		baseRequestUrl:     makeBaseRequestUrl(config, tunnel, sessionId),
 		psiphonHttpsClient: psiphonHttpsClient,
+		statsServerId:      tunnel.serverEntry.IpAddress,
 	}
 	// Sending two seperate requests is a legacy from when the handshake was
 	// performed before a tunnel was established and the connect was performed
@@ -72,6 +88,17 @@ func NewSession(config *Config, tunnel *Tunnel) (session *Session, err error) {
 	return session, nil
 }
 
+// ServerID provides a unique identifier for the server the session connects to.
+// This ID is consistent between multiple sessions/tunnels connected to that server.
+func (session *Session) StatsServerID() string {
+	return session.statsServerId
+}
+
+// StatsRegexps gets the Regexps used for the statistics for this tunnel.
+func (session *Session) StatsRegexps() *Regexps {
+	return session.statsRegexps
+}
+
 // DoStatusRequest makes a /status request to the server, sending session stats.
 // final should be true if this is the last such request before disconnecting.
 func (session *Session) DoStatusRequest(statsPayload json.Marshaler, final bool) error {
@@ -87,7 +114,7 @@ func (session *Session) DoStatusRequest(statsPayload json.Marshaler, final bool)
 
 	url := session.buildRequestUrl(
 		"status",
-		&ExtraParam{"session_id", session.tunnel.sessionId},
+		&ExtraParam{"session_id", session.sessionId},
 		&ExtraParam{"connected", connected})
 
 	err = session.doPostRequest(url, "application/json", bytes.NewReader(statsPayloadJSON))
@@ -161,9 +188,9 @@ func (session *Session) doHandshakeRequest() error {
 	if handshakeConfig.UpgradeClientVersion != "" {
 		Notice(NOTICE_UPGRADE, "%s", handshakeConfig.UpgradeClientVersion)
 	}
-	session.tunnel.SetStatsRegexps(MakeRegexps(
+	session.statsRegexps = MakeRegexps(
 		handshakeConfig.PageViewRegexes,
-		handshakeConfig.HttpsRequestRegexes))
+		handshakeConfig.HttpsRequestRegexes)
 	return nil
 }
 
@@ -184,7 +211,7 @@ func (session *Session) doConnectedRequest() error {
 	}
 	url := session.buildRequestUrl(
 		"connected",
-		&ExtraParam{"session_id", session.tunnel.sessionId},
+		&ExtraParam{"session_id", session.sessionId},
 		&ExtraParam{"last_connected", lastConnected})
 	responseBody, err := session.doGetRequest(url)
 	if err != nil {
@@ -202,47 +229,6 @@ func (session *Session) doConnectedRequest() error {
 		return ContextError(err)
 	}
 	return nil
-}
-
-type ExtraParam struct{ name, value string }
-
-// buildRequestUrl makes a URL containing all the common parameters
-// that are included with Psiphon API requests. These common parameters
-// are used for statistics.
-func (session *Session) buildRequestUrl(path string, extraParams ...*ExtraParam) string {
-	var requestUrl bytes.Buffer
-	// Note: don't prefix with HTTPS scheme, see comment in doGetRequest.
-	// e.g., don't do this: requestUrl.WriteString("https://")
-	requestUrl.WriteString("http://")
-	requestUrl.WriteString(session.tunnel.serverEntry.IpAddress)
-	requestUrl.WriteString(":")
-	requestUrl.WriteString(session.tunnel.serverEntry.WebServerPort)
-	requestUrl.WriteString("/")
-	requestUrl.WriteString(path)
-	requestUrl.WriteString("?client_session_id=")
-	requestUrl.WriteString(session.tunnel.sessionId)
-	requestUrl.WriteString("&server_secret=")
-	requestUrl.WriteString(session.tunnel.serverEntry.WebServerSecret)
-	requestUrl.WriteString("&propagation_channel_id=")
-	requestUrl.WriteString(session.config.PropagationChannelId)
-	requestUrl.WriteString("&sponsor_id=")
-	requestUrl.WriteString(session.config.SponsorId)
-	requestUrl.WriteString("&client_version=")
-	requestUrl.WriteString(session.config.ClientVersion)
-	// TODO: client_tunnel_core_version
-	requestUrl.WriteString("&relay_protocol=")
-	requestUrl.WriteString(session.tunnel.protocol)
-	requestUrl.WriteString("&client_platform=")
-	requestUrl.WriteString(session.config.ClientPlatform)
-	requestUrl.WriteString("&tunnel_whole_device=")
-	requestUrl.WriteString(strconv.Itoa(session.config.TunnelWholeDevice))
-	for _, extraParam := range extraParams {
-		requestUrl.WriteString("&")
-		requestUrl.WriteString(extraParam.name)
-		requestUrl.WriteString("=")
-		requestUrl.WriteString(extraParam.value)
-	}
-	return requestUrl.String()
 }
 
 // doGetRequest makes a tunneled HTTPS request and returns the response body.
@@ -275,6 +261,56 @@ func (session *Session) doPostRequest(requestUrl string, bodyType string, body i
 		return ContextError(fmt.Errorf("HTTP POST request failed with response code: %d", response.StatusCode))
 	}
 	return
+}
+
+// makeBaseRequestUrl makes a URL containing all the common parameters
+// that are included with Psiphon API requests. These common parameters
+// are used for statistics.
+func makeBaseRequestUrl(config *Config, tunnel *Tunnel, sessionId string) string {
+	var requestUrl bytes.Buffer
+	// Note: don't prefix with HTTPS scheme, see comment in doGetRequest.
+	// e.g., don't do this: requestUrl.WriteString("https://")
+	requestUrl.WriteString("http://")
+	requestUrl.WriteString(tunnel.serverEntry.IpAddress)
+	requestUrl.WriteString(":")
+	requestUrl.WriteString(tunnel.serverEntry.WebServerPort)
+	requestUrl.WriteString("/")
+	// Placeholder for the path component of a request
+	requestUrl.WriteString("%s")
+	requestUrl.WriteString("?client_session_id=")
+	requestUrl.WriteString(sessionId)
+	requestUrl.WriteString("&server_secret=")
+	requestUrl.WriteString(tunnel.serverEntry.WebServerSecret)
+	requestUrl.WriteString("&propagation_channel_id=")
+	requestUrl.WriteString(config.PropagationChannelId)
+	requestUrl.WriteString("&sponsor_id=")
+	requestUrl.WriteString(config.SponsorId)
+	requestUrl.WriteString("&client_version=")
+	requestUrl.WriteString(config.ClientVersion)
+	// TODO: client_tunnel_core_version
+	requestUrl.WriteString("&relay_protocol=")
+	requestUrl.WriteString(tunnel.protocol)
+	requestUrl.WriteString("&client_platform=")
+	requestUrl.WriteString(config.ClientPlatform)
+	requestUrl.WriteString("&tunnel_whole_device=")
+	requestUrl.WriteString(strconv.Itoa(config.TunnelWholeDevice))
+	return requestUrl.String()
+}
+
+type ExtraParam struct{ name, value string }
+
+// buildRequestUrl makes a URL for an API request. The URL includes the
+// base request URL and any extra parameters for the specific request.
+func (session *Session) buildRequestUrl(path string, extraParams ...*ExtraParam) string {
+	var requestUrl bytes.Buffer
+	requestUrl.WriteString(fmt.Sprintf(session.baseRequestUrl, path))
+	for _, extraParam := range extraParams {
+		requestUrl.WriteString("&")
+		requestUrl.WriteString(extraParam.name)
+		requestUrl.WriteString("=")
+		requestUrl.WriteString(extraParam.value)
+	}
+	return requestUrl.String()
 }
 
 // makeHttpsClient creates a Psiphon HTTPS client that tunnels requests and which validates
