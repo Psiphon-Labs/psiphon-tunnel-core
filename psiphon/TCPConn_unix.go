@@ -119,10 +119,16 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	// Convert the syscall socket to a net.Conn
 	file := os.NewFile(uintptr(conn.interruptible.socketFd), "")
 	defer file.Close()
-	conn.Conn, err = net.FileConn(file)
+	fileConn, err := net.FileConn(file)
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
+	// Need mutex to write conn.Conn since conn remains in pendingConns, from
+	// where conn.Close() may be called in another goroutine
+	conn.mutex.Lock()
+	conn.Conn = fileConn
+	conn.mutex.Unlock()
 
 	// Going through upstream HTTP proxy
 	if config.UpstreamHttpProxyAddress != "" {
