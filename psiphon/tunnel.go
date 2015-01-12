@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -181,8 +182,55 @@ func (tunnel *Tunnel) Dial(remoteAddr string) (conn net.Conn, err error) {
 	if isClosed {
 		return nil, errors.New("tunnel is closed")
 	}
-	// TODO: should this track port forward failures as in Controller.DialWithTunnel?
-	return tunnel.sshClient.Dial("tcp", remoteAddr)
+
+	sshPortForwardConn, err := tunnel.sshClient.Dial("tcp", remoteAddr)
+	if err != nil {
+		// TODO: conditional on type of error or error message?
+		select {
+		case tunnel.portForwardFailures <- 1:
+		default:
+		}
+		return nil, ContextError(err)
+	}
+
+	return &TunneledConn{
+			Conn:   sshPortForwardConn,
+			tunnel: tunnel},
+		nil
+}
+
+// TunneledConn implements net.Conn and wraps a port foward connection.
+// It is used to hook into Read and Write to observe I/O errors and
+// report these errors back to the tunnel monitor as port forward failures.
+type TunneledConn struct {
+	net.Conn
+	tunnel *Tunnel
+}
+
+func (conn *TunneledConn) Read(buffer []byte) (n int, err error) {
+	n, err = conn.Conn.Read(buffer)
+	if err != nil && err != io.EOF {
+		// Report 1 new failure. Won't block; assumes the receiver
+		// has a sufficient buffer for the threshold number of reports.
+		// TODO: conditional on type of error or error message?
+		select {
+		case conn.tunnel.portForwardFailures <- 1:
+		default:
+		}
+	}
+	return
+}
+
+func (conn *TunneledConn) Write(buffer []byte) (n int, err error) {
+	n, err = conn.Conn.Write(buffer)
+	if err != nil && err != io.EOF {
+		// Same as TunneledConn.Read()
+		select {
+		case conn.tunnel.portForwardFailures <- 1:
+		default:
+		}
+	}
+	return
 }
 
 // SignalComponentFailure notifies the tunnel that an associated component has failed.

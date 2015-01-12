@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -61,8 +61,7 @@ func DialTCP(addr string, config *DialConfig) (conn *TCPConn, err error) {
 	return conn, nil
 }
 
-// SetClosedSignal implements psiphon.Conn.SetClosedSignal. Returns true
-// if signal is successfully set, or false if the conn is already closed.
+// SetClosedSignal implements psiphon.Conn.SetClosedSignal.
 func (conn *TCPConn) SetClosedSignal(closedSignal chan struct{}) bool {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()

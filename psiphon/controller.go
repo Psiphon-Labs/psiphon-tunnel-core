@@ -25,7 +25,6 @@ package psiphon
 
 import (
 	"errors"
-	"io"
 	"net"
 	"sync"
 	"time"
@@ -346,40 +345,6 @@ func (controller *Controller) isActiveTunnelServerEntry(serverEntry *ServerEntry
 	return false
 }
 
-// TunneledConn implements net.Conn and wraps a port foward connection.
-// It is used to hook into Read and Write to observe I/O errors and
-// report these errors back to the tunnel monitor as port forward failures.
-type TunneledConn struct {
-	net.Conn
-	tunnel *Tunnel
-}
-
-func (conn *TunneledConn) Read(buffer []byte) (n int, err error) {
-	n, err = conn.Conn.Read(buffer)
-	if err != nil && err != io.EOF {
-		// Report 1 new failure. Won't block; assumes the receiver
-		// has a sufficient buffer for the threshold number of reports.
-		// TODO: conditional on type of error or error message?
-		select {
-		case conn.tunnel.portForwardFailures <- 1:
-		default:
-		}
-	}
-	return
-}
-
-func (conn *TunneledConn) Write(buffer []byte) (n int, err error) {
-	n, err = conn.Conn.Write(buffer)
-	if err != nil && err != io.EOF {
-		// Same as TunneledConn.Read()
-		select {
-		case conn.tunnel.portForwardFailures <- 1:
-		default:
-		}
-	}
-	return
-}
-
 // Dial selects an active tunnel and establishes a port forward
 // connection through the selected tunnel. Failure to connect is considered
 // a port foward failure, for the purpose of monitoring tunnel health.
@@ -388,24 +353,16 @@ func (controller *Controller) Dial(remoteAddr string) (conn net.Conn, err error)
 	if tunnel == nil {
 		return nil, ContextError(errors.New("no active tunnels"))
 	}
-	tunnelConn, err := tunnel.Dial(remoteAddr)
+
+	tunneledConn, err := tunnel.Dial(remoteAddr)
 	if err != nil {
-		// TODO: conditional on type of error or error message?
-		select {
-		case tunnel.portForwardFailures <- 1:
-		default:
-		}
 		return nil, ContextError(err)
 	}
 
 	statsConn := NewStatsConn(
-		tunnelConn, tunnel.session.StatsServerID(), tunnel.session.StatsRegexps())
+		tunneledConn, tunnel.session.StatsServerID(), tunnel.session.StatsRegexps())
 
-	conn = &TunneledConn{
-		Conn:   statsConn,
-		tunnel: tunnel}
-
-	return
+	return statsConn, nil
 }
 
 // startEstablishing creates a pool of worker goroutines which will
