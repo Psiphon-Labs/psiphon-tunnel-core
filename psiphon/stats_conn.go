@@ -70,7 +70,7 @@ func (conn *StatsConn) Write(buffer []byte) (n int, err error) {
 	if n > 0 {
 		// If this is the first request, try to determine the hostname to associate
 		// with this connection.
-		if atomic.CompareAndSwapInt32(&conn.firstWrite, 0, 1) {
+		if atomic.CompareAndSwapInt32(&conn.firstWrite, 1, 0) {
 
 			hostname, ok := getHostname(buffer)
 			if ok {
