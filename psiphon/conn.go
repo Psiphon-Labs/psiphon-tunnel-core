@@ -77,11 +77,11 @@ type Conn interface {
 	net.Conn
 
 	// SetClosedSignal sets the channel which will be signaled
-	// when the connection is closed. This function returns an error
+	// when the connection is closed. This function returns false
 	// if the connection is already closed (and would never send
 	// the signal). SetClosedSignal and Close may be called by
 	// concurrent goroutines.
-	SetClosedSignal(closedSignal chan struct{}) (err error)
+	SetClosedSignal(closedSignal chan struct{}) bool
 }
 
 // Conns is a synchronized list of Conns that is used to coordinate

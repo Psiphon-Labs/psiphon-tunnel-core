@@ -61,15 +61,16 @@ func DialTCP(addr string, config *DialConfig) (conn *TCPConn, err error) {
 	return conn, nil
 }
 
-// SetClosedSignal implements psiphon.Conn.SetClosedSignal
-func (conn *TCPConn) SetClosedSignal(closedSignal chan struct{}) (err error) {
+// SetClosedSignal implements psiphon.Conn.SetClosedSignal. Returns true
+// if signal is successfully set, or false if the conn is already closed.
+func (conn *TCPConn) SetClosedSignal(closedSignal chan struct{}) bool {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 	if conn.isClosed {
-		return ContextError(errors.New("connection is already closed"))
+		return false
 	}
 	conn.closedSignal = closedSignal
-	return nil
+	return true
 }
 
 // Close terminates a connected (net.Conn) or connecting (socketFd) TCPConn.

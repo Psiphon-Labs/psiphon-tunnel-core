@@ -344,11 +344,14 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 	defer sshKeepAliveTicker.Stop()
 
 	tunnelClosedSignal := make(chan struct{}, 1)
-	err := tunnel.conn.SetClosedSignal(tunnelClosedSignal)
-	if err != nil {
-		err = fmt.Errorf("failed to set closed signal: %s", err)
+	if !tunnel.conn.SetClosedSignal(tunnelClosedSignal) {
+		// Tunnel is already closed. This is not unexpected -- for example,
+		// when establish is interrupted.
+		Notice(NOTICE_INFO, "shutdown operate tunnel (tunnel already closed)")
+		return
 	}
 
+	var err error
 	for err == nil {
 		select {
 		case <-statsTimer.C:

@@ -187,14 +187,14 @@ func DialMeek(
 }
 
 // SetClosedSignal implements psiphon.Conn.SetClosedSignal
-func (meek *MeekConn) SetClosedSignal(closedSignal chan struct{}) (err error) {
+func (meek *MeekConn) SetClosedSignal(closedSignal chan struct{}) bool {
 	meek.mutex.Lock()
 	defer meek.mutex.Unlock()
 	if meek.isClosed {
-		return ContextError(errors.New("connection is already closed"))
+		return false
 	}
 	meek.closedSignal = closedSignal
-	return nil
+	return true
 }
 
 // Close terminates the meek connection. Close waits for the relay processing goroutine
