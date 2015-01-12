@@ -68,6 +68,8 @@ var SupportedTunnelProtocols = []string{
 // tunnel includes a network connection to the specified server
 // and an SSH session built on top of that transport.
 type Tunnel struct {
+	mutex                    *sync.Mutex
+	isClosed                 bool
 	serverEntry              *ServerEntry
 	session                  *Session
 	protocol                 string
@@ -125,6 +127,8 @@ func EstablishTunnel(
 
 	// The tunnel is now connected
 	tunnel = &Tunnel{
+		mutex:                    new(sync.Mutex),
+		isClosed:                 false,
 		serverEntry:              serverEntry,
 		protocol:                 selectedProtocol,
 		conn:                     conn,
@@ -157,15 +161,26 @@ func EstablishTunnel(
 }
 
 // Close stops operating the tunnel and closes the underlying connection.
-// Note: unlike Conn, this currently only supports a single to Close().
+// Supports multiple and/or concurrent calls to Close().
 func (tunnel *Tunnel) Close() {
-	close(tunnel.shutdownOperateBroadcast)
-	tunnel.operateWaitGroup.Wait()
-	tunnel.conn.Close()
+	tunnel.mutex.Lock()
+	if !tunnel.isClosed {
+		close(tunnel.shutdownOperateBroadcast)
+		tunnel.operateWaitGroup.Wait()
+		tunnel.conn.Close()
+	}
+	tunnel.isClosed = true
+	tunnel.mutex.Unlock()
 }
 
 // Dial establishes a port forward connection through the tunnel
 func (tunnel *Tunnel) Dial(remoteAddr string) (conn net.Conn, err error) {
+	tunnel.mutex.Lock()
+	isClosed := tunnel.isClosed
+	tunnel.mutex.Unlock()
+	if isClosed {
+		return nil, errors.New("tunnel is closed")
+	}
 	// TODO: should this track port forward failures as in Controller.DialWithTunnel?
 	return tunnel.sshClient.Dial("tcp", remoteAddr)
 }
