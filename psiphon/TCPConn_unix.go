@@ -116,18 +116,26 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 		return nil, ContextError(err)
 	}
 
+	// Mutex required for:
+	// 1. preventing concurrent interruptibleTCPClose (via conn.Close())
+	//    while performing os.NewFile/net.FileConn transformation
+	// 2. writing conn.Conn, since conn remains in pendingConns, from
+	//    where conn.Close() may be called in another goroutine
+
+	conn.mutex.Lock()
+
 	// Convert the syscall socket to a net.Conn
 	file := os.NewFile(uintptr(conn.interruptible.socketFd), "")
-	defer file.Close()
 	fileConn, err := net.FileConn(file)
+	file.Close()
 	if err != nil {
+		// TODO: syscall.Close(conn.interruptible.socketFd)?
+		conn.mutex.Unlock()
 		return nil, ContextError(err)
 	}
-
-	// Need mutex to write conn.Conn since conn remains in pendingConns, from
-	// where conn.Close() may be called in another goroutine
-	conn.mutex.Lock()
+	conn.interruptible.socketFd = -1
 	conn.Conn = fileConn
+
 	conn.mutex.Unlock()
 
 	// Going through upstream HTTP proxy

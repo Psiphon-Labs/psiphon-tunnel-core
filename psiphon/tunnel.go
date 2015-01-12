@@ -336,18 +336,18 @@ func dialSsh(
 func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 	defer tunnel.operateWaitGroup.Done()
 
-	tunnelClosedSignal := make(chan struct{}, 1)
-	err := tunnel.conn.SetClosedSignal(tunnelClosedSignal)
-	if err != nil {
-		err = fmt.Errorf("failed to set closed signal: %s", err)
-	}
-
 	// Note: not using a Ticker since NextSendPeriod() is not a fixed time period
 	statsTimer := time.NewTimer(NextSendPeriod())
 	defer statsTimer.Stop()
 
 	sshKeepAliveTicker := time.NewTicker(TUNNEL_SSH_KEEP_ALIVE_PERIOD)
 	defer sshKeepAliveTicker.Stop()
+
+	tunnelClosedSignal := make(chan struct{}, 1)
+	err := tunnel.conn.SetClosedSignal(tunnelClosedSignal)
+	if err != nil {
+		err = fmt.Errorf("failed to set closed signal: %s", err)
+	}
 
 	for err == nil {
 		select {
