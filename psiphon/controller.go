@@ -47,7 +47,8 @@ type Controller struct {
 	establishWaitGroup        *sync.WaitGroup
 	stopEstablishingBroadcast chan struct{}
 	candidateServerEntries    chan *ServerEntry
-	pendingConns              *Conns
+	establishPendingConns     *Conns
+	fetchRemotePendingConns   *Conns
 }
 
 // NewController initializes a new controller.
@@ -62,11 +63,12 @@ func NewController(config *Config) (controller *Controller) {
 		runWaitGroup:           new(sync.WaitGroup),
 		// establishedTunnels and failedTunnels buffer sizes are large enough to
 		// receive full pools of tunnels without blocking. Senders should not block.
-		establishedTunnels: make(chan *Tunnel, config.TunnelPoolSize),
-		failedTunnels:      make(chan *Tunnel, config.TunnelPoolSize),
-		tunnels:            make([]*Tunnel, 0),
-		isEstablishing:     false,
-		pendingConns:       new(Conns),
+		establishedTunnels:      make(chan *Tunnel, config.TunnelPoolSize),
+		failedTunnels:           make(chan *Tunnel, config.TunnelPoolSize),
+		tunnels:                 make([]*Tunnel, 0),
+		isEstablishing:          false,
+		establishPendingConns:   new(Conns),
+		fetchRemotePendingConns: new(Conns),
 	}
 }
 
@@ -105,10 +107,9 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 		Notice(NOTICE_ALERT, "controller shutdown due to component failure")
 	}
 
-	// Note: in addition to establish(), this pendingConns will interrupt
-	// FetchRemoteServerList
-	controller.pendingConns.CloseAll()
 	close(controller.shutdownBroadcast)
+	controller.establishPendingConns.CloseAll()
+	controller.fetchRemotePendingConns.CloseAll()
 	controller.runWaitGroup.Wait()
 
 	Notice(NOTICE_INFO, "exiting controller")
@@ -129,13 +130,13 @@ func (controller *Controller) SignalComponentFailure() {
 func (controller *Controller) remoteServerListFetcher() {
 	defer controller.runWaitGroup.Done()
 
-	// Note: unlike existing Psiphon clients, this code
+	// Note: unlike legacy Psiphon clients, this code
 	// always makes the fetch remote server list request
 loop:
 	for {
-		// TODO: FetchRemoteServerList should have its own pendingConns,
-		// otherwise it may needlessly abort when establish is stopped.
-		err := FetchRemoteServerList(controller.config, controller.pendingConns)
+		err := FetchRemoteServerList(
+			controller.config, controller.fetchRemotePendingConns)
+
 		var duration time.Duration
 		if err != nil {
 			Notice(NOTICE_ALERT, "failed to fetch remote server list: %s", err)
@@ -377,7 +378,7 @@ func (controller *Controller) startEstablishing() {
 	controller.establishWaitGroup = new(sync.WaitGroup)
 	controller.stopEstablishingBroadcast = make(chan struct{})
 	controller.candidateServerEntries = make(chan *ServerEntry)
-	controller.pendingConns.Reset()
+	controller.establishPendingConns.Reset()
 
 	for i := 0; i < controller.config.ConnectionWorkerPoolSize; i++ {
 		controller.establishWaitGroup.Add(1)
@@ -399,7 +400,7 @@ func (controller *Controller) stopEstablishing() {
 	close(controller.stopEstablishingBroadcast)
 	// Note: on Windows, interruptibleTCPClose doesn't really interrupt socket connects
 	// and may leave goroutines running for a time after the Wait call.
-	controller.pendingConns.CloseAll()
+	controller.establishPendingConns.CloseAll()
 	// Note: establishCandidateGenerator closes controller.candidateServerEntries
 	// (as it may be sending to that channel).
 	controller.establishWaitGroup.Wait()
@@ -484,7 +485,7 @@ loop:
 
 		tunnel, err := EstablishTunnel(
 			controller.config,
-			controller.pendingConns,
+			controller.establishPendingConns,
 			serverEntry,
 			controller) // TunnelOwner
 		if err != nil {
