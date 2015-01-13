@@ -51,8 +51,8 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 		return nil, ContextError(err)
 	}
 	defer func() {
-		// Cleanup on error
-		if err != nil {
+		// Cleanup on error (fd isset to -1 when it should no longer be closed)
+		if err != nil && socketFd != -1 {
 			syscall.Close(socketFd)
 		}
 	}()
@@ -95,7 +95,10 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 		interruptible: interruptibleTCPSocket{socketFd: socketFd},
 		readTimeout:   config.ReadTimeout,
 		writeTimeout:  config.WriteTimeout}
-	config.PendingConns.Add(conn)
+
+	if !config.PendingConns.Add(conn) {
+		return nil, ContextError(errors.New("pending connections already closed"))
+	}
 
 	// Connect the socket
 	// TODO: adjust the timeout to account for time spent resolving hostname
@@ -134,6 +137,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 		return nil, ContextError(err)
 	}
 	conn.interruptible.socketFd = -1
+	socketFd = -1
 	conn.Conn = fileConn
 
 	conn.mutex.Unlock()

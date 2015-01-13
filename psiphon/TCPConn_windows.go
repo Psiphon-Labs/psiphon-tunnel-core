@@ -55,7 +55,10 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 		interruptible: interruptibleTCPSocket{results: make(chan *interruptibleDialResult, 2)},
 		readTimeout:   config.ReadTimeout,
 		writeTimeout:  config.WriteTimeout}
-	config.PendingConns.Add(conn)
+
+	if !config.PendingConns.Add(conn) {
+		return nil, ContextError(errors.New("pending connections already closed"))
+	}
 
 	// Call the blocking Dial in a goroutine
 	results := conn.interruptible.results

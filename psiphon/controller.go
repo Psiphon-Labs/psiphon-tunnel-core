@@ -377,6 +377,7 @@ func (controller *Controller) startEstablishing() {
 	controller.establishWaitGroup = new(sync.WaitGroup)
 	controller.stopEstablishingBroadcast = make(chan struct{})
 	controller.candidateServerEntries = make(chan *ServerEntry)
+	controller.pendingConns.Reset()
 
 	for i := 0; i < controller.config.ConnectionWorkerPoolSize; i++ {
 		controller.establishWaitGroup.Add(1)
@@ -470,12 +471,10 @@ func (controller *Controller) establishTunnelWorker() {
 	defer controller.establishWaitGroup.Done()
 loop:
 	for serverEntry := range controller.candidateServerEntries {
-		// Note: don't receive from candidateQueue and broadcastStopWorkers in the same
-		// select, since we want to prioritize receiving the stop signal
-		select {
-		case <-controller.stopEstablishingBroadcast:
+		// Note: don't receive from candidateServerEntries and stopEstablishingBroadcast
+		// in the same select, since we want to prioritize receiving the stop signal
+		if controller.isStopEstablishingBroadcast() {
 			break loop
-		default:
 		}
 
 		// There may already be a tunnel to this candidate. If so, skip it.
@@ -491,10 +490,8 @@ loop:
 		if err != nil {
 			// Before emitting error, check if establish interrupted, in which
 			// case the error is noise.
-			select {
-			case <-controller.stopEstablishingBroadcast:
+			if controller.isStopEstablishingBroadcast() {
 				break loop
-			default:
 			}
 			Notice(NOTICE_INFO, "failed to connect to %s: %s", serverEntry.IpAddress, err)
 			continue
@@ -511,4 +508,13 @@ loop:
 		}
 	}
 	Notice(NOTICE_INFO, "stopped establish worker")
+}
+
+func (controller *Controller) isStopEstablishingBroadcast() bool {
+	select {
+	case <-controller.stopEstablishingBroadcast:
+		return true
+	default:
+	}
+	return false
 }
