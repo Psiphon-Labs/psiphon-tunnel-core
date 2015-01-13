@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -171,7 +171,7 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 			return ContextError(err)
 		}
 		if serverEntryExists && !replaceIfExists {
-			// Nothing more to do
+			Notice(NOTICE_INFO, "ignored update for server %s", serverEntry.IpAddress)
 			return nil
 		}
 		_, err = transaction.Exec(`
@@ -215,10 +215,23 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 		}
 		// TODO: post notice after commit
 		if !serverEntryExists {
-			Notice(NOTICE_INFO, "stored server %s", serverEntry.IpAddress)
+			Notice(NOTICE_INFO, "updated server %s", serverEntry.IpAddress)
 		}
 		return nil
 	})
+}
+
+// StoreServerEntries stores a list of server entries. This is simply a
+// helper which calls StoreServerEntry on each entry in the list -- so there
+// is an independent transaction for each entry -- and stops on first error.
+func StoreServerEntries(serverEntries []*ServerEntry, replaceIfExists bool) error {
+	for _, serverEntry := range serverEntries {
+		err := StoreServerEntry(serverEntry, replaceIfExists)
+		if err != nil {
+			return ContextError(err)
+		}
+	}
+	return nil
 }
 
 // PromoteServerEntry assigns the top rank (one more than current
