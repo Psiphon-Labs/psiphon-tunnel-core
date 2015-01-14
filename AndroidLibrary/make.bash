@@ -7,8 +7,6 @@ if [ ! -f make.bash ]; then
   exit 1
 fi
 
-ANDROID_APP=$PWD
-
 # Make sure we have our dependencies
 echo 'go-getting dependencies...'
 go get -d -v ./...

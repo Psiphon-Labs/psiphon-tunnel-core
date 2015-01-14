@@ -1,9 +1,11 @@
 # Dockerfile to build an image with the local version of psiphon-tunnel-core.
 #
-#  > docker build -t psigobuild $GOPATH/src/github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidApp
-#  > docker run -it --rm -v $GOPATH/src:/src psigobuild
+# See README.md for usage instructions.
 
+# TODO: Switch to debian:testing
 FROM ubuntu:12.04
+
+ENV GOVERSION=go1.4
 
 # Install system-level dependencies.
 ENV DEBIAN_FRONTEND=noninteractive
@@ -54,7 +56,7 @@ ENV GOROOT=/go \
   GOPATH=/
 ENV PATH=$PATH:$GOROOT/bin
 RUN echo "INSTALLING GO" && \
-  curl -L https://github.com/golang/go/archive/master.zip -o /tmp/go.zip && \
+  curl -L https://github.com/golang/go/archive/$GOVERSION.zip -o /tmp/go.zip && \
   unzip /tmp/go.zip && \
   rm /tmp/go.zip && \
   mv /go-master $GOROOT && \
