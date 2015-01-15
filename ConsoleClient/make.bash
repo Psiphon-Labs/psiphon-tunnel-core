@@ -11,12 +11,18 @@ fi
 echo 'go-getting dependencies...'
 go get -d -v ./...
 
-echo 'Building windows-386 executable...'
-CGO_ENABLED=1 GOOS=windows GOARCH=386 \
-  go build -a -v -o psiphon-tunnel-core.exe
-upx --best psiphon-tunnel-core.exe
+CGO_ENABLED=1
 
-mkdir -p windows_386
-mv -f psiphon-tunnel-core.exe windows_386/psiphon-tunnel-core.exe
+echo 'Building windows-386...'
+CC=/usr/bin/i686-w64-mingw32-gcc \
+  gox -verbose -osarch windows/386 -output windows_386_psiphon-tunnel-core
+upx --best windows_386_psiphon-tunnel-core.exe
 
-echo 'Windows executable can be found at: windows_386/psiphon-tunnel-core.exe'
+echo 'Building windows-amd64...'
+CC=/usr/bin/x86_64-w64-mingw32-gcc \
+  gox -verbose -osarch windows/amd64 -output windows_amd64_psiphon-tunnel-core
+upx --best windows_amd64_psiphon-tunnel-core.exe
+
+echo 'Building linux-amd64...'
+gox -verbose -osarch linux/amd64 -output linux_amd64_psiphon-tunnel-core
+upx --best linux_amd64_psiphon-tunnel-core

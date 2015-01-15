@@ -11,7 +11,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
   apt-get -y install build-essential python-software-properties bzip2 unzip curl \
     git subversion mercurial bzr \
-    gcc-mingw-w64-i686 upx
+    upx gcc-mingw-w64-i686 gcc-mingw-w64-x86-64
 
 # Install Go.
 ENV GOROOT=/go \
@@ -24,7 +24,14 @@ RUN echo "INSTALLING GO" && \
   mv /go-$GOVERSION $GOROOT && \
   echo $GOVERSION > $GOROOT/VERSION && \
   cd $GOROOT/src && \
-  ./all.bash && \
-  GOOS=windows GOARCH=386 CGO_ENABLED=1 CC_FOR_TARGET=/usr/bin/i686-w64-mingw32-gcc ./make.bash
+  ./all.bash
+
+ENV CGO_ENABLED=1
+RUN go get github.com/mitchellh/gox && \
+  go get github.com/inconshreveable/gonative && \
+  mkdir -p /usr/local/gonative && \
+  cd /usr/local/gonative && \
+  gonative build
+ENV PATH=/usr/local/gonative/go/bin:$PATH
 
 WORKDIR $GOPATH/src
