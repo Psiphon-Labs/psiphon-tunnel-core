@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -35,6 +35,7 @@ const (
 	NOTICE_HOMEPAGE         = "HOMEPAGE"
 	NOTICE_PAGE_VIEW_REGEX  = "PAGE-VIEW-REGEX"
 	NOTICE_HTTPS_REGEX      = "HTTPS-REGEX"
+	NOTICE_VPN_PSK          = "VPN-PSK"
 )
 
 func Notice(prefix, format string, args ...interface{}) {

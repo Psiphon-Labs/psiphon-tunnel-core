@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -77,28 +77,42 @@ type Conn interface {
 	net.Conn
 
 	// SetClosedSignal sets the channel which will be signaled
-	// when the connection is closed. This function returns an error
+	// when the connection is closed. This function returns false
 	// if the connection is already closed (and would never send
 	// the signal). SetClosedSignal and Close may be called by
 	// concurrent goroutines.
-	SetClosedSignal(closedSignal chan struct{}) (err error)
+	SetClosedSignal(closedSignal chan struct{}) bool
 }
 
 // Conns is a synchronized list of Conns that is used to coordinate
 // interrupting a set of goroutines establishing connections, or
 // close a set of open connections, etc.
+// Once the list is closed, no more items may be added to the
+// list (unless it is reset).
 type Conns struct {
-	mutex sync.Mutex
-	conns map[net.Conn]bool
+	mutex    sync.Mutex
+	isClosed bool
+	conns    map[net.Conn]bool
 }
 
-func (conns *Conns) Add(conn net.Conn) {
+func (conns *Conns) Reset() {
 	conns.mutex.Lock()
 	defer conns.mutex.Unlock()
+	conns.isClosed = false
+	conns.conns = make(map[net.Conn]bool)
+}
+
+func (conns *Conns) Add(conn net.Conn) bool {
+	conns.mutex.Lock()
+	defer conns.mutex.Unlock()
+	if conns.isClosed {
+		return false
+	}
 	if conns.conns == nil {
 		conns.conns = make(map[net.Conn]bool)
 	}
 	conns.conns[conn] = true
+	return true
 }
 
 func (conns *Conns) Remove(conn net.Conn) {
@@ -110,6 +124,7 @@ func (conns *Conns) Remove(conn net.Conn) {
 func (conns *Conns) CloseAll() {
 	conns.mutex.Lock()
 	defer conns.mutex.Unlock()
+	conns.isClosed = true
 	for conn, _ := range conns.conns {
 		conn.Close()
 	}
