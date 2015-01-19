@@ -11,7 +11,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
   apt-get -y install build-essential python-software-properties bzip2 unzip curl \
     git subversion mercurial bzr \
-    upx gcc-mingw-w64-i686 gcc-mingw-w64-x86-64
+    upx gcc-mingw-w64-i686 gcc-mingw-w64-x86-64 gcc-multilib
 
 # Install Go.
 ENV GOROOT=/go \
