@@ -89,9 +89,10 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 		return
 	}
 	defer socksProxy.Close()
+
 	httpProxy, err := NewHttpProxy(controller.config, controller)
 	if err != nil {
-		Notice(NOTICE_ALERT, "error initializing local SOCKS proxy: %s", err)
+		Notice(NOTICE_ALERT, "error initializing local HTTP proxy: %s", err)
 		return
 	}
 	defer httpProxy.Close()
