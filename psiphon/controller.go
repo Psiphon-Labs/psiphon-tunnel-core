@@ -228,7 +228,7 @@ loop:
 	Notice(NOTICE_INFO, "exiting run tunnels")
 }
 
-// HandleFailedTunnel implements the TunnelOwner interface. This function
+// SignalTunnelFailure implements the TunnelOwner interface. This function
 // is called by Tunnel.operateTunnel when the tunnel has detected that it
 // has failed. The Controller will signal runTunnels to create a new
 // tunnel and/or remove the tunnel from the list of active tunnels.
