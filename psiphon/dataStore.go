@@ -294,10 +294,30 @@ func (iterator *ServerEntryIterator) Reset() error {
 		return ContextError(err)
 	}
 	var cursor *sql.Rows
+
+	// This query implements the Psiphon server candidate selection
+	// algorithm: the first set of server candidates are in rank (priority)
+	// order, to favor previously successful servers; then the remaining
+	// long tail is shuffled to raise up less recent candidates.
+
 	whereClause, whereParams := makeServerEntryWhereClause(
 		iterator.region, iterator.protocol, nil)
-	query := "select data from serverEntry" + whereClause + " order by rank desc;"
-	cursor, err = transaction.Query(query, whereParams...)
+	headLength := CONNECTION_WORKER_POOL_SIZE
+	queryFormat := `
+		select data from serverEntry %s
+		order by case
+		when rank > coalesce((select rank from serverEntry %s order by rank desc limit ?, 1), -1) then rank
+		else abs(random())%%((select rank from serverEntry %s order by rank desc limit ?, 1))
+		end desc;`
+	query := fmt.Sprintf(queryFormat, whereClause, whereClause, whereClause)
+	params := make([]interface{}, 0)
+	params = append(params, whereParams...)
+	params = append(params, whereParams...)
+	params = append(params, headLength)
+	params = append(params, whereParams...)
+	params = append(params, headLength)
+
+	cursor, err = transaction.Query(query, params...)
 	if err != nil {
 		transaction.Rollback()
 		return ContextError(err)
