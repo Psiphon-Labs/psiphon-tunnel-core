@@ -114,21 +114,26 @@ func main() {
 	// Run Psiphon
 
 	controller := psiphon.NewController(config)
+	controllerStopSignal := make(chan struct{}, 1)
 	shutdownBroadcast := make(chan struct{})
 	controllerWaitGroup := new(sync.WaitGroup)
 	controllerWaitGroup.Add(1)
 	go func() {
 		defer controllerWaitGroup.Done()
 		controller.Run(shutdownBroadcast)
+		controllerStopSignal <- *new(struct{})
 	}()
 
-	// Wait for an OS signal, then stop Psiphon and exit
+	// Wait for an OS signal or a Run stop signal, then stop Psiphon and exit
 
 	systemStopSignal := make(chan os.Signal, 1)
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill)
-	<-systemStopSignal
-
-	psiphon.Notice(psiphon.NOTICE_INFO, "shutdown by system")
-	close(shutdownBroadcast)
-	controllerWaitGroup.Wait()
+	select {
+	case <-systemStopSignal:
+		psiphon.Notice(psiphon.NOTICE_INFO, "shutdown by system")
+		close(shutdownBroadcast)
+		controllerWaitGroup.Wait()
+	case <-controllerStopSignal:
+		psiphon.Notice(psiphon.NOTICE_INFO, "shutdown by controller")
+	}
 }
