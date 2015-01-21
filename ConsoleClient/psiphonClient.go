@@ -60,6 +60,17 @@ func main() {
 		log.Fatalf("error processing configuration file: %s", err)
 	}
 
+	// Set logfile, if configured
+
+	if config.LogFilename != "" {
+		logFile, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			log.Fatalf("error opening log file: %s", err)
+		}
+		defer logFile.Close()
+		log.SetOutput(logFile)
+	}
+
 	// Handle optional profiling parameter
 
 	if profileFilename != "" {
@@ -98,17 +109,6 @@ func main() {
 		if err != nil {
 			log.Fatalf("error storing embedded server entry list data: %s", err)
 		}
-	}
-
-	// Set logfile, if configured
-
-	if config.LogFilename != "" {
-		logFile, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-		if err != nil {
-			log.Fatalf("error opening log file: %s", err)
-		}
-		defer logFile.Close()
-		log.SetOutput(logFile)
 	}
 
 	// Run Psiphon
