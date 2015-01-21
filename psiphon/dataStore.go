@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -221,10 +222,17 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 	})
 }
 
-// StoreServerEntries stores a list of server entries. This is simply a
-// helper which calls StoreServerEntry on each entry in the list -- so there
-// is an independent transaction for each entry -- and stops on first error.
+// StoreServerEntries shuffles and stores a list of server entries.
+// Shuffling is performed on imported server entrues as part of client-side
+// load balancing.
+// There is an independent transaction for each entry insert/update.
 func StoreServerEntries(serverEntries []*ServerEntry, replaceIfExists bool) error {
+
+	for index := len(serverEntries) - 1; index > 0; index-- {
+		swapIndex := rand.Intn(index + 1)
+		serverEntries[index], serverEntries[swapIndex] = serverEntries[swapIndex], serverEntries[index]
+	}
+
 	for _, serverEntry := range serverEntries {
 		err := StoreServerEntry(serverEntry, replaceIfExists)
 		if err != nil {
