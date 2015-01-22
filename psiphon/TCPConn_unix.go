@@ -1,7 +1,7 @@
 // +build android darwin dragonfly freebsd linux nacl netbsd openbsd solaris
 
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -34,7 +34,12 @@ type interruptibleTCPSocket struct {
 	socketFd int
 }
 
-// interruptibleTCPDial creates a socket connection.
+const _INVALID_FD = -1
+
+// interruptibleTCPDial establishes a TCP network connection. A conn is added
+// to config.PendingConns before blocking on network IO, which enables interruption.
+// The caller is responsible for removing an established conn from PendingConns.
+//
 // To implement socket device binding and interruptible connecting, the lower-level
 // syscall APIs are used. The sequence of syscalls in this implementation are
 // taken from: https://code.google.com/p/go/issues/detail?id=6966
@@ -49,7 +54,8 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	}
 	defer func() {
 		// Cleanup on error
-		if err != nil {
+		// (socketFd is reset to _INVALID_FD once it should no longer be closed)
+		if err != nil && socketFd != _INVALID_FD {
 			syscall.Close(socketFd)
 		}
 	}()
@@ -67,6 +73,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	}
 
 	// Get the remote IP and port, resolving a domain name if necessary
+	// TODO: domain name resolution isn't interruptible
 	host, strPort, err := net.SplitHostPort(dialAddr)
 	if err != nil {
 		return nil, ContextError(err)
@@ -91,8 +98,10 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 		interruptible: interruptibleTCPSocket{socketFd: socketFd},
 		readTimeout:   config.ReadTimeout,
 		writeTimeout:  config.WriteTimeout}
-	config.PendingConns.Add(conn)
-	defer config.PendingConns.Remove(conn)
+
+	if !config.PendingConns.Add(conn) {
+		return nil, ContextError(errors.New("pending connections already closed"))
+	}
 
 	// Connect the socket
 	// TODO: adjust the timeout to account for time spent resolving hostname
@@ -109,17 +118,39 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	} else {
 		err = syscall.Connect(socketFd, &sockAddr)
 	}
+
+	// Mutex required for writing to conn, since conn remains in
+	// pendingConns, through which conn.Close() may be called from
+	// another goroutine.
+
+	conn.mutex.Lock()
+
+	// From this point, ensure conn.interruptible.socketFd is reset
+	// since the fd value may be reused for a different file or socket
+	// before Close() -- and interruptibleTCPClose() -- is called for
+	// this conn.
+	conn.interruptible.socketFd = _INVALID_FD // (requires mutex)
+
+	// This is the syscall.Connect result
 	if err != nil {
+		conn.mutex.Unlock()
 		return nil, ContextError(err)
 	}
 
-	// Convert the syscall socket to a net.Conn
-	file := os.NewFile(uintptr(conn.interruptible.socketFd), "")
-	defer file.Close()
-	conn.Conn, err = net.FileConn(file)
+	// Convert the socket fd to a net.Conn
+
+	file := os.NewFile(uintptr(socketFd), "")
+	fileConn, err := net.FileConn(file)
+	file.Close()
+	// No more deferred fd clean up on err
+	socketFd = _INVALID_FD
 	if err != nil {
+		conn.mutex.Unlock()
 		return nil, ContextError(err)
 	}
+	conn.Conn = fileConn // (requires mutex)
+
+	conn.mutex.Unlock()
 
 	// Going through upstream HTTP proxy
 	if config.UpstreamHttpProxyAddress != "" {
@@ -134,5 +165,8 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 }
 
 func interruptibleTCPClose(interruptible interruptibleTCPSocket) error {
+	if interruptible.socketFd == _INVALID_FD {
+		return nil
+	}
 	return syscall.Close(interruptible.socketFd)
 }

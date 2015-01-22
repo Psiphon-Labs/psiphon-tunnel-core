@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -29,7 +29,6 @@ import (
 	"errors"
 	"io/ioutil"
 	"net/http"
-	"strings"
 )
 
 // RemoteServerList is a JSON record containing a list of Psiphon server
@@ -84,16 +83,16 @@ func FetchRemoteServerList(config *Config, pendingConns *Conns) (err error) {
 		return ContextError(err)
 	}
 
-	for _, encodedServerEntry := range strings.Split(remoteServerList.Data, "\n") {
-		serverEntry, err := DecodeServerEntry(encodedServerEntry)
-		if err != nil {
-			return ContextError(err)
-		}
-		err = StoreServerEntry(serverEntry, true)
-		if err != nil {
-			return ContextError(err)
-		}
+	serverEntries, err := DecodeServerEntryList(remoteServerList.Data)
+	if err != nil {
+		return ContextError(err)
 	}
+
+	err = StoreServerEntries(serverEntries, true)
+	if err != nil {
+		return ContextError(err)
+	}
+
 	return nil
 }
 

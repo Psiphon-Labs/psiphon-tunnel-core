@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -21,9 +21,10 @@ package psiphon
 
 import (
 	"fmt"
-	socks "github.com/Psiphon-Inc/goptlib"
 	"net"
 	"sync"
+
+	socks "github.com/Psiphon-Inc/goptlib"
 )
 
 // SocksProxy is a SOCKS server that accepts local host connections
@@ -103,13 +104,13 @@ loop:
 		}
 		if err != nil {
 			Notice(NOTICE_ALERT, "SOCKS proxy accept error: %s", err)
-			if e, ok := err.(net.Error); ok && !e.Temporary() {
-				proxy.tunneler.SignalFailure()
-				// Fatal error, stop the proxy
-				break loop
+			if e, ok := err.(net.Error); ok && e.Temporary() {
+				// Temporary error, keep running
+				continue
 			}
-			// Temporary error, keep running
-			continue
+			// Fatal error, stop the proxy
+			proxy.tunneler.SignalComponentFailure()
+			break loop
 		}
 		go func() {
 			err := proxy.socksConnectionHandler(socksConnection)

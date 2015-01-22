@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 )
 
 // ServerEntry represents a Psiphon server. It contains information
@@ -68,4 +69,18 @@ func DecodeServerEntry(encodedServerEntry string) (serverEntry *ServerEntry, err
 		return nil, ContextError(err)
 	}
 	return serverEntry, nil
+}
+
+// DecodeServerEntryList extracts server entries from the list encoding
+// used by remote server lists and Psiphon server handshake requests.
+func DecodeServerEntryList(encodedServerEntryList string) (serverEntries []*ServerEntry, err error) {
+	serverEntries = make([]*ServerEntry, 0)
+	for _, encodedServerEntry := range strings.Split(encodedServerEntryList, "\n") {
+		serverEntry, err := DecodeServerEntry(encodedServerEntry)
+		if err != nil {
+			return nil, ContextError(err)
+		}
+		serverEntries = append(serverEntries, serverEntry)
+	}
+	return serverEntries, nil
 }
