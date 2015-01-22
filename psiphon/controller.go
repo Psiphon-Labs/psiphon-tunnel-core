@@ -89,9 +89,10 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 		return
 	}
 	defer socksProxy.Close()
+
 	httpProxy, err := NewHttpProxy(controller.config, controller)
 	if err != nil {
-		Notice(NOTICE_ALERT, "error initializing local SOCKS proxy: %s", err)
+		Notice(NOTICE_ALERT, "error initializing local HTTP proxy: %s", err)
 		return
 	}
 	defer httpProxy.Close()
@@ -228,7 +229,7 @@ loop:
 	Notice(NOTICE_INFO, "exiting run tunnels")
 }
 
-// HandleFailedTunnel implements the TunnelOwner interface. This function
+// SignalTunnelFailure implements the TunnelOwner interface. This function
 // is called by Tunnel.operateTunnel when the tunnel has detected that it
 // has failed. The Controller will signal runTunnels to create a new
 // tunnel and/or remove the tunnel from the list of active tunnels.

@@ -60,6 +60,17 @@ func main() {
 		log.Fatalf("error processing configuration file: %s", err)
 	}
 
+	// Set logfile, if configured
+
+	if config.LogFilename != "" {
+		logFile, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			log.Fatalf("error opening log file: %s", err)
+		}
+		defer logFile.Close()
+		log.SetOutput(logFile)
+	}
+
 	// Handle optional profiling parameter
 
 	if profileFilename != "" {
@@ -100,35 +111,29 @@ func main() {
 		}
 	}
 
-	// Set logfile, if configured
-
-	if config.LogFilename != "" {
-		logFile, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-		if err != nil {
-			log.Fatalf("error opening log file: %s", err)
-		}
-		defer logFile.Close()
-		log.SetOutput(logFile)
-	}
-
 	// Run Psiphon
 
 	controller := psiphon.NewController(config)
+	controllerStopSignal := make(chan struct{}, 1)
 	shutdownBroadcast := make(chan struct{})
 	controllerWaitGroup := new(sync.WaitGroup)
 	controllerWaitGroup.Add(1)
 	go func() {
 		defer controllerWaitGroup.Done()
 		controller.Run(shutdownBroadcast)
+		controllerStopSignal <- *new(struct{})
 	}()
 
-	// Wait for an OS signal, then stop Psiphon and exit
+	// Wait for an OS signal or a Run stop signal, then stop Psiphon and exit
 
 	systemStopSignal := make(chan os.Signal, 1)
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill)
-	<-systemStopSignal
-
-	psiphon.Notice(psiphon.NOTICE_INFO, "shutdown by system")
-	close(shutdownBroadcast)
-	controllerWaitGroup.Wait()
+	select {
+	case <-systemStopSignal:
+		psiphon.Notice(psiphon.NOTICE_INFO, "shutdown by system")
+		close(shutdownBroadcast)
+		controllerWaitGroup.Wait()
+	case <-controllerStopSignal:
+		psiphon.Notice(psiphon.NOTICE_INFO, "shutdown by controller")
+	}
 }

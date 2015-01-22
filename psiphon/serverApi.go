@@ -166,7 +166,6 @@ func (session *Session) doHandshakeRequest() error {
 		PageViewRegexes      []map[string]string `json:"page_view_regexes"`
 		HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
 		EncodedServerList    []string            `json:"encoded_server_list"`
-		VpnPsk               string              `json:"l2tp_ipsec_psk"`
 	}
 	err = json.Unmarshal(configLine, &handshakeConfig)
 	if err != nil {
@@ -192,9 +191,6 @@ func (session *Session) doHandshakeRequest() error {
 	}
 	if handshakeConfig.UpgradeClientVersion != "" {
 		Notice(NOTICE_UPGRADE, "%s", handshakeConfig.UpgradeClientVersion)
-	}
-	if handshakeConfig.VpnPsk != "" {
-		Notice(NOTICE_VPN_PSK, "%s", handshakeConfig.VpnPsk)
 	}
 
 	session.statsRegexps = MakeRegexps(
