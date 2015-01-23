@@ -23,7 +23,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"sync"
-	"time"
 )
 
 // TODO: Stats for a server are only removed when they are sent in a status
@@ -100,23 +99,6 @@ func recordStat(stat *statsUpdate) {
 	storedHostStats.numBytesReceived += stat.numBytesReceived
 
 	//fmt.Println("server:", stat.serverID, "host:", stat.hostname, "sent:", storedHostStats.numBytesSent, "received:", storedHostStats.numBytesReceived)
-}
-
-// NextSendPeriod returns the amount of time that should be waited before the
-// next time stats are sent.
-func NextSendPeriod() (duration time.Duration) {
-	defaultStatsSendDuration := 5 * 60 * 1000 // 5 minutes in millis
-
-	// We include a random component to make the stats send less fingerprintable.
-	jitter, err := MakeSecureRandomInt(defaultStatsSendDuration)
-
-	// In case of error we're just going to use zero jitter.
-	if err != nil {
-		Notice(NOTICE_ALERT, "stats.NextSendPeriod: MakeSecureRandomInt failed")
-	}
-
-	duration = time.Duration(defaultStatsSendDuration+jitter) * time.Millisecond
-	return
 }
 
 // Implement the json.Marshaler interface

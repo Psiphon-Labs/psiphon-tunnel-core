@@ -41,13 +41,20 @@ func Contains(list []string, target string) bool {
 }
 
 // MakeSecureRandomInt is a helper function that wraps
-// crypto/rand.Int, which returns a uniform random value in [0, max).
+// MakeSecureRandomInt64.
 func MakeSecureRandomInt(max int) (int, error) {
-	randomInt, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
+	randomInt, err := MakeSecureRandomInt64(int64(max))
+	return int(randomInt), err
+}
+
+// MakeSecureRandomInt64 is a helper function that wraps
+// crypto/rand.Int, which returns a uniform random value in [0, max).
+func MakeSecureRandomInt64(max int64) (int64, error) {
+	randomInt, err := rand.Int(rand.Reader, big.NewInt(max))
 	if err != nil {
 		return 0, ContextError(err)
 	}
-	return int(randomInt.Uint64()), nil
+	return randomInt.Int64(), nil
 }
 
 // MakeSecureRandomBytes is a helper function that wraps

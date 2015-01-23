@@ -24,22 +24,26 @@ import (
 )
 
 const (
-	VERSION                                  = "0.0.5"
-	DATA_STORE_FILENAME                      = "psiphon.db"
-	CONNECTION_WORKER_POOL_SIZE              = 10
-	TUNNEL_POOL_SIZE                         = 1
-	TUNNEL_CONNECT_TIMEOUT                   = 15 * time.Second
-	TUNNEL_READ_TIMEOUT                      = 0 * time.Second
-	TUNNEL_WRITE_TIMEOUT                     = 5 * time.Second
-	TUNNEL_SSH_KEEP_ALIVE_PERIOD             = 60 * time.Second
-	ESTABLISH_TUNNEL_TIMEOUT                 = 60 * time.Second
-	ESTABLISH_TUNNEL_PAUSE_PERIOD            = 10 * time.Second
-	PORT_FORWARD_FAILURE_THRESHOLD           = 10
-	HTTP_PROXY_ORIGIN_SERVER_TIMEOUT         = 15 * time.Second
-	HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST = 50
-	FETCH_REMOTE_SERVER_LIST_TIMEOUT         = 10 * time.Second
-	FETCH_REMOTE_SERVER_LIST_RETRY_TIMEOUT   = 5 * time.Second
-	FETCH_REMOTE_SERVER_LIST_STALE_TIMEOUT   = 6 * time.Hour
-	PSIPHON_API_CLIENT_SESSION_ID_LENGTH     = 16
-	PSIPHON_API_SERVER_TIMEOUT               = 20 * time.Second
+	VERSION                                    = "0.0.5"
+	DATA_STORE_FILENAME                        = "psiphon.db"
+	CONNECTION_WORKER_POOL_SIZE                = 10
+	TUNNEL_POOL_SIZE                           = 1
+	TUNNEL_CONNECT_TIMEOUT                     = 15 * time.Second
+	TUNNEL_READ_TIMEOUT                        = 0 * time.Second
+	TUNNEL_WRITE_TIMEOUT                       = 5 * time.Second
+	TUNNEL_SSH_KEEP_ALIVE_PERIOD               = 60 * time.Second
+	ESTABLISH_TUNNEL_TIMEOUT                   = 60 * time.Second
+	ESTABLISH_TUNNEL_PAUSE_PERIOD              = 10 * time.Second
+	PORT_FORWARD_FAILURE_THRESHOLD             = 10
+	HTTP_PROXY_ORIGIN_SERVER_TIMEOUT           = 15 * time.Second
+	HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST   = 50
+	FETCH_REMOTE_SERVER_LIST_TIMEOUT           = 10 * time.Second
+	FETCH_REMOTE_SERVER_LIST_RETRY_PERIOD      = 5 * time.Second
+	FETCH_REMOTE_SERVER_LIST_STALE_PERIOD      = 6 * time.Hour
+	PSIPHON_API_CLIENT_SESSION_ID_LENGTH       = 16
+	PSIPHON_API_SERVER_TIMEOUT                 = 20 * time.Second
+	PSIPHON_API_STATUS_REQUEST_PERIOD_MIN      = 5 * time.Minute
+	PSIPHON_API_STATUS_REQUEST_PERIOD_MAX      = 10 * time.Minute
+	PSIPHON_API_CONNECTED_REQUEST_PERIOD       = 24 * time.Hour
+	PSIPHON_API_CONNECTED_REQUEST_RETRY_PERIOD = 5 * time.Second
 )

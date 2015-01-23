@@ -95,6 +95,7 @@ type Tunnel struct {
 // server capabilities is used.
 func EstablishTunnel(
 	config *Config,
+	sessionId string,
 	pendingConns *Conns,
 	serverEntry *ServerEntry,
 	tunnelOwner TunnelOwner) (tunnel *Tunnel, err error) {
@@ -105,14 +106,6 @@ func EstablishTunnel(
 	}
 	Notice(NOTICE_INFO, "connecting to %s in region %s using %s",
 		serverEntry.IpAddress, serverEntry.Region, selectedProtocol)
-
-	// Generate a session Id for the Psiphon server API. This is generated now so
-	// that it can be sent with the SSH password payload, which helps the server
-	// associate client geo location, used in server API stats, with the session ID.
-	sessionId, err := MakeSessionId()
-	if err != nil {
-		return nil, ContextError(err)
-	}
 
 	// Build transport layers and establish SSH connection
 	conn, closedSignal, sshClient, err := dialSsh(
@@ -143,7 +136,12 @@ func EstablishTunnel(
 		// of failure reports without blocking. Senders can drop failures without blocking.
 		portForwardFailures: make(chan int, config.PortForwardFailureThreshold)}
 
-	// Create a new Psiphon API session for this tunnel
+	// Create a new Psiphon API session for this tunnel. This includes performing
+	// a handshake request. If the handshake fails, this establishment fails.
+	//
+	// TODO: as long as the servers are not enforcing that a client perform a handshake,
+	// proceed with this tunnel as long as at least one previous handhake succeeded?
+	//
 	Notice(NOTICE_INFO, "starting session for %s", tunnel.serverEntry.IpAddress)
 	tunnel.session, err = NewSession(config, tunnel, sessionId)
 	if err != nil {
@@ -392,8 +390,8 @@ func dialSsh(
 	return conn, closedSignal, sshClient, nil
 }
 
-// operateTunnel periodically sends stats updates to the Psiphon API and
-// monitors the tunnel for failures:
+// operateTunnel periodically sends status requests (traffic stats updates updates)
+// to the Psiphon API; and monitors the tunnel for failures:
 //
 // 1. Overall tunnel failure: the tunnel sends a signal to the ClosedSignal
 // channel on keep-alive failure and other transport I/O errors. In case
@@ -419,8 +417,8 @@ func dialSsh(
 func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 	defer tunnel.operateWaitGroup.Done()
 
-	// Note: not using a Ticker since NextSendPeriod() is not a fixed time period
-	statsTimer := time.NewTimer(NextSendPeriod())
+	// Note: not using a Ticker since NextStatusRequestPeriod() is not a fixed time period
+	statsTimer := time.NewTimer(NextStatusRequestPeriod())
 	defer statsTimer.Stop()
 
 	sshKeepAliveTicker := time.NewTicker(TUNNEL_SSH_KEEP_ALIVE_PERIOD)
@@ -430,8 +428,8 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 	for err == nil {
 		select {
 		case <-statsTimer.C:
-			sendStats(tunnel, false)
-			statsTimer.Reset(NextSendPeriod())
+			sendStats(tunnel)
+			statsTimer.Reset(NextStatusRequestPeriod())
 
 		case <-sshKeepAliveTicker.C:
 			_, _, err := tunnel.sshClient.SendRequest("keepalive@openssh.com", true, nil)
@@ -451,8 +449,8 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 			err = errors.New("tunnel closed unexpectedly")
 
 		case <-tunnel.shutdownOperateBroadcast:
-			// Send final stats
-			sendStats(tunnel, true)
+			// Attempt to send any remaining stats
+			sendStats(tunnel)
 			Notice(NOTICE_INFO, "shutdown operate tunnel")
 			return
 		}
@@ -465,10 +463,10 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 }
 
 // sendStats is a helper for sending session stats to the server.
-func sendStats(tunnel *Tunnel, final bool) {
+func sendStats(tunnel *Tunnel) {
 	payload := GetForServer(tunnel.serverEntry.IpAddress)
 	if payload != nil {
-		err := tunnel.session.DoStatusRequest(payload, final)
+		err := tunnel.session.DoStatusRequest(payload)
 		if err != nil {
 			Notice(NOTICE_ALERT, "DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
 			PutBack(tunnel.serverEntry.IpAddress, payload)

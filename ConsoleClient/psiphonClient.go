@@ -113,7 +113,11 @@ func main() {
 
 	// Run Psiphon
 
-	controller := psiphon.NewController(config)
+	controller, err := psiphon.NewController(config)
+	if err != nil {
+		log.Fatalf("error creating controller: %s", err)
+	}
+
 	controllerStopSignal := make(chan struct{}, 1)
 	shutdownBroadcast := make(chan struct{})
 	controllerWaitGroup := new(sync.WaitGroup)

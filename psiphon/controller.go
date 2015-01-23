@@ -35,6 +35,7 @@ import (
 // route traffic through the tunnels.
 type Controller struct {
 	config                    *Config
+	sessionId                 string
 	componentFailureSignal    chan struct{}
 	shutdownBroadcast         chan struct{}
 	runWaitGroup              *sync.WaitGroup
@@ -43,6 +44,7 @@ type Controller struct {
 	tunnelMutex               sync.Mutex
 	tunnels                   []*Tunnel
 	nextTunnel                int
+	startedConnectedReporter  bool
 	isEstablishing            bool
 	establishWaitGroup        *sync.WaitGroup
 	stopEstablishingBroadcast chan struct{}
@@ -52,9 +54,18 @@ type Controller struct {
 }
 
 // NewController initializes a new controller.
-func NewController(config *Config) (controller *Controller) {
+func NewController(config *Config) (controller *Controller, err error) {
+
+	// Generate a session ID for the Psiphon server API. This session ID is
+	// used across all tunnels established by the controller.
+	sessionId, err := MakeSessionId()
+	if err != nil {
+		return nil, ContextError(err)
+	}
+
 	return &Controller{
-		config: config,
+		config:    config,
+		sessionId: sessionId,
 		// componentFailureSignal receives a signal from a component (including socks and
 		// http local proxies) if they unexpectedly fail. Senders should not block.
 		// A buffer allows at least one stop signal to be sent before there is a receiver.
@@ -63,13 +74,14 @@ func NewController(config *Config) (controller *Controller) {
 		runWaitGroup:           new(sync.WaitGroup),
 		// establishedTunnels and failedTunnels buffer sizes are large enough to
 		// receive full pools of tunnels without blocking. Senders should not block.
-		establishedTunnels:      make(chan *Tunnel, config.TunnelPoolSize),
-		failedTunnels:           make(chan *Tunnel, config.TunnelPoolSize),
-		tunnels:                 make([]*Tunnel, 0),
-		isEstablishing:          false,
-		establishPendingConns:   new(Conns),
-		fetchRemotePendingConns: new(Conns),
-	}
+		establishedTunnels:       make(chan *Tunnel, config.TunnelPoolSize),
+		failedTunnels:            make(chan *Tunnel, config.TunnelPoolSize),
+		tunnels:                  make([]*Tunnel, 0),
+		startedConnectedReporter: false,
+		isEstablishing:           false,
+		establishPendingConns:    new(Conns),
+		fetchRemotePendingConns:  new(Conns),
+	}, nil
 }
 
 // Run executes the controller. It launches components and then monitors
@@ -77,6 +89,7 @@ func NewController(config *Config) (controller *Controller) {
 // controller.
 // The components include:
 // - the periodic remote server list fetcher
+// - the connected reporter
 // - the tunnel manager
 // - a local SOCKS proxy that port forwards through the pool of tunnels
 // - a local HTTP proxy that port forwards through the pool of tunnels
@@ -96,6 +109,8 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 		return
 	}
 	defer httpProxy.Close()
+
+	/// Note: the connected reporter isn't started until a tunnel is established
 
 	controller.runWaitGroup.Add(2)
 	go controller.remoteServerListFetcher()
@@ -141,9 +156,9 @@ loop:
 		var duration time.Duration
 		if err != nil {
 			Notice(NOTICE_ALERT, "failed to fetch remote server list: %s", err)
-			duration = FETCH_REMOTE_SERVER_LIST_RETRY_TIMEOUT
+			duration = FETCH_REMOTE_SERVER_LIST_RETRY_PERIOD
 		} else {
-			duration = FETCH_REMOTE_SERVER_LIST_STALE_TIMEOUT
+			duration = FETCH_REMOTE_SERVER_LIST_STALE_PERIOD
 		}
 		timeout := time.After(duration)
 		select {
@@ -155,6 +170,49 @@ loop:
 	}
 
 	Notice(NOTICE_INFO, "exiting remote server list fetcher")
+}
+
+// connectedReporter sends periodic "connected" requests to the Psiphon API.
+// These requests are for server-side unique user stats calculation. See the
+// comment in DoConnectedRequest for a description of the request mechanism.
+// To ensure we don't over- or under-count unique users, only one connected
+// request is made across all simultaneous multi-tunnels; and the connected
+// request is repeated periodically.
+func (controller *Controller) connectedReporter() {
+	defer controller.runWaitGroup.Done()
+loop:
+	for {
+
+		// Pick any active tunnel and make the next connected request. No error
+		// is logged if there's no active tunnel, as that's not an unexpected condition.
+		reported := false
+		tunnel := controller.getNextActiveTunnel()
+		if tunnel != nil {
+			err := tunnel.session.DoConnectedRequest()
+			if err == nil {
+				reported = true
+			} else {
+				Notice(NOTICE_ALERT, "failed to make connected request: %s", err)
+			}
+		}
+
+		// Schedule the next connected request and wait.
+		var duration time.Duration
+		if reported {
+			duration = PSIPHON_API_CONNECTED_REQUEST_PERIOD
+		} else {
+			duration = PSIPHON_API_CONNECTED_REQUEST_RETRY_PERIOD
+		}
+		timeout := time.After(duration)
+		select {
+		case <-timeout:
+			// Make another connected request
+		case <-controller.shutdownBroadcast:
+			break loop
+		}
+	}
+
+	Notice(NOTICE_INFO, "exiting connected reporter")
 }
 
 // runTunnels is the controller tunnel management main loop. It starts and stops
@@ -190,8 +248,8 @@ loop:
 		case failedTunnel := <-controller.failedTunnels:
 			Notice(NOTICE_ALERT, "tunnel failed: %s", failedTunnel.serverEntry.IpAddress)
 			controller.terminateTunnel(failedTunnel)
-			// Note: only this goroutine may call startEstablishing/stopEstablishing and access
-			// isEstablishing.
+			// Concurrency note: only this goroutine may call startEstablishing/stopEstablishing
+			// and access isEstablishing.
 			if !controller.isEstablishing {
 				controller.startEstablishing()
 			}
@@ -207,6 +265,15 @@ loop:
 			}
 			if controller.isFullyEstablished() {
 				controller.stopEstablishing()
+			}
+
+			// Start the connected reporter after the first tunnel is established.
+			// Concurrency note: only this goroutine may access startedConnectedReporter.
+			// isEstablishing.
+			if !controller.startedConnectedReporter {
+				controller.startedConnectedReporter = true
+				controller.runWaitGroup.Add(1)
+				go controller.connectedReporter()
 			}
 
 		case <-controller.shutdownBroadcast:
@@ -486,6 +553,7 @@ loop:
 
 		tunnel, err := EstablishTunnel(
 			controller.config,
+			controller.sessionId,
 			controller.establishPendingConns,
 			serverEntry,
 			controller) // TunnelOwner
