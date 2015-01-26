@@ -46,6 +46,9 @@ type Config struct {
 	UpstreamHttpProxyAddress           string
 	BindToDeviceProvider               DeviceBinder
 	BindToDeviceDnsServer              string
+	TargetServerEntry                  string
+	DisableApi                         bool
+	DisableRemoteServerListFetcher     bool
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON

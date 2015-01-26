@@ -264,19 +264,28 @@ func PromoteServerEntry(ipAddress string) error {
 // ServerEntryIterator is used to iterate over
 // stored server entries in rank order.
 type ServerEntryIterator struct {
-	region      string
-	protocol    string
-	excludeIds  []string
-	transaction *sql.Tx
-	cursor      *sql.Rows
+	region                      string
+	protocol                    string
+	transaction                 *sql.Tx
+	cursor                      *sql.Rows
+	isTargetServerEntryIterator bool
+	hasNextTargetServerEntry    bool
+	targetServerEntry           *ServerEntry
 }
 
 // NewServerEntryIterator creates a new NewServerEntryIterator
-func NewServerEntryIterator(region, protocol string) (iterator *ServerEntryIterator, err error) {
+func NewServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err error) {
+
+	// When configured, this target server entry is the only candidate
+	if config.TargetServerEntry != "" {
+		return newTargetServerEntryIterator(config)
+	}
+
 	checkInitDataStore()
 	iterator = &ServerEntryIterator{
-		region:   region,
-		protocol: protocol,
+		region:                      config.EgressRegion,
+		protocol:                    config.TunnelProtocol,
+		isTargetServerEntryIterator: false,
 	}
 	err = iterator.Reset()
 	if err != nil {
@@ -285,10 +294,41 @@ func NewServerEntryIterator(region, protocol string) (iterator *ServerEntryItera
 	return iterator, nil
 }
 
+// newTargetServerEntryIterator is a helper for initializing the TargetServerEntry case
+func newTargetServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err error) {
+	serverEntry, err := DecodeServerEntry(config.TargetServerEntry)
+	if err != nil {
+		return nil, err
+	}
+	if config.EgressRegion != "" && serverEntry.Region != config.EgressRegion {
+		return nil, errors.New("TargetServerEntry does not support EgressRegion")
+	}
+	if config.TunnelProtocol != "" {
+		// Note: same capability/protocol mapping as in StoreServerEntry
+		requiredCapability := strings.TrimSuffix(config.TunnelProtocol, "-OSSH")
+		if !Contains(serverEntry.Capabilities, requiredCapability) {
+			return nil, errors.New("TargetServerEntry does not support TunnelProtocol")
+		}
+	}
+	iterator = &ServerEntryIterator{
+		isTargetServerEntryIterator: true,
+		hasNextTargetServerEntry:    true,
+		targetServerEntry:           serverEntry,
+	}
+	Notice(NOTICE_INFO, "using TargetServerEntry: %s", serverEntry.IpAddress)
+	return iterator, nil
+}
+
 // Reset a NewServerEntryIterator to the start of its cycle. The next
 // call to Next will return the first server entry.
 func (iterator *ServerEntryIterator) Reset() error {
 	iterator.Close()
+
+	if iterator.isTargetServerEntryIterator {
+		iterator.hasNextTargetServerEntry = true
+		return nil
+	}
+
 	transaction, err := singleton.db.Begin()
 	if err != nil {
 		return ContextError(err)
@@ -347,6 +387,15 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 			iterator.Close()
 		}
 	}()
+
+	if iterator.isTargetServerEntryIterator {
+		if iterator.hasNextTargetServerEntry {
+			iterator.hasNextTargetServerEntry = false
+			return iterator.targetServerEntry, nil
+		}
+		return nil, nil
+	}
+
 	if !iterator.cursor.Next() {
 		err = iterator.cursor.Err()
 		if err != nil {
@@ -406,10 +455,9 @@ func makeServerEntryWhereClause(
 	return whereClause, whereParams
 }
 
-// HasServerEntries returns true if the data store contains at
-// least one server entry (for the specified region and/or protocol,
-// when not blank).
-func HasServerEntries(region, protocol string) bool {
+// CountServerEntries returns a count of stored servers for the
+// specified region and protocol.
+func CountServerEntries(region, protocol string) int {
 	checkInitDataStore()
 	var count int
 	whereClause, whereParams := makeServerEntryWhereClause(region, protocol, nil)
@@ -417,8 +465,8 @@ func HasServerEntries(region, protocol string) bool {
 	err := singleton.db.QueryRow(query, whereParams...).Scan(&count)
 
 	if err != nil {
-		Notice(NOTICE_ALERT, "HasServerEntries failed: %s", err)
-		return false
+		Notice(NOTICE_ALERT, "CountServerEntries failed: %s", err)
+		return 0
 	}
 
 	if region == "" {
@@ -430,7 +478,7 @@ func HasServerEntries(region, protocol string) bool {
 	Notice(NOTICE_INFO, "servers for region %s and protocol %s: %d",
 		region, protocol, count)
 
-	return count > 0
+	return count
 }
 
 // GetServerEntryIpAddresses returns an array containing

@@ -142,10 +142,12 @@ func EstablishTunnel(
 	// TODO: as long as the servers are not enforcing that a client perform a handshake,
 	// proceed with this tunnel as long as at least one previous handhake succeeded?
 	//
-	Notice(NOTICE_INFO, "starting session for %s", tunnel.serverEntry.IpAddress)
-	tunnel.session, err = NewSession(config, tunnel, sessionId)
-	if err != nil {
-		return nil, ContextError(fmt.Errorf("error starting session for %s: %s", tunnel.serverEntry.IpAddress, err))
+	if !config.DisableApi {
+		Notice(NOTICE_INFO, "starting session for %s", tunnel.serverEntry.IpAddress)
+		tunnel.session, err = NewSession(config, tunnel, sessionId)
+		if err != nil {
+			return nil, ContextError(fmt.Errorf("error starting session for %s: %s", tunnel.serverEntry.IpAddress, err))
+		}
 	}
 
 	// Now that network operations are complete, cancel interruptibility
@@ -194,10 +196,17 @@ func (tunnel *Tunnel) Dial(remoteAddr string) (conn net.Conn, err error) {
 		return nil, ContextError(err)
 	}
 
-	return &TunneledConn{
-			Conn:   sshPortForwardConn,
-			tunnel: tunnel},
-		nil
+	conn = &TunneledConn{
+		Conn:   sshPortForwardConn,
+		tunnel: tunnel}
+
+	// Tunnel does not have a session when DisableApi is set
+	if tunnel.session != nil {
+		conn = NewStatsConn(
+			conn, tunnel.session.StatsServerID(), tunnel.session.StatsRegexps())
+	}
+
+	return conn, nil
 }
 
 // TunneledConn implements net.Conn and wraps a port foward connection.
@@ -409,6 +418,9 @@ func dialSsh(
 // some typical error messages to consider matching against (or ignoring):
 //
 // - "ssh: rejected: administratively prohibited (open failed)"
+//   (this error message is reported in both actual and false cases: when a server
+//    is overloaded and has no free ephemeral ports; and when the user mistypes
+//    a domain in a browser address bar and name resolution fails)
 // - "ssh: rejected: connect failed (Connection timed out)"
 // - "write tcp ... broken pipe"
 // - "read tcp ... connection reset by peer"
@@ -464,6 +476,12 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 
 // sendStats is a helper for sending session stats to the server.
 func sendStats(tunnel *Tunnel) {
+
+	// Tunnel does not have a session when DisableApi is set
+	if tunnel.session == nil {
+		return
+	}
+
 	payload := GetForServer(tunnel.serverEntry.IpAddress)
 	if payload != nil {
 		err := tunnel.session.DoStatusRequest(payload)

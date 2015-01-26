@@ -96,6 +96,8 @@ func NewController(config *Config) (controller *Controller, err error) {
 func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	Notice(NOTICE_VERSION, VERSION)
 
+	// Start components
+
 	socksProxy, err := NewSocksProxy(controller.config, controller)
 	if err != nil {
 		Notice(NOTICE_ALERT, "error initializing local SOCKS proxy: %s", err)
@@ -110,11 +112,21 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	}
 	defer httpProxy.Close()
 
-	/// Note: the connected reporter isn't started until a tunnel is established
+	// Note: unlike legacy Psiphon clients, this code always makes the
+	// fetch remote server list request
 
-	controller.runWaitGroup.Add(2)
-	go controller.remoteServerListFetcher()
+	if !controller.config.DisableRemoteServerListFetcher {
+		controller.runWaitGroup.Add(1)
+		go controller.remoteServerListFetcher()
+	}
+
+	/// Note: the connected reporter isn't started until a tunnel is
+	// established
+
+	controller.runWaitGroup.Add(1)
 	go controller.runTunnels()
+
+	// Wait while running
 
 	select {
 	case <-shutdownBroadcast:
@@ -146,8 +158,6 @@ func (controller *Controller) SignalComponentFailure() {
 func (controller *Controller) remoteServerListFetcher() {
 	defer controller.runWaitGroup.Done()
 
-	// Note: unlike legacy Psiphon clients, this code
-	// always makes the fetch remote server list request
 loop:
 	for {
 		err := FetchRemoteServerList(
@@ -215,32 +225,42 @@ loop:
 	Notice(NOTICE_INFO, "exiting connected reporter")
 }
 
+func (controller *Controller) startConnectedReporter() {
+	if controller.config.DisableApi {
+		return
+	}
+
+	// Start the connected reporter after the first tunnel is established.
+	// Concurrency note: only the runTunnels goroutine may access startedConnectedReporter.
+	if !controller.startedConnectedReporter {
+		controller.startedConnectedReporter = true
+		controller.runWaitGroup.Add(1)
+		go controller.connectedReporter()
+	}
+}
+
 // runTunnels is the controller tunnel management main loop. It starts and stops
 // establishing tunnels based on the target tunnel pool size and the current size
 // of the pool. Tunnels are established asynchronously using worker goroutines.
+//
+// When there are no server entries for the target region/protocol, the
+// establishCandidateGenerator will yield no candidates and wait before
+// trying again. In the meantime, a remote server entry fetch may supply
+// valid candidates.
+//
 // When a tunnel is established, it's added to the active pool. The tunnel's
 // operateTunnel goroutine monitors the tunnel.
+//
 // When a tunnel fails, it's removed from the pool and the establish process is
 // restarted to fill the pool.
 func (controller *Controller) runTunnels() {
 	defer controller.runWaitGroup.Done()
 
-	// Don't start establishing until there are some server candidates. The
-	// typical case is a client with no server entries which will wait for
-	// the first successful FetchRemoteServerList to populate the data store.
-	for {
-		if HasServerEntries(
-			controller.config.EgressRegion, controller.config.TunnelProtocol) {
-			break
-		}
-		// TODO: replace polling with signal
-		timeout := time.After(5 * time.Second)
-		select {
-		case <-timeout:
-		case <-controller.shutdownBroadcast:
-			return
-		}
-	}
+	// Note: calling Count for its logging side-effect.
+	_ = CountServerEntries(controller.config.EgressRegion, controller.config.TunnelProtocol)
+
+	// Start running
+
 	controller.startEstablishing()
 loop:
 	for {
@@ -266,20 +286,15 @@ loop:
 			if controller.isFullyEstablished() {
 				controller.stopEstablishing()
 			}
-
-			// Start the connected reporter after the first tunnel is established.
-			// Concurrency note: only this goroutine may access startedConnectedReporter.
-			// isEstablishing.
-			if !controller.startedConnectedReporter {
-				controller.startedConnectedReporter = true
-				controller.runWaitGroup.Add(1)
-				go controller.connectedReporter()
-			}
+			controller.startConnectedReporter()
 
 		case <-controller.shutdownBroadcast:
 			break loop
 		}
 	}
+
+	// Stop running
+
 	controller.stopEstablishing()
 	controller.terminateAllTunnels()
 
@@ -428,10 +443,7 @@ func (controller *Controller) Dial(remoteAddr string) (conn net.Conn, err error)
 		return nil, ContextError(err)
 	}
 
-	statsConn := NewStatsConn(
-		tunneledConn, tunnel.session.StatsServerID(), tunnel.session.StatsRegexps())
-
-	return statsConn, nil
+	return tunneledConn, nil
 }
 
 // startEstablishing creates a pool of worker goroutines which will
@@ -485,8 +497,7 @@ func (controller *Controller) stopEstablishing() {
 func (controller *Controller) establishCandidateGenerator() {
 	defer controller.establishWaitGroup.Done()
 
-	iterator, err := NewServerEntryIterator(
-		controller.config.EgressRegion, controller.config.TunnelProtocol)
+	iterator, err := NewServerEntryIterator(controller.config)
 	if err != nil {
 		Notice(NOTICE_ALERT, "failed to iterate over candidates: %s", err)
 		controller.SignalComponentFailure()
@@ -495,7 +506,10 @@ func (controller *Controller) establishCandidateGenerator() {
 	defer iterator.Close()
 
 loop:
+	// Repeat until stopped
 	for {
+
+		// Yield each server entry returned by the iterator
 		for {
 			serverEntry, err := iterator.Next()
 			if err != nil {
@@ -530,6 +544,7 @@ loop:
 			break loop
 		}
 	}
+
 	close(controller.candidateServerEntries)
 	Notice(NOTICE_INFO, "stopped candidate generator")
 }
