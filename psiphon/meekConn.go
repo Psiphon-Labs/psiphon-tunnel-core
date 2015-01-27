@@ -107,6 +107,8 @@ func DialMeek(
 
 	var host string
 	var dialer Dialer
+	var proxyUrl func(*http.Request) (*url.URL, error)
+
 	if useFronting {
 		// In this case, host is not what is dialed but is what ends up in the HTTP Host header
 		host = serverEntry.MeekFrontingHost
@@ -123,6 +125,18 @@ func DialMeek(
 	} else {
 		// In this case, host is both what is dialed and what ends up in the HTTP Host header
 		host = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
+
+		// For unfronted meek, we let the http.Transport handle proxying, as the
+		// target server hostname has to be in the HTTP request line. Also, in this
+		// case, we don't require the proxy to support CONNECT and so we can work
+		// throigh HTTP proxies that don't support it.
+		url, err := url.Parse(fmt.Sprintf("http://%s", meekConfig.UpstreamHttpProxyAddress))
+		if err != nil {
+			return nil, ContextError(err)
+		}
+		proxyUrl = http.ProxyURL(url)
+		meekConfig.UpstreamHttpProxyAddress = ""
+
 		dialer = NewTCPDialer(meekConfig)
 	}
 
@@ -139,7 +153,8 @@ func DialMeek(
 	}
 	// TODO: also use http.Client, with its Timeout field?
 	transport := &http.Transport{
-		Dial: dialer,
+		Proxy: proxyUrl,
+		Dial:  dialer,
 		ResponseHeaderTimeout: TUNNEL_WRITE_TIMEOUT,
 	}
 

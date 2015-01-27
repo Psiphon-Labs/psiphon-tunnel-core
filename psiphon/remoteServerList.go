@@ -50,9 +50,10 @@ func FetchRemoteServerList(config *Config, pendingConns *Conns) (err error) {
 	// Note: pendingConns may be used to interrupt the fetch remote server list
 	// request. BindToDevice may be used to exclude requests from VPN routing.
 	dialConfig := &DialConfig{
-		PendingConns:          pendingConns,
-		BindToDeviceProvider:  config.BindToDeviceProvider,
-		BindToDeviceDnsServer: config.BindToDeviceDnsServer,
+		UpstreamHttpProxyAddress: config.UpstreamHttpProxyAddress,
+		PendingConns:             pendingConns,
+		BindToDeviceProvider:     config.BindToDeviceProvider,
+		BindToDeviceDnsServer:    config.BindToDeviceDnsServer,
 	}
 	transport := &http.Transport{
 		Dial: NewTCPDialer(dialConfig),

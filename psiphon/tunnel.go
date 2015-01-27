@@ -308,12 +308,13 @@ func dialSsh(
 
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
-		ConnectTimeout:        TUNNEL_CONNECT_TIMEOUT,
-		ReadTimeout:           TUNNEL_READ_TIMEOUT,
-		WriteTimeout:          TUNNEL_WRITE_TIMEOUT,
-		PendingConns:          pendingConns,
-		BindToDeviceProvider:  config.BindToDeviceProvider,
-		BindToDeviceDnsServer: config.BindToDeviceDnsServer,
+		UpstreamHttpProxyAddress: config.UpstreamHttpProxyAddress,
+		ConnectTimeout:           TUNNEL_CONNECT_TIMEOUT,
+		ReadTimeout:              TUNNEL_READ_TIMEOUT,
+		WriteTimeout:             TUNNEL_WRITE_TIMEOUT,
+		PendingConns:             pendingConns,
+		BindToDeviceProvider:     config.BindToDeviceProvider,
+		BindToDeviceDnsServer:    config.BindToDeviceDnsServer,
 	}
 	if useMeek {
 		conn, err = DialMeek(serverEntry, sessionId, useFronting, dialConfig)
