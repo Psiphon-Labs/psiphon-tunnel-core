@@ -35,6 +35,7 @@ import (
 // route traffic through the tunnels.
 type Controller struct {
 	config                    *Config
+	sessionId                 string
 	componentFailureSignal    chan struct{}
 	shutdownBroadcast         chan struct{}
 	runWaitGroup              *sync.WaitGroup
@@ -43,6 +44,7 @@ type Controller struct {
 	tunnelMutex               sync.Mutex
 	tunnels                   []*Tunnel
 	nextTunnel                int
+	startedConnectedReporter  bool
 	isEstablishing            bool
 	establishWaitGroup        *sync.WaitGroup
 	stopEstablishingBroadcast chan struct{}
@@ -52,9 +54,18 @@ type Controller struct {
 }
 
 // NewController initializes a new controller.
-func NewController(config *Config) (controller *Controller) {
+func NewController(config *Config) (controller *Controller, err error) {
+
+	// Generate a session ID for the Psiphon server API. This session ID is
+	// used across all tunnels established by the controller.
+	sessionId, err := MakeSessionId()
+	if err != nil {
+		return nil, ContextError(err)
+	}
+
 	return &Controller{
-		config: config,
+		config:    config,
+		sessionId: sessionId,
 		// componentFailureSignal receives a signal from a component (including socks and
 		// http local proxies) if they unexpectedly fail. Senders should not block.
 		// A buffer allows at least one stop signal to be sent before there is a receiver.
@@ -63,13 +74,14 @@ func NewController(config *Config) (controller *Controller) {
 		runWaitGroup:           new(sync.WaitGroup),
 		// establishedTunnels and failedTunnels buffer sizes are large enough to
 		// receive full pools of tunnels without blocking. Senders should not block.
-		establishedTunnels:      make(chan *Tunnel, config.TunnelPoolSize),
-		failedTunnels:           make(chan *Tunnel, config.TunnelPoolSize),
-		tunnels:                 make([]*Tunnel, 0),
-		isEstablishing:          false,
-		establishPendingConns:   new(Conns),
-		fetchRemotePendingConns: new(Conns),
-	}
+		establishedTunnels:       make(chan *Tunnel, config.TunnelPoolSize),
+		failedTunnels:            make(chan *Tunnel, config.TunnelPoolSize),
+		tunnels:                  make([]*Tunnel, 0),
+		startedConnectedReporter: false,
+		isEstablishing:           false,
+		establishPendingConns:    new(Conns),
+		fetchRemotePendingConns:  new(Conns),
+	}, nil
 }
 
 // Run executes the controller. It launches components and then monitors
@@ -77,35 +89,50 @@ func NewController(config *Config) (controller *Controller) {
 // controller.
 // The components include:
 // - the periodic remote server list fetcher
+// - the connected reporter
 // - the tunnel manager
 // - a local SOCKS proxy that port forwards through the pool of tunnels
 // - a local HTTP proxy that port forwards through the pool of tunnels
 func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
-	Notice(NOTICE_VERSION, VERSION)
+	NoticeCoreVersion(VERSION)
+
+	// Start components
 
 	socksProxy, err := NewSocksProxy(controller.config, controller)
 	if err != nil {
-		Notice(NOTICE_ALERT, "error initializing local SOCKS proxy: %s", err)
+		NoticeAlert("error initializing local SOCKS proxy: %s", err)
 		return
 	}
 	defer socksProxy.Close()
 
 	httpProxy, err := NewHttpProxy(controller.config, controller)
 	if err != nil {
-		Notice(NOTICE_ALERT, "error initializing local HTTP proxy: %s", err)
+		NoticeAlert("error initializing local HTTP proxy: %s", err)
 		return
 	}
 	defer httpProxy.Close()
 
-	controller.runWaitGroup.Add(2)
-	go controller.remoteServerListFetcher()
+	// Note: unlike legacy Psiphon clients, this code always makes the
+	// fetch remote server list request
+
+	if !controller.config.DisableRemoteServerListFetcher {
+		controller.runWaitGroup.Add(1)
+		go controller.remoteServerListFetcher()
+	}
+
+	/// Note: the connected reporter isn't started until a tunnel is
+	// established
+
+	controller.runWaitGroup.Add(1)
 	go controller.runTunnels()
+
+	// Wait while running
 
 	select {
 	case <-shutdownBroadcast:
-		Notice(NOTICE_INFO, "controller shutdown by request")
+		NoticeInfo("controller shutdown by request")
 	case <-controller.componentFailureSignal:
-		Notice(NOTICE_ALERT, "controller shutdown due to component failure")
+		NoticeAlert("controller shutdown due to component failure")
 	}
 
 	close(controller.shutdownBroadcast)
@@ -113,7 +140,7 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	controller.fetchRemotePendingConns.CloseAll()
 	controller.runWaitGroup.Wait()
 
-	Notice(NOTICE_INFO, "exiting controller")
+	NoticeInfo("exiting controller")
 }
 
 // SignalComponentFailure notifies the controller that an associated component has failed.
@@ -131,8 +158,6 @@ func (controller *Controller) SignalComponentFailure() {
 func (controller *Controller) remoteServerListFetcher() {
 	defer controller.runWaitGroup.Done()
 
-	// Note: unlike legacy Psiphon clients, this code
-	// always makes the fetch remote server list request
 loop:
 	for {
 		err := FetchRemoteServerList(
@@ -140,10 +165,10 @@ loop:
 
 		var duration time.Duration
 		if err != nil {
-			Notice(NOTICE_ALERT, "failed to fetch remote server list: %s", err)
-			duration = FETCH_REMOTE_SERVER_LIST_RETRY_TIMEOUT
+			NoticeAlert("failed to fetch remote server list: %s", err)
+			duration = FETCH_REMOTE_SERVER_LIST_RETRY_PERIOD
 		} else {
-			duration = FETCH_REMOTE_SERVER_LIST_STALE_TIMEOUT
+			duration = FETCH_REMOTE_SERVER_LIST_STALE_PERIOD
 		}
 		timeout := time.After(duration)
 		select {
@@ -154,44 +179,94 @@ loop:
 		}
 	}
 
-	Notice(NOTICE_INFO, "exiting remote server list fetcher")
+	NoticeInfo("exiting remote server list fetcher")
+}
+
+// connectedReporter sends periodic "connected" requests to the Psiphon API.
+// These requests are for server-side unique user stats calculation. See the
+// comment in DoConnectedRequest for a description of the request mechanism.
+// To ensure we don't over- or under-count unique users, only one connected
+// request is made across all simultaneous multi-tunnels; and the connected
+// request is repeated periodically.
+func (controller *Controller) connectedReporter() {
+	defer controller.runWaitGroup.Done()
+loop:
+	for {
+
+		// Pick any active tunnel and make the next connected request. No error
+		// is logged if there's no active tunnel, as that's not an unexpected condition.
+		reported := false
+		tunnel := controller.getNextActiveTunnel()
+		if tunnel != nil {
+			err := tunnel.session.DoConnectedRequest()
+			if err == nil {
+				reported = true
+			} else {
+				NoticeAlert("failed to make connected request: %s", err)
+			}
+		}
+
+		// Schedule the next connected request and wait.
+		var duration time.Duration
+		if reported {
+			duration = PSIPHON_API_CONNECTED_REQUEST_PERIOD
+		} else {
+			duration = PSIPHON_API_CONNECTED_REQUEST_RETRY_PERIOD
+		}
+		timeout := time.After(duration)
+		select {
+		case <-timeout:
+			// Make another connected request
+		case <-controller.shutdownBroadcast:
+			break loop
+		}
+	}
+
+	NoticeInfo("exiting connected reporter")
+}
+
+func (controller *Controller) startConnectedReporter() {
+	if controller.config.DisableApi {
+		return
+	}
+
+	// Start the connected reporter after the first tunnel is established.
+	// Concurrency note: only the runTunnels goroutine may access startedConnectedReporter.
+	if !controller.startedConnectedReporter {
+		controller.startedConnectedReporter = true
+		controller.runWaitGroup.Add(1)
+		go controller.connectedReporter()
+	}
 }
 
 // runTunnels is the controller tunnel management main loop. It starts and stops
 // establishing tunnels based on the target tunnel pool size and the current size
 // of the pool. Tunnels are established asynchronously using worker goroutines.
+//
+// When there are no server entries for the target region/protocol, the
+// establishCandidateGenerator will yield no candidates and wait before
+// trying again. In the meantime, a remote server entry fetch may supply
+// valid candidates.
+//
 // When a tunnel is established, it's added to the active pool. The tunnel's
 // operateTunnel goroutine monitors the tunnel.
+//
 // When a tunnel fails, it's removed from the pool and the establish process is
 // restarted to fill the pool.
 func (controller *Controller) runTunnels() {
 	defer controller.runWaitGroup.Done()
 
-	// Don't start establishing until there are some server candidates. The
-	// typical case is a client with no server entries which will wait for
-	// the first successful FetchRemoteServerList to populate the data store.
-	for {
-		if HasServerEntries(
-			controller.config.EgressRegion, controller.config.TunnelProtocol) {
-			break
-		}
-		// TODO: replace polling with signal
-		timeout := time.After(5 * time.Second)
-		select {
-		case <-timeout:
-		case <-controller.shutdownBroadcast:
-			return
-		}
-	}
+	// Start running
+
 	controller.startEstablishing()
 loop:
 	for {
 		select {
 		case failedTunnel := <-controller.failedTunnels:
-			Notice(NOTICE_ALERT, "tunnel failed: %s", failedTunnel.serverEntry.IpAddress)
+			NoticeAlert("tunnel failed: %s", failedTunnel.serverEntry.IpAddress)
 			controller.terminateTunnel(failedTunnel)
-			// Note: only this goroutine may call startEstablishing/stopEstablishing and access
-			// isEstablishing.
+			// Concurrency note: only this goroutine may call startEstablishing/stopEstablishing
+			// and access isEstablishing.
 			if !controller.isEstablishing {
 				controller.startEstablishing()
 			}
@@ -199,20 +274,23 @@ loop:
 		// !TODO! design issue: might not be enough server entries with region/caps to ever fill tunnel slots
 		// solution(?) target MIN(CountServerEntries(region, protocol), TunnelPoolSize)
 		case establishedTunnel := <-controller.establishedTunnels:
-			Notice(NOTICE_INFO, "established tunnel: %s", establishedTunnel.serverEntry.IpAddress)
 			if controller.registerTunnel(establishedTunnel) {
-				Notice(NOTICE_INFO, "active tunnel: %s", establishedTunnel.serverEntry.IpAddress)
+				NoticeActiveTunnel(establishedTunnel.serverEntry.IpAddress)
 			} else {
 				controller.discardTunnel(establishedTunnel)
 			}
 			if controller.isFullyEstablished() {
 				controller.stopEstablishing()
 			}
+			controller.startConnectedReporter()
 
 		case <-controller.shutdownBroadcast:
 			break loop
 		}
 	}
+
+	// Stop running
+
 	controller.stopEstablishing()
 	controller.terminateAllTunnels()
 
@@ -226,7 +304,7 @@ loop:
 		controller.discardTunnel(tunnel)
 	}
 
-	Notice(NOTICE_INFO, "exiting run tunnels")
+	NoticeInfo("exiting run tunnels")
 }
 
 // SignalTunnelFailure implements the TunnelOwner interface. This function
@@ -247,7 +325,7 @@ func (controller *Controller) SignalTunnelFailure(tunnel *Tunnel) {
 
 // discardTunnel disposes of a successful connection that is no longer required.
 func (controller *Controller) discardTunnel(tunnel *Tunnel) {
-	Notice(NOTICE_INFO, "discard tunnel: %s", tunnel.serverEntry.IpAddress)
+	NoticeInfo("discard tunnel: %s", tunnel.serverEntry.IpAddress)
 	// TODO: not calling PromoteServerEntry, since that would rank the
 	// discarded tunnel before fully active tunnels. Can a discarded tunnel
 	// be promoted (since it connects), but with lower rank than all active
@@ -268,12 +346,12 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 	// a duplicate connection.
 	for _, activeTunnel := range controller.tunnels {
 		if activeTunnel.serverEntry.IpAddress == tunnel.serverEntry.IpAddress {
-			Notice(NOTICE_ALERT, "duplicate tunnel: %s", tunnel.serverEntry.IpAddress)
+			NoticeAlert("duplicate tunnel: %s", tunnel.serverEntry.IpAddress)
 			return false
 		}
 	}
 	controller.tunnels = append(controller.tunnels, tunnel)
-	Notice(NOTICE_TUNNELS, "%d", len(controller.tunnels))
+	NoticeTunnels(len(controller.tunnels))
 	return true
 }
 
@@ -301,7 +379,7 @@ func (controller *Controller) terminateTunnel(tunnel *Tunnel) {
 				controller.nextTunnel = 0
 			}
 			activeTunnel.Close()
-			Notice(NOTICE_TUNNELS, "%d", len(controller.tunnels))
+			NoticeTunnels(len(controller.tunnels))
 			break
 		}
 	}
@@ -317,7 +395,7 @@ func (controller *Controller) terminateAllTunnels() {
 	}
 	controller.tunnels = make([]*Tunnel, 0)
 	controller.nextTunnel = 0
-	Notice(NOTICE_TUNNELS, "%d", len(controller.tunnels))
+	NoticeTunnels(len(controller.tunnels))
 }
 
 // getNextActiveTunnel returns the next tunnel from the pool of active
@@ -361,10 +439,7 @@ func (controller *Controller) Dial(remoteAddr string) (conn net.Conn, err error)
 		return nil, ContextError(err)
 	}
 
-	statsConn := NewStatsConn(
-		tunneledConn, tunnel.session.StatsServerID(), tunnel.session.StatsRegexps())
-
-	return statsConn, nil
+	return tunneledConn, nil
 }
 
 // startEstablishing creates a pool of worker goroutines which will
@@ -374,7 +449,7 @@ func (controller *Controller) startEstablishing() {
 	if controller.isEstablishing {
 		return
 	}
-	Notice(NOTICE_INFO, "start establishing")
+	NoticeInfo("start establishing")
 	controller.isEstablishing = true
 	controller.establishWaitGroup = new(sync.WaitGroup)
 	controller.stopEstablishingBroadcast = make(chan struct{})
@@ -397,7 +472,7 @@ func (controller *Controller) stopEstablishing() {
 	if !controller.isEstablishing {
 		return
 	}
-	Notice(NOTICE_INFO, "stop establishing")
+	NoticeInfo("stop establishing")
 	close(controller.stopEstablishingBroadcast)
 	// Note: on Windows, interruptibleTCPClose doesn't really interrupt socket connects
 	// and may leave goroutines running for a time after the Wait call.
@@ -418,21 +493,22 @@ func (controller *Controller) stopEstablishing() {
 func (controller *Controller) establishCandidateGenerator() {
 	defer controller.establishWaitGroup.Done()
 
-	iterator, err := NewServerEntryIterator(
-		controller.config.EgressRegion, controller.config.TunnelProtocol)
+	iterator, err := NewServerEntryIterator(controller.config)
 	if err != nil {
-		Notice(NOTICE_ALERT, "failed to iterate over candidates: %s", err)
+		NoticeAlert("failed to iterate over candidates: %s", err)
 		controller.SignalComponentFailure()
 		return
 	}
 	defer iterator.Close()
 
 loop:
+	// Repeat until stopped
 	for {
+		// Yield each server entry returned by the iterator
 		for {
 			serverEntry, err := iterator.Next()
 			if err != nil {
-				Notice(NOTICE_ALERT, "failed to get next candidate: %s", err)
+				NoticeAlert("failed to get next candidate: %s", err)
 				controller.SignalComponentFailure()
 				break loop
 			}
@@ -463,8 +539,9 @@ loop:
 			break loop
 		}
 	}
+
 	close(controller.candidateServerEntries)
-	Notice(NOTICE_INFO, "stopped candidate generator")
+	NoticeInfo("stopped candidate generator")
 }
 
 // establishTunnelWorker pulls candidates from the candidate queue, establishes
@@ -486,6 +563,7 @@ loop:
 
 		tunnel, err := EstablishTunnel(
 			controller.config,
+			controller.sessionId,
 			controller.establishPendingConns,
 			serverEntry,
 			controller) // TunnelOwner
@@ -495,7 +573,7 @@ loop:
 			if controller.isStopEstablishingBroadcast() {
 				break loop
 			}
-			Notice(NOTICE_INFO, "failed to connect to %s: %s", serverEntry.IpAddress, err)
+			NoticeInfo("failed to connect to %s: %s", serverEntry.IpAddress, err)
 			continue
 		}
 
@@ -509,7 +587,7 @@ loop:
 			controller.discardTunnel(tunnel)
 		}
 	}
-	Notice(NOTICE_INFO, "stopped establish worker")
+	NoticeInfo("stopped establish worker")
 }
 
 func (controller *Controller) isStopEstablishingBroadcast() bool {

@@ -45,14 +45,15 @@ type RemoteServerList struct {
 // public key config.RemoteServerListSignaturePublicKey; and parses the
 // data field into ServerEntry records.
 func FetchRemoteServerList(config *Config, pendingConns *Conns) (err error) {
-	Notice(NOTICE_INFO, "fetching remote server list")
+	NoticeInfo("fetching remote server list")
 
 	// Note: pendingConns may be used to interrupt the fetch remote server list
 	// request. BindToDevice may be used to exclude requests from VPN routing.
 	dialConfig := &DialConfig{
-		PendingConns:          pendingConns,
-		BindToDeviceProvider:  config.BindToDeviceProvider,
-		BindToDeviceDnsServer: config.BindToDeviceDnsServer,
+		UpstreamHttpProxyAddress: config.UpstreamHttpProxyAddress,
+		PendingConns:             pendingConns,
+		BindToDeviceProvider:     config.BindToDeviceProvider,
+		BindToDeviceDnsServer:    config.BindToDeviceDnsServer,
 	}
 	transport := &http.Transport{
 		Dial: NewTCPDialer(dialConfig),
@@ -83,7 +84,7 @@ func FetchRemoteServerList(config *Config, pendingConns *Conns) (err error) {
 		return ContextError(err)
 	}
 
-	serverEntries, err := DecodeServerEntryList(remoteServerList.Data)
+	serverEntries, err := DecodeAndValidateServerEntryList(remoteServerList.Data)
 	if err != nil {
 		return ContextError(err)
 	}

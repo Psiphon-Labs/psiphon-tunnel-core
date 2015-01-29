@@ -30,6 +30,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 // Session is a utility struct which holds all of the data associated
@@ -45,9 +46,11 @@ type Session struct {
 }
 
 // MakeSessionId creates a new session ID. Making the session ID is not done
-// in NewSession as the transport needs to send the ID in the SSH credentials
-// before the tunnel is established; and NewSession performs a handshake on
-// an established tunnel.
+// in NewSession because:
+// (1) the transport needs to send the ID in the SSH credentials before the tunnel
+//     is established and NewSession performs a handshake on an established tunnel.
+// (2) the same session ID is used across multi-tunnel controller runs, where each
+//     tunnel has its own Session instance.
 func MakeSessionId() (sessionId string, err error) {
 	randomId, err := MakeSecureRandomBytes(PSIPHON_API_CLIENT_SESSION_ID_LENGTH)
 	if err != nil {
@@ -56,10 +59,10 @@ func MakeSessionId() (sessionId string, err error) {
 	return hex.EncodeToString(randomId), nil
 }
 
-// NewSession makes tunnelled handshake and connected requests to the
+// NewSession makes the tunnelled handshake request to the
 // Psiphon server and returns a Session struct, initialized with the
 // session ID, for use with subsequent Psiphon server API requests (e.g.,
-// periodic status requests).
+// periodic connected and status requests).
 func NewSession(config *Config, tunnel *Tunnel, sessionId string) (session *Session, err error) {
 
 	psiphonHttpsClient, err := makePsiphonHttpsClient(tunnel)
@@ -72,20 +75,50 @@ func NewSession(config *Config, tunnel *Tunnel, sessionId string) (session *Sess
 		psiphonHttpsClient: psiphonHttpsClient,
 		statsServerId:      tunnel.serverEntry.IpAddress,
 	}
-	// Sending two seperate requests is a legacy from when the handshake was
-	// performed before a tunnel was established and the connect was performed
-	// within the established tunnel. Here we perform both requests back-to-back
-	// inside the tunnel.
+
 	err = session.doHandshakeRequest()
-	if err != nil {
-		return nil, ContextError(err)
-	}
-	err = session.doConnectedRequest()
 	if err != nil {
 		return nil, ContextError(err)
 	}
 
 	return session, nil
+}
+
+// DoConnectedRequest performs the connected API request. This request is
+// used for statistics. The server returns a last_connected token for
+// the client to store and send next time it connects. This token is
+// a timestamp (using the server clock, and should be rounded to the
+// nearest hour) which is used to determine when a connection represents
+// a unique user for a time period.
+func (session *Session) DoConnectedRequest() error {
+	const DATA_STORE_LAST_CONNECTED_KEY = "lastConnected"
+	lastConnected, err := GetKeyValue(DATA_STORE_LAST_CONNECTED_KEY)
+	if err != nil {
+		return ContextError(err)
+	}
+	if lastConnected == "" {
+		lastConnected = "None"
+	}
+	url := session.buildRequestUrl(
+		"connected",
+		&ExtraParam{"session_id", session.sessionId},
+		&ExtraParam{"last_connected", lastConnected})
+	responseBody, err := session.doGetRequest(url)
+	if err != nil {
+		return ContextError(err)
+	}
+	var response struct {
+		connectedTimestamp string `json:connected_timestamp`
+	}
+	err = json.Unmarshal(responseBody, &response)
+	if err != nil {
+		return ContextError(err)
+	}
+	err = SetKeyValue(DATA_STORE_LAST_CONNECTED_KEY, response.connectedTimestamp)
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
 }
 
 // ServerID provides a unique identifier for the server the session connects to.
@@ -99,23 +132,37 @@ func (session *Session) StatsRegexps() *Regexps {
 	return session.statsRegexps
 }
 
+// NextStatusRequestPeriod returns the amount of time that should be waited before the
+// next time stats are sent. The next wait time is picked at random, from a range,
+// to make the stats send less fingerprintable.
+func NextStatusRequestPeriod() (duration time.Duration) {
+	jitter, err := MakeSecureRandomInt64(
+		PSIPHON_API_STATUS_REQUEST_PERIOD_MAX.Nanoseconds() -
+			PSIPHON_API_STATUS_REQUEST_PERIOD_MIN.Nanoseconds())
+
+	// In case of error we're just going to use zero jitter.
+	if err != nil {
+		NoticeAlert("NextStatusRequestPeriod: make jitter failed")
+	}
+
+	duration = PSIPHON_API_STATUS_REQUEST_PERIOD_MIN + time.Duration(jitter)
+	return
+}
+
 // DoStatusRequest makes a /status request to the server, sending session stats.
-// final should be true if this is the last such request before disconnecting.
-func (session *Session) DoStatusRequest(statsPayload json.Marshaler, final bool) error {
+func (session *Session) DoStatusRequest(statsPayload json.Marshaler) error {
 	statsPayloadJSON, err := json.Marshal(statsPayload)
 	if err != nil {
 		return ContextError(err)
 	}
 
-	connected := "1"
-	if final {
-		connected = "0"
-	}
+	// "connected" is a legacy parameter. This client does not report when
+	// it has disconnected.
 
 	url := session.buildRequestUrl(
 		"status",
 		&ExtraParam{"session_id", session.sessionId},
-		&ExtraParam{"connected", connected})
+		&ExtraParam{"connected", "1"})
 
 	err = session.doPostRequest(url, "application/json", bytes.NewReader(statsPayloadJSON))
 	if err != nil {
@@ -178,6 +225,11 @@ func (session *Session) doHandshakeRequest() error {
 		if err != nil {
 			return ContextError(err)
 		}
+		err = ValidateServerEntry(serverEntry)
+		if err != nil {
+			// Skip this entry and continue with the next one
+			continue
+		}
 		err = StoreServerEntry(serverEntry, true)
 		if err != nil {
 			return ContextError(err)
@@ -187,52 +239,15 @@ func (session *Session) doHandshakeRequest() error {
 	// TODO: formally communicate the sponsor and upgrade info to an
 	// outer client via some control interface.
 	for _, homepage := range handshakeConfig.Homepages {
-		Notice(NOTICE_HOMEPAGE, homepage)
+		NoticeHomepage(homepage)
 	}
 	if handshakeConfig.UpgradeClientVersion != "" {
-		Notice(NOTICE_UPGRADE, "%s", handshakeConfig.UpgradeClientVersion)
+		NoticeClientUpgradeAvailable(handshakeConfig.UpgradeClientVersion)
 	}
 
 	session.statsRegexps = MakeRegexps(
 		handshakeConfig.PageViewRegexes,
 		handshakeConfig.HttpsRequestRegexes)
-	return nil
-}
-
-// doConnectedRequest performs the connected API request. This request is
-// used for statistics. The server returns a last_connected token for
-// the client to store and send next time it connects. This token is
-// a timestamp (using the server clock, and should be rounded to the
-// nearest hour) which is used to determine when a new connection is
-// a unique user for a time period.
-func (session *Session) doConnectedRequest() error {
-	const DATA_STORE_LAST_CONNECTED_KEY = "lastConnected"
-	lastConnected, err := GetKeyValue(DATA_STORE_LAST_CONNECTED_KEY)
-	if err != nil {
-		return ContextError(err)
-	}
-	if lastConnected == "" {
-		lastConnected = "None"
-	}
-	url := session.buildRequestUrl(
-		"connected",
-		&ExtraParam{"session_id", session.sessionId},
-		&ExtraParam{"last_connected", lastConnected})
-	responseBody, err := session.doGetRequest(url)
-	if err != nil {
-		return ContextError(err)
-	}
-	var response struct {
-		connectedTimestamp string `json:connected_timestamp`
-	}
-	err = json.Unmarshal(responseBody, &response)
-	if err != nil {
-		return ContextError(err)
-	}
-	err = SetKeyValue(DATA_STORE_LAST_CONNECTED_KEY, response.connectedTimestamp)
-	if err != nil {
-		return ContextError(err)
-	}
 	return nil
 }
 

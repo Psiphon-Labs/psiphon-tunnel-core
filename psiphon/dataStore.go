@@ -165,14 +165,24 @@ func serverEntryExists(transaction *sql.Tx, ipAddress string) (bool, error) {
 // rank order, so the largest rank is top rank.
 // When replaceIfExists is true, an existing server entry record is
 // overwritten; otherwise, the existing record is unchanged.
+// If the server entry data is malformed, an alert notice is issued and
+// the entry is skipped; no error is returned.
 func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
+
+	// Server entries should already be validated before this point,
+	// so instead of skipping we fail with an error.
+	err := ValidateServerEntry(serverEntry)
+	if err != nil {
+		return ContextError(errors.New("invalid server entry"))
+	}
+
 	return transactionWithRetry(func(transaction *sql.Tx) error {
 		serverEntryExists, err := serverEntryExists(transaction, serverEntry.IpAddress)
 		if err != nil {
 			return ContextError(err)
 		}
 		if serverEntryExists && !replaceIfExists {
-			Notice(NOTICE_INFO, "ignored update for server %s", serverEntry.IpAddress)
+			NoticeInfo("ignored update for server %s", serverEntry.IpAddress)
 			return nil
 		}
 		_, err = transaction.Exec(`
@@ -216,7 +226,7 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 		}
 		// TODO: post notice after commit
 		if !serverEntryExists {
-			Notice(NOTICE_INFO, "updated server %s", serverEntry.IpAddress)
+			NoticeInfo("updated server %s", serverEntry.IpAddress)
 		}
 		return nil
 	})
@@ -264,19 +274,28 @@ func PromoteServerEntry(ipAddress string) error {
 // ServerEntryIterator is used to iterate over
 // stored server entries in rank order.
 type ServerEntryIterator struct {
-	region      string
-	protocol    string
-	excludeIds  []string
-	transaction *sql.Tx
-	cursor      *sql.Rows
+	region                      string
+	protocol                    string
+	transaction                 *sql.Tx
+	cursor                      *sql.Rows
+	isTargetServerEntryIterator bool
+	hasNextTargetServerEntry    bool
+	targetServerEntry           *ServerEntry
 }
 
 // NewServerEntryIterator creates a new NewServerEntryIterator
-func NewServerEntryIterator(region, protocol string) (iterator *ServerEntryIterator, err error) {
+func NewServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err error) {
+
+	// When configured, this target server entry is the only candidate
+	if config.TargetServerEntry != "" {
+		return newTargetServerEntryIterator(config)
+	}
+
 	checkInitDataStore()
 	iterator = &ServerEntryIterator{
-		region:   region,
-		protocol: protocol,
+		region:                      config.EgressRegion,
+		protocol:                    config.TunnelProtocol,
+		isTargetServerEntryIterator: false,
 	}
 	err = iterator.Reset()
 	if err != nil {
@@ -285,10 +304,44 @@ func NewServerEntryIterator(region, protocol string) (iterator *ServerEntryItera
 	return iterator, nil
 }
 
+// newTargetServerEntryIterator is a helper for initializing the TargetServerEntry case
+func newTargetServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err error) {
+	serverEntry, err := DecodeServerEntry(config.TargetServerEntry)
+	if err != nil {
+		return nil, err
+	}
+	if config.EgressRegion != "" && serverEntry.Region != config.EgressRegion {
+		return nil, errors.New("TargetServerEntry does not support EgressRegion")
+	}
+	if config.TunnelProtocol != "" {
+		// Note: same capability/protocol mapping as in StoreServerEntry
+		requiredCapability := strings.TrimSuffix(config.TunnelProtocol, "-OSSH")
+		if !Contains(serverEntry.Capabilities, requiredCapability) {
+			return nil, errors.New("TargetServerEntry does not support TunnelProtocol")
+		}
+	}
+	iterator = &ServerEntryIterator{
+		isTargetServerEntryIterator: true,
+		hasNextTargetServerEntry:    true,
+		targetServerEntry:           serverEntry,
+	}
+	NoticeInfo("using TargetServerEntry: %s", serverEntry.IpAddress)
+	return iterator, nil
+}
+
 // Reset a NewServerEntryIterator to the start of its cycle. The next
 // call to Next will return the first server entry.
 func (iterator *ServerEntryIterator) Reset() error {
 	iterator.Close()
+
+	if iterator.isTargetServerEntryIterator {
+		iterator.hasNextTargetServerEntry = true
+		return nil
+	}
+
+	count := CountServerEntries(iterator.region, iterator.protocol)
+	NoticeCandidateServers(iterator.region, iterator.protocol, count)
+
 	transaction, err := singleton.db.Begin()
 	if err != nil {
 		return ContextError(err)
@@ -347,6 +400,15 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 			iterator.Close()
 		}
 	}()
+
+	if iterator.isTargetServerEntryIterator {
+		if iterator.hasNextTargetServerEntry {
+			iterator.hasNextTargetServerEntry = false
+			return iterator.targetServerEntry, nil
+		}
+		return nil, nil
+	}
+
 	if !iterator.cursor.Next() {
 		err = iterator.cursor.Err()
 		if err != nil {
@@ -406,10 +468,9 @@ func makeServerEntryWhereClause(
 	return whereClause, whereParams
 }
 
-// HasServerEntries returns true if the data store contains at
-// least one server entry (for the specified region and/or protocol,
-// when not blank).
-func HasServerEntries(region, protocol string) bool {
+// CountServerEntries returns a count of stored servers for the
+// specified region and protocol.
+func CountServerEntries(region, protocol string) int {
 	checkInitDataStore()
 	var count int
 	whereClause, whereParams := makeServerEntryWhereClause(region, protocol, nil)
@@ -417,8 +478,8 @@ func HasServerEntries(region, protocol string) bool {
 	err := singleton.db.QueryRow(query, whereParams...).Scan(&count)
 
 	if err != nil {
-		Notice(NOTICE_ALERT, "HasServerEntries failed: %s", err)
-		return false
+		NoticeAlert("CountServerEntries failed: %s", err)
+		return 0
 	}
 
 	if region == "" {
@@ -427,10 +488,10 @@ func HasServerEntries(region, protocol string) bool {
 	if protocol == "" {
 		protocol = "(any)"
 	}
-	Notice(NOTICE_INFO, "servers for region %s and protocol %s: %d",
+	NoticeInfo("servers for region %s and protocol %s: %d",
 		region, protocol, count)
 
-	return count > 0
+	return count
 }
 
 // GetServerEntryIpAddresses returns an array containing

@@ -83,11 +83,12 @@ func makeStatsDialer(serverID string, regexps *Regexps) func(network, addr strin
 	}
 }
 
-func (suite *StatsTestSuite) Test_NextSendPeriod() {
-	res1 := NextSendPeriod()
+// TODO: move out of stats test suite
+func (suite *StatsTestSuite) Test_NextStatusRequestPeriod() {
+	res1 := NextStatusRequestPeriod()
 	suite.True(res1 > time.Duration(0), "duration should not be zero")
 
-	res2 := NextSendPeriod()
+	res2 := NextStatusRequestPeriod()
 	suite.NotEqual(res1, res2, "duration should have randomness difference between calls")
 }
 

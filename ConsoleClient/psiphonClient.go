@@ -68,7 +68,9 @@ func main() {
 			log.Fatalf("error opening log file: %s", err)
 		}
 		defer logFile.Close()
-		log.SetOutput(logFile)
+		psiphon.SetNoticeOutput(logFile)
+	} else {
+		psiphon.SetNoticeOutput(psiphon.NewNoticeConsoleRewriter(os.Stderr))
 	}
 
 	// Handle optional profiling parameter
@@ -99,7 +101,7 @@ func main() {
 			log.Fatalf("error loading embedded server entry list file: %s", err)
 		}
 		// TODO: stream embedded server list data? also, the cast makaes an unnecessary copy of a large buffer?
-		serverEntries, err := psiphon.DecodeServerEntryList(string(serverEntryList))
+		serverEntries, err := psiphon.DecodeAndValidateServerEntryList(string(serverEntryList))
 		if err != nil {
 			log.Fatalf("error decoding embedded server entry list file: %s", err)
 		}
@@ -113,7 +115,11 @@ func main() {
 
 	// Run Psiphon
 
-	controller := psiphon.NewController(config)
+	controller, err := psiphon.NewController(config)
+	if err != nil {
+		log.Fatalf("error creating controller: %s", err)
+	}
+
 	controllerStopSignal := make(chan struct{}, 1)
 	shutdownBroadcast := make(chan struct{})
 	controllerWaitGroup := new(sync.WaitGroup)
@@ -130,10 +136,10 @@ func main() {
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill)
 	select {
 	case <-systemStopSignal:
-		psiphon.Notice(psiphon.NOTICE_INFO, "shutdown by system")
+		psiphon.NoticeInfo("shutdown by system")
 		close(shutdownBroadcast)
 		controllerWaitGroup.Wait()
 	case <-controllerStopSignal:
-		psiphon.Notice(psiphon.NOTICE_INFO, "shutdown by controller")
+		psiphon.NoticeInfo("shutdown by controller")
 	}
 }

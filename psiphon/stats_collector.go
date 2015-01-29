@@ -23,7 +23,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"sync"
-	"time"
 )
 
 // TODO: Stats for a server are only removed when they are sent in a status
@@ -102,23 +101,6 @@ func recordStat(stat *statsUpdate) {
 	//fmt.Println("server:", stat.serverID, "host:", stat.hostname, "sent:", storedHostStats.numBytesSent, "received:", storedHostStats.numBytesReceived)
 }
 
-// NextSendPeriod returns the amount of time that should be waited before the
-// next time stats are sent.
-func NextSendPeriod() (duration time.Duration) {
-	defaultStatsSendDuration := 5 * 60 * 1000 // 5 minutes in millis
-
-	// We include a random component to make the stats send less fingerprintable.
-	jitter, err := MakeSecureRandomInt(defaultStatsSendDuration)
-
-	// In case of error we're just going to use zero jitter.
-	if err != nil {
-		Notice(NOTICE_ALERT, "stats.NextSendPeriod: MakeSecureRandomInt failed")
-	}
-
-	duration = time.Duration(defaultStatsSendDuration+jitter) * time.Millisecond
-	return
-}
-
 // Implement the json.Marshaler interface
 func (ss serverStats) MarshalJSON() ([]byte, error) {
 	out := make(map[string]interface{})
@@ -130,12 +112,12 @@ func (ss serverStats) MarshalJSON() ([]byte, error) {
 	// In case of randomness fail, we're going to proceed with zero padding.
 	// TODO: Is this okay?
 	if err != nil {
-		Notice(NOTICE_ALERT, "stats.serverStats.MarshalJSON: MakeSecureRandomInt failed")
+		NoticeAlert("stats.serverStats.MarshalJSON: MakeSecureRandomInt failed")
 		padding = make([]byte, 0)
 	} else {
 		padding, err = MakeSecureRandomBytes(paddingSize)
 		if err != nil {
-			Notice(NOTICE_ALERT, "stats.serverStats.MarshalJSON: MakeSecureRandomBytes failed")
+			NoticeAlert("stats.serverStats.MarshalJSON: MakeSecureRandomBytes failed")
 			padding = make([]byte, 0)
 		}
 	}
@@ -154,7 +136,7 @@ func (ss serverStats) MarshalJSON() ([]byte, error) {
 
 	// Print the notice before adding the padding, since it's not interesting
 	noticeJSON, _ := json.Marshal(out)
-	Notice(NOTICE_INFO, "sending stats: %s", noticeJSON)
+	NoticeInfo("sending stats: %s", noticeJSON)
 
 	out["padding"] = base64.StdEncoding.EncodeToString(padding)
 

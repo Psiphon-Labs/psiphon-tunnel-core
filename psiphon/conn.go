@@ -140,12 +140,12 @@ func Relay(localConn, remoteConn net.Conn) {
 		defer copyWaitGroup.Done()
 		_, err := io.Copy(localConn, remoteConn)
 		if err != nil {
-			Notice(NOTICE_ALERT, "Relay failed: %s", ContextError(err))
+			NoticeAlert("Relay failed: %s", ContextError(err))
 		}
 	}()
 	_, err := io.Copy(remoteConn, localConn)
 	if err != nil {
-		Notice(NOTICE_ALERT, "Relay failed: %s", ContextError(err))
+		NoticeAlert("Relay failed: %s", ContextError(err))
 	}
 	copyWaitGroup.Wait()
 }
