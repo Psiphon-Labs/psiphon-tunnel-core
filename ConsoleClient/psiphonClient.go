@@ -68,7 +68,9 @@ func main() {
 			log.Fatalf("error opening log file: %s", err)
 		}
 		defer logFile.Close()
-		log.SetOutput(logFile)
+		psiphon.SetNoticeOutput(logFile)
+	} else {
+		psiphon.SetNoticeOutput(psiphon.NewNoticeConsoleRewriter(os.Stderr))
 	}
 
 	// Handle optional profiling parameter
@@ -134,10 +136,10 @@ func main() {
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill)
 	select {
 	case <-systemStopSignal:
-		psiphon.Notice(psiphon.NOTICE_INFO, "shutdown by system")
+		psiphon.NoticeInfo("shutdown by system")
 		close(shutdownBroadcast)
 		controllerWaitGroup.Wait()
 	case <-controllerStopSignal:
-		psiphon.Notice(psiphon.NOTICE_INFO, "shutdown by controller")
+		psiphon.NoticeInfo("shutdown by controller")
 	}
 }

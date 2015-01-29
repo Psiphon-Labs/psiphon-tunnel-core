@@ -182,7 +182,7 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 			return ContextError(err)
 		}
 		if serverEntryExists && !replaceIfExists {
-			Notice(NOTICE_INFO, "ignored update for server %s", serverEntry.IpAddress)
+			NoticeInfo("ignored update for server %s", serverEntry.IpAddress)
 			return nil
 		}
 		_, err = transaction.Exec(`
@@ -226,7 +226,7 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 		}
 		// TODO: post notice after commit
 		if !serverEntryExists {
-			Notice(NOTICE_INFO, "updated server %s", serverEntry.IpAddress)
+			NoticeInfo("updated server %s", serverEntry.IpAddress)
 		}
 		return nil
 	})
@@ -325,7 +325,7 @@ func newTargetServerEntryIterator(config *Config) (iterator *ServerEntryIterator
 		hasNextTargetServerEntry:    true,
 		targetServerEntry:           serverEntry,
 	}
-	Notice(NOTICE_INFO, "using TargetServerEntry: %s", serverEntry.IpAddress)
+	NoticeInfo("using TargetServerEntry: %s", serverEntry.IpAddress)
 	return iterator, nil
 }
 
@@ -338,6 +338,9 @@ func (iterator *ServerEntryIterator) Reset() error {
 		iterator.hasNextTargetServerEntry = true
 		return nil
 	}
+
+	count := CountServerEntries(iterator.region, iterator.protocol)
+	NoticeCandidateServers(iterator.region, iterator.protocol, count)
 
 	transaction, err := singleton.db.Begin()
 	if err != nil {
@@ -475,7 +478,7 @@ func CountServerEntries(region, protocol string) int {
 	err := singleton.db.QueryRow(query, whereParams...).Scan(&count)
 
 	if err != nil {
-		Notice(NOTICE_ALERT, "CountServerEntries failed: %s", err)
+		NoticeAlert("CountServerEntries failed: %s", err)
 		return 0
 	}
 
@@ -485,7 +488,7 @@ func CountServerEntries(region, protocol string) int {
 	if protocol == "" {
 		protocol = "(any)"
 	}
-	Notice(NOTICE_INFO, "servers for region %s and protocol %s: %d",
+	NoticeInfo("servers for region %s and protocol %s: %d",
 		region, protocol, count)
 
 	return count

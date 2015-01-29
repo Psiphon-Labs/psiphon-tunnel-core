@@ -20,13 +20,19 @@
 package psiphon
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
+	"os"
 	"runtime"
+	"strings"
+	"sync"
 )
 
 // Contains is a helper function that returns true
@@ -71,6 +77,18 @@ func MakeSecureRandomBytes(length int) ([]byte, error) {
 	return randomBytes, nil
 }
 
+func DecodeCertificate(encodedCertificate string) (certificate *x509.Certificate, err error) {
+	derEncodedCertificate, err := base64.StdEncoding.DecodeString(encodedCertificate)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	certificate, err = x509.ParseCertificate(derEncodedCertificate)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	return certificate, nil
+}
+
 // TrimError removes the middle of over-long error message strings
 func TrimError(err error) error {
 	const MAX_LEN = 100
@@ -88,17 +106,59 @@ func ContextError(err error) error {
 	}
 	pc, _, line, _ := runtime.Caller(1)
 	funcName := runtime.FuncForPC(pc).Name()
+	index := strings.LastIndex(funcName, "/")
+	if index != -1 {
+		funcName = funcName[index+1:]
+	}
 	return fmt.Errorf("%s#%d: %s", funcName, line, err)
 }
 
-func DecodeCertificate(encodedCertificate string) (certificate *x509.Certificate, err error) {
-	derEncodedCertificate, err := base64.StdEncoding.DecodeString(encodedCertificate)
-	if err != nil {
-		return nil, ContextError(err)
+// IsNetworkBindError returns true when the err is due to EADDRINUSE.
+func IsNetworkBindError(err error) bool {
+	return strings.Contains(err.Error(), "bind: address already in use")
+}
+
+// NoticeConsoleRewriter consumes JOSN-format notice input and parses each
+// notice and rewrites in a more human-readable format more suitable for
+// console output. The data payload field is left as JSON.
+type NoticeConsoleRewriter struct {
+	mutex  sync.Mutex
+	writer io.Writer
+	buffer []byte
+}
+
+// NewNoticeConsoleRewriter initializes a new NoticeConsoleRewriter
+func NewNoticeConsoleRewriter(writer io.Writer) *NoticeConsoleRewriter {
+	return &NoticeConsoleRewriter{writer: writer}
+}
+
+// Write implements io.Writer.
+func (rewriter *NoticeConsoleRewriter) Write(p []byte) (n int, err error) {
+	rewriter.mutex.Lock()
+	defer rewriter.mutex.Unlock()
+
+	rewriter.buffer = append(rewriter.buffer, p...)
+
+	index := bytes.Index(rewriter.buffer, []byte("\n"))
+	if index == -1 {
+		return len(p), nil
 	}
-	certificate, err = x509.ParseCertificate(derEncodedCertificate)
-	if err != nil {
-		return nil, ContextError(err)
+	line := rewriter.buffer[:index]
+	rewriter.buffer = rewriter.buffer[index+1:]
+
+	type NoticeObject struct {
+		NoticeType string          `json:"noticeType"`
+		Data       json.RawMessage `json:"data"`
+		Timestamp  string          `json:"timestamp"`
 	}
-	return certificate, nil
+
+	var noticeObject NoticeObject
+	_ = json.Unmarshal(line, &noticeObject)
+	fmt.Fprintf(os.Stderr,
+		"%s %s %s\n",
+		noticeObject.Timestamp,
+		noticeObject.NoticeType,
+		string(noticeObject.Data))
+
+	return len(p), nil
 }

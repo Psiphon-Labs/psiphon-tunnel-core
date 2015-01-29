@@ -84,7 +84,7 @@ func ValidateServerEntry(serverEntry *ServerEntry) error {
 		errMsg := fmt.Sprintf("server entry has invalid IpAddress: '%s'", serverEntry.IpAddress)
 		// Some callers skip invalid server entries without propagating
 		// the error mesage, so issue a notice.
-		Notice(NOTICE_ALERT, errMsg)
+		NoticeAlert(errMsg)
 		return ContextError(errors.New(errMsg))
 	}
 	return nil

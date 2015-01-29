@@ -44,6 +44,9 @@ func NewHttpProxy(config *Config, tunneler Tunneler) (proxy *HttpProxy, err erro
 	listener, err := net.Listen(
 		"tcp", fmt.Sprintf("127.0.0.1:%d", config.LocalHttpProxyPort))
 	if err != nil {
+		if IsNetworkBindError(err) {
+			NoticeHttpProxyPortInUse(config.LocalSocksProxyPort)
+		}
 		return nil, ContextError(err)
 	}
 	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
@@ -66,7 +69,7 @@ func NewHttpProxy(config *Config, tunneler Tunneler) (proxy *HttpProxy, err erro
 	}
 	proxy.serveWaitGroup.Add(1)
 	go proxy.serve()
-	Notice(NOTICE_HTTP_PROXY_PORT, "%d", proxy.listener.Addr().(*net.TCPAddr).Port)
+	NoticeListeningHttpProxyPort(proxy.listener.Addr().(*net.TCPAddr).Port)
 	return proxy, nil
 }
 
@@ -103,20 +106,20 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 		hijacker, _ := responseWriter.(http.Hijacker)
 		conn, _, err := hijacker.Hijack()
 		if err != nil {
-			Notice(NOTICE_ALERT, "%s", ContextError(err))
+			NoticeAlert("%s", ContextError(err))
 			http.Error(responseWriter, "", http.StatusInternalServerError)
 			return
 		}
 		go func() {
 			err := proxy.httpConnectHandler(conn, request.URL.Host)
 			if err != nil {
-				Notice(NOTICE_ALERT, "%s", ContextError(err))
+				NoticeAlert("%s", ContextError(err))
 			}
 		}()
 		return
 	}
 	if !request.URL.IsAbs() {
-		Notice(NOTICE_ALERT, "%s", ContextError(errors.New("no domain in request URL")))
+		NoticeAlert("%s", ContextError(errors.New("no domain in request URL")))
 		http.Error(responseWriter, "", http.StatusInternalServerError)
 		return
 	}
@@ -131,7 +134,7 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 	// Relay the HTTP request and get the response
 	response, err := proxy.httpRelay.RoundTrip(request)
 	if err != nil {
-		Notice(NOTICE_ALERT, "%s", ContextError(err))
+		NoticeAlert("%s", ContextError(err))
 		forceClose(responseWriter)
 		return
 	}
@@ -154,7 +157,7 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 	responseWriter.WriteHeader(response.StatusCode)
 	_, err = io.Copy(responseWriter, response.Body)
 	if err != nil {
-		Notice(NOTICE_ALERT, "%s", ContextError(err))
+		NoticeAlert("%s", ContextError(err))
 		forceClose(responseWriter)
 		return
 	}
@@ -237,8 +240,8 @@ func (proxy *HttpProxy) serve() {
 	default:
 		if err != nil {
 			proxy.tunneler.SignalComponentFailure()
-			Notice(NOTICE_ALERT, "%s", ContextError(err))
+			NoticeAlert("%s", ContextError(err))
 		}
 	}
-	Notice(NOTICE_INFO, "HTTP proxy stopped")
+	NoticeInfo("HTTP proxy stopped")
 }

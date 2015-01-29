@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	VERSION                                    = "0.0.5"
+	VERSION                                    = "0.0.6"
 	DATA_STORE_FILENAME                        = "psiphon.db"
 	CONNECTION_WORKER_POOL_SIZE                = 10
 	TUNNEL_POOL_SIZE                           = 1

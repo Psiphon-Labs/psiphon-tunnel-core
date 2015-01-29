@@ -46,6 +46,9 @@ func NewSocksProxy(config *Config, tunneler Tunneler) (proxy *SocksProxy, err er
 	listener, err := socks.ListenSocks(
 		"tcp", fmt.Sprintf("127.0.0.1:%d", config.LocalSocksProxyPort))
 	if err != nil {
+		if IsNetworkBindError(err) {
+			NoticeSocksProxyPortInUse(config.LocalSocksProxyPort)
+		}
 		return nil, ContextError(err)
 	}
 	proxy = &SocksProxy{
@@ -57,7 +60,7 @@ func NewSocksProxy(config *Config, tunneler Tunneler) (proxy *SocksProxy, err er
 	}
 	proxy.serveWaitGroup.Add(1)
 	go proxy.serve()
-	Notice(NOTICE_SOCKS_PROXY_PORT, "%d", proxy.listener.Addr().(*net.TCPAddr).Port)
+	NoticeListeningSocksProxyPort(proxy.listener.Addr().(*net.TCPAddr).Port)
 	return proxy, nil
 }
 
@@ -103,7 +106,7 @@ loop:
 		default:
 		}
 		if err != nil {
-			Notice(NOTICE_ALERT, "SOCKS proxy accept error: %s", err)
+			NoticeAlert("SOCKS proxy accept error: %s", err)
 			if e, ok := err.(net.Error); ok && e.Temporary() {
 				// Temporary error, keep running
 				continue
@@ -115,9 +118,9 @@ loop:
 		go func() {
 			err := proxy.socksConnectionHandler(socksConnection)
 			if err != nil {
-				Notice(NOTICE_ALERT, "%s", ContextError(err))
+				NoticeAlert("%s", ContextError(err))
 			}
 		}()
 	}
-	Notice(NOTICE_INFO, "SOCKS proxy stopped")
+	NoticeInfo("SOCKS proxy stopped")
 }

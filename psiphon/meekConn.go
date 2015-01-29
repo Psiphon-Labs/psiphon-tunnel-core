@@ -364,14 +364,14 @@ func (meek *MeekConn) relay() {
 			sendPayloadSize, err = sendBuffer.Read(sendPayload)
 			meek.replaceSendBuffer(sendBuffer)
 			if err != nil {
-				Notice(NOTICE_ALERT, "%s", ContextError(err))
+				NoticeAlert("%s", ContextError(err))
 				go meek.Close()
 				return
 			}
 		}
 		receivedPayload, err := meek.roundTrip(sendPayload[:sendPayloadSize])
 		if err != nil {
-			Notice(NOTICE_ALERT, "%s", ContextError(err))
+			NoticeAlert("%s", ContextError(err))
 			go meek.Close()
 			return
 		}
@@ -381,7 +381,7 @@ func (meek *MeekConn) relay() {
 		}
 		receivedPayloadSize, err := meek.readPayload(receivedPayload)
 		if err != nil {
-			Notice(NOTICE_ALERT, "%s", ContextError(err))
+			NoticeAlert("%s", ContextError(err))
 			go meek.Close()
 			return
 		}

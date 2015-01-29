@@ -104,8 +104,6 @@ func EstablishTunnel(
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	Notice(NOTICE_INFO, "connecting to %s in region %s using %s",
-		serverEntry.IpAddress, serverEntry.Region, selectedProtocol)
 
 	// Build transport layers and establish SSH connection
 	conn, closedSignal, sshClient, err := dialSsh(
@@ -143,7 +141,7 @@ func EstablishTunnel(
 	// proceed with this tunnel as long as at least one previous handhake succeeded?
 	//
 	if !config.DisableApi {
-		Notice(NOTICE_INFO, "starting session for %s", tunnel.serverEntry.IpAddress)
+		NoticeInfo("starting session for %s", tunnel.serverEntry.IpAddress)
 		tunnel.session, err = NewSession(config, tunnel, sessionId)
 		if err != nil {
 			return nil, ContextError(fmt.Errorf("error starting session for %s: %s", tunnel.serverEntry.IpAddress, err))
@@ -246,7 +244,7 @@ func (conn *TunneledConn) Write(buffer []byte) (n int, err error) {
 // SignalComponentFailure notifies the tunnel that an associated component has failed.
 // This will terminate the tunnel.
 func (tunnel *Tunnel) SignalComponentFailure() {
-	Notice(NOTICE_ALERT, "tunnel received component failure signal")
+	NoticeAlert("tunnel received component failure signal")
 	tunnel.Close()
 }
 
@@ -305,6 +303,16 @@ func dialSsh(
 	case TUNNEL_PROTOCOL_SSH:
 		port = serverEntry.SshPort
 	}
+
+	frontingDomain := ""
+	if useFronting {
+		frontingDomain = serverEntry.MeekFrontingDomain
+	}
+	NoticeConnectingServer(
+		serverEntry.IpAddress,
+		serverEntry.Region,
+		selectedProtocol,
+		frontingDomain)
 
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
@@ -451,8 +459,7 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 		case failures := <-tunnel.portForwardFailures:
 			// Note: no mutex on portForwardFailureTotal; only referenced here
 			tunnel.portForwardFailureTotal += failures
-			Notice(
-				NOTICE_INFO, "port forward failures for %s: %d",
+			NoticeInfo("port forward failures for %s: %d",
 				tunnel.serverEntry.IpAddress, tunnel.portForwardFailureTotal)
 			if tunnel.portForwardFailureTotal > config.PortForwardFailureThreshold {
 				err = errors.New("tunnel exceeded port forward failure threshold")
@@ -464,13 +471,13 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 		case <-tunnel.shutdownOperateBroadcast:
 			// Attempt to send any remaining stats
 			sendStats(tunnel)
-			Notice(NOTICE_INFO, "shutdown operate tunnel")
+			NoticeInfo("shutdown operate tunnel")
 			return
 		}
 	}
 
 	if err != nil {
-		Notice(NOTICE_ALERT, "operate tunnel error for %s: %s", tunnel.serverEntry.IpAddress, err)
+		NoticeAlert("operate tunnel error for %s: %s", tunnel.serverEntry.IpAddress, err)
 		tunnelOwner.SignalTunnelFailure(tunnel)
 	}
 }
@@ -487,7 +494,7 @@ func sendStats(tunnel *Tunnel) {
 	if payload != nil {
 		err := tunnel.session.DoStatusRequest(payload)
 		if err != nil {
-			Notice(NOTICE_ALERT, "DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
+			NoticeAlert("DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
 			PutBack(tunnel.serverEntry.IpAddress, payload)
 		}
 	}

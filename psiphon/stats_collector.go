@@ -112,12 +112,12 @@ func (ss serverStats) MarshalJSON() ([]byte, error) {
 	// In case of randomness fail, we're going to proceed with zero padding.
 	// TODO: Is this okay?
 	if err != nil {
-		Notice(NOTICE_ALERT, "stats.serverStats.MarshalJSON: MakeSecureRandomInt failed")
+		NoticeAlert("stats.serverStats.MarshalJSON: MakeSecureRandomInt failed")
 		padding = make([]byte, 0)
 	} else {
 		padding, err = MakeSecureRandomBytes(paddingSize)
 		if err != nil {
-			Notice(NOTICE_ALERT, "stats.serverStats.MarshalJSON: MakeSecureRandomBytes failed")
+			NoticeAlert("stats.serverStats.MarshalJSON: MakeSecureRandomBytes failed")
 			padding = make([]byte, 0)
 		}
 	}
@@ -136,7 +136,7 @@ func (ss serverStats) MarshalJSON() ([]byte, error) {
 
 	// Print the notice before adding the padding, since it's not interesting
 	noticeJSON, _ := json.Marshal(out)
-	Notice(NOTICE_INFO, "sending stats: %s", noticeJSON)
+	NoticeInfo("sending stats: %s", noticeJSON)
 
 	out["padding"] = base64.StdEncoding.EncodeToString(padding)
 

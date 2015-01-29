@@ -39,19 +39,19 @@ func MakeRegexps(pageViewRegexes, httpsRequestRegexes []map[string]string) *Rege
 	for _, rr := range httpsRequestRegexes {
 		regexString := rr["regex"]
 		if regexString == "" {
-			Notice(NOTICE_ALERT, "MakeRegexps: empty regex")
+			NoticeAlert("MakeRegexps: empty regex")
 			continue
 		}
 
 		replace := rr["replace"]
 		if replace == "" {
-			Notice(NOTICE_ALERT, "MakeRegexps: empty replace")
+			NoticeAlert("MakeRegexps: empty replace")
 			continue
 		}
 
 		regex, err := regexp.Compile(regexString)
 		if err != nil {
-			Notice(NOTICE_ALERT, "MakeRegexps: failed to compile regex: %s: %s", regexString, err)
+			NoticeAlert("MakeRegexps: failed to compile regex: %s: %s", regexString, err)
 			continue
 		}
 

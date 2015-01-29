@@ -142,7 +142,7 @@ func NextStatusRequestPeriod() (duration time.Duration) {
 
 	// In case of error we're just going to use zero jitter.
 	if err != nil {
-		Notice(NOTICE_ALERT, "NextStatusRequestPeriod: make jitter failed")
+		NoticeAlert("NextStatusRequestPeriod: make jitter failed")
 	}
 
 	duration = PSIPHON_API_STATUS_REQUEST_PERIOD_MIN + time.Duration(jitter)
@@ -239,10 +239,10 @@ func (session *Session) doHandshakeRequest() error {
 	// TODO: formally communicate the sponsor and upgrade info to an
 	// outer client via some control interface.
 	for _, homepage := range handshakeConfig.Homepages {
-		Notice(NOTICE_HOMEPAGE, homepage)
+		NoticeHomepage(homepage)
 	}
 	if handshakeConfig.UpgradeClientVersion != "" {
-		Notice(NOTICE_UPGRADE, "%s", handshakeConfig.UpgradeClientVersion)
+		NoticeClientUpgradeAvailable(handshakeConfig.UpgradeClientVersion)
 	}
 
 	session.statsRegexps = MakeRegexps(
