@@ -84,7 +84,7 @@ func FetchRemoteServerList(config *Config, pendingConns *Conns) (err error) {
 		return ContextError(err)
 	}
 
-	serverEntries, err := DecodeServerEntryList(remoteServerList.Data)
+	serverEntries, err := DecodeAndValidateServerEntryList(remoteServerList.Data)
 	if err != nil {
 		return ContextError(err)
 	}

@@ -24,6 +24,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
 	"strings"
 )
 
@@ -71,14 +73,37 @@ func DecodeServerEntry(encodedServerEntry string) (serverEntry *ServerEntry, err
 	return serverEntry, nil
 }
 
-// DecodeServerEntryList extracts server entries from the list encoding
+// ValidateServerEntry checks for malformed server entries.
+// Currently, it checks for a valid ipAddress. This is important since
+// handshake requests submit back to the server a list of known server
+// IP addresses and the handshake API expects well-formed inputs.
+// TODO: validate more fields
+func ValidateServerEntry(serverEntry *ServerEntry) error {
+	ipAddr := net.ParseIP(serverEntry.IpAddress)
+	if ipAddr == nil {
+		errMsg := fmt.Sprintf("server entry has invalid IpAddress: '%s'", serverEntry.IpAddress)
+		// Some callers skip invalid server entries without propagating
+		// the error mesage, so issue a notice.
+		Notice(NOTICE_ALERT, errMsg)
+		return ContextError(errors.New(errMsg))
+	}
+	return nil
+}
+
+// DecodeAndValidateServerEntryList extracts server entries from the list encoding
 // used by remote server lists and Psiphon server handshake requests.
-func DecodeServerEntryList(encodedServerEntryList string) (serverEntries []*ServerEntry, err error) {
+// Each server entry is validated and invalid entries are skipped.
+func DecodeAndValidateServerEntryList(encodedServerEntryList string) (serverEntries []*ServerEntry, err error) {
 	serverEntries = make([]*ServerEntry, 0)
 	for _, encodedServerEntry := range strings.Split(encodedServerEntryList, "\n") {
+		// TODO: skip this entry and continue if can't decode?
 		serverEntry, err := DecodeServerEntry(encodedServerEntry)
 		if err != nil {
 			return nil, ContextError(err)
+		}
+		if ValidateServerEntry(serverEntry) != nil {
+			// Skip this entry and continue with the next one
+			continue
 		}
 		serverEntries = append(serverEntries, serverEntry)
 	}

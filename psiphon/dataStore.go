@@ -165,7 +165,17 @@ func serverEntryExists(transaction *sql.Tx, ipAddress string) (bool, error) {
 // rank order, so the largest rank is top rank.
 // When replaceIfExists is true, an existing server entry record is
 // overwritten; otherwise, the existing record is unchanged.
+// If the server entry data is malformed, an alert notice is issued and
+// the entry is skipped; no error is returned.
 func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
+
+	// Server entries should already be validated before this point,
+	// so instead of skipping we fail with an error.
+	err := ValidateServerEntry(serverEntry)
+	if err != nil {
+		return ContextError(errors.New("invalid server entry"))
+	}
+
 	return transactionWithRetry(func(transaction *sql.Tx) error {
 		serverEntryExists, err := serverEntryExists(transaction, serverEntry.IpAddress)
 		if err != nil {

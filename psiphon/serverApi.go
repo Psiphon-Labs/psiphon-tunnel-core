@@ -225,6 +225,11 @@ func (session *Session) doHandshakeRequest() error {
 		if err != nil {
 			return ContextError(err)
 		}
+		err = ValidateServerEntry(serverEntry)
+		if err != nil {
+			// Skip this entry and continue with the next one
+			continue
+		}
 		err = StoreServerEntry(serverEntry, true)
 		if err != nil {
 			return ContextError(err)

@@ -99,7 +99,7 @@ func main() {
 			log.Fatalf("error loading embedded server entry list file: %s", err)
 		}
 		// TODO: stream embedded server list data? also, the cast makaes an unnecessary copy of a large buffer?
-		serverEntries, err := psiphon.DecodeServerEntryList(string(serverEntryList))
+		serverEntries, err := psiphon.DecodeAndValidateServerEntryList(string(serverEntryList))
 		if err != nil {
 			log.Fatalf("error decoding embedded server entry list file: %s", err)
 		}
