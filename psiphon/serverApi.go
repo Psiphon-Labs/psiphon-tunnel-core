@@ -31,7 +31,6 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"time"
 )
 
 // Session is a utility struct which holds all of the data associated
@@ -133,23 +132,6 @@ func (session *Session) StatsRegexps() *Regexps {
 	return session.statsRegexps
 }
 
-// NextStatusRequestPeriod returns the amount of time that should be waited before the
-// next time stats are sent. The next wait time is picked at random, from a range,
-// to make the stats send less fingerprintable.
-func NextStatusRequestPeriod() (duration time.Duration) {
-	jitter, err := MakeSecureRandomInt64(
-		PSIPHON_API_STATUS_REQUEST_PERIOD_MAX.Nanoseconds() -
-			PSIPHON_API_STATUS_REQUEST_PERIOD_MIN.Nanoseconds())
-
-	// In case of error we're just going to use zero jitter.
-	if err != nil {
-		NoticeAlert("NextStatusRequestPeriod: make jitter failed")
-	}
-
-	duration = PSIPHON_API_STATUS_REQUEST_PERIOD_MIN + time.Duration(jitter)
-	return
-}
-
 // DoStatusRequest makes a /status request to the server, sending session stats.
 func (session *Session) DoStatusRequest(statsPayload json.Marshaler) error {
 	statsPayloadJSON, err := json.Marshal(statsPayload)
@@ -159,20 +141,7 @@ func (session *Session) DoStatusRequest(statsPayload json.Marshaler) error {
 
 	// Add a random amount of padding to help prevent stats updates from being
 	// a predictable size (which often happens when the connection is quiet).
-	var padding []byte
-	paddingSize, err := MakeSecureRandomInt(PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES)
-	// In case of randomness fail, we're going to proceed with zero padding.
-	// TODO: Is this okay?
-	if err != nil {
-		NoticeAlert("DoStatusRequest: MakeSecureRandomInt failed")
-		padding = make([]byte, 0)
-	} else {
-		padding, err = MakeSecureRandomBytes(paddingSize)
-		if err != nil {
-			NoticeAlert("DoStatusRequest: MakeSecureRandomBytes failed")
-			padding = make([]byte, 0)
-		}
-	}
+	padding := MakeSecureRandomPadding(0, PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES)
 
 	// "connected" is a legacy parameter. This client does not report when
 	// it has disconnected.

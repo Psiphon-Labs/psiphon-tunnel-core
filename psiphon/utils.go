@@ -33,6 +33,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Contains is a helper function that returns true
@@ -75,6 +76,38 @@ func MakeSecureRandomBytes(length int) ([]byte, error) {
 		return nil, ContextError(errors.New("insufficient random bytes"))
 	}
 	return randomBytes, nil
+}
+
+// MakeSecureRandomPadding selects a random padding length in the indicated
+// range and returns a random byte array of the selected length.
+// In the unlikely case where an  underlying MakeRandom functions fails,
+// the padding is length 0.
+func MakeSecureRandomPadding(minLength, maxLength int) []byte {
+	var padding []byte
+	paddingSize, err := MakeSecureRandomInt(maxLength - minLength)
+	if err != nil {
+		NoticeAlert("MakeSecureRandomPadding: MakeSecureRandomInt failed")
+		return make([]byte, 0)
+	}
+	paddingSize += minLength
+	padding, err = MakeSecureRandomBytes(paddingSize)
+	if err != nil {
+		NoticeAlert("MakeSecureRandomPadding: MakeSecureRandomBytes failed")
+		return make([]byte, 0)
+	}
+	return padding
+}
+
+// MakeRandomPeriod returns a random duration, within a given range.
+// In the unlikely case where an  underlying MakeRandom functions fails,
+// the period is the minimum.
+func MakeRandomPeriod(min, max time.Duration) (duration time.Duration) {
+	period, err := MakeSecureRandomInt64(max.Nanoseconds() - min.Nanoseconds())
+	if err != nil {
+		NoticeAlert("NextRandomRangePeriod: MakeSecureRandomInt64 failed")
+	}
+	duration = min + time.Duration(period)
+	return
 }
 
 func DecodeCertificate(encodedCertificate string) (certificate *x509.Certificate, err error) {
