@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -156,13 +157,33 @@ func (session *Session) DoStatusRequest(statsPayload json.Marshaler) error {
 		return ContextError(err)
 	}
 
+	// Add a random amount of padding to help prevent stats updates from being
+	// a predictable size (which often happens when the connection is quiet).
+	var padding []byte
+	paddingSize, err := MakeSecureRandomInt(PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES)
+	// In case of randomness fail, we're going to proceed with zero padding.
+	// TODO: Is this okay?
+	if err != nil {
+		NoticeAlert("DoStatusRequest: MakeSecureRandomInt failed")
+		padding = make([]byte, 0)
+	} else {
+		padding, err = MakeSecureRandomBytes(paddingSize)
+		if err != nil {
+			NoticeAlert("DoStatusRequest: MakeSecureRandomBytes failed")
+			padding = make([]byte, 0)
+		}
+	}
+
 	// "connected" is a legacy parameter. This client does not report when
 	// it has disconnected.
 
 	url := session.buildRequestUrl(
 		"status",
 		&ExtraParam{"session_id", session.sessionId},
-		&ExtraParam{"connected", "1"})
+		&ExtraParam{"connected", "1"},
+		// TODO: base64 encoding of padding means the padding
+		// size is not exactly [0, PADDING_MAX_BYTES]
+		&ExtraParam{"padding", base64.StdEncoding.EncodeToString(padding)})
 
 	err = session.doPostRequest(url, "application/json", bytes.NewReader(statsPayloadJSON))
 	if err != nil {

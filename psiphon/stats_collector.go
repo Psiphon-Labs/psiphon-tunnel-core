@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -20,7 +20,6 @@
 package psiphon
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"sync"
 )
@@ -105,23 +104,6 @@ func recordStat(stat *statsUpdate) {
 func (ss serverStats) MarshalJSON() ([]byte, error) {
 	out := make(map[string]interface{})
 
-	// Add a random amount of padding to help prevent stats updates from being
-	// a predictable size (which often happens when the connection is quiet).
-	var padding []byte
-	paddingSize, err := MakeSecureRandomInt(256)
-	// In case of randomness fail, we're going to proceed with zero padding.
-	// TODO: Is this okay?
-	if err != nil {
-		NoticeAlert("stats.serverStats.MarshalJSON: MakeSecureRandomInt failed")
-		padding = make([]byte, 0)
-	} else {
-		padding, err = MakeSecureRandomBytes(paddingSize)
-		if err != nil {
-			NoticeAlert("stats.serverStats.MarshalJSON: MakeSecureRandomBytes failed")
-			padding = make([]byte, 0)
-		}
-	}
-
 	hostBytes := make(map[string]int64)
 	bytesTransferred := int64(0)
 
@@ -134,11 +116,8 @@ func (ss serverStats) MarshalJSON() ([]byte, error) {
 	out["bytes_transferred"] = bytesTransferred
 	out["host_bytes"] = hostBytes
 
-	// Print the notice before adding the padding, since it's not interesting
 	noticeJSON, _ := json.Marshal(out)
 	NoticeInfo("sending stats: %s", noticeJSON)
-
-	out["padding"] = base64.StdEncoding.EncodeToString(padding)
 
 	// We're not using these fields, but the server requires them
 	out["page_views"] = make([]string, 0)
