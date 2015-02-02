@@ -83,15 +83,6 @@ func makeStatsDialer(serverID string, regexps *Regexps) func(network, addr strin
 	}
 }
 
-// TODO: move out of stats test suite
-func (suite *StatsTestSuite) Test_NextStatusRequestPeriod() {
-	res1 := NextStatusRequestPeriod()
-	suite.True(res1 > time.Duration(0), "duration should not be zero")
-
-	res2 := NextStatusRequestPeriod()
-	suite.NotEqual(res1, res2, "duration should have randomness difference between calls")
-}
-
 func (suite *StatsTestSuite) Test_StatsConn() {
 	resp, err := suite.httpClient.Get("http://example.com/index.html")
 	suite.Nil(err, "basic HTTP requests should succeed")

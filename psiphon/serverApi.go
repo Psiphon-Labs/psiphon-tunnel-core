@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -30,7 +31,6 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"time"
 )
 
 // Session is a utility struct which holds all of the data associated
@@ -132,23 +132,6 @@ func (session *Session) StatsRegexps() *Regexps {
 	return session.statsRegexps
 }
 
-// NextStatusRequestPeriod returns the amount of time that should be waited before the
-// next time stats are sent. The next wait time is picked at random, from a range,
-// to make the stats send less fingerprintable.
-func NextStatusRequestPeriod() (duration time.Duration) {
-	jitter, err := MakeSecureRandomInt64(
-		PSIPHON_API_STATUS_REQUEST_PERIOD_MAX.Nanoseconds() -
-			PSIPHON_API_STATUS_REQUEST_PERIOD_MIN.Nanoseconds())
-
-	// In case of error we're just going to use zero jitter.
-	if err != nil {
-		NoticeAlert("NextStatusRequestPeriod: make jitter failed")
-	}
-
-	duration = PSIPHON_API_STATUS_REQUEST_PERIOD_MIN + time.Duration(jitter)
-	return
-}
-
 // DoStatusRequest makes a /status request to the server, sending session stats.
 func (session *Session) DoStatusRequest(statsPayload json.Marshaler) error {
 	statsPayloadJSON, err := json.Marshal(statsPayload)
@@ -156,13 +139,20 @@ func (session *Session) DoStatusRequest(statsPayload json.Marshaler) error {
 		return ContextError(err)
 	}
 
+	// Add a random amount of padding to help prevent stats updates from being
+	// a predictable size (which often happens when the connection is quiet).
+	padding := MakeSecureRandomPadding(0, PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES)
+
 	// "connected" is a legacy parameter. This client does not report when
 	// it has disconnected.
 
 	url := session.buildRequestUrl(
 		"status",
 		&ExtraParam{"session_id", session.sessionId},
-		&ExtraParam{"connected", "1"})
+		&ExtraParam{"connected", "1"},
+		// TODO: base64 encoding of padding means the padding
+		// size is not exactly [0, PADDING_MAX_BYTES]
+		&ExtraParam{"padding", base64.StdEncoding.EncodeToString(padding)})
 
 	err = session.doPostRequest(url, "application/json", bytes.NewReader(statsPayloadJSON))
 	if err != nil {

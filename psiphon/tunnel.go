@@ -438,23 +438,42 @@ func dialSsh(
 func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 	defer tunnel.operateWaitGroup.Done()
 
-	// Note: not using a Ticker since NextStatusRequestPeriod() is not a fixed time period
-	statsTimer := time.NewTimer(NextStatusRequestPeriod())
+	// The next status request and ssh keep alive times are picked at random,
+	// from a range, to make the resulting traffic less fingerprintable,
+	// especially when then tunnel is otherwise idle.
+	// Note: not using Tickers since these are not fixed time periods.
+
+	nextStatusRequestPeriod := func() time.Duration {
+		return MakeRandomPeriod(
+			PSIPHON_API_STATUS_REQUEST_PERIOD_MIN,
+			PSIPHON_API_STATUS_REQUEST_PERIOD_MAX)
+	}
+	nextSshKeepAlivePeriod := func() time.Duration {
+		return MakeRandomPeriod(
+			TUNNEL_SSH_KEEP_ALIVE_PERIOD_MIN,
+			TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX)
+	}
+
+	statsTimer := time.NewTimer(nextStatusRequestPeriod())
 	defer statsTimer.Stop()
 
-	sshKeepAliveTicker := time.NewTicker(TUNNEL_SSH_KEEP_ALIVE_PERIOD)
-	defer sshKeepAliveTicker.Stop()
+	sshKeepAliveTimer := time.NewTimer(nextSshKeepAlivePeriod())
+	defer sshKeepAliveTimer.Stop()
 
 	var err error
 	for err == nil {
 		select {
 		case <-statsTimer.C:
 			sendStats(tunnel)
-			statsTimer.Reset(NextStatusRequestPeriod())
+			statsTimer.Reset(nextStatusRequestPeriod())
 
-		case <-sshKeepAliveTicker.C:
-			_, _, err := tunnel.sshClient.SendRequest("keepalive@openssh.com", true, nil)
+		case <-sshKeepAliveTimer.C:
+			// Random padding to frustrate fingerprinting
+			_, _, err := tunnel.sshClient.SendRequest(
+				"keepalive@openssh.com", true,
+				MakeSecureRandomPadding(0, TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES))
 			err = fmt.Errorf("ssh keep alive failed: %s", err)
+			sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
 
 		case failures := <-tunnel.portForwardFailures:
 			// Note: no mutex on portForwardFailureTotal; only referenced here
