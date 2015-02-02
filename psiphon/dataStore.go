@@ -276,6 +276,7 @@ func PromoteServerEntry(ipAddress string) error {
 type ServerEntryIterator struct {
 	region                      string
 	protocol                    string
+	shuffleHeadLength           int
 	transaction                 *sql.Tx
 	cursor                      *sql.Rows
 	isTargetServerEntryIterator bool
@@ -295,6 +296,7 @@ func NewServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err 
 	iterator = &ServerEntryIterator{
 		region:                      config.EgressRegion,
 		protocol:                    config.TunnelProtocol,
+		shuffleHeadLength:           config.TunnelPoolSize,
 		isTargetServerEntryIterator: false,
 	}
 	err = iterator.Reset()
@@ -349,13 +351,13 @@ func (iterator *ServerEntryIterator) Reset() error {
 	var cursor *sql.Rows
 
 	// This query implements the Psiphon server candidate selection
-	// algorithm: the first set of server candidates are in rank (priority)
-	// order, to favor previously successful servers; then the remaining
-	// long tail is shuffled to raise up less recent candidates.
+	// algorithm: the first TunnelPoolSize server candidates are in rank
+	// (priority) order, to favor previously successful servers; then the
+	// remaining long tail is shuffled to raise up less recent candidates.
 
 	whereClause, whereParams := makeServerEntryWhereClause(
 		iterator.region, iterator.protocol, nil)
-	headLength := CONNECTION_WORKER_POOL_SIZE
+	headLength := iterator.shuffleHeadLength
 	queryFormat := `
 		select data from serverEntry %s
 		order by case

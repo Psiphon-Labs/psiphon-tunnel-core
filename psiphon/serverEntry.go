@@ -96,15 +96,21 @@ func ValidateServerEntry(serverEntry *ServerEntry) error {
 func DecodeAndValidateServerEntryList(encodedServerEntryList string) (serverEntries []*ServerEntry, err error) {
 	serverEntries = make([]*ServerEntry, 0)
 	for _, encodedServerEntry := range strings.Split(encodedServerEntryList, "\n") {
+		if len(encodedServerEntry) == 0 {
+			continue
+		}
+
 		// TODO: skip this entry and continue if can't decode?
 		serverEntry, err := DecodeServerEntry(encodedServerEntry)
 		if err != nil {
 			return nil, ContextError(err)
 		}
+
 		if ValidateServerEntry(serverEntry) != nil {
 			// Skip this entry and continue with the next one
 			continue
 		}
+
 		serverEntries = append(serverEntries, serverEntry)
 	}
 	return serverEntries, nil

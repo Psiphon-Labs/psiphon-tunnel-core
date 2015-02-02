@@ -64,7 +64,7 @@ func outputNotice(noticeType string, showUser bool, args ...interface{}) {
 	obj["showUser"] = showUser
 	obj["data"] = noticeData
 	obj["timestamp"] = time.Now().UTC().Format(time.RFC3339)
-	for i := 0; i < len(args)/2; i++ {
+	for i := 0; i < len(args)-1; i += 2 {
 		name, ok := args[i].(string)
 		value := args[i+1]
 		if ok {
