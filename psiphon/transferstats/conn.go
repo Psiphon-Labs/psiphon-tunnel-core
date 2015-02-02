@@ -19,7 +19,7 @@
 
 // Package stats counts and keeps track of session stats. These are per-domain
 // bytes transferred and total bytes transferred.
-package psiphon
+package transferstats
 
 /*
 Assumption: The same connection will not be used to access different hostnames
@@ -35,9 +35,9 @@ import (
 	"sync/atomic"
 )
 
-// StatsConn is to be used as an intermediate link in a chain of net.Conn objects.
+// Conn is to be used as an intermediate link in a chain of net.Conn objects.
 // It inspects requests and responses and derives stats from them.
-type StatsConn struct {
+type Conn struct {
 	net.Conn
 	serverID       string
 	firstWrite     int32
@@ -46,11 +46,11 @@ type StatsConn struct {
 	regexps        *Regexps
 }
 
-// NewStatsConn creates a StatsConn. serverID can be anything that uniquely
+// NewConn creates a Conn. serverID can be anything that uniquely
 // identifies the server; it will be passed to GetForServer() when retrieving
 // the accumulated stats.
-func NewStatsConn(nextConn net.Conn, serverID string, regexps *Regexps) *StatsConn {
-	return &StatsConn{
+func NewConn(nextConn net.Conn, serverID string, regexps *Regexps) *Conn {
+	return &Conn{
 		Conn:           nextConn,
 		serverID:       serverID,
 		firstWrite:     1,
@@ -61,7 +61,7 @@ func NewStatsConn(nextConn net.Conn, serverID string, regexps *Regexps) *StatsCo
 
 // Write is called when requests are being written out through the tunnel to
 // the remote server.
-func (conn *StatsConn) Write(buffer []byte) (n int, err error) {
+func (conn *Conn) Write(buffer []byte) (n int, err error) {
 	// First pass the data down the chain.
 	n, err = conn.Conn.Write(buffer)
 
@@ -92,7 +92,7 @@ func (conn *StatsConn) Write(buffer []byte) (n int, err error) {
 }
 
 // Read is called when responses to requests are being read from the remote server.
-func (conn *StatsConn) Read(buffer []byte) (n int, err error) {
+func (conn *Conn) Read(buffer []byte) (n int, err error) {
 	n, err = conn.Conn.Read(buffer)
 
 	var hostname string

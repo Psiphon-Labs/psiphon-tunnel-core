@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -17,7 +17,7 @@
  *
  */
 
-package psiphon
+package transferstats
 
 import (
 	"encoding/json"
@@ -77,7 +77,7 @@ func makeStatsDialer(serverID string, regexps *Regexps) func(network, addr strin
 			return
 		}
 
-		conn = NewStatsConn(subConn, serverID, regexps)
+		conn = NewConn(subConn, serverID, regexps)
 		err = nil
 		return
 	}
@@ -149,9 +149,10 @@ func (suite *StatsTestSuite) Test_MakeRegexps() {
 	httpsRequestRegexes[1]["regex"] = `^.*example\.org$`
 	httpsRequestRegexes[1]["replace"] = "replacement"
 
-	regexps := MakeRegexps(pageViewRegexes, httpsRequestRegexes)
+	regexps, notices := MakeRegexps(pageViewRegexes, httpsRequestRegexes)
 	suite.NotNil(regexps, "should return a valid object")
 	suite.Len(*regexps, 2, "should only have processed httpsRequestRegexes")
+	suite.Len(notices, 0, "should return no notices")
 
 	//
 	// Test some bad regexps
@@ -159,21 +160,24 @@ func (suite *StatsTestSuite) Test_MakeRegexps() {
 
 	httpsRequestRegexes[0]["regex"] = ""
 	httpsRequestRegexes[0]["replace"] = "$1"
-	regexps = MakeRegexps(pageViewRegexes, httpsRequestRegexes)
+	regexps, notices = MakeRegexps(pageViewRegexes, httpsRequestRegexes)
 	suite.NotNil(regexps, "should return a valid object")
 	suite.Len(*regexps, 1, "should have discarded one regexp")
+	suite.Len(notices, 1, "should have returned one notice")
 
 	httpsRequestRegexes[0]["regex"] = `^[a-z0-9\.]*\.(example\.com)$`
 	httpsRequestRegexes[0]["replace"] = ""
-	regexps = MakeRegexps(pageViewRegexes, httpsRequestRegexes)
+	regexps, notices = MakeRegexps(pageViewRegexes, httpsRequestRegexes)
 	suite.NotNil(regexps, "should return a valid object")
 	suite.Len(*regexps, 1, "should have discarded one regexp")
+	suite.Len(notices, 1, "should have returned one notice")
 
 	httpsRequestRegexes[0]["regex"] = `^[a-z0-9\.]*\.(example\.com$` // missing closing paren
 	httpsRequestRegexes[0]["replace"] = "$1"
-	regexps = MakeRegexps(pageViewRegexes, httpsRequestRegexes)
+	regexps, notices = MakeRegexps(pageViewRegexes, httpsRequestRegexes)
 	suite.NotNil(regexps, "should return a valid object")
 	suite.Len(*regexps, 1, "should have discarded one regexp")
+	suite.Len(notices, 1, "should have returned one notice")
 }
 
 func (suite *StatsTestSuite) Test_Regex() {
@@ -184,7 +188,7 @@ func (suite *StatsTestSuite) Test_Regex() {
 	httpsRequestRegexes[0]["replace"] = "$1"
 	httpsRequestRegexes[1]["regex"] = `^.*example\.org$`
 	httpsRequestRegexes[1]["replace"] = "replacement"
-	regexps := MakeRegexps(pageViewRegexes, httpsRequestRegexes)
+	regexps, _ := MakeRegexps(pageViewRegexes, httpsRequestRegexes)
 
 	suite.httpClient = &http.Client{
 		Transport: &http.Transport{

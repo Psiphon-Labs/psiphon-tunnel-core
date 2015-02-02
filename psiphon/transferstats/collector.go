@@ -17,7 +17,7 @@
  *
  */
 
-package psiphon
+package transferstats
 
 import (
 	"encoding/json"
@@ -115,9 +115,6 @@ func (ss serverStats) MarshalJSON() ([]byte, error) {
 
 	out["bytes_transferred"] = bytesTransferred
 	out["host_bytes"] = hostBytes
-
-	noticeJSON, _ := json.Marshal(out)
-	NoticeInfo("sending stats: %s", noticeJSON)
 
 	// We're not using these fields, but the server requires them
 	out["page_views"] = make([]string, 0)
