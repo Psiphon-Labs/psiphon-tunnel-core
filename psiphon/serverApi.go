@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	"io"
 	"io/ioutil"
 	"net"
@@ -41,7 +42,7 @@ type Session struct {
 	sessionId          string
 	baseRequestUrl     string
 	psiphonHttpsClient *http.Client
-	statsRegexps       *Regexps
+	statsRegexps       *transferstats.Regexps
 	statsServerId      string
 }
 
@@ -128,7 +129,7 @@ func (session *Session) StatsServerID() string {
 }
 
 // StatsRegexps gets the Regexps used for the statistics for this tunnel.
-func (session *Session) StatsRegexps() *Regexps {
+func (session *Session) StatsRegexps() *transferstats.Regexps {
 	return session.statsRegexps
 }
 
@@ -235,9 +236,15 @@ func (session *Session) doHandshakeRequest() error {
 		NoticeClientUpgradeAvailable(handshakeConfig.UpgradeClientVersion)
 	}
 
-	session.statsRegexps = MakeRegexps(
+	var regexpsNotices []string
+	session.statsRegexps, regexpsNotices = transferstats.MakeRegexps(
 		handshakeConfig.PageViewRegexes,
 		handshakeConfig.HttpsRequestRegexes)
+
+	for _, notice := range regexpsNotices {
+		NoticeAlert(notice)
+	}
+
 	return nil
 }
 

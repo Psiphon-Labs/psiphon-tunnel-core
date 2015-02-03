@@ -48,20 +48,22 @@ Follow Go Android documentation:
 
 ### Building with Docker
 
+Note that you may need to use `sudo docker` below, depending on your OS.
+
 Create the build image:
 
 ```bash
 # While in the same directory as the Dockerfile...
-$ sudo docker build -t psibuild .
+$ docker build --no-cache=true -t psigoandroid .
 # That will take a long time to complete.
-# After it's done, you'll have an image called "psibuild". Check with...
-$ sudo docker images
+# After it's done, you'll have an image called "psigoandroid". Check with...
+$ docker images
 ```
 
 To do the build:
 
 ```bash
-$ sudo docker run -v $GOPATH/src:/src psibuild /bin/bash -c 'cd /src/github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary && ./make.bash'
+$ docker run --rm -v $GOPATH/src:/src psigoandroid /bin/bash -c 'cd /src/github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary && ./make.bash'
 ```
 
 When that command completes, the compiled library will be located at `libs/armeabi-v7a/libgojni.so`.

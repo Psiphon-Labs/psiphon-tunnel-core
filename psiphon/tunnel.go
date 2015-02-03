@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -200,7 +201,7 @@ func (tunnel *Tunnel) Dial(remoteAddr string) (conn net.Conn, err error) {
 
 	// Tunnel does not have a session when DisableApi is set
 	if tunnel.session != nil {
-		conn = NewStatsConn(
+		conn = transferstats.NewConn(
 			conn, tunnel.session.StatsServerID(), tunnel.session.StatsRegexps())
 	}
 
@@ -509,12 +510,12 @@ func sendStats(tunnel *Tunnel) {
 		return
 	}
 
-	payload := GetForServer(tunnel.serverEntry.IpAddress)
+	payload := transferstats.GetForServer(tunnel.serverEntry.IpAddress)
 	if payload != nil {
 		err := tunnel.session.DoStatusRequest(payload)
 		if err != nil {
 			NoticeAlert("DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
-			PutBack(tunnel.serverEntry.IpAddress, payload)
+			transferstats.PutBack(tunnel.serverEntry.IpAddress, payload)
 		}
 	}
 }
