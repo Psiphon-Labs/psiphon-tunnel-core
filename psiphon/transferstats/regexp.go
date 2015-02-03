@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -17,9 +17,12 @@
  *
  */
 
-package psiphon
+package transferstats
 
-import "regexp"
+import (
+	"fmt"
+	"regexp"
+)
 
 type regexpReplace struct {
 	regexp  *regexp.Regexp
@@ -32,33 +35,36 @@ type Regexps []regexpReplace
 
 // MakeRegexps takes the raw string-map form of the regex-replace pairs
 // returned by the server handshake and turns them into a usable object.
-func MakeRegexps(pageViewRegexes, httpsRequestRegexes []map[string]string) *Regexps {
-	regexps := make(Regexps, 0)
+func MakeRegexps(pageViewRegexes, httpsRequestRegexes []map[string]string) (regexps *Regexps, notices []string) {
+	regexpsSlice := make(Regexps, 0)
+	notices = make([]string, 0)
 
 	// We aren't doing page view stats anymore, so we won't process those regexps.
 	for _, rr := range httpsRequestRegexes {
 		regexString := rr["regex"]
 		if regexString == "" {
-			NoticeAlert("MakeRegexps: empty regex")
+			notices = append(notices, "MakeRegexps: empty regex")
 			continue
 		}
 
 		replace := rr["replace"]
 		if replace == "" {
-			NoticeAlert("MakeRegexps: empty replace")
+			notices = append(notices, "MakeRegexps: empty replace")
 			continue
 		}
 
 		regex, err := regexp.Compile(regexString)
 		if err != nil {
-			NoticeAlert("MakeRegexps: failed to compile regex: %s: %s", regexString, err)
+			notices = append(notices, fmt.Sprintf("MakeRegexps: failed to compile regex: %s: %s", regexString, err))
 			continue
 		}
 
-		regexps = append(regexps, regexpReplace{regex, replace})
+		regexpsSlice = append(regexpsSlice, regexpReplace{regex, replace})
 	}
 
-	return &regexps
+	regexps = &regexpsSlice
+
+	return
 }
 
 // regexHostname processes hostname through the given regexps and returns the

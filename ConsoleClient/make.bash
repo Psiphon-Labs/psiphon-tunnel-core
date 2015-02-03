@@ -26,3 +26,8 @@ upx --best windows_amd64_psiphon-tunnel-core.exe
 echo 'Building linux-amd64...'
 gox -verbose -osarch linux/amd64 -output linux_amd64_psiphon-tunnel-core
 upx --best linux_amd64_psiphon-tunnel-core
+
+echo 'Building linux-386...'
+CFLAGS=-m32 \
+  gox -verbose -osarch linux/386 -output linux_386_psiphon-tunnel-core
+upx --best linux_386_psiphon-tunnel-core
