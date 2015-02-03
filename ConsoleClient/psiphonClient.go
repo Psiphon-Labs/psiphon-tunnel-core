@@ -21,6 +21,7 @@ package main
 
 import (
 	"flag"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -41,6 +42,9 @@ func main() {
 	var embeddedServerEntryListFilename string
 	flag.StringVar(&embeddedServerEntryListFilename, "serverList", "", "embedded server entry list input file")
 
+	var formatNotices bool
+	flag.BoolVar(&formatNotices, "formatNotices", false, "emit notices in human-readable format")
+
 	var profileFilename string
 	flag.StringVar(&profileFilename, "profile", "", "CPU profile output file")
 
@@ -60,18 +64,21 @@ func main() {
 		log.Fatalf("error processing configuration file: %s", err)
 	}
 
-	// Set logfile, if configured
+	// Initialize notice output; use logfile, if configured
 
+	var noticeWriter io.Writer
+	noticeWriter = os.Stderr
 	if config.LogFilename != "" {
 		logFile, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
 			log.Fatalf("error opening log file: %s", err)
 		}
 		defer logFile.Close()
-		psiphon.SetNoticeOutput(logFile)
-	} else {
-		psiphon.SetNoticeOutput(psiphon.NewNoticeConsoleRewriter(os.Stderr))
 	}
+	if formatNotices {
+		noticeWriter = psiphon.NewNoticeConsoleRewriter(noticeWriter)
+	}
+	psiphon.SetNoticeOutput(noticeWriter)
 
 	// Handle optional profiling parameter
 
