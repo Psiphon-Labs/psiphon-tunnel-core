@@ -20,19 +20,14 @@
 package psiphon
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
-	"os"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -149,49 +144,4 @@ func ContextError(err error) error {
 // IsNetworkBindError returns true when the err is due to EADDRINUSE.
 func IsNetworkBindError(err error) bool {
 	return strings.Contains(err.Error(), "bind: address already in use")
-}
-
-// NoticeConsoleRewriter consumes JOSN-format notice input and parses each
-// notice and rewrites in a more human-readable format more suitable for
-// console output. The data payload field is left as JSON.
-type NoticeConsoleRewriter struct {
-	mutex  sync.Mutex
-	writer io.Writer
-	buffer []byte
-}
-
-// NewNoticeConsoleRewriter initializes a new NoticeConsoleRewriter
-func NewNoticeConsoleRewriter(writer io.Writer) *NoticeConsoleRewriter {
-	return &NoticeConsoleRewriter{writer: writer}
-}
-
-// Write implements io.Writer.
-func (rewriter *NoticeConsoleRewriter) Write(p []byte) (n int, err error) {
-	rewriter.mutex.Lock()
-	defer rewriter.mutex.Unlock()
-
-	rewriter.buffer = append(rewriter.buffer, p...)
-
-	index := bytes.Index(rewriter.buffer, []byte("\n"))
-	if index == -1 {
-		return len(p), nil
-	}
-	line := rewriter.buffer[:index]
-	rewriter.buffer = rewriter.buffer[index+1:]
-
-	type NoticeObject struct {
-		NoticeType string          `json:"noticeType"`
-		Data       json.RawMessage `json:"data"`
-		Timestamp  string          `json:"timestamp"`
-	}
-
-	var noticeObject NoticeObject
-	_ = json.Unmarshal(line, &noticeObject)
-	fmt.Fprintf(os.Stderr,
-		"%s %s %s\n",
-		noticeObject.Timestamp,
-		noticeObject.NoticeType,
-		string(noticeObject.Data))
-
-	return len(p), nil
 }
