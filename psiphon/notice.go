@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -156,4 +157,79 @@ func NoticeHomepage(url string) {
 // disconnected; when count > 1, the core is connected.
 func NoticeTunnels(count int) {
 	outputNotice("Tunnels", false, "count", count)
+}
+
+type noticeObject struct {
+	NoticeType string          `json:"noticeType"`
+	Data       json.RawMessage `json:"data"`
+	Timestamp  string          `json:"timestamp"`
+}
+
+// GetNoticeTunnels receives a JSON encoded object and attempts to parse it as a Notice.
+// When the object is a Notice of type Tunnels, the count payload is returned.
+func GetNoticeTunnels(notice []byte) (count int, ok bool) {
+	var object noticeObject
+	if json.Unmarshal(notice, &object) != nil {
+		return 0, false
+	}
+	if object.NoticeType != "Tunnels" {
+		return 0, false
+	}
+	type tunnelsPayload struct {
+		Count int `json:"count"`
+	}
+	var payload tunnelsPayload
+	if json.Unmarshal(object.Data, &payload) != nil {
+		return 0, false
+	}
+	return payload.Count, true
+}
+
+// NoticeReceiver consumes a notice input stream and invokes a callback function
+// for each discrete JSON notice object byte sequence.
+type NoticeReceiver struct {
+	mutex    sync.Mutex
+	buffer   []byte
+	callback func([]byte)
+}
+
+// NewNoticeReceiver initializes a new NoticeReceiver
+func NewNoticeReceiver(callback func([]byte)) *NoticeReceiver {
+	return &NoticeReceiver{callback: callback}
+}
+
+// Write implements io.Writer.
+func (receiver *NoticeReceiver) Write(p []byte) (n int, err error) {
+	receiver.mutex.Lock()
+	defer receiver.mutex.Unlock()
+
+	receiver.buffer = append(receiver.buffer, p...)
+
+	index := bytes.Index(receiver.buffer, []byte("\n"))
+	if index == -1 {
+		return len(p), nil
+	}
+
+	notice := receiver.buffer[:index]
+	receiver.buffer = receiver.buffer[index+1:]
+
+	receiver.callback(notice)
+
+	return len(p), nil
+}
+
+// NewNoticeConsoleRewriter consumes JSON-format notice input and parses each
+// notice and rewrites in a more human-readable format more suitable for
+// console output. The data payload field is left as JSON.
+func NewNoticeConsoleRewriter(writer io.Writer) *NoticeReceiver {
+	return NewNoticeReceiver(func(notice []byte) {
+		var object noticeObject
+		_ = json.Unmarshal(notice, &object)
+		fmt.Fprintf(
+			writer,
+			"%s %s %s\n",
+			object.Timestamp,
+			object.NoticeType,
+			string(object.Data))
+	})
 }

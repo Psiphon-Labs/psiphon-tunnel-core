@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -33,28 +33,18 @@ import (
 )
 
 type PsiphonProvider interface {
-	Notice(message string)
+	Notice(noticeJSON string)
 
 	// TODO: return 'error'; at the moment gobind doesn't
 	// work with interface function return values.
 	BindToDevice(fileDescriptor int)
 }
 
-type logRelay struct {
-	provider PsiphonProvider
-}
-
-func (lr *logRelay) Write(p []byte) (n int, err error) {
-	// TODO: buffer incomplete lines
-	lr.provider.Notice(string(p))
-	return len(p), nil
-}
-
 var controller *psiphon.Controller
 var shutdownBroadcast chan struct{}
 var controllerWaitGroup *sync.WaitGroup
 
-func Start(configJson string, provider PsiphonProvider) error {
+func Start(configJson, embeddedServerEntryList string, provider PsiphonProvider) error {
 
 	if controller != nil {
 		return fmt.Errorf("already started")
@@ -64,17 +54,32 @@ func Start(configJson string, provider PsiphonProvider) error {
 	if err != nil {
 		return fmt.Errorf("error loading configuration file: %s", err)
 	}
+	config.BindToDeviceProvider = provider
 
 	err = psiphon.InitDataStore(config)
 	if err != nil {
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
-	log.SetOutput(&logRelay{provider: provider})
+	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
+		func(notice []byte) {
+			provider.Notice(string(notice))
+		}))
 
-	config.BindToDeviceProvider = provider
+	serverEntries, err := psiphon.DecodeAndValidateServerEntryList(embeddedServerEntryList)
+	if err != nil {
+		log.Fatalf("error decoding embedded server entry list: %s", err)
+	}
+	err = psiphon.StoreServerEntries(serverEntries, false)
+	if err != nil {
+		log.Fatalf("error storing embedded server entry list: %s", err)
+	}
 
-	controller = psiphon.NewController(config)
+	controller, err = psiphon.NewController(config)
+	if err != nil {
+		return fmt.Errorf("error initializing controller: %s", err)
+	}
+
 	shutdownBroadcast = make(chan struct{})
 	controllerWaitGroup = new(sync.WaitGroup)
 	controllerWaitGroup.Add(1)

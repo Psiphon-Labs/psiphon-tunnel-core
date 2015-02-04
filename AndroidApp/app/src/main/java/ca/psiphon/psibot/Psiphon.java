@@ -49,12 +49,12 @@ public class Psiphon extends Psi.PsiphonProvider.Stub {
 
     // PsiphonProvider.Notice
     @Override
-    public void Notice(String message) {
-        message = message.trim();
+    public void Notice(String noticeJSON) {
+        noticeJSON = noticeJSON.trim();
 
-        android.util.Log.d("PSIPHON", message);
-        parseMessage(message);
-        Log.addEntry(message);
+        android.util.Log.d("PSIPHON", noticeJSON);
+        parseMessage(noticeJSON);
+        Log.addEntry(noticeJSON);
     }
 
     // PsiphonProvider.BindToDevice
@@ -72,8 +72,11 @@ public class Psiphon extends Psi.PsiphonProvider.Stub {
         mLocalHttpProxyPort = 0;
         mHomePages = new HashSet<String>();
 
+        // TODO: supply embedded server list
+        String embeddedServerEntryList = "";
+
         try {
-            Psi.Start(loadConfig(mVpnService), this);
+            Psi.Start(loadConfig(mVpnService), embeddedServerEntryList, this);
         } catch (Exception e) {
             throw new Utils.PsibotError("failed to start Psiphon", e);
         }
@@ -172,21 +175,24 @@ public class Psiphon extends Psi.PsiphonProvider.Stub {
         return json.toString();
     }
 
-    private synchronized void parseMessage(String message) {
-        // TODO: this is based on tentative log line formats
-        final String socksProxy = "SOCKS-PROXY-PORT ";
-        final String httpProxy = "HTTP-PROXY-PORT ";
-        final String homePage = "HOMEPAGE ";
-        final String tunnelStarted = "TUNNELS 1";
-        int index;
-        if (-1 != (index = message.indexOf(socksProxy))) {
-            mLocalSocksProxyPort = Integer.parseInt(message.substring(index + socksProxy.length()));
-        } else if (-1 != (index = message.indexOf(httpProxy))) {
-            mLocalHttpProxyPort = Integer.parseInt(message.substring(index + httpProxy.length()));
-        } else if (-1 != (index = message.indexOf(homePage))) {
-            mHomePages.add(message.substring(index + homePage.length()));
-        } else if (message.contains(tunnelStarted)) {
-            mTunnelStartedSignal.countDown();
+    private synchronized void parseMessage(String noticeJSON) {
+        try {
+            JSONObject notice = new JSONObject(noticeJSON);
+            String noticeType = notice.getString("noticeType");
+            if (noticeType.equals("Tunnels")) {
+                int count = notice.getJSONObject("data").getInt("count");
+                if (count == 1) {
+                    mTunnelStartedSignal.countDown();
+                }
+            } else if (noticeType.equals("ListeningSocksProxyPort")) {
+                mLocalSocksProxyPort = notice.getJSONObject("data").getInt("port");
+            } else if (noticeType.equals("ListeningHttpProxyPort")) {
+                mLocalHttpProxyPort = notice.getJSONObject("data").getInt("port");
+            } else if (noticeType.equals("Homepage")) {
+                mHomePages.add(notice.getJSONObject("data").getString("url"));
+            }
+        } catch (JSONException e) {
+            // Ignore notice
         }
     }
 }

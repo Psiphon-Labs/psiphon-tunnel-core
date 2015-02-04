@@ -5,7 +5,7 @@
 package go_psi
 
 import (
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary/psi"
+	"."
 	"golang.org/x/mobile/bind/seq"
 )
 
@@ -23,14 +23,15 @@ func (p *proxyPsiphonProvider) BindToDevice(fileDescriptor int) {
 	seq.Transact((*seq.Ref)(p), proxyPsiphonProviderBindToDeviceCode, out)
 }
 
-func (p *proxyPsiphonProvider) Notice(message string) {
+func (p *proxyPsiphonProvider) Notice(noticeJSON string) {
 	out := new(seq.Buffer)
-	out.WriteUTF16(message)
+	out.WriteUTF16(noticeJSON)
 	seq.Transact((*seq.Ref)(p), proxyPsiphonProviderNoticeCode, out)
 }
 
 func proxy_Start(out, in *seq.Buffer) {
 	param_configJson := in.ReadUTF16()
+	param_embeddedServerEntryList := in.ReadUTF16()
 	var param_provider psi.PsiphonProvider
 	param_provider_ref := in.ReadRef()
 	if param_provider_ref.Num < 0 {
@@ -38,7 +39,7 @@ func proxy_Start(out, in *seq.Buffer) {
 	} else {
 		param_provider = (*proxyPsiphonProvider)(param_provider_ref)
 	}
-	err := psi.Start(param_configJson, param_provider)
+	err := psi.Start(param_configJson, param_embeddedServerEntryList, param_provider)
 	if err == nil {
 		out.WriteUTF16("")
 	} else {
