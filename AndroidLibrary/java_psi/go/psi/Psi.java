@@ -12,7 +12,7 @@ public abstract class Psi {
     public interface PsiphonProvider extends go.Seq.Object {
         public void BindToDevice(long fileDescriptor);
         
-        public void Notice(String message);
+        public void Notice(String noticeJSON);
         
         public static abstract class Stub implements PsiphonProvider {
             static final String DESCRIPTOR = "go.psi.PsiphonProvider";
@@ -32,8 +32,8 @@ public abstract class Psi {
                     return;
                 }
                 case Proxy.CALL_Notice: {
-                    String param_message = in.readUTF16();
-                    this.Notice(param_message);
+                    String param_noticeJSON = in.readUTF16();
+                    this.Notice(param_noticeJSON);
                     return;
                 }
                 default:
@@ -63,11 +63,11 @@ public abstract class Psi {
                 Seq.send(DESCRIPTOR, CALL_BindToDevice, _in, _out);
             }
             
-            public void Notice(String message) {
+            public void Notice(String noticeJSON) {
                 go.Seq _in = new go.Seq();
                 go.Seq _out = new go.Seq();
                 _in.writeRef(ref);
-                _in.writeUTF16(message);
+                _in.writeUTF16(noticeJSON);
                 Seq.send(DESCRIPTOR, CALL_Notice, _in, _out);
             }
             
@@ -76,10 +76,11 @@ public abstract class Psi {
         }
     }
     
-    public static void Start(String configJson, PsiphonProvider provider) throws Exception {
+    public static void Start(String configJson, String embeddedServerEntryList, PsiphonProvider provider) throws Exception {
         go.Seq _in = new go.Seq();
         go.Seq _out = new go.Seq();
         _in.writeUTF16(configJson);
+        _in.writeUTF16(embeddedServerEntryList);
         _in.writeRef(provider.ref());
         Seq.send(DESCRIPTOR, CALL_Start, _in, _out);
         String _err = _out.readUTF16();
