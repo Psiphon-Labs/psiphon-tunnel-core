@@ -44,7 +44,7 @@ func NewHttpProxy(config *Config, tunneler Tunneler) (proxy *HttpProxy, err erro
 	listener, err := net.Listen(
 		"tcp", fmt.Sprintf("127.0.0.1:%d", config.LocalHttpProxyPort))
 	if err != nil {
-		if IsNetworkBindError(err) {
+		if IsAddressInUseError(err) {
 			NoticeHttpProxyPortInUse(config.LocalSocksProxyPort)
 		}
 		return nil, ContextError(err)
