@@ -5,7 +5,7 @@
 package go_psi
 
 import (
-	"."
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary/psi"
 	"golang.org/x/mobile/bind/seq"
 )
 
