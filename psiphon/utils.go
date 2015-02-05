@@ -26,8 +26,11 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
+	"os"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -141,7 +144,20 @@ func ContextError(err error) error {
 	return fmt.Errorf("%s#%d: %s", funcName, line, err)
 }
 
-// IsNetworkBindError returns true when the err is due to EADDRINUSE.
-func IsNetworkBindError(err error) bool {
-	return strings.Contains(err.Error(), "bind: address already in use")
+// IsAddressInUseError returns true when the err is due to EADDRINUSE/WSAEADDRINUSE.
+func IsAddressInUseError(err error) bool {
+	if err, ok := err.(*net.OpError); ok {
+		if err, ok := err.Err.(*os.SyscallError); ok {
+			if err.Err == syscall.EADDRINUSE {
+				return true
+			}
+			// Special case for Windows (WSAEADDRINUSE = 10048)
+			if errno, ok := err.Err.(syscall.Errno); ok {
+				if 10048 == int(errno) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

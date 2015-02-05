@@ -46,7 +46,7 @@ func NewSocksProxy(config *Config, tunneler Tunneler) (proxy *SocksProxy, err er
 	listener, err := socks.ListenSocks(
 		"tcp", fmt.Sprintf("127.0.0.1:%d", config.LocalSocksProxyPort))
 	if err != nil {
-		if IsNetworkBindError(err) {
+		if IsAddressInUseError(err) {
 			NoticeSocksProxyPortInUse(config.LocalSocksProxyPort)
 		}
 		return nil, ContextError(err)

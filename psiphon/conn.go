@@ -20,10 +20,13 @@
 package psiphon
 
 import (
-	"bytes"
+	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -168,15 +171,16 @@ func HttpProxyConnect(rawConn net.Conn, addr string) (err error) {
 		return ContextError(err)
 	}
 
-	expectedResponse := []byte("HTTP/1.1 200 OK\r\n\r\n")
-	readBuffer := make([]byte, len(expectedResponse))
-	_, err = io.ReadFull(rawConn, readBuffer)
+	// Adapted from dialConn in net/http/transport.go:
+	// Read response.
+	// Okay to use and discard buffered reader here, because
+	// TLS server will not speak until spoken to.
+	response, err := http.ReadResponse(bufio.NewReader(rawConn), nil)
 	if err != nil {
 		return ContextError(err)
 	}
-
-	if !bytes.Equal(readBuffer, expectedResponse) {
-		return fmt.Errorf("unexpected HTTP proxy response: %s", string(readBuffer))
+	if response.StatusCode != 200 {
+		return ContextError(errors.New(strings.SplitN(response.Status, " ", 2)[1]))
 	}
 
 	return nil
