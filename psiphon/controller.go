@@ -528,6 +528,7 @@ func (controller *Controller) stopEstablishing() {
 // servers with higher rank are priority candidates.
 func (controller *Controller) establishCandidateGenerator() {
 	defer controller.establishWaitGroup.Done()
+	defer close(controller.candidateServerEntries)
 
 	iterator, err := NewServerEntryIterator(controller.config)
 	if err != nil {
@@ -576,7 +577,6 @@ loop:
 		}
 	}
 
-	close(controller.candidateServerEntries)
 	NoticeInfo("stopped candidate generator")
 }
 
