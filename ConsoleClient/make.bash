@@ -16,7 +16,9 @@ CGO_ENABLED=1
 echo 'Building windows-386...'
 CC=/usr/bin/i686-w64-mingw32-gcc \
   gox -verbose -osarch windows/386 -output windows_386_psiphon-tunnel-core
-upx --best windows_386_psiphon-tunnel-core.exe
+# We are finding that UPXing the full Windows Psiphon client produces better results
+# if psiphon-tunnel-core.exe is not already UPX'd.
+#upx --best windows_386_psiphon-tunnel-core.exe
 
 echo 'Building windows-amd64...'
 CC=/usr/bin/x86_64-w64-mingw32-gcc \
