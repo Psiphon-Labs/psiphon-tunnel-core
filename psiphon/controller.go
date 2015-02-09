@@ -42,6 +42,7 @@ type Controller struct {
 	establishedTunnels        chan *Tunnel
 	failedTunnels             chan *Tunnel
 	tunnelMutex               sync.Mutex
+	establishedOnce           bool
 	tunnels                   []*Tunnel
 	nextTunnel                int
 	startedConnectedReporter  bool
@@ -77,6 +78,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 		establishedTunnels:       make(chan *Tunnel, config.TunnelPoolSize),
 		failedTunnels:            make(chan *Tunnel, config.TunnelPoolSize),
 		tunnels:                  make([]*Tunnel, 0),
+		establishedOnce:          false,
 		startedConnectedReporter: false,
 		isEstablishing:           false,
 		establishPendingConns:    new(Conns),
@@ -112,9 +114,6 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	}
 	defer httpProxy.Close()
 
-	// Note: unlike legacy Psiphon clients, this code always makes the
-	// fetch remote server list request
-
 	if !controller.config.DisableRemoteServerListFetcher {
 		controller.runWaitGroup.Add(1)
 		go controller.remoteServerListFetcher()
@@ -125,6 +124,11 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 
 	controller.runWaitGroup.Add(1)
 	go controller.runTunnels()
+
+	if *controller.config.EstablishTunnelTimeoutSeconds != 0 {
+		controller.runWaitGroup.Add(1)
+		go controller.establishTunnelWatcher()
+	}
 
 	// Wait while running
 
@@ -180,6 +184,28 @@ loop:
 	}
 
 	NoticeInfo("exiting remote server list fetcher")
+}
+
+// establishTunnelWatcher terminates the controller if a tunnel
+// has not been established in the configured time period. This
+// is regardless of how many tunnels are presently active -- meaning
+// that if an active tunnel was established and lost the controller
+// is left running (to re-establish).
+func (controller *Controller) establishTunnelWatcher() {
+	defer controller.runWaitGroup.Done()
+
+	timeout := time.After(
+		time.Duration(*controller.config.EstablishTunnelTimeoutSeconds) * time.Second)
+	select {
+	case <-timeout:
+		if !controller.hasEstablishedOnce() {
+			NoticeAlert("failed to establish tunnel before timeout")
+			controller.SignalComponentFailure()
+		}
+	case <-controller.shutdownBroadcast:
+	}
+
+	NoticeInfo("exiting establish tunnel watcher")
 }
 
 // connectedReporter sends periodic "connected" requests to the Psiphon API.
@@ -350,9 +376,19 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 			return false
 		}
 	}
+	controller.establishedOnce = true
 	controller.tunnels = append(controller.tunnels, tunnel)
 	NoticeTunnels(len(controller.tunnels))
 	return true
+}
+
+// hasEstablishedOnce indicates if at least one active tunnel has
+// been established up to this point. This is regardeless of how many
+// tunnels are presently active.
+func (controller *Controller) hasEstablishedOnce() bool {
+	controller.tunnelMutex.Lock()
+	defer controller.tunnelMutex.Unlock()
+	return controller.establishedOnce
 }
 
 // isFullyEstablished indicates if the pool of active tunnels is full.
@@ -492,6 +528,7 @@ func (controller *Controller) stopEstablishing() {
 // servers with higher rank are priority candidates.
 func (controller *Controller) establishCandidateGenerator() {
 	defer controller.establishWaitGroup.Done()
+	defer close(controller.candidateServerEntries)
 
 	iterator, err := NewServerEntryIterator(controller.config)
 	if err != nil {
@@ -540,7 +577,6 @@ loop:
 		}
 	}
 
-	close(controller.candidateServerEntries)
 	NoticeInfo("stopped candidate generator")
 }
 
