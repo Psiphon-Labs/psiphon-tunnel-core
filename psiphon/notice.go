@@ -143,7 +143,7 @@ func NoticeListeningHttpProxyPort(port int) {
 // NoticeClientUpgradeAvailable is an available client upgrade, as per the handshake. The
 // client should download and install an upgrade.
 func NoticeClientUpgradeAvailable(version string) {
-	outputNotice("ClientUgradeAvailable", false, "version", version)
+	outputNotice("ClientUpgradeAvailable", false, "version", version)
 }
 
 // NoticeClientUpgradeAvailable is a sponsor homepage, as per the handshake. The client
