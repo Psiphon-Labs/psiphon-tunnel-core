@@ -2,10 +2,9 @@
 #
 # See README.md for usage instructions.
 
-# TODO: Switch to debian:testing
 FROM ubuntu:12.04
 
-ENV GOVERSION=go1.4
+ENV GOVERSION=go1.4.1
 
 # Install system-level dependencies.
 ENV DEBIAN_FRONTEND=noninteractive
@@ -59,7 +58,7 @@ RUN echo "INSTALLING GO" && \
   curl -L https://github.com/golang/go/archive/$GOVERSION.zip -o /tmp/go.zip && \
   unzip /tmp/go.zip && \
   rm /tmp/go.zip && \
-  mv /go-master $GOROOT && \
+  mv /go-$GOVERSION $GOROOT && \
   echo devel > $GOROOT/VERSION && \
   cd $GOROOT/src && \
   ./all.bash && \

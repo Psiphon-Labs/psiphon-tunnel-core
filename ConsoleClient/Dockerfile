@@ -2,9 +2,9 @@
 #
 # See README.md for usage instructions.
 
-FROM debian:testing
+FROM ubuntu:12.04
 
-ENV GOVERSION=go1.4
+ENV GOVERSION=go1.4.1
 
 # Install system-level dependencies.
 ENV DEBIAN_FRONTEND=noninteractive
