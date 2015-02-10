@@ -28,6 +28,7 @@ _testmain.go
 *.exe
 *.test
 *.prof
+*_buildinfo.txt
 
 # Mac OS X clutter
 *.DS_Store
