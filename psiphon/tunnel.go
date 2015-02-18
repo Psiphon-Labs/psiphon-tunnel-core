@@ -39,8 +39,12 @@ import (
 // Components which use this interface may be serviced by a single Tunnel instance,
 // or a Controller which manages a pool of tunnels, or any other object which
 // implements Tunneler.
+// downstreamConn is an optional parameter which specifies a connection to be
+// explictly closed when the Dialed connection is closed. For instance, this
+// is used to close downstreamConn App<->LocalProxy connections when the related
+// LocalProxy<->SshPortForward connections close.
 type Tunneler interface {
-	Dial(remoteAddr string) (conn net.Conn, err error)
+	Dial(remoteAddr string, downstreamConn net.Conn) (conn net.Conn, err error)
 	SignalComponentFailure()
 }
 
@@ -177,7 +181,7 @@ func (tunnel *Tunnel) Close() {
 }
 
 // Dial establishes a port forward connection through the tunnel
-func (tunnel *Tunnel) Dial(remoteAddr string) (conn net.Conn, err error) {
+func (tunnel *Tunnel) Dial(remoteAddr string, downstreamConn net.Conn) (conn net.Conn, err error) {
 	tunnel.mutex.Lock()
 	isClosed := tunnel.isClosed
 	tunnel.mutex.Unlock()
@@ -196,8 +200,9 @@ func (tunnel *Tunnel) Dial(remoteAddr string) (conn net.Conn, err error) {
 	}
 
 	conn = &TunneledConn{
-		Conn:   sshPortForwardConn,
-		tunnel: tunnel}
+		Conn:           sshPortForwardConn,
+		tunnel:         tunnel,
+		downstreamConn: downstreamConn}
 
 	// Tunnel does not have a session when DisableApi is set
 	if tunnel.session != nil {
@@ -208,12 +213,22 @@ func (tunnel *Tunnel) Dial(remoteAddr string) (conn net.Conn, err error) {
 	return conn, nil
 }
 
+// SignalComponentFailure notifies the tunnel that an associated component has failed.
+// This will terminate the tunnel.
+func (tunnel *Tunnel) SignalComponentFailure() {
+	NoticeAlert("tunnel received component failure signal")
+	tunnel.Close()
+}
+
 // TunneledConn implements net.Conn and wraps a port foward connection.
 // It is used to hook into Read and Write to observe I/O errors and
 // report these errors back to the tunnel monitor as port forward failures.
+// TunneledConn optionally tracks a peer connection to be explictly closed
+// when the TunneledConn is closed.
 type TunneledConn struct {
 	net.Conn
-	tunnel *Tunnel
+	tunnel         *Tunnel
+	downstreamConn net.Conn
 }
 
 func (conn *TunneledConn) Read(buffer []byte) (n int, err error) {
@@ -242,11 +257,14 @@ func (conn *TunneledConn) Write(buffer []byte) (n int, err error) {
 	return
 }
 
-// SignalComponentFailure notifies the tunnel that an associated component has failed.
-// This will terminate the tunnel.
-func (tunnel *Tunnel) SignalComponentFailure() {
-	NoticeAlert("tunnel received component failure signal")
-	tunnel.Close()
+func (conn *TunneledConn) Close() error {
+	if conn.downstreamConn != nil {
+		err := conn.downstreamConn.Close()
+		if err != nil {
+			NoticeAlert("downstreamConn.Close() error: %s", ContextError(err))
+		}
+	}
+	return conn.Conn.Close()
 }
 
 // selectProtocol is a helper that picks the tunnel protocol
