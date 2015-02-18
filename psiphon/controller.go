@@ -465,13 +465,13 @@ func (controller *Controller) isActiveTunnelServerEntry(serverEntry *ServerEntry
 // Dial selects an active tunnel and establishes a port forward
 // connection through the selected tunnel. Failure to connect is considered
 // a port foward failure, for the purpose of monitoring tunnel health.
-func (controller *Controller) Dial(remoteAddr string) (conn net.Conn, err error) {
+func (controller *Controller) Dial(remoteAddr string, downstreamConn net.Conn) (conn net.Conn, err error) {
 	tunnel := controller.getNextActiveTunnel()
 	if tunnel == nil {
 		return nil, ContextError(errors.New("no active tunnels"))
 	}
 
-	tunneledConn, err := tunnel.Dial(remoteAddr)
+	tunneledConn, err := tunnel.Dial(remoteAddr, downstreamConn)
 	if err != nil {
 		return nil, ContextError(err)
 	}

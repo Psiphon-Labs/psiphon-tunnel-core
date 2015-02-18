@@ -50,8 +50,11 @@ func NewHttpProxy(config *Config, tunneler Tunneler) (proxy *HttpProxy, err erro
 		return nil, ContextError(err)
 	}
 	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
+		// downstreamConn is not set in this case, as there is not a fixed
+		// association between a downstream client connection and a particular
+		// tunnel.
 		// TODO: connect timeout?
-		return tunneler.Dial(addr)
+		return tunneler.Dial(addr, nil)
 	}
 	// TODO: also use http.Client, with its Timeout field?
 	transport := &http.Transport{
@@ -174,7 +177,7 @@ func forceClose(responseWriter http.ResponseWriter) {
 	}
 }
 
-// From // https://golang.org/src/pkg/net/http/httputil/reverseproxy.go:
+// From https://golang.org/src/pkg/net/http/httputil/reverseproxy.go:
 // Hop-by-hop headers. These are removed when sent to the backend.
 // http://www.w3.org/Protocols/rfc2616/rfc2616-sec13.html
 var hopHeaders = []string{
@@ -193,7 +196,10 @@ func (proxy *HttpProxy) httpConnectHandler(localConn net.Conn, target string) (e
 	defer localConn.Close()
 	defer proxy.openConns.Remove(localConn)
 	proxy.openConns.Add(localConn)
-	remoteConn, err := proxy.tunneler.Dial(target)
+	// Setting downstreamConn so localConn.Close() will be called when remoteConn.Close() is called.
+	// This ensures that the downstream client (e.g., web browser) doesn't keep waiting on the
+	// open connection for data which will never arrive.
+	remoteConn, err := proxy.tunneler.Dial(target, localConn)
 	if err != nil {
 		return ContextError(err)
 	}

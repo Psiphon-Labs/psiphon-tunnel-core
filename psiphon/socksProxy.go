@@ -77,7 +77,10 @@ func (proxy *SocksProxy) socksConnectionHandler(localConn *socks.SocksConn) (err
 	defer localConn.Close()
 	defer proxy.openConns.Remove(localConn)
 	proxy.openConns.Add(localConn)
-	remoteConn, err := proxy.tunneler.Dial(localConn.Req.Target)
+	// Setting peerConn so localConn.Close() will be called when remoteConn.Close() is called.
+	// This ensures that the downstream client (e.g., web browser) doesn't keep waiting on the
+	// open connection for data which will never arrive.
+	remoteConn, err := proxy.tunneler.Dial(localConn.Req.Target, localConn)
 	if err != nil {
 		return ContextError(err)
 	}
