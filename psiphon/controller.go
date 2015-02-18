@@ -433,9 +433,19 @@ func (controller *Controller) terminateTunnel(tunnel *Tunnel) {
 func (controller *Controller) terminateAllTunnels() {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
+	// Closing all tunnels in parallel. In an orderly shutdown, each tunnel
+	// may take a few seconds to send a final status request. We only want
+	// to wait as long as the single slowest tunnel.
+	closeWaitGroup := new(sync.WaitGroup)
+	closeWaitGroup.Add(len(controller.tunnels))
 	for _, activeTunnel := range controller.tunnels {
-		activeTunnel.Close()
+		tunnel := activeTunnel
+		go func() {
+			defer closeWaitGroup.Done()
+			tunnel.Close()
+		}()
 	}
+	closeWaitGroup.Wait()
 	controller.tunnels = make([]*Tunnel, 0)
 	controller.nextTunnel = 0
 	NoticeTunnels(len(controller.tunnels))

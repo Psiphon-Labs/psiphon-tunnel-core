@@ -172,8 +172,19 @@ func EstablishTunnel(
 func (tunnel *Tunnel) Close() {
 	tunnel.mutex.Lock()
 	if !tunnel.isClosed {
+		// Signal operateTunnel to stop before closing the tunnel -- this
+		// allows a final status request to be made in the case of an orderly
+		// shutdown.
+		// A timer is set, so if operateTunnel takes too long to stop, the
+		// tunnel is closed, which will interrupt any slow final status request.
+		// In effect, the TUNNEL_OPERATE_SHUTDOWN_TIMEOUT value will take
+		// precedence over the PSIPHON_API_SERVER_TIMEOUT http.Client.Timeout
+		// value set in makePsiphonHttpsClient.
+		timer := time.AfterFunc(TUNNEL_OPERATE_SHUTDOWN_TIMEOUT, func() { tunnel.conn.Close() })
 		close(tunnel.shutdownOperateBroadcast)
 		tunnel.operateWaitGroup.Wait()
+		timer.Stop()
+		// tunnel.conn.Close() may get called twice, which is allowed.
 		tunnel.conn.Close()
 	}
 	tunnel.isClosed = true
