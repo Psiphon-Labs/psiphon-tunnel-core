@@ -10,7 +10,9 @@ public abstract class Psi {
     private Psi() {} // uninstantiable
     
     public interface PsiphonProvider extends go.Seq.Object {
-        public void BindToDevice(long fileDescriptor);
+        public void BindToDevice(long fileDescriptor) throws Exception;
+        
+        public long HasNetworkConnectivity();
         
         public void Notice(String noticeJSON);
         
@@ -28,7 +30,17 @@ public abstract class Psi {
                 switch (code) {
                 case Proxy.CALL_BindToDevice: {
                     long param_fileDescriptor = in.readInt();
-                    this.BindToDevice(param_fileDescriptor);
+                    try {
+                        this.BindToDevice(param_fileDescriptor);
+                        out.writeUTF16(null);
+                    } catch (Exception e) {
+                        out.writeUTF16(e.getMessage());
+                    }
+                    return;
+                }
+                case Proxy.CALL_HasNetworkConnectivity: {
+                    long result = this.HasNetworkConnectivity();
+                    out.writeInt(result);
                     return;
                 }
                 case Proxy.CALL_Notice: {
@@ -55,12 +67,26 @@ public abstract class Psi {
                 throw new RuntimeException("cycle: cannot call proxy");
             }
         
-            public void BindToDevice(long fileDescriptor) {
+            public void BindToDevice(long fileDescriptor) throws Exception {
                 go.Seq _in = new go.Seq();
                 go.Seq _out = new go.Seq();
                 _in.writeRef(ref);
                 _in.writeInt(fileDescriptor);
                 Seq.send(DESCRIPTOR, CALL_BindToDevice, _in, _out);
+                String _err = _out.readUTF16();
+                if (_err != null) {
+                    throw new Exception(_err);
+                }
+            }
+            
+            public long HasNetworkConnectivity() {
+                go.Seq _in = new go.Seq();
+                go.Seq _out = new go.Seq();
+                long _result;
+                _in.writeRef(ref);
+                Seq.send(DESCRIPTOR, CALL_HasNetworkConnectivity, _in, _out);
+                _result = _out.readInt();
+                return _result;
             }
             
             public void Notice(String noticeJSON) {
@@ -72,7 +98,8 @@ public abstract class Psi {
             }
             
             static final int CALL_BindToDevice = 0x10a;
-            static final int CALL_Notice = 0x20a;
+            static final int CALL_HasNetworkConnectivity = 0x20a;
+            static final int CALL_Notice = 0x30a;
         }
     }
     

@@ -10,23 +10,65 @@ import (
 )
 
 const (
-	proxyPsiphonProviderDescriptor       = "go.psi.PsiphonProvider"
-	proxyPsiphonProviderBindToDeviceCode = 0x10a
-	proxyPsiphonProviderNoticeCode       = 0x20a
+	proxyPsiphonProviderDescriptor                 = "go.psi.PsiphonProvider"
+	proxyPsiphonProviderBindToDeviceCode           = 0x10a
+	proxyPsiphonProviderHasNetworkConnectivityCode = 0x20a
+	proxyPsiphonProviderNoticeCode                 = 0x30a
 )
+
+func proxyPsiphonProviderBindToDevice(out, in *seq.Buffer) {
+	ref := in.ReadRef()
+	v := ref.Get().(psi.PsiphonProvider)
+	param_fileDescriptor := in.ReadInt()
+	err := v.BindToDevice(param_fileDescriptor)
+	if err == nil {
+		out.WriteUTF16("")
+	} else {
+		out.WriteUTF16(err.Error())
+	}
+}
+
+func proxyPsiphonProviderHasNetworkConnectivity(out, in *seq.Buffer) {
+	ref := in.ReadRef()
+	v := ref.Get().(psi.PsiphonProvider)
+	res := v.HasNetworkConnectivity()
+	out.WriteInt(res)
+}
+
+func proxyPsiphonProviderNotice(out, in *seq.Buffer) {
+	ref := in.ReadRef()
+	v := ref.Get().(psi.PsiphonProvider)
+	param_noticeJSON := in.ReadUTF16()
+	v.Notice(param_noticeJSON)
+}
+
+func init() {
+	seq.Register(proxyPsiphonProviderDescriptor, proxyPsiphonProviderBindToDeviceCode, proxyPsiphonProviderBindToDevice)
+	seq.Register(proxyPsiphonProviderDescriptor, proxyPsiphonProviderHasNetworkConnectivityCode, proxyPsiphonProviderHasNetworkConnectivity)
+	seq.Register(proxyPsiphonProviderDescriptor, proxyPsiphonProviderNoticeCode, proxyPsiphonProviderNotice)
+}
 
 type proxyPsiphonProvider seq.Ref
 
-func (p *proxyPsiphonProvider) BindToDevice(fileDescriptor int) {
-	out := new(seq.Buffer)
-	out.WriteInt(fileDescriptor)
-	seq.Transact((*seq.Ref)(p), proxyPsiphonProviderBindToDeviceCode, out)
+func (p *proxyPsiphonProvider) BindToDevice(fileDescriptor int) error {
+	in := new(seq.Buffer)
+	in.WriteInt(fileDescriptor)
+	out := seq.Transact((*seq.Ref)(p), proxyPsiphonProviderBindToDeviceCode, in)
+	res_0 := out.ReadError()
+	return res_0
+}
+
+func (p *proxyPsiphonProvider) HasNetworkConnectivity() int {
+	in := new(seq.Buffer)
+	out := seq.Transact((*seq.Ref)(p), proxyPsiphonProviderHasNetworkConnectivityCode, in)
+	res_0 := out.ReadInt()
+	return res_0
 }
 
 func (p *proxyPsiphonProvider) Notice(noticeJSON string) {
-	out := new(seq.Buffer)
-	out.WriteUTF16(noticeJSON)
-	seq.Transact((*seq.Ref)(p), proxyPsiphonProviderNoticeCode, out)
+	in := new(seq.Buffer)
+	in.WriteUTF16(noticeJSON)
+	seq.Transact((*seq.Ref)(p), proxyPsiphonProviderNoticeCode, in)
 }
 
 func proxy_Start(out, in *seq.Buffer) {
@@ -34,9 +76,9 @@ func proxy_Start(out, in *seq.Buffer) {
 	param_embeddedServerEntryList := in.ReadUTF16()
 	var param_provider psi.PsiphonProvider
 	param_provider_ref := in.ReadRef()
-	if param_provider_ref.Num < 0 {
+	if param_provider_ref.Num < 0 { // go object
 		param_provider = param_provider_ref.Get().(psi.PsiphonProvider)
-	} else {
+	} else { // foreign object
 		param_provider = (*proxyPsiphonProvider)(param_provider_ref)
 	}
 	err := psi.Start(param_configJson, param_embeddedServerEntryList, param_provider)

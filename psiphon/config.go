@@ -29,7 +29,7 @@ import (
 // TODO: allow all params to be configured
 
 const (
-	VERSION                                      = "0.0.6"
+	VERSION                                      = "0.0.7"
 	DATA_STORE_FILENAME                          = "psiphon.db"
 	CONNECTION_WORKER_POOL_SIZE                  = 10
 	TUNNEL_POOL_SIZE                             = 1
@@ -80,6 +80,7 @@ type Config struct {
 	TunnelPoolSize                     int
 	PortForwardFailureThreshold        int
 	UpstreamHttpProxyAddress           string
+	CheckNetworkConnectivityProvider   NetworkConnectivityChecker
 	BindToDeviceProvider               DeviceBinder
 	BindToDeviceDnsServer              string
 	TargetServerEntry                  string
@@ -149,8 +150,12 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		config.PortForwardFailureThreshold = PORT_FORWARD_FAILURE_THRESHOLD
 	}
 
+	if config.CheckNetworkConnectivityProvider != nil {
+		return nil, ContextError(errors.New("CheckNetworkConnectivityProvider interface must be set at runtime"))
+	}
+
 	if config.BindToDeviceProvider != nil {
-		return nil, ContextError(errors.New("interface must be set at runtime"))
+		return nil, ContextError(errors.New("BindToDeviceProvider interface must be set at runtime"))
 	}
 
 	return &config, nil

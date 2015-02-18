@@ -64,9 +64,40 @@ type DialConfig struct {
 
 // DeviceBinder defines the interface to the external BindToDevice provider
 type DeviceBinder interface {
-	// TODO: return 'error'; currently no return value due to
-	// Android Library limitation.
-	BindToDevice(fileDescriptor int)
+	BindToDevice(fileDescriptor int) error
+}
+
+// NetworkConnectivityChecker defines the interface to the external
+// HasNetworkConnectivity provider
+type NetworkConnectivityChecker interface {
+	// TODO: change to bool return value once gobind supports that type
+	HasNetworkConnectivity() int
+}
+
+// WaitForNetworkConnectivity uses a NetworkConnectivityChecker to
+// periodically check for network connectivity. It returns true if
+// no NetworkConnectivityChecker is provided (waiting is disabled)
+// or if NetworkConnectivityChecker.HasNetworkConnectivity() indicates
+// connectivity. It polls the checker once a second. If a stop is
+// broadcast, false is returned.
+func WaitForNetworkConnectivity(
+	connectivityChecker NetworkConnectivityChecker, stopBroadcast <-chan struct{}) bool {
+	if connectivityChecker == nil || 1 == connectivityChecker.HasNetworkConnectivity() {
+		return true
+	}
+	NoticeInfo("waiting for network connectivity")
+	ticker := time.NewTicker(1 * time.Second)
+	for {
+		if 1 == connectivityChecker.HasNetworkConnectivity() {
+			return true
+		}
+		select {
+		case <-ticker.C:
+			// Check again
+		case <-stopBroadcast:
+			return false
+		}
+	}
 }
 
 // Dialer is a custom dialer compatible with http.Transport.Dial.

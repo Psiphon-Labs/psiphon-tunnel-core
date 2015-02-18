@@ -23,6 +23,7 @@ package psiphon
 
 import (
 	"errors"
+	"fmt"
 	dns "github.com/Psiphon-Inc/dns"
 	"net"
 	"os"
@@ -62,8 +63,10 @@ func bindLookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 	}
 	defer syscall.Close(socketFd)
 
-	// TODO: check BindToDevice result
-	config.BindToDeviceProvider.BindToDevice(socketFd)
+	err = config.BindToDeviceProvider.BindToDevice(socketFd)
+	if err != nil {
+		return nil, ContextError(fmt.Errorf("BindToDevice failed: %s", err))
+	}
 
 	// config.BindToDeviceDnsServer must be an IP address
 	ipAddr = net.ParseIP(config.BindToDeviceDnsServer)

@@ -100,6 +100,13 @@ public class Utils {
         return outputStream.toByteArray();
     }
 
+    public static boolean hasNetworkConnectivity(Context context) {
+        ConnectivityManager connectivityManager =
+                (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkInfo networkInfo = connectivityManager.getActiveNetworkInfo();
+        return networkInfo != null && networkInfo.isConnected();
+    }
+
     public static String getNetworkTypeName(Context context) {
         ConnectivityManager connectivityManager =
                 (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
