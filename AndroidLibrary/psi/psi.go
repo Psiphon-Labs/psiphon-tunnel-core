@@ -34,10 +34,8 @@ import (
 
 type PsiphonProvider interface {
 	Notice(noticeJSON string)
-
-	// TODO: return 'error'; at the moment gobind doesn't
-	// work with interface function return values.
-	BindToDevice(fileDescriptor int)
+	HasNetworkConnectivity() int
+	BindToDevice(fileDescriptor int) error
 }
 
 var controller *psiphon.Controller
@@ -54,6 +52,7 @@ func Start(configJson, embeddedServerEntryList string, provider PsiphonProvider)
 	if err != nil {
 		return fmt.Errorf("error loading configuration file: %s", err)
 	}
+	config.CheckNetworkConnectivityProvider = provider
 	config.BindToDeviceProvider = provider
 
 	err = psiphon.InitDataStore(config)

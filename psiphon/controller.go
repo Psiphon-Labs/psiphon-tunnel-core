@@ -165,6 +165,12 @@ func (controller *Controller) remoteServerListFetcher() {
 
 loop:
 	for {
+		if !WaitForNetworkConnectivity(
+			controller.config.CheckNetworkConnectivityProvider,
+			controller.shutdownBroadcast) {
+			break
+		}
+
 		err := FetchRemoteServerList(
 			controller.config, controller.fetchRemotePendingConns)
 
@@ -596,6 +602,12 @@ loop:
 		// There may already be a tunnel to this candidate. If so, skip it.
 		if controller.isActiveTunnelServerEntry(serverEntry) {
 			continue
+		}
+
+		if !WaitForNetworkConnectivity(
+			controller.config.CheckNetworkConnectivityProvider,
+			controller.stopEstablishingBroadcast) {
+			break loop
 		}
 
 		tunnel, err := EstablishTunnel(

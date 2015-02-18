@@ -50,19 +50,22 @@ public class Psiphon extends Psi.PsiphonProvider.Stub {
     // PsiphonProvider.Notice
     @Override
     public void Notice(String noticeJSON) {
-        noticeJSON = noticeJSON.trim();
-
-        android.util.Log.d("PSIPHON", noticeJSON);
-        parseMessage(noticeJSON);
-        Log.addEntry(noticeJSON);
+        handleNotice(noticeJSON);
     }
 
     // PsiphonProvider.BindToDevice
     @Override
-    public void BindToDevice(long fileDescriptor) {
-        // TODO: return result; currently no return value due to
-        // Android Library limitation.
-        mVpnService.protect((int)fileDescriptor);
+    public void BindToDevice(long fileDescriptor) throws Exception {
+        if (!mVpnService.protect((int)fileDescriptor)) {
+            throw new Exception("protect socket failed");
+        }
+    }
+
+    // PsiphonProvider.HasNetworkConnectivity
+    @Override
+    public long HasNetworkConnectivity() {
+        // TODO: change to bool return value once gobind supports that type
+        return Utils.hasNetworkConnectivity(mVpnService) ? 1 : 0;
     }
 
     public void start() throws Utils.PsibotError {
@@ -175,7 +178,7 @@ public class Psiphon extends Psi.PsiphonProvider.Stub {
         return json.toString();
     }
 
-    private synchronized void parseMessage(String noticeJSON) {
+    private synchronized void handleNotice(String noticeJSON) {
         try {
             JSONObject notice = new JSONObject(noticeJSON);
             String noticeType = notice.getString("noticeType");
@@ -191,6 +194,9 @@ public class Psiphon extends Psi.PsiphonProvider.Stub {
             } else if (noticeType.equals("Homepage")) {
                 mHomePages.add(notice.getJSONObject("data").getString("url"));
             }
+            String displayNotice = noticeType + " " + notice.getJSONObject("data").toString();
+            android.util.Log.d("PSIPHON", displayNotice);
+            Log.addEntry(displayNotice);
         } catch (JSONException e) {
             // Ignore notice
         }
