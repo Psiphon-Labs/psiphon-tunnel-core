@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -43,7 +43,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        startVpn();
+        start();
     }
 
     @Override
@@ -55,15 +55,8 @@ public class MainActivity extends Activity {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
-        case R.id.action_email_log:
-            Log.composeEmail(this);
-            return true;
         case R.id.action_settings:
             startActivity(new Intent(this, SettingsActivity.class));
-            return true;
-        case R.id.action_quit:
-            stopVpnService();
-            finish();
             return true;
         }
         return super.onOptionsItemSelected(item);
@@ -71,37 +64,23 @@ public class MainActivity extends Activity {
 
     protected static final int REQUEST_CODE_PREPARE_VPN = 100;
 
-    protected void startVpn() {
-        if (Service.isRunning()) {
-            return;
-        }
+    protected void start() {
         try {
             Intent intent = VpnService.prepare(this);
             if (intent != null) {
                 startActivityForResult(intent, REQUEST_CODE_PREPARE_VPN);
             } else {
-                startVpnService();
+                startService(new Intent(this, Service.class));
             }
         } catch (ActivityNotFoundException e) {
             Log.addEntry("prepare VPN failed: " + e.getMessage());
         }
     }
 
-    protected void startVpnService() {
-        startService(new Intent(this, Service.class));
-    }
-
-    protected void stopVpnService() {
-        // Note: Tun2Socks.stop() closes the VpnService file descriptor.
-        // This is necessary in order to stop the VpnService while running.
-        Tun2Socks.stop();
-        stopService(new Intent(this, Service.class));
-    }
-
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         if (request == REQUEST_CODE_PREPARE_VPN && result == RESULT_OK) {
-            startVpnService();
+            startService(new Intent(this, Service.class));
         }
     }
 }

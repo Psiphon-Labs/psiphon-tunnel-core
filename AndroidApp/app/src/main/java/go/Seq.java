@@ -1,6 +1,5 @@
 package go;
 
-import android.util.Log;
 import android.util.SparseArray;
 import android.util.SparseIntArray;
 
@@ -208,7 +207,20 @@ public class Seq {
 		synchronized void dec(int refnum) {
 			if (refnum > 0) {
 				// Java objects are removed on request of Go.
-				javaObjs.remove(refnum);
+
+				// TEMP FIX -- this can remove references for valid objects
+                // The problem appears to be that references are added when
+                // a Java object is created (only once) but removed after the
+                // object is passed to Go and then no longer referenced by Go
+                // (via runtime.SetFinalizer: https://github.com/golang/mobile/blob/b2e453e1cda693a5a97d5c97cc9f3016a64b7dfa/bind/seq/buffer.go#L110)
+                // But if the same Java object is passed to Go again, then it
+                // will no longer be in javaObjs (after Go GCs the Ref)!
+                // This temp fix keeps eternal references to Java objects,
+                // which is ok for us since we only have one. Another workaround
+                // would be to create temporary proxy objects, once per call into Go.
+
+				// javaObjs.remove(refnum);
+
 				return;
 			}
 			int count = goObjs.get(refnum);

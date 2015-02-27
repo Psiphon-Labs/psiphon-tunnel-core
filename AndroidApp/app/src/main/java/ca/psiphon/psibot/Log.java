@@ -19,9 +19,6 @@
 
 package ca.psiphon.psibot;
 
-import android.content.ActivityNotFoundException;
-import android.content.Context;
-import android.content.Intent;
 import android.os.Handler;
 
 import java.util.ArrayList;
@@ -94,26 +91,5 @@ public class Log {
 
     public synchronized static void unregisterObserver(Observer observer) {
         mObservers.remove(observer);
-    }
-
-    public synchronized static void composeEmail(Context context) {
-        try {
-            StringBuilder body = new StringBuilder();
-            for (Entry entry : mEntries) {
-                body.append(entry.mTimestamp);
-                body.append(": ");
-                body.append(entry.mMessage);
-                body.append("\n");
-            }
-
-            Intent intent = new Intent(Intent.ACTION_SEND);
-            intent.setType("message/rfc822");
-            intent.putExtra(Intent.EXTRA_EMAIL, new String[]{"feedback+psibot@psiphon.ca"});
-            intent.putExtra(Intent.EXTRA_SUBJECT, "Psibot Logs");
-            intent.putExtra(Intent.EXTRA_TEXT, body.toString());
-            context.startActivity(intent);
-        } catch (ActivityNotFoundException e) {
-            Log.addEntry("compose log email failed: " + e.getMessage());
-        }
     }
 }
