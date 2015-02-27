@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -24,33 +24,32 @@ import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.VpnService;
-import android.os.ParcelFileDescriptor;
 import android.preference.PreferenceManager;
 
-import java.util.Locale;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.InputStream;
+
+import ca.psiphon.PsiphonVpn;
 
 public class Service extends VpnService
-        implements SharedPreferences.OnSharedPreferenceChangeListener {
+        implements PsiphonVpn.HostService, SharedPreferences.OnSharedPreferenceChangeListener {
 
-    // Note: assumes only one instance of Service
-    private static AtomicBoolean mIsRunning = new AtomicBoolean();
-
-    public static boolean isRunning() {
-        return mIsRunning.get();
-    }
-
-    private Thread mThread;
-    private CountDownLatch mInterruptSignal;
-    private AtomicBoolean mStopFlag;
+    private PsiphonVpn mPsiphonVpn;
 
     @Override
     public void onCreate() {
-        mIsRunning.set(true);
+        mPsiphonVpn = PsiphonVpn.newPsiphonVpn(this);
         startForeground(R.string.foregroundServiceNotificationId, makeForegroundNotification());
-        startWorking();
+        try {
+            mPsiphonVpn.startRouting();
+            mPsiphonVpn.startTunneling();
+        } catch (PsiphonVpn.Exception e) {
+            Log.addEntry("failed to start Psiphon VPN: " + e.getMessage());
+            mPsiphonVpn.stop();
+            stopSelf();
+        }
         PreferenceManager.getDefaultSharedPreferences(this).
                 registerOnSharedPreferenceChangeListener(this);
     }
@@ -59,179 +58,100 @@ public class Service extends VpnService
     public void onDestroy() {
         PreferenceManager.getDefaultSharedPreferences(this).
                 unregisterOnSharedPreferenceChangeListener(this);
-        stopWorking();
+        mPsiphonVpn.stop();
         stopForeground(true);
-        mIsRunning.set(false);
     }
 
     @Override
     public synchronized void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
-        if (!mIsRunning.get()) {
-            return;
-        }
-        // An interrupt without setting stop will restart Psiphon, using the newest preferences.
-        interruptWorking();
-    }
-
-    private void startWorking() {
-        stopWorking();
-        mInterruptSignal = new CountDownLatch(1);
-        mStopFlag = new AtomicBoolean(false);
-        mThread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                CountDownLatch tunnelStartedSignal = new CountDownLatch(1);
-                Psiphon psiphon = new Psiphon(Service.this, tunnelStartedSignal);
-                // An interrupt with mStopFlag=false will cause Psiphon to restart without stopping
-                // the service thread or VPN; this is to apply new preferences to the Psiphon config.
-                // (The VPN is restarted if the preferred SOCKS proxy port changes.)
-                int localSocksProxyPort = -1;
-                while (!mStopFlag.get()) {
-                    try {
-                        // TODO: monitor tunnel messages and update notification UI when re-connecting, etc.
-                        psiphon.start();
-                        while (true) {
-                            if (tunnelStartedSignal.await(100, TimeUnit.MILLISECONDS)) {
-                                break;
-                            }
-                            if (mInterruptSignal.await(0, TimeUnit.MILLISECONDS)) {
-                                throw new Utils.PsibotError("interrupted while waiting tunnel");
-                            }
-                        }
-                        // [Re]start the VPN when the local SOCKS proxy port changes. Leave the
-                        // VPN up when other preferences change; only Psiphon restarts in this case.
-                        if (psiphon.getLocalSocksProxyPort() != localSocksProxyPort) {
-                            if (localSocksProxyPort != -1) {
-                                stopVpn();
-                            }
-                            localSocksProxyPort = psiphon.getLocalSocksProxyPort();
-                            runVpn(localSocksProxyPort);
-                        }
-                        mInterruptSignal.await();
-                    } catch (Utils.PsibotError e) {
-                        Log.addEntry("Service failed: " + e.getMessage());
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                }
-                stopVpn();
-                psiphon.stop();
-                stopSelf();
-            }
-        });
-        mThread.start();
-    }
-
-    private void interruptWorking() {
-        if (mInterruptSignal == null) {
-            return;
-        }
-        CountDownLatch currentSignal = mInterruptSignal;
-        // This is the new interrupt signal for when work resumes
-        mInterruptSignal = new CountDownLatch(1);
-        // Interrupt work
-        currentSignal.countDown();
-    }
-
-    private void stopWorking() {
-        if (mStopFlag != null) {
-            mStopFlag.set(true);
-        }
-        interruptWorking();
-        if (mThread != null) {
-            try {
-                mThread.join();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-        mInterruptSignal = null;
-        mStopFlag = null;
-        mThread = null;
-    }
-
-    private final static String VPN_INTERFACE_NETMASK = "255.255.255.0";
-    private final static int VPN_INTERFACE_MTU = 1500;
-    private final static int UDPGW_SERVER_PORT = 7300;
-
-    private void runVpn(int localSocksProxyPort) throws Utils.PsibotError {
-        Log.addEntry("network type: " + Utils.getNetworkTypeName(this));
-
-        String privateIpAddress = Utils.selectPrivateAddress();
-        if (privateIpAddress == null) {
-            throw new Utils.PsibotError("no private address available");
-        }
-
-        ParcelFileDescriptor vpnInterfaceFileDescriptor = establishVpn(privateIpAddress);
-        Log.addEntry("VPN established");
-
-        String socksServerAddress = "127.0.0.1:" + Integer.toString(localSocksProxyPort);
-        String udpgwServerAddress = "127.0.0.1:" + Integer.toString(UDPGW_SERVER_PORT);
-        Tun2Socks.start(
-                this,
-                vpnInterfaceFileDescriptor,
-                VPN_INTERFACE_MTU,
-                Utils.getPrivateAddressRouter(privateIpAddress),
-                VPN_INTERFACE_NETMASK,
-                socksServerAddress,
-                udpgwServerAddress,
-                true);
-        Log.addEntry("tun2socks started");
-
-        // Note: should now double-check tunnel routing; see:
-        // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/1dc5e4257dca99790109f3bf374e8ab3a0ead4d7/Android/PsiphonAndroidLibrary/src/com/psiphon3/psiphonlibrary/TunnelCore.java?at=default#cl-779
-    }
-
-    private ParcelFileDescriptor establishVpn(String privateIpAddress)
-        throws Utils.PsibotError {
-
-        Locale previousLocale = Locale.getDefault();
-        ParcelFileDescriptor vpnInterfaceFileDescriptor = null;
-
-        final String errorMessage = "establishVpn failed";
         try {
-            String subnet = Utils.getPrivateAddressSubnet(privateIpAddress);
-            int prefixLength = Utils.getPrivateAddressPrefixLength(privateIpAddress);
-            String router = Utils.getPrivateAddressRouter(privateIpAddress);
-
-            // Set the locale to English (or probably any other language that
-            // uses Hindu-Arabic (aka Latin) numerals).
-            // We have found that VpnService.Builder does something locale-dependent
-            // internally that causes errors when the locale uses its own numerals
-            // (i.e., Farsi and Arabic).
-            Locale.setDefault(new Locale("en"));
-
-            vpnInterfaceFileDescriptor = new VpnService.Builder()
-                    .setSession(getString(R.string.app_name))
-                    .setMtu(VPN_INTERFACE_MTU)
-                    .addAddress(privateIpAddress, prefixLength)
-                    .addRoute("0.0.0.0", 0)
-                    .addRoute(subnet, prefixLength)
-                    .addDnsServer(router)
-                    .establish();
-
-            if (vpnInterfaceFileDescriptor == null) {
-                // as per http://developer.android.com/reference/android/net/VpnService.Builder.html#establish%28%29
-                throw new Utils.PsibotError(errorMessage + ": application is not prepared or is revoked");
-            }
-        } catch(IllegalArgumentException e) {
-            throw new Utils.PsibotError(errorMessage, e);
-        } catch(IllegalStateException e) {
-            throw new Utils.PsibotError(errorMessage, e);
-        } catch(SecurityException e) {
-            throw new Utils.PsibotError(errorMessage, e);
-        } finally {
-            // Restore the original locale.
-            Locale.setDefault(previousLocale);
+            mPsiphonVpn.restartPsiphon();
+        } catch (PsiphonVpn.Exception e) {
+            Log.addEntry("failed to restart Psiphon: " + e.getMessage());
+            mPsiphonVpn.stop();
+            stopSelf();
         }
-
-        return vpnInterfaceFileDescriptor;
     }
 
-    private void stopVpn() {
-        // Tun2socks closes the VPN file descriptor, which closes the VpnService session
-        Tun2Socks.stop();
-        Log.addEntry("VPN stopped");
+    @Override
+    public String getAppName() {
+        return getString(R.string.app_name);
+    }
+
+    @Override
+    public VpnService getVpnService() {
+        return this;
+    }
+
+    @Override
+    public VpnService.Builder newVpnServiceBuilder() {
+        return new VpnService.Builder();
+    }
+
+    @Override
+    public InputStream getPsiphonConfigResource() {
+        return getResources().openRawResource(R.raw.psiphon_config);
+    }
+
+    @Override
+    public void customizeConfigParameters(JSONObject config) {
+        // User-specified settings.
+        // Note: currently, validation is not comprehensive, and related errors are
+        // not directly parsed.
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
+        try {
+            config.put("EgressRegion",
+                    preferences.getString(
+                            getString(R.string.preferenceEgressRegion),
+                            getString(R.string.preferenceEgressRegionDefaultValue)));
+            config.put("TunnelProtocol",
+                    preferences.getString(
+                            getString(R.string.preferenceTunnelProtocol),
+                            getString(R.string.preferenceTunnelProtocolDefaultValue)));
+            config.put("UpstreamHttpProxyAddress",
+                    preferences.getString(
+                            getString(R.string.preferenceUpstreamHttpProxyAddress),
+                            getString(R.string.preferenceUpstreamHttpProxyAddressDefaultValue)));
+            config.put("LocalHttpProxyPort",
+                    Integer.parseInt(
+                            preferences.getString(
+                                    getString(R.string.preferenceLocalHttpProxyPort),
+                                    getString(R.string.preferenceLocalHttpProxyPortDefaultValue))));
+            config.put("LocalSocksProxyPort",
+                    Integer.parseInt(
+                            preferences.getString(
+                                    getString(R.string.preferenceLocalSocksProxyPort),
+                                    getString(R.string.preferenceLocalSocksProxyPortDefaultValue))));
+            config.put("ConnectionWorkerPoolSize",
+                    Integer.parseInt(
+                            preferences.getString(
+                                    getString(R.string.preferenceConnectionWorkerPoolSize),
+                                    getString(R.string.preferenceConnectionWorkerPoolSizeDefaultValue))));
+            config.put("TunnelPoolSize",
+                    Integer.parseInt(
+                            preferences.getString(
+                                    getString(R.string.preferenceTunnelPoolSize),
+                                    getString(R.string.preferenceTunnelPoolSizeDefaultValue))));
+            config.put("PortForwardFailureThreshold",
+                    Integer.parseInt(
+                            preferences.getString(
+                                    getString(R.string.preferencePortForwardFailureThreshold),
+                                    getString(R.string.preferencePortForwardFailureThresholdDefaultValue))));
+        } catch (JSONException e) {
+            Log.addEntry("error setting config parameters: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void logWarning(String message) {
+        android.util.Log.w(getString(R.string.app_name), message);
+        Log.addEntry(message);
+    }
+
+    @Override
+    public void logInfo(String message) {
+        android.util.Log.i(getString(R.string.app_name), message);
+        Log.addEntry(message);
     }
 
     private Notification makeForegroundNotification() {
