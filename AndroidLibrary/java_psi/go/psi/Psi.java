@@ -12,6 +12,8 @@ public abstract class Psi {
     public interface PsiphonProvider extends go.Seq.Object {
         public void BindToDevice(long fileDescriptor) throws Exception;
         
+        public String GetDnsServer();
+        
         public long HasNetworkConnectivity();
         
         public void Notice(String noticeJSON);
@@ -36,6 +38,11 @@ public abstract class Psi {
                     } catch (Exception e) {
                         out.writeUTF16(e.getMessage());
                     }
+                    return;
+                }
+                case Proxy.CALL_GetDnsServer: {
+                    String result = this.GetDnsServer();
+                    out.writeUTF16(result);
                     return;
                 }
                 case Proxy.CALL_HasNetworkConnectivity: {
@@ -79,6 +86,16 @@ public abstract class Psi {
                 }
             }
             
+            public String GetDnsServer() {
+                go.Seq _in = new go.Seq();
+                go.Seq _out = new go.Seq();
+                String _result;
+                _in.writeRef(ref);
+                Seq.send(DESCRIPTOR, CALL_GetDnsServer, _in, _out);
+                _result = _out.readUTF16();
+                return _result;
+            }
+            
             public long HasNetworkConnectivity() {
                 go.Seq _in = new go.Seq();
                 go.Seq _out = new go.Seq();
@@ -98,8 +115,9 @@ public abstract class Psi {
             }
             
             static final int CALL_BindToDevice = 0x10a;
-            static final int CALL_HasNetworkConnectivity = 0x20a;
-            static final int CALL_Notice = 0x30a;
+            static final int CALL_GetDnsServer = 0x20a;
+            static final int CALL_HasNetworkConnectivity = 0x30a;
+            static final int CALL_Notice = 0x40a;
         }
     }
     

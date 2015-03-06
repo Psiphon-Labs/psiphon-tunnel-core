@@ -12,8 +12,9 @@ import (
 const (
 	proxyPsiphonProviderDescriptor                 = "go.psi.PsiphonProvider"
 	proxyPsiphonProviderBindToDeviceCode           = 0x10a
-	proxyPsiphonProviderHasNetworkConnectivityCode = 0x20a
-	proxyPsiphonProviderNoticeCode                 = 0x30a
+	proxyPsiphonProviderGetDnsServerCode           = 0x20a
+	proxyPsiphonProviderHasNetworkConnectivityCode = 0x30a
+	proxyPsiphonProviderNoticeCode                 = 0x40a
 )
 
 func proxyPsiphonProviderBindToDevice(out, in *seq.Buffer) {
@@ -26,6 +27,13 @@ func proxyPsiphonProviderBindToDevice(out, in *seq.Buffer) {
 	} else {
 		out.WriteUTF16(err.Error())
 	}
+}
+
+func proxyPsiphonProviderGetDnsServer(out, in *seq.Buffer) {
+	ref := in.ReadRef()
+	v := ref.Get().(psi.PsiphonProvider)
+	res := v.GetDnsServer()
+	out.WriteUTF16(res)
 }
 
 func proxyPsiphonProviderHasNetworkConnectivity(out, in *seq.Buffer) {
@@ -44,6 +52,7 @@ func proxyPsiphonProviderNotice(out, in *seq.Buffer) {
 
 func init() {
 	seq.Register(proxyPsiphonProviderDescriptor, proxyPsiphonProviderBindToDeviceCode, proxyPsiphonProviderBindToDevice)
+	seq.Register(proxyPsiphonProviderDescriptor, proxyPsiphonProviderGetDnsServerCode, proxyPsiphonProviderGetDnsServer)
 	seq.Register(proxyPsiphonProviderDescriptor, proxyPsiphonProviderHasNetworkConnectivityCode, proxyPsiphonProviderHasNetworkConnectivity)
 	seq.Register(proxyPsiphonProviderDescriptor, proxyPsiphonProviderNoticeCode, proxyPsiphonProviderNotice)
 }
@@ -55,6 +64,13 @@ func (p *proxyPsiphonProvider) BindToDevice(fileDescriptor int) error {
 	in.WriteInt(fileDescriptor)
 	out := seq.Transact((*seq.Ref)(p), proxyPsiphonProviderBindToDeviceCode, in)
 	res_0 := out.ReadError()
+	return res_0
+}
+
+func (p *proxyPsiphonProvider) GetDnsServer() string {
+	in := new(seq.Buffer)
+	out := seq.Transact((*seq.Ref)(p), proxyPsiphonProviderGetDnsServerCode, in)
+	res_0 := out.ReadUTF16()
 	return res_0
 }
 

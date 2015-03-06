@@ -81,9 +81,9 @@ type Config struct {
 	TunnelPoolSize                     int
 	PortForwardFailureThreshold        int
 	UpstreamHttpProxyAddress           string
-	CheckNetworkConnectivityProvider   NetworkConnectivityChecker
-	BindToDeviceProvider               DeviceBinder
-	BindToDeviceDnsServer              string
+	NetworkConnectivityChecker         NetworkConnectivityChecker
+	DeviceBinder                       DeviceBinder
+	DnsServerGetter                    DnsServerGetter
 	TargetServerEntry                  string
 	DisableApi                         bool
 	DisableRemoteServerListFetcher     bool
@@ -151,12 +151,16 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		config.PortForwardFailureThreshold = PORT_FORWARD_FAILURE_THRESHOLD
 	}
 
-	if config.CheckNetworkConnectivityProvider != nil {
-		return nil, ContextError(errors.New("CheckNetworkConnectivityProvider interface must be set at runtime"))
+	if config.NetworkConnectivityChecker != nil {
+		return nil, ContextError(errors.New("NetworkConnectivityChecker interface must be set at runtime"))
 	}
 
-	if config.BindToDeviceProvider != nil {
-		return nil, ContextError(errors.New("BindToDeviceProvider interface must be set at runtime"))
+	if config.DeviceBinder != nil {
+		return nil, ContextError(errors.New("DeviceBinder interface must be set at runtime"))
+	}
+
+	if config.DnsServerGetter != nil {
+		return nil, ContextError(errors.New("DnsServerGetter interface must be set at runtime"))
 	}
 
 	return &config, nil

@@ -29,8 +29,8 @@ import (
 // LookupIP resolves a hostname. When BindToDevice is not required, it
 // simply uses net.LookuIP.
 func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
-	if config.BindToDeviceProvider != nil {
-		return nil, ContextError(errors.New("LookupIP with bind not supported on this platform"))
+	if config.DeviceBinder != nil {
+		return nil, ContextError(errors.New("LookupIP with DeviceBinder not supported on this platform"))
 	}
 	return net.LookupIP(host)
 }

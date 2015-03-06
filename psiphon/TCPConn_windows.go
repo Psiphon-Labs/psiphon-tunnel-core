@@ -46,8 +46,8 @@ type interruptibleDialResult struct {
 // to config.PendingConns before blocking on network IO, which enables interruption.
 // The caller is responsible for removing an established conn from PendingConns.
 func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err error) {
-	if config.BindToDeviceProvider != nil {
-		return nil, ContextError(errors.New("psiphon.interruptibleTCPDial with bind not supported on Windows"))
+	if config.DeviceBinder != nil {
+		return nil, ContextError(errors.New("psiphon.interruptibleTCPDial with DeviceBinder not supported on Windows"))
 	}
 
 	// Enable interruption

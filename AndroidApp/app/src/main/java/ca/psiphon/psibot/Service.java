@@ -43,7 +43,9 @@ public class Service extends VpnService
         mPsiphonVpn = PsiphonVpn.newPsiphonVpn(this);
         startForeground(R.string.foregroundServiceNotificationId, makeForegroundNotification());
         try {
-            mPsiphonVpn.startRouting();
+            if (!mPsiphonVpn.startRouting()) {
+                throw new PsiphonVpn.Exception("VPN not prepared");
+            }
             mPsiphonVpn.startTunneling();
         } catch (PsiphonVpn.Exception e) {
             Log.addEntry("failed to start Psiphon VPN: " + e.getMessage());

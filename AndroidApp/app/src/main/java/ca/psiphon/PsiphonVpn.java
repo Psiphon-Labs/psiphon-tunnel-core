@@ -136,6 +136,7 @@ public class PsiphonVpn extends Psi.PsiphonProvider.Stub {
     private final static String VPN_INTERFACE_NETMASK = "255.255.255.0";
     private final static int VPN_INTERFACE_MTU = 1500;
     private final static int UDPGW_SERVER_PORT = 7300;
+    private final static String DEFAULT_DNS_SERVER = "8.8.4.4";
 
     private boolean startVpn() throws Exception {
 
@@ -237,6 +238,18 @@ public class PsiphonVpn extends Psi.PsiphonProvider.Stub {
         return hasNetworkConnectivity(mHostService.getVpnService()) ? 1 : 0;
     }
 
+    @Override
+    public String GetDnsServer() {
+        String dnsResolver = null;
+        try {
+            dnsResolver = getFirstActiveNetworkDnsResolver(mHostService.getVpnService());
+        } catch (Exception e) {
+            mHostService.logWarning("failed to get active network DNS resolver: " + e.getMessage());
+            dnsResolver = DEFAULT_DNS_SERVER;
+        }
+        return dnsResolver;
+    }
+
     //----------------------------------------------------------------------------------------------
     // Psiphon Tunnel Core
     //----------------------------------------------------------------------------------------------
@@ -264,25 +277,11 @@ public class PsiphonVpn extends Psi.PsiphonProvider.Stub {
     private String loadPsiphonConfig(Context context)
             throws IOException, JSONException {
 
-        // If we can obtain a DNS resolver for the active network,
-        // prefer that for DNS resolution in BindToDevice mode.
-        String dnsResolver = null;
-        try {
-            dnsResolver = getFirstActiveNetworkDnsResolver(context);
-        } catch (Exception e) {
-            mHostService.logWarning("failed to get active network DNS resolver: " + e.getMessage());
-            // Proceed with default value in config file
-        }
-
         // Load settings from the raw resource JSON config file and
         // update as necessary. Then write JSON to disk for the Go client.
         JSONObject json = new JSONObject(
                 readInputStreamToString(
                     mHostService.getPsiphonConfigResource()));
-
-        if (dnsResolver != null) {
-            json.put("BindToDeviceDnsServer", dnsResolver);
-        }
 
         // On Android, these directories must be set to the app private storage area.
         // The Psiphon library won't be able to use its current working directory

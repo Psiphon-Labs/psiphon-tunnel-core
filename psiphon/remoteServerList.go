@@ -52,8 +52,8 @@ func FetchRemoteServerList(config *Config, pendingConns *Conns) (err error) {
 	dialConfig := &DialConfig{
 		UpstreamHttpProxyAddress: config.UpstreamHttpProxyAddress,
 		PendingConns:             pendingConns,
-		BindToDeviceProvider:     config.BindToDeviceProvider,
-		BindToDeviceDnsServer:    config.BindToDeviceDnsServer,
+		DeviceBinder:             config.DeviceBinder,
+		DnsServerGetter:          config.DnsServerGetter,
 	}
 	transport := &http.Transport{
 		Dial: NewTCPDialer(dialConfig),

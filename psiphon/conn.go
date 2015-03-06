@@ -52,14 +52,14 @@ type DialConfig struct {
 
 	// BindToDevice parameters are used to exclude connections and
 	// associated DNS requests from VPN routing.
-	// When BindToDeviceProvider is set, any underlying socket is
+	// When DeviceBinder is set, any underlying socket is
 	// submitted to the device binding servicebefore connecting.
 	// The service should bind the socket to a device so that it doesn't route
 	// through a VPN interface. This service is also used to bind UDP sockets used
-	// for DNS requests, in which case BindToDeviceDnsServer is used as the
-	// DNS server.
-	BindToDeviceProvider  DeviceBinder
-	BindToDeviceDnsServer string
+	// for DNS requests, in which case DnsServerGetter is used to get the
+	// current active untunneled network DNS server.
+	DeviceBinder    DeviceBinder
+	DnsServerGetter DnsServerGetter
 }
 
 // DeviceBinder defines the interface to the external BindToDevice provider
@@ -72,6 +72,11 @@ type DeviceBinder interface {
 type NetworkConnectivityChecker interface {
 	// TODO: change to bool return value once gobind supports that type
 	HasNetworkConnectivity() int
+}
+
+// DnsServerGetter defines the interface to the external GetDnsServer provider
+type DnsServerGetter interface {
+	GetDnsServer() string
 }
 
 // WaitForNetworkConnectivity uses a NetworkConnectivityChecker to
