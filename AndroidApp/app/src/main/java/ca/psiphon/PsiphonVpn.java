@@ -419,7 +419,7 @@ public class PsiphonVpn extends Psi.PsiphonProvider.Stub {
         // which private address range isn't in use.
 
         Map<String, PrivateAddress> candidates = new HashMap<String, PrivateAddress>();
-        candidates.put("10", new PrivateAddress("10.0.0.1",    "10.0.0.0",     8, "10.0.0.2"));
+        candidates.put( "10", new PrivateAddress("10.0.0.1",    "10.0.0.0",     8, "10.0.0.2"));
         candidates.put("172", new PrivateAddress("172.16.0.1",  "172.16.0.0",  12, "172.16.0.2"));
         candidates.put("192", new PrivateAddress("192.168.0.1", "192.168.0.0", 16, "192.168.0.2"));
         candidates.put("169", new PrivateAddress("169.254.1.1", "169.254.1.0", 24, "169.254.1.2"));
@@ -486,16 +486,18 @@ public class PsiphonVpn extends Psi.PsiphonProvider.Stub {
             Class<?> LinkPropertiesClass = Class.forName("android.net.LinkProperties");
             Method getActiveLinkPropertiesMethod = ConnectivityManager.class.getMethod("getActiveLinkProperties", new Class []{});
             Object linkProperties = getActiveLinkPropertiesMethod.invoke(connectivityManager);
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-                Method getDnsesMethod = LinkPropertiesClass.getMethod("getDnses", new Class []{});
-                Collection<?> dnses = (Collection<?>)getDnsesMethod.invoke(linkProperties);
-                for (Object dns : dnses) {
-                    dnsAddresses.add((InetAddress)dns);
-                }
-            } else {
-                // LinkProperties is public in API 21 (and the DNS function signature has changed)
-                for (InetAddress dns : ((LinkProperties)linkProperties).getDnsServers()) {
-                    dnsAddresses.add(dns);
+            if (linkProperties != null) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+                    Method getDnsesMethod = LinkPropertiesClass.getMethod("getDnses", new Class []{});
+                    Collection<?> dnses = (Collection<?>)getDnsesMethod.invoke(linkProperties);
+                    for (Object dns : dnses) {
+                        dnsAddresses.add((InetAddress)dns);
+                    }
+                } else {
+                    // LinkProperties is public in API 21 (and the DNS function signature has changed)
+                    for (InetAddress dns : ((LinkProperties)linkProperties).getDnsServers()) {
+                        dnsAddresses.add(dns);
+                    }
                 }
             }
         } catch (ClassNotFoundException e) {
