@@ -61,8 +61,8 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 		}
 	}()
 
-	if config.BindToDeviceProvider != nil {
-		err = config.BindToDeviceProvider.BindToDevice(socketFd)
+	if config.DeviceBinder != nil {
+		err = config.DeviceBinder.BindToDevice(socketFd)
 		if err != nil {
 			return nil, ContextError(fmt.Errorf("BindToDevice failed: %s", err))
 		}

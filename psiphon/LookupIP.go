@@ -39,7 +39,7 @@ const DNS_PORT = 53
 // socket, binds it to the device, and makes an explicit DNS request
 // to the specified DNS resolver.
 func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
-	if config.BindToDeviceProvider != nil {
+	if config.DeviceBinder != nil {
 		return bindLookupIP(host, config)
 	}
 	return net.LookupIP(host)
@@ -63,13 +63,13 @@ func bindLookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 	}
 	defer syscall.Close(socketFd)
 
-	err = config.BindToDeviceProvider.BindToDevice(socketFd)
+	err = config.DeviceBinder.BindToDevice(socketFd)
 	if err != nil {
 		return nil, ContextError(fmt.Errorf("BindToDevice failed: %s", err))
 	}
 
-	// config.BindToDeviceDnsServer must be an IP address
-	ipAddr = net.ParseIP(config.BindToDeviceDnsServer)
+	// config.DnsServerGetter.GetDnsServer must return an IP address
+	ipAddr = net.ParseIP(config.DnsServerGetter.GetDnsServer())
 	if ipAddr == nil {
 		return nil, ContextError(errors.New("invalid IP address"))
 	}

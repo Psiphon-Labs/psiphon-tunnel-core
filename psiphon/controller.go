@@ -166,7 +166,7 @@ func (controller *Controller) remoteServerListFetcher() {
 loop:
 	for {
 		if !WaitForNetworkConnectivity(
-			controller.config.CheckNetworkConnectivityProvider,
+			controller.config.NetworkConnectivityChecker,
 			controller.shutdownBroadcast) {
 			break
 		}
@@ -615,7 +615,7 @@ loop:
 		}
 
 		if !WaitForNetworkConnectivity(
-			controller.config.CheckNetworkConnectivityProvider,
+			controller.config.NetworkConnectivityChecker,
 			controller.stopEstablishingBroadcast) {
 			break loop
 		}

@@ -36,6 +36,7 @@ type PsiphonProvider interface {
 	Notice(noticeJSON string)
 	HasNetworkConnectivity() int
 	BindToDevice(fileDescriptor int) error
+	GetDnsServer() string
 }
 
 var controller *psiphon.Controller
@@ -52,8 +53,9 @@ func Start(configJson, embeddedServerEntryList string, provider PsiphonProvider)
 	if err != nil {
 		return fmt.Errorf("error loading configuration file: %s", err)
 	}
-	config.CheckNetworkConnectivityProvider = provider
-	config.BindToDeviceProvider = provider
+	config.NetworkConnectivityChecker = provider
+	config.DeviceBinder = provider
+	config.DnsServerGetter = provider
 
 	err = psiphon.InitDataStore(config)
 	if err != nil {

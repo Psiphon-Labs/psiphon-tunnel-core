@@ -351,8 +351,8 @@ func dialSsh(
 		ReadTimeout:              TUNNEL_READ_TIMEOUT,
 		WriteTimeout:             TUNNEL_WRITE_TIMEOUT,
 		PendingConns:             pendingConns,
-		BindToDeviceProvider:     config.BindToDeviceProvider,
-		BindToDeviceDnsServer:    config.BindToDeviceDnsServer,
+		DeviceBinder:             config.DeviceBinder,
+		DnsServerGetter:          config.DnsServerGetter,
 	}
 	if useMeek {
 		conn, err = DialMeek(serverEntry, sessionId, useFronting, dialConfig)
