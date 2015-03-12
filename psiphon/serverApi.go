@@ -205,7 +205,7 @@ func (session *Session) doHandshakeRequest() error {
 		PageViewRegexes      []map[string]string `json:"page_view_regexes"`
 		HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
 		EncodedServerList    []string            `json:"encoded_server_list"`
-		ClientRegion         string              `json:"region"`
+		ClientRegion         string              `json:"client_region"`
 	}
 	err = json.Unmarshal(configLine, &handshakeConfig)
 	if err != nil {
