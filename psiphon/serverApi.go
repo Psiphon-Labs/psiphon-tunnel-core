@@ -44,6 +44,7 @@ type Session struct {
 	psiphonHttpsClient *http.Client
 	statsRegexps       *transferstats.Regexps
 	statsServerId      string
+	clientRegion       string
 }
 
 // MakeSessionId creates a new session ID. Making the session ID is not done
@@ -204,11 +205,14 @@ func (session *Session) doHandshakeRequest() error {
 		PageViewRegexes      []map[string]string `json:"page_view_regexes"`
 		HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
 		EncodedServerList    []string            `json:"encoded_server_list"`
+		ClientRegion         string              `json:"region"`
 	}
 	err = json.Unmarshal(configLine, &handshakeConfig)
 	if err != nil {
 		return ContextError(err)
 	}
+
+	session.clientRegion = handshakeConfig.ClientRegion
 
 	// Store discovered server entries
 	for _, encodedServerEntry := range handshakeConfig.EncodedServerList {

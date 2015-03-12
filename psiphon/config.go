@@ -55,6 +55,7 @@ const (
 	PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES = 256
 	PSIPHON_API_CONNECTED_REQUEST_PERIOD         = 24 * time.Hour
 	PSIPHON_API_CONNECTED_REQUEST_RETRY_PERIOD   = 5 * time.Second
+	FETCH_ROUTES_TIMEOUT                         = 10 * time.Second
 )
 
 // To distinguish omitted timeout params from explicit 0 value timeout
@@ -87,6 +88,8 @@ type Config struct {
 	TargetServerEntry                  string
 	DisableApi                         bool
 	DisableRemoteServerListFetcher     bool
+	SplitTunnelRoutesUrlFormat         string
+	SplitTunnelDnsServer               string
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON

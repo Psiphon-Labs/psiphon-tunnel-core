@@ -44,17 +44,9 @@ type RemoteServerList struct {
 // config.RemoteServerListUrl; validates its digital signature using the
 // public key config.RemoteServerListSignaturePublicKey; and parses the
 // data field into ServerEntry records.
-func FetchRemoteServerList(config *Config, pendingConns *Conns) (err error) {
+func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 	NoticeInfo("fetching remote server list")
 
-	// Note: pendingConns may be used to interrupt the fetch remote server list
-	// request. BindToDevice may be used to exclude requests from VPN routing.
-	dialConfig := &DialConfig{
-		UpstreamHttpProxyAddress: config.UpstreamHttpProxyAddress,
-		PendingConns:             pendingConns,
-		DeviceBinder:             config.DeviceBinder,
-		DnsServerGetter:          config.DnsServerGetter,
-	}
 	transport := &http.Transport{
 		Dial: NewTCPDialer(dialConfig),
 	}

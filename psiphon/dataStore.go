@@ -83,6 +83,10 @@ func InitDataStore(config *Config) (err error) {
             (serverEntryId text not null,
              protocol text not null,
              primary key (serverEntryId, protocol));
+        create table if not exists splitTunnelRoutes
+            (region text not null primary key,
+             etag text not null,
+             data blob not null);
         create table if not exists keyValue
             (key text not null primary key,
              value text not null);
@@ -518,6 +522,50 @@ func GetServerEntryIpAddresses() (ipAddresses []string, err error) {
 		return nil, ContextError(err)
 	}
 	return ipAddresses, nil
+}
+
+// SetSplitTunnelRoutes updates the cached routes data for
+// the given region. The associated etag is also stored and
+// used to make efficient web requests for updates to the data.
+func SetSplitTunnelRoutes(region, etag string, data []byte) error {
+	return transactionWithRetry(func(transaction *sql.Tx) error {
+		_, err := transaction.Exec(`
+            insert or replace into splitTunnelRoutes (region, etag, data)
+            values (?, ?. ?);
+            `, region, etag, data)
+		if err != nil {
+			// Note: ContextError() would break canRetry()
+			return err
+		}
+		return nil
+	})
+}
+
+// GetSplitTunnelRoutesETag retrieves the etag for cached routes
+// data for the specified region. If not found, it returns an empty string value.
+func GetSplitTunnelRoutesETag(region string) (etag string, err error) {
+	checkInitDataStore()
+	rows := singleton.db.QueryRow("select etag from splitTunnelRoutes where region = ?;", region)
+	err = rows.Scan(&etag)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", ContextError(err)
+	}
+	return etag, nil
+}
+
+// GetSplitTunnelRoutesData retrieves the cached routes data
+// for the specified region. It returns an error if not found.
+func GetSplitTunnelRoutesData(region string) (data []byte, err error) {
+	checkInitDataStore()
+	rows := singleton.db.QueryRow("select data from splitTunnelRoutes where region = ?;", region)
+	err = rows.Scan(&data)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	return data, nil
 }
 
 // SetKeyValue stores a key/value pair.

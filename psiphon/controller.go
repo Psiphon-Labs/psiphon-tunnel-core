@@ -51,7 +51,9 @@ type Controller struct {
 	stopEstablishingBroadcast chan struct{}
 	candidateServerEntries    chan *ServerEntry
 	establishPendingConns     *Conns
-	fetchRemotePendingConns   *Conns
+	untunneledPendingConns    *Conns
+	untunneledDialConfig      *DialConfig
+	splitTunnelClassifier     *SplitTunnelClassifier
 }
 
 // NewController initializes a new controller.
@@ -62,6 +64,17 @@ func NewController(config *Config) (controller *Controller, err error) {
 	sessionId, err := MakeSessionId()
 	if err != nil {
 		return nil, ContextError(err)
+	}
+
+	// untunneledPendingConns may be used to interrupt the fetch remote server list
+	// request and other untunneled connection establishments. BindToDevice may be
+	// used to exclude these requests and connection from VPN routing.
+	untunneledPendingConns := new(Conns)
+	untunneledDialConfig := &DialConfig{
+		UpstreamHttpProxyAddress: config.UpstreamHttpProxyAddress,
+		PendingConns:             untunneledPendingConns,
+		DeviceBinder:             config.DeviceBinder,
+		DnsServerGetter:          config.DnsServerGetter,
 	}
 
 	return &Controller{
@@ -82,7 +95,9 @@ func NewController(config *Config) (controller *Controller, err error) {
 		startedConnectedReporter: false,
 		isEstablishing:           false,
 		establishPendingConns:    new(Conns),
-		fetchRemotePendingConns:  new(Conns),
+		untunneledPendingConns:   untunneledPendingConns,
+		untunneledDialConfig:     untunneledDialConfig,
+		splitTunnelClassifier:    NewSplitTunnelClassifier(config, untunneledDialConfig),
 	}, nil
 }
 
@@ -142,8 +157,10 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 
 	close(controller.shutdownBroadcast)
 	controller.establishPendingConns.CloseAll()
-	controller.fetchRemotePendingConns.CloseAll()
+	controller.untunneledPendingConns.CloseAll()
 	controller.runWaitGroup.Wait()
+
+	controller.splitTunnelClassifier.Shutdown()
 
 	NoticeInfo("exiting controller")
 }
@@ -172,7 +189,7 @@ loop:
 		}
 
 		err := FetchRemoteServerList(
-			controller.config, controller.fetchRemotePendingConns)
+			controller.config, controller.untunneledDialConfig)
 
 		var duration time.Duration
 		if err != nil {
@@ -386,6 +403,23 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 	controller.establishedOnce = true
 	controller.tunnels = append(controller.tunnels, tunnel)
 	NoticeTunnels(len(controller.tunnels))
+
+	// The split tunnel classifier is started once the first tunnel is
+	// established. This first tunnel is passed in to be used to make
+	// the routes data request.
+	// A long-running controller may run while the host device is present
+	// in different regions. In this case, we want the split tunnel logic
+	// to switch to routes for new regions and not classify traffic based
+	// on routes installed for older regions.
+	// We assume that when regions change, the host network will also
+	// change, and so all tunnels will fail and be re-established. Under
+	// that assumption, the classifier will be re-Start()-ed here when
+	// the region has changed.
+	if len(controller.tunnels) == 1 {
+		controller.splitTunnelClassifier.Start(
+			tunnel, controller.untunneledDialConfig)
+	}
+
 	return true
 }
 
@@ -465,7 +499,7 @@ func (controller *Controller) getNextActiveTunnel() (tunnel *Tunnel) {
 	return nil
 }
 
-// isActiveTunnelServerEntries is used to check if there's already
+// isActiveTunnelServerEntry is used to check if there's already
 // an existing tunnel to a candidate server.
 func (controller *Controller) isActiveTunnelServerEntry(serverEntry *ServerEntry) bool {
 	controller.tunnelMutex.Lock()
@@ -485,6 +519,11 @@ func (controller *Controller) Dial(remoteAddr string, downstreamConn net.Conn) (
 	tunnel := controller.getNextActiveTunnel()
 	if tunnel == nil {
 		return nil, ContextError(errors.New("no active tunnels"))
+	}
+
+	if controller.splitTunnelClassifier.IsUntunneled(remoteAddr) {
+		// !TODO! track downstreamConn and close it when the DialTCP conn closes, as with tunnel.Dial conns?
+		return DialTCP(remoteAddr, controller.untunneledDialConfig)
 	}
 
 	tunneledConn, err := tunnel.Dial(remoteAddr, downstreamConn)
