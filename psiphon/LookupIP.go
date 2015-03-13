@@ -1,7 +1,7 @@
 // +build android linux
 
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -24,7 +24,6 @@ package psiphon
 import (
 	"errors"
 	"fmt"
-	dns "github.com/Psiphon-Inc/dns"
 	"net"
 	"os"
 	"syscall"
@@ -98,25 +97,8 @@ func bindLookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 		conn.SetWriteDeadline(time.Now().Add(config.ConnectTimeout))
 	}
 
-	// Make the DNS query
-	// TODO: make interruptible?
-	dnsConn := &dns.Conn{Conn: conn}
-	defer dnsConn.Close()
-	query := new(dns.Msg)
-	query.SetQuestion(dns.Fqdn(host), dns.TypeA)
-	query.RecursionDesired = true
-	dnsConn.WriteMsg(query)
+	// TODO: make conn interruptible?
 
-	// Process the response
-	response, err := dnsConn.ReadMsg()
-	if err != nil {
-		return nil, ContextError(err)
-	}
-	addrs = make([]net.IP, 0)
-	for _, answer := range response.Answer {
-		if a, ok := answer.(*dns.A); ok {
-			addrs = append(addrs, a.A)
-		}
-	}
-	return addrs, nil
+	addrs, _, err = ResolveIP(host, conn)
+	return
 }

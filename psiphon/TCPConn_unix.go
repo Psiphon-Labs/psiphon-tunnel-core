@@ -90,7 +90,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 		return nil, ContextError(err)
 	}
 	if len(ipAddrs) < 1 {
-		return nil, ContextError(errors.New("no ip address"))
+		return nil, ContextError(errors.New("no IP address"))
 	}
 	// TODO: IPv6 support
 	var ip [4]byte

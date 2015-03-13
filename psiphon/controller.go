@@ -77,7 +77,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 		DnsServerGetter:          config.DnsServerGetter,
 	}
 
-	return &Controller{
+	controller = &Controller{
 		config:    config,
 		sessionId: sessionId,
 		// componentFailureSignal receives a signal from a component (including socks and
@@ -97,8 +97,11 @@ func NewController(config *Config) (controller *Controller, err error) {
 		establishPendingConns:    new(Conns),
 		untunneledPendingConns:   untunneledPendingConns,
 		untunneledDialConfig:     untunneledDialConfig,
-		splitTunnelClassifier:    NewSplitTunnelClassifier(config, untunneledDialConfig),
-	}, nil
+	}
+
+	controller.splitTunnelClassifier = NewSplitTunnelClassifier(config, controller)
+
+	return controller, nil
 }
 
 // Run executes the controller. It launches components and then monitors
@@ -416,8 +419,7 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 	// that assumption, the classifier will be re-Start()-ed here when
 	// the region has changed.
 	if len(controller.tunnels) == 1 {
-		controller.splitTunnelClassifier.Start(
-			tunnel, controller.untunneledDialConfig)
+		controller.splitTunnelClassifier.Start(tunnel)
 	}
 
 	return true
@@ -515,18 +517,26 @@ func (controller *Controller) isActiveTunnelServerEntry(serverEntry *ServerEntry
 // Dial selects an active tunnel and establishes a port forward
 // connection through the selected tunnel. Failure to connect is considered
 // a port foward failure, for the purpose of monitoring tunnel health.
-func (controller *Controller) Dial(remoteAddr string, downstreamConn net.Conn) (conn net.Conn, err error) {
+func (controller *Controller) Dial(
+	remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error) {
+
 	tunnel := controller.getNextActiveTunnel()
 	if tunnel == nil {
 		return nil, ContextError(errors.New("no active tunnels"))
 	}
 
-	if controller.splitTunnelClassifier.IsUntunneled(remoteAddr) {
+	// Note: a possible optimization, when split tunnel is active and IsUntunneled performs
+	// a DNS resolution in order to make its classification, is to reuse that IP address in
+	// the following Dials so they do not need to make their own resolutions. However, the
+	// way this is currently implemented ensures that, e.g., DNS geo load balancing occurs
+	// relative to the outbound network.
+
+	if !alwaysTunnel && controller.splitTunnelClassifier.IsUntunneled(remoteAddr) {
 		// !TODO! track downstreamConn and close it when the DialTCP conn closes, as with tunnel.Dial conns?
 		return DialTCP(remoteAddr, controller.untunneledDialConfig)
 	}
 
-	tunneledConn, err := tunnel.Dial(remoteAddr, downstreamConn)
+	tunneledConn, err := tunnel.Dial(remoteAddr, alwaysTunnel, downstreamConn)
 	if err != nil {
 		return nil, ContextError(err)
 	}

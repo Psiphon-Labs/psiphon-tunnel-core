@@ -20,11 +20,16 @@
 package psiphon
 
 import (
+	"bytes"
+	"compress/zlib"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // SplitTunnelClassifier determines whether a network destination
@@ -35,6 +40,10 @@ import (
 // with a hostname, the classifier performs a tunneled (uncensored)
 // DNS request to first determine the IP address for that hostname;
 // then a classification is made based on the IP address.
+//
+// Classification results (both the hostname resolution and the
+// following IP address classification) are cached for the duration
+// of the DNS record TTL.
 //
 // Classification is by geographical region (country code). When the
 // split tunnel feature is configured to be on, and if the IP
@@ -55,21 +64,30 @@ import (
 // data is cached in the data store so it need not be downloaded in full
 // when fresh data is in the cache.
 type SplitTunnelClassifier struct {
-	mutex                sync.RWMutex
-	fetchRoutesUrlFormat string
-	dnsServerAddress     string
-	dnsDialConfig        *DialConfig
-	fetchRoutesWaitGroup *sync.WaitGroup
-	isRoutesSet          bool
+	mutex                    sync.RWMutex
+	fetchRoutesUrlFormat     string
+	routesSignaturePublicKey string
+	dnsServerAddress         string
+	dnsTunneler              Tunneler
+	fetchRoutesWaitGroup     *sync.WaitGroup
+	isRoutesSet              bool
+	cache                    map[string]*classification
 }
 
-func NewSplitTunnelClassifier(config *Config, dnsDialConfig *DialConfig) *SplitTunnelClassifier {
+type classification struct {
+	isUntunneled bool
+	expiry       time.Time
+}
+
+func NewSplitTunnelClassifier(config *Config, tunneler Tunneler) *SplitTunnelClassifier {
 	return &SplitTunnelClassifier{
-		fetchRoutesUrlFormat: config.SplitTunnelRoutesUrlFormat,
-		dnsServerAddress:     config.SplitTunnelDnsServer,
-		dnsDialConfig:        dnsDialConfig,
-		fetchRoutesWaitGroup: new(sync.WaitGroup),
-		isRoutesSet:          false,
+		fetchRoutesUrlFormat:     config.SplitTunnelRoutesUrlFormat,
+		routesSignaturePublicKey: config.SplitTunnelRoutesSignaturePublicKey,
+		dnsServerAddress:         config.SplitTunnelDnsServer,
+		dnsTunneler:              tunneler,
+		fetchRoutesWaitGroup:     new(sync.WaitGroup),
+		isRoutesSet:              false,
+		cache:                    make(map[string]*classification),
 	}
 }
 
@@ -77,8 +95,7 @@ func NewSplitTunnelClassifier(config *Config, dnsDialConfig *DialConfig) *SplitT
 // all IP addresses are classified as requiring tunneling. With
 // sufficient configuration and region info, this function starts
 // a goroutine to asynchronously fetch and install the routes data.
-func (classifier *SplitTunnelClassifier) Start(
-	fetchRoutesTunnel *Tunnel, dnsDialConfig *DialConfig) {
+func (classifier *SplitTunnelClassifier) Start(fetchRoutesTunnel *Tunnel) {
 
 	classifier.mutex.Lock()
 	defer classifier.mutex.Unlock()
@@ -86,6 +103,7 @@ func (classifier *SplitTunnelClassifier) Start(
 	classifier.isRoutesSet = false
 
 	if classifier.dnsServerAddress == "" ||
+		classifier.routesSignaturePublicKey == "" ||
 		classifier.fetchRoutesUrlFormat == "" {
 		// Split tunnel capability is not configured
 		return
@@ -118,19 +136,39 @@ func (classifier *SplitTunnelClassifier) Shutdown() {
 // IsUntunneled takes a destination hostname or IP address and determines
 // if it should be accessed through a tunnel. When a hostname is presented, it
 // is first resolved to an IP address which can be matched against the routes data.
-// Multiple goroutines may invoke RequiresTunnel simultaneously. A multi-reader
-// lock is used to enable concurrent access.
+// Multiple goroutines may invoke RequiresTunnel simultaneously. Multi-reader
+// locks are used in the implementation to enable concurrent access, with no locks
+// held during network access.
 func (classifier *SplitTunnelClassifier) IsUntunneled(targetAddress string) bool {
-	classifier.mutex.RLock()
-	defer classifier.mutex.RUnlock()
 
-	if !classifier.isRoutesSet {
+	if !classifier.hasRoutes() {
 		return false
 	}
 
-	// ***TODO***: implementation
+	classifier.mutex.RLock()
+	cachedClassification, ok := classifier.cache[targetAddress]
+	classifier.mutex.RUnlock()
+	if ok && cachedClassification.expiry.After(time.Now()) {
+		return cachedClassification.isUntunneled
+	}
 
-	return false
+	ipAddr, ttl, err := tunneledLookupIP(
+		classifier.dnsServerAddress, classifier.dnsTunneler, targetAddress)
+	if err != nil {
+		NoticeAlert("failed to resolve address for split tunnel classification: %s", err)
+		return false
+	}
+	expiry := time.Now().Add(ttl)
+
+	isUntunneled := classifier.ipAddressInRoutes(ipAddr)
+
+	// TODO: garbage collect expired items from cache?
+
+	classifier.mutex.Lock()
+	classifier.cache[targetAddress] = &classification{isUntunneled, expiry}
+	classifier.mutex.Unlock()
+
+	return isUntunneled
 }
 
 // setRoutes is a background routine that fetches routes data and installs it,
@@ -187,30 +225,72 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 		Timeout:   FETCH_ROUTES_TIMEOUT,
 	}
 
+	// At this time, the largest uncompressed routes data set is ~1MB. For now,
+	// the processing pipeline is done all in-memory.
+
 	useCachedRoutes := false
 
 	response, err := httpClient.Do(request)
 	if err != nil {
-		NoticeAlert("failed to request split tunnel routes: %s", ContextError(err))
+		NoticeAlert("failed to request split tunnel routes package: %s", ContextError(err))
 		useCachedRoutes = true
-	} else {
+	}
+
+	if !useCachedRoutes {
 		defer response.Body.Close()
 		if response.StatusCode == http.StatusNotModified {
 			useCachedRoutes = true
-		} else {
-			routesData, err = ioutil.ReadAll(response.Body)
+		}
+	}
+
+	var routesDataPackage []byte
+	if !useCachedRoutes {
+		routesDataPackage, err = ioutil.ReadAll(response.Body)
+		if err != nil {
+			NoticeAlert("failed to download split tunnel routes package: %s", ContextError(err))
+			useCachedRoutes = true
+		}
+	}
+
+	var encodedRoutesData string
+	if !useCachedRoutes {
+		encodedRoutesData, err = ReadAuthenticatedDataPackage(
+			routesDataPackage, classifier.routesSignaturePublicKey)
+		if err != nil {
+			NoticeAlert("failed to read split tunnel routes package: %s", ContextError(err))
+			useCachedRoutes = true
+		}
+	}
+
+	var compressedRoutesData []byte
+	if !useCachedRoutes {
+		routesData, err = base64.StdEncoding.DecodeString(encodedRoutesData)
+		if err != nil {
+			NoticeAlert("failed to decode split tunnel routes: %s", ContextError(err))
+			useCachedRoutes = true
+		}
+	}
+
+	if !useCachedRoutes {
+		bytesReader := bytes.NewReader(compressedRoutesData)
+		zlibReader, err := zlib.NewReader(bytesReader)
+		if err == nil {
+			routesData, err = ioutil.ReadAll(zlibReader)
+			zlibReader.Close()
+		}
+		if err != nil {
+			NoticeAlert("failed to decompress split tunnel routes: %s", ContextError(err))
+			useCachedRoutes = true
+		}
+	}
+
+	if !useCachedRoutes {
+		etag := response.Header.Get("ETag")
+		if etag != "" {
+			err := SetSplitTunnelRoutes(tunnel.session.clientRegion, etag, routesData)
 			if err != nil {
-				NoticeAlert("failed to read split tunnel routes: %s", ContextError(err))
-				useCachedRoutes = true
-			} else {
-				etag := response.Header.Get("ETag")
-				if etag != "" {
-					err := SetSplitTunnelRoutes(tunnel.session.clientRegion, etag, routesData)
-					if err != nil {
-						NoticeAlert("failed to cache split tunnel routes: %s", ContextError(err))
-						// Proceed with fetched data, even when we can't cache it
-					}
-				}
+				NoticeAlert("failed to cache split tunnel routes: %s", ContextError(err))
+				// Proceed with fetched data, even when we can't cache it
 			}
 		}
 	}
@@ -225,6 +305,14 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	return routesData, nil
 }
 
+// hasRoutes checks if the classifier has routes installed.
+func (classifier *SplitTunnelClassifier) hasRoutes() bool {
+	classifier.mutex.RLock()
+	defer classifier.mutex.RUnlock()
+
+	return classifier.isRoutesSet
+}
+
 // installRoutes parses the raw routes data and creates data structures
 // for fast in-memory classification.
 func (classifier *SplitTunnelClassifier) installRoutes(routesData []byte) (err error) {
@@ -236,4 +324,51 @@ func (classifier *SplitTunnelClassifier) installRoutes(routesData []byte) (err e
 	classifier.isRoutesSet = true
 
 	return nil
+}
+
+// ipAddressInRoutes searches for a split tunnel candidate IP address in the routes data.
+func (classifier *SplitTunnelClassifier) ipAddressInRoutes(ipAddr net.IP) bool {
+	classifier.mutex.RLock()
+	defer classifier.mutex.RUnlock()
+
+	// ***TODO***: implementation
+
+	return false
+}
+
+// tunneledLookupIP resolves a split tunnel candidate hostname with a tunneled
+// DNS request.
+func tunneledLookupIP(
+	dnsServerAddress string, dnsTunneler Tunneler, host string) (addr net.IP, ttl time.Duration, err error) {
+
+	ipAddr := net.ParseIP(host)
+	if ipAddr != nil {
+		// maxDuration from golang.org/src/time/time.go
+		return ipAddr, time.Duration(1<<63 - 1), nil
+	}
+
+	// dnsServerAddress must be an IP address
+	ipAddr = net.ParseIP(dnsServerAddress)
+	if ipAddr == nil {
+		return nil, 0, ContextError(errors.New("invalid IP address"))
+	}
+
+	// Dial's alwaysTunnel is set to true to ensure this connection
+	// is tunneled (also ensures this code path isn't circular).
+	// Assumes tunnel dialer conn configures timeouts and interruptibility.
+
+	conn, err := dnsTunneler.Dial(dnsServerAddress, true, nil)
+	if err != nil {
+		return nil, 0, ContextError(err)
+	}
+
+	ipAddrs, ttls, err := ResolveIP(host, conn)
+	if err != nil {
+		return nil, 0, ContextError(err)
+	}
+	if len(ipAddrs) < 1 {
+		return nil, 0, ContextError(errors.New("no IP address"))
+	}
+
+	return ipAddrs[0], ttls[0], nil
 }

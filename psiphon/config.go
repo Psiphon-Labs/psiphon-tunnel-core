@@ -63,33 +63,34 @@ const (
 // so use the default; a non-nil pointer to 0 means no timeout.
 
 type Config struct {
-	LogFilename                        string
-	DataStoreDirectory                 string
-	DataStoreTempDirectory             string
-	PropagationChannelId               string
-	SponsorId                          string
-	RemoteServerListUrl                string
-	RemoteServerListSignaturePublicKey string
-	ClientVersion                      string
-	ClientPlatform                     string
-	TunnelWholeDevice                  int
-	EgressRegion                       string
-	TunnelProtocol                     string
-	EstablishTunnelTimeoutSeconds      *int
-	LocalSocksProxyPort                int
-	LocalHttpProxyPort                 int
-	ConnectionWorkerPoolSize           int
-	TunnelPoolSize                     int
-	PortForwardFailureThreshold        int
-	UpstreamHttpProxyAddress           string
-	NetworkConnectivityChecker         NetworkConnectivityChecker
-	DeviceBinder                       DeviceBinder
-	DnsServerGetter                    DnsServerGetter
-	TargetServerEntry                  string
-	DisableApi                         bool
-	DisableRemoteServerListFetcher     bool
-	SplitTunnelRoutesUrlFormat         string
-	SplitTunnelDnsServer               string
+	LogFilename                         string
+	DataStoreDirectory                  string
+	DataStoreTempDirectory              string
+	PropagationChannelId                string
+	SponsorId                           string
+	RemoteServerListUrl                 string
+	RemoteServerListSignaturePublicKey  string
+	ClientVersion                       string
+	ClientPlatform                      string
+	TunnelWholeDevice                   int
+	EgressRegion                        string
+	TunnelProtocol                      string
+	EstablishTunnelTimeoutSeconds       *int
+	LocalSocksProxyPort                 int
+	LocalHttpProxyPort                  int
+	ConnectionWorkerPoolSize            int
+	TunnelPoolSize                      int
+	PortForwardFailureThreshold         int
+	UpstreamHttpProxyAddress            string
+	NetworkConnectivityChecker          NetworkConnectivityChecker
+	DeviceBinder                        DeviceBinder
+	DnsServerGetter                     DnsServerGetter
+	TargetServerEntry                   string
+	DisableApi                          bool
+	DisableRemoteServerListFetcher      bool
+	SplitTunnelRoutesUrlFormat          string
+	SplitTunnelRoutesSignaturePublicKey string
+	SplitTunnelDnsServer                string
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON

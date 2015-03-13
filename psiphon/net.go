@@ -29,6 +29,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Psiphon-Inc/dns"
 )
 
 // DialConfig contains parameters to determine the behavior
@@ -77,32 +79,6 @@ type NetworkConnectivityChecker interface {
 // DnsServerGetter defines the interface to the external GetDnsServer provider
 type DnsServerGetter interface {
 	GetDnsServer() string
-}
-
-// WaitForNetworkConnectivity uses a NetworkConnectivityChecker to
-// periodically check for network connectivity. It returns true if
-// no NetworkConnectivityChecker is provided (waiting is disabled)
-// or if NetworkConnectivityChecker.HasNetworkConnectivity() indicates
-// connectivity. It polls the checker once a second. If a stop is
-// broadcast, false is returned.
-func WaitForNetworkConnectivity(
-	connectivityChecker NetworkConnectivityChecker, stopBroadcast <-chan struct{}) bool {
-	if connectivityChecker == nil || 1 == connectivityChecker.HasNetworkConnectivity() {
-		return true
-	}
-	NoticeInfo("waiting for network connectivity")
-	ticker := time.NewTicker(1 * time.Second)
-	for {
-		if 1 == connectivityChecker.HasNetworkConnectivity() {
-			return true
-		}
-		select {
-		case <-ticker.C:
-			// Check again
-		case <-stopBroadcast:
-			return false
-		}
-	}
 }
 
 // Dialer is a custom dialer compatible with http.Transport.Dial.
@@ -220,4 +196,62 @@ func HttpProxyConnect(rawConn net.Conn, addr string) (err error) {
 	}
 
 	return nil
+}
+
+// WaitForNetworkConnectivity uses a NetworkConnectivityChecker to
+// periodically check for network connectivity. It returns true if
+// no NetworkConnectivityChecker is provided (waiting is disabled)
+// or if NetworkConnectivityChecker.HasNetworkConnectivity() indicates
+// connectivity. It polls the checker once a second. If a stop is
+// broadcast, false is returned.
+func WaitForNetworkConnectivity(
+	connectivityChecker NetworkConnectivityChecker, stopBroadcast <-chan struct{}) bool {
+	if connectivityChecker == nil || 1 == connectivityChecker.HasNetworkConnectivity() {
+		return true
+	}
+	NoticeInfo("waiting for network connectivity")
+	ticker := time.NewTicker(1 * time.Second)
+	for {
+		if 1 == connectivityChecker.HasNetworkConnectivity() {
+			return true
+		}
+		select {
+		case <-ticker.C:
+			// Check again
+		case <-stopBroadcast:
+			return false
+		}
+	}
+}
+
+// ResolveIP uses a custom dns stack to make a DNS query over the
+// given TCP or UDP conn. This is used, e.g., when we need to ensure
+// that a DNS connection bypasses a VPN interface (BindToDevice) or
+// when we need to ensure that a DNS connection is tunneled.
+// Caller must set timeouts or interruptibility as required for conn.
+func ResolveIP(host string, conn net.Conn) (addrs []net.IP, ttls []time.Duration, err error) {
+
+	// Send the DNS query
+	dnsConn := &dns.Conn{Conn: conn}
+	defer dnsConn.Close()
+	query := new(dns.Msg)
+	query.SetQuestion(dns.Fqdn(host), dns.TypeA)
+	query.RecursionDesired = true
+	dnsConn.WriteMsg(query)
+
+	// Process the response
+	response, err := dnsConn.ReadMsg()
+	if err != nil {
+		return nil, nil, ContextError(err)
+	}
+	addrs = make([]net.IP, 0)
+	ttls = make([]time.Duration, 0)
+	for _, answer := range response.Answer {
+		if a, ok := answer.(*dns.A); ok {
+			addrs = append(addrs, a.A)
+			ttl := time.Duration(a.Hdr.Ttl) * time.Second
+			ttls = append(ttls, ttl)
+		}
+	}
+	return addrs, ttls, nil
 }

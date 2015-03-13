@@ -20,25 +20,9 @@
 package psiphon
 
 import (
-	"crypto"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/base64"
-	"encoding/json"
-	"errors"
 	"io/ioutil"
 	"net/http"
 )
-
-// RemoteServerList is a JSON record containing a list of Psiphon server
-// entries. As it may be downloaded from various sources, it is digitally
-// signed so that the data may be authenticated.
-type RemoteServerList struct {
-	Data                   string `json:"data"`
-	SigningPublicKeyDigest string `json:"signingPublicKeyDigest"`
-	Signature              string `json:"signature"`
-}
 
 // FetchRemoteServerList downloads a remote server list JSON record from
 // config.RemoteServerListUrl; validates its digital signature using the
@@ -66,17 +50,13 @@ func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 		return ContextError(err)
 	}
 
-	var remoteServerList *RemoteServerList
-	err = json.Unmarshal(body, &remoteServerList)
-	if err != nil {
-		return ContextError(err)
-	}
-	err = validateRemoteServerList(config, remoteServerList)
+	remoteServerList, err := ReadAuthenticatedDataPackage(
+		body, config.RemoteServerListSignaturePublicKey)
 	if err != nil {
 		return ContextError(err)
 	}
 
-	serverEntries, err := DecodeAndValidateServerEntryList(remoteServerList.Data)
+	serverEntries, err := DecodeAndValidateServerEntryList(remoteServerList)
 	if err != nil {
 		return ContextError(err)
 	}
@@ -86,34 +66,5 @@ func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 		return ContextError(err)
 	}
 
-	return nil
-}
-
-func validateRemoteServerList(config *Config, remoteServerList *RemoteServerList) (err error) {
-	derEncodedPublicKey, err := base64.StdEncoding.DecodeString(config.RemoteServerListSignaturePublicKey)
-	if err != nil {
-		return ContextError(err)
-	}
-	publicKey, err := x509.ParsePKIXPublicKey(derEncodedPublicKey)
-	if err != nil {
-		return ContextError(err)
-	}
-	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
-	if !ok {
-		return ContextError(errors.New("unexpected RemoteServerListSignaturePublicKey key type"))
-	}
-	signature, err := base64.StdEncoding.DecodeString(remoteServerList.Signature)
-	if err != nil {
-		return ContextError(err)
-	}
-	// TODO: can detect if signed with different key --
-	// match digest(publicKey) against remoteServerList.signingPublicKeyDigest
-	hash := sha256.New()
-	hash.Write([]byte(remoteServerList.Data))
-	digest := hash.Sum(nil)
-	err = rsa.VerifyPKCS1v15(rsaPublicKey, crypto.SHA256, digest, signature)
-	if err != nil {
-		return ContextError(err)
-	}
 	return nil
 }
