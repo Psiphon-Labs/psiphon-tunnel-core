@@ -175,7 +175,7 @@ func (classifier *SplitTunnelClassifier) IsUntunneled(targetAddress string) bool
 	classifier.mutex.Unlock()
 
 	if isUntunneled {
-		NoticeUntunneledClassification(targetAddress)
+		NoticeUntunneled(targetAddress)
 	}
 
 	return isUntunneled
