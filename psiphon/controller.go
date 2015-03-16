@@ -525,15 +525,25 @@ func (controller *Controller) Dial(
 		return nil, ContextError(errors.New("no active tunnels"))
 	}
 
-	// Note: a possible optimization, when split tunnel is active and IsUntunneled performs
-	// a DNS resolution in order to make its classification, is to reuse that IP address in
-	// the following Dials so they do not need to make their own resolutions. However, the
-	// way this is currently implemented ensures that, e.g., DNS geo load balancing occurs
-	// relative to the outbound network.
+	// Perform split tunnel classification when feature is enabled, and if the remote
+	// address is classified as untunneled, dial directly.
+	if !alwaysTunnel && controller.config.SplitTunnelDnsServer != "" {
 
-	if !alwaysTunnel && controller.splitTunnelClassifier.IsUntunneled(remoteAddr) {
-		// !TODO! track downstreamConn and close it when the DialTCP conn closes, as with tunnel.Dial conns?
-		return DialTCP(remoteAddr, controller.untunneledDialConfig)
+		host, _, err := net.SplitHostPort(remoteAddr)
+		if err != nil {
+			return nil, ContextError(err)
+		}
+
+		// Note: a possible optimization, when split tunnel is active and IsUntunneled performs
+		// a DNS resolution in order to make its classification, is to reuse that IP address in
+		// the following Dials so they do not need to make their own resolutions. However, the
+		// way this is currently implemented ensures that, e.g., DNS geo load balancing occurs
+		// relative to the outbound network.
+
+		if controller.splitTunnelClassifier.IsUntunneled(host) {
+			// !TODO! track downstreamConn and close it when the DialTCP conn closes, as with tunnel.Dial conns?
+			return DialTCP(remoteAddr, controller.untunneledDialConfig)
+		}
 	}
 
 	tunneledConn, err := tunnel.Dial(remoteAddr, alwaysTunnel, downstreamConn)
