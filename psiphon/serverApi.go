@@ -214,6 +214,9 @@ func (session *Session) doHandshakeRequest() error {
 
 	session.clientRegion = handshakeConfig.ClientRegion
 
+	// ***TEMP***
+	session.clientRegion = "CA"
+
 	// Store discovered server entries
 	for _, encodedServerEntry := range handshakeConfig.EncodedServerList {
 		serverEntry, err := DecodeServerEntry(encodedServerEntry)

@@ -33,6 +33,8 @@ import (
 	"github.com/Psiphon-Inc/dns"
 )
 
+const DNS_PORT = 53
+
 // DialConfig contains parameters to determine the behavior
 // of a Psiphon dialer (TCPDial, MeekDial, etc.)
 type DialConfig struct {

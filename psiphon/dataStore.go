@@ -531,7 +531,7 @@ func SetSplitTunnelRoutes(region, etag string, data []byte) error {
 	return transactionWithRetry(func(transaction *sql.Tx) error {
 		_, err := transaction.Exec(`
             insert or replace into splitTunnelRoutes (region, etag, data)
-            values (?, ?. ?);
+            values (?, ?, ?);
             `, region, etag, data)
 		if err != nil {
 			// Note: ContextError() would break canRetry()
@@ -557,11 +557,14 @@ func GetSplitTunnelRoutesETag(region string) (etag string, err error) {
 }
 
 // GetSplitTunnelRoutesData retrieves the cached routes data
-// for the specified region. It returns an error if not found.
+// for the specified region. If not found, it returns a nil value.
 func GetSplitTunnelRoutesData(region string) (data []byte, err error) {
 	checkInitDataStore()
 	rows := singleton.db.QueryRow("select data from splitTunnelRoutes where region = ?;", region)
 	err = rows.Scan(&data)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, ContextError(err)
 	}

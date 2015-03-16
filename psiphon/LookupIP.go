@@ -30,8 +30,6 @@ import (
 	"time"
 )
 
-const DNS_PORT = 53
-
 // LookupIP resolves a hostname. When BindToDevice is not required, it
 // simply uses net.LookupIP.
 // When BindToDevice is required, LookupIP explicitly creates a UDP
