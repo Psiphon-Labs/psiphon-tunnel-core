@@ -91,6 +91,7 @@ type Config struct {
 	SplitTunnelRoutesUrlFormat          string
 	SplitTunnelRoutesSignaturePublicKey string
 	SplitTunnelDnsServer                string
+	AlternateMeekFrontingAddresses      map[string][]string
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON

@@ -629,6 +629,20 @@ loop:
 				// Completed this iteration
 				break
 			}
+
+			// Override fronting domain, if configured to do so.
+			// TODO: we could generate multiple candidates from
+			// the current server entry when there are many
+			// AlternateMeekFrontingAddresses for this MeekFrontingHost.
+			if addresses, ok := controller.config.AlternateMeekFrontingAddresses[serverEntry.MeekFrontingDomain]; ok {
+				index, err := MakeSecureRandomInt(len(addresses))
+				if err == nil {
+					address := addresses[index]
+					NoticeAlert("using alternate address for %s: %s", serverEntry.MeekFrontingDomain, address)
+					serverEntry.MeekFrontingDomain = address
+				}
+			}
+
 			select {
 			case controller.candidateServerEntries <- serverEntry:
 			case <-controller.stopEstablishingBroadcast:

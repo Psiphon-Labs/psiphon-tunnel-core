@@ -93,8 +93,8 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 		return nil, ContextError(errors.New("no IP address"))
 	}
 
-	// Select an IP at random, so we're not always trying the same IP,
-	// which ay be blocked.
+	// Select an IP at random from the list, so we're not always
+	// trying the same IP (when > 1) which may be blocked.
 	// TODO: retry all IPs until one connects? For now, this retry
 	// will happen on subsequent TCPDial calls, when a different IP
 	// is selected.

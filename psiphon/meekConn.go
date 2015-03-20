@@ -112,6 +112,13 @@ func DialMeek(
 	if useFronting {
 		// In this case, host is not what is dialed but is what ends up in the HTTP Host header
 		host = serverEntry.MeekFrontingHost
+
+		// We skip verifying the server certificate when the host address is an IP address. In the
+		// short term, this is a circumvention weakness: it's vulnerable to an active MiM attack
+		// which injects its own cert and decrypts the TLS and reads the custom Host header.
+		// We need to know which server cert to expect in order to perform verification in this case.
+		skipVerify := (net.ParseIP(serverEntry.MeekFrontingDomain) != nil)
+
 		// Custom TLS dialer:
 		//  - ignores the HTTP request address and uses the fronting domain
 		//  - disables SNI -- SNI breaks fronting when used with CDNs that support SNI on the server side.
@@ -121,6 +128,7 @@ func DialMeek(
 				Timeout:        meekConfig.ConnectTimeout,
 				FrontingAddr:   fmt.Sprintf("%s:%d", serverEntry.MeekFrontingDomain, 443),
 				SendServerName: false,
+				SkipVerify:     skipVerify,
 			})
 	} else {
 		// In this case, host is both what is dialed and what ends up in the HTTP Host header
