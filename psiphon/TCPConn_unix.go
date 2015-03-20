@@ -92,9 +92,20 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	if len(ipAddrs) < 1 {
 		return nil, ContextError(errors.New("no IP address"))
 	}
+
+	// Select an IP at random, so we're not always trying the same IP,
+	// which ay be blocked.
+	// TODO: retry all IPs until one connects? For now, this retry
+	// will happen on subsequent TCPDial calls, when a different IP
+	// is selected.
+	index, err := MakeSecureRandomInt(len(ipAddrs))
+	if err != nil {
+		return nil, ContextError(err)
+	}
+
 	// TODO: IPv6 support
 	var ip [4]byte
-	copy(ip[:], ipAddrs[0].To4())
+	copy(ip[:], ipAddrs[index].To4())
 
 	// Enable interruption
 	conn = &TCPConn{
