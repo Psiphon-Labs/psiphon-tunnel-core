@@ -630,7 +630,7 @@ loop:
 				break
 			}
 
-			// Override fronting domain, if configured to do so.
+			// Override server entry fronting domain, if configured to do so.
 			// TODO: we could generate multiple candidates from
 			// the current server entry when there are many
 			// AlternateMeekFrontingAddresses for this MeekFrontingHost.
