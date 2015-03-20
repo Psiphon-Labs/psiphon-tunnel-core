@@ -39,12 +39,15 @@ import (
 // Components which use this interface may be serviced by a single Tunnel instance,
 // or a Controller which manages a pool of tunnels, or any other object which
 // implements Tunneler.
+// alwaysTunnel indicates that the connection should always be tunneled. If this
+// is not set, the connection may be made directly, depending on split tunnel
+// classification, when that feature is supported and active.
 // downstreamConn is an optional parameter which specifies a connection to be
 // explictly closed when the Dialed connection is closed. For instance, this
 // is used to close downstreamConn App<->LocalProxy connections when the related
 // LocalProxy<->SshPortForward connections close.
 type Tunneler interface {
-	Dial(remoteAddr string, downstreamConn net.Conn) (conn net.Conn, err error)
+	Dial(remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error)
 	SignalComponentFailure()
 }
 
@@ -192,7 +195,10 @@ func (tunnel *Tunnel) Close() {
 }
 
 // Dial establishes a port forward connection through the tunnel
-func (tunnel *Tunnel) Dial(remoteAddr string, downstreamConn net.Conn) (conn net.Conn, err error) {
+// This Dial doesn't support split tunnel, so alwaysTunnel is not referenced
+func (tunnel *Tunnel) Dial(
+	remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error) {
+
 	tunnel.mutex.Lock()
 	isClosed := tunnel.isClosed
 	tunnel.mutex.Unlock()

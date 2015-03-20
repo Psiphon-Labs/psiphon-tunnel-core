@@ -159,6 +159,16 @@ func NoticeTunnels(count int) {
 	outputNotice("Tunnels", false, "count", count)
 }
 
+// NoticeUntunneled indicates than an address has been classified as untunneled and is being
+// accessed directly.
+//
+// Note: "address" should remain private; this notice should only be used for alerting
+// users, not for diagnostics logs.
+//
+func NoticeUntunneled(address string) {
+	outputNotice("Untunneled", true, "address", address)
+}
+
 type noticeObject struct {
 	NoticeType string          `json:"noticeType"`
 	Data       json.RawMessage `json:"data"`

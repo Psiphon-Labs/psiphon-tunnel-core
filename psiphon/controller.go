@@ -51,7 +51,9 @@ type Controller struct {
 	stopEstablishingBroadcast chan struct{}
 	candidateServerEntries    chan *ServerEntry
 	establishPendingConns     *Conns
-	fetchRemotePendingConns   *Conns
+	untunneledPendingConns    *Conns
+	untunneledDialConfig      *DialConfig
+	splitTunnelClassifier     *SplitTunnelClassifier
 }
 
 // NewController initializes a new controller.
@@ -64,7 +66,18 @@ func NewController(config *Config) (controller *Controller, err error) {
 		return nil, ContextError(err)
 	}
 
-	return &Controller{
+	// untunneledPendingConns may be used to interrupt the fetch remote server list
+	// request and other untunneled connection establishments. BindToDevice may be
+	// used to exclude these requests and connection from VPN routing.
+	untunneledPendingConns := new(Conns)
+	untunneledDialConfig := &DialConfig{
+		UpstreamHttpProxyAddress: config.UpstreamHttpProxyAddress,
+		PendingConns:             untunneledPendingConns,
+		DeviceBinder:             config.DeviceBinder,
+		DnsServerGetter:          config.DnsServerGetter,
+	}
+
+	controller = &Controller{
 		config:    config,
 		sessionId: sessionId,
 		// componentFailureSignal receives a signal from a component (including socks and
@@ -82,8 +95,13 @@ func NewController(config *Config) (controller *Controller, err error) {
 		startedConnectedReporter: false,
 		isEstablishing:           false,
 		establishPendingConns:    new(Conns),
-		fetchRemotePendingConns:  new(Conns),
-	}, nil
+		untunneledPendingConns:   untunneledPendingConns,
+		untunneledDialConfig:     untunneledDialConfig,
+	}
+
+	controller.splitTunnelClassifier = NewSplitTunnelClassifier(config, controller)
+
+	return controller, nil
 }
 
 // Run executes the controller. It launches components and then monitors
@@ -142,8 +160,10 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 
 	close(controller.shutdownBroadcast)
 	controller.establishPendingConns.CloseAll()
-	controller.fetchRemotePendingConns.CloseAll()
+	controller.untunneledPendingConns.CloseAll()
 	controller.runWaitGroup.Wait()
+
+	controller.splitTunnelClassifier.Shutdown()
 
 	NoticeInfo("exiting controller")
 }
@@ -172,7 +192,7 @@ loop:
 		}
 
 		err := FetchRemoteServerList(
-			controller.config, controller.fetchRemotePendingConns)
+			controller.config, controller.untunneledDialConfig)
 
 		var duration time.Duration
 		if err != nil {
@@ -386,6 +406,22 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 	controller.establishedOnce = true
 	controller.tunnels = append(controller.tunnels, tunnel)
 	NoticeTunnels(len(controller.tunnels))
+
+	// The split tunnel classifier is started once the first tunnel is
+	// established. This first tunnel is passed in to be used to make
+	// the routes data request.
+	// A long-running controller may run while the host device is present
+	// in different regions. In this case, we want the split tunnel logic
+	// to switch to routes for new regions and not classify traffic based
+	// on routes installed for older regions.
+	// We assume that when regions change, the host network will also
+	// change, and so all tunnels will fail and be re-established. Under
+	// that assumption, the classifier will be re-Start()-ed here when
+	// the region has changed.
+	if len(controller.tunnels) == 1 {
+		controller.splitTunnelClassifier.Start(tunnel)
+	}
+
 	return true
 }
 
@@ -465,7 +501,7 @@ func (controller *Controller) getNextActiveTunnel() (tunnel *Tunnel) {
 	return nil
 }
 
-// isActiveTunnelServerEntries is used to check if there's already
+// isActiveTunnelServerEntry is used to check if there's already
 // an existing tunnel to a candidate server.
 func (controller *Controller) isActiveTunnelServerEntry(serverEntry *ServerEntry) bool {
 	controller.tunnelMutex.Lock()
@@ -481,13 +517,36 @@ func (controller *Controller) isActiveTunnelServerEntry(serverEntry *ServerEntry
 // Dial selects an active tunnel and establishes a port forward
 // connection through the selected tunnel. Failure to connect is considered
 // a port foward failure, for the purpose of monitoring tunnel health.
-func (controller *Controller) Dial(remoteAddr string, downstreamConn net.Conn) (conn net.Conn, err error) {
+func (controller *Controller) Dial(
+	remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error) {
+
 	tunnel := controller.getNextActiveTunnel()
 	if tunnel == nil {
 		return nil, ContextError(errors.New("no active tunnels"))
 	}
 
-	tunneledConn, err := tunnel.Dial(remoteAddr, downstreamConn)
+	// Perform split tunnel classification when feature is enabled, and if the remote
+	// address is classified as untunneled, dial directly.
+	if !alwaysTunnel && controller.config.SplitTunnelDnsServer != "" {
+
+		host, _, err := net.SplitHostPort(remoteAddr)
+		if err != nil {
+			return nil, ContextError(err)
+		}
+
+		// Note: a possible optimization, when split tunnel is active and IsUntunneled performs
+		// a DNS resolution in order to make its classification, is to reuse that IP address in
+		// the following Dials so they do not need to make their own resolutions. However, the
+		// way this is currently implemented ensures that, e.g., DNS geo load balancing occurs
+		// relative to the outbound network.
+
+		if controller.splitTunnelClassifier.IsUntunneled(host) {
+			// !TODO! track downstreamConn and close it when the DialTCP conn closes, as with tunnel.Dial conns?
+			return DialTCP(remoteAddr, controller.untunneledDialConfig)
+		}
+	}
+
+	tunneledConn, err := tunnel.Dial(remoteAddr, alwaysTunnel, downstreamConn)
 	if err != nil {
 		return nil, ContextError(err)
 	}
