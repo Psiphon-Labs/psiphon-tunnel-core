@@ -169,6 +169,11 @@ func NoticeUntunneled(address string) {
 	outputNotice("Untunneled", true, "address", address)
 }
 
+// NoticeSplitTunnelRegion reports that split tunnel is on for the given region
+func NoticeSplitTunnelRegion(region string) {
+	outputNotice("SplitTunnelRegion", true, "region", region)
+}
+
 type noticeObject struct {
 	NoticeType string          `json:"noticeType"`
 	Data       json.RawMessage `json:"data"`
