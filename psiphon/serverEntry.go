@@ -50,7 +50,8 @@ type ServerEntry struct {
 	MeekCookieEncryptionPublicKey string   `json:"meekCookieEncryptionPublicKey"`
 	MeekObfuscatedKey             string   `json:"meekObfuscatedKey"`
 	MeekFrontingHost              string   `json:"meekFrontingHost"`
-	MeekFrontingAddresses         []string `json:"MeekFrontingAddresses"`
+	MeekFrontingDomain            string   `json:"meekFrontingDomain"`
+	MeekFrontingAddresses         []string `json:"meekFrontingAddresses"`
 }
 
 // DecodeServerEntry extracts server entries from the encoding
@@ -70,6 +71,7 @@ func DecodeServerEntry(encodedServerEntry string) (serverEntry *ServerEntry, err
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
 	return serverEntry, nil
 }
 
