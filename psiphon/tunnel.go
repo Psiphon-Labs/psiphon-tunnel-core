@@ -295,17 +295,38 @@ func selectProtocol(config *Config, serverEntry *ServerEntry) (selectedProtocol 
 		}
 		selectedProtocol = config.TunnelProtocol
 	} else {
-		// Order of SupportedTunnelProtocols is default preference order
+		// Pick at random from the supported protocols. This ensures that we'll eventually
+		// try all possible protocols. Depending on network configuration, it may be the
+		// case that some protocol is only available through multi-capability servers,
+		// and a simplr ranked preference of protocols could lead to that protocol never
+		// being selected.
+
+		// TODO: this is a good spot to apply protocol selection weightings. This would be
+		// to defend against an attack where the adversary, for example, classifies OSSH as
+		// an "unidentified" protocol; allows it to connect; but then kills the underlying
+		// TCP connection after a short time. Since OSSH has less latency than other protocols
+		// that may bypass an "unidentified" filter, other protocols which would be otherwise
+		// classified and not killed might never be selected for use.
+		// So one proposed defense is to add negative selection weights to the protocol
+		// associated with failed tunnels (controller.failedTunnels) with short session
+		// durations.
+
+		candidateProtocols := make([]string, 0)
 		for _, protocol := range SupportedTunnelProtocols {
 			requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
 			if Contains(serverEntry.Capabilities, requiredCapability) {
-				selectedProtocol = protocol
-				break
+				candidateProtocols = append(candidateProtocols, protocol)
 			}
 		}
-		if selectedProtocol == "" {
+		if len(candidateProtocols) == 0 {
 			return "", ContextError(fmt.Errorf("server does not have any supported capabilities"))
 		}
+
+		index, err := MakeSecureRandomInt(len(candidateProtocols))
+		if err != nil {
+			return "", ContextError(err)
+		}
+		selectedProtocol = candidateProtocols[index]
 	}
 	return selectedProtocol, nil
 }
@@ -340,15 +361,26 @@ func dialSsh(
 		port = serverEntry.SshPort
 	}
 
-	frontingDomain := ""
+	frontingAddress := ""
 	if useFronting {
-		frontingDomain = serverEntry.MeekFrontingDomain
+
+		// Randomly select, for this connection attempt, one front address for
+		// fronting-capable servers.
+
+		if len(serverEntry.MeekFrontingAddresses) == 0 {
+			return nil, nil, nil, ContextError(errors.New("MeekFrontingAddresses is empty"))
+		}
+		index, err := MakeSecureRandomInt(len(serverEntry.MeekFrontingAddresses))
+		if err != nil {
+			return nil, nil, nil, ContextError(err)
+		}
+		frontingAddress = serverEntry.MeekFrontingAddresses[index]
 	}
 	NoticeConnectingServer(
 		serverEntry.IpAddress,
 		serverEntry.Region,
 		selectedProtocol,
-		frontingDomain)
+		frontingAddress)
 
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
@@ -361,7 +393,7 @@ func dialSsh(
 		DnsServerGetter:          config.DnsServerGetter,
 	}
 	if useMeek {
-		conn, err = DialMeek(serverEntry, sessionId, useFronting, dialConfig)
+		conn, err = DialMeek(serverEntry, sessionId, frontingAddress, dialConfig)
 		if err != nil {
 			return nil, nil, nil, ContextError(err)
 		}

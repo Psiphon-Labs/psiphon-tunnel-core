@@ -110,9 +110,9 @@ func NoticeCandidateServers(region, protocol string, count int) {
 }
 
 // NoticeConnectingServer is details on a connection attempt
-func NoticeConnectingServer(ipAddress, region, protocol, frontingDomain string) {
+func NoticeConnectingServer(ipAddress, region, protocol, frontingAddress string) {
 	outputNotice("ConnectingServer", false, "ipAddress", ipAddress, "region",
-		region, "protocol", protocol, "frontingDomain", frontingDomain)
+		region, "protocol", protocol, "frontingAddress", frontingAddress)
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
@@ -169,7 +169,7 @@ func NoticeUntunneled(address string) {
 	outputNotice("Untunneled", true, "address", address)
 }
 
-// NoticeSplitTunnelRegion reports that split tunnel is on for the given region
+// NoticeSplitTunnelRegion reports that split tunnel is on for the given region.
 func NoticeSplitTunnelRegion(region string) {
 	outputNotice("SplitTunnelRegion", true, "region", region)
 }

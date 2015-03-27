@@ -29,7 +29,7 @@ import (
 // TODO: allow all params to be configured
 
 const (
-	VERSION                                      = "0.0.7"
+	VERSION                                      = "0.0.8"
 	DATA_STORE_FILENAME                          = "psiphon.db"
 	CONNECTION_WORKER_POOL_SIZE                  = 10
 	TUNNEL_POOL_SIZE                             = 1
@@ -91,7 +91,6 @@ type Config struct {
 	SplitTunnelRoutesUrlFormat          string
 	SplitTunnelRoutesSignaturePublicKey string
 	SplitTunnelDnsServer                string
-	AlternateMeekFrontingAddresses      map[string][]string
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON

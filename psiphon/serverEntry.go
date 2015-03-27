@@ -49,8 +49,8 @@ type ServerEntry struct {
 	MeekServerPort                int      `json:"meekServerPort"`
 	MeekCookieEncryptionPublicKey string   `json:"meekCookieEncryptionPublicKey"`
 	MeekObfuscatedKey             string   `json:"meekObfuscatedKey"`
-	MeekFrontingDomain            string   `json:"meekFrontingDomain"`
 	MeekFrontingHost              string   `json:"meekFrontingHost"`
+	MeekFrontingAddresses         []string `json:"MeekFrontingAddresses"`
 }
 
 // DecodeServerEntry extracts server entries from the encoding
