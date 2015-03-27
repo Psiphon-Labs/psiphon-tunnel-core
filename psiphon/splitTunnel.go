@@ -201,6 +201,8 @@ func (classifier *SplitTunnelClassifier) setRoutes(tunnel *Tunnel) {
 		NoticeAlert("failed to install split tunnel routes: %s", err)
 		return
 	}
+
+	NoticeSplitTunnelRegion(tunnel.session.clientRegion)
 }
 
 // getRoutes makes a web request to download fresh routes data for the

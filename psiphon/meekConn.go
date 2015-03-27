@@ -88,10 +88,11 @@ type MeekConn struct {
 // persistent HTTP connections are used for performance). This function does not
 // wait for the connection to be "established" before returning. A goroutine
 // is spawned which will eventually start HTTP polling.
-// useFronting assumes caller has already checked server entry capabilities.
+// When frontingAddress is not "", fronting is used. This option assumes caller has
+// already checked server entry capabilities.
 func DialMeek(
 	serverEntry *ServerEntry, sessionId string,
-	useFronting bool, config *DialConfig) (meek *MeekConn, err error) {
+	frontingAddress string, config *DialConfig) (meek *MeekConn, err error) {
 
 	// Configure transport
 	// Note: MeekConn has its own PendingConns to manage the underlying HTTP transport connections,
@@ -109,26 +110,51 @@ func DialMeek(
 	var dialer Dialer
 	var proxyUrl func(*http.Request) (*url.URL, error)
 
-	if useFronting {
+	if frontingAddress != "" {
 		// In this case, host is not what is dialed but is what ends up in the HTTP Host header
 		host = serverEntry.MeekFrontingHost
 
-		// We skip verifying the server certificate when the host address is an IP address. In the
-		// short term, this is a circumvention weakness: it's vulnerable to an active MiM attack
-		// which injects its own cert and decrypts the TLS and reads the custom Host header.
-		// We need to know which server cert to expect in order to perform verification in this case.
-		skipVerify := (net.ParseIP(serverEntry.MeekFrontingDomain) != nil)
-
 		// Custom TLS dialer:
-		//  - ignores the HTTP request address and uses the fronting domain
-		//  - disables SNI -- SNI breaks fronting when used with CDNs that support SNI on the server side.
+		//
+		//  1. ignores the HTTP request address and uses the fronting domain
+		//  2. disables SNI -- SNI breaks fronting when used with CDNs that support SNI on the server side.
+		//  3. skips verifying the server cert.
+		//
+		// Reasoning for #3:
+		//
+		// With a TLS MiM attack in place, and server certs verified, we'll fail to connect because the client
+		// will refuse to connect. That's not a successful outcome.
+		//
+		// With a MiM attack in place, and server certs not verified, we'll fail to connect if the MiM is actively
+		// targeting Psiphon and classifying the HTTP traffic by Host header or payload signature.
+		//
+		// However, in the case of a passive MiM that's just recording traffic or an active MiM that's targeting
+		// something other than Psiphon, the client will connect. This is a successful outcome.
+		//
+		// What is exposed to the MiM? The Host header does not contain a Psiphon server IP address, just an
+		// unrelated, randomly generated domain name which cannot be used to block direct connections. The
+		// Psiphon server IP is sent over meek, but it's in the encrypted cookie.
+		//
+		// The payload (user traffic) gets its confidentiality and integrity from the underlying SSH protocol.
+		// So, nothing is leaked to the MiM apart from signatures which could be used to classify the traffic
+		// as Psiphon to possibly block it; but note that not revealing that the client is Psiphon is outside
+		// our threat model; we merely seek to evade mass blocking by taking steps that require progressively
+		// more effort to block.
+		//
+		// There is a subtle attack remaining: an adversary that can MiM some CDNs but not others (and so can
+		// classify Psiphon traffic on some CDNs but not others) may throttle non-MiM CDNs so that our server
+		// selection always chooses tunnels to the MiM CDN (without any server cert verification, we won't
+		// exclusively connect to non-MiM CDNs); then the adversary kills the underlying TCP connection after
+		// some short period. This is similar to the "unidentified protocol" attack outlined in selectProtocol().
+		// A similar weighted selection defense may be appropriate.
+
 		dialer = NewCustomTLSDialer(
 			&CustomTLSConfig{
 				Dial:           NewTCPDialer(meekConfig),
 				Timeout:        meekConfig.ConnectTimeout,
-				FrontingAddr:   fmt.Sprintf("%s:%d", serverEntry.MeekFrontingDomain, 443),
+				FrontingAddr:   fmt.Sprintf("%s:%d", frontingAddress, 443),
 				SendServerName: false,
-				SkipVerify:     skipVerify,
+				SkipVerify:     true,
 			})
 	} else {
 		// In this case, host is both what is dialed and what ends up in the HTTP Host header
