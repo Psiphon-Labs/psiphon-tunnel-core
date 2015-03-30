@@ -410,7 +410,7 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 	if iterator.isTargetServerEntryIterator {
 		if iterator.hasNextTargetServerEntry {
 			iterator.hasNextTargetServerEntry = false
-			return makeCompatibleServerEntry(iterator.targetServerEntry), nil
+			return MakeCompatibleServerEntry(iterator.targetServerEntry), nil
 		}
 		return nil, nil
 	}
@@ -435,15 +435,14 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 		return nil, ContextError(err)
 	}
 
-	return makeCompatibleServerEntry(serverEntry), nil
+	return MakeCompatibleServerEntry(serverEntry), nil
 }
 
-func makeCompatibleServerEntry(serverEntry *ServerEntry) *ServerEntry {
-
-	// Backwards compatibility: old server entries have a single meekFrontingDomain
-	// and not a meekFrontingAddresses array. By copying this one meekFrontingDomain
-	// into meekFrontingAddresses, this client effectively uses that single value
-	// as legacy clients do.
+// MakeCompatibleServerEntry provides backwards compatibility with old server entries
+// which have a single meekFrontingDomain and not a meekFrontingAddresses array.
+// By copying this one meekFrontingDomain into meekFrontingAddresses, this client effectively
+// uses that single value as legacy clients do.
+func MakeCompatibleServerEntry(serverEntry *ServerEntry) *ServerEntry {
 	if len(serverEntry.MeekFrontingAddresses) == 0 && serverEntry.MeekFrontingDomain != "" {
 		serverEntry.MeekFrontingAddresses =
 			append(serverEntry.MeekFrontingAddresses, serverEntry.MeekFrontingDomain)
