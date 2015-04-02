@@ -44,14 +44,16 @@ import (
 // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/default/go/meek-client/meek-client.go
 
 const (
-	MEEK_PROTOCOL_VERSION      = 2
-	MEEK_COOKIE_MAX_PADDING    = 32
-	MAX_SEND_PAYLOAD_LENGTH    = 65536
-	FULL_RECEIVE_BUFFER_LENGTH = 4194304
-	READ_PAYLOAD_CHUNK_LENGTH  = 65536
-	MIN_POLL_INTERVAL          = 100 * time.Millisecond
-	MAX_POLL_INTERVAL          = 5 * time.Second
-	POLL_INTERNAL_MULTIPLIER   = 1.5
+	MEEK_PROTOCOL_VERSION          = 2
+	MEEK_COOKIE_MAX_PADDING        = 32
+	MAX_SEND_PAYLOAD_LENGTH        = 65536
+	FULL_RECEIVE_BUFFER_LENGTH     = 4194304
+	READ_PAYLOAD_CHUNK_LENGTH      = 65536
+	MIN_POLL_INTERVAL              = 100 * time.Millisecond
+	MAX_POLL_INTERVAL              = 5 * time.Second
+	POLL_INTERNAL_MULTIPLIER       = 1.5
+	MEEK_ROUND_TRIP_RETRY_DEADLINE = 1 * time.Second
+	MEEK_ROUND_TRIP_RETRY_DELAY    = 50 * time.Millisecond
 )
 
 // MeekConn is a network connection that tunnels TCP over HTTP and supports "fronting". Meek sends
@@ -473,16 +475,27 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadClos
 	}
 	// Don't use the default user agent ("Go 1.1 package http").
 	// For now, just omit the header (net/http/request.go: "may be blank to not send the header").
+
 	request.Header.Set("User-Agent", "")
 	request.Header.Set("Content-Type", "application/octet-stream")
 	request.AddCookie(meek.cookie)
 
 	// The retry mitigates intermittent failures between the client and front/server.
+	//
 	// Note: Retry will only be effective if entire request failed (underlying transport protocol
 	// such as SSH will fail if extra bytes are replayed in either direction due to partial relay
 	// success followed by retry).
+	// We retry when still within a brief deadline and wait for a short time before re-dialing.
+	//
+	// TODO: in principle, we could retry for min(TUNNEL_WRITE_TIMEOUT, meek-server.MAX_SESSION_STALENESS),
+	// i.e., as long as the underlying tunnel has not timed out and as long as the server has not
+	// expired the current meek session. Presently not doing this to avoid excessive connection attempts
+	// through the first hop. In addition, this will require additional support for timely shutdown.
+
+	retryDeadline := time.Now().Add(MEEK_ROUND_TRIP_RETRY_DEADLINE)
+
 	var response *http.Response
-	for retry := 0; retry <= 1; retry++ {
+	for {
 
 		// The http.Transport.RoundTrip is run in a goroutine to enable cancelling a request in-flight.
 		type roundTripResponse struct {
@@ -510,6 +523,11 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadClos
 		if err == nil {
 			break
 		}
+
+		if time.Now().After(retryDeadline) {
+			break
+		}
+		time.Sleep(MEEK_ROUND_TRIP_RETRY_DELAY)
 	}
 	if err != nil {
 		return nil, ContextError(err)
