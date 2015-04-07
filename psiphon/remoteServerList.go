@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"errors"
 	"io/ioutil"
 	"net/http"
 )
@@ -30,6 +31,13 @@ import (
 // data field into ServerEntry records.
 func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 	NoticeInfo("fetching remote server list")
+
+	if config.RemoteServerListUrl == "" {
+		return ContextError(errors.New("remote server list URL is blank"))
+	}
+	if config.RemoteServerListSignaturePublicKey == "" {
+		return ContextError(errors.New("remote server list signature public key blank"))
+	}
 
 	transport := &http.Transport{
 		Dial: NewTCPDialer(dialConfig),
