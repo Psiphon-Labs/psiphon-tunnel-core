@@ -111,14 +111,6 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		return nil, ContextError(
 			errors.New("sponsor ID is missing from the configuration file"))
 	}
-	if config.RemoteServerListUrl == "" {
-		return nil, ContextError(
-			errors.New("remote server list URL is missing from the configuration file"))
-	}
-	if config.RemoteServerListSignaturePublicKey == "" {
-		return nil, ContextError(
-			errors.New("remote server list signature public key is missing from the configuration file"))
-	}
 
 	if config.DataStoreDirectory == "" {
 		config.DataStoreDirectory, err = os.Getwd()
