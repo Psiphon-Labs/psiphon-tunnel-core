@@ -114,6 +114,11 @@ func (classifier *SplitTunnelClassifier) Start(fetchRoutesTunnel *Tunnel) {
 		return
 	}
 
+	if fetchRoutesTunnel.session == nil {
+		// Tunnel has no session
+		return
+	}
+
 	if fetchRoutesTunnel.session.clientRegion == "" {
 		// Split tunnel region is unknown
 		return
