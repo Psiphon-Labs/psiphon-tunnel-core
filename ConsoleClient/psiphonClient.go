@@ -23,7 +23,6 @@ import (
 	"flag"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"os/signal"
 	"runtime/pprof"
@@ -50,42 +49,56 @@ func main() {
 
 	flag.Parse()
 
-	// Handle required config file parameter
-
-	if configFilename == "" {
-		log.Fatalf("configuration file is required")
-	}
-	configFileContents, err := ioutil.ReadFile(configFilename)
-	if err != nil {
-		log.Fatalf("error loading configuration file: %s", err)
-	}
-	config, err := psiphon.LoadConfig(configFileContents)
-	if err != nil {
-		log.Fatalf("error processing configuration file: %s", err)
-	}
-
-	// Initialize notice output; use logfile, if configured
+	// Initialize default Notice output (stderr)
 
 	var noticeWriter io.Writer
 	noticeWriter = os.Stderr
-	if config.LogFilename != "" {
-		logFile, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-		if err != nil {
-			log.Fatalf("error opening log file: %s", err)
-		}
-		defer logFile.Close()
-	}
 	if formatNotices {
 		noticeWriter = psiphon.NewNoticeConsoleRewriter(noticeWriter)
 	}
 	psiphon.SetNoticeOutput(noticeWriter)
+
+	// Handle required config file parameter
+
+	if configFilename == "" {
+		psiphon.NoticeError("configuration file is required")
+		os.Exit(1)
+	}
+	configFileContents, err := ioutil.ReadFile(configFilename)
+	if err != nil {
+		psiphon.NoticeError("error loading configuration file: %s", err)
+		os.Exit(1)
+	}
+	config, err := psiphon.LoadConfig(configFileContents)
+	if err != nil {
+		psiphon.NoticeError("error processing configuration file: %s", err)
+		os.Exit(1)
+	}
+
+	// When a logfile is configured, reinitialize Notice output
+
+	if config.LogFilename != "" {
+		logFile, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			psiphon.NoticeError("error opening log file: %s", err)
+			os.Exit(1)
+		}
+		defer logFile.Close()
+		var noticeWriter io.Writer
+		noticeWriter = logFile
+		if formatNotices {
+			noticeWriter = psiphon.NewNoticeConsoleRewriter(noticeWriter)
+		}
+		psiphon.SetNoticeOutput(noticeWriter)
+	}
 
 	// Handle optional profiling parameter
 
 	if profileFilename != "" {
 		profileFile, err := os.Create(profileFilename)
 		if err != nil {
-			log.Fatalf("error opening profile file: %s", err)
+			psiphon.NoticeError("error opening profile file: %s", err)
+			os.Exit(1)
 		}
 		pprof.StartCPUProfile(profileFile)
 		defer pprof.StopCPUProfile()
@@ -95,7 +108,8 @@ func main() {
 
 	err = psiphon.InitDataStore(config)
 	if err != nil {
-		log.Fatalf("error initializing datastore: %s", err)
+		psiphon.NoticeError("error initializing datastore: %s", err)
+		os.Exit(1)
 	}
 
 	// Handle optional embedded server list file parameter
@@ -105,18 +119,21 @@ func main() {
 	if embeddedServerEntryListFilename != "" {
 		serverEntryList, err := ioutil.ReadFile(embeddedServerEntryListFilename)
 		if err != nil {
-			log.Fatalf("error loading embedded server entry list file: %s", err)
+			psiphon.NoticeError("error loading embedded server entry list file: %s", err)
+			os.Exit(1)
 		}
 		// TODO: stream embedded server list data? also, the cast makaes an unnecessary copy of a large buffer?
 		serverEntries, err := psiphon.DecodeAndValidateServerEntryList(string(serverEntryList))
 		if err != nil {
-			log.Fatalf("error decoding embedded server entry list file: %s", err)
+			psiphon.NoticeError("error decoding embedded server entry list file: %s", err)
+			os.Exit(1)
 		}
 		// Since embedded server list entries may become stale, they will not
 		// overwrite existing stored entries for the same server.
 		err = psiphon.StoreServerEntries(serverEntries, false)
 		if err != nil {
-			log.Fatalf("error storing embedded server entry list data: %s", err)
+			psiphon.NoticeError("error storing embedded server entry list data: %s", err)
+			os.Exit(1)
 		}
 	}
 
@@ -124,7 +141,8 @@ func main() {
 
 	controller, err := psiphon.NewController(config)
 	if err != nil {
-		log.Fatalf("error creating controller: %s", err)
+		psiphon.NoticeError("error creating controller: %s", err)
+		os.Exit(1)
 	}
 
 	controllerStopSignal := make(chan struct{}, 1)

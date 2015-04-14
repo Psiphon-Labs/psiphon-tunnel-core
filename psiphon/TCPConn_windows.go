@@ -75,6 +75,9 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 
 		if err == nil && config.UpstreamHttpProxyAddress != "" {
 			err = HttpProxyConnect(netConn, addr)
+			if err != nil {
+				NoticeUpstreamProxyError(err)
+			}
 		}
 		if err != nil {
 			netConn = nil

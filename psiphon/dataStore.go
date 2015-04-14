@@ -186,7 +186,10 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 			return ContextError(err)
 		}
 		if serverEntryExists && !replaceIfExists {
-			NoticeInfo("ignored update for server %s", serverEntry.IpAddress)
+			// Disabling this notice, for now, as it generates too much noise
+			// in diagnostics with clients that always submit embedded servers
+			// to the core on each run.
+			// NoticeInfo("ignored update for server %s", serverEntry.IpAddress)
 			return nil
 		}
 		_, err = transaction.Exec(`
