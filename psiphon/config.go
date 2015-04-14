@@ -29,7 +29,7 @@ import (
 // TODO: allow all params to be configured
 
 const (
-	VERSION                                      = "0.0.8"
+	VERSION                                      = "0.0.9"
 	DATA_STORE_FILENAME                          = "psiphon.db"
 	CONNECTION_WORKER_POOL_SIZE                  = 10
 	TUNNEL_POOL_SIZE                             = 1
