@@ -179,6 +179,12 @@ func NoticeSplitTunnelRegion(region string) {
 	outputNotice("SplitTunnelRegion", true, "region", region)
 }
 
+// NoticeUpstreamProxyError reports an error when connecting to an upstream proxy. The
+// user may have input, for example, an incorrect address or incorrect credentials.
+func NoticeUpstreamProxyError(err error) {
+	outputNotice("UpstreamProxyError", true, "message", fmt.Sprintf("%s", err))
+}
+
 type noticeObject struct {
 	NoticeType string          `json:"noticeType"`
 	Data       json.RawMessage `json:"data"`
