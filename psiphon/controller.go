@@ -116,7 +116,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	NoticeBuildInfo()
 	NoticeCoreVersion(VERSION)
-	UpdateAvailableRegions()
+	ReportAvailableRegions()
 
 	// Start components
 

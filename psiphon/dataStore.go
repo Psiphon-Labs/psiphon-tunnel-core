@@ -260,7 +260,7 @@ func StoreServerEntries(serverEntries []*ServerEntry, replaceIfExists bool) erro
 
 	// Since there has possibly been a significant change in the server entries,
 	// take this opportunity to update the available egress regions.
-	UpdateAvailableRegions()
+	ReportAvailableRegions()
 
 	return nil
 }
@@ -523,8 +523,8 @@ func CountServerEntries(region, protocol string) int {
 	return count
 }
 
-// UpdateAvailableRegions prints a notice with the available egress regions.
-func UpdateAvailableRegions() {
+// ReportAvailableRegions prints a notice with the available egress regions.
+func ReportAvailableRegions() {
 	checkInitDataStore()
 
 	// TODO: For consistency, regions-per-protocol should be used
