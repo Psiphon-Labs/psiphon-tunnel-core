@@ -109,14 +109,16 @@ func (session *Session) DoConnectedRequest() error {
 	if err != nil {
 		return ContextError(err)
 	}
+
 	var response struct {
-		connectedTimestamp string `json:connected_timestamp`
+		ConnectedTimestamp string `json:"connected_timestamp"`
 	}
 	err = json.Unmarshal(responseBody, &response)
 	if err != nil {
 		return ContextError(err)
 	}
-	err = SetKeyValue(DATA_STORE_LAST_CONNECTED_KEY, response.connectedTimestamp)
+
+	err = SetKeyValue(DATA_STORE_LAST_CONNECTED_KEY, response.ConnectedTimestamp)
 	if err != nil {
 		return ContextError(err)
 	}
