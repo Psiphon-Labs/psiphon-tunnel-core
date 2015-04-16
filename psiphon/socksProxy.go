@@ -80,7 +80,7 @@ func (proxy *SocksProxy) socksConnectionHandler(localConn *socks.SocksConn) (err
 	// Using downstreamConn so localConn.Close() will be called when remoteConn.Close() is called.
 	// This ensures that the downstream client (e.g., web browser) doesn't keep waiting on the
 	// open connection for data which will never arrive.
-	remoteConn, err := proxy.tunneler.Dial(localConn.Req.Target, localConn)
+	remoteConn, err := proxy.tunneler.Dial(localConn.Req.Target, false, localConn)
 	if err != nil {
 		return ContextError(err)
 	}

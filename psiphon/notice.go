@@ -110,9 +110,9 @@ func NoticeCandidateServers(region, protocol string, count int) {
 }
 
 // NoticeConnectingServer is details on a connection attempt
-func NoticeConnectingServer(ipAddress, region, protocol, frontingDomain string) {
+func NoticeConnectingServer(ipAddress, region, protocol, frontingAddress string) {
 	outputNotice("ConnectingServer", false, "ipAddress", ipAddress, "region",
-		region, "protocol", protocol, "frontingDomain", frontingDomain)
+		region, "protocol", protocol, "frontingAddress", frontingAddress)
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
@@ -157,6 +157,27 @@ func NoticeHomepage(url string) {
 // disconnected; when count > 1, the core is connected.
 func NoticeTunnels(count int) {
 	outputNotice("Tunnels", false, "count", count)
+}
+
+// NoticeUntunneled indicates than an address has been classified as untunneled and is being
+// accessed directly.
+//
+// Note: "address" should remain private; this notice should only be used for alerting
+// users, not for diagnostics logs.
+//
+func NoticeUntunneled(address string) {
+	outputNotice("Untunneled", true, "address", address)
+}
+
+// NoticeSplitTunnelRegion reports that split tunnel is on for the given region.
+func NoticeSplitTunnelRegion(region string) {
+	outputNotice("SplitTunnelRegion", true, "region", region)
+}
+
+// NoticeUpstreamProxyError reports an error when connecting to an upstream proxy. The
+// user may have input, for example, an incorrect address or incorrect credentials.
+func NoticeUpstreamProxyError(err error) {
+	outputNotice("UpstreamProxyError", true, "message", fmt.Sprintf("%s", err))
 }
 
 type noticeObject struct {

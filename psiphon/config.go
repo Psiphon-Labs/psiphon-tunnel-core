@@ -29,7 +29,7 @@ import (
 // TODO: allow all params to be configured
 
 const (
-	VERSION                                      = "0.0.7"
+	VERSION                                      = "0.0.9"
 	DATA_STORE_FILENAME                          = "psiphon.db"
 	CONNECTION_WORKER_POOL_SIZE                  = 10
 	TUNNEL_POOL_SIZE                             = 1
@@ -55,6 +55,7 @@ const (
 	PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES = 256
 	PSIPHON_API_CONNECTED_REQUEST_PERIOD         = 24 * time.Hour
 	PSIPHON_API_CONNECTED_REQUEST_RETRY_PERIOD   = 5 * time.Second
+	FETCH_ROUTES_TIMEOUT                         = 10 * time.Second
 )
 
 // To distinguish omitted timeout params from explicit 0 value timeout
@@ -62,31 +63,34 @@ const (
 // so use the default; a non-nil pointer to 0 means no timeout.
 
 type Config struct {
-	LogFilename                        string
-	DataStoreDirectory                 string
-	DataStoreTempDirectory             string
-	PropagationChannelId               string
-	SponsorId                          string
-	RemoteServerListUrl                string
-	RemoteServerListSignaturePublicKey string
-	ClientVersion                      string
-	ClientPlatform                     string
-	TunnelWholeDevice                  int
-	EgressRegion                       string
-	TunnelProtocol                     string
-	EstablishTunnelTimeoutSeconds      *int
-	LocalSocksProxyPort                int
-	LocalHttpProxyPort                 int
-	ConnectionWorkerPoolSize           int
-	TunnelPoolSize                     int
-	PortForwardFailureThreshold        int
-	UpstreamHttpProxyAddress           string
-	NetworkConnectivityChecker         NetworkConnectivityChecker
-	DeviceBinder                       DeviceBinder
-	DnsServerGetter                    DnsServerGetter
-	TargetServerEntry                  string
-	DisableApi                         bool
-	DisableRemoteServerListFetcher     bool
+	LogFilename                         string
+	DataStoreDirectory                  string
+	DataStoreTempDirectory              string
+	PropagationChannelId                string
+	SponsorId                           string
+	RemoteServerListUrl                 string
+	RemoteServerListSignaturePublicKey  string
+	ClientVersion                       string
+	ClientPlatform                      string
+	TunnelWholeDevice                   int
+	EgressRegion                        string
+	TunnelProtocol                      string
+	EstablishTunnelTimeoutSeconds       *int
+	LocalSocksProxyPort                 int
+	LocalHttpProxyPort                  int
+	ConnectionWorkerPoolSize            int
+	TunnelPoolSize                      int
+	PortForwardFailureThreshold         int
+	UpstreamHttpProxyAddress            string
+	NetworkConnectivityChecker          NetworkConnectivityChecker
+	DeviceBinder                        DeviceBinder
+	DnsServerGetter                     DnsServerGetter
+	TargetServerEntry                   string
+	DisableApi                          bool
+	DisableRemoteServerListFetcher      bool
+	SplitTunnelRoutesUrlFormat          string
+	SplitTunnelRoutesSignaturePublicKey string
+	SplitTunnelDnsServer                string
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON
@@ -106,14 +110,6 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	if config.SponsorId == "" {
 		return nil, ContextError(
 			errors.New("sponsor ID is missing from the configuration file"))
-	}
-	if config.RemoteServerListUrl == "" {
-		return nil, ContextError(
-			errors.New("remote server list URL is missing from the configuration file"))
-	}
-	if config.RemoteServerListSignaturePublicKey == "" {
-		return nil, ContextError(
-			errors.New("remote server list signature public key is missing from the configuration file"))
 	}
 
 	if config.DataStoreDirectory == "" {

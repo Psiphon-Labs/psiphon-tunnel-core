@@ -54,7 +54,7 @@ func NewHttpProxy(config *Config, tunneler Tunneler) (proxy *HttpProxy, err erro
 		// association between a downstream client connection and a particular
 		// tunnel.
 		// TODO: connect timeout?
-		return tunneler.Dial(addr, nil)
+		return tunneler.Dial(addr, false, nil)
 	}
 	// TODO: also use http.Client, with its Timeout field?
 	transport := &http.Transport{
@@ -199,7 +199,7 @@ func (proxy *HttpProxy) httpConnectHandler(localConn net.Conn, target string) (e
 	// Setting downstreamConn so localConn.Close() will be called when remoteConn.Close() is called.
 	// This ensures that the downstream client (e.g., web browser) doesn't keep waiting on the
 	// open connection for data which will never arrive.
-	remoteConn, err := proxy.tunneler.Dial(target, localConn)
+	remoteConn, err := proxy.tunneler.Dial(target, false, localConn)
 	if err != nil {
 		return ContextError(err)
 	}

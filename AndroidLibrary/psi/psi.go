@@ -57,15 +57,17 @@ func Start(configJson, embeddedServerEntryList string, provider PsiphonProvider)
 	config.DeviceBinder = provider
 	config.DnsServerGetter = provider
 
-	err = psiphon.InitDataStore(config)
-	if err != nil {
-		return fmt.Errorf("error initializing datastore: %s", err)
-	}
-
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 			provider.Notice(string(notice))
 		}))
+
+	// TODO: should following errors be Notices?
+
+	err = psiphon.InitDataStore(config)
+	if err != nil {
+		return fmt.Errorf("error initializing datastore: %s", err)
+	}
 
 	serverEntries, err := psiphon.DecodeAndValidateServerEntryList(embeddedServerEntryList)
 	if err != nil {

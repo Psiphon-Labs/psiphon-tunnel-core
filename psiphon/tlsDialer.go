@@ -104,6 +104,9 @@ type CustomTLSConfig struct {
 	// (tlsdialer functionality)
 	SendServerName bool
 
+	// SkipVerify completely disables server certificate verification.
+	SkipVerify bool
+
 	// VerifyLegacyCertificate is a special case self-signed server
 	// certificate case. Ignores IP SANs and basic constraints. No
 	// certificate chain. Just checks that the server presented the
@@ -192,11 +195,13 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, er
 		err = <-errChannel
 	}
 
-	if err == nil && config.VerifyLegacyCertificate != nil {
-		err = verifyLegacyCertificate(conn, config.VerifyLegacyCertificate)
-	} else if err == nil && !config.SendServerName && !tlsConfig.InsecureSkipVerify {
-		// Manually verify certificates
-		err = verifyServerCerts(conn, serverName, tlsConfigCopy)
+	if !config.SkipVerify {
+		if err == nil && config.VerifyLegacyCertificate != nil {
+			err = verifyLegacyCertificate(conn, config.VerifyLegacyCertificate)
+		} else if err == nil && !config.SendServerName && !tlsConfig.InsecureSkipVerify {
+			// Manually verify certificates
+			err = verifyServerCerts(conn, serverName, tlsConfigCopy)
+		}
 	}
 
 	if err != nil {

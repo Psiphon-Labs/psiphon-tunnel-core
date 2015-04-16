@@ -73,8 +73,13 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 
 		netConn, err := net.DialTimeout("tcp", dialAddr, config.ConnectTimeout)
 
-		if err == nil && config.UpstreamHttpProxyAddress != "" {
-			err = HttpProxyConnect(netConn, addr)
+		if config.UpstreamHttpProxyAddress != "" {
+			if err == nil {
+				err = HttpProxyConnect(netConn, addr)
+			}
+			if err != nil {
+				NoticeUpstreamProxyError(err)
+			}
 		}
 		if err != nil {
 			netConn = nil

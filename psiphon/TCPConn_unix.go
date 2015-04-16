@@ -73,6 +73,14 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	dialAddr := addr
 	if config.UpstreamHttpProxyAddress != "" {
 		dialAddr = config.UpstreamHttpProxyAddress
+
+		// Report connection errors in a notice, as user may have input
+		// invalid proxy address or credential
+		defer func() {
+			if err != nil {
+				NoticeUpstreamProxyError(err)
+			}
+		}()
 	}
 
 	// Get the remote IP and port, resolving a domain name if necessary
@@ -90,11 +98,22 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 		return nil, ContextError(err)
 	}
 	if len(ipAddrs) < 1 {
-		return nil, ContextError(errors.New("no ip address"))
+		return nil, ContextError(errors.New("no IP address"))
 	}
+
+	// Select an IP at random from the list, so we're not always
+	// trying the same IP (when > 1) which may be blocked.
+	// TODO: retry all IPs until one connects? For now, this retry
+	// will happen on subsequent TCPDial calls, when a different IP
+	// is selected.
+	index, err := MakeSecureRandomInt(len(ipAddrs))
+	if err != nil {
+		return nil, ContextError(err)
+	}
+
 	// TODO: IPv6 support
 	var ip [4]byte
-	copy(ip[:], ipAddrs[0].To4())
+	copy(ip[:], ipAddrs[index].To4())
 
 	// Enable interruption
 	conn = &TCPConn{
@@ -158,7 +177,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	// Going through upstream HTTP proxy
 	if config.UpstreamHttpProxyAddress != "" {
 		// This call can be interrupted by closing the pending conn
-		err := HttpProxyConnect(conn, addr)
+		err = HttpProxyConnect(conn, addr)
 		if err != nil {
 			return nil, ContextError(err)
 		}

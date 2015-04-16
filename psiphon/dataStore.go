@@ -83,6 +83,10 @@ func InitDataStore(config *Config) (err error) {
             (serverEntryId text not null,
              protocol text not null,
              primary key (serverEntryId, protocol));
+        create table if not exists splitTunnelRoutes
+            (region text not null primary key,
+             etag text not null,
+             data blob not null);
         create table if not exists keyValue
             (key text not null primary key,
              value text not null);
@@ -182,7 +186,10 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 			return ContextError(err)
 		}
 		if serverEntryExists && !replaceIfExists {
-			NoticeInfo("ignored update for server %s", serverEntry.IpAddress)
+			// Disabling this notice, for now, as it generates too much noise
+			// in diagnostics with clients that always submit embedded servers
+			// to the core on each run.
+			// NoticeInfo("ignored update for server %s", serverEntry.IpAddress)
 			return nil
 		}
 		_, err = transaction.Exec(`
@@ -406,7 +413,7 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 	if iterator.isTargetServerEntryIterator {
 		if iterator.hasNextTargetServerEntry {
 			iterator.hasNextTargetServerEntry = false
-			return iterator.targetServerEntry, nil
+			return MakeCompatibleServerEntry(iterator.targetServerEntry), nil
 		}
 		return nil, nil
 	}
@@ -430,7 +437,21 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	return serverEntry, nil
+
+	return MakeCompatibleServerEntry(serverEntry), nil
+}
+
+// MakeCompatibleServerEntry provides backwards compatibility with old server entries
+// which have a single meekFrontingDomain and not a meekFrontingAddresses array.
+// By copying this one meekFrontingDomain into meekFrontingAddresses, this client effectively
+// uses that single value as legacy clients do.
+func MakeCompatibleServerEntry(serverEntry *ServerEntry) *ServerEntry {
+	if len(serverEntry.MeekFrontingAddresses) == 0 && serverEntry.MeekFrontingDomain != "" {
+		serverEntry.MeekFrontingAddresses =
+			append(serverEntry.MeekFrontingAddresses, serverEntry.MeekFrontingDomain)
+	}
+
+	return serverEntry
 }
 
 func makeServerEntryWhereClause(
@@ -518,6 +539,53 @@ func GetServerEntryIpAddresses() (ipAddresses []string, err error) {
 		return nil, ContextError(err)
 	}
 	return ipAddresses, nil
+}
+
+// SetSplitTunnelRoutes updates the cached routes data for
+// the given region. The associated etag is also stored and
+// used to make efficient web requests for updates to the data.
+func SetSplitTunnelRoutes(region, etag string, data []byte) error {
+	return transactionWithRetry(func(transaction *sql.Tx) error {
+		_, err := transaction.Exec(`
+            insert or replace into splitTunnelRoutes (region, etag, data)
+            values (?, ?, ?);
+            `, region, etag, data)
+		if err != nil {
+			// Note: ContextError() would break canRetry()
+			return err
+		}
+		return nil
+	})
+}
+
+// GetSplitTunnelRoutesETag retrieves the etag for cached routes
+// data for the specified region. If not found, it returns an empty string value.
+func GetSplitTunnelRoutesETag(region string) (etag string, err error) {
+	checkInitDataStore()
+	rows := singleton.db.QueryRow("select etag from splitTunnelRoutes where region = ?;", region)
+	err = rows.Scan(&etag)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", ContextError(err)
+	}
+	return etag, nil
+}
+
+// GetSplitTunnelRoutesData retrieves the cached routes data
+// for the specified region. If not found, it returns a nil value.
+func GetSplitTunnelRoutesData(region string) (data []byte, err error) {
+	checkInitDataStore()
+	rows := singleton.db.QueryRow("select data from splitTunnelRoutes where region = ?;", region)
+	err = rows.Scan(&data)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	return data, nil
 }
 
 // SetKeyValue stores a key/value pair.
