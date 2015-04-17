@@ -109,6 +109,11 @@ func NoticeCandidateServers(region, protocol string, count int) {
 	outputNotice("CandidateServers", false, "region", region, "protocol", protocol, "count", count)
 }
 
+// NoticeAvailableEgressRegions is what regions are available for egress from
+func NoticeAvailableEgressRegions(regions []string) {
+	outputNotice("AvailableEgressRegions", false, "regions", regions)
+}
+
 // NoticeConnectingServer is details on a connection attempt
 func NoticeConnectingServer(ipAddress, region, protocol, frontingAddress string) {
 	outputNotice("ConnectingServer", false, "ipAddress", ipAddress, "region",

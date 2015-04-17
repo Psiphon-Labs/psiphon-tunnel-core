@@ -216,6 +216,8 @@ func (session *Session) doHandshakeRequest() error {
 
 	session.clientRegion = handshakeConfig.ClientRegion
 
+	var decodedServerEntries []*ServerEntry
+
 	// Store discovered server entries
 	for _, encodedServerEntry := range handshakeConfig.EncodedServerList {
 		serverEntry, err := DecodeServerEntry(encodedServerEntry)
@@ -227,10 +229,16 @@ func (session *Session) doHandshakeRequest() error {
 			// Skip this entry and continue with the next one
 			continue
 		}
-		err = StoreServerEntry(serverEntry, true)
-		if err != nil {
-			return ContextError(err)
-		}
+
+		decodedServerEntries = append(decodedServerEntries, serverEntry)
+	}
+
+	// The reason we are storing the entire array of server entries at once rather
+	// than one at a time is that some desirable side-effects get triggered by
+	// StoreServerEntries that don't get triggered by StoreServerEntry.
+	err = StoreServerEntries(decodedServerEntries, true)
+	if err != nil {
+		return ContextError(err)
 	}
 
 	// TODO: formally communicate the sponsor and upgrade info to an
