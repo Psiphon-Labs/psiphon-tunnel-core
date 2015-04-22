@@ -545,7 +545,12 @@ func ReportAvailableRegions() {
 			NoticeAlert("failed to retrieve available regions from data store: %s", ContextError(err))
 			return
 		}
-		regions = append(regions, region)
+
+		// Some server entries do not have a region, but it makes no sense to return
+		// an empty string as an "available region".
+		if (region != "") {
+			regions = append(regions, region)
+		}
 	}
 
 	NoticeAvailableEgressRegions(regions)
