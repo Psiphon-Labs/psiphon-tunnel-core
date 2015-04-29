@@ -79,6 +79,7 @@ func InitDataStore(config *Config) (err error) {
              rank integer not null unique,
              region text not null,
              data blob not null);
+        create index if not exists idx_serverEntry_region on serverEntry(region);
         create table if not exists serverEntryProtocol
             (serverEntryId text not null,
              protocol text not null,
@@ -256,6 +257,11 @@ func StoreServerEntries(serverEntries []*ServerEntry, replaceIfExists bool) erro
 			return ContextError(err)
 		}
 	}
+
+	// Since there has possibly been a significant change in the server entries,
+	// take this opportunity to update the available egress regions.
+	ReportAvailableRegions()
+
 	return nil
 }
 
@@ -515,6 +521,39 @@ func CountServerEntries(region, protocol string) int {
 		region, protocol, count)
 
 	return count
+}
+
+// ReportAvailableRegions prints a notice with the available egress regions.
+func ReportAvailableRegions() {
+	checkInitDataStore()
+
+	// TODO: For consistency, regions-per-protocol should be used
+
+	rows, err := singleton.db.Query("select distinct(region) from serverEntry;")
+	if err != nil {
+		NoticeAlert("failed to query data store for available regions: %s", ContextError(err))
+		return
+	}
+	defer rows.Close()
+
+	var regions []string
+
+	for rows.Next() {
+		var region string
+		err = rows.Scan(&region)
+		if err != nil {
+			NoticeAlert("failed to retrieve available regions from data store: %s", ContextError(err))
+			return
+		}
+
+		// Some server entries do not have a region, but it makes no sense to return
+		// an empty string as an "available region".
+		if (region != "") {
+			regions = append(regions, region)
+		}
+	}
+
+	NoticeAvailableEgressRegions(regions)
 }
 
 // GetServerEntryIpAddresses returns an array containing

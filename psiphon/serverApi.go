@@ -109,14 +109,16 @@ func (session *Session) DoConnectedRequest() error {
 	if err != nil {
 		return ContextError(err)
 	}
+
 	var response struct {
-		connectedTimestamp string `json:connected_timestamp`
+		ConnectedTimestamp string `json:"connected_timestamp"`
 	}
 	err = json.Unmarshal(responseBody, &response)
 	if err != nil {
 		return ContextError(err)
 	}
-	err = SetKeyValue(DATA_STORE_LAST_CONNECTED_KEY, response.connectedTimestamp)
+
+	err = SetKeyValue(DATA_STORE_LAST_CONNECTED_KEY, response.ConnectedTimestamp)
 	if err != nil {
 		return ContextError(err)
 	}
@@ -214,6 +216,8 @@ func (session *Session) doHandshakeRequest() error {
 
 	session.clientRegion = handshakeConfig.ClientRegion
 
+	var decodedServerEntries []*ServerEntry
+
 	// Store discovered server entries
 	for _, encodedServerEntry := range handshakeConfig.EncodedServerList {
 		serverEntry, err := DecodeServerEntry(encodedServerEntry)
@@ -225,10 +229,16 @@ func (session *Session) doHandshakeRequest() error {
 			// Skip this entry and continue with the next one
 			continue
 		}
-		err = StoreServerEntry(serverEntry, true)
-		if err != nil {
-			return ContextError(err)
-		}
+
+		decodedServerEntries = append(decodedServerEntries, serverEntry)
+	}
+
+	// The reason we are storing the entire array of server entries at once rather
+	// than one at a time is that some desirable side-effects get triggered by
+	// StoreServerEntries that don't get triggered by StoreServerEntry.
+	err = StoreServerEntries(decodedServerEntries, true)
+	if err != nil {
+		return ContextError(err)
 	}
 
 	// TODO: formally communicate the sponsor and upgrade info to an

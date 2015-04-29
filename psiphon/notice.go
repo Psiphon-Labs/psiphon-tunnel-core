@@ -109,6 +109,11 @@ func NoticeCandidateServers(region, protocol string, count int) {
 	outputNotice("CandidateServers", false, "region", region, "protocol", protocol, "count", count)
 }
 
+// NoticeAvailableEgressRegions is what regions are available for egress from
+func NoticeAvailableEgressRegions(regions []string) {
+	outputNotice("AvailableEgressRegions", false, "regions", regions)
+}
+
 // NoticeConnectingServer is details on a connection attempt
 func NoticeConnectingServer(ipAddress, region, protocol, frontingAddress string) {
 	outputNotice("ConnectingServer", false, "ipAddress", ipAddress, "region",
@@ -186,24 +191,22 @@ type noticeObject struct {
 	Timestamp  string          `json:"timestamp"`
 }
 
-// GetNoticeTunnels receives a JSON encoded object and attempts to parse it as a Notice.
-// When the object is a Notice of type Tunnels, the count payload is returned.
-func GetNoticeTunnels(notice []byte) (count int, ok bool) {
+// GetNotice receives a JSON encoded object and attempts to parse it as a Notice.
+// The type is returned as a string and the payload as a generic map.
+func GetNotice(notice []byte) (
+	noticeType string, payload map[string]interface{}, err error) {
+
 	var object noticeObject
-	if json.Unmarshal(notice, &object) != nil {
-		return 0, false
+	err = json.Unmarshal(notice, &object)
+	if err != nil {
+		return "", nil, err
 	}
-	if object.NoticeType != "Tunnels" {
-		return 0, false
+	var objectPayload interface{}
+	err = json.Unmarshal(object.Data, &objectPayload)
+	if err != nil {
+		return "", nil, err
 	}
-	type tunnelsPayload struct {
-		Count int `json:"count"`
-	}
-	var payload tunnelsPayload
-	if json.Unmarshal(object.Data, &payload) != nil {
-		return 0, false
-	}
-	return payload.Count, true
+	return object.NoticeType, objectPayload.(map[string]interface{}), nil
 }
 
 // NoticeReceiver consumes a notice input stream and invokes a callback function

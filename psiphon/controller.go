@@ -116,6 +116,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	NoticeBuildInfo()
 	NoticeCoreVersion(VERSION)
+	ReportAvailableRegions()
 
 	// Start components
 
@@ -126,7 +127,8 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	}
 	defer socksProxy.Close()
 
-	httpProxy, err := NewHttpProxy(controller.config, controller)
+	httpProxy, err := NewHttpProxy(
+		controller.config, controller.untunneledDialConfig, controller)
 	if err != nil {
 		NoticeAlert("error initializing local HTTP proxy: %s", err)
 		return

@@ -20,7 +20,11 @@
 package psiphon
 
 import (
+	"fmt"
 	"io/ioutil"
+	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -69,19 +73,32 @@ func controllerRun(t *testing.T, protocol string) {
 	}
 
 	// Monitor notices for "Tunnels" with count > 1, the
-	// indication of tunnel establishment success
+	// indication of tunnel establishment success.
+	// Also record the selected HTTP proxy port to use
+	// when fetching websites through the tunnel.
+
+	httpProxyPort := 0
 
 	tunnelEstablished := make(chan struct{}, 1)
 	SetNoticeOutput(NewNoticeReceiver(
 		func(notice []byte) {
 			// TODO: log notices without logging server IPs:
 			// fmt.Fprintf(os.Stderr, "%s\n", string(notice))
-			count, ok := GetNoticeTunnels(notice)
-			if ok && count > 0 {
-				select {
-				case tunnelEstablished <- *new(struct{}):
-				default:
+			noticeType, payload, err := GetNotice(notice)
+			if err != nil {
+				return
+			}
+			switch noticeType {
+			case "Tunnels":
+				count := int(payload["count"].(float64))
+				if count > 0 {
+					select {
+					case tunnelEstablished <- *new(struct{}):
+					default:
+					}
 				}
+			case "ListeningHttpProxyPort":
+				httpProxyPort = int(payload["port"].(float64))
 			}
 		}))
 
@@ -101,8 +118,12 @@ func controllerRun(t *testing.T, protocol string) {
 
 	select {
 	case <-tunnelEstablished:
+		// Test: fetch website through tunnel
+		fetchWebsite(t, httpProxyPort)
+
 	case <-establishTimeout.C:
 		t.Errorf("tunnel establish timeout exceeded")
+		// ...continue with cleanup
 	}
 
 	close(shutdownBroadcast)
@@ -121,5 +142,98 @@ func controllerRun(t *testing.T, protocol string) {
 	case <-shutdownOk:
 	case <-shutdownTimeout.C:
 		t.Errorf("controller shutdown timeout exceeded")
+	}
+}
+
+func fetchWebsite(t *testing.T, httpProxyPort int) {
+
+	testUrl := "https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core/master/LICENSE"
+	roundTripTimeout := 10 * time.Second
+	expectedResponsePrefix := "                    GNU GENERAL PUBLIC LICENSE"
+	expectedResponseSize := 35148
+	checkResponse := func(responseBody string) bool {
+		return strings.HasPrefix(responseBody, expectedResponsePrefix) && len(responseBody) == expectedResponseSize
+	}
+
+	// Test: use HTTP proxy
+
+	proxyUrl, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", httpProxyPort))
+	if err != nil {
+		t.Errorf("error initializing proxied HTTP request: %s", err)
+		t.FailNow()
+	}
+
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyUrl),
+		},
+		Timeout: roundTripTimeout,
+	}
+
+	response, err := httpClient.Get(testUrl)
+	if err != nil {
+		t.Errorf("error sending proxied HTTP request: %s", err)
+		t.FailNow()
+	}
+
+	body, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		t.Errorf("error reading proxied HTTP response: %s", err)
+		t.FailNow()
+	}
+	response.Body.Close()
+
+	if !checkResponse(string(body)) {
+		t.Errorf("unexpected proxied HTTP response")
+		t.FailNow()
+	}
+
+	// Test: use direct URL proxy
+
+	httpClient = &http.Client{
+		Transport: http.DefaultTransport,
+		Timeout:   roundTripTimeout,
+	}
+
+	response, err = httpClient.Get(
+		fmt.Sprintf("http://127.0.0.1:%d/direct/%s",
+			httpProxyPort, url.QueryEscape(testUrl)))
+	if err != nil {
+		t.Errorf("error sending direct URL request: %s", err)
+		t.FailNow()
+	}
+
+	body, err = ioutil.ReadAll(response.Body)
+	if err != nil {
+		t.Errorf("error reading direct URL response: %s", err)
+		t.FailNow()
+	}
+	response.Body.Close()
+
+	if !checkResponse(string(body)) {
+		t.Errorf("unexpected direct URL response")
+		t.FailNow()
+	}
+
+	// Test: use tunneled URL proxy
+
+	response, err = httpClient.Get(
+		fmt.Sprintf("http://127.0.0.1:%d/tunneled/%s",
+			httpProxyPort, url.QueryEscape(testUrl)))
+	if err != nil {
+		t.Errorf("error sending tunneled URL request: %s", err)
+		t.FailNow()
+	}
+
+	body, err = ioutil.ReadAll(response.Body)
+	if err != nil {
+		t.Errorf("error reading tunneled URL response: %s", err)
+		t.FailNow()
+	}
+	response.Body.Close()
+
+	if !checkResponse(string(body)) {
+		t.Errorf("unexpected tunneled URL response")
+		t.FailNow()
 	}
 }

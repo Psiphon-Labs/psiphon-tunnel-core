@@ -29,8 +29,8 @@ Setup
     {
         "PropagationChannelId" : "<placeholder>",
         "SponsorId" : "<placeholder>",
-        "RemoteServerListUrl" : "<placeholder>",
-        "RemoteServerListSignaturePublicKey" : "<placeholder>",
+        "RemoteServerListUrl" : "",
+        "RemoteServerListSignaturePublicKey" : "",
         "DataStoreDirectory" : "",
         "DataStoreTempDirectory" : "",
         "LogFilename" : "",
