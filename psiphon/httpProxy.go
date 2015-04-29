@@ -25,22 +25,51 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 )
 
-// HttpProxy is a HTTP server that relays HTTP requests through
-// the tunnel SSH client.
+// HttpProxy is a HTTP server that relays HTTP requests through the Psiphon tunnel.
+// It includes support for HTTP CONNECT.
+//
+// This proxy also offers a "URL proxy" mode that relays requests for HTTP or HTTPS
+// or URLs specified in the proxy request path. This mode relays either through the
+// Psiphon tunnel, or directly.
+//
+// An example use case for tunneled URL proxy relays is to craft proxied URLs to pass to
+// components that don't support HTTP or SOCKS proxy settings. For example, the
+// Android Media Player (http://developer.android.com/reference/android/media/MediaPlayer.html).
+// To make the Media Player use the Psiphon tunnel, construct a URL such as:
+// "http://127.0.0.1:<proxy-port>/tunneled/<origin media URL>"; and pass this to the player.
+// TODO: add ICY protocol to support certain streaming media (e.g., https://gist.github.com/tulskiy/1008126)
+//
+// An example use case for direct, untunneled, relaying is to make use of Go's TLS
+// stack for HTTPS requests in cases where the native TLS stack is lacking (e.g.,
+// WinHTTP on Windows XP). The URL for direct relaying is:
+// "http://127.0.0.1:<proxy-port>/direct/<origin URL>".
+//
+// Origin URLs must include the scheme prefix ("http://" or "https://") and must be
+// URL encoded.
+//
 type HttpProxy struct {
 	tunneler               Tunneler
 	listener               net.Listener
 	serveWaitGroup         *sync.WaitGroup
-	httpRelay              *http.Transport
+	httpTunneledRelay      *http.Transport
+	httpTunneledClient     *http.Client
+	httpDirectRelay        *http.Transport
+	httpDirectClient       *http.Client
 	openConns              *Conns
 	stopListeningBroadcast chan struct{}
 }
 
 // NewHttpProxy initializes and runs a new HTTP proxy server.
-func NewHttpProxy(config *Config, tunneler Tunneler) (proxy *HttpProxy, err error) {
+func NewHttpProxy(
+	config *Config,
+	untunneledDialConfig *DialConfig,
+	tunneler Tunneler) (proxy *HttpProxy, err error) {
+
 	listener, err := net.Listen(
 		"tcp", fmt.Sprintf("127.0.0.1:%d", config.LocalHttpProxyPort))
 	if err != nil {
@@ -49,6 +78,7 @@ func NewHttpProxy(config *Config, tunneler Tunneler) (proxy *HttpProxy, err erro
 		}
 		return nil, ContextError(err)
 	}
+
 	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
 		// downstreamConn is not set in this case, as there is not a fixed
 		// association between a downstream client connection and a particular
@@ -56,17 +86,38 @@ func NewHttpProxy(config *Config, tunneler Tunneler) (proxy *HttpProxy, err erro
 		// TODO: connect timeout?
 		return tunneler.Dial(addr, false, nil)
 	}
-	// TODO: also use http.Client, with its Timeout field?
-	transport := &http.Transport{
-		Dial:                  tunneledDialer,
+	httpTunneledRelay := &http.Transport{
+		Dial:                tunneledDialer,
+		MaxIdleConnsPerHost: HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
+	}
+	httpTunneledClient := &http.Client{
+		Transport: httpTunneledRelay,
+		Jar:       nil, // TODO: cookie support for URL proxy?
+		Timeout:   HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
+	}
+
+	directDialer := func(_, addr string) (conn net.Conn, err error) {
+		return DialTCP(addr, untunneledDialConfig)
+	}
+	httpDirectRelay := &http.Transport{
+		Dial:                  directDialer,
 		MaxIdleConnsPerHost:   HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
 		ResponseHeaderTimeout: HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
 	}
+	httpDirectClient := &http.Client{
+		Transport: httpDirectRelay,
+		Jar:       nil,
+		Timeout:   HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
+	}
+
 	proxy = &HttpProxy{
 		tunneler:               tunneler,
 		listener:               listener,
 		serveWaitGroup:         new(sync.WaitGroup),
-		httpRelay:              transport,
+		httpTunneledRelay:      httpTunneledRelay,
+		httpTunneledClient:     httpTunneledClient,
+		httpDirectRelay:        httpDirectRelay,
+		httpDirectClient:       httpDirectClient,
 		openConns:              new(Conns),
 		stopListeningBroadcast: make(chan struct{}),
 	}
@@ -85,7 +136,8 @@ func (proxy *HttpProxy) Close() {
 	proxy.openConns.CloseAll()
 	// Close idle proxy->origin persistent connections
 	// TODO: also close active connections
-	proxy.httpRelay.CloseIdleConnections()
+	proxy.httpTunneledRelay.CloseIdleConnections()
+	proxy.httpDirectRelay.CloseIdleConnections()
 }
 
 // ServeHTTP receives HTTP requests and proxies them. CONNECT requests
@@ -119,15 +171,89 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 				NoticeAlert("%s", ContextError(err))
 			}
 		}()
-		return
+	} else if request.URL.IsAbs() {
+		proxy.httpProxyHandler(responseWriter, request)
+	} else {
+		proxy.urlProxyHandler(responseWriter, request)
 	}
-	if !request.URL.IsAbs() {
-		NoticeAlert("%s", ContextError(errors.New("no domain in request URL")))
-		http.Error(responseWriter, "", http.StatusInternalServerError)
+}
+
+func (proxy *HttpProxy) httpConnectHandler(localConn net.Conn, target string) (err error) {
+	defer localConn.Close()
+	defer proxy.openConns.Remove(localConn)
+	proxy.openConns.Add(localConn)
+	// Setting downstreamConn so localConn.Close() will be called when remoteConn.Close() is called.
+	// This ensures that the downstream client (e.g., web browser) doesn't keep waiting on the
+	// open connection for data which will never arrive.
+	remoteConn, err := proxy.tunneler.Dial(target, false, localConn)
+	if err != nil {
+		return ContextError(err)
+	}
+	defer remoteConn.Close()
+	_, err = localConn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+	if err != nil {
+		return ContextError(err)
+	}
+	Relay(localConn, remoteConn)
+	return nil
+}
+
+func (proxy *HttpProxy) httpProxyHandler(responseWriter http.ResponseWriter, request *http.Request) {
+	relayHttpRequest(proxy.httpTunneledClient, request, responseWriter)
+}
+
+const (
+	URL_PROXY_TUNNELED_REQUEST_PATH = "/tunneled/"
+	URL_PROXY_DIRECT_REQUEST_PATH   = "/direct/"
+)
+
+func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, request *http.Request) {
+
+	var client *http.Client
+	var originUrl string
+	var err error
+
+	// Request URL should be "/tunneled/<origin URL>" or  "/direct/<origin URL>" and the
+	// origin URL must be URL encoded.
+	switch {
+	case strings.HasPrefix(request.URL.Path, URL_PROXY_TUNNELED_REQUEST_PATH):
+		originUrl, err = url.QueryUnescape(request.URL.Path[len(URL_PROXY_TUNNELED_REQUEST_PATH):])
+		client = proxy.httpTunneledClient
+	case strings.HasPrefix(request.URL.Path, URL_PROXY_DIRECT_REQUEST_PATH):
+		originUrl, err = url.QueryUnescape(request.URL.Path[len(URL_PROXY_DIRECT_REQUEST_PATH):])
+		client = proxy.httpDirectClient
+	default:
+		err = errors.New("missing origin URL")
+	}
+	if err != nil {
+		NoticeAlert("%s", ContextError(err))
+		forceClose(responseWriter)
 		return
 	}
 
-	// Transform request struct before using as input to relayed request
+	// Origin URL must be well-formed, absolute, and have a scheme of  "http" or "https"
+	url, err := url.ParseRequestURI(originUrl)
+	if err != nil {
+		NoticeAlert("%s", ContextError(err))
+		forceClose(responseWriter)
+		return
+	}
+	if !url.IsAbs() || (url.Scheme != "http" && url.Scheme != "https") {
+		NoticeAlert("invalid origin URL")
+		forceClose(responseWriter)
+		return
+	}
+
+	// Transform received request to directly reference the origin URL
+	request.Host = url.Host
+	request.URL = url
+
+	relayHttpRequest(client, request, responseWriter)
+}
+
+func relayHttpRequest(client *http.Client, request *http.Request, responseWriter http.ResponseWriter) {
+
+	// Transform received request struct before using as input to relayed request
 	request.Close = false
 	request.RequestURI = ""
 	for _, key := range hopHeaders {
@@ -135,7 +261,8 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 	}
 
 	// Relay the HTTP request and get the response
-	response, err := proxy.httpRelay.RoundTrip(request)
+	//response, err := relay.RoundTrip(request)
+	response, err := client.Do(request)
 	if err != nil {
 		NoticeAlert("%s", ContextError(err))
 		forceClose(responseWriter)
@@ -190,26 +317,6 @@ var hopHeaders = []string{
 	"Trailers",
 	"Transfer-Encoding",
 	"Upgrade",
-}
-
-func (proxy *HttpProxy) httpConnectHandler(localConn net.Conn, target string) (err error) {
-	defer localConn.Close()
-	defer proxy.openConns.Remove(localConn)
-	proxy.openConns.Add(localConn)
-	// Setting downstreamConn so localConn.Close() will be called when remoteConn.Close() is called.
-	// This ensures that the downstream client (e.g., web browser) doesn't keep waiting on the
-	// open connection for data which will never arrive.
-	remoteConn, err := proxy.tunneler.Dial(target, false, localConn)
-	if err != nil {
-		return ContextError(err)
-	}
-	defer remoteConn.Close()
-	_, err = localConn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
-	if err != nil {
-		return ContextError(err)
-	}
-	Relay(localConn, remoteConn)
-	return nil
 }
 
 // httpConnStateCallback is called by http.Server when the state of a local->proxy
