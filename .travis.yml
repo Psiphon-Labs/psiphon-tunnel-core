@@ -2,9 +2,10 @@ language: go
 go:
 - 1.4
 - tip
-before_install:
-- sudo apt-get update
-- sudo apt-get install libx11-dev libgles2-mesa-dev
+addons:
+  apt_packages:
+    - libx11-dev
+    - libgles2-mesa-dev
 install:
 - go get -t -d -v ./... && go build -v ./...
 script:
