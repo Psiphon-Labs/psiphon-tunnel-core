@@ -127,7 +127,8 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	}
 	defer socksProxy.Close()
 
-	httpProxy, err := NewHttpProxy(controller.config, controller)
+	httpProxy, err := NewHttpProxy(
+		controller.config, controller.untunneledDialConfig, controller)
 	if err != nil {
 		NoticeAlert("error initializing local HTTP proxy: %s", err)
 		return
