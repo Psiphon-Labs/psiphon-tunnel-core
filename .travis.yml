@@ -1,7 +1,6 @@
 language: go
 go:
 - 1.4
-- tip
 addons:
   apt_packages:
     - libx11-dev
