@@ -87,13 +87,16 @@ func NewHttpProxy(
 		return tunneler.Dial(addr, false, nil)
 	}
 	httpTunneledRelay := &http.Transport{
-		Dial:                tunneledDialer,
-		MaxIdleConnsPerHost: HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
+		Dial:                  tunneledDialer,
+		MaxIdleConnsPerHost:   HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
+		ResponseHeaderTimeout: HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
 	}
 	httpTunneledClient := &http.Client{
 		Transport: httpTunneledRelay,
 		Jar:       nil, // TODO: cookie support for URL proxy?
-		Timeout:   HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
+
+		// This timeout cuts downloads of large response bodies
+		//Timeout:   HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
 	}
 
 	directDialer := func(_, addr string) (conn net.Conn, err error) {
@@ -107,7 +110,9 @@ func NewHttpProxy(
 	httpDirectClient := &http.Client{
 		Transport: httpDirectRelay,
 		Jar:       nil,
-		Timeout:   HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
+
+		// This timeout cuts downloads of large response bodies
+		//Timeout:   HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
 	}
 
 	proxy = &HttpProxy{

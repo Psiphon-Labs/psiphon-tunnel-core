@@ -548,7 +548,7 @@ func ReportAvailableRegions() {
 
 		// Some server entries do not have a region, but it makes no sense to return
 		// an empty string as an "available region".
-		if (region != "") {
+		if region != "" {
 			regions = append(regions, region)
 		}
 	}
