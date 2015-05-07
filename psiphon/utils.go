@@ -161,27 +161,3 @@ func IsAddressInUseError(err error) bool {
 	}
 	return false
 }
-
-// ParseIPv4Mask parses IPv4 string of form a.b.c.d and returns 4 bytes long net.IP
-func ParseIPv4(s string) net.IP {
-	ip := net.ParseIP(s)
-	if ip == nil {
-		return nil
-	}
-	return ip.To4()
-}
-
-// ParseIPv4Mask parses netmask in form of an IPv4 string, i.e. 240.0.0.0
-func ParseIPv4Mask(s string) net.IPMask {
-	ip := ParseIPv4(s)
-	if ip == nil {
-		return nil
-	}
-	mask := net.IPMask(ip)
-
-	//verify if mask value is valid
-	if bits, size := mask.Size(); bits == 0 || size == 0 {
-		return nil
-	}
-	return mask
-}
