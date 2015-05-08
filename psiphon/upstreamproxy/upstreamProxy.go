@@ -1,10 +1,10 @@
 package upstreamproxy
 
 import (
+	"fmt"
 	"golang.org/x/net/proxy"
 	"net"
 	"net/url"
-        "fmt"
 )
 
 type DialFunc func(string, string) (net.Conn, error)
@@ -21,10 +21,13 @@ func (u *UpstreamProxyConfig) Dial(network, addr string) (net.Conn, error) {
 }
 
 func NewProxyDialFunc(config *UpstreamProxyConfig) DialFunc {
+	if config.ProxyURIString == "" {
+		return config.ForwardDialFunc
+	}
 	proxyURI, err := url.Parse(config.ProxyURIString)
 	if err != nil {
 		return func(network, addr string) (net.Conn, error) {
-                    return nil,  fmt.Errorf("Upstream proxy URI parsing error: %v", err)
+			return nil, fmt.Errorf("Upstream proxy URI parsing error: %v", err)
 		}
 	}
 

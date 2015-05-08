@@ -18,5 +18,4 @@ proxyDialer = NewProxyDialFunc((
             })
 ```
 
-
-
+Note: `NewProxyDialFunc` returns `ForwardDialFunc` if `ProxyURIString` is empty
