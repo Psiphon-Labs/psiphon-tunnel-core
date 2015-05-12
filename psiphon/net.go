@@ -26,7 +26,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -194,7 +193,7 @@ func HttpProxyConnect(rawConn net.Conn, addr string) (err error) {
 		return ContextError(err)
 	}
 	if response.StatusCode != 200 {
-		return ContextError(errors.New(strings.SplitN(response.Status, " ", 2)[1]))
+		return ContextError(errors.New(response.Status))
 	}
 
 	return nil

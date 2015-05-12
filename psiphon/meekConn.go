@@ -166,7 +166,7 @@ func DialMeek(
 			// For unfronted meek, we let the http.Transport handle proxying, as the
 			// target server hostname has to be in the HTTP request line. Also, in this
 			// case, we don't require the proxy to support CONNECT and so we can work
-			// throigh HTTP proxies that don't support it.
+			// through HTTP proxies that don't support it.
 			url, err := url.Parse(fmt.Sprintf("http://%s", meekConfig.UpstreamHttpProxyAddress))
 			if err != nil {
 				return nil, ContextError(err)
