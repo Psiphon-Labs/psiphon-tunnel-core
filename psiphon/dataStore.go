@@ -71,7 +71,7 @@ func InitDataStore(config *Config) (err error) {
 			// temporary directory: https://www.sqlite.org/pragma.html#pragma_temp_store_directory.
 			// TODO: is there another way to restrict writing of temporary files? E.g. temp_store=3?
 			initialization += fmt.Sprintf(
-				"pragma temp_store_directory=\"%s\";\n", config.DataStoreDirectory)
+				"pragma temp_store_directory=\"%s\";\n", config.DataStoreTempDirectory)
 		}
 		initialization += `
         create table if not exists serverEntry
