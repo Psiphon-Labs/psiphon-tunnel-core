@@ -113,27 +113,43 @@ func main() {
 	}
 
 	// Handle optional embedded server list file parameter
-	// If specified, the embedded server list is loaded and stored before
-	// running Psiphon.
-
+	// If specified, the embedded server list is loaded and stored. When there
+	// are no server candidates at all, we wait for this import to complete
+	// before starting the Psiphon controller. Otherwise, we import while
+	// concurrently starting the controller to minimize delay before attempting
+	// to connect to existing candidate servers.
+	// If the import fails, an error notice is emitted, but the controller is
+	// still started: either existing candidate servers may suffice, or the
+	// remote server list fetch may obtain candidate servers.
 	if embeddedServerEntryListFilename != "" {
-		serverEntryList, err := ioutil.ReadFile(embeddedServerEntryListFilename)
-		if err != nil {
-			psiphon.NoticeError("error loading embedded server entry list file: %s", err)
-			os.Exit(1)
-		}
-		// TODO: stream embedded server list data? also, the cast makaes an unnecessary copy of a large buffer?
-		serverEntries, err := psiphon.DecodeAndValidateServerEntryList(string(serverEntryList))
-		if err != nil {
-			psiphon.NoticeError("error decoding embedded server entry list file: %s", err)
-			os.Exit(1)
-		}
-		// Since embedded server list entries may become stale, they will not
-		// overwrite existing stored entries for the same server.
-		err = psiphon.StoreServerEntries(serverEntries, false)
-		if err != nil {
-			psiphon.NoticeError("error storing embedded server entry list data: %s", err)
-			os.Exit(1)
+		embeddedServerListWaitGroup := new(sync.WaitGroup)
+		embeddedServerListWaitGroup.Add(1)
+		go func() {
+			defer embeddedServerListWaitGroup.Done()
+			serverEntryList, err := ioutil.ReadFile(embeddedServerEntryListFilename)
+			if err != nil {
+				psiphon.NoticeError("error loading embedded server entry list file: %s", err)
+				return
+			}
+			// TODO: stream embedded server list data? also, the cast makes an unnecessary copy of a large buffer?
+			serverEntries, err := psiphon.DecodeAndValidateServerEntryList(string(serverEntryList))
+			if err != nil {
+				psiphon.NoticeError("error decoding embedded server entry list file: %s", err)
+				return
+			}
+			// Since embedded server list entries may become stale, they will not
+			// overwrite existing stored entries for the same server.
+			err = psiphon.StoreServerEntries(serverEntries, false)
+			if err != nil {
+				psiphon.NoticeError("error storing embedded server entry list data: %s", err)
+				return
+			}
+		}()
+
+		if psiphon.CountServerEntries(config.EgressRegion, config.TunnelProtocol) == 0 {
+			embeddedServerListWaitGroup.Wait()
+		} else {
+			defer embeddedServerListWaitGroup.Wait()
 		}
 	}
 

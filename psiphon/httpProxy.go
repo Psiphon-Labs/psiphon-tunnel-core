@@ -95,7 +95,7 @@ func NewHttpProxy(
 		Transport: httpTunneledRelay,
 		Jar:       nil, // TODO: cookie support for URL proxy?
 
-		// This timeout cuts downloads of large response bodies
+		// Note: don't use this timeout -- it interrupts downloads of large response bodies
 		//Timeout:   HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
 	}
 
@@ -110,9 +110,6 @@ func NewHttpProxy(
 	httpDirectClient := &http.Client{
 		Transport: httpDirectRelay,
 		Jar:       nil,
-
-		// This timeout cuts downloads of large response bodies
-		//Timeout:   HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
 	}
 
 	proxy = &HttpProxy{
@@ -231,7 +228,7 @@ func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, requ
 		err = errors.New("missing origin URL")
 	}
 	if err != nil {
-		NoticeAlert("%s", ContextError(err))
+		NoticeAlert("%s", ContextError(FilterUrlError(err)))
 		forceClose(responseWriter)
 		return
 	}
@@ -239,7 +236,7 @@ func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, requ
 	// Origin URL must be well-formed, absolute, and have a scheme of  "http" or "https"
 	url, err := url.ParseRequestURI(originUrl)
 	if err != nil {
-		NoticeAlert("%s", ContextError(err))
+		NoticeAlert("%s", ContextError(FilterUrlError(err)))
 		forceClose(responseWriter)
 		return
 	}
@@ -266,10 +263,9 @@ func relayHttpRequest(client *http.Client, request *http.Request, responseWriter
 	}
 
 	// Relay the HTTP request and get the response
-	//response, err := relay.RoundTrip(request)
 	response, err := client.Do(request)
 	if err != nil {
-		NoticeAlert("%s", ContextError(err))
+		NoticeAlert("%s", ContextError(FilterUrlError(err)))
 		forceClose(responseWriter)
 		return
 	}

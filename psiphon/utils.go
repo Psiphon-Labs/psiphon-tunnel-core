@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -118,6 +119,26 @@ func DecodeCertificate(encodedCertificate string) (certificate *x509.Certificate
 		return nil, ContextError(err)
 	}
 	return certificate, nil
+}
+
+// FilterUrlError transforms an error, when it is a url.Error, removing
+// the URL value. This is to avoid logging private user data in cases
+// where the URL may be a user input value.
+// This function is used with errors returned by net/http and net/url,
+// which are (currently) of type url.Error. In particular, the round trip
+// function used by our HttpProxy, http.Client.Do, returns errors of type
+// url.Error, with the URL being the url sent from the user's tunneled
+// applications:
+// https://github.com/golang/go/blob/release-branch.go1.4/src/net/http/client.go#L394
+func FilterUrlError(err error) error {
+	if urlErr, ok := err.(*url.Error); ok {
+		err = &url.Error{
+			Op:  urlErr.Op,
+			URL: "",
+			Err: urlErr.Err,
+		}
+	}
+	return err
 }
 
 // TrimError removes the middle of over-long error message strings
