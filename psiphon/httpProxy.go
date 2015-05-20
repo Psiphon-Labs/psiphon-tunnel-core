@@ -91,7 +91,7 @@ func NewHttpProxy(
 		return DialTCP(addr, untunneledDialConfig)
 	}
 
-	// TODO: could HTTP proxy share a tunneled transort with URL proxy?
+	// TODO: could HTTP proxy share a tunneled transport with URL proxy?
 	// For now, keeping them distinct just to be conservative.
 	httpProxyTunneledRelay := &http.Transport{
 		Dial:                  tunneledDialer,
