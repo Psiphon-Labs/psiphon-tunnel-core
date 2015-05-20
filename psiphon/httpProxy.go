@@ -56,10 +56,11 @@ type HttpProxy struct {
 	tunneler               Tunneler
 	listener               net.Listener
 	serveWaitGroup         *sync.WaitGroup
-	httpTunneledRelay      *http.Transport
-	httpTunneledClient     *http.Client
-	httpDirectRelay        *http.Transport
-	httpDirectClient       *http.Client
+	httpProxyTunneledRelay *http.Transport
+	urlProxyTunneledRelay  *http.Transport
+	urlProxyTunneledClient *http.Client
+	urlProxyDirectRelay    *http.Transport
+	urlProxyDirectClient   *http.Client
 	openConns              *Conns
 	stopListeningBroadcast chan struct{}
 }
@@ -86,29 +87,42 @@ func NewHttpProxy(
 		// TODO: connect timeout?
 		return tunneler.Dial(addr, false, nil)
 	}
-	httpTunneledRelay := &http.Transport{
+	directDialer := func(_, addr string) (conn net.Conn, err error) {
+		return DialTCP(addr, untunneledDialConfig)
+	}
+
+	// TODO: could HTTP proxy share a tunneled transort with URL proxy?
+	// For now, keeping them distinct just to be conservative.
+	httpProxyTunneledRelay := &http.Transport{
 		Dial:                  tunneledDialer,
 		MaxIdleConnsPerHost:   HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
 		ResponseHeaderTimeout: HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
 	}
-	httpTunneledClient := &http.Client{
-		Transport: httpTunneledRelay,
+
+	// Note: URL proxy relays use http.Client for upstream requests, so
+	// redirects will be followed. HTTP proxy should not follow redirects
+	// and simply uses http.Transport directly.
+
+	urlProxyTunneledRelay := &http.Transport{
+		Dial:                  tunneledDialer,
+		MaxIdleConnsPerHost:   HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
+		ResponseHeaderTimeout: HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
+	}
+	urlProxyTunneledClient := &http.Client{
+		Transport: urlProxyTunneledRelay,
 		Jar:       nil, // TODO: cookie support for URL proxy?
 
 		// Note: don't use this timeout -- it interrupts downloads of large response bodies
 		//Timeout:   HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
 	}
 
-	directDialer := func(_, addr string) (conn net.Conn, err error) {
-		return DialTCP(addr, untunneledDialConfig)
-	}
-	httpDirectRelay := &http.Transport{
+	urlProxyDirectRelay := &http.Transport{
 		Dial:                  directDialer,
 		MaxIdleConnsPerHost:   HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
 		ResponseHeaderTimeout: HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
 	}
-	httpDirectClient := &http.Client{
-		Transport: httpDirectRelay,
+	urlProxyDirectClient := &http.Client{
+		Transport: urlProxyDirectRelay,
 		Jar:       nil,
 	}
 
@@ -116,10 +130,11 @@ func NewHttpProxy(
 		tunneler:               tunneler,
 		listener:               listener,
 		serveWaitGroup:         new(sync.WaitGroup),
-		httpTunneledRelay:      httpTunneledRelay,
-		httpTunneledClient:     httpTunneledClient,
-		httpDirectRelay:        httpDirectRelay,
-		httpDirectClient:       httpDirectClient,
+		httpProxyTunneledRelay: httpProxyTunneledRelay,
+		urlProxyTunneledRelay:  urlProxyTunneledRelay,
+		urlProxyTunneledClient: urlProxyTunneledClient,
+		urlProxyDirectRelay:    urlProxyDirectRelay,
+		urlProxyDirectClient:   urlProxyDirectClient,
 		openConns:              new(Conns),
 		stopListeningBroadcast: make(chan struct{}),
 	}
@@ -138,8 +153,9 @@ func (proxy *HttpProxy) Close() {
 	proxy.openConns.CloseAll()
 	// Close idle proxy->origin persistent connections
 	// TODO: also close active connections
-	proxy.httpTunneledRelay.CloseIdleConnections()
-	proxy.httpDirectRelay.CloseIdleConnections()
+	proxy.httpProxyTunneledRelay.CloseIdleConnections()
+	proxy.urlProxyTunneledRelay.CloseIdleConnections()
+	proxy.urlProxyDirectRelay.CloseIdleConnections()
 }
 
 // ServeHTTP receives HTTP requests and proxies them. CONNECT requests
@@ -201,7 +217,7 @@ func (proxy *HttpProxy) httpConnectHandler(localConn net.Conn, target string) (e
 }
 
 func (proxy *HttpProxy) httpProxyHandler(responseWriter http.ResponseWriter, request *http.Request) {
-	relayHttpRequest(proxy.httpTunneledClient, request, responseWriter)
+	relayHttpRequest(nil, proxy.httpProxyTunneledRelay, request, responseWriter)
 }
 
 const (
@@ -220,10 +236,10 @@ func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, requ
 	switch {
 	case strings.HasPrefix(request.URL.Path, URL_PROXY_TUNNELED_REQUEST_PATH):
 		originUrl, err = url.QueryUnescape(request.URL.Path[len(URL_PROXY_TUNNELED_REQUEST_PATH):])
-		client = proxy.httpTunneledClient
+		client = proxy.urlProxyTunneledClient
 	case strings.HasPrefix(request.URL.Path, URL_PROXY_DIRECT_REQUEST_PATH):
 		originUrl, err = url.QueryUnescape(request.URL.Path[len(URL_PROXY_DIRECT_REQUEST_PATH):])
-		client = proxy.httpDirectClient
+		client = proxy.urlProxyDirectClient
 	default:
 		err = errors.New("missing origin URL")
 	}
@@ -250,10 +266,14 @@ func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, requ
 	request.Host = url.Host
 	request.URL = url
 
-	relayHttpRequest(client, request, responseWriter)
+	relayHttpRequest(client, nil, request, responseWriter)
 }
 
-func relayHttpRequest(client *http.Client, request *http.Request, responseWriter http.ResponseWriter) {
+func relayHttpRequest(
+	client *http.Client,
+	transport *http.Transport,
+	request *http.Request,
+	responseWriter http.ResponseWriter) {
 
 	// Transform received request struct before using as input to relayed request
 	request.Close = false
@@ -262,8 +282,17 @@ func relayHttpRequest(client *http.Client, request *http.Request, responseWriter
 		request.Header.Del(key)
 	}
 
-	// Relay the HTTP request and get the response
-	response, err := client.Do(request)
+	// Relay the HTTP request and get the response. Use a client when supplied,
+	// otherwise a transport. A client handles cookies and redirects, and a
+	// transport does not.
+	var response *http.Response
+	var err error
+	if client != nil {
+		response, err = client.Do(request)
+	} else {
+		response, err = transport.RoundTrip(request)
+	}
+
 	if err != nil {
 		NoticeAlert("%s", ContextError(FilterUrlError(err)))
 		forceClose(responseWriter)
