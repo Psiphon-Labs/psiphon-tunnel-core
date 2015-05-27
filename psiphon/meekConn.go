@@ -189,7 +189,6 @@ func DialMeek(
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	// TODO: also use http.Client, with its Timeout field?
 	transport := &http.Transport{
 		Proxy: proxyUrl,
 		Dial:  dialer,
