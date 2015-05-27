@@ -118,6 +118,10 @@ func controllerRun(t *testing.T, protocol string) {
 
 	select {
 	case <-tunnelEstablished:
+
+		// Allow for known race condition described in NewHttpProxy():
+		time.Sleep(1 * time.Second)
+
 		// Test: fetch website through tunnel
 		fetchWebsite(t, httpProxyPort)
 
