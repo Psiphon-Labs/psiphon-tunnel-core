@@ -99,6 +99,12 @@ func controllerRun(t *testing.T, protocol string) {
 				}
 			case "ListeningHttpProxyPort":
 				httpProxyPort = int(payload["port"].(float64))
+			case "ConnectingServer":
+				serverProtocol := payload["protocol"]
+				if serverProtocol != protocol {
+					t.Errorf("wrong protocol selected: %s", serverProtocol)
+					t.FailNow()
+				}
 			}
 		}))
 
