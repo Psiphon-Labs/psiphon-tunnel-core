@@ -47,7 +47,20 @@ func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 		Transport: transport,
 	}
 
-	response, err := httpClient.Get(config.RemoteServerListUrl)
+	request, err := http.NewRequest("GET", config.RemoteServerListUrl, nil)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	etag, err := GetUrlETag(config.RemoteServerListUrl)
+	if err != nil {
+		return ContextError(err)
+	}
+	if etag != "" {
+		request.Header.Add("If-None-Match", etag)
+	}
+
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return ContextError(err)
 	}
@@ -72,6 +85,15 @@ func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 	err = StoreServerEntries(serverEntries, true)
 	if err != nil {
 		return ContextError(err)
+	}
+
+	etag = response.Header.Get("ETag")
+	if etag != "" {
+		err := SetUrlETag(config.RemoteServerListUrl, etag)
+		if err != nil {
+			NoticeAlert("failed to set remote server list etag: %s", ContextError(err))
+			// This fetch is still reported as a success, even if we can't store the etag
+		}
 	}
 
 	return nil

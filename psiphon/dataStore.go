@@ -90,6 +90,9 @@ func InitDataStore(config *Config) (err error) {
             (region text not null primary key,
              etag text not null,
              data blob not null);
+        create table if not exists urlETags
+            (url text not null primary key,
+             etag text not null);
         create table if not exists keyValue
             (key text not null primary key,
              value text not null);
@@ -627,6 +630,38 @@ func GetSplitTunnelRoutesData(region string) (data []byte, err error) {
 		return nil, ContextError(err)
 	}
 	return data, nil
+}
+
+// SetUrlETag stores an ETag for the specfied URL.
+// Note: input URL is treated as a string, and is not
+// encoded or decoded or otherwise canonicalized.
+func SetUrlETag(url, etag string) error {
+	return transactionWithRetry(func(transaction *sql.Tx) error {
+		_, err := transaction.Exec(`
+            insert or replace into urlETags (url, etag)
+            values (?, ?);
+            `, url, etag)
+		if err != nil {
+			// Note: ContextError() would break canRetry()
+			return err
+		}
+		return nil
+	})
+}
+
+// GetUrlETag retrieves a previously stored an ETag for the
+// specfied URL. If not found, it returns an empty string value.
+func GetUrlETag(url string) (etag string, err error) {
+	checkInitDataStore()
+	rows := singleton.db.QueryRow("select etag from urlETags where url = ?;", url)
+	err = rows.Scan(&etag)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", ContextError(err)
+	}
+	return etag, nil
 }
 
 // SetKeyValue stores a key/value pair.

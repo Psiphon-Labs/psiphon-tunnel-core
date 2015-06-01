@@ -51,8 +51,9 @@ const (
 	serverEntriesBucket         = "serverEntries"
 	rankedServerEntriesBucket   = "rankedServerEntries"
 	rankedServerEntriesKey      = "rankedServerEntries"
-	splitTunnelRouteEtagsBucket = "splitTunnelRouteEtags"
+	splitTunnelRouteETagsBucket = "splitTunnelRouteETags"
 	splitTunnelRouteDataBucket  = "splitTunnelRouteData"
+	urlETagsBucket              = "urlETags"
 	keyValueBucket              = "keyValues"
 	rankedServerEntryCount      = 100
 )
@@ -82,8 +83,9 @@ func InitDataStore(config *Config) (err error) {
 			requiredBuckets := []string{
 				serverEntriesBucket,
 				rankedServerEntriesBucket,
-				splitTunnelRouteEtagsBucket,
+				splitTunnelRouteETagsBucket,
 				splitTunnelRouteDataBucket,
+				urlETagsBucket,
 				keyValueBucket,
 			}
 			for _, bucket := range requiredBuckets {
@@ -601,7 +603,7 @@ func SetSplitTunnelRoutes(region, etag string, data []byte) error {
 	checkInitDataStore()
 
 	err := singleton.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(splitTunnelRouteEtagsBucket))
+		bucket := tx.Bucket([]byte(splitTunnelRouteETagsBucket))
 		err := bucket.Put([]byte(region), []byte(etag))
 
 		bucket = tx.Bucket([]byte(splitTunnelRouteDataBucket))
@@ -621,7 +623,7 @@ func GetSplitTunnelRoutesETag(region string) (etag string, err error) {
 	checkInitDataStore()
 
 	err = singleton.db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(splitTunnelRouteEtagsBucket))
+		bucket := tx.Bucket([]byte(splitTunnelRouteETagsBucket))
 		etag = string(bucket.Get([]byte(region)))
 		return nil
 	})
@@ -647,6 +649,41 @@ func GetSplitTunnelRoutesData(region string) (data []byte, err error) {
 		return nil, ContextError(err)
 	}
 	return data, nil
+}
+
+// SetUrlETag stores an ETag for the specfied URL.
+// Note: input URL is treated as a string, and is not
+// encoded or decoded or otherwise canonicalized.
+func SetUrlETag(url, etag string) error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(urlETagsBucket))
+		err := bucket.Put([]byte(url), []byte(etag))
+		return err
+	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
+}
+
+// GetUrlETag retrieves a previously stored an ETag for the
+// specfied URL. If not found, it returns an empty string value.
+func GetUrlETag(url string) (etag string, err error) {
+	checkInitDataStore()
+
+	err = singleton.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(urlETagsBucket))
+		etag = string(bucket.Get([]byte(url)))
+		return nil
+	})
+
+	if err != nil {
+		return "", ContextError(err)
+	}
+	return etag, nil
 }
 
 // SetKeyValue stores a key/value pair.
