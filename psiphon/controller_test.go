@@ -99,6 +99,12 @@ func controllerRun(t *testing.T, protocol string) {
 				}
 			case "ListeningHttpProxyPort":
 				httpProxyPort = int(payload["port"].(float64))
+			case "ConnectingServer":
+				serverProtocol := payload["protocol"]
+				if serverProtocol != protocol {
+					t.Errorf("wrong protocol selected: %s", serverProtocol)
+					t.FailNow()
+				}
 			}
 		}))
 
@@ -118,6 +124,10 @@ func controllerRun(t *testing.T, protocol string) {
 
 	select {
 	case <-tunnelEstablished:
+
+		// Allow for known race condition described in NewHttpProxy():
+		time.Sleep(1 * time.Second)
+
 		// Test: fetch website through tunnel
 		fetchWebsite(t, httpProxyPort)
 

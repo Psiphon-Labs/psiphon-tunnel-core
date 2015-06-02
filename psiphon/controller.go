@@ -34,26 +34,27 @@ import (
 // connect to; establishes and monitors tunnels; and runs local proxies which
 // route traffic through the tunnels.
 type Controller struct {
-	config                    *Config
-	sessionId                 string
-	componentFailureSignal    chan struct{}
-	shutdownBroadcast         chan struct{}
-	runWaitGroup              *sync.WaitGroup
-	establishedTunnels        chan *Tunnel
-	failedTunnels             chan *Tunnel
-	tunnelMutex               sync.Mutex
-	establishedOnce           bool
-	tunnels                   []*Tunnel
-	nextTunnel                int
-	startedConnectedReporter  bool
-	isEstablishing            bool
-	establishWaitGroup        *sync.WaitGroup
-	stopEstablishingBroadcast chan struct{}
-	candidateServerEntries    chan *ServerEntry
-	establishPendingConns     *Conns
-	untunneledPendingConns    *Conns
-	untunneledDialConfig      *DialConfig
-	splitTunnelClassifier     *SplitTunnelClassifier
+	config                      *Config
+	sessionId                   string
+	componentFailureSignal      chan struct{}
+	shutdownBroadcast           chan struct{}
+	runWaitGroup                *sync.WaitGroup
+	establishedTunnels          chan *Tunnel
+	failedTunnels               chan *Tunnel
+	tunnelMutex                 sync.Mutex
+	establishedOnce             bool
+	tunnels                     []*Tunnel
+	nextTunnel                  int
+	startedConnectedReporter    bool
+	isEstablishing              bool
+	establishWaitGroup          *sync.WaitGroup
+	stopEstablishingBroadcast   chan struct{}
+	candidateServerEntries      chan *ServerEntry
+	establishPendingConns       *Conns
+	untunneledPendingConns      *Conns
+	untunneledDialConfig        *DialConfig
+	splitTunnelClassifier       *SplitTunnelClassifier
+	signalFetchRemoteServerList chan struct{}
 }
 
 // NewController initializes a new controller.
@@ -97,6 +98,9 @@ func NewController(config *Config) (controller *Controller, err error) {
 		establishPendingConns:    new(Conns),
 		untunneledPendingConns:   untunneledPendingConns,
 		untunneledDialConfig:     untunneledDialConfig,
+		// A buffer allows at least one signal to be sent even when the receiver is
+		// not listening. Senders should not block.
+		signalFetchRemoteServerList: make(chan struct{}, 1),
 	}
 
 	controller.splitTunnelClassifier = NewSplitTunnelClassifier(config, controller)
@@ -180,35 +184,54 @@ func (controller *Controller) SignalComponentFailure() {
 }
 
 // remoteServerListFetcher fetches an out-of-band list of server entries
-// for more tunnel candidates. It fetches immediately, retries after failure
-// with a wait period, and refetches after success with a longer wait period.
+// for more tunnel candidates. It fetches when signalled, with retries
+// on failure.
 func (controller *Controller) remoteServerListFetcher() {
 	defer controller.runWaitGroup.Done()
 
-loop:
+	var lastFetchTime time.Time
+
+fetcherLoop:
 	for {
-		if !WaitForNetworkConnectivity(
-			controller.config.NetworkConnectivityChecker,
-			controller.shutdownBroadcast) {
-			break
-		}
-
-		err := FetchRemoteServerList(
-			controller.config, controller.untunneledDialConfig)
-
-		var duration time.Duration
-		if err != nil {
-			NoticeAlert("failed to fetch remote server list: %s", err)
-			duration = FETCH_REMOTE_SERVER_LIST_RETRY_PERIOD
-		} else {
-			duration = FETCH_REMOTE_SERVER_LIST_STALE_PERIOD
-		}
-		timeout := time.After(duration)
+		// Wait for a signal before fetching
 		select {
-		case <-timeout:
-			// Fetch again
+		case <-controller.signalFetchRemoteServerList:
 		case <-controller.shutdownBroadcast:
-			break loop
+			break fetcherLoop
+		}
+
+		// Skip fetch entirely (i.e., send no request at all, even when ETag would save
+		// on response size) when a recent fetch was successful
+		if time.Now().Before(lastFetchTime.Add(FETCH_REMOTE_SERVER_LIST_STALE_PERIOD)) {
+			continue
+		}
+
+	retryLoop:
+		for {
+			// Don't attempt to fetch while there is no network connectivity,
+			// to avoid alert notice noise.
+			if !WaitForNetworkConnectivity(
+				controller.config.NetworkConnectivityChecker,
+				controller.shutdownBroadcast) {
+				break fetcherLoop
+			}
+
+			err := FetchRemoteServerList(
+				controller.config, controller.untunneledDialConfig)
+
+			if err == nil {
+				lastFetchTime = time.Now()
+				break retryLoop
+			}
+
+			NoticeAlert("failed to fetch remote server list: %s", err)
+
+			timeout := time.After(FETCH_REMOTE_SERVER_LIST_RETRY_PERIOD)
+			select {
+			case <-timeout:
+			case <-controller.shutdownBroadcast:
+				break fetcherLoop
+			}
 		}
 	}
 
@@ -619,7 +642,9 @@ func (controller *Controller) establishCandidateGenerator() {
 loop:
 	// Repeat until stopped
 	for {
-		// Yield each server entry returned by the iterator
+
+		// Send each iterator server entry to the establish workers
+		startTime := time.Now()
 		for {
 			serverEntry, err := iterator.Next()
 			if err != nil {
@@ -642,12 +667,33 @@ loop:
 			case <-controller.shutdownBroadcast:
 				break loop
 			}
+
+			if time.Now().After(startTime.Add(ESTABLISH_TUNNEL_WORK_TIME_SECONDS)) {
+				// Start over, after a brief pause, with a new shuffle of the server
+				// entries, and potentially some newly fetched server entries.
+				break
+			}
 		}
-		iterator.Reset()
+		// Free up resources now, but don't reset until after the pause.
+		iterator.Close()
+
+		// Trigger a fetch remote server list, since we may have failed to
+		// connect with all known servers. Don't block sending signal, since
+		// this signal may have already been sent.
+		// Don't wait for fetch remote to succeed, since it may fail and
+		// enter a retry loop and we're better off trying more known servers.
+		// TODO: synchronize the fetch response, so it can be incorporated
+		// into the server entry iterator as soon as available.
+		select {
+		case controller.signalFetchRemoteServerList <- *new(struct{}):
+		default:
+		}
 
 		// After a complete iteration of candidate servers, pause before iterating again.
 		// This helps avoid some busy wait loop conditions, and also allows some time for
-		// network conditions to change.
+		// network conditions to change. Also allows for fetch remote to complete,
+		// in typical conditions (it isn't strictly necessary to wait for this, there will
+		// be more rounds if required).
 		timeout := time.After(ESTABLISH_TUNNEL_PAUSE_PERIOD)
 		select {
 		case <-timeout:
@@ -657,6 +703,8 @@ loop:
 		case <-controller.shutdownBroadcast:
 			break loop
 		}
+
+		iterator.Reset()
 	}
 
 	NoticeInfo("stopped candidate generator")

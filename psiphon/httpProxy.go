@@ -140,7 +140,20 @@ func NewHttpProxy(
 	}
 	proxy.serveWaitGroup.Add(1)
 	go proxy.serve()
+
+	// TODO: NoticeListeningHttpProxyPort is emitted after net.Listen
+	// but before go proxy.server() and httpServer.Serve(), and this
+	// appears to cause client connections to the HTTP proxy to fail
+	// (in controller_test.go, only when a tunnel is established very quickly
+	// and NoticeTunnels is emitted and the client makes a request -- all
+	// before the proxy.server() goroutine runs).
+	// This condition doesn't arise in Go 1.4, just in Go tip (pre-1.5).
+	// Note that httpServer.Serve() blocks so the fix can't be to emit
+	// NoticeListeningHttpProxyPort after that call.
+	// Also, check the listen backlog queue length -- shouldn't it be possible
+	// to enqueue pending connections between net.Listen() and httpServer.Serve()?
 	NoticeListeningHttpProxyPort(proxy.listener.Addr().(*net.TCPAddr).Port)
+
 	return proxy, nil
 }
 
