@@ -484,13 +484,15 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadClos
 	// Note: Retry will only be effective if entire request failed (underlying transport protocol
 	// such as SSH will fail if extra bytes are replayed in either direction due to partial relay
 	// success followed by retry).
-	// We retry when still within a brief deadline and wait for a short time before re-dialing.
+	// At least one retry is always attempted. We retry when still within a brief deadline and wait
+	// for a short time before re-dialing.
 	//
 	// TODO: in principle, we could retry for min(TUNNEL_WRITE_TIMEOUT, meek-server.MAX_SESSION_STALENESS),
 	// i.e., as long as the underlying tunnel has not timed out and as long as the server has not
 	// expired the current meek session. Presently not doing this to avoid excessive connection attempts
 	// through the first hop. In addition, this will require additional support for timely shutdown.
 
+	retries := uint(0)
 	retryDeadline := time.Now().Add(MEEK_ROUND_TRIP_RETRY_DEADLINE)
 
 	var response *http.Response
@@ -523,9 +525,11 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadClos
 			break
 		}
 
-		if time.Now().After(retryDeadline) {
+		if retries >= 1 && time.Now().After(retryDeadline) {
 			break
 		}
+		retries += 1
+
 		time.Sleep(MEEK_ROUND_TRIP_RETRY_DELAY)
 	}
 	if err != nil {
