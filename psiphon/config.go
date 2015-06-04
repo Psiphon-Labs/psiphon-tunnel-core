@@ -41,7 +41,8 @@ const (
 	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MIN             = 60 * time.Second
 	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX             = 120 * time.Second
 	ESTABLISH_TUNNEL_TIMEOUT_SECONDS             = 300
-	ESTABLISH_TUNNEL_PAUSE_PERIOD                = 10 * time.Second
+	ESTABLISH_TUNNEL_WORK_TIME_SECONDS           = 60 * time.Second
+	ESTABLISH_TUNNEL_PAUSE_PERIOD                = 5 * time.Second
 	PORT_FORWARD_FAILURE_THRESHOLD               = 10
 	HTTP_PROXY_ORIGIN_SERVER_TIMEOUT             = 15 * time.Second
 	HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST     = 50
