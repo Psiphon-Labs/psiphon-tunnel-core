@@ -47,130 +47,201 @@ package upstreamproxy
 
 import (
 	"bufio"
-	"fmt"
+	"errors"
+	//"fmt"
+	"golang.org/x/net/proxy"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"time"
+)
 
-	"golang.org/x/net/proxy"
+const (
+	PROXY_SUCCESS int = iota
+	PROXY_FAILURE
+	PROXY_HANDSHAKE_IN_PROGRESS
 )
 
 // httpProxy is a HTTP connect proxy.
 type httpProxy struct {
 	hostPort string
-	haveAuth bool
 	username string
 	password string
 	forward  proxy.Dialer
 }
 
 func newHTTP(uri *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
-	s := new(httpProxy)
-	s.hostPort = uri.Host
-	s.forward = forward
+	hp := new(httpProxy)
+	hp.hostPort = uri.Host
+	hp.forward = forward
 	if uri.User != nil {
-		s.haveAuth = true
-		s.username = uri.User.Username()
-		s.password, _ = uri.User.Password()
+		hp.username = uri.User.Username()
+		hp.password, _ = uri.User.Password()
 	}
 
-	return s, nil
+	return hp, nil
 }
 
-func (s *httpProxy) Dial(network, addr string) (net.Conn, error) {
+func (hp *httpProxy) Dial(network, addr string) (net.Conn, error) {
 	// Dial and create the http client connection.
-	c, err := s.forward.Dial("tcp", s.hostPort)
+
+	pc := &proxyConn{authState: HTTP_AUTH_STATE_UNCHALLENGED}
+	err := pc.makeNewClientConn(hp.forward, hp.hostPort)
 	if err != nil {
-		return nil, err
-	}
-	conn := new(httpConn)
-	conn.httpConn = httputil.NewClientConn(c, nil)
-	conn.remoteAddr, err = net.ResolveTCPAddr(network, addr)
-	if err != nil {
-		conn.httpConn.Close()
 		return nil, err
 	}
 
+	for {
+		err := pc.handshake(addr, hp.username, hp.password)
+		switch pc.authState {
+		case HTTP_AUTH_STATE_SUCCESS:
+			pc.hijackedConn, pc.staleReader = pc.httpClientConn.Hijack()
+			return pc, nil
+		case HTTP_AUTH_STATE_FAILURE:
+			return nil, err
+		case HTTP_AUTH_STATE_CHALLENGED:
+			// the server may send Connection: close,
+			// at this point we just going to create a new
+			// ClientConn and continue the handshake
+			if err == httputil.ErrPersistEOF {
+				err := pc.makeNewClientConn(hp.forward, hp.hostPort)
+				if err != nil {
+					return nil, err
+				}
+			}
+			continue
+		}
+		panic("Illegal proxy handshake auth state")
+	}
+
+}
+
+type proxyConn struct {
+	httpClientConn *httputil.ClientConn
+	hijackedConn   net.Conn
+	staleReader    *bufio.Reader
+	authenticator  HttpAuthenticator
+	authState      HttpAuthState
+}
+
+func (pc *proxyConn) handshake(addr, username, password string) error {
 	// HACK HACK HACK HACK.  http.ReadRequest also does this.
 	reqURL, err := url.Parse("http://" + addr)
 	if err != nil {
-		conn.httpConn.Close()
-		return nil, err
+		pc.httpClientConn.Close()
+		pc.authState = HTTP_AUTH_STATE_FAILURE
+		return err
 	}
 	reqURL.Scheme = ""
 
 	req, err := http.NewRequest("CONNECT", reqURL.String(), nil)
 	if err != nil {
-		conn.httpConn.Close()
-		return nil, err
+		pc.httpClientConn.Close()
+		pc.authState = HTTP_AUTH_STATE_FAILURE
+		return err
 	}
 	req.Close = false
-	if s.haveAuth {
-		req.SetBasicAuth(s.username, s.password)
-	}
 	req.Header.Set("User-Agent", "")
 
-	resp, err := conn.httpConn.Do(req)
-	if err != nil && err != httputil.ErrPersistEOF {
-		conn.httpConn.Close()
-		return nil, err
-	}
-	if resp.StatusCode != 200 {
-		conn.httpConn.Close()
-		return nil, fmt.Errorf("proxy error: %s", resp.Status)
-	}
-
-	conn.hijackedConn, conn.staleReader = conn.httpConn.Hijack()
-	return conn, nil
-}
-
-type httpConn struct {
-	remoteAddr   *net.TCPAddr
-	httpConn     *httputil.ClientConn
-	hijackedConn net.Conn
-	staleReader  *bufio.Reader
-}
-
-func (c *httpConn) Read(b []byte) (int, error) {
-	if c.staleReader != nil {
-		if c.staleReader.Buffered() > 0 {
-			return c.staleReader.Read(b)
+	if pc.authState == HTTP_AUTH_STATE_CHALLENGED {
+		if pc.authenticator == nil {
+			panic("HttpAuthenticator is not initialized, can't response to the proxy server auth challenge!")
 		}
-		c.staleReader = nil
+		err := pc.authenticator.authenticate(req, username, password)
+		if err != nil {
+			pc.authState = HTTP_AUTH_STATE_FAILURE
+			return err
+		}
 	}
-	return c.hijackedConn.Read(b)
+
+	resp, err := pc.httpClientConn.Do(req)
+
+	if err != nil && err != httputil.ErrPersistEOF {
+		pc.httpClientConn.Close()
+		pc.authState = HTTP_AUTH_STATE_FAILURE
+		return err
+	}
+
+	if resp.StatusCode == 200 {
+		pc.authState = HTTP_AUTH_STATE_SUCCESS
+		return nil
+	}
+
+	if resp.StatusCode == 407 {
+		if username == "" {
+			pc.httpClientConn.Close()
+			pc.authState = HTTP_AUTH_STATE_FAILURE
+			return errors.New("No credentials provided for proxy auth")
+		}
+
+		if pc.authState == HTTP_AUTH_STATE_UNCHALLENGED {
+			pc.authenticator, err = newHttpAuthenticator(resp)
+			if err != nil {
+				pc.httpClientConn.Close()
+				pc.authState = HTTP_AUTH_STATE_FAILURE
+				return err
+			}
+			pc.authState = HTTP_AUTH_STATE_CHALLENGED
+			return nil
+		}
+	}
+	pc.authState = HTTP_AUTH_STATE_FAILURE
+	return err
 }
 
-func (c *httpConn) Write(b []byte) (int, error) {
-	return c.hijackedConn.Write(b)
+func (pc *proxyConn) makeNewClientConn(dialer proxy.Dialer, addr string) error {
+	c, err := dialer.Dial("tcp", addr)
+	if err != nil {
+		pc.httpClientConn.Close()
+		return err
+	}
+	if pc.httpClientConn != nil {
+		pc.httpClientConn.Close()
+	}
+	pc.httpClientConn = httputil.NewClientConn(c, nil)
+	return nil
 }
 
-func (c *httpConn) Close() error {
-	return c.hijackedConn.Close()
+func (pc *proxyConn) Read(b []byte) (int, error) {
+	if pc.staleReader != nil {
+		if pc.staleReader.Buffered() > 0 {
+			return pc.staleReader.Read(b)
+		}
+		pc.staleReader = nil
+	}
+	return pc.hijackedConn.Read(b)
 }
 
-func (c *httpConn) LocalAddr() net.Addr {
-	return c.hijackedConn.LocalAddr()
+func (pc *proxyConn) Write(b []byte) (int, error) {
+	return pc.hijackedConn.Write(b)
 }
 
-func (c *httpConn) RemoteAddr() net.Addr {
-	return c.remoteAddr
+func (pc *proxyConn) Close() error {
+	return pc.hijackedConn.Close()
 }
 
-func (c *httpConn) SetDeadline(t time.Time) error {
-	return c.hijackedConn.SetDeadline(t)
+func (pc *proxyConn) LocalAddr() net.Addr {
+	return nil
 }
 
-func (c *httpConn) SetReadDeadline(t time.Time) error {
-	return c.hijackedConn.SetReadDeadline(t)
+func (pc *proxyConn) RemoteAddr() net.Addr {
+	return nil
 }
 
-func (c *httpConn) SetWriteDeadline(t time.Time) error {
-	return c.hijackedConn.SetWriteDeadline(t)
+func (pc *proxyConn) SetDeadline(t time.Time) error {
+	return errors.New("not supported")
+}
+
+func (pc *proxyConn) SetReadDeadline(t time.Time) error {
+	return errors.New("not supported")
+}
+
+func (pc *proxyConn) SetWriteDeadline(t time.Time) error {
+	return errors.New("not supported")
 }
 
 func init() {
 	proxy.RegisterDialerType("http", newHTTP)
+	proxy.RegisterDialerType("https", newHTTP)
 }
