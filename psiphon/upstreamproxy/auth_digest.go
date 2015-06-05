@@ -142,7 +142,7 @@ func (a DigestHttpAuthenticator) authenticate(req *http.Request, username, passw
 		d.ApplyAuth(req)
 		a.state = DIGEST_HTTP_AUTH_STATE_RESPONSE_GENERATED
 		return nil
-
+	} else {
 		return errors.New("Authorization is not accepted by the proxy server")
 	}
 }
