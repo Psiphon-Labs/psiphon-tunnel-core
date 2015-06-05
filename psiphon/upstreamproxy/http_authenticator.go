@@ -33,9 +33,9 @@ func newHttpAuthenticator(resp *http.Response) (HttpAuthenticator, error) {
 			challenges[s[0]] = ""
 		}
 	}
-        if len(challenges) == 0 {
-            return nil, fmt.Errorf("No valid challenges in the Proxy-Authenticate header")
-        }
+	if len(challenges) == 0 {
+		return nil, fmt.Errorf("No valid challenges in the Proxy-Authenticate header")
+	}
 	// NTLM > Digest > Basic
 	if challenge, ok := challenges["NTLM"]; ok {
 		return newNTLMAuthenticator(challenge), nil

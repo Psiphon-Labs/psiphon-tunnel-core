@@ -8,7 +8,7 @@ import (
 type BasicHttpAuthState int
 
 const (
-	BASIC_HTTP_AUTH_STATE_NEW BasicHttpAuthState = iota
+	BASIC_HTTP_AUTH_STATE_CHALLENGE_RECEIVED BasicHttpAuthState = iota
 	BASIC_HTTP_AUTH_STATE_RESPONSE_GENERATED
 )
 
@@ -18,16 +18,16 @@ type BasicHttpAuthenticator struct {
 }
 
 func newBasicAuthenticator(challenge string) *BasicHttpAuthenticator {
-	return &BasicHttpAuthenticator{state: BASIC_HTTP_AUTH_STATE_NEW,
+	return &BasicHttpAuthenticator{state: BASIC_HTTP_AUTH_STATE_CHALLENGE_RECEIVED,
 		challenge: challenge}
 }
 
-func (b BasicHttpAuthenticator) authenticate(req *http.Request, username, password string) error {
-	if b.state == BASIC_HTTP_AUTH_STATE_NEW {
-		b.state = BASIC_HTTP_AUTH_STATE_RESPONSE_GENERATED
+func (a BasicHttpAuthenticator) authenticate(req *http.Request, username, password string) error {
+	if a.state == BASIC_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
 		req.SetBasicAuth(username, password)
+		a.state = BASIC_HTTP_AUTH_STATE_RESPONSE_GENERATED
 		return nil
 	} else {
-		return errors.New("Authentication is not accepted by the proxy server")
+		return errors.New("Authorization is not accepted by the proxy server")
 	}
 }
