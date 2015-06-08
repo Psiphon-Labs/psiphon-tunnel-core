@@ -243,5 +243,4 @@ func (pc *proxyConn) SetWriteDeadline(t time.Time) error {
 
 func init() {
 	proxy.RegisterDialerType("http", newHTTP)
-	proxy.RegisterDialerType("https", newHTTP)
 }
