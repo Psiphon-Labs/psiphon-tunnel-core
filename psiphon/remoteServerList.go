@@ -66,6 +66,10 @@ func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 	}
 	defer response.Body.Close()
 
+	if response.StatusCode == http.StatusNotModified {
+		return nil
+	}
+
 	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		return ContextError(err)
