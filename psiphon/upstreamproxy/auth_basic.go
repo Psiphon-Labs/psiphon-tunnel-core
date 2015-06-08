@@ -1,6 +1,7 @@
 package upstreamproxy
 
 import (
+	"encoding/base64"
 	"errors"
 	"net/http"
 )
@@ -13,13 +14,13 @@ const (
 )
 
 type BasicHttpAuthenticator struct {
-	state     BasicHttpAuthState
-	challenge string
+	state        BasicHttpAuthState
+	challengeStr string
 }
 
-func newBasicAuthenticator(challenge string) *BasicHttpAuthenticator {
+func newBasicAuthenticator(str string) *BasicHttpAuthenticator {
 	return &BasicHttpAuthenticator{state: BASIC_HTTP_AUTH_STATE_CHALLENGE_RECEIVED,
-		challenge: challenge}
+		challengeStr: str}
 }
 
 func (a BasicHttpAuthenticator) authenticate(req *http.Request, username, password string) error {

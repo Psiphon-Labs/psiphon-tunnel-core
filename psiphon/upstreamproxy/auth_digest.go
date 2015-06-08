@@ -4,7 +4,7 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/base64"
-	//"errors"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -97,23 +97,23 @@ const (
 )
 
 type DigestHttpAuthenticator struct {
-	state     DigestHttpAuthState
-	challenge string
+	state        DigestHttpAuthState
+	challengeStr string
 }
 
-func newDigestAuthenticator(challenge string) *DigestHttpAuthenticator {
+func newDigestAuthenticator(str string) *DigestHttpAuthenticator {
 	return &DigestHttpAuthenticator{state: DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED,
-		challenge: challenge}
+		challengeStr: str}
 }
 
 func (a DigestHttpAuthenticator) authenticate(req *http.Request, username, password string) error {
 	if a.state == DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
-		if len(challenge) == 0 {
+		if len(a.challengeStr) == 0 {
 			return errors.New("Digest authentication challenge is empty")
 		}
 		//parse challenge
 		digestParams := map[string]string{}
-		for _, keyval := range strings.Split(a.challenge, ",") {
+		for _, keyval := range strings.Split(a.challengeStr, ",") {
 			param := strings.SplitN(keyval, "=", 2)
 			if len(param) != 2 {
 				continue
