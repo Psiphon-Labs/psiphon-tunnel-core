@@ -68,6 +68,7 @@ const (
 // MeekConn also operates in unfronted mode, in which plain HTTP connections are made without routing
 // through a CDN.
 type MeekConn struct {
+	frontingAddress      string
 	url                  *url.URL
 	cookie               *http.Cookie
 	pendingConns         *Conns
@@ -212,6 +213,7 @@ func DialMeek(
 	// Write() calls and relay() are synchronized in a similar way, using a single
 	// sendBuffer.
 	meek = &MeekConn{
+		frontingAddress:      frontingAddress,
 		url:                  url,
 		cookie:               cookie,
 		pendingConns:         pendingConns,
@@ -472,11 +474,17 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadClos
 	if err != nil {
 		return nil, err
 	}
+
+	if meek.frontingAddress != "" && nil == net.ParseIP(meek.frontingAddress) {
+		request.Header.Set("X-Psiphon-Fronting-Address", meek.frontingAddress)
+	}
+
 	// Don't use the default user agent ("Go 1.1 package http").
 	// For now, just omit the header (net/http/request.go: "may be blank to not send the header").
-
 	request.Header.Set("User-Agent", "")
+
 	request.Header.Set("Content-Type", "application/octet-stream")
+
 	request.AddCookie(meek.cookie)
 
 	// The retry mitigates intermittent failures between the client and front/server.
