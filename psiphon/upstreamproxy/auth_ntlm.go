@@ -3,7 +3,7 @@ package upstreamproxy
 import (
 	"encoding/base64"
 	"errors"
-	"github.com/jmckaskill/gontlm"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy/ntlm"
 	"net/http"
 	"strings"
 )
