@@ -48,12 +48,13 @@ package upstreamproxy
 import (
 	"bufio"
 	"errors"
-	//"fmt"
+	"fmt"
 	"golang.org/x/net/proxy"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"time"
 )
 

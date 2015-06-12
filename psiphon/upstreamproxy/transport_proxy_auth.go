@@ -30,7 +30,8 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if err != nil {
 			return nil, err
 		}
-		return RoundTrip(req2)
+		//TODO: avoid going into endless loop due to bad proxy credentials
+		return t.RoundTrip(req2)
 	}
 	return resp, err
 }
