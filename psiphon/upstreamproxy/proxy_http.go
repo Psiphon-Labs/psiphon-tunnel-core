@@ -57,11 +57,47 @@ import (
 	"time"
 )
 
+type HttpAuthState int
+
 const (
-	PROXY_SUCCESS int = iota
-	PROXY_FAILURE
-	PROXY_HANDSHAKE_IN_PROGRESS
+	HTTP_AUTH_STATE_UNCHALLENGED HttpAuthState = iota
+	HTTP_AUTH_STATE_CHALLENGED
+	HTTP_AUTH_STATE_FAILURE
+	HTTP_AUTH_STATE_SUCCESS
 )
+
+func authenticateRequest(req *http.Request, resp *http.Response, username, pasword string) error {
+	challenges := make(map[string]string)
+	headers := resp.Header[http.CanonicalHeaderKey("proxy-authenticate")]
+
+	for _, val := range headers {
+		s := strings.SplitN(val, " ", 2)
+		if len(s) == 2 {
+			challenges[s[0]] = s[1]
+		}
+		if len(s) == 1 && s[0] != "" {
+			challenges[s[0]] = ""
+		}
+	}
+	if len(challenges) == 0 {
+		return fmt.Errorf("No valid challenges in the Proxy-Authenticate header")
+	}
+	// NTLM > Digest > Basic
+	if challenge, ok := challenges["NTLM"]; ok {
+		return ntlmAuthenticate(req, challenge, username, pasword)
+	} else if challenge, ok := challenges["Digest"]; ok {
+		return digestAuthenticate(req, challenge, username, pasword)
+	} else if challenge, ok := challenges["Basic"]; ok {
+		return basicAuthenticate(req, challenge, username, pasword)
+	}
+
+	//Unsupported scheme
+	schemes := make([]string, 0, len(challenges))
+	for scheme := range challenges {
+		schemes = append(schemes, scheme)
+	}
+	return fmt.Errorf("Unsupported proxy authentication scheme in %v", schemes)
+}
 
 // httpProxy is a HTTP connect proxy.
 type httpProxy struct {
@@ -121,7 +157,7 @@ type proxyConn struct {
 	httpClientConn *httputil.ClientConn
 	hijackedConn   net.Conn
 	staleReader    *bufio.Reader
-	authenticator  HttpAuthenticator
+	authResponse   *http.Response
 	authState      HttpAuthState
 }
 
@@ -145,10 +181,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	req.Header.Set("User-Agent", "")
 
 	if pc.authState == HTTP_AUTH_STATE_CHALLENGED {
-		if pc.authenticator == nil {
-			panic("HttpAuthenticator is not initialized, can't response to the proxy server auth challenge!")
-		}
-		err := pc.authenticator.authenticate(req, username, password)
+		err := authenticateRequest(req, pc.authResponse, username, password)
 		if err != nil {
 			pc.authState = HTTP_AUTH_STATE_FAILURE
 			return err
@@ -169,21 +202,12 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	}
 
 	if resp.StatusCode == 407 {
+		pc.authState = HTTP_AUTH_STATE_CHALLENGED
+		pc.authResponse = resp
 		if username == "" {
 			pc.httpClientConn.Close()
 			pc.authState = HTTP_AUTH_STATE_FAILURE
 			return errors.New("No credentials provided for proxy auth")
-		}
-
-		if pc.authState == HTTP_AUTH_STATE_UNCHALLENGED {
-			pc.authenticator, err = newHttpAuthenticator(resp)
-			if err != nil {
-				pc.httpClientConn.Close()
-				pc.authState = HTTP_AUTH_STATE_FAILURE
-				return err
-			}
-			pc.authState = HTTP_AUTH_STATE_CHALLENGED
-			return nil
 		}
 	}
 	pc.authState = HTTP_AUTH_STATE_FAILURE

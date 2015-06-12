@@ -89,60 +89,38 @@ func h(data string) string {
 
 /* End of https://github.com/ryanjdew/http-digest-auth-client code adaptation */
 
-type DigestHttpAuthState int
-
-const (
-	DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED DigestHttpAuthState = iota
-	DIGEST_HTTP_AUTH_STATE_RESPONSE_GENERATED
-)
-
-type DigestHttpAuthenticator struct {
-	state        DigestHttpAuthState
-	challengeStr string
-}
-
-func newDigestAuthenticator(str string) *DigestHttpAuthenticator {
-	return &DigestHttpAuthenticator{state: DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED,
-		challengeStr: str}
-}
-
-func (a DigestHttpAuthenticator) authenticate(req *http.Request, username, password string) error {
-	if a.state == DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
-		if len(a.challengeStr) == 0 {
-			return errors.New("Digest authentication challenge is empty")
-		}
-		//parse challenge
-		digestParams := map[string]string{}
-		for _, keyval := range strings.Split(a.challengeStr, ",") {
-			param := strings.SplitN(keyval, "=", 2)
-			if len(param) != 2 {
-				continue
-			}
-			digestParams[strings.Trim(param[0], "\" ")] = strings.Trim(param[1], "\" ")
-		}
-		if len(digestParams) == 0 {
-			return errors.New("Digest authentication challenge is malformed")
-		}
-
-		algorithm := digestParams["algorithm"]
-
-		d := &DigestHeaders{}
-		d.Realm = digestParams["realm"]
-		d.Qop = digestParams["qop"]
-		d.Nonce = digestParams["nonce"]
-		d.Opaque = digestParams["opaque"]
-		if algorithm == "" {
-			d.Algorithm = "MD5"
-		} else {
-			d.Algorithm = digestParams["algorithm"]
-		}
-		d.Nc = 0x0
-		d.Username = username
-		d.Password = password
-		d.ApplyAuth(req)
-		a.state = DIGEST_HTTP_AUTH_STATE_RESPONSE_GENERATED
-		return nil
-	} else {
-		return errors.New("Authorization is not accepted by the proxy server")
+func digestAuthenticate(req *http.Request, challenge, username, password string) error {
+	if len(challenge) == 0 {
+		return errors.New("Digest authentication challenge is empty")
 	}
+	//parse challenge
+	digestParams := map[string]string{}
+	for _, keyval := range strings.Split(challenge, ",") {
+		param := strings.SplitN(keyval, "=", 2)
+		if len(param) != 2 {
+			continue
+		}
+		digestParams[strings.Trim(param[0], "\" ")] = strings.Trim(param[1], "\" ")
+	}
+	if len(digestParams) == 0 {
+		return errors.New("Digest authentication challenge is malformed")
+	}
+
+	algorithm := digestParams["algorithm"]
+
+	d := &DigestHeaders{}
+	d.Realm = digestParams["realm"]
+	d.Qop = digestParams["qop"]
+	d.Nonce = digestParams["nonce"]
+	d.Opaque = digestParams["opaque"]
+	if algorithm == "" {
+		d.Algorithm = "MD5"
+	} else {
+		d.Algorithm = digestParams["algorithm"]
+	}
+	d.Nc = 0x0
+	d.Username = username
+	d.Password = password
+	d.ApplyAuth(req)
+	return nil
 }
