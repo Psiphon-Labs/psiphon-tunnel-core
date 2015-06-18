@@ -2,17 +2,28 @@ package upstreamproxy
 
 import (
 	"encoding/base64"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy/ntlm"
+	"errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy/go-ntlm/ntlm"
 	"net/http"
 	"strings"
 )
 
 func ntlmAuthenticate(req *http.Request, challenge, username, password string) error {
+	err := errors.New("NTLM authentication unknown error")
+	var ntlmMsg []byte
+
+	session, err := ntlm.CreateClientSession(ntlm.Version2, ntlm.ConnectionOrientedMode)
+	if err != nil {
+		return err
+	}
 	if challenge == "" {
 		//generate TYPE 1 message
-		type1Msg := ntlm.Negotiate()
-		req.Header.Set("Proxy-Authorization", base64.StdEncoding.EncodeToString(type1Msg))
-		return nil
+		negotiate, err := session.GenerateNegotiateMessage()
+		if err != nil {
+			return err
+		}
+		ntlmMsg = negotiate.Bytes()
+		err = nil
 	} else {
 		// Parse username for domain in form DOMAIN\username
 		var NTDomain, NTUser string
@@ -24,15 +35,23 @@ func ntlmAuthenticate(req *http.Request, challenge, username, password string) e
 			NTDomain = ""
 			NTUser = username
 		}
-		chlg, err := base64.StdEncoding.DecodeString(challenge)
+		challengeBytes, err := base64.StdEncoding.DecodeString(challenge)
 		if err != nil {
 			return err
 		}
-		type3Msg, err := ntlm.Authenticate(chlg, NTDomain, NTUser, password)
+		session.SetUserInfo(NTUser, password, NTDomain)
+		ntlmChallenge, err := ntlm.ParseChallengeMessage(challengeBytes)
 		if err != nil {
 			return err
 		}
-		req.Header.Set("Proxy-Authorization", base64.StdEncoding.EncodeToString(type3Msg))
-		return nil
+		session.ProcessChallengeMessage(ntlmChallenge)
+		authenticate, err := session.GenerateAuthenticateMessage()
+		if err != nil {
+			return err
+		}
+		ntlmMsg = authenticate.Bytes()
+		err = nil
 	}
+	req.Header.Set("Proxy-Authorization", "NTLM "+base64.StdEncoding.EncodeToString(ntlmMsg))
+	return err
 }

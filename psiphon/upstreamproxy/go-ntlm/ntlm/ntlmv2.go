@@ -238,14 +238,13 @@ func (n *V2ServerSession) ProcessAuthenticateMessage(am *AuthenticateMessage) (e
 		return err
 	}
 
-
 	if am.Version == nil {
-        //UGH not entirely sure how this could possibly happen, going to put this in for now
-        //TODO investigate if this ever is really happening
-        am.Version = &VersionStruct{ProductMajorVersion: uint8(5), ProductMinorVersion: uint8(1), ProductBuild: uint16(2600), NTLMRevisionCurrent: uint8(15)}
+		//UGH not entirely sure how this could possibly happen, going to put this in for now
+		//TODO investigate if this ever is really happening
+		am.Version = &VersionStruct{ProductMajorVersion: uint8(5), ProductMinorVersion: uint8(1), ProductBuild: uint16(2600), NTLMRevisionCurrent: uint8(15)}
 
-        l4g.Error("Nil version in ntlmv2")
-    }
+		l4g.Error("Nil version in ntlmv2")
+	}
 
 	err = n.calculateKeys(am.Version.NTLMRevisionCurrent)
 	if err != nil {
@@ -289,7 +288,24 @@ type V2ClientSession struct {
 }
 
 func (n *V2ClientSession) GenerateNegotiateMessage() (nm *NegotiateMessage, err error) {
-	return nil, nil
+	nm = new(NegotiateMessage)
+	nm.Signature = []byte("NTLMSSP\x00")
+	nm.MessageType = uint32(1)
+	nm.NegotiateFlags = NEGOTIATE_FLAG_REQUEST_NTLMv1 |
+		NEGOTIATE_FLAG_REQUEST_NTLM2_SESSION |
+		NEGOTIATE_FLAG_REQUEST_VERSION |
+		NEGOTIATE_FLAG_REQUEST_ALWAYS_SIGN |
+		NEGOTIATE_FLAG_REQUEST_128BIT_KEY_EXCH |
+		NEGOTIATE_FLAG_REQUEST_56BIT_ENCRYPTION |
+		NEGOTIATE_FLAG_REQUEST_UNICODE_ENCODING
+
+	nm.Version = &VersionStruct{ProductMajorVersion: 0x05,
+		ProductMinorVersion: 0x01,
+		ProductBuild:        0x280a,
+		Reserved:            []byte{0x00, 0x00, 0x00},
+		NTLMRevisionCurrent: 0x0f,
+	}
+	return nm, nil
 }
 
 func (n *V2ClientSession) ProcessChallengeMessage(cm *ChallengeMessage) (err error) {
