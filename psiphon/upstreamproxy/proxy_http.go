@@ -50,6 +50,7 @@ import (
 	"errors"
 	"fmt"
 	"golang.org/x/net/proxy"
+	//"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -126,9 +127,10 @@ func (hp *httpProxy) Dial(network, addr string) (net.Conn, error) {
 	pc := &proxyConn{authState: HTTP_AUTH_STATE_UNCHALLENGED}
 	err := pc.makeNewClientConn(hp.forward, hp.hostPort)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("makeNewClientConn error: %v", err)
 	}
 
+	//TODO: count handshake attempts
 	for {
 		err := pc.handshake(addr, hp.username, hp.password)
 		switch pc.authState {
@@ -142,15 +144,17 @@ func (hp *httpProxy) Dial(network, addr string) (net.Conn, error) {
 			// at this point we just going to create a new
 			// ClientConn and continue the handshake
 			if err == httputil.ErrPersistEOF {
-				err := pc.makeNewClientConn(hp.forward, hp.hostPort)
+				err = pc.makeNewClientConn(hp.forward, hp.hostPort)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("makeNewClientConn error: %v", err)
 				}
 			}
 			continue
+		default:
+			panic("Illegal proxy handshake auth state")
 		}
-		panic("Illegal proxy handshake auth state")
 	}
+	return nil, fmt.Errorf("Unknown handshake error")
 
 }
 
@@ -210,6 +214,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 			pc.authState = HTTP_AUTH_STATE_FAILURE
 			return errors.New("No credentials provided for proxy auth")
 		}
+		return err
 	}
 	pc.authState = HTTP_AUTH_STATE_FAILURE
 	return err
@@ -217,12 +222,11 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 
 func (pc *proxyConn) makeNewClientConn(dialer proxy.Dialer, addr string) error {
 	c, err := dialer.Dial("tcp", addr)
-	if err != nil {
-		pc.httpClientConn.Close()
-		return err
-	}
 	if pc.httpClientConn != nil {
 		pc.httpClientConn.Close()
+	}
+	if err != nil {
+		return err
 	}
 	pc.httpClientConn = httputil.NewClientConn(c, nil)
 	return nil

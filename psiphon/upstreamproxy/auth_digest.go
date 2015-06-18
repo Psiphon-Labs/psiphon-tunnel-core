@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -23,7 +22,7 @@ type DigestHeaders struct {
 	HA1       string
 	HA2       string
 	Cnonce    string
-	Path      string
+	Uri       string
 	Nc        int16
 	Username  string
 	Password  string
@@ -34,12 +33,11 @@ func (d *DigestHeaders) ApplyAuth(req *http.Request) {
 	d.Nc += 0x1
 	d.Cnonce = randomKey()
 	d.Method = req.Method
-	d.Path = req.URL.RequestURI()
 	d.digestChecksum()
 	response := h(strings.Join([]string{d.HA1, d.Nonce, fmt.Sprintf("%08x", d.Nc),
 		d.Cnonce, d.Qop, d.HA2}, ":"))
-	AuthHeader := fmt.Sprintf(`Digest username="%s", realm="%s", nonce="%s", uri="%s", cnonce="%s", nc=%08x, qop=%s, response="%s", algorithm=%s`,
-		d.Username, d.Realm, d.Nonce, d.Path, d.Cnonce, d.Nc, d.Qop, response, d.Algorithm)
+	AuthHeader := fmt.Sprintf(`Digest username="%s", realm="%s", nonce="%s", uri="%s", response="%s", qop=%s, nc=%08x, cnonce="%s", algorithm=%s`,
+		d.Username, d.Realm, d.Nonce, d.Uri, response, d.Qop, d.Nc, d.Cnonce, d.Algorithm)
 	if d.Opaque != "" {
 		AuthHeader = fmt.Sprintf(`%s, opaque="%s"`, AuthHeader, d.Opaque)
 	}
@@ -47,23 +45,28 @@ func (d *DigestHeaders) ApplyAuth(req *http.Request) {
 }
 
 func (d *DigestHeaders) digestChecksum() {
+	var A1 string
 	switch d.Algorithm {
 	case "MD5":
-		// A1
-		h := md5.New()
-		A1 := fmt.Sprintf("%s:%s:%s", d.Username, d.Realm, d.Password)
-		io.WriteString(h, A1)
-		d.HA1 = fmt.Sprintf("%x", h.Sum(nil))
+		//HA1=MD5(username:realm:password)
+		A1 = fmt.Sprintf("%s:%s:%s", d.Username, d.Realm, d.Password)
 
-		// A2
-		h = md5.New()
-		A2 := fmt.Sprintf("%s:%s", d.Method, d.Path)
-		io.WriteString(h, A2)
-		d.HA2 = fmt.Sprintf("%x", h.Sum(nil))
 	case "MD5-sess":
+		// HA1=MD5(MD5(username:realm:password):nonce:cnonce)
+		str := fmt.Sprintf("%s:%s:%s", d.Username, d.Realm, d.Password)
+		A1 = fmt.Sprintf("%s:%s:%s", h(str), d.Nonce, d.Cnonce)
 	default:
 		//token
 	}
+	if A1 == "" {
+		return
+	}
+	//HA1
+	d.HA1 = h(A1)
+	// HA2
+	A2 := fmt.Sprintf("%s:%s", d.Method, d.Uri)
+	d.HA2 = h(A2)
+
 }
 
 func randomKey() string {
@@ -73,6 +76,7 @@ func randomKey() string {
 		if err != nil {
 			panic("rand.Read() failed")
 		}
+		k[bytes] = byte(bytes)
 		bytes += n
 	}
 	return base64.StdEncoding.EncodeToString(k)
@@ -86,8 +90,6 @@ func h(data string) string {
 	digest.Write([]byte(data))
 	return fmt.Sprintf("%x", digest.Sum(nil))
 }
-
-/* End of https://github.com/ryanjdew/http-digest-auth-client code adaptation */
 
 func digestAuthenticate(req *http.Request, challenge, username, password string) error {
 	if len(challenge) == 0 {
@@ -109,6 +111,11 @@ func digestAuthenticate(req *http.Request, challenge, username, password string)
 	algorithm := digestParams["algorithm"]
 
 	d := &DigestHeaders{}
+	if req.Method == "CONNECT" {
+		d.Uri = req.URL.Host
+	} else {
+		d.Uri = req.URL.Scheme + "://" + req.URL.Host + req.URL.RequestURI()
+	}
 	d.Realm = digestParams["realm"]
 	d.Qop = digestParams["qop"]
 	d.Nonce = digestParams["nonce"]
