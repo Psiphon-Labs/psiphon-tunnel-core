@@ -19,7 +19,8 @@ func NewTransport(username, password string, dialFn DialFunc) *Transport {
 	return t
 }
 
-func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+/*
+   func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	// TODO: Check if we cached auth header for the transport ProxyURL
 	resp, err := t.transport.RoundTrip(req)
@@ -35,6 +36,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	return resp, err
 }
+*/
 
 func cloneRequest(r *http.Request) *http.Request {
 	// shallow copy of the struct

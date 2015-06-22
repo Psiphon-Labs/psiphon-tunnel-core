@@ -55,51 +55,8 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
 	"time"
 )
-
-type HttpAuthState int
-
-const (
-	HTTP_AUTH_STATE_UNCHALLENGED HttpAuthState = iota
-	HTTP_AUTH_STATE_CHALLENGED
-	HTTP_AUTH_STATE_FAILURE
-	HTTP_AUTH_STATE_SUCCESS
-)
-
-func authenticateRequest(req *http.Request, resp *http.Response, username, pasword string) error {
-	challenges := make(map[string]string)
-	headers := resp.Header[http.CanonicalHeaderKey("proxy-authenticate")]
-
-	for _, val := range headers {
-		s := strings.SplitN(val, " ", 2)
-		if len(s) == 2 {
-			challenges[s[0]] = s[1]
-		}
-		if len(s) == 1 && s[0] != "" {
-			challenges[s[0]] = ""
-		}
-	}
-	if len(challenges) == 0 {
-		return fmt.Errorf("No valid challenges in the Proxy-Authenticate header")
-	}
-	// NTLM > Digest > Basic
-	if challenge, ok := challenges["NTLM"]; ok {
-		return ntlmAuthenticate(req, challenge, username, pasword)
-	} else if challenge, ok := challenges["Digest"]; ok {
-		return digestAuthenticate(req, challenge, username, pasword)
-	} else if challenge, ok := challenges["Basic"]; ok {
-		return basicAuthenticate(req, challenge, username, pasword)
-	}
-
-	//Unsupported scheme
-	schemes := make([]string, 0, len(challenges))
-	for scheme := range challenges {
-		schemes = append(schemes, scheme)
-	}
-	return fmt.Errorf("Unsupported proxy authentication scheme in %v", schemes)
-}
 
 // httpProxy is a HTTP connect proxy.
 type httpProxy struct {
@@ -127,10 +84,9 @@ func (hp *httpProxy) Dial(network, addr string) (net.Conn, error) {
 	pc := &proxyConn{authState: HTTP_AUTH_STATE_UNCHALLENGED}
 	err := pc.makeNewClientConn(hp.forward, hp.hostPort)
 	if err != nil {
-		return nil, fmt.Errorf("makeNewClientConn error: %v", err)
+		return nil, fmt.Errorf("upstreamproxy: makeNewClientConn error: %v", err)
 	}
 
-	//TODO: count handshake attempts
 	for {
 		err := pc.handshake(addr, hp.username, hp.password)
 		switch pc.authState {
@@ -146,7 +102,7 @@ func (hp *httpProxy) Dial(network, addr string) (net.Conn, error) {
 			if err == httputil.ErrPersistEOF {
 				err = pc.makeNewClientConn(hp.forward, hp.hostPort)
 				if err != nil {
-					return nil, fmt.Errorf("makeNewClientConn error: %v", err)
+					return nil, fmt.Errorf("upstreamproxy: makeNewClientConn error: %v", err)
 				}
 			}
 			continue
@@ -164,6 +120,7 @@ type proxyConn struct {
 	staleReader    *bufio.Reader
 	authResponse   *http.Response
 	authState      HttpAuthState
+	authenticator  HttpAuthenticator
 }
 
 func (pc *proxyConn) handshake(addr, username, password string) error {
@@ -186,7 +143,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	req.Header.Set("User-Agent", "")
 
 	if pc.authState == HTTP_AUTH_STATE_CHALLENGED {
-		err := authenticateRequest(req, pc.authResponse, username, password)
+		err := pc.authenticator.authenticate(req, pc.authResponse, username, password)
 		if err != nil {
 			pc.authState = HTTP_AUTH_STATE_FAILURE
 			return err
@@ -207,12 +164,22 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	}
 
 	if resp.StatusCode == 407 {
+		if pc.authState == HTTP_AUTH_STATE_UNCHALLENGED {
+			var auth_err error = nil
+			pc.authenticator, auth_err = newHttpAuthenticator(resp)
+			if auth_err != nil {
+				pc.httpClientConn.Close()
+				pc.authState = HTTP_AUTH_STATE_FAILURE
+				return auth_err
+			}
+		}
+
 		pc.authState = HTTP_AUTH_STATE_CHALLENGED
 		pc.authResponse = resp
 		if username == "" {
 			pc.httpClientConn.Close()
 			pc.authState = HTTP_AUTH_STATE_FAILURE
-			return errors.New("No credentials provided for proxy auth")
+			return errors.New("upstreamproxy: No credentials provided for proxy auth")
 		}
 		return err
 	}

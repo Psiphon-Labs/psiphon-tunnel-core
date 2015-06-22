@@ -299,12 +299,7 @@ func (n *V2ClientSession) GenerateNegotiateMessage() (nm *NegotiateMessage, err 
 		NEGOTIATE_FLAG_REQUEST_56BIT_ENCRYPTION |
 		NEGOTIATE_FLAG_REQUEST_UNICODE_ENCODING
 
-	nm.Version = &VersionStruct{ProductMajorVersion: 0x05,
-		ProductMinorVersion: 0x01,
-		ProductBuild:        0x280a,
-		Reserved:            []byte{0x00, 0x00, 0x00},
-		NTLMRevisionCurrent: 0x0f,
-	}
+	nm.Version = &VersionStruct{ProductMajorVersion: uint8(5), ProductMinorVersion: uint8(1), ProductBuild: uint16(2600), NTLMRevisionCurrent: uint8(15)}
 	return nm, nil
 }
 

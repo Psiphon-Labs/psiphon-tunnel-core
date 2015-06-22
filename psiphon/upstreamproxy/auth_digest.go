@@ -10,6 +10,21 @@ import (
 	"strings"
 )
 
+type DigestHttpAuthState int
+
+const (
+	DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED DigestHttpAuthState = iota
+	DIGEST_HTTP_AUTH_STATE_RESPONSE_GENERATED
+)
+
+type DigestHttpAuthenticator struct {
+	state DigestHttpAuthState
+}
+
+func newDigestAuthenticator() *DigestHttpAuthenticator {
+	return &DigestHttpAuthenticator{state: DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED}
+}
+
 /* Adapted from https://github.com/ryanjdew/http-digest-auth-client */
 
 type DigestHeaders struct {
@@ -91,9 +106,17 @@ func h(data string) string {
 	return fmt.Sprintf("%x", digest.Sum(nil))
 }
 
-func digestAuthenticate(req *http.Request, challenge, username, password string) error {
+func (a *DigestHttpAuthenticator) authenticate(req *http.Request, resp *http.Response, username, password string) error {
+	if a.state != DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
+		return errors.New("upstreamproxy: Authorization is not accepted by the proxy server")
+	}
+	challenges, err := parseAuthChallenge(resp)
+	if err != nil {
+		return err
+	}
+	challenge := challenges["Digest"]
 	if len(challenge) == 0 {
-		return errors.New("Digest authentication challenge is empty")
+		return errors.New("upstreamproxy: Digest authentication challenge is empty")
 	}
 	//parse challenge
 	digestParams := map[string]string{}
@@ -105,7 +128,7 @@ func digestAuthenticate(req *http.Request, challenge, username, password string)
 		digestParams[strings.Trim(param[0], "\" ")] = strings.Trim(param[1], "\" ")
 	}
 	if len(digestParams) == 0 {
-		return errors.New("Digest authentication challenge is malformed")
+		return errors.New("upstreamproxy: Digest authentication challenge is malformed")
 	}
 
 	algorithm := digestParams["algorithm"]
@@ -129,5 +152,6 @@ func digestAuthenticate(req *http.Request, challenge, username, password string)
 	d.Username = username
 	d.Password = password
 	d.ApplyAuth(req)
+	a.state = DIGEST_HTTP_AUTH_STATE_RESPONSE_GENERATED
 	return nil
 }

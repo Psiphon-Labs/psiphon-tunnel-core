@@ -8,23 +8,47 @@ import (
 	"strings"
 )
 
-func ntlmAuthenticate(req *http.Request, challenge, username, password string) error {
-	err := errors.New("NTLM authentication unknown error")
+type NTLMHttpAuthState int
+
+const (
+	NTLM_HTTP_AUTH_STATE_CHALLENGE_RECEIVED NTLMHttpAuthState = iota
+	NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE1_GENERATED
+	NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE3_GENERATED
+)
+
+type NTLMHttpAuthenticator struct {
+	state NTLMHttpAuthState
+}
+
+func newNTLMAuthenticator() *NTLMHttpAuthenticator {
+	return &NTLMHttpAuthenticator{state: NTLM_HTTP_AUTH_STATE_CHALLENGE_RECEIVED}
+}
+
+func (a *NTLMHttpAuthenticator) authenticate(req *http.Request, resp *http.Response, username, password string) error {
+	challenges, err := parseAuthChallenge(resp)
+
+	challenge, ok := challenges["NTLM"]
+	if !ok {
+		return errors.New("upstreamproxy: Bad proxy response, no NTLM challenge for NTLMHttpAuthenticator")
+	}
+
 	var ntlmMsg []byte
 
 	session, err := ntlm.CreateClientSession(ntlm.Version2, ntlm.ConnectionOrientedMode)
 	if err != nil {
 		return err
 	}
-	if challenge == "" {
+	if a.state == NTLM_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
 		//generate TYPE 1 message
 		negotiate, err := session.GenerateNegotiateMessage()
 		if err != nil {
 			return err
 		}
 		ntlmMsg = negotiate.Bytes()
-		err = nil
-	} else {
+		a.state = NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE1_GENERATED
+		req.Header.Set("Proxy-Authorization", "NTLM "+base64.StdEncoding.EncodeToString(ntlmMsg))
+		return nil
+	} else if a.state == NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE1_GENERATED {
 		// Parse username for domain in form DOMAIN\username
 		var NTDomain, NTUser string
 		parts := strings.SplitN(username, "\\", 2)
@@ -50,8 +74,10 @@ func ntlmAuthenticate(req *http.Request, challenge, username, password string) e
 			return err
 		}
 		ntlmMsg = authenticate.Bytes()
-		err = nil
+		a.state = NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE3_GENERATED
+		req.Header.Set("Proxy-Authorization", "NTLM "+base64.StdEncoding.EncodeToString(ntlmMsg))
+		return nil
 	}
-	req.Header.Set("Proxy-Authorization", "NTLM "+base64.StdEncoding.EncodeToString(ntlmMsg))
-	return err
+
+	return errors.New("upstreamproxy: Authorization is not accepted by the proxy server")
 }
