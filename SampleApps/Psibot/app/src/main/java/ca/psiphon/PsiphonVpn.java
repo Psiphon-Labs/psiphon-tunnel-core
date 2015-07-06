@@ -48,7 +48,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import go.Go;
 import go.psi.Psi;
 
 public class PsiphonVpn extends Psi.PsiphonProvider.Stub {
@@ -78,12 +77,13 @@ public class PsiphonVpn extends Psi.PsiphonProvider.Stub {
         if (mPsiphonVpn != null) {
             mPsiphonVpn.stop();
         }
+        // Load the native go code embedded in psi.aar
+        System.loadLibrary("gojni");
         mPsiphonVpn = new PsiphonVpn(hostService);
         return mPsiphonVpn;
     }
 
     private PsiphonVpn(HostService hostService) {
-        Go.init(hostService.getVpnService());
         mHostService = hostService;
         mLocalSocksProxyPort = 0;
         mRoutingThroughTunnel = false;
