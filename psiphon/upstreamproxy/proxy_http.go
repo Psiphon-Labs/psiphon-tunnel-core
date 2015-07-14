@@ -80,7 +80,6 @@ func newHTTP(uri *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
 
 func (hp *httpProxy) Dial(network, addr string) (net.Conn, error) {
 	// Dial and create the http client connection.
-
 	pc := &proxyConn{authState: HTTP_AUTH_STATE_UNCHALLENGED}
 	err := pc.makeNewClientConn(hp.forward, hp.hostPort)
 	if err != nil {
@@ -143,7 +142,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	req.Header.Set("User-Agent", "")
 
 	if pc.authState == HTTP_AUTH_STATE_CHALLENGED {
-		err := pc.authenticator.authenticate(req, pc.authResponse, username, password)
+		err := pc.authenticator.Authenticate(req, pc.authResponse, username, password)
 		if err != nil {
 			pc.authState = HTTP_AUTH_STATE_FAILURE
 			return err
@@ -166,7 +165,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	if resp.StatusCode == 407 {
 		if pc.authState == HTTP_AUTH_STATE_UNCHALLENGED {
 			var auth_err error = nil
-			pc.authenticator, auth_err = newHttpAuthenticator(resp)
+			pc.authenticator, auth_err = NewHttpAuthenticator(resp)
 			if auth_err != nil {
 				pc.httpClientConn.Close()
 				pc.authState = HTTP_AUTH_STATE_FAILURE

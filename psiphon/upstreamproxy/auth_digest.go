@@ -106,7 +106,7 @@ func h(data string) string {
 	return fmt.Sprintf("%x", digest.Sum(nil))
 }
 
-func (a *DigestHttpAuthenticator) authenticate(req *http.Request, resp *http.Response, username, password string) error {
+func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response, username, password string) error {
 	if a.state != DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
 		return errors.New("upstreamproxy: Authorization is not accepted by the proxy server")
 	}

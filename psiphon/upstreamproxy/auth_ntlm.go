@@ -24,10 +24,18 @@ func newNTLMAuthenticator() *NTLMHttpAuthenticator {
 	return &NTLMHttpAuthenticator{state: NTLM_HTTP_AUTH_STATE_CHALLENGE_RECEIVED}
 }
 
-func (a *NTLMHttpAuthenticator) authenticate(req *http.Request, resp *http.Response, username, password string) error {
+func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response, username, password string) error {
+	if a.state == NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE3_GENERATED {
+		return errors.New("upstreamproxy: Authorization is not accepted by the proxy server")
+	}
 	challenges, err := parseAuthChallenge(resp)
 
 	challenge, ok := challenges["NTLM"]
+	if challenge == "" {
+		a.state = NTLM_HTTP_AUTH_STATE_CHALLENGE_RECEIVED
+	} else {
+		a.state = NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE1_GENERATED
+	}
 	if !ok {
 		return errors.New("upstreamproxy: Bad proxy response, no NTLM challenge for NTLMHttpAuthenticator")
 	}

@@ -21,7 +21,7 @@ func newBasicAuthenticator() *BasicHttpAuthenticator {
 	return &BasicHttpAuthenticator{state: BASIC_HTTP_AUTH_STATE_CHALLENGE_RECEIVED}
 }
 
-func (a *BasicHttpAuthenticator) authenticate(req *http.Request, resp *http.Response, username, password string) error {
+func (a *BasicHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response, username, password string) error {
 	if a.state == BASIC_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
 		auth := username + ":" + password
 		req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(auth)))

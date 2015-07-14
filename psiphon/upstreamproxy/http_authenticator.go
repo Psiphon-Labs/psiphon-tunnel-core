@@ -16,7 +16,7 @@ const (
 )
 
 type HttpAuthenticator interface {
-	authenticate(req *http.Request, resp *http.Response, username, pasword string) error
+	Authenticate(req *http.Request, resp *http.Response, username, pasword string) error
 }
 
 func parseAuthChallenge(resp *http.Response) (map[string]string, error) {
@@ -38,7 +38,7 @@ func parseAuthChallenge(resp *http.Response) (map[string]string, error) {
 	return challenges, nil
 }
 
-func newHttpAuthenticator(resp *http.Response) (HttpAuthenticator, error) {
+func NewHttpAuthenticator(resp *http.Response) (HttpAuthenticator, error) {
 
 	challenges, err := parseAuthChallenge(resp)
 	if err != nil {
