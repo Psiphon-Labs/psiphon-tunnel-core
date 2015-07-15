@@ -565,11 +565,10 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 			statsTimer.Reset(nextStatusRequestPeriod())
 
 		case <-sshKeepAliveTimer.C:
-			// Random padding to frustrate fingerprinting
-			_, _, err := tunnel.sshClient.SendRequest(
-				"keepalive@openssh.com", true,
-				MakeSecureRandomPadding(0, TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES))
-			err = fmt.Errorf("ssh keep alive failed: %s", err)
+			err = sendSshKeepAlive(tunnel.sshClient)
+			if err != nil {
+				err = fmt.Errorf("ssh keep alive failed: %s", err)
+			}
 			sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
 
 		case failures := <-tunnel.portForwardFailures:
@@ -596,6 +595,33 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 		NoticeAlert("operate tunnel error for %s: %s", tunnel.serverEntry.IpAddress, err)
 		tunnelOwner.SignalTunnelFailure(tunnel)
 	}
+}
+
+// sendSshKeepAlive is a helper which sends a keepalive@openssh.com request
+// on the specified SSH connections and returns true of the request succeeds
+// within a specified timeout.
+func sendSshKeepAlive(sshClient *ssh.Client) error {
+
+	errChannel := make(chan error, 2)
+	time.AfterFunc(TUNNEL_SSH_KEEP_ALIVE_TIMEOUT, func() {
+		errChannel <- TimeoutError{}
+	})
+
+	go func() {
+		// Random padding to frustrate fingerprinting
+
+		NoticeInfo("sending keepalive@openssh.com")
+
+		_, _, err := sshClient.SendRequest(
+			"keepalive@openssh.com", true,
+			MakeSecureRandomPadding(0, TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES))
+
+		NoticeInfo("done keepalive@openssh.com")
+
+		errChannel <- err
+	}()
+
+	return <-errChannel
 }
 
 // sendStats is a helper for sending session stats to the server.
