@@ -26,7 +26,6 @@ package psi
 
 import (
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
@@ -43,7 +42,10 @@ var controller *psiphon.Controller
 var shutdownBroadcast chan struct{}
 var controllerWaitGroup *sync.WaitGroup
 
-func Start(configJson, embeddedServerEntryList string, provider PsiphonProvider) error {
+func Start(
+	configJson, embeddedServerEntryList string,
+	provider PsiphonProvider,
+	useDeviceBinder bool) error {
 
 	if controller != nil {
 		return fmt.Errorf("already started")
@@ -54,8 +56,11 @@ func Start(configJson, embeddedServerEntryList string, provider PsiphonProvider)
 		return fmt.Errorf("error loading configuration file: %s", err)
 	}
 	config.NetworkConnectivityChecker = provider
-	config.DeviceBinder = provider
-	config.DnsServerGetter = provider
+
+	if useDeviceBinder {
+		config.DeviceBinder = provider
+		config.DnsServerGetter = provider
+	}
 
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
@@ -69,13 +74,40 @@ func Start(configJson, embeddedServerEntryList string, provider PsiphonProvider)
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
-	serverEntries, err := psiphon.DecodeAndValidateServerEntryList(embeddedServerEntryList)
-	if err != nil {
-		log.Fatalf("error decoding embedded server entry list: %s", err)
-	}
-	err = psiphon.StoreServerEntries(serverEntries, false)
-	if err != nil {
-		log.Fatalf("error storing embedded server entry list: %s", err)
+	// If specified, the embedded server list is loaded and stored. When there
+	// are no server candidates at all, we wait for this import to complete
+	// before starting the Psiphon controller. Otherwise, we import while
+	// concurrently starting the controller to minimize delay before attempting
+	// to connect to existing candidate servers.
+	// If the import fails, an error notice is emitted, but the controller is
+	// still started: either existing candidate servers may suffice, or the
+	// remote server list fetch may obtain candidate servers.
+	// TODO: duplicates logic in psiphonClient.go -- refactor?
+	if embeddedServerEntryList != "" {
+		embeddedServerListWaitGroup := new(sync.WaitGroup)
+		embeddedServerListWaitGroup.Add(1)
+		go func() {
+			defer embeddedServerListWaitGroup.Done()
+			// TODO: stream embedded server list data?
+			serverEntries, err := psiphon.DecodeAndValidateServerEntryList(embeddedServerEntryList)
+			if err != nil {
+				psiphon.NoticeError("error decoding embedded server entry list file: %s", err)
+				return
+			}
+			// Since embedded server list entries may become stale, they will not
+			// overwrite existing stored entries for the same server.
+			err = psiphon.StoreServerEntries(serverEntries, false)
+			if err != nil {
+				psiphon.NoticeError("error storing embedded server entry list data: %s", err)
+				return
+			}
+		}()
+
+		if psiphon.CountServerEntries(config.EgressRegion, config.TunnelProtocol) == 0 {
+			embeddedServerListWaitGroup.Wait()
+		} else {
+			defer embeddedServerListWaitGroup.Wait()
+		}
 	}
 
 	controller, err = psiphon.NewController(config)
