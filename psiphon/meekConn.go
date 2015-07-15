@@ -54,6 +54,7 @@ const (
 	POLL_INTERNAL_MULTIPLIER       = 1.5
 	MEEK_ROUND_TRIP_RETRY_DEADLINE = 1 * time.Second
 	MEEK_ROUND_TRIP_RETRY_DELAY    = 50 * time.Millisecond
+	MEEK_ROUND_TRIP_TIMEOUT        = 20 * time.Second
 )
 
 // MeekConn is a network connection that tunnels TCP over HTTP and supports "fronting". Meek sends
@@ -193,7 +194,7 @@ func DialMeek(
 	transport := &http.Transport{
 		Proxy: proxyUrl,
 		Dial:  dialer,
-		ResponseHeaderTimeout: TUNNEL_WRITE_TIMEOUT,
+		ResponseHeaderTimeout: MEEK_ROUND_TRIP_TIMEOUT,
 	}
 
 	// The main loop of a MeekConn is run in the relay() goroutine.
