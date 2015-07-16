@@ -185,6 +185,12 @@ func NoticeUpstreamProxyError(err error) {
 	outputNotice("UpstreamProxyError", true, "message", fmt.Sprintf("%s", err))
 }
 
+// NoticeClientUpgradeDownloaded indicates that a client upgrade download
+// is complete and available at the destination specified.
+func NoticeClientUpgradeDownloaded(filename string) {
+	outputNotice("ClientUpgradeDownloaded", false, "filename", filename)
+}
+
 type noticeObject struct {
 	NoticeType string          `json:"noticeType"`
 	Data       json.RawMessage `json:"data"`

@@ -182,3 +182,33 @@ func IsAddressInUseError(err error) bool {
 	}
 	return false
 }
+
+// SyncFileWriter wraps a file and exposes an io.Writer. At predefined
+// steps, the file is synced (flushed to disk) while writing.
+type SyncFileWriter struct {
+	file  *os.File
+	step  int
+	count int
+}
+
+// NewSyncFileWriter creates a SyncFileWriter.
+func NewSyncFileWriter(file *os.File) *SyncFileWriter {
+	return &SyncFileWriter{
+		file:  file,
+		step:  2 << 16,
+		count: 0}
+}
+
+// Write implements io.Writer with periodic file syncing.
+func (writer *SyncFileWriter) Write(p []byte) (n int, err error) {
+	n, err = writer.file.Write(p)
+	if err != nil {
+		return
+	}
+	writer.count += n
+	if writer.count >= writer.step {
+		err = writer.file.Sync()
+		writer.count = 0
+	}
+	return
+}

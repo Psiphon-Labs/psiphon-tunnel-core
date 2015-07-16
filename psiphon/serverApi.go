@@ -39,12 +39,13 @@ import (
 // includes the session ID (used for Psiphon API requests) and a http
 // client configured to make tunneled Psiphon API requests.
 type Session struct {
-	sessionId          string
-	baseRequestUrl     string
-	psiphonHttpsClient *http.Client
-	statsRegexps       *transferstats.Regexps
-	statsServerId      string
-	clientRegion       string
+	sessionId            string
+	baseRequestUrl       string
+	psiphonHttpsClient   *http.Client
+	statsRegexps         *transferstats.Regexps
+	statsServerId        string
+	clientRegion         string
+	clientUpgradeVersion string
 }
 
 // MakeSessionId creates a new session ID. Making the session ID is not done
@@ -246,6 +247,8 @@ func (session *Session) doHandshakeRequest() error {
 	for _, homepage := range handshakeConfig.Homepages {
 		NoticeHomepage(homepage)
 	}
+
+	session.clientUpgradeVersion = handshakeConfig.UpgradeClientVersion
 	if handshakeConfig.UpgradeClientVersion != "" {
 		NoticeClientUpgradeAvailable(handshakeConfig.UpgradeClientVersion)
 	}

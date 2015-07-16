@@ -566,9 +566,6 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 
 		case <-sshKeepAliveTimer.C:
 			err = sendSshKeepAlive(tunnel.sshClient)
-			if err != nil {
-				err = fmt.Errorf("ssh keep alive failed: %s", err)
-			}
 			sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
 
 		case failures := <-tunnel.portForwardFailures:
@@ -585,9 +582,6 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 				// is hit. But if we can't make a simple round trip request to the
 				// server, we'll immediately abort.
 				err = sendSshKeepAlive(tunnel.sshClient)
-				if err != nil {
-					err = fmt.Errorf("ssh keep alive failed: %s", err)
-				}
 				sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
 			}
 
@@ -626,7 +620,7 @@ func sendSshKeepAlive(sshClient *ssh.Client) error {
 		errChannel <- err
 	}()
 
-	return <-errChannel
+	return ContextError(<-errChannel)
 }
 
 // sendStats is a helper for sending session stats to the server.
