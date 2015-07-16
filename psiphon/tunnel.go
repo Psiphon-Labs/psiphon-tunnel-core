@@ -609,15 +609,9 @@ func sendSshKeepAlive(sshClient *ssh.Client) error {
 
 	go func() {
 		// Random padding to frustrate fingerprinting
-
-		NoticeInfo("sending keepalive@openssh.com")
-
 		_, _, err := sshClient.SendRequest(
 			"keepalive@openssh.com", true,
 			MakeSecureRandomPadding(0, TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES))
-
-		NoticeInfo("done keepalive@openssh.com")
-
 		errChannel <- err
 	}()
 
