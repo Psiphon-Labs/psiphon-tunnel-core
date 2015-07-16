@@ -588,6 +588,7 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 				if err != nil {
 					err = fmt.Errorf("ssh keep alive failed: %s", err)
 				}
+				sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
 			}
 
 		case <-tunnel.closedSignal:
