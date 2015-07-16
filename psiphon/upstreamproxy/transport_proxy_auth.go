@@ -88,11 +88,10 @@ func newTransportConn(c net.Conn, tr *ProxyAuthTransport) *transportConn {
 		for {
 			req, err := http.ReadRequest(bufio.NewReader(pr))
 			if err != nil {
-				tc.Close()
-				tc.errChannel <- fmt.Errorf("intercept request loop http.ReadRequest error: %s", err)
+				tc.Conn.Close()
 				pr.Close()
 				pw.Close()
-				tc.Close()
+				tc.errChannel <- fmt.Errorf("intercept request loop http.ReadRequest error: %s", err)
 				break requestInterceptLoop
 			}
 			//read and copy entire body
@@ -157,10 +156,7 @@ func (tc *transportConn) Read(p []byte) (int, error) {
 				return 0, err
 			}
 
-			//TODO: eliminate possible race condition
 			//Replay authenticated request
-			//block until a new cycle of the request intercept loop started
-			//<-tc.writeBlocker
 			tc.lastRequest.WriteProxy(tc)
 			return tc.Read(p)
 		}
