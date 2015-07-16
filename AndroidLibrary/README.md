@@ -17,71 +17,19 @@ Building From Source
 --------------------------------------------------------------------------------
 
 Follow Go Android documentation:
-* [Overview README](https://code.google.com/p/go/source/browse/README?repo=mobile)
-* [Sample JNI App README](https://code.google.com/p/go/source/browse/example/libhello/README?repo=mobile)
-* [gobind documentation](http://godoc.org/golang.org/x/mobile/cmd/gobind)
-
-```
-/AndroidLibrary
-  README.md                - this file
-  libgojni.so              - build binary output
-  /psi
-    psi.go                 - main library source
-  /go_psi
-    go_psi.go              - gobind output
-  /java_psi/go/psi
-    Psi.java               - gobind output
-  /java_golang/go
-    Go.java                - fork of Go/Java integration file
-    Seq.java               - fork of Go/Java integration file
-  /libpsi
-    main.go                - stub main package for library
-```
-
-* Requires Go 1.4 or later.
-* Install Go from source. The Android instructions are here:
-[https://code.google.com/p/go/source/browse/README?repo=mobile](https://code.google.com/p/go/source/browse/README?repo=mobile).
-  * In summary, download and install the Android NDK, use a script to make a [standalone toolchain](https://developer.android.com/tools/sdk/ndk/index.html#Docs), and use that toolchain to build android/arm support within the Go source install. Then cross compile as usual.
-* `$GOPATH/bin/gobind -lang=go github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary/psi > go_psi/go_psi.go`
-* `$GOPATH/bin/gobind -lang=java github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary/psi > java_psi/go/psi/Psi.java`
-* In `/libpsi` `CGO_ENABLED=1 GOOS=android GOARCH=arm GOARM=7 go build -ldflags="-shared"` and copy output file to `gojni.so`
-
-### Building with Docker
-
-Note that you may need to use `sudo docker` below, depending on your OS.
-
-Create the build image:
-
-```bash
-# While in the same directory as the Dockerfile...
-$ docker build --no-cache=true -t psigoandroid .
-# That will take a long time to complete.
-# After it's done, you'll have an image called "psigoandroid". Check with...
-$ docker images
-```
-
-To do the build:
-
-```bash
-$ docker run --rm -v $GOPATH/src:/src psigoandroid /bin/bash -c 'cd /src/github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary && ./make.bash'
-```
-
-When that command completes, the compiled library will be located at `libs/armeabi-v7a/libgojni.so`.
-
+* [gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile)
+* Requires Go 1.5 or later.
+* Build command: `gomobile bind -target=android github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary/psi`
+* Output: `psi.aar`
 
 Using
 --------------------------------------------------------------------------------
 
-1. Build the shared object library from source or use the [binary release](https://github.com/Psiphon-Labs/psiphon-tunnel-core/releases) and Java source files
-1. Add Go/Java integration files `java_golang/go/*.java` to your `$src/go`
-1. Add `java_psi/go/psi/Psi.java` to your `$src/go/psi`
-1. Add `libgojni.so` to your Android app
+1. Build `psi.aar` from source or use the [binary release](https://github.com/Psiphon-Labs/psiphon-tunnel-core/releases)
+1. Add `psi.aar` to your Android Studio project as described in the [gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile)
+1. Example usage in [Psibot sample app](../SampleApps/Psibot/README.md)
 
-NOTE: may change to Psiphon-specific library name and init.
-
-[AndroidApp README](../AndroidApp/README.md)
-
-See sample usage in [Psiphon.java](../AndroidApp/app/src/main/java/ca/psiphon/psibot/Psiphon.java). Uses `gobind` conventions for data passing.
+See sample API usage in [Psibot's PsiphonVpn.java](../SampleApps/Psibot/app/src/main/java/ca/psiphon/PsiphonVpn.java). Uses `gobind` conventions for data passing.
 
 1. Embed a [config file](../README.md#setup)
 1. Call `Go.init(getApplicationContext());` in `Application.onCreate()`

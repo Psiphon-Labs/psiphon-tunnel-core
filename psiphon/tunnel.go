@@ -464,16 +464,45 @@ func dialSsh(
 		},
 		HostKeyCallback: sshCertChecker.CheckHostKey,
 	}
-	// The folowing is adapted from ssh.Dial(), here using a custom conn
-	// The sshAddress is passed through to host key verification callbacks; we don't use it.
-	sshAddress := ""
-	sshClientConn, sshChans, sshReqs, err := ssh.NewClientConn(sshConn, sshAddress, sshClientConfig)
-	if err != nil {
-		return nil, nil, nil, ContextError(err)
-	}
-	sshClient = ssh.NewClient(sshClientConn, sshChans, sshReqs)
 
-	return conn, closedSignal, sshClient, nil
+	// The ssh session establishment (via ssh.NewClientConn) is wrapped
+	// in a timeout to ensure it won't hang. We've encountered firewalls
+	// that allow the TCP handshake to complete but then send a RST to the
+	// server-side and nothing to the client-side, and if that happens
+	// while ssh.NewClientConn is reading, it may wait forever. The timeout
+	// closes the conn, which interrupts it.
+	// Note: TCP handshake timeouts are provided by TCPConn, and session
+	// timeouts *after* ssh establishment are provided by the ssh keep alive
+	// in operate tunnel.
+	// TODO: adjust the timeout to account for time-elapsed-from-start
+
+	type sshNewClientResult struct {
+		sshClient *ssh.Client
+		err       error
+	}
+	resultChannel := make(chan *sshNewClientResult, 2)
+	time.AfterFunc(TUNNEL_CONNECT_TIMEOUT, func() {
+		resultChannel <- &sshNewClientResult{nil, errors.New("ssh dial timeout")}
+	})
+
+	go func() {
+		// The folowing is adapted from ssh.Dial(), here using a custom conn
+		// The sshAddress is passed through to host key verification callbacks; we don't use it.
+		sshAddress := ""
+		sshClientConn, sshChans, sshReqs, err := ssh.NewClientConn(sshConn, sshAddress, sshClientConfig)
+		var sshClient *ssh.Client
+		if err == nil {
+			sshClient = ssh.NewClient(sshClientConn, sshChans, sshReqs)
+		}
+		resultChannel <- &sshNewClientResult{sshClient, err}
+	}()
+
+	result := <-resultChannel
+	if result.err != nil {
+		return nil, nil, nil, ContextError(result.err)
+	}
+
+	return conn, closedSignal, result.sshClient, nil
 }
 
 // operateTunnel periodically sends status requests (traffic stats updates updates)
