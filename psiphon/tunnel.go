@@ -578,6 +578,16 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 				tunnel.serverEntry.IpAddress, tunnel.portForwardFailureTotal)
 			if tunnel.portForwardFailureTotal > config.PortForwardFailureThreshold {
 				err = errors.New("tunnel exceeded port forward failure threshold")
+			} else {
+				// Try an SSH keep alive to check the state of the SSH connection
+				// Some port forward failures are due to intermittent conditions
+				// on the server, so we don't abort the connection until the threshold
+				// is hit. But if we can't make a simple round trip request to the
+				// server, we'll immediately abort.
+				err = sendSshKeepAlive(tunnel.sshClient)
+				if err != nil {
+					err = fmt.Errorf("ssh keep alive failed: %s", err)
+				}
 			}
 
 		case <-tunnel.closedSignal:
