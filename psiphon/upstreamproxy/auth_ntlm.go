@@ -21,7 +21,7 @@ package upstreamproxy
 
 import (
 	"encoding/base64"
-	"errors"
+	"fmt"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy/go-ntlm/ntlm"
 	"net/http"
 	"strings"
@@ -45,7 +45,7 @@ func newNTLMAuthenticator() *NTLMHttpAuthenticator {
 
 func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response, username, password string) error {
 	if a.state == NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE3_GENERATED {
-		return errors.New("upstreamproxy: Authorization is not accepted by the proxy server")
+		return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
 	}
 	challenges, err := parseAuthChallenge(resp)
 
@@ -56,20 +56,20 @@ func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Respo
 		a.state = NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE1_GENERATED
 	}
 	if !ok {
-		return errors.New("upstreamproxy: Bad proxy response, no NTLM challenge for NTLMHttpAuthenticator")
+		return proxyError(fmt.Errorf("Bad proxy response, no NTLM challenge for NTLMHttpAuthenticator"))
 	}
 
 	var ntlmMsg []byte
 
 	session, err := ntlm.CreateClientSession(ntlm.Version2, ntlm.ConnectionOrientedMode)
 	if err != nil {
-		return err
+		return proxyError(err)
 	}
 	if a.state == NTLM_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
 		//generate TYPE 1 message
 		negotiate, err := session.GenerateNegotiateMessage()
 		if err != nil {
-			return err
+			return proxyError(err)
 		}
 		ntlmMsg = negotiate.Bytes()
 		a.state = NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE1_GENERATED
@@ -88,17 +88,17 @@ func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Respo
 		}
 		challengeBytes, err := base64.StdEncoding.DecodeString(challenge)
 		if err != nil {
-			return err
+			return proxyError(fmt.Errorf("NTLM challeenge base 64 decoding: %v", err))
 		}
 		session.SetUserInfo(NTUser, password, NTDomain)
 		ntlmChallenge, err := ntlm.ParseChallengeMessage(challengeBytes)
 		if err != nil {
-			return err
+			return proxyError(err)
 		}
 		session.ProcessChallengeMessage(ntlmChallenge)
 		authenticate, err := session.GenerateAuthenticateMessage()
 		if err != nil {
-			return err
+			return proxyError(err)
 		}
 		ntlmMsg = authenticate.Bytes()
 		a.state = NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE3_GENERATED
@@ -106,5 +106,5 @@ func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Respo
 		return nil
 	}
 
-	return errors.New("upstreamproxy: Authorization is not accepted by the proxy server")
+	return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
 }

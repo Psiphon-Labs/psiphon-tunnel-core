@@ -47,7 +47,6 @@ package upstreamproxy
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"golang.org/x/net/proxy"
 	"net"
@@ -79,44 +78,40 @@ func newHTTP(uri *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
 
 func (hp *httpProxy) Dial(network, addr string) (net.Conn, error) {
 	// Dial and create the http client connection.
-	pc := &proxyConn{authState: HTTP_AUTH_STATE_UNCHALLENGED}
-	err := pc.makeNewClientConn(hp.forward, hp.hostPort)
+	pc := &proxyConn{
+		authState: HTTP_AUTH_STATE_UNCHALLENGED,
+		dialFn:    hp.forward.Dial,
+		proxyAddr: hp.hostPort,
+	}
+	err := pc.makeNewClientConn()
 	if err != nil {
-		return nil, fmt.Errorf("upstreamproxy: makeNewClientConn error: %v", err)
+		//Already wrapped in proxyError
+		return nil, err
 	}
 
 handshakeLoop:
 	for {
 		err := pc.handshake(addr, hp.username, hp.password)
-		if err != nil {
-			return nil, err
-		}
 		switch pc.authState {
 		case HTTP_AUTH_STATE_SUCCESS:
 			pc.hijackedConn, pc.staleReader = pc.httpClientConn.Hijack()
 			return pc, nil
 		case HTTP_AUTH_STATE_FAILURE:
+			//err already wrapped in proxyError
 			return nil, err
 		case HTTP_AUTH_STATE_CHALLENGED:
-			// the server may send Connection: close,
-			// at this point we just going to create a new
-			// ClientConn and continue the handshake
-			if err == httputil.ErrPersistEOF {
-				err = pc.makeNewClientConn(hp.forward, hp.hostPort)
-				if err != nil {
-					return nil, fmt.Errorf("upstreamproxy: makeNewClientConn error: %v", err)
-				}
-			}
 			continue
 		default:
 			break handshakeLoop
 		}
 	}
-	return nil, fmt.Errorf("Unknown handshake error")
+	return nil, proxyError(fmt.Errorf("Unknown handshake error"))
 
 }
 
 type proxyConn struct {
+	dialFn         DialFunc
+	proxyAddr      string
 	httpClientConn *httputil.ClientConn
 	hijackedConn   net.Conn
 	staleReader    *bufio.Reader
@@ -132,7 +127,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	if err != nil {
 		pc.httpClientConn.Close()
 		pc.authState = HTTP_AUTH_STATE_FAILURE
-		return err
+		return proxyError(fmt.Errorf("Failed to parse proxy address: %v", err))
 	}
 	reqURL.Scheme = ""
 
@@ -140,7 +135,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	if err != nil {
 		pc.httpClientConn.Close()
 		pc.authState = HTTP_AUTH_STATE_FAILURE
-		return err
+		return proxyError(fmt.Errorf("Create proxy request: %v", err))
 	}
 	req.Close = false
 	req.Header.Set("User-Agent", "")
@@ -149,6 +144,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 		err := pc.authenticator.Authenticate(req, pc.authResponse, username, password)
 		if err != nil {
 			pc.authState = HTTP_AUTH_STATE_FAILURE
+			//Already wrapped in proxyError
 			return err
 		}
 	}
@@ -158,7 +154,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	if err != nil && err != httputil.ErrPersistEOF {
 		pc.httpClientConn.Close()
 		pc.authState = HTTP_AUTH_STATE_FAILURE
-		return err
+		return proxyError(fmt.Errorf("making proxy request: %v", err))
 	}
 
 	if resp.StatusCode == 200 {
@@ -173,6 +169,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 			if auth_err != nil {
 				pc.httpClientConn.Close()
 				pc.authState = HTTP_AUTH_STATE_FAILURE
+				//Already wrapped in proxyError
 				return auth_err
 			}
 		}
@@ -182,21 +179,31 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 		if username == "" {
 			pc.httpClientConn.Close()
 			pc.authState = HTTP_AUTH_STATE_FAILURE
-			return errors.New("upstreamproxy: No credentials provided for proxy auth")
+			return proxyError(fmt.Errorf("No username credentials provided for proxy auth"))
 		}
-		return err
+		if err == httputil.ErrPersistEOF {
+			// the server may send Connection: close,
+			// at this point we just going to create a new
+			// ClientConn and continue the handshake
+			err = pc.makeNewClientConn()
+			if err != nil {
+				//Already wrapped in proxyError
+				return err
+			}
+		}
+		return nil
 	}
 	pc.authState = HTTP_AUTH_STATE_FAILURE
-	return err
+	return proxyError(err)
 }
 
-func (pc *proxyConn) makeNewClientConn(dialer proxy.Dialer, addr string) error {
-	c, err := dialer.Dial("tcp", addr)
+func (pc *proxyConn) makeNewClientConn() error {
+	c, err := pc.dialFn("tcp", pc.proxyAddr)
 	if pc.httpClientConn != nil {
 		pc.httpClientConn.Close()
 	}
 	if err != nil {
-		return err
+		return proxyError(fmt.Errorf("makeNewClientConn: %v", err))
 	}
 	pc.httpClientConn = httputil.NewClientConn(c, nil)
 	return nil
@@ -229,15 +236,15 @@ func (pc *proxyConn) RemoteAddr() net.Addr {
 }
 
 func (pc *proxyConn) SetDeadline(t time.Time) error {
-	return errors.New("not supported")
+	return proxyError(fmt.Errorf("not supported"))
 }
 
 func (pc *proxyConn) SetReadDeadline(t time.Time) error {
-	return errors.New("not supported")
+	return proxyError(fmt.Errorf("not supported"))
 }
 
 func (pc *proxyConn) SetWriteDeadline(t time.Time) error {
-	return errors.New("not supported")
+	return proxyError(fmt.Errorf("not supported"))
 }
 
 func init() {

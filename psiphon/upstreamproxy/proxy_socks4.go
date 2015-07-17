@@ -52,7 +52,6 @@
 package upstreamproxy
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -93,31 +92,31 @@ func newSOCKS4(uri *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
 
 func (s *socks4Proxy) Dial(network, addr string) (net.Conn, error) {
 	if network != "tcp" && network != "tcp4" {
-		return nil, errors.New("invalid network type")
+		return nil, proxyError(fmt.Errorf("invalid network type"))
 	}
 
 	// Deal with the destination address/string.
 	ipStr, portStr, err := net.SplitHostPort(addr)
 	if err != nil {
-		return nil, err
+		return nil, proxyError(fmt.Errorf("parsing destination address: %v", err))
 	}
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
-		return nil, errors.New("failed to parse destination IP")
+		return nil, proxyError(fmt.Errorf("failed to parse destination IP"))
 	}
 	ip4 := ip.To4()
 	if ip4 == nil {
-		return nil, errors.New("destination address is not IPv4")
+		return nil, proxyError(fmt.Errorf("destination address is not IPv4"))
 	}
 	port, err := strconv.ParseUint(portStr, 10, 16)
 	if err != nil {
-		return nil, err
+		return nil, proxyError(fmt.Errorf("failed to parse destination port: %v", err))
 	}
 
 	// Connect to the proxy.
 	c, err := s.forward.Dial("tcp", s.hostPort)
 	if err != nil {
-		return nil, err
+		return nil, proxyError(fmt.Errorf("failed to dial SOCKS4a proxy: %v", err))
 	}
 
 	// Make/write the request:
@@ -137,7 +136,7 @@ func (s *socks4Proxy) Dial(network, addr string) (net.Conn, error) {
 	_, err = c.Write(req)
 	if err != nil {
 		c.Close()
-		return nil, err
+		return nil, proxyError(fmt.Errorf("failed to write to SOCKS4a proxy: %v", err))
 	}
 
 	// Read the response:
@@ -149,15 +148,15 @@ func (s *socks4Proxy) Dial(network, addr string) (net.Conn, error) {
 	_, err = io.ReadFull(c, resp[:])
 	if err != nil {
 		c.Close()
-		return nil, err
+		return nil, proxyError(fmt.Errorf("failed to read SOCKS4a proxy response: %v", err))
 	}
 	if resp[0] != socks4ReplyVersion {
 		c.Close()
-		return nil, errors.New("proxy returned invalid SOCKS4 version")
+		return nil, proxyError(fmt.Errorf("proxy returned invalid SOCKS4 version"))
 	}
 	if resp[1] != socks4Granted {
 		c.Close()
-		return nil, fmt.Errorf("proxy error: %s", socks4ErrorToString(resp[1]))
+		return nil, proxyError(fmt.Errorf("proxy error: %s", socks4ErrorToString(resp[1])))
 	}
 
 	return c, nil

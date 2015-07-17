@@ -170,12 +170,11 @@ func (tc *transportConn) Read(p []byte) (int, error) {
 				tc.connReader = bufio.NewReader(tc.Conn)
 			}
 
+			// Authenticate and replay the request
 			err = tc.authenticator.Authenticate(tc.lastRequest, resp, tc.transport.Username, tc.transport.Password)
 			if err != nil {
 				return 0, err
 			}
-
-			//Replay authenticated request
 			tc.lastRequest.WriteProxy(tc)
 			return tc.Read(p)
 		}

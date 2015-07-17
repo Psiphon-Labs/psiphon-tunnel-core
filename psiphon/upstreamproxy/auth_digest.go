@@ -23,7 +23,6 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -127,15 +126,16 @@ func h(data string) string {
 
 func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response, username, password string) error {
 	if a.state != DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
-		return errors.New("upstreamproxy: Authorization is not accepted by the proxy server")
+		return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
 	}
 	challenges, err := parseAuthChallenge(resp)
 	if err != nil {
+		//already wrapped in proxyError
 		return err
 	}
 	challenge := challenges["Digest"]
 	if len(challenge) == 0 {
-		return errors.New("upstreamproxy: Digest authentication challenge is empty")
+		return proxyError(fmt.Errorf("Digest authentication challenge is empty"))
 	}
 	//parse challenge
 	digestParams := map[string]string{}
@@ -147,7 +147,7 @@ func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Res
 		digestParams[strings.Trim(param[0], "\" ")] = strings.Trim(param[1], "\" ")
 	}
 	if len(digestParams) == 0 {
-		return errors.New("upstreamproxy: Digest authentication challenge is malformed")
+		return proxyError(fmt.Errorf("Digest authentication challenge is malformed"))
 	}
 
 	algorithm := digestParams["algorithm"]

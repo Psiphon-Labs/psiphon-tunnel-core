@@ -52,7 +52,7 @@ func parseAuthChallenge(resp *http.Response) (map[string]string, error) {
 		}
 	}
 	if len(challenges) == 0 {
-		return nil, fmt.Errorf("upstreamproxy: No valid challenges in the Proxy-Authenticate header")
+		return nil, proxyError(fmt.Errorf("No valid challenges in the Proxy-Authenticate header"))
 	}
 	return challenges, nil
 }
@@ -61,6 +61,7 @@ func NewHttpAuthenticator(resp *http.Response) (HttpAuthenticator, error) {
 
 	challenges, err := parseAuthChallenge(resp)
 	if err != nil {
+		//Already wrapped in proxyError
 		return nil, err
 	}
 
@@ -78,5 +79,5 @@ func NewHttpAuthenticator(resp *http.Response) (HttpAuthenticator, error) {
 	for scheme := range challenges {
 		schemes = append(schemes, scheme)
 	}
-	return nil, fmt.Errorf("Unsupported proxy authentication scheme in %v", schemes)
+	return nil, proxyError(fmt.Errorf("Unsupported proxy authentication scheme in %v", schemes))
 }

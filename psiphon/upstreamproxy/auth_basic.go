@@ -21,7 +21,7 @@ package upstreamproxy
 
 import (
 	"encoding/base64"
-	"errors"
+	"fmt"
 	"net/http"
 )
 
@@ -47,6 +47,6 @@ func (a *BasicHttpAuthenticator) Authenticate(req *http.Request, resp *http.Resp
 		a.state = BASIC_HTTP_AUTH_STATE_RESPONSE_GENERATED
 		return nil
 	} else {
-		return errors.New("upstreamproxy: Authorization is not accepted by the proxy server")
+		return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
 	}
 }
