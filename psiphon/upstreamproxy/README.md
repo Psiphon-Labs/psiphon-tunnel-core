@@ -58,7 +58,7 @@ func doAuthenticatedHTTPS() {
 		if err != nil {
 			return nil, err
 		}
-		tlsconfig := &tls.Config{InsecureSkipVerify: true}
+		tlsconfig := &tls.Config{InsecureSkipVerify: false}
 		tlsConn := tls.Client(conn, tlsconfig)
 
 		return tlsConn, tlsConn.Handshake()

@@ -50,7 +50,6 @@ import (
 	"errors"
 	"fmt"
 	"golang.org/x/net/proxy"
-	//"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -86,8 +85,12 @@ func (hp *httpProxy) Dial(network, addr string) (net.Conn, error) {
 		return nil, fmt.Errorf("upstreamproxy: makeNewClientConn error: %v", err)
 	}
 
+handshakeLoop:
 	for {
 		err := pc.handshake(addr, hp.username, hp.password)
+		if err != nil {
+			return nil, err
+		}
 		switch pc.authState {
 		case HTTP_AUTH_STATE_SUCCESS:
 			pc.hijackedConn, pc.staleReader = pc.httpClientConn.Hijack()
@@ -106,7 +109,7 @@ func (hp *httpProxy) Dial(network, addr string) (net.Conn, error) {
 			}
 			continue
 		default:
-			panic("Illegal proxy handshake auth state")
+			break handshakeLoop
 		}
 	}
 	return nil, fmt.Errorf("Unknown handshake error")
@@ -123,7 +126,8 @@ type proxyConn struct {
 }
 
 func (pc *proxyConn) handshake(addr, username, password string) error {
-	// HACK HACK HACK HACK.  http.ReadRequest also does this.
+	// HACK: prefix addr of the form 'hostname:port' with a 'http' scheme
+	// so it could be parsed by url.Parse
 	reqURL, err := url.Parse("http://" + addr)
 	if err != nil {
 		pc.httpClientConn.Close()
