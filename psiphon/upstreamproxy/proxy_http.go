@@ -92,6 +92,10 @@ func (hp *httpProxy) Dial(network, addr string) (net.Conn, error) {
 handshakeLoop:
 	for {
 		err := pc.handshake(addr, hp.username, hp.password)
+		if err != nil {
+			//already wrapped in proxyError
+			return nil, err
+		}
 		switch pc.authState {
 		case HTTP_AUTH_STATE_SUCCESS:
 			pc.hijackedConn, pc.staleReader = pc.httpClientConn.Hijack()
