@@ -73,10 +73,10 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// used to exclude these requests and connection from VPN routing.
 	untunneledPendingConns := new(Conns)
 	untunneledDialConfig := &DialConfig{
-		UpstreamHttpProxyAddress: config.UpstreamHttpProxyAddress,
-		PendingConns:             untunneledPendingConns,
-		DeviceBinder:             config.DeviceBinder,
-		DnsServerGetter:          config.DnsServerGetter,
+		UpstreamProxyUrl: config.UpstreamProxyUrl,
+		PendingConns:     untunneledPendingConns,
+		DeviceBinder:     config.DeviceBinder,
+		DnsServerGetter:  config.DnsServerGetter,
 	}
 
 	controller = &Controller{

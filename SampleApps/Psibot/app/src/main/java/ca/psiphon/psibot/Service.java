@@ -110,10 +110,10 @@ public class Service extends VpnService
                     preferences.getString(
                             getString(R.string.preferenceTunnelProtocol),
                             getString(R.string.preferenceTunnelProtocolDefaultValue)));
-            config.put("UpstreamHttpProxyAddress",
+            config.put("UpstreamProxyUrl",
                     preferences.getString(
-                            getString(R.string.preferenceUpstreamHttpProxyAddress),
-                            getString(R.string.preferenceUpstreamHttpProxyAddressDefaultValue)));
+                            getString(R.string.preferenceUpstreamProxyUrl),
+                            getString(R.string.preferenceUpstreamProxyUrlDefaultValue)));
             config.put("LocalHttpProxyPort",
                     Integer.parseInt(
                             preferences.getString(

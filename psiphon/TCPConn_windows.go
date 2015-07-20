@@ -63,28 +63,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	// Call the blocking Dial in a goroutine
 	results := conn.interruptible.results
 	go func() {
-
-		// When using an upstream HTTP proxy, first connect to the proxy,
-		// then use HTTP CONNECT to connect to the original destination.
-		dialAddr := addr
-		if config.UpstreamHttpProxyAddress != "" {
-			dialAddr = config.UpstreamHttpProxyAddress
-		}
-
-		netConn, err := net.DialTimeout("tcp", dialAddr, config.ConnectTimeout)
-
-		if config.UpstreamHttpProxyAddress != "" {
-			if err == nil {
-				err = HttpProxyConnect(netConn, addr)
-			}
-			if err != nil {
-				NoticeUpstreamProxyError(err)
-			}
-		}
-		if err != nil {
-			netConn = nil
-		}
-
+		netConn, err := net.DialTimeout("tcp", addr, config.ConnectTimeout)
 		results <- &interruptibleDialResult{netConn, err}
 	}()
 

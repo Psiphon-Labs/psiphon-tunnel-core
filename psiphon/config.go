@@ -85,7 +85,7 @@ type Config struct {
 	ConnectionWorkerPoolSize            int
 	TunnelPoolSize                      int
 	PortForwardFailureThreshold         int
-	UpstreamHttpProxyAddress            string
+	UpstreamProxyUrl                    string
 	NetworkConnectivityChecker          NetworkConnectivityChecker
 	DeviceBinder                        DeviceBinder
 	DnsServerGetter                     DnsServerGetter

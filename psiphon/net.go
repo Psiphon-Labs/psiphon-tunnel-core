@@ -20,12 +20,8 @@
 package psiphon
 
 import (
-	"bufio"
-	"errors"
-	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"sync"
 	"time"
 
@@ -38,10 +34,16 @@ const DNS_PORT = 53
 // of a Psiphon dialer (TCPDial, MeekDial, etc.)
 type DialConfig struct {
 
-	// UpstreamHttpProxyAddress specifies an HTTP proxy to connect through
-	// (the proxy must support HTTP CONNECT). The address may be a hostname
-	// or IP address and must include a port number.
-	UpstreamHttpProxyAddress string
+	// UpstreamProxyUrl specifies a proxy to connect through.
+	// E.g., "http://proxyhost:8080"
+	//       "socks5://user:password@proxyhost:1080"
+	//       "socks4a://proxyhost:1080"
+	//       "http://NTDOMAIN\NTUser:password@proxyhost:3375"
+	//
+	// Certain tunnel protocols require HTTP CONNECT support
+	// when a HTTP proxy is specified. If CONNECT is not
+	// supported, those protocols will not connect.
+	UpstreamProxyUrl string
 
 	ConnectTimeout time.Duration
 	ReadTimeout    time.Duration
@@ -171,39 +173,6 @@ func Relay(localConn, remoteConn net.Conn) {
 		NoticeAlert("Relay failed: %s", ContextError(err))
 	}
 	copyWaitGroup.Wait()
-}
-
-// HttpProxyConnect establishes a HTTP CONNECT tunnel to addr through
-// an established network connection to an HTTP proxy. It is assumed that
-// no payload bytes have been sent through the connection to the proxy.
-func HttpProxyConnect(rawConn net.Conn, addr string) (err error) {
-	hostname, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return ContextError(err)
-	}
-
-	// TODO: use the proxy request/response code from net/http/transport.go?
-	connectRequest := fmt.Sprintf(
-		"CONNECT %s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n\r\n",
-		addr, hostname)
-	_, err = rawConn.Write([]byte(connectRequest))
-	if err != nil {
-		return ContextError(err)
-	}
-
-	// Adapted from dialConn in net/http/transport.go:
-	// Read response.
-	// Okay to use and discard buffered reader here, because
-	// TLS server will not speak until spoken to.
-	response, err := http.ReadResponse(bufio.NewReader(rawConn), nil)
-	if err != nil {
-		return ContextError(err)
-	}
-	if response.StatusCode != 200 {
-		return ContextError(errors.New(response.Status))
-	}
-
-	return nil
 }
 
 // WaitForNetworkConnectivity uses a NetworkConnectivityChecker to
