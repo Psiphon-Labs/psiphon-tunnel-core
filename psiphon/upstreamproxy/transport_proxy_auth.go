@@ -30,6 +30,9 @@ import (
 	"strings"
 )
 
+// ProxyAuthTransport provides support for proxy authentication when doing plain HTTP
+// by tapping into HTTP conversation and adding authentication headers to the requests
+// when requested by server
 type ProxyAuthTransport struct {
 	*http.Transport
 	Dial     DialFunc
@@ -69,6 +72,10 @@ func (tr *ProxyAuthTransport) RoundTrip(req *http.Request) (resp *http.Response,
 	return tr.Transport.RoundTrip(req)
 }
 
+// wrapTransportDial wraps original transport Dial function
+// and returns a new net.Conn interface provided by transportConn
+// that allows us to intercept both outgoing requests and incoming
+// responses and examine / mutate them
 func (tr *ProxyAuthTransport) wrapTransportDial() DialFunc {
 	return func(network, addr string) (net.Conn, error) {
 		c, err := tr.Dial("tcp", addr)
@@ -82,10 +89,13 @@ func (tr *ProxyAuthTransport) wrapTransportDial() DialFunc {
 
 type transportConn struct {
 	net.Conn
-	requestWriter io.Writer
-	reqDone       chan struct{}
-	errChannel    chan error
-	connReader    *bufio.Reader
+	requestInterceptor io.Writer
+	reqDone            chan struct{}
+	errChannel         chan error
+	// a buffered Reader from the raw net.Conn so we could Peek at the data
+	// without advancing the 'read' pointer
+	connReader *bufio.Reader
+	// last written request holder
 	lastRequest   *http.Request
 	authenticator HttpAuthenticator
 	authState     HttpAuthState
@@ -100,8 +110,11 @@ func newTransportConn(c net.Conn, tr *ProxyAuthTransport) *transportConn {
 		connReader: bufio.NewReader(c),
 		transport:  tr,
 	}
+	// Intercept outgoing request as it is written out to server and store it
+	// in case it needs to be authenticated and replayed
+	//NOTE that pipelining is currently not supported
 	pr, pw := io.Pipe()
-	tc.requestWriter = pw
+	tc.requestInterceptor = pw
 	go func() {
 	requestInterceptLoop:
 		for {
@@ -117,20 +130,17 @@ func newTransportConn(c net.Conn, tr *ProxyAuthTransport) *transportConn {
 			body, _ := ioutil.ReadAll(req.Body)
 			tc.lastRequest = req
 			tc.lastRequest.Body = ioutil.NopCloser(bytes.NewReader(body))
+			//Signal when we have a complete request
 			tc.reqDone <- struct{}{}
 		}
 	}()
 	return tc
 }
 
+// Read peeks into the new response and checks if the proxy requests authentication
+// If so, the last intercepted request is authenticated against the response
+// authentication challenge and replayed
 func (tc *transportConn) Read(p []byte) (int, error) {
-	/*
-	   The first Read on a new RoundTrip will occur *before* Write and
-	   will block until request is written out completely and response
-	   headers are read in
-
-	   Peek will actually call Read and buffer read data
-	*/
 	peeked, err := tc.connReader.Peek(12)
 	if err != nil {
 		return 0, err
@@ -138,7 +148,8 @@ func (tc *transportConn) Read(p []byte) (int, error) {
 	line := string(peeked)
 	select {
 	case _ = <-tc.reqDone:
-		//Brand new response
+		//This is a new response
+		//Let's see if proxy requests authentication
 		f := strings.SplitN(line, " ", 2)
 		if (f[0] == "HTTP/1.0" || f[0] == "HTTP/1.1") && f[1] == "407" {
 			resp, err := http.ReadResponse(tc.connReader, nil)
@@ -188,6 +199,7 @@ func (tc *transportConn) Read(p []byte) (int, error) {
 
 func (tc *transportConn) Write(p []byte) (n int, err error) {
 	n, err = tc.Conn.Write(p)
-	tc.requestWriter.Write(p[:n])
+	//also write data to the request interceptor
+	tc.requestInterceptor.Write(p[:n])
 	return n, err
 }
