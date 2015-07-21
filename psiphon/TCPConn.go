@@ -24,13 +24,18 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 )
 
 // TCPConn is a customized TCP connection that:
 // - can be interrupted while connecting;
+// - implements a connect timeout;
 // - implements idle read/write timeouts;
+// - uses an upstream proxy when specified, and includes
+//   upstream proxy dialing in the connect timeout;
 // - can be bound to a specific system device (for Android VpnService
-//   routing compatibility, for example).
+//   routing compatibility, for example);
 // - implements the psiphon.Conn interface
 type TCPConn struct {
 	net.Conn
@@ -44,15 +49,58 @@ type TCPConn struct {
 
 // NewTCPDialer creates a TCPDialer.
 func NewTCPDialer(config *DialConfig) Dialer {
-	return func(network, addr string) (net.Conn, error) {
+
+	dialer := func(network, addr string) (net.Conn, error) {
 		if network != "tcp" {
 			return nil, errors.New("unsupported network type in NewTCPDialer")
 		}
 		return DialTCP(addr, config)
 	}
+
+	if config.UpstreamProxyUrl != "" {
+
+		upstreamDialer := upstreamproxy.NewProxyDialFunc(
+			&upstreamproxy.UpstreamProxyConfig{
+				ForwardDialFunc: dialer,
+				ProxyURIString:  config.UpstreamProxyUrl,
+			})
+
+		dialer = func(network, addr string) (net.Conn, error) {
+
+			// The entire upstream dial is wrapped in an explicit timeout. This
+			// may include network connection read and writes when proxy auth negotation
+			// is performed.
+
+			type upstreamDialResult struct {
+				conn net.Conn
+				err  error
+			}
+			resultChannel := make(chan *upstreamDialResult, 2)
+			time.AfterFunc(config.ConnectTimeout, func() {
+				// TODO: we could "interrupt" the underlying TCPConn at this point, as
+				// it's being abandoned. But we don't have a reference to it. It's left
+				// to the outer DialConfig.PendingConns to track and clean up that TCPConn.
+				resultChannel <- &upstreamDialResult{nil, errors.New("upstreamproxy dial timeout")}
+			})
+			go func() {
+				conn, err := upstreamDialer(network, addr)
+				resultChannel <- &upstreamDialResult{conn, err}
+			}()
+			result := <-resultChannel
+
+			if _, ok := result.err.(upstreamproxy.Error); ok {
+				NoticeUpstreamProxyError(result.err)
+			}
+
+			return result.conn, result.err
+		}
+	}
+
+	return dialer
 }
 
-// TCPConn creates a new, connected TCPConn.
+// TCPConn creates a new, connected TCPConn. It uses an upstream proxy
+// when specified.
 func DialTCP(addr string, config *DialConfig) (conn *TCPConn, err error) {
 	conn, err = interruptibleTCPDial(addr, config)
 	if err != nil {

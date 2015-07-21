@@ -41,7 +41,7 @@ Setup
         "ConnectionWorkerPoolSize" : 10,
         "TunnelPoolSize" : 1,
         "PortForwardFailureThreshold" : 10,
-        "UpstreamHttpProxyAddress" : ""
+        "UpstreamProxyUrl" : ""
     }
     ```
 <!--END-SAMPLE-CONFIG-->

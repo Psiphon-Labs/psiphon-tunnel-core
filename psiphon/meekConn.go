@@ -33,6 +33,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -54,6 +55,7 @@ const (
 	POLL_INTERNAL_MULTIPLIER       = 1.5
 	MEEK_ROUND_TRIP_RETRY_DEADLINE = 1 * time.Second
 	MEEK_ROUND_TRIP_RETRY_DELAY    = 50 * time.Millisecond
+	MEEK_ROUND_TRIP_TIMEOUT        = 20 * time.Second
 )
 
 // MeekConn is a network connection that tunnels TCP over HTTP and supports "fronting". Meek sends
@@ -72,7 +74,7 @@ type MeekConn struct {
 	url                  *url.URL
 	cookie               *http.Cookie
 	pendingConns         *Conns
-	transport            *http.Transport
+	transport            transporter
 	mutex                sync.Mutex
 	isClosed             bool
 	closedSignal         chan struct{}
@@ -84,6 +86,14 @@ type MeekConn struct {
 	emptySendBuffer      chan *bytes.Buffer
 	partialSendBuffer    chan *bytes.Buffer
 	fullSendBuffer       chan *bytes.Buffer
+}
+
+// transporter is implemented by both http.Transport and upstreamproxy.ProxyAuthTransport.
+type transporter interface {
+	CancelRequest(req *http.Request)
+	CloseIdleConnections()
+	RegisterProtocol(scheme string, rt http.RoundTripper)
+	RoundTrip(req *http.Request) (resp *http.Response, err error)
 }
 
 // DialMeek returns an initialized meek connection. A meek connection is
@@ -160,20 +170,20 @@ func DialMeek(
 				SkipVerify:     true,
 			})
 	} else {
-		// In this case, host is both what is dialed and what ends up in the HTTP Host header
+		// In the unfronted case, host is both what is dialed and what ends up in the HTTP Host header
 		host = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
 
-		if meekConfig.UpstreamHttpProxyAddress != "" {
+		if meekConfig.UpstreamProxyUrl != "" {
 			// For unfronted meek, we let the http.Transport handle proxying, as the
 			// target server hostname has to be in the HTTP request line. Also, in this
 			// case, we don't require the proxy to support CONNECT and so we can work
 			// through HTTP proxies that don't support it.
-			url, err := url.Parse(fmt.Sprintf("http://%s", meekConfig.UpstreamHttpProxyAddress))
+			url, err := url.Parse(meekConfig.UpstreamProxyUrl)
 			if err != nil {
 				return nil, ContextError(err)
 			}
 			proxyUrl = http.ProxyURL(url)
-			meekConfig.UpstreamHttpProxyAddress = ""
+			meekConfig.UpstreamProxyUrl = ""
 		}
 
 		dialer = NewTCPDialer(meekConfig)
@@ -190,10 +200,20 @@ func DialMeek(
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	transport := &http.Transport{
+	httpTransport := &http.Transport{
 		Proxy: proxyUrl,
 		Dial:  dialer,
-		ResponseHeaderTimeout: TUNNEL_WRITE_TIMEOUT,
+		ResponseHeaderTimeout: MEEK_ROUND_TRIP_TIMEOUT,
+	}
+	var transport transporter
+	if proxyUrl != nil {
+		// Wrap transport with a transport that can perform HTTP proxy auth negotiation
+		transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport)
+		if err != nil {
+			return nil, ContextError(err)
+		}
+	} else {
+		transport = httpTransport
 	}
 
 	// The main loop of a MeekConn is run in the relay() goroutine.
@@ -472,7 +492,7 @@ func (meek *MeekConn) readPayload(receivedPayload io.ReadCloser) (totalSize int6
 func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadCloser, err error) {
 	request, err := http.NewRequest("POST", meek.url.String(), bytes.NewReader(sendPayload))
 	if err != nil {
-		return nil, err
+		return nil, ContextError(err)
 	}
 
 	if meek.frontingAddress != "" && nil == net.ParseIP(meek.frontingAddress) {

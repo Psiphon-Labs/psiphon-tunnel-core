@@ -18,10 +18,10 @@
         android:defaultValue="@string/preferenceTunnelProtocolDefaultValue" />
 
     <EditTextPreference
-        android:key="@string/preferenceUpstreamHttpProxyAddress"
-        android:title="@string/preference_upstream_http_proxy_address"
-        android:dialogTitle="@string/preference_upstream_http_proxy_address"
-        android:defaultValue="@string/preferenceUpstreamHttpProxyAddressDefaultValue" />
+        android:key="@string/preferenceUpstreamProxyUrl"
+        android:title="@string/preference_upstream_proxy_url"
+        android:dialogTitle="@string/preference_upstream_proxy_url"
+        android:defaultValue="@string/preferenceUpstreamProxyUrlDefaultValue" />
 
     <EditTextPreference
         android:numeric="integer"

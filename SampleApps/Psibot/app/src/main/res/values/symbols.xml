@@ -22,8 +22,8 @@
     </string-array>
     <string name="preferenceTunnelProtocolDefaultValue"></string>
 
-    <string name="preferenceUpstreamHttpProxyAddress">preferenceUpstreamHttpProxyAddress</string>
-    <string name="preferenceUpstreamHttpProxyAddressDefaultValue"></string>
+    <string name="preferenceUpstreamProxyUrl">preferenceUpstreamProxyUrl</string>
+    <string name="preferenceUpstreamProxyUrlDefaultValue"></string>
 
     <string name="preferenceLocalHttpProxyPort">preferenceLocalHttpProxyPort</string>
     <string name="preferenceLocalHttpProxyPortDefaultValue">0</string>

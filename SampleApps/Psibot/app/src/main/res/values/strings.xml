@@ -27,7 +27,7 @@
         <item>Fronted Meek</item>
     </string-array>
 
-    <string name="preference_upstream_http_proxy_address">Upstream HTTP Proxy Address</string>
+    <string name="preference_upstream_proxy_url">Upstream Proxy URL</string>
     <string name="preference_local_http_proxy_port">Local HTTP Proxy Port</string>
     <string name="preference_local_socks_proxy_port">Local SOCKS Proxy Port</string>
     <string name="preference_connection_worker_pool_size">Connection Workers</string>

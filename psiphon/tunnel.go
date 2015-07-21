@@ -384,13 +384,13 @@ func dialSsh(
 
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
-		UpstreamHttpProxyAddress: config.UpstreamHttpProxyAddress,
-		ConnectTimeout:           TUNNEL_CONNECT_TIMEOUT,
-		ReadTimeout:              TUNNEL_READ_TIMEOUT,
-		WriteTimeout:             TUNNEL_WRITE_TIMEOUT,
-		PendingConns:             pendingConns,
-		DeviceBinder:             config.DeviceBinder,
-		DnsServerGetter:          config.DnsServerGetter,
+		UpstreamProxyUrl: config.UpstreamProxyUrl,
+		ConnectTimeout:   TUNNEL_CONNECT_TIMEOUT,
+		ReadTimeout:      TUNNEL_READ_TIMEOUT,
+		WriteTimeout:     TUNNEL_WRITE_TIMEOUT,
+		PendingConns:     pendingConns,
+		DeviceBinder:     config.DeviceBinder,
+		DnsServerGetter:  config.DnsServerGetter,
 	}
 	if useMeek {
 		conn, err = DialMeek(serverEntry, sessionId, frontingAddress, dialConfig)
@@ -565,11 +565,7 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 			statsTimer.Reset(nextStatusRequestPeriod())
 
 		case <-sshKeepAliveTimer.C:
-			// Random padding to frustrate fingerprinting
-			_, _, err := tunnel.sshClient.SendRequest(
-				"keepalive@openssh.com", true,
-				MakeSecureRandomPadding(0, TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES))
-			err = fmt.Errorf("ssh keep alive failed: %s", err)
+			err = sendSshKeepAlive(tunnel.sshClient)
 			sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
 
 		case failures := <-tunnel.portForwardFailures:
@@ -579,6 +575,14 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 				tunnel.serverEntry.IpAddress, tunnel.portForwardFailureTotal)
 			if tunnel.portForwardFailureTotal > config.PortForwardFailureThreshold {
 				err = errors.New("tunnel exceeded port forward failure threshold")
+			} else {
+				// Try an SSH keep alive to check the state of the SSH connection
+				// Some port forward failures are due to intermittent conditions
+				// on the server, so we don't abort the connection until the threshold
+				// is hit. But if we can't make a simple round trip request to the
+				// server, we'll immediately abort.
+				err = sendSshKeepAlive(tunnel.sshClient)
+				sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
 			}
 
 		case <-tunnel.closedSignal:
@@ -596,6 +600,27 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 		NoticeAlert("operate tunnel error for %s: %s", tunnel.serverEntry.IpAddress, err)
 		tunnelOwner.SignalTunnelFailure(tunnel)
 	}
+}
+
+// sendSshKeepAlive is a helper which sends a keepalive@openssh.com request
+// on the specified SSH connections and returns true of the request succeeds
+// within a specified timeout.
+func sendSshKeepAlive(sshClient *ssh.Client) error {
+
+	errChannel := make(chan error, 2)
+	time.AfterFunc(TUNNEL_SSH_KEEP_ALIVE_TIMEOUT, func() {
+		errChannel <- TimeoutError{}
+	})
+
+	go func() {
+		// Random padding to frustrate fingerprinting
+		_, _, err := sshClient.SendRequest(
+			"keepalive@openssh.com", true,
+			MakeSecureRandomPadding(0, TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES))
+		errChannel <- err
+	}()
+
+	return ContextError(<-errChannel)
 }
 
 // sendStats is a helper for sending session stats to the server.

@@ -68,24 +68,9 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 		}
 	}
 
-	// When using an upstream HTTP proxy, first connect to the proxy,
-	// then use HTTP CONNECT to connect to the original destination.
-	dialAddr := addr
-	if config.UpstreamHttpProxyAddress != "" {
-		dialAddr = config.UpstreamHttpProxyAddress
-
-		// Report connection errors in a notice, as user may have input
-		// invalid proxy address or credential
-		defer func() {
-			if err != nil {
-				NoticeUpstreamProxyError(err)
-			}
-		}()
-	}
-
 	// Get the remote IP and port, resolving a domain name if necessary
 	// TODO: domain name resolution isn't interruptible
-	host, strPort, err := net.SplitHostPort(dialAddr)
+	host, strPort, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -173,15 +158,6 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	conn.Conn = fileConn // (requires mutex)
 
 	conn.mutex.Unlock()
-
-	// Going through upstream HTTP proxy
-	if config.UpstreamHttpProxyAddress != "" {
-		// This call can be interrupted by closing the pending conn
-		err = HttpProxyConnect(conn, addr)
-		if err != nil {
-			return nil, ContextError(err)
-		}
-	}
 
 	return conn, nil
 }

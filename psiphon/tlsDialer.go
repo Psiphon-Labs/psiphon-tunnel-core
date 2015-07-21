@@ -79,12 +79,6 @@ import (
 	"time"
 )
 
-type timeoutError struct{}
-
-func (timeoutError) Error() string   { return "tls: DialWithDialer timed out" }
-func (timeoutError) Timeout() bool   { return true }
-func (timeoutError) Temporary() bool { return true }
-
 // CustomTLSConfig contains parameters to determine the behavior
 // of CustomTLSDial.
 type CustomTLSConfig struct {
@@ -139,7 +133,7 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, er
 	if config.Timeout != 0 {
 		errChannel = make(chan error, 2)
 		time.AfterFunc(config.Timeout, func() {
-			errChannel <- timeoutError{}
+			errChannel <- TimeoutError{}
 		})
 	}
 

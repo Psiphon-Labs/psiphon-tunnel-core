@@ -46,6 +46,7 @@ type Controller struct {
 	tunnels                     []*Tunnel
 	nextTunnel                  int
 	startedConnectedReporter    bool
+	startedUpgradeDownloader    bool
 	isEstablishing              bool
 	establishWaitGroup          *sync.WaitGroup
 	stopEstablishingBroadcast   chan struct{}
@@ -72,10 +73,10 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// used to exclude these requests and connection from VPN routing.
 	untunneledPendingConns := new(Conns)
 	untunneledDialConfig := &DialConfig{
-		UpstreamHttpProxyAddress: config.UpstreamHttpProxyAddress,
-		PendingConns:             untunneledPendingConns,
-		DeviceBinder:             config.DeviceBinder,
-		DnsServerGetter:          config.DnsServerGetter,
+		UpstreamProxyUrl: config.UpstreamProxyUrl,
+		PendingConns:     untunneledPendingConns,
+		DeviceBinder:     config.DeviceBinder,
+		DnsServerGetter:  config.DnsServerGetter,
 	}
 
 	controller = &Controller{
@@ -94,6 +95,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 		tunnels:                  make([]*Tunnel, 0),
 		establishedOnce:          false,
 		startedConnectedReporter: false,
+		startedUpgradeDownloader: false,
 		isEstablishing:           false,
 		establishPendingConns:    new(Conns),
 		untunneledPendingConns:   untunneledPendingConns,
@@ -317,6 +319,66 @@ func (controller *Controller) startConnectedReporter() {
 	}
 }
 
+// upgradeDownloader makes periodic attemps to complete a client upgrade
+// download. DownloadUpgrade() is resumable, so each attempt has potential for
+// getting closer to completion, even in conditions where the download or
+// tunnel is repeatedly interrupted.
+// Once the download is complete, the downloader exits and is not run again:
+// We're assuming that the upgrade will be applied and the entire system
+// restarted before another upgrade is to be downloaded.
+func (controller *Controller) upgradeDownloader(clientUpgradeVersion string) {
+	defer controller.runWaitGroup.Done()
+
+loop:
+	for {
+		// Pick any active tunnel and make the next download attempt. No error
+		// is logged if there's no active tunnel, as that's not an unexpected condition.
+		tunnel := controller.getNextActiveTunnel()
+		if tunnel != nil {
+			err := DownloadUpgrade(controller.config, clientUpgradeVersion, tunnel)
+			if err == nil {
+				break loop
+			}
+			NoticeAlert("upgrade download failed: ", err)
+		}
+
+		timeout := time.After(DOWNLOAD_UPGRADE_RETRY_PAUSE_PERIOD)
+		select {
+		case <-timeout:
+			// Make another download attempt
+		case <-controller.shutdownBroadcast:
+			break loop
+		}
+	}
+
+	NoticeInfo("exiting upgrade downloader")
+}
+
+func (controller *Controller) startClientUpgradeDownloader(clientUpgradeVersion string) {
+	if controller.config.DisableApi {
+		return
+	}
+
+	if controller.config.UpgradeDownloadUrl == "" ||
+		controller.config.UpgradeDownloadFilename == "" {
+		// No upgrade is desired
+		return
+	}
+
+	if clientUpgradeVersion == "" {
+		// No upgrade is offered
+		return
+	}
+
+	// Start the client upgrade downloaded after the first tunnel is established.
+	// Concurrency note: only the runTunnels goroutine may access startClientUpgradeDownloader.
+	if !controller.startedUpgradeDownloader {
+		controller.startedUpgradeDownloader = true
+		controller.runWaitGroup.Add(1)
+		go controller.upgradeDownloader(clientUpgradeVersion)
+	}
+}
+
 // runTunnels is the controller tunnel management main loop. It starts and stops
 // establishing tunnels based on the target tunnel pool size and the current size
 // of the pool. Tunnels are established asynchronously using worker goroutines.
@@ -361,6 +423,7 @@ loop:
 				controller.stopEstablishing()
 			}
 			controller.startConnectedReporter()
+			controller.startClientUpgradeDownloader(establishedTunnel.session.clientUpgradeVersion)
 
 		case <-controller.shutdownBroadcast:
 			break loop
