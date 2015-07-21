@@ -82,7 +82,7 @@ type Tunnel struct {
 	serverEntry              *ServerEntry
 	session                  *Session
 	protocol                 string
-	conn                     Conn
+	conn                     net.Conn
 	closedSignal             chan struct{}
 	sshClient                *ssh.Client
 	operateWaitGroup         *sync.WaitGroup
@@ -337,7 +337,7 @@ func dialSsh(
 	pendingConns *Conns,
 	serverEntry *ServerEntry,
 	selectedProtocol,
-	sessionId string) (conn Conn, closedSignal chan struct{}, sshClient *ssh.Client, err error) {
+	sessionId string) (conn net.Conn, closedSignal chan struct{}, sshClient *ssh.Client, err error) {
 
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
@@ -382,8 +382,11 @@ func dialSsh(
 		selectedProtocol,
 		frontingAddress)
 
+	closedSignal = make(chan struct{}, 1)
+
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
+		ClosedSignal:     closedSignal,
 		UpstreamProxyUrl: config.UpstreamProxyUrl,
 		ConnectTimeout:   TUNNEL_CONNECT_TIMEOUT,
 		ReadTimeout:      TUNNEL_READ_TIMEOUT,
@@ -411,20 +414,6 @@ func dialSsh(
 			cleanupConn.Close()
 		}
 	}()
-
-	// Create signal which is triggered when the underlying network connection is closed,
-	// this is used in operateTunnel to detect an unexpected disconnect. SetClosedSignal
-	// is called here, well before operateTunnel, so that we don't need to handle the
-	// "already closed" with a tunnelOwner.SignalTunnelFailure() in operateTunnel (this
-	// was previously the order of events, which caused the establish process to sometimes
-	// run briefly when not needed).
-	closedSignal = make(chan struct{}, 1)
-	if !conn.SetClosedSignal(closedSignal) {
-		// Conn is already closed. This is not unexpected -- for example,
-		// when establish is interrupted.
-		// TODO: make this not log an error when called from establishTunnelWorker?
-		return nil, nil, nil, ContextError(errors.New("conn already closed"))
-	}
 
 	// Add obfuscated SSH layer
 	var sshConn net.Conn

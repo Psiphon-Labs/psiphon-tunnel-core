@@ -33,8 +33,8 @@ type Error struct {
 }
 
 func proxyError(err error) error {
-	//Avoid multiple upstream.Error wrapping
-	if _, ok := err.(Error); ok {
+	// Avoid multiple upstream.Error wrapping
+	if _, ok := err.(*Error); ok {
 		return err
 	}
 	return &Error{error: fmt.Errorf("upstreamproxy error: %s", err)}

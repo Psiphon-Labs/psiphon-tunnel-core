@@ -34,6 +34,13 @@ const DNS_PORT = 53
 // of a Psiphon dialer (TCPDial, MeekDial, etc.)
 type DialConfig struct {
 
+	// ClosedSignal is triggered when an underlying TCPConn network
+	// connection is closed. This is used in operateTunnel to detect
+	// an unexpected disconnect. Channel should be have buffer to
+	// receive at least on signal. Sender in TCPConn.Close() does not
+	// block.
+	ClosedSignal chan struct{}
+
 	// UpstreamProxyUrl specifies a proxy to connect through.
 	// E.g., "http://proxyhost:8080"
 	//       "socks5://user:password@proxyhost:1080"
