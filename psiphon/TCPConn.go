@@ -49,12 +49,35 @@ type TCPConn struct {
 
 // NewTCPDialer creates a TCPDialer.
 func NewTCPDialer(config *DialConfig) Dialer {
+	return makeTCPDialer(config)
+}
+
+// DialTCP creates a new, connected TCPConn.
+func DialTCP(addr string, config *DialConfig) (conn net.Conn, err error) {
+	return makeTCPDialer(config)("tcp", addr)
+}
+
+// makeTCPDialer creates a custom dialer which creates TCPConn. An upstream
+// proxy is used when specified.
+func makeTCPDialer(config *DialConfig) func(network, addr string) (net.Conn, error) {
 
 	dialer := func(network, addr string) (net.Conn, error) {
 		if network != "tcp" {
-			return nil, errors.New("unsupported network type in NewTCPDialer")
+			return nil, errors.New("unsupported network type in TCPConn dialer")
 		}
-		return DialTCP(addr, config)
+		conn, err := interruptibleTCPDial(addr, config)
+		if err != nil {
+			return nil, ContextError(err)
+		}
+		if config.ClosedSignal != nil {
+			if !conn.SetClosedSignal(config.ClosedSignal) {
+				// Conn is already closed. This is not unexpected -- for example,
+				// when establish is interrupted.
+				// TODO: make this not log an error when called from establishTunnelWorker?
+				return nil, ContextError(errors.New("conn already closed"))
+			}
+		}
+		return conn, nil
 	}
 
 	if config.UpstreamProxyUrl != "" {
@@ -88,7 +111,7 @@ func NewTCPDialer(config *DialConfig) Dialer {
 			}()
 			result := <-resultChannel
 
-			if _, ok := result.err.(upstreamproxy.Error); ok {
+			if _, ok := result.err.(*upstreamproxy.Error); ok {
 				NoticeUpstreamProxyError(result.err)
 			}
 
@@ -97,16 +120,6 @@ func NewTCPDialer(config *DialConfig) Dialer {
 	}
 
 	return dialer
-}
-
-// TCPConn creates a new, connected TCPConn. It uses an upstream proxy
-// when specified.
-func DialTCP(addr string, config *DialConfig) (conn *TCPConn, err error) {
-	conn, err = interruptibleTCPDial(addr, config)
-	if err != nil {
-		return nil, ContextError(err)
-	}
-	return conn, nil
 }
 
 // SetClosedSignal implements psiphon.Conn.SetClosedSignal.
