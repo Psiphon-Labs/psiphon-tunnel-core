@@ -37,8 +37,7 @@ func proxyError(err error) error {
 	if _, ok := err.(Error); ok {
 		return err
 	}
-	format := fmt.Sprintf("upstreamproxy error: %v", err)
-	return &Error{error: fmt.Errorf(format, err)}
+	return &Error{error: fmt.Errorf("upstreamproxy error: %s", err)}
 }
 
 type UpstreamProxyConfig struct {
