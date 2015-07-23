@@ -30,6 +30,8 @@ import (
 	"strings"
 )
 
+const HTTP_STAT_LINE_LENGTH = 12
+
 // ProxyAuthTransport provides support for proxy authentication when doing plain HTTP
 // by tapping into HTTP conversation and adding authentication headers to the requests
 // when requested by server
@@ -92,13 +94,11 @@ type transportConn struct {
 	requestInterceptor io.Writer
 	reqDone            chan struct{}
 	errChannel         chan error
-	// a buffered Reader from the raw net.Conn so we could Peek at the data
-	// without advancing the 'read' pointer
-	connReader *bufio.Reader
 	// last written request holder
 	lastRequest   *http.Request
 	authenticator HttpAuthenticator
 	authState     HttpAuthState
+	authCache     string
 	transport     *ProxyAuthTransport
 }
 
@@ -107,7 +107,6 @@ func newTransportConn(c net.Conn, tr *ProxyAuthTransport) *transportConn {
 		Conn:       c,
 		reqDone:    make(chan struct{}),
 		errChannel: make(chan error),
-		connReader: bufio.NewReader(c),
 		transport:  tr,
 	}
 	// Intercept outgoing request as it is written out to server and store it
@@ -115,10 +114,11 @@ func newTransportConn(c net.Conn, tr *ProxyAuthTransport) *transportConn {
 	//NOTE that pipelining is currently not supported
 	pr, pw := io.Pipe()
 	tc.requestInterceptor = pw
+	requestReader := bufio.NewReader(pr)
 	go func() {
 	requestInterceptLoop:
 		for {
-			req, err := http.ReadRequest(bufio.NewReader(pr))
+			req, err := http.ReadRequest(requestReader)
 			if err != nil {
 				tc.Conn.Close()
 				pr.Close()
@@ -139,20 +139,21 @@ func newTransportConn(c net.Conn, tr *ProxyAuthTransport) *transportConn {
 
 // Read peeks into the new response and checks if the proxy requests authentication
 // If so, the last intercepted request is authenticated against the response
-// authentication challenge and replayed
-func (tc *transportConn) Read(p []byte) (int, error) {
-	peeked, err := tc.connReader.Peek(12)
-	if err != nil {
-		return 0, err
+func (tc *transportConn) Read(p []byte) (n int, err error) {
+	n, err = tc.Conn.Read(p)
+	if n < HTTP_STAT_LINE_LENGTH {
+		return
 	}
-	line := string(peeked)
 	select {
 	case _ = <-tc.reqDone:
+		line := string(p[:HTTP_STAT_LINE_LENGTH])
 		//This is a new response
 		//Let's see if proxy requests authentication
 		f := strings.SplitN(line, " ", 2)
+		readBufferReader := bytes.NewReader(p)
+		responseReader := io.MultiReader(readBufferReader, tc.Conn)
 		if (f[0] == "HTTP/1.0" || f[0] == "HTTP/1.1") && f[1] == "407" {
-			resp, err := http.ReadResponse(tc.connReader, nil)
+			resp, err := http.ReadResponse(bufio.NewReader(responseReader), nil)
 			if err != nil {
 				return 0, err
 			}
@@ -178,7 +179,6 @@ func (tc *transportConn) Read(p []byte) (int, error) {
 				if err != nil {
 					return 0, err
 				}
-				tc.connReader = bufio.NewReader(tc.Conn)
 			}
 
 			// Authenticate and replay the request
@@ -193,8 +193,7 @@ func (tc *transportConn) Read(p []byte) (int, error) {
 		return 0, err
 	default:
 	}
-	n, err := tc.connReader.Read(p)
-	return n, err
+	return
 }
 
 func (tc *transportConn) Write(p []byte) (n int, err error) {
