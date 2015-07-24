@@ -50,3 +50,7 @@ func (a *BasicHttpAuthenticator) Authenticate(req *http.Request, resp *http.Resp
 		return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
 	}
 }
+
+func (a *BasicHttpAuthenticator) IsConnectionBased() bool {
+	return false
+}

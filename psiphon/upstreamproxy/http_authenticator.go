@@ -36,6 +36,7 @@ const (
 
 type HttpAuthenticator interface {
 	Authenticate(req *http.Request, resp *http.Response, username, pasword string) error
+	IsConnectionBased() bool
 }
 
 func parseAuthChallenge(resp *http.Response) (map[string]string, error) {

@@ -174,3 +174,7 @@ func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Res
 	a.state = DIGEST_HTTP_AUTH_STATE_RESPONSE_GENERATED
 	return nil
 }
+
+func (a *DigestHttpAuthenticator) IsConnectionBased() bool {
+	return false
+}

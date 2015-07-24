@@ -108,3 +108,7 @@ func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Respo
 
 	return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
 }
+
+func (a *NTLMHttpAuthenticator) IsConnectionBased() bool {
+	return true
+}
