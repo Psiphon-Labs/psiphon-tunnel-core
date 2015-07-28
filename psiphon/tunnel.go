@@ -206,18 +206,31 @@ func (tunnel *Tunnel) Dial(
 		return nil, errors.New("tunnel is closed")
 	}
 
-	sshPortForwardConn, err := tunnel.sshClient.Dial("tcp", remoteAddr)
-	if err != nil {
+	type tunnelDialResult struct {
+		sshPortForwardConn net.Conn
+		err                error
+	}
+	resultChannel := make(chan *tunnelDialResult, 2)
+	time.AfterFunc(TUNNEL_PORT_FORWARD_DIAL_TIMEOUT, func() {
+		resultChannel <- &tunnelDialResult{nil, errors.New("tunnel dial timeout")}
+	})
+	go func() {
+		sshPortForwardConn, err := tunnel.sshClient.Dial("tcp", remoteAddr)
+		resultChannel <- &tunnelDialResult{sshPortForwardConn, err}
+	}()
+	result := <-resultChannel
+
+	if result.err != nil {
 		// TODO: conditional on type of error or error message?
 		select {
 		case tunnel.portForwardFailures <- 1:
 		default:
 		}
-		return nil, ContextError(err)
+		return nil, ContextError(result.err)
 	}
 
 	conn = &TunneledConn{
-		Conn:           sshPortForwardConn,
+		Conn:           result.sshPortForwardConn,
 		tunnel:         tunnel,
 		downstreamConn: downstreamConn}
 
