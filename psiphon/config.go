@@ -37,6 +37,7 @@ const (
 	TUNNEL_READ_TIMEOUT                          = 0 * time.Second
 	TUNNEL_WRITE_TIMEOUT                         = 5 * time.Second
 	TUNNEL_OPERATE_SHUTDOWN_TIMEOUT              = 2 * time.Second
+	TUNNEL_PORT_FORWARD_DIAL_TIMEOUT             = 10 * time.Second
 	TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES      = 256
 	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MIN             = 60 * time.Second
 	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX             = 120 * time.Second
