@@ -101,10 +101,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (conn *TCPConn, err e
 	copy(ip[:], ipAddrs[index].To4())
 
 	// Enable interruption
-	conn = &TCPConn{
-		interruptible: interruptibleTCPSocket{socketFd: socketFd},
-		readTimeout:   config.ReadTimeout,
-		writeTimeout:  config.WriteTimeout}
+	conn = &TCPConn{interruptible: interruptibleTCPSocket{socketFd: socketFd}}
 
 	if !config.PendingConns.Add(conn) {
 		return nil, ContextError(errors.New("pending connections already closed"))

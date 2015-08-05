@@ -83,7 +83,6 @@ type Tunnel struct {
 	session                  *Session
 	protocol                 string
 	conn                     net.Conn
-	closedSignal             chan struct{}
 	sshClient                *ssh.Client
 	operateWaitGroup         *sync.WaitGroup
 	shutdownOperateBroadcast chan struct{}
@@ -114,7 +113,7 @@ func EstablishTunnel(
 	}
 
 	// Build transport layers and establish SSH connection
-	conn, closedSignal, sshClient, err := dialSsh(
+	conn, sshClient, err := dialSsh(
 		config, pendingConns, serverEntry, selectedProtocol, sessionId)
 	if err != nil {
 		return nil, ContextError(err)
@@ -135,7 +134,6 @@ func EstablishTunnel(
 		serverEntry:              serverEntry,
 		protocol:                 selectedProtocol,
 		conn:                     conn,
-		closedSignal:             closedSignal,
 		sshClient:                sshClient,
 		operateWaitGroup:         new(sync.WaitGroup),
 		shutdownOperateBroadcast: make(chan struct{}),
@@ -174,8 +172,13 @@ func EstablishTunnel(
 // Close stops operating the tunnel and closes the underlying connection.
 // Supports multiple and/or concurrent calls to Close().
 func (tunnel *Tunnel) Close() {
+
 	tunnel.mutex.Lock()
-	if !tunnel.isClosed {
+	isClosed := tunnel.isClosed
+	tunnel.isClosed = true
+	tunnel.mutex.Unlock()
+
+	if !isClosed {
 		// Signal operateTunnel to stop before closing the tunnel -- this
 		// allows a final status request to be made in the case of an orderly
 		// shutdown.
@@ -192,8 +195,6 @@ func (tunnel *Tunnel) Close() {
 		// tunnel.conn.Close() may get called twice, which is allowed.
 		tunnel.conn.Close()
 	}
-	tunnel.isClosed = true
-	tunnel.mutex.Unlock()
 }
 
 // Dial establishes a port forward connection through the tunnel
@@ -204,6 +205,7 @@ func (tunnel *Tunnel) Dial(
 	tunnel.mutex.Lock()
 	isClosed := tunnel.isClosed
 	tunnel.mutex.Unlock()
+
 	if isClosed {
 		return nil, errors.New("tunnel is closed")
 	}
@@ -352,7 +354,7 @@ func dialSsh(
 	pendingConns *Conns,
 	serverEntry *ServerEntry,
 	selectedProtocol,
-	sessionId string) (conn net.Conn, closedSignal chan struct{}, sshClient *ssh.Client, err error) {
+	sessionId string) (conn net.Conn, sshClient *ssh.Client, err error) {
 
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
@@ -383,11 +385,11 @@ func dialSsh(
 		// fronting-capable servers.
 
 		if len(serverEntry.MeekFrontingAddresses) == 0 {
-			return nil, nil, nil, ContextError(errors.New("MeekFrontingAddresses is empty"))
+			return nil, nil, ContextError(errors.New("MeekFrontingAddresses is empty"))
 		}
 		index, err := MakeSecureRandomInt(len(serverEntry.MeekFrontingAddresses))
 		if err != nil {
-			return nil, nil, nil, ContextError(err)
+			return nil, nil, ContextError(err)
 		}
 		frontingAddress = serverEntry.MeekFrontingAddresses[index]
 	}
@@ -397,15 +399,10 @@ func dialSsh(
 		selectedProtocol,
 		frontingAddress)
 
-	closedSignal = make(chan struct{}, 1)
-
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
-		ClosedSignal:     closedSignal,
 		UpstreamProxyUrl: config.UpstreamProxyUrl,
 		ConnectTimeout:   TUNNEL_CONNECT_TIMEOUT,
-		ReadTimeout:      TUNNEL_READ_TIMEOUT,
-		WriteTimeout:     TUNNEL_WRITE_TIMEOUT,
 		PendingConns:     pendingConns,
 		DeviceBinder:     config.DeviceBinder,
 		DnsServerGetter:  config.DnsServerGetter,
@@ -413,12 +410,12 @@ func dialSsh(
 	if useMeek {
 		conn, err = DialMeek(serverEntry, sessionId, frontingAddress, dialConfig)
 		if err != nil {
-			return nil, nil, nil, ContextError(err)
+			return nil, nil, ContextError(err)
 		}
 	} else {
 		conn, err = DialTCP(fmt.Sprintf("%s:%d", serverEntry.IpAddress, port), dialConfig)
 		if err != nil {
-			return nil, nil, nil, ContextError(err)
+			return nil, nil, ContextError(err)
 		}
 	}
 
@@ -436,14 +433,14 @@ func dialSsh(
 	if useObfuscatedSsh {
 		sshConn, err = NewObfuscatedSshConn(conn, serverEntry.SshObfuscatedKey)
 		if err != nil {
-			return nil, nil, nil, ContextError(err)
+			return nil, nil, ContextError(err)
 		}
 	}
 
 	// Now establish the SSH session over the sshConn transport
 	expectedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.SshHostKey)
 	if err != nil {
-		return nil, nil, nil, ContextError(err)
+		return nil, nil, ContextError(err)
 	}
 	sshCertChecker := &ssh.CertChecker{
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
@@ -459,7 +456,7 @@ func dialSsh(
 			SshPassword string `json:"SshPassword"`
 		}{sessionId, serverEntry.SshPassword})
 	if err != nil {
-		return nil, nil, nil, ContextError(err)
+		return nil, nil, ContextError(err)
 	}
 	sshClientConfig := &ssh.ClientConfig{
 		User: serverEntry.SshUsername,
@@ -503,10 +500,10 @@ func dialSsh(
 
 	result := <-resultChannel
 	if result.err != nil {
-		return nil, nil, nil, ContextError(result.err)
+		return nil, nil, ContextError(result.err)
 	}
 
-	return conn, closedSignal, result.sshClient, nil
+	return conn, result.sshClient, nil
 }
 
 // operateTunnel periodically sends status requests (traffic stats updates updates)
@@ -597,9 +594,6 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 				err = sendSshKeepAlive(tunnel.sshClient, tunnel.conn)
 				sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
 			}
-
-		case <-tunnel.closedSignal:
-			err = errors.New("tunnel closed unexpectedly")
 
 		case <-tunnel.shutdownOperateBroadcast:
 			// Attempt to send any remaining stats
