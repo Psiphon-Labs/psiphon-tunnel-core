@@ -123,6 +123,7 @@ func EstablishTunnel(
 	// Cleanup on error
 	defer func() {
 		if err != nil {
+			sshClient.Close()
 			conn.Close()
 		}
 	}()
@@ -187,6 +188,7 @@ func (tunnel *Tunnel) Close() {
 		close(tunnel.shutdownOperateBroadcast)
 		tunnel.operateWaitGroup.Wait()
 		timer.Stop()
+		tunnel.sshClient.Close()
 		// tunnel.conn.Close() may get called twice, which is allowed.
 		tunnel.conn.Close()
 	}
@@ -567,7 +569,7 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 			statsTimer.Reset(nextStatusRequestPeriod())
 
 		case <-sshKeepAliveTimer.C:
-			err = sendSshKeepAlive(tunnel.sshClient)
+			err = sendSshKeepAlive(tunnel.sshClient, tunnel.conn)
 			sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
 
 		case failures := <-tunnel.portForwardFailures:
@@ -583,7 +585,7 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 				// on the server, so we don't abort the connection until the threshold
 				// is hit. But if we can't make a simple round trip request to the
 				// server, we'll immediately abort.
-				err = sendSshKeepAlive(tunnel.sshClient)
+				err = sendSshKeepAlive(tunnel.sshClient, tunnel.conn)
 				sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
 			}
 
@@ -607,7 +609,7 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 // sendSshKeepAlive is a helper which sends a keepalive@openssh.com request
 // on the specified SSH connections and returns true of the request succeeds
 // within a specified timeout.
-func sendSshKeepAlive(sshClient *ssh.Client) error {
+func sendSshKeepAlive(sshClient *ssh.Client, conn net.Conn) error {
 
 	errChannel := make(chan error, 2)
 	time.AfterFunc(TUNNEL_SSH_KEEP_ALIVE_TIMEOUT, func() {
@@ -622,7 +624,13 @@ func sendSshKeepAlive(sshClient *ssh.Client) error {
 		errChannel <- err
 	}()
 
-	return ContextError(<-errChannel)
+	err := <-errChannel
+	if err != nil {
+		sshClient.Close()
+		conn.Close()
+	}
+
+	return ContextError(err)
 }
 
 // sendStats is a helper for sending session stats to the server.
