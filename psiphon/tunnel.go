@@ -536,6 +536,14 @@ func dialSsh(
 // - "read tcp ... connection reset by peer"
 // - "ssh: unexpected packet in response to channel open: <nil>"
 //
+// Update: the above is superceded by SSH keep alives with timeouts. When a keep
+// alive times out, the tunnel is marked as failed. Keep alives are triggered
+// periodically, and also immediately in the case of a port forward failure (so
+// as to immediately detect a situation such as a device waking up and trying
+// to use a dead tunnel). By default, port forward theshold counting does not
+// cause a tunnel to be marked as failed, with the conservative assumption that
+// a server which responds to an SSH keep alive is fully functional.
+//
 func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 	defer tunnel.operateWaitGroup.Done()
 
@@ -577,7 +585,8 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 			tunnel.portForwardFailureTotal += failures
 			NoticeInfo("port forward failures for %s: %d",
 				tunnel.serverEntry.IpAddress, tunnel.portForwardFailureTotal)
-			if tunnel.portForwardFailureTotal > config.PortForwardFailureThreshold {
+			if config.PortForwardFailureThreshold > 0 &&
+				tunnel.portForwardFailureTotal > config.PortForwardFailureThreshold {
 				err = errors.New("tunnel exceeded port forward failure threshold")
 			} else {
 				// Try an SSH keep alive to check the state of the SSH connection
