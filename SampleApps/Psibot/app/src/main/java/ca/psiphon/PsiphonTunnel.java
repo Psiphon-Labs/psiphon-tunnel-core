@@ -302,6 +302,9 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         // Note: onConnecting/onConnected logic assumes 1 tunnel connection
         json.put("TunnelPoolSize", 1);
 
+        // Continue to run indefinitely until connected
+        json.put("EstablishTunnelTimeoutSeconds", 0);
+
         if (mLocalSocksProxyPort != 0) {
             // When mLocalSocksProxyPort is set, tun2socks is already configured
             // to use that port value. So we force use of the same port.
