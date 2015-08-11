@@ -34,13 +34,6 @@ const DNS_PORT = 53
 // of a Psiphon dialer (TCPDial, MeekDial, etc.)
 type DialConfig struct {
 
-	// ClosedSignal is triggered when an underlying TCPConn network
-	// connection is closed. This is used in operateTunnel to detect
-	// an unexpected disconnect. Channel should be have buffer to
-	// receive at least on signal. Sender in TCPConn.Close() does not
-	// block.
-	ClosedSignal chan struct{}
-
 	// UpstreamProxyUrl specifies a proxy to connect through.
 	// E.g., "http://proxyhost:8080"
 	//       "socks5://user:password@proxyhost:1080"
@@ -53,8 +46,6 @@ type DialConfig struct {
 	UpstreamProxyUrl string
 
 	ConnectTimeout time.Duration
-	ReadTimeout    time.Duration
-	WriteTimeout   time.Duration
 
 	// PendingConns is used to interrupt dials in progress.
 	// The dial may be interrupted using PendingConns.CloseAll(): on platforms
@@ -100,21 +91,6 @@ func (TimeoutError) Temporary() bool { return true }
 
 // Dialer is a custom dialer compatible with http.Transport.Dial.
 type Dialer func(string, string) (net.Conn, error)
-
-// Conn is a net.Conn which supports sending a signal to a channel when
-// it is closed. In Psiphon, this interface is implemented by tunnel
-// connection types (DirectConn and MeekConn) and the close signal is
-// used as one trigger for tearing down the tunnel.
-type Conn interface {
-	net.Conn
-
-	// SetClosedSignal sets the channel which will be signaled
-	// when the connection is closed. This function returns false
-	// if the connection is already closed (and would never send
-	// the signal). SetClosedSignal and Close may be called by
-	// concurrent goroutines.
-	SetClosedSignal(closedSignal chan struct{}) bool
-}
 
 // Conns is a synchronized list of Conns that is used to coordinate
 // interrupting a set of goroutines establishing connections, or

@@ -21,6 +21,7 @@ package ca.psiphon.psibot;
 
 import android.app.Notification;
 import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.VpnService;
@@ -29,27 +30,30 @@ import android.preference.PreferenceManager;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.util.List;
 
-import ca.psiphon.PsiphonVpn;
+import ca.psiphon.PsiphonTunnel;
 
 public class Service extends VpnService
-        implements PsiphonVpn.HostService, SharedPreferences.OnSharedPreferenceChangeListener {
+        implements PsiphonTunnel.HostService, SharedPreferences.OnSharedPreferenceChangeListener {
 
-    private PsiphonVpn mPsiphonVpn;
+    private PsiphonTunnel mPsiphonTunnel;
 
     @Override
     public void onCreate() {
-        mPsiphonVpn = PsiphonVpn.newPsiphonVpn(this);
+        mPsiphonTunnel = PsiphonTunnel.newPsiphonVpn(this);
         startForeground(R.string.foregroundServiceNotificationId, makeForegroundNotification());
         try {
-            if (!mPsiphonVpn.startRouting()) {
-                throw new PsiphonVpn.Exception("VPN not prepared");
+            if (!mPsiphonTunnel.startRouting()) {
+                throw new PsiphonTunnel.Exception("VPN not prepared");
             }
-            mPsiphonVpn.startTunneling();
-        } catch (PsiphonVpn.Exception e) {
+            mPsiphonTunnel.startTunneling("");
+        } catch (PsiphonTunnel.Exception e) {
             Log.addEntry("failed to start Psiphon VPN: " + e.getMessage());
-            mPsiphonVpn.stop();
+            mPsiphonTunnel.stop();
             stopSelf();
         }
         PreferenceManager.getDefaultSharedPreferences(this).
@@ -60,17 +64,17 @@ public class Service extends VpnService
     public void onDestroy() {
         PreferenceManager.getDefaultSharedPreferences(this).
                 unregisterOnSharedPreferenceChangeListener(this);
-        mPsiphonVpn.stop();
+        mPsiphonTunnel.stop();
         stopForeground(true);
     }
 
     @Override
     public synchronized void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
         try {
-            mPsiphonVpn.restartPsiphon();
-        } catch (PsiphonVpn.Exception e) {
+            mPsiphonTunnel.restartPsiphon();
+        } catch (PsiphonTunnel.Exception e) {
             Log.addEntry("failed to restart Psiphon: " + e.getMessage());
-            mPsiphonVpn.stop();
+            mPsiphonTunnel.stop();
             stopSelf();
         }
     }
@@ -78,6 +82,11 @@ public class Service extends VpnService
     @Override
     public String getAppName() {
         return getString(R.string.app_name);
+    }
+
+    @Override
+    public Context getContext() {
+        return this;
     }
 
     @Override
@@ -91,17 +100,16 @@ public class Service extends VpnService
     }
 
     @Override
-    public InputStream getPsiphonConfigResource() {
-        return getResources().openRawResource(R.raw.psiphon_config);
-    }
-
-    @Override
-    public void customizeConfigParameters(JSONObject config) {
-        // User-specified settings.
-        // Note: currently, validation is not comprehensive, and related errors are
-        // not directly parsed.
-        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
+    public String getPsiphonConfig() {
         try {
+            JSONObject config = new JSONObject(
+                    readInputStreamToString(
+                        getResources().openRawResource(R.raw.psiphon_config)));
+
+            // Insert user-specified settings.
+            // Note: currently, validation is not comprehensive, and related errors are
+            // not directly parsed.
+            SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
             config.put("EgressRegion",
                     preferences.getString(
                             getString(R.string.preferenceEgressRegion),
@@ -139,21 +147,97 @@ public class Service extends VpnService
                             preferences.getString(
                                     getString(R.string.preferencePortForwardFailureThreshold),
                                     getString(R.string.preferencePortForwardFailureThresholdDefaultValue))));
+
+            return config.toString();
+
+        } catch (IOException e) {
+            Log.addEntry("error setting config parameters: " + e.getMessage());
         } catch (JSONException e) {
             Log.addEntry("error setting config parameters: " + e.getMessage());
         }
+        return "";
     }
 
     @Override
-    public void logWarning(String message) {
-        android.util.Log.w(getString(R.string.app_name), message);
-        Log.addEntry(message);
-    }
-
-    @Override
-    public void logInfo(String message) {
+    public void onDiagnosticMessage(String message) {
         android.util.Log.i(getString(R.string.app_name), message);
         Log.addEntry(message);
+    }
+
+    @Override
+    public void onAvailableEgressRegions(List<String> regions) {
+        // TODO: show only available regions in SettingActivity
+    }
+
+    @Override
+    public void onSocksProxyPortInUse(int port) {
+        Log.addEntry("local SOCKS proxy port in use: " + Integer.toString(port));
+    }
+
+    @Override
+    public void onHttpProxyPortInUse(int port) {
+        Log.addEntry("local HTTP proxy port in use: " + Integer.toString(port));
+    }
+
+    @Override
+    public void onListeningSocksProxyPort(int port) {
+        Log.addEntry("local SOCKS proxy listening on port: " + Integer.toString(port));
+    }
+
+    @Override
+    public void onListeningHttpProxyPort(int port) {
+        Log.addEntry("local HTTP proxy listening on port: " + Integer.toString(port));
+    }
+
+    @Override
+    public void onUpstreamProxyError(String message) {
+        Log.addEntry("upstream proxy error: " + message);
+    }
+
+    @Override
+    public void onConnecting() {
+        Log.addEntry("connecting...");
+    }
+
+    @Override
+    public void onConnected() {
+        Log.addEntry("connected");
+    }
+
+    @Override
+    public void onHomepage(String url) {
+        Log.addEntry("home page: " + url);
+    }
+
+    @Override
+    public void onClientUpgradeDownloaded(String filename) {
+        Log.addEntry("client upgrade downloaded");
+    }
+
+    @Override
+    public void onSplitTunnelRegion(String region) {
+        Log.addEntry("split tunnel region: " + region);
+    }
+
+    @Override
+    public void onUntunneledAddress(String address) {
+        Log.addEntry("untunneled address: " + address);
+    }
+
+    private static String readInputStreamToString(InputStream inputStream) throws IOException {
+        return new String(readInputStreamToBytes(inputStream), "UTF-8");
+    }
+
+    private static byte[] readInputStreamToBytes(InputStream inputStream) throws IOException {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        int readCount;
+        byte[] buffer = new byte[16384];
+        while ((readCount = inputStream.read(buffer, 0, buffer.length)) != -1) {
+            outputStream.write(buffer, 0, readCount);
+        }
+        outputStream.flush();
+        inputStream.close();
+        return outputStream.toByteArray();
     }
 
     private Notification makeForegroundNotification() {
