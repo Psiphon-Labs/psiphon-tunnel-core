@@ -59,6 +59,8 @@ const (
 	FETCH_ROUTES_TIMEOUT                         = 1 * time.Minute
 	DOWNLOAD_UPGRADE_TIMEOUT                     = 15 * time.Minute
 	DOWNLOAD_UPGRADE_RETRY_PAUSE_PERIOD          = 5 * time.Second
+	IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION    = 2 * time.Minute
+	IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD   = 3
 )
 
 // To distinguish omitted timeout params from explicit 0 value timeout

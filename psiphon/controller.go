@@ -34,28 +34,29 @@ import (
 // connect to; establishes and monitors tunnels; and runs local proxies which
 // route traffic through the tunnels.
 type Controller struct {
-	config                      *Config
-	sessionId                   string
-	componentFailureSignal      chan struct{}
-	shutdownBroadcast           chan struct{}
-	runWaitGroup                *sync.WaitGroup
-	establishedTunnels          chan *Tunnel
-	failedTunnels               chan *Tunnel
-	tunnelMutex                 sync.Mutex
-	establishedOnce             bool
-	tunnels                     []*Tunnel
-	nextTunnel                  int
-	startedConnectedReporter    bool
-	startedUpgradeDownloader    bool
-	isEstablishing              bool
-	establishWaitGroup          *sync.WaitGroup
-	stopEstablishingBroadcast   chan struct{}
-	candidateServerEntries      chan *ServerEntry
-	establishPendingConns       *Conns
-	untunneledPendingConns      *Conns
-	untunneledDialConfig        *DialConfig
-	splitTunnelClassifier       *SplitTunnelClassifier
-	signalFetchRemoteServerList chan struct{}
+	config                         *Config
+	sessionId                      string
+	componentFailureSignal         chan struct{}
+	shutdownBroadcast              chan struct{}
+	runWaitGroup                   *sync.WaitGroup
+	establishedTunnels             chan *Tunnel
+	failedTunnels                  chan *Tunnel
+	tunnelMutex                    sync.Mutex
+	establishedOnce                bool
+	tunnels                        []*Tunnel
+	nextTunnel                     int
+	startedConnectedReporter       bool
+	startedUpgradeDownloader       bool
+	isEstablishing                 bool
+	establishWaitGroup             *sync.WaitGroup
+	stopEstablishingBroadcast      chan struct{}
+	candidateServerEntries         chan *ServerEntry
+	establishPendingConns          *Conns
+	untunneledPendingConns         *Conns
+	untunneledDialConfig           *DialConfig
+	splitTunnelClassifier          *SplitTunnelClassifier
+	signalFetchRemoteServerList    chan struct{}
+	impairedProtocolClassification map[string]int
 }
 
 // NewController initializes a new controller.
@@ -102,7 +103,8 @@ func NewController(config *Config) (controller *Controller, err error) {
 		untunneledDialConfig:     untunneledDialConfig,
 		// A buffer allows at least one signal to be sent even when the receiver is
 		// not listening. Senders should not block.
-		signalFetchRemoteServerList: make(chan struct{}, 1),
+		signalFetchRemoteServerList:    make(chan struct{}, 1),
+		impairedProtocolClassification: make(map[string]int),
 	}
 
 	controller.splitTunnelClassifier = NewSplitTunnelClassifier(config, controller)
@@ -419,6 +421,8 @@ loop:
 			default:
 			}
 
+			controller.classifyImpairedProtocol(failedTunnel)
+
 			// Concurrency note: only this goroutine may call startEstablishing/stopEstablishing
 			// and access isEstablishing.
 			if !controller.isEstablishing {
@@ -460,6 +464,48 @@ loop:
 	}
 
 	NoticeInfo("exiting run tunnels")
+}
+
+// classifyImpairedProtocol tracks "impaired" protocol classifications for failed
+// tunnels. A protocol is classified as impaired if a tunnel using that protocol
+// fails, repeatedly, shortly after the start of the session. During tunnel
+// establishment, impaired protocols are briefly skipped.
+//
+// One purpose of this measure is to defend against an attack where the adversary,
+// for example, tags an OSSH TCP connection as an "unidentified" protocol; allows
+// it to connect; but then kills the underlying TCP connection after a short time.
+// Since OSSH has less latency than other protocols that may bypass an "unidentified"
+// filter, these other protocols might never be selected for use.
+//
+// Concurrency note: only the runTunnels() goroutine may call classifyImpairedProtocol
+func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
+	if failedTunnel.sessionStartTime.Add(IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION).After(time.Now()) {
+		controller.impairedProtocolClassification[failedTunnel.protocol] += 1
+	} else {
+		controller.impairedProtocolClassification[failedTunnel.protocol] = 0
+	}
+	if len(controller.getImpairedProtocols()) == len(SupportedTunnelProtocols) {
+		// Reset classification if all protocols are classified as impaired as
+		// the network situation (or attack) may not be protocol-specific.
+		controller.impairedProtocolClassification = make(map[string]int)
+	}
+}
+
+// getImpairedProtocols returns a list of protocols that have sufficient
+// classifications to be considered impaired protocols.
+//
+// Concurrency note: only the runTunnels() goroutine may call getImpairedProtocols
+func (controller *Controller) getImpairedProtocols() []string {
+	if len(controller.impairedProtocolClassification) > 0 {
+		NoticeInfo("impaired protocols: %+v", controller.impairedProtocolClassification)
+	}
+	impairedProtocols := make([]string, 0)
+	for protocol, count := range controller.impairedProtocolClassification {
+		if count >= IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD {
+			impairedProtocols = append(impairedProtocols, protocol)
+		}
+	}
+	return impairedProtocols
 }
 
 // SignalTunnelFailure implements the TunnelOwner interface. This function
@@ -676,7 +722,8 @@ func (controller *Controller) startEstablishing() {
 	}
 
 	controller.establishWaitGroup.Add(1)
-	go controller.establishCandidateGenerator()
+	go controller.establishCandidateGenerator(
+		controller.getImpairedProtocols())
 }
 
 // stopEstablishing signals the establish goroutines to stop and waits
@@ -704,7 +751,7 @@ func (controller *Controller) stopEstablishing() {
 // establishCandidateGenerator populates the candidate queue with server entries
 // from the data store. Server entries are iterated in rank order, so that promoted
 // servers with higher rank are priority candidates.
-func (controller *Controller) establishCandidateGenerator() {
+func (controller *Controller) establishCandidateGenerator(impairedProtocols []string) {
 	defer controller.establishWaitGroup.Done()
 	defer close(controller.candidateServerEntries)
 
@@ -729,7 +776,7 @@ loop:
 
 		// Send each iterator server entry to the establish workers
 		startTime := time.Now()
-		for {
+		for i := 0; ; i++ {
 			serverEntry, err := iterator.Next()
 			if err != nil {
 				NoticeAlert("failed to get next candidate: %s", err)
@@ -739,6 +786,24 @@ loop:
 			if serverEntry == nil {
 				// Completed this iteration
 				break
+			}
+
+			// Disable impaired protocols. This is only done for the
+			// first iteration of the ESTABLISH_TUNNEL_WORK_TIME_SECONDS
+			// loop since (a) one iteration should be sufficient to
+			// evade the attack; (b) there's a good chance of false
+			// positives (such as short session durations due to network
+			// hopping on a mobile device).
+			// Impaired protocols logic is not applied when
+			// config.TunnelProtocol is specified.
+			if i == 0 && controller.config.TunnelProtocol == "" {
+				serverEntry.DisableImpairedProtocols(impairedProtocols)
+				if len(serverEntry.GetSupportedProtocols()) == 0 {
+					// Skip this server entry, as it has no supported
+					// protocols after disabling the impaired ones
+					// TODO: modify ServerEntryIterator to skip these?
+					continue
+				}
 			}
 
 			// TODO: here we could generate multiple candidates from the

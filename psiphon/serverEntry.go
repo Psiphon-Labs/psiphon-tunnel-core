@@ -29,6 +29,20 @@ import (
 	"strings"
 )
 
+const (
+	TUNNEL_PROTOCOL_SSH            = "SSH"
+	TUNNEL_PROTOCOL_OBFUSCATED_SSH = "OSSH"
+	TUNNEL_PROTOCOL_UNFRONTED_MEEK = "UNFRONTED-MEEK-OSSH"
+	TUNNEL_PROTOCOL_FRONTED_MEEK   = "FRONTED-MEEK-OSSH"
+)
+
+var SupportedTunnelProtocols = []string{
+	TUNNEL_PROTOCOL_FRONTED_MEEK,
+	TUNNEL_PROTOCOL_UNFRONTED_MEEK,
+	TUNNEL_PROTOCOL_OBFUSCATED_SSH,
+	TUNNEL_PROTOCOL_SSH,
+}
+
 // ServerEntry represents a Psiphon server. It contains information
 // about how to estalish a tunnel connection to the server through
 // several protocols. ServerEntry are JSON records downloaded from
@@ -52,6 +66,47 @@ type ServerEntry struct {
 	MeekFrontingHost              string   `json:"meekFrontingHost"`
 	MeekFrontingDomain            string   `json:"meekFrontingDomain"`
 	MeekFrontingAddresses         []string `json:"meekFrontingAddresses"`
+}
+
+// SupportsProtocol returns true if and only if the ServerEntry has
+// the necessary capability to support the specified tunnel protocol.
+func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
+	requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
+	return Contains(serverEntry.Capabilities, requiredCapability)
+}
+
+// GetSupportedProtocols returns a list of tunnel protocols supported
+// by the ServerEntry's capabilities.
+func (serverEntry *ServerEntry) GetSupportedProtocols() []string {
+	supportedProtocols := make([]string, 0)
+	for _, protocol := range SupportedTunnelProtocols {
+		requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
+		if Contains(serverEntry.Capabilities, requiredCapability) {
+			supportedProtocols = append(supportedProtocols, protocol)
+		}
+	}
+	return supportedProtocols
+}
+
+// DisableImpairedProtocols modifies the ServerEntry to disable
+// the specified protocols.
+// Note: this assumes that protocol capabilities are 1-to-1.
+func (serverEntry *ServerEntry) DisableImpairedProtocols(impairedProtocols []string) {
+	capabilities := make([]string, 0)
+	for _, capability := range serverEntry.Capabilities {
+		omit := false
+		for _, protocol := range impairedProtocols {
+			requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
+			if capability == requiredCapability {
+				omit = true
+				break
+			}
+		}
+		if !omit {
+			capabilities = append(capabilities, capability)
+		}
+	}
+	serverEntry.Capabilities = capabilities
 }
 
 // DecodeServerEntry extracts server entries from the encoding
