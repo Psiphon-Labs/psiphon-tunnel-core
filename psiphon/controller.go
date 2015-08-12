@@ -411,7 +411,7 @@ loop:
 			// establishPendingConns.Reset() which clears the closed flag in
 			// establishPendingConns; this causes the pendingConns.Add() within
 			// interruptibleTCPDial to succeed instead of aborting, and the result
-			// is that it's possible for extablish goroutines to run all the way through
+			// is that it's possible for establish goroutines to run all the way through
 			// NewSession before being discarded... delaying shutdown.
 			select {
 			case <-controller.shutdownBroadcast:
@@ -720,6 +720,13 @@ loop:
 	// Repeat until stopped
 	for {
 
+		if !WaitForNetworkConnectivity(
+			controller.config.NetworkConnectivityChecker,
+			controller.stopEstablishingBroadcast,
+			controller.shutdownBroadcast) {
+			break loop
+		}
+
 		// Send each iterator server entry to the establish workers
 		startTime := time.Now()
 		for {
@@ -802,12 +809,6 @@ loop:
 		// There may already be a tunnel to this candidate. If so, skip it.
 		if controller.isActiveTunnelServerEntry(serverEntry) {
 			continue
-		}
-
-		if !WaitForNetworkConnectivity(
-			controller.config.NetworkConnectivityChecker,
-			controller.stopEstablishingBroadcast) {
-			break loop
 		}
 
 		tunnel, err := EstablishTunnel(
