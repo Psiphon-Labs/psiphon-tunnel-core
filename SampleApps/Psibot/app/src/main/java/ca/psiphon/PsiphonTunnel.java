@@ -268,12 +268,12 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         stopPsiphon();
         mHostService.onDiagnosticMessage("starting Psiphon library");
         try {
-            boolean useDeviceBinder = (mTunFd != null);
+            boolean isVpnMode = (mTunFd != null);
             Psi.Start(
-                loadPsiphonConfig(mHostService.getContext()),
+                loadPsiphonConfig(mHostService.getContext(), isVpnMode),
                 embeddedServerEntries,
                 this,
-                useDeviceBinder);
+                isVpnMode);
         } catch (java.lang.Exception e) {
             throw new Exception("failed to start Psiphon library", e);
         }
@@ -286,7 +286,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         mHostService.onDiagnosticMessage("Psiphon library stopped");
     }
 
-    private String loadPsiphonConfig(Context context)
+    private String loadPsiphonConfig(Context context, boolean isVpnMode)
             throws IOException, JSONException {
 
         // Load settings from the raw resource JSON config file and
@@ -305,6 +305,17 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         // Continue to run indefinitely until connected
         json.put("EstablishTunnelTimeoutSeconds", 0);
 
+        // Enable tunnel auto-reconnect after a threshold number of port
+        // forward failures. By default, this mechanism is disabled in
+        // tunnel-core due to the chance of false positives due to
+        // bad user input. Since VpnService mode resolves domain names
+        // differently (udpgw), invalid domain name user input won't result
+        // in SSH port forward failures.
+        // TODO: only enable when
+        if (isVpnMode) {
+            json.put("PortForwardFailureThreshold", 10);
+        }
+        
         if (mLocalSocksProxyPort != 0) {
             // When mLocalSocksProxyPort is set, tun2socks is already configured
             // to use that port value. So we force use of the same port.
