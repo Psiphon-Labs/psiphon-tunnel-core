@@ -36,11 +36,17 @@ const (
 )
 
 type DigestHttpAuthenticator struct {
-	state DigestHttpAuthState
+	state    DigestHttpAuthState
+	username string
+	password string
 }
 
-func newDigestAuthenticator() *DigestHttpAuthenticator {
-	return &DigestHttpAuthenticator{state: DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED}
+func newDigestAuthenticator(username, password string) *DigestHttpAuthenticator {
+	return &DigestHttpAuthenticator{
+		state:    DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED,
+		username: username,
+		password: password,
+	}
 }
 
 /* Adapted from https://github.com/ryanjdew/http-digest-auth-client */
@@ -124,7 +130,7 @@ func h(data string) string {
 	return fmt.Sprintf("%x", digest.Sum(nil))
 }
 
-func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response, username, password string) error {
+func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response) error {
 	if a.state != DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
 		return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
 	}
@@ -168,8 +174,8 @@ func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Res
 		d.Algorithm = digestParams["algorithm"]
 	}
 	d.Nc = 0x0
-	d.Username = username
-	d.Password = password
+	d.Username = a.username
+	d.Password = a.password
 	d.ApplyAuth(req)
 	a.state = DIGEST_HTTP_AUTH_STATE_RESPONSE_GENERATED
 	return nil
@@ -177,4 +183,16 @@ func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Res
 
 func (a *DigestHttpAuthenticator) IsConnectionBased() bool {
 	return false
+}
+
+func (a *DigestHttpAuthenticator) IsComplete() bool {
+	return a.state == DIGEST_HTTP_AUTH_STATE_RESPONSE_GENERATED
+}
+
+func (a *DigestHttpAuthenticator) Reset() {
+	a.state = DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED
+}
+
+func (a *DigestHttpAuthenticator) PreAuthenticate(req *http.Request) error {
+	return nil
 }

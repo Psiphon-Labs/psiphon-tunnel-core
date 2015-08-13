@@ -145,7 +145,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	req.Header.Set("User-Agent", "")
 
 	if pc.authState == HTTP_AUTH_STATE_CHALLENGED {
-		err := pc.authenticator.Authenticate(req, pc.authResponse, username, password)
+		err := pc.authenticator.Authenticate(req, pc.authResponse)
 		if err != nil {
 			pc.authState = HTTP_AUTH_STATE_FAILURE
 			//Already wrapped in proxyError
@@ -169,7 +169,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	if resp.StatusCode == 407 {
 		if pc.authState == HTTP_AUTH_STATE_UNCHALLENGED {
 			var auth_err error = nil
-			pc.authenticator, auth_err = NewHttpAuthenticator(resp)
+			pc.authenticator, auth_err = NewHttpAuthenticator(resp, username, password)
 			if auth_err != nil {
 				pc.httpClientConn.Close()
 				pc.authState = HTTP_AUTH_STATE_FAILURE

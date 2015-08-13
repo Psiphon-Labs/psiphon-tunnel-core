@@ -36,14 +36,20 @@ const (
 )
 
 type NTLMHttpAuthenticator struct {
-	state NTLMHttpAuthState
+	state    NTLMHttpAuthState
+	username string
+	password string
 }
 
-func newNTLMAuthenticator() *NTLMHttpAuthenticator {
-	return &NTLMHttpAuthenticator{state: NTLM_HTTP_AUTH_STATE_CHALLENGE_RECEIVED}
+func newNTLMAuthenticator(username, password string) *NTLMHttpAuthenticator {
+	return &NTLMHttpAuthenticator{
+		state:    NTLM_HTTP_AUTH_STATE_CHALLENGE_RECEIVED,
+		username: username,
+		password: password,
+	}
 }
 
-func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response, username, password string) error {
+func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response) error {
 	if a.state == NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE3_GENERATED {
 		return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
 	}
@@ -78,19 +84,19 @@ func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Respo
 	} else if a.state == NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE1_GENERATED {
 		// Parse username for domain in form DOMAIN\username
 		var NTDomain, NTUser string
-		parts := strings.SplitN(username, "\\", 2)
+		parts := strings.SplitN(a.username, "\\", 2)
 		if len(parts) == 2 {
 			NTDomain = parts[0]
 			NTUser = parts[1]
 		} else {
 			NTDomain = ""
-			NTUser = username
+			NTUser = a.username
 		}
 		challengeBytes, err := base64.StdEncoding.DecodeString(challenge)
 		if err != nil {
 			return proxyError(fmt.Errorf("NTLM challeenge base 64 decoding: %v", err))
 		}
-		session.SetUserInfo(NTUser, password, NTDomain)
+		session.SetUserInfo(NTUser, a.password, NTDomain)
 		ntlmChallenge, err := ntlm.ParseChallengeMessage(challengeBytes)
 		if err != nil {
 			return proxyError(err)
@@ -111,4 +117,16 @@ func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Respo
 
 func (a *NTLMHttpAuthenticator) IsConnectionBased() bool {
 	return true
+}
+
+func (a *NTLMHttpAuthenticator) IsComplete() bool {
+	return a.state == NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE3_GENERATED
+}
+
+func (a *NTLMHttpAuthenticator) Reset() {
+	a.state = NTLM_HTTP_AUTH_STATE_CHALLENGE_RECEIVED
+}
+
+func (a *NTLMHttpAuthenticator) PreAuthenticate(req *http.Request) error {
+	return nil
 }

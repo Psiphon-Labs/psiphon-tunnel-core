@@ -35,8 +35,11 @@ const (
 )
 
 type HttpAuthenticator interface {
-	Authenticate(req *http.Request, resp *http.Response, username, pasword string) error
+	PreAuthenticate(req *http.Request) error
+	Authenticate(req *http.Request, resp *http.Response) error
 	IsConnectionBased() bool
+	IsComplete() bool
+	Reset()
 }
 
 func parseAuthChallenge(resp *http.Response) (map[string]string, error) {
@@ -58,7 +61,7 @@ func parseAuthChallenge(resp *http.Response) (map[string]string, error) {
 	return challenges, nil
 }
 
-func NewHttpAuthenticator(resp *http.Response) (HttpAuthenticator, error) {
+func NewHttpAuthenticator(resp *http.Response, username, password string) (HttpAuthenticator, error) {
 
 	challenges, err := parseAuthChallenge(resp)
 	if err != nil {
@@ -68,11 +71,11 @@ func NewHttpAuthenticator(resp *http.Response) (HttpAuthenticator, error) {
 
 	// NTLM > Digest > Basic
 	if _, ok := challenges["NTLM"]; ok {
-		return newNTLMAuthenticator(), nil
+		return newNTLMAuthenticator(username, password), nil
 	} else if _, ok := challenges["Digest"]; ok {
-		return newDigestAuthenticator(), nil
+		return newDigestAuthenticator(username, password), nil
 	} else if _, ok := challenges["Basic"]; ok {
-		return newBasicAuthenticator(), nil
+		return newBasicAuthenticator(username, password), nil
 	}
 
 	//Unsupported scheme
