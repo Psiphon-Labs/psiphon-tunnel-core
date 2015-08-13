@@ -529,6 +529,14 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 			TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX)
 	}
 
+	// TODO: don't initialize if !config.EmitBytesTransferred
+	noticeBytesTransferredTicker := time.NewTicker(1 * time.Second)
+	if !config.EmitBytesTransferred {
+		noticeBytesTransferredTicker.Stop()
+	} else {
+		defer noticeBytesTransferredTicker.Stop()
+	}
+
 	statsTimer := time.NewTimer(nextStatusRequestPeriod())
 	defer statsTimer.Stop()
 
@@ -538,6 +546,14 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 	var err error
 	for err == nil {
 		select {
+		case <-noticeBytesTransferredTicker.C:
+			sent, received := transferstats.GetBytesTransferredForServer(
+				tunnel.serverEntry.IpAddress)
+			// Only emit notice when tunnel is not idle.
+			if sent > 0 || received > 0 {
+				NoticeBytesTransferred(sent, received)
+			}
+
 		case <-statsTimer.C:
 			sendStats(tunnel)
 			statsTimer.Reset(nextStatusRequestPeriod())

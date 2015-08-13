@@ -98,6 +98,7 @@ type Config struct {
 	SplitTunnelDnsServer                string
 	UpgradeDownloadUrl                  string
 	UpgradeDownloadFilename             string
+	EmitBytesTransferred                bool
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON

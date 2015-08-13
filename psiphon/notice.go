@@ -191,6 +191,12 @@ func NoticeClientUpgradeDownloaded(filename string) {
 	outputNotice("ClientUpgradeDownloaded", false, "filename", filename)
 }
 
+// NoticeBytesTransferred reports how many tunneled bytes have been
+// transferred since the last NoticeBytesTransferred.
+func NoticeBytesTransferred(sent, received int64) {
+	outputNotice("BytesTransferred", false, "sent", sent, "received", received)
+}
+
 type noticeObject struct {
 	NoticeType string          `json:"noticeType"`
 	Data       json.RawMessage `json:"data"`

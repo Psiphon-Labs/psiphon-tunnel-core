@@ -70,6 +70,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         public void onClientUpgradeDownloaded(String filename);
         public void onSplitTunnelRegion(String region);
         public void onUntunneledAddress(String address);
+        public void onBytesTransferred(long sent, long received);
     }
 
     private final HostService mHostService;
@@ -311,11 +312,12 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         // bad user input. Since VpnService mode resolves domain names
         // differently (udpgw), invalid domain name user input won't result
         // in SSH port forward failures.
-        // TODO: only enable when
         if (isVpnMode) {
             json.put("PortForwardFailureThreshold", 10);
         }
-        
+
+        json.put("EmitBytesTransferred", true);
+
         if (mLocalSocksProxyPort != 0) {
             // When mLocalSocksProxyPort is set, tun2socks is already configured
             // to use that port value. So we force use of the same port.
@@ -384,6 +386,10 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
 
             } else if (noticeType.equals("UntunneledAddress")) {
                 mHostService.onHomepage(notice.getJSONObject("data").getString("address"));
+
+            } else if (noticeType.equals("BytesTransferred")) {
+                JSONObject data = notice.getJSONObject("data");
+                mHostService.onBytesTransferred(data.getLong("sent"), data.getLong("received"));
             }
 
             if (diagnostic) {
