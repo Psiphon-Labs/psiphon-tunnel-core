@@ -487,6 +487,8 @@ func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
 	if len(controller.getImpairedProtocols()) == len(SupportedTunnelProtocols) {
 		// Reset classification if all protocols are classified as impaired as
 		// the network situation (or attack) may not be protocol-specific.
+		// TODO: compare against count of distinct supported protocols for
+		// current known server entries.
 		controller.impairedProtocolClassification = make(map[string]int)
 	}
 }
@@ -796,6 +798,8 @@ loop:
 			// hopping on a mobile device).
 			// Impaired protocols logic is not applied when
 			// config.TunnelProtocol is specified.
+			// The edited serverEntry is temporary copy which is not
+			// stored or reused.
 			if i == 0 && controller.config.TunnelProtocol == "" {
 				serverEntry.DisableImpairedProtocols(impairedProtocols)
 				if len(serverEntry.GetSupportedProtocols()) == 0 {

@@ -80,8 +80,7 @@ func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 func (serverEntry *ServerEntry) GetSupportedProtocols() []string {
 	supportedProtocols := make([]string, 0)
 	for _, protocol := range SupportedTunnelProtocols {
-		requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
-		if Contains(serverEntry.Capabilities, requiredCapability) {
+		if serverEntry.SupportsProtocol(protocol) {
 			supportedProtocols = append(supportedProtocols, protocol)
 		}
 	}
