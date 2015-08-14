@@ -26,12 +26,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"strconv"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 )
 
 // Session is a utility struct which holds all of the data associated
@@ -216,6 +217,7 @@ func (session *Session) doHandshakeRequest() error {
 	}
 
 	session.clientRegion = handshakeConfig.ClientRegion
+	NoticeClientRegion(session.clientRegion)
 
 	var decodedServerEntries []*ServerEntry
 

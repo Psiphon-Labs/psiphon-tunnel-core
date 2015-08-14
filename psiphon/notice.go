@@ -157,6 +157,12 @@ func NoticeHomepage(url string) {
 	outputNotice("Homepage", false, "url", url)
 }
 
+// NoticeClientRegion is the client's region, as determined by the server and
+// reported to the client in the handshake.
+func NoticeClientRegion(region string) {
+	outputNotice("ClientRegion", false, "region", region)
+}
+
 // NoticeTunnels is how many active tunnels are available. The client should use this to
 // determine connecting/unexpected disconnect state transitions. When count is 0, the core is
 // disconnected; when count > 1, the core is connected.
