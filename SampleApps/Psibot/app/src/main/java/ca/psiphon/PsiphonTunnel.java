@@ -67,6 +67,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         public void onConnecting();
         public void onConnected();
         public void onHomepage(String url);
+        public void onClientRegion(String region);
         public void onClientUpgradeDownloaded(String filename);
         public void onSplitTunnelRegion(String region);
         public void onUntunneledAddress(String address);
@@ -381,11 +382,14 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             } else if (noticeType.equals("Homepage")) {
                 mHostService.onHomepage(notice.getJSONObject("data").getString("url"));
 
+            } else if (noticeType.equals("ClientRegion")) {
+                mHostService.onClientRegion(notice.getJSONObject("data").getString("region"));
+
             } else if (noticeType.equals("SplitTunnelRegion")) {
-                mHostService.onHomepage(notice.getJSONObject("data").getString("region"));
+                mHostService.onSplitTunnelRegion(notice.getJSONObject("data").getString("region"));
 
             } else if (noticeType.equals("UntunneledAddress")) {
-                mHostService.onHomepage(notice.getJSONObject("data").getString("address"));
+                mHostService.onUntunneledAddress(notice.getJSONObject("data").getString("address"));
 
             } else if (noticeType.equals("BytesTransferred")) {
                 JSONObject data = notice.getJSONObject("data");
