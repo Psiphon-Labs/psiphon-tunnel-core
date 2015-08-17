@@ -42,7 +42,6 @@ type ProxyAuthTransport struct {
 	Username      string
 	Password      string
 	Authenticator HttpAuthenticator
-	authState     HttpAuthState
 	mu            sync.Mutex
 }
 
@@ -51,7 +50,7 @@ func NewProxyAuthTransport(rawTransport *http.Transport) (*ProxyAuthTransport, e
 	if dialFn == nil {
 		dialFn = net.Dial
 	}
-	tr := &ProxyAuthTransport{Dial: dialFn, authState: HTTP_AUTH_STATE_UNCHALLENGED}
+	tr := &ProxyAuthTransport{Dial: dialFn}
 	proxyUrlFn := rawTransport.Proxy
 	if proxyUrlFn != nil {
 		wrappedDialFn := tr.wrapTransportDial()
@@ -76,6 +75,8 @@ func NewProxyAuthTransport(rawTransport *http.Transport) (*ProxyAuthTransport, e
 }
 
 func (tr *ProxyAuthTransport) preAuthenticateRequest(req *http.Request) error {
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
 	if tr.Authenticator == nil {
 		return nil
 	}
@@ -91,10 +92,10 @@ func (tr *ProxyAuthTransport) RoundTrip(req *http.Request) (resp *http.Response,
 		return nil, err
 	}
 
-	//Clone request early because RoundTrip will destroy request Body
 	var ha HttpAuthenticator = nil
+
+	//Clone request early because RoundTrip will destroy request Body
 	newReq := cloneRequest(req)
-	//authState := HTTP_AUTH_STATE_UNCHALLENGED
 
 	resp, err = tr.Transport.RoundTrip(newReq)
 
@@ -103,16 +104,19 @@ func (tr *ProxyAuthTransport) RoundTrip(req *http.Request) (resp *http.Response,
 	}
 
 	if resp.StatusCode == 407 {
-		fmt.Println("407!")
 		tr.mu.Lock()
 		defer tr.mu.Unlock()
+		if err != nil {
+			//already wrapped in proxyError
+			return nil, err
+		}
 		if tr.Authenticator == nil {
 			ha, err = NewHttpAuthenticator(resp, tr.Username, tr.Password)
 			if err != nil {
 				return nil, err
 			}
 			if ha.IsConnectionBased() {
-				return nil, proxyError(fmt.Errorf("Connection based auth was not handled by transportConn"))
+				return nil, proxyError(fmt.Errorf("Connection based auth was not handled by transportConn!"))
 			}
 			tr.Authenticator = ha
 		}
@@ -133,6 +137,7 @@ func (tr *ProxyAuthTransport) RoundTrip(req *http.Request) (resp *http.Response,
 					tr.Authenticator.Reset()
 				}
 				break authenticationLoop
+			} else {
 			}
 		}
 	}
@@ -155,8 +160,6 @@ func (tr *ProxyAuthTransport) wrapTransportDial() DialFunc {
 	}
 }
 
-// cloneRequest returns a clone of the provided *http.Request. The clone is a
-// shallow copy of the struct and its Header map.
 func cloneRequest(r *http.Request) *http.Request {
 	// shallow copy of the struct
 	r2 := new(http.Request)
@@ -170,8 +173,10 @@ func cloneRequest(r *http.Request) *http.Request {
 	if r.Body != nil {
 		body, _ := ioutil.ReadAll(r.Body)
 		defer r.Body.Close()
-		//restore original request Body
+		// restore original request Body
+		// drained by ReadAll()
 		r.Body = ioutil.NopCloser(bytes.NewReader(body))
+
 		r2.Body = ioutil.NopCloser(bytes.NewReader(body))
 	}
 	return r2
@@ -182,12 +187,9 @@ type transportConn struct {
 	requestInterceptor io.Writer
 	reqDone            chan struct{}
 	errChannel         chan error
-	// last written request holder
-	lastRequest   *http.Request
-	authenticator HttpAuthenticator
-	authState     HttpAuthState
-	transport     *ProxyAuthTransport
-	//mutex         *sync.Mutex
+	lastRequest        *http.Request
+	authenticator      HttpAuthenticator
+	transport          *ProxyAuthTransport
 }
 
 func newTransportConn(c net.Conn, tr *ProxyAuthTransport) *transportConn {
@@ -227,6 +229,8 @@ func newTransportConn(c net.Conn, tr *ProxyAuthTransport) *transportConn {
 
 // Read peeks into the new response and checks if the proxy requests authentication
 // If so, the last intercepted request is authenticated against the response
+// in case of connection based auth scheme(i.e. NTLM)
+// All the non-connection based schemes are handled by the ProxyAuthTransport.RoundTrip()
 func (tc *transportConn) Read(p []byte) (n int, read_err error) {
 	n, read_err = tc.Conn.Read(p)
 	if n < HTTP_STAT_LINE_LENGTH {
@@ -251,14 +255,15 @@ func (tc *transportConn) Read(p []byte) (n int, read_err error) {
 				return 0, err
 			}
 			// If connection based auth is requested, we are going to
-			// authenticate this very connection
-
+			// authenticate request on this very connection
+			// otherwise just return what we read
 			if !ha.IsConnectionBased() {
 				return
 			}
 
 			// Drain the rest of the response
 			// in order to perform auth handshake
+			// on the connection
 			readBufferReader.Seek(0, 0)
 			responseReader = bufio.NewReader(io.MultiReader(readBufferReader, tc.Conn))
 			resp, err = http.ReadResponse(responseReader, nil)

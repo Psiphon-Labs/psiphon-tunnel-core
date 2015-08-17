@@ -36,9 +36,10 @@ const (
 )
 
 type DigestHttpAuthenticator struct {
-	state    DigestHttpAuthState
-	username string
-	password string
+	state         DigestHttpAuthState
+	username      string
+	password      string
+	digestHeaders *DigestHeaders
 }
 
 func newDigestAuthenticator(username, password string) *DigestHttpAuthenticator {
@@ -70,7 +71,6 @@ type DigestHeaders struct {
 // ApplyAuth adds proper auth header to the passed request
 func (d *DigestHeaders) ApplyAuth(req *http.Request) {
 	d.Nc += 0x1
-	d.Cnonce = randomKey()
 	d.Method = req.Method
 	d.digestChecksum()
 	response := h(strings.Join([]string{d.HA1, d.Nonce, fmt.Sprintf("%08x", d.Nc),
@@ -158,25 +158,38 @@ func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Res
 
 	algorithm := digestParams["algorithm"]
 
-	d := &DigestHeaders{}
-	if req.Method == "CONNECT" {
-		d.Uri = req.URL.Host
-	} else {
-		d.Uri = req.URL.Scheme + "://" + req.URL.Host + req.URL.RequestURI()
+	if _, ok := digestParams["stale"]; ok {
+		// Server indicated that the nonce is stale
+		// Reset auth cache and state
+		a.digestHeaders = nil
+		a.state = DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED
+		return nil
 	}
-	d.Realm = digestParams["realm"]
-	d.Qop = digestParams["qop"]
-	d.Nonce = digestParams["nonce"]
-	d.Opaque = digestParams["opaque"]
-	if algorithm == "" {
-		d.Algorithm = "MD5"
-	} else {
-		d.Algorithm = digestParams["algorithm"]
+
+	if a.digestHeaders == nil {
+		d := &DigestHeaders{}
+		if req.Method == "CONNECT" {
+			d.Uri = req.URL.Host
+		} else {
+			d.Uri = req.URL.Scheme + "://" + req.URL.Host + req.URL.RequestURI()
+		}
+		d.Realm = digestParams["realm"]
+		d.Qop = digestParams["qop"]
+		d.Nonce = digestParams["nonce"]
+		d.Opaque = digestParams["opaque"]
+		if algorithm == "" {
+			d.Algorithm = "MD5"
+		} else {
+			d.Algorithm = digestParams["algorithm"]
+		}
+		d.Nc = 0x0
+		d.Cnonce = randomKey()
+		d.Username = a.username
+		d.Password = a.password
+		a.digestHeaders = d
 	}
-	d.Nc = 0x0
-	d.Username = a.username
-	d.Password = a.password
-	d.ApplyAuth(req)
+
+	a.digestHeaders.ApplyAuth(req)
 	a.state = DIGEST_HTTP_AUTH_STATE_RESPONSE_GENERATED
 	return nil
 }
@@ -194,5 +207,8 @@ func (a *DigestHttpAuthenticator) Reset() {
 }
 
 func (a *DigestHttpAuthenticator) PreAuthenticate(req *http.Request) error {
+	if a.digestHeaders != nil {
+		a.digestHeaders.ApplyAuth(req)
+	}
 	return nil
 }
