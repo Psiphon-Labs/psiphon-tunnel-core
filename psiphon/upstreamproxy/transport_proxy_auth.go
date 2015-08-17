@@ -110,16 +110,14 @@ func (tr *ProxyAuthTransport) RoundTrip(req *http.Request) (resp *http.Response,
 			//already wrapped in proxyError
 			return nil, err
 		}
-		if tr.Authenticator == nil {
-			ha, err = NewHttpAuthenticator(resp, tr.Username, tr.Password)
-			if err != nil {
-				return nil, err
-			}
-			if ha.IsConnectionBased() {
-				return nil, proxyError(fmt.Errorf("Connection based auth was not handled by transportConn!"))
-			}
-			tr.Authenticator = ha
+		ha, err = NewHttpAuthenticator(resp, tr.Username, tr.Password)
+		if err != nil {
+			return nil, err
 		}
+		if ha.IsConnectionBased() {
+			return nil, proxyError(fmt.Errorf("Connection based auth was not handled by transportConn!"))
+		}
+		tr.Authenticator = ha
 	authenticationLoop:
 		for {
 			newReq = cloneRequest(req)
