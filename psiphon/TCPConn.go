@@ -31,20 +31,15 @@ import (
 // TCPConn is a customized TCP connection that:
 // - can be interrupted while connecting;
 // - implements a connect timeout;
-// - implements idle read/write timeouts;
 // - uses an upstream proxy when specified, and includes
 //   upstream proxy dialing in the connect timeout;
 // - can be bound to a specific system device (for Android VpnService
 //   routing compatibility, for example);
-// - implements the psiphon.Conn interface
 type TCPConn struct {
 	net.Conn
 	mutex         sync.Mutex
 	isClosed      bool
-	closedSignal  chan struct{}
 	interruptible interruptibleTCPSocket
-	readTimeout   time.Duration
-	writeTimeout  time.Duration
 }
 
 // NewTCPDialer creates a TCPDialer.
@@ -68,14 +63,6 @@ func makeTCPDialer(config *DialConfig) func(network, addr string) (net.Conn, err
 		conn, err := interruptibleTCPDial(addr, config)
 		if err != nil {
 			return nil, ContextError(err)
-		}
-		if config.ClosedSignal != nil {
-			if !conn.SetClosedSignal(config.ClosedSignal) {
-				// Conn is already closed. This is not unexpected -- for example,
-				// when establish is interrupted.
-				// TODO: make this not log an error when called from establishTunnelWorker?
-				return nil, ContextError(errors.New("conn already closed"))
-			}
 		}
 		return conn, nil
 	}
@@ -122,82 +109,21 @@ func makeTCPDialer(config *DialConfig) func(network, addr string) (net.Conn, err
 	return dialer
 }
 
-// SetClosedSignal implements psiphon.Conn.SetClosedSignal.
-func (conn *TCPConn) SetClosedSignal(closedSignal chan struct{}) bool {
-	conn.mutex.Lock()
-	defer conn.mutex.Unlock()
-	if conn.isClosed {
-		return false
-	}
-	conn.closedSignal = closedSignal
-	return true
-}
-
 // Close terminates a connected (net.Conn) or connecting (socketFd) TCPConn.
-// A mutex is required to support psiphon.Conn.SetClosedSignal concurrency semantics.
+// A mutex is required to support net.Conn concurrency semantics.
+// Note also use of mutex around conn.interruptible and conn.Conn in
+// TCPConn_unix.go.
 func (conn *TCPConn) Close() (err error) {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
+
 	if !conn.isClosed {
+		conn.isClosed = true
 		if conn.Conn == nil {
 			err = interruptibleTCPClose(conn.interruptible)
 		} else {
 			err = conn.Conn.Close()
 		}
-		conn.isClosed = true
-		select {
-		case conn.closedSignal <- *new(struct{}):
-		default:
-		}
 	}
 	return err
-}
-
-// Read wraps standard Read to add an idle timeout. The connection
-// is explicitly closed on timeout.
-func (conn *TCPConn) Read(buffer []byte) (n int, err error) {
-	// Note: no mutex on the conn.readTimeout access
-	if conn.readTimeout != 0 {
-		err = conn.Conn.SetReadDeadline(time.Now().Add(conn.readTimeout))
-		if err != nil {
-			return 0, ContextError(err)
-		}
-	}
-	n, err = conn.Conn.Read(buffer)
-	if err != nil {
-		conn.Close()
-	}
-	return
-}
-
-// Write wraps standard Write to add an idle timeout The connection
-// is explicitly closed on timeout.
-func (conn *TCPConn) Write(buffer []byte) (n int, err error) {
-	// Note: no mutex on the conn.writeTimeout access
-	if conn.writeTimeout != 0 {
-		err = conn.Conn.SetWriteDeadline(time.Now().Add(conn.writeTimeout))
-		if err != nil {
-			return 0, ContextError(err)
-		}
-	}
-	n, err = conn.Conn.Write(buffer)
-	if err != nil {
-		conn.Close()
-	}
-	return
-}
-
-// Override implementation of net.Conn.SetDeadline
-func (conn *TCPConn) SetDeadline(t time.Time) error {
-	return errors.New("net.Conn SetDeadline not supported")
-}
-
-// Override implementation of net.Conn.SetReadDeadline
-func (conn *TCPConn) SetReadDeadline(t time.Time) error {
-	return errors.New("net.Conn SetReadDeadline not supported")
-}
-
-// Override implementation of net.Conn.SetWriteDeadline
-func (conn *TCPConn) SetWriteDeadline(t time.Time) error {
-	return errors.New("net.Conn SetWriteDeadline not supported")
 }

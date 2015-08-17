@@ -405,6 +405,20 @@ loop:
 		case failedTunnel := <-controller.failedTunnels:
 			NoticeAlert("tunnel failed: %s", failedTunnel.serverEntry.IpAddress)
 			controller.terminateTunnel(failedTunnel)
+
+			// Note: we make this extra check to ensure the shutdown signal takes priority
+			// and that we do not start establishing. Critically, startEstablishing() calls
+			// establishPendingConns.Reset() which clears the closed flag in
+			// establishPendingConns; this causes the pendingConns.Add() within
+			// interruptibleTCPDial to succeed instead of aborting, and the result
+			// is that it's possible for extablish goroutines to run all the way through
+			// NewSession before being discarded... delaying shutdown.
+			select {
+			case <-controller.shutdownBroadcast:
+				break loop
+			default:
+			}
+
 			// Concurrency note: only this goroutine may call startEstablishing/stopEstablishing
 			// and access isEstablishing.
 			if !controller.isEstablishing {

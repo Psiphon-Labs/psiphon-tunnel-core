@@ -74,40 +74,13 @@ func Start(
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
-	// If specified, the embedded server list is loaded and stored. When there
-	// are no server candidates at all, we wait for this import to complete
-	// before starting the Psiphon controller. Otherwise, we import while
-	// concurrently starting the controller to minimize delay before attempting
-	// to connect to existing candidate servers.
-	// If the import fails, an error notice is emitted, but the controller is
-	// still started: either existing candidate servers may suffice, or the
-	// remote server list fetch may obtain candidate servers.
-	// TODO: duplicates logic in psiphonClient.go -- refactor?
-	if embeddedServerEntryList != "" {
-		embeddedServerListWaitGroup := new(sync.WaitGroup)
-		embeddedServerListWaitGroup.Add(1)
-		go func() {
-			defer embeddedServerListWaitGroup.Done()
-			// TODO: stream embedded server list data?
-			serverEntries, err := psiphon.DecodeAndValidateServerEntryList(embeddedServerEntryList)
-			if err != nil {
-				psiphon.NoticeError("error decoding embedded server entry list file: %s", err)
-				return
-			}
-			// Since embedded server list entries may become stale, they will not
-			// overwrite existing stored entries for the same server.
-			err = psiphon.StoreServerEntries(serverEntries, false)
-			if err != nil {
-				psiphon.NoticeError("error storing embedded server entry list data: %s", err)
-				return
-			}
-		}()
-
-		if psiphon.CountServerEntries(config.EgressRegion, config.TunnelProtocol) == 0 {
-			embeddedServerListWaitGroup.Wait()
-		} else {
-			defer embeddedServerListWaitGroup.Wait()
-		}
+	serverEntries, err := psiphon.DecodeAndValidateServerEntryList(embeddedServerEntryList)
+	if err != nil {
+		return fmt.Errorf("error decoding embedded server entry list: %s", err)
+	}
+	err = psiphon.StoreServerEntries(serverEntries, false)
+	if err != nil {
+		return fmt.Errorf("error storing embedded server entry list: %s", err)
 	}
 
 	controller, err = psiphon.NewController(config)

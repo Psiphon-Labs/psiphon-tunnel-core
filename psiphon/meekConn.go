@@ -77,7 +77,6 @@ type MeekConn struct {
 	transport            transporter
 	mutex                sync.Mutex
 	isClosed             bool
-	closedSignal         chan struct{}
 	broadcastClosed      chan struct{}
 	relayWaitGroup       *sync.WaitGroup
 	emptyReceiveBuffer   chan *bytes.Buffer
@@ -255,46 +254,40 @@ func DialMeek(
 	go meek.relay()
 
 	// Enable interruption
-	config.PendingConns.Add(meek)
+	if !config.PendingConns.Add(meek) {
+		meek.Close()
+		return nil, ContextError(errors.New("pending connections already closed"))
+	}
 
 	return meek, nil
 }
 
-// SetClosedSignal implements psiphon.Conn.SetClosedSignal
-func (meek *MeekConn) SetClosedSignal(closedSignal chan struct{}) bool {
-	meek.mutex.Lock()
-	defer meek.mutex.Unlock()
-	if meek.isClosed {
-		return false
-	}
-	meek.closedSignal = closedSignal
-	return true
-}
-
 // Close terminates the meek connection. Close waits for the relay processing goroutine
 // to stop and releases HTTP transport resources.
-// A mutex is required to support psiphon.Conn.SetClosedSignal concurrency semantics.
+// A mutex is required to support net.Conn concurrency semantics.
 func (meek *MeekConn) Close() (err error) {
+
 	meek.mutex.Lock()
-	defer meek.mutex.Unlock()
-	if !meek.isClosed {
+	isClosed := meek.isClosed
+	meek.isClosed = true
+	meek.mutex.Unlock()
+
+	if !isClosed {
 		close(meek.broadcastClosed)
 		meek.pendingConns.CloseAll()
 		meek.relayWaitGroup.Wait()
 		meek.transport.CloseIdleConnections()
-		meek.isClosed = true
-		select {
-		case meek.closedSignal <- *new(struct{}):
-		default:
-		}
 	}
 	return nil
 }
 
 func (meek *MeekConn) closed() bool {
+
 	meek.mutex.Lock()
-	defer meek.mutex.Unlock()
-	return meek.isClosed
+	isClosed := meek.isClosed
+	meek.mutex.Unlock()
+
+	return isClosed
 }
 
 // Read reads data from the connection.
