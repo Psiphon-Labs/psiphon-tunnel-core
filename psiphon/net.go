@@ -185,8 +185,8 @@ func WaitForNetworkConnectivity(
 				Dir: reflect.SelectRecv, Chan: reflect.ValueOf(stopBroadcast)}
 		}
 
-		chosen, _, closed := reflect.Select(selectCases)
-		if chosen == 0 && !closed {
+		chosen, _, ok := reflect.Select(selectCases)
+		if chosen == 0 && ok {
 			// Ticker case, so check again
 		} else {
 			// Stop case
