@@ -62,8 +62,10 @@ func NewProxyAuthTransport(rawTransport *http.Transport) (*ProxyAuthTransport, e
 		if proxyUrl.Scheme != "http" {
 			return nil, fmt.Errorf("Only HTTP proxy supported, for SOCKS use http.Transport with custom dialers & upstreamproxy.NewProxyDialFunc")
 		}
-		tr.Username = proxyUrl.User.Username()
-		tr.Password, _ = proxyUrl.User.Password()
+		if proxyUrl.User != nil {
+			tr.Username = proxyUrl.User.Username()
+			tr.Password, _ = proxyUrl.User.Password()
+		}
 		// strip username and password from the proxyURL because
 		// we do not want the wrapped transport to handle authentication
 		proxyUrl.User = nil
