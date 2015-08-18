@@ -106,10 +106,6 @@ func (tr *ProxyAuthTransport) RoundTrip(req *http.Request) (resp *http.Response,
 	if resp.StatusCode == 407 {
 		tr.mu.Lock()
 		defer tr.mu.Unlock()
-		if err != nil {
-			//already wrapped in proxyError
-			return nil, err
-		}
 		ha, err = NewHttpAuthenticator(resp, tr.Username, tr.Password)
 		if err != nil {
 			return nil, err
