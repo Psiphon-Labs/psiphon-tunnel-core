@@ -33,20 +33,42 @@ const (
 )
 
 type BasicHttpAuthenticator struct {
-	state BasicHttpAuthState
+	state    BasicHttpAuthState
+	username string
+	password string
 }
 
-func newBasicAuthenticator() *BasicHttpAuthenticator {
-	return &BasicHttpAuthenticator{state: BASIC_HTTP_AUTH_STATE_CHALLENGE_RECEIVED}
+func newBasicAuthenticator(username, password string) *BasicHttpAuthenticator {
+	return &BasicHttpAuthenticator{
+		state:    BASIC_HTTP_AUTH_STATE_CHALLENGE_RECEIVED,
+		username: username,
+		password: password,
+	}
 }
 
-func (a *BasicHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response, username, password string) error {
+func (a *BasicHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response) error {
 	if a.state == BASIC_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
-		auth := username + ":" + password
-		req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(auth)))
 		a.state = BASIC_HTTP_AUTH_STATE_RESPONSE_GENERATED
-		return nil
+		return a.PreAuthenticate(req)
 	} else {
 		return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
 	}
+}
+
+func (a *BasicHttpAuthenticator) IsConnectionBased() bool {
+	return false
+}
+
+func (a *BasicHttpAuthenticator) IsComplete() bool {
+	return a.state == BASIC_HTTP_AUTH_STATE_RESPONSE_GENERATED
+}
+
+func (a *BasicHttpAuthenticator) Reset() {
+	a.state = BASIC_HTTP_AUTH_STATE_CHALLENGE_RECEIVED
+}
+
+func (a *BasicHttpAuthenticator) PreAuthenticate(req *http.Request) error {
+	auth := a.username + ":" + a.password
+	req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(auth)))
+	return nil
 }

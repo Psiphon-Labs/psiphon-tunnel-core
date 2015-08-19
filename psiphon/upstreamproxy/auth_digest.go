@@ -36,11 +36,18 @@ const (
 )
 
 type DigestHttpAuthenticator struct {
-	state DigestHttpAuthState
+	state         DigestHttpAuthState
+	username      string
+	password      string
+	digestHeaders *DigestHeaders
 }
 
-func newDigestAuthenticator() *DigestHttpAuthenticator {
-	return &DigestHttpAuthenticator{state: DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED}
+func newDigestAuthenticator(username, password string) *DigestHttpAuthenticator {
+	return &DigestHttpAuthenticator{
+		state:    DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED,
+		username: username,
+		password: password,
+	}
 }
 
 /* Adapted from https://github.com/ryanjdew/http-digest-auth-client */
@@ -64,7 +71,6 @@ type DigestHeaders struct {
 // ApplyAuth adds proper auth header to the passed request
 func (d *DigestHeaders) ApplyAuth(req *http.Request) {
 	d.Nc += 0x1
-	d.Cnonce = randomKey()
 	d.Method = req.Method
 	d.digestChecksum()
 	response := h(strings.Join([]string{d.HA1, d.Nonce, fmt.Sprintf("%08x", d.Nc),
@@ -124,7 +130,7 @@ func h(data string) string {
 	return fmt.Sprintf("%x", digest.Sum(nil))
 }
 
-func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response, username, password string) error {
+func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response) error {
 	if a.state != DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
 		return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
 	}
@@ -152,25 +158,57 @@ func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Res
 
 	algorithm := digestParams["algorithm"]
 
-	d := &DigestHeaders{}
-	if req.Method == "CONNECT" {
-		d.Uri = req.URL.Host
-	} else {
-		d.Uri = req.URL.Scheme + "://" + req.URL.Host + req.URL.RequestURI()
+	if _, ok := digestParams["stale"]; ok {
+		// Server indicated that the nonce is stale
+		// Reset auth cache and state
+		a.digestHeaders = nil
+		a.state = DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED
+		return nil
 	}
-	d.Realm = digestParams["realm"]
-	d.Qop = digestParams["qop"]
-	d.Nonce = digestParams["nonce"]
-	d.Opaque = digestParams["opaque"]
-	if algorithm == "" {
-		d.Algorithm = "MD5"
-	} else {
-		d.Algorithm = digestParams["algorithm"]
+
+	if a.digestHeaders == nil {
+		d := &DigestHeaders{}
+		if req.Method == "CONNECT" {
+			d.Uri = req.URL.Host
+		} else {
+			d.Uri = req.URL.Scheme + "://" + req.URL.Host + req.URL.RequestURI()
+		}
+		d.Realm = digestParams["realm"]
+		d.Qop = digestParams["qop"]
+		d.Nonce = digestParams["nonce"]
+		d.Opaque = digestParams["opaque"]
+		if algorithm == "" {
+			d.Algorithm = "MD5"
+		} else {
+			d.Algorithm = digestParams["algorithm"]
+		}
+		d.Nc = 0x0
+		d.Cnonce = randomKey()
+		d.Username = a.username
+		d.Password = a.password
+		a.digestHeaders = d
 	}
-	d.Nc = 0x0
-	d.Username = username
-	d.Password = password
-	d.ApplyAuth(req)
+
+	a.digestHeaders.ApplyAuth(req)
 	a.state = DIGEST_HTTP_AUTH_STATE_RESPONSE_GENERATED
+	return nil
+}
+
+func (a *DigestHttpAuthenticator) IsConnectionBased() bool {
+	return false
+}
+
+func (a *DigestHttpAuthenticator) IsComplete() bool {
+	return a.state == DIGEST_HTTP_AUTH_STATE_RESPONSE_GENERATED
+}
+
+func (a *DigestHttpAuthenticator) Reset() {
+	a.state = DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED
+}
+
+func (a *DigestHttpAuthenticator) PreAuthenticate(req *http.Request) error {
+	if a.digestHeaders != nil {
+		a.digestHeaders.ApplyAuth(req)
+	}
 	return nil
 }

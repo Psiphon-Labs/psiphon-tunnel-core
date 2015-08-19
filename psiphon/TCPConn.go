@@ -21,11 +21,10 @@ package psiphon
 
 import (
 	"errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 	"net"
 	"sync"
 	"time"
-
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 )
 
 // TCPConn is a customized TCP connection that:
@@ -75,7 +74,7 @@ func makeTCPDialer(config *DialConfig) func(network, addr string) (net.Conn, err
 				ProxyURIString:  config.UpstreamProxyUrl,
 			})
 
-		dialer = func(network, addr string) (net.Conn, error) {
+		dialer = func(network, addr string) (conn net.Conn, err error) {
 
 			// The entire upstream dial is wrapped in an explicit timeout. This
 			// may include network connection read and writes when proxy auth negotation
@@ -85,24 +84,29 @@ func makeTCPDialer(config *DialConfig) func(network, addr string) (net.Conn, err
 				conn net.Conn
 				err  error
 			}
-			resultChannel := make(chan *upstreamDialResult, 2)
-			time.AfterFunc(config.ConnectTimeout, func() {
-				// TODO: we could "interrupt" the underlying TCPConn at this point, as
-				// it's being abandoned. But we don't have a reference to it. It's left
-				// to the outer DialConfig.PendingConns to track and clean up that TCPConn.
-				resultChannel <- &upstreamDialResult{nil, errors.New("upstreamproxy dial timeout")}
-			})
-			go func() {
-				conn, err := upstreamDialer(network, addr)
-				resultChannel <- &upstreamDialResult{conn, err}
-			}()
-			result := <-resultChannel
+			if config.ConnectTimeout != 0 {
+				resultChannel := make(chan *upstreamDialResult, 2)
+				time.AfterFunc(config.ConnectTimeout, func() {
+					// TODO: we could "interrupt" the underlying TCPConn at this point, as
+					// it's being abandoned. But we don't have a reference to it. It's left
+					// to the outer DialConfig.PendingConns to track and clean up that TCPConn.
+					resultChannel <- &upstreamDialResult{nil, errors.New("upstreamproxy dial timeout")}
+				})
+				go func() {
+					conn, err := upstreamDialer(network, addr)
+					resultChannel <- &upstreamDialResult{conn, err}
+				}()
+				result := <-resultChannel
 
-			if _, ok := result.err.(*upstreamproxy.Error); ok {
-				NoticeUpstreamProxyError(result.err)
+				conn, err = result.conn, result.err
+			} else {
+				conn, err = upstreamDialer(network, addr)
 			}
 
-			return result.conn, result.err
+			if _, ok := err.(*upstreamproxy.Error); ok {
+				NoticeUpstreamProxyError(err)
+			}
+			return conn, err
 		}
 	}
 
