@@ -46,7 +46,9 @@ func newHostStats() *hostStats {
 
 // serverStats holds per-server stats.
 type serverStats struct {
-	hostnameToStats map[string]*hostStats
+	hostnameToStats    map[string]*hostStats
+	totalBytesSent     int64
+	totalBytesReceived int64
 }
 
 func newServerStats() *serverStats {
@@ -94,6 +96,9 @@ func recordStat(stat *statsUpdate) {
 		storedServerStats.hostnameToStats[stat.hostname] = storedHostStats
 	}
 
+	storedServerStats.totalBytesSent += stat.numBytesSent
+	storedServerStats.totalBytesReceived += stat.numBytesReceived
+
 	storedHostStats.numBytesSent += stat.numBytesSent
 	storedHostStats.numBytesReceived += stat.numBytesReceived
 
@@ -121,6 +126,27 @@ func (ss serverStats) MarshalJSON() ([]byte, error) {
 	out["https_requests"] = make([]string, 0)
 
 	return json.Marshal(out)
+}
+
+// GetBytesTransferredForServer returns total bytes sent and received since
+// the last call to GetBytesTransferredForServer.
+func GetBytesTransferredForServer(serverID string) (sent, received int64) {
+	allStats.statsMutex.Lock()
+	defer allStats.statsMutex.Unlock()
+
+	stats := allStats.serverIDtoStats[serverID]
+
+	if stats == nil {
+		return
+	}
+
+	sent = stats.totalBytesSent
+	received = stats.totalBytesReceived
+
+	stats.totalBytesSent = 0
+	stats.totalBytesReceived = 0
+
+	return
 }
 
 // GetForServer returns the json-able stats package for the given server.

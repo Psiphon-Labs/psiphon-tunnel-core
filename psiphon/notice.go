@@ -157,6 +157,12 @@ func NoticeHomepage(url string) {
 	outputNotice("Homepage", false, "url", url)
 }
 
+// NoticeClientRegion is the client's region, as determined by the server and
+// reported to the client in the handshake.
+func NoticeClientRegion(region string) {
+	outputNotice("ClientRegion", false, "region", region)
+}
+
 // NoticeTunnels is how many active tunnels are available. The client should use this to
 // determine connecting/unexpected disconnect state transitions. When count is 0, the core is
 // disconnected; when count > 1, the core is connected.
@@ -189,6 +195,12 @@ func NoticeUpstreamProxyError(err error) {
 // is complete and available at the destination specified.
 func NoticeClientUpgradeDownloaded(filename string) {
 	outputNotice("ClientUpgradeDownloaded", false, "filename", filename)
+}
+
+// NoticeBytesTransferred reports how many tunneled bytes have been
+// transferred since the last NoticeBytesTransferred.
+func NoticeBytesTransferred(sent, received int64) {
+	outputNotice("BytesTransferred", false, "sent", sent, "received", received)
 }
 
 type noticeObject struct {

@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -58,21 +57,6 @@ type TunnelOwner interface {
 	SignalTunnelFailure(tunnel *Tunnel)
 }
 
-const (
-	TUNNEL_PROTOCOL_SSH            = "SSH"
-	TUNNEL_PROTOCOL_OBFUSCATED_SSH = "OSSH"
-	TUNNEL_PROTOCOL_UNFRONTED_MEEK = "UNFRONTED-MEEK-OSSH"
-	TUNNEL_PROTOCOL_FRONTED_MEEK   = "FRONTED-MEEK-OSSH"
-)
-
-// This is a list of supported tunnel protocols, in default preference order
-var SupportedTunnelProtocols = []string{
-	TUNNEL_PROTOCOL_FRONTED_MEEK,
-	TUNNEL_PROTOCOL_UNFRONTED_MEEK,
-	TUNNEL_PROTOCOL_OBFUSCATED_SSH,
-	TUNNEL_PROTOCOL_SSH,
-}
-
 // Tunnel is a connection to a Psiphon server. An established
 // tunnel includes a network connection to the specified server
 // and an SSH session built on top of that transport.
@@ -88,6 +72,7 @@ type Tunnel struct {
 	shutdownOperateBroadcast chan struct{}
 	portForwardFailures      chan int
 	portForwardFailureTotal  int
+	sessionStartTime         time.Time
 }
 
 // EstablishTunnel first makes a network transport connection to the
@@ -98,8 +83,7 @@ type Tunnel struct {
 // plain SSH over TCP, obfuscated SSH over TCP, or obfuscated SSH over
 // HTTP (meek protocol).
 // When requiredProtocol is not blank, that protocol is used. Otherwise,
-// the first protocol in SupportedTunnelProtocols that's also in the
-// server capabilities is used.
+// the a random supported protocol is used.
 func EstablishTunnel(
 	config *Config,
 	sessionId string,
@@ -154,6 +138,8 @@ func EstablishTunnel(
 			return nil, ContextError(fmt.Errorf("error starting session for %s: %s", tunnel.serverEntry.IpAddress, err))
 		}
 	}
+
+	tunnel.sessionStartTime = time.Now()
 
 	// Now that network operations are complete, cancel interruptibility
 	pendingConns.Remove(conn)
@@ -306,8 +292,7 @@ func selectProtocol(config *Config, serverEntry *ServerEntry) (selectedProtocol 
 	// TODO: properly handle protocols (e.g. FRONTED-MEEK-OSSH) vs. capabilities (e.g., {FRONTED-MEEK, OSSH})
 	// for now, the code is simply assuming that MEEK capabilities imply OSSH capability.
 	if config.TunnelProtocol != "" {
-		requiredCapability := strings.TrimSuffix(config.TunnelProtocol, "-OSSH")
-		if !Contains(serverEntry.Capabilities, requiredCapability) {
+		if !serverEntry.SupportsProtocol(config.TunnelProtocol) {
 			return "", ContextError(fmt.Errorf("server does not have required capability"))
 		}
 		selectedProtocol = config.TunnelProtocol
@@ -315,26 +300,10 @@ func selectProtocol(config *Config, serverEntry *ServerEntry) (selectedProtocol 
 		// Pick at random from the supported protocols. This ensures that we'll eventually
 		// try all possible protocols. Depending on network configuration, it may be the
 		// case that some protocol is only available through multi-capability servers,
-		// and a simplr ranked preference of protocols could lead to that protocol never
+		// and a simpler ranked preference of protocols could lead to that protocol never
 		// being selected.
 
-		// TODO: this is a good spot to apply protocol selection weightings. This would be
-		// to defend against an attack where the adversary, for example, classifies OSSH as
-		// an "unidentified" protocol; allows it to connect; but then kills the underlying
-		// TCP connection after a short time. Since OSSH has less latency than other protocols
-		// that may bypass an "unidentified" filter, other protocols which would be otherwise
-		// classified and not killed might never be selected for use.
-		// So one proposed defense is to add negative selection weights to the protocol
-		// associated with failed tunnels (controller.failedTunnels) with short session
-		// durations.
-
-		candidateProtocols := make([]string, 0)
-		for _, protocol := range SupportedTunnelProtocols {
-			requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
-			if Contains(serverEntry.Capabilities, requiredCapability) {
-				candidateProtocols = append(candidateProtocols, protocol)
-			}
-		}
+		candidateProtocols := serverEntry.GetSupportedProtocols()
 		if len(candidateProtocols) == 0 {
 			return "", ContextError(fmt.Errorf("server does not have any supported capabilities"))
 		}
@@ -560,6 +529,14 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 			TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX)
 	}
 
+	// TODO: don't initialize if !config.EmitBytesTransferred
+	noticeBytesTransferredTicker := time.NewTicker(1 * time.Second)
+	if !config.EmitBytesTransferred {
+		noticeBytesTransferredTicker.Stop()
+	} else {
+		defer noticeBytesTransferredTicker.Stop()
+	}
+
 	statsTimer := time.NewTimer(nextStatusRequestPeriod())
 	defer statsTimer.Stop()
 
@@ -569,6 +546,14 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 	var err error
 	for err == nil {
 		select {
+		case <-noticeBytesTransferredTicker.C:
+			sent, received := transferstats.GetBytesTransferredForServer(
+				tunnel.serverEntry.IpAddress)
+			// Only emit notice when tunnel is not idle.
+			if sent > 0 || received > 0 {
+				NoticeBytesTransferred(sent, received)
+			}
+
 		case <-statsTimer.C:
 			sendStats(tunnel)
 			statsTimer.Reset(nextStatusRequestPeriod())

@@ -224,6 +224,15 @@ public class Service extends VpnService
         Log.addEntry("untunneled address: " + address);
     }
 
+    @Override
+    public void onBytesTransferred(long sent, long received) {
+    }
+
+    @Override
+    public void onClientRegion(String region) {
+        Log.addEntry("client region: " + region);
+    }
+
     private static String readInputStreamToString(InputStream inputStream) throws IOException {
         return new String(readInputStreamToBytes(inputStream), "UTF-8");
     }

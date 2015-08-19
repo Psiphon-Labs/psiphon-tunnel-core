@@ -67,9 +67,11 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         public void onConnecting();
         public void onConnected();
         public void onHomepage(String url);
+        public void onClientRegion(String region);
         public void onClientUpgradeDownloaded(String filename);
         public void onSplitTunnelRegion(String region);
         public void onUntunneledAddress(String address);
+        public void onBytesTransferred(long sent, long received);
     }
 
     private final HostService mHostService;
@@ -268,12 +270,12 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         stopPsiphon();
         mHostService.onDiagnosticMessage("starting Psiphon library");
         try {
-            boolean useDeviceBinder = (mTunFd != null);
+            boolean isVpnMode = (mTunFd != null);
             Psi.Start(
-                loadPsiphonConfig(mHostService.getContext()),
+                loadPsiphonConfig(mHostService.getContext(), isVpnMode),
                 embeddedServerEntries,
                 this,
-                useDeviceBinder);
+                isVpnMode);
         } catch (java.lang.Exception e) {
             throw new Exception("failed to start Psiphon library", e);
         }
@@ -286,7 +288,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         mHostService.onDiagnosticMessage("Psiphon library stopped");
     }
 
-    private String loadPsiphonConfig(Context context)
+    private String loadPsiphonConfig(Context context, boolean isVpnMode)
             throws IOException, JSONException {
 
         // Load settings from the raw resource JSON config file and
@@ -304,6 +306,18 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
 
         // Continue to run indefinitely until connected
         json.put("EstablishTunnelTimeoutSeconds", 0);
+
+        // Enable tunnel auto-reconnect after a threshold number of port
+        // forward failures. By default, this mechanism is disabled in
+        // tunnel-core due to the chance of false positives due to
+        // bad user input. Since VpnService mode resolves domain names
+        // differently (udpgw), invalid domain name user input won't result
+        // in SSH port forward failures.
+        if (isVpnMode) {
+            json.put("PortForwardFailureThreshold", 10);
+        }
+
+        json.put("EmitBytesTransferred", true);
 
         if (mLocalSocksProxyPort != 0) {
             // When mLocalSocksProxyPort is set, tun2socks is already configured
@@ -368,11 +382,18 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             } else if (noticeType.equals("Homepage")) {
                 mHostService.onHomepage(notice.getJSONObject("data").getString("url"));
 
+            } else if (noticeType.equals("ClientRegion")) {
+                mHostService.onClientRegion(notice.getJSONObject("data").getString("region"));
+
             } else if (noticeType.equals("SplitTunnelRegion")) {
-                mHostService.onHomepage(notice.getJSONObject("data").getString("region"));
+                mHostService.onSplitTunnelRegion(notice.getJSONObject("data").getString("region"));
 
             } else if (noticeType.equals("UntunneledAddress")) {
-                mHostService.onHomepage(notice.getJSONObject("data").getString("address"));
+                mHostService.onUntunneledAddress(notice.getJSONObject("data").getString("address"));
+
+            } else if (noticeType.equals("BytesTransferred")) {
+                JSONObject data = notice.getJSONObject("data");
+                mHostService.onBytesTransferred(data.getLong("sent"), data.getLong("received"));
             }
 
             if (diagnostic) {

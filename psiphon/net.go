@@ -22,6 +22,7 @@ package psiphon
 import (
 	"io"
 	"net"
+	"reflect"
 	"sync"
 	"time"
 
@@ -161,11 +162,11 @@ func Relay(localConn, remoteConn net.Conn) {
 // WaitForNetworkConnectivity uses a NetworkConnectivityChecker to
 // periodically check for network connectivity. It returns true if
 // no NetworkConnectivityChecker is provided (waiting is disabled)
-// or if NetworkConnectivityChecker.HasNetworkConnectivity() indicates
-// connectivity. It polls the checker once a second. If a stop is
-// broadcast, false is returned.
+// or when NetworkConnectivityChecker.HasNetworkConnectivity()
+// indicates connectivity. It waits and polls the checker once a second.
+// If any stop is broadcast, false is returned immediately.
 func WaitForNetworkConnectivity(
-	connectivityChecker NetworkConnectivityChecker, stopBroadcast <-chan struct{}) bool {
+	connectivityChecker NetworkConnectivityChecker, stopBroadcasts ...<-chan struct{}) bool {
 	if connectivityChecker == nil || 1 == connectivityChecker.HasNetworkConnectivity() {
 		return true
 	}
@@ -175,10 +176,20 @@ func WaitForNetworkConnectivity(
 		if 1 == connectivityChecker.HasNetworkConnectivity() {
 			return true
 		}
-		select {
-		case <-ticker.C:
-			// Check again
-		case <-stopBroadcast:
+
+		selectCases := make([]reflect.SelectCase, 1+len(stopBroadcasts))
+		selectCases[0] = reflect.SelectCase{
+			Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ticker.C)}
+		for i, stopBroadcast := range stopBroadcasts {
+			selectCases[i+1] = reflect.SelectCase{
+				Dir: reflect.SelectRecv, Chan: reflect.ValueOf(stopBroadcast)}
+		}
+
+		chosen, _, ok := reflect.Select(selectCases)
+		if chosen == 0 && ok {
+			// Ticker case, so check again
+		} else {
+			// Stop case
 			return false
 		}
 	}
