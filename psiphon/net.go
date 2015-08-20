@@ -64,6 +64,12 @@ type DialConfig struct {
 	// current active untunneled network DNS server.
 	DeviceBinder    DeviceBinder
 	DnsServerGetter DnsServerGetter
+
+	// UseIndistinguishableTLS specifies whether to try to use an
+	// alternative stack for TLS. From a circumvention perspective,
+	// Go's TLS has a distinct fingerprint that may be used for blocking.
+	// Only applies to TLS connections.
+	UseIndistinguishableTLS bool
 }
 
 // DeviceBinder defines the interface to the external BindToDevice provider

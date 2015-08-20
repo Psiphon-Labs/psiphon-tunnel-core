@@ -1,7 +1,7 @@
-// +build !android,!linux
+// +build !android
 
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -26,11 +26,7 @@ import (
 	"net"
 )
 
-// LookupIP resolves a hostname. When BindToDevice is not required, it
-// simply uses net.LookupIP.
-func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
-	if config.DeviceBinder != nil {
-		return nil, ContextError(errors.New("LookupIP with DeviceBinder not supported on this platform"))
-	}
-	return net.LookupIP(host)
+// newOpenSSLConn simply returns an error when used on an unsupported platform.
+func newOpenSSLConn(rawConn net.Conn, config *CustomTLSConfig) (handshakeConn, error) {
+	return nil, ContextError(errors.New("newOpenSSLConn not supported on this platform"))
 }

@@ -162,11 +162,12 @@ func DialMeek(
 
 		dialer = NewCustomTLSDialer(
 			&CustomTLSConfig{
-				Dial:           NewTCPDialer(meekConfig),
-				Timeout:        meekConfig.ConnectTimeout,
-				FrontingAddr:   fmt.Sprintf("%s:%d", frontingAddress, 443),
-				SendServerName: false,
-				SkipVerify:     true,
+				Dial:                    NewTCPDialer(meekConfig),
+				Timeout:                 meekConfig.ConnectTimeout,
+				FrontingAddr:            fmt.Sprintf("%s:%d", frontingAddress, 443),
+				SendServerName:          false,
+				SkipVerify:              true,
+				UseIndistinguishableTLS: config.UseIndistinguishableTLS,
 			})
 	} else {
 		// In the unfronted case, host is both what is dialed and what ends up in the HTTP Host header

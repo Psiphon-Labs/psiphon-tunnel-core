@@ -14,7 +14,7 @@ This directory contains source and scripts to build OpenSSL libraries that can b
 statically linked with Psiphon Tunnel Core.
 
 Mimicking stock TLS implementations is done both at compile time (no-heartbeats)
-and at [runtime](TODO-link) (specific CipherSuites and options).
+and at [runtime](psiphon/opensslConn.go) (specific cipher suites and options).
 
 Android
 --------------------------------------------------------------------------------

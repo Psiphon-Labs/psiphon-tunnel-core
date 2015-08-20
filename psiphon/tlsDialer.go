@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -110,6 +110,11 @@ type CustomTLSConfig struct {
 	// TlsConfig is a tls.Config to use in the
 	// non-verifyLegacyCertificate case.
 	TlsConfig *tls.Config
+
+	// UseIndistinguishableTLS specifies whether to try to use an
+	// alternative stack for TLS. From a circumvention perspective,
+	// Go's TLS has a distinct fingerprint that may be used for blocking.
+	UseIndistinguishableTLS bool
 }
 
 func NewCustomTLSDialer(config *CustomTLSConfig) Dialer {
@@ -118,13 +123,19 @@ func NewCustomTLSDialer(config *CustomTLSConfig) Dialer {
 	}
 }
 
+// handshakeConn is a net.Conn that can perform a TLS handshake
+type handshakeConn interface {
+	net.Conn
+	Handshake() error
+}
+
 // CustomTLSDialWithDialer is a customized replacement for tls.Dial.
 // Based on tlsdialer.DialWithDialer which is based on crypto/tls.DialWithDialer.
 //
 // tlsdialer comment:
 //   Note - if sendServerName is false, the VerifiedChains field on the
 //   connection's ConnectionState will never get populated.
-func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, error) {
+func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, error) {
 
 	// We want the Timeout and Deadline values from dialer to cover the
 	// whole process: TCP connection and TLS handshake. This means that we
@@ -149,6 +160,7 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, er
 
 	hostname, _, err := net.SplitHostPort(dialAddr)
 	if err != nil {
+		rawConn.Close()
 		return nil, ContextError(err)
 	}
 
@@ -178,7 +190,19 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, er
 		tlsConfigCopy.InsecureSkipVerify = true
 	}
 
-	conn := tls.Client(rawConn, tlsConfigCopy)
+	var conn handshakeConn
+
+	// When supported, use OpenSSL TLS as a more indistinguishable TLS.
+	// TODO: add SNI and cert verification support for OpenSSL conns
+	if config.UseIndistinguishableTLS && !config.SendServerName && config.SkipVerify {
+		conn, err = newOpenSSLConn(rawConn, config)
+		if err != nil {
+			rawConn.Close()
+			return nil, ContextError(err)
+		}
+	} else {
+		conn = tls.Client(rawConn, tlsConfigCopy)
+	}
 
 	if config.Timeout == 0 {
 		err = conn.Handshake()
@@ -189,12 +213,14 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (*tls.Conn, er
 		err = <-errChannel
 	}
 
-	if !config.SkipVerify {
+	// TODO: replace type conversion with handshakeConn interface for verification
+	tlsConn, isTlsConn := conn.(*tls.Conn)
+	if !config.SkipVerify && isTlsConn {
 		if err == nil && config.VerifyLegacyCertificate != nil {
-			err = verifyLegacyCertificate(conn, config.VerifyLegacyCertificate)
+			err = verifyLegacyCertificate(tlsConn, config.VerifyLegacyCertificate)
 		} else if err == nil && !config.SendServerName && !tlsConfig.InsecureSkipVerify {
 			// Manually verify certificates
-			err = verifyServerCerts(conn, serverName, tlsConfigCopy)
+			err = verifyServerCerts(tlsConn, serverName, tlsConfigCopy)
 		}
 	}
 

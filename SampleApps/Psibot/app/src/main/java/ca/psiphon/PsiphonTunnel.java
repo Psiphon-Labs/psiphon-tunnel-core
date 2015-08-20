@@ -319,6 +319,8 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
 
         json.put("EmitBytesTransferred", true);
 
+        json.put("UseIndistinguishableTLS", true);
+
         if (mLocalSocksProxyPort != 0) {
             // When mLocalSocksProxyPort is set, tun2socks is already configured
             // to use that port value. So we force use of the same port.
