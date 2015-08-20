@@ -26,6 +26,6 @@ variables as follows (alternatively, set up `pkg-config`, which is used by the
 [openssl package](https://github.com/Psiphon-Inc/openssl/blob/master/build.go)).
 
 ```
-export CGO_CFLAGS="-I/Users/User/Code/openssl-android/openssl-1.0.1p/include"
-export CGO_LDFLAGS="-L/Users/User/Code/openssl-android/openssl-1.0.1p -lssl -lcrypto"
+export CGO_CFLAGS="-I<path>/include"
+export CGO_LDFLAGS="-L<path> -lssl -lcrypto"
 ```
