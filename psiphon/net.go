@@ -70,6 +70,12 @@ type DialConfig struct {
 	// Go's TLS has a distinct fingerprint that may be used for blocking.
 	// Only applies to TLS connections.
 	UseIndistinguishableTLS bool
+
+	// SystemCACertificateDirectory specifies a directory containing
+	// CA certs. Directory contents should be compatible with OpenSSL's
+	// SSL_CTX_load_verify_locations
+	// Only applies to UseIndistinguishableTLS connections.
+	SystemCACertificateDirectory string
 }
 
 // DeviceBinder defines the interface to the external BindToDevice provider

@@ -33,18 +33,29 @@ import (
 // This facility is used as a circumvention measure to ensure Psiphon client
 // TLS ClientHello messages match common TLS ClientHellos vs. the more
 // distinguishable (blockable) Go TLS ClientHello.
-func newOpenSSLConn(rawConn net.Conn, config *CustomTLSConfig) (handshakeConn, error) {
-
-	if !config.SkipVerify {
-		return nil, ContextError(errors.New("opensslDial certificate verification not supported"))
-	}
-	if config.SendServerName {
-		return nil, ContextError(errors.New("opensslDial server name not supported"))
-	}
+func newOpenSSLConn(rawConn net.Conn, hostname string, config *CustomTLSConfig) (handshakeConn, error) {
 
 	ctx, err := openssl.NewCtx()
 	if err != nil {
 		return nil, ContextError(err)
+	}
+
+	if !config.SkipVerify {
+		ctx.SetVerifyMode(openssl.VerifyPeer)
+		if config.VerifyLegacyCertificate != nil {
+			// TODO: verify with VerifyLegacyCertificate
+			return nil, errors.New("newOpenSSLConn does not support VerifyLegacyCertificate")
+		} else {
+			if config.SystemCACertificateDirectory == "" {
+				return nil, errors.New("newOpenSSLConn cannot verify without SystemCACertificateDirectory")
+			}
+			err = ctx.LoadVerifyLocations("", config.SystemCACertificateDirectory)
+			if err != nil {
+				return nil, ContextError(err)
+			}
+		}
+	} else {
+		ctx.SetVerifyMode(openssl.VerifyNone)
 	}
 
 	// Use the same cipher suites, in the same priority order, as stock Android TLS.
@@ -83,6 +94,13 @@ func newOpenSSLConn(rawConn net.Conn, config *CustomTLSConfig) (handshakeConn, e
 	conn, err := openssl.Client(rawConn, ctx)
 	if err != nil {
 		return nil, ContextError(err)
+	}
+
+	if config.SendServerName {
+		err = conn.SetTlsExtHostName(hostname)
+		if err != nil {
+			return nil, ContextError(err)
+		}
 	}
 
 	return conn, nil

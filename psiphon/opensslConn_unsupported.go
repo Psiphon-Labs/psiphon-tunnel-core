@@ -27,6 +27,6 @@ import (
 )
 
 // newOpenSSLConn simply returns an error when used on an unsupported platform.
-func newOpenSSLConn(rawConn net.Conn, config *CustomTLSConfig) (handshakeConn, error) {
+func newOpenSSLConn(rawConn net.Conn, hostname string, config *CustomTLSConfig) (handshakeConn, error) {
 	return nil, ContextError(errors.New("newOpenSSLConn not supported on this platform"))
 }

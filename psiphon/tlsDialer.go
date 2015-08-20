@@ -104,17 +104,19 @@ type CustomTLSConfig struct {
 	// VerifyLegacyCertificate is a special case self-signed server
 	// certificate case. Ignores IP SANs and basic constraints. No
 	// certificate chain. Just checks that the server presented the
-	// specified certificate.
+	// specified certificate. SNI is disbled when this is set.
 	VerifyLegacyCertificate *x509.Certificate
-
-	// TlsConfig is a tls.Config to use in the
-	// non-verifyLegacyCertificate case.
-	TlsConfig *tls.Config
 
 	// UseIndistinguishableTLS specifies whether to try to use an
 	// alternative stack for TLS. From a circumvention perspective,
 	// Go's TLS has a distinct fingerprint that may be used for blocking.
 	UseIndistinguishableTLS bool
+
+	// SystemCACertificateDirectory specifies a directory containing
+	// CA certs. Directory contents should be compatible with OpenSSL's
+	// SSL_CTX_load_verify_locations
+	// Only applies to UseIndistinguishableTLS connections.
+	SystemCACertificateDirectory string
 }
 
 func NewCustomTLSDialer(config *CustomTLSConfig) Dialer {
@@ -164,44 +166,38 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 		return nil, ContextError(err)
 	}
 
-	tlsConfig := config.TlsConfig
-	if tlsConfig == nil {
-		tlsConfig = &tls.Config{}
+	tlsConfig := &tls.Config{}
+
+	if config.SkipVerify {
+		tlsConfig.InsecureSkipVerify = true
 	}
 
-	// Copy config so we can tweak it
-	tlsConfigCopy := new(tls.Config)
-	*tlsConfigCopy = *tlsConfig
-
-	serverName := tlsConfig.ServerName
-	// If no ServerName is set, infer the ServerName
-	// from the hostname we're connecting to.
-	if serverName == "" {
-		serverName = hostname
-	}
-
-	if config.SendServerName {
+	if config.SendServerName && config.VerifyLegacyCertificate == nil {
 		// Set the ServerName and rely on the usual logic in
 		// tls.Conn.Handshake() to do its verification
-		tlsConfigCopy.ServerName = serverName
+		tlsConfig.ServerName = hostname
 	} else {
+		// No SNI.
 		// Disable verification in tls.Conn.Handshake().  We'll verify manually
 		// after handshaking
-		tlsConfigCopy.InsecureSkipVerify = true
+		tlsConfig.InsecureSkipVerify = true
 	}
 
 	var conn handshakeConn
 
 	// When supported, use OpenSSL TLS as a more indistinguishable TLS.
-	// TODO: add SNI and cert verification support for OpenSSL conns
-	if config.UseIndistinguishableTLS && !config.SendServerName && config.SkipVerify {
-		conn, err = newOpenSSLConn(rawConn, config)
+	if config.UseIndistinguishableTLS &&
+		(config.SkipVerify ||
+			// TODO: config.VerifyLegacyCertificate != nil ||
+			config.SystemCACertificateDirectory != "") {
+
+		conn, err = newOpenSSLConn(rawConn, hostname, config)
 		if err != nil {
 			rawConn.Close()
 			return nil, ContextError(err)
 		}
 	} else {
-		conn = tls.Client(rawConn, tlsConfigCopy)
+		conn = tls.Client(rawConn, tlsConfig)
 	}
 
 	if config.Timeout == 0 {
@@ -213,14 +209,20 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 		err = <-errChannel
 	}
 
-	// TODO: replace type conversion with handshakeConn interface for verification
+	// openSSLConns complete verification automatically. For Go TLS,
+	// we need to complete the process from crypto/tls.Dial.
+
+	// NOTE: for (config.SendServerName && !config.tlsConfig.InsecureSkipVerify),
+	// the tls.Conn.Handshake() does the complete verification, including host name.
 	tlsConn, isTlsConn := conn.(*tls.Conn)
-	if !config.SkipVerify && isTlsConn {
-		if err == nil && config.VerifyLegacyCertificate != nil {
+	if err == nil && isTlsConn &&
+		!config.SkipVerify && tlsConfig.InsecureSkipVerify {
+
+		if config.VerifyLegacyCertificate != nil {
 			err = verifyLegacyCertificate(tlsConn, config.VerifyLegacyCertificate)
-		} else if err == nil && !config.SendServerName && !tlsConfig.InsecureSkipVerify {
+		} else {
 			// Manually verify certificates
-			err = verifyServerCerts(tlsConn, serverName, tlsConfigCopy)
+			err = verifyServerCerts(tlsConn, hostname, tlsConfig)
 		}
 	}
 
@@ -243,13 +245,13 @@ func verifyLegacyCertificate(conn *tls.Conn, expectedCertificate *x509.Certifica
 	return nil
 }
 
-func verifyServerCerts(conn *tls.Conn, serverName string, config *tls.Config) error {
+func verifyServerCerts(conn *tls.Conn, hostname string, config *tls.Config) error {
 	certs := conn.ConnectionState().PeerCertificates
 
 	opts := x509.VerifyOptions{
 		Roots:         config.RootCAs,
 		CurrentTime:   time.Now(),
-		DNSName:       serverName,
+		DNSName:       hostname,
 		Intermediates: x509.NewCertPool(),
 	}
 

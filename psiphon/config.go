@@ -100,6 +100,7 @@ type Config struct {
 	UpgradeDownloadFilename             string
 	EmitBytesTransferred                bool
 	UseIndistinguishableTLS             bool
+	SystemCACertificateDirectory        string
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON

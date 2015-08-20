@@ -321,6 +321,10 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
 
         json.put("UseIndistinguishableTLS", true);
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
+            json.put("SystemCACertificateDirectory", "/system/etc/security/cacerts");
+        }
+
         if (mLocalSocksProxyPort != 0) {
             // When mLocalSocksProxyPort is set, tun2socks is already configured
             // to use that port value. So we force use of the same port.
