@@ -74,10 +74,12 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// used to exclude these requests and connection from VPN routing.
 	untunneledPendingConns := new(Conns)
 	untunneledDialConfig := &DialConfig{
-		UpstreamProxyUrl: config.UpstreamProxyUrl,
-		PendingConns:     untunneledPendingConns,
-		DeviceBinder:     config.DeviceBinder,
-		DnsServerGetter:  config.DnsServerGetter,
+		UpstreamProxyUrl:             config.UpstreamProxyUrl,
+		PendingConns:                 untunneledPendingConns,
+		DeviceBinder:                 config.DeviceBinder,
+		DnsServerGetter:              config.DnsServerGetter,
+		UseIndistinguishableTLS:      config.UseIndistinguishableTLS,
+		SystemCACertificateDirectory: config.SystemCACertificateDirectory,
 	}
 
 	controller = &Controller{
@@ -123,7 +125,6 @@ func NewController(config *Config) (controller *Controller, err error) {
 // - a local HTTP proxy that port forwards through the pool of tunnels
 func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	NoticeBuildInfo()
-	NoticeCoreVersion(VERSION)
 	ReportAvailableRegions()
 
 	// Start components

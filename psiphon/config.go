@@ -29,7 +29,6 @@ import (
 // TODO: allow all params to be configured
 
 const (
-	VERSION                                      = "0.0.9"
 	DATA_STORE_FILENAME                          = "psiphon.db"
 	CONNECTION_WORKER_POOL_SIZE                  = 10
 	TUNNEL_POOL_SIZE                             = 1
@@ -99,6 +98,8 @@ type Config struct {
 	UpgradeDownloadUrl                  string
 	UpgradeDownloadFilename             string
 	EmitBytesTransferred                bool
+	UseIndistinguishableTLS             bool
+	SystemCACertificateDirectory        string
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON

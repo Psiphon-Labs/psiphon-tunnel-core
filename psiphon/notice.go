@@ -99,11 +99,6 @@ func NoticeError(format string, args ...interface{}) {
 	outputNotice("Error", true, "message", fmt.Sprintf(format, args...))
 }
 
-// NoticeCoreVersion is the version string of the core
-func NoticeCoreVersion(version string) {
-	outputNotice("CoreVersion", false, "version", version)
-}
-
 // NoticeCandidateServers is how many possible servers are available for the selected region and protocol
 func NoticeCandidateServers(region, protocol string, count int) {
 	outputNotice("CandidateServers", false, "region", region, "protocol", protocol, "count", count)

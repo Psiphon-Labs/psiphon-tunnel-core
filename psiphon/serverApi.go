@@ -367,7 +367,6 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 		&CustomTLSConfig{
 			Dial:                    tunneledDialer,
 			Timeout:                 PSIPHON_API_SERVER_TIMEOUT,
-			SendServerName:          false,
 			VerifyLegacyCertificate: certificate,
 		})
 	transport := &http.Transport{

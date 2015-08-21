@@ -19,9 +19,22 @@ Setup
 --------------------------------------------------------------------------------
 
 * Go 1.4 (or higher) is required.
-* In this repository, run `go build` to make the `psiphon-tunnel-core` binary.
-* Note that the `psiphon` package is imported using the absolute path `github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon`; without further local configuration, `go` will use this version of the code and not the local copy in the repository.
 * This project builds and runs on recent versions of Windows, Linux, and Mac OS X.
+* Note that the `psiphon` package is imported using the absolute path `github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon`; without further local configuration, `go` will use this version of the code and not the local copy in the repository.
+* In this repository, run `go build` to make the `psiphon-tunnel-core` binary.
+  * Build versioning info may be configured as follows, and passed to `go build` in the `-ldflags` argument:
+
+    ```
+    BUILDDATE=$(date --iso-8601=seconds)
+    BUILDREPO=$(git config --get remote.origin.url)
+    BUILDREV=$(git rev-parse HEAD)
+    LDFLAGS="\
+    -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildDate $BUILDDATE \
+    -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildRepo $BUILDREPO \
+    -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildRev $BUILDREV \
+    "
+    ```
+
 * Run `./psiphon-tunnel-core --config psiphon.config` where the config file looks like this:
 
 <!--BEGIN-SAMPLE-CONFIG-->

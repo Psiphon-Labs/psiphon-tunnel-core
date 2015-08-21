@@ -370,11 +370,13 @@ func dialSsh(
 
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
-		UpstreamProxyUrl: config.UpstreamProxyUrl,
-		ConnectTimeout:   TUNNEL_CONNECT_TIMEOUT,
-		PendingConns:     pendingConns,
-		DeviceBinder:     config.DeviceBinder,
-		DnsServerGetter:  config.DnsServerGetter,
+		UpstreamProxyUrl:             config.UpstreamProxyUrl,
+		ConnectTimeout:               TUNNEL_CONNECT_TIMEOUT,
+		PendingConns:                 pendingConns,
+		DeviceBinder:                 config.DeviceBinder,
+		DnsServerGetter:              config.DnsServerGetter,
+		UseIndistinguishableTLS:      config.UseIndistinguishableTLS,
+		SystemCACertificateDirectory: config.SystemCACertificateDirectory,
 	}
 	if useMeek {
 		conn, err = DialMeek(serverEntry, sessionId, frontingAddress, dialConfig)

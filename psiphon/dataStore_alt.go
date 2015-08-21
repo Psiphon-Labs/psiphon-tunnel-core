@@ -31,7 +31,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/boltdb/bolt"
+	"github.com/Psiphon-Inc/bolt"
 )
 
 // The BoltDB dataStore implementation is an alternative to the sqlite3-based
