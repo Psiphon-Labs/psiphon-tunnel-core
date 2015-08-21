@@ -19,7 +19,8 @@ and at [runtime](psiphon/opensslConn.go) (specific cipher suites and options).
 Android
 --------------------------------------------------------------------------------
 
-Run the `build-android.sh` script to build static libraries for Android.
+Ensure `ANDROID_NDK_ROOT` is set. Run the `build-android.sh` script to build
+static libraries for Android.
 
 When running `gomobile bind` to build the Android library, set `CGO` environment
 variables as follows (alternatively, set up `pkg-config`, which is used by the
