@@ -22,7 +22,9 @@ package psiphon
 import (
 	"errors"
 	"io/ioutil"
+	"net"
 	"net/http"
+	"net/url"
 )
 
 // FetchRemoteServerList downloads a remote server list JSON record from
@@ -39,15 +41,46 @@ func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 		return ContextError(errors.New("remote server list signature public key blank"))
 	}
 
+	dialer := NewTCPDialer(dialConfig)
+
+	// When the URL is HTTPS, use the custom TLS dialer with the
+	// UseIndistinguishableTLS option.
+	// TODO: refactor into helper function
+	requestUrl, err := url.Parse(config.RemoteServerListUrl)
+	if err != nil {
+		return ContextError(err)
+	}
+	if requestUrl.Scheme == "https" {
+		dialer = NewCustomTLSDialer(
+			&CustomTLSConfig{
+				Dial:                         dialer,
+				SendServerName:               true,
+				SkipVerify:                   false,
+				UseIndistinguishableTLS:      config.UseIndistinguishableTLS,
+				SystemCACertificateDirectory: config.SystemCACertificateDirectory,
+			})
+
+		// Change the scheme to "http"; otherwise http.Transport will try to do
+		// another TLS handshake inside the explicit TLS session. Also need to
+		// force the port to 443,as the default for "http", 80, won't talk TLS.
+		requestUrl.Scheme = "http"
+		host, _, err := net.SplitHostPort(requestUrl.Host)
+		if err != nil {
+			// Assume there's no port
+			host = requestUrl.Host
+		}
+		requestUrl.Host = net.JoinHostPort(host, "443")
+	}
+
 	transport := &http.Transport{
-		Dial: NewTCPDialer(dialConfig),
+		Dial: dialer,
 	}
 	httpClient := http.Client{
 		Timeout:   FETCH_REMOTE_SERVER_LIST_TIMEOUT,
 		Transport: transport,
 	}
 
-	request, err := http.NewRequest("GET", config.RemoteServerListUrl, nil)
+	request, err := http.NewRequest("GET", requestUrl.String(), nil)
 	if err != nil {
 		return ContextError(err)
 	}
