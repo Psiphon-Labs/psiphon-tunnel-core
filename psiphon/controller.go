@@ -25,6 +25,7 @@ package psiphon
 
 import (
 	"errors"
+	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -61,6 +62,9 @@ type Controller struct {
 
 // NewController initializes a new controller.
 func NewController(config *Config) (controller *Controller, err error) {
+
+	// Needed by regen, at least
+	rand.Seed(int64(time.Now().Nanosecond()))
 
 	// Generate a session ID for the Psiphon server API. This session ID is
 	// used across all tunnels established by the controller.

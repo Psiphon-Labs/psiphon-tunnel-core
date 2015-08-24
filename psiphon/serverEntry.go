@@ -66,6 +66,7 @@ type ServerEntry struct {
 	MeekFrontingHost              string   `json:"meekFrontingHost"`
 	MeekFrontingDomain            string   `json:"meekFrontingDomain"`
 	MeekFrontingAddresses         []string `json:"meekFrontingAddresses"`
+	MeekFrontingAddressesRegex    string   `json:"meekFrontingAddressesRegex"`
 }
 
 // SupportsProtocol returns true if and only if the ServerEntry has
