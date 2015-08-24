@@ -30,7 +30,7 @@ import (
 	"sync"
 	"time"
 
-        "github.com/Psiphon-Inc/goregen"
+	"github.com/Psiphon-Inc/goregen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	"golang.org/x/crypto/ssh"
 )
