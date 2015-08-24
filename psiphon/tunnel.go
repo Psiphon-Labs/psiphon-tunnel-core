@@ -30,9 +30,9 @@ import (
 	"sync"
 	"time"
 
+        "github.com/Psiphon-Inc/goregen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	"golang.org/x/crypto/ssh"
-        "github.com/Psiphon-Inc/goregen"
 )
 
 // Tunneler specifies the interface required by components that use a tunnel.
