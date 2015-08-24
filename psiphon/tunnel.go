@@ -350,7 +350,6 @@ func dialSsh(
 
 	frontingAddress := ""
 	if useFronting {
-
 		if len(serverEntry.MeekFrontingAddressesRegex) > 0 {
 
 			// Generate a front address based on the regex.
