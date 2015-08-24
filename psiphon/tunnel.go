@@ -32,6 +32,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	"golang.org/x/crypto/ssh"
+        "github.com/Psiphon-Inc/goregen"
 )
 
 // Tunneler specifies the interface required by components that use a tunnel.
@@ -350,17 +351,28 @@ func dialSsh(
 	frontingAddress := ""
 	if useFronting {
 
-		// Randomly select, for this connection attempt, one front address for
-		// fronting-capable servers.
+		if len(serverEntry.MeekFrontingAddressesRegex) > 0 {
 
-		if len(serverEntry.MeekFrontingAddresses) == 0 {
-			return nil, nil, ContextError(errors.New("MeekFrontingAddresses is empty"))
+			// Generate a front address based on the regex.
+
+			frontingAddress, err = regen.Generate(serverEntry.MeekFrontingAddressesRegex)
+			if err != nil {
+				return nil, nil, ContextError(err)
+			}
+		} else {
+
+			// Randomly select, for this connection attempt, one front address for
+			// fronting-capable servers.
+
+			if len(serverEntry.MeekFrontingAddresses) == 0 {
+				return nil, nil, ContextError(errors.New("MeekFrontingAddresses is empty"))
+			}
+			index, err := MakeSecureRandomInt(len(serverEntry.MeekFrontingAddresses))
+			if err != nil {
+				return nil, nil, ContextError(err)
+			}
+			frontingAddress = serverEntry.MeekFrontingAddresses[index]
 		}
-		index, err := MakeSecureRandomInt(len(serverEntry.MeekFrontingAddresses))
-		if err != nil {
-			return nil, nil, ContextError(err)
-		}
-		frontingAddress = serverEntry.MeekFrontingAddresses[index]
 	}
 	NoticeConnectingServer(
 		serverEntry.IpAddress,
