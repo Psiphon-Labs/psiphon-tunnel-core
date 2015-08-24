@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"reflect"
@@ -152,21 +153,23 @@ func (conns *Conns) CloseAll() {
 	conns.conns = make(map[net.Conn]bool)
 }
 
-// Relay sends to remoteConn bytes received from localConn,
+// LocalProxyRelay sends to remoteConn bytes received from localConn,
 // and sends to localConn bytes received from remoteConn.
-func Relay(localConn, remoteConn net.Conn) {
+func LocalProxyRelay(proxyType string, localConn, remoteConn net.Conn) {
 	copyWaitGroup := new(sync.WaitGroup)
 	copyWaitGroup.Add(1)
 	go func() {
 		defer copyWaitGroup.Done()
 		_, err := io.Copy(localConn, remoteConn)
 		if err != nil {
-			NoticeAlert("Relay failed: %s", ContextError(err))
+			err = fmt.Errorf("Relay failed: %s", ContextError(err))
+			NoticeLocalProxyError(proxyType, err)
 		}
 	}()
 	_, err := io.Copy(remoteConn, localConn)
 	if err != nil {
-		NoticeAlert("Relay failed: %s", ContextError(err))
+		err = fmt.Errorf("Relay failed: %s", ContextError(err))
+		NoticeLocalProxyError(proxyType, err)
 	}
 	copyWaitGroup.Wait()
 }

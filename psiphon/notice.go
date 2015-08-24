@@ -26,6 +26,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -196,6 +197,64 @@ func NoticeClientUpgradeDownloaded(filename string) {
 // transferred since the last NoticeBytesTransferred.
 func NoticeBytesTransferred(sent, received int64) {
 	outputNotice("BytesTransferred", false, "sent", sent, "received", received)
+}
+
+// NoticeLocalProxyError reports a local proxy error message. Repetitive
+// errors for a given proxy type are suppressed.
+func NoticeLocalProxyError(proxyType string, err error) {
+	noticeRepetitiveError("LocalProxyError", proxyType, err)
+}
+
+type repetitiveErrorState struct {
+	message string
+	repeats int
+}
+
+var lastRepetitiveErrorMutex sync.Mutex
+var localRepetitiveStates = make(map[string]*repetitiveErrorState)
+
+// noticeRepetitiveError reports a an error message. Used for errors which
+// often repeat in noisy bursts, the error is emitted with a " +1" suffix on the
+// second consecutive repeat and suppressed on further consecutive repeats.
+func noticeRepetitiveError(noticeType, subjectType string, err error) {
+	lastRepetitiveErrorMutex.Lock()
+	defer lastRepetitiveErrorMutex.Unlock()
+
+	key := noticeType + subjectType
+	state, ok := localRepetitiveStates[key]
+	if !ok {
+		state = new(repetitiveErrorState)
+		localRepetitiveStates[key] = state
+	}
+
+	emit := true
+	errMessage := err.Error()
+
+	// For repeats, only consider the base error message, which is
+	// the root error that repeats (the full error often contains
+	// different, e.g., port numbers but the same repeating root).
+	// Assumes error format of ContextError.
+	baseMessage := errMessage
+	index := strings.LastIndex(errMessage, ": ")
+	if index != -1 {
+		baseMessage = errMessage[index+2:]
+	}
+
+	if baseMessage != state.message {
+		state.message = baseMessage
+		state.repeats = 0
+	} else {
+		state.repeats += 1
+		if state.repeats == 1 {
+			errMessage += " +1"
+		} else {
+			emit = false
+		}
+	}
+
+	if emit {
+		outputNotice(noticeType, false, "type", subjectType, "message", errMessage)
+	}
 }
 
 type noticeObject struct {
