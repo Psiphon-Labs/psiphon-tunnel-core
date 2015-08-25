@@ -37,16 +37,16 @@ Setup
 
 * Run `./ConsoleClient --config psiphon.config` where the config file looks like this:
 
-<!--BEGIN-SAMPLE-CONFIG-->
-    ```
-    {
-        "PropagationChannelId" : "<placeholder>",
-        "SponsorId" : "<placeholder>",
-        "LocalHttpProxyPort" : 8080,
-        "LocalSocksProxyPort" : 1080
-    }
-    ```
-<!--END-SAMPLE-CONFIG-->
+  <!--BEGIN-SAMPLE-CONFIG-->
+  ```
+  {
+      "PropagationChannelId" : "<placeholder>",
+      "SponsorId" : "<placeholder>",
+      "LocalHttpProxyPort" : 8080,
+      "LocalSocksProxyPort" : 1080
+  }
+  ```
+  <!--END-SAMPLE-CONFIG-->
 
 * Config file parameters are [documented here](https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#Config).
 * Replace each `<placeholder>` with a value from your Psiphon network. The Psiphon server-side stack is open source and can be found in our  [Psiphon 3 repository](https://bitbucket.org/psiphon/psiphon-circumvention-system). If you would like to use the Psiphon Inc. network, contact <developer-support@psiphon.ca>.
