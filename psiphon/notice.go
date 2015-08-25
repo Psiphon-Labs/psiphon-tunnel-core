@@ -105,9 +105,13 @@ func NoticeCandidateServers(region, protocol string, count int) {
 	outputNotice("CandidateServers", false, "region", region, "protocol", protocol, "count", count)
 }
 
-// NoticeAvailableEgressRegions is what regions are available for egress from
+// NoticeAvailableEgressRegions is what regions are available for egress from.
+// Consecutive reports of the same list of regions are suppressed.
 func NoticeAvailableEgressRegions(regions []string) {
-	outputNotice("AvailableEgressRegions", false, "regions", regions)
+	repetitionMessage := strings.Join(regions, "")
+	outputRepetitiveNotice(
+		"AvailableEgressRegions", repetitionMessage, 0,
+		"AvailableEgressRegions", false, "regions", regions)
 }
 
 // NoticeConnectingServer is details on a connection attempt
@@ -184,7 +188,7 @@ func NoticeSplitTunnelRegion(region string) {
 // NoticeUpstreamProxyError reports an error when connecting to an upstream proxy. The
 // user may have input, for example, an incorrect address or incorrect credentials.
 func NoticeUpstreamProxyError(err error) {
-	outputNotice("UpstreamProxyError", true, "message", fmt.Sprintf("%s", err))
+	outputNotice("UpstreamProxyError", true, "message", err.Error())
 }
 
 // NoticeClientUpgradeDownloaded indicates that a client upgrade download
@@ -202,58 +206,64 @@ func NoticeBytesTransferred(sent, received int64) {
 // NoticeLocalProxyError reports a local proxy error message. Repetitive
 // errors for a given proxy type are suppressed.
 func NoticeLocalProxyError(proxyType string, err error) {
-	noticeRepetitiveError("LocalProxyError", proxyType, err)
+
+	// For repeats, only consider the base error message, which is
+	// the root error that repeats (the full error often contains
+	// different specific values, e.g., local port numbers, but
+	// the same repeating root).
+	// Assumes error format of ContextError.
+	repetitionMessage := err.Error()
+	index := strings.LastIndex(repetitionMessage, ": ")
+	if index != -1 {
+		repetitionMessage = repetitionMessage[index+2:]
+	}
+
+	outputRepetitiveNotice(
+		"LocalProxyError"+proxyType, repetitionMessage, 1,
+		"LocalProxyError", false, "message", err.Error())
 }
 
-type repetitiveErrorState struct {
+type repetitiveNoticeState struct {
 	message string
 	repeats int
 }
 
-var lastRepetitiveErrorMutex sync.Mutex
-var localRepetitiveStates = make(map[string]*repetitiveErrorState)
+var repetitiveNoticeMutex sync.Mutex
+var repetitiveNoticeStates = make(map[string]*repetitiveNoticeState)
 
-// noticeRepetitiveError reports a an error message. Used for errors which
-// often repeat in noisy bursts, the error is emitted with a " +1" suffix on the
-// second consecutive repeat and suppressed on further consecutive repeats.
-func noticeRepetitiveError(noticeType, subjectType string, err error) {
-	lastRepetitiveErrorMutex.Lock()
-	defer lastRepetitiveErrorMutex.Unlock()
+// outputRepetitiveNotice conditionally outputs a notice. Used for noticies which
+// often repeat in noisy bursts. For a repeat limit of N, the notice is emitted
+// with a "repeats" count on consecutive repeats up to the limit and then suppressed
+// until the repetitionMessage differs.
+func outputRepetitiveNotice(
+	repetitionKey, repetitionMessage string, repeatLimit int,
+	noticeType string, showUser bool, args ...interface{}) {
 
-	key := noticeType + subjectType
-	state, ok := localRepetitiveStates[key]
+	repetitiveNoticeMutex.Lock()
+	defer repetitiveNoticeMutex.Unlock()
+
+	state, ok := repetitiveNoticeStates[repetitionKey]
 	if !ok {
-		state = new(repetitiveErrorState)
-		localRepetitiveStates[key] = state
+		state = new(repetitiveNoticeState)
+		repetitiveNoticeStates[repetitionKey] = state
 	}
 
 	emit := true
-	errMessage := err.Error()
-
-	// For repeats, only consider the base error message, which is
-	// the root error that repeats (the full error often contains
-	// different, e.g., port numbers but the same repeating root).
-	// Assumes error format of ContextError.
-	baseMessage := errMessage
-	index := strings.LastIndex(errMessage, ": ")
-	if index != -1 {
-		baseMessage = errMessage[index+2:]
-	}
-
-	if baseMessage != state.message {
-		state.message = baseMessage
+	if repetitionMessage != state.message {
+		state.message = repetitionMessage
 		state.repeats = 0
 	} else {
 		state.repeats += 1
-		if state.repeats == 1 {
-			errMessage += " +1"
-		} else {
+		if state.repeats > repeatLimit {
 			emit = false
 		}
 	}
 
 	if emit {
-		outputNotice(noticeType, false, "type", subjectType, "message", errMessage)
+		if state.repeats > 0 {
+			args = append(args, "repeats", state.repeats)
+		}
+		outputNotice(noticeType, showUser, args...)
 	}
 }
 
