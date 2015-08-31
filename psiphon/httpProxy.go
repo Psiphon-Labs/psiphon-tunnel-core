@@ -65,6 +65,8 @@ type HttpProxy struct {
 	stopListeningBroadcast chan struct{}
 }
 
+var _HTTP_PROXY_TYPE = "HTTP"
+
 // NewHttpProxy initializes and runs a new HTTP proxy server.
 func NewHttpProxy(
 	config *Config,
@@ -225,7 +227,7 @@ func (proxy *HttpProxy) httpConnectHandler(localConn net.Conn, target string) (e
 	if err != nil {
 		return ContextError(err)
 	}
-	Relay(localConn, remoteConn)
+	LocalProxyRelay(_HTTP_PROXY_TYPE, localConn, remoteConn)
 	return nil
 }
 
@@ -396,7 +398,7 @@ func (proxy *HttpProxy) serve() {
 	default:
 		if err != nil {
 			proxy.tunneler.SignalComponentFailure()
-			NoticeAlert("%s", ContextError(err))
+			NoticeLocalProxyError(_HTTP_PROXY_TYPE, ContextError(err))
 		}
 	}
 	NoticeInfo("HTTP proxy stopped")

@@ -416,7 +416,6 @@ func (iterator *ServerEntryIterator) Reset() error {
 		return ContextError(err)
 	}
 
-	rand.Seed(int64(time.Now().Nanosecond()))
 	for i := len(serverEntryIds) - 1; i > iterator.shuffleHeadLength-1; i-- {
 		j := rand.Intn(i)
 		serverEntryIds[i], serverEntryIds[j] = serverEntryIds[j], serverEntryIds[i]

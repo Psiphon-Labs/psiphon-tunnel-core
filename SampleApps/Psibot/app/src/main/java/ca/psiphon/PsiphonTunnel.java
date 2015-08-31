@@ -206,7 +206,6 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
                 socksServerAddress,
                 udpgwServerAddress,
                 true);
-        mTunFd = null;
         mHostService.onDiagnosticMessage("routing through tunnel");
 
         // TODO: should double-check tunnel routing; see:
@@ -221,10 +220,8 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             }
             mTunFd = null;
         }
-        if (mRoutingThroughTunnel) {
-            stopTun2Socks();
-            mRoutingThroughTunnel = false;
-        }
+        waitStopTun2Socks();
+        mRoutingThroughTunnel = false;
     }
     
     //----------------------------------------------------------------------------------------------
@@ -294,7 +291,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         // Load settings from the raw resource JSON config file and
         // update as necessary. Then write JSON to disk for the Go client.
         JSONObject json = new JSONObject(mHostService.getPsiphonConfig());
-
+        
         // On Android, these directories must be set to the app private storage area.
         // The Psiphon library won't be able to use its current working directory
         // and the standard temporary directories do not exist.
@@ -306,6 +303,9 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
 
         // Continue to run indefinitely until connected
         json.put("EstablishTunnelTimeoutSeconds", 0);
+
+        // This parameter is for stats reporting
+        json.put("TunnelWholeDevice", isVpnMode ? 1 : 0);
 
         // Enable tunnel auto-reconnect after a threshold number of port
         // forward failures. By default, this mechanism is disabled in
@@ -319,12 +319,6 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
 
         json.put("EmitBytesTransferred", true);
 
-        json.put("UseIndistinguishableTLS", true);
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
-            json.put("SystemCACertificateDirectory", "/system/etc/security/cacerts");
-        }
-
         if (mLocalSocksProxyPort != 0) {
             // When mLocalSocksProxyPort is set, tun2socks is already configured
             // to use that port value. So we force use of the same port.
@@ -332,6 +326,15 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             // has no effect with restartPsiphon(), a full stop() is necessary.
             json.put("LocalSocksProxyPort", mLocalSocksProxyPort);
         }
+        
+        json.put("UseIndistinguishableTLS", true);
+
+        // TODO: doesn't work due to OpenSSL version incompatibility; try using
+        // the KeyStore API to build a local copy of trusted CAs cert files.
+        //
+        //if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
+        //    json.put("SystemCACertificateDirectory", "/system/etc/security/cacerts");
+        //}
 
         return json.toString();
     }
@@ -348,9 +351,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             if (noticeType.equals("Tunnels")) {
                 int count = notice.getJSONObject("data").getInt("count");
                 if (count > 0) {
-                    if (mTunFd != null) {
-                        routeThroughTunnel();
-                    }
+                    routeThroughTunnel();
                     mHostService.onConnected();
                 } else {
                     mHostService.onConnecting();
@@ -425,12 +426,11 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             final String socksServerAddress,
             final String udpgwServerAddress,
             final boolean udpgwTransparentDNS) {
-        stopTun2Socks();
         mTun2SocksThread = new Thread(new Runnable() {
             @Override
             public void run() {
                 runTun2Socks(
-                        vpnInterfaceFileDescriptor.detachFd(),
+                        vpnInterfaceFileDescriptor.getFd(),
                         vpnInterfaceMTU,
                         vpnIpAddress,
                         vpnNetMask,
@@ -443,10 +443,10 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         mHostService.onDiagnosticMessage("tun2socks started");
     }
 
-    private void stopTun2Socks() {
+    private void waitStopTun2Socks() {
         if (mTun2SocksThread != null) {
-            terminateTun2Socks();
             try {
+                // Assumes mTunFd has been closed, which signals tun2socks to exit
                 mTun2SocksThread.join();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -469,8 +469,6 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             String socksServerAddress,
             String udpgwServerAddress,
             int udpgwTransparentDNS);
-
-    private native static void terminateTun2Socks();
 
     static {
         System.loadLibrary("tun2socks");
