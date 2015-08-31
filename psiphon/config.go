@@ -33,7 +33,7 @@ const (
 	CONNECTION_WORKER_POOL_SIZE                  = 10
 	TUNNEL_POOL_SIZE                             = 1
 	TUNNEL_CONNECT_TIMEOUT                       = 15 * time.Second
-	TUNNEL_OPERATE_SHUTDOWN_TIMEOUT              = 2 * time.Second
+	TUNNEL_OPERATE_SHUTDOWN_TIMEOUT              = 500 * time.Millisecond
 	TUNNEL_PORT_FORWARD_DIAL_TIMEOUT             = 10 * time.Second
 	TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES      = 256
 	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MIN             = 60 * time.Second
