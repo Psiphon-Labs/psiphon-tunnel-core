@@ -772,7 +772,7 @@ func (controller *Controller) establishCandidateGenerator(impairedProtocols []st
 
 loop:
 	// Repeat until stopped
-	for {
+	for i := 0; ; i++ {
 
 		if !WaitForNetworkConnectivity(
 			controller.config.NetworkConnectivityChecker,
@@ -783,7 +783,7 @@ loop:
 
 		// Send each iterator server entry to the establish workers
 		startTime := time.Now()
-		for i := 0; ; i++ {
+		for {
 			serverEntry, err := iterator.Next()
 			if err != nil {
 				NoticeAlert("failed to get next candidate: %s", err)
