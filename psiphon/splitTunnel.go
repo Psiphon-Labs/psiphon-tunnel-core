@@ -248,6 +248,12 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	useCachedRoutes := false
 
 	response, err := httpClient.Do(request)
+
+	if err == nil &&
+		(response.StatusCode != http.StatusOK && response.StatusCode != http.StatusNotModified) {
+		response.Body.Close()
+		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
+	}
 	if err != nil {
 		NoticeAlert("failed to request split tunnel routes package: %s", ContextError(err))
 		useCachedRoutes = true
