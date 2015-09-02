@@ -21,14 +21,15 @@ package psiphon
 
 import (
 	"errors"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 )
 
 // TCPConn is a customized TCP connection that:
-// - can be interrupted while connecting;
+// - can be interrupted while dialing;
 // - implements a connect timeout;
 // - uses an upstream proxy when specified, and includes
 //   upstream proxy dialing in the connect timeout;
@@ -36,9 +37,9 @@ import (
 //   routing compatibility, for example);
 type TCPConn struct {
 	net.Conn
-	mutex         sync.Mutex
-	isClosed      bool
-	interruptible interruptibleTCPSocket
+	mutex      sync.Mutex
+	isClosed   bool
+	dialResult chan error
 }
 
 // NewTCPDialer creates a TCPDialer.
@@ -113,21 +114,79 @@ func makeTCPDialer(config *DialConfig) func(network, addr string) (net.Conn, err
 	return dialer
 }
 
-// Close terminates a connected (net.Conn) or connecting (socketFd) TCPConn.
-// A mutex is required to support net.Conn concurrency semantics.
-// Note also use of mutex around conn.interruptible and conn.Conn in
-// TCPConn_unix.go.
+// interruptibleTCPDial establishes a TCP network connection. A conn is added
+// to config.PendingConns before blocking on network I/O, which enables interruption.
+// The caller is responsible for removing an established conn from PendingConns.
+//
+// Note that interruption does not actually cancel a connection in progress; it
+// stops waiting for the goroutine blocking on connect()/Dial.
+func interruptibleTCPDial(addr string, config *DialConfig) (*TCPConn, error) {
+
+	// Buffers the first result; senders should discard results when
+	// sending would block, as that means the first result is already set.
+	conn := &TCPConn{dialResult: make(chan error, 1)}
+
+	// Enable interruption
+	if !config.PendingConns.Add(conn) {
+		return nil, ContextError(errors.New("pending connections already closed"))
+	}
+
+	// Call the blocking Connect() in a goroutine
+	// Note: since this goroutine may be left running after an interrupt, don't
+	// call Notice() or perform other actions unexpected after a Controller stops.
+	// The lifetime of the goroutine may depend on the host OS TCP connect timeout
+	// when tcpDial, amoung other things, when makes a blocking syscall.Connect()
+	// call.
+	go func() {
+		netConn, err := tcpDial(addr, config, conn.dialResult)
+
+		// Mutex is necessary for referencing conn.isClosed and conn.Conn as
+		// TCPConn.Close may be called while this goroutine is running.
+		conn.mutex.Lock()
+
+		// If already interrupted, cleanup the net.Conn resource and discard.
+		if conn.isClosed && netConn != nil {
+			netConn.Close()
+			conn.mutex.Unlock()
+			return
+		}
+
+		conn.Conn = netConn
+		conn.mutex.Unlock()
+
+		select {
+		case conn.dialResult <- err:
+		default:
+		}
+	}()
+
+	// Wait until Dial completes (or times out) or until interrupt
+	err := <-conn.dialResult
+	if err != nil {
+		return nil, ContextError(err)
+	}
+
+	return conn, nil
+}
+
+// Close terminates a connected TCPConn or interrupts a dialing TCPConn.
 func (conn *TCPConn) Close() (err error) {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
-	if !conn.isClosed {
-		conn.isClosed = true
-		if conn.Conn == nil {
-			err = interruptibleTCPClose(conn.interruptible)
-		} else {
-			err = conn.Conn.Close()
-		}
+	if conn.isClosed {
+		return
 	}
+	conn.isClosed = true
+
+	if conn.Conn != nil {
+		err = conn.Conn.Close()
+	}
+
+	select {
+	case conn.dialResult <- errors.New("dial interrupted"):
+	default:
+	}
+
 	return err
 }

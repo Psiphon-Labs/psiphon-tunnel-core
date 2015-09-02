@@ -742,7 +742,7 @@ func (controller *Controller) stopEstablishing() {
 	}
 	NoticeInfo("stop establishing")
 	close(controller.stopEstablishingBroadcast)
-	// Note: on Windows, interruptibleTCPClose doesn't really interrupt socket connects
+	// Note: interruptibleTCPClose doesn't really interrupt socket connects
 	// and may leave goroutines running for a time after the Wait call.
 	controller.establishPendingConns.CloseAll()
 	// Note: establishCandidateGenerator closes controller.candidateServerEntries

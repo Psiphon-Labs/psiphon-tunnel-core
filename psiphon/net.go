@@ -49,10 +49,10 @@ type DialConfig struct {
 
 	ConnectTimeout time.Duration
 
-	// PendingConns is used to interrupt dials in progress.
-	// The dial may be interrupted using PendingConns.CloseAll(): on platforms
-	// that support this, the new conn is added to pendingConns before the network
-	// connect begins and removed from pendingConns once the connect succeeds or fails.
+	// PendingConns is used to track and interrupt dials in progress.
+	// Dials may be interrupted using PendingConns.CloseAll(). Once instantiated,
+	// a conn is added to pendingConns before the network connect begins and
+	// removed from pendingConns once the connect succeeds or fails.
 	PendingConns *Conns
 
 	// BindToDevice parameters are used to exclude connections and

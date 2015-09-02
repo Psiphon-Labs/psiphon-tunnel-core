@@ -26,6 +26,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -108,10 +109,12 @@ func NoticeCandidateServers(region, protocol string, count int) {
 // NoticeAvailableEgressRegions is what regions are available for egress from.
 // Consecutive reports of the same list of regions are suppressed.
 func NoticeAvailableEgressRegions(regions []string) {
-	repetitionMessage := strings.Join(regions, "")
+	sortedRegions := append([]string(nil), regions...)
+	sort.Strings(sortedRegions)
+	repetitionMessage := strings.Join(sortedRegions, "")
 	outputRepetitiveNotice(
 		"AvailableEgressRegions", repetitionMessage, 0,
-		"AvailableEgressRegions", false, "regions", regions)
+		"AvailableEgressRegions", false, "regions", sortedRegions)
 }
 
 // NoticeConnectingServer is details on a connection attempt
