@@ -72,11 +72,11 @@ type DialConfig struct {
 	// Only applies to TLS connections.
 	UseIndistinguishableTLS bool
 
-	// SystemCACertificateDirectory specifies a directory containing
-	// CA certs. Directory contents should be compatible with OpenSSL's
-	// SSL_CTX_load_verify_locations
+	// TrustedCACertificatesFilename specifies a file containing trusted
+	// CA certs. The file contents should be compatible with OpenSSL's
+	// SSL_CTX_load_verify_locations.
 	// Only applies to UseIndistinguishableTLS connections.
-	SystemCACertificateDirectory string
+	TrustedCACertificatesFilename string
 }
 
 // DeviceBinder defines the interface to the external BindToDevice provider

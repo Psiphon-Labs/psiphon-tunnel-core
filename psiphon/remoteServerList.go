@@ -54,11 +54,11 @@ func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 	if requestUrl.Scheme == "https" {
 		dialer = NewCustomTLSDialer(
 			&CustomTLSConfig{
-				Dial:                         dialer,
-				SendServerName:               true,
-				SkipVerify:                   false,
-				UseIndistinguishableTLS:      config.UseIndistinguishableTLS,
-				SystemCACertificateDirectory: config.SystemCACertificateDirectory,
+				Dial:                          dialer,
+				SendServerName:                true,
+				SkipVerify:                    false,
+				UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
+				TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
 			})
 
 		// Change the scheme to "http"; otherwise http.Transport will try to do

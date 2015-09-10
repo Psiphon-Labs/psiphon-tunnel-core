@@ -112,11 +112,11 @@ type CustomTLSConfig struct {
 	// Go's TLS has a distinct fingerprint that may be used for blocking.
 	UseIndistinguishableTLS bool
 
-	// SystemCACertificateDirectory specifies a directory containing
+	// TrustedCACertificatesFilename specifies a file containing trusted
 	// CA certs. Directory contents should be compatible with OpenSSL's
 	// SSL_CTX_load_verify_locations
 	// Only applies to UseIndistinguishableTLS connections.
-	SystemCACertificateDirectory string
+	TrustedCACertificatesFilename string
 }
 
 func NewCustomTLSDialer(config *CustomTLSConfig) Dialer {
@@ -189,7 +189,7 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 	if config.UseIndistinguishableTLS &&
 		(config.SkipVerify ||
 			// TODO: config.VerifyLegacyCertificate != nil ||
-			config.SystemCACertificateDirectory != "") {
+			config.TrustedCACertificatesFilename != "") {
 
 		conn, err = newOpenSSLConn(rawConn, hostname, config)
 		if err != nil {

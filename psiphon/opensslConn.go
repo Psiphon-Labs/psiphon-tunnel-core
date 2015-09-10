@@ -46,10 +46,10 @@ func newOpenSSLConn(rawConn net.Conn, hostname string, config *CustomTLSConfig) 
 			// TODO: verify with VerifyLegacyCertificate
 			return nil, errors.New("newOpenSSLConn does not support VerifyLegacyCertificate")
 		} else {
-			if config.SystemCACertificateDirectory == "" {
-				return nil, errors.New("newOpenSSLConn cannot verify without SystemCACertificateDirectory")
+			if config.TrustedCACertificatesFilename == "" {
+				return nil, errors.New("newOpenSSLConn cannot verify without TrustedCACertificatesFilename")
 			}
-			err = ctx.LoadVerifyLocations("", config.SystemCACertificateDirectory)
+			err = ctx.LoadVerifyLocations(config.TrustedCACertificatesFilename, "")
 			if err != nil {
 				return nil, ContextError(err)
 			}
