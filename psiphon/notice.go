@@ -26,6 +26,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -104,9 +105,13 @@ func NoticeCandidateServers(region, protocol string, count int) {
 	outputNotice("CandidateServers", false, "region", region, "protocol", protocol, "count", count)
 }
 
-// NoticeAvailableEgressRegions is what regions are available for egress from
+// NoticeAvailableEgressRegions is what regions are available for egress from.
+// Consecutive reports of the same list of regions are suppressed.
 func NoticeAvailableEgressRegions(regions []string) {
-	outputNotice("AvailableEgressRegions", false, "regions", regions)
+	repetitionMessage := strings.Join(regions, "")
+	outputRepetitiveNotice(
+		"AvailableEgressRegions", repetitionMessage, 0,
+		"AvailableEgressRegions", false, "regions", regions)
 }
 
 // NoticeConnectingServer is details on a connection attempt
@@ -183,7 +188,7 @@ func NoticeSplitTunnelRegion(region string) {
 // NoticeUpstreamProxyError reports an error when connecting to an upstream proxy. The
 // user may have input, for example, an incorrect address or incorrect credentials.
 func NoticeUpstreamProxyError(err error) {
-	outputNotice("UpstreamProxyError", true, "message", fmt.Sprintf("%s", err))
+	outputNotice("UpstreamProxyError", true, "message", err.Error())
 }
 
 // NoticeClientUpgradeDownloaded indicates that a client upgrade download
@@ -196,6 +201,70 @@ func NoticeClientUpgradeDownloaded(filename string) {
 // transferred since the last NoticeBytesTransferred.
 func NoticeBytesTransferred(sent, received int64) {
 	outputNotice("BytesTransferred", false, "sent", sent, "received", received)
+}
+
+// NoticeLocalProxyError reports a local proxy error message. Repetitive
+// errors for a given proxy type are suppressed.
+func NoticeLocalProxyError(proxyType string, err error) {
+
+	// For repeats, only consider the base error message, which is
+	// the root error that repeats (the full error often contains
+	// different specific values, e.g., local port numbers, but
+	// the same repeating root).
+	// Assumes error format of ContextError.
+	repetitionMessage := err.Error()
+	index := strings.LastIndex(repetitionMessage, ": ")
+	if index != -1 {
+		repetitionMessage = repetitionMessage[index+2:]
+	}
+
+	outputRepetitiveNotice(
+		"LocalProxyError"+proxyType, repetitionMessage, 1,
+		"LocalProxyError", false, "message", err.Error())
+}
+
+type repetitiveNoticeState struct {
+	message string
+	repeats int
+}
+
+var repetitiveNoticeMutex sync.Mutex
+var repetitiveNoticeStates = make(map[string]*repetitiveNoticeState)
+
+// outputRepetitiveNotice conditionally outputs a notice. Used for noticies which
+// often repeat in noisy bursts. For a repeat limit of N, the notice is emitted
+// with a "repeats" count on consecutive repeats up to the limit and then suppressed
+// until the repetitionMessage differs.
+func outputRepetitiveNotice(
+	repetitionKey, repetitionMessage string, repeatLimit int,
+	noticeType string, showUser bool, args ...interface{}) {
+
+	repetitiveNoticeMutex.Lock()
+	defer repetitiveNoticeMutex.Unlock()
+
+	state, ok := repetitiveNoticeStates[repetitionKey]
+	if !ok {
+		state = new(repetitiveNoticeState)
+		repetitiveNoticeStates[repetitionKey] = state
+	}
+
+	emit := true
+	if repetitionMessage != state.message {
+		state.message = repetitionMessage
+		state.repeats = 0
+	} else {
+		state.repeats += 1
+		if state.repeats > repeatLimit {
+			emit = false
+		}
+	}
+
+	if emit {
+		if state.repeats > 0 {
+			args = append(args, "repeats", state.repeats)
+		}
+		outputNotice(noticeType, showUser, args...)
+	}
 }
 
 type noticeObject struct {

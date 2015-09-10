@@ -33,7 +33,7 @@ const (
 	CONNECTION_WORKER_POOL_SIZE                  = 10
 	TUNNEL_POOL_SIZE                             = 1
 	TUNNEL_CONNECT_TIMEOUT                       = 15 * time.Second
-	TUNNEL_OPERATE_SHUTDOWN_TIMEOUT              = 2 * time.Second
+	TUNNEL_OPERATE_SHUTDOWN_TIMEOUT              = 500 * time.Millisecond
 	TUNNEL_PORT_FORWARD_DIAL_TIMEOUT             = 10 * time.Second
 	TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES      = 256
 	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MIN             = 60 * time.Second
@@ -66,40 +66,189 @@ const (
 // params, these params are int pointers. nil means no param was supplied
 // so use the default; a non-nil pointer to 0 means no timeout.
 
+// Config is the Psiphon configuration specified by the application. This
+// configuration controls the behavior of the core tunnel functionality.
 type Config struct {
-	LogFilename                         string
-	DataStoreDirectory                  string
-	DataStoreTempDirectory              string
-	PropagationChannelId                string
-	SponsorId                           string
-	RemoteServerListUrl                 string
-	RemoteServerListSignaturePublicKey  string
-	ClientVersion                       string
-	ClientPlatform                      string
-	TunnelWholeDevice                   int
-	EgressRegion                        string
-	TunnelProtocol                      string
-	EstablishTunnelTimeoutSeconds       *int
-	LocalSocksProxyPort                 int
-	LocalHttpProxyPort                  int
-	ConnectionWorkerPoolSize            int
-	TunnelPoolSize                      int
-	PortForwardFailureThreshold         int
-	UpstreamProxyUrl                    string
-	NetworkConnectivityChecker          NetworkConnectivityChecker
-	DeviceBinder                        DeviceBinder
-	DnsServerGetter                     DnsServerGetter
-	TargetServerEntry                   string
-	DisableApi                          bool
-	DisableRemoteServerListFetcher      bool
-	SplitTunnelRoutesUrlFormat          string
+	// LogFilename specifies a file to receive event notices (JSON format)
+	// By default, notices are emitted to stdout.
+	LogFilename string
+
+	// DataStoreDirectory is the directory in which to store the persistent
+	// database, which contains information such as server entries.
+	// By default, current working directory.
+	DataStoreDirectory string
+
+	// DataStoreTempDirectory is the directory in which to store temporary
+	// work files associated with the persistent database.
+	// This parameter is deprecated and may be removed.
+	DataStoreTempDirectory string
+
+	// PropagationChannelId is a string identifier which indicates how the
+	// Psiphon client was distributed. This parameter is required.
+	// This value is supplied by and depends on the Psiphon Network, and is
+	// typically embedded in the client binary.
+	PropagationChannelId string
+
+	// PropagationChannelId is a string identifier which indicates who
+	// is sponsoring this Psiphon client. One purpose of this value is to
+	// determine the home pages for display. This parameter is required.
+	// This value is supplied by and depends on the Psiphon Network, and is
+	// typically embedded in the client binary.
+	SponsorId string
+
+	// RemoteServerListUrl is a URL which specifies a location to fetch
+	// out-of-band server entries. This facility is used when a tunnel cannot
+	// be established to known servers.
+	// This value is supplied by and depends on the Psiphon Network, and is
+	// typically embedded in the client binary.
+	RemoteServerListUrl string
+
+	// RemoteServerListSignaturePublicKey specifies a public key that's
+	// used to authenticate the remote server list payload.
+	// This value is supplied by and depends on the Psiphon Network, and is
+	// typically embedded in the client binary.
+	RemoteServerListSignaturePublicKey string
+
+	// ClientVersion is the client version number that the client reports
+	// to the server. The version number refers to the host client application,
+	// not the core tunnel library. One purpose of this value is to enable
+	// automatic updates.
+	// This value is supplied by and depends on the Psiphon Network, and is
+	// typically embedded in the client binary.
+	ClientVersion string
+
+	// ClientPlatform is the client platform ("Windows", "Android", etc.) that
+	// the client reports to the server.
+	ClientPlatform string
+
+	// TunnelWholeDevice is a flag that is passed through to the handshake
+	// request for stats purposes. Set to 1 when the host application is tunneling
+	// the whole device, 0 otherwise.
+	TunnelWholeDevice int
+
+	// EgressRegion is a ISO 3166-1 alpha-2 country code which indicates which
+	// country to egress from. For the default, "", the best performing server
+	// in any country is selected.
+	EgressRegion string
+
+	// TunnelProtocol indicates which protocol to use. Valid values include:
+	// "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "FRONTED-MEEK-OSSH". For the default,
+	// "", the best performing protocol is used.
+	TunnelProtocol string
+
+	// EstablishTunnelTimeoutSeconds specifies a time limit after which to halt
+	// the core tunnel controller if no tunnel has been established. By default,
+	// the controller will keep trying indefinitely.
+	EstablishTunnelTimeoutSeconds *int
+
+	// LocalSocksProxyPort specifies a port number for the local SOCKS proxy
+	// running at 127.0.0.1. For the default value, 0, the system selects a free
+	// port (a notice reporting the selected port is emitted).
+	LocalSocksProxyPort int
+
+	// LocalHttpProxyPort specifies a port number for the local HTTP proxy
+	// running at 127.0.0.1. For the default value, 0, the system selects a free
+	// port (a notice reporting the selected port is emitted).
+	LocalHttpProxyPort int
+
+	// ConnectionWorkerPoolSize specifies how many connection attempts to attempt
+	// in parallel. The default, 0, uses CONNECTION_WORKER_POOL_SIZE which is
+	// recommended.
+	ConnectionWorkerPoolSize int
+
+	// TunnelPoolSize specifies how many tunnels to run in parallel. Port forwards
+	// are multiplexed over multiple tunnels. The default, 0, uses TUNNEL_POOL_SIZE
+	// which is recommended.
+	TunnelPoolSize int
+
+	// PortForwardFailureThreshold specifies a threshold number of port forward
+	// failures (failure to connect, or I/O failure) after which the tunnel is
+	// considered to be degraded and a re-establish is launched. This facility
+	// can suffer from false positives, especially when the host client is running
+	// in configuration where domain name resolution is done as part of the port
+	// forward (as opposed to tunneling UDP, for example). The default is 0, off.
+	PortForwardFailureThreshold int
+
+	// UpstreamProxyUrl is a URL specifying an upstream proxy to use for all
+	// outbound connections. The URL should include proxy type and authentication
+	// information, as required. See example URLs here:
+	// https://github.com/Psiphon-Labs/psiphon-tunnel-core/tree/master/psiphon/upstreamproxy
+	UpstreamProxyUrl string
+
+	// NetworkConnectivityChecker is an interface that enables the core tunnel to call
+	// into the host application to check for network connectivity. This parameter is
+	// only applicable to library deployments.
+	NetworkConnectivityChecker NetworkConnectivityChecker
+
+	// DeviceBinder is an interface that enables the core tunnel to call
+	// into the host application to bind sockets to specific devices. This is used
+	// for VPN routing exclusion. This parameter is only applicable to library
+	// deployments.
+	DeviceBinder DeviceBinder
+
+	// DnsServerGetter is an interface that enables the core tunnel to call
+	// into the host application to discover the native network DNS server settings.
+	// This parameter is only applicable to library deployments.
+	DnsServerGetter DnsServerGetter
+
+	// TargetServerEntry is an encoded server entry. When specified, this server entry
+	// is used exclusively and all other known servers are ignored.
+	TargetServerEntry string
+
+	// DisableApi disables Psiphon server API calls including handshake, connected,
+	// status, etc. This is used for special case temporary tunnels (Windows VPN mode).
+	DisableApi bool
+
+	// DisableRemoteServerListFetcher disables fetching remote server lists. This is
+	// used for special case temporary tunnels.
+	DisableRemoteServerListFetcher bool
+
+	// SplitTunnelRoutesUrlFormat is an URL which specifies the location of a routes
+	// file to use for split tunnel mode. The URL must include a placeholder for the
+	// client region to be supplied. Split tunnel mode uses the routes file to classify
+	// port forward destinations as foreign or domestic and does not tunnel domestic
+	// destinations. Split tunnel mode is on when all the SplitTunnel parameters are
+	// supplied.
+	// This value is supplied by and depends on the Psiphon Network, and is
+	// typically embedded in the client binary.
+	SplitTunnelRoutesUrlFormat string
+
+	// SplitTunnelRoutesSignaturePublicKey specifies a public key that's
+	// used to authenticate the split tunnel routes payload.
+	// This value is supplied by and depends on the Psiphon Network, and is
+	// typically embedded in the client binary.
 	SplitTunnelRoutesSignaturePublicKey string
-	SplitTunnelDnsServer                string
-	UpgradeDownloadUrl                  string
-	UpgradeDownloadFilename             string
-	EmitBytesTransferred                bool
-	UseIndistinguishableTLS             bool
-	SystemCACertificateDirectory        string
+
+	// SplitTunnelDnsServer specifies a DNS server to use when resolving port
+	// forward target domain names to IP addresses for classification. The DNS
+	// server must support TCP requests.
+	SplitTunnelDnsServer string
+
+	// UpgradeDownloadUrl specifies a URL from which to download a host client upgrade
+	// file, when one is available. The core tunnel controller provides a resumable
+	// download facility which downloads this resource and emits a notice when complete.
+	// This value is supplied by and depends on the Psiphon Network, and is
+	// typically embedded in the client binary.
+	UpgradeDownloadUrl string
+
+	// UpgradeDownloadFilename is the local target filename for an upgrade download.
+	// This parameter is required when UpgradeDownloadUrl is specified.
+	UpgradeDownloadFilename string
+
+	// EmitBytesTransferred indicates whether to emit periodic notices showing
+	// bytes sent and received.
+	EmitBytesTransferred bool
+
+	// UseIndistinguishableTLS enables use of an alternative TLS stack with a less
+	// distinct fingerprint (ClientHello content) than the stock Go TLS. This
+	// parameter is only supported on platforms built with OpenSSL.
+	UseIndistinguishableTLS bool
+
+	// SystemCACertificateDirectory specifies a directory containing OpenSSL-format
+	// CA certificate files (OpenSSL 1.0.1+ format). When specified, this enables
+	// use of indistinguishable TLS for HTTPS requests that require typical (system
+	// CA) server authentication.
+	SystemCACertificateDirectory string
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON

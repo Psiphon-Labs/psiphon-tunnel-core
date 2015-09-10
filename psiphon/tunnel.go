@@ -30,7 +30,7 @@ import (
 	"sync"
 	"time"
 
-        "github.com/Psiphon-Inc/goregen"
+	regen "github.com/Psiphon-Inc/goregen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	"golang.org/x/crypto/ssh"
 )
@@ -280,10 +280,7 @@ func (conn *TunneledConn) Write(buffer []byte) (n int, err error) {
 
 func (conn *TunneledConn) Close() error {
 	if conn.downstreamConn != nil {
-		err := conn.downstreamConn.Close()
-		if err != nil {
-			NoticeAlert("downstreamConn.Close() error: %s", ContextError(err))
-		}
+		conn.downstreamConn.Close()
 	}
 	return conn.Conn.Close()
 }
