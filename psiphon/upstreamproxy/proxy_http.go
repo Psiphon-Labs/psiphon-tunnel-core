@@ -198,7 +198,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 		return nil
 	}
 	pc.authState = HTTP_AUTH_STATE_FAILURE
-	return proxyError(err)
+	return proxyError(fmt.Errorf("Handshake error: %v, response status: %s", err, resp.Status))
 }
 
 func (pc *proxyConn) makeNewClientConn() error {
