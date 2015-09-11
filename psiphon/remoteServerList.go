@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -53,11 +54,11 @@ func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 	if requestUrl.Scheme == "https" {
 		dialer = NewCustomTLSDialer(
 			&CustomTLSConfig{
-				Dial:                         dialer,
-				SendServerName:               true,
-				SkipVerify:                   false,
-				UseIndistinguishableTLS:      config.UseIndistinguishableTLS,
-				SystemCACertificateDirectory: config.SystemCACertificateDirectory,
+				Dial:                          dialer,
+				SendServerName:                true,
+				SkipVerify:                    false,
+				UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
+				TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
 			})
 
 		// Change the scheme to "http"; otherwise http.Transport will try to do
@@ -94,6 +95,12 @@ func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 	}
 
 	response, err := httpClient.Do(request)
+
+	if err == nil &&
+		(response.StatusCode != http.StatusOK && response.StatusCode != http.StatusNotModified) {
+		response.Body.Close()
+		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
+	}
 	if err != nil {
 		return ContextError(err)
 	}

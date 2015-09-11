@@ -78,12 +78,12 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// used to exclude these requests and connection from VPN routing.
 	untunneledPendingConns := new(Conns)
 	untunneledDialConfig := &DialConfig{
-		UpstreamProxyUrl:             config.UpstreamProxyUrl,
-		PendingConns:                 untunneledPendingConns,
-		DeviceBinder:                 config.DeviceBinder,
-		DnsServerGetter:              config.DnsServerGetter,
-		UseIndistinguishableTLS:      config.UseIndistinguishableTLS,
-		SystemCACertificateDirectory: config.SystemCACertificateDirectory,
+		UpstreamProxyUrl:              config.UpstreamProxyUrl,
+		PendingConns:                  untunneledPendingConns,
+		DeviceBinder:                  config.DeviceBinder,
+		DnsServerGetter:               config.DnsServerGetter,
+		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
+		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
 	}
 
 	controller = &Controller{
@@ -742,7 +742,7 @@ func (controller *Controller) stopEstablishing() {
 	}
 	NoticeInfo("stop establishing")
 	close(controller.stopEstablishingBroadcast)
-	// Note: on Windows, interruptibleTCPClose doesn't really interrupt socket connects
+	// Note: interruptibleTCPClose doesn't really interrupt socket connects
 	// and may leave goroutines running for a time after the Wait call.
 	controller.establishPendingConns.CloseAll()
 	// Note: establishCandidateGenerator closes controller.candidateServerEntries

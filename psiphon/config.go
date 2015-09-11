@@ -244,11 +244,11 @@ type Config struct {
 	// parameter is only supported on platforms built with OpenSSL.
 	UseIndistinguishableTLS bool
 
-	// SystemCACertificateDirectory specifies a directory containing OpenSSL-format
-	// CA certificate files (OpenSSL 1.0.1+ format). When specified, this enables
-	// use of indistinguishable TLS for HTTPS requests that require typical (system
-	// CA) server authentication.
-	SystemCACertificateDirectory string
+	// TrustedCACertificatesFilename specifies a file containing trusted CA certs.
+	// The file contents should be compatible with OpenSSL's SSL_CTX_load_verify_locations.
+	// When specified, this enables use of indistinguishable TLS for HTTPS requests
+	// that require typical (system CA) server authentication.
+	TrustedCACertificatesFilename string
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON
