@@ -49,10 +49,10 @@ type DialConfig struct {
 
 	ConnectTimeout time.Duration
 
-	// PendingConns is used to interrupt dials in progress.
-	// The dial may be interrupted using PendingConns.CloseAll(): on platforms
-	// that support this, the new conn is added to pendingConns before the network
-	// connect begins and removed from pendingConns once the connect succeeds or fails.
+	// PendingConns is used to track and interrupt dials in progress.
+	// Dials may be interrupted using PendingConns.CloseAll(). Once instantiated,
+	// a conn is added to pendingConns before the network connect begins and
+	// removed from pendingConns once the connect succeeds or fails.
 	PendingConns *Conns
 
 	// BindToDevice parameters are used to exclude connections and
@@ -72,11 +72,11 @@ type DialConfig struct {
 	// Only applies to TLS connections.
 	UseIndistinguishableTLS bool
 
-	// SystemCACertificateDirectory specifies a directory containing
-	// CA certs. Directory contents should be compatible with OpenSSL's
-	// SSL_CTX_load_verify_locations
+	// TrustedCACertificatesFilename specifies a file containing trusted
+	// CA certs. The file contents should be compatible with OpenSSL's
+	// SSL_CTX_load_verify_locations.
 	// Only applies to UseIndistinguishableTLS connections.
-	SystemCACertificateDirectory string
+	TrustedCACertificatesFilename string
 }
 
 // DeviceBinder defines the interface to the external BindToDevice provider

@@ -270,6 +270,10 @@ func (session *Session) doHandshakeRequest() error {
 // doGetRequest makes a tunneled HTTPS request and returns the response body.
 func (session *Session) doGetRequest(requestUrl string) (responseBody []byte, err error) {
 	response, err := session.psiphonHttpsClient.Get(requestUrl)
+	if err == nil && response.StatusCode != http.StatusOK {
+		response.Body.Close()
+		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
+	}
 	if err != nil {
 		// Trim this error since it may include long URLs
 		return nil, ContextError(TrimError(err))
@@ -288,6 +292,10 @@ func (session *Session) doGetRequest(requestUrl string) (responseBody []byte, er
 // doPostRequest makes a tunneled HTTPS POST request.
 func (session *Session) doPostRequest(requestUrl string, bodyType string, body io.Reader) (err error) {
 	response, err := session.psiphonHttpsClient.Post(requestUrl, bodyType, body)
+	if err == nil && response.StatusCode != http.StatusOK {
+		response.Body.Close()
+		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
+	}
 	if err != nil {
 		// Trim this error since it may include long URLs
 		return ContextError(TrimError(err))

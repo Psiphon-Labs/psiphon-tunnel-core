@@ -74,6 +74,16 @@ func DownloadUpgrade(config *Config, clientUpgradeVersion string, tunnel *Tunnel
 	}
 
 	response, err := httpClient.Do(request)
+
+	// The resumeable download may ask for bytes past the resource range
+	// since it doesn't store the "completed download" state. In this case,
+	// the HTTP server returns 416. Otherwise, we expect 206.
+	if err == nil &&
+		(response.StatusCode != http.StatusPartialContent &&
+			response.StatusCode != http.StatusRequestedRangeNotSatisfiable) {
+		response.Body.Close()
+		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
+	}
 	if err != nil {
 		return ContextError(err)
 	}
