@@ -313,6 +313,7 @@ loop:
 }
 
 func (controller *Controller) startConnectedReporter() {
+	// session is nil when DisableApi is set
 	if controller.config.DisableApi {
 		return
 	}
@@ -361,7 +362,8 @@ loop:
 	NoticeInfo("exiting upgrade downloader")
 }
 
-func (controller *Controller) startClientUpgradeDownloader(clientUpgradeVersion string) {
+func (controller *Controller) startClientUpgradeDownloader(session *Session) {
+	// session is nil when DisableApi is set
 	if controller.config.DisableApi {
 		return
 	}
@@ -372,7 +374,7 @@ func (controller *Controller) startClientUpgradeDownloader(clientUpgradeVersion 
 		return
 	}
 
-	if clientUpgradeVersion == "" {
+	if session.clientUpgradeVersion == "" {
 		// No upgrade is offered
 		return
 	}
@@ -382,7 +384,7 @@ func (controller *Controller) startClientUpgradeDownloader(clientUpgradeVersion 
 	if !controller.startedUpgradeDownloader {
 		controller.startedUpgradeDownloader = true
 		controller.runWaitGroup.Add(1)
-		go controller.upgradeDownloader(clientUpgradeVersion)
+		go controller.upgradeDownloader(session.clientUpgradeVersion)
 	}
 }
 
@@ -446,7 +448,7 @@ loop:
 				controller.stopEstablishing()
 			}
 			controller.startConnectedReporter()
-			controller.startClientUpgradeDownloader(establishedTunnel.session.clientUpgradeVersion)
+			controller.startClientUpgradeDownloader(establishedTunnel.session)
 
 		case <-controller.shutdownBroadcast:
 			break loop
