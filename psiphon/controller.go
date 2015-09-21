@@ -798,7 +798,7 @@ loop:
 			}
 
 			// Disable impaired protocols. This is only done for the
-			// first iteration of the ESTABLISH_TUNNEL_WORK_TIME_SECONDS
+			// first iteration of the ESTABLISH_TUNNEL_WORK_TIME
 			// loop since (a) one iteration should be sufficient to
 			// evade the attack; (b) there's a good chance of false
 			// positives (such as short session durations due to network
@@ -828,7 +828,7 @@ loop:
 				break loop
 			}
 
-			if time.Now().After(startTime.Add(ESTABLISH_TUNNEL_WORK_TIME_SECONDS)) {
+			if time.Now().After(startTime.Add(ESTABLISH_TUNNEL_WORK_TIME)) {
 				// Start over, after a brief pause, with a new shuffle of the server
 				// entries, and potentially some newly fetched server entries.
 				break

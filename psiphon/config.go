@@ -32,20 +32,21 @@ const (
 	DATA_STORE_FILENAME                          = "psiphon.db"
 	CONNECTION_WORKER_POOL_SIZE                  = 10
 	TUNNEL_POOL_SIZE                             = 1
-	TUNNEL_CONNECT_TIMEOUT                       = 15 * time.Second
+	TUNNEL_CONNECT_TIMEOUT                       = 20 * time.Second
 	TUNNEL_OPERATE_SHUTDOWN_TIMEOUT              = 500 * time.Millisecond
 	TUNNEL_PORT_FORWARD_DIAL_TIMEOUT             = 10 * time.Second
 	TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES      = 256
 	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MIN             = 60 * time.Second
 	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX             = 120 * time.Second
-	TUNNEL_SSH_KEEP_ALIVE_TIMEOUT                = 10 * time.Second
+	TUNNEL_SSH_KEEP_ALIVE_PERIODIC_TIMEOUT       = 30 * time.Second
+	TUNNEL_SSH_KEEP_ALIVE_PROBE_TIMEOUT          = 5 * time.Second
 	ESTABLISH_TUNNEL_TIMEOUT_SECONDS             = 300
-	ESTABLISH_TUNNEL_WORK_TIME_SECONDS           = 60 * time.Second
+	ESTABLISH_TUNNEL_WORK_TIME                   = 60 * time.Second
 	ESTABLISH_TUNNEL_PAUSE_PERIOD                = 5 * time.Second
 	PORT_FORWARD_FAILURE_THRESHOLD               = 0
 	HTTP_PROXY_ORIGIN_SERVER_TIMEOUT             = 15 * time.Second
 	HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST     = 50
-	FETCH_REMOTE_SERVER_LIST_TIMEOUT             = 10 * time.Second
+	FETCH_REMOTE_SERVER_LIST_TIMEOUT             = 30 * time.Second
 	FETCH_REMOTE_SERVER_LIST_RETRY_PERIOD        = 5 * time.Second
 	FETCH_REMOTE_SERVER_LIST_STALE_PERIOD        = 6 * time.Hour
 	PSIPHON_API_CLIENT_SESSION_ID_LENGTH         = 16
@@ -249,6 +250,11 @@ type Config struct {
 	// When specified, this enables use of indistinguishable TLS for HTTPS requests
 	// that require typical (system CA) server authentication.
 	TrustedCACertificatesFilename string
+
+	// EnablePeriodicSshKeepAlive indicates whether to send an SSH keepalive every
+	// 1-2 minutes. If the SSH keepalive timesout, the tunnel is considered to have
+	// failed.
+	EnablePeriodicSshKeepAlive bool
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON

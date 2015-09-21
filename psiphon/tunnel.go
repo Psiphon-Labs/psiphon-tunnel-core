@@ -539,7 +539,7 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 			TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX)
 	}
 
-	// TODO: don't initialize if !config.EmitBytesTransferred
+	// TODO: don't initialize timer if !config.EmitBytesTransferred
 	noticeBytesTransferredTicker := time.NewTicker(1 * time.Second)
 	if !config.EmitBytesTransferred {
 		noticeBytesTransferredTicker.Stop()
@@ -550,8 +550,13 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 	statsTimer := time.NewTimer(nextStatusRequestPeriod())
 	defer statsTimer.Stop()
 
+	// TODO: don't initialize timer if !config.EnablePeriodicSshKeepAlive
 	sshKeepAliveTimer := time.NewTimer(nextSshKeepAlivePeriod())
-	defer sshKeepAliveTimer.Stop()
+	if !config.EnablePeriodicSshKeepAlive {
+		sshKeepAliveTimer.Stop()
+	} else {
+		defer sshKeepAliveTimer.Stop()
+	}
 
 	var err error
 	for err == nil {
@@ -569,7 +574,8 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 			statsTimer.Reset(nextStatusRequestPeriod())
 
 		case <-sshKeepAliveTimer.C:
-			err = sendSshKeepAlive(tunnel.sshClient, tunnel.conn)
+			err = sendSshKeepAlive(
+				tunnel.sshClient, tunnel.conn, TUNNEL_SSH_KEEP_ALIVE_PERIODIC_TIMEOUT)
 			sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
 
 		case failures := <-tunnel.portForwardFailures:
@@ -586,8 +592,11 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 				// on the server, so we don't abort the connection until the threshold
 				// is hit. But if we can't make a simple round trip request to the
 				// server, we'll immediately abort.
-				err = sendSshKeepAlive(tunnel.sshClient, tunnel.conn)
-				sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
+				err = sendSshKeepAlive(
+					tunnel.sshClient, tunnel.conn, TUNNEL_SSH_KEEP_ALIVE_PROBE_TIMEOUT)
+				if config.EnablePeriodicSshKeepAlive {
+					sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
+				}
 			}
 
 		case <-tunnel.shutdownOperateBroadcast:
@@ -607,10 +616,11 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 // sendSshKeepAlive is a helper which sends a keepalive@openssh.com request
 // on the specified SSH connections and returns true of the request succeeds
 // within a specified timeout.
-func sendSshKeepAlive(sshClient *ssh.Client, conn net.Conn) error {
+func sendSshKeepAlive(
+	sshClient *ssh.Client, conn net.Conn, timeout time.Duration) error {
 
 	errChannel := make(chan error, 2)
-	time.AfterFunc(TUNNEL_SSH_KEEP_ALIVE_TIMEOUT, func() {
+	time.AfterFunc(timeout, func() {
 		errChannel <- TimeoutError{}
 	})
 
