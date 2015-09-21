@@ -20,6 +20,7 @@ Follow Go Android documentation:
 * [gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile)
 * Requires Go 1.5 or later.
 * Build command: `gomobile bind -target=android github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary/psi`
+  * Record build version info, as described [here](https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/README.md#setup), by passing a `-ldflags` argument to `gomobile bind`.
 * Output: `psi.aar`
 
 Using
