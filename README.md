@@ -41,14 +41,19 @@ Setup
 
  * Configuration files are standard text files containing a valid JSON object. Example:
 
+
+  <!--BEGIN-SAMPLE-CONFIG-->
   ```
   {
-      "PropagationChannelId" : "<placeholder>",
+    "PropagationChannelId" : "<placeholder>",
       "SponsorId" : "<placeholder>",
       "LocalHttpProxyPort" : 8080,
       "LocalSocksProxyPort" : 1080
   }
   ```
+  <!--END-SAMPLE-CONFIG-->
+
+*Note: The lines `<!--BEGIN-SAMPLE-CONFIG-->` and `<--END-SAMPLE-CONFIG-->` (visible in the raw Markdown) are used by the [config test](psiphon/config_test.go). Do not remove them.*
 
 * All config file parameters are [documented here](https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#Config).
 * Replace each `<placeholder>` with a value from your Psiphon network. The Psiphon server-side stack is open source and can be found in our  [Psiphon 3 repository](https://bitbucket.org/psiphon/psiphon-circumvention-system). If you would like to use the Psiphon Inc. network, contact <developer-support@psiphon.ca>.
