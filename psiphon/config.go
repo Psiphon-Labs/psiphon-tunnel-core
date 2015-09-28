@@ -29,38 +29,40 @@ import (
 // TODO: allow all params to be configured
 
 const (
-	DATA_STORE_FILENAME                          = "psiphon.db"
-	CONNECTION_WORKER_POOL_SIZE                  = 10
-	TUNNEL_POOL_SIZE                             = 1
-	TUNNEL_CONNECT_TIMEOUT                       = 20 * time.Second
-	TUNNEL_OPERATE_SHUTDOWN_TIMEOUT              = 500 * time.Millisecond
-	TUNNEL_PORT_FORWARD_DIAL_TIMEOUT             = 10 * time.Second
-	TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES      = 256
-	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MIN             = 60 * time.Second
-	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX             = 120 * time.Second
-	TUNNEL_SSH_KEEP_ALIVE_PERIODIC_TIMEOUT       = 30 * time.Second
-	TUNNEL_SSH_KEEP_ALIVE_PROBE_TIMEOUT          = 5 * time.Second
-	ESTABLISH_TUNNEL_TIMEOUT_SECONDS             = 300
-	ESTABLISH_TUNNEL_WORK_TIME                   = 60 * time.Second
-	ESTABLISH_TUNNEL_PAUSE_PERIOD                = 5 * time.Second
-	PORT_FORWARD_FAILURE_THRESHOLD               = 0
-	HTTP_PROXY_ORIGIN_SERVER_TIMEOUT             = 15 * time.Second
-	HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST     = 50
-	FETCH_REMOTE_SERVER_LIST_TIMEOUT             = 30 * time.Second
-	FETCH_REMOTE_SERVER_LIST_RETRY_PERIOD        = 5 * time.Second
-	FETCH_REMOTE_SERVER_LIST_STALE_PERIOD        = 6 * time.Hour
-	PSIPHON_API_CLIENT_SESSION_ID_LENGTH         = 16
-	PSIPHON_API_SERVER_TIMEOUT                   = 20 * time.Second
-	PSIPHON_API_STATUS_REQUEST_PERIOD_MIN        = 5 * time.Minute
-	PSIPHON_API_STATUS_REQUEST_PERIOD_MAX        = 10 * time.Minute
-	PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES = 256
-	PSIPHON_API_CONNECTED_REQUEST_PERIOD         = 24 * time.Hour
-	PSIPHON_API_CONNECTED_REQUEST_RETRY_PERIOD   = 5 * time.Second
-	FETCH_ROUTES_TIMEOUT                         = 1 * time.Minute
-	DOWNLOAD_UPGRADE_TIMEOUT                     = 15 * time.Minute
-	DOWNLOAD_UPGRADE_RETRY_PAUSE_PERIOD          = 5 * time.Second
-	IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION    = 2 * time.Minute
-	IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD   = 3
+	DATA_STORE_FILENAME                            = "psiphon.db"
+	CONNECTION_WORKER_POOL_SIZE                    = 10
+	TUNNEL_POOL_SIZE                               = 1
+	TUNNEL_CONNECT_TIMEOUT                         = 20 * time.Second
+	TUNNEL_OPERATE_SHUTDOWN_TIMEOUT                = 500 * time.Millisecond
+	TUNNEL_PORT_FORWARD_DIAL_TIMEOUT               = 10 * time.Second
+	TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES        = 256
+	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MIN               = 60 * time.Second
+	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX               = 120 * time.Second
+	TUNNEL_SSH_KEEP_ALIVE_PERIODIC_TIMEOUT         = 30 * time.Second
+	TUNNEL_SSH_KEEP_ALIVE_PERIODIC_INACTIVE_PERIOD = 10 * time.Second
+	TUNNEL_SSH_KEEP_ALIVE_PROBE_TIMEOUT            = 5 * time.Second
+	TUNNEL_SSH_KEEP_ALIVE_PROBE_INACTIVE_PERIOD    = 5 * time.Second
+	ESTABLISH_TUNNEL_TIMEOUT_SECONDS               = 300
+	ESTABLISH_TUNNEL_WORK_TIME                     = 60 * time.Second
+	ESTABLISH_TUNNEL_PAUSE_PERIOD                  = 5 * time.Second
+	HTTP_PROXY_ORIGIN_SERVER_TIMEOUT               = 15 * time.Second
+	HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST       = 50
+	FETCH_REMOTE_SERVER_LIST_TIMEOUT               = 30 * time.Second
+	FETCH_REMOTE_SERVER_LIST_RETRY_PERIOD          = 5 * time.Second
+	FETCH_REMOTE_SERVER_LIST_STALE_PERIOD          = 6 * time.Hour
+	PSIPHON_API_CLIENT_SESSION_ID_LENGTH           = 16
+	PSIPHON_API_SERVER_TIMEOUT                     = 20 * time.Second
+	PSIPHON_API_STATUS_REQUEST_PERIOD_MIN          = 5 * time.Minute
+	PSIPHON_API_STATUS_REQUEST_PERIOD_MAX          = 10 * time.Minute
+	PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES   = 256
+	PSIPHON_API_CONNECTED_REQUEST_PERIOD           = 24 * time.Hour
+	PSIPHON_API_CONNECTED_REQUEST_RETRY_PERIOD     = 5 * time.Second
+	FETCH_ROUTES_TIMEOUT                           = 1 * time.Minute
+	DOWNLOAD_UPGRADE_TIMEOUT                       = 15 * time.Minute
+	DOWNLOAD_UPGRADE_RETRY_PAUSE_PERIOD            = 5 * time.Second
+	IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION      = 2 * time.Minute
+	IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD     = 3
+	TOTAL_BYTES_TRANSFERRED_NOTICE_PERIOD          = 5 * time.Minute
 )
 
 // To distinguish omitted timeout params from explicit 0 value timeout
@@ -162,14 +164,6 @@ type Config struct {
 	// which is recommended.
 	TunnelPoolSize int
 
-	// PortForwardFailureThreshold specifies a threshold number of port forward
-	// failures (failure to connect, or I/O failure) after which the tunnel is
-	// considered to be degraded and a re-establish is launched. This facility
-	// can suffer from false positives, especially when the host client is running
-	// in configuration where domain name resolution is done as part of the port
-	// forward (as opposed to tunneling UDP, for example). The default is 0, off.
-	PortForwardFailureThreshold int
-
 	// UpstreamProxyUrl is a URL specifying an upstream proxy to use for all
 	// outbound connections. The URL should include proxy type and authentication
 	// information, as required. See example URLs here:
@@ -251,10 +245,10 @@ type Config struct {
 	// that require typical (system CA) server authentication.
 	TrustedCACertificatesFilename string
 
-	// EnablePeriodicSshKeepAlive indicates whether to send an SSH keepalive every
-	// 1-2 minutes. If the SSH keepalive timesout, the tunnel is considered to have
-	// failed.
-	EnablePeriodicSshKeepAlive bool
+	// DisablePeriodicSshKeepAlive indicates whether to send an SSH keepalive every
+	// 1-2 minutes, when the tunnel is idle. If the SSH keepalive times out, the tunnel
+	// is considered to have failed.
+	DisablePeriodicSshKeepAlive bool
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON
@@ -305,10 +299,6 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	if config.TunnelPoolSize == 0 {
 		config.TunnelPoolSize = TUNNEL_POOL_SIZE
-	}
-
-	if config.PortForwardFailureThreshold == 0 {
-		config.PortForwardFailureThreshold = PORT_FORWARD_FAILURE_THRESHOLD
 	}
 
 	if config.NetworkConnectivityChecker != nil {
