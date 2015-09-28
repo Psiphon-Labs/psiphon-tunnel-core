@@ -44,7 +44,6 @@ type Session struct {
 	baseRequestUrl       string
 	psiphonHttpsClient   *http.Client
 	statsRegexps         *transferstats.Regexps
-	statsServerId        string
 	clientRegion         string
 	clientUpgradeVersion string
 }
@@ -77,7 +76,6 @@ func NewSession(config *Config, tunnel *Tunnel, sessionId string) (session *Sess
 		sessionId:          sessionId,
 		baseRequestUrl:     makeBaseRequestUrl(config, tunnel, sessionId),
 		psiphonHttpsClient: psiphonHttpsClient,
-		statsServerId:      tunnel.serverEntry.IpAddress,
 	}
 
 	err = session.doHandshakeRequest()
@@ -125,12 +123,6 @@ func (session *Session) DoConnectedRequest() error {
 		return ContextError(err)
 	}
 	return nil
-}
-
-// ServerID provides a unique identifier for the server the session connects to.
-// This ID is consistent between multiple sessions/tunnels connected to that server.
-func (session *Session) StatsServerID() string {
-	return session.statsServerId
 }
 
 // StatsRegexps gets the Regexps used for the statistics for this tunnel.
