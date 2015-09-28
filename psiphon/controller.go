@@ -440,7 +440,7 @@ loop:
 		// solution(?) target MIN(CountServerEntries(region, protocol), TunnelPoolSize)
 		case establishedTunnel := <-controller.establishedTunnels:
 			if controller.registerTunnel(establishedTunnel) {
-				NoticeActiveTunnel(establishedTunnel.serverEntry.IpAddress)
+				NoticeActiveTunnel(establishedTunnel.serverEntry.IpAddress, establishedTunnel.protocol)
 			} else {
 				controller.discardTunnel(establishedTunnel)
 			}

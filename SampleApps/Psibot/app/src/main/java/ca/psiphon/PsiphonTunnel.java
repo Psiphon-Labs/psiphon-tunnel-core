@@ -329,16 +329,6 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         // This parameter is for stats reporting
         json.put("TunnelWholeDevice", isVpnMode ? 1 : 0);
 
-        // Enable tunnel auto-reconnect after a threshold number of port
-        // forward failures. By default, this mechanism is disabled in
-        // tunnel-core due to the chance of false positives due to
-        // bad user input. Since VpnService mode resolves domain names
-        // differently (udpgw), invalid domain name user input won't result
-        // in SSH port forward failures.
-        if (isVpnMode) {
-            json.put("PortForwardFailureThreshold", 10);
-        }
-
         json.put("EmitBytesTransferred", true);
 
         if (mLocalSocksProxyPort != 0) {
@@ -424,6 +414,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
                 mHostService.onUntunneledAddress(notice.getJSONObject("data").getString("address"));
 
             } else if (noticeType.equals("BytesTransferred")) {
+                diagnostic = false;
                 JSONObject data = notice.getJSONObject("data");
                 mHostService.onBytesTransferred(data.getLong("sent"), data.getLong("received"));
             }

@@ -71,10 +71,12 @@ func MakeRegexps(pageViewRegexes, httpsRequestRegexes []map[string]string) (rege
 // string that should be used for stats.
 func regexHostname(hostname string, regexps *Regexps) (statsHostname string) {
 	statsHostname = "(OTHER)"
-	for _, rr := range *regexps {
-		if rr.regexp.MatchString(hostname) {
-			statsHostname = rr.regexp.ReplaceAllString(hostname, rr.replace)
-			break
+	if regexps != nil {
+		for _, rr := range *regexps {
+			if rr.regexp.MatchString(hostname) {
+				statsHostname = rr.regexp.ReplaceAllString(hostname, rr.replace)
+				break
+			}
 		}
 	}
 	return
