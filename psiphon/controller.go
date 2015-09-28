@@ -108,9 +108,12 @@ func NewController(config *Config) (controller *Controller, err error) {
 		establishPendingConns:          new(Conns),
 		untunneledPendingConns:         untunneledPendingConns,
 		untunneledDialConfig:           untunneledDialConfig,
-		signalFetchRemoteServerList:    make(chan struct{}),
 		impairedProtocolClassification: make(map[string]int),
-		signalReportConnected:          make(chan struct{}),
+		// TODO: Add a buffer of 1 so we don't miss a signal while receiver is
+		// starting? Trade-off is potential back-to-back fetch remotes. As-is,
+		// establish will eventually signal another fetch remote.
+		signalFetchRemoteServerList: make(chan struct{}),
+		signalReportConnected:       make(chan struct{}),
 	}
 
 	controller.splitTunnelClassifier = NewSplitTunnelClassifier(config, controller)
