@@ -18,7 +18,7 @@ This project is currently at the proof-of-concept stage. Current production Psip
 Setup
 --------------------------------------------------------------------------------
 
-* Go 1.4 (or higher) is required.
+* Go 1.5 (or higher) is required.
 * This project builds and runs on recent versions of Windows, Linux, and Mac OS X.
 * Note that the `psiphon` package is imported using the absolute path `github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon`; without further local configuration, `go` will use this version of the code and not the local copy in the repository.
 * In this repository, run `go build` in `ConsoleClient` to make the `ConsoleClient` binary, a console Psiphon client application.
