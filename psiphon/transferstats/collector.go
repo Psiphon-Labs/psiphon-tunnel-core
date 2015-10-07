@@ -150,12 +150,14 @@ func GetBytesTransferredForServer(serverID string) (sent, received int64) {
 }
 
 // GetForServer returns the json-able stats package for the given server.
-// If there are no stats, nil will be returned.
 func GetForServer(serverID string) (payload *serverStats) {
 	allStats.statsMutex.Lock()
 	defer allStats.statsMutex.Unlock()
 
 	payload = allStats.serverIDtoStats[serverID]
+	if payload == nil {
+		payload = newServerStats()
+	}
 	delete(allStats.serverIDtoStats, serverID)
 	return
 }

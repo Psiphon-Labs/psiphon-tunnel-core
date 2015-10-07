@@ -717,11 +717,9 @@ func sendStats(tunnel *Tunnel) {
 	}
 
 	payload := transferstats.GetForServer(tunnel.serverEntry.IpAddress)
-	if payload != nil {
-		err := tunnel.session.DoStatusRequest(payload)
-		if err != nil {
-			NoticeAlert("DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
-			transferstats.PutBack(tunnel.serverEntry.IpAddress, payload)
-		}
+	err := tunnel.session.DoStatusRequest(payload)
+	if err != nil {
+		NoticeAlert("DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
+		transferstats.PutBack(tunnel.serverEntry.IpAddress, payload)
 	}
 }
