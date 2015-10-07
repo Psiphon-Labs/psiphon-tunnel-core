@@ -94,16 +94,15 @@ func (suite *StatsTestSuite) Test_StatsConn() {
 }
 
 func (suite *StatsTestSuite) Test_GetForServer() {
+
+	zeroPayload := newServerStats()
+
 	payload := GetForServer(_SERVER_ID)
-	suite.Nil(payload, "should get nil stats before any traffic (but not crash)")
+	suite.Equal(payload, zeroPayload, "should get zero stats before any traffic")
 
 	resp, err := suite.httpClient.Get("http://example.com/index.html")
 	suite.Nil(err, "need successful http to proceed with tests")
 	resp.Body.Close()
-
-	// Make sure there aren't stats returned for a bad server ID
-	payload = GetForServer("INVALID")
-	suite.Nil(payload, "should get nil stats for invalid server ID")
 
 	payload = GetForServer(_SERVER_ID)
 	suite.NotNil(payload, "should receive valid payload for valid server ID")
@@ -115,7 +114,7 @@ func (suite *StatsTestSuite) Test_GetForServer() {
 
 	// After we retrieve the stats for a server, they should be cleared out of the tracked stats
 	payload = GetForServer(_SERVER_ID)
-	suite.Nil(payload, "after retrieving stats for a server, there should be no more stats (until more data goes through)")
+	suite.Equal(payload, zeroPayload, "after retrieving stats for a server, there should be zero stats (until more data goes through)")
 }
 
 func (suite *StatsTestSuite) Test_PutBack() {
@@ -126,15 +125,17 @@ func (suite *StatsTestSuite) Test_PutBack() {
 	payloadToPutBack := GetForServer(_SERVER_ID)
 	suite.NotNil(payloadToPutBack, "should receive valid payload for valid server ID")
 
+	zeroPayload := newServerStats()
+
 	payload := GetForServer(_SERVER_ID)
-	suite.Nil(payload, "should not be any remaining stats after getting them")
+	suite.Equal(payload, zeroPayload, "should be zero stats after getting them")
 
 	PutBack(_SERVER_ID, payloadToPutBack)
 	// PutBack is asynchronous, so we'll need to wait a moment for it to do its thing
 	<-time.After(100 * time.Millisecond)
 
 	payload = GetForServer(_SERVER_ID)
-	suite.NotNil(payload, "stats should be re-added after putting back")
+	suite.NotEqual(payload, zeroPayload, "stats should be re-added after putting back")
 	suite.Equal(payload, payloadToPutBack, "stats should be the same as after the first retrieval")
 }
 
