@@ -1,4 +1,4 @@
-// +build !android,!linux
+// +build !android,!linux,!darwin
 
 /*
  * Copyright (c) 2014, Psiphon Inc.
