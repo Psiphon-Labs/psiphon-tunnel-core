@@ -532,6 +532,9 @@ func dialSsh(
 // resolve, while no new port forward is attempted which would otherwise
 // result in a tunnel failure detection.
 //
+// TODO: change "recently active" to include having received any
+// SSH protocol messages from the server, not just user payload?
+//
 func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 	defer tunnel.operateWaitGroup.Done()
 
@@ -717,11 +720,9 @@ func sendStats(tunnel *Tunnel) {
 	}
 
 	payload := transferstats.GetForServer(tunnel.serverEntry.IpAddress)
-	if payload != nil {
-		err := tunnel.session.DoStatusRequest(payload)
-		if err != nil {
-			NoticeAlert("DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
-			transferstats.PutBack(tunnel.serverEntry.IpAddress, payload)
-		}
+	err := tunnel.session.DoStatusRequest(payload)
+	if err != nil {
+		NoticeAlert("DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
+		transferstats.PutBack(tunnel.serverEntry.IpAddress, payload)
 	}
 }
