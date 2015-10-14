@@ -9,6 +9,7 @@ Note that you may need to use `sudo docker` below, depending on your OS.
   2. Once completed, verify that you see an image named `psiclient` when running: `docker images`
 
 #####Run the build:
+  *Ensure that the command below is run from within the `ConsoleClient` directory*
 
   ```bash
   cd .. && \
