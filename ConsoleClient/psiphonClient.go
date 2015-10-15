@@ -48,7 +48,7 @@ func main() {
 	flag.StringVar(&profileFilename, "profile", "", "CPU profile output file")
 
 	var interfaceName string
-	flag.StringVar(&interfaceName, "interface", "", "Interface Name")
+	flag.StringVar(&interfaceName, "listenInterface", "", "Interface Name")
 
 	flag.Parse()
 
@@ -158,22 +158,6 @@ func main() {
 
 	if interfaceName != "" {
 		config.ListenInterface = interfaceName
-		config.ListenIP, err = psiphon.GetInterfaceIPAddress(interfaceName)
-		if err != nil {
-			psiphon.NoticeError("error getting listener IP: %s", err)
-			os.Exit(1)
-		}
-		psiphon.NoticeAlert("Listening on interface: %s : %s", config.ListenInterface, config.ListenIP)
-	} else {
-		if config.ListenInterface != "" {
-			config.ListenIP, err = psiphon.GetInterfaceIPAddress(config.ListenInterface)
-			if err != nil {
-				psiphon.NoticeError("error getting listener IP: %s", err)
-				os.Exit(1)
-			}
-		} else {
-			config.ListenIP = "127.0.0.1"
-		}
 	}
 
 	// Run Psiphon

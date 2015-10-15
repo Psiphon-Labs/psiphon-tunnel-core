@@ -23,51 +23,57 @@ import (
 	"net"
 )
 
-func GetInterfaceIPAddress(interfaceName string) (string, error) {
-	var selectedInterface net.Interface
+// Take in an interface name ("lo", "eth0", "any") passed from either
+// a config setting or by -interface command line flag and return the IP
+// address associated with it.
+// If no interface is provided use the default loopback interface (127.0.0.1).
+// If "any" is passed then listen on 0.0.0.0
+func GetInterfaceIPAddress(listenInterface string) (string, error) {
 	var ip net.IP
 
-	//Get a list of interfaces
-	availableInterfaces, err := net.Interfaces()
-	if err != nil {
-		NoticeAlert("%s", ContextError(err))
-		return "", err
-	}
-
-	if interfaceName == "any" {
+	if listenInterface == "" {
+		ip = net.ParseIP("127.0.0.1")
+	} else if listenInterface == "any" {
 		ip = net.ParseIP("0.0.0.0")
 	} else {
+		//Get a list of interfaces
+		availableInterfaces, err := net.Interfaces()
+		if err != nil {
+			return "", ContextError(err)
+		}
+
+		var selectedInterface net.Interface
+		found := false
 		for _, networkInterface := range availableInterfaces {
-			if interfaceName == networkInterface.Name {
-				NoticeAlert("Using interface: %s", networkInterface.Name)
+			if listenInterface == networkInterface.Name {
+				NoticeInfo("Using interface: %s", networkInterface.Name)
 				selectedInterface = networkInterface
+				found = true
 				break
+			}
+		}
+		if !found {
+			NoticeAlert("Interface not found: %s", listenInterface)
+			ip = net.ParseIP("127.0.0.1")
+		} else {
+			netAddrs, err := selectedInterface.Addrs()
+			if err != nil {
+				return "", ContextError(err)
+			}
+
+			for _, ipAddr := range netAddrs {
+				ip, _, err = net.ParseCIDR(ipAddr.String())
+				if err != nil {
+					return "", ContextError(err)
+				}
+				if ip.To4() != nil {
+					break
+				}
 			}
 		}
 	}
 
-	if ip.To4() == nil {
-		if selectedInterface.Name == "" {
-			selectedInterface = availableInterfaces[0]
-			NoticeAlert("No interface found, using %s", selectedInterface.Name)
-		}
-	}
-
-	netAddrs, err := selectedInterface.Addrs()
-	if err != nil {
-		NoticeAlert("Error : %s", err.Error())
-		return "", err
-	}
-
-	for _, ipAddr := range netAddrs {
-		ip, _, err = net.ParseCIDR(ipAddr.String())
-		if err != nil {
-			NoticeAlert("Error parsing address %s", err.Error())
-		}
-		if ip.To4() != nil {
-			break
-		}
-	}
+	NoticeInfo("Listening on IP address: %s", ip.String())
 
 	return ip.String(), nil
 }

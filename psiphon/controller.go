@@ -136,7 +136,13 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 
 	// Start components
 
-	socksProxy, err := NewSocksProxy(controller.config, controller)
+	listenIP, err := GetInterfaceIPAddress(controller.config.ListenInterface)
+	if err != nil {
+		NoticeError("error getting listener IP: %s", err)
+		return
+	}
+
+	socksProxy, err := NewSocksProxy(controller.config, controller, listenIP)
 	if err != nil {
 		NoticeAlert("error initializing local SOCKS proxy: %s", err)
 		return
@@ -144,7 +150,7 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	defer socksProxy.Close()
 
 	httpProxy, err := NewHttpProxy(
-		controller.config, controller.untunneledDialConfig, controller)
+		controller.config, controller.untunneledDialConfig, controller, listenIP)
 	if err != nil {
 		NoticeAlert("error initializing local HTTP proxy: %s", err)
 		return
