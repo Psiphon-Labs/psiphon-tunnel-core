@@ -23,7 +23,7 @@ import (
 	"net"
 )
 
-func GetInterfaceIPAddress(interfaceName string) string {
+func GetInterfaceIPAddress(interfaceName string) (string, error) {
 	var selectedInterface net.Interface
 	var ip net.IP
 
@@ -31,6 +31,7 @@ func GetInterfaceIPAddress(interfaceName string) string {
 	availableInterfaces, err := net.Interfaces()
 	if err != nil {
 		NoticeAlert("%s", ContextError(err))
+		return "", err
 	}
 
 	if interfaceName == "any" {
@@ -55,6 +56,7 @@ func GetInterfaceIPAddress(interfaceName string) string {
 	netAddrs, err := selectedInterface.Addrs()
 	if err != nil {
 		NoticeAlert("Error : %s", err.Error())
+		return "", err
 	}
 
 	for _, ipAddr := range netAddrs {
@@ -67,5 +69,5 @@ func GetInterfaceIPAddress(interfaceName string) string {
 		}
 	}
 
-	return ip.String()
+	return ip.String(), nil
 }

@@ -144,7 +144,7 @@ type Config struct {
 	// the controller will keep trying indefinitely.
 	EstablishTunnelTimeoutSeconds *int
 
-	// ListenInterface specifies whic interface to listen on.  If no interface
+	// ListenInterface specifies which interface to listen on.  If no interface
 	// is provided then listen on 127.0.0.1.
 	// If 'any' is provided then use 0.0.0.0
 	ListenInterface string

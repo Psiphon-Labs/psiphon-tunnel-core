@@ -158,11 +158,19 @@ func main() {
 
 	if interfaceName != "" {
 		config.ListenInterface = interfaceName
-		config.ListenIP = psiphon.GetInterfaceIPAddress(interfaceName)
+		config.ListenIP, err = psiphon.GetInterfaceIPAddress(interfaceName)
+		if err != nil {
+			psiphon.NoticeError("error getting listener IP: %s", err)
+			os.Exit(1)
+		}
 		psiphon.NoticeAlert("Listening on interface: %s : %s", config.ListenInterface, config.ListenIP)
 	} else {
 		if config.ListenInterface != "" {
-			config.ListenIP = psiphon.GetInterfaceIPAddress(config.ListenInterface)
+			config.ListenIP, err = psiphon.GetInterfaceIPAddress(config.ListenInterface)
+			if err != nil {
+				psiphon.NoticeError("error getting listener IP: %s", err)
+				os.Exit(1)
+			}
 		} else {
 			config.ListenIP = "127.0.0.1"
 		}
