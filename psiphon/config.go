@@ -144,6 +144,13 @@ type Config struct {
 	// the controller will keep trying indefinitely.
 	EstablishTunnelTimeoutSeconds *int
 
+	// ListenInterface specifies which interface to listen on.  If no interface
+	// is provided then listen on 127.0.0.1.
+	// If an invalid interface is provided then listen on localhost (127.0.0.1).
+	// If 'any' is provided then use 0.0.0.0.
+	// If there are multiple IP addresses on an interface use the first IPv4 address.
+	ListenInterface string
+
 	// LocalSocksProxyPort specifies a port number for the local SOCKS proxy
 	// running at 127.0.0.1. For the default value, 0, the system selects a free
 	// port (a notice reporting the selected port is emitted).
