@@ -18,7 +18,7 @@ Note that you may need to use `sudo docker` below, depending on your OS.
     -v $(pwd):/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core \
     psiclient \
     /bin/bash -c 'cd /go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient && ./make.bash' \
-  && cd -
+  ; cd -
   ```
 
 When that command completes, the compiled binaries will be located in the `bin` directory under the current directory. The structure will be:
