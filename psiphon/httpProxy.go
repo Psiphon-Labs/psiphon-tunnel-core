@@ -71,10 +71,11 @@ var _HTTP_PROXY_TYPE = "HTTP"
 func NewHttpProxy(
 	config *Config,
 	untunneledDialConfig *DialConfig,
-	tunneler Tunneler) (proxy *HttpProxy, err error) {
+	tunneler Tunneler,
+	listenIP string) (proxy *HttpProxy, err error) {
 
 	listener, err := net.Listen(
-		"tcp", fmt.Sprintf("127.0.0.1:%d", config.LocalHttpProxyPort))
+		"tcp", fmt.Sprintf("%s:%d", listenIP, config.LocalHttpProxyPort))
 	if err != nil {
 		if IsAddressInUseError(err) {
 			NoticeHttpProxyPortInUse(config.LocalHttpProxyPort)

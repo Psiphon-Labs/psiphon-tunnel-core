@@ -47,6 +47,9 @@ func main() {
 	var profileFilename string
 	flag.StringVar(&profileFilename, "profile", "", "CPU profile output file")
 
+	var interfaceName string
+	flag.StringVar(&interfaceName, "listenInterface", "", "Interface Name")
+
 	flag.Parse()
 
 	// Initialize default Notice output (stderr)
@@ -151,6 +154,10 @@ func main() {
 		} else {
 			defer embeddedServerListWaitGroup.Wait()
 		}
+	}
+
+	if interfaceName != "" {
+		config.ListenInterface = interfaceName
 	}
 
 	// Run Psiphon
