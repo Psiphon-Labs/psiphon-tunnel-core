@@ -66,7 +66,7 @@ func MakeSessionId() (sessionId string, err error) {
 // Psiphon server and returns a Session struct, initialized with the
 // session ID, for use with subsequent Psiphon server API requests (e.g.,
 // periodic connected and status requests).
-func NewSession(config *Config, tunnel *Tunnel, sessionId string) (session *Session, err error) {
+func NewSession(tunnel *Tunnel, sessionId string) (session *Session, err error) {
 
 	psiphonHttpsClient, err := makePsiphonHttpsClient(tunnel)
 	if err != nil {
@@ -74,7 +74,7 @@ func NewSession(config *Config, tunnel *Tunnel, sessionId string) (session *Sess
 	}
 	session = &Session{
 		sessionId:          sessionId,
-		baseRequestUrl:     makeBaseRequestUrl(config, tunnel, sessionId),
+		baseRequestUrl:     makeBaseRequestUrl(tunnel, "", sessionId),
 		psiphonHttpsClient: psiphonHttpsClient,
 	}
 
@@ -101,7 +101,8 @@ func (session *Session) DoConnectedRequest() error {
 	if lastConnected == "" {
 		lastConnected = "None"
 	}
-	url := session.buildRequestUrl(
+	url := buildRequestUrl(
+		session.baseRequestUrl,
 		"connected",
 		&ExtraParam{"session_id", session.sessionId},
 		&ExtraParam{"last_connected", lastConnected})
@@ -140,25 +141,7 @@ func (session *Session) DoStatusRequest(
 		return ContextError(err)
 	}
 
-	// Add a random amount of padding to help prevent stats updates from being
-	// a predictable size (which often happens when the connection is quiet).
-	padding := MakeSecureRandomPadding(0, PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES)
-
-	// "connected" is a legacy parameter. This client does not report when
-	// it has disconnected.
-
-	connected := "1"
-	if !isConnected {
-		connected = "0"
-	}
-
-	url := session.buildRequestUrl(
-		"status",
-		&ExtraParam{"session_id", session.sessionId},
-		&ExtraParam{"connected", connected},
-		// TODO: base64 encoding of padding means the padding
-		// size is not exactly [0, PADDING_MAX_BYTES]
-		&ExtraParam{"padding", base64.StdEncoding.EncodeToString(padding)})
+	url := makeStatusRequestUrl(session.sessionId, session.baseRequestUrl, isConnected)
 
 	err = session.doPostRequest(url, "application/json", bytes.NewReader(statsPayloadJSON))
 	if err != nil {
@@ -166,6 +149,29 @@ func (session *Session) DoStatusRequest(
 	}
 
 	return nil
+}
+
+// makeStatusRequestUrl is a helper shared by DoStatusRequest
+// and doUntunneledStatusRequest.
+func makeStatusRequestUrl(sessionId, baseRequestUrl string, isConnected bool) string {
+
+	// Add a random amount of padding to help prevent stats updates from being
+	// a predictable size (which often happens when the connection is quiet).
+	padding := MakeSecureRandomPadding(0, PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES)
+
+	connected := "1"
+	if !isConnected {
+		connected = "0"
+	}
+
+	return buildRequestUrl(
+		baseRequestUrl,
+		"status",
+		&ExtraParam{"session_id", sessionId},
+		&ExtraParam{"connected", connected},
+		// TODO: base64 encoding of padding means the padding
+		// size is not exactly [0, PADDING_MAX_BYTES]
+		&ExtraParam{"padding", base64.StdEncoding.EncodeToString(padding)})
 }
 
 // doHandshakeRequest performs the handshake API request. The handshake
@@ -182,7 +188,7 @@ func (session *Session) doHandshakeRequest() error {
 	for _, ipAddress := range serverEntryIpAddresses {
 		extraParams = append(extraParams, &ExtraParam{"known_server", ipAddress})
 	}
-	url := session.buildRequestUrl("handshake", extraParams...)
+	url := buildRequestUrl(session.baseRequestUrl, "handshake", extraParams...)
 	responseBody, err := session.doGetRequest(url)
 	if err != nil {
 		return ContextError(err)
@@ -272,7 +278,7 @@ func (session *Session) doGetRequest(requestUrl string) (responseBody []byte, er
 	response, err := session.psiphonHttpsClient.Get(requestUrl)
 	if err == nil && response.StatusCode != http.StatusOK {
 		response.Body.Close()
-		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
+		err = fmt.Errorf("HTTP GET request failed with response code: %d", response.StatusCode)
 	}
 	if err != nil {
 		// Trim this error since it may include long URLs
@@ -283,9 +289,6 @@ func (session *Session) doGetRequest(requestUrl string) (responseBody []byte, er
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	if response.StatusCode != http.StatusOK {
-		return nil, ContextError(fmt.Errorf("HTTP GET request failed with response code: %d", response.StatusCode))
-	}
 	return body, nil
 }
 
@@ -294,30 +297,32 @@ func (session *Session) doPostRequest(requestUrl string, bodyType string, body i
 	response, err := session.psiphonHttpsClient.Post(requestUrl, bodyType, body)
 	if err == nil && response.StatusCode != http.StatusOK {
 		response.Body.Close()
-		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
+		err = fmt.Errorf("HTTP POST request failed with response code: %d", response.StatusCode)
 	}
 	if err != nil {
 		// Trim this error since it may include long URLs
 		return ContextError(TrimError(err))
 	}
 	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return ContextError(fmt.Errorf("HTTP POST request failed with response code: %d", response.StatusCode))
-	}
-	return
+	return nil
 }
 
 // makeBaseRequestUrl makes a URL containing all the common parameters
 // that are included with Psiphon API requests. These common parameters
 // are used for statistics.
-func makeBaseRequestUrl(config *Config, tunnel *Tunnel, sessionId string) string {
+func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
 	var requestUrl bytes.Buffer
+
+	if port == "" {
+		port = tunnel.serverEntry.WebServerPort
+	}
+
 	// Note: don't prefix with HTTPS scheme, see comment in doGetRequest.
 	// e.g., don't do this: requestUrl.WriteString("https://")
 	requestUrl.WriteString("http://")
 	requestUrl.WriteString(tunnel.serverEntry.IpAddress)
 	requestUrl.WriteString(":")
-	requestUrl.WriteString(tunnel.serverEntry.WebServerPort)
+	requestUrl.WriteString(port)
 	requestUrl.WriteString("/")
 	// Placeholder for the path component of a request
 	requestUrl.WriteString("%s")
@@ -326,18 +331,18 @@ func makeBaseRequestUrl(config *Config, tunnel *Tunnel, sessionId string) string
 	requestUrl.WriteString("&server_secret=")
 	requestUrl.WriteString(tunnel.serverEntry.WebServerSecret)
 	requestUrl.WriteString("&propagation_channel_id=")
-	requestUrl.WriteString(config.PropagationChannelId)
+	requestUrl.WriteString(tunnel.config.PropagationChannelId)
 	requestUrl.WriteString("&sponsor_id=")
-	requestUrl.WriteString(config.SponsorId)
+	requestUrl.WriteString(tunnel.config.SponsorId)
 	requestUrl.WriteString("&client_version=")
-	requestUrl.WriteString(config.ClientVersion)
+	requestUrl.WriteString(tunnel.config.ClientVersion)
 	// TODO: client_tunnel_core_version
 	requestUrl.WriteString("&relay_protocol=")
 	requestUrl.WriteString(tunnel.protocol)
 	requestUrl.WriteString("&client_platform=")
-	requestUrl.WriteString(config.ClientPlatform)
+	requestUrl.WriteString(tunnel.config.ClientPlatform)
 	requestUrl.WriteString("&tunnel_whole_device=")
-	requestUrl.WriteString(strconv.Itoa(config.TunnelWholeDevice))
+	requestUrl.WriteString(strconv.Itoa(tunnel.config.TunnelWholeDevice))
 	return requestUrl.String()
 }
 
@@ -345,9 +350,9 @@ type ExtraParam struct{ name, value string }
 
 // buildRequestUrl makes a URL for an API request. The URL includes the
 // base request URL and any extra parameters for the specific request.
-func (session *Session) buildRequestUrl(path string, extraParams ...*ExtraParam) string {
+func buildRequestUrl(baseRequestUrl, path string, extraParams ...*ExtraParam) string {
 	var requestUrl bytes.Buffer
-	requestUrl.WriteString(fmt.Sprintf(session.baseRequestUrl, path))
+	requestUrl.WriteString(fmt.Sprintf(baseRequestUrl, path))
 	for _, extraParam := range extraParams {
 		requestUrl.WriteString("&")
 		requestUrl.WriteString(extraParam.name)
@@ -385,4 +390,69 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 		Transport: transport,
 		Timeout:   PSIPHON_API_SERVER_TIMEOUT,
 	}, nil
+}
+
+// TryUntunneledStatusRequest makes direct connections to the specified
+// server (if supported) in an attempt to send useful bytes transferred
+// and session duration stats after a tunnel has alreay failed.
+// The tunnel is assumed to be closed, but its config, protocol, and
+// session values must still be valid.
+// TryUntunneledStatusRequest emits notices detailing failed attempts.
+func TryUntunneledStatusRequest(tunnel *Tunnel, statsPayload json.Marshaler) error {
+
+	for _, port := range tunnel.serverEntry.GetDirectWebRequestPorts() {
+		err := doUntunneledStatusRequest(tunnel, port, statsPayload)
+		if err == nil {
+			return nil
+		}
+		NoticeAlert("doUntunneledStatusRequest failed for %s:%s: %s",
+			tunnel.serverEntry.IpAddress, port, err)
+	}
+
+	return errors.New("all attempts failed")
+}
+
+// doUntunneledStatusRequest attempts an untunneled stratus request.
+func doUntunneledStatusRequest(
+	tunnel *Tunnel, port string, statsPayload json.Marshaler) error {
+
+	url := makeStatusRequestUrl(
+		tunnel.session.sessionId,
+		makeBaseRequestUrl(tunnel, port, tunnel.session.sessionId),
+		false)
+
+	certificate, err := DecodeCertificate(tunnel.serverEntry.WebServerCertificate)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	httpClient, requestUrl, err := MakeUntunneledHttpsClient(
+		tunnel.untunneledDialConfig,
+		certificate,
+		url,
+		PSIPHON_API_UNTUNNELED_STATUS_REQUEST_TIMEOUT)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	statsPayloadJSON, err := json.Marshal(statsPayload)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	bodyType := "application/json"
+	body := bytes.NewReader(statsPayloadJSON)
+
+	response, err := httpClient.Post(requestUrl, bodyType, body)
+	if err == nil && response.StatusCode != http.StatusOK {
+		response.Body.Close()
+		err = fmt.Errorf("HTTP POST request failed with response code: %d", response.StatusCode)
+	}
+	if err != nil {
+		// Trim this error since it may include long URLs
+		return ContextError(TrimError(err))
+	}
+	response.Body.Close()
+
+	return nil
 }

@@ -33,7 +33,7 @@ const (
 	CONNECTION_WORKER_POOL_SIZE                    = 10
 	TUNNEL_POOL_SIZE                               = 1
 	TUNNEL_CONNECT_TIMEOUT                         = 20 * time.Second
-	TUNNEL_OPERATE_SHUTDOWN_TIMEOUT                = 1000 * time.Millisecond
+	TUNNEL_OPERATE_SHUTDOWN_TIMEOUT                = 1 * time.Second
 	TUNNEL_PORT_FORWARD_DIAL_TIMEOUT               = 10 * time.Second
 	TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES        = 256
 	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MIN               = 60 * time.Second
@@ -52,6 +52,7 @@ const (
 	FETCH_REMOTE_SERVER_LIST_STALE_PERIOD          = 6 * time.Hour
 	PSIPHON_API_CLIENT_SESSION_ID_LENGTH           = 16
 	PSIPHON_API_SERVER_TIMEOUT                     = 20 * time.Second
+	PSIPHON_API_UNTUNNELED_STATUS_REQUEST_TIMEOUT  = 1 * time.Second
 	PSIPHON_API_STATUS_REQUEST_PERIOD_MIN          = 5 * time.Minute
 	PSIPHON_API_STATUS_REQUEST_PERIOD_MAX          = 10 * time.Minute
 	PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES   = 256

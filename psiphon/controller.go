@@ -184,8 +184,18 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 
 	close(controller.shutdownBroadcast)
 	controller.establishPendingConns.CloseAll()
-	controller.untunneledPendingConns.CloseAll()
 	controller.runWaitGroup.Wait()
+
+	// Stops untunneled connections, including split tunnel port
+	// forwards and also untunneled final stats requests.
+	// Note: there's a circular dependency with runWaitGroup.Wait()
+	// and untunneledPendingConns.CloseAll(): runWaitGroup depends
+	// on tunnels stopping which depends on final status requests
+	// completing. So this pending conns cancel comes to late to
+	// interrupt final status requests -- which is ok since we
+	// give those a short timeout and would like to not interrupt
+	// them.
+	controller.untunneledPendingConns.CloseAll()
 
 	controller.splitTunnelClassifier.Shutdown()
 
@@ -581,7 +591,7 @@ func (controller *Controller) discardTunnel(tunnel *Tunnel) {
 	// discarded tunnel before fully active tunnels. Can a discarded tunnel
 	// be promoted (since it connects), but with lower rank than all active
 	// tunnels?
-	tunnel.Close()
+	tunnel.Close(true)
 }
 
 // registerTunnel adds the connected tunnel to the pool of active tunnels
@@ -640,7 +650,7 @@ func (controller *Controller) terminateTunnel(tunnel *Tunnel) {
 			if controller.nextTunnel >= len(controller.tunnels) {
 				controller.nextTunnel = 0
 			}
-			activeTunnel.Close()
+			activeTunnel.Close(false)
 			NoticeTunnels(len(controller.tunnels))
 			break
 		}
@@ -661,7 +671,7 @@ func (controller *Controller) terminateAllTunnels() {
 		tunnel := activeTunnel
 		go func() {
 			defer closeWaitGroup.Done()
-			tunnel.Close()
+			tunnel.Close(false)
 		}()
 	}
 	closeWaitGroup.Wait()
@@ -915,6 +925,7 @@ loop:
 
 		tunnel, err := EstablishTunnel(
 			controller.config,
+			controller.untunneledDialConfig,
 			controller.sessionId,
 			controller.establishPendingConns,
 			serverEntry,

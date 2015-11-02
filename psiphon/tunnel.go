@@ -63,6 +63,9 @@ type TunnelOwner interface {
 // and an SSH session built on top of that transport.
 type Tunnel struct {
 	mutex                    *sync.Mutex
+	config                   *Config
+	untunneledDialConfig     *DialConfig
+	isDiscarded              bool
 	isClosed                 bool
 	serverEntry              *ServerEntry
 	session                  *Session
@@ -85,8 +88,10 @@ type Tunnel struct {
 // HTTP (meek protocol).
 // When requiredProtocol is not blank, that protocol is used. Otherwise,
 // the a random supported protocol is used.
+// untunneledDialConfig is used for untunneled final status requests.
 func EstablishTunnel(
 	config *Config,
+	untunneledDialConfig *DialConfig,
 	sessionId string,
 	pendingConns *Conns,
 	serverEntry *ServerEntry,
@@ -115,6 +120,8 @@ func EstablishTunnel(
 	// The tunnel is now connected
 	tunnel = &Tunnel{
 		mutex:                    new(sync.Mutex),
+		config:                   config,
+		untunneledDialConfig:     untunneledDialConfig,
 		isClosed:                 false,
 		serverEntry:              serverEntry,
 		protocol:                 selectedProtocol,
@@ -135,7 +142,7 @@ func EstablishTunnel(
 	//
 	if !config.DisableApi {
 		NoticeInfo("starting session for %s", tunnel.serverEntry.IpAddress)
-		tunnel.session, err = NewSession(config, tunnel, sessionId)
+		tunnel.session, err = NewSession(tunnel, sessionId)
 		if err != nil {
 			return nil, ContextError(fmt.Errorf("error starting session for %s: %s", tunnel.serverEntry.IpAddress, err))
 		}
@@ -152,16 +159,19 @@ func EstablishTunnel(
 
 	// Spawn the operateTunnel goroutine, which monitors the tunnel and handles periodic stats updates.
 	tunnel.operateWaitGroup.Add(1)
-	go tunnel.operateTunnel(config, tunnelOwner)
+	go tunnel.operateTunnel(tunnelOwner)
 
 	return tunnel, nil
 }
 
 // Close stops operating the tunnel and closes the underlying connection.
 // Supports multiple and/or concurrent calls to Close().
-func (tunnel *Tunnel) Close() {
+// When isDicarded is set, operateTunnel will not attempt to send final
+// status requests.
+func (tunnel *Tunnel) Close(isDicarded bool) {
 
 	tunnel.mutex.Lock()
+	tunnel.isDiscarded = isDicarded
 	isClosed := tunnel.isClosed
 	tunnel.isClosed = true
 	tunnel.mutex.Unlock()
@@ -183,6 +193,13 @@ func (tunnel *Tunnel) Close() {
 		// tunnel.conn.Close() may get called twice, which is allowed.
 		tunnel.conn.Close()
 	}
+}
+
+// IsDiscarded returns the tunnel's discarded flag.
+func (tunnel *Tunnel) IsDiscarded() bool {
+	tunnel.mutex.Lock()
+	defer tunnel.mutex.Unlock()
+	return tunnel.isDiscarded
 }
 
 // Dial establishes a port forward connection through the tunnel
@@ -242,7 +259,7 @@ func (tunnel *Tunnel) Dial(
 // This will terminate the tunnel.
 func (tunnel *Tunnel) SignalComponentFailure() {
 	NoticeAlert("tunnel received component failure signal")
-	tunnel.Close()
+	tunnel.Close(false)
 }
 
 // TunneledConn implements net.Conn and wraps a port foward connection.
@@ -535,7 +552,7 @@ func dialSsh(
 // TODO: change "recently active" to include having received any
 // SSH protocol messages from the server, not just user payload?
 //
-func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
+func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	defer tunnel.operateWaitGroup.Done()
 
 	lastBytesReceivedTime := time.Now()
@@ -572,7 +589,7 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 
 	// TODO: don't initialize timer when config.DisablePeriodicSshKeepAlive is set
 	sshKeepAliveTimer := time.NewTimer(nextSshKeepAlivePeriod())
-	if config.DisablePeriodicSshKeepAlive {
+	if tunnel.config.DisablePeriodicSshKeepAlive {
 		sshKeepAliveTimer.Stop()
 	} else {
 		defer sshKeepAliveTimer.Stop()
@@ -628,7 +645,7 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 			}
 
 			// Only emit the frequent BytesTransferred notice when tunnel is not idle.
-			if config.EmitBytesTransferred && (sent > 0 || received > 0) {
+			if tunnel.config.EmitBytesTransferred && (sent > 0 || received > 0) {
 				NoticeBytesTransferred(tunnel.serverEntry.IpAddress, sent, received)
 			}
 
@@ -660,7 +677,7 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 				default:
 				}
 			}
-			if !config.DisablePeriodicSshKeepAlive {
+			if !tunnel.config.DisablePeriodicSshKeepAlive {
 				sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
 			}
 
@@ -678,12 +695,25 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 	close(signalStatusRequest)
 	requestsWaitGroup.Wait()
 
+	// Note: if sendStats takes too long, it will be interrupted. The attempts
+	// in sendUntunneledStats will not be interrupted and have short timeouts.
+
 	if err == nil {
-		sendStats(tunnel, false)
 		NoticeInfo("shutdown operate tunnel")
+		if !sendStats(tunnel, false) {
+			sendUntunneledStats(tunnel)
+		}
 	} else {
 		NoticeAlert("operate tunnel error for %s: %s", tunnel.serverEntry.IpAddress, err)
+
+		// Note: this order of calls may appear to allow re-establishment to
+		// begin before making the untunneled status request attempts. But the
+		// receiving Controller will call tunnel.Close() before re-establishing,
+		// and that Close() will block waiting for operateTunnel to exit.
+		// TODO: fix this?
+
 		tunnelOwner.SignalTunnelFailure(tunnel)
+		sendUntunneledStats(tunnel)
 	}
 }
 
@@ -716,17 +746,50 @@ func sendSshKeepAlive(
 }
 
 // sendStats is a helper for sending session stats to the server.
-func sendStats(tunnel *Tunnel, isConnected bool) {
+func sendStats(tunnel *Tunnel, isConnected bool) bool {
 
 	// Tunnel does not have a session when DisableApi is set
 	if tunnel.session == nil {
-		return
+		return true
+	}
+
+	// Skip when tunnel is discarded
+	if tunnel.IsDiscarded() {
+		return true
 	}
 
 	payload := transferstats.GetForServer(tunnel.serverEntry.IpAddress)
 	err := tunnel.session.DoStatusRequest(payload, isConnected)
 	if err != nil {
 		NoticeAlert("DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
+		transferstats.PutBack(tunnel.serverEntry.IpAddress, payload)
+	}
+
+	return err != nil
+}
+
+// sendUntunnelStats sends final status requests directly to Psiphon
+// servers after the tunnel has already failed. This is an to attempt
+// to retain useful bytes transferred and session duration information.
+func sendUntunneledStats(tunnel *Tunnel) {
+
+	// Tunnel does not have a session when DisableApi is set
+	if tunnel.session == nil {
+		return
+	}
+
+	// Skip when tunnel is discarded
+	if tunnel.IsDiscarded() {
+		return
+	}
+
+	payload := transferstats.GetForServer(tunnel.serverEntry.IpAddress)
+	err := TryUntunneledStatusRequest(tunnel, payload)
+	if err != nil {
+		NoticeAlert("TryUntunneledStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
+
+		// By putting back now, we may send the bytes transferred data for this
+		// session in the next session for the same server.
 		transferstats.PutBack(tunnel.serverEntry.IpAddress, payload)
 	}
 }
