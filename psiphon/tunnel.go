@@ -765,7 +765,7 @@ func sendStats(tunnel *Tunnel, isConnected bool) bool {
 		transferstats.PutBack(tunnel.serverEntry.IpAddress, payload)
 	}
 
-	return err != nil
+	return err == nil
 }
 
 // sendUntunnelStats sends final status requests directly to Psiphon
