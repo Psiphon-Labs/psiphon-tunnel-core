@@ -580,24 +580,20 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 
 	// Perform network requests in separate goroutines so as not to block
 	// other operations.
-	// Note: defer LIFO dependency: channels to be closed before Wait()
 	requestsWaitGroup := new(sync.WaitGroup)
-	defer requestsWaitGroup.Wait()
 
 	requestsWaitGroup.Add(1)
 	signalStatusRequest := make(chan struct{})
-	defer close(signalStatusRequest)
 	go func() {
 		defer requestsWaitGroup.Done()
 		for _ = range signalStatusRequest {
-			sendStats(tunnel)
+			sendStats(tunnel, true)
 		}
 	}()
 
 	requestsWaitGroup.Add(1)
 	signalSshKeepAlive := make(chan time.Duration)
 	sshKeepAliveError := make(chan error, 1)
-	defer close(signalSshKeepAlive)
 	go func() {
 		defer requestsWaitGroup.Done()
 		for timeout := range signalSshKeepAlive {
@@ -611,8 +607,9 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 		}
 	}()
 
+	shutdown := false
 	var err error
-	for err == nil {
+	for !shutdown && err == nil {
 		select {
 		case <-noticeBytesTransferredTicker.C:
 			sent, received := transferstats.GetBytesTransferredForServer(
@@ -670,14 +667,21 @@ func (tunnel *Tunnel) operateTunnel(config *Config, tunnelOwner TunnelOwner) {
 		case err = <-sshKeepAliveError:
 
 		case <-tunnel.shutdownOperateBroadcast:
-			// Attempt to send any remaining stats
-			sendStats(tunnel)
-			NoticeInfo("shutdown operate tunnel")
-			return
+			shutdown = true
 		}
 	}
 
-	if err != nil {
+	// Note: ensure sendStats goroutine is stopped before
+	// sending sendStats(tunnel, false) -- we don't want
+	// to send isConnected=true after isConnected=false.
+	close(signalSshKeepAlive)
+	close(signalStatusRequest)
+	requestsWaitGroup.Wait()
+
+	if err == nil {
+		sendStats(tunnel, false)
+		NoticeInfo("shutdown operate tunnel")
+	} else {
 		NoticeAlert("operate tunnel error for %s: %s", tunnel.serverEntry.IpAddress, err)
 		tunnelOwner.SignalTunnelFailure(tunnel)
 	}
@@ -712,7 +716,7 @@ func sendSshKeepAlive(
 }
 
 // sendStats is a helper for sending session stats to the server.
-func sendStats(tunnel *Tunnel) {
+func sendStats(tunnel *Tunnel, isConnected bool) {
 
 	// Tunnel does not have a session when DisableApi is set
 	if tunnel.session == nil {
@@ -720,7 +724,7 @@ func sendStats(tunnel *Tunnel) {
 	}
 
 	payload := transferstats.GetForServer(tunnel.serverEntry.IpAddress)
-	err := tunnel.session.DoStatusRequest(payload)
+	err := tunnel.session.DoStatusRequest(payload, isConnected)
 	if err != nil {
 		NoticeAlert("DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
 		transferstats.PutBack(tunnel.serverEntry.IpAddress, payload)

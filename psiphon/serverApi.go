@@ -131,7 +131,10 @@ func (session *Session) StatsRegexps() *transferstats.Regexps {
 }
 
 // DoStatusRequest makes a /status request to the server, sending session stats.
-func (session *Session) DoStatusRequest(statsPayload json.Marshaler) error {
+func (session *Session) DoStatusRequest(
+	statsPayload json.Marshaler,
+	isConnected bool) error {
+
 	statsPayloadJSON, err := json.Marshal(statsPayload)
 	if err != nil {
 		return ContextError(err)
@@ -144,10 +147,15 @@ func (session *Session) DoStatusRequest(statsPayload json.Marshaler) error {
 	// "connected" is a legacy parameter. This client does not report when
 	// it has disconnected.
 
+	connected := "1"
+	if !isConnected {
+		connected = "0"
+	}
+
 	url := session.buildRequestUrl(
 		"status",
 		&ExtraParam{"session_id", session.sessionId},
-		&ExtraParam{"connected", "1"},
+		&ExtraParam{"connected", connected},
 		// TODO: base64 encoding of padding means the padding
 		// size is not exactly [0, PADDING_MAX_BYTES]
 		&ExtraParam{"padding", base64.StdEncoding.EncodeToString(padding)})
