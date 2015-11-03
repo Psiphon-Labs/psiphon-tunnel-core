@@ -398,10 +398,13 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 // The tunnel is assumed to be closed, but its config, protocol, and
 // session values must still be valid.
 // TryUntunneledStatusRequest emits notices detailing failed attempts.
-func TryUntunneledStatusRequest(tunnel *Tunnel, statsPayload json.Marshaler) error {
+func TryUntunneledStatusRequest(
+	tunnel *Tunnel,
+	statsPayload json.Marshaler,
+	isShutdown bool) error {
 
 	for _, port := range tunnel.serverEntry.GetDirectWebRequestPorts() {
-		err := doUntunneledStatusRequest(tunnel, port, statsPayload)
+		err := doUntunneledStatusRequest(tunnel, port, statsPayload, isShutdown)
 		if err == nil {
 			return nil
 		}
@@ -414,7 +417,10 @@ func TryUntunneledStatusRequest(tunnel *Tunnel, statsPayload json.Marshaler) err
 
 // doUntunneledStatusRequest attempts an untunneled stratus request.
 func doUntunneledStatusRequest(
-	tunnel *Tunnel, port string, statsPayload json.Marshaler) error {
+	tunnel *Tunnel,
+	port string,
+	statsPayload json.Marshaler,
+	isShutdown bool) error {
 
 	url := makeStatusRequestUrl(
 		tunnel.session.sessionId,
@@ -426,11 +432,16 @@ func doUntunneledStatusRequest(
 		return ContextError(err)
 	}
 
+	timeout := PSIPHON_API_SERVER_TIMEOUT
+	if isShutdown {
+		timeout = PSIPHON_API_SHUTDOWN_SERVER_TIMEOUT
+	}
+
 	httpClient, requestUrl, err := MakeUntunneledHttpsClient(
 		tunnel.untunneledDialConfig,
 		certificate,
 		url,
-		PSIPHON_API_UNTUNNELED_STATUS_REQUEST_TIMEOUT)
+		timeout)
 	if err != nil {
 		return ContextError(err)
 	}

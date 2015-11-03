@@ -695,25 +695,40 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	close(signalStatusRequest)
 	requestsWaitGroup.Wait()
 
-	// Note: if sendStats takes too long, it will be interrupted. The attempts
-	// in sendUntunneledStats will not be interrupted and have short timeouts.
+	// Final status request notes:
+	//
+	// For session duration calculation, it's highly desirable to record
+	// a final status request with "connected=0". For this reason, we attempt
+	// untunneled requests when the tunneled request isn't possible or has
+	// failed.
+	//
+	// In an orderly shutdown (err == nil), the Controller is stopping and
+	// everything must be wrapped up quickly. Also, we still have a working
+	// tunnel. So we first attempt a tunneled status request (with a short
+	// timeout) and then attempt, synchronously -- otherwise the Contoller's
+	// untunneledPendingConns.CloseAll() will immediately interrupt untunneled
+	// requests -- untunneled requests (also with short timeouts).
+	// Note that this depends on the order of untunneledPendingConns.CloseAll()
+	// coming after tunnel.Close(): see note in Controller.Run().
+	//
+	// If the tunnel has failed, the Controller may continue working. We want
+	// to re-establish as soon as possible (so don't want to block on status
+	// requests, even for a second). We may have a long time to attempt
+	// untunneled requests in the background. And there is no tunnel through
+	// which to attempt tunneled requests. So we spawn a goroutine to run the
+	// untunneled requests, which are allowed a longer timeout. These requests
+	// will be interrupted by the Controller's untunneledPendingConns.CloseAll()
+	// in the case of a shutdown.
 
 	if err == nil {
 		NoticeInfo("shutdown operate tunnel")
 		if !sendStats(tunnel, false) {
-			sendUntunneledStats(tunnel)
+			sendUntunneledStats(tunnel, true)
 		}
 	} else {
 		NoticeAlert("operate tunnel error for %s: %s", tunnel.serverEntry.IpAddress, err)
-
-		// Note: this order of calls may appear to allow re-establishment to
-		// begin before making the untunneled status request attempts. But the
-		// receiving Controller will call tunnel.Close() before re-establishing,
-		// and that Close() will block waiting for operateTunnel to exit.
-		// TODO: fix this?
-
+		go sendUntunneledStats(tunnel, false)
 		tunnelOwner.SignalTunnelFailure(tunnel)
-		sendUntunneledStats(tunnel)
 	}
 }
 
@@ -771,7 +786,7 @@ func sendStats(tunnel *Tunnel, isConnected bool) bool {
 // sendUntunnelStats sends final status requests directly to Psiphon
 // servers after the tunnel has already failed. This is an to attempt
 // to retain useful bytes transferred and session duration information.
-func sendUntunneledStats(tunnel *Tunnel) {
+func sendUntunneledStats(tunnel *Tunnel, isShutdown bool) {
 
 	// Tunnel does not have a session when DisableApi is set
 	if tunnel.session == nil {
@@ -784,7 +799,7 @@ func sendUntunneledStats(tunnel *Tunnel) {
 	}
 
 	payload := transferstats.GetForServer(tunnel.serverEntry.IpAddress)
-	err := TryUntunneledStatusRequest(tunnel, payload)
+	err := TryUntunneledStatusRequest(tunnel, payload, isShutdown)
 	if err != nil {
 		NoticeAlert("TryUntunneledStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
 

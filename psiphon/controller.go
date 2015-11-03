@@ -186,14 +186,14 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	controller.establishPendingConns.CloseAll()
 	controller.runWaitGroup.Wait()
 
-	// Stops untunneled connections, including split tunnel port
-	// forwards and also untunneled final stats requests.
-	// Note: there's a circular dependency with runWaitGroup.Wait()
-	// and untunneledPendingConns.CloseAll(): runWaitGroup depends
-	// on tunnels stopping which depends on final status requests
-	// completing. So this pending conns cancel comes to late to
-	// interrupt final status requests -- which is ok since we
-	// give those a short timeout and would like to not interrupt
+	// Stops untunneled connections, including fetch remote server list,
+	// split tunnel port forwards and also untunneled final stats requests.
+	// Note: there's a circular dependency with runWaitGroup.Wait() and
+	// untunneledPendingConns.CloseAll(): runWaitGroup depends on tunnels
+	// stopping which depends, in orderly shutdown, on final status requests
+	// completing. So this pending conns cancel comes too late to interrupt
+	// final status requests in the orderly shutdown case -- which is desired
+	// since we give those a short timeout and would prefer to not interrupt
 	// them.
 	controller.untunneledPendingConns.CloseAll()
 
