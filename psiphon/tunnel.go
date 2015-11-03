@@ -153,10 +153,6 @@ func EstablishTunnel(
 	// Now that network operations are complete, cancel interruptibility
 	pendingConns.Remove(conn)
 
-	// Promote this successful tunnel to first rank so it's one
-	// of the first candidates next time establish runs.
-	PromoteServerEntry(tunnel.serverEntry.IpAddress)
-
 	// Spawn the operateTunnel goroutine, which monitors the tunnel and handles periodic stats updates.
 	tunnel.operateWaitGroup.Add(1)
 	go tunnel.operateTunnel(tunnelOwner)
@@ -773,6 +769,11 @@ func sendStats(tunnel *Tunnel, isConnected bool) bool {
 		return true
 	}
 
+	// TODO: reconcile session duration scheme with multi-tunnel mode
+	if tunnel.config.TunnelPoolSize > 1 && !isConnected {
+		return true
+	}
+
 	payload := transferstats.GetForServer(tunnel.serverEntry.IpAddress)
 	err := tunnel.session.DoStatusRequest(payload, isConnected)
 	if err != nil {
@@ -795,6 +796,11 @@ func sendUntunneledStats(tunnel *Tunnel, isShutdown bool) {
 
 	// Skip when tunnel is discarded
 	if tunnel.IsDiscarded() {
+		return
+	}
+
+	// TODO: reconcile session duration scheme with multi-tunnel mode
+	if tunnel.config.TunnelPoolSize > 1 {
 		return
 	}
 
