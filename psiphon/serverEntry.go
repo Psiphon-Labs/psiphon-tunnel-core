@@ -112,14 +112,13 @@ func (serverEntry *ServerEntry) DisableImpairedProtocols(impairedProtocols []str
 func (serverEntry *ServerEntry) GetDirectWebRequestPorts() []string {
 	ports := make([]string, 0)
 	if Contains(serverEntry.Capabilities, "handshake") {
-		ports = append(ports, serverEntry.WebServerPort)
-
 		// Server-side configuration quirk: there's a port forward from
 		// port 443 to the web server, which we can try, except on servers
 		// running FRONTED_MEEK, which listens on port 443.
 		if serverEntry.SupportsProtocol(TUNNEL_PROTOCOL_FRONTED_MEEK) {
 			ports = append(ports, "443")
 		}
+		ports = append(ports, serverEntry.WebServerPort)
 	}
 	return ports
 }
