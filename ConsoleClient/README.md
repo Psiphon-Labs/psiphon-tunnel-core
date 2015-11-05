@@ -21,7 +21,7 @@ Note that you may need to use `sudo docker` below, depending on your OS.
   ; cd -
   ```
 
-When that command completes, the compiled binaries will be located in the `bin` directory under the current directory. The structure will be:
+When that command completes, the compiled binaries will be located in the `bin` directory (`./bin`, and everything under it will likely be owned by root, so be sure to `chown` to an appropriate user) under the current directory. The structure will be:
   ```
   bin
   ├── darwin
