@@ -28,8 +28,7 @@ import (
 	"runtime/pprof"
 	"sync"
 
-	// TODO: Put this back to the real github URL (can't go get from a branch, so this seemed reasonable for now)
-	"../psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
 
 func main() {

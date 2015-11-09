@@ -72,7 +72,7 @@ func InitDataStore(config *Config) (err error) {
 	var migratableServerEntries []*ServerEntry
 
 	singleton.init.Do(func() {
-		migratableServerEntries, err = PrepareMigrationEntries(config)
+		migratableServerEntries, err = prepareMigrationEntries(config)
 		if err != nil {
 			return
 		}
@@ -109,11 +109,16 @@ func InitDataStore(config *Config) (err error) {
 		}
 
 		singleton.db = db
-	})
 
-	if len(migratableServerEntries) > 0 {
-		err = MigrateEntries(migratableServerEntries)
-	}
+		// The migrateServerEntries function requires the data store is
+		// initialized prior to execution so that migrated entries can be stored
+		if len(migratableServerEntries) > 0 {
+			migrationFailures := migrateEntries(migratableServerEntries, filepath.Join(config.DataStoreDirectory, LEGACY_DATA_STORE_FILENAME))
+			if migrationFailures != nil {
+				NoticeAlert("initDataStore failed to migrate legacy server entries: %s", migrationFailures)
+			}
+		}
+	})
 
 	return err
 }
