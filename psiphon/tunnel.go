@@ -163,10 +163,10 @@ func EstablishTunnel(
 // Supports multiple and/or concurrent calls to Close().
 // When isDicarded is set, operateTunnel will not attempt to send final
 // status requests.
-func (tunnel *Tunnel) Close(isDicarded bool) {
+func (tunnel *Tunnel) Close(isDiscarded bool) {
 
 	tunnel.mutex.Lock()
-	tunnel.isDiscarded = isDicarded
+	tunnel.isDiscarded = isDiscarded
 	isClosed := tunnel.isClosed
 	tunnel.isClosed = true
 	tunnel.mutex.Unlock()
