@@ -22,6 +22,7 @@
 package psiphon
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,6 +56,7 @@ const (
 	splitTunnelRouteDataBucket  = "splitTunnelRouteData"
 	urlETagsBucket              = "urlETags"
 	keyValueBucket              = "keyValues"
+	tunnelDurationsBucket       = "tunnelDurations"
 	rankedServerEntryCount      = 100
 )
 
@@ -87,6 +89,7 @@ func InitDataStore(config *Config) (err error) {
 				splitTunnelRouteDataBucket,
 				urlETagsBucket,
 				keyValueBucket,
+				tunnelDurationsBucket,
 			}
 			for _, bucket := range requiredBuckets {
 				_, err := tx.CreateBucketIfNotExists([]byte(bucket))
@@ -102,6 +105,8 @@ func InitDataStore(config *Config) (err error) {
 		}
 
 		singleton.db = db
+
+		resetAllTunnelDurationsToUnreported()
 	})
 	return err
 }
@@ -716,4 +721,172 @@ func GetKeyValue(key string) (value string, err error) {
 		return "", ContextError(err)
 	}
 	return value, nil
+}
+
+// Tunnel duration records in the tunnelDurationStateUnreported
+// state are available for take out.
+// Records in the tunnelDurationStateReporting have been
+// taken out and are pending either deleting (for a
+// successful request) or change to StateUnreported (for
+// a failed request).
+// All tunnel durations are reverted to StateUnreported when
+// the datastore is initialized at start up.
+
+var tunnelDurationStateUnreported = []byte("0")
+var tunnelDurationStateReporting = []byte("1")
+
+// StoreTunnelDuration adds a new tunnel duration, which is
+// set to StateUnreported and is an immediate candidate for
+// reporting.
+// tunnelDuration is a JSON byte array containing fields as
+// required by the Psiphon server API (see RecordTunnelDuration).
+// It's assumed that the JSON value contains enough unique
+// information for the value to function as a key in the
+// key/value datastore. This assumption is currently satisfied
+// by the fields sessionId + tunnelNumber.
+func StoreTunnelDuration(tunnelDuration []byte) error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelDurationsBucket))
+		err := bucket.Put(tunnelDuration, tunnelDurationStateUnreported)
+		return err
+	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
+}
+
+// CountUnreportedTunnelDurations returns the number of tunnel
+// duration records in StateUnreported.
+func CountUnreportedTunnelDurations() int {
+	checkInitDataStore()
+
+	unreported := 0
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelDurationsBucket))
+		cursor := bucket.Cursor()
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			if 0 == bytes.Compare(value, tunnelDurationStateUnreported) {
+				unreported++
+				break
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		NoticeAlert("CountUnreportedTunnelDurations failed: %s", err)
+		return 0
+	}
+
+	return unreported
+}
+
+// TakeOutUnreportedTunnelDurations returns up to maxCount tunnel
+// durations that are in StateUnreported. The records are set to
+// StateReporting. If the records are successfully reported,
+// clear them with ClearReportedTunnelDurations. If the records are
+// not successfully reported, restore them with
+// PutBackUnreportedTunnelDurations.
+func TakeOutUnreportedTunnelDurations(maxCount int) ([][]byte, error) {
+	checkInitDataStore()
+
+	tunnelDurations := make([][]byte, 0)
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelDurationsBucket))
+		cursor := bucket.Cursor()
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			if 0 == bytes.Compare(value, tunnelDurationStateUnreported) {
+				err := bucket.Put(key, tunnelDurationStateReporting)
+				if err != nil {
+					return err
+				}
+				tunnelDurations = append(tunnelDurations, key)
+				if len(tunnelDurations) >= maxCount {
+					break
+				}
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	return tunnelDurations, nil
+}
+
+// PutBackUnreportedTunnelDurations restores a list of tunnel
+// durations to StateUnreported.
+func PutBackUnreportedTunnelDurations(tunnelDurations [][]byte) error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelDurationsBucket))
+		for _, tunnelDuration := range tunnelDurations {
+			err := bucket.Put(tunnelDuration, tunnelDurationStateUnreported)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
+}
+
+// ClearReportedTunnelDurations deletes a list of tunnel
+// durations that were succesdfully reported.
+func ClearReportedTunnelDurations(tunnelDurations [][]byte) error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelDurationsBucket))
+		for _, tunnelDuration := range tunnelDurations {
+			err := bucket.Delete(tunnelDuration)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
+}
+
+// resetAllTunnelDurationsToUnreported sets all tunnel
+// duration records to StateUnreported. This reset is called
+// when the datastore is initialized at start up, as we do
+// not know if tunnel records in StateReporting were reported
+// or not.
+func resetAllTunnelDurationsToUnreported() error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelDurationsBucket))
+		cursor := bucket.Cursor()
+		for key, _ := cursor.First(); key != nil; key, _ = cursor.Next() {
+			err := bucket.Put(key, tunnelDurationStateUnreported)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
 }

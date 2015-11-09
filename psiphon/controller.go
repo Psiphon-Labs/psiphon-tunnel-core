@@ -312,7 +312,7 @@ loop:
 		reported := false
 		tunnel := controller.getNextActiveTunnel()
 		if tunnel != nil {
-			err := tunnel.session.DoConnectedRequest()
+			err := tunnel.serverContext.DoConnectedRequest()
 			if err == nil {
 				reported = true
 			} else {
@@ -396,8 +396,10 @@ loop:
 	NoticeInfo("exiting upgrade downloader")
 }
 
-func (controller *Controller) startClientUpgradeDownloader(session *Session) {
-	// session is nil when DisableApi is set
+func (controller *Controller) startClientUpgradeDownloader(
+	serverContext *ServerContext) {
+
+	// serverContext is nil when DisableApi is set
 	if controller.config.DisableApi {
 		return
 	}
@@ -408,7 +410,7 @@ func (controller *Controller) startClientUpgradeDownloader(session *Session) {
 		return
 	}
 
-	if session.clientUpgradeVersion == "" {
+	if serverContext.clientUpgradeVersion == "" {
 		// No upgrade is offered
 		return
 	}
@@ -418,7 +420,7 @@ func (controller *Controller) startClientUpgradeDownloader(session *Session) {
 	if !controller.startedUpgradeDownloader {
 		controller.startedUpgradeDownloader = true
 		controller.runWaitGroup.Add(1)
-		go controller.upgradeDownloader(session.clientUpgradeVersion)
+		go controller.upgradeDownloader(serverContext.clientUpgradeVersion)
 	}
 }
 
@@ -455,7 +457,7 @@ loop:
 			// establishPendingConns; this causes the pendingConns.Add() within
 			// interruptibleTCPDial to succeed instead of aborting, and the result
 			// is that it's possible for establish goroutines to run all the way through
-			// NewSession before being discarded... delaying shutdown.
+			// NewServerContext before being discarded... delaying shutdown.
 			select {
 			case <-controller.shutdownBroadcast:
 				break loop
@@ -497,7 +499,8 @@ loop:
 					// tunnel is established.
 					controller.startOrSignalConnectedReporter()
 
-					controller.startClientUpgradeDownloader(establishedTunnel.session)
+					controller.startClientUpgradeDownloader(
+						establishedTunnel.serverContext)
 				}
 
 			} else {
@@ -532,7 +535,7 @@ loop:
 
 // classifyImpairedProtocol tracks "impaired" protocol classifications for failed
 // tunnels. A protocol is classified as impaired if a tunnel using that protocol
-// fails, repeatedly, shortly after the start of the session. During tunnel
+// fails, repeatedly, shortly after the start of the connection. During tunnel
 // establishment, impaired protocols are briefly skipped.
 //
 // One purpose of this measure is to defend against an attack where the adversary,
@@ -543,7 +546,7 @@ loop:
 //
 // Concurrency note: only the runTunnels() goroutine may call classifyImpairedProtocol
 func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
-	if failedTunnel.sessionStartTime.Add(IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION).After(time.Now()) {
+	if failedTunnel.startTime.Add(IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION).After(time.Now()) {
 		controller.impairedProtocolClassification[failedTunnel.protocol] += 1
 	} else {
 		controller.impairedProtocolClassification[failedTunnel.protocol] = 0
@@ -879,7 +882,7 @@ loop:
 			// first iteration of the ESTABLISH_TUNNEL_WORK_TIME
 			// loop since (a) one iteration should be sufficient to
 			// evade the attack; (b) there's a good chance of false
-			// positives (such as short session durations due to network
+			// positives (such as short tunnel durations due to network
 			// hopping on a mobile device).
 			// Impaired protocols logic is not applied when
 			// config.TunnelProtocol is specified.

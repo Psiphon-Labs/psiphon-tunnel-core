@@ -68,7 +68,7 @@ type Tunnel struct {
 	isDiscarded              bool
 	isClosed                 bool
 	serverEntry              *ServerEntry
-	session                  *Session
+	serverContext            *ServerContext
 	protocol                 string
 	conn                     net.Conn
 	sshClient                *ssh.Client
@@ -76,7 +76,7 @@ type Tunnel struct {
 	shutdownOperateBroadcast chan struct{}
 	signalPortForwardFailure chan struct{}
 	totalPortForwardFailures int
-	sessionStartTime         time.Time
+	startTime                time.Time
 }
 
 // EstablishTunnel first makes a network transport connection to the
@@ -134,21 +134,20 @@ func EstablishTunnel(
 		signalPortForwardFailure: make(chan struct{}, 1),
 	}
 
-	// Create a new Psiphon API session for this tunnel. This includes performing
-	// a handshake request. If the handshake fails, this establishment fails.
-	//
-	// TODO: as long as the servers are not enforcing that a client perform a handshake,
-	// proceed with this tunnel as long as at least one previous handhake succeeded?
-	//
+	// Create a new Psiphon API server context for this tunnel. This includes
+	// performing a handshake request. If the handshake fails, this establishment
+	// fails.
 	if !config.DisableApi {
-		NoticeInfo("starting session for %s", tunnel.serverEntry.IpAddress)
-		tunnel.session, err = NewSession(tunnel, sessionId)
+		NoticeInfo("starting server context for %s", tunnel.serverEntry.IpAddress)
+		tunnel.serverContext, err = NewServerContext(tunnel, sessionId)
 		if err != nil {
-			return nil, ContextError(fmt.Errorf("error starting session for %s: %s", tunnel.serverEntry.IpAddress, err))
+			return nil, ContextError(
+				fmt.Errorf("error starting server context for %s: %s",
+					tunnel.serverEntry.IpAddress, err))
 		}
 	}
 
-	tunnel.sessionStartTime = time.Now()
+	tunnel.startTime = time.Now()
 
 	// Now that network operations are complete, cancel interruptibility
 	pendingConns.Remove(conn)
@@ -239,12 +238,12 @@ func (tunnel *Tunnel) Dial(
 		tunnel:         tunnel,
 		downstreamConn: downstreamConn}
 
-	// Tunnel does not have a session when DisableApi is set. We still use
+	// Tunnel does not have a serverContext when DisableApi is set. We still use
 	// transferstats.Conn to count bytes transferred for monitoring tunnel
 	// quality.
 	var regexps *transferstats.Regexps
-	if tunnel.session != nil {
-		regexps = tunnel.session.StatsRegexps()
+	if tunnel.serverContext != nil {
+		regexps = tunnel.serverContext.StatsRegexps()
 	}
 	conn = transferstats.NewConn(conn, tunnel.serverEntry.IpAddress, regexps)
 
@@ -577,6 +576,17 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	statsTimer := time.NewTimer(nextStatusRequestPeriod())
 	defer statsTimer.Stop()
 
+	// Schedule an immediate status request to deliver any unreported
+	// tunnelDurations.
+	// Note: this may not be effective when there's an outstanding
+	// asynchronous untunneled final status request is holding the
+	// tunnel duration records.
+	unreported := CountUnreportedTunnelDurations()
+	if unreported > 0 {
+		NoticeInfo("Unreported tunnel durations: %d", unreported)
+		statsTimer.Reset(0)
+	}
+
 	nextSshKeepAlivePeriod := func() time.Duration {
 		return MakeRandomPeriod(
 			TUNNEL_SSH_KEEP_ALIVE_PERIOD_MIN,
@@ -600,7 +610,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	go func() {
 		defer requestsWaitGroup.Done()
 		for _ = range signalStatusRequest {
-			sendStats(tunnel, true)
+			sendStats(tunnel)
 		}
 	}()
 
@@ -684,19 +694,36 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		}
 	}
 
-	// Note: ensure sendStats goroutine is stopped before
-	// sending sendStats(tunnel, false) -- we don't want
-	// to send isConnected=true after isConnected=false.
 	close(signalSshKeepAlive)
 	close(signalStatusRequest)
 	requestsWaitGroup.Wait()
 
+	// This tunnel duration will be reported via the next successful status
+	// request.
+	// Note: Since client clocks are unreliable, we use the server's reported
+	// timestamp in the handshake response as the tunnel start time. This time
+	// will be slightly earlier than the actual tunnel activation time, as the
+	// client has to receive and parse the response and activate the tunnel.
+	if !tunnel.IsDiscarded() {
+		err := RecordTunnelDuration(
+			tunnel.serverContext.sessionId,
+			tunnel.serverContext.tunnelNumber,
+			tunnel.serverEntry.IpAddress,
+			tunnel.serverContext.serverHandshakeTimestamp,
+			fmt.Sprintf("%d", tunnel.startTime.Sub(time.Now())),
+			totalSent,
+			totalReceived)
+		if err != nil {
+			NoticeAlert("RecordTunnelDuration failed: %s", ContextError(err))
+		}
+	}
+
 	// Final status request notes:
 	//
-	// For session duration calculation, it's highly desirable to record
-	// a final status request with "connected=0". For this reason, we attempt
-	// untunneled requests when the tunneled request isn't possible or has
-	// failed.
+	// It's highly desirable to send a final status request in order to report
+	// domain bytes transferred stats as well as to report tunnel duration as
+	// soon as possible. For this reason, we attempt untunneled requests when
+	// the tunneled request isn't possible or has failed.
 	//
 	// In an orderly shutdown (err == nil), the Controller is stopping and
 	// everything must be wrapped up quickly. Also, we still have a working
@@ -718,7 +745,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 	if err == nil {
 		NoticeInfo("shutdown operate tunnel")
-		if !sendStats(tunnel, false) {
+		if !sendStats(tunnel) {
 			sendUntunneledStats(tunnel, true)
 		}
 	} else {
@@ -757,10 +784,10 @@ func sendSshKeepAlive(
 }
 
 // sendStats is a helper for sending session stats to the server.
-func sendStats(tunnel *Tunnel, isConnected bool) bool {
+func sendStats(tunnel *Tunnel) bool {
 
-	// Tunnel does not have a session when DisableApi is set
-	if tunnel.session == nil {
+	// Tunnel does not have a serverContext when DisableApi is set
+	if tunnel.serverContext == nil {
 		return true
 	}
 
@@ -769,28 +796,21 @@ func sendStats(tunnel *Tunnel, isConnected bool) bool {
 		return true
 	}
 
-	// TODO: reconcile session duration scheme with multi-tunnel mode
-	if tunnel.config.TunnelPoolSize > 1 && !isConnected {
-		return true
-	}
-
-	payload := transferstats.GetForServer(tunnel.serverEntry.IpAddress)
-	err := tunnel.session.DoStatusRequest(payload, isConnected)
+	err := tunnel.serverContext.DoStatusRequest(tunnel)
 	if err != nil {
 		NoticeAlert("DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
-		transferstats.PutBack(tunnel.serverEntry.IpAddress, payload)
 	}
 
 	return err == nil
 }
 
 // sendUntunnelStats sends final status requests directly to Psiphon
-// servers after the tunnel has already failed. This is an to attempt
-// to retain useful bytes transferred and session duration information.
+// servers after the tunnel has already failed. This is an attempt
+// to retain useful bytes transferred stats.
 func sendUntunneledStats(tunnel *Tunnel, isShutdown bool) {
 
-	// Tunnel does not have a session when DisableApi is set
-	if tunnel.session == nil {
+	// Tunnel does not have a serverContext when DisableApi is set
+	if tunnel.serverContext == nil {
 		return
 	}
 
@@ -799,18 +819,8 @@ func sendUntunneledStats(tunnel *Tunnel, isShutdown bool) {
 		return
 	}
 
-	// TODO: reconcile session duration scheme with multi-tunnel mode
-	if tunnel.config.TunnelPoolSize > 1 {
-		return
-	}
-
-	payload := transferstats.GetForServer(tunnel.serverEntry.IpAddress)
-	err := TryUntunneledStatusRequest(tunnel, payload, isShutdown)
+	err := TryUntunneledStatusRequest(tunnel, isShutdown)
 	if err != nil {
 		NoticeAlert("TryUntunneledStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
-
-		// By putting back now, we may send the bytes transferred data for this
-		// session in the next session for the same server.
-		transferstats.PutBack(tunnel.serverEntry.IpAddress, payload)
 	}
 }

@@ -59,6 +59,7 @@ const (
 	PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES   = 256
 	PSIPHON_API_CONNECTED_REQUEST_PERIOD           = 24 * time.Hour
 	PSIPHON_API_CONNECTED_REQUEST_RETRY_PERIOD     = 5 * time.Second
+	PSIPHON_API_TUNNEL_DURATIONS_MAX_COUNT         = 1000
 	FETCH_ROUTES_TIMEOUT                           = 1 * time.Minute
 	DOWNLOAD_UPGRADE_TIMEOUT                       = 15 * time.Minute
 	DOWNLOAD_UPGRADE_RETRY_PAUSE_PERIOD            = 5 * time.Second
