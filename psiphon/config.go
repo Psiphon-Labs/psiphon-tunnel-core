@@ -29,7 +29,8 @@ import (
 // TODO: allow all params to be configured
 
 const (
-	DATA_STORE_FILENAME                            = "psiphon.db"
+	LEGACY_DATA_STORE_FILENAME                     = "psiphon.db"
+	DATA_STORE_FILENAME                            = "psiphon.boltdb"
 	CONNECTION_WORKER_POOL_SIZE                    = 10
 	TUNNEL_POOL_SIZE                               = 1
 	TUNNEL_CONNECT_TIMEOUT                         = 20 * time.Second
