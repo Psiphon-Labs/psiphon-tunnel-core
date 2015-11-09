@@ -40,6 +40,8 @@ func prepareMigrationEntries(config *Config) ([]*ServerEntry, error) {
 		// If LEGACY_DATA_STORE_FILENAME exists on disk
 		if _, err := os.Stat(filepath.Join(config.DataStoreDirectory, LEGACY_DATA_STORE_FILENAME)); err == nil {
 			legacyDb, err = sql.Open("sqlite3", fmt.Sprintf("file:%s?cache=private&mode=rwc", filepath.Join(config.DataStoreDirectory, LEGACY_DATA_STORE_FILENAME)))
+			defer legacyDb.Close()
+
 			if err != nil {
 				return migratableServerEntries, err
 			}
