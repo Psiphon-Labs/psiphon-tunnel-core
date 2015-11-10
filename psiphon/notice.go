@@ -91,12 +91,12 @@ func NoticeInfo(format string, args ...interface{}) {
 	outputNotice("Info", false, "message", fmt.Sprintf(format, args...))
 }
 
-// NoticeInfo is an alert message; typically a recoverable error condition
+// NoticeAlert is an alert message; typically a recoverable error condition
 func NoticeAlert(format string, args ...interface{}) {
 	outputNotice("Alert", false, "message", fmt.Sprintf(format, args...))
 }
 
-// NoticeInfo is an error message; typically an unrecoverable error condition
+// NoticeError is an error message; typically an unrecoverable error condition
 func NoticeError(format string, args ...interface{}) {
 	outputNotice("Error", true, "message", fmt.Sprintf(format, args...))
 }

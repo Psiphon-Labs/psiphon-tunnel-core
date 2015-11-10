@@ -77,21 +77,33 @@ func prepareMigrationEntries(config *Config) ([]*ServerEntry, error) {
 	return migratableServerEntries, nil
 }
 
-func migrateEntries(serverEntries []*ServerEntry, legacyDataStoreFilename string) error {
+// migrateEntries calls the BoltDB data store method to shuffle
+// and store an array of server entries (StoreServerEntries)
+// Failing to migrate entries, or delete the legacy file is never fatal
+func migrateEntries(serverEntries []*ServerEntry, legacyDataStoreFilename string) {
 	checkInitDataStore()
 
 	err := StoreServerEntries(serverEntries, false)
 	if err != nil {
-		return err
+		NoticeAlert("failed to store migrated server entries: %s", err)
+	} else {
+		// Retain server affinity from old datastore by taking the first
+		// array element (previous top ranked server) and promoting it
+		// to the top rank before the server selection process begins
+		err = PromoteServerEntry(serverEntries[0].IpAddress)
+		if err != nil {
+			NoticeAlert("failed to promote server entry: %s", err)
+		}
+
+		NoticeAlert("%d server entries successfully migrated to new data store", len(serverEntries))
 	}
-	NoticeInfo("%d server entries successfully migrated to new data store", len(serverEntries))
 
 	err = os.Remove(legacyDataStoreFilename)
 	if err != nil {
-		NoticeInfo("failed to delete legacy data store file '%s': %s", legacyDataStoreFilename, err)
+		NoticeAlert("failed to delete legacy data store file '%s': %s", legacyDataStoreFilename, err)
 	}
 
-	return nil
+	return
 }
 
 // This code is copied from the dataStore.go code used to operate the legacy
