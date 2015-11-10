@@ -795,6 +795,11 @@ func (controller *Controller) startEstablishing() {
 	// Note: the establishTunnelWorker that receives the affinity
 	// candidate is solely resonsible for closing
 	// controller.serverAffinityDoneBroadcast.
+	//
+	// Note: if config.EgressRegion or config.TunnelProtocol has changed
+	// since the top server was promoted, the first server may not actually
+	// be the last connected server.
+	// TODO: should not favor the first server in this case
 	controller.serverAffinityDoneBroadcast = make(chan struct{})
 
 	for i := 0; i < controller.config.ConnectionWorkerPoolSize; i++ {
