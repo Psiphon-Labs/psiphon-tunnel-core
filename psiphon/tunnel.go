@@ -580,11 +580,16 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// tunnelDurations.
 	// Note: this may not be effective when there's an outstanding
 	// asynchronous untunneled final status request is holding the
-	// tunnel duration records.
+	// tunnel duration records. It may also conflict with other
+	// tunnel candidates which attempt to send an immediate request
+	// before being discarded. For now, we mitigate this with a short,
+	// random delay.
 	unreported := CountUnreportedTunnelDurations()
 	if unreported > 0 {
 		NoticeInfo("Unreported tunnel durations: %d", unreported)
-		statsTimer.Reset(0)
+		statsTimer.Reset(MakeRandomPeriod(
+			PSIPHON_API_STATUS_REQUEST_SHORT_PERIOD_MIN,
+			PSIPHON_API_STATUS_REQUEST_SHORT_PERIOD_MAX))
 	}
 
 	nextSshKeepAlivePeriod := func() time.Duration {
