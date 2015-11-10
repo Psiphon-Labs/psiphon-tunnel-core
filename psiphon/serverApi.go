@@ -493,13 +493,13 @@ func RecordTunnelDuration(
 	totalBytesSent, totalBytesReceived int64) error {
 
 	tunnelDuration := struct {
-		sessionId                string `json:"sessionId"`
-		tunnelNumber             int64  `json:"tunnelNumber"`
-		serverId                 string `json:"serverId"`
-		serverHandshakeTimestamp string `json:"serverHandshakeTimestamp"`
-		duration                 string `json:"duration"`
-		totalBytesSent           int64  `json:"totalBytesSent"`
-		totalBytesReceived       int64  `json:"totalBytesReceived"`
+		SessionId                string `json:"sessionId"`
+		TunnelNumber             int64  `json:"tunnelNumber"`
+		ServerId                 string `json:"serverId"`
+		ServerHandshakeTimestamp string `json:"serverHandshakeTimestamp"`
+		Duration                 string `json:"duration"`
+		TotalBytesSent           int64  `json:"totalBytesSent"`
+		TotalBytesReceived       int64  `json:"totalBytesReceived"`
 	}{
 		sessionId,
 		tunnelNumber,
