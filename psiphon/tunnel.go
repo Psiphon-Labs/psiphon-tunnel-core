@@ -715,7 +715,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			tunnel.serverContext.tunnelNumber,
 			tunnel.serverEntry.IpAddress,
 			tunnel.serverContext.serverHandshakeTimestamp,
-			fmt.Sprintf("%d", tunnel.startTime.Sub(time.Now())),
+			fmt.Sprintf("%d", time.Now().Sub(tunnel.startTime)),
 			totalSent,
 			totalReceived)
 		if err != nil {
