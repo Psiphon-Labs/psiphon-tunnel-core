@@ -577,16 +577,16 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	defer statsTimer.Stop()
 
 	// Schedule an immediate status request to deliver any unreported
-	// tunnelDurations.
+	// tunnel stats.
 	// Note: this may not be effective when there's an outstanding
 	// asynchronous untunneled final status request is holding the
-	// tunnel duration records. It may also conflict with other
+	// tunnel stats records. It may also conflict with other
 	// tunnel candidates which attempt to send an immediate request
 	// before being discarded. For now, we mitigate this with a short,
 	// random delay.
-	unreported := CountUnreportedTunnelDurations()
+	unreported := CountUnreportedTunnelStats()
 	if unreported > 0 {
-		NoticeInfo("Unreported tunnel durations: %d", unreported)
+		NoticeInfo("Unreported tunnel stats: %d", unreported)
 		statsTimer.Reset(MakeRandomPeriod(
 			PSIPHON_API_STATUS_REQUEST_SHORT_PERIOD_MIN,
 			PSIPHON_API_STATUS_REQUEST_SHORT_PERIOD_MAX))
@@ -703,14 +703,14 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	close(signalStatusRequest)
 	requestsWaitGroup.Wait()
 
-	// This tunnel duration will be reported via the next successful status
-	// request.
+	// The stats for this tunnel will be reported via the next successful
+	// status request.
 	// Note: Since client clocks are unreliable, we use the server's reported
 	// timestamp in the handshake response as the tunnel start time. This time
 	// will be slightly earlier than the actual tunnel activation time, as the
 	// client has to receive and parse the response and activate the tunnel.
 	if !tunnel.IsDiscarded() {
-		err := RecordTunnelDuration(
+		err := RecordTunnelStats(
 			tunnel.serverContext.sessionId,
 			tunnel.serverContext.tunnelNumber,
 			tunnel.serverEntry.IpAddress,
@@ -719,14 +719,14 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			totalSent,
 			totalReceived)
 		if err != nil {
-			NoticeAlert("RecordTunnelDuration failed: %s", ContextError(err))
+			NoticeAlert("RecordTunnelStats failed: %s", ContextError(err))
 		}
 	}
 
 	// Final status request notes:
 	//
 	// It's highly desirable to send a final status request in order to report
-	// domain bytes transferred stats as well as to report tunnel duration as
+	// domain bytes transferred stats as well as to report tunnel stats as
 	// soon as possible. For this reason, we attempt untunneled requests when
 	// the tunneled request isn't possible or has failed.
 	//

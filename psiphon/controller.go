@@ -775,8 +775,7 @@ func (controller *Controller) startEstablishing() {
 	controller.establishPendingConns.Reset()
 
 	// The server affinity mechanism attempts to favor the previously
-	// used server when reconnecting. This is useful for server-side
-	// session duration stats calculation and also beneficial for user
+	// used server when reconnecting. This is beneficial for user
 	// applications which expect consistency in user IP address (for
 	// example, a web site which prompts for additional user
 	// authentication when the IP address changes).

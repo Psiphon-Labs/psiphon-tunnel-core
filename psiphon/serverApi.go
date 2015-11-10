@@ -257,7 +257,7 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 	err = serverContext.doPostRequest(url, "application/json", bytes.NewReader(payload))
 	if err != nil {
 
-		// Resend the transfer stats and tunnel durations later
+		// Resend the transfer stats and tunnel stats later
 		// Note: potential duplicate reports if the server received and processed
 		// the request but the client failed to receive the response.
 		putBackStatusRequestPayload(payloadInfo)
@@ -277,7 +277,7 @@ func makeStatusRequestUrl(sessionId, baseRequestUrl string, isTunneled bool) str
 
 	// Legacy clients set "connected" to "0" when disconnecting, and this value
 	// is used to calculate session duration estimates. This is now superseded
-	// by explicit tunnel duration reporting.
+	// by explicit tunnel stats duration reporting.
 	// The legacy method of reconstructing session durations is not compatible
 	// with this client's connected request retries and asynchronous final
 	// status request attempts. So we simply set this "connected" flag to reflect
@@ -302,25 +302,25 @@ func makeStatusRequestUrl(sessionId, baseRequestUrl string, isTunneled bool) str
 // either "clear" or "put back" status request payload data depending
 // on whether or not the request succeeded.
 type statusRequestPayloadInfo struct {
-	serverId        string
-	transferStats   *transferstats.ServerStats
-	tunnelDurations [][]byte
+	serverId      string
+	transferStats *transferstats.ServerStats
+	tunnelStats   [][]byte
 }
 
 func makeStatusRequestPayload(
 	serverId string) ([]byte, *statusRequestPayloadInfo, error) {
 
 	transferStats := transferstats.GetForServer(serverId)
-	tunnelDurations, err := TakeOutUnreportedTunnelDurations(
-		PSIPHON_API_TUNNEL_DURATIONS_MAX_COUNT)
+	tunnelStats, err := TakeOutUnreportedTunnelStats(
+		PSIPHON_API_TUNNEL_STATS_MAX_COUNT)
 	if err != nil {
 		NoticeAlert(
-			"TakeOutUnreportedTunnelDurations failed: %s", ContextError(err))
-		tunnelDurations = nil
+			"TakeOutUnreportedTunnelStats failed: %s", ContextError(err))
+		tunnelStats = nil
 		// Proceed with transferStats only
 	}
 	payloadInfo := &statusRequestPayloadInfo{
-		serverId, transferStats, tunnelDurations}
+		serverId, transferStats, tunnelStats}
 
 	payload := make(map[string]interface{})
 
@@ -332,17 +332,17 @@ func makeStatusRequestPayload(
 	payload["page_views"] = make([]string, 0)
 	payload["https_requests"] = make([]string, 0)
 
-	// Tunnel duration records are already in JSON format
-	jsonTunnelDurations := make([]json.RawMessage, len(tunnelDurations))
-	for i, tunnelDuration := range tunnelDurations {
-		jsonTunnelDurations[i] = json.RawMessage(tunnelDuration)
+	// Tunnel stats records are already in JSON format
+	jsonTunnelStats := make([]json.RawMessage, len(tunnelStats))
+	for i, tunnelStatsRecord := range tunnelStats {
+		jsonTunnelStats[i] = json.RawMessage(tunnelStatsRecord)
 	}
-	payload["tunnel_durations"] = jsonTunnelDurations
+	payload["tunnel_stats"] = jsonTunnelStats
 
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
 
-		// Send the transfer stats and tunnel durations later
+		// Send the transfer stats and tunnel stats later
 		putBackStatusRequestPayload(payloadInfo)
 
 		return nil, nil, ContextError(err)
@@ -353,21 +353,21 @@ func makeStatusRequestPayload(
 
 func putBackStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 	transferstats.PutBack(payloadInfo.serverId, payloadInfo.transferStats)
-	err := PutBackUnreportedTunnelDurations(payloadInfo.tunnelDurations)
+	err := PutBackUnreportedTunnelStats(payloadInfo.tunnelStats)
 	if err != nil {
-		// These tunnel duration records won't be resent under after a
+		// These tunnel stats records won't be resent under after a
 		// datastore re-initialization.
 		NoticeAlert(
-			"PutBackUnreportedTunnelDurations failed: %s", ContextError(err))
+			"PutBackUnreportedTunnelStats failed: %s", ContextError(err))
 	}
 }
 
 func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
-	err := ClearReportedTunnelDurations(payloadInfo.tunnelDurations)
+	err := ClearReportedTunnelStats(payloadInfo.tunnelStats)
 	if err != nil {
-		// These tunnel duration records may be resent.
+		// These tunnel stats records may be resent.
 		NoticeAlert(
-			"ClearReportedTunnelDurations failed: %s", ContextError(err))
+			"ClearReportedTunnelStats failed: %s", ContextError(err))
 	}
 }
 
@@ -434,7 +434,7 @@ func doUntunneledStatusRequest(
 	}
 	if err != nil {
 
-		// Resend the transfer stats and tunnel durations later
+		// Resend the transfer stats and tunnel stats later
 		// Note: potential duplicate reports if the server received and processed
 		// the request but the client failed to receive the response.
 		putBackStatusRequestPayload(payloadInfo)
@@ -448,59 +448,60 @@ func doUntunneledStatusRequest(
 	return nil
 }
 
-// RecordTunnelDuration records a tunnel duration for
-// subsequent reporting.
+// RecordTunnelStats records a tunnel duration and bytes
+// sent and received for subsequent reporting and quality
+// analysis.
 //
 // Tunnel durations are precisely measured client-side
 // and reported in status requests. As the duration is
 // not determined until the tunnel is closed, tunnel
-// duration records are stored in the persistent datastore
+// stats records are stored in the persistent datastore
 // and reported via subsequent status requests sent to any
 // Psiphon server.
 //
-// Since the status request that reports a tunnel duration
-// is not necessarily handled by the same server, the
-// tunnel duration records include the original server ID.
+// Since the status request that reports a tunnel stats
+// record is not necessarily handled by the same server, the
+// tunnel stats records include the original server ID.
 //
-// Other fields that may change between duration recording and
-// duration reporting include client geo data, propagation channel,
+// Other fields that may change between tunnel stats recording
+// and reporting include client geo data, propagation channel,
 // sponsor ID, client version. These are not stored in the
 // datastore (client region, in particular, since that would
 // create an on-disk record of user location).
 // TODO: the server could encrypt, with a nonce and key unknown to
 // the client, a blob containing this data; return it in the
 // handshake response; and the client could store and later report
-// this blob with its tunnel duration records.
+// this blob with its tunnel stats records.
 //
 // Multiple "status" requests may be in flight at once (due
 // to multi-tunnel, asynchronous final status retry, and
 // aggressive status requests for pre-registered tunnels),
-// To avoid duplicate reporting, tunnel duration records are
+// To avoid duplicate reporting, tunnel stats records are
 // "taken-out" by a status request and then "put back" in
 // case the request fails.
 //
-// Note: since tunnel duration records have a globally unique
-// identifier (sessionId + tunnelNumber), we could permit
+// Note: since tunnel stats records have a globally unique
+// identifier (sessionId + tunnelNumber), we could tolerate
 // duplicate reporting and filter our duplicates on the
 // server-side. Permitting duplicate reporting could increase
 // the velocity of reporting (for example, both the asynchronous
 // untunneled final status requests and the post-connected
 // immediate startus requests could try to report the same tunnel
-// durations).
+// stats).
 // Duplicate reporting may also occur when a server receives and
 // processes a status request but the client fails to receive
 // the response.
-func RecordTunnelDuration(
+func RecordTunnelStats(
 	sessionId string,
 	tunnelNumber int64,
-	serverId string,
+	tunnelServerIpAddress string,
 	serverHandshakeTimestamp, duration string,
 	totalBytesSent, totalBytesReceived int64) error {
 
-	tunnelDuration := struct {
+	tunnelStats := struct {
 		SessionId                string `json:"session_id"`
 		TunnelNumber             int64  `json:"tunnel_number"`
-		ServerId                 string `json:"server_id"`
+		TunnelServerIpAddress    string `json:"tunnel_server_ip_address"`
 		ServerHandshakeTimestamp string `json:"server_handshake_timestamp"`
 		Duration                 string `json:"duration"`
 		TotalBytesSent           int64  `json:"total_bytes_sent"`
@@ -508,19 +509,19 @@ func RecordTunnelDuration(
 	}{
 		sessionId,
 		tunnelNumber,
-		serverId,
+		tunnelServerIpAddress,
 		serverHandshakeTimestamp,
 		duration,
 		totalBytesSent,
 		totalBytesReceived,
 	}
 
-	tunnelDurationJson, err := json.Marshal(tunnelDuration)
+	tunnelStatsJson, err := json.Marshal(tunnelStats)
 	if err != nil {
 		return ContextError(err)
 	}
 
-	return StoreTunnelDuration(tunnelDurationJson)
+	return StoreTunnelStats(tunnelStatsJson)
 }
 
 // doGetRequest makes a tunneled HTTPS request and returns the response body.
