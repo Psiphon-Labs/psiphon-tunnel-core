@@ -332,7 +332,12 @@ func makeStatusRequestPayload(
 	payload["page_views"] = make([]string, 0)
 	payload["https_requests"] = make([]string, 0)
 
-	payload["tunnel_durations"] = tunnelDurations
+	// Tunnel duration records are already in JSON format
+	jsonTunnelDurations := make([]json.RawMessage, len(tunnelDurations))
+	for i, tunnelDuration := range tunnelDurations {
+		jsonTunnelDurations[i] = json.RawMessage(tunnelDuration)
+	}
+	payload["tunnel_durations"] = jsonTunnelDurations
 
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
