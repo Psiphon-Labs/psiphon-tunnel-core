@@ -389,7 +389,7 @@ func (iterator *ServerEntryIterator) Reset() error {
 	//     transaction is open.
 	//     (https://github.com/boltdb/bolt)
 	//
-	// So the uderlying serverEntriesBucket could change after the serverEntryIds
+	// So the underlying serverEntriesBucket could change after the serverEntryIds
 	// list is built.
 
 	var serverEntryIds []string
@@ -422,7 +422,7 @@ func (iterator *ServerEntryIterator) Reset() error {
 	}
 
 	for i := len(serverEntryIds) - 1; i > iterator.shuffleHeadLength-1; i-- {
-		j := rand.Intn(i)
+		j := rand.Intn(i+1-iterator.shuffleHeadLength) + iterator.shuffleHeadLength
 		serverEntryIds[i], serverEntryIds[j] = serverEntryIds[j], serverEntryIds[i]
 	}
 
