@@ -45,7 +45,7 @@ Setup
   <!--BEGIN-SAMPLE-CONFIG-->
   ```
   {
-    "PropagationChannelId" : "<placeholder>",
+      "PropagationChannelId" : "<placeholder>",
       "SponsorId" : "<placeholder>",
       "LocalHttpProxyPort" : 8080,
       "LocalSocksProxyPort" : 1080

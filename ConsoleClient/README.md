@@ -25,13 +25,13 @@ When that command completes, the compiled binaries will be located in the `bin` 
   ```
   bin
   ├── darwin
-  │   └── psiphon-native-messaging-host-x86_64
+  │   └── psiphon-tunnel-core-x86_64
   ├── linux
-  │   └── psiphon-native-messaging-host-i686
-  │   └── psiphon-native-messaging-host-x86_64
+  │   └── psiphon-tunnel-core-i686
+  │   └── psiphon-tunnel-core-x86_64
   └── windows
-      └── psiphon-native-messaging-host-i686.exe
-      └── psiphon-native-messaging-host-x86_64.exe
+      └── psiphon-tunnel-core-i686.exe
+      └── psiphon-tunnel-core-x86_64.exe
 
   ```
 
