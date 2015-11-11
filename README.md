@@ -18,6 +18,8 @@ This project is currently at the proof-of-concept stage. Current production Psip
 Setup
 --------------------------------------------------------------------------------
 
+#### Build
+
 * Go 1.5 (or higher) is required.
 * This project builds and runs on recent versions of Windows, Linux, and Mac OS X.
 * Note that the `psiphon` package is imported using the absolute path `github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon`; without further local configuration, `go` will use this version of the code and not the local copy in the repository.
@@ -35,7 +37,10 @@ Setup
     "
     ```
 
-* Run `./ConsoleClient --config psiphon.config` where the config file looks like this:
+#### Configure
+
+ * Configuration files are standard text files containing a valid JSON object. Example:
+
 
   <!--BEGIN-SAMPLE-CONFIG-->
   ```
@@ -48,9 +53,22 @@ Setup
   ```
   <!--END-SAMPLE-CONFIG-->
 
-* Config file parameters are [documented here](https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#Config).
+*Note: The lines `<!--BEGIN-SAMPLE-CONFIG-->` and `<--END-SAMPLE-CONFIG-->` (visible in the raw Markdown) are used by the [config test](psiphon/config_test.go). Do not remove them.*
+
+* All config file parameters are [documented here](https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#Config).
 * Replace each `<placeholder>` with a value from your Psiphon network. The Psiphon server-side stack is open source and can be found in our  [Psiphon 3 repository](https://bitbucket.org/psiphon/psiphon-circumvention-system). If you would like to use the Psiphon Inc. network, contact <developer-support@psiphon.ca>.
+
+
+#### Run
+
+* Run `./ConsoleClient --config psiphon.config` where `psiphon.config` is created as described in the [Configure](#configure) section above
+
+
+Other Platforms
+--------------------------------------------------------------------------------
+
 * The project builds and runs on Android. See the [AndroidLibrary README](AndroidLibrary/README.md) for more information about building the Go component, and the [AndroidApp README](AndroidApp/README.md) for a sample Android app that uses it.
+
 
 Licensing
 --------------------------------------------------------------------------------

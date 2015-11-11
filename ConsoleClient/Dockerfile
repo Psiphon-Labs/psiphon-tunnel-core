@@ -2,36 +2,25 @@
 #
 # See README.md for usage instructions.
 
-FROM ubuntu:12.04
+FROM ubuntu:15.04
 
-ENV GOVERSION=go1.4.1
+ENV GOVERSION=go1.5
 
 # Install system-level dependencies.
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && \
-  apt-get -y install build-essential python-software-properties bzip2 unzip curl \
-    git subversion mercurial bzr \
-    upx gcc-mingw-w64-i686 gcc-mingw-w64-x86-64 gcc-multilib
+RUN apt-get update && apt-get -y install build-essential curl git mercurial upx gcc-mingw-w64-i686 gcc-mingw-w64-x86-64 gcc-multilib
 
 # Install Go.
-ENV GOROOT=/go \
-  GOPATH=/
-ENV PATH=$PATH:$GOROOT/bin
-RUN echo "INSTALLING GO" && \
-  curl -L https://github.com/golang/go/archive/$GOVERSION.zip -o /tmp/go.zip && \
-  unzip /tmp/go.zip && \
-  rm /tmp/go.zip && \
-  mv /go-$GOVERSION $GOROOT && \
-  echo $GOVERSION > $GOROOT/VERSION && \
-  cd $GOROOT/src && \
-  ./all.bash
+ENV GOROOT=/usr/local/go GOPATH=/go
+ENV PATH=$PATH:$GOROOT/bin:$GOPATH/bin
+
+RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz -o /tmp/go.tar.gz && \
+  tar -C /usr/local -xzf /tmp/go.tar.gz && \
+  rm /tmp/go.tar.gz && \
+  echo $GOVERSION > $GOROOT/VERSION
 
 ENV CGO_ENABLED=1
-RUN go get github.com/mitchellh/gox && \
-  go get github.com/inconshreveable/gonative && \
-  mkdir -p /usr/local/gonative && \
-  cd /usr/local/gonative && \
-  gonative build
-ENV PATH=/usr/local/gonative/go/bin:$PATH
+
+RUN go get github.com/mitchellh/gox && go get github.com/pwaller/goupx
 
 WORKDIR $GOPATH/src
