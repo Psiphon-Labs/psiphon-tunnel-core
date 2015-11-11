@@ -1,5 +1,3 @@
-// TODO: runtime.GOOS check and Windows only build flag in migrateDataStore.go?
-
 /*
  * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
@@ -69,9 +67,8 @@ var singleton dataStore
 // InitDataStore() call with the filename passed in. The on-demand calls
 // have been replaced by checkInitDataStore() to assert that Init was called.
 func InitDataStore(config *Config) (err error) {
-	var migratableServerEntries []*ServerEntry
-
 	singleton.init.Do(func() {
+		var migratableServerEntries []*ServerEntry
 		migratableServerEntries, err = prepareMigrationEntries(config)
 		if err != nil {
 			return
