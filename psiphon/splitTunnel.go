@@ -114,12 +114,12 @@ func (classifier *SplitTunnelClassifier) Start(fetchRoutesTunnel *Tunnel) {
 		return
 	}
 
-	if fetchRoutesTunnel.session == nil {
-		// Tunnel has no session
+	if fetchRoutesTunnel.serverContext == nil {
+		// Tunnel has no serverContext
 		return
 	}
 
-	if fetchRoutesTunnel.session.clientRegion == "" {
+	if fetchRoutesTunnel.serverContext.clientRegion == "" {
 		// Split tunnel region is unknown
 		return
 	}
@@ -207,7 +207,7 @@ func (classifier *SplitTunnelClassifier) setRoutes(tunnel *Tunnel) {
 		return
 	}
 
-	NoticeSplitTunnelRegion(tunnel.session.clientRegion)
+	NoticeSplitTunnelRegion(tunnel.serverContext.clientRegion)
 }
 
 // getRoutes makes a web request to download fresh routes data for the
@@ -216,13 +216,13 @@ func (classifier *SplitTunnelClassifier) setRoutes(tunnel *Tunnel) {
 // fails and cached routes data is present, that cached data is returned.
 func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData []byte, err error) {
 
-	url := fmt.Sprintf(classifier.fetchRoutesUrlFormat, tunnel.session.clientRegion)
+	url := fmt.Sprintf(classifier.fetchRoutesUrlFormat, tunnel.serverContext.clientRegion)
 	request, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, ContextError(err)
 	}
 
-	etag, err := GetSplitTunnelRoutesETag(tunnel.session.clientRegion)
+	etag, err := GetSplitTunnelRoutesETag(tunnel.serverContext.clientRegion)
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -310,7 +310,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	if !useCachedRoutes {
 		etag := response.Header.Get("ETag")
 		if etag != "" {
-			err := SetSplitTunnelRoutes(tunnel.session.clientRegion, etag, routesData)
+			err := SetSplitTunnelRoutes(tunnel.serverContext.clientRegion, etag, routesData)
 			if err != nil {
 				NoticeAlert("failed to cache split tunnel routes: %s", ContextError(err))
 				// Proceed with fetched data, even when we can't cache it
@@ -319,7 +319,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	}
 
 	if useCachedRoutes {
-		routesData, err = GetSplitTunnelRoutesData(tunnel.session.clientRegion)
+		routesData, err = GetSplitTunnelRoutesData(tunnel.serverContext.clientRegion)
 		if err != nil {
 			return nil, ContextError(err)
 		}

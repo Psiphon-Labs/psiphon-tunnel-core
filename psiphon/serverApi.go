@@ -31,29 +31,39 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 )
 
-// Session is a utility struct which holds all of the data associated
-// with a Psiphon session. In addition to the established tunnel, this
-// includes the session ID (used for Psiphon API requests) and a http
+// ServerContext is a utility struct which holds all of the data associated
+// with a Psiphon server connection. In addition to the established tunnel, this
+// includes data associated with Psiphon API requests and a persistent http
 // client configured to make tunneled Psiphon API requests.
-type Session struct {
-	sessionId            string
-	baseRequestUrl       string
-	psiphonHttpsClient   *http.Client
-	statsRegexps         *transferstats.Regexps
-	clientRegion         string
-	clientUpgradeVersion string
+type ServerContext struct {
+	sessionId                string
+	tunnelNumber             int64
+	baseRequestUrl           string
+	psiphonHttpsClient       *http.Client
+	statsRegexps             *transferstats.Regexps
+	clientRegion             string
+	clientUpgradeVersion     string
+	serverHandshakeTimestamp string
 }
 
-// MakeSessionId creates a new session ID. Making the session ID is not done
-// in NewSession because:
-// (1) the transport needs to send the ID in the SSH credentials before the tunnel
-//     is established and NewSession performs a handshake on an established tunnel.
-// (2) the same session ID is used across multi-tunnel controller runs, where each
-//     tunnel has its own Session instance.
+// nextTunnelNumber is a monotonically increasing number assigned to each
+// successive tunnel connection. The sessionId and tunnelNumber together
+// form a globally unique identifier for tunnels, which is used for
+// stats. Note that the number is increasing but not necessarily
+// consecutive for each active tunnel in session.
+var nextTunnelNumber int64
+
+// MakeSessionId creates a new session ID. The same session ID is used across
+// multi-tunnel controller runs, where each tunnel has its own ServerContext
+// instance.
+// In server-side stats, we now consider a "session" to be the lifetime of the
+// Controller (e.g., the user's commanded start and stop) and we measure this
+// duration as well as the duration of each tunnel within the session.
 func MakeSessionId() (sessionId string, err error) {
 	randomId, err := MakeSecureRandomBytes(PSIPHON_API_CLIENT_SESSION_ID_LENGTH)
 	if err != nil {
@@ -62,108 +72,35 @@ func MakeSessionId() (sessionId string, err error) {
 	return hex.EncodeToString(randomId), nil
 }
 
-// NewSession makes the tunnelled handshake request to the
-// Psiphon server and returns a Session struct, initialized with the
-// session ID, for use with subsequent Psiphon server API requests (e.g.,
-// periodic connected and status requests).
-func NewSession(config *Config, tunnel *Tunnel, sessionId string) (session *Session, err error) {
+// NewServerContext makes the tunnelled handshake request to the Psiphon server
+// and returns a ServerContext struct for use with subsequent Psiphon server API
+// requests (e.g., periodic connected and status requests).
+func NewServerContext(tunnel *Tunnel, sessionId string) (*ServerContext, error) {
 
 	psiphonHttpsClient, err := makePsiphonHttpsClient(tunnel)
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	session = &Session{
+
+	serverContext := &ServerContext{
 		sessionId:          sessionId,
-		baseRequestUrl:     makeBaseRequestUrl(config, tunnel, sessionId),
+		tunnelNumber:       atomic.AddInt64(&nextTunnelNumber, 1),
+		baseRequestUrl:     makeBaseRequestUrl(tunnel, "", sessionId),
 		psiphonHttpsClient: psiphonHttpsClient,
 	}
 
-	err = session.doHandshakeRequest()
+	err = serverContext.doHandshakeRequest()
 	if err != nil {
 		return nil, ContextError(err)
 	}
 
-	return session, nil
-}
-
-// DoConnectedRequest performs the connected API request. This request is
-// used for statistics. The server returns a last_connected token for
-// the client to store and send next time it connects. This token is
-// a timestamp (using the server clock, and should be rounded to the
-// nearest hour) which is used to determine when a connection represents
-// a unique user for a time period.
-func (session *Session) DoConnectedRequest() error {
-	const DATA_STORE_LAST_CONNECTED_KEY = "lastConnected"
-	lastConnected, err := GetKeyValue(DATA_STORE_LAST_CONNECTED_KEY)
-	if err != nil {
-		return ContextError(err)
-	}
-	if lastConnected == "" {
-		lastConnected = "None"
-	}
-	url := session.buildRequestUrl(
-		"connected",
-		&ExtraParam{"session_id", session.sessionId},
-		&ExtraParam{"last_connected", lastConnected})
-	responseBody, err := session.doGetRequest(url)
-	if err != nil {
-		return ContextError(err)
-	}
-
-	var response struct {
-		ConnectedTimestamp string `json:"connected_timestamp"`
-	}
-	err = json.Unmarshal(responseBody, &response)
-	if err != nil {
-		return ContextError(err)
-	}
-
-	err = SetKeyValue(DATA_STORE_LAST_CONNECTED_KEY, response.ConnectedTimestamp)
-	if err != nil {
-		return ContextError(err)
-	}
-	return nil
-}
-
-// StatsRegexps gets the Regexps used for the statistics for this tunnel.
-func (session *Session) StatsRegexps() *transferstats.Regexps {
-	return session.statsRegexps
-}
-
-// DoStatusRequest makes a /status request to the server, sending session stats.
-func (session *Session) DoStatusRequest(statsPayload json.Marshaler) error {
-	statsPayloadJSON, err := json.Marshal(statsPayload)
-	if err != nil {
-		return ContextError(err)
-	}
-
-	// Add a random amount of padding to help prevent stats updates from being
-	// a predictable size (which often happens when the connection is quiet).
-	padding := MakeSecureRandomPadding(0, PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES)
-
-	// "connected" is a legacy parameter. This client does not report when
-	// it has disconnected.
-
-	url := session.buildRequestUrl(
-		"status",
-		&ExtraParam{"session_id", session.sessionId},
-		&ExtraParam{"connected", "1"},
-		// TODO: base64 encoding of padding means the padding
-		// size is not exactly [0, PADDING_MAX_BYTES]
-		&ExtraParam{"padding", base64.StdEncoding.EncodeToString(padding)})
-
-	err = session.doPostRequest(url, "application/json", bytes.NewReader(statsPayloadJSON))
-	if err != nil {
-		return ContextError(err)
-	}
-
-	return nil
+	return serverContext, nil
 }
 
 // doHandshakeRequest performs the handshake API request. The handshake
 // returns upgrade info, newly discovered server entries -- which are
 // stored -- and sponsor info (home pages, stat regexes).
-func (session *Session) doHandshakeRequest() error {
+func (serverContext *ServerContext) doHandshakeRequest() error {
 	extraParams := make([]*ExtraParam, 0)
 	serverEntryIpAddresses, err := GetServerEntryIpAddresses()
 	if err != nil {
@@ -174,8 +111,8 @@ func (session *Session) doHandshakeRequest() error {
 	for _, ipAddress := range serverEntryIpAddresses {
 		extraParams = append(extraParams, &ExtraParam{"known_server", ipAddress})
 	}
-	url := session.buildRequestUrl("handshake", extraParams...)
-	responseBody, err := session.doGetRequest(url)
+	url := buildRequestUrl(serverContext.baseRequestUrl, "handshake", extraParams...)
+	responseBody, err := serverContext.doGetRequest(url)
 	if err != nil {
 		return ContextError(err)
 	}
@@ -202,14 +139,15 @@ func (session *Session) doHandshakeRequest() error {
 		HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
 		EncodedServerList    []string            `json:"encoded_server_list"`
 		ClientRegion         string              `json:"client_region"`
+		ServerTimestamp      string              `json:"server_timestamp"`
 	}
 	err = json.Unmarshal(configLine, &handshakeConfig)
 	if err != nil {
 		return ContextError(err)
 	}
 
-	session.clientRegion = handshakeConfig.ClientRegion
-	NoticeClientRegion(session.clientRegion)
+	serverContext.clientRegion = handshakeConfig.ClientRegion
+	NoticeClientRegion(serverContext.clientRegion)
 
 	var decodedServerEntries []*ServerEntry
 
@@ -242,13 +180,13 @@ func (session *Session) doHandshakeRequest() error {
 		NoticeHomepage(homepage)
 	}
 
-	session.clientUpgradeVersion = handshakeConfig.UpgradeClientVersion
+	serverContext.clientUpgradeVersion = handshakeConfig.UpgradeClientVersion
 	if handshakeConfig.UpgradeClientVersion != "" {
 		NoticeClientUpgradeAvailable(handshakeConfig.UpgradeClientVersion)
 	}
 
 	var regexpsNotices []string
-	session.statsRegexps, regexpsNotices = transferstats.MakeRegexps(
+	serverContext.statsRegexps, regexpsNotices = transferstats.MakeRegexps(
 		handshakeConfig.PageViewRegexes,
 		handshakeConfig.HttpsRequestRegexes)
 
@@ -256,15 +194,344 @@ func (session *Session) doHandshakeRequest() error {
 		NoticeAlert(notice)
 	}
 
+	serverContext.serverHandshakeTimestamp = handshakeConfig.ServerTimestamp
+
 	return nil
 }
 
-// doGetRequest makes a tunneled HTTPS request and returns the response body.
-func (session *Session) doGetRequest(requestUrl string) (responseBody []byte, err error) {
-	response, err := session.psiphonHttpsClient.Get(requestUrl)
+// DoConnectedRequest performs the connected API request. This request is
+// used for statistics. The server returns a last_connected token for
+// the client to store and send next time it connects. This token is
+// a timestamp (using the server clock, and should be rounded to the
+// nearest hour) which is used to determine when a connection represents
+// a unique user for a time period.
+func (serverContext *ServerContext) DoConnectedRequest() error {
+	const DATA_STORE_LAST_CONNECTED_KEY = "lastConnected"
+	lastConnected, err := GetKeyValue(DATA_STORE_LAST_CONNECTED_KEY)
+	if err != nil {
+		return ContextError(err)
+	}
+	if lastConnected == "" {
+		lastConnected = "None"
+	}
+	url := buildRequestUrl(
+		serverContext.baseRequestUrl,
+		"connected",
+		&ExtraParam{"session_id", serverContext.sessionId},
+		&ExtraParam{"last_connected", lastConnected})
+	responseBody, err := serverContext.doGetRequest(url)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	var response struct {
+		ConnectedTimestamp string `json:"connected_timestamp"`
+	}
+	err = json.Unmarshal(responseBody, &response)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	err = SetKeyValue(DATA_STORE_LAST_CONNECTED_KEY, response.ConnectedTimestamp)
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
+}
+
+// StatsRegexps gets the Regexps used for the statistics for this tunnel.
+func (serverContext *ServerContext) StatsRegexps() *transferstats.Regexps {
+	return serverContext.statsRegexps
+}
+
+// DoStatusRequest makes a /status request to the server, sending session stats.
+func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
+
+	url := makeStatusRequestUrl(serverContext.sessionId, serverContext.baseRequestUrl, true)
+
+	payload, payloadInfo, err := makeStatusRequestPayload(tunnel.serverEntry.IpAddress)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	err = serverContext.doPostRequest(url, "application/json", bytes.NewReader(payload))
+	if err != nil {
+
+		// Resend the transfer stats and tunnel stats later
+		// Note: potential duplicate reports if the server received and processed
+		// the request but the client failed to receive the response.
+		putBackStatusRequestPayload(payloadInfo)
+
+		return ContextError(err)
+	}
+	confirmStatusRequestPayload(payloadInfo)
+
+	return nil
+}
+
+func makeStatusRequestUrl(sessionId, baseRequestUrl string, isTunneled bool) string {
+
+	// Add a random amount of padding to help prevent stats updates from being
+	// a predictable size (which often happens when the connection is quiet).
+	padding := MakeSecureRandomPadding(0, PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES)
+
+	// Legacy clients set "connected" to "0" when disconnecting, and this value
+	// is used to calculate session duration estimates. This is now superseded
+	// by explicit tunnel stats duration reporting.
+	// The legacy method of reconstructing session durations is not compatible
+	// with this client's connected request retries and asynchronous final
+	// status request attempts. So we simply set this "connected" flag to reflect
+	// whether the request is sent tunneled or not.
+
+	connected := "1"
+	if !isTunneled {
+		connected = "0"
+	}
+
+	return buildRequestUrl(
+		baseRequestUrl,
+		"status",
+		&ExtraParam{"session_id", sessionId},
+		&ExtraParam{"connected", connected},
+		// TODO: base64 encoding of padding means the padding
+		// size is not exactly [0, PADDING_MAX_BYTES]
+		&ExtraParam{"padding", base64.StdEncoding.EncodeToString(padding)})
+}
+
+// statusRequestPayloadInfo is a temporary structure for data used to
+// either "clear" or "put back" status request payload data depending
+// on whether or not the request succeeded.
+type statusRequestPayloadInfo struct {
+	serverId      string
+	transferStats *transferstats.ServerStats
+	tunnelStats   [][]byte
+}
+
+func makeStatusRequestPayload(
+	serverId string) ([]byte, *statusRequestPayloadInfo, error) {
+
+	transferStats := transferstats.GetForServer(serverId)
+	tunnelStats, err := TakeOutUnreportedTunnelStats(
+		PSIPHON_API_TUNNEL_STATS_MAX_COUNT)
+	if err != nil {
+		NoticeAlert(
+			"TakeOutUnreportedTunnelStats failed: %s", ContextError(err))
+		tunnelStats = nil
+		// Proceed with transferStats only
+	}
+	payloadInfo := &statusRequestPayloadInfo{
+		serverId, transferStats, tunnelStats}
+
+	payload := make(map[string]interface{})
+
+	hostBytes, bytesTransferred := transferStats.GetStatsForReporting()
+	payload["host_bytes"] = hostBytes
+	payload["bytes_transferred"] = bytesTransferred
+
+	// We're not recording these fields, but the server requires them.
+	payload["page_views"] = make([]string, 0)
+	payload["https_requests"] = make([]string, 0)
+
+	// Tunnel stats records are already in JSON format
+	jsonTunnelStats := make([]json.RawMessage, len(tunnelStats))
+	for i, tunnelStatsRecord := range tunnelStats {
+		jsonTunnelStats[i] = json.RawMessage(tunnelStatsRecord)
+	}
+	payload["tunnel_stats"] = jsonTunnelStats
+
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+
+		// Send the transfer stats and tunnel stats later
+		putBackStatusRequestPayload(payloadInfo)
+
+		return nil, nil, ContextError(err)
+	}
+
+	return jsonPayload, payloadInfo, nil
+}
+
+func putBackStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
+	transferstats.PutBack(payloadInfo.serverId, payloadInfo.transferStats)
+	err := PutBackUnreportedTunnelStats(payloadInfo.tunnelStats)
+	if err != nil {
+		// These tunnel stats records won't be resent under after a
+		// datastore re-initialization.
+		NoticeAlert(
+			"PutBackUnreportedTunnelStats failed: %s", ContextError(err))
+	}
+}
+
+func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
+	err := ClearReportedTunnelStats(payloadInfo.tunnelStats)
+	if err != nil {
+		// These tunnel stats records may be resent.
+		NoticeAlert(
+			"ClearReportedTunnelStats failed: %s", ContextError(err))
+	}
+}
+
+// TryUntunneledStatusRequest makes direct connections to the specified
+// server (if supported) in an attempt to send useful bytes transferred
+// and tunnel duration stats after a tunnel has alreay failed.
+// The tunnel is assumed to be closed, but its config, protocol, and
+// context values must still be valid.
+// TryUntunneledStatusRequest emits notices detailing failed attempts.
+func TryUntunneledStatusRequest(tunnel *Tunnel, isShutdown bool) error {
+
+	for _, port := range tunnel.serverEntry.GetDirectWebRequestPorts() {
+		err := doUntunneledStatusRequest(tunnel, port, isShutdown)
+		if err == nil {
+			return nil
+		}
+		NoticeAlert("doUntunneledStatusRequest failed for %s:%s: %s",
+			tunnel.serverEntry.IpAddress, port, err)
+	}
+
+	return errors.New("all attempts failed")
+}
+
+// doUntunneledStatusRequest attempts an untunneled stratus request.
+func doUntunneledStatusRequest(
+	tunnel *Tunnel, port string, isShutdown bool) error {
+
+	url := makeStatusRequestUrl(
+		tunnel.serverContext.sessionId,
+		makeBaseRequestUrl(tunnel, port, tunnel.serverContext.sessionId),
+		false)
+
+	certificate, err := DecodeCertificate(tunnel.serverEntry.WebServerCertificate)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	timeout := PSIPHON_API_SERVER_TIMEOUT
+	if isShutdown {
+		timeout = PSIPHON_API_SHUTDOWN_SERVER_TIMEOUT
+	}
+
+	httpClient, requestUrl, err := MakeUntunneledHttpsClient(
+		tunnel.untunneledDialConfig,
+		certificate,
+		url,
+		timeout)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	payload, payloadInfo, err := makeStatusRequestPayload(tunnel.serverEntry.IpAddress)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	bodyType := "application/json"
+	body := bytes.NewReader(payload)
+
+	response, err := httpClient.Post(requestUrl, bodyType, body)
 	if err == nil && response.StatusCode != http.StatusOK {
 		response.Body.Close()
-		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
+		err = fmt.Errorf("HTTP POST request failed with response code: %d", response.StatusCode)
+	}
+	if err != nil {
+
+		// Resend the transfer stats and tunnel stats later
+		// Note: potential duplicate reports if the server received and processed
+		// the request but the client failed to receive the response.
+		putBackStatusRequestPayload(payloadInfo)
+
+		// Trim this error since it may include long URLs
+		return ContextError(TrimError(err))
+	}
+	confirmStatusRequestPayload(payloadInfo)
+	response.Body.Close()
+
+	return nil
+}
+
+// RecordTunnelStats records a tunnel duration and bytes
+// sent and received for subsequent reporting and quality
+// analysis.
+//
+// Tunnel durations are precisely measured client-side
+// and reported in status requests. As the duration is
+// not determined until the tunnel is closed, tunnel
+// stats records are stored in the persistent datastore
+// and reported via subsequent status requests sent to any
+// Psiphon server.
+//
+// Since the status request that reports a tunnel stats
+// record is not necessarily handled by the same server, the
+// tunnel stats records include the original server ID.
+//
+// Other fields that may change between tunnel stats recording
+// and reporting include client geo data, propagation channel,
+// sponsor ID, client version. These are not stored in the
+// datastore (client region, in particular, since that would
+// create an on-disk record of user location).
+// TODO: the server could encrypt, with a nonce and key unknown to
+// the client, a blob containing this data; return it in the
+// handshake response; and the client could store and later report
+// this blob with its tunnel stats records.
+//
+// Multiple "status" requests may be in flight at once (due
+// to multi-tunnel, asynchronous final status retry, and
+// aggressive status requests for pre-registered tunnels),
+// To avoid duplicate reporting, tunnel stats records are
+// "taken-out" by a status request and then "put back" in
+// case the request fails.
+//
+// Note: since tunnel stats records have a globally unique
+// identifier (sessionId + tunnelNumber), we could tolerate
+// duplicate reporting and filter our duplicates on the
+// server-side. Permitting duplicate reporting could increase
+// the velocity of reporting (for example, both the asynchronous
+// untunneled final status requests and the post-connected
+// immediate startus requests could try to report the same tunnel
+// stats).
+// Duplicate reporting may also occur when a server receives and
+// processes a status request but the client fails to receive
+// the response.
+func RecordTunnelStats(
+	sessionId string,
+	tunnelNumber int64,
+	tunnelServerIpAddress string,
+	serverHandshakeTimestamp, duration string,
+	totalBytesSent, totalBytesReceived int64) error {
+
+	tunnelStats := struct {
+		SessionId                string `json:"session_id"`
+		TunnelNumber             int64  `json:"tunnel_number"`
+		TunnelServerIpAddress    string `json:"tunnel_server_ip_address"`
+		ServerHandshakeTimestamp string `json:"server_handshake_timestamp"`
+		Duration                 string `json:"duration"`
+		TotalBytesSent           int64  `json:"total_bytes_sent"`
+		TotalBytesReceived       int64  `json:"total_bytes_received"`
+	}{
+		sessionId,
+		tunnelNumber,
+		tunnelServerIpAddress,
+		serverHandshakeTimestamp,
+		duration,
+		totalBytesSent,
+		totalBytesReceived,
+	}
+
+	tunnelStatsJson, err := json.Marshal(tunnelStats)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	return StoreTunnelStats(tunnelStatsJson)
+}
+
+// doGetRequest makes a tunneled HTTPS request and returns the response body.
+func (serverContext *ServerContext) doGetRequest(
+	requestUrl string) (responseBody []byte, err error) {
+
+	response, err := serverContext.psiphonHttpsClient.Get(requestUrl)
+	if err == nil && response.StatusCode != http.StatusOK {
+		response.Body.Close()
+		err = fmt.Errorf("HTTP GET request failed with response code: %d", response.StatusCode)
 	}
 	if err != nil {
 		// Trim this error since it may include long URLs
@@ -275,41 +542,42 @@ func (session *Session) doGetRequest(requestUrl string) (responseBody []byte, er
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	if response.StatusCode != http.StatusOK {
-		return nil, ContextError(fmt.Errorf("HTTP GET request failed with response code: %d", response.StatusCode))
-	}
 	return body, nil
 }
 
 // doPostRequest makes a tunneled HTTPS POST request.
-func (session *Session) doPostRequest(requestUrl string, bodyType string, body io.Reader) (err error) {
-	response, err := session.psiphonHttpsClient.Post(requestUrl, bodyType, body)
+func (serverContext *ServerContext) doPostRequest(
+	requestUrl string, bodyType string, body io.Reader) (err error) {
+
+	response, err := serverContext.psiphonHttpsClient.Post(requestUrl, bodyType, body)
 	if err == nil && response.StatusCode != http.StatusOK {
 		response.Body.Close()
-		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
+		err = fmt.Errorf("HTTP POST request failed with response code: %d", response.StatusCode)
 	}
 	if err != nil {
 		// Trim this error since it may include long URLs
 		return ContextError(TrimError(err))
 	}
 	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return ContextError(fmt.Errorf("HTTP POST request failed with response code: %d", response.StatusCode))
-	}
-	return
+	return nil
 }
 
 // makeBaseRequestUrl makes a URL containing all the common parameters
 // that are included with Psiphon API requests. These common parameters
 // are used for statistics.
-func makeBaseRequestUrl(config *Config, tunnel *Tunnel, sessionId string) string {
+func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
 	var requestUrl bytes.Buffer
+
+	if port == "" {
+		port = tunnel.serverEntry.WebServerPort
+	}
+
 	// Note: don't prefix with HTTPS scheme, see comment in doGetRequest.
 	// e.g., don't do this: requestUrl.WriteString("https://")
 	requestUrl.WriteString("http://")
 	requestUrl.WriteString(tunnel.serverEntry.IpAddress)
 	requestUrl.WriteString(":")
-	requestUrl.WriteString(tunnel.serverEntry.WebServerPort)
+	requestUrl.WriteString(port)
 	requestUrl.WriteString("/")
 	// Placeholder for the path component of a request
 	requestUrl.WriteString("%s")
@@ -318,18 +586,18 @@ func makeBaseRequestUrl(config *Config, tunnel *Tunnel, sessionId string) string
 	requestUrl.WriteString("&server_secret=")
 	requestUrl.WriteString(tunnel.serverEntry.WebServerSecret)
 	requestUrl.WriteString("&propagation_channel_id=")
-	requestUrl.WriteString(config.PropagationChannelId)
+	requestUrl.WriteString(tunnel.config.PropagationChannelId)
 	requestUrl.WriteString("&sponsor_id=")
-	requestUrl.WriteString(config.SponsorId)
+	requestUrl.WriteString(tunnel.config.SponsorId)
 	requestUrl.WriteString("&client_version=")
-	requestUrl.WriteString(config.ClientVersion)
+	requestUrl.WriteString(tunnel.config.ClientVersion)
 	// TODO: client_tunnel_core_version
 	requestUrl.WriteString("&relay_protocol=")
 	requestUrl.WriteString(tunnel.protocol)
 	requestUrl.WriteString("&client_platform=")
-	requestUrl.WriteString(config.ClientPlatform)
+	requestUrl.WriteString(tunnel.config.ClientPlatform)
 	requestUrl.WriteString("&tunnel_whole_device=")
-	requestUrl.WriteString(strconv.Itoa(config.TunnelWholeDevice))
+	requestUrl.WriteString(strconv.Itoa(tunnel.config.TunnelWholeDevice))
 	return requestUrl.String()
 }
 
@@ -337,9 +605,9 @@ type ExtraParam struct{ name, value string }
 
 // buildRequestUrl makes a URL for an API request. The URL includes the
 // base request URL and any extra parameters for the specific request.
-func (session *Session) buildRequestUrl(path string, extraParams ...*ExtraParam) string {
+func buildRequestUrl(baseRequestUrl, path string, extraParams ...*ExtraParam) string {
 	var requestUrl bytes.Buffer
-	requestUrl.WriteString(fmt.Sprintf(session.baseRequestUrl, path))
+	requestUrl.WriteString(fmt.Sprintf(baseRequestUrl, path))
 	for _, extraParam := range extraParams {
 		requestUrl.WriteString("&")
 		requestUrl.WriteString(extraParam.name)
