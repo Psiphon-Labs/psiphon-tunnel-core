@@ -271,19 +271,28 @@ func insertRankedServerEntry(tx *bolt.Tx, serverEntryId string, position int) er
 	// enough to meet the shuffleHeadLength = config.TunnelPoolSize criteria, for
 	// any reasonable configuration of config.TunnelPoolSize.
 
-	if position >= len(rankedServerEntries) {
-		rankedServerEntries = append(rankedServerEntries, serverEntryId)
-	} else {
-		end := len(rankedServerEntries)
-		if end+1 > rankedServerEntryCount {
-			end = rankedServerEntryCount
+	// Using: https://github.com/golang/go/wiki/SliceTricks
+
+	// When serverEntryId is already ranked, remove it first to avoid duplicates
+
+	for i, rankedServerEntryId := range rankedServerEntries {
+		if rankedServerEntryId == serverEntryId {
+			rankedServerEntries = append(
+				rankedServerEntries[:i], rankedServerEntries[i+1:]...)
+			break
 		}
-		// insert: https://github.com/golang/go/wiki/SliceTricks
-		rankedServerEntries = append(
-			rankedServerEntries[:position],
-			append([]string{serverEntryId},
-				rankedServerEntries[position:end]...)...)
 	}
+
+	// SliceTricks insert, with length cap enforced
+
+	if len(rankedServerEntries) < rankedServerEntryCount {
+		rankedServerEntries = append(rankedServerEntries, "")
+	}
+	if position >= len(rankedServerEntries) {
+		position = len(rankedServerEntries) - 1
+	}
+	copy(rankedServerEntries[position+1:], rankedServerEntries[position:])
+	rankedServerEntries[position] = serverEntryId
 
 	err = setRankedServerEntries(tx, rankedServerEntries)
 	if err != nil {
