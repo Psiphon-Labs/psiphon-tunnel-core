@@ -3,6 +3,11 @@ psiphon_config
 psiphon.config
 controller_test.config
 psiphon.db*
+psiphon.boltdb
+
+# Exclude compiled tunnel core binaries
+ConsoleClient/ConsoleClient
+ConsoleClient/bin
 
 # Compiled Object files, Static and Dynamic libs (Shared Objects)
 *.o
