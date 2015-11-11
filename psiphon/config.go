@@ -29,7 +29,8 @@ import (
 // TODO: allow all params to be configured
 
 const (
-	DATA_STORE_FILENAME                            = "psiphon.db"
+	LEGACY_DATA_STORE_FILENAME                     = "psiphon.db"
+	DATA_STORE_FILENAME                            = "psiphon.boltdb"
 	CONNECTION_WORKER_POOL_SIZE                    = 10
 	TUNNEL_POOL_SIZE                               = 1
 	TUNNEL_CONNECT_TIMEOUT                         = 20 * time.Second
@@ -123,6 +124,9 @@ type Config struct {
 	// automatic updates.
 	// This value is supplied by and depends on the Psiphon Network, and is
 	// typically embedded in the client binary.
+	// Note that sending a ClientPlatform string which includes "windows"
+	// (case insensitive) and a ClientVersion of <= 44 will cause an
+	// error in processing the response to DoConnectedRequest calls.
 	ClientVersion string
 
 	// ClientPlatform is the client platform ("Windows", "Android", etc.) that
