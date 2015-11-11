@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,6 +54,7 @@ const (
 	splitTunnelRouteDataBucket  = "splitTunnelRouteData"
 	urlETagsBucket              = "urlETags"
 	keyValueBucket              = "keyValues"
+	tunnelStatsBucket           = "tunnelStats"
 	rankedServerEntryCount      = 100
 )
 
@@ -68,11 +70,6 @@ var singleton dataStore
 // have been replaced by checkInitDataStore() to assert that Init was called.
 func InitDataStore(config *Config) (err error) {
 	singleton.init.Do(func() {
-		var migratableServerEntries []*ServerEntry
-		migratableServerEntries, err = prepareMigrationEntries(config)
-		if err != nil {
-			return
-		}
 
 		filename := filepath.Join(config.DataStoreDirectory, DATA_STORE_FILENAME)
 		var db *bolt.DB
@@ -91,6 +88,7 @@ func InitDataStore(config *Config) (err error) {
 				splitTunnelRouteDataBucket,
 				urlETagsBucket,
 				keyValueBucket,
+				tunnelStatsBucket,
 			}
 			for _, bucket := range requiredBuckets {
 				_, err := tx.CreateBucketIfNotExists([]byte(bucket))
@@ -109,9 +107,12 @@ func InitDataStore(config *Config) (err error) {
 
 		// The migrateServerEntries function requires the data store is
 		// initialized prior to execution so that migrated entries can be stored
+		migratableServerEntries := prepareMigrationEntries(config)
 		if len(migratableServerEntries) > 0 {
 			migrateEntries(migratableServerEntries, filepath.Join(config.DataStoreDirectory, LEGACY_DATA_STORE_FILENAME))
 		}
+
+		resetAllTunnelStatsToUnreported()
 	})
 
 	return err
@@ -277,19 +278,28 @@ func insertRankedServerEntry(tx *bolt.Tx, serverEntryId string, position int) er
 	// enough to meet the shuffleHeadLength = config.TunnelPoolSize criteria, for
 	// any reasonable configuration of config.TunnelPoolSize.
 
-	if position >= len(rankedServerEntries) {
-		rankedServerEntries = append(rankedServerEntries, serverEntryId)
-	} else {
-		end := len(rankedServerEntries)
-		if end+1 > rankedServerEntryCount {
-			end = rankedServerEntryCount
+	// Using: https://github.com/golang/go/wiki/SliceTricks
+
+	// When serverEntryId is already ranked, remove it first to avoid duplicates
+
+	for i, rankedServerEntryId := range rankedServerEntries {
+		if rankedServerEntryId == serverEntryId {
+			rankedServerEntries = append(
+				rankedServerEntries[:i], rankedServerEntries[i+1:]...)
+			break
 		}
-		// insert: https://github.com/golang/go/wiki/SliceTricks
-		rankedServerEntries = append(
-			rankedServerEntries[:position],
-			append([]string{serverEntryId},
-				rankedServerEntries[position:end]...)...)
 	}
+
+	// SliceTricks insert, with length cap enforced
+
+	if len(rankedServerEntries) < rankedServerEntryCount {
+		rankedServerEntries = append(rankedServerEntries, "")
+	}
+	if position >= len(rankedServerEntries) {
+		position = len(rankedServerEntries) - 1
+	}
+	copy(rankedServerEntries[position+1:], rankedServerEntries[position:])
+	rankedServerEntries[position] = serverEntryId
 
 	err = setRankedServerEntries(tx, rankedServerEntries)
 	if err != nil {
@@ -395,7 +405,7 @@ func (iterator *ServerEntryIterator) Reset() error {
 	//     transaction is open.
 	//     (https://github.com/boltdb/bolt)
 	//
-	// So the uderlying serverEntriesBucket could change after the serverEntryIds
+	// So the underlying serverEntriesBucket could change after the serverEntryIds
 	// list is built.
 
 	var serverEntryIds []string
@@ -428,7 +438,7 @@ func (iterator *ServerEntryIterator) Reset() error {
 	}
 
 	for i := len(serverEntryIds) - 1; i > iterator.shuffleHeadLength-1; i-- {
-		j := rand.Intn(i)
+		j := rand.Intn(i+1-iterator.shuffleHeadLength) + iterator.shuffleHeadLength
 		serverEntryIds[i], serverEntryIds[j] = serverEntryIds[j], serverEntryIds[i]
 	}
 
@@ -727,4 +737,172 @@ func GetKeyValue(key string) (value string, err error) {
 		return "", ContextError(err)
 	}
 	return value, nil
+}
+
+// Tunnel stats records in the tunnelStatsStateUnreported
+// state are available for take out.
+// Records in the tunnelStatsStateReporting have been
+// taken out and are pending either deleting (for a
+// successful request) or change to StateUnreported (for
+// a failed request).
+// All tunnel stats records are reverted to StateUnreported
+// when the datastore is initialized at start up.
+
+var tunnelStatsStateUnreported = []byte("0")
+var tunnelStatsStateReporting = []byte("1")
+
+// StoreTunnelStats adds a new tunnel stats record, which is
+// set to StateUnreported and is an immediate candidate for
+// reporting.
+// tunnelStats is a JSON byte array containing fields as
+// required by the Psiphon server API (see RecordTunnelStats).
+// It's assumed that the JSON value contains enough unique
+// information for the value to function as a key in the
+// key/value datastore. This assumption is currently satisfied
+// by the fields sessionId + tunnelNumber.
+func StoreTunnelStats(tunnelStats []byte) error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelStatsBucket))
+		err := bucket.Put(tunnelStats, tunnelStatsStateUnreported)
+		return err
+	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
+}
+
+// CountUnreportedTunnelStats returns the number of tunnel
+// stats records in StateUnreported.
+func CountUnreportedTunnelStats() int {
+	checkInitDataStore()
+
+	unreported := 0
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelStatsBucket))
+		cursor := bucket.Cursor()
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			if 0 == bytes.Compare(value, tunnelStatsStateUnreported) {
+				unreported++
+				break
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		NoticeAlert("CountUnreportedTunnelStats failed: %s", err)
+		return 0
+	}
+
+	return unreported
+}
+
+// TakeOutUnreportedTunnelStats returns up to maxCount tunnel
+// stats records that are in StateUnreported. The records are set
+// to StateReporting. If the records are successfully reported,
+// clear them with ClearReportedTunnelStats. If the records are
+// not successfully reported, restore them with
+// PutBackUnreportedTunnelStats.
+func TakeOutUnreportedTunnelStats(maxCount int) ([][]byte, error) {
+	checkInitDataStore()
+
+	tunnelStats := make([][]byte, 0)
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelStatsBucket))
+		cursor := bucket.Cursor()
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			if 0 == bytes.Compare(value, tunnelStatsStateUnreported) {
+				err := bucket.Put(key, tunnelStatsStateReporting)
+				if err != nil {
+					return err
+				}
+				tunnelStats = append(tunnelStats, key)
+				if len(tunnelStats) >= maxCount {
+					break
+				}
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	return tunnelStats, nil
+}
+
+// PutBackUnreportedTunnelStats restores a list of tunnel
+// stats records to StateUnreported.
+func PutBackUnreportedTunnelStats(tunnelStats [][]byte) error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelStatsBucket))
+		for _, key := range tunnelStats {
+			err := bucket.Put(key, tunnelStatsStateUnreported)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
+}
+
+// ClearReportedTunnelStats deletes a list of tunnel
+// stats records that were succesdfully reported.
+func ClearReportedTunnelStats(tunnelStats [][]byte) error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelStatsBucket))
+		for _, key := range tunnelStats {
+			err := bucket.Delete(key)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
+}
+
+// resetAllTunnelStatsToUnreported sets all tunnel
+// stats records to StateUnreported. This reset is called
+// when the datastore is initialized at start up, as we do
+// not know if tunnel records in StateReporting were reported
+// or not.
+func resetAllTunnelStatsToUnreported() error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelStatsBucket))
+		cursor := bucket.Cursor()
+		for key, _ := cursor.First(); key != nil; key, _ = cursor.Next() {
+			err := bucket.Put(key, tunnelStatsStateUnreported)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
 }

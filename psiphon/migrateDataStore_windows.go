@@ -33,36 +33,40 @@ import (
 
 var legacyDb *sql.DB
 
-func prepareMigrationEntries(config *Config) ([]*ServerEntry, error) {
+func prepareMigrationEntries(config *Config) []*ServerEntry {
+	var migratableServerEntries []*ServerEntry
+
 	// If DATA_STORE_FILENAME does not exist on disk
 	if _, err := os.Stat(filepath.Join(config.DataStoreDirectory, DATA_STORE_FILENAME)); os.IsNotExist(err) {
 		// If LEGACY_DATA_STORE_FILENAME exists on disk
 		if _, err := os.Stat(filepath.Join(config.DataStoreDirectory, LEGACY_DATA_STORE_FILENAME)); err == nil {
-			var migratableServerEntries []*ServerEntry
 
 			legacyDb, err = sql.Open("sqlite3", fmt.Sprintf("file:%s?cache=private&mode=rwc", filepath.Join(config.DataStoreDirectory, LEGACY_DATA_STORE_FILENAME)))
 			defer legacyDb.Close()
 
 			if err != nil {
-				return migratableServerEntries, err
+				NoticeAlert("prepareMigrationEntries: sql.Open failed: %s", err)
+				return nil
 			}
 
 			initialization := "pragma journal_mode=WAL;\n"
 			_, err = legacyDb.Exec(initialization)
 			if err != nil {
-				return migratableServerEntries, err
+				NoticeAlert("prepareMigrationEntries: sql.DB.Exec failed: %s", err)
+				return nil
 			}
 
 			iterator, err := newlegacyServerEntryIterator(config)
 			if err != nil {
-				return migratableServerEntries, err
+				NoticeAlert("prepareMigrationEntries: newlegacyServerEntryIterator failed: %s", err)
+				return nil
 			}
 			defer iterator.Close()
 
 			for {
 				serverEntry, err := iterator.Next()
 				if err != nil {
-					err = fmt.Errorf("failed to iterate legacy server entries: %s", err)
+					NoticeAlert("prepareMigrationEntries: legacyServerEntryIterator.Next failed: %s", err)
 					break
 				}
 				if serverEntry == nil {
@@ -75,7 +79,7 @@ func prepareMigrationEntries(config *Config) ([]*ServerEntry, error) {
 		}
 	}
 
-	return migratableServerEntries, nil
+	return migratableServerEntries
 }
 
 // migrateEntries calls the BoltDB data store method to shuffle
@@ -86,14 +90,14 @@ func migrateEntries(serverEntries []*ServerEntry, legacyDataStoreFilename string
 
 	err := StoreServerEntries(serverEntries, false)
 	if err != nil {
-		NoticeAlert("failed to store migrated server entries: %s", err)
+		NoticeAlert("migrateEntries: StoreServerEntries failed: %s", err)
 	} else {
 		// Retain server affinity from old datastore by taking the first
 		// array element (previous top ranked server) and promoting it
 		// to the top rank before the server selection process begins
 		err = PromoteServerEntry(serverEntries[0].IpAddress)
 		if err != nil {
-			NoticeAlert("failed to promote server entry: %s", err)
+			NoticeAlert("migrateEntries: PromoteServerEntry failed: %s", err)
 		}
 
 		NoticeAlert("%d server entries successfully migrated to new data store", len(serverEntries))
@@ -101,7 +105,7 @@ func migrateEntries(serverEntries []*ServerEntry, legacyDataStoreFilename string
 
 	err = os.Remove(legacyDataStoreFilename)
 	if err != nil {
-		NoticeAlert("failed to delete legacy data store file '%s': %s", legacyDataStoreFilename, err)
+		NoticeAlert("migrateEntries: failed to delete legacy data store file '%s': %s", legacyDataStoreFilename, err)
 	}
 
 	return

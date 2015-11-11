@@ -20,7 +20,6 @@
 package transferstats
 
 import (
-	"encoding/json"
 	"sync"
 )
 
@@ -44,15 +43,15 @@ func newHostStats() *hostStats {
 	return &hostStats{}
 }
 
-// serverStats holds per-server stats.
-type serverStats struct {
+// ServerStats holds per-server stats.
+type ServerStats struct {
 	hostnameToStats    map[string]*hostStats
 	totalBytesSent     int64
 	totalBytesReceived int64
 }
 
-func newServerStats() *serverStats {
-	return &serverStats{
+func newServerStats() *ServerStats {
+	return &ServerStats{
 		hostnameToStats: make(map[string]*hostStats),
 	}
 }
@@ -61,8 +60,8 @@ func newServerStats() *serverStats {
 // as well as the mutex to access them.
 var allStats = struct {
 	statsMutex      sync.RWMutex
-	serverIDtoStats map[string]*serverStats
-}{serverIDtoStats: make(map[string]*serverStats)}
+	serverIDtoStats map[string]*ServerStats
+}{serverIDtoStats: make(map[string]*ServerStats)}
 
 // statsUpdate contains new stats counts to be aggregated.
 type statsUpdate struct {
@@ -105,27 +104,18 @@ func recordStat(stat *statsUpdate) {
 	//fmt.Println("server:", stat.serverID, "host:", stat.hostname, "sent:", storedHostStats.numBytesSent, "received:", storedHostStats.numBytesReceived)
 }
 
-// Implement the json.Marshaler interface
-func (ss serverStats) MarshalJSON() ([]byte, error) {
-	out := make(map[string]interface{})
+func (serverStats ServerStats) GetStatsForReporting() (map[string]int64, int64) {
 
 	hostBytes := make(map[string]int64)
 	bytesTransferred := int64(0)
 
-	for hostname, hostStats := range ss.hostnameToStats {
+	for hostname, hostStats := range serverStats.hostnameToStats {
 		totalBytes := hostStats.numBytesReceived + hostStats.numBytesSent
 		bytesTransferred += totalBytes
 		hostBytes[hostname] = totalBytes
 	}
 
-	out["bytes_transferred"] = bytesTransferred
-	out["host_bytes"] = hostBytes
-
-	// We're not using these fields, but the server requires them
-	out["page_views"] = make([]string, 0)
-	out["https_requests"] = make([]string, 0)
-
-	return json.Marshal(out)
+	return hostBytes, bytesTransferred
 }
 
 // GetBytesTransferredForServer returns total bytes sent and received since
@@ -149,22 +139,22 @@ func GetBytesTransferredForServer(serverID string) (sent, received int64) {
 	return
 }
 
-// GetForServer returns the json-able stats package for the given server.
-func GetForServer(serverID string) (payload *serverStats) {
+// GetForServer returns the server stats for the given server.
+func GetForServer(serverID string) (serverStats *ServerStats) {
 	allStats.statsMutex.Lock()
 	defer allStats.statsMutex.Unlock()
 
-	payload = allStats.serverIDtoStats[serverID]
-	if payload == nil {
-		payload = newServerStats()
+	serverStats = allStats.serverIDtoStats[serverID]
+	if serverStats == nil {
+		serverStats = newServerStats()
 	}
 	delete(allStats.serverIDtoStats, serverID)
 	return
 }
 
 // PutBack re-adds a set of server stats to the collection.
-func PutBack(serverID string, ss *serverStats) {
-	for hostname, hoststats := range ss.hostnameToStats {
+func PutBack(serverID string, serverStats *ServerStats) {
+	for hostname, hoststats := range serverStats.hostnameToStats {
 		recordStat(
 			&statsUpdate{
 				serverID:         serverID,

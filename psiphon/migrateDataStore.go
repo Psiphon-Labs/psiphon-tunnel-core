@@ -20,12 +20,10 @@
 package psiphon
 
 // Stub function to return an empty list for non-Windows builds
-func prepareMigrationEntries(config *Config) ([]*ServerEntry, error) {
-	var migratableServerEntries []*ServerEntry
-	return migratableServerEntries, nil
+func prepareMigrationEntries(config *Config) []*ServerEntry {
+	return nil
 }
 
 // Stub function to return immediately for non-Windows builds
 func migrateEntries(serverEntries []*ServerEntry, legacyDataStoreFilename string) {
-	return
 }
