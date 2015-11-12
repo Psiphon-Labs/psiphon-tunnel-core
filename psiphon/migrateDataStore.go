@@ -1,3 +1,5 @@
+// +build !windows
+
 /*
  * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
