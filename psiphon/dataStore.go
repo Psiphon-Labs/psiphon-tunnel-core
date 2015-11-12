@@ -70,7 +70,11 @@ var singleton dataStore
 // have been replaced by checkInitDataStore() to assert that Init was called.
 func InitDataStore(config *Config) (err error) {
 	singleton.init.Do(func() {
-
+		// Need to gather the list of migratable server entries before
+		// initializing the boltdb store (as prepareMigrationEntries
+		// checks for the existence of the bolt db file)
+		migratableServerEntries := prepareMigrationEntries(config)
+		
 		filename := filepath.Join(config.DataStoreDirectory, DATA_STORE_FILENAME)
 		var db *bolt.DB
 		db, err = bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
@@ -107,7 +111,7 @@ func InitDataStore(config *Config) (err error) {
 
 		// The migrateServerEntries function requires the data store is
 		// initialized prior to execution so that migrated entries can be stored
-		migratableServerEntries := prepareMigrationEntries(config)
+	
 		if len(migratableServerEntries) > 0 {
 			migrateEntries(migratableServerEntries, filepath.Join(config.DataStoreDirectory, LEGACY_DATA_STORE_FILENAME))
 		}
