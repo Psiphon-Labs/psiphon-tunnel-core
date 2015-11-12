@@ -1,5 +1,3 @@
-// TODO: Windows only build flag + runtime.GOOS check in datastore.go?
-
 /*
  * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
