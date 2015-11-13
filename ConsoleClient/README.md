@@ -17,9 +17,10 @@ Note that you may need to use `sudo docker` below, depending on your OS.
     --rm \
     -v $(pwd):/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core \
     psiclient \
-    /bin/bash -c 'cd /go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient && ./make.bash' \
+    /bin/bash -c 'cd /go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient && ./make.bash all' \
   ; cd -
   ```
+This command can also be modified by replacing `all` with `windows`, `linux`, or `osx` as the first parameter to `make.bash` (as in `...&& ./make.bash windows`) to only build binaries for the operating system of choice
 
 When that command completes, the compiled binaries will be located in the `bin` directory (`./bin`, and everything under it will likely be owned by root, so be sure to `chown` to an appropriate user) under the current directory. The structure will be:
   ```
