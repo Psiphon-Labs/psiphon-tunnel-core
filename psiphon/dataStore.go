@@ -74,7 +74,7 @@ func InitDataStore(config *Config) (err error) {
 		// initializing the boltdb store (as prepareMigrationEntries
 		// checks for the existence of the bolt db file)
 		migratableServerEntries := prepareMigrationEntries(config)
-		
+
 		filename := filepath.Join(config.DataStoreDirectory, DATA_STORE_FILENAME)
 		var db *bolt.DB
 		db, err = bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
@@ -111,7 +111,7 @@ func InitDataStore(config *Config) (err error) {
 
 		// The migrateServerEntries function requires the data store is
 		// initialized prior to execution so that migrated entries can be stored
-	
+
 		if len(migratableServerEntries) > 0 {
 			migrateEntries(migratableServerEntries, filepath.Join(config.DataStoreDirectory, LEGACY_DATA_STORE_FILENAME))
 		}
@@ -159,9 +159,19 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 	err = singleton.db.Update(func(tx *bolt.Tx) error {
 
 		serverEntries := tx.Bucket([]byte(serverEntriesBucket))
-		serverEntryExists = (serverEntries.Get([]byte(serverEntry.IpAddress)) != nil)
 
-		if serverEntryExists && !replaceIfExists {
+		// Check not only that the entry exists, but is valid. This
+		// will replace in the rare case where the data is corrupt.
+		existingServerEntryValid := false
+		existingData := serverEntries.Get([]byte(serverEntry.IpAddress))
+		if existingData != nil {
+			existingServerEntry := new(ServerEntry)
+			if json.Unmarshal(existingData, existingServerEntry) == nil {
+				existingServerEntryValid = true
+			}
+		}
+
+		if existingServerEntryValid && !replaceIfExists {
 			// Disabling this notice, for now, as it generates too much noise
 			// in diagnostics with clients that always submit embedded servers
 			// to the core on each run.
@@ -498,16 +508,22 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 		}
 
 		if data == nil {
-			return nil, ContextError(
-				fmt.Errorf("Unexpected missing server entry: %s", serverEntryId))
+			// In case of data corruption or a bug causing this condition,
+			// do not stop iterating.
+			NoticeAlert("ServerEntryIterator.Next: unexpected missing server entry: %s", serverEntryId)
+			continue
 		}
 
 		serverEntry = new(ServerEntry)
 		err = json.Unmarshal(data, serverEntry)
 		if err != nil {
-			return nil, ContextError(err)
+			// In case of data corruption or a bug causing this condition,
+			// do not stop iterating.
+			NoticeAlert("ServerEntryIterator.Next: %s", ContextError(err))
+			continue
 		}
 
+		// Check filter requirements
 		if (iterator.region == "" || serverEntry.Region == iterator.region) &&
 			(iterator.protocol == "" || serverEntrySupportsProtocol(serverEntry, iterator.protocol)) {
 
@@ -540,7 +556,10 @@ func scanServerEntries(scanner func(*ServerEntry)) error {
 			serverEntry := new(ServerEntry)
 			err := json.Unmarshal(value, serverEntry)
 			if err != nil {
-				return err
+				// In case of data corruption or a bug causing this condition,
+				// do not stop iterating.
+				NoticeAlert("scanServerEntries: %s", ContextError(err))
+				continue
 			}
 			scanner(serverEntry)
 		}
