@@ -116,8 +116,6 @@ func migrateEntries(serverEntries []*ServerEntry, legacyDataStoreFilename string
 // legacyServerEntryIterator is used to iterate over
 // stored server entries in rank order.
 type legacyServerEntryIterator struct {
-	region            string
-	protocol          string
 	shuffleHeadLength int
 	transaction       *sql.Tx
 	cursor            *sql.Rows
@@ -127,8 +125,6 @@ type legacyServerEntryIterator struct {
 func newlegacyServerEntryIterator(config *Config) (iterator *legacyServerEntryIterator, err error) {
 
 	iterator = &legacyServerEntryIterator{
-		region:            config.EgressRegion,
-		protocol:          config.TunnelProtocol,
 		shuffleHeadLength: config.TunnelPoolSize,
 	}
 	err = iterator.Reset()
@@ -187,9 +183,6 @@ func (iterator *legacyServerEntryIterator) Next() (serverEntry *ServerEntry, err
 func (iterator *legacyServerEntryIterator) Reset() error {
 	iterator.Close()
 
-	count := countLegacyServerEntries(iterator.region, iterator.protocol)
-	NoticeCandidateServers(iterator.region, iterator.protocol, count)
-
 	transaction, err := legacyDb.Begin()
 	if err != nil {
 		return ContextError(err)
@@ -201,8 +194,7 @@ func (iterator *legacyServerEntryIterator) Reset() error {
 	// (priority) order, to favor previously successful servers; then the
 	// remaining long tail is shuffled to raise up less recent candidates.
 
-	whereClause, whereParams := makeServerEntryWhereClause(
-		iterator.region, iterator.protocol, nil)
+	whereClause, whereParams := makeServerEntryWhereClause(nil)
 	headLength := iterator.shuffleHeadLength
 	queryFormat := `
 		select data from serverEntry %s
@@ -228,24 +220,9 @@ func (iterator *legacyServerEntryIterator) Reset() error {
 	return nil
 }
 
-func makeServerEntryWhereClause(
-	region, protocol string, excludeIds []string) (whereClause string, whereParams []interface{}) {
+func makeServerEntryWhereClause(excludeIds []string) (whereClause string, whereParams []interface{}) {
 	whereClause = ""
 	whereParams = make([]interface{}, 0)
-	if region != "" {
-		whereClause += " where region = ?"
-		whereParams = append(whereParams, region)
-	}
-	if protocol != "" {
-		if len(whereClause) > 0 {
-			whereClause += " and"
-		} else {
-			whereClause += " where"
-		}
-		whereClause +=
-			" exists (select 1 from serverEntryProtocol where protocol = ? and serverEntryId = serverEntry.id)"
-		whereParams = append(whereParams, protocol)
-	}
 	if len(excludeIds) > 0 {
 		if len(whereClause) > 0 {
 			whereClause += " and"
@@ -263,28 +240,4 @@ func makeServerEntryWhereClause(
 		whereClause += ")"
 	}
 	return whereClause, whereParams
-}
-
-// countLegacyServerEntries returns a count of stored servers for the specified region and protocol.
-func countLegacyServerEntries(region, protocol string) int {
-	var count int
-	whereClause, whereParams := makeServerEntryWhereClause(region, protocol, nil)
-	query := "select count(*) from serverEntry" + whereClause
-	err := legacyDb.QueryRow(query, whereParams...).Scan(&count)
-
-	if err != nil {
-		NoticeAlert("countLegacyServerEntries failed: %s", err)
-		return 0
-	}
-
-	if region == "" {
-		region = "(any)"
-	}
-	if protocol == "" {
-		protocol = "(any)"
-	}
-	NoticeInfo("servers for region %s and protocol %s: %d",
-		region, protocol, count)
-
-	return count
 }
