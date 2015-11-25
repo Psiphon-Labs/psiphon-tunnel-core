@@ -303,14 +303,14 @@ func makeStatusRequestUrl(sessionId, baseRequestUrl string, isTunneled bool) str
 // on whether or not the request succeeded.
 type statusRequestPayloadInfo struct {
 	serverId      string
-	transferStats *transferstats.ServerStats
+	transferStats *transferstats.AccumulatedStats
 	tunnelStats   [][]byte
 }
 
 func makeStatusRequestPayload(
 	serverId string) ([]byte, *statusRequestPayloadInfo, error) {
 
-	transferStats := transferstats.GetForServer(serverId)
+	transferStats := transferstats.TakeOutStatsForServer(serverId)
 	tunnelStats, err := TakeOutUnreportedTunnelStats(
 		PSIPHON_API_TUNNEL_STATS_MAX_COUNT)
 	if err != nil {
@@ -324,7 +324,7 @@ func makeStatusRequestPayload(
 
 	payload := make(map[string]interface{})
 
-	hostBytes, bytesTransferred := transferStats.GetStatsForReporting()
+	hostBytes, bytesTransferred := transferStats.GetStatsForStatusRequest()
 	payload["host_bytes"] = hostBytes
 	payload["bytes_transferred"] = bytesTransferred
 
@@ -352,7 +352,8 @@ func makeStatusRequestPayload(
 }
 
 func putBackStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
-	transferstats.PutBack(payloadInfo.serverId, payloadInfo.transferStats)
+	transferstats.PutBackStatsForServer(
+		payloadInfo.serverId, payloadInfo.transferStats)
 	err := PutBackUnreportedTunnelStats(payloadInfo.tunnelStats)
 	if err != nil {
 		// These tunnel stats records won't be resent under after a
