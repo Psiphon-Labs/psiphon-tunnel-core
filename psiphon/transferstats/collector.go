@@ -157,6 +157,8 @@ func TakeOutStatsForServer(serverID string) (accumulatedStats *AccumulatedStats)
 	newAccumulatedStats := &AccumulatedStats{
 		hostnameToStats: make(map[string]*hostStats)}
 
+	// Note: for an existing serverStats, only the accumulatedStats is
+	// affected; the recentBytes fields are not changed.
 	serverStats := allStats.serverIDtoStats[serverID]
 	if serverStats != nil {
 		accumulatedStats = serverStats.accumulatedStats
