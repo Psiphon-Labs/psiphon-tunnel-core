@@ -640,7 +640,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	for !shutdown && err == nil {
 		select {
 		case <-noticeBytesTransferredTicker.C:
-			sent, received := transferstats.GetBytesTransferredForServer(
+			sent, received := transferstats.ReportRecentBytesTransferredForServer(
 				tunnel.serverEntry.IpAddress)
 
 			if received > 0 {

@@ -626,7 +626,11 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) (int, bool) {
 
 	// Promote this successful tunnel to first rank so it's one
 	// of the first candidates next time establish runs.
-	PromoteServerEntry(tunnel.serverEntry.IpAddress)
+	// Connecting to a TargetServerEntry does not change the
+	// ranking.
+	if controller.config.TargetServerEntry == "" {
+		PromoteServerEntry(tunnel.serverEntry.IpAddress)
+	}
 
 	return len(controller.tunnels), true
 }
