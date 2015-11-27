@@ -91,11 +91,14 @@ func (suite *StatsTestSuite) Test_StatsConn() {
 	resp, err = suite.httpClient.Get("https://example.org/index.html")
 	suite.Nil(err, "basic HTTPS requests should succeed")
 	resp.Body.Close()
+
+	// Clear out stats
+	_ = TakeOutStatsForServer(_SERVER_ID)
 }
 
 func (suite *StatsTestSuite) Test_TakeOutStatsForServer() {
 
-	zeroPayload := newServerStats()
+	zeroPayload := &AccumulatedStats{hostnameToStats: make(map[string]*hostStats)}
 
 	payload := TakeOutStatsForServer(_SERVER_ID)
 	suite.Equal(payload, zeroPayload, "should get zero stats before any traffic")
@@ -125,16 +128,16 @@ func (suite *StatsTestSuite) Test_PutBackStatsForServer() {
 	payloadToPutBack := TakeOutStatsForServer(_SERVER_ID)
 	suite.NotNil(payloadToPutBack, "should receive valid payload for valid server ID")
 
-	zeroPayload := newServerStats()
+	zeroPayload := &AccumulatedStats{hostnameToStats: make(map[string]*hostStats)}
 
-	payload := PutBackStatsForServer(_SERVER_ID)
+	payload := TakeOutStatsForServer(_SERVER_ID)
 	suite.Equal(payload, zeroPayload, "should be zero stats after getting them")
 
-	PutBack(_SERVER_ID, payloadToPutBack)
+	PutBackStatsForServer(_SERVER_ID, payloadToPutBack)
 	// PutBack is asynchronous, so we'll need to wait a moment for it to do its thing
 	<-time.After(100 * time.Millisecond)
 
-	payload = PutBackStatsForServer(_SERVER_ID)
+	payload = TakeOutStatsForServer(_SERVER_ID)
 	suite.NotEqual(payload, zeroPayload, "stats should be re-added after putting back")
 	suite.Equal(payload, payloadToPutBack, "stats should be the same as after the first retrieval")
 }
