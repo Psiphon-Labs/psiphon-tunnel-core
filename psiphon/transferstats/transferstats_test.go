@@ -91,21 +91,23 @@ func (suite *StatsTestSuite) Test_StatsConn() {
 	resp, err = suite.httpClient.Get("https://example.org/index.html")
 	suite.Nil(err, "basic HTTPS requests should succeed")
 	resp.Body.Close()
+
+	// Clear out stats
+	_ = TakeOutStatsForServer(_SERVER_ID)
 }
 
-func (suite *StatsTestSuite) Test_GetForServer() {
-	payload := GetForServer(_SERVER_ID)
-	suite.Nil(payload, "should get nil stats before any traffic (but not crash)")
+func (suite *StatsTestSuite) Test_TakeOutStatsForServer() {
+
+	zeroPayload := &AccumulatedStats{hostnameToStats: make(map[string]*hostStats)}
+
+	payload := TakeOutStatsForServer(_SERVER_ID)
+	suite.Equal(payload, zeroPayload, "should get zero stats before any traffic")
 
 	resp, err := suite.httpClient.Get("http://example.com/index.html")
 	suite.Nil(err, "need successful http to proceed with tests")
 	resp.Body.Close()
 
-	// Make sure there aren't stats returned for a bad server ID
-	payload = GetForServer("INVALID")
-	suite.Nil(payload, "should get nil stats for invalid server ID")
-
-	payload = GetForServer(_SERVER_ID)
+	payload = TakeOutStatsForServer(_SERVER_ID)
 	suite.NotNil(payload, "should receive valid payload for valid server ID")
 
 	payloadJSON, err := json.Marshal(payload)
@@ -114,27 +116,29 @@ func (suite *StatsTestSuite) Test_GetForServer() {
 	suite.Nil(err, "payload JSON should parse successfully")
 
 	// After we retrieve the stats for a server, they should be cleared out of the tracked stats
-	payload = GetForServer(_SERVER_ID)
-	suite.Nil(payload, "after retrieving stats for a server, there should be no more stats (until more data goes through)")
+	payload = TakeOutStatsForServer(_SERVER_ID)
+	suite.Equal(payload, zeroPayload, "after retrieving stats for a server, there should be zero stats (until more data goes through)")
 }
 
-func (suite *StatsTestSuite) Test_PutBack() {
+func (suite *StatsTestSuite) Test_PutBackStatsForServer() {
 	resp, err := suite.httpClient.Get("http://example.com/index.html")
 	suite.Nil(err, "need successful http to proceed with tests")
 	resp.Body.Close()
 
-	payloadToPutBack := GetForServer(_SERVER_ID)
+	payloadToPutBack := TakeOutStatsForServer(_SERVER_ID)
 	suite.NotNil(payloadToPutBack, "should receive valid payload for valid server ID")
 
-	payload := GetForServer(_SERVER_ID)
-	suite.Nil(payload, "should not be any remaining stats after getting them")
+	zeroPayload := &AccumulatedStats{hostnameToStats: make(map[string]*hostStats)}
 
-	PutBack(_SERVER_ID, payloadToPutBack)
+	payload := TakeOutStatsForServer(_SERVER_ID)
+	suite.Equal(payload, zeroPayload, "should be zero stats after getting them")
+
+	PutBackStatsForServer(_SERVER_ID, payloadToPutBack)
 	// PutBack is asynchronous, so we'll need to wait a moment for it to do its thing
 	<-time.After(100 * time.Millisecond)
 
-	payload = GetForServer(_SERVER_ID)
-	suite.NotNil(payload, "stats should be re-added after putting back")
+	payload = TakeOutStatsForServer(_SERVER_ID)
+	suite.NotEqual(payload, zeroPayload, "stats should be re-added after putting back")
 	suite.Equal(payload, payloadToPutBack, "stats should be the same as after the first retrieval")
 }
 
@@ -216,7 +220,7 @@ func (suite *StatsTestSuite) Test_Regex() {
 		suite.Nil(err)
 		resp.Body.Close()
 
-		payload := GetForServer(_SERVER_ID)
+		payload := TakeOutStatsForServer(_SERVER_ID)
 		suite.NotNil(payload, "should get stats because we made HTTP reqs; %s", scheme)
 
 		expectedHostnames := mapset.NewSet()

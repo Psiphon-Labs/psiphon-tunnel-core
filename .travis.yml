@@ -1,6 +1,6 @@
 language: go
 go:
-- 1.4
+- 1.5
 addons:
   apt_packages:
     - libx11-dev

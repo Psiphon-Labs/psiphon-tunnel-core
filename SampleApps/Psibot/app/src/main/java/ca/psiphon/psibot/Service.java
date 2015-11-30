@@ -229,6 +229,11 @@ public class Service extends VpnService
     }
 
     @Override
+    public void onStartedWaitingForNetworkConnectivity() {
+        Log.addEntry("waiting for network connectivity...");
+    }
+
+    @Override
     public void onClientRegion(String region) {
         Log.addEntry("client region: " + region);
     }

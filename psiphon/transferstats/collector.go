@@ -20,7 +20,6 @@
 package transferstats
 
 import (
-	"encoding/json"
 	"sync"
 )
 
@@ -40,21 +39,39 @@ type hostStats struct {
 	numBytesReceived int64
 }
 
-func newHostStats() *hostStats {
-	return &hostStats{}
+// AccumulatedStats holds the Psiphon Server API status request data for a
+// given server. To accommodate status requests that may fail, and be retried,
+// the TakeOutStatsForServer/PutBackStatsForServer procedure allows the requester
+// to check out stats for reporting and merge back stats for a later retry.
+type AccumulatedStats struct {
+	hostnameToStats map[string]*hostStats
+}
+
+// GetStatsForStatusRequest summarizes AccumulatedStats data as
+// required for the Psiphon Server API status request.
+func (stats AccumulatedStats) GetStatsForStatusRequest() (map[string]int64, int64) {
+
+	hostBytes := make(map[string]int64)
+	bytesTransferred := int64(0)
+
+	for hostname, hostStats := range stats.hostnameToStats {
+		totalBytes := hostStats.numBytesReceived + hostStats.numBytesSent
+		bytesTransferred += totalBytes
+		hostBytes[hostname] = totalBytes
+	}
+
+	return hostBytes, bytesTransferred
 }
 
 // serverStats holds per-server stats.
+// accumulatedStats data is payload for the Psiphon status request
+// which is accessed via TakeOut/PutBack.
+// recentBytes data is for tunnel monitoring which is accessed via
+// ReportRecentBytesTransferredForServer.
 type serverStats struct {
-	hostnameToStats    map[string]*hostStats
-	totalBytesSent     int64
-	totalBytesReceived int64
-}
-
-func newServerStats() *serverStats {
-	return &serverStats{
-		hostnameToStats: make(map[string]*hostStats),
-	}
+	accumulatedStats    *AccumulatedStats
+	recentBytesSent     int64
+	recentBytesReceived int64
 }
 
 // allStats is the root object that holds stats for all servers and all hosts,
@@ -73,10 +90,9 @@ type statsUpdate struct {
 }
 
 // recordStats makes sure the given stats update is added to the global
-// collection. Guaranteed to not block.
-// Callers of this function should assume that it "takes control" of the
-// statsUpdate object.
-func recordStat(stat *statsUpdate) {
+// collection. recentBytes are not adjusted when isPutBack is true,
+// as recentBytes aren't subject to TakeOut/PutBack.
+func recordStat(stat *statsUpdate, isPutBack bool) {
 	allStats.statsMutex.Lock()
 	defer allStats.statsMutex.Unlock()
 
@@ -86,51 +102,31 @@ func recordStat(stat *statsUpdate) {
 
 	storedServerStats := allStats.serverIDtoStats[stat.serverID]
 	if storedServerStats == nil {
-		storedServerStats = newServerStats()
+		storedServerStats = &serverStats{
+			accumulatedStats: &AccumulatedStats{
+				hostnameToStats: make(map[string]*hostStats)}}
 		allStats.serverIDtoStats[stat.serverID] = storedServerStats
 	}
 
-	storedHostStats := storedServerStats.hostnameToStats[stat.hostname]
+	storedHostStats := storedServerStats.accumulatedStats.hostnameToStats[stat.hostname]
 	if storedHostStats == nil {
-		storedHostStats = newHostStats()
-		storedServerStats.hostnameToStats[stat.hostname] = storedHostStats
+		storedHostStats = &hostStats{}
+		storedServerStats.accumulatedStats.hostnameToStats[stat.hostname] = storedHostStats
 	}
-
-	storedServerStats.totalBytesSent += stat.numBytesSent
-	storedServerStats.totalBytesReceived += stat.numBytesReceived
 
 	storedHostStats.numBytesSent += stat.numBytesSent
 	storedHostStats.numBytesReceived += stat.numBytesReceived
 
-	//fmt.Println("server:", stat.serverID, "host:", stat.hostname, "sent:", storedHostStats.numBytesSent, "received:", storedHostStats.numBytesReceived)
-}
-
-// Implement the json.Marshaler interface
-func (ss serverStats) MarshalJSON() ([]byte, error) {
-	out := make(map[string]interface{})
-
-	hostBytes := make(map[string]int64)
-	bytesTransferred := int64(0)
-
-	for hostname, hostStats := range ss.hostnameToStats {
-		totalBytes := hostStats.numBytesReceived + hostStats.numBytesSent
-		bytesTransferred += totalBytes
-		hostBytes[hostname] = totalBytes
+	if !isPutBack {
+		storedServerStats.recentBytesSent += stat.numBytesSent
+		storedServerStats.recentBytesReceived += stat.numBytesReceived
 	}
-
-	out["bytes_transferred"] = bytesTransferred
-	out["host_bytes"] = hostBytes
-
-	// We're not using these fields, but the server requires them
-	out["page_views"] = make([]string, 0)
-	out["https_requests"] = make([]string, 0)
-
-	return json.Marshal(out)
 }
 
-// GetBytesTransferredForServer returns total bytes sent and received since
-// the last call to GetBytesTransferredForServer.
-func GetBytesTransferredForServer(serverID string) (sent, received int64) {
+// ReportRecentBytesTransferredForServer returns bytes sent and received since
+// the last call to ReportRecentBytesTransferredForServer. The accumulated sent
+// and received are reset to 0 by this call.
+func ReportRecentBytesTransferredForServer(serverID string) (sent, received int64) {
 	allStats.statsMutex.Lock()
 	defer allStats.statsMutex.Unlock()
 
@@ -140,35 +136,49 @@ func GetBytesTransferredForServer(serverID string) (sent, received int64) {
 		return
 	}
 
-	sent = stats.totalBytesSent
-	received = stats.totalBytesReceived
+	sent = stats.recentBytesSent
+	received = stats.recentBytesReceived
 
-	stats.totalBytesSent = 0
-	stats.totalBytesReceived = 0
+	stats.recentBytesSent = 0
+	stats.recentBytesReceived = 0
 
 	return
 }
 
-// GetForServer returns the json-able stats package for the given server.
-// If there are no stats, nil will be returned.
-func GetForServer(serverID string) (payload *serverStats) {
+// TakeOutStatsForServer borrows the AccumulatedStats for the specified
+// server. When we fail to report these stats, resubmit them with
+// PutBackStatsForServer. Stats will continue to be accumulated between
+// TakeOut and PutBack calls. The recentBytes values are unaffected by
+// TakeOut/PutBack. Returns empty stats if the serverID is not found.
+func TakeOutStatsForServer(serverID string) (accumulatedStats *AccumulatedStats) {
 	allStats.statsMutex.Lock()
 	defer allStats.statsMutex.Unlock()
 
-	payload = allStats.serverIDtoStats[serverID]
-	delete(allStats.serverIDtoStats, serverID)
+	newAccumulatedStats := &AccumulatedStats{
+		hostnameToStats: make(map[string]*hostStats)}
+
+	// Note: for an existing serverStats, only the accumulatedStats is
+	// affected; the recentBytes fields are not changed.
+	serverStats := allStats.serverIDtoStats[serverID]
+	if serverStats != nil {
+		accumulatedStats = serverStats.accumulatedStats
+		serverStats.accumulatedStats = newAccumulatedStats
+	} else {
+		accumulatedStats = newAccumulatedStats
+	}
 	return
 }
 
-// PutBack re-adds a set of server stats to the collection.
-func PutBack(serverID string, ss *serverStats) {
-	for hostname, hoststats := range ss.hostnameToStats {
+// PutBackStatsForServer re-adds a set of server stats to the collection.
+func PutBackStatsForServer(serverID string, accumulatedStats *AccumulatedStats) {
+	for hostname, hoststats := range accumulatedStats.hostnameToStats {
 		recordStat(
 			&statsUpdate{
 				serverID:         serverID,
 				hostname:         hostname,
 				numBytesSent:     hoststats.numBytesSent,
 				numBytesReceived: hoststats.numBytesReceived,
-			})
+			},
+			true)
 	}
 }

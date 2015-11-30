@@ -1,7 +1,7 @@
-// +build !android,!linux,!darwin
+// +build !windows
 
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -21,16 +21,11 @@
 
 package psiphon
 
-import (
-	"errors"
-	"net"
-)
+// Stub function to return an empty list for non-Windows builds
+func prepareMigrationEntries(config *Config) []*ServerEntry {
+	return nil
+}
 
-// LookupIP resolves a hostname. When BindToDevice is not required, it
-// simply uses net.LookupIP.
-func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
-	if config.DeviceBinder != nil {
-		return nil, ContextError(errors.New("LookupIP with DeviceBinder not supported on this platform"))
-	}
-	return net.LookupIP(host)
+// Stub function to return immediately for non-Windows builds
+func migrateEntries(serverEntries []*ServerEntry, legacyDataStoreFilename string) {
 }

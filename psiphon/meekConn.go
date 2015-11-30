@@ -157,8 +157,7 @@ func DialMeek(
 		// classify Psiphon traffic on some CDNs but not others) may throttle non-MiM CDNs so that our server
 		// selection always chooses tunnels to the MiM CDN (without any server cert verification, we won't
 		// exclusively connect to non-MiM CDNs); then the adversary kills the underlying TCP connection after
-		// some short period. This is similar to the "unidentified protocol" attack outlined in selectProtocol().
-		// A similar weighted selection defense may be appropriate.
+		// some short period. This is mitigated by the "impaired" protocol classification mechanism.
 
 		dialer = NewCustomTLSDialer(
 			&CustomTLSConfig{

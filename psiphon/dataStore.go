@@ -1,5 +1,3 @@
-// +build windows
-
 /*
  * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
@@ -22,7 +20,7 @@
 package psiphon
 
 import (
-	"database/sql"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,13 +30,33 @@ import (
 	"sync"
 	"time"
 
-	sqlite3 "github.com/Psiphon-Inc/go-sqlite3"
+	"github.com/Psiphon-Inc/bolt"
 )
 
+// The BoltDB dataStore implementation is an alternative to the sqlite3-based
+// implementation in dataStore.go. Both implementations have the same interface.
+//
+// BoltDB is pure Go, and is intended to be used in cases where we have trouble
+// building sqlite3/CGO (e.g., currently go mobile due to
+// https://github.com/mattn/go-sqlite3/issues/201), and perhaps ultimately as
+// the primary dataStore implementation.
+//
 type dataStore struct {
 	init sync.Once
-	db   *sql.DB
+	db   *bolt.DB
 }
+
+const (
+	serverEntriesBucket         = "serverEntries"
+	rankedServerEntriesBucket   = "rankedServerEntries"
+	rankedServerEntriesKey      = "rankedServerEntries"
+	splitTunnelRouteETagsBucket = "splitTunnelRouteETags"
+	splitTunnelRouteDataBucket  = "splitTunnelRouteData"
+	urlETagsBucket              = "urlETags"
+	keyValueBucket              = "keyValues"
+	tunnelStatsBucket           = "tunnelStats"
+	rankedServerEntryCount      = 100
+)
 
 var singleton dataStore
 
@@ -52,58 +70,65 @@ var singleton dataStore
 // have been replaced by checkInitDataStore() to assert that Init was called.
 func InitDataStore(config *Config) (err error) {
 	singleton.init.Do(func() {
+		// Need to gather the list of migratable server entries before
+		// initializing the boltdb store (as prepareMigrationEntries
+		// checks for the existence of the bolt db file)
+		migratableServerEntries := prepareMigrationEntries(config)
+
 		filename := filepath.Join(config.DataStoreDirectory, DATA_STORE_FILENAME)
-		var db *sql.DB
-		db, err = sql.Open(
-			"sqlite3",
-			fmt.Sprintf("file:%s?cache=private&mode=rwc", filename))
+		var db *bolt.DB
+		db, err = bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
 		if err != nil {
 			// Note: intending to set the err return value for InitDataStore
 			err = fmt.Errorf("initDataStore failed to open database: %s", err)
 			return
 		}
-		initialization := "pragma journal_mode=WAL;\n"
-		if config.DataStoreTempDirectory != "" {
-			// On some platforms (e.g., Android), the standard temporary directories expected
-			// by sqlite (see unixGetTempname in aggregate sqlite3.c) may not be present.
-			// In that case, sqlite tries to use the current working directory; but this may
-			// be "/" (again, on Android) which is not writable.
-			// Instead of setting the process current working directory from this library,
-			// use the deprecated temp_store_directory pragma to force use of a specified
-			// temporary directory: https://www.sqlite.org/pragma.html#pragma_temp_store_directory.
-			// TODO: is there another way to restrict writing of temporary files? E.g. temp_store=3?
-			initialization += fmt.Sprintf(
-				"pragma temp_store_directory=\"%s\";\n", config.DataStoreTempDirectory)
-		}
-		initialization += `
-        create table if not exists serverEntry
-            (id text not null primary key,
-             rank integer not null unique,
-             region text not null,
-             data blob not null);
-        create index if not exists idx_serverEntry_region on serverEntry(region);
-        create table if not exists serverEntryProtocol
-            (serverEntryId text not null,
-             protocol text not null,
-             primary key (serverEntryId, protocol));
-        create table if not exists splitTunnelRoutes
-            (region text not null primary key,
-             etag text not null,
-             data blob not null);
-        create table if not exists urlETags
-            (url text not null primary key,
-             etag text not null);
-        create table if not exists keyValue
-            (key text not null primary key,
-             value text not null);
-        `
-		_, err = db.Exec(initialization)
+
+		err = db.Update(func(tx *bolt.Tx) error {
+			requiredBuckets := []string{
+				serverEntriesBucket,
+				rankedServerEntriesBucket,
+				splitTunnelRouteETagsBucket,
+				splitTunnelRouteDataBucket,
+				urlETagsBucket,
+				keyValueBucket,
+				tunnelStatsBucket,
+			}
+			for _, bucket := range requiredBuckets {
+				_, err := tx.CreateBucketIfNotExists([]byte(bucket))
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 		if err != nil {
-			err = fmt.Errorf("initDataStore failed to initialize: %s", err)
+			err = fmt.Errorf("initDataStore failed to create buckets: %s", err)
 			return
 		}
+
+		// Run consistency checks on datastore and emit errors for diagnostics purposes
+		// We assume this will complete quickly for typical size Psiphon datastores.
+		db.View(func(tx *bolt.Tx) error {
+			err := <-tx.Check()
+			if err != nil {
+				NoticeAlert("boltdb Check(): %s", err)
+			}
+			return nil
+		})
+
 		singleton.db = db
+
+		// The migrateServerEntries function requires the data store is
+		// initialized prior to execution so that migrated entries can be stored
+
+		if len(migratableServerEntries) > 0 {
+			migrateEntries(migratableServerEntries, filepath.Join(config.DataStoreDirectory, LEGACY_DATA_STORE_FILENAME))
+		}
+
+		resetAllTunnelStatsToUnreported()
 	})
+
 	return err
 }
 
@@ -113,71 +138,17 @@ func checkInitDataStore() {
 	}
 }
 
-func canRetry(err error) bool {
-	sqlError, ok := err.(sqlite3.Error)
-	return ok && (sqlError.Code == sqlite3.ErrBusy ||
-		sqlError.Code == sqlite3.ErrLocked ||
-		sqlError.ExtendedCode == sqlite3.ErrLockedSharedCache ||
-		sqlError.ExtendedCode == sqlite3.ErrBusySnapshot)
-}
-
-// transactionWithRetry will retry a write transaction if sqlite3
-// reports a table is locked by another writer.
-func transactionWithRetry(updater func(*sql.Tx) error) error {
-	checkInitDataStore()
-	for i := 0; i < 10; i++ {
-		if i > 0 {
-			// Delay on retry
-			time.Sleep(100)
-		}
-		transaction, err := singleton.db.Begin()
-		if err != nil {
-			return ContextError(err)
-		}
-		err = updater(transaction)
-		if err != nil {
-			transaction.Rollback()
-			if canRetry(err) {
-				continue
-			}
-			return ContextError(err)
-		}
-		err = transaction.Commit()
-		if err != nil {
-			transaction.Rollback()
-			if canRetry(err) {
-				continue
-			}
-			return ContextError(err)
-		}
-		return nil
-	}
-	return ContextError(errors.New("retries exhausted"))
-}
-
-// serverEntryExists returns true if a serverEntry with the
-// given ipAddress id already exists.
-func serverEntryExists(transaction *sql.Tx, ipAddress string) (bool, error) {
-	query := "select count(*) from serverEntry where id  = ?;"
-	var count int
-	err := singleton.db.QueryRow(query, ipAddress).Scan(&count)
-	if err != nil {
-		return false, ContextError(err)
-	}
-	return count > 0, nil
-}
-
 // StoreServerEntry adds the server entry to the data store.
 // A newly stored (or re-stored) server entry is assigned the next-to-top
 // rank for iteration order (the previous top ranked entry is promoted). The
 // purpose of inserting at next-to-top is to keep the last selected server
-// as the top ranked server. Note, server candidates are iterated in decending
-// rank order, so the largest rank is top rank.
+// as the top ranked server.
 // When replaceIfExists is true, an existing server entry record is
 // overwritten; otherwise, the existing record is unchanged.
 // If the server entry data is malformed, an alert notice is issued and
 // the entry is skipped; no error is returned.
 func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
+	checkInitDataStore()
 
 	// Server entries should already be validated before this point,
 	// so instead of skipping we fail with an error.
@@ -186,63 +157,62 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 		return ContextError(errors.New("invalid server entry"))
 	}
 
-	return transactionWithRetry(func(transaction *sql.Tx) error {
-		serverEntryExists, err := serverEntryExists(transaction, serverEntry.IpAddress)
-		if err != nil {
-			return ContextError(err)
+	// BoltDB implementation note:
+	// For simplicity, we don't maintain indexes on server entry
+	// region or supported protocols. Instead, we perform full-bucket
+	// scans with a filter. With a small enough database (thousands or
+	// even tens of thousand of server entries) and common enough
+	// values (e.g., many servers support all protocols), performance
+	// is expected to be acceptable.
+
+	serverEntryExists := false
+	err = singleton.db.Update(func(tx *bolt.Tx) error {
+
+		serverEntries := tx.Bucket([]byte(serverEntriesBucket))
+
+		// Check not only that the entry exists, but is valid. This
+		// will replace in the rare case where the data is corrupt.
+		existingServerEntryValid := false
+		existingData := serverEntries.Get([]byte(serverEntry.IpAddress))
+		if existingData != nil {
+			existingServerEntry := new(ServerEntry)
+			if json.Unmarshal(existingData, existingServerEntry) == nil {
+				existingServerEntryValid = true
+			}
 		}
-		if serverEntryExists && !replaceIfExists {
+
+		if existingServerEntryValid && !replaceIfExists {
 			// Disabling this notice, for now, as it generates too much noise
 			// in diagnostics with clients that always submit embedded servers
 			// to the core on each run.
 			// NoticeInfo("ignored update for server %s", serverEntry.IpAddress)
 			return nil
 		}
-		_, err = transaction.Exec(`
-            update serverEntry set rank = rank + 1
-                where id = (select id from serverEntry order by rank desc limit 1);
-            `)
-		if err != nil {
-			// Note: ContextError() would break canRetry()
-			return err
-		}
+
 		data, err := json.Marshal(serverEntry)
 		if err != nil {
 			return ContextError(err)
 		}
-		_, err = transaction.Exec(`
-            insert or replace into serverEntry (id, rank, region, data)
-            values (?, (select coalesce(max(rank)-1, 0) from serverEntry), ?, ?);
-            `, serverEntry.IpAddress, serverEntry.Region, data)
+		err = serverEntries.Put([]byte(serverEntry.IpAddress), data)
 		if err != nil {
-			return err
+			return ContextError(err)
 		}
-		_, err = transaction.Exec(`
-            delete from serverEntryProtocol where serverEntryId = ?;
-            `, serverEntry.IpAddress)
+
+		err = insertRankedServerEntry(tx, serverEntry.IpAddress, 1)
 		if err != nil {
-			return err
+			return ContextError(err)
 		}
-		for _, protocol := range SupportedTunnelProtocols {
-			// Note: for meek, the capabilities are FRONTED-MEEK and UNFRONTED-MEEK
-			// and the additonal OSSH service is assumed to be available internally.
-			requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
-			if Contains(serverEntry.Capabilities, requiredCapability) {
-				_, err = transaction.Exec(`
-                    insert into serverEntryProtocol (serverEntryId, protocol)
-                    values (?, ?);
-                    `, serverEntry.IpAddress, protocol)
-				if err != nil {
-					return err
-				}
-			}
-		}
-		// TODO: post notice after commit
-		if !serverEntryExists {
-			NoticeInfo("updated server %s", serverEntry.IpAddress)
-		}
+
 		return nil
 	})
+	if err != nil {
+		return ContextError(err)
+	}
+
+	if !serverEntryExists {
+		NoticeInfo("updated server %s", serverEntry.IpAddress)
+	}
+	return nil
 }
 
 // StoreServerEntries shuffles and stores a list of server entries.
@@ -250,6 +220,7 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 // load balancing.
 // There is an independent transaction for each entry insert/update.
 func StoreServerEntries(serverEntries []*ServerEntry, replaceIfExists bool) error {
+	checkInitDataStore()
 
 	for index := len(serverEntries) - 1; index > 0; index-- {
 		swapIndex := rand.Intn(index + 1)
@@ -275,18 +246,110 @@ func StoreServerEntries(serverEntries []*ServerEntry, replaceIfExists bool) erro
 // iterated in decending rank order, so this server entry will be
 // the first candidate in a subsequent tunnel establishment.
 func PromoteServerEntry(ipAddress string) error {
-	return transactionWithRetry(func(transaction *sql.Tx) error {
-		_, err := transaction.Exec(`
-            update serverEntry
-            set rank = (select MAX(rank)+1 from serverEntry)
-            where id = ?;
-            `, ipAddress)
-		if err != nil {
-			// Note: ContextError() would break canRetry()
-			return err
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+
+		// Ensure the corresponding entry exists before
+		// inserting into rank.
+		bucket := tx.Bucket([]byte(serverEntriesBucket))
+		data := bucket.Get([]byte(ipAddress))
+		if data == nil {
+			NoticeAlert(
+				"PromoteServerEntry: ignoring unknown server entry: %s",
+				ipAddress)
+			return nil
 		}
-		return nil
+
+		return insertRankedServerEntry(tx, ipAddress, 0)
 	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
+}
+
+func getRankedServerEntries(tx *bolt.Tx) ([]string, error) {
+	bucket := tx.Bucket([]byte(rankedServerEntriesBucket))
+	data := bucket.Get([]byte(rankedServerEntriesKey))
+
+	if data == nil {
+		return []string{}, nil
+	}
+
+	rankedServerEntries := make([]string, 0)
+	err := json.Unmarshal(data, &rankedServerEntries)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	return rankedServerEntries, nil
+}
+
+func setRankedServerEntries(tx *bolt.Tx, rankedServerEntries []string) error {
+	data, err := json.Marshal(rankedServerEntries)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	bucket := tx.Bucket([]byte(rankedServerEntriesBucket))
+	err = bucket.Put([]byte(rankedServerEntriesKey), data)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	return nil
+}
+
+func insertRankedServerEntry(tx *bolt.Tx, serverEntryId string, position int) error {
+	rankedServerEntries, err := getRankedServerEntries(tx)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	// BoltDB implementation note:
+	// For simplicity, we store the ranked server ids in an array serialized to
+	// a single key value. To ensure this value doesn't grow without bound,
+	// it's capped at rankedServerEntryCount. For now, this cap should be large
+	// enough to meet the shuffleHeadLength = config.TunnelPoolSize criteria, for
+	// any reasonable configuration of config.TunnelPoolSize.
+
+	// Using: https://github.com/golang/go/wiki/SliceTricks
+
+	// When serverEntryId is already ranked, remove it first to avoid duplicates
+
+	for i, rankedServerEntryId := range rankedServerEntries {
+		if rankedServerEntryId == serverEntryId {
+			rankedServerEntries = append(
+				rankedServerEntries[:i], rankedServerEntries[i+1:]...)
+			break
+		}
+	}
+
+	// SliceTricks insert, with length cap enforced
+
+	if len(rankedServerEntries) < rankedServerEntryCount {
+		rankedServerEntries = append(rankedServerEntries, "")
+	}
+	if position >= len(rankedServerEntries) {
+		position = len(rankedServerEntries) - 1
+	}
+	copy(rankedServerEntries[position+1:], rankedServerEntries[position:])
+	rankedServerEntries[position] = serverEntryId
+
+	err = setRankedServerEntries(tx, rankedServerEntries)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	return nil
+}
+
+func serverEntrySupportsProtocol(serverEntry *ServerEntry, protocol string) bool {
+	// Note: for meek, the capabilities are FRONTED-MEEK and UNFRONTED-MEEK
+	// and the additonal OSSH service is assumed to be available internally.
+	requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
+	return Contains(serverEntry.Capabilities, requiredCapability)
 }
 
 // ServerEntryIterator is used to iterate over
@@ -295,14 +358,14 @@ type ServerEntryIterator struct {
 	region                      string
 	protocol                    string
 	shuffleHeadLength           int
-	transaction                 *sql.Tx
-	cursor                      *sql.Rows
+	serverEntryIds              []string
+	serverEntryIndex            int
 	isTargetServerEntryIterator bool
 	hasNextTargetServerEntry    bool
 	targetServerEntry           *ServerEntry
 }
 
-// NewServerEntryIterator creates a new NewServerEntryIterator
+// NewServerEntryIterator creates a new ServerEntryIterator
 func NewServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err error) {
 
 	// When configured, this target server entry is the only candidate
@@ -362,54 +425,69 @@ func (iterator *ServerEntryIterator) Reset() error {
 	count := CountServerEntries(iterator.region, iterator.protocol)
 	NoticeCandidateServers(iterator.region, iterator.protocol, count)
 
-	transaction, err := singleton.db.Begin()
-	if err != nil {
-		return ContextError(err)
-	}
-	var cursor *sql.Rows
-
 	// This query implements the Psiphon server candidate selection
 	// algorithm: the first TunnelPoolSize server candidates are in rank
 	// (priority) order, to favor previously successful servers; then the
 	// remaining long tail is shuffled to raise up less recent candidates.
 
-	whereClause, whereParams := makeServerEntryWhereClause(
-		iterator.region, iterator.protocol, nil)
-	headLength := iterator.shuffleHeadLength
-	queryFormat := `
-		select data from serverEntry %s
-		order by case
-		when rank > coalesce((select rank from serverEntry %s order by rank desc limit ?, 1), -1) then rank
-		else abs(random())%%((select rank from serverEntry %s order by rank desc limit ?, 1))
-		end desc;`
-	query := fmt.Sprintf(queryFormat, whereClause, whereClause, whereClause)
-	params := make([]interface{}, 0)
-	params = append(params, whereParams...)
-	params = append(params, whereParams...)
-	params = append(params, headLength)
-	params = append(params, whereParams...)
-	params = append(params, headLength)
+	// BoltDB implementation note:
+	// We don't keep a transaction open for the duration of the iterator
+	// because this would expose the following semantics to consumer code:
+	//
+	//     Read-only transactions and read-write transactions ... generally
+	//     shouldn't be opened simultaneously in the same goroutine. This can
+	//     cause a deadlock as the read-write transaction needs to periodically
+	//     re-map the data file but it cannot do so while a read-only
+	//     transaction is open.
+	//     (https://github.com/boltdb/bolt)
+	//
+	// So the underlying serverEntriesBucket could change after the serverEntryIds
+	// list is built.
 
-	cursor, err = transaction.Query(query, params...)
+	var serverEntryIds []string
+
+	err := singleton.db.View(func(tx *bolt.Tx) error {
+		var err error
+		serverEntryIds, err = getRankedServerEntries(tx)
+		if err != nil {
+			return err
+		}
+
+		skipServerEntryIds := make(map[string]bool)
+		for _, serverEntryId := range serverEntryIds {
+			skipServerEntryIds[serverEntryId] = true
+		}
+
+		bucket := tx.Bucket([]byte(serverEntriesBucket))
+		cursor := bucket.Cursor()
+		for key, _ := cursor.Last(); key != nil; key, _ = cursor.Prev() {
+			serverEntryId := string(key)
+			if _, ok := skipServerEntryIds[serverEntryId]; ok {
+				continue
+			}
+			serverEntryIds = append(serverEntryIds, serverEntryId)
+		}
+		return nil
+	})
 	if err != nil {
-		transaction.Rollback()
 		return ContextError(err)
 	}
-	iterator.transaction = transaction
-	iterator.cursor = cursor
+
+	for i := len(serverEntryIds) - 1; i > iterator.shuffleHeadLength-1; i-- {
+		j := rand.Intn(i+1-iterator.shuffleHeadLength) + iterator.shuffleHeadLength
+		serverEntryIds[i], serverEntryIds[j] = serverEntryIds[j], serverEntryIds[i]
+	}
+
+	iterator.serverEntryIds = serverEntryIds
+	iterator.serverEntryIndex = 0
+
 	return nil
 }
 
 // Close cleans up resources associated with a ServerEntryIterator.
 func (iterator *ServerEntryIterator) Close() {
-	if iterator.cursor != nil {
-		iterator.cursor.Close()
-	}
-	iterator.cursor = nil
-	if iterator.transaction != nil {
-		iterator.transaction.Rollback()
-	}
-	iterator.transaction = nil
+	iterator.serverEntryIds = nil
+	iterator.serverEntryIndex = 0
 }
 
 // Next returns the next server entry, by rank, for a ServerEntryIterator.
@@ -429,24 +507,55 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 		return nil, nil
 	}
 
-	if !iterator.cursor.Next() {
-		err = iterator.cursor.Err()
+	// There are no region/protocol indexes for the server entries bucket.
+	// Loop until we have the next server entry that matches the iterator
+	// filter requirements.
+	for {
+		if iterator.serverEntryIndex >= len(iterator.serverEntryIds) {
+			// There is no next item
+			return nil, nil
+		}
+
+		serverEntryId := iterator.serverEntryIds[iterator.serverEntryIndex]
+		iterator.serverEntryIndex += 1
+
+		var data []byte
+		err = singleton.db.View(func(tx *bolt.Tx) error {
+			bucket := tx.Bucket([]byte(serverEntriesBucket))
+			value := bucket.Get([]byte(serverEntryId))
+			if value != nil {
+				// Must make a copy as slice is only valid within transaction.
+				data = make([]byte, len(value))
+				copy(data, value)
+			}
+			return nil
+		})
 		if err != nil {
 			return nil, ContextError(err)
 		}
-		// There is no next item
-		return nil, nil
-	}
 
-	var data []byte
-	err = iterator.cursor.Scan(&data)
-	if err != nil {
-		return nil, ContextError(err)
-	}
-	serverEntry = new(ServerEntry)
-	err = json.Unmarshal(data, serverEntry)
-	if err != nil {
-		return nil, ContextError(err)
+		if data == nil {
+			// In case of data corruption or a bug causing this condition,
+			// do not stop iterating.
+			NoticeAlert("ServerEntryIterator.Next: unexpected missing server entry: %s", serverEntryId)
+			continue
+		}
+
+		serverEntry = new(ServerEntry)
+		err = json.Unmarshal(data, serverEntry)
+		if err != nil {
+			// In case of data corruption or a bug causing this condition,
+			// do not stop iterating.
+			NoticeAlert("ServerEntryIterator.Next: %s", ContextError(err))
+			continue
+		}
+
+		// Check filter requirements
+		if (iterator.region == "" || serverEntry.Region == iterator.region) &&
+			(iterator.protocol == "" || serverEntrySupportsProtocol(serverEntry, iterator.protocol)) {
+
+			break
+		}
 	}
 
 	return MakeCompatibleServerEntry(serverEntry), nil
@@ -465,123 +574,95 @@ func MakeCompatibleServerEntry(serverEntry *ServerEntry) *ServerEntry {
 	return serverEntry
 }
 
-func makeServerEntryWhereClause(
-	region, protocol string, excludeIds []string) (whereClause string, whereParams []interface{}) {
-	whereClause = ""
-	whereParams = make([]interface{}, 0)
-	if region != "" {
-		whereClause += " where region = ?"
-		whereParams = append(whereParams, region)
-	}
-	if protocol != "" {
-		if len(whereClause) > 0 {
-			whereClause += " and"
-		} else {
-			whereClause += " where"
-		}
-		whereClause +=
-			" exists (select 1 from serverEntryProtocol where protocol = ? and serverEntryId = serverEntry.id)"
-		whereParams = append(whereParams, protocol)
-	}
-	if len(excludeIds) > 0 {
-		if len(whereClause) > 0 {
-			whereClause += " and"
-		} else {
-			whereClause += " where"
-		}
-		whereClause += " id in ("
-		for index, id := range excludeIds {
-			if index > 0 {
-				whereClause += ", "
+func scanServerEntries(scanner func(*ServerEntry)) error {
+	err := singleton.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(serverEntriesBucket))
+		cursor := bucket.Cursor()
+
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			serverEntry := new(ServerEntry)
+			err := json.Unmarshal(value, serverEntry)
+			if err != nil {
+				// In case of data corruption or a bug causing this condition,
+				// do not stop iterating.
+				NoticeAlert("scanServerEntries: %s", ContextError(err))
+				continue
 			}
-			whereClause += "?"
-			whereParams = append(whereParams, id)
+			scanner(serverEntry)
 		}
-		whereClause += ")"
+
+		return nil
+	})
+
+	if err != nil {
+		return ContextError(err)
 	}
-	return whereClause, whereParams
+
+	return nil
 }
 
 // CountServerEntries returns a count of stored servers for the
 // specified region and protocol.
 func CountServerEntries(region, protocol string) int {
 	checkInitDataStore()
-	var count int
-	whereClause, whereParams := makeServerEntryWhereClause(region, protocol, nil)
-	query := "select count(*) from serverEntry" + whereClause
-	err := singleton.db.QueryRow(query, whereParams...).Scan(&count)
+
+	count := 0
+	err := scanServerEntries(func(serverEntry *ServerEntry) {
+		if (region == "" || serverEntry.Region == region) &&
+			(protocol == "" || serverEntrySupportsProtocol(serverEntry, protocol)) {
+			count += 1
+		}
+	})
 
 	if err != nil {
 		NoticeAlert("CountServerEntries failed: %s", err)
 		return 0
 	}
 
-	if region == "" {
-		region = "(any)"
-	}
-	if protocol == "" {
-		protocol = "(any)"
-	}
-	NoticeInfo("servers for region %s and protocol %s: %d",
-		region, protocol, count)
-
 	return count
 }
 
 // ReportAvailableRegions prints a notice with the available egress regions.
+// Note that this report ignores config.TunnelProtocol.
 func ReportAvailableRegions() {
 	checkInitDataStore()
 
-	// TODO: For consistency, regions-per-protocol should be used
+	regions := make(map[string]bool)
+	err := scanServerEntries(func(serverEntry *ServerEntry) {
+		regions[serverEntry.Region] = true
+	})
 
-	rows, err := singleton.db.Query("select distinct(region) from serverEntry;")
 	if err != nil {
-		NoticeAlert("failed to query data store for available regions: %s", ContextError(err))
+		NoticeAlert("ReportAvailableRegions failed: %s", err)
 		return
 	}
-	defer rows.Close()
 
-	var regions []string
-
-	for rows.Next() {
-		var region string
-		err = rows.Scan(&region)
-		if err != nil {
-			NoticeAlert("failed to retrieve available regions from data store: %s", ContextError(err))
-			return
-		}
-
+	regionList := make([]string, 0, len(regions))
+	for region, _ := range regions {
 		// Some server entries do not have a region, but it makes no sense to return
 		// an empty string as an "available region".
 		if region != "" {
-			regions = append(regions, region)
+			regionList = append(regionList, region)
 		}
 	}
 
-	NoticeAvailableEgressRegions(regions)
+	NoticeAvailableEgressRegions(regionList)
 }
 
 // GetServerEntryIpAddresses returns an array containing
 // all stored server IP addresses.
 func GetServerEntryIpAddresses() (ipAddresses []string, err error) {
 	checkInitDataStore()
+
 	ipAddresses = make([]string, 0)
-	rows, err := singleton.db.Query("select id from serverEntry;")
+	err = scanServerEntries(func(serverEntry *ServerEntry) {
+		ipAddresses = append(ipAddresses, serverEntry.IpAddress)
+	})
+
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var ipAddress string
-		err = rows.Scan(&ipAddress)
-		if err != nil {
-			return nil, ContextError(err)
-		}
-		ipAddresses = append(ipAddresses, ipAddress)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, ContextError(err)
-	}
+
 	return ipAddresses, nil
 }
 
@@ -589,28 +670,34 @@ func GetServerEntryIpAddresses() (ipAddresses []string, err error) {
 // the given region. The associated etag is also stored and
 // used to make efficient web requests for updates to the data.
 func SetSplitTunnelRoutes(region, etag string, data []byte) error {
-	return transactionWithRetry(func(transaction *sql.Tx) error {
-		_, err := transaction.Exec(`
-            insert or replace into splitTunnelRoutes (region, etag, data)
-            values (?, ?, ?);
-            `, region, etag, data)
-		if err != nil {
-			// Note: ContextError() would break canRetry()
-			return err
-		}
-		return nil
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(splitTunnelRouteETagsBucket))
+		err := bucket.Put([]byte(region), []byte(etag))
+
+		bucket = tx.Bucket([]byte(splitTunnelRouteDataBucket))
+		err = bucket.Put([]byte(region), data)
+		return err
 	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
 }
 
 // GetSplitTunnelRoutesETag retrieves the etag for cached routes
 // data for the specified region. If not found, it returns an empty string value.
 func GetSplitTunnelRoutesETag(region string) (etag string, err error) {
 	checkInitDataStore()
-	rows := singleton.db.QueryRow("select etag from splitTunnelRoutes where region = ?;", region)
-	err = rows.Scan(&etag)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
+
+	err = singleton.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(splitTunnelRouteETagsBucket))
+		etag = string(bucket.Get([]byte(region)))
+		return nil
+	})
+
 	if err != nil {
 		return "", ContextError(err)
 	}
@@ -621,11 +708,18 @@ func GetSplitTunnelRoutesETag(region string) (etag string, err error) {
 // for the specified region. If not found, it returns a nil value.
 func GetSplitTunnelRoutesData(region string) (data []byte, err error) {
 	checkInitDataStore()
-	rows := singleton.db.QueryRow("select data from splitTunnelRoutes where region = ?;", region)
-	err = rows.Scan(&data)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
+
+	err = singleton.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(splitTunnelRouteDataBucket))
+		value := bucket.Get([]byte(region))
+		if value != nil {
+			// Must make a copy as slice is only valid within transaction.
+			data = make([]byte, len(value))
+			copy(data, value)
+		}
+		return nil
+	})
+
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -636,28 +730,31 @@ func GetSplitTunnelRoutesData(region string) (data []byte, err error) {
 // Note: input URL is treated as a string, and is not
 // encoded or decoded or otherwise canonicalized.
 func SetUrlETag(url, etag string) error {
-	return transactionWithRetry(func(transaction *sql.Tx) error {
-		_, err := transaction.Exec(`
-            insert or replace into urlETags (url, etag)
-            values (?, ?);
-            `, url, etag)
-		if err != nil {
-			// Note: ContextError() would break canRetry()
-			return err
-		}
-		return nil
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(urlETagsBucket))
+		err := bucket.Put([]byte(url), []byte(etag))
+		return err
 	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
 }
 
 // GetUrlETag retrieves a previously stored an ETag for the
 // specfied URL. If not found, it returns an empty string value.
 func GetUrlETag(url string) (etag string, err error) {
 	checkInitDataStore()
-	rows := singleton.db.QueryRow("select etag from urlETags where url = ?;", url)
-	err = rows.Scan(&etag)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
+
+	err = singleton.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(urlETagsBucket))
+		etag = string(bucket.Get([]byte(url)))
+		return nil
+	})
+
 	if err != nil {
 		return "", ContextError(err)
 	}
@@ -666,30 +763,226 @@ func GetUrlETag(url string) (etag string, err error) {
 
 // SetKeyValue stores a key/value pair.
 func SetKeyValue(key, value string) error {
-	return transactionWithRetry(func(transaction *sql.Tx) error {
-		_, err := transaction.Exec(`
-            insert or replace into keyValue (key, value)
-            values (?, ?);
-            `, key, value)
-		if err != nil {
-			// Note: ContextError() would break canRetry()
-			return err
-		}
-		return nil
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(keyValueBucket))
+		err := bucket.Put([]byte(key), []byte(value))
+		return err
 	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
 }
 
 // GetKeyValue retrieves the value for a given key. If not found,
 // it returns an empty string value.
 func GetKeyValue(key string) (value string, err error) {
 	checkInitDataStore()
-	rows := singleton.db.QueryRow("select value from keyValue where key = ?;", key)
-	err = rows.Scan(&value)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
+
+	err = singleton.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(keyValueBucket))
+		value = string(bucket.Get([]byte(key)))
+		return nil
+	})
+
 	if err != nil {
 		return "", ContextError(err)
 	}
 	return value, nil
+}
+
+// Tunnel stats records in the tunnelStatsStateUnreported
+// state are available for take out.
+// Records in the tunnelStatsStateReporting have been
+// taken out and are pending either deleting (for a
+// successful request) or change to StateUnreported (for
+// a failed request).
+// All tunnel stats records are reverted to StateUnreported
+// when the datastore is initialized at start up.
+
+var tunnelStatsStateUnreported = []byte("0")
+var tunnelStatsStateReporting = []byte("1")
+
+// StoreTunnelStats adds a new tunnel stats record, which is
+// set to StateUnreported and is an immediate candidate for
+// reporting.
+// tunnelStats is a JSON byte array containing fields as
+// required by the Psiphon server API (see RecordTunnelStats).
+// It's assumed that the JSON value contains enough unique
+// information for the value to function as a key in the
+// key/value datastore. This assumption is currently satisfied
+// by the fields sessionId + tunnelNumber.
+func StoreTunnelStats(tunnelStats []byte) error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelStatsBucket))
+		err := bucket.Put(tunnelStats, tunnelStatsStateUnreported)
+		return err
+	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
+}
+
+// CountUnreportedTunnelStats returns the number of tunnel
+// stats records in StateUnreported.
+func CountUnreportedTunnelStats() int {
+	checkInitDataStore()
+
+	unreported := 0
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelStatsBucket))
+		cursor := bucket.Cursor()
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			if 0 == bytes.Compare(value, tunnelStatsStateUnreported) {
+				unreported++
+				break
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		NoticeAlert("CountUnreportedTunnelStats failed: %s", err)
+		return 0
+	}
+
+	return unreported
+}
+
+// TakeOutUnreportedTunnelStats returns up to maxCount tunnel
+// stats records that are in StateUnreported. The records are set
+// to StateReporting. If the records are successfully reported,
+// clear them with ClearReportedTunnelStats. If the records are
+// not successfully reported, restore them with
+// PutBackUnreportedTunnelStats.
+func TakeOutUnreportedTunnelStats(maxCount int) ([][]byte, error) {
+	checkInitDataStore()
+
+	tunnelStats := make([][]byte, 0)
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelStatsBucket))
+		cursor := bucket.Cursor()
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+
+			// Perform a test JSON unmarshaling. In case of data corruption or a bug,
+			// skip the record.
+			var jsonData interface{}
+			err := json.Unmarshal(key, &jsonData)
+			if err != nil {
+				NoticeAlert(
+					"Invalid key in TakeOutUnreportedTunnelStats: %s: %s",
+					string(key), err)
+				continue
+			}
+
+			if 0 == bytes.Compare(value, tunnelStatsStateUnreported) {
+				// Must make a copy as slice is only valid within transaction.
+				data := make([]byte, len(key))
+				copy(data, key)
+				tunnelStats = append(tunnelStats, data)
+				if len(tunnelStats) >= maxCount {
+					break
+				}
+			}
+		}
+		for _, key := range tunnelStats {
+			err := bucket.Put(key, tunnelStatsStateReporting)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	return tunnelStats, nil
+}
+
+// PutBackUnreportedTunnelStats restores a list of tunnel
+// stats records to StateUnreported.
+func PutBackUnreportedTunnelStats(tunnelStats [][]byte) error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelStatsBucket))
+		for _, key := range tunnelStats {
+			err := bucket.Put(key, tunnelStatsStateUnreported)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
+}
+
+// ClearReportedTunnelStats deletes a list of tunnel
+// stats records that were succesdfully reported.
+func ClearReportedTunnelStats(tunnelStats [][]byte) error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelStatsBucket))
+		for _, key := range tunnelStats {
+			err := bucket.Delete(key)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
+}
+
+// resetAllTunnelStatsToUnreported sets all tunnel
+// stats records to StateUnreported. This reset is called
+// when the datastore is initialized at start up, as we do
+// not know if tunnel records in StateReporting were reported
+// or not.
+func resetAllTunnelStatsToUnreported() error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(tunnelStatsBucket))
+		resetKeys := make([][]byte, 0)
+		cursor := bucket.Cursor()
+		for key, _ := cursor.First(); key != nil; key, _ = cursor.Next() {
+			resetKeys = append(resetKeys, key)
+		}
+		// TODO: data mutation is done outside cursor. Is this
+		// strictly necessary in this case?
+		// https://godoc.org/github.com/boltdb/bolt#Cursor
+		for _, key := range resetKeys {
+			err := bucket.Put(key, tunnelStatsStateUnreported)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return ContextError(err)
+	}
+	return nil
 }

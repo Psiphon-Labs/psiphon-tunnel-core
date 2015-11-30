@@ -47,8 +47,8 @@ type Conn struct {
 }
 
 // NewConn creates a Conn. serverID can be anything that uniquely
-// identifies the server; it will be passed to GetForServer() when retrieving
-// the accumulated stats.
+// identifies the server; it will be passed to TakeOutStatsForServer() when
+// retrieving the accumulated stats.
 func NewConn(nextConn net.Conn, serverID string, regexps *Regexps) *Conn {
 	return &Conn{
 		Conn:           nextConn,
@@ -85,7 +85,8 @@ func (conn *Conn) Write(buffer []byte) (n int, err error) {
 			conn.serverID,
 			conn.hostname,
 			int64(n),
-			0})
+			0},
+			false)
 	}
 
 	return
@@ -108,7 +109,8 @@ func (conn *Conn) Read(buffer []byte) (n int, err error) {
 		conn.serverID,
 		hostname,
 		0,
-		int64(n)})
+		int64(n)},
+		false)
 
 	return
 }

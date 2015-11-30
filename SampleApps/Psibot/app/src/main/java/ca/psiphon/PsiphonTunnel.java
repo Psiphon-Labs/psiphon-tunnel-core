@@ -27,25 +27,36 @@ import android.net.NetworkInfo;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
+import android.util.Base64;
 
 import org.apache.http.conn.util.InetAddressUtils;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import go.psi.Psi;
 
@@ -72,6 +83,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         public void onSplitTunnelRegion(String region);
         public void onUntunneledAddress(String address);
         public void onBytesTransferred(long sent, long received);
+        public void onStartedWaitingForNetworkConnectivity();
     }
 
     private final HostService mHostService;
@@ -80,6 +92,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     private int mLocalSocksProxyPort;
     private boolean mRoutingThroughTunnel;
     private Thread mTun2SocksThread;
+    private AtomicBoolean mIsWaitingForNetworkConnectivity;
 
     // Only one PsiphonVpn instance may exist at a time, as the underlying
     // go.psi.Psi and tun2socks implementations each contain global state.
@@ -99,6 +112,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         mHostService = hostService;
         mLocalSocksProxyPort = 0;
         mRoutingThroughTunnel = false;
+        mIsWaitingForNetworkConnectivity = new AtomicBoolean(false);
     }
 
     public Object clone() throws CloneNotSupportedException {
@@ -243,8 +257,16 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
 
     @Override
     public long HasNetworkConnectivity() {
+        boolean hasConnectivity = hasNetworkConnectivity(mHostService.getContext());
+        boolean wasWaitingForNetworkConnectivity = mIsWaitingForNetworkConnectivity.getAndSet(!hasConnectivity);
+        if (!hasConnectivity && !wasWaitingForNetworkConnectivity) {
+            // HasNetworkConnectivity may be called many times, but only call
+            // onStartedWaitingForNetworkConnectivity once per loss of connectivity,
+            // so the HostService may log a single message.
+            mHostService.onStartedWaitingForNetworkConnectivity();
+        }
         // TODO: change to bool return value once gobind supports that type
-        return hasNetworkConnectivity(mHostService.getContext()) ? 1 : 0;
+        return hasConnectivity ? 1 : 0;
     }
 
     @Override
@@ -307,16 +329,6 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         // This parameter is for stats reporting
         json.put("TunnelWholeDevice", isVpnMode ? 1 : 0);
 
-        // Enable tunnel auto-reconnect after a threshold number of port
-        // forward failures. By default, this mechanism is disabled in
-        // tunnel-core due to the chance of false positives due to
-        // bad user input. Since VpnService mode resolves domain names
-        // differently (udpgw), invalid domain name user input won't result
-        // in SSH port forward failures.
-        if (isVpnMode) {
-            json.put("PortForwardFailureThreshold", 10);
-        }
-
         json.put("EmitBytesTransferred", true);
 
         if (mLocalSocksProxyPort != 0) {
@@ -326,15 +338,18 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             // has no effect with restartPsiphon(), a full stop() is necessary.
             json.put("LocalSocksProxyPort", mLocalSocksProxyPort);
         }
-        
+
         json.put("UseIndistinguishableTLS", true);
 
-        // TODO: doesn't work due to OpenSSL version incompatibility; try using
-        // the KeyStore API to build a local copy of trusted CAs cert files.
-        //
-        //if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
-        //    json.put("SystemCACertificateDirectory", "/system/etc/security/cacerts");
-        //}
+        try {
+            // Also enable indistinguishable TLS for HTTPS requests that
+            // require system CAs.
+            json.put(
+                "TrustedCACertificatesFilename",
+                setupTrustedCertificates(mHostService.getContext()));
+        } catch (Exception e) {
+            mHostService.onDiagnosticMessage(e.getMessage());
+        }
 
         return json.toString();
     }
@@ -399,6 +414,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
                 mHostService.onUntunneledAddress(notice.getJSONObject("data").getString("address"));
 
             } else if (noticeType.equals("BytesTransferred")) {
+                diagnostic = false;
                 JSONObject data = notice.getJSONObject("data");
                 mHostService.onBytesTransferred(data.getLong("sent"), data.getLong("received"));
             }
@@ -410,6 +426,75 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
 
         } catch (JSONException e) {
             // Ignore notice
+        }
+    }
+
+    private String setupTrustedCertificates(Context context) throws Exception {
+
+        // Copy the Android system CA store to a local, private cert bundle file.
+        //
+        // This results in a file that can be passed to SSL_CTX_load_verify_locations
+        // for use with OpenSSL modes in tunnel-core.
+        // https://www.openssl.org/docs/manmaster/ssl/SSL_CTX_load_verify_locations.html
+        //
+        // TODO: to use the path mode of load_verify_locations would require emulating
+        // the filename scheme used by c_rehash:
+        // https://www.openssl.org/docs/manmaster/apps/c_rehash.html
+        // http://stackoverflow.com/questions/19237167/the-new-subject-hash-openssl-algorithm-differs
+
+        File directory = context.getDir("PsiphonCAStore", Context.MODE_PRIVATE);
+
+        final String errorMessage = "copy AndroidCAStore failed";
+        try {
+
+            File file = new File(directory, "certs.dat");
+
+            // Pave a fresh copy on every run, which ensures we're not using old certs.
+            // Note: assumes KeyStore doesn't return revoked certs.
+            //
+            // TODO: this takes under 1 second, but should we avoid repaving every time?
+            file.delete();
+
+            PrintStream output = null;
+            try {
+                output = new PrintStream(new FileOutputStream(file));
+
+                KeyStore keyStore = KeyStore.getInstance("AndroidCAStore");
+                keyStore.load(null, null);
+
+                Enumeration<String> aliases = keyStore.aliases();
+                while (aliases.hasMoreElements()) {
+                    String alias = aliases.nextElement();
+                    X509Certificate cert = (X509Certificate) keyStore.getCertificate(alias);
+
+                    output.println("-----BEGIN CERTIFICATE-----");
+                    String pemCert = new String(Base64.encode(cert.getEncoded(), Base64.NO_WRAP), "UTF-8");
+                    // OpenSSL appears to reject the default linebreaking done by Base64.encode,
+                    // so we manually linebreak every 64 characters
+                    for (int i = 0; i < pemCert.length() ; i+= 64) {
+                        output.println(pemCert.substring(i, Math.min(i + 64, pemCert.length())));
+                    }
+                    output.println("-----END CERTIFICATE-----");
+                }
+
+                mHostService.onDiagnosticMessage("prepared PsiphonCAStore");
+
+                return file.getAbsolutePath();
+
+            } finally {
+                if (output != null) {
+                    output.close();
+                }
+            }
+
+        } catch (KeyStoreException e) {
+            throw new Exception(errorMessage, e);
+        } catch (NoSuchAlgorithmException e) {
+            throw new Exception(errorMessage, e);
+        } catch (CertificateException e) {
+            throw new Exception(errorMessage, e);
+        } catch (IOException e) {
+            throw new Exception(errorMessage, e);
         }
     }
 

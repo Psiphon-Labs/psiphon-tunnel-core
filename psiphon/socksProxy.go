@@ -44,9 +44,13 @@ var _SOCKS_PROXY_TYPE = "SOCKS"
 // NewSocksProxy initializes a new SOCKS server. It begins listening for
 // connections, starts a goroutine that runs an accept loop, and returns
 // leaving the accept loop running.
-func NewSocksProxy(config *Config, tunneler Tunneler) (proxy *SocksProxy, err error) {
+func NewSocksProxy(
+	config *Config,
+	tunneler Tunneler,
+	listenIP string) (proxy *SocksProxy, err error) {
+
 	listener, err := socks.ListenSocks(
-		"tcp", fmt.Sprintf("127.0.0.1:%d", config.LocalSocksProxyPort))
+		"tcp", fmt.Sprintf("%s:%d", listenIP, config.LocalSocksProxyPort))
 	if err != nil {
 		if IsAddressInUseError(err) {
 			NoticeSocksProxyPortInUse(config.LocalSocksProxyPort)

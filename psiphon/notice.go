@@ -91,12 +91,12 @@ func NoticeInfo(format string, args ...interface{}) {
 	outputNotice("Info", false, "message", fmt.Sprintf(format, args...))
 }
 
-// NoticeInfo is an alert message; typically a recoverable error condition
+// NoticeAlert is an alert message; typically a recoverable error condition
 func NoticeAlert(format string, args ...interface{}) {
 	outputNotice("Alert", false, "message", fmt.Sprintf(format, args...))
 }
 
-// NoticeInfo is an error message; typically an unrecoverable error condition
+// NoticeError is an error message; typically an unrecoverable error condition
 func NoticeError(format string, args ...interface{}) {
 	outputNotice("Error", true, "message", fmt.Sprintf(format, args...))
 }
@@ -124,8 +124,8 @@ func NoticeConnectingServer(ipAddress, region, protocol, frontingAddress string)
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
-func NoticeActiveTunnel(ipAddress string) {
-	outputNotice("ActiveTunnel", false, "ipAddress", ipAddress)
+func NoticeActiveTunnel(ipAddress, protocol string) {
+	outputNotice("ActiveTunnel", false, "ipAddress", ipAddress, "protocol", protocol)
 }
 
 // NoticeSocksProxyPortInUse is a failure to use the configured LocalSocksProxyPort
@@ -201,9 +201,17 @@ func NoticeClientUpgradeDownloaded(filename string) {
 }
 
 // NoticeBytesTransferred reports how many tunneled bytes have been
-// transferred since the last NoticeBytesTransferred.
-func NoticeBytesTransferred(sent, received int64) {
-	outputNotice("BytesTransferred", false, "sent", sent, "received", received)
+// transferred since the last NoticeBytesTransferred, for the tunnel
+// to the server at ipAddress.
+func NoticeBytesTransferred(ipAddress string, sent, received int64) {
+	outputNotice("BytesTransferred", false, "ipAddress", ipAddress, "sent", sent, "received", received)
+}
+
+// NoticeTotalBytesTransferred reports how many tunneled bytes have been
+// transferred in total up to this point, for the tunnel to the server
+// at ipAddress.
+func NoticeTotalBytesTransferred(ipAddress string, sent, received int64) {
+	outputNotice("TotalBytesTransferred", false, "ipAddress", ipAddress, "sent", sent, "received", received)
 }
 
 // NoticeLocalProxyError reports a local proxy error message. Repetitive
