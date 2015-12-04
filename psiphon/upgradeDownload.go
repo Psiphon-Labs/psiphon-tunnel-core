@@ -33,6 +33,16 @@ import (
 // config.UpgradeDownloadFilename.
 // NOTE: this code does not check that any existing file at config.UpgradeDownloadFilename
 // is actually the version specified in clientUpgradeVersion.
+//
+// BUG: a download that resumes after automation replaces the server-side upgrade entity
+// will end up with corrupt data (some part of the older entity, followed by part of
+// the newer entity). This is not fatal since authentication of the upgrade package will
+// will detect this and the upgrade will be re-downloaded in its entirety. A fix would
+// involve storing the entity ETag with the partial download and using If-Range
+// (http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.27), or, since S3 doesn't
+// list the If-Range header as supported
+// (http://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectGET.html), If-Match followed
+// be a re-request on failure.
 func DownloadUpgrade(config *Config, clientUpgradeVersion string, tunnel *Tunnel) error {
 
 	// Check if complete file already downloaded
