@@ -20,9 +20,12 @@
 package psiphon
 
 import (
+	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -301,4 +304,44 @@ func MakeUntunneledHttpsClient(
 	}
 
 	return httpClient, urlComponents.String(), nil
+}
+
+// MakeTunneledHttpClient returns a net/http.Client which is
+// configured to use custom dialing features including tunneled
+// dialing and, optionally, UseTrustedCACertificatesForStockTLS.
+// Unlike MakeUntunneledHttpsClient and makePsiphonHttpsClient,
+// This http.Client uses stock TLS and no scheme transformation
+// hack is required.
+func MakeTunneledHttpClient(
+	config *Config,
+	tunnel *Tunnel,
+	requestTimeout time.Duration) (*http.Client, error) {
+
+	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
+		return tunnel.sshClient.Dial("tcp", addr)
+	}
+
+	transport := &http.Transport{
+		Dial: tunneledDialer,
+		ResponseHeaderTimeout: requestTimeout,
+	}
+
+	if config.UseTrustedCACertificatesForStockTLS {
+		if config.TrustedCACertificatesFilename == "" {
+			return nil, ContextError(errors.New(
+				"UseTrustedCACertificatesForStockTLS requires TrustedCACertificatesFilename"))
+		}
+		rootCAs := x509.NewCertPool()
+		certData, err := ioutil.ReadFile(config.TrustedCACertificatesFilename)
+		if err != nil {
+			return nil, ContextError(err)
+		}
+		rootCAs.AppendCertsFromPEM(certData)
+		transport.TLSClientConfig = &tls.Config{RootCAs: rootCAs}
+	}
+
+	return &http.Client{
+		Transport: transport,
+		Timeout:   requestTimeout,
+	}, nil
 }

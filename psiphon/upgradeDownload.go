@@ -22,7 +22,6 @@ package psiphon
 import (
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 )
@@ -51,6 +50,11 @@ func DownloadUpgrade(config *Config, clientUpgradeVersion string, tunnel *Tunnel
 		return nil
 	}
 
+	httpClient, err := MakeTunneledHttpClient(config, tunnel, DOWNLOAD_UPGRADE_TIMEOUT)
+	if err != nil {
+		return ContextError(err)
+	}
+
 	partialFilename := fmt.Sprintf(
 		"%s.%s.part", config.UpgradeDownloadFilename, clientUpgradeVersion)
 
@@ -70,18 +74,6 @@ func DownloadUpgrade(config *Config, clientUpgradeVersion string, tunnel *Tunnel
 		return ContextError(err)
 	}
 	request.Header.Add("Range", fmt.Sprintf("bytes=%d-", fileInfo.Size()))
-
-	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
-		return tunnel.sshClient.Dial("tcp", addr)
-	}
-	transport := &http.Transport{
-		Dial: tunneledDialer,
-		ResponseHeaderTimeout: DOWNLOAD_UPGRADE_TIMEOUT,
-	}
-	httpClient := &http.Client{
-		Transport: transport,
-		Timeout:   DOWNLOAD_UPGRADE_TIMEOUT,
-	}
 
 	response, err := httpClient.Do(request)
 

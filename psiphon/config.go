@@ -251,9 +251,19 @@ type Config struct {
 	EmitBytesTransferred bool
 
 	// UseIndistinguishableTLS enables use of an alternative TLS stack with a less
-	// distinct fingerprint (ClientHello content) than the stock Go TLS. This
+	// distinct fingerprint (ClientHello content) than the stock Go TLS.
+	// UseIndistinguishableTLS only applies to untunneled TLS connections. This
 	// parameter is only supported on platforms built with OpenSSL.
+	// Requires TrustedCACertificatesFilename to be set.
 	UseIndistinguishableTLS bool
+
+	// UseTrustedCACertificates toggles use of the trusted CA certs, specified
+	// in TrustedCACertificatesFilename, for tunneled TLS connections that expect
+	// server certificates signed with public certificate authorities (currently,
+	// only upgrade downloads). This option is used with stock Go TLS in cases where
+	// Go may fail to obtain a list of root CAs from the operating system.
+	// Requires TrustedCACertificatesFilename to be set.
+	UseTrustedCACertificatesForStockTLS bool
 
 	// TrustedCACertificatesFilename specifies a file containing trusted CA certs.
 	// The file contents should be compatible with OpenSSL's SSL_CTX_load_verify_locations.
