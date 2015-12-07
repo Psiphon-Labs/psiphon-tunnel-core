@@ -618,7 +618,7 @@ func buildRequestUrl(baseRequestUrl, path string, extraParams ...*ExtraParam) st
 	return requestUrl.String()
 }
 
-// makeHttpsClient creates a Psiphon HTTPS client that tunnels requests and which validates
+// makePsiphonHttpsClient creates a Psiphon HTTPS client that tunnels requests and which validates
 // the web server using the Psiphon server entry web server certificate.
 // This is not a general purpose HTTPS client.
 // As the custom dialer makes an explicit TLS connection, URLs submitted to the returned
