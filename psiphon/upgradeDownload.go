@@ -22,7 +22,6 @@ package psiphon
 import (
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 )
@@ -33,12 +32,27 @@ import (
 // config.UpgradeDownloadFilename.
 // NOTE: this code does not check that any existing file at config.UpgradeDownloadFilename
 // is actually the version specified in clientUpgradeVersion.
+//
+// BUG: a download that resumes after automation replaces the server-side upgrade entity
+// will end up with corrupt data (some part of the older entity, followed by part of
+// the newer entity). This is not fatal since authentication of the upgrade package will
+// will detect this and the upgrade will be re-downloaded in its entirety. A fix would
+// involve storing the entity ETag with the partial download and using If-Range
+// (http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.27), or, since S3 doesn't
+// list the If-Range header as supported
+// (http://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectGET.html), If-Match followed
+// be a re-request on failure.
 func DownloadUpgrade(config *Config, clientUpgradeVersion string, tunnel *Tunnel) error {
 
 	// Check if complete file already downloaded
 	if _, err := os.Stat(config.UpgradeDownloadFilename); err == nil {
 		NoticeClientUpgradeDownloaded(config.UpgradeDownloadFilename)
 		return nil
+	}
+
+	httpClient, err := MakeTunneledHttpClient(config, tunnel, DOWNLOAD_UPGRADE_TIMEOUT)
+	if err != nil {
+		return ContextError(err)
 	}
 
 	partialFilename := fmt.Sprintf(
@@ -60,18 +74,6 @@ func DownloadUpgrade(config *Config, clientUpgradeVersion string, tunnel *Tunnel
 		return ContextError(err)
 	}
 	request.Header.Add("Range", fmt.Sprintf("bytes=%d-", fileInfo.Size()))
-
-	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
-		return tunnel.sshClient.Dial("tcp", addr)
-	}
-	transport := &http.Transport{
-		Dial: tunneledDialer,
-		ResponseHeaderTimeout: DOWNLOAD_UPGRADE_TIMEOUT,
-	}
-	httpClient := &http.Client{
-		Transport: transport,
-		Timeout:   DOWNLOAD_UPGRADE_TIMEOUT,
-	}
 
 	response, err := httpClient.Do(request)
 
