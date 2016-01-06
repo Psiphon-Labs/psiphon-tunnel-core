@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -78,6 +79,14 @@ func InitDataStore(config *Config) (err error) {
 		filename := filepath.Join(config.DataStoreDirectory, DATA_STORE_FILENAME)
 		var db *bolt.DB
 		db, err = bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
+
+		// The datastore file may be corrupt, so attempt to delete and try again
+		if err != nil {
+			NoticeAlert("retry on initDataStore error: %s", err)
+			os.Remove(filename)
+			db, err = bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
+		}
+
 		if err != nil {
 			// Note: intending to set the err return value for InitDataStore
 			err = fmt.Errorf("initDataStore failed to open database: %s", err)
