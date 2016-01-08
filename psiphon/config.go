@@ -85,6 +85,11 @@ type Config struct {
 	// DataStoreDirectory is the directory in which to store the persistent
 	// database, which contains information such as server entries.
 	// By default, current working directory.
+	//
+	// Warning: If the datastore file, DataStoreDirectory/DATA_STORE_FILENAME,
+	// exists but fails to open for any reason (checksum error, unexpected file
+	// format, etc.) it will be deleted in order to pave a new datastore and
+	// continue running.
 	DataStoreDirectory string
 
 	// DataStoreTempDirectory is the directory in which to store temporary
