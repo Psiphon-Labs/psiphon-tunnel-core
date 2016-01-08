@@ -556,11 +556,6 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	totalSent := int64(0)
 	totalReceived := int64(0)
 
-	// Always emit a final NoticeTotalBytesTransferred
-	defer func() {
-		NoticeTotalBytesTransferred(tunnel.serverEntry.IpAddress, totalSent, totalReceived)
-	}()
-
 	noticeBytesTransferredTicker := time.NewTicker(1 * time.Second)
 	defer noticeBytesTransferredTicker.Stop()
 
@@ -702,6 +697,14 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	close(signalSshKeepAlive)
 	close(signalStatusRequest)
 	requestsWaitGroup.Wait()
+
+	// Capture bytes transferred since the last noticeBytesTransferredTicker tick
+	sent, received := transferstats.ReportRecentBytesTransferredForServer(tunnel.serverEntry.IpAddress)
+	totalSent += sent
+	totalReceived += received
+
+	// Always emit a final NoticeTotalBytesTransferred
+	NoticeTotalBytesTransferred(tunnel.serverEntry.IpAddress, totalSent, totalReceived)
 
 	// The stats for this tunnel will be reported via the next successful
 	// status request.
