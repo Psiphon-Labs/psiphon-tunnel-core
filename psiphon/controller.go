@@ -381,7 +381,7 @@ loop:
 			if err == nil {
 				break loop
 			}
-			NoticeAlert("upgrade download failed: ", err)
+			NoticeAlert("upgrade download failed: %s", err)
 		}
 
 		timeout := time.After(DOWNLOAD_UPGRADE_RETRY_PAUSE_PERIOD)
