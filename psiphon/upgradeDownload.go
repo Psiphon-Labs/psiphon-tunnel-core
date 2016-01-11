@@ -20,8 +20,10 @@
 package psiphon
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 )
@@ -32,16 +34,6 @@ import (
 // config.UpgradeDownloadFilename.
 // NOTE: this code does not check that any existing file at config.UpgradeDownloadFilename
 // is actually the version specified in clientUpgradeVersion.
-//
-// BUG: a download that resumes after automation replaces the server-side upgrade entity
-// will end up with corrupt data (some part of the older entity, followed by part of
-// the newer entity). This is not fatal since authentication of the upgrade package will
-// will detect this and the upgrade will be re-downloaded in its entirety. A fix would
-// involve storing the entity ETag with the partial download and using If-Range
-// (http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.27), or, since S3 doesn't
-// list the If-Range header as supported
-// (http://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectGET.html), If-Match followed
-// be a re-request on failure.
 func DownloadUpgrade(config *Config, clientUpgradeVersion string, tunnel *Tunnel) error {
 
 	// Check if complete file already downloaded
@@ -58,6 +50,9 @@ func DownloadUpgrade(config *Config, clientUpgradeVersion string, tunnel *Tunnel
 	partialFilename := fmt.Sprintf(
 		"%s.%s.part", config.UpgradeDownloadFilename, clientUpgradeVersion)
 
+	partialETagFilename := fmt.Sprintf(
+		"%s.%s.part.etag", config.UpgradeDownloadFilename, clientUpgradeVersion)
+
 	file, err := os.OpenFile(partialFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return ContextError(err)
@@ -69,20 +64,50 @@ func DownloadUpgrade(config *Config, clientUpgradeVersion string, tunnel *Tunnel
 		return ContextError(err)
 	}
 
+	// A partial download should have an ETag which is to be sent with the
+	// Range request to ensure that the source object is the same as the
+	// one that is partially downloaded.
+	var partialETag []byte
+	if fileInfo.Size() > 0 {
+
+		partialETag, err = ioutil.ReadFile(partialETagFilename)
+
+		// When the ETag can't be loaded, delete the partial download. To keep the
+		// code simple, there is no immediate, inline retry here, on the assumption
+		// that the controller's upgradeDownloader will shortly call DownloadUpgrade
+		// again.
+		if err != nil {
+			os.Remove(partialFilename)
+			os.Remove(partialETagFilename)
+			return ContextError(
+				fmt.Errorf("failed to load partial download ETag: %s", err))
+		}
+
+	}
+
 	request, err := http.NewRequest("GET", config.UpgradeDownloadUrl, nil)
 	if err != nil {
 		return ContextError(err)
 	}
 	request.Header.Add("Range", fmt.Sprintf("bytes=%d-", fileInfo.Size()))
 
+	// Note: not using If-Range, since not all remote server list host servers
+	// support it. Using If-Match means we need to check for status code 412
+	// and reset when the ETag has changed since the last partial download.
+	if partialETag != nil {
+		request.Header.Add("If-Match", string(partialETag))
+	}
+
 	response, err := httpClient.Do(request)
 
 	// The resumeable download may ask for bytes past the resource range
 	// since it doesn't store the "completed download" state. In this case,
-	// the HTTP server returns 416. Otherwise, we expect 206.
+	// the HTTP server returns 416. Otherwise, we expect 206. We may also
+	// receive 412 on ETag mismatch.
 	if err == nil &&
 		(response.StatusCode != http.StatusPartialContent &&
-			response.StatusCode != http.StatusRequestedRangeNotSatisfiable) {
+			response.StatusCode != http.StatusRequestedRangeNotSatisfiable &&
+			response.StatusCode != http.StatusPreconditionFailed) {
 		response.Body.Close()
 		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
 	}
@@ -90,6 +115,18 @@ func DownloadUpgrade(config *Config, clientUpgradeVersion string, tunnel *Tunnel
 		return ContextError(err)
 	}
 	defer response.Body.Close()
+
+	if response.StatusCode == http.StatusPreconditionFailed {
+		// When the ETag no longer matches, delete the partial download. As above,
+		// simply failing and relying on the controller's upgradeDownloader retry.
+		os.Remove(partialFilename)
+		os.Remove(partialETagFilename)
+		return ContextError(errors.New("partial download ETag mismatch"))
+	}
+
+	// Not making failure to write ETag file fatal, in case the entire download
+	// succeeds in this one request.
+	ioutil.WriteFile(partialETagFilename, []byte(response.Header.Get("ETag")), 0600)
 
 	n, err := io.Copy(NewSyncFileWriter(file), response.Body)
 	if err != nil {
@@ -109,6 +146,8 @@ func DownloadUpgrade(config *Config, clientUpgradeVersion string, tunnel *Tunnel
 	if err != nil {
 		return ContextError(err)
 	}
+
+	os.Remove(partialETagFilename)
 
 	NoticeClientUpgradeDownloaded(config.UpgradeDownloadFilename)
 

@@ -630,6 +630,7 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 		return nil, ContextError(err)
 	}
 	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
+		// TODO: check tunnel.isClosed, and apply TUNNEL_PORT_FORWARD_DIAL_TIMEOUT as in Tunnel.Dial?
 		return tunnel.sshClient.Dial("tcp", addr)
 	}
 	dialer := NewCustomTLSDialer(
