@@ -103,9 +103,11 @@ type transporter interface {
 // is spawned which will eventually start HTTP polling.
 // When frontingAddress is not "", fronting is used. This option assumes caller has
 // already checked server entry capabilities.
+// Fronting always uses HTTPS. Otherwise, HTTPS is optional.
 func DialMeek(
 	serverEntry *ServerEntry, sessionId string,
-	frontingAddress string, config *DialConfig) (meek *MeekConn, err error) {
+	useHttps bool, frontingAddress string,
+	config *DialConfig) (meek *MeekConn, err error) {
 
 	// Configure transport
 	// Note: MeekConn has its own PendingConns to manage the underlying HTTP transport connections,
@@ -119,14 +121,12 @@ func DialMeek(
 	*meekConfig = *config
 	meekConfig.PendingConns = pendingConns
 
-	var host string
+	// host is both what is dialed and what ends up in the HTTP Host header
+	host := fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
 	var dialer Dialer
 	var proxyUrl func(*http.Request) (*url.URL, error)
 
-	if frontingAddress != "" {
-		// In this case, host is not what is dialed but is what ends up in the HTTP Host header
-		host = serverEntry.MeekFrontingHost
-
+	if useHttps || frontingAddress != "" {
 		// Custom TLS dialer:
 		//
 		//  1. ignores the HTTP request address and uses the fronting domain
@@ -160,19 +160,24 @@ func DialMeek(
 		// exclusively connect to non-MiM CDNs); then the adversary kills the underlying TCP connection after
 		// some short period. This is mitigated by the "impaired" protocol classification mechanism.
 
-		dialer = NewCustomTLSDialer(
-			&CustomTLSConfig{
-				Dial:                          NewTCPDialer(meekConfig),
-				Timeout:                       meekConfig.ConnectTimeout,
-				FrontingAddr:                  fmt.Sprintf("%s:%d", frontingAddress, 443),
-				SendServerName:                false,
-				SkipVerify:                    true,
-				UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
-				TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
-			})
+		customTLSConfig := &CustomTLSConfig{
+			Dial:                          NewTCPDialer(meekConfig),
+			Timeout:                       meekConfig.ConnectTimeout,
+			SendServerName:                false,
+			SkipVerify:                    true,
+			UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
+			TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
+		}
+
+		if frontingAddress != "" {
+			// In this case, host is not what is dialed but is what ends up in the HTTP Host header
+			host = serverEntry.MeekFrontingHost
+			customTLSConfig.FrontingAddr = fmt.Sprintf("%s:%d", frontingAddress, 443)
+		}
+
+		dialer = NewCustomTLSDialer(customTLSConfig)
+
 	} else {
-		// In the unfronted case, host is both what is dialed and what ends up in the HTTP Host header
-		host = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
 
 		if strings.HasPrefix(meekConfig.UpstreamProxyUrl, "http://") {
 			// For unfronted meek, we let the http.Transport handle proxying, as the

@@ -343,15 +343,22 @@ func dialSsh(
 	// So depending on which protocol is used, multiple layers are initialized.
 	port := 0
 	useMeek := false
+	useMeekHttps := false
 	useFronting := false
 	useObfuscatedSsh := false
 	switch selectedProtocol {
 	case TUNNEL_PROTOCOL_FRONTED_MEEK:
 		useMeek = true
+		useMeekHttps = true
 		useFronting = true
 		useObfuscatedSsh = true
 	case TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 		useMeek = true
+		useObfuscatedSsh = true
+		port = serverEntry.SshObfuscatedPort
+	case TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS:
+		useMeek = true
+		useMeekHttps = true
 		useObfuscatedSsh = true
 		port = serverEntry.SshObfuscatedPort
 	case TUNNEL_PROTOCOL_OBFUSCATED_SSH:
@@ -403,7 +410,7 @@ func dialSsh(
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
 	}
 	if useMeek {
-		conn, err = DialMeek(serverEntry, sessionId, frontingAddress, dialConfig)
+		conn, err = DialMeek(serverEntry, sessionId, useMeekHttps, frontingAddress, dialConfig)
 		if err != nil {
 			return nil, nil, ContextError(err)
 		}
