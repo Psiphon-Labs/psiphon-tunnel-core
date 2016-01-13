@@ -39,8 +39,13 @@ func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 	if config.DeviceBinder != nil {
 		addrs, err = bindLookupIP(host, config.DnsServerGetter.GetPrimaryDnsServer(), config)
 		if err == nil {
-			return addrs, err
+			if len(addrs) == 0 {
+				err = errors.New("empty address list")
+			} else {
+				return addrs, err
+			}
 		}
+		NoticeAlert("retry resolve host %s: %s", host, err)
 		dnsServer := config.DnsServerGetter.GetSecondaryDnsServer()
 		if dnsServer == "" {
 			return addrs, err
