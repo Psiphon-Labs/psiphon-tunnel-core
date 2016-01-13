@@ -174,7 +174,6 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 	// values (e.g., many servers support all protocols), performance
 	// is expected to be acceptable.
 
-	serverEntryExists := false
 	err = singleton.db.Update(func(tx *bolt.Tx) error {
 
 		serverEntries := tx.Bucket([]byte(serverEntriesBucket))
@@ -212,15 +211,14 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 			return ContextError(err)
 		}
 
+		NoticeInfo("updated server %s", serverEntry.IpAddress)
+
 		return nil
 	})
 	if err != nil {
 		return ContextError(err)
 	}
 
-	if !serverEntryExists {
-		NoticeInfo("updated server %s", serverEntry.IpAddress)
-	}
 	return nil
 }
 
