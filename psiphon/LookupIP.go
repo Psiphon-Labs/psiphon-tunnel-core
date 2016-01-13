@@ -37,7 +37,15 @@ import (
 // to the specified DNS resolver.
 func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 	if config.DeviceBinder != nil {
-		return bindLookupIP(host, config)
+		addrs, err = bindLookupIP(host, config.DnsServerGetter.GetPrimaryDnsServer(), config)
+		if err == nil {
+			return addrs, err
+		}
+		dnsServer := config.DnsServerGetter.GetSecondaryDnsServer()
+		if dnsServer == "" {
+			return addrs, err
+		}
+		return bindLookupIP(host, dnsServer, config)
 	}
 	return net.LookupIP(host)
 }
@@ -46,7 +54,7 @@ func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 // To implement socket device binding, the lower-level syscall APIs are used.
 // The sequence of syscalls in this implementation are taken from:
 // https://code.google.com/p/go/issues/detail?id=6966
-func bindLookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
+func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, err error) {
 
 	// When the input host is an IP address, echo it back
 	ipAddr := net.ParseIP(host)
@@ -65,8 +73,8 @@ func bindLookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 		return nil, ContextError(fmt.Errorf("BindToDevice failed: %s", err))
 	}
 
-	// config.DnsServerGetter.GetDnsServer must return an IP address
-	ipAddr = net.ParseIP(config.DnsServerGetter.GetDnsServer())
+	// config.DnsServerGetter.GetDnsServers() must return IP addresses
+	ipAddr = net.ParseIP(dnsServer)
 	if ipAddr == nil {
 		return nil, ContextError(errors.New("invalid IP address"))
 	}
@@ -94,8 +102,6 @@ func bindLookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 		conn.SetReadDeadline(time.Now().Add(config.ConnectTimeout))
 		conn.SetWriteDeadline(time.Now().Add(config.ConnectTimeout))
 	}
-
-	// TODO: make conn interruptible?
 
 	addrs, _, err = ResolveIP(host, conn)
 	return

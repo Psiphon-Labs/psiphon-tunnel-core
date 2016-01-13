@@ -99,7 +99,8 @@ type NetworkConnectivityChecker interface {
 
 // DnsServerGetter defines the interface to the external GetDnsServer provider
 type DnsServerGetter interface {
-	GetDnsServer() string
+	GetPrimaryDnsServer() string
+	GetSecondaryDnsServer() string
 }
 
 // TimeoutError implements the error interface
