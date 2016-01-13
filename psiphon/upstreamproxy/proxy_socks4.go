@@ -96,13 +96,17 @@ func (s *socks4Proxy) Dial(network, addr string) (net.Conn, error) {
 	}
 
 	// Deal with the destination address/string.
-	ipStr, portStr, err := net.SplitHostPort(addr)
+	hostStr, portStr, err := net.SplitHostPort(addr)
+	domainDest := ""
 	if err != nil {
 		return nil, proxyError(fmt.Errorf("parsing destination address: %v", err))
 	}
-	ip := net.ParseIP(ipStr)
+	ip := net.ParseIP(hostStr)
 	if ip == nil {
-		return nil, proxyError(fmt.Errorf("failed to parse destination IP"))
+		// hostStr is not representing an IP, probably a domain name
+		// try to put an invalid IP into DSTIP field and
+		// append domain name terminated by '\x00' at the end of request
+		ip = net.IPv4(0, 0, 0, 1)
 	}
 	ip4 := ip.To4()
 	if ip4 == nil {
@@ -133,6 +137,10 @@ func (s *socks4Proxy) Dial(network, addr string) (net.Conn, error) {
 		req = append(req, s.username...)
 	}
 	req = append(req, socks4Null)
+	if domainDest != "" {
+		req = append(req, domainDest...)
+		req = append(req, socks4Null)
+	}
 	_, err = c.Write(req)
 	if err != nil {
 		c.Close()
@@ -176,6 +184,5 @@ func socks4ErrorToString(code byte) string {
 }
 
 func init() {
-	// Despite the scheme name, this really is SOCKS4.
 	proxy.RegisterDialerType("socks4a", newSOCKS4)
 }
