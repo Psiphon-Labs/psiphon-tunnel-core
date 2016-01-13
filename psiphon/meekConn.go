@@ -174,7 +174,7 @@ func DialMeek(
 		// In the unfronted case, host is both what is dialed and what ends up in the HTTP Host header
 		host = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
 
-		if meekConfig.UpstreamProxyUrl != "" && strings.HasPrefix(meekConfig.UpstreamProxyUrl, "http://") {
+		if strings.HasPrefix(meekConfig.UpstreamProxyUrl, "http://") {
 			// For unfronted meek, we let the http.Transport handle proxying, as the
 			// target server hostname has to be in the HTTP request line. Also, in this
 			// case, we don't require the proxy to support CONNECT and so we can work
