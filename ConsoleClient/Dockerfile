@@ -24,12 +24,8 @@ ENV CGO_ENABLED=1
 # Get go dependencies
 RUN go get github.com/mitchellh/gox && go get github.com/pwaller/goupx
 
-# Build static OpenSSL libray
+# Setup paths for static OpenSSL libray
 ENV OPENSSL_VERSION=1.0.1p
 ENV PKG_CONFIG_PATH=/tmp/openssl/openssl-$OPENSSL_VERSION
-
-RUN curl -L https://github.com/Psiphon-Labs/psiphon-tunnel-core/raw/master/openssl/openssl-$OPENSSL_VERSION.tar.gz -o /tmp/openssl.tar.gz && \
-      mkdir -p /tmp/openssl && tar -C /tmp/openssl -xzf /tmp/openssl.tar.gz && rm /tmp/openssl.tar.gz
-RUN cd $PKG_CONFIG_PATH && ./Configure --cross-compile-prefix=i686-w64-mingw32- mingw no-shared no-ssl2 no-ssl3 no-comp no-hw no-md2 no-md4 no-rc2 no-rc5 no-krb5 no-ripemd160 no-idea no-gost no-camellia no-seed no-3des no-heartbeats && make depend && make
 
 WORKDIR $GOPATH/src
