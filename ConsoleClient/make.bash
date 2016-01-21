@@ -30,42 +30,38 @@ if [ ! -d bin ]; then
   mkdir bin
 fi
 
-
-prep_openssl () {
-  if [ ! -f /tmp/openssl.tar.gz ]; then
-    curl -L https://github.com/Psiphon-Labs/psiphon-tunnel-core/raw/master/openssl/openssl-$OPENSSL_VERSION.tar.gz -o /tmp/openssl.tar.gz
-  fi
-
-  if [ -d /tmp/openssl ]; then
-    rm -rf /tmp/openssl
-  fi
-
-  mkdir -p /tmp/openssl
-  tar -C /tmp/openssl -xzf /tmp/openssl.tar.gz
-}
-
 build_for_windows () {
   echo "...Getting project dependencies (via go get) for Windows. Parameter is: '$1'"
   GOOS=windows go get -d -v ./...
 
   if [ -z $1 ] || [ "$1" == "32" ]; then
-    echo "...Building windows-i686"
-    echo "....Preparing clean OpenSSL"
-    prep_openssl
+    unset PKG_CONFIG_PATH
+    export PKG_CONFIG_PATH=$PKG_CONFIG_PATH_32
 
-    cd $PKG_CONFIG_PATH && ./Configure --cross-compile-prefix=i686-w64-mingw32- mingw no-shared no-ssl2 no-ssl3 no-comp no-hw no-md2 no-md4 no-rc2 no-rc5 no-krb5 no-ripemd160 no-idea no-gost no-camellia no-seed no-3des no-heartbeats && make depend && make && cd $GOPATH/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient || exit 1
-    CGO_CFLAGS="-I $PKG_CONFIG_PATH/include/" CGO_LDFLAGS="-L $PKG_CONFIG_PATH -L /usr/i686-w64-mingw32/lib/ -lssl -lcrypto -lwsock32 -lcrypt32 -lgdi32" CC=/usr/bin/i686-w64-mingw32-gcc gox -verbose -ldflags "$LDFLAGS" -osarch windows/386 -output bin/windows/${EXE_BASENAME}-i686
+    echo "...Building windows-i686"
+    echo "....PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+
+    CGO_CFLAGS="-I $PKG_CONFIG_PATH/include/" \
+    CGO_LDFLAGS="-L $PKG_CONFIG_PATH -L /usr/i686-w64-mingw32/lib/ -lssl -lcrypto -lwsock32 -lcrypt32 -lgdi32" \
+    CC=/usr/bin/i686-w64-mingw32-gcc \
+    gox -verbose -ldflags "$LDFLAGS" -osarch windows/386 -output bin/windows/${EXE_BASENAME}-i686
+
     ## We are finding that UPXing the full Windows Psiphon client produces better results if psiphon-tunnel-core.exe is not already UPX'd.
     echo "....No UPX for this build"
   fi
 
   if [ -z $1 ] || [ "$1" == "64" ]; then
-    echo "...Building windows-x86_64"
-    echo "....Preparing clean OpenSSL"
-    prep_openssl
+    unset PKG_CONFIG_PATH
+    export PKG_CONFIG_PATH=$PKG_CONFIG_PATH_64
 
-    cd $PKG_CONFIG_PATH && ./Configure --cross-compile-prefix=x86_64-w64-mingw32- mingw64 no-shared no-ssl2 no-ssl3 no-comp no-hw no-md2 no-md4 no-rc2 no-rc5 no-krb5 no-ripemd160 no-idea no-gost no-camellia no-seed no-3des no-heartbeats && make depend && make && cd $GOPATH/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient || exit 1
-    CGO_CFLAGS="-I $PKG_CONFIG_PATH/include/" CGO_LDFLAGS="-L $PKG_CONFIG_PATH -L /usr/x86_64-w64-mingw32/lib/ -lssl -lcrypto -lwsock32 -lcrypt32 -lgdi32" CC=/usr/bin/x86_64-w64-mingw32-gcc gox -verbose -ldflags "$LDFLAGS" -osarch windows/amd64 -output bin/windows/${EXE_BASENAME}-x86_64
+    echo "...Building windows-x86_64"
+    echo "....PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+
+    CGO_CFLAGS="-I $PKG_CONFIG_PATH/include/" \
+    CGO_LDFLAGS="-L $PKG_CONFIG_PATH -L /usr/x86_64-w64-mingw32/lib/ -lssl -lcrypto -lwsock32 -lcrypt32 -lgdi32" \
+    CC=/usr/bin/x86_64-w64-mingw32-gcc \
+    gox -verbose -ldflags "$LDFLAGS" -osarch windows/amd64 -output bin/windows/${EXE_BASENAME}-x86_64
+
     # We are finding that UPXing the full Windows Psiphon client produces better results if psiphon-tunnel-core.exe is not already UPX'd.
     echo "....No UPX for this build"
   fi
