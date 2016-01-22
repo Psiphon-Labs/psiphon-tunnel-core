@@ -149,8 +149,9 @@ type Config struct {
 	EgressRegion string
 
 	// TunnelProtocol indicates which protocol to use. Valid values include:
-	// "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "FRONTED-MEEK-OSSH". For the default,
-	// "", the best performing protocol is used.
+	// "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
+	// "FRONTED-MEEK-OSSH". For the default, "", the best performing protocol
+	// is used.
 	TunnelProtocol string
 
 	// EstablishTunnelTimeoutSeconds specifies a time limit after which to halt

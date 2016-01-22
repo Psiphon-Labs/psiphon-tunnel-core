@@ -1,4 +1,4 @@
-// +build !android, !windows
+// +build !android,!windows
 
 /*
  * Copyright (c) 2015, Psiphon Inc.

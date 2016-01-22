@@ -128,6 +128,8 @@ func DownloadUpgrade(config *Config, clientUpgradeVersion string, tunnel *Tunnel
 	// succeeds in this one request.
 	ioutil.WriteFile(partialETagFilename, []byte(response.Header.Get("ETag")), 0600)
 
+	// A partial download occurs when this copy is interrupted. The io.Copy
+	// will fail, leaving a partial download in place (.part and .part.etag).
 	n, err := io.Copy(NewSyncFileWriter(file), response.Body)
 	if err != nil {
 		return ContextError(err)
