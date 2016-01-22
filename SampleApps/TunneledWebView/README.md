@@ -32,18 +32,18 @@ import ca.psiphon.PsiphonTunnel;
 //
 // This sample app demonstrates tunneling a WebView through the
 // Psiphon Library. This app's main activity shows a log of
-// activity and a WebView that is loaded once Psiphon is connected.
+// events and a WebView that is loaded once Psiphon is connected.
 //
 // The flow is as follows:
 //
-// - The Psiphon tunnel is started in onResume. PsiphonTunnel.start()
+// - The Psiphon tunnel is started in onResume(). PsiphonTunnel.start()
 //   is an asynchronous call that returns immediately.
 //
 // - Once Psiphon has selected a local HTTP proxy listening port, the
-//   onListeningHttpProxyPort callback is called. This app records the
+//   onListeningHttpProxyPort() callback is called. This app records the
 //   port to use for tunneling traffic.
 //
-// - Once Psiphon has established a tunnel, the onConnected callback
+// - Once Psiphon has established a tunnel, the onConnected() callback
 //   is called. This app now loads the WebView, after setting its proxy
 //   to point to Psiphon's local HTTP proxy.
 //
@@ -52,7 +52,8 @@ import ca.psiphon.PsiphonTunnel;
 // - Embed a Psiphon config file in app/src/main/res/raw/psiphon_config.
 //
 // - Add the Psiphon Library AAR module as a dependency (see this app's
-//   project settings).
+//   project settings; to build this sample project, you need to drop
+//   psi-0.0.10.aar into app/libs).
 //
 // - Use app/src/main/java/ca/psiphon/PsiphonTunnel.java, which provides
 //   a higher-level wrapper around the Psiphon Library module. This file
