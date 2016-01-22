@@ -44,7 +44,7 @@ public class Service extends VpnService
 
     @Override
     public void onCreate() {
-        mPsiphonTunnel = PsiphonTunnel.newPsiphonVpn(this);
+        mPsiphonTunnel = PsiphonTunnel.newPsiphonTunnel(this);
         startForeground(R.string.foregroundServiceNotificationId, makeForegroundNotification());
         try {
             if (!mPsiphonTunnel.startRouting()) {

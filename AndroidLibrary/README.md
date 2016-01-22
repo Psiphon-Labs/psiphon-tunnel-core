@@ -28,18 +28,7 @@ Using
 
 1. Build `psi.aar` from source or use the [binary release](https://github.com/Psiphon-Labs/psiphon-tunnel-core/releases)
 1. Add `psi.aar` to your Android Studio project as described in the [gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile)
-1. Example usage in [Psibot sample app](../SampleApps/Psibot/README.md)
-
-See sample API usage in [Psibot's PsiphonVpn.java](../SampleApps/Psibot/app/src/main/java/ca/psiphon/PsiphonVpn.java). Uses `gobind` conventions for data passing.
-
-1. Embed a [config file](../README.md#setup)
-1. Call `Go.init(getApplicationContext());` in `Application.onCreate()`
-1. Extend `Psi.Listener.Stub` to receive messages in `Message(String line)`
-1. Call `Psi.Start(configFile, Psi.Listener)` to start Psiphon. Catch `Exception` to receive errors.
-1. Call `Psi.Stop()` to stop Psiphon.
-1. Sample shows how to monitor messages and detect which proxy ports to use and when the tunnel is active.
-
-NOTE: may add more explicit interface for state change events.
+1. Example usage in [TunneledWebView sample app](../SampleApps/TunneledWebView/README.md)
 
 Limitations
 --------------------------------------------------------------------------------
