@@ -21,6 +21,6 @@ Native libraries
 Psiphon Android Library and config file
 --------------------------------------------------------------------------------
 
-Uses the [Psiphon Android Library](../AndroidLibrary/README.md).
+Uses the [Psiphon Android Library](../../AndroidLibrary/README.md).
 
 * `app/src/main/res/raw/psiphon_config_stub` and its placeholder values must be replaced with `app\src\main\res\raw\psiphon_config` and valid configuration values.
