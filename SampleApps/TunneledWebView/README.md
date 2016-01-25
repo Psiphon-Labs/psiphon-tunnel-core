@@ -10,7 +10,7 @@ an Android app. TunneledWebView proxies a WebView through the Psiphon tunnel.
 Integration
 --------------------------------------------------------------------------------
 
-Uses the [Psiphon Android Library](../AndroidLibrary/README.md).
+Uses the [Psiphon Android Library](../../AndroidLibrary/README.md).
 
 Integration is illustrated in the main activity source file in the sample app. Here are the key parts.
 
