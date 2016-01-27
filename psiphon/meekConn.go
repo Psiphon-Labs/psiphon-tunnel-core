@@ -451,7 +451,7 @@ func (meek *MeekConn) relay() {
 		} else {
 			interval = time.Duration(float64(interval) * POLL_INTERNAL_MULTIPLIER)
 			if interval >= MAX_POLL_INTERVAL {
-				interval = MIN_POLL_INTERVAL
+				interval = MAX_POLL_INTERVAL
 			}
 		}
 	}
