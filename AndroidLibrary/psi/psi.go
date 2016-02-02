@@ -35,7 +35,8 @@ type PsiphonProvider interface {
 	Notice(noticeJSON string)
 	HasNetworkConnectivity() int
 	BindToDevice(fileDescriptor int) error
-	GetDnsServer() string
+	GetPrimaryDnsServer() string
+	GetSecondaryDnsServer() string
 }
 
 var controller *psiphon.Controller

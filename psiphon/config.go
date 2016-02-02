@@ -29,11 +29,12 @@ import (
 // TODO: allow all params to be configured
 
 const (
-	DATA_STORE_FILENAME                            = "psiphon.db"
+	LEGACY_DATA_STORE_FILENAME                     = "psiphon.db"
+	DATA_STORE_FILENAME                            = "psiphon.boltdb"
 	CONNECTION_WORKER_POOL_SIZE                    = 10
 	TUNNEL_POOL_SIZE                               = 1
 	TUNNEL_CONNECT_TIMEOUT                         = 20 * time.Second
-	TUNNEL_OPERATE_SHUTDOWN_TIMEOUT                = 500 * time.Millisecond
+	TUNNEL_OPERATE_SHUTDOWN_TIMEOUT                = 1 * time.Second
 	TUNNEL_PORT_FORWARD_DIAL_TIMEOUT               = 10 * time.Second
 	TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES        = 256
 	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MIN               = 60 * time.Second
@@ -45,6 +46,7 @@ const (
 	ESTABLISH_TUNNEL_TIMEOUT_SECONDS               = 300
 	ESTABLISH_TUNNEL_WORK_TIME                     = 60 * time.Second
 	ESTABLISH_TUNNEL_PAUSE_PERIOD                  = 5 * time.Second
+	ESTABLISH_TUNNEL_SERVER_AFFINITY_GRACE_PERIOD  = 1 * time.Second
 	HTTP_PROXY_ORIGIN_SERVER_TIMEOUT               = 15 * time.Second
 	HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST       = 50
 	FETCH_REMOTE_SERVER_LIST_TIMEOUT               = 30 * time.Second
@@ -52,11 +54,15 @@ const (
 	FETCH_REMOTE_SERVER_LIST_STALE_PERIOD          = 6 * time.Hour
 	PSIPHON_API_CLIENT_SESSION_ID_LENGTH           = 16
 	PSIPHON_API_SERVER_TIMEOUT                     = 20 * time.Second
+	PSIPHON_API_SHUTDOWN_SERVER_TIMEOUT            = 1 * time.Second
 	PSIPHON_API_STATUS_REQUEST_PERIOD_MIN          = 5 * time.Minute
 	PSIPHON_API_STATUS_REQUEST_PERIOD_MAX          = 10 * time.Minute
+	PSIPHON_API_STATUS_REQUEST_SHORT_PERIOD_MIN    = 5 * time.Second
+	PSIPHON_API_STATUS_REQUEST_SHORT_PERIOD_MAX    = 10 * time.Second
 	PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES   = 256
 	PSIPHON_API_CONNECTED_REQUEST_PERIOD           = 24 * time.Hour
 	PSIPHON_API_CONNECTED_REQUEST_RETRY_PERIOD     = 5 * time.Second
+	PSIPHON_API_TUNNEL_STATS_MAX_COUNT             = 1000
 	FETCH_ROUTES_TIMEOUT                           = 1 * time.Minute
 	DOWNLOAD_UPGRADE_TIMEOUT                       = 15 * time.Minute
 	DOWNLOAD_UPGRADE_RETRY_PAUSE_PERIOD            = 5 * time.Second
@@ -79,6 +85,11 @@ type Config struct {
 	// DataStoreDirectory is the directory in which to store the persistent
 	// database, which contains information such as server entries.
 	// By default, current working directory.
+	//
+	// Warning: If the datastore file, DataStoreDirectory/DATA_STORE_FILENAME,
+	// exists but fails to open for any reason (checksum error, unexpected file
+	// format, etc.) it will be deleted in order to pave a new datastore and
+	// continue running.
 	DataStoreDirectory string
 
 	// DataStoreTempDirectory is the directory in which to store temporary
@@ -118,6 +129,9 @@ type Config struct {
 	// automatic updates.
 	// This value is supplied by and depends on the Psiphon Network, and is
 	// typically embedded in the client binary.
+	// Note that sending a ClientPlatform string which includes "windows"
+	// (case insensitive) and a ClientVersion of <= 44 will cause an
+	// error in processing the response to DoConnectedRequest calls.
 	ClientVersion string
 
 	// ClientPlatform is the client platform ("Windows", "Android", etc.) that
@@ -135,8 +149,9 @@ type Config struct {
 	EgressRegion string
 
 	// TunnelProtocol indicates which protocol to use. Valid values include:
-	// "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "FRONTED-MEEK-OSSH". For the default,
-	// "", the best performing protocol is used.
+	// "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
+	// "FRONTED-MEEK-OSSH". For the default, "", the best performing protocol
+	// is used.
 	TunnelProtocol string
 
 	// EstablishTunnelTimeoutSeconds specifies a time limit after which to halt
@@ -242,9 +257,19 @@ type Config struct {
 	EmitBytesTransferred bool
 
 	// UseIndistinguishableTLS enables use of an alternative TLS stack with a less
-	// distinct fingerprint (ClientHello content) than the stock Go TLS. This
+	// distinct fingerprint (ClientHello content) than the stock Go TLS.
+	// UseIndistinguishableTLS only applies to untunneled TLS connections. This
 	// parameter is only supported on platforms built with OpenSSL.
+	// Requires TrustedCACertificatesFilename to be set.
 	UseIndistinguishableTLS bool
+
+	// UseTrustedCACertificates toggles use of the trusted CA certs, specified
+	// in TrustedCACertificatesFilename, for tunneled TLS connections that expect
+	// server certificates signed with public certificate authorities (currently,
+	// only upgrade downloads). This option is used with stock Go TLS in cases where
+	// Go may fail to obtain a list of root CAs from the operating system.
+	// Requires TrustedCACertificatesFilename to be set.
+	UseTrustedCACertificatesForStockTLS bool
 
 	// TrustedCACertificatesFilename specifies a file containing trusted CA certs.
 	// The file contents should be compatible with OpenSSL's SSL_CTX_load_verify_locations.

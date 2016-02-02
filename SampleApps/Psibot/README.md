@@ -4,7 +4,7 @@ Psibot README
 Overview
 --------------------------------------------------------------------------------
 
-Psibot is a sample app that demonstrates embedding the Psiphon Go client in
+Psibot is a sample app that demonstrates embedding the Psiphon Library in
 an Android app. Psibot uses the Android VpnService API to route all device
 traffic through tun2socks and in turn through Psiphon.
 
@@ -21,8 +21,6 @@ Native libraries
 Psiphon Android Library and config file
 --------------------------------------------------------------------------------
 
-Uses the [Psiphon Android Library](../AndroidLibrary/README.md).
+Uses the [Psiphon Android Library](../../AndroidLibrary/README.md).
 
 * `app/src/main/res/raw/psiphon_config_stub` and its placeholder values must be replaced with `app\src\main\res\raw\psiphon_config` and valid configuration values.
-
-* Install the Android Library shared object binary at `app/src/main/jniLibs/armeabi-v7a/libgojni.so`.

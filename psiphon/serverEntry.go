@@ -30,15 +30,17 @@ import (
 )
 
 const (
-	TUNNEL_PROTOCOL_SSH            = "SSH"
-	TUNNEL_PROTOCOL_OBFUSCATED_SSH = "OSSH"
-	TUNNEL_PROTOCOL_UNFRONTED_MEEK = "UNFRONTED-MEEK-OSSH"
-	TUNNEL_PROTOCOL_FRONTED_MEEK   = "FRONTED-MEEK-OSSH"
+	TUNNEL_PROTOCOL_SSH                  = "SSH"
+	TUNNEL_PROTOCOL_OBFUSCATED_SSH       = "OSSH"
+	TUNNEL_PROTOCOL_UNFRONTED_MEEK       = "UNFRONTED-MEEK-OSSH"
+	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS = "UNFRONTED-MEEK-HTTPS-OSSH"
+	TUNNEL_PROTOCOL_FRONTED_MEEK         = "FRONTED-MEEK-OSSH"
 )
 
 var SupportedTunnelProtocols = []string{
 	TUNNEL_PROTOCOL_FRONTED_MEEK,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK,
+	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 	TUNNEL_PROTOCOL_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_SSH,
 }
@@ -107,6 +109,20 @@ func (serverEntry *ServerEntry) DisableImpairedProtocols(impairedProtocols []str
 		}
 	}
 	serverEntry.Capabilities = capabilities
+}
+
+func (serverEntry *ServerEntry) GetDirectWebRequestPorts() []string {
+	ports := make([]string, 0)
+	if Contains(serverEntry.Capabilities, "handshake") {
+		// Server-side configuration quirk: there's a port forward from
+		// port 443 to the web server, which we can try, except on servers
+		// running FRONTED_MEEK, which listens on port 443.
+		if !serverEntry.SupportsProtocol(TUNNEL_PROTOCOL_FRONTED_MEEK) {
+			ports = append(ports, "443")
+		}
+		ports = append(ports, serverEntry.WebServerPort)
+	}
+	return ports
 }
 
 // DecodeServerEntry extracts server entries from the encoding
