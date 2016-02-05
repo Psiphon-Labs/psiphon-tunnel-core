@@ -28,6 +28,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	regen "github.com/Psiphon-Inc/goregen"
@@ -77,6 +78,7 @@ type Tunnel struct {
 	signalPortForwardFailure chan struct{}
 	totalPortForwardFailures int
 	startTime                time.Time
+	frontedMeekStats         *FrontedMeekStats
 }
 
 // EstablishTunnel first makes a network transport connection to the
@@ -103,7 +105,7 @@ func EstablishTunnel(
 	}
 
 	// Build transport layers and establish SSH connection
-	conn, sshClient, err := dialSsh(
+	conn, sshClient, frontedMeekStats, err := dialSsh(
 		config, pendingConns, serverEntry, selectedProtocol, sessionId)
 	if err != nil {
 		return nil, ContextError(err)
@@ -132,6 +134,7 @@ func EstablishTunnel(
 		// A buffer allows at least one signal to be sent even when the receiver is
 		// not listening. Senders should not block.
 		signalPortForwardFailure: make(chan struct{}, 1),
+		frontedMeekStats:         frontedMeekStats,
 	}
 
 	// Create a new Psiphon API server context for this tunnel. This includes
@@ -331,13 +334,16 @@ func selectProtocol(config *Config, serverEntry *ServerEntry) (selectedProtocol 
 	return selectedProtocol, nil
 }
 
-// dialSsh is a helper that builds the transport layers and establishes the SSH connection
+// dialSsh is a helper that builds the transport layers and establishes the SSH connection.
+// When TUNNEL_PROTOCOL_FRONTED_MEEK is selected, additional FrontedMeekStats are recorded
+// and returned.
 func dialSsh(
 	config *Config,
 	pendingConns *Conns,
 	serverEntry *ServerEntry,
 	selectedProtocol,
-	sessionId string) (conn net.Conn, sshClient *ssh.Client, err error) {
+	sessionId string) (
+	conn net.Conn, sshClient *ssh.Client, frontedMeekStats *FrontedMeekStats, err error) {
 
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
@@ -376,7 +382,7 @@ func dialSsh(
 
 			frontingAddress, err = regen.Generate(serverEntry.MeekFrontingAddressesRegex)
 			if err != nil {
-				return nil, nil, ContextError(err)
+				return nil, nil, nil, ContextError(err)
 			}
 		} else {
 
@@ -384,20 +390,33 @@ func dialSsh(
 			// fronting-capable servers.
 
 			if len(serverEntry.MeekFrontingAddresses) == 0 {
-				return nil, nil, ContextError(errors.New("MeekFrontingAddresses is empty"))
+				return nil, nil, nil, ContextError(errors.New("MeekFrontingAddresses is empty"))
 			}
 			index, err := MakeSecureRandomInt(len(serverEntry.MeekFrontingAddresses))
 			if err != nil {
-				return nil, nil, ContextError(err)
+				return nil, nil, nil, ContextError(err)
 			}
 			frontingAddress = serverEntry.MeekFrontingAddresses[index]
 		}
 	}
+
 	NoticeConnectingServer(
 		serverEntry.IpAddress,
 		serverEntry.Region,
 		selectedProtocol,
 		frontingAddress)
+
+	// Use an asynchronous callback to record the resolved IP address when
+	// dialing a domain name. Note that DialMeek doesn't immediately
+	// establish any HTTPS connections, so the resolved IP address won't be
+	// reported until during/after ssh session establishment (the ssh traffic
+	// is meek payload). So don't Load() the IP address value until after that
+	// has completed to ensure a result.
+	var resolvedIPAddress atomic.Value
+	resolvedIPAddress.Store("")
+	setResolvedIPAddress := func(IPAddress string) {
+		resolvedIPAddress.Store(IPAddress)
+	}
 
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
@@ -409,16 +428,17 @@ func dialSsh(
 		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
 		DeviceRegion:                  config.DeviceRegion,
+		ResolvedIPCallback:            setResolvedIPAddress,
 	}
 	if useMeek {
 		conn, err = DialMeek(serverEntry, sessionId, useMeekHttps, frontingAddress, dialConfig)
 		if err != nil {
-			return nil, nil, ContextError(err)
+			return nil, nil, nil, ContextError(err)
 		}
 	} else {
 		conn, err = DialTCP(fmt.Sprintf("%s:%d", serverEntry.IpAddress, port), dialConfig)
 		if err != nil {
-			return nil, nil, ContextError(err)
+			return nil, nil, nil, ContextError(err)
 		}
 	}
 
@@ -436,14 +456,14 @@ func dialSsh(
 	if useObfuscatedSsh {
 		sshConn, err = NewObfuscatedSshConn(conn, serverEntry.SshObfuscatedKey)
 		if err != nil {
-			return nil, nil, ContextError(err)
+			return nil, nil, nil, ContextError(err)
 		}
 	}
 
 	// Now establish the SSH session over the sshConn transport
 	expectedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.SshHostKey)
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, nil, ContextError(err)
 	}
 	sshCertChecker := &ssh.CertChecker{
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
@@ -459,7 +479,7 @@ func dialSsh(
 			SshPassword string `json:"SshPassword"`
 		}{sessionId, serverEntry.SshPassword})
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, nil, ContextError(err)
 	}
 	sshClientConfig := &ssh.ClientConfig{
 		User: serverEntry.SshUsername,
@@ -503,10 +523,18 @@ func dialSsh(
 
 	result := <-resultChannel
 	if result.err != nil {
-		return nil, nil, ContextError(result.err)
+		return nil, nil, nil, ContextError(result.err)
 	}
 
-	return conn, result.sshClient, nil
+	if selectedProtocol == TUNNEL_PROTOCOL_FRONTED_MEEK {
+		frontedMeekStats = &FrontedMeekStats{
+			frontingAddress:   frontingAddress,
+			resolvedIPAddress: resolvedIPAddress.Load().(string),
+			enabledSNI:        false,
+		}
+	}
+
+	return conn, result.sshClient, frontedMeekStats, nil
 }
 
 // operateTunnel monitors the health of the tunnel and performs

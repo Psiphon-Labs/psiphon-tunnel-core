@@ -51,6 +51,16 @@ type ServerContext struct {
 	serverHandshakeTimestamp string
 }
 
+// FrontedMeekStats holds extra stats that are only gathered for
+// TUNNEL_PROTOCOL_FRONTED_MEEK. Specifically, which fronting address was
+// selected, what IP address a fronting domain resolved to, and whether SNI
+// was enabled.
+type FrontedMeekStats struct {
+	frontingAddress   string
+	resolvedIPAddress string
+	enabledSNI        bool
+}
+
 // nextTunnelNumber is a monotonically increasing number assigned to each
 // successive tunnel connection. The sessionId and tunnelNumber together
 // form a globally unique identifier for tunnels, which is used for
@@ -599,6 +609,21 @@ func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
 	requestUrl.WriteString(tunnel.config.ClientPlatform)
 	requestUrl.WriteString("&tunnel_whole_device=")
 	requestUrl.WriteString(strconv.Itoa(tunnel.config.TunnelWholeDevice))
+	requestUrl.WriteString("&device_region=")
+	requestUrl.WriteString(tunnel.config.DeviceRegion)
+	if tunnel.frontedMeekStats != nil {
+		requestUrl.WriteString("&fronting_address=")
+		requestUrl.WriteString(tunnel.frontedMeekStats.frontingAddress)
+		requestUrl.WriteString("&fronting_resolved_ip_address=")
+		requestUrl.WriteString(tunnel.frontedMeekStats.resolvedIPAddress)
+		requestUrl.WriteString("&fronting_enabled_sni=")
+		if tunnel.frontedMeekStats.enabledSNI {
+			requestUrl.WriteString("1")
+		} else {
+			requestUrl.WriteString("0")
+		}
+	}
+
 	return requestUrl.String()
 }
 

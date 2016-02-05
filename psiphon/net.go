@@ -88,6 +88,13 @@ type DialConfig struct {
 	// When set, this value may be used, pre-connection, to select performance
 	// or circumvention optimization strategies for the given region.
 	DeviceRegion string
+
+	// ResolvedIPCallback, when set, is called with the IP address that was
+	// dialed. This is either the specified IP address in the dial address,
+	// or the resolved IP address in the case where the dial address is a
+	// domain name.
+	// The callback may be invoked by a concurrent goroutine.
+	ResolvedIPCallback func(string)
 }
 
 // DeviceBinder defines the interface to the external BindToDevice provider
