@@ -83,6 +83,11 @@ type DialConfig struct {
 	// SSL_CTX_load_verify_locations.
 	// Only applies to UseIndistinguishableTLS connections.
 	TrustedCACertificatesFilename string
+
+	// DeviceRegion is the reported region the host device is running in.
+	// When set, this value may be used, pre-connection, to select performance
+	// or circumvention optimization strategies for the given region.
+	DeviceRegion string
 }
 
 // DeviceBinder defines the interface to the external BindToDevice provider

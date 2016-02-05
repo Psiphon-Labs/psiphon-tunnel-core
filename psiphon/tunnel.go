@@ -408,6 +408,7 @@ func dialSsh(
 		DnsServerGetter:               config.DnsServerGetter,
 		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
+		DeviceRegion:                  config.DeviceRegion,
 	}
 	if useMeek {
 		conn, err = DialMeek(serverEntry, sessionId, useMeekHttps, frontingAddress, dialConfig)

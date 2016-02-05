@@ -281,6 +281,14 @@ type Config struct {
 	// 1-2 minutes, when the tunnel is idle. If the SSH keepalive times out, the tunnel
 	// is considered to have failed.
 	DisablePeriodicSshKeepAlive bool
+
+	// DeviceRegion is the optional, reported region the host device is running in.
+	// This input value should be a ISO 3166-1 alpha-2 country code. The device region
+	// is reported to the server in the connected request and recorded for Psiphon
+	// stats.
+	// When provided, this value may be used, pre-connection, to select performance
+	// or circumvention optimization strategies for the given region.
+	DeviceRegion string
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON
