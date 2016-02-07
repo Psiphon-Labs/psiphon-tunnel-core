@@ -629,6 +629,8 @@ func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
 			requestUrl.WriteString("0")
 		}
 	}
+	requestUrl.WriteString("&server_entry_region=")
+	requestUrl.WriteString(tunnel.serverEntry.Region)
 	requestUrl.WriteString("&server_entry_source=")
 	requestUrl.WriteString(tunnel.serverEntry.LocalSource)
 	requestUrl.WriteString("&server_entry_timestamp=")
