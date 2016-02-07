@@ -161,11 +161,18 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	var decodedServerEntries []*ServerEntry
 
 	// Store discovered server entries
+	// We use the server's time, as it's available here, for the server entry
+	// timestamp since this is more reliable than the client time.
 	for _, encodedServerEntry := range handshakeConfig.EncodedServerList {
-		serverEntry, err := DecodeServerEntry(encodedServerEntry)
+
+		serverEntry, err := DecodeServerEntry(
+			encodedServerEntry,
+			TruncateTimestampToHour(handshakeConfig.ServerTimestamp),
+			SERVER_ENTRY_SOURCE_DISCOVERY)
 		if err != nil {
 			return ContextError(err)
 		}
+
 		err = ValidateServerEntry(serverEntry)
 		if err != nil {
 			// Skip this entry and continue with the next one
@@ -622,6 +629,16 @@ func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
 			requestUrl.WriteString("0")
 		}
 	}
+	requestUrl.WriteString("&server_entry_source=")
+	requestUrl.WriteString(tunnel.serverEntry.LocalSource)
+	requestUrl.WriteString("&server_entry_timestamp=")
+
+	// As with last_connected, this timestamp stat, which may be
+	// a precise handshake request server timestamp, is truncated
+	// to hour granularity to avoid introducing a reconstructable
+	// cross-session user trace into server logs.
+	requestUrl.WriteString(
+		TruncateTimestampToHour(tunnel.serverEntry.LocalTimestamp))
 
 	return requestUrl.String()
 }

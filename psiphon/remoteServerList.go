@@ -86,7 +86,10 @@ func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 		return ContextError(err)
 	}
 
-	serverEntries, err := DecodeAndValidateServerEntryList(remoteServerList)
+	serverEntries, err := DecodeAndValidateServerEntryList(
+		remoteServerList,
+		GetCurrentTimestamp(),
+		SERVER_ENTRY_SOURCE_REMOTE)
 	if err != nil {
 		return ContextError(err)
 	}

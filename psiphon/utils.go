@@ -212,3 +212,21 @@ func (writer *SyncFileWriter) Write(p []byte) (n int, err error) {
 	}
 	return
 }
+
+// GetCurrentTimestamp returns the current time in UTC as
+// an RFC 3339 formatted string.
+func GetCurrentTimestamp() string {
+	return time.Now().UTC().Format(time.RFC3339)
+}
+
+// TruncateTimestampToHour truncates an RFC 3339 formatted string
+// to hour granularity. If the input is not a valid format, the
+// result is "".
+func TruncateTimestampToHour(timestamp string) string {
+	t, err := time.Parse(time.RFC3339, timestamp)
+	if err != nil {
+		NoticeAlert("failed to truncate timestamp: %s", err)
+		return ""
+	}
+	return t.Truncate(1 * time.Hour).Format(time.RFC3339)
+}

@@ -396,7 +396,8 @@ func NewServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err 
 
 // newTargetServerEntryIterator is a helper for initializing the TargetServerEntry case
 func newTargetServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err error) {
-	serverEntry, err := DecodeServerEntry(config.TargetServerEntry)
+	serverEntry, err := DecodeServerEntry(
+		config.TargetServerEntry, GetCurrentTimestamp(), SERVER_ENTRY_SOURCE_TARGET)
 	if err != nil {
 		return nil, err
 	}
