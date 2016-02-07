@@ -46,6 +46,15 @@ func Contains(list []string, target string) bool {
 	return false
 }
 
+// FlipCoin is a helper function that randomly
+// returns true or false. If the underlying random
+// number generator fails, FlipCoin still returns
+// a result.
+func FlipCoin() bool {
+	randomInt, _ := MakeSecureRandomInt(2)
+	return randomInt == 1
+}
+
 // MakeSecureRandomInt is a helper function that wraps
 // MakeSecureRandomInt64.
 func MakeSecureRandomInt(max int) (int, error) {
