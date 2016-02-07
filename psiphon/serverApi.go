@@ -52,9 +52,8 @@ type ServerContext struct {
 }
 
 // FrontedMeekStats holds extra stats that are only gathered for
-// TUNNEL_PROTOCOL_FRONTED_MEEK. Specifically, which fronting address was
-// selected, what IP address a fronting domain resolved to, and whether SNI
-// was enabled.
+// FRONTED-MEEK-OSSH. Specifically, which fronting address was selected, what
+// IP address a fronting domain resolved to, and whether SNI was enabled.
 type FrontedMeekStats struct {
 	frontingAddress   string
 	resolvedIPAddress string

@@ -335,8 +335,7 @@ func selectProtocol(config *Config, serverEntry *ServerEntry) (selectedProtocol 
 }
 
 // dialSsh is a helper that builds the transport layers and establishes the SSH connection.
-// When TUNNEL_PROTOCOL_FRONTED_MEEK is selected, additional FrontedMeekStats are recorded
-// and returned.
+// When  FRONTED-MEEK-OSSH is selected, additional FrontedMeekStats are recorded and returned.
 func dialSsh(
 	config *Config,
 	pendingConns *Conns,
@@ -532,6 +531,8 @@ func dialSsh(
 			resolvedIPAddress: resolvedIPAddress.Load().(string),
 			enabledSNI:        false,
 		}
+
+		NoticeFrontedMeekStats(serverEntry.IpAddress, frontedMeekStats)
 	}
 
 	return conn, result.sshClient, frontedMeekStats, nil

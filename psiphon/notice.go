@@ -214,6 +214,15 @@ func NoticeTotalBytesTransferred(ipAddress string, sent, received int64) {
 	outputNotice("TotalBytesTransferred", false, "ipAddress", ipAddress, "sent", sent, "received", received)
 }
 
+// NoticeFrontedMeekStats reports extra network details for a
+// FRONTED-MEEK-OSSH tunnel connection.
+func NoticeFrontedMeekStats(ipAddress string, frontedMeekStats *FrontedMeekStats) {
+	outputNotice("NoticeFrontedMeekStats", false, "ipAddress", ipAddress,
+		"frontingAddress", frontedMeekStats.frontingAddress,
+		"resolvedIPAddress", frontedMeekStats.resolvedIPAddress,
+		"enabledSNI", frontedMeekStats.enabledSNI)
+}
+
 // NoticeLocalProxyError reports a local proxy error message. Repetitive
 // errors for a given proxy type are suppressed.
 func NoticeLocalProxyError(proxyType string, err error) {
