@@ -615,8 +615,15 @@ func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
 	requestUrl.WriteString(tunnel.config.ClientPlatform)
 	requestUrl.WriteString("&tunnel_whole_device=")
 	requestUrl.WriteString(strconv.Itoa(tunnel.config.TunnelWholeDevice))
-	requestUrl.WriteString("&device_region=")
-	requestUrl.WriteString(tunnel.config.DeviceRegion)
+
+	// The following parameters may be blank and must
+	// not be sent to the server if blank.
+
+	if tunnel.config.DeviceRegion != "" {
+		requestUrl.WriteString("&device_region=")
+		requestUrl.WriteString(tunnel.config.DeviceRegion)
+	}
+
 	if tunnel.frontedMeekStats != nil {
 		requestUrl.WriteString("&fronting_address=")
 		requestUrl.WriteString(tunnel.frontedMeekStats.frontingAddress)
@@ -629,18 +636,26 @@ func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
 			requestUrl.WriteString("0")
 		}
 	}
-	requestUrl.WriteString("&server_entry_region=")
-	requestUrl.WriteString(tunnel.serverEntry.Region)
-	requestUrl.WriteString("&server_entry_source=")
-	requestUrl.WriteString(tunnel.serverEntry.LocalSource)
+
+	if tunnel.serverEntry.Region != "" {
+		requestUrl.WriteString("&server_entry_region=")
+		requestUrl.WriteString(tunnel.serverEntry.Region)
+	}
+
+	if tunnel.serverEntry.LocalSource != "" {
+		requestUrl.WriteString("&server_entry_source=")
+		requestUrl.WriteString(tunnel.serverEntry.LocalSource)
+	}
 
 	// As with last_connected, this timestamp stat, which may be
 	// a precise handshake request server timestamp, is truncated
 	// to hour granularity to avoid introducing a reconstructable
 	// cross-session user trace into server logs.
-	requestUrl.WriteString("&server_entry_timestamp=")
-	requestUrl.WriteString(
-		TruncateTimestampToHour(tunnel.serverEntry.LocalTimestamp))
+	localServerEntryTimestamp := TruncateTimestampToHour(tunnel.serverEntry.LocalTimestamp)
+	if localServerEntryTimestamp != "" {
+		requestUrl.WriteString("&server_entry_timestamp=")
+		requestUrl.WriteString(localServerEntryTimestamp)
+	}
 
 	return requestUrl.String()
 }
