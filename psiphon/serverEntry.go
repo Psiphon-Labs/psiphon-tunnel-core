@@ -81,9 +81,9 @@ type ServerEntrySource string
 
 const (
 	SERVER_ENTRY_SOURCE_EMBEDDED  ServerEntrySource = "EMBEDDED"
-	SERVER_ENTRY_SOURCE_REMOTE                      = "REMOTE"
-	SERVER_ENTRY_SOURCE_DISCOVERY                   = "DISCOVERY"
-	SERVER_ENTRY_SOURCE_TARGET                      = "TARGET"
+	SERVER_ENTRY_SOURCE_REMOTE    ServerEntrySource = "REMOTE"
+	SERVER_ENTRY_SOURCE_DISCOVERY ServerEntrySource = "DISCOVERY"
+	SERVER_ENTRY_SOURCE_TARGET    ServerEntrySource = "TARGET"
 )
 
 // SupportsProtocol returns true if and only if the ServerEntry has
