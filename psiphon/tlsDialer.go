@@ -174,8 +174,13 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 
 	if config.SendServerName && config.VerifyLegacyCertificate == nil {
 		// Set the ServerName and rely on the usual logic in
-		// tls.Conn.Handshake() to do its verification
-		tlsConfig.ServerName = hostname
+		// tls.Conn.Handshake() to do its verification.
+		// Explicitly exclude IPs:
+		// - "Literal IPv4 and IPv6 addresses are not permitted": https://tools.ietf.org/html/rfc6066#page-6.
+		// - OpenSSL does not appear to enforce this rule itself.
+		if net.ParseIP(hostname) == nil {
+			tlsConfig.ServerName = hostname
+		}
 	} else {
 		// No SNI.
 		// Disable verification in tls.Conn.Handshake().  We'll verify manually

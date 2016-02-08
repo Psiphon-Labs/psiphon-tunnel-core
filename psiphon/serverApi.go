@@ -633,12 +633,12 @@ func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
 	requestUrl.WriteString(tunnel.serverEntry.Region)
 	requestUrl.WriteString("&server_entry_source=")
 	requestUrl.WriteString(tunnel.serverEntry.LocalSource)
-	requestUrl.WriteString("&server_entry_timestamp=")
 
 	// As with last_connected, this timestamp stat, which may be
 	// a precise handshake request server timestamp, is truncated
 	// to hour granularity to avoid introducing a reconstructable
 	// cross-session user trace into server logs.
+	requestUrl.WriteString("&server_entry_timestamp=")
 	requestUrl.WriteString(
 		TruncateTimestampToHour(tunnel.serverEntry.LocalTimestamp))
 
