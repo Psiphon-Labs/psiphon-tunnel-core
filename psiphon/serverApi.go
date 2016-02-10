@@ -51,6 +51,15 @@ type ServerContext struct {
 	serverHandshakeTimestamp string
 }
 
+// FrontedMeekStats holds extra stats that are only gathered for
+// FRONTED-MEEK-OSSH. Specifically, which fronting address was selected, what
+// IP address a fronting domain resolved to, and whether SNI was enabled.
+type FrontedMeekStats struct {
+	frontingAddress   string
+	resolvedIPAddress string
+	enabledSNI        bool
+}
+
 // nextTunnelNumber is a monotonically increasing number assigned to each
 // successive tunnel connection. The sessionId and tunnelNumber together
 // form a globally unique identifier for tunnels, which is used for
@@ -152,11 +161,18 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	var decodedServerEntries []*ServerEntry
 
 	// Store discovered server entries
+	// We use the server's time, as it's available here, for the server entry
+	// timestamp since this is more reliable than the client time.
 	for _, encodedServerEntry := range handshakeConfig.EncodedServerList {
-		serverEntry, err := DecodeServerEntry(encodedServerEntry)
+
+		serverEntry, err := DecodeServerEntry(
+			encodedServerEntry,
+			TruncateTimestampToHour(handshakeConfig.ServerTimestamp),
+			SERVER_ENTRY_SOURCE_DISCOVERY)
 		if err != nil {
 			return ContextError(err)
 		}
+
 		err = ValidateServerEntry(serverEntry)
 		if err != nil {
 			// Skip this entry and continue with the next one
@@ -599,6 +615,48 @@ func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
 	requestUrl.WriteString(tunnel.config.ClientPlatform)
 	requestUrl.WriteString("&tunnel_whole_device=")
 	requestUrl.WriteString(strconv.Itoa(tunnel.config.TunnelWholeDevice))
+
+	// The following parameters may be blank and must
+	// not be sent to the server if blank.
+
+	if tunnel.config.DeviceRegion != "" {
+		requestUrl.WriteString("&device_region=")
+		requestUrl.WriteString(tunnel.config.DeviceRegion)
+	}
+
+	if tunnel.frontedMeekStats != nil {
+		requestUrl.WriteString("&fronting_address=")
+		requestUrl.WriteString(tunnel.frontedMeekStats.frontingAddress)
+		requestUrl.WriteString("&fronting_resolved_ip_address=")
+		requestUrl.WriteString(tunnel.frontedMeekStats.resolvedIPAddress)
+		requestUrl.WriteString("&fronting_enabled_sni=")
+		if tunnel.frontedMeekStats.enabledSNI {
+			requestUrl.WriteString("1")
+		} else {
+			requestUrl.WriteString("0")
+		}
+	}
+
+	if tunnel.serverEntry.Region != "" {
+		requestUrl.WriteString("&server_entry_region=")
+		requestUrl.WriteString(tunnel.serverEntry.Region)
+	}
+
+	if tunnel.serverEntry.LocalSource != "" {
+		requestUrl.WriteString("&server_entry_source=")
+		requestUrl.WriteString(tunnel.serverEntry.LocalSource)
+	}
+
+	// As with last_connected, this timestamp stat, which may be
+	// a precise handshake request server timestamp, is truncated
+	// to hour granularity to avoid introducing a reconstructable
+	// cross-session user trace into server logs.
+	localServerEntryTimestamp := TruncateTimestampToHour(tunnel.serverEntry.LocalTimestamp)
+	if localServerEntryTimestamp != "" {
+		requestUrl.WriteString("&server_entry_timestamp=")
+		requestUrl.WriteString(localServerEntryTimestamp)
+	}
+
 	return requestUrl.String()
 }
 

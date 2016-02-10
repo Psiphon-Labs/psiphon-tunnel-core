@@ -61,6 +61,12 @@ func makeTCPDialer(config *DialConfig) func(network, addr string) (net.Conn, err
 		if err != nil {
 			return nil, ContextError(err)
 		}
+		if config.ResolvedIPCallback != nil {
+			host, _, err := net.SplitHostPort(conn.RemoteAddr().String())
+			if err == nil {
+				config.ResolvedIPCallback(host)
+			}
+		}
 		return conn, nil
 	}
 }

@@ -91,6 +91,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 		DnsServerGetter:               config.DnsServerGetter,
 		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
+		DeviceRegion:                  config.DeviceRegion,
 	}
 
 	controller = &Controller{

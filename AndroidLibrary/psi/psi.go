@@ -75,7 +75,10 @@ func Start(
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
-	serverEntries, err := psiphon.DecodeAndValidateServerEntryList(embeddedServerEntryList)
+	serverEntries, err := psiphon.DecodeAndValidateServerEntryList(
+		embeddedServerEntryList,
+		psiphon.GetCurrentTimestamp(),
+		psiphon.SERVER_ENTRY_SOURCE_EMBEDDED)
 	if err != nil {
 		return fmt.Errorf("error decoding embedded server entry list: %s", err)
 	}
