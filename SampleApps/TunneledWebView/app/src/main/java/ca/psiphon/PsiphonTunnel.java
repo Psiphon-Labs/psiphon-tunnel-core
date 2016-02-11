@@ -401,6 +401,6 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
                 region = defaultLocale.getCountry();
             }
         }
-        return region.toUpperCase();
+        return region.toUpperCase(Locale.US);
     }
 }
