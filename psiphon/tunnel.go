@@ -555,7 +555,7 @@ func dialSsh(
 		frontedMeekStats = &FrontedMeekStats{
 			frontingAddress:   frontingAddress,
 			resolvedIPAddress: resolvedIPAddress.Load().(string),
-			enabledSNI:        false,
+			enabledSNI:        useMeekSNI,
 			frontingHost:      frontingHost,
 		}
 
