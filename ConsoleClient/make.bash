@@ -33,6 +33,10 @@ fi
 build_for_windows () {
   echo "...Getting project dependencies (via go get) for Windows. Parameter is: '$1'"
   GOOS=windows go get -d -v ./...
+  if [ $? != 0 ]; then
+    echo "....'go get' failed, exiting"
+    exit $?
+  fi
 
   if [ -z $1 ] || [ "$1" == "32" ]; then
     unset PKG_CONFIG_PATH
@@ -45,6 +49,13 @@ build_for_windows () {
     CGO_LDFLAGS="-L $PKG_CONFIG_PATH -L /usr/i686-w64-mingw32/lib/ -lssl -lcrypto -lwsock32 -lcrypt32 -lgdi32" \
     CC=/usr/bin/i686-w64-mingw32-gcc \
     gox -verbose -ldflags "$LDFLAGS" -osarch windows/386 -output bin/windows/${EXE_BASENAME}-i686
+    RETVAL=$?
+    echo ".....gox completed, exit code: $?"
+    if [ $RETVAL != 0 ]; then
+      echo ".....gox failed, exiting"
+      exit $RETVAL
+    fi
+    unset RETVAL
 
     ## We are finding that UPXing the full Windows Psiphon client produces better results if psiphon-tunnel-core.exe is not already UPX'd.
     echo "....No UPX for this build"
@@ -61,6 +72,12 @@ build_for_windows () {
     CGO_LDFLAGS="-L $PKG_CONFIG_PATH -L /usr/x86_64-w64-mingw32/lib/ -lssl -lcrypto -lwsock32 -lcrypt32 -lgdi32" \
     CC=/usr/bin/x86_64-w64-mingw32-gcc \
     gox -verbose -ldflags "$LDFLAGS" -osarch windows/amd64 -output bin/windows/${EXE_BASENAME}-x86_64
+    RETVAL=$?
+    if [ $RETVAL != 0 ]; then
+      echo ".....gox failed, exiting"
+      exit $RETVAL
+    fi
+    unset RETVAL
 
     # We are finding that UPXing the full Windows Psiphon client produces better results if psiphon-tunnel-core.exe is not already UPX'd.
     echo "....No UPX for this build"
@@ -70,25 +87,59 @@ build_for_windows () {
 build_for_linux () {
   echo "Getting project dependencies (via go get) for Linux. Parameter is: '$1'"
   GOOS=linux go get -d -v ./...
+  if [ $? != 0 ]; then
+    echo "...'go get' failed, exiting"
+    exit $?
+  fi
 
   if [ -z $1 ] || [ "$1" == "32" ]; then
     echo "...Building linux-i686"
     CFLAGS=-m32 gox -verbose -ldflags "$LDFLAGS" -osarch linux/386 -output bin/linux/${EXE_BASENAME}-i686
+    RETVAL=$?
+    if [ $RETVAL != 0 ]; then
+      echo ".....gox failed, exiting"
+      exit $RETVAL
+    fi
+    unset RETVAL
+
     echo "....UPX packaging output"
     goupx --best bin/linux/${EXE_BASENAME}-i686
+    RETVAL=$?
+    if [ $RETVAL != 0 ]; then
+      echo ".....goupx failed, exiting"
+      exit $RETVAL
+    fi
+    unset RETVAL
   fi
 
   if [ -z $1 ] || [ "$1" == "64" ]; then
     echo "...Building linux-x86_64"
     gox -verbose -ldflags "$LDFLAGS" -osarch linux/amd64 -output bin/linux/${EXE_BASENAME}-x86_64
+    RETVAL=$?
+    if [ $RETVAL != 0 ]; then
+      echo "....gox failed, exiting"
+      exit $RETVAL
+    fi
+    unset RETVAL
+
     echo "....UPX packaging output"
     goupx --best bin/linux/${EXE_BASENAME}-x86_64
+    RETVAL=$?
+    if [ $RETVAL != 0 ]; then
+      echo ".....goupx failed, exiting"
+      exit $RETVAL
+    fi
+    unset RETVAL
   fi
 }
 
 build_for_osx () {
   echo "Getting project dependencies (via go get) for OSX"
   GOOS=darwin go get -d -v ./...
+  if [ $? != 0 ]; then
+    echo "..'go get' failed, exiting"
+    exit $?
+  fi
 
   echo "Building darwin-x86_64..."
   echo "..Disabling CGO for this build"
@@ -102,26 +153,56 @@ case $TARGET in
   windows)
     echo "..Building for Windows"
     build_for_windows $2
+    exit $?
+
     ;;
   linux)
     echo "..Building for Linux"
     build_for_linux $2
+    exit $?
+
     ;;
   osx)
     echo "..Building for OSX"
     build_for_osx
+    exit $?
+
     ;;
   all)
     echo "..Building all"
     build_for_windows $2
+    if [ $? != 0 ]; then
+      exit $?
+    fi
+
     build_for_linux $2
+    if [ $? != 0 ]; then
+      exit $?
+    fi
+
     build_for_osx
+    if [ $? != 0 ]; then
+      exit $?
+    fi
+
     ;;
   *)
     echo "..No selection made, building all"
     build_for_windows $2
+    if [ $? != 0 ]; then
+      exit $?
+    fi
+
     build_for_linux $2
+    if [ $? != 0 ]; then
+      exit $?
+    fi
+
     build_for_osx
+    if [ $? != 0 ]; then
+      exit $?
+    fi
+
     ;;
 
 esac
