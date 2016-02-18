@@ -9,6 +9,12 @@ install:
 - go get -t -d -v ./... && go build -v ./...
 script:
 - go test -v ./...
+- cd psiphon
+- go test -v -covermode=count -coverprofile=coverage.out
+- $HOME/gopath/bin/goveralls -coverprofile=coverage.out -service=travis-ci -repotoken $COVERALLS_TOKEN
 before_install:
+- go get github.com/axw/gocov/gocov
+- go get github.com/mattn/goveralls
+- if ! go get github.com/golang/tools/cmd/cover; then go get golang.org/x/tools/cmd/cover; fi
 - openssl aes-256-cbc -K $encrypted_9e40808ea1e2_key -iv $encrypted_9e40808ea1e2_iv
   -in psiphon/controller_test.config.enc -out psiphon/controller_test.config -d
