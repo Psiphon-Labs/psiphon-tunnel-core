@@ -35,10 +35,12 @@ const (
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK       = "UNFRONTED-MEEK-OSSH"
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS = "UNFRONTED-MEEK-HTTPS-OSSH"
 	TUNNEL_PROTOCOL_FRONTED_MEEK         = "FRONTED-MEEK-OSSH"
+	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP    = "FRONTED-MEEK-HTTP-OSSH"
 )
 
 var SupportedTunnelProtocols = []string{
 	TUNNEL_PROTOCOL_FRONTED_MEEK,
+	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 	TUNNEL_PROTOCOL_OBFUSCATED_SSH,
@@ -66,9 +68,11 @@ type ServerEntry struct {
 	MeekCookieEncryptionPublicKey string   `json:"meekCookieEncryptionPublicKey"`
 	MeekObfuscatedKey             string   `json:"meekObfuscatedKey"`
 	MeekFrontingHost              string   `json:"meekFrontingHost"`
+	MeekFrontingHosts             []string `json:"meekFrontingHosts"`
 	MeekFrontingDomain            string   `json:"meekFrontingDomain"`
 	MeekFrontingAddresses         []string `json:"meekFrontingAddresses"`
 	MeekFrontingAddressesRegex    string   `json:"meekFrontingAddressesRegex"`
+	MeekFrontingDisableSNI        bool     `json:"meekFrontingDisableSNI"`
 
 	// These local fields are not expected to be present in downloaded server
 	// entries. They are added by the client to record and report stats about

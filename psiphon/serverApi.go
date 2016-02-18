@@ -52,12 +52,12 @@ type ServerContext struct {
 }
 
 // FrontedMeekStats holds extra stats that are only gathered for
-// FRONTED-MEEK-OSSH. Specifically, which fronting address was selected, what
-// IP address a fronting domain resolved to, and whether SNI was enabled.
+// FRONTED-MEEK-OSSH, FRONTED-MEEK-HTTP-OSSH.
 type FrontedMeekStats struct {
 	frontingAddress   string
 	resolvedIPAddress string
 	enabledSNI        bool
+	frontingHost      string
 }
 
 // nextTunnelNumber is a monotonically increasing number assigned to each
@@ -635,6 +635,8 @@ func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
 		} else {
 			requestUrl.WriteString("0")
 		}
+		requestUrl.WriteString("&fronting_host=")
+		requestUrl.WriteString(tunnel.frontedMeekStats.frontingHost)
 	}
 
 	if tunnel.serverEntry.Region != "" {

@@ -220,7 +220,8 @@ func NoticeFrontedMeekStats(ipAddress string, frontedMeekStats *FrontedMeekStats
 	outputNotice("NoticeFrontedMeekStats", false, "ipAddress", ipAddress,
 		"frontingAddress", frontedMeekStats.frontingAddress,
 		"resolvedIPAddress", frontedMeekStats.resolvedIPAddress,
-		"enabledSNI", frontedMeekStats.enabledSNI)
+		"enabledSNI", frontedMeekStats.enabledSNI,
+		"frontingHost", frontedMeekStats.frontingHost)
 }
 
 // NoticeLocalProxyError reports a local proxy error message. Repetitive
