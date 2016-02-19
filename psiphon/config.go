@@ -289,6 +289,12 @@ type Config struct {
 	// When provided, this value may be used, pre-connection, to select performance
 	// or circumvention optimization strategies for the given region.
 	DeviceRegion string
+
+	// EmitDiagnosticNotices indicates whether to output notices containing detailed
+	// information about the Psiphon session. As these notices may contain sensitive
+	// network information, they should not be insecurely distributed or displayed
+	// to users.
+	EmitDiagnosticNotices bool
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON
@@ -351,6 +357,10 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	if config.DnsServerGetter != nil {
 		return nil, ContextError(errors.New("DnsServerGetter interface must be set at runtime"))
+	}
+
+	if config.EmitDiagnosticNotices {
+		setEmitDiagnosticNotices(true)
 	}
 
 	return &config, nil

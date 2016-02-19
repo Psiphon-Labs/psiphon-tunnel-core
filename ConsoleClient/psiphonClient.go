@@ -61,6 +61,8 @@ func main() {
 	}
 	psiphon.SetNoticeOutput(noticeWriter)
 
+	psiphon.EmitNoticeBuildInfo()
+
 	// Handle required config file parameter
 
 	if configFilename == "" {

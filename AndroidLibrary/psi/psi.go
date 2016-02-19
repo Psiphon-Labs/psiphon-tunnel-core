@@ -68,6 +68,8 @@ func Start(
 			provider.Notice(string(notice))
 		}))
 
+	psiphon.EmitNoticeBuildInfo()
+
 	// TODO: should following errors be Notices?
 
 	err = psiphon.InitDataStore(config)

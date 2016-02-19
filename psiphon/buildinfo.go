@@ -44,22 +44,11 @@ var goVersion string
 // -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.gomobileVersion=`gomobile version | perl -ne '/gomobile version (.*?) / && print $1'`
 var gomobileVersion string
 
-func NoticeBuildInfo() {
-
-	if len(strings.TrimSpace(gomobileVersion)) > 0 {
-		NoticeInfo(
-			"Built: %#v from %#v at rev %#v using go: %#v and gomobile: %#v",
-			strings.TrimSpace(buildDate),
-			strings.TrimSpace(buildRepo),
-			strings.TrimSpace(buildRev),
-			strings.TrimSpace(goVersion),
-			strings.TrimSpace(gomobileVersion))
-	} else {
-		NoticeInfo(
-			"Built: %#v from %#v at rev %#v using go: %#v",
-			strings.TrimSpace(buildDate),
-			strings.TrimSpace(buildRepo),
-			strings.TrimSpace(buildRev),
-			strings.TrimSpace(goVersion))
-	}
+func EmitNoticeBuildInfo() {
+	NoticeBuildInfo(
+		strings.TrimSpace(buildDate),
+		strings.TrimSpace(buildRepo),
+		strings.TrimSpace(buildRev),
+		strings.TrimSpace(goVersion),
+		strings.TrimSpace(gomobileVersion))
 }
