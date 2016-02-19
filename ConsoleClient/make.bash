@@ -12,11 +12,13 @@ BUILDINFOFILE="${EXE_BASENAME}_buildinfo.txt"
 BUILDDATE=$(date --iso-8601=seconds)
 BUILDREPO=$(git config --get remote.origin.url)
 BUILDREV=$(git rev-parse --short HEAD)
+GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
 
 LDFLAGS="\
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildDate=$BUILDDATE \
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildRepo=$BUILDREPO \
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildRev=$BUILDREV \
+-X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.goVersion=$GOVERSION \
 "
 echo -e "${BUILDDATE}\n${BUILDREPO}\n${BUILDREV}\n" > $BUILDINFOFILE
 
@@ -24,6 +26,7 @@ echo "Variables for ldflags:"
 echo " Build date: ${BUILDDATE}"
 echo " Build repo: ${BUILDREPO}"
 echo " Build revision: ${BUILDREV}"
+echo " Go version: ${GOVERSION}"
 echo ""
 
 if [ ! -d bin ]; then
