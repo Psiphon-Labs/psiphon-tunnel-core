@@ -70,7 +70,8 @@ func makeTCPDialer(config *DialConfig) func(network, addr string) (net.Conn, err
 				if err == nil {
 					config.ResolvedIPCallback(host)
 				}
-			}		}
+			}
+		}
 		return conn, nil
 	}
 }
