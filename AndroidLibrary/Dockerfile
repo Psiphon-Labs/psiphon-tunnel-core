@@ -16,15 +16,13 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
-# Install Go and Go Mobile.
+# Install Go.
 ENV GOVERSION=go1.5.3 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
 
 RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz -o /tmp/go.tar.gz \
   && tar -C /usr/local -xzf /tmp/go.tar.gz \
   && rm /tmp/go.tar.gz \
-  && echo $GOVERSION > $GOROOT/VERSION \
-  && go get -v golang.org/x/mobile/cmd/gomobile \
-  && gomobile init -v
+  && echo $GOVERSION > $GOROOT/VERSION
 
 # Setup Android Environment.
 ENV ANDROID_NDK_ROOT=/android-ndk ANDROID_HOME=/android-sdk-linux
@@ -41,7 +39,7 @@ RUN cd /tmp \
 RUN curl -L http://dl.google.com/android/android-sdk_r24.4.1-linux.tgz -o /tmp/android-sdk.tgz \
   && tar -C / -xzf /tmp/android-sdk.tgz \
   && rm /tmp/android-sdk.tgz \
-  && (while true; do echo 'y'; sleep 2; done) | $ANDROID_HOME/tools/android update sdk --no-ui
+  && (while true; do echo 'y'; sleep 2; done) | $ANDROID_HOME/tools/android update sdk --no-ui --filter platform,platform-tool,tool
 
 # Setup OpenSSL libray.
 ENV OPENSSL_VERSION=1.0.1p
@@ -80,5 +78,16 @@ RUN mkdir -p /tmp/openssl \
     && make depend \
     && make all"
 
+# Install Pinned Gomobile
+#  - Ordered last to allow use of previously cached layers when changing revisions
+ENV GOMOBILE_PINNED_REV=52e0785361572f92c44186af9e2ccd18746adc2e
+RUN mkdir -p $GOPATH/src/golang.org/x \
+  && cd $GOPATH/src/golang.org/x \
+  && git clone https://github.com/golang/mobile \
+  && cd mobile \
+  && git checkout -b pinned $GOMOBILE_PINNED_REV \
+  && echo "master: $(git rev-parse master)\npinned: $(git rev-parse pinned)" | tee $GOROOT/MOBILE \
+  && go install golang.org/x/mobile/cmd/gomobile \
+  && gomobile init -v
 
 WORKDIR $GOPATH/src
