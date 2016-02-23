@@ -46,6 +46,14 @@ func TestControllerRunFrontedMeek(t *testing.T) {
 	controllerRun(t, TUNNEL_PROTOCOL_FRONTED_MEEK)
 }
 
+func TestControllerRunFrontedMeekHTTP(t *testing.T) {
+	controllerRun(t, TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP)
+}
+
+func TestControllerRunUnfrontedMeekHTTPS(t *testing.T) {
+	controllerRun(t, TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS)
+}
+
 func controllerRun(t *testing.T, protocol string) {
 
 	configFileContents, err := ioutil.ReadFile("controller_test.config")

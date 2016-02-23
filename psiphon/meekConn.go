@@ -72,6 +72,7 @@ const (
 // through a CDN.
 type MeekConn struct {
 	frontingAddress      string
+	useHTTPS             bool
 	url                  *url.URL
 	cookie               *http.Cookie
 	pendingConns         *Conns
@@ -103,10 +104,10 @@ type transporter interface {
 // is spawned which will eventually start HTTP polling.
 // When frontingAddress is not "", fronting is used. This option assumes caller has
 // already checked server entry capabilities.
-// Fronting always uses HTTPS. Otherwise, HTTPS is optional.
 func DialMeek(
 	serverEntry *ServerEntry, sessionId string,
-	useHttps bool, frontingAddress string,
+	useHTTPS, useSNI bool,
+	frontingAddress, frontingHost string,
 	config *DialConfig) (meek *MeekConn, err error) {
 
 	// Configure transport
@@ -121,78 +122,105 @@ func DialMeek(
 	*meekConfig = *config
 	meekConfig.PendingConns = pendingConns
 
-	// host is both what is dialed and what ends up in the HTTP Host header
-	host := fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
+	var host string
 	var dialer Dialer
 	var proxyUrl func(*http.Request) (*url.URL, error)
 
-	if useHttps || frontingAddress != "" {
-		// Custom TLS dialer:
-		//
-		//  1. ignores the HTTP request address and uses the fronting domain
-		//  2. disables SNI -- SNI breaks fronting when used with CDNs that support SNI on the server side.
-		//  3. skips verifying the server cert.
-		//
-		// Reasoning for #3:
-		//
-		// With a TLS MiM attack in place, and server certs verified, we'll fail to connect because the client
-		// will refuse to connect. That's not a successful outcome.
-		//
-		// With a MiM attack in place, and server certs not verified, we'll fail to connect if the MiM is actively
-		// targeting Psiphon and classifying the HTTP traffic by Host header or payload signature.
-		//
-		// However, in the case of a passive MiM that's just recording traffic or an active MiM that's targeting
-		// something other than Psiphon, the client will connect. This is a successful outcome.
-		//
-		// What is exposed to the MiM? The Host header does not contain a Psiphon server IP address, just an
-		// unrelated, randomly generated domain name which cannot be used to block direct connections. The
-		// Psiphon server IP is sent over meek, but it's in the encrypted cookie.
-		//
-		// The payload (user traffic) gets its confidentiality and integrity from the underlying SSH protocol.
-		// So, nothing is leaked to the MiM apart from signatures which could be used to classify the traffic
-		// as Psiphon to possibly block it; but note that not revealing that the client is Psiphon is outside
-		// our threat model; we merely seek to evade mass blocking by taking steps that require progressively
-		// more effort to block.
-		//
-		// There is a subtle attack remaining: an adversary that can MiM some CDNs but not others (and so can
-		// classify Psiphon traffic on some CDNs but not others) may throttle non-MiM CDNs so that our server
-		// selection always chooses tunnels to the MiM CDN (without any server cert verification, we won't
-		// exclusively connect to non-MiM CDNs); then the adversary kills the underlying TCP connection after
-		// some short period. This is mitigated by the "impaired" protocol classification mechanism.
+	if frontingAddress != "" {
 
-		customTLSConfig := &CustomTLSConfig{
-			Dial:                          NewTCPDialer(meekConfig),
-			Timeout:                       meekConfig.ConnectTimeout,
-			SendServerName:                false,
-			SkipVerify:                    true,
-			UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
-			TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
-		}
+		// In this case, host is not what is dialed but is what ends up in the HTTP Host header
+		host = frontingHost
 
-		if frontingAddress != "" {
-			// In this case, host is not what is dialed but is what ends up in the HTTP Host header
-			host = serverEntry.MeekFrontingHost
-			customTLSConfig.FrontingAddr = fmt.Sprintf("%s:%d", frontingAddress, 443)
-		}
+		if useHTTPS {
 
-		dialer = NewCustomTLSDialer(customTLSConfig)
+			// Custom TLS dialer:
+			//
+			//  1. ignores the HTTP request address and uses the fronting domain
+			//  2. optionally disables SNI -- SNI breaks fronting when used with certain CDNs.
+			//  3. skips verifying the server cert.
+			//
+			// Reasoning for #3:
+			//
+			// With a TLS MiM attack in place, and server certs verified, we'll fail to connect because the client
+			// will refuse to connect. That's not a successful outcome.
+			//
+			// With a MiM attack in place, and server certs not verified, we'll fail to connect if the MiM is actively
+			// targeting Psiphon and classifying the HTTP traffic by Host header or payload signature.
+			//
+			// However, in the case of a passive MiM that's just recording traffic or an active MiM that's targeting
+			// something other than Psiphon, the client will connect. This is a successful outcome.
+			//
+			// What is exposed to the MiM? The Host header does not contain a Psiphon server IP address, just an
+			// unrelated, randomly generated domain name which cannot be used to block direct connections. The
+			// Psiphon server IP is sent over meek, but it's in the encrypted cookie.
+			//
+			// The payload (user traffic) gets its confidentiality and integrity from the underlying SSH protocol.
+			// So, nothing is leaked to the MiM apart from signatures which could be used to classify the traffic
+			// as Psiphon to possibly block it; but note that not revealing that the client is Psiphon is outside
+			// our threat model; we merely seek to evade mass blocking by taking steps that require progressively
+			// more effort to block.
+			//
+			// There is a subtle attack remaining: an adversary that can MiM some CDNs but not others (and so can
+			// classify Psiphon traffic on some CDNs but not others) may throttle non-MiM CDNs so that our server
+			// selection always chooses tunnels to the MiM CDN (without any server cert verification, we won't
+			// exclusively connect to non-MiM CDNs); then the adversary kills the underlying TCP connection after
+			// some short period. This is mitigated by the "impaired" protocol classification mechanism.
 
-	} else {
-
-		if strings.HasPrefix(meekConfig.UpstreamProxyUrl, "http://") {
-			// For unfronted meek, we let the http.Transport handle proxying, as the
-			// target server hostname has to be in the HTTP request line. Also, in this
-			// case, we don't require the proxy to support CONNECT and so we can work
-			// through HTTP proxies that don't support it.
-			url, err := url.Parse(meekConfig.UpstreamProxyUrl)
-			if err != nil {
-				return nil, ContextError(err)
+			customTLSConfig := &CustomTLSConfig{
+				FrontingAddr:                  fmt.Sprintf("%s:%d", frontingAddress, 443),
+				Dial:                          NewTCPDialer(meekConfig),
+				Timeout:                       meekConfig.ConnectTimeout,
+				SendServerName:                useSNI,
+				SkipVerify:                    true,
+				UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
+				TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
 			}
-			proxyUrl = http.ProxyURL(url)
-			meekConfig.UpstreamProxyUrl = ""
+
+			dialer = NewCustomTLSDialer(customTLSConfig)
+
+		} else { // !useHTTPS
+
+			dialer = func(string, string) (net.Conn, error) {
+				return NewTCPDialer(meekConfig)("tcp", frontingAddress+":80")
+			}
 		}
 
-		dialer = NewTCPDialer(meekConfig)
+	} else { // frontingAddress == ""
+
+		// host is both what is dialed and what ends up in the HTTP Host header
+		host = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
+
+		if useHTTPS {
+
+			customTLSConfig := &CustomTLSConfig{
+				Dial:                          NewTCPDialer(meekConfig),
+				Timeout:                       meekConfig.ConnectTimeout,
+				SendServerName:                useSNI,
+				SkipVerify:                    true,
+				UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
+				TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
+			}
+
+			dialer = NewCustomTLSDialer(customTLSConfig)
+
+		} else { // !useHTTPS
+
+			if strings.HasPrefix(meekConfig.UpstreamProxyUrl, "http://") {
+				// For unfronted meek, we let the http.Transport handle proxying, as the
+				// target server hostname has to be in the HTTP request line. Also, in this
+				// case, we don't require the proxy to support CONNECT and so we can work
+				// through HTTP proxies that don't support it.
+				url, err := url.Parse(meekConfig.UpstreamProxyUrl)
+				if err != nil {
+					return nil, ContextError(err)
+				}
+				proxyUrl = http.ProxyURL(url)
+				meekConfig.UpstreamProxyUrl = ""
+			}
+
+			dialer = NewTCPDialer(meekConfig)
+		}
+
 	}
 
 	// Scheme is always "http". Otherwise http.Transport will try to do another TLS
@@ -240,6 +268,7 @@ func DialMeek(
 	// sendBuffer.
 	meek = &MeekConn{
 		frontingAddress:      frontingAddress,
+		useHTTPS:             useHTTPS,
 		url:                  url,
 		cookie:               cookie,
 		pendingConns:         pendingConns,
@@ -495,7 +524,7 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadClos
 		return nil, ContextError(err)
 	}
 
-	if meek.frontingAddress != "" && nil == net.ParseIP(meek.frontingAddress) {
+	if meek.useHTTPS {
 		request.Header.Set("X-Psiphon-Fronting-Address", meek.frontingAddress)
 	}
 

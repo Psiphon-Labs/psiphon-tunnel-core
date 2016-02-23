@@ -97,9 +97,14 @@ func newOpenSSLConn(rawConn net.Conn, hostname string, config *CustomTLSConfig) 
 	}
 
 	if config.SendServerName {
-		err = conn.SetTlsExtHostName(hostname)
-		if err != nil {
-			return nil, ContextError(err)
+		// Explicitly exclude IPs:
+		// - "Literal IPv4 and IPv6 addresses are not permitted": https://tools.ietf.org/html/rfc6066#page-6.
+		// - OpenSSL does not appear to enforce this rule itself.
+		if net.ParseIP(hostname) == nil {
+			err = conn.SetTlsExtHostName(hostname)
+			if err != nil {
+				return nil, ContextError(err)
+			}
 		}
 	}
 

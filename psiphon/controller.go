@@ -138,7 +138,6 @@ func NewController(config *Config) (controller *Controller, err error) {
 // - a local SOCKS proxy that port forwards through the pool of tunnels
 // - a local HTTP proxy that port forwards through the pool of tunnels
 func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
-	NoticeBuildInfo()
 	ReportAvailableRegions()
 
 	// Start components

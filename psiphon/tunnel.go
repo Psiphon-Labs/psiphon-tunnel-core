@@ -348,22 +348,33 @@ func dialSsh(
 	// So depending on which protocol is used, multiple layers are initialized.
 	port := 0
 	useMeek := false
-	useMeekHttps := false
+	useMeekHTTPS := false
+	useMeekSNI := false
 	useFronting := false
 	useObfuscatedSsh := false
 	switch selectedProtocol {
 	case TUNNEL_PROTOCOL_FRONTED_MEEK:
 		useMeek = true
-		useMeekHttps = true
+		useMeekHTTPS = true
+		useMeekSNI = !serverEntry.MeekFrontingDisableSNI
+		useFronting = true
+		useObfuscatedSsh = true
+	case TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
+		useMeek = true
+		useMeekHTTPS = false
+		useMeekSNI = false
 		useFronting = true
 		useObfuscatedSsh = true
 	case TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 		useMeek = true
+		useMeekHTTPS = false
+		useMeekSNI = false
 		useObfuscatedSsh = true
 		port = serverEntry.SshObfuscatedPort
 	case TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS:
 		useMeek = true
-		useMeekHttps = true
+		useMeekHTTPS = true
+		useMeekSNI = false
 		useObfuscatedSsh = true
 		port = serverEntry.SshObfuscatedPort
 	case TUNNEL_PROTOCOL_OBFUSCATED_SSH:
@@ -374,6 +385,7 @@ func dialSsh(
 	}
 
 	frontingAddress := ""
+	frontingHost := ""
 	if useFronting {
 		if len(serverEntry.MeekFrontingAddressesRegex) > 0 {
 
@@ -396,6 +408,17 @@ func dialSsh(
 				return nil, nil, nil, ContextError(err)
 			}
 			frontingAddress = serverEntry.MeekFrontingAddresses[index]
+		}
+
+		if len(serverEntry.MeekFrontingHosts) > 0 {
+			index, err := MakeSecureRandomInt(len(serverEntry.MeekFrontingHosts))
+			if err != nil {
+				return nil, nil, nil, ContextError(err)
+			}
+			frontingHost = serverEntry.MeekFrontingHosts[index]
+		} else {
+			// Backwards compatibility case
+			frontingHost = serverEntry.MeekFrontingHost
 		}
 	}
 
@@ -430,7 +453,8 @@ func dialSsh(
 		ResolvedIPCallback:            setResolvedIPAddress,
 	}
 	if useMeek {
-		conn, err = DialMeek(serverEntry, sessionId, useMeekHttps, frontingAddress, dialConfig)
+		conn, err = DialMeek(
+			serverEntry, sessionId, useMeekHTTPS, useMeekSNI, frontingAddress, frontingHost, dialConfig)
 		if err != nil {
 			return nil, nil, nil, ContextError(err)
 		}
@@ -525,11 +549,14 @@ func dialSsh(
 		return nil, nil, nil, ContextError(result.err)
 	}
 
-	if selectedProtocol == TUNNEL_PROTOCOL_FRONTED_MEEK {
+	if selectedProtocol == TUNNEL_PROTOCOL_FRONTED_MEEK ||
+		selectedProtocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP {
+
 		frontedMeekStats = &FrontedMeekStats{
 			frontingAddress:   frontingAddress,
 			resolvedIPAddress: resolvedIPAddress.Load().(string),
-			enabledSNI:        false,
+			enabledSNI:        useMeekSNI,
+			frontingHost:      frontingHost,
 		}
 
 		NoticeFrontedMeekStats(serverEntry.IpAddress, frontedMeekStats)
