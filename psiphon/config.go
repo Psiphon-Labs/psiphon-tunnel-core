@@ -293,7 +293,7 @@ type Config struct {
 	// EmitDiagnosticNotices indicates whether to output notices containing detailed
 	// information about the Psiphon session. As these notices may contain sensitive
 	// network information, they should not be insecurely distributed or displayed
-	// to users.
+	// to users. Default is off.
 	EmitDiagnosticNotices bool
 }
 
