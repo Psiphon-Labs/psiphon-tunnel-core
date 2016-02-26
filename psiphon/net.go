@@ -276,6 +276,9 @@ func MakeUntunneledHttpsClient(
 	requestUrl string,
 	requestTimeout time.Duration) (*http.Client, string, error) {
 
+	// Note: IndistinguishableTLS mode doesn't support VerifyLegacyCertificate
+	useIndistinguishableTLS := dialConfig.UseIndistinguishableTLS && verifyLegacyCertificate == nil
+
 	dialer := NewCustomTLSDialer(
 		// Note: when verifyLegacyCertificate is not nil, some
 		// of the other CustomTLSConfig is overridden.
@@ -284,7 +287,7 @@ func MakeUntunneledHttpsClient(
 			VerifyLegacyCertificate:       verifyLegacyCertificate,
 			SendServerName:                true,
 			SkipVerify:                    false,
-			UseIndistinguishableTLS:       dialConfig.UseIndistinguishableTLS,
+			UseIndistinguishableTLS:       useIndistinguishableTLS,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
 		})
 
