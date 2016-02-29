@@ -17,7 +17,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Go.
-ENV GOVERSION=go1.5.3 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
+ENV GOVERSION=go1.6 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
 
 RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz -o /tmp/go.tar.gz \
   && tar -C /usr/local -xzf /tmp/go.tar.gz \
@@ -80,7 +80,7 @@ RUN mkdir -p /tmp/openssl \
 
 # Install Pinned Gomobile
 #  - Ordered last to allow use of previously cached layers when changing revisions
-ENV GOMOBILE_PINNED_REV=52e0785361572f92c44186af9e2ccd18746adc2e
+ENV GOMOBILE_PINNED_REV=320ec40f6328971c405979b804e20d5f3c86770c
 RUN mkdir -p $GOPATH/src/golang.org/x \
   && cd $GOPATH/src/golang.org/x \
   && git clone https://github.com/golang/mobile \
