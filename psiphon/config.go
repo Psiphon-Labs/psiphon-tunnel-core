@@ -208,6 +208,10 @@ type Config struct {
 	// This parameter is only applicable to library deployments.
 	DnsServerGetter DnsServerGetter
 
+	// HostNameTransformer is an interface that enables pluggable hostname
+	// transformation circumvention strategies.
+	HostNameTransformer HostNameTransformer
+
 	// TargetServerEntry is an encoded server entry. When specified, this server entry
 	// is used exclusively and all other known servers are ignored.
 	TargetServerEntry string
@@ -357,6 +361,10 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	if config.DnsServerGetter != nil {
 		return nil, ContextError(errors.New("DnsServerGetter interface must be set at runtime"))
+	}
+
+	if config.HostNameTransformer != nil {
+		return nil, ContextError(errors.New("HostNameTransformer interface must be set at runtime"))
 	}
 
 	if config.EmitDiagnosticNotices {

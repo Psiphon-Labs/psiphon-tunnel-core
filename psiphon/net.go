@@ -97,11 +97,6 @@ type DialConfig struct {
 	ResolvedIPCallback func(string)
 }
 
-// DeviceBinder defines the interface to the external BindToDevice provider
-type DeviceBinder interface {
-	BindToDevice(fileDescriptor int) error
-}
-
 // NetworkConnectivityChecker defines the interface to the external
 // HasNetworkConnectivity provider
 type NetworkConnectivityChecker interface {
@@ -109,10 +104,29 @@ type NetworkConnectivityChecker interface {
 	HasNetworkConnectivity() int
 }
 
+// DeviceBinder defines the interface to the external BindToDevice provider
+type DeviceBinder interface {
+	BindToDevice(fileDescriptor int) error
+}
+
 // DnsServerGetter defines the interface to the external GetDnsServer provider
 type DnsServerGetter interface {
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
+}
+
+// HostNameTransformer defines the interface for pluggable hostname
+// transformation circumvention strategies.
+type HostNameTransformer interface {
+	TransformHostName(hostname string) (string, bool)
+}
+
+// IdentityHostNameTransformer is the default HostNameTransformer, which
+// returns the hostname unchanged.
+type IdentityHostNameTransformer struct{}
+
+func (IdentityHostNameTransformer) TransformHostName(hostname string) (string, bool) {
+	return hostname, false
 }
 
 // TimeoutError implements the error interface
@@ -276,29 +290,15 @@ func MakeUntunneledHttpsClient(
 	requestUrl string,
 	requestTimeout time.Duration) (*http.Client, string, error) {
 
-	// Note: IndistinguishableTLS mode doesn't support VerifyLegacyCertificate
-	useIndistinguishableTLS := dialConfig.UseIndistinguishableTLS && verifyLegacyCertificate == nil
-
-	dialer := NewCustomTLSDialer(
-		// Note: when verifyLegacyCertificate is not nil, some
-		// of the other CustomTLSConfig is overridden.
-		&CustomTLSConfig{
-			Dial: NewTCPDialer(dialConfig),
-			VerifyLegacyCertificate:       verifyLegacyCertificate,
-			SendServerName:                true,
-			SkipVerify:                    false,
-			UseIndistinguishableTLS:       useIndistinguishableTLS,
-			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
-		})
+	// Change the scheme to "http"; otherwise http.Transport will try to do
+	// another TLS handshake inside the explicit TLS session. Also need to
+	// force an explicit port, as the default for "http", 80, won't talk TLS.
 
 	urlComponents, err := url.Parse(requestUrl)
 	if err != nil {
 		return nil, "", ContextError(err)
 	}
 
-	// Change the scheme to "http"; otherwise http.Transport will try to do
-	// another TLS handshake inside the explicit TLS session. Also need to
-	// force an explicit port, as the default for "http", 80, won't talk TLS.
 	urlComponents.Scheme = "http"
 	host, port, err := net.SplitHostPort(urlComponents.Host)
 	if err != nil {
@@ -310,6 +310,21 @@ func MakeUntunneledHttpsClient(
 		port = "443"
 	}
 	urlComponents.Host = net.JoinHostPort(host, port)
+
+	// Note: IndistinguishableTLS mode doesn't support VerifyLegacyCertificate
+	useIndistinguishableTLS := dialConfig.UseIndistinguishableTLS && verifyLegacyCertificate == nil
+
+	dialer := NewCustomTLSDialer(
+		// Note: when verifyLegacyCertificate is not nil, some
+		// of the other CustomTLSConfig is overridden.
+		&CustomTLSConfig{
+			Dial: NewTCPDialer(dialConfig),
+			VerifyLegacyCertificate:       verifyLegacyCertificate,
+			SNIServerName:                 host,
+			SkipVerify:                    false,
+			UseIndistinguishableTLS:       useIndistinguishableTLS,
+			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
+		})
 
 	transport := &http.Transport{
 		Dial: dialer,

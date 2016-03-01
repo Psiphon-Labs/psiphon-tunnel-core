@@ -51,13 +51,13 @@ type ServerContext struct {
 	serverHandshakeTimestamp string
 }
 
-// FrontedMeekStats holds extra stats that are only gathered for
-// FRONTED-MEEK-OSSH, FRONTED-MEEK-HTTP-OSSH.
-type FrontedMeekStats struct {
-	frontingAddress   string
-	resolvedIPAddress string
-	enabledSNI        bool
-	frontingHost      string
+// MeekStats holds extra stats that are only gathered for meek tunnels.
+type MeekStats struct {
+	ServerAddress       string
+	ResolvedIPAddress   string
+	SNIServerName       string
+	HostHeader          string
+	TransformedHostName bool
 }
 
 // nextTunnelNumber is a monotonically increasing number assigned to each
@@ -623,20 +623,29 @@ func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
 		requestUrl.WriteString("&device_region=")
 		requestUrl.WriteString(tunnel.config.DeviceRegion)
 	}
-
-	if tunnel.frontedMeekStats != nil {
-		requestUrl.WriteString("&fronting_address=")
-		requestUrl.WriteString(tunnel.frontedMeekStats.frontingAddress)
-		requestUrl.WriteString("&fronting_resolved_ip_address=")
-		requestUrl.WriteString(tunnel.frontedMeekStats.resolvedIPAddress)
-		requestUrl.WriteString("&fronting_enabled_sni=")
-		if tunnel.frontedMeekStats.enabledSNI {
+	if tunnel.meekStats != nil {
+		if tunnel.meekStats.ServerAddress != "" {
+			requestUrl.WriteString("&meek_server_address=")
+			requestUrl.WriteString(tunnel.meekStats.ServerAddress)
+		}
+		if tunnel.meekStats.ResolvedIPAddress != "" {
+			requestUrl.WriteString("&meek_resolved_ip_address=")
+			requestUrl.WriteString(tunnel.meekStats.ResolvedIPAddress)
+		}
+		if tunnel.meekStats.SNIServerName != "" {
+			requestUrl.WriteString("&meek_sni_server_name=")
+			requestUrl.WriteString(tunnel.meekStats.SNIServerName)
+		}
+		if tunnel.meekStats.HostHeader != "" {
+			requestUrl.WriteString("&meek_host_header=")
+			requestUrl.WriteString(tunnel.meekStats.HostHeader)
+		}
+		requestUrl.WriteString("&meek_transformed_host_name=")
+		if tunnel.meekStats.TransformedHostName {
 			requestUrl.WriteString("1")
 		} else {
 			requestUrl.WriteString("0")
 		}
-		requestUrl.WriteString("&fronting_host=")
-		requestUrl.WriteString(tunnel.frontedMeekStats.frontingHost)
 	}
 
 	if tunnel.serverEntry.Region != "" {

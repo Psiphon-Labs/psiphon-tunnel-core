@@ -73,6 +73,11 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// Needed by regen, at least
 	rand.Seed(int64(time.Now().Nanosecond()))
 
+	// Supply a default HostNameTransformer
+	if config.HostNameTransformer == nil {
+		config.HostNameTransformer = &IdentityHostNameTransformer{}
+	}
+
 	// Generate a session ID for the Psiphon server API. This session ID is
 	// used across all tunnels established by the controller.
 	sessionId, err := MakeSessionId()
