@@ -22,7 +22,9 @@ package psiphon
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -65,7 +67,8 @@ const (
 	PSIPHON_API_TUNNEL_STATS_MAX_COUNT             = 1000
 	FETCH_ROUTES_TIMEOUT                           = 1 * time.Minute
 	DOWNLOAD_UPGRADE_TIMEOUT                       = 15 * time.Minute
-	DOWNLOAD_UPGRADE_RETRY_PAUSE_PERIOD            = 5 * time.Second
+	DOWNLOAD_UPGRADE_RETRY_PERIOD                  = 5 * time.Second
+	DOWNLOAD_UPGRADE_STALE_PERIOD                  = 6 * time.Hour
 	IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION      = 2 * time.Minute
 	IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD     = 3
 	TOTAL_BYTES_TRANSFERRED_NOTICE_PERIOD          = 5 * time.Minute
@@ -252,6 +255,13 @@ type Config struct {
 	// typically embedded in the client binary.
 	UpgradeDownloadUrl string
 
+	// UpgradeDownloadClientVersionHeader specifies the HTTP header name for the
+	// entity at UpgradeDownloadUrl which specifies the client version (an integer
+	// value). A HEAD request may be made to check the version number available at
+	// UpgradeDownloadUrl. UpgradeDownloadClientVersionHeader is required when
+	// UpgradeDownloadUrl is specified.
+	UpgradeDownloadClientVersionHeader string
+
 	// UpgradeDownloadFilename is the local target filename for an upgrade download.
 	// This parameter is required when UpgradeDownloadUrl is specified.
 	UpgradeDownloadFilename string
@@ -331,6 +341,12 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		config.ClientVersion = "0"
 	}
 
+	_, err = strconv.Atoi(config.ClientVersion)
+	if err != nil {
+		return nil, ContextError(
+			fmt.Errorf("invalid client version: %s", err))
+	}
+
 	if config.TunnelProtocol != "" {
 		if !Contains(SupportedTunnelProtocols, config.TunnelProtocol) {
 			return nil, ContextError(
@@ -365,6 +381,12 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	if config.HostNameTransformer != nil {
 		return nil, ContextError(errors.New("HostNameTransformer interface must be set at runtime"))
+	}
+
+	if config.UpgradeDownloadUrl != "" &&
+		(config.UpgradeDownloadClientVersionHeader == "" || config.UpgradeDownloadFilename == "") {
+		return nil, ContextError(errors.New(
+			"UpgradeDownloadUrl requires UpgradeDownloadClientVersionHeader and UpgradeDownloadFilename"))
 	}
 
 	if config.EmitDiagnosticNotices {

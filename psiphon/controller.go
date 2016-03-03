@@ -47,7 +47,6 @@ type Controller struct {
 	tunnels                        []*Tunnel
 	nextTunnel                     int
 	startedConnectedReporter       bool
-	startedUpgradeDownloader       bool
 	isEstablishing                 bool
 	establishWaitGroup             *sync.WaitGroup
 	stopEstablishingBroadcast      chan struct{}
@@ -57,6 +56,7 @@ type Controller struct {
 	untunneledDialConfig           *DialConfig
 	splitTunnelClassifier          *SplitTunnelClassifier
 	signalFetchRemoteServerList    chan struct{}
+	signalDownloadUpgrade          chan string
 	impairedProtocolClassification map[string]int
 	signalReportConnected          chan struct{}
 	serverAffinityDoneBroadcast    chan struct{}
@@ -115,7 +115,6 @@ func NewController(config *Config) (controller *Controller, err error) {
 		tunnels:                        make([]*Tunnel, 0),
 		establishedOnce:                false,
 		startedConnectedReporter:       false,
-		startedUpgradeDownloader:       false,
 		isEstablishing:                 false,
 		establishPendingConns:          new(Conns),
 		untunneledPendingConns:         untunneledPendingConns,
@@ -125,6 +124,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 		// starting? Trade-off is potential back-to-back fetch remotes. As-is,
 		// establish will eventually signal another fetch remote.
 		signalFetchRemoteServerList: make(chan struct{}),
+		signalDownloadUpgrade:       make(chan string),
 		signalReportConnected:       make(chan struct{}),
 	}
 
@@ -171,6 +171,13 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	if !controller.config.DisableRemoteServerListFetcher {
 		controller.runWaitGroup.Add(1)
 		go controller.remoteServerListFetcher()
+	}
+
+	if controller.config.UpgradeDownloadUrl != "" &&
+		controller.config.UpgradeDownloadFilename != "" {
+
+		controller.runWaitGroup.Add(1)
+		go controller.upgradeDownloader()
 	}
 
 	/// Note: the connected reporter isn't started until a tunnel is
@@ -370,63 +377,76 @@ func (controller *Controller) startOrSignalConnectedReporter() {
 // download. DownloadUpgrade() is resumable, so each attempt has potential for
 // getting closer to completion, even in conditions where the download or
 // tunnel is repeatedly interrupted.
-// Once the download is complete, the downloader exits and is not run again:
+// An upgrade download is triggered by either a handshake response indicating
+// that a new version is available; or after failing to connect, in which case
+// it's useful to check, out-of-band, for an upgrade with new circumvention
+// capabilities.
+// Once the download operation completes successfully, the downloader exits
+// and is not run again: either there is not a newer version, or the upgrade
+// has been downloaded and is ready to be applied.
 // We're assuming that the upgrade will be applied and the entire system
 // restarted before another upgrade is to be downloaded.
-func (controller *Controller) upgradeDownloader(clientUpgradeVersion string) {
+//
+// TODO: refactor upgrade downloader and remote server list fetcher to use
+// common code (including the resumable download routines).
+//
+func (controller *Controller) upgradeDownloader() {
 	defer controller.runWaitGroup.Done()
 
-loop:
+	var lastDownloadTime time.Time
+
+downloadLoop:
 	for {
-		// Pick any active tunnel and make the next download attempt. No error
-		// is logged if there's no active tunnel, as that's not an unexpected condition.
-		tunnel := controller.getNextActiveTunnel()
-		if tunnel != nil {
-			err := DownloadUpgrade(controller.config, clientUpgradeVersion, tunnel)
-			if err == nil {
-				break loop
-			}
-			NoticeAlert("upgrade download failed: %s", err)
+		// Wait for a signal before downloading
+		var handshakeVersion string
+		select {
+		case handshakeVersion = <-controller.signalDownloadUpgrade:
+		case <-controller.shutdownBroadcast:
+			break downloadLoop
 		}
 
-		timeout := time.After(DOWNLOAD_UPGRADE_RETRY_PAUSE_PERIOD)
-		select {
-		case <-timeout:
-			// Make another download attempt
-		case <-controller.shutdownBroadcast:
-			break loop
+		// Skip download entirely when a recent download was successful
+		if time.Now().Before(lastDownloadTime.Add(DOWNLOAD_UPGRADE_STALE_PERIOD)) {
+			continue
+		}
+
+	retryLoop:
+		for {
+			// Don't attempt to download while there is no network connectivity,
+			// to avoid alert notice noise.
+			if !WaitForNetworkConnectivity(
+				controller.config.NetworkConnectivityChecker,
+				controller.shutdownBroadcast) {
+				break downloadLoop
+			}
+
+			// Pick any active tunnel and make the next download attempt. If there's
+			// no active tunnel, the untunneledDialConfig will be used.
+			tunnel := controller.getNextActiveTunnel()
+
+			err := DownloadUpgrade(
+				controller.config,
+				handshakeVersion,
+				tunnel,
+				controller.untunneledDialConfig)
+
+			if err == nil {
+				lastDownloadTime = time.Now()
+				break retryLoop
+			}
+
+			NoticeAlert("failed to download upgrade: %s", err)
+
+			timeout := time.After(DOWNLOAD_UPGRADE_RETRY_PERIOD)
+			select {
+			case <-timeout:
+			case <-controller.shutdownBroadcast:
+				break downloadLoop
+			}
 		}
 	}
 
 	NoticeInfo("exiting upgrade downloader")
-}
-
-func (controller *Controller) startClientUpgradeDownloader(
-	serverContext *ServerContext) {
-
-	// serverContext is nil when DisableApi is set
-	if controller.config.DisableApi {
-		return
-	}
-
-	if controller.config.UpgradeDownloadUrl == "" ||
-		controller.config.UpgradeDownloadFilename == "" {
-		// No upgrade is desired
-		return
-	}
-
-	if serverContext.clientUpgradeVersion == "" {
-		// No upgrade is offered
-		return
-	}
-
-	// Start the client upgrade downloaded after the first tunnel is established.
-	// Concurrency note: only the runTunnels goroutine may access startClientUpgradeDownloader.
-	if !controller.startedUpgradeDownloader {
-		controller.startedUpgradeDownloader = true
-		controller.runWaitGroup.Add(1)
-		go controller.upgradeDownloader(serverContext.clientUpgradeVersion)
-	}
 }
 
 // runTunnels is the controller tunnel management main loop. It starts and stops
@@ -504,8 +524,18 @@ loop:
 					// tunnel is established.
 					controller.startOrSignalConnectedReporter()
 
-					controller.startClientUpgradeDownloader(
-						establishedTunnel.serverContext)
+					// If the handshake indicated that a new client version is available,
+					// trigger an upgrade download.
+					// Note: serverContext is nil when DisableApi is set
+					if establishedTunnel.serverContext != nil &&
+						establishedTunnel.serverContext.clientUpgradeVersion != "" {
+
+						handshakeVersion := establishedTunnel.serverContext.clientUpgradeVersion
+						select {
+						case controller.signalDownloadUpgrade <- handshakeVersion:
+						default:
+						}
+					}
 				}
 
 			} else {
@@ -945,6 +975,14 @@ loop:
 		// into the server entry iterator as soon as available.
 		select {
 		case controller.signalFetchRemoteServerList <- *new(struct{}):
+		default:
+		}
+
+		// Trigger an out-of-band upgrade availability check and download.
+		// Since we may have failed to connect, we may benefit from upgrading
+		// to a new client version with new circumvention capabilities.
+		select {
+		case controller.signalDownloadUpgrade <- "":
 		default:
 		}
 
