@@ -320,6 +320,11 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		return nil, ContextError(err)
 	}
 
+	// Do setEmitDiagnosticNotices first, to ensure config file errors are emitted.
+	if config.EmitDiagnosticNotices {
+		setEmitDiagnosticNotices(true)
+	}
+
 	// These fields are required; the rest are optional
 	if config.PropagationChannelId == "" {
 		return nil, ContextError(
@@ -387,10 +392,6 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		(config.UpgradeDownloadClientVersionHeader == "" || config.UpgradeDownloadFilename == "") {
 		return nil, ContextError(errors.New(
 			"UpgradeDownloadUrl requires UpgradeDownloadClientVersionHeader and UpgradeDownloadFilename"))
-	}
-
-	if config.EmitDiagnosticNotices {
-		setEmitDiagnosticNotices(true)
 	}
 
 	return &config, nil
