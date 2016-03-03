@@ -31,30 +31,45 @@ import (
 )
 
 func TestControllerRunSSH(t *testing.T) {
-	controllerRun(t, TUNNEL_PROTOCOL_SSH)
+	controllerRun(t, TUNNEL_PROTOCOL_SSH, false)
 }
 
 func TestControllerRunObfuscatedSSH(t *testing.T) {
-	controllerRun(t, TUNNEL_PROTOCOL_OBFUSCATED_SSH)
+	controllerRun(t, TUNNEL_PROTOCOL_OBFUSCATED_SSH, false)
 }
 
 func TestControllerRunUnfrontedMeek(t *testing.T) {
-	controllerRun(t, TUNNEL_PROTOCOL_UNFRONTED_MEEK)
+	controllerRun(t, TUNNEL_PROTOCOL_UNFRONTED_MEEK, true)
 }
 
 func TestControllerRunFrontedMeek(t *testing.T) {
-	controllerRun(t, TUNNEL_PROTOCOL_FRONTED_MEEK)
+	controllerRun(t, TUNNEL_PROTOCOL_FRONTED_MEEK, true)
 }
 
 func TestControllerRunFrontedMeekHTTP(t *testing.T) {
-	controllerRun(t, TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP)
+	controllerRun(t, TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP, false)
 }
 
 func TestControllerRunUnfrontedMeekHTTPS(t *testing.T) {
-	controllerRun(t, TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS)
+	controllerRun(t, TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS, true)
 }
 
-func controllerRun(t *testing.T, protocol string) {
+type TestHostNameTransformer struct {
+}
+
+func (TestHostNameTransformer) TransformHostName(string) (string, bool) {
+	return "example.com", true
+}
+
+func controllerRun(t *testing.T, protocol string, protocolUsesHostNameTransformer bool) {
+	doControllerRun(t, protocol, nil)
+	if protocolUsesHostNameTransformer {
+		t.Log("running with testHostNameTransformer")
+		doControllerRun(t, protocol, &TestHostNameTransformer{})
+	}
+}
+
+func doControllerRun(t *testing.T, protocol string, hostNameTransformer HostNameTransformer) {
 
 	configFileContents, err := ioutil.ReadFile("controller_test.config")
 	if err != nil {
@@ -67,6 +82,8 @@ func controllerRun(t *testing.T, protocol string) {
 		t.FailNow()
 	}
 	config.TunnelProtocol = protocol
+
+	config.HostNameTransformer = hostNameTransformer
 
 	err = InitDataStore(config)
 	if err != nil {
