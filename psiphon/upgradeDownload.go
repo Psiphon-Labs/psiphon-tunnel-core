@@ -112,8 +112,8 @@ func DownloadUpgrade(
 
 		// Note: if the header is missing, Header.Get returns "" and then
 		// strconv.Atoi returns a parse error.
-		headerValue := response.Header.Get(config.UpgradeDownloadClientVersionHeader)
-		availableClientVersion, err := strconv.Atoi(headerValue)
+		availableClientVersion := response.Header.Get(config.UpgradeDownloadClientVersionHeader)
+		checkAvailableClientVersion, err := strconv.Atoi(availableClientVersion)
 		if err != nil {
 			// If the header is missing or malformed, we can't determine the available
 			// version number. This is unexpected; but if it happens, it's likely due
@@ -123,12 +123,14 @@ func DownloadUpgrade(
 			// download later in the session).
 			NoticeAlert(
 				"failed to download upgrade: invalid %s header value %s: %s",
-				config.UpgradeDownloadClientVersionHeader, headerValue, err)
+				config.UpgradeDownloadClientVersionHeader, availableClientVersion, err)
 			return nil
 		}
 
-		if currentClientVersion >= availableClientVersion {
-			NoticeInfo("skipping download of available client version %d", availableClientVersion)
+		if currentClientVersion >= checkAvailableClientVersion {
+			NoticeInfo(
+				"skipping download of available client version %d",
+				checkAvailableClientVersion)
 		}
 	}
 
@@ -218,11 +220,12 @@ func DownloadUpgrade(
 	// A partial download occurs when this copy is interrupted. The io.Copy
 	// will fail, leaving a partial download in place (.part and .part.etag).
 	n, err := io.Copy(NewSyncFileWriter(file), response.Body)
+
+	NoticeClientUpgradeDownloadedBytes(n)
+
 	if err != nil {
 		return ContextError(err)
 	}
-
-	NoticeInfo("client upgrade downloaded bytes: %d", n)
 
 	// Ensure the file is flushed to disk. The deferred close
 	// will be a noop when this succeeds.
