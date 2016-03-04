@@ -230,7 +230,7 @@ func NoticeUpstreamProxyError(err error) {
 
 // NoticeClientUpgradeDownloadedBytes reports client upgrade download progress.
 func NoticeClientUpgradeDownloadedBytes(bytes int64) {
-	outputNotice("ClientUpgradeDownloadedBytes", false, false, "bytes", bytes)
+	outputNotice("ClientUpgradeDownloadedBytes", true, false, "bytes", bytes)
 }
 
 // NoticeClientUpgradeDownloaded indicates that a client upgrade download
