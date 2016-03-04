@@ -429,7 +429,11 @@ func initMeekConfig(
 		useHTTPS = true
 		SNIServerName, transformedHostName =
 			config.HostNameTransformer.TransformHostName(serverEntry.IpAddress)
-		hostHeader = dialAddress
+		if serverEntry.MeekServerPort == 443 {
+			hostHeader = serverEntry.IpAddress
+		} else {
+			hostHeader = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
+		}
 
 	default:
 		return nil, ContextError(errors.New("unexpected selectedProtocol"))
