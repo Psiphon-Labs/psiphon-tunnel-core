@@ -287,7 +287,7 @@ func NoticeLocalProxyError(proxyType string, err error) {
 func NoticeConnectedMeekStats(ipAddress string, meekStats *MeekStats) {
 	outputNotice("NoticeConnectedMeekStats", true, false,
 		"ipAddress", ipAddress,
-		"serverAddress", meekStats.ServerAddress,
+		"dialAddress", meekStats.DialAddress,
 		"resolvedIPAddress", meekStats.ResolvedIPAddress,
 		"sniServerName", meekStats.SNIServerName,
 		"hostHeader", meekStats.HostHeader,

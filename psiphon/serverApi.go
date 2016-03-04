@@ -53,7 +53,7 @@ type ServerContext struct {
 
 // MeekStats holds extra stats that are only gathered for meek tunnels.
 type MeekStats struct {
-	ServerAddress       string
+	DialAddress         string
 	ResolvedIPAddress   string
 	SNIServerName       string
 	HostHeader          string
@@ -624,9 +624,9 @@ func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
 		requestUrl.WriteString(tunnel.config.DeviceRegion)
 	}
 	if tunnel.meekStats != nil {
-		if tunnel.meekStats.ServerAddress != "" {
-			requestUrl.WriteString("&meek_server_address=")
-			requestUrl.WriteString(tunnel.meekStats.ServerAddress)
+		if tunnel.meekStats.DialAddress != "" {
+			requestUrl.WriteString("&meek_dial_address=")
+			requestUrl.WriteString(tunnel.meekStats.DialAddress)
 		}
 		if tunnel.meekStats.ResolvedIPAddress != "" {
 			requestUrl.WriteString("&meek_resolved_ip_address=")

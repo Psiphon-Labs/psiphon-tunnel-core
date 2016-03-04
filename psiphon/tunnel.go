@@ -616,7 +616,7 @@ func dialSsh(
 
 	if meekConfig != nil {
 		meekStats = &MeekStats{
-			ServerAddress:       meekConfig.DialAddress,
+			DialAddress:         meekConfig.DialAddress,
 			ResolvedIPAddress:   resolvedIPAddress.Load().(string),
 			SNIServerName:       meekConfig.SNIServerName,
 			HostHeader:          meekConfig.HostHeader,
