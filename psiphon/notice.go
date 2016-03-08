@@ -137,9 +137,24 @@ func NoticeAvailableEgressRegions(regions []string) {
 }
 
 // NoticeConnectingServer is details on a connection attempt
-func NoticeConnectingServer(ipAddress, region, protocol, frontingAddress string) {
-	outputNotice("ConnectingServer", true, false, "ipAddress", ipAddress, "region",
-		region, "protocol", protocol, "frontingAddress", frontingAddress)
+func NoticeConnectingServer(ipAddress, region, protocol, directTCPDialAddress string, meekConfig *MeekConfig) {
+	if meekConfig == nil {
+		outputNotice("ConnectingServer", true, false,
+			"ipAddress", ipAddress,
+			"region", region,
+			"protocol", protocol,
+			"directTCPDialAddress", directTCPDialAddress)
+	} else {
+		outputNotice("ConnectingServer", true, false,
+			"ipAddress", ipAddress,
+			"region", region,
+			"protocol", protocol,
+			"meekDialAddress", meekConfig.DialAddress,
+			"meekUseHTTPS", meekConfig.UseHTTPS,
+			"meekSNIServerName", meekConfig.SNIServerName,
+			"meekHostHeader", meekConfig.HostHeader,
+			"meekTransformedHostName", meekConfig.TransformedHostName)
+	}
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
@@ -213,6 +228,11 @@ func NoticeUpstreamProxyError(err error) {
 	outputNotice("UpstreamProxyError", false, true, "message", err.Error())
 }
 
+// NoticeClientUpgradeDownloadedBytes reports client upgrade download progress.
+func NoticeClientUpgradeDownloadedBytes(bytes int64) {
+	outputNotice("ClientUpgradeDownloadedBytes", true, false, "bytes", bytes)
+}
+
 // NoticeClientUpgradeDownloaded indicates that a client upgrade download
 // is complete and available at the destination specified.
 func NoticeClientUpgradeDownloaded(filename string) {
@@ -263,14 +283,15 @@ func NoticeLocalProxyError(proxyType string, err error) {
 		"LocalProxyError", true, false, "message", err.Error())
 }
 
-// NoticeFrontedMeekStats reports extra network details for a
-// FRONTED-MEEK-OSSH or FRONTED-MEEK-HTTP-OSSH tunnel connection.
-func NoticeFrontedMeekStats(ipAddress string, frontedMeekStats *FrontedMeekStats) {
-	outputNotice("NoticeFrontedMeekStats", true, false, "ipAddress", ipAddress,
-		"frontingAddress", frontedMeekStats.frontingAddress,
-		"resolvedIPAddress", frontedMeekStats.resolvedIPAddress,
-		"enabledSNI", frontedMeekStats.enabledSNI,
-		"frontingHost", frontedMeekStats.frontingHost)
+// NoticeConnectedMeekStats reports extra network details for a meek tunnel connection.
+func NoticeConnectedMeekStats(ipAddress string, meekStats *MeekStats) {
+	outputNotice("NoticeConnectedMeekStats", true, false,
+		"ipAddress", ipAddress,
+		"dialAddress", meekStats.DialAddress,
+		"resolvedIPAddress", meekStats.ResolvedIPAddress,
+		"sniServerName", meekStats.SNIServerName,
+		"hostHeader", meekStats.HostHeader,
+		"transformedHostName", meekStats.TransformedHostName)
 }
 
 // NoticeBuildInfo reports build version info.
