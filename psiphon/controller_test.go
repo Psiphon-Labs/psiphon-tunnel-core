@@ -51,6 +51,11 @@ func TestMain(m *testing.M) {
 // initialized in order to to clear out its data entries
 // and be able to arbitrarily order the tests.
 
+/*
+
+TODO: temporarily disabled pending automation
+      support for untunneled upgrade downloads.
+
 func TestUntunneledUpgradeDownload(t *testing.T) {
 	doUntunnledUpgradeDownload(t, false)
 }
@@ -58,6 +63,7 @@ func TestUntunneledUpgradeDownload(t *testing.T) {
 func TestUntunneledResumableUpgradeDownload(t *testing.T) {
 	doUntunnledUpgradeDownload(t, true)
 }
+*/
 
 func TestControllerRunSSH(t *testing.T) {
 	controllerRun(t, TUNNEL_PROTOCOL_SSH, false)
