@@ -405,8 +405,10 @@ downloadLoop:
 			break downloadLoop
 		}
 
-		// Skip download entirely when a recent download was successful
-		if time.Now().Before(lastDownloadTime.Add(DOWNLOAD_UPGRADE_STALE_PERIOD)) {
+		// Unless handshake is explicitly advertizing a new version, skip
+		// checking entirely when a recent download was successful.
+		if handshakeVersion == "" &&
+			time.Now().Before(lastDownloadTime.Add(DOWNLOAD_UPGRADE_STALE_PERIOD)) {
 			continue
 		}
 
