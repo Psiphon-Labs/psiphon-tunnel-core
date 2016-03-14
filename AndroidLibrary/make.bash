@@ -36,7 +36,7 @@ echo " Go version: ${GOVERSION}"
 echo " Gomobile version: ${GOMOBILEVERSION}"
 echo ""
 
-gomobile bind -v -ldflags="$LDFLAGS" github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary/psi
+gomobile bind -v -target=android/arm -ldflags="$LDFLAGS" github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary/psi
 if [ $? != 0 ]; then
   echo "..'gomobile bind' failed, exiting"
   exit $?
