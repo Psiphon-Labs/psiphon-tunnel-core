@@ -94,7 +94,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (*TCPConn, error) {
 	conn := &TCPConn{dialResult: make(chan error, 1)}
 
 	// Enable interruption
-	if !config.PendingConns.Add(conn) {
+	if config.PendingConns != nil && !config.PendingConns.Add(conn) {
 		return nil, ContextError(errors.New("pending connections already closed"))
 	}
 

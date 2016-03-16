@@ -869,10 +869,11 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// everything must be wrapped up quickly. Also, we still have a working
 	// tunnel. So we first attempt a tunneled status request (with a short
 	// timeout) and then attempt, synchronously -- otherwise the Contoller's
-	// untunneledPendingConns.CloseAll() will immediately interrupt untunneled
-	// requests -- untunneled requests (also with short timeouts).
-	// Note that this depends on the order of untunneledPendingConns.CloseAll()
-	// coming after tunnel.Close(): see note in Controller.Run().
+	// runWaitGroup.Wait() will return while a request is still in progress
+	// -- untunneled requests (also with short timeouts). Note that in this
+	// case the untunneled request will opt out of untunneledPendingConns so
+	// that it's not inadvertently canceled by the Controller shutdown
+	// sequence (see doUntunneledStatusRequest).
 	//
 	// If the tunnel has failed, the Controller may continue working. We want
 	// to re-establish as soon as possible (so don't want to block on status
