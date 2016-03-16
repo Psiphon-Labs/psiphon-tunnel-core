@@ -128,9 +128,7 @@ func DownloadUpgrade(
 		}
 
 		if currentClientVersion >= checkAvailableClientVersion {
-			NoticeInfo(
-				"skipping download of available client version %d",
-				checkAvailableClientVersion)
+			NoticeClientIsLatestVersion(availableClientVersion)
 			return nil
 		}
 	}
