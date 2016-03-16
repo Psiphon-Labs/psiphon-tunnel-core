@@ -59,6 +59,7 @@ type DialConfig struct {
 	// Dials may be interrupted using PendingConns.CloseAll(). Once instantiated,
 	// a conn is added to pendingConns before the network connect begins and
 	// removed from pendingConns once the connect succeeds or fails.
+	// May be nil.
 	PendingConns *Conns
 
 	// BindToDevice parameters are used to exclude connections and

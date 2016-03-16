@@ -422,13 +422,21 @@ func doUntunneledStatusRequest(
 		return ContextError(err)
 	}
 
+	dialConfig := tunnel.untunneledDialConfig
+
 	timeout := PSIPHON_API_SERVER_TIMEOUT
 	if isShutdown {
 		timeout = PSIPHON_API_SHUTDOWN_SERVER_TIMEOUT
+
+		// Use a copy of DialConfig without pendingConns. This ensures
+		// this request isn't interrupted/canceled. This measure should
+		// be used only with the very short PSIPHON_API_SHUTDOWN_SERVER_TIMEOUT.
+		dialConfig = new(DialConfig)
+		*dialConfig = *tunnel.untunneledDialConfig
 	}
 
 	httpClient, requestUrl, err := MakeUntunneledHttpsClient(
-		tunnel.untunneledDialConfig,
+		dialConfig,
 		certificate,
 		url,
 		timeout)

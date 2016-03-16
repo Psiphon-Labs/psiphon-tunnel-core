@@ -88,6 +88,8 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// untunneledPendingConns may be used to interrupt the fetch remote server list
 	// request and other untunneled connection establishments. BindToDevice may be
 	// used to exclude these requests and connection from VPN routing.
+	// TODO: fetch remote server list and untunneled upgrade download should remove
+	// their completed conns from untunneledPendingConns.
 	untunneledPendingConns := new(Conns)
 	untunneledDialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
@@ -201,19 +203,27 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	}
 
 	close(controller.shutdownBroadcast)
-	controller.establishPendingConns.CloseAll()
-	controller.runWaitGroup.Wait()
 
-	// Stops untunneled connections, including fetch remote server list,
-	// split tunnel port forwards and also untunneled final stats requests.
-	// Note: there's a circular dependency with runWaitGroup.Wait() and
-	// untunneledPendingConns.CloseAll(): runWaitGroup depends on tunnels
-	// stopping which depends, in orderly shutdown, on final status requests
-	// completing. So this pending conns cancel comes too late to interrupt
-	// final status requests in the orderly shutdown case -- which is desired
-	// since we give those a short timeout and would prefer to not interrupt
-	// them.
+	// Interrupts and stops establish workers blocking on
+	// tunnel establishment network operations.
+	controller.establishPendingConns.CloseAll()
+
+	// Interrupts and stops workers blocking on untunneled
+	// network operations. This includes fetch remote server
+	// list and untunneled uprade download.
+	// Note: this doesn't interrupt the final, untunneled status
+	// requests started in operateTunnel after shutdownBroadcast.
+	// This is by design -- we want to give these requests a short
+	// timer period to succeed and deliver stats. These particular
+	// requests opt out of untunneledPendingConns and use the
+	// PSIPHON_API_SHUTDOWN_SERVER_TIMEOUT timeout (see
+	// doUntunneledStatusRequest).
 	controller.untunneledPendingConns.CloseAll()
+
+	// Now with all workers signaled to stop and with all
+	// blocking network operations interrupted, wait for
+	// all workers to terminate.
+	controller.runWaitGroup.Wait()
 
 	controller.splitTunnelClassifier.Shutdown()
 
