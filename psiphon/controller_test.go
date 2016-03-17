@@ -58,7 +58,7 @@ func TestUntunneledUpgradeDownload(t *testing.T) {
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: false,
 			disableEstablishing:      true,
-			disrupt:                  false,
+			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 		})
 }
@@ -70,7 +70,7 @@ func TestUntunneledResumableUpgradeDownload(t *testing.T) {
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: false,
 			disableEstablishing:      true,
-			disrupt:                  true,
+			disruptNetwork:           true,
 			useHostNameTransformer:   false,
 		})
 }
@@ -82,7 +82,7 @@ func TestUntunneledUpgradeClientIsLatestVersion(t *testing.T) {
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: false,
 			disableEstablishing:      true,
-			disrupt:                  false,
+			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 		})
 }
@@ -94,7 +94,7 @@ func TestTunneledUpgradeClientIsLatestVersion(t *testing.T) {
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
-			disrupt:                  false,
+			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 		})
 }
@@ -106,7 +106,7 @@ func TestControllerRunSSH(t *testing.T) {
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
-			disrupt:                  false,
+			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 		})
 }
@@ -118,7 +118,7 @@ func TestControllerRunObfuscatedSSH(t *testing.T) {
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
-			disrupt:                  false,
+			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 		})
 }
@@ -130,7 +130,7 @@ func TestControllerRunUnfrontedMeek(t *testing.T) {
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
-			disrupt:                  false,
+			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 		})
 }
@@ -142,7 +142,7 @@ func TestControllerRunUnfrontedMeekWithTransformer(t *testing.T) {
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
-			disrupt:                  false,
+			disruptNetwork:           false,
 			useHostNameTransformer:   true,
 		})
 }
@@ -154,7 +154,7 @@ func TestControllerRunFrontedMeek(t *testing.T) {
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
-			disrupt:                  false,
+			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 		})
 }
@@ -166,7 +166,7 @@ func TestControllerRunFrontedMeekWithTransformer(t *testing.T) {
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
-			disrupt:                  false,
+			disruptNetwork:           false,
 			useHostNameTransformer:   true,
 		})
 }
@@ -178,7 +178,7 @@ func TestControllerFrontedMeekHTTP(t *testing.T) {
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
-			disrupt:                  false,
+			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 		})
 }
@@ -190,7 +190,7 @@ func TestControllerRunUnfrontedMeekHTTPS(t *testing.T) {
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
-			disrupt:                  false,
+			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 		})
 }
@@ -202,7 +202,7 @@ func TestControllerRunUnfrontedMeekHTTPSWithTransformer(t *testing.T) {
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
-			disrupt:                  false,
+			disruptNetwork:           false,
 			useHostNameTransformer:   true,
 		})
 }
@@ -212,7 +212,7 @@ type controllerRunConfig struct {
 	clientIsLatestVersion    bool
 	disableUntunneledUpgrade bool
 	disableEstablishing      bool
-	disrupt                  bool
+	disruptNetwork           bool
 	useHostNameTransformer   bool
 }
 
@@ -243,7 +243,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		config.UpgradeDownloadClientVersionHeader = ""
 	}
 
-	if runConfig.disrupt {
+	if runConfig.disruptNetwork {
 		config.UpstreamProxyUrl = disruptorProxyURL
 	}
 
@@ -394,9 +394,9 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		t.Fatalf("upgrade download timeout exceeded")
 	}
 
-	// Test: with disrupt, must be multiple download progress notices
+	// Test: with disruptNetwork, must be multiple download progress notices
 
-	if runConfig.disrupt && !runConfig.clientIsLatestVersion {
+	if runConfig.disruptNetwork && !runConfig.clientIsLatestVersion {
 		count := atomic.LoadInt32(&clientUpgradeDownloadedBytesCount)
 		if count <= 1 {
 			t.Fatalf("unexpected upgrade download progress: %d", count)
