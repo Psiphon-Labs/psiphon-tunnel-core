@@ -199,6 +199,8 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	serverContext.clientUpgradeVersion = handshakeConfig.UpgradeClientVersion
 	if handshakeConfig.UpgradeClientVersion != "" {
 		NoticeClientUpgradeAvailable(handshakeConfig.UpgradeClientVersion)
+	} else {
+		NoticeClientIsLatestVersion("")
 	}
 
 	var regexpsNotices []string

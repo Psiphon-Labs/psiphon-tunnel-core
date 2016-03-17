@@ -188,6 +188,13 @@ func NoticeClientUpgradeAvailable(version string) {
 	outputNotice("ClientUpgradeAvailable", false, false, "version", version)
 }
 
+// NoticeClientIsLatestVersion reports that an upgrade check was made and the client
+// is already the latest version. availableVersion is the version available for download,
+// if known.
+func NoticeClientIsLatestVersion(availableVersion string) {
+	outputNotice("ClientIsLatestVersion", false, false, "availableVersion", availableVersion)
+}
+
 // NoticeClientUpgradeAvailable is a sponsor homepage, as per the handshake. The client
 // should display the sponsor's homepage.
 func NoticeHomepage(url string) {
