@@ -509,50 +509,70 @@ loop:
 				controller.startEstablishing()
 			}
 
-		// !TODO! design issue: might not be enough server entries with region/caps to ever fill tunnel slots
-		// solution(?) target MIN(CountServerEntries(region, protocol), TunnelPoolSize)
 		case establishedTunnel := <-controller.establishedTunnels:
+
+			if controller.isImpairedProtocol(establishedTunnel.protocol) {
+
+				NoticeAlert("established tunnel with impaired protocol: %s", establishedTunnel.protocol)
+
+				// Protocol was classified as impaired while this tunnel
+				// established, so discard.
+				controller.discardTunnel(establishedTunnel)
+
+				// Reset establish generator to stop producing tunnels
+				// with impaired protocols.
+				if controller.isEstablishing {
+					controller.stopEstablishing()
+					controller.startEstablishing()
+				}
+				break
+			}
+
 			tunnelCount, registered := controller.registerTunnel(establishedTunnel)
-			if registered {
-				NoticeActiveTunnel(establishedTunnel.serverEntry.IpAddress, establishedTunnel.protocol)
+			if !registered {
+				// Already fully established, so discard.
+				controller.discardTunnel(establishedTunnel)
+				break
+			}
 
-				if tunnelCount == 1 {
+			NoticeActiveTunnel(establishedTunnel.serverEntry.IpAddress, establishedTunnel.protocol)
 
-					// The split tunnel classifier is started once the first tunnel is
-					// established. This first tunnel is passed in to be used to make
-					// the routes data request.
-					// A long-running controller may run while the host device is present
-					// in different regions. In this case, we want the split tunnel logic
-					// to switch to routes for new regions and not classify traffic based
-					// on routes installed for older regions.
-					// We assume that when regions change, the host network will also
-					// change, and so all tunnels will fail and be re-established. Under
-					// that assumption, the classifier will be re-Start()-ed here when
-					// the region has changed.
-					controller.splitTunnelClassifier.Start(establishedTunnel)
+			if tunnelCount == 1 {
 
-					// Signal a connected request on each 1st tunnel establishment. For
-					// multi-tunnels, the session is connected as long as at least one
-					// tunnel is established.
-					controller.startOrSignalConnectedReporter()
+				// The split tunnel classifier is started once the first tunnel is
+				// established. This first tunnel is passed in to be used to make
+				// the routes data request.
+				// A long-running controller may run while the host device is present
+				// in different regions. In this case, we want the split tunnel logic
+				// to switch to routes for new regions and not classify traffic based
+				// on routes installed for older regions.
+				// We assume that when regions change, the host network will also
+				// change, and so all tunnels will fail and be re-established. Under
+				// that assumption, the classifier will be re-Start()-ed here when
+				// the region has changed.
+				controller.splitTunnelClassifier.Start(establishedTunnel)
 
-					// If the handshake indicated that a new client version is available,
-					// trigger an upgrade download.
-					// Note: serverContext is nil when DisableApi is set
-					if establishedTunnel.serverContext != nil &&
-						establishedTunnel.serverContext.clientUpgradeVersion != "" {
+				// Signal a connected request on each 1st tunnel establishment. For
+				// multi-tunnels, the session is connected as long as at least one
+				// tunnel is established.
+				controller.startOrSignalConnectedReporter()
 
-						handshakeVersion := establishedTunnel.serverContext.clientUpgradeVersion
-						select {
-						case controller.signalDownloadUpgrade <- handshakeVersion:
-						default:
-						}
+				// If the handshake indicated that a new client version is available,
+				// trigger an upgrade download.
+				// Note: serverContext is nil when DisableApi is set
+				if establishedTunnel.serverContext != nil &&
+					establishedTunnel.serverContext.clientUpgradeVersion != "" {
+
+					handshakeVersion := establishedTunnel.serverContext.clientUpgradeVersion
+					select {
+					case controller.signalDownloadUpgrade <- handshakeVersion:
+					default:
 					}
 				}
-
-			} else {
-				controller.discardTunnel(establishedTunnel)
 			}
+
+			// TODO: design issue -- might not be enough server entries with region/caps to ever fill tunnel slots;
+			// possible solution is establish target MIN(CountServerEntries(region, protocol), TunnelPoolSize)
 			if controller.isFullyEstablished() {
 				controller.stopEstablishing()
 			}
@@ -612,9 +632,7 @@ func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
 //
 // Concurrency note: only the runTunnels() goroutine may call getImpairedProtocols
 func (controller *Controller) getImpairedProtocols() []string {
-	if len(controller.impairedProtocolClassification) > 0 {
-		NoticeInfo("impaired protocols: %+v", controller.impairedProtocolClassification)
-	}
+	NoticeImpairedProtocolClassification(controller.impairedProtocolClassification)
 	impairedProtocols := make([]string, 0)
 	for protocol, count := range controller.impairedProtocolClassification {
 		if count >= IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD {
@@ -622,6 +640,14 @@ func (controller *Controller) getImpairedProtocols() []string {
 		}
 	}
 	return impairedProtocols
+}
+
+// isImpairedProtocol checks if the specified protocol is classified as impaired.
+//
+// Concurrency note: only the runTunnels() goroutine may call isImpairedProtocol
+func (controller *Controller) isImpairedProtocol(protocol string) bool {
+	count, ok := controller.impairedProtocolClassification[protocol]
+	return ok && count >= IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD
 }
 
 // SignalTunnelFailure implements the TunnelOwner interface. This function
@@ -798,7 +824,7 @@ func (controller *Controller) Dial(
 		// relative to the outbound network.
 
 		if controller.splitTunnelClassifier.IsUntunneled(host) {
-			// !TODO! track downstreamConn and close it when the DialTCP conn closes, as with tunnel.Dial conns?
+			// TODO: track downstreamConn and close it when the DialTCP conn closes, as with tunnel.Dial conns?
 			return DialTCP(remoteAddr, controller.untunneledDialConfig)
 		}
 	}

@@ -214,6 +214,11 @@ func NoticeTunnels(count int) {
 	outputNotice("Tunnels", false, false, "count", count)
 }
 
+func NoticeImpairedProtocolClassification(impairedProtocolClassification map[string]int) {
+	outputNotice("ImpairedProtocolClassification", false, false,
+		"classification", impairedProtocolClassification)
+}
+
 // NoticeUntunneled indicates than an address has been classified as untunneled and is being
 // accessed directly.
 //
