@@ -13,7 +13,7 @@ This component does not include a UI and does not handle capturing or routing lo
 Status
 --------------------------------------------------------------------------------
 
-This project is currently at the proof-of-concept stage. Current production Psiphon client code is available at our [Psiphon 3 repository](https://bitbucket.org/psiphon/psiphon-circumvention-system).
+This project is in production and used as the tunneling engine in our Windows and Android clients, which are available at our [Psiphon 3 repository](https://bitbucket.org/psiphon/psiphon-circumvention-system).
 
 Setup
 --------------------------------------------------------------------------------
