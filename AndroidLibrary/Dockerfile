@@ -81,7 +81,11 @@ RUN mkdir -p /tmp/openssl \
 # Install Pinned Gomobile
 #  - Ordered last to allow use of previously cached layers when changing revisions
 ENV GOMOBILE_PINNED_REV=320ec40f6328971c405979b804e20d5f3c86770c
-RUN mkdir -p $GOPATH/src/golang.org/x \
+RUN mkdir -p $GOPATH/pkg/gomobile/dl \
+  && cd $GOPATH/pkg/gomobile/dl \
+  && curl -O https://dl.google.com/go/mobile/gomobile-ndk-r10e-linux-x86_64.tar.gz \
+  && curl -O https://dl.google.com/go/mobile/gomobile-openal-soft-1.16.0.1.tar.gz \
+  && mkdir -p $GOPATH/src/golang.org/x \
   && cd $GOPATH/src/golang.org/x \
   && git clone https://github.com/golang/mobile \
   && cd mobile \
