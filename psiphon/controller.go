@@ -84,6 +84,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 	if err != nil {
 		return nil, ContextError(err)
 	}
+	NoticeSessionId(sessionId)
 
 	// untunneledPendingConns may be used to interrupt the fetch remote server list
 	// request and other untunneled connection establishments. BindToDevice may be
