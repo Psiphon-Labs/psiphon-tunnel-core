@@ -214,6 +214,11 @@ func NoticeTunnels(count int) {
 	outputNotice("Tunnels", false, false, "count", count)
 }
 
+// NoticeSessionId is the session ID used across all tunnels established by the controller.
+func NoticeSessionId(sessionId string) {
+	outputNotice("SessionId", true, false, "sessionId", sessionId)
+}
+
 func NoticeImpairedProtocolClassification(impairedProtocolClassification map[string]int) {
 	outputNotice("ImpairedProtocolClassification", false, false,
 		"classification", impairedProtocolClassification)
