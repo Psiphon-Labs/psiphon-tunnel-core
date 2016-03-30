@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"time"
 )
 
 // FetchRemoteServerList downloads a remote server list JSON record from
@@ -40,8 +41,12 @@ func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 		return ContextError(errors.New("remote server list signature public key blank"))
 	}
 
+	var requestTimeout time.Duration
+	if *config.FetchRemoteServerListTimeoutSeconds > 0 {
+		requestTimeout = time.Duration(*config.FetchRemoteServerListTimeoutSeconds) * time.Second
+	}
 	httpClient, requestUrl, err := MakeUntunneledHttpsClient(
-		dialConfig, nil, config.RemoteServerListUrl, FETCH_REMOTE_SERVER_LIST_TIMEOUT)
+		dialConfig, nil, config.RemoteServerListUrl, requestTimeout)
 	if err != nil {
 		return ContextError(err)
 	}

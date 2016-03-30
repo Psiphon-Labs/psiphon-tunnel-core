@@ -235,11 +235,11 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	}
 	transport := &http.Transport{
 		Dial: tunneledDialer,
-		ResponseHeaderTimeout: FETCH_ROUTES_TIMEOUT,
+		ResponseHeaderTimeout: time.Duration(*tunnel.config.FetchRoutesTimeoutSeconds) * time.Second,
 	}
 	httpClient := &http.Client{
 		Transport: transport,
-		Timeout:   FETCH_ROUTES_TIMEOUT,
+		Timeout:   time.Duration(*tunnel.config.FetchRoutesTimeoutSeconds) * time.Second,
 	}
 
 	// At this time, the largest uncompressed routes data set is ~1MB. For now,

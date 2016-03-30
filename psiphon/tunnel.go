@@ -218,9 +218,11 @@ func (tunnel *Tunnel) Dial(
 		err                error
 	}
 	resultChannel := make(chan *tunnelDialResult, 2)
-	time.AfterFunc(TUNNEL_PORT_FORWARD_DIAL_TIMEOUT, func() {
-		resultChannel <- &tunnelDialResult{nil, errors.New("tunnel dial timeout")}
-	})
+	if *tunnel.config.TunnelPortForwardTimeoutSeconds > 0 {
+		time.AfterFunc(time.Duration(*tunnel.config.TunnelPortForwardTimeoutSeconds)*time.Second, func() {
+			resultChannel <- &tunnelDialResult{nil, errors.New("tunnel dial timeout")}
+		})
+	}
 	go func() {
 		sshPortForwardConn, err := tunnel.sshClient.Dial("tcp", remoteAddr)
 		resultChannel <- &tunnelDialResult{sshPortForwardConn, err}
@@ -513,7 +515,7 @@ func dialSsh(
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
-		ConnectTimeout:                TUNNEL_CONNECT_TIMEOUT,
+		ConnectTimeout:                time.Duration(*config.TunnelConnectTimeoutSeconds) * time.Second,
 		PendingConns:                  pendingConns,
 		DeviceBinder:                  config.DeviceBinder,
 		DnsServerGetter:               config.DnsServerGetter,
@@ -597,9 +599,11 @@ func dialSsh(
 		err       error
 	}
 	resultChannel := make(chan *sshNewClientResult, 2)
-	time.AfterFunc(TUNNEL_CONNECT_TIMEOUT, func() {
-		resultChannel <- &sshNewClientResult{nil, errors.New("ssh dial timeout")}
-	})
+	if *config.TunnelConnectTimeoutSeconds > 0 {
+		time.AfterFunc(time.Duration(*config.TunnelConnectTimeoutSeconds)*time.Second, func() {
+			resultChannel <- &sshNewClientResult{nil, errors.New("ssh dial timeout")}
+		})
+	}
 
 	go func() {
 		// The folowing is adapted from ssh.Dial(), here using a custom conn
@@ -797,7 +801,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		case <-sshKeepAliveTimer.C:
 			if lastBytesReceivedTime.Add(TUNNEL_SSH_KEEP_ALIVE_PERIODIC_INACTIVE_PERIOD).Before(time.Now()) {
 				select {
-				case signalSshKeepAlive <- TUNNEL_SSH_KEEP_ALIVE_PERIODIC_TIMEOUT:
+				case signalSshKeepAlive <- time.Duration(*tunnel.config.TunnelSshKeepAlivePeriodicTimeoutSeconds) * time.Second:
 				default:
 				}
 			}
@@ -811,7 +815,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 			if lastBytesReceivedTime.Add(TUNNEL_SSH_KEEP_ALIVE_PROBE_INACTIVE_PERIOD).Before(time.Now()) {
 				select {
-				case signalSshKeepAlive <- TUNNEL_SSH_KEEP_ALIVE_PROBE_TIMEOUT:
+				case signalSshKeepAlive <- time.Duration(*tunnel.config.TunnelSshKeepAliveProbeTimeoutSeconds) * time.Second:
 				default:
 				}
 			}
@@ -903,9 +907,11 @@ func sendSshKeepAlive(
 	sshClient *ssh.Client, conn net.Conn, timeout time.Duration) error {
 
 	errChannel := make(chan error, 2)
-	time.AfterFunc(timeout, func() {
-		errChannel <- TimeoutError{}
-	})
+	if timeout > 0 {
+		time.AfterFunc(timeout, func() {
+			errChannel <- TimeoutError{}
+		})
+	}
 
 	go func() {
 		// Random padding to frustrate fingerprinting
