@@ -93,6 +93,13 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 	_, err = LoadConfig(testObjJSON)
 	suite.NotNil(err, "JSON with one of our required fields missing should fail")
 
+	// Missing required SponsorId field
+	json.Unmarshal(suite.confStubBlob, &testObj)
+	delete(testObj, suite.requiredFields[1]) // will need to update if config in README changes
+	testObjJSON, _ = json.Marshal(testObj)
+	_, err = LoadConfig(testObjJSON)
+	suite.NotNil(err, "JSON with missing SponsorId field should fail")
+
 	// Bad type for required field
 	json.Unmarshal(suite.confStubBlob, &testObj)
 	testObj[suite.requiredFields[0]] = false // basically guessing a wrong type
