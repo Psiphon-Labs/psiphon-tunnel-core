@@ -61,6 +61,17 @@ func makeTCPDialer(config *DialConfig) func(network, addr string) (net.Conn, err
 		if err != nil {
 			return nil, ContextError(err)
 		}
+		// Note: when an upstream proxy is used, we don't know what IP address
+		// was resolved, by the proxy, for that destination.
+		if config.ResolvedIPCallback != nil && config.UpstreamProxyUrl == "" {
+			remoteAddr := conn.RemoteAddr()
+			if remoteAddr != nil {
+				host, _, err := net.SplitHostPort(conn.RemoteAddr().String())
+				if err == nil {
+					config.ResolvedIPCallback(host)
+				}
+			}
+		}
 		return conn, nil
 	}
 }
@@ -83,7 +94,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (*TCPConn, error) {
 	conn := &TCPConn{dialResult: make(chan error, 1)}
 
 	// Enable interruption
-	if !config.PendingConns.Add(conn) {
+	if config.PendingConns != nil && !config.PendingConns.Add(conn) {
 		return nil, ContextError(errors.New("pending connections already closed"))
 	}
 

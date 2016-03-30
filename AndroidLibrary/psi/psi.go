@@ -68,6 +68,8 @@ func Start(
 			provider.Notice(string(notice))
 		}))
 
+	psiphon.EmitNoticeBuildInfo()
+
 	// TODO: should following errors be Notices?
 
 	err = psiphon.InitDataStore(config)
@@ -75,7 +77,10 @@ func Start(
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
-	serverEntries, err := psiphon.DecodeAndValidateServerEntryList(embeddedServerEntryList)
+	serverEntries, err := psiphon.DecodeAndValidateServerEntryList(
+		embeddedServerEntryList,
+		psiphon.GetCurrentTimestamp(),
+		psiphon.SERVER_ENTRY_SOURCE_EMBEDDED)
 	if err != nil {
 		return fmt.Errorf("error decoding embedded server entry list: %s", err)
 	}

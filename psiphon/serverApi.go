@@ -51,6 +51,15 @@ type ServerContext struct {
 	serverHandshakeTimestamp string
 }
 
+// MeekStats holds extra stats that are only gathered for meek tunnels.
+type MeekStats struct {
+	DialAddress         string
+	ResolvedIPAddress   string
+	SNIServerName       string
+	HostHeader          string
+	TransformedHostName bool
+}
+
 // nextTunnelNumber is a monotonically increasing number assigned to each
 // successive tunnel connection. The sessionId and tunnelNumber together
 // form a globally unique identifier for tunnels, which is used for
@@ -152,11 +161,18 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	var decodedServerEntries []*ServerEntry
 
 	// Store discovered server entries
+	// We use the server's time, as it's available here, for the server entry
+	// timestamp since this is more reliable than the client time.
 	for _, encodedServerEntry := range handshakeConfig.EncodedServerList {
-		serverEntry, err := DecodeServerEntry(encodedServerEntry)
+
+		serverEntry, err := DecodeServerEntry(
+			encodedServerEntry,
+			TruncateTimestampToHour(handshakeConfig.ServerTimestamp),
+			SERVER_ENTRY_SOURCE_DISCOVERY)
 		if err != nil {
 			return ContextError(err)
 		}
+
 		err = ValidateServerEntry(serverEntry)
 		if err != nil {
 			// Skip this entry and continue with the next one
@@ -183,6 +199,8 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	serverContext.clientUpgradeVersion = handshakeConfig.UpgradeClientVersion
 	if handshakeConfig.UpgradeClientVersion != "" {
 		NoticeClientUpgradeAvailable(handshakeConfig.UpgradeClientVersion)
+	} else {
+		NoticeClientIsLatestVersion("")
 	}
 
 	var regexpsNotices []string
@@ -406,13 +424,21 @@ func doUntunneledStatusRequest(
 		return ContextError(err)
 	}
 
+	dialConfig := tunnel.untunneledDialConfig
+
 	timeout := PSIPHON_API_SERVER_TIMEOUT
 	if isShutdown {
 		timeout = PSIPHON_API_SHUTDOWN_SERVER_TIMEOUT
+
+		// Use a copy of DialConfig without pendingConns. This ensures
+		// this request isn't interrupted/canceled. This measure should
+		// be used only with the very short PSIPHON_API_SHUTDOWN_SERVER_TIMEOUT.
+		dialConfig = new(DialConfig)
+		*dialConfig = *tunnel.untunneledDialConfig
 	}
 
 	httpClient, requestUrl, err := MakeUntunneledHttpsClient(
-		tunnel.untunneledDialConfig,
+		dialConfig,
 		certificate,
 		url,
 		timeout)
@@ -599,6 +625,59 @@ func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
 	requestUrl.WriteString(tunnel.config.ClientPlatform)
 	requestUrl.WriteString("&tunnel_whole_device=")
 	requestUrl.WriteString(strconv.Itoa(tunnel.config.TunnelWholeDevice))
+
+	// The following parameters may be blank and must
+	// not be sent to the server if blank.
+
+	if tunnel.config.DeviceRegion != "" {
+		requestUrl.WriteString("&device_region=")
+		requestUrl.WriteString(tunnel.config.DeviceRegion)
+	}
+	if tunnel.meekStats != nil {
+		if tunnel.meekStats.DialAddress != "" {
+			requestUrl.WriteString("&meek_dial_address=")
+			requestUrl.WriteString(tunnel.meekStats.DialAddress)
+		}
+		if tunnel.meekStats.ResolvedIPAddress != "" {
+			requestUrl.WriteString("&meek_resolved_ip_address=")
+			requestUrl.WriteString(tunnel.meekStats.ResolvedIPAddress)
+		}
+		if tunnel.meekStats.SNIServerName != "" {
+			requestUrl.WriteString("&meek_sni_server_name=")
+			requestUrl.WriteString(tunnel.meekStats.SNIServerName)
+		}
+		if tunnel.meekStats.HostHeader != "" {
+			requestUrl.WriteString("&meek_host_header=")
+			requestUrl.WriteString(tunnel.meekStats.HostHeader)
+		}
+		requestUrl.WriteString("&meek_transformed_host_name=")
+		if tunnel.meekStats.TransformedHostName {
+			requestUrl.WriteString("1")
+		} else {
+			requestUrl.WriteString("0")
+		}
+	}
+
+	if tunnel.serverEntry.Region != "" {
+		requestUrl.WriteString("&server_entry_region=")
+		requestUrl.WriteString(tunnel.serverEntry.Region)
+	}
+
+	if tunnel.serverEntry.LocalSource != "" {
+		requestUrl.WriteString("&server_entry_source=")
+		requestUrl.WriteString(tunnel.serverEntry.LocalSource)
+	}
+
+	// As with last_connected, this timestamp stat, which may be
+	// a precise handshake request server timestamp, is truncated
+	// to hour granularity to avoid introducing a reconstructable
+	// cross-session user trace into server logs.
+	localServerEntryTimestamp := TruncateTimestampToHour(tunnel.serverEntry.LocalTimestamp)
+	if localServerEntryTimestamp != "" {
+		requestUrl.WriteString("&server_entry_timestamp=")
+		requestUrl.WriteString(localServerEntryTimestamp)
+	}
+
 	return requestUrl.String()
 }
 

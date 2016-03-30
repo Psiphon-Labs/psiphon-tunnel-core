@@ -59,6 +59,7 @@ type DialConfig struct {
 	// Dials may be interrupted using PendingConns.CloseAll(). Once instantiated,
 	// a conn is added to pendingConns before the network connect begins and
 	// removed from pendingConns once the connect succeeds or fails.
+	// May be nil.
 	PendingConns *Conns
 
 	// BindToDevice parameters are used to exclude connections and
@@ -83,11 +84,18 @@ type DialConfig struct {
 	// SSL_CTX_load_verify_locations.
 	// Only applies to UseIndistinguishableTLS connections.
 	TrustedCACertificatesFilename string
-}
 
-// DeviceBinder defines the interface to the external BindToDevice provider
-type DeviceBinder interface {
-	BindToDevice(fileDescriptor int) error
+	// DeviceRegion is the reported region the host device is running in.
+	// When set, this value may be used, pre-connection, to select performance
+	// or circumvention optimization strategies for the given region.
+	DeviceRegion string
+
+	// ResolvedIPCallback, when set, is called with the IP address that was
+	// dialed. This is either the specified IP address in the dial address,
+	// or the resolved IP address in the case where the dial address is a
+	// domain name.
+	// The callback may be invoked by a concurrent goroutine.
+	ResolvedIPCallback func(string)
 }
 
 // NetworkConnectivityChecker defines the interface to the external
@@ -97,10 +105,29 @@ type NetworkConnectivityChecker interface {
 	HasNetworkConnectivity() int
 }
 
+// DeviceBinder defines the interface to the external BindToDevice provider
+type DeviceBinder interface {
+	BindToDevice(fileDescriptor int) error
+}
+
 // DnsServerGetter defines the interface to the external GetDnsServer provider
 type DnsServerGetter interface {
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
+}
+
+// HostNameTransformer defines the interface for pluggable hostname
+// transformation circumvention strategies.
+type HostNameTransformer interface {
+	TransformHostName(hostname string) (string, bool)
+}
+
+// IdentityHostNameTransformer is the default HostNameTransformer, which
+// returns the hostname unchanged.
+type IdentityHostNameTransformer struct{}
+
+func (IdentityHostNameTransformer) TransformHostName(hostname string) (string, bool) {
+	return hostname, false
 }
 
 // TimeoutError implements the error interface
@@ -264,26 +291,15 @@ func MakeUntunneledHttpsClient(
 	requestUrl string,
 	requestTimeout time.Duration) (*http.Client, string, error) {
 
-	dialer := NewCustomTLSDialer(
-		// Note: when verifyLegacyCertificate is not nil, some
-		// of the other CustomTLSConfig is overridden.
-		&CustomTLSConfig{
-			Dial: NewTCPDialer(dialConfig),
-			VerifyLegacyCertificate:       verifyLegacyCertificate,
-			SendServerName:                true,
-			SkipVerify:                    false,
-			UseIndistinguishableTLS:       dialConfig.UseIndistinguishableTLS,
-			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
-		})
+	// Change the scheme to "http"; otherwise http.Transport will try to do
+	// another TLS handshake inside the explicit TLS session. Also need to
+	// force an explicit port, as the default for "http", 80, won't talk TLS.
 
 	urlComponents, err := url.Parse(requestUrl)
 	if err != nil {
 		return nil, "", ContextError(err)
 	}
 
-	// Change the scheme to "http"; otherwise http.Transport will try to do
-	// another TLS handshake inside the explicit TLS session. Also need to
-	// force an explicit port, as the default for "http", 80, won't talk TLS.
 	urlComponents.Scheme = "http"
 	host, port, err := net.SplitHostPort(urlComponents.Host)
 	if err != nil {
@@ -295,6 +311,21 @@ func MakeUntunneledHttpsClient(
 		port = "443"
 	}
 	urlComponents.Host = net.JoinHostPort(host, port)
+
+	// Note: IndistinguishableTLS mode doesn't support VerifyLegacyCertificate
+	useIndistinguishableTLS := dialConfig.UseIndistinguishableTLS && verifyLegacyCertificate == nil
+
+	dialer := NewCustomTLSDialer(
+		// Note: when verifyLegacyCertificate is not nil, some
+		// of the other CustomTLSConfig is overridden.
+		&CustomTLSConfig{
+			Dial: NewTCPDialer(dialConfig),
+			VerifyLegacyCertificate:       verifyLegacyCertificate,
+			SNIServerName:                 host,
+			SkipVerify:                    false,
+			UseIndistinguishableTLS:       useIndistinguishableTLS,
+			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
+		})
 
 	transport := &http.Transport{
 		Dial: dialer,

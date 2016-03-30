@@ -28,6 +28,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	regen "github.com/Psiphon-Inc/goregen"
@@ -77,6 +78,7 @@ type Tunnel struct {
 	signalPortForwardFailure chan struct{}
 	totalPortForwardFailures int
 	startTime                time.Time
+	meekStats                *MeekStats
 }
 
 // EstablishTunnel first makes a network transport connection to the
@@ -103,7 +105,7 @@ func EstablishTunnel(
 	}
 
 	// Build transport layers and establish SSH connection
-	conn, sshClient, err := dialSsh(
+	conn, sshClient, meekStats, err := dialSsh(
 		config, pendingConns, serverEntry, selectedProtocol, sessionId)
 	if err != nil {
 		return nil, ContextError(err)
@@ -132,6 +134,7 @@ func EstablishTunnel(
 		// A buffer allows at least one signal to be sent even when the receiver is
 		// not listening. Senders should not block.
 		signalPortForwardFailure: make(chan struct{}, 1),
+		meekStats:                meekStats,
 	}
 
 	// Create a new Psiphon API server context for this tunnel. This includes
@@ -331,73 +334,181 @@ func selectProtocol(config *Config, serverEntry *ServerEntry) (selectedProtocol 
 	return selectedProtocol, nil
 }
 
-// dialSsh is a helper that builds the transport layers and establishes the SSH connection
+// selectFrontingParameters is a helper which selects/generates meek fronting
+// parameters where the server entry provides multiple options or patterns.
+func selectFrontingParameters(
+	serverEntry *ServerEntry) (frontingAddress, frontingHost string, err error) {
+
+	if len(serverEntry.MeekFrontingAddressesRegex) > 0 {
+
+		// Generate a front address based on the regex.
+
+		frontingAddress, err = regen.Generate(serverEntry.MeekFrontingAddressesRegex)
+		if err != nil {
+			return "", "", ContextError(err)
+		}
+	} else {
+
+		// Randomly select, for this connection attempt, one front address for
+		// fronting-capable servers.
+
+		if len(serverEntry.MeekFrontingAddresses) == 0 {
+			return "", "", ContextError(errors.New("MeekFrontingAddresses is empty"))
+		}
+		index, err := MakeSecureRandomInt(len(serverEntry.MeekFrontingAddresses))
+		if err != nil {
+			return "", "", ContextError(err)
+		}
+		frontingAddress = serverEntry.MeekFrontingAddresses[index]
+	}
+
+	if len(serverEntry.MeekFrontingHosts) > 0 {
+		index, err := MakeSecureRandomInt(len(serverEntry.MeekFrontingHosts))
+		if err != nil {
+			return "", "", ContextError(err)
+		}
+		frontingHost = serverEntry.MeekFrontingHosts[index]
+	} else {
+		// Backwards compatibility case
+		frontingHost = serverEntry.MeekFrontingHost
+	}
+
+	return
+}
+
+// initMeekConfig is a helper that creates a MeekConfig suitable for the
+// selected meek tunnel protocol.
+func initMeekConfig(
+	config *Config,
+	serverEntry *ServerEntry,
+	selectedProtocol,
+	sessionId string) (*MeekConfig, error) {
+
+	// The meek protocol always uses OSSH
+	psiphonServerAddress := fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
+
+	var dialAddress string
+	useHTTPS := false
+	var SNIServerName, hostHeader string
+	transformedHostName := false
+
+	switch selectedProtocol {
+	case TUNNEL_PROTOCOL_FRONTED_MEEK:
+		frontingAddress, frontingHost, err := selectFrontingParameters(serverEntry)
+		if err != nil {
+			return nil, ContextError(err)
+		}
+		dialAddress = fmt.Sprintf("%s:443", frontingAddress)
+		useHTTPS = true
+		if !serverEntry.MeekFrontingDisableSNI {
+			SNIServerName, transformedHostName =
+				config.HostNameTransformer.TransformHostName(frontingAddress)
+		}
+		hostHeader = frontingHost
+
+	case TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
+		frontingAddress, frontingHost, err := selectFrontingParameters(serverEntry)
+		if err != nil {
+			return nil, ContextError(err)
+		}
+		dialAddress = fmt.Sprintf("%s:80", frontingAddress)
+		hostHeader = frontingHost
+
+	case TUNNEL_PROTOCOL_UNFRONTED_MEEK:
+		dialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
+		hostname := serverEntry.IpAddress
+		hostname, transformedHostName = config.HostNameTransformer.TransformHostName(hostname)
+		if serverEntry.MeekServerPort == 80 {
+			hostHeader = hostname
+		} else {
+			hostHeader = fmt.Sprintf("%s:%d", hostname, serverEntry.MeekServerPort)
+		}
+
+	case TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS:
+		dialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
+		useHTTPS = true
+		SNIServerName, transformedHostName =
+			config.HostNameTransformer.TransformHostName(serverEntry.IpAddress)
+		if serverEntry.MeekServerPort == 443 {
+			hostHeader = serverEntry.IpAddress
+		} else {
+			hostHeader = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
+		}
+
+	default:
+		return nil, ContextError(errors.New("unexpected selectedProtocol"))
+	}
+
+	// The unnderlying TLS will automatically disable SNI for IP address server name
+	// values; we have this explicit check here so we record the correct value for stats.
+	if net.ParseIP(SNIServerName) != nil {
+		SNIServerName = ""
+	}
+
+	return &MeekConfig{
+		DialAddress:                   dialAddress,
+		UseHTTPS:                      useHTTPS,
+		SNIServerName:                 SNIServerName,
+		HostHeader:                    hostHeader,
+		TransformedHostName:           transformedHostName,
+		PsiphonServerAddress:          psiphonServerAddress,
+		SessionID:                     sessionId,
+		MeekCookieEncryptionPublicKey: serverEntry.MeekCookieEncryptionPublicKey,
+		MeekObfuscatedKey:             serverEntry.MeekObfuscatedKey,
+	}, nil
+}
+
+// dialSsh is a helper that builds the transport layers and establishes the SSH connection.
+// When a meek protocols is selected, additional MeekStats are recorded and returned.
 func dialSsh(
 	config *Config,
 	pendingConns *Conns,
 	serverEntry *ServerEntry,
 	selectedProtocol,
-	sessionId string) (conn net.Conn, sshClient *ssh.Client, err error) {
+	sessionId string) (
+	conn net.Conn, sshClient *ssh.Client, meekStats *MeekStats, err error) {
 
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
-	port := 0
-	useMeek := false
-	useMeekHttps := false
-	useFronting := false
+
 	useObfuscatedSsh := false
+	var directTCPDialAddress string
+	var meekConfig *MeekConfig
+
 	switch selectedProtocol {
-	case TUNNEL_PROTOCOL_FRONTED_MEEK:
-		useMeek = true
-		useMeekHttps = true
-		useFronting = true
-		useObfuscatedSsh = true
-	case TUNNEL_PROTOCOL_UNFRONTED_MEEK:
-		useMeek = true
-		useObfuscatedSsh = true
-		port = serverEntry.SshObfuscatedPort
-	case TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS:
-		useMeek = true
-		useMeekHttps = true
-		useObfuscatedSsh = true
-		port = serverEntry.SshObfuscatedPort
 	case TUNNEL_PROTOCOL_OBFUSCATED_SSH:
 		useObfuscatedSsh = true
-		port = serverEntry.SshObfuscatedPort
+		directTCPDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
+
 	case TUNNEL_PROTOCOL_SSH:
-		port = serverEntry.SshPort
-	}
+		directTCPDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshPort)
 
-	frontingAddress := ""
-	if useFronting {
-		if len(serverEntry.MeekFrontingAddressesRegex) > 0 {
-
-			// Generate a front address based on the regex.
-
-			frontingAddress, err = regen.Generate(serverEntry.MeekFrontingAddressesRegex)
-			if err != nil {
-				return nil, nil, ContextError(err)
-			}
-		} else {
-
-			// Randomly select, for this connection attempt, one front address for
-			// fronting-capable servers.
-
-			if len(serverEntry.MeekFrontingAddresses) == 0 {
-				return nil, nil, ContextError(errors.New("MeekFrontingAddresses is empty"))
-			}
-			index, err := MakeSecureRandomInt(len(serverEntry.MeekFrontingAddresses))
-			if err != nil {
-				return nil, nil, ContextError(err)
-			}
-			frontingAddress = serverEntry.MeekFrontingAddresses[index]
+	default:
+		useObfuscatedSsh = true
+		meekConfig, err = initMeekConfig(config, serverEntry, selectedProtocol, sessionId)
+		if err != nil {
+			return nil, nil, nil, ContextError(err)
 		}
 	}
+
 	NoticeConnectingServer(
 		serverEntry.IpAddress,
 		serverEntry.Region,
 		selectedProtocol,
-		frontingAddress)
+		directTCPDialAddress,
+		meekConfig)
+
+	// Use an asynchronous callback to record the resolved IP address when
+	// dialing a domain name. Note that DialMeek doesn't immediately
+	// establish any HTTPS connections, so the resolved IP address won't be
+	// reported until during/after ssh session establishment (the ssh traffic
+	// is meek payload). So don't Load() the IP address value until after that
+	// has completed to ensure a result.
+	var resolvedIPAddress atomic.Value
+	resolvedIPAddress.Store("")
+	setResolvedIPAddress := func(IPAddress string) {
+		resolvedIPAddress.Store(IPAddress)
+	}
 
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
@@ -408,16 +519,18 @@ func dialSsh(
 		DnsServerGetter:               config.DnsServerGetter,
 		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
+		DeviceRegion:                  config.DeviceRegion,
+		ResolvedIPCallback:            setResolvedIPAddress,
 	}
-	if useMeek {
-		conn, err = DialMeek(serverEntry, sessionId, useMeekHttps, frontingAddress, dialConfig)
+	if meekConfig != nil {
+		conn, err = DialMeek(meekConfig, dialConfig)
 		if err != nil {
-			return nil, nil, ContextError(err)
+			return nil, nil, nil, ContextError(err)
 		}
 	} else {
-		conn, err = DialTCP(fmt.Sprintf("%s:%d", serverEntry.IpAddress, port), dialConfig)
+		conn, err = DialTCP(directTCPDialAddress, dialConfig)
 		if err != nil {
-			return nil, nil, ContextError(err)
+			return nil, nil, nil, ContextError(err)
 		}
 	}
 
@@ -435,14 +548,14 @@ func dialSsh(
 	if useObfuscatedSsh {
 		sshConn, err = NewObfuscatedSshConn(conn, serverEntry.SshObfuscatedKey)
 		if err != nil {
-			return nil, nil, ContextError(err)
+			return nil, nil, nil, ContextError(err)
 		}
 	}
 
 	// Now establish the SSH session over the sshConn transport
 	expectedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.SshHostKey)
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, nil, ContextError(err)
 	}
 	sshCertChecker := &ssh.CertChecker{
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
@@ -458,7 +571,7 @@ func dialSsh(
 			SshPassword string `json:"SshPassword"`
 		}{sessionId, serverEntry.SshPassword})
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, nil, ContextError(err)
 	}
 	sshClientConfig := &ssh.ClientConfig{
 		User: serverEntry.SshUsername,
@@ -502,10 +615,22 @@ func dialSsh(
 
 	result := <-resultChannel
 	if result.err != nil {
-		return nil, nil, ContextError(result.err)
+		return nil, nil, nil, ContextError(result.err)
 	}
 
-	return conn, result.sshClient, nil
+	if meekConfig != nil {
+		meekStats = &MeekStats{
+			DialAddress:         meekConfig.DialAddress,
+			ResolvedIPAddress:   resolvedIPAddress.Load().(string),
+			SNIServerName:       meekConfig.SNIServerName,
+			HostHeader:          meekConfig.HostHeader,
+			TransformedHostName: meekConfig.TransformedHostName,
+		}
+
+		NoticeConnectedMeekStats(serverEntry.IpAddress, meekStats)
+	}
+
+	return conn, result.sshClient, meekStats, nil
 }
 
 // operateTunnel monitors the health of the tunnel and performs
@@ -744,10 +869,11 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// everything must be wrapped up quickly. Also, we still have a working
 	// tunnel. So we first attempt a tunneled status request (with a short
 	// timeout) and then attempt, synchronously -- otherwise the Contoller's
-	// untunneledPendingConns.CloseAll() will immediately interrupt untunneled
-	// requests -- untunneled requests (also with short timeouts).
-	// Note that this depends on the order of untunneledPendingConns.CloseAll()
-	// coming after tunnel.Close(): see note in Controller.Run().
+	// runWaitGroup.Wait() will return while a request is still in progress
+	// -- untunneled requests (also with short timeouts). Note that in this
+	// case the untunneled request will opt out of untunneledPendingConns so
+	// that it's not inadvertently canceled by the Controller shutdown
+	// sequence (see doUntunneledStatusRequest).
 	//
 	// If the tunnel has failed, the Controller may continue working. We want
 	// to re-establish as soon as possible (so don't want to block on status

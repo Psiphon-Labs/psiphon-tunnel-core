@@ -107,6 +107,7 @@ func (s *socks4Proxy) Dial(network, addr string) (net.Conn, error) {
 		// try to put an invalid IP into DSTIP field and
 		// append domain name terminated by '\x00' at the end of request
 		ip = net.IPv4(0, 0, 0, 1)
+		domainDest = hostStr
 	}
 	ip4 := ip.To4()
 	if ip4 == nil {

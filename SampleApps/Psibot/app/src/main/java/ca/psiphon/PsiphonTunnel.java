@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Psiphon Inc.
+ * Copyright (c) 2015, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -27,6 +27,7 @@ import android.net.NetworkInfo;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
+import android.telephony.TelephonyManager;
 import android.util.Base64;
 
 import org.apache.http.conn.util.InetAddressUtils;
@@ -90,6 +91,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     }
 
     private final HostService mHostService;
+    private AtomicBoolean mVpnMode;
     private PrivateAddress mPrivateAddress;
     private AtomicReference<ParcelFileDescriptor> mTunFd;
     private AtomicInteger mLocalSocksProxyPort;
@@ -113,6 +115,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
 
     private PsiphonTunnel(HostService hostService) {
         mHostService = hostService;
+        mVpnMode = new AtomicBoolean(false);
         mTunFd = new AtomicReference<ParcelFileDescriptor>();
         mLocalSocksProxyPort = new AtomicInteger(0);
         mRoutingThroughTunnel = new AtomicBoolean(false);
@@ -148,10 +151,11 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         stopPsiphon();
         startPsiphon("");
     }
-
+    
     public synchronized void stop() {
         stopVpn();
         stopPsiphon();
+        mVpnMode.set(false);
         mLocalSocksProxyPort.set(0);
     }
 
@@ -164,7 +168,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     private final static int UDPGW_SERVER_PORT = 7300;
     private final static String DEFAULT_PRIMARY_DNS_SERVER = "8.8.4.4";
     private final static String DEFAULT_SECONDARY_DNS_SERVER = "8.8.8.8";
-
+    
     // Note: Atomic variables used for getting/setting local proxy port, routing flag, and
     // tun fd, as these functions may be called via PsiphonProvider callbacks. Do not use
     // synchronized functions as stop() is synchronized and a deadlock is possible as callbacks
@@ -173,6 +177,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
     private boolean startVpn() throws Exception {
 
+        mVpnMode.set(true);
         mPrivateAddress = selectPrivateAddress();
 
         Locale previousLocale = Locale.getDefault();
@@ -183,20 +188,21 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             Locale.setDefault(new Locale("en"));
 
             ParcelFileDescriptor tunFd =
-                    ((VpnService.Builder) mHostService.newVpnServiceBuilder())
-                            .setSession(mHostService.getAppName())
-                            .setMtu(VPN_INTERFACE_MTU)
-                            .addAddress(mPrivateAddress.mIpAddress, mPrivateAddress.mPrefixLength)
-                            .addRoute("0.0.0.0", 0)
-                            .addRoute(mPrivateAddress.mSubnet, mPrivateAddress.mPrefixLength)
-                            .addDnsServer(mPrivateAddress.mRouter)
-                            .establish();
+                ((VpnService.Builder) mHostService.newVpnServiceBuilder())
+                    .setSession(mHostService.getAppName())
+                    .setMtu(VPN_INTERFACE_MTU)
+                    .addAddress(mPrivateAddress.mIpAddress, mPrivateAddress.mPrefixLength)
+                    .addRoute("0.0.0.0", 0)
+                    .addRoute(mPrivateAddress.mSubnet, mPrivateAddress.mPrefixLength)
+                    .addDnsServer(mPrivateAddress.mRouter)
+                    .establish();
             if (tunFd == null) {
                 // As per http://developer.android.com/reference/android/net/VpnService.Builder.html#establish%28%29,
                 // this application is no longer prepared or was revoked.
                 return false;
             }
             mTunFd.set(tunFd);
+            mRoutingThroughTunnel.set(false);
 
             mHostService.onDiagnosticMessage("VPN established");
 
@@ -215,7 +221,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     }
 
     private boolean isVpnMode() {
-        return mTunFd.get() != null;
+        return mVpnMode.get();
     }
 
     private void setLocalSocksProxyPort(int port) {
@@ -226,10 +232,14 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         if (!mRoutingThroughTunnel.compareAndSet(false, true)) {
             return;
         }
+        ParcelFileDescriptor tunFd = mTunFd.getAndSet(null);
+        if (tunFd == null) {
+            return;
+        }
         String socksServerAddress = "127.0.0.1:" + Integer.toString(mLocalSocksProxyPort.get());
         String udpgwServerAddress = "127.0.0.1:" + Integer.toString(UDPGW_SERVER_PORT);
         startTun2Socks(
-                mTunFd.get(),
+                tunFd,
                 VPN_INTERFACE_MTU,
                 mPrivateAddress.mRouter,
                 VPN_INTERFACE_NETMASK,
@@ -243,6 +253,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     }
 
     private void stopVpn() {
+        stopTun2Socks();
         ParcelFileDescriptor tunFd = mTunFd.getAndSet(null);
         if (tunFd != null) {
             try {
@@ -250,10 +261,9 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             } catch (IOException e) {
             }
         }
-        waitStopTun2Socks();
         mRoutingThroughTunnel.set(false);
     }
-
+    
     //----------------------------------------------------------------------------------------------
     // PsiphonProvider (Core support) interface implementation
     //----------------------------------------------------------------------------------------------
@@ -311,10 +321,10 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         mHostService.onDiagnosticMessage("starting Psiphon library");
         try {
             Psi.Start(
-                    loadPsiphonConfig(mHostService.getContext()),
-                    embeddedServerEntries,
-                    this,
-                    isVpnMode());
+                loadPsiphonConfig(mHostService.getContext()),
+                embeddedServerEntries,
+                this,
+                isVpnMode());
         } catch (java.lang.Exception e) {
             throw new Exception("failed to start Psiphon library", e);
         }
@@ -333,7 +343,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         // Load settings from the raw resource JSON config file and
         // update as necessary. Then write JSON to disk for the Go client.
         JSONObject json = new JSONObject(mHostService.getPsiphonConfig());
-
+        
         // On Android, these directories must be set to the app private storage area.
         // The Psiphon library won't be able to use its current working directory
         // and the standard temporary directories do not exist.
@@ -360,7 +370,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         }
 
         json.put("UseIndistinguishableTLS", true);
-
+        
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
             json.put("UseTrustedCACertificatesForStockTLS", true);
         }
@@ -369,11 +379,13 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             // Also enable indistinguishable TLS for HTTPS requests that
             // require system CAs.
             json.put(
-                    "TrustedCACertificatesFilename",
-                    setupTrustedCertificates(mHostService.getContext()));
+                "TrustedCACertificatesFilename",
+                setupTrustedCertificates(mHostService.getContext()));
         } catch (Exception e) {
             mHostService.onDiagnosticMessage(e.getMessage());
         }
+        
+        json.put("DeviceRegion", getDeviceRegion(mHostService.getContext()));
 
         return json.toString();
     }
@@ -383,10 +395,10 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             // All notices are sent on as diagnostic messages
             // except those that may contain private user data.
             boolean diagnostic = true;
-
+            
             JSONObject notice = new JSONObject(noticeJSON);
             String noticeType = notice.getString("noticeType");
-
+            
             if (noticeType.equals("Tunnels")) {
                 int count = notice.getJSONObject("data").getInt("count");
                 if (count > 0) {
@@ -405,7 +417,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
                     regions.add(egressRegions.getString(i));
                 }
                 mHostService.onAvailableEgressRegions(regions);
-
+                
             } else if (noticeType.equals("SocksProxyPortInUse")) {
                 mHostService.onSocksProxyPortInUse(notice.getJSONObject("data").getInt("port"));
 
@@ -537,6 +549,24 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         }
     }
 
+    private static String getDeviceRegion(Context context) {
+        String region = "";
+        TelephonyManager telephonyManager = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
+        if (telephonyManager != null) {
+            region = telephonyManager.getSimCountryIso();
+            if (region.length() == 0 && telephonyManager.getPhoneType() != TelephonyManager.PHONE_TYPE_CDMA) {
+                region = telephonyManager.getNetworkCountryIso();
+            }
+        }
+        if (region.length() == 0) {
+            Locale defaultLocale = Locale.getDefault();
+            if (defaultLocale != null) {
+                region = defaultLocale.getCountry();
+            }
+        }
+        return region.toUpperCase(Locale.US);
+    }
+    
     //----------------------------------------------------------------------------------------------
     // Tun2Socks
     //----------------------------------------------------------------------------------------------
@@ -550,11 +580,14 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             final String socksServerAddress,
             final String udpgwServerAddress,
             final boolean udpgwTransparentDNS) {
+        if (mTun2SocksThread != null) {
+            return;
+        }
         mTun2SocksThread = new Thread(new Runnable() {
             @Override
             public void run() {
                 runTun2Socks(
-                        vpnInterfaceFileDescriptor.getFd(),
+                        vpnInterfaceFileDescriptor.detachFd(),
                         vpnInterfaceMTU,
                         vpnIpAddress,
                         vpnNetMask,
@@ -567,10 +600,10 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         mHostService.onDiagnosticMessage("tun2socks started");
     }
 
-    private void waitStopTun2Socks() {
+    private void stopTun2Socks() {
         if (mTun2SocksThread != null) {
             try {
-                // Assumes mTunFd has been closed, which signals tun2socks to exit
+                terminateTun2Socks();
                 mTun2SocksThread.join();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -593,6 +626,8 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             String socksServerAddress,
             String udpgwServerAddress,
             int udpgwTransparentDNS);
+    
+    private native static int terminateTun2Socks();
 
     static {
         System.loadLibrary("tun2socks");

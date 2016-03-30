@@ -40,7 +40,8 @@ func TestDecodeAndValidateServerEntryList(t *testing.T) {
 		hex.EncodeToString([]byte(_INVALID_WINDOWS_REGISTRY_LEGACY_SERVER_ENTRY)) + "\n" +
 		hex.EncodeToString([]byte(_INVALID_MALFORMED_IP_ADDRESS_SERVER_ENTRY))
 
-	serverEntries, err := DecodeAndValidateServerEntryList(testEncodedServerEntryList)
+	serverEntries, err := DecodeAndValidateServerEntryList(
+		testEncodedServerEntryList, GetCurrentTimestamp(), SERVER_ENTRY_SOURCE_EMBEDDED)
 	if err != nil {
 		t.Error(err.Error())
 		t.FailNow()
@@ -62,7 +63,8 @@ func TestInvalidServerEntries(t *testing.T) {
 
 	for _, testCase := range testCases {
 		encodedServerEntry := hex.EncodeToString([]byte(testCase))
-		serverEntry, err := DecodeServerEntry(encodedServerEntry)
+		serverEntry, err := DecodeServerEntry(
+			encodedServerEntry, GetCurrentTimestamp(), SERVER_ENTRY_SOURCE_EMBEDDED)
 		if err != nil {
 			t.Error(err.Error())
 		}

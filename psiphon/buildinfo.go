@@ -23,24 +23,32 @@ import "strings"
 
 /*
 These values should be filled in at build time using the `-X` option[1] to the
-Go linker (probably via `-ldflags` option to `go build` -- like `-ldflags "-X var1 abc -X var2 xyz"`).
+Go linker (probably via `-ldflags` option to `go build` -- like `-ldflags "-X var1=abc -X var2=xyz"`).
 [1]: http://golang.org/cmd/ld/
 Without those build flags, the build info in the notice will simply be empty strings.
 Suggestions for how to fill in the values will be given for each variable.
+Note that any passed value must contain no whitespace.
 */
-// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildDate `date --iso-8601=seconds`
+// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildDate=`date --iso-8601=seconds`
 var buildDate string
 
-// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildRepo `git config --get remote.origin.url`
+// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildRepo=`git config --get remote.origin.url`
 var buildRepo string
 
-// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildRev `git rev-parse HEAD`
+// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildRev=`git rev-parse --short HEAD`
 var buildRev string
 
-func NoticeBuildInfo() {
-	NoticeInfo(
-		"Built: %#v from %#v at rev %#v",
+// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.goVersion=`go version | perl -ne '/go version (.*?) / && print $1'`
+var goVersion string
+
+// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.gomobileVersion=`gomobile version | perl -ne '/gomobile version (.*?) / && print $1'`
+var gomobileVersion string
+
+func EmitNoticeBuildInfo() {
+	NoticeBuildInfo(
 		strings.TrimSpace(buildDate),
 		strings.TrimSpace(buildRepo),
-		strings.TrimSpace(buildRev))
+		strings.TrimSpace(buildRev),
+		strings.TrimSpace(goVersion),
+		strings.TrimSpace(gomobileVersion))
 }

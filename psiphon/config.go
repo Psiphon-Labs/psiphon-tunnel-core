@@ -22,7 +22,9 @@ package psiphon
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -65,7 +67,8 @@ const (
 	PSIPHON_API_TUNNEL_STATS_MAX_COUNT             = 1000
 	FETCH_ROUTES_TIMEOUT                           = 1 * time.Minute
 	DOWNLOAD_UPGRADE_TIMEOUT                       = 15 * time.Minute
-	DOWNLOAD_UPGRADE_RETRY_PAUSE_PERIOD            = 5 * time.Second
+	DOWNLOAD_UPGRADE_RETRY_PERIOD                  = 5 * time.Second
+	DOWNLOAD_UPGRADE_STALE_PERIOD                  = 6 * time.Hour
 	IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION      = 2 * time.Minute
 	IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD     = 3
 	TOTAL_BYTES_TRANSFERRED_NOTICE_PERIOD          = 5 * time.Minute
@@ -150,8 +153,8 @@ type Config struct {
 
 	// TunnelProtocol indicates which protocol to use. Valid values include:
 	// "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
-	// "FRONTED-MEEK-OSSH". For the default, "", the best performing protocol
-	// is used.
+	// "FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH". For the default, "",
+	// the best performing protocol is used.
 	TunnelProtocol string
 
 	// EstablishTunnelTimeoutSeconds specifies a time limit after which to halt
@@ -208,6 +211,10 @@ type Config struct {
 	// This parameter is only applicable to library deployments.
 	DnsServerGetter DnsServerGetter
 
+	// HostNameTransformer is an interface that enables pluggable hostname
+	// transformation circumvention strategies.
+	HostNameTransformer HostNameTransformer
+
 	// TargetServerEntry is an encoded server entry. When specified, this server entry
 	// is used exclusively and all other known servers are ignored.
 	TargetServerEntry string
@@ -248,6 +255,13 @@ type Config struct {
 	// typically embedded in the client binary.
 	UpgradeDownloadUrl string
 
+	// UpgradeDownloadClientVersionHeader specifies the HTTP header name for the
+	// entity at UpgradeDownloadUrl which specifies the client version (an integer
+	// value). A HEAD request may be made to check the version number available at
+	// UpgradeDownloadUrl. UpgradeDownloadClientVersionHeader is required when
+	// UpgradeDownloadUrl is specified.
+	UpgradeDownloadClientVersionHeader string
+
 	// UpgradeDownloadFilename is the local target filename for an upgrade download.
 	// This parameter is required when UpgradeDownloadUrl is specified.
 	UpgradeDownloadFilename string
@@ -281,6 +295,20 @@ type Config struct {
 	// 1-2 minutes, when the tunnel is idle. If the SSH keepalive times out, the tunnel
 	// is considered to have failed.
 	DisablePeriodicSshKeepAlive bool
+
+	// DeviceRegion is the optional, reported region the host device is running in.
+	// This input value should be a ISO 3166-1 alpha-2 country code. The device region
+	// is reported to the server in the connected request and recorded for Psiphon
+	// stats.
+	// When provided, this value may be used, pre-connection, to select performance
+	// or circumvention optimization strategies for the given region.
+	DeviceRegion string
+
+	// EmitDiagnosticNotices indicates whether to output notices containing detailed
+	// information about the Psiphon session. As these notices may contain sensitive
+	// network information, they should not be insecurely distributed or displayed
+	// to users. Default is off.
+	EmitDiagnosticNotices bool
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON
@@ -290,6 +318,11 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	err := json.Unmarshal(configJson, &config)
 	if err != nil {
 		return nil, ContextError(err)
+	}
+
+	// Do setEmitDiagnosticNotices first, to ensure config file errors are emitted.
+	if config.EmitDiagnosticNotices {
+		setEmitDiagnosticNotices(true)
 	}
 
 	// These fields are required; the rest are optional
@@ -311,6 +344,12 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	if config.ClientVersion == "" {
 		config.ClientVersion = "0"
+	}
+
+	_, err = strconv.Atoi(config.ClientVersion)
+	if err != nil {
+		return nil, ContextError(
+			fmt.Errorf("invalid client version: %s", err))
 	}
 
 	if config.TunnelProtocol != "" {
@@ -343,6 +382,16 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	if config.DnsServerGetter != nil {
 		return nil, ContextError(errors.New("DnsServerGetter interface must be set at runtime"))
+	}
+
+	if config.HostNameTransformer != nil {
+		return nil, ContextError(errors.New("HostNameTransformer interface must be set at runtime"))
+	}
+
+	if config.UpgradeDownloadUrl != "" &&
+		(config.UpgradeDownloadClientVersionHeader == "" || config.UpgradeDownloadFilename == "") {
+		return nil, ContextError(errors.New(
+			"UpgradeDownloadUrl requires UpgradeDownloadClientVersionHeader and UpgradeDownloadFilename"))
 	}
 
 	return &config, nil

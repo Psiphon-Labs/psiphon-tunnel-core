@@ -91,12 +91,14 @@ type CustomTLSConfig struct {
 	// connection dial and TLS handshake.
 	Timeout time.Duration
 
-	// FrontingAddr overrides the "addr" input to Dial when specified
-	FrontingAddr string
+	// DialAddr overrides the "addr" input to Dial when specified
+	DialAddr string
 
-	// SendServerName specifies whether to use SNI
-	// (tlsdialer functionality)
-	SendServerName bool
+	// SNIServerName specifies the value to set in the SNI
+	// server_name field. When blank, SNI is omitted. Note that
+	// underlying TLS code also automatically omits SNI when
+	// the server_name is an IP address.
+	SNIServerName string
 
 	// SkipVerify completely disables server certificate verification.
 	SkipVerify bool
@@ -151,8 +153,8 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 	}
 
 	dialAddr := addr
-	if config.FrontingAddr != "" {
-		dialAddr = config.FrontingAddr
+	if config.DialAddr != "" {
+		dialAddr = config.DialAddr
 	}
 
 	rawConn, err := config.Dial(network, dialAddr)
@@ -172,10 +174,13 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 		tlsConfig.InsecureSkipVerify = true
 	}
 
-	if config.SendServerName && config.VerifyLegacyCertificate == nil {
+	if config.SNIServerName != "" && config.VerifyLegacyCertificate == nil {
 		// Set the ServerName and rely on the usual logic in
-		// tls.Conn.Handshake() to do its verification
-		tlsConfig.ServerName = hostname
+		// tls.Conn.Handshake() to do its verification.
+		// Note: Go TLS will automatically omit this ServerName when it's an IP address
+		if net.ParseIP(hostname) == nil {
+			tlsConfig.ServerName = config.SNIServerName
+		}
 	} else {
 		// No SNI.
 		// Disable verification in tls.Conn.Handshake().  We'll verify manually

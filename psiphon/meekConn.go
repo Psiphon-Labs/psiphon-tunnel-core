@@ -59,6 +59,37 @@ const (
 	MEEK_ROUND_TRIP_TIMEOUT        = 20 * time.Second
 )
 
+// MeekConfig specifies the behavior of a MeekConn
+type MeekConfig struct {
+
+	// DialAddress is the actual network address to dial to establish a
+	// connection to the meek server. This may be either a fronted or
+	// direct address. The address must be in the form "host:port",
+	// where host may be a domain name or IP address.
+	DialAddress string
+
+	// UseHTTPS indicates whether to use HTTPS (true) or HTTP (false).
+	UseHTTPS bool
+
+	// SNIServerName is the value to place in the TLS SNI server_name
+	// field when HTTPS is used.
+	SNIServerName string
+
+	// HostHeader is the value to place in the HTTP request Host header.
+	HostHeader string
+
+	// TransformedHostName records whether a HostNameTransformer
+	// transformation is in effect. This value is used for stats reporting.
+	TransformedHostName bool
+
+	// The following values are used to create the obfuscated meek cookie.
+
+	PsiphonServerAddress          string
+	SessionID                     string
+	MeekCookieEncryptionPublicKey string
+	MeekObfuscatedKey             string
+}
+
 // MeekConn is a network connection that tunnels TCP over HTTP and supports "fronting". Meek sends
 // client->server flow in HTTP request bodies and receives server->client flow in HTTP response bodies.
 // Polling is used to achieve full duplex TCP.
@@ -71,8 +102,8 @@ const (
 // MeekConn also operates in unfronted mode, in which plain HTTP connections are made without routing
 // through a CDN.
 type MeekConn struct {
-	frontingAddress      string
 	url                  *url.URL
+	additionalHeaders    map[string]string
 	cookie               *http.Cookie
 	pendingConns         *Conns
 	transport            transporter
@@ -103,11 +134,9 @@ type transporter interface {
 // is spawned which will eventually start HTTP polling.
 // When frontingAddress is not "", fronting is used. This option assumes caller has
 // already checked server entry capabilities.
-// Fronting always uses HTTPS. Otherwise, HTTPS is optional.
 func DialMeek(
-	serverEntry *ServerEntry, sessionId string,
-	useHttps bool, frontingAddress string,
-	config *DialConfig) (meek *MeekConn, err error) {
+	meekConfig *MeekConfig,
+	dialConfig *DialConfig) (meek *MeekConn, err error) {
 
 	// Configure transport
 	// Note: MeekConn has its own PendingConns to manage the underlying HTTP transport connections,
@@ -117,20 +146,17 @@ func DialMeek(
 	pendingConns := new(Conns)
 
 	// Use a copy of DialConfig with the meek pendingConns
-	meekConfig := new(DialConfig)
-	*meekConfig = *config
-	meekConfig.PendingConns = pendingConns
+	meekDialConfig := new(DialConfig)
+	*meekDialConfig = *dialConfig
+	meekDialConfig.PendingConns = pendingConns
 
-	// host is both what is dialed and what ends up in the HTTP Host header
-	host := fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
-	var dialer Dialer
-	var proxyUrl func(*http.Request) (*url.URL, error)
+	var transport transporter
 
-	if useHttps || frontingAddress != "" {
+	if meekConfig.UseHTTPS {
 		// Custom TLS dialer:
 		//
 		//  1. ignores the HTTP request address and uses the fronting domain
-		//  2. disables SNI -- SNI breaks fronting when used with CDNs that support SNI on the server side.
+		//  2. optionally disables SNI -- SNI breaks fronting when used with certain CDNs.
 		//  3. skips verifying the server cert.
 		//
 		// Reasoning for #3:
@@ -160,66 +186,81 @@ func DialMeek(
 		// exclusively connect to non-MiM CDNs); then the adversary kills the underlying TCP connection after
 		// some short period. This is mitigated by the "impaired" protocol classification mechanism.
 
-		customTLSConfig := &CustomTLSConfig{
-			Dial:                          NewTCPDialer(meekConfig),
-			Timeout:                       meekConfig.ConnectTimeout,
-			SendServerName:                false,
+		dialer := NewCustomTLSDialer(&CustomTLSConfig{
+			DialAddr:                      meekConfig.DialAddress,
+			Dial:                          NewTCPDialer(meekDialConfig),
+			Timeout:                       meekDialConfig.ConnectTimeout,
+			SNIServerName:                 meekConfig.SNIServerName,
 			SkipVerify:                    true,
-			UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
-			TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
+			UseIndistinguishableTLS:       meekDialConfig.UseIndistinguishableTLS,
+			TrustedCACertificatesFilename: meekDialConfig.TrustedCACertificatesFilename,
+		})
+
+		transport = &http.Transport{
+			Dial: dialer,
+			ResponseHeaderTimeout: MEEK_ROUND_TRIP_TIMEOUT,
 		}
-
-		if frontingAddress != "" {
-			// In this case, host is not what is dialed but is what ends up in the HTTP Host header
-			host = serverEntry.MeekFrontingHost
-			customTLSConfig.FrontingAddr = fmt.Sprintf("%s:%d", frontingAddress, 443)
-		}
-
-		dialer = NewCustomTLSDialer(customTLSConfig)
-
 	} else {
 
-		if strings.HasPrefix(meekConfig.UpstreamProxyUrl, "http://") {
-			// For unfronted meek, we let the http.Transport handle proxying, as the
-			// target server hostname has to be in the HTTP request line. Also, in this
-			// case, we don't require the proxy to support CONNECT and so we can work
-			// through HTTP proxies that don't support it.
-			url, err := url.Parse(meekConfig.UpstreamProxyUrl)
+		// For HTTP meek, we let the http.Transport handle proxying. http.Transport will
+		// put the the HTTP server address in the HTTP request line. In this case, we can
+		// use an HTTP proxy that does not support CONNECT.
+		var proxyUrl func(*http.Request) (*url.URL, error)
+		if strings.HasPrefix(meekDialConfig.UpstreamProxyUrl, "http://") &&
+			(meekConfig.DialAddress == meekConfig.HostHeader ||
+				meekConfig.DialAddress == meekConfig.HostHeader+":80") {
+			url, err := url.Parse(meekDialConfig.UpstreamProxyUrl)
 			if err != nil {
 				return nil, ContextError(err)
 			}
 			proxyUrl = http.ProxyURL(url)
-			meekConfig.UpstreamProxyUrl = ""
+			meekDialConfig.UpstreamProxyUrl = ""
 		}
 
-		dialer = NewTCPDialer(meekConfig)
+		// dialer ignores address that http.Transport will pass in (derived from
+		// the HTTP request URL) and always dials meekConfig.DialAddress.
+		dialer := func(string, string) (net.Conn, error) {
+			return NewTCPDialer(meekDialConfig)("tcp", meekConfig.DialAddress)
+		}
+
+		httpTransport := &http.Transport{
+			Proxy: proxyUrl,
+			Dial:  dialer,
+			ResponseHeaderTimeout: MEEK_ROUND_TRIP_TIMEOUT,
+		}
+		if proxyUrl != nil {
+			// Wrap transport with a transport that can perform HTTP proxy auth negotiation
+			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport)
+			if err != nil {
+				return nil, ContextError(err)
+			}
+		} else {
+			transport = httpTransport
+		}
 	}
 
 	// Scheme is always "http". Otherwise http.Transport will try to do another TLS
 	// handshake inside the explicit TLS session (in fronting mode).
 	url := &url.URL{
 		Scheme: "http",
-		Host:   host,
+		Host:   meekConfig.HostHeader,
 		Path:   "/",
 	}
-	cookie, err := makeCookie(serverEntry, sessionId)
-	if err != nil {
-		return nil, ContextError(err)
-	}
-	httpTransport := &http.Transport{
-		Proxy: proxyUrl,
-		Dial:  dialer,
-		ResponseHeaderTimeout: MEEK_ROUND_TRIP_TIMEOUT,
-	}
-	var transport transporter
-	if proxyUrl != nil {
-		// Wrap transport with a transport that can perform HTTP proxy auth negotiation
-		transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport)
+
+	var additionalHeaders map[string]string
+	if meekConfig.UseHTTPS {
+		host, _, err := net.SplitHostPort(meekConfig.DialAddress)
 		if err != nil {
 			return nil, ContextError(err)
 		}
-	} else {
-		transport = httpTransport
+		additionalHeaders = map[string]string{
+			"X-Psiphon-Fronting-Address": host,
+		}
+	}
+
+	cookie, err := makeCookie(meekConfig)
+	if err != nil {
+		return nil, ContextError(err)
 	}
 
 	// The main loop of a MeekConn is run in the relay() goroutine.
@@ -239,8 +280,8 @@ func DialMeek(
 	// Write() calls and relay() are synchronized in a similar way, using a single
 	// sendBuffer.
 	meek = &MeekConn{
-		frontingAddress:      frontingAddress,
 		url:                  url,
+		additionalHeaders:    additionalHeaders,
 		cookie:               cookie,
 		pendingConns:         pendingConns,
 		transport:            transport,
@@ -261,7 +302,7 @@ func DialMeek(
 	go meek.relay()
 
 	// Enable interruption
-	if !config.PendingConns.Add(meek) {
+	if !dialConfig.PendingConns.Add(meek) {
 		meek.Close()
 		return nil, ContextError(errors.New("pending connections already closed"))
 	}
@@ -495,15 +536,15 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadClos
 		return nil, ContextError(err)
 	}
 
-	if meek.frontingAddress != "" && nil == net.ParseIP(meek.frontingAddress) {
-		request.Header.Set("X-Psiphon-Fronting-Address", meek.frontingAddress)
-	}
-
 	// Don't use the default user agent ("Go 1.1 package http").
 	// For now, just omit the header (net/http/request.go: "may be blank to not send the header").
 	request.Header.Set("User-Agent", "")
 
 	request.Header.Set("Content-Type", "application/octet-stream")
+
+	for name, value := range meek.additionalHeaders {
+		request.Header.Set(name, value)
+	}
 
 	request.AddCookie(meek.cookie)
 
@@ -595,13 +636,13 @@ type meekCookieData struct {
 // all consequent HTTP requests
 // In unfronted meek mode, the cookie is visible over the adversary network, so the
 // cookie is encrypted and obfuscated.
-func makeCookie(serverEntry *ServerEntry, sessionId string) (cookie *http.Cookie, err error) {
+func makeCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
 
 	// Make the JSON data
-	serverAddress := fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
+	serverAddress := meekConfig.PsiphonServerAddress
 	cookieData := &meekCookieData{
 		ServerAddress:       serverAddress,
-		SessionID:           sessionId,
+		SessionID:           meekConfig.SessionID,
 		MeekProtocolVersion: MEEK_PROTOCOL_VERSION,
 	}
 	serializedCookie, err := json.Marshal(cookieData)
@@ -618,7 +659,7 @@ func makeCookie(serverEntry *ServerEntry, sessionId string) (cookie *http.Cookie
 	// different messages if the messages are sent to two different public keys."
 	var nonce [24]byte
 	var publicKey [32]byte
-	decodedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.MeekCookieEncryptionPublicKey)
+	decodedPublicKey, err := base64.StdEncoding.DecodeString(meekConfig.MeekCookieEncryptionPublicKey)
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -634,7 +675,7 @@ func makeCookie(serverEntry *ServerEntry, sessionId string) (cookie *http.Cookie
 
 	// Obfuscate the encrypted data
 	obfuscator, err := NewObfuscator(
-		&ObfuscatorConfig{Keyword: serverEntry.MeekObfuscatedKey, MaxPadding: MEEK_COOKIE_MAX_PADDING})
+		&ObfuscatorConfig{Keyword: meekConfig.MeekObfuscatedKey, MaxPadding: MEEK_COOKIE_MAX_PADDING})
 	if err != nil {
 		return nil, ContextError(err)
 	}

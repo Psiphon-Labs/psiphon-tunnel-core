@@ -35,10 +35,12 @@ const (
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK       = "UNFRONTED-MEEK-OSSH"
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS = "UNFRONTED-MEEK-HTTPS-OSSH"
 	TUNNEL_PROTOCOL_FRONTED_MEEK         = "FRONTED-MEEK-OSSH"
+	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP    = "FRONTED-MEEK-HTTP-OSSH"
 )
 
 var SupportedTunnelProtocols = []string{
 	TUNNEL_PROTOCOL_FRONTED_MEEK,
+	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 	TUNNEL_PROTOCOL_OBFUSCATED_SSH,
@@ -46,8 +48,8 @@ var SupportedTunnelProtocols = []string{
 }
 
 // ServerEntry represents a Psiphon server. It contains information
-// about how to estalish a tunnel connection to the server through
-// several protocols. ServerEntry are JSON records downloaded from
+// about how to establish a tunnel connection to the server through
+// several protocols. Server entries are JSON records downloaded from
 // various sources.
 type ServerEntry struct {
 	IpAddress                     string   `json:"ipAddress"`
@@ -66,10 +68,27 @@ type ServerEntry struct {
 	MeekCookieEncryptionPublicKey string   `json:"meekCookieEncryptionPublicKey"`
 	MeekObfuscatedKey             string   `json:"meekObfuscatedKey"`
 	MeekFrontingHost              string   `json:"meekFrontingHost"`
+	MeekFrontingHosts             []string `json:"meekFrontingHosts"`
 	MeekFrontingDomain            string   `json:"meekFrontingDomain"`
 	MeekFrontingAddresses         []string `json:"meekFrontingAddresses"`
 	MeekFrontingAddressesRegex    string   `json:"meekFrontingAddressesRegex"`
+	MeekFrontingDisableSNI        bool     `json:"meekFrontingDisableSNI"`
+
+	// These local fields are not expected to be present in downloaded server
+	// entries. They are added by the client to record and report stats about
+	// how and when server entries are obtained.
+	LocalSource    string `json:"localSource"`
+	LocalTimestamp string `json:"localTimestamp"`
 }
+
+type ServerEntrySource string
+
+const (
+	SERVER_ENTRY_SOURCE_EMBEDDED  ServerEntrySource = "EMBEDDED"
+	SERVER_ENTRY_SOURCE_REMOTE    ServerEntrySource = "REMOTE"
+	SERVER_ENTRY_SOURCE_DISCOVERY ServerEntrySource = "DISCOVERY"
+	SERVER_ENTRY_SOURCE_TARGET    ServerEntrySource = "TARGET"
+)
 
 // SupportsProtocol returns true if and only if the ServerEntry has
 // the necessary capability to support the specified tunnel protocol.
@@ -127,21 +146,38 @@ func (serverEntry *ServerEntry) GetDirectWebRequestPorts() []string {
 
 // DecodeServerEntry extracts server entries from the encoding
 // used by remote server lists and Psiphon server handshake requests.
-func DecodeServerEntry(encodedServerEntry string) (serverEntry *ServerEntry, err error) {
+//
+// The resulting ServerEntry.LocalSource is populated with serverEntrySource,
+// which should be one of SERVER_ENTRY_SOURCE_EMBEDDED, SERVER_ENTRY_SOURCE_REMOTE,
+// SERVER_ENTRY_SOURCE_DISCOVERY, SERVER_ENTRY_SOURCE_TARGET.
+// ServerEntry.LocalTimestamp is populated with the provided timestamp, which
+// should be a RFC 3339 formatted string. These local fields are stored with the
+// server entry and reported to the server as stats (a coarse granularity timestamp
+// is reported).
+func DecodeServerEntry(
+	encodedServerEntry, timestamp string,
+	serverEntrySource ServerEntrySource) (serverEntry *ServerEntry, err error) {
+
 	hexDecodedServerEntry, err := hex.DecodeString(encodedServerEntry)
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
 	// Skip past legacy format (4 space delimited fields) and just parse the JSON config
 	fields := bytes.SplitN(hexDecodedServerEntry, []byte(" "), 5)
 	if len(fields) != 5 {
 		return nil, ContextError(errors.New("invalid encoded server entry"))
 	}
+
 	serverEntry = new(ServerEntry)
 	err = json.Unmarshal(fields[4], &serverEntry)
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
+	// NOTE: if the source JSON happens to have values in these fields, they get clobbered.
+	serverEntry.LocalSource = string(serverEntrySource)
+	serverEntry.LocalTimestamp = timestamp
 
 	return serverEntry, nil
 }
@@ -166,7 +202,11 @@ func ValidateServerEntry(serverEntry *ServerEntry) error {
 // DecodeAndValidateServerEntryList extracts server entries from the list encoding
 // used by remote server lists and Psiphon server handshake requests.
 // Each server entry is validated and invalid entries are skipped.
-func DecodeAndValidateServerEntryList(encodedServerEntryList string) (serverEntries []*ServerEntry, err error) {
+// See DecodeServerEntry for note on serverEntrySource/timestamp.
+func DecodeAndValidateServerEntryList(
+	encodedServerEntryList, timestamp string,
+	serverEntrySource ServerEntrySource) (serverEntries []*ServerEntry, err error) {
+
 	serverEntries = make([]*ServerEntry, 0)
 	for _, encodedServerEntry := range strings.Split(encodedServerEntryList, "\n") {
 		if len(encodedServerEntry) == 0 {
@@ -174,7 +214,7 @@ func DecodeAndValidateServerEntryList(encodedServerEntryList string) (serverEntr
 		}
 
 		// TODO: skip this entry and continue if can't decode?
-		serverEntry, err := DecodeServerEntry(encodedServerEntry)
+		serverEntry, err := DecodeServerEntry(encodedServerEntry, timestamp, serverEntrySource)
 		if err != nil {
 			return nil, ContextError(err)
 		}
