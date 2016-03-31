@@ -86,12 +86,14 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 	_, err := LoadConfig([]byte(`{"f1": 11, "f2": "two"}`))
 	suite.NotNil(err, "JSON with none of our fields should fail")
 
-	// Missing a required field
-	json.Unmarshal(suite.confStubBlob, &testObj)
-	delete(testObj, suite.requiredFields[0])
-	testObjJSON, _ = json.Marshal(testObj)
-	_, err = LoadConfig(testObjJSON)
-	suite.NotNil(err, "JSON with one of our required fields missing should fail")
+	// Test config missing each required field
+	for i := range suite.requiredFields {
+	  json.Unmarshal(suite.confStubBlob, &testObj)
+	  delete(testObj, suite.requiredFields[i])
+	  testObjJSON, _ = json.Marshal(testObj)
+	  _, err = LoadConfig(testObjJSON)
+	  suite.NotNil(err, "JSON with one of our required fields missing should fail")
+	}
 
 	// Bad type for required field
 	json.Unmarshal(suite.confStubBlob, &testObj)
