@@ -79,6 +79,4 @@ Please see the LICENSE file.
 Contacts
 --------------------------------------------------------------------------------
 
-For more information on Psiphon Inc, please visit our web site at:
-
-[www.psiphon.ca](http://www.psiphon.ca)
+We maintain a developer mailing list at	<psiphon3-developers@googlegroups.com>. For more information about Psiphon Inc., please visit our web site at [www.psiphon.ca](http://www.psiphon.ca).
