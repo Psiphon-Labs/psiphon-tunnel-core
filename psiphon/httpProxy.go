@@ -28,6 +28,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 )
 
 // HttpProxy is a HTTP server that relays HTTP requests through the Psiphon tunnel.
