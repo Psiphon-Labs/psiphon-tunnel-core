@@ -49,7 +49,7 @@ const (
 	ESTABLISH_TUNNEL_WORK_TIME                     = 60 * time.Second
 	ESTABLISH_TUNNEL_PAUSE_PERIOD                  = 5 * time.Second
 	ESTABLISH_TUNNEL_SERVER_AFFINITY_GRACE_PERIOD  = 1 * time.Second
-	HTTP_PROXY_ORIGIN_SERVER_TIMEOUT               = 15 * time.Second
+	HTTP_PROXY_ORIGIN_SERVER_TIMEOUT_SECONDS       = 15
 	HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST       = 50
 	FETCH_REMOTE_SERVER_LIST_TIMEOUT_SECONDS       = 30
 	FETCH_REMOTE_SERVER_LIST_RETRY_PERIOD          = 5 * time.Second
@@ -321,7 +321,7 @@ type Config struct {
 	TunnelPortForwardTimeoutSeconds *int
 
 	// TunnelSshKeepAliveProbeTimeoutSeconds specifies a timeout value for "probe"
-	// SSH keep-alivei that is sent upon port forward failure.
+	// SSH keep-alive that is sent upon port forward failure.
 	// Zero value means keep-alive request will not time out.
 	// If omitted default value is TUNNEL_SSH_KEEP_ALIVE_PROBE_TIMEOUT_SECONDS.
 	TunnelSshKeepAliveProbeTimeoutSeconds *int
@@ -332,7 +332,7 @@ type Config struct {
 	// If omitted default value is TUNNEL_SSH_KEEP_ALIVE_PERIODIC_TIMEOUT_SECONDS.
 	TunnelSshKeepAlivePeriodicTimeoutSeconds *int
 
-	// FetchRemoteServerListTimeoutSeconds specifies a timout value for remote server list
+	// FetchRemoteServerListTimeoutSeconds specifies a timeout value for remote server list
 	// HTTP request. Zero value means that request will not time out.
 	// If omitted default value is FETCH_REMOTE_SERVER_LIST_TIMEOUT_SECONDS.
 	FetchRemoteServerListTimeoutSeconds *int
@@ -345,10 +345,16 @@ type Config struct {
 	// process in order to prevent hangs.
 	PsiphonApiServerTimeoutSeconds *int
 
-	// FetchRoutesTimeoutSeconds specifies a timout value for split tunnel routes
+	// FetchRoutesTimeoutSeconds specifies a timeout value for split tunnel routes
 	// HTTP request. Zero value means that request will not time out.
 	// If omitted default value is FETCH_ROUTES_TIMEOUT_SECONDS.
 	FetchRoutesTimeoutSeconds *int
+
+	// HttpProxyOriginServerTimeoutSeconds specifies an HTTP response header timeout
+	// value in various HTTP relays found in httpProxy.
+	// Zero value means that request will not time out.
+	// If omitted default value  HTTP_PROXY_ORIGIN_SERVER_TIMEOUT_SECONDS.
+	HttpProxyOriginServerTimeoutSeconds *int
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON
@@ -467,6 +473,11 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	if config.FetchRoutesTimeoutSeconds == nil {
 		defaultFetchRoutesTimeoutSeconds := FETCH_ROUTES_TIMEOUT_SECONDS
 		config.FetchRoutesTimeoutSeconds = &defaultFetchRoutesTimeoutSeconds
+	}
+
+	if config.HttpProxyOriginServerTimeoutSeconds == nil {
+		defaultHttpProxyOriginServerTimeoutSeconds := HTTP_PROXY_ORIGIN_SERVER_TIMEOUT_SECONDS
+		config.HttpProxyOriginServerTimeoutSeconds = &defaultHttpProxyOriginServerTimeoutSeconds
 	}
 
 	return &config, nil

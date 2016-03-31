@@ -41,12 +41,8 @@ func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 		return ContextError(errors.New("remote server list signature public key blank"))
 	}
 
-	var requestTimeout time.Duration
-	if *config.FetchRemoteServerListTimeoutSeconds > 0 {
-		requestTimeout = time.Duration(*config.FetchRemoteServerListTimeoutSeconds) * time.Second
-	}
 	httpClient, requestUrl, err := MakeUntunneledHttpsClient(
-		dialConfig, nil, config.RemoteServerListUrl, requestTimeout)
+		dialConfig, nil, config.RemoteServerListUrl, time.Duration(*config.FetchRemoteServerListTimeoutSeconds)*time.Second)
 	if err != nil {
 		return ContextError(err)
 	}
