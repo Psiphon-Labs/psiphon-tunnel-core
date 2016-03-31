@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 )
@@ -424,9 +425,10 @@ func doUntunneledStatusRequest(
 		return ContextError(err)
 	}
 
+	timeout := time.Duration(*tunnel.config.PsiphonApiServerTimeoutSeconds) * time.Second
+
 	dialConfig := tunnel.untunneledDialConfig
 
-	timeout := PSIPHON_API_SERVER_TIMEOUT
 	if isShutdown {
 		timeout = PSIPHON_API_SHUTDOWN_SERVER_TIMEOUT
 
@@ -712,18 +714,19 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 		// TODO: check tunnel.isClosed, and apply TUNNEL_PORT_FORWARD_DIAL_TIMEOUT as in Tunnel.Dial?
 		return tunnel.sshClient.Dial("tcp", addr)
 	}
+	timeout := time.Duration(*tunnel.config.PsiphonApiServerTimeoutSeconds) * time.Second
 	dialer := NewCustomTLSDialer(
 		&CustomTLSConfig{
 			Dial:                    tunneledDialer,
-			Timeout:                 PSIPHON_API_SERVER_TIMEOUT,
+			Timeout:                 timeout,
 			VerifyLegacyCertificate: certificate,
 		})
 	transport := &http.Transport{
 		Dial: dialer,
-		ResponseHeaderTimeout: PSIPHON_API_SERVER_TIMEOUT,
+		ResponseHeaderTimeout: timeout,
 	}
 	return &http.Client{
 		Transport: transport,
-		Timeout:   PSIPHON_API_SERVER_TIMEOUT,
+		Timeout:   timeout,
 	}, nil
 }

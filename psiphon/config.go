@@ -35,27 +35,27 @@ const (
 	DATA_STORE_FILENAME                            = "psiphon.boltdb"
 	CONNECTION_WORKER_POOL_SIZE                    = 10
 	TUNNEL_POOL_SIZE                               = 1
-	TUNNEL_CONNECT_TIMEOUT                         = 20 * time.Second
+	TUNNEL_CONNECT_TIMEOUT_SECONDS                 = 20
 	TUNNEL_OPERATE_SHUTDOWN_TIMEOUT                = 1 * time.Second
-	TUNNEL_PORT_FORWARD_DIAL_TIMEOUT               = 10 * time.Second
+	TUNNEL_PORT_FORWARD_DIAL_TIMEOUT_SECONDS       = 10
 	TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES        = 256
 	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MIN               = 60 * time.Second
 	TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX               = 120 * time.Second
-	TUNNEL_SSH_KEEP_ALIVE_PERIODIC_TIMEOUT         = 30 * time.Second
+	TUNNEL_SSH_KEEP_ALIVE_PERIODIC_TIMEOUT_SECONDS = 30
 	TUNNEL_SSH_KEEP_ALIVE_PERIODIC_INACTIVE_PERIOD = 10 * time.Second
-	TUNNEL_SSH_KEEP_ALIVE_PROBE_TIMEOUT            = 5 * time.Second
+	TUNNEL_SSH_KEEP_ALIVE_PROBE_TIMEOUT_SECONDS    = 5
 	TUNNEL_SSH_KEEP_ALIVE_PROBE_INACTIVE_PERIOD    = 10 * time.Second
 	ESTABLISH_TUNNEL_TIMEOUT_SECONDS               = 300
 	ESTABLISH_TUNNEL_WORK_TIME                     = 60 * time.Second
 	ESTABLISH_TUNNEL_PAUSE_PERIOD                  = 5 * time.Second
 	ESTABLISH_TUNNEL_SERVER_AFFINITY_GRACE_PERIOD  = 1 * time.Second
-	HTTP_PROXY_ORIGIN_SERVER_TIMEOUT               = 15 * time.Second
+	HTTP_PROXY_ORIGIN_SERVER_TIMEOUT_SECONDS       = 15
 	HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST       = 50
-	FETCH_REMOTE_SERVER_LIST_TIMEOUT               = 30 * time.Second
+	FETCH_REMOTE_SERVER_LIST_TIMEOUT_SECONDS       = 30
 	FETCH_REMOTE_SERVER_LIST_RETRY_PERIOD          = 5 * time.Second
 	FETCH_REMOTE_SERVER_LIST_STALE_PERIOD          = 6 * time.Hour
 	PSIPHON_API_CLIENT_SESSION_ID_LENGTH           = 16
-	PSIPHON_API_SERVER_TIMEOUT                     = 20 * time.Second
+	PSIPHON_API_SERVER_TIMEOUT_SECONDS             = 20
 	PSIPHON_API_SHUTDOWN_SERVER_TIMEOUT            = 1 * time.Second
 	PSIPHON_API_STATUS_REQUEST_PERIOD_MIN          = 5 * time.Minute
 	PSIPHON_API_STATUS_REQUEST_PERIOD_MAX          = 10 * time.Minute
@@ -65,7 +65,7 @@ const (
 	PSIPHON_API_CONNECTED_REQUEST_PERIOD           = 24 * time.Hour
 	PSIPHON_API_CONNECTED_REQUEST_RETRY_PERIOD     = 5 * time.Second
 	PSIPHON_API_TUNNEL_STATS_MAX_COUNT             = 1000
-	FETCH_ROUTES_TIMEOUT                           = 1 * time.Minute
+	FETCH_ROUTES_TIMEOUT_SECONDS                   = 60
 	DOWNLOAD_UPGRADE_TIMEOUT                       = 15 * time.Minute
 	DOWNLOAD_UPGRADE_RETRY_PERIOD                  = 5 * time.Second
 	DOWNLOAD_UPGRADE_STALE_PERIOD                  = 6 * time.Hour
@@ -309,6 +309,52 @@ type Config struct {
 	// network information, they should not be insecurely distributed or displayed
 	// to users. Default is off.
 	EmitDiagnosticNotices bool
+
+	// TunnelConnectTimeoutSeconds specifies a single tunnel connection sequence timeout.
+	// Zero value means that connection process will not time out.
+	// If omitted default value is TUNNEL_CONNECT_TIMEOUT_SECONDS.
+	TunnelConnectTimeoutSeconds *int
+
+	// TunnelPortForwardTimeoutSeconds specifies a timeout per SSH port forward.
+	// Zero value means a port forward will not time out.
+	// If omitted default value is TUNNEL_PORT_FORWARD_DIAL_TIMEOUT_SECONDS.
+	TunnelPortForwardTimeoutSeconds *int
+
+	// TunnelSshKeepAliveProbeTimeoutSeconds specifies a timeout value for "probe"
+	// SSH keep-alive that is sent upon port forward failure.
+	// Zero value means keep-alive request will not time out.
+	// If omitted default value is TUNNEL_SSH_KEEP_ALIVE_PROBE_TIMEOUT_SECONDS.
+	TunnelSshKeepAliveProbeTimeoutSeconds *int
+
+	// TunnelSshKeepAlivePeriodicTimeoutSeconds specifies a timeout value for regular
+	// SSH keep-alives that are sent periodically.
+	// Zero value means keep-alive request will not time out.
+	// If omitted default value is TUNNEL_SSH_KEEP_ALIVE_PERIODIC_TIMEOUT_SECONDS.
+	TunnelSshKeepAlivePeriodicTimeoutSeconds *int
+
+	// FetchRemoteServerListTimeoutSeconds specifies a timeout value for remote server list
+	// HTTP request. Zero value means that request will not time out.
+	// If omitted default value is FETCH_REMOTE_SERVER_LIST_TIMEOUT_SECONDS.
+	FetchRemoteServerListTimeoutSeconds *int
+
+	// PsiphonApiServerTimeoutSeconds specifies a timeout for periodic API HTTP
+	// requests to Psiphon server such as stats, home pages, etc.
+	// Zero value means that request will not time out.
+	// If omitted default value is PSIPHON_API_SERVER_TIMEOUT_SECONDS.
+	// Note that this value is overridden for final stats requests during shutdown
+	// process in order to prevent hangs.
+	PsiphonApiServerTimeoutSeconds *int
+
+	// FetchRoutesTimeoutSeconds specifies a timeout value for split tunnel routes
+	// HTTP request. Zero value means that request will not time out.
+	// If omitted default value is FETCH_ROUTES_TIMEOUT_SECONDS.
+	FetchRoutesTimeoutSeconds *int
+
+	// HttpProxyOriginServerTimeoutSeconds specifies an HTTP response header timeout
+	// value in various HTTP relays found in httpProxy.
+	// Zero value means that request will not time out.
+	// If omitted default value  HTTP_PROXY_ORIGIN_SERVER_TIMEOUT_SECONDS.
+	HttpProxyOriginServerTimeoutSeconds *int
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON
@@ -392,6 +438,46 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		(config.UpgradeDownloadClientVersionHeader == "" || config.UpgradeDownloadFilename == "") {
 		return nil, ContextError(errors.New(
 			"UpgradeDownloadUrl requires UpgradeDownloadClientVersionHeader and UpgradeDownloadFilename"))
+	}
+
+	if config.TunnelConnectTimeoutSeconds == nil {
+		defaultTunnelConnectTimeoutSeconds := TUNNEL_CONNECT_TIMEOUT_SECONDS
+		config.TunnelConnectTimeoutSeconds = &defaultTunnelConnectTimeoutSeconds
+	}
+
+	if config.TunnelPortForwardTimeoutSeconds == nil {
+		defaultTunnelPortForwardTimeoutSeconds := TUNNEL_PORT_FORWARD_DIAL_TIMEOUT_SECONDS
+		config.TunnelPortForwardTimeoutSeconds = &defaultTunnelPortForwardTimeoutSeconds
+	}
+
+	if config.TunnelSshKeepAliveProbeTimeoutSeconds == nil {
+		defaultTunnelSshKeepAliveProbeTimeoutSeconds := TUNNEL_SSH_KEEP_ALIVE_PROBE_TIMEOUT_SECONDS
+		config.TunnelSshKeepAliveProbeTimeoutSeconds = &defaultTunnelSshKeepAliveProbeTimeoutSeconds
+	}
+
+	if config.TunnelSshKeepAlivePeriodicTimeoutSeconds == nil {
+		defaultTunnelSshKeepAlivePeriodicTimeoutSeconds := TUNNEL_SSH_KEEP_ALIVE_PERIODIC_TIMEOUT_SECONDS
+		config.TunnelSshKeepAlivePeriodicTimeoutSeconds = &defaultTunnelSshKeepAlivePeriodicTimeoutSeconds
+	}
+
+	if config.FetchRemoteServerListTimeoutSeconds == nil {
+		defaultFetchRemoteServerListTimeoutSeconds := FETCH_REMOTE_SERVER_LIST_TIMEOUT_SECONDS
+		config.FetchRemoteServerListTimeoutSeconds = &defaultFetchRemoteServerListTimeoutSeconds
+	}
+
+	if config.PsiphonApiServerTimeoutSeconds == nil {
+		defaultPsiphonApiServerTimeoutSeconds := PSIPHON_API_SERVER_TIMEOUT_SECONDS
+		config.PsiphonApiServerTimeoutSeconds = &defaultPsiphonApiServerTimeoutSeconds
+	}
+
+	if config.FetchRoutesTimeoutSeconds == nil {
+		defaultFetchRoutesTimeoutSeconds := FETCH_ROUTES_TIMEOUT_SECONDS
+		config.FetchRoutesTimeoutSeconds = &defaultFetchRoutesTimeoutSeconds
+	}
+
+	if config.HttpProxyOriginServerTimeoutSeconds == nil {
+		defaultHttpProxyOriginServerTimeoutSeconds := HTTP_PROXY_ORIGIN_SERVER_TIMEOUT_SECONDS
+		config.HttpProxyOriginServerTimeoutSeconds = &defaultHttpProxyOriginServerTimeoutSeconds
 	}
 
 	return &config, nil

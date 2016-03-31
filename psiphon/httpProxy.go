@@ -94,12 +94,13 @@ func NewHttpProxy(
 		return DialTCP(addr, untunneledDialConfig)
 	}
 
+	responseHeaderTimeout := time.Duration(*config.HttpProxyOriginServerTimeoutSeconds) * time.Second
 	// TODO: could HTTP proxy share a tunneled transport with URL proxy?
 	// For now, keeping them distinct just to be conservative.
 	httpProxyTunneledRelay := &http.Transport{
 		Dial:                  tunneledDialer,
 		MaxIdleConnsPerHost:   HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
-		ResponseHeaderTimeout: HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
+		ResponseHeaderTimeout: responseHeaderTimeout,
 	}
 
 	// Note: URL proxy relays use http.Client for upstream requests, so
@@ -109,12 +110,13 @@ func NewHttpProxy(
 	urlProxyTunneledRelay := &http.Transport{
 		Dial:                  tunneledDialer,
 		MaxIdleConnsPerHost:   HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
-		ResponseHeaderTimeout: HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
+		ResponseHeaderTimeout: responseHeaderTimeout,
 	}
 	urlProxyTunneledClient := &http.Client{
 		Transport: urlProxyTunneledRelay,
 		Jar:       nil, // TODO: cookie support for URL proxy?
 
+		// Leaving original value in the note below:
 		// Note: don't use this timeout -- it interrupts downloads of large response bodies
 		//Timeout:   HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
 	}
@@ -122,7 +124,7 @@ func NewHttpProxy(
 	urlProxyDirectRelay := &http.Transport{
 		Dial:                  directDialer,
 		MaxIdleConnsPerHost:   HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
-		ResponseHeaderTimeout: HTTP_PROXY_ORIGIN_SERVER_TIMEOUT,
+		ResponseHeaderTimeout: responseHeaderTimeout,
 	}
 	urlProxyDirectClient := &http.Client{
 		Transport: urlProxyDirectRelay,
