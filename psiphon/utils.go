@@ -118,6 +118,16 @@ func MakeRandomPeriod(min, max time.Duration) (duration time.Duration) {
 	return
 }
 
+// MakeRandomString returns a base64 encoded random string. byteLength
+// specifies the pre-encoded data length.
+func MakeRandomString(byteLength int) (string, error) {
+	bytes, err := MakeSecureRandomBytes(byteLength)
+	if err != nil {
+		return "", ContextError(err)
+	}
+	return base64.RawStdEncoding.EncodeToString(bytes), nil
+}
+
 func DecodeCertificate(encodedCertificate string) (certificate *x509.Certificate, err error) {
 	derEncodedCertificate, err := base64.StdEncoding.DecodeString(encodedCertificate)
 	if err != nil {

@@ -144,6 +144,23 @@ func (serverEntry *ServerEntry) GetDirectWebRequestPorts() []string {
 	return ports
 }
 
+// EncodeServerEntry returns a string containing the encoding of
+// a ServerEntry following Psiphon conventions.
+func EncodeServerEntry(serverEntry *ServerEntry) (string, error) {
+	serverEntryContents, err := json.Marshal(serverEntry)
+	if err != nil {
+		return "", ContextError(err)
+	}
+
+	return hex.EncodeToString([]byte(fmt.Sprintf(
+		"%s %s %s %s %s",
+		serverEntry.IpAddress,
+		serverEntry.WebServerPort,
+		serverEntry.WebServerSecret,
+		serverEntry.WebServerCertificate,
+		serverEntryContents))), nil
+}
+
 // DecodeServerEntry extracts server entries from the encoding
 // used by remote server lists and Psiphon server handshake requests.
 //
