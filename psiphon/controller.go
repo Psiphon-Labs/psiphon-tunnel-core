@@ -229,6 +229,8 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	controller.splitTunnelClassifier.Shutdown()
 
 	NoticeInfo("exiting controller")
+
+	NoticeExiting()
 }
 
 // SignalComponentFailure notifies the controller that an associated component has failed.
