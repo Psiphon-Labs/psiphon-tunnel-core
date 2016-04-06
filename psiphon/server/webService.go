@@ -65,12 +65,14 @@ func RunWebServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 	logWriter := log.StandardLogger().Writer()
 	defer logWriter.Close()
 
-	httpServer := &http.Server{
-		Handler:      serveMux,
-		TLSConfig:    tlsConfig,
-		ReadTimeout:  WEB_SERVER_READ_TIMEOUT,
-		WriteTimeout: WEB_SERVER_WRITE_TIMEOUT,
-		ErrorLog:     golanglog.New(logWriter, "", 0),
+	server := &psiphon.HTTPSServer{
+		http.Server{
+			Handler:      serveMux,
+			TLSConfig:    tlsConfig,
+			ReadTimeout:  WEB_SERVER_READ_TIMEOUT,
+			WriteTimeout: WEB_SERVER_WRITE_TIMEOUT,
+			ErrorLog:     golanglog.New(logWriter, "", 0),
+		},
 	}
 
 	listener, err := net.Listen(
@@ -90,7 +92,7 @@ func RunWebServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 		defer waitGroup.Done()
 
 		// Note: will be interrupted by listener.Close()
-		err := httpServer.Serve(listener)
+		err := server.ServeTLS(listener)
 
 		// Can't check for the exact error that Close() will cause in Accept(),
 		// (see: https://code.google.com/p/go/issues/detail?id=4373). So using an

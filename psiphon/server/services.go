@@ -57,7 +57,7 @@ func RunServices(encodedConfig []byte) error {
 	waitGroup.Add(1)
 	go func() {
 		defer waitGroup.Done()
-		err := RunSSH(config, shutdownBroadcast)
+		err := RunSSHServer(config, shutdownBroadcast)
 		select {
 		case errors <- err:
 		default:

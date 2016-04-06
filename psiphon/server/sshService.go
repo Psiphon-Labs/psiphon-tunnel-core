@@ -39,10 +39,11 @@ type sshServer struct {
 	clients         map[string]ssh.Conn
 }
 
-func RunSSH(config *Config, shutdownBroadcast <-chan struct{}) error {
+func RunSSHServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 
 	sshServer := &sshServer{
-		config: config,
+		config:  config,
+		clients: make(map[string]ssh.Conn),
 	}
 
 	sshServer.sshConfig = &ssh.ServerConfig{
@@ -147,11 +148,11 @@ func (sshServer *sshServer) passwordCallback(conn ssh.ConnMetadata, password []b
 }
 
 func (sshServer *sshServer) authLogCallback(conn ssh.ConnMetadata, method string, err error) {
-	errMsg := "success"
 	if err != nil {
-		errMsg = err.Error()
+		log.Warning("ssh: %s authentication failed %s", method, err)
+	} else {
+		log.Info("ssh: %s authentication success %s", method)
 	}
-	log.Warning("ssh: %s authentication attempt %s", method, errMsg)
 }
 
 func (sshServer *sshServer) registerClient(sshConn ssh.Conn) bool {
