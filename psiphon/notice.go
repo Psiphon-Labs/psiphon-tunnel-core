@@ -321,6 +321,11 @@ func NoticeBuildInfo(buildDate, buildRepo, buildRev, goVersion, gomobileVersion 
 		"gomobileVersion", gomobileVersion)
 }
 
+// NoticeExiting indicates that tunnel-core is exiting imminently.
+func NoticeExiting() {
+	outputNotice("NoticeExiting", false, true)
+}
+
 type repetitiveNoticeState struct {
 	message string
 	repeats int
