@@ -86,42 +86,46 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 	_, err := LoadConfig([]byte(`{"f1": 11, "f2": "two"}`))
 	suite.NotNil(err, "JSON with none of our fields should fail")
 
-	// Test config missing each required field
-	for i := range suite.requiredFields {
-	  json.Unmarshal(suite.confStubBlob, &testObj)
-	  delete(testObj, suite.requiredFields[i])
-	  testObjJSON, _ = json.Marshal(testObj)
-	  _, err = LoadConfig(testObjJSON)
-	  suite.NotNil(err, "JSON with one of our required fields missing should fail")
+	// Test all required fields
+	for _, field := range suite.requiredFields {
+		// Missing a required field
+		json.Unmarshal(suite.confStubBlob, &testObj)
+		delete(testObj, field)
+		testObjJSON, _ = json.Marshal(testObj)
+		_, err = LoadConfig(testObjJSON)
+		suite.NotNil(err, "JSON with one of our required fields missing should fail: %s", field)
+
+		// Bad type for required field
+		json.Unmarshal(suite.confStubBlob, &testObj)
+		testObj[field] = false // basically guessing a wrong type
+		testObjJSON, _ = json.Marshal(testObj)
+		_, err = LoadConfig(testObjJSON)
+		suite.NotNil(err, "JSON with one of our required fields with the wrong type should fail: %s", field)
+
+		// One of our required fields is null
+		json.Unmarshal(suite.confStubBlob, &testObj)
+		testObj[field] = nil
+		testObjJSON, _ = json.Marshal(testObj)
+		_, err = LoadConfig(testObjJSON)
+		suite.NotNil(err, "JSON with one of our required fields set to null should fail: %s", field)
+
+		// One of our required fields is an empty string
+		json.Unmarshal(suite.confStubBlob, &testObj)
+		testObj[field] = ""
+		testObjJSON, _ = json.Marshal(testObj)
+		_, err = LoadConfig(testObjJSON)
+		suite.NotNil(err, "JSON with one of our required fields set to an empty string should fail: %s", field)
 	}
 
-	// Bad type for required field
-	json.Unmarshal(suite.confStubBlob, &testObj)
-	testObj[suite.requiredFields[0]] = false // basically guessing a wrong type
-	testObjJSON, _ = json.Marshal(testObj)
-	_, err = LoadConfig(testObjJSON)
-	suite.NotNil(err, "JSON with one of our required fields with the wrong type should fail")
-
-	// One of our required fields is null
-	json.Unmarshal(suite.confStubBlob, &testObj)
-	testObj[suite.requiredFields[0]] = nil
-	testObjJSON, _ = json.Marshal(testObj)
-	_, err = LoadConfig(testObjJSON)
-	suite.NotNil(err, "JSON with one of our required fields set to null should fail")
-
-	// One of our required fields is an empty string
-	json.Unmarshal(suite.confStubBlob, &testObj)
-	testObj[suite.requiredFields[0]] = ""
-	testObjJSON, _ = json.Marshal(testObj)
-	_, err = LoadConfig(testObjJSON)
-	suite.NotNil(err, "JSON with one of our required fields set to an empty string should fail")
-
-	// Has incorrect type for optional field
-	json.Unmarshal(suite.confStubBlob, &testObj)
-	testObj[suite.nonRequiredFields[0]] = false // basically guessing a wrong type
-	testObjJSON, _ = json.Marshal(testObj)
-	_, err = LoadConfig(testObjJSON)
-	suite.NotNil(err, "JSON with one of our optional fields with the wrong type should fail")
+	// Test optional fields
+	for _, field := range suite.nonRequiredFields {
+		// Has incorrect type for optional field
+		json.Unmarshal(suite.confStubBlob, &testObj)
+		testObj[field] = false // basically guessing a wrong type
+		testObjJSON, _ = json.Marshal(testObj)
+		_, err = LoadConfig(testObjJSON)
+		suite.NotNil(err, "JSON with one of our optional fields with the wrong type should fail: %s", field)
+	}
 }
 
 // Tests config file with JSON contents that don't match our structure
