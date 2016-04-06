@@ -26,7 +26,6 @@ import (
 	"net"
 	"sync"
 
-	log "github.com/Psiphon-Inc/logrus"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"golang.org/x/crypto/ssh"
 )
@@ -71,7 +70,7 @@ func RunSSHServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 		return psiphon.ContextError(err)
 	}
 
-	log.Info("RunSSH: starting server")
+	log.WithContext().Info("starting")
 
 	err = nil
 	errors := make(chan error)
@@ -93,7 +92,7 @@ func RunSSHServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 
 			if err != nil {
 				if e, ok := err.(net.Error); ok && e.Temporary() {
-					log.Warning("RunSSH accept error: %s", err)
+					log.WithContextFields(LogFields{"error": err}).Error("accept failed")
 					// Temporary error, keep running
 					continue
 				}
@@ -112,7 +111,7 @@ func RunSSHServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 
 		sshServer.stopClients()
 
-		log.Info("RunSSH: server stopped")
+		log.WithContext().Info("stopped")
 	}()
 
 	select {
@@ -124,7 +123,7 @@ func RunSSHServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 
 	waitGroup.Wait()
 
-	log.Info("RunSSH: exiting")
+	log.WithContext().Info("exiting")
 
 	return err
 }
@@ -149,9 +148,9 @@ func (sshServer *sshServer) passwordCallback(conn ssh.ConnMetadata, password []b
 
 func (sshServer *sshServer) authLogCallback(conn ssh.ConnMetadata, method string, err error) {
 	if err != nil {
-		log.Warning("ssh: %s authentication failed %s", method, err)
+		log.WithContextFields(LogFields{"error": err, "method": method}).Warning("authentication failed")
 	} else {
-		log.Info("ssh: %s authentication success %s", method)
+		log.WithContextFields(LogFields{"error": err, "method": method}).Info("authentication success")
 	}
 }
 
@@ -163,7 +162,7 @@ func (sshServer *sshServer) registerClient(sshConn ssh.Conn) bool {
 	}
 	existingSshConn := sshServer.clients[string(sshConn.SessionID())]
 	if existingSshConn != nil {
-		log.Warning("sshServer.registerClient: unexpected existing connection")
+		log.WithContext().Warning("unexpected existing connection")
 		existingSshConn.Close()
 		existingSshConn.Wait()
 	}
@@ -197,19 +196,19 @@ func (sshServer *sshServer) handleClient(conn net.Conn) {
 	sshConn, channels, requests, err := ssh.NewServerConn(conn, sshServer.sshConfig)
 	if err != nil {
 		conn.Close()
-		log.Error("sshServer.handleClient: ssh establish connection failed: %s", err)
+		log.WithContextFields(LogFields{"error": err}).Warning("establish failed")
 		return
 	}
 
 	if !sshServer.registerClient(sshConn) {
 		sshConn.Close()
-		log.Error("sshServer.handleClient: failed to register client")
+		log.WithContext().Warning("register failed")
 		return
 	}
 	defer sshServer.unregisterClient(sshConn)
 
 	// TODO: don't record IP; do GeoIP
-	log.Info("connection from %s", sshConn.RemoteAddr())
+	log.WithContextFields(LogFields{"remoteAddr": sshConn.RemoteAddr()}).Warning("connection accepted")
 
 	go ssh.DiscardRequests(requests)
 
@@ -227,7 +226,12 @@ func (sshServer *sshServer) handleClient(conn net.Conn) {
 
 func (sshServer *sshServer) rejectNewChannel(newChannel ssh.NewChannel, reason ssh.RejectionReason, message string) {
 	// TODO: log more details?
-	log.Warning("ssh reject new channel: %s: %d: %s", newChannel.ChannelType(), reason, message)
+	log.WithContextFields(
+		LogFields{
+			"channelType":   newChannel.ChannelType(),
+			"rejectMessage": message,
+			"rejectReason":  reason,
+		}).Warning("reject new channel")
 	newChannel.Reject(reason, message)
 }
 
@@ -251,7 +255,7 @@ func (sshServer *sshServer) handleNewDirectTcpipChannel(newChannel ssh.NewChanne
 		directTcpipExtraData.HostToConnect,
 		directTcpipExtraData.PortToConnect)
 
-	log.Debug("sshServer.handleNewDirectTcpipChannel: dialing %s", targetAddr)
+	log.WithContextFields(LogFields{"target": targetAddr}).Debug("dialing")
 
 	// TODO: port forward dial timeout
 	// TODO: report ssh.ResourceShortage when appropriate
@@ -264,11 +268,11 @@ func (sshServer *sshServer) handleNewDirectTcpipChannel(newChannel ssh.NewChanne
 
 	fwdChannel, requests, err := newChannel.Accept()
 	if err != nil {
-		log.Warning("sshServer.handleNewDirectTcpipChannel: accept new channel failed: %s", err)
+		log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
 		return
 	}
 
-	log.Debug("sshServer.handleNewDirectTcpipChannel: relaying %s", targetAddr)
+	log.WithContextFields(LogFields{"target": targetAddr}).Debug("relaying")
 
 	go ssh.DiscardRequests(requests)
 
@@ -285,15 +289,15 @@ func (sshServer *sshServer) handleNewDirectTcpipChannel(newChannel ssh.NewChanne
 		defer relayWaitGroup.Done()
 		_, err := io.Copy(fwdConn, fwdChannel)
 		if err != nil {
-			log.Warning("sshServer.handleNewDirectTcpipChannel: upstream relay failed: %s", err)
+			log.WithContextFields(LogFields{"error": err}).Warning("upstream relay failed")
 		}
 	}()
 	_, err = io.Copy(fwdChannel, fwdConn)
 	if err != nil {
-		log.Warning("sshServer.handleNewDirectTcpipChannel: downstream relay failed: %s", err)
+		log.WithContextFields(LogFields{"error": err}).Warning("downstream relay failed")
 	}
 	fwdChannel.CloseWrite()
 	relayWaitGroup.Wait()
 
-	log.Info("sshServer.handleNewDirectTcpipChannel: exiting %s", targetAddr)
+	log.WithContextFields(LogFields{"target": targetAddr}).Debug("exiting")
 }

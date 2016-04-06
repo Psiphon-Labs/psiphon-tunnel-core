@@ -24,7 +24,6 @@ import (
 	"os/signal"
 	"sync"
 
-	log "github.com/Psiphon-Inc/logrus"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
 
@@ -32,7 +31,7 @@ func RunServices(encodedConfig []byte) error {
 
 	config, err := LoadConfig(encodedConfig)
 	if err != nil {
-		log.Error("RunServices failed: %s", err)
+		log.WithContextFields(LogFields{"error": err}).Error("load config failed")
 		return psiphon.ContextError(err)
 	}
 
@@ -72,9 +71,9 @@ func RunServices(encodedConfig []byte) error {
 
 	select {
 	case <-systemStopSignal:
-		log.Info("RunServices shutdown by system")
+		log.WithContext().Info("shutdown by system")
 	case err = <-errors:
-		log.Error("RunServices failed: %s", err)
+		log.WithContextFields(LogFields{"error": err}).Error("service failed")
 	}
 
 	close(shutdownBroadcast)

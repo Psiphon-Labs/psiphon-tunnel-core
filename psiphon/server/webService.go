@@ -30,7 +30,6 @@ import (
 	"net/http"
 	"sync"
 
-	log "github.com/Psiphon-Inc/logrus"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
 
@@ -61,8 +60,8 @@ func RunWebServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 		Certificates: []tls.Certificate{certificate},
 	}
 
-	// TODO: inherit global log config?
-	logWriter := log.StandardLogger().Writer()
+	// TODO: inherits global log config?
+	logWriter := NewLogWriter()
 	defer logWriter.Close()
 
 	server := &psiphon.HTTPSServer{
@@ -81,7 +80,7 @@ func RunWebServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 		return psiphon.ContextError(err)
 	}
 
-	log.Info("RunWebServer: starting server")
+	log.WithContext().Info("starting")
 
 	err = nil
 	errors := make(chan error)
@@ -108,7 +107,7 @@ func RunWebServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 			}
 		}
 
-		log.Info("RunWebServer: server stopped")
+		log.WithContext().Info("stopped")
 	}()
 
 	select {
@@ -120,7 +119,7 @@ func RunWebServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 
 	waitGroup.Wait()
 
-	log.Info("RunWebServer: exiting")
+	log.WithContext().Info("exiting")
 
 	return err
 }
@@ -135,14 +134,14 @@ func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Requ
 
 	if !webServer.checkWebServerSecret(r) {
 		// TODO: log more details?
-		log.Warning("handshakeHandler: checkWebServerSecret failed")
+		log.WithContext().Warning("checkWebServerSecret failed")
 		// TODO: psi_web returns NotFound in this case
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
 
 	// TODO: validate; proper log
-	log.Info("handshake: %+v", r.URL.Query())
+	log.WithContextFields(LogFields{"queryParams": r.URL.Query()}).Info("handshake")
 
 	// TODO: necessary, in case client sends bogus request body?
 	_, err := ioutil.ReadAll(r.Body)
@@ -182,14 +181,14 @@ func (webServer *webServer) connectedHandler(w http.ResponseWriter, r *http.Requ
 
 	if !webServer.checkWebServerSecret(r) {
 		// TODO: log more details?
-		log.Warning("handshakeHandler: checkWebServerSecret failed")
+		log.WithContext().Warning("checkWebServerSecret failed")
 		// TODO: psi_web does NotFound in this case
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
 
 	// TODO: validate; proper log
-	log.Info("connected: %+v", r.URL.Query())
+	log.WithContextFields(LogFields{"queryParams": r.URL.Query()}).Info("connected")
 
 	// TODO: necessary, in case client sends bogus request body?
 	_, err := ioutil.ReadAll(r.Body)
@@ -219,14 +218,14 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 
 	if !webServer.checkWebServerSecret(r) {
 		// TODO: log more details?
-		log.Warning("handshakeHandler: checkWebServerSecret failed")
+		log.WithContext().Warning("checkWebServerSecret failed")
 		// TODO: psi_web does NotFound in this case
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
 
 	// TODO: validate; proper log
-	log.Info("status: %+v", r.URL.Query())
+	log.WithContextFields(LogFields{"queryParams": r.URL.Query()}).Info("status")
 
 	// TODO: use json.NewDecoder(r.Body)? But will that handle bogus extra data in request body?
 	requestBody, err := ioutil.ReadAll(r.Body)
@@ -236,7 +235,7 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	// TODO: parse payload; validate; proper logs
-	log.Info("status payload: %s", string(requestBody))
+	log.WithContextFields(LogFields{"payload": string(requestBody)}).Info("status payload")
 
 	w.WriteHeader(http.StatusOK)
 }

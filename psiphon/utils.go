@@ -202,18 +202,33 @@ func TrimError(err error) error {
 	return err
 }
 
-// ContextError prefixes an error message with the current function name
-func ContextError(err error) error {
-	if err == nil {
-		return nil
-	}
-	pc, _, line, _ := runtime.Caller(1)
+// getFunctionName is a helper that extracts a simple function name from
+// full name returned byruntime.Func.Name(). This is used to declutter
+// log messages containing function names.
+func getFunctionName(pc uintptr) string {
 	funcName := runtime.FuncForPC(pc).Name()
 	index := strings.LastIndex(funcName, "/")
 	if index != -1 {
 		funcName = funcName[index+1:]
 	}
-	return fmt.Errorf("%s#%d: %s", funcName, line, err)
+	return funcName
+}
+
+// GetParentContext returns the parent function name and source file
+// line number.
+func GetParentContext() string {
+	pc, _, line, _ := runtime.Caller(2)
+	return fmt.Sprintf("%s#%d", getFunctionName(pc), line)
+}
+
+// ContextError prefixes an error message with the current function
+// name and source file line number.
+func ContextError(err error) error {
+	if err == nil {
+		return nil
+	}
+	pc, _, line, _ := runtime.Caller(1)
+	return fmt.Errorf("%s#%d: %s", getFunctionName(pc), line, err)
 }
 
 // IsAddressInUseError returns true when the err is due to EADDRINUSE/WSAEADDRINUSE.
