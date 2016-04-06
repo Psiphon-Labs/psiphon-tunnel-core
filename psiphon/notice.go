@@ -302,7 +302,7 @@ func NoticeLocalProxyError(proxyType string, err error) {
 
 // NoticeConnectedMeekStats reports extra network details for a meek tunnel connection.
 func NoticeConnectedMeekStats(ipAddress string, meekStats *MeekStats) {
-	outputNotice("NoticeConnectedMeekStats", true, false,
+	outputNotice("ConnectedMeekStats", true, false,
 		"ipAddress", ipAddress,
 		"dialAddress", meekStats.DialAddress,
 		"resolvedIPAddress", meekStats.ResolvedIPAddress,
@@ -313,7 +313,7 @@ func NoticeConnectedMeekStats(ipAddress string, meekStats *MeekStats) {
 
 // NoticeBuildInfo reports build version info.
 func NoticeBuildInfo(buildDate, buildRepo, buildRev, goVersion, gomobileVersion string) {
-	outputNotice("NoticeBuildInfo", false, false,
+	outputNotice("BuildInfo", false, false,
 		"buildDate", buildDate,
 		"buildRepo", buildRepo,
 		"buildRev", buildRev,
@@ -323,7 +323,7 @@ func NoticeBuildInfo(buildDate, buildRepo, buildRev, goVersion, gomobileVersion 
 
 // NoticeExiting indicates that tunnel-core is exiting imminently.
 func NoticeExiting() {
-	outputNotice("NoticeExiting", false, true)
+	outputNotice("Exiting", false, true)
 }
 
 type repetitiveNoticeState struct {
