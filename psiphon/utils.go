@@ -54,6 +54,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -150,14 +151,14 @@ func MakeRandomPeriod(min, max time.Duration) (duration time.Duration) {
 	return
 }
 
-// MakeRandomString returns a base64 encoded random string. byteLength
+// MakeRandomString returns a hex encoded random string. byteLength
 // specifies the pre-encoded data length.
 func MakeRandomString(byteLength int) (string, error) {
 	bytes, err := MakeSecureRandomBytes(byteLength)
 	if err != nil {
 		return "", ContextError(err)
 	}
-	return base64.RawStdEncoding.EncodeToString(bytes), nil
+	return hex.EncodeToString(bytes), nil
 }
 
 func DecodeCertificate(encodedCertificate string) (certificate *x509.Certificate, err error) {
