@@ -107,12 +107,13 @@ func NewObfuscatedSshConn(
 	conn net.Conn,
 	obfuscationKeyword string) (*ObfuscatedSshConn, error) {
 
+	var err error
 	var obfuscator *Obfuscator
 	var readDeobfuscate, writeObfuscate func([]byte)
 	var writeState ObfuscatedSshWriteState
 
 	if mode == OBFUSCATION_CONN_MODE_CLIENT {
-		obfuscator, err := NewClientObfuscator(&ObfuscatorConfig{Keyword: obfuscationKeyword})
+		obfuscator, err = NewClientObfuscator(&ObfuscatorConfig{Keyword: obfuscationKeyword})
 		if err != nil {
 			return nil, ContextError(err)
 		}
@@ -121,7 +122,7 @@ func NewObfuscatedSshConn(
 		writeState = OBFUSCATION_WRITE_STATE_CLIENT_SEND_SEED_MESSAGE
 	} else {
 		// NewServerObfuscator reads a seed message from conn
-		obfuscator, err := NewServerObfuscator(
+		obfuscator, err = NewServerObfuscator(
 			conn, &ObfuscatorConfig{Keyword: obfuscationKeyword})
 		if err != nil {
 			// TODO: readForver() equivilent
