@@ -219,11 +219,11 @@ func readSeedMessage(
 	buffer := bytes.NewReader(fixedLengthFields)
 
 	var magicValue, paddingLength int32
-	err = binary.Read(buffer, binary.LittleEndian, &magicValue)
+	err = binary.Read(buffer, binary.BigEndian, &magicValue)
 	if err != nil {
 		return nil, nil, ContextError(err)
 	}
-	err = binary.Read(buffer, binary.LittleEndian, &paddingLength)
+	err = binary.Read(buffer, binary.BigEndian, &paddingLength)
 	if err != nil {
 		return nil, nil, ContextError(err)
 	}
