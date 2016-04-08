@@ -314,6 +314,7 @@ func (conn *ObfuscatedSshConn) transformAndWrite(buffer []byte) (err error) {
 		if err != nil {
 			return ContextError(err)
 		}
+		conn.writeObfuscate(padding)
 		_, err = conn.Conn.Write(padding)
 		if err != nil {
 			return ContextError(err)
