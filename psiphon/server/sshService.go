@@ -93,7 +93,10 @@ func runSSHServer(
 	}
 
 	log.WithContextFields(
-		LogFields{"useObfuscation": useObfuscation}).Info("starting")
+		LogFields{
+			"useObfuscation": useObfuscation,
+			"port":           serverPort,
+		}).Info("starting")
 
 	err = nil
 	errors := make(chan error)
