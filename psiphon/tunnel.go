@@ -548,7 +548,8 @@ func dialSsh(
 	var sshConn net.Conn
 	sshConn = conn
 	if useObfuscatedSsh {
-		sshConn, err = NewObfuscatedSshConn(conn, serverEntry.SshObfuscatedKey)
+		sshConn, err = NewObfuscatedSshConn(
+			OBFUSCATION_CONN_MODE_CLIENT, conn, serverEntry.SshObfuscatedKey)
 		if err != nil {
 			return nil, nil, nil, ContextError(err)
 		}

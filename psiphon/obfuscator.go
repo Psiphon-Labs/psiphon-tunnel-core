@@ -25,6 +25,8 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"errors"
+	"io"
+	"net"
 )
 
 const (
@@ -51,47 +53,57 @@ type ObfuscatorConfig struct {
 	MaxPadding int
 }
 
-// NewObfuscator creates a new Obfuscator, initializes it with
-// a seed message, derives client and server keys, and creates
-// RC4 stream ciphers to obfuscate data.
-func NewObfuscator(config *ObfuscatorConfig) (obfuscator *Obfuscator, err error) {
+// NewClientObfuscator creates a new Obfuscator, staging a seed message to be
+// sent to the server (by the caller) and initializing stream ciphers to
+// obfuscate data.
+func NewClientObfuscator(
+	config *ObfuscatorConfig) (obfuscator *Obfuscator, err error) {
+
 	seed, err := MakeSecureRandomBytes(OBFUSCATE_SEED_LENGTH)
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	clientToServerKey, err := deriveKey(seed, []byte(config.Keyword), []byte(OBFUSCATE_CLIENT_TO_SERVER_IV))
+
+	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(seed, config)
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	serverToClientKey, err := deriveKey(seed, []byte(config.Keyword), []byte(OBFUSCATE_SERVER_TO_CLIENT_IV))
-	if err != nil {
-		return nil, ContextError(err)
-	}
-	clientToServerCipher, err := rc4.NewCipher(clientToServerKey)
-	if err != nil {
-		return nil, ContextError(err)
-	}
-	serverToClientCipher, err := rc4.NewCipher(serverToClientKey)
-	if err != nil {
-		return nil, ContextError(err)
-	}
+
 	maxPadding := OBFUSCATE_MAX_PADDING
 	if config.MaxPadding > 0 {
 		maxPadding = config.MaxPadding
 	}
+
 	seedMessage, err := makeSeedMessage(maxPadding, seed, clientToServerCipher)
 	if err != nil {
 		return nil, ContextError(err)
 	}
+
 	return &Obfuscator{
 		seedMessage:          seedMessage,
 		clientToServerCipher: clientToServerCipher,
 		serverToClientCipher: serverToClientCipher}, nil
 }
 
-// ConsumeSeedMessage returns the seed message created in NewObfuscator,
+// NewServerObfuscator creates a new Obfuscator, reading a seed message directly
+// from the clientConn and initializing stream ciphers to obfuscate data.
+func NewServerObfuscator(
+	clientConn net.Conn, config *ObfuscatorConfig) (obfuscator *Obfuscator, err error) {
+
+	clientToServerCipher, serverToClientCipher, err := readSeedMessage(
+		clientConn, config)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+
+	return &Obfuscator{
+		clientToServerCipher: clientToServerCipher,
+		serverToClientCipher: serverToClientCipher}, nil
+}
+
+// SendSeedMessage returns the seed message created in NewObfuscatorClient,
 // removing the reference so that it may be garbage collected.
-func (obfuscator *Obfuscator) ConsumeSeedMessage() []byte {
+func (obfuscator *Obfuscator) SendSeedMessage() []byte {
 	seedMessage := obfuscator.seedMessage
 	obfuscator.seedMessage = nil
 	return seedMessage
@@ -105,6 +117,32 @@ func (obfuscator *Obfuscator) ObfuscateClientToServer(buffer []byte) {
 // ObfuscateServerToClient applies the server RC4 stream to the bytes in buffer.
 func (obfuscator *Obfuscator) ObfuscateServerToClient(buffer []byte) {
 	obfuscator.serverToClientCipher.XORKeyStream(buffer, buffer)
+}
+
+func initObfuscatorCiphers(
+	seed []byte, config *ObfuscatorConfig) (*rc4.Cipher, *rc4.Cipher, error) {
+
+	clientToServerKey, err := deriveKey(seed, []byte(config.Keyword), []byte(OBFUSCATE_CLIENT_TO_SERVER_IV))
+	if err != nil {
+		return nil, nil, ContextError(err)
+	}
+
+	serverToClientKey, err := deriveKey(seed, []byte(config.Keyword), []byte(OBFUSCATE_SERVER_TO_CLIENT_IV))
+	if err != nil {
+		return nil, nil, ContextError(err)
+	}
+
+	clientToServerCipher, err := rc4.NewCipher(clientToServerKey)
+	if err != nil {
+		return nil, nil, ContextError(err)
+	}
+
+	serverToClientCipher, err := rc4.NewCipher(serverToClientKey)
+	if err != nil {
+		return nil, nil, ContextError(err)
+	}
+
+	return clientToServerCipher, serverToClientCipher, nil
 }
 
 func deriveKey(seed, keyword, iv []byte) ([]byte, error) {
@@ -154,4 +192,57 @@ func makeSeedMessage(maxPadding int, seed []byte, clientToServerCipher *rc4.Ciph
 	seedMessage := buffer.Bytes()
 	clientToServerCipher.XORKeyStream(seedMessage[len(seed):], seedMessage[len(seed):])
 	return seedMessage, nil
+}
+
+func readSeedMessage(
+	clientConn net.Conn, config *ObfuscatorConfig) (*rc4.Cipher, *rc4.Cipher, error) {
+
+	seed := make([]byte, OBFUSCATE_SEED_LENGTH)
+	_, err := io.ReadFull(clientConn, seed)
+	if err != nil {
+		return nil, nil, ContextError(err)
+	}
+
+	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(seed, config)
+	if err != nil {
+		return nil, nil, ContextError(err)
+	}
+
+	fixedLengthFields := make([]byte, 8) // 4 bytes each for magic value and padding length
+	_, err = io.ReadFull(clientConn, fixedLengthFields)
+	if err != nil {
+		return nil, nil, ContextError(err)
+	}
+
+	clientToServerCipher.XORKeyStream(fixedLengthFields, fixedLengthFields)
+
+	buffer := bytes.NewReader(fixedLengthFields)
+
+	var magicValue, paddingLength int32
+	err = binary.Read(buffer, binary.LittleEndian, &magicValue)
+	if err != nil {
+		return nil, nil, ContextError(err)
+	}
+	err = binary.Read(buffer, binary.LittleEndian, &paddingLength)
+	if err != nil {
+		return nil, nil, ContextError(err)
+	}
+
+	if magicValue != OBFUSCATE_MAGIC_VALUE {
+		return nil, nil, ContextError(errors.New("invalid magic value"))
+	}
+
+	if paddingLength < 0 || paddingLength > OBFUSCATE_MAX_PADDING {
+		return nil, nil, ContextError(errors.New("invalid padding length"))
+	}
+
+	padding := make([]byte, paddingLength)
+	_, err = io.ReadFull(clientConn, padding)
+	if err != nil {
+		return nil, nil, ContextError(err)
+	}
+
+	clientToServerCipher.XORKeyStream(padding, padding)
+
+	return clientToServerCipher, serverToClientCipher, nil
 }
