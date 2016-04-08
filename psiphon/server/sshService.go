@@ -254,7 +254,7 @@ func (sshServer *sshServer) handleClient(conn net.Conn) {
 		}
 		if result.err == nil {
 			result.sshConn, result.channels,
-				result.requests, result.err = ssh.NewServerConn(conn, sshServer.sshConfig)
+				result.requests, result.err = ssh.NewServerConn(result.conn, sshServer.sshConfig)
 		}
 		resultChannel <- result
 	}()
