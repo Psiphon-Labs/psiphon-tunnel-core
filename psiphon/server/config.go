@@ -49,19 +49,24 @@ const (
 	SSH_PASSWORD_BYTE_LENGTH               = 32
 	SSH_RSA_HOST_KEY_BITS                  = 2048
 	DEFAULT_SSH_SERVER_PORT                = 2222
+	SSH_HANDSHAKE_TIMEOUT                  = 30 * time.Second
+	SSH_OBFUSCATED_KEY_BYTE_LENGTH         = 32
+	DEFAULT_OBFUSCATED_SSH_SERVER_PORT     = 3333
 )
 
 type Config struct {
-	ServerIPAddress      string
-	WebServerPort        int
-	WebServerSecret      string
-	WebServerCertificate string
-	WebServerPrivateKey  string
-	SSHPrivateKey        string
-	SSHServerVersion     string
-	SSHUserName          string
-	SSHPassword          string
-	SSHPort              int
+	ServerIPAddress         string
+	WebServerPort           int
+	WebServerSecret         string
+	WebServerCertificate    string
+	WebServerPrivateKey     string
+	SSHPrivateKey           string
+	SSHServerVersion        string
+	SSHUserName             string
+	SSHPassword             string
+	SSHServerPort           int
+	ObfuscatedSSHKey        string
+	ObfuscatedSSHServerPort int
 }
 
 func LoadConfig(configJson []byte) (*Config, error) {
@@ -73,17 +78,21 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	}
 
 	// TODO: config field validation
+	// TODO: validation case: OSSH requires extra fields
 
 	return &config, nil
 }
 
 type GenerateConfigParams struct {
-	ServerIPAddress string
-	WebServerPort   int
-	SSHServerPort   int
+	ServerIPAddress         string
+	WebServerPort           int
+	SSHServerPort           int
+	ObfuscatedSSHServerPort int
 }
 
 func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
+
+	// TODO: support disabling web server or a subset of protocols
 
 	serverIPaddress := params.ServerIPAddress
 	if serverIPaddress == "" {
@@ -150,17 +159,33 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 	// TODO: vary version string for anti-fingerprint
 	sshServerVersion := "SSH-2.0-Psiphon"
 
+	// Obfuscated SSH config
+
+	obfuscatedSSHServerPort := params.ObfuscatedSSHServerPort
+	if obfuscatedSSHServerPort == 0 {
+		obfuscatedSSHServerPort = DEFAULT_OBFUSCATED_SSH_SERVER_PORT
+	}
+
+	obfuscatedSSHKey, err := psiphon.MakeRandomString(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+	if err != nil {
+		return nil, nil, psiphon.ContextError(err)
+	}
+
+	// Assemble config and server entry
+
 	config := &Config{
-		ServerIPAddress:      serverIPaddress,
-		WebServerPort:        webServerPort,
-		WebServerSecret:      webServerSecret,
-		WebServerCertificate: webServerCertificate,
-		WebServerPrivateKey:  webServerPrivateKey,
-		SSHPrivateKey:        string(sshPrivateKey),
-		SSHServerVersion:     sshServerVersion,
-		SSHUserName:          sshUserName,
-		SSHPassword:          sshPassword,
-		SSHPort:              sshServerPort,
+		ServerIPAddress:         serverIPaddress,
+		WebServerPort:           webServerPort,
+		WebServerSecret:         webServerSecret,
+		WebServerCertificate:    webServerCertificate,
+		WebServerPrivateKey:     webServerPrivateKey,
+		SSHPrivateKey:           string(sshPrivateKey),
+		SSHServerVersion:        sshServerVersion,
+		SSHUserName:             sshUserName,
+		SSHPassword:             sshPassword,
+		SSHServerPort:           sshServerPort,
+		ObfuscatedSSHKey:        obfuscatedSSHKey,
+		ObfuscatedSSHServerPort: obfuscatedSSHServerPort,
 	}
 
 	encodedConfig, err := json.Marshal(config)
@@ -172,6 +197,11 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 	lines := strings.Split(webServerCertificate, "\n")
 	strippedWebServerCertificate := strings.Join(lines[1:len(lines)-2], "")
 
+	capabilities := []string{
+		psiphon.GetCapability(psiphon.TUNNEL_PROTOCOL_SSH),
+		psiphon.GetCapability(psiphon.TUNNEL_PROTOCOL_OBFUSCATED_SSH),
+	}
+
 	serverEntry := &psiphon.ServerEntry{
 		IpAddress:            serverIPaddress,
 		WebServerPort:        fmt.Sprintf("%d", webServerPort),
@@ -181,9 +211,9 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 		SshUsername:          sshUserName,
 		SshPassword:          sshPassword,
 		SshHostKey:           base64.RawStdEncoding.EncodeToString(sshPublicKey.Marshal()),
-		SshObfuscatedPort:    0,
-		SshObfuscatedKey:     "",
-		Capabilities:         []string{"SSH"},
+		SshObfuscatedPort:    obfuscatedSSHServerPort,
+		SshObfuscatedKey:     obfuscatedSSHKey,
+		Capabilities:         capabilities,
 		Region:               "US",
 	}
 
