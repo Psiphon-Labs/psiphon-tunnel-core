@@ -63,6 +63,16 @@ func RunServices(encodedConfig []byte) error {
 		}
 	}()
 
+	waitGroup.Add(1)
+	go func() {
+		defer waitGroup.Done()
+		err := RunObfuscatedSSHServer(config, shutdownBroadcast)
+		select {
+		case errors <- err:
+		default:
+		}
+	}()
+
 	// An OS signal triggers an orderly shutdown
 	systemStopSignal := make(chan os.Signal, 1)
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill)
