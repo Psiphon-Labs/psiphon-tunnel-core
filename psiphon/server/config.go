@@ -51,6 +51,7 @@ const (
 	SSH_RSA_HOST_KEY_BITS                  = 2048
 	DEFAULT_SSH_SERVER_PORT                = 2222
 	SSH_HANDSHAKE_TIMEOUT                  = 30 * time.Second
+	SSH_CONNECTION_READ_DEADLINE           = 5 * time.Minute
 	SSH_OBFUSCATED_KEY_BYTE_LENGTH         = 32
 	DEFAULT_OBFUSCATED_SSH_SERVER_PORT     = 3333
 )

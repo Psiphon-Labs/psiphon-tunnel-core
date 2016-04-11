@@ -390,3 +390,26 @@ func IPAddressFromAddr(addr net.Addr) string {
 	}
 	return ipAddress
 }
+
+// TimeoutTCPConn wraps a net.TCPConn and sets an initial ReadDeadline. The
+// deadline is reset whenever data is received from the connection.
+type TimeoutTCPConn struct {
+	*net.TCPConn
+	deadline time.Duration
+}
+
+func NewTimeoutTCPConn(tcpConn *net.TCPConn, deadline time.Duration) *TimeoutTCPConn {
+	tcpConn.SetReadDeadline(time.Now().Add(deadline))
+	return &TimeoutTCPConn{
+		TCPConn:  tcpConn,
+		deadline: deadline,
+	}
+}
+
+func (conn *TimeoutTCPConn) Read(buffer []byte) (int, error) {
+	n, err := conn.TCPConn.Read(buffer)
+	if err == nil {
+		conn.TCPConn.SetReadDeadline(time.Now().Add(conn.deadline))
+	}
+	return n, err
+}

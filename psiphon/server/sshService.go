@@ -149,7 +149,7 @@ func runSSHServer(
 			}
 
 			// process each client connection concurrently
-			go sshServer.handleClient(conn)
+			go sshServer.handleClient(conn.(*net.TCPConn))
 		}
 
 		sshServer.stopClients()
@@ -245,15 +245,23 @@ func (sshServer *sshServer) stopClients() {
 	sshServer.clients = make(map[string]*sshClient)
 }
 
-func (sshServer *sshServer) handleClient(conn net.Conn) {
+func (sshServer *sshServer) handleClient(tcpConn *net.TCPConn) {
 
 	startTime := time.Now()
-	geoIPData := GeoIPLookup(psiphon.IPAddressFromAddr(conn.RemoteAddr()))
+	geoIPData := GeoIPLookup(psiphon.IPAddressFromAddr(tcpConn.RemoteAddr()))
 
-	// Run the initial [obfuscated] SSH handshake in a goroutine
-	// so we can both respect shutdownBroadcast and implement a
-	// handshake timeout. The timeout is to reclaim network
-	// resources in case the handshake takes too long.
+	// Wrap the base TCP connection in a TimeoutTCPConn which will terminate
+	// the connection if it's idle for too long. This timeout is in effect for
+	// the entire duration of the SSH connection. Clients must actively use
+	// the connection or send SSH keep alive requests to keep the connection
+	// active.
+
+	conn := psiphon.NewTimeoutTCPConn(tcpConn, SSH_CONNECTION_READ_DEADLINE)
+
+	// Run the initial [obfuscated] SSH handshake in a goroutine so we can both
+	// respect shutdownBroadcast and implement a specific handshake timeout.
+	// The timeout is to reclaim network resources in case the handshake takes
+	// too long.
 
 	type sshNewServerConnResult struct {
 		conn     net.Conn
@@ -272,6 +280,7 @@ func (sshServer *sshServer) handleClient(conn net.Conn) {
 	}
 
 	go func() {
+
 		result := &sshNewServerConnResult{}
 		if sshServer.useObfuscation {
 			result.conn, result.err = psiphon.NewObfuscatedSshConn(
