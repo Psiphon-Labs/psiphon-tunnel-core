@@ -38,6 +38,7 @@ import (
 const (
 	SERVER_CONFIG_FILENAME                 = "psiphon-server.config"
 	SERVER_ENTRY_FILENAME                  = "serverEntry.dat"
+	DEFAULT_GEO_IP_DATABASE_FILENAME       = "GeoLite2-City.mmdb"
 	DEFAULT_SERVER_IP_ADDRESS              = "127.0.0.1"
 	WEB_SERVER_SECRET_BYTE_LENGTH          = 32
 	WEB_SERVER_CERTIFICATE_RSA_KEY_BITS    = 2048
@@ -55,6 +56,7 @@ const (
 )
 
 type Config struct {
+	GeoIPDatabaseFilename   string
 	ServerIPAddress         string
 	WebServerPort           int
 	WebServerSecret         string
@@ -174,6 +176,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 	// Assemble config and server entry
 
 	config := &Config{
+		GeoIPDatabaseFilename:   DEFAULT_GEO_IP_DATABASE_FILENAME,
 		ServerIPAddress:         serverIPaddress,
 		WebServerPort:           webServerPort,
 		WebServerSecret:         webServerSecret,

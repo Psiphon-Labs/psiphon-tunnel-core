@@ -377,3 +377,16 @@ func MakeTunneledHttpClient(
 		Timeout:   requestTimeout,
 	}, nil
 }
+
+// IPAddressFromAddr is a helper which extracts an IP address
+// from a net.Addr or returns "" if there is no IP address.
+func IPAddressFromAddr(addr net.Addr) string {
+	ipAddress := ""
+	if addr != nil {
+		host, _, err := net.SplitHostPort(addr.String())
+		if err == nil {
+			ipAddress = host
+		}
+	}
+	return ipAddress
+}

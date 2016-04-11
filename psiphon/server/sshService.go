@@ -21,6 +21,7 @@ package server
 
 import (
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -179,6 +180,17 @@ func (sshServer *sshServer) passwordCallback(conn ssh.ConnMetadata, password []b
 	if !userOk || !passwordOk {
 		return nil, psiphon.ContextError(fmt.Errorf("invalid password for %q", conn.User()))
 	}
+
+	geoIPData := GeoIPLookup(psiphon.IPAddressFromAddr(conn.RemoteAddr()))
+
+	log.WithContextFields(
+		LogFields{
+			"sshSessionID":     hex.EncodeToString(conn.SessionID()),
+			"psiphonSessionID": sshPasswordPayload.SessionId,
+			"country":          geoIPData.Country,
+			"city":             geoIPData.City,
+			"ISP":              geoIPData.ISP,
+		}).Info("tunnel started")
 
 	return nil, nil
 }

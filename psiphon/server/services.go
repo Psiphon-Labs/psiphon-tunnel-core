@@ -37,6 +37,12 @@ func RunServices(encodedConfig []byte) error {
 
 	// TODO: init logging
 
+	err = InitGeoIP(config)
+	if err != nil {
+		log.WithContextFields(LogFields{"error": err}).Error("init GeoIP failed")
+		return psiphon.ContextError(err)
+	}
+
 	waitGroup := new(sync.WaitGroup)
 	shutdownBroadcast := make(chan struct{})
 	errors := make(chan error)
