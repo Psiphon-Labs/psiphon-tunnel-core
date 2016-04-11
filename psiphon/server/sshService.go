@@ -20,6 +20,7 @@
 package server
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -169,12 +170,17 @@ func (sshServer *sshServer) passwordCallback(conn ssh.ConnMetadata, password []b
 		return nil, psiphon.ContextError(fmt.Errorf("invalid password payload for %q", conn.User()))
 	}
 
-	if conn.User() == sshServer.config.SSHUserName &&
-		sshPasswordPayload.SshPassword == sshServer.config.SSHPassword {
-		return nil, nil
+	userOk := (subtle.ConstantTimeCompare(
+		[]byte(conn.User()), []byte(sshServer.config.SSHUserName)) == 1)
+
+	passwordOk := (subtle.ConstantTimeCompare(
+		[]byte(sshPasswordPayload.SshPassword), []byte(sshServer.config.SSHPassword)) == 1)
+
+	if !userOk || !passwordOk {
+		return nil, psiphon.ContextError(fmt.Errorf("invalid password for %q", conn.User()))
 	}
 
-	return nil, psiphon.ContextError(fmt.Errorf("invalid password for %q", conn.User()))
+	return nil, nil
 }
 
 func (sshServer *sshServer) authLogCallback(conn ssh.ConnMetadata, method string, err error) {
