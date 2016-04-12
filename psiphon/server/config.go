@@ -192,7 +192,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 		ObfuscatedSSHServerPort: obfuscatedSSHServerPort,
 	}
 
-	encodedConfig, err := json.Marshal(config)
+	encodedConfig, err := json.MarshalIndent(config, "\n", "    ")
 	if err != nil {
 		return nil, nil, psiphon.ContextError(err)
 	}
