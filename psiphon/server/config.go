@@ -38,6 +38,7 @@ import (
 const (
 	SERVER_CONFIG_FILENAME                 = "psiphon-server.config"
 	SERVER_ENTRY_FILENAME                  = "serverEntry.dat"
+	DEFAULT_LOG_LEVEL                      = "Info"
 	DEFAULT_GEO_IP_DATABASE_FILENAME       = "GeoLite2-City.mmdb"
 	DEFAULT_SERVER_IP_ADDRESS              = "127.0.0.1"
 	WEB_SERVER_SECRET_BYTE_LENGTH          = 32
@@ -56,7 +57,13 @@ const (
 	DEFAULT_OBFUSCATED_SSH_SERVER_PORT     = 3333
 )
 
+// TODO: break config into sections (sub-structs)
+
 type Config struct {
+	LogLevel                string
+	SyslogAddress           string
+	SyslogFacility          string
+	SyslogTag               string
 	GeoIPDatabaseFilename   string
 	ServerIPAddress         string
 	WebServerPort           int
@@ -177,6 +184,10 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 	// Assemble config and server entry
 
 	config := &Config{
+		LogLevel:                DEFAULT_LOG_LEVEL,
+		SyslogAddress:           "",
+		SyslogFacility:          "",
+		SyslogTag:               "",
 		GeoIPDatabaseFilename:   DEFAULT_GEO_IP_DATABASE_FILENAME,
 		ServerIPAddress:         serverIPaddress,
 		WebServerPort:           webServerPort,

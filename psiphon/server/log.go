@@ -21,9 +21,11 @@ package server
 
 import (
 	"io"
+	"log/syslog"
 	"os"
 
 	"github.com/Psiphon-Inc/logrus"
+	logrus_syslog "github.com/Psiphon-Inc/logrus/hooks/syslog"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
 
@@ -67,6 +69,92 @@ func NewLogWriter() *io.PipeWriter {
 }
 
 var log *ContextLogger
+
+// InitLogging configures a logger according to the specified
+// config params. If not called, the default logger set by the
+// package init() is used.
+// Concurrenty note: should only be called from the main
+// goroutine.
+func InitLogging(config *Config) error {
+
+	logLevel := DEFAULT_LOG_LEVEL
+	if config.LogLevel != "" {
+		logLevel = config.LogLevel
+	}
+
+	level, err := logrus.ParseLevel(logLevel)
+	if err != nil {
+		return psiphon.ContextError(err)
+	}
+
+	hooks := make(logrus.LevelHooks)
+
+	var syslogHook *logrus_syslog.SyslogHook
+
+	if config.SyslogAddress != "" {
+
+		syslogHook, err = logrus_syslog.NewSyslogHook(
+			"udp",
+			config.SyslogAddress,
+			getSyslogPriority(config),
+			config.SyslogTag)
+
+		if err != nil {
+			return psiphon.ContextError(err)
+		}
+
+		hooks.Add(syslogHook)
+	}
+
+	log = &ContextLogger{
+		&logrus.Logger{
+			Out:       os.Stderr,
+			Formatter: new(logrus.TextFormatter),
+			Hooks:     hooks,
+			Level:     level,
+		},
+	}
+
+	return nil
+}
+
+// getSyslogPriority determines golang's syslog "priority" value
+// based on the provided config.
+func getSyslogPriority(config *Config) syslog.Priority {
+
+	// TODO: assumes log.Level filter applies?
+	severity := syslog.LOG_DEBUG
+
+	facilityCodes := map[string]syslog.Priority{
+		"KERN":     syslog.LOG_KERN,
+		"USER":     syslog.LOG_USER,
+		"MAIL":     syslog.LOG_MAIL,
+		"DAEMON":   syslog.LOG_DAEMON,
+		"AUTH":     syslog.LOG_AUTH,
+		"SYSLOG":   syslog.LOG_SYSLOG,
+		"LPR":      syslog.LOG_LPR,
+		"NEWS":     syslog.LOG_NEWS,
+		"UUCP":     syslog.LOG_UUCP,
+		"CRON":     syslog.LOG_CRON,
+		"AUTHPRIV": syslog.LOG_AUTHPRIV,
+		"FTP":      syslog.LOG_FTP,
+		"LOCAL0":   syslog.LOG_LOCAL0,
+		"LOCAL1":   syslog.LOG_LOCAL1,
+		"LOCAL2":   syslog.LOG_LOCAL2,
+		"LOCAL3":   syslog.LOG_LOCAL3,
+		"LOCAL4":   syslog.LOG_LOCAL4,
+		"LOCAL5":   syslog.LOG_LOCAL5,
+		"LOCAL6":   syslog.LOG_LOCAL6,
+		"LOCAL7":   syslog.LOG_LOCAL7,
+	}
+
+	facility, ok := facilityCodes[config.SyslogFacility]
+	if !ok {
+		facility = syslog.LOG_USER
+	}
+
+	return severity | facility
+}
 
 func init() {
 	log = &ContextLogger{

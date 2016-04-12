@@ -35,7 +35,11 @@ func RunServices(encodedConfig []byte) error {
 		return psiphon.ContextError(err)
 	}
 
-	// TODO: init logging
+	err = InitLogging(config)
+	if err != nil {
+		log.WithContextFields(LogFields{"error": err}).Error("init logging failed")
+		return psiphon.ContextError(err)
+	}
 
 	err = InitGeoIP(config)
 	if err != nil {
