@@ -47,37 +47,41 @@ func RunServices(encodedConfig []byte) error {
 	shutdownBroadcast := make(chan struct{})
 	errors := make(chan error)
 
-	// TODO: optional services (e.g., run SSH only)
+	if config.WebServerPort > 0 {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			err := RunWebServer(config, shutdownBroadcast)
+			select {
+			case errors <- err:
+			default:
+			}
+		}()
+	}
 
-	waitGroup.Add(1)
-	go func() {
-		defer waitGroup.Done()
-		err := RunWebServer(config, shutdownBroadcast)
-		select {
-		case errors <- err:
-		default:
-		}
-	}()
+	if config.SSHServerPort > 0 {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			err := RunSSHServer(config, shutdownBroadcast)
+			select {
+			case errors <- err:
+			default:
+			}
+		}()
+	}
 
-	waitGroup.Add(1)
-	go func() {
-		defer waitGroup.Done()
-		err := RunSSHServer(config, shutdownBroadcast)
-		select {
-		case errors <- err:
-		default:
-		}
-	}()
-
-	waitGroup.Add(1)
-	go func() {
-		defer waitGroup.Done()
-		err := RunObfuscatedSSHServer(config, shutdownBroadcast)
-		select {
-		case errors <- err:
-		default:
-		}
-	}()
+	if config.ObfuscatedSSHServerPort > 0 {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			err := RunObfuscatedSSHServer(config, shutdownBroadcast)
+			select {
+			case errors <- err:
+			default:
+			}
+		}()
+	}
 
 	// An OS signal triggers an orderly shutdown
 	systemStopSignal := make(chan os.Signal, 1)
