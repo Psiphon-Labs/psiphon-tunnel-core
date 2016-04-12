@@ -202,9 +202,17 @@ func DialMeek(
 		}
 	} else {
 
-		// For HTTP meek, we let the http.Transport handle proxying. http.Transport will
-		// put the the HTTP server address in the HTTP request line. In this case, we can
-		// use an HTTP proxy that does not support CONNECT.
+		// The dialer ignores address that http.Transport will pass in (derived
+		// from the HTTP request URL) and always dials meekConfig.DialAddress.
+		dialer := func(string, string) (net.Conn, error) {
+			return NewTCPDialer(meekDialConfig)("tcp", meekConfig.DialAddress)
+		}
+
+		// For HTTP, and when the meekConfig.DialAddress matches the
+		// meekConfig.HostHeader, we let http.Transport handle proxying.
+		// http.Transport will put the the HTTP server address in the HTTP
+		// request line. In this one case, we can use an HTTP proxy that does
+		// not offer CONNECT support.
 		var proxyUrl func(*http.Request) (*url.URL, error)
 		if strings.HasPrefix(meekDialConfig.UpstreamProxyUrl, "http://") &&
 			(meekConfig.DialAddress == meekConfig.HostHeader ||
@@ -215,12 +223,10 @@ func DialMeek(
 			}
 			proxyUrl = http.ProxyURL(url)
 			meekDialConfig.UpstreamProxyUrl = ""
-		}
 
-		// dialer ignores address that http.Transport will pass in (derived from
-		// the HTTP request URL) and always dials meekConfig.DialAddress.
-		dialer := func(string, string) (net.Conn, error) {
-			return NewTCPDialer(meekDialConfig)("tcp", meekConfig.DialAddress)
+			// Here, the dialer must use the address that http.Transport
+			// passes in (which will be proxy address).
+			dialer = NewTCPDialer(meekDialConfig)
 		}
 
 		httpTransport := &http.Transport{
