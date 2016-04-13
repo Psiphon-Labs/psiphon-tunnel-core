@@ -87,7 +87,7 @@ func UpdateRedisForLegacyPsiWeb(psiphonSessionID string, geoIPData GeoIPData) er
 var redisPool *redis.Pool
 
 func InitRedis(config *Config) error {
-	redisPool := &redis.Pool{
+	redisPool = &redis.Pool{
 		Dial: func() (redis.Conn, error) {
 			return redis.Dial("tcp", config.RedisServerAddress)
 		},
