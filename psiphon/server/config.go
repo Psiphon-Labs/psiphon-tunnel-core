@@ -55,6 +55,9 @@ const (
 	SSH_CONNECTION_READ_DEADLINE           = 5 * time.Minute
 	SSH_OBFUSCATED_KEY_BYTE_LENGTH         = 32
 	DEFAULT_OBFUSCATED_SSH_SERVER_PORT     = 3333
+	REDIS_POOL_MAX_IDLE                    = 5
+	REDIS_POOL_MAX_ACTIVE                  = 1000
+	REDIS_POOL_IDLE_TIMEOUT                = 5 * time.Minute
 )
 
 // TODO: break config into sections (sub-structs)
@@ -77,6 +80,23 @@ type Config struct {
 	SSHServerPort           int
 	ObfuscatedSSHKey        string
 	ObfuscatedSSHServerPort int
+	RedisServerAddress      string
+}
+
+func (config *Config) RunWebServer() bool {
+	return config.WebServerPort > 0
+}
+
+func (config *Config) RunSSHServer() bool {
+	return config.SSHServerPort > 0
+}
+
+func (config *Config) RunObfuscatedSSHServer() bool {
+	return config.ObfuscatedSSHServerPort > 0
+}
+
+func (config *Config) UseRedis() bool {
+	return config.RedisServerAddress != ""
 }
 
 func LoadConfig(configJson []byte) (*Config, error) {
@@ -201,6 +221,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 		SSHServerPort:           sshServerPort,
 		ObfuscatedSSHKey:        obfuscatedSSHKey,
 		ObfuscatedSSHServerPort: obfuscatedSSHServerPort,
+		RedisServerAddress:      "",
 	}
 
 	encodedConfig, err := json.MarshalIndent(config, "\n", "    ")

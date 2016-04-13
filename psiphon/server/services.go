@@ -47,11 +47,19 @@ func RunServices(encodedConfig []byte) error {
 		return psiphon.ContextError(err)
 	}
 
+	if config.UseRedis() {
+		err = InitRedis(config)
+		if err != nil {
+			log.WithContextFields(LogFields{"error": err}).Error("init redis failed")
+			return psiphon.ContextError(err)
+		}
+	}
+
 	waitGroup := new(sync.WaitGroup)
 	shutdownBroadcast := make(chan struct{})
 	errors := make(chan error)
 
-	if config.WebServerPort > 0 {
+	if config.RunWebServer() {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
@@ -63,7 +71,7 @@ func RunServices(encodedConfig []byte) error {
 		}()
 	}
 
-	if config.SSHServerPort > 0 {
+	if config.RunSSHServer() {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
@@ -75,7 +83,7 @@ func RunServices(encodedConfig []byte) error {
 		}()
 	}
 
-	if config.ObfuscatedSSHServerPort > 0 {
+	if config.RunObfuscatedSSHServer() {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()

@@ -190,33 +190,48 @@ func (sshServer *sshServer) registerClient(client *sshClient) (string, bool) {
 	return key, true
 }
 
+func (sshServer *sshServer) getClientGeoIPData(clientKey string) GeoIPData {
+	sshServer.clientsMutex.Lock()
+	client, ok := sshServer.clients[clientKey]
+	sshServer.clientsMutex.Unlock()
+
+	geoIPData := NewGeoIPData()
+
+	if ok {
+		client.Lock()
+		geoIPData = client.geoIPData
+		client.Unlock()
+	}
+
+	return geoIPData
+}
+
 func (sshServer *sshServer) updateClient(
 	clientKey string, updater func(*sshClient)) {
 
 	sshServer.clientsMutex.Lock()
-	sshClient, ok := sshServer.clients[clientKey]
+	client, ok := sshServer.clients[clientKey]
 	sshServer.clientsMutex.Unlock()
 	if ok {
-		sshClient.Lock()
-		updater(sshClient)
-		sshClient.Unlock()
+		client.Lock()
+		updater(client)
+		client.Unlock()
 	}
 }
 
 func (sshServer *sshServer) unregisterClient(clientKey string) {
 	sshServer.clientsMutex.Lock()
-	if sshServer.stoppingClients {
-		return
-	}
 	client := sshServer.clients[clientKey]
 	delete(sshServer.clients, clientKey)
 	sshServer.clientsMutex.Unlock()
-
-	if client == nil {
-		return
+	if client != nil {
+		sshServer.stopClient(client)
 	}
+}
 
+func (sshServer *sshServer) stopClient(client *sshClient) {
 	client.sshConn.Close()
+	client.sshConn.Wait()
 	client.Lock()
 	log.WithContextFields(
 		LogFields{
@@ -237,12 +252,11 @@ func (sshServer *sshServer) unregisterClient(clientKey string) {
 func (sshServer *sshServer) stopClients() {
 	sshServer.clientsMutex.Lock()
 	sshServer.stoppingClients = true
+	sshServer.clients = make(map[string]*sshClient)
 	sshServer.clientsMutex.Unlock()
 	for _, client := range sshServer.clients {
-		client.sshConn.Close()
-		client.sshConn.Wait()
+		sshServer.stopClient(client)
 	}
-	sshServer.clients = make(map[string]*sshClient)
 }
 
 func (sshServer *sshServer) handleClient(tcpConn *net.TCPConn) {
@@ -359,9 +373,23 @@ func (sshServer *sshServer) passwordCallback(conn ssh.ConnMetadata, password []b
 	}
 
 	clientKey := string(conn.SessionID())
+	psiphonSessionID := sshPasswordPayload.SessionId
+
 	sshServer.updateClient(clientKey, func(client *sshClient) {
-		client.psiphonSessionID = sshPasswordPayload.SessionId
+		client.psiphonSessionID = psiphonSessionID
 	})
+
+	if sshServer.config.UseRedis() {
+		err = UpdateRedisForLegacyPsiWeb(
+			psiphonSessionID, sshServer.getClientGeoIPData(clientKey))
+		if err != nil {
+			log.WithContextFields(LogFields{
+				"psiphonSessionID": psiphonSessionID,
+				"error":            err}).Warning("UpdateRedisForLegacyPsiWeb failed")
+			// Allow the connection to proceed; legacy psi_web will not get accurate GeoIP values.
+		}
+	}
+
 	return nil, nil
 }
 

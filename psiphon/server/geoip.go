@@ -34,13 +34,17 @@ type GeoIPData struct {
 	ISP     string
 }
 
-func GeoIPLookup(ipAddress string) GeoIPData {
-
-	result := GeoIPData{
+func NewGeoIPData() GeoIPData {
+	return GeoIPData{
 		Country: UNKNOWN_GEOIP_VALUE,
 		City:    UNKNOWN_GEOIP_VALUE,
 		ISP:     UNKNOWN_GEOIP_VALUE,
 	}
+}
+
+func GeoIPLookup(ipAddress string) GeoIPData {
+
+	result := NewGeoIPData()
 
 	ip := net.ParseIP(ipAddress)
 
