@@ -67,12 +67,18 @@ func GeoIPLookup(ipAddress string) GeoIPData {
 		log.WithContextFields(LogFields{"error": err}).Warning("GeoIP lookup failed")
 	}
 
-	result.Country = geoIPFields.Country.ISOCode
+	if geoIPFields.Country.ISOCode != "" {
+		result.Country = geoIPFields.Country.ISOCode
+	}
+
 	name, ok := geoIPFields.City.Names["en"]
-	if ok {
+	if ok && name != "" {
 		result.City = name
 	}
-	result.ISP = geoIPFields.ISP
+
+	if geoIPFields.ISP != "" {
+		result.ISP = geoIPFields.ISP
+	}
 
 	return result
 }

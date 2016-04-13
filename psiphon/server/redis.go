@@ -73,9 +73,9 @@ func UpdateRedisForLegacyPsiWeb(psiphonSessionID string, geoIPData GeoIPData) er
 
 	conn.Send("MULTI")
 	conn.Send("SELECT", redisSessionDBIndex)
-	conn.Send("SET", psiphonSessionID, sessionRecord, "NX", "EX", sessionExpireSeconds)
+	conn.Send("SET", psiphonSessionID, string(sessionRecord), "NX", "EX", sessionExpireSeconds)
 	conn.Send("SELECT", redisDiscoveryDBIndex)
-	conn.Send("SET", psiphonSessionID, discoveryRecord, "NX", "EX", discoveryExpireSeconds)
+	conn.Send("SET", psiphonSessionID, string(discoveryRecord), "NX", "EX", discoveryExpireSeconds)
 	_, err = conn.Do("EXEC")
 	if err != nil {
 		return psiphon.ContextError(err)
