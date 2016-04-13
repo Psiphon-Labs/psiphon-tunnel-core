@@ -41,8 +41,8 @@ func UpdateRedisForLegacyPsiWeb(psiphonSessionID string, geoIPData GeoIPData) er
 
 	sessionRecord, err := json.Marshal(
 		struct {
-			country string `json:"region"`
-			city    string `json:"city"`
+			Country string `json:"region"`
+			City    string `json:"city"`
 			ISP     string `json:"isp"`
 		}{geoIPData.Country, geoIPData.City, geoIPData.ISP})
 	if err != nil {
@@ -59,7 +59,7 @@ func UpdateRedisForLegacyPsiWeb(psiphonSessionID string, geoIPData GeoIPData) er
 
 	discoveryRecord, err := json.Marshal(
 		struct {
-			value int `json:"client_ip_address_strategy_value"`
+			Value int `json:"client_ip_address_strategy_value"`
 		}{discoveryValue})
 	if err != nil {
 		return psiphon.ContextError(err)
