@@ -183,8 +183,8 @@ func (sshServer *sshServer) registerClient(client *sshClient) (string, bool) {
 	existingClient := sshServer.clients[key]
 	if existingClient != nil {
 		log.WithContext().Warning("unexpected existing connection")
-		client.sshConn.Close()
-		client.sshConn.Wait()
+		existingClient.sshConn.Close()
+		existingClient.sshConn.Wait()
 	}
 	sshServer.clients[key] = client
 	return key, true
