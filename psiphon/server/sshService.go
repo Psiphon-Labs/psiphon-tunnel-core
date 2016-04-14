@@ -436,7 +436,8 @@ func (sshServer *sshServer) handleNewDirectTcpipChannel(clientKey string, newCha
 
 	// TODO: port forward dial timeout
 	// TODO: report ssh.ResourceShortage when appropriate
-	fwdConn, err := net.Dial("tcp", targetAddr)
+	// TODO: IPv6 support
+	fwdConn, err := net.Dial("tcp4", targetAddr)
 	if err != nil {
 		sshServer.rejectNewChannel(newChannel, ssh.ConnectionFailed, err.Error())
 		return
