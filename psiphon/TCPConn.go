@@ -64,12 +64,9 @@ func makeTCPDialer(config *DialConfig) func(network, addr string) (net.Conn, err
 		// Note: when an upstream proxy is used, we don't know what IP address
 		// was resolved, by the proxy, for that destination.
 		if config.ResolvedIPCallback != nil && config.UpstreamProxyUrl == "" {
-			remoteAddr := conn.RemoteAddr()
-			if remoteAddr != nil {
-				host, _, err := net.SplitHostPort(conn.RemoteAddr().String())
-				if err == nil {
-					config.ResolvedIPCallback(host)
-				}
+			ipAddress := IPAddressFromAddr(conn.RemoteAddr())
+			if ipAddress != "" {
+				config.ResolvedIPCallback(ipAddress)
 			}
 		}
 		return conn, nil

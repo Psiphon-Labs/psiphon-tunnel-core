@@ -680,12 +680,12 @@ func makeCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
 	copy(encryptedCookie[32:], box)
 
 	// Obfuscate the encrypted data
-	obfuscator, err := NewObfuscator(
+	obfuscator, err := NewClientObfuscator(
 		&ObfuscatorConfig{Keyword: meekConfig.MeekObfuscatedKey, MaxPadding: MEEK_COOKIE_MAX_PADDING})
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	obfuscatedCookie := obfuscator.ConsumeSeedMessage()
+	obfuscatedCookie := obfuscator.SendSeedMessage()
 	seedLen := len(obfuscatedCookie)
 	obfuscatedCookie = append(obfuscatedCookie, encryptedCookie...)
 	obfuscator.ObfuscateClientToServer(obfuscatedCookie[seedLen:])

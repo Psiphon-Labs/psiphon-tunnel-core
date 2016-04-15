@@ -548,7 +548,8 @@ func dialSsh(
 	var sshConn net.Conn
 	sshConn = conn
 	if useObfuscatedSsh {
-		sshConn, err = NewObfuscatedSshConn(conn, serverEntry.SshObfuscatedKey)
+		sshConn, err = NewObfuscatedSshConn(
+			OBFUSCATION_CONN_MODE_CLIENT, conn, serverEntry.SshObfuscatedKey)
 		if err != nil {
 			return nil, nil, nil, ContextError(err)
 		}
@@ -606,7 +607,7 @@ func dialSsh(
 	}
 
 	go func() {
-		// The folowing is adapted from ssh.Dial(), here using a custom conn
+		// The following is adapted from ssh.Dial(), here using a custom conn
 		// The sshAddress is passed through to host key verification callbacks; we don't use it.
 		sshAddress := ""
 		sshClientConn, sshChans, sshReqs, err := ssh.NewClientConn(sshConn, sshAddress, sshClientConfig)

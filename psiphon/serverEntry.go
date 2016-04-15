@@ -90,10 +90,16 @@ const (
 	SERVER_ENTRY_SOURCE_TARGET    ServerEntrySource = "TARGET"
 )
 
+// GetCapability returns the server capability corresponding
+// to the protocol.
+func GetCapability(protocol string) string {
+	return strings.TrimSuffix(protocol, "-OSSH")
+}
+
 // SupportsProtocol returns true if and only if the ServerEntry has
 // the necessary capability to support the specified tunnel protocol.
 func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
-	requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
+	requiredCapability := GetCapability(protocol)
 	return Contains(serverEntry.Capabilities, requiredCapability)
 }
 
@@ -117,7 +123,7 @@ func (serverEntry *ServerEntry) DisableImpairedProtocols(impairedProtocols []str
 	for _, capability := range serverEntry.Capabilities {
 		omit := false
 		for _, protocol := range impairedProtocols {
-			requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
+			requiredCapability := GetCapability(protocol)
 			if capability == requiredCapability {
 				omit = true
 				break
@@ -142,6 +148,23 @@ func (serverEntry *ServerEntry) GetDirectWebRequestPorts() []string {
 		ports = append(ports, serverEntry.WebServerPort)
 	}
 	return ports
+}
+
+// EncodeServerEntry returns a string containing the encoding of
+// a ServerEntry following Psiphon conventions.
+func EncodeServerEntry(serverEntry *ServerEntry) (string, error) {
+	serverEntryContents, err := json.Marshal(serverEntry)
+	if err != nil {
+		return "", ContextError(err)
+	}
+
+	return hex.EncodeToString([]byte(fmt.Sprintf(
+		"%s %s %s %s %s",
+		serverEntry.IpAddress,
+		serverEntry.WebServerPort,
+		serverEntry.WebServerSecret,
+		serverEntry.WebServerCertificate,
+		serverEntryContents))), nil
 }
 
 // DecodeServerEntry extracts server entries from the encoding
