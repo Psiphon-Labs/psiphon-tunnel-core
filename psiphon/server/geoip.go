@@ -20,6 +20,8 @@
 package server
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"net"
 
 	maxminddb "github.com/Psiphon-Inc/maxminddb-golang"
@@ -29,9 +31,10 @@ import (
 const UNKNOWN_GEOIP_VALUE = "None"
 
 type GeoIPData struct {
-	Country string
-	City    string
-	ISP     string
+	Country        string
+	City           string
+	ISP            string
+	DiscoveryValue int
 }
 
 func NewGeoIPData() GeoIPData {
@@ -80,12 +83,29 @@ func GeoIPLookup(ipAddress string) GeoIPData {
 		result.ISP = geoIPFields.ISP
 	}
 
+	result.DiscoveryValue = calculateDiscoveryValue(ipAddress)
+
 	return result
 }
 
+func calculateDiscoveryValue(ipAddress string) int {
+	// From: psi_ops_discovery.calculate_ip_address_strategy_value:
+	//     # Mix bits from all octets of the client IP address to determine the
+	//     # bucket. An HMAC is used to prevent pre-calculation of buckets for IPs.
+	//     return ord(hmac.new(HMAC_KEY, ip_address, hashlib.sha256).digest()[0])
+	// TODO: use 3-octet algorithm?
+	hash := hmac.New(sha256.New, []byte(discoveryValueHMACKey))
+	hash.Write([]byte(ipAddress))
+	return int(hash.Sum(nil)[0])
+}
+
 var geoIPReader *maxminddb.Reader
+var discoveryValueHMACKey string
 
 func InitGeoIP(config *Config) error {
+
+	discoveryValueHMACKey = config.DiscoveryValueHMACKey
+
 	if config.GeoIPDatabaseFilename != "" {
 		var err error
 		geoIPReader, err = maxminddb.Open(config.GeoIPDatabaseFilename)
@@ -94,5 +114,6 @@ func InitGeoIP(config *Config) error {
 		}
 		log.WithContext().Info("GeoIP initialized")
 	}
+
 	return nil
 }

@@ -54,13 +54,10 @@ func UpdateRedisForLegacyPsiWeb(psiphonSessionID string, geoIPData GeoIPData) er
 	// Discard discovery records older than 5 minutes
 	discoveryExpireSeconds := 60 * 5
 
-	// TODO: implement psi_ops_discovery.calculate_ip_address_strategy_value
-	discoveryValue := 0
-
 	discoveryRecord, err := json.Marshal(
 		struct {
-			Value int `json:"client_ip_address_strategy_value"`
-		}{discoveryValue})
+			DiscoveryValue int `json:"client_ip_address_strategy_value"`
+		}{geoIPData.DiscoveryValue})
 	if err != nil {
 		return psiphon.ContextError(err)
 	}

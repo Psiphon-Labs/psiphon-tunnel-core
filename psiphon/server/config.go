@@ -67,6 +67,7 @@ type Config struct {
 	SyslogAddress           string
 	SyslogFacility          string
 	SyslogTag               string
+	DiscoveryValueHMACKey   string
 	GeoIPDatabaseFilename   string
 	ServerIPAddress         string
 	WebServerPort           int
@@ -208,6 +209,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 		SyslogAddress:           "",
 		SyslogFacility:          "",
 		SyslogTag:               "",
+		DiscoveryValueHMACKey:   "",
 		GeoIPDatabaseFilename:   DEFAULT_GEO_IP_DATABASE_FILENAME,
 		ServerIPAddress:         serverIPaddress,
 		WebServerPort:           webServerPort,
