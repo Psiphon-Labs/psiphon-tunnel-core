@@ -55,7 +55,7 @@ const (
 	SSH_CONNECTION_READ_DEADLINE           = 5 * time.Minute
 	SSH_OBFUSCATED_KEY_BYTE_LENGTH         = 32
 	DEFAULT_OBFUSCATED_SSH_SERVER_PORT     = 3333
-	REDIS_POOL_MAX_IDLE                    = 5
+	REDIS_POOL_MAX_IDLE                    = 50
 	REDIS_POOL_MAX_ACTIVE                  = 1000
 	REDIS_POOL_IDLE_TIMEOUT                = 5 * time.Minute
 )
