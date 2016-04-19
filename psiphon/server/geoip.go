@@ -30,6 +30,12 @@ import (
 
 const UNKNOWN_GEOIP_VALUE = "None"
 
+// GeoIPData stores GeoIP data for a client session. Individual client
+// IP addresses are neither logged nor explicitly referenced during a session.
+// The GeoIP country, city, and ISP corresponding to a client IP address are
+// resolved and then logged along with usage stats. The DiscoveryValue is
+// a special value derived from the client IP that's used to compartmentalize
+// discoverable servers (see calculateDiscoveryValue for details).
 type GeoIPData struct {
 	Country        string
 	City           string
@@ -37,6 +43,8 @@ type GeoIPData struct {
 	DiscoveryValue int
 }
 
+// NewGeoIPData returns a GeoIPData initialized with the expected
+// UNKNOWN_GEOIP_VALUE values to be used when GeoIP lookup fails.
 func NewGeoIPData() GeoIPData {
 	return GeoIPData{
 		Country: UNKNOWN_GEOIP_VALUE,
@@ -45,6 +53,7 @@ func NewGeoIPData() GeoIPData {
 	}
 }
 
+// GeoIPLookup determines a GeoIPData for a given client IP address.
 func GeoIPLookup(ipAddress string) GeoIPData {
 
 	result := NewGeoIPData()
@@ -88,6 +97,12 @@ func GeoIPLookup(ipAddress string) GeoIPData {
 	return result
 }
 
+// calculateDiscoveryValue derives a value from the client IP address to be
+// used as input in the server discovery algorithm. Since we do not explicitly
+// store the client IP address, we must derive the value here and store it for
+// later use by the discovery algorithm.
+// See https://bitbucket.org/psiphon/psiphon-circumvention-system/src/tip/Automation/psi_ops_discovery.py
+// for full details.
 func calculateDiscoveryValue(ipAddress string) int {
 	// From: psi_ops_discovery.calculate_ip_address_strategy_value:
 	//     # Mix bits from all octets of the client IP address to determine the
@@ -102,6 +117,8 @@ func calculateDiscoveryValue(ipAddress string) int {
 var geoIPReader *maxminddb.Reader
 var discoveryValueHMACKey string
 
+// InitGeoIP opens a GeoIP2/GeoLite2 MaxMind database and prepares
+// it for lookups.
 func InitGeoIP(config *Config) error {
 
 	discoveryValueHMACKey = config.DiscoveryValueHMACKey

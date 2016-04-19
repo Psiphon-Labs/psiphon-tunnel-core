@@ -69,10 +69,18 @@ func UpdateRedisForLegacyPsiWeb(psiphonSessionID string, geoIPData GeoIPData) er
 	// meek server). We allow expiry deadline extension unconditionally.
 
 	conn.Send("MULTI")
+
 	conn.Send("SELECT", redisSessionDBIndex)
-	conn.Send("SET", psiphonSessionID, string(sessionRecord), "NX", "EX", sessionExpireSeconds)
+	// http://redis.io/commands/set -- NX/EX options require Redis 2.6.12
+	//conn.Send("SET", psiphonSessionID, string(sessionRecord), "NX", "EX", sessionExpireSeconds)
+	conn.Send("SETNX", psiphonSessionID, string(sessionRecord))
+	conn.Send("EXPIRE", psiphonSessionID, sessionExpireSeconds)
+
 	conn.Send("SELECT", redisDiscoveryDBIndex)
-	conn.Send("SET", psiphonSessionID, string(discoveryRecord), "NX", "EX", discoveryExpireSeconds)
+	//conn.Send("SET", psiphonSessionID, string(discoveryRecord), "NX", "EX", discoveryExpireSeconds)
+	conn.Send("SETNX", psiphonSessionID, string(discoveryRecord))
+	conn.Send("EXPIRE", psiphonSessionID, discoveryExpireSeconds)
+
 	_, err = conn.Do("EXEC")
 	if err != nil {
 		return psiphon.ContextError(err)
@@ -83,6 +91,8 @@ func UpdateRedisForLegacyPsiWeb(psiphonSessionID string, geoIPData GeoIPData) er
 
 var redisPool *redis.Pool
 
+// InitRedis establishes a redis client connection pool and
+// also tests at least one single connection.
 func InitRedis(config *Config) error {
 	redisPool = &redis.Pool{
 		Dial: func() (redis.Conn, error) {

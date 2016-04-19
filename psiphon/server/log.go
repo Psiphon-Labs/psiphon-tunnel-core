@@ -93,11 +93,16 @@ func InitLogging(config *Config) error {
 
 	if config.SyslogAddress != "" {
 
+		tag := DEFAULT_SYSLOG_TAG
+		if config.SyslogTag != "" {
+			tag = config.SyslogTag
+		}
+
 		syslogHook, err = logrus_syslog.NewSyslogHook(
 			"udp",
 			config.SyslogAddress,
 			getSyslogPriority(config),
-			config.SyslogTag)
+			tag)
 
 		if err != nil {
 			return psiphon.ContextError(err)
@@ -126,26 +131,26 @@ func getSyslogPriority(config *Config) syslog.Priority {
 	severity := syslog.LOG_DEBUG
 
 	facilityCodes := map[string]syslog.Priority{
-		"KERN":     syslog.LOG_KERN,
-		"USER":     syslog.LOG_USER,
-		"MAIL":     syslog.LOG_MAIL,
-		"DAEMON":   syslog.LOG_DAEMON,
-		"AUTH":     syslog.LOG_AUTH,
-		"SYSLOG":   syslog.LOG_SYSLOG,
-		"LPR":      syslog.LOG_LPR,
-		"NEWS":     syslog.LOG_NEWS,
-		"UUCP":     syslog.LOG_UUCP,
-		"CRON":     syslog.LOG_CRON,
-		"AUTHPRIV": syslog.LOG_AUTHPRIV,
-		"FTP":      syslog.LOG_FTP,
-		"LOCAL0":   syslog.LOG_LOCAL0,
-		"LOCAL1":   syslog.LOG_LOCAL1,
-		"LOCAL2":   syslog.LOG_LOCAL2,
-		"LOCAL3":   syslog.LOG_LOCAL3,
-		"LOCAL4":   syslog.LOG_LOCAL4,
-		"LOCAL5":   syslog.LOG_LOCAL5,
-		"LOCAL6":   syslog.LOG_LOCAL6,
-		"LOCAL7":   syslog.LOG_LOCAL7,
+		"kern":     syslog.LOG_KERN,
+		"user":     syslog.LOG_USER,
+		"mail":     syslog.LOG_MAIL,
+		"daemon":   syslog.LOG_DAEMON,
+		"auth":     syslog.LOG_AUTH,
+		"syslog":   syslog.LOG_SYSLOG,
+		"lpr":      syslog.LOG_LPR,
+		"news":     syslog.LOG_NEWS,
+		"uucp":     syslog.LOG_UUCP,
+		"cron":     syslog.LOG_CRON,
+		"authpriv": syslog.LOG_AUTHPRIV,
+		"ftp":      syslog.LOG_FTP,
+		"local0":   syslog.LOG_LOCAL0,
+		"local1":   syslog.LOG_LOCAL1,
+		"local2":   syslog.LOG_LOCAL2,
+		"local3":   syslog.LOG_LOCAL3,
+		"local4":   syslog.LOG_LOCAL4,
+		"local5":   syslog.LOG_LOCAL5,
+		"local6":   syslog.LOG_LOCAL6,
+		"local7":   syslog.LOG_LOCAL7,
 	}
 
 	facility, ok := facilityCodes[config.SyslogFacility]
