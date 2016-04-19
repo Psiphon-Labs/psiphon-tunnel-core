@@ -38,7 +38,8 @@ import (
 const (
 	SERVER_CONFIG_FILENAME                 = "psiphon-server.config"
 	SERVER_ENTRY_FILENAME                  = "serverEntry.dat"
-	DEFAULT_LOG_LEVEL                      = "Info"
+	DEFAULT_LOG_LEVEL                      = "info"
+	DEFAULT_SYSLOG_TAG                     = "psiphon-server"
 	DEFAULT_GEO_IP_DATABASE_FILENAME       = "GeoLite2-City.mmdb"
 	DEFAULT_SERVER_IP_ADDRESS              = "127.0.0.1"
 	WEB_SERVER_SECRET_BYTE_LENGTH          = 32
@@ -62,44 +63,111 @@ const (
 
 // TODO: break config into sections (sub-structs)
 
+// Config specifies the configuration and behavior of a Psiphon
+// server.
 type Config struct {
-	LogLevel                string
-	SyslogAddress           string
-	SyslogFacility          string
-	SyslogTag               string
-	DiscoveryValueHMACKey   string
-	GeoIPDatabaseFilename   string
-	ServerIPAddress         string
-	WebServerPort           int
-	WebServerSecret         string
-	WebServerCertificate    string
-	WebServerPrivateKey     string
-	SSHPrivateKey           string
-	SSHServerVersion        string
-	SSHUserName             string
-	SSHPassword             string
-	SSHServerPort           int
-	ObfuscatedSSHKey        string
+
+	// LogLevel specifies the log level. Valid values are:
+	// panic, fatal, error, warn, info, debug
+	LogLevel string
+
+	// SyslogAddress specifies the UDP address of a syslog
+	// service. When set, syslog is used for message logging.
+	SyslogAddress string
+
+	// SyslogFacility specifies the syslog facility to log to.
+	// Valid values include: "user", "local0", "local1", etc.
+	SyslogFacility string
+
+	// SyslogTag specifies an optional tag for syslog log
+	// messages. The default tag is "psiphon-server".
+	SyslogTag string
+
+	// DiscoveryValueHMACKey is the network-wide secret value
+	// used to determine a unique discovery strategy.
+	DiscoveryValueHMACKey string
+
+	// GeoIPDatabaseFilename is the path of the GeoIP2/GeoLite2
+	// MaxMind database file.
+	GeoIPDatabaseFilename string
+
+	// ServerIPAddress is the public IP address of the server.
+	ServerIPAddress string
+
+	// WebServerPort is the listening port of the web server.
+	// When <= 0, no web server component is run.
+	WebServerPort int
+
+	// WebServerSecret is the unique secret value that the client
+	// must supply to make requests to the web server.
+	WebServerSecret string
+
+	// WebServerCertificate is the certificate the client uses to
+	// authenticate the web server.
+	WebServerCertificate string
+
+	// WebServerPrivateKey is the private key the web server uses to
+	// authenticate itself to clients.
+	WebServerPrivateKey string
+
+	// SSHPrivateKey is the SSH host key. The same key is used for
+	// both the SSH and Obfuscated SSH servers.
+	SSHPrivateKey string
+
+	// SSHServerVersion is the server version presented in the
+	// identification string. The same value is used for both SSH
+	// and Obfuscated SSH servers.
+	SSHServerVersion string
+
+	// SSHUserName is the SSH user name to be presented by the
+	// the tunnel-core client. The same value is used for both SSH
+	// and Obfuscated SSH servers.
+	SSHUserName string
+
+	// SSHPassword is the SSH password to be presented by the
+	// the tunnel-core client. The same value is used for both SSH
+	// and Obfuscated SSH servers.
+	SSHPassword string
+
+	// SSHServerPort is the listening port of the SSH server.
+	// When <= 0, no SSH server component is run.
+	SSHServerPort int
+
+	// ObfuscatedSSHKey is the secret key for use in the Obfuscated
+	// SSH protocol.
+	ObfuscatedSSHKey string
+
+	// ObfuscatedSSHServerPort is the listening port of the Obfuscated SSH server.
+	// When <= 0, no Obfuscated SSH server component is run.
 	ObfuscatedSSHServerPort int
-	RedisServerAddress      string
+
+	// RedisServerAddress is the TCP address of a redis server. When
+	// set, redis is used to store per-session GeoIP information.
+	RedisServerAddress string
 }
 
+// RunWebServer indicates whether to run a web server component.
 func (config *Config) RunWebServer() bool {
 	return config.WebServerPort > 0
 }
 
+// RunSSHServer indicates whether to run an SSH server component.
 func (config *Config) RunSSHServer() bool {
 	return config.SSHServerPort > 0
 }
 
+// RunObfuscatedSSHServer indicates whether to run an Obfuscated SSH server component.
 func (config *Config) RunObfuscatedSSHServer() bool {
 	return config.ObfuscatedSSHServerPort > 0
 }
 
+// RunObfuscatedSSHServer indicates whether to store per-session GeoIP information in
+// redis. This is for integration with the legacy psi_web component.
 func (config *Config) UseRedis() bool {
 	return config.RedisServerAddress != ""
 }
 
+// LoadConfig loads and validates a JSON encoded server config.
 func LoadConfig(configJson []byte) (*Config, error) {
 
 	var config Config
@@ -114,13 +182,30 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	return &config, nil
 }
 
+// GenerateConfigParams specifies customizations to be applied to
+// a generated server config.
 type GenerateConfigParams struct {
-	ServerIPAddress         string
-	WebServerPort           int
-	SSHServerPort           int
+
+	// ServerIPAddress is the public IP address of the server.
+	ServerIPAddress string
+
+	// WebServerPort is the listening port of the web server.
+	// When <= 0, no web server component is run.
+	WebServerPort int
+
+	// SSHServerPort is the listening port of the SSH server.
+	// When <= 0, no SSH server component is run.
+	SSHServerPort int
+
+	// ObfuscatedSSHServerPort is the listening port of the Obfuscated SSH server.
+	// When <= 0, no Obfuscated SSH server component is run.
 	ObfuscatedSSHServerPort int
 }
 
+// GenerateConfig create a new Psiphon server config. It returns a JSON
+// encoded config and a client-compatible "server entry" for the server. It
+// generates all necessary secrets and key material, which are emitted in
+// the config file and server entry as necessary.
 func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 
 	// TODO: support disabling web server or a subset of protocols

@@ -83,6 +83,8 @@ func UpdateRedisForLegacyPsiWeb(psiphonSessionID string, geoIPData GeoIPData) er
 
 var redisPool *redis.Pool
 
+// InitRedis establishes a redis client connection pool and
+// also tests at least one single connection.
 func InitRedis(config *Config) error {
 	redisPool = &redis.Pool{
 		Dial: func() (redis.Conn, error) {

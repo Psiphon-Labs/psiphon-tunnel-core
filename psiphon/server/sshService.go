@@ -33,14 +33,31 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// RunSSHServer runs an ssh server with plain SSH protocol.
 func RunSSHServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 	return runSSHServer(config, false, shutdownBroadcast)
 }
 
+// RunSSHServer runs an ssh server with Obfuscated SSH protocol.
 func RunObfuscatedSSHServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 	return runSSHServer(config, true, shutdownBroadcast)
 }
 
+// runSSHServer runs an SSH or Obfuscated SSH server. In the Obfuscated SSH case, an
+// ObfuscatedSSHConn is layered in front of the client TCP connection; otherwise, both
+// modes are identical.
+//
+// runSSHServer listens on the designated port and spawns new goroutines to handle
+// each client connection. It halts when shutdownBroadcast is signaled. A list of active
+// clients is maintained, and when halting all clients are first shutdown.
+//
+// Each client goroutine handles its own obfuscation (optional), SSH handshake, SSH
+// authentication, and then looping on client new channel requests. At this time, only
+// "direct-tcpip" channels, dynamic port fowards, are expected and supported.
+//
+// A new goroutine is spawned to handle each port forward. Each port forward tracks its
+// bytes transferred. Overall per-client stats for connection duration, GeoIP, number of
+// port forwards, and bytes transferred are tracked and logged when the client shuts down.
 func runSSHServer(
 	config *Config, useObfuscation bool, shutdownBroadcast <-chan struct{}) error {
 

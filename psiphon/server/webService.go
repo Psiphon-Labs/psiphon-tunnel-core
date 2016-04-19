@@ -38,6 +38,12 @@ type webServer struct {
 	config   *Config
 }
 
+// RunWebServer runs a web server which responds to the following Psiphon API
+// web requests: handshake, connected, and status. At this time, this web
+// server is a stub for stand-alone testing. It provides the minimal response
+// required by the tunnel-core client. It doesn't return read landing pages,
+// serer discovery results, or other handshake response values. It also does
+// not log stats in the standard way.
 func RunWebServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 
 	webServer := &webServer{

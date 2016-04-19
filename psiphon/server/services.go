@@ -17,6 +17,10 @@
  *
  */
 
+// Package psiphon/server implements the core tunnel functionality of a Psiphon server.
+// The main function is RunServices, which runs one or all of a Psiphon API web server,
+// a tunneling SSH server, and an Obfuscated SSH protocol server. The server configuration
+// is created by the GenerateConfig function.
 package server
 
 import (
@@ -27,6 +31,10 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
 
+// RunServices initializes support functions including logging, GeoIP service, and
+// redis connection pooling; and then starts the server components and runs them
+// until os.Interrupt or os.Kill signals are received. The config determines
+// which components are run.
 func RunServices(encodedConfig []byte) error {
 
 	config, err := LoadConfig(encodedConfig)
