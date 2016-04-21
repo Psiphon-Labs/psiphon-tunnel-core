@@ -62,13 +62,13 @@ func main() {
 	flag.Var(
 		&runConfigFilenames,
 		"config",
-		"run with this config `filename`; may be repeated to load multiple config files")
+		"run with this config `filename`; flag may be repeated to load multiple config files")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr,
 			"Usage:\n\n"+
-				"%s generate    generates a configuration and server entry\n"+
-				"%s run         runs configured services\n\n",
+				"%s <flags> generate    generates a configuration and server entry\n"+
+				"%s <flags> run         runs configured services\n\n",
 			os.Args[0], os.Args[0])
 		flag.PrintDefaults()
 	}
