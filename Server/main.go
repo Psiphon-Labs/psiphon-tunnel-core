@@ -24,28 +24,76 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strings"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
 )
 
 func main() {
 
+	var generateServerIPaddress string
+	var generateWebServerPort, generateSSHServerPort, generateObfuscatedSSHServerPort int
+	var runConfigFilenames stringListFlag
+
+	flag.StringVar(
+		&generateServerIPaddress,
+		"ipaddress",
+		server.DEFAULT_SERVER_IP_ADDRESS,
+		"generate with this server `IP address`")
+
+	flag.IntVar(
+		&generateWebServerPort,
+		"webport",
+		server.DEFAULT_WEB_SERVER_PORT,
+		"generate with this web server `port`; 0 for no web server")
+
+	flag.IntVar(
+		&generateSSHServerPort,
+		"sshport",
+		server.DEFAULT_SSH_SERVER_PORT,
+		"generate with this SSH server `port`; 0 for no SSH server")
+
+	flag.IntVar(
+		&generateObfuscatedSSHServerPort,
+		"osshport",
+		server.DEFAULT_OBFUSCATED_SSH_SERVER_PORT,
+		"generate with this Obfuscated SSH server `port`; 0 for no Obfuscated SSH server")
+
+	flag.Var(
+		&runConfigFilenames,
+		"config",
+		"run with this config `filename`; may be repeated to load multiple config files")
+
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr,
+			"Usage:\n\n"+
+				"%s generate    generates a configuration and server entry\n"+
+				"%s run         runs configured services\n\n",
+			os.Args[0], os.Args[0])
+		flag.PrintDefaults()
+	}
+
 	flag.Parse()
 
 	args := flag.Args()
 
-	// TODO: add working directory flag
 	configFilename := server.SERVER_CONFIG_FILENAME
+
 	serverEntryFilename := server.SERVER_ENTRY_FILENAME
 
 	if len(args) < 1 {
-		fmt.Errorf("usage: '%s generate' or '%s run'", os.Args[0])
+		flag.Usage()
 		os.Exit(1)
 	} else if args[0] == "generate" {
 
-		// TODO: flags to set generate params
 		configFileContents, serverEntryFileContents, err := server.GenerateConfig(
-			&server.GenerateConfigParams{})
+			&server.GenerateConfigParams{
+				ServerIPAddress:         generateServerIPaddress,
+				WebServerPort:           generateWebServerPort,
+				SSHServerPort:           generateSSHServerPort,
+				ObfuscatedSSHServerPort: generateObfuscatedSSHServerPort,
+			})
+
 		if err != nil {
 			fmt.Errorf("generate failed: %s", err)
 			os.Exit(1)
@@ -64,16 +112,37 @@ func main() {
 
 	} else if args[0] == "run" {
 
-		configFileContents, err := ioutil.ReadFile(configFilename)
-		if err != nil {
-			fmt.Errorf("error loading configuration file: %s", err)
-			os.Exit(1)
+		if len(runConfigFilenames) == 0 {
+			runConfigFilenames = []string{configFilename}
 		}
 
-		err = server.RunServices(configFileContents)
+		var configFileContents [][]byte
+
+		for _, configFilename := range runConfigFilenames {
+			ccontents, err := ioutil.ReadFile(configFilename)
+			if err != nil {
+				fmt.Errorf("error loading configuration file: %s", err)
+				os.Exit(1)
+			}
+
+			configFileContents = append(configFileContents, ccontents)
+		}
+
+		err := server.RunServices(configFileContents)
 		if err != nil {
 			fmt.Errorf("run failed: %s", err)
 			os.Exit(1)
 		}
 	}
+}
+
+type stringListFlag []string
+
+func (list *stringListFlag) String() string {
+	return strings.Join(*list, ", ")
+}
+
+func (list *stringListFlag) Set(flagValue string) error {
+	*list = append(*list, flagValue)
+	return nil
 }
