@@ -247,12 +247,12 @@ func (sshServer *sshServer) handleClient(tcpConn *net.TCPConn) {
 	sshClient.trafficRules = sshServer.config.GetTrafficRules(sshClient.geoIPData.Country)
 
 	// Wrap the base TCP connection with an IdleTimeoutConn which will terminate
-	// the connection if it's idle for too long. This timeout is in effect for
-	// the entire duration of the SSH connection. Clients must actively use
-	// the connection or send SSH keep alive requests to keep the connection
+	// the connection if no data is received before the deadline. This timeout is
+	// in effect for the entire duration of the SSH connection. Clients must actively
+	// use the connection or send SSH keep alive requests to keep the connection
 	// active.
 
-	conn := psiphon.NewIdleTimeoutConn(tcpConn, SSH_CONNECTION_READ_DEADLINE)
+	conn := psiphon.NewIdleTimeoutConn(tcpConn, SSH_CONNECTION_READ_DEADLINE, false)
 
 	// Run the initial [obfuscated] SSH handshake in a goroutine so we can both
 	// respect shutdownBroadcast and implement a specific handshake timeout.
@@ -435,18 +435,17 @@ func (sshClient *sshClient) handleNewDirectTcpipChannel(newChannel ssh.NewChanne
 
 	defer fwdChannel.Close()
 
-	// TODO: Fix -- fwdChannel is a ssh.Channel which is not a net.Conn, which
-	// NewJointIdleTimeoutConn expects.
-	/*
-		// When idle port forward traffic rules are in place, wrap each end of the
-		// port forward in peer JointIdleTimeoutConns which triggers an idle
-		// timeout only if both ends are (read) idle.
-		if sshClient.trafficRules.IdlePortForwardTimeoutMilliseconds > 0 {
-			fwdConn, fwdChannel = psiphon.NewJointIdleTimeoutConn(
-				fwdConn, fwdChannel,
-				time.Duration(sshClient.trafficRules.IdlePortForwardTimeoutMilliseconds)*time.Millisecond)
-		}
-	*/
+	// When idle port forward traffic rules are in place, wrap fwdConn
+	// in an IdleTimeoutConn configured to reset idle on writes as well
+	// as read. This ensures the port forward idle timeout only happens
+	// when both upstream and downstream directions are are idle.
+
+	if sshClient.trafficRules.IdlePortForwardTimeoutMilliseconds > 0 {
+		fwdConn = psiphon.NewIdleTimeoutConn(
+			fwdConn,
+			time.Duration(sshClient.trafficRules.IdlePortForwardTimeoutMilliseconds)*time.Millisecond,
+			true)
+	}
 
 	// relay channel to forwarded connection
 	// TODO: relay errors to fwdChannel.Stderr()?
