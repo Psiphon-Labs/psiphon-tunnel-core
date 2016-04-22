@@ -391,25 +391,64 @@ func IPAddressFromAddr(addr net.Addr) string {
 	return ipAddress
 }
 
-// TimeoutTCPConn wraps a net.TCPConn and sets an initial ReadDeadline. The
+// IdleTimeoutConn wraps a net.Conn and sets an initial ReadDeadline. The
 // deadline is reset whenever data is received from the connection.
-type TimeoutTCPConn struct {
-	*net.TCPConn
+type IdleTimeoutConn struct {
+	net.Conn
 	deadline time.Duration
 }
 
-func NewTimeoutTCPConn(tcpConn *net.TCPConn, deadline time.Duration) *TimeoutTCPConn {
-	tcpConn.SetReadDeadline(time.Now().Add(deadline))
-	return &TimeoutTCPConn{
-		TCPConn:  tcpConn,
+func NewIdleTimeoutConn(conn net.Conn, deadline time.Duration) *IdleTimeoutConn {
+	conn.SetReadDeadline(time.Now().Add(deadline))
+	return &IdleTimeoutConn{
+		Conn:     conn,
 		deadline: deadline,
 	}
 }
 
-func (conn *TimeoutTCPConn) Read(buffer []byte) (int, error) {
-	n, err := conn.TCPConn.Read(buffer)
+func (conn *IdleTimeoutConn) Read(buffer []byte) (int, error) {
+	n, err := conn.Conn.Read(buffer)
 	if err == nil {
-		conn.TCPConn.SetReadDeadline(time.Now().Add(conn.deadline))
+		conn.Conn.SetReadDeadline(time.Now().Add(conn.deadline))
+	}
+	return n, err
+}
+
+// JointIdleTimeoutConn wraps a pair of net.Conns, implementing an idle
+// timeout using SetReadDeadline. The read deadline for both conns is
+// extended when either one complete a read.
+type JointIdleTimeoutConn struct {
+	net.Conn
+	deadline time.Duration
+	peer     net.Conn
+}
+
+func NewJointIdleTimeoutConn(
+	conn1, conn2 net.Conn, deadline time.Duration) (
+	*JointIdleTimeoutConn, *JointIdleTimeoutConn) {
+
+	conn1.SetReadDeadline(time.Now().Add(deadline))
+	joint1 := &JointIdleTimeoutConn{
+		Conn:     conn1,
+		deadline: deadline,
+		peer:     conn2,
+	}
+
+	conn2.SetReadDeadline(time.Now().Add(deadline))
+	joint2 := &JointIdleTimeoutConn{
+		Conn:     conn2,
+		deadline: deadline,
+		peer:     conn1,
+	}
+
+	return joint1, joint2
+}
+
+func (conn *JointIdleTimeoutConn) Read(buffer []byte) (int, error) {
+	n, err := conn.Conn.Read(buffer)
+	if err == nil {
+		conn.Conn.SetReadDeadline(time.Now().Add(conn.deadline))
+		conn.peer.SetReadDeadline(time.Now().Add(conn.deadline))
 	}
 	return n, err
 }
