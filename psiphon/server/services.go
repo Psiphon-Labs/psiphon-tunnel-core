@@ -35,9 +35,9 @@ import (
 // redis connection pooling; and then starts the server components and runs them
 // until os.Interrupt or os.Kill signals are received. The config determines
 // which components are run.
-func RunServices(encodedConfig []byte) error {
+func RunServices(encodedConfigs [][]byte) error {
 
-	config, err := LoadConfig(encodedConfig)
+	config, err := LoadConfig(encodedConfigs)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("load config failed")
 		return psiphon.ContextError(err)

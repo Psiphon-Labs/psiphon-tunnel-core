@@ -391,25 +391,39 @@ func IPAddressFromAddr(addr net.Addr) string {
 	return ipAddress
 }
 
-// TimeoutTCPConn wraps a net.TCPConn and sets an initial ReadDeadline. The
-// deadline is reset whenever data is received from the connection.
-type TimeoutTCPConn struct {
-	*net.TCPConn
-	deadline time.Duration
+// IdleTimeoutConn wraps a net.Conn and sets an initial ReadDeadline. The
+// deadline is extended whenever data is received from the connection.
+// Optionally, IdleTimeoutConn will also extend the deadline when data is
+// written to the connection.
+type IdleTimeoutConn struct {
+	net.Conn
+	deadline     time.Duration
+	resetOnWrite bool
 }
 
-func NewTimeoutTCPConn(tcpConn *net.TCPConn, deadline time.Duration) *TimeoutTCPConn {
-	tcpConn.SetReadDeadline(time.Now().Add(deadline))
-	return &TimeoutTCPConn{
-		TCPConn:  tcpConn,
-		deadline: deadline,
+func NewIdleTimeoutConn(
+	conn net.Conn, deadline time.Duration, resetOnWrite bool) *IdleTimeoutConn {
+
+	conn.SetReadDeadline(time.Now().Add(deadline))
+	return &IdleTimeoutConn{
+		Conn:         conn,
+		deadline:     deadline,
+		resetOnWrite: resetOnWrite,
 	}
 }
 
-func (conn *TimeoutTCPConn) Read(buffer []byte) (int, error) {
-	n, err := conn.TCPConn.Read(buffer)
+func (conn *IdleTimeoutConn) Read(buffer []byte) (int, error) {
+	n, err := conn.Conn.Read(buffer)
 	if err == nil {
-		conn.TCPConn.SetReadDeadline(time.Now().Add(conn.deadline))
+		conn.Conn.SetReadDeadline(time.Now().Add(conn.deadline))
+	}
+	return n, err
+}
+
+func (conn *IdleTimeoutConn) Write(buffer []byte) (int, error) {
+	n, err := conn.Conn.Write(buffer)
+	if err == nil && conn.resetOnWrite {
+		conn.Conn.SetReadDeadline(time.Now().Add(conn.deadline))
 	}
 	return n, err
 }

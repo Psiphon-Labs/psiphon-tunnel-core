@@ -26,6 +26,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -54,6 +55,7 @@ const (
 	DEFAULT_SSH_SERVER_PORT                = 2222
 	SSH_HANDSHAKE_TIMEOUT                  = 30 * time.Second
 	SSH_CONNECTION_READ_DEADLINE           = 5 * time.Minute
+	SSH_THROTTLED_PORT_FORWARD_MAX_COPY    = 32 * 1024
 	SSH_OBFUSCATED_KEY_BYTE_LENGTH         = 32
 	DEFAULT_OBFUSCATED_SSH_SERVER_PORT     = 3333
 	REDIS_POOL_MAX_IDLE                    = 50
@@ -88,7 +90,8 @@ type Config struct {
 	DiscoveryValueHMACKey string
 
 	// GeoIPDatabaseFilename is the path of the GeoIP2/GeoLite2
-	// MaxMind database file.
+	// MaxMind database file. when blank, no GeoIP lookups are
+	// performed.
 	GeoIPDatabaseFilename string
 
 	// ServerIPAddress is the public IP address of the server.
@@ -110,6 +113,10 @@ type Config struct {
 	// authenticate itself to clients.
 	WebServerPrivateKey string
 
+	// SSHServerPort is the listening port of the SSH server.
+	// When <= 0, no SSH server component is run.
+	SSHServerPort int
+
 	// SSHPrivateKey is the SSH host key. The same key is used for
 	// both the SSH and Obfuscated SSH servers.
 	SSHPrivateKey string
@@ -129,21 +136,53 @@ type Config struct {
 	// and Obfuscated SSH servers.
 	SSHPassword string
 
-	// SSHServerPort is the listening port of the SSH server.
-	// When <= 0, no SSH server component is run.
-	SSHServerPort int
+	// ObfuscatedSSHServerPort is the listening port of the Obfuscated SSH server.
+	// When <= 0, no Obfuscated SSH server component is run.
+	ObfuscatedSSHServerPort int
 
 	// ObfuscatedSSHKey is the secret key for use in the Obfuscated
 	// SSH protocol.
 	ObfuscatedSSHKey string
 
-	// ObfuscatedSSHServerPort is the listening port of the Obfuscated SSH server.
-	// When <= 0, no Obfuscated SSH server component is run.
-	ObfuscatedSSHServerPort int
-
 	// RedisServerAddress is the TCP address of a redis server. When
 	// set, redis is used to store per-session GeoIP information.
 	RedisServerAddress string
+
+	// DefaultTrafficRules specifies the traffic rules to be used when
+	// no regional-specific rules are set.
+	DefaultTrafficRules TrafficRules
+
+	// RegionalTrafficRules specifies the traffic rules for particular
+	// client regions (countries) as determined by GeoIP lookup of the
+	// client IP address. The key for each regional traffic rule entry
+	// is one or more space delimited ISO 3166-1 alpha-2 country codes.
+	RegionalTrafficRules map[string]TrafficRules
+}
+
+// TrafficRules specify the limits placed on SSH client port forward
+// traffic.
+type TrafficRules struct {
+
+	// ThrottleUpstreamSleepMilliseconds is the period to sleep
+	// between sending each chunk of client->destination traffic.
+	// The default, 0, is no sleep.
+	ThrottleUpstreamSleepMilliseconds int
+
+	// ThrottleDownstreamSleepMilliseconds is the period to sleep
+	// between sending each chunk of destination->client traffic.
+	// The default, 0, is no sleep.
+	ThrottleDownstreamSleepMilliseconds int
+
+	// IdlePortForwardTimeoutMilliseconds is the timeout period
+	// after which idle (no bytes flowing in either direction)
+	// SSH client port forwards are preemptively closed.
+	// The default, 0, is no idle timeout.
+	IdlePortForwardTimeoutMilliseconds int
+
+	// MaxClientPortForwardCount is the maximum number of port
+	// forwards each client may have open concurrently.
+	// The default, 0, is no maximum.
+	MaxClientPortForwardCount int
 }
 
 // RunWebServer indicates whether to run a web server component.
@@ -167,17 +206,61 @@ func (config *Config) UseRedis() bool {
 	return config.RedisServerAddress != ""
 }
 
-// LoadConfig loads and validates a JSON encoded server config.
-func LoadConfig(configJson []byte) (*Config, error) {
+// GetTrafficRules looks up the traffic rules for the specified country. If there
+// are no RegionalTrafficRules for the country, DefaultTrafficRules are returned.
+func (config *Config) GetTrafficRules(targetCountryCode string) TrafficRules {
+	// TODO: faster lookup?
+	for countryCodes, trafficRules := range config.RegionalTrafficRules {
+		for _, countryCode := range strings.Split(countryCodes, " ") {
+			if countryCode == targetCountryCode {
+				return trafficRules
+			}
+		}
+	}
+	return config.DefaultTrafficRules
+}
 
+// LoadConfig loads and validates a JSON encoded server config. If more than one
+// JSON config is specified, then all are loaded and values are merged together,
+// in order. Multiple configs allows for use cases like storing static, server-specific
+// values in a base config while also deploying network-wide throttling settings
+// in a secondary file that can be paved over on all server hosts.
+func LoadConfig(configJSONs [][]byte) (*Config, error) {
+
+	// Note: default values are set in GenerateConfig
 	var config Config
-	err := json.Unmarshal(configJson, &config)
-	if err != nil {
-		return nil, psiphon.ContextError(err)
+
+	for _, configJSON := range configJSONs {
+		err := json.Unmarshal(configJSON, &config)
+		if err != nil {
+			return nil, psiphon.ContextError(err)
+		}
 	}
 
-	// TODO: config field validation
-	// TODO: validation case: OSSH requires extra fields
+	if config.ServerIPAddress == "" {
+		return nil, errors.New("server IP address is missing from config file")
+	}
+
+	if config.WebServerPort > 0 && (config.WebServerSecret == "" || config.WebServerCertificate == "" ||
+		config.WebServerPrivateKey == "") {
+
+		return nil, errors.New(
+			"web server requires WebServerSecret, WebServerCertificate, WebServerPrivateKey")
+	}
+
+	if config.SSHServerPort > 0 && (config.SSHPrivateKey == "" || config.SSHServerVersion == "" ||
+		config.SSHUserName == "" || config.SSHPassword == "") {
+
+		return nil, errors.New(
+			"SSH server requires SSHPrivateKey, SSHServerVersion, SSHUserName, SSHPassword")
+	}
+
+	if config.ObfuscatedSSHServerPort > 0 && (config.SSHPrivateKey == "" || config.SSHServerVersion == "" ||
+		config.SSHUserName == "" || config.SSHPassword == "" || config.ObfuscatedSSHKey == "") {
+
+		return nil, errors.New(
+			"Obfuscated SSH server requires SSHPrivateKey, SSHServerVersion, SSHUserName, SSHPassword, ObfuscatedSSHKey")
+	}
 
 	return &config, nil
 }
@@ -293,7 +376,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 		LogLevel:                DEFAULT_LOG_LEVEL,
 		SyslogAddress:           "",
 		SyslogFacility:          "",
-		SyslogTag:               "",
+		SyslogTag:               DEFAULT_SYSLOG_TAG,
 		DiscoveryValueHMACKey:   "",
 		GeoIPDatabaseFilename:   DEFAULT_GEO_IP_DATABASE_FILENAME,
 		ServerIPAddress:         serverIPaddress,

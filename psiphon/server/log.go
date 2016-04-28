@@ -77,12 +77,7 @@ var log *ContextLogger
 // goroutine.
 func InitLogging(config *Config) error {
 
-	logLevel := DEFAULT_LOG_LEVEL
-	if config.LogLevel != "" {
-		logLevel = config.LogLevel
-	}
-
-	level, err := logrus.ParseLevel(logLevel)
+	level, err := logrus.ParseLevel(config.LogLevel)
 	if err != nil {
 		return psiphon.ContextError(err)
 	}
@@ -93,16 +88,11 @@ func InitLogging(config *Config) error {
 
 	if config.SyslogAddress != "" {
 
-		tag := DEFAULT_SYSLOG_TAG
-		if config.SyslogTag != "" {
-			tag = config.SyslogTag
-		}
-
 		syslogHook, err = logrus_syslog.NewSyslogHook(
 			"udp",
 			config.SyslogAddress,
 			getSyslogPriority(config),
-			tag)
+			config.SyslogTag)
 
 		if err != nil {
 			return psiphon.ContextError(err)

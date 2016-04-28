@@ -158,8 +158,8 @@ type Config struct {
 	TunnelProtocol string
 
 	// EstablishTunnelTimeoutSeconds specifies a time limit after which to halt
-	// the core tunnel controller if no tunnel has been established. By default,
-	// the controller will keep trying indefinitely.
+	// the core tunnel controller if no tunnel has been established. The default
+	// is ESTABLISH_TUNNEL_TIMEOUT_SECONDS.
 	EstablishTunnelTimeoutSeconds *int
 
 	// ListenInterface specifies which interface to listen on.  If no interface
