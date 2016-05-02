@@ -275,8 +275,14 @@ fetcherLoop:
 				break fetcherLoop
 			}
 
+			// Pick any active tunnel and make the next fetch attempt. If there's
+			// no active tunnel, the untunneledDialConfig will be used.
+			tunnel := controller.getNextActiveTunnel()
+
 			err := FetchRemoteServerList(
-				controller.config, controller.untunneledDialConfig)
+				controller.config,
+				tunnel,
+				controller.untunneledDialConfig)
 
 			if err == nil {
 				lastFetchTime = time.Now()

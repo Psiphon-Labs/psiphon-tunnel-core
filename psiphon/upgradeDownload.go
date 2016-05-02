@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 )
 
 // DownloadUpgrade performs a resumable download of client upgrade files.
@@ -67,24 +68,14 @@ func DownloadUpgrade(
 		return nil
 	}
 
-	requestUrl := config.UpgradeDownloadUrl
-	var httpClient *http.Client
-	var err error
-
 	// Select tunneled or untunneled configuration
 
-	if tunnel != nil {
-		httpClient, err = MakeTunneledHttpClient(config, tunnel, DOWNLOAD_UPGRADE_TIMEOUT)
-		if err != nil {
-			return ContextError(err)
-		}
-	} else {
-		httpClient, requestUrl, err = MakeUntunneledHttpsClient(
-			untunneledDialConfig, nil, requestUrl, DOWNLOAD_UPGRADE_TIMEOUT)
-		if err != nil {
-			return ContextError(err)
-		}
-	}
+	httpClient, requestUrl, err := makeDownloadHttpClient(
+		config,
+		tunnel,
+		untunneledDialConfig,
+		config.UpgradeDownloadUrl,
+		DOWNLOAD_UPGRADE_TIMEOUT)
 
 	// If no handshake version is supplied, make an initial HEAD request
 	// to get the current version from the version header.
@@ -133,23 +124,95 @@ func DownloadUpgrade(
 		}
 	}
 
-	// Proceed with full download
+	// Proceed with download
 
-	partialFilename := fmt.Sprintf(
-		"%s.%s.part", config.UpgradeDownloadFilename, availableClientVersion)
+	// An intermediate filename is used since the presence of
+	// config.UpgradeDownloadFilename indicates a completed download.
 
-	partialETagFilename := fmt.Sprintf(
-		"%s.%s.part.etag", config.UpgradeDownloadFilename, availableClientVersion)
+	downloadFilename := fmt.Sprintf(
+		"%s.%s", config.UpgradeDownloadFilename, availableClientVersion)
+
+	n, _, err := resumeDownload(
+		httpClient, requestUrl, downloadFilename, "")
+
+	NoticeClientUpgradeDownloadedBytes(n)
+
+	if err != nil {
+		return ContextError(err)
+	}
+
+	err = os.Rename(downloadFilename, config.UpgradeDownloadFilename)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	NoticeClientUpgradeDownloaded(config.UpgradeDownloadFilename)
+
+	return nil
+}
+
+// makeDownloadHttpClient is a resusable helper that sets up a
+// http.Client for use either untunneled or through a tunnel.
+// See MakeUntunneledHttpsClient for a note about request URL
+// rewritting.
+func makeDownloadHttpClient(
+	config *Config,
+	tunnel *Tunnel,
+	untunneledDialConfig *DialConfig,
+	requestUrl string,
+	requestTimeout time.Duration) (*http.Client, string, error) {
+
+	var httpClient *http.Client
+	var err error
+
+	if tunnel != nil {
+		httpClient, err = MakeTunneledHttpClient(config, tunnel, requestTimeout)
+		if err != nil {
+			return nil, "", ContextError(err)
+		}
+	} else {
+		httpClient, requestUrl, err = MakeUntunneledHttpsClient(
+			untunneledDialConfig, nil, requestUrl, requestTimeout)
+		if err != nil {
+			return nil, "", ContextError(err)
+		}
+	}
+
+	return httpClient, requestUrl, nil
+}
+
+// resumeDownload is a resuable helper that downloads requestUrl via the
+// httpClient, storing the result in downloadFilename when the download is
+// complete. Intermediate, partial downloads state is stored in
+// downloadFilename.part and downloadFilename.part.etag.
+//
+// In the case where the remote object has change while a partial download
+// is to be resumed, the partial state is reset and resumeDownload fails.
+// The caller must restart the download.
+//
+// When ifNoneMatchETag is specified, no download is made if the remote
+// object has the same ETag. ifNoneMatchETag has an effect only when no
+// partial download is in progress.
+//
+func resumeDownload(
+	httpClient *http.Client,
+	requestUrl string,
+	downloadFilename string,
+	ifNoneMatchETag string) (int64, string, error) {
+
+	partialFilename := fmt.Sprintf("%s.part", downloadFilename)
+
+	partialETagFilename := fmt.Sprintf("%s.part.etag", downloadFilename)
 
 	file, err := os.OpenFile(partialFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
-		return ContextError(err)
+		return 0, "", ContextError(err)
 	}
 	defer file.Close()
 
 	fileInfo, err := file.Stat()
 	if err != nil {
-		return ContextError(err)
+		return 0, "", ContextError(err)
 	}
 
 	// A partial download should have an ETag which is to be sent with the
@@ -167,23 +230,41 @@ func DownloadUpgrade(
 		if err != nil {
 			os.Remove(partialFilename)
 			os.Remove(partialETagFilename)
-			return ContextError(
+			return 0, "", ContextError(
 				fmt.Errorf("failed to load partial download ETag: %s", err))
 		}
-
 	}
 
 	request, err := http.NewRequest("GET", requestUrl, nil)
 	if err != nil {
-		return ContextError(err)
+		return 0, "", ContextError(err)
 	}
+
 	request.Header.Add("Range", fmt.Sprintf("bytes=%d-", fileInfo.Size()))
 
-	// Note: not using If-Range, since not all remote server list host servers
-	// support it. Using If-Match means we need to check for status code 412
-	// and reset when the ETag has changed since the last partial download.
 	if partialETag != nil {
+
+		// Note: not using If-Range, since not all host servers support it.
+		// Using If-Match means we need to check for status code 412 and reset
+		// when the ETag has changed since the last partial download.
 		request.Header.Add("If-Match", string(partialETag))
+
+	} else if ifNoneMatchETag != "" {
+
+		// Can't specify both If-Match and If-None-Match. Behavior is undefined.
+		// https://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.26
+		// So for downloaders that store an ETag and wish to use that to prevent
+		// redundant downloads, that ETag is sent as If-None-Match in the case
+		// where a partial download is not in progress. When a partial download
+		// is in progress, the partial ETag is sent as If-Match: either that's
+		// a version that was never fully received, or it's no longer current in
+		// which case the response will be StatusPreconditionFailed, the partial
+		// download will be discarded, and then the next retry will use
+		// If-None-Match.
+
+		// Note: in this case, fileInfo.Size() == 0
+
+		request.Header.Add("If-None-Match", ifNoneMatchETag)
 	}
 
 	response, err := httpClient.Do(request)
@@ -195,52 +276,59 @@ func DownloadUpgrade(
 	if err == nil &&
 		(response.StatusCode != http.StatusPartialContent &&
 			response.StatusCode != http.StatusRequestedRangeNotSatisfiable &&
-			response.StatusCode != http.StatusPreconditionFailed) {
+			response.StatusCode != http.StatusPreconditionFailed &&
+			response.StatusCode != http.StatusNotModified) {
 		response.Body.Close()
 		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
 	}
 	if err != nil {
-		return ContextError(err)
+		return 0, "", ContextError(err)
 	}
 	defer response.Body.Close()
 
+	responseETag := response.Header.Get("ETag")
+
 	if response.StatusCode == http.StatusPreconditionFailed {
 		// When the ETag no longer matches, delete the partial download. As above,
-		// simply failing and relying on the controller's upgradeDownloader retry.
+		// simply failing and relying on the caller's retry schedule.
 		os.Remove(partialFilename)
 		os.Remove(partialETagFilename)
-		return ContextError(errors.New("partial download ETag mismatch"))
+		return 0, "", ContextError(errors.New("partial download ETag mismatch"))
+
+	} else if response.StatusCode == http.StatusNotModified {
+		// This status code is possible in the "If-None-Match" case. Don't leave
+		// any partial download in progress. Caller should check that responseETag
+		// matches ifNoneMatchETag.
+		os.Remove(partialFilename)
+		os.Remove(partialETagFilename)
+		return 0, responseETag, nil
 	}
 
 	// Not making failure to write ETag file fatal, in case the entire download
 	// succeeds in this one request.
-	ioutil.WriteFile(partialETagFilename, []byte(response.Header.Get("ETag")), 0600)
+	ioutil.WriteFile(partialETagFilename, []byte(responseETag), 0600)
 
 	// A partial download occurs when this copy is interrupted. The io.Copy
 	// will fail, leaving a partial download in place (.part and .part.etag).
 	n, err := io.Copy(NewSyncFileWriter(file), response.Body)
 
-	NoticeClientUpgradeDownloadedBytes(n)
-
 	if err != nil {
-		return ContextError(err)
+		return 0, "", ContextError(err)
 	}
 
 	// Ensure the file is flushed to disk. The deferred close
 	// will be a noop when this succeeds.
 	err = file.Close()
 	if err != nil {
-		return ContextError(err)
+		return 0, "", ContextError(err)
 	}
 
-	err = os.Rename(partialFilename, config.UpgradeDownloadFilename)
+	err = os.Rename(partialFilename, downloadFilename)
 	if err != nil {
-		return ContextError(err)
+		return 0, "", ContextError(err)
 	}
 
 	os.Remove(partialETagFilename)
 
-	NoticeClientUpgradeDownloaded(config.UpgradeDownloadFilename)
-
-	return nil
+	return n, responseETag, nil
 }

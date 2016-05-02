@@ -20,10 +20,11 @@
 package psiphon
 
 import (
+	"compress/zlib"
 	"errors"
-	"fmt"
 	"io/ioutil"
-	"net/http"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -31,7 +32,11 @@ import (
 // config.RemoteServerListUrl; validates its digital signature using the
 // public key config.RemoteServerListSignaturePublicKey; and parses the
 // data field into ServerEntry records.
-func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
+func FetchRemoteServerList(
+	config *Config,
+	tunnel *Tunnel,
+	untunneledDialConfig *DialConfig) (err error) {
+
 	NoticeInfo("fetching remote server list")
 
 	if config.RemoteServerListUrl == "" {
@@ -41,48 +46,66 @@ func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 		return ContextError(errors.New("remote server list signature public key blank"))
 	}
 
-	httpClient, requestUrl, err := MakeUntunneledHttpsClient(
-		dialConfig, nil, config.RemoteServerListUrl, time.Duration(*config.FetchRemoteServerListTimeoutSeconds)*time.Second)
+	// Select tunneled or untunneled configuration
+
+	httpClient, requestUrl, err := makeDownloadHttpClient(
+		config,
+		tunnel,
+		untunneledDialConfig,
+		config.RemoteServerListUrl,
+		time.Duration(*config.FetchRemoteServerListTimeoutSeconds)*time.Second)
 	if err != nil {
 		return ContextError(err)
 	}
 
-	request, err := http.NewRequest("GET", requestUrl, nil)
+	// Proceed with download
+
+	splitPath := strings.Split(config.RemoteServerListUrl, "/")
+	downloadFilename := splitPath[len(splitPath)-1]
+
+	lastETag, err := GetUrlETag(config.RemoteServerListUrl)
 	if err != nil {
 		return ContextError(err)
 	}
 
-	etag, err := GetUrlETag(config.RemoteServerListUrl)
-	if err != nil {
-		return ContextError(err)
-	}
-	if etag != "" {
-		request.Header.Add("If-None-Match", etag)
-	}
+	n, responseETag, err := resumeDownload(
+		httpClient, requestUrl, downloadFilename, lastETag)
 
-	response, err := httpClient.Do(request)
-
-	if err == nil &&
-		(response.StatusCode != http.StatusOK && response.StatusCode != http.StatusNotModified) {
-		response.Body.Close()
-		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
-	}
-	if err != nil {
-		return ContextError(err)
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode == http.StatusNotModified {
+	if responseETag == lastETag {
+		// The remote server list is unchanged and no data was downloaded
 		return nil
 	}
 
-	body, err := ioutil.ReadAll(response.Body)
+	NoticeRemoteServerListDownloadedBytes(n)
+
+	if err != nil {
+		return ContextError(err)
+	}
+
+	NoticeRemoteServerListDownloaded()
+
+	// The downloaded content is a zlib compressed authenticated
+	// data package containing a list of encoded server entries.
+
+	downloadContent, err := os.Open(downloadFilename)
+	if err != nil {
+		return ContextError(err)
+	}
+	defer downloadContent.Close()
+
+	zlibReader, err := zlib.NewReader(downloadContent)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	dataPackage, err := ioutil.ReadAll(zlibReader)
+	zlibReader.Close()
 	if err != nil {
 		return ContextError(err)
 	}
 
 	remoteServerList, err := ReadAuthenticatedDataPackage(
-		body, config.RemoteServerListSignaturePublicKey)
+		dataPackage, config.RemoteServerListSignaturePublicKey)
 	if err != nil {
 		return ContextError(err)
 	}
@@ -100,11 +123,13 @@ func FetchRemoteServerList(config *Config, dialConfig *DialConfig) (err error) {
 		return ContextError(err)
 	}
 
-	etag = response.Header.Get("ETag")
-	if etag != "" {
-		err := SetUrlETag(config.RemoteServerListUrl, etag)
+	// Now that the server entries are successfully imported, store the response
+	// ETag so we won't re-download this same data again.
+
+	if responseETag != "" {
+		err := SetUrlETag(config.RemoteServerListUrl, responseETag)
 		if err != nil {
-			NoticeAlert("failed to set remote server list etag: %s", ContextError(err))
+			NoticeAlert("failed to set remote server list ETag: %s", ContextError(err))
 			// This fetch is still reported as a success, even if we can't store the etag
 		}
 	}
