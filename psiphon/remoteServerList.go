@@ -48,7 +48,7 @@ func FetchRemoteServerList(
 
 	// Select tunneled or untunneled configuration
 
-	httpClient, requestUrl, err := makeDownloadHttpClient(
+	httpClient, requestUrl, err := MakeDownloadHttpClient(
 		config,
 		tunnel,
 		untunneledDialConfig,
@@ -68,7 +68,7 @@ func FetchRemoteServerList(
 		return ContextError(err)
 	}
 
-	n, responseETag, err := resumeDownload(
+	n, responseETag, err := ResumeDownload(
 		httpClient, requestUrl, downloadFilename, lastETag)
 
 	if responseETag == lastETag {
