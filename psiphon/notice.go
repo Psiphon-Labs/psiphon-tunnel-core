@@ -328,13 +328,13 @@ func NoticeExiting() {
 
 // NoticeRemoteServerListDownloadedBytes reports remote server list download progress.
 func NoticeRemoteServerListDownloadedBytes(bytes int64) {
-	outputNotice("NoticeRemoteServerListDownloadedBytes", true, false, "bytes", bytes)
+	outputNotice("RemoteServerListDownloadedBytes", true, false, "bytes", bytes)
 }
 
 // NoticeRemoteServerListDownloaded indicates that a remote server list download
 // completed successfully.
-func NoticeRemoteServerListDownloaded() {
-	outputNotice("NoticeRemoteServerListDownloaded", false, false)
+func NoticeRemoteServerListDownloaded(filename string) {
+	outputNotice("RemoteServerListDownloaded", false, false, "filename", filename)
 }
 
 type repetitiveNoticeState struct {

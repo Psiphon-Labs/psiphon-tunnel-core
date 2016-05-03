@@ -21,7 +21,6 @@ package psiphon
 
 import (
 	"compress/zlib"
-	"errors"
 	"io/ioutil"
 	"os"
 	"strings"
@@ -35,16 +34,9 @@ import (
 func FetchRemoteServerList(
 	config *Config,
 	tunnel *Tunnel,
-	untunneledDialConfig *DialConfig) (err error) {
+	untunneledDialConfig *DialConfig) error {
 
 	NoticeInfo("fetching remote server list")
-
-	if config.RemoteServerListUrl == "" {
-		return ContextError(errors.New("remote server list URL is blank"))
-	}
-	if config.RemoteServerListSignaturePublicKey == "" {
-		return ContextError(errors.New("remote server list signature public key blank"))
-	}
 
 	// Select tunneled or untunneled configuration
 
@@ -60,8 +52,11 @@ func FetchRemoteServerList(
 
 	// Proceed with download
 
-	splitPath := strings.Split(config.RemoteServerListUrl, "/")
-	downloadFilename := splitPath[len(splitPath)-1]
+	downloadFilename := config.RemoteServerListDownloadFilename
+	if downloadFilename == "" {
+		splitPath := strings.Split(config.RemoteServerListUrl, "/")
+		downloadFilename = splitPath[len(splitPath)-1]
+	}
 
 	lastETag, err := GetUrlETag(config.RemoteServerListUrl)
 	if err != nil {
@@ -71,18 +66,18 @@ func FetchRemoteServerList(
 	n, responseETag, err := ResumeDownload(
 		httpClient, requestUrl, downloadFilename, lastETag)
 
-	if responseETag == lastETag {
-		// The remote server list is unchanged and no data was downloaded
-		return nil
-	}
-
 	NoticeRemoteServerListDownloadedBytes(n)
 
 	if err != nil {
 		return ContextError(err)
 	}
 
-	NoticeRemoteServerListDownloaded()
+	if responseETag == lastETag {
+		// The remote server list is unchanged and no data was downloaded
+		return nil
+	}
+
+	NoticeRemoteServerListDownloaded(downloadFilename)
 
 	// The downloaded content is a zlib compressed authenticated
 	// data package containing a list of encoded server entries.

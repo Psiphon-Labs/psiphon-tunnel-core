@@ -99,7 +99,7 @@ func DownloadUpgrade(
 
 		// Note: if the header is missing, Header.Get returns "" and then
 		// strconv.Atoi returns a parse error.
-		availableClientVersion := response.Header.Get(config.UpgradeDownloadClientVersionHeader)
+		availableClientVersion = response.Header.Get(config.UpgradeDownloadClientVersionHeader)
 		checkAvailableClientVersion, err := strconv.Atoi(availableClientVersion)
 		if err != nil {
 			// If the header is missing or malformed, we can't determine the available

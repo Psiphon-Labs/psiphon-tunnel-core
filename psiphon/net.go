@@ -413,6 +413,7 @@ func MakeDownloadHttpClient(
 // httpClient, storing the result in downloadFilename when the download is
 // complete. Intermediate, partial downloads state is stored in
 // downloadFilename.part and downloadFilename.part.etag.
+// Any existing downloadFilename file will be overwritten.
 //
 // In the case where the remote object has change while a partial download
 // is to be resumed, the partial state is reset and resumeDownload fails.
@@ -540,20 +541,26 @@ func ResumeDownload(
 	// will fail, leaving a partial download in place (.part and .part.etag).
 	n, err := io.Copy(NewSyncFileWriter(file), response.Body)
 
+	// From this point, n bytes are indicated as downloaded, even if there is
+	// an error; the caller may use this to report partial download progress.
+
 	if err != nil {
-		return 0, "", ContextError(err)
+		return n, "", ContextError(err)
 	}
 
 	// Ensure the file is flushed to disk. The deferred close
 	// will be a noop when this succeeds.
 	err = file.Close()
 	if err != nil {
-		return 0, "", ContextError(err)
+		return n, "", ContextError(err)
 	}
+
+	// Remove if exists, to enable rename
+	os.Remove(downloadFilename)
 
 	err = os.Rename(partialFilename, downloadFilename)
 	if err != nil {
-		return 0, "", ContextError(err)
+		return n, "", ContextError(err)
 	}
 
 	os.Remove(partialETagFilename)
