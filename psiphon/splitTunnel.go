@@ -295,8 +295,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	}
 
 	if !useCachedRoutes {
-		bytesReader := bytes.NewReader(compressedRoutesData)
-		zlibReader, err := zlib.NewReader(bytesReader)
+		zlibReader, err := zlib.NewReader(bytes.NewReader(compressedRoutesData))
 		if err == nil {
 			routesData, err = ioutil.ReadAll(zlibReader)
 			zlibReader.Close()

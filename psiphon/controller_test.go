@@ -45,15 +45,34 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// Note: untunneled upgrade tests must execute before
-// the other tests to ensure no tunnel is established.
-// We need a way to reset the datastore after it's been
-// initialized in order to to clear out its data entries
-// and be able to arbitrarily order the tests.
+// Test case notes/limitations/dependencies:
+//
+// * Untunneled upgrade tests must execute before
+//   the other tests to ensure no tunnel is established.
+//   We need a way to reset the datastore after it's been
+//   initialized in order to to clear out its data entries
+//   and be able to arbitrarily order the tests.
+//
+// * The resumable download tests using disruptNetwork
+//   depend on the download object being larger than the
+//   disruptorMax limits so that the disruptor will actually
+//   interrupt the first download attempt. Specifically, the
+//   upgrade and remote server list at the URLs specified in
+//   controller_test.config.enc.
+//
+// * The protocol tests assume there is at least one server
+//   supporting each protocol in the server list at the URL
+//   specified in controller_test.config.enc, and that these
+//   servers are not overloaded.
+//
+// * fetchAndVerifyWebsite depends on the target URL being
+//   available and responding.
+//
 
 func TestUntunneledUpgradeDownload(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
+			expectNoServerEntries:    true,
 			protocol:                 "",
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: false,
@@ -68,6 +87,7 @@ func TestUntunneledUpgradeDownload(t *testing.T) {
 func TestUntunneledResumableUpgradeDownload(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
+			expectNoServerEntries:    true,
 			protocol:                 "",
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: false,
@@ -82,6 +102,7 @@ func TestUntunneledResumableUpgradeDownload(t *testing.T) {
 func TestUntunneledUpgradeClientIsLatestVersion(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
+			expectNoServerEntries:    true,
 			protocol:                 "",
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: false,
@@ -93,9 +114,25 @@ func TestUntunneledUpgradeClientIsLatestVersion(t *testing.T) {
 		})
 }
 
+func TestUntunneledResumableFetchRemoveServerList(t *testing.T) {
+	controllerRun(t,
+		&controllerRunConfig{
+			expectNoServerEntries:    true,
+			protocol:                 "",
+			clientIsLatestVersion:    true,
+			disableUntunneledUpgrade: false,
+			disableEstablishing:      false,
+			tunnelPoolSize:           1,
+			disruptNetwork:           true,
+			useHostNameTransformer:   false,
+			runDuration:              0,
+		})
+}
+
 func TestTunneledUpgradeClientIsLatestVersion(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
+			expectNoServerEntries:    false,
 			protocol:                 "",
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
@@ -118,6 +155,7 @@ func TestImpairedProtocols(t *testing.T) {
 
 	controllerRun(t,
 		&controllerRunConfig{
+			expectNoServerEntries:    false,
 			protocol:                 "",
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
@@ -132,6 +170,7 @@ func TestImpairedProtocols(t *testing.T) {
 func TestSSH(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
+			expectNoServerEntries:    false,
 			protocol:                 TUNNEL_PROTOCOL_SSH,
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
@@ -146,6 +185,7 @@ func TestSSH(t *testing.T) {
 func TestObfuscatedSSH(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
+			expectNoServerEntries:    false,
 			protocol:                 TUNNEL_PROTOCOL_OBFUSCATED_SSH,
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
@@ -160,6 +200,7 @@ func TestObfuscatedSSH(t *testing.T) {
 func TestUnfrontedMeek(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
+			expectNoServerEntries:    false,
 			protocol:                 TUNNEL_PROTOCOL_UNFRONTED_MEEK,
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
@@ -174,6 +215,7 @@ func TestUnfrontedMeek(t *testing.T) {
 func TestUnfrontedMeekWithTransformer(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
+			expectNoServerEntries:    false,
 			protocol:                 TUNNEL_PROTOCOL_UNFRONTED_MEEK,
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
@@ -188,6 +230,7 @@ func TestUnfrontedMeekWithTransformer(t *testing.T) {
 func TestFrontedMeek(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
+			expectNoServerEntries:    false,
 			protocol:                 TUNNEL_PROTOCOL_FRONTED_MEEK,
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
@@ -202,6 +245,7 @@ func TestFrontedMeek(t *testing.T) {
 func TestFrontedMeekWithTransformer(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
+			expectNoServerEntries:    false,
 			protocol:                 TUNNEL_PROTOCOL_FRONTED_MEEK,
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
@@ -216,6 +260,7 @@ func TestFrontedMeekWithTransformer(t *testing.T) {
 func TestFrontedMeekHTTP(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
+			expectNoServerEntries:    false,
 			protocol:                 TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP,
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
@@ -230,6 +275,7 @@ func TestFrontedMeekHTTP(t *testing.T) {
 func TestUnfrontedMeekHTTPS(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
+			expectNoServerEntries:    false,
 			protocol:                 TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
@@ -244,6 +290,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 func TestUnfrontedMeekHTTPSWithTransformer(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
+			expectNoServerEntries:    false,
 			protocol:                 TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
@@ -256,6 +303,7 @@ func TestUnfrontedMeekHTTPSWithTransformer(t *testing.T) {
 }
 
 type controllerRunConfig struct {
+	expectNoServerEntries    bool
 	protocol                 string
 	clientIsLatestVersion    bool
 	disableUntunneledUpgrade bool
@@ -312,6 +360,14 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		t.Fatalf("error initializing datastore: %s", err)
 	}
 
+	serverEntryCount := CountServerEntries("", "")
+
+	if runConfig.expectNoServerEntries && serverEntryCount > 0 {
+		// TODO: replace expectNoServerEntries with resetServerEntries
+		// so tests can run in arbitrary order
+		t.Fatalf("unexpected server entries")
+	}
+
 	controller, err := NewController(config)
 	if err != nil {
 		t.Fatalf("error creating controller: %s", err)
@@ -326,9 +382,11 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	tunnelEstablished := make(chan struct{}, 1)
 	upgradeDownloaded := make(chan struct{}, 1)
+	remoteServerListDownloaded := make(chan struct{}, 1)
 	confirmedLatestVersion := make(chan struct{}, 1)
 
 	var clientUpgradeDownloadedBytesCount int32
+	var remoteServerListDownloadedBytesCount int32
 	var impairedProtocolCount int32
 	var impairedProtocolClassification = struct {
 		sync.RWMutex
@@ -388,6 +446,18 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 				select {
 				case confirmedLatestVersion <- *new(struct{}):
+				default:
+				}
+
+			case "RemoteServerListDownloadedBytes":
+
+				atomic.AddInt32(&remoteServerListDownloadedBytesCount, 1)
+				t.Logf("RemoteServerListDownloadedBytes: %d", int(payload["bytes"].(float64)))
+
+			case "RemoteServerListDownloaded":
+
+				select {
+				case remoteServerListDownloaded <- *new(struct{}):
 				default:
 				}
 
@@ -459,15 +529,34 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	if !runConfig.disableEstablishing {
 
-		// Test: tunnel must be established within 60 seconds
+		// Test: tunnel must be established within 120 seconds
 
-		establishTimeout := time.NewTimer(60 * time.Second)
+		establishTimeout := time.NewTimer(120 * time.Second)
 
 		select {
 		case <-tunnelEstablished:
 
 		case <-establishTimeout.C:
 			t.Fatalf("tunnel establish timeout exceeded")
+		}
+
+		// Test: if starting with no server entries, a fetch remote
+		// server list must have succeeded. With disruptNetwork, the
+		// fetch must have been resumed at least once.
+
+		if serverEntryCount == 0 {
+			select {
+			case <-remoteServerListDownloaded:
+			default:
+				t.Fatalf("expected remote server list downloaded")
+			}
+
+			if runConfig.disruptNetwork {
+				count := atomic.LoadInt32(&remoteServerListDownloadedBytesCount)
+				if count <= 1 {
+					t.Fatalf("unexpected remote server list download progress: %d", count)
+				}
+			}
 		}
 
 		// Test: fetch website through tunnel
@@ -508,9 +597,9 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		}
 	}
 
-	// Test: upgrade check/download must be downloaded within 120 seconds
+	// Test: upgrade check/download must be downloaded within 180 seconds
 
-	upgradeTimeout := time.NewTimer(120 * time.Second)
+	upgradeTimeout := time.NewTimer(180 * time.Second)
 
 	select {
 	case <-upgradeDownloaded:
@@ -653,7 +742,7 @@ func useTunnel(t *testing.T, httpProxyPort int) {
 
 const disruptorProxyAddress = "127.0.0.1:2160"
 const disruptorProxyURL = "socks4a://" + disruptorProxyAddress
-const disruptorMaxConnectionBytes = 2000000
+const disruptorMaxConnectionBytes = 625000
 const disruptorMaxConnectionTime = 10 * time.Second
 
 func initDisruptor() {

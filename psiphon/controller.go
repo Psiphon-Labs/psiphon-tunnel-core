@@ -248,6 +248,15 @@ func (controller *Controller) SignalComponentFailure() {
 func (controller *Controller) remoteServerListFetcher() {
 	defer controller.runWaitGroup.Done()
 
+	if controller.config.RemoteServerListUrl == "" {
+		NoticeAlert("remote server list URL is blank")
+		return
+	}
+	if controller.config.RemoteServerListSignaturePublicKey == "" {
+		NoticeAlert("remote server list signature public key blank")
+		return
+	}
+
 	var lastFetchTime time.Time
 
 fetcherLoop:
@@ -275,8 +284,14 @@ fetcherLoop:
 				break fetcherLoop
 			}
 
+			// Pick any active tunnel and make the next fetch attempt. If there's
+			// no active tunnel, the untunneledDialConfig will be used.
+			tunnel := controller.getNextActiveTunnel()
+
 			err := FetchRemoteServerList(
-				controller.config, controller.untunneledDialConfig)
+				controller.config,
+				tunnel,
+				controller.untunneledDialConfig)
 
 			if err == nil {
 				lastFetchTime = time.Now()
@@ -285,7 +300,8 @@ fetcherLoop:
 
 			NoticeAlert("failed to fetch remote server list: %s", err)
 
-			timeout := time.After(FETCH_REMOTE_SERVER_LIST_RETRY_PERIOD)
+			timeout := time.After(
+				time.Duration(*controller.config.FetchRemoteServerListRetryPeriodSeconds) * time.Second)
 			select {
 			case <-timeout:
 			case <-controller.shutdownBroadcast:
@@ -452,7 +468,8 @@ downloadLoop:
 
 			NoticeAlert("failed to download upgrade: %s", err)
 
-			timeout := time.After(DOWNLOAD_UPGRADE_RETRY_PERIOD)
+			timeout := time.After(
+				time.Duration(*controller.config.DownloadUpgradeRetryPeriodSeconds) * time.Second)
 			select {
 			case <-timeout:
 			case <-controller.shutdownBroadcast:
@@ -1032,7 +1049,8 @@ loop:
 		// network conditions to change. Also allows for fetch remote to complete,
 		// in typical conditions (it isn't strictly necessary to wait for this, there will
 		// be more rounds if required).
-		timeout := time.After(ESTABLISH_TUNNEL_PAUSE_PERIOD)
+		timeout := time.After(
+			time.Duration(*controller.config.EstablishTunnelPausePeriodSeconds) * time.Second)
 		select {
 		case <-timeout:
 			// Retry iterating

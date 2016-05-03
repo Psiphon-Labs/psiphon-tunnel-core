@@ -544,6 +544,12 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 
 func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string, err error) {
 	if err != nil {
+		if sshClient.sshServer.config.UseFail2Ban() {
+			clientIPAddress := psiphon.IPAddressFromAddr(conn.RemoteAddr())
+			if clientIPAddress != "" {
+				LogFail2Ban(clientIPAddress)
+			}
+		}
 		log.WithContextFields(LogFields{"error": err, "method": method}).Warning("authentication failed")
 	} else {
 		log.WithContextFields(LogFields{"error": err, "method": method}).Info("authentication success")

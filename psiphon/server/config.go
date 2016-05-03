@@ -73,17 +73,28 @@ type Config struct {
 	// panic, fatal, error, warn, info, debug
 	LogLevel string
 
-	// SyslogAddress specifies the UDP address of a syslog
-	// service. When set, syslog is used for message logging.
-	SyslogAddress string
-
 	// SyslogFacility specifies the syslog facility to log to.
+	// When set, the local syslog service is used for message
+	// logging.
 	// Valid values include: "user", "local0", "local1", etc.
 	SyslogFacility string
 
 	// SyslogTag specifies an optional tag for syslog log
-	// messages. The default tag is "psiphon-server".
+	// messages. The default tag is "psiphon-server". The
+	// fail2ban logs, if enabled, also use this tag.
 	SyslogTag string
+
+	// Fail2BanFormat is a string format specifier for the
+	// log message format to use for fail2ban integration for
+	// blocking abusive clients by source IP address.
+	// When set, logs with this format are made to the AUTH
+	// facility with INFO severity in the local syslog server
+	// if clients fail to authenticate.
+	// The client's IP address is included with the log message.
+	// An example format specifier, which should be compatible
+	// with default SSH fail2ban configuration, is
+	// "Authentication failure for psiphon-client from %s".
+	Fail2BanFormat string
 
 	// DiscoveryValueHMACKey is the network-wide secret value
 	// used to determine a unique discovery strategy.
@@ -200,10 +211,16 @@ func (config *Config) RunObfuscatedSSHServer() bool {
 	return config.ObfuscatedSSHServerPort > 0
 }
 
-// RunObfuscatedSSHServer indicates whether to store per-session GeoIP information in
+// UseRedis indicates whether to store per-session GeoIP information in
 // redis. This is for integration with the legacy psi_web component.
 func (config *Config) UseRedis() bool {
 	return config.RedisServerAddress != ""
+}
+
+// UseFail2Ban indicates whether to log client IP addresses, in authentication
+// failure cases, to the local syslog service AUTH facility for use by fail2ban.
+func (config *Config) UseFail2Ban() bool {
+	return config.Fail2BanFormat != ""
 }
 
 // GetTrafficRules looks up the traffic rules for the specified country. If there
@@ -237,8 +254,12 @@ func LoadConfig(configJSONs [][]byte) (*Config, error) {
 		}
 	}
 
+	if config.Fail2BanFormat != "" && strings.Count(config.Fail2BanFormat, "%s") != 1 {
+		return nil, errors.New("Fail2BanFormat must have one '%%s' placeholder")
+	}
+
 	if config.ServerIPAddress == "" {
-		return nil, errors.New("server IP address is missing from config file")
+		return nil, errors.New("ServerIPAddress is missing from config file")
 	}
 
 	if config.WebServerPort > 0 && (config.WebServerSecret == "" || config.WebServerCertificate == "" ||
@@ -374,9 +395,9 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 
 	config := &Config{
 		LogLevel:                DEFAULT_LOG_LEVEL,
-		SyslogAddress:           "",
 		SyslogFacility:          "",
 		SyslogTag:               DEFAULT_SYSLOG_TAG,
+		Fail2BanFormat:          "",
 		DiscoveryValueHMACKey:   "",
 		GeoIPDatabaseFilename:   DEFAULT_GEO_IP_DATABASE_FILENAME,
 		ServerIPAddress:         serverIPaddress,
