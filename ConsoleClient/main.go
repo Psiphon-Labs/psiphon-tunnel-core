@@ -27,7 +27,6 @@ import (
 	"os/signal"
 	"runtime/pprof"
 	"sync"
-	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
@@ -183,11 +182,6 @@ func main() {
 		controller.Run(shutdownBroadcast)
 		controllerStopSignal <- *new(struct{})
 	}()
-
-	// **TEMP**
-	time.Sleep(5 * time.Second)
-	controller.MakeServerAPIRequest("ID1", "feedback1", "", 1)
-	// **TEMP**
 
 	// Wait for an OS signal or a Run stop signal, then stop Psiphon and exit
 
