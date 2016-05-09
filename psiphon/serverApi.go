@@ -553,6 +553,17 @@ func RecordTunnelStats(
 	return StoreTunnelStats(tunnelStatsJson)
 }
 
+// DoServerAPIRequest performs a caller-defined Server API request.
+// See description in Controller.MakeServerAPIRequest.
+func (serverContext *ServerContext) DoServerAPIRequest(
+	requestName, requestPayload string) error {
+
+	return serverContext.doPostRequest(
+		buildRequestUrl(serverContext.baseRequestUrl, requestName),
+		"application/json",
+		bytes.NewReader([]byte(requestPayload)))
+}
+
 // doGetRequest makes a tunneled HTTPS request and returns the response body.
 func (serverContext *ServerContext) doGetRequest(
 	requestUrl string) (responseBody []byte, err error) {

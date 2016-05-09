@@ -337,6 +337,14 @@ func NoticeRemoteServerListDownloaded(filename string) {
 	outputNotice("RemoteServerListDownloaded", false, false, "filename", filename)
 }
 
+func NoticeServerAPIRequestCompleted(requestID string) {
+	outputNotice("NoticeServerAPIRequestCompleted", false, false, "requestID", requestID)
+}
+
+func NoticeServerAPIRequestFailed(requestID string, err error) {
+	outputNotice("NoticeServerAPIRequestFailed", false, false, "requestID", requestID, "error", err.Error())
+}
+
 type repetitiveNoticeState struct {
 	message string
 	repeats int

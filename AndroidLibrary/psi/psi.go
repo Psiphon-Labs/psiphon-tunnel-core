@@ -39,6 +39,7 @@ type PsiphonProvider interface {
 	GetSecondaryDnsServer() string
 }
 
+var controllerMutex sync.Mutex
 var controller *psiphon.Controller
 var shutdownBroadcast chan struct{}
 var controllerWaitGroup *sync.WaitGroup
@@ -47,6 +48,9 @@ func Start(
 	configJson, embeddedServerEntryList string,
 	provider PsiphonProvider,
 	useDeviceBinder bool) error {
+
+	controllerMutex.Lock()
+	defer controllerMutex.Unlock()
 
 	if controller != nil {
 		return fmt.Errorf("already started")
@@ -106,11 +110,28 @@ func Start(
 }
 
 func Stop() {
+
+	controllerMutex.Lock()
+	defer controllerMutex.Unlock()
+
 	if controller != nil {
 		close(shutdownBroadcast)
 		controllerWaitGroup.Wait()
 		controller = nil
 		shutdownBroadcast = nil
 		controllerWaitGroup = nil
+	}
+}
+
+// See description in Controller.MakeServerAPIRequest.
+func MakeServerAPIRequest(
+	requestID, requestName, requestPayloadJSON string, retryDelaySeconds int) {
+
+	controllerMutex.Lock()
+	defer controllerMutex.Unlock()
+
+	if controller != nil {
+		controller.MakeServerAPIRequest(
+			requestID, requestName, requestPayloadJSON, retryDelaySeconds)
 	}
 }

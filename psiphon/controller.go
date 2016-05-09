@@ -481,6 +481,61 @@ downloadLoop:
 	NoticeInfo("exiting upgrade downloader")
 }
 
+// MakeServerAPIRequest submits a caller-defined request to the
+// Psiphon API via a currently established tunnel. This is used
+// by higher-level client code to perform non-tunnel-core API requests.
+//
+// requestName and requestPayloadJSON define the API request. The "common"
+// API inputs are added to the request as query parameters. The request
+// is a POST with "application/json" encoding.
+//
+// requestID is a caller-selected unique ID used to identify response
+// Notices for this request. The request is sent in a background goroutine.
+// This function does not block. After the request completes, the requestID
+// is reported in a Notice.
+//
+// If the request does not complete successfully or there is no active tunnel,
+// the request will be retried. retryDelaySeconds specifies a pause period
+// between retries.
+//
+// Current limitations:
+// - Assumes HTTP status code 200 is expected; will retry on all other HTTP
+//   status codes
+// - GET requests unsupported
+// - response payloads unsupported
+//
+func (controller *Controller) MakeServerAPIRequest(
+	requestID, requestName, requestPayloadJSON string, retryDelaySeconds int) {
+
+	controller.runWaitGroup.Add(1)
+	go func() {
+		defer controller.runWaitGroup.Done()
+	loop:
+		for {
+
+			tunnel := controller.getNextActiveTunnel()
+			if tunnel != nil {
+				err := tunnel.serverContext.DoServerAPIRequest(
+					requestName, requestPayloadJSON)
+				if err == nil {
+					NoticeServerAPIRequestCompleted(requestID)
+					break loop
+				}
+				NoticeServerAPIRequestFailed(requestID, err)
+			}
+
+			timeout := time.After(time.Duration(retryDelaySeconds) * time.Second)
+			select {
+			case <-timeout:
+				// Attempt the request again
+
+			case <-controller.shutdownBroadcast:
+				break loop
+			}
+		}
+	}()
+}
+
 // runTunnels is the controller tunnel management main loop. It starts and stops
 // establishing tunnels based on the target tunnel pool size and the current size
 // of the pool. Tunnels are established asynchronously using worker goroutines.
