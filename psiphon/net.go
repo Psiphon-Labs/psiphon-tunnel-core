@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Inc/dns"
+	"github.com/Psiphon-Inc/ratelimit"
 )
 
 const DNS_PORT = 53
@@ -616,4 +617,49 @@ func (conn *IdleTimeoutConn) Write(buffer []byte) (int, error) {
 		conn.Conn.SetReadDeadline(time.Now().Add(conn.deadline))
 	}
 	return n, err
+}
+
+// ThrottledConn wraps a net.Conn with read and write rate limiters.
+// Rates are specified as bytes per second. The underlying rate limiter
+// uses the token bucket algorithm to calculate delay times for read
+// and write operations. Specify limit values of 0 set no limit.
+type ThrottledConn struct {
+	net.Conn
+	reader io.Reader
+	writer io.Writer
+}
+
+func NewThrottledConn(
+	conn net.Conn,
+	limitReadBytesPerSecond, limitWriteBytesPerSecond int64) *ThrottledConn {
+
+	var reader io.Reader
+	if limitReadBytesPerSecond == 0 {
+		reader = conn
+	} else {
+		reader = ratelimit.Reader(conn,
+			ratelimit.NewBucketWithRate(
+				float64(limitReadBytesPerSecond), limitReadBytesPerSecond))
+	}
+	var writer io.Writer
+	if limitWriteBytesPerSecond == 0 {
+		writer = conn
+	} else {
+		writer = ratelimit.Writer(conn,
+			ratelimit.NewBucketWithRate(
+				float64(limitWriteBytesPerSecond), limitWriteBytesPerSecond))
+	}
+	return &ThrottledConn{
+		Conn:   conn,
+		reader: reader,
+		writer: writer,
+	}
+}
+
+func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
+	return conn.reader.Read(buffer)
+}
+
+func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
+	return conn.writer.Write(buffer)
 }
