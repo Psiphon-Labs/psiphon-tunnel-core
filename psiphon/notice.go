@@ -337,12 +337,8 @@ func NoticeRemoteServerListDownloaded(filename string) {
 	outputNotice("RemoteServerListDownloaded", false, false, "filename", filename)
 }
 
-func NoticeServerAPIRequestCompleted(requestID string) {
-	outputNotice("NoticeServerAPIRequestCompleted", false, false, "requestID", requestID)
-}
-
-func NoticeServerAPIRequestFailed(requestID string, err error) {
-	outputNotice("NoticeServerAPIRequestFailed", false, false, "requestID", requestID, "error", err.Error())
+func NoticeClientVerificationRequestCompleted(ipAddress string) {
+	outputNotice("NoticeClientVerificationRequestCompleted", true, false, "ipAddress", ipAddress)
 }
 
 type repetitiveNoticeState struct {

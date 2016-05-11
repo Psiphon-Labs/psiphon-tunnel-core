@@ -123,15 +123,15 @@ func Stop() {
 	}
 }
 
-// See description in Controller.MakeServerAPIRequest.
-func MakeServerAPIRequest(
-	requestID, requestName, requestPayloadJSON string, retryDelaySeconds int) {
+// This is a passthrough to Controller.SetClientVerificationPayload.
+// Note: should only be called after Start() and before Stop(); otherwise,
+// will silently take no action.
+func SetClientVerificationPayload(clientVerificationPayload string) {
 
 	controllerMutex.Lock()
 	defer controllerMutex.Unlock()
 
 	if controller != nil {
-		controller.MakeServerAPIRequest(
-			requestID, requestName, requestPayloadJSON, retryDelaySeconds)
+		controller.SetClientVerificationPayload(clientVerificationPayload)
 	}
 }

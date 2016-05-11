@@ -63,22 +63,23 @@ type TunnelOwner interface {
 // tunnel includes a network connection to the specified server
 // and an SSH session built on top of that transport.
 type Tunnel struct {
-	mutex                    *sync.Mutex
-	config                   *Config
-	untunneledDialConfig     *DialConfig
-	isDiscarded              bool
-	isClosed                 bool
-	serverEntry              *ServerEntry
-	serverContext            *ServerContext
-	protocol                 string
-	conn                     net.Conn
-	sshClient                *ssh.Client
-	operateWaitGroup         *sync.WaitGroup
-	shutdownOperateBroadcast chan struct{}
-	signalPortForwardFailure chan struct{}
-	totalPortForwardFailures int
-	startTime                time.Time
-	meekStats                *MeekStats
+	mutex                        *sync.Mutex
+	config                       *Config
+	untunneledDialConfig         *DialConfig
+	isDiscarded                  bool
+	isClosed                     bool
+	serverEntry                  *ServerEntry
+	serverContext                *ServerContext
+	protocol                     string
+	conn                         net.Conn
+	sshClient                    *ssh.Client
+	operateWaitGroup             *sync.WaitGroup
+	shutdownOperateBroadcast     chan struct{}
+	signalPortForwardFailure     chan struct{}
+	totalPortForwardFailures     int
+	startTime                    time.Time
+	meekStats                    *MeekStats
+	newClientVerificationPayload chan string
 }
 
 // EstablishTunnel first makes a network transport connection to the
@@ -135,6 +136,9 @@ func EstablishTunnel(
 		// not listening. Senders should not block.
 		signalPortForwardFailure: make(chan struct{}, 1),
 		meekStats:                meekStats,
+		// Buffer allows SetClientVerificationPayload to submit one new payload
+		// without blocking or dropping it.
+		newClientVerificationPayload: make(chan string, 1),
 	}
 
 	// Create a new Psiphon API server context for this tunnel. This includes
@@ -260,6 +264,17 @@ func (tunnel *Tunnel) Dial(
 func (tunnel *Tunnel) SignalComponentFailure() {
 	NoticeAlert("tunnel received component failure signal")
 	tunnel.Close(false)
+}
+
+// SetClientVerificationPayload triggers a client verification request, for this
+// tunnel, with the specified verifiction payload. If the tunnel is not yet established,
+// the payload/request is enqueued. If a payload/request is already eneueued, the
+// new payload is dropped.
+func (tunnel *Tunnel) SetClientVerificationPayload(clientVerificationPayload string) {
+	select {
+	case tunnel.newClientVerificationPayload <- clientVerificationPayload:
+	default:
+	}
 }
 
 // TunneledConn implements net.Conn and wraps a port foward connection.
@@ -767,6 +782,39 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		}
 	}()
 
+	requestsWaitGroup.Add(1)
+	signalStopClientVerificationRequests := make(chan struct{})
+	go func() {
+		defer requestsWaitGroup.Done()
+
+		clientVerificationPayload := ""
+		for {
+			// TODO: use reflect.SelectCase?
+			if clientVerificationPayload == "" {
+				select {
+				case clientVerificationPayload = <-tunnel.newClientVerificationPayload:
+				case <-signalStopClientVerificationRequests:
+					return
+				}
+			} else {
+				// When clientVerificationPayload is not "", the request for that
+				// payload so retry after a delay. Will use a new payload instead
+				// if that arrives in the meantime.
+				timeout := time.After(PSIPHON_API_CLIENT_VERIFICATION_REQUEST_RETRY_PERIOD)
+				select {
+				case <-timeout:
+				case clientVerificationPayload = <-tunnel.newClientVerificationPayload:
+				case <-signalStopClientVerificationRequests:
+					return
+				}
+			}
+			if sendClientVerification(tunnel, clientVerificationPayload) {
+				clientVerificationPayload = ""
+			}
+
+		}
+	}()
+
 	shutdown := false
 	var err error
 	for !shutdown && err == nil {
@@ -833,6 +881,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 	close(signalSshKeepAlive)
 	close(signalStatusRequest)
+	close(signalStopClientVerificationRequests)
 	requestsWaitGroup.Wait()
 
 	// Capture bytes transferred since the last noticeBytesTransferredTicker tick
@@ -971,4 +1020,28 @@ func sendUntunneledStats(tunnel *Tunnel, isShutdown bool) {
 	if err != nil {
 		NoticeAlert("TryUntunneledStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
 	}
+}
+
+// sendClientVerification is a helper for sending a client verification request
+// to the server.
+func sendClientVerification(tunnel *Tunnel, clientVerificationPayload string) bool {
+
+	// Tunnel does not have a serverContext when DisableApi is set
+	if tunnel.serverContext == nil {
+		return true
+	}
+
+	// Skip when tunnel is discarded
+	if tunnel.IsDiscarded() {
+		return true
+	}
+
+	err := tunnel.serverContext.DoClientVerificationRequest(clientVerificationPayload)
+	if err != nil {
+		NoticeAlert("DoClientVerificationRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
+	} else {
+		NoticeClientVerificationRequestCompleted(tunnel.serverEntry.IpAddress)
+	}
+
+	return err == nil
 }

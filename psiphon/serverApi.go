@@ -553,15 +553,18 @@ func RecordTunnelStats(
 	return StoreTunnelStats(tunnelStatsJson)
 }
 
-// DoServerAPIRequest performs a caller-defined Server API request.
-// See description in Controller.MakeServerAPIRequest.
-func (serverContext *ServerContext) DoServerAPIRequest(
-	requestName, requestPayload string) error {
+// DoClientVerificationRequest performs the client_verification API
+// request. This request is used to verify that the client is a
+// valid Psiphon client, which will determine how the server treats
+// the client traffic. The proof-of-validity is platform-specific
+// and the payload is opaque to this function but assumed to be JSON.
+func (serverContext *ServerContext) DoClientVerificationRequest(
+	verificationPayload string) error {
 
 	return serverContext.doPostRequest(
-		buildRequestUrl(serverContext.baseRequestUrl, requestName),
+		buildRequestUrl(serverContext.baseRequestUrl, "client_verification"),
 		"application/json",
-		bytes.NewReader([]byte(requestPayload)))
+		bytes.NewReader([]byte(verificationPayload)))
 }
 
 // doGetRequest makes a tunneled HTTPS request and returns the response body.

@@ -60,6 +60,7 @@ type Controller struct {
 	impairedProtocolClassification map[string]int
 	signalReportConnected          chan struct{}
 	serverAffinityDoneBroadcast    chan struct{}
+	newClientVerificationPayload   chan string
 }
 
 type candidateServerEntry struct {
@@ -107,7 +108,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 		sessionId: sessionId,
 		// componentFailureSignal receives a signal from a component (including socks and
 		// http local proxies) if they unexpectedly fail. Senders should not block.
-		// A buffer allows at least one stop signal to be sent before there is a receiver.
+		// Buffer allows at least one stop signal to be sent before there is a receiver.
 		componentFailureSignal: make(chan struct{}, 1),
 		shutdownBroadcast:      make(chan struct{}),
 		runWaitGroup:           new(sync.WaitGroup),
@@ -129,6 +130,9 @@ func NewController(config *Config) (controller *Controller, err error) {
 		signalFetchRemoteServerList: make(chan struct{}),
 		signalDownloadUpgrade:       make(chan string),
 		signalReportConnected:       make(chan struct{}),
+		// Buffer allows SetClientVerificationPayload to submit one new payload
+		// without blocking or dropping it.
+		newClientVerificationPayload: make(chan string, 1),
 	}
 
 	controller.splitTunnelClassifier = NewSplitTunnelClassifier(config, controller)
@@ -238,6 +242,31 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 func (controller *Controller) SignalComponentFailure() {
 	select {
 	case controller.componentFailureSignal <- *new(struct{}):
+	default:
+	}
+}
+
+// SetClientVerificationPayload sets the client verification payload
+// that is to be sent in client verification requests to all established
+// tunnels. Calling this function both sets the payload to be used for
+// all future tunnels as wells as triggering requests with this payload
+// for all currently established tunneled.
+//
+// Client verification is used to verify that the client is a
+// valid Psiphon client, which will determine how the server treats
+// the client traffic. The proof-of-validity is platform-specific
+// and the payload is opaque to this function but assumed to be JSON.
+//
+// Since, in some cases, verification payload cannot be determined until
+// after tunnel-core starts, the payload cannot be simply specified in
+// the Config.
+//
+// SetClientVerificationPayload will not block enqueuing a new verification
+// payload. One new payload can be enqueued, after which additional payloads
+// will be dropped if a payload is still enqueued.
+func (controller *Controller) SetClientVerificationPayload(clientVerificationPayload string) {
+	select {
+	case controller.newClientVerificationPayload <- clientVerificationPayload:
 	default:
 	}
 }
@@ -481,61 +510,6 @@ downloadLoop:
 	NoticeInfo("exiting upgrade downloader")
 }
 
-// MakeServerAPIRequest submits a caller-defined request to the
-// Psiphon API via a currently established tunnel. This is used
-// by higher-level client code to perform non-tunnel-core API requests.
-//
-// requestName and requestPayloadJSON define the API request. The "common"
-// API inputs are added to the request as query parameters. The request
-// is a POST with "application/json" encoding.
-//
-// requestID is a caller-selected unique ID used to identify response
-// Notices for this request. The request is sent in a background goroutine.
-// This function does not block. After the request completes, the requestID
-// is reported in a Notice.
-//
-// If the request does not complete successfully or there is no active tunnel,
-// the request will be retried. retryDelaySeconds specifies a pause period
-// between retries.
-//
-// Current limitations:
-// - Assumes HTTP status code 200 is expected; will retry on all other HTTP
-//   status codes
-// - GET requests unsupported
-// - response payloads unsupported
-//
-func (controller *Controller) MakeServerAPIRequest(
-	requestID, requestName, requestPayloadJSON string, retryDelaySeconds int) {
-
-	controller.runWaitGroup.Add(1)
-	go func() {
-		defer controller.runWaitGroup.Done()
-	loop:
-		for {
-
-			tunnel := controller.getNextActiveTunnel()
-			if tunnel != nil {
-				err := tunnel.serverContext.DoServerAPIRequest(
-					requestName, requestPayloadJSON)
-				if err == nil {
-					NoticeServerAPIRequestCompleted(requestID)
-					break loop
-				}
-				NoticeServerAPIRequestFailed(requestID, err)
-			}
-
-			timeout := time.After(time.Duration(retryDelaySeconds) * time.Second)
-			select {
-			case <-timeout:
-				// Attempt the request again
-
-			case <-controller.shutdownBroadcast:
-				break loop
-			}
-		}
-	}()
-}
-
 // runTunnels is the controller tunnel management main loop. It starts and stops
 // establishing tunnels based on the target tunnel pool size and the current size
 // of the pool. Tunnels are established asynchronously using worker goroutines.
@@ -552,6 +526,8 @@ func (controller *Controller) MakeServerAPIRequest(
 // restarted to fill the pool.
 func (controller *Controller) runTunnels() {
 	defer controller.runWaitGroup.Done()
+
+	var clientVerificationPayload string
 
 	// Start running
 
@@ -610,6 +586,10 @@ loop:
 				break
 			}
 
+			if clientVerificationPayload != "" {
+				establishedTunnel.SetClientVerificationPayload(clientVerificationPayload)
+			}
+
 			NoticeActiveTunnel(establishedTunnel.serverEntry.IpAddress, establishedTunnel.protocol)
 
 			if tunnelCount == 1 {
@@ -651,6 +631,9 @@ loop:
 			if controller.isFullyEstablished() {
 				controller.stopEstablishing()
 			}
+
+		case clientVerificationPayload = <-controller.newClientVerificationPayload:
+			controller.setClientVerificationPayloadForActiveTunnels(clientVerificationPayload)
 
 		case <-controller.shutdownBroadcast:
 			break loop
@@ -870,6 +853,19 @@ func (controller *Controller) isActiveTunnelServerEntry(serverEntry *ServerEntry
 		}
 	}
 	return false
+}
+
+// setClientVerificationPayloadForActiveTunnels triggers the client verification
+// request for all active tunnels.
+func (controller *Controller) setClientVerificationPayloadForActiveTunnels(
+	clientVerificationPayload string) {
+
+	controller.tunnelMutex.Lock()
+	defer controller.tunnelMutex.Unlock()
+
+	for _, activeTunnel := range controller.tunnels {
+		activeTunnel.SetClientVerificationPayload(clientVerificationPayload)
+	}
 }
 
 // Dial selects an active tunnel and establishes a port forward
