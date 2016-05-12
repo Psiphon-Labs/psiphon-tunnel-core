@@ -348,7 +348,9 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         // The Psiphon library won't be able to use its current working directory
         // and the standard temporary directories do not exist.
         json.put("DataStoreDirectory", context.getFilesDir());
-        json.put("DataStoreTempDirectory", context.getCacheDir());
+
+        File remoteServerListDownload = new File(context.getFilesDir(), "remote_server_list");
+        json.put("RemoteServerListDownloadFilename", remoteServerListDownload.getPath());
 
         // Note: onConnecting/onConnected logic assumes 1 tunnel connection
         json.put("TunnelPoolSize", 1);

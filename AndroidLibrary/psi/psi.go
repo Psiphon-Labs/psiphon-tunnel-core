@@ -39,6 +39,7 @@ type PsiphonProvider interface {
 	GetSecondaryDnsServer() string
 }
 
+var controllerMutex sync.Mutex
 var controller *psiphon.Controller
 var shutdownBroadcast chan struct{}
 var controllerWaitGroup *sync.WaitGroup
@@ -47,6 +48,9 @@ func Start(
 	configJson, embeddedServerEntryList string,
 	provider PsiphonProvider,
 	useDeviceBinder bool) error {
+
+	controllerMutex.Lock()
+	defer controllerMutex.Unlock()
 
 	if controller != nil {
 		return fmt.Errorf("already started")
@@ -106,11 +110,28 @@ func Start(
 }
 
 func Stop() {
+
+	controllerMutex.Lock()
+	defer controllerMutex.Unlock()
+
 	if controller != nil {
 		close(shutdownBroadcast)
 		controllerWaitGroup.Wait()
 		controller = nil
 		shutdownBroadcast = nil
 		controllerWaitGroup = nil
+	}
+}
+
+// This is a passthrough to Controller.SetClientVerificationPayload.
+// Note: should only be called after Start() and before Stop(); otherwise,
+// will silently take no action.
+func SetClientVerificationPayload(clientVerificationPayload string) {
+
+	controllerMutex.Lock()
+	defer controllerMutex.Unlock()
+
+	if controller != nil {
+		controller.SetClientVerificationPayload(clientVerificationPayload)
 	}
 }

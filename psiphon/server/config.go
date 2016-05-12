@@ -29,6 +29,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,7 +57,6 @@ const (
 	DEFAULT_SSH_SERVER_PORT                = 2222
 	SSH_HANDSHAKE_TIMEOUT                  = 30 * time.Second
 	SSH_CONNECTION_READ_DEADLINE           = 5 * time.Minute
-	SSH_THROTTLED_PORT_FORWARD_MAX_COPY    = 32 * 1024
 	SSH_OBFUSCATED_KEY_BYTE_LENGTH         = 32
 	DEFAULT_OBFUSCATED_SSH_SERVER_PORT     = 3333
 	REDIS_POOL_MAX_IDLE                    = 50
@@ -168,21 +169,34 @@ type Config struct {
 	// client IP address. The key for each regional traffic rule entry
 	// is one or more space delimited ISO 3166-1 alpha-2 country codes.
 	RegionalTrafficRules map[string]TrafficRules
+
+	// DNSServerAddress specifies the network address of a DNS server
+	// to which DNS UDP packets will be forwarded to. When set, any
+	// tunneled DNS UDP packets will be re-routed to this destination.
+	DNSServerAddress string
+
+	// UdpgwServerAddress specifies the network address of a udpgw
+	// server which clients may be port forwarding to. When specified,
+	// these TCP port forwards are intercepted and handled directly
+	// by this server, which parses the SSH channel using the udpgw
+	// protocol.
+	UdpgwServerAddress string
 }
 
-// TrafficRules specify the limits placed on SSH client port forward
-// traffic.
+// TrafficRules specify the limits placed on client traffic.
 type TrafficRules struct {
 
-	// ThrottleUpstreamSleepMilliseconds is the period to sleep
-	// between sending each chunk of client->destination traffic.
-	// The default, 0, is no sleep.
-	ThrottleUpstreamSleepMilliseconds int
+	// LimitDownstreamBytesPerSecond specifies a rate limit for
+	// downstream data transfer between a single client and the
+	// server.
+	// The default, 0, is no rate limit.
+	LimitDownstreamBytesPerSecond int
 
-	// ThrottleDownstreamSleepMilliseconds is the period to sleep
-	// between sending each chunk of destination->client traffic.
-	// The default, 0, is no sleep.
-	ThrottleDownstreamSleepMilliseconds int
+	// LimitUpstreamBytesPerSecond specifies a rate limit for
+	// upstream data transfer between a single client and the
+	// server.
+	// The default, 0, is no rate limit.
+	LimitUpstreamBytesPerSecond int
 
 	// IdlePortForwardTimeoutMilliseconds is the timeout period
 	// after which idle (no bytes flowing in either direction)
@@ -190,10 +204,35 @@ type TrafficRules struct {
 	// The default, 0, is no idle timeout.
 	IdlePortForwardTimeoutMilliseconds int
 
-	// MaxClientPortForwardCount is the maximum number of port
+	// MaxTCPPortForwardCount is the maximum number of TCP port
 	// forwards each client may have open concurrently.
 	// The default, 0, is no maximum.
-	MaxClientPortForwardCount int
+	MaxTCPPortForwardCount int
+
+	// MaxUDPPortForwardCount is the maximum number of UDP port
+	// forwards each client may have open concurrently.
+	// The default, 0, is no maximum.
+	MaxUDPPortForwardCount int
+
+	// AllowTCPPorts specifies a whitelist of TCP ports that
+	// are permitted for port forwarding. When set, only ports
+	// in the list are accessible to clients.
+	AllowTCPPorts []int
+
+	// AllowUDPPorts specifies a whitelist of UDP ports that
+	// are permitted for port forwarding. When set, only ports
+	// in the list are accessible to clients.
+	AllowUDPPorts []int
+
+	// DenyTCPPorts specifies a blacklist of TCP ports that
+	// are not permitted for port forwarding. When set, the
+	// ports in the list are inaccessible to clients.
+	DenyTCPPorts []int
+
+	// DenyUDPPorts specifies a blacklist of UDP ports that
+	// are not permitted for port forwarding. When set, the
+	// ports in the list are inaccessible to clients.
+	DenyUDPPorts []int
 }
 
 // RunWebServer indicates whether to run a web server component.
@@ -266,7 +305,7 @@ func LoadConfig(configJSONs [][]byte) (*Config, error) {
 		config.WebServerPrivateKey == "") {
 
 		return nil, errors.New(
-			"web server requires WebServerSecret, WebServerCertificate, WebServerPrivateKey")
+			"Web server requires WebServerSecret, WebServerCertificate, WebServerPrivateKey")
 	}
 
 	if config.SSHServerPort > 0 && (config.SSHPrivateKey == "" || config.SSHServerVersion == "" ||
@@ -281,6 +320,26 @@ func LoadConfig(configJSONs [][]byte) (*Config, error) {
 
 		return nil, errors.New(
 			"Obfuscated SSH server requires SSHPrivateKey, SSHServerVersion, SSHUserName, SSHPassword, ObfuscatedSSHKey")
+	}
+
+	validateNetworkAddress := func(address string) error {
+		_, portStr, err := net.SplitHostPort(config.DNSServerAddress)
+		if err == nil {
+			_, err = strconv.Atoi(portStr)
+		}
+		return err
+	}
+
+	if config.DNSServerAddress != "" {
+		if err := validateNetworkAddress(config.DNSServerAddress); err != nil {
+			return nil, fmt.Errorf("DNSServerAddress is invalid: %s", err)
+		}
+	}
+
+	if config.UdpgwServerAddress != "" {
+		if err := validateNetworkAddress(config.UdpgwServerAddress); err != nil {
+			return nil, fmt.Errorf("UdpgwServerAddress is invalid: %s", err)
+		}
 	}
 
 	return &config, nil
@@ -467,7 +526,7 @@ func generateWebServerCertificate() (string, string, error) {
 	notAfter := notBefore.Add(WEB_SERVER_CERTIFICATE_VALIDITY_PERIOD)
 
 	// TODO: psi_ops_install sets serial number to 0?
-	// TOSO: psi_ops_install sets RSA exponent to 3, digest type to 'sha1', and version to 2?
+	// TODO: psi_ops_install sets RSA exponent to 3, digest type to 'sha1', and version to 2?
 
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)

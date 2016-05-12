@@ -337,6 +337,10 @@ func NoticeRemoteServerListDownloaded(filename string) {
 	outputNotice("RemoteServerListDownloaded", false, false, "filename", filename)
 }
 
+func NoticeClientVerificationRequestCompleted(ipAddress string) {
+	outputNotice("NoticeClientVerificationRequestCompleted", true, false, "ipAddress", ipAddress)
+}
+
 type repetitiveNoticeState struct {
 	message string
 	repeats int
