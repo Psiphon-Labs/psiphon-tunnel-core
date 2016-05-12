@@ -42,7 +42,7 @@ RUN curl -L http://dl.google.com/android/android-sdk_r24.4.1-linux.tgz -o /tmp/a
   && (while true; do echo 'y'; sleep 2; done) | $ANDROID_HOME/tools/android update sdk --no-ui --filter platform,platform-tool,tool
 
 # Setup OpenSSL libray.
-ENV OPENSSL_VERSION=1.0.1p
+ENV OPENSSL_VERSION=1.0.2h
 ENV PKG_CONFIG_PATH=/tmp/openssl/openssl-$OPENSSL_VERSION
 ENV CGO_CFLAGS="-I $PKG_CONFIG_PATH/include" CGO_LDFLAGS="-L $PKG_CONFIG_PATH -lssl -lcrypto"
 

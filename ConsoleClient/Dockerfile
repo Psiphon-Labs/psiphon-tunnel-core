@@ -34,7 +34,7 @@ RUN go get github.com/mitchellh/gox \
     && go get github.com/pwaller/goupx
 
 # Setup OpenSSL libray.
-ENV OPENSSL_VERSION=1.0.1p
+ENV OPENSSL_VERSION=1.0.2h
 ENV PKG_CONFIG_PATH_32=/tmp/openssl/32/openssl-$OPENSSL_VERSION PKG_CONFIG_PATH_64=/tmp/openssl/64/openssl-$OPENSSL_VERSION
 
 RUN mkdir -p /tmp/openssl/32 \
