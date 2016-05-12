@@ -323,9 +323,12 @@ func LoadConfig(configJSONs [][]byte) (*Config, error) {
 	}
 
 	validateNetworkAddress := func(address string) error {
-		_, portStr, err := net.SplitHostPort(config.DNSServerAddress)
+		host, port, err := net.SplitHostPort(address)
+		if err == nil && net.ParseIP(host) == nil {
+			err = errors.New("Host must be an IP address")
+		}
 		if err == nil {
-			_, err = strconv.Atoi(portStr)
+			_, err = strconv.Atoi(port)
 		}
 		return err
 	}
