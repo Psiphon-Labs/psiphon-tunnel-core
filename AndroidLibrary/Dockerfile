@@ -2,7 +2,7 @@
 #
 # See README.md for usage instructions.
 
-FROM ubuntu:latest
+FROM ubuntu:16.04
 
 # Install system-level dependencies.
 ENV DEBIAN_FRONTEND=noninteractive
@@ -11,13 +11,13 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     git \
-    openjdk-7-jdk \
+    openjdk-8-jdk \
     pkg-config \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Go.
-ENV GOVERSION=go1.6 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
+ENV GOVERSION=go1.6.2 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
 
 RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz -o /tmp/go.tar.gz \
   && tar -C /usr/local -xzf /tmp/go.tar.gz \
