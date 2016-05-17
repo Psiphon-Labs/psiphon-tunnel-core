@@ -201,6 +201,12 @@ func NoticeHomepage(url string) {
 	outputNotice("Homepage", false, false, "url", url)
 }
 
+// NoticeClientVerificationRequired indicates that client verification is required, as
+// indicated bythe handshake. The client should submit a client verification payload.
+func NoticeClientVerificationRequired() {
+	outputNotice("ClientVerificationRequired", false, false)
+}
+
 // NoticeClientRegion is the client's region, as determined by the server and
 // reported to the client in the handshake.
 func NoticeClientRegion(region string) {
