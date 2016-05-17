@@ -143,13 +143,14 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	// - 'preemptive_reconnect_lifetime_milliseconds' is currently unused
 	// - 'ssh_session_id' is ignored; client session ID is used instead
 	var handshakeConfig struct {
-		Homepages            []string            `json:"homepages"`
-		UpgradeClientVersion string              `json:"upgrade_client_version"`
-		PageViewRegexes      []map[string]string `json:"page_view_regexes"`
-		HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
-		EncodedServerList    []string            `json:"encoded_server_list"`
-		ClientRegion         string              `json:"client_region"`
-		ServerTimestamp      string              `json:"server_timestamp"`
+		Homepages                  []string            `json:"homepages"`
+		UpgradeClientVersion       string              `json:"upgrade_client_version"`
+		PageViewRegexes            []map[string]string `json:"page_view_regexes"`
+		HttpsRequestRegexes        []map[string]string `json:"https_request_regexes"`
+		EncodedServerList          []string            `json:"encoded_server_list"`
+		ClientRegion               string              `json:"client_region"`
+		ServerTimestamp            string              `json:"server_timestamp"`
+		ClientVerificationRequired bool                `json:"client_verification_required"`
 	}
 	err = json.Unmarshal(configLine, &handshakeConfig)
 	if err != nil {
@@ -214,6 +215,10 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	}
 
 	serverContext.serverHandshakeTimestamp = handshakeConfig.ServerTimestamp
+
+	if handshakeConfig.ClientVerificationRequired {
+		NoticeClientVerificationRequired()
+	}
 
 	return nil
 }
