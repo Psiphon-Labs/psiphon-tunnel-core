@@ -898,7 +898,8 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// timestamp in the handshake response as the tunnel start time. This time
 	// will be slightly earlier than the actual tunnel activation time, as the
 	// client has to receive and parse the response and activate the tunnel.
-	if !tunnel.IsDiscarded() {
+	// Tunnel does not have a serverContext when DisableApi is set.
+	if tunnel.serverContext != nil && !tunnel.IsDiscarded() {
 		err := RecordTunnelStats(
 			tunnel.serverContext.sessionId,
 			tunnel.serverContext.tunnelNumber,
