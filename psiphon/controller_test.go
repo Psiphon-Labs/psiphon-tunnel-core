@@ -77,6 +77,7 @@ func TestUntunneledUpgradeDownload(t *testing.T) {
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: false,
 			disableEstablishing:      true,
+			disableApi:               false,
 			tunnelPoolSize:           1,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
@@ -92,6 +93,7 @@ func TestUntunneledResumableUpgradeDownload(t *testing.T) {
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: false,
 			disableEstablishing:      true,
+			disableApi:               false,
 			tunnelPoolSize:           1,
 			disruptNetwork:           true,
 			useHostNameTransformer:   false,
@@ -107,6 +109,7 @@ func TestUntunneledUpgradeClientIsLatestVersion(t *testing.T) {
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: false,
 			disableEstablishing:      true,
+			disableApi:               false,
 			tunnelPoolSize:           1,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
@@ -122,6 +125,7 @@ func TestUntunneledResumableFetchRemoveServerList(t *testing.T) {
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: false,
 			disableEstablishing:      false,
+			disableApi:               false,
 			tunnelPoolSize:           1,
 			disruptNetwork:           true,
 			useHostNameTransformer:   false,
@@ -137,6 +141,7 @@ func TestTunneledUpgradeClientIsLatestVersion(t *testing.T) {
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
+			disableApi:               false,
 			tunnelPoolSize:           1,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
@@ -160,6 +165,7 @@ func TestImpairedProtocols(t *testing.T) {
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
+			disableApi:               false,
 			tunnelPoolSize:           40,
 			disruptNetwork:           true,
 			useHostNameTransformer:   false,
@@ -175,6 +181,7 @@ func TestSSH(t *testing.T) {
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
+			disableApi:               false,
 			tunnelPoolSize:           1,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
@@ -190,6 +197,7 @@ func TestObfuscatedSSH(t *testing.T) {
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
+			disableApi:               false,
 			tunnelPoolSize:           1,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
@@ -205,6 +213,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
+			disableApi:               false,
 			tunnelPoolSize:           1,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
@@ -220,6 +229,7 @@ func TestUnfrontedMeekWithTransformer(t *testing.T) {
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
+			disableApi:               false,
 			tunnelPoolSize:           1,
 			disruptNetwork:           false,
 			useHostNameTransformer:   true,
@@ -235,6 +245,7 @@ func TestFrontedMeek(t *testing.T) {
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
+			disableApi:               false,
 			tunnelPoolSize:           1,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
@@ -250,6 +261,7 @@ func TestFrontedMeekWithTransformer(t *testing.T) {
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
+			disableApi:               false,
 			tunnelPoolSize:           1,
 			disruptNetwork:           false,
 			useHostNameTransformer:   true,
@@ -265,6 +277,7 @@ func TestFrontedMeekHTTP(t *testing.T) {
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
+			disableApi:               false,
 			tunnelPoolSize:           1,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
@@ -280,6 +293,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
+			disableApi:               false,
 			tunnelPoolSize:           1,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
@@ -295,9 +309,26 @@ func TestUnfrontedMeekHTTPSWithTransformer(t *testing.T) {
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
+			disableApi:               false,
 			tunnelPoolSize:           1,
 			disruptNetwork:           false,
 			useHostNameTransformer:   true,
+			runDuration:              0,
+		})
+}
+
+func TestDisabledApi(t *testing.T) {
+	controllerRun(t,
+		&controllerRunConfig{
+			expectNoServerEntries:    false,
+			protocol:                 "",
+			clientIsLatestVersion:    true,
+			disableUntunneledUpgrade: true,
+			disableEstablishing:      false,
+			disableApi:               true,
+			tunnelPoolSize:           1,
+			disruptNetwork:           false,
+			useHostNameTransformer:   false,
 			runDuration:              0,
 		})
 }
@@ -312,6 +343,7 @@ type controllerRunConfig struct {
 	disruptNetwork           bool
 	useHostNameTransformer   bool
 	runDuration              time.Duration
+	disableApi               bool
 }
 
 func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
@@ -334,6 +366,10 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		// Clear remote server list so tunnel cannot be established.
 		// TODO: also delete all server entries in the datastore.
 		config.RemoteServerListUrl = ""
+	}
+
+	if runConfig.disableApi {
+		config.DisableApi = true
 	}
 
 	config.TunnelPoolSize = runConfig.tunnelPoolSize
@@ -599,31 +635,35 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	// Test: upgrade check/download must be downloaded within 180 seconds
 
-	upgradeTimeout := time.NewTimer(180 * time.Second)
+	expectUpgrade := !runConfig.disableApi && !runConfig.disableUntunneledUpgrade
 
-	select {
-	case <-upgradeDownloaded:
-		// TODO: verify downloaded file
-		if runConfig.clientIsLatestVersion {
-			t.Fatalf("upgrade downloaded unexpectedly")
-		}
+	if expectUpgrade {
+		upgradeTimeout := time.NewTimer(180 * time.Second)
 
-		// Test: with disruptNetwork, must be multiple download progress notices
-
-		if runConfig.disruptNetwork {
-			count := atomic.LoadInt32(&clientUpgradeDownloadedBytesCount)
-			if count <= 1 {
-				t.Fatalf("unexpected upgrade download progress: %d", count)
+		select {
+		case <-upgradeDownloaded:
+			// TODO: verify downloaded file
+			if runConfig.clientIsLatestVersion {
+				t.Fatalf("upgrade downloaded unexpectedly")
 			}
-		}
 
-	case <-confirmedLatestVersion:
-		if !runConfig.clientIsLatestVersion {
-			t.Fatalf("confirmed latest version unexpectedly")
-		}
+			// Test: with disruptNetwork, must be multiple download progress notices
 
-	case <-upgradeTimeout.C:
-		t.Fatalf("upgrade download timeout exceeded")
+			if runConfig.disruptNetwork {
+				count := atomic.LoadInt32(&clientUpgradeDownloadedBytesCount)
+				if count <= 1 {
+					t.Fatalf("unexpected upgrade download progress: %d", count)
+				}
+			}
+
+		case <-confirmedLatestVersion:
+			if !runConfig.clientIsLatestVersion {
+				t.Fatalf("confirmed latest version unexpectedly")
+			}
+
+		case <-upgradeTimeout.C:
+			t.Fatalf("upgrade download timeout exceeded")
+		}
 	}
 }
 
