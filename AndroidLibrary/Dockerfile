@@ -2,7 +2,7 @@
 #
 # See README.md for usage instructions.
 
-FROM ubuntu:latest
+FROM ubuntu:16.04
 
 # Install system-level dependencies.
 ENV DEBIAN_FRONTEND=noninteractive
@@ -11,13 +11,13 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     git \
-    openjdk-7-jdk \
+    openjdk-8-jdk \
     pkg-config \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Go.
-ENV GOVERSION=go1.6 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
+ENV GOVERSION=go1.6.2 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
 
 RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz -o /tmp/go.tar.gz \
   && tar -C /usr/local -xzf /tmp/go.tar.gz \
@@ -42,7 +42,7 @@ RUN curl -L http://dl.google.com/android/android-sdk_r24.4.1-linux.tgz -o /tmp/a
   && (while true; do echo 'y'; sleep 2; done) | $ANDROID_HOME/tools/android update sdk --no-ui --filter platform,platform-tool,tool
 
 # Setup OpenSSL libray.
-ENV OPENSSL_VERSION=1.0.1p
+ENV OPENSSL_VERSION=1.0.2h
 ENV PKG_CONFIG_PATH=/tmp/openssl/openssl-$OPENSSL_VERSION
 ENV CGO_CFLAGS="-I $PKG_CONFIG_PATH/include" CGO_LDFLAGS="-L $PKG_CONFIG_PATH -lssl -lcrypto"
 
