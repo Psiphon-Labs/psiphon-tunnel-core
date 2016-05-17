@@ -195,7 +195,7 @@ func NoticeClientIsLatestVersion(availableVersion string) {
 	outputNotice("ClientIsLatestVersion", false, false, "availableVersion", availableVersion)
 }
 
-// NoticeClientUpgradeAvailable is a sponsor homepage, as per the handshake. The client
+// NoticeHomepage is a sponsor homepage, as per the handshake. The client
 // should display the sponsor's homepage.
 func NoticeHomepage(url string) {
 	outputNotice("Homepage", false, false, "url", url)
