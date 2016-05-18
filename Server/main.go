@@ -31,9 +31,21 @@ import (
 
 func main() {
 
-	var generateServerIPaddress string
+	var generateServerIPaddress, newConfigFilename, newServerEntryFilename string
 	var generateWebServerPort, generateSSHServerPort, generateObfuscatedSSHServerPort int
 	var runConfigFilenames stringListFlag
+
+	flag.StringVar(
+		&newConfigFilename,
+		"newConfig",
+		server.SERVER_CONFIG_FILENAME,
+		"generate new config with this `filename`")
+
+	flag.StringVar(
+		&newServerEntryFilename,
+		"newServerEntry",
+		server.SERVER_ENTRY_FILENAME,
+		"generate new server entry with this `filename`")
 
 	flag.StringVar(
 		&generateServerIPaddress,
@@ -77,10 +89,6 @@ func main() {
 
 	args := flag.Args()
 
-	configFilename := server.SERVER_CONFIG_FILENAME
-
-	serverEntryFilename := server.SERVER_ENTRY_FILENAME
-
 	if len(args) < 1 {
 		flag.Usage()
 		os.Exit(1)
@@ -98,13 +106,13 @@ func main() {
 			fmt.Errorf("generate failed: %s", err)
 			os.Exit(1)
 		}
-		err = ioutil.WriteFile(configFilename, configFileContents, 0600)
+		err = ioutil.WriteFile(newConfigFilename, configFileContents, 0600)
 		if err != nil {
 			fmt.Errorf("error writing configuration file: %s", err)
 			os.Exit(1)
 		}
 
-		err = ioutil.WriteFile(serverEntryFilename, serverEntryFileContents, 0600)
+		err = ioutil.WriteFile(newServerEntryFilename, serverEntryFileContents, 0600)
 		if err != nil {
 			fmt.Errorf("error writing server entry file: %s", err)
 			os.Exit(1)
@@ -113,19 +121,19 @@ func main() {
 	} else if args[0] == "run" {
 
 		if len(runConfigFilenames) == 0 {
-			runConfigFilenames = []string{configFilename}
+			runConfigFilenames = []string{server.SERVER_CONFIG_FILENAME}
 		}
 
 		var configFileContents [][]byte
 
 		for _, configFilename := range runConfigFilenames {
-			ccontents, err := ioutil.ReadFile(configFilename)
+			contents, err := ioutil.ReadFile(configFilename)
 			if err != nil {
 				fmt.Errorf("error loading configuration file: %s", err)
 				os.Exit(1)
 			}
 
-			configFileContents = append(configFileContents, ccontents)
+			configFileContents = append(configFileContents, contents)
 		}
 
 		err := server.RunServices(configFileContents)
