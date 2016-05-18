@@ -387,6 +387,15 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		config.HostNameTransformer = &TestHostNameTransformer{}
 	}
 
+	// Override client retry throttle values to speed up automated
+	// tests and ensure tests complete within fixed deadlines.
+	fetchRemoteServerListRetryPeriodSeconds := 0
+	config.FetchRemoteServerListRetryPeriodSeconds = &fetchRemoteServerListRetryPeriodSeconds
+	downloadUpgradeRetryPeriodSeconds := 0
+	config.DownloadUpgradeRetryPeriodSeconds = &downloadUpgradeRetryPeriodSeconds
+	establishTunnelPausePeriodSeconds := 1
+	config.EstablishTunnelPausePeriodSeconds = &establishTunnelPausePeriodSeconds
+
 	os.Remove(config.UpgradeDownloadFilename)
 
 	config.TunnelProtocol = runConfig.protocol
