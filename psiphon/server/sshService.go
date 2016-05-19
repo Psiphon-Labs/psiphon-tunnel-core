@@ -27,6 +27,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
@@ -199,34 +200,8 @@ func (sshServer *sshServer) unregisterClient(clientID sshClientID) {
 	sshServer.clientsMutex.Unlock()
 
 	if client != nil {
-		sshServer.stopClient(client)
+		client.stop()
 	}
-}
-
-func (sshServer *sshServer) stopClient(client *sshClient) {
-
-	client.sshConn.Close()
-	client.sshConn.Wait()
-
-	client.Lock()
-	log.WithContextFields(
-		LogFields{
-			"startTime":                         client.startTime,
-			"duration":                          time.Now().Sub(client.startTime),
-			"psiphonSessionID":                  client.psiphonSessionID,
-			"country":                           client.geoIPData.Country,
-			"city":                              client.geoIPData.City,
-			"ISP":                               client.geoIPData.ISP,
-			"bytesUpTCP":                        client.tcpTrafficState.bytesUp,
-			"bytesDownTCP":                      client.tcpTrafficState.bytesDown,
-			"portForwardCountTCP":               client.tcpTrafficState.portForwardCount,
-			"peakConcurrentPortForwardCountTCP": client.tcpTrafficState.peakConcurrentPortForwardCount,
-			"bytesUpUDP":                        client.udpTrafficState.bytesUp,
-			"bytesDownUDP":                      client.udpTrafficState.bytesDown,
-			"portForwardCountUDP":               client.udpTrafficState.portForwardCount,
-			"peakConcurrentPortForwardCountUDP": client.udpTrafficState.peakConcurrentPortForwardCount,
-		}).Info("tunnel closed")
-	client.Unlock()
 }
 
 func (sshServer *sshServer) stopClients() {
@@ -237,7 +212,7 @@ func (sshServer *sshServer) stopClients() {
 	sshServer.clientsMutex.Unlock()
 
 	for _, client := range sshServer.clients {
-		sshServer.stopClient(client)
+		client.stop()
 	}
 }
 
@@ -245,14 +220,8 @@ func (sshServer *sshServer) handleClient(tcpConn *net.TCPConn) {
 
 	geoIPData := GeoIPLookup(psiphon.IPAddressFromAddr(tcpConn.RemoteAddr()))
 
-	sshClient := &sshClient{
-		sshServer:       sshServer,
-		startTime:       time.Now(),
-		geoIPData:       geoIPData,
-		trafficRules:    sshServer.config.GetTrafficRules(geoIPData.Country),
-		tcpTrafficState: &trafficState{},
-		udpTrafficState: &trafficState{},
-	}
+	sshClient := newSshClient(
+		sshServer, geoIPData, sshServer.config.GetTrafficRules(geoIPData.Country))
 
 	// Wrap the base TCP connection with an IdleTimeoutConn which will terminate
 	// the connection if no data is received before the deadline. This timeout is
@@ -351,15 +320,17 @@ func (sshServer *sshServer) handleClient(tcpConn *net.TCPConn) {
 
 type sshClient struct {
 	sync.Mutex
-	sshServer        *sshServer
-	sshConn          ssh.Conn
-	startTime        time.Time
-	geoIPData        GeoIPData
-	psiphonSessionID string
-	udpChannel       ssh.Channel
-	trafficRules     TrafficRules
-	tcpTrafficState  *trafficState
-	udpTrafficState  *trafficState
+	sshServer               *sshServer
+	sshConn                 ssh.Conn
+	startTime               time.Time
+	geoIPData               GeoIPData
+	psiphonSessionID        string
+	udpChannel              ssh.Channel
+	trafficRules            TrafficRules
+	tcpTrafficState         *trafficState
+	udpTrafficState         *trafficState
+	channelHandlerWaitGroup *sync.WaitGroup
+	stopBroadcast           chan struct{}
 }
 
 type trafficState struct {
@@ -370,15 +341,29 @@ type trafficState struct {
 	peakConcurrentPortForwardCount int64
 }
 
+func newSshClient(sshServer *sshServer, geoIPData GeoIPData, trafficRules TrafficRules) *sshClient {
+	return &sshClient{
+		sshServer:               sshServer,
+		startTime:               time.Now(),
+		geoIPData:               geoIPData,
+		trafficRules:            trafficRules,
+		tcpTrafficState:         &trafficState{},
+		udpTrafficState:         &trafficState{},
+		channelHandlerWaitGroup: new(sync.WaitGroup),
+		stopBroadcast:           make(chan struct{}),
+	}
+}
+
 func (sshClient *sshClient) handleChannels(channels <-chan ssh.NewChannel) {
 	for newChannel := range channels {
 
 		if newChannel.ChannelType() != "direct-tcpip" {
 			sshClient.rejectNewChannel(newChannel, ssh.Prohibited, "unknown or unsupported channel type")
-			return
+			continue
 		}
 
 		// process each port forward concurrently
+		sshClient.channelHandlerWaitGroup.Add(1)
 		go sshClient.handleNewPortForwardChannel(newChannel)
 	}
 }
@@ -395,6 +380,7 @@ func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, reason s
 }
 
 func (sshClient *sshClient) handleNewPortForwardChannel(newChannel ssh.NewChannel) {
+	defer sshClient.channelHandlerWaitGroup.Done()
 
 	// http://tools.ietf.org/html/rfc4254#section-7.2
 	var directTcpipExtraData struct {
@@ -460,7 +446,7 @@ func (sshClient *sshClient) isPortForwardLimitExceeded(
 	return limitExceeded
 }
 
-func (sshClient *sshClient) establishedPortForward(
+func (sshClient *sshClient) openedPortForward(
 	state *trafficState) {
 
 	sshClient.Lock()
@@ -497,7 +483,17 @@ func (sshClient *sshClient) handleTCPChannel(
 		return
 	}
 
-	// TODO: close LRU connection (after successful Dial) instead of rejecting new connection?
+	var bytesUp, bytesDown int64
+	sshClient.openedPortForward(sshClient.tcpTrafficState)
+	defer sshClient.closedPortForward(
+		sshClient.tcpTrafficState, atomic.LoadInt64(&bytesUp), atomic.LoadInt64(&bytesDown))
+
+	// TOCTOU note: important to increment the port forward count (via
+	// openPortForward) _before_ checking isPortForwardLimitExceeded
+	// otherwise, the client could potentially consume excess resources
+	// by initiating many port forwards concurrently.
+	// TODO: close LRU connection (after successful Dial) instead of
+	// rejecting new connection?
 	if sshClient.isPortForwardLimitExceeded(
 		sshClient.tcpTrafficState,
 		sshClient.trafficRules.MaxTCPPortForwardCount) {
@@ -507,18 +503,39 @@ func (sshClient *sshClient) handleTCPChannel(
 		return
 	}
 
-	targetAddr := fmt.Sprintf("%s:%d", hostToConnect, portToConnect)
+	remoteAddr := fmt.Sprintf("%s:%d", hostToConnect, portToConnect)
 
-	log.WithContextFields(LogFields{"target": targetAddr}).Debug("dialing")
+	log.WithContextFields(LogFields{"remoteAddr": remoteAddr}).Debug("dialing")
 
-	// TODO: on EADDRNOTAVAIL, temporarily suspend new clients
-	// TODO: port forward dial timeout
-	// TODO: IPv6 support
-	fwdConn, err := net.Dial("tcp4", targetAddr)
-	if err != nil {
-		sshClient.rejectNewChannel(newChannel, ssh.ConnectionFailed, err.Error())
+	type dialTcpResult struct {
+		conn net.Conn
+		err  error
+	}
+
+	resultChannel := make(chan *dialTcpResult, 1)
+
+	go func() {
+		// TODO: on EADDRNOTAVAIL, temporarily suspend new clients
+		// TODO: IPv6 support
+		conn, err := net.DialTimeout(
+			"tcp4", remoteAddr, SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT)
+		resultChannel <- &dialTcpResult{conn, err}
+	}()
+
+	var result *dialTcpResult
+	select {
+	case result = <-resultChannel:
+	case <-sshClient.stopBroadcast:
+		// Note: may leave dial in progress
 		return
 	}
+
+	if result.err != nil {
+		sshClient.rejectNewChannel(newChannel, ssh.ConnectionFailed, result.err.Error())
+		return
+	}
+
+	fwdConn := result.conn
 	defer fwdConn.Close()
 
 	fwdChannel, requests, err := newChannel.Accept()
@@ -529,9 +546,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	go ssh.DiscardRequests(requests)
 	defer fwdChannel.Close()
 
-	sshClient.establishedPortForward(sshClient.tcpTrafficState)
-
-	log.WithContextFields(LogFields{"target": targetAddr}).Debug("relaying")
+	log.WithContextFields(LogFields{"remoteAddr": remoteAddr}).Debug("relaying")
 
 	// When idle port forward traffic rules are in place, wrap fwdConn
 	// in an IdleTimeoutConn configured to reset idle on writes as well
@@ -549,28 +564,35 @@ func (sshClient *sshClient) handleTCPChannel(
 	// TODO: relay errors to fwdChannel.Stderr()?
 	// TODO: use a low-memory io.Copy?
 
-	var bytesUp, bytesDown int64
-
 	relayWaitGroup := new(sync.WaitGroup)
 	relayWaitGroup.Add(1)
 	go func() {
 		defer relayWaitGroup.Done()
-		var err error
-		bytesUp, err = io.Copy(fwdConn, fwdChannel)
-		if err != nil {
-			log.WithContextFields(LogFields{"error": err}).Warning("upstream TCP relay failed")
+		bytes, err := io.Copy(fwdChannel, fwdConn)
+		atomic.AddInt64(&bytesDown, bytes)
+		if err != nil && err != io.EOF {
+			log.WithContextFields(LogFields{"error": err}).Warning("downstream TCP relay failed")
 		}
 	}()
-	bytesDown, err = io.Copy(fwdChannel, fwdConn)
-	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("downstream TCP relay failed")
+	bytes, err := io.Copy(fwdConn, fwdChannel)
+	atomic.AddInt64(&bytesUp, bytes)
+	if err != nil && err != io.EOF {
+		log.WithContextFields(LogFields{"error": err}).Warning("upstream TCP relay failed")
 	}
-	fwdChannel.CloseWrite()
+
+	// Shutdown special case: fwdChannel will be closed and return EOF when
+	// the SSH connection is closed, but we need to explicitly close fwdConn
+	// to interrupt the downstream io.Copy, which may be blocked on a
+	// fwdConn.Read().
+	fwdConn.Close()
+
 	relayWaitGroup.Wait()
 
-	sshClient.closedPortForward(sshClient.tcpTrafficState, bytesUp, bytesDown)
-
-	log.WithContextFields(LogFields{"target": targetAddr}).Debug("exiting")
+	log.WithContextFields(
+		LogFields{
+			"remoteAddr": remoteAddr,
+			"bytesUp":    atomic.LoadInt64(&bytesUp),
+			"bytesDown":  atomic.LoadInt64(&bytesDown)}).Debug("exiting")
 }
 
 func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
@@ -625,4 +647,33 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 	} else {
 		log.WithContextFields(LogFields{"error": err, "method": method}).Info("authentication success")
 	}
+}
+
+func (sshClient *sshClient) stop() {
+
+	sshClient.sshConn.Close()
+	sshClient.sshConn.Wait()
+
+	close(sshClient.stopBroadcast)
+	sshClient.channelHandlerWaitGroup.Wait()
+
+	sshClient.Lock()
+	log.WithContextFields(
+		LogFields{
+			"startTime":                         sshClient.startTime,
+			"duration":                          time.Now().Sub(sshClient.startTime),
+			"psiphonSessionID":                  sshClient.psiphonSessionID,
+			"country":                           sshClient.geoIPData.Country,
+			"city":                              sshClient.geoIPData.City,
+			"ISP":                               sshClient.geoIPData.ISP,
+			"bytesUpTCP":                        sshClient.tcpTrafficState.bytesUp,
+			"bytesDownTCP":                      sshClient.tcpTrafficState.bytesDown,
+			"portForwardCountTCP":               sshClient.tcpTrafficState.portForwardCount,
+			"peakConcurrentPortForwardCountTCP": sshClient.tcpTrafficState.peakConcurrentPortForwardCount,
+			"bytesUpUDP":                        sshClient.udpTrafficState.bytesUp,
+			"bytesDownUDP":                      sshClient.udpTrafficState.bytesDown,
+			"portForwardCountUDP":               sshClient.udpTrafficState.portForwardCount,
+			"peakConcurrentPortForwardCountUDP": sshClient.udpTrafficState.peakConcurrentPortForwardCount,
+		}).Info("tunnel closed")
+	sshClient.Unlock()
 }
