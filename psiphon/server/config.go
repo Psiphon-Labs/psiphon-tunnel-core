@@ -62,6 +62,7 @@ const (
 	REDIS_POOL_MAX_IDLE                    = 50
 	REDIS_POOL_MAX_ACTIVE                  = 1000
 	REDIS_POOL_IDLE_TIMEOUT                = 5 * time.Minute
+	DEFAULT_NETWORK_INTERFACE              = "lo"
 )
 
 // TODO: break config into sections (sub-structs)
@@ -355,6 +356,10 @@ type GenerateConfigParams struct {
 	// ServerIPAddress is the public IP address of the server.
 	ServerIPAddress string
 
+	// ServerNetworkInterface is the (optional) nic to expose the server on
+	// when running in unprivileged mode but want to allow external clients to connect.
+	ServerNetworkInterface string
+
 	// WebServerPort is the listening port of the web server.
 	// When <= 0, no web server component is run.
 	WebServerPort int
@@ -453,6 +458,14 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 		return nil, nil, psiphon.ContextError(err)
 	}
 
+	// Find IP address of the network interface (if not loopback)
+	serverNetworkInterface := params.ServerNetworkInterface
+	serverNetworkInterfaceIP, err := getNetworkInterfaceIP(serverNetworkInterface)
+	if err != nil {
+		serverNetworkInterfaceIP = serverIPaddress
+		fmt.Printf("Could not find IP address of nic.  Falling back to %s\n", serverIPaddress)
+	}
+
 	// Assemble config and server entry
 
 	config := &Config{
@@ -492,7 +505,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 	}
 
 	serverEntry := &psiphon.ServerEntry{
-		IpAddress:            serverIPaddress,
+		IpAddress:            serverNetworkInterfaceIP,
 		WebServerPort:        fmt.Sprintf("%d", webServerPort),
 		WebServerSecret:      webServerSecret,
 		WebServerCertificate: strippedWebServerCertificate,
@@ -576,4 +589,30 @@ func generateWebServerCertificate() (string, string, error) {
 	)
 
 	return string(webServerCertificate), string(webServerPrivateKey), nil
+}
+
+func getNetworkInterfaceIP(networkInterface string) (string, error) {
+	iface, err := net.InterfaceByName(networkInterface)
+	if err != nil {
+		return "", psiphon.ContextError(err)
+	}
+
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return "", psiphon.ContextError(err)
+	}
+	for _, addr := range addrs {
+		var ip net.IP
+		switch t := addr.(type) {
+		case *net.IPNet:
+			ip = t.IP
+		}
+		ip = ip.To4()
+		if ip == nil {
+			continue
+		}
+		return ip.String(), nil
+	}
+
+	return "", psiphon.ContextError(errors.New("Could not find IP address of specified interface"))
 }

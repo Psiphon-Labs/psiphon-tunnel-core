@@ -32,6 +32,7 @@ import (
 func main() {
 
 	var generateServerIPaddress, newConfigFilename, newServerEntryFilename string
+	var networkInterface string
 	var generateWebServerPort, generateSSHServerPort, generateObfuscatedSSHServerPort int
 	var runConfigFilenames stringListFlag
 
@@ -46,6 +47,12 @@ func main() {
 		"newServerEntry",
 		server.SERVER_ENTRY_FILENAME,
 		"generate new server entry with this `filename`")
+
+	flag.StringVar(
+		&networkInterface,
+		"interface",
+		"",
+		"generate server entry with this `network-interface`")
 
 	flag.StringVar(
 		&generateServerIPaddress,
@@ -97,6 +104,7 @@ func main() {
 		configFileContents, serverEntryFileContents, err := server.GenerateConfig(
 			&server.GenerateConfigParams{
 				ServerIPAddress:         generateServerIPaddress,
+				ServerNetworkInterface:  networkInterface,
 				WebServerPort:           generateWebServerPort,
 				SSHServerPort:           generateSSHServerPort,
 				ObfuscatedSSHServerPort: generateObfuscatedSSHServerPort,
