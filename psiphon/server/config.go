@@ -182,6 +182,12 @@ type Config struct {
 	// by this server, which parses the SSH channel using the udpgw
 	// protocol.
 	UdpgwServerAddress string
+
+	// LoadMonitorPeriodSeconds indicates how frequently to log server
+	// load information (number of connected clients per tunnel protocol,
+	// number of running goroutines, amount of memory allocated).
+	// The default, 0, disables load logging.
+	LoadMonitorPeriodSeconds int
 }
 
 // TrafficRules specify the limits placed on client traffic.
@@ -249,6 +255,11 @@ func (config *Config) RunSSHServer() bool {
 // RunObfuscatedSSHServer indicates whether to run an Obfuscated SSH server component.
 func (config *Config) RunObfuscatedSSHServer() bool {
 	return config.ObfuscatedSSHServerPort > 0
+}
+
+// RunLoadMonitor indicates whether to monitor and log server load.
+func (config *Config) RunLoadMonitor() bool {
+	return config.LoadMonitorPeriodSeconds > 0
 }
 
 // UseRedis indicates whether to store per-session GeoIP information in

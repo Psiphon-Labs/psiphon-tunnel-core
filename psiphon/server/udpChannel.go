@@ -211,7 +211,8 @@ func (mux *udpPortForwardMultiplexer) run() {
 		// Note: assumes UDP writes won't block (https://golang.org/pkg/net/#UDPConn.WriteToUDP)
 		_, err = portForward.conn.Write(message.packet)
 		if err != nil {
-			log.WithContextFields(LogFields{"error": err}).Warning("upstream UDP relay failed")
+			// Debug since errors such as "write: operation not permitted" occur during normal operation
+			log.WithContextFields(LogFields{"error": err}).Debug("upstream UDP relay failed")
 			// The port forward's goroutine will complete cleanup
 			portForward.conn.Close()
 		}
@@ -301,6 +302,7 @@ func (portForward *udpPortForward) relayDownstream() {
 		}
 		if err != nil {
 			if err != io.EOF {
+				// Debug since errors such as "use of closed network connection" occur during normal operation
 				log.WithContextFields(LogFields{"error": err}).Warning("downstream UDP relay failed")
 			}
 			break
@@ -320,7 +322,7 @@ func (portForward *udpPortForward) relayDownstream() {
 		if err != nil {
 			// Close the channel, which will interrupt the main loop.
 			portForward.mux.sshChannel.Close()
-			log.WithContextFields(LogFields{"error": err}).Warning("downstream UDP relay failed")
+			log.WithContextFields(LogFields{"error": err}).Debug("downstream UDP relay failed")
 			break
 		}
 
