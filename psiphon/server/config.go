@@ -62,7 +62,6 @@ const (
 	REDIS_POOL_MAX_IDLE                    = 50
 	REDIS_POOL_MAX_ACTIVE                  = 1000
 	REDIS_POOL_IDLE_TIMEOUT                = 5 * time.Minute
-	DEFAULT_NETWORK_INTERFACE              = "lo"
 )
 
 // TODO: break config into sections (sub-structs)
@@ -460,7 +459,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 
 	// Find IP address of the network interface (if not loopback)
 	serverNetworkInterface := params.ServerNetworkInterface
-	serverNetworkInterfaceIP, err := getNetworkInterfaceIP(serverNetworkInterface)
+	serverNetworkInterfaceIP, err := psiphon.GetInterfaceIPAddress(serverNetworkInterface)
 	if err != nil {
 		serverNetworkInterfaceIP = serverIPaddress
 		fmt.Printf("Could not find IP address of nic.  Falling back to %s\n", serverIPaddress)
@@ -589,30 +588,4 @@ func generateWebServerCertificate() (string, string, error) {
 	)
 
 	return string(webServerCertificate), string(webServerPrivateKey), nil
-}
-
-func getNetworkInterfaceIP(networkInterface string) (string, error) {
-	iface, err := net.InterfaceByName(networkInterface)
-	if err != nil {
-		return "", psiphon.ContextError(err)
-	}
-
-	addrs, err := iface.Addrs()
-	if err != nil {
-		return "", psiphon.ContextError(err)
-	}
-	for _, addr := range addrs {
-		var ip net.IP
-		switch t := addr.(type) {
-		case *net.IPNet:
-			ip = t.IP
-		}
-		ip = ip.To4()
-		if ip == nil {
-			continue
-		}
-		return ip.String(), nil
-	}
-
-	return "", psiphon.ContextError(errors.New("Could not find IP address of specified interface"))
 }
