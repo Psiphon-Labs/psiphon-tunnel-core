@@ -387,9 +387,9 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		return nil, ContextError(err)
 	}
 
-	// Do setEmitDiagnosticNotices first, to ensure config file errors are emitted.
+	// Do SetEmitDiagnosticNotices first, to ensure config file errors are emitted.
 	if config.EmitDiagnosticNotices {
-		setEmitDiagnosticNotices(true)
+		SetEmitDiagnosticNotices(true)
 	}
 
 	// These fields are required; the rest are optional

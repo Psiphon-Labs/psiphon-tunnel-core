@@ -41,7 +41,7 @@ func TestMain(m *testing.M) {
 	flag.Parse()
 	os.Remove(DATA_STORE_FILENAME)
 	initDisruptor()
-	setEmitDiagnosticNotices(true)
+	SetEmitDiagnosticNotices(true)
 	os.Exit(m.Run())
 }
 
