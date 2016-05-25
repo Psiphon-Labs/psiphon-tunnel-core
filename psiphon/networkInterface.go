@@ -20,60 +20,45 @@
 package psiphon
 
 import (
+	"errors"
 	"net"
 )
 
 // Take in an interface name ("lo", "eth0", "any") passed from either
-// a config setting or by -interface command line flag and return the IP
+// a config setting, by using the -listenInterface flag on client or
+// -interface flag on server from the command line and return the IP
 // address associated with it.
 // If no interface is provided use the default loopback interface (127.0.0.1).
-// If "any" is passed then listen on 0.0.0.0
+// If "any" is passed then listen on 0.0.0.0 for client (invalid with server)
 func GetInterfaceIPAddress(listenInterface string) (string, error) {
 	var ip net.IP
-
 	if listenInterface == "" {
 		ip = net.ParseIP("127.0.0.1")
+		return ip.String(), nil
 	} else if listenInterface == "any" {
 		ip = net.ParseIP("0.0.0.0")
+		return ip.String(), nil
 	} else {
-		//Get a list of interfaces
-		availableInterfaces, err := net.Interfaces()
+		availableInterfaces, err := net.InterfaceByName(listenInterface)
 		if err != nil {
 			return "", ContextError(err)
 		}
 
-		var selectedInterface net.Interface
-		found := false
-		for _, networkInterface := range availableInterfaces {
-			if listenInterface == networkInterface.Name {
-				NoticeInfo("Using interface: %s", networkInterface.Name)
-				selectedInterface = networkInterface
-				found = true
-				break
-			}
+		addrs, err := availableInterfaces.Addrs()
+		if err != nil {
+			return "", ContextError(err)
 		}
-		if !found {
-			NoticeAlert("Interface not found: %s", listenInterface)
-			ip = net.ParseIP("127.0.0.1")
-		} else {
-			netAddrs, err := selectedInterface.Addrs()
-			if err != nil {
-				return "", ContextError(err)
+		for _, addr := range addrs {
+			iptype := addr.(*net.IPNet)
+			if iptype == nil {
+				continue
 			}
-
-			for _, ipAddr := range netAddrs {
-				ip, _, err = net.ParseCIDR(ipAddr.String())
-				if err != nil {
-					return "", ContextError(err)
-				}
-				if ip.To4() != nil {
-					break
-				}
-			}
+			// TODO: IPv6 support
+			ip = iptype.IP.To4()
+			return ip.String(), nil
 		}
 	}
 
-	NoticeInfo("Listening on IP address: %s", ip.String())
+	return "", ContextError(errors.New("Could not find IP address of specified interface"))
 
-	return ip.String(), nil
 }

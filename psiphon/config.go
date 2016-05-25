@@ -168,7 +168,6 @@ type Config struct {
 
 	// ListenInterface specifies which interface to listen on.  If no interface
 	// is provided then listen on 127.0.0.1.
-	// If an invalid interface is provided then listen on localhost (127.0.0.1).
 	// If 'any' is provided then use 0.0.0.0.
 	// If there are multiple IP addresses on an interface use the first IPv4 address.
 	ListenInterface string
