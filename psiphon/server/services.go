@@ -79,23 +79,11 @@ func RunServices(encodedConfigs [][]byte) error {
 		}()
 	}
 
-	if config.RunSSHServer() {
+	if config.RunSSHServer() || config.RunObfuscatedSSHServer() {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
 			err := RunSSHServer(config, shutdownBroadcast)
-			select {
-			case errors <- err:
-			default:
-			}
-		}()
-	}
-
-	if config.RunObfuscatedSSHServer() {
-		waitGroup.Add(1)
-		go func() {
-			defer waitGroup.Done()
-			err := RunObfuscatedSSHServer(config, shutdownBroadcast)
 			select {
 			case errors <- err:
 			default:

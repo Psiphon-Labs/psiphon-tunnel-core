@@ -55,6 +55,9 @@ func GetInterfaceIPAddress(listenInterface string) (string, error) {
 			}
 			// TODO: IPv6 support
 			ip = iptype.IP.To4()
+			if ip == nil {
+				continue
+			}
 			return ip.String(), nil
 		}
 	}

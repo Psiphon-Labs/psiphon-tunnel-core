@@ -57,6 +57,7 @@ const (
 	DEFAULT_SSH_SERVER_PORT                = 2222
 	SSH_HANDSHAKE_TIMEOUT                  = 30 * time.Second
 	SSH_CONNECTION_READ_DEADLINE           = 5 * time.Minute
+	SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT      = 30 * time.Second
 	SSH_OBFUSCATED_KEY_BYTE_LENGTH         = 32
 	DEFAULT_OBFUSCATED_SSH_SERVER_PORT     = 3333
 	REDIS_POOL_MAX_IDLE                    = 50
@@ -181,6 +182,12 @@ type Config struct {
 	// by this server, which parses the SSH channel using the udpgw
 	// protocol.
 	UdpgwServerAddress string
+
+	// LoadMonitorPeriodSeconds indicates how frequently to log server
+	// load information (number of connected clients per tunnel protocol,
+	// number of running goroutines, amount of memory allocated).
+	// The default, 0, disables load logging.
+	LoadMonitorPeriodSeconds int
 }
 
 // TrafficRules specify the limits placed on client traffic.
@@ -248,6 +255,11 @@ func (config *Config) RunSSHServer() bool {
 // RunObfuscatedSSHServer indicates whether to run an Obfuscated SSH server component.
 func (config *Config) RunObfuscatedSSHServer() bool {
 	return config.ObfuscatedSSHServerPort > 0
+}
+
+// RunLoadMonitor indicates whether to monitor and log server load.
+func (config *Config) RunLoadMonitor() bool {
+	return config.LoadMonitorPeriodSeconds > 0
 }
 
 // UseRedis indicates whether to store per-session GeoIP information in
@@ -355,8 +367,9 @@ type GenerateConfigParams struct {
 	// ServerIPAddress is the public IP address of the server.
 	ServerIPAddress string
 
-	// ServerNetworkInterface is the (optional) nic to expose the server on
-	// when running in unprivileged mode but want to allow external clients to connect.
+	// ServerNetworkInterface specifies a network interface to
+	// use to determine the ServerIPAddress automatically. When
+	// set, ServerIPAddress is ignored.
 	ServerNetworkInterface string
 
 	// WebServerPort is the listening port of the web server.
@@ -378,11 +391,17 @@ type GenerateConfigParams struct {
 // the config file and server entry as necessary.
 func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 
-	// TODO: support disabling web server or a subset of protocols
-
 	serverIPaddress := params.ServerIPAddress
 	if serverIPaddress == "" {
 		serverIPaddress = DEFAULT_SERVER_IP_ADDRESS
+	}
+
+	if params.ServerNetworkInterface != "" {
+		var err error
+		serverIPaddress, err = psiphon.GetInterfaceIPAddress(params.ServerNetworkInterface)
+		if err != nil {
+			return nil, nil, psiphon.ContextError(err)
+		}
 	}
 
 	// Web server config
@@ -457,14 +476,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 		return nil, nil, psiphon.ContextError(err)
 	}
 
-	// Find IP address of the network interface (if not loopback)
-	serverNetworkInterface := params.ServerNetworkInterface
-	serverNetworkInterfaceIP, err := psiphon.GetInterfaceIPAddress(serverNetworkInterface)
-	if err != nil {
-		serverNetworkInterfaceIP = serverIPaddress
-		fmt.Printf("Could not find IP address of nic.  Falling back to %s\n", serverIPaddress)
-	}
-
 	// Assemble config and server entry
 
 	config := &Config{
@@ -504,7 +515,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 	}
 
 	serverEntry := &psiphon.ServerEntry{
-		IpAddress:            serverNetworkInterfaceIP,
+		IpAddress:            serverIPaddress,
 		WebServerPort:        fmt.Sprintf("%d", webServerPort),
 		WebServerSecret:      webServerSecret,
 		WebServerCertificate: strippedWebServerCertificate,
