@@ -355,6 +355,10 @@ type GenerateConfigParams struct {
 	// ServerIPAddress is the public IP address of the server.
 	ServerIPAddress string
 
+	// ServerNetworkInterface is the (optional) nic to expose the server on
+	// when running in unprivileged mode but want to allow external clients to connect.
+	ServerNetworkInterface string
+
 	// WebServerPort is the listening port of the web server.
 	// When <= 0, no web server component is run.
 	WebServerPort int
@@ -453,6 +457,14 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 		return nil, nil, psiphon.ContextError(err)
 	}
 
+	// Find IP address of the network interface (if not loopback)
+	serverNetworkInterface := params.ServerNetworkInterface
+	serverNetworkInterfaceIP, err := psiphon.GetInterfaceIPAddress(serverNetworkInterface)
+	if err != nil {
+		serverNetworkInterfaceIP = serverIPaddress
+		fmt.Printf("Could not find IP address of nic.  Falling back to %s\n", serverIPaddress)
+	}
+
 	// Assemble config and server entry
 
 	config := &Config{
@@ -492,7 +504,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 	}
 
 	serverEntry := &psiphon.ServerEntry{
-		IpAddress:            serverIPaddress,
+		IpAddress:            serverNetworkInterfaceIP,
 		WebServerPort:        fmt.Sprintf("%d", webServerPort),
 		WebServerSecret:      webServerSecret,
 		WebServerCertificate: strippedWebServerCertificate,
