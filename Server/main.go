@@ -31,25 +31,25 @@ import (
 
 func main() {
 
-	var generateServerIPaddress, newConfigFilename, newServerEntryFilename string
-	var networkInterface string
+	var generateServerIPaddress, generateServerNetworkInterface string
+	var generateConfigFilename, generateServerEntryFilename string
 	var generateWebServerPort, generateSSHServerPort, generateObfuscatedSSHServerPort int
 	var runConfigFilenames stringListFlag
 
 	flag.StringVar(
-		&newConfigFilename,
+		&generateConfigFilename,
 		"newConfig",
 		server.SERVER_CONFIG_FILENAME,
 		"generate new config with this `filename`")
 
 	flag.StringVar(
-		&newServerEntryFilename,
+		&generateServerEntryFilename,
 		"newServerEntry",
 		server.SERVER_ENTRY_FILENAME,
 		"generate new server entry with this `filename`")
 
 	flag.StringVar(
-		&networkInterface,
+		&generateServerNetworkInterface,
 		"interface",
 		"",
 		"generate server entry with this `network-interface`")
@@ -104,7 +104,7 @@ func main() {
 		configFileContents, serverEntryFileContents, err := server.GenerateConfig(
 			&server.GenerateConfigParams{
 				ServerIPAddress:         generateServerIPaddress,
-				ServerNetworkInterface:  networkInterface,
+				ServerNetworkInterface:  generateServerNetworkInterface,
 				WebServerPort:           generateWebServerPort,
 				SSHServerPort:           generateSSHServerPort,
 				ObfuscatedSSHServerPort: generateObfuscatedSSHServerPort,
@@ -114,13 +114,13 @@ func main() {
 			fmt.Errorf("generate failed: %s", err)
 			os.Exit(1)
 		}
-		err = ioutil.WriteFile(newConfigFilename, configFileContents, 0600)
+		err = ioutil.WriteFile(generateConfigFilename, configFileContents, 0600)
 		if err != nil {
 			fmt.Errorf("error writing configuration file: %s", err)
 			os.Exit(1)
 		}
 
-		err = ioutil.WriteFile(newServerEntryFilename, serverEntryFileContents, 0600)
+		err = ioutil.WriteFile(generateServerEntryFilename, serverEntryFileContents, 0600)
 		if err != nil {
 			fmt.Errorf("error writing server entry file: %s", err)
 			os.Exit(1)

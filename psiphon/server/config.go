@@ -367,8 +367,9 @@ type GenerateConfigParams struct {
 	// ServerIPAddress is the public IP address of the server.
 	ServerIPAddress string
 
-	// ServerNetworkInterface is the (optional) nic to expose the server on
-	// when running in unprivileged mode but want to allow external clients to connect.
+	// ServerNetworkInterface specifies a network interface to
+	// use to determine the ServerIPAddress automatically. When
+	// set, ServerIPAddress is ignored.
 	ServerNetworkInterface string
 
 	// WebServerPort is the listening port of the web server.
@@ -390,11 +391,17 @@ type GenerateConfigParams struct {
 // the config file and server entry as necessary.
 func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 
-	// TODO: support disabling web server or a subset of protocols
-
 	serverIPaddress := params.ServerIPAddress
 	if serverIPaddress == "" {
 		serverIPaddress = DEFAULT_SERVER_IP_ADDRESS
+	}
+
+	if params.ServerNetworkInterface != "" {
+		var err error
+		serverIPaddress, err = psiphon.GetInterfaceIPAddress(params.ServerNetworkInterface)
+		if err != nil {
+			return nil, nil, psiphon.ContextError(err)
+		}
 	}
 
 	// Web server config
@@ -469,14 +476,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 		return nil, nil, psiphon.ContextError(err)
 	}
 
-	// Find IP address of the network interface (if not loopback)
-	serverNetworkInterface := params.ServerNetworkInterface
-	serverNetworkInterfaceIP, err := psiphon.GetInterfaceIPAddress(serverNetworkInterface)
-	if err != nil {
-		serverNetworkInterfaceIP = serverIPaddress
-		fmt.Printf("Could not find IP address of nic.  Falling back to %s\n", serverIPaddress)
-	}
-
 	// Assemble config and server entry
 
 	config := &Config{
@@ -516,7 +515,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 	}
 
 	serverEntry := &psiphon.ServerEntry{
-		IpAddress:            serverNetworkInterfaceIP,
+		IpAddress:            serverIPaddress,
 		WebServerPort:        fmt.Sprintf("%d", webServerPort),
 		WebServerSecret:      webServerSecret,
 		WebServerCertificate: strippedWebServerCertificate,
