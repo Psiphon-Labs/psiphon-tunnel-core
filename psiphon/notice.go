@@ -37,7 +37,12 @@ var noticeLoggerMutex sync.Mutex
 var noticeLogger = log.New(os.Stderr, "", 0)
 var noticeLogDiagnostics = int32(0)
 
-func setEmitDiagnosticNotices(enable bool) {
+// SetEmitDiagnosticNotices toggles whether diagnostic notices
+// are emitted. Diagnostic notices contain potentially sensitive
+// circumvention network information; only enable this in environments
+// where notices are handled securely (for example, don't include these
+// notices in log files which users could post to public forums).
+func SetEmitDiagnosticNotices(enable bool) {
 	if enable {
 		atomic.StoreInt32(&noticeLogDiagnostics, 1)
 	} else {
@@ -45,7 +50,9 @@ func setEmitDiagnosticNotices(enable bool) {
 	}
 }
 
-func getEmitDiagnoticNotices() bool {
+// GetEmitDiagnoticNotices returns the current state
+// of emitting diagnostic notices.
+func GetEmitDiagnoticNotices() bool {
 	return atomic.LoadInt32(&noticeLogDiagnostics) == 1
 }
 
@@ -76,7 +83,7 @@ func SetNoticeOutput(output io.Writer) {
 // outputNotice encodes a notice in JSON and writes it to the output writer.
 func outputNotice(noticeType string, isDiagnostic, showUser bool, args ...interface{}) {
 
-	if isDiagnostic && !getEmitDiagnoticNotices() {
+	if isDiagnostic && !GetEmitDiagnoticNotices() {
 		return
 	}
 
@@ -266,7 +273,7 @@ func NoticeClientUpgradeDownloaded(filename string) {
 // transferred since the last NoticeBytesTransferred, for the tunnel
 // to the server at ipAddress.
 func NoticeBytesTransferred(ipAddress string, sent, received int64) {
-	if getEmitDiagnoticNotices() {
+	if GetEmitDiagnoticNotices() {
 		outputNotice("BytesTransferred", true, false, "ipAddress", ipAddress, "sent", sent, "received", received)
 	} else {
 		// This case keeps the EmitBytesTransferred and EmitDiagnosticNotices config options independent
@@ -278,7 +285,7 @@ func NoticeBytesTransferred(ipAddress string, sent, received int64) {
 // transferred in total up to this point, for the tunnel to the server
 // at ipAddress.
 func NoticeTotalBytesTransferred(ipAddress string, sent, received int64) {
-	if getEmitDiagnoticNotices() {
+	if GetEmitDiagnoticNotices() {
 		outputNotice("TotalBytesTransferred", true, false, "ipAddress", ipAddress, "sent", sent, "received", received)
 	} else {
 		// This case keeps the EmitBytesTransferred and EmitDiagnosticNotices config options independent
