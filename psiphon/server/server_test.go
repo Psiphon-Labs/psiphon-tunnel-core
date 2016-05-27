@@ -41,7 +41,27 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestServer(t *testing.T) {
+func TestSSH(t *testing.T) {
+	runServer(t, "SSH")
+}
+
+func TestOSSH(t *testing.T) {
+	runServer(t, "OSSH")
+}
+
+func TestFrontedMeek(t *testing.T) {
+	runServer(t, "FRONTED-MEEK-OSSH")
+}
+
+func TestUnfrontedMeek(t *testing.T) {
+	runServer(t, "UNFRONTED-MEEK-OSSH")
+}
+
+func TestFrontedMeekHTTP(t *testing.T) {
+	runServer(t, "FRONTED-MEEK-HTTP-OSSH")
+}
+
+func runServer(t *testing.T, tunnelProtocol string) {
 
 	// create a server
 

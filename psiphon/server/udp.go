@@ -252,10 +252,10 @@ func (mux *udpPortForwardMultiplexer) closeLeastRecentlyUsedPortForward() {
 func (mux *udpPortForwardMultiplexer) transparentDNSAddress(
 	dialIP net.IP, dialPort int) (net.IP, int) {
 
-	if mux.sshClient.sshServer.config.DNSServerAddress != "" {
-		// Note: DNSServerAddress is validated in LoadConfig
+	if mux.sshClient.sshServer.config.UDPForwardDNSServerAddress != "" {
+		// Note: UDPForwardDNSServerAddress is validated in LoadConfig
 		host, portStr, _ := net.SplitHostPort(
-			mux.sshClient.sshServer.config.DNSServerAddress)
+			mux.sshClient.sshServer.config.UDPForwardDNSServerAddress)
 		dialIP = net.ParseIP(host)
 		dialPort, _ = strconv.Atoi(portStr)
 	}

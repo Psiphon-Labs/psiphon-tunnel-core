@@ -17,41 +17,10 @@
  *
  */
 
-/*
-Copyright (c) 2012 The Go Authors. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met:
-
-   * Redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the following disclaimer
-in the documentation and/or other materials provided with the
-distribution.
-   * Neither the name of Google Inc. nor the names of its
-contributors may be used to endorse or promote products derived from
-this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*/
-
 package psiphon
 
 import (
 	"crypto/rand"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -59,7 +28,6 @@ import (
 	"fmt"
 	"math/big"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"runtime"
@@ -121,7 +89,7 @@ func MakeSecureRandomBytes(length int) ([]byte, error) {
 
 // MakeSecureRandomPadding selects a random padding length in the indicated
 // range and returns a random byte array of the selected length.
-// In the unlikely case where an  underlying MakeRandom functions fails,
+// In the unlikely case where an underlying MakeRandom functions fails,
 // the padding is length 0.
 func MakeSecureRandomPadding(minLength, maxLength int) []byte {
 	var padding []byte
@@ -151,14 +119,24 @@ func MakeRandomPeriod(min, max time.Duration) (duration time.Duration) {
 	return
 }
 
-// MakeRandomString returns a hex encoded random string. byteLength
-// specifies the pre-encoded data length.
-func MakeRandomString(byteLength int) (string, error) {
+// MakeRandomStringHex returns a hex encoded random string.
+// byteLength specifies the pre-encoded data length.
+func MakeRandomStringHex(byteLength int) (string, error) {
 	bytes, err := MakeSecureRandomBytes(byteLength)
 	if err != nil {
 		return "", ContextError(err)
 	}
 	return hex.EncodeToString(bytes), nil
+}
+
+// MakeRandomStringBase64 returns a base64 encoded random string.
+// byteLength specifies the pre-encoded data length.
+func MakeRandomStringBase64(byteLength int) (string, error) {
+	bytes, err := MakeSecureRandomBytes(byteLength)
+	if err != nil {
+		return "", ContextError(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(bytes), nil
 }
 
 func DecodeCertificate(encodedCertificate string) (certificate *x509.Certificate, err error) {
@@ -296,37 +274,4 @@ func TruncateTimestampToHour(timestamp string) string {
 		return ""
 	}
 	return t.Truncate(1 * time.Hour).Format(time.RFC3339)
-}
-
-// HTTPSServer is a wrapper around http.Server which adds the
-// ServeTLS function.
-type HTTPSServer struct {
-	http.Server
-}
-
-// ServeTLS is a offers the equivalent interface as http.Serve.
-// The http package has both ListenAndServe and ListenAndServeTLS higher-
-// level interfaces, but only Serve (not TLS) offers a lower-level interface that
-// allows the caller to keep a refererence to the Listener, allowing for external
-// shutdown. ListenAndServeTLS also requires the TLS cert and key to be in files
-// and we avoid that here.
-// tcpKeepAliveListener is used in http.ListenAndServeTLS but not exported,
-// so we use a copy from https://golang.org/src/net/http/server.go.
-func (server *HTTPSServer) ServeTLS(listener net.Listener) error {
-	tlsListener := tls.NewListener(tcpKeepAliveListener{listener.(*net.TCPListener)}, server.TLSConfig)
-	return server.Serve(tlsListener)
-}
-
-type tcpKeepAliveListener struct {
-	*net.TCPListener
-}
-
-func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
-	tc, err := ln.AcceptTCP()
-	if err != nil {
-		return
-	}
-	tc.SetKeepAlive(true)
-	tc.SetKeepAlivePeriod(3 * time.Minute)
-	return tc, nil
 }

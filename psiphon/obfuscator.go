@@ -26,7 +26,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"net"
 )
 
 const (
@@ -86,12 +85,12 @@ func NewClientObfuscator(
 }
 
 // NewServerObfuscator creates a new Obfuscator, reading a seed message directly
-// from the clientConn and initializing stream ciphers to obfuscate data.
+// from the clientReader and initializing stream ciphers to obfuscate data.
 func NewServerObfuscator(
-	clientConn net.Conn, config *ObfuscatorConfig) (obfuscator *Obfuscator, err error) {
+	clientReader io.Reader, config *ObfuscatorConfig) (obfuscator *Obfuscator, err error) {
 
 	clientToServerCipher, serverToClientCipher, err := readSeedMessage(
-		clientConn, config)
+		clientReader, config)
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -195,10 +194,10 @@ func makeSeedMessage(maxPadding int, seed []byte, clientToServerCipher *rc4.Ciph
 }
 
 func readSeedMessage(
-	clientConn net.Conn, config *ObfuscatorConfig) (*rc4.Cipher, *rc4.Cipher, error) {
+	clientReader io.Reader, config *ObfuscatorConfig) (*rc4.Cipher, *rc4.Cipher, error) {
 
 	seed := make([]byte, OBFUSCATE_SEED_LENGTH)
-	_, err := io.ReadFull(clientConn, seed)
+	_, err := io.ReadFull(clientReader, seed)
 	if err != nil {
 		return nil, nil, ContextError(err)
 	}
@@ -209,7 +208,7 @@ func readSeedMessage(
 	}
 
 	fixedLengthFields := make([]byte, 8) // 4 bytes each for magic value and padding length
-	_, err = io.ReadFull(clientConn, fixedLengthFields)
+	_, err = io.ReadFull(clientReader, fixedLengthFields)
 	if err != nil {
 		return nil, nil, ContextError(err)
 	}
@@ -237,7 +236,7 @@ func readSeedMessage(
 	}
 
 	padding := make([]byte, paddingLength)
-	_, err = io.ReadFull(clientConn, padding)
+	_, err = io.ReadFull(clientReader, padding)
 	if err != nil {
 		return nil, nil, ContextError(err)
 	}

@@ -90,6 +90,24 @@ const (
 	SERVER_ENTRY_SOURCE_TARGET    ServerEntrySource = "TARGET"
 )
 
+func TunnelProtocolUsesSSH(protocol string) bool {
+	return true
+}
+
+func TunnelProtocolUsesObfuscatedSSH(protocol string) bool {
+	return protocol != TUNNEL_PROTOCOL_SSH
+}
+
+func TunnelProtocolUsesMeekHTTP(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
+		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP
+}
+
+func TunnelProtocolUsesMeekHTTPS(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS
+}
+
 // GetCapability returns the server capability corresponding
 // to the protocol.
 func GetCapability(protocol string) string {

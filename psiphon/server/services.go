@@ -26,7 +26,9 @@ package server
 import (
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
@@ -67,6 +69,23 @@ func RunServices(encodedConfigs [][]byte) error {
 	shutdownBroadcast := make(chan struct{})
 	errors := make(chan error)
 
+	tunnelServer, err := NewTunnelServer(config, shutdownBroadcast)
+	if err != nil {
+		log.WithContextFields(LogFields{"error": err}).Error("init tunnel server failed")
+		return psiphon.ContextError(err)
+	}
+
+	if config.RunLoadMonitor() {
+		waitGroup.Add(1)
+		go func() {
+			waitGroup.Done()
+			runLoadMonitor(
+				tunnelServer,
+				time.Duration(config.LoadMonitorPeriodSeconds)*time.Second,
+				shutdownBroadcast)
+		}()
+	}
+
 	if config.RunWebServer() {
 		waitGroup.Add(1)
 		go func() {
@@ -79,17 +98,17 @@ func RunServices(encodedConfigs [][]byte) error {
 		}()
 	}
 
-	if config.RunSSHServer() || config.RunObfuscatedSSHServer() {
-		waitGroup.Add(1)
-		go func() {
-			defer waitGroup.Done()
-			err := RunSSHServer(config, shutdownBroadcast)
-			select {
-			case errors <- err:
-			default:
-			}
-		}()
-	}
+	// The tunnel server is always run; it launches multiple
+	// listeners, depending on which tunnel protocols are enabled.
+	waitGroup.Add(1)
+	go func() {
+		defer waitGroup.Done()
+		err := tunnelServer.Run()
+		select {
+		case errors <- err:
+		default:
+		}
+	}()
 
 	// An OS signal triggers an orderly shutdown
 	systemStopSignal := make(chan os.Signal, 1)
@@ -108,4 +127,40 @@ func RunServices(encodedConfigs [][]byte) error {
 	waitGroup.Wait()
 
 	return err
+}
+
+// runLoadMonitor periodically logs golang runtime and tunnel server stats
+func runLoadMonitor(
+	server *TunnelServer,
+	loadMonitorPeriod time.Duration,
+	shutdownBroadcast <-chan struct{}) {
+
+	ticker := time.NewTicker(loadMonitorPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-shutdownBroadcast:
+			return
+		case <-ticker.C:
+
+			// golang runtime stats
+			var memStats runtime.MemStats
+			runtime.ReadMemStats(&memStats)
+			fields := LogFields{
+				"NumGoroutine":        runtime.NumGoroutine(),
+				"MemStats.Alloc":      memStats.Alloc,
+				"MemStats.TotalAlloc": memStats.TotalAlloc,
+				"MemStats.Sys":        memStats.Sys,
+			}
+
+			// tunnel server stats
+			for tunnelProtocol, stats := range server.GetLoadStats() {
+				for stat, value := range stats {
+					fields[tunnelProtocol+"."+stat] = value
+				}
+			}
+
+			log.WithContextFields(fields).Info("load")
+		}
+	}
 }
