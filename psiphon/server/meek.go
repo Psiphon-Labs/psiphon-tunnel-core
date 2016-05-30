@@ -439,15 +439,16 @@ type meekSession struct {
 	clientConn          *meekConn
 	meekProtocolVersion int
 	sessionIDSent       bool
-	lastSeen            time.Time
+	lastActivity        int64
 }
 
 func (session *meekSession) touch() {
-	session.lastSeen = time.Now()
+	atomic.StoreInt64(&session.lastActivity, time.Now().UnixNano())
 }
 
 func (session *meekSession) expired() bool {
-	return time.Since(session.lastSeen) > MEEK_MAX_SESSION_STALENESS
+	lastActivity := atomic.LoadInt64(&session.lastActivity)
+	return time.Since(time.Unix(0, lastActivity)) > MEEK_MAX_SESSION_STALENESS
 }
 
 // makeMeekTLSConfig creates a TLS config for a meek HTTPS listener.
@@ -637,7 +638,13 @@ func (conn *meekConn) Read(buffer []byte) (int, error) {
 
 	n, err := reader.Read(buffer)
 
-	if n == len(buffer) && err == nil {
+	if err != nil {
+		if err == io.EOF {
+			err = nil
+		}
+		// Assumes readerResult won't block.
+		conn.readResult <- err
+	} else {
 		// There may be more data in the reader, but the caller's
 		// buffer is full, so put the reader back into the ready
 		// channel. PumpReads remains blocked waiting for another
@@ -645,9 +652,6 @@ func (conn *meekConn) Read(buffer []byte) (int, error) {
 		// Note that the reader could be at EOF, while another call is
 		// required to get that result (https://golang.org/pkg/io/#Reader).
 		conn.readyReader <- reader
-	} else {
-		// Assumes readerResult won't block.
-		conn.readResult <- err
 	}
 
 	return n, err
@@ -668,11 +672,16 @@ func (conn *meekConn) PumpWrites(writer io.Writer) error {
 		select {
 		case buffer := <-conn.nextWriteBuffer:
 			_, err := writer.Write(buffer)
+
+			// Assumes that writeResult won't block.
+			// Note: always send the err to writeResult,
+			// as the Write() caller is blocking on this.
+			conn.writeResult <- err
+
 			if err != nil {
-				// Assumes that writeResult won't block.
-				conn.writeResult <- err
 				return err
 			}
+
 			if conn.protocolVersion < MEEK_PROTOCOL_VERSION_2 {
 				// Protocol v1 clients expect at most
 				// MEEK_MAX_PAYLOAD_LENGTH response bodies
@@ -710,13 +719,23 @@ func (conn *meekConn) Write(buffer []byte) (int, error) {
 		// Only write MEEK_MAX_PAYLOAD_LENGTH at a time,
 		// to ensure compatibility with v1 protocol.
 		chunk := buffer[n:end]
+
 		select {
 		case conn.nextWriteBuffer <- chunk:
-		case err := <-conn.writeResult:
-			return n, err
 		case <-conn.closeBroadcast:
 			return n, io.EOF
 		}
+
+		// Wait for the buffer to be processed.
+		select {
+		case err := <-conn.writeResult:
+			if err != nil {
+				return n, err
+			}
+		case <-conn.closeBroadcast:
+			return n, io.EOF
+		}
+		n += len(chunk)
 	}
 	return n, nil
 }
