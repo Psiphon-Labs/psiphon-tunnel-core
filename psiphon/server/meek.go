@@ -163,7 +163,7 @@ func (server *MeekServer) Run() error {
 	if server.tlsConfig != nil {
 		httpServer.TLSConfig = server.tlsConfig
 		httpsServer := psiphon.HTTPSServer{Server: *httpServer}
-		err = httpsServer.Serve(server.listener)
+		err = httpsServer.ServeTLS(server.listener)
 	} else {
 		err = httpServer.Serve(server.listener)
 	}
@@ -708,6 +708,10 @@ func (conn *meekConn) PumpWrites(writer io.Writer) error {
 func (conn *meekConn) Write(buffer []byte) (int, error) {
 	conn.writeLock.Lock()
 	defer conn.writeLock.Unlock()
+
+	// TODO: may be more efficient to send whole buffer
+	// and have PumpWrites stash partial buffer when can't
+	// send it all.
 
 	n := 0
 	for n < len(buffer) {
