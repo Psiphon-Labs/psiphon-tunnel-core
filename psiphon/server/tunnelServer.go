@@ -318,10 +318,13 @@ func (sshServer *sshServer) getLoadStats() map[string]map[string]int64 {
 
 	loadStats := make(map[string]map[string]int64)
 	for _, client := range sshServer.clients {
+		if loadStats[client.tunnelProtocol] == nil {
+			loadStats[client.tunnelProtocol] = make(map[string]int64)
+		}
 		// Note: can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
 		loadStats[client.tunnelProtocol]["CurrentClients"] += 1
 		client.Lock()
-		loadStats[client.tunnelProtocol]["CurrentCPPortForwards"] += client.tcpTrafficState.concurrentPortForwardCount
+		loadStats[client.tunnelProtocol]["CurrentTCPPortForwards"] += client.tcpTrafficState.concurrentPortForwardCount
 		loadStats[client.tunnelProtocol]["TotalTCPPortForwards"] += client.tcpTrafficState.totalPortForwardCount
 		loadStats[client.tunnelProtocol]["CurrentUDPPortForwards"] += client.udpTrafficState.concurrentPortForwardCount
 		loadStats[client.tunnelProtocol]["TotalUDPPortForwards"] += client.udpTrafficState.totalPortForwardCount
