@@ -409,7 +409,7 @@ func GenerateConfig(serverIPaddress string) ([]byte, []byte, error) {
 
 	// Web server config
 
-	webServerPort := 8080
+	webServerPort := 8088
 
 	webServerSecret, err := psiphon.MakeRandomStringHex(WEB_SERVER_SECRET_BYTE_LENGTH)
 	if err != nil {
@@ -490,7 +490,7 @@ func GenerateConfig(serverIPaddress string) ([]byte, []byte, error) {
 
 	sshPort := 22
 	obfuscatedSSHPort := 53
-	meekPort := 8080
+	meekPort := 8188
 
 	config := &Config{
 		LogLevel:              "info",
@@ -517,9 +517,9 @@ func GenerateConfig(serverIPaddress string) ([]byte, []byte, error) {
 			"FRONTED-MEEK-HTTP-OSSH": 80,
 		},
 		RedisServerAddress:             "",
-		UDPForwardDNSServerAddress:     "8.8.8.8",
+		UDPForwardDNSServerAddress:     "8.8.8.8:53",
 		UDPInterceptUdpgwServerAddress: "127.0.0.1:7300",
-		MeekCookieEncryptionPrivateKey: base64.RawStdEncoding.EncodeToString(meekCookieEncryptionPrivateKey[:]),
+		MeekCookieEncryptionPrivateKey: base64.StdEncoding.EncodeToString(meekCookieEncryptionPrivateKey[:]),
 		MeekObfuscatedKey:              meekObfuscatedKey,
 		MeekCertificateCommonName:      "www.example.org",
 		MeekProhibitedHeaders:          nil,
@@ -572,7 +572,7 @@ func GenerateConfig(serverIPaddress string) ([]byte, []byte, error) {
 		Capabilities:                  capabilities,
 		Region:                        "US",
 		MeekServerPort:                meekPort,
-		MeekCookieEncryptionPublicKey: base64.RawStdEncoding.EncodeToString(meekCookieEncryptionPublicKey[:]),
+		MeekCookieEncryptionPublicKey: base64.StdEncoding.EncodeToString(meekCookieEncryptionPublicKey[:]),
 		MeekObfuscatedKey:             meekObfuscatedKey,
 		MeekFrontingHosts:             []string{serverIPaddress},
 		MeekFrontingAddresses:         []string{serverIPaddress},

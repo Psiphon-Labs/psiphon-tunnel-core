@@ -66,7 +66,7 @@ func runServer(t *testing.T, tunnelProtocol string) {
 	// create a server
 
 	serverConfigFileContents, serverEntryFileContents, err := GenerateConfig(
-		&GenerateConfigParams{})
+		"127.0.0.1")
 	if err != nil {
 		t.Fatalf("error generating server config: %s", err)
 	}
@@ -133,7 +133,7 @@ func runServer(t *testing.T, tunnelProtocol string) {
 	clientConfig.DisableRemoteServerListFetcher = true
 	clientConfig.EstablishTunnelPausePeriodSeconds = &establishTunnelPausePeriodSeconds
 	clientConfig.TargetServerEntry = string(serverEntryFileContents)
-	clientConfig.TunnelProtocol = "OSSH"
+	clientConfig.TunnelProtocol = tunnelProtocol
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
 
 	err = psiphon.InitDataStore(clientConfig)
@@ -170,10 +170,14 @@ func runServer(t *testing.T, tunnelProtocol string) {
 			}
 		}))
 
+	controllerShutdownBroadcast := make(chan struct{})
+	controllerWaitGroup := new(sync.WaitGroup)
+	controllerWaitGroup.Add(1)
 	go func() {
-		shutdownBroadcast := make(chan struct{})
-		controller.Run(shutdownBroadcast)
+		defer controllerWaitGroup.Done()
+		controller.Run(controllerShutdownBroadcast)
 	}()
+	defer close(controllerShutdownBroadcast)
 
 	// Test: tunnels must be established within 30 seconds
 
