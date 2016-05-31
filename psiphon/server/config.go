@@ -217,20 +217,41 @@ type Config struct {
 	LoadMonitorPeriodSeconds int
 }
 
+// RateLimits specify the rate limits for tunneled data transfer
+// between an individual client and the server.
+type RateLimits struct {
+
+	// DownstreamUnlimitedBytes specifies the number of downstream
+	// bytes to transfer, approximately, before starting rate
+	// limiting.
+	DownstreamUnlimitedBytes int64
+
+	// DownstreamBytesPerSecond specifies a rate limit for downstream
+	// data transfer. The default, 0, is no limit.
+	DownstreamBytesPerSecond int
+
+	// UpstreamUnlimitedBytes specifies the number of upstream
+	// bytes to transfer, approximately, before starting rate
+	// limiting.
+	UpstreamUnlimitedBytes int64
+
+	// UpstreamBytesPerSecond specifies a rate limit for upstream
+	// data transfer. The default, 0, is no limit.
+	UpstreamBytesPerSecond int
+}
+
 // TrafficRules specify the limits placed on client traffic.
 type TrafficRules struct {
+	// DefaultRateLimitsare the rate limits to be applied when
+	// no protocol-specific rates are set.
+	DefaultRateLimits RateLimits
 
-	// LimitDownstreamBytesPerSecond specifies a rate limit for
-	// downstream data transfer between a single client and the
-	// server.
-	// The default, 0, is no rate limit.
-	LimitDownstreamBytesPerSecond int
-
-	// LimitUpstreamBytesPerSecond specifies a rate limit for
-	// upstream data transfer between a single client and the
-	// server.
-	// The default, 0, is no rate limit.
-	LimitUpstreamBytesPerSecond int
+	// ProtocolRateLimits specifies the rate limits for particular
+	// tunnel protocols. The key for each rate limit entry is one
+	// or more space delimited Psiphon tunnel protocol names. Valid
+	// tunnel protocols includes the same list as for
+	// TunnelProtocolPorts.
+	ProtocolRateLimits map[string]RateLimits
 
 	// IdlePortForwardTimeoutMilliseconds is the timeout period
 	// after which idle (no bytes flowing in either direction)
@@ -292,17 +313,31 @@ func (config *Config) UseFail2Ban() bool {
 }
 
 // GetTrafficRules looks up the traffic rules for the specified country. If there
-// are no RegionalTrafficRules for the country, DefaultTrafficRules are returned.
-func (config *Config) GetTrafficRules(targetCountryCode string) TrafficRules {
+// are no RegionalTrafficRules for the country, DefaultTrafficRules are used.
+func (config *Config) GetTrafficRules(clientCountryCode string) TrafficRules {
 	// TODO: faster lookup?
 	for countryCodes, trafficRules := range config.RegionalTrafficRules {
 		for _, countryCode := range strings.Split(countryCodes, " ") {
-			if countryCode == targetCountryCode {
+			if countryCode == clientCountryCode {
 				return trafficRules
 			}
 		}
 	}
 	return config.DefaultTrafficRules
+}
+
+// GetRateLimits looks up the rate limits for the specified tunnel protocol.
+// If there are no ProtocolRateLimits for the protocol, DefaultRateLimits are used.
+func (rules *TrafficRules) GetRateLimits(clientTunnelProtocol string) RateLimits {
+	// TODO: faster lookup?
+	for tunnelProtocols, rateLimits := range rules.ProtocolRateLimits {
+		for _, tunnelProtocol := range strings.Split(tunnelProtocols, " ") {
+			if tunnelProtocol == clientTunnelProtocol {
+				return rateLimits
+			}
+		}
+	}
+	return rules.DefaultRateLimits
 }
 
 // LoadConfig loads and validates a JSON encoded server config. If more than one
@@ -525,8 +560,12 @@ func GenerateConfig(serverIPaddress string) ([]byte, []byte, error) {
 		MeekProhibitedHeaders:          nil,
 		MeekProxyForwardedForHeaders:   []string{"X-Forwarded-For"},
 		DefaultTrafficRules: TrafficRules{
-			LimitDownstreamBytesPerSecond:      0,
-			LimitUpstreamBytesPerSecond:        0,
+			DefaultRateLimits: RateLimits{
+				DownstreamUnlimitedBytes: 0,
+				DownstreamBytesPerSecond: 0,
+				UpstreamUnlimitedBytes:   0,
+				UpstreamBytesPerSecond:   0,
+			},
 			IdlePortForwardTimeoutMilliseconds: 0,
 			MaxTCPPortForwardCount:             256,
 			MaxUDPPortForwardCount:             32,

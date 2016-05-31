@@ -63,6 +63,7 @@ import (
 	"os"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Inc/dns"
@@ -684,18 +685,30 @@ func (conn *IdleTimeoutConn) Write(buffer []byte) (int, error) {
 }
 
 // ThrottledConn wraps a net.Conn with read and write rate limiters.
-// Rates are specified as bytes per second. The underlying rate limiter
-// uses the token bucket algorithm to calculate delay times for read
-// and write operations. Specify limit values of 0 set no limit.
+// Rates are specified as bytes per second. Optional unlimited byte
+// counts allow for a number of bytes to read or write before
+// applying rate limiting. Specify limit values of 0 to set no rate
+// limit (unlimited counts are ignored in this case).
+// The underlying rate limiter uses the token bucket algorithm to
+// calculate delay times for read and write operations.
 type ThrottledConn struct {
 	net.Conn
-	reader io.Reader
-	writer io.Writer
+	unlimitedReadBytes  int64
+	limitingReads       int32
+	limitedReader       io.Reader
+	unlimitedWriteBytes int64
+	limitingWrites      int32
+	limitedWriter       io.Writer
 }
 
+// NewThrottledConn initializes a new ThrottledConn.
 func NewThrottledConn(
 	conn net.Conn,
-	limitReadBytesPerSecond, limitWriteBytesPerSecond int64) *ThrottledConn {
+	unlimitedReadBytes, limitReadBytesPerSecond,
+	unlimitedWriteBytes, limitWriteBytesPerSecond int64) *ThrottledConn {
+
+	// When no limit is specified, the rate limited reader/writer
+	// is simply the base reader/writer.
 
 	var reader io.Reader
 	if limitReadBytesPerSecond == 0 {
@@ -705,6 +718,7 @@ func NewThrottledConn(
 			ratelimit.NewBucketWithRate(
 				float64(limitReadBytesPerSecond), limitReadBytesPerSecond))
 	}
+
 	var writer io.Writer
 	if limitWriteBytesPerSecond == 0 {
 		writer = conn
@@ -713,17 +727,42 @@ func NewThrottledConn(
 			ratelimit.NewBucketWithRate(
 				float64(limitWriteBytesPerSecond), limitWriteBytesPerSecond))
 	}
+
 	return &ThrottledConn{
-		Conn:   conn,
-		reader: reader,
-		writer: writer,
+		Conn:                conn,
+		unlimitedReadBytes:  unlimitedReadBytes,
+		limitingReads:       0,
+		limitedReader:       reader,
+		unlimitedWriteBytes: unlimitedWriteBytes,
+		limitingWrites:      0,
+		limitedWriter:       writer,
 	}
 }
 
 func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
-	return conn.reader.Read(buffer)
+
+	// Use the base reader until the unlimited count is exhausted.
+	if atomic.LoadInt32(&conn.limitingReads) == 0 {
+		if atomic.AddInt64(&conn.unlimitedReadBytes, -int64(len(buffer))) <= 0 {
+			atomic.StoreInt32(&conn.limitingReads, 1)
+		} else {
+			return conn.Read(buffer)
+		}
+	}
+
+	return conn.limitedReader.Read(buffer)
 }
 
 func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
-	return conn.writer.Write(buffer)
+
+	// Use the base writer until the unlimited count is exhausted.
+	if atomic.LoadInt32(&conn.limitingWrites) == 0 {
+		if atomic.AddInt64(&conn.unlimitedWriteBytes, -int64(len(buffer))) <= 0 {
+			atomic.StoreInt32(&conn.limitingWrites, 1)
+		} else {
+			return conn.Write(buffer)
+		}
+	}
+
+	return conn.limitedWriter.Write(buffer)
 }

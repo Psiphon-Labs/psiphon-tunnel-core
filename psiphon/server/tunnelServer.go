@@ -365,10 +365,13 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 
 	// Further wrap the connection in a rate limiting ThrottledConn.
 
+	rateLimits := sshClient.trafficRules.GetRateLimits(tunnelProtocol)
 	clientConn = psiphon.NewThrottledConn(
 		clientConn,
-		int64(sshClient.trafficRules.LimitDownstreamBytesPerSecond),
-		int64(sshClient.trafficRules.LimitUpstreamBytesPerSecond))
+		rateLimits.DownstreamUnlimitedBytes,
+		int64(rateLimits.DownstreamBytesPerSecond),
+		rateLimits.UpstreamUnlimitedBytes,
+		int64(rateLimits.UpstreamBytesPerSecond))
 
 	// Run the initial [obfuscated] SSH handshake in a goroutine so we can both
 	// respect shutdownBroadcast and implement a specific handshake timeout.
