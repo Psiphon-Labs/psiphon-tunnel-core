@@ -635,8 +635,12 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	var bytesUp, bytesDown int64
 	sshClient.openedPortForward(sshClient.tcpTrafficState)
-	defer sshClient.closedPortForward(
-		sshClient.tcpTrafficState, atomic.LoadInt64(&bytesUp), atomic.LoadInt64(&bytesDown))
+	defer func() {
+		sshClient.closedPortForward(
+			sshClient.tcpTrafficState,
+			atomic.LoadInt64(&bytesUp),
+			atomic.LoadInt64(&bytesDown))
+	}()
 
 	// TOCTOU note: important to increment the port forward count (via
 	// openPortForward) _before_ checking isPortForwardLimitExceeded
