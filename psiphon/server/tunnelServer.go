@@ -714,7 +714,7 @@ func (sshClient *sshClient) handleTCPChannel(
 			true)
 	}
 
-	// relay channel to forwarded connection
+	// Relay channel to forwarded connection.
 	// TODO: relay errors to fwdChannel.Stderr()?
 	// TODO: use a low-memory io.Copy?
 
@@ -728,13 +728,17 @@ func (sshClient *sshClient) handleTCPChannel(
 			// Debug since errors such as "connection reset by peer" occur during normal operation
 			log.WithContextFields(LogFields{"error": err}).Debug("downstream TCP relay failed")
 		}
+		// Interrupt upstream io.Copy when downstream is shutting down.
+		// TODO: this is done to quickly cleanup the port forward when
+		// fwdConn has a read timeout, but is it clean -- upstream may still
+		// be flowing?
+		fwdChannel.Close()
 	}()
 	bytes, err := io.Copy(fwdConn, fwdChannel)
 	atomic.AddInt64(&bytesUp, bytes)
 	if err != nil && err != io.EOF {
 		log.WithContextFields(LogFields{"error": err}).Debug("upstream TCP relay failed")
 	}
-
 	// Shutdown special case: fwdChannel will be closed and return EOF when
 	// the SSH connection is closed, but we need to explicitly close fwdConn
 	// to interrupt the downstream io.Copy, which may be blocked on a
