@@ -439,7 +439,10 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 
 	if result.err != nil {
 		clientConn.Close()
-		log.WithContextFields(LogFields{"error": result.err}).Warning("handshake failed")
+		// This is a Debug log due to noise. The handshake often fails due to I/O
+		// errors as clients frequently interrupt connections in progress when
+		// client-side load balancing completes a connection to a different server.
+		log.WithContextFields(LogFields{"error": result.err}).Debug("handshake failed")
 		return
 	}
 
@@ -791,9 +794,9 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 				LogFail2Ban(clientIPAddress)
 			}
 		}
-		log.WithContextFields(LogFields{"error": err, "method": method}).Warning("authentication failed")
+		log.WithContextFields(LogFields{"error": err, "method": method}).Debug("authentication failed")
 	} else {
-		log.WithContextFields(LogFields{"error": err, "method": method}).Info("authentication success")
+		log.WithContextFields(LogFields{"error": err, "method": method}).Debug("authentication success")
 	}
 }
 
