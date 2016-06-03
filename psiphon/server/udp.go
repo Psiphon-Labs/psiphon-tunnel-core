@@ -178,7 +178,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 					"connID":     message.connID}).Debug("dialing")
 
 			// TODO: on EADDRNOTAVAIL, temporarily suspend new clients
-			updConn, err := net.DialUDP(
+			udpConn, err := net.DialUDP(
 				"udp", nil, &net.UDPAddr{IP: dialIP, Port: dialPort})
 			if err != nil {
 				mux.sshClient.closedPortForward(mux.sshClient.udpTrafficState, 0, 0)
@@ -186,12 +186,27 @@ func (mux *udpPortForwardMultiplexer) run() {
 				continue
 			}
 
+			// When idle port forward traffic rules are in place, wrap updConn
+			// in an IdleTimeoutConn configured to reset idle on writes as well
+			// as reads. This ensures the port forward idle timeout only happens
+			// when both upstream and downstream directions are are idle.
+
+			var conn net.Conn
+			if mux.sshClient.trafficRules.IdlePortForwardTimeoutMilliseconds > 0 {
+				conn = psiphon.NewIdleTimeoutConn(
+					udpConn,
+					time.Duration(mux.sshClient.trafficRules.IdlePortForwardTimeoutMilliseconds)*time.Millisecond,
+					true)
+			} else {
+				conn = udpConn
+			}
+
 			portForward = &udpPortForward{
 				connID:       message.connID,
 				preambleSize: message.preambleSize,
 				remoteIP:     message.remoteIP,
 				remotePort:   message.remotePort,
-				conn:         updConn,
+				conn:         conn,
 				lastActivity: time.Now().UnixNano(),
 				bytesUp:      0,
 				bytesDown:    0,
@@ -200,8 +215,6 @@ func (mux *udpPortForwardMultiplexer) run() {
 			mux.portForwardsMutex.Lock()
 			mux.portForwards[portForward.connID] = portForward
 			mux.portForwardsMutex.Unlock()
-
-			// TODO: timeout inactive UDP port forwards
 
 			// relayDownstream will call sshClient.closedPortForward()
 			mux.relayWaitGroup.Add(1)
@@ -233,7 +246,8 @@ func (mux *udpPortForwardMultiplexer) run() {
 }
 
 func (mux *udpPortForwardMultiplexer) closeLeastRecentlyUsedPortForward() {
-	// TODO: use "container/list" and avoid a linear scan?
+	// TODO: use "container/list" and avoid a linear scan? However,
+	// move-to-front on each read/write would require mutex lock?
 	mux.portForwardsMutex.Lock()
 	oldestActivity := int64(math.MaxInt64)
 	var oldestPortForward *udpPortForward
@@ -273,7 +287,7 @@ type udpPortForward struct {
 	preambleSize int
 	remoteIP     []byte
 	remotePort   uint16
-	conn         *net.UDPConn
+	conn         net.Conn
 	lastActivity int64
 	bytesUp      int64
 	bytesDown    int64
