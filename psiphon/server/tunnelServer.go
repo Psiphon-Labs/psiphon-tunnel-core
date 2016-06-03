@@ -716,13 +716,16 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	// Relay channel to forwarded connection.
 	// TODO: relay errors to fwdChannel.Stderr()?
-	// TODO: use a low-memory io.Copy?
 
 	relayWaitGroup := new(sync.WaitGroup)
 	relayWaitGroup.Add(1)
 	go func() {
 		defer relayWaitGroup.Done()
-		bytes, err := io.Copy(fwdChannel, fwdConn)
+		// io.Copy allocates a 32K temporary buffer, and each port forward relay uses
+		// two of these buffers; using io.CopyBuffer with a smaller buffer reduces the
+		// overall memory footprint.
+		bytes, err := io.CopyBuffer(
+			fwdChannel, fwdConn, make([]byte, SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE))
 		atomic.AddInt64(&bytesDown, bytes)
 		if err != nil && err != io.EOF {
 			// Debug since errors such as "connection reset by peer" occur during normal operation
@@ -734,7 +737,8 @@ func (sshClient *sshClient) handleTCPChannel(
 		// be flowing?
 		fwdChannel.Close()
 	}()
-	bytes, err := io.Copy(fwdConn, fwdChannel)
+	bytes, err := io.CopyBuffer(
+		fwdConn, fwdChannel, make([]byte, SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE))
 	atomic.AddInt64(&bytesUp, bytes)
 	if err != nil && err != io.EOF {
 		log.WithContextFields(LogFields{"error": err}).Debug("upstream TCP relay failed")

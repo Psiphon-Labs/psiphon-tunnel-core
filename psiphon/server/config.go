@@ -39,23 +39,24 @@ import (
 )
 
 const (
-	SERVER_CONFIG_FILENAME            = "psiphon-server.config"
-	SERVER_ENTRY_FILENAME             = "serverEntry.dat"
-	DEFAULT_SERVER_IP_ADDRESS         = "127.0.0.1"
-	WEB_SERVER_SECRET_BYTE_LENGTH     = 32
-	DISCOVERY_VALUE_KEY_BYTE_LENGTH   = 32
-	WEB_SERVER_READ_TIMEOUT           = 10 * time.Second
-	WEB_SERVER_WRITE_TIMEOUT          = 10 * time.Second
-	SSH_USERNAME_SUFFIX_BYTE_LENGTH   = 8
-	SSH_PASSWORD_BYTE_LENGTH          = 32
-	SSH_RSA_HOST_KEY_BITS             = 2048
-	SSH_HANDSHAKE_TIMEOUT             = 30 * time.Second
-	SSH_CONNECTION_READ_DEADLINE      = 5 * time.Minute
-	SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT = 30 * time.Second
-	SSH_OBFUSCATED_KEY_BYTE_LENGTH    = 32
-	REDIS_POOL_MAX_IDLE               = 50
-	REDIS_POOL_MAX_ACTIVE             = 1000
-	REDIS_POOL_IDLE_TIMEOUT           = 5 * time.Minute
+	SERVER_CONFIG_FILENAME                = "psiphon-server.config"
+	SERVER_ENTRY_FILENAME                 = "serverEntry.dat"
+	DEFAULT_SERVER_IP_ADDRESS             = "127.0.0.1"
+	WEB_SERVER_SECRET_BYTE_LENGTH         = 32
+	DISCOVERY_VALUE_KEY_BYTE_LENGTH       = 32
+	WEB_SERVER_READ_TIMEOUT               = 10 * time.Second
+	WEB_SERVER_WRITE_TIMEOUT              = 10 * time.Second
+	SSH_USERNAME_SUFFIX_BYTE_LENGTH       = 8
+	SSH_PASSWORD_BYTE_LENGTH              = 32
+	SSH_RSA_HOST_KEY_BITS                 = 2048
+	SSH_HANDSHAKE_TIMEOUT                 = 30 * time.Second
+	SSH_CONNECTION_READ_DEADLINE          = 5 * time.Minute
+	SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT     = 30 * time.Second
+	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE = 8192
+	SSH_OBFUSCATED_KEY_BYTE_LENGTH        = 32
+	REDIS_POOL_MAX_IDLE                   = 50
+	REDIS_POOL_MAX_ACTIVE                 = 1000
+	REDIS_POOL_IDLE_TIMEOUT               = 5 * time.Minute
 )
 
 // TODO: break config into sections (sub-structs)
