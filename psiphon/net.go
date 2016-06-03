@@ -51,6 +51,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package psiphon
 
 import (
+	"container/list"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -219,6 +220,92 @@ func (conns *Conns) CloseAll() {
 		conn.Close()
 	}
 	conns.conns = make(map[net.Conn]bool)
+}
+
+// LRUConns is a concurrency-safe list of net.Conns ordered
+// by recent activity. Its purpose is to facilitate closing
+// the oldest connection in a set of connections.
+//
+// New connections added are referenced by a LRUConnsEntry,
+// which is used to Touch() active connections, which
+// promotes them to the front of the order and to Remove()
+// connections that are no longer LRU candidates.
+//
+// CloseOldest() will remove the oldest connection from the
+// list and call net.Conn.Close() on the connection.
+//
+// After an entry has been removed, LRUConnsEntry Touch()
+// and Remove() will have no effect.
+type LRUConns struct {
+	mutex sync.Mutex
+	list  *list.List
+}
+
+// NewLRUConns initializes a new LRUConns.
+func NewLRUConns() *LRUConns {
+	return &LRUConns{list: list.New()}
+}
+
+// Add inserts a net.Conn as the freshest connection
+// in a LRUConns and returns an LRUConnsEntry to be
+// used to freshen the connection or remove the connection
+// from the LRU list.
+func (conns *LRUConns) Add(conn net.Conn) *LRUConnsEntry {
+	conns.mutex.Lock()
+	defer conns.mutex.Unlock()
+	return &LRUConnsEntry{
+		lruConns: conns,
+		element:  conns.list.PushFront(conn),
+	}
+}
+
+// CloseOldest closes the oldest connection in a
+// LRUConns. It calls net.Conn.Close() on the
+// connection.
+func (conns *LRUConns) CloseOldest() {
+	conns.mutex.Lock()
+	oldest := conns.list.Back()
+	conn, ok := oldest.Value.(net.Conn)
+	if oldest != nil {
+		conns.list.Remove(oldest)
+	}
+	// Release mutex before closing conn
+	conns.mutex.Unlock()
+	if ok {
+		conn.Close()
+	}
+}
+
+// LRUConnsEntry is an entry in a LRUConns list.
+type LRUConnsEntry struct {
+	lruConns *LRUConns
+	element  *list.Element
+}
+
+// Remove deletes the connection referenced by the
+// LRUConnsEntry from the associated LRUConns.
+// Has no effect if the entry was not initialized
+// or previously removed.
+func (entry *LRUConnsEntry) Remove() {
+	if entry.lruConns == nil || entry.element == nil {
+		return
+	}
+	entry.lruConns.mutex.Lock()
+	defer entry.lruConns.mutex.Unlock()
+	entry.lruConns.list.Remove(entry.element)
+}
+
+// Touch promotes the connection referenced by the
+// LRUConnsEntry to the front of the associated LRUConns.
+// Has no effect if the entry was not initialized
+// or previously removed.
+func (entry *LRUConnsEntry) Touch() {
+	if entry.lruConns == nil || entry.element == nil {
+		return
+	}
+	entry.lruConns.mutex.Lock()
+	defer entry.lruConns.mutex.Unlock()
+	entry.lruConns.list.MoveToFront(entry.element)
 }
 
 // LocalProxyRelay sends to remoteConn bytes received from localConn,
@@ -647,39 +734,63 @@ func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
 	return tc, nil
 }
 
-// IdleTimeoutConn wraps a net.Conn and sets an initial ReadDeadline. The
-// deadline is extended whenever data is received from the connection.
-// Optionally, IdleTimeoutConn will also extend the deadline when data is
-// written to the connection.
-type IdleTimeoutConn struct {
+// ActivityMonitoredConn wraps a net.Conn, adding logic to deal with
+// events triggered by I/O activity.
+//
+// When an inactivity timeout is specified, the net.Conn Read() will
+// timeout after the specified period of read inactivity. Optionally,
+// ActivityMonitoredConn will also consider the connection active when
+// data is written to it.
+//
+// When a LRUConnsEntry is specified, then the LRU entry is promoted on
+// either a successful read or write.
+//
+type ActivityMonitoredConn struct {
 	net.Conn
-	deadline     time.Duration
-	resetOnWrite bool
+	inactivityTimeout time.Duration
+	activeOnWrite     bool
+	lruEntry          *LRUConnsEntry
 }
 
-func NewIdleTimeoutConn(
-	conn net.Conn, deadline time.Duration, resetOnWrite bool) *IdleTimeoutConn {
+func NewActivityMonitoredConn(
+	conn net.Conn,
+	inactivityTimeout time.Duration,
+	activeOnWrite bool,
+	lruEntry *LRUConnsEntry) *ActivityMonitoredConn {
 
-	conn.SetReadDeadline(time.Now().Add(deadline))
-	return &IdleTimeoutConn{
-		Conn:         conn,
-		deadline:     deadline,
-		resetOnWrite: resetOnWrite,
+	if inactivityTimeout > 0 {
+		conn.SetReadDeadline(time.Now().Add(inactivityTimeout))
+	}
+	return &ActivityMonitoredConn{
+		Conn:              conn,
+		inactivityTimeout: inactivityTimeout,
+		activeOnWrite:     activeOnWrite,
+		lruEntry:          lruEntry,
 	}
 }
 
-func (conn *IdleTimeoutConn) Read(buffer []byte) (int, error) {
+func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 	n, err := conn.Conn.Read(buffer)
 	if err == nil {
-		conn.Conn.SetReadDeadline(time.Now().Add(conn.deadline))
+		if conn.inactivityTimeout > 0 {
+			conn.Conn.SetReadDeadline(time.Now().Add(conn.inactivityTimeout))
+		}
+		if conn.lruEntry != nil {
+			conn.lruEntry.Touch()
+		}
 	}
 	return n, err
 }
 
-func (conn *IdleTimeoutConn) Write(buffer []byte) (int, error) {
+func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 	n, err := conn.Conn.Write(buffer)
-	if err == nil && conn.resetOnWrite {
-		conn.Conn.SetReadDeadline(time.Now().Add(conn.deadline))
+	if err == nil {
+		if conn.inactivityTimeout > 0 && conn.activeOnWrite {
+			conn.Conn.SetReadDeadline(time.Now().Add(conn.inactivityTimeout))
+		}
+		if conn.lruEntry != nil {
+			conn.lruEntry.Touch()
+		}
 	}
 	return n, err
 }

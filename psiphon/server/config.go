@@ -254,11 +254,17 @@ type TrafficRules struct {
 	// TunnelProtocolPorts.
 	ProtocolRateLimits map[string]RateLimits
 
-	// IdlePortForwardTimeoutMilliseconds is the timeout period
+	// IdleTCPPortForwardTimeoutMilliseconds is the timeout period
 	// after which idle (no bytes flowing in either direction)
-	// SSH client port forwards are preemptively closed.
+	// client TCP port forwards are preemptively closed.
 	// The default, 0, is no idle timeout.
-	IdlePortForwardTimeoutMilliseconds int
+	IdleTCPPortForwardTimeoutMilliseconds int
+
+	// IdleUDPPortForwardTimeoutMilliseconds is the timeout period
+	// after which idle (no bytes flowing in either direction)
+	// client UDP port forwards are preemptively closed.
+	// The default, 0, is no idle timeout.
+	IdleUDPPortForwardTimeoutMilliseconds int
 
 	// MaxTCPPortForwardCount is the maximum number of TCP port
 	// forwards each client may have open concurrently.
@@ -567,13 +573,14 @@ func GenerateConfig(serverIPaddress string) ([]byte, []byte, error) {
 				UpstreamUnlimitedBytes:   0,
 				UpstreamBytesPerSecond:   0,
 			},
-			IdlePortForwardTimeoutMilliseconds: 30000,
-			MaxTCPPortForwardCount:             1024,
-			MaxUDPPortForwardCount:             32,
-			AllowTCPPorts:                      nil,
-			AllowUDPPorts:                      nil,
-			DenyTCPPorts:                       nil,
-			DenyUDPPorts:                       nil,
+			IdleTCPPortForwardTimeoutMilliseconds: 30000,
+			IdleUDPPortForwardTimeoutMilliseconds: 30000,
+			MaxTCPPortForwardCount:                1024,
+			MaxUDPPortForwardCount:                32,
+			AllowTCPPorts:                         nil,
+			AllowUDPPorts:                         nil,
+			DenyTCPPorts:                          nil,
+			DenyUDPPorts:                          nil,
 		},
 		LoadMonitorPeriodSeconds: 300,
 	}

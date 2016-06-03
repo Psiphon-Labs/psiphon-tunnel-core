@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -75,6 +74,7 @@ func (sshClient *sshClient) handleUDPChannel(newChannel ssh.NewChannel) {
 		sshClient:      sshClient,
 		sshChannel:     sshChannel,
 		portForwards:   make(map[uint16]*udpPortForward),
+		portForwardLRU: psiphon.NewLRUConns(),
 		relayWaitGroup: new(sync.WaitGroup),
 	}
 	multiplexer.run()
@@ -86,6 +86,7 @@ type udpPortForwardMultiplexer struct {
 	portForwardsMutex sync.Mutex
 	portForwards      map[uint16]*udpPortForward
 	relayWaitGroup    *sync.WaitGroup
+	portForwardLRU    *psiphon.LRUConns
 }
 
 func (mux *udpPortForwardMultiplexer) run() {
@@ -158,10 +159,18 @@ func (mux *udpPortForwardMultiplexer) run() {
 				mux.sshClient.tcpTrafficState,
 				mux.sshClient.trafficRules.MaxUDPPortForwardCount) {
 
-				// When the UDP port forward limit is exceeded, we
-				// select the least recently used (read from or written
-				// to) port forward and discard it.
-				mux.closeLeastRecentlyUsedPortForward()
+				// Close the oldest UDP port forward. CloseOldest() closes
+				// the conn and the port forward's goroutine will complete
+				// the cleanup asynchronously.
+				//
+				// See LRU comment in handleTCPChannel() for a known
+				// limitations regarding CloseOldest().
+				mux.portForwardLRU.CloseOldest()
+
+				log.WithContextFields(
+					LogFields{
+						"maxCount": mux.sshClient.trafficRules.MaxUDPPortForwardCount,
+					}).Debug("closed LRU UDP port forward")
 			}
 
 			dialIP := net.IP(message.remoteIP)
@@ -186,20 +195,17 @@ func (mux *udpPortForwardMultiplexer) run() {
 				continue
 			}
 
-			// When idle port forward traffic rules are in place, wrap updConn
-			// in an IdleTimeoutConn configured to reset idle on writes as well
-			// as reads. This ensures the port forward idle timeout only happens
-			// when both upstream and downstream directions are are idle.
+			lruEntry := mux.portForwardLRU.Add(udpConn)
 
-			var conn net.Conn
-			if mux.sshClient.trafficRules.IdlePortForwardTimeoutMilliseconds > 0 {
-				conn = psiphon.NewIdleTimeoutConn(
-					udpConn,
-					time.Duration(mux.sshClient.trafficRules.IdlePortForwardTimeoutMilliseconds)*time.Millisecond,
-					true)
-			} else {
-				conn = udpConn
-			}
+			// ActivityMonitoredConn monitors the TCP port forward I/O and updates
+			// its LRU status. ActivityMonitoredConn also times out read on the port
+			// forward if both reads and writes have been idle for the specified
+			// duration.
+			conn := psiphon.NewActivityMonitoredConn(
+				udpConn,
+				time.Duration(mux.sshClient.trafficRules.IdleUDPPortForwardTimeoutMilliseconds)*time.Millisecond,
+				true,
+				lruEntry)
 
 			portForward = &udpPortForward{
 				connID:       message.connID,
@@ -207,7 +213,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 				remoteIP:     message.remoteIP,
 				remotePort:   message.remotePort,
 				conn:         conn,
-				lastActivity: time.Now().UnixNano(),
+				lruEntry:     lruEntry,
 				bytesUp:      0,
 				bytesDown:    0,
 				mux:          mux,
@@ -229,7 +235,9 @@ func (mux *udpPortForwardMultiplexer) run() {
 			// The port forward's goroutine will complete cleanup
 			portForward.conn.Close()
 		}
-		atomic.StoreInt64(&portForward.lastActivity, time.Now().UnixNano())
+
+		portForward.lruEntry.Touch()
+
 		atomic.AddInt64(&portForward.bytesUp, int64(len(message.packet)))
 	}
 
@@ -243,24 +251,6 @@ func (mux *udpPortForwardMultiplexer) run() {
 	mux.portForwardsMutex.Unlock()
 
 	mux.relayWaitGroup.Wait()
-}
-
-func (mux *udpPortForwardMultiplexer) closeLeastRecentlyUsedPortForward() {
-	// TODO: use "container/list" and avoid a linear scan? However,
-	// move-to-front on each read/write would require mutex lock?
-	mux.portForwardsMutex.Lock()
-	oldestActivity := int64(math.MaxInt64)
-	var oldestPortForward *udpPortForward
-	for _, nextPortForward := range mux.portForwards {
-		if nextPortForward.lastActivity < oldestActivity {
-			oldestPortForward = nextPortForward
-		}
-	}
-	if oldestPortForward != nil {
-		// The port forward's goroutine will complete cleanup
-		oldestPortForward.conn.Close()
-	}
-	mux.portForwardsMutex.Unlock()
 }
 
 func (mux *udpPortForwardMultiplexer) transparentDNSAddress(
@@ -288,7 +278,7 @@ type udpPortForward struct {
 	remoteIP     []byte
 	remotePort   uint16
 	conn         net.Conn
-	lastActivity int64
+	lruEntry     *psiphon.LRUConnsEntry
 	bytesUp      int64
 	bytesDown    int64
 	mux          *udpPortForwardMultiplexer
@@ -340,11 +330,14 @@ func (portForward *udpPortForward) relayDownstream() {
 			break
 		}
 
-		atomic.StoreInt64(&portForward.lastActivity, time.Now().UnixNano())
+		portForward.lruEntry.Touch()
+
 		atomic.AddInt64(&portForward.bytesDown, int64(packetSize))
 	}
 
 	portForward.mux.removePortForward(portForward.connID)
+
+	portForward.lruEntry.Remove()
 
 	portForward.conn.Close()
 
