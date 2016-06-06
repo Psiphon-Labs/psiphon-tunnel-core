@@ -443,15 +443,40 @@ func LoadConfig(configJSONs [][]byte) (*Config, error) {
 // encoded config and a client-compatible "server entry" for the server. It
 // generates all necessary secrets and key material, which are emitted in
 // the config file and server entry as necessary.
-// GenerateConfig creates a maximal config with many tunnel protocols enabled.
-// It uses sample values for many fields. The intention is for a generated
-// config to be used for testing or as a template for production setup, not
-// to generate production-ready configurations.
-func GenerateConfig(serverIPaddress string) ([]byte, []byte, error) {
+// GenerateConfig uses sample values for many fields. The intention is for
+// a generated config to be used for testing or as a template for production
+// setup, not to generate production-ready configurations.
+func GenerateConfig(
+	serverIPaddress string,
+	webServerPort int,
+	tunnelProtocolPorts map[string]int) ([]byte, []byte, error) {
+
+	// Input validation
+
+	if net.ParseIP(serverIPaddress) == nil {
+		return nil, nil, psiphon.ContextError(errors.New("invalid IP address"))
+	}
+
+	if len(tunnelProtocolPorts) == 0 {
+		return nil, nil, psiphon.ContextError(errors.New("no tunnel protocols"))
+	}
+
+	usedPort := make(map[int]bool)
+	if webServerPort != 0 {
+		usedPort[webServerPort] = true
+	}
+
+	for protocol, port := range tunnelProtocolPorts {
+		if !psiphon.Contains(psiphon.SupportedTunnelProtocols, protocol) {
+			return nil, nil, psiphon.ContextError(errors.New("invalid tunnel protocol"))
+		}
+		if usedPort[port] {
+			return nil, nil, psiphon.ContextError(errors.New("duplicate listening port"))
+		}
+		usedPort[port] = true
+	}
 
 	// Web server config
-
-	webServerPort := 8088
 
 	webServerSecret, err := psiphon.MakeRandomStringHex(WEB_SERVER_SECRET_BYTE_LENGTH)
 	if err != nil {
@@ -530,34 +555,24 @@ func GenerateConfig(serverIPaddress string) ([]byte, []byte, error) {
 	// Note: this config is intended for either testing or as an illustrative
 	// example or template and is not intended for production deployment.
 
-	sshPort := 22
-	obfuscatedSSHPort := 53
-	meekPort := 8188
-
 	config := &Config{
-		LogLevel:              "info",
-		SyslogFacility:        "user",
-		SyslogTag:             "psiphon-server",
-		Fail2BanFormat:        "Authentication failure for psiphon-client from %s",
-		GeoIPDatabaseFilename: "",
-		ServerIPAddress:       serverIPaddress,
-		DiscoveryValueHMACKey: discoveryValueHMACKey,
-		WebServerPort:         webServerPort,
-		WebServerSecret:       webServerSecret,
-		WebServerCertificate:  webServerCertificate,
-		WebServerPrivateKey:   webServerPrivateKey,
-		SSHPrivateKey:         string(sshPrivateKey),
-		SSHServerVersion:      sshServerVersion,
-		SSHUserName:           sshUserName,
-		SSHPassword:           sshPassword,
-		ObfuscatedSSHKey:      obfuscatedSSHKey,
-		TunnelProtocolPorts: map[string]int{
-			"SSH":                    sshPort,
-			"OSSH":                   obfuscatedSSHPort,
-			"FRONTED-MEEK-OSSH":      443,
-			"UNFRONTED-MEEK-OSSH":    meekPort,
-			"FRONTED-MEEK-HTTP-OSSH": 80,
-		},
+		LogLevel:                       "info",
+		SyslogFacility:                 "user",
+		SyslogTag:                      "psiphon-server",
+		Fail2BanFormat:                 "Authentication failure for psiphon-client from %s",
+		GeoIPDatabaseFilename:          "",
+		ServerIPAddress:                serverIPaddress,
+		DiscoveryValueHMACKey:          discoveryValueHMACKey,
+		WebServerPort:                  webServerPort,
+		WebServerSecret:                webServerSecret,
+		WebServerCertificate:           webServerCertificate,
+		WebServerPrivateKey:            webServerPrivateKey,
+		SSHPrivateKey:                  string(sshPrivateKey),
+		SSHServerVersion:               sshServerVersion,
+		SSHUserName:                    sshUserName,
+		SSHPassword:                    sshPassword,
+		ObfuscatedSSHKey:               obfuscatedSSHKey,
+		TunnelProtocolPorts:            tunnelProtocolPorts,
 		RedisServerAddress:             "",
 		UDPForwardDNSServerAddress:     "8.8.8.8:53",
 		UDPInterceptUdpgwServerAddress: "127.0.0.1:7300",
@@ -594,11 +609,21 @@ func GenerateConfig(serverIPaddress string) ([]byte, []byte, error) {
 	lines := strings.Split(webServerCertificate, "\n")
 	strippedWebServerCertificate := strings.Join(lines[1:len(lines)-2], "")
 
-	capabilities := []string{
-		psiphon.GetCapability(psiphon.TUNNEL_PROTOCOL_SSH),
-		psiphon.GetCapability(psiphon.TUNNEL_PROTOCOL_OBFUSCATED_SSH),
-		psiphon.GetCapability(psiphon.TUNNEL_PROTOCOL_FRONTED_MEEK),
-		psiphon.GetCapability(psiphon.TUNNEL_PROTOCOL_UNFRONTED_MEEK),
+	capabilities := make([]string, 0)
+
+	for protocol, _ := range tunnelProtocolPorts {
+		capabilities = append(capabilities, psiphon.GetCapability(protocol))
+	}
+
+	sshPort := tunnelProtocolPorts["SSH"]
+	obfuscatedSSHPort := tunnelProtocolPorts["OSSH"]
+
+	// Meek port limitations
+	// - fronted meek protocols are hard-wired in the client to be port 443 or 80.
+	// - only one other meek port may be specified.
+	meekPort := tunnelProtocolPorts["UNFRONTED-MEEK-OSSH"]
+	if meekPort == 0 {
+		meekPort = tunnelProtocolPorts["UNFRONTED-MEEK-HTTPS-OSSH"]
 	}
 
 	// Note: fronting params are a stub; this server entry will exercise
