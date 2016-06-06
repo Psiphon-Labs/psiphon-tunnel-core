@@ -17,9 +17,41 @@
  *
  */
 
+// for HTTPSServer.ServeTLS:
+/*
+Copyright (c) 2012 The Go Authors. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of Google Inc. nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 package psiphon
 
 import (
+	"container/list"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -32,6 +64,7 @@ import (
 	"os"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Inc/dns"
@@ -187,6 +220,92 @@ func (conns *Conns) CloseAll() {
 		conn.Close()
 	}
 	conns.conns = make(map[net.Conn]bool)
+}
+
+// LRUConns is a concurrency-safe list of net.Conns ordered
+// by recent activity. Its purpose is to facilitate closing
+// the oldest connection in a set of connections.
+//
+// New connections added are referenced by a LRUConnsEntry,
+// which is used to Touch() active connections, which
+// promotes them to the front of the order and to Remove()
+// connections that are no longer LRU candidates.
+//
+// CloseOldest() will remove the oldest connection from the
+// list and call net.Conn.Close() on the connection.
+//
+// After an entry has been removed, LRUConnsEntry Touch()
+// and Remove() will have no effect.
+type LRUConns struct {
+	mutex sync.Mutex
+	list  *list.List
+}
+
+// NewLRUConns initializes a new LRUConns.
+func NewLRUConns() *LRUConns {
+	return &LRUConns{list: list.New()}
+}
+
+// Add inserts a net.Conn as the freshest connection
+// in a LRUConns and returns an LRUConnsEntry to be
+// used to freshen the connection or remove the connection
+// from the LRU list.
+func (conns *LRUConns) Add(conn net.Conn) *LRUConnsEntry {
+	conns.mutex.Lock()
+	defer conns.mutex.Unlock()
+	return &LRUConnsEntry{
+		lruConns: conns,
+		element:  conns.list.PushFront(conn),
+	}
+}
+
+// CloseOldest closes the oldest connection in a
+// LRUConns. It calls net.Conn.Close() on the
+// connection.
+func (conns *LRUConns) CloseOldest() {
+	conns.mutex.Lock()
+	oldest := conns.list.Back()
+	conn, ok := oldest.Value.(net.Conn)
+	if oldest != nil {
+		conns.list.Remove(oldest)
+	}
+	// Release mutex before closing conn
+	conns.mutex.Unlock()
+	if ok {
+		conn.Close()
+	}
+}
+
+// LRUConnsEntry is an entry in a LRUConns list.
+type LRUConnsEntry struct {
+	lruConns *LRUConns
+	element  *list.Element
+}
+
+// Remove deletes the connection referenced by the
+// LRUConnsEntry from the associated LRUConns.
+// Has no effect if the entry was not initialized
+// or previously removed.
+func (entry *LRUConnsEntry) Remove() {
+	if entry.lruConns == nil || entry.element == nil {
+		return
+	}
+	entry.lruConns.mutex.Lock()
+	defer entry.lruConns.mutex.Unlock()
+	entry.lruConns.list.Remove(entry.element)
+}
+
+// Touch promotes the connection referenced by the
+// LRUConnsEntry to the front of the associated LRUConns.
+// Has no effect if the entry was not initialized
+// or previously removed.
+func (entry *LRUConnsEntry) Touch() {
+	if entry.lruConns == nil || entry.element == nil {
+		return
+	}
+	entry.lruConns.mutex.Lock()
+	defer entry.lruConns.mutex.Unlock()
+	entry.lruConns.list.MoveToFront(entry.element)
 }
 
 // LocalProxyRelay sends to remoteConn bytes received from localConn,
@@ -582,56 +701,125 @@ func IPAddressFromAddr(addr net.Addr) string {
 	return ipAddress
 }
 
-// IdleTimeoutConn wraps a net.Conn and sets an initial ReadDeadline. The
-// deadline is extended whenever data is received from the connection.
-// Optionally, IdleTimeoutConn will also extend the deadline when data is
-// written to the connection.
-type IdleTimeoutConn struct {
-	net.Conn
-	deadline     time.Duration
-	resetOnWrite bool
+// HTTPSServer is a wrapper around http.Server which adds the
+// ServeTLS function.
+type HTTPSServer struct {
+	http.Server
 }
 
-func NewIdleTimeoutConn(
-	conn net.Conn, deadline time.Duration, resetOnWrite bool) *IdleTimeoutConn {
+// ServeTLS is a offers the equivalent interface as http.Serve.
+// The http package has both ListenAndServe and ListenAndServeTLS higher-
+// level interfaces, but only Serve (not TLS) offers a lower-level interface that
+// allows the caller to keep a refererence to the Listener, allowing for external
+// shutdown. ListenAndServeTLS also requires the TLS cert and key to be in files
+// and we avoid that here.
+// tcpKeepAliveListener is used in http.ListenAndServeTLS but not exported,
+// so we use a copy from https://golang.org/src/net/http/server.go.
+func (server *HTTPSServer) ServeTLS(listener net.Listener) error {
+	tlsListener := tls.NewListener(tcpKeepAliveListener{listener.(*net.TCPListener)}, server.TLSConfig)
+	return server.Serve(tlsListener)
+}
 
-	conn.SetReadDeadline(time.Now().Add(deadline))
-	return &IdleTimeoutConn{
-		Conn:         conn,
-		deadline:     deadline,
-		resetOnWrite: resetOnWrite,
+type tcpKeepAliveListener struct {
+	*net.TCPListener
+}
+
+func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
+	tc, err := ln.AcceptTCP()
+	if err != nil {
+		return
+	}
+	tc.SetKeepAlive(true)
+	tc.SetKeepAlivePeriod(3 * time.Minute)
+	return tc, nil
+}
+
+// ActivityMonitoredConn wraps a net.Conn, adding logic to deal with
+// events triggered by I/O activity.
+//
+// When an inactivity timeout is specified, the net.Conn Read() will
+// timeout after the specified period of read inactivity. Optionally,
+// ActivityMonitoredConn will also consider the connection active when
+// data is written to it.
+//
+// When a LRUConnsEntry is specified, then the LRU entry is promoted on
+// either a successful read or write.
+//
+type ActivityMonitoredConn struct {
+	net.Conn
+	inactivityTimeout time.Duration
+	activeOnWrite     bool
+	lruEntry          *LRUConnsEntry
+}
+
+func NewActivityMonitoredConn(
+	conn net.Conn,
+	inactivityTimeout time.Duration,
+	activeOnWrite bool,
+	lruEntry *LRUConnsEntry) *ActivityMonitoredConn {
+
+	if inactivityTimeout > 0 {
+		conn.SetReadDeadline(time.Now().Add(inactivityTimeout))
+	}
+	return &ActivityMonitoredConn{
+		Conn:              conn,
+		inactivityTimeout: inactivityTimeout,
+		activeOnWrite:     activeOnWrite,
+		lruEntry:          lruEntry,
 	}
 }
 
-func (conn *IdleTimeoutConn) Read(buffer []byte) (int, error) {
+func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 	n, err := conn.Conn.Read(buffer)
 	if err == nil {
-		conn.Conn.SetReadDeadline(time.Now().Add(conn.deadline))
+		if conn.inactivityTimeout > 0 {
+			conn.Conn.SetReadDeadline(time.Now().Add(conn.inactivityTimeout))
+		}
+		if conn.lruEntry != nil {
+			conn.lruEntry.Touch()
+		}
 	}
 	return n, err
 }
 
-func (conn *IdleTimeoutConn) Write(buffer []byte) (int, error) {
+func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 	n, err := conn.Conn.Write(buffer)
-	if err == nil && conn.resetOnWrite {
-		conn.Conn.SetReadDeadline(time.Now().Add(conn.deadline))
+	if err == nil {
+		if conn.inactivityTimeout > 0 && conn.activeOnWrite {
+			conn.Conn.SetReadDeadline(time.Now().Add(conn.inactivityTimeout))
+		}
+		if conn.lruEntry != nil {
+			conn.lruEntry.Touch()
+		}
 	}
 	return n, err
 }
 
 // ThrottledConn wraps a net.Conn with read and write rate limiters.
-// Rates are specified as bytes per second. The underlying rate limiter
-// uses the token bucket algorithm to calculate delay times for read
-// and write operations. Specify limit values of 0 set no limit.
+// Rates are specified as bytes per second. Optional unlimited byte
+// counts allow for a number of bytes to read or write before
+// applying rate limiting. Specify limit values of 0 to set no rate
+// limit (unlimited counts are ignored in this case).
+// The underlying rate limiter uses the token bucket algorithm to
+// calculate delay times for read and write operations.
 type ThrottledConn struct {
 	net.Conn
-	reader io.Reader
-	writer io.Writer
+	unlimitedReadBytes  int64
+	limitingReads       int32
+	limitedReader       io.Reader
+	unlimitedWriteBytes int64
+	limitingWrites      int32
+	limitedWriter       io.Writer
 }
 
+// NewThrottledConn initializes a new ThrottledConn.
 func NewThrottledConn(
 	conn net.Conn,
-	limitReadBytesPerSecond, limitWriteBytesPerSecond int64) *ThrottledConn {
+	unlimitedReadBytes, limitReadBytesPerSecond,
+	unlimitedWriteBytes, limitWriteBytesPerSecond int64) *ThrottledConn {
+
+	// When no limit is specified, the rate limited reader/writer
+	// is simply the base reader/writer.
 
 	var reader io.Reader
 	if limitReadBytesPerSecond == 0 {
@@ -641,6 +829,7 @@ func NewThrottledConn(
 			ratelimit.NewBucketWithRate(
 				float64(limitReadBytesPerSecond), limitReadBytesPerSecond))
 	}
+
 	var writer io.Writer
 	if limitWriteBytesPerSecond == 0 {
 		writer = conn
@@ -649,17 +838,42 @@ func NewThrottledConn(
 			ratelimit.NewBucketWithRate(
 				float64(limitWriteBytesPerSecond), limitWriteBytesPerSecond))
 	}
+
 	return &ThrottledConn{
-		Conn:   conn,
-		reader: reader,
-		writer: writer,
+		Conn:                conn,
+		unlimitedReadBytes:  unlimitedReadBytes,
+		limitingReads:       0,
+		limitedReader:       reader,
+		unlimitedWriteBytes: unlimitedWriteBytes,
+		limitingWrites:      0,
+		limitedWriter:       writer,
 	}
 }
 
 func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
-	return conn.reader.Read(buffer)
+
+	// Use the base reader until the unlimited count is exhausted.
+	if atomic.LoadInt32(&conn.limitingReads) == 0 {
+		if atomic.AddInt64(&conn.unlimitedReadBytes, -int64(len(buffer))) <= 0 {
+			atomic.StoreInt32(&conn.limitingReads, 1)
+		} else {
+			return conn.Read(buffer)
+		}
+	}
+
+	return conn.limitedReader.Read(buffer)
 }
 
 func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
-	return conn.writer.Write(buffer)
+
+	// Use the base writer until the unlimited count is exhausted.
+	if atomic.LoadInt32(&conn.limitingWrites) == 0 {
+		if atomic.AddInt64(&conn.unlimitedWriteBytes, -int64(len(buffer))) <= 0 {
+			atomic.StoreInt32(&conn.limitingWrites, 1)
+		} else {
+			return conn.Write(buffer)
+		}
+	}
+
+	return conn.limitedWriter.Write(buffer)
 }

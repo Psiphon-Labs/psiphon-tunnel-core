@@ -41,12 +41,32 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestServer(t *testing.T) {
+func TestSSH(t *testing.T) {
+	runServer(t, "SSH")
+}
+
+func TestOSSH(t *testing.T) {
+	runServer(t, "OSSH")
+}
+
+func TestFrontedMeek(t *testing.T) {
+	runServer(t, "FRONTED-MEEK-OSSH")
+}
+
+func TestUnfrontedMeek(t *testing.T) {
+	runServer(t, "UNFRONTED-MEEK-OSSH")
+}
+
+func TestFrontedMeekHTTP(t *testing.T) {
+	runServer(t, "FRONTED-MEEK-HTTP-OSSH")
+}
+
+func runServer(t *testing.T, tunnelProtocol string) {
 
 	// create a server
 
 	serverConfigFileContents, serverEntryFileContents, err := GenerateConfig(
-		&GenerateConfigParams{})
+		"127.0.0.1")
 	if err != nil {
 		t.Fatalf("error generating server config: %s", err)
 	}
@@ -113,7 +133,7 @@ func TestServer(t *testing.T) {
 	clientConfig.DisableRemoteServerListFetcher = true
 	clientConfig.EstablishTunnelPausePeriodSeconds = &establishTunnelPausePeriodSeconds
 	clientConfig.TargetServerEntry = string(serverEntryFileContents)
-	clientConfig.TunnelProtocol = "OSSH"
+	clientConfig.TunnelProtocol = tunnelProtocol
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
 
 	err = psiphon.InitDataStore(clientConfig)
@@ -150,10 +170,14 @@ func TestServer(t *testing.T) {
 			}
 		}))
 
+	controllerShutdownBroadcast := make(chan struct{})
+	controllerWaitGroup := new(sync.WaitGroup)
+	controllerWaitGroup.Add(1)
 	go func() {
-		shutdownBroadcast := make(chan struct{})
-		controller.Run(shutdownBroadcast)
+		defer controllerWaitGroup.Done()
+		controller.Run(controllerShutdownBroadcast)
 	}()
+	defer close(controllerShutdownBroadcast)
 
 	// Test: tunnels must be established within 30 seconds
 

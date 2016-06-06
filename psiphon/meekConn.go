@@ -264,7 +264,7 @@ func DialMeek(
 		}
 	}
 
-	cookie, err := makeCookie(meekConfig)
+	cookie, err := makeMeekCookie(meekConfig)
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -642,7 +642,7 @@ type meekCookieData struct {
 // all consequent HTTP requests
 // In unfronted meek mode, the cookie is visible over the adversary network, so the
 // cookie is encrypted and obfuscated.
-func makeCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
+func makeMeekCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
 
 	// Make the JSON data
 	serverAddress := meekConfig.PsiphonServerAddress

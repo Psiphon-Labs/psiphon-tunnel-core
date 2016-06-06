@@ -26,6 +26,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
 )
 
@@ -33,7 +34,6 @@ func main() {
 
 	var generateServerIPaddress, generateServerNetworkInterface string
 	var generateConfigFilename, generateServerEntryFilename string
-	var generateWebServerPort, generateSSHServerPort, generateObfuscatedSSHServerPort int
 	var runConfigFilenames stringListFlag
 
 	flag.StringVar(
@@ -52,31 +52,13 @@ func main() {
 		&generateServerNetworkInterface,
 		"interface",
 		"",
-		"generate server entry with this `network-interface`")
+		"generate with server IP address from this `network-interface`")
 
 	flag.StringVar(
 		&generateServerIPaddress,
 		"ipaddress",
 		server.DEFAULT_SERVER_IP_ADDRESS,
 		"generate with this server `IP address`")
-
-	flag.IntVar(
-		&generateWebServerPort,
-		"webport",
-		server.DEFAULT_WEB_SERVER_PORT,
-		"generate with this web server `port`; 0 for no web server")
-
-	flag.IntVar(
-		&generateSSHServerPort,
-		"sshport",
-		server.DEFAULT_SSH_SERVER_PORT,
-		"generate with this SSH server `port`; 0 for no SSH server")
-
-	flag.IntVar(
-		&generateObfuscatedSSHServerPort,
-		"osshport",
-		server.DEFAULT_OBFUSCATED_SSH_SERVER_PORT,
-		"generate with this Obfuscated SSH server `port`; 0 for no Obfuscated SSH server")
 
 	flag.Var(
 		&runConfigFilenames,
@@ -101,19 +83,22 @@ func main() {
 		os.Exit(1)
 	} else if args[0] == "generate" {
 
-		configFileContents, serverEntryFileContents, err := server.GenerateConfig(
-			&server.GenerateConfigParams{
-				ServerIPAddress:         generateServerIPaddress,
-				ServerNetworkInterface:  generateServerNetworkInterface,
-				WebServerPort:           generateWebServerPort,
-				SSHServerPort:           generateSSHServerPort,
-				ObfuscatedSSHServerPort: generateObfuscatedSSHServerPort,
-			})
+		serverIPaddress := generateServerIPaddress
 
+		if generateServerNetworkInterface != "" {
+			var err error
+			serverIPaddress, err = psiphon.GetInterfaceIPAddress(generateServerNetworkInterface)
+			fmt.Errorf("generate failed: %s", err)
+			os.Exit(1)
+		}
+
+		configFileContents, serverEntryFileContents, err :=
+			server.GenerateConfig(serverIPaddress)
 		if err != nil {
 			fmt.Errorf("generate failed: %s", err)
 			os.Exit(1)
 		}
+
 		err = ioutil.WriteFile(generateConfigFilename, configFileContents, 0600)
 		if err != nil {
 			fmt.Errorf("error writing configuration file: %s", err)

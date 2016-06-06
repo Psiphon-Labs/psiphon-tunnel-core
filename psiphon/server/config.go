@@ -28,41 +28,35 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/crypto/ssh"
 )
 
 const (
-	SERVER_CONFIG_FILENAME                 = "psiphon-server.config"
-	SERVER_ENTRY_FILENAME                  = "serverEntry.dat"
-	DEFAULT_LOG_LEVEL                      = "info"
-	DEFAULT_SYSLOG_TAG                     = "psiphon-server"
-	DEFAULT_GEO_IP_DATABASE_FILENAME       = "GeoLite2-City.mmdb"
-	DEFAULT_SERVER_IP_ADDRESS              = "127.0.0.1"
-	WEB_SERVER_SECRET_BYTE_LENGTH          = 32
-	WEB_SERVER_CERTIFICATE_RSA_KEY_BITS    = 2048
-	WEB_SERVER_CERTIFICATE_VALIDITY_PERIOD = 10 * 365 * 24 * time.Hour // approx. 10 years
-	DEFAULT_WEB_SERVER_PORT                = 8000
-	WEB_SERVER_READ_TIMEOUT                = 10 * time.Second
-	WEB_SERVER_WRITE_TIMEOUT               = 10 * time.Second
-	SSH_USERNAME_SUFFIX_BYTE_LENGTH        = 8
-	SSH_PASSWORD_BYTE_LENGTH               = 32
-	SSH_RSA_HOST_KEY_BITS                  = 2048
-	DEFAULT_SSH_SERVER_PORT                = 2222
-	SSH_HANDSHAKE_TIMEOUT                  = 30 * time.Second
-	SSH_CONNECTION_READ_DEADLINE           = 5 * time.Minute
-	SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT      = 30 * time.Second
-	SSH_OBFUSCATED_KEY_BYTE_LENGTH         = 32
-	DEFAULT_OBFUSCATED_SSH_SERVER_PORT     = 3333
-	REDIS_POOL_MAX_IDLE                    = 50
-	REDIS_POOL_MAX_ACTIVE                  = 1000
-	REDIS_POOL_IDLE_TIMEOUT                = 5 * time.Minute
+	SERVER_CONFIG_FILENAME                = "psiphon-server.config"
+	SERVER_ENTRY_FILENAME                 = "serverEntry.dat"
+	DEFAULT_SERVER_IP_ADDRESS             = "127.0.0.1"
+	WEB_SERVER_SECRET_BYTE_LENGTH         = 32
+	DISCOVERY_VALUE_KEY_BYTE_LENGTH       = 32
+	WEB_SERVER_READ_TIMEOUT               = 10 * time.Second
+	WEB_SERVER_WRITE_TIMEOUT              = 10 * time.Second
+	SSH_USERNAME_SUFFIX_BYTE_LENGTH       = 8
+	SSH_PASSWORD_BYTE_LENGTH              = 32
+	SSH_RSA_HOST_KEY_BITS                 = 2048
+	SSH_HANDSHAKE_TIMEOUT                 = 30 * time.Second
+	SSH_CONNECTION_READ_DEADLINE          = 5 * time.Minute
+	SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT     = 30 * time.Second
+	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE = 8192
+	SSH_OBFUSCATED_KEY_BYTE_LENGTH        = 32
+	REDIS_POOL_MAX_IDLE                   = 50
+	REDIS_POOL_MAX_ACTIVE                 = 1000
+	REDIS_POOL_IDLE_TIMEOUT               = 5 * time.Minute
 )
 
 // TODO: break config into sections (sub-structs)
@@ -107,6 +101,10 @@ type Config struct {
 	// performed.
 	GeoIPDatabaseFilename string
 
+	// RedisServerAddress is the TCP address of a redis server. When
+	// set, redis is used to store per-session GeoIP information.
+	RedisServerAddress string
+
 	// ServerIPAddress is the public IP address of the server.
 	ServerIPAddress string
 
@@ -126,40 +124,82 @@ type Config struct {
 	// authenticate itself to clients.
 	WebServerPrivateKey string
 
-	// SSHServerPort is the listening port of the SSH server.
-	// When <= 0, no SSH server component is run.
-	SSHServerPort int
+	// TunnelProtocolPorts specifies which tunnel protocols to run
+	// and which ports to listen on for each protocol. Valid tunnel
+	// protocols include: "SSH", "OSSH", "UNFRONTED-MEEK-OSSH",
+	// "UNFRONTED-MEEK-HTTPS-OSSH", "FRONTED-MEEK-OSSH",
+	// "FRONTED-MEEK-HTTP-OSSH".
+	TunnelProtocolPorts map[string]int
 
 	// SSHPrivateKey is the SSH host key. The same key is used for
-	// both the SSH and Obfuscated SSH servers.
+	// all protocols, run by this server instance, which use SSH.
 	SSHPrivateKey string
 
 	// SSHServerVersion is the server version presented in the
-	// identification string. The same value is used for both SSH
-	// and Obfuscated SSH servers.
+	// identification string. The same value is used for all
+	// protocols, run by this server instance, which use SSH.
 	SSHServerVersion string
 
 	// SSHUserName is the SSH user name to be presented by the
-	// the tunnel-core client. The same value is used for both SSH
-	// and Obfuscated SSH servers.
+	// the tunnel-core client. The same value is used for all
+	// protocols, run by this server instance, which use SSH.
 	SSHUserName string
 
 	// SSHPassword is the SSH password to be presented by the
-	// the tunnel-core client. The same value is used for both SSH
-	// and Obfuscated SSH servers.
+	// the tunnel-core client. The same value is used for all
+	// protocols, run by this server instance, which use SSH.
 	SSHPassword string
 
-	// ObfuscatedSSHServerPort is the listening port of the Obfuscated SSH server.
-	// When <= 0, no Obfuscated SSH server component is run.
-	ObfuscatedSSHServerPort int
-
 	// ObfuscatedSSHKey is the secret key for use in the Obfuscated
-	// SSH protocol.
+	// SSH protocol. The same secret key is used for all protocols,
+	// run by this server instance, which use Obfuscated SSH.
 	ObfuscatedSSHKey string
 
-	// RedisServerAddress is the TCP address of a redis server. When
-	// set, redis is used to store per-session GeoIP information.
-	RedisServerAddress string
+	// MeekCookieEncryptionPrivateKey is the NaCl private key used
+	// to decrypt meek cookie payload sent from clients. The same
+	// key is used for all meek protocols run by this server instance.
+	MeekCookieEncryptionPrivateKey string
+
+	// MeekObfuscatedKey is the secret key used for obfuscating
+	// meek cookies sent from clients. The same key is used for all
+	// meek protocols run by this server instance.
+	MeekObfuscatedKey string
+
+	// MeekCertificateCommonName is the value used for the hostname
+	// in the self-signed certificate generated and used for meek
+	// HTTPS modes. The same value is used for all HTTPS meek
+	// protocols.
+	MeekCertificateCommonName string
+
+	// MeekProhibitedHeaders is a list of HTTP headers to check for
+	// in client requests. If one of these headers is found, the
+	// request fails. This is used to defend against abuse.
+	MeekProhibitedHeaders []string
+
+	// MeekProxyForwardedForHeaders is a list of HTTP headers which
+	// may be added by downstream HTTP proxies or CDNs in front
+	// of clients. These headers supply the original client IP
+	// address, which is geolocated for stats purposes. Headers
+	// include, for example, X-Forwarded-For. The header's value
+	// is assumed to be a comma delimted list of IP addresses where
+	// the client IP is the first IP address in the list. Meek protocols
+	// look for these headers and use the client IP address from
+	// the header if any one is present and the value is a valid
+	// IP address; otherwise the direct connection remote address is
+	// used as the client IP.
+	MeekProxyForwardedForHeaders []string
+
+	// UDPInterceptUdpgwServerAddress specifies the network address of
+	// a udpgw server which clients may be port forwarding to. When
+	// specified, these TCP port forwards are intercepted and handled
+	// directly by this server, which parses the SSH channel using the
+	// udpgw protocol.
+	UDPInterceptUdpgwServerAddress string
+
+	// DNSServerAddress specifies the network address of a DNS server
+	// to which DNS UDP packets will be forwarded to. When set, any
+	// tunneled DNS UDP packets will be re-routed to this destination.
+	UDPForwardDNSServerAddress string
 
 	// DefaultTrafficRules specifies the traffic rules to be used when
 	// no regional-specific rules are set.
@@ -171,45 +211,60 @@ type Config struct {
 	// is one or more space delimited ISO 3166-1 alpha-2 country codes.
 	RegionalTrafficRules map[string]TrafficRules
 
-	// DNSServerAddress specifies the network address of a DNS server
-	// to which DNS UDP packets will be forwarded to. When set, any
-	// tunneled DNS UDP packets will be re-routed to this destination.
-	DNSServerAddress string
-
-	// UdpgwServerAddress specifies the network address of a udpgw
-	// server which clients may be port forwarding to. When specified,
-	// these TCP port forwards are intercepted and handled directly
-	// by this server, which parses the SSH channel using the udpgw
-	// protocol.
-	UdpgwServerAddress string
-
 	// LoadMonitorPeriodSeconds indicates how frequently to log server
 	// load information (number of connected clients per tunnel protocol,
-	// number of running goroutines, amount of memory allocated).
+	// number of running goroutines, amount of memory allocated, etc.)
 	// The default, 0, disables load logging.
 	LoadMonitorPeriodSeconds int
 }
 
+// RateLimits specify the rate limits for tunneled data transfer
+// between an individual client and the server.
+type RateLimits struct {
+
+	// DownstreamUnlimitedBytes specifies the number of downstream
+	// bytes to transfer, approximately, before starting rate
+	// limiting.
+	DownstreamUnlimitedBytes int64
+
+	// DownstreamBytesPerSecond specifies a rate limit for downstream
+	// data transfer. The default, 0, is no limit.
+	DownstreamBytesPerSecond int
+
+	// UpstreamUnlimitedBytes specifies the number of upstream
+	// bytes to transfer, approximately, before starting rate
+	// limiting.
+	UpstreamUnlimitedBytes int64
+
+	// UpstreamBytesPerSecond specifies a rate limit for upstream
+	// data transfer. The default, 0, is no limit.
+	UpstreamBytesPerSecond int
+}
+
 // TrafficRules specify the limits placed on client traffic.
 type TrafficRules struct {
+	// DefaultRateLimitsare the rate limits to be applied when
+	// no protocol-specific rates are set.
+	DefaultRateLimits RateLimits
 
-	// LimitDownstreamBytesPerSecond specifies a rate limit for
-	// downstream data transfer between a single client and the
-	// server.
-	// The default, 0, is no rate limit.
-	LimitDownstreamBytesPerSecond int
+	// ProtocolRateLimits specifies the rate limits for particular
+	// tunnel protocols. The key for each rate limit entry is one
+	// or more space delimited Psiphon tunnel protocol names. Valid
+	// tunnel protocols includes the same list as for
+	// TunnelProtocolPorts.
+	ProtocolRateLimits map[string]RateLimits
 
-	// LimitUpstreamBytesPerSecond specifies a rate limit for
-	// upstream data transfer between a single client and the
-	// server.
-	// The default, 0, is no rate limit.
-	LimitUpstreamBytesPerSecond int
-
-	// IdlePortForwardTimeoutMilliseconds is the timeout period
+	// IdleTCPPortForwardTimeoutMilliseconds is the timeout period
 	// after which idle (no bytes flowing in either direction)
-	// SSH client port forwards are preemptively closed.
+	// client TCP port forwards are preemptively closed.
 	// The default, 0, is no idle timeout.
-	IdlePortForwardTimeoutMilliseconds int
+	IdleTCPPortForwardTimeoutMilliseconds int
+
+	// IdleUDPPortForwardTimeoutMilliseconds is the timeout period
+	// after which idle (no bytes flowing in either direction)
+	// client UDP port forwards are preemptively closed.
+	// The default, 0, is no idle timeout.
+	IdleUDPPortForwardTimeoutMilliseconds int
 
 	// MaxTCPPortForwardCount is the maximum number of TCP port
 	// forwards each client may have open concurrently.
@@ -247,16 +302,6 @@ func (config *Config) RunWebServer() bool {
 	return config.WebServerPort > 0
 }
 
-// RunSSHServer indicates whether to run an SSH server component.
-func (config *Config) RunSSHServer() bool {
-	return config.SSHServerPort > 0
-}
-
-// RunObfuscatedSSHServer indicates whether to run an Obfuscated SSH server component.
-func (config *Config) RunObfuscatedSSHServer() bool {
-	return config.ObfuscatedSSHServerPort > 0
-}
-
 // RunLoadMonitor indicates whether to monitor and log server load.
 func (config *Config) RunLoadMonitor() bool {
 	return config.LoadMonitorPeriodSeconds > 0
@@ -275,17 +320,31 @@ func (config *Config) UseFail2Ban() bool {
 }
 
 // GetTrafficRules looks up the traffic rules for the specified country. If there
-// are no RegionalTrafficRules for the country, DefaultTrafficRules are returned.
-func (config *Config) GetTrafficRules(targetCountryCode string) TrafficRules {
+// are no RegionalTrafficRules for the country, DefaultTrafficRules are used.
+func (config *Config) GetTrafficRules(clientCountryCode string) TrafficRules {
 	// TODO: faster lookup?
 	for countryCodes, trafficRules := range config.RegionalTrafficRules {
 		for _, countryCode := range strings.Split(countryCodes, " ") {
-			if countryCode == targetCountryCode {
+			if countryCode == clientCountryCode {
 				return trafficRules
 			}
 		}
 	}
 	return config.DefaultTrafficRules
+}
+
+// GetRateLimits looks up the rate limits for the specified tunnel protocol.
+// If there are no ProtocolRateLimits for the protocol, DefaultRateLimits are used.
+func (rules *TrafficRules) GetRateLimits(clientTunnelProtocol string) RateLimits {
+	// TODO: faster lookup?
+	for tunnelProtocols, rateLimits := range rules.ProtocolRateLimits {
+		for _, tunnelProtocol := range strings.Split(tunnelProtocols, " ") {
+			if tunnelProtocol == clientTunnelProtocol {
+				return rateLimits
+			}
+		}
+	}
+	return rules.DefaultRateLimits
 }
 
 // LoadConfig loads and validates a JSON encoded server config. If more than one
@@ -320,18 +379,38 @@ func LoadConfig(configJSONs [][]byte) (*Config, error) {
 			"Web server requires WebServerSecret, WebServerCertificate, WebServerPrivateKey")
 	}
 
-	if config.SSHServerPort > 0 && (config.SSHPrivateKey == "" || config.SSHServerVersion == "" ||
-		config.SSHUserName == "" || config.SSHPassword == "") {
-
-		return nil, errors.New(
-			"SSH server requires SSHPrivateKey, SSHServerVersion, SSHUserName, SSHPassword")
-	}
-
-	if config.ObfuscatedSSHServerPort > 0 && (config.SSHPrivateKey == "" || config.SSHServerVersion == "" ||
-		config.SSHUserName == "" || config.SSHPassword == "" || config.ObfuscatedSSHKey == "") {
-
-		return nil, errors.New(
-			"Obfuscated SSH server requires SSHPrivateKey, SSHServerVersion, SSHUserName, SSHPassword, ObfuscatedSSHKey")
+	for tunnelProtocol, _ := range config.TunnelProtocolPorts {
+		if psiphon.TunnelProtocolUsesSSH(tunnelProtocol) ||
+			psiphon.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
+			if config.SSHPrivateKey == "" || config.SSHServerVersion == "" ||
+				config.SSHUserName == "" || config.SSHPassword == "" {
+				return nil, fmt.Errorf(
+					"Tunnel protocol %s requires SSHPrivateKey, SSHServerVersion, SSHUserName, SSHPassword",
+					tunnelProtocol)
+			}
+		}
+		if psiphon.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
+			if config.ObfuscatedSSHKey == "" {
+				return nil, fmt.Errorf(
+					"Tunnel protocol %s requires ObfuscatedSSHKey",
+					tunnelProtocol)
+			}
+		}
+		if psiphon.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
+			psiphon.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+			if config.MeekCookieEncryptionPrivateKey == "" || config.MeekObfuscatedKey == "" {
+				return nil, fmt.Errorf(
+					"Tunnel protocol %s requires MeekCookieEncryptionPrivateKey, MeekObfuscatedKey",
+					tunnelProtocol)
+			}
+		}
+		if psiphon.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+			if config.MeekCertificateCommonName == "" {
+				return nil, fmt.Errorf(
+					"Tunnel protocol %s requires MeekCertificateCommonName",
+					tunnelProtocol)
+			}
+		}
 	}
 
 	validateNetworkAddress := func(address string) error {
@@ -345,91 +424,53 @@ func LoadConfig(configJSONs [][]byte) (*Config, error) {
 		return err
 	}
 
-	if config.DNSServerAddress != "" {
-		if err := validateNetworkAddress(config.DNSServerAddress); err != nil {
-			return nil, fmt.Errorf("DNSServerAddress is invalid: %s", err)
+	if config.UDPForwardDNSServerAddress != "" {
+		if err := validateNetworkAddress(config.UDPForwardDNSServerAddress); err != nil {
+			return nil, fmt.Errorf("UDPForwardDNSServerAddress is invalid: %s", err)
 		}
 	}
 
-	if config.UdpgwServerAddress != "" {
-		if err := validateNetworkAddress(config.UdpgwServerAddress); err != nil {
-			return nil, fmt.Errorf("UdpgwServerAddress is invalid: %s", err)
+	if config.UDPInterceptUdpgwServerAddress != "" {
+		if err := validateNetworkAddress(config.UDPInterceptUdpgwServerAddress); err != nil {
+			return nil, fmt.Errorf("UDPInterceptUdpgwServerAddress is invalid: %s", err)
 		}
 	}
 
 	return &config, nil
 }
 
-// GenerateConfigParams specifies customizations to be applied to
-// a generated server config.
-type GenerateConfigParams struct {
-
-	// ServerIPAddress is the public IP address of the server.
-	ServerIPAddress string
-
-	// ServerNetworkInterface specifies a network interface to
-	// use to determine the ServerIPAddress automatically. When
-	// set, ServerIPAddress is ignored.
-	ServerNetworkInterface string
-
-	// WebServerPort is the listening port of the web server.
-	// When <= 0, no web server component is run.
-	WebServerPort int
-
-	// SSHServerPort is the listening port of the SSH server.
-	// When <= 0, no SSH server component is run.
-	SSHServerPort int
-
-	// ObfuscatedSSHServerPort is the listening port of the Obfuscated SSH server.
-	// When <= 0, no Obfuscated SSH server component is run.
-	ObfuscatedSSHServerPort int
-}
-
-// GenerateConfig create a new Psiphon server config. It returns a JSON
+// GenerateConfig creates a new Psiphon server config. It returns a JSON
 // encoded config and a client-compatible "server entry" for the server. It
 // generates all necessary secrets and key material, which are emitted in
 // the config file and server entry as necessary.
-func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
-
-	serverIPaddress := params.ServerIPAddress
-	if serverIPaddress == "" {
-		serverIPaddress = DEFAULT_SERVER_IP_ADDRESS
-	}
-
-	if params.ServerNetworkInterface != "" {
-		var err error
-		serverIPaddress, err = psiphon.GetInterfaceIPAddress(params.ServerNetworkInterface)
-		if err != nil {
-			return nil, nil, psiphon.ContextError(err)
-		}
-	}
+// GenerateConfig creates a maximal config with many tunnel protocols enabled.
+// It uses sample values for many fields. The intention is for a generated
+// config to be used for testing or as a template for production setup, not
+// to generate production-ready configurations.
+func GenerateConfig(serverIPaddress string) ([]byte, []byte, error) {
 
 	// Web server config
 
-	webServerPort := params.WebServerPort
-	if webServerPort == 0 {
-		webServerPort = DEFAULT_WEB_SERVER_PORT
-	}
+	webServerPort := 8088
 
-	webServerSecret, err := psiphon.MakeRandomString(WEB_SERVER_SECRET_BYTE_LENGTH)
+	webServerSecret, err := psiphon.MakeRandomStringHex(WEB_SERVER_SECRET_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, psiphon.ContextError(err)
 	}
 
-	webServerCertificate, webServerPrivateKey, err := generateWebServerCertificate()
+	webServerCertificate, webServerPrivateKey, err := GenerateWebServerCertificate("")
+	if err != nil {
+		return nil, nil, psiphon.ContextError(err)
+	}
+
+	discoveryValueHMACKey, err := psiphon.MakeRandomStringBase64(DISCOVERY_VALUE_KEY_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, psiphon.ContextError(err)
 	}
 
 	// SSH config
 
-	sshServerPort := params.SSHServerPort
-	if sshServerPort == 0 {
-		sshServerPort = DEFAULT_SSH_SERVER_PORT
-	}
-
 	// TODO: use other key types: anti-fingerprint by varying params
-
 	rsaKey, err := rsa.GenerateKey(rand.Reader, SSH_RSA_HOST_KEY_BITS)
 	if err != nil {
 		return nil, nil, psiphon.ContextError(err)
@@ -449,14 +490,14 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 
 	sshPublicKey := signer.PublicKey()
 
-	sshUserNameSuffix, err := psiphon.MakeRandomString(SSH_USERNAME_SUFFIX_BYTE_LENGTH)
+	sshUserNameSuffix, err := psiphon.MakeRandomStringHex(SSH_USERNAME_SUFFIX_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, psiphon.ContextError(err)
 	}
 
 	sshUserName := "psiphon_" + sshUserNameSuffix
 
-	sshPassword, err := psiphon.MakeRandomString(SSH_PASSWORD_BYTE_LENGTH)
+	sshPassword, err := psiphon.MakeRandomStringHex(SSH_PASSWORD_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, psiphon.ContextError(err)
 	}
@@ -466,38 +507,82 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 
 	// Obfuscated SSH config
 
-	obfuscatedSSHServerPort := params.ObfuscatedSSHServerPort
-	if obfuscatedSSHServerPort == 0 {
-		obfuscatedSSHServerPort = DEFAULT_OBFUSCATED_SSH_SERVER_PORT
+	obfuscatedSSHKey, err := psiphon.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+	if err != nil {
+		return nil, nil, psiphon.ContextError(err)
 	}
 
-	obfuscatedSSHKey, err := psiphon.MakeRandomString(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+	// Meek config
+
+	meekCookieEncryptionPublicKey, meekCookieEncryptionPrivateKey, err :=
+		box.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, psiphon.ContextError(err)
+	}
+
+	meekObfuscatedKey, err := psiphon.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, psiphon.ContextError(err)
 	}
 
 	// Assemble config and server entry
 
+	// Note: this config is intended for either testing or as an illustrative
+	// example or template and is not intended for production deployment.
+
+	sshPort := 22
+	obfuscatedSSHPort := 53
+	meekPort := 8188
+
 	config := &Config{
-		LogLevel:                DEFAULT_LOG_LEVEL,
-		SyslogFacility:          "",
-		SyslogTag:               DEFAULT_SYSLOG_TAG,
-		Fail2BanFormat:          "",
-		DiscoveryValueHMACKey:   "",
-		GeoIPDatabaseFilename:   DEFAULT_GEO_IP_DATABASE_FILENAME,
-		ServerIPAddress:         serverIPaddress,
-		WebServerPort:           webServerPort,
-		WebServerSecret:         webServerSecret,
-		WebServerCertificate:    webServerCertificate,
-		WebServerPrivateKey:     webServerPrivateKey,
-		SSHPrivateKey:           string(sshPrivateKey),
-		SSHServerVersion:        sshServerVersion,
-		SSHUserName:             sshUserName,
-		SSHPassword:             sshPassword,
-		SSHServerPort:           sshServerPort,
-		ObfuscatedSSHKey:        obfuscatedSSHKey,
-		ObfuscatedSSHServerPort: obfuscatedSSHServerPort,
-		RedisServerAddress:      "",
+		LogLevel:              "info",
+		SyslogFacility:        "user",
+		SyslogTag:             "psiphon-server",
+		Fail2BanFormat:        "Authentication failure for psiphon-client from %s",
+		GeoIPDatabaseFilename: "",
+		ServerIPAddress:       serverIPaddress,
+		DiscoveryValueHMACKey: discoveryValueHMACKey,
+		WebServerPort:         webServerPort,
+		WebServerSecret:       webServerSecret,
+		WebServerCertificate:  webServerCertificate,
+		WebServerPrivateKey:   webServerPrivateKey,
+		SSHPrivateKey:         string(sshPrivateKey),
+		SSHServerVersion:      sshServerVersion,
+		SSHUserName:           sshUserName,
+		SSHPassword:           sshPassword,
+		ObfuscatedSSHKey:      obfuscatedSSHKey,
+		TunnelProtocolPorts: map[string]int{
+			"SSH":                    sshPort,
+			"OSSH":                   obfuscatedSSHPort,
+			"FRONTED-MEEK-OSSH":      443,
+			"UNFRONTED-MEEK-OSSH":    meekPort,
+			"FRONTED-MEEK-HTTP-OSSH": 80,
+		},
+		RedisServerAddress:             "",
+		UDPForwardDNSServerAddress:     "8.8.8.8:53",
+		UDPInterceptUdpgwServerAddress: "127.0.0.1:7300",
+		MeekCookieEncryptionPrivateKey: base64.StdEncoding.EncodeToString(meekCookieEncryptionPrivateKey[:]),
+		MeekObfuscatedKey:              meekObfuscatedKey,
+		MeekCertificateCommonName:      "www.example.org",
+		MeekProhibitedHeaders:          nil,
+		MeekProxyForwardedForHeaders:   []string{"X-Forwarded-For"},
+		DefaultTrafficRules: TrafficRules{
+			DefaultRateLimits: RateLimits{
+				DownstreamUnlimitedBytes: 0,
+				DownstreamBytesPerSecond: 0,
+				UpstreamUnlimitedBytes:   0,
+				UpstreamBytesPerSecond:   0,
+			},
+			IdleTCPPortForwardTimeoutMilliseconds: 30000,
+			IdleUDPPortForwardTimeoutMilliseconds: 30000,
+			MaxTCPPortForwardCount:                1024,
+			MaxUDPPortForwardCount:                32,
+			AllowTCPPorts:                         nil,
+			AllowUDPPorts:                         nil,
+			DenyTCPPorts:                          nil,
+			DenyUDPPorts:                          nil,
+		},
+		LoadMonitorPeriodSeconds: 300,
 	}
 
 	encodedConfig, err := json.MarshalIndent(config, "\n", "    ")
@@ -512,21 +597,33 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 	capabilities := []string{
 		psiphon.GetCapability(psiphon.TUNNEL_PROTOCOL_SSH),
 		psiphon.GetCapability(psiphon.TUNNEL_PROTOCOL_OBFUSCATED_SSH),
+		psiphon.GetCapability(psiphon.TUNNEL_PROTOCOL_FRONTED_MEEK),
+		psiphon.GetCapability(psiphon.TUNNEL_PROTOCOL_UNFRONTED_MEEK),
 	}
 
+	// Note: fronting params are a stub; this server entry will exercise
+	// client and server fronting code paths, but not actually traverse
+	// a fronting hop.
+
 	serverEntry := &psiphon.ServerEntry{
-		IpAddress:            serverIPaddress,
-		WebServerPort:        fmt.Sprintf("%d", webServerPort),
-		WebServerSecret:      webServerSecret,
-		WebServerCertificate: strippedWebServerCertificate,
-		SshPort:              sshServerPort,
-		SshUsername:          sshUserName,
-		SshPassword:          sshPassword,
-		SshHostKey:           base64.RawStdEncoding.EncodeToString(sshPublicKey.Marshal()),
-		SshObfuscatedPort:    obfuscatedSSHServerPort,
-		SshObfuscatedKey:     obfuscatedSSHKey,
-		Capabilities:         capabilities,
-		Region:               "US",
+		IpAddress:                     serverIPaddress,
+		WebServerPort:                 fmt.Sprintf("%d", webServerPort),
+		WebServerSecret:               webServerSecret,
+		WebServerCertificate:          strippedWebServerCertificate,
+		SshPort:                       sshPort,
+		SshUsername:                   sshUserName,
+		SshPassword:                   sshPassword,
+		SshHostKey:                    base64.RawStdEncoding.EncodeToString(sshPublicKey.Marshal()),
+		SshObfuscatedPort:             obfuscatedSSHPort,
+		SshObfuscatedKey:              obfuscatedSSHKey,
+		Capabilities:                  capabilities,
+		Region:                        "US",
+		MeekServerPort:                meekPort,
+		MeekCookieEncryptionPublicKey: base64.StdEncoding.EncodeToString(meekCookieEncryptionPublicKey[:]),
+		MeekObfuscatedKey:             meekObfuscatedKey,
+		MeekFrontingHosts:             []string{serverIPaddress},
+		MeekFrontingAddresses:         []string{serverIPaddress},
+		MeekFrontingDisableSNI:        false,
 	}
 
 	encodedServerEntry, err := psiphon.EncodeServerEntry(serverEntry)
@@ -535,68 +632,4 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 	}
 
 	return encodedConfig, []byte(encodedServerEntry), nil
-}
-
-func generateWebServerCertificate() (string, string, error) {
-
-	// Based on https://golang.org/src/crypto/tls/generate_cert.go
-
-	// TODO: use other key types: anti-fingerprint by varying params
-
-	rsaKey, err := rsa.GenerateKey(rand.Reader, WEB_SERVER_CERTIFICATE_RSA_KEY_BITS)
-	if err != nil {
-		return "", "", psiphon.ContextError(err)
-	}
-
-	notBefore := time.Now()
-	notAfter := notBefore.Add(WEB_SERVER_CERTIFICATE_VALIDITY_PERIOD)
-
-	// TODO: psi_ops_install sets serial number to 0?
-	// TODO: psi_ops_install sets RSA exponent to 3, digest type to 'sha1', and version to 2?
-
-	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
-	if err != nil {
-		return "", "", psiphon.ContextError(err)
-	}
-
-	template := x509.Certificate{
-
-		// TODO: psi_ops_install leaves subject blank?
-		/*
-			Subject: pkix.Name{
-				Organization: []string{""},
-			},
-			IPAddresses: ...
-		*/
-
-		SerialNumber:          serialNumber,
-		NotBefore:             notBefore,
-		NotAfter:              notAfter,
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		IsCA: true,
-	}
-
-	derCert, err := x509.CreateCertificate(rand.Reader, &template, &template, rsaKey.Public(), rsaKey)
-	if err != nil {
-		return "", "", psiphon.ContextError(err)
-	}
-
-	webServerCertificate := pem.EncodeToMemory(
-		&pem.Block{
-			Type:  "CERTIFICATE",
-			Bytes: derCert,
-		},
-	)
-
-	webServerPrivateKey := pem.EncodeToMemory(
-		&pem.Block{
-			Type:  "RSA PRIVATE KEY",
-			Bytes: x509.MarshalPKCS1PrivateKey(rsaKey),
-		},
-	)
-
-	return string(webServerCertificate), string(webServerPrivateKey), nil
 }

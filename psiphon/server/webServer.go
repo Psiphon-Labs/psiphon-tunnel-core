@@ -54,6 +54,7 @@ func RunWebServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 	serveMux.HandleFunc("/handshake", webServer.handshakeHandler)
 	serveMux.HandleFunc("/connected", webServer.connectedHandler)
 	serveMux.HandleFunc("/status", webServer.statusHandler)
+	serveMux.HandleFunc("/client_verification", webServer.clientVerificationHandler)
 
 	certificate, err := tls.X509KeyPair(
 		[]byte(config.WebServerCertificate),
@@ -242,6 +243,32 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 
 	// TODO: parse payload; validate; proper logs
 	log.WithContextFields(LogFields{"payload": string(requestBody)}).Info("status payload")
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *http.Request) {
+
+	if !webServer.checkWebServerSecret(r) {
+		// TODO: log more details?
+		log.WithContext().Warning("checkWebServerSecret failed")
+		// TODO: psi_web does NotFound in this case
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	// TODO: validate; proper log
+	log.WithContextFields(LogFields{"queryParams": r.URL.Query()}).Info("client_verification")
+
+	// TODO: use json.NewDecoder(r.Body)? But will that handle bogus extra data in request body?
+	requestBody, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// TODO: parse payload; validate; proper logs
+	log.WithContextFields(LogFields{"payload": string(requestBody)}).Info("client_verification payload")
 
 	w.WriteHeader(http.StatusOK)
 }
