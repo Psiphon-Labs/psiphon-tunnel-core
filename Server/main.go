@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
@@ -34,6 +35,8 @@ func main() {
 
 	var generateServerIPaddress, generateServerNetworkInterface string
 	var generateConfigFilename, generateServerEntryFilename string
+	var generateWebServerPort int
+	var generateProtocolPorts stringListFlag
 	var runConfigFilenames stringListFlag
 
 	flag.StringVar(
@@ -59,6 +62,17 @@ func main() {
 		"ipaddress",
 		server.DEFAULT_SERVER_IP_ADDRESS,
 		"generate with this server `IP address`")
+
+	flag.IntVar(
+		&generateWebServerPort,
+		"web",
+		0,
+		"generate with web server `port`; 0 for no web server")
+
+	flag.Var(
+		&generateProtocolPorts,
+		"protocol",
+		"generate with `protocol:port`; flag may be repeated to enable multiple protocols")
 
 	flag.Var(
 		&runConfigFilenames,
@@ -88,26 +102,42 @@ func main() {
 		if generateServerNetworkInterface != "" {
 			var err error
 			serverIPaddress, err = psiphon.GetInterfaceIPAddress(generateServerNetworkInterface)
-			fmt.Errorf("generate failed: %s", err)
+			fmt.Printf("generate failed: %s\n", err)
 			os.Exit(1)
 		}
 
+		tunnelProtocolPorts := make(map[string]int)
+		for _, protocolPort := range generateProtocolPorts {
+			parts := strings.Split(protocolPort, ":")
+			if len(parts) == 2 {
+				port, err := strconv.Atoi(parts[1])
+				if err != nil {
+					fmt.Printf("generate failed: %s\n", err)
+					os.Exit(1)
+				}
+				tunnelProtocolPorts[parts[0]] = port
+			}
+		}
+
 		configFileContents, serverEntryFileContents, err :=
-			server.GenerateConfig(serverIPaddress)
+			server.GenerateConfig(
+				serverIPaddress,
+				generateWebServerPort,
+				tunnelProtocolPorts)
 		if err != nil {
-			fmt.Errorf("generate failed: %s", err)
+			fmt.Printf("generate failed: %s\n", err)
 			os.Exit(1)
 		}
 
 		err = ioutil.WriteFile(generateConfigFilename, configFileContents, 0600)
 		if err != nil {
-			fmt.Errorf("error writing configuration file: %s", err)
+			fmt.Printf("error writing configuration file: %s\n", err)
 			os.Exit(1)
 		}
 
 		err = ioutil.WriteFile(generateServerEntryFilename, serverEntryFileContents, 0600)
 		if err != nil {
-			fmt.Errorf("error writing server entry file: %s", err)
+			fmt.Printf("error writing server entry file: %s\n", err)
 			os.Exit(1)
 		}
 
@@ -122,7 +152,7 @@ func main() {
 		for _, configFilename := range runConfigFilenames {
 			contents, err := ioutil.ReadFile(configFilename)
 			if err != nil {
-				fmt.Errorf("error loading configuration file: %s", err)
+				fmt.Printf("error loading configuration file: %s\n", err)
 				os.Exit(1)
 			}
 
@@ -131,7 +161,7 @@ func main() {
 
 		err := server.RunServices(configFileContents)
 		if err != nil {
-			fmt.Errorf("run failed: %s", err)
+			fmt.Printf("run failed: %s\n", err)
 			os.Exit(1)
 		}
 	}

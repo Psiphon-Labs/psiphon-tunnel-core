@@ -41,6 +41,9 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// Note: not testing fronting meek protocols, which client is
+// hard-wired to except running on privileged ports 80 and 443.
+
 func TestSSH(t *testing.T) {
 	runServer(t, "SSH")
 }
@@ -49,16 +52,12 @@ func TestOSSH(t *testing.T) {
 	runServer(t, "OSSH")
 }
 
-func TestFrontedMeek(t *testing.T) {
-	runServer(t, "FRONTED-MEEK-OSSH")
-}
-
 func TestUnfrontedMeek(t *testing.T) {
 	runServer(t, "UNFRONTED-MEEK-OSSH")
 }
 
-func TestFrontedMeekHTTP(t *testing.T) {
-	runServer(t, "FRONTED-MEEK-HTTP-OSSH")
+func TestUnfrontedMeekHTTPS(t *testing.T) {
+	runServer(t, "UNFRONTED-MEEK-HTTPS-OSSH")
 }
 
 func runServer(t *testing.T, tunnelProtocol string) {
@@ -66,7 +65,9 @@ func runServer(t *testing.T, tunnelProtocol string) {
 	// create a server
 
 	serverConfigFileContents, serverEntryFileContents, err := GenerateConfig(
-		"127.0.0.1")
+		"127.0.0.1",
+		8000,
+		map[string]int{tunnelProtocol: 4000})
 	if err != nil {
 		t.Fatalf("error generating server config: %s", err)
 	}
@@ -177,7 +178,23 @@ func runServer(t *testing.T, tunnelProtocol string) {
 		defer controllerWaitGroup.Done()
 		controller.Run(controllerShutdownBroadcast)
 	}()
-	defer close(controllerShutdownBroadcast)
+	defer func() {
+		close(controllerShutdownBroadcast)
+
+		shutdownTimeout := time.NewTimer(20 * time.Second)
+
+		shutdownOk := make(chan struct{}, 1)
+		go func() {
+			controllerWaitGroup.Wait()
+			shutdownOk <- *new(struct{})
+		}()
+
+		select {
+		case <-shutdownOk:
+		case <-shutdownTimeout.C:
+			t.Fatalf("controller shutdown timeout exceeded")
+		}
+	}()
 
 	// Test: tunnels must be established within 30 seconds
 
