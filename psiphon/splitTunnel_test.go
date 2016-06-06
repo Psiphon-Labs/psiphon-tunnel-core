@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-var list networkList
+var netList networkList
 var isLocalAddr bool
 
 func Benchmark_NewNetworkList(b *testing.B) {
@@ -19,13 +19,13 @@ func Benchmark_NewNetworkList(b *testing.B) {
 	}
 
 	for n := 0; n < b.N; n++ {
-		list, _ = NewNetworkList(routesData)
+		netList, _ = NewNetworkList(routesData)
 	}
 }
 
 func Benchmark_containsRandomAddr(b *testing.B) {
 
-	if list == nil {
+	if netList == nil {
 		b.Skipf("no test routes file")
 	}
 
@@ -33,6 +33,6 @@ func Benchmark_containsRandomAddr(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		ip := make([]byte, 4)
 		binary.BigEndian.PutUint32(ip, rand.Uint32())
-		isLocalAddr = list.ContainsIpAddress(net.IP(ip))
+		isLocalAddr = netList.ContainsIpAddress(net.IP(ip))
 	}
 }
