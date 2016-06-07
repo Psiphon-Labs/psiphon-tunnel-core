@@ -63,6 +63,7 @@ func UpdateRedisForLegacyPsiWeb(psiphonSessionID string, geoIPData GeoIPData) er
 	}
 
 	conn := redisPool.Get()
+	defer conn.Close()
 
 	// Note: using SET with NX (set if not exists) so as to not clobber
 	// any existing records set by an upstream connection server (i.e.,
