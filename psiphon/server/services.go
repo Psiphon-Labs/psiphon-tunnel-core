@@ -28,6 +28,7 @@ import (
 	"os/signal"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
@@ -79,10 +80,16 @@ func RunServices(encodedConfigs [][]byte) error {
 		waitGroup.Add(1)
 		go func() {
 			waitGroup.Done()
-			runLoadMonitor(
-				tunnelServer,
-				time.Duration(config.LoadMonitorPeriodSeconds)*time.Second,
-				shutdownBroadcast)
+			ticker := time.NewTicker(time.Duration(config.LoadMonitorPeriodSeconds) * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-shutdownBroadcast:
+					return
+				case <-ticker.C:
+					logLoad(tunnelServer)
+				}
+			}
 		}()
 	}
 
@@ -114,13 +121,24 @@ func RunServices(encodedConfigs [][]byte) error {
 	systemStopSignal := make(chan os.Signal, 1)
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill)
 
+	// SIGUSR1 triggers a load log
+	logLoadSignal := make(chan os.Signal, 1)
+	signal.Notify(logLoadSignal, syscall.SIGUSR1)
+
 	err = nil
 
-	select {
-	case <-systemStopSignal:
-		log.WithContext().Info("shutdown by system")
-	case err = <-errors:
-		log.WithContextFields(LogFields{"error": err}).Error("service failed")
+loop:
+	for {
+		select {
+		case <-logLoadSignal:
+			logLoad(tunnelServer)
+		case <-systemStopSignal:
+			log.WithContext().Info("shutdown by system")
+			break loop
+		case err = <-errors:
+			log.WithContextFields(LogFields{"error": err}).Error("service failed")
+			break loop
+		}
 	}
 
 	close(shutdownBroadcast)
@@ -129,38 +147,24 @@ func RunServices(encodedConfigs [][]byte) error {
 	return err
 }
 
-// runLoadMonitor periodically logs golang runtime and tunnel server stats
-func runLoadMonitor(
-	server *TunnelServer,
-	loadMonitorPeriod time.Duration,
-	shutdownBroadcast <-chan struct{}) {
+func logLoad(server *TunnelServer) {
 
-	ticker := time.NewTicker(loadMonitorPeriod)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-shutdownBroadcast:
-			return
-		case <-ticker.C:
+	// golang runtime stats
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+	fields := LogFields{
+		"NumGoroutine":        runtime.NumGoroutine(),
+		"MemStats.Alloc":      memStats.Alloc,
+		"MemStats.TotalAlloc": memStats.TotalAlloc,
+		"MemStats.Sys":        memStats.Sys,
+	}
 
-			// golang runtime stats
-			var memStats runtime.MemStats
-			runtime.ReadMemStats(&memStats)
-			fields := LogFields{
-				"NumGoroutine":        runtime.NumGoroutine(),
-				"MemStats.Alloc":      memStats.Alloc,
-				"MemStats.TotalAlloc": memStats.TotalAlloc,
-				"MemStats.Sys":        memStats.Sys,
-			}
-
-			// tunnel server stats
-			for tunnelProtocol, stats := range server.GetLoadStats() {
-				for stat, value := range stats {
-					fields[tunnelProtocol+"."+stat] = value
-				}
-			}
-
-			log.WithContextFields(fields).Info("load")
+	// tunnel server stats
+	for tunnelProtocol, stats := range server.GetLoadStats() {
+		for stat, value := range stats {
+			fields[tunnelProtocol+"."+stat] = value
 		}
 	}
+
+	log.WithContextFields(fields).Info("load")
 }
