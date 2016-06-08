@@ -44,7 +44,7 @@ type LogFields logrus.Fields
 // function name and source file line number. Use this function
 // when the log has no fields.
 func (logger *ContextLogger) WithContext() *logrus.Entry {
-	return logrus.WithFields(
+	return log.WithFields(
 		logrus.Fields{
 			"context": psiphon.GetParentContext(),
 		})
@@ -105,7 +105,7 @@ func InitLogging(config *Config) error {
 	log = &ContextLogger{
 		&logrus.Logger{
 			Out:       os.Stderr,
-			Formatter: new(logrus.TextFormatter),
+			Formatter: new(logrus.JSONFormatter),
 			Hooks:     hooks,
 			Level:     level,
 		},
@@ -176,7 +176,7 @@ func init() {
 	log = &ContextLogger{
 		&logrus.Logger{
 			Out:       os.Stderr,
-			Formatter: new(logrus.TextFormatter),
+			Formatter: new(logrus.JSONFormatter),
 			Hooks:     make(logrus.LevelHooks),
 			Level:     logrus.DebugLevel,
 		},
