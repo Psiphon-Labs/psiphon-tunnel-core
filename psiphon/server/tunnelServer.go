@@ -52,9 +52,12 @@ type TunnelServer struct {
 
 // NewTunnelServer initializes a new tunnel server.
 func NewTunnelServer(
-	config *Config, shutdownBroadcast <-chan struct{}) (*TunnelServer, error) {
+	config *Config,
+	psinetDatabase *PsinetDatabase,
+	shutdownBroadcast <-chan struct{}) (*TunnelServer, error) {
 
-	sshServer, err := newSSHServer(config, shutdownBroadcast)
+	sshServer, err := newSSHServer(
+		config, psinetDatabase, shutdownBroadcast)
 	if err != nil {
 		return nil, psiphon.ContextError(err)
 	}
@@ -180,6 +183,7 @@ type sshClientID uint64
 
 type sshServer struct {
 	config            *Config
+	psinetDatabase    *PsinetDatabase
 	shutdownBroadcast <-chan struct{}
 	sshHostKey        ssh.Signer
 	nextClientID      sshClientID
@@ -190,6 +194,7 @@ type sshServer struct {
 
 func newSSHServer(
 	config *Config,
+	psinetDatabase *PsinetDatabase,
 	shutdownBroadcast <-chan struct{}) (*sshServer, error) {
 
 	privateKey, err := ssh.ParseRawPrivateKey([]byte(config.SSHPrivateKey))
@@ -205,6 +210,7 @@ func newSSHServer(
 
 	return &sshServer{
 		config:            config,
+		psinetDatabase:    psinetDatabase,
 		shutdownBroadcast: shutdownBroadcast,
 		sshHostKey:        signer,
 		nextClientID:      1,
@@ -606,7 +612,11 @@ func (sshClient *sshClient) runClient(
 
 			// requests are processed serially; responses must be sent in request order.
 			responsePayload, err := sshAPIRequestHandler(
-				sshClient.sshServer.config, sshClient.geoIPData, request.Type, request.Payload)
+				sshClient.sshServer.config,
+				sshClient.sshServer.psinetDatabase,
+				sshClient.geoIPData,
+				request.Type,
+				request.Payload)
 
 			if err == nil {
 				err = request.Reply(true, responsePayload)

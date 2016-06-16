@@ -33,8 +33,9 @@ import (
 )
 
 type webServer struct {
-	serveMux *http.ServeMux
-	config   *Config
+	serveMux       *http.ServeMux
+	config         *Config
+	psinetDatabase *PsinetDatabase
 }
 
 // RunWebServer runs a web server which supports tunneled and untunneled
@@ -51,10 +52,14 @@ type webServer struct {
 // The API is compatible with all tunnel-core clients but not backwards
 // compatible with older clients.
 //
-func RunWebServer(config *Config, shutdownBroadcast <-chan struct{}) error {
+func RunWebServer(
+	config *Config,
+	psinetDatabase *PsinetDatabase,
+	shutdownBroadcast <-chan struct{}) error {
 
 	webServer := &webServer{
-		config: config,
+		config:         config,
+		psinetDatabase: psinetDatabase,
 	}
 
 	serveMux := http.NewServeMux()
@@ -188,7 +193,10 @@ func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Requ
 	var responsePayload []byte
 	if err == nil {
 		responsePayload, err = handshakeAPIRequestHandler(
-			webServer.config, webServer.lookupGeoIPData(params), params)
+			webServer.config,
+			webServer.psinetDatabase,
+			webServer.lookupGeoIPData(params),
+			params)
 	}
 
 	if err != nil {

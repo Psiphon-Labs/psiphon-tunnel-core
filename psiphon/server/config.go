@@ -105,6 +105,10 @@ type Config struct {
 	// set, redis is used to store per-session GeoIP information.
 	RedisServerAddress string
 
+	// PsinetDatabaseFilename is the path of the Psiphon automation
+	// jsonpickle format Psiphon API data file.
+	PsinetDatabaseFilename string
+
 	// HostID is the ID of the server host; this is used for API
 	// event logging.
 	HostID string

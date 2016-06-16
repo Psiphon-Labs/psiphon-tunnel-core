@@ -49,7 +49,11 @@ type requestJSONObject map[string]interface{}
 // clients.
 //
 func sshAPIRequestHandler(
-	config *Config, geoIPData GeoIPData, name string, requestPayload []byte) ([]byte, error) {
+	config *Config,
+	psinetDatabase *PsinetDatabase,
+	geoIPData GeoIPData,
+	name string,
+	requestPayload []byte) ([]byte, error) {
 
 	// Note: for SSH requests, MAX_API_PARAMS_SIZE is implicitly enforced
 	// by max SSH reqest packet size.
@@ -62,7 +66,7 @@ func sshAPIRequestHandler(
 
 	switch name {
 	case psiphon.SERVER_API_HANDSHAKE_REQUEST_NAME:
-		return handshakeAPIRequestHandler(config, geoIPData, params)
+		return handshakeAPIRequestHandler(config, psinetDatabase, geoIPData, params)
 	case psiphon.SERVER_API_CONNECTED_REQUEST_NAME:
 		return connectedAPIRequestHandler(config, geoIPData, params)
 	case psiphon.SERVER_API_STATUS_REQUEST_NAME:
@@ -79,7 +83,10 @@ func sshAPIRequestHandler(
 // connection; the response tells the client what homepage to open, what
 // stats to record, etc.
 func handshakeAPIRequestHandler(
-	config *Config, geoIPData GeoIPData, params requestJSONObject) ([]byte, error) {
+	config *Config,
+	psinetDatabase *PsinetDatabase,
+	geoIPData GeoIPData,
+	params requestJSONObject) ([]byte, error) {
 
 	// Note: ignoring "known_servers" params
 
@@ -109,6 +116,20 @@ func handshakeAPIRequestHandler(
 		ClientRegion         string              `json:"client_region"`
 		ServerTimestamp      string              `json:"server_timestamp"`
 	}
+
+	handshakeResponse.Homepages = psinetDatabase.GetHomepages(
+		"", "", "") // TODO: sponsorID, clientRegion, clientPlatform)
+
+	handshakeResponse.UpgradeClientVersion = psinetDatabase.GetUpgradeClientVersion(
+		"") // TODO: clientVersion)
+
+	handshakeResponse.HttpsRequestRegexes = psinetDatabase.GetHttpsRequestRegexes(
+		"", "", "") // TODO: sponsorID, clientRegion, clientPlatform)
+
+	handshakeResponse.EncodedServerList = psinetDatabase.DiscoverServers(
+		"", 0) // TODO: propagationChannelID, discoveryValue)
+
+	handshakeResponse.ClientRegion = geoIPData.Country
 
 	handshakeResponse.ServerTimestamp = psiphon.GetCurrentTimestamp()
 
