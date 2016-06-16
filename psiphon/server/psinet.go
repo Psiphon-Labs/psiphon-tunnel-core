@@ -48,7 +48,7 @@ func (psinet *PsinetDatabase) GetHomepages(sponsorID, clientRegion, clientPlatfo
 // GetUpgradeClientVersion returns a new client version when an upgrade is
 // indicated for the specified client current version. The result is "" when
 // no upgrade is available.
-func (psinet *PsinetDatabase) GetUpgradeClientVersion(clientVersion string) string {
+func (psinet *PsinetDatabase) GetUpgradeClientVersion(clientVersion, clientPlatform string) string {
 
 	// TODO: implement
 
@@ -56,8 +56,8 @@ func (psinet *PsinetDatabase) GetUpgradeClientVersion(clientVersion string) stri
 }
 
 // GetHttpsRequestRegexes returns bytes transferred stats regexes for the
-// specified client inputs.
-func (psinet *PsinetDatabase) GetHttpsRequestRegexes(sponsorID, clientRegion, clientPlatform string) []map[string]string {
+// specified sponsor.
+func (psinet *PsinetDatabase) GetHttpsRequestRegexes(sponsorID string) []map[string]string {
 
 	return make([]map[string]string, 0)
 }
