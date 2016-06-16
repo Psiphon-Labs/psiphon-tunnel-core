@@ -36,6 +36,14 @@ const (
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS = "UNFRONTED-MEEK-HTTPS-OSSH"
 	TUNNEL_PROTOCOL_FRONTED_MEEK         = "FRONTED-MEEK-OSSH"
 	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP    = "FRONTED-MEEK-HTTP-OSSH"
+
+	SERVER_ENTRY_SOURCE_EMBEDDED  = "EMBEDDED"
+	SERVER_ENTRY_SOURCE_REMOTE    = "REMOTE"
+	SERVER_ENTRY_SOURCE_DISCOVERY = "DISCOVERY"
+	SERVER_ENTRY_SOURCE_TARGET    = "TARGET"
+
+	CAPABILITY_SSH_API_REQUESTS            = "ssh-api-requests"
+	CAPABILITY_UNTUNNELED_WEB_API_REQUESTS = "handshake"
 )
 
 var SupportedTunnelProtocols = []string{
@@ -45,6 +53,13 @@ var SupportedTunnelProtocols = []string{
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 	TUNNEL_PROTOCOL_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_SSH,
+}
+
+var SupportedServerEntrySources = []string{
+	SERVER_ENTRY_SOURCE_EMBEDDED,
+	SERVER_ENTRY_SOURCE_REMOTE,
+	SERVER_ENTRY_SOURCE_DISCOVERY,
+	SERVER_ENTRY_SOURCE_TARGET,
 }
 
 // ServerEntry represents a Psiphon server. It contains information
@@ -80,15 +95,6 @@ type ServerEntry struct {
 	LocalSource    string `json:"localSource"`
 	LocalTimestamp string `json:"localTimestamp"`
 }
-
-type ServerEntrySource string
-
-const (
-	SERVER_ENTRY_SOURCE_EMBEDDED  ServerEntrySource = "EMBEDDED"
-	SERVER_ENTRY_SOURCE_REMOTE    ServerEntrySource = "REMOTE"
-	SERVER_ENTRY_SOURCE_DISCOVERY ServerEntrySource = "DISCOVERY"
-	SERVER_ENTRY_SOURCE_TARGET    ServerEntrySource = "TARGET"
-)
 
 func TunnelProtocolUsesSSH(protocol string) bool {
 	return true
@@ -154,9 +160,15 @@ func (serverEntry *ServerEntry) DisableImpairedProtocols(impairedProtocols []str
 	serverEntry.Capabilities = capabilities
 }
 
-func (serverEntry *ServerEntry) GetDirectWebRequestPorts() []string {
+// SupportsSSHAPIRequests returns true when the server supports
+// SSH API requests.
+func (serverEntry *ServerEntry) SupportsSSHAPIRequests() bool {
+	return Contains(serverEntry.Capabilities, CAPABILITY_SSH_API_REQUESTS)
+}
+
+func (serverEntry *ServerEntry) GetUntunneledWebRequestPorts() []string {
 	ports := make([]string, 0)
-	if Contains(serverEntry.Capabilities, "handshake") {
+	if Contains(serverEntry.Capabilities, CAPABILITY_UNTUNNELED_WEB_API_REQUESTS) {
 		// Server-side configuration quirk: there's a port forward from
 		// port 443 to the web server, which we can try, except on servers
 		// running FRONTED_MEEK, which listens on port 443.
@@ -196,8 +208,8 @@ func EncodeServerEntry(serverEntry *ServerEntry) (string, error) {
 // server entry and reported to the server as stats (a coarse granularity timestamp
 // is reported).
 func DecodeServerEntry(
-	encodedServerEntry, timestamp string,
-	serverEntrySource ServerEntrySource) (serverEntry *ServerEntry, err error) {
+	encodedServerEntry, timestamp,
+	serverEntrySource string) (serverEntry *ServerEntry, err error) {
 
 	hexDecodedServerEntry, err := hex.DecodeString(encodedServerEntry)
 	if err != nil {
@@ -217,7 +229,7 @@ func DecodeServerEntry(
 	}
 
 	// NOTE: if the source JSON happens to have values in these fields, they get clobbered.
-	serverEntry.LocalSource = string(serverEntrySource)
+	serverEntry.LocalSource = serverEntrySource
 	serverEntry.LocalTimestamp = timestamp
 
 	return serverEntry, nil
@@ -245,8 +257,8 @@ func ValidateServerEntry(serverEntry *ServerEntry) error {
 // Each server entry is validated and invalid entries are skipped.
 // See DecodeServerEntry for note on serverEntrySource/timestamp.
 func DecodeAndValidateServerEntryList(
-	encodedServerEntryList, timestamp string,
-	serverEntrySource ServerEntrySource) (serverEntries []*ServerEntry, err error) {
+	encodedServerEntryList, timestamp,
+	serverEntrySource string) (serverEntries []*ServerEntry, err error) {
 
 	serverEntries = make([]*ServerEntry, 0)
 	for _, encodedServerEntry := range strings.Split(encodedServerEntryList, "\n") {

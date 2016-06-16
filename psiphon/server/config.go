@@ -105,6 +105,14 @@ type Config struct {
 	// set, redis is used to store per-session GeoIP information.
 	RedisServerAddress string
 
+	// PsinetDatabaseFilename is the path of the Psiphon automation
+	// jsonpickle format Psiphon API data file.
+	PsinetDatabaseFilename string
+
+	// HostID is the ID of the server host; this is used for API
+	// event logging.
+	HostID string
+
 	// ServerIPAddress is the public IP address of the server.
 	ServerIPAddress string
 
@@ -561,6 +569,7 @@ func GenerateConfig(
 		SyslogTag:                      "psiphon-server",
 		Fail2BanFormat:                 "Authentication failure for psiphon-client from %s",
 		GeoIPDatabaseFilename:          "",
+		HostID:                         "example-host-id",
 		ServerIPAddress:                serverIPaddress,
 		DiscoveryValueHMACKey:          discoveryValueHMACKey,
 		WebServerPort:                  webServerPort,
@@ -609,7 +618,11 @@ func GenerateConfig(
 	lines := strings.Split(webServerCertificate, "\n")
 	strippedWebServerCertificate := strings.Join(lines[1:len(lines)-2], "")
 
-	capabilities := make([]string, 0)
+	capabilities := []string{psiphon.CAPABILITY_SSH_API_REQUESTS}
+
+	if webServerPort != 0 {
+		capabilities = append(capabilities, psiphon.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS)
+	}
 
 	for protocol, _ := range tunnelProtocolPorts {
 		capabilities = append(capabilities, psiphon.GetCapability(protocol))

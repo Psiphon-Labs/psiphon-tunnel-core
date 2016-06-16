@@ -58,6 +58,12 @@ func RunServices(encodedConfigs [][]byte) error {
 		return psiphon.ContextError(err)
 	}
 
+	psinetDatabase, err := NewPsinetDatabase(config.PsinetDatabaseFilename)
+	if err != nil {
+		log.WithContextFields(LogFields{"error": err}).Error("init PsinetDatabase failed")
+		return psiphon.ContextError(err)
+	}
+
 	if config.UseRedis() {
 		err = InitRedis(config)
 		if err != nil {
@@ -70,7 +76,7 @@ func RunServices(encodedConfigs [][]byte) error {
 	shutdownBroadcast := make(chan struct{})
 	errors := make(chan error)
 
-	tunnelServer, err := NewTunnelServer(config, shutdownBroadcast)
+	tunnelServer, err := NewTunnelServer(config, psinetDatabase, shutdownBroadcast)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("init tunnel server failed")
 		return psiphon.ContextError(err)
@@ -97,7 +103,7 @@ func RunServices(encodedConfigs [][]byte) error {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
-			err := RunWebServer(config, shutdownBroadcast)
+			err := RunWebServer(config, psinetDatabase, shutdownBroadcast)
 			select {
 			case errors <- err:
 			default:

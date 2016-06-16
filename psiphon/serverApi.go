@@ -37,14 +37,22 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 )
 
+const (
+	SERVER_API_HANDSHAKE_REQUEST_NAME           = "psiphon-handshake"
+	SERVER_API_CONNECTED_REQUEST_NAME           = "psiphon-connected"
+	SERVER_API_STATUS_REQUEST_NAME              = "psiphon-status"
+	SERVER_API_CLIENT_VERIFICATION_REQUEST_NAME = "psiphon-client-verification"
+)
+
 // ServerContext is a utility struct which holds all of the data associated
 // with a Psiphon server connection. In addition to the established tunnel, this
-// includes data associated with Psiphon API requests and a persistent http
-// client configured to make tunneled Psiphon API requests.
+// includes data and transport mechanisms for Psiphon API requests. Legacy servers
+// offer the Psiphon API through a web service; newer servers offer the Psiphon
+// API through SSH requests made directly through the tunnel's SSH client.
 type ServerContext struct {
 	sessionId                string
 	tunnelNumber             int64
-	baseRequestUrl           string
+	tunnel                   *Tunnel
 	psiphonHttpsClient       *http.Client
 	statsRegexps             *transferstats.Regexps
 	clientRegion             string
@@ -87,19 +95,25 @@ func MakeSessionId() (sessionId string, err error) {
 // requests (e.g., periodic connected and status requests).
 func NewServerContext(tunnel *Tunnel, sessionId string) (*ServerContext, error) {
 
-	psiphonHttpsClient, err := makePsiphonHttpsClient(tunnel)
-	if err != nil {
-		return nil, ContextError(err)
+	// For legacy servers, set up psiphonHttpsClient for
+	// accessing the Psiphon API via the web service.
+	var psiphonHttpsClient *http.Client
+	if !tunnel.serverEntry.SupportsSSHAPIRequests() {
+		var err error
+		psiphonHttpsClient, err = makePsiphonHttpsClient(tunnel)
+		if err != nil {
+			return nil, ContextError(err)
+		}
 	}
 
 	serverContext := &ServerContext{
 		sessionId:          sessionId,
 		tunnelNumber:       atomic.AddInt64(&nextTunnelNumber, 1),
-		baseRequestUrl:     makeBaseRequestUrl(tunnel, "", sessionId),
+		tunnel:             tunnel,
 		psiphonHttpsClient: psiphonHttpsClient,
 	}
 
-	err = serverContext.doHandshakeRequest()
+	err := serverContext.doHandshakeRequest()
 	if err != nil {
 		return nil, ContextError(err)
 	}
@@ -107,42 +121,67 @@ func NewServerContext(tunnel *Tunnel, sessionId string) (*ServerContext, error) 
 	return serverContext, nil
 }
 
-// doHandshakeRequest performs the handshake API request. The handshake
+// doHandshakeRequest performs the "handshake" API request. The handshake
 // returns upgrade info, newly discovered server entries -- which are
 // stored -- and sponsor info (home pages, stat regexes).
 func (serverContext *ServerContext) doHandshakeRequest() error {
-	extraParams := make([]*ExtraParam, 0)
-	serverEntryIpAddresses, err := GetServerEntryIpAddresses()
-	if err != nil {
-		return ContextError(err)
-	}
-	// Submit a list of known servers -- this will be used for
-	// discovery statistics.
-	for _, ipAddress := range serverEntryIpAddresses {
-		extraParams = append(extraParams, &ExtraParam{"known_server", ipAddress})
-	}
-	url := buildRequestUrl(serverContext.baseRequestUrl, "handshake", extraParams...)
-	responseBody, err := serverContext.doGetRequest(url)
-	if err != nil {
-		return ContextError(err)
-	}
-	// Skip legacy format lines and just parse the JSON config line
-	configLinePrefix := []byte("Config: ")
-	var configLine []byte
-	for _, line := range bytes.Split(responseBody, []byte("\n")) {
-		if bytes.HasPrefix(line, configLinePrefix) {
-			configLine = line[len(configLinePrefix):]
-			break
+
+	params := serverContext.getBaseParams()
+
+	// *TODO*: this is obsolete?
+	/*
+		serverEntryIpAddresses, err := GetServerEntryIpAddresses()
+		if err != nil {
+			return ContextError(err)
 		}
-	}
-	if len(configLine) == 0 {
-		return ContextError(errors.New("no config line found"))
+
+		// Submit a list of known servers -- this will be used for
+		// discovery statistics.
+		for _, ipAddress := range serverEntryIpAddresses {
+			params = append(params, requestParam{"known_server", ipAddress})
+		}
+	*/
+
+	var response []byte
+	if serverContext.psiphonHttpsClient == nil {
+
+		request, err := makeSSHAPIRequestPayload(params)
+		if err != nil {
+			return ContextError(err)
+		}
+
+		response, err = serverContext.tunnel.SendAPIRequest(
+			SERVER_API_HANDSHAKE_REQUEST_NAME, request)
+		if err != nil {
+			return ContextError(err)
+		}
+
+	} else {
+
+		// Legacy web service API request
+
+		responseBody, err := serverContext.doGetRequest(
+			makeRequestUrl(serverContext.tunnel, "", "handshake", params))
+		if err != nil {
+			return ContextError(err)
+		}
+		// Skip legacy format lines and just parse the JSON config line
+		configLinePrefix := []byte("Config: ")
+		for _, line := range bytes.Split(responseBody, []byte("\n")) {
+			if bytes.HasPrefix(line, configLinePrefix) {
+				response = line[len(configLinePrefix):]
+				break
+			}
+		}
+		if len(response) == 0 {
+			return ContextError(errors.New("no config line found"))
+		}
 	}
 
 	// Note:
 	// - 'preemptive_reconnect_lifetime_milliseconds' is currently unused
 	// - 'ssh_session_id' is ignored; client session ID is used instead
-	var handshakeConfig struct {
+	var handshakeResponse struct {
 		Homepages                  []string            `json:"homepages"`
 		UpgradeClientVersion       string              `json:"upgrade_client_version"`
 		PageViewRegexes            []map[string]string `json:"page_view_regexes"`
@@ -152,12 +191,12 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 		ServerTimestamp            string              `json:"server_timestamp"`
 		ClientVerificationRequired bool                `json:"client_verification_required"`
 	}
-	err = json.Unmarshal(configLine, &handshakeConfig)
+	err := json.Unmarshal(response, &handshakeResponse)
 	if err != nil {
 		return ContextError(err)
 	}
 
-	serverContext.clientRegion = handshakeConfig.ClientRegion
+	serverContext.clientRegion = handshakeResponse.ClientRegion
 	NoticeClientRegion(serverContext.clientRegion)
 
 	var decodedServerEntries []*ServerEntry
@@ -165,11 +204,11 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	// Store discovered server entries
 	// We use the server's time, as it's available here, for the server entry
 	// timestamp since this is more reliable than the client time.
-	for _, encodedServerEntry := range handshakeConfig.EncodedServerList {
+	for _, encodedServerEntry := range handshakeResponse.EncodedServerList {
 
 		serverEntry, err := DecodeServerEntry(
 			encodedServerEntry,
-			TruncateTimestampToHour(handshakeConfig.ServerTimestamp),
+			TruncateTimestampToHour(handshakeResponse.ServerTimestamp),
 			SERVER_ENTRY_SOURCE_DISCOVERY)
 		if err != nil {
 			return ContextError(err)
@@ -194,42 +233,45 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 
 	// TODO: formally communicate the sponsor and upgrade info to an
 	// outer client via some control interface.
-	for _, homepage := range handshakeConfig.Homepages {
+	for _, homepage := range handshakeResponse.Homepages {
 		NoticeHomepage(homepage)
 	}
 
-	serverContext.clientUpgradeVersion = handshakeConfig.UpgradeClientVersion
-	if handshakeConfig.UpgradeClientVersion != "" {
-		NoticeClientUpgradeAvailable(handshakeConfig.UpgradeClientVersion)
+	serverContext.clientUpgradeVersion = handshakeResponse.UpgradeClientVersion
+	if handshakeResponse.UpgradeClientVersion != "" {
+		NoticeClientUpgradeAvailable(handshakeResponse.UpgradeClientVersion)
 	} else {
 		NoticeClientIsLatestVersion("")
 	}
 
 	var regexpsNotices []string
 	serverContext.statsRegexps, regexpsNotices = transferstats.MakeRegexps(
-		handshakeConfig.PageViewRegexes,
-		handshakeConfig.HttpsRequestRegexes)
+		handshakeResponse.PageViewRegexes,
+		handshakeResponse.HttpsRequestRegexes)
 
 	for _, notice := range regexpsNotices {
 		NoticeAlert(notice)
 	}
 
-	serverContext.serverHandshakeTimestamp = handshakeConfig.ServerTimestamp
+	serverContext.serverHandshakeTimestamp = handshakeResponse.ServerTimestamp
 
-	if handshakeConfig.ClientVerificationRequired {
+	if handshakeResponse.ClientVerificationRequired {
 		NoticeClientVerificationRequired()
 	}
 
 	return nil
 }
 
-// DoConnectedRequest performs the connected API request. This request is
+// DoConnectedRequest performs the "connected" API request. This request is
 // used for statistics. The server returns a last_connected token for
 // the client to store and send next time it connects. This token is
 // a timestamp (using the server clock, and should be rounded to the
 // nearest hour) which is used to determine when a connection represents
 // a unique user for a time period.
 func (serverContext *ServerContext) DoConnectedRequest() error {
+
+	params := serverContext.getBaseParams()
+
 	const DATA_STORE_LAST_CONNECTED_KEY = "lastConnected"
 	lastConnected, err := GetKeyValue(DATA_STORE_LAST_CONNECTED_KEY)
 	if err != nil {
@@ -238,25 +280,44 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 	if lastConnected == "" {
 		lastConnected = "None"
 	}
-	url := buildRequestUrl(
-		serverContext.baseRequestUrl,
-		"connected",
-		&ExtraParam{"session_id", serverContext.sessionId},
-		&ExtraParam{"last_connected", lastConnected})
-	responseBody, err := serverContext.doGetRequest(url)
-	if err != nil {
-		return ContextError(err)
+
+	params["last_connected"] = lastConnected
+
+	var response []byte
+	if serverContext.psiphonHttpsClient == nil {
+
+		request, err := makeSSHAPIRequestPayload(params)
+		if err != nil {
+			return ContextError(err)
+		}
+
+		response, err = serverContext.tunnel.SendAPIRequest(
+			SERVER_API_CONNECTED_REQUEST_NAME, request)
+		if err != nil {
+			return ContextError(err)
+		}
+
+	} else {
+
+		// Legacy web service API request
+
+		response, err = serverContext.doGetRequest(
+			makeRequestUrl(serverContext.tunnel, "", "connected", params))
+		if err != nil {
+			return ContextError(err)
+		}
 	}
 
-	var response struct {
+	var connectedResponse struct {
 		ConnectedTimestamp string `json:"connected_timestamp"`
 	}
-	err = json.Unmarshal(responseBody, &response)
+	err = json.Unmarshal(response, &connectedResponse)
 	if err != nil {
 		return ContextError(err)
 	}
 
-	err = SetKeyValue(DATA_STORE_LAST_CONNECTED_KEY, response.ConnectedTimestamp)
+	err = SetKeyValue(
+		DATA_STORE_LAST_CONNECTED_KEY, connectedResponse.ConnectedTimestamp)
 	if err != nil {
 		return ContextError(err)
 	}
@@ -268,36 +329,67 @@ func (serverContext *ServerContext) StatsRegexps() *transferstats.Regexps {
 	return serverContext.statsRegexps
 }
 
-// DoStatusRequest makes a /status request to the server, sending session stats.
+// DoStatusRequest makes a "status" API request to the server, sending session stats.
 func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 
-	url := makeStatusRequestUrl(serverContext.sessionId, serverContext.baseRequestUrl, true)
+	params := serverContext.getStatusParams(true)
 
-	payload, payloadInfo, err := makeStatusRequestPayload(tunnel.serverEntry.IpAddress)
+	// Note: ensure putBackStatusRequestPayload is called, to replace
+	// payload for future attempt, in all failure cases.
+
+	statusPayload, statusPayloadInfo, err := makeStatusRequestPayload(
+		tunnel.serverEntry.IpAddress)
 	if err != nil {
 		return ContextError(err)
 	}
 
-	err = serverContext.doPostRequest(url, "application/json", bytes.NewReader(payload))
+	if serverContext.psiphonHttpsClient == nil {
+
+		params["statusData"] = json.RawMessage(statusPayload)
+
+		var request []byte
+		request, err = makeSSHAPIRequestPayload(params)
+
+		if err == nil {
+			_, err = serverContext.tunnel.SendAPIRequest(
+				SERVER_API_STATUS_REQUEST_NAME, request)
+		}
+
+	} else {
+
+		// Legacy web service API request
+		err = serverContext.doPostRequest(
+			makeRequestUrl(serverContext.tunnel, "", "status", params),
+			"application/json",
+			bytes.NewReader(statusPayload))
+	}
+
 	if err != nil {
 
 		// Resend the transfer stats and tunnel stats later
 		// Note: potential duplicate reports if the server received and processed
 		// the request but the client failed to receive the response.
-		putBackStatusRequestPayload(payloadInfo)
+		putBackStatusRequestPayload(statusPayloadInfo)
 
 		return ContextError(err)
 	}
-	confirmStatusRequestPayload(payloadInfo)
+
+	confirmStatusRequestPayload(statusPayloadInfo)
 
 	return nil
 }
 
-func makeStatusRequestUrl(sessionId, baseRequestUrl string, isTunneled bool) string {
+func (serverContext *ServerContext) getStatusParams(isTunneled bool) requestJSONObject {
+
+	params := serverContext.getBaseParams()
 
 	// Add a random amount of padding to help prevent stats updates from being
 	// a predictable size (which often happens when the connection is quiet).
-	padding := MakeSecureRandomPadding(0, PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES)
+	// TODO: base64 encoding of padding means the padding size is not exactly
+	// [0, PADDING_MAX_BYTES].
+
+	randomPadding := MakeSecureRandomPadding(0, PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES)
+	params["padding"] = base64.StdEncoding.EncodeToString(randomPadding)
 
 	// Legacy clients set "connected" to "0" when disconnecting, and this value
 	// is used to calculate session duration estimates. This is now superseded
@@ -311,15 +403,9 @@ func makeStatusRequestUrl(sessionId, baseRequestUrl string, isTunneled bool) str
 	if !isTunneled {
 		connected = "0"
 	}
+	params["connected"] = connected
 
-	return buildRequestUrl(
-		baseRequestUrl,
-		"status",
-		&ExtraParam{"session_id", sessionId},
-		&ExtraParam{"connected", connected},
-		// TODO: base64 encoding of padding means the padding
-		// size is not exactly [0, PADDING_MAX_BYTES]
-		&ExtraParam{"padding", base64.StdEncoding.EncodeToString(padding)})
+	return params
 }
 
 // statusRequestPayloadInfo is a temporary structure for data used to
@@ -402,28 +488,25 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 // The tunnel is assumed to be closed, but its config, protocol, and
 // context values must still be valid.
 // TryUntunneledStatusRequest emits notices detailing failed attempts.
-func TryUntunneledStatusRequest(tunnel *Tunnel, isShutdown bool) error {
+func (serverContext *ServerContext) TryUntunneledStatusRequest(isShutdown bool) error {
 
-	for _, port := range tunnel.serverEntry.GetDirectWebRequestPorts() {
-		err := doUntunneledStatusRequest(tunnel, port, isShutdown)
+	for _, port := range serverContext.tunnel.serverEntry.GetUntunneledWebRequestPorts() {
+		err := serverContext.doUntunneledStatusRequest(port, isShutdown)
 		if err == nil {
 			return nil
 		}
 		NoticeAlert("doUntunneledStatusRequest failed for %s:%s: %s",
-			tunnel.serverEntry.IpAddress, port, err)
+			serverContext.tunnel.serverEntry.IpAddress, port, err)
 	}
 
 	return errors.New("all attempts failed")
 }
 
-// doUntunneledStatusRequest attempts an untunneled stratus request.
-func doUntunneledStatusRequest(
-	tunnel *Tunnel, port string, isShutdown bool) error {
+// doUntunneledStatusRequest attempts an untunneled status request.
+func (serverContext *ServerContext) doUntunneledStatusRequest(
+	port string, isShutdown bool) error {
 
-	url := makeStatusRequestUrl(
-		tunnel.serverContext.sessionId,
-		makeBaseRequestUrl(tunnel, port, tunnel.serverContext.sessionId),
-		false)
+	tunnel := serverContext.tunnel
 
 	certificate, err := DecodeCertificate(tunnel.serverEntry.WebServerCertificate)
 	if err != nil {
@@ -444,7 +527,9 @@ func doUntunneledStatusRequest(
 		*dialConfig = *tunnel.untunneledDialConfig
 	}
 
-	httpClient, requestUrl, err := MakeUntunneledHttpsClient(
+	url := makeRequestUrl(tunnel, port, "status", serverContext.getStatusParams(false))
+
+	httpClient, url, err := MakeUntunneledHttpsClient(
 		dialConfig,
 		certificate,
 		url,
@@ -453,15 +538,15 @@ func doUntunneledStatusRequest(
 		return ContextError(err)
 	}
 
-	payload, payloadInfo, err := makeStatusRequestPayload(tunnel.serverEntry.IpAddress)
+	statusPayload, statusPayloadInfo, err := makeStatusRequestPayload(tunnel.serverEntry.IpAddress)
 	if err != nil {
 		return ContextError(err)
 	}
 
 	bodyType := "application/json"
-	body := bytes.NewReader(payload)
+	body := bytes.NewReader(statusPayload)
 
-	response, err := httpClient.Post(requestUrl, bodyType, body)
+	response, err := httpClient.Post(url, bodyType, body)
 	if err == nil && response.StatusCode != http.StatusOK {
 		response.Body.Close()
 		err = fmt.Errorf("HTTP POST request failed with response code: %d", response.StatusCode)
@@ -471,12 +556,12 @@ func doUntunneledStatusRequest(
 		// Resend the transfer stats and tunnel stats later
 		// Note: potential duplicate reports if the server received and processed
 		// the request but the client failed to receive the response.
-		putBackStatusRequestPayload(payloadInfo)
+		putBackStatusRequestPayload(statusPayloadInfo)
 
 		// Trim this error since it may include long URLs
 		return ContextError(TrimError(err))
 	}
-	confirmStatusRequestPayload(payloadInfo)
+	confirmStatusRequestPayload(statusPayloadInfo)
 	response.Body.Close()
 
 	return nil
@@ -558,18 +643,44 @@ func RecordTunnelStats(
 	return StoreTunnelStats(tunnelStatsJson)
 }
 
-// DoClientVerificationRequest performs the client_verification API
-// request. This request is used to verify that the client is a
-// valid Psiphon client, which will determine how the server treats
-// the client traffic. The proof-of-validity is platform-specific
-// and the payload is opaque to this function but assumed to be JSON.
+// DoClientVerificationRequest performs the "client_verification" API
+// request. This request is used to verify that the client is a valid
+// Psiphon client, which will determine how the server treats the client
+// traffic. The proof-of-validity is platform-specific and the payload
+// is opaque to this function but assumed to be JSON.
 func (serverContext *ServerContext) DoClientVerificationRequest(
 	verificationPayload string) error {
 
-	return serverContext.doPostRequest(
-		buildRequestUrl(serverContext.baseRequestUrl, "client_verification"),
-		"application/json",
-		bytes.NewReader([]byte(verificationPayload)))
+	params := serverContext.getBaseParams()
+
+	if serverContext.psiphonHttpsClient == nil {
+
+		params["verificationData"] = json.RawMessage(verificationPayload)
+
+		request, err := makeSSHAPIRequestPayload(params)
+		if err != nil {
+			return ContextError(err)
+		}
+
+		_, err = serverContext.tunnel.SendAPIRequest(
+			SERVER_API_CLIENT_VERIFICATION_REQUEST_NAME, request)
+		if err != nil {
+			return ContextError(err)
+		}
+
+	} else {
+
+		// Legacy web service API request
+		err := serverContext.doPostRequest(
+			makeRequestUrl(serverContext.tunnel, "", "client_verification", params),
+			"application/json",
+			bytes.NewReader([]byte(verificationPayload)))
+		if err != nil {
+			return ContextError(err)
+		}
+	}
+
+	return nil
 }
 
 // doGetRequest makes a tunneled HTTPS request and returns the response body.
@@ -610,10 +721,85 @@ func (serverContext *ServerContext) doPostRequest(
 	return nil
 }
 
-// makeBaseRequestUrl makes a URL containing all the common parameters
-// that are included with Psiphon API requests. These common parameters
-// are used for statistics.
-func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
+type requestJSONObject map[string]interface{}
+
+// getBaseParams returns all the common API parameters that are included
+// with each Psiphon API request. These common parameters are used for
+// statistics.
+func (serverContext *ServerContext) getBaseParams() requestJSONObject {
+
+	params := make(requestJSONObject)
+
+	tunnel := serverContext.tunnel
+
+	params["session_id"] = serverContext.sessionId
+	params["client_session_id"] = serverContext.sessionId
+	params["server_secret"] = tunnel.serverEntry.WebServerSecret
+	params["propagation_channel_id"] = tunnel.config.PropagationChannelId
+	params["sponsor_id"] = tunnel.config.SponsorId
+	params["client_version"] = tunnel.config.ClientVersion
+	// TODO: client_tunnel_core_version?
+	params["relay_protocol"] = tunnel.protocol
+	params["client_platform"] = tunnel.config.ClientPlatform
+	params["tunnel_whole_device"] = strconv.Itoa(tunnel.config.TunnelWholeDevice)
+
+	// The following parameters may be blank and must
+	// not be sent to the server if blank.
+
+	if tunnel.config.DeviceRegion != "" {
+		params["device_region"] = tunnel.config.DeviceRegion
+	}
+	if tunnel.meekStats != nil {
+		if tunnel.meekStats.DialAddress != "" {
+			params["meek_dial_address"] = tunnel.meekStats.DialAddress
+		}
+		if tunnel.meekStats.ResolvedIPAddress != "" {
+			params["meek_resolved_ip_address"] = tunnel.meekStats.ResolvedIPAddress
+		}
+		if tunnel.meekStats.SNIServerName != "" {
+			params["meek_sni_server_name"] = tunnel.meekStats.SNIServerName
+		}
+		if tunnel.meekStats.HostHeader != "" {
+			params["meek_host_header"] = tunnel.meekStats.HostHeader
+		}
+		transformedHostName := "0"
+		if tunnel.meekStats.TransformedHostName {
+			transformedHostName = "1"
+		}
+		params["meek_transformed_host_name"] = transformedHostName
+	}
+
+	if tunnel.serverEntry.Region != "" {
+		params["server_entry_region"] = tunnel.serverEntry.Region
+	}
+
+	if tunnel.serverEntry.LocalSource != "" {
+		params["server_entry_source"] = tunnel.serverEntry.LocalSource
+	}
+
+	// As with last_connected, this timestamp stat, which may be
+	// a precise handshake request server timestamp, is truncated
+	// to hour granularity to avoid introducing a reconstructable
+	// cross-session user trace into server logs.
+	localServerEntryTimestamp := TruncateTimestampToHour(tunnel.serverEntry.LocalTimestamp)
+	if localServerEntryTimestamp != "" {
+		params["server_entry_timestamp"] = localServerEntryTimestamp
+	}
+
+	return params
+}
+
+// makeSSHAPIRequestPayload makes a JSON payload for an SSH API request.
+func makeSSHAPIRequestPayload(params requestJSONObject) ([]byte, error) {
+	jsonPayload, err := json.Marshal(params)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	return jsonPayload, nil
+}
+
+// makeRequestUrl makes a URL for a web service API request.
+func makeRequestUrl(tunnel *Tunnel, port, path string, params requestJSONObject) string {
 	var requestUrl bytes.Buffer
 
 	if port == "" {
@@ -627,100 +813,27 @@ func makeBaseRequestUrl(tunnel *Tunnel, port, sessionId string) string {
 	requestUrl.WriteString(":")
 	requestUrl.WriteString(port)
 	requestUrl.WriteString("/")
-	// Placeholder for the path component of a request
-	requestUrl.WriteString("%s")
-	requestUrl.WriteString("?client_session_id=")
-	requestUrl.WriteString(sessionId)
-	requestUrl.WriteString("&server_secret=")
-	requestUrl.WriteString(tunnel.serverEntry.WebServerSecret)
-	requestUrl.WriteString("&propagation_channel_id=")
-	requestUrl.WriteString(tunnel.config.PropagationChannelId)
-	requestUrl.WriteString("&sponsor_id=")
-	requestUrl.WriteString(tunnel.config.SponsorId)
-	requestUrl.WriteString("&client_version=")
-	requestUrl.WriteString(tunnel.config.ClientVersion)
-	// TODO: client_tunnel_core_version
-	requestUrl.WriteString("&relay_protocol=")
-	requestUrl.WriteString(tunnel.protocol)
-	requestUrl.WriteString("&client_platform=")
-	requestUrl.WriteString(tunnel.config.ClientPlatform)
-	requestUrl.WriteString("&tunnel_whole_device=")
-	requestUrl.WriteString(strconv.Itoa(tunnel.config.TunnelWholeDevice))
-
-	// The following parameters may be blank and must
-	// not be sent to the server if blank.
-
-	if tunnel.config.DeviceRegion != "" {
-		requestUrl.WriteString("&device_region=")
-		requestUrl.WriteString(tunnel.config.DeviceRegion)
-	}
-	if tunnel.meekStats != nil {
-		if tunnel.meekStats.DialAddress != "" {
-			requestUrl.WriteString("&meek_dial_address=")
-			requestUrl.WriteString(tunnel.meekStats.DialAddress)
+	requestUrl.WriteString(path)
+	firstParam := true
+	for name, value := range params {
+		if strValue, ok := value.(string); ok {
+			if firstParam {
+				requestUrl.WriteString("?")
+				firstParam = false
+			} else {
+				requestUrl.WriteString("&")
+			}
+			requestUrl.WriteString(name)
+			requestUrl.WriteString("=")
+			requestUrl.WriteString(strValue)
 		}
-		if tunnel.meekStats.ResolvedIPAddress != "" {
-			requestUrl.WriteString("&meek_resolved_ip_address=")
-			requestUrl.WriteString(tunnel.meekStats.ResolvedIPAddress)
-		}
-		if tunnel.meekStats.SNIServerName != "" {
-			requestUrl.WriteString("&meek_sni_server_name=")
-			requestUrl.WriteString(tunnel.meekStats.SNIServerName)
-		}
-		if tunnel.meekStats.HostHeader != "" {
-			requestUrl.WriteString("&meek_host_header=")
-			requestUrl.WriteString(tunnel.meekStats.HostHeader)
-		}
-		requestUrl.WriteString("&meek_transformed_host_name=")
-		if tunnel.meekStats.TransformedHostName {
-			requestUrl.WriteString("1")
-		} else {
-			requestUrl.WriteString("0")
-		}
-	}
-
-	if tunnel.serverEntry.Region != "" {
-		requestUrl.WriteString("&server_entry_region=")
-		requestUrl.WriteString(tunnel.serverEntry.Region)
-	}
-
-	if tunnel.serverEntry.LocalSource != "" {
-		requestUrl.WriteString("&server_entry_source=")
-		requestUrl.WriteString(tunnel.serverEntry.LocalSource)
-	}
-
-	// As with last_connected, this timestamp stat, which may be
-	// a precise handshake request server timestamp, is truncated
-	// to hour granularity to avoid introducing a reconstructable
-	// cross-session user trace into server logs.
-	localServerEntryTimestamp := TruncateTimestampToHour(tunnel.serverEntry.LocalTimestamp)
-	if localServerEntryTimestamp != "" {
-		requestUrl.WriteString("&server_entry_timestamp=")
-		requestUrl.WriteString(localServerEntryTimestamp)
-	}
-
-	return requestUrl.String()
-}
-
-type ExtraParam struct{ name, value string }
-
-// buildRequestUrl makes a URL for an API request. The URL includes the
-// base request URL and any extra parameters for the specific request.
-func buildRequestUrl(baseRequestUrl, path string, extraParams ...*ExtraParam) string {
-	var requestUrl bytes.Buffer
-	requestUrl.WriteString(fmt.Sprintf(baseRequestUrl, path))
-	for _, extraParam := range extraParams {
-		requestUrl.WriteString("&")
-		requestUrl.WriteString(extraParam.name)
-		requestUrl.WriteString("=")
-		requestUrl.WriteString(extraParam.value)
 	}
 	return requestUrl.String()
 }
 
-// makePsiphonHttpsClient creates a Psiphon HTTPS client that tunnels requests and which validates
-// the web server using the Psiphon server entry web server certificate.
-// This is not a general purpose HTTPS client.
+// makePsiphonHttpsClient creates a Psiphon HTTPS client that tunnels web service API
+// requests and which validates the web server using the Psiphon server entry web server
+// certificate. This is not a general purpose HTTPS client.
 // As the custom dialer makes an explicit TLS connection, URLs submitted to the returned
 // http.Client should use the "http://" scheme. Otherwise http.Transport will try to do another TLS
 // handshake inside the explicit TLS session.

@@ -197,6 +197,13 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 	}
 }
 
+// IsClosed returns the tunnel's closed status.
+func (tunnel *Tunnel) IsClosed() bool {
+	tunnel.mutex.Lock()
+	defer tunnel.mutex.Unlock()
+	return tunnel.isClosed
+}
+
 // IsDiscarded returns the tunnel's discarded flag.
 func (tunnel *Tunnel) IsDiscarded() bool {
 	tunnel.mutex.Lock()
@@ -204,17 +211,38 @@ func (tunnel *Tunnel) IsDiscarded() bool {
 	return tunnel.isDiscarded
 }
 
+// SendAPIRequest sends an API request as an SSH request through the tunnel.
+// This function blocks awaiting a response. Only one request may be in-flight
+// at once; a concurrent SendAPIRequest will block until an active request
+// receives its response (or the SSH connection is terminated).
+func (tunnel *Tunnel) SendAPIRequest(
+	name string, requestPayload []byte) ([]byte, error) {
+
+	if tunnel.IsClosed() {
+		return nil, ContextError(errors.New("tunnel is closed"))
+	}
+
+	ok, responsePayload, err := tunnel.sshClient.Conn.SendRequest(
+		name, true, requestPayload)
+
+	if err != nil {
+		return nil, ContextError(err)
+	}
+
+	if !ok {
+		return nil, ContextError(errors.New("API request rejected"))
+	}
+
+	return responsePayload, nil
+}
+
 // Dial establishes a port forward connection through the tunnel
 // This Dial doesn't support split tunnel, so alwaysTunnel is not referenced
 func (tunnel *Tunnel) Dial(
 	remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error) {
 
-	tunnel.mutex.Lock()
-	isClosed := tunnel.isClosed
-	tunnel.mutex.Unlock()
-
-	if isClosed {
-		return nil, errors.New("tunnel is closed")
+	if tunnel.IsClosed() {
+		return nil, ContextError(errors.New("tunnel is closed"))
 	}
 
 	type tunnelDialResult struct {
@@ -482,8 +510,7 @@ func dialSsh(
 	pendingConns *Conns,
 	serverEntry *ServerEntry,
 	selectedProtocol,
-	sessionId string) (
-	conn net.Conn, sshClient *ssh.Client, meekStats *MeekStats, err error) {
+	sessionId string) (net.Conn, *ssh.Client, *MeekStats, error) {
 
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
@@ -491,6 +518,7 @@ func dialSsh(
 	useObfuscatedSsh := false
 	var directTCPDialAddress string
 	var meekConfig *MeekConfig
+	var err error
 
 	switch selectedProtocol {
 	case TUNNEL_PROTOCOL_OBFUSCATED_SSH:
@@ -539,6 +567,7 @@ func dialSsh(
 		DeviceRegion:                  config.DeviceRegion,
 		ResolvedIPCallback:            setResolvedIPAddress,
 	}
+	var conn net.Conn
 	if meekConfig != nil {
 		conn, err = DialMeek(meekConfig, dialConfig)
 		if err != nil {
@@ -554,14 +583,13 @@ func dialSsh(
 	cleanupConn := conn
 	defer func() {
 		// Cleanup on error
-		if err != nil {
+		if cleanupConn != nil {
 			cleanupConn.Close()
 		}
 	}()
 
 	// Add obfuscated SSH layer
-	var sshConn net.Conn
-	sshConn = conn
+	sshConn := conn
 	if useObfuscatedSsh {
 		sshConn, err = NewObfuscatedSshConn(
 			OBFUSCATION_CONN_MODE_CLIENT, conn, serverEntry.SshObfuscatedKey)
@@ -570,7 +598,7 @@ func dialSsh(
 		}
 	}
 
-	// Now establish the SSH session over the sshConn transport
+	// Now establish the SSH session over the conn transport
 	expectedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.SshHostKey)
 	if err != nil {
 		return nil, nil, nil, ContextError(err)
@@ -638,6 +666,7 @@ func dialSsh(
 		return nil, nil, nil, ContextError(result.err)
 	}
 
+	var meekStats *MeekStats
 	if meekConfig != nil {
 		meekStats = &MeekStats{
 			DialAddress:         meekConfig.DialAddress,
@@ -649,6 +678,8 @@ func dialSsh(
 
 		NoticeConnectedMeekStats(serverEntry.IpAddress, meekStats)
 	}
+
+	cleanupConn = nil
 
 	return conn, result.sshClient, meekStats, nil
 }
@@ -1017,7 +1048,7 @@ func sendUntunneledStats(tunnel *Tunnel, isShutdown bool) {
 		return
 	}
 
-	err := TryUntunneledStatusRequest(tunnel, isShutdown)
+	err := tunnel.serverContext.TryUntunneledStatusRequest(isShutdown)
 	if err != nil {
 		NoticeAlert("TryUntunneledStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
 	}

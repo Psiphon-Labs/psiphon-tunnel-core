@@ -52,9 +52,12 @@ type TunnelServer struct {
 
 // NewTunnelServer initializes a new tunnel server.
 func NewTunnelServer(
-	config *Config, shutdownBroadcast <-chan struct{}) (*TunnelServer, error) {
+	config *Config,
+	psinetDatabase *PsinetDatabase,
+	shutdownBroadcast <-chan struct{}) (*TunnelServer, error) {
 
-	sshServer, err := newSSHServer(config, shutdownBroadcast)
+	sshServer, err := newSSHServer(
+		config, psinetDatabase, shutdownBroadcast)
 	if err != nil {
 		return nil, psiphon.ContextError(err)
 	}
@@ -180,6 +183,7 @@ type sshClientID uint64
 
 type sshServer struct {
 	config            *Config
+	psinetDatabase    *PsinetDatabase
 	shutdownBroadcast <-chan struct{}
 	sshHostKey        ssh.Signer
 	nextClientID      sshClientID
@@ -190,6 +194,7 @@ type sshServer struct {
 
 func newSSHServer(
 	config *Config,
+	psinetDatabase *PsinetDatabase,
 	shutdownBroadcast <-chan struct{}) (*sshServer, error) {
 
 	privateKey, err := ssh.ParseRawPrivateKey([]byte(config.SSHPrivateKey))
@@ -205,6 +210,7 @@ func newSSHServer(
 
 	return &sshServer{
 		config:            config,
+		psinetDatabase:    psinetDatabase,
 		shutdownBroadcast: shutdownBroadcast,
 		sshHostKey:        signer,
 		nextClientID:      1,
@@ -462,9 +468,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	}
 	defer sshServer.unregisterClient(clientID)
 
-	go ssh.DiscardRequests(result.requests)
-
-	sshClient.handleChannels(result.channels)
+	sshClient.runClient(result.channels, result.requests)
 
 	// TODO: clientConn.Close()?
 }
@@ -593,7 +597,40 @@ func (sshClient *sshClient) stop() {
 	sshClient.Unlock()
 }
 
-func (sshClient *sshClient) handleChannels(channels <-chan ssh.NewChannel) {
+// runClient handles/dispatches new channel and new requests from the client.
+// When the SSH client connection closes, both the channels and requests channels
+// will close and runClient will exit.
+func (sshClient *sshClient) runClient(
+	channels <-chan ssh.NewChannel, requests <-chan *ssh.Request) {
+
+	requestsWaitGroup := new(sync.WaitGroup)
+	requestsWaitGroup.Add(1)
+	go func() {
+		defer requestsWaitGroup.Done()
+
+		for request := range requests {
+
+			// requests are processed serially; responses must be sent in request order.
+			responsePayload, err := sshAPIRequestHandler(
+				sshClient.sshServer.config,
+				sshClient.sshServer.psinetDatabase,
+				sshClient.geoIPData,
+				request.Type,
+				request.Payload)
+
+			if err == nil {
+				err = request.Reply(true, responsePayload)
+			} else {
+				log.WithContextFields(LogFields{"error": err}).Warning("request failed")
+				err = request.Reply(false, nil)
+			}
+			if err != nil {
+				log.WithContextFields(LogFields{"error": err}).Warning("response failed")
+			}
+
+		}
+	}()
+
 	for newChannel := range channels {
 
 		if newChannel.ChannelType() != "direct-tcpip" {
@@ -605,6 +642,8 @@ func (sshClient *sshClient) handleChannels(channels <-chan ssh.NewChannel) {
 		sshClient.channelHandlerWaitGroup.Add(1)
 		go sshClient.handleNewPortForwardChannel(newChannel)
 	}
+
+	requestsWaitGroup.Wait()
 }
 
 func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, reason ssh.RejectionReason, message string) {
