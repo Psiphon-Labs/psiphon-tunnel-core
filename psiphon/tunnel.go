@@ -1043,7 +1043,7 @@ func sendUntunneledStats(tunnel *Tunnel, isShutdown bool) {
 		return
 	}
 
-	err := TryUntunneledStatusRequest(tunnel, isShutdown)
+	err := tunnel.serverContext.TryUntunneledStatusRequest(isShutdown)
 	if err != nil {
 		NoticeAlert("TryUntunneledStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
 	}

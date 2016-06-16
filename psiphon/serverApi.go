@@ -126,7 +126,7 @@ func NewServerContext(tunnel *Tunnel, sessionId string) (*ServerContext, error) 
 // stored -- and sponsor info (home pages, stat regexes).
 func (serverContext *ServerContext) doHandshakeRequest() error {
 
-	params := getBaseParams(serverContext.tunnel)
+	params := serverContext.getBaseParams()
 
 	// *TODO*: this is obsolete?
 	/*
@@ -270,7 +270,7 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 // a unique user for a time period.
 func (serverContext *ServerContext) DoConnectedRequest() error {
 
-	params := getBaseParams(serverContext.tunnel)
+	params := serverContext.getBaseParams()
 
 	const DATA_STORE_LAST_CONNECTED_KEY = "lastConnected"
 	lastConnected, err := GetKeyValue(DATA_STORE_LAST_CONNECTED_KEY)
@@ -332,7 +332,7 @@ func (serverContext *ServerContext) StatsRegexps() *transferstats.Regexps {
 // DoStatusRequest makes a "status" API request to the server, sending session stats.
 func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 
-	params := getStatusParams(serverContext.tunnel, true)
+	params := serverContext.getStatusParams(true)
 
 	// Note: ensure putBackStatusRequestPayload is called, to replace
 	// payload for future attempt, in all failure cases.
@@ -379,9 +379,9 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 	return nil
 }
 
-func getStatusParams(tunnel *Tunnel, isTunneled bool) requestJSONObject {
+func (serverContext *ServerContext) getStatusParams(isTunneled bool) requestJSONObject {
 
-	params := getBaseParams(tunnel)
+	params := serverContext.getBaseParams()
 
 	// Add a random amount of padding to help prevent stats updates from being
 	// a predictable size (which often happens when the connection is quiet).
@@ -488,23 +488,25 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 // The tunnel is assumed to be closed, but its config, protocol, and
 // context values must still be valid.
 // TryUntunneledStatusRequest emits notices detailing failed attempts.
-func TryUntunneledStatusRequest(tunnel *Tunnel, isShutdown bool) error {
+func (serverContext *ServerContext) TryUntunneledStatusRequest(isShutdown bool) error {
 
-	for _, port := range tunnel.serverEntry.GetUntunneledWebRequestPorts() {
-		err := doUntunneledStatusRequest(tunnel, port, isShutdown)
+	for _, port := range serverContext.tunnel.serverEntry.GetUntunneledWebRequestPorts() {
+		err := serverContext.doUntunneledStatusRequest(port, isShutdown)
 		if err == nil {
 			return nil
 		}
 		NoticeAlert("doUntunneledStatusRequest failed for %s:%s: %s",
-			tunnel.serverEntry.IpAddress, port, err)
+			serverContext.tunnel.serverEntry.IpAddress, port, err)
 	}
 
 	return errors.New("all attempts failed")
 }
 
 // doUntunneledStatusRequest attempts an untunneled status request.
-func doUntunneledStatusRequest(
-	tunnel *Tunnel, port string, isShutdown bool) error {
+func (serverContext *ServerContext) doUntunneledStatusRequest(
+	port string, isShutdown bool) error {
+
+	tunnel := serverContext.tunnel
 
 	certificate, err := DecodeCertificate(tunnel.serverEntry.WebServerCertificate)
 	if err != nil {
@@ -525,7 +527,7 @@ func doUntunneledStatusRequest(
 		*dialConfig = *tunnel.untunneledDialConfig
 	}
 
-	url := makeRequestUrl(tunnel, port, "status", getStatusParams(tunnel, false))
+	url := makeRequestUrl(tunnel, port, "status", serverContext.getStatusParams(false))
 
 	httpClient, url, err := MakeUntunneledHttpsClient(
 		dialConfig,
@@ -649,7 +651,7 @@ func RecordTunnelStats(
 func (serverContext *ServerContext) DoClientVerificationRequest(
 	verificationPayload string) error {
 
-	params := getBaseParams(serverContext.tunnel)
+	params := serverContext.getBaseParams()
 
 	if serverContext.psiphonHttpsClient == nil {
 
@@ -724,12 +726,14 @@ type requestJSONObject map[string]interface{}
 // getBaseParams returns all the common API parameters that are included
 // with each Psiphon API request. These common parameters are used for
 // statistics.
-func getBaseParams(tunnel *Tunnel) requestJSONObject {
+func (serverContext *ServerContext) getBaseParams() requestJSONObject {
 
 	params := make(requestJSONObject)
 
-	params["session_id"] = tunnel.serverContext.sessionId
-	params["client_session_id"] = tunnel.serverContext.sessionId
+	tunnel := serverContext.tunnel
+
+	params["session_id"] = serverContext.sessionId
+	params["client_session_id"] = serverContext.sessionId
 	params["server_secret"] = tunnel.serverEntry.WebServerSecret
 	params["propagation_channel_id"] = tunnel.config.PropagationChannelId
 	params["sponsor_id"] = tunnel.config.SponsorId

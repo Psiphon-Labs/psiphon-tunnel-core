@@ -61,17 +61,17 @@ func sshAPIRequestHandler(
 	}
 
 	switch name {
-	case "handshake":
+	case psiphon.SERVER_API_HANDSHAKE_REQUEST_NAME:
 		return handshakeAPIRequestHandler(config, geoIPData, params)
-	case "connected":
+	case psiphon.SERVER_API_CONNECTED_REQUEST_NAME:
 		return connectedAPIRequestHandler(config, geoIPData, params)
-	case "status":
+	case psiphon.SERVER_API_STATUS_REQUEST_NAME:
 		return statusAPIRequestHandler(config, geoIPData, params)
-	case "client_verification":
+	case psiphon.SERVER_API_CLIENT_VERIFICATION_REQUEST_NAME:
 		return clientVerificationAPIRequestHandler(config, geoIPData, params)
 	}
 
-	return nil, psiphon.ContextError(errors.New("invalid request name"))
+	return nil, psiphon.ContextError(fmt.Errorf("invalid request name: %s", name))
 }
 
 // handshakeAPIRequestHandler implements the "handshake" API request.
@@ -528,7 +528,7 @@ func isIPAddress(_ *Config, value string) bool {
 	return net.ParseIP(value) != nil
 }
 
-var isDomainRegex = regexp.MustCompile("(?!-)[a-zA-Z\\d-]{1,63}(?<!-)$")
+var isDomainRegex = regexp.MustCompile("[a-zA-Z\\d-]{1,63}$")
 
 func isDomain(_ *Config, value string) bool {
 
@@ -545,6 +545,11 @@ func isDomain(_ *Config, value string) bool {
 	}
 	value = strings.TrimSuffix(value, ".")
 	for _, part := range strings.Split(value, ".") {
+		// Note: regexp doesn't support the following Perl expression which
+		// would check for '-' prefix/suffix: "(?!-)[a-zA-Z\\d-]{1,63}(?<!-)$"
+		if strings.HasPrefix(part, "-") || strings.HasSuffix(part, "-") {
+			return false
+		}
 		if !isDomainRegex.Match([]byte(part)) {
 			return false
 		}
