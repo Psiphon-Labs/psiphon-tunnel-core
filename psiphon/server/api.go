@@ -105,8 +105,6 @@ func handshakeAPIRequestHandler(
 			baseRequestParams)).Info("API event")
 
 	// TODO: share struct definition with psiphon/serverApi.go?
-	// TODO: populate response data using psinet database
-
 	var handshakeResponse struct {
 		Homepages            []string            `json:"homepages"`
 		UpgradeClientVersion string              `json:"upgrade_client_version"`
@@ -117,19 +115,26 @@ func handshakeAPIRequestHandler(
 		ServerTimestamp      string              `json:"server_timestamp"`
 	}
 
+	// Ignoring errors as params are validated
+	sponsorID, _ := getStringRequestParam(params, "sponsor_id")
+	propagationChannelID, _ := getStringRequestParam(params, "propagation_channel_id")
+	clientVersion, _ := getStringRequestParam(params, "client_version")
+	clientPlatform, _ := getStringRequestParam(params, "client_platform")
+	clientRegion := geoIPData.Country
+
 	handshakeResponse.Homepages = psinetDatabase.GetHomepages(
-		"", "", "") // TODO: sponsorID, clientRegion, clientPlatform)
+		sponsorID, clientRegion, clientPlatform)
 
 	handshakeResponse.UpgradeClientVersion = psinetDatabase.GetUpgradeClientVersion(
-		"") // TODO: clientVersion)
+		clientVersion, clientPlatform)
 
 	handshakeResponse.HttpsRequestRegexes = psinetDatabase.GetHttpsRequestRegexes(
-		"", "", "") // TODO: sponsorID, clientRegion, clientPlatform)
+		sponsorID)
 
 	handshakeResponse.EncodedServerList = psinetDatabase.DiscoverServers(
-		"", 0) // TODO: propagationChannelID, discoveryValue)
+		propagationChannelID, geoIPData.DiscoveryValue)
 
-	handshakeResponse.ClientRegion = geoIPData.Country
+	handshakeResponse.ClientRegion = clientRegion
 
 	handshakeResponse.ServerTimestamp = psiphon.GetCurrentTimestamp()
 
