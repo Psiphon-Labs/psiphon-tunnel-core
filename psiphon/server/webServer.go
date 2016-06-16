@@ -20,7 +20,6 @@
 package server
 
 import (
-	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -38,12 +37,20 @@ type webServer struct {
 	config   *Config
 }
 
-// RunWebServer runs a web server which responds to the following Psiphon API
-// web requests: handshake, connected, and status. At this time, this web
-// server is a stub for stand-alone testing. It provides the minimal response
-// required by the tunnel-core client. It doesn't return read landing pages,
-// serer discovery results, or other handshake response values. It also does
-// not log stats in the standard way.
+// RunWebServer runs a web server which supports tunneled and untunneled
+// Psiphon API requests.
+//
+// The HTTP request handlers are light wrappers around the base Psiphon
+// API request handlers from the SSH API transport. The SSH API transport
+// is preferred by new clients; however the web API transport is still
+// required for untunneled final status requests. The web API transport
+// may be retired once untunneled final status requests are made obsolete
+// (e.g., by server-side bytes transferred stats, by client-side local
+// storage of stats for retry, or some other future development).
+//
+// The API is compatible with all tunnel-core clients but not backwards
+// compatible with older clients.
+//
 func RunWebServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 
 	webServer := &webServer{
@@ -73,11 +80,12 @@ func RunWebServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 
 	server := &psiphon.HTTPSServer{
 		http.Server{
-			Handler:      serveMux,
-			TLSConfig:    tlsConfig,
-			ReadTimeout:  WEB_SERVER_READ_TIMEOUT,
-			WriteTimeout: WEB_SERVER_WRITE_TIMEOUT,
-			ErrorLog:     golanglog.New(logWriter, "", 0),
+			MaxHeaderBytes: MAX_API_PARAMS_SIZE,
+			Handler:        serveMux,
+			TLSConfig:      tlsConfig,
+			ReadTimeout:    WEB_SERVER_READ_TIMEOUT,
+			WriteTimeout:   WEB_SERVER_WRITE_TIMEOUT,
+			ErrorLog:       golanglog.New(logWriter, "", 0),
 		},
 	}
 
@@ -131,54 +139,69 @@ func RunWebServer(config *Config, shutdownBroadcast <-chan struct{}) error {
 	return err
 }
 
-func (webServer *webServer) checkWebServerSecret(r *http.Request) bool {
-	return subtle.ConstantTimeCompare(
-		[]byte(r.URL.Query().Get("server_secret")),
-		[]byte(webServer.config.WebServerSecret)) == 1
+// convertHTTPRequestToAPIRequest converts the HTTP request query
+// parameters and request body to the JSON object import format
+// expected by the API request handlers.
+func convertHTTPRequestToAPIRequest(
+	w http.ResponseWriter,
+	r *http.Request,
+	requestBodyName string) (requestJSONObject, error) {
+
+	params := make(requestJSONObject)
+
+	for name, values := range r.URL.Query() {
+		for _, value := range values {
+			params[name] = value
+			// Note: multiple values per name are ignored
+			break
+		}
+	}
+
+	if requestBodyName != "" {
+		r.Body = http.MaxBytesReader(w, r.Body, MAX_API_PARAMS_SIZE)
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			return nil, psiphon.ContextError(err)
+		}
+		var bodyParams requestJSONObject
+		err = json.Unmarshal(body, &bodyParams)
+		if err != nil {
+			return nil, psiphon.ContextError(err)
+		}
+		params[requestBodyName] = bodyParams
+	}
+
+	return params, nil
+}
+
+func (webServer *webServer) lookupGeoIPData(params requestJSONObject) GeoIPData {
+
+	// TODO: implement
+
+	return NewGeoIPData()
 }
 
 func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Request) {
 
-	if !webServer.checkWebServerSecret(r) {
-		// TODO: log more details?
-		log.WithContext().Warning("checkWebServerSecret failed")
-		// TODO: psi_web returns NotFound in this case
-		w.WriteHeader(http.StatusForbidden)
-		return
+	params, err := convertHTTPRequestToAPIRequest(w, r, "")
+
+	var responsePayload []byte
+	if err == nil {
+		responsePayload, err = handshakeAPIRequestHandler(
+			webServer.config, webServer.lookupGeoIPData(params), params)
 	}
 
-	// TODO: validate; proper log
-	log.WithContextFields(LogFields{"queryParams": r.URL.Query()}).Info("handshake")
-
-	// TODO: necessary, in case client sends bogus request body?
-	_, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		log.WithContextFields(LogFields{"error": err}).Warning("failed")
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	// TODO: backwards compatibility cases (only sending the new JSON format response line)
-	// TODO: share struct definition with psiphon/serverApi.go?
-	// TODO: populate more response data
-
-	var handshakeConfig struct {
-		Homepages            []string            `json:"homepages"`
-		UpgradeClientVersion string              `json:"upgrade_client_version"`
-		PageViewRegexes      []map[string]string `json:"page_view_regexes"`
-		HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
-		EncodedServerList    []string            `json:"encoded_server_list"`
-		ClientRegion         string              `json:"client_region"`
-		ServerTimestamp      string              `json:"server_timestamp"`
-	}
-
-	handshakeConfig.ServerTimestamp = psiphon.GetCurrentTimestamp()
-
-	jsonPayload, err := json.Marshal(handshakeConfig)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	responseBody := append([]byte("Config: "), jsonPayload...)
+	// The legacy response format is newline seperated, name prefixed values.
+	// Within that legacy format, the modern JSON response (containing all the
+	// legacy response values and more) is single value with a "Config:" prefix.
+	// This response uses the legacy format but omits all but the JSON value.
+	responseBody := append([]byte("Config: "), responsePayload...)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(responseBody)
@@ -186,89 +209,56 @@ func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Requ
 
 func (webServer *webServer) connectedHandler(w http.ResponseWriter, r *http.Request) {
 
-	if !webServer.checkWebServerSecret(r) {
-		// TODO: log more details?
-		log.WithContext().Warning("checkWebServerSecret failed")
-		// TODO: psi_web does NotFound in this case
-		w.WriteHeader(http.StatusForbidden)
-		return
+	params, err := convertHTTPRequestToAPIRequest(w, r, "")
+
+	var responsePayload []byte
+	if err == nil {
+		responsePayload, err = connectedAPIRequestHandler(
+			webServer.config, webServer.lookupGeoIPData(params), params)
 	}
 
-	// TODO: validate; proper log
-	log.WithContextFields(LogFields{"queryParams": r.URL.Query()}).Info("connected")
-
-	// TODO: necessary, in case client sends bogus request body?
-	_, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	var connectedResponse struct {
-		ConnectedTimestamp string `json:"connected_timestamp"`
-	}
-
-	connectedResponse.ConnectedTimestamp =
-		psiphon.TruncateTimestampToHour(psiphon.GetCurrentTimestamp())
-
-	responseBody, err := json.Marshal(connectedResponse)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		log.WithContextFields(LogFields{"error": err}).Warning("failed")
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write(responseBody)
+	w.Write(responsePayload)
 }
 
 func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request) {
 
-	if !webServer.checkWebServerSecret(r) {
-		// TODO: log more details?
-		log.WithContext().Warning("checkWebServerSecret failed")
-		// TODO: psi_web does NotFound in this case
-		w.WriteHeader(http.StatusForbidden)
-		return
+	params, err := convertHTTPRequestToAPIRequest(w, r, "statusData")
+
+	if err == nil {
+		_, err = statusAPIRequestHandler(
+			webServer.config, webServer.lookupGeoIPData(params), params)
 	}
 
-	// TODO: validate; proper log
-	log.WithContextFields(LogFields{"queryParams": r.URL.Query()}).Info("status")
-
-	// TODO: use json.NewDecoder(r.Body)? But will that handle bogus extra data in request body?
-	requestBody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		log.WithContextFields(LogFields{"error": err}).Warning("failed")
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-
-	// TODO: parse payload; validate; proper logs
-	log.WithContextFields(LogFields{"payload": string(requestBody)}).Info("status payload")
 
 	w.WriteHeader(http.StatusOK)
 }
 
 func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *http.Request) {
 
-	if !webServer.checkWebServerSecret(r) {
-		// TODO: log more details?
-		log.WithContext().Warning("checkWebServerSecret failed")
-		// TODO: psi_web does NotFound in this case
-		w.WriteHeader(http.StatusForbidden)
-		return
+	params, err := convertHTTPRequestToAPIRequest(w, r, "verificationData")
+
+	if err == nil {
+		_, err = clientVerificationAPIRequestHandler(
+			webServer.config, webServer.lookupGeoIPData(params), params)
 	}
 
-	// TODO: validate; proper log
-	log.WithContextFields(LogFields{"queryParams": r.URL.Query()}).Info("client_verification")
-
-	// TODO: use json.NewDecoder(r.Body)? But will that handle bogus extra data in request body?
-	requestBody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		log.WithContextFields(LogFields{"error": err}).Warning("failed")
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-
-	// TODO: parse payload; validate; proper logs
-	log.WithContextFields(LogFields{"payload": string(requestBody)}).Info("client_verification payload")
 
 	w.WriteHeader(http.StatusOK)
 }

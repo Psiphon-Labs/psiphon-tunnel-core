@@ -197,6 +197,13 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 	}
 }
 
+// IsClosed returns the tunnel's closed status.
+func (tunnel *Tunnel) IsClosed() bool {
+	tunnel.mutex.Lock()
+	defer tunnel.mutex.Unlock()
+	return tunnel.isClosed
+}
+
 // IsDiscarded returns the tunnel's discarded flag.
 func (tunnel *Tunnel) IsDiscarded() bool {
 	tunnel.mutex.Lock()
@@ -204,17 +211,38 @@ func (tunnel *Tunnel) IsDiscarded() bool {
 	return tunnel.isDiscarded
 }
 
+// SendAPIRequest sends an API request as an SSH request through the tunnel.
+// This function blocks awaiting a response. Only one request may be in-flight
+// at once; a concurrent SendAPIRequest will block until an active request
+// receives its response (or the SSH connection is terminated).
+func (tunnel *Tunnel) SendAPIRequest(
+	name string, requestPayload []byte) ([]byte, error) {
+
+	if tunnel.IsClosed() {
+		return nil, ContextError(errors.New("tunnel is closed"))
+	}
+
+	ok, responsePayload, err := tunnel.sshClient.Conn.SendRequest(
+		name, true, requestPayload)
+
+	if err != nil {
+		return nil, ContextError(err)
+	}
+
+	if !ok {
+		return nil, ContextError(errors.New("API request rejected"))
+	}
+
+	return responsePayload, nil
+}
+
 // Dial establishes a port forward connection through the tunnel
 // This Dial doesn't support split tunnel, so alwaysTunnel is not referenced
 func (tunnel *Tunnel) Dial(
 	remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error) {
 
-	tunnel.mutex.Lock()
-	isClosed := tunnel.isClosed
-	tunnel.mutex.Unlock()
-
-	if isClosed {
-		return nil, errors.New("tunnel is closed")
+	if tunnel.IsClosed() {
+		return nil, ContextError(errors.New("tunnel is closed"))
 	}
 
 	type tunnelDialResult struct {
@@ -560,17 +588,15 @@ func dialSsh(
 	}()
 
 	// Add obfuscated SSH layer
-	var sshConn net.Conn
-	sshConn = conn
 	if useObfuscatedSsh {
-		sshConn, err = NewObfuscatedSshConn(
+		conn, err = NewObfuscatedSshConn(
 			OBFUSCATION_CONN_MODE_CLIENT, conn, serverEntry.SshObfuscatedKey)
 		if err != nil {
 			return nil, nil, nil, ContextError(err)
 		}
 	}
 
-	// Now establish the SSH session over the sshConn transport
+	// Now establish the SSH session over the conn transport
 	expectedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.SshHostKey)
 	if err != nil {
 		return nil, nil, nil, ContextError(err)
@@ -625,7 +651,7 @@ func dialSsh(
 		// The following is adapted from ssh.Dial(), here using a custom conn
 		// The sshAddress is passed through to host key verification callbacks; we don't use it.
 		sshAddress := ""
-		sshClientConn, sshChans, sshReqs, err := ssh.NewClientConn(sshConn, sshAddress, sshClientConfig)
+		sshClientConn, sshChans, sshReqs, err := ssh.NewClientConn(conn, sshAddress, sshClientConfig)
 		var sshClient *ssh.Client
 		if err == nil {
 			sshClient = ssh.NewClient(sshClientConn, sshChans, sshReqs)
