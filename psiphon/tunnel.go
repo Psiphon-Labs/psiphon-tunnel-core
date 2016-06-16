@@ -510,8 +510,7 @@ func dialSsh(
 	pendingConns *Conns,
 	serverEntry *ServerEntry,
 	selectedProtocol,
-	sessionId string) (
-	conn net.Conn, sshClient *ssh.Client, meekStats *MeekStats, err error) {
+	sessionId string) (net.Conn, *ssh.Client, *MeekStats, error) {
 
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
@@ -519,6 +518,7 @@ func dialSsh(
 	useObfuscatedSsh := false
 	var directTCPDialAddress string
 	var meekConfig *MeekConfig
+	var err error
 
 	switch selectedProtocol {
 	case TUNNEL_PROTOCOL_OBFUSCATED_SSH:
@@ -567,6 +567,7 @@ func dialSsh(
 		DeviceRegion:                  config.DeviceRegion,
 		ResolvedIPCallback:            setResolvedIPAddress,
 	}
+	var conn net.Conn
 	if meekConfig != nil {
 		conn, err = DialMeek(meekConfig, dialConfig)
 		if err != nil {
@@ -582,14 +583,15 @@ func dialSsh(
 	cleanupConn := conn
 	defer func() {
 		// Cleanup on error
-		if err != nil {
+		if cleanupConn != nil {
 			cleanupConn.Close()
 		}
 	}()
 
 	// Add obfuscated SSH layer
+	sshConn := conn
 	if useObfuscatedSsh {
-		conn, err = NewObfuscatedSshConn(
+		sshConn, err = NewObfuscatedSshConn(
 			OBFUSCATION_CONN_MODE_CLIENT, conn, serverEntry.SshObfuscatedKey)
 		if err != nil {
 			return nil, nil, nil, ContextError(err)
@@ -651,7 +653,7 @@ func dialSsh(
 		// The following is adapted from ssh.Dial(), here using a custom conn
 		// The sshAddress is passed through to host key verification callbacks; we don't use it.
 		sshAddress := ""
-		sshClientConn, sshChans, sshReqs, err := ssh.NewClientConn(conn, sshAddress, sshClientConfig)
+		sshClientConn, sshChans, sshReqs, err := ssh.NewClientConn(sshConn, sshAddress, sshClientConfig)
 		var sshClient *ssh.Client
 		if err == nil {
 			sshClient = ssh.NewClient(sshClientConn, sshChans, sshReqs)
@@ -664,6 +666,7 @@ func dialSsh(
 		return nil, nil, nil, ContextError(result.err)
 	}
 
+	var meekStats *MeekStats
 	if meekConfig != nil {
 		meekStats = &MeekStats{
 			DialAddress:         meekConfig.DialAddress,
@@ -675,6 +678,8 @@ func dialSsh(
 
 		NoticeConnectedMeekStats(serverEntry.IpAddress, meekStats)
 	}
+
+	cleanupConn = nil
 
 	return conn, result.sshClient, meekStats, nil
 }
