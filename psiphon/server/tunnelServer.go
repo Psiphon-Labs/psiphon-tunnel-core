@@ -343,10 +343,11 @@ func (sshServer *sshServer) stopClients() {
 
 	sshServer.clientsMutex.Lock()
 	sshServer.stoppingClients = true
+	clients := sshServer.clients
 	sshServer.clients = make(map[sshClientID]*sshClient)
 	sshServer.clientsMutex.Unlock()
 
-	for _, client := range sshServer.clients {
+	for _, client := range clients {
 		client.stop()
 	}
 }
