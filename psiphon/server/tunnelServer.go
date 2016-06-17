@@ -367,11 +367,12 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	// must actively use the connection or send SSH keep alive requests to keep
 	// the connection active.
 
-	clientConn = psiphon.NewActivityMonitoredConn(
+	activityConn := psiphon.NewActivityMonitoredConn(
 		clientConn,
 		SSH_CONNECTION_READ_DEADLINE,
 		false,
 		nil)
+	clientConn = activityConn
 
 	// Further wrap the connection in a rate limiting ThrottledConn.
 
@@ -458,6 +459,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 
 	sshClient.Lock()
 	sshClient.sshConn = result.sshConn
+	sshClient.activityConn = activityConn
 	sshClient.Unlock()
 
 	clientID, ok := sshServer.registerClient(sshClient)
@@ -478,7 +480,7 @@ type sshClient struct {
 	sshServer               *sshServer
 	tunnelProtocol          string
 	sshConn                 ssh.Conn
-	startTime               time.Time
+	activityConn            *psiphon.ActivityMonitoredConn
 	geoIPData               GeoIPData
 	psiphonSessionID        string
 	udpChannel              ssh.Channel
@@ -503,7 +505,6 @@ func newSshClient(
 	return &sshClient{
 		sshServer:               sshServer,
 		tunnelProtocol:          tunnelProtocol,
-		startTime:               time.Now(),
 		geoIPData:               geoIPData,
 		trafficRules:            trafficRules,
 		tcpTrafficState:         &trafficState{},
@@ -576,11 +577,20 @@ func (sshClient *sshClient) stop() {
 	close(sshClient.stopBroadcast)
 	sshClient.channelHandlerWaitGroup.Wait()
 
+	// Note: reporting duration based on last confirmed data transfer, which
+	// is reads for sshClient.activityConn.GetActiveDuration(), and not
+	// connection closing is important for protocols such as meek. For
+	// meek, the connection remains open until the HTTP session expires,
+	// which may be some time after the tunnel has closed. (The meek
+	// protocol has no allowance for signalling payload EOF, and even if
+	// it did the client may not have the opportunity to send a final
+	// request with an EOF flag set.)
+
 	sshClient.Lock()
 	log.WithContextFields(
 		LogFields{
-			"startTime":                         sshClient.startTime,
-			"duration":                          time.Now().Sub(sshClient.startTime),
+			"startTime":                         sshClient.activityConn.GetStartTime(),
+			"duration":                          sshClient.activityConn.GetActiveDuration(),
 			"psiphonSessionID":                  sshClient.psiphonSessionID,
 			"country":                           sshClient.geoIPData.Country,
 			"city":                              sshClient.geoIPData.City,

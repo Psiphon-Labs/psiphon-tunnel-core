@@ -749,6 +749,8 @@ type ActivityMonitoredConn struct {
 	net.Conn
 	inactivityTimeout time.Duration
 	activeOnWrite     bool
+	startTime         int64
+	lastActivityTime  int64
 	lruEntry          *LRUConnsEntry
 }
 
@@ -761,20 +763,42 @@ func NewActivityMonitoredConn(
 	if inactivityTimeout > 0 {
 		conn.SetReadDeadline(time.Now().Add(inactivityTimeout))
 	}
+
+	now := time.Now().UnixNano()
+
 	return &ActivityMonitoredConn{
 		Conn:              conn,
 		inactivityTimeout: inactivityTimeout,
 		activeOnWrite:     activeOnWrite,
+		startTime:         now,
+		lastActivityTime:  now,
 		lruEntry:          lruEntry,
 	}
+}
+
+// GetStartTime gets the time when the ActivityMonitoredConn was
+// initialized.
+func (conn *ActivityMonitoredConn) GetStartTime() time.Time {
+	return time.Unix(0, conn.startTime)
+}
+
+// GetActiveDuration returns the time elapsed between the initialization
+// of the ActivityMonitoredConn and the last Read (or Write when
+// activeOnWrite is specified).
+func (conn *ActivityMonitoredConn) GetActiveDuration() time.Duration {
+	return time.Duration(atomic.LoadInt64(&conn.lastActivityTime) - conn.startTime)
 }
 
 func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 	n, err := conn.Conn.Read(buffer)
 	if err == nil {
+
+		atomic.StoreInt64(&conn.lastActivityTime, time.Now().UnixNano())
+
 		if conn.inactivityTimeout > 0 {
 			conn.Conn.SetReadDeadline(time.Now().Add(conn.inactivityTimeout))
 		}
+
 		if conn.lruEntry != nil {
 			conn.lruEntry.Touch()
 		}
@@ -785,9 +809,16 @@ func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 	n, err := conn.Conn.Write(buffer)
 	if err == nil {
-		if conn.inactivityTimeout > 0 && conn.activeOnWrite {
-			conn.Conn.SetReadDeadline(time.Now().Add(conn.inactivityTimeout))
+
+		if conn.activeOnWrite {
+
+			atomic.StoreInt64(&conn.lastActivityTime, time.Now().UnixNano())
+
+			if conn.inactivityTimeout > 0 {
+				conn.Conn.SetReadDeadline(time.Now().Add(conn.inactivityTimeout))
+			}
 		}
+
 		if conn.lruEntry != nil {
 			conn.lruEntry.Touch()
 		}
