@@ -194,6 +194,9 @@ var statusRequestParams = append(
 // statusAPIRequestHandler implements the "status" API request.
 // Clients make periodic status requests which deliver client-side
 // recorded data transfer and tunnel duration stats.
+// Note from psi_web implementation: no input validation on domains;
+// any string is accepted (regex transform may result in arbitrary
+// string). Stats processor must handle this input with care.
 func statusAPIRequestHandler(
 	config *Config, geoIPData GeoIPData, params requestJSONObject) ([]byte, error) {
 
