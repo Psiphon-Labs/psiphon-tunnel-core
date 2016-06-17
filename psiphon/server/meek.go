@@ -55,10 +55,6 @@ const MEEK_PROTOCOL_VERSION_1 = 1
 // session ID on all subsequent requests for the remainder of the session.
 const MEEK_PROTOCOL_VERSION_2 = 2
 
-// TODO: protocol version 3, to support rapid shutdown of meek connections. Currently, there's no
-// signal from the clients that the payload within meek is EOF and that a given request is the
-// last request for a session; instead, session expiry is always what closes a session.
-
 const MEEK_MAX_PAYLOAD_LENGTH = 0x10000
 const MEEK_TURN_AROUND_TIMEOUT = 20 * time.Millisecond
 const MEEK_EXTENDED_TURN_AROUND_TIMEOUT = 100 * time.Millisecond

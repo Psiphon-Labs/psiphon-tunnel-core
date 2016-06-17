@@ -54,9 +54,7 @@ const (
 	SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT     = 30 * time.Second
 	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE = 8192
 	SSH_OBFUSCATED_KEY_BYTE_LENGTH        = 32
-	REDIS_POOL_MAX_IDLE                   = 50
-	REDIS_POOL_MAX_ACTIVE                 = 1000
-	REDIS_POOL_IDLE_TIMEOUT               = 5 * time.Minute
+	GEOIP_SESSION_CACHE_TTL               = 60 * time.Minute
 )
 
 // TODO: break config into sections (sub-structs)
@@ -100,10 +98,6 @@ type Config struct {
 	// MaxMind database file. when blank, no GeoIP lookups are
 	// performed.
 	GeoIPDatabaseFilename string
-
-	// RedisServerAddress is the TCP address of a redis server. When
-	// set, redis is used to store per-session GeoIP information.
-	RedisServerAddress string
 
 	// PsinetDatabaseFilename is the path of the Psiphon automation
 	// jsonpickle format Psiphon API data file.
@@ -315,12 +309,6 @@ func (config *Config) RunLoadMonitor() bool {
 	return config.LoadMonitorPeriodSeconds > 0
 }
 
-// UseRedis indicates whether to store per-session GeoIP information in
-// redis. This is for integration with the legacy psi_web component.
-func (config *Config) UseRedis() bool {
-	return config.RedisServerAddress != ""
-}
-
 // UseFail2Ban indicates whether to log client IP addresses, in authentication
 // failure cases, to the local syslog service AUTH facility for use by fail2ban.
 func (config *Config) UseFail2Ban() bool {
@@ -447,6 +435,15 @@ func LoadConfig(configJSONs [][]byte) (*Config, error) {
 	return &config, nil
 }
 
+// GenerateConfigParams specifies customizations to be applied to
+// a generated server config.
+type GenerateConfigParams struct {
+	ServerIPAddress      string
+	WebServerPort        int
+	EnableSSHAPIRequests bool
+	TunnelProtocolPorts  map[string]int
+}
+
 // GenerateConfig creates a new Psiphon server config. It returns a JSON
 // encoded config and a client-compatible "server entry" for the server. It
 // generates all necessary secrets and key material, which are emitted in
@@ -454,51 +451,57 @@ func LoadConfig(configJSONs [][]byte) (*Config, error) {
 // GenerateConfig uses sample values for many fields. The intention is for
 // a generated config to be used for testing or as a template for production
 // setup, not to generate production-ready configurations.
-func GenerateConfig(
-	serverIPaddress string,
-	webServerPort int,
-	tunnelProtocolPorts map[string]int) ([]byte, []byte, error) {
+func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 
 	// Input validation
 
-	if net.ParseIP(serverIPaddress) == nil {
+	if net.ParseIP(params.ServerIPAddress) == nil {
 		return nil, nil, psiphon.ContextError(errors.New("invalid IP address"))
 	}
 
-	if len(tunnelProtocolPorts) == 0 {
+	if len(params.TunnelProtocolPorts) == 0 {
 		return nil, nil, psiphon.ContextError(errors.New("no tunnel protocols"))
 	}
 
 	usedPort := make(map[int]bool)
-	if webServerPort != 0 {
-		usedPort[webServerPort] = true
+	if params.WebServerPort != 0 {
+		usedPort[params.WebServerPort] = true
 	}
 
-	for protocol, port := range tunnelProtocolPorts {
+	usingMeek := false
+
+	for protocol, port := range params.TunnelProtocolPorts {
+
 		if !psiphon.Contains(psiphon.SupportedTunnelProtocols, protocol) {
 			return nil, nil, psiphon.ContextError(errors.New("invalid tunnel protocol"))
 		}
+
 		if usedPort[port] {
 			return nil, nil, psiphon.ContextError(errors.New("duplicate listening port"))
 		}
 		usedPort[port] = true
+
+		if psiphon.TunnelProtocolUsesMeekHTTP(protocol) ||
+			psiphon.TunnelProtocolUsesMeekHTTPS(protocol) {
+			usingMeek = true
+		}
 	}
 
 	// Web server config
 
-	webServerSecret, err := psiphon.MakeRandomStringHex(WEB_SERVER_SECRET_BYTE_LENGTH)
-	if err != nil {
-		return nil, nil, psiphon.ContextError(err)
-	}
+	var webServerSecret, webServerCertificate, webServerPrivateKey string
 
-	webServerCertificate, webServerPrivateKey, err := GenerateWebServerCertificate("")
-	if err != nil {
-		return nil, nil, psiphon.ContextError(err)
-	}
+	if params.WebServerPort != 0 {
+		var err error
+		webServerSecret, err = psiphon.MakeRandomStringHex(WEB_SERVER_SECRET_BYTE_LENGTH)
+		if err != nil {
+			return nil, nil, psiphon.ContextError(err)
+		}
 
-	discoveryValueHMACKey, err := psiphon.MakeRandomStringBase64(DISCOVERY_VALUE_KEY_BYTE_LENGTH)
-	if err != nil {
-		return nil, nil, psiphon.ContextError(err)
+		webServerCertificate, webServerPrivateKey, err = GenerateWebServerCertificate("")
+		if err != nil {
+			return nil, nil, psiphon.ContextError(err)
+		}
 	}
 
 	// SSH config
@@ -547,13 +550,27 @@ func GenerateConfig(
 
 	// Meek config
 
-	meekCookieEncryptionPublicKey, meekCookieEncryptionPrivateKey, err :=
-		box.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, nil, psiphon.ContextError(err)
+	var meekCookieEncryptionPublicKey, meekCookieEncryptionPrivateKey, meekObfuscatedKey string
+
+	if usingMeek {
+		rawMeekCookieEncryptionPublicKey, rawMeekCookieEncryptionPrivateKey, err :=
+			box.GenerateKey(rand.Reader)
+		if err != nil {
+			return nil, nil, psiphon.ContextError(err)
+		}
+
+		meekCookieEncryptionPublicKey = base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPublicKey[:])
+		meekCookieEncryptionPrivateKey = base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPrivateKey[:])
+
+		meekObfuscatedKey, err = psiphon.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+		if err != nil {
+			return nil, nil, psiphon.ContextError(err)
+		}
 	}
 
-	meekObfuscatedKey, err := psiphon.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+	// Other config
+
+	discoveryValueHMACKey, err := psiphon.MakeRandomStringBase64(DISCOVERY_VALUE_KEY_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, psiphon.ContextError(err)
 	}
@@ -570,9 +587,9 @@ func GenerateConfig(
 		Fail2BanFormat:                 "Authentication failure for psiphon-client from %s",
 		GeoIPDatabaseFilename:          "",
 		HostID:                         "example-host-id",
-		ServerIPAddress:                serverIPaddress,
+		ServerIPAddress:                params.ServerIPAddress,
 		DiscoveryValueHMACKey:          discoveryValueHMACKey,
-		WebServerPort:                  webServerPort,
+		WebServerPort:                  params.WebServerPort,
 		WebServerSecret:                webServerSecret,
 		WebServerCertificate:           webServerCertificate,
 		WebServerPrivateKey:            webServerPrivateKey,
@@ -581,11 +598,10 @@ func GenerateConfig(
 		SSHUserName:                    sshUserName,
 		SSHPassword:                    sshPassword,
 		ObfuscatedSSHKey:               obfuscatedSSHKey,
-		TunnelProtocolPorts:            tunnelProtocolPorts,
-		RedisServerAddress:             "",
+		TunnelProtocolPorts:            params.TunnelProtocolPorts,
 		UDPForwardDNSServerAddress:     "8.8.8.8:53",
 		UDPInterceptUdpgwServerAddress: "127.0.0.1:7300",
-		MeekCookieEncryptionPrivateKey: base64.StdEncoding.EncodeToString(meekCookieEncryptionPrivateKey[:]),
+		MeekCookieEncryptionPrivateKey: meekCookieEncryptionPrivateKey,
 		MeekObfuscatedKey:              meekObfuscatedKey,
 		MeekCertificateCommonName:      "www.example.org",
 		MeekProhibitedHeaders:          nil,
@@ -618,34 +634,44 @@ func GenerateConfig(
 	lines := strings.Split(webServerCertificate, "\n")
 	strippedWebServerCertificate := strings.Join(lines[1:len(lines)-2], "")
 
-	capabilities := []string{psiphon.CAPABILITY_SSH_API_REQUESTS}
+	capabilities := []string{}
 
-	if webServerPort != 0 {
+	if params.EnableSSHAPIRequests {
+		capabilities = append(capabilities, psiphon.CAPABILITY_SSH_API_REQUESTS)
+	}
+
+	if params.WebServerPort != 0 {
 		capabilities = append(capabilities, psiphon.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS)
 	}
 
-	for protocol, _ := range tunnelProtocolPorts {
+	for protocol, _ := range params.TunnelProtocolPorts {
 		capabilities = append(capabilities, psiphon.GetCapability(protocol))
 	}
 
-	sshPort := tunnelProtocolPorts["SSH"]
-	obfuscatedSSHPort := tunnelProtocolPorts["OSSH"]
+	sshPort := params.TunnelProtocolPorts["SSH"]
+	obfuscatedSSHPort := params.TunnelProtocolPorts["OSSH"]
 
 	// Meek port limitations
 	// - fronted meek protocols are hard-wired in the client to be port 443 or 80.
 	// - only one other meek port may be specified.
-	meekPort := tunnelProtocolPorts["UNFRONTED-MEEK-OSSH"]
+	meekPort := params.TunnelProtocolPorts["UNFRONTED-MEEK-OSSH"]
 	if meekPort == 0 {
-		meekPort = tunnelProtocolPorts["UNFRONTED-MEEK-HTTPS-OSSH"]
+		meekPort = params.TunnelProtocolPorts["UNFRONTED-MEEK-HTTPS-OSSH"]
 	}
 
 	// Note: fronting params are a stub; this server entry will exercise
 	// client and server fronting code paths, but not actually traverse
 	// a fronting hop.
 
+	serverEntryWebServerPort := ""
+
+	if params.WebServerPort != 0 {
+		serverEntryWebServerPort = fmt.Sprintf("%d", params.WebServerPort)
+	}
+
 	serverEntry := &psiphon.ServerEntry{
-		IpAddress:                     serverIPaddress,
-		WebServerPort:                 fmt.Sprintf("%d", webServerPort),
+		IpAddress:                     params.ServerIPAddress,
+		WebServerPort:                 serverEntryWebServerPort,
 		WebServerSecret:               webServerSecret,
 		WebServerCertificate:          strippedWebServerCertificate,
 		SshPort:                       sshPort,
@@ -657,10 +683,10 @@ func GenerateConfig(
 		Capabilities:                  capabilities,
 		Region:                        "US",
 		MeekServerPort:                meekPort,
-		MeekCookieEncryptionPublicKey: base64.StdEncoding.EncodeToString(meekCookieEncryptionPublicKey[:]),
+		MeekCookieEncryptionPublicKey: meekCookieEncryptionPublicKey,
 		MeekObfuscatedKey:             meekObfuscatedKey,
-		MeekFrontingHosts:             []string{serverIPaddress},
-		MeekFrontingAddresses:         []string{serverIPaddress},
+		MeekFrontingHosts:             []string{params.ServerIPAddress},
+		MeekFrontingAddresses:         []string{params.ServerIPAddress},
 		MeekFrontingDisableSNI:        false,
 	}
 
