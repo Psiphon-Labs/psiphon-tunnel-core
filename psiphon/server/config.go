@@ -54,9 +54,6 @@ const (
 	SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT     = 30 * time.Second
 	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE = 8192
 	SSH_OBFUSCATED_KEY_BYTE_LENGTH        = 32
-	REDIS_POOL_MAX_IDLE                   = 50
-	REDIS_POOL_MAX_ACTIVE                 = 1000
-	REDIS_POOL_IDLE_TIMEOUT               = 5 * time.Minute
 	GEOIP_SESSION_CACHE_TTL               = 60 * time.Minute
 )
 
@@ -101,10 +98,6 @@ type Config struct {
 	// MaxMind database file. when blank, no GeoIP lookups are
 	// performed.
 	GeoIPDatabaseFilename string
-
-	// RedisServerAddress is the TCP address of a redis server. When
-	// set, redis is used to store per-session GeoIP information.
-	RedisServerAddress string
 
 	// PsinetDatabaseFilename is the path of the Psiphon automation
 	// jsonpickle format Psiphon API data file.
@@ -314,12 +307,6 @@ func (config *Config) RunWebServer() bool {
 // RunLoadMonitor indicates whether to monitor and log server load.
 func (config *Config) RunLoadMonitor() bool {
 	return config.LoadMonitorPeriodSeconds > 0
-}
-
-// UseRedis indicates whether to store per-session GeoIP information in
-// redis. This is for integration with the legacy psi_web component.
-func (config *Config) UseRedis() bool {
-	return config.RedisServerAddress != ""
 }
 
 // UseFail2Ban indicates whether to log client IP addresses, in authentication
@@ -612,7 +599,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, error) {
 		SSHPassword:                    sshPassword,
 		ObfuscatedSSHKey:               obfuscatedSSHKey,
 		TunnelProtocolPorts:            params.TunnelProtocolPorts,
-		RedisServerAddress:             "",
 		UDPForwardDNSServerAddress:     "8.8.8.8:53",
 		UDPInterceptUdpgwServerAddress: "127.0.0.1:7300",
 		MeekCookieEncryptionPrivateKey: meekCookieEncryptionPrivateKey,

@@ -34,10 +34,9 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
 
-// RunServices initializes support functions including logging, GeoIP service, and
-// redis connection pooling; and then starts the server components and runs them
-// until os.Interrupt or os.Kill signals are received. The config determines
-// which components are run.
+// RunServices initializes support functions including logging and GeoIP services;
+// and then starts the server components and runs them until os.Interrupt or
+// os.Kill signals are received. The config determines which components are run.
 func RunServices(encodedConfigs [][]byte) error {
 
 	config, err := LoadConfig(encodedConfigs)
@@ -56,14 +55,6 @@ func RunServices(encodedConfigs [][]byte) error {
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("init GeoIP failed")
 		return psiphon.ContextError(err)
-	}
-
-	if config.UseRedis() {
-		err = InitRedis(config)
-		if err != nil {
-			log.WithContextFields(LogFields{"error": err}).Error("init redis failed")
-			return psiphon.ContextError(err)
-		}
 	}
 
 	psinetDatabase, err := NewPsinetDatabase(config.PsinetDatabaseFilename)

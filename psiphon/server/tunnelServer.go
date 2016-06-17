@@ -547,16 +547,6 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 	// available to the web server for web transport Psiphon API requests.
 	SetGeoIPSessionCache(psiphonSessionID, geoIPData)
 
-	if sshClient.sshServer.config.UseRedis() {
-		err = UpdateRedisForLegacyPsiWeb(psiphonSessionID, geoIPData)
-		if err != nil {
-			log.WithContextFields(LogFields{
-				"psiphonSessionID": psiphonSessionID,
-				"error":            err}).Warning("UpdateRedisForLegacyPsiWeb failed")
-			// Allow the connection to proceed; legacy psi_web will not get accurate GeoIP values.
-		}
-	}
-
 	return nil, nil
 }
 
