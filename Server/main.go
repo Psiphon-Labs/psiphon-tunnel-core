@@ -121,9 +121,12 @@ func main() {
 
 		configFileContents, serverEntryFileContents, err :=
 			server.GenerateConfig(
-				serverIPaddress,
-				generateWebServerPort,
-				tunnelProtocolPorts)
+				&server.GenerateConfigParams{
+					ServerIPAddress:      serverIPaddress,
+					EnableSSHAPIRequests: true,
+					WebServerPort:        generateWebServerPort,
+					TunnelProtocolPorts:  tunnelProtocolPorts,
+				})
 		if err != nil {
 			fmt.Printf("generate failed: %s\n", err)
 			os.Exit(1)

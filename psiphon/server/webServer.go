@@ -181,9 +181,13 @@ func convertHTTPRequestToAPIRequest(
 
 func (webServer *webServer) lookupGeoIPData(params requestJSONObject) GeoIPData {
 
-	// TODO: implement
+	clientSessionID, err := getStringRequestParam(params, "client_session_id")
+	if err != nil {
+		// Not all clients send this parameter
+		return NewGeoIPData()
+	}
 
-	return NewGeoIPData()
+	return GetGeoIPSessionCache(clientSessionID)
 }
 
 func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Request) {

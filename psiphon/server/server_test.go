@@ -45,29 +45,61 @@ func TestMain(m *testing.M) {
 // hard-wired to except running on privileged ports 80 and 443.
 
 func TestSSH(t *testing.T) {
-	runServer(t, "SSH")
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "SSH",
+			enableSSHAPIRequests: true,
+		})
 }
 
 func TestOSSH(t *testing.T) {
-	runServer(t, "OSSH")
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+		})
 }
 
 func TestUnfrontedMeek(t *testing.T) {
-	runServer(t, "UNFRONTED-MEEK-OSSH")
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
+			enableSSHAPIRequests: true,
+		})
 }
 
 func TestUnfrontedMeekHTTPS(t *testing.T) {
-	runServer(t, "UNFRONTED-MEEK-HTTPS-OSSH")
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
+			enableSSHAPIRequests: true,
+		})
 }
 
-func runServer(t *testing.T, tunnelProtocol string) {
+func TestWebTransportAPIRequests(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: false,
+		})
+}
+
+type runServerConfig struct {
+	tunnelProtocol       string
+	enableSSHAPIRequests bool
+}
+
+func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// create a server
 
 	serverConfigFileContents, serverEntryFileContents, err := GenerateConfig(
-		"127.0.0.1",
-		8000,
-		map[string]int{tunnelProtocol: 4000})
+		&GenerateConfigParams{
+			ServerIPAddress:      "127.0.0.1",
+			EnableSSHAPIRequests: runConfig.enableSSHAPIRequests,
+			WebServerPort:        8000,
+			TunnelProtocolPorts:  map[string]int{runConfig.tunnelProtocol: 4000},
+		})
 	if err != nil {
 		t.Fatalf("error generating server config: %s", err)
 	}
@@ -134,7 +166,7 @@ func runServer(t *testing.T, tunnelProtocol string) {
 	clientConfig.DisableRemoteServerListFetcher = true
 	clientConfig.EstablishTunnelPausePeriodSeconds = &establishTunnelPausePeriodSeconds
 	clientConfig.TargetServerEntry = string(serverEntryFileContents)
-	clientConfig.TunnelProtocol = tunnelProtocol
+	clientConfig.TunnelProtocol = runConfig.tunnelProtocol
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
 
 	err = psiphon.InitDataStore(clientConfig)
@@ -152,7 +184,7 @@ func runServer(t *testing.T, tunnelProtocol string) {
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 
-			fmt.Printf("%s\n", string(notice))
+			//fmt.Printf("%s\n", string(notice))
 
 			noticeType, payload, err := psiphon.GetNotice(notice)
 			if err != nil {

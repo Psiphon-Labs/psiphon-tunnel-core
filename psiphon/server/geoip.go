@@ -23,7 +23,9 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"net"
+	"time"
 
+	cache "github.com/Psiphon-Inc/go-cache"
 	maxminddb "github.com/Psiphon-Inc/maxminddb-golang"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
@@ -97,6 +99,24 @@ func GeoIPLookup(ipAddress string) GeoIPData {
 	return result
 }
 
+func SetGeoIPSessionCache(sessionID string, geoIPData GeoIPData) {
+	if geoIPSessionCache == nil {
+		return
+	}
+	geoIPSessionCache.Set(sessionID, geoIPData, cache.DefaultExpiration)
+}
+
+func GetGeoIPSessionCache(sessionID string) GeoIPData {
+	if geoIPSessionCache == nil {
+		return NewGeoIPData()
+	}
+	geoIPData, found := geoIPSessionCache.Get(sessionID)
+	if !found {
+		return NewGeoIPData()
+	}
+	return geoIPData.(GeoIPData)
+}
+
 // calculateDiscoveryValue derives a value from the client IP address to be
 // used as input in the server discovery algorithm. Since we do not explicitly
 // store the client IP address, we must derive the value here and store it for
@@ -115,6 +135,7 @@ func calculateDiscoveryValue(ipAddress string) int {
 }
 
 var geoIPReader *maxminddb.Reader
+var geoIPSessionCache *cache.Cache
 var discoveryValueHMACKey string
 
 // InitGeoIP opens a GeoIP2/GeoLite2 MaxMind database and prepares
@@ -124,11 +145,15 @@ func InitGeoIP(config *Config) error {
 	discoveryValueHMACKey = config.DiscoveryValueHMACKey
 
 	if config.GeoIPDatabaseFilename != "" {
+
 		var err error
 		geoIPReader, err = maxminddb.Open(config.GeoIPDatabaseFilename)
 		if err != nil {
 			return psiphon.ContextError(err)
 		}
+
+		geoIPSessionCache = cache.New(GEOIP_SESSION_CACHE_TTL, 1*time.Minute)
+
 		log.WithContext().Info("GeoIP initialized")
 	}
 

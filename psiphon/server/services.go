@@ -58,18 +58,18 @@ func RunServices(encodedConfigs [][]byte) error {
 		return psiphon.ContextError(err)
 	}
 
-	psinetDatabase, err := NewPsinetDatabase(config.PsinetDatabaseFilename)
-	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Error("init PsinetDatabase failed")
-		return psiphon.ContextError(err)
-	}
-
 	if config.UseRedis() {
 		err = InitRedis(config)
 		if err != nil {
 			log.WithContextFields(LogFields{"error": err}).Error("init redis failed")
 			return psiphon.ContextError(err)
 		}
+	}
+
+	psinetDatabase, err := NewPsinetDatabase(config.PsinetDatabaseFilename)
+	if err != nil {
+		log.WithContextFields(LogFields{"error": err}).Error("init PsinetDatabase failed")
+		return psiphon.ContextError(err)
 	}
 
 	waitGroup := new(sync.WaitGroup)
