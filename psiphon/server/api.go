@@ -394,6 +394,11 @@ func getRequestLogFields(
 	logFields["client_isp"] = strings.Replace(geoIPData.ISP, " ", "_", -1)
 
 	for _, expectedParam := range expectedParams {
+
+		if expectedParam.flags&requestParamNotLogged != 0 {
+			continue
+		}
+
 		value := params[expectedParam.name]
 		if value == nil {
 			// Skip optional params
@@ -405,6 +410,7 @@ func getRequestLogFields(
 			// validateRequestParams, so failure is unexpected.
 			continue
 		}
+
 		// Special cases:
 		// - Number fields are encoded as integer types.
 		// - For ELK performance we record these domain-or-IP
