@@ -517,13 +517,28 @@ func newSshClient(
 }
 
 func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
+
 	var sshPasswordPayload struct {
 		SessionId   string `json:"SessionId"`
 		SshPassword string `json:"SshPassword"`
 	}
 	err := json.Unmarshal(password, &sshPasswordPayload)
 	if err != nil {
-		return nil, psiphon.ContextError(fmt.Errorf("invalid password payload for %q", conn.User()))
+
+		// Backwards compatibility case: instead of a JSON payload, older clients
+		// send the hex encoded session ID prepended to the SSH password.
+		// Note: there's an even older case where clients don't send any session ID,
+		// but that's no longer supported.
+		if len(password) == 2*psiphon.PSIPHON_API_CLIENT_SESSION_ID_LENGTH+2*SSH_PASSWORD_BYTE_LENGTH {
+			sshPasswordPayload.SessionId = string(password[0 : 2*psiphon.PSIPHON_API_CLIENT_SESSION_ID_LENGTH])
+			sshPasswordPayload.SshPassword = string(password[2*psiphon.PSIPHON_API_CLIENT_SESSION_ID_LENGTH : len(password)])
+		} else {
+			return nil, psiphon.ContextError(fmt.Errorf("invalid password payload for %q", conn.User()))
+		}
+	}
+
+	if !isHexDigits(sshClient.sshServer.config, sshPasswordPayload.SessionId) {
+		return nil, psiphon.ContextError(fmt.Errorf("invalid session ID for %q", conn.User()))
 	}
 
 	userOk := (subtle.ConstantTimeCompare(
