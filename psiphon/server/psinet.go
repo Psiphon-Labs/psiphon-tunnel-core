@@ -23,6 +23,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"strconv"
@@ -139,7 +140,7 @@ func NewPsinetDatabase(filename string) (*PsinetDatabase, error) {
 		return nil, err
 	}
 
-	psinetDatabase = new(PsinetDatabase)
+	psinetDatabase := new(PsinetDatabase)
 
 	err = json.NewDecoder(file).Decode(psinetDatabase)
 
