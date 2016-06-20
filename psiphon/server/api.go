@@ -332,7 +332,7 @@ func clientVerificationAPIRequestHandler(
 type requestParamSpec struct {
 	name      string
 	validator func(*Config, string) bool
-	flags     int32
+	flags     uint32
 }
 
 const (
