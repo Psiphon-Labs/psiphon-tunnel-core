@@ -91,6 +91,43 @@ type Sponsor struct {
 	WebsiteBannerLink   string                `json:"website_banner_link"`
 }
 
+type Campaign struct {
+	// TODO: implement
+}
+
+type ClientVersion struct {
+	Version string `json:"version"`
+}
+
+type HomePage struct {
+	Region string `json:"region"`
+	Url    string `json:"url"`
+}
+
+type HttpsRequestRegex struct {
+	Regex   string `json:"regex"`
+	Replace string `json:"replace"`
+}
+
+type MobileHomePage struct {
+	Region string `json:"region"`
+	Url    string `json:"url"`
+}
+
+type PageViewRegex struct {
+	Regex   string `json:"regex"`
+	Replace string `json:"replace"`
+}
+
+type TimeStamps struct {
+	TimeStamp []TimeStamp `json:"py/tuple"`
+}
+
+type TimeStamp struct {
+	PyObject string     `json:"py/object"`
+	Reduce   [][]string `json:"__reduce__"`
+}
+
 // NewPsinetDatabase initializes a PsinetDatabase. It loads the specified
 // file, which should be in the Psiphon automation jsonpickle format, and
 // prepares to serve data requests.
