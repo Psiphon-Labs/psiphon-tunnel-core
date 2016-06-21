@@ -273,7 +273,7 @@ func (psinet *PsinetDatabase) DiscoverServers(discoveryValue int) []string {
 }
 
 // Parse legacy jsonpickle datetime object from python
-// Object's base64 encoded hex string corresponds to UTC timestamp
+// The base64 encoded hex string corresponds to a UTC timestamp
 func parseJsonPickleDatetime(base64DatetimeString string) (*time.Time, error) {
 	var hexTimestamp string
 
@@ -352,8 +352,8 @@ func selectServers(servers map[string]Server, discoveryValue int) []Server {
 	// of buckets and the number of items in each bucket are close (using sqrt).
 	// IP address selects the bucket, time selects the item in the bucket.
 
-	// NOTE: this code assumes that range of possible time_values and
-	// discoveryValue is sufficient to index to all bucket items.
+	// NOTE: this code assumes that the range of possible timeStrategyValues
+	// and discoveryValues are sufficient to index to all bucket items.
 	bucketCount := calculateBucketCount(len(servers))
 
 	buckets := bucketizeServerList(servers, bucketCount)
