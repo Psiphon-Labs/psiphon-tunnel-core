@@ -30,12 +30,13 @@ import (
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 )
 
 type webServer struct {
 	serveMux       *http.ServeMux
 	config         *Config
-	psinetDatabase *PsinetDatabase
+	psinetDatabase *psinet.Database
 }
 
 // RunWebServer runs a web server which supports tunneled and untunneled
@@ -54,7 +55,7 @@ type webServer struct {
 //
 func RunWebServer(
 	config *Config,
-	psinetDatabase *PsinetDatabase,
+	psinetDatabase *psinet.Database,
 	shutdownBroadcast <-chan struct{}) error {
 
 	webServer := &webServer{

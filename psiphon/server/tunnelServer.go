@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -53,7 +54,7 @@ type TunnelServer struct {
 // NewTunnelServer initializes a new tunnel server.
 func NewTunnelServer(
 	config *Config,
-	psinetDatabase *PsinetDatabase,
+	psinetDatabase *psinet.Database,
 	shutdownBroadcast <-chan struct{}) (*TunnelServer, error) {
 
 	sshServer, err := newSSHServer(
@@ -183,7 +184,7 @@ type sshClientID uint64
 
 type sshServer struct {
 	config            *Config
-	psinetDatabase    *PsinetDatabase
+	psinetDatabase    *psinet.Database
 	shutdownBroadcast <-chan struct{}
 	sshHostKey        ssh.Signer
 	nextClientID      sshClientID
@@ -194,7 +195,7 @@ type sshServer struct {
 
 func newSSHServer(
 	config *Config,
-	psinetDatabase *PsinetDatabase,
+	psinetDatabase *psinet.Database,
 	shutdownBroadcast <-chan struct{}) (*sshServer, error) {
 
 	privateKey, err := ssh.ParseRawPrivateKey([]byte(config.SSHPrivateKey))
