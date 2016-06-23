@@ -32,9 +32,17 @@ Build Steps:
  - Get dependencies: `GOOS=linux GOARCH=amd64 go get -d -v ./...`
  - Build: `GOOS=linux GOARCH=amd64 CC=/usr/local/musl/bin/musl-gcc go build --ldflags '-linkmode external -extldflags "-static"' -o psiphond main.go` (will generate a statically linked binary named `psiphond`)
 
+##### Building the binary with MUSL in Docker
+
+You may also use the `Dockerfile-binary-builder` docker file to create an image that will be able to build the binary for you without installing MUSL and cross-compiling locally.
+
+1. Build the image: `docker build -f Dockerfile-binary-builder -t psiphond-builder .`
+2. Run the build via the image: `cd .. && docker run --rm -v $(pwd):/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core psiphond-builder /bin/bash -c 'cd /go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/Server && ./make.bash'; cd -`
+3. Change the owner (if desired) of the `psiphond` binary. The permissions are `777`/`a+rwx`, but the owner and group will both be `root`. Functionally, this should not matter at all.
+
 ##### Generate a configuration file
  1. Use the command `./psiphond --help` to get a list of flags to pass to the `generate` sub-command
- 2. Run: `./psiphond --newConfig psiphond.config --protocol SSH:22 --protocol OSSH:53 --web 80 generate`
+ 2. Run: `./psiphond --newConfig psiphond.config --ipaddress 0.0.0.0 --protocol SSH:22 --protocol OSSH:53 --web 80 generate` (IP address `0.0.0.0` is used due to how docker handles services bound to the loopback device)
  3. Remove the value for the `SyslogFacility` key (eg: `sed -i 's/"SyslogFacility": "user"/"SyslogFacility": ""/' psiphond.config`)
  4. Remove the value for the `Fail2BanFormat` key (eg: `sed -i 's/"Fail2BanFormat": "Authentication failure for psiphon-client from %s"/"Fail2BanFormat": ""/' psiphond.config`)
 
