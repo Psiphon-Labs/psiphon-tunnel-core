@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 )
 
 // RunServices initializes support functions including logging and GeoIP services;
@@ -57,7 +58,7 @@ func RunServices(encodedConfigs [][]byte) error {
 		return psiphon.ContextError(err)
 	}
 
-	psinetDatabase, err := NewPsinetDatabase(config.PsinetDatabaseFilename)
+	psinetDatabase, err := psinet.NewDatabase(config.PsinetDatabaseFilename)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("init PsinetDatabase failed")
 		return psiphon.ContextError(err)

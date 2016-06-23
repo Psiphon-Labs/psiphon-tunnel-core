@@ -31,6 +31,7 @@ import (
 	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 )
 
 const MAX_API_PARAMS_SIZE = 256 * 1024 // 256KB
@@ -50,7 +51,7 @@ type requestJSONObject map[string]interface{}
 //
 func sshAPIRequestHandler(
 	config *Config,
-	psinetDatabase *PsinetDatabase,
+	psinetDatabase *psinet.Database,
 	geoIPData GeoIPData,
 	name string,
 	requestPayload []byte) ([]byte, error) {
@@ -84,7 +85,7 @@ func sshAPIRequestHandler(
 // stats to record, etc.
 func handshakeAPIRequestHandler(
 	config *Config,
-	psinetDatabase *PsinetDatabase,
+	psinetDatabase *psinet.Database,
 	geoIPData GeoIPData,
 	params requestJSONObject) ([]byte, error) {
 
@@ -332,7 +333,7 @@ func clientVerificationAPIRequestHandler(
 type requestParamSpec struct {
 	name      string
 	validator func(*Config, string) bool
-	flags     int32
+	flags     uint32
 }
 
 const (
