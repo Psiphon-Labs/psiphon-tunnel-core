@@ -32,6 +32,10 @@ Build Steps:
  - Get dependencies: `GOOS=linux GOARCH=amd64 go get -d -v ./...`
  - Build: `GOOS=linux GOARCH=amd64 CC=/usr/local/musl/bin/musl-gcc go build --ldflags '-linkmode external -extldflags "-static"' -o psiphond main.go` (will generate a statically linked binary named `psiphond`)
 
+**NOTE**: If you have ever used a _GNU libc_ based build of this project, you will need to append the `-a` flag to your `go build` command in order to force rebuilding of previously built libraries. Additionally, compiling with the _GNU libc_ again (after having compiled with _MUSL libc_) will also require the `-a` flag. 
+
+Updated build command: `GOOS=linux GOARCH=amd64 CC=/usr/local/musl/bin/musl-gcc go build -a --ldflags '-linkmode external -extldflags "-static"' -o psiphond main.go`
+
 ##### Building the binary with MUSL in Docker
 
 You may also use the `Dockerfile-binary-builder` docker file to create an image that will be able to build the binary for you without installing MUSL and cross-compiling locally.
