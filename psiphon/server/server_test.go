@@ -93,7 +93,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// create a server
 
-	serverConfigFileContents, serverEntryFileContents, err := GenerateConfig(
+	serverConfigJSON, _, encodedServerEntry, err := GenerateConfig(
 		&GenerateConfigParams{
 			ServerIPAddress:      "127.0.0.1",
 			EnableSSHAPIRequests: runConfig.enableSSHAPIRequests,
@@ -107,9 +107,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// customize server config
 
 	var serverConfig interface{}
-	json.Unmarshal(serverConfigFileContents, &serverConfig)
+	json.Unmarshal(serverConfigJSON, &serverConfig)
 	serverConfig.(map[string]interface{})["GeoIPDatabaseFilename"] = ""
-	serverConfigFileContents, _ = json.Marshal(serverConfig)
+	serverConfig.(map[string]interface{})["TrafficRulesFilename"] = ""
+	serverConfigJSON, _ = json.Marshal(serverConfig)
 
 	// run server
 
@@ -117,7 +118,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverWaitGroup.Add(1)
 	go func() {
 		defer serverWaitGroup.Done()
-		err := RunServices([][]byte{serverConfigFileContents})
+		err := RunServices(serverConfigJSON)
 		if err != nil {
 			// TODO: wrong goroutine for t.FatalNow()
 			t.Fatalf("error running server: %s", err)
@@ -149,23 +150,23 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// TODO: currently, TargetServerEntry only works with one tunnel
 	numTunnels := 1
-	localHTTPProxyPort := 8080
+	localHTTPProxyPort := 8081
 	establishTunnelPausePeriodSeconds := 1
 
 	// Note: calling LoadConfig ensures all *int config fields are initialized
-	configJson := `
+	clientConfigJSON := `
 	{
 	"ClientVersion":                     "0",
 	"PropagationChannelId":              "0",
 	"SponsorId":                         "0"
 	}`
-	clientConfig, _ := psiphon.LoadConfig([]byte(configJson))
+	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
 
 	clientConfig.ConnectionWorkerPoolSize = numTunnels
 	clientConfig.TunnelPoolSize = numTunnels
 	clientConfig.DisableRemoteServerListFetcher = true
 	clientConfig.EstablishTunnelPausePeriodSeconds = &establishTunnelPausePeriodSeconds
-	clientConfig.TargetServerEntry = string(serverEntryFileContents)
+	clientConfig.TargetServerEntry = string(encodedServerEntry)
 	clientConfig.TunnelProtocol = runConfig.tunnelProtocol
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
 

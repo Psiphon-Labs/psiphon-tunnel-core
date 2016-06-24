@@ -33,35 +33,35 @@ import (
 
 func main() {
 
+	var generateTrafficRulesFilename, generateServerEntryFilename string
 	var generateServerIPaddress, generateServerNetworkInterface string
-	var generateConfigFilename, generateServerEntryFilename string
 	var generateWebServerPort int
 	var generateProtocolPorts stringListFlag
-	var runConfigFilenames stringListFlag
+	var configFilename string
 
 	flag.StringVar(
-		&generateConfigFilename,
-		"newConfig",
-		server.SERVER_CONFIG_FILENAME,
-		"generate new config with this `filename`")
+		&generateTrafficRulesFilename,
+		"trafficRules",
+		server.SERVER_TRAFFIC_RULES_FILENAME,
+		"generate with this traffic rules `filename`")
 
 	flag.StringVar(
 		&generateServerEntryFilename,
-		"newServerEntry",
+		"serverEntry",
 		server.SERVER_ENTRY_FILENAME,
-		"generate new server entry with this `filename`")
-
-	flag.StringVar(
-		&generateServerNetworkInterface,
-		"interface",
-		"",
-		"generate with server IP address from this `network-interface`")
+		"generate with this server entry `filename`")
 
 	flag.StringVar(
 		&generateServerIPaddress,
 		"ipaddress",
 		server.DEFAULT_SERVER_IP_ADDRESS,
 		"generate with this server `IP address`")
+
+	flag.StringVar(
+		&generateServerNetworkInterface,
+		"interface",
+		"",
+		"generate with server IP address from this `network-interface`")
 
 	flag.IntVar(
 		&generateWebServerPort,
@@ -74,15 +74,16 @@ func main() {
 		"protocol",
 		"generate with `protocol:port`; flag may be repeated to enable multiple protocols")
 
-	flag.Var(
-		&runConfigFilenames,
+	flag.StringVar(
+		&configFilename,
 		"config",
-		"run with this config `filename`; flag may be repeated to load multiple config files")
+		server.SERVER_CONFIG_FILENAME,
+		"run or generate with this config `filename`")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr,
 			"Usage:\n\n"+
-				"%s <flags> generate    generates a configuration and server entry\n"+
+				"%s <flags> generate    generates configuration files\n"+
 				"%s <flags> run         runs configured services\n\n",
 			os.Args[0], os.Args[0])
 		flag.PrintDefaults()
@@ -119,26 +120,33 @@ func main() {
 			}
 		}
 
-		configFileContents, serverEntryFileContents, err :=
+		configJSON, trafficRulesJSON, encodedServerEntry, err :=
 			server.GenerateConfig(
 				&server.GenerateConfigParams{
 					ServerIPAddress:      serverIPaddress,
 					EnableSSHAPIRequests: true,
 					WebServerPort:        generateWebServerPort,
 					TunnelProtocolPorts:  tunnelProtocolPorts,
+					TrafficRulesFilename: generateTrafficRulesFilename,
 				})
 		if err != nil {
 			fmt.Printf("generate failed: %s\n", err)
 			os.Exit(1)
 		}
 
-		err = ioutil.WriteFile(generateConfigFilename, configFileContents, 0600)
+		err = ioutil.WriteFile(configFilename, configJSON, 0600)
 		if err != nil {
 			fmt.Printf("error writing configuration file: %s\n", err)
 			os.Exit(1)
 		}
 
-		err = ioutil.WriteFile(generateServerEntryFilename, serverEntryFileContents, 0600)
+		err = ioutil.WriteFile(generateTrafficRulesFilename, trafficRulesJSON, 0600)
+		if err != nil {
+			fmt.Printf("error writing traffic rule configuration file: %s\n", err)
+			os.Exit(1)
+		}
+
+		err = ioutil.WriteFile(generateServerEntryFilename, encodedServerEntry, 0600)
 		if err != nil {
 			fmt.Printf("error writing server entry file: %s\n", err)
 			os.Exit(1)
@@ -146,23 +154,13 @@ func main() {
 
 	} else if args[0] == "run" {
 
-		if len(runConfigFilenames) == 0 {
-			runConfigFilenames = []string{server.SERVER_CONFIG_FILENAME}
+		configJSON, err := ioutil.ReadFile(configFilename)
+		if err != nil {
+			fmt.Printf("error loading configuration file: %s\n", err)
+			os.Exit(1)
 		}
 
-		var configFileContents [][]byte
-
-		for _, configFilename := range runConfigFilenames {
-			contents, err := ioutil.ReadFile(configFilename)
-			if err != nil {
-				fmt.Printf("error loading configuration file: %s\n", err)
-				os.Exit(1)
-			}
-
-			configFileContents = append(configFileContents, contents)
-		}
-
-		err := server.RunServices(configFileContents)
+		err = server.RunServices(configJSON)
 		if err != nil {
 			fmt.Printf("run failed: %s\n", err)
 			os.Exit(1)

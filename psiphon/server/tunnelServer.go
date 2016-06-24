@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -44,7 +43,6 @@ import (
 // and meek protocols, which provide further circumvention
 // capabilities.
 type TunnelServer struct {
-	config            *Config
 	runWaitGroup      *sync.WaitGroup
 	listenerError     chan error
 	shutdownBroadcast <-chan struct{}
@@ -53,18 +51,15 @@ type TunnelServer struct {
 
 // NewTunnelServer initializes a new tunnel server.
 func NewTunnelServer(
-	config *Config,
-	psinetDatabase *psinet.Database,
+	support *SupportServices,
 	shutdownBroadcast <-chan struct{}) (*TunnelServer, error) {
 
-	sshServer, err := newSSHServer(
-		config, psinetDatabase, shutdownBroadcast)
+	sshServer, err := newSSHServer(support, shutdownBroadcast)
 	if err != nil {
 		return nil, psiphon.ContextError(err)
 	}
 
 	return &TunnelServer{
-		config:            config,
 		runWaitGroup:      new(sync.WaitGroup),
 		listenerError:     make(chan error),
 		shutdownBroadcast: shutdownBroadcast,
@@ -105,15 +100,18 @@ func (server *TunnelServer) Run() error {
 		tunnelProtocol string
 	}
 
+	// TODO: should TunnelServer hold its own support pointer?
+	support := server.sshServer.support
+
 	// First bind all listeners; once all are successful,
 	// start accepting connections on each.
 
 	var listeners []*sshListener
 
-	for tunnelProtocol, listenPort := range server.config.TunnelProtocolPorts {
+	for tunnelProtocol, listenPort := range support.Config.TunnelProtocolPorts {
 
 		localAddress := fmt.Sprintf(
-			"%s:%d", server.config.ServerIPAddress, listenPort)
+			"%s:%d", support.Config.ServerIPAddress, listenPort)
 
 		listener, err := net.Listen("tcp", localAddress)
 		if err != nil {
@@ -183,8 +181,7 @@ func (server *TunnelServer) Run() error {
 type sshClientID uint64
 
 type sshServer struct {
-	config            *Config
-	psinetDatabase    *psinet.Database
+	support           *SupportServices
 	shutdownBroadcast <-chan struct{}
 	sshHostKey        ssh.Signer
 	nextClientID      sshClientID
@@ -194,11 +191,10 @@ type sshServer struct {
 }
 
 func newSSHServer(
-	config *Config,
-	psinetDatabase *psinet.Database,
+	support *SupportServices,
 	shutdownBroadcast <-chan struct{}) (*sshServer, error) {
 
-	privateKey, err := ssh.ParseRawPrivateKey([]byte(config.SSHPrivateKey))
+	privateKey, err := ssh.ParseRawPrivateKey([]byte(support.Config.SSHPrivateKey))
 	if err != nil {
 		return nil, psiphon.ContextError(err)
 	}
@@ -210,8 +206,7 @@ func newSSHServer(
 	}
 
 	return &sshServer{
-		config:            config,
-		psinetDatabase:    psinetDatabase,
+		support:           support,
 		shutdownBroadcast: shutdownBroadcast,
 		sshHostKey:        signer,
 		nextClientID:      1,
@@ -241,7 +236,7 @@ func (sshServer *sshServer) runListener(
 		psiphon.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
 
 		meekServer, err := NewMeekServer(
-			sshServer.config,
+			sshServer.support,
 			listener,
 			psiphon.TunnelProtocolUsesMeekHTTPS(tunnelProtocol),
 			handleClient,
@@ -355,13 +350,16 @@ func (sshServer *sshServer) stopClients() {
 
 func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.Conn) {
 
-	geoIPData := GeoIPLookup(psiphon.IPAddressFromAddr(clientConn.RemoteAddr()))
+	geoIPData := sshServer.support.GeoIPService.Lookup(
+		psiphon.IPAddressFromAddr(clientConn.RemoteAddr()))
+
+	// TODO: apply reload of TrafficRulesSet to existing clients
 
 	sshClient := newSshClient(
 		sshServer,
 		tunnelProtocol,
 		geoIPData,
-		sshServer.config.GetTrafficRules(geoIPData.Country))
+		sshServer.support.TrafficRulesSet.GetTrafficRules(geoIPData.Country))
 
 	// Wrap the base client connection with an ActivityMonitoredConn which will
 	// terminate the connection if no data is received before the deadline. This
@@ -411,7 +409,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 		sshServerConfig := &ssh.ServerConfig{
 			PasswordCallback: sshClient.passwordCallback,
 			AuthLogCallback:  sshClient.authLogCallback,
-			ServerVersion:    sshServer.config.SSHServerVersion,
+			ServerVersion:    sshServer.support.Config.SSHServerVersion,
 		}
 		sshServerConfig.AddHostKey(sshServer.sshHostKey)
 
@@ -425,7 +423,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 			conn, result.err = psiphon.NewObfuscatedSshConn(
 				psiphon.OBFUSCATION_CONN_MODE_SERVER,
 				clientConn,
-				sshServer.config.ObfuscatedSSHKey)
+				sshServer.support.Config.ObfuscatedSSHKey)
 			if result.err != nil {
 				result.err = psiphon.ContextError(result.err)
 			}
@@ -538,15 +536,15 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 		}
 	}
 
-	if !isHexDigits(sshClient.sshServer.config, sshPasswordPayload.SessionId) {
+	if !isHexDigits(sshClient.sshServer.support, sshPasswordPayload.SessionId) {
 		return nil, psiphon.ContextError(fmt.Errorf("invalid session ID for %q", conn.User()))
 	}
 
 	userOk := (subtle.ConstantTimeCompare(
-		[]byte(conn.User()), []byte(sshClient.sshServer.config.SSHUserName)) == 1)
+		[]byte(conn.User()), []byte(sshClient.sshServer.support.Config.SSHUserName)) == 1)
 
 	passwordOk := (subtle.ConstantTimeCompare(
-		[]byte(sshPasswordPayload.SshPassword), []byte(sshClient.sshServer.config.SSHPassword)) == 1)
+		[]byte(sshPasswordPayload.SshPassword), []byte(sshClient.sshServer.support.Config.SSHPassword)) == 1)
 
 	if !userOk || !passwordOk {
 		return nil, psiphon.ContextError(fmt.Errorf("invalid password for %q", conn.User()))
@@ -561,20 +559,23 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 
 	// Store the GeoIP data associated with the session ID. This makes the GeoIP data
 	// available to the web server for web transport Psiphon API requests.
-	SetGeoIPSessionCache(psiphonSessionID, geoIPData)
+	sshClient.sshServer.support.GeoIPService.SetSessionCache(
+		psiphonSessionID, geoIPData)
 
 	return nil, nil
 }
 
 func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string, err error) {
 	if err != nil {
-		if sshClient.sshServer.config.UseFail2Ban() {
+		logFields := LogFields{"error": err, "method": method}
+		if sshClient.sshServer.support.Config.UseFail2Ban() {
 			clientIPAddress := psiphon.IPAddressFromAddr(conn.RemoteAddr())
 			if clientIPAddress != "" {
-				LogFail2Ban(clientIPAddress)
+				logFields["fail2ban"] = fmt.Sprintf(
+					sshClient.sshServer.support.Config.Fail2BanFormat, clientIPAddress)
 			}
 		}
-		log.WithContextFields(LogFields{"error": err, "method": method}).Debug("authentication failed")
+		log.WithContextFields(LogFields{"error": err, "method": method}).Error("authentication failed")
 	} else {
 		log.WithContextFields(LogFields{"error": err, "method": method}).Debug("authentication success")
 	}
@@ -633,8 +634,7 @@ func (sshClient *sshClient) runClient(
 
 			// requests are processed serially; responses must be sent in request order.
 			responsePayload, err := sshAPIRequestHandler(
-				sshClient.sshServer.config,
-				sshClient.sshServer.psinetDatabase,
+				sshClient.sshServer.support,
 				sshClient.geoIPData,
 				request.Type,
 				request.Payload)
@@ -697,8 +697,8 @@ func (sshClient *sshClient) handleNewPortForwardChannel(newChannel ssh.NewChanne
 
 	// Intercept TCP port forwards to a specified udpgw server and handle directly.
 	// TODO: also support UDP explicitly, e.g. with a custom "direct-udp" channel type?
-	isUDPChannel := sshClient.sshServer.config.UDPInterceptUdpgwServerAddress != "" &&
-		sshClient.sshServer.config.UDPInterceptUdpgwServerAddress ==
+	isUDPChannel := sshClient.sshServer.support.Config.UDPInterceptUdpgwServerAddress != "" &&
+		sshClient.sshServer.support.Config.UDPInterceptUdpgwServerAddress ==
 			fmt.Sprintf("%s:%d",
 				directTcpipExtraData.HostToConnect,
 				directTcpipExtraData.PortToConnect)

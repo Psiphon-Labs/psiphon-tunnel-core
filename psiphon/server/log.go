@@ -20,7 +20,6 @@
 package server
 
 import (
-	"fmt"
 	"io"
 	"log/syslog"
 	"os"
@@ -70,8 +69,6 @@ func NewLogWriter() *io.PipeWriter {
 }
 
 var log *ContextLogger
-var fail2BanFormat string
-var fail2BanWriter *syslog.Writer
 
 // InitLogging configures a logger according to the specified
 // config params. If not called, the default logger set by the
@@ -111,27 +108,7 @@ func InitLogging(config *Config) error {
 		},
 	}
 
-	if config.Fail2BanFormat != "" {
-		fail2BanFormat = config.Fail2BanFormat
-		fail2BanWriter, err = syslog.Dial(
-			"", "", syslog.LOG_AUTH|syslog.LOG_INFO, config.SyslogTag)
-		if err != nil {
-			return psiphon.ContextError(err)
-		}
-	}
-
 	return nil
-}
-
-// LogFail2Ban logs a message to the local syslog service AUTH
-// facility with INFO severity using the format specified by
-// config.Fail2BanFormat and the given client IP address. This
-// is for integration with fail2ban for blocking abusive
-// clients by source IP address. When set, the tag in
-// config.SyslogTag is used.
-func LogFail2Ban(clientIPAddress string) {
-	fail2BanWriter.Info(
-		fmt.Sprintf(fail2BanFormat, clientIPAddress))
 }
 
 // getSyslogPriority determines golang's syslog "priority" value
