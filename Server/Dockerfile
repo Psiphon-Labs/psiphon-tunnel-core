@@ -12,11 +12,6 @@ RUN mkdir -p /opt/psiphon
 
 ADD ["psiphond", "psiphond.config", "/opt/psiphon/"]
 
-EXPOSE 22
-EXPOSE 53
-EXPOSE 443
-EXPOSE 80
-
 WORKDIR /opt/psiphon
 
 ENTRYPOINT ["./psiphond", "--config", "psiphond.config", "run"]
