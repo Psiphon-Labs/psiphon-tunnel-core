@@ -156,7 +156,8 @@ func (set *TrafficRulesSet) Reload(ruleSetFilename string) error {
 		return psiphon.ContextError(err)
 	}
 
-	*set = newSet
+	set.DefaultRules = newSet.DefaultRules
+	set.RegionalRules = newSet.RegionalRules
 
 	return nil
 }

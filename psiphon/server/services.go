@@ -214,21 +214,33 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 //
 func (support *SupportServices) Reload() {
 
-	err := support.TrafficRulesSet.Reload(support.Config.TrafficRulesFilename)
-	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Error("reload traffic rules failed")
-		// Keep running with previous state of support.TrafficRulesSet
+	if support.Config.TrafficRulesFilename != "" {
+		err := support.TrafficRulesSet.Reload(support.Config.TrafficRulesFilename)
+		if err != nil {
+			log.WithContextFields(LogFields{"error": err}).Error("reload traffic rules failed")
+			// Keep running with previous state of support.TrafficRulesSet
+		} else {
+			log.WithContext().Info("reloaded traffic rules")
+		}
 	}
 
-	err = support.PsinetDatabase.Reload(support.Config.PsinetDatabaseFilename)
-	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Error("reload psinet database failed")
-		// Keep running with previous state of support.PsinetDatabase
+	if support.Config.PsinetDatabaseFilename != "" {
+		err := support.PsinetDatabase.Reload(support.Config.PsinetDatabaseFilename)
+		if err != nil {
+			log.WithContextFields(LogFields{"error": err}).Error("reload psinet database failed")
+			// Keep running with previous state of support.PsinetDatabase
+		} else {
+			log.WithContext().Info("reloaded psinet database")
+		}
 	}
 
-	err = support.GeoIPService.ReloadDatabase(support.Config.GeoIPDatabaseFilename)
-	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Error("reload GeoIP database failed")
-		// Keep running with previous state of support.GeoIPService
+	if support.Config.GeoIPDatabaseFilename != "" {
+		err := support.GeoIPService.ReloadDatabase(support.Config.GeoIPDatabaseFilename)
+		if err != nil {
+			log.WithContextFields(LogFields{"error": err}).Error("reload GeoIP database failed")
+			// Keep running with previous state of support.GeoIPService
+		} else {
+			log.WithContext().Info("reloaded GeoIP database")
+		}
 	}
 }
