@@ -347,7 +347,7 @@ func calculateBucketCount(length int) int {
 	return int(math.Ceil(math.Sqrt(float64(length))))
 }
 
-// Create bucketCount buckets
+// Create bucketCount buckets.
 // Each bucket will be of size division or divison-1.
 func bucketizeServerList(servers []Server, bucketCount int) [][]Server {
 	division := float64(len(servers)) / float64(bucketCount)
@@ -370,8 +370,8 @@ func bucketizeServerList(servers []Server, bucketCount int) [][]Server {
 	return buckets
 }
 
-// Return hex encoded server entry string for comsumption by client
-// Newer clients ignore the legacy fields and only utilize the extended (new) config
+// Return hex encoded server entry string for comsumption by client.
+// Newer clients ignore the legacy fields and only utilize the extended (new) config.
 func (db *Database) getEncodedServerEntry(server Server) string {
 
 	// Double-check that we're not giving our blank server credentials
@@ -503,7 +503,7 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	return hex.EncodeToString(append([]byte(prefixString)[:], []byte(jsonDump)[:]...))
 }
 
-// Parse string of format "ssh-key-type ssh-key"
+// Parse string of format "ssh-key-type ssh-key".
 func parseSshKeyString(sshKeyString string) (keyType string, key string) {
 	sshKeyArr := strings.Split(sshKeyString, " ")
 	if len(sshKeyArr) != 2 {
