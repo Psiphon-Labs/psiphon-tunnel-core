@@ -132,7 +132,7 @@ func handshakeAPIRequestHandler(
 		sponsorID)
 
 	handshakeResponse.EncodedServerList = support.PsinetDatabase.DiscoverServers(
-		propagationChannelID, geoIPData.DiscoveryValue)
+		geoIPData.DiscoveryValue)
 
 	handshakeResponse.ClientRegion = clientRegion
 
