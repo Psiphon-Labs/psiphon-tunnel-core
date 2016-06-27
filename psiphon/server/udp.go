@@ -256,10 +256,10 @@ func (mux *udpPortForwardMultiplexer) run() {
 func (mux *udpPortForwardMultiplexer) transparentDNSAddress(
 	dialIP net.IP, dialPort int) (net.IP, int) {
 
-	if mux.sshClient.sshServer.config.UDPForwardDNSServerAddress != "" {
+	if mux.sshClient.sshServer.support.Config.UDPForwardDNSServerAddress != "" {
 		// Note: UDPForwardDNSServerAddress is validated in LoadConfig
 		host, portStr, _ := net.SplitHostPort(
-			mux.sshClient.sshServer.config.UDPForwardDNSServerAddress)
+			mux.sshClient.sshServer.support.Config.UDPForwardDNSServerAddress)
 		dialIP = net.ParseIP(host)
 		dialPort, _ = strconv.Atoi(portStr)
 	}

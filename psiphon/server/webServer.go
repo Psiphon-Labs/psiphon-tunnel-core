@@ -30,13 +30,11 @@ import (
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 )
 
 type webServer struct {
-	serveMux       *http.ServeMux
-	config         *Config
-	psinetDatabase *psinet.Database
+	support  *SupportServices
+	serveMux *http.ServeMux
 }
 
 // RunWebServer runs a web server which supports tunneled and untunneled
@@ -54,13 +52,11 @@ type webServer struct {
 // compatible with older clients.
 //
 func RunWebServer(
-	config *Config,
-	psinetDatabase *psinet.Database,
+	support *SupportServices,
 	shutdownBroadcast <-chan struct{}) error {
 
 	webServer := &webServer{
-		config:         config,
-		psinetDatabase: psinetDatabase,
+		support: support,
 	}
 
 	serveMux := http.NewServeMux()
@@ -70,8 +66,8 @@ func RunWebServer(
 	serveMux.HandleFunc("/client_verification", webServer.clientVerificationHandler)
 
 	certificate, err := tls.X509KeyPair(
-		[]byte(config.WebServerCertificate),
-		[]byte(config.WebServerPrivateKey))
+		[]byte(support.Config.WebServerCertificate),
+		[]byte(support.Config.WebServerPrivateKey))
 	if err != nil {
 		return psiphon.ContextError(err)
 	}
@@ -96,7 +92,9 @@ func RunWebServer(
 	}
 
 	listener, err := net.Listen(
-		"tcp", fmt.Sprintf("%s:%d", config.ServerIPAddress, config.WebServerPort))
+		"tcp", fmt.Sprintf("%s:%d",
+			support.Config.ServerIPAddress,
+			support.Config.WebServerPort))
 	if err != nil {
 		return psiphon.ContextError(err)
 	}
@@ -188,7 +186,7 @@ func (webServer *webServer) lookupGeoIPData(params requestJSONObject) GeoIPData 
 		return NewGeoIPData()
 	}
 
-	return GetGeoIPSessionCache(clientSessionID)
+	return webServer.support.GeoIPService.GetSessionCache(clientSessionID)
 }
 
 func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Request) {
@@ -198,10 +196,7 @@ func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Requ
 	var responsePayload []byte
 	if err == nil {
 		responsePayload, err = handshakeAPIRequestHandler(
-			webServer.config,
-			webServer.psinetDatabase,
-			webServer.lookupGeoIPData(params),
-			params)
+			webServer.support, webServer.lookupGeoIPData(params), params)
 	}
 
 	if err != nil {
@@ -227,7 +222,7 @@ func (webServer *webServer) connectedHandler(w http.ResponseWriter, r *http.Requ
 	var responsePayload []byte
 	if err == nil {
 		responsePayload, err = connectedAPIRequestHandler(
-			webServer.config, webServer.lookupGeoIPData(params), params)
+			webServer.support, webServer.lookupGeoIPData(params), params)
 	}
 
 	if err != nil {
@@ -246,7 +241,7 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 
 	if err == nil {
 		_, err = statusAPIRequestHandler(
-			webServer.config, webServer.lookupGeoIPData(params), params)
+			webServer.support, webServer.lookupGeoIPData(params), params)
 	}
 
 	if err != nil {
@@ -264,7 +259,7 @@ func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *
 
 	if err == nil {
 		_, err = clientVerificationAPIRequestHandler(
-			webServer.config, webServer.lookupGeoIPData(params), params)
+			webServer.support, webServer.lookupGeoIPData(params), params)
 	}
 
 	if err != nil {

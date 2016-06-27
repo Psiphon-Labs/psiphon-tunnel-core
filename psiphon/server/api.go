@@ -31,7 +31,6 @@ import (
 	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 )
 
 const MAX_API_PARAMS_SIZE = 256 * 1024 // 256KB
@@ -50,8 +49,7 @@ type requestJSONObject map[string]interface{}
 // clients.
 //
 func sshAPIRequestHandler(
-	config *Config,
-	psinetDatabase *psinet.Database,
+	support *SupportServices,
 	geoIPData GeoIPData,
 	name string,
 	requestPayload []byte) ([]byte, error) {
@@ -67,13 +65,13 @@ func sshAPIRequestHandler(
 
 	switch name {
 	case psiphon.SERVER_API_HANDSHAKE_REQUEST_NAME:
-		return handshakeAPIRequestHandler(config, psinetDatabase, geoIPData, params)
+		return handshakeAPIRequestHandler(support, geoIPData, params)
 	case psiphon.SERVER_API_CONNECTED_REQUEST_NAME:
-		return connectedAPIRequestHandler(config, geoIPData, params)
+		return connectedAPIRequestHandler(support, geoIPData, params)
 	case psiphon.SERVER_API_STATUS_REQUEST_NAME:
-		return statusAPIRequestHandler(config, geoIPData, params)
+		return statusAPIRequestHandler(support, geoIPData, params)
 	case psiphon.SERVER_API_CLIENT_VERIFICATION_REQUEST_NAME:
-		return clientVerificationAPIRequestHandler(config, geoIPData, params)
+		return clientVerificationAPIRequestHandler(support, geoIPData, params)
 	}
 
 	return nil, psiphon.ContextError(fmt.Errorf("invalid request name: %s", name))
@@ -84,14 +82,13 @@ func sshAPIRequestHandler(
 // connection; the response tells the client what homepage to open, what
 // stats to record, etc.
 func handshakeAPIRequestHandler(
-	config *Config,
-	psinetDatabase *psinet.Database,
+	support *SupportServices,
 	geoIPData GeoIPData,
 	params requestJSONObject) ([]byte, error) {
 
 	// Note: ignoring "known_servers" params
 
-	err := validateRequestParams(config, params, baseRequestParams)
+	err := validateRequestParams(support, params, baseRequestParams)
 	if err != nil {
 		// TODO: fail2ban?
 		return nil, psiphon.ContextError(errors.New("invalid params"))
@@ -99,7 +96,7 @@ func handshakeAPIRequestHandler(
 
 	log.WithContextFields(
 		getRequestLogFields(
-			config,
+			support,
 			"handshake",
 			geoIPData,
 			params,
@@ -123,16 +120,18 @@ func handshakeAPIRequestHandler(
 	clientPlatform, _ := getStringRequestParam(params, "client_platform")
 	clientRegion := geoIPData.Country
 
-	handshakeResponse.Homepages = psinetDatabase.GetHomepages(
+	// Note: no guarantee that PsinetDatabase won't reload between calls
+
+	handshakeResponse.Homepages = support.PsinetDatabase.GetHomepages(
 		sponsorID, clientRegion, clientPlatform)
 
-	handshakeResponse.UpgradeClientVersion = psinetDatabase.GetUpgradeClientVersion(
+	handshakeResponse.UpgradeClientVersion = support.PsinetDatabase.GetUpgradeClientVersion(
 		clientVersion, clientPlatform)
 
-	handshakeResponse.HttpsRequestRegexes = psinetDatabase.GetHttpsRequestRegexes(
+	handshakeResponse.HttpsRequestRegexes = support.PsinetDatabase.GetHttpsRequestRegexes(
 		sponsorID)
 
-	handshakeResponse.EncodedServerList = psinetDatabase.DiscoverServers(
+	handshakeResponse.EncodedServerList = support.PsinetDatabase.DiscoverServers(
 		propagationChannelID, geoIPData.DiscoveryValue)
 
 	handshakeResponse.ClientRegion = clientRegion
@@ -159,9 +158,11 @@ var connectedRequestParams = append(
 // which should be a connected_timestamp output from a previous connected
 // response, is used to calculate unique user stats.
 func connectedAPIRequestHandler(
-	config *Config, geoIPData GeoIPData, params requestJSONObject) ([]byte, error) {
+	support *SupportServices,
+	geoIPData GeoIPData,
+	params requestJSONObject) ([]byte, error) {
 
-	err := validateRequestParams(config, params, connectedRequestParams)
+	err := validateRequestParams(support, params, connectedRequestParams)
 	if err != nil {
 		// TODO: fail2ban?
 		return nil, psiphon.ContextError(errors.New("invalid params"))
@@ -169,7 +170,7 @@ func connectedAPIRequestHandler(
 
 	log.WithContextFields(
 		getRequestLogFields(
-			config,
+			support,
 			"connected",
 			geoIPData,
 			params,
@@ -203,9 +204,11 @@ var statusRequestParams = append(
 // any string is accepted (regex transform may result in arbitrary
 // string). Stats processor must handle this input with care.
 func statusAPIRequestHandler(
-	config *Config, geoIPData GeoIPData, params requestJSONObject) ([]byte, error) {
+	support *SupportServices,
+	geoIPData GeoIPData,
+	params requestJSONObject) ([]byte, error) {
 
-	err := validateRequestParams(config, params, statusRequestParams)
+	err := validateRequestParams(support, params, statusRequestParams)
 	if err != nil {
 		// TODO: fail2ban?
 		return nil, psiphon.ContextError(errors.New("invalid params"))
@@ -223,7 +226,7 @@ func statusAPIRequestHandler(
 		return nil, psiphon.ContextError(err)
 	}
 	bytesTransferredFields := getRequestLogFields(
-		config, "bytes_transferred", geoIPData, params, statusRequestParams)
+		support, "bytes_transferred", geoIPData, params, statusRequestParams)
 	bytesTransferredFields["bytes"] = bytesTransferred
 	log.WithContextFields(bytesTransferredFields).Info("API event")
 
@@ -237,7 +240,7 @@ func statusAPIRequestHandler(
 			return nil, psiphon.ContextError(err)
 		}
 		domainBytesFields := getRequestLogFields(
-			config, "domain_bytes", geoIPData, params, statusRequestParams)
+			support, "domain_bytes", geoIPData, params, statusRequestParams)
 		for domain, bytes := range hostBytes {
 			domainBytesFields["domain"] = domain
 			domainBytesFields["bytes"] = bytes
@@ -255,7 +258,7 @@ func statusAPIRequestHandler(
 			return nil, psiphon.ContextError(err)
 		}
 		sessionFields := getRequestLogFields(
-			config, "session", geoIPData, params, statusRequestParams)
+			support, "session", geoIPData, params, statusRequestParams)
 		for _, tunnelStat := range tunnelStats {
 
 			sessionID, err := getStringRequestParam(tunnelStat, "session_id")
@@ -317,9 +320,11 @@ func statusAPIRequestHandler(
 // verification request once per tunnel connection. The payload
 // attests that client is a legitimate Psiphon client.
 func clientVerificationAPIRequestHandler(
-	config *Config, geoIPData GeoIPData, params requestJSONObject) ([]byte, error) {
+	support *SupportServices,
+	geoIPData GeoIPData,
+	params requestJSONObject) ([]byte, error) {
 
-	err := validateRequestParams(config, params, baseRequestParams)
+	err := validateRequestParams(support, params, baseRequestParams)
 	if err != nil {
 		// TODO: fail2ban?
 		return nil, psiphon.ContextError(errors.New("invalid params"))
@@ -332,7 +337,7 @@ func clientVerificationAPIRequestHandler(
 
 type requestParamSpec struct {
 	name      string
-	validator func(*Config, string) bool
+	validator func(*SupportServices, string) bool
 	flags     uint32
 }
 
@@ -365,7 +370,7 @@ var baseRequestParams = []requestParamSpec{
 }
 
 func validateRequestParams(
-	config *Config,
+	support *SupportServices,
 	params requestJSONObject,
 	expectedParams []requestParamSpec) error {
 
@@ -383,7 +388,7 @@ func validateRequestParams(
 			return psiphon.ContextError(
 				fmt.Errorf("unexpected param type: %s", expectedParam.name))
 		}
-		if !expectedParam.validator(config, strValue) {
+		if !expectedParam.validator(support, strValue) {
 			return psiphon.ContextError(
 				fmt.Errorf("invalid param: %s", expectedParam.name))
 		}
@@ -395,7 +400,7 @@ func validateRequestParams(
 // getRequestLogFields makes LogFields to log the API event following
 // the legacy psi_web and current ELK naming conventions.
 func getRequestLogFields(
-	config *Config,
+	support *SupportServices,
 	eventName string,
 	geoIPData GeoIPData,
 	params requestJSONObject,
@@ -404,7 +409,7 @@ func getRequestLogFields(
 	logFields := make(LogFields)
 
 	logFields["event_name"] = eventName
-	logFields["host_id"] = config.HostID
+	logFields["host_id"] = support.Config.HostID
 
 	// In psi_web, the space replacement was done to accommodate space
 	// delimited logging, which is no longer required; we retain the
@@ -449,7 +454,7 @@ func getRequestLogFields(
 			logFields[expectedParam.name] = intValue
 		case "meek_dial_address":
 			host, _, _ := net.SplitHostPort(strValue)
-			if isIPAddress(config, host) {
+			if isIPAddress(support, host) {
 				logFields["meek_dial_ip_address"] = host
 			} else {
 				logFields["meek_dial_domain"] = host
@@ -544,40 +549,40 @@ func getMapStringInt64RequestParam(params requestJSONObject, name string) (map[s
 
 // Input validators follow the legacy validations rules in psi_web.
 
-func isServerSecret(config *Config, value string) bool {
+func isServerSecret(support *SupportServices, value string) bool {
 	return subtle.ConstantTimeCompare(
 		[]byte(value),
-		[]byte(config.WebServerSecret)) == 1
+		[]byte(support.Config.WebServerSecret)) == 1
 }
 
-func isHexDigits(_ *Config, value string) bool {
+func isHexDigits(_ *SupportServices, value string) bool {
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		return !unicode.Is(unicode.ASCII_Hex_Digit, c)
 	})
 }
 
-func isDigits(_ *Config, value string) bool {
+func isDigits(_ *SupportServices, value string) bool {
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		return c < '0' || c > '9'
 	})
 }
 
-func isClientPlatform(_ *Config, value string) bool {
+func isClientPlatform(_ *SupportServices, value string) bool {
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		// Note: stricter than psi_web's Python string.whitespace
 		return unicode.Is(unicode.White_Space, c)
 	})
 }
 
-func isRelayProtocol(_ *Config, value string) bool {
+func isRelayProtocol(_ *SupportServices, value string) bool {
 	return psiphon.Contains(psiphon.SupportedTunnelProtocols, value)
 }
 
-func isBooleanFlag(_ *Config, value string) bool {
+func isBooleanFlag(_ *SupportServices, value string) bool {
 	return value == "0" || value == "1"
 }
 
-func isRegionCode(_ *Config, value string) bool {
+func isRegionCode(_ *SupportServices, value string) bool {
 	if len(value) != 2 {
 		return false
 	}
@@ -586,16 +591,16 @@ func isRegionCode(_ *Config, value string) bool {
 	})
 }
 
-func isDialAddress(config *Config, value string) bool {
+func isDialAddress(support *SupportServices, value string) bool {
 	// "<host>:<port>", where <host> is a domain or IP address
 	parts := strings.Split(value, ":")
 	if len(parts) != 2 {
 		return false
 	}
-	if !isIPAddress(config, parts[0]) && !isDomain(config, parts[0]) {
+	if !isIPAddress(support, parts[0]) && !isDomain(support, parts[0]) {
 		return false
 	}
-	if !isDigits(config, parts[1]) {
+	if !isDigits(support, parts[1]) {
 		return false
 	}
 	port, err := strconv.Atoi(parts[1])
@@ -605,13 +610,13 @@ func isDialAddress(config *Config, value string) bool {
 	return port > 0 && port < 65536
 }
 
-func isIPAddress(_ *Config, value string) bool {
+func isIPAddress(_ *SupportServices, value string) bool {
 	return net.ParseIP(value) != nil
 }
 
 var isDomainRegex = regexp.MustCompile("[a-zA-Z\\d-]{1,63}$")
 
-func isDomain(_ *Config, value string) bool {
+func isDomain(_ *SupportServices, value string) bool {
 
 	// From: http://stackoverflow.com/questions/2532053/validate-a-hostname-string
 	//
@@ -638,25 +643,25 @@ func isDomain(_ *Config, value string) bool {
 	return true
 }
 
-func isHostHeader(config *Config, value string) bool {
+func isHostHeader(support *SupportServices, value string) bool {
 	// "<host>:<port>", where <host> is a domain or IP address and ":<port>" is optional
 	if strings.Contains(value, ":") {
-		return isDialAddress(config, value)
+		return isDialAddress(support, value)
 	}
-	return isIPAddress(config, value) || isDomain(config, value)
+	return isIPAddress(support, value) || isDomain(support, value)
 }
 
-func isServerEntrySource(_ *Config, value string) bool {
+func isServerEntrySource(_ *SupportServices, value string) bool {
 	return psiphon.Contains(psiphon.SupportedServerEntrySources, value)
 }
 
 var isISO8601DateRegex = regexp.MustCompile(
 	"(?P<year>[0-9]{4})-(?P<month>[0-9]{1,2})-(?P<day>[0-9]{1,2})T(?P<hour>[0-9]{2}):(?P<minute>[0-9]{2}):(?P<second>[0-9]{2})(\\.(?P<fraction>[0-9]+))?(?P<timezone>Z|(([-+])([0-9]{2}):([0-9]{2})))")
 
-func isISO8601Date(_ *Config, value string) bool {
+func isISO8601Date(_ *SupportServices, value string) bool {
 	return isISO8601DateRegex.Match([]byte(value))
 }
 
-func isLastConnected(config *Config, value string) bool {
-	return value == "None" || value == "Unknown" || isISO8601Date(config, value)
+func isLastConnected(support *SupportServices, value string) bool {
+	return value == "None" || value == "Unknown" || isISO8601Date(support, value)
 }

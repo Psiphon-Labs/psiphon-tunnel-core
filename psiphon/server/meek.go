@@ -76,7 +76,7 @@ const MEEK_MAX_SESSION_ID_LENGTH = 20
 // HTTP payload traffic for a given session into net.Conn conforming Read()s and Write()s via
 // the meekConn struct.
 type MeekServer struct {
-	config        *Config
+	support       *SupportServices
 	listener      net.Listener
 	tlsConfig     *tls.Config
 	clientHandler func(clientConn net.Conn)
@@ -88,14 +88,14 @@ type MeekServer struct {
 
 // NewMeekServer initializes a new meek server.
 func NewMeekServer(
-	config *Config,
+	support *SupportServices,
 	listener net.Listener,
 	useTLS bool,
 	clientHandler func(clientConn net.Conn),
 	stopBroadcast <-chan struct{}) (*MeekServer, error) {
 
 	meekServer := &MeekServer{
-		config:        config,
+		support:       support,
 		listener:      listener,
 		clientHandler: clientHandler,
 		openConns:     new(psiphon.Conns),
@@ -104,7 +104,7 @@ func NewMeekServer(
 	}
 
 	if useTLS {
-		tlsConfig, err := makeMeekTLSConfig(config)
+		tlsConfig, err := makeMeekTLSConfig(support)
 		if err != nil {
 			return nil, psiphon.ContextError(err)
 		}
@@ -199,8 +199,8 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		return
 	}
 
-	if len(server.config.MeekProhibitedHeaders) > 0 {
-		for _, header := range server.config.MeekProhibitedHeaders {
+	if len(server.support.Config.MeekProhibitedHeaders) > 0 {
+		for _, header := range server.support.Config.MeekProhibitedHeaders {
 			value := request.Header.Get(header)
 			if header != "" {
 				log.WithContextFields(LogFields{
@@ -284,7 +284,7 @@ func (server *MeekServer) getSession(
 	// The session is new (or expired). Treat the cookie value as a new meek
 	// cookie, extract the payload, and create a new session.
 
-	payloadJSON, err := getMeekCookiePayload(server.config, meekCookie.Value)
+	payloadJSON, err := getMeekCookiePayload(server.support, meekCookie.Value)
 	if err != nil {
 		return "", nil, psiphon.ContextError(err)
 	}
@@ -309,8 +309,8 @@ func (server *MeekServer) getSession(
 
 	clientIP := strings.Split(request.RemoteAddr, ":")[0]
 
-	if len(server.config.MeekProxyForwardedForHeaders) > 0 {
-		for _, header := range server.config.MeekProxyForwardedForHeaders {
+	if len(server.support.Config.MeekProxyForwardedForHeaders) > 0 {
+		for _, header := range server.support.Config.MeekProxyForwardedForHeaders {
 			value := request.Header.Get(header)
 			if len(value) > 0 {
 				// Some headers, such as X-Forwarded-For, are a comma-separated
@@ -451,10 +451,10 @@ func (session *meekSession) expired() bool {
 // Currently, this config is optimized for fronted meek where the nature
 // of the connection is non-circumvention; it's optimized for performance
 // assuming the peer is an uncensored CDN.
-func makeMeekTLSConfig(config *Config) (*tls.Config, error) {
+func makeMeekTLSConfig(support *SupportServices) (*tls.Config, error) {
 
 	certificate, privateKey, err := GenerateWebServerCertificate(
-		config.MeekCertificateCommonName)
+		support.Config.MeekCertificateCommonName)
 	if err != nil {
 		return nil, psiphon.ContextError(err)
 	}
@@ -501,7 +501,7 @@ func makeMeekTLSConfig(config *Config) (*tls.Config, error) {
 
 // getMeekCookiePayload extracts the payload from a meek cookie. The cookie
 // paylod is base64 encoded, obfuscated, and NaCl encrypted.
-func getMeekCookiePayload(config *Config, cookieValue string) ([]byte, error) {
+func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte, error) {
 	decodedValue, err := base64.StdEncoding.DecodeString(cookieValue)
 	if err != nil {
 		return nil, psiphon.ContextError(err)
@@ -516,7 +516,7 @@ func getMeekCookiePayload(config *Config, cookieValue string) ([]byte, error) {
 
 	obfuscator, err := psiphon.NewServerObfuscator(
 		reader,
-		&psiphon.ObfuscatorConfig{Keyword: config.MeekObfuscatedKey})
+		&psiphon.ObfuscatorConfig{Keyword: support.Config.MeekObfuscatedKey})
 	if err != nil {
 		return nil, psiphon.ContextError(err)
 	}
@@ -532,7 +532,8 @@ func getMeekCookiePayload(config *Config, cookieValue string) ([]byte, error) {
 	var nonce [24]byte
 	var privateKey, ephemeralPublicKey [32]byte
 
-	decodedPrivateKey, err := base64.StdEncoding.DecodeString(config.MeekCookieEncryptionPrivateKey)
+	decodedPrivateKey, err := base64.StdEncoding.DecodeString(
+		support.Config.MeekCookieEncryptionPrivateKey)
 	if err != nil {
 		return nil, psiphon.ContextError(err)
 	}

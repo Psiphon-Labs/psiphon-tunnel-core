@@ -23,6 +23,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"net"
+	"sync"
 	"time"
 
 	cache "github.com/Psiphon-Inc/go-cache"
@@ -32,7 +33,7 @@ import (
 
 const UNKNOWN_GEOIP_VALUE = "None"
 
-// GeoIPData stores GeoIP data for a client session. Individual client
+// GeoIPData is GeoIP data for a client session. Individual client
 // IP addresses are neither logged nor explicitly referenced during a session.
 // The GeoIP country, city, and ISP corresponding to a client IP address are
 // resolved and then logged along with usage stats. The DiscoveryValue is
@@ -55,14 +56,62 @@ func NewGeoIPData() GeoIPData {
 	}
 }
 
-// GeoIPLookup determines a GeoIPData for a given client IP address.
-func GeoIPLookup(ipAddress string) GeoIPData {
+// GeoIPService implements GeoIP lookup and session/GeoIP caching.
+// Lookup is via a MaxMind database; the ReloadDatabase function
+// supports hot reloading of MaxMind data while the server is
+// running.
+type GeoIPService struct {
+	maxMindReadeMutex     sync.RWMutex
+	maxMindReader         *maxminddb.Reader
+	sessionCache          *cache.Cache
+	discoveryValueHMACKey string
+}
+
+// NewGeoIPService initializes a new GeoIPService.
+func NewGeoIPService(databaseFilename, discoveryValueHMACKey string) (*GeoIPService, error) {
+	geoIP := &GeoIPService{
+		maxMindReader:         nil,
+		sessionCache:          cache.New(GEOIP_SESSION_CACHE_TTL, 1*time.Minute),
+		discoveryValueHMACKey: discoveryValueHMACKey,
+	}
+	return geoIP, geoIP.ReloadDatabase(databaseFilename)
+}
+
+// ReloadDatabase [re]loads a MaxMind GeoIP2/GeoLite2 database to
+// be used for GeoIP lookup. When ReloadDatabase fails, the previous
+// MaxMind database state is retained.
+// ReloadDatabase only updates the MaxMind database and doesn't affect
+// other GeopIPService components (e.g., the session cache).
+func (geoIP *GeoIPService) ReloadDatabase(databaseFilename string) error {
+	geoIP.maxMindReadeMutex.Lock()
+	defer geoIP.maxMindReadeMutex.Unlock()
+
+	if databaseFilename == "" {
+		// No database filename in the config
+		return nil
+	}
+
+	maxMindReader, err := maxminddb.Open(databaseFilename)
+	if err != nil {
+		return psiphon.ContextError(err)
+	}
+
+	geoIP.maxMindReader = maxMindReader
+
+	return nil
+}
+
+// Lookup determines a GeoIPData for a given client IP address.
+func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
+	geoIP.maxMindReadeMutex.RLock()
+	defer geoIP.maxMindReadeMutex.RUnlock()
 
 	result := NewGeoIPData()
 
 	ip := net.ParseIP(ipAddress)
 
-	if ip == nil || geoIPReader == nil {
+	// Note: maxMindReader is nil when config.GeoIPDatabaseFilename is blank.
+	if ip == nil || geoIP.maxMindReader == nil {
 		return result
 	}
 
@@ -76,7 +125,7 @@ func GeoIPLookup(ipAddress string) GeoIPData {
 		ISP string `maxminddb:"isp"`
 	}
 
-	err := geoIPReader.Lookup(ip, &geoIPFields)
+	err := geoIP.maxMindReader.Lookup(ip, &geoIPFields)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Warning("GeoIP lookup failed")
 	}
@@ -94,23 +143,19 @@ func GeoIPLookup(ipAddress string) GeoIPData {
 		result.ISP = geoIPFields.ISP
 	}
 
-	result.DiscoveryValue = calculateDiscoveryValue(ipAddress)
+	result.DiscoveryValue = calculateDiscoveryValue(
+		geoIP.discoveryValueHMACKey, ipAddress)
 
 	return result
 }
 
-func SetGeoIPSessionCache(sessionID string, geoIPData GeoIPData) {
-	if geoIPSessionCache == nil {
-		return
-	}
-	geoIPSessionCache.Set(sessionID, geoIPData, cache.DefaultExpiration)
+func (geoIP *GeoIPService) SetSessionCache(sessionID string, geoIPData GeoIPData) {
+	geoIP.sessionCache.Set(sessionID, geoIPData, cache.DefaultExpiration)
 }
 
-func GetGeoIPSessionCache(sessionID string) GeoIPData {
-	if geoIPSessionCache == nil {
-		return NewGeoIPData()
-	}
-	geoIPData, found := geoIPSessionCache.Get(sessionID)
+func (geoIP *GeoIPService) GetSessionCache(
+	sessionID string) GeoIPData {
+	geoIPData, found := geoIP.sessionCache.Get(sessionID)
 	if !found {
 		return NewGeoIPData()
 	}
@@ -123,7 +168,7 @@ func GetGeoIPSessionCache(sessionID string) GeoIPData {
 // later use by the discovery algorithm.
 // See https://bitbucket.org/psiphon/psiphon-circumvention-system/src/tip/Automation/psi_ops_discovery.py
 // for full details.
-func calculateDiscoveryValue(ipAddress string) int {
+func calculateDiscoveryValue(discoveryValueHMACKey, ipAddress string) int {
 	// From: psi_ops_discovery.calculate_ip_address_strategy_value:
 	//     # Mix bits from all octets of the client IP address to determine the
 	//     # bucket. An HMAC is used to prevent pre-calculation of buckets for IPs.
@@ -132,30 +177,4 @@ func calculateDiscoveryValue(ipAddress string) int {
 	hash := hmac.New(sha256.New, []byte(discoveryValueHMACKey))
 	hash.Write([]byte(ipAddress))
 	return int(hash.Sum(nil)[0])
-}
-
-var geoIPReader *maxminddb.Reader
-var geoIPSessionCache *cache.Cache
-var discoveryValueHMACKey string
-
-// InitGeoIP opens a GeoIP2/GeoLite2 MaxMind database and prepares
-// it for lookups.
-func InitGeoIP(config *Config) error {
-
-	discoveryValueHMACKey = config.DiscoveryValueHMACKey
-
-	if config.GeoIPDatabaseFilename != "" {
-
-		var err error
-		geoIPReader, err = maxminddb.Open(config.GeoIPDatabaseFilename)
-		if err != nil {
-			return psiphon.ContextError(err)
-		}
-
-		geoIPSessionCache = cache.New(GEOIP_SESSION_CACHE_TTL, 1*time.Minute)
-
-		log.WithContext().Info("GeoIP initialized")
-	}
-
-	return nil
 }

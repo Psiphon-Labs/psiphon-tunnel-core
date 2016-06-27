@@ -30,9 +30,10 @@ import (
 )
 
 // Database serves Psiphon API data requests. It's safe for
-// concurrent usage.
+// concurrent usage. The Reload function supports hot reloading
+// of Psiphon network data while the server is running.
 type Database struct {
-	mutex sync.RWMutex
+	sync.RWMutex
 
 	// TODO: implement
 }
@@ -43,7 +44,7 @@ func NewDatabase(filename string) (*Database, error) {
 
 	database := &Database{}
 
-	err := database.Load(filename)
+	err := database.Reload(filename)
 	if err != nil {
 		return nil, psiphon.ContextError(err)
 	}
@@ -51,14 +52,15 @@ func NewDatabase(filename string) (*Database, error) {
 	return database, nil
 }
 
-// Load [re]initializes the Database with the Psiphon network data
+// Reload [re]initializes the Database with the Psiphon network data
 // in the specified file. This function obtains a write lock on
 // the database, blocking all readers.
 // The input "" is valid and initializes a functional Database
-// with no data.
-func (db *Database) Load(filename string) error {
-	db.mutex.Lock()
-	defer db.mutex.Unlock()
+// with no data. When Reload fails, the previous Database state is
+// retained.
+func (db *Database) Reload(filename string) error {
+	db.Lock()
+	defer db.Unlock()
 
 	// TODO: implement
 
@@ -68,8 +70,8 @@ func (db *Database) Load(filename string) error {
 // GetHomepages returns a list of  home pages for the specified sponsor,
 // region, and platform.
 func (db *Database) GetHomepages(sponsorID, clientRegion, clientPlatform string) []string {
-	db.mutex.RLock()
-	defer db.mutex.RUnlock()
+	db.RLock()
+	defer db.RUnlock()
 
 	// TODO: implement
 
@@ -80,8 +82,8 @@ func (db *Database) GetHomepages(sponsorID, clientRegion, clientPlatform string)
 // indicated for the specified client current version. The result is "" when
 // no upgrade is available.
 func (db *Database) GetUpgradeClientVersion(clientVersion, clientPlatform string) string {
-	db.mutex.RLock()
-	defer db.mutex.RUnlock()
+	db.RLock()
+	defer db.RUnlock()
 
 	// TODO: implement
 
@@ -91,8 +93,8 @@ func (db *Database) GetUpgradeClientVersion(clientVersion, clientPlatform string
 // GetHttpsRequestRegexes returns bytes transferred stats regexes for the
 // specified sponsor.
 func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string {
-	db.mutex.RLock()
-	defer db.mutex.RUnlock()
+	db.RLock()
+	defer db.RUnlock()
 
 	return make([]map[string]string, 0)
 }
@@ -100,8 +102,8 @@ func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string
 // DiscoverServers selects new encoded server entries to be "discovered" by
 // the client, using the discoveryValue as the input into the discovery algorithm.
 func (db *Database) DiscoverServers(propagationChannelID string, discoveryValue int) []string {
-	db.mutex.RLock()
-	defer db.mutex.RUnlock()
+	db.RLock()
+	defer db.RUnlock()
 
 	// TODO: implement
 

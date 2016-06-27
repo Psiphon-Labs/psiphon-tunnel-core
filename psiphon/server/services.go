@@ -38,9 +38,9 @@ import (
 // RunServices initializes support functions including logging and GeoIP services;
 // and then starts the server components and runs them until os.Interrupt or
 // os.Kill signals are received. The config determines which components are run.
-func RunServices(encodedConfigs [][]byte) error {
+func RunServices(configJSON []byte) error {
 
-	config, err := LoadConfig(encodedConfigs)
+	config, err := LoadConfig(configJSON)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("load config failed")
 		return psiphon.ContextError(err)
@@ -52,15 +52,9 @@ func RunServices(encodedConfigs [][]byte) error {
 		return psiphon.ContextError(err)
 	}
 
-	err = InitGeoIP(config)
+	supportServices, err := NewSupportServices(config)
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Error("init GeoIP failed")
-		return psiphon.ContextError(err)
-	}
-
-	psinetDatabase, err := psinet.NewDatabase(config.PsinetDatabaseFilename)
-	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Error("init PsinetDatabase failed")
+		log.WithContextFields(LogFields{"error": err}).Error("init support services failed")
 		return psiphon.ContextError(err)
 	}
 
@@ -68,7 +62,7 @@ func RunServices(encodedConfigs [][]byte) error {
 	shutdownBroadcast := make(chan struct{})
 	errors := make(chan error)
 
-	tunnelServer, err := NewTunnelServer(config, psinetDatabase, shutdownBroadcast)
+	tunnelServer, err := NewTunnelServer(supportServices, shutdownBroadcast)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("init tunnel server failed")
 		return psiphon.ContextError(err)
@@ -85,7 +79,7 @@ func RunServices(encodedConfigs [][]byte) error {
 				case <-shutdownBroadcast:
 					return
 				case <-ticker.C:
-					logLoad(tunnelServer)
+					logServerLoad(tunnelServer)
 				}
 			}
 		}()
@@ -95,7 +89,7 @@ func RunServices(encodedConfigs [][]byte) error {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
-			err := RunWebServer(config, psinetDatabase, shutdownBroadcast)
+			err := RunWebServer(supportServices, shutdownBroadcast)
 			select {
 			case errors <- err:
 			default:
@@ -119,17 +113,23 @@ func RunServices(encodedConfigs [][]byte) error {
 	systemStopSignal := make(chan os.Signal, 1)
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill)
 
-	// SIGUSR1 triggers a load log
-	logLoadSignal := make(chan os.Signal, 1)
-	signal.Notify(logLoadSignal, syscall.SIGUSR1)
+	// SIGUSR1 triggers a reload of support services
+	reloadSupportServicesSignal := make(chan os.Signal, 1)
+	signal.Notify(reloadSupportServicesSignal, syscall.SIGUSR1)
+
+	// SIGUSR2 triggers an immediate load log
+	logServerLoadSignal := make(chan os.Signal, 1)
+	signal.Notify(logServerLoadSignal, syscall.SIGUSR2)
 
 	err = nil
 
 loop:
 	for {
 		select {
-		case <-logLoadSignal:
-			logLoad(tunnelServer)
+		case <-reloadSupportServicesSignal:
+			supportServices.Reload()
+		case <-logServerLoadSignal:
+			logServerLoad(tunnelServer)
 		case <-systemStopSignal:
 			log.WithContext().Info("shutdown by system")
 			break loop
@@ -145,7 +145,7 @@ loop:
 	return err
 }
 
-func logLoad(server *TunnelServer) {
+func logServerLoad(server *TunnelServer) {
 
 	// golang runtime stats
 	var memStats runtime.MemStats
@@ -165,4 +165,82 @@ func logLoad(server *TunnelServer) {
 	}
 
 	log.WithContextFields(fields).Info("load")
+}
+
+// SupportServices carries common and shared data components
+// across different server components. SupportServices implements a
+// hot reload of traffic rules, psinet database, and geo IP database
+// components, which allows these data components to be refreshed
+// without restarting the server process.
+type SupportServices struct {
+	Config          *Config
+	TrafficRulesSet *TrafficRulesSet
+	PsinetDatabase  *psinet.Database
+	GeoIPService    *GeoIPService
+}
+
+// NewSupportServices initializes a new SupportServices.
+func NewSupportServices(config *Config) (*SupportServices, error) {
+	trafficRulesSet, err := NewTrafficRulesSet(config.TrafficRulesFilename)
+	if err != nil {
+		return nil, psiphon.ContextError(err)
+	}
+
+	psinetDatabase, err := psinet.NewDatabase(config.PsinetDatabaseFilename)
+	if err != nil {
+		return nil, psiphon.ContextError(err)
+	}
+
+	geoIPService, err := NewGeoIPService(
+		config.GeoIPDatabaseFilename, config.DiscoveryValueHMACKey)
+	if err != nil {
+		return nil, psiphon.ContextError(err)
+	}
+
+	return &SupportServices{
+		Config:          config,
+		TrafficRulesSet: trafficRulesSet,
+		PsinetDatabase:  psinetDatabase,
+		GeoIPService:    geoIPService,
+	}, nil
+}
+
+// Reload reinitializes traffic rules, psinet database, and geo IP database
+// components. If any component fails to reload, an error is logged and
+// Reload proceeds, using the previous state of the component.
+//
+// Note: reload of traffic rules currently doesn't apply to existing,
+// established clients.
+//
+func (support *SupportServices) Reload() {
+
+	if support.Config.TrafficRulesFilename != "" {
+		err := support.TrafficRulesSet.Reload(support.Config.TrafficRulesFilename)
+		if err != nil {
+			log.WithContextFields(LogFields{"error": err}).Error("reload traffic rules failed")
+			// Keep running with previous state of support.TrafficRulesSet
+		} else {
+			log.WithContext().Info("reloaded traffic rules")
+		}
+	}
+
+	if support.Config.PsinetDatabaseFilename != "" {
+		err := support.PsinetDatabase.Reload(support.Config.PsinetDatabaseFilename)
+		if err != nil {
+			log.WithContextFields(LogFields{"error": err}).Error("reload psinet database failed")
+			// Keep running with previous state of support.PsinetDatabase
+		} else {
+			log.WithContext().Info("reloaded psinet database")
+		}
+	}
+
+	if support.Config.GeoIPDatabaseFilename != "" {
+		err := support.GeoIPService.ReloadDatabase(support.Config.GeoIPDatabaseFilename)
+		if err != nil {
+			log.WithContextFields(LogFields{"error": err}).Error("reload GeoIP database failed")
+			// Keep running with previous state of support.GeoIPService
+		} else {
+			log.WithContext().Info("reloaded GeoIP database")
+		}
+	}
 }
