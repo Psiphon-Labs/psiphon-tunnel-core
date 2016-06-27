@@ -249,11 +249,20 @@ func (db *Database) GetUpgradeClientVersion(clientVersion, clientPlatform string
 
 // GetHttpsRequestRegexes returns bytes transferred stats regexes for the
 // specified sponsor. The result is nil when an unknown sponsorID is provided.
-func (db *Database) GetHttpsRequestRegexes(sponsorID string) []HttpsRequestRegex {
+func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string {
 	db.RLock()
 	defer db.RUnlock()
 
-	return db.Sponsors[sponsorID].HttpsRequestRegexes
+	regexes := make([]map[string]string, 0)
+
+	for i := range db.Sponsors[sponsorID].HttpsRequestRegexes {
+		regex := make(map[string]string)
+		regex["replace"] = db.Sponsors[sponsorID].HttpsRequestRegexes[i].Replace
+		regex["regex"] = db.Sponsors[sponsorID].HttpsRequestRegexes[i].Regex
+		regexes = append(regexes, regex)
+	}
+
+	return regexes
 }
 
 // DiscoverServers selects new encoded server entries to be "discovered" by

@@ -115,7 +115,6 @@ func handshakeAPIRequestHandler(
 
 	// Ignoring errors as params are validated
 	sponsorID, _ := getStringRequestParam(params, "sponsor_id")
-	propagationChannelID, _ := getStringRequestParam(params, "propagation_channel_id")
 	clientVersion, _ := getStringRequestParam(params, "client_version")
 	clientPlatform, _ := getStringRequestParam(params, "client_platform")
 	clientRegion := geoIPData.Country
@@ -132,7 +131,7 @@ func handshakeAPIRequestHandler(
 		sponsorID)
 
 	handshakeResponse.EncodedServerList = support.PsinetDatabase.DiscoverServers(
-		propagationChannelID, geoIPData.DiscoveryValue)
+		geoIPData.DiscoveryValue)
 
 	handshakeResponse.ClientRegion = clientRegion
 
