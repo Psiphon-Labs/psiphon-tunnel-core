@@ -370,7 +370,7 @@ func bucketizeServerList(servers []Server, bucketCount int) [][]Server {
 	return buckets
 }
 
-// Return base64 encoded server entry for comsumption by client
+// Return hex encoded server entry string for comsumption by client
 // Newer clients ignore the legacy fields and only utilize the extended (new) config
 func (db *Database) getEncodedServerEntry(server Server) string {
 
