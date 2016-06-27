@@ -566,7 +566,14 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 }
 
 func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string, err error) {
+
 	if err != nil {
+
+		if method == "none" && err.Error() == "no auth passed yet" {
+			// In this case, the callback invocation is noise from auth negotiation
+			return
+		}
+
 		logFields := LogFields{"error": err, "method": method}
 		if sshClient.sshServer.support.Config.UseFail2Ban() {
 			clientIPAddress := psiphon.IPAddressFromAddr(conn.RemoteAddr())
@@ -575,8 +582,10 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 					sshClient.sshServer.support.Config.Fail2BanFormat, clientIPAddress)
 			}
 		}
-		log.WithContextFields(LogFields{"error": err, "method": method}).Error("authentication failed")
+		log.WithContextFields(logFields).Error("authentication failed")
+
 	} else {
+
 		log.WithContextFields(LogFields{"error": err, "method": method}).Debug("authentication success")
 	}
 }
