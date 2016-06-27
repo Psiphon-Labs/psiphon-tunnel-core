@@ -495,11 +495,12 @@ func getJSONObjectRequestParam(params requestJSONObject, name string) (requestJS
 	if params[name] == nil {
 		return nil, psiphon.ContextError(fmt.Errorf("missing param: %s", name))
 	}
-	value, ok := params[name].(requestJSONObject)
+	// TODO: can't use requestJSONObject type?
+	value, ok := params[name].(map[string]interface{})
 	if !ok {
 		return nil, psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
-	return value, nil
+	return requestJSONObject(value), nil
 }
 
 func getJSONObjectArrayRequestParam(params requestJSONObject, name string) ([]requestJSONObject, error) {
