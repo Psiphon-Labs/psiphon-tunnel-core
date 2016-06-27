@@ -27,9 +27,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"math/rand"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -154,14 +154,15 @@ func (db *Database) Reload(filename string) error {
 		return nil
 	}
 
-	file, err := os.Open(filename)
+	configJSON, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return err
 	}
 
-	defer file.Close()
-
-	err = json.NewDecoder(file).Decode(db)
+	// Unmarshal first validates the provided JSON and then
+	// populates the interface. The previosly loaded data
+	// persists if the new JSON is malformed.
+	err = json.Unmarshal(configJSON, &db)
 
 	return err
 }
@@ -257,6 +258,9 @@ func (db *Database) GetHttpsRequestRegexes(sponsorID string) []HttpsRequestRegex
 
 // DiscoverServers selects new encoded server entries to be "discovered" by
 // the client, using the discoveryValue as the input into the discovery algorithm.
+// The server list (db.Servers) loaded from JSON is stored as an array instead of
+// a map to ensure servers are discovered deterministically. Each iteration over a
+// map in go is seeded with a random value which causes non-deterministic ordering.
 func (db *Database) DiscoverServers(discoveryValue int) []string {
 	db.RLock()
 	defer db.RUnlock()
