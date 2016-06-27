@@ -256,8 +256,9 @@ func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string
 	regexes := make([]map[string]string, 0)
 
 	for i := range db.Sponsors[sponsorID].HttpsRequestRegexes {
-		regex := make(map[string]string, 0)
-		regex[db.Sponsors[sponsorID].HttpsRequestRegexes[i].Replace] = db.Sponsors[sponsorID].HttpsRequestRegexes[i].Regex
+		regex := make(map[string]string)
+		regex["replace"] = db.Sponsors[sponsorID].HttpsRequestRegexes[i].Replace
+		regex["regex"] = db.Sponsors[sponsorID].HttpsRequestRegexes[i].Regex
 		regexes = append(regexes, regex)
 	}
 
