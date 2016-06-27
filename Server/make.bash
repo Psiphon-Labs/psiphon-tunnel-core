@@ -23,9 +23,22 @@ build_for_linux () {
     echo "...'go build' failed, exiting"
     exit $?
   fi
-  chmod 777 psiphond
+  chmod 555 psiphond
+
+  if [ "$1" == "generate" ]; then
+    ./psiphond --ipaddress 0.0.0.0 --protocol SSH:22 --protocol OSSH:53 --web 80 generate
+    # Temporary:
+    #  - Disable syslog integration until final strategy is chosen
+    #  - Disable Fail2Ban integration until final strategy is chosen
+    sed -i 's/"SyslogFacility": "user"/"SyslogFacility": ""/' psiphond.config
+    sed -i 's/"Fail2BanFormat": "Authentication failure for psiphon-client from %s"/"Fail2BanFormat": ""/' psiphond.config
+
+    chmod 666 psiphond.config
+    chmod 666 psiphond-traffic-rules.config
+    chmod 666 server-entry.dat
+  fi
 
 }
 
-build_for_linux
+build_for_linux generate
 echo "Done"
