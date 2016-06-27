@@ -160,7 +160,7 @@ func (db *Database) Reload(filename string) error {
 	}
 
 	// Unmarshal first validates the provided JSON and then
-	// populates the interface. The previosly loaded data
+	// populates the interface. The previously loaded data
 	// persists if the new JSON is malformed.
 	err = json.Unmarshal(configJSON, &db)
 
