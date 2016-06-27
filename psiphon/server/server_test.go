@@ -106,9 +106,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// customize server config
 
+	psinetFilename, sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(t)
+
 	var serverConfig interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
 	serverConfig.(map[string]interface{})["GeoIPDatabaseFilename"] = ""
+	serverConfig.(map[string]interface{})["PsinetDatabaseFilename"] = psinetFilename
 	serverConfig.(map[string]interface{})["TrafficRulesFilename"] = ""
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
@@ -155,13 +158,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// Note: calling LoadConfig ensures all *int config fields are initialized
 	clientConfigJSON := `
-	{
-	"ClientVersion":                     "0",
-	"PropagationChannelId":              "0",
-	"SponsorId":                         "0"
-	}`
+    {
+        "ClientVersion" : "0",
+        "SponsorId" : "0",
+        "PropagationChannelId" : "0"
+    }`
 	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
 
+	clientConfig.SponsorId = sponsorID
 	clientConfig.ConnectionWorkerPoolSize = numTunnels
 	clientConfig.TunnelPoolSize = numTunnels
 	clientConfig.DisableRemoteServerListFetcher = true
@@ -181,6 +185,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 
 	tunnelsEstablished := make(chan struct{}, 1)
+	homepageReceived := make(chan struct{}, 1)
 
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
@@ -200,6 +205,16 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 					case tunnelsEstablished <- *new(struct{}):
 					default:
 					}
+				}
+			case "Homepage":
+				homepageURL := payload["url"].(string)
+				if homepageURL != expectedHomepageURL {
+					// TODO: wrong goroutine for t.FatalNow()
+					t.Fatalf("unexpected homepage: %s", homepageURL)
+				}
+				select {
+				case homepageReceived <- *new(struct{}):
+				default:
 				}
 			}
 		}))
@@ -229,13 +244,20 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}()
 
-	// Test: tunnels must be established within 30 seconds
+	// Test: tunnels must be established, and correct homepage
+	// must be received, within 30 seconds
 
 	establishTimeout := time.NewTimer(30 * time.Second)
 	select {
 	case <-tunnelsEstablished:
 	case <-establishTimeout.C:
 		t.Fatalf("tunnel establish timeout exceeded")
+	}
+
+	select {
+	case <-homepageReceived:
+	case <-establishTimeout.C:
+		t.Fatalf("homepage received timeout exceeded")
 	}
 
 	// Test: tunneled web site fetch
@@ -265,4 +287,40 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("error reading proxied HTTP response: %s", err)
 	}
 	response.Body.Close()
+}
+
+func pavePsinetDatabaseFile(t *testing.T) (string, string, string) {
+
+	psinetFilename := "psinet.json"
+
+	sponsorID, _ := psiphon.MakeRandomStringHex(8)
+
+	fakeDomain, _ := psiphon.MakeRandomStringHex(4)
+	fakePath, _ := psiphon.MakeRandomStringHex(4)
+	expectedHomepageURL := fmt.Sprintf("https://%s.com/%s", fakeDomain, fakePath)
+
+	psinetJSONFormat := `
+    {
+        "sponsors": {
+            "%s": {
+                "home_pages": {
+                    "None": [
+                        {
+                            "region": null,
+                            "url": "%s"
+                        }
+                    ]
+                }
+            }
+        }
+    }
+	`
+	psinetJSON := fmt.Sprintf(psinetJSONFormat, sponsorID, expectedHomepageURL)
+
+	err := ioutil.WriteFile(psinetFilename, []byte(psinetJSON), 0600)
+	if err != nil {
+		t.Fatalf("error paving psinet database: %s", err)
+	}
+
+	return psinetFilename, sponsorID, expectedHomepageURL
 }
