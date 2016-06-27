@@ -10,8 +10,8 @@ RUN apk add --update \
 
 RUN mkdir -p /opt/psiphon
 
-ADD ["psiphond", "psiphond.config", "/opt/psiphon/"]
+ADD ["psiphond", "psiphond.config", "psiphond-traffic-rules.config", "/opt/psiphon/"]
 
 WORKDIR /opt/psiphon
 
-ENTRYPOINT ["./psiphond", "--config", "psiphond.config", "run"]
+ENTRYPOINT ["./psiphond", "run"]

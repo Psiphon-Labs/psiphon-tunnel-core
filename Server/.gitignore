@@ -1,4 +1,5 @@
 Server
 psiphond
 psiphond.config
-serverEntry.dat
+psiphond-traffic-rules.config
+server-entry.dat
