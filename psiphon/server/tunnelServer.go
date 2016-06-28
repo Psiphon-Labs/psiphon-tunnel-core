@@ -641,7 +641,12 @@ func (sshClient *sshClient) runClient(
 
 		for request := range requests {
 
-			// requests are processed serially; responses must be sent in request order.
+			// Discard keepalive requests.
+			if request.Type == "keepalive@openssh.com" && request.WantReply == false {
+				continue
+			}
+
+			// Requests are processed serially; responses must be sent in request order.
 			responsePayload, err := sshAPIRequestHandler(
 				sshClient.sshServer.support,
 				sshClient.geoIPData,
