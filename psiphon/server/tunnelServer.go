@@ -181,13 +181,14 @@ func (server *TunnelServer) Run() error {
 type sshClientID uint64
 
 type sshServer struct {
-	support           *SupportServices
-	shutdownBroadcast <-chan struct{}
-	sshHostKey        ssh.Signer
-	nextClientID      sshClientID
-	clientsMutex      sync.Mutex
-	stoppingClients   bool
-	clients           map[sshClientID]*sshClient
+	support              *SupportServices
+	shutdownBroadcast    <-chan struct{}
+	sshHostKey           ssh.Signer
+	nextClientID         sshClientID
+	clientsMutex         sync.Mutex
+	stoppingClients      bool
+	acceptedClientCounts map[string]int64
+	clients              map[sshClientID]*sshClient
 }
 
 func newSSHServer(
@@ -206,11 +207,12 @@ func newSSHServer(
 	}
 
 	return &sshServer{
-		support:           support,
-		shutdownBroadcast: shutdownBroadcast,
-		sshHostKey:        signer,
-		nextClientID:      1,
-		clients:           make(map[sshClientID]*sshClient),
+		support:              support,
+		shutdownBroadcast:    shutdownBroadcast,
+		sshHostKey:           signer,
+		nextClientID:         1,
+		acceptedClientCounts: make(map[string]int64),
+		clients:              make(map[sshClientID]*sshClient),
 	}, nil
 }
 
@@ -284,7 +286,28 @@ func (sshServer *sshServer) runListener(
 	}
 }
 
-func (sshServer *sshServer) registerClient(client *sshClient) (sshClientID, bool) {
+// An accepted client has completed a direct TCP or meek connection and has a net.Conn. Registration
+// is for tracking the number of connections.
+func (sshServer *sshServer) registerAcceptedClient(tunnelProtocol string) {
+
+	sshServer.clientsMutex.Lock()
+	defer sshServer.clientsMutex.Unlock()
+
+	sshServer.acceptedClientCounts[tunnelProtocol] += 1
+}
+
+func (sshServer *sshServer) unregisterAcceptedClient(tunnelProtocol string) {
+
+	sshServer.clientsMutex.Lock()
+	defer sshServer.clientsMutex.Unlock()
+
+	sshServer.acceptedClientCounts[tunnelProtocol] -= 1
+}
+
+// An established client has completed its SSH handshake and has a ssh.Conn. Registration is
+// for tracking the number of fully established clients and for maintaining a list of running
+// clients (for stopping at shutdown time).
+func (sshServer *sshServer) registerEstablishedClient(client *sshClient) (sshClientID, bool) {
 
 	sshServer.clientsMutex.Lock()
 	defer sshServer.clientsMutex.Unlock()
@@ -301,7 +324,7 @@ func (sshServer *sshServer) registerClient(client *sshClient) (sshClientID, bool
 	return clientID, true
 }
 
-func (sshServer *sshServer) unregisterClient(clientID sshClientID) {
+func (sshServer *sshServer) unregisterEstablishedClient(clientID sshClientID) {
 
 	sshServer.clientsMutex.Lock()
 	client := sshServer.clients[clientID]
@@ -319,19 +342,36 @@ func (sshServer *sshServer) getLoadStats() map[string]map[string]int64 {
 	defer sshServer.clientsMutex.Unlock()
 
 	loadStats := make(map[string]map[string]int64)
+
+	// Explicitly populate with zeros to get 0 counts in log messages derived from getLoadStats()
+
+	for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
+		loadStats[tunnelProtocol] = make(map[string]int64)
+		loadStats[tunnelProtocol]["AcceptedClients"] = 0
+		loadStats[tunnelProtocol]["EstablishedClients"] = 0
+		loadStats[tunnelProtocol]["TCPPortForwards"] = 0
+		loadStats[tunnelProtocol]["TotalTCPPortForwards"] = 0
+		loadStats[tunnelProtocol]["UDPPortForwards"] = 0
+		loadStats[tunnelProtocol]["TotalUDPPortForwards"] = 0
+	}
+
+	// Note: as currently tracked/counted, each established client is also an accepted client
+
+	for tunnelProtocol, acceptedClientCount := range sshServer.acceptedClientCounts {
+		loadStats[tunnelProtocol]["AcceptedClients"] = acceptedClientCount
+	}
+
 	for _, client := range sshServer.clients {
-		if loadStats[client.tunnelProtocol] == nil {
-			loadStats[client.tunnelProtocol] = make(map[string]int64)
-		}
 		// Note: can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
-		loadStats[client.tunnelProtocol]["CurrentClients"] += 1
+		loadStats[client.tunnelProtocol]["EstablishedClients"] += 1
 		client.Lock()
-		loadStats[client.tunnelProtocol]["CurrentTCPPortForwards"] += client.tcpTrafficState.concurrentPortForwardCount
+		loadStats[client.tunnelProtocol]["TCPPortForwards"] += client.tcpTrafficState.concurrentPortForwardCount
 		loadStats[client.tunnelProtocol]["TotalTCPPortForwards"] += client.tcpTrafficState.totalPortForwardCount
-		loadStats[client.tunnelProtocol]["CurrentUDPPortForwards"] += client.udpTrafficState.concurrentPortForwardCount
+		loadStats[client.tunnelProtocol]["UDPPortForwards"] += client.udpTrafficState.concurrentPortForwardCount
 		loadStats[client.tunnelProtocol]["TotalUDPPortForwards"] += client.udpTrafficState.totalPortForwardCount
 		client.Unlock()
 	}
+
 	return loadStats
 }
 
@@ -349,6 +389,9 @@ func (sshServer *sshServer) stopClients() {
 }
 
 func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.Conn) {
+
+	sshServer.registerAcceptedClient(tunnelProtocol)
+	defer sshServer.unregisterAcceptedClient(tunnelProtocol)
 
 	geoIPData := sshServer.support.GeoIPService.Lookup(
 		psiphon.IPAddressFromAddr(clientConn.RemoteAddr()))
@@ -462,17 +505,18 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	sshClient.activityConn = activityConn
 	sshClient.Unlock()
 
-	clientID, ok := sshServer.registerClient(sshClient)
+	clientID, ok := sshServer.registerEstablishedClient(sshClient)
 	if !ok {
 		clientConn.Close()
 		log.WithContext().Warning("register failed")
 		return
 	}
-	defer sshServer.unregisterClient(clientID)
+	defer sshServer.unregisterEstablishedClient(clientID)
 
 	sshClient.runClient(result.channels, result.requests)
 
-	// TODO: clientConn.Close()?
+	// Note: sshServer.unregisterClient calls sshClient.Close(),
+	// which also closes underlying transport Conn.
 }
 
 type sshClient struct {
