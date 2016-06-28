@@ -60,7 +60,8 @@ func sshAPIRequestHandler(
 	var params requestJSONObject
 	err := json.Unmarshal(requestPayload, &params)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, psiphon.ContextError(
+			fmt.Errorf("invalid payload for request name: %s: %s", name, err))
 	}
 
 	switch name {
