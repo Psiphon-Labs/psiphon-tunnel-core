@@ -685,17 +685,21 @@ func (sshClient *sshClient) runClient(
 
 		for request := range requests {
 
-			// Discard keepalive requests.
-			if request.Type == "keepalive@openssh.com" && request.WantReply == false {
-				continue
-			}
+			// Requests are processed serially; API responses must be sent in request order.
 
-			// Requests are processed serially; responses must be sent in request order.
-			responsePayload, err := sshAPIRequestHandler(
-				sshClient.sshServer.support,
-				sshClient.geoIPData,
-				request.Type,
-				request.Payload)
+			var responsePayload []byte
+			var err error
+
+			if request.Type == "keepalive@openssh.com" {
+				// Keepalive requests have an empty response.
+			} else {
+				// All other requests are assumed to be API requests.
+				responsePayload, err = sshAPIRequestHandler(
+					sshClient.sshServer.support,
+					sshClient.geoIPData,
+					request.Type,
+					request.Payload)
+			}
 
 			if err == nil {
 				err = request.Reply(true, responsePayload)
