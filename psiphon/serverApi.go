@@ -345,7 +345,8 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 
 	if serverContext.psiphonHttpsClient == nil {
 
-		params["statusData"] = json.RawMessage(statusPayload)
+		rawMessage := json.RawMessage(statusPayload)
+		params["statusData"] = &rawMessage
 
 		var request []byte
 		request, err = makeSSHAPIRequestPayload(params)
@@ -655,7 +656,8 @@ func (serverContext *ServerContext) DoClientVerificationRequest(
 
 	if serverContext.psiphonHttpsClient == nil {
 
-		params["verificationData"] = json.RawMessage(verificationPayload)
+		rawMessage := json.RawMessage(verificationPayload)
+		params["verificationData"] = &rawMessage
 
 		request, err := makeSSHAPIRequestPayload(params)
 		if err != nil {

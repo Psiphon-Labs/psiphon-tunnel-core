@@ -28,6 +28,7 @@ import (
 	"net/url"
 	"os"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -49,6 +50,7 @@ func TestSSH(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "SSH",
 			enableSSHAPIRequests: true,
+			doHotReload:          false,
 		})
 }
 
@@ -57,6 +59,7 @@ func TestOSSH(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
+			doHotReload:          false,
 		})
 }
 
@@ -65,6 +68,7 @@ func TestUnfrontedMeek(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
 			enableSSHAPIRequests: true,
+			doHotReload:          false,
 		})
 }
 
@@ -73,6 +77,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
 			enableSSHAPIRequests: true,
+			doHotReload:          false,
 		})
 }
 
@@ -81,12 +86,23 @@ func TestWebTransportAPIRequests(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: false,
+			doHotReload:          false,
+		})
+}
+
+func TestHotReload(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          true,
 		})
 }
 
 type runServerConfig struct {
 	tunnelProtocol       string
 	enableSSHAPIRequests bool
+	doHotReload          bool
 }
 
 func runServer(t *testing.T, runConfig *runServerConfig) {
@@ -106,9 +122,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// customize server config
 
+	// Pave psinet with random values to test handshake homepages.
+	psinetFilename := "psinet.json"
+	sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(t, psinetFilename)
+
 	var serverConfig interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
 	serverConfig.(map[string]interface{})["GeoIPDatabaseFilename"] = ""
+	serverConfig.(map[string]interface{})["PsinetDatabaseFilename"] = psinetFilename
 	serverConfig.(map[string]interface{})["TrafficRulesFilename"] = ""
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
@@ -146,6 +167,26 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}()
 
+	// Test: hot reload (of psinet)
+
+	if runConfig.doHotReload {
+		// TODO: monitor logs for more robust wait-until-loaded
+		time.Sleep(1 * time.Second)
+
+		// Pave a new psinet with different random values.
+		sponsorID, expectedHomepageURL = pavePsinetDatabaseFile(t, psinetFilename)
+
+		p, _ := os.FindProcess(os.Getpid())
+		p.Signal(syscall.SIGUSR1)
+
+		// TODO: monitor logs for more robust wait-until-reloaded
+		time.Sleep(1 * time.Second)
+
+		// After reloading psinet, the new sponsorID/expectedHomepageURL
+		// should be active, as tested in the client "Homepage" notice
+		// handler below.
+	}
+
 	// connect to server with client
 
 	// TODO: currently, TargetServerEntry only works with one tunnel
@@ -155,13 +196,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// Note: calling LoadConfig ensures all *int config fields are initialized
 	clientConfigJSON := `
-	{
-	"ClientVersion":                     "0",
-	"PropagationChannelId":              "0",
-	"SponsorId":                         "0"
-	}`
+    {
+        "ClientVersion" : "0",
+        "SponsorId" : "0",
+        "PropagationChannelId" : "0"
+    }`
 	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
 
+	clientConfig.SponsorId = sponsorID
 	clientConfig.ConnectionWorkerPoolSize = numTunnels
 	clientConfig.TunnelPoolSize = numTunnels
 	clientConfig.DisableRemoteServerListFetcher = true
@@ -181,6 +223,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 
 	tunnelsEstablished := make(chan struct{}, 1)
+	homepageReceived := make(chan struct{}, 1)
 
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
@@ -200,6 +243,16 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 					case tunnelsEstablished <- *new(struct{}):
 					default:
 					}
+				}
+			case "Homepage":
+				homepageURL := payload["url"].(string)
+				if homepageURL != expectedHomepageURL {
+					// TODO: wrong goroutine for t.FatalNow()
+					t.Fatalf("unexpected homepage: %s", homepageURL)
+				}
+				select {
+				case homepageReceived <- *new(struct{}):
+				default:
 				}
 			}
 		}))
@@ -229,13 +282,20 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}()
 
-	// Test: tunnels must be established within 30 seconds
+	// Test: tunnels must be established, and correct homepage
+	// must be received, within 30 seconds
 
 	establishTimeout := time.NewTimer(30 * time.Second)
 	select {
 	case <-tunnelsEstablished:
 	case <-establishTimeout.C:
 		t.Fatalf("tunnel establish timeout exceeded")
+	}
+
+	select {
+	case <-homepageReceived:
+	case <-establishTimeout.C:
+		t.Fatalf("homepage received timeout exceeded")
 	}
 
 	// Test: tunneled web site fetch
@@ -265,4 +325,38 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("error reading proxied HTTP response: %s", err)
 	}
 	response.Body.Close()
+}
+
+func pavePsinetDatabaseFile(t *testing.T, psinetFilename string) (string, string) {
+
+	sponsorID, _ := psiphon.MakeRandomStringHex(8)
+
+	fakeDomain, _ := psiphon.MakeRandomStringHex(4)
+	fakePath, _ := psiphon.MakeRandomStringHex(4)
+	expectedHomepageURL := fmt.Sprintf("https://%s.com/%s", fakeDomain, fakePath)
+
+	psinetJSONFormat := `
+    {
+        "sponsors": {
+            "%s": {
+                "home_pages": {
+                    "None": [
+                        {
+                            "region": null,
+                            "url": "%s"
+                        }
+                    ]
+                }
+            }
+        }
+    }
+	`
+	psinetJSON := fmt.Sprintf(psinetJSONFormat, sponsorID, expectedHomepageURL)
+
+	err := ioutil.WriteFile(psinetFilename, []byte(psinetJSON), 0600)
+	if err != nil {
+		t.Fatalf("error paving psinet database: %s", err)
+	}
+
+	return sponsorID, expectedHomepageURL
 }
