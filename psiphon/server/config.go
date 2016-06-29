@@ -66,16 +66,9 @@ type Config struct {
 	// panic, fatal, error, warn, info, debug
 	LogLevel string
 
-	// SyslogFacility specifies the syslog facility to log to.
-	// When set, the local syslog service is used for message
-	// logging.
-	// Valid values include: "user", "local0", "local1", etc.
-	SyslogFacility string
-
-	// SyslogTag specifies an optional tag for syslog log
-	// messages. The default tag is "psiphon-server". The
-	// fail2ban logs, if enabled, also use this tag.
-	SyslogTag string
+	// LogFilename specifies the path of the file to log
+	// to. When blank, logs are written to stderr.
+	LogFilename string
 
 	// Fail2BanFormat is a string format specifier for the
 	// log message format to use for fail2ban integration for
@@ -87,6 +80,11 @@ type Config struct {
 	// with default SSH fail2ban configuration, is
 	// "Authentication failure for psiphon-client from %s".
 	Fail2BanFormat string
+
+	// LogFilename specifies the path of the file to log
+	// fail2ban messages to. When blank, logs are written to
+	// stderr.
+	Fail2BanLogFilename string
 
 	// DiscoveryValueHMACKey is the network-wide secret value
 	// used to determine a unique discovery strategy.
@@ -224,7 +222,7 @@ func (config *Config) RunLoadMonitor() bool {
 }
 
 // UseFail2Ban indicates whether to log client IP addresses, in authentication
-// failure cases, to the local syslog service AUTH facility for use by fail2ban.
+// failure cases, for use by fail2ban.
 func (config *Config) UseFail2Ban() bool {
 	return config.Fail2BanFormat != ""
 }
@@ -461,8 +459,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	config := &Config{
 		LogLevel:                       "info",
-		SyslogFacility:                 "user",
-		SyslogTag:                      "psiphon-server",
 		Fail2BanFormat:                 "Authentication failure for psiphon-client from %s",
 		GeoIPDatabaseFilename:          "",
 		HostID:                         "example-host-id",
