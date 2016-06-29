@@ -38,9 +38,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
 
-var CLIENT_PLATFORM_ANDROID string = "Android"
-var CLIENT_PLATFORM_WINDOWS string = "Windows"
-
 // Database serves Psiphon API data requests. It's safe for
 // concurrent usage. The Reload function supports hot reloading
 // of Psiphon network data while the server is running.
@@ -156,7 +153,7 @@ func (db *Database) Reload(filename string) error {
 
 	configJSON, err := ioutil.ReadFile(filename)
 	if err != nil {
-		return err
+		return psiphon.ContextError(err)
 	}
 
 	// Unmarshal first validates the provided JSON and then
@@ -164,12 +161,12 @@ func (db *Database) Reload(filename string) error {
 	// persists if the new JSON is malformed.
 	err = json.Unmarshal(configJSON, &db)
 
-	return err
+	return psiphon.ContextError(err)
 }
 
 // GetHomepages returns a list of  home pages for the specified sponsor,
 // region, and platform.
-func (db *Database) GetHomepages(sponsorID, clientRegion, clientPlatform string) []string {
+func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatform bool) []string {
 	db.RLock()
 	defer db.RUnlock()
 
@@ -183,7 +180,7 @@ func (db *Database) GetHomepages(sponsorID, clientRegion, clientPlatform string)
 
 	homePages := sponsor.HomePages
 
-	if getClientPlatform(clientPlatform) == CLIENT_PLATFORM_ANDROID {
+	if isMobilePlatform {
 		if sponsor.MobileHomePages != nil {
 			homePages = sponsor.MobileHomePages
 		}
@@ -213,17 +210,19 @@ func (db *Database) GetHomepages(sponsorID, clientRegion, clientPlatform string)
 
 // GetUpgradeClientVersion returns a new client version when an upgrade is
 // indicated for the specified client current version. The result is "" when
-// no upgrade is available.
+// no upgrade is available. Caller should normalize clientPlatform.
 func (db *Database) GetUpgradeClientVersion(clientVersion, clientPlatform string) string {
 	db.RLock()
 	defer db.RUnlock()
 
 	// Check lastest version number against client version number
-	platform := getClientPlatform(clientPlatform)
 
-	// If no versions exist for this platform
-	clientVersions, ok := db.Versions[platform]
+	clientVersions, ok := db.Versions[clientPlatform]
 	if !ok {
+		return ""
+	}
+
+	if len(clientVersions) == 0 {
 		return ""
 	}
 
@@ -524,16 +523,4 @@ func parseSshKeyString(sshKeyString string) (keyType string, key string) {
 	}
 
 	return sshKeyArr[0], sshKeyArr[1]
-}
-
-// Parse client platform string for platform identifier
-// and return corresponding platform.
-func getClientPlatform(clientPlatformString string) string {
-	platform := CLIENT_PLATFORM_WINDOWS
-
-	if strings.Contains(strings.ToLower(clientPlatformString), strings.ToLower(CLIENT_PLATFORM_ANDROID)) {
-		platform = CLIENT_PLATFORM_ANDROID
-	}
-
-	return platform
 }
