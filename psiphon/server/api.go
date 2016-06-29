@@ -33,7 +33,12 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
 
-const MAX_API_PARAMS_SIZE = 256 * 1024 // 256KB
+const (
+	MAX_API_PARAMS_SIZE = 256 * 1024 // 256KB
+
+	CLIENT_PLATFORM_ANDROID = "Android"
+	CLIENT_PLATFORM_WINDOWS = "Windows"
+)
 
 type requestJSONObject map[string]interface{}
 
@@ -123,10 +128,10 @@ func handshakeAPIRequestHandler(
 	// Note: no guarantee that PsinetDatabase won't reload between calls
 
 	handshakeResponse.Homepages = support.PsinetDatabase.GetHomepages(
-		sponsorID, clientRegion, clientPlatform)
+		sponsorID, clientRegion, isMobileClientPlatform(clientPlatform))
 
 	handshakeResponse.UpgradeClientVersion = support.PsinetDatabase.GetUpgradeClientVersion(
-		clientVersion, clientPlatform)
+		clientVersion, normalizeClientPlatform(clientPlatform))
 
 	handshakeResponse.HttpsRequestRegexes = support.PsinetDatabase.GetHttpsRequestRegexes(
 		sponsorID)
@@ -330,7 +335,23 @@ func clientVerificationAPIRequestHandler(
 		return nil, psiphon.ContextError(errors.New("invalid params"))
 	}
 
-	// TODO: implement
+	// Ignoring error as params are validated
+	clientPlatform, _ := getStringRequestParam(params, "client_platform")
+
+	verificationData, err := getJSONObjectRequestParam(params, "verificationData")
+	if err != nil {
+		return nil, psiphon.ContextError(err)
+	}
+
+	var verified bool
+	switch normalizeClientPlatform(clientPlatform) {
+	case CLIENT_PLATFORM_ANDROID:
+		verified = verifySafetyNetPayload(verificationData)
+	}
+
+	if verified {
+		// TODO: change throttling treatment
+	}
 
 	return make([]byte, 0), nil
 }
@@ -546,6 +567,22 @@ func getMapStringInt64RequestParam(params requestJSONObject, name string) (map[s
 	}
 
 	return result, nil
+}
+
+// Normalize reported client platform. Android clients, for example, report
+// OS version, rooted status, and Google Play build status in the clientPlatform
+// string along with "Android".
+func normalizeClientPlatform(clientPlatform string) string {
+
+	if strings.Contains(strings.ToLower(clientPlatform), strings.ToLower(CLIENT_PLATFORM_ANDROID)) {
+		return CLIENT_PLATFORM_ANDROID
+	}
+
+	return CLIENT_PLATFORM_WINDOWS
+}
+
+func isMobileClientPlatform(clientPlatform string) bool {
+	return normalizeClientPlatform(clientPlatform) == CLIENT_PLATFORM_ANDROID
 }
 
 // Input validators follow the legacy validations rules in psi_web.
