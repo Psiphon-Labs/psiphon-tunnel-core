@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"time"
@@ -197,6 +198,11 @@ type Config struct {
 	// information, as required. See example URLs here:
 	// https://github.com/Psiphon-Labs/psiphon-tunnel-core/tree/master/psiphon/upstreamproxy
 	UpstreamProxyUrl string
+
+	// UpstreamProxyCustomHeaders is a set of additional arbitrary HTTP headers that are
+	// added to all requests made through the upstream proxy specified by UpstreamProxyUrl
+	// NOTE: Only HTTP(s) proxies use this if specified
+	UpstreamProxyCustomHeaders http.Header
 
 	// NetworkConnectivityChecker is an interface that enables the core tunnel to call
 	// into the host application to check for network connectivity. This parameter is

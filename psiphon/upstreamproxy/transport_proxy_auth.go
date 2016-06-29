@@ -43,14 +43,15 @@ type ProxyAuthTransport struct {
 	Password      string
 	Authenticator HttpAuthenticator
 	mu            sync.Mutex
+	CustomHeaders http.Header
 }
 
-func NewProxyAuthTransport(rawTransport *http.Transport) (*ProxyAuthTransport, error) {
+func NewProxyAuthTransport(rawTransport *http.Transport, customHeaders http.Header) (*ProxyAuthTransport, error) {
 	dialFn := rawTransport.Dial
 	if dialFn == nil {
 		dialFn = net.Dial
 	}
-	tr := &ProxyAuthTransport{Dial: dialFn}
+	tr := &ProxyAuthTransport{Dial: dialFn, CustomHeaders: customHeaders}
 	proxyUrlFn := rawTransport.Proxy
 	if proxyUrlFn != nil {
 		wrappedDialFn := tr.wrapTransportDial()
@@ -96,8 +97,9 @@ func (tr *ProxyAuthTransport) RoundTrip(req *http.Request) (resp *http.Response,
 
 	var ha HttpAuthenticator = nil
 
-	//Clone request early because RoundTrip will destroy request Body
-	newReq := cloneRequest(req)
+	// Clone request early because RoundTrip will destroy request Body
+	// Also add custom headers to the cloned request
+	newReq := cloneRequest(req, tr.CustomHeaders)
 
 	resp, err = tr.Transport.RoundTrip(newReq)
 
@@ -118,7 +120,7 @@ func (tr *ProxyAuthTransport) RoundTrip(req *http.Request) (resp *http.Response,
 		tr.Authenticator = ha
 	authenticationLoop:
 		for {
-			newReq = cloneRequest(req)
+			newReq = cloneRequest(req, tr.CustomHeaders)
 			err = tr.Authenticator.Authenticate(newReq, resp)
 			if err != nil {
 				return nil, err
@@ -156,13 +158,18 @@ func (tr *ProxyAuthTransport) wrapTransportDial() DialFunc {
 	}
 }
 
-func cloneRequest(r *http.Request) *http.Request {
+func cloneRequest(r *http.Request, ch http.Header) *http.Request {
 	// shallow copy of the struct
 	r2 := new(http.Request)
 	*r2 = *r
 	// deep copy of the Header
 	r2.Header = make(http.Header)
 	for k, s := range r.Header {
+		r2.Header[k] = s
+	}
+
+	//Add custom headers to the cloned request
+	for k, s := range ch {
 		r2.Header[k] = s
 	}
 
