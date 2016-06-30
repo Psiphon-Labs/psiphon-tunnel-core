@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 
 set -e
 
@@ -26,12 +26,7 @@ build_for_linux () {
   chmod 555 psiphond
 
   if [ "$1" == "generate" ]; then
-    ./psiphond --ipaddress 0.0.0.0 --protocol SSH:22 --protocol OSSH:53 --web 80 generate
-    # Temporary:
-    #  - Disable syslog integration until final strategy is chosen
-    #  - Disable Fail2Ban integration until final strategy is chosen
-    sed -i 's/"SyslogFacility": "user"/"SyslogFacility": ""/' psiphond.config
-    sed -i 's/"Fail2BanFormat": "Authentication failure for psiphon-client from %s"/"Fail2BanFormat": ""/' psiphond.config
+    ./psiphond --ipaddress 0.0.0.0 --web 3000 --protocol SSH:3001 --protocol OSSH:3002 --logFilename /var/log/psiphon/psiphond.log --fail2BanLogFilename /var/log/psiphon/fail2ban.log generate
 
     chmod 666 psiphond.config
     chmod 666 psiphond-traffic-rules.config
