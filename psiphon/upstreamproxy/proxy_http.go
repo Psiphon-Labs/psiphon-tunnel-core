@@ -48,20 +48,22 @@ package upstreamproxy
 import (
 	"bufio"
 	"fmt"
-	"golang.org/x/net/proxy"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"time"
+
+	"golang.org/x/net/proxy"
 )
 
 // httpProxy is a HTTP connect proxy.
 type httpProxy struct {
-	hostPort string
-	username string
-	password string
-	forward  proxy.Dialer
+	hostPort      string
+	username      string
+	password      string
+	forward       proxy.Dialer
+	customHeaders http.Header
 }
 
 func newHTTP(uri *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
@@ -73,15 +75,20 @@ func newHTTP(uri *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
 		hp.password, _ = uri.User.Password()
 	}
 
+	if upstreamProxyConfig, ok := forward.(*UpstreamProxyConfig); ok {
+		hp.customHeaders = upstreamProxyConfig.CustomHeaders
+	}
+
 	return hp, nil
 }
 
 func (hp *httpProxy) Dial(network, addr string) (net.Conn, error) {
 	// Dial and create the http client connection.
 	pc := &proxyConn{
-		authState: HTTP_AUTH_STATE_UNCHALLENGED,
-		dialFn:    hp.forward.Dial,
-		proxyAddr: hp.hostPort,
+		authState:     HTTP_AUTH_STATE_UNCHALLENGED,
+		dialFn:        hp.forward.Dial,
+		proxyAddr:     hp.hostPort,
+		customHeaders: hp.customHeaders,
 	}
 	err := pc.makeNewClientConn()
 	if err != nil {
@@ -116,6 +123,7 @@ handshakeLoop:
 type proxyConn struct {
 	dialFn         DialFunc
 	proxyAddr      string
+	customHeaders  http.Header
 	httpClientConn *httputil.ClientConn
 	hijackedConn   net.Conn
 	staleReader    *bufio.Reader
@@ -143,6 +151,10 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	}
 	req.Close = false
 	req.Header.Set("User-Agent", "")
+
+	for k, s := range pc.customHeaders {
+		req.Header[k] = s
+	}
 
 	if pc.authState == HTTP_AUTH_STATE_CHALLENGED {
 		err := pc.authenticator.Authenticate(req, pc.authResponse)

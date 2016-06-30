@@ -88,6 +88,11 @@ type DialConfig struct {
 	// supported, those protocols will not connect.
 	UpstreamProxyUrl string
 
+	// UpstreamProxyCustomHeader is a set of additional arbitrary HTTP headers that are
+	// added to all HTTP requests made through the upstream proxy specified by UpstreamProxyUrl
+	// in case of HTTP proxy
+	UpstreamProxyCustomHeaders http.Header
+
 	ConnectTimeout time.Duration
 
 	// PendingConns is used to track and interrupt dials in progress.
