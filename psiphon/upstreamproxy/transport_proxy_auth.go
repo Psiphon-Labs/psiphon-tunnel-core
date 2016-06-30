@@ -158,6 +158,8 @@ func (tr *ProxyAuthTransport) wrapTransportDial() DialFunc {
 	}
 }
 
+// Based on https://github.com/golang/oauth2/blob/master/transport.go
+// Copyright 2014 The Go Authors. All rights reserved.
 func cloneRequest(r *http.Request, ch http.Header) *http.Request {
 	// shallow copy of the struct
 	r2 := new(http.Request)

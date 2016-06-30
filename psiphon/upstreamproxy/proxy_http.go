@@ -75,8 +75,8 @@ func newHTTP(uri *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
 		hp.password, _ = uri.User.Password()
 	}
 
-	if upstreamProyConfig, ok := forward.(*UpstreamProxyConfig); ok {
-		hp.customHeaders = upstreamProyConfig.CustomHeaders
+	if upstreamProxyConfig, ok := forward.(*UpstreamProxyConfig); ok {
+		hp.customHeaders = upstreamProxyConfig.CustomHeaders
 	}
 
 	return hp, nil
