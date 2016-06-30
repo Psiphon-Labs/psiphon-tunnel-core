@@ -37,6 +37,8 @@ func main() {
 	var generateServerIPaddress, generateServerNetworkInterface string
 	var generateWebServerPort int
 	var generateProtocolPorts stringListFlag
+	var generateLogFilename string
+	var generateFail2BanLogFilename string
 	var configFilename string
 
 	flag.StringVar(
@@ -73,6 +75,18 @@ func main() {
 		&generateProtocolPorts,
 		"protocol",
 		"generate with `protocol:port`; flag may be repeated to enable multiple protocols")
+
+	flag.StringVar(
+		&generateLogFilename,
+		"logFilename",
+		"",
+		"set application log file name and path; blank for stderr")
+
+	flag.StringVar(
+		&generateFail2BanLogFilename,
+		"fail2BanLogFilename",
+		"",
+		"set Fail2Ban log file name and path; blank for stderr")
 
 	flag.StringVar(
 		&configFilename,
@@ -128,6 +142,8 @@ func main() {
 					WebServerPort:        generateWebServerPort,
 					TunnelProtocolPorts:  tunnelProtocolPorts,
 					TrafficRulesFilename: generateTrafficRulesFilename,
+					LogFilename:          generateLogFilename,
+					Fail2BanLogFilename:  generateFail2BanLogFilename,
 				})
 		if err != nil {
 			fmt.Printf("generate failed: %s\n", err)

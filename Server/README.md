@@ -32,7 +32,7 @@ Build Steps:
  - Get dependencies: `GOOS=linux GOARCH=amd64 go get -d -v ./...`
  - Build: `GOOS=linux GOARCH=amd64 CC=/usr/local/musl/bin/musl-gcc go build --ldflags '-linkmode external -extldflags "-static"' -o psiphond main.go` (will generate a statically linked binary named `psiphond`)
 
-**NOTE**: If you have ever used a _GNU libc_ based build of this project, you will need to append the `-a` flag to your `go build` command in order to force rebuilding of previously built libraries. Additionally, compiling with the _GNU libc_ again (after having compiled with _MUSL libc_) will also require the `-a` flag. 
+**NOTE**: If you have ever used a _GNU libc_ based build of this project, you will need to append the `-a` flag to your `go build` command in order to force rebuilding of previously built libraries. Additionally, compiling with the _GNU libc_ again (after having compiled with _MUSL libc_) will also require the `-a` flag.
 
 Updated build command: `GOOS=linux GOARCH=amd64 CC=/usr/local/musl/bin/musl-gcc go build -a --ldflags '-linkmode external -extldflags "-static"' -o psiphond main.go`
 
@@ -41,14 +41,13 @@ Updated build command: `GOOS=linux GOARCH=amd64 CC=/usr/local/musl/bin/musl-gcc 
 You may also use the `Dockerfile-binary-builder` docker file to create an image that will be able to build the binary for you without installing MUSL and cross-compiling locally.
 
 1. Build the image: `docker build -f Dockerfile-binary-builder -t psiphond-builder .`
-2. Run the build via the image: `cd .. && docker run --rm -v $(pwd):/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core psiphond-builder /bin/bash -c 'cd /go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/Server && ./make.bash'; cd -`
+2. Run the build via the image: `docker run --rm -v $PWD/../:/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core psiphond-builder`
 3. Change the owner (if desired) of the `psiphond` binary. The permissions are `777`/`a+rwx`, but the owner and group will both be `root`. Functionally, this should not matter at all.
 
 ##### Generate a configuration file
  1. Use the command `./psiphond --help` to get a list of flags to pass to the `generate` sub-command
- 2. Run: `./psiphond --newConfig psiphond.config --ipaddress 0.0.0.0 --protocol SSH:22 --protocol OSSH:53 --web 80 generate` (IP address `0.0.0.0` is used due to how docker handles services bound to the loopback device)
- 3. Remove the value for the `SyslogFacility` key (eg: `sed -i 's/"SyslogFacility": "user"/"SyslogFacility": ""/' psiphond.config`)
- 4. Remove the value for the `Fail2BanFormat` key (eg: `sed -i 's/"Fail2BanFormat": "Authentication failure for psiphon-client from %s"/"Fail2BanFormat": ""/' psiphond.config`)
+ 2. Run: `./psiphond --ipaddress 0.0.0.0 --web 3000 --protocol SSH:3001 --protocol OSSH:3002 --logFilename /var/log/psiphon/psiphond.log --fail2BanLogFilename /var/log/psiphon/fail2ban.log generate` (IP address `0.0.0.0` is used due to how docker handles services bound to the loopback device)
+
 
 ##### Create the Docker image:
  1. Run the command: `docker build --no-cache=true -t psiphond .` (this may take some time to complete)
@@ -62,12 +61,12 @@ You may also use the `Dockerfile-binary-builder` docker file to create an image 
 - Copy the contents of the server entry file to the client (e.g., the `TargetServerEntry` config field in the tunnel-core client) to connect to the server.
 
 #### Run the docker image
-Run the docker container built above as follows: `docker run -d --name psiphond-1 -p 10053:53 -p 10022:22 -p 10080:80 psiphond`
+Run the docker container built above as follows: `docker run -d --name psiphond-1 -p 13000:3000 -p 13001:3001 -p 13002:3002 psiphond`
 
 This will start a daemonized container, running the tunnel core server named `psiphond-1`, with `host:container` port mappings:
- - 10053:53
- - 10022:22
- - 10080:80
+ - 13000:3000
+ - 13001:3001
+ - 13002:3002
 
  The container can be stopped by issuing the command `docker stop psiphond-1`. It will send the server a `SIGTERM`, followed by a `SIGKILL` if it is still running after a grace period
 

@@ -319,6 +319,8 @@ type GenerateConfigParams struct {
 	EnableSSHAPIRequests bool
 	TunnelProtocolPorts  map[string]int
 	TrafficRulesFilename string
+	LogFilename          string
+	Fail2BanLogFilename  string
 }
 
 // GenerateConfig creates a new Psiphon server config. It returns JSON
@@ -483,6 +485,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		MeekProxyForwardedForHeaders:   []string{"X-Forwarded-For"},
 		LoadMonitorPeriodSeconds:       300,
 		TrafficRulesFilename:           params.TrafficRulesFilename,
+		LogFilename:                    params.LogFilename,
+		Fail2BanLogFilename:            params.Fail2BanLogFilename,
 	}
 
 	encodedConfig, err := json.MarshalIndent(config, "\n", "    ")
