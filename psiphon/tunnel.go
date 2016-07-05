@@ -27,6 +27,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,8 +80,24 @@ type Tunnel struct {
 	signalPortForwardFailure     chan struct{}
 	totalPortForwardFailures     int
 	startTime                    time.Time
-	meekStats                    *MeekStats
+	dialStats                    *TunnelDialStats
 	newClientVerificationPayload chan string
+}
+
+// TunnelDialStats records additional dial config that is sent to the server for stats
+// recording. This data is used to analyze which configuration settings are successful
+// in various circumvention contexts, and includes meek dial params and upstream proxy
+// params.
+// For upstream proxy, only proxy type and custom header names are recorded; proxy
+// address and custom header values are considered PII.
+type TunnelDialStats struct {
+	UpstreamProxyType              string
+	UpstreamProxyCustomHeaderNames []string
+	MeekDialAddress                string
+	MeekResolvedIPAddress          string
+	MeekSNIServerName              string
+	MeekHostHeader                 string
+	MeekTransformedHostName        bool
 }
 
 // EstablishTunnel first makes a network transport connection to the
@@ -106,7 +124,7 @@ func EstablishTunnel(
 	}
 
 	// Build transport layers and establish SSH connection
-	conn, sshClient, meekStats, err := dialSsh(
+	conn, sshClient, dialStats, err := dialSsh(
 		config, pendingConns, serverEntry, selectedProtocol, sessionId)
 	if err != nil {
 		return nil, ContextError(err)
@@ -135,7 +153,7 @@ func EstablishTunnel(
 		// A buffer allows at least one signal to be sent even when the receiver is
 		// not listening. Senders should not block.
 		signalPortForwardFailure: make(chan struct{}, 1),
-		meekStats:                meekStats,
+		dialStats:                dialStats,
 		// Buffer allows SetClientVerificationPayload to submit one new payload
 		// without blocking or dropping it.
 		newClientVerificationPayload: make(chan string, 1),
@@ -504,13 +522,13 @@ func initMeekConfig(
 }
 
 // dialSsh is a helper that builds the transport layers and establishes the SSH connection.
-// When a meek protocols is selected, additional MeekStats are recorded and returned.
+// When additional dial configuration is used, DialStats are recorded and returned.
 func dialSsh(
 	config *Config,
 	pendingConns *Conns,
 	serverEntry *ServerEntry,
 	selectedProtocol,
-	sessionId string) (net.Conn, *ssh.Client, *MeekStats, error) {
+	sessionId string) (net.Conn, *ssh.Client, *TunnelDialStats, error) {
 
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
@@ -667,22 +685,39 @@ func dialSsh(
 		return nil, nil, nil, ContextError(result.err)
 	}
 
-	var meekStats *MeekStats
-	if meekConfig != nil {
-		meekStats = &MeekStats{
-			DialAddress:         meekConfig.DialAddress,
-			ResolvedIPAddress:   resolvedIPAddress.Load().(string),
-			SNIServerName:       meekConfig.SNIServerName,
-			HostHeader:          meekConfig.HostHeader,
-			TransformedHostName: meekConfig.TransformedHostName,
+	var dialStats *TunnelDialStats
+
+	if dialConfig.UpstreamProxyUrl != "" || meekConfig != nil {
+		dialStats = &TunnelDialStats{}
+
+		if dialConfig.UpstreamProxyUrl != "" {
+
+			// Note: UpstreamProxyUrl should have parsed correctly in the dial
+			proxyURL, err := url.Parse(dialConfig.UpstreamProxyUrl)
+			if err == nil {
+				dialStats.UpstreamProxyType = proxyURL.Scheme
+			}
+
+			dialStats.UpstreamProxyCustomHeaderNames = make([]string, len(dialConfig.UpstreamProxyCustomHeaders))
+			for name, _ := range dialConfig.UpstreamProxyCustomHeaders {
+				dialStats.UpstreamProxyCustomHeaderNames = append(dialStats.UpstreamProxyCustomHeaderNames, name)
+			}
 		}
 
-		NoticeConnectedMeekStats(serverEntry.IpAddress, meekStats)
+		if meekConfig != nil {
+			dialStats.MeekDialAddress = meekConfig.DialAddress
+			dialStats.MeekResolvedIPAddress = resolvedIPAddress.Load().(string)
+			dialStats.MeekSNIServerName = meekConfig.SNIServerName
+			dialStats.MeekHostHeader = meekConfig.HostHeader
+			dialStats.MeekTransformedHostName = meekConfig.TransformedHostName
+		}
+
+		NoticeConnectedTunnelDialStats(serverEntry.IpAddress, dialStats)
 	}
 
 	cleanupConn = nil
 
-	return conn, result.sshClient, meekStats, nil
+	return conn, result.sshClient, dialStats, nil
 }
 
 // operateTunnel monitors the health of the tunnel and performs

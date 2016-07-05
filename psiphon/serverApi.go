@@ -60,15 +60,6 @@ type ServerContext struct {
 	serverHandshakeTimestamp string
 }
 
-// MeekStats holds extra stats that are only gathered for meek tunnels.
-type MeekStats struct {
-	DialAddress         string
-	ResolvedIPAddress   string
-	SNIServerName       string
-	HostHeader          string
-	TransformedHostName bool
-}
-
 // nextTunnelNumber is a monotonically increasing number assigned to each
 // successive tunnel connection. The sessionId and tunnelNumber together
 // form a globally unique identifier for tunnels, which is used for
@@ -751,21 +742,27 @@ func (serverContext *ServerContext) getBaseParams() requestJSONObject {
 	if tunnel.config.DeviceRegion != "" {
 		params["device_region"] = tunnel.config.DeviceRegion
 	}
-	if tunnel.meekStats != nil {
-		if tunnel.meekStats.DialAddress != "" {
-			params["meek_dial_address"] = tunnel.meekStats.DialAddress
+	if tunnel.dialStats != nil {
+		if tunnel.dialStats.UpstreamProxyType != "" {
+			params["upstream_proxy_type"] = tunnel.dialStats.UpstreamProxyType
 		}
-		if tunnel.meekStats.ResolvedIPAddress != "" {
-			params["meek_resolved_ip_address"] = tunnel.meekStats.ResolvedIPAddress
+		if tunnel.dialStats.UpstreamProxyCustomHeaderNames != nil {
+			params["upstream_proxy_custom_header_names"] = tunnel.dialStats.UpstreamProxyCustomHeaderNames
 		}
-		if tunnel.meekStats.SNIServerName != "" {
-			params["meek_sni_server_name"] = tunnel.meekStats.SNIServerName
+		if tunnel.dialStats.MeekDialAddress != "" {
+			params["meek_dial_address"] = tunnel.dialStats.MeekDialAddress
 		}
-		if tunnel.meekStats.HostHeader != "" {
-			params["meek_host_header"] = tunnel.meekStats.HostHeader
+		if tunnel.dialStats.MeekResolvedIPAddress != "" {
+			params["meek_resolved_ip_address"] = tunnel.dialStats.MeekResolvedIPAddress
+		}
+		if tunnel.dialStats.MeekSNIServerName != "" {
+			params["meek_sni_server_name"] = tunnel.dialStats.MeekSNIServerName
+		}
+		if tunnel.dialStats.MeekHostHeader != "" {
+			params["meek_host_header"] = tunnel.dialStats.MeekHostHeader
 		}
 		transformedHostName := "0"
-		if tunnel.meekStats.TransformedHostName {
+		if tunnel.dialStats.MeekTransformedHostName {
 			transformedHostName = "1"
 		}
 		params["meek_transformed_host_name"] = transformedHostName
@@ -816,20 +813,37 @@ func makeRequestUrl(tunnel *Tunnel, port, path string, params requestJSONObject)
 	requestUrl.WriteString(port)
 	requestUrl.WriteString("/")
 	requestUrl.WriteString(path)
+
 	firstParam := true
 	for name, value := range params {
-		if strValue, ok := value.(string); ok {
-			if firstParam {
-				requestUrl.WriteString("?")
-				firstParam = false
-			} else {
-				requestUrl.WriteString("&")
-			}
-			requestUrl.WriteString(name)
-			requestUrl.WriteString("=")
-			requestUrl.WriteString(strValue)
+
+		if firstParam {
+			requestUrl.WriteString("?")
+			firstParam = false
+		} else {
+			requestUrl.WriteString("&")
 		}
+
+		requestUrl.WriteString(name)
+		requestUrl.WriteString("=")
+
+		strValue := ""
+		switch v := value.(type) {
+		case string:
+			strValue = v
+		case []string:
+			// String array param encoded as JSON
+			// (URL encoding will be done by http.Client)
+			jsonValue, err := json.Marshal(v)
+			if err != nil {
+				break
+			}
+			strValue = string(jsonValue)
+		}
+
+		requestUrl.WriteString(strValue)
 	}
+
 	return requestUrl.String()
 }
 

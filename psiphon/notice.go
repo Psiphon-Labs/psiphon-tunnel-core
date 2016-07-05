@@ -318,15 +318,18 @@ func NoticeLocalProxyError(proxyType string, err error) {
 		"LocalProxyError", noticeIsDiagnostic, "message", err.Error())
 }
 
-// NoticeConnectedMeekStats reports extra network details for a meek tunnel connection.
-func NoticeConnectedMeekStats(ipAddress string, meekStats *MeekStats) {
-	outputNotice("ConnectedMeekStats", noticeIsDiagnostic,
+// NoticeConnectedTunnelDialStats reports extra network details for tunnel connections that required extra configuration.
+func NoticeConnectedTunnelDialStats(ipAddress string, tunnelDialStats *TunnelDialStats) {
+	outputNotice("ConnectedTunnelDialStats", noticeIsDiagnostic,
 		"ipAddress", ipAddress,
-		"dialAddress", meekStats.DialAddress,
-		"resolvedIPAddress", meekStats.ResolvedIPAddress,
-		"sniServerName", meekStats.SNIServerName,
-		"hostHeader", meekStats.HostHeader,
-		"transformedHostName", meekStats.TransformedHostName)
+		"upstreamProxyType", tunnelDialStats.UpstreamProxyType,
+		"upstreamProxyCustomHeaderNames", strings.Join(tunnelDialStats.UpstreamProxyCustomHeaderNames, ","),
+		"meekDialAddress", tunnelDialStats.MeekDialAddress,
+		"meekDialAddress", tunnelDialStats.MeekDialAddress,
+		"meekResolvedIPAddress", tunnelDialStats.MeekResolvedIPAddress,
+		"meekSNIServerName", tunnelDialStats.MeekSNIServerName,
+		"meekHostHeader", tunnelDialStats.MeekHostHeader,
+		"meekTransformedHostName", tunnelDialStats.MeekTransformedHostName)
 }
 
 // NoticeBuildInfo reports build version info.

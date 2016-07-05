@@ -22,7 +22,6 @@ package server
 import (
 	"crypto/subtle"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"regexp"
@@ -97,7 +96,7 @@ func handshakeAPIRequestHandler(
 	err := validateRequestParams(support, params, baseRequestParams)
 	if err != nil {
 		// TODO: fail2ban?
-		return nil, psiphon.ContextError(errors.New("invalid params"))
+		return nil, psiphon.ContextError(err)
 	}
 
 	log.WithContextFields(
@@ -170,7 +169,7 @@ func connectedAPIRequestHandler(
 	err := validateRequestParams(support, params, connectedRequestParams)
 	if err != nil {
 		// TODO: fail2ban?
-		return nil, psiphon.ContextError(errors.New("invalid params"))
+		return nil, psiphon.ContextError(err)
 	}
 
 	log.WithContextFields(
@@ -216,7 +215,7 @@ func statusAPIRequestHandler(
 	err := validateRequestParams(support, params, statusRequestParams)
 	if err != nil {
 		// TODO: fail2ban?
-		return nil, psiphon.ContextError(errors.New("invalid params"))
+		return nil, psiphon.ContextError(err)
 	}
 
 	statusData, err := getJSONObjectRequestParam(params, "statusData")
@@ -332,7 +331,7 @@ func clientVerificationAPIRequestHandler(
 	err := validateRequestParams(support, params, baseRequestParams)
 	if err != nil {
 		// TODO: fail2ban?
-		return nil, psiphon.ContextError(errors.New("invalid params"))
+		return nil, psiphon.ContextError(err)
 	}
 
 	// Ignoring error as params are validated
@@ -365,11 +364,14 @@ type requestParamSpec struct {
 const (
 	requestParamOptional  = 1
 	requestParamNotLogged = 2
+	requestParamArray     = 4
 )
 
 // baseRequestParams is the list of required and optional
 // request parameters; derived from COMMON_INPUTS and
 // OPTIONAL_COMMON_INPUTS in psi_web.
+// Each param is expected to be a string, unless requestParamArray
+// is specified, in which case an array of string is expected.
 var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"server_secret", isServerSecret, requestParamNotLogged},
 	requestParamSpec{"client_session_id", isHexDigits, requestParamOptional},
@@ -380,6 +382,8 @@ var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"relay_protocol", isRelayProtocol, 0},
 	requestParamSpec{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
 	requestParamSpec{"device_region", isRegionCode, requestParamOptional},
+	requestParamSpec{"upstream_proxy_type", isAnyString, requestParamOptional},
+	requestParamSpec{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
 	requestParamSpec{"meek_dial_address", isDialAddress, requestParamOptional},
 	requestParamSpec{"meek_resolved_ip_address", isIPAddress, requestParamOptional},
 	requestParamSpec{"meek_sni_server_name", isDomain, requestParamOptional},
@@ -404,17 +408,53 @@ func validateRequestParams(
 			return psiphon.ContextError(
 				fmt.Errorf("missing param: %s", expectedParam.name))
 		}
-		strValue, ok := value.(string)
-		if !ok {
-			return psiphon.ContextError(
-				fmt.Errorf("unexpected param type: %s", expectedParam.name))
+		var err error
+		if expectedParam.flags&requestParamArray != 0 {
+			err = validateStringArrayRequestParam(support, expectedParam, value)
+		} else {
+			err = validateStringRequestParam(support, expectedParam, value)
 		}
-		if !expectedParam.validator(support, strValue) {
-			return psiphon.ContextError(
-				fmt.Errorf("invalid param: %s", expectedParam.name))
+		if err != nil {
+			return psiphon.ContextError(err)
 		}
 	}
 
+	return nil
+}
+
+func validateStringRequestParam(
+	support *SupportServices,
+	expectedParam requestParamSpec,
+	value interface{}) error {
+
+	strValue, ok := value.(string)
+	if !ok {
+		return psiphon.ContextError(
+			fmt.Errorf("unexpected string param type: %s", expectedParam.name))
+	}
+	if !expectedParam.validator(support, strValue) {
+		return psiphon.ContextError(
+			fmt.Errorf("invalid param: %s", expectedParam.name))
+	}
+	return nil
+}
+
+func validateStringArrayRequestParam(
+	support *SupportServices,
+	expectedParam requestParamSpec,
+	value interface{}) error {
+
+	arrayValue, ok := value.([]interface{})
+	if !ok {
+		return psiphon.ContextError(
+			fmt.Errorf("unexpected string param type: %s", expectedParam.name))
+	}
+	for _, value := range arrayValue {
+		err := validateStringRequestParam(support, expectedParam, value)
+		if err != nil {
+			return psiphon.ContextError(err)
+		}
+	}
 	return nil
 }
 
@@ -457,34 +497,42 @@ func getRequestLogFields(
 				continue
 			}
 		}
-		strValue, ok := value.(string)
-		if !ok {
+
+		switch v := value.(type) {
+		case string:
+			strValue := v
+
+			// Special cases:
+			// - Number fields are encoded as integer types.
+			// - For ELK performance we record these domain-or-IP
+			//   fields as one of two different values based on type;
+			//   we also omit port from host:port fields for now.
+			switch expectedParam.name {
+			case "client_version":
+				intValue, _ := strconv.Atoi(strValue)
+				logFields[expectedParam.name] = intValue
+			case "meek_dial_address":
+				host, _, _ := net.SplitHostPort(strValue)
+				if isIPAddress(support, host) {
+					logFields["meek_dial_ip_address"] = host
+				} else {
+					logFields["meek_dial_domain"] = host
+				}
+			case "meek_host_header":
+				host, _, _ := net.SplitHostPort(strValue)
+				logFields[expectedParam.name] = host
+			default:
+				logFields[expectedParam.name] = strValue
+			}
+
+		case []interface{}:
+			// Note: actually validated as an array of strings
+			logFields[expectedParam.name] = v
+
+		default:
 			// This type assertion should be checked already in
 			// validateRequestParams, so failure is unexpected.
 			continue
-		}
-
-		// Special cases:
-		// - Number fields are encoded as integer types.
-		// - For ELK performance we record these domain-or-IP
-		//   fields as one of two different values based on type;
-		//   we also omit port from host:port fields for now.
-		switch expectedParam.name {
-		case "client_version":
-			intValue, _ := strconv.Atoi(strValue)
-			logFields[expectedParam.name] = intValue
-		case "meek_dial_address":
-			host, _, _ := net.SplitHostPort(strValue)
-			if isIPAddress(support, host) {
-				logFields["meek_dial_ip_address"] = host
-			} else {
-				logFields["meek_dial_domain"] = host
-			}
-		case "meek_host_header":
-			host, _, _ := net.SplitHostPort(strValue)
-			logFields[expectedParam.name] = host
-		default:
-			logFields[expectedParam.name] = strValue
 		}
 	}
 
@@ -586,6 +634,10 @@ func isMobileClientPlatform(clientPlatform string) bool {
 }
 
 // Input validators follow the legacy validations rules in psi_web.
+
+func isAnyString(support *SupportServices, value string) bool {
+	return true
+}
 
 func isServerSecret(support *SupportServices, value string) bool {
 	return subtle.ConstantTimeCompare(
