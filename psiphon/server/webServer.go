@@ -157,6 +157,7 @@ func convertHTTPRequestToAPIRequest(
 		for _, value := range values {
 			// Note: multiple values per name are ignored
 
+			// TODO: faster lookup?
 			isArray := false
 			for _, paramSpec := range baseRequestParams {
 				if paramSpec.name == name {
