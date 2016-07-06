@@ -155,8 +155,29 @@ func convertHTTPRequestToAPIRequest(
 
 	for name, values := range r.URL.Query() {
 		for _, value := range values {
-			params[name] = value
 			// Note: multiple values per name are ignored
+
+			// TODO: faster lookup?
+			isArray := false
+			for _, paramSpec := range baseRequestParams {
+				if paramSpec.name == name {
+					isArray = (paramSpec.flags&requestParamArray != 0)
+					break
+				}
+			}
+
+			if isArray {
+				// Special case: a JSON encoded array
+				var arrayValue []interface{}
+				err := json.Unmarshal([]byte(value), &arrayValue)
+				if err != nil {
+					return nil, psiphon.ContextError(err)
+				}
+				params[name] = arrayValue
+			} else {
+				// All other query parameters are simple strings
+				params[name] = value
+			}
 			break
 		}
 	}
