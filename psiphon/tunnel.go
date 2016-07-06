@@ -697,7 +697,7 @@ func dialSsh(
 				dialStats.UpstreamProxyType = proxyURL.Scheme
 			}
 
-			dialStats.UpstreamProxyCustomHeaderNames = make([]string, len(dialConfig.UpstreamProxyCustomHeaders))
+			dialStats.UpstreamProxyCustomHeaderNames = make([]string, 0)
 			for name, _ := range dialConfig.UpstreamProxyCustomHeaders {
 				dialStats.UpstreamProxyCustomHeaderNames = append(dialStats.UpstreamProxyCustomHeaderNames, name)
 			}
