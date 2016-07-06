@@ -275,3 +275,26 @@ func TruncateTimestampToHour(timestamp string) string {
 	}
 	return t.Truncate(1 * time.Hour).Format(time.RFC3339)
 }
+
+// IsFileChanged uses os.Stat to check if the name, size, or last mod time of the
+// file has changed (which is a heuristic, but sufficiently robust for users of this
+// function). Returns nil if file has not changed; otherwise, returns a changed
+// os.FileInfo which may be used to check for subsequent changes.
+func IsFileChanged(path string, previousFileInfo os.FileInfo) (os.FileInfo, error) {
+
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+
+	changed := previousFileInfo == nil ||
+		fileInfo.Name() != previousFileInfo.Name() ||
+		fileInfo.Size() != previousFileInfo.Size() ||
+		fileInfo.ModTime() != previousFileInfo.ModTime()
+
+	if !changed {
+		return nil, nil
+	}
+
+	return fileInfo, nil
+}

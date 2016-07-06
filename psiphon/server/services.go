@@ -151,10 +151,14 @@ func logServerLoad(server *TunnelServer) {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	fields := LogFields{
-		"NumGoroutine":        runtime.NumGoroutine(),
-		"MemStats.Alloc":      memStats.Alloc,
-		"MemStats.TotalAlloc": memStats.TotalAlloc,
-		"MemStats.Sys":        memStats.Sys,
+		"NumGoroutine":           runtime.NumGoroutine(),
+		"MemStats.Alloc":         memStats.Alloc,
+		"MemStats.TotalAlloc":    memStats.TotalAlloc,
+		"MemStats.Sys":           memStats.Sys,
+		"MemStats.PauseTotalNs":  memStats.PauseTotalNs,
+		"MemStats.PauseNs":       memStats.PauseNs,
+		"MemStats.NumGC":         memStats.NumGC,
+		"MemStats.GCCPUFraction": memStats.GCCPUFraction,
 	}
 
 	// tunnel server stats
@@ -209,38 +213,43 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 // components. If any component fails to reload, an error is logged and
 // Reload proceeds, using the previous state of the component.
 //
-// Note: reload of traffic rules currently doesn't apply to existing,
-// established clients.
+// Notes:
+//
+// - reload of traffic rules currently doesn't apply to existing,
+//   established clients
+//
+// - "reloaded" flag indicates if file was actually reloaded or ignored
+//   due to IsFileChanged
 //
 func (support *SupportServices) Reload() {
 
 	if support.Config.TrafficRulesFilename != "" {
-		err := support.TrafficRulesSet.Reload(support.Config.TrafficRulesFilename)
+		reloaded, err := support.TrafficRulesSet.Reload(support.Config.TrafficRulesFilename)
 		if err != nil {
 			log.WithContextFields(LogFields{"error": err}).Error("reload traffic rules failed")
 			// Keep running with previous state of support.TrafficRulesSet
 		} else {
-			log.WithContext().Info("reloaded traffic rules")
+			log.WithContextFields(LogFields{"reloaded": reloaded}).Info("reload traffic rules success")
 		}
 	}
 
 	if support.Config.PsinetDatabaseFilename != "" {
-		err := support.PsinetDatabase.Reload(support.Config.PsinetDatabaseFilename)
+		reloaded, err := support.PsinetDatabase.Reload(support.Config.PsinetDatabaseFilename)
 		if err != nil {
 			log.WithContextFields(LogFields{"error": err}).Error("reload psinet database failed")
 			// Keep running with previous state of support.PsinetDatabase
 		} else {
-			log.WithContext().Info("reloaded psinet database")
+			log.WithContextFields(LogFields{"reloaded": reloaded}).Info("reload psinet database success")
 		}
 	}
 
 	if support.Config.GeoIPDatabaseFilename != "" {
-		err := support.GeoIPService.ReloadDatabase(support.Config.GeoIPDatabaseFilename)
+		reloaded, err := support.GeoIPService.ReloadDatabase(support.Config.GeoIPDatabaseFilename)
 		if err != nil {
 			log.WithContextFields(LogFields{"error": err}).Error("reload GeoIP database failed")
 			// Keep running with previous state of support.GeoIPService
 		} else {
-			log.WithContext().Info("reloaded GeoIP database")
+			log.WithContextFields(LogFields{"reloaded": reloaded}).Info("reload GeoIP database success")
 		}
 	}
 }

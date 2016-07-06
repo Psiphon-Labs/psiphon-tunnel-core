@@ -22,6 +22,7 @@ package server
 import (
 	"encoding/json"
 	"io/ioutil"
+	"os"
 	"strings"
 	"sync"
 
@@ -33,6 +34,7 @@ import (
 // hot reloading of rules data while the server is running.
 type TrafficRulesSet struct {
 	sync.RWMutex
+	fileInfo os.FileInfo
 
 	// DefaultRules specifies the traffic rules to be used when no
 	// regional-specific rules are set or apply to a particular
@@ -129,37 +131,49 @@ type TrafficRules struct {
 // the rules data in the specified config file.
 func NewTrafficRulesSet(ruleSetFilename string) (*TrafficRulesSet, error) {
 	set := &TrafficRulesSet{}
-	return set, set.Reload(ruleSetFilename)
+	_, err := set.Reload(ruleSetFilename)
+	return set, err
 }
 
 // Reload [re]initializes the TrafficRulesSet with the rules data
 // in the specified file. This function obtains a write lock on
 // the database, blocking all readers. When Reload fails, the previous
 // state is retained.
-func (set *TrafficRulesSet) Reload(ruleSetFilename string) error {
+func (set *TrafficRulesSet) Reload(ruleSetFilename string) (bool, error) {
 	set.Lock()
 	defer set.Unlock()
 
 	if ruleSetFilename == "" {
 		// No traffic rules filename in the config
-		return nil
+		return false, nil
+	}
+
+	changedFileInfo, err := psiphon.IsFileChanged(
+		ruleSetFilename, set.fileInfo)
+	if err != nil {
+		return false, psiphon.ContextError(err)
+	}
+
+	if changedFileInfo == nil {
+		return false, nil
 	}
 
 	configJSON, err := ioutil.ReadFile(ruleSetFilename)
 	if err != nil {
-		return psiphon.ContextError(err)
+		return false, psiphon.ContextError(err)
 	}
 
-	var newSet TrafficRulesSet
-	err = json.Unmarshal(configJSON, &newSet)
+	// Unmarshal first validates the provided JSON and then
+	// populates the interface. The previously loaded data
+	// persists if the new JSON is malformed.
+	err = json.Unmarshal(configJSON, &set)
 	if err != nil {
-		return psiphon.ContextError(err)
+		return false, psiphon.ContextError(err)
 	}
 
-	set.DefaultRules = newSet.DefaultRules
-	set.RegionalRules = newSet.RegionalRules
+	set.fileInfo = changedFileInfo
 
-	return nil
+	return true, nil
 }
 
 // GetTrafficRules looks up the traffic rules for the specified country. If there

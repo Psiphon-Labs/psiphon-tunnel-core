@@ -30,6 +30,7 @@ import (
 	"io/ioutil"
 	"math"
 	"math/rand"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,6 +44,7 @@ import (
 // of Psiphon network data while the server is running.
 type Database struct {
 	sync.RWMutex
+	fileInfo os.FileInfo
 
 	AlternateMeekFrontingAddresses      map[string][]string        `json:"alternate_meek_fronting_addresses"`
 	AlternateMeekFrontingAddressesRegex map[string]string          `json:"alternate_meek_fronting_addresses_regex"`
@@ -131,7 +133,7 @@ func NewDatabase(filename string) (*Database, error) {
 
 	database := &Database{}
 
-	err := database.Reload(filename)
+	_, err := database.Reload(filename)
 	if err != nil {
 		return nil, psiphon.ContextError(err)
 	}
@@ -146,22 +148,39 @@ func NewDatabase(filename string) (*Database, error) {
 // with no data.
 // The previously loaded data will persist if an error occurs
 // while reinitializing the database.
-func (db *Database) Reload(filename string) error {
+func (db *Database) Reload(filename string) (bool, error) {
+	db.Lock()
+	defer db.Unlock()
+
 	if filename == "" {
-		return nil
+		return false, nil
 	}
 
-	configJSON, err := ioutil.ReadFile(filename)
+	changedFileInfo, err := psiphon.IsFileChanged(filename, db.fileInfo)
 	if err != nil {
-		return psiphon.ContextError(err)
+		return false, psiphon.ContextError(err)
+	}
+
+	if changedFileInfo == nil {
+		return false, nil
+	}
+
+	psinetJSON, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return false, psiphon.ContextError(err)
 	}
 
 	// Unmarshal first validates the provided JSON and then
 	// populates the interface. The previously loaded data
 	// persists if the new JSON is malformed.
-	err = json.Unmarshal(configJSON, &db)
+	err = json.Unmarshal(psinetJSON, &db)
+	if err != nil {
+		return false, psiphon.ContextError(err)
+	}
 
-	return psiphon.ContextError(err)
+	db.fileInfo = changedFileInfo
+
+	return true, nil
 }
 
 // GetHomepages returns a list of  home pages for the specified sponsor,
