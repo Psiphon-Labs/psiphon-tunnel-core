@@ -10,15 +10,15 @@ RUN apk add --update \
 
 RUN mkdir -p /opt/psiphon
 
-ADD ["psiphond", "/opt/psiphon/"]
+ADD ["psiphond", "/opt/psiphon/psiphond/"]
 
 # All configuration files, Server databases, GeoIP databases, etc.
 # should be made available via the `/opt/psiphon/config` volume
-VOLUME ["/opt/psiphon/config", "/var/log/psiphon"]
+VOLUME ["/opt/psiphon/psiphond/config", "/var/log/psiphond"]
 
 EXPOSE 3000 3001 3002 3003 3004 3005 3006
 
-WORKDIR /opt/psiphon/config
+WORKDIR /opt/psiphon/psiphond/config
 
-ENTRYPOINT ["/opt/psiphon/psiphond"]
+ENTRYPOINT ["/opt/psiphon/psiphond/psiphond"]
 CMD ["run"]
