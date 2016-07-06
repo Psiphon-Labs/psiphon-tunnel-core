@@ -96,7 +96,7 @@ func newJwtBody(jsonBytes []byte) (jwtBody, error) {
 
 // Add missing padding so data is not
 // truncated in Decode
-func decodeBase64(data string) []byte {
+func decodeBase64(data string) ([]byte, error) {
 	missingPadding := 4 - len(data)%4
 
 	for i := 0; i < missingPadding; i++ {
@@ -104,10 +104,8 @@ func decodeBase64(data string) []byte {
 	}
 
 	d, err := base64.URLEncoding.DecodeString(data)
-	if err != nil {
 
-	}
-	return d
+	return d, err
 }
 
 // Verify x509 certificate chain
@@ -214,9 +212,18 @@ func verifySafetyNetPayload(params requestJSONObject) bool {
 	}
 
 	// Decode header, body, signature
-	headerJson := decodeBase64(jwtParts[0])
-	bodyJson := decodeBase64(jwtParts[1])
-	signature := decodeBase64(jwtParts[2])
+	headerJson, err := decodeBase64(jwtParts[0])
+	if err != nil {
+		return false
+	}
+	bodyJson, err := decodeBase64(jwtParts[1])
+	if err != nil {
+		return false
+	}
+	signature, err := decodeBase64(jwtParts[2])
+	if err != nil {
+		return false
+	}
 
 	// Extract header from json
 	header, err := newJwtHeader(headerJson)
