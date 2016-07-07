@@ -214,9 +214,11 @@ func NoticeHomepage(url string) {
 }
 
 // NoticeClientVerificationRequired indicates that client verification is required, as
-// indicated bythe handshake. The client should submit a client verification payload.
-func NoticeClientVerificationRequired() {
-	outputNotice("ClientVerificationRequired", 0)
+// indicated by the handshake. The client should submit a client verification payload.
+// Empty nonce is allowed, if ttlSeconds is 0 the client should not send verification
+// payload to the server.
+func NoticeClientVerificationRequired(nonce string, ttlSeconds int) {
+	outputNotice("ClientVerificationRequired", 0, "nonce", nonce, "ttlSeconds", ttlSeconds)
 }
 
 // NoticeClientRegion is the client's region, as determined by the server and
