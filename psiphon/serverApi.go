@@ -173,16 +173,16 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	// - 'preemptive_reconnect_lifetime_milliseconds' is currently unused
 	// - 'ssh_session_id' is ignored; client session ID is used instead
 	var handshakeResponse struct {
-		Homepages                    []string            `json:"homepages"`
-		UpgradeClientVersion         string              `json:"upgrade_client_version"`
-		PageViewRegexes              []map[string]string `json:"page_view_regexes"`
-		HttpsRequestRegexes          []map[string]string `json:"https_request_regexes"`
-		EncodedServerList            []string            `json:"encoded_server_list"`
-		ClientRegion                 string              `json:"client_region"`
-		ServerTimestamp              string              `json:"server_timestamp"`
-		ClientVerificationRequired   bool                `json:"client_verification_required"`
-		ClientVerificationNonce      string              `json:"client_verification_nonce"`
-		ClientVerificationTTLSeconds int                 `json:"client_verification_ttl_seconds"`
+		Homepages                     []string            `json:"homepages"`
+		UpgradeClientVersion          string              `json:"upgrade_client_version"`
+		PageViewRegexes               []map[string]string `json:"page_view_regexes"`
+		HttpsRequestRegexes           []map[string]string `json:"https_request_regexes"`
+		EncodedServerList             []string            `json:"encoded_server_list"`
+		ClientRegion                  string              `json:"client_region"`
+		ServerTimestamp               string              `json:"server_timestamp"`
+		ClientVerificationRequired    bool                `json:"client_verification_required"`
+		ClientVerificationServerNonce string              `json:"client_verification__server_nonce"`
+		ClientVerificationTTLSeconds  int                 `json:"client_verification_ttl_seconds"`
 	}
 	err := json.Unmarshal(response, &handshakeResponse)
 	if err != nil {
@@ -249,7 +249,7 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	serverContext.serverHandshakeTimestamp = handshakeResponse.ServerTimestamp
 
 	if handshakeResponse.ClientVerificationRequired {
-		NoticeClientVerificationRequired(handshakeResponse.ClientVerificationNonce,
+		NoticeClientVerificationRequired(handshakeResponse.ClientVerificationServerNonce,
 			handshakeResponse.ClientVerificationTTLSeconds)
 	}
 
@@ -682,8 +682,8 @@ func (serverContext *ServerContext) DoClientVerificationRequest(
 	// for example, if the payload timestamp is too old, etc.
 
 	var clientVerificationResponse struct {
-		ClientVerificationNonce      string `json:"client_verification_nonce"`
-		ClientVerificationTTLSeconds int    `json:"client_verification_ttl_seconds"`
+		ClientVerificationServerNonce string `json:"client_verification_server_nonce"`
+		ClientVerificationTTLSeconds  int    `json:"client_verification_ttl_seconds"`
 	}
 
 	err = json.Unmarshal(response, &clientVerificationResponse)
@@ -693,7 +693,7 @@ func (serverContext *ServerContext) DoClientVerificationRequest(
 
 	if clientVerificationResponse.ClientVerificationTTLSeconds > 0 {
 		NoticeClientVerificationRequired(
-			clientVerificationResponse.ClientVerificationNonce,
+			clientVerificationResponse.ClientVerificationServerNonce,
 			clientVerificationResponse.ClientVerificationTTLSeconds)
 	} else {
 		NoticeClientVerificationRequestCompleted(serverIP)
