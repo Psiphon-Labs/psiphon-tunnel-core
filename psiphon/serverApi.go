@@ -173,14 +173,16 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	// - 'preemptive_reconnect_lifetime_milliseconds' is currently unused
 	// - 'ssh_session_id' is ignored; client session ID is used instead
 	var handshakeResponse struct {
-		Homepages                  []string            `json:"homepages"`
-		UpgradeClientVersion       string              `json:"upgrade_client_version"`
-		PageViewRegexes            []map[string]string `json:"page_view_regexes"`
-		HttpsRequestRegexes        []map[string]string `json:"https_request_regexes"`
-		EncodedServerList          []string            `json:"encoded_server_list"`
-		ClientRegion               string              `json:"client_region"`
-		ServerTimestamp            string              `json:"server_timestamp"`
-		ClientVerificationRequired bool                `json:"client_verification_required"`
+		Homepages                    []string            `json:"homepages"`
+		UpgradeClientVersion         string              `json:"upgrade_client_version"`
+		PageViewRegexes              []map[string]string `json:"page_view_regexes"`
+		HttpsRequestRegexes          []map[string]string `json:"https_request_regexes"`
+		EncodedServerList            []string            `json:"encoded_server_list"`
+		ClientRegion                 string              `json:"client_region"`
+		ServerTimestamp              string              `json:"server_timestamp"`
+		ClientVerificationRequired   bool                `json:"client_verification_required"`
+		ClientVerificationNonce      string              `json:"client_verification_nonce"`
+		ClientVerificationTTLSeconds int                 `json:"client_verification_ttl_seconds"`
 	}
 	err := json.Unmarshal(response, &handshakeResponse)
 	if err != nil {
@@ -247,7 +249,8 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	serverContext.serverHandshakeTimestamp = handshakeResponse.ServerTimestamp
 
 	if handshakeResponse.ClientVerificationRequired {
-		NoticeClientVerificationRequired()
+		NoticeClientVerificationRequired(handshakeResponse.ClientVerificationNonce,
+			handshakeResponse.ClientVerificationTTLSeconds)
 	}
 
 	return nil
@@ -350,7 +353,7 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 	} else {
 
 		// Legacy web service API request
-		err = serverContext.doPostRequest(
+		_, err = serverContext.doPostRequest(
 			makeRequestUrl(serverContext.tunnel, "", "status", params),
 			"application/json",
 			bytes.NewReader(statusPayload))
@@ -641,9 +644,11 @@ func RecordTunnelStats(
 // traffic. The proof-of-validity is platform-specific and the payload
 // is opaque to this function but assumed to be JSON.
 func (serverContext *ServerContext) DoClientVerificationRequest(
-	verificationPayload string) error {
+	verificationPayload string, serverIP string) error {
 
 	params := serverContext.getBaseParams()
+	var response []byte
+	var err error
 
 	if serverContext.psiphonHttpsClient == nil {
 
@@ -655,7 +660,7 @@ func (serverContext *ServerContext) DoClientVerificationRequest(
 			return ContextError(err)
 		}
 
-		_, err = serverContext.tunnel.SendAPIRequest(
+		response, err = serverContext.tunnel.SendAPIRequest(
 			SERVER_API_CLIENT_VERIFICATION_REQUEST_NAME, request)
 		if err != nil {
 			return ContextError(err)
@@ -664,13 +669,34 @@ func (serverContext *ServerContext) DoClientVerificationRequest(
 	} else {
 
 		// Legacy web service API request
-		err := serverContext.doPostRequest(
+		response, err = serverContext.doPostRequest(
 			makeRequestUrl(serverContext.tunnel, "", "client_verification", params),
 			"application/json",
 			bytes.NewReader([]byte(verificationPayload)))
 		if err != nil {
 			return ContextError(err)
 		}
+	}
+
+	// Server may request a new verification to be performed,
+	// for example, if the payload timestamp is too old, etc.
+
+	var clientVerificationResponse struct {
+		ClientVerificationNonce      string `json:"client_verification_nonce"`
+		ClientVerificationTTLSeconds int    `json:"client_verification_ttl_seconds"`
+	}
+
+	err = json.Unmarshal(response, &clientVerificationResponse)
+	if err != nil {
+		return ContextError(err)
+	}
+
+	if clientVerificationResponse.ClientVerificationTTLSeconds > 0 {
+		NoticeClientVerificationRequired(
+			clientVerificationResponse.ClientVerificationNonce,
+			clientVerificationResponse.ClientVerificationTTLSeconds)
+	} else {
+		NoticeClientVerificationRequestCompleted(serverIP)
 	}
 
 	return nil
@@ -699,7 +725,7 @@ func (serverContext *ServerContext) doGetRequest(
 
 // doPostRequest makes a tunneled HTTPS POST request.
 func (serverContext *ServerContext) doPostRequest(
-	requestUrl string, bodyType string, body io.Reader) (err error) {
+	requestUrl string, bodyType string, body io.Reader) (responseBody []byte, err error) {
 
 	response, err := serverContext.psiphonHttpsClient.Post(requestUrl, bodyType, body)
 	if err == nil && response.StatusCode != http.StatusOK {
@@ -708,10 +734,14 @@ func (serverContext *ServerContext) doPostRequest(
 	}
 	if err != nil {
 		// Trim this error since it may include long URLs
-		return ContextError(TrimError(err))
+		return nil, ContextError(TrimError(err))
 	}
-	response.Body.Close()
-	return nil
+	defer response.Body.Close()
+	responseBody, err = ioutil.ReadAll(response.Body)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	return responseBody, nil
 }
 
 type requestJSONObject map[string]interface{}

@@ -1103,11 +1103,9 @@ func sendClientVerification(tunnel *Tunnel, clientVerificationPayload string) bo
 		return true
 	}
 
-	err := tunnel.serverContext.DoClientVerificationRequest(clientVerificationPayload)
+	err := tunnel.serverContext.DoClientVerificationRequest(clientVerificationPayload, tunnel.serverEntry.IpAddress)
 	if err != nil {
 		NoticeAlert("DoClientVerificationRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
-	} else {
-		NoticeClientVerificationRequestCompleted(tunnel.serverEntry.IpAddress)
 	}
 
 	return err == nil
