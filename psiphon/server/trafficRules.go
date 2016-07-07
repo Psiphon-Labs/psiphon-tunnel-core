@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"strings"
-	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
@@ -32,7 +31,7 @@ import (
 // apply to Psiphon client tunnels. The Reload function supports
 // hot reloading of rules data while the server is running.
 type TrafficRulesSet struct {
-	sync.RWMutex
+	psiphon.ReloadableFile
 
 	// DefaultRules specifies the traffic rules to be used when no
 	// regional-specific rules are set or apply to a particular
@@ -127,46 +126,42 @@ type TrafficRules struct {
 
 // NewTrafficRulesSet initializes a TrafficRulesSet with
 // the rules data in the specified config file.
-func NewTrafficRulesSet(ruleSetFilename string) (*TrafficRulesSet, error) {
+func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
+
 	set := &TrafficRulesSet{}
-	return set, set.Reload(ruleSetFilename)
-}
 
-// Reload [re]initializes the TrafficRulesSet with the rules data
-// in the specified file. This function obtains a write lock on
-// the database, blocking all readers. When Reload fails, the previous
-// state is retained.
-func (set *TrafficRulesSet) Reload(ruleSetFilename string) error {
-	set.Lock()
-	defer set.Unlock()
+	set.ReloadableFile = psiphon.NewReloadableFile(
+		"traffic rules set",
+		filename,
+		func(filename string) error {
+			configJSON, err := ioutil.ReadFile(filename)
+			if err != nil {
+				// On error, state remains the same
+				return psiphon.ContextError(err)
+			}
+			err = json.Unmarshal(configJSON, &set)
+			if err != nil {
+				// On error, state remains the same
+				// (Unmarshal first validates the provided
+				//  JOSN and then populates the interface)
+				return psiphon.ContextError(err)
+			}
+			return nil
+		})
 
-	if ruleSetFilename == "" {
-		// No traffic rules filename in the config
-		return nil
-	}
-
-	configJSON, err := ioutil.ReadFile(ruleSetFilename)
+	_, err := set.Reload()
 	if err != nil {
-		return psiphon.ContextError(err)
+		return nil, psiphon.ContextError(err)
 	}
 
-	var newSet TrafficRulesSet
-	err = json.Unmarshal(configJSON, &newSet)
-	if err != nil {
-		return psiphon.ContextError(err)
-	}
-
-	set.DefaultRules = newSet.DefaultRules
-	set.RegionalRules = newSet.RegionalRules
-
-	return nil
+	return set, nil
 }
 
 // GetTrafficRules looks up the traffic rules for the specified country. If there
 // are no regional TrafficRules for the country, default TrafficRules are returned.
 func (set *TrafficRulesSet) GetTrafficRules(clientCountryCode string) TrafficRules {
-	set.RLock()
-	defer set.RUnlock()
+	set.ReloadableFile.RLock()
+	defer set.ReloadableFile.RUnlock()
 
 	// TODO: faster lookup?
 	for countryCodes, trafficRules := range set.RegionalRules {

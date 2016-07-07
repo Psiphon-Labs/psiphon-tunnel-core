@@ -32,7 +32,6 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
@@ -42,7 +41,7 @@ import (
 // concurrent usage. The Reload function supports hot reloading
 // of Psiphon network data while the server is running.
 type Database struct {
-	sync.RWMutex
+	psiphon.ReloadableFile
 
 	AlternateMeekFrontingAddresses      map[string][]string        `json:"alternate_meek_fronting_addresses"`
 	AlternateMeekFrontingAddressesRegex map[string]string          `json:"alternate_meek_fronting_addresses_regex"`
@@ -131,7 +130,26 @@ func NewDatabase(filename string) (*Database, error) {
 
 	database := &Database{}
 
-	err := database.Reload(filename)
+	database.ReloadableFile = psiphon.NewReloadableFile(
+		"psinet database",
+		filename,
+		func(filename string) error {
+			psinetJSON, err := ioutil.ReadFile(filename)
+			if err != nil {
+				// On error, state remains the same
+				return psiphon.ContextError(err)
+			}
+			err = json.Unmarshal(psinetJSON, &database)
+			if err != nil {
+				// On error, state remains the same
+				// (Unmarshal first validates the provided
+				//  JOSN and then populates the interface)
+				return psiphon.ContextError(err)
+			}
+			return nil
+		})
+
+	_, err := database.Reload()
 	if err != nil {
 		return nil, psiphon.ContextError(err)
 	}
@@ -139,36 +157,11 @@ func NewDatabase(filename string) (*Database, error) {
 	return database, nil
 }
 
-// Load [re]initializes the Database with the Psiphon network data
-// in the specified file. This function obtains a write lock on
-// the database, blocking all readers.
-// The input "" is valid and initializes a functional Database
-// with no data.
-// The previously loaded data will persist if an error occurs
-// while reinitializing the database.
-func (db *Database) Reload(filename string) error {
-	if filename == "" {
-		return nil
-	}
-
-	configJSON, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return psiphon.ContextError(err)
-	}
-
-	// Unmarshal first validates the provided JSON and then
-	// populates the interface. The previously loaded data
-	// persists if the new JSON is malformed.
-	err = json.Unmarshal(configJSON, &db)
-
-	return psiphon.ContextError(err)
-}
-
 // GetHomepages returns a list of  home pages for the specified sponsor,
 // region, and platform.
 func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatform bool) []string {
-	db.RLock()
-	defer db.RUnlock()
+	db.ReloadableFile.RLock()
+	defer db.ReloadableFile.RUnlock()
 
 	sponsorHomePages := make([]string, 0)
 
@@ -212,8 +205,8 @@ func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatfor
 // indicated for the specified client current version. The result is "" when
 // no upgrade is available. Caller should normalize clientPlatform.
 func (db *Database) GetUpgradeClientVersion(clientVersion, clientPlatform string) string {
-	db.RLock()
-	defer db.RUnlock()
+	db.ReloadableFile.RLock()
+	defer db.ReloadableFile.RUnlock()
 
 	// Check lastest version number against client version number
 
@@ -249,8 +242,8 @@ func (db *Database) GetUpgradeClientVersion(clientVersion, clientPlatform string
 // GetHttpsRequestRegexes returns bytes transferred stats regexes for the
 // specified sponsor. The result is nil when an unknown sponsorID is provided.
 func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string {
-	db.RLock()
-	defer db.RUnlock()
+	db.ReloadableFile.RLock()
+	defer db.ReloadableFile.RUnlock()
 
 	regexes := make([]map[string]string, 0)
 
@@ -270,8 +263,8 @@ func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string
 // a map to ensure servers are discovered deterministically. Each iteration over a
 // map in go is seeded with a random value which causes non-deterministic ordering.
 func (db *Database) DiscoverServers(discoveryValue int) []string {
-	db.RLock()
-	defer db.RUnlock()
+	db.ReloadableFile.RLock()
+	defer db.ReloadableFile.RUnlock()
 
 	var servers []Server
 

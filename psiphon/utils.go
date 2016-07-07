@@ -32,6 +32,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -274,4 +275,121 @@ func TruncateTimestampToHour(timestamp string) string {
 		return ""
 	}
 	return t.Truncate(1 * time.Hour).Format(time.RFC3339)
+}
+
+// IsFileChanged uses os.Stat to check if the name, size, or last mod time of the
+// file has changed (which is a heuristic, but sufficiently robust for users of this
+// function). Returns nil if file has not changed; otherwise, returns a changed
+// os.FileInfo which may be used to check for subsequent changes.
+func IsFileChanged(path string, previousFileInfo os.FileInfo) (os.FileInfo, error) {
+
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return nil, ContextError(err)
+	}
+
+	changed := previousFileInfo == nil ||
+		fileInfo.Name() != previousFileInfo.Name() ||
+		fileInfo.Size() != previousFileInfo.Size() ||
+		fileInfo.ModTime() != previousFileInfo.ModTime()
+
+	if !changed {
+		return nil, nil
+	}
+
+	return fileInfo, nil
+}
+
+// Reloader represents a read-only, in-memory reloadable data object. For example,
+// a JSON data file that is loaded into memory and accessed for read-only lookups;
+// and from time to time may be reloaded from the same file, updating the memory
+// copy.
+type Reloader interface {
+
+	// Reload reloads the data object. Reload returns a flag indicating if the
+	// reloadable target has changed and reloaded or remains unchanged. By
+	// convention, when reloading fails the Reloader should revert to its previous
+	// in-memory state.
+	Reload() (bool, error)
+
+	// WillReload indicates if the data object is capable of reloading.
+	WillReload() bool
+
+	// LogDescription returns a description to be used for logging
+	// events related to the Reloader.
+	LogDescription() string
+}
+
+// ReloadableFile is a file-backed Reloader. This type is intended to be embedded
+// in other types that add the actual reloadable data structures.
+//
+// ReloadableFile has a multi-reader mutex for synchronization. Its Reload() function
+// will obtain a write lock before reloading the data structures. Actually reloading
+// action is to be provided via the reloadAction callback (for example, read the contents
+// of the file and unmarshall the contents into data structures). All read access to
+// the data structures should be guarded by RLocks on the ReloadableFile mutex.
+//
+// reloadAction must ensure that data structures revert to their previous state when
+// a reload fails.
+//
+type ReloadableFile struct {
+	sync.RWMutex
+	logDescription string
+	fileName       string
+	fileInfo       os.FileInfo
+	reloadAction   func(string) error
+}
+
+// NewReloadableFile initializes a new ReloadableFile
+func NewReloadableFile(
+	logDescription, fileName string,
+	reloadAction func(string) error) ReloadableFile {
+
+	return ReloadableFile{
+		logDescription: logDescription,
+		fileName:       fileName,
+		reloadAction:   reloadAction,
+	}
+}
+
+// WillReload indicates whether the ReloadableFile is capable
+// of reloading.
+func (reloadable *ReloadableFile) WillReload() bool {
+	return reloadable.fileName != ""
+}
+
+// Reload checks if the underlying file has changed (using IsFileChanged semantics, which
+// are heuristics) and, when changed, invokes the reloadAction callback which should
+// reload, from the file, the in-memory data structures.
+// All data structure readers should be blocked by the ReloadableFile mutex.
+func (reloadable *ReloadableFile) Reload() (bool, error) {
+
+	reloadable.Lock()
+	defer reloadable.Unlock()
+
+	if !reloadable.WillReload() {
+		return false, nil
+	}
+
+	changedFileInfo, err := IsFileChanged(reloadable.fileName, reloadable.fileInfo)
+	if err != nil {
+		return false, ContextError(err)
+	}
+
+	if changedFileInfo == nil {
+		return false, nil
+	}
+
+	err = reloadable.reloadAction(reloadable.fileName)
+	if err != nil {
+		return false, ContextError(err)
+	}
+
+	reloadable.fileInfo = changedFileInfo
+
+	return true, nil
+}
+
+func (reloadable *ReloadableFile) LogDescription() string {
+	return reloadable.logDescription
 }
