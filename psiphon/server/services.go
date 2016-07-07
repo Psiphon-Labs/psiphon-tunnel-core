@@ -213,43 +213,35 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 // components. If any component fails to reload, an error is logged and
 // Reload proceeds, using the previous state of the component.
 //
-// Notes:
-//
-// - reload of traffic rules currently doesn't apply to existing,
-//   established clients
-//
-// - "reloaded" flag indicates if file was actually reloaded or ignored
-//   due to IsFileChanged
-//
+// Limitation: reload of traffic rules currently doesn't apply to existing,
+// established clients.
 func (support *SupportServices) Reload() {
 
-	if support.Config.TrafficRulesFilename != "" {
-		reloaded, err := support.TrafficRulesSet.Reload(support.Config.TrafficRulesFilename)
-		if err != nil {
-			log.WithContextFields(LogFields{"error": err}).Error("reload traffic rules failed")
-			// Keep running with previous state of support.TrafficRulesSet
-		} else {
-			log.WithContextFields(LogFields{"reloaded": reloaded}).Info("reload traffic rules success")
-		}
-	}
+	reloaders := []psiphon.Reloader{
+		support.TrafficRulesSet,
+		support.PsinetDatabase,
+		support.GeoIPService}
 
-	if support.Config.PsinetDatabaseFilename != "" {
-		reloaded, err := support.PsinetDatabase.Reload(support.Config.PsinetDatabaseFilename)
-		if err != nil {
-			log.WithContextFields(LogFields{"error": err}).Error("reload psinet database failed")
-			// Keep running with previous state of support.PsinetDatabase
-		} else {
-			log.WithContextFields(LogFields{"reloaded": reloaded}).Info("reload psinet database success")
-		}
-	}
+	for _, reloader := range reloaders {
 
-	if support.Config.GeoIPDatabaseFilename != "" {
-		reloaded, err := support.GeoIPService.ReloadDatabase(support.Config.GeoIPDatabaseFilename)
+		if !reloader.WillReload() {
+			// Skip logging
+			continue
+		}
+
+		// "reloaded" flag indicates if file was actually reloaded or ignored
+		reloaded, err := reloader.Reload()
 		if err != nil {
-			log.WithContextFields(LogFields{"error": err}).Error("reload GeoIP database failed")
-			// Keep running with previous state of support.GeoIPService
+			log.WithContextFields(
+				LogFields{
+					"reloader": reloader.LogDescription(),
+					"error":    err}).Error("reload failed")
+			// Keep running with previous state
 		} else {
-			log.WithContextFields(LogFields{"reloaded": reloaded}).Info("reload GeoIP database success")
+			log.WithContextFields(
+				LogFields{
+					"reloader": reloader.LogDescription(),
+					"reloaded": reloaded}).Info("reload success")
 		}
 	}
 }

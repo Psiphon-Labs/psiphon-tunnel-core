@@ -23,8 +23,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"net"
-	"os"
-	"sync"
 	"time"
 
 	cache "github.com/Psiphon-Inc/go-cache"
@@ -62,63 +60,46 @@ func NewGeoIPData() GeoIPData {
 // supports hot reloading of MaxMind data while the server is
 // running.
 type GeoIPService struct {
-	maxMindReaderMutex         sync.RWMutex
-	maxMindReaderMutexFileInfo os.FileInfo
-	maxMindReader              *maxminddb.Reader
-	sessionCache               *cache.Cache
-	discoveryValueHMACKey      string
+	psiphon.ReloadableFile
+	maxMindReader         *maxminddb.Reader
+	sessionCache          *cache.Cache
+	discoveryValueHMACKey string
 }
 
 // NewGeoIPService initializes a new GeoIPService.
-func NewGeoIPService(databaseFilename, discoveryValueHMACKey string) (*GeoIPService, error) {
+func NewGeoIPService(filename, discoveryValueHMACKey string) (*GeoIPService, error) {
+
 	geoIP := &GeoIPService{
 		maxMindReader:         nil,
 		sessionCache:          cache.New(GEOIP_SESSION_CACHE_TTL, 1*time.Minute),
 		discoveryValueHMACKey: discoveryValueHMACKey,
 	}
-	_, err := geoIP.ReloadDatabase(databaseFilename)
+
+	geoIP.ReloadableFile = psiphon.NewReloadableFile(
+		"geoip database",
+		filename,
+		func(filename string) error {
+			maxMindReader, err := maxminddb.Open(filename)
+			if err != nil {
+				// On error, geoIP state remains the same
+				return psiphon.ContextError(err)
+			}
+			geoIP.maxMindReader = maxMindReader
+			return nil
+		})
+
+	_, err := geoIP.Reload()
+	if err != nil {
+		return nil, psiphon.ContextError(err)
+	}
+
 	return geoIP, err
-}
-
-// ReloadDatabase [re]loads a MaxMind GeoIP2/GeoLite2 database to
-// be used for GeoIP lookup. When ReloadDatabase fails, the previous
-// MaxMind database state is retained.
-// ReloadDatabase only updates the MaxMind database and doesn't affect
-// other GeopIPService components (e.g., the session cache).
-func (geoIP *GeoIPService) ReloadDatabase(databaseFilename string) (bool, error) {
-	geoIP.maxMindReaderMutex.Lock()
-	defer geoIP.maxMindReaderMutex.Unlock()
-
-	if databaseFilename == "" {
-		// No database filename in the config
-		return false, nil
-	}
-
-	changedFileInfo, err := psiphon.IsFileChanged(
-		databaseFilename, geoIP.maxMindReaderMutexFileInfo)
-	if err != nil {
-		return false, psiphon.ContextError(err)
-	}
-
-	if changedFileInfo == nil {
-		return false, nil
-	}
-
-	maxMindReader, err := maxminddb.Open(databaseFilename)
-	if err != nil {
-		return false, psiphon.ContextError(err)
-	}
-
-	geoIP.maxMindReaderMutexFileInfo = changedFileInfo
-	geoIP.maxMindReader = maxMindReader
-
-	return true, nil
 }
 
 // Lookup determines a GeoIPData for a given client IP address.
 func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
-	geoIP.maxMindReaderMutex.RLock()
-	defer geoIP.maxMindReaderMutex.RUnlock()
+	geoIP.ReloadableFile.RLock()
+	defer geoIP.ReloadableFile.RUnlock()
 
 	result := NewGeoIPData()
 
