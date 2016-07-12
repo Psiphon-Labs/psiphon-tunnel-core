@@ -334,21 +334,19 @@ type Reloader interface {
 //
 type ReloadableFile struct {
 	sync.RWMutex
-	logDescription string
-	fileName       string
-	fileInfo       os.FileInfo
-	reloadAction   func(string) error
+	fileName     string
+	fileInfo     os.FileInfo
+	reloadAction func(string) error
 }
 
 // NewReloadableFile initializes a new ReloadableFile
 func NewReloadableFile(
-	logDescription, fileName string,
+	fileName string,
 	reloadAction func(string) error) ReloadableFile {
 
 	return ReloadableFile{
-		logDescription: logDescription,
-		fileName:       fileName,
-		reloadAction:   reloadAction,
+		fileName:     fileName,
+		reloadAction: reloadAction,
 	}
 }
 
@@ -391,5 +389,5 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 }
 
 func (reloadable *ReloadableFile) LogDescription() string {
-	return reloadable.logDescription
+	return reloadable.fileName
 }

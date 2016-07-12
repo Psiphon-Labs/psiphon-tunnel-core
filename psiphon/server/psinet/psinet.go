@@ -131,7 +131,6 @@ func NewDatabase(filename string) (*Database, error) {
 	database := &Database{}
 
 	database.ReloadableFile = psiphon.NewReloadableFile(
-		"psinet database",
 		filename,
 		func(filename string) error {
 			psinetJSON, err := ioutil.ReadFile(filename)

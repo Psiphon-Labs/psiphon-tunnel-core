@@ -90,10 +90,13 @@ type Config struct {
 	// used to determine a unique discovery strategy.
 	DiscoveryValueHMACKey string
 
-	// GeoIPDatabaseFilename is the path of the GeoIP2/GeoLite2
-	// MaxMind database file. when blank, no GeoIP lookups are
-	// performed.
-	GeoIPDatabaseFilename string
+	// GeoIPDatabaseFilenames ares paths of GeoIP2/GeoLite2
+	// MaxMind database files. When empty, no GeoIP lookups are
+	// performed. Each file is queried, in order, for the
+	// logged fields: country code, city, and ISP. Multiple
+	// file support accomodates the MaxMind distribution where
+	// ISP data in a separate file.
+	GeoIPDatabaseFilenames []string
 
 	// PsinetDatabaseFilename is the path of the Psiphon automation
 	// jsonpickle format Psiphon API data file.
@@ -462,7 +465,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 	config := &Config{
 		LogLevel:                       "info",
 		Fail2BanFormat:                 "Authentication failure for psiphon-client from %s",
-		GeoIPDatabaseFilename:          "",
+		GeoIPDatabaseFilenames:         nil,
 		HostID:                         "example-host-id",
 		ServerIPAddress:                params.ServerIPAddress,
 		DiscoveryValueHMACKey:          discoveryValueHMACKey,

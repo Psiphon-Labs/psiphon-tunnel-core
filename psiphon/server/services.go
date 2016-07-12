@@ -196,7 +196,7 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 	}
 
 	geoIPService, err := NewGeoIPService(
-		config.GeoIPDatabaseFilename, config.DiscoveryValueHMACKey)
+		config.GeoIPDatabaseFilenames, config.DiscoveryValueHMACKey)
 	if err != nil {
 		return nil, psiphon.ContextError(err)
 	}
@@ -217,10 +217,9 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 // established clients.
 func (support *SupportServices) Reload() {
 
-	reloaders := []psiphon.Reloader{
-		support.TrafficRulesSet,
-		support.PsinetDatabase,
-		support.GeoIPService}
+	reloaders := append(
+		[]psiphon.Reloader{support.TrafficRulesSet, support.PsinetDatabase},
+		support.GeoIPService.Reloaders()...)
 
 	for _, reloader := range reloaders {
 
