@@ -60,53 +60,74 @@ func NewGeoIPData() GeoIPData {
 // supports hot reloading of MaxMind data while the server is
 // running.
 type GeoIPService struct {
-	psiphon.ReloadableFile
-	maxMindReader         *maxminddb.Reader
+	databases             []*geoIPDatabase
 	sessionCache          *cache.Cache
 	discoveryValueHMACKey string
 }
 
+type geoIPDatabase struct {
+	psiphon.ReloadableFile
+	maxMindReader *maxminddb.Reader
+}
+
 // NewGeoIPService initializes a new GeoIPService.
-func NewGeoIPService(filename, discoveryValueHMACKey string) (*GeoIPService, error) {
+func NewGeoIPService(
+	databaseFilenames []string,
+	discoveryValueHMACKey string) (*GeoIPService, error) {
 
 	geoIP := &GeoIPService{
-		maxMindReader:         nil,
+		databases:             make([]*geoIPDatabase, len(databaseFilenames)),
 		sessionCache:          cache.New(GEOIP_SESSION_CACHE_TTL, 1*time.Minute),
 		discoveryValueHMACKey: discoveryValueHMACKey,
 	}
 
-	geoIP.ReloadableFile = psiphon.NewReloadableFile(
-		"geoip database",
-		filename,
-		func(filename string) error {
-			maxMindReader, err := maxminddb.Open(filename)
-			if err != nil {
-				// On error, geoIP state remains the same
-				return psiphon.ContextError(err)
-			}
-			geoIP.maxMindReader = maxMindReader
-			return nil
-		})
+	for i, filename := range databaseFilenames {
 
-	_, err := geoIP.Reload()
-	if err != nil {
-		return nil, psiphon.ContextError(err)
+		database := &geoIPDatabase{}
+		database.ReloadableFile = psiphon.NewReloadableFile(
+			filename,
+			func(filename string) error {
+				maxMindReader, err := maxminddb.Open(filename)
+				if err != nil {
+					// On error, database state remains the same
+					return psiphon.ContextError(err)
+				}
+				if database.maxMindReader != nil {
+					database.maxMindReader.Close()
+				}
+				database.maxMindReader = maxMindReader
+				return nil
+			})
+
+		_, err := database.Reload()
+		if err != nil {
+			return nil, psiphon.ContextError(err)
+		}
+
+		geoIP.databases[i] = database
 	}
 
-	return geoIP, err
+	return geoIP, nil
+}
+
+// Reloaders gets the list of reloadable databases in use
+// by the GeoIPService. This list is used to hot reload
+// these databases.
+func (geoIP *GeoIPService) Reloaders() []psiphon.Reloader {
+	reloaders := make([]psiphon.Reloader, len(geoIP.databases))
+	for i, database := range geoIP.databases {
+		reloaders[i] = database
+	}
+	return reloaders
 }
 
 // Lookup determines a GeoIPData for a given client IP address.
 func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
-	geoIP.ReloadableFile.RLock()
-	defer geoIP.ReloadableFile.RUnlock()
-
 	result := NewGeoIPData()
 
 	ip := net.ParseIP(ipAddress)
 
-	// Note: maxMindReader is nil when config.GeoIPDatabaseFilename is blank.
-	if ip == nil || geoIP.maxMindReader == nil {
+	if ip == nil || len(geoIP.databases) == 0 {
 		return result
 	}
 
@@ -120,9 +141,16 @@ func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
 		ISP string `maxminddb:"isp"`
 	}
 
-	err := geoIP.maxMindReader.Lookup(ip, &geoIPFields)
-	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("GeoIP lookup failed")
+	// Each database will populate geoIPFields with the values it contains. In the
+	// currnt MaxMind deployment, the City database populates Country and City and
+	// the separate ISP database populates ISP.
+	for _, database := range geoIP.databases {
+		database.ReloadableFile.RLock()
+		err := database.maxMindReader.Lookup(ip, &geoIPFields)
+		database.ReloadableFile.RUnlock()
+		if err != nil {
+			log.WithContextFields(LogFields{"error": err}).Warning("GeoIP lookup failed")
+		}
 	}
 
 	if geoIPFields.Country.ISOCode != "" {

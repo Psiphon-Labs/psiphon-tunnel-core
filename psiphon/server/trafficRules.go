@@ -131,7 +131,6 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 	set := &TrafficRulesSet{}
 
 	set.ReloadableFile = psiphon.NewReloadableFile(
-		"traffic rules set",
 		filename,
 		func(filename string) error {
 			configJSON, err := ioutil.ReadFile(filename)
