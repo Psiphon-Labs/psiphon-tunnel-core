@@ -181,6 +181,7 @@ type SupportServices struct {
 	TrafficRulesSet *TrafficRulesSet
 	PsinetDatabase  *psinet.Database
 	GeoIPService    *GeoIPService
+	DNSResolver     *DNSResolver
 }
 
 // NewSupportServices initializes a new SupportServices.
@@ -201,11 +202,17 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 		return nil, psiphon.ContextError(err)
 	}
 
+	dnsResolver, err := NewDNSResolver(config.DNSResolverIPAddress)
+	if err != nil {
+		return nil, psiphon.ContextError(err)
+	}
+
 	return &SupportServices{
 		Config:          config,
 		TrafficRulesSet: trafficRulesSet,
 		PsinetDatabase:  psinetDatabase,
 		GeoIPService:    geoIPService,
+		DNSResolver:     dnsResolver,
 	}, nil
 }
 

@@ -362,14 +362,15 @@ func (reloadable *ReloadableFile) WillReload() bool {
 // All data structure readers should be blocked by the ReloadableFile mutex.
 func (reloadable *ReloadableFile) Reload() (bool, error) {
 
-	reloadable.Lock()
-	defer reloadable.Unlock()
-
 	if !reloadable.WillReload() {
 		return false, nil
 	}
 
+	// Check whether the file has changed _before_ blocking readers
+
+	reloadable.RLock()
 	changedFileInfo, err := IsFileChanged(reloadable.fileName, reloadable.fileInfo)
+	reloadable.RUnlock()
 	if err != nil {
 		return false, ContextError(err)
 	}
@@ -377,6 +378,11 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 	if changedFileInfo == nil {
 		return false, nil
 	}
+
+	// ...now block readers
+
+	reloadable.Lock()
+	defer reloadable.Unlock()
 
 	err = reloadable.reloadAction(reloadable.fileName)
 	if err != nil {

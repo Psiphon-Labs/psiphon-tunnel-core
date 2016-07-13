@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -85,8 +84,8 @@ type udpPortForwardMultiplexer struct {
 	sshChannel        ssh.Channel
 	portForwardsMutex sync.Mutex
 	portForwards      map[uint16]*udpPortForward
-	relayWaitGroup    *sync.WaitGroup
 	portForwardLRU    *psiphon.LRUConns
+	relayWaitGroup    *sync.WaitGroup
 }
 
 func (mux *udpPortForwardMultiplexer) run() {
@@ -178,7 +177,8 @@ func (mux *udpPortForwardMultiplexer) run() {
 
 			// Transparent DNS forwarding
 			if message.forwardDNS {
-				dialIP, dialPort = mux.transparentDNSAddress(dialIP, dialPort)
+				dialIP = mux.sshClient.sshServer.support.DNSResolver.Get()
+				dialPort = DNS_RESOLVER_PORT
 			}
 
 			log.WithContextFields(
@@ -251,19 +251,6 @@ func (mux *udpPortForwardMultiplexer) run() {
 	mux.portForwardsMutex.Unlock()
 
 	mux.relayWaitGroup.Wait()
-}
-
-func (mux *udpPortForwardMultiplexer) transparentDNSAddress(
-	dialIP net.IP, dialPort int) (net.IP, int) {
-
-	if mux.sshClient.sshServer.support.Config.UDPForwardDNSServerAddress != "" {
-		// Note: UDPForwardDNSServerAddress is validated in LoadConfig
-		host, portStr, _ := net.SplitHostPort(
-			mux.sshClient.sshServer.support.Config.UDPForwardDNSServerAddress)
-		dialIP = net.ParseIP(host)
-		dialPort, _ = strconv.Atoi(portStr)
-	}
-	return dialIP, dialPort
 }
 
 func (mux *udpPortForwardMultiplexer) removePortForward(connID uint16) {
