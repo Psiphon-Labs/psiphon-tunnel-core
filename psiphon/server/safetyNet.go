@@ -23,8 +23,13 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
 
 const (
@@ -79,12 +84,12 @@ func newJwtHeader(jsonBytes []byte) (jwtHeader, error) {
 }
 
 type jwtBody struct {
-	Nonce                      string   `json:"nonce"`
-	TimestampMs                int      `json:"timestampMs"`
-	ApkPackageName             string   `json:"apkPackageName"`
-	ApkDigestSha256            string   `json:"apkDigestSha256"`
 	CtsProfileMatch            bool     `json:"ctsProfileMatch"`
+	TimestampMs                int      `json:"timestampMs"`
+	ApkDigestSha256            string   `json:"apkDigestSha256"`
+	ApkPackageName             string   `json:"apkPackageName"`
 	Extension                  string   `json:"extension"`
+	Nonce                      string   `json:"nonce"`
 	ApkCertificateDigestSha256 []string `json:"apkCertificateDigestSha256"`
 }
 
@@ -95,25 +100,25 @@ func newJwtBody(jsonBytes []byte) (jwtBody, error) {
 }
 
 // Verify x509 certificate chain
-func (x5c X5C) verifyCertChain() (*x509.Certificate, error) {
+func (x5c X5C) verifyCertChain() (leaf *x509.Certificate, validCN bool, err error) {
 	if len(x5c) == 0 || len(x5c) > 10 {
 		// OpenSSL's default maximum chain length is 10
-		return nil, fmt.Errorf("Invalid certchain length of %d\n", len(x5c))
+		return nil, false, fmt.Errorf("Invalid certchain length of %d\n", len(x5c))
 	}
 
 	// Parse leaf certificate
 	leafCertDer, err := base64.StdEncoding.DecodeString(x5c[0])
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	leafCert, err := x509.ParseCertificate(leafCertDer)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	// Verify CN
-	if leafCert.Subject.CommonName != safetynetCN {
-		return nil, err
+	if leafCert.Subject.CommonName == safetynetCN {
+		validCN = true
 	}
 
 	// Parse and add intermediate certificates
@@ -121,12 +126,12 @@ func (x5c X5C) verifyCertChain() (*x509.Certificate, error) {
 	for i := 1; i < len(x5c); i++ {
 		intermediateCertDer, err := base64.StdEncoding.DecodeString(x5c[i])
 		if err != nil {
-			return nil, err
+			return leafCert, false, err
 		}
 
 		intermediateCert, err := x509.ParseCertificate(intermediateCertDer)
 		if err != nil {
-			return nil, err
+			return leafCert, false, err
 		}
 		intermediates.AddCert(intermediateCert)
 	}
@@ -135,7 +140,7 @@ func (x5c X5C) verifyCertChain() (*x509.Certificate, error) {
 	roots := x509.NewCertPool()
 	ok := roots.AppendCertsFromPEM([]byte(geotrustCert))
 	if !ok {
-		return nil, fmt.Errorf("Failed to append GEOTRUST cert\n")
+		return leafCert, false, fmt.Errorf("Failed to append GEOTRUST cert\n")
 	}
 
 	// Verify leaf certificate
@@ -146,101 +151,140 @@ func (x5c X5C) verifyCertChain() (*x509.Certificate, error) {
 	}
 	_, err = leafCert.Verify(storeCtx)
 	if err != nil {
-		return nil, err
+		return leafCert, false, err
 	}
 
-	return leafCert, nil
+	return leafCert, validCN, nil
 }
 
-func (body *jwtBody) verifyJWTBody() bool {
+func (body *jwtBody) verifyJWTBody() (validApkCert, validApkPackageName bool) {
 	// Verify apk certificate digest
-	if len(body.ApkCertificateDigestSha256) < 1 || body.ApkCertificateDigestSha256[0] != psiphon3Base64CertHash {
-		return false
+	if len(body.ApkCertificateDigestSha256) >= 1 && body.ApkCertificateDigestSha256[0] == psiphon3Base64CertHash {
+		validApkCert = true
 	}
 
 	// Verify apk package name
-	if !sliceContains(psiphonApkPackagenames, body.ApkPackageName) {
-		return false
+	if psiphon.Contains(psiphonApkPackagenames, body.ApkPackageName) {
+		validApkPackageName = true
 	}
 
-	return true
+	return
 }
 
-func sliceContains(arr []string, str string) bool {
-	for _, s := range arr {
-		if s == str {
-			return true
-		}
+// Form log fields for debugging
+func errorLogFields(err error, params requestJSONObject) LogFields {
+	return LogFields{
+		"error_message": err.Error(),
+		"payload":       params,
 	}
-
-	return false
 }
 
-// Validate JWT produced by safteynet
-func verifySafetyNetPayload(params requestJSONObject) bool {
+// Convert error to string for logging
+func getError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// Validate JWT produced by safetynet
+func verifySafetyNetPayload(params requestJSONObject) (bool, LogFields) {
 
 	jwt := newJwt(params)
 	if jwt == nil {
 		// Malformed JWT
-		return false
+		return false, errorLogFields(errors.New("Invalid request to client_verification, malformed jwt"), params)
+
+	}
+
+	statusStrings := map[int]string{
+		0: "API_REQUEST_OK",
+		1: "API_REQUEST_FAILED",
+		2: "API_CONNECT_FAILED",
+	}
+
+	statusString, ok := statusStrings[(*jwt).status]
+	if !ok {
+		statusString = "INVALID_STATUS: expected 0-2, got " + strconv.Itoa((*jwt).status)
 	}
 
 	// SafetyNet check failed
 	if (*jwt).status != 0 {
-		return false
+		return false, errorLogFields(errors.New(statusString), params)
 	}
 
 	// Split into base64 encoded header, body, signature
 	jwtParts := strings.Split((*jwt).payload, ".")
 	if len(jwtParts) != 3 {
 		// Malformed payload
-		return false
+		return false, errorLogFields(errors.New("Invalid request to client_verification, malformed jwt"), params)
+
 	}
 
 	// Decode header, body, signature
-	headerJson, err := base64.URLEncoding.WithPadding(base64.NoPadding).DecodeString(jwtParts[0])
+	headerJson, err := base64.RawURLEncoding.DecodeString(jwtParts[0])
 	if err != nil {
-		return false
+		return false, errorLogFields(err, params)
 	}
-	bodyJson, err := base64.URLEncoding.WithPadding(base64.NoPadding).DecodeString(jwtParts[1])
+	bodyJson, err := base64.RawURLEncoding.DecodeString(jwtParts[1])
 	if err != nil {
-		return false
+		return false, errorLogFields(err, params)
 	}
-	signature, err := base64.URLEncoding.WithPadding(base64.NoPadding).DecodeString(jwtParts[2])
+	signature, err := base64.RawURLEncoding.DecodeString(jwtParts[2])
 	if err != nil {
-		return false
+		return false, errorLogFields(err, params)
 	}
 
 	// Extract header from json
 	header, err := newJwtHeader(headerJson)
 	if err != nil {
-		return false
+		return false, errorLogFields(err, params)
 	}
 
-	// Validate certchain in header
-	leafCert, err := header.CertChain.verifyCertChain()
-	if err != nil {
-		// Invalid certchain
-		return false
-	}
+	// Verify certchain in header
+	leafCert, validCN, certChainErrors := header.CertChain.verifyCertChain()
 
-	// Validate signature
-	err = leafCert.CheckSignature(x509.SHA256WithRSA, []byte(jwtParts[0]+"."+jwtParts[1]), signature)
-	if err != nil {
-		return false
+	var signatureErrors error
+	if leafCert == nil {
+		signatureErrors = errors.New("Failed to parse leaf certificate")
+	} else {
+		// Verify signature over header and body
+		signatureErrors = leafCert.CheckSignature(x509.SHA256WithRSA, []byte(jwtParts[0]+"."+jwtParts[1]), signature)
 	}
 
 	// Extract body from json
 	body, err := newJwtBody(bodyJson)
 	if err != nil {
-		return false
+		return false, errorLogFields(err, params)
 	}
 
 	// Validate jwt payload
-	validPayload := body.verifyJWTBody()
-	if !validPayload {
-		return false
+	validApkCert, validApkPackageName := body.verifyJWTBody()
+
+	validCertChain := certChainErrors == nil
+	validSignature := signatureErrors == nil
+	verified := validCN && validApkCert && validApkPackageName && validCertChain && validSignature
+
+	// Generate logging information
+	logFields := LogFields{
+		"apk_certificate_digest_sha256": body.ApkCertificateDigestSha256[0],
+		"apk_digest_sha256":             body.ApkDigestSha256,
+		"apk_package_name":              body.ApkPackageName,
+		"certchain_errors":              getError(certChainErrors),
+		"cts_profile_match":             body.CtsProfileMatch,
+		"extension":                     body.Extension,
+		"nonce":                         body.Nonce,
+		"signature_errors":              getError(signatureErrors),
+		"status":                        strconv.Itoa((*jwt).status),
+		"status_string":                 statusString,
+		"valid_cn":                      validCN,
+		"valid_apk_cert":                validApkCert,
+		"valid_apk_packagename":         validApkPackageName,
+		"valid_certchain":               validCertChain,
+		"valid_signature":               validSignature,
+		"verification_timestamp":        time.Unix(0, int64(body.TimestampMs)*1e6).UTC().Format(time.RFC3339),
+		"verified":                      verified,
 	}
 
-	return true
+	return verified, logFields
 }
