@@ -618,14 +618,7 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 			return
 		}
 
-		if sshClient.sshServer.support.Config.UseFail2Ban() {
-			clientIPAddress := psiphon.IPAddressFromAddr(conn.RemoteAddr())
-			if clientIPAddress != "" {
-				LogFail2Ban(clientIPAddress)
-			}
-		}
-
-		log.WithContextFields(LogFields{"error": err, "method": method}).Error("authentication failed")
+		log.WithContextFields(LogFields{"error": err, "method": method}).Warning("authentication failed")
 
 	} else {
 
