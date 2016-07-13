@@ -183,6 +183,7 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 		ClientVerificationRequired    bool                `json:"client_verification_required"`
 		ClientVerificationServerNonce string              `json:"client_verification__server_nonce"`
 		ClientVerificationTTLSeconds  int                 `json:"client_verification_ttl_seconds"`
+		ClientVerificationResetCache  bool                `json:"client_verification_reset_cache"`
 	}
 	err := json.Unmarshal(response, &handshakeResponse)
 	if err != nil {
@@ -250,7 +251,8 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 
 	if handshakeResponse.ClientVerificationRequired {
 		NoticeClientVerificationRequired(handshakeResponse.ClientVerificationServerNonce,
-			handshakeResponse.ClientVerificationTTLSeconds)
+			handshakeResponse.ClientVerificationTTLSeconds,
+			handshakeResponse.ClientVerificationResetCache)
 	}
 
 	return nil
@@ -684,6 +686,7 @@ func (serverContext *ServerContext) DoClientVerificationRequest(
 	var clientVerificationResponse struct {
 		ClientVerificationServerNonce string `json:"client_verification_server_nonce"`
 		ClientVerificationTTLSeconds  int    `json:"client_verification_ttl_seconds"`
+		ClientVerificationResetCache  bool   `json:"client_verification_reset_cache"`
 	}
 
 	err = json.Unmarshal(response, &clientVerificationResponse)
@@ -694,7 +697,8 @@ func (serverContext *ServerContext) DoClientVerificationRequest(
 	if clientVerificationResponse.ClientVerificationTTLSeconds > 0 {
 		NoticeClientVerificationRequired(
 			clientVerificationResponse.ClientVerificationServerNonce,
-			clientVerificationResponse.ClientVerificationTTLSeconds)
+			clientVerificationResponse.ClientVerificationTTLSeconds,
+			clientVerificationResponse.ClientVerificationResetCache)
 	} else {
 		NoticeClientVerificationRequestCompleted(serverIP)
 	}
