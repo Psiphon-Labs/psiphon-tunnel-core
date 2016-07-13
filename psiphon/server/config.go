@@ -194,13 +194,15 @@ type Config struct {
 	// a udpgw server which clients may be port forwarding to. When
 	// specified, these TCP port forwards are intercepted and handled
 	// directly by this server, which parses the SSH channel using the
-	// udpgw protocol.
+	// udpgw protocol. Handling includes udpgw transparent DNS: tunneled
+	// UDP DNS packets are rerouted to the host's DNS server.
 	UDPInterceptUdpgwServerAddress string
 
-	// DNSServerAddress specifies the network address of a DNS server
-	// to which DNS UDP packets will be forwarded to. When set, any
-	// tunneled DNS UDP packets will be re-routed to this destination.
-	UDPForwardDNSServerAddress string
+	// DNSResolverIPAddress specifies the IP address of a DNS server
+	// to be used when "/etc/resolv.conf" doesn't exist or fails to
+	// parse. When blank, "/etc/resolv.conf" must contain a usable
+	// "nameserver" entry.
+	DNSResolverIPAddress string
 
 	// LoadMonitorPeriodSeconds indicates how frequently to log server
 	// load information (number of connected clients per tunnel protocol,
@@ -299,15 +301,15 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		return err
 	}
 
-	if config.UDPForwardDNSServerAddress != "" {
-		if err := validateNetworkAddress(config.UDPForwardDNSServerAddress); err != nil {
-			return nil, fmt.Errorf("UDPForwardDNSServerAddress is invalid: %s", err)
-		}
-	}
-
 	if config.UDPInterceptUdpgwServerAddress != "" {
 		if err := validateNetworkAddress(config.UDPInterceptUdpgwServerAddress); err != nil {
 			return nil, fmt.Errorf("UDPInterceptUdpgwServerAddress is invalid: %s", err)
+		}
+	}
+
+	if config.DNSResolverIPAddress != "" {
+		if net.ParseIP(config.DNSResolverIPAddress) == nil {
+			return nil, fmt.Errorf("DNSResolverIPAddress is invalid")
 		}
 	}
 
@@ -479,7 +481,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		SSHPassword:                    sshPassword,
 		ObfuscatedSSHKey:               obfuscatedSSHKey,
 		TunnelProtocolPorts:            params.TunnelProtocolPorts,
-		UDPForwardDNSServerAddress:     "8.8.8.8:53",
+		DNSResolverIPAddress:           "8.8.8.8",
 		UDPInterceptUdpgwServerAddress: "127.0.0.1:7300",
 		MeekCookieEncryptionPrivateKey: meekCookieEncryptionPrivateKey,
 		MeekObfuscatedKey:              meekObfuscatedKey,
