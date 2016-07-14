@@ -342,11 +342,22 @@ func clientVerificationAPIRequestHandler(
 		return nil, psiphon.ContextError(err)
 	}
 
+	logFields := getRequestLogFields(
+		support,
+		"client_verification",
+		geoIPData,
+		params,
+		baseRequestParams)
+
 	var verified bool
+	var safetyNetCheckLogs LogFields
 	switch normalizeClientPlatform(clientPlatform) {
 	case CLIENT_PLATFORM_ANDROID:
-		verified = verifySafetyNetPayload(verificationData)
+		verified, safetyNetCheckLogs = verifySafetyNetPayload(verificationData)
+		logFields["safetynet_check"] = safetyNetCheckLogs
 	}
+
+	log.WithContextFields(logFields).Info("API event")
 
 	if verified {
 		// TODO: change throttling treatment
