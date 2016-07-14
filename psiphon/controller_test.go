@@ -456,6 +456,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		config.UpstreamProxyUrl = disruptorProxyURL
 	} else if runConfig.useUpstreamProxy {
 		config.UpstreamProxyUrl = upstreamProxyURL
+		config.UpstreamProxyCustomHeaders = upstreamProxyCustomHeaders
 	}
 
 	if runConfig.useHostNameTransformer {
@@ -919,10 +920,44 @@ func initDisruptor() {
 
 const upstreamProxyURL = "http://127.0.0.1:2161"
 
+var upstreamProxyCustomHeaders = map[string][]string{"X-Test-Header-Name": []string{"test-header-value1", "test-header-value2"}}
+
+func hasExpectedCustomHeaders(h http.Header) bool {
+	for name, values := range upstreamProxyCustomHeaders {
+		if h[name] == nil {
+			return false
+		}
+		// Order may not be the same
+		for _, value := range values {
+			if !Contains(h[name], value) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func initUpstreamProxy() {
 	go func() {
 		proxy := goproxy.NewProxyHttpServer()
-		err := http.ListenAndServe(":2161", proxy)
+
+		proxy.OnRequest().DoFunc(
+			func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+				if !hasExpectedCustomHeaders(r.Header) {
+					return nil, goproxy.NewResponse(r, goproxy.ContentTypeText, http.StatusUnauthorized, "")
+				}
+				return r, nil
+			})
+
+		proxy.OnRequest().HandleConnectFunc(
+			func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
+				if !hasExpectedCustomHeaders(ctx.Req.Header) {
+					return goproxy.RejectConnect, host
+				}
+				return goproxy.OkConnect, host
+			})
+
+		err := http.ListenAndServe("127.0.0.1:2161", proxy)
 		if err != nil {
 			fmt.Printf("upstream proxy failed: %s", err)
 		}
