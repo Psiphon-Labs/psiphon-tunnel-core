@@ -70,22 +70,6 @@ type Config struct {
 	// to. When blank, logs are written to stderr.
 	LogFilename string
 
-	// Fail2BanFormat is a string format specifier for the
-	// log message format to use for fail2ban integration for
-	// blocking abusive clients by source IP address.
-	// When set, logs with this format are made if clients fail
-	// to authenticate.
-	// The client's IP address is included with the log message.
-	// An example format specifier, which should be compatible
-	// with default SSH fail2ban configuration, is
-	// "Authentication failure for psiphon-client from %s".
-	Fail2BanFormat string
-
-	// LogFilename specifies the path of the file to log
-	// fail2ban messages to. When blank, logs are written to
-	// stderr.
-	Fail2BanLogFilename string
-
 	// DiscoveryValueHMACKey is the network-wide secret value
 	// used to determine a unique discovery strategy.
 	DiscoveryValueHMACKey string
@@ -226,12 +210,6 @@ func (config *Config) RunLoadMonitor() bool {
 	return config.LoadMonitorPeriodSeconds > 0
 }
 
-// UseFail2Ban indicates whether to log client IP addresses, in authentication
-// failure cases, for use by fail2ban.
-func (config *Config) UseFail2Ban() bool {
-	return config.Fail2BanFormat != ""
-}
-
 // LoadConfig loads and validates a JSON encoded server config.
 func LoadConfig(configJSON []byte) (*Config, error) {
 
@@ -239,10 +217,6 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	err := json.Unmarshal(configJSON, &config)
 	if err != nil {
 		return nil, psiphon.ContextError(err)
-	}
-
-	if config.Fail2BanFormat != "" && strings.Count(config.Fail2BanFormat, "%s") != 1 {
-		return nil, errors.New("Fail2BanFormat must have one '%%s' placeholder")
 	}
 
 	if config.ServerIPAddress == "" {
@@ -319,13 +293,12 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 // GenerateConfigParams specifies customizations to be applied to
 // a generated server config.
 type GenerateConfigParams struct {
+	LogFilename          string
 	ServerIPAddress      string
 	WebServerPort        int
 	EnableSSHAPIRequests bool
 	TunnelProtocolPorts  map[string]int
 	TrafficRulesFilename string
-	LogFilename          string
-	Fail2BanLogFilename  string
 }
 
 // GenerateConfig creates a new Psiphon server config. It returns JSON
@@ -466,7 +439,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	config := &Config{
 		LogLevel:                       "info",
-		Fail2BanFormat:                 "Authentication failure for psiphon-client from %s",
+		LogFilename:                    params.LogFilename,
 		GeoIPDatabaseFilenames:         nil,
 		HostID:                         "example-host-id",
 		ServerIPAddress:                params.ServerIPAddress,
@@ -490,8 +463,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		MeekProxyForwardedForHeaders:   []string{"X-Forwarded-For"},
 		LoadMonitorPeriodSeconds:       300,
 		TrafficRulesFilename:           params.TrafficRulesFilename,
-		LogFilename:                    params.LogFilename,
-		Fail2BanLogFilename:            params.Fail2BanLogFilename,
 	}
 
 	encodedConfig, err := json.MarshalIndent(config, "\n", "    ")

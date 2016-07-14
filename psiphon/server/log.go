@@ -20,7 +20,6 @@
 package server
 
 import (
-	"fmt"
 	"io"
 	"os"
 
@@ -67,24 +66,11 @@ func NewLogWriter() *io.PipeWriter {
 	return log.Writer()
 }
 
-// LogFail2Ban logs a message using the format specified by
-// config.Fail2BanFormat and the given client IP address. This
-// is for integration with fail2ban for blocking abusive
-// clients by source IP address.
-func LogFail2Ban(clientIPAddress string) {
-	fail2BanLogger.Info(
-		fmt.Sprintf(fail2BanFormat, clientIPAddress))
-}
-
 var log *ContextLogger
-var fail2BanFormat string
-var fail2BanLogger *logrus.Logger
 
 // InitLogging configures a logger according to the specified
 // config params. If not called, the default logger set by the
 // package init() is used.
-// When configured, InitLogging also establishes a local syslog
-// logger specifically for fail2ban integration.
 // Concurrenty note: should only be called from the main
 // goroutine.
 func InitLogging(config *Config) error {
@@ -110,30 +96,6 @@ func InitLogging(config *Config) error {
 			Formatter: &logrus.JSONFormatter{},
 			Level:     level,
 		},
-	}
-
-	if config.Fail2BanFormat != "" {
-
-		fail2BanFormat = config.Fail2BanFormat
-
-		fail2BanLogWriter := os.Stderr
-
-		if config.Fail2BanLogFilename != "" {
-			logWriter, err = os.OpenFile(
-				config.Fail2BanLogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
-			if err != nil {
-				return psiphon.ContextError(err)
-			}
-		}
-
-		fail2BanLogger = &logrus.Logger{
-			Out: fail2BanLogWriter,
-			Formatter: &logrus.TextFormatter{
-				DisableColors: true,
-				FullTimestamp: true,
-			},
-			Level: level,
-		}
 	}
 
 	return nil

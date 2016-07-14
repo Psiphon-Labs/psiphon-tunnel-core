@@ -95,7 +95,6 @@ func handshakeAPIRequestHandler(
 
 	err := validateRequestParams(support, params, baseRequestParams)
 	if err != nil {
-		// TODO: fail2ban?
 		return nil, psiphon.ContextError(err)
 	}
 
@@ -168,7 +167,6 @@ func connectedAPIRequestHandler(
 
 	err := validateRequestParams(support, params, connectedRequestParams)
 	if err != nil {
-		// TODO: fail2ban?
 		return nil, psiphon.ContextError(err)
 	}
 
@@ -214,7 +212,6 @@ func statusAPIRequestHandler(
 
 	err := validateRequestParams(support, params, statusRequestParams)
 	if err != nil {
-		// TODO: fail2ban?
 		return nil, psiphon.ContextError(err)
 	}
 
@@ -330,7 +327,6 @@ func clientVerificationAPIRequestHandler(
 
 	err := validateRequestParams(support, params, baseRequestParams)
 	if err != nil {
-		// TODO: fail2ban?
 		return nil, psiphon.ContextError(err)
 	}
 

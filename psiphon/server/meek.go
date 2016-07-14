@@ -303,7 +303,7 @@ func (server *MeekServer) getSession(
 	}
 
 	// Determine the client remote address, which is used for geolocation
-	// and stats. When an intermediate proxy of CDN is in use, we may be
+	// and stats. When an intermediate proxy or CDN is in use, we may be
 	// able to determine the original client address by inspecting HTTP
 	// headers such as X-Forwarded-For.
 
@@ -317,7 +317,7 @@ func (server *MeekServer) getSession(
 				// list of IPs (each proxy in a chain). The first IP should be
 				// the client IP.
 				proxyClientIP := strings.Split(header, ",")[0]
-				if net.ParseIP(clientIP) != nil {
+				if net.ParseIP(proxyClientIP) != nil {
 					clientIP = proxyClientIP
 					break
 				}
@@ -331,7 +331,7 @@ func (server *MeekServer) getSession(
 	// meek conn with a useful value to return when the tunnel
 	// server calls conn.RemoteAddr() to get the client's IP address.
 
-	// Assumes clientIP is a value IP address; the port value is a stub
+	// Assumes clientIP is a valid IP address; the port value is a stub
 	// and is expected to be ignored.
 	clientConn := newMeekConn(
 		&net.TCPAddr{
