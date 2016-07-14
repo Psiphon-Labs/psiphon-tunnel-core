@@ -196,6 +196,7 @@ func DialMeek(
 			TrustedCACertificatesFilename: meekDialConfig.TrustedCACertificatesFilename,
 		})
 
+		// TODO: wrap in an http.Client and use http.Client.Timeout which actually covers round trip
 		transport = &http.Transport{
 			Dial: dialer,
 			ResponseHeaderTimeout: MEEK_ROUND_TRIP_TIMEOUT,
@@ -229,6 +230,7 @@ func DialMeek(
 			dialer = NewTCPDialer(meekDialConfig)
 		}
 
+		// TODO: wrap in an http.Client and use http.Client.Timeout which actually covers round trip
 		httpTransport := &http.Transport{
 			Proxy: proxyUrl,
 			Dial:  dialer,

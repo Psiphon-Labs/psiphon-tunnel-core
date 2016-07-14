@@ -35,6 +35,9 @@ import (
 const (
 	MAX_API_PARAMS_SIZE = 256 * 1024 // 256KB
 
+	CLIENT_VERIFICATION_REQUIRED    = true
+	CLIENT_VERIFICATION_TTL_SECONDS = 60 * 60 * 24 * 7 // 7 days
+
 	CLIENT_PLATFORM_ANDROID = "Android"
 	CLIENT_PLATFORM_WINDOWS = "Windows"
 )
@@ -108,13 +111,17 @@ func handshakeAPIRequestHandler(
 
 	// TODO: share struct definition with psiphon/serverApi.go?
 	var handshakeResponse struct {
-		Homepages            []string            `json:"homepages"`
-		UpgradeClientVersion string              `json:"upgrade_client_version"`
-		PageViewRegexes      []map[string]string `json:"page_view_regexes"`
-		HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
-		EncodedServerList    []string            `json:"encoded_server_list"`
-		ClientRegion         string              `json:"client_region"`
-		ServerTimestamp      string              `json:"server_timestamp"`
+		Homepages                     []string            `json:"homepages"`
+		UpgradeClientVersion          string              `json:"upgrade_client_version"`
+		PageViewRegexes               []map[string]string `json:"page_view_regexes"`
+		HttpsRequestRegexes           []map[string]string `json:"https_request_regexes"`
+		EncodedServerList             []string            `json:"encoded_server_list"`
+		ClientRegion                  string              `json:"client_region"`
+		ServerTimestamp               string              `json:"server_timestamp"`
+		ClientVerificationRequired    bool                `json:"client_verification_required"`
+		ClientVerificationServerNonce string              `json:"client_verification_server_nonce"`
+		ClientVerificationTTLSeconds  int                 `json:"client_verification_ttl_seconds"`
+		ClientVerificationResetCache  bool                `json:"client_verification_reset_cache"`
 	}
 
 	// Ignoring errors as params are validated
@@ -140,6 +147,11 @@ func handshakeAPIRequestHandler(
 	handshakeResponse.ClientRegion = clientRegion
 
 	handshakeResponse.ServerTimestamp = psiphon.GetCurrentTimestamp()
+
+	handshakeResponse.ClientVerificationRequired = CLIENT_VERIFICATION_REQUIRED
+	handshakeResponse.ClientVerificationServerNonce = ""
+	handshakeResponse.ClientVerificationTTLSeconds = CLIENT_VERIFICATION_TTL_SECONDS
+	handshakeResponse.ClientVerificationResetCache = false
 
 	responsePayload, err := json.Marshal(handshakeResponse)
 	if err != nil {
@@ -389,7 +401,7 @@ var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"relay_protocol", isRelayProtocol, 0},
 	requestParamSpec{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
 	requestParamSpec{"device_region", isRegionCode, requestParamOptional},
-	requestParamSpec{"upstream_proxy_type", isAnyString, requestParamOptional},
+	requestParamSpec{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
 	requestParamSpec{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
 	requestParamSpec{"meek_dial_address", isDialAddress, requestParamOptional},
 	requestParamSpec{"meek_resolved_ip_address", isIPAddress, requestParamOptional},
@@ -528,6 +540,9 @@ func getRequestLogFields(
 			case "meek_host_header":
 				host, _, _ := net.SplitHostPort(strValue)
 				logFields[expectedParam.name] = host
+			case "upstream_proxy_type":
+				// Submitted value could be e.g., "SOCKS5" or "socks5"; log lowercase
+				logFields[expectedParam.name] = strings.ToLower(strValue)
 			default:
 				logFields[expectedParam.name] = strValue
 			}
@@ -636,15 +651,15 @@ func normalizeClientPlatform(clientPlatform string) string {
 	return CLIENT_PLATFORM_WINDOWS
 }
 
+func isAnyString(support *SupportServices, value string) bool {
+	return true
+}
+
 func isMobileClientPlatform(clientPlatform string) bool {
 	return normalizeClientPlatform(clientPlatform) == CLIENT_PLATFORM_ANDROID
 }
 
 // Input validators follow the legacy validations rules in psi_web.
-
-func isAnyString(support *SupportServices, value string) bool {
-	return true
-}
 
 func isServerSecret(support *SupportServices, value string) bool {
 	return subtle.ConstantTimeCompare(
@@ -677,6 +692,11 @@ func isRelayProtocol(_ *SupportServices, value string) bool {
 
 func isBooleanFlag(_ *SupportServices, value string) bool {
 	return value == "0" || value == "1"
+}
+
+func isUpstreamProxyType(_ *SupportServices, value string) bool {
+	value = strings.ToLower(value)
+	return value == "http" || value == "socks5" || value == "socks4a"
 }
 
 func isRegionCode(_ *SupportServices, value string) bool {
