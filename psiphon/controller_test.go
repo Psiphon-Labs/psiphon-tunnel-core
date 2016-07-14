@@ -35,12 +35,14 @@ import (
 	"time"
 
 	socks "github.com/Psiphon-Inc/goptlib"
+	"github.com/elazarl/goproxy"
 )
 
 func TestMain(m *testing.M) {
 	flag.Parse()
 	os.Remove(DATA_STORE_FILENAME)
 	initDisruptor()
+	initUpstreamProxy()
 	SetEmitDiagnosticNotices(true)
 	os.Exit(m.Run())
 }
@@ -79,6 +81,7 @@ func TestUntunneledUpgradeDownload(t *testing.T) {
 			disableEstablishing:      true,
 			disableApi:               false,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 			runDuration:              0,
@@ -95,6 +98,7 @@ func TestUntunneledResumableUpgradeDownload(t *testing.T) {
 			disableEstablishing:      true,
 			disableApi:               false,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
 			disruptNetwork:           true,
 			useHostNameTransformer:   false,
 			runDuration:              0,
@@ -111,6 +115,7 @@ func TestUntunneledUpgradeClientIsLatestVersion(t *testing.T) {
 			disableEstablishing:      true,
 			disableApi:               false,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 			runDuration:              0,
@@ -127,6 +132,7 @@ func TestUntunneledResumableFetchRemoveServerList(t *testing.T) {
 			disableEstablishing:      false,
 			disableApi:               false,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
 			disruptNetwork:           true,
 			useHostNameTransformer:   false,
 			runDuration:              0,
@@ -143,6 +149,7 @@ func TestTunneledUpgradeClientIsLatestVersion(t *testing.T) {
 			disableEstablishing:      false,
 			disableApi:               false,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 			runDuration:              0,
@@ -167,6 +174,7 @@ func TestImpairedProtocols(t *testing.T) {
 			disableEstablishing:      false,
 			disableApi:               false,
 			tunnelPoolSize:           40,
+			useUpstreamProxy:         false,
 			disruptNetwork:           true,
 			useHostNameTransformer:   false,
 			runDuration:              1 * time.Minute,
@@ -183,6 +191,7 @@ func TestSSH(t *testing.T) {
 			disableEstablishing:      false,
 			disableApi:               false,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 			runDuration:              0,
@@ -199,6 +208,7 @@ func TestObfuscatedSSH(t *testing.T) {
 			disableEstablishing:      false,
 			disableApi:               false,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 			runDuration:              0,
@@ -215,6 +225,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			disableEstablishing:      false,
 			disableApi:               false,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 			runDuration:              0,
@@ -231,6 +242,7 @@ func TestUnfrontedMeekWithTransformer(t *testing.T) {
 			disableEstablishing:      false,
 			disableApi:               false,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			useHostNameTransformer:   true,
 			runDuration:              0,
@@ -247,6 +259,7 @@ func TestFrontedMeek(t *testing.T) {
 			disableEstablishing:      false,
 			disableApi:               false,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 			runDuration:              0,
@@ -263,6 +276,7 @@ func TestFrontedMeekWithTransformer(t *testing.T) {
 			disableEstablishing:      false,
 			disableApi:               false,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			useHostNameTransformer:   true,
 			runDuration:              0,
@@ -279,6 +293,7 @@ func TestFrontedMeekHTTP(t *testing.T) {
 			disableEstablishing:      false,
 			disableApi:               false,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 			runDuration:              0,
@@ -295,6 +310,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			disableEstablishing:      false,
 			disableApi:               false,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 			runDuration:              0,
@@ -311,6 +327,7 @@ func TestUnfrontedMeekHTTPSWithTransformer(t *testing.T) {
 			disableEstablishing:      false,
 			disableApi:               false,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			useHostNameTransformer:   true,
 			runDuration:              0,
@@ -327,6 +344,58 @@ func TestDisabledApi(t *testing.T) {
 			disableEstablishing:      false,
 			disableApi:               true,
 			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
+			disruptNetwork:           false,
+			useHostNameTransformer:   false,
+			runDuration:              0,
+		})
+}
+
+func TestObfuscatedSSHWithUpstreamProxy(t *testing.T) {
+	controllerRun(t,
+		&controllerRunConfig{
+			expectNoServerEntries:    false,
+			protocol:                 TUNNEL_PROTOCOL_OBFUSCATED_SSH,
+			clientIsLatestVersion:    false,
+			disableUntunneledUpgrade: true,
+			disableEstablishing:      false,
+			disableApi:               false,
+			tunnelPoolSize:           1,
+			useUpstreamProxy:         true,
+			disruptNetwork:           false,
+			useHostNameTransformer:   false,
+			runDuration:              0,
+		})
+}
+
+func TestUnfrontedMeekWithUpstreamProxy(t *testing.T) {
+	controllerRun(t,
+		&controllerRunConfig{
+			expectNoServerEntries:    false,
+			protocol:                 TUNNEL_PROTOCOL_UNFRONTED_MEEK,
+			clientIsLatestVersion:    false,
+			disableUntunneledUpgrade: true,
+			disableEstablishing:      false,
+			disableApi:               false,
+			tunnelPoolSize:           1,
+			useUpstreamProxy:         true,
+			disruptNetwork:           false,
+			useHostNameTransformer:   false,
+			runDuration:              0,
+		})
+}
+
+func TestUnfrontedMeekHTTPSWithUpstreamProxy(t *testing.T) {
+	controllerRun(t,
+		&controllerRunConfig{
+			expectNoServerEntries:    false,
+			protocol:                 TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
+			clientIsLatestVersion:    false,
+			disableUntunneledUpgrade: true,
+			disableEstablishing:      false,
+			disableApi:               false,
+			tunnelPoolSize:           1,
+			useUpstreamProxy:         true,
 			disruptNetwork:           false,
 			useHostNameTransformer:   false,
 			runDuration:              0,
@@ -339,11 +408,12 @@ type controllerRunConfig struct {
 	clientIsLatestVersion    bool
 	disableUntunneledUpgrade bool
 	disableEstablishing      bool
+	disableApi               bool
 	tunnelPoolSize           int
+	useUpstreamProxy         bool
 	disruptNetwork           bool
 	useHostNameTransformer   bool
 	runDuration              time.Duration
-	disableApi               bool
 }
 
 func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
@@ -379,8 +449,13 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		config.UpgradeDownloadClientVersionHeader = ""
 	}
 
+	if runConfig.useUpstreamProxy && runConfig.disruptNetwork {
+		t.Fatalf("cannot use multiple upstream proxies")
+	}
 	if runConfig.disruptNetwork {
 		config.UpstreamProxyUrl = disruptorProxyURL
+	} else if runConfig.useUpstreamProxy {
+		config.UpstreamProxyUrl = upstreamProxyURL
 	}
 
 	if runConfig.useHostNameTransformer {
@@ -840,4 +915,18 @@ func initDisruptor() {
 			}()
 		}
 	}()
+}
+
+const upstreamProxyURL = "http://127.0.0.1:2161"
+
+func initUpstreamProxy() {
+	go func() {
+		proxy := goproxy.NewProxyHttpServer()
+		err := http.ListenAndServe(":2161", proxy)
+		if err != nil {
+			fmt.Printf("upstream proxy failed: %s", err)
+		}
+	}()
+
+	// TODO: wait until listener is active?
 }
