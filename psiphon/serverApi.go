@@ -181,7 +181,7 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 		ClientRegion                  string              `json:"client_region"`
 		ServerTimestamp               string              `json:"server_timestamp"`
 		ClientVerificationRequired    bool                `json:"client_verification_required"`
-		ClientVerificationServerNonce string              `json:"client_verification__server_nonce"`
+		ClientVerificationServerNonce string              `json:"client_verification_server_nonce"`
 		ClientVerificationTTLSeconds  int                 `json:"client_verification_ttl_seconds"`
 		ClientVerificationResetCache  bool                `json:"client_verification_reset_cache"`
 	}
