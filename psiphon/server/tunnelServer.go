@@ -618,6 +618,26 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 			return
 		}
 
+		// Note: here we previously logged messages for fail2ban to act on. This is no longer
+		// done as the complexity outweighs the benefits.
+		//
+		// - The SSH credential is not secret -- it's in the server entry. Attackers targetting
+		//   the server likely already have the credential. On the other hand, random scanning and
+		//   brute forcing is mitigated with high entropy random passwords, rate limiting
+		//   (implemented on the host via iptables), and limited capabilities (the SSH session can
+		//   only port forward).
+		//
+		// - fail2ban coverage was inconsistent; in the case of an unfronted meek protocol through
+		//   an upstream proxy, the remote address is the upstream proxy, which should not be blocked.
+		//   The X-Forwarded-For header cant be used instead as it may be forged and used to get IPs
+		//   deliberately blocked; and in any case fail2ban adds iptables rules which can only block
+		//   by direct remote IP, not by original client IP. Fronted meek has the same iptables issue.
+		//
+		// TODO: random scanning and brute forcing of port 22 will result in log noise. To eliminate
+		// this, and to also cover meek protocols, and bad obfuscation keys, and bad inputs to the web
+		// server, consider implementing fail2ban-type logic directly in this server, with the ability
+		// to use X-Forwarded-For (when trustworthy; e.g, from a CDN).
+
 		log.WithContextFields(LogFields{"error": err, "method": method}).Warning("authentication failed")
 
 	} else {
