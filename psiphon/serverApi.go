@@ -905,7 +905,6 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 		})
 	transport := &http.Transport{
 		Dial: dialer,
-		ResponseHeaderTimeout: timeout,
 	}
 	return &http.Client{
 		Transport: transport,

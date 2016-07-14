@@ -481,7 +481,6 @@ func MakeTunneledHttpClient(
 
 	transport := &http.Transport{
 		Dial: tunneledDialer,
-		ResponseHeaderTimeout: requestTimeout,
 	}
 
 	if config.UseTrustedCACertificatesForStockTLS {
