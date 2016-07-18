@@ -741,7 +741,7 @@ func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
 // ActivityMonitoredConn wraps a net.Conn, adding logic to deal with
 // events triggered by I/O activity.
 //
-// When an inactivity timeout is specified, the net.Conn Read() will
+// When an inactivity timeout is specified, the network I/O will
 // timeout after the specified period of read inactivity. Optionally,
 // ActivityMonitoredConn will also consider the connection active when
 // data is written to it.
@@ -751,33 +751,36 @@ func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
 //
 type ActivityMonitoredConn struct {
 	net.Conn
-	inactivityTimeout time.Duration
-	activeOnWrite     bool
-	startTime         int64
-	lastActivityTime  int64
-	lruEntry          *LRUConnsEntry
+	inactivityTimeout    time.Duration
+	activeOnWrite        bool
+	startTime            int64
+	lastReadActivityTime int64
+	lruEntry             *LRUConnsEntry
 }
 
 func NewActivityMonitoredConn(
 	conn net.Conn,
 	inactivityTimeout time.Duration,
 	activeOnWrite bool,
-	lruEntry *LRUConnsEntry) *ActivityMonitoredConn {
+	lruEntry *LRUConnsEntry) (*ActivityMonitoredConn, error) {
 
 	if inactivityTimeout > 0 {
-		conn.SetReadDeadline(time.Now().Add(inactivityTimeout))
+		err := conn.SetDeadline(time.Now().Add(inactivityTimeout))
+		if err != nil {
+			return nil, ContextError(err)
+		}
 	}
 
 	now := time.Now().UnixNano()
 
 	return &ActivityMonitoredConn{
-		Conn:              conn,
-		inactivityTimeout: inactivityTimeout,
-		activeOnWrite:     activeOnWrite,
-		startTime:         now,
-		lastActivityTime:  now,
-		lruEntry:          lruEntry,
-	}
+		Conn:                 conn,
+		inactivityTimeout:    inactivityTimeout,
+		activeOnWrite:        activeOnWrite,
+		startTime:            now,
+		lastReadActivityTime: now,
+		lruEntry:             lruEntry,
+	}, nil
 }
 
 // GetStartTime gets the time when the ActivityMonitoredConn was
@@ -787,46 +790,50 @@ func (conn *ActivityMonitoredConn) GetStartTime() time.Time {
 }
 
 // GetActiveDuration returns the time elapsed between the initialization
-// of the ActivityMonitoredConn and the last Read (or Write when
-// activeOnWrite is specified).
+// of the ActivityMonitoredConn and the last Read. Only reads are used
+// for this calculation since writes may succeed locally due to buffering.
 func (conn *ActivityMonitoredConn) GetActiveDuration() time.Duration {
-	return time.Duration(atomic.LoadInt64(&conn.lastActivityTime) - conn.startTime)
+	return time.Duration(atomic.LoadInt64(&conn.lastReadActivityTime) - conn.startTime)
 }
 
 func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 	n, err := conn.Conn.Read(buffer)
 	if err == nil {
 
-		atomic.StoreInt64(&conn.lastActivityTime, time.Now().UnixNano())
-
 		if conn.inactivityTimeout > 0 {
-			conn.Conn.SetReadDeadline(time.Now().Add(conn.inactivityTimeout))
+			err = conn.Conn.SetDeadline(time.Now().Add(conn.inactivityTimeout))
+			if err != nil {
+				return n, ContextError(err)
+			}
 		}
-
 		if conn.lruEntry != nil {
 			conn.lruEntry.Touch()
 		}
+
+		atomic.StoreInt64(&conn.lastReadActivityTime, time.Now().UnixNano())
+
 	}
+	// Note: no context error to preserve error type
 	return n, err
 }
 
 func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 	n, err := conn.Conn.Write(buffer)
-	if err == nil {
+	if err == nil && conn.activeOnWrite {
 
-		if conn.activeOnWrite {
-
-			atomic.StoreInt64(&conn.lastActivityTime, time.Now().UnixNano())
-
-			if conn.inactivityTimeout > 0 {
-				conn.Conn.SetReadDeadline(time.Now().Add(conn.inactivityTimeout))
+		if conn.inactivityTimeout > 0 {
+			err = conn.Conn.SetDeadline(time.Now().Add(conn.inactivityTimeout))
+			if err != nil {
+				return n, ContextError(err)
 			}
 		}
 
 		if conn.lruEntry != nil {
 			conn.lruEntry.Touch()
 		}
+
 	}
+	// Note: no context error to preserve error type
 	return n, err
 }
 

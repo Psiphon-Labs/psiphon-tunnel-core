@@ -109,9 +109,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// create a server
 
+	serverIPaddress, err := psiphon.GetInterfaceIPAddress("en0")
+	if err != nil {
+		t.Fatalf("error getting server IP address: %s", err)
+	}
+
 	serverConfigJSON, _, encodedServerEntry, err := GenerateConfig(
 		&GenerateConfigParams{
-			ServerIPAddress:      "127.0.0.1",
+			ServerIPAddress:      serverIPaddress,
 			EnableSSHAPIRequests: runConfig.enableSSHAPIRequests,
 			WebServerPort:        8000,
 			TunnelProtocolPorts:  map[string]int{runConfig.tunnelProtocol: 4000},
