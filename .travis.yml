@@ -8,7 +8,6 @@ addons:
 install:
 - go get -t -d -v ./... && go build -v ./...
 script:
-- go test -v ./...
 - cd psiphon
 - go test -v -covermode=count -coverprofile=transferstats.coverprofile ./transferstats
 - go test -v -covermode=count -coverprofile=upstreamproxy.coverprofile ./upstreamproxy
