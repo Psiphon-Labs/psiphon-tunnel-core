@@ -28,9 +28,12 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
+
+const WEB_SERVER_IO_TIMEOUT = 10 * time.Second
 
 type webServer struct {
 	support  *SupportServices
@@ -80,13 +83,16 @@ func RunWebServer(
 	logWriter := NewLogWriter()
 	defer logWriter.Close()
 
+	// Note: WriteTimeout includes time awaiting request, as per:
+	// https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts
+
 	server := &psiphon.HTTPSServer{
 		http.Server{
 			MaxHeaderBytes: MAX_API_PARAMS_SIZE,
 			Handler:        serveMux,
 			TLSConfig:      tlsConfig,
-			ReadTimeout:    WEB_SERVER_READ_TIMEOUT,
-			WriteTimeout:   WEB_SERVER_WRITE_TIMEOUT,
+			ReadTimeout:    WEB_SERVER_IO_TIMEOUT,
+			WriteTimeout:   WEB_SERVER_IO_TIMEOUT,
 			ErrorLog:       golanglog.New(logWriter, "", 0),
 		},
 	}

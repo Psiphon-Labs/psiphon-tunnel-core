@@ -44,25 +44,27 @@ import (
 //
 // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/default/go/meek-client/meek-client.go
 
-// Protocol version 1 clients can handle arbitrary length response bodies. Older clients
-// report no version number and expect at most 64K response bodies.
-const MEEK_PROTOCOL_VERSION_1 = 1
+const (
 
-// Protocol version 2 clients initiate a session by sending a encrypted and obfuscated meek
-// cookie with their initial HTTP request. Connection information is contained within the
-// encrypted cookie payload. The server inspects the cookie and establishes a new session and
-// returns a new random session ID back to client via Set-Cookie header. The client uses this
-// session ID on all subsequent requests for the remainder of the session.
-const MEEK_PROTOCOL_VERSION_2 = 2
+	// Protocol version 1 clients can handle arbitrary length response bodies. Older clients
+	// report no version number and expect at most 64K response bodies.
+	MEEK_PROTOCOL_VERSION_1 = 1
 
-const MEEK_MAX_PAYLOAD_LENGTH = 0x10000
-const MEEK_TURN_AROUND_TIMEOUT = 20 * time.Millisecond
-const MEEK_EXTENDED_TURN_AROUND_TIMEOUT = 100 * time.Millisecond
-const MEEK_MAX_SESSION_STALENESS = 45 * time.Second
-const MEEK_HTTP_CLIENT_READ_TIMEOUT = 45 * time.Second
-const MEEK_HTTP_CLIENT_WRITE_TIMEOUT = 10 * time.Second
-const MEEK_MIN_SESSION_ID_LENGTH = 8
-const MEEK_MAX_SESSION_ID_LENGTH = 20
+	// Protocol version 2 clients initiate a session by sending a encrypted and obfuscated meek
+	// cookie with their initial HTTP request. Connection information is contained within the
+	// encrypted cookie payload. The server inspects the cookie and establishes a new session and
+	// returns a new random session ID back to client via Set-Cookie header. The client uses this
+	// session ID on all subsequent requests for the remainder of the session.
+	MEEK_PROTOCOL_VERSION_2 = 2
+
+	MEEK_MAX_PAYLOAD_LENGTH           = 0x10000
+	MEEK_TURN_AROUND_TIMEOUT          = 20 * time.Millisecond
+	MEEK_EXTENDED_TURN_AROUND_TIMEOUT = 100 * time.Millisecond
+	MEEK_MAX_SESSION_STALENESS        = 45 * time.Second
+	MEEK_HTTP_CLIENT_IO_TIMEOUT       = 45 * time.Second
+	MEEK_MIN_SESSION_ID_LENGTH        = 8
+	MEEK_MAX_SESSION_ID_LENGTH        = 20
+)
 
 // MeekServer implements the meek protocol, which tunnels TCP traffic (in the case of Psiphon,
 // Obfusated SSH traffic) over HTTP. Meek may be fronted (through a CDN) or direct and may be
@@ -144,9 +146,17 @@ func (server *MeekServer) Run() error {
 
 	// Serve HTTP or HTTPS
 
+	// Notes:
+	// - WriteTimeout may include time awaiting request, as per:
+	//   https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts
+	// - Legacy meek-server wrapped each client HTTP connection with an explict idle
+	//   timeout net.Conn and didn't use http.Server timeouts. We could do the same
+	//   here (use ActivityMonitoredConn) but the stock http.Server timeouts should
+	//   now be sufficient.
+
 	httpServer := &http.Server{
-		ReadTimeout:  MEEK_HTTP_CLIENT_READ_TIMEOUT,
-		WriteTimeout: MEEK_HTTP_CLIENT_WRITE_TIMEOUT,
+		ReadTimeout:  MEEK_HTTP_CLIENT_IO_TIMEOUT,
+		WriteTimeout: MEEK_HTTP_CLIENT_IO_TIMEOUT,
 		Handler:      server,
 		ConnState:    server.httpConnStateCallback,
 
@@ -764,8 +774,17 @@ func (conn *meekConn) RemoteAddr() net.Addr {
 	return conn.remoteAddr
 }
 
-// Stub implementation of net.Conn.SetDeadline
+// SetDeadline is not a true implementation of net.Conn.SetDeadline. It
+// merely checks that the requested timeout exceeds the MEEK_MAX_SESSION_STALENESS
+// period. When it does, and the session is idle, the meekConn Read/Write will
+// be interrupted and return io.EOF (not a timeout error) before the deadline.
+// In other words, this conn will approximate the desired functionality of
+// timing out on idle on or before the requested deadline.
 func (conn *meekConn) SetDeadline(t time.Time) error {
+	// Overhead: nanoseconds (https://blog.cloudflare.com/its-go-time-on-linux/)
+	if time.Now().Add(MEEK_MAX_SESSION_STALENESS).Before(t) {
+		return nil
+	}
 	return psiphon.ContextError(errors.New("not supported"))
 }
 

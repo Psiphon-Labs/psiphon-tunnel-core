@@ -34,6 +34,18 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+const (
+	SSH_HANDSHAKE_TIMEOUT                 = 30 * time.Second
+	SSH_CONNECTION_READ_DEADLINE          = 5 * time.Minute
+	SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT     = 30 * time.Second
+	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE = 8192
+)
+
+// Disallowed port forward hosts is a failsafe. The server should
+// be run on a host with correctly configured firewall rules, or
+// containerization, or both.
+var SSH_DISALLOWED_PORT_FORWARD_HOSTS = []string{"localhost", "127.0.0.1"}
+
 // TunnelServer is the main server that accepts Psiphon client
 // connections, via various obfuscation protocols, and provides
 // port forwarding (TCP and UDP) services to the Psiphon client.
@@ -408,13 +420,19 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	// terminate the connection if no data is received before the deadline. This
 	// timeout is in effect for the entire duration of the SSH connection. Clients
 	// must actively use the connection or send SSH keep alive requests to keep
-	// the connection active.
+	// the connection active. Writes are not considered reliable activity indicators
+	// due to buffering.
 
-	activityConn := psiphon.NewActivityMonitoredConn(
+	activityConn, err := psiphon.NewActivityMonitoredConn(
 		clientConn,
 		SSH_CONNECTION_READ_DEADLINE,
 		false,
 		nil)
+	if err != nil {
+		clientConn.Close()
+		log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
+		return
+	}
 	clientConn = activityConn
 
 	// Further wrap the connection in a rate limiting ThrottledConn.
@@ -741,15 +759,15 @@ func (sshClient *sshClient) runClient(
 	requestsWaitGroup.Wait()
 }
 
-func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, reason ssh.RejectionReason, message string) {
-	// TODO: log more details?
+func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, reason ssh.RejectionReason, logMessage string) {
 	log.WithContextFields(
 		LogFields{
-			"channelType":   newChannel.ChannelType(),
-			"rejectMessage": message,
-			"rejectReason":  reason,
+			"channelType":  newChannel.ChannelType(),
+			"logMessage":   logMessage,
+			"rejectReason": reason.String(),
 		}).Warning("reject new channel")
-	newChannel.Reject(reason, message)
+	// Note: logMessage is internal, for logging only; just the RejectionReason is sent to the client
+	newChannel.Reject(reason, reason.String())
 }
 
 func (sshClient *sshClient) handleNewPortForwardChannel(newChannel ssh.NewChannel) {
@@ -786,7 +804,11 @@ func (sshClient *sshClient) handleNewPortForwardChannel(newChannel ssh.NewChanne
 }
 
 func (sshClient *sshClient) isPortForwardPermitted(
-	port int, allowPorts []int, denyPorts []int) bool {
+	host string, port int, allowPorts []int, denyPorts []int) bool {
+
+	if psiphon.Contains(SSH_DISALLOWED_PORT_FORWARD_HOSTS, host) {
+		return false
+	}
 
 	// TODO: faster lookup?
 	if len(allowPorts) > 0 {
@@ -797,6 +819,7 @@ func (sshClient *sshClient) isPortForwardPermitted(
 		}
 		return false
 	}
+
 	if len(denyPorts) > 0 {
 		for _, denyPort := range denyPorts {
 			if port == denyPort {
@@ -804,6 +827,7 @@ func (sshClient *sshClient) isPortForwardPermitted(
 			}
 		}
 	}
+
 	return true
 }
 
@@ -847,6 +871,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	newChannel ssh.NewChannel) {
 
 	if !sshClient.isPortForwardPermitted(
+		hostToConnect,
 		portToConnect,
 		sshClient.trafficRules.AllowTCPPorts,
 		sshClient.trafficRules.DenyTCPPorts) {
@@ -950,19 +975,6 @@ func (sshClient *sshClient) handleTCPChannel(
 	fwdConn := result.conn
 	defer fwdConn.Close()
 
-	lruEntry := sshClient.tcpPortForwardLRU.Add(fwdConn)
-	defer lruEntry.Remove()
-
-	// ActivityMonitoredConn monitors the TCP port forward I/O and updates
-	// its LRU status. ActivityMonitoredConn also times out read on the port
-	// forward if both reads and writes have been idle for the specified
-	// duration.
-	fwdConn = psiphon.NewActivityMonitoredConn(
-		fwdConn,
-		time.Duration(sshClient.trafficRules.IdleTCPPortForwardTimeoutMilliseconds)*time.Millisecond,
-		true,
-		lruEntry)
-
 	fwdChannel, requests, err := newChannel.Accept()
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
@@ -971,9 +983,27 @@ func (sshClient *sshClient) handleTCPChannel(
 	go ssh.DiscardRequests(requests)
 	defer fwdChannel.Close()
 
-	log.WithContextFields(LogFields{"remoteAddr": remoteAddr}).Debug("relaying")
+	// ActivityMonitoredConn monitors the TCP port forward I/O and updates
+	// its LRU status. ActivityMonitoredConn also times out I/O on the port
+	// forward if both reads and writes have been idle for the specified
+	// duration.
+
+	lruEntry := sshClient.tcpPortForwardLRU.Add(fwdConn)
+	defer lruEntry.Remove()
+
+	fwdConn, err = psiphon.NewActivityMonitoredConn(
+		fwdConn,
+		time.Duration(sshClient.trafficRules.IdleTCPPortForwardTimeoutMilliseconds)*time.Millisecond,
+		true,
+		lruEntry)
+	if result.err != nil {
+		log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
+		return
+	}
 
 	// Relay channel to forwarded connection.
+
+	log.WithContextFields(LogFields{"remoteAddr": remoteAddr}).Debug("relaying")
 
 	// TODO: relay errors to fwdChannel.Stderr()?
 	relayWaitGroup := new(sync.WaitGroup)

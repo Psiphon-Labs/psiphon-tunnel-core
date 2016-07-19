@@ -140,7 +140,17 @@ func (mux *udpPortForwardMultiplexer) run() {
 
 			// Create a new port forward
 
+			dialIP := net.IP(message.remoteIP)
+			dialPort := int(message.remotePort)
+
+			// Transparent DNS forwarding
+			if message.forwardDNS {
+				dialIP = mux.sshClient.sshServer.support.DNSResolver.Get()
+				dialPort = DNS_RESOLVER_PORT
+			}
+
 			if !mux.sshClient.isPortForwardPermitted(
+				dialIP.String(),
 				int(message.remotePort),
 				mux.sshClient.trafficRules.AllowUDPPorts,
 				mux.sshClient.trafficRules.DenyUDPPorts) {
@@ -172,15 +182,6 @@ func (mux *udpPortForwardMultiplexer) run() {
 					}).Debug("closed LRU UDP port forward")
 			}
 
-			dialIP := net.IP(message.remoteIP)
-			dialPort := int(message.remotePort)
-
-			// Transparent DNS forwarding
-			if message.forwardDNS {
-				dialIP = mux.sshClient.sshServer.support.DNSResolver.Get()
-				dialPort = DNS_RESOLVER_PORT
-			}
-
 			log.WithContextFields(
 				LogFields{
 					"remoteAddr": fmt.Sprintf("%s:%d", dialIP.String(), dialPort),
@@ -195,17 +196,24 @@ func (mux *udpPortForwardMultiplexer) run() {
 				continue
 			}
 
-			lruEntry := mux.portForwardLRU.Add(udpConn)
-
 			// ActivityMonitoredConn monitors the TCP port forward I/O and updates
-			// its LRU status. ActivityMonitoredConn also times out read on the port
+			// its LRU status. ActivityMonitoredConn also times out I/O on the port
 			// forward if both reads and writes have been idle for the specified
 			// duration.
-			conn := psiphon.NewActivityMonitoredConn(
+
+			lruEntry := mux.portForwardLRU.Add(udpConn)
+
+			conn, err := psiphon.NewActivityMonitoredConn(
 				udpConn,
 				time.Duration(mux.sshClient.trafficRules.IdleUDPPortForwardTimeoutMilliseconds)*time.Millisecond,
 				true,
 				lruEntry)
+			if err != nil {
+				lruEntry.Remove()
+				mux.sshClient.closedPortForward(mux.sshClient.udpTrafficState, 0, 0)
+				log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
+				continue
+			}
 
 			portForward = &udpPortForward{
 				connID:       message.connID,

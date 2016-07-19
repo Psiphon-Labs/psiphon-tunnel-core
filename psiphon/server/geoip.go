@@ -30,7 +30,10 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 )
 
-const UNKNOWN_GEOIP_VALUE = "None"
+const (
+	GEOIP_SESSION_CACHE_TTL = 60 * time.Minute
+	GEOIP_UNKNOWN_VALUE     = "None"
+)
 
 // GeoIPData is GeoIP data for a client session. Individual client
 // IP addresses are neither logged nor explicitly referenced during a session.
@@ -46,12 +49,12 @@ type GeoIPData struct {
 }
 
 // NewGeoIPData returns a GeoIPData initialized with the expected
-// UNKNOWN_GEOIP_VALUE values to be used when GeoIP lookup fails.
+// GEOIP_UNKNOWN_VALUE values to be used when GeoIP lookup fails.
 func NewGeoIPData() GeoIPData {
 	return GeoIPData{
-		Country: UNKNOWN_GEOIP_VALUE,
-		City:    UNKNOWN_GEOIP_VALUE,
-		ISP:     UNKNOWN_GEOIP_VALUE,
+		Country: GEOIP_UNKNOWN_VALUE,
+		City:    GEOIP_UNKNOWN_VALUE,
+		ISP:     GEOIP_UNKNOWN_VALUE,
 	}
 }
 
