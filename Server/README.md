@@ -46,7 +46,7 @@ You may also use the `Dockerfile-binary-builder` docker file to create an image 
 
 ##### Generate a configuration file
  1. Use the command `./psiphond --help` to get a list of flags to pass to the `generate` sub-command
- 2. Run: `./psiphond --ipaddress 0.0.0.0 --web 3000 --protocol SSH:3001 --protocol OSSH:3002 --logFilename /var/log/psiphon/psiphond.log --fail2BanLogFilename /var/log/psiphon/fail2ban.log generate` (IP address `0.0.0.0` is used due to how docker handles services bound to the loopback device)
+ 2. Run: `./psiphond --ipaddress 0.0.0.0 --web 3000 --protocol SSH:3001 --protocol OSSH:3002 --logFilename /var/log/psiphon/psiphond.log generate` (IP address `0.0.0.0` is used due to how docker handles services bound to the loopback device)
 
 
 ##### Create the Docker image:
