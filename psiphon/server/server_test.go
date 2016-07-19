@@ -109,7 +109,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// create a server
 
-	serverIPaddress, err := psiphon.GetInterfaceIPAddress("en0")
+	var err error
+	serverIPaddress := ""
+	for _, interfaceName := range []string{"eth0", "en0"} {
+		serverIPaddress, err = psiphon.GetInterfaceIPAddress(interfaceName)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		t.Fatalf("error getting server IP address: %s", err)
 	}
