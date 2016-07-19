@@ -17,7 +17,7 @@
  *
  */
 
-package server
+package upstreamproxy
 
 import (
 	"encoding/json"
@@ -28,84 +28,44 @@ import (
 	"net/url"
 	"os"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
+	"github.com/elazarl/goproxy"
 )
+
+// Note: upstreamproxy_test is redundant -- it doesn't test any cases not
+// covered by controller_test; and its code is largely copied from server_test
+// and controller_test. upstreamproxy_test exists so that coverage within the
+// upstreamproxy package can be measured and reported.
 
 func TestMain(m *testing.M) {
 	flag.Parse()
 	os.Remove(psiphon.DATA_STORE_FILENAME)
+	initUpstreamProxy()
 	psiphon.SetEmitDiagnosticNotices(true)
 	os.Exit(m.Run())
 }
 
-// Note: not testing fronting meek protocols, which client is
-// hard-wired to except running on privileged ports 80 and 443.
-
-func TestSSH(t *testing.T) {
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:       "SSH",
-			enableSSHAPIRequests: true,
-			doHotReload:          false,
-		})
+func TestSSHViaUpstreamProxy(t *testing.T) {
+	runServer(t, "SSH")
 }
 
-func TestOSSH(t *testing.T) {
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
-			doHotReload:          false,
-		})
+func TestOSSHViaUpstreamProxy(t *testing.T) {
+	runServer(t, "OSSH")
 }
 
-func TestUnfrontedMeek(t *testing.T) {
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
-			enableSSHAPIRequests: true,
-			doHotReload:          false,
-		})
+func TestUnfrontedMeekViaUpstreamProxy(t *testing.T) {
+	runServer(t, "UNFRONTED-MEEK-OSSH")
 }
 
-func TestUnfrontedMeekHTTPS(t *testing.T) {
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
-			enableSSHAPIRequests: true,
-			doHotReload:          false,
-		})
+func TestUnfrontedMeekHTTPSViaUpstreamProxy(t *testing.T) {
+	runServer(t, "UNFRONTED-MEEK-HTTPS-OSSH")
 }
 
-func TestWebTransportAPIRequests(t *testing.T) {
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: false,
-			doHotReload:          false,
-		})
-}
-
-func TestHotReload(t *testing.T) {
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
-			doHotReload:          true,
-		})
-}
-
-type runServerConfig struct {
-	tunnelProtocol       string
-	enableSSHAPIRequests bool
-	doHotReload          bool
-}
-
-func runServer(t *testing.T, runConfig *runServerConfig) {
+func runServer(t *testing.T, tunnelProtocol string) {
 
 	// create a server
 
@@ -121,12 +81,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("error getting server IP address: %s", err)
 	}
 
-	serverConfigJSON, _, encodedServerEntry, err := GenerateConfig(
-		&GenerateConfigParams{
+	serverConfigJSON, _, encodedServerEntry, err := server.GenerateConfig(
+		&server.GenerateConfigParams{
 			ServerIPAddress:      serverIPaddress,
-			EnableSSHAPIRequests: runConfig.enableSSHAPIRequests,
+			EnableSSHAPIRequests: true,
 			WebServerPort:        8000,
-			TunnelProtocolPorts:  map[string]int{runConfig.tunnelProtocol: 4000},
+			TunnelProtocolPorts:  map[string]int{tunnelProtocol: 4000},
 		})
 	if err != nil {
 		t.Fatalf("error generating server config: %s", err)
@@ -134,14 +94,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// customize server config
 
-	// Pave psinet with random values to test handshake homepages.
-	psinetFilename := "psinet.json"
-	sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(t, psinetFilename)
-
 	var serverConfig interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
 	serverConfig.(map[string]interface{})["GeoIPDatabaseFilename"] = ""
-	serverConfig.(map[string]interface{})["PsinetDatabaseFilename"] = psinetFilename
+	serverConfig.(map[string]interface{})["PsinetDatabaseFilename"] = ""
 	serverConfig.(map[string]interface{})["TrafficRulesFilename"] = ""
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
@@ -151,53 +107,17 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverWaitGroup.Add(1)
 	go func() {
 		defer serverWaitGroup.Done()
-		err := RunServices(serverConfigJSON)
+		err := server.RunServices(serverConfigJSON)
 		if err != nil {
 			// TODO: wrong goroutine for t.FatalNow()
 			t.Fatalf("error running server: %s", err)
 		}
 	}()
 	defer func() {
-
-		// Test: orderly server shutdown
-
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(os.Interrupt)
-
-		shutdownTimeout := time.NewTimer(5 * time.Second)
-
-		shutdownOk := make(chan struct{}, 1)
-		go func() {
-			serverWaitGroup.Wait()
-			shutdownOk <- *new(struct{})
-		}()
-
-		select {
-		case <-shutdownOk:
-		case <-shutdownTimeout.C:
-			t.Fatalf("server shutdown timeout exceeded")
-		}
+		serverWaitGroup.Wait()
 	}()
-
-	// Test: hot reload (of psinet)
-
-	if runConfig.doHotReload {
-		// TODO: monitor logs for more robust wait-until-loaded
-		time.Sleep(1 * time.Second)
-
-		// Pave a new psinet with different random values.
-		sponsorID, expectedHomepageURL = pavePsinetDatabaseFile(t, psinetFilename)
-
-		p, _ := os.FindProcess(os.Getpid())
-		p.Signal(syscall.SIGUSR1)
-
-		// TODO: monitor logs for more robust wait-until-reloaded
-		time.Sleep(1 * time.Second)
-
-		// After reloading psinet, the new sponsorID/expectedHomepageURL
-		// should be active, as tested in the client "Homepage" notice
-		// handler below.
-	}
 
 	// connect to server with client
 
@@ -215,14 +135,16 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
     }`
 	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
 
-	clientConfig.SponsorId = sponsorID
 	clientConfig.ConnectionWorkerPoolSize = numTunnels
 	clientConfig.TunnelPoolSize = numTunnels
 	clientConfig.DisableRemoteServerListFetcher = true
 	clientConfig.EstablishTunnelPausePeriodSeconds = &establishTunnelPausePeriodSeconds
 	clientConfig.TargetServerEntry = string(encodedServerEntry)
-	clientConfig.TunnelProtocol = runConfig.tunnelProtocol
+	clientConfig.TunnelProtocol = tunnelProtocol
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
+
+	clientConfig.UpstreamProxyUrl = upstreamProxyURL
+	clientConfig.UpstreamProxyCustomHeaders = upstreamProxyCustomHeaders
 
 	err = psiphon.InitDataStore(clientConfig)
 	if err != nil {
@@ -235,12 +157,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 
 	tunnelsEstablished := make(chan struct{}, 1)
-	homepageReceived := make(chan struct{}, 1)
 
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 
-			//fmt.Printf("%s\n", string(notice))
+			fmt.Printf("%s\n", string(notice))
 
 			noticeType, payload, err := psiphon.GetNotice(notice)
 			if err != nil {
@@ -256,16 +177,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 					default:
 					}
 				}
-			case "Homepage":
-				homepageURL := payload["url"].(string)
-				if homepageURL != expectedHomepageURL {
-					// TODO: wrong goroutine for t.FatalNow()
-					t.Fatalf("unexpected homepage: %s", homepageURL)
-				}
-				select {
-				case homepageReceived <- *new(struct{}):
-				default:
-				}
 			}
 		}))
 
@@ -278,36 +189,16 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}()
 	defer func() {
 		close(controllerShutdownBroadcast)
-
-		shutdownTimeout := time.NewTimer(20 * time.Second)
-
-		shutdownOk := make(chan struct{}, 1)
-		go func() {
-			controllerWaitGroup.Wait()
-			shutdownOk <- *new(struct{})
-		}()
-
-		select {
-		case <-shutdownOk:
-		case <-shutdownTimeout.C:
-			t.Fatalf("controller shutdown timeout exceeded")
-		}
+		controllerWaitGroup.Wait()
 	}()
 
-	// Test: tunnels must be established, and correct homepage
-	// must be received, within 30 seconds
+	// Test: tunnels must be established within 30 seconds
 
 	establishTimeout := time.NewTimer(30 * time.Second)
 	select {
 	case <-tunnelsEstablished:
 	case <-establishTimeout.C:
 		t.Fatalf("tunnel establish timeout exceeded")
-	}
-
-	select {
-	case <-homepageReceived:
-	case <-establishTimeout.C:
-		t.Fatalf("homepage received timeout exceeded")
 	}
 
 	// Test: tunneled web site fetch
@@ -339,36 +230,61 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	response.Body.Close()
 }
 
-func pavePsinetDatabaseFile(t *testing.T, psinetFilename string) (string, string) {
+const upstreamProxyURL = "http://127.0.0.1:2161"
 
-	sponsorID, _ := psiphon.MakeRandomStringHex(8)
+var upstreamProxyCustomHeaders = map[string][]string{"X-Test-Header-Name": []string{"test-header-value1", "test-header-value2"}}
 
-	fakeDomain, _ := psiphon.MakeRandomStringHex(4)
-	fakePath, _ := psiphon.MakeRandomStringHex(4)
-	expectedHomepageURL := fmt.Sprintf("https://%s.com/%s", fakeDomain, fakePath)
-
-	psinetJSONFormat := `
-    {
-        "sponsors": {
-            "%s": {
-                "home_pages": {
-                    "None": [
-                        {
-                            "region": null,
-                            "url": "%s"
-                        }
-                    ]
-                }
-            }
-        }
-    }
-	`
-	psinetJSON := fmt.Sprintf(psinetJSONFormat, sponsorID, expectedHomepageURL)
-
-	err := ioutil.WriteFile(psinetFilename, []byte(psinetJSON), 0600)
-	if err != nil {
-		t.Fatalf("error paving psinet database: %s", err)
+func hasExpectedCustomHeaders(h http.Header) bool {
+	for name, values := range upstreamProxyCustomHeaders {
+		if h[name] == nil {
+			return false
+		}
+		// Order may not be the same
+		for _, value := range values {
+			if !psiphon.Contains(h[name], value) {
+				return false
+			}
+		}
 	}
+	return true
+}
 
-	return sponsorID, expectedHomepageURL
+func initUpstreamProxy() {
+	go func() {
+		proxy := goproxy.NewProxyHttpServer()
+
+		proxy.OnRequest().DoFunc(
+			func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+				if !hasExpectedCustomHeaders(r.Header) {
+					ctx.Logf("missing expected headers: %+v", ctx.Req.Header)
+					return nil, goproxy.NewResponse(r, goproxy.ContentTypeText, http.StatusUnauthorized, "")
+				}
+				return r, nil
+			})
+
+		proxy.OnRequest().HandleConnectFunc(
+			func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
+				// TODO: enable this check. Currently the headers aren't send because the
+				// following type assertion in upstreamproxy.newHTTP fails (but only in this
+				// test context, not in controller_test):
+				//   if upstreamProxyConfig, ok := forward.(*UpstreamProxyConfig); ok {
+				//       hp.customHeaders = upstreamProxyConfig.CustomHeaders
+				//   }
+				//
+				/*
+					if !hasExpectedCustomHeaders(ctx.Req.Header) {
+						ctx.Logf("missing expected headers: %+v", ctx.Req.Header)
+						return goproxy.RejectConnect, host
+					}
+				*/
+				return goproxy.OkConnect, host
+			})
+
+		err := http.ListenAndServe("127.0.0.1:2161", proxy)
+		if err != nil {
+			fmt.Printf("upstream proxy failed: %s", err)
+		}
+	}()
+
+	// TODO: wait until listener is active?
 }

@@ -944,6 +944,7 @@ func initUpstreamProxy() {
 		proxy.OnRequest().DoFunc(
 			func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 				if !hasExpectedCustomHeaders(r.Header) {
+					ctx.Logf("missing expected headers: %+v", ctx.Req.Header)
 					return nil, goproxy.NewResponse(r, goproxy.ContentTypeText, http.StatusUnauthorized, "")
 				}
 				return r, nil
@@ -952,6 +953,7 @@ func initUpstreamProxy() {
 		proxy.OnRequest().HandleConnectFunc(
 			func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
 				if !hasExpectedCustomHeaders(ctx.Req.Header) {
+					ctx.Logf("missing expected headers: %+v", ctx.Req.Header)
 					return goproxy.RejectConnect, host
 				}
 				return goproxy.OkConnect, host

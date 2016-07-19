@@ -423,7 +423,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	// the connection active. Writes are not considered reliable activity indicators
 	// due to buffering.
 
-	activityConn, err := psiphon.NewActivityMonitoredConn(
+	activityConn, err := NewActivityMonitoredConn(
 		clientConn,
 		SSH_CONNECTION_READ_DEADLINE,
 		false,
@@ -438,7 +438,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	// Further wrap the connection in a rate limiting ThrottledConn.
 
 	rateLimits := sshClient.trafficRules.GetRateLimits(tunnelProtocol)
-	clientConn = psiphon.NewThrottledConn(
+	clientConn = NewThrottledConn(
 		clientConn,
 		rateLimits.DownstreamUnlimitedBytes,
 		int64(rateLimits.DownstreamBytesPerSecond),
@@ -542,7 +542,7 @@ type sshClient struct {
 	sshServer               *sshServer
 	tunnelProtocol          string
 	sshConn                 ssh.Conn
-	activityConn            *psiphon.ActivityMonitoredConn
+	activityConn            *ActivityMonitoredConn
 	geoIPData               GeoIPData
 	psiphonSessionID        string
 	udpChannel              ssh.Channel
@@ -550,7 +550,7 @@ type sshClient struct {
 	tcpTrafficState         *trafficState
 	udpTrafficState         *trafficState
 	channelHandlerWaitGroup *sync.WaitGroup
-	tcpPortForwardLRU       *psiphon.LRUConns
+	tcpPortForwardLRU       *LRUConns
 	stopBroadcast           chan struct{}
 }
 
@@ -572,7 +572,7 @@ func newSshClient(
 		tcpTrafficState:         &trafficState{},
 		udpTrafficState:         &trafficState{},
 		channelHandlerWaitGroup: new(sync.WaitGroup),
-		tcpPortForwardLRU:       psiphon.NewLRUConns(),
+		tcpPortForwardLRU:       NewLRUConns(),
 		stopBroadcast:           make(chan struct{}),
 	}
 }
@@ -991,7 +991,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	lruEntry := sshClient.tcpPortForwardLRU.Add(fwdConn)
 	defer lruEntry.Remove()
 
-	fwdConn, err = psiphon.NewActivityMonitoredConn(
+	fwdConn, err = NewActivityMonitoredConn(
 		fwdConn,
 		time.Duration(sshClient.trafficRules.IdleTCPPortForwardTimeoutMilliseconds)*time.Millisecond,
 		true,
