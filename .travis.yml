@@ -1,6 +1,6 @@
 language: go
 go:
-- 1.6.3
+- 1.6
 addons:
   apt_packages:
     - libx11-dev
@@ -15,7 +15,7 @@ script:
 - go test -v -covermode=count -coverprofile=server.coverprofile ./server
 - go test -v -covermode=count -coverprofile=psiphon.coverprofile
 - $HOME/gopath/bin/gover
-- $HOME/gopath/bin/goveralls -coverprofile=coverage.out -service=travis-ci -repotoken $COVERALLS_TOKEN
+- $HOME/gopath/bin/goveralls -coverprofile=gover.coverprofile -service=travis-ci -repotoken $COVERALLS_TOKEN
 before_install:
 - go get github.com/axw/gocov/gocov
 - go get github.com/modocache/gover
