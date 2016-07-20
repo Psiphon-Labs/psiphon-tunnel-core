@@ -29,6 +29,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // Controller is a tunnel lifecycle coordinator. It manages lists of servers to
@@ -51,8 +53,8 @@ type Controller struct {
 	establishWaitGroup             *sync.WaitGroup
 	stopEstablishingBroadcast      chan struct{}
 	candidateServerEntries         chan *candidateServerEntry
-	establishPendingConns          *Conns
-	untunneledPendingConns         *Conns
+	establishPendingConns          *common.Conns
+	untunneledPendingConns         *common.Conns
 	untunneledDialConfig           *DialConfig
 	splitTunnelClassifier          *SplitTunnelClassifier
 	signalFetchRemoteServerList    chan struct{}
@@ -83,7 +85,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// used across all tunnels established by the controller.
 	sessionId, err := MakeSessionId()
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	NoticeSessionId(sessionId)
 
@@ -92,7 +94,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// used to exclude these requests and connection from VPN routing.
 	// TODO: fetch remote server list and untunneled upgrade download should remove
 	// their completed conns from untunneledPendingConns.
-	untunneledPendingConns := new(Conns)
+	untunneledPendingConns := new(common.Conns)
 	untunneledDialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
 		UpstreamProxyCustomHeaders:    config.UpstreamProxyCustomHeaders,
@@ -121,7 +123,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 		establishedOnce:                false,
 		startedConnectedReporter:       false,
 		isEstablishing:                 false,
-		establishPendingConns:          new(Conns),
+		establishPendingConns:          new(common.Conns),
 		untunneledPendingConns:         untunneledPendingConns,
 		untunneledDialConfig:           untunneledDialConfig,
 		impairedProtocolClassification: make(map[string]int),
@@ -677,7 +679,7 @@ func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
 	} else {
 		controller.impairedProtocolClassification[failedTunnel.protocol] = 0
 	}
-	if len(controller.getImpairedProtocols()) == len(SupportedTunnelProtocols) {
+	if len(controller.getImpairedProtocols()) == len(common.SupportedTunnelProtocols) {
 		// Reset classification if all protocols are classified as impaired as
 		// the network situation (or attack) may not be protocol-specific.
 		// TODO: compare against count of distinct supported protocols for
@@ -877,7 +879,7 @@ func (controller *Controller) Dial(
 
 	tunnel := controller.getNextActiveTunnel()
 	if tunnel == nil {
-		return nil, ContextError(errors.New("no active tunnels"))
+		return nil, common.ContextError(errors.New("no active tunnels"))
 	}
 
 	// Perform split tunnel classification when feature is enabled, and if the remote
@@ -886,7 +888,7 @@ func (controller *Controller) Dial(
 
 		host, _, err := net.SplitHostPort(remoteAddr)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 
 		// Note: a possible optimization, when split tunnel is active and IsUntunneled performs
@@ -903,7 +905,7 @@ func (controller *Controller) Dial(
 
 	tunneledConn, err := tunnel.Dial(remoteAddr, alwaysTunnel, downstreamConn)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return tunneledConn, nil

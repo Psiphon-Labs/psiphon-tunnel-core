@@ -34,6 +34,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // SplitTunnelClassifier determines whether a network destination
@@ -219,12 +221,12 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	url := fmt.Sprintf(classifier.fetchRoutesUrlFormat, tunnel.serverContext.clientRegion)
 	request, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	etag, err := GetSplitTunnelRoutesETag(tunnel.serverContext.clientRegion)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	if etag != "" {
 		request.Header.Add("If-None-Match", etag)
@@ -255,7 +257,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
 	}
 	if err != nil {
-		NoticeAlert("failed to request split tunnel routes package: %s", ContextError(err))
+		NoticeAlert("failed to request split tunnel routes package: %s", common.ContextError(err))
 		useCachedRoutes = true
 	}
 
@@ -270,7 +272,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	if !useCachedRoutes {
 		routesDataPackage, err = ioutil.ReadAll(response.Body)
 		if err != nil {
-			NoticeAlert("failed to download split tunnel routes package: %s", ContextError(err))
+			NoticeAlert("failed to download split tunnel routes package: %s", common.ContextError(err))
 			useCachedRoutes = true
 		}
 	}
@@ -280,7 +282,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 		encodedRoutesData, err = ReadAuthenticatedDataPackage(
 			routesDataPackage, classifier.routesSignaturePublicKey)
 		if err != nil {
-			NoticeAlert("failed to read split tunnel routes package: %s", ContextError(err))
+			NoticeAlert("failed to read split tunnel routes package: %s", common.ContextError(err))
 			useCachedRoutes = true
 		}
 	}
@@ -289,7 +291,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	if !useCachedRoutes {
 		compressedRoutesData, err = base64.StdEncoding.DecodeString(encodedRoutesData)
 		if err != nil {
-			NoticeAlert("failed to decode split tunnel routes: %s", ContextError(err))
+			NoticeAlert("failed to decode split tunnel routes: %s", common.ContextError(err))
 			useCachedRoutes = true
 		}
 	}
@@ -301,7 +303,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 			zlibReader.Close()
 		}
 		if err != nil {
-			NoticeAlert("failed to decompress split tunnel routes: %s", ContextError(err))
+			NoticeAlert("failed to decompress split tunnel routes: %s", common.ContextError(err))
 			useCachedRoutes = true
 		}
 	}
@@ -311,7 +313,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 		if etag != "" {
 			err := SetSplitTunnelRoutes(tunnel.serverContext.clientRegion, etag, routesData)
 			if err != nil {
-				NoticeAlert("failed to cache split tunnel routes: %s", ContextError(err))
+				NoticeAlert("failed to cache split tunnel routes: %s", common.ContextError(err))
 				// Proceed with fetched data, even when we can't cache it
 			}
 		}
@@ -320,10 +322,10 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	if useCachedRoutes {
 		routesData, err = GetSplitTunnelRoutesData(tunnel.serverContext.clientRegion)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		if routesData == nil {
-			return nil, ContextError(errors.New("no cached routes"))
+			return nil, common.ContextError(errors.New("no cached routes"))
 		}
 	}
 
@@ -346,7 +348,7 @@ func (classifier *SplitTunnelClassifier) installRoutes(routesData []byte) (err e
 
 	classifier.routes, err = NewNetworkList(routesData)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	classifier.isRoutesSet = true
@@ -392,7 +394,7 @@ func NewNetworkList(routesData []byte) (networkList, error) {
 		list = append(list, net.IPNet{IP: ip.Mask(mask), Mask: mask})
 	}
 	if len(list) == 0 {
-		return nil, ContextError(errors.New("Routes data contains no networks"))
+		return nil, common.ContextError(errors.New("Routes data contains no networks"))
 	}
 
 	// Sort data for fast lookup
@@ -480,7 +482,7 @@ func tunneledLookupIP(
 	// dnsServerAddress must be an IP address
 	ipAddr = net.ParseIP(dnsServerAddress)
 	if ipAddr == nil {
-		return nil, 0, ContextError(errors.New("invalid IP address"))
+		return nil, 0, common.ContextError(errors.New("invalid IP address"))
 	}
 
 	// Dial's alwaysTunnel is set to true to ensure this connection
@@ -490,15 +492,15 @@ func tunneledLookupIP(
 	conn, err := dnsTunneler.Dial(fmt.Sprintf(
 		"%s:%d", dnsServerAddress, DNS_PORT), true, nil)
 	if err != nil {
-		return nil, 0, ContextError(err)
+		return nil, 0, common.ContextError(err)
 	}
 
 	ipAddrs, ttls, err := ResolveIP(host, conn)
 	if err != nil {
-		return nil, 0, ContextError(err)
+		return nil, 0, common.ContextError(err)
 	}
 	if len(ipAddrs) < 1 {
-		return nil, 0, ContextError(errors.New("no IP address"))
+		return nil, 0, common.ContextError(errors.New("no IP address"))
 	}
 
 	return ipAddrs[0], ttls[0], nil

@@ -33,6 +33,7 @@ import (
 	"strings"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/crypto/ssh"
 )
@@ -208,7 +209,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	var config Config
 	err := json.Unmarshal(configJSON, &config)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	if config.ServerIPAddress == "" {
@@ -223,8 +224,8 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	}
 
 	for tunnelProtocol, _ := range config.TunnelProtocolPorts {
-		if psiphon.TunnelProtocolUsesSSH(tunnelProtocol) ||
-			psiphon.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
+		if common.TunnelProtocolUsesSSH(tunnelProtocol) ||
+			common.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
 			if config.SSHPrivateKey == "" || config.SSHServerVersion == "" ||
 				config.SSHUserName == "" || config.SSHPassword == "" {
 				return nil, fmt.Errorf(
@@ -232,22 +233,22 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 					tunnelProtocol)
 			}
 		}
-		if psiphon.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
+		if common.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
 			if config.ObfuscatedSSHKey == "" {
 				return nil, fmt.Errorf(
 					"Tunnel protocol %s requires ObfuscatedSSHKey",
 					tunnelProtocol)
 			}
 		}
-		if psiphon.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
-			psiphon.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+		if common.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
+			common.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
 			if config.MeekCookieEncryptionPrivateKey == "" || config.MeekObfuscatedKey == "" {
 				return nil, fmt.Errorf(
 					"Tunnel protocol %s requires MeekCookieEncryptionPrivateKey, MeekObfuscatedKey",
 					tunnelProtocol)
 			}
 		}
-		if psiphon.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+		if common.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
 			if config.MeekCertificateCommonName == "" {
 				return nil, fmt.Errorf(
 					"Tunnel protocol %s requires MeekCertificateCommonName",
@@ -305,11 +306,11 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 	// Input validation
 
 	if net.ParseIP(params.ServerIPAddress) == nil {
-		return nil, nil, nil, psiphon.ContextError(errors.New("invalid IP address"))
+		return nil, nil, nil, common.ContextError(errors.New("invalid IP address"))
 	}
 
 	if len(params.TunnelProtocolPorts) == 0 {
-		return nil, nil, nil, psiphon.ContextError(errors.New("no tunnel protocols"))
+		return nil, nil, nil, common.ContextError(errors.New("no tunnel protocols"))
 	}
 
 	usedPort := make(map[int]bool)
@@ -321,17 +322,17 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	for protocol, port := range params.TunnelProtocolPorts {
 
-		if !psiphon.Contains(psiphon.SupportedTunnelProtocols, protocol) {
-			return nil, nil, nil, psiphon.ContextError(errors.New("invalid tunnel protocol"))
+		if !common.Contains(common.SupportedTunnelProtocols, protocol) {
+			return nil, nil, nil, common.ContextError(errors.New("invalid tunnel protocol"))
 		}
 
 		if usedPort[port] {
-			return nil, nil, nil, psiphon.ContextError(errors.New("duplicate listening port"))
+			return nil, nil, nil, common.ContextError(errors.New("duplicate listening port"))
 		}
 		usedPort[port] = true
 
-		if psiphon.TunnelProtocolUsesMeekHTTP(protocol) ||
-			psiphon.TunnelProtocolUsesMeekHTTPS(protocol) {
+		if common.TunnelProtocolUsesMeekHTTP(protocol) ||
+			common.TunnelProtocolUsesMeekHTTPS(protocol) {
 			usingMeek = true
 		}
 	}
@@ -342,14 +343,14 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	if params.WebServerPort != 0 {
 		var err error
-		webServerSecret, err = psiphon.MakeRandomStringHex(WEB_SERVER_SECRET_BYTE_LENGTH)
+		webServerSecret, err = common.MakeRandomStringHex(WEB_SERVER_SECRET_BYTE_LENGTH)
 		if err != nil {
-			return nil, nil, nil, psiphon.ContextError(err)
+			return nil, nil, nil, common.ContextError(err)
 		}
 
 		webServerCertificate, webServerPrivateKey, err = GenerateWebServerCertificate("")
 		if err != nil {
-			return nil, nil, nil, psiphon.ContextError(err)
+			return nil, nil, nil, common.ContextError(err)
 		}
 	}
 
@@ -358,7 +359,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 	// TODO: use other key types: anti-fingerprint by varying params
 	rsaKey, err := rsa.GenerateKey(rand.Reader, SSH_RSA_HOST_KEY_BITS)
 	if err != nil {
-		return nil, nil, nil, psiphon.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 
 	sshPrivateKey := pem.EncodeToMemory(
@@ -370,21 +371,21 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	signer, err := ssh.NewSignerFromKey(rsaKey)
 	if err != nil {
-		return nil, nil, nil, psiphon.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 
 	sshPublicKey := signer.PublicKey()
 
-	sshUserNameSuffix, err := psiphon.MakeRandomStringHex(SSH_USERNAME_SUFFIX_BYTE_LENGTH)
+	sshUserNameSuffix, err := common.MakeRandomStringHex(SSH_USERNAME_SUFFIX_BYTE_LENGTH)
 	if err != nil {
-		return nil, nil, nil, psiphon.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 
 	sshUserName := "psiphon_" + sshUserNameSuffix
 
-	sshPassword, err := psiphon.MakeRandomStringHex(SSH_PASSWORD_BYTE_LENGTH)
+	sshPassword, err := common.MakeRandomStringHex(SSH_PASSWORD_BYTE_LENGTH)
 	if err != nil {
-		return nil, nil, nil, psiphon.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 
 	// TODO: vary version string for anti-fingerprint
@@ -392,9 +393,9 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	// Obfuscated SSH config
 
-	obfuscatedSSHKey, err := psiphon.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+	obfuscatedSSHKey, err := common.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 	if err != nil {
-		return nil, nil, nil, psiphon.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 
 	// Meek config
@@ -405,23 +406,23 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		rawMeekCookieEncryptionPublicKey, rawMeekCookieEncryptionPrivateKey, err :=
 			box.GenerateKey(rand.Reader)
 		if err != nil {
-			return nil, nil, nil, psiphon.ContextError(err)
+			return nil, nil, nil, common.ContextError(err)
 		}
 
 		meekCookieEncryptionPublicKey = base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPublicKey[:])
 		meekCookieEncryptionPrivateKey = base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPrivateKey[:])
 
-		meekObfuscatedKey, err = psiphon.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+		meekObfuscatedKey, err = common.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 		if err != nil {
-			return nil, nil, nil, psiphon.ContextError(err)
+			return nil, nil, nil, common.ContextError(err)
 		}
 	}
 
 	// Other config
 
-	discoveryValueHMACKey, err := psiphon.MakeRandomStringBase64(DISCOVERY_VALUE_KEY_BYTE_LENGTH)
+	discoveryValueHMACKey, err := common.MakeRandomStringBase64(DISCOVERY_VALUE_KEY_BYTE_LENGTH)
 	if err != nil {
-		return nil, nil, nil, psiphon.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 
 	// Assemble configs and server entry
@@ -459,12 +460,12 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	encodedConfig, err := json.MarshalIndent(config, "\n", "    ")
 	if err != nil {
-		return nil, nil, nil, psiphon.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 
 	trafficRulesSet := &TrafficRulesSet{
 		DefaultRules: TrafficRules{
-			DefaultLimits: RateLimits{
+			DefaultLimits: common.RateLimits{
 				DownstreamUnlimitedBytes: 0,
 				DownstreamBytesPerSecond: 0,
 				UpstreamUnlimitedBytes:   0,
@@ -483,17 +484,17 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	encodedTrafficRulesSet, err := json.MarshalIndent(trafficRulesSet, "\n", "    ")
 	if err != nil {
-		return nil, nil, nil, psiphon.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 
 	capabilities := []string{}
 
 	if params.EnableSSHAPIRequests {
-		capabilities = append(capabilities, psiphon.CAPABILITY_SSH_API_REQUESTS)
+		capabilities = append(capabilities, common.CAPABILITY_SSH_API_REQUESTS)
 	}
 
 	if params.WebServerPort != 0 {
-		capabilities = append(capabilities, psiphon.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS)
+		capabilities = append(capabilities, common.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS)
 	}
 
 	for protocol, _ := range params.TunnelProtocolPorts {
@@ -549,7 +550,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	encodedServerEntry, err := psiphon.EncodeServerEntry(serverEntry)
 	if err != nil {
-		return nil, nil, nil, psiphon.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 
 	return encodedConfig, encodedTrafficRulesSet, []byte(encodedServerEntry), nil

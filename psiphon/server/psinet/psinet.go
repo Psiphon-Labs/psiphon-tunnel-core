@@ -34,14 +34,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // Database serves Psiphon API data requests. It's safe for
 // concurrent usage. The Reload function supports hot reloading
 // of Psiphon network data while the server is running.
 type Database struct {
-	psiphon.ReloadableFile
+	common.ReloadableFile
 
 	AlternateMeekFrontingAddresses      map[string][]string        `json:"alternate_meek_fronting_addresses"`
 	AlternateMeekFrontingAddressesRegex map[string]string          `json:"alternate_meek_fronting_addresses_regex"`
@@ -130,27 +130,27 @@ func NewDatabase(filename string) (*Database, error) {
 
 	database := &Database{}
 
-	database.ReloadableFile = psiphon.NewReloadableFile(
+	database.ReloadableFile = common.NewReloadableFile(
 		filename,
 		func(filename string) error {
 			psinetJSON, err := ioutil.ReadFile(filename)
 			if err != nil {
 				// On error, state remains the same
-				return psiphon.ContextError(err)
+				return common.ContextError(err)
 			}
 			err = json.Unmarshal(psinetJSON, &database)
 			if err != nil {
 				// On error, state remains the same
 				// (Unmarshal first validates the provided
 				//  JOSN and then populates the interface)
-				return psiphon.ContextError(err)
+				return common.ContextError(err)
 			}
 			return nil
 		})
 
 	_, err := database.Reload()
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return database, nil

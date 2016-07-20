@@ -17,37 +17,6 @@
  *
  */
 
-// for HTTPSServer.ServeTLS:
-/*
-Copyright (c) 2012 The Go Authors. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met:
-
-   * Redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the following disclaimer
-in the documentation and/or other materials provided with the
-distribution.
-   * Neither the name of Google Inc. nor the names of its
-contributors may be used to endorse or promote products derived from
-this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*/
-
 package psiphon
 
 import (
@@ -66,6 +35,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Inc/dns"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 const DNS_PORT = 53
@@ -97,7 +67,7 @@ type DialConfig struct {
 	// a conn is added to pendingConns before the network connect begins and
 	// removed from pendingConns once the connect succeeds or fails.
 	// May be nil.
-	PendingConns *Conns
+	PendingConns *common.Conns
 
 	// BindToDevice parameters are used to exclude connections and
 	// associated DNS requests from VPN routing.
@@ -177,53 +147,6 @@ func (TimeoutError) Temporary() bool { return true }
 // Dialer is a custom dialer compatible with http.Transport.Dial.
 type Dialer func(string, string) (net.Conn, error)
 
-// Conns is a synchronized list of Conns that is used to coordinate
-// interrupting a set of goroutines establishing connections, or
-// close a set of open connections, etc.
-// Once the list is closed, no more items may be added to the
-// list (unless it is reset).
-type Conns struct {
-	mutex    sync.Mutex
-	isClosed bool
-	conns    map[net.Conn]bool
-}
-
-func (conns *Conns) Reset() {
-	conns.mutex.Lock()
-	defer conns.mutex.Unlock()
-	conns.isClosed = false
-	conns.conns = make(map[net.Conn]bool)
-}
-
-func (conns *Conns) Add(conn net.Conn) bool {
-	conns.mutex.Lock()
-	defer conns.mutex.Unlock()
-	if conns.isClosed {
-		return false
-	}
-	if conns.conns == nil {
-		conns.conns = make(map[net.Conn]bool)
-	}
-	conns.conns[conn] = true
-	return true
-}
-
-func (conns *Conns) Remove(conn net.Conn) {
-	conns.mutex.Lock()
-	defer conns.mutex.Unlock()
-	delete(conns.conns, conn)
-}
-
-func (conns *Conns) CloseAll() {
-	conns.mutex.Lock()
-	defer conns.mutex.Unlock()
-	conns.isClosed = true
-	for conn, _ := range conns.conns {
-		conn.Close()
-	}
-	conns.conns = make(map[net.Conn]bool)
-}
-
 // LocalProxyRelay sends to remoteConn bytes received from localConn,
 // and sends to localConn bytes received from remoteConn.
 func LocalProxyRelay(proxyType string, localConn, remoteConn net.Conn) {
@@ -233,13 +156,13 @@ func LocalProxyRelay(proxyType string, localConn, remoteConn net.Conn) {
 		defer copyWaitGroup.Done()
 		_, err := io.Copy(localConn, remoteConn)
 		if err != nil {
-			err = fmt.Errorf("Relay failed: %s", ContextError(err))
+			err = fmt.Errorf("Relay failed: %s", common.ContextError(err))
 			NoticeLocalProxyError(proxyType, err)
 		}
 	}()
 	_, err := io.Copy(remoteConn, localConn)
 	if err != nil {
-		err = fmt.Errorf("Relay failed: %s", ContextError(err))
+		err = fmt.Errorf("Relay failed: %s", common.ContextError(err))
 		NoticeLocalProxyError(proxyType, err)
 	}
 	copyWaitGroup.Wait()
@@ -299,7 +222,7 @@ func ResolveIP(host string, conn net.Conn) (addrs []net.IP, ttls []time.Duration
 	// Process the response
 	response, err := dnsConn.ReadMsg()
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 	addrs = make([]net.IP, 0)
 	ttls = make([]time.Duration, 0)
@@ -334,7 +257,7 @@ func MakeUntunneledHttpsClient(
 
 	urlComponents, err := url.Parse(requestUrl)
 	if err != nil {
-		return nil, "", ContextError(err)
+		return nil, "", common.ContextError(err)
 	}
 
 	urlComponents.Scheme = "http"
@@ -396,13 +319,13 @@ func MakeTunneledHttpClient(
 
 	if config.UseTrustedCACertificatesForStockTLS {
 		if config.TrustedCACertificatesFilename == "" {
-			return nil, ContextError(errors.New(
+			return nil, common.ContextError(errors.New(
 				"UseTrustedCACertificatesForStockTLS requires TrustedCACertificatesFilename"))
 		}
 		rootCAs := x509.NewCertPool()
 		certData, err := ioutil.ReadFile(config.TrustedCACertificatesFilename)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		rootCAs.AppendCertsFromPEM(certData)
 		transport.TLSClientConfig = &tls.Config{RootCAs: rootCAs}
@@ -431,13 +354,13 @@ func MakeDownloadHttpClient(
 	if tunnel != nil {
 		httpClient, err = MakeTunneledHttpClient(config, tunnel, requestTimeout)
 		if err != nil {
-			return nil, "", ContextError(err)
+			return nil, "", common.ContextError(err)
 		}
 	} else {
 		httpClient, requestUrl, err = MakeUntunneledHttpsClient(
 			untunneledDialConfig, nil, requestUrl, requestTimeout)
 		if err != nil {
-			return nil, "", ContextError(err)
+			return nil, "", common.ContextError(err)
 		}
 	}
 
@@ -470,13 +393,13 @@ func ResumeDownload(
 
 	file, err := os.OpenFile(partialFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
-		return 0, "", ContextError(err)
+		return 0, "", common.ContextError(err)
 	}
 	defer file.Close()
 
 	fileInfo, err := file.Stat()
 	if err != nil {
-		return 0, "", ContextError(err)
+		return 0, "", common.ContextError(err)
 	}
 
 	// A partial download should have an ETag which is to be sent with the
@@ -494,14 +417,14 @@ func ResumeDownload(
 		if err != nil {
 			os.Remove(partialFilename)
 			os.Remove(partialETagFilename)
-			return 0, "", ContextError(
+			return 0, "", common.ContextError(
 				fmt.Errorf("failed to load partial download ETag: %s", err))
 		}
 	}
 
 	request, err := http.NewRequest("GET", requestUrl, nil)
 	if err != nil {
-		return 0, "", ContextError(err)
+		return 0, "", common.ContextError(err)
 	}
 
 	request.Header.Add("Range", fmt.Sprintf("bytes=%d-", fileInfo.Size()))
@@ -546,7 +469,7 @@ func ResumeDownload(
 		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
 	}
 	if err != nil {
-		return 0, "", ContextError(err)
+		return 0, "", common.ContextError(err)
 	}
 	defer response.Body.Close()
 
@@ -557,7 +480,7 @@ func ResumeDownload(
 		// simply failing and relying on the caller's retry schedule.
 		os.Remove(partialFilename)
 		os.Remove(partialETagFilename)
-		return 0, "", ContextError(errors.New("partial download ETag mismatch"))
+		return 0, "", common.ContextError(errors.New("partial download ETag mismatch"))
 
 	} else if response.StatusCode == http.StatusNotModified {
 		// This status code is possible in the "If-None-Match" case. Don't leave
@@ -580,14 +503,14 @@ func ResumeDownload(
 	// an error; the caller may use this to report partial download progress.
 
 	if err != nil {
-		return n, "", ContextError(err)
+		return n, "", common.ContextError(err)
 	}
 
 	// Ensure the file is flushed to disk. The deferred close
 	// will be a noop when this succeeds.
 	err = file.Close()
 	if err != nil {
-		return n, "", ContextError(err)
+		return n, "", common.ContextError(err)
 	}
 
 	// Remove if exists, to enable rename
@@ -595,56 +518,10 @@ func ResumeDownload(
 
 	err = os.Rename(partialFilename, downloadFilename)
 	if err != nil {
-		return n, "", ContextError(err)
+		return n, "", common.ContextError(err)
 	}
 
 	os.Remove(partialETagFilename)
 
 	return n, responseETag, nil
-}
-
-// IPAddressFromAddr is a helper which extracts an IP address
-// from a net.Addr or returns "" if there is no IP address.
-func IPAddressFromAddr(addr net.Addr) string {
-	ipAddress := ""
-	if addr != nil {
-		host, _, err := net.SplitHostPort(addr.String())
-		if err == nil {
-			ipAddress = host
-		}
-	}
-	return ipAddress
-}
-
-// HTTPSServer is a wrapper around http.Server which adds the
-// ServeTLS function.
-type HTTPSServer struct {
-	http.Server
-}
-
-// ServeTLS is a offers the equivalent interface as http.Serve.
-// The http package has both ListenAndServe and ListenAndServeTLS higher-
-// level interfaces, but only Serve (not TLS) offers a lower-level interface that
-// allows the caller to keep a refererence to the Listener, allowing for external
-// shutdown. ListenAndServeTLS also requires the TLS cert and key to be in files
-// and we avoid that here.
-// tcpKeepAliveListener is used in http.ListenAndServeTLS but not exported,
-// so we use a copy from https://golang.org/src/net/http/server.go.
-func (server *HTTPSServer) ServeTLS(listener net.Listener) error {
-	tlsListener := tls.NewListener(tcpKeepAliveListener{listener.(*net.TCPListener)}, server.TLSConfig)
-	return server.Serve(tlsListener)
-}
-
-type tcpKeepAliveListener struct {
-	*net.TCPListener
-}
-
-func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
-	tc, err := ln.AcceptTCP()
-	if err != nil {
-		return
-	}
-	tc.SetKeepAlive(true)
-	tc.SetKeepAlivePeriod(3 * time.Minute)
-	return tc, nil
 }

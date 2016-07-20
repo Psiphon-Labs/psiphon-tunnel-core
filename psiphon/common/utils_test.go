@@ -17,7 +17,7 @@
  *
  */
 
-package psiphon
+package common
 
 import (
 	"testing"
@@ -28,7 +28,11 @@ func TestMakeRandomPeriod(t *testing.T) {
 	min := 1 * time.Nanosecond
 	max := 10000 * time.Nanosecond
 
-	res1 := MakeRandomPeriod(min, max)
+	res1, err := MakeRandomPeriod(min, max)
+
+	if err != nil {
+		t.Error("MakeRandomPeriod failed: %s", err)
+	}
 
 	if res1 < min {
 		t.Error("duration should not be less than min")
@@ -38,7 +42,12 @@ func TestMakeRandomPeriod(t *testing.T) {
 		t.Error("duration should not be more than max")
 	}
 
-	res2 := MakeRandomPeriod(min, max)
+	res2, err := MakeRandomPeriod(min, max)
+
+	if err != nil {
+		t.Error("MakeRandomPeriod failed: %s", err)
+	}
+
 	if res1 == res2 {
 		t.Error("duration should have randomness difference between calls")
 	}

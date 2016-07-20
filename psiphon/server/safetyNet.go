@@ -29,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 const (
@@ -164,7 +164,7 @@ func (body *jwtBody) verifyJWTBody() (validApkCert, validApkPackageName bool) {
 	}
 
 	// Verify apk package name
-	if psiphon.Contains(psiphonApkPackagenames, body.ApkPackageName) {
+	if common.Contains(psiphonApkPackagenames, body.ApkPackageName) {
 		validApkPackageName = true
 	}
 

@@ -27,6 +27,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // AuthenticatedDataPackage is a JSON record containing some Psiphon data
@@ -45,24 +47,24 @@ func ReadAuthenticatedDataPackage(
 	var authenticatedDataPackage *AuthenticatedDataPackage
 	err = json.Unmarshal(rawPackage, &authenticatedDataPackage)
 	if err != nil {
-		return "", ContextError(err)
+		return "", common.ContextError(err)
 	}
 
 	derEncodedPublicKey, err := base64.StdEncoding.DecodeString(signingPublicKey)
 	if err != nil {
-		return "", ContextError(err)
+		return "", common.ContextError(err)
 	}
 	publicKey, err := x509.ParsePKIXPublicKey(derEncodedPublicKey)
 	if err != nil {
-		return "", ContextError(err)
+		return "", common.ContextError(err)
 	}
 	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
 	if !ok {
-		return "", ContextError(errors.New("unexpected signing public key type"))
+		return "", common.ContextError(errors.New("unexpected signing public key type"))
 	}
 	signature, err := base64.StdEncoding.DecodeString(authenticatedDataPackage.Signature)
 	if err != nil {
-		return "", ContextError(err)
+		return "", common.ContextError(err)
 	}
 	// TODO: can distinguish signed-with-different-key from other errors:
 	// match digest(publicKey) against authenticatedDataPackage.SigningPublicKeyDigest
@@ -71,7 +73,7 @@ func ReadAuthenticatedDataPackage(
 	digest := hash.Sum(nil)
 	err = rsa.VerifyPKCS1v15(rsaPublicKey, crypto.SHA256, digest, signature)
 	if err != nil {
-		return "", ContextError(err)
+		return "", common.ContextError(err)
 	}
 
 	return authenticatedDataPackage.Data, nil

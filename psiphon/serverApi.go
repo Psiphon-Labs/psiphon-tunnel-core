@@ -34,14 +34,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
-)
-
-const (
-	SERVER_API_HANDSHAKE_REQUEST_NAME           = "psiphon-handshake"
-	SERVER_API_CONNECTED_REQUEST_NAME           = "psiphon-connected"
-	SERVER_API_STATUS_REQUEST_NAME              = "psiphon-status"
-	SERVER_API_CLIENT_VERIFICATION_REQUEST_NAME = "psiphon-client-verification"
 )
 
 // ServerContext is a utility struct which holds all of the data associated
@@ -74,9 +68,9 @@ var nextTunnelNumber int64
 // Controller (e.g., the user's commanded start and stop) and we measure this
 // duration as well as the duration of each tunnel within the session.
 func MakeSessionId() (sessionId string, err error) {
-	randomId, err := MakeSecureRandomBytes(PSIPHON_API_CLIENT_SESSION_ID_LENGTH)
+	randomId, err := common.MakeSecureRandomBytes(common.PSIPHON_API_CLIENT_SESSION_ID_LENGTH)
 	if err != nil {
-		return "", ContextError(err)
+		return "", common.ContextError(err)
 	}
 	return hex.EncodeToString(randomId), nil
 }
@@ -93,7 +87,7 @@ func NewServerContext(tunnel *Tunnel, sessionId string) (*ServerContext, error) 
 		var err error
 		psiphonHttpsClient, err = makePsiphonHttpsClient(tunnel)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 	}
 
@@ -106,7 +100,7 @@ func NewServerContext(tunnel *Tunnel, sessionId string) (*ServerContext, error) 
 
 	err := serverContext.doHandshakeRequest()
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return serverContext, nil
@@ -123,7 +117,7 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	/*
 		serverEntryIpAddresses, err := GetServerEntryIpAddresses()
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 
 		// Submit a list of known servers -- this will be used for
@@ -138,13 +132,13 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 
 		request, err := makeSSHAPIRequestPayload(params)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 
 		response, err = serverContext.tunnel.SendAPIRequest(
-			SERVER_API_HANDSHAKE_REQUEST_NAME, request)
+			common.PSIPHON_API_HANDSHAKE_REQUEST_NAME, request)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 
 	} else {
@@ -154,7 +148,7 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 		responseBody, err := serverContext.doGetRequest(
 			makeRequestUrl(serverContext.tunnel, "", "handshake", params))
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 		// Skip legacy format lines and just parse the JSON config line
 		configLinePrefix := []byte("Config: ")
@@ -165,7 +159,7 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 			}
 		}
 		if len(response) == 0 {
-			return ContextError(errors.New("no config line found"))
+			return common.ContextError(errors.New("no config line found"))
 		}
 	}
 
@@ -187,7 +181,7 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	}
 	err := json.Unmarshal(response, &handshakeResponse)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	serverContext.clientRegion = handshakeResponse.ClientRegion
@@ -202,10 +196,10 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 
 		serverEntry, err := DecodeServerEntry(
 			encodedServerEntry,
-			TruncateTimestampToHour(handshakeResponse.ServerTimestamp),
-			SERVER_ENTRY_SOURCE_DISCOVERY)
+			common.TruncateTimestampToHour(handshakeResponse.ServerTimestamp),
+			common.SERVER_ENTRY_SOURCE_DISCOVERY)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 
 		err = ValidateServerEntry(serverEntry)
@@ -222,7 +216,7 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	// StoreServerEntries that don't get triggered by StoreServerEntry.
 	err = StoreServerEntries(decodedServerEntries, true)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	// TODO: formally communicate the sponsor and upgrade info to an
@@ -271,7 +265,7 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 	const DATA_STORE_LAST_CONNECTED_KEY = "lastConnected"
 	lastConnected, err := GetKeyValue(DATA_STORE_LAST_CONNECTED_KEY)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	if lastConnected == "" {
 		lastConnected = "None"
@@ -284,13 +278,13 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 
 		request, err := makeSSHAPIRequestPayload(params)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 
 		response, err = serverContext.tunnel.SendAPIRequest(
-			SERVER_API_CONNECTED_REQUEST_NAME, request)
+			common.PSIPHON_API_CONNECTED_REQUEST_NAME, request)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 
 	} else {
@@ -300,7 +294,7 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 		response, err = serverContext.doGetRequest(
 			makeRequestUrl(serverContext.tunnel, "", "connected", params))
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 	}
 
@@ -309,13 +303,13 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 	}
 	err = json.Unmarshal(response, &connectedResponse)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	err = SetKeyValue(
 		DATA_STORE_LAST_CONNECTED_KEY, connectedResponse.ConnectedTimestamp)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	return nil
 }
@@ -336,7 +330,7 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 	statusPayload, statusPayloadInfo, err := makeStatusRequestPayload(
 		tunnel.serverEntry.IpAddress)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	if serverContext.psiphonHttpsClient == nil {
@@ -349,7 +343,7 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 
 		if err == nil {
 			_, err = serverContext.tunnel.SendAPIRequest(
-				SERVER_API_STATUS_REQUEST_NAME, request)
+				common.PSIPHON_API_STATUS_REQUEST_NAME, request)
 		}
 
 	} else {
@@ -368,7 +362,7 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 		// the request but the client failed to receive the response.
 		putBackStatusRequestPayload(statusPayloadInfo)
 
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	confirmStatusRequestPayload(statusPayloadInfo)
@@ -385,7 +379,12 @@ func (serverContext *ServerContext) getStatusParams(isTunneled bool) requestJSON
 	// TODO: base64 encoding of padding means the padding size is not exactly
 	// [0, PADDING_MAX_BYTES].
 
-	randomPadding := MakeSecureRandomPadding(0, PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES)
+	randomPadding, err := common.MakeSecureRandomPadding(0, PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES)
+	if err != nil {
+		NoticeAlert("MakeSecureRandomPadding failed: %s", err)
+		// Proceed without random padding
+		randomPadding = make([]byte, 0)
+	}
 	params["padding"] = base64.StdEncoding.EncodeToString(randomPadding)
 
 	// Legacy clients set "connected" to "0" when disconnecting, and this value
@@ -422,7 +421,7 @@ func makeStatusRequestPayload(
 		PSIPHON_API_TUNNEL_STATS_MAX_COUNT)
 	if err != nil {
 		NoticeAlert(
-			"TakeOutUnreportedTunnelStats failed: %s", ContextError(err))
+			"TakeOutUnreportedTunnelStats failed: %s", common.ContextError(err))
 		tunnelStats = nil
 		// Proceed with transferStats only
 	}
@@ -452,7 +451,7 @@ func makeStatusRequestPayload(
 		// Send the transfer stats and tunnel stats later
 		putBackStatusRequestPayload(payloadInfo)
 
-		return nil, nil, ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 
 	return jsonPayload, payloadInfo, nil
@@ -466,7 +465,7 @@ func putBackStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 		// These tunnel stats records won't be resent under after a
 		// datastore re-initialization.
 		NoticeAlert(
-			"PutBackUnreportedTunnelStats failed: %s", ContextError(err))
+			"PutBackUnreportedTunnelStats failed: %s", common.ContextError(err))
 	}
 }
 
@@ -475,7 +474,7 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 	if err != nil {
 		// These tunnel stats records may be resent.
 		NoticeAlert(
-			"ClearReportedTunnelStats failed: %s", ContextError(err))
+			"ClearReportedTunnelStats failed: %s", common.ContextError(err))
 	}
 }
 
@@ -507,7 +506,7 @@ func (serverContext *ServerContext) doUntunneledStatusRequest(
 
 	certificate, err := DecodeCertificate(tunnel.serverEntry.WebServerCertificate)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	timeout := time.Duration(*tunnel.config.PsiphonApiServerTimeoutSeconds) * time.Second
@@ -532,12 +531,12 @@ func (serverContext *ServerContext) doUntunneledStatusRequest(
 		url,
 		timeout)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	statusPayload, statusPayloadInfo, err := makeStatusRequestPayload(tunnel.serverEntry.IpAddress)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	bodyType := "application/json"
@@ -556,7 +555,7 @@ func (serverContext *ServerContext) doUntunneledStatusRequest(
 		putBackStatusRequestPayload(statusPayloadInfo)
 
 		// Trim this error since it may include long URLs
-		return ContextError(TrimError(err))
+		return common.ContextError(TrimError(err))
 	}
 	confirmStatusRequestPayload(statusPayloadInfo)
 	response.Body.Close()
@@ -634,7 +633,7 @@ func RecordTunnelStats(
 
 	tunnelStatsJson, err := json.Marshal(tunnelStats)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	return StoreTunnelStats(tunnelStatsJson)
@@ -659,13 +658,13 @@ func (serverContext *ServerContext) DoClientVerificationRequest(
 
 		request, err := makeSSHAPIRequestPayload(params)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 
 		response, err = serverContext.tunnel.SendAPIRequest(
-			SERVER_API_CLIENT_VERIFICATION_REQUEST_NAME, request)
+			common.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME, request)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 
 	} else {
@@ -676,7 +675,7 @@ func (serverContext *ServerContext) DoClientVerificationRequest(
 			"application/json",
 			bytes.NewReader([]byte(verificationPayload)))
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 	}
 
@@ -691,7 +690,7 @@ func (serverContext *ServerContext) DoClientVerificationRequest(
 
 	err = json.Unmarshal(response, &clientVerificationResponse)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	if clientVerificationResponse.ClientVerificationTTLSeconds > 0 {
@@ -717,12 +716,12 @@ func (serverContext *ServerContext) doGetRequest(
 	}
 	if err != nil {
 		// Trim this error since it may include long URLs
-		return nil, ContextError(TrimError(err))
+		return nil, common.ContextError(TrimError(err))
 	}
 	defer response.Body.Close()
 	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	return body, nil
 }
@@ -738,12 +737,12 @@ func (serverContext *ServerContext) doPostRequest(
 	}
 	if err != nil {
 		// Trim this error since it may include long URLs
-		return nil, ContextError(TrimError(err))
+		return nil, common.ContextError(TrimError(err))
 	}
 	defer response.Body.Close()
 	responseBody, err = ioutil.ReadAll(response.Body)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	return responseBody, nil
 }
@@ -814,7 +813,7 @@ func (serverContext *ServerContext) getBaseParams() requestJSONObject {
 	// a precise handshake request server timestamp, is truncated
 	// to hour granularity to avoid introducing a reconstructable
 	// cross-session user trace into server logs.
-	localServerEntryTimestamp := TruncateTimestampToHour(tunnel.serverEntry.LocalTimestamp)
+	localServerEntryTimestamp := common.TruncateTimestampToHour(tunnel.serverEntry.LocalTimestamp)
 	if localServerEntryTimestamp != "" {
 		params["server_entry_timestamp"] = localServerEntryTimestamp
 	}
@@ -826,7 +825,7 @@ func (serverContext *ServerContext) getBaseParams() requestJSONObject {
 func makeSSHAPIRequestPayload(params requestJSONObject) ([]byte, error) {
 	jsonPayload, err := json.Marshal(params)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	return jsonPayload, nil
 }
@@ -890,7 +889,7 @@ func makeRequestUrl(tunnel *Tunnel, port, path string, params requestJSONObject)
 func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error) {
 	certificate, err := DecodeCertificate(tunnel.serverEntry.WebServerCertificate)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
 		// TODO: check tunnel.isClosed, and apply TUNNEL_PORT_FORWARD_DIAL_TIMEOUT as in Tunnel.Dial?

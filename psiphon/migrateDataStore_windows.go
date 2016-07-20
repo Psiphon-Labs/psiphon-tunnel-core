@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 
 	_ "github.com/Psiphon-Inc/go-sqlite3"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 var legacyDb *sql.DB
@@ -158,7 +159,7 @@ func (iterator *legacyServerEntryIterator) Next() (serverEntry *ServerEntry, err
 	if !iterator.cursor.Next() {
 		err = iterator.cursor.Err()
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		// There is no next item
 		return nil, nil
@@ -167,12 +168,12 @@ func (iterator *legacyServerEntryIterator) Next() (serverEntry *ServerEntry, err
 	var data []byte
 	err = iterator.cursor.Scan(&data)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	serverEntry = new(ServerEntry)
 	err = json.Unmarshal(data, serverEntry)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return MakeCompatibleServerEntry(serverEntry), nil
@@ -185,7 +186,7 @@ func (iterator *legacyServerEntryIterator) Reset() error {
 
 	transaction, err := legacyDb.Begin()
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	var cursor *sql.Rows
 
@@ -213,7 +214,7 @@ func (iterator *legacyServerEntryIterator) Reset() error {
 	cursor, err = transaction.Query(query, params...)
 	if err != nil {
 		transaction.Rollback()
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	iterator.transaction = transaction
 	iterator.cursor = cursor

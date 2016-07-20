@@ -29,7 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -384,18 +384,18 @@ func readUdpgwMessage(
 
 		_, err := io.ReadFull(reader, buffer[0:2])
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 
 		size := uint16(buffer[0]) + uint16(buffer[1])<<8
 
 		if int(size) > len(buffer)-2 {
-			return nil, psiphon.ContextError(errors.New("invalid udpgw message size"))
+			return nil, common.ContextError(errors.New("invalid udpgw message size"))
 		}
 
 		_, err = io.ReadFull(reader, buffer[2:2+size])
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 
 		flags := buffer[2]
@@ -417,7 +417,7 @@ func readUdpgwMessage(
 		if flags&udpgwProtocolFlagIPv6 == udpgwProtocolFlagIPv6 {
 
 			if size < 21 {
-				return nil, psiphon.ContextError(errors.New("invalid udpgw message size"))
+				return nil, common.ContextError(errors.New("invalid udpgw message size"))
 			}
 
 			remoteIP = make([]byte, 16)
@@ -429,7 +429,7 @@ func readUdpgwMessage(
 		} else {
 
 			if size < 9 {
-				return nil, psiphon.ContextError(errors.New("invalid udpgw message size"))
+				return nil, common.ContextError(errors.New("invalid udpgw message size"))
 			}
 
 			remoteIP = make([]byte, 4)
@@ -465,7 +465,7 @@ func writeUdpgwPreamble(
 	buffer []byte) error {
 
 	if preambleSize != 7+len(remoteIP) {
-		return errors.New("invalid udpgw preamble size")
+		return common.ContextError(errors.New("invalid udpgw preamble size"))
 	}
 
 	size := uint16(preambleSize-2) + packetSize

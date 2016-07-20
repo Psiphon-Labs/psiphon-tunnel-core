@@ -30,7 +30,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 const WEB_SERVER_IO_TIMEOUT = 10 * time.Second
@@ -72,7 +72,7 @@ func RunWebServer(
 		[]byte(support.Config.WebServerCertificate),
 		[]byte(support.Config.WebServerPrivateKey))
 	if err != nil {
-		return psiphon.ContextError(err)
+		return common.ContextError(err)
 	}
 
 	tlsConfig := &tls.Config{
@@ -86,7 +86,7 @@ func RunWebServer(
 	// Note: WriteTimeout includes time awaiting request, as per:
 	// https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts
 
-	server := &psiphon.HTTPSServer{
+	server := &HTTPSServer{
 		http.Server{
 			MaxHeaderBytes: MAX_API_PARAMS_SIZE,
 			Handler:        serveMux,
@@ -102,7 +102,7 @@ func RunWebServer(
 			support.Config.ServerIPAddress,
 			support.Config.WebServerPort))
 	if err != nil {
-		return psiphon.ContextError(err)
+		return common.ContextError(err)
 	}
 
 	log.WithContext().Info("starting")
@@ -126,7 +126,7 @@ func RunWebServer(
 		default:
 			if err != nil {
 				select {
-				case errors <- psiphon.ContextError(err):
+				case errors <- common.ContextError(err):
 				default:
 				}
 			}
@@ -177,7 +177,7 @@ func convertHTTPRequestToAPIRequest(
 				var arrayValue []interface{}
 				err := json.Unmarshal([]byte(value), &arrayValue)
 				if err != nil {
-					return nil, psiphon.ContextError(err)
+					return nil, common.ContextError(err)
 				}
 				params[name] = arrayValue
 			} else {
@@ -192,12 +192,12 @@ func convertHTTPRequestToAPIRequest(
 		r.Body = http.MaxBytesReader(w, r.Body, MAX_API_PARAMS_SIZE)
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		var bodyParams requestJSONObject
 		err = json.Unmarshal(body, &bodyParams)
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		params[requestBodyName] = bodyParams
 	}

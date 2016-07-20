@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 func TestMain(m *testing.M) {
@@ -240,7 +241,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 
-			//fmt.Printf("%s\n", string(notice))
+			fmt.Printf("%s\n", string(notice))
 
 			noticeType, payload, err := psiphon.GetNotice(notice)
 			if err != nil {
@@ -341,10 +342,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 func pavePsinetDatabaseFile(t *testing.T, psinetFilename string) (string, string) {
 
-	sponsorID, _ := psiphon.MakeRandomStringHex(8)
+	sponsorID, _ := common.MakeRandomStringHex(8)
 
-	fakeDomain, _ := psiphon.MakeRandomStringHex(4)
-	fakePath, _ := psiphon.MakeRandomStringHex(4)
+	fakeDomain, _ := common.MakeRandomStringHex(4)
+	fakePath, _ := common.MakeRandomStringHex(4)
 	expectedHomepageURL := fmt.Sprintf("https://%s.com/%s", fakeDomain, fakePath)
 
 	psinetJSONFormat := `

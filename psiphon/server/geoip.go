@@ -27,7 +27,7 @@ import (
 
 	cache "github.com/Psiphon-Inc/go-cache"
 	maxminddb "github.com/Psiphon-Inc/maxminddb-golang"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 const (
@@ -69,7 +69,7 @@ type GeoIPService struct {
 }
 
 type geoIPDatabase struct {
-	psiphon.ReloadableFile
+	common.ReloadableFile
 	maxMindReader *maxminddb.Reader
 }
 
@@ -87,13 +87,13 @@ func NewGeoIPService(
 	for i, filename := range databaseFilenames {
 
 		database := &geoIPDatabase{}
-		database.ReloadableFile = psiphon.NewReloadableFile(
+		database.ReloadableFile = common.NewReloadableFile(
 			filename,
 			func(filename string) error {
 				maxMindReader, err := maxminddb.Open(filename)
 				if err != nil {
 					// On error, database state remains the same
-					return psiphon.ContextError(err)
+					return common.ContextError(err)
 				}
 				if database.maxMindReader != nil {
 					database.maxMindReader.Close()
@@ -104,7 +104,7 @@ func NewGeoIPService(
 
 		_, err := database.Reload()
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 
 		geoIP.databases[i] = database
@@ -116,8 +116,8 @@ func NewGeoIPService(
 // Reloaders gets the list of reloadable databases in use
 // by the GeoIPService. This list is used to hot reload
 // these databases.
-func (geoIP *GeoIPService) Reloaders() []psiphon.Reloader {
-	reloaders := make([]psiphon.Reloader, len(geoIP.databases))
+func (geoIP *GeoIPService) Reloaders() []common.Reloader {
+	reloaders := make([]common.Reloader, len(geoIP.databases))
 	for i, database := range geoIP.databases {
 		reloaders[i] = database
 	}

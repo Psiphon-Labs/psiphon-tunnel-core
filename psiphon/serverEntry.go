@@ -27,40 +27,9 @@ import (
 	"fmt"
 	"net"
 	"strings"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
-
-const (
-	TUNNEL_PROTOCOL_SSH                  = "SSH"
-	TUNNEL_PROTOCOL_OBFUSCATED_SSH       = "OSSH"
-	TUNNEL_PROTOCOL_UNFRONTED_MEEK       = "UNFRONTED-MEEK-OSSH"
-	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS = "UNFRONTED-MEEK-HTTPS-OSSH"
-	TUNNEL_PROTOCOL_FRONTED_MEEK         = "FRONTED-MEEK-OSSH"
-	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP    = "FRONTED-MEEK-HTTP-OSSH"
-
-	SERVER_ENTRY_SOURCE_EMBEDDED  = "EMBEDDED"
-	SERVER_ENTRY_SOURCE_REMOTE    = "REMOTE"
-	SERVER_ENTRY_SOURCE_DISCOVERY = "DISCOVERY"
-	SERVER_ENTRY_SOURCE_TARGET    = "TARGET"
-
-	CAPABILITY_SSH_API_REQUESTS            = "ssh-api-requests"
-	CAPABILITY_UNTUNNELED_WEB_API_REQUESTS = "handshake"
-)
-
-var SupportedTunnelProtocols = []string{
-	TUNNEL_PROTOCOL_FRONTED_MEEK,
-	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP,
-	TUNNEL_PROTOCOL_UNFRONTED_MEEK,
-	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
-	TUNNEL_PROTOCOL_OBFUSCATED_SSH,
-	TUNNEL_PROTOCOL_SSH,
-}
-
-var SupportedServerEntrySources = []string{
-	SERVER_ENTRY_SOURCE_EMBEDDED,
-	SERVER_ENTRY_SOURCE_REMOTE,
-	SERVER_ENTRY_SOURCE_DISCOVERY,
-	SERVER_ENTRY_SOURCE_TARGET,
-}
 
 // ServerEntry represents a Psiphon server. It contains information
 // about how to establish a tunnel connection to the server through
@@ -96,24 +65,6 @@ type ServerEntry struct {
 	LocalTimestamp string `json:"localTimestamp"`
 }
 
-func TunnelProtocolUsesSSH(protocol string) bool {
-	return true
-}
-
-func TunnelProtocolUsesObfuscatedSSH(protocol string) bool {
-	return protocol != TUNNEL_PROTOCOL_SSH
-}
-
-func TunnelProtocolUsesMeekHTTP(protocol string) bool {
-	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
-		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP
-}
-
-func TunnelProtocolUsesMeekHTTPS(protocol string) bool {
-	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK ||
-		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS
-}
-
 // GetCapability returns the server capability corresponding
 // to the protocol.
 func GetCapability(protocol string) string {
@@ -124,14 +75,14 @@ func GetCapability(protocol string) string {
 // the necessary capability to support the specified tunnel protocol.
 func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 	requiredCapability := GetCapability(protocol)
-	return Contains(serverEntry.Capabilities, requiredCapability)
+	return common.Contains(serverEntry.Capabilities, requiredCapability)
 }
 
 // GetSupportedProtocols returns a list of tunnel protocols supported
 // by the ServerEntry's capabilities.
 func (serverEntry *ServerEntry) GetSupportedProtocols() []string {
 	supportedProtocols := make([]string, 0)
-	for _, protocol := range SupportedTunnelProtocols {
+	for _, protocol := range common.SupportedTunnelProtocols {
 		if serverEntry.SupportsProtocol(protocol) {
 			supportedProtocols = append(supportedProtocols, protocol)
 		}
@@ -163,16 +114,16 @@ func (serverEntry *ServerEntry) DisableImpairedProtocols(impairedProtocols []str
 // SupportsSSHAPIRequests returns true when the server supports
 // SSH API requests.
 func (serverEntry *ServerEntry) SupportsSSHAPIRequests() bool {
-	return Contains(serverEntry.Capabilities, CAPABILITY_SSH_API_REQUESTS)
+	return common.Contains(serverEntry.Capabilities, common.CAPABILITY_SSH_API_REQUESTS)
 }
 
 func (serverEntry *ServerEntry) GetUntunneledWebRequestPorts() []string {
 	ports := make([]string, 0)
-	if Contains(serverEntry.Capabilities, CAPABILITY_UNTUNNELED_WEB_API_REQUESTS) {
+	if common.Contains(serverEntry.Capabilities, common.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS) {
 		// Server-side configuration quirk: there's a port forward from
 		// port 443 to the web server, which we can try, except on servers
 		// running FRONTED_MEEK, which listens on port 443.
-		if !serverEntry.SupportsProtocol(TUNNEL_PROTOCOL_FRONTED_MEEK) {
+		if !serverEntry.SupportsProtocol(common.TUNNEL_PROTOCOL_FRONTED_MEEK) {
 			ports = append(ports, "443")
 		}
 		ports = append(ports, serverEntry.WebServerPort)
@@ -185,7 +136,7 @@ func (serverEntry *ServerEntry) GetUntunneledWebRequestPorts() []string {
 func EncodeServerEntry(serverEntry *ServerEntry) (string, error) {
 	serverEntryContents, err := json.Marshal(serverEntry)
 	if err != nil {
-		return "", ContextError(err)
+		return "", common.ContextError(err)
 	}
 
 	return hex.EncodeToString([]byte(fmt.Sprintf(
@@ -213,19 +164,19 @@ func DecodeServerEntry(
 
 	hexDecodedServerEntry, err := hex.DecodeString(encodedServerEntry)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// Skip past legacy format (4 space delimited fields) and just parse the JSON config
 	fields := bytes.SplitN(hexDecodedServerEntry, []byte(" "), 5)
 	if len(fields) != 5 {
-		return nil, ContextError(errors.New("invalid encoded server entry"))
+		return nil, common.ContextError(errors.New("invalid encoded server entry"))
 	}
 
 	serverEntry = new(ServerEntry)
 	err = json.Unmarshal(fields[4], &serverEntry)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// NOTE: if the source JSON happens to have values in these fields, they get clobbered.
@@ -247,7 +198,7 @@ func ValidateServerEntry(serverEntry *ServerEntry) error {
 		// Some callers skip invalid server entries without propagating
 		// the error mesage, so issue a notice.
 		NoticeAlert(errMsg)
-		return ContextError(errors.New(errMsg))
+		return common.ContextError(errors.New(errMsg))
 	}
 	return nil
 }
@@ -269,7 +220,7 @@ func DecodeAndValidateServerEntryList(
 		// TODO: skip this entry and continue if can't decode?
 		serverEntry, err := DecodeServerEntry(encodedServerEntry, timestamp, serverEntrySource)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 
 		if ValidateServerEntry(serverEntry) != nil {

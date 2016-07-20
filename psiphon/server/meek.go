@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -82,7 +83,7 @@ type MeekServer struct {
 	listener      net.Listener
 	tlsConfig     *tls.Config
 	clientHandler func(clientConn net.Conn)
-	openConns     *psiphon.Conns
+	openConns     *common.Conns
 	stopBroadcast <-chan struct{}
 	sessionsLock  sync.RWMutex
 	sessions      map[string]*meekSession
@@ -100,7 +101,7 @@ func NewMeekServer(
 		support:       support,
 		listener:      listener,
 		clientHandler: clientHandler,
-		openConns:     new(psiphon.Conns),
+		openConns:     new(common.Conns),
 		stopBroadcast: stopBroadcast,
 		sessions:      make(map[string]*meekSession),
 	}
@@ -108,7 +109,7 @@ func NewMeekServer(
 	if useTLS {
 		tlsConfig, err := makeMeekTLSConfig(support)
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		meekServer.tlsConfig = tlsConfig
 	}
@@ -168,7 +169,7 @@ func (server *MeekServer) Run() error {
 	var err error
 	if server.tlsConfig != nil {
 		httpServer.TLSConfig = server.tlsConfig
-		httpsServer := psiphon.HTTPSServer{Server: *httpServer}
+		httpsServer := HTTPSServer{Server: *httpServer}
 		err = httpsServer.ServeTLS(server.listener)
 	} else {
 		err = httpServer.Serve(server.listener)
@@ -296,7 +297,7 @@ func (server *MeekServer) getSession(
 
 	payloadJSON, err := getMeekCookiePayload(server.support, meekCookie.Value)
 	if err != nil {
-		return "", nil, psiphon.ContextError(err)
+		return "", nil, common.ContextError(err)
 	}
 
 	// Note: this meek server ignores all but Version MeekProtocolVersion;
@@ -309,7 +310,7 @@ func (server *MeekServer) getSession(
 
 	err = json.Unmarshal(payloadJSON, &clientSessionData)
 	if err != nil {
-		return "", nil, psiphon.ContextError(err)
+		return "", nil, common.ContextError(err)
 	}
 
 	// Determine the client remote address, which is used for geolocation
@@ -368,7 +369,7 @@ func (server *MeekServer) getSession(
 	if clientSessionData.MeekProtocolVersion >= MEEK_PROTOCOL_VERSION_2 {
 		sessionID, err = makeMeekSessionID()
 		if err != nil {
-			return "", nil, psiphon.ContextError(err)
+			return "", nil, common.ContextError(err)
 		}
 	}
 
@@ -466,13 +467,13 @@ func makeMeekTLSConfig(support *SupportServices) (*tls.Config, error) {
 	certificate, privateKey, err := GenerateWebServerCertificate(
 		support.Config.MeekCertificateCommonName)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	tlsCertificate, err := tls.X509KeyPair(
 		[]byte(certificate), []byte(privateKey))
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return &tls.Config{
@@ -514,7 +515,7 @@ func makeMeekTLSConfig(support *SupportServices) (*tls.Config, error) {
 func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte, error) {
 	decodedValue, err := base64.StdEncoding.DecodeString(cookieValue)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// The data consists of an obfuscated seed message prepended
@@ -528,12 +529,12 @@ func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte,
 		reader,
 		&psiphon.ObfuscatorConfig{Keyword: support.Config.MeekObfuscatedKey})
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	offset, err := reader.Seek(0, 1)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	encryptedPayload := decodedValue[offset:]
 
@@ -545,18 +546,18 @@ func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte,
 	decodedPrivateKey, err := base64.StdEncoding.DecodeString(
 		support.Config.MeekCookieEncryptionPrivateKey)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	copy(privateKey[:], decodedPrivateKey)
 
 	if len(encryptedPayload) < 32 {
-		return nil, psiphon.ContextError(errors.New("unexpected encrypted payload size"))
+		return nil, common.ContextError(errors.New("unexpected encrypted payload size"))
 	}
 	copy(ephemeralPublicKey[0:32], encryptedPayload[0:32])
 
 	payload, ok := box.Open(nil, encryptedPayload[32:], &nonce, &ephemeralPublicKey, &privateKey)
 	if !ok {
-		return nil, psiphon.ContextError(errors.New("open box failed"))
+		return nil, common.ContextError(errors.New("open box failed"))
 	}
 
 	return payload, nil
@@ -566,14 +567,14 @@ func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte,
 // frustrate traffic analysis of both plaintext and TLS meek traffic.
 func makeMeekSessionID() (string, error) {
 	size := MEEK_MIN_SESSION_ID_LENGTH
-	n, err := psiphon.MakeSecureRandomInt(MEEK_MAX_SESSION_ID_LENGTH - MEEK_MIN_SESSION_ID_LENGTH)
+	n, err := common.MakeSecureRandomInt(MEEK_MAX_SESSION_ID_LENGTH - MEEK_MIN_SESSION_ID_LENGTH)
 	if err != nil {
-		return "", psiphon.ContextError(err)
+		return "", common.ContextError(err)
 	}
 	size += n
-	sessionID, err := psiphon.MakeRandomStringBase64(size)
+	sessionID, err := common.MakeRandomStringBase64(size)
 	if err != nil {
-		return "", psiphon.ContextError(err)
+		return "", common.ContextError(err)
 	}
 	return sessionID, nil
 }
@@ -785,15 +786,15 @@ func (conn *meekConn) SetDeadline(t time.Time) error {
 	if time.Now().Add(MEEK_MAX_SESSION_STALENESS).Before(t) {
 		return nil
 	}
-	return psiphon.ContextError(errors.New("not supported"))
+	return common.ContextError(errors.New("not supported"))
 }
 
 // Stub implementation of net.Conn.SetReadDeadline
 func (conn *meekConn) SetReadDeadline(t time.Time) error {
-	return psiphon.ContextError(errors.New("not supported"))
+	return common.ContextError(errors.New("not supported"))
 }
 
 // Stub implementation of net.Conn.SetWriteDeadline
 func (conn *meekConn) SetWriteDeadline(t time.Time) error {
-	return psiphon.ContextError(errors.New("not supported"))
+	return common.ContextError(errors.New("not supported"))
 }

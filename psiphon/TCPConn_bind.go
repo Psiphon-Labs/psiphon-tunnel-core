@@ -29,6 +29,8 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // tcpDial is the platform-specific part of interruptibleTCPDial
@@ -52,18 +54,18 @@ func tcpDial(addr string, config *DialConfig, dialResult chan error) (net.Conn, 
 	// Get the remote IP and port, resolving a domain name if necessary
 	host, strPort, err := net.SplitHostPort(addr)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	port, err := strconv.Atoi(strPort)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	ipAddrs, err := LookupIP(host, config)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	if len(ipAddrs) < 1 {
-		return nil, ContextError(errors.New("no IP address"))
+		return nil, common.ContextError(errors.New("no IP address"))
 	}
 
 	// Select an IP at random from the list, so we're not always
@@ -71,9 +73,9 @@ func tcpDial(addr string, config *DialConfig, dialResult chan error) (net.Conn, 
 	// TODO: retry all IPs until one connects? For now, this retry
 	// will happen on subsequent TCPDial calls, when a different IP
 	// is selected.
-	index, err := MakeSecureRandomInt(len(ipAddrs))
+	index, err := common.MakeSecureRandomInt(len(ipAddrs))
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// TODO: IPv6 support
@@ -83,7 +85,7 @@ func tcpDial(addr string, config *DialConfig, dialResult chan error) (net.Conn, 
 	// Create a socket and bind to device, when configured to do so
 	socketFd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	if config.DeviceBinder != nil {
@@ -94,7 +96,7 @@ func tcpDial(addr string, config *DialConfig, dialResult chan error) (net.Conn, 
 		err = config.DeviceBinder.BindToDevice(socketFd)
 		if err != nil {
 			syscall.Close(socketFd)
-			return nil, ContextError(fmt.Errorf("BindToDevice failed: %s", err))
+			return nil, common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))
 		}
 	}
 
@@ -102,7 +104,7 @@ func tcpDial(addr string, config *DialConfig, dialResult chan error) (net.Conn, 
 	err = syscall.Connect(socketFd, &sockAddr)
 	if err != nil {
 		syscall.Close(socketFd)
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// Convert the socket fd to a net.Conn
@@ -110,7 +112,7 @@ func tcpDial(addr string, config *DialConfig, dialResult chan error) (net.Conn, 
 	netConn, err := net.FileConn(file) // net.FileConn() dups socketFd
 	file.Close()                       // file.Close() closes socketFd
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return netConn, nil

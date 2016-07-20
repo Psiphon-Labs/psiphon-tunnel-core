@@ -24,13 +24,15 @@ package psiphon
 import (
 	"errors"
 	"net"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // LookupIP resolves a hostname. When BindToDevice is not required, it
 // simply uses net.LookupIP.
 func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 	if config.DeviceBinder != nil {
-		return nil, ContextError(errors.New("LookupIP with DeviceBinder not supported on this platform"))
+		return nil, common.ContextError(errors.New("LookupIP with DeviceBinder not supported on this platform"))
 	}
 	return net.LookupIP(host)
 }

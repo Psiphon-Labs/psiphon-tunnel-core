@@ -24,14 +24,14 @@ import (
 	"io/ioutil"
 	"strings"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // TrafficRulesSet represents the various traffic rules to
 // apply to Psiphon client tunnels. The Reload function supports
 // hot reloading of rules data while the server is running.
 type TrafficRulesSet struct {
-	psiphon.ReloadableFile
+	common.ReloadableFile
 
 	// DefaultRules specifies the traffic rules to be used when no
 	// regional-specific rules are set or apply to a particular
@@ -45,41 +45,18 @@ type TrafficRulesSet struct {
 	RegionalRules map[string]TrafficRules
 }
 
-// RateLimits specify the rate limits for tunneled data transfer
-// between an individual client and the server.
-type RateLimits struct {
-
-	// DownstreamUnlimitedBytes specifies the number of downstream
-	// bytes to transfer, approximately, before starting rate
-	// limiting.
-	DownstreamUnlimitedBytes int64
-
-	// DownstreamBytesPerSecond specifies a rate limit for downstream
-	// data transfer. The default, 0, is no limit.
-	DownstreamBytesPerSecond int
-
-	// UpstreamUnlimitedBytes specifies the number of upstream
-	// bytes to transfer, approximately, before starting rate
-	// limiting.
-	UpstreamUnlimitedBytes int64
-
-	// UpstreamBytesPerSecond specifies a rate limit for upstream
-	// data transfer. The default, 0, is no limit.
-	UpstreamBytesPerSecond int
-}
-
 // TrafficRules specify the limits placed on client traffic.
 type TrafficRules struct {
 	// DefaultLimits are the rate limits to be applied when
 	// no protocol-specific rates are set.
-	DefaultLimits RateLimits
+	DefaultLimits common.RateLimits
 
 	// ProtocolLimits specifies the rate limits for particular
 	// tunnel protocols. The key for each rate limit entry is one
 	// or more space delimited Psiphon tunnel protocol names. Valid
 	// tunnel protocols includes the same list as for
 	// TunnelProtocolPorts.
-	ProtocolLimits map[string]RateLimits
+	ProtocolLimits map[string]common.RateLimits
 
 	// IdleTCPPortForwardTimeoutMilliseconds is the timeout period
 	// after which idle (no bytes flowing in either direction)
@@ -130,27 +107,27 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 
 	set := &TrafficRulesSet{}
 
-	set.ReloadableFile = psiphon.NewReloadableFile(
+	set.ReloadableFile = common.NewReloadableFile(
 		filename,
 		func(filename string) error {
 			configJSON, err := ioutil.ReadFile(filename)
 			if err != nil {
 				// On error, state remains the same
-				return psiphon.ContextError(err)
+				return common.ContextError(err)
 			}
 			err = json.Unmarshal(configJSON, &set)
 			if err != nil {
 				// On error, state remains the same
 				// (Unmarshal first validates the provided
 				//  JOSN and then populates the interface)
-				return psiphon.ContextError(err)
+				return common.ContextError(err)
 			}
 			return nil
 		})
 
 	_, err := set.Reload()
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return set, nil
@@ -176,7 +153,7 @@ func (set *TrafficRulesSet) GetTrafficRules(clientCountryCode string) TrafficRul
 // GetRateLimits looks up the rate limits for the specified tunnel protocol.
 // If there are no specific RateLimits for the protocol, default RateLimits are
 // returned.
-func (rules *TrafficRules) GetRateLimits(clientTunnelProtocol string) RateLimits {
+func (rules *TrafficRules) GetRateLimits(clientTunnelProtocol string) common.RateLimits {
 
 	// TODO: faster lookup?
 	for tunnelProtocols, rateLimits := range rules.ProtocolLimits {

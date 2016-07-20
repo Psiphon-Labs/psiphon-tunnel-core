@@ -29,7 +29,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 const (
@@ -67,22 +67,22 @@ func sshAPIRequestHandler(
 	var params requestJSONObject
 	err := json.Unmarshal(requestPayload, &params)
 	if err != nil {
-		return nil, psiphon.ContextError(
+		return nil, common.ContextError(
 			fmt.Errorf("invalid payload for request name: %s: %s", name, err))
 	}
 
 	switch name {
-	case psiphon.SERVER_API_HANDSHAKE_REQUEST_NAME:
+	case common.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
 		return handshakeAPIRequestHandler(support, geoIPData, params)
-	case psiphon.SERVER_API_CONNECTED_REQUEST_NAME:
+	case common.PSIPHON_API_CONNECTED_REQUEST_NAME:
 		return connectedAPIRequestHandler(support, geoIPData, params)
-	case psiphon.SERVER_API_STATUS_REQUEST_NAME:
+	case common.PSIPHON_API_STATUS_REQUEST_NAME:
 		return statusAPIRequestHandler(support, geoIPData, params)
-	case psiphon.SERVER_API_CLIENT_VERIFICATION_REQUEST_NAME:
+	case common.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME:
 		return clientVerificationAPIRequestHandler(support, geoIPData, params)
 	}
 
-	return nil, psiphon.ContextError(fmt.Errorf("invalid request name: %s", name))
+	return nil, common.ContextError(fmt.Errorf("invalid request name: %s", name))
 }
 
 // handshakeAPIRequestHandler implements the "handshake" API request.
@@ -98,7 +98,7 @@ func handshakeAPIRequestHandler(
 
 	err := validateRequestParams(support, params, baseRequestParams)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	log.WithContextFields(
@@ -146,7 +146,7 @@ func handshakeAPIRequestHandler(
 
 	handshakeResponse.ClientRegion = clientRegion
 
-	handshakeResponse.ServerTimestamp = psiphon.GetCurrentTimestamp()
+	handshakeResponse.ServerTimestamp = common.GetCurrentTimestamp()
 
 	handshakeResponse.ClientVerificationRequired = CLIENT_VERIFICATION_REQUIRED
 	handshakeResponse.ClientVerificationServerNonce = ""
@@ -155,7 +155,7 @@ func handshakeAPIRequestHandler(
 
 	responsePayload, err := json.Marshal(handshakeResponse)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return responsePayload, nil
@@ -179,7 +179,7 @@ func connectedAPIRequestHandler(
 
 	err := validateRequestParams(support, params, connectedRequestParams)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	log.WithContextFields(
@@ -195,11 +195,11 @@ func connectedAPIRequestHandler(
 	}
 
 	connectedResponse.ConnectedTimestamp =
-		psiphon.TruncateTimestampToHour(psiphon.GetCurrentTimestamp())
+		common.TruncateTimestampToHour(common.GetCurrentTimestamp())
 
 	responsePayload, err := json.Marshal(connectedResponse)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return responsePayload, nil
@@ -224,19 +224,19 @@ func statusAPIRequestHandler(
 
 	err := validateRequestParams(support, params, statusRequestParams)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	statusData, err := getJSONObjectRequestParam(params, "statusData")
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// Overall bytes transferred stats
 
 	bytesTransferred, err := getInt64RequestParam(statusData, "bytes_transferred")
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	bytesTransferredFields := getRequestLogFields(
 		support, "bytes_transferred", geoIPData, params, statusRequestParams)
@@ -250,7 +250,7 @@ func statusAPIRequestHandler(
 
 		hostBytes, err := getMapStringInt64RequestParam(statusData, "host_bytes")
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		domainBytesFields := getRequestLogFields(
 			support, "domain_bytes", geoIPData, params, statusRequestParams)
@@ -268,7 +268,7 @@ func statusAPIRequestHandler(
 
 		tunnelStats, err := getJSONObjectArrayRequestParam(statusData, "tunnel_stats")
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		sessionFields := getRequestLogFields(
 			support, "session", geoIPData, params, statusRequestParams)
@@ -276,48 +276,48 @@ func statusAPIRequestHandler(
 
 			sessionID, err := getStringRequestParam(tunnelStat, "session_id")
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			sessionFields["session_id"] = sessionID
 
 			tunnelNumber, err := getInt64RequestParam(tunnelStat, "tunnel_number")
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			sessionFields["tunnel_number"] = tunnelNumber
 
 			tunnelServerIPAddress, err := getStringRequestParam(tunnelStat, "tunnel_server_ip_address")
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			sessionFields["tunnel_server_ip_address"] = tunnelServerIPAddress
 
 			serverHandshakeTimestamp, err := getStringRequestParam(tunnelStat, "server_handshake_timestamp")
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			sessionFields["server_handshake_timestamp"] = serverHandshakeTimestamp
 
 			strDuration, err := getStringRequestParam(tunnelStat, "duration")
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			duration, err := strconv.ParseInt(strDuration, 10, 64)
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			// Client reports durations in nanoseconds; divide to get to milliseconds
 			sessionFields["duration"] = duration / 1000000
 
 			totalBytesSent, err := getInt64RequestParam(tunnelStat, "total_bytes_sent")
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			sessionFields["total_bytes_sent"] = totalBytesSent
 
 			totalBytesReceived, err := getInt64RequestParam(tunnelStat, "total_bytes_received")
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			sessionFields["total_bytes_received"] = totalBytesReceived
 
@@ -339,7 +339,7 @@ func clientVerificationAPIRequestHandler(
 
 	err := validateRequestParams(support, params, baseRequestParams)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// Ignoring error as params are validated
@@ -347,7 +347,7 @@ func clientVerificationAPIRequestHandler(
 
 	verificationData, err := getJSONObjectRequestParam(params, "verificationData")
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	logFields := getRequestLogFields(
@@ -424,7 +424,7 @@ func validateRequestParams(
 			if expectedParam.flags&requestParamOptional != 0 {
 				continue
 			}
-			return psiphon.ContextError(
+			return common.ContextError(
 				fmt.Errorf("missing param: %s", expectedParam.name))
 		}
 		var err error
@@ -434,7 +434,7 @@ func validateRequestParams(
 			err = validateStringRequestParam(support, expectedParam, value)
 		}
 		if err != nil {
-			return psiphon.ContextError(err)
+			return common.ContextError(err)
 		}
 	}
 
@@ -448,11 +448,11 @@ func validateStringRequestParam(
 
 	strValue, ok := value.(string)
 	if !ok {
-		return psiphon.ContextError(
+		return common.ContextError(
 			fmt.Errorf("unexpected string param type: %s", expectedParam.name))
 	}
 	if !expectedParam.validator(support, strValue) {
-		return psiphon.ContextError(
+		return common.ContextError(
 			fmt.Errorf("invalid param: %s", expectedParam.name))
 	}
 	return nil
@@ -465,13 +465,13 @@ func validateStringArrayRequestParam(
 
 	arrayValue, ok := value.([]interface{})
 	if !ok {
-		return psiphon.ContextError(
+		return common.ContextError(
 			fmt.Errorf("unexpected string param type: %s", expectedParam.name))
 	}
 	for _, value := range arrayValue {
 		err := validateStringRequestParam(support, expectedParam, value)
 		if err != nil {
-			return psiphon.ContextError(err)
+			return common.ContextError(err)
 		}
 	}
 	return nil
@@ -563,45 +563,45 @@ func getRequestLogFields(
 
 func getStringRequestParam(params requestJSONObject, name string) (string, error) {
 	if params[name] == nil {
-		return "", psiphon.ContextError(fmt.Errorf("missing param: %s", name))
+		return "", common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
 	value, ok := params[name].(string)
 	if !ok {
-		return "", psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
+		return "", common.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
 	return value, nil
 }
 
 func getInt64RequestParam(params requestJSONObject, name string) (int64, error) {
 	if params[name] == nil {
-		return 0, psiphon.ContextError(fmt.Errorf("missing param: %s", name))
+		return 0, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
 	value, ok := params[name].(float64)
 	if !ok {
-		return 0, psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
+		return 0, common.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
 	return int64(value), nil
 }
 
 func getJSONObjectRequestParam(params requestJSONObject, name string) (requestJSONObject, error) {
 	if params[name] == nil {
-		return nil, psiphon.ContextError(fmt.Errorf("missing param: %s", name))
+		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
 	// TODO: can't use requestJSONObject type?
 	value, ok := params[name].(map[string]interface{})
 	if !ok {
-		return nil, psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
+		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
 	return requestJSONObject(value), nil
 }
 
 func getJSONObjectArrayRequestParam(params requestJSONObject, name string) ([]requestJSONObject, error) {
 	if params[name] == nil {
-		return nil, psiphon.ContextError(fmt.Errorf("missing param: %s", name))
+		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
 	value, ok := params[name].([]interface{})
 	if !ok {
-		return nil, psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
+		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
 
 	result := make([]requestJSONObject, len(value))
@@ -609,7 +609,7 @@ func getJSONObjectArrayRequestParam(params requestJSONObject, name string) ([]re
 		// TODO: can't use requestJSONObject type?
 		resultItem, ok := item.(map[string]interface{})
 		if !ok {
-			return nil, psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
+			return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
 		}
 		result[i] = requestJSONObject(resultItem)
 	}
@@ -619,19 +619,19 @@ func getJSONObjectArrayRequestParam(params requestJSONObject, name string) ([]re
 
 func getMapStringInt64RequestParam(params requestJSONObject, name string) (map[string]int64, error) {
 	if params[name] == nil {
-		return nil, psiphon.ContextError(fmt.Errorf("missing param: %s", name))
+		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
 	// TODO: can't use requestJSONObject type?
 	value, ok := params[name].(map[string]interface{})
 	if !ok {
-		return nil, psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
+		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
 
 	result := make(map[string]int64)
 	for k, v := range value {
 		numValue, ok := v.(float64)
 		if !ok {
-			return nil, psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
+			return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
 		}
 		result[k] = int64(numValue)
 	}
@@ -687,7 +687,7 @@ func isClientPlatform(_ *SupportServices, value string) bool {
 }
 
 func isRelayProtocol(_ *SupportServices, value string) bool {
-	return psiphon.Contains(psiphon.SupportedTunnelProtocols, value)
+	return common.Contains(common.SupportedTunnelProtocols, value)
 }
 
 func isBooleanFlag(_ *SupportServices, value string) bool {
@@ -769,7 +769,7 @@ func isHostHeader(support *SupportServices, value string) bool {
 }
 
 func isServerEntrySource(_ *SupportServices, value string) bool {
-	return psiphon.Contains(psiphon.SupportedServerEntrySources, value)
+	return common.Contains(common.SupportedServerEntrySources, value)
 }
 
 var isISO8601DateRegex = regexp.MustCompile(

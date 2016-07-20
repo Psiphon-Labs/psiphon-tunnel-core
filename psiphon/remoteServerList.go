@@ -25,6 +25,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // FetchRemoteServerList downloads a remote server list JSON record from
@@ -47,7 +49,7 @@ func FetchRemoteServerList(
 		config.RemoteServerListUrl,
 		time.Duration(*config.FetchRemoteServerListTimeoutSeconds)*time.Second)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	// Proceed with download
@@ -60,7 +62,7 @@ func FetchRemoteServerList(
 
 	lastETag, err := GetUrlETag(config.RemoteServerListUrl)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	n, responseETag, err := ResumeDownload(
@@ -69,7 +71,7 @@ func FetchRemoteServerList(
 	NoticeRemoteServerListDownloadedBytes(n)
 
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	if responseETag == lastETag {
@@ -84,38 +86,38 @@ func FetchRemoteServerList(
 
 	downloadContent, err := os.Open(downloadFilename)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	defer downloadContent.Close()
 
 	zlibReader, err := zlib.NewReader(downloadContent)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	dataPackage, err := ioutil.ReadAll(zlibReader)
 	zlibReader.Close()
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	remoteServerList, err := ReadAuthenticatedDataPackage(
 		dataPackage, config.RemoteServerListSignaturePublicKey)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	serverEntries, err := DecodeAndValidateServerEntryList(
 		remoteServerList,
-		GetCurrentTimestamp(),
-		SERVER_ENTRY_SOURCE_REMOTE)
+		common.GetCurrentTimestamp(),
+		common.SERVER_ENTRY_SOURCE_REMOTE)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	err = StoreServerEntries(serverEntries, true)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	// Now that the server entries are successfully imported, store the response
@@ -124,7 +126,7 @@ func FetchRemoteServerList(
 	if responseETag != "" {
 		err := SetUrlETag(config.RemoteServerListUrl, responseETag)
 		if err != nil {
-			NoticeAlert("failed to set remote server list ETag: %s", ContextError(err))
+			NoticeAlert("failed to set remote server list ETag: %s", common.ContextError(err))
 			// This fetch is still reported as a success, even if we can't store the etag
 		}
 	}
