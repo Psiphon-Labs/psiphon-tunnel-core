@@ -9,9 +9,8 @@ install:
 - go get -t -d -v ./... && go build -v ./...
 script:
 - cd psiphon
+- go test -v -covermode=count -coverprofile=common.coverprofile ./common
 - go test -v -covermode=count -coverprofile=transferstats.coverprofile ./transferstats
-# upstreamproxy test disabled until "import cycle not allowed in test" problem resolved
-#- go test -v -covermode=count -coverprofile=upstreamproxy.coverprofile ./upstreamproxy
 - go test -v -covermode=count -coverprofile=server.coverprofile ./server
 - go test -v -covermode=count -coverprofile=psiphon.coverprofile
 - $HOME/gopath/bin/gover

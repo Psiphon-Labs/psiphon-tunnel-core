@@ -29,6 +29,7 @@ import (
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 func main() {
@@ -139,8 +140,8 @@ func main() {
 			// TODO: stream embedded server list data? also, the cast makes an unnecessary copy of a large buffer?
 			serverEntries, err := psiphon.DecodeAndValidateServerEntryList(
 				string(serverEntryList),
-				psiphon.GetCurrentTimestamp(),
-				psiphon.SERVER_ENTRY_SOURCE_EMBEDDED)
+				common.GetCurrentTimestamp(),
+				common.SERVER_ENTRY_SOURCE_EMBEDDED)
 			if err != nil {
 				psiphon.NoticeError("error decoding embedded server entry list file: %s", err)
 				return

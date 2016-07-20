@@ -29,6 +29,7 @@ import (
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 type PsiphonProvider interface {
@@ -83,8 +84,8 @@ func Start(
 
 	serverEntries, err := psiphon.DecodeAndValidateServerEntryList(
 		embeddedServerEntryList,
-		psiphon.GetCurrentTimestamp(),
-		psiphon.SERVER_ENTRY_SOURCE_EMBEDDED)
+		common.GetCurrentTimestamp(),
+		common.SERVER_ENTRY_SOURCE_EMBEDDED)
 	if err != nil {
 		return fmt.Errorf("error decoding embedded server entry list: %s", err)
 	}

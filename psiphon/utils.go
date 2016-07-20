@@ -20,134 +20,26 @@
 package psiphon
 
 import (
-	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"net/url"
 	"os"
-	"runtime"
-	"strings"
-	"sync"
 	"syscall"
-	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
-
-// Contains is a helper function that returns true
-// if the target string is in the list.
-func Contains(list []string, target string) bool {
-	for _, listItem := range list {
-		if listItem == target {
-			return true
-		}
-	}
-	return false
-}
-
-// FlipCoin is a helper function that randomly
-// returns true or false. If the underlying random
-// number generator fails, FlipCoin still returns
-// a result.
-func FlipCoin() bool {
-	randomInt, _ := MakeSecureRandomInt(2)
-	return randomInt == 1
-}
-
-// MakeSecureRandomInt is a helper function that wraps
-// MakeSecureRandomInt64.
-func MakeSecureRandomInt(max int) (int, error) {
-	randomInt, err := MakeSecureRandomInt64(int64(max))
-	return int(randomInt), err
-}
-
-// MakeSecureRandomInt64 is a helper function that wraps
-// crypto/rand.Int, which returns a uniform random value in [0, max).
-func MakeSecureRandomInt64(max int64) (int64, error) {
-	randomInt, err := rand.Int(rand.Reader, big.NewInt(max))
-	if err != nil {
-		return 0, ContextError(err)
-	}
-	return randomInt.Int64(), nil
-}
-
-// MakeSecureRandomBytes is a helper function that wraps
-// crypto/rand.Read.
-func MakeSecureRandomBytes(length int) ([]byte, error) {
-	randomBytes := make([]byte, length)
-	n, err := rand.Read(randomBytes)
-	if err != nil {
-		return nil, ContextError(err)
-	}
-	if n != length {
-		return nil, ContextError(errors.New("insufficient random bytes"))
-	}
-	return randomBytes, nil
-}
-
-// MakeSecureRandomPadding selects a random padding length in the indicated
-// range and returns a random byte array of the selected length.
-// In the unlikely case where an underlying MakeRandom functions fails,
-// the padding is length 0.
-func MakeSecureRandomPadding(minLength, maxLength int) []byte {
-	var padding []byte
-	paddingSize, err := MakeSecureRandomInt(maxLength - minLength)
-	if err != nil {
-		NoticeAlert("MakeSecureRandomPadding: MakeSecureRandomInt failed")
-		return make([]byte, 0)
-	}
-	paddingSize += minLength
-	padding, err = MakeSecureRandomBytes(paddingSize)
-	if err != nil {
-		NoticeAlert("MakeSecureRandomPadding: MakeSecureRandomBytes failed")
-		return make([]byte, 0)
-	}
-	return padding
-}
-
-// MakeRandomPeriod returns a random duration, within a given range.
-// In the unlikely case where an  underlying MakeRandom functions fails,
-// the period is the minimum.
-func MakeRandomPeriod(min, max time.Duration) (duration time.Duration) {
-	period, err := MakeSecureRandomInt64(max.Nanoseconds() - min.Nanoseconds())
-	if err != nil {
-		NoticeAlert("NextRandomRangePeriod: MakeSecureRandomInt64 failed")
-	}
-	duration = min + time.Duration(period)
-	return
-}
-
-// MakeRandomStringHex returns a hex encoded random string.
-// byteLength specifies the pre-encoded data length.
-func MakeRandomStringHex(byteLength int) (string, error) {
-	bytes, err := MakeSecureRandomBytes(byteLength)
-	if err != nil {
-		return "", ContextError(err)
-	}
-	return hex.EncodeToString(bytes), nil
-}
-
-// MakeRandomStringBase64 returns a base64 encoded random string.
-// byteLength specifies the pre-encoded data length.
-func MakeRandomStringBase64(byteLength int) (string, error) {
-	bytes, err := MakeSecureRandomBytes(byteLength)
-	if err != nil {
-		return "", ContextError(err)
-	}
-	return base64.RawURLEncoding.EncodeToString(bytes), nil
-}
 
 func DecodeCertificate(encodedCertificate string) (certificate *x509.Certificate, err error) {
 	derEncodedCertificate, err := base64.StdEncoding.DecodeString(encodedCertificate)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	certificate, err = x509.ParseCertificate(derEncodedCertificate)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	return certificate, nil
 }
@@ -180,35 +72,6 @@ func TrimError(err error) error {
 		return errors.New(message[:MAX_LEN/2] + "..." + message[len(message)-MAX_LEN/2:])
 	}
 	return err
-}
-
-// getFunctionName is a helper that extracts a simple function name from
-// full name returned byruntime.Func.Name(). This is used to declutter
-// log messages containing function names.
-func getFunctionName(pc uintptr) string {
-	funcName := runtime.FuncForPC(pc).Name()
-	index := strings.LastIndex(funcName, "/")
-	if index != -1 {
-		funcName = funcName[index+1:]
-	}
-	return funcName
-}
-
-// GetParentContext returns the parent function name and source file
-// line number.
-func GetParentContext() string {
-	pc, _, line, _ := runtime.Caller(2)
-	return fmt.Sprintf("%s#%d", getFunctionName(pc), line)
-}
-
-// ContextError prefixes an error message with the current function
-// name and source file line number.
-func ContextError(err error) error {
-	if err == nil {
-		return nil
-	}
-	pc, _, line, _ := runtime.Caller(1)
-	return fmt.Errorf("%s#%d: %s", getFunctionName(pc), line, err)
 }
 
 // IsAddressInUseError returns true when the err is due to EADDRINUSE/WSAEADDRINUSE.
@@ -257,143 +120,4 @@ func (writer *SyncFileWriter) Write(p []byte) (n int, err error) {
 		writer.count = 0
 	}
 	return
-}
-
-// GetCurrentTimestamp returns the current time in UTC as
-// an RFC 3339 formatted string.
-func GetCurrentTimestamp() string {
-	return time.Now().UTC().Format(time.RFC3339)
-}
-
-// TruncateTimestampToHour truncates an RFC 3339 formatted string
-// to hour granularity. If the input is not a valid format, the
-// result is "".
-func TruncateTimestampToHour(timestamp string) string {
-	t, err := time.Parse(time.RFC3339, timestamp)
-	if err != nil {
-		NoticeAlert("failed to truncate timestamp: %s", err)
-		return ""
-	}
-	return t.Truncate(1 * time.Hour).Format(time.RFC3339)
-}
-
-// IsFileChanged uses os.Stat to check if the name, size, or last mod time of the
-// file has changed (which is a heuristic, but sufficiently robust for users of this
-// function). Returns nil if file has not changed; otherwise, returns a changed
-// os.FileInfo which may be used to check for subsequent changes.
-func IsFileChanged(path string, previousFileInfo os.FileInfo) (os.FileInfo, error) {
-
-	fileInfo, err := os.Stat(path)
-	if err != nil {
-		return nil, ContextError(err)
-	}
-
-	changed := previousFileInfo == nil ||
-		fileInfo.Name() != previousFileInfo.Name() ||
-		fileInfo.Size() != previousFileInfo.Size() ||
-		fileInfo.ModTime() != previousFileInfo.ModTime()
-
-	if !changed {
-		return nil, nil
-	}
-
-	return fileInfo, nil
-}
-
-// Reloader represents a read-only, in-memory reloadable data object. For example,
-// a JSON data file that is loaded into memory and accessed for read-only lookups;
-// and from time to time may be reloaded from the same file, updating the memory
-// copy.
-type Reloader interface {
-
-	// Reload reloads the data object. Reload returns a flag indicating if the
-	// reloadable target has changed and reloaded or remains unchanged. By
-	// convention, when reloading fails the Reloader should revert to its previous
-	// in-memory state.
-	Reload() (bool, error)
-
-	// WillReload indicates if the data object is capable of reloading.
-	WillReload() bool
-
-	// LogDescription returns a description to be used for logging
-	// events related to the Reloader.
-	LogDescription() string
-}
-
-// ReloadableFile is a file-backed Reloader. This type is intended to be embedded
-// in other types that add the actual reloadable data structures.
-//
-// ReloadableFile has a multi-reader mutex for synchronization. Its Reload() function
-// will obtain a write lock before reloading the data structures. Actually reloading
-// action is to be provided via the reloadAction callback (for example, read the contents
-// of the file and unmarshall the contents into data structures). All read access to
-// the data structures should be guarded by RLocks on the ReloadableFile mutex.
-//
-// reloadAction must ensure that data structures revert to their previous state when
-// a reload fails.
-//
-type ReloadableFile struct {
-	sync.RWMutex
-	fileName     string
-	fileInfo     os.FileInfo
-	reloadAction func(string) error
-}
-
-// NewReloadableFile initializes a new ReloadableFile
-func NewReloadableFile(
-	fileName string,
-	reloadAction func(string) error) ReloadableFile {
-
-	return ReloadableFile{
-		fileName:     fileName,
-		reloadAction: reloadAction,
-	}
-}
-
-// WillReload indicates whether the ReloadableFile is capable
-// of reloading.
-func (reloadable *ReloadableFile) WillReload() bool {
-	return reloadable.fileName != ""
-}
-
-// Reload checks if the underlying file has changed (using IsFileChanged semantics, which
-// are heuristics) and, when changed, invokes the reloadAction callback which should
-// reload, from the file, the in-memory data structures.
-// All data structure readers should be blocked by the ReloadableFile mutex.
-func (reloadable *ReloadableFile) Reload() (bool, error) {
-
-	if !reloadable.WillReload() {
-		return false, nil
-	}
-
-	// Check whether the file has changed _before_ blocking readers
-
-	reloadable.RLock()
-	changedFileInfo, err := IsFileChanged(reloadable.fileName, reloadable.fileInfo)
-	reloadable.RUnlock()
-	if err != nil {
-		return false, ContextError(err)
-	}
-
-	if changedFileInfo == nil {
-		return false, nil
-	}
-
-	// ...now block readers
-
-	reloadable.Lock()
-	defer reloadable.Unlock()
-
-	err = reloadable.reloadAction(reloadable.fileName)
-	if err != nil {
-		return false, ContextError(err)
-	}
-
-	reloadable.fileInfo = changedFileInfo
-
-	return true, nil
-}
-
-func (reloadable *ReloadableFile) LogDescription() string {
-	return reloadable.fileName
 }

@@ -33,6 +33,7 @@ import (
 	"time"
 
 	regen "github.com/Psiphon-Inc/goregen"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	"golang.org/x/crypto/ssh"
 )
@@ -113,27 +114,30 @@ func EstablishTunnel(
 	config *Config,
 	untunneledDialConfig *DialConfig,
 	sessionId string,
-	pendingConns *Conns,
+	pendingConns *common.Conns,
 	serverEntry *ServerEntry,
 	tunnelOwner TunnelOwner) (tunnel *Tunnel, err error) {
 
 	selectedProtocol, err := selectProtocol(config, serverEntry)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// Build transport layers and establish SSH connection
-	conn, sshClient, dialStats, err := dialSsh(
+	dialConn, sshClient, dialStats, err := dialSsh(
 		config, pendingConns, serverEntry, selectedProtocol, sessionId)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
+
+	// Apply throttling (if configured)
+	conn := common.NewThrottledConn(dialConn, config.RateLimits)
 
 	// Cleanup on error
 	defer func() {
 		if err != nil {
 			sshClient.Close()
-			conn.Close()
+			dialConn.Close()
 		}
 	}()
 
@@ -165,7 +169,7 @@ func EstablishTunnel(
 		NoticeInfo("starting server context for %s", tunnel.serverEntry.IpAddress)
 		tunnel.serverContext, err = NewServerContext(tunnel, sessionId)
 		if err != nil {
-			return nil, ContextError(
+			return nil, common.ContextError(
 				fmt.Errorf("error starting server context for %s: %s",
 					tunnel.serverEntry.IpAddress, err))
 		}
@@ -174,7 +178,7 @@ func EstablishTunnel(
 	tunnel.startTime = time.Now()
 
 	// Now that network operations are complete, cancel interruptibility
-	pendingConns.Remove(conn)
+	pendingConns.Remove(dialConn)
 
 	// Spawn the operateTunnel goroutine, which monitors the tunnel and handles periodic stats updates.
 	tunnel.operateWaitGroup.Add(1)
@@ -236,18 +240,18 @@ func (tunnel *Tunnel) SendAPIRequest(
 	name string, requestPayload []byte) ([]byte, error) {
 
 	if tunnel.IsClosed() {
-		return nil, ContextError(errors.New("tunnel is closed"))
+		return nil, common.ContextError(errors.New("tunnel is closed"))
 	}
 
 	ok, responsePayload, err := tunnel.sshClient.Conn.SendRequest(
 		name, true, requestPayload)
 
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	if !ok {
-		return nil, ContextError(errors.New("API request rejected"))
+		return nil, common.ContextError(errors.New("API request rejected"))
 	}
 
 	return responsePayload, nil
@@ -259,7 +263,7 @@ func (tunnel *Tunnel) Dial(
 	remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error) {
 
 	if tunnel.IsClosed() {
-		return nil, ContextError(errors.New("tunnel is closed"))
+		return nil, common.ContextError(errors.New("tunnel is closed"))
 	}
 
 	type tunnelDialResult struct {
@@ -284,7 +288,7 @@ func (tunnel *Tunnel) Dial(
 		case tunnel.signalPortForwardFailure <- *new(struct{}):
 		default:
 		}
-		return nil, ContextError(result.err)
+		return nil, common.ContextError(result.err)
 	}
 
 	conn = &TunneledConn{
@@ -372,7 +376,7 @@ func selectProtocol(config *Config, serverEntry *ServerEntry) (selectedProtocol 
 	// for now, the code is simply assuming that MEEK capabilities imply OSSH capability.
 	if config.TunnelProtocol != "" {
 		if !serverEntry.SupportsProtocol(config.TunnelProtocol) {
-			return "", ContextError(fmt.Errorf("server does not have required capability"))
+			return "", common.ContextError(fmt.Errorf("server does not have required capability"))
 		}
 		selectedProtocol = config.TunnelProtocol
 	} else {
@@ -384,12 +388,12 @@ func selectProtocol(config *Config, serverEntry *ServerEntry) (selectedProtocol 
 
 		candidateProtocols := serverEntry.GetSupportedProtocols()
 		if len(candidateProtocols) == 0 {
-			return "", ContextError(fmt.Errorf("server does not have any supported capabilities"))
+			return "", common.ContextError(fmt.Errorf("server does not have any supported capabilities"))
 		}
 
-		index, err := MakeSecureRandomInt(len(candidateProtocols))
+		index, err := common.MakeSecureRandomInt(len(candidateProtocols))
 		if err != nil {
-			return "", ContextError(err)
+			return "", common.ContextError(err)
 		}
 		selectedProtocol = candidateProtocols[index]
 	}
@@ -407,7 +411,7 @@ func selectFrontingParameters(
 
 		frontingAddress, err = regen.Generate(serverEntry.MeekFrontingAddressesRegex)
 		if err != nil {
-			return "", "", ContextError(err)
+			return "", "", common.ContextError(err)
 		}
 	} else {
 
@@ -415,19 +419,19 @@ func selectFrontingParameters(
 		// fronting-capable servers.
 
 		if len(serverEntry.MeekFrontingAddresses) == 0 {
-			return "", "", ContextError(errors.New("MeekFrontingAddresses is empty"))
+			return "", "", common.ContextError(errors.New("MeekFrontingAddresses is empty"))
 		}
-		index, err := MakeSecureRandomInt(len(serverEntry.MeekFrontingAddresses))
+		index, err := common.MakeSecureRandomInt(len(serverEntry.MeekFrontingAddresses))
 		if err != nil {
-			return "", "", ContextError(err)
+			return "", "", common.ContextError(err)
 		}
 		frontingAddress = serverEntry.MeekFrontingAddresses[index]
 	}
 
 	if len(serverEntry.MeekFrontingHosts) > 0 {
-		index, err := MakeSecureRandomInt(len(serverEntry.MeekFrontingHosts))
+		index, err := common.MakeSecureRandomInt(len(serverEntry.MeekFrontingHosts))
 		if err != nil {
-			return "", "", ContextError(err)
+			return "", "", common.ContextError(err)
 		}
 		frontingHost = serverEntry.MeekFrontingHosts[index]
 	} else {
@@ -455,10 +459,10 @@ func initMeekConfig(
 	transformedHostName := false
 
 	switch selectedProtocol {
-	case TUNNEL_PROTOCOL_FRONTED_MEEK:
+	case common.TUNNEL_PROTOCOL_FRONTED_MEEK:
 		frontingAddress, frontingHost, err := selectFrontingParameters(serverEntry)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		dialAddress = fmt.Sprintf("%s:443", frontingAddress)
 		useHTTPS = true
@@ -468,15 +472,15 @@ func initMeekConfig(
 		}
 		hostHeader = frontingHost
 
-	case TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
+	case common.TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
 		frontingAddress, frontingHost, err := selectFrontingParameters(serverEntry)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		dialAddress = fmt.Sprintf("%s:80", frontingAddress)
 		hostHeader = frontingHost
 
-	case TUNNEL_PROTOCOL_UNFRONTED_MEEK:
+	case common.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 		dialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
 		hostname := serverEntry.IpAddress
 		hostname, transformedHostName = config.HostNameTransformer.TransformHostName(hostname)
@@ -486,7 +490,7 @@ func initMeekConfig(
 			hostHeader = fmt.Sprintf("%s:%d", hostname, serverEntry.MeekServerPort)
 		}
 
-	case TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS:
+	case common.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS:
 		dialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
 		useHTTPS = true
 		SNIServerName, transformedHostName =
@@ -498,7 +502,7 @@ func initMeekConfig(
 		}
 
 	default:
-		return nil, ContextError(errors.New("unexpected selectedProtocol"))
+		return nil, common.ContextError(errors.New("unexpected selectedProtocol"))
 	}
 
 	// The unnderlying TLS will automatically disable SNI for IP address server name
@@ -524,7 +528,7 @@ func initMeekConfig(
 // When additional dial configuration is used, DialStats are recorded and returned.
 func dialSsh(
 	config *Config,
-	pendingConns *Conns,
+	pendingConns *common.Conns,
 	serverEntry *ServerEntry,
 	selectedProtocol,
 	sessionId string) (net.Conn, *ssh.Client, *TunnelDialStats, error) {
@@ -538,18 +542,18 @@ func dialSsh(
 	var err error
 
 	switch selectedProtocol {
-	case TUNNEL_PROTOCOL_OBFUSCATED_SSH:
+	case common.TUNNEL_PROTOCOL_OBFUSCATED_SSH:
 		useObfuscatedSsh = true
 		directTCPDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
 
-	case TUNNEL_PROTOCOL_SSH:
+	case common.TUNNEL_PROTOCOL_SSH:
 		directTCPDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshPort)
 
 	default:
 		useObfuscatedSsh = true
 		meekConfig, err = initMeekConfig(config, serverEntry, selectedProtocol, sessionId)
 		if err != nil {
-			return nil, nil, nil, ContextError(err)
+			return nil, nil, nil, common.ContextError(err)
 		}
 	}
 
@@ -589,12 +593,12 @@ func dialSsh(
 	if meekConfig != nil {
 		conn, err = DialMeek(meekConfig, dialConfig)
 		if err != nil {
-			return nil, nil, nil, ContextError(err)
+			return nil, nil, nil, common.ContextError(err)
 		}
 	} else {
 		conn, err = DialTCP(directTCPDialAddress, dialConfig)
 		if err != nil {
-			return nil, nil, nil, ContextError(err)
+			return nil, nil, nil, common.ContextError(err)
 		}
 	}
 
@@ -612,19 +616,19 @@ func dialSsh(
 		sshConn, err = NewObfuscatedSshConn(
 			OBFUSCATION_CONN_MODE_CLIENT, conn, serverEntry.SshObfuscatedKey)
 		if err != nil {
-			return nil, nil, nil, ContextError(err)
+			return nil, nil, nil, common.ContextError(err)
 		}
 	}
 
 	// Now establish the SSH session over the conn transport
 	expectedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.SshHostKey)
 	if err != nil {
-		return nil, nil, nil, ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 	sshCertChecker := &ssh.CertChecker{
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
 			if !bytes.Equal(expectedPublicKey, publicKey.Marshal()) {
-				return ContextError(errors.New("unexpected host public key"))
+				return common.ContextError(errors.New("unexpected host public key"))
 			}
 			return nil
 		},
@@ -635,7 +639,7 @@ func dialSsh(
 			SshPassword string `json:"SshPassword"`
 		}{sessionId, serverEntry.SshPassword})
 	if err != nil {
-		return nil, nil, nil, ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 	sshClientConfig := &ssh.ClientConfig{
 		User: serverEntry.SshUsername,
@@ -681,7 +685,7 @@ func dialSsh(
 
 	result := <-resultChannel
 	if result.err != nil {
-		return nil, nil, nil, ContextError(result.err)
+		return nil, nil, nil, common.ContextError(result.err)
 	}
 
 	var dialStats *TunnelDialStats
@@ -717,6 +721,16 @@ func dialSsh(
 	cleanupConn = nil
 
 	return conn, result.sshClient, dialStats, nil
+}
+
+func makeRandomPeriod(min, max time.Duration) time.Duration {
+	period, err := common.MakeRandomPeriod(min, max)
+	if err != nil {
+		NoticeAlert("MakeRandomPeriod failed: %s", err)
+		// Proceed without random period
+		period = max
+	}
+	return period
 }
 
 // operateTunnel monitors the health of the tunnel and performs
@@ -781,7 +795,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// from a range, to make the resulting traffic less fingerprintable,
 	// Note: not using Tickers since these are not fixed time periods.
 	nextStatusRequestPeriod := func() time.Duration {
-		return MakeRandomPeriod(
+		return makeRandomPeriod(
 			PSIPHON_API_STATUS_REQUEST_PERIOD_MIN,
 			PSIPHON_API_STATUS_REQUEST_PERIOD_MAX)
 	}
@@ -800,13 +814,13 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	unreported := CountUnreportedTunnelStats()
 	if unreported > 0 {
 		NoticeInfo("Unreported tunnel stats: %d", unreported)
-		statsTimer.Reset(MakeRandomPeriod(
+		statsTimer.Reset(makeRandomPeriod(
 			PSIPHON_API_STATUS_REQUEST_SHORT_PERIOD_MIN,
 			PSIPHON_API_STATUS_REQUEST_SHORT_PERIOD_MAX))
 	}
 
 	nextSshKeepAlivePeriod := func() time.Duration {
-		return MakeRandomPeriod(
+		return makeRandomPeriod(
 			TUNNEL_SSH_KEEP_ALIVE_PERIOD_MIN,
 			TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX)
 	}
@@ -975,7 +989,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			totalSent,
 			totalReceived)
 		if err != nil {
-			NoticeAlert("RecordTunnelStats failed: %s", ContextError(err))
+			NoticeAlert("RecordTunnelStats failed: %s", common.ContextError(err))
 		}
 	}
 
@@ -1032,9 +1046,13 @@ func sendSshKeepAlive(
 
 	go func() {
 		// Random padding to frustrate fingerprinting
-		_, _, err := sshClient.SendRequest(
-			"keepalive@openssh.com", true,
-			MakeSecureRandomPadding(0, TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES))
+		randomPadding, err := common.MakeSecureRandomPadding(0, TUNNEL_SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES)
+		if err != nil {
+			NoticeAlert("MakeSecureRandomPadding failed: %s", err)
+			// Proceed without random padding
+			randomPadding = make([]byte, 0)
+		}
+		_, _, err = sshClient.SendRequest("keepalive@openssh.com", true, randomPadding)
 		errChannel <- err
 	}()
 
@@ -1044,7 +1062,7 @@ func sendSshKeepAlive(
 		conn.Close()
 	}
 
-	return ContextError(err)
+	return common.ContextError(err)
 }
 
 // sendStats is a helper for sending session stats to the server.

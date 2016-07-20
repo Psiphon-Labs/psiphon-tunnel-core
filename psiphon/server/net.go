@@ -17,18 +17,49 @@
  *
  */
 
+// for HTTPSServer.ServeTLS:
+/*
+Copyright (c) 2012 The Go Authors. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of Google Inc. nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 package server
 
 import (
 	"container/list"
-	"io"
+	"crypto/tls"
 	"net"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/Psiphon-Inc/ratelimit"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // LRUConns is a concurrency-safe list of net.Conns ordered
@@ -146,7 +177,7 @@ func NewActivityMonitoredConn(
 	if inactivityTimeout > 0 {
 		err := conn.SetDeadline(time.Now().Add(inactivityTimeout))
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 	}
 
@@ -182,7 +213,7 @@ func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 		if conn.inactivityTimeout > 0 {
 			err = conn.Conn.SetDeadline(time.Now().Add(conn.inactivityTimeout))
 			if err != nil {
-				return n, psiphon.ContextError(err)
+				return n, common.ContextError(err)
 			}
 		}
 		if conn.lruEntry != nil {
@@ -203,7 +234,7 @@ func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 		if conn.inactivityTimeout > 0 {
 			err = conn.Conn.SetDeadline(time.Now().Add(conn.inactivityTimeout))
 			if err != nil {
-				return n, psiphon.ContextError(err)
+				return n, common.ContextError(err)
 			}
 		}
 
@@ -216,85 +247,35 @@ func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 	return n, err
 }
 
-// ThrottledConn wraps a net.Conn with read and write rate limiters.
-// Rates are specified as bytes per second. Optional unlimited byte
-// counts allow for a number of bytes to read or write before
-// applying rate limiting. Specify limit values of 0 to set no rate
-// limit (unlimited counts are ignored in this case).
-// The underlying rate limiter uses the token bucket algorithm to
-// calculate delay times for read and write operations.
-type ThrottledConn struct {
-	net.Conn
-	unlimitedReadBytes  int64
-	limitingReads       int32
-	limitedReader       io.Reader
-	unlimitedWriteBytes int64
-	limitingWrites      int32
-	limitedWriter       io.Writer
+// HTTPSServer is a wrapper around http.Server which adds the
+// ServeTLS function.
+type HTTPSServer struct {
+	http.Server
 }
 
-// NewThrottledConn initializes a new ThrottledConn.
-func NewThrottledConn(
-	conn net.Conn,
-	unlimitedReadBytes, limitReadBytesPerSecond,
-	unlimitedWriteBytes, limitWriteBytesPerSecond int64) *ThrottledConn {
-
-	// When no limit is specified, the rate limited reader/writer
-	// is simply the base reader/writer.
-
-	var reader io.Reader
-	if limitReadBytesPerSecond == 0 {
-		reader = conn
-	} else {
-		reader = ratelimit.Reader(conn,
-			ratelimit.NewBucketWithRate(
-				float64(limitReadBytesPerSecond), limitReadBytesPerSecond))
-	}
-
-	var writer io.Writer
-	if limitWriteBytesPerSecond == 0 {
-		writer = conn
-	} else {
-		writer = ratelimit.Writer(conn,
-			ratelimit.NewBucketWithRate(
-				float64(limitWriteBytesPerSecond), limitWriteBytesPerSecond))
-	}
-
-	return &ThrottledConn{
-		Conn:                conn,
-		unlimitedReadBytes:  unlimitedReadBytes,
-		limitingReads:       0,
-		limitedReader:       reader,
-		unlimitedWriteBytes: unlimitedWriteBytes,
-		limitingWrites:      0,
-		limitedWriter:       writer,
-	}
+// ServeTLS is a offers the equivalent interface as http.Serve.
+// The http package has both ListenAndServe and ListenAndServeTLS higher-
+// level interfaces, but only Serve (not TLS) offers a lower-level interface that
+// allows the caller to keep a refererence to the Listener, allowing for external
+// shutdown. ListenAndServeTLS also requires the TLS cert and key to be in files
+// and we avoid that here.
+// tcpKeepAliveListener is used in http.ListenAndServeTLS but not exported,
+// so we use a copy from https://golang.org/src/net/http/server.go.
+func (server *HTTPSServer) ServeTLS(listener net.Listener) error {
+	tlsListener := tls.NewListener(tcpKeepAliveListener{listener.(*net.TCPListener)}, server.TLSConfig)
+	return server.Serve(tlsListener)
 }
 
-func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
-
-	// Use the base reader until the unlimited count is exhausted.
-	if atomic.LoadInt32(&conn.limitingReads) == 0 {
-		if atomic.AddInt64(&conn.unlimitedReadBytes, -int64(len(buffer))) <= 0 {
-			atomic.StoreInt32(&conn.limitingReads, 1)
-		} else {
-			return conn.Read(buffer)
-		}
-	}
-
-	return conn.limitedReader.Read(buffer)
+type tcpKeepAliveListener struct {
+	*net.TCPListener
 }
 
-func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
-
-	// Use the base writer until the unlimited count is exhausted.
-	if atomic.LoadInt32(&conn.limitingWrites) == 0 {
-		if atomic.AddInt64(&conn.unlimitedWriteBytes, -int64(len(buffer))) <= 0 {
-			atomic.StoreInt32(&conn.limitingWrites, 1)
-		} else {
-			return conn.Write(buffer)
-		}
+func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
+	tc, err := ln.AcceptTCP()
+	if err != nil {
+		return
 	}
-
-	return conn.limitedWriter.Write(buffer)
+	tc.SetKeepAlive(true)
+	tc.SetKeepAlivePeriod(3 * time.Minute)
+	return tc, nil
 }

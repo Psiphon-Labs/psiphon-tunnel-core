@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2016, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -17,29 +17,12 @@
  *
  */
 
-package psiphon
+package common
 
 import (
 	"testing"
-	"time"
 )
 
-func TestMakeRandomPeriod(t *testing.T) {
-	min := 1 * time.Nanosecond
-	max := 10000 * time.Nanosecond
-
-	res1 := MakeRandomPeriod(min, max)
-
-	if res1 < min {
-		t.Error("duration should not be less than min")
-	}
-
-	if res1 > max {
-		t.Error("duration should not be more than max")
-	}
-
-	res2 := MakeRandomPeriod(min, max)
-	if res1 == res2 {
-		t.Error("duration should have randomness difference between calls")
-	}
+func TestThrottledConn(t *testing.T) {
+	// TODO
 }

@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/Psiphon-Inc/openssl"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // newOpenSSLConn wraps a connection with TLS which mimicks stock Android TLS.
@@ -37,7 +38,7 @@ func newOpenSSLConn(rawConn net.Conn, hostname string, config *CustomTLSConfig) 
 
 	ctx, err := openssl.NewCtx()
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	if !config.SkipVerify {
@@ -51,7 +52,7 @@ func newOpenSSLConn(rawConn net.Conn, hostname string, config *CustomTLSConfig) 
 			}
 			err = ctx.LoadVerifyLocations(config.TrustedCACertificatesFilename, "")
 			if err != nil {
-				return nil, ContextError(err)
+				return nil, common.ContextError(err)
 			}
 		}
 	} else {
@@ -93,7 +94,7 @@ func newOpenSSLConn(rawConn net.Conn, hostname string, config *CustomTLSConfig) 
 
 	conn, err := openssl.Client(rawConn, ctx)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	if config.SNIServerName != "" {
@@ -103,7 +104,7 @@ func newOpenSSLConn(rawConn net.Conn, hostname string, config *CustomTLSConfig) 
 		if net.ParseIP(config.SNIServerName) == nil {
 			err = conn.SetTlsExtHostName(config.SNIServerName)
 			if err != nil {
-				return nil, ContextError(err)
+				return nil, common.ContextError(err)
 			}
 		}
 	}

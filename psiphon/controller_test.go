@@ -35,6 +35,7 @@ import (
 	"time"
 
 	socks "github.com/Psiphon-Inc/goptlib"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/elazarl/goproxy"
 )
 
@@ -185,7 +186,7 @@ func TestSSH(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
-			protocol:                 TUNNEL_PROTOCOL_SSH,
+			protocol:                 common.TUNNEL_PROTOCOL_SSH,
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
@@ -202,7 +203,7 @@ func TestObfuscatedSSH(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
-			protocol:                 TUNNEL_PROTOCOL_OBFUSCATED_SSH,
+			protocol:                 common.TUNNEL_PROTOCOL_OBFUSCATED_SSH,
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
@@ -219,7 +220,7 @@ func TestUnfrontedMeek(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
-			protocol:                 TUNNEL_PROTOCOL_UNFRONTED_MEEK,
+			protocol:                 common.TUNNEL_PROTOCOL_UNFRONTED_MEEK,
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
@@ -236,7 +237,7 @@ func TestUnfrontedMeekWithTransformer(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
-			protocol:                 TUNNEL_PROTOCOL_UNFRONTED_MEEK,
+			protocol:                 common.TUNNEL_PROTOCOL_UNFRONTED_MEEK,
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
@@ -253,7 +254,7 @@ func TestFrontedMeek(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
-			protocol:                 TUNNEL_PROTOCOL_FRONTED_MEEK,
+			protocol:                 common.TUNNEL_PROTOCOL_FRONTED_MEEK,
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
@@ -270,7 +271,7 @@ func TestFrontedMeekWithTransformer(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
-			protocol:                 TUNNEL_PROTOCOL_FRONTED_MEEK,
+			protocol:                 common.TUNNEL_PROTOCOL_FRONTED_MEEK,
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
@@ -287,7 +288,7 @@ func TestFrontedMeekHTTP(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
-			protocol:                 TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP,
+			protocol:                 common.TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP,
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
@@ -304,7 +305,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
-			protocol:                 TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
+			protocol:                 common.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
@@ -321,7 +322,7 @@ func TestUnfrontedMeekHTTPSWithTransformer(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
-			protocol:                 TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
+			protocol:                 common.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
@@ -355,7 +356,7 @@ func TestObfuscatedSSHWithUpstreamProxy(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
-			protocol:                 TUNNEL_PROTOCOL_OBFUSCATED_SSH,
+			protocol:                 common.TUNNEL_PROTOCOL_OBFUSCATED_SSH,
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
@@ -372,7 +373,7 @@ func TestUnfrontedMeekWithUpstreamProxy(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
-			protocol:                 TUNNEL_PROTOCOL_UNFRONTED_MEEK,
+			protocol:                 common.TUNNEL_PROTOCOL_UNFRONTED_MEEK,
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
@@ -389,7 +390,7 @@ func TestUnfrontedMeekHTTPSWithUpstreamProxy(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
-			protocol:                 TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
+			protocol:                 common.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
@@ -929,7 +930,7 @@ func hasExpectedCustomHeaders(h http.Header) bool {
 		}
 		// Order may not be the same
 		for _, value := range values {
-			if !Contains(h[name], value) {
+			if !common.Contains(h[name], value) {
 				return false
 			}
 		}

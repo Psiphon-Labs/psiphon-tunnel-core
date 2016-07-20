@@ -1,5 +1,3 @@
-// +build !android,!linux,!darwin
-
 /*
  * Copyright (c) 2014, Psiphon Inc.
  * All rights reserved.
@@ -19,20 +17,38 @@
  *
  */
 
-package psiphon
+package common
 
 import (
-	"errors"
-	"net"
-
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"testing"
+	"time"
 )
 
-// LookupIP resolves a hostname. When BindToDevice is not required, it
-// simply uses net.LookupIP.
-func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
-	if config.DeviceBinder != nil {
-		return nil, common.ContextError(errors.New("LookupIP with DeviceBinder not supported on this platform"))
+func TestMakeRandomPeriod(t *testing.T) {
+	min := 1 * time.Nanosecond
+	max := 10000 * time.Nanosecond
+
+	res1, err := MakeRandomPeriod(min, max)
+
+	if err != nil {
+		t.Error("MakeRandomPeriod failed: %s", err)
 	}
-	return net.LookupIP(host)
+
+	if res1 < min {
+		t.Error("duration should not be less than min")
+	}
+
+	if res1 > max {
+		t.Error("duration should not be more than max")
+	}
+
+	res2, err := MakeRandomPeriod(min, max)
+
+	if err != nil {
+		t.Error("MakeRandomPeriod failed: %s", err)
+	}
+
+	if res1 == res2 {
+		t.Error("duration should have randomness difference between calls")
+	}
 }

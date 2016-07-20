@@ -29,7 +29,7 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // GenerateWebServerCertificate creates a self-signed web server certificate,
@@ -53,15 +53,15 @@ func GenerateWebServerCertificate(commonName string) (string, string, error) {
 
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		return "", "", psiphon.ContextError(err)
+		return "", "", common.ContextError(err)
 	}
 
 	// Validity period is ~10 years, starting some number of ~months
 	// back in the last year.
 
-	age, err := psiphon.MakeSecureRandomInt(12)
+	age, err := common.MakeSecureRandomInt(12)
 	if err != nil {
-		return "", "", psiphon.ContextError(err)
+		return "", "", common.ContextError(err)
 	}
 	age += 1
 	validityPeriod := 10 * 365 * 24 * time.Hour
@@ -71,12 +71,12 @@ func GenerateWebServerCertificate(commonName string) (string, string, error) {
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
-		return "", "", psiphon.ContextError(err)
+		return "", "", common.ContextError(err)
 	}
 
 	publicKeyBytes, err := x509.MarshalPKIXPublicKey(rsaKey.Public())
 	if err != nil {
-		return "", "", psiphon.ContextError(err)
+		return "", "", common.ContextError(err)
 	}
 	// as per RFC3280 sec. 4.2.1.2
 	subjectKeyID := sha1.Sum(publicKeyBytes)
@@ -107,7 +107,7 @@ func GenerateWebServerCertificate(commonName string) (string, string, error) {
 		rsaKey.Public(),
 		rsaKey)
 	if err != nil {
-		return "", "", psiphon.ContextError(err)
+		return "", "", common.ContextError(err)
 	}
 
 	webServerCertificate := pem.EncodeToMemory(

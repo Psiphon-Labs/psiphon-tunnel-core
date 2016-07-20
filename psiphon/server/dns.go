@@ -28,7 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 const (
@@ -41,7 +41,7 @@ const (
 // "/etc/resolv.conf" on platforms where it is available; and
 // otherwise using a default value.
 type DNSResolver struct {
-	psiphon.ReloadableFile
+	common.ReloadableFile
 	lastReloadTime int64
 	isReloading    int32
 	resolver       net.IP
@@ -71,14 +71,14 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 		lastReloadTime: time.Now().Unix(),
 	}
 
-	dns.ReloadableFile = psiphon.NewReloadableFile(
+	dns.ReloadableFile = common.NewReloadableFile(
 		DNS_SYSTEM_CONFIG_FILENAME,
 		func(filename string) error {
 
 			resolver, err := parseResolveConf(filename)
 			if err != nil {
 				// On error, state remains the same
-				return psiphon.ContextError(err)
+				return common.ContextError(err)
 			}
 
 			dns.resolver = resolver
@@ -94,7 +94,7 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 	_, err := dns.Reload()
 	if err != nil {
 		if defaultResolver == "" {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 
 		log.WithContextFields(
@@ -103,7 +103,7 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 
 		resolver, err := parseResolver(defaultResolver)
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 
 		dns.resolver = resolver
@@ -122,7 +122,7 @@ func (dns *DNSResolver) Get() net.IP {
 	// atomic.LoadInt64 reload time check and the RLock (an atomic.AddInt32
 	// when no write lock is pending). An atomic.CompareAndSwapInt32 is
 	// used to ensure only one goroutine enters Reload() and blocks on
-	// its write lock. Finally, since since psiphon.ReloadableFile.Reload
+	// its write lock. Finally, since since ReloadableFile.Reload
 	// checks whether the underlying file has changed _before_ aquiring a
 	// write lock, we only incur write lock blocking when "/etc/resolv.conf"
 	// has actually changed.
@@ -160,7 +160,7 @@ func (dns *DNSResolver) Get() net.IP {
 func parseResolveConf(filename string) (net.IP, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	defer file.Close()
 
@@ -179,16 +179,16 @@ func parseResolveConf(filename string) (net.IP, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
-	return nil, psiphon.ContextError(errors.New("nameserver not found"))
+	return nil, common.ContextError(errors.New("nameserver not found"))
 }
 
 func parseResolver(resolver string) (net.IP, error) {
 
 	ipAddress := net.ParseIP(resolver)
 	if ipAddress == nil {
-		return nil, psiphon.ContextError(errors.New("invalid IP address"))
+		return nil, common.ContextError(errors.New("invalid IP address"))
 	}
 
 	return ipAddress, nil

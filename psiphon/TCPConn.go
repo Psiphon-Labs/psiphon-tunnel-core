@@ -24,6 +24,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 )
 
@@ -59,12 +60,12 @@ func makeTCPDialer(config *DialConfig) func(network, addr string) (net.Conn, err
 		}
 		conn, err := interruptibleTCPDial(addr, config)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		// Note: when an upstream proxy is used, we don't know what IP address
 		// was resolved, by the proxy, for that destination.
 		if config.ResolvedIPCallback != nil && config.UpstreamProxyUrl == "" {
-			ipAddress := IPAddressFromAddr(conn.RemoteAddr())
+			ipAddress := common.IPAddressFromAddr(conn.RemoteAddr())
 			if ipAddress != "" {
 				config.ResolvedIPCallback(ipAddress)
 			}
@@ -92,7 +93,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (*TCPConn, error) {
 
 	// Enable interruption
 	if config.PendingConns != nil && !config.PendingConns.Add(conn) {
-		return nil, ContextError(errors.New("pending connections already closed"))
+		return nil, common.ContextError(errors.New("pending connections already closed"))
 	}
 
 	// Call the blocking Connect() in a goroutine. ConnectTimeout is handled
@@ -134,7 +135,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (*TCPConn, error) {
 	// Wait until Dial completes (or times out) or until interrupt
 	err := <-conn.dialResult
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return conn, nil

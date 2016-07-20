@@ -27,6 +27,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // TODO: allow all params to be configured
@@ -55,7 +57,6 @@ const (
 	FETCH_REMOTE_SERVER_LIST_TIMEOUT_SECONDS             = 30
 	FETCH_REMOTE_SERVER_LIST_RETRY_PERIOD_SECONDS        = 30
 	FETCH_REMOTE_SERVER_LIST_STALE_PERIOD                = 6 * time.Hour
-	PSIPHON_API_CLIENT_SESSION_ID_LENGTH                 = 16
 	PSIPHON_API_SERVER_TIMEOUT_SECONDS                   = 20
 	PSIPHON_API_SHUTDOWN_SERVER_TIMEOUT                  = 1 * time.Second
 	PSIPHON_API_STATUS_REQUEST_PERIOD_MIN                = 5 * time.Minute
@@ -382,6 +383,9 @@ type Config struct {
 	// and for asynchronous operations such as fetch remote server list to complete.
 	// If omitted, the default value is ESTABLISH_TUNNEL_PAUSE_PERIOD_SECONDS.
 	EstablishTunnelPausePeriodSeconds *int
+
+	// RateLimits specify throttling configuration for the tunnel.
+	RateLimits common.RateLimits
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON
@@ -390,7 +394,7 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	var config Config
 	err := json.Unmarshal(configJson, &config)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// Do SetEmitDiagnosticNotices first, to ensure config file errors are emitted.
@@ -400,18 +404,18 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	// These fields are required; the rest are optional
 	if config.PropagationChannelId == "" {
-		return nil, ContextError(
+		return nil, common.ContextError(
 			errors.New("propagation channel ID is missing from the configuration file"))
 	}
 	if config.SponsorId == "" {
-		return nil, ContextError(
+		return nil, common.ContextError(
 			errors.New("sponsor ID is missing from the configuration file"))
 	}
 
 	if config.DataStoreDirectory == "" {
 		config.DataStoreDirectory, err = os.Getwd()
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 	}
 
@@ -421,13 +425,13 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	_, err = strconv.Atoi(config.ClientVersion)
 	if err != nil {
-		return nil, ContextError(
+		return nil, common.ContextError(
 			fmt.Errorf("invalid client version: %s", err))
 	}
 
 	if config.TunnelProtocol != "" {
-		if !Contains(SupportedTunnelProtocols, config.TunnelProtocol) {
-			return nil, ContextError(
+		if !common.Contains(common.SupportedTunnelProtocols, config.TunnelProtocol) {
+			return nil, common.ContextError(
 				errors.New("invalid tunnel protocol"))
 		}
 	}
@@ -446,24 +450,28 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	}
 
 	if config.NetworkConnectivityChecker != nil {
-		return nil, ContextError(errors.New("NetworkConnectivityChecker interface must be set at runtime"))
+		return nil, common.ContextError(
+			errors.New("NetworkConnectivityChecker interface must be set at runtime"))
 	}
 
 	if config.DeviceBinder != nil {
-		return nil, ContextError(errors.New("DeviceBinder interface must be set at runtime"))
+		return nil, common.ContextError(
+			errors.New("DeviceBinder interface must be set at runtime"))
 	}
 
 	if config.DnsServerGetter != nil {
-		return nil, ContextError(errors.New("DnsServerGetter interface must be set at runtime"))
+		return nil, common.ContextError(
+			errors.New("DnsServerGetter interface must be set at runtime"))
 	}
 
 	if config.HostNameTransformer != nil {
-		return nil, ContextError(errors.New("HostNameTransformer interface must be set at runtime"))
+		return nil, common.ContextError(
+			errors.New("HostNameTransformer interface must be set at runtime"))
 	}
 
 	if config.UpgradeDownloadUrl != "" &&
 		(config.UpgradeDownloadClientVersionHeader == "" || config.UpgradeDownloadFilename == "") {
-		return nil, ContextError(errors.New(
+		return nil, common.ContextError(errors.New(
 			"UpgradeDownloadUrl requires UpgradeDownloadClientVersionHeader and UpgradeDownloadFilename"))
 	}
 

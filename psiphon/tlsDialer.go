@@ -77,6 +77,8 @@ import (
 	"errors"
 	"net"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // CustomTLSConfig contains parameters to determine the behavior
@@ -159,13 +161,13 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 
 	rawConn, err := config.Dial(network, dialAddr)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	hostname, _, err := net.SplitHostPort(dialAddr)
 	if err != nil {
 		rawConn.Close()
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	tlsConfig := &tls.Config{}
@@ -199,7 +201,7 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 		conn, err = newOpenSSLConn(rawConn, hostname, config)
 		if err != nil {
 			rawConn.Close()
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 	} else {
 		conn = tls.Client(rawConn, tlsConfig)
@@ -233,7 +235,7 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 
 	if err != nil {
 		rawConn.Close()
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return conn, nil
@@ -242,10 +244,10 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 func verifyLegacyCertificate(conn *tls.Conn, expectedCertificate *x509.Certificate) error {
 	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) < 1 {
-		return ContextError(errors.New("no certificate to verify"))
+		return common.ContextError(errors.New("no certificate to verify"))
 	}
 	if !bytes.Equal(certs[0].Raw, expectedCertificate.Raw) {
-		return ContextError(errors.New("unexpected certificate"))
+		return common.ContextError(errors.New("unexpected certificate"))
 	}
 	return nil
 }
@@ -269,7 +271,7 @@ func verifyServerCerts(conn *tls.Conn, hostname string, config *tls.Config) erro
 
 	_, err := certs[0].Verify(opts)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	return nil
 }

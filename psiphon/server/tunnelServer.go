@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -68,7 +69,7 @@ func NewTunnelServer(
 
 	sshServer, err := newSSHServer(support, shutdownBroadcast)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return &TunnelServer{
@@ -130,7 +131,7 @@ func (server *TunnelServer) Run() error {
 			for _, existingListener := range listeners {
 				existingListener.Listener.Close()
 			}
-			return psiphon.ContextError(err)
+			return common.ContextError(err)
 		}
 
 		log.WithContextFields(
@@ -209,13 +210,13 @@ func newSSHServer(
 
 	privateKey, err := ssh.ParseRawPrivateKey([]byte(support.Config.SSHPrivateKey))
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// TODO: use cert (ssh.NewCertSigner) for anti-fingerprint?
 	signer, err := ssh.NewSignerFromKey(privateKey)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return &sshServer{
@@ -246,18 +247,18 @@ func (sshServer *sshServer) runListener(
 	// TunnelServer.Run will properly shut down instead of remaining
 	// running.
 
-	if psiphon.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
-		psiphon.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+	if common.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
+		common.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
 
 		meekServer, err := NewMeekServer(
 			sshServer.support,
 			listener,
-			psiphon.TunnelProtocolUsesMeekHTTPS(tunnelProtocol),
+			common.TunnelProtocolUsesMeekHTTPS(tunnelProtocol),
 			handleClient,
 			sshServer.shutdownBroadcast)
 		if err != nil {
 			select {
-			case listenerError <- psiphon.ContextError(err):
+			case listenerError <- common.ContextError(err):
 			default:
 			}
 			return
@@ -287,7 +288,7 @@ func (sshServer *sshServer) runListener(
 				}
 
 				select {
-				case listenerError <- psiphon.ContextError(err):
+				case listenerError <- common.ContextError(err):
 				default:
 				}
 				return
@@ -406,7 +407,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	defer sshServer.unregisterAcceptedClient(tunnelProtocol)
 
 	geoIPData := sshServer.support.GeoIPService.Lookup(
-		psiphon.IPAddressFromAddr(clientConn.RemoteAddr()))
+		common.IPAddressFromAddr(clientConn.RemoteAddr()))
 
 	// TODO: apply reload of TrafficRulesSet to existing clients
 
@@ -437,13 +438,8 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 
 	// Further wrap the connection in a rate limiting ThrottledConn.
 
-	rateLimits := sshClient.trafficRules.GetRateLimits(tunnelProtocol)
-	clientConn = NewThrottledConn(
-		clientConn,
-		rateLimits.DownstreamUnlimitedBytes,
-		int64(rateLimits.DownstreamBytesPerSecond),
-		rateLimits.UpstreamUnlimitedBytes,
-		int64(rateLimits.UpstreamBytesPerSecond))
+	clientConn = common.NewThrottledConn(
+		clientConn, sshClient.trafficRules.GetRateLimits(tunnelProtocol))
 
 	// Run the initial [obfuscated] SSH handshake in a goroutine so we can both
 	// respect shutdownBroadcast and implement a specific handshake timeout.
@@ -478,7 +474,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 
 		// Wrap the connection in an SSH deobfuscator when required.
 
-		if psiphon.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
+		if common.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
 			// Note: NewObfuscatedSshConn blocks on network I/O
 			// TODO: ensure this won't block shutdown
 			conn, result.err = psiphon.NewObfuscatedSshConn(
@@ -486,7 +482,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 				clientConn,
 				sshServer.support.Config.ObfuscatedSSHKey)
 			if result.err != nil {
-				result.err = psiphon.ContextError(result.err)
+				result.err = common.ContextError(result.err)
 			}
 		}
 
@@ -590,16 +586,16 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 		// send the hex encoded session ID prepended to the SSH password.
 		// Note: there's an even older case where clients don't send any session ID,
 		// but that's no longer supported.
-		if len(password) == 2*psiphon.PSIPHON_API_CLIENT_SESSION_ID_LENGTH+2*SSH_PASSWORD_BYTE_LENGTH {
-			sshPasswordPayload.SessionId = string(password[0 : 2*psiphon.PSIPHON_API_CLIENT_SESSION_ID_LENGTH])
-			sshPasswordPayload.SshPassword = string(password[2*psiphon.PSIPHON_API_CLIENT_SESSION_ID_LENGTH : len(password)])
+		if len(password) == 2*common.PSIPHON_API_CLIENT_SESSION_ID_LENGTH+2*SSH_PASSWORD_BYTE_LENGTH {
+			sshPasswordPayload.SessionId = string(password[0 : 2*common.PSIPHON_API_CLIENT_SESSION_ID_LENGTH])
+			sshPasswordPayload.SshPassword = string(password[2*common.PSIPHON_API_CLIENT_SESSION_ID_LENGTH : len(password)])
 		} else {
-			return nil, psiphon.ContextError(fmt.Errorf("invalid password payload for %q", conn.User()))
+			return nil, common.ContextError(fmt.Errorf("invalid password payload for %q", conn.User()))
 		}
 	}
 
 	if !isHexDigits(sshClient.sshServer.support, sshPasswordPayload.SessionId) {
-		return nil, psiphon.ContextError(fmt.Errorf("invalid session ID for %q", conn.User()))
+		return nil, common.ContextError(fmt.Errorf("invalid session ID for %q", conn.User()))
 	}
 
 	userOk := (subtle.ConstantTimeCompare(
@@ -609,7 +605,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 		[]byte(sshPasswordPayload.SshPassword), []byte(sshClient.sshServer.support.Config.SSHPassword)) == 1)
 
 	if !userOk || !passwordOk {
-		return nil, psiphon.ContextError(fmt.Errorf("invalid password for %q", conn.User()))
+		return nil, common.ContextError(fmt.Errorf("invalid password for %q", conn.User()))
 	}
 
 	psiphonSessionID := sshPasswordPayload.SessionId
@@ -806,7 +802,7 @@ func (sshClient *sshClient) handleNewPortForwardChannel(newChannel ssh.NewChanne
 func (sshClient *sshClient) isPortForwardPermitted(
 	host string, port int, allowPorts []int, denyPorts []int) bool {
 
-	if psiphon.Contains(SSH_DISALLOWED_PORT_FORWARD_HOSTS, host) {
+	if common.Contains(SSH_DISALLOWED_PORT_FORWARD_HOSTS, host) {
 		return false
 	}
 

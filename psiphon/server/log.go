@@ -24,7 +24,7 @@ import (
 	"os"
 
 	"github.com/Psiphon-Inc/logrus"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // ContextLogger adds context logging functionality to the
@@ -43,7 +43,7 @@ type LogFields logrus.Fields
 func (logger *ContextLogger) WithContext() *logrus.Entry {
 	return log.WithFields(
 		logrus.Fields{
-			"context": psiphon.GetParentContext(),
+			"context": common.GetParentContext(),
 		})
 }
 
@@ -56,7 +56,7 @@ func (logger *ContextLogger) WithContextFields(fields LogFields) *logrus.Entry {
 	if ok {
 		fields["fields.context"] = fields["context"]
 	}
-	fields["context"] = psiphon.GetParentContext()
+	fields["context"] = common.GetParentContext()
 	return log.WithFields(logrus.Fields(fields))
 }
 
@@ -77,7 +77,7 @@ func InitLogging(config *Config) error {
 
 	level, err := logrus.ParseLevel(config.LogLevel)
 	if err != nil {
-		return psiphon.ContextError(err)
+		return common.ContextError(err)
 	}
 
 	logWriter := os.Stderr
@@ -86,7 +86,7 @@ func InitLogging(config *Config) error {
 		logWriter, err = os.OpenFile(
 			config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
 		if err != nil {
-			return psiphon.ContextError(err)
+			return common.ContextError(err)
 		}
 	}
 

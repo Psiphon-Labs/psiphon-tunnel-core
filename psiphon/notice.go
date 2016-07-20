@@ -31,6 +31,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 var noticeLoggerMutex sync.Mutex
@@ -110,7 +112,7 @@ func outputNotice(noticeType string, noticeFlags uint32, args ...interface{}) {
 	if err == nil {
 		output = string(encodedJson)
 	} else {
-		output = fmt.Sprintf("{\"Alert\":{\"message\":\"%s\"}}", ContextError(err))
+		output = fmt.Sprintf("{\"Alert\":{\"message\":\"%s\"}}", common.ContextError(err))
 	}
 	noticeLoggerMutex.Lock()
 	defer noticeLoggerMutex.Unlock()
@@ -309,7 +311,7 @@ func NoticeLocalProxyError(proxyType string, err error) {
 	// the root error that repeats (the full error often contains
 	// different specific values, e.g., local port numbers, but
 	// the same repeating root).
-	// Assumes error format of ContextError.
+	// Assumes error format of common.ContextError.
 	repetitionMessage := err.Error()
 	index := strings.LastIndex(repetitionMessage, ": ")
 	if index != -1 {

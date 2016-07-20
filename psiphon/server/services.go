@@ -31,7 +31,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 )
 
@@ -43,19 +43,19 @@ func RunServices(configJSON []byte) error {
 	config, err := LoadConfig(configJSON)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("load config failed")
-		return psiphon.ContextError(err)
+		return common.ContextError(err)
 	}
 
 	err = InitLogging(config)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("init logging failed")
-		return psiphon.ContextError(err)
+		return common.ContextError(err)
 	}
 
 	supportServices, err := NewSupportServices(config)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("init support services failed")
-		return psiphon.ContextError(err)
+		return common.ContextError(err)
 	}
 
 	waitGroup := new(sync.WaitGroup)
@@ -65,7 +65,7 @@ func RunServices(configJSON []byte) error {
 	tunnelServer, err := NewTunnelServer(supportServices, shutdownBroadcast)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("init tunnel server failed")
-		return psiphon.ContextError(err)
+		return common.ContextError(err)
 	}
 
 	if config.RunLoadMonitor() {
@@ -188,23 +188,23 @@ type SupportServices struct {
 func NewSupportServices(config *Config) (*SupportServices, error) {
 	trafficRulesSet, err := NewTrafficRulesSet(config.TrafficRulesFilename)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	psinetDatabase, err := psinet.NewDatabase(config.PsinetDatabaseFilename)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	geoIPService, err := NewGeoIPService(
 		config.GeoIPDatabaseFilenames, config.DiscoveryValueHMACKey)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	dnsResolver, err := NewDNSResolver(config.DNSResolverIPAddress)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return &SupportServices{
@@ -225,7 +225,7 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 func (support *SupportServices) Reload() {
 
 	reloaders := append(
-		[]psiphon.Reloader{support.TrafficRulesSet, support.PsinetDatabase},
+		[]common.Reloader{support.TrafficRulesSet, support.PsinetDatabase},
 		support.GeoIPService.Reloaders()...)
 
 	for _, reloader := range reloaders {
