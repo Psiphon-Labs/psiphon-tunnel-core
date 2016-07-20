@@ -20,9 +20,104 @@
 package common
 
 import (
+	"bytes"
+	"io/ioutil"
+	"os"
 	"testing"
+	"time"
 )
 
 func TestReloader(t *testing.T) {
-	// TODO
+
+	fileName := "reloader_test.dat"
+	initialContents := []byte("contents1\n")
+	modifiedContents := []byte("contents2\n")
+
+	var file struct {
+		ReloadableFile
+		contents []byte
+	}
+
+	file.ReloadableFile = NewReloadableFile(
+		fileName,
+		func(filename string) error {
+			contents, err := ioutil.ReadFile(filename)
+			if err != nil {
+				return err
+			}
+			file.contents = contents
+			return nil
+		})
+
+	// Test: initial load
+
+	err := ioutil.WriteFile(fileName, initialContents, 0600)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %s", err)
+	}
+
+	time.Sleep(2 * time.Second)
+	fileInfo, err := os.Stat(fileName)
+	if err != nil {
+		t.Fatalf("Stat failed: %s", err)
+	}
+	t.Logf("ModTime: %s", fileInfo.ModTime())
+
+	reloaded, err := file.Reload()
+	if err != nil {
+		t.Fatalf("Reload failed: %s", err)
+	}
+
+	if !reloaded {
+		t.Fatalf("Unexpected non-reload")
+	}
+
+	if bytes.Compare(file.contents, initialContents) != 0 {
+		t.Fatalf("Unexpected contents")
+	}
+
+	// Test: reload unchanged file
+
+	reloaded, err = file.Reload()
+	if err != nil {
+		t.Fatalf("Reload failed: %s", err)
+	}
+
+	if reloaded {
+		t.Fatalf("Unexpected reload")
+	}
+
+	if bytes.Compare(file.contents, initialContents) != 0 {
+		t.Fatalf("Unexpected contents")
+	}
+
+	// Test: reload changed file
+
+	err = ioutil.WriteFile(fileName, modifiedContents, 0600)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %s", err)
+	}
+
+	// TODO: without the sleeps, the os.Stat ModTime doesn't
+	// change and IsFileChanged fails to detect the modification.
+
+	time.Sleep(2 * time.Second)
+	fileInfo, err = os.Stat(fileName)
+	if err != nil {
+		t.Fatalf("Stat failed: %s", err)
+	}
+	t.Logf("ModTime: %s", fileInfo.ModTime())
+
+	reloaded, err = file.Reload()
+	if err != nil {
+		t.Fatalf("Reload failed: %s", err)
+	}
+
+	if !reloaded {
+		t.Fatalf("Unexpected non-reload")
+	}
+
+	if bytes.Compare(file.contents, modifiedContents) != 0 {
+		t.Fatalf("Unexpected contents")
+	}
 }
