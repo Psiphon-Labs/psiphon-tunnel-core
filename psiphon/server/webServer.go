@@ -194,7 +194,7 @@ func convertHTTPRequestToAPIRequest(
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
-		var bodyParams requestJSONObject
+		var bodyParams map[string]interface{}
 		err = json.Unmarshal(body, &bodyParams)
 		if err != nil {
 			return nil, common.ContextError(err)
