@@ -587,7 +587,7 @@ func getJSONObjectRequestParam(params requestJSONObject, name string) (requestJS
 	if params[name] == nil {
 		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
-	// TODO: can't use requestJSONObject type?
+	// Note: generic unmarshal of JSON produces map[string]interface{}, not requestJSONObject
 	value, ok := params[name].(map[string]interface{})
 	if !ok {
 		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
@@ -606,7 +606,7 @@ func getJSONObjectArrayRequestParam(params requestJSONObject, name string) ([]re
 
 	result := make([]requestJSONObject, len(value))
 	for i, item := range value {
-		// TODO: can't use requestJSONObject type?
+		// Note: generic unmarshal of JSON produces map[string]interface{}, not requestJSONObject
 		resultItem, ok := item.(map[string]interface{})
 		if !ok {
 			return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
