@@ -52,6 +52,13 @@ func TestThrottledConn(t *testing.T) {
 
 	run(t, RateLimits{
 		DownstreamUnlimitedBytes: 0,
+		DownstreamBytesPerSecond: 2 * 1024 * 1024,
+		UpstreamUnlimitedBytes:   0,
+		UpstreamBytesPerSecond:   0,
+	})
+
+	run(t, RateLimits{
+		DownstreamUnlimitedBytes: 0,
 		DownstreamBytesPerSecond: 1024 * 1024,
 		UpstreamUnlimitedBytes:   0,
 		UpstreamBytesPerSecond:   0,
@@ -121,18 +128,21 @@ func run(t *testing.T, rateLimits RateLimits) {
 
 	// Test: elapsed time must reflect rate limit
 
-	// No rate limit should finish under a second
+	// No rate limit should finish under a couple seconds
 	floorElapsedTime := 0 * time.Second
-	ceilingElapsedTime := 1 * time.Second
+	ceilingElapsedTime := 2 * time.Second
 
 	if rateLimits.DownstreamBytesPerSecond != 0 {
-		// With rate limit, should finish within a second or so of data size / bytes-per-second;
+		// With rate limit, should finish within a couple seconds or so of data size / bytes-per-second;
 		// won't be eaxact due to request overhead and approximations in "ratelimit" package
 		expectedElapsedTime := float64(testDataSize) / float64(rateLimits.DownstreamBytesPerSecond)
 		floorElapsedTime = time.Duration(int64(math.Floor(expectedElapsedTime))) * time.Second
-		floorElapsedTime -= 1 * time.Second
+		floorElapsedTime -= 1500 * time.Millisecond
+		if floorElapsedTime < 0 {
+			floorElapsedTime = 0
+		}
 		ceilingElapsedTime = time.Duration(int64(math.Ceil(expectedElapsedTime))) * time.Second
-		ceilingElapsedTime += 1 * time.Second
+		ceilingElapsedTime += 1500 * time.Millisecond
 	}
 
 	t.Logf(
