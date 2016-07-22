@@ -97,7 +97,7 @@ func newJwtBody(jsonBytes []byte) (jwtBody, error) {
 	var body jwtBody
 	err := json.Unmarshal(jsonBytes, &body)
 
-	// Handle empty apk digest array
+	// Handle empty apk certificate digest array
 	if len(body.ApkCertificateDigestSha256) == 0 {
 		body.ApkCertificateDigestSha256 = append(body.ApkCertificateDigestSha256, "")
 	}
