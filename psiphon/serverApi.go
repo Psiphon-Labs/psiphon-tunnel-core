@@ -167,17 +167,13 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	// - 'preemptive_reconnect_lifetime_milliseconds' is currently unused
 	// - 'ssh_session_id' is ignored; client session ID is used instead
 	var handshakeResponse struct {
-		Homepages                     []string            `json:"homepages"`
-		UpgradeClientVersion          string              `json:"upgrade_client_version"`
-		PageViewRegexes               []map[string]string `json:"page_view_regexes"`
-		HttpsRequestRegexes           []map[string]string `json:"https_request_regexes"`
-		EncodedServerList             []string            `json:"encoded_server_list"`
-		ClientRegion                  string              `json:"client_region"`
-		ServerTimestamp               string              `json:"server_timestamp"`
-		ClientVerificationRequired    bool                `json:"client_verification_required"`
-		ClientVerificationServerNonce string              `json:"client_verification_server_nonce"`
-		ClientVerificationTTLSeconds  int                 `json:"client_verification_ttl_seconds"`
-		ClientVerificationResetCache  bool                `json:"client_verification_reset_cache"`
+		Homepages            []string            `json:"homepages"`
+		UpgradeClientVersion string              `json:"upgrade_client_version"`
+		PageViewRegexes      []map[string]string `json:"page_view_regexes"`
+		HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
+		EncodedServerList    []string            `json:"encoded_server_list"`
+		ClientRegion         string              `json:"client_region"`
+		ServerTimestamp      string              `json:"server_timestamp"`
 	}
 	err := json.Unmarshal(response, &handshakeResponse)
 	if err != nil {
@@ -242,12 +238,6 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	}
 
 	serverContext.serverHandshakeTimestamp = handshakeResponse.ServerTimestamp
-
-	if handshakeResponse.ClientVerificationRequired {
-		NoticeClientVerificationRequired(handshakeResponse.ClientVerificationServerNonce,
-			handshakeResponse.ClientVerificationTTLSeconds,
-			handshakeResponse.ClientVerificationResetCache)
-	}
 
 	return nil
 }

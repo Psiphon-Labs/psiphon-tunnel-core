@@ -589,9 +589,7 @@ loop:
 				break
 			}
 
-			if clientVerificationPayload != "" {
-				establishedTunnel.SetClientVerificationPayload(clientVerificationPayload)
-			}
+			establishedTunnel.SetClientVerificationPayload(clientVerificationPayload)
 
 			NoticeActiveTunnel(establishedTunnel.serverEntry.IpAddress, establishedTunnel.protocol)
 
