@@ -872,6 +872,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		defer requestsWaitGroup.Done()
 
 		clientVerificationRequestFailed := false
+		var clientVerificationPayload string
 		for {
 			// TODO: use reflect.SelectCase?
 			if clientVerificationRequestFailed == false {
