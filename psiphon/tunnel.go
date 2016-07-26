@@ -870,11 +870,11 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	go func() {
 		defer requestsWaitGroup.Done()
 
-		clientVerificationRequestFailed := false
+		clientVerificationRequestSuccess := true
 		clientVerificationPayload := ""
 		for {
 			// TODO: use reflect.SelectCase?
-			if clientVerificationRequestFailed == false {
+			if clientVerificationRequestSuccess == true {
 				select {
 				case clientVerificationPayload = <-tunnel.newClientVerificationPayload:
 				case <-signalStopClientVerificationRequests:
@@ -893,7 +893,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 				}
 			}
 
-			clientVerificationRequestFailed = sendClientVerification(tunnel, clientVerificationPayload)
+			clientVerificationRequestSuccess = sendClientVerification(tunnel, clientVerificationPayload)
 		}
 	}()
 
