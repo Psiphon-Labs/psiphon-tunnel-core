@@ -678,10 +678,10 @@ func (serverContext *ServerContext) DoClientVerificationRequest(
 		ClientVerificationResetCache  bool   `json:"client_verification_reset_cache"`
 	}
 
-	err = json.Unmarshal(response, &clientVerificationResponse)
-	if err != nil {
-		return common.ContextError(err)
-	}
+	// In case of empty response body the json.Unmarshal will fail
+	// and clientVerificationResponse will be initialized with default values
+
+	_ = json.Unmarshal(response, &clientVerificationResponse)
 
 	if clientVerificationResponse.ClientVerificationTTLSeconds > 0 {
 		NoticeClientVerificationRequired(

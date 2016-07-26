@@ -152,11 +152,9 @@ func EstablishTunnel(
 		shutdownOperateBroadcast: make(chan struct{}),
 		// A buffer allows at least one signal to be sent even when the receiver is
 		// not listening. Senders should not block.
-		signalPortForwardFailure: make(chan struct{}, 1),
-		dialStats:                dialStats,
-		// Buffer allows SetClientVerificationPayload to submit one new payload
-		// without blocking or dropping it.
-		newClientVerificationPayload: make(chan string, 1),
+		signalPortForwardFailure:     make(chan struct{}, 1),
+		dialStats:                    dialStats,
+		newClientVerificationPayload: make(chan string),
 	}
 
 	// Create a new Psiphon API server context for this tunnel. This includes
@@ -608,7 +606,8 @@ func dialSsh(
 	}()
 
 	// Apply throttling (if configured)
-	throttledConn := common.NewThrottledConn(dialConn, config.RateLimits)
+	//throttledConn := common.NewThrottledConn(dialConn, config.RateLimits)
+	throttledConn := dialConn
 
 	// Add obfuscated SSH layer
 	var sshConn net.Conn = throttledConn
@@ -872,7 +871,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		defer requestsWaitGroup.Done()
 
 		clientVerificationRequestFailed := false
-		var clientVerificationPayload string
+		clientVerificationPayload := ""
 		for {
 			// TODO: use reflect.SelectCase?
 			if clientVerificationRequestFailed == false {
@@ -882,8 +881,8 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 					return
 				}
 			} else {
-				// When clientVerificationPayload is not "", the request for that
-				// payload so retry after a delay. Will use a new payload instead
+				// If sendClientVerification failed to send the payload we
+				// will retry after a delay. Will use a new payload instead
 				// if that arrives in the meantime.
 				timeout := time.After(PSIPHON_API_CLIENT_VERIFICATION_REQUEST_RETRY_PERIOD)
 				select {
@@ -893,12 +892,8 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 					return
 				}
 			}
-			if sendClientVerification(tunnel, clientVerificationPayload) {
-				clientVerificationRequestFailed = false
-			} else {
-				clientVerificationRequestFailed = true
-			}
 
+			clientVerificationRequestFailed = sendClientVerification(tunnel, clientVerificationPayload)
 		}
 	}()
 
