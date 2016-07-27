@@ -152,9 +152,11 @@ func EstablishTunnel(
 		shutdownOperateBroadcast: make(chan struct{}),
 		// A buffer allows at least one signal to be sent even when the receiver is
 		// not listening. Senders should not block.
-		signalPortForwardFailure:     make(chan struct{}, 1),
-		dialStats:                    dialStats,
-		newClientVerificationPayload: make(chan string),
+		signalPortForwardFailure: make(chan struct{}, 1),
+		dialStats:                dialStats,
+		// Buffer allows SetClientVerificationPayload to submit one new payload
+		// without blocking or dropping it.
+		newClientVerificationPayload: make(chan string, 1),
 	}
 
 	// Create a new Psiphon API server context for this tunnel. This includes
@@ -871,9 +873,11 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 		clientVerificationRequestSuccess := true
 		clientVerificationPayload := ""
+		failCount := 0
 		for {
 			// TODO: use reflect.SelectCase?
 			if clientVerificationRequestSuccess == true {
+				failCount = 0
 				select {
 				case clientVerificationPayload = <-tunnel.newClientVerificationPayload:
 				case <-signalStopClientVerificationRequests:
@@ -883,6 +887,12 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 				// If sendClientVerification failed to send the payload we
 				// will retry after a delay. Will use a new payload instead
 				// if that arrives in the meantime.
+				// If failures count is more than PSIPHON_API_CLIENT_VERIFICATION_REQUEST_MAX_RETRIES
+				// stop retrying for this tunnel.
+				failCount += 1
+				if failCount > PSIPHON_API_CLIENT_VERIFICATION_REQUEST_MAX_RETRIES {
+					return
+				}
 				timeout := time.After(PSIPHON_API_CLIENT_VERIFICATION_REQUEST_RETRY_PERIOD)
 				select {
 				case <-timeout:
