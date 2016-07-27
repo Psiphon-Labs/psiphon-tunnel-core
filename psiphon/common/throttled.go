@@ -57,13 +57,18 @@ type RateLimits struct {
 // The underlying rate limiter uses the token bucket algorithm to
 // calculate delay times for read and write operations.
 type ThrottledConn struct {
-	net.Conn
+	// https://golang.org/src/sync/atomic/doc.go#L50
+	// On both ARM and x86-32, it is the caller's responsibility to arrange for 64-bit
+	// alignment of 64-bit words accessed atomically. The first word in a global
+	// variable or in an allocated struct or slice can be relied upon to be
+	// 64-bit aligned.
 	unlimitedReadBytes  int64
-	limitingReads       int32
-	limitedReader       io.Reader
 	unlimitedWriteBytes int64
+	limitingReads       int32
 	limitingWrites      int32
+	limitedReader       io.Reader
 	limitedWriter       io.Writer
+	net.Conn
 }
 
 // NewThrottledConn initializes a new ThrottledConn.

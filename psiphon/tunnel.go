@@ -606,8 +606,7 @@ func dialSsh(
 	}()
 
 	// Apply throttling (if configured)
-	//throttledConn := common.NewThrottledConn(dialConn, config.RateLimits)
-	throttledConn := dialConn
+	throttledConn := common.NewThrottledConn(dialConn, config.RateLimits)
 
 	// Add obfuscated SSH layer
 	var sshConn net.Conn = throttledConn
