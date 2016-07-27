@@ -133,8 +133,8 @@ func NewController(config *Config) (controller *Controller, err error) {
 		signalFetchRemoteServerList: make(chan struct{}),
 		signalDownloadUpgrade:       make(chan string),
 		signalReportConnected:       make(chan struct{}),
-		// Buffer allows SetClientVerificationPayload to submit one new payload
-		// without blocking or dropping it.
+		// Buffer allows SetClientVerificationPayloadForActiveTunnels to submit one
+		// new payload without blocking or dropping it.
 		newClientVerificationPayload: make(chan string, 1),
 	}
 
@@ -249,11 +249,9 @@ func (controller *Controller) SignalComponentFailure() {
 	}
 }
 
-// SetClientVerificationPayload sets the client verification payload
-// that is to be sent in client verification requests to all established
-// tunnels. Calling this function both sets the payload to be used for
-// all future tunnels as wells as triggering requests with this payload
-// for all currently established tunneled.
+// SetClientVerificationPayloadForActiveTunnels sets the client verification
+// payload that is to be sent in client verification requests to all established
+// tunnels.
 //
 // Client verification is used to verify that the client is a
 // valid Psiphon client, which will determine how the server treats
@@ -264,10 +262,10 @@ func (controller *Controller) SignalComponentFailure() {
 // after tunnel-core starts, the payload cannot be simply specified in
 // the Config.
 //
-// SetClientVerificationPayload will not block enqueuing a new verification
+// SetClientVerificationPayloadForActiveTunnels will not block enqueuing a new verification
 // payload. One new payload can be enqueued, after which additional payloads
 // will be dropped if a payload is still enqueued.
-func (controller *Controller) SetClientVerificationPayload(clientVerificationPayload string) {
+func (controller *Controller) SetClientVerificationPayloadForActiveTunnels(clientVerificationPayload string) {
 	select {
 	case controller.newClientVerificationPayload <- clientVerificationPayload:
 	default:
@@ -587,10 +585,6 @@ loop:
 				// Already fully established, so discard.
 				controller.discardTunnel(establishedTunnel)
 				break
-			}
-
-			if clientVerificationPayload != "" {
-				establishedTunnel.SetClientVerificationPayload(clientVerificationPayload)
 			}
 
 			NoticeActiveTunnel(establishedTunnel.serverEntry.IpAddress, establishedTunnel.protocol)
