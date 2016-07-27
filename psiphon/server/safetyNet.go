@@ -33,10 +33,10 @@ import (
 )
 
 const (
-	safetynetCN = "attest.android.com"
 	// Cert of the root certificate authority (GeoTrust Global CA)
 	// which signs the intermediate certificate from Google (GIAG2)
-	geotrustCert = "-----BEGIN CERTIFICATE-----\nMIIDVDCCAjygAwIBAgIDAjRWMA0GCSqGSIb3DQEBBQUAMEIxCzAJBgNVBAYTAlVT\nMRYwFAYDVQQKEw1HZW9UcnVzdCBJbmMuMRswGQYDVQQDExJHZW9UcnVzdCBHbG9i\nYWwgQ0EwHhcNMDIwNTIxMDQwMDAwWhcNMjIwNTIxMDQwMDAwWjBCMQswCQYDVQQG\nEwJVUzEWMBQGA1UEChMNR2VvVHJ1c3QgSW5jLjEbMBkGA1UEAxMSR2VvVHJ1c3Qg\nR2xvYmFsIENBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2swYYzD9\n9BcjGlZ+W988bDjkcbd4kdS8odhM+KhDtgPpTSEHCIjaWC9mOSm9BXiLnTjoBbdq\nfnGk5sRgprDvgOSJKA+eJdbtg/OtppHHmMlCGDUUna2YRpIuT8rxh0PBFpVXLVDv\niS2Aelet8u5fa9IAjbkU+BQVNdnARqN7csiRv8lVK83Qlz6cJmTM386DGXHKTubU\n1XupGc1V3sjs0l44U+VcT4wt/lAjNvxm5suOpDkZALeVAjmRCw7+OC7RHQWa9k0+\nbw8HHa8sHo9gOeL6NlMTOdReJivbPagUvTLrGAMoUgRx5aszPeE4uwc2hGKceeoW\nMPRfwCvocWvk+QIDAQABo1MwUTAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTA\nephojYn7qwVkDBF9qn1luMrMTjAfBgNVHSMEGDAWgBTAephojYn7qwVkDBF9qn1l\nuMrMTjANBgkqhkiG9w0BAQUFAAOCAQEANeMpauUvXVSOKVCUn5kaFOSPeCpilKIn\nZ57QzxpeR+nBsqTP3UEaBU6bS+5Kb1VSsyShNwrrZHYqLizz/Tt1kL/6cdjHPTfS\ntQWVYrmm3ok9Nns4d0iXrKYgjy6myQzCsplFAMfOEVEiIuCl6rYVSAlk6l5PdPcF\nPseKUgzbFbS9bZvlxrFUaKnjaZC2mqUPuLk/IH2uSrW4nOQdtqvmlKXBx4Ot2/Un\nhw4EbNX/3aBd7YdStysVAq45pmp06drE57xNNB6pXE0zX5IJL4hmXXeXxx12E6nV\n5fEWCRE11azbJHFwLJhWC9kXtNHjUStedejV0NxPNO3CBWaAocvmMw==\n-----END CERTIFICATE-----\n"
+	geotrustCert    = "-----BEGIN CERTIFICATE-----\nMIIDVDCCAjygAwIBAgIDAjRWMA0GCSqGSIb3DQEBBQUAMEIxCzAJBgNVBAYTAlVT\nMRYwFAYDVQQKEw1HZW9UcnVzdCBJbmMuMRswGQYDVQQDExJHZW9UcnVzdCBHbG9i\nYWwgQ0EwHhcNMDIwNTIxMDQwMDAwWhcNMjIwNTIxMDQwMDAwWjBCMQswCQYDVQQG\nEwJVUzEWMBQGA1UEChMNR2VvVHJ1c3QgSW5jLjEbMBkGA1UEAxMSR2VvVHJ1c3Qg\nR2xvYmFsIENBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2swYYzD9\n9BcjGlZ+W988bDjkcbd4kdS8odhM+KhDtgPpTSEHCIjaWC9mOSm9BXiLnTjoBbdq\nfnGk5sRgprDvgOSJKA+eJdbtg/OtppHHmMlCGDUUna2YRpIuT8rxh0PBFpVXLVDv\niS2Aelet8u5fa9IAjbkU+BQVNdnARqN7csiRv8lVK83Qlz6cJmTM386DGXHKTubU\n1XupGc1V3sjs0l44U+VcT4wt/lAjNvxm5suOpDkZALeVAjmRCw7+OC7RHQWa9k0+\nbw8HHa8sHo9gOeL6NlMTOdReJivbPagUvTLrGAMoUgRx5aszPeE4uwc2hGKceeoW\nMPRfwCvocWvk+QIDAQABo1MwUTAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTA\nephojYn7qwVkDBF9qn1luMrMTjAfBgNVHSMEGDAWgBTAephojYn7qwVkDBF9qn1l\nuMrMTjANBgkqhkiG9w0BAQUFAAOCAQEANeMpauUvXVSOKVCUn5kaFOSPeCpilKIn\nZ57QzxpeR+nBsqTP3UEaBU6bS+5Kb1VSsyShNwrrZHYqLizz/Tt1kL/6cdjHPTfS\ntQWVYrmm3ok9Nns4d0iXrKYgjy6myQzCsplFAMfOEVEiIuCl6rYVSAlk6l5PdPcF\nPseKUgzbFbS9bZvlxrFUaKnjaZC2mqUPuLk/IH2uSrW4nOQdtqvmlKXBx4Ot2/Un\nhw4EbNX/3aBd7YdStysVAq45pmp06drE57xNNB6pXE0zX5IJL4hmXXeXxx12E6nV\n5fEWCRE11azbJHFwLJhWC9kXtNHjUStedejV0NxPNO3CBWaAocvmMw==\n-----END CERTIFICATE-----\n"
+	maxLogFieldSize = 256
 	// base64 encoded sha256 hash of the license used to sign the android
 	// client (.apk) https://psiphon.ca/en/faq.html#authentic-android
 	//
@@ -46,6 +46,7 @@ const (
 	// echo dtvvFfZ3JtRRoSNZuFecDXqfY11SaqN0JN8TFjLxeBA= | base64 -d | hexdump  -e '32/1 "%02X " "\n"'
 	// 76 DB EF 15 F6 77 26 D4 51 A1 23 59 B8 57 9C 0D 7A 9F 63 5D 52 6A A3 74 24 DF 13 16 32 F1 78 10
 	psiphon3Base64CertHash = "dtvvFfZ3JtRRoSNZuFecDXqfY11SaqN0JN8TFjLxeBA="
+	safetynetCN            = "attest.android.com"
 )
 
 var psiphonApkPackagenames = []string{"com.psiphon3", "com.psiphon3.subscription"}
@@ -84,8 +85,9 @@ func newJwtHeader(jsonBytes []byte) (jwtHeader, error) {
 }
 
 type jwtBody struct {
-	CtsProfileMatch            bool     `json:"ctsProfileMatch"`
-	TimestampMs                int      `json:"timestampMs"`
+	BasicIntegrity             *bool    `json:"basicIntegrity"`
+	CtsProfileMatch            *bool    `json:"ctsProfileMatch"`
+	TimestampMs                *int     `json:"timestampMs"`
 	ApkDigestSha256            string   `json:"apkDigestSha256"`
 	ApkPackageName             string   `json:"apkPackageName"`
 	Extension                  string   `json:"extension"`
@@ -178,9 +180,19 @@ func (body *jwtBody) verifyJWTBody() (validApkCert, validApkPackageName bool) {
 
 // Form log fields for debugging
 func errorLogFields(err error, params requestJSONObject) LogFields {
+	payload, ok := params["payload"].(string)
+	if !ok {
+		// Catch malformed or non-existant payload
+		payload = ""
+	} else if len(payload) > maxLogFieldSize {
+		// Truncate if payload exceedingly long
+		payload = payload[:maxLogFieldSize]
+		payload += ".."
+	}
+
 	return LogFields{
 		"error_message": err.Error(),
-		"payload":       params,
+		"payload":       payload,
 	}
 }
 
@@ -198,8 +210,7 @@ func verifySafetyNetPayload(params requestJSONObject) (bool, LogFields) {
 	jwt := newJwt(params)
 	if jwt == nil {
 		// Malformed JWT
-		return false, errorLogFields(errors.New("Invalid request to client_verification, malformed jwt"), params)
-
+		return false, errorLogFields(errors.New("Malformed JWT"), params)
 	}
 
 	statusStrings := map[int]string{
@@ -210,7 +221,7 @@ func verifySafetyNetPayload(params requestJSONObject) (bool, LogFields) {
 
 	statusString, ok := statusStrings[(*jwt).status]
 	if !ok {
-		statusString = "INVALID_STATUS: expected 0-2, got " + strconv.Itoa((*jwt).status)
+		statusString = "Expected status in range 0-2. Got " + strconv.Itoa((*jwt).status)
 	}
 
 	// SafetyNet check failed
@@ -222,8 +233,7 @@ func verifySafetyNetPayload(params requestJSONObject) (bool, LogFields) {
 	jwtParts := strings.Split((*jwt).payload, ".")
 	if len(jwtParts) != 3 {
 		// Malformed payload
-		return false, errorLogFields(errors.New("Invalid request to client_verification, malformed jwt"), params)
-
+		return false, errorLogFields(errors.New("JWT does not have 3 parts"), params)
 	}
 
 	// Decode header, body, signature
@@ -276,7 +286,6 @@ func verifySafetyNetPayload(params requestJSONObject) (bool, LogFields) {
 		"apk_digest_sha256":             body.ApkDigestSha256,
 		"apk_package_name":              body.ApkPackageName,
 		"certchain_errors":              getError(certChainErrors),
-		"cts_profile_match":             body.CtsProfileMatch,
 		"extension":                     body.Extension,
 		"nonce":                         body.Nonce,
 		"signature_errors":              getError(signatureErrors),
@@ -287,8 +296,22 @@ func verifySafetyNetPayload(params requestJSONObject) (bool, LogFields) {
 		"valid_apk_packagename":         validApkPackageName,
 		"valid_certchain":               validCertChain,
 		"valid_signature":               validSignature,
-		"verification_timestamp":        time.Unix(0, int64(body.TimestampMs)*1e6).UTC().Format(time.RFC3339),
 		"verified":                      verified,
+	}
+
+	// These fields may not exist and the default
+	// values assigned when unmarshaling into the
+	// corresponding struct would cause non-existing
+	// fields to be logged (strings are fine as
+	// default is "")
+	if body.BasicIntegrity != nil {
+		logFields["basic_integrity"] = *body.BasicIntegrity
+	}
+	if body.CtsProfileMatch != nil {
+		logFields["cts_profile_match"] = *body.CtsProfileMatch
+	}
+	if body.TimestampMs != nil {
+		logFields["verification_timestamp"] = time.Unix(0, int64(*body.TimestampMs)*1e6).UTC().Format(time.RFC3339)
 	}
 
 	return verified, logFields
