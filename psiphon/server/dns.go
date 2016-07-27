@@ -41,10 +41,10 @@ const (
 // "/etc/resolv.conf" on platforms where it is available; and
 // otherwise using a default value.
 type DNSResolver struct {
-	common.ReloadableFile
 	lastReloadTime int64
-	isReloading    int32
-	resolver       net.IP
+	common.ReloadableFile
+	isReloading int32
+	resolver    net.IP
 }
 
 // NewDNSResolver initializes a new DNSResolver, loading it with

@@ -443,10 +443,10 @@ func (server *MeekServer) terminateConnection(
 }
 
 type meekSession struct {
+	lastActivity        int64
 	clientConn          *meekConn
 	meekProtocolVersion int
 	sessionIDSent       bool
-	lastActivity        int64
 }
 
 func (session *meekSession) touch() {
