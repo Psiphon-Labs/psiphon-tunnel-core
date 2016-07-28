@@ -106,6 +106,27 @@ type runServerConfig struct {
 	doHotReload          bool
 }
 
+func sendNotificationReceived(c chan<- struct{}) {
+	select {
+	case c <- *new(struct{}):
+	default:
+	}
+}
+
+func waitOnNotification(c <-chan struct{}, t *testing.T, timeout <-chan time.Time, timeoutMessage string) {
+	select {
+	case <-c:
+	case <-timeout:
+		t.Fatalf(timeoutMessage)
+	}
+}
+
+const dummyClientVerificationPayload = `
+{
+	"status": 0,
+	"payload": ""
+}`
+
 func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// create a server
@@ -210,6 +231,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Note: calling LoadConfig ensures all *int config fields are initialized
 	clientConfigJSON := `
     {
+        "ClientPlatform" : "Android",
         "ClientVersion" : "0",
         "SponsorId" : "0",
         "PropagationChannelId" : "0"
@@ -237,6 +259,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	tunnelsEstablished := make(chan struct{}, 1)
 	homepageReceived := make(chan struct{}, 1)
+	verificationCompleted := make(chan struct{}, 1)
 
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
@@ -247,15 +270,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			if err != nil {
 				return
 			}
-
 			switch noticeType {
 			case "Tunnels":
+				// Do not set verification payload until tunnel is
+				// established. Otherwise will silently take no action.
+				controller.SetClientVerificationPayloadForActiveTunnels(dummyClientVerificationPayload)
 				count := int(payload["count"].(float64))
 				if count >= numTunnels {
-					select {
-					case tunnelsEstablished <- *new(struct{}):
-					default:
-					}
+					sendNotificationReceived(tunnelsEstablished)
 				}
 			case "Homepage":
 				homepageURL := payload["url"].(string)
@@ -263,10 +285,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 					// TODO: wrong goroutine for t.FatalNow()
 					t.Fatalf("unexpected homepage: %s", homepageURL)
 				}
-				select {
-				case homepageReceived <- *new(struct{}):
-				default:
-				}
+				sendNotificationReceived(homepageReceived)
+			case "NoticeClientVerificationRequestCompleted":
+				sendNotificationReceived(verificationCompleted)
 			}
 		}))
 
@@ -298,18 +319,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Test: tunnels must be established, and correct homepage
 	// must be received, within 30 seconds
 
-	establishTimeout := time.NewTimer(30 * time.Second)
-	select {
-	case <-tunnelsEstablished:
-	case <-establishTimeout.C:
-		t.Fatalf("tunnel establish timeout exceeded")
-	}
+	establishedTimeout := time.NewTimer(30 * time.Second)
 
-	select {
-	case <-homepageReceived:
-	case <-establishTimeout.C:
-		t.Fatalf("homepage received timeout exceeded")
-	}
+	waitOnNotification(tunnelsEstablished, t, establishedTimeout.C, "tunnel establish timeout exceeded")
+	waitOnNotification(homepageReceived, t, establishedTimeout.C, "homepage received timeout exceeded")
+	waitOnNotification(verificationCompleted, t, establishedTimeout.C, "verification completed timeout exceeded")
 
 	// Test: tunneled web site fetch
 
