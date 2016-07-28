@@ -871,19 +871,28 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	go func() {
 		defer requestsWaitGroup.Done()
 
+		clientVerificationRequestSuccess := true
 		clientVerificationPayload := ""
+		failCount := 0
 		for {
 			// TODO: use reflect.SelectCase?
-			if clientVerificationPayload == "" {
+			if clientVerificationRequestSuccess == true {
+				failCount = 0
 				select {
 				case clientVerificationPayload = <-tunnel.newClientVerificationPayload:
 				case <-signalStopClientVerificationRequests:
 					return
 				}
 			} else {
-				// When clientVerificationPayload is not "", the request for that
-				// payload so retry after a delay. Will use a new payload instead
+				// If sendClientVerification failed to send the payload we
+				// will retry after a delay. Will use a new payload instead
 				// if that arrives in the meantime.
+				// If failures count is more than PSIPHON_API_CLIENT_VERIFICATION_REQUEST_MAX_RETRIES
+				// stop retrying for this tunnel.
+				failCount += 1
+				if failCount > PSIPHON_API_CLIENT_VERIFICATION_REQUEST_MAX_RETRIES {
+					return
+				}
 				timeout := time.After(PSIPHON_API_CLIENT_VERIFICATION_REQUEST_RETRY_PERIOD)
 				select {
 				case <-timeout:
@@ -892,10 +901,8 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 					return
 				}
 			}
-			if sendClientVerification(tunnel, clientVerificationPayload) {
-				clientVerificationPayload = ""
-			}
 
+			clientVerificationRequestSuccess = sendClientVerification(tunnel, clientVerificationPayload)
 		}
 	}()
 

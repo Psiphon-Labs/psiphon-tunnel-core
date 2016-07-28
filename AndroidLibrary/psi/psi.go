@@ -124,7 +124,7 @@ func Stop() {
 	}
 }
 
-// This is a passthrough to Controller.SetClientVerificationPayload.
+// This is a passthrough to Controller.SetClientVerificationPayloadForActiveTunnels.
 // Note: should only be called after Start() and before Stop(); otherwise,
 // will silently take no action.
 func SetClientVerificationPayload(clientVerificationPayload string) {
@@ -133,6 +133,6 @@ func SetClientVerificationPayload(clientVerificationPayload string) {
 	defer controllerMutex.Unlock()
 
 	if controller != nil {
-		controller.SetClientVerificationPayload(clientVerificationPayload)
+		controller.SetClientVerificationPayloadForActiveTunnels(clientVerificationPayload)
 	}
 }

@@ -160,12 +160,12 @@ func (entry *LRUConnsEntry) Touch() {
 // either a successful read or write.
 //
 type ActivityMonitoredConn struct {
-	net.Conn
-	inactivityTimeout    time.Duration
-	activeOnWrite        bool
 	startTime            int64
 	lastReadActivityTime int64
-	lruEntry             *LRUConnsEntry
+	net.Conn
+	inactivityTimeout time.Duration
+	activeOnWrite     bool
+	lruEntry          *LRUConnsEntry
 }
 
 func NewActivityMonitoredConn(

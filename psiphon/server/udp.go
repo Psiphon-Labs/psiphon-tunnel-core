@@ -268,14 +268,14 @@ func (mux *udpPortForwardMultiplexer) removePortForward(connID uint16) {
 }
 
 type udpPortForward struct {
+	bytesUp      int64
+	bytesDown    int64
 	connID       uint16
 	preambleSize int
 	remoteIP     []byte
 	remotePort   uint16
 	conn         net.Conn
 	lruEntry     *LRUConnsEntry
-	bytesUp      int64
-	bytesDown    int64
 	mux          *udpPortForwardMultiplexer
 }
 
