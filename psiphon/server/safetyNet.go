@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -59,19 +60,35 @@ type jwt struct {
 	payload string
 }
 
-func newJwt(token requestJSONObject) *jwt {
-	status, ok := token["status"].(float64)
+func newJwt(token requestJSONObject) (jwt, error) {
+	jwtObj := jwt{}
+
+	status, ok := token["status"]
 	if !ok {
-		return nil
+		return jwtObj, errors.New("Absent JWT status field")
 	}
-	payload, ok := token["payload"].(string)
+
+	statusFloat64, ok := status.(float64)
 	if !ok {
-		return nil
+		return jwtObj, errors.New("Malformed JWT status field. Expected float64 got " + reflect.TypeOf(status).String())
 	}
-	return &jwt{
-		status:  int(status),
-		payload: payload,
+
+	payload, ok := token["payload"]
+	if !ok {
+		return jwtObj, errors.New("Absent JWT payload field")
 	}
+	payloadString, ok := payload.(string)
+	if !ok {
+		return jwtObj, errors.New("Malformed JWT payload field. Expected string got " + reflect.TypeOf(payload).String())
+	}
+
+	if len(payloadString) > maxLogPayloadSize {
+		return jwtObj, errors.New("JWT of length " + strconv.Itoa(len(payloadString)) + " exceeds maximum expected length of " + strconv.Itoa(maxLogPayloadSize))
+	}
+
+	jwtObj.status = int(statusFloat64)
+	jwtObj.payload = payloadString
+	return jwtObj, nil
 }
 
 type jwtHeader struct {
@@ -255,10 +272,10 @@ func (l LogFields) addJwtField(field string, input interface{}) {
 // Validate JWT produced by safetynet
 func verifySafetyNetPayload(params requestJSONObject) (bool, LogFields) {
 
-	jwt := newJwt(params)
-	if jwt == nil {
+	jwt, err := newJwt(params)
+	if err != nil {
 		// Malformed JWT
-		return false, errorLogFields(errors.New("Malformed JWT"), params)
+		return false, errorLogFields(err, params)
 	}
 
 	statusStrings := map[int]string{
@@ -267,18 +284,18 @@ func verifySafetyNetPayload(params requestJSONObject) (bool, LogFields) {
 		2: "API_CONNECT_FAILED",
 	}
 
-	statusString, ok := statusStrings[(*jwt).status]
+	statusString, ok := statusStrings[jwt.status]
 	if !ok {
-		statusString = "Expected status in range 0-2. Got " + strconv.Itoa((*jwt).status)
+		statusString = "Expected status in range 0-2. Got " + strconv.Itoa(jwt.status)
 	}
 
 	// SafetyNet check failed
-	if (*jwt).status != 0 {
+	if jwt.status != 0 {
 		return false, errorLogFields(errors.New(statusString), params)
 	}
 
 	// Split into base64 encoded header, body, signature
-	jwtParts := strings.Split((*jwt).payload, ".")
+	jwtParts := strings.Split(jwt.payload, ".")
 	if len(jwtParts) != 3 {
 		// Malformed payload
 		return false, errorLogFields(errors.New("JWT does not have 3 parts"), params)
@@ -332,7 +349,7 @@ func verifySafetyNetPayload(params requestJSONObject) (bool, LogFields) {
 	logFields := LogFields{
 		"certchain_errors":      getError(certChainErrors),
 		"signature_errors":      getError(signatureErrors),
-		"status":                strconv.Itoa((*jwt).status),
+		"status":                strconv.Itoa(jwt.status),
 		"status_string":         statusString,
 		"valid_cn":              validCN,
 		"valid_apk_cert":        validApkCert,
