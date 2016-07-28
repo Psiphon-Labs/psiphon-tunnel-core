@@ -63,31 +63,28 @@ type jwt struct {
 func newJwt(token requestJSONObject) (jwt, error) {
 	jwtObj := jwt{}
 
-	status, ok := token["status"]
-	if !ok {
+	if token["status"] == nil {
 		return jwtObj, errors.New("Absent JWT status field")
 	}
-
-	statusFloat64, ok := status.(float64)
+	status, ok := token["status"].(float64)
 	if !ok {
-		return jwtObj, errors.New("Malformed JWT status field. Expected float64 got " + reflect.TypeOf(status).String())
+		return jwtObj, errors.New("Malformed JWT status field. Expected float64 got " + reflect.TypeOf(token["status"]).String())
 	}
 
-	payload, ok := token["payload"]
-	if !ok {
+	if token["payload"] == nil {
 		return jwtObj, errors.New("Absent JWT payload field")
 	}
-	payloadString, ok := payload.(string)
+	payload, ok := token["payload"].(string)
 	if !ok {
-		return jwtObj, errors.New("Malformed JWT payload field. Expected string got " + reflect.TypeOf(payload).String())
+		return jwtObj, errors.New("Malformed JWT payload field. Expected string got " + reflect.TypeOf(token["payload"]).String())
 	}
 
-	if len(payloadString) > maxLogPayloadSize {
-		return jwtObj, errors.New("JWT of length " + strconv.Itoa(len(payloadString)) + " exceeds maximum expected length of " + strconv.Itoa(maxLogPayloadSize))
+	if len(payload) > maxLogPayloadSize {
+		return jwtObj, errors.New("JWT of length " + strconv.Itoa(len(payload)) + " exceeds maximum expected length of " + strconv.Itoa(maxLogPayloadSize))
 	}
 
-	jwtObj.status = int(statusFloat64)
-	jwtObj.payload = payloadString
+	jwtObj.status = int(status)
+	jwtObj.payload = payload
 	return jwtObj, nil
 }
 
