@@ -643,8 +643,14 @@ func (serverContext *ServerContext) DoClientVerificationRequest(
 
 	if serverContext.psiphonHttpsClient == nil {
 
-		rawMessage := json.RawMessage(verificationPayload)
-		params["verificationData"] = &rawMessage
+		// Empty verification payload signals desire to
+		// query the server for current TTL. This is
+		// indicated to the server by the absense of the
+		// verificationData field.
+		if verificationPayload != "" {
+			rawMessage := json.RawMessage(verificationPayload)
+			params["verificationData"] = &rawMessage
+		}
 
 		request, err := makeSSHAPIRequestPayload(params)
 		if err != nil {

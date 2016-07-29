@@ -259,6 +259,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	tunnelsEstablished := make(chan struct{}, 1)
 	homepageReceived := make(chan struct{}, 1)
+	verificationRequired := make(chan struct{}, 1)
 	verificationCompleted := make(chan struct{}, 1)
 
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
@@ -270,11 +271,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			if err != nil {
 				return
 			}
+
 			switch noticeType {
 			case "Tunnels":
 				// Do not set verification payload until tunnel is
 				// established. Otherwise will silently take no action.
-				controller.SetClientVerificationPayloadForActiveTunnels(dummyClientVerificationPayload)
+				controller.SetClientVerificationPayloadForActiveTunnels("")
 				count := int(payload["count"].(float64))
 				if count >= numTunnels {
 					sendNotificationReceived(tunnelsEstablished)
@@ -286,6 +288,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 					t.Fatalf("unexpected homepage: %s", homepageURL)
 				}
 				sendNotificationReceived(homepageReceived)
+			case "ClientVerificationRequired":
+				sendNotificationReceived(verificationRequired)
+				controller.SetClientVerificationPayloadForActiveTunnels(dummyClientVerificationPayload)
 			case "NoticeClientVerificationRequestCompleted":
 				sendNotificationReceived(verificationCompleted)
 			}
@@ -323,6 +328,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	waitOnNotification(tunnelsEstablished, t, establishedTimeout.C, "tunnel establish timeout exceeded")
 	waitOnNotification(homepageReceived, t, establishedTimeout.C, "homepage received timeout exceeded")
+	waitOnNotification(verificationRequired, t, establishedTimeout.C, "verification required timeout exceeded")
 	waitOnNotification(verificationCompleted, t, establishedTimeout.C, "verification completed timeout exceeded")
 
 	// Test: tunneled web site fetch

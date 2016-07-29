@@ -337,7 +337,7 @@ func clientVerificationAPIRequestHandler(
 	clientPlatform, _ := getStringRequestParam(params, "client_platform")
 
 	// Client sends empty payload to receive TTL
-	// NOTE: these events are not logged currently
+	// NOTE: these events are not currently logged
 	if params["verificationData"] == nil {
 		if CLIENT_VERIFICATION_REQUIRED {
 
