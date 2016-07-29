@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Inc/bolt"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // The BoltDB dataStore implementation is an alternative to the sqlite3-based
@@ -163,7 +164,7 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 	// so instead of skipping we fail with an error.
 	err := ValidateServerEntry(serverEntry)
 	if err != nil {
-		return ContextError(errors.New("invalid server entry"))
+		return common.ContextError(errors.New("invalid server entry"))
 	}
 
 	// BoltDB implementation note:
@@ -199,16 +200,16 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 
 		data, err := json.Marshal(serverEntry)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 		err = serverEntries.Put([]byte(serverEntry.IpAddress), data)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 
 		err = insertRankedServerEntry(tx, serverEntry.IpAddress, 1)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 
 		NoticeInfo("updated server %s", serverEntry.IpAddress)
@@ -216,7 +217,7 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 		return nil
 	})
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	return nil
@@ -237,7 +238,7 @@ func StoreServerEntries(serverEntries []*ServerEntry, replaceIfExists bool) erro
 	for _, serverEntry := range serverEntries {
 		err := StoreServerEntry(serverEntry, replaceIfExists)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 	}
 
@@ -272,7 +273,7 @@ func PromoteServerEntry(ipAddress string) error {
 	})
 
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	return nil
 }
@@ -288,7 +289,7 @@ func getRankedServerEntries(tx *bolt.Tx) ([]string, error) {
 	rankedServerEntries := make([]string, 0)
 	err := json.Unmarshal(data, &rankedServerEntries)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	return rankedServerEntries, nil
 }
@@ -296,13 +297,13 @@ func getRankedServerEntries(tx *bolt.Tx) ([]string, error) {
 func setRankedServerEntries(tx *bolt.Tx, rankedServerEntries []string) error {
 	data, err := json.Marshal(rankedServerEntries)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	bucket := tx.Bucket([]byte(rankedServerEntriesBucket))
 	err = bucket.Put([]byte(rankedServerEntriesKey), data)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	return nil
@@ -311,7 +312,7 @@ func setRankedServerEntries(tx *bolt.Tx, rankedServerEntries []string) error {
 func insertRankedServerEntry(tx *bolt.Tx, serverEntryId string, position int) error {
 	rankedServerEntries, err := getRankedServerEntries(tx)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	// BoltDB implementation note:
@@ -346,7 +347,7 @@ func insertRankedServerEntry(tx *bolt.Tx, serverEntryId string, position int) er
 
 	err = setRankedServerEntries(tx, rankedServerEntries)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	return nil
@@ -356,7 +357,7 @@ func serverEntrySupportsProtocol(serverEntry *ServerEntry, protocol string) bool
 	// Note: for meek, the capabilities are FRONTED-MEEK and UNFRONTED-MEEK
 	// and the additonal OSSH service is assumed to be available internally.
 	requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
-	return Contains(serverEntry.Capabilities, requiredCapability)
+	return common.Contains(serverEntry.Capabilities, requiredCapability)
 }
 
 // ServerEntryIterator is used to iterate over
@@ -397,7 +398,7 @@ func NewServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err 
 // newTargetServerEntryIterator is a helper for initializing the TargetServerEntry case
 func newTargetServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err error) {
 	serverEntry, err := DecodeServerEntry(
-		config.TargetServerEntry, GetCurrentTimestamp(), SERVER_ENTRY_SOURCE_TARGET)
+		config.TargetServerEntry, common.GetCurrentTimestamp(), common.SERVER_ENTRY_SOURCE_TARGET)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +408,7 @@ func newTargetServerEntryIterator(config *Config) (iterator *ServerEntryIterator
 	if config.TunnelProtocol != "" {
 		// Note: same capability/protocol mapping as in StoreServerEntry
 		requiredCapability := strings.TrimSuffix(config.TunnelProtocol, "-OSSH")
-		if !Contains(serverEntry.Capabilities, requiredCapability) {
+		if !common.Contains(serverEntry.Capabilities, requiredCapability) {
 			return nil, errors.New("TargetServerEntry does not support TunnelProtocol")
 		}
 	}
@@ -478,7 +479,7 @@ func (iterator *ServerEntryIterator) Reset() error {
 		return nil
 	})
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	for i := len(serverEntryIds) - 1; i > iterator.shuffleHeadLength-1; i-- {
@@ -539,7 +540,7 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 			return nil
 		})
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 
 		if data == nil {
@@ -554,7 +555,7 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 		if err != nil {
 			// In case of data corruption or a bug causing this condition,
 			// do not stop iterating.
-			NoticeAlert("ServerEntryIterator.Next: %s", ContextError(err))
+			NoticeAlert("ServerEntryIterator.Next: %s", common.ContextError(err))
 			continue
 		}
 
@@ -593,7 +594,7 @@ func scanServerEntries(scanner func(*ServerEntry)) error {
 			if err != nil {
 				// In case of data corruption or a bug causing this condition,
 				// do not stop iterating.
-				NoticeAlert("scanServerEntries: %s", ContextError(err))
+				NoticeAlert("scanServerEntries: %s", common.ContextError(err))
 				continue
 			}
 			scanner(serverEntry)
@@ -603,7 +604,7 @@ func scanServerEntries(scanner func(*ServerEntry)) error {
 	})
 
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	return nil
@@ -668,7 +669,7 @@ func GetServerEntryIpAddresses() (ipAddresses []string, err error) {
 	})
 
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return ipAddresses, nil
@@ -690,7 +691,7 @@ func SetSplitTunnelRoutes(region, etag string, data []byte) error {
 	})
 
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	return nil
 }
@@ -707,7 +708,7 @@ func GetSplitTunnelRoutesETag(region string) (etag string, err error) {
 	})
 
 	if err != nil {
-		return "", ContextError(err)
+		return "", common.ContextError(err)
 	}
 	return etag, nil
 }
@@ -729,7 +730,7 @@ func GetSplitTunnelRoutesData(region string) (data []byte, err error) {
 	})
 
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	return data, nil
 }
@@ -747,7 +748,7 @@ func SetUrlETag(url, etag string) error {
 	})
 
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	return nil
 }
@@ -764,7 +765,7 @@ func GetUrlETag(url string) (etag string, err error) {
 	})
 
 	if err != nil {
-		return "", ContextError(err)
+		return "", common.ContextError(err)
 	}
 	return etag, nil
 }
@@ -780,7 +781,7 @@ func SetKeyValue(key, value string) error {
 	})
 
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	return nil
 }
@@ -797,7 +798,7 @@ func GetKeyValue(key string) (value string, err error) {
 	})
 
 	if err != nil {
-		return "", ContextError(err)
+		return "", common.ContextError(err)
 	}
 	return value, nil
 }
@@ -833,7 +834,7 @@ func StoreTunnelStats(tunnelStats []byte) error {
 	})
 
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	return nil
 }
@@ -913,7 +914,7 @@ func TakeOutUnreportedTunnelStats(maxCount int) ([][]byte, error) {
 	})
 
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	return tunnelStats, nil
 }
@@ -935,7 +936,7 @@ func PutBackUnreportedTunnelStats(tunnelStats [][]byte) error {
 	})
 
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	return nil
 }
@@ -957,7 +958,7 @@ func ClearReportedTunnelStats(tunnelStats [][]byte) error {
 	})
 
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	return nil
 }
@@ -990,7 +991,7 @@ func resetAllTunnelStatsToUnreported() error {
 	})
 
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	return nil
 }

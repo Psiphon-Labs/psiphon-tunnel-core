@@ -28,14 +28,16 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
+const WEB_SERVER_IO_TIMEOUT = 10 * time.Second
+
 type webServer struct {
-	serveMux       *http.ServeMux
-	config         *Config
-	psinetDatabase *PsinetDatabase
+	support  *SupportServices
+	serveMux *http.ServeMux
 }
 
 // RunWebServer runs a web server which supports tunneled and untunneled
@@ -53,13 +55,11 @@ type webServer struct {
 // compatible with older clients.
 //
 func RunWebServer(
-	config *Config,
-	psinetDatabase *PsinetDatabase,
+	support *SupportServices,
 	shutdownBroadcast <-chan struct{}) error {
 
 	webServer := &webServer{
-		config:         config,
-		psinetDatabase: psinetDatabase,
+		support: support,
 	}
 
 	serveMux := http.NewServeMux()
@@ -69,10 +69,10 @@ func RunWebServer(
 	serveMux.HandleFunc("/client_verification", webServer.clientVerificationHandler)
 
 	certificate, err := tls.X509KeyPair(
-		[]byte(config.WebServerCertificate),
-		[]byte(config.WebServerPrivateKey))
+		[]byte(support.Config.WebServerCertificate),
+		[]byte(support.Config.WebServerPrivateKey))
 	if err != nil {
-		return psiphon.ContextError(err)
+		return common.ContextError(err)
 	}
 
 	tlsConfig := &tls.Config{
@@ -83,21 +83,26 @@ func RunWebServer(
 	logWriter := NewLogWriter()
 	defer logWriter.Close()
 
-	server := &psiphon.HTTPSServer{
+	// Note: WriteTimeout includes time awaiting request, as per:
+	// https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts
+
+	server := &HTTPSServer{
 		http.Server{
 			MaxHeaderBytes: MAX_API_PARAMS_SIZE,
 			Handler:        serveMux,
 			TLSConfig:      tlsConfig,
-			ReadTimeout:    WEB_SERVER_READ_TIMEOUT,
-			WriteTimeout:   WEB_SERVER_WRITE_TIMEOUT,
+			ReadTimeout:    WEB_SERVER_IO_TIMEOUT,
+			WriteTimeout:   WEB_SERVER_IO_TIMEOUT,
 			ErrorLog:       golanglog.New(logWriter, "", 0),
 		},
 	}
 
 	listener, err := net.Listen(
-		"tcp", fmt.Sprintf("%s:%d", config.ServerIPAddress, config.WebServerPort))
+		"tcp", fmt.Sprintf("%s:%d",
+			support.Config.ServerIPAddress,
+			support.Config.WebServerPort))
 	if err != nil {
-		return psiphon.ContextError(err)
+		return common.ContextError(err)
 	}
 
 	log.WithContext().Info("starting")
@@ -121,7 +126,7 @@ func RunWebServer(
 		default:
 			if err != nil {
 				select {
-				case errors <- psiphon.ContextError(err):
+				case errors <- common.ContextError(err):
 				default:
 				}
 			}
@@ -156,8 +161,29 @@ func convertHTTPRequestToAPIRequest(
 
 	for name, values := range r.URL.Query() {
 		for _, value := range values {
-			params[name] = value
 			// Note: multiple values per name are ignored
+
+			// TODO: faster lookup?
+			isArray := false
+			for _, paramSpec := range baseRequestParams {
+				if paramSpec.name == name {
+					isArray = (paramSpec.flags&requestParamArray != 0)
+					break
+				}
+			}
+
+			if isArray {
+				// Special case: a JSON encoded array
+				var arrayValue []interface{}
+				err := json.Unmarshal([]byte(value), &arrayValue)
+				if err != nil {
+					return nil, common.ContextError(err)
+				}
+				params[name] = arrayValue
+			} else {
+				// All other query parameters are simple strings
+				params[name] = value
+			}
 			break
 		}
 	}
@@ -166,12 +192,12 @@ func convertHTTPRequestToAPIRequest(
 		r.Body = http.MaxBytesReader(w, r.Body, MAX_API_PARAMS_SIZE)
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
-		var bodyParams requestJSONObject
+		var bodyParams map[string]interface{}
 		err = json.Unmarshal(body, &bodyParams)
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		params[requestBodyName] = bodyParams
 	}
@@ -187,7 +213,7 @@ func (webServer *webServer) lookupGeoIPData(params requestJSONObject) GeoIPData 
 		return NewGeoIPData()
 	}
 
-	return GetGeoIPSessionCache(clientSessionID)
+	return webServer.support.GeoIPService.GetSessionCache(clientSessionID)
 }
 
 func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Request) {
@@ -197,10 +223,7 @@ func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Requ
 	var responsePayload []byte
 	if err == nil {
 		responsePayload, err = handshakeAPIRequestHandler(
-			webServer.config,
-			webServer.psinetDatabase,
-			webServer.lookupGeoIPData(params),
-			params)
+			webServer.support, webServer.lookupGeoIPData(params), params)
 	}
 
 	if err != nil {
@@ -226,7 +249,7 @@ func (webServer *webServer) connectedHandler(w http.ResponseWriter, r *http.Requ
 	var responsePayload []byte
 	if err == nil {
 		responsePayload, err = connectedAPIRequestHandler(
-			webServer.config, webServer.lookupGeoIPData(params), params)
+			webServer.support, webServer.lookupGeoIPData(params), params)
 	}
 
 	if err != nil {
@@ -245,7 +268,7 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 
 	if err == nil {
 		_, err = statusAPIRequestHandler(
-			webServer.config, webServer.lookupGeoIPData(params), params)
+			webServer.support, webServer.lookupGeoIPData(params), params)
 	}
 
 	if err != nil {
@@ -263,7 +286,7 @@ func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *
 
 	if err == nil {
 		_, err = clientVerificationAPIRequestHandler(
-			webServer.config, webServer.lookupGeoIPData(params), params)
+			webServer.support, webServer.lookupGeoIPData(params), params)
 	}
 
 	if err != nil {

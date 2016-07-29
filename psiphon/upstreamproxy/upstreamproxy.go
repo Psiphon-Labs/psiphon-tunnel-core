@@ -21,9 +21,11 @@ package upstreamproxy
 
 import (
 	"fmt"
-	"golang.org/x/net/proxy"
 	"net"
+	"net/http"
 	"net/url"
+
+	"golang.org/x/net/proxy"
 )
 
 type DialFunc func(string, string) (net.Conn, error)
@@ -43,6 +45,7 @@ func proxyError(err error) error {
 type UpstreamProxyConfig struct {
 	ForwardDialFunc DialFunc
 	ProxyURIString  string
+	CustomHeaders   http.Header
 }
 
 // UpstreamProxyConfig implements proxy.Dialer interface

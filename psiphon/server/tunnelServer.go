@@ -31,8 +31,21 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"golang.org/x/crypto/ssh"
 )
+
+const (
+	SSH_HANDSHAKE_TIMEOUT                 = 30 * time.Second
+	SSH_CONNECTION_READ_DEADLINE          = 5 * time.Minute
+	SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT     = 30 * time.Second
+	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE = 8192
+)
+
+// Disallowed port forward hosts is a failsafe. The server should
+// be run on a host with correctly configured firewall rules, or
+// containerization, or both.
+var SSH_DISALLOWED_PORT_FORWARD_HOSTS = []string{"localhost", "127.0.0.1"}
 
 // TunnelServer is the main server that accepts Psiphon client
 // connections, via various obfuscation protocols, and provides
@@ -43,7 +56,6 @@ import (
 // and meek protocols, which provide further circumvention
 // capabilities.
 type TunnelServer struct {
-	config            *Config
 	runWaitGroup      *sync.WaitGroup
 	listenerError     chan error
 	shutdownBroadcast <-chan struct{}
@@ -52,18 +64,15 @@ type TunnelServer struct {
 
 // NewTunnelServer initializes a new tunnel server.
 func NewTunnelServer(
-	config *Config,
-	psinetDatabase *PsinetDatabase,
+	support *SupportServices,
 	shutdownBroadcast <-chan struct{}) (*TunnelServer, error) {
 
-	sshServer, err := newSSHServer(
-		config, psinetDatabase, shutdownBroadcast)
+	sshServer, err := newSSHServer(support, shutdownBroadcast)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return &TunnelServer{
-		config:            config,
 		runWaitGroup:      new(sync.WaitGroup),
 		listenerError:     make(chan error),
 		shutdownBroadcast: shutdownBroadcast,
@@ -104,22 +113,25 @@ func (server *TunnelServer) Run() error {
 		tunnelProtocol string
 	}
 
+	// TODO: should TunnelServer hold its own support pointer?
+	support := server.sshServer.support
+
 	// First bind all listeners; once all are successful,
 	// start accepting connections on each.
 
 	var listeners []*sshListener
 
-	for tunnelProtocol, listenPort := range server.config.TunnelProtocolPorts {
+	for tunnelProtocol, listenPort := range support.Config.TunnelProtocolPorts {
 
 		localAddress := fmt.Sprintf(
-			"%s:%d", server.config.ServerIPAddress, listenPort)
+			"%s:%d", support.Config.ServerIPAddress, listenPort)
 
 		listener, err := net.Listen("tcp", localAddress)
 		if err != nil {
 			for _, existingListener := range listeners {
 				existingListener.Listener.Close()
 			}
-			return psiphon.ContextError(err)
+			return common.ContextError(err)
 		}
 
 		log.WithContextFields(
@@ -182,39 +194,38 @@ func (server *TunnelServer) Run() error {
 type sshClientID uint64
 
 type sshServer struct {
-	config            *Config
-	psinetDatabase    *PsinetDatabase
-	shutdownBroadcast <-chan struct{}
-	sshHostKey        ssh.Signer
-	nextClientID      sshClientID
-	clientsMutex      sync.Mutex
-	stoppingClients   bool
-	clients           map[sshClientID]*sshClient
+	support              *SupportServices
+	shutdownBroadcast    <-chan struct{}
+	sshHostKey           ssh.Signer
+	nextClientID         sshClientID
+	clientsMutex         sync.Mutex
+	stoppingClients      bool
+	acceptedClientCounts map[string]int64
+	clients              map[sshClientID]*sshClient
 }
 
 func newSSHServer(
-	config *Config,
-	psinetDatabase *PsinetDatabase,
+	support *SupportServices,
 	shutdownBroadcast <-chan struct{}) (*sshServer, error) {
 
-	privateKey, err := ssh.ParseRawPrivateKey([]byte(config.SSHPrivateKey))
+	privateKey, err := ssh.ParseRawPrivateKey([]byte(support.Config.SSHPrivateKey))
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// TODO: use cert (ssh.NewCertSigner) for anti-fingerprint?
 	signer, err := ssh.NewSignerFromKey(privateKey)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return &sshServer{
-		config:            config,
-		psinetDatabase:    psinetDatabase,
-		shutdownBroadcast: shutdownBroadcast,
-		sshHostKey:        signer,
-		nextClientID:      1,
-		clients:           make(map[sshClientID]*sshClient),
+		support:              support,
+		shutdownBroadcast:    shutdownBroadcast,
+		sshHostKey:           signer,
+		nextClientID:         1,
+		acceptedClientCounts: make(map[string]int64),
+		clients:              make(map[sshClientID]*sshClient),
 	}, nil
 }
 
@@ -236,18 +247,18 @@ func (sshServer *sshServer) runListener(
 	// TunnelServer.Run will properly shut down instead of remaining
 	// running.
 
-	if psiphon.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
-		psiphon.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+	if common.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
+		common.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
 
 		meekServer, err := NewMeekServer(
-			sshServer.config,
+			sshServer.support,
 			listener,
-			psiphon.TunnelProtocolUsesMeekHTTPS(tunnelProtocol),
+			common.TunnelProtocolUsesMeekHTTPS(tunnelProtocol),
 			handleClient,
 			sshServer.shutdownBroadcast)
 		if err != nil {
 			select {
-			case listenerError <- psiphon.ContextError(err):
+			case listenerError <- common.ContextError(err):
 			default:
 			}
 			return
@@ -277,7 +288,7 @@ func (sshServer *sshServer) runListener(
 				}
 
 				select {
-				case listenerError <- psiphon.ContextError(err):
+				case listenerError <- common.ContextError(err):
 				default:
 				}
 				return
@@ -288,7 +299,28 @@ func (sshServer *sshServer) runListener(
 	}
 }
 
-func (sshServer *sshServer) registerClient(client *sshClient) (sshClientID, bool) {
+// An accepted client has completed a direct TCP or meek connection and has a net.Conn. Registration
+// is for tracking the number of connections.
+func (sshServer *sshServer) registerAcceptedClient(tunnelProtocol string) {
+
+	sshServer.clientsMutex.Lock()
+	defer sshServer.clientsMutex.Unlock()
+
+	sshServer.acceptedClientCounts[tunnelProtocol] += 1
+}
+
+func (sshServer *sshServer) unregisterAcceptedClient(tunnelProtocol string) {
+
+	sshServer.clientsMutex.Lock()
+	defer sshServer.clientsMutex.Unlock()
+
+	sshServer.acceptedClientCounts[tunnelProtocol] -= 1
+}
+
+// An established client has completed its SSH handshake and has a ssh.Conn. Registration is
+// for tracking the number of fully established clients and for maintaining a list of running
+// clients (for stopping at shutdown time).
+func (sshServer *sshServer) registerEstablishedClient(client *sshClient) (sshClientID, bool) {
 
 	sshServer.clientsMutex.Lock()
 	defer sshServer.clientsMutex.Unlock()
@@ -305,7 +337,7 @@ func (sshServer *sshServer) registerClient(client *sshClient) (sshClientID, bool
 	return clientID, true
 }
 
-func (sshServer *sshServer) unregisterClient(clientID sshClientID) {
+func (sshServer *sshServer) unregisterEstablishedClient(clientID sshClientID) {
 
 	sshServer.clientsMutex.Lock()
 	client := sshServer.clients[clientID]
@@ -323,19 +355,36 @@ func (sshServer *sshServer) getLoadStats() map[string]map[string]int64 {
 	defer sshServer.clientsMutex.Unlock()
 
 	loadStats := make(map[string]map[string]int64)
+
+	// Explicitly populate with zeros to get 0 counts in log messages derived from getLoadStats()
+
+	for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
+		loadStats[tunnelProtocol] = make(map[string]int64)
+		loadStats[tunnelProtocol]["AcceptedClients"] = 0
+		loadStats[tunnelProtocol]["EstablishedClients"] = 0
+		loadStats[tunnelProtocol]["TCPPortForwards"] = 0
+		loadStats[tunnelProtocol]["TotalTCPPortForwards"] = 0
+		loadStats[tunnelProtocol]["UDPPortForwards"] = 0
+		loadStats[tunnelProtocol]["TotalUDPPortForwards"] = 0
+	}
+
+	// Note: as currently tracked/counted, each established client is also an accepted client
+
+	for tunnelProtocol, acceptedClientCount := range sshServer.acceptedClientCounts {
+		loadStats[tunnelProtocol]["AcceptedClients"] = acceptedClientCount
+	}
+
 	for _, client := range sshServer.clients {
-		if loadStats[client.tunnelProtocol] == nil {
-			loadStats[client.tunnelProtocol] = make(map[string]int64)
-		}
 		// Note: can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
-		loadStats[client.tunnelProtocol]["CurrentClients"] += 1
+		loadStats[client.tunnelProtocol]["EstablishedClients"] += 1
 		client.Lock()
-		loadStats[client.tunnelProtocol]["CurrentTCPPortForwards"] += client.tcpTrafficState.concurrentPortForwardCount
+		loadStats[client.tunnelProtocol]["TCPPortForwards"] += client.tcpTrafficState.concurrentPortForwardCount
 		loadStats[client.tunnelProtocol]["TotalTCPPortForwards"] += client.tcpTrafficState.totalPortForwardCount
-		loadStats[client.tunnelProtocol]["CurrentUDPPortForwards"] += client.udpTrafficState.concurrentPortForwardCount
+		loadStats[client.tunnelProtocol]["UDPPortForwards"] += client.udpTrafficState.concurrentPortForwardCount
 		loadStats[client.tunnelProtocol]["TotalUDPPortForwards"] += client.udpTrafficState.totalPortForwardCount
 		client.Unlock()
 	}
+
 	return loadStats
 }
 
@@ -354,36 +403,43 @@ func (sshServer *sshServer) stopClients() {
 
 func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.Conn) {
 
-	geoIPData := GeoIPLookup(psiphon.IPAddressFromAddr(clientConn.RemoteAddr()))
+	sshServer.registerAcceptedClient(tunnelProtocol)
+	defer sshServer.unregisterAcceptedClient(tunnelProtocol)
+
+	geoIPData := sshServer.support.GeoIPService.Lookup(
+		common.IPAddressFromAddr(clientConn.RemoteAddr()))
+
+	// TODO: apply reload of TrafficRulesSet to existing clients
 
 	sshClient := newSshClient(
 		sshServer,
 		tunnelProtocol,
 		geoIPData,
-		sshServer.config.GetTrafficRules(geoIPData.Country))
+		sshServer.support.TrafficRulesSet.GetTrafficRules(geoIPData.Country))
 
 	// Wrap the base client connection with an ActivityMonitoredConn which will
 	// terminate the connection if no data is received before the deadline. This
 	// timeout is in effect for the entire duration of the SSH connection. Clients
 	// must actively use the connection or send SSH keep alive requests to keep
-	// the connection active.
+	// the connection active. Writes are not considered reliable activity indicators
+	// due to buffering.
 
-	activityConn := psiphon.NewActivityMonitoredConn(
+	activityConn, err := NewActivityMonitoredConn(
 		clientConn,
 		SSH_CONNECTION_READ_DEADLINE,
 		false,
 		nil)
+	if err != nil {
+		clientConn.Close()
+		log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
+		return
+	}
 	clientConn = activityConn
 
 	// Further wrap the connection in a rate limiting ThrottledConn.
 
-	rateLimits := sshClient.trafficRules.GetRateLimits(tunnelProtocol)
-	clientConn = psiphon.NewThrottledConn(
-		clientConn,
-		rateLimits.DownstreamUnlimitedBytes,
-		int64(rateLimits.DownstreamBytesPerSecond),
-		rateLimits.UpstreamUnlimitedBytes,
-		int64(rateLimits.UpstreamBytesPerSecond))
+	clientConn = common.NewThrottledConn(
+		clientConn, sshClient.trafficRules.GetRateLimits(tunnelProtocol))
 
 	// Run the initial [obfuscated] SSH handshake in a goroutine so we can both
 	// respect shutdownBroadcast and implement a specific handshake timeout.
@@ -410,7 +466,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 		sshServerConfig := &ssh.ServerConfig{
 			PasswordCallback: sshClient.passwordCallback,
 			AuthLogCallback:  sshClient.authLogCallback,
-			ServerVersion:    sshServer.config.SSHServerVersion,
+			ServerVersion:    sshServer.support.Config.SSHServerVersion,
 		}
 		sshServerConfig.AddHostKey(sshServer.sshHostKey)
 
@@ -418,15 +474,15 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 
 		// Wrap the connection in an SSH deobfuscator when required.
 
-		if psiphon.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
+		if common.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
 			// Note: NewObfuscatedSshConn blocks on network I/O
 			// TODO: ensure this won't block shutdown
 			conn, result.err = psiphon.NewObfuscatedSshConn(
 				psiphon.OBFUSCATION_CONN_MODE_SERVER,
 				clientConn,
-				sshServer.config.ObfuscatedSSHKey)
+				sshServer.support.Config.ObfuscatedSSHKey)
 			if result.err != nil {
-				result.err = psiphon.ContextError(result.err)
+				result.err = common.ContextError(result.err)
 			}
 		}
 
@@ -463,17 +519,18 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	sshClient.activityConn = activityConn
 	sshClient.Unlock()
 
-	clientID, ok := sshServer.registerClient(sshClient)
+	clientID, ok := sshServer.registerEstablishedClient(sshClient)
 	if !ok {
 		clientConn.Close()
 		log.WithContext().Warning("register failed")
 		return
 	}
-	defer sshServer.unregisterClient(clientID)
+	defer sshServer.unregisterEstablishedClient(clientID)
 
 	sshClient.runClient(result.channels, result.requests)
 
-	// TODO: clientConn.Close()?
+	// Note: sshServer.unregisterClient calls sshClient.Close(),
+	// which also closes underlying transport Conn.
 }
 
 type sshClient struct {
@@ -481,7 +538,7 @@ type sshClient struct {
 	sshServer               *sshServer
 	tunnelProtocol          string
 	sshConn                 ssh.Conn
-	activityConn            *psiphon.ActivityMonitoredConn
+	activityConn            *ActivityMonitoredConn
 	geoIPData               GeoIPData
 	psiphonSessionID        string
 	udpChannel              ssh.Channel
@@ -489,7 +546,7 @@ type sshClient struct {
 	tcpTrafficState         *trafficState
 	udpTrafficState         *trafficState
 	channelHandlerWaitGroup *sync.WaitGroup
-	tcpPortForwardLRU       *psiphon.LRUConns
+	tcpPortForwardLRU       *LRUConns
 	stopBroadcast           chan struct{}
 }
 
@@ -511,29 +568,44 @@ func newSshClient(
 		tcpTrafficState:         &trafficState{},
 		udpTrafficState:         &trafficState{},
 		channelHandlerWaitGroup: new(sync.WaitGroup),
-		tcpPortForwardLRU:       psiphon.NewLRUConns(),
+		tcpPortForwardLRU:       NewLRUConns(),
 		stopBroadcast:           make(chan struct{}),
 	}
 }
 
 func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
+
 	var sshPasswordPayload struct {
 		SessionId   string `json:"SessionId"`
 		SshPassword string `json:"SshPassword"`
 	}
 	err := json.Unmarshal(password, &sshPasswordPayload)
 	if err != nil {
-		return nil, psiphon.ContextError(fmt.Errorf("invalid password payload for %q", conn.User()))
+
+		// Backwards compatibility case: instead of a JSON payload, older clients
+		// send the hex encoded session ID prepended to the SSH password.
+		// Note: there's an even older case where clients don't send any session ID,
+		// but that's no longer supported.
+		if len(password) == 2*common.PSIPHON_API_CLIENT_SESSION_ID_LENGTH+2*SSH_PASSWORD_BYTE_LENGTH {
+			sshPasswordPayload.SessionId = string(password[0 : 2*common.PSIPHON_API_CLIENT_SESSION_ID_LENGTH])
+			sshPasswordPayload.SshPassword = string(password[2*common.PSIPHON_API_CLIENT_SESSION_ID_LENGTH : len(password)])
+		} else {
+			return nil, common.ContextError(fmt.Errorf("invalid password payload for %q", conn.User()))
+		}
+	}
+
+	if !isHexDigits(sshClient.sshServer.support, sshPasswordPayload.SessionId) {
+		return nil, common.ContextError(fmt.Errorf("invalid session ID for %q", conn.User()))
 	}
 
 	userOk := (subtle.ConstantTimeCompare(
-		[]byte(conn.User()), []byte(sshClient.sshServer.config.SSHUserName)) == 1)
+		[]byte(conn.User()), []byte(sshClient.sshServer.support.Config.SSHUserName)) == 1)
 
 	passwordOk := (subtle.ConstantTimeCompare(
-		[]byte(sshPasswordPayload.SshPassword), []byte(sshClient.sshServer.config.SSHPassword)) == 1)
+		[]byte(sshPasswordPayload.SshPassword), []byte(sshClient.sshServer.support.Config.SSHPassword)) == 1)
 
 	if !userOk || !passwordOk {
-		return nil, psiphon.ContextError(fmt.Errorf("invalid password for %q", conn.User()))
+		return nil, common.ContextError(fmt.Errorf("invalid password for %q", conn.User()))
 	}
 
 	psiphonSessionID := sshPasswordPayload.SessionId
@@ -545,21 +617,45 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 
 	// Store the GeoIP data associated with the session ID. This makes the GeoIP data
 	// available to the web server for web transport Psiphon API requests.
-	SetGeoIPSessionCache(psiphonSessionID, geoIPData)
+	sshClient.sshServer.support.GeoIPService.SetSessionCache(
+		psiphonSessionID, geoIPData)
 
 	return nil, nil
 }
 
 func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string, err error) {
+
 	if err != nil {
-		if sshClient.sshServer.config.UseFail2Ban() {
-			clientIPAddress := psiphon.IPAddressFromAddr(conn.RemoteAddr())
-			if clientIPAddress != "" {
-				LogFail2Ban(clientIPAddress)
-			}
+
+		if method == "none" && err.Error() == "no auth passed yet" {
+			// In this case, the callback invocation is noise from auth negotiation
+			return
 		}
-		log.WithContextFields(LogFields{"error": err, "method": method}).Debug("authentication failed")
+
+		// Note: here we previously logged messages for fail2ban to act on. This is no longer
+		// done as the complexity outweighs the benefits.
+		//
+		// - The SSH credential is not secret -- it's in the server entry. Attackers targetting
+		//   the server likely already have the credential. On the other hand, random scanning and
+		//   brute forcing is mitigated with high entropy random passwords, rate limiting
+		//   (implemented on the host via iptables), and limited capabilities (the SSH session can
+		//   only port forward).
+		//
+		// - fail2ban coverage was inconsistent; in the case of an unfronted meek protocol through
+		//   an upstream proxy, the remote address is the upstream proxy, which should not be blocked.
+		//   The X-Forwarded-For header cant be used instead as it may be forged and used to get IPs
+		//   deliberately blocked; and in any case fail2ban adds iptables rules which can only block
+		//   by direct remote IP, not by original client IP. Fronted meek has the same iptables issue.
+		//
+		// TODO: random scanning and brute forcing of port 22 will result in log noise. To eliminate
+		// this, and to also cover meek protocols, and bad obfuscation keys, and bad inputs to the web
+		// server, consider implementing fail2ban-type logic directly in this server, with the ability
+		// to use X-Forwarded-For (when trustworthy; e.g, from a CDN).
+
+		log.WithContextFields(LogFields{"error": err, "method": method}).Warning("authentication failed")
+
 	} else {
+
 		log.WithContextFields(LogFields{"error": err, "method": method}).Debug("authentication success")
 	}
 }
@@ -615,13 +711,21 @@ func (sshClient *sshClient) runClient(
 
 		for request := range requests {
 
-			// requests are processed serially; responses must be sent in request order.
-			responsePayload, err := sshAPIRequestHandler(
-				sshClient.sshServer.config,
-				sshClient.sshServer.psinetDatabase,
-				sshClient.geoIPData,
-				request.Type,
-				request.Payload)
+			// Requests are processed serially; API responses must be sent in request order.
+
+			var responsePayload []byte
+			var err error
+
+			if request.Type == "keepalive@openssh.com" {
+				// Keepalive requests have an empty response.
+			} else {
+				// All other requests are assumed to be API requests.
+				responsePayload, err = sshAPIRequestHandler(
+					sshClient.sshServer.support,
+					sshClient.geoIPData,
+					request.Type,
+					request.Payload)
+			}
 
 			if err == nil {
 				err = request.Reply(true, responsePayload)
@@ -651,15 +755,15 @@ func (sshClient *sshClient) runClient(
 	requestsWaitGroup.Wait()
 }
 
-func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, reason ssh.RejectionReason, message string) {
-	// TODO: log more details?
+func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, reason ssh.RejectionReason, logMessage string) {
 	log.WithContextFields(
 		LogFields{
-			"channelType":   newChannel.ChannelType(),
-			"rejectMessage": message,
-			"rejectReason":  reason,
+			"channelType":  newChannel.ChannelType(),
+			"logMessage":   logMessage,
+			"rejectReason": reason.String(),
 		}).Warning("reject new channel")
-	newChannel.Reject(reason, message)
+	// Note: logMessage is internal, for logging only; just the RejectionReason is sent to the client
+	newChannel.Reject(reason, reason.String())
 }
 
 func (sshClient *sshClient) handleNewPortForwardChannel(newChannel ssh.NewChannel) {
@@ -681,8 +785,8 @@ func (sshClient *sshClient) handleNewPortForwardChannel(newChannel ssh.NewChanne
 
 	// Intercept TCP port forwards to a specified udpgw server and handle directly.
 	// TODO: also support UDP explicitly, e.g. with a custom "direct-udp" channel type?
-	isUDPChannel := sshClient.sshServer.config.UDPInterceptUdpgwServerAddress != "" &&
-		sshClient.sshServer.config.UDPInterceptUdpgwServerAddress ==
+	isUDPChannel := sshClient.sshServer.support.Config.UDPInterceptUdpgwServerAddress != "" &&
+		sshClient.sshServer.support.Config.UDPInterceptUdpgwServerAddress ==
 			fmt.Sprintf("%s:%d",
 				directTcpipExtraData.HostToConnect,
 				directTcpipExtraData.PortToConnect)
@@ -696,7 +800,11 @@ func (sshClient *sshClient) handleNewPortForwardChannel(newChannel ssh.NewChanne
 }
 
 func (sshClient *sshClient) isPortForwardPermitted(
-	port int, allowPorts []int, denyPorts []int) bool {
+	host string, port int, allowPorts []int, denyPorts []int) bool {
+
+	if common.Contains(SSH_DISALLOWED_PORT_FORWARD_HOSTS, host) {
+		return false
+	}
 
 	// TODO: faster lookup?
 	if len(allowPorts) > 0 {
@@ -707,6 +815,7 @@ func (sshClient *sshClient) isPortForwardPermitted(
 		}
 		return false
 	}
+
 	if len(denyPorts) > 0 {
 		for _, denyPort := range denyPorts {
 			if port == denyPort {
@@ -714,6 +823,7 @@ func (sshClient *sshClient) isPortForwardPermitted(
 			}
 		}
 	}
+
 	return true
 }
 
@@ -757,6 +867,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	newChannel ssh.NewChannel) {
 
 	if !sshClient.isPortForwardPermitted(
+		hostToConnect,
 		portToConnect,
 		sshClient.trafficRules.AllowTCPPorts,
 		sshClient.trafficRules.DenyTCPPorts) {
@@ -860,19 +971,6 @@ func (sshClient *sshClient) handleTCPChannel(
 	fwdConn := result.conn
 	defer fwdConn.Close()
 
-	lruEntry := sshClient.tcpPortForwardLRU.Add(fwdConn)
-	defer lruEntry.Remove()
-
-	// ActivityMonitoredConn monitors the TCP port forward I/O and updates
-	// its LRU status. ActivityMonitoredConn also times out read on the port
-	// forward if both reads and writes have been idle for the specified
-	// duration.
-	fwdConn = psiphon.NewActivityMonitoredConn(
-		fwdConn,
-		time.Duration(sshClient.trafficRules.IdleTCPPortForwardTimeoutMilliseconds)*time.Millisecond,
-		true,
-		lruEntry)
-
 	fwdChannel, requests, err := newChannel.Accept()
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
@@ -881,9 +979,27 @@ func (sshClient *sshClient) handleTCPChannel(
 	go ssh.DiscardRequests(requests)
 	defer fwdChannel.Close()
 
-	log.WithContextFields(LogFields{"remoteAddr": remoteAddr}).Debug("relaying")
+	// ActivityMonitoredConn monitors the TCP port forward I/O and updates
+	// its LRU status. ActivityMonitoredConn also times out I/O on the port
+	// forward if both reads and writes have been idle for the specified
+	// duration.
+
+	lruEntry := sshClient.tcpPortForwardLRU.Add(fwdConn)
+	defer lruEntry.Remove()
+
+	fwdConn, err = NewActivityMonitoredConn(
+		fwdConn,
+		time.Duration(sshClient.trafficRules.IdleTCPPortForwardTimeoutMilliseconds)*time.Millisecond,
+		true,
+		lruEntry)
+	if result.err != nil {
+		log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
+		return
+	}
 
 	// Relay channel to forwarded connection.
+
+	log.WithContextFields(LogFields{"remoteAddr": remoteAddr}).Debug("relaying")
 
 	// TODO: relay errors to fwdChannel.Stderr()?
 	relayWaitGroup := new(sync.WaitGroup)

@@ -29,6 +29,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // Controller is a tunnel lifecycle coordinator. It manages lists of servers to
@@ -51,8 +53,8 @@ type Controller struct {
 	establishWaitGroup             *sync.WaitGroup
 	stopEstablishingBroadcast      chan struct{}
 	candidateServerEntries         chan *candidateServerEntry
-	establishPendingConns          *Conns
-	untunneledPendingConns         *Conns
+	establishPendingConns          *common.Conns
+	untunneledPendingConns         *common.Conns
 	untunneledDialConfig           *DialConfig
 	splitTunnelClassifier          *SplitTunnelClassifier
 	signalFetchRemoteServerList    chan struct{}
@@ -83,7 +85,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// used across all tunnels established by the controller.
 	sessionId, err := MakeSessionId()
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	NoticeSessionId(sessionId)
 
@@ -92,9 +94,10 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// used to exclude these requests and connection from VPN routing.
 	// TODO: fetch remote server list and untunneled upgrade download should remove
 	// their completed conns from untunneledPendingConns.
-	untunneledPendingConns := new(Conns)
+	untunneledPendingConns := new(common.Conns)
 	untunneledDialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
+		UpstreamProxyCustomHeaders:    config.UpstreamProxyCustomHeaders,
 		PendingConns:                  untunneledPendingConns,
 		DeviceBinder:                  config.DeviceBinder,
 		DnsServerGetter:               config.DnsServerGetter,
@@ -120,7 +123,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 		establishedOnce:                false,
 		startedConnectedReporter:       false,
 		isEstablishing:                 false,
-		establishPendingConns:          new(Conns),
+		establishPendingConns:          new(common.Conns),
 		untunneledPendingConns:         untunneledPendingConns,
 		untunneledDialConfig:           untunneledDialConfig,
 		impairedProtocolClassification: make(map[string]int),
@@ -130,8 +133,8 @@ func NewController(config *Config) (controller *Controller, err error) {
 		signalFetchRemoteServerList: make(chan struct{}),
 		signalDownloadUpgrade:       make(chan string),
 		signalReportConnected:       make(chan struct{}),
-		// Buffer allows SetClientVerificationPayload to submit one new payload
-		// without blocking or dropping it.
+		// Buffer allows SetClientVerificationPayloadForActiveTunnels to submit one
+		// new payload without blocking or dropping it.
 		newClientVerificationPayload: make(chan string, 1),
 	}
 
@@ -246,11 +249,9 @@ func (controller *Controller) SignalComponentFailure() {
 	}
 }
 
-// SetClientVerificationPayload sets the client verification payload
-// that is to be sent in client verification requests to all established
-// tunnels. Calling this function both sets the payload to be used for
-// all future tunnels as wells as triggering requests with this payload
-// for all currently established tunneled.
+// SetClientVerificationPayloadForActiveTunnels sets the client verification
+// payload that is to be sent in client verification requests to all established
+// tunnels.
 //
 // Client verification is used to verify that the client is a
 // valid Psiphon client, which will determine how the server treats
@@ -261,10 +262,10 @@ func (controller *Controller) SignalComponentFailure() {
 // after tunnel-core starts, the payload cannot be simply specified in
 // the Config.
 //
-// SetClientVerificationPayload will not block enqueuing a new verification
+// SetClientVerificationPayloadForActiveTunnels will not block enqueuing a new verification
 // payload. One new payload can be enqueued, after which additional payloads
 // will be dropped if a payload is still enqueued.
-func (controller *Controller) SetClientVerificationPayload(clientVerificationPayload string) {
+func (controller *Controller) SetClientVerificationPayloadForActiveTunnels(clientVerificationPayload string) {
 	select {
 	case controller.newClientVerificationPayload <- clientVerificationPayload:
 	default:
@@ -586,10 +587,6 @@ loop:
 				break
 			}
 
-			if clientVerificationPayload != "" {
-				establishedTunnel.SetClientVerificationPayload(clientVerificationPayload)
-			}
-
 			NoticeActiveTunnel(establishedTunnel.serverEntry.IpAddress, establishedTunnel.protocol)
 
 			if tunnelCount == 1 {
@@ -676,7 +673,7 @@ func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
 	} else {
 		controller.impairedProtocolClassification[failedTunnel.protocol] = 0
 	}
-	if len(controller.getImpairedProtocols()) == len(SupportedTunnelProtocols) {
+	if len(controller.getImpairedProtocols()) == len(common.SupportedTunnelProtocols) {
 		// Reset classification if all protocols are classified as impaired as
 		// the network situation (or attack) may not be protocol-specific.
 		// TODO: compare against count of distinct supported protocols for
@@ -876,7 +873,7 @@ func (controller *Controller) Dial(
 
 	tunnel := controller.getNextActiveTunnel()
 	if tunnel == nil {
-		return nil, ContextError(errors.New("no active tunnels"))
+		return nil, common.ContextError(errors.New("no active tunnels"))
 	}
 
 	// Perform split tunnel classification when feature is enabled, and if the remote
@@ -885,7 +882,7 @@ func (controller *Controller) Dial(
 
 		host, _, err := net.SplitHostPort(remoteAddr)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 
 		// Note: a possible optimization, when split tunnel is active and IsUntunneled performs
@@ -902,7 +899,7 @@ func (controller *Controller) Dial(
 
 	tunneledConn, err := tunnel.Dial(remoteAddr, alwaysTunnel, downstreamConn)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return tunneledConn, nil

@@ -25,6 +25,7 @@ import (
 	"sync"
 
 	socks "github.com/Psiphon-Inc/goptlib"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // SocksProxy is a SOCKS server that accepts local host connections
@@ -35,7 +36,7 @@ type SocksProxy struct {
 	tunneler               Tunneler
 	listener               *socks.SocksListener
 	serveWaitGroup         *sync.WaitGroup
-	openConns              *Conns
+	openConns              *common.Conns
 	stopListeningBroadcast chan struct{}
 }
 
@@ -55,13 +56,13 @@ func NewSocksProxy(
 		if IsAddressInUseError(err) {
 			NoticeSocksProxyPortInUse(config.LocalSocksProxyPort)
 		}
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	proxy = &SocksProxy{
 		tunneler:               tunneler,
 		listener:               listener,
 		serveWaitGroup:         new(sync.WaitGroup),
-		openConns:              new(Conns),
+		openConns:              new(common.Conns),
 		stopListeningBroadcast: make(chan struct{}),
 	}
 	proxy.serveWaitGroup.Add(1)
@@ -88,12 +89,12 @@ func (proxy *SocksProxy) socksConnectionHandler(localConn *socks.SocksConn) (err
 	// open connection for data which will never arrive.
 	remoteConn, err := proxy.tunneler.Dial(localConn.Req.Target, false, localConn)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	defer remoteConn.Close()
 	err = localConn.Grant(&net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0})
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 	LocalProxyRelay(_SOCKS_PROXY_TYPE, localConn, remoteConn)
 	return nil
@@ -127,7 +128,7 @@ loop:
 		go func() {
 			err := proxy.socksConnectionHandler(socksConnection)
 			if err != nil {
-				NoticeLocalProxyError(_SOCKS_PROXY_TYPE, ContextError(err))
+				NoticeLocalProxyError(_SOCKS_PROXY_TYPE, common.ContextError(err))
 			}
 		}()
 	}

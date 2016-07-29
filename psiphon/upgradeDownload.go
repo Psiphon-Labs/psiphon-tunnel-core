@@ -24,6 +24,8 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // DownloadUpgrade performs a resumable download of client upgrade files.
@@ -80,7 +82,7 @@ func DownloadUpgrade(
 	if availableClientVersion == "" {
 		request, err := http.NewRequest("HEAD", requestUrl, nil)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 		response, err := httpClient.Do(request)
 		if err == nil && response.StatusCode != http.StatusOK {
@@ -88,13 +90,13 @@ func DownloadUpgrade(
 			err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
 		}
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 		defer response.Body.Close()
 
 		currentClientVersion, err := strconv.Atoi(config.ClientVersion)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 
 		// Note: if the header is missing, Header.Get returns "" and then
@@ -134,12 +136,12 @@ func DownloadUpgrade(
 	NoticeClientUpgradeDownloadedBytes(n)
 
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	err = os.Rename(downloadFilename, config.UpgradeDownloadFilename)
 	if err != nil {
-		return ContextError(err)
+		return common.ContextError(err)
 	}
 
 	NoticeClientUpgradeDownloaded(config.UpgradeDownloadFilename)

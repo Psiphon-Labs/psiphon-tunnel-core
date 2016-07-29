@@ -20,14 +20,11 @@
 package server
 
 import (
-	"fmt"
 	"io"
-	"log/syslog"
 	"os"
 
 	"github.com/Psiphon-Inc/logrus"
-	logrus_syslog "github.com/Psiphon-Inc/logrus/hooks/syslog"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // ContextLogger adds context logging functionality to the
@@ -46,7 +43,7 @@ type LogFields logrus.Fields
 func (logger *ContextLogger) WithContext() *logrus.Entry {
 	return log.WithFields(
 		logrus.Fields{
-			"context": psiphon.GetParentContext(),
+			"context": common.GetParentContext(),
 		})
 }
 
@@ -59,7 +56,7 @@ func (logger *ContextLogger) WithContextFields(fields LogFields) *logrus.Entry {
 	if ok {
 		fields["fields.context"] = fields["context"]
 	}
-	fields["context"] = psiphon.GetParentContext()
+	fields["context"] = common.GetParentContext()
 	return log.WithFields(logrus.Fields(fields))
 }
 
@@ -70,113 +67,45 @@ func NewLogWriter() *io.PipeWriter {
 }
 
 var log *ContextLogger
-var fail2BanFormat string
-var fail2BanWriter *syslog.Writer
 
 // InitLogging configures a logger according to the specified
 // config params. If not called, the default logger set by the
 // package init() is used.
-// When configured, InitLogging also establishes a local syslog
-// logger specifically for fail2ban integration.
 // Concurrenty note: should only be called from the main
 // goroutine.
 func InitLogging(config *Config) error {
 
 	level, err := logrus.ParseLevel(config.LogLevel)
 	if err != nil {
-		return psiphon.ContextError(err)
+		return common.ContextError(err)
 	}
 
-	hooks := make(logrus.LevelHooks)
+	logWriter := os.Stderr
 
-	var syslogHook *logrus_syslog.SyslogHook
-
-	if config.SyslogFacility != "" {
-
-		syslogHook, err = logrus_syslog.NewSyslogHook(
-			"", "", getSyslogPriority(config), config.SyslogTag)
+	if config.LogFilename != "" {
+		logWriter, err = os.OpenFile(
+			config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
 		if err != nil {
-			return psiphon.ContextError(err)
+			return common.ContextError(err)
 		}
-
-		hooks.Add(syslogHook)
 	}
 
 	log = &ContextLogger{
 		&logrus.Logger{
-			Out:       os.Stderr,
-			Formatter: new(logrus.JSONFormatter),
-			Hooks:     hooks,
+			Out:       logWriter,
+			Formatter: &logrus.JSONFormatter{},
 			Level:     level,
 		},
 	}
 
-	if config.Fail2BanFormat != "" {
-		fail2BanFormat = config.Fail2BanFormat
-		fail2BanWriter, err = syslog.Dial(
-			"", "", syslog.LOG_AUTH|syslog.LOG_INFO, config.SyslogTag)
-		if err != nil {
-			return psiphon.ContextError(err)
-		}
-	}
-
 	return nil
-}
-
-// LogFail2Ban logs a message to the local syslog service AUTH
-// facility with INFO severity using the format specified by
-// config.Fail2BanFormat and the given client IP address. This
-// is for integration with fail2ban for blocking abusive
-// clients by source IP address. When set, the tag in
-// config.SyslogTag is used.
-func LogFail2Ban(clientIPAddress string) {
-	fail2BanWriter.Info(
-		fmt.Sprintf(fail2BanFormat, clientIPAddress))
-}
-
-// getSyslogPriority determines golang's syslog "priority" value
-// based on the provided config.
-func getSyslogPriority(config *Config) syslog.Priority {
-
-	// TODO: assumes log.Level filter applies?
-	severity := syslog.LOG_DEBUG
-
-	facilityCodes := map[string]syslog.Priority{
-		"kern":     syslog.LOG_KERN,
-		"user":     syslog.LOG_USER,
-		"mail":     syslog.LOG_MAIL,
-		"daemon":   syslog.LOG_DAEMON,
-		"auth":     syslog.LOG_AUTH,
-		"syslog":   syslog.LOG_SYSLOG,
-		"lpr":      syslog.LOG_LPR,
-		"news":     syslog.LOG_NEWS,
-		"uucp":     syslog.LOG_UUCP,
-		"cron":     syslog.LOG_CRON,
-		"authpriv": syslog.LOG_AUTHPRIV,
-		"ftp":      syslog.LOG_FTP,
-		"local0":   syslog.LOG_LOCAL0,
-		"local1":   syslog.LOG_LOCAL1,
-		"local2":   syslog.LOG_LOCAL2,
-		"local3":   syslog.LOG_LOCAL3,
-		"local4":   syslog.LOG_LOCAL4,
-		"local5":   syslog.LOG_LOCAL5,
-		"local6":   syslog.LOG_LOCAL6,
-		"local7":   syslog.LOG_LOCAL7,
-	}
-
-	facility, ok := facilityCodes[config.SyslogFacility]
-	if !ok {
-		facility = syslog.LOG_USER
-	}
-
-	return severity | facility
 }
 
 func init() {
 	log = &ContextLogger{
 		&logrus.Logger{
 			Out:       os.Stderr,
-			Formatter: new(logrus.JSONFormatter),
+			Formatter: &logrus.JSONFormatter{},
 			Hooks:     make(logrus.LevelHooks),
 			Level:     logrus.DebugLevel,
 		},

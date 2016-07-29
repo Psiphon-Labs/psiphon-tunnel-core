@@ -34,6 +34,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 	"golang.org/x/crypto/nacl/box"
 )
@@ -105,7 +106,7 @@ type MeekConn struct {
 	url                  *url.URL
 	additionalHeaders    map[string]string
 	cookie               *http.Cookie
-	pendingConns         *Conns
+	pendingConns         *common.Conns
 	transport            transporter
 	mutex                sync.Mutex
 	isClosed             bool
@@ -143,7 +144,7 @@ func DialMeek(
 	// which may be interrupted on MeekConn.Close(). This code previously used the establishTunnel
 	// pendingConns here, but that was a lifecycle mismatch: we don't want to abort HTTP transport
 	// connections while MeekConn is still in use
-	pendingConns := new(Conns)
+	pendingConns := new(common.Conns)
 
 	// Use a copy of DialConfig with the meek pendingConns
 	meekDialConfig := new(DialConfig)
@@ -196,6 +197,7 @@ func DialMeek(
 			TrustedCACertificatesFilename: meekDialConfig.TrustedCACertificatesFilename,
 		})
 
+		// TODO: wrap in an http.Client and use http.Client.Timeout which actually covers round trip
 		transport = &http.Transport{
 			Dial: dialer,
 			ResponseHeaderTimeout: MEEK_ROUND_TRIP_TIMEOUT,
@@ -219,7 +221,7 @@ func DialMeek(
 				meekConfig.DialAddress == meekConfig.HostHeader+":80") {
 			url, err := url.Parse(meekDialConfig.UpstreamProxyUrl)
 			if err != nil {
-				return nil, ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			proxyUrl = http.ProxyURL(url)
 			meekDialConfig.UpstreamProxyUrl = ""
@@ -229,6 +231,7 @@ func DialMeek(
 			dialer = NewTCPDialer(meekDialConfig)
 		}
 
+		// TODO: wrap in an http.Client and use http.Client.Timeout which actually covers round trip
 		httpTransport := &http.Transport{
 			Proxy: proxyUrl,
 			Dial:  dialer,
@@ -236,9 +239,9 @@ func DialMeek(
 		}
 		if proxyUrl != nil {
 			// Wrap transport with a transport that can perform HTTP proxy auth negotiation
-			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport)
+			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport, meekDialConfig.UpstreamProxyCustomHeaders)
 			if err != nil {
-				return nil, ContextError(err)
+				return nil, common.ContextError(err)
 			}
 		} else {
 			transport = httpTransport
@@ -257,7 +260,7 @@ func DialMeek(
 	if meekConfig.UseHTTPS {
 		host, _, err := net.SplitHostPort(meekConfig.DialAddress)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		additionalHeaders = map[string]string{
 			"X-Psiphon-Fronting-Address": host,
@@ -266,7 +269,7 @@ func DialMeek(
 
 	cookie, err := makeMeekCookie(meekConfig)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// The main loop of a MeekConn is run in the relay() goroutine.
@@ -310,7 +313,7 @@ func DialMeek(
 	// Enable interruption
 	if !dialConfig.PendingConns.Add(meek) {
 		meek.Close()
-		return nil, ContextError(errors.New("pending connections already closed"))
+		return nil, common.ContextError(errors.New("pending connections already closed"))
 	}
 
 	return meek, nil
@@ -348,7 +351,7 @@ func (meek *MeekConn) closed() bool {
 // net.Conn Deadlines are ignored. net.Conn concurrency semantics are supported.
 func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
 	if meek.closed() {
-		return 0, ContextError(errors.New("meek connection is closed"))
+		return 0, common.ContextError(errors.New("meek connection is closed"))
 	}
 	// Block until there is received data to consume
 	var receiveBuffer *bytes.Buffer
@@ -356,7 +359,7 @@ func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
 	case receiveBuffer = <-meek.partialReceiveBuffer:
 	case receiveBuffer = <-meek.fullReceiveBuffer:
 	case <-meek.broadcastClosed:
-		return 0, ContextError(errors.New("meek connection has closed"))
+		return 0, common.ContextError(errors.New("meek connection has closed"))
 	}
 	n, err = receiveBuffer.Read(buffer)
 	meek.replaceReceiveBuffer(receiveBuffer)
@@ -367,7 +370,7 @@ func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
 // net.Conn Deadlines are ignored. net.Conn concurrency semantics are supported.
 func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
 	if meek.closed() {
-		return 0, ContextError(errors.New("meek connection is closed"))
+		return 0, common.ContextError(errors.New("meek connection is closed"))
 	}
 	// Repeats until all n bytes are written
 	n = len(buffer)
@@ -378,7 +381,7 @@ func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
 		case sendBuffer = <-meek.emptySendBuffer:
 		case sendBuffer = <-meek.partialSendBuffer:
 		case <-meek.broadcastClosed:
-			return 0, ContextError(errors.New("meek connection has closed"))
+			return 0, common.ContextError(errors.New("meek connection has closed"))
 		}
 		writeLen := MAX_SEND_PAYLOAD_LENGTH - sendBuffer.Len()
 		if writeLen > 0 {
@@ -405,17 +408,17 @@ func (meek *MeekConn) RemoteAddr() net.Addr {
 
 // Stub implementation of net.Conn.SetDeadline
 func (meek *MeekConn) SetDeadline(t time.Time) error {
-	return ContextError(errors.New("not supported"))
+	return common.ContextError(errors.New("not supported"))
 }
 
 // Stub implementation of net.Conn.SetReadDeadline
 func (meek *MeekConn) SetReadDeadline(t time.Time) error {
-	return ContextError(errors.New("not supported"))
+	return common.ContextError(errors.New("not supported"))
 }
 
 // Stub implementation of net.Conn.SetWriteDeadline
 func (meek *MeekConn) SetWriteDeadline(t time.Time) error {
-	return ContextError(errors.New("not supported"))
+	return common.ContextError(errors.New("not supported"))
 }
 
 func (meek *MeekConn) replaceReceiveBuffer(receiveBuffer *bytes.Buffer) {
@@ -470,14 +473,14 @@ func (meek *MeekConn) relay() {
 			sendPayloadSize, err = sendBuffer.Read(sendPayload)
 			meek.replaceSendBuffer(sendBuffer)
 			if err != nil {
-				NoticeAlert("%s", ContextError(err))
+				NoticeAlert("%s", common.ContextError(err))
 				go meek.Close()
 				return
 			}
 		}
 		receivedPayload, err := meek.roundTrip(sendPayload[:sendPayloadSize])
 		if err != nil {
-			NoticeAlert("%s", ContextError(err))
+			NoticeAlert("%s", common.ContextError(err))
 			go meek.Close()
 			return
 		}
@@ -487,7 +490,7 @@ func (meek *MeekConn) relay() {
 		}
 		receivedPayloadSize, err := meek.readPayload(receivedPayload)
 		if err != nil {
-			NoticeAlert("%s", ContextError(err))
+			NoticeAlert("%s", common.ContextError(err))
 			go meek.Close()
 			return
 		}
@@ -525,7 +528,7 @@ func (meek *MeekConn) readPayload(receivedPayload io.ReadCloser) (totalSize int6
 		n, err := receiveBuffer.ReadFrom(reader)
 		meek.replaceReceiveBuffer(receiveBuffer)
 		if err != nil {
-			return 0, ContextError(err)
+			return 0, common.ContextError(err)
 		}
 		totalSize += n
 		if n == 0 {
@@ -539,7 +542,7 @@ func (meek *MeekConn) readPayload(receivedPayload io.ReadCloser) (totalSize int6
 func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadCloser, err error) {
 	request, err := http.NewRequest("POST", meek.url.String(), bytes.NewReader(sendPayload))
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// Don't use the default user agent ("Go 1.1 package http").
@@ -608,10 +611,10 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadClos
 		time.Sleep(MEEK_ROUND_TRIP_RETRY_DELAY)
 	}
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, ContextError(fmt.Errorf("http request failed %d", response.StatusCode))
+		return nil, common.ContextError(fmt.Errorf("http request failed %d", response.StatusCode))
 	}
 	// observe response cookies for meek session key token.
 	// Once found it must be used for all consecutive requests made to the server
@@ -653,7 +656,7 @@ func makeMeekCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
 	}
 	serializedCookie, err := json.Marshal(cookieData)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// Encrypt the JSON data
@@ -667,12 +670,12 @@ func makeMeekCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
 	var publicKey [32]byte
 	decodedPublicKey, err := base64.StdEncoding.DecodeString(meekConfig.MeekCookieEncryptionPublicKey)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	copy(publicKey[:], decodedPublicKey)
 	ephemeralPublicKey, ephemeralPrivateKey, err := box.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	box := box.Seal(nil, serializedCookie, &nonce, &publicKey, ephemeralPrivateKey)
 	encryptedCookie := make([]byte, 32+len(box))
@@ -683,7 +686,7 @@ func makeMeekCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
 	obfuscator, err := NewClientObfuscator(
 		&ObfuscatorConfig{Keyword: meekConfig.MeekObfuscatedKey, MaxPadding: MEEK_COOKIE_MAX_PADDING})
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	obfuscatedCookie := obfuscator.SendSeedMessage()
 	seedLen := len(obfuscatedCookie)
@@ -695,9 +698,9 @@ func makeMeekCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
 	A := int('A')
 	Z := int('Z')
 	// letterIndex is integer in range [int('A'), int('Z')]
-	letterIndex, err := MakeSecureRandomInt(Z - A + 1)
+	letterIndex, err := common.MakeSecureRandomInt(Z - A + 1)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	return &http.Cookie{
 			Name:  string(byte(A + letterIndex)),

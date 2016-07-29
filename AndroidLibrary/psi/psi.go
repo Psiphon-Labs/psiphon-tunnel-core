@@ -29,6 +29,7 @@ import (
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 type PsiphonProvider interface {
@@ -83,8 +84,8 @@ func Start(
 
 	serverEntries, err := psiphon.DecodeAndValidateServerEntryList(
 		embeddedServerEntryList,
-		psiphon.GetCurrentTimestamp(),
-		psiphon.SERVER_ENTRY_SOURCE_EMBEDDED)
+		common.GetCurrentTimestamp(),
+		common.SERVER_ENTRY_SOURCE_EMBEDDED)
 	if err != nil {
 		return fmt.Errorf("error decoding embedded server entry list: %s", err)
 	}
@@ -123,7 +124,7 @@ func Stop() {
 	}
 }
 
-// This is a passthrough to Controller.SetClientVerificationPayload.
+// This is a passthrough to Controller.SetClientVerificationPayloadForActiveTunnels.
 // Note: should only be called after Start() and before Stop(); otherwise,
 // will silently take no action.
 func SetClientVerificationPayload(clientVerificationPayload string) {
@@ -132,6 +133,6 @@ func SetClientVerificationPayload(clientVerificationPayload string) {
 	defer controllerMutex.Unlock()
 
 	if controller != nil {
-		controller.SetClientVerificationPayload(clientVerificationPayload)
+		controller.SetClientVerificationPayloadForActiveTunnels(clientVerificationPayload)
 	}
 }

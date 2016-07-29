@@ -24,8 +24,9 @@ Note: `NewProxyDialFunc` returns `ForwardDialFunc` if `ProxyURIString` is empty
 func doAuthenticatedHTTP() {
 	proxyUrl, err := url.Parse("http://user:password@172.16.1.1:8080")
 	transport := &http.Transport{Proxy: http.ProxyURL(proxyUrl)}
+	customHeader := http.Header{"Test" :{"test"}}
 
-	authHttpTransport, err := upstreamproxy.NewProxyAuthTransport(transport)
+	authHttpTransport, err := upstreamproxy.NewProxyAuthTransport(transport, customHeader)
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return

@@ -22,7 +22,6 @@ package server
 import (
 	"crypto/subtle"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"regexp"
@@ -30,10 +29,18 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
-const MAX_API_PARAMS_SIZE = 256 * 1024 // 256KB
+const (
+	MAX_API_PARAMS_SIZE = 256 * 1024 // 256KB
+
+	CLIENT_VERIFICATION_REQUIRED    = true
+	CLIENT_VERIFICATION_TTL_SECONDS = 60 * 60 * 24 * 7 // 7 days
+
+	CLIENT_PLATFORM_ANDROID = "Android"
+	CLIENT_PLATFORM_WINDOWS = "Windows"
+)
 
 type requestJSONObject map[string]interface{}
 
@@ -49,8 +56,7 @@ type requestJSONObject map[string]interface{}
 // clients.
 //
 func sshAPIRequestHandler(
-	config *Config,
-	psinetDatabase *PsinetDatabase,
+	support *SupportServices,
 	geoIPData GeoIPData,
 	name string,
 	requestPayload []byte) ([]byte, error) {
@@ -61,21 +67,22 @@ func sshAPIRequestHandler(
 	var params requestJSONObject
 	err := json.Unmarshal(requestPayload, &params)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(
+			fmt.Errorf("invalid payload for request name: %s: %s", name, err))
 	}
 
 	switch name {
-	case psiphon.SERVER_API_HANDSHAKE_REQUEST_NAME:
-		return handshakeAPIRequestHandler(config, psinetDatabase, geoIPData, params)
-	case psiphon.SERVER_API_CONNECTED_REQUEST_NAME:
-		return connectedAPIRequestHandler(config, geoIPData, params)
-	case psiphon.SERVER_API_STATUS_REQUEST_NAME:
-		return statusAPIRequestHandler(config, geoIPData, params)
-	case psiphon.SERVER_API_CLIENT_VERIFICATION_REQUEST_NAME:
-		return clientVerificationAPIRequestHandler(config, geoIPData, params)
+	case common.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
+		return handshakeAPIRequestHandler(support, geoIPData, params)
+	case common.PSIPHON_API_CONNECTED_REQUEST_NAME:
+		return connectedAPIRequestHandler(support, geoIPData, params)
+	case common.PSIPHON_API_STATUS_REQUEST_NAME:
+		return statusAPIRequestHandler(support, geoIPData, params)
+	case common.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME:
+		return clientVerificationAPIRequestHandler(support, geoIPData, params)
 	}
 
-	return nil, psiphon.ContextError(fmt.Errorf("invalid request name: %s", name))
+	return nil, common.ContextError(fmt.Errorf("invalid request name: %s", name))
 }
 
 // handshakeAPIRequestHandler implements the "handshake" API request.
@@ -83,22 +90,20 @@ func sshAPIRequestHandler(
 // connection; the response tells the client what homepage to open, what
 // stats to record, etc.
 func handshakeAPIRequestHandler(
-	config *Config,
-	psinetDatabase *PsinetDatabase,
+	support *SupportServices,
 	geoIPData GeoIPData,
 	params requestJSONObject) ([]byte, error) {
 
 	// Note: ignoring "known_servers" params
 
-	err := validateRequestParams(config, params, baseRequestParams)
+	err := validateRequestParams(support, params, baseRequestParams)
 	if err != nil {
-		// TODO: fail2ban?
-		return nil, psiphon.ContextError(errors.New("invalid params"))
+		return nil, common.ContextError(err)
 	}
 
 	log.WithContextFields(
 		getRequestLogFields(
-			config,
+			support,
 			"handshake",
 			geoIPData,
 			params,
@@ -117,30 +122,31 @@ func handshakeAPIRequestHandler(
 
 	// Ignoring errors as params are validated
 	sponsorID, _ := getStringRequestParam(params, "sponsor_id")
-	propagationChannelID, _ := getStringRequestParam(params, "propagation_channel_id")
 	clientVersion, _ := getStringRequestParam(params, "client_version")
 	clientPlatform, _ := getStringRequestParam(params, "client_platform")
 	clientRegion := geoIPData.Country
 
-	handshakeResponse.Homepages = psinetDatabase.GetHomepages(
-		sponsorID, clientRegion, clientPlatform)
+	// Note: no guarantee that PsinetDatabase won't reload between calls
 
-	handshakeResponse.UpgradeClientVersion = psinetDatabase.GetUpgradeClientVersion(
-		clientVersion, clientPlatform)
+	handshakeResponse.Homepages = support.PsinetDatabase.GetHomepages(
+		sponsorID, clientRegion, isMobileClientPlatform(clientPlatform))
 
-	handshakeResponse.HttpsRequestRegexes = psinetDatabase.GetHttpsRequestRegexes(
+	handshakeResponse.UpgradeClientVersion = support.PsinetDatabase.GetUpgradeClientVersion(
+		clientVersion, normalizeClientPlatform(clientPlatform))
+
+	handshakeResponse.HttpsRequestRegexes = support.PsinetDatabase.GetHttpsRequestRegexes(
 		sponsorID)
 
-	handshakeResponse.EncodedServerList = psinetDatabase.DiscoverServers(
-		propagationChannelID, geoIPData.DiscoveryValue)
+	handshakeResponse.EncodedServerList = support.PsinetDatabase.DiscoverServers(
+		geoIPData.DiscoveryValue)
 
 	handshakeResponse.ClientRegion = clientRegion
 
-	handshakeResponse.ServerTimestamp = psiphon.GetCurrentTimestamp()
+	handshakeResponse.ServerTimestamp = common.GetCurrentTimestamp()
 
 	responsePayload, err := json.Marshal(handshakeResponse)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return responsePayload, nil
@@ -158,17 +164,18 @@ var connectedRequestParams = append(
 // which should be a connected_timestamp output from a previous connected
 // response, is used to calculate unique user stats.
 func connectedAPIRequestHandler(
-	config *Config, geoIPData GeoIPData, params requestJSONObject) ([]byte, error) {
+	support *SupportServices,
+	geoIPData GeoIPData,
+	params requestJSONObject) ([]byte, error) {
 
-	err := validateRequestParams(config, params, connectedRequestParams)
+	err := validateRequestParams(support, params, connectedRequestParams)
 	if err != nil {
-		// TODO: fail2ban?
-		return nil, psiphon.ContextError(errors.New("invalid params"))
+		return nil, common.ContextError(err)
 	}
 
 	log.WithContextFields(
 		getRequestLogFields(
-			config,
+			support,
 			"connected",
 			geoIPData,
 			params,
@@ -179,11 +186,11 @@ func connectedAPIRequestHandler(
 	}
 
 	connectedResponse.ConnectedTimestamp =
-		psiphon.TruncateTimestampToHour(psiphon.GetCurrentTimestamp())
+		common.TruncateTimestampToHour(common.GetCurrentTimestamp())
 
 	responsePayload, err := json.Marshal(connectedResponse)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return responsePayload, nil
@@ -202,27 +209,28 @@ var statusRequestParams = append(
 // any string is accepted (regex transform may result in arbitrary
 // string). Stats processor must handle this input with care.
 func statusAPIRequestHandler(
-	config *Config, geoIPData GeoIPData, params requestJSONObject) ([]byte, error) {
+	support *SupportServices,
+	geoIPData GeoIPData,
+	params requestJSONObject) ([]byte, error) {
 
-	err := validateRequestParams(config, params, statusRequestParams)
+	err := validateRequestParams(support, params, statusRequestParams)
 	if err != nil {
-		// TODO: fail2ban?
-		return nil, psiphon.ContextError(errors.New("invalid params"))
+		return nil, common.ContextError(err)
 	}
 
 	statusData, err := getJSONObjectRequestParam(params, "statusData")
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// Overall bytes transferred stats
 
 	bytesTransferred, err := getInt64RequestParam(statusData, "bytes_transferred")
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	bytesTransferredFields := getRequestLogFields(
-		config, "bytes_transferred", geoIPData, params, statusRequestParams)
+		support, "bytes_transferred", geoIPData, params, statusRequestParams)
 	bytesTransferredFields["bytes"] = bytesTransferred
 	log.WithContextFields(bytesTransferredFields).Info("API event")
 
@@ -233,10 +241,10 @@ func statusAPIRequestHandler(
 
 		hostBytes, err := getMapStringInt64RequestParam(statusData, "host_bytes")
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		domainBytesFields := getRequestLogFields(
-			config, "domain_bytes", geoIPData, params, statusRequestParams)
+			support, "domain_bytes", geoIPData, params, statusRequestParams)
 		for domain, bytes := range hostBytes {
 			domainBytesFields["domain"] = domain
 			domainBytesFields["bytes"] = bytes
@@ -251,56 +259,56 @@ func statusAPIRequestHandler(
 
 		tunnelStats, err := getJSONObjectArrayRequestParam(statusData, "tunnel_stats")
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		sessionFields := getRequestLogFields(
-			config, "session", geoIPData, params, statusRequestParams)
+			support, "session", geoIPData, params, statusRequestParams)
 		for _, tunnelStat := range tunnelStats {
 
 			sessionID, err := getStringRequestParam(tunnelStat, "session_id")
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			sessionFields["session_id"] = sessionID
 
 			tunnelNumber, err := getInt64RequestParam(tunnelStat, "tunnel_number")
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			sessionFields["tunnel_number"] = tunnelNumber
 
 			tunnelServerIPAddress, err := getStringRequestParam(tunnelStat, "tunnel_server_ip_address")
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			sessionFields["tunnel_server_ip_address"] = tunnelServerIPAddress
 
 			serverHandshakeTimestamp, err := getStringRequestParam(tunnelStat, "server_handshake_timestamp")
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			sessionFields["server_handshake_timestamp"] = serverHandshakeTimestamp
 
 			strDuration, err := getStringRequestParam(tunnelStat, "duration")
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			duration, err := strconv.ParseInt(strDuration, 10, 64)
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			// Client reports durations in nanoseconds; divide to get to milliseconds
 			sessionFields["duration"] = duration / 1000000
 
 			totalBytesSent, err := getInt64RequestParam(tunnelStat, "total_bytes_sent")
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			sessionFields["total_bytes_sent"] = totalBytesSent
 
 			totalBytesReceived, err := getInt64RequestParam(tunnelStat, "total_bytes_received")
 			if err != nil {
-				return nil, psiphon.ContextError(err)
+				return nil, common.ContextError(err)
 			}
 			sessionFields["total_bytes_received"] = totalBytesReceived
 
@@ -316,33 +324,84 @@ func statusAPIRequestHandler(
 // verification request once per tunnel connection. The payload
 // attests that client is a legitimate Psiphon client.
 func clientVerificationAPIRequestHandler(
-	config *Config, geoIPData GeoIPData, params requestJSONObject) ([]byte, error) {
+	support *SupportServices,
+	geoIPData GeoIPData,
+	params requestJSONObject) ([]byte, error) {
 
-	err := validateRequestParams(config, params, baseRequestParams)
+	err := validateRequestParams(support, params, baseRequestParams)
 	if err != nil {
-		// TODO: fail2ban?
-		return nil, psiphon.ContextError(errors.New("invalid params"))
+		return nil, common.ContextError(err)
 	}
 
-	// TODO: implement
+	// Ignoring error as params are validated
+	clientPlatform, _ := getStringRequestParam(params, "client_platform")
 
-	return make([]byte, 0), nil
+	// Client sends empty payload to receive TTL
+	// NOTE: these events are not logged currently
+	if params["verificationData"] == nil {
+		if CLIENT_VERIFICATION_REQUIRED {
+
+			var clientVerificationResponse struct {
+				ClientVerificationTTLSeconds int `json:"client_verification_ttl_seconds"`
+			}
+			clientVerificationResponse.ClientVerificationTTLSeconds = CLIENT_VERIFICATION_TTL_SECONDS
+
+			responsePayload, err := json.Marshal(clientVerificationResponse)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+
+			return responsePayload, nil
+		} else {
+			return make([]byte, 0), nil
+		}
+	} else {
+		verificationData, err := getJSONObjectRequestParam(params, "verificationData")
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
+		logFields := getRequestLogFields(
+			support,
+			"client_verification",
+			geoIPData,
+			params,
+			baseRequestParams)
+
+		var verified bool
+		var safetyNetCheckLogs LogFields
+		switch normalizeClientPlatform(clientPlatform) {
+		case CLIENT_PLATFORM_ANDROID:
+			verified, safetyNetCheckLogs = verifySafetyNetPayload(verificationData)
+			logFields["safetynet_check"] = safetyNetCheckLogs
+		}
+
+		log.WithContextFields(logFields).Info("API event")
+
+		if verified {
+			// TODO: change throttling treatment
+		}
+		return make([]byte, 0), nil
+	}
 }
 
 type requestParamSpec struct {
 	name      string
-	validator func(*Config, string) bool
-	flags     int32
+	validator func(*SupportServices, string) bool
+	flags     uint32
 }
 
 const (
 	requestParamOptional  = 1
 	requestParamNotLogged = 2
+	requestParamArray     = 4
 )
 
 // baseRequestParams is the list of required and optional
 // request parameters; derived from COMMON_INPUTS and
 // OPTIONAL_COMMON_INPUTS in psi_web.
+// Each param is expected to be a string, unless requestParamArray
+// is specified, in which case an array of string is expected.
 var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"server_secret", isServerSecret, requestParamNotLogged},
 	requestParamSpec{"client_session_id", isHexDigits, requestParamOptional},
@@ -353,6 +412,8 @@ var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"relay_protocol", isRelayProtocol, 0},
 	requestParamSpec{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
 	requestParamSpec{"device_region", isRegionCode, requestParamOptional},
+	requestParamSpec{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
+	requestParamSpec{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
 	requestParamSpec{"meek_dial_address", isDialAddress, requestParamOptional},
 	requestParamSpec{"meek_resolved_ip_address", isIPAddress, requestParamOptional},
 	requestParamSpec{"meek_sni_server_name", isDomain, requestParamOptional},
@@ -364,7 +425,7 @@ var baseRequestParams = []requestParamSpec{
 }
 
 func validateRequestParams(
-	config *Config,
+	support *SupportServices,
 	params requestJSONObject,
 	expectedParams []requestParamSpec) error {
 
@@ -374,27 +435,63 @@ func validateRequestParams(
 			if expectedParam.flags&requestParamOptional != 0 {
 				continue
 			}
-			return psiphon.ContextError(
+			return common.ContextError(
 				fmt.Errorf("missing param: %s", expectedParam.name))
 		}
-		strValue, ok := value.(string)
-		if !ok {
-			return psiphon.ContextError(
-				fmt.Errorf("unexpected param type: %s", expectedParam.name))
+		var err error
+		if expectedParam.flags&requestParamArray != 0 {
+			err = validateStringArrayRequestParam(support, expectedParam, value)
+		} else {
+			err = validateStringRequestParam(support, expectedParam, value)
 		}
-		if !expectedParam.validator(config, strValue) {
-			return psiphon.ContextError(
-				fmt.Errorf("invalid param: %s", expectedParam.name))
+		if err != nil {
+			return common.ContextError(err)
 		}
 	}
 
 	return nil
 }
 
+func validateStringRequestParam(
+	support *SupportServices,
+	expectedParam requestParamSpec,
+	value interface{}) error {
+
+	strValue, ok := value.(string)
+	if !ok {
+		return common.ContextError(
+			fmt.Errorf("unexpected string param type: %s", expectedParam.name))
+	}
+	if !expectedParam.validator(support, strValue) {
+		return common.ContextError(
+			fmt.Errorf("invalid param: %s", expectedParam.name))
+	}
+	return nil
+}
+
+func validateStringArrayRequestParam(
+	support *SupportServices,
+	expectedParam requestParamSpec,
+	value interface{}) error {
+
+	arrayValue, ok := value.([]interface{})
+	if !ok {
+		return common.ContextError(
+			fmt.Errorf("unexpected string param type: %s", expectedParam.name))
+	}
+	for _, value := range arrayValue {
+		err := validateStringRequestParam(support, expectedParam, value)
+		if err != nil {
+			return common.ContextError(err)
+		}
+	}
+	return nil
+}
+
 // getRequestLogFields makes LogFields to log the API event following
 // the legacy psi_web and current ELK naming conventions.
 func getRequestLogFields(
-	config *Config,
+	support *SupportServices,
 	eventName string,
 	geoIPData GeoIPData,
 	params requestJSONObject,
@@ -403,7 +500,7 @@ func getRequestLogFields(
 	logFields := make(LogFields)
 
 	logFields["event_name"] = eventName
-	logFields["host_id"] = config.HostID
+	logFields["host_id"] = support.Config.HostID
 
 	// In psi_web, the space replacement was done to accommodate space
 	// delimited logging, which is no longer required; we retain the
@@ -430,34 +527,45 @@ func getRequestLogFields(
 				continue
 			}
 		}
-		strValue, ok := value.(string)
-		if !ok {
+
+		switch v := value.(type) {
+		case string:
+			strValue := v
+
+			// Special cases:
+			// - Number fields are encoded as integer types.
+			// - For ELK performance we record these domain-or-IP
+			//   fields as one of two different values based on type;
+			//   we also omit port from host:port fields for now.
+			switch expectedParam.name {
+			case "client_version":
+				intValue, _ := strconv.Atoi(strValue)
+				logFields[expectedParam.name] = intValue
+			case "meek_dial_address":
+				host, _, _ := net.SplitHostPort(strValue)
+				if isIPAddress(support, host) {
+					logFields["meek_dial_ip_address"] = host
+				} else {
+					logFields["meek_dial_domain"] = host
+				}
+			case "meek_host_header":
+				host, _, _ := net.SplitHostPort(strValue)
+				logFields[expectedParam.name] = host
+			case "upstream_proxy_type":
+				// Submitted value could be e.g., "SOCKS5" or "socks5"; log lowercase
+				logFields[expectedParam.name] = strings.ToLower(strValue)
+			default:
+				logFields[expectedParam.name] = strValue
+			}
+
+		case []interface{}:
+			// Note: actually validated as an array of strings
+			logFields[expectedParam.name] = v
+
+		default:
 			// This type assertion should be checked already in
 			// validateRequestParams, so failure is unexpected.
 			continue
-		}
-
-		// Special cases:
-		// - Number fields are encoded as integer types.
-		// - For ELK performance we record these domain-or-IP
-		//   fields as one of two different values based on type;
-		//   we also omit port from host:port fields for now.
-		switch expectedParam.name {
-		case "client_version":
-			intValue, _ := strconv.Atoi(strValue)
-			logFields[expectedParam.name] = intValue
-		case "meek_dial_address":
-			host, _, _ := net.SplitHostPort(strValue)
-			if isIPAddress(config, host) {
-				logFields["meek_dial_ip_address"] = host
-			} else {
-				logFields["meek_dial_domain"] = host
-			}
-		case "meek_host_header":
-			host, _, _ := net.SplitHostPort(strValue)
-			logFields[expectedParam.name] = host
-		default:
-			logFields[expectedParam.name] = strValue
 		}
 	}
 
@@ -466,52 +574,53 @@ func getRequestLogFields(
 
 func getStringRequestParam(params requestJSONObject, name string) (string, error) {
 	if params[name] == nil {
-		return "", psiphon.ContextError(fmt.Errorf("missing param: %s", name))
+		return "", common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
 	value, ok := params[name].(string)
 	if !ok {
-		return "", psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
+		return "", common.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
 	return value, nil
 }
 
 func getInt64RequestParam(params requestJSONObject, name string) (int64, error) {
 	if params[name] == nil {
-		return 0, psiphon.ContextError(fmt.Errorf("missing param: %s", name))
+		return 0, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
 	value, ok := params[name].(float64)
 	if !ok {
-		return 0, psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
+		return 0, common.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
 	return int64(value), nil
 }
 
 func getJSONObjectRequestParam(params requestJSONObject, name string) (requestJSONObject, error) {
 	if params[name] == nil {
-		return nil, psiphon.ContextError(fmt.Errorf("missing param: %s", name))
+		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
-	value, ok := params[name].(requestJSONObject)
+	// Note: generic unmarshal of JSON produces map[string]interface{}, not requestJSONObject
+	value, ok := params[name].(map[string]interface{})
 	if !ok {
-		return nil, psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
+		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
-	return value, nil
+	return requestJSONObject(value), nil
 }
 
 func getJSONObjectArrayRequestParam(params requestJSONObject, name string) ([]requestJSONObject, error) {
 	if params[name] == nil {
-		return nil, psiphon.ContextError(fmt.Errorf("missing param: %s", name))
+		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
 	value, ok := params[name].([]interface{})
 	if !ok {
-		return nil, psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
+		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
 
 	result := make([]requestJSONObject, len(value))
 	for i, item := range value {
-		// TODO: can't use requestJSONObject type?
+		// Note: generic unmarshal of JSON produces map[string]interface{}, not requestJSONObject
 		resultItem, ok := item.(map[string]interface{})
 		if !ok {
-			return nil, psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
+			return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
 		}
 		result[i] = requestJSONObject(resultItem)
 	}
@@ -521,19 +630,19 @@ func getJSONObjectArrayRequestParam(params requestJSONObject, name string) ([]re
 
 func getMapStringInt64RequestParam(params requestJSONObject, name string) (map[string]int64, error) {
 	if params[name] == nil {
-		return nil, psiphon.ContextError(fmt.Errorf("missing param: %s", name))
+		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
 	// TODO: can't use requestJSONObject type?
 	value, ok := params[name].(map[string]interface{})
 	if !ok {
-		return nil, psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
+		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
 
 	result := make(map[string]int64)
 	for k, v := range value {
 		numValue, ok := v.(float64)
 		if !ok {
-			return nil, psiphon.ContextError(fmt.Errorf("invalid param: %s", name))
+			return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
 		}
 		result[k] = int64(numValue)
 	}
@@ -541,42 +650,67 @@ func getMapStringInt64RequestParam(params requestJSONObject, name string) (map[s
 	return result, nil
 }
 
-// Input validators follow the legacy validations rules in psi_web.
+// Normalize reported client platform. Android clients, for example, report
+// OS version, rooted status, and Google Play build status in the clientPlatform
+// string along with "Android".
+func normalizeClientPlatform(clientPlatform string) string {
 
-func isServerSecret(config *Config, value string) bool {
-	return subtle.ConstantTimeCompare(
-		[]byte(value),
-		[]byte(config.WebServerSecret)) == 1
+	if strings.Contains(strings.ToLower(clientPlatform), strings.ToLower(CLIENT_PLATFORM_ANDROID)) {
+		return CLIENT_PLATFORM_ANDROID
+	}
+
+	return CLIENT_PLATFORM_WINDOWS
 }
 
-func isHexDigits(_ *Config, value string) bool {
+func isAnyString(support *SupportServices, value string) bool {
+	return true
+}
+
+func isMobileClientPlatform(clientPlatform string) bool {
+	return normalizeClientPlatform(clientPlatform) == CLIENT_PLATFORM_ANDROID
+}
+
+// Input validators follow the legacy validations rules in psi_web.
+
+func isServerSecret(support *SupportServices, value string) bool {
+	return subtle.ConstantTimeCompare(
+		[]byte(value),
+		[]byte(support.Config.WebServerSecret)) == 1
+}
+
+func isHexDigits(_ *SupportServices, value string) bool {
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		return !unicode.Is(unicode.ASCII_Hex_Digit, c)
 	})
 }
 
-func isDigits(_ *Config, value string) bool {
+func isDigits(_ *SupportServices, value string) bool {
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		return c < '0' || c > '9'
 	})
 }
 
-func isClientPlatform(_ *Config, value string) bool {
+func isClientPlatform(_ *SupportServices, value string) bool {
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		// Note: stricter than psi_web's Python string.whitespace
 		return unicode.Is(unicode.White_Space, c)
 	})
 }
 
-func isRelayProtocol(_ *Config, value string) bool {
-	return psiphon.Contains(psiphon.SupportedTunnelProtocols, value)
+func isRelayProtocol(_ *SupportServices, value string) bool {
+	return common.Contains(common.SupportedTunnelProtocols, value)
 }
 
-func isBooleanFlag(_ *Config, value string) bool {
+func isBooleanFlag(_ *SupportServices, value string) bool {
 	return value == "0" || value == "1"
 }
 
-func isRegionCode(_ *Config, value string) bool {
+func isUpstreamProxyType(_ *SupportServices, value string) bool {
+	value = strings.ToLower(value)
+	return value == "http" || value == "socks5" || value == "socks4a"
+}
+
+func isRegionCode(_ *SupportServices, value string) bool {
 	if len(value) != 2 {
 		return false
 	}
@@ -585,16 +719,16 @@ func isRegionCode(_ *Config, value string) bool {
 	})
 }
 
-func isDialAddress(config *Config, value string) bool {
+func isDialAddress(support *SupportServices, value string) bool {
 	// "<host>:<port>", where <host> is a domain or IP address
 	parts := strings.Split(value, ":")
 	if len(parts) != 2 {
 		return false
 	}
-	if !isIPAddress(config, parts[0]) && !isDomain(config, parts[0]) {
+	if !isIPAddress(support, parts[0]) && !isDomain(support, parts[0]) {
 		return false
 	}
-	if !isDigits(config, parts[1]) {
+	if !isDigits(support, parts[1]) {
 		return false
 	}
 	port, err := strconv.Atoi(parts[1])
@@ -604,13 +738,13 @@ func isDialAddress(config *Config, value string) bool {
 	return port > 0 && port < 65536
 }
 
-func isIPAddress(_ *Config, value string) bool {
+func isIPAddress(_ *SupportServices, value string) bool {
 	return net.ParseIP(value) != nil
 }
 
 var isDomainRegex = regexp.MustCompile("[a-zA-Z\\d-]{1,63}$")
 
-func isDomain(_ *Config, value string) bool {
+func isDomain(_ *SupportServices, value string) bool {
 
 	// From: http://stackoverflow.com/questions/2532053/validate-a-hostname-string
 	//
@@ -637,25 +771,25 @@ func isDomain(_ *Config, value string) bool {
 	return true
 }
 
-func isHostHeader(config *Config, value string) bool {
+func isHostHeader(support *SupportServices, value string) bool {
 	// "<host>:<port>", where <host> is a domain or IP address and ":<port>" is optional
 	if strings.Contains(value, ":") {
-		return isDialAddress(config, value)
+		return isDialAddress(support, value)
 	}
-	return isIPAddress(config, value) || isDomain(config, value)
+	return isIPAddress(support, value) || isDomain(support, value)
 }
 
-func isServerEntrySource(_ *Config, value string) bool {
-	return psiphon.Contains(psiphon.SupportedServerEntrySources, value)
+func isServerEntrySource(_ *SupportServices, value string) bool {
+	return common.Contains(common.SupportedServerEntrySources, value)
 }
 
 var isISO8601DateRegex = regexp.MustCompile(
 	"(?P<year>[0-9]{4})-(?P<month>[0-9]{1,2})-(?P<day>[0-9]{1,2})T(?P<hour>[0-9]{2}):(?P<minute>[0-9]{2}):(?P<second>[0-9]{2})(\\.(?P<fraction>[0-9]+))?(?P<timezone>Z|(([-+])([0-9]{2}):([0-9]{2})))")
 
-func isISO8601Date(_ *Config, value string) bool {
+func isISO8601Date(_ *SupportServices, value string) bool {
 	return isISO8601DateRegex.Match([]byte(value))
 }
 
-func isLastConnected(config *Config, value string) bool {
-	return value == "None" || value == "Unknown" || isISO8601Date(config, value)
+func isLastConnected(support *SupportServices, value string) bool {
+	return value == "None" || value == "Unknown" || isISO8601Date(support, value)
 }

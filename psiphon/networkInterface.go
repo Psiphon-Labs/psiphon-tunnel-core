@@ -22,6 +22,8 @@ package psiphon
 import (
 	"errors"
 	"net"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // Take in an interface name ("lo", "eth0", "any") passed from either
@@ -41,12 +43,12 @@ func GetInterfaceIPAddress(listenInterface string) (string, error) {
 	} else {
 		availableInterfaces, err := net.InterfaceByName(listenInterface)
 		if err != nil {
-			return "", ContextError(err)
+			return "", common.ContextError(err)
 		}
 
 		addrs, err := availableInterfaces.Addrs()
 		if err != nil {
-			return "", ContextError(err)
+			return "", common.ContextError(err)
 		}
 		for _, addr := range addrs {
 			iptype := addr.(*net.IPNet)
@@ -62,6 +64,6 @@ func GetInterfaceIPAddress(listenInterface string) (string, error) {
 		}
 	}
 
-	return "", ContextError(errors.New("Could not find IP address of specified interface"))
+	return "", common.ContextError(errors.New("Could not find IP address of specified interface"))
 
 }

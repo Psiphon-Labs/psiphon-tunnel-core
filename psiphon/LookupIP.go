@@ -28,6 +28,8 @@ import (
 	"os"
 	"syscall"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // LookupIP resolves a hostname. When BindToDevice is not required, it
@@ -69,19 +71,19 @@ func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, e
 
 	socketFd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, 0)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	defer syscall.Close(socketFd)
 
 	err = config.DeviceBinder.BindToDevice(socketFd)
 	if err != nil {
-		return nil, ContextError(fmt.Errorf("BindToDevice failed: %s", err))
+		return nil, common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))
 	}
 
 	// config.DnsServerGetter.GetDnsServers() must return IP addresses
 	ipAddr = net.ParseIP(dnsServer)
 	if ipAddr == nil {
-		return nil, ContextError(errors.New("invalid IP address"))
+		return nil, common.ContextError(errors.New("invalid IP address"))
 	}
 
 	// TODO: IPv6 support
@@ -91,7 +93,7 @@ func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, e
 	// Note: no timeout or interrupt for this connect, as it's a datagram socket
 	err = syscall.Connect(socketFd, &sockAddr)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// Convert the syscall socket to a net.Conn, for use in the dns package
@@ -99,7 +101,7 @@ func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, e
 	defer file.Close()
 	conn, err := net.FileConn(file)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// Set DNS query timeouts, using the ConnectTimeout from the overall Dial

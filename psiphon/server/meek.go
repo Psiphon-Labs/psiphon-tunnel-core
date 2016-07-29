@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -44,25 +45,27 @@ import (
 //
 // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/default/go/meek-client/meek-client.go
 
-// Protocol version 1 clients can handle arbitrary length response bodies. Older clients
-// report no version number and expect at most 64K response bodies.
-const MEEK_PROTOCOL_VERSION_1 = 1
+const (
 
-// Protocol version 2 clients initiate a session by sending a encrypted and obfuscated meek
-// cookie with their initial HTTP request. Connection information is contained within the
-// encrypted cookie payload. The server inspects the cookie and establishes a new session and
-// returns a new random session ID back to client via Set-Cookie header. The client uses this
-// session ID on all subsequent requests for the remainder of the session.
-const MEEK_PROTOCOL_VERSION_2 = 2
+	// Protocol version 1 clients can handle arbitrary length response bodies. Older clients
+	// report no version number and expect at most 64K response bodies.
+	MEEK_PROTOCOL_VERSION_1 = 1
 
-const MEEK_MAX_PAYLOAD_LENGTH = 0x10000
-const MEEK_TURN_AROUND_TIMEOUT = 20 * time.Millisecond
-const MEEK_EXTENDED_TURN_AROUND_TIMEOUT = 100 * time.Millisecond
-const MEEK_MAX_SESSION_STALENESS = 45 * time.Second
-const MEEK_HTTP_CLIENT_READ_TIMEOUT = 45 * time.Second
-const MEEK_HTTP_CLIENT_WRITE_TIMEOUT = 10 * time.Second
-const MEEK_MIN_SESSION_ID_LENGTH = 8
-const MEEK_MAX_SESSION_ID_LENGTH = 20
+	// Protocol version 2 clients initiate a session by sending a encrypted and obfuscated meek
+	// cookie with their initial HTTP request. Connection information is contained within the
+	// encrypted cookie payload. The server inspects the cookie and establishes a new session and
+	// returns a new random session ID back to client via Set-Cookie header. The client uses this
+	// session ID on all subsequent requests for the remainder of the session.
+	MEEK_PROTOCOL_VERSION_2 = 2
+
+	MEEK_MAX_PAYLOAD_LENGTH           = 0x10000
+	MEEK_TURN_AROUND_TIMEOUT          = 20 * time.Millisecond
+	MEEK_EXTENDED_TURN_AROUND_TIMEOUT = 100 * time.Millisecond
+	MEEK_MAX_SESSION_STALENESS        = 45 * time.Second
+	MEEK_HTTP_CLIENT_IO_TIMEOUT       = 45 * time.Second
+	MEEK_MIN_SESSION_ID_LENGTH        = 8
+	MEEK_MAX_SESSION_ID_LENGTH        = 20
+)
 
 // MeekServer implements the meek protocol, which tunnels TCP traffic (in the case of Psiphon,
 // Obfusated SSH traffic) over HTTP. Meek may be fronted (through a CDN) or direct and may be
@@ -76,11 +79,11 @@ const MEEK_MAX_SESSION_ID_LENGTH = 20
 // HTTP payload traffic for a given session into net.Conn conforming Read()s and Write()s via
 // the meekConn struct.
 type MeekServer struct {
-	config        *Config
+	support       *SupportServices
 	listener      net.Listener
 	tlsConfig     *tls.Config
 	clientHandler func(clientConn net.Conn)
-	openConns     *psiphon.Conns
+	openConns     *common.Conns
 	stopBroadcast <-chan struct{}
 	sessionsLock  sync.RWMutex
 	sessions      map[string]*meekSession
@@ -88,25 +91,25 @@ type MeekServer struct {
 
 // NewMeekServer initializes a new meek server.
 func NewMeekServer(
-	config *Config,
+	support *SupportServices,
 	listener net.Listener,
 	useTLS bool,
 	clientHandler func(clientConn net.Conn),
 	stopBroadcast <-chan struct{}) (*MeekServer, error) {
 
 	meekServer := &MeekServer{
-		config:        config,
+		support:       support,
 		listener:      listener,
 		clientHandler: clientHandler,
-		openConns:     new(psiphon.Conns),
+		openConns:     new(common.Conns),
 		stopBroadcast: stopBroadcast,
 		sessions:      make(map[string]*meekSession),
 	}
 
 	if useTLS {
-		tlsConfig, err := makeMeekTLSConfig(config)
+		tlsConfig, err := makeMeekTLSConfig(support)
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		meekServer.tlsConfig = tlsConfig
 	}
@@ -144,9 +147,17 @@ func (server *MeekServer) Run() error {
 
 	// Serve HTTP or HTTPS
 
+	// Notes:
+	// - WriteTimeout may include time awaiting request, as per:
+	//   https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts
+	// - Legacy meek-server wrapped each client HTTP connection with an explict idle
+	//   timeout net.Conn and didn't use http.Server timeouts. We could do the same
+	//   here (use ActivityMonitoredConn) but the stock http.Server timeouts should
+	//   now be sufficient.
+
 	httpServer := &http.Server{
-		ReadTimeout:  MEEK_HTTP_CLIENT_READ_TIMEOUT,
-		WriteTimeout: MEEK_HTTP_CLIENT_WRITE_TIMEOUT,
+		ReadTimeout:  MEEK_HTTP_CLIENT_IO_TIMEOUT,
+		WriteTimeout: MEEK_HTTP_CLIENT_IO_TIMEOUT,
 		Handler:      server,
 		ConnState:    server.httpConnStateCallback,
 
@@ -158,7 +169,7 @@ func (server *MeekServer) Run() error {
 	var err error
 	if server.tlsConfig != nil {
 		httpServer.TLSConfig = server.tlsConfig
-		httpsServer := psiphon.HTTPSServer{Server: *httpServer}
+		httpsServer := HTTPSServer{Server: *httpServer}
 		err = httpsServer.ServeTLS(server.listener)
 	} else {
 		err = httpServer.Serve(server.listener)
@@ -199,8 +210,8 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		return
 	}
 
-	if len(server.config.MeekProhibitedHeaders) > 0 {
-		for _, header := range server.config.MeekProhibitedHeaders {
+	if len(server.support.Config.MeekProhibitedHeaders) > 0 {
+		for _, header := range server.support.Config.MeekProhibitedHeaders {
 			value := request.Header.Get(header)
 			if header != "" {
 				log.WithContextFields(LogFields{
@@ -284,9 +295,9 @@ func (server *MeekServer) getSession(
 	// The session is new (or expired). Treat the cookie value as a new meek
 	// cookie, extract the payload, and create a new session.
 
-	payloadJSON, err := getMeekCookiePayload(server.config, meekCookie.Value)
+	payloadJSON, err := getMeekCookiePayload(server.support, meekCookie.Value)
 	if err != nil {
-		return "", nil, psiphon.ContextError(err)
+		return "", nil, common.ContextError(err)
 	}
 
 	// Note: this meek server ignores all but Version MeekProtocolVersion;
@@ -299,25 +310,25 @@ func (server *MeekServer) getSession(
 
 	err = json.Unmarshal(payloadJSON, &clientSessionData)
 	if err != nil {
-		return "", nil, psiphon.ContextError(err)
+		return "", nil, common.ContextError(err)
 	}
 
 	// Determine the client remote address, which is used for geolocation
-	// and stats. When an intermediate proxy of CDN is in use, we may be
+	// and stats. When an intermediate proxy or CDN is in use, we may be
 	// able to determine the original client address by inspecting HTTP
 	// headers such as X-Forwarded-For.
 
 	clientIP := strings.Split(request.RemoteAddr, ":")[0]
 
-	if len(server.config.MeekProxyForwardedForHeaders) > 0 {
-		for _, header := range server.config.MeekProxyForwardedForHeaders {
+	if len(server.support.Config.MeekProxyForwardedForHeaders) > 0 {
+		for _, header := range server.support.Config.MeekProxyForwardedForHeaders {
 			value := request.Header.Get(header)
 			if len(value) > 0 {
 				// Some headers, such as X-Forwarded-For, are a comma-separated
 				// list of IPs (each proxy in a chain). The first IP should be
 				// the client IP.
 				proxyClientIP := strings.Split(header, ",")[0]
-				if net.ParseIP(clientIP) != nil {
+				if net.ParseIP(proxyClientIP) != nil {
 					clientIP = proxyClientIP
 					break
 				}
@@ -331,7 +342,7 @@ func (server *MeekServer) getSession(
 	// meek conn with a useful value to return when the tunnel
 	// server calls conn.RemoteAddr() to get the client's IP address.
 
-	// Assumes clientIP is a value IP address; the port value is a stub
+	// Assumes clientIP is a valid IP address; the port value is a stub
 	// and is expected to be ignored.
 	clientConn := newMeekConn(
 		&net.TCPAddr{
@@ -358,7 +369,7 @@ func (server *MeekServer) getSession(
 	if clientSessionData.MeekProtocolVersion >= MEEK_PROTOCOL_VERSION_2 {
 		sessionID, err = makeMeekSessionID()
 		if err != nil {
-			return "", nil, psiphon.ContextError(err)
+			return "", nil, common.ContextError(err)
 		}
 	}
 
@@ -432,10 +443,10 @@ func (server *MeekServer) terminateConnection(
 }
 
 type meekSession struct {
+	lastActivity        int64
 	clientConn          *meekConn
 	meekProtocolVersion int
 	sessionIDSent       bool
-	lastActivity        int64
 }
 
 func (session *meekSession) touch() {
@@ -451,18 +462,18 @@ func (session *meekSession) expired() bool {
 // Currently, this config is optimized for fronted meek where the nature
 // of the connection is non-circumvention; it's optimized for performance
 // assuming the peer is an uncensored CDN.
-func makeMeekTLSConfig(config *Config) (*tls.Config, error) {
+func makeMeekTLSConfig(support *SupportServices) (*tls.Config, error) {
 
 	certificate, privateKey, err := GenerateWebServerCertificate(
-		config.MeekCertificateCommonName)
+		support.Config.MeekCertificateCommonName)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	tlsCertificate, err := tls.X509KeyPair(
 		[]byte(certificate), []byte(privateKey))
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return &tls.Config{
@@ -501,10 +512,10 @@ func makeMeekTLSConfig(config *Config) (*tls.Config, error) {
 
 // getMeekCookiePayload extracts the payload from a meek cookie. The cookie
 // paylod is base64 encoded, obfuscated, and NaCl encrypted.
-func getMeekCookiePayload(config *Config, cookieValue string) ([]byte, error) {
+func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte, error) {
 	decodedValue, err := base64.StdEncoding.DecodeString(cookieValue)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// The data consists of an obfuscated seed message prepended
@@ -516,14 +527,14 @@ func getMeekCookiePayload(config *Config, cookieValue string) ([]byte, error) {
 
 	obfuscator, err := psiphon.NewServerObfuscator(
 		reader,
-		&psiphon.ObfuscatorConfig{Keyword: config.MeekObfuscatedKey})
+		&psiphon.ObfuscatorConfig{Keyword: support.Config.MeekObfuscatedKey})
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	offset, err := reader.Seek(0, 1)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	encryptedPayload := decodedValue[offset:]
 
@@ -532,20 +543,21 @@ func getMeekCookiePayload(config *Config, cookieValue string) ([]byte, error) {
 	var nonce [24]byte
 	var privateKey, ephemeralPublicKey [32]byte
 
-	decodedPrivateKey, err := base64.StdEncoding.DecodeString(config.MeekCookieEncryptionPrivateKey)
+	decodedPrivateKey, err := base64.StdEncoding.DecodeString(
+		support.Config.MeekCookieEncryptionPrivateKey)
 	if err != nil {
-		return nil, psiphon.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	copy(privateKey[:], decodedPrivateKey)
 
 	if len(encryptedPayload) < 32 {
-		return nil, psiphon.ContextError(errors.New("unexpected encrypted payload size"))
+		return nil, common.ContextError(errors.New("unexpected encrypted payload size"))
 	}
 	copy(ephemeralPublicKey[0:32], encryptedPayload[0:32])
 
 	payload, ok := box.Open(nil, encryptedPayload[32:], &nonce, &ephemeralPublicKey, &privateKey)
 	if !ok {
-		return nil, psiphon.ContextError(errors.New("open box failed"))
+		return nil, common.ContextError(errors.New("open box failed"))
 	}
 
 	return payload, nil
@@ -555,14 +567,14 @@ func getMeekCookiePayload(config *Config, cookieValue string) ([]byte, error) {
 // frustrate traffic analysis of both plaintext and TLS meek traffic.
 func makeMeekSessionID() (string, error) {
 	size := MEEK_MIN_SESSION_ID_LENGTH
-	n, err := psiphon.MakeSecureRandomInt(MEEK_MAX_SESSION_ID_LENGTH - MEEK_MIN_SESSION_ID_LENGTH)
+	n, err := common.MakeSecureRandomInt(MEEK_MAX_SESSION_ID_LENGTH - MEEK_MIN_SESSION_ID_LENGTH)
 	if err != nil {
-		return "", psiphon.ContextError(err)
+		return "", common.ContextError(err)
 	}
 	size += n
-	sessionID, err := psiphon.MakeRandomStringBase64(size)
+	sessionID, err := common.MakeRandomStringBase64(size)
 	if err != nil {
-		return "", psiphon.ContextError(err)
+		return "", common.ContextError(err)
 	}
 	return sessionID, nil
 }
@@ -763,17 +775,26 @@ func (conn *meekConn) RemoteAddr() net.Addr {
 	return conn.remoteAddr
 }
 
-// Stub implementation of net.Conn.SetDeadline
+// SetDeadline is not a true implementation of net.Conn.SetDeadline. It
+// merely checks that the requested timeout exceeds the MEEK_MAX_SESSION_STALENESS
+// period. When it does, and the session is idle, the meekConn Read/Write will
+// be interrupted and return io.EOF (not a timeout error) before the deadline.
+// In other words, this conn will approximate the desired functionality of
+// timing out on idle on or before the requested deadline.
 func (conn *meekConn) SetDeadline(t time.Time) error {
-	return psiphon.ContextError(errors.New("not supported"))
+	// Overhead: nanoseconds (https://blog.cloudflare.com/its-go-time-on-linux/)
+	if time.Now().Add(MEEK_MAX_SESSION_STALENESS).Before(t) {
+		return nil
+	}
+	return common.ContextError(errors.New("not supported"))
 }
 
 // Stub implementation of net.Conn.SetReadDeadline
 func (conn *meekConn) SetReadDeadline(t time.Time) error {
-	return psiphon.ContextError(errors.New("not supported"))
+	return common.ContextError(errors.New("not supported"))
 }
 
 // Stub implementation of net.Conn.SetWriteDeadline
 func (conn *meekConn) SetWriteDeadline(t time.Time) error {
-	return psiphon.ContextError(errors.New("not supported"))
+	return common.ContextError(errors.New("not supported"))
 }

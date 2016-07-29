@@ -25,12 +25,11 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -74,7 +73,7 @@ func (sshClient *sshClient) handleUDPChannel(newChannel ssh.NewChannel) {
 		sshClient:      sshClient,
 		sshChannel:     sshChannel,
 		portForwards:   make(map[uint16]*udpPortForward),
-		portForwardLRU: psiphon.NewLRUConns(),
+		portForwardLRU: NewLRUConns(),
 		relayWaitGroup: new(sync.WaitGroup),
 	}
 	multiplexer.run()
@@ -85,8 +84,8 @@ type udpPortForwardMultiplexer struct {
 	sshChannel        ssh.Channel
 	portForwardsMutex sync.Mutex
 	portForwards      map[uint16]*udpPortForward
+	portForwardLRU    *LRUConns
 	relayWaitGroup    *sync.WaitGroup
-	portForwardLRU    *psiphon.LRUConns
 }
 
 func (mux *udpPortForwardMultiplexer) run() {
@@ -141,7 +140,17 @@ func (mux *udpPortForwardMultiplexer) run() {
 
 			// Create a new port forward
 
+			dialIP := net.IP(message.remoteIP)
+			dialPort := int(message.remotePort)
+
+			// Transparent DNS forwarding
+			if message.forwardDNS {
+				dialIP = mux.sshClient.sshServer.support.DNSResolver.Get()
+				dialPort = DNS_RESOLVER_PORT
+			}
+
 			if !mux.sshClient.isPortForwardPermitted(
+				dialIP.String(),
 				int(message.remotePort),
 				mux.sshClient.trafficRules.AllowUDPPorts,
 				mux.sshClient.trafficRules.DenyUDPPorts) {
@@ -173,14 +182,6 @@ func (mux *udpPortForwardMultiplexer) run() {
 					}).Debug("closed LRU UDP port forward")
 			}
 
-			dialIP := net.IP(message.remoteIP)
-			dialPort := int(message.remotePort)
-
-			// Transparent DNS forwarding
-			if message.forwardDNS {
-				dialIP, dialPort = mux.transparentDNSAddress(dialIP, dialPort)
-			}
-
 			log.WithContextFields(
 				LogFields{
 					"remoteAddr": fmt.Sprintf("%s:%d", dialIP.String(), dialPort),
@@ -195,17 +196,24 @@ func (mux *udpPortForwardMultiplexer) run() {
 				continue
 			}
 
-			lruEntry := mux.portForwardLRU.Add(udpConn)
-
 			// ActivityMonitoredConn monitors the TCP port forward I/O and updates
-			// its LRU status. ActivityMonitoredConn also times out read on the port
+			// its LRU status. ActivityMonitoredConn also times out I/O on the port
 			// forward if both reads and writes have been idle for the specified
 			// duration.
-			conn := psiphon.NewActivityMonitoredConn(
+
+			lruEntry := mux.portForwardLRU.Add(udpConn)
+
+			conn, err := NewActivityMonitoredConn(
 				udpConn,
 				time.Duration(mux.sshClient.trafficRules.IdleUDPPortForwardTimeoutMilliseconds)*time.Millisecond,
 				true,
 				lruEntry)
+			if err != nil {
+				lruEntry.Remove()
+				mux.sshClient.closedPortForward(mux.sshClient.udpTrafficState, 0, 0)
+				log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
+				continue
+			}
 
 			portForward = &udpPortForward{
 				connID:       message.connID,
@@ -253,19 +261,6 @@ func (mux *udpPortForwardMultiplexer) run() {
 	mux.relayWaitGroup.Wait()
 }
 
-func (mux *udpPortForwardMultiplexer) transparentDNSAddress(
-	dialIP net.IP, dialPort int) (net.IP, int) {
-
-	if mux.sshClient.sshServer.config.UDPForwardDNSServerAddress != "" {
-		// Note: UDPForwardDNSServerAddress is validated in LoadConfig
-		host, portStr, _ := net.SplitHostPort(
-			mux.sshClient.sshServer.config.UDPForwardDNSServerAddress)
-		dialIP = net.ParseIP(host)
-		dialPort, _ = strconv.Atoi(portStr)
-	}
-	return dialIP, dialPort
-}
-
 func (mux *udpPortForwardMultiplexer) removePortForward(connID uint16) {
 	mux.portForwardsMutex.Lock()
 	delete(mux.portForwards, connID)
@@ -273,14 +268,14 @@ func (mux *udpPortForwardMultiplexer) removePortForward(connID uint16) {
 }
 
 type udpPortForward struct {
+	bytesUp      int64
+	bytesDown    int64
 	connID       uint16
 	preambleSize int
 	remoteIP     []byte
 	remotePort   uint16
 	conn         net.Conn
-	lruEntry     *psiphon.LRUConnsEntry
-	bytesUp      int64
-	bytesDown    int64
+	lruEntry     *LRUConnsEntry
 	mux          *udpPortForwardMultiplexer
 }
 
@@ -389,18 +384,18 @@ func readUdpgwMessage(
 
 		_, err := io.ReadFull(reader, buffer[0:2])
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 
 		size := uint16(buffer[0]) + uint16(buffer[1])<<8
 
 		if int(size) > len(buffer)-2 {
-			return nil, psiphon.ContextError(errors.New("invalid udpgw message size"))
+			return nil, common.ContextError(errors.New("invalid udpgw message size"))
 		}
 
 		_, err = io.ReadFull(reader, buffer[2:2+size])
 		if err != nil {
-			return nil, psiphon.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 
 		flags := buffer[2]
@@ -422,7 +417,7 @@ func readUdpgwMessage(
 		if flags&udpgwProtocolFlagIPv6 == udpgwProtocolFlagIPv6 {
 
 			if size < 21 {
-				return nil, psiphon.ContextError(errors.New("invalid udpgw message size"))
+				return nil, common.ContextError(errors.New("invalid udpgw message size"))
 			}
 
 			remoteIP = make([]byte, 16)
@@ -434,7 +429,7 @@ func readUdpgwMessage(
 		} else {
 
 			if size < 9 {
-				return nil, psiphon.ContextError(errors.New("invalid udpgw message size"))
+				return nil, common.ContextError(errors.New("invalid udpgw message size"))
 			}
 
 			remoteIP = make([]byte, 4)
@@ -470,7 +465,7 @@ func writeUdpgwPreamble(
 	buffer []byte) error {
 
 	if preambleSize != 7+len(remoteIP) {
-		return errors.New("invalid udpgw preamble size")
+		return common.ContextError(errors.New("invalid udpgw preamble size"))
 	}
 
 	size := uint16(preambleSize-2) + packetSize

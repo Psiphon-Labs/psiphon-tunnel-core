@@ -17,29 +17,39 @@
  *
  */
 
-package server
+// Package psiphon/server/psinet implements psinet database services. The psinet
+// database is a JSON-format file containing information about the Psiphon network,
+// including sponsors, home pages, stats regexes, available upgrades, and other
+// servers for discovery. This package also implements the Psiphon discovery algorithm.
+package psinet
 
 import (
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"math"
-	"os"
+	"math/rand"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
-var CLIENT_PLATFORM_ANDROID string = "Android"
-var CLIENT_PLATFORM_WINDOWS string = "Windows"
+// Database serves Psiphon API data requests. It's safe for
+// concurrent usage. The Reload function supports hot reloading
+// of Psiphon network data while the server is running.
+type Database struct {
+	common.ReloadableFile
 
-// PsinetDatabase serves Psiphon API data requests. It's safe for
-// concurrent usage.
-type PsinetDatabase struct {
-	Hosts    map[string]Host            `json:"_PsiphonNetwork__hosts"`
-	Servers  map[string]Server          `json:"_PsiphonNetwork__servers"`
-	Sponsors map[string]Sponsor         `json:"_PsiphonNetwork__sponsors"`
-	Versions map[string][]ClientVersion `json:"_PsiphonNetwork__client_versions"`
+	AlternateMeekFrontingAddresses      map[string][]string        `json:"alternate_meek_fronting_addresses"`
+	AlternateMeekFrontingAddressesRegex map[string]string          `json:"alternate_meek_fronting_addresses_regex"`
+	Hosts                               map[string]Host            `json:"hosts"`
+	MeekFrontingDisableSNI              map[string]bool            `json:"meek_fronting_disable_SNI"`
+	Servers                             []Server                   `json:"servers"`
+	Sponsors                            map[string]Sponsor         `json:"sponsors"`
+	Versions                            map[string][]ClientVersion `json:"client_versions"`
 }
 
 type Host struct {
@@ -56,9 +66,9 @@ type Host struct {
 }
 
 type Server struct {
-	AlternateSshObfuscatedPorts bool            `json:"alternate_ssh_obfuscated_ports"`
+	AlternateSshObfuscatedPorts []string        `json:"alternate_ssh_obfuscated_ports"`
 	Capabilities                map[string]bool `json:"capabilities"`
-	DiscoveryDateRange          TimeStamps      `json:"discovery_date_range"`
+	DiscoveryDateRange          []string        `json:"discovery_date_range"`
 	EgressIpAddress             string          `json:"egress_ip_address"`
 	HostId                      string          `json:"host_id"`
 	Id                          string          `json:"id"`
@@ -80,7 +90,6 @@ type Server struct {
 
 type Sponsor struct {
 	Banner              string
-	Campaigns           map[string]Campaign   `json:"campaigns"`
 	HomePages           map[string][]HomePage `json:"home_pages"`
 	HttpsRequestRegexes []HttpsRequestRegex   `json:"https_request_regexes"`
 	Id                  string                `json:"id"`
@@ -89,10 +98,6 @@ type Sponsor struct {
 	PageViewRegexes     []PageViewRegex       `json:"page_view_regexes"`
 	WebsiteBanner       string                `json:"website_banner"`
 	WebsiteBannerLink   string                `json:"website_banner_link"`
-}
-
-type Campaign struct {
-	// TODO: implement
 }
 
 type ClientVersion struct {
@@ -119,54 +124,61 @@ type PageViewRegex struct {
 	Replace string `json:"replace"`
 }
 
-type TimeStamps struct {
-	TimeStamp []TimeStamp `json:"py/tuple"`
-}
+// NewDatabase initializes a Database, calling Reload on the specified
+// filename.
+func NewDatabase(filename string) (*Database, error) {
 
-type TimeStamp struct {
-	PyObject string     `json:"py/object"`
-	Reduce   [][]string `json:"__reduce__"`
-}
+	database := &Database{}
 
-// NewPsinetDatabase initializes a PsinetDatabase. It loads the specified
-// file, which should be in the Psiphon automation jsonpickle format, and
-// prepares to serve data requests.
-// The input "" is valid and returns a functional PsinetDatabase with no
-// data.
-func NewPsinetDatabase(filename string) (*PsinetDatabase, error) {
-	file, err := os.Open(filename)
+	database.ReloadableFile = common.NewReloadableFile(
+		filename,
+		func(filename string) error {
+			psinetJSON, err := ioutil.ReadFile(filename)
+			if err != nil {
+				// On error, state remains the same
+				return common.ContextError(err)
+			}
+			err = json.Unmarshal(psinetJSON, &database)
+			if err != nil {
+				// On error, state remains the same
+				// (Unmarshal first validates the provided
+				//  JOSN and then populates the interface)
+				return common.ContextError(err)
+			}
+			return nil
+		})
+
+	_, err := database.Reload()
 	if err != nil {
-		return nil, err
+		return nil, common.ContextError(err)
 	}
 
-	psinetDatabase = new(PsinetDatabase)
-
-	err = json.NewDecoder(file).Decode(psinetDatabase)
-
-	return psinetDatabase, err
+	return database, nil
 }
 
 // GetHomepages returns a list of  home pages for the specified sponsor,
 // region, and platform.
-func (psinet *PsinetDatabase) GetHomepages(sponsorID, clientRegion, clientPlatform string) []string {
+func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatform bool) []string {
+	db.ReloadableFile.RLock()
+	defer db.ReloadableFile.RUnlock()
 
 	sponsorHomePages := make([]string, 0)
 
-	// Sponsor id does not exist, fail gracefully
-	sponsor, ok := psinet.Sponsors[sponsorID]
+	// Sponsor id does not exist: fail gracefully
+	sponsor, ok := db.Sponsors[sponsorID]
 	if !ok {
 		return nil
 	}
 
 	homePages := sponsor.HomePages
 
-	if getClientPlatform(clientPlatform) == CLIENT_PLATFORM_ANDROID {
+	if isMobilePlatform {
 		if sponsor.MobileHomePages != nil {
 			homePages = sponsor.MobileHomePages
 		}
 	}
 
-	// case: lookup succeeded and corresponding homepages found for region
+	// Case: lookup succeeded and corresponding homepages found for region
 	homePagesByRegion, ok := homePages[clientRegion]
 	if ok {
 		for _, homePage := range homePagesByRegion {
@@ -174,7 +186,7 @@ func (psinet *PsinetDatabase) GetHomepages(sponsorID, clientRegion, clientPlatfo
 		}
 	}
 
-	// case: lookup failed or no corresponding homepages found for region --> use default
+	// Case: lookup failed or no corresponding homepages found for region --> use default
 	if sponsorHomePages == nil {
 		defaultHomePages, ok := homePages["None"]
 		if ok {
@@ -190,18 +202,23 @@ func (psinet *PsinetDatabase) GetHomepages(sponsorID, clientRegion, clientPlatfo
 
 // GetUpgradeClientVersion returns a new client version when an upgrade is
 // indicated for the specified client current version. The result is "" when
-// no upgrade is available.
-func (psinet *PsinetDatabase) GetUpgradeClientVersion(clientVersion, clientPlatform string) string {
-	// Check last version number against client version number
-	// Assumes versions list is in ascending version order
-	platform := getClientPlatform(clientPlatform)
+// no upgrade is available. Caller should normalize clientPlatform.
+func (db *Database) GetUpgradeClientVersion(clientVersion, clientPlatform string) string {
+	db.ReloadableFile.RLock()
+	defer db.ReloadableFile.RUnlock()
 
-	// If no versions exist for this platform
-	clientVersions, ok := psinet.Versions[platform]
+	// Check lastest version number against client version number
+
+	clientVersions, ok := db.Versions[clientPlatform]
 	if !ok {
 		return ""
 	}
 
+	if len(clientVersions) == 0 {
+		return ""
+	}
+
+	// NOTE: Assumes versions list is in ascending version order
 	lastVersion := clientVersions[len(clientVersions)-1].Version
 
 	lastVersionInt, err := strconv.Atoi(lastVersion)
@@ -213,7 +230,7 @@ func (psinet *PsinetDatabase) GetUpgradeClientVersion(clientVersion, clientPlatf
 		return ""
 	}
 
-	// Return version if upgrade needed
+	// Return latest version if upgrade needed
 	if lastVersionInt > clientVersionInt {
 		return lastVersion
 	}
@@ -222,41 +239,54 @@ func (psinet *PsinetDatabase) GetUpgradeClientVersion(clientVersion, clientPlatf
 }
 
 // GetHttpsRequestRegexes returns bytes transferred stats regexes for the
-// specified sponsor.
-func (psinet *PsinetDatabase) GetHttpsRequestRegexes(sponsorID string) []HttpsRequestRegex {
-	return psinet.Sponsors[sponsorID].HttpsRequestRegexes
+// specified sponsor. The result is nil when an unknown sponsorID is provided.
+func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string {
+	db.ReloadableFile.RLock()
+	defer db.ReloadableFile.RUnlock()
+
+	regexes := make([]map[string]string, 0)
+
+	for i := range db.Sponsors[sponsorID].HttpsRequestRegexes {
+		regex := make(map[string]string)
+		regex["replace"] = db.Sponsors[sponsorID].HttpsRequestRegexes[i].Replace
+		regex["regex"] = db.Sponsors[sponsorID].HttpsRequestRegexes[i].Regex
+		regexes = append(regexes, regex)
+	}
+
+	return regexes
 }
 
 // DiscoverServers selects new encoded server entries to be "discovered" by
 // the client, using the discoveryValue as the input into the discovery algorithm.
-func (psinet *PsinetDatabase) DiscoverServers(discoveryValue int) []string {
+// The server list (db.Servers) loaded from JSON is stored as an array instead of
+// a map to ensure servers are discovered deterministically. Each iteration over a
+// map in go is seeded with a random value which causes non-deterministic ordering.
+func (db *Database) DiscoverServers(discoveryValue int) []string {
+	db.ReloadableFile.RLock()
+	defer db.ReloadableFile.RUnlock()
 
 	var servers []Server
 
 	discoveryDate := time.Now().UTC()
-	candidateServers := make(map[string]Server)
+	candidateServers := make([]Server, 0)
 
-	for serverName, server := range psinet.Servers {
-		var start *time.Time
-		var end *time.Time
+	for _, server := range db.Servers {
+		var start time.Time
+		var end time.Time
 		var err error
 
 		// All servers that are discoverable on this day are eligable for discovery
-		if len(server.DiscoveryDateRange.TimeStamp) != 0 {
-			if len(server.DiscoveryDateRange.TimeStamp[0].Reduce[1][0]) != 0 {
-				start, err = parseJsonPickleDatetime(server.DiscoveryDateRange.TimeStamp[0].Reduce[1][0])
-				if err != nil {
-					continue
-				}
+		if len(server.DiscoveryDateRange) != 0 {
+			start, err = time.Parse("2006-01-02T15:04:05", server.DiscoveryDateRange[0])
+			if err != nil {
+				continue
 			}
-			if len(server.DiscoveryDateRange.TimeStamp[1].Reduce[1][0]) != 0 {
-				end, err = parseJsonPickleDatetime(server.DiscoveryDateRange.TimeStamp[1].Reduce[1][0])
-				if err != nil {
-					continue
-				}
+			end, err = time.Parse("2006-01-02T15:04:05", server.DiscoveryDateRange[1])
+			if err != nil {
+				continue
 			}
-			if discoveryDate.After(*start) && discoveryDate.Before(*end) {
-				candidateServers[serverName] = server
+			if discoveryDate.After(start) && discoveryDate.Before(end) {
+				candidateServers = append(candidateServers, server)
 			}
 		}
 	}
@@ -265,60 +295,10 @@ func (psinet *PsinetDatabase) DiscoverServers(discoveryValue int) []string {
 	encodedServerEntries := make([]string, 0)
 
 	for _, server := range servers {
-		encodedServerEntries = append(encodedServerEntries, psinet.getEncodedServerEntry(server))
+		encodedServerEntries = append(encodedServerEntries, db.getEncodedServerEntry(server))
 	}
 
 	return encodedServerEntries
-}
-
-// Parse legacy jsonpickle datetime object from python
-// Object's base64 encoded hex string corresponds to UTC timestamp
-func parseJsonPickleDatetime(base64DatetimeString string) (*time.Time, error) {
-	var hexTimestamp string
-
-	base64DecodedTimestamp, err := base64.StdEncoding.DecodeString(base64DatetimeString)
-	if err != nil {
-		return nil, err
-	} else {
-		hexTimestamp = hex.EncodeToString(base64DecodedTimestamp)
-	}
-
-	// If timestamp is malformed fail gracefully
-	if len(hexTimestamp) != 20 {
-		return nil, err
-	}
-	year, err := strconv.ParseInt(hexTimestamp[:4], 16, 64)
-	if err != nil {
-		return nil, err
-	}
-	month, err := strconv.ParseInt(hexTimestamp[4:6], 16, 64)
-	if err != nil {
-		return nil, err
-	}
-	day, err := strconv.ParseInt(hexTimestamp[6:8], 16, 64)
-	if err != nil {
-		return nil, err
-	}
-	hour, err := strconv.ParseInt(hexTimestamp[8:10], 16, 64)
-	if err != nil {
-		return nil, err
-	}
-	min, err := strconv.ParseInt(hexTimestamp[10:12], 16, 64)
-	if err != nil {
-		return nil, err
-	}
-	sec, err := strconv.ParseInt(hexTimestamp[12:14], 16, 64)
-	if err != nil {
-		return nil, err
-	}
-	nsec, err := strconv.ParseInt(hexTimestamp[14:20], 16, 64)
-	if err != nil {
-		return nil, err
-	}
-
-	time := time.Date(int(year), time.Month(month), int(day), int(hour), int(min), int(sec), int(nsec), time.UTC)
-
-	return &time, nil
 }
 
 // Combine client IP address and time-of-day strategies to give out different
@@ -336,7 +316,7 @@ func parseJsonPickleDatetime(base64DatetimeString string) (*time.Time, error) {
 // both aspects determine which server is selected. IP address is given the
 // priority: if there are only a couple of servers, for example, IP address alone
 // determines the outcome.
-func selectServers(servers map[string]Server, discoveryValue int) []Server {
+func selectServers(servers []Server, discoveryValue int) []Server {
 	TIME_GRANULARITY := 3600
 
 	if len(servers) == 0 {
@@ -351,8 +331,8 @@ func selectServers(servers map[string]Server, discoveryValue int) []Server {
 	// of buckets and the number of items in each bucket are close (using sqrt).
 	// IP address selects the bucket, time selects the item in the bucket.
 
-	// NOTE: this code assumes that range of possible time_values and
-	// discoveryValue is sufficient to index to all bucket items.
+	// NOTE: this code assumes that the range of possible timeStrategyValues
+	// and discoveryValues are sufficient to index to all bucket items.
 	bucketCount := calculateBucketCount(len(servers))
 
 	buckets := bucketizeServerList(servers, bucketCount)
@@ -371,9 +351,9 @@ func calculateBucketCount(length int) int {
 	return int(math.Ceil(math.Sqrt(float64(length))))
 }
 
-// Create `bucketCount` buckets
-// Each bucket will be of size `division` or `divison`-1
-func bucketizeServerList(servers map[string]Server, bucketCount int) [][]Server {
+// Create bucketCount buckets.
+// Each bucket will be of size division or divison-1.
+func bucketizeServerList(servers []Server, bucketCount int) [][]Server {
 	division := float64(len(servers)) / float64(bucketCount)
 
 	buckets := make([][]Server, bucketCount)
@@ -394,12 +374,16 @@ func bucketizeServerList(servers map[string]Server, bucketCount int) [][]Server 
 	return buckets
 }
 
-func (psinet *PsinetDatabase) getEncodedServerEntry(server Server) string {
+// Return hex encoded server entry string for comsumption by client.
+// Newer clients ignore the legacy fields and only utilize the extended (new) config.
+func (db *Database) getEncodedServerEntry(server Server) string {
 
+	// Double-check that we're not giving our blank server credentials
 	if len(server.IpAddress) <= 1 || len(server.WebServerPort) <= 1 || len(server.WebServerSecret) <= 1 || len(server.WebServerCertificate) <= 1 {
 		return ""
 	}
 
+	// Extended (new) entry fields are in a JSON string
 	var extendedConfig struct {
 		IpAddress                     string
 		WebServerPort                 string
@@ -417,11 +401,14 @@ func (psinet *PsinetDatabase) getEncodedServerEntry(server Server) string {
 		MeekFrontingDomain            string
 		MeekFrontingHost              string
 		MeekCookieEncryptionPublicKey string
-		meekFrontingAddrssRegex       string
-		meekFrontingDisableSNI        string
-		meekFrontingHosts             string
-		capabilities                  string
+		meekFrontingAddresses         []string
+		meekFrontingAddressesRegex    string
+		meekFrontingDisableSNI        bool
+		meekFrontingHosts             []string
+		capabilities                  []string
 	}
+
+	// NOTE: also putting original values in extended config for easier parsing by new clients
 	extendedConfig.IpAddress = server.IpAddress
 	extendedConfig.WebServerPort = server.WebServerPort
 	extendedConfig.WebServerSecret = server.WebServerSecret
@@ -446,9 +433,17 @@ func (psinet *PsinetDatabase) getEncodedServerEntry(server Server) string {
 	}
 
 	extendedConfig.SshObfuscatedPort = server.SshObfuscatedPort
+	// Use the latest alternate port unless tunneling through meek
+	if len(server.AlternateSshObfuscatedPorts) > 0 && !(server.Capabilities["FRONTED-MEEK"] || server.Capabilities["UNFRONTED-MEEK"]) {
+		port, err := strconv.Atoi(server.AlternateSshObfuscatedPorts[len(server.AlternateSshObfuscatedPorts)-1])
+		if err == nil {
+			extendedConfig.SshObfuscatedPort = port
+		}
+	}
+
 	extendedConfig.SshObfuscatedKey = server.SshObfuscatedKey
 
-	host := psinet.Hosts[server.HostId]
+	host := db.Hosts[server.HostId]
 
 	extendedConfig.Region = host.Region
 	extendedConfig.MeekServerPort = host.MeekServerPort
@@ -457,18 +452,47 @@ func (psinet *PsinetDatabase) getEncodedServerEntry(server Server) string {
 	extendedConfig.MeekFrontingHost = host.MeekServerFrontingHost
 	extendedConfig.MeekCookieEncryptionPublicKey = host.MeekCookieEncryptionPublicKey
 
-	if host.AlternateMeekServerFrontingHosts != nil {
-		// TODO: implement
+	serverCapabilities := make(map[string]bool, 0)
+	for capability, enabled := range server.Capabilities {
+		serverCapabilities[capability] = enabled
+	}
+
+	if serverCapabilities["UNFRONTED-MEEK"] && host.MeekServerPort == 443 {
+		serverCapabilities["UNFRONTED-MEEK"] = false
+		serverCapabilities["UNFRONTED-MEEK-HTTPS"] = true
 	}
 
 	if host.MeekServerFrontingDomain != "" {
-		// TODO: implement
+		alternateMeekFrontingAddresses := db.AlternateMeekFrontingAddresses[host.MeekServerFrontingDomain]
+		if len(alternateMeekFrontingAddresses) > 0 {
+			// Choose 3 addresses randomly
+			perm := rand.Perm(len(alternateMeekFrontingAddresses))[:int(math.Min(float64(len(alternateMeekFrontingAddresses)), float64(3)))]
+
+			for i := range perm {
+				extendedConfig.meekFrontingAddresses = append(extendedConfig.meekFrontingAddresses, alternateMeekFrontingAddresses[perm[i]])
+			}
+		}
+
+		extendedConfig.meekFrontingAddressesRegex = db.AlternateMeekFrontingAddressesRegex[host.MeekServerFrontingDomain]
+		extendedConfig.meekFrontingDisableSNI = db.MeekFrontingDisableSNI[host.MeekServerFrontingDomain]
 	}
 
-	capabilities := make([]string, 0)
-	for capability, enabled := range server.Capabilities {
+	if host.AlternateMeekServerFrontingHosts != nil {
+		// Choose 3 addresses randomly
+		perm := rand.Perm(len(host.AlternateMeekServerFrontingHosts))[:int(math.Min(float64(len(host.AlternateMeekServerFrontingHosts)), float64(3)))]
+
+		for i := range perm {
+			extendedConfig.meekFrontingHosts = append(extendedConfig.meekFrontingHosts, host.AlternateMeekServerFrontingHosts[i])
+		}
+
+		if serverCapabilities["FRONTED-MEEK"] == true {
+			serverCapabilities["FRONTED-MEEK-HTTP"] = true
+		}
+	}
+
+	for capability, enabled := range serverCapabilities {
 		if enabled == true {
-			capabilities = append(capabilities, capability)
+			extendedConfig.capabilities = append(extendedConfig.capabilities, capability)
 		}
 	}
 
@@ -477,11 +501,13 @@ func (psinet *PsinetDatabase) getEncodedServerEntry(server Server) string {
 		return ""
 	}
 
+	// Legacy format + extended (new) config
 	prefixString := fmt.Sprintf("%s %s %s %s ", server.IpAddress, server.WebServerPort, server.WebServerSecret, server.WebServerCertificate)
 
 	return hex.EncodeToString(append([]byte(prefixString)[:], []byte(jsonDump)[:]...))
 }
 
+// Parse string of format "ssh-key-type ssh-key".
 func parseSshKeyString(sshKeyString string) (keyType string, key string) {
 	sshKeyArr := strings.Split(sshKeyString, " ")
 	if len(sshKeyArr) != 2 {
@@ -489,14 +515,4 @@ func parseSshKeyString(sshKeyString string) (keyType string, key string) {
 	}
 
 	return sshKeyArr[0], sshKeyArr[1]
-}
-
-func getClientPlatform(clientPlatformString string) string {
-	platform := CLIENT_PLATFORM_WINDOWS
-
-	if strings.Contains(strings.ToLower(clientPlatformString), strings.ToLower(CLIENT_PLATFORM_ANDROID)) {
-		platform = CLIENT_PLATFORM_ANDROID
-	}
-
-	return platform
 }

@@ -8,12 +8,16 @@ addons:
 install:
 - go get -t -d -v ./... && go build -v ./...
 script:
-- go test -v ./...
 - cd psiphon
-- go test -v -covermode=count -coverprofile=coverage.out
-- $HOME/gopath/bin/goveralls -coverprofile=coverage.out -service=travis-ci -repotoken $COVERALLS_TOKEN
+- go test -v -covermode=count -coverprofile=common.coverprofile ./common
+- go test -v -covermode=count -coverprofile=transferstats.coverprofile ./transferstats
+- go test -v -covermode=count -coverprofile=server.coverprofile ./server
+- go test -v -covermode=count -coverprofile=psiphon.coverprofile
+- $HOME/gopath/bin/gover
+- $HOME/gopath/bin/goveralls -coverprofile=gover.coverprofile -service=travis-ci -repotoken $COVERALLS_TOKEN
 before_install:
 - go get github.com/axw/gocov/gocov
+- go get github.com/modocache/gover
 - go get github.com/mattn/goveralls
 - if ! go get github.com/golang/tools/cmd/cover; then go get golang.org/x/tools/cmd/cover; fi
 - openssl aes-256-cbc -K $encrypted_bf83b4ab4874_key -iv $encrypted_bf83b4ab4874_iv

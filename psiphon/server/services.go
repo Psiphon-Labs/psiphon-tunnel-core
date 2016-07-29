@@ -31,46 +31,41 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 )
 
 // RunServices initializes support functions including logging and GeoIP services;
 // and then starts the server components and runs them until os.Interrupt or
 // os.Kill signals are received. The config determines which components are run.
-func RunServices(encodedConfigs [][]byte) error {
+func RunServices(configJSON []byte) error {
 
-	config, err := LoadConfig(encodedConfigs)
+	config, err := LoadConfig(configJSON)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("load config failed")
-		return psiphon.ContextError(err)
+		return common.ContextError(err)
 	}
 
 	err = InitLogging(config)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("init logging failed")
-		return psiphon.ContextError(err)
+		return common.ContextError(err)
 	}
 
-	err = InitGeoIP(config)
+	supportServices, err := NewSupportServices(config)
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Error("init GeoIP failed")
-		return psiphon.ContextError(err)
-	}
-
-	psinetDatabase, err := NewPsinetDatabase(config.PsinetDatabaseFilename)
-	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Error("init PsinetDatabase failed")
-		return psiphon.ContextError(err)
+		log.WithContextFields(LogFields{"error": err}).Error("init support services failed")
+		return common.ContextError(err)
 	}
 
 	waitGroup := new(sync.WaitGroup)
 	shutdownBroadcast := make(chan struct{})
 	errors := make(chan error)
 
-	tunnelServer, err := NewTunnelServer(config, psinetDatabase, shutdownBroadcast)
+	tunnelServer, err := NewTunnelServer(supportServices, shutdownBroadcast)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("init tunnel server failed")
-		return psiphon.ContextError(err)
+		return common.ContextError(err)
 	}
 
 	if config.RunLoadMonitor() {
@@ -84,7 +79,7 @@ func RunServices(encodedConfigs [][]byte) error {
 				case <-shutdownBroadcast:
 					return
 				case <-ticker.C:
-					logLoad(tunnelServer)
+					logServerLoad(tunnelServer)
 				}
 			}
 		}()
@@ -94,7 +89,7 @@ func RunServices(encodedConfigs [][]byte) error {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
-			err := RunWebServer(config, psinetDatabase, shutdownBroadcast)
+			err := RunWebServer(supportServices, shutdownBroadcast)
 			select {
 			case errors <- err:
 			default:
@@ -118,17 +113,23 @@ func RunServices(encodedConfigs [][]byte) error {
 	systemStopSignal := make(chan os.Signal, 1)
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill)
 
-	// SIGUSR1 triggers a load log
-	logLoadSignal := make(chan os.Signal, 1)
-	signal.Notify(logLoadSignal, syscall.SIGUSR1)
+	// SIGUSR1 triggers a reload of support services
+	reloadSupportServicesSignal := make(chan os.Signal, 1)
+	signal.Notify(reloadSupportServicesSignal, syscall.SIGUSR1)
+
+	// SIGUSR2 triggers an immediate load log
+	logServerLoadSignal := make(chan os.Signal, 1)
+	signal.Notify(logServerLoadSignal, syscall.SIGUSR2)
 
 	err = nil
 
 loop:
 	for {
 		select {
-		case <-logLoadSignal:
-			logLoad(tunnelServer)
+		case <-reloadSupportServicesSignal:
+			supportServices.Reload()
+		case <-logServerLoadSignal:
+			logServerLoad(tunnelServer)
 		case <-systemStopSignal:
 			log.WithContext().Info("shutdown by system")
 			break loop
@@ -144,16 +145,20 @@ loop:
 	return err
 }
 
-func logLoad(server *TunnelServer) {
+func logServerLoad(server *TunnelServer) {
 
 	// golang runtime stats
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	fields := LogFields{
-		"NumGoroutine":        runtime.NumGoroutine(),
-		"MemStats.Alloc":      memStats.Alloc,
-		"MemStats.TotalAlloc": memStats.TotalAlloc,
-		"MemStats.Sys":        memStats.Sys,
+		"NumGoroutine":           runtime.NumGoroutine(),
+		"MemStats.Alloc":         memStats.Alloc,
+		"MemStats.TotalAlloc":    memStats.TotalAlloc,
+		"MemStats.Sys":           memStats.Sys,
+		"MemStats.PauseTotalNs":  memStats.PauseTotalNs,
+		"MemStats.PauseNs":       memStats.PauseNs,
+		"MemStats.NumGC":         memStats.NumGC,
+		"MemStats.GCCPUFraction": memStats.GCCPUFraction,
 	}
 
 	// tunnel server stats
@@ -164,4 +169,85 @@ func logLoad(server *TunnelServer) {
 	}
 
 	log.WithContextFields(fields).Info("load")
+}
+
+// SupportServices carries common and shared data components
+// across different server components. SupportServices implements a
+// hot reload of traffic rules, psinet database, and geo IP database
+// components, which allows these data components to be refreshed
+// without restarting the server process.
+type SupportServices struct {
+	Config          *Config
+	TrafficRulesSet *TrafficRulesSet
+	PsinetDatabase  *psinet.Database
+	GeoIPService    *GeoIPService
+	DNSResolver     *DNSResolver
+}
+
+// NewSupportServices initializes a new SupportServices.
+func NewSupportServices(config *Config) (*SupportServices, error) {
+	trafficRulesSet, err := NewTrafficRulesSet(config.TrafficRulesFilename)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	psinetDatabase, err := psinet.NewDatabase(config.PsinetDatabaseFilename)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	geoIPService, err := NewGeoIPService(
+		config.GeoIPDatabaseFilenames, config.DiscoveryValueHMACKey)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	dnsResolver, err := NewDNSResolver(config.DNSResolverIPAddress)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return &SupportServices{
+		Config:          config,
+		TrafficRulesSet: trafficRulesSet,
+		PsinetDatabase:  psinetDatabase,
+		GeoIPService:    geoIPService,
+		DNSResolver:     dnsResolver,
+	}, nil
+}
+
+// Reload reinitializes traffic rules, psinet database, and geo IP database
+// components. If any component fails to reload, an error is logged and
+// Reload proceeds, using the previous state of the component.
+//
+// Limitation: reload of traffic rules currently doesn't apply to existing,
+// established clients.
+func (support *SupportServices) Reload() {
+
+	reloaders := append(
+		[]common.Reloader{support.TrafficRulesSet, support.PsinetDatabase},
+		support.GeoIPService.Reloaders()...)
+
+	for _, reloader := range reloaders {
+
+		if !reloader.WillReload() {
+			// Skip logging
+			continue
+		}
+
+		// "reloaded" flag indicates if file was actually reloaded or ignored
+		reloaded, err := reloader.Reload()
+		if err != nil {
+			log.WithContextFields(
+				LogFields{
+					"reloader": reloader.LogDescription(),
+					"error":    err}).Error("reload failed")
+			// Keep running with previous state
+		} else {
+			log.WithContextFields(
+				LogFields{
+					"reloader": reloader.LogDescription(),
+					"reloaded": reloaded}).Info("reload success")
+		}
+	}
 }
