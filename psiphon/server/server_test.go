@@ -113,10 +113,10 @@ func sendNotificationReceived(c chan<- struct{}) {
 	}
 }
 
-func waitOnNotification(c <-chan struct{}, t *testing.T, timeout <-chan time.Time, timeoutMessage string) {
+func waitOnNotification(t *testing.T, c, timeoutSignal <-chan struct{}, timeoutMessage string) {
 	select {
 	case <-c:
-	case <-timeout:
+	case <-timeoutSignal:
 		t.Fatalf(timeoutMessage)
 	}
 }
@@ -265,7 +265,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 
-			fmt.Printf("%s\n", string(notice))
+			//fmt.Printf("%s\n", string(notice))
 
 			noticeType, payload, err := psiphon.GetNotice(notice)
 			if err != nil {
@@ -324,12 +324,17 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Test: tunnels must be established, and correct homepage
 	// must be received, within 30 seconds
 
-	establishedTimeout := time.NewTimer(30 * time.Second)
+	timeoutSignal := make(chan struct{})
+	go func() {
+		timer := time.NewTimer(30 * time.Second)
+		<-timer.C
+		close(timeoutSignal)
+	}()
 
-	waitOnNotification(tunnelsEstablished, t, establishedTimeout.C, "tunnel establish timeout exceeded")
-	waitOnNotification(homepageReceived, t, establishedTimeout.C, "homepage received timeout exceeded")
-	waitOnNotification(verificationRequired, t, establishedTimeout.C, "verification required timeout exceeded")
-	waitOnNotification(verificationCompleted, t, establishedTimeout.C, "verification completed timeout exceeded")
+	waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel establish timeout exceeded")
+	waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
+	waitOnNotification(t, verificationRequired, timeoutSignal, "verification required timeout exceeded")
+	waitOnNotification(t, verificationCompleted, timeoutSignal, "verification completed timeout exceeded")
 
 	// Test: tunneled web site fetch
 
