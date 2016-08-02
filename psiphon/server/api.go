@@ -83,8 +83,8 @@ func dispatchAPIRequestHandler(
 	name string,
 	params requestJSONObject) (response []byte, reterr error) {
 
-	// Recover from and log any unexpected panics causes by user input
-	// handling bugs. User inputs shuld be properly validated; this
+	// Recover from and log any unexpected panics caused by user input
+	// handling bugs. User inputs should be properly validated; this
 	// mechanism is only a last resort to prevent the process from
 	// terminating in the case of a bug.
 	defer func() {
