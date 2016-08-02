@@ -443,6 +443,9 @@ func (server *MeekServer) terminateConnection(
 }
 
 type meekSession struct {
+	// Note: 64-bit ints used with atomic operations are at placed
+	// at the start of struct to ensure 64-bit alignment.
+	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	lastActivity        int64
 	clientConn          *meekConn
 	meekProtocolVersion int

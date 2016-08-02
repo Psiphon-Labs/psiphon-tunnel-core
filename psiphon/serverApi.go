@@ -44,8 +44,11 @@ import (
 // offer the Psiphon API through a web service; newer servers offer the Psiphon
 // API through SSH requests made directly through the tunnel's SSH client.
 type ServerContext struct {
-	sessionId                string
+	// Note: 64-bit ints used with atomic operations are at placed
+	// at the start of struct to ensure 64-bit alignment.
+	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	tunnelNumber             int64
+	sessionId                string
 	tunnel                   *Tunnel
 	psiphonHttpsClient       *http.Client
 	statsRegexps             *transferstats.Regexps
