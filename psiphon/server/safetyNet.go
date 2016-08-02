@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -33,10 +34,11 @@ import (
 )
 
 const (
-	safetynetCN = "attest.android.com"
 	// Cert of the root certificate authority (GeoTrust Global CA)
 	// which signs the intermediate certificate from Google (GIAG2)
-	geotrustCert = "-----BEGIN CERTIFICATE-----\nMIIDVDCCAjygAwIBAgIDAjRWMA0GCSqGSIb3DQEBBQUAMEIxCzAJBgNVBAYTAlVT\nMRYwFAYDVQQKEw1HZW9UcnVzdCBJbmMuMRswGQYDVQQDExJHZW9UcnVzdCBHbG9i\nYWwgQ0EwHhcNMDIwNTIxMDQwMDAwWhcNMjIwNTIxMDQwMDAwWjBCMQswCQYDVQQG\nEwJVUzEWMBQGA1UEChMNR2VvVHJ1c3QgSW5jLjEbMBkGA1UEAxMSR2VvVHJ1c3Qg\nR2xvYmFsIENBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2swYYzD9\n9BcjGlZ+W988bDjkcbd4kdS8odhM+KhDtgPpTSEHCIjaWC9mOSm9BXiLnTjoBbdq\nfnGk5sRgprDvgOSJKA+eJdbtg/OtppHHmMlCGDUUna2YRpIuT8rxh0PBFpVXLVDv\niS2Aelet8u5fa9IAjbkU+BQVNdnARqN7csiRv8lVK83Qlz6cJmTM386DGXHKTubU\n1XupGc1V3sjs0l44U+VcT4wt/lAjNvxm5suOpDkZALeVAjmRCw7+OC7RHQWa9k0+\nbw8HHa8sHo9gOeL6NlMTOdReJivbPagUvTLrGAMoUgRx5aszPeE4uwc2hGKceeoW\nMPRfwCvocWvk+QIDAQABo1MwUTAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTA\nephojYn7qwVkDBF9qn1luMrMTjAfBgNVHSMEGDAWgBTAephojYn7qwVkDBF9qn1l\nuMrMTjANBgkqhkiG9w0BAQUFAAOCAQEANeMpauUvXVSOKVCUn5kaFOSPeCpilKIn\nZ57QzxpeR+nBsqTP3UEaBU6bS+5Kb1VSsyShNwrrZHYqLizz/Tt1kL/6cdjHPTfS\ntQWVYrmm3ok9Nns4d0iXrKYgjy6myQzCsplFAMfOEVEiIuCl6rYVSAlk6l5PdPcF\nPseKUgzbFbS9bZvlxrFUaKnjaZC2mqUPuLk/IH2uSrW4nOQdtqvmlKXBx4Ot2/Un\nhw4EbNX/3aBd7YdStysVAq45pmp06drE57xNNB6pXE0zX5IJL4hmXXeXxx12E6nV\n5fEWCRE11azbJHFwLJhWC9kXtNHjUStedejV0NxPNO3CBWaAocvmMw==\n-----END CERTIFICATE-----\n"
+	geotrustCert      = "-----BEGIN CERTIFICATE-----\nMIIDVDCCAjygAwIBAgIDAjRWMA0GCSqGSIb3DQEBBQUAMEIxCzAJBgNVBAYTAlVT\nMRYwFAYDVQQKEw1HZW9UcnVzdCBJbmMuMRswGQYDVQQDExJHZW9UcnVzdCBHbG9i\nYWwgQ0EwHhcNMDIwNTIxMDQwMDAwWhcNMjIwNTIxMDQwMDAwWjBCMQswCQYDVQQG\nEwJVUzEWMBQGA1UEChMNR2VvVHJ1c3QgSW5jLjEbMBkGA1UEAxMSR2VvVHJ1c3Qg\nR2xvYmFsIENBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2swYYzD9\n9BcjGlZ+W988bDjkcbd4kdS8odhM+KhDtgPpTSEHCIjaWC9mOSm9BXiLnTjoBbdq\nfnGk5sRgprDvgOSJKA+eJdbtg/OtppHHmMlCGDUUna2YRpIuT8rxh0PBFpVXLVDv\niS2Aelet8u5fa9IAjbkU+BQVNdnARqN7csiRv8lVK83Qlz6cJmTM386DGXHKTubU\n1XupGc1V3sjs0l44U+VcT4wt/lAjNvxm5suOpDkZALeVAjmRCw7+OC7RHQWa9k0+\nbw8HHa8sHo9gOeL6NlMTOdReJivbPagUvTLrGAMoUgRx5aszPeE4uwc2hGKceeoW\nMPRfwCvocWvk+QIDAQABo1MwUTAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTA\nephojYn7qwVkDBF9qn1luMrMTjAfBgNVHSMEGDAWgBTAephojYn7qwVkDBF9qn1l\nuMrMTjANBgkqhkiG9w0BAQUFAAOCAQEANeMpauUvXVSOKVCUn5kaFOSPeCpilKIn\nZ57QzxpeR+nBsqTP3UEaBU6bS+5Kb1VSsyShNwrrZHYqLizz/Tt1kL/6cdjHPTfS\ntQWVYrmm3ok9Nns4d0iXrKYgjy6myQzCsplFAMfOEVEiIuCl6rYVSAlk6l5PdPcF\nPseKUgzbFbS9bZvlxrFUaKnjaZC2mqUPuLk/IH2uSrW4nOQdtqvmlKXBx4Ot2/Un\nhw4EbNX/3aBd7YdStysVAq45pmp06drE57xNNB6pXE0zX5IJL4hmXXeXxx12E6nV\n5fEWCRE11azbJHFwLJhWC9kXtNHjUStedejV0NxPNO3CBWaAocvmMw==\n-----END CERTIFICATE-----\n"
+	maxLogFieldSize   = 64
+	maxLogPayloadSize = 6144
 	// base64 encoded sha256 hash of the license used to sign the android
 	// client (.apk) https://psiphon.ca/en/faq.html#authentic-android
 	//
@@ -46,6 +48,7 @@ const (
 	// echo dtvvFfZ3JtRRoSNZuFecDXqfY11SaqN0JN8TFjLxeBA= | base64 -d | hexdump  -e '32/1 "%02X " "\n"'
 	// 76 DB EF 15 F6 77 26 D4 51 A1 23 59 B8 57 9C 0D 7A 9F 63 5D 52 6A A3 74 24 DF 13 16 32 F1 78 10
 	psiphon3Base64CertHash = "dtvvFfZ3JtRRoSNZuFecDXqfY11SaqN0JN8TFjLxeBA="
+	safetynetCN            = "attest.android.com"
 )
 
 var psiphonApkPackagenames = []string{"com.psiphon3", "com.psiphon3.subscription"}
@@ -57,19 +60,32 @@ type jwt struct {
 	payload string
 }
 
-func newJwt(token requestJSONObject) *jwt {
+func newJwt(token requestJSONObject) (jwt, error) {
+	jwtObj := jwt{}
+
+	if token["status"] == nil {
+		return jwtObj, errors.New("Absent JWT status field")
+	}
 	status, ok := token["status"].(float64)
 	if !ok {
-		return nil
+		return jwtObj, errors.New("Malformed JWT status field. Expected float64 got " + reflect.TypeOf(token["status"]).String())
+	}
+
+	if token["payload"] == nil {
+		return jwtObj, errors.New("Absent JWT payload field")
 	}
 	payload, ok := token["payload"].(string)
 	if !ok {
-		return nil
+		return jwtObj, errors.New("Malformed JWT payload field. Expected string got " + reflect.TypeOf(token["payload"]).String())
 	}
-	return &jwt{
-		status:  int(status),
-		payload: payload,
+
+	if len(payload) > maxLogPayloadSize {
+		return jwtObj, errors.New("JWT of length " + strconv.Itoa(len(payload)) + " exceeds maximum expected length of " + strconv.Itoa(maxLogPayloadSize))
 	}
+
+	jwtObj.status = int(status)
+	jwtObj.payload = payload
+	return jwtObj, nil
 }
 
 type jwtHeader struct {
@@ -84,23 +100,27 @@ func newJwtHeader(jsonBytes []byte) (jwtHeader, error) {
 }
 
 type jwtBody struct {
-	CtsProfileMatch            bool     `json:"ctsProfileMatch"`
-	TimestampMs                int      `json:"timestampMs"`
-	ApkDigestSha256            string   `json:"apkDigestSha256"`
-	ApkPackageName             string   `json:"apkPackageName"`
-	Extension                  string   `json:"extension"`
-	Nonce                      string   `json:"nonce"`
-	ApkCertificateDigestSha256 []string `json:"apkCertificateDigestSha256"`
+	// Pointers are used because these fields may not
+	// exist and the default values assigned when
+	// unmarshalling into the corresponding non-pointer
+	// struct would cause non-existing fields to be logged
+	// in a manner that would make it impossible to distinguise
+	// between a non-existing field and field of default value
+	BasicIntegrity             *bool     `json:"basicIntegrity"`
+	CtsProfileMatch            *bool     `json:"ctsProfileMatch"`
+	TimestampMs                *int      `json:"timestampMs"`
+	ApkDigestSha256            *string   `json:"apkDigestSha256"`
+	ApkPackageName             *string   `json:"apkPackageName"`
+	Error                      *string   `json:"error"`
+	Extension                  *string   `json:"extension"`
+	Nonce                      *string   `json:"nonce"`
+	ApkCertificateDigestSha256 *[]string `json:"apkCertificateDigestSha256"`
 }
 
 func newJwtBody(jsonBytes []byte) (jwtBody, error) {
 	var body jwtBody
 	err := json.Unmarshal(jsonBytes, &body)
 
-	// Handle empty apk certificate digest array
-	if len(body.ApkCertificateDigestSha256) == 0 {
-		body.ApkCertificateDigestSha256 = append(body.ApkCertificateDigestSha256, "")
-	}
 	return body, err
 }
 
@@ -164,12 +184,14 @@ func (x5c X5C) verifyCertChain() (leaf *x509.Certificate, validCN bool, err erro
 
 func (body *jwtBody) verifyJWTBody() (validApkCert, validApkPackageName bool) {
 	// Verify apk certificate digest
-	if len(body.ApkCertificateDigestSha256) >= 1 && body.ApkCertificateDigestSha256[0] == psiphon3Base64CertHash {
-		validApkCert = true
+	if body.ApkCertificateDigestSha256 != nil {
+		if len(*body.ApkCertificateDigestSha256) > 0 && (*body.ApkCertificateDigestSha256)[0] == psiphon3Base64CertHash {
+			validApkCert = true
+		}
 	}
 
 	// Verify apk package name
-	if common.Contains(psiphonApkPackagenames, body.ApkPackageName) {
+	if body.ApkPackageName != nil && common.Contains(psiphonApkPackagenames, *body.ApkPackageName) {
 		validApkPackageName = true
 	}
 
@@ -178,10 +200,25 @@ func (body *jwtBody) verifyJWTBody() (validApkCert, validApkPackageName bool) {
 
 // Form log fields for debugging
 func errorLogFields(err error, params requestJSONObject) LogFields {
-	return LogFields{
-		"error_message": err.Error(),
-		"payload":       params,
+	logFields := LogFields{
+		// Must sanitize string. JSON unmarshalling exceptions
+		// include the value of the field which failed to unmarshal.
+		"error_message": sanitizeJwtString(err.Error()),
 	}
+
+	// Sanitize payload for logging
+	payload, ok := params["payload"].(string)
+	// Only log payload if it exists
+	if ok {
+		if len(payload) > maxLogPayloadSize {
+			// Truncate if payload exceedingly long
+			payload = payload[:maxLogPayloadSize]
+			payload += ".."
+		}
+		logFields["payload"] = payload
+	}
+
+	return logFields
 }
 
 // Convert error to string for logging
@@ -192,14 +229,50 @@ func getError(err error) string {
 	return err.Error()
 }
 
+// Sanitize client / safetynet provided strings for logging
+func sanitizeJwtString(s string) string {
+	if len(s) > maxLogFieldSize {
+		return s[:maxLogFieldSize]
+	}
+	return s
+}
+
+// Add log field if it exists (see comment accompanying jwtBody struct)
+func (l LogFields) addJwtField(field string, input interface{}) {
+	switch val := input.(type) {
+	case *bool:
+		if val != nil {
+			l[field] = *val
+		}
+	case *int:
+		if val != nil {
+			if field == "verification_timestamp" {
+				l[field] = time.Unix(0, int64(*val)*1e6).UTC().Format(time.RFC3339)
+			} else {
+				l[field] = *val
+			}
+		}
+	case *string:
+		if val != nil {
+			l[field] = sanitizeJwtString(*val)
+		}
+	case *[]string:
+		// Only concerned with ApkCertificateDigestSha256[0] for now
+		if val != nil && len(*val) > 0 {
+			l[field] = sanitizeJwtString((*val)[0])
+		}
+	default:
+		// Do nothing
+	}
+}
+
 // Validate JWT produced by safetynet
 func verifySafetyNetPayload(params requestJSONObject) (bool, LogFields) {
 
-	jwt := newJwt(params)
-	if jwt == nil {
+	jwt, err := newJwt(params)
+	if err != nil {
 		// Malformed JWT
-		return false, errorLogFields(errors.New("Invalid request to client_verification, malformed jwt"), params)
-
+		return false, errorLogFields(err, params)
 	}
 
 	statusStrings := map[int]string{
@@ -208,22 +281,21 @@ func verifySafetyNetPayload(params requestJSONObject) (bool, LogFields) {
 		2: "API_CONNECT_FAILED",
 	}
 
-	statusString, ok := statusStrings[(*jwt).status]
+	statusString, ok := statusStrings[jwt.status]
 	if !ok {
-		statusString = "INVALID_STATUS: expected 0-2, got " + strconv.Itoa((*jwt).status)
+		statusString = "Expected status in range 0-2. Got " + strconv.Itoa(jwt.status)
 	}
 
 	// SafetyNet check failed
-	if (*jwt).status != 0 {
+	if jwt.status != 0 {
 		return false, errorLogFields(errors.New(statusString), params)
 	}
 
 	// Split into base64 encoded header, body, signature
-	jwtParts := strings.Split((*jwt).payload, ".")
+	jwtParts := strings.Split(jwt.payload, ".")
 	if len(jwtParts) != 3 {
 		// Malformed payload
-		return false, errorLogFields(errors.New("Invalid request to client_verification, malformed jwt"), params)
-
+		return false, errorLogFields(errors.New("JWT does not have 3 parts"), params)
 	}
 
 	// Decode header, body, signature
@@ -270,26 +342,30 @@ func verifySafetyNetPayload(params requestJSONObject) (bool, LogFields) {
 	validSignature := signatureErrors == nil
 	verified := validCN && validApkCert && validApkPackageName && validCertChain && validSignature
 
-	// Generate logging information
+	// Add server generated fields for logging
 	logFields := LogFields{
-		"apk_certificate_digest_sha256": body.ApkCertificateDigestSha256[0],
-		"apk_digest_sha256":             body.ApkDigestSha256,
-		"apk_package_name":              body.ApkPackageName,
-		"certchain_errors":              getError(certChainErrors),
-		"cts_profile_match":             body.CtsProfileMatch,
-		"extension":                     body.Extension,
-		"nonce":                         body.Nonce,
-		"signature_errors":              getError(signatureErrors),
-		"status":                        strconv.Itoa((*jwt).status),
-		"status_string":                 statusString,
-		"valid_cn":                      validCN,
-		"valid_apk_cert":                validApkCert,
-		"valid_apk_packagename":         validApkPackageName,
-		"valid_certchain":               validCertChain,
-		"valid_signature":               validSignature,
-		"verification_timestamp":        time.Unix(0, int64(body.TimestampMs)*1e6).UTC().Format(time.RFC3339),
-		"verified":                      verified,
+		"certchain_errors":      getError(certChainErrors),
+		"signature_errors":      getError(signatureErrors),
+		"status":                strconv.Itoa(jwt.status),
+		"status_string":         statusString,
+		"valid_cn":              validCN,
+		"valid_apk_cert":        validApkCert,
+		"valid_apk_packagename": validApkPackageName,
+		"valid_certchain":       validCertChain,
+		"valid_signature":       validSignature,
+		"verified":              verified,
 	}
+
+	// Add client / safetynet generated fields for logging
+	logFields.addJwtField("apk_certificate_digest_sha256", body.ApkCertificateDigestSha256)
+	logFields.addJwtField("apk_digest_sha256", body.ApkDigestSha256)
+	logFields.addJwtField("apk_package_name", body.ApkPackageName)
+	logFields.addJwtField("basic_integrity", body.BasicIntegrity)
+	logFields.addJwtField("cts_profile_match", body.CtsProfileMatch)
+	logFields.addJwtField("error", body.Error)
+	logFields.addJwtField("extension", body.Extension)
+	logFields.addJwtField("nonce", body.Nonce)
+	logFields.addJwtField("verification_timestamp", body.TimestampMs)
 
 	return verified, logFields
 }

@@ -195,11 +195,14 @@ func convertHTTPRequestToAPIRequest(
 			return nil, common.ContextError(err)
 		}
 		var bodyParams map[string]interface{}
-		err = json.Unmarshal(body, &bodyParams)
-		if err != nil {
-			return nil, common.ContextError(err)
+
+		if len(body) != 0 {
+			err = json.Unmarshal(body, &bodyParams)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+			params[requestBodyName] = bodyParams
 		}
-		params[requestBodyName] = bodyParams
 	}
 
 	return params, nil
@@ -284,8 +287,9 @@ func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *
 
 	params, err := convertHTTPRequestToAPIRequest(w, r, "verificationData")
 
+	var responsePayload []byte
 	if err == nil {
-		_, err = clientVerificationAPIRequestHandler(
+		responsePayload, err = clientVerificationAPIRequestHandler(
 			webServer.support, webServer.lookupGeoIPData(params), params)
 	}
 
@@ -296,4 +300,5 @@ func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *
 	}
 
 	w.WriteHeader(http.StatusOK)
+	w.Write(responsePayload)
 }
