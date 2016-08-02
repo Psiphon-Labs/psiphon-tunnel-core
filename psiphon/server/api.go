@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"unicode"
@@ -70,6 +71,29 @@ func sshAPIRequestHandler(
 		return nil, common.ContextError(
 			fmt.Errorf("invalid payload for request name: %s: %s", name, err))
 	}
+
+	return dispatchAPIRequestHandler(support, geoIPData, name, params)
+}
+
+// dispatchAPIRequestHandler is the common dispatch point for both
+// web and SSH API requests.
+func dispatchAPIRequestHandler(
+	support *SupportServices,
+	geoIPData GeoIPData,
+	name string,
+	params requestJSONObject) (response []byte, reterr error) {
+
+	// Recover from and log any unexpected panics causes by user input
+	// handling bugs. User inputs shuld be properly validated; this
+	// mechanism is only a last resort to prevent the process from
+	// terminating in the case of a bug.
+	defer func() {
+		if e := recover(); e != nil {
+			reterr = common.ContextError(
+				fmt.Errorf(
+					"request handler panic: %s: %s", e, debug.Stack()))
+		}
+	}()
 
 	switch name {
 	case common.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
