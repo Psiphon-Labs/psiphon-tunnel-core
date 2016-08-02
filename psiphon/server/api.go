@@ -111,17 +111,13 @@ func handshakeAPIRequestHandler(
 
 	// TODO: share struct definition with psiphon/serverApi.go?
 	var handshakeResponse struct {
-		Homepages                     []string            `json:"homepages"`
-		UpgradeClientVersion          string              `json:"upgrade_client_version"`
-		PageViewRegexes               []map[string]string `json:"page_view_regexes"`
-		HttpsRequestRegexes           []map[string]string `json:"https_request_regexes"`
-		EncodedServerList             []string            `json:"encoded_server_list"`
-		ClientRegion                  string              `json:"client_region"`
-		ServerTimestamp               string              `json:"server_timestamp"`
-		ClientVerificationRequired    bool                `json:"client_verification_required"`
-		ClientVerificationServerNonce string              `json:"client_verification_server_nonce"`
-		ClientVerificationTTLSeconds  int                 `json:"client_verification_ttl_seconds"`
-		ClientVerificationResetCache  bool                `json:"client_verification_reset_cache"`
+		Homepages            []string            `json:"homepages"`
+		UpgradeClientVersion string              `json:"upgrade_client_version"`
+		PageViewRegexes      []map[string]string `json:"page_view_regexes"`
+		HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
+		EncodedServerList    []string            `json:"encoded_server_list"`
+		ClientRegion         string              `json:"client_region"`
+		ServerTimestamp      string              `json:"server_timestamp"`
 	}
 
 	// Ignoring errors as params are validated
@@ -147,11 +143,6 @@ func handshakeAPIRequestHandler(
 	handshakeResponse.ClientRegion = clientRegion
 
 	handshakeResponse.ServerTimestamp = common.GetCurrentTimestamp()
-
-	handshakeResponse.ClientVerificationRequired = CLIENT_VERIFICATION_REQUIRED
-	handshakeResponse.ClientVerificationServerNonce = ""
-	handshakeResponse.ClientVerificationTTLSeconds = CLIENT_VERIFICATION_TTL_SECONDS
-	handshakeResponse.ClientVerificationResetCache = false
 
 	responsePayload, err := json.Marshal(handshakeResponse)
 	if err != nil {
@@ -345,33 +336,53 @@ func clientVerificationAPIRequestHandler(
 	// Ignoring error as params are validated
 	clientPlatform, _ := getStringRequestParam(params, "client_platform")
 
-	verificationData, err := getJSONObjectRequestParam(params, "verificationData")
-	if err != nil {
-		return nil, common.ContextError(err)
+	// Client sends empty payload to receive TTL
+	// NOTE: these events are not currently logged
+	if params["verificationData"] == nil {
+		if CLIENT_VERIFICATION_REQUIRED {
+
+			var clientVerificationResponse struct {
+				ClientVerificationTTLSeconds int `json:"client_verification_ttl_seconds"`
+			}
+			clientVerificationResponse.ClientVerificationTTLSeconds = CLIENT_VERIFICATION_TTL_SECONDS
+
+			responsePayload, err := json.Marshal(clientVerificationResponse)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+
+			return responsePayload, nil
+		} else {
+			return make([]byte, 0), nil
+		}
+	} else {
+		verificationData, err := getJSONObjectRequestParam(params, "verificationData")
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
+		logFields := getRequestLogFields(
+			support,
+			"client_verification",
+			geoIPData,
+			params,
+			baseRequestParams)
+
+		var verified bool
+		var safetyNetCheckLogs LogFields
+		switch normalizeClientPlatform(clientPlatform) {
+		case CLIENT_PLATFORM_ANDROID:
+			verified, safetyNetCheckLogs = verifySafetyNetPayload(verificationData)
+			logFields["safetynet_check"] = safetyNetCheckLogs
+		}
+
+		log.WithContextFields(logFields).Info("API event")
+
+		if verified {
+			// TODO: change throttling treatment
+		}
+		return make([]byte, 0), nil
 	}
-
-	logFields := getRequestLogFields(
-		support,
-		"client_verification",
-		geoIPData,
-		params,
-		baseRequestParams)
-
-	var verified bool
-	var safetyNetCheckLogs LogFields
-	switch normalizeClientPlatform(clientPlatform) {
-	case CLIENT_PLATFORM_ANDROID:
-		verified, safetyNetCheckLogs = verifySafetyNetPayload(verificationData)
-		logFields["safetynet_check"] = safetyNetCheckLogs
-	}
-
-	log.WithContextFields(logFields).Info("API event")
-
-	if verified {
-		// TODO: change throttling treatment
-	}
-
-	return make([]byte, 0), nil
 }
 
 type requestParamSpec struct {
