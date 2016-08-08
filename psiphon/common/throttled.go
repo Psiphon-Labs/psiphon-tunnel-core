@@ -69,8 +69,6 @@ type ThrottledConn struct {
 	net.Conn
 }
 
-const chunkSize = 4096
-
 // NewThrottledConn initializes a new ThrottledConn.
 func NewThrottledConn(conn net.Conn, limits RateLimits) *ThrottledConn {
 
@@ -119,14 +117,7 @@ func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
 		}
 	}
 
-	// When throttling, read small chunks to avoid
-	// excessive latency due to long waits in limitedReader.Read.
-
-	if len(buffer) <= chunkSize {
-		return conn.limitedReader.Read(buffer)
-	}
-
-	return conn.limitedReader.Read(buffer[0:chunkSize])
+	return conn.limitedReader.Read(buffer)
 }
 
 func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
@@ -140,24 +131,5 @@ func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
 		}
 	}
 
-	// When throttling, write buffer in small chunks to avoid
-	// excessive latency due to long waits in limitedWriter.Write.
-
-	bytesWritten := 0
-
-	for start := 0; start < len(buffer); start += chunkSize {
-		end := start + chunkSize
-		if end > len(buffer) {
-			end = len(buffer)
-		}
-
-		n, err := conn.limitedWriter.Write(buffer[start:end])
-		bytesWritten += n
-		if err != nil {
-			// Note: no ContextError as caller may check for io.EOF, etc.
-			return bytesWritten, err
-		}
-	}
-
-	return bytesWritten, nil
+	return conn.limitedWriter.Write(buffer)
 }
