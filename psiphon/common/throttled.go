@@ -145,9 +145,7 @@ func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
 
 	bytesWritten := 0
 
-	for i := 0; i < len(buffer); i += chunkSize {
-
-		start := i
+	for start := 0; start < len(buffer); start += chunkSize {
 		end := start + chunkSize
 		if end > len(buffer) {
 			end = len(buffer)

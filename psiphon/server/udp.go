@@ -324,6 +324,7 @@ func (portForward *udpPortForward) relayDownstream() {
 
 		err = writeUdpgwPreamble(
 			portForward.preambleSize,
+			0,
 			portForward.connID,
 			portForward.remoteIP,
 			portForward.remotePort,
@@ -377,7 +378,7 @@ const (
 	udpgwProtocolMaxMessageSize  = udpgwProtocolMaxPreambleSize + udpgwProtocolMaxPayloadSize
 )
 
-type udpProtocolMessage struct {
+type udpgwProtocolMessage struct {
 	connID              uint16
 	preambleSize        int
 	remoteIP            []byte
@@ -388,7 +389,7 @@ type udpProtocolMessage struct {
 }
 
 func readUdpgwMessage(
-	reader io.Reader, buffer []byte) (*udpProtocolMessage, error) {
+	reader io.Reader, buffer []byte) (*udpgwProtocolMessage, error) {
 
 	// udpgw message layout:
 	//
@@ -455,9 +456,9 @@ func readUdpgwMessage(
 		}
 
 		// Assemble message
-		// Note: udpProtocolMessage.packet references memory in the input buffer
+		// Note: udpgwProtocolMessage.packet references memory in the input buffer
 
-		message := &udpProtocolMessage{
+		message := &udpgwProtocolMessage{
 			connID:              connID,
 			preambleSize:        packetStart,
 			remoteIP:            remoteIP,
@@ -473,6 +474,7 @@ func readUdpgwMessage(
 
 func writeUdpgwPreamble(
 	preambleSize int,
+	flags uint8,
 	connID uint16,
 	remoteIP []byte,
 	remotePort uint16,
@@ -490,7 +492,7 @@ func writeUdpgwPreamble(
 	buffer[1] = byte(size >> 8)
 
 	// flags
-	buffer[2] = 0
+	buffer[2] = flags
 
 	// connID
 	buffer[3] = byte(connID & 0xFF)
