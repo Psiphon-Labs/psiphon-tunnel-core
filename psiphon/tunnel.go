@@ -268,8 +268,8 @@ func (tunnel *Tunnel) Dial(
 		err                error
 	}
 	resultChannel := make(chan *tunnelDialResult, 2)
-	if *tunnel.config.TunnelPortForwardTimeoutSeconds > 0 {
-		time.AfterFunc(time.Duration(*tunnel.config.TunnelPortForwardTimeoutSeconds)*time.Second, func() {
+	if *tunnel.config.TunnelPortForwardDialTimeoutSeconds > 0 {
+		time.AfterFunc(time.Duration(*tunnel.config.TunnelPortForwardDialTimeoutSeconds)*time.Second, func() {
 			resultChannel <- &tunnelDialResult{nil, errors.New("tunnel dial timeout")}
 		})
 	}
