@@ -233,11 +233,11 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		return
 	}
 
-	// PumpReads causes a TunnelServer/SSH goroutine blocking on a Read to
+	// pumpReads causes a TunnelServer/SSH goroutine blocking on a Read to
 	// read the request body as upstream traffic.
-	// TODO: run PumpReads and PumpWrites concurrently?
+	// TODO: run pumpReads and pumpWrites concurrently?
 
-	err = session.clientConn.PumpReads(request.Body)
+	err = session.clientConn.pumpReads(request.Body)
 	if err != nil {
 		if err != io.EOF {
 			log.WithContextFields(LogFields{"error": err}).Warning("pump reads failed")
@@ -257,10 +257,10 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		session.sessionIDSent = true
 	}
 
-	// PumpWrites causes a TunnelServer/SSH goroutine blocking on a Write to
+	// pumpWrites causes a TunnelServer/SSH goroutine blocking on a Write to
 	// write its downstream traffic through to the response body.
 
-	err = session.clientConn.PumpWrites(responseWriter)
+	err = session.clientConn.pumpWrites(responseWriter)
 	if err != nil {
 		if err != io.EOF {
 			log.WithContextFields(LogFields{"error": err}).Warning("pump writes failed")
@@ -612,11 +612,11 @@ func newMeekConn(remoteAddr net.Addr, protocolVersion int) *meekConn {
 	}
 }
 
-// PumpReads causes goroutines blocking on meekConn.Read() to read
+// pumpReads causes goroutines blocking on meekConn.Read() to read
 // from the specified reader. This function blocks until the reader
 // is fully consumed or the meekConn is closed.
-// Note: channel scheme assumes only one concurrent call to PumpReads
-func (conn *meekConn) PumpReads(reader io.Reader) error {
+// Note: channel scheme assumes only one concurrent call to pumpReads
+func (conn *meekConn) pumpReads(reader io.Reader) error {
 
 	// Assumes that readyReader won't block.
 	conn.readyReader <- reader
@@ -634,7 +634,7 @@ func (conn *meekConn) PumpReads(reader io.Reader) error {
 
 // Read reads from the meekConn into buffer. Read blocks until
 // some data is read or the meekConn closes. Under the hood, it
-// waits for PumpReads to submit a reader to read from.
+// waits for pumpReads to submit a reader to read from.
 // Note: lock is to conform with net.Conn concurrency semantics
 func (conn *meekConn) Read(buffer []byte) (int, error) {
 	conn.readLock.Lock()
@@ -658,7 +658,7 @@ func (conn *meekConn) Read(buffer []byte) (int, error) {
 	} else {
 		// There may be more data in the reader, but the caller's
 		// buffer is full, so put the reader back into the ready
-		// channel. PumpReads remains blocked waiting for another
+		// channel. pumpReads remains blocked waiting for another
 		// Read call.
 		// Note that the reader could be at EOF, while another call is
 		// required to get that result (https://golang.org/pkg/io/#Reader).
@@ -668,12 +668,12 @@ func (conn *meekConn) Read(buffer []byte) (int, error) {
 	return n, err
 }
 
-// PumpReads causes goroutines blocking on meekConn.Write() to write
+// pumpWrites causes goroutines blocking on meekConn.Write() to write
 // to the specified writer. This function blocks until the meek response
 // body limits (size for protocol v1, turn around time for protocol v2+)
 // are met, or the meekConn is closed.
-// Note: channel scheme assumes only one concurrent call to PumpWrites
-func (conn *meekConn) PumpWrites(writer io.Writer) error {
+// Note: channel scheme assumes only one concurrent call to pumpWrites
+func (conn *meekConn) pumpWrites(writer io.Writer) error {
 
 	startTime := time.Now()
 	timeout := time.NewTimer(MEEK_TURN_AROUND_TIMEOUT)
@@ -713,7 +713,7 @@ func (conn *meekConn) PumpWrites(writer io.Writer) error {
 
 // Write writes the buffer to the meekConn. It blocks until the
 // entire buffer is written to or the meekConn closes. Under the
-// hood, it waits for sufficient PumpWrites calls to consume the
+// hood, it waits for sufficient pumpWrites calls to consume the
 // write buffer.
 // Note: lock is to conform with net.Conn concurrency semantics
 func (conn *meekConn) Write(buffer []byte) (int, error) {
@@ -721,7 +721,7 @@ func (conn *meekConn) Write(buffer []byte) (int, error) {
 	defer conn.writeLock.Unlock()
 
 	// TODO: may be more efficient to send whole buffer
-	// and have PumpWrites stash partial buffer when can't
+	// and have pumpWrites stash partial buffer when can't
 	// send it all.
 
 	n := 0
@@ -756,7 +756,7 @@ func (conn *meekConn) Write(buffer []byte) (int, error) {
 }
 
 // Close closes the meekConn. This will interrupt any blocked
-// Read, Write, PumpReads, and PumpWrites.
+// Read, Write, pumpReads, and pumpWrites.
 func (conn *meekConn) Close() error {
 	if atomic.CompareAndSwapInt32(&conn.closed, 0, 1) {
 		close(conn.closeBroadcast)
