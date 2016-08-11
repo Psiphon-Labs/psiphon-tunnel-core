@@ -15,22 +15,6 @@ Status
 
 This project is in production and used as the tunneling engine in our Windows and Android clients, which are available at our [Psiphon 3 repository](https://bitbucket.org/psiphon/psiphon-circumvention-system).
 
-Acknowledgements
---------------------------------------------------------------------------------
-
-Psiphon Tunnel Core uses:
-
-* [Go](https://golang.org/)
-* [Logrus](https://github.com/Sirupsen/logrus)
-* [MaxMind DB Reader for Go](https://github.com/oschwald/maxminddb-golang)
-* [go-cache](https://github.com/patrickmn/go-cache)
-* [ratelimit](https://github.com/juju/ratelimit)
-* [Bolt](https://github.com/boltdb/bolt)
-* [Go DNS](https://github.com/miekg/dns)
-* [OpenSSL Bindings for Go](https://github.com/spacemonkeygo/openssl)
-* [goptlib](https://github.com/Yawning/goptlib)
-* [goregen](https://github.com/zach-klippenstein/goregen)
-
 Client Setup
 --------------------------------------------------------------------------------
 
@@ -85,6 +69,22 @@ Other Platforms
 
 * The project builds and runs on Android. See the [Android Library README](MobileLibrary/Android/README.md) for more information about building the Go component, and the [Android Sample App README](MobileLibrary/Android/SampleApps/TunneledWebView/README.md) for a sample Android app that uses it.
 
+
+Acknowledgements
+--------------------------------------------------------------------------------
+
+Psiphon Tunnel Core uses:
+
+* [Go](https://golang.org/)
+* [Logrus](https://github.com/Sirupsen/logrus)
+* [MaxMind DB Reader for Go](https://github.com/oschwald/maxminddb-golang)
+* [go-cache](https://github.com/patrickmn/go-cache)
+* [ratelimit](https://github.com/juju/ratelimit)
+* [Bolt](https://github.com/boltdb/bolt)
+* [Go DNS](https://github.com/miekg/dns)
+* [OpenSSL Bindings for Go](https://github.com/spacemonkeygo/openssl)
+* [goptlib](https://github.com/Yawning/goptlib)
+* [goregen](https://github.com/zach-klippenstein/goregen)
 
 Licensing
 --------------------------------------------------------------------------------
