@@ -45,9 +45,7 @@ When that command completes, the compiled `.aar` file (suitable for use in an An
 #####Steps:
 
  1. Follow Go Android documentation ([gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile))
- - Build command: `gomobile bind -target=android github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi`
-  - Record build version info, as described [here](../README.md#setup), by passing a `-ldflags` argument to `gomobile bind`.
-  - Output: `psi.aar`
+ 2. Run `make.bash`
 
 ###Using the Library
 
