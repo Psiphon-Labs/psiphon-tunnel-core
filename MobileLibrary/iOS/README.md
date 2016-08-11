@@ -6,6 +6,10 @@ Psiphon Library for iOS enables you to easily embed Psiphon in your iOS
 app. The Psiphon Library for iOS is implemented in Go and follows the standard
 conventions for using a Go library in an iOS app.
 
+###Acknowledgements
+
+Psiphon iOS Library uses [OpenSSL-for-iPhone](https://github.com/x2on/OpenSSL-for-iPhone).
+
 ###Building
 
 ####Prerequisites
