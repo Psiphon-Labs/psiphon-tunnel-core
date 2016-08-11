@@ -24,6 +24,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -34,6 +35,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"golang.org/x/net/proxy"
 )
 
 func TestMain(m *testing.M) {
@@ -113,10 +115,10 @@ func sendNotificationReceived(c chan<- struct{}) {
 	}
 }
 
-func waitOnNotification(c <-chan struct{}, t *testing.T, timeout <-chan time.Time, timeoutMessage string) {
+func waitOnNotification(t *testing.T, c, timeoutSignal <-chan struct{}, timeoutMessage string) {
 	select {
 	case <-c:
-	case <-timeout:
+	case <-timeoutSignal:
 		t.Fatalf(timeoutMessage)
 	}
 }
@@ -165,6 +167,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig.(map[string]interface{})["GeoIPDatabaseFilename"] = ""
 	serverConfig.(map[string]interface{})["PsinetDatabaseFilename"] = psinetFilename
 	serverConfig.(map[string]interface{})["TrafficRulesFilename"] = ""
+	serverConfig.(map[string]interface{})["LogLevel"] = "debug"
+
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
 	// run server
@@ -225,6 +229,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// TODO: currently, TargetServerEntry only works with one tunnel
 	numTunnels := 1
+	localSOCKSProxyPort := 1081
 	localHTTPProxyPort := 8081
 	establishTunnelPausePeriodSeconds := 1
 
@@ -245,6 +250,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.EstablishTunnelPausePeriodSeconds = &establishTunnelPausePeriodSeconds
 	clientConfig.TargetServerEntry = string(encodedServerEntry)
 	clientConfig.TunnelProtocol = runConfig.tunnelProtocol
+	clientConfig.LocalSocksProxyPort = localSOCKSProxyPort
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
 
 	err = psiphon.InitDataStore(clientConfig)
@@ -265,7 +271,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 
-			fmt.Printf("%s\n", string(notice))
+			//fmt.Printf("%s\n", string(notice))
 
 			noticeType, payload, err := psiphon.GetNotice(notice)
 			if err != nil {
@@ -324,14 +330,29 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Test: tunnels must be established, and correct homepage
 	// must be received, within 30 seconds
 
-	establishedTimeout := time.NewTimer(30 * time.Second)
+	timeoutSignal := make(chan struct{})
+	go func() {
+		timer := time.NewTimer(30 * time.Second)
+		<-timer.C
+		close(timeoutSignal)
+	}()
 
-	waitOnNotification(tunnelsEstablished, t, establishedTimeout.C, "tunnel establish timeout exceeded")
-	waitOnNotification(homepageReceived, t, establishedTimeout.C, "homepage received timeout exceeded")
-	waitOnNotification(verificationRequired, t, establishedTimeout.C, "verification required timeout exceeded")
-	waitOnNotification(verificationCompleted, t, establishedTimeout.C, "verification completed timeout exceeded")
+	waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel establish timeout exceeded")
+	waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
+	waitOnNotification(t, verificationRequired, timeoutSignal, "verification required timeout exceeded")
+	waitOnNotification(t, verificationCompleted, timeoutSignal, "verification completed timeout exceeded")
 
 	// Test: tunneled web site fetch
+
+	makeTunneledWebRequest(t, localHTTPProxyPort)
+
+	// Test: tunneled UDP packet
+
+	udpgwServerAddress := serverConfig.(map[string]interface{})["UDPInterceptUdpgwServerAddress"].(string)
+	makeTunneledDNSRequest(t, localSOCKSProxyPort, udpgwServerAddress)
+}
+
+func makeTunneledWebRequest(t *testing.T, localHTTPProxyPort int) {
 
 	testUrl := "https://psiphon.ca"
 	roundTripTimeout := 30 * time.Second
@@ -358,6 +379,91 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("error reading proxied HTTP response: %s", err)
 	}
 	response.Body.Close()
+}
+
+func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAddress string) {
+
+	testHostname := "psiphon.ca"
+	timeout := 10 * time.Second
+
+	localUDPProxyAddress, err := net.ResolveUDPAddr("udp", "127.0.0.1:7301")
+	if err != nil {
+		t.Fatalf("ResolveUDPAddr failed: %s", err)
+	}
+
+	go func() {
+
+		serverUDPConn, err := net.ListenUDP("udp", localUDPProxyAddress)
+		if err != nil {
+			t.Fatalf("ListenUDP failed: %s", err)
+		}
+		defer serverUDPConn.Close()
+
+		udpgwPreambleSize := 11 // see writeUdpgwPreamble
+		buffer := make([]byte, udpgwProtocolMaxMessageSize)
+		packetSize, clientAddr, err := serverUDPConn.ReadFromUDP(
+			buffer[udpgwPreambleSize:len(buffer)])
+		if err != nil {
+			t.Fatalf("serverUDPConn.Read failed: %s", err)
+		}
+
+		socksProxyAddress := fmt.Sprintf("127.0.0.1:%d", localSOCKSProxyPort)
+
+		dialer, err := proxy.SOCKS5("tcp", socksProxyAddress, nil, proxy.Direct)
+		if err != nil {
+			t.Fatalf("proxy.SOCKS5 failed: %s", err)
+		}
+
+		socksTCPConn, err := dialer.Dial("tcp", udpgwServerAddress)
+		if err != nil {
+			t.Fatalf("dialer.Dial failed: %s", err)
+		}
+		defer socksTCPConn.Close()
+
+		err = writeUdpgwPreamble(
+			udpgwPreambleSize,
+			udpgwProtocolFlagDNS,
+			0,
+			make([]byte, 4), // ignored due to transparent DNS forwarding
+			53,
+			uint16(packetSize),
+			buffer)
+		if err != nil {
+			t.Fatalf("writeUdpgwPreamble failed: %s", err)
+		}
+
+		_, err = socksTCPConn.Write(buffer[0 : udpgwPreambleSize+packetSize])
+		if err != nil {
+			t.Fatalf("socksTCPConn.Write failed: %s", err)
+		}
+
+		updgwProtocolMessage, err := readUdpgwMessage(socksTCPConn, buffer)
+		if err != nil {
+			t.Fatalf("readUdpgwMessage failed: %s", err)
+		}
+
+		_, err = serverUDPConn.WriteToUDP(updgwProtocolMessage.packet, clientAddr)
+		if err != nil {
+			t.Fatalf("serverUDPConn.Write failed: %s", err)
+		}
+	}()
+
+	// TODO: properly synchronize with server startup
+	time.Sleep(1 * time.Second)
+
+	clientUDPConn, err := net.DialUDP("udp", nil, localUDPProxyAddress)
+	if err != nil {
+		t.Fatalf("DialUDP failed: %s", err)
+	}
+	defer clientUDPConn.Close()
+
+	clientUDPConn.SetReadDeadline(time.Now().Add(timeout))
+	clientUDPConn.SetWriteDeadline(time.Now().Add(timeout))
+
+	_, _, err = psiphon.ResolveIP(testHostname, clientUDPConn)
+	if err != nil {
+		t.Fatalf("ResolveIP failed: %s", err)
+	}
 }
 
 func pavePsinetDatabaseFile(t *testing.T, psinetFilename string) (string, string) {

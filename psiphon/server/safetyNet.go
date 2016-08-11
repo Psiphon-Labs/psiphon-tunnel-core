@@ -104,7 +104,7 @@ type jwtBody struct {
 	// exist and the default values assigned when
 	// unmarshalling into the corresponding non-pointer
 	// struct would cause non-existing fields to be logged
-	// in a manner that would make it impossible to distinguise
+	// in a manner that would make it impossible to distinguish
 	// between a non-existing field and field of default value
 	BasicIntegrity             *bool     `json:"basicIntegrity"`
 	CtsProfileMatch            *bool     `json:"ctsProfileMatch"`

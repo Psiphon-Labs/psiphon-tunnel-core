@@ -225,8 +225,11 @@ func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Requ
 
 	var responsePayload []byte
 	if err == nil {
-		responsePayload, err = handshakeAPIRequestHandler(
-			webServer.support, webServer.lookupGeoIPData(params), params)
+		responsePayload, err = dispatchAPIRequestHandler(
+			webServer.support,
+			webServer.lookupGeoIPData(params),
+			common.PSIPHON_API_HANDSHAKE_REQUEST_NAME,
+			params)
 	}
 
 	if err != nil {
@@ -251,8 +254,11 @@ func (webServer *webServer) connectedHandler(w http.ResponseWriter, r *http.Requ
 
 	var responsePayload []byte
 	if err == nil {
-		responsePayload, err = connectedAPIRequestHandler(
-			webServer.support, webServer.lookupGeoIPData(params), params)
+		responsePayload, err = dispatchAPIRequestHandler(
+			webServer.support,
+			webServer.lookupGeoIPData(params),
+			common.PSIPHON_API_CONNECTED_REQUEST_NAME,
+			params)
 	}
 
 	if err != nil {
@@ -270,8 +276,11 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 	params, err := convertHTTPRequestToAPIRequest(w, r, "statusData")
 
 	if err == nil {
-		_, err = statusAPIRequestHandler(
-			webServer.support, webServer.lookupGeoIPData(params), params)
+		_, err = dispatchAPIRequestHandler(
+			webServer.support,
+			webServer.lookupGeoIPData(params),
+			common.PSIPHON_API_STATUS_REQUEST_NAME,
+			params)
 	}
 
 	if err != nil {
@@ -289,8 +298,11 @@ func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *
 
 	var responsePayload []byte
 	if err == nil {
-		responsePayload, err = clientVerificationAPIRequestHandler(
-			webServer.support, webServer.lookupGeoIPData(params), params)
+		responsePayload, err = dispatchAPIRequestHandler(
+			webServer.support,
+			webServer.lookupGeoIPData(params),
+			common.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME,
+			params)
 	}
 
 	if err != nil {

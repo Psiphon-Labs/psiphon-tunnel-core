@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -99,6 +100,17 @@ func (mux *udpPortForwardMultiplexer) run() {
 	//
 	// When the client disconnects or the server shuts down, the channel will close and
 	// readUdpgwMessage will exit with EOF.
+
+	// Recover from and log any unexpected panics caused by udpgw input handling bugs.
+	// Note: this covers the run() goroutine only and not relayDownstream() goroutines.
+	defer func() {
+		if e := recover(); e != nil {
+			err := common.ContextError(
+				fmt.Errorf(
+					"udpPortForwardMultiplexer panic: %s: %s", e, debug.Stack()))
+			log.WithContextFields(LogFields{"error": err}).Warning("run failed")
+		}
+	}()
 
 	buffer := make([]byte, udpgwProtocolMaxMessageSize)
 	for {
@@ -268,6 +280,9 @@ func (mux *udpPortForwardMultiplexer) removePortForward(connID uint16) {
 }
 
 type udpPortForward struct {
+	// Note: 64-bit ints used with atomic operations are at placed
+	// at the start of struct to ensure 64-bit alignment.
+	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	bytesUp      int64
 	bytesDown    int64
 	connID       uint16
@@ -302,13 +317,14 @@ func (portForward *udpPortForward) relayDownstream() {
 		if err != nil {
 			if err != io.EOF {
 				// Debug since errors such as "use of closed network connection" occur during normal operation
-				log.WithContextFields(LogFields{"error": err}).Warning("downstream UDP relay failed")
+				log.WithContextFields(LogFields{"error": err}).Debug("downstream UDP relay failed")
 			}
 			break
 		}
 
 		err = writeUdpgwPreamble(
 			portForward.preambleSize,
+			0,
 			portForward.connID,
 			portForward.remoteIP,
 			portForward.remotePort,
@@ -362,7 +378,7 @@ const (
 	udpgwProtocolMaxMessageSize  = udpgwProtocolMaxPreambleSize + udpgwProtocolMaxPayloadSize
 )
 
-type udpProtocolMessage struct {
+type udpgwProtocolMessage struct {
 	connID              uint16
 	preambleSize        int
 	remoteIP            []byte
@@ -373,7 +389,7 @@ type udpProtocolMessage struct {
 }
 
 func readUdpgwMessage(
-	reader io.Reader, buffer []byte) (*udpProtocolMessage, error) {
+	reader io.Reader, buffer []byte) (*udpgwProtocolMessage, error) {
 
 	// udpgw message layout:
 	//
@@ -440,9 +456,9 @@ func readUdpgwMessage(
 		}
 
 		// Assemble message
-		// Note: udpProtocolMessage.packet references memory in the input buffer
+		// Note: udpgwProtocolMessage.packet references memory in the input buffer
 
-		message := &udpProtocolMessage{
+		message := &udpgwProtocolMessage{
 			connID:              connID,
 			preambleSize:        packetStart,
 			remoteIP:            remoteIP,
@@ -458,6 +474,7 @@ func readUdpgwMessage(
 
 func writeUdpgwPreamble(
 	preambleSize int,
+	flags uint8,
 	connID uint16,
 	remoteIP []byte,
 	remotePort uint16,
@@ -475,7 +492,7 @@ func writeUdpgwPreamble(
 	buffer[1] = byte(size >> 8)
 
 	// flags
-	buffer[2] = 0
+	buffer[2] = flags
 
 	// connID
 	buffer[3] = byte(connID & 0xFF)
