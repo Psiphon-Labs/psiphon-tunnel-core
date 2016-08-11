@@ -345,6 +345,7 @@ func verifySafetyNetPayload(params requestJSONObject) (bool, LogFields) {
 	// Add server generated fields for logging
 	logFields := LogFields{
 		"certchain_errors":      getError(certChainErrors),
+		"is_tcs":                true,
 		"signature_errors":      getError(signatureErrors),
 		"status":                strconv.Itoa(jwt.status),
 		"status_string":         statusString,
