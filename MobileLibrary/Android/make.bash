@@ -7,8 +7,8 @@ if [ ! -f make.bash ]; then
   exit 1
 fi
 
-GOOS=arm go get -d -v github.com/Psiphon-Inc/openssl
-GOOS=arm go get -d -v ./...
+GOOS=arm go get -d -v -u github.com/Psiphon-Inc/openssl
+GOOS=arm go get -d -v -u ./...
 if [ $? != 0 ]; then
   echo "..'go get' failed, exiting"
   exit $?
