@@ -7,10 +7,18 @@ if [ ! -f make.bash ]; then
   exit 1
 fi
 
-GOOS=arm go get -d -v -u github.com/Psiphon-Inc/openssl
+# Don't use '-u' to force updates because the docker builds always pull
+# the latest versions. Outside of Docker, be aware that these dependencies
+# will not be overridden w/ new versions if they already exist in $GOPATH
+
+GOOS=arm go get -d -v github.com/Psiphon-Inc/openssl
+if [ $? != 0 ]; then
+  echo "..'go get -d -v github.com/psiphon-inc/openssl' failed, exiting"
+  exit $?
+fi
 GOOS=arm go get -d -v github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon
 if [ $? != 0 ]; then
-  echo "..'go get' failed, exiting"
+  echo "..'go get -d -v github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon' failed, exiting"
   exit $?
 fi
 
