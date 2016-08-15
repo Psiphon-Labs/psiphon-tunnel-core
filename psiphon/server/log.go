@@ -20,6 +20,8 @@
 package server
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 
@@ -60,10 +62,76 @@ func (logger *ContextLogger) WithContextFields(fields LogFields) *logrus.Entry {
 	return log.WithFields(logrus.Fields(fields))
 }
 
+// LogRawFieldsWithTimestamp directly logs the supplied fields adding only
+// an additional "timestamp" field. The stock "msg" and "level" fields are
+// omitted. This log is emitted at the Error level. This function exists to
+// support API logs which have neither a natural message nor severity; and
+// omitting these values here makes it easier to ship these logs to existing
+// API log consumers.
+func (logger *ContextLogger) LogRawFieldsWithTimestamp(fields LogFields) {
+	logger.WithFields(logrus.Fields(fields)).Error(
+		customJSONFormatterLogRawFieldsWithTimestamp)
+}
+
 // NewLogWriter returns an io.PipeWriter that can be used to write
 // to the global logger. Caller must Close() the writer.
 func NewLogWriter() *io.PipeWriter {
 	return log.Writer()
+}
+
+// CustomJSONFormatter is a customized version of logrus.JSONFormatter
+type CustomJSONFormatter struct {
+}
+
+const customJSONFormatterLogRawFieldsWithTimestamp = "CustomJSONFormatter.LogRawFieldsWithTimestamp"
+
+// Format implements logrus.Formatter. This is a customized version
+// of the standard logrus.JSONFormatter adapted from:
+// https://github.com/Sirupsen/logrus/blob/f1addc29722ba9f7651bc42b4198d0944b66e7c4/json_formatter.go
+//
+// The changes are:
+// - "time" is renamed to "timestamp"
+// - there's an option to omit the standard "msg" and "level" fields
+//
+func (f *CustomJSONFormatter) Format(entry *logrus.Entry) ([]byte, error) {
+	data := make(logrus.Fields, len(entry.Data)+3)
+	for k, v := range entry.Data {
+		switch v := v.(type) {
+		case error:
+			// Otherwise errors are ignored by `encoding/json`
+			// https://github.com/Sirupsen/logrus/issues/137
+			data[k] = v.Error()
+		default:
+			data[k] = v
+		}
+	}
+
+	if t, ok := data["timestamp"]; ok {
+		data["fields.timestamp"] = t
+	}
+
+	data["timestamp"] = entry.Time.Format(logrus.DefaultTimestampFormat)
+
+	if entry.Message != customJSONFormatterLogRawFieldsWithTimestamp {
+
+		if m, ok := data["msg"]; ok {
+			data["fields.msg"] = m
+		}
+
+		if l, ok := data["level"]; ok {
+			data["fields.level"] = l
+		}
+
+		data["msg"] = entry.Message
+		data["level"] = entry.Level.String()
+	}
+
+	serialized, err := json.Marshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to marshal fields to JSON, %v", err)
+	}
+
+	return append(serialized, '\n'), nil
 }
 
 var log *ContextLogger
@@ -93,7 +161,7 @@ func InitLogging(config *Config) error {
 	log = &ContextLogger{
 		&logrus.Logger{
 			Out:       logWriter,
-			Formatter: &logrus.JSONFormatter{},
+			Formatter: &CustomJSONFormatter{},
 			Level:     level,
 		},
 	}
@@ -105,7 +173,7 @@ func init() {
 	log = &ContextLogger{
 		&logrus.Logger{
 			Out:       os.Stderr,
-			Formatter: &logrus.JSONFormatter{},
+			Formatter: &CustomJSONFormatter{},
 			Hooks:     make(logrus.LevelHooks),
 			Level:     logrus.DebugLevel,
 		},
