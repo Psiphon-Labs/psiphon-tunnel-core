@@ -30,9 +30,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Psiphon-Inc/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -479,7 +479,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 			// TODO: ensure this won't block shutdown
 			conn, result.err = psiphon.NewObfuscatedSshConn(
 				psiphon.OBFUSCATION_CONN_MODE_SERVER,
-				clientConn,
+				conn,
 				sshServer.support.Config.ObfuscatedSSHKey)
 			if result.err != nil {
 				result.err = common.ContextError(result.err)
