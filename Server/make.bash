@@ -12,7 +12,7 @@ fi
 
 prepare_build () {
   BUILDINFOFILE="${EXE_BASENAME}_buildinfo.txt"
-  BUILDDATE=$(date --iso-8601=seconds)
+  BUILDDATE=$(date -Iseconds)
   BUILDREPO=$(git config --get remote.origin.url)
   BUILDREV=$(git rev-parse --short HEAD)
   GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
