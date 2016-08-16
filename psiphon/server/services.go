@@ -58,6 +58,8 @@ func RunServices(configJSON []byte) error {
 		return common.ContextError(err)
 	}
 
+	log.WithContextFields(*common.GetBuildInfo().ToMap()).Info("startup")
+
 	waitGroup := new(sync.WaitGroup)
 	shutdownBroadcast := make(chan struct{})
 	errors := make(chan error)
@@ -151,6 +153,7 @@ func logServerLoad(server *TunnelServer) {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	fields := LogFields{
+		"BuildRev":               common.GetBuildInfo().BuildRev,
 		"NumGoroutine":           runtime.NumGoroutine(),
 		"MemStats.Alloc":         memStats.Alloc,
 		"MemStats.TotalAlloc":    memStats.TotalAlloc,

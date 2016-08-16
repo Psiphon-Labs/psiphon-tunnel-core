@@ -15,9 +15,9 @@ Note that you may need to use `sudo docker` below, depending on your OS.
   cd .. && \
     docker run \
     --rm \
-    -v $(pwd):/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core \
+    -v $PWD:/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core \
     psiclient \
-    /bin/bash -c 'cd /go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient && ./make.bash all' \
+    /bin/bash -c './make.bash all' \
   ; cd -
   ```
 This command can also be modified by:

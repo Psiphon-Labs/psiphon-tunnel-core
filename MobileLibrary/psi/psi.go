@@ -73,7 +73,7 @@ func Start(
 			provider.Notice(string(notice))
 		}))
 
-	psiphon.EmitNoticeBuildInfo()
+	psiphon.GetBuildInfo()
 
 	// TODO: should following errors be Notices?
 

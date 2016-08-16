@@ -8,26 +8,32 @@ if [ ! -f make.bash ]; then
 fi
 
 EXE_BASENAME="psiphon-tunnel-core"
-BUILDINFOFILE="${EXE_BASENAME}_buildinfo.txt"
-BUILDDATE=$(date --iso-8601=seconds)
-BUILDREPO=$(git config --get remote.origin.url)
-BUILDREV=$(git rev-parse --short HEAD)
-GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
 
-LDFLAGS="\
--X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildDate=$BUILDDATE \
--X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildRepo=$BUILDREPO \
--X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildRev=$BUILDREV \
--X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.goVersion=$GOVERSION \
-"
-echo -e "${BUILDDATE}\n${BUILDREPO}\n${BUILDREV}\n" > $BUILDINFOFILE
+prepare_build () {
+  BUILDINFOFILE="${EXE_BASENAME}_buildinfo.txt"
+  BUILDDATE=$(date --iso-8601=seconds)
+  BUILDREPO=$(git config --get remote.origin.url)
+  BUILDREV=$(git rev-parse --short HEAD)
+  GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
+  DEPENDENCIES=$(echo -n "{" && go list -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
 
-echo "Variables for ldflags:"
-echo " Build date: ${BUILDDATE}"
-echo " Build repo: ${BUILDREPO}"
-echo " Build revision: ${BUILDREV}"
-echo " Go version: ${GOVERSION}"
-echo ""
+  LDFLAGS="\
+  -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildDate=$BUILDDATE \
+  -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildRepo=$BUILDREPO \
+  -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildRev=$BUILDREV \
+  -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.goVersion=$GOVERSION \
+  -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.dependencies=$DEPENDENCIES \
+  "
+  echo -e "${BUILDDATE}\n${BUILDREPO}\n${BUILDREV}\n" > $BUILDINFOFILE
+
+  echo "Variables for ldflags:"
+  echo " Build date: ${BUILDDATE}"
+  echo " Build repo: ${BUILDREPO}"
+  echo " Build revision: ${BUILDREV}"
+  echo " Go version: ${GOVERSION}"
+  echo " Dependencies: ${DEPENDENCIES}"
+  echo ""
+}
 
 if [ ! -d bin ]; then
   mkdir bin
@@ -36,6 +42,7 @@ fi
 build_for_windows () {
   echo "...Getting project dependencies (via go get) for Windows. Parameter is: '$1'"
   GOOS=windows go get -d -v ./...
+  prepare_build
   if [ $? != 0 ]; then
     echo "....'go get' failed, exiting"
     exit $?
@@ -90,6 +97,7 @@ build_for_windows () {
 build_for_linux () {
   echo "Getting project dependencies (via go get) for Linux. Parameter is: '$1'"
   GOOS=linux go get -d -v ./...
+  prepare_build
   if [ $? != 0 ]; then
     echo "...'go get' failed, exiting"
     exit $?
@@ -139,6 +147,7 @@ build_for_linux () {
 build_for_osx () {
   echo "Getting project dependencies (via go get) for OSX"
   GOOS=darwin go get -d -v ./...
+  prepare_build
   if [ $? != 0 ]; then
     echo "..'go get' failed, exiting"
     exit $?
