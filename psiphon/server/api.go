@@ -525,6 +525,7 @@ func getRequestLogFields(
 
 	logFields["event_name"] = eventName
 	logFields["host_id"] = support.Config.HostID
+	logFields["build_rev"] = common.GetBuildInfo().BuildRev
 
 	// In psi_web, the space replacement was done to accommodate space
 	// delimited logging, which is no longer required; we retain the

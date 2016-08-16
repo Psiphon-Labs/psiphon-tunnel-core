@@ -62,7 +62,7 @@ func main() {
 	}
 	psiphon.SetNoticeOutput(noticeWriter)
 
-	psiphon.EmitNoticeBuildInfo()
+	psiphon.NoticeBuildInfo()
 
 	// Handle required config file parameter
 

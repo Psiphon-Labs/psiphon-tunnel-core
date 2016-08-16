@@ -87,4 +87,4 @@ RUN cd $PKG_CONFIG_PATH_32 \
   && make depend \
   && make
 
-WORKDIR $GOPATH/src
+WORKDIR $GOPATH/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient
