@@ -328,10 +328,10 @@ type Config struct {
 	// If omitted, the default value is TUNNEL_CONNECT_TIMEOUT_SECONDS.
 	TunnelConnectTimeoutSeconds *int
 
-	// TunnelPortForwardTimeoutSeconds specifies a timeout per SSH port forward.
-	// Zero value means a port forward will not time out.
+	// TunnelPortForwardDialTimeoutSeconds specifies a dial timeout per SSH port forward.
+	// Zero value means a port forward dial will not time out.
 	// If omitted, the default value is TUNNEL_PORT_FORWARD_DIAL_TIMEOUT_SECONDS.
-	TunnelPortForwardTimeoutSeconds *int
+	TunnelPortForwardDialTimeoutSeconds *int
 
 	// TunnelSshKeepAliveProbeTimeoutSeconds specifies a timeout value for "probe"
 	// SSH keep-alive that is sent upon port forward failure.
@@ -481,9 +481,9 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		config.TunnelConnectTimeoutSeconds = &defaultTunnelConnectTimeoutSeconds
 	}
 
-	if config.TunnelPortForwardTimeoutSeconds == nil {
-		defaultTunnelPortForwardTimeoutSeconds := TUNNEL_PORT_FORWARD_DIAL_TIMEOUT_SECONDS
-		config.TunnelPortForwardTimeoutSeconds = &defaultTunnelPortForwardTimeoutSeconds
+	if config.TunnelPortForwardDialTimeoutSeconds == nil {
+		TunnelPortForwardDialTimeoutSeconds := TUNNEL_PORT_FORWARD_DIAL_TIMEOUT_SECONDS
+		config.TunnelPortForwardDialTimeoutSeconds = &TunnelPortForwardDialTimeoutSeconds
 	}
 
 	if config.TunnelSshKeepAliveProbeTimeoutSeconds == nil {
