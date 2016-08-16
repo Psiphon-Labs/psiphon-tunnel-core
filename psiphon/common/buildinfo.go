@@ -19,7 +19,10 @@
 
 package common
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 /*
 These values should be filled in at build time using the `-X` option[1] to the
@@ -77,12 +80,12 @@ func (bi *BuildInfo) ToMap() *map[string]interface{} {
 // Return an instance of the BuildInfo struct
 func GetBuildInfo() *BuildInfo {
 	buildInfo := BuildInfo{
-		BuildDate:       buildDate,
-		BuildRepo:       buildRepo,
-		BuildRev:        buildRev,
-		GoVersion:       goVersion,
-		GomobileVersion: gomobileVersion,
-		Dependencies:    json.RawMessage(dependencies),
+		BuildDate:       strings.TrimSpace(buildDate),
+		BuildRepo:       strings.TrimSpace(buildRepo),
+		BuildRev:        strings.TrimSpace(buildRev),
+		GoVersion:       strings.TrimSpace(goVersion),
+		GomobileVersion: strings.TrimSpace(gomobileVersion),
+		Dependencies:    json.RawMessage(strings.TrimSpace(dependencies)),
 	}
 
 	return &buildInfo
