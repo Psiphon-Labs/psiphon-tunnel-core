@@ -154,6 +154,7 @@ func logServerLoad(server *TunnelServer) {
 	runtime.ReadMemStats(&memStats)
 	fields := LogFields{
 		"BuildRev":     common.GetBuildInfo().BuildRev,
+		"HostID":       server.sshServer.support.Config.HostID,
 		"NumGoroutine": runtime.NumGoroutine(),
 		"MemStats": map[string]interface{}{
 			"Alloc":         memStats.Alloc,
@@ -168,12 +169,7 @@ func logServerLoad(server *TunnelServer) {
 
 	// tunnel server stats
 	for tunnelProtocol, stats := range server.GetLoadStats() {
-		tempMap := make(map[string]interface{})
-		for stat, value := range stats {
-			tempMap[stat] = value
-		}
-
-		fields[tunnelProtocol] = tempMap
+		fields[tunnelProtocol] = stats
 	}
 
 	log.WithContextFields(fields).Info("load")
