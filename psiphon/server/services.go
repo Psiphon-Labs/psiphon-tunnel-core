@@ -153,7 +153,7 @@ func logServerLoad(server *TunnelServer) {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	fields := LogFields{
-		"event_type":   "server_load",
+		"event_name":   "server_load",
 		"BuildRev":     common.GetBuildInfo().BuildRev,
 		"HostID":       server.sshServer.support.Config.HostID,
 		"NumGoroutine": runtime.NumGoroutine(),
