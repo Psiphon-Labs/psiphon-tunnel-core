@@ -338,13 +338,8 @@ func NoticeConnectedTunnelDialStats(ipAddress string, tunnelDialStats *TunnelDia
 }
 
 // NoticeBuildInfo reports build version info.
-func NoticeBuildInfo(buildDate, buildRepo, buildRev, goVersion, gomobileVersion string) {
-	outputNotice("BuildInfo", 0,
-		"buildDate", buildDate,
-		"buildRepo", buildRepo,
-		"buildRev", buildRev,
-		"goVersion", goVersion,
-		"gomobileVersion", gomobileVersion)
+func NoticeBuildInfo() {
+	outputNotice("BuildInfo", 0, "buildInfo", common.GetBuildInfo())
 }
 
 // NoticeExiting indicates that tunnel-core is exiting imminently.

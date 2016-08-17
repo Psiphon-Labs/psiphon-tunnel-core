@@ -30,9 +30,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Psiphon-Inc/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -385,6 +385,17 @@ func (sshServer *sshServer) getLoadStats() map[string]map[string]int64 {
 		client.Unlock()
 	}
 
+	// Calculate and report totals across all protocols. It's easier to do this here
+	// than futher down the stats stack. Also useful for glancing at log files.
+
+	allProtocolsStats := make(map[string]int64)
+	for _, stats := range loadStats {
+		for name, value := range stats {
+			allProtocolsStats[name] += value
+		}
+	}
+	loadStats["ALL"] = allProtocolsStats
+
 	return loadStats
 }
 
@@ -479,7 +490,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 			// TODO: ensure this won't block shutdown
 			conn, result.err = psiphon.NewObfuscatedSshConn(
 				psiphon.OBFUSCATION_CONN_MODE_SERVER,
-				clientConn,
+				conn,
 				sshServer.support.Config.ObfuscatedSSHKey)
 			if result.err != nil {
 				result.err = common.ContextError(result.err)

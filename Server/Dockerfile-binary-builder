@@ -1,6 +1,6 @@
 FROM alpine:latest
 
-ENV GOLANG_VERSION 1.6.2
+ENV GOLANG_VERSION 1.7
 ENV GOLANG_SRC_URL https://golang.org/dl/go$GOLANG_VERSION.src.tar.gz
 
 RUN set -ex \
@@ -8,10 +8,11 @@ RUN set -ex \
 		bash \
 		ca-certificates \
 		gcc \
-    git \
+		git \
+		go \
 		musl-dev \
 		openssl \
-		go \
+		perl \
 	\
 	&& export GOROOT_BOOTSTRAP="$(go env GOROOT)" \
 	\

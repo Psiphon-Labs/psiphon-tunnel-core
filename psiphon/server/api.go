@@ -125,13 +125,13 @@ func handshakeAPIRequestHandler(
 		return nil, common.ContextError(err)
 	}
 
-	log.WithContextFields(
+	log.LogRawFieldsWithTimestamp(
 		getRequestLogFields(
 			support,
 			"handshake",
 			geoIPData,
 			params,
-			baseRequestParams)).Info("API event")
+			baseRequestParams))
 
 	// TODO: share struct definition with psiphon/serverApi.go?
 	var handshakeResponse struct {
@@ -197,13 +197,13 @@ func connectedAPIRequestHandler(
 		return nil, common.ContextError(err)
 	}
 
-	log.WithContextFields(
+	log.LogRawFieldsWithTimestamp(
 		getRequestLogFields(
 			support,
 			"connected",
 			geoIPData,
 			params,
-			connectedRequestParams)).Info("API event")
+			connectedRequestParams))
 
 	var connectedResponse struct {
 		ConnectedTimestamp string `json:"connected_timestamp"`
@@ -256,7 +256,7 @@ func statusAPIRequestHandler(
 	bytesTransferredFields := getRequestLogFields(
 		support, "bytes_transferred", geoIPData, params, statusRequestParams)
 	bytesTransferredFields["bytes"] = bytesTransferred
-	log.WithContextFields(bytesTransferredFields).Info("API event")
+	log.LogRawFieldsWithTimestamp(bytesTransferredFields)
 
 	// Domain bytes transferred stats
 	// Older clients may not submit this data
@@ -272,7 +272,7 @@ func statusAPIRequestHandler(
 		for domain, bytes := range hostBytes {
 			domainBytesFields["domain"] = domain
 			domainBytesFields["bytes"] = bytes
-			log.WithContextFields(domainBytesFields).Info("API event")
+			log.LogRawFieldsWithTimestamp(domainBytesFields)
 		}
 	}
 
@@ -336,7 +336,7 @@ func statusAPIRequestHandler(
 			}
 			sessionFields["total_bytes_received"] = totalBytesReceived
 
-			log.WithContextFields(sessionFields).Info("API event")
+			log.LogRawFieldsWithTimestamp(sessionFields)
 		}
 	}
 
@@ -400,7 +400,7 @@ func clientVerificationAPIRequestHandler(
 			logFields["safetynet_check"] = safetyNetCheckLogs
 		}
 
-		log.WithContextFields(logFields).Info("API event")
+		log.LogRawFieldsWithTimestamp(logFields)
 
 		if verified {
 			// TODO: change throttling treatment
@@ -525,6 +525,7 @@ func getRequestLogFields(
 
 	logFields["event_name"] = eventName
 	logFields["host_id"] = support.Config.HostID
+	logFields["build_rev"] = common.GetBuildInfo().BuildRev
 
 	// In psi_web, the space replacement was done to accommodate space
 	// delimited logging, which is no longer required; we retain the
