@@ -1,0 +1,7 @@
+framework module "Psi" {
+    header "GoPsi.h"
+    header "GoUniverse.h"
+    header "Psi.h"
+
+    export *
+}
