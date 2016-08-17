@@ -385,6 +385,17 @@ func (sshServer *sshServer) getLoadStats() map[string]map[string]int64 {
 		client.Unlock()
 	}
 
+	// Calculate and report totals across all protocols. It's easier to do this here
+	// than futher down the stats stack. Also useful for glancing at log files.
+
+	allProtocolsStats := make(map[string]int64)
+	for _, stats := range loadStats {
+		for name, value := range stats {
+			allProtocolsStats[name] += value
+		}
+	}
+	loadStats["ALL"] = allProtocolsStats
+
 	return loadStats
 }
 

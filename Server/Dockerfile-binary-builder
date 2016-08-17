@@ -8,10 +8,11 @@ RUN set -ex \
 		bash \
 		ca-certificates \
 		gcc \
-    git \
+		git \
+		go \
 		musl-dev \
 		openssl \
-		go \
+		perl \
 	\
 	&& export GOROOT_BOOTSTRAP="$(go env GOROOT)" \
 	\

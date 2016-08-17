@@ -153,7 +153,9 @@ func logServerLoad(server *TunnelServer) {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	fields := LogFields{
+		"event_type":   "server_load",
 		"BuildRev":     common.GetBuildInfo().BuildRev,
+		"HostID":       server.sshServer.support.Config.HostID,
 		"NumGoroutine": runtime.NumGoroutine(),
 		"MemStats": map[string]interface{}{
 			"Alloc":         memStats.Alloc,
@@ -168,15 +170,10 @@ func logServerLoad(server *TunnelServer) {
 
 	// tunnel server stats
 	for tunnelProtocol, stats := range server.GetLoadStats() {
-		tempMap := make(map[string]interface{})
-		for stat, value := range stats {
-			tempMap[stat] = value
-		}
-
-		fields[tunnelProtocol] = tempMap
+		fields[tunnelProtocol] = stats
 	}
 
-	log.WithContextFields(fields).Info("load")
+	log.LogRawFieldsWithTimestamp(fields)
 }
 
 // SupportServices carries common and shared data components

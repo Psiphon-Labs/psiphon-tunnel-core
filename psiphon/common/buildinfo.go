@@ -63,6 +63,7 @@ type BuildInfo struct {
 
 // Convert 'BuildInfo' struct to 'map[string]interface{}'
 func (bi *BuildInfo) ToMap() *map[string]interface{} {
+
 	var dependenciesMap map[string]interface{}
 	json.Unmarshal([]byte(bi.Dependencies), &dependenciesMap)
 
@@ -79,6 +80,10 @@ func (bi *BuildInfo) ToMap() *map[string]interface{} {
 
 // Return an instance of the BuildInfo struct
 func GetBuildInfo() *BuildInfo {
+	if strings.TrimSpace(dependencies) == "" {
+		dependencies = "{}"
+	}
+
 	buildInfo := BuildInfo{
 		BuildDate:       strings.TrimSpace(buildDate),
 		BuildRepo:       strings.TrimSpace(buildRepo),
