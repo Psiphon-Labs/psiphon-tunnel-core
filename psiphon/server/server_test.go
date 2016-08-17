@@ -169,6 +169,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig.(map[string]interface{})["TrafficRulesFilename"] = ""
 	serverConfig.(map[string]interface{})["LogLevel"] = "debug"
 
+	// 1 second is the minimum period; should be small enough to emit a log during the
+	// test run, but not guaranteed
+	serverConfig.(map[string]interface{})["LoadMonitorPeriodSeconds"] = 1
+
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
 	// run server
