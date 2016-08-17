@@ -153,6 +153,7 @@ func logServerLoad(server *TunnelServer) {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	fields := LogFields{
+		"event_type":   "server_load",
 		"BuildRev":     common.GetBuildInfo().BuildRev,
 		"HostID":       server.sshServer.support.Config.HostID,
 		"NumGoroutine": runtime.NumGoroutine(),
@@ -172,7 +173,7 @@ func logServerLoad(server *TunnelServer) {
 		fields[tunnelProtocol] = stats
 	}
 
-	log.WithContextFields(fields).Info("load")
+	log.LogRawFieldsWithTimestamp(fields)
 }
 
 // SupportServices carries common and shared data components
