@@ -20,12 +20,12 @@ Note that you may need to use `sudo docker` below, depending on your OS.
   *Ensure that the command below is run from within the `AndroidLibrary` directory*
 
   ```bash
-  cd .. && \
+  cd ../.. && \
     docker run \
     --rm \
     -v $(pwd):/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core \
     psiandroid \
-    /bin/bash -c 'source /tmp/setenv-android.sh && cd /go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/AndroidLibrary && ./make.bash' \
+    /bin/bash -c 'source /tmp/setenv-android.sh && cd /go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/Android && ./make.bash' \
   ; cd -
   ```
 When that command completes, the compiled `.aar` file (suitable for use in an Android Studio project) will be located in the current directory (it will likely be owned by root, so be sure to `chown` to an appropriate user).
