@@ -28,13 +28,11 @@ import (
 	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/sha256"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -49,6 +47,8 @@ const (
 	FEEDBACK_UPLOAD_TIMEOUT_SECONDS     = 30
 )
 
+// Conforms to the format expected by the feedback decryptor.
+// https://bitbucket.org/psiphon/psiphon-circumvention-system/src/default/EmailResponder/FeedbackDecryptor/decryptor.py
 type secureFeedback struct {
 	IV                   string `json:"iv"`
 	ContentCipherText    string `json:"contentCiphertext"`
@@ -101,13 +101,30 @@ func encryptFeedback(diagnosticsJson, b64EncodedPublicKey string) ([]byte, error
 
 // Encrypt feedback and upload to server. If upload fails
 // the feedback thread will sleep and retry multiple times.
-func SendFeedback(diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders string) error {
+func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders string) error {
+
+	config, err := LoadConfig([]byte(configJson))
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	untunneledDialConfig := &DialConfig{
+		UpstreamProxyUrl:              config.UpstreamProxyUrl,
+		UpstreamProxyCustomHeaders:    config.UpstreamProxyCustomHeaders,
+		PendingConns:                  nil,
+		DeviceBinder:                  nil,
+		DnsServerGetter:               nil,
+		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
+		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
+		DeviceRegion:                  config.DeviceRegion,
+	}
+
 	secureFeedback, err := encryptFeedback(diagnosticsJson, b64EncodedPublicKey)
 	if err != nil {
 		return err
 	}
 
-	randBytes, err := nRandBytes(8)
+	randBytes, err := common.MakeSecureRandomBytes(8)
 	if err != nil {
 		return err
 	}
@@ -121,7 +138,7 @@ func SendFeedback(diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath
 	}
 
 	for i := 0; i < FEEDBACK_UPLOAD_MAX_RETRIES; i++ {
-		err := uploadFeedback(secureFeedback, url, headerPieces)
+		err := uploadFeedback(untunneledDialConfig, secureFeedback, url, headerPieces)
 		if err != nil {
 			NoticeAlert("failed to upload feedback: %s", err)
 			time.Sleep(FEEDBACK_UPLOAD_RETRY_DELAY_SECONDS * time.Second)
@@ -132,19 +149,14 @@ func SendFeedback(diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath
 	return nil
 }
 
-// Attempt to upload feedback data to server. Will timeout if
-// request takes too long as upload will be retried upon failure.
-func uploadFeedback(feedbackData []byte, url string, headerPieces []string) error {
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{},
+// Attempt to upload feedback data to server.
+func uploadFeedback(config *DialConfig, feedbackData []byte, url string, headerPieces []string) error {
+	client, parsedUrl, err := MakeUntunneledHttpsClient(config, nil, url, time.Duration(FEEDBACK_UPLOAD_TIMEOUT_SECONDS*time.Second))
+	if err != nil {
+		return err
 	}
 
-	client := &http.Client{
-		Timeout:   time.Duration(FEEDBACK_UPLOAD_TIMEOUT_SECONDS * time.Second),
-		Transport: tr,
-	}
-
-	req, err := http.NewRequest("PUT", url, bytes.NewBuffer(feedbackData))
+	req, err := http.NewRequest("PUT", parsedUrl, bytes.NewBuffer(feedbackData))
 	if err != nil {
 		return common.ContextError(err)
 	}
@@ -163,16 +175,6 @@ func uploadFeedback(feedbackData []byte, url string, headerPieces []string) erro
 	return nil
 }
 
-// nRandBytes is a helper function that pulls 'n' random bytes from
-// io.Reader (a cryptographically strong pseudo-random generator).
-func nRandBytes(n int) ([]byte, error) {
-	randBytes := make([]byte, n)
-	if _, err := io.ReadFull(rand.Reader, randBytes); err != nil {
-		return nil, common.ContextError(err)
-	}
-	return randBytes, nil
-}
-
 // Pad src to the next block boundary with PKCS7 padding
 // (https://tools.ietf.org/html/rfc5652#section-6.3).
 func AddPKCS7Padding(src []byte, blockSize int) []byte {
@@ -188,12 +190,12 @@ func encryptAESCBC(plaintext []byte) ([]byte, []byte, []byte, error) {
 	plaintext = AddPKCS7Padding(plaintext, aes.BlockSize)
 
 	ciphertext := make([]byte, len(plaintext))
-	iv, err := nRandBytes(aes.BlockSize)
+	iv, err := common.MakeSecureRandomBytes(aes.BlockSize)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	key, err := nRandBytes(aes.BlockSize)
+	key, err := common.MakeSecureRandomBytes(aes.BlockSize)
 	if err != nil {
 		return nil, nil, nil, common.ContextError(err)
 	}
@@ -227,7 +229,7 @@ func encryptWithPublicKey(plaintext, publicKey []byte) ([]byte, error) {
 
 // Generate HMAC for Encrypt-then-MAC paradigm.
 func generateHMAC(iv, plaintext []byte) ([]byte, []byte, error) {
-	key, err := nRandBytes(16)
+	key, err := common.MakeSecureRandomBytes(16)
 	if err != nil {
 		return nil, nil, err
 	}
