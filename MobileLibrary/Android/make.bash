@@ -61,4 +61,15 @@ if [ $? != 0 ]; then
   exit $?
 fi
 
+mkdir -p build-tmp/psi
+unzip -o psi.aar -d build-tmp/psi
+yes | cp -rf PsiphonTunnel/AndroidManifest.xml build-tmp/psi/AndroidManifest.xml
+javac -d build-tmp -bootclasspath $ANDROID_HOME/platforms/android-23/android.jar -source 1.7 -target 1.7 -classpath build-tmp/psi/classes.jar:$ANDROID_HOME/platforms/android-23/optional/org.apache.http.legacy.jar PsiphonTunnel/PsiphonTunnel.java 
+cd build-tmp
+jar uf psi/classes.jar ca/psiphon/*.class
+cd -
+cd build-tmp/psi
+zip -r ../../ca.psiphon.aar ./
+cd -
+rm -rf build-tmp
 echo "Done"
