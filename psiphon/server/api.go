@@ -428,7 +428,7 @@ const (
 // is specified, in which case an array of string is expected.
 var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"server_secret", isServerSecret, requestParamNotLogged},
-	requestParamSpec{"client_session_id", isHexDigits, requestParamOptional},
+	requestParamSpec{"client_session_id", isHexDigits, requestParamOptional | requestParamNotLogged},
 	requestParamSpec{"propagation_channel_id", isHexDigits, 0},
 	requestParamSpec{"sponsor_id", isHexDigits, 0},
 	requestParamSpec{"client_version", isDigits, 0},
