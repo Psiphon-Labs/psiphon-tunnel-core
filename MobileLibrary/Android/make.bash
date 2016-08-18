@@ -64,9 +64,21 @@ fi
 mkdir -p build-tmp/psi
 unzip -o psi.aar -d build-tmp/psi
 yes | cp -rf PsiphonTunnel/AndroidManifest.xml build-tmp/psi/AndroidManifest.xml
+
 javac -d build-tmp -bootclasspath $ANDROID_HOME/platforms/android-23/android.jar -source 1.7 -target 1.7 -classpath build-tmp/psi/classes.jar:$ANDROID_HOME/platforms/android-23/optional/org.apache.http.legacy.jar PsiphonTunnel/PsiphonTunnel.java 
+if [ $? != 0 ]; then
+  echo "..'javac' compiling PiphonTunnel failed, exiting"
+  exit $?
+fi
+
 cd build-tmp
+
 jar uf psi/classes.jar ca/psiphon/*.class
+if [ $? != 0 ]; then
+  echo "..'jar' failed to add classes, exiting"
+  exit $?
+fi
+
 cd -
 cd build-tmp/psi
 zip -r ../../ca.psiphon.aar ./
