@@ -1,0 +1,114 @@
+{
+  "DVTSourceControlWorkspaceBlueprintPrimaryRemoteRepositoryKey" : "654BDFA72D0BD5C4AAA375C3F6D7EA32AC58A304+++F92F6D3",
+  "DVTSourceControlWorkspaceBlueprintWorkingCopyRepositoryLocationsKey" : {
+
+  },
+  "DVTSourceControlWorkspaceBlueprintWorkingCopyStatesKey" : {
+    "8B61C8B48DB4B96AD94F67018EFB8A9684F3EFD6+++DCC608E" : 9223372036854775807,
+    "654BDFA72D0BD5C4AAA375C3F6D7EA32AC58A304+++38A1A30" : 9223372036854775807,
+    "A5AD174D8B9671567C38590D166034173C866E1D+++C7AE692" : 9223372036854775807,
+    "18F8E8F32D4612669B2AC73CE391ED54473F75DA+++ED25EBA" : 9223372036854775807,
+    "3CDC0364FAC963F881E15357C59A43097543A382+++74D281F" : 9223372036854775807,
+    "654BDFA72D0BD5C4AAA375C3F6D7EA32AC58A304+++F92F6D3" : 9223372036854775807,
+    "18F8E8F32D4612669B2AC73CE391ED54473F75DA+++D9DC38C" : 9223372036854775807,
+    "D059B056F0F8D707428CFA53B26B54CB05124896+++41B0777" : 9223372036854775807,
+    "C811301B9BA5BED994AD79D58835794EFE2C4BAD+++5A1EDEB" : 9223372036854775807,
+    "18F8E8F32D4612669B2AC73CE391ED54473F75DA+++739CA66" : 9223372036854775807,
+    "A5AD174D8B9671567C38590D166034173C866E1D+++795FDF9" : 9223372036854775807,
+    "18F8E8F32D4612669B2AC73CE391ED54473F75DA+++0719F03" : 9223372036854775807,
+    "0EDA2F64A27382CC2BF1F85AB9A4AEECDF2AEE03+++14C946E" : 9223372036854775807,
+    "0559510868EA25C63F4143C7E150BF185B7A091F+++F4FA2CA" : 9223372036854775807
+  },
+  "DVTSourceControlWorkspaceBlueprintIdentifierKey" : "7D3F11EA-BDE9-4C77-841B-858842838E65",
+  "DVTSourceControlWorkspaceBlueprintWorkingCopyPathsKey" : {
+    "8B61C8B48DB4B96AD94F67018EFB8A9684F3EFD6+++DCC608E" : "psiphon-tunnel-core\/MobileLibrary\/iOS\/go-ios-build\/src\/github.com\/Psiphon-Inc\/bolt\/",
+    "654BDFA72D0BD5C4AAA375C3F6D7EA32AC58A304+++38A1A30" : "psiphon-tunnel-core\/MobileLibrary\/iOS\/go-ios-build\/src\/github.com\/Psiphon-Labs\/psiphon-tunnel-core\/",
+    "A5AD174D8B9671567C38590D166034173C866E1D+++C7AE692" : "psiphon-tunnel-core\/MobileLibrary\/iOS\/go-ios-build\/src\/github.com\/spacemonkeygo\/openssl\/",
+    "18F8E8F32D4612669B2AC73CE391ED54473F75DA+++ED25EBA" : "psiphon-tunnel-core\/MobileLibrary\/iOS\/go-ios-build\/src\/golang.org\/x\/net\/",
+    "3CDC0364FAC963F881E15357C59A43097543A382+++74D281F" : "psiphon-tunnel-core\/MobileLibrary\/iOS\/go-ios-build\/src\/github.com\/Psiphon-Inc\/dns\/",
+    "654BDFA72D0BD5C4AAA375C3F6D7EA32AC58A304+++F92F6D3" : "psiphon-tunnel-core\/",
+    "18F8E8F32D4612669B2AC73CE391ED54473F75DA+++D9DC38C" : "psiphon-tunnel-core\/MobileLibrary\/iOS\/go-ios-build\/src\/golang.org\/x\/net\/",
+    "D059B056F0F8D707428CFA53B26B54CB05124896+++41B0777" : "psiphon-tunnel-core\/MobileLibrary\/iOS\/go-ios-build\/src\/github.com\/Psiphon-Inc\/goptlib\/",
+    "C811301B9BA5BED994AD79D58835794EFE2C4BAD+++5A1EDEB" : "psiphon-tunnel-core\/MobileLibrary\/iOS\/go-ios-build\/src\/github.com\/Psiphon-Inc\/goregen\/",
+    "18F8E8F32D4612669B2AC73CE391ED54473F75DA+++739CA66" : "psiphon-tunnel-core\/MobileLibrary\/iOS\/go-ios-build\/src\/golang.org\/x\/net\/",
+    "A5AD174D8B9671567C38590D166034173C866E1D+++795FDF9" : "psiphon-tunnel-core\/MobileLibrary\/iOS\/go-ios-build\/src\/github.com\/spacemonkeygo\/openssl\/",
+    "18F8E8F32D4612669B2AC73CE391ED54473F75DA+++0719F03" : "psiphon-tunnel-core\/MobileLibrary\/iOS\/go-ios-build\/src\/golang.org\/x\/net\/",
+    "0EDA2F64A27382CC2BF1F85AB9A4AEECDF2AEE03+++14C946E" : "psiphon-tunnel-core\/MobileLibrary\/iOS\/go-ios-build\/src\/github.com\/Psiphon-Inc\/ratelimit\/",
+    "0559510868EA25C63F4143C7E150BF185B7A091F+++F4FA2CA" : "psiphon-tunnel-core\/MobileLibrary\/iOS\/go-ios-build\/src\/github.com\/spacemonkeygo\/spacelog\/"
+  },
+  "DVTSourceControlWorkspaceBlueprintNameKey" : "PsiphonTunnelController",
+  "DVTSourceControlWorkspaceBlueprintVersion" : 204,
+  "DVTSourceControlWorkspaceBlueprintRelativePathToProjectKey" : "MobileLibrary\/iOS\/PsiphonTunnelController\/PsiphonTunnelController.xcodeproj",
+  "DVTSourceControlWorkspaceBlueprintRemoteRepositoriesKey" : [
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "https:\/\/github.com\/spacemonkeygo\/spacelog",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "0559510868EA25C63F4143C7E150BF185B7A091F+++F4FA2CA"
+    },
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "https:\/\/github.com\/Psiphon-Inc\/ratelimit",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "0EDA2F64A27382CC2BF1F85AB9A4AEECDF2AEE03+++14C946E"
+    },
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "https:\/\/go.googlesource.com\/net",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "18F8E8F32D4612669B2AC73CE391ED54473F75DA+++0719F03"
+    },
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "https:\/\/go.googlesource.com\/crypto",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "18F8E8F32D4612669B2AC73CE391ED54473F75DA+++739CA66"
+    },
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "https:\/\/go.googlesource.com\/mobile",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "18F8E8F32D4612669B2AC73CE391ED54473F75DA+++D9DC38C"
+    },
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "https:\/\/github.com\/Psiphon-Inc\/crypto",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "18F8E8F32D4612669B2AC73CE391ED54473F75DA+++ED25EBA"
+    },
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "https:\/\/github.com\/Psiphon-Inc\/dns",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "3CDC0364FAC963F881E15357C59A43097543A382+++74D281F"
+    },
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "github.com:efryntov\/psiphon-tunnel-core.git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "654BDFA72D0BD5C4AAA375C3F6D7EA32AC58A304+++38A1A30"
+    },
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "github.com:efryntov\/psiphon-tunnel-core.git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "654BDFA72D0BD5C4AAA375C3F6D7EA32AC58A304+++F92F6D3"
+    },
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "https:\/\/github.com\/Psiphon-Inc\/bolt",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "8B61C8B48DB4B96AD94F67018EFB8A9684F3EFD6+++DCC608E"
+    },
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "https:\/\/github.com\/spacemonkeygo\/openssl",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "A5AD174D8B9671567C38590D166034173C866E1D+++795FDF9"
+    },
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "https:\/\/github.com\/Psiphon-Inc\/openssl",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "A5AD174D8B9671567C38590D166034173C866E1D+++C7AE692"
+    },
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "https:\/\/github.com\/Psiphon-Inc\/goregen",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "C811301B9BA5BED994AD79D58835794EFE2C4BAD+++5A1EDEB"
+    },
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "https:\/\/github.com\/Psiphon-Inc\/goptlib",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "D059B056F0F8D707428CFA53B26B54CB05124896+++41B0777"
+    }
+  ]
+}

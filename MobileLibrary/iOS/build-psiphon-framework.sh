@@ -10,12 +10,16 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-OUTPUT_DIR=${BASE_DIR}/framework
-OUTPUT_FILE=Psi.framework
+VALID_ARCHS="arm64 armv7 armv7s"
+FRAMEWORK="Psi"
+OUTPUT_DIR="${BASE_DIR}/framework"
+OUTPUT_FILE="${FRAMEWORK}.framework"
+FRAMEWORK_BINARY="${OUTPUT_DIR}/${OUTPUT_FILE}/Versions/A/${FRAMEWORK}"
 
 LIBSSL=${BASE_DIR}/OpenSSL-for-iPhone/lib/libssl.a
 LIBCRYPTO=${BASE_DIR}/OpenSSL-for-iPhone/lib/libcrypto.a
 OPENSSL_INCLUDE=${BASE_DIR}/OpenSSL-for-iPhone/include/
+UMBRELLA_FRAMEWORK_XCODE_PROJECT=${BASE_DIR}/PsiphonTunnelController/PsiphonTunnelController.xcodeproj/
 
 # Not exporting this breaks go commands later if run via jenkins
 export GOPATH=${PWD}/go-ios-build
@@ -70,6 +74,8 @@ check_pinned_version
 if [ $? -ne 0 ]; then
     go get -u golang.org/x/mobile/cmd/gomobile
     cd ${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
+    git checkout master 
+    git branch -d pinned
     git checkout -b pinned ${GOMOBILE_PINNED_REV}
     go build
     gomobile init -v
@@ -114,3 +120,13 @@ IOS_CGO_BUILD_FLAGS='// #cgo darwin CFLAGS: -I'"${OPENSSL_INCLUDE}"'\
 LC_ALL=C sed -i -- "s|// #cgo pkg-config: libssl|${IOS_CGO_BUILD_FLAGS}|" "${OPENSSL_SRC_DIR}/build.go"
 
 gomobile bind -v -target ios -ldflags="${LDFLAGS}" -o ${OUTPUT_DIR}/${OUTPUT_FILE} github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+ARCHS="$(lipo -info "${FRAMEWORK_BINARY}" | rev | cut -d ':' -f1 | rev)"
+for ARCH in $ARCHS; do
+  if ! [[ "${VALID_ARCHS}" == *"$ARCH"* ]]; then
+    echo "Stripping ARCH ${ARCH} from ${FRAMEWORK_BINARY}"
+    lipo -remove "$ARCH" -output "$FRAMEWORK_BINARY" "$FRAMEWORK_BINARY" || exit 1
+  fi
+done
+
+xcodebuild clean build -configuration Release -sdk iphoneos -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT}
+echo "Done."
