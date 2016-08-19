@@ -67,7 +67,7 @@ yes | cp -rf PsiphonTunnel/AndroidManifest.xml build-tmp/psi/AndroidManifest.xml
 
 javac -d build-tmp -bootclasspath $ANDROID_HOME/platforms/android-23/android.jar -source 1.7 -target 1.7 -classpath build-tmp/psi/classes.jar:$ANDROID_HOME/platforms/android-23/optional/org.apache.http.legacy.jar PsiphonTunnel/PsiphonTunnel.java 
 if [ $? != 0 ]; then
-  echo "..'javac' compiling PiphonTunnel failed, exiting"
+  echo "..'javac' compiling PsiphonTunnel failed, exiting"
   exit $?
 fi
 
