@@ -28,7 +28,7 @@ Note that you may need to use `sudo docker` below, depending on your OS.
     /bin/bash -c 'source /tmp/setenv-android.sh && cd /go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/Android && ./make.bash' \
   ; cd -
   ```
-When that command completes, the compiled `.aar` file (suitable for use in an Android Studio project) will be located in the current directory (it will likely be owned by root, so be sure to `chown` to an appropriate user).
+When that command completes, the compiled `.aar` files (suitable for use in an Android Studio project) will be located in the current directory (it will likely be owned by root, so be sure to `chown` to an appropriate user).
 
 ###Building without Docker (from source)
 
@@ -49,8 +49,8 @@ When that command completes, the compiled `.aar` file (suitable for use in an An
 
 ###Using the Library
 
- 1. Build `psi.aar` from via the docker container, from source, or use the [binary release](https://github.com/Psiphon-Labs/psiphon-tunnel-core/releases)
- 2. Add `psi.aar` to your Android Studio project as described in the [gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile)
+ 1. Build `ca.psiphon.aar` from via the docker container, from source, or use the [binary release](https://github.com/Psiphon-Labs/psiphon-tunnel-core/releases)
+ 2. Add `ca.psiphon..aar` to your Android Studio project as described in the [gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile)
  3. Example usage in [TunneledWebView sample app](./SampleApps/TunneledWebView/README.md)
 
 #####Limitations

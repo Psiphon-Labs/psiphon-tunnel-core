@@ -13,6 +13,8 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
     git \
     openjdk-8-jdk \
     pkg-config \
+    zip \
+    unzip \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
