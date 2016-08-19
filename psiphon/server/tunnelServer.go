@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -801,9 +802,7 @@ func (sshClient *sshClient) handleNewPortForwardChannel(newChannel ssh.NewChanne
 	// TODO: also support UDP explicitly, e.g. with a custom "direct-udp" channel type?
 	isUDPChannel := sshClient.sshServer.support.Config.UDPInterceptUdpgwServerAddress != "" &&
 		sshClient.sshServer.support.Config.UDPInterceptUdpgwServerAddress ==
-			fmt.Sprintf("%s:%d",
-				directTcpipExtraData.HostToConnect,
-				directTcpipExtraData.PortToConnect)
+			net.JoinHostPort(directTcpipExtraData.HostToConnect, strconv.Itoa(int(directTcpipExtraData.PortToConnect)))
 
 	if isUDPChannel {
 		sshClient.handleUDPChannel(newChannel)
@@ -889,6 +888,19 @@ func (sshClient *sshClient) handleTCPChannel(
 		sshClient.rejectNewChannel(
 			newChannel, ssh.Prohibited, "port forward not permitted")
 		return
+	}
+
+	// Note: redirects are applied *after* isPortForwardPermitted allows the original destination
+	if sshClient.sshServer.support.Config.TCPPortForwardRedirects != nil {
+		destination := net.JoinHostPort(hostToConnect, strconv.Itoa(portToConnect))
+		if redirect, ok := sshClient.sshServer.support.Config.TCPPortForwardRedirects[destination]; ok {
+			// Note: redirect format is validated when config is loaded
+			host, portStr, _ := net.SplitHostPort(redirect)
+			port, _ := strconv.Atoi(portStr)
+			hostToConnect = host
+			portToConnect = port
+			log.WithContextFields(LogFields{"destination": destination, "redirect": redirect}).Debug("port forward redirect")
+		}
 	}
 
 	var bytesUp, bytesDown int64
