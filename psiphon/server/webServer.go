@@ -100,15 +100,16 @@ func RunWebServer(
 		},
 	}
 
-	listener, err := net.Listen(
-		"tcp", fmt.Sprintf("%s:%d",
-			support.Config.ServerIPAddress,
-			support.Config.WebServerPort))
+	localAddress := fmt.Sprintf("%s:%d",
+		support.Config.ServerIPAddress, support.Config.WebServerPort)
+
+	listener, err := net.Listen("tcp", localAddress)
 	if err != nil {
 		return common.ContextError(err)
 	}
 
-	log.WithContext().Info("starting")
+	log.WithContextFields(
+		LogFields{"localAddress": localAddress}).Info("starting")
 
 	err = nil
 	errors := make(chan error)
@@ -135,7 +136,8 @@ func RunWebServer(
 			}
 		}
 
-		log.WithContext().Info("stopped")
+		log.WithContextFields(
+			LogFields{"localAddress": localAddress}).Info("stopped")
 	}()
 
 	select {
@@ -147,7 +149,8 @@ func RunWebServer(
 
 	waitGroup.Wait()
 
-	log.WithContext().Info("exiting")
+	log.WithContextFields(
+		LogFields{"localAddress": localAddress}).Info("exiting")
 
 	return err
 }
