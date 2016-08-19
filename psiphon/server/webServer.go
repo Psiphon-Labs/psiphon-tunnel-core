@@ -94,6 +94,9 @@ func RunWebServer(
 			ReadTimeout:    WEB_SERVER_IO_TIMEOUT,
 			WriteTimeout:   WEB_SERVER_IO_TIMEOUT,
 			ErrorLog:       golanglog.New(logWriter, "", 0),
+
+			// Disable auto HTTP/2 (https://golang.org/doc/go1.6)
+			TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
 		},
 	}
 

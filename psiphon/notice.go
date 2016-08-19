@@ -22,6 +22,7 @@ package psiphon
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -112,7 +113,23 @@ func outputNotice(noticeType string, noticeFlags uint32, args ...interface{}) {
 	if err == nil {
 		output = string(encodedJson)
 	} else {
-		output = fmt.Sprintf("{\"Alert\":{\"message\":\"%s\"}}", common.ContextError(err))
+		// Try to emit a properly formatted Alert notice that the outer client can
+		// report. One scenario where this is useful is if the preceeding Marshal
+		// fails due to bad data in the args. This has happened for a json.RawMessage
+		// field.
+		obj := make(map[string]interface{})
+		obj["noticeType"] = "Alert"
+		obj["showUser"] = false
+		obj["data"] = map[string]interface{}{
+			"message": fmt.Sprintf("Marshal notice failed: %s", common.ContextError(err)),
+		}
+		obj["timestamp"] = time.Now().UTC().Format(time.RFC3339)
+		encodedJson, err := json.Marshal(obj)
+		if err == nil {
+			output = string(encodedJson)
+		} else {
+			output = common.ContextError(errors.New("failed to marshal notice")).Error()
+		}
 	}
 	noticeLoggerMutex.Lock()
 	defer noticeLoggerMutex.Unlock()

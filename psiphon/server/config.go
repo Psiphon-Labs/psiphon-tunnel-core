@@ -173,6 +173,11 @@ type Config struct {
 	// directly by this server, which parses the SSH channel using the
 	// udpgw protocol. Handling includes udpgw transparent DNS: tunneled
 	// UDP DNS packets are rerouted to the host's DNS server.
+	//
+	// The intercept is applied before the port forward destination is
+	// validated against SSH_DISALLOWED_PORT_FORWARD_HOSTS and
+	// AllowTCPPorts/DenyTCPPorts. So the intercept address may be any
+	// otherwise prohibited destination.
 	UDPInterceptUdpgwServerAddress string
 
 	// DNSResolverIPAddress specifies the IP address of a DNS server
@@ -180,6 +185,21 @@ type Config struct {
 	// parse. When blank, "/etc/resolv.conf" must contain a usable
 	// "nameserver" entry.
 	DNSResolverIPAddress string
+
+	// TCPPortForwardRedirects is a mapping from client port forward
+	// destination to an alternate destination address. When the client's
+	// port forward HostToConnect and PortToConnect matches a redirect,
+	// the redirect is substituted and dialed instead of the original
+	// destination.
+	//
+	// The redirect is applied after the original destination is
+	// validated against SSH_DISALLOWED_PORT_FORWARD_HOSTS and
+	// AllowTCPPorts/DenyTCPPorts. So the redirect may map to any
+	// otherwise prohibited destination.
+	//
+	// The redirect is applied after UDPInterceptUdpgwServerAddress is
+	// checked. So the redirect address will not be intercepted.
+	TCPPortForwardRedirects map[string]string
 
 	// LoadMonitorPeriodSeconds indicates how frequently to log server
 	// load information (number of connected clients per tunnel protocol,
@@ -257,19 +277,26 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		}
 	}
 
-	validateNetworkAddress := func(address string) error {
-		host, port, err := net.SplitHostPort(address)
-		if err == nil && net.ParseIP(host) == nil {
-			err = errors.New("Host must be an IP address")
+	validateNetworkAddress := func(address string, requireIPaddress bool) error {
+		host, portStr, err := net.SplitHostPort(address)
+		if err != nil {
+			return err
 		}
-		if err == nil {
-			_, err = strconv.Atoi(port)
+		if requireIPaddress && net.ParseIP(host) == nil {
+			return errors.New("host must be an IP address")
 		}
-		return err
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return err
+		}
+		if port < 0 || port > 65535 {
+			return errors.New("invalid port")
+		}
+		return nil
 	}
 
 	if config.UDPInterceptUdpgwServerAddress != "" {
-		if err := validateNetworkAddress(config.UDPInterceptUdpgwServerAddress); err != nil {
+		if err := validateNetworkAddress(config.UDPInterceptUdpgwServerAddress, true); err != nil {
 			return nil, fmt.Errorf("UDPInterceptUdpgwServerAddress is invalid: %s", err)
 		}
 	}
@@ -277,6 +304,17 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	if config.DNSResolverIPAddress != "" {
 		if net.ParseIP(config.DNSResolverIPAddress) == nil {
 			return nil, fmt.Errorf("DNSResolverIPAddress is invalid")
+		}
+	}
+
+	if config.TCPPortForwardRedirects != nil {
+		for destination, redirect := range config.TCPPortForwardRedirects {
+			if err := validateNetworkAddress(destination, false); err != nil {
+				return nil, fmt.Errorf("TCPPortForwardRedirects destination %s is invalid: %s", destination, err)
+			}
+			if err := validateNetworkAddress(redirect, false); err != nil {
+				return nil, fmt.Errorf("TCPPortForwardRedirects redirect %s is invalid: %s", redirect, err)
+			}
 		}
 	}
 
