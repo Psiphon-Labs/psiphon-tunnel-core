@@ -50,7 +50,7 @@ When that command completes, the compiled `.aar` files (suitable for use in an A
 ###Using the Library
 
  1. Build `ca.psiphon.aar` from via the docker container, from source, or use the [binary release](https://github.com/Psiphon-Labs/psiphon-tunnel-core/releases)
- 2. Add `ca.psiphon..aar` to your Android Studio project as described in the [gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile)
+ 2. Add `ca.psiphon.aar` to your Android Studio project as described in the [gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile)
  3. Example usage in [TunneledWebView sample app](./SampleApps/TunneledWebView/README.md)
 
 #####Limitations
