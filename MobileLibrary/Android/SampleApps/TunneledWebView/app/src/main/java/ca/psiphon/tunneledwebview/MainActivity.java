@@ -72,7 +72,7 @@ import ca.psiphon.PsiphonTunnel;
 //----------------------------------------------------------------------------------------------
 
 public class MainActivity extends ActionBarActivity
-        implements PsiphonTunnel.TunneledApp {
+        implements PsiphonTunnel.HostService {
 
     private ListView mListView;
     private WebView mWebView;
@@ -110,7 +110,10 @@ public class MainActivity extends ActionBarActivity
         // Psiphon running, so start/stop in onCreate/onDestroy or
         // even consider running a background Service.
 
-        if (!mPsiphonTunnel.start("")) {
+
+        try {
+            mPsiphonTunnel.startTunneling("");
+        } catch (PsiphonTunnel.Exception e) {
             logMessage("failed to start Psiphon");
         }
     }
@@ -171,8 +174,23 @@ public class MainActivity extends ActionBarActivity
     //----------------------------------------------------------------------------------------------
 
     @Override
+    public String getAppName() {
+        return "TunneledWebView Sample";
+    }
+
+    @Override
     public Context getContext() {
         return this;
+    }
+
+    @Override
+    public Object getVpnService() {
+        return null;
+    }
+
+    @Override
+    public Object newVpnServiceBuilder() {
+        return null;
     }
 
     @Override
@@ -253,6 +271,11 @@ public class MainActivity extends ActionBarActivity
     }
 
     @Override
+    public void onClientIsLatestVersion() {
+
+    }
+
+    @Override
     public void onSplitTunnelRegion(String region) {
         logMessage("split tunnel region: " + region);
     }
@@ -271,6 +294,16 @@ public class MainActivity extends ActionBarActivity
     @Override
     public void onStartedWaitingForNetworkConnectivity() {
         logMessage("waiting for network connectivity...");
+    }
+
+    @Override
+    public void onClientVerificationRequired(String s, int i, boolean b) {
+
+    }
+
+    @Override
+    public void onExiting() {
+
     }
 
     @Override
