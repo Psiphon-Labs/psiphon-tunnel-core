@@ -140,6 +140,10 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     // be started due to lack of prepare or revoked permissions (called should re-prepare and
     // try again); throws exception for other error conditions.
     public synchronized boolean startRouting() throws Exception {
+        // Load tun2socks library embedded in the aar
+        // If this method is called more than once with the same library name, the second and subsequent calls are ignored.
+        // http://docs.oracle.com/javase/7/docs/api/java/lang/Runtime.html#loadLibrary%28java.lang.String%29
+        System.loadLibrary("tun2socks");
         return startVpn();
     }
 
@@ -660,10 +664,6 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             int udpgwTransparentDNS);
 
     private native static int terminateTun2Socks();
-
-    static {
-        System.loadLibrary("tun2socks");
-    }
 
     //----------------------------------------------------------------------------------------------
     // Implementation: Network Utils
