@@ -858,7 +858,6 @@ func makeRequestUrl(tunnel *Tunnel, port, path string, params requestJSONObject)
 				strValue = v
 			case []string:
 				// String array param encoded as JSON
-				// (URL encoding will be done by http.Client)
 				jsonValue, err := json.Marshal(v)
 				if err != nil {
 					break
