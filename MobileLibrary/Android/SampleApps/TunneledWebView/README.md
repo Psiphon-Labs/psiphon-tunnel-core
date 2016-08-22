@@ -36,7 +36,7 @@ import ca.psiphon.PsiphonTunnel;
 //
 // The flow is as follows:
 //
-// - The Psiphon tunnel is started in onResume(). PsiphonTunnel.start()
+// - The Psiphon tunnel is started in onResume(). PsiphonTunnel.startTunneling()
 //   is an asynchronous call that returns immediately.
 //
 // - Once Psiphon has selected a local HTTP proxy listening port, the
