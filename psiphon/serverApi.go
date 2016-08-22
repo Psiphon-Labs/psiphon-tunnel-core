@@ -30,6 +30,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -846,34 +847,29 @@ func makeRequestUrl(tunnel *Tunnel, port, path string, params requestJSONObject)
 	requestUrl.WriteString("/")
 	requestUrl.WriteString(path)
 
-	firstParam := true
-	for name, value := range params {
+	if len(params) > 0 {
 
-		if firstParam {
-			requestUrl.WriteString("?")
-			firstParam = false
-		} else {
-			requestUrl.WriteString("&")
-		}
+		queryParams := url.Values{}
 
-		requestUrl.WriteString(name)
-		requestUrl.WriteString("=")
-
-		strValue := ""
-		switch v := value.(type) {
-		case string:
-			strValue = v
-		case []string:
-			// String array param encoded as JSON
-			// (URL encoding will be done by http.Client)
-			jsonValue, err := json.Marshal(v)
-			if err != nil {
-				break
+		for name, value := range params {
+			strValue := ""
+			switch v := value.(type) {
+			case string:
+				strValue = v
+			case []string:
+				// String array param encoded as JSON
+				jsonValue, err := json.Marshal(v)
+				if err != nil {
+					break
+				}
+				strValue = string(jsonValue)
 			}
-			strValue = string(jsonValue)
+
+			queryParams.Set(name, strValue)
 		}
 
-		requestUrl.WriteString(strValue)
+		requestUrl.WriteString("?")
+		requestUrl.WriteString(queryParams.Encode())
 	}
 
 	return requestUrl.String()
