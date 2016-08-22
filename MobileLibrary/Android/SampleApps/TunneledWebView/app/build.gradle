@@ -29,5 +29,5 @@ dependencies {
     compile fileTree(dir: 'libs', include: ['*.jar'])
     testCompile 'junit:junit:4.12'
     compile 'com.android.support:appcompat-v7:21.0.3'
-    compile 'go.psi:psi:0.0.10@aar'
+    compile(name:'ca.psiphon', ext:'aar')
 }

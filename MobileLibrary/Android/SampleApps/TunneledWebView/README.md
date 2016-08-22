@@ -10,7 +10,7 @@ an Android app. TunneledWebView proxies a WebView through the Psiphon tunnel.
 Integration
 --------------------------------------------------------------------------------
 
-Uses the [Psiphon Android Library](../../AndroidLibrary/README.md).
+Uses the [Psiphon Android Library](../../../Android/README.md).
 
 Integration is illustrated in the main activity source file in the sample app. Here are the key parts.
 
@@ -36,7 +36,7 @@ import ca.psiphon.PsiphonTunnel;
 //
 // The flow is as follows:
 //
-// - The Psiphon tunnel is started in onResume(). PsiphonTunnel.start()
+// - The Psiphon tunnel is started in onResume(). PsiphonTunnel.startTunneling()
 //   is an asynchronous call that returns immediately.
 //
 // - Once Psiphon has selected a local HTTP proxy listening port, the
@@ -53,16 +53,11 @@ import ca.psiphon.PsiphonTunnel;
 //
 // - Add the Psiphon Library AAR module as a dependency (see this app's
 //   project settings; to build this sample project, you need to drop
-//   psi-0.0.10.aar into app/libs).
-//
-// - Use app/src/main/java/ca/psiphon/PsiphonTunnel.java, which provides
-//   a higher-level wrapper around the Psiphon Library module. This file
-//   shows how to use PsiphonTunnel and PsiphonTunnel.TunneledApp.
-//
+//   ca.psiphon.aar into app/libs).
 //----------------------------------------------------------------------------------------------
 
 public class MainActivity extends ActionBarActivity
-        implements PsiphonTunnel.TunneledApp {
+        implements PsiphonTunnel.HostService {
 
 // ...
 
@@ -84,7 +79,9 @@ public class MainActivity extends ActionBarActivity
         // Psiphon running, so start/stop in onCreate/onDestroy or
         // even consider running a background Service.
 
-        if (!mPsiphonTunnel.start("")) {
+        try {
+            mPsiphonTunnel.startTunneling("");
+        } catch (PsiphonTunnel.Exception e) {
             logMessage("failed to start Psiphon");
         }
     }
@@ -114,7 +111,7 @@ public class MainActivity extends ActionBarActivity
 
     private void loadWebView() {
 
-        // NOTE: functions called via PsiphonTunnel.TunneledApp may be
+        // NOTE: functions called via PsiphonTunnel.HostService may be
         // called on background threads. It's important to ensure that
         // these threads are not blocked and that UI functions are not
         // called directly from these threads. Here we use runOnUiThread
@@ -132,7 +129,7 @@ public class MainActivity extends ActionBarActivity
     // ...
 
     //----------------------------------------------------------------------------------------------
-    // PsiphonTunnel.TunneledApp implementation
+    // PsiphonTunnel.HostService implementation
     //
     // NOTE: these are callbacks from the Psiphon Library
     //----------------------------------------------------------------------------------------------
