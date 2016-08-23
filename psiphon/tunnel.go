@@ -73,14 +73,15 @@ type Tunnel struct {
 	serverEntry                  *ServerEntry
 	serverContext                *ServerContext
 	protocol                     string
-	conn                         net.Conn
+	dialConn                     net.Conn
+	monitoredConn                *common.ActivityMonitoredConn
 	sshClient                    *ssh.Client
 	operateWaitGroup             *sync.WaitGroup
 	shutdownOperateBroadcast     chan struct{}
 	signalPortForwardFailure     chan struct{}
 	totalPortForwardFailures     int
-	startTime                    time.Time
 	establishDuration            time.Duration
+	establishedTime              time.Time
 	dialStats                    *TunnelDialStats
 	newClientVerificationPayload chan string
 }
@@ -125,8 +126,9 @@ func EstablishTunnel(
 		return nil, common.ContextError(err)
 	}
 
-	// Build transport layers and establish SSH connection
-	conn, sshClient, dialStats, err := dialSsh(
+	// Build transport layers and establish SSH connection. Note that
+	// dialConn and monitoredConn are the same network connection.
+	dialConn, monitoredConn, sshClient, dialStats, err := dialSsh(
 		config, pendingConns, serverEntry, selectedProtocol, sessionId)
 	if err != nil {
 		return nil, common.ContextError(err)
@@ -136,7 +138,8 @@ func EstablishTunnel(
 	defer func() {
 		if err != nil {
 			sshClient.Close()
-			conn.Close()
+			dialConn.Close()
+			pendingConns.Remove(dialConn)
 		}
 	}()
 
@@ -148,7 +151,8 @@ func EstablishTunnel(
 		isClosed:                 false,
 		serverEntry:              serverEntry,
 		protocol:                 selectedProtocol,
-		conn:                     conn,
+		dialConn:                 dialConn,
+		monitoredConn:            monitoredConn,
 		sshClient:                sshClient,
 		operateWaitGroup:         new(sync.WaitGroup),
 		shutdownOperateBroadcast: make(chan struct{}),
@@ -174,18 +178,18 @@ func EstablishTunnel(
 		}
 	}
 
-	tunnel.startTime = time.Now()
+	tunnel.establishedTime = time.Now()
 
 	// establishDuration is the elapsed time between the controller starting tunnel
 	// establishment and this tunnel being established. This time period can include
 	// time spent unsuccessfully connecting to other servers. The reported value
 	// represents how long the user waited between starting the client and having
 	// a usable tunnel.
-	// Note: this duration calculation doesn't exclude device sleep time.
-	tunnel.establishDuration = tunnel.startTime.Sub(establishStartTime)
+	// Note: this duration calculation doesn't exclude host or device sleep time.
+	tunnel.establishDuration = tunnel.establishedTime.Sub(establishStartTime)
 
 	// Now that network operations are complete, cancel interruptibility
-	pendingConns.Remove(conn)
+	pendingConns.Remove(dialConn)
 
 	// Spawn the operateTunnel goroutine, which monitors the tunnel and handles periodic stats updates.
 	tunnel.operateWaitGroup.Add(1)
@@ -215,13 +219,13 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 		// In effect, the TUNNEL_OPERATE_SHUTDOWN_TIMEOUT value will take
 		// precedence over the PSIPHON_API_SERVER_TIMEOUT http.Client.Timeout
 		// value set in makePsiphonHttpsClient.
-		timer := time.AfterFunc(TUNNEL_OPERATE_SHUTDOWN_TIMEOUT, func() { tunnel.conn.Close() })
+		timer := time.AfterFunc(TUNNEL_OPERATE_SHUTDOWN_TIMEOUT, func() { tunnel.dialConn.Close() })
 		close(tunnel.shutdownOperateBroadcast)
 		tunnel.operateWaitGroup.Wait()
 		timer.Stop()
 		tunnel.sshClient.Close()
-		// tunnel.conn.Close() may get called twice, which is allowed.
-		tunnel.conn.Close()
+		// tunnel.dialConn.Close() may get called twice, which is allowed.
+		tunnel.dialConn.Close()
 	}
 }
 
@@ -533,12 +537,17 @@ func initMeekConfig(
 
 // dialSsh is a helper that builds the transport layers and establishes the SSH connection.
 // When additional dial configuration is used, DialStats are recorded and returned.
+//
+// The net.Conn return value is the value to be removed from pendingConns; additional
+// layering (ThrottledConn, ActivityMonitoredConn) is applied, but this return value is the
+// base dial conn. The *ActivityMonitoredConn return value is the layered conn passed into
+// the ssh.Client.
 func dialSsh(
 	config *Config,
 	pendingConns *common.Conns,
 	serverEntry *ServerEntry,
 	selectedProtocol,
-	sessionId string) (net.Conn, *ssh.Client, *TunnelDialStats, error) {
+	sessionId string) (net.Conn, *common.ActivityMonitoredConn, *ssh.Client, *TunnelDialStats, error) {
 
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
@@ -560,7 +569,7 @@ func dialSsh(
 		useObfuscatedSsh = true
 		meekConfig, err = initMeekConfig(config, serverEntry, selectedProtocol, sessionId)
 		if err != nil {
-			return nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, common.ContextError(err)
 		}
 	}
 
@@ -600,12 +609,12 @@ func dialSsh(
 	if meekConfig != nil {
 		dialConn, err = DialMeek(meekConfig, dialConfig)
 		if err != nil {
-			return nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, common.ContextError(err)
 		}
 	} else {
 		dialConn, err = DialTCP(directTCPDialAddress, dialConfig)
 		if err != nil {
-			return nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, common.ContextError(err)
 		}
 	}
 
@@ -614,11 +623,18 @@ func dialSsh(
 		// Cleanup on error
 		if cleanupConn != nil {
 			cleanupConn.Close()
+			pendingConns.Remove(cleanupConn)
 		}
 	}()
 
+	// Activity monitoring is used to measure tunnel duration
+	monitoredConn, err := common.NewActivityMonitoredConn(dialConn, 0, false, nil)
+	if err != nil {
+		return nil, nil, nil, nil, common.ContextError(err)
+	}
+
 	// Apply throttling (if configured)
-	throttledConn := common.NewThrottledConn(dialConn, config.RateLimits)
+	throttledConn := common.NewThrottledConn(monitoredConn, config.RateLimits)
 
 	// Add obfuscated SSH layer
 	var sshConn net.Conn = throttledConn
@@ -626,14 +642,14 @@ func dialSsh(
 		sshConn, err = NewObfuscatedSshConn(
 			OBFUSCATION_CONN_MODE_CLIENT, throttledConn, serverEntry.SshObfuscatedKey)
 		if err != nil {
-			return nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, common.ContextError(err)
 		}
 	}
 
 	// Now establish the SSH session over the conn transport
 	expectedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.SshHostKey)
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, common.ContextError(err)
 	}
 	sshCertChecker := &ssh.CertChecker{
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
@@ -649,7 +665,7 @@ func dialSsh(
 			SshPassword string `json:"SshPassword"`
 		}{sessionId, serverEntry.SshPassword})
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, common.ContextError(err)
 	}
 	sshClientConfig := &ssh.ClientConfig{
 		User: serverEntry.SshUsername,
@@ -695,7 +711,7 @@ func dialSsh(
 
 	result := <-resultChannel
 	if result.err != nil {
-		return nil, nil, nil, common.ContextError(result.err)
+		return nil, nil, nil, nil, common.ContextError(result.err)
 	}
 
 	var dialStats *TunnelDialStats
@@ -734,7 +750,7 @@ func dialSsh(
 	// but should not be used to perform I/O as that would interfere with SSH
 	// (and also bypasses throttling).
 
-	return dialConn, result.sshClient, dialStats, nil
+	return dialConn, monitoredConn, result.sshClient, dialStats, nil
 }
 
 func makeRandomPeriod(min, max time.Duration) time.Duration {
@@ -866,7 +882,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	go func() {
 		defer requestsWaitGroup.Done()
 		for timeout := range signalSshKeepAlive {
-			err := sendSshKeepAlive(tunnel.sshClient, tunnel.conn, timeout)
+			err := sendSshKeepAlive(tunnel.sshClient, tunnel.dialConn, timeout)
 			if err != nil {
 				select {
 				case sshKeepAliveError <- err:
@@ -995,10 +1011,19 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 	// The stats for this tunnel will be reported via the next successful
 	// status request.
-	// Note: Since client clocks are unreliable, we use the server's reported
-	// timestamp in the handshake response as the tunnel start time. This time
+	//
+	// Since client clocks are unreliable, we report the server's timestamp from
+	// the handshake response as the absolute tunnel start time. This time
 	// will be slightly earlier than the actual tunnel activation time, as the
 	// client has to receive and parse the response and activate the tunnel.
+	//
+	// For the tunnel duration calculation, we use the local clock. The start time
+	// is tunnel.establishedTime as recorded when the tunnel was established. For the
+	// end time, we do not use the current time as we may now be long past the
+	// actual termination time of the tunnel. For example, the host or device may
+	// have resumed after a long sleep. Instead, we use the last data received time
+	// as the estimated tunnel end time.
+	//
 	// Tunnel does not have a serverContext when DisableApi is set.
 	if tunnel.serverContext != nil && !tunnel.IsDiscarded() {
 		err := RecordTunnelStats(
@@ -1007,7 +1032,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			tunnel.serverEntry.IpAddress,
 			fmt.Sprintf("%d", tunnel.establishDuration),
 			tunnel.serverContext.serverHandshakeTimestamp,
-			fmt.Sprintf("%d", time.Now().Sub(tunnel.startTime)),
+			fmt.Sprintf("%d", tunnel.monitoredConn.GetLastActivityTime().Sub(tunnel.establishedTime)),
 			totalSent,
 			totalReceived)
 		if err != nil {
@@ -1057,7 +1082,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 // on the specified SSH connections and returns true of the request succeeds
 // within a specified timeout.
 func sendSshKeepAlive(
-	sshClient *ssh.Client, conn net.Conn, timeout time.Duration) error {
+	sshClient *ssh.Client, dialConn net.Conn, timeout time.Duration) error {
 
 	errChannel := make(chan error, 2)
 	if timeout > 0 {
@@ -1081,7 +1106,7 @@ func sendSshKeepAlive(
 	err := <-errChannel
 	if err != nil {
 		sshClient.Close()
-		conn.Close()
+		dialConn.Close()
 	}
 
 	return common.ContextError(err)

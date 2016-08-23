@@ -74,7 +74,7 @@ func (sshClient *sshClient) handleUDPChannel(newChannel ssh.NewChannel) {
 		sshClient:      sshClient,
 		sshChannel:     sshChannel,
 		portForwards:   make(map[uint16]*udpPortForward),
-		portForwardLRU: NewLRUConns(),
+		portForwardLRU: common.NewLRUConns(),
 		relayWaitGroup: new(sync.WaitGroup),
 	}
 	multiplexer.run()
@@ -85,7 +85,7 @@ type udpPortForwardMultiplexer struct {
 	sshChannel        ssh.Channel
 	portForwardsMutex sync.Mutex
 	portForwards      map[uint16]*udpPortForward
-	portForwardLRU    *LRUConns
+	portForwardLRU    *common.LRUConns
 	relayWaitGroup    *sync.WaitGroup
 }
 
@@ -215,7 +215,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 
 			lruEntry := mux.portForwardLRU.Add(udpConn)
 
-			conn, err := NewActivityMonitoredConn(
+			conn, err := common.NewActivityMonitoredConn(
 				udpConn,
 				time.Duration(mux.sshClient.trafficRules.IdleUDPPortForwardTimeoutMilliseconds)*time.Millisecond,
 				true,
@@ -290,7 +290,7 @@ type udpPortForward struct {
 	remoteIP     []byte
 	remotePort   uint16
 	conn         net.Conn
-	lruEntry     *LRUConnsEntry
+	lruEntry     *common.LRUConnsEntry
 	mux          *udpPortForwardMultiplexer
 }
 
