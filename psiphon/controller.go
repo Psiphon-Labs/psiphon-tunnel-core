@@ -913,6 +913,11 @@ func (controller *Controller) startEstablishing() {
 		return
 	}
 	NoticeInfo("start establishing")
+
+	// establishStartTime is used to calculate and report the
+	// client's tunnel establishment duration.
+	establishStartTime := time.Now()
+
 	controller.isEstablishing = true
 	controller.establishWaitGroup = new(sync.WaitGroup)
 	controller.stopEstablishingBroadcast = make(chan struct{})
@@ -948,7 +953,7 @@ func (controller *Controller) startEstablishing() {
 
 	for i := 0; i < controller.config.ConnectionWorkerPoolSize; i++ {
 		controller.establishWaitGroup.Add(1)
-		go controller.establishTunnelWorker()
+		go controller.establishTunnelWorker(establishStartTime)
 	}
 
 	controller.establishWaitGroup.Add(1)
@@ -1116,7 +1121,7 @@ loop:
 
 // establishTunnelWorker pulls candidates from the candidate queue, establishes
 // a connection to the tunnel server, and delivers the established tunnel to a channel.
-func (controller *Controller) establishTunnelWorker() {
+func (controller *Controller) establishTunnelWorker(establishStartTime time.Time) {
 	defer controller.establishWaitGroup.Done()
 loop:
 	for candidateServerEntry := range controller.candidateServerEntries {
@@ -1137,6 +1142,7 @@ loop:
 			controller.sessionId,
 			controller.establishPendingConns,
 			candidateServerEntry.serverEntry,
+			establishStartTime,
 			controller) // TunnelOwner
 		if err != nil {
 

@@ -80,6 +80,7 @@ type Tunnel struct {
 	signalPortForwardFailure     chan struct{}
 	totalPortForwardFailures     int
 	startTime                    time.Time
+	establishDuration            time.Duration
 	dialStats                    *TunnelDialStats
 	newClientVerificationPayload chan string
 }
@@ -116,6 +117,7 @@ func EstablishTunnel(
 	sessionId string,
 	pendingConns *common.Conns,
 	serverEntry *ServerEntry,
+	establishStartTime time.Time,
 	tunnelOwner TunnelOwner) (tunnel *Tunnel, err error) {
 
 	selectedProtocol, err := selectProtocol(config, serverEntry)
@@ -173,6 +175,14 @@ func EstablishTunnel(
 	}
 
 	tunnel.startTime = time.Now()
+
+	// establishDuration is the elapsed time between the controller starting tunnel
+	// establishment and this tunnel being established. This time period can include
+	// time spent unsuccessfully connecting to other servers. The reported value
+	// represents how long the user waited between starting the client and having
+	// a usable tunnel.
+	// Note: this duration calculation doesn't exclude device sleep time.
+	tunnel.establishDuration = tunnel.startTime.Sub(establishStartTime)
 
 	// Now that network operations are complete, cancel interruptibility
 	pendingConns.Remove(conn)
@@ -995,6 +1005,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			tunnel.serverContext.sessionId,
 			tunnel.serverContext.tunnelNumber,
 			tunnel.serverEntry.IpAddress,
+			fmt.Sprintf("%d", tunnel.establishDuration),
 			tunnel.serverContext.serverHandshakeTimestamp,
 			fmt.Sprintf("%d", time.Now().Sub(tunnel.startTime)),
 			totalSent,
