@@ -614,7 +614,7 @@ func RecordTunnelStats(
 		SessionId                string `json:"session_id"`
 		TunnelNumber             int64  `json:"tunnel_number"`
 		TunnelServerIpAddress    string `json:"tunnel_server_ip_address"`
-		EstablishmentDuration    string `json:"establishmentDuration"`
+		EstablishmentDuration    string `json:"establishment_duration"`
 		ServerHandshakeTimestamp string `json:"server_handshake_timestamp"`
 		Duration                 string `json:"duration"`
 		TotalBytesSent           int64  `json:"total_bytes_sent"`
