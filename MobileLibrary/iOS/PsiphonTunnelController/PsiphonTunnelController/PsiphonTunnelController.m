@@ -80,8 +80,6 @@
     Reachability *reachability = [Reachability reachabilityForInternetConnection];
     NetworkStatus netstat = [reachability currentReachabilityStatus];
     return (int) netstat != NotReachable;
-    return 1L;
-    
 }
 
 - (void)notice:(NSString*)noticeJSON {
