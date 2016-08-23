@@ -130,14 +130,13 @@ func (conns *LRUConns) Add(conn net.Conn) *LRUConnsEntry {
 func (conns *LRUConns) CloseOldest() {
 	conns.mutex.Lock()
 	oldest := conns.list.Back()
-	conn, ok := oldest.Value.(net.Conn)
 	if oldest != nil {
 		conns.list.Remove(oldest)
 	}
 	// Release mutex before closing conn
 	conns.mutex.Unlock()
-	if ok {
-		conn.Close()
+	if oldest != nil {
+		oldest.Value.(net.Conn).Close()
 	}
 }
 
@@ -178,8 +177,8 @@ func (entry *LRUConnsEntry) Touch() {
 //
 // When an inactivity timeout is specified, the network I/O will
 // timeout after the specified period of read inactivity. Optionally,
-// ActivityMonitoredConn will also consider the connection active when
-// data is written to it.
+// for the purpose of inactivity only, ActivityMonitoredConn will also
+// consider the connection active when data is written to it.
 //
 // When a LRUConnsEntry is specified, then the LRU entry is promoted on
 // either a successful read or write.

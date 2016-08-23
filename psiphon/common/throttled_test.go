@@ -65,12 +65,15 @@ func TestThrottledConn(t *testing.T) {
 		UpstreamBytesPerSecond:   1024 * 1024,
 	})
 
-	run(t, RateLimits{
-		DownstreamUnlimitedBytes: 0,
-		DownstreamBytesPerSecond: 1024 * 1024 / 8,
-		UpstreamUnlimitedBytes:   0,
-		UpstreamBytesPerSecond:   1024 * 1024 / 8,
-	})
+	// This test takes > 1 min to run, so disabled for now
+	/*
+		run(t, RateLimits{
+			DownstreamUnlimitedBytes: 0,
+			DownstreamBytesPerSecond: 1024 * 1024 / 8,
+			UpstreamUnlimitedBytes:   0,
+			UpstreamBytesPerSecond:   1024 * 1024 / 8,
+		})
+	*/
 }
 
 func run(t *testing.T, rateLimits RateLimits) {
