@@ -1024,6 +1024,14 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// have resumed after a long sleep. Instead, we use the last data received time
 	// as the estimated tunnel end time.
 	//
+	// One potential issue with using the last rereceived time is a successful read
+	// after a long sleep when the device sleep occured with data still in the OS socket
+	// buffer. This is not expected to happen on Android, as the OS will wake a process
+	// when it has TCP data available to read. (For this reason, the actual long sleep
+	// issue is only with an idle tunnel; in this case the client is responsible for
+	// sending SSH keep alives but a device sleep will delay the golang SSH keep alive
+	// timer.)
+	//
 	// Tunnel does not have a serverContext when DisableApi is set.
 	if tunnel.serverContext != nil && !tunnel.IsDiscarded() {
 		err := RecordTunnelStats(
