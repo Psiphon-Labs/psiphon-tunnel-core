@@ -25,6 +25,8 @@ import (
 	"testing"
 	"testing/iotest"
 	"time"
+
+	"github.com/Psiphon-Inc/goarista/monotime"
 )
 
 type dummyConn struct {
@@ -109,7 +111,9 @@ func TestActivityMonitoredConn(t *testing.T) {
 		t.Fatalf("NewActivityMonitoredConn failed")
 	}
 
-	startTime := time.Now()
+	realStartTime := time.Now()
+
+	monotonicStartTime := monotime.Now()
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -139,7 +143,7 @@ func TestActivityMonitoredConn(t *testing.T) {
 		t.Fatalf("previous write failed to extend timeout")
 	}
 
-	lastSuccessfulReadTime := time.Now()
+	lastSuccessfulReadTime := monotime.Now()
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -155,15 +159,16 @@ func TestActivityMonitoredConn(t *testing.T) {
 		t.Fatalf("failed to timeout")
 	}
 
-	if startTime.Round(time.Millisecond) != conn.GetStartTime().Round(time.Millisecond) {
+	if realStartTime.Round(time.Millisecond) != conn.GetStartTime().Round(time.Millisecond) {
 		t.Fatalf("unexpected GetStartTime")
 	}
 
-	if lastSuccessfulReadTime.Round(time.Millisecond) != conn.GetLastActivityTime().Round(time.Millisecond) {
-		t.Fatalf("unexpected GetLastActivityTimes")
+	if int64(lastSuccessfulReadTime)/int64(time.Millisecond) !=
+		int64(conn.GetLastActivityMonotime())/int64(time.Millisecond) {
+		t.Fatalf("unexpected GetLastActivityTime")
 	}
 
-	diff := lastSuccessfulReadTime.Sub(startTime).Nanoseconds() - conn.GetActiveDuration().Nanoseconds()
+	diff := lastSuccessfulReadTime.Sub(monotonicStartTime).Nanoseconds() - conn.GetActiveDuration().Nanoseconds()
 	if diff < 0 {
 		diff = -diff
 	}

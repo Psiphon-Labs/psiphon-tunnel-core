@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
@@ -71,7 +72,7 @@ type DNSResolver struct {
 func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 
 	dns := &DNSResolver{
-		lastReloadTime: time.Now().Unix(),
+		lastReloadTime: int64(monotime.Now()),
 	}
 
 	dns.ReloadableFile = common.NewReloadableFile(
@@ -130,8 +131,8 @@ func (dns *DNSResolver) Get() net.IP {
 	// write lock, we only incur write lock blocking when "/etc/resolv.conf"
 	// has actually changed.
 
-	lastReloadTime := atomic.LoadInt64(&dns.lastReloadTime)
-	stale := time.Unix(lastReloadTime, 0).Add(DNS_SYSTEM_CONFIG_RELOAD_PERIOD).Before(time.Now())
+	lastReloadTime := monotime.Time(atomic.LoadInt64(&dns.lastReloadTime))
+	stale := monotime.Now().After(lastReloadTime.Add(DNS_SYSTEM_CONFIG_RELOAD_PERIOD))
 
 	if stale {
 

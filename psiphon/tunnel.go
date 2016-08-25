@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Inc/crypto/ssh"
+	"github.com/Psiphon-Inc/goarista/monotime"
 	regen "github.com/Psiphon-Inc/goregen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
@@ -81,7 +82,7 @@ type Tunnel struct {
 	signalPortForwardFailure     chan struct{}
 	totalPortForwardFailures     int
 	establishDuration            time.Duration
-	establishedTime              time.Time
+	establishedTime              monotime.Time
 	dialStats                    *TunnelDialStats
 	newClientVerificationPayload chan string
 }
@@ -118,8 +119,7 @@ func EstablishTunnel(
 	sessionId string,
 	pendingConns *common.Conns,
 	serverEntry *ServerEntry,
-	establishStartTime time.Time,
-	establishNetworkWaitDuration time.Duration,
+	adjustedEstablishStartTime monotime.Time,
 	tunnelOwner TunnelOwner) (tunnel *Tunnel, err error) {
 
 	selectedProtocol, err := selectProtocol(config, serverEntry)
@@ -179,8 +179,6 @@ func EstablishTunnel(
 		}
 	}
 
-	tunnel.establishedTime = time.Now()
-
 	// establishDuration is the elapsed time between the controller starting tunnel
 	// establishment and this tunnel being established. The reported value represents
 	// how long the user waited between starting the client and having a usable tunnel;
@@ -188,18 +186,10 @@ func EstablishTunnel(
 	// completing automatic reestablishment.
 	//
 	// This time period may include time spent unsuccessfully connecting to other
-	// servers. Time spent waiting for network connectivity is excluded. This duration
-	// calculation doesn't exclude host or device sleep time, except that which is
-	// included in establishNetworkWaitDuration.
-	tunnel.establishDuration =
-		time.Duration(tunnel.establishedTime.Sub(establishStartTime).Nanoseconds() -
-			establishNetworkWaitDuration.Nanoseconds())
+	// servers. Time spent waiting for network connectivity is excluded.
+	tunnel.establishDuration = monotime.Since(adjustedEstablishStartTime)
 
-	// A negative duration typically shouldn't happen, unless the user changes
-	// the OS clock. Always report 0 in this case.
-	if tunnel.establishDuration < 0 {
-		tunnel.establishDuration = 0
-	}
+	tunnel.establishedTime = monotime.Now()
 
 	// Now that network operations are complete, cancel interruptibility
 	pendingConns.Remove(dialConn)
@@ -825,9 +815,9 @@ func makeRandomPeriod(min, max time.Duration) time.Duration {
 func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	defer tunnel.operateWaitGroup.Done()
 
-	lastBytesReceivedTime := time.Now()
+	lastBytesReceivedTime := monotime.Now()
 
-	lastTotalBytesTransferedTime := time.Now()
+	lastTotalBytesTransferedTime := monotime.Now()
 	totalSent := int64(0)
 	totalReceived := int64(0)
 
@@ -954,15 +944,15 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 				tunnel.serverEntry.IpAddress)
 
 			if received > 0 {
-				lastBytesReceivedTime = time.Now()
+				lastBytesReceivedTime = monotime.Now()
 			}
 
 			totalSent += sent
 			totalReceived += received
 
-			if lastTotalBytesTransferedTime.Add(TOTAL_BYTES_TRANSFERRED_NOTICE_PERIOD).Before(time.Now()) {
+			if lastTotalBytesTransferedTime.Add(TOTAL_BYTES_TRANSFERRED_NOTICE_PERIOD).Before(monotime.Now()) {
 				NoticeTotalBytesTransferred(tunnel.serverEntry.IpAddress, totalSent, totalReceived)
-				lastTotalBytesTransferedTime = time.Now()
+				lastTotalBytesTransferedTime = monotime.Now()
 			}
 
 			// Only emit the frequent BytesTransferred notice when tunnel is not idle.
@@ -978,7 +968,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			statsTimer.Reset(nextStatusRequestPeriod())
 
 		case <-sshKeepAliveTimer.C:
-			if lastBytesReceivedTime.Add(TUNNEL_SSH_KEEP_ALIVE_PERIODIC_INACTIVE_PERIOD).Before(time.Now()) {
+			if lastBytesReceivedTime.Add(TUNNEL_SSH_KEEP_ALIVE_PERIODIC_INACTIVE_PERIOD).Before(monotime.Now()) {
 				select {
 				case signalSshKeepAlive <- time.Duration(*tunnel.config.TunnelSshKeepAlivePeriodicTimeoutSeconds) * time.Second:
 				default:
@@ -992,7 +982,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			NoticeInfo("port forward failures for %s: %d",
 				tunnel.serverEntry.IpAddress, tunnel.totalPortForwardFailures)
 
-			if lastBytesReceivedTime.Add(TUNNEL_SSH_KEEP_ALIVE_PROBE_INACTIVE_PERIOD).Before(time.Now()) {
+			if lastBytesReceivedTime.Add(TUNNEL_SSH_KEEP_ALIVE_PROBE_INACTIVE_PERIOD).Before(monotime.Now()) {
 				select {
 				case signalSshKeepAlive <- time.Duration(*tunnel.config.TunnelSshKeepAliveProbeTimeoutSeconds) * time.Second:
 				default:
@@ -1029,7 +1019,9 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// the handshake response as the absolute tunnel start time. This time
 	// will be slightly earlier than the actual tunnel activation time, as the
 	// client has to receive and parse the response and activate the tunnel.
-	//
+
+	tunnelStartTime := tunnel.serverContext.serverHandshakeTimestamp
+
 	// For the tunnel duration calculation, we use the local clock. The start time
 	// is tunnel.establishedTime as recorded when the tunnel was established. For the
 	// end time, we do not use the current time as we may now be long past the
@@ -1049,6 +1041,8 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// the last-received-time scheme can undercount tunnel durations by up to
 	// TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX to idle tunnels.
 
+	tunnelDuration := tunnel.monitoredConn.GetLastActivityMonotime().Sub(tunnel.establishedTime)
+
 	// Tunnel does not have a serverContext when DisableApi is set.
 	if tunnel.serverContext != nil && !tunnel.IsDiscarded() {
 		err := RecordTunnelStats(
@@ -1056,8 +1050,8 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			tunnel.serverContext.tunnelNumber,
 			tunnel.serverEntry.IpAddress,
 			fmt.Sprintf("%d", tunnel.establishDuration),
-			tunnel.serverContext.serverHandshakeTimestamp,
-			fmt.Sprintf("%d", tunnel.monitoredConn.GetLastActivityTime().Sub(tunnel.establishedTime)),
+			tunnelStartTime,
+			fmt.Sprintf("%d", tunnelDuration),
 			totalSent,
 			totalReceived)
 		if err != nil {

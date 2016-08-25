@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
@@ -66,10 +67,9 @@ type Controller struct {
 }
 
 type candidateServerEntry struct {
-	serverEntry               *ServerEntry
-	isServerAffinityCandidate bool
-	establishStartTime        time.Time
-	networkWaitDuration       time.Duration
+	serverEntry                *ServerEntry
+	isServerAffinityCandidate  bool
+	adjustedEstablishStartTime monotime.Time
 }
 
 // NewController initializes a new controller.
@@ -289,7 +289,7 @@ func (controller *Controller) remoteServerListFetcher() {
 		return
 	}
 
-	var lastFetchTime time.Time
+	var lastFetchTime monotime.Time
 
 fetcherLoop:
 	for {
@@ -302,7 +302,8 @@ fetcherLoop:
 
 		// Skip fetch entirely (i.e., send no request at all, even when ETag would save
 		// on response size) when a recent fetch was successful
-		if time.Now().Before(lastFetchTime.Add(FETCH_REMOTE_SERVER_LIST_STALE_PERIOD)) {
+		if lastFetchTime != 0 &&
+			lastFetchTime.Add(FETCH_REMOTE_SERVER_LIST_STALE_PERIOD).After(monotime.Now()) {
 			continue
 		}
 
@@ -326,7 +327,7 @@ fetcherLoop:
 				controller.untunneledDialConfig)
 
 			if err == nil {
-				lastFetchTime = time.Now()
+				lastFetchTime = monotime.Now()
 				break retryLoop
 			}
 
@@ -454,7 +455,7 @@ func (controller *Controller) startOrSignalConnectedReporter() {
 func (controller *Controller) upgradeDownloader() {
 	defer controller.runWaitGroup.Done()
 
-	var lastDownloadTime time.Time
+	var lastDownloadTime monotime.Time
 
 downloadLoop:
 	for {
@@ -469,7 +470,8 @@ downloadLoop:
 		// Unless handshake is explicitly advertizing a new version, skip
 		// checking entirely when a recent download was successful.
 		if handshakeVersion == "" &&
-			time.Now().Before(lastDownloadTime.Add(DOWNLOAD_UPGRADE_STALE_PERIOD)) {
+			lastDownloadTime != 0 &&
+			lastDownloadTime.Add(DOWNLOAD_UPGRADE_STALE_PERIOD).After(monotime.Now()) {
 			continue
 		}
 
@@ -494,7 +496,7 @@ downloadLoop:
 				controller.untunneledDialConfig)
 
 			if err == nil {
-				lastDownloadTime = time.Now()
+				lastDownloadTime = monotime.Now()
 				break retryLoop
 			}
 
@@ -670,7 +672,7 @@ loop:
 //
 // Concurrency note: only the runTunnels() goroutine may call classifyImpairedProtocol
 func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
-	if failedTunnel.establishedTime.Add(IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION).After(time.Now()) {
+	if failedTunnel.establishedTime.Add(IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION).After(monotime.Now()) {
 		controller.impairedProtocolClassification[failedTunnel.protocol] += 1
 	} else {
 		controller.impairedProtocolClassification[failedTunnel.protocol] = 0
@@ -995,8 +997,7 @@ func (controller *Controller) establishCandidateGenerator(impairedProtocols []st
 	// networkWaitDuration is the elapsed time spent waiting
 	// for network connectivity. This duration will be excluded
 	// from reported tunnel establishment duration.
-	// networkWaitDuration may include device sleep time.
-	establishStartTime := time.Now()
+	establishStartTime := monotime.Now()
 	var networkWaitDuration time.Duration
 
 	iterator, err := NewServerEntryIterator(controller.config)
@@ -1019,7 +1020,7 @@ loop:
 	// Repeat until stopped
 	for i := 0; ; i++ {
 
-		networkWaitStartTime := time.Now()
+		networkWaitStartTime := monotime.Now()
 
 		if !WaitForNetworkConnectivity(
 			controller.config.NetworkConnectivityChecker,
@@ -1028,10 +1029,10 @@ loop:
 			break loop
 		}
 
-		networkWaitDuration += time.Since(networkWaitStartTime)
+		networkWaitDuration += monotime.Since(networkWaitStartTime)
 
 		// Send each iterator server entry to the establish workers
-		startTime := time.Now()
+		startTime := monotime.Now()
 		for {
 			serverEntry, err := iterator.Next()
 			if err != nil {
@@ -1064,11 +1065,13 @@ loop:
 				}
 			}
 
+			// adjustedEstablishStartTime is establishStartTime shifted
+			// to exclude time spent waiting for network connectivity.
+
 			candidate := &candidateServerEntry{
-				serverEntry:               serverEntry,
-				isServerAffinityCandidate: isServerAffinityCandidate,
-				establishStartTime:        establishStartTime,
-				networkWaitDuration:       networkWaitDuration,
+				serverEntry:                serverEntry,
+				isServerAffinityCandidate:  isServerAffinityCandidate,
+				adjustedEstablishStartTime: establishStartTime.Add(networkWaitDuration),
 			}
 
 			// Note: there must be only one server affinity candidate, as it
@@ -1086,7 +1089,7 @@ loop:
 				break loop
 			}
 
-			if time.Now().After(startTime.Add(ESTABLISH_TUNNEL_WORK_TIME)) {
+			if startTime.Add(ESTABLISH_TUNNEL_WORK_TIME).Before(monotime.Now()) {
 				// Start over, after a brief pause, with a new shuffle of the server
 				// entries, and potentially some newly fetched server entries.
 				break
@@ -1160,8 +1163,7 @@ loop:
 			controller.sessionId,
 			controller.establishPendingConns,
 			candidateServerEntry.serverEntry,
-			candidateServerEntry.establishStartTime,
-			candidateServerEntry.networkWaitDuration,
+			candidateServerEntry.adjustedEstablishStartTime,
 			controller) // TunnelOwner
 		if err != nil {
 

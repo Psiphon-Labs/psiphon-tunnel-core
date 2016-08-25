@@ -34,6 +34,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 	"golang.org/x/crypto/nacl/box"
@@ -571,7 +572,7 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadClos
 	// through the first hop. In addition, this will require additional support for timely shutdown.
 
 	retries := uint(0)
-	retryDeadline := time.Now().Add(MEEK_ROUND_TRIP_RETRY_DEADLINE)
+	retryDeadline := monotime.Now().Add(MEEK_ROUND_TRIP_RETRY_DEADLINE)
 
 	var response *http.Response
 	for {
@@ -603,7 +604,7 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadClos
 			break
 		}
 
-		if retries >= 1 && time.Now().After(retryDeadline) {
+		if retries >= 1 && monotime.Now().After(retryDeadline) {
 			break
 		}
 		retries += 1

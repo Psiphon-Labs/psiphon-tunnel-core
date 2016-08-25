@@ -25,6 +25,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Psiphon-Inc/goarista/monotime"
 )
 
 // Conns is a synchronized list of Conns that is used to coordinate
@@ -187,8 +189,9 @@ type ActivityMonitoredConn struct {
 	// Note: 64-bit ints used with atomic operations are at placed
 	// at the start of struct to ensure 64-bit alignment.
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	startTime            int64
+	monotonicStartTime   int64
 	lastReadActivityTime int64
+	realStartTime        time.Time
 	net.Conn
 	inactivityTimeout time.Duration
 	activeOnWrite     bool
@@ -208,13 +211,14 @@ func NewActivityMonitoredConn(
 		}
 	}
 
-	now := time.Now().UnixNano()
+	now := int64(monotime.Now())
 
 	return &ActivityMonitoredConn{
 		Conn:                 conn,
 		inactivityTimeout:    inactivityTimeout,
 		activeOnWrite:        activeOnWrite,
-		startTime:            now,
+		realStartTime:        time.Now(),
+		monotonicStartTime:   now,
 		lastReadActivityTime: now,
 		lruEntry:             lruEntry,
 	}, nil
@@ -223,19 +227,19 @@ func NewActivityMonitoredConn(
 // GetStartTime gets the time when the ActivityMonitoredConn was
 // initialized.
 func (conn *ActivityMonitoredConn) GetStartTime() time.Time {
-	return time.Unix(0, conn.startTime)
+	return conn.realStartTime
 }
 
 // GetActiveDuration returns the time elapsed between the initialization
 // of the ActivityMonitoredConn and the last Read. Only reads are used
 // for this calculation since writes may succeed locally due to buffering.
 func (conn *ActivityMonitoredConn) GetActiveDuration() time.Duration {
-	return time.Duration(atomic.LoadInt64(&conn.lastReadActivityTime) - conn.startTime)
+	return time.Duration(atomic.LoadInt64(&conn.lastReadActivityTime) - conn.monotonicStartTime)
 }
 
-// GetLastActivityTime returns the time of the last Read.
-func (conn *ActivityMonitoredConn) GetLastActivityTime() time.Time {
-	return time.Unix(0, atomic.LoadInt64(&conn.lastReadActivityTime))
+// GetLastActivityTime returns the arbitrary monotonic time of the last Read.
+func (conn *ActivityMonitoredConn) GetLastActivityMonotime() monotime.Time {
+	return monotime.Time(atomic.LoadInt64(&conn.lastReadActivityTime))
 }
 
 func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
@@ -252,7 +256,7 @@ func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 			conn.lruEntry.Touch()
 		}
 
-		atomic.StoreInt64(&conn.lastReadActivityTime, time.Now().UnixNano())
+		atomic.StoreInt64(&conn.lastReadActivityTime, int64(monotime.Now()))
 
 	}
 	// Note: no context error to preserve error type
