@@ -172,14 +172,7 @@ func cloneRequest(r *http.Request, ch http.Header) *http.Request {
 
 	//Add custom headers to the cloned request
 	for k, s := range ch {
-		// handle special Host header case
-		if k == "Host" {
-			if len(s) > 0 {
-				r2.Host = s[0]
-			}
-		} else {
-			r2.Header[k] = s
-		}
+		r2.Header[k] = s
 	}
 
 	if r.Body != nil {
