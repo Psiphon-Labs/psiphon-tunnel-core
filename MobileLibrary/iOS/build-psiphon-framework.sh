@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 BASE_DIR=$(cd "$(dirname "$0")" ; pwd -P)
 cd ${BASE_DIR}
 
@@ -20,6 +19,10 @@ LIBSSL=${BASE_DIR}/OpenSSL-for-iPhone/lib/libssl.a
 LIBCRYPTO=${BASE_DIR}/OpenSSL-for-iPhone/lib/libcrypto.a
 OPENSSL_INCLUDE=${BASE_DIR}/OpenSSL-for-iPhone/include/
 UMBRELLA_FRAMEWORK_XCODE_PROJECT=${BASE_DIR}/PsiphonTunnelController/PsiphonTunnelController.xcodeproj/
+TRUSTED_ROOT_CA_FILE=${BASE_DIR}/PsiphonTunnelController/PsiphonTunnelController/rootCAs.txt
+
+#Download trustedroot CAs off curl website, see https://curl.haxx.se/docs/caextract.html for details
+curl -o $TRUSTED_ROOT_CA_FILE https://curl.haxx.se/ca/cacert.pem
 
 # Not exporting this breaks go commands later if run via jenkins
 export GOPATH=${PWD}/go-ios-build
@@ -93,11 +96,11 @@ GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
 GOMOBILEVERSION=$(gomobile version | perl -ne '/gomobile version (.*?) / && print $1')
 
 LDFLAGS="\
--X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildDate=${BUILDDATE} \
--X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildRepo=${BUILDREPO} \
--X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.buildRev=${BUILDREV} \
--X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.goVersion=${GOVERSION} \
--X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon.gomobileVersion=${GOMOBILEVERSION} \
+-X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildDate=${BUILDDATE} \
+-X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildRepo=${BUILDREPO} \
+-X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildRev=${BUILDREV} \
+-X github.com/Psiphon-Labs/psiphon-tunnel-core//psiphon/common.goVersion=${GOVERSION} \
+-X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.gomobileVersion=${GOMOBILEVERSION} \
 "
 
 echo ""
@@ -119,7 +122,7 @@ IOS_CGO_BUILD_FLAGS='// #cgo darwin CFLAGS: -I'"${OPENSSL_INCLUDE}"'\
 
 LC_ALL=C sed -i -- "s|// #cgo pkg-config: libssl|${IOS_CGO_BUILD_FLAGS}|" "${OPENSSL_SRC_DIR}/build.go"
 
-gomobile bind -v -target ios -ldflags="${LDFLAGS}" -o ${OUTPUT_DIR}/${OUTPUT_FILE} github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+gomobile bind  -target ios -ldflags="${LDFLAGS}" -o ${OUTPUT_DIR}/${OUTPUT_FILE} github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 ARCHS="$(lipo -info "${FRAMEWORK_BINARY}" | rev | cut -d ':' -f1 | rev)"
 for ARCH in $ARCHS; do
   if ! [[ "${VALID_ARCHS}" == *"$ARCH"* ]]; then
