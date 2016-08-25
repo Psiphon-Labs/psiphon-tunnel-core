@@ -68,6 +68,8 @@ type Controller struct {
 type candidateServerEntry struct {
 	serverEntry               *ServerEntry
 	isServerAffinityCandidate bool
+	establishStartTime        time.Time
+	networkWaitDuration       time.Duration
 }
 
 // NewController initializes a new controller.
@@ -914,10 +916,6 @@ func (controller *Controller) startEstablishing() {
 	}
 	NoticeInfo("start establishing")
 
-	// establishStartTime is used to calculate and report the
-	// client's tunnel establishment duration.
-	establishStartTime := time.Now()
-
 	controller.isEstablishing = true
 	controller.establishWaitGroup = new(sync.WaitGroup)
 	controller.stopEstablishingBroadcast = make(chan struct{})
@@ -953,7 +951,7 @@ func (controller *Controller) startEstablishing() {
 
 	for i := 0; i < controller.config.ConnectionWorkerPoolSize; i++ {
 		controller.establishWaitGroup.Add(1)
-		go controller.establishTunnelWorker(establishStartTime)
+		go controller.establishTunnelWorker()
 	}
 
 	controller.establishWaitGroup.Add(1)
@@ -991,6 +989,16 @@ func (controller *Controller) establishCandidateGenerator(impairedProtocols []st
 	defer controller.establishWaitGroup.Done()
 	defer close(controller.candidateServerEntries)
 
+	// establishStartTime is used to calculate and report the
+	// client's tunnel establishment duration.
+	//
+	// networkWaitDuration is the elapsed time spent waiting
+	// for network connectivity. This duration will be excluded
+	// from reported tunnel establishment duration.
+	// networkWaitDuration may include device sleep time.
+	establishStartTime := time.Now()
+	var networkWaitDuration time.Duration
+
 	iterator, err := NewServerEntryIterator(controller.config)
 	if err != nil {
 		NoticeAlert("failed to iterate over candidates: %s", err)
@@ -1011,12 +1019,16 @@ loop:
 	// Repeat until stopped
 	for i := 0; ; i++ {
 
+		networkWaitStartTime := time.Now()
+
 		if !WaitForNetworkConnectivity(
 			controller.config.NetworkConnectivityChecker,
 			controller.stopEstablishingBroadcast,
 			controller.shutdownBroadcast) {
 			break loop
 		}
+
+		networkWaitDuration += time.Since(networkWaitStartTime)
 
 		// Send each iterator server entry to the establish workers
 		startTime := time.Now()
@@ -1052,9 +1064,15 @@ loop:
 				}
 			}
 
+			candidate := &candidateServerEntry{
+				serverEntry:               serverEntry,
+				isServerAffinityCandidate: isServerAffinityCandidate,
+				establishStartTime:        establishStartTime,
+				networkWaitDuration:       networkWaitDuration,
+			}
+
 			// Note: there must be only one server affinity candidate, as it
 			// closes the serverAffinityDoneBroadcast channel.
-			candidate := &candidateServerEntry{serverEntry, isServerAffinityCandidate}
 			isServerAffinityCandidate = false
 
 			// TODO: here we could generate multiple candidates from the
@@ -1121,7 +1139,7 @@ loop:
 
 // establishTunnelWorker pulls candidates from the candidate queue, establishes
 // a connection to the tunnel server, and delivers the established tunnel to a channel.
-func (controller *Controller) establishTunnelWorker(establishStartTime time.Time) {
+func (controller *Controller) establishTunnelWorker() {
 	defer controller.establishWaitGroup.Done()
 loop:
 	for candidateServerEntry := range controller.candidateServerEntries {
@@ -1142,7 +1160,8 @@ loop:
 			controller.sessionId,
 			controller.establishPendingConns,
 			candidateServerEntry.serverEntry,
-			establishStartTime,
+			candidateServerEntry.establishStartTime,
+			candidateServerEntry.networkWaitDuration,
 			controller) // TunnelOwner
 		if err != nil {
 
