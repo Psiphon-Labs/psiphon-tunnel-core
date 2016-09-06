@@ -33,6 +33,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"golang.org/x/crypto/nacl/box"
@@ -453,12 +454,12 @@ type meekSession struct {
 }
 
 func (session *meekSession) touch() {
-	atomic.StoreInt64(&session.lastActivity, time.Now().UnixNano())
+	atomic.StoreInt64(&session.lastActivity, int64(monotime.Now()))
 }
 
 func (session *meekSession) expired() bool {
-	lastActivity := atomic.LoadInt64(&session.lastActivity)
-	return time.Since(time.Unix(0, lastActivity)) > MEEK_MAX_SESSION_STALENESS
+	lastActivity := monotime.Time(atomic.LoadInt64(&session.lastActivity))
+	return monotime.Since(lastActivity) > MEEK_MAX_SESSION_STALENESS
 }
 
 // makeMeekTLSConfig creates a TLS config for a meek HTTPS listener.
@@ -675,7 +676,7 @@ func (conn *meekConn) Read(buffer []byte) (int, error) {
 // Note: channel scheme assumes only one concurrent call to pumpWrites
 func (conn *meekConn) pumpWrites(writer io.Writer) error {
 
-	startTime := time.Now()
+	startTime := monotime.Now()
 	timeout := time.NewTimer(MEEK_TURN_AROUND_TIMEOUT)
 	defer timeout.Stop()
 
@@ -698,7 +699,7 @@ func (conn *meekConn) pumpWrites(writer io.Writer) error {
 				// MEEK_MAX_PAYLOAD_LENGTH response bodies
 				return nil
 			}
-			totalElapsedTime := time.Now().Sub(startTime) / time.Millisecond
+			totalElapsedTime := monotime.Since(startTime) / time.Millisecond
 			if totalElapsedTime >= MEEK_EXTENDED_TURN_AROUND_TIMEOUT {
 				return nil
 			}

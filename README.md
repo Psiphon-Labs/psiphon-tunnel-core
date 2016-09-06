@@ -90,6 +90,7 @@ Psiphon Tunnel Core uses:
 * [OpenSSL Bindings for Go](https://github.com/spacemonkeygo/openssl)
 * [goptlib](https://github.com/Yawning/goptlib)
 * [goregen](https://github.com/zach-klippenstein/goregen)
+* [monotime](https://github.com/aristanetworks/goarista)
 
 Licensing
 --------------------------------------------------------------------------------

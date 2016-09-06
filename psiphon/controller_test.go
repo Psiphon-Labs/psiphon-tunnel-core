@@ -34,6 +34,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Psiphon-Inc/goarista/monotime"
 	socks "github.com/Psiphon-Inc/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/elazarl/goproxy"
@@ -692,14 +693,14 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		// ensure failed tunnel detection, and ultimately hitting
 		// impaired protocol checks.
 
-		startTime := time.Now()
+		startTime := monotime.Now()
 
 		for {
 
 			time.Sleep(1 * time.Second)
 			useTunnel(t, httpProxyPort)
 
-			if startTime.Add(runConfig.runDuration).Before(time.Now()) {
+			if startTime.Add(runConfig.runDuration).Before(monotime.Now()) {
 				break
 			}
 		}

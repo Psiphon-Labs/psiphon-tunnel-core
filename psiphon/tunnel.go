@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Inc/crypto/ssh"
+	"github.com/Psiphon-Inc/goarista/monotime"
 	regen "github.com/Psiphon-Inc/goregen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
@@ -73,13 +74,14 @@ type Tunnel struct {
 	serverEntry                  *ServerEntry
 	serverContext                *ServerContext
 	protocol                     string
-	conn                         net.Conn
+	conn                         *common.ActivityMonitoredConn
 	sshClient                    *ssh.Client
 	operateWaitGroup             *sync.WaitGroup
 	shutdownOperateBroadcast     chan struct{}
 	signalPortForwardFailure     chan struct{}
 	totalPortForwardFailures     int
-	startTime                    time.Time
+	establishDuration            time.Duration
+	establishedTime              monotime.Time
 	dialStats                    *TunnelDialStats
 	newClientVerificationPayload chan string
 }
@@ -116,6 +118,7 @@ func EstablishTunnel(
 	sessionId string,
 	pendingConns *common.Conns,
 	serverEntry *ServerEntry,
+	adjustedEstablishStartTime monotime.Time,
 	tunnelOwner TunnelOwner) (tunnel *Tunnel, err error) {
 
 	selectedProtocol, err := selectProtocol(config, serverEntry)
@@ -123,8 +126,9 @@ func EstablishTunnel(
 		return nil, common.ContextError(err)
 	}
 
-	// Build transport layers and establish SSH connection
-	conn, sshClient, dialStats, err := dialSsh(
+	// Build transport layers and establish SSH connection. Note that
+	// dialConn and monitoredConn are the same network connection.
+	dialConn, monitoredConn, sshClient, dialStats, err := dialSsh(
 		config, pendingConns, serverEntry, selectedProtocol, sessionId)
 	if err != nil {
 		return nil, common.ContextError(err)
@@ -134,7 +138,8 @@ func EstablishTunnel(
 	defer func() {
 		if err != nil {
 			sshClient.Close()
-			conn.Close()
+			monitoredConn.Close()
+			pendingConns.Remove(dialConn)
 		}
 	}()
 
@@ -146,7 +151,7 @@ func EstablishTunnel(
 		isClosed:                 false,
 		serverEntry:              serverEntry,
 		protocol:                 selectedProtocol,
-		conn:                     conn,
+		conn:                     monitoredConn,
 		sshClient:                sshClient,
 		operateWaitGroup:         new(sync.WaitGroup),
 		shutdownOperateBroadcast: make(chan struct{}),
@@ -172,10 +177,20 @@ func EstablishTunnel(
 		}
 	}
 
-	tunnel.startTime = time.Now()
+	// establishDuration is the elapsed time between the controller starting tunnel
+	// establishment and this tunnel being established. The reported value represents
+	// how long the user waited between starting the client and having a usable tunnel;
+	// or how long between the client detecting an unexpected tunnel disconnect and
+	// completing automatic reestablishment.
+	//
+	// This time period may include time spent unsuccessfully connecting to other
+	// servers. Time spent waiting for network connectivity is excluded.
+	tunnel.establishDuration = monotime.Since(adjustedEstablishStartTime)
+
+	tunnel.establishedTime = monotime.Now()
 
 	// Now that network operations are complete, cancel interruptibility
-	pendingConns.Remove(conn)
+	pendingConns.Remove(dialConn)
 
 	// Spawn the operateTunnel goroutine, which monitors the tunnel and handles periodic stats updates.
 	tunnel.operateWaitGroup.Add(1)
@@ -210,7 +225,7 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 		tunnel.operateWaitGroup.Wait()
 		timer.Stop()
 		tunnel.sshClient.Close()
-		// tunnel.conn.Close() may get called twice, which is allowed.
+		// tunnel.conn.Close() may get called multiple times, which is allowed.
 		tunnel.conn.Close()
 	}
 }
@@ -523,12 +538,17 @@ func initMeekConfig(
 
 // dialSsh is a helper that builds the transport layers and establishes the SSH connection.
 // When additional dial configuration is used, DialStats are recorded and returned.
+//
+// The net.Conn return value is the value to be removed from pendingConns; additional
+// layering (ThrottledConn, ActivityMonitoredConn) is applied, but this return value is the
+// base dial conn. The *ActivityMonitoredConn return value is the layered conn passed into
+// the ssh.Client.
 func dialSsh(
 	config *Config,
 	pendingConns *common.Conns,
 	serverEntry *ServerEntry,
 	selectedProtocol,
-	sessionId string) (net.Conn, *ssh.Client, *TunnelDialStats, error) {
+	sessionId string) (net.Conn, *common.ActivityMonitoredConn, *ssh.Client, *TunnelDialStats, error) {
 
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
@@ -550,7 +570,7 @@ func dialSsh(
 		useObfuscatedSsh = true
 		meekConfig, err = initMeekConfig(config, serverEntry, selectedProtocol, sessionId)
 		if err != nil {
-			return nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, common.ContextError(err)
 		}
 	}
 
@@ -590,12 +610,12 @@ func dialSsh(
 	if meekConfig != nil {
 		dialConn, err = DialMeek(meekConfig, dialConfig)
 		if err != nil {
-			return nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, common.ContextError(err)
 		}
 	} else {
 		dialConn, err = DialTCP(directTCPDialAddress, dialConfig)
 		if err != nil {
-			return nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, common.ContextError(err)
 		}
 	}
 
@@ -604,11 +624,18 @@ func dialSsh(
 		// Cleanup on error
 		if cleanupConn != nil {
 			cleanupConn.Close()
+			pendingConns.Remove(cleanupConn)
 		}
 	}()
 
+	// Activity monitoring is used to measure tunnel duration
+	monitoredConn, err := common.NewActivityMonitoredConn(dialConn, 0, false, nil)
+	if err != nil {
+		return nil, nil, nil, nil, common.ContextError(err)
+	}
+
 	// Apply throttling (if configured)
-	throttledConn := common.NewThrottledConn(dialConn, config.RateLimits)
+	throttledConn := common.NewThrottledConn(monitoredConn, config.RateLimits)
 
 	// Add obfuscated SSH layer
 	var sshConn net.Conn = throttledConn
@@ -616,14 +643,14 @@ func dialSsh(
 		sshConn, err = NewObfuscatedSshConn(
 			OBFUSCATION_CONN_MODE_CLIENT, throttledConn, serverEntry.SshObfuscatedKey)
 		if err != nil {
-			return nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, common.ContextError(err)
 		}
 	}
 
 	// Now establish the SSH session over the conn transport
 	expectedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.SshHostKey)
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, common.ContextError(err)
 	}
 	sshCertChecker := &ssh.CertChecker{
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
@@ -639,7 +666,7 @@ func dialSsh(
 			SshPassword string `json:"SshPassword"`
 		}{sessionId, serverEntry.SshPassword})
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, common.ContextError(err)
 	}
 	sshClientConfig := &ssh.ClientConfig{
 		User: serverEntry.SshUsername,
@@ -685,7 +712,7 @@ func dialSsh(
 
 	result := <-resultChannel
 	if result.err != nil {
-		return nil, nil, nil, common.ContextError(result.err)
+		return nil, nil, nil, nil, common.ContextError(result.err)
 	}
 
 	var dialStats *TunnelDialStats
@@ -724,7 +751,7 @@ func dialSsh(
 	// but should not be used to perform I/O as that would interfere with SSH
 	// (and also bypasses throttling).
 
-	return dialConn, result.sshClient, dialStats, nil
+	return dialConn, monitoredConn, result.sshClient, dialStats, nil
 }
 
 func makeRandomPeriod(min, max time.Duration) time.Duration {
@@ -786,9 +813,9 @@ func makeRandomPeriod(min, max time.Duration) time.Duration {
 func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	defer tunnel.operateWaitGroup.Done()
 
-	lastBytesReceivedTime := time.Now()
+	lastBytesReceivedTime := monotime.Now()
 
-	lastTotalBytesTransferedTime := time.Now()
+	lastTotalBytesTransferedTime := monotime.Now()
 	totalSent := int64(0)
 	totalReceived := int64(0)
 
@@ -915,15 +942,15 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 				tunnel.serverEntry.IpAddress)
 
 			if received > 0 {
-				lastBytesReceivedTime = time.Now()
+				lastBytesReceivedTime = monotime.Now()
 			}
 
 			totalSent += sent
 			totalReceived += received
 
-			if lastTotalBytesTransferedTime.Add(TOTAL_BYTES_TRANSFERRED_NOTICE_PERIOD).Before(time.Now()) {
+			if lastTotalBytesTransferedTime.Add(TOTAL_BYTES_TRANSFERRED_NOTICE_PERIOD).Before(monotime.Now()) {
 				NoticeTotalBytesTransferred(tunnel.serverEntry.IpAddress, totalSent, totalReceived)
-				lastTotalBytesTransferedTime = time.Now()
+				lastTotalBytesTransferedTime = monotime.Now()
 			}
 
 			// Only emit the frequent BytesTransferred notice when tunnel is not idle.
@@ -939,7 +966,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			statsTimer.Reset(nextStatusRequestPeriod())
 
 		case <-sshKeepAliveTimer.C:
-			if lastBytesReceivedTime.Add(TUNNEL_SSH_KEEP_ALIVE_PERIODIC_INACTIVE_PERIOD).Before(time.Now()) {
+			if lastBytesReceivedTime.Add(TUNNEL_SSH_KEEP_ALIVE_PERIODIC_INACTIVE_PERIOD).Before(monotime.Now()) {
 				select {
 				case signalSshKeepAlive <- time.Duration(*tunnel.config.TunnelSshKeepAlivePeriodicTimeoutSeconds) * time.Second:
 				default:
@@ -953,7 +980,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			NoticeInfo("port forward failures for %s: %d",
 				tunnel.serverEntry.IpAddress, tunnel.totalPortForwardFailures)
 
-			if lastBytesReceivedTime.Add(TUNNEL_SSH_KEEP_ALIVE_PROBE_INACTIVE_PERIOD).Before(time.Now()) {
+			if lastBytesReceivedTime.Add(TUNNEL_SSH_KEEP_ALIVE_PROBE_INACTIVE_PERIOD).Before(monotime.Now()) {
 				select {
 				case signalSshKeepAlive <- time.Duration(*tunnel.config.TunnelSshKeepAliveProbeTimeoutSeconds) * time.Second:
 				default:
@@ -983,20 +1010,48 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// Always emit a final NoticeTotalBytesTransferred
 	NoticeTotalBytesTransferred(tunnel.serverEntry.IpAddress, totalSent, totalReceived)
 
-	// The stats for this tunnel will be reported via the next successful
-	// status request.
-	// Note: Since client clocks are unreliable, we use the server's reported
-	// timestamp in the handshake response as the tunnel start time. This time
-	// will be slightly earlier than the actual tunnel activation time, as the
-	// client has to receive and parse the response and activate the tunnel.
 	// Tunnel does not have a serverContext when DisableApi is set.
 	if tunnel.serverContext != nil && !tunnel.IsDiscarded() {
+
+		// The stats for this tunnel will be reported via the next successful
+		// status request.
+
+		// Since client clocks are unreliable, we report the server's timestamp from
+		// the handshake response as the absolute tunnel start time. This time
+		// will be slightly earlier than the actual tunnel activation time, as the
+		// client has to receive and parse the response and activate the tunnel.
+
+		tunnelStartTime := tunnel.serverContext.serverHandshakeTimestamp
+
+		// For the tunnel duration calculation, we use the local clock. The start time
+		// is tunnel.establishedTime as recorded when the tunnel was established. For the
+		// end time, we do not use the current time as we may now be long past the
+		// actual termination time of the tunnel. For example, the host or device may
+		// have resumed after a long sleep (it's not clear that the monotonic clock service
+		// used to measure elapsed time will or will not stop during device sleep). Instead,
+		// we use the last data received time as the estimated tunnel end time.
+		//
+		// One potential issue with using the last received time is receiving data
+		// after an extended sleep because the device sleep occured with data still in
+		// the OS socket read buffer. This is not expected to happen on Android, as the
+		// OS will wake a process when it has TCP data available to read. (For this reason,
+		// the actual long sleep issue is only with an idle tunnel; in this case the client
+		// is responsible for sending SSH keep alives but a device sleep will delay the
+		// golang SSH keep alive timer.)
+		//
+		// Idle tunnels will only read data when a SSH keep alive is sent. As a result,
+		// the last-received-time scheme can undercount tunnel durations by up to
+		// TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX for idle tunnels.
+
+		tunnelDuration := tunnel.conn.GetLastActivityMonotime().Sub(tunnel.establishedTime)
+
 		err := RecordTunnelStats(
 			tunnel.serverContext.sessionId,
 			tunnel.serverContext.tunnelNumber,
 			tunnel.serverEntry.IpAddress,
-			tunnel.serverContext.serverHandshakeTimestamp,
-			fmt.Sprintf("%d", time.Now().Sub(tunnel.startTime)),
+			fmt.Sprintf("%d", tunnel.establishDuration),
+			tunnelStartTime,
+			fmt.Sprintf("%d", tunnelDuration),
 			totalSent,
 			totalReceived)
 		if err != nil {
@@ -1044,7 +1099,8 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 // sendSshKeepAlive is a helper which sends a keepalive@openssh.com request
 // on the specified SSH connections and returns true of the request succeeds
-// within a specified timeout.
+// within a specified timeout. If the request fails, the associated conn is
+// closed, which will terminate the associated tunnel.
 func sendSshKeepAlive(
 	sshClient *ssh.Client, conn net.Conn, timeout time.Duration) error {
 
@@ -1063,6 +1119,8 @@ func sendSshKeepAlive(
 			// Proceed without random padding
 			randomPadding = make([]byte, 0)
 		}
+		// Note: reading a reply is important for last-received-time tunnel
+		// duration calculation.
 		_, _, err = sshClient.SendRequest("keepalive@openssh.com", true, randomPadding)
 		errChannel <- err
 	}()

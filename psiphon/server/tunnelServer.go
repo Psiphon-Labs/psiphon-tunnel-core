@@ -436,7 +436,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	// the connection active. Writes are not considered reliable activity indicators
 	// due to buffering.
 
-	activityConn, err := NewActivityMonitoredConn(
+	activityConn, err := common.NewActivityMonitoredConn(
 		clientConn,
 		SSH_CONNECTION_READ_DEADLINE,
 		false,
@@ -550,7 +550,7 @@ type sshClient struct {
 	sshServer               *sshServer
 	tunnelProtocol          string
 	sshConn                 ssh.Conn
-	activityConn            *ActivityMonitoredConn
+	activityConn            *common.ActivityMonitoredConn
 	geoIPData               GeoIPData
 	psiphonSessionID        string
 	udpChannel              ssh.Channel
@@ -558,7 +558,7 @@ type sshClient struct {
 	tcpTrafficState         *trafficState
 	udpTrafficState         *trafficState
 	channelHandlerWaitGroup *sync.WaitGroup
-	tcpPortForwardLRU       *LRUConns
+	tcpPortForwardLRU       *common.LRUConns
 	stopBroadcast           chan struct{}
 }
 
@@ -583,7 +583,7 @@ func newSshClient(
 		tcpTrafficState:         &trafficState{},
 		udpTrafficState:         &trafficState{},
 		channelHandlerWaitGroup: new(sync.WaitGroup),
-		tcpPortForwardLRU:       NewLRUConns(),
+		tcpPortForwardLRU:       common.NewLRUConns(),
 		stopBroadcast:           make(chan struct{}),
 	}
 }
@@ -1013,7 +1013,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	lruEntry := sshClient.tcpPortForwardLRU.Add(fwdConn)
 	defer lruEntry.Remove()
 
-	fwdConn, err = NewActivityMonitoredConn(
+	fwdConn, err = common.NewActivityMonitoredConn(
 		fwdConn,
 		time.Duration(sshClient.trafficRules.IdleTCPPortForwardTimeoutMilliseconds)*time.Millisecond,
 		true,
