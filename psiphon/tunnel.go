@@ -1026,8 +1026,9 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// is tunnel.establishedTime as recorded when the tunnel was established. For the
 	// end time, we do not use the current time as we may now be long past the
 	// actual termination time of the tunnel. For example, the host or device may
-	// have resumed after a long sleep. Instead, we use the last data received time
-	// as the estimated tunnel end time.
+	// have resumed after a long sleep (it's not clear that the monotonic clock service
+	// used to measure elapsed time will or will not stop during device sleep). Instead,
+	// we use the last data received time as the estimated tunnel end time.
 	//
 	// One potential issue with using the last received time is receiving data
 	// after an extended sleep because the device sleep occured with data still in
@@ -1039,7 +1040,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	//
 	// Idle tunnels will only read data when a SSH keep alive is sent. As a result,
 	// the last-received-time scheme can undercount tunnel durations by up to
-	// TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX to idle tunnels.
+	// TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX for idle tunnels.
 
 	tunnelDuration := tunnel.monitoredConn.GetLastActivityMonotime().Sub(tunnel.establishedTime)
 
