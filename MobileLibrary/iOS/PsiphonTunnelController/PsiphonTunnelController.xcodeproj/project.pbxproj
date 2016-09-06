@@ -9,10 +9,11 @@
 /* Begin PBXBuildFile section */
 		44980AC21D63A3B300B78274 /* PsiphonTunnelController.h in Headers */ = {isa = PBXBuildFile; fileRef = 44980AC01D63A3B300B78274 /* PsiphonTunnelController.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		44980ACB1D63A3EA00B78274 /* PsiphonTunnelController.m in Sources */ = {isa = PBXBuildFile; fileRef = 44980AC81D63A3EA00B78274 /* PsiphonTunnelController.m */; };
-		44980ACC1D63A3EA00B78274 /* Reachability.h in Headers */ = {isa = PBXBuildFile; fileRef = 44980AC91D63A3EA00B78274 /* Reachability.h */; };
+		44980ACC1D63A3EA00B78274 /* Reachability.h in Headers */ = {isa = PBXBuildFile; fileRef = 44980AC91D63A3EA00B78274 /* Reachability.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		44980ACD1D63A3EA00B78274 /* Reachability.m in Sources */ = {isa = PBXBuildFile; fileRef = 44980ACA1D63A3EA00B78274 /* Reachability.m */; };
 		44980AD71D63A6FD00B78274 /* Psi.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 44980AD61D63A6FD00B78274 /* Psi.framework */; };
 		44980ADA1D63B0A800B78274 /* Psi.framework in Resources */ = {isa = PBXBuildFile; fileRef = 44980AD61D63A6FD00B78274 /* Psi.framework */; };
+		44CC93D61D6CBD740082F743 /* rootCAs.txt in Resources */ = {isa = PBXBuildFile; fileRef = 44CC93D51D6CBD740082F743 /* rootCAs.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -23,6 +24,7 @@
 		44980AC91D63A3EA00B78274 /* Reachability.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Reachability.h; sourceTree = "<group>"; };
 		44980ACA1D63A3EA00B78274 /* Reachability.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Reachability.m; sourceTree = "<group>"; };
 		44980AD61D63A6FD00B78274 /* Psi.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Psi.framework; path = ../framework/Psi.framework; sourceTree = "<group>"; };
+		44CC93D51D6CBD740082F743 /* rootCAs.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = rootCAs.txt; path = PsiphonTunnelController/rootCAs.txt; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -40,6 +42,7 @@
 		44980AB31D63A3B300B78274 = {
 			isa = PBXGroup;
 			children = (
+				44CC93D41D6CBD260082F743 /* Resources */,
 				44980ABF1D63A3B300B78274 /* PsiphonTunnelController */,
 				44980ABE1D63A3B300B78274 /* Products */,
 				44980AD51D63A6FD00B78274 /* Frameworks */,
@@ -72,6 +75,14 @@
 				44980AD61D63A6FD00B78274 /* Psi.framework */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		44CC93D41D6CBD260082F743 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				44CC93D51D6CBD740082F743 /* rootCAs.txt */,
+			);
+			name = Resources;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -144,6 +155,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				44CC93D61D6CBD740082F743 /* rootCAs.txt in Resources */,
 				44980ADA1D63B0A800B78274 /* Psi.framework in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -337,6 +349,7 @@
 				44980AC71D63A3B300B78274 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};

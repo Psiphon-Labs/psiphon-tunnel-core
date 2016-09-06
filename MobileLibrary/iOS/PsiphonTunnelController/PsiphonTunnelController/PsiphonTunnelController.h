@@ -6,8 +6,6 @@
 //  Copyright © 2016 Psiphon Inc. All rights reserved.
 //
 
-#import <UIKit/UIKit.h>
-
 
 //! Project version number for PsiphonMobile.
 FOUNDATION_EXPORT double PsiphonMobileVersionNumber;
