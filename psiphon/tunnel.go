@@ -74,8 +74,7 @@ type Tunnel struct {
 	serverEntry                  *ServerEntry
 	serverContext                *ServerContext
 	protocol                     string
-	dialConn                     net.Conn
-	monitoredConn                *common.ActivityMonitoredConn
+	conn                         *common.ActivityMonitoredConn
 	sshClient                    *ssh.Client
 	operateWaitGroup             *sync.WaitGroup
 	shutdownOperateBroadcast     chan struct{}
@@ -139,7 +138,7 @@ func EstablishTunnel(
 	defer func() {
 		if err != nil {
 			sshClient.Close()
-			dialConn.Close()
+			monitoredConn.Close()
 			pendingConns.Remove(dialConn)
 		}
 	}()
@@ -152,8 +151,7 @@ func EstablishTunnel(
 		isClosed:                 false,
 		serverEntry:              serverEntry,
 		protocol:                 selectedProtocol,
-		dialConn:                 dialConn,
-		monitoredConn:            monitoredConn,
+		conn:                     monitoredConn,
 		sshClient:                sshClient,
 		operateWaitGroup:         new(sync.WaitGroup),
 		shutdownOperateBroadcast: make(chan struct{}),
@@ -222,13 +220,13 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 		// In effect, the TUNNEL_OPERATE_SHUTDOWN_TIMEOUT value will take
 		// precedence over the PSIPHON_API_SERVER_TIMEOUT http.Client.Timeout
 		// value set in makePsiphonHttpsClient.
-		timer := time.AfterFunc(TUNNEL_OPERATE_SHUTDOWN_TIMEOUT, func() { tunnel.dialConn.Close() })
+		timer := time.AfterFunc(TUNNEL_OPERATE_SHUTDOWN_TIMEOUT, func() { tunnel.conn.Close() })
 		close(tunnel.shutdownOperateBroadcast)
 		tunnel.operateWaitGroup.Wait()
 		timer.Stop()
 		tunnel.sshClient.Close()
-		// tunnel.dialConn.Close() may get called twice, which is allowed.
-		tunnel.dialConn.Close()
+		// tunnel.conn.Close() may get called multiple times, which is allowed.
+		tunnel.conn.Close()
 	}
 }
 
@@ -885,7 +883,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	go func() {
 		defer requestsWaitGroup.Done()
 		for timeout := range signalSshKeepAlive {
-			err := sendSshKeepAlive(tunnel.sshClient, tunnel.dialConn, timeout)
+			err := sendSshKeepAlive(tunnel.sshClient, tunnel.conn, timeout)
 			if err != nil {
 				select {
 				case sshKeepAliveError <- err:
@@ -1042,7 +1040,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// the last-received-time scheme can undercount tunnel durations by up to
 	// TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX for idle tunnels.
 
-	tunnelDuration := tunnel.monitoredConn.GetLastActivityMonotime().Sub(tunnel.establishedTime)
+	tunnelDuration := tunnel.conn.GetLastActivityMonotime().Sub(tunnel.establishedTime)
 
 	// Tunnel does not have a serverContext when DisableApi is set.
 	if tunnel.serverContext != nil && !tunnel.IsDiscarded() {
@@ -1100,9 +1098,10 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 // sendSshKeepAlive is a helper which sends a keepalive@openssh.com request
 // on the specified SSH connections and returns true of the request succeeds
-// within a specified timeout.
+// within a specified timeout. If the request fails, the associated conn is
+// closed, which will terminate the associated tunnel.
 func sendSshKeepAlive(
-	sshClient *ssh.Client, dialConn net.Conn, timeout time.Duration) error {
+	sshClient *ssh.Client, conn net.Conn, timeout time.Duration) error {
 
 	errChannel := make(chan error, 2)
 	if timeout > 0 {
@@ -1128,7 +1127,7 @@ func sendSshKeepAlive(
 	err := <-errChannel
 	if err != nil {
 		sshClient.Close()
-		dialConn.Close()
+		conn.Close()
 	}
 
 	return common.ContextError(err)

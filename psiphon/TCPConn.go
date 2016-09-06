@@ -135,8 +135,13 @@ func interruptibleTCPDial(addr string, config *DialConfig) (*TCPConn, error) {
 	// Wait until Dial completes (or times out) or until interrupt
 	err := <-conn.dialResult
 	if err != nil {
+		if config.PendingConns != nil {
+			config.PendingConns.Remove(conn)
+		}
 		return nil, common.ContextError(err)
 	}
+
+	// TODO: now allow conn.dialResult to be garbage collected?
 
 	return conn, nil
 }
