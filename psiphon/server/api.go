@@ -307,16 +307,20 @@ func statusAPIRequestHandler(
 			}
 			sessionFields["tunnel_server_ip_address"] = tunnelServerIPAddress
 
-			strEstablishmentDuration, err := getStringRequestParam(tunnelStat, "establishment_duration")
-			if err != nil {
-				return nil, common.ContextError(err)
+			// Note: older clients won't send establishment_duration
+			if tunnelStat["establishment_duration"] != nil {
+
+				strEstablishmentDuration, err := getStringRequestParam(tunnelStat, "establishment_duration")
+				if err != nil {
+					return nil, common.ContextError(err)
+				}
+				establishmentDuration, err := strconv.ParseInt(strEstablishmentDuration, 10, 64)
+				if err != nil {
+					return nil, common.ContextError(err)
+				}
+				// Client reports establishment_duration in nanoseconds; divide to get to milliseconds
+				sessionFields["establishment_duration"] = establishmentDuration / 1000000
 			}
-			establishmentDuration, err := strconv.ParseInt(strEstablishmentDuration, 10, 64)
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			// Client reports establishment_duration in nanoseconds; divide to get to milliseconds
-			sessionFields["establishment_duration"] = establishmentDuration / 1000000
 
 			serverHandshakeTimestamp, err := getStringRequestParam(tunnelStat, "server_handshake_timestamp")
 			if err != nil {
