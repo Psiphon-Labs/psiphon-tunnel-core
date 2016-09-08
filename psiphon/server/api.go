@@ -308,7 +308,7 @@ func statusAPIRequestHandler(
 			sessionFields["tunnel_server_ip_address"] = tunnelServerIPAddress
 
 			// Note: older clients won't send establishment_duration
-			if tunnelStat["establishment_duration"] != nil {
+			if _, ok := tunnelStat["establishment_duration"]; ok {
 
 				strEstablishmentDuration, err := getStringRequestParam(tunnelStat, "establishment_duration")
 				if err != nil {
