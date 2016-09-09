@@ -244,6 +244,9 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	}
 
 	for tunnelProtocol, _ := range config.TunnelProtocolPorts {
+		if !common.Contains(common.SupportedTunnelProtocols, tunnelProtocol) {
+			return nil, fmt.Errorf("Unsupported tunnel protocol: %s", tunnelProtocol)
+		}
 		if common.TunnelProtocolUsesSSH(tunnelProtocol) ||
 			common.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
 			if config.SSHPrivateKey == "" || config.SSHServerVersion == "" ||
