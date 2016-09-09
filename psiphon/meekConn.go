@@ -540,23 +540,7 @@ func (meek *MeekConn) readPayload(receivedPayload io.ReadCloser) (totalSize int6
 }
 
 // roundTrip configures and makes the actual HTTP POST request
-func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadCloser, err error) {
-	request, err := http.NewRequest("POST", meek.url.String(), bytes.NewReader(sendPayload))
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-
-	// Don't use the default user agent ("Go 1.1 package http").
-	// For now, just omit the header (net/http/request.go: "may be blank to not send the header").
-	request.Header.Set("User-Agent", "")
-
-	request.Header.Set("Content-Type", "application/octet-stream")
-
-	for name, value := range meek.additionalHeaders {
-		request.Header.Set(name, value)
-	}
-
-	request.AddCookie(meek.cookie)
+func (meek *MeekConn) roundTrip(sendPayload []byte) (io.ReadCloser, error) {
 
 	// The retry mitigates intermittent failures between the client and front/server.
 	//
@@ -570,12 +554,31 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (receivedPayload io.ReadClos
 	// i.e., as long as the underlying tunnel has not timed out and as long as the server has not
 	// expired the current meek session. Presently not doing this to avoid excessive connection attempts
 	// through the first hop. In addition, this will require additional support for timely shutdown.
-
 	retries := uint(0)
 	retryDeadline := monotime.Now().Add(MEEK_ROUND_TRIP_RETRY_DEADLINE)
 
+	var err error
 	var response *http.Response
 	for {
+
+		var request *http.Request
+		request, err = http.NewRequest("POST", meek.url.String(), bytes.NewReader(sendPayload))
+		if err != nil {
+			// Don't retry when can't initialize a Request
+			break
+		}
+
+		// Don't use the default user agent ("Go 1.1 package http").
+		// For now, just omit the header (net/http/request.go: "may be blank to not send the header").
+		request.Header.Set("User-Agent", "")
+
+		request.Header.Set("Content-Type", "application/octet-stream")
+
+		for name, value := range meek.additionalHeaders {
+			request.Header.Set(name, value)
+		}
+
+		request.AddCookie(meek.cookie)
 
 		// The http.Transport.RoundTrip is run in a goroutine to enable cancelling a request in-flight.
 		type roundTripResponse struct {

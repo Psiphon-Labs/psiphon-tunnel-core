@@ -307,6 +307,21 @@ func statusAPIRequestHandler(
 			}
 			sessionFields["tunnel_server_ip_address"] = tunnelServerIPAddress
 
+			// Note: older clients won't send establishment_duration
+			if _, ok := tunnelStat["establishment_duration"]; ok {
+
+				strEstablishmentDuration, err := getStringRequestParam(tunnelStat, "establishment_duration")
+				if err != nil {
+					return nil, common.ContextError(err)
+				}
+				establishmentDuration, err := strconv.ParseInt(strEstablishmentDuration, 10, 64)
+				if err != nil {
+					return nil, common.ContextError(err)
+				}
+				// Client reports establishment_duration in nanoseconds; divide to get to milliseconds
+				sessionFields["establishment_duration"] = establishmentDuration / 1000000
+			}
+
 			serverHandshakeTimestamp, err := getStringRequestParam(tunnelStat, "server_handshake_timestamp")
 			if err != nil {
 				return nil, common.ContextError(err)
@@ -321,7 +336,7 @@ func statusAPIRequestHandler(
 			if err != nil {
 				return nil, common.ContextError(err)
 			}
-			// Client reports durations in nanoseconds; divide to get to milliseconds
+			// Client reports duration in nanoseconds; divide to get to milliseconds
 			sessionFields["duration"] = duration / 1000000
 
 			totalBytesSent, err := getInt64RequestParam(tunnelStat, "total_bytes_sent")
