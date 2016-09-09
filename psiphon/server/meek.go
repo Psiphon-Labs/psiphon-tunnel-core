@@ -585,51 +585,68 @@ func makeMeekSessionID() (string, error) {
 
 // meekConn implements the net.Conn interface and is to be used as a client
 // connection by the tunnel server (being passed to sshServer.handleClient).
-// meekConn doesn't perform any real I/O, but instead shuttles io.Readers and
-// io.Writers between goroutines blocking on Read()s and Write()s.
+// meekConn bridges net/http request/response payload readers and writers
+// and goroutines calling Read()s and Write()s.
 type meekConn struct {
-	remoteAddr      net.Addr
-	protocolVersion int
-	closeBroadcast  chan struct{}
-	closed          int32
-	readLock        sync.Mutex
-	readyReader     chan io.Reader
-	readResult      chan error
-	writeLock       sync.Mutex
-	nextWriteBuffer chan []byte
-	writeResult     chan error
+	remoteAddr        net.Addr
+	protocolVersion   int
+	closeBroadcast    chan struct{}
+	closed            int32
+	readLock          sync.Mutex
+	emptyReadBuffer   chan *bytes.Buffer
+	partialReadBuffer chan *bytes.Buffer
+	fullReadBuffer    chan *bytes.Buffer
+	writeLock         sync.Mutex
+	nextWriteBuffer   chan []byte
+	writeResult       chan error
 }
 
 func newMeekConn(remoteAddr net.Addr, protocolVersion int) *meekConn {
-	return &meekConn{
-		remoteAddr:      remoteAddr,
-		protocolVersion: protocolVersion,
-		closeBroadcast:  make(chan struct{}),
-		closed:          0,
-		readyReader:     make(chan io.Reader, 1),
-		readResult:      make(chan error, 1),
-		nextWriteBuffer: make(chan []byte, 1),
-		writeResult:     make(chan error, 1),
+	conn := &meekConn{
+		remoteAddr:        remoteAddr,
+		protocolVersion:   protocolVersion,
+		closeBroadcast:    make(chan struct{}),
+		closed:            0,
+		emptyReadBuffer:   make(chan *bytes.Buffer, 1),
+		partialReadBuffer: make(chan *bytes.Buffer, 1),
+		fullReadBuffer:    make(chan *bytes.Buffer, 1),
+		nextWriteBuffer:   make(chan []byte, 1),
+		writeResult:       make(chan error, 1),
 	}
+	// Read() calls and pumpReads() are synchronized by exchanging control
+	// of a single readBuffer. This is the same scheme used in and described
+	// in psiphon.MeekConn.
+	conn.emptyReadBuffer <- new(bytes.Buffer)
+	return conn
 }
 
 // pumpReads causes goroutines blocking on meekConn.Read() to read
 // from the specified reader. This function blocks until the reader
-// is fully consumed or the meekConn is closed.
-// Note: channel scheme assumes only one concurrent call to pumpReads
+// is fully consumed or the meekConn is closed. A read buffer allows
+// up to MEEK_MAX_PAYLOAD_LENGTH bytes to be read and buffered without
+// a Read() immediately consuming the bytes, but there's still a
+// possibility of a stall if no Read() calls are made after this
+// read buffer is full.
+// Note: assumes only one concurrent call to pumpReads
 func (conn *meekConn) pumpReads(reader io.Reader) error {
+	for {
 
-	// Assumes that readyReader won't block.
-	conn.readyReader <- reader
+		var readBuffer *bytes.Buffer
+		select {
+		case readBuffer = <-conn.emptyReadBuffer:
+		case readBuffer = <-conn.partialReadBuffer:
+		case <-conn.closeBroadcast:
+			return io.EOF
+		}
 
-	// Receiving readResult means Read(s) have consumed the
-	// reader sent to readyReader. readyReader is now empty and
-	// no reference is kept to the reader.
-	select {
-	case err := <-conn.readResult:
-		return err
-	case <-conn.closeBroadcast:
-		return io.EOF
+		limitReader := io.LimitReader(reader, int64(MEEK_MAX_PAYLOAD_LENGTH-readBuffer.Len()))
+		n, err := readBuffer.ReadFrom(limitReader)
+
+		conn.replaceReadBuffer(readBuffer)
+
+		if n == 0 || err != nil {
+			return err
+		}
 	}
 }
 
@@ -641,32 +658,30 @@ func (conn *meekConn) Read(buffer []byte) (int, error) {
 	conn.readLock.Lock()
 	defer conn.readLock.Unlock()
 
-	var reader io.Reader
+	var readBuffer *bytes.Buffer
 	select {
-	case reader = <-conn.readyReader:
+	case readBuffer = <-conn.partialReadBuffer:
+	case readBuffer = <-conn.fullReadBuffer:
 	case <-conn.closeBroadcast:
 		return 0, io.EOF
 	}
 
-	n, err := reader.Read(buffer)
+	n, err := readBuffer.Read(buffer)
 
-	if err != nil {
-		if err == io.EOF {
-			err = nil
-		}
-		// Assumes readerResult won't block.
-		conn.readResult <- err
-	} else {
-		// There may be more data in the reader, but the caller's
-		// buffer is full, so put the reader back into the ready
-		// channel. pumpReads remains blocked waiting for another
-		// Read call.
-		// Note that the reader could be at EOF, while another call is
-		// required to get that result (https://golang.org/pkg/io/#Reader).
-		conn.readyReader <- reader
-	}
+	conn.replaceReadBuffer(readBuffer)
 
 	return n, err
+}
+
+func (conn *meekConn) replaceReadBuffer(readBuffer *bytes.Buffer) {
+	switch readBuffer.Len() {
+	case MEEK_MAX_PAYLOAD_LENGTH:
+		conn.fullReadBuffer <- readBuffer
+	case 0:
+		conn.emptyReadBuffer <- readBuffer
+	default:
+		conn.partialReadBuffer <- readBuffer
+	}
 }
 
 // pumpWrites causes goroutines blocking on meekConn.Write() to write
