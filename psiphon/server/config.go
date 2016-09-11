@@ -507,10 +507,10 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 	trafficRulesSet := &TrafficRulesSet{
 		DefaultRules: TrafficRules{
 			DefaultLimits: common.RateLimits{
-				DownstreamUnlimitedBytes: 0,
-				DownstreamBytesPerSecond: 0,
-				UpstreamUnlimitedBytes:   0,
-				UpstreamBytesPerSecond:   0,
+				ReadUnthrottledBytes:  0,
+				ReadBytesPerSecond:    0,
+				WriteUnthrottledBytes: 0,
+				WriteBytesPerSecond:   0,
 			},
 			IdleTCPPortForwardTimeoutMilliseconds: 30000,
 			IdleUDPPortForwardTimeoutMilliseconds: 30000,
