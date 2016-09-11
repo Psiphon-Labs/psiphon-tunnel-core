@@ -110,11 +110,11 @@ func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
 
 	// Use the base reader until the unlimited count is exhausted.
 	if atomic.LoadInt32(&conn.limitingReads) == 0 {
-		if atomic.AddInt64(&conn.unlimitedReadBytes, -int64(len(buffer))) <= 0 {
+		n, err := conn.Conn.Read(buffer)
+		if atomic.AddInt64(&conn.unlimitedReadBytes, -int64(n)) <= 0 {
 			atomic.StoreInt32(&conn.limitingReads, 1)
-		} else {
-			return conn.Read(buffer)
 		}
+		return n, err
 	}
 
 	return conn.limitedReader.Read(buffer)
@@ -124,11 +124,11 @@ func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
 
 	// Use the base writer until the unlimited count is exhausted.
 	if atomic.LoadInt32(&conn.limitingWrites) == 0 {
-		if atomic.AddInt64(&conn.unlimitedWriteBytes, -int64(len(buffer))) <= 0 {
+		n, err := conn.Conn.Write(buffer)
+		if atomic.AddInt64(&conn.unlimitedWriteBytes, -int64(n)) <= 0 {
 			atomic.StoreInt32(&conn.limitingWrites, 1)
-		} else {
-			return conn.Write(buffer)
 		}
+		return n, err
 	}
 
 	return conn.limitedWriter.Write(buffer)
