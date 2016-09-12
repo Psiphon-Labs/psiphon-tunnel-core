@@ -672,9 +672,10 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 	sshClient.Unlock()
 
 	// Store the GeoIP data associated with the session ID. This makes the GeoIP data
-	// available to the web server for web transport Psiphon API requests.
-	sshClient.sshServer.support.GeoIPService.SetSessionCache(
-		sessionID, geoIPData)
+	// available to the web server for web transport Psiphon API requests. To allow for
+	// post-tunnel final status requests, the lifetime of cached GeoIP records exceeds
+	// the lifetime of the sshClient, and that's why this distinct session cache exists.
+	sshClient.sshServer.support.GeoIPService.SetSessionCache(sessionID, geoIPData)
 
 	return nil, nil
 }
