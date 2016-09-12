@@ -28,7 +28,6 @@ import (
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/Psiphon-Inc/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -162,23 +161,18 @@ func (mux *udpPortForwardMultiplexer) run() {
 			}
 
 			if !mux.sshClient.isPortForwardPermitted(
-				dialIP.String(),
-				int(message.remotePort),
-				mux.sshClient.trafficRules.AllowUDPPorts,
-				mux.sshClient.trafficRules.DenyUDPPorts) {
+				portForwardTypeUDP, dialIP.String(), int(message.remotePort)) {
 				// The udpgw protocol has no error response, so
 				// we just discard the message and read another.
 				continue
 			}
 
-			mux.sshClient.openedPortForward(mux.sshClient.udpTrafficState)
+			mux.sshClient.openedPortForward(portForwardTypeUDP)
 			// Note: can't defer sshClient.closedPortForward() here
 
 			// TOCTOU note: important to increment the port forward count (via
 			// openPortForward) _before_ checking isPortForwardLimitExceeded
-			if mux.sshClient.isPortForwardLimitExceeded(
-				mux.sshClient.tcpTrafficState,
-				mux.sshClient.trafficRules.MaxUDPPortForwardCount) {
+			if maxCount, exceeded := mux.sshClient.isPortForwardLimitExceeded(portForwardTypeUDP); exceeded {
 
 				// Close the oldest UDP port forward. CloseOldest() closes
 				// the conn and the port forward's goroutine will complete
@@ -190,7 +184,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 
 				log.WithContextFields(
 					LogFields{
-						"maxCount": mux.sshClient.trafficRules.MaxUDPPortForwardCount,
+						"maxCount": maxCount,
 					}).Debug("closed LRU UDP port forward")
 			}
 
@@ -203,7 +197,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 			udpConn, err := net.DialUDP(
 				"udp", nil, &net.UDPAddr{IP: dialIP, Port: dialPort})
 			if err != nil {
-				mux.sshClient.closedPortForward(mux.sshClient.udpTrafficState, 0, 0)
+				mux.sshClient.closedPortForward(portForwardTypeUDP, 0, 0)
 				log.WithContextFields(LogFields{"error": err}).Warning("DialUDP failed")
 				continue
 			}
@@ -217,12 +211,12 @@ func (mux *udpPortForwardMultiplexer) run() {
 
 			conn, err := common.NewActivityMonitoredConn(
 				udpConn,
-				time.Duration(mux.sshClient.trafficRules.IdleUDPPortForwardTimeoutMilliseconds)*time.Millisecond,
+				mux.sshClient.idleUDPPortForwardTimeout(),
 				true,
 				lruEntry)
 			if err != nil {
 				lruEntry.Remove()
-				mux.sshClient.closedPortForward(mux.sshClient.udpTrafficState, 0, 0)
+				mux.sshClient.closedPortForward(portForwardTypeUDP, 0, 0)
 				log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
 				continue
 			}
@@ -354,8 +348,7 @@ func (portForward *udpPortForward) relayDownstream() {
 
 	bytesUp := atomic.LoadInt64(&portForward.bytesUp)
 	bytesDown := atomic.LoadInt64(&portForward.bytesDown)
-	portForward.mux.sshClient.closedPortForward(
-		portForward.mux.sshClient.udpTrafficState, bytesUp, bytesDown)
+	portForward.mux.sshClient.closedPortForward(portForwardTypeUDP, bytesUp, bytesDown)
 
 	log.WithContextFields(
 		LogFields{

@@ -130,6 +130,9 @@ loop:
 		select {
 		case <-reloadSupportServicesSignal:
 			supportServices.Reload()
+			// Reselect traffic rules for established clients to reflect reloaded config
+			// TODO: only update when traffic rules config has changed
+			tunnelServer.SelectAllClientTrafficRules()
 		case <-logServerLoadSignal:
 			logServerLoad(tunnelServer)
 		case <-systemStopSignal:
