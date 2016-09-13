@@ -148,3 +148,8 @@
 
 @end
 
+@implementation Psi
++ (void)sendFeedback:(NSString*)configJson diagnostics: (NSString*)diagnosticsJson b64EncodedPublicKey: (NSString*) b64EncodedPublicKey uploadServer: (NSString*)uploadServer uploadPath: (NSString*) uploadPath uploadServerHeaders: (NSString*)uploadServerHeaders {
+    GoPsiSendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders);
+}
+@end
