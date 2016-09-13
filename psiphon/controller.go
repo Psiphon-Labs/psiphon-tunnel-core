@@ -1045,6 +1045,11 @@ loop:
 				break
 			}
 
+			if controller.config.TargetApiProtocol == "ssh" &&
+				!serverEntry.SupportsSSHAPIRequests() {
+				continue
+			}
+
 			// Disable impaired protocols. This is only done for the
 			// first iteration of the ESTABLISH_TUNNEL_WORK_TIME
 			// loop since (a) one iteration should be sufficient to
