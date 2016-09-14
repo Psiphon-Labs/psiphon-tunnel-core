@@ -133,40 +133,45 @@ func handshakeAPIRequestHandler(
 			params,
 			baseRequestParams))
 
-	// TODO: share struct definition with psiphon/serverApi.go?
-	var handshakeResponse struct {
-		Homepages            []string            `json:"homepages"`
-		UpgradeClientVersion string              `json:"upgrade_client_version"`
-		PageViewRegexes      []map[string]string `json:"page_view_regexes"`
-		HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
-		EncodedServerList    []string            `json:"encoded_server_list"`
-		ClientRegion         string              `json:"client_region"`
-		ServerTimestamp      string              `json:"server_timestamp"`
+	// Note: ignoring errors as params are validated
+	sessionID, _ := getStringRequestParam(params, "client_session_id")
+	propagationChannelID, _ := getStringRequestParam(params, "propagation_channel_id")
+	sponsorID, _ := getStringRequestParam(params, "sponsor_id")
+	clientVersionStr, _ := getStringRequestParam(params, "client_version")
+	clientVersion, _ := strconv.Atoi(clientVersionStr)
+	clientPlatform, _ := getStringRequestParam(params, "client_platform")
+	isMobile := isMobileClientPlatform(clientPlatform)
+	normalizedPlatform := normalizeClientPlatform(clientPlatform)
+
+	// Flag the SSH client as having completed its handshake. This
+	// may reselect traffic rules and starts allowing port forwards.
+
+	// TODO: in the case of SSH API requests, the actual sshClient could
+	// be passed in and used here. The session ID lookup is only strictly
+	// necessary to support web API requests.
+	err = support.TunnelServer.SetClientHandshakeState(
+		sessionID,
+		handshakeState{
+			completed:            true,
+			propagationChannelID: propagationChannelID,
+			sponsorID:            sponsorID,
+			clientVersion:        clientVersion,
+			clientPlatform:       clientPlatform,
+		})
+	if err != nil {
+		return nil, common.ContextError(err)
 	}
 
-	// Ignoring errors as params are validated
-	sponsorID, _ := getStringRequestParam(params, "sponsor_id")
-	clientVersion, _ := getStringRequestParam(params, "client_version")
-	clientPlatform, _ := getStringRequestParam(params, "client_platform")
-	clientRegion := geoIPData.Country
-
-	// Note: no guarantee that PsinetDatabase won't reload between calls
-
-	handshakeResponse.Homepages = support.PsinetDatabase.GetHomepages(
-		sponsorID, clientRegion, isMobileClientPlatform(clientPlatform))
-
-	handshakeResponse.UpgradeClientVersion = support.PsinetDatabase.GetUpgradeClientVersion(
-		clientVersion, normalizeClientPlatform(clientPlatform))
-
-	handshakeResponse.HttpsRequestRegexes = support.PsinetDatabase.GetHttpsRequestRegexes(
-		sponsorID)
-
-	handshakeResponse.EncodedServerList = support.PsinetDatabase.DiscoverServers(
-		geoIPData.DiscoveryValue)
-
-	handshakeResponse.ClientRegion = clientRegion
-
-	handshakeResponse.ServerTimestamp = common.GetCurrentTimestamp()
+	// Note: no guarantee that PsinetDatabase won't reload between database calls
+	db := support.PsinetDatabase
+	handshakeResponse := common.HandshakeResponse{
+		Homepages:            db.GetHomepages(sponsorID, geoIPData.Country, isMobile),
+		UpgradeClientVersion: db.GetUpgradeClientVersion(clientVersionStr, normalizedPlatform),
+		HttpsRequestRegexes:  db.GetHttpsRequestRegexes(sponsorID),
+		EncodedServerList:    db.DiscoverServers(geoIPData.DiscoveryValue),
+		ClientRegion:         geoIPData.Country,
+		ServerTimestamp:      common.GetCurrentTimestamp(),
+	}
 
 	responsePayload, err := json.Marshal(handshakeResponse)
 	if err != nil {
@@ -205,12 +210,9 @@ func connectedAPIRequestHandler(
 			params,
 			connectedRequestParams))
 
-	var connectedResponse struct {
-		ConnectedTimestamp string `json:"connected_timestamp"`
+	connectedResponse := common.ConnectedResponse{
+		ConnectedTimestamp: common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
 	}
-
-	connectedResponse.ConnectedTimestamp =
-		common.TruncateTimestampToHour(common.GetCurrentTimestamp())
 
 	responsePayload, err := json.Marshal(connectedResponse)
 	if err != nil {
@@ -446,7 +448,7 @@ var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"client_session_id", isHexDigits, requestParamOptional | requestParamNotLogged},
 	requestParamSpec{"propagation_channel_id", isHexDigits, 0},
 	requestParamSpec{"sponsor_id", isHexDigits, 0},
-	requestParamSpec{"client_version", isDigits, 0},
+	requestParamSpec{"client_version", isInt, 0},
 	requestParamSpec{"client_platform", isClientPlatform, 0},
 	requestParamSpec{"relay_protocol", isRelayProtocol, 0},
 	requestParamSpec{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
@@ -728,6 +730,11 @@ func isDigits(_ *SupportServices, value string) bool {
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		return c < '0' || c > '9'
 	})
+}
+
+func isInt(_ *SupportServices, value string) bool {
+	_, err := strconv.Atoi(value)
+	return err == nil
 }
 
 func isClientPlatform(_ *SupportServices, value string) bool {

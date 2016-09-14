@@ -36,8 +36,9 @@ import (
 const WEB_SERVER_IO_TIMEOUT = 10 * time.Second
 
 type webServer struct {
-	support  *SupportServices
-	serveMux *http.ServeMux
+	support      *SupportServices
+	tunnelServer *TunnelServer
+	serveMux     *http.ServeMux
 }
 
 // RunWebServer runs a web server which supports tunneled and untunneled

@@ -76,3 +76,17 @@ func TunnelProtocolUsesMeekHTTPS(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS
 }
+
+type HandshakeResponse struct {
+	Homepages            []string            `json:"homepages"`
+	UpgradeClientVersion string              `json:"upgrade_client_version"`
+	PageViewRegexes      []map[string]string `json:"page_view_regexes"`
+	HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
+	EncodedServerList    []string            `json:"encoded_server_list"`
+	ClientRegion         string              `json:"client_region"`
+	ServerTimestamp      string              `json:"server_timestamp"`
+}
+
+type ConnectedResponse struct {
+	ConnectedTimestamp string `json:"connected_timestamp"`
+}
