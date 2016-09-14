@@ -106,7 +106,7 @@ type Config struct {
 	// address ("<host>:<port>") specified in a client's port forward
 	// HostToConnect and PortToConnect when the client is making a
 	// tunneled connection to the web server. This address is always
-	// excepted from validation againstSSH_DISALLOWED_PORT_FORWARD_HOSTS
+	// exempted from validation against SSH_DISALLOWED_PORT_FORWARD_HOSTS
 	// and AllowTCPPorts/DenyTCPPorts.
 	WebServerPortForwardAddress string
 
