@@ -172,7 +172,20 @@ func cloneRequest(r *http.Request, ch http.Header) *http.Request {
 
 	//Add custom headers to the cloned request
 	for k, s := range ch {
-		r2.Header[k] = s
+		// handle special Host header case
+		if k == "Host" {
+			if len(s) > 0 {
+				// hack around special case when http proxy is used:
+				// https://golang.org/src/net/http/request.go#L474
+				// using URL.Opaque, see URL.RequestURI() https://golang.org/src/net/url/url.go#L915
+				if r2.URL.Opaque == "" {
+					r2.URL.Opaque = r2.URL.Scheme + "://" + r2.Host + r2.URL.RequestURI()
+				}
+				r2.Host = s[0]
+			}
+		} else {
+			r2.Header[k] = s
+		}
 	}
 
 	if r.Body != nil {
