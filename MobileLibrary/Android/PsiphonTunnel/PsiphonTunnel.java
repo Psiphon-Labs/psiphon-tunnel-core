@@ -473,7 +473,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
                 mHostService.onClientRegion(notice.getJSONObject("data").getString("region"));
             } else if (noticeType.equals("SplitTunnelRegion")) {
                 mHostService.onSplitTunnelRegion(notice.getJSONObject("data").getString("region"));
-            } else if (noticeType.equals("UntunneledAddress")) {
+            } else if (noticeType.equals("Untunneled")) {
                 mHostService.onUntunneledAddress(notice.getJSONObject("data").getString("address"));
             } else if (noticeType.equals("BytesTransferred")) {
                 diagnostic = false;
