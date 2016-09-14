@@ -153,7 +153,19 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	req.Header.Set("User-Agent", "")
 
 	for k, s := range pc.customHeaders {
-		req.Header[k] = s
+		// handle special Host header case
+		if k == "Host" {
+			if len(s) > 0 {
+				// hack around 'CONNECT' special case:
+				// https://golang.org/src/net/http/request.go#L476
+				// using URL.Opaque, see URL.RequestURI() https://golang.org/src/net/url/url.go#L915
+				req.URL.Opaque = req.Host
+				req.URL.Path = " "
+				req.Host = s[0]
+			}
+		} else {
+			req.Header[k] = s
+		}
 	}
 
 	if pc.authState == HTTP_AUTH_STATE_CHALLENGED {

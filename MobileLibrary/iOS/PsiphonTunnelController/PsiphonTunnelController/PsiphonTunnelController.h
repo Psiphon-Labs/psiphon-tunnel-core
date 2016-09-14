@@ -50,3 +50,7 @@ FOUNDATION_EXPORT const unsigned char PsiphonMobileVersionString[];
 -(void) stopTunnel;
 
 @end
+
+@interface Psi : NSObject
++ (void)sendFeedback:(NSString*)configJson diagnostics: (NSString*)diagnosticsJson b64EncodedPublicKey: (NSString*) b64EncodedPublicKey uploadServer: (NSString*)uploadServer uploadPath: (NSString*) uploadPath uploadServerHeaders: (NSString*)uploadServerHeaders;
+@end
