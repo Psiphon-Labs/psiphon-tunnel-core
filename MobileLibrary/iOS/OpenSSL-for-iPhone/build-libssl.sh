@@ -74,6 +74,8 @@ if [ ${FORCE_BUILD} == false ]; then
   fi
 fi
 
+git clean -Xdf ${CURRENTPATH}
+
 if [ ! -d "$DEVELOPER" ]; then
   echo "xcode path is not set correctly $DEVELOPER does not exist"
   echo "run"
