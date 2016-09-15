@@ -192,10 +192,10 @@ func (server *TunnelServer) GetLoadStats() map[string]map[string]int64 {
 	return server.sshServer.getLoadStats()
 }
 
-// SelectAllClientTrafficRules resets all established client traffic rules
+// ResetAllClientTrafficRules resets all established client traffic rules
 // to use the latest server config and client state.
-func (server *TunnelServer) SelectAllClientTrafficRules() {
-	server.sshServer.selectAllClientTrafficRules()
+func (server *TunnelServer) ResetAllClientTrafficRules() {
+	server.sshServer.resetAllClientTrafficRules()
 }
 
 // SetClientHandshakeState sets the handshake state -- that it completed and
@@ -424,7 +424,7 @@ func (sshServer *sshServer) getLoadStats() map[string]map[string]int64 {
 	return loadStats
 }
 
-func (sshServer *sshServer) selectAllClientTrafficRules() {
+func (sshServer *sshServer) resetAllClientTrafficRules() {
 
 	sshServer.clientsMutex.Lock()
 	clients := make(map[string]*sshClient)
@@ -434,7 +434,7 @@ func (sshServer *sshServer) selectAllClientTrafficRules() {
 	sshServer.clientsMutex.Unlock()
 
 	for _, client := range clients {
-		client.selectTrafficRules()
+		client.setTrafficRules()
 	}
 }
 
@@ -454,7 +454,7 @@ func (sshServer *sshServer) setClientHandshakeState(
 		return common.ContextError(err)
 	}
 
-	client.selectTrafficRules()
+	client.setTrafficRules()
 
 	return nil
 }
@@ -482,7 +482,8 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 
 	sshClient := newSshClient(sshServer, tunnelProtocol, geoIPData)
 
-	sshClient.selectTrafficRules()
+	// Set initial traffic rules, pre-handshake, based on currently known info.
+	sshClient.setTrafficRules()
 
 	// Wrap the base client connection with an ActivityMonitoredConn which will
 	// terminate the connection if no data is received before the deadline. This
@@ -901,30 +902,29 @@ func (sshClient *sshClient) setHandshakeState(state handshakeState) error {
 	return nil
 }
 
-// selectTrafficRules resets the client's traffic rules based on the latest server config
+// setTrafficRules resets the client's traffic rules based on the latest server config
 // and client state. As sshClient.trafficRules may be reset by a concurrent goroutine,
 // trafficRules must only be accessed within the sshClient mutex.
-func (sshClient *sshClient) selectTrafficRules() {
+func (sshClient *sshClient) setTrafficRules() {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
 	sshClient.trafficRules = sshClient.sshServer.support.TrafficRulesSet.GetTrafficRules(
-		// TODO: sshClient.geoIPData, sshClient.handshakeState)
-		sshClient.geoIPData.Country)
+		sshClient.tunnelProtocol, sshClient.geoIPData, sshClient.handshakeState)
 }
 
 func (sshClient *sshClient) rateLimits() common.RateLimits {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
-	return sshClient.trafficRules.GetRateLimits(sshClient.tunnelProtocol)
+	return sshClient.trafficRules.RateLimits.CommonRateLimits()
 }
 
 func (sshClient *sshClient) idleTCPPortForwardTimeout() time.Duration {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
-	return time.Duration(sshClient.trafficRules.IdleTCPPortForwardTimeoutMilliseconds) * time.Millisecond
+	return time.Duration(*sshClient.trafficRules.IdleTCPPortForwardTimeoutMilliseconds) * time.Millisecond
 }
 
 func (sshClient *sshClient) idleUDPPortForwardTimeout() time.Duration {
@@ -932,7 +932,7 @@ func (sshClient *sshClient) idleUDPPortForwardTimeout() time.Duration {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
-	return time.Duration(sshClient.trafficRules.IdleUDPPortForwardTimeoutMilliseconds) * time.Millisecond
+	return time.Duration(*sshClient.trafficRules.IdleUDPPortForwardTimeoutMilliseconds) * time.Millisecond
 }
 
 const (
@@ -994,10 +994,10 @@ func (sshClient *sshClient) isPortForwardLimitExceeded(
 	var maxPortForwardCount int
 	var state *trafficState
 	if portForwardType == portForwardTypeTCP {
-		maxPortForwardCount = sshClient.trafficRules.MaxTCPPortForwardCount
+		maxPortForwardCount = *sshClient.trafficRules.MaxTCPPortForwardCount
 		state = &sshClient.tcpTrafficState
 	} else {
-		maxPortForwardCount = sshClient.trafficRules.MaxUDPPortForwardCount
+		maxPortForwardCount = *sshClient.trafficRules.MaxUDPPortForwardCount
 		state = &sshClient.udpTrafficState
 	}
 

@@ -22,7 +22,7 @@ package server
 import (
 	"encoding/json"
 	"io/ioutil"
-	"strings"
+	"strconv"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
@@ -30,55 +30,89 @@ import (
 // TrafficRulesSet represents the various traffic rules to
 // apply to Psiphon client tunnels. The Reload function supports
 // hot reloading of rules data while the server is running.
+//
+// For a given client, the traffic rules are determined by starting
+// with DefaultRules, then finding the first (if any)
+// FilteredTrafficRules match and overriding the defaults with fields
+// set in the selected FilteredTrafficRules.
 type TrafficRulesSet struct {
 	common.ReloadableFile
 
-	// DefaultRules specifies the traffic rules to be used when no
-	// regional-specific rules are set or apply to a particular
-	// client.
+	// DefaultRules are the base values to use as defaults for all
+	// clients.
 	DefaultRules TrafficRules
 
-	// RegionalRules specifies the traffic rules for particular client
-	// regions (countries) as determined by GeoIP lookup of the client
-	// IP address. The key for each regional traffic rule entry is one
-	// or more space delimited ISO 3166-1 alpha-2 country codes.
-	RegionalRules map[string]TrafficRules
+	// FilteredTrafficRules is an ordered list of filter/rules pairs.
+	// For each client, the first matching Filter in FilteredTrafficRules
+	// determines the additional Rules that are selected and applied
+	// on top of DefaultRules.
+	FilteredTrafficRules []struct {
+		Filter TrafficRulesFilter
+		Rules  TrafficRules
+	}
+}
+
+// TrafficRulesFilter defines a filter to match against client attributes.
+type TrafficRulesFilter struct {
+
+	// Protocols is a list of client tunnel protocols that must be in use
+	// to match this filter. When omitted or empty, any protocol matches.
+	Protocols []string
+
+	// Regions is a list of client GeoIP countries that the client must
+	// reolve to to match this filter. When omitted or empty, any client
+	// region matches.
+	Regions []string
+
+	// SponsorIDs is a list of client handshake sponsor IDs that must be
+	// specified to match this filter. When omitted or empty, any client
+	// sponsor ID matches.
+	SponsorIDs []string
+
+	// PropagationChannelIDs is a list of client handshake propagation
+	// channel IDs that must be specified to match this filter. When
+	// omitted or empty, any propagation channel ID matches.
+	PropagationChannelIDs []string
+
+	// MinClientVersion is a minimum client handshake version number that
+	// must be specified to match this filter. When omitted or empty, any
+	// client version matches.
+	MinClientVersion *int
+
+	// MaxClientVersion is a maximum client handshake version number that
+	// must be specified to match this filter. When omitted or empty, any
+	// client version matches.
+	MaxClientVersion *int
 }
 
 // TrafficRules specify the limits placed on client traffic.
 type TrafficRules struct {
-	// DefaultLimits are the rate limits to be applied when
-	// no protocol-specific rates are set.
-	DefaultLimits common.RateLimits
 
-	// ProtocolLimits specifies the rate limits for particular
-	// tunnel protocols. The key for each rate limit entry is one
-	// or more space delimited Psiphon tunnel protocol names. Valid
-	// tunnel protocols includes the same list as for
-	// TunnelProtocolPorts.
-	ProtocolLimits map[string]common.RateLimits
+	// RateLimits specifies data transfer rate limits for the
+	// client traffic.
+	RateLimits RateLimits
 
 	// IdleTCPPortForwardTimeoutMilliseconds is the timeout period
 	// after which idle (no bytes flowing in either direction)
 	// client TCP port forwards are preemptively closed.
 	// The default, 0, is no idle timeout.
-	IdleTCPPortForwardTimeoutMilliseconds int
+	IdleTCPPortForwardTimeoutMilliseconds *int
 
 	// IdleUDPPortForwardTimeoutMilliseconds is the timeout period
 	// after which idle (no bytes flowing in either direction)
 	// client UDP port forwards are preemptively closed.
 	// The default, 0, is no idle timeout.
-	IdleUDPPortForwardTimeoutMilliseconds int
+	IdleUDPPortForwardTimeoutMilliseconds *int
 
 	// MaxTCPPortForwardCount is the maximum number of TCP port
 	// forwards each client may have open concurrently.
 	// The default, 0, is no maximum.
-	MaxTCPPortForwardCount int
+	MaxTCPPortForwardCount *int
 
 	// MaxUDPPortForwardCount is the maximum number of UDP port
 	// forwards each client may have open concurrently.
 	// The default, 0, is no maximum.
-	MaxUDPPortForwardCount int
+	MaxUDPPortForwardCount *int
 
 	// AllowTCPPorts specifies a whitelist of TCP ports that
 	// are permitted for port forwarding. When set, only ports
@@ -99,6 +133,29 @@ type TrafficRules struct {
 	// are not permitted for port forwarding. When set, the
 	// ports in the list are inaccessible to clients.
 	DenyUDPPorts []int
+}
+
+// RateLimits is a clone of common.RateLimits with pointers
+// to fields to enable distinguishing between zero values and
+// omitted values in JSON serialized traffic rules.
+// See common.RateLimits for field descriptions.
+type RateLimits struct {
+	ReadUnthrottledBytes  *int64
+	ReadBytesPerSecond    *int64
+	WriteUnthrottledBytes *int64
+	WriteBytesPerSecond   *int64
+	CloseAfterExhausted   *bool
+}
+
+// CommonRateLimits converts a RateLimits to a common.RateLimits.
+func (rateLimits *RateLimits) CommonRateLimits() common.RateLimits {
+	return common.RateLimits{
+		ReadUnthrottledBytes:  *rateLimits.ReadUnthrottledBytes,
+		ReadBytesPerSecond:    *rateLimits.ReadBytesPerSecond,
+		WriteUnthrottledBytes: *rateLimits.WriteUnthrottledBytes,
+		WriteBytesPerSecond:   *rateLimits.WriteBytesPerSecond,
+		CloseAfterExhausted:   *rateLimits.CloseAfterExhausted,
+	}
 }
 
 // NewTrafficRulesSet initializes a TrafficRulesSet with
@@ -133,35 +190,189 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 	return set, nil
 }
 
-// GetTrafficRules looks up the traffic rules for the specified country. If there
-// are no regional TrafficRules for the country, default TrafficRules are returned.
-func (set *TrafficRulesSet) GetTrafficRules(clientCountryCode string) TrafficRules {
+// GetTrafficRules determines the traffic rules for a client based on its attributes.
+// For the return value TrafficRules, all pointer and slice fields are initialized,
+// so nil checks are not required. The caller must not modify the returned TrafficRules.
+func (set *TrafficRulesSet) GetTrafficRules(
+	tunnelProtocol string, geoIPData GeoIPData, state handshakeState) TrafficRules {
+
 	set.ReloadableFile.RLock()
 	defer set.ReloadableFile.RUnlock()
 
+	// Start with a copy of the DefaultRules, and then select the first
+	// matches Rules from FilteredTrafficRules, taking only the explicitly
+	// specified fields from that Rules.
+	//
+	// Notes:
+	// - Scalar pointers are used in TrafficRules and RateLimits to distinguish between
+	//   omitted fields (in serialized JSON) and default values. For example, if a filtered
+	//   Rules specifies a field value of 0, this will override the default; but if the
+	//   serialized filtered rule omits the field, the default is to be retained.
+	// - We use shallow copies and slices and scalar pointers are shared between the
+	//   return value TrafficRules, so callers must treat the return value as immutable.
+	//   This also means that these slices and pointers can remain referenced in memory even
+	//   after a hot reload.
+
+	trafficRules := set.DefaultRules
+
+	// Populate defaults for omitted DefaultRules fields
+
+	if trafficRules.RateLimits.ReadUnthrottledBytes == nil {
+		trafficRules.RateLimits.ReadUnthrottledBytes = new(int64)
+	}
+
+	if trafficRules.RateLimits.ReadBytesPerSecond == nil {
+		trafficRules.RateLimits.ReadBytesPerSecond = new(int64)
+	}
+
+	if trafficRules.RateLimits.WriteUnthrottledBytes == nil {
+		trafficRules.RateLimits.WriteUnthrottledBytes = new(int64)
+	}
+
+	if trafficRules.RateLimits.WriteBytesPerSecond == nil {
+		trafficRules.RateLimits.WriteBytesPerSecond = new(int64)
+	}
+
+	if trafficRules.RateLimits.CloseAfterExhausted == nil {
+		trafficRules.RateLimits.CloseAfterExhausted = new(bool)
+	}
+
+	if trafficRules.IdleTCPPortForwardTimeoutMilliseconds == nil {
+		trafficRules.IdleTCPPortForwardTimeoutMilliseconds = new(int)
+	}
+
+	if trafficRules.IdleUDPPortForwardTimeoutMilliseconds == nil {
+		trafficRules.IdleUDPPortForwardTimeoutMilliseconds = new(int)
+	}
+
+	if trafficRules.MaxTCPPortForwardCount == nil {
+		trafficRules.MaxTCPPortForwardCount = new(int)
+	}
+
+	if trafficRules.MaxUDPPortForwardCount == nil {
+		trafficRules.MaxUDPPortForwardCount = new(int)
+	}
+
+	if trafficRules.AllowTCPPorts == nil {
+		trafficRules.AllowTCPPorts = make([]int, 0)
+	}
+
+	if trafficRules.AllowUDPPorts == nil {
+		trafficRules.AllowUDPPorts = make([]int, 0)
+	}
+
+	if trafficRules.DenyTCPPorts == nil {
+		trafficRules.DenyTCPPorts = make([]int, 0)
+	}
+
+	if trafficRules.DenyUDPPorts == nil {
+		trafficRules.DenyUDPPorts = make([]int, 0)
+	}
+
 	// TODO: faster lookup?
-	for countryCodes, trafficRules := range set.RegionalRules {
-		for _, countryCode := range strings.Split(countryCodes, " ") {
-			if countryCode == clientCountryCode {
-				return trafficRules
+	for _, filteredRules := range set.FilteredTrafficRules {
+
+		if len(filteredRules.Filter.Protocols) > 0 {
+			if !common.Contains(filteredRules.Filter.Protocols, tunnelProtocol) {
+				continue
 			}
 		}
-	}
-	return set.DefaultRules
-}
 
-// GetRateLimits looks up the rate limits for the specified tunnel protocol.
-// If there are no specific RateLimits for the protocol, default RateLimits are
-// returned.
-func (rules *TrafficRules) GetRateLimits(clientTunnelProtocol string) common.RateLimits {
-
-	// TODO: faster lookup?
-	for tunnelProtocols, rateLimits := range rules.ProtocolLimits {
-		for _, tunnelProtocol := range strings.Split(tunnelProtocols, " ") {
-			if tunnelProtocol == clientTunnelProtocol {
-				return rateLimits
+		if len(filteredRules.Filter.Regions) > 0 {
+			if !common.Contains(filteredRules.Filter.Regions, geoIPData.Country) {
+				continue
 			}
 		}
+
+		// Note: ignoring param format errors as params have been validated
+
+		if len(filteredRules.Filter.SponsorIDs) > 0 {
+			if !state.completed {
+				continue
+			}
+			sponsorID, _ := getStringRequestParam(state.apiParams, "sponsor_id")
+			if !common.Contains(filteredRules.Filter.SponsorIDs, sponsorID) {
+				continue
+			}
+		}
+
+		if len(filteredRules.Filter.PropagationChannelIDs) > 0 {
+			if !state.completed {
+				continue
+			}
+			propagationChannelID, _ := getStringRequestParam(state.apiParams, "propagation_channel_id")
+			if !common.Contains(filteredRules.Filter.PropagationChannelIDs, propagationChannelID) {
+				continue
+			}
+		}
+
+		if filteredRules.Filter.MinClientVersion != nil || filteredRules.Filter.MaxClientVersion != nil {
+			clientVersionStr, _ := getStringRequestParam(state.apiParams, "client_version")
+			clientVersion, _ := strconv.Atoi(clientVersionStr)
+			if filteredRules.Filter.MinClientVersion != nil && clientVersion < *filteredRules.Filter.MinClientVersion {
+				continue
+			}
+			if filteredRules.Filter.MaxClientVersion != nil && clientVersion > *filteredRules.Filter.MaxClientVersion {
+				continue
+			}
+		}
+
+		// This is the first match. Override defaults using provided fields from selected rules, and return result.
+
+		if filteredRules.Rules.RateLimits.ReadUnthrottledBytes != nil {
+			trafficRules.RateLimits.ReadUnthrottledBytes = filteredRules.Rules.RateLimits.ReadUnthrottledBytes
+		}
+
+		if filteredRules.Rules.RateLimits.ReadBytesPerSecond != nil {
+			trafficRules.RateLimits.ReadBytesPerSecond = filteredRules.Rules.RateLimits.ReadBytesPerSecond
+		}
+
+		if filteredRules.Rules.RateLimits.WriteUnthrottledBytes != nil {
+			trafficRules.RateLimits.WriteUnthrottledBytes = filteredRules.Rules.RateLimits.WriteUnthrottledBytes
+		}
+
+		if filteredRules.Rules.RateLimits.WriteBytesPerSecond != nil {
+			trafficRules.RateLimits.WriteBytesPerSecond = filteredRules.Rules.RateLimits.WriteBytesPerSecond
+		}
+
+		if filteredRules.Rules.RateLimits.CloseAfterExhausted != nil {
+			trafficRules.RateLimits.CloseAfterExhausted = filteredRules.Rules.RateLimits.CloseAfterExhausted
+		}
+
+		if filteredRules.Rules.IdleTCPPortForwardTimeoutMilliseconds != nil {
+			trafficRules.IdleTCPPortForwardTimeoutMilliseconds = filteredRules.Rules.IdleTCPPortForwardTimeoutMilliseconds
+		}
+
+		if filteredRules.Rules.IdleUDPPortForwardTimeoutMilliseconds != nil {
+			trafficRules.IdleUDPPortForwardTimeoutMilliseconds = filteredRules.Rules.IdleUDPPortForwardTimeoutMilliseconds
+		}
+
+		if filteredRules.Rules.MaxTCPPortForwardCount != nil {
+			trafficRules.MaxTCPPortForwardCount = filteredRules.Rules.MaxTCPPortForwardCount
+		}
+
+		if filteredRules.Rules.MaxUDPPortForwardCount != nil {
+			trafficRules.MaxUDPPortForwardCount = filteredRules.Rules.MaxUDPPortForwardCount
+		}
+
+		if filteredRules.Rules.AllowTCPPorts != nil {
+			trafficRules.AllowTCPPorts = filteredRules.Rules.AllowTCPPorts
+		}
+
+		if filteredRules.Rules.AllowUDPPorts != nil {
+			trafficRules.AllowUDPPorts = filteredRules.Rules.AllowUDPPorts
+		}
+
+		if filteredRules.Rules.DenyTCPPorts != nil {
+			trafficRules.DenyTCPPorts = filteredRules.Rules.DenyTCPPorts
+		}
+
+		if filteredRules.Rules.DenyUDPPorts != nil {
+			trafficRules.DenyUDPPorts = filteredRules.Rules.DenyUDPPorts
+		}
+
+		break
 	}
-	return rules.DefaultLimits
+
+	return trafficRules
 }

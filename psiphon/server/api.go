@@ -133,7 +133,8 @@ func handshakeAPIRequestHandler(
 			params,
 			baseRequestParams))
 
-	// Note: ignoring errors as params are validated
+	// Note: ignoring param format errors as params have been validated
+
 	sessionID, _ := getStringRequestParam(params, "client_session_id")
 	sponsorID, _ := getStringRequestParam(params, "sponsor_id")
 	clientVersion, _ := getStringRequestParam(params, "client_version")

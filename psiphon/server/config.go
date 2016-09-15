@@ -514,18 +514,22 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		return nil, nil, nil, common.ContextError(err)
 	}
 
+	intPtr := func(i int) *int {
+		return &i
+	}
+
 	trafficRulesSet := &TrafficRulesSet{
 		DefaultRules: TrafficRules{
-			DefaultLimits: common.RateLimits{
-				ReadUnthrottledBytes:  0,
-				ReadBytesPerSecond:    0,
-				WriteUnthrottledBytes: 0,
-				WriteBytesPerSecond:   0,
+			RateLimits: RateLimits{
+				ReadUnthrottledBytes:  new(int64),
+				ReadBytesPerSecond:    new(int64),
+				WriteUnthrottledBytes: new(int64),
+				WriteBytesPerSecond:   new(int64),
 			},
-			IdleTCPPortForwardTimeoutMilliseconds: 30000,
-			IdleUDPPortForwardTimeoutMilliseconds: 30000,
-			MaxTCPPortForwardCount:                1024,
-			MaxUDPPortForwardCount:                32,
+			IdleTCPPortForwardTimeoutMilliseconds: intPtr(30000),
+			IdleUDPPortForwardTimeoutMilliseconds: intPtr(30000),
+			MaxTCPPortForwardCount:                intPtr(1024),
+			MaxUDPPortForwardCount:                intPtr(32),
 			AllowTCPPorts:                         nil,
 			AllowUDPPorts:                         nil,
 			DenyTCPPorts:                          nil,
