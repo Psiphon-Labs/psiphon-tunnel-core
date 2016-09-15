@@ -135,10 +135,8 @@ func handshakeAPIRequestHandler(
 
 	// Note: ignoring errors as params are validated
 	sessionID, _ := getStringRequestParam(params, "client_session_id")
-	propagationChannelID, _ := getStringRequestParam(params, "propagation_channel_id")
 	sponsorID, _ := getStringRequestParam(params, "sponsor_id")
-	clientVersionStr, _ := getStringRequestParam(params, "client_version")
-	clientVersion, _ := strconv.Atoi(clientVersionStr)
+	clientVersion, _ := getStringRequestParam(params, "client_version")
 	clientPlatform, _ := getStringRequestParam(params, "client_platform")
 	isMobile := isMobileClientPlatform(clientPlatform)
 	normalizedPlatform := normalizeClientPlatform(clientPlatform)
@@ -152,11 +150,8 @@ func handshakeAPIRequestHandler(
 	err = support.TunnelServer.SetClientHandshakeState(
 		sessionID,
 		handshakeState{
-			completed:            true,
-			propagationChannelID: propagationChannelID,
-			sponsorID:            sponsorID,
-			clientVersion:        clientVersion,
-			clientPlatform:       clientPlatform,
+			completed: true,
+			apiParams: copyBaseRequestParams(params),
 		})
 	if err != nil {
 		return nil, common.ContextError(err)
@@ -166,7 +161,7 @@ func handshakeAPIRequestHandler(
 	db := support.PsinetDatabase
 	handshakeResponse := common.HandshakeResponse{
 		Homepages:            db.GetHomepages(sponsorID, geoIPData.Country, isMobile),
-		UpgradeClientVersion: db.GetUpgradeClientVersion(clientVersionStr, normalizedPlatform),
+		UpgradeClientVersion: db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
 		HttpsRequestRegexes:  db.GetHttpsRequestRegexes(sponsorID),
 		EncodedServerList:    db.DiscoverServers(geoIPData.DiscoveryValue),
 		ClientRegion:         geoIPData.Country,
@@ -448,7 +443,7 @@ var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"client_session_id", isHexDigits, requestParamOptional | requestParamNotLogged},
 	requestParamSpec{"propagation_channel_id", isHexDigits, 0},
 	requestParamSpec{"sponsor_id", isHexDigits, 0},
-	requestParamSpec{"client_version", isInt, 0},
+	requestParamSpec{"client_version", isIntString, 0},
 	requestParamSpec{"client_platform", isClientPlatform, 0},
 	requestParamSpec{"relay_protocol", isRelayProtocol, 0},
 	requestParamSpec{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
@@ -491,6 +486,26 @@ func validateRequestParams(
 	}
 
 	return nil
+}
+
+// copyBaseRequestParams makes a copy of the params which
+// includes only the baseRequestParams.
+func copyBaseRequestParams(params requestJSONObject) requestJSONObject {
+
+	// Note: not a deep copy; assumes baseRequestParams values
+	// are all scalar types (int, string, etc.)
+
+	paramsCopy := make(requestJSONObject)
+	for _, baseParam := range baseRequestParams {
+		value := params[baseParam.name]
+		if value == nil {
+			continue
+		}
+
+		paramsCopy[baseParam.name] = value
+	}
+
+	return paramsCopy
 }
 
 func validateStringRequestParam(
@@ -550,6 +565,10 @@ func getRequestLogFields(
 	logFields["client_region"] = strings.Replace(geoIPData.Country, " ", "_", -1)
 	logFields["client_city"] = strings.Replace(geoIPData.City, " ", "_", -1)
 	logFields["client_isp"] = strings.Replace(geoIPData.ISP, " ", "_", -1)
+
+	if params == nil {
+		return logFields
+	}
 
 	for _, expectedParam := range expectedParams {
 
@@ -732,7 +751,7 @@ func isDigits(_ *SupportServices, value string) bool {
 	})
 }
 
-func isInt(_ *SupportServices, value string) bool {
+func isIntString(_ *SupportServices, value string) bool {
 	_, err := strconv.Atoi(value)
 	return err == nil
 }

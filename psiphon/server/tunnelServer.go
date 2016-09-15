@@ -631,11 +631,8 @@ type trafficState struct {
 }
 
 type handshakeState struct {
-	completed            bool
-	propagationChannelID string
-	sponsorID            string
-	clientVersion        int
-	clientPlatform       string
+	completed bool
+	apiParams requestJSONObject
 }
 
 func newSshClient(
@@ -759,33 +756,31 @@ func (sshClient *sshClient) stop() {
 	// it did the client may not have the opportunity to send a final
 	// request with an EOF flag set.)
 
-	// TODO: match legacy log field naming convention?
-	// TODO: log all handshake common inputs?
-
 	sshClient.Lock()
-	log.WithContextFields(
-		LogFields{
-			"handshakeCompleted":                sshClient.handshakeState.completed,
-			"propagationChannelID":              sshClient.handshakeState.propagationChannelID,
-			"sponsorID":                         sshClient.handshakeState.sponsorID,
-			"clientVersion":                     sshClient.handshakeState.clientVersion,
-			"clientPlatform":                    sshClient.handshakeState.clientPlatform,
-			"startTime":                         sshClient.activityConn.GetStartTime(),
-			"duration":                          sshClient.activityConn.GetActiveDuration(),
-			"sessionID":                         sshClient.sessionID,
-			"country":                           sshClient.geoIPData.Country,
-			"city":                              sshClient.geoIPData.City,
-			"ISP":                               sshClient.geoIPData.ISP,
-			"bytesUpTCP":                        sshClient.tcpTrafficState.bytesUp,
-			"bytesDownTCP":                      sshClient.tcpTrafficState.bytesDown,
-			"peakConcurrentPortForwardCountTCP": sshClient.tcpTrafficState.peakConcurrentPortForwardCount,
-			"totalPortForwardCountTCP":          sshClient.tcpTrafficState.totalPortForwardCount,
-			"bytesUpUDP":                        sshClient.udpTrafficState.bytesUp,
-			"bytesDownUDP":                      sshClient.udpTrafficState.bytesDown,
-			"peakConcurrentPortForwardCountUDP": sshClient.udpTrafficState.peakConcurrentPortForwardCount,
-			"totalPortForwardCountUDP":          sshClient.udpTrafficState.totalPortForwardCount,
-		}).Info("tunnel closed")
+
+	logFields := getRequestLogFields(
+		sshClient.sshServer.support,
+		"server_tunnel",
+		sshClient.geoIPData,
+		sshClient.handshakeState.apiParams,
+		baseRequestParams)
+
+	// TODO: match legacy log field naming convention?
+	logFields["HandshakeCompleted"] = sshClient.handshakeState.completed
+	logFields["startTime"] = sshClient.activityConn.GetStartTime()
+	logFields["Duration"] = sshClient.activityConn.GetActiveDuration()
+	logFields["BytesUpTCP"] = sshClient.tcpTrafficState.bytesUp
+	logFields["BytesDownTCP"] = sshClient.tcpTrafficState.bytesDown
+	logFields["PeakConcurrentPortForwardCountTCP"] = sshClient.tcpTrafficState.peakConcurrentPortForwardCount
+	logFields["TotalPortForwardCountTCP"] = sshClient.tcpTrafficState.totalPortForwardCount
+	logFields["BytesUpUDP"] = sshClient.udpTrafficState.bytesUp
+	logFields["BytesDownUDP"] = sshClient.udpTrafficState.bytesDown
+	logFields["PeakConcurrentPortForwardCountUDP"] = sshClient.udpTrafficState.peakConcurrentPortForwardCount
+	logFields["TotalPortForwardCountUDP"] = sshClient.udpTrafficState.totalPortForwardCount
+
 	sshClient.Unlock()
+
+	log.LogRawFieldsWithTimestamp(logFields)
 }
 
 // runClient handles/dispatches new channel and new requests from the client.
