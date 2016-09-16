@@ -11,9 +11,9 @@ fi
 
 VALID_ARCHS="arm64 armv7 armv7s"
 FRAMEWORK="Psi"
-OUTPUT_DIR="${BASE_DIR}/framework"
-OUTPUT_FILE="${FRAMEWORK}.framework"
-FRAMEWORK_BINARY="${OUTPUT_DIR}/${OUTPUT_FILE}/Versions/A/${FRAMEWORK}"
+INTERMEDIATE_OUPUT_DIR="${BASE_DIR}/PsiphonTunnelController/PsiphonTunnelController"
+INTERMEDIATE_OUPUT_FILE="${FRAMEWORK}.framework"
+FRAMEWORK_BINARY="${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}/Versions/A/${FRAMEWORK}"
 
 LIBSSL=${BASE_DIR}/OpenSSL-for-iPhone/lib/libssl.a
 LIBCRYPTO=${BASE_DIR}/OpenSSL-for-iPhone/lib/libcrypto.a
@@ -27,7 +27,7 @@ curl -o $TRUSTED_ROOT_CA_FILE https://curl.haxx.se/ca/cacert.pem
 # Not exporting this breaks go commands later if run via jenkins
 export GOPATH=${PWD}/go-ios-build
 
-GOMOBILE_PINNED_REV=8ab5dbbea1dc4713a98b6f1d51de4582a43e3fa8
+GOMOBILE_PINNED_REV=e99a906c3a3ac5959fa4b8d08f90dd5f75d3b27c
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
 IOS_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-ios
@@ -37,7 +37,7 @@ OPENSSL_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Inc/openssl
 PATH=${PATH}:${GOPATH}/bin
 
 mkdir -p ${GOPATH}
-mkdir -p ${OUTPUT_DIR}
+mkdir -p ${INTERMEDIATE_OUPUT_DIR}
 
 if [ ! -e ${IOS_SRC_DIR} ]; then
   echo "iOS source directory (${IOS_SRC_DIR}) not found, creating link"
@@ -51,8 +51,8 @@ fi
 
 cd OpenSSL-for-iPhone && ./build-libssl.sh; cd -
 
-go get -d -v github.com/Psiphon-Inc/openssl
-go get -d -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+go get -d  -u -v github.com/Psiphon-Inc/openssl
+go get -d -u -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 
 function check_pinned_version() {
   echo "Checking for gomobile revision: '${GOMOBILE_PINNED_REV}'"
@@ -80,7 +80,7 @@ if [ $? -ne 0 ]; then
     git checkout master 
     git branch -d pinned
     git checkout -b pinned ${GOMOBILE_PINNED_REV}
-    go build
+    go install
     gomobile init -v
     check_pinned_version
     if [ $? -ne 0 ]; then
@@ -122,7 +122,7 @@ IOS_CGO_BUILD_FLAGS='// #cgo darwin CFLAGS: -I'"${OPENSSL_INCLUDE}"'\
 
 LC_ALL=C sed -i -- "s|// #cgo pkg-config: libssl|${IOS_CGO_BUILD_FLAGS}|" "${OPENSSL_SRC_DIR}/build.go"
 
-gomobile bind  -target ios -ldflags="${LDFLAGS}" -o ${OUTPUT_DIR}/${OUTPUT_FILE} github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+gomobile bind  -target ios -ldflags="${LDFLAGS}" -o ${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE} github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 ARCHS="$(lipo -info "${FRAMEWORK_BINARY}" | rev | cut -d ':' -f1 | rev)"
 for ARCH in $ARCHS; do
   if ! [[ "${VALID_ARCHS}" == *"$ARCH"* ]]; then
@@ -131,5 +131,5 @@ for ARCH in $ARCHS; do
   fi
 done
 
-xcodebuild clean build -configuration Release -sdk iphoneos -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT}
+xcodebuild clean build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -configuration Release -sdk iphoneos -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT} CONFIGURATION_BUILD_DIR="${BASE_DIR}/build"
 echo "Done."
