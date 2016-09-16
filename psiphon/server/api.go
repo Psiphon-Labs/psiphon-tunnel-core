@@ -72,13 +72,19 @@ func sshAPIRequestHandler(
 			fmt.Errorf("invalid payload for request name: %s: %s", name, err))
 	}
 
-	return dispatchAPIRequestHandler(support, geoIPData, name, params)
+	return dispatchAPIRequestHandler(
+		support,
+		common.PSIPHON_SSH_API_PROTOCOL,
+		geoIPData,
+		name,
+		params)
 }
 
 // dispatchAPIRequestHandler is the common dispatch point for both
 // web and SSH API requests.
 func dispatchAPIRequestHandler(
 	support *SupportServices,
+	apiProtocol string,
 	geoIPData GeoIPData,
 	name string,
 	params requestJSONObject) (response []byte, reterr error) {
@@ -97,7 +103,7 @@ func dispatchAPIRequestHandler(
 
 	switch name {
 	case common.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
-		return handshakeAPIRequestHandler(support, geoIPData, params)
+		return handshakeAPIRequestHandler(support, apiProtocol, geoIPData, params)
 	case common.PSIPHON_API_CONNECTED_REQUEST_NAME:
 		return connectedAPIRequestHandler(support, geoIPData, params)
 	case common.PSIPHON_API_STATUS_REQUEST_NAME:
@@ -115,6 +121,7 @@ func dispatchAPIRequestHandler(
 // stats to record, etc.
 func handshakeAPIRequestHandler(
 	support *SupportServices,
+	apiProtocol string,
 	geoIPData GeoIPData,
 	params requestJSONObject) ([]byte, error) {
 
@@ -151,8 +158,9 @@ func handshakeAPIRequestHandler(
 	err = support.TunnelServer.SetClientHandshakeState(
 		sessionID,
 		handshakeState{
-			completed: true,
-			apiParams: copyBaseRequestParams(params),
+			completed:   true,
+			apiProtocol: apiProtocol,
+			apiParams:   copyBaseRequestParams(params),
 		})
 	if err != nil {
 		return nil, common.ContextError(err)

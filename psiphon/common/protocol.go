@@ -41,6 +41,9 @@ const (
 	PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME = "psiphon-client-verification"
 
 	PSIPHON_API_CLIENT_SESSION_ID_LENGTH = 16
+
+	PSIPHON_SSH_API_PROTOCOL = "ssh"
+	PSIPHON_WEB_API_PROTOCOL = "web"
 )
 
 var SupportedTunnelProtocols = []string{

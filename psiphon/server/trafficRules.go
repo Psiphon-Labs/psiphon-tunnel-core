@@ -64,6 +64,11 @@ type TrafficRulesFilter struct {
 	// region matches.
 	Regions []string
 
+	// APIProtocol specifies whether the client must use the SSH
+	// API protocol (when "ssh") or the web API protocol (when "web").
+	// When omitted or blank, any API protocol matches.
+	APIProtocol string
+
 	// SponsorIDs is a list of client handshake sponsor IDs that must be
 	// specified to match this filter. When omitted or empty, any client
 	// sponsor ID matches.
@@ -284,6 +289,15 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			}
 		}
 
+		if filteredRules.Filter.APIProtocol != "" {
+			if !state.completed {
+				continue
+			}
+			if state.apiProtocol != filteredRules.Filter.APIProtocol {
+				continue
+			}
+		}
+
 		// Note: ignoring param format errors as params have been validated
 
 		if len(filteredRules.Filter.SponsorIDs) > 0 {
@@ -307,6 +321,9 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		}
 
 		if filteredRules.Filter.MinClientVersion != nil || filteredRules.Filter.MaxClientVersion != nil {
+			if !state.completed {
+				continue
+			}
 			clientVersionStr, _ := getStringRequestParam(state.apiParams, "client_version")
 			clientVersion, _ := strconv.Atoi(clientVersionStr)
 			if filteredRules.Filter.MinClientVersion != nil && clientVersion < *filteredRules.Filter.MinClientVersion {

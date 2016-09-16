@@ -234,6 +234,7 @@ func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Requ
 	if err == nil {
 		responsePayload, err = dispatchAPIRequestHandler(
 			webServer.support,
+			common.PSIPHON_WEB_API_PROTOCOL,
 			webServer.lookupGeoIPData(params),
 			common.PSIPHON_API_HANDSHAKE_REQUEST_NAME,
 			params)
@@ -263,6 +264,7 @@ func (webServer *webServer) connectedHandler(w http.ResponseWriter, r *http.Requ
 	if err == nil {
 		responsePayload, err = dispatchAPIRequestHandler(
 			webServer.support,
+			common.PSIPHON_WEB_API_PROTOCOL,
 			webServer.lookupGeoIPData(params),
 			common.PSIPHON_API_CONNECTED_REQUEST_NAME,
 			params)
@@ -285,6 +287,7 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 	if err == nil {
 		_, err = dispatchAPIRequestHandler(
 			webServer.support,
+			common.PSIPHON_WEB_API_PROTOCOL,
 			webServer.lookupGeoIPData(params),
 			common.PSIPHON_API_STATUS_REQUEST_NAME,
 			params)
@@ -307,6 +310,7 @@ func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *
 	if err == nil {
 		responsePayload, err = dispatchAPIRequestHandler(
 			webServer.support,
+			common.PSIPHON_WEB_API_PROTOCOL,
 			webServer.lookupGeoIPData(params),
 			common.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME,
 			params)

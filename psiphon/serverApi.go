@@ -87,7 +87,9 @@ func NewServerContext(tunnel *Tunnel, sessionId string) (*ServerContext, error) 
 	// For legacy servers, set up psiphonHttpsClient for
 	// accessing the Psiphon API via the web service.
 	var psiphonHttpsClient *http.Client
-	if !tunnel.serverEntry.SupportsSSHAPIRequests() || tunnel.config.TargetApiProtocol == "web" {
+	if !tunnel.serverEntry.SupportsSSHAPIRequests() ||
+		tunnel.config.TargetApiProtocol == common.PSIPHON_WEB_API_PROTOCOL {
+
 		var err error
 		psiphonHttpsClient, err = makePsiphonHttpsClient(tunnel)
 		if err != nil {

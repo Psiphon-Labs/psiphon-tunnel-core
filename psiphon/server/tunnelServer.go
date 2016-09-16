@@ -632,8 +632,9 @@ type trafficState struct {
 }
 
 type handshakeState struct {
-	completed bool
-	apiParams requestJSONObject
+	completed   bool
+	apiProtocol string
+	apiParams   requestJSONObject
 }
 
 func newSshClient(

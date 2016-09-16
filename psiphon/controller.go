@@ -1045,7 +1045,7 @@ loop:
 				break
 			}
 
-			if controller.config.TargetApiProtocol == "ssh" &&
+			if controller.config.TargetApiProtocol == common.PSIPHON_SSH_API_PROTOCOL &&
 				!serverEntry.SupportsSSHAPIRequests() {
 				continue
 			}

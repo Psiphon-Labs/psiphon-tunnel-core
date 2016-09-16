@@ -476,7 +476,10 @@ func LoadConfig(configJson []byte) (*Config, error) {
 			errors.New("HostNameTransformer interface must be set at runtime"))
 	}
 
-	if !common.Contains([]string{"", "ssh", "web"}, config.TargetApiProtocol) {
+	if !common.Contains(
+		[]string{"", common.PSIPHON_SSH_API_PROTOCOL, common.PSIPHON_WEB_API_PROTOCOL},
+		config.TargetApiProtocol) {
+
 		return nil, common.ContextError(
 			errors.New("invalid TargetApiProtocol"))
 	}
