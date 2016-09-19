@@ -386,7 +386,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	// Web server config
 
-	var webServerSecret, webServerCertificate, webServerPrivateKey string
+	var webServerSecret, webServerCertificate,
+		webServerPrivateKey, webServerPortForwardAddress string
 
 	if params.WebServerPort != 0 {
 		var err error
@@ -399,10 +400,10 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		if err != nil {
 			return nil, nil, nil, common.ContextError(err)
 		}
-	}
 
-	webServerPortForwardAddress := net.JoinHostPort(
-		params.ServerIPAddress, strconv.Itoa(params.WebServerPort))
+		webServerPortForwardAddress = net.JoinHostPort(
+			params.ServerIPAddress, strconv.Itoa(params.WebServerPort))
+	}
 
 	// SSH config
 
