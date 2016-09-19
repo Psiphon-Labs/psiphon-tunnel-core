@@ -8,23 +8,36 @@
 
 /* Begin PBXBuildFile section */
 		4445243B1D8B356E00AF7B5B /* Psi.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4445243A1D8B356E00AF7B5B /* Psi.framework */; };
-		4445243C1D8B357500AF7B5B /* Psi.framework in Resources */ = {isa = PBXBuildFile; fileRef = 4445243A1D8B356E00AF7B5B /* Psi.framework */; };
-		44980AC21D63A3B300B78274 /* PsiphonTunnelController.h in Headers */ = {isa = PBXBuildFile; fileRef = 44980AC01D63A3B300B78274 /* PsiphonTunnelController.h */; settings = {ATTRIBUTES = (Public, ); }; };
-		44980ACB1D63A3EA00B78274 /* PsiphonTunnelController.m in Sources */ = {isa = PBXBuildFile; fileRef = 44980AC81D63A3EA00B78274 /* PsiphonTunnelController.m */; };
 		44980ACC1D63A3EA00B78274 /* Reachability.h in Headers */ = {isa = PBXBuildFile; fileRef = 44980AC91D63A3EA00B78274 /* Reachability.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		44980ACD1D63A3EA00B78274 /* Reachability.m in Sources */ = {isa = PBXBuildFile; fileRef = 44980ACA1D63A3EA00B78274 /* Reachability.m */; };
 		44CC93D61D6CBD740082F743 /* rootCAs.txt in Resources */ = {isa = PBXBuildFile; fileRef = 44CC93D51D6CBD740082F743 /* rootCAs.txt */; };
+		66ED503D1D8C73EE00417FE8 /* PsiphonTunnel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66ED503B1D8C73EE00417FE8 /* PsiphonTunnel.swift */; };
+		66ED503E1D8C73EE00417FE8 /* SwiftyJSON.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66ED503C1D8C73EE00417FE8 /* SwiftyJSON.swift */; };
+		66ED50531D9043B800417FE8 /* Psi.framework in CopyFiles */ = {isa = PBXBuildFile; fileRef = 4445243A1D8B356E00AF7B5B /* Psi.framework */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		66ED50521D9043A800417FE8 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				66ED50531D9043B800417FE8 /* Psi.framework in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		4445243A1D8B356E00AF7B5B /* Psi.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Psi.framework; path = PsiphonTunnelController/Psi.framework; sourceTree = "<group>"; };
 		44980ABD1D63A3B300B78274 /* PsiphonTunnelController.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = PsiphonTunnelController.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		44980AC01D63A3B300B78274 /* PsiphonTunnelController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PsiphonTunnelController.h; sourceTree = "<group>"; };
 		44980AC11D63A3B300B78274 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		44980AC81D63A3EA00B78274 /* PsiphonTunnelController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = PsiphonTunnelController.m; sourceTree = "<group>"; };
 		44980AC91D63A3EA00B78274 /* Reachability.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Reachability.h; sourceTree = "<group>"; };
 		44980ACA1D63A3EA00B78274 /* Reachability.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Reachability.m; sourceTree = "<group>"; };
 		44CC93D51D6CBD740082F743 /* rootCAs.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = rootCAs.txt; path = PsiphonTunnelController/rootCAs.txt; sourceTree = "<group>"; };
+		66ED503B1D8C73EE00417FE8 /* PsiphonTunnel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PsiphonTunnel.swift; sourceTree = "<group>"; };
+		66ED503C1D8C73EE00417FE8 /* SwiftyJSON.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SwiftyJSON.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -60,10 +73,10 @@
 		44980ABF1D63A3B300B78274 /* PsiphonTunnelController */ = {
 			isa = PBXGroup;
 			children = (
-				44980AC81D63A3EA00B78274 /* PsiphonTunnelController.m */,
+				66ED503B1D8C73EE00417FE8 /* PsiphonTunnel.swift */,
+				66ED503C1D8C73EE00417FE8 /* SwiftyJSON.swift */,
 				44980AC91D63A3EA00B78274 /* Reachability.h */,
 				44980ACA1D63A3EA00B78274 /* Reachability.m */,
-				44980AC01D63A3B300B78274 /* PsiphonTunnelController.h */,
 				44980AC11D63A3B300B78274 /* Info.plist */,
 			);
 			path = PsiphonTunnelController;
@@ -84,7 +97,6 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				44980AC21D63A3B300B78274 /* PsiphonTunnelController.h in Headers */,
 				44980ACC1D63A3EA00B78274 /* Reachability.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -100,6 +112,7 @@
 				44980AB91D63A3B300B78274 /* Frameworks */,
 				44980ABA1D63A3B300B78274 /* Headers */,
 				44980ABB1D63A3B300B78274 /* Resources */,
+				66ED50521D9043A800417FE8 /* CopyFiles */,
 			);
 			buildRules = (
 			);
@@ -121,6 +134,7 @@
 				TargetAttributes = {
 					44980ABC1D63A3B300B78274 = {
 						CreatedOnToolsVersion = 8.0;
+						LastSwiftMigration = 0800;
 						ProvisioningStyle = Manual;
 					};
 				};
@@ -147,7 +161,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4445243C1D8B357500AF7B5B /* Psi.framework in Resources */,
 				44CC93D61D6CBD740082F743 /* rootCAs.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -159,8 +172,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				66ED503E1D8C73EE00417FE8 /* SwiftyJSON.swift in Sources */,
 				44980ACD1D63A3EA00B78274 /* Reachability.m in Sources */,
-				44980ACB1D63A3EA00B78274 /* PsiphonTunnelController.m in Sources */,
+				66ED503D1D8C73EE00417FE8 /* PsiphonTunnel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -290,9 +304,18 @@
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = (
+					"-read_only_relocs",
+					suppress,
+					"-sub_umbrella",
+					Psi,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon.PsiphonTunnelController;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
+				SWIFT_OBJC_INTERFACE_HEADER_NAME = "$(SWIFT_MODULE_NAME).h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 3.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = "arm64 armv7 armv7s";
 			};
@@ -314,9 +337,17 @@
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = (
+					"-read_only_relocs",
+					suppress,
+					"-sub_umbrella",
+					Psi,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon.PsiphonTunnelController;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
+				SWIFT_OBJC_INTERFACE_HEADER_NAME = "$(SWIFT_MODULE_NAME).h";
+				SWIFT_VERSION = 3.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = "arm64 armv7 armv7s";
 			};
