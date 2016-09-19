@@ -54,6 +54,7 @@ func TestSSH(t *testing.T) {
 			tunnelProtocol:       "SSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
+			denyTrafficRules:     false,
 		})
 }
 
@@ -63,6 +64,7 @@ func TestOSSH(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
+			denyTrafficRules:     false,
 		})
 }
 
@@ -72,6 +74,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
+			denyTrafficRules:     false,
 		})
 }
 
@@ -81,6 +84,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
+			denyTrafficRules:     false,
 		})
 }
 
@@ -90,6 +94,7 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: false,
 			doHotReload:          false,
+			denyTrafficRules:     false,
 		})
 }
 
@@ -99,6 +104,17 @@ func TestHotReload(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
+			denyTrafficRules:     false,
+		})
+}
+
+func TestDenyTrafficRules(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          true,
+			denyTrafficRules:     true,
 		})
 }
 
@@ -106,6 +122,7 @@ type runServerConfig struct {
 	tunnelProtocol       string
 	enableSSHAPIRequests bool
 	doHotReload          bool
+	denyTrafficRules     bool
 }
 
 func sendNotificationReceived(c chan<- struct{}) {
@@ -162,11 +179,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	psinetFilename := "psinet.json"
 	sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(t, psinetFilename)
 
+	// Pave traffic rules file which exercises handshake parameter filtering
+	trafficRulesFilename := "traffic_rules.json"
+	paveTrafficRulesFile(t, trafficRulesFilename, sponsorID, runConfig.denyTrafficRules)
+
 	var serverConfig interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
 	serverConfig.(map[string]interface{})["GeoIPDatabaseFilename"] = ""
 	serverConfig.(map[string]interface{})["PsinetDatabaseFilename"] = psinetFilename
-	serverConfig.(map[string]interface{})["TrafficRulesFilename"] = ""
+	serverConfig.(map[string]interface{})["TrafficRulesFilename"] = trafficRulesFilename
 	serverConfig.(map[string]interface{})["LogLevel"] = "debug"
 
 	// 1 second is the minimum period; should be small enough to emit a log during the
@@ -348,22 +369,43 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// Test: tunneled web site fetch
 
-	makeTunneledWebRequest(t, localHTTPProxyPort)
+	err = makeTunneledWebRequest(t, localHTTPProxyPort)
+
+	if err == nil {
+		if runConfig.denyTrafficRules {
+			t.Fatalf("unexpected tunneled web request success")
+		}
+	} else {
+		if !runConfig.denyTrafficRules {
+			t.Fatalf("tunneled web request failed: %s", err)
+		}
+	}
 
 	// Test: tunneled UDP packet
 
 	udpgwServerAddress := serverConfig.(map[string]interface{})["UDPInterceptUdpgwServerAddress"].(string)
-	makeTunneledDNSRequest(t, localSOCKSProxyPort, udpgwServerAddress)
+
+	err = makeTunneledDNSRequest(t, localSOCKSProxyPort, udpgwServerAddress)
+
+	if err == nil {
+		if runConfig.denyTrafficRules {
+			t.Fatalf("unexpected tunneled DNS request success")
+		}
+	} else {
+		if !runConfig.denyTrafficRules {
+			t.Fatalf("tunneled DNS request failed: %s", err)
+		}
+	}
 }
 
-func makeTunneledWebRequest(t *testing.T, localHTTPProxyPort int) {
+func makeTunneledWebRequest(t *testing.T, localHTTPProxyPort int) error {
 
 	testUrl := "https://psiphon.ca"
 	roundTripTimeout := 30 * time.Second
 
 	proxyUrl, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", localHTTPProxyPort))
 	if err != nil {
-		t.Fatalf("error initializing proxied HTTP request: %s", err)
+		return fmt.Errorf("error initializing proxied HTTP request: %s", err)
 	}
 
 	httpClient := &http.Client{
@@ -375,20 +417,22 @@ func makeTunneledWebRequest(t *testing.T, localHTTPProxyPort int) {
 
 	response, err := httpClient.Get(testUrl)
 	if err != nil {
-		t.Fatalf("error sending proxied HTTP request: %s", err)
+		return fmt.Errorf("error sending proxied HTTP request: %s", err)
 	}
 
 	_, err = ioutil.ReadAll(response.Body)
 	if err != nil {
-		t.Fatalf("error reading proxied HTTP response: %s", err)
+		return fmt.Errorf("error reading proxied HTTP response: %s", err)
 	}
 	response.Body.Close()
+
+	return nil
 }
 
-func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAddress string) {
+func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAddress string) error {
 
 	testHostname := "psiphon.ca"
-	timeout := 10 * time.Second
+	timeout := 5 * time.Second
 
 	localUDPProxyAddress, err := net.ResolveUDPAddr("udp", "127.0.0.1:7301")
 	if err != nil {
@@ -399,7 +443,8 @@ func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAd
 
 		serverUDPConn, err := net.ListenUDP("udp", localUDPProxyAddress)
 		if err != nil {
-			t.Fatalf("ListenUDP failed: %s", err)
+			t.Logf("ListenUDP failed: %s", err)
+			return
 		}
 		defer serverUDPConn.Close()
 
@@ -408,19 +453,22 @@ func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAd
 		packetSize, clientAddr, err := serverUDPConn.ReadFromUDP(
 			buffer[udpgwPreambleSize:len(buffer)])
 		if err != nil {
-			t.Fatalf("serverUDPConn.Read failed: %s", err)
+			t.Logf("serverUDPConn.Read failed: %s", err)
+			return
 		}
 
 		socksProxyAddress := fmt.Sprintf("127.0.0.1:%d", localSOCKSProxyPort)
 
 		dialer, err := proxy.SOCKS5("tcp", socksProxyAddress, nil, proxy.Direct)
 		if err != nil {
-			t.Fatalf("proxy.SOCKS5 failed: %s", err)
+			t.Logf("proxy.SOCKS5 failed: %s", err)
+			return
 		}
 
 		socksTCPConn, err := dialer.Dial("tcp", udpgwServerAddress)
 		if err != nil {
-			t.Fatalf("dialer.Dial failed: %s", err)
+			t.Logf("dialer.Dial failed: %s", err)
+			return
 		}
 		defer socksTCPConn.Close()
 
@@ -433,22 +481,26 @@ func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAd
 			uint16(packetSize),
 			buffer)
 		if err != nil {
-			t.Fatalf("writeUdpgwPreamble failed: %s", err)
+			t.Logf("writeUdpgwPreamble failed: %s", err)
+			return
 		}
 
 		_, err = socksTCPConn.Write(buffer[0 : udpgwPreambleSize+packetSize])
 		if err != nil {
-			t.Fatalf("socksTCPConn.Write failed: %s", err)
+			t.Logf("socksTCPConn.Write failed: %s", err)
+			return
 		}
 
 		updgwProtocolMessage, err := readUdpgwMessage(socksTCPConn, buffer)
 		if err != nil {
-			t.Fatalf("readUdpgwMessage failed: %s", err)
+			t.Logf("readUdpgwMessage failed: %s", err)
+			return
 		}
 
 		_, err = serverUDPConn.WriteToUDP(updgwProtocolMessage.packet, clientAddr)
 		if err != nil {
-			t.Fatalf("serverUDPConn.Write failed: %s", err)
+			t.Logf("serverUDPConn.Write failed: %s", err)
+			return
 		}
 	}()
 
@@ -457,7 +509,7 @@ func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAd
 
 	clientUDPConn, err := net.DialUDP("udp", nil, localUDPProxyAddress)
 	if err != nil {
-		t.Fatalf("DialUDP failed: %s", err)
+		return fmt.Errorf("DialUDP failed: %s", err)
 	}
 	defer clientUDPConn.Close()
 
@@ -466,8 +518,10 @@ func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAd
 
 	_, _, err = psiphon.ResolveIP(testHostname, clientUDPConn)
 	if err != nil {
-		t.Fatalf("ResolveIP failed: %s", err)
+		return fmt.Errorf("ResolveIP failed: %s", err)
 	}
+
+	return nil
 }
 
 func pavePsinetDatabaseFile(t *testing.T, psinetFilename string) (string, string) {
@@ -498,8 +552,59 @@ func pavePsinetDatabaseFile(t *testing.T, psinetFilename string) (string, string
 
 	err := ioutil.WriteFile(psinetFilename, []byte(psinetJSON), 0600)
 	if err != nil {
-		t.Fatalf("error paving psinet database: %s", err)
+		t.Fatalf("error paving psinet database file: %s", err)
 	}
 
 	return sponsorID, expectedHomepageURL
+}
+
+func paveTrafficRulesFile(t *testing.T, trafficRulesFilename, sponsorID string, deny bool) {
+
+	allowTCPPort := "443"
+	allowUDPPort := "53"
+
+	if deny {
+		allowTCPPort = "0"
+		allowUDPPort = "0"
+	}
+
+	trafficRulesJSONFormat := `
+    {
+        "DefaultRules" :  {
+            "RateLimits" : {
+                "ReadBytesPerSecond": 16384,
+                "WriteBytesPerSecond": 16384
+            },
+            "DenyTCPPorts" : [443],
+            "DenyUDPPorts" : [53]
+        },
+        "FilteredRules" : [
+            {
+                "Filter" : {
+                    "HandshakeParameters" : {
+                        "sponsor_id" : ["%s"]
+                    }
+                },
+                "Rules" : {
+                    "RateLimits" : {
+                        "ReadUnthrottledBytes": 132352,
+                        "WriteUnthrottledBytes": 132352
+                    },
+                    "AllowTCPPorts" : [%s],
+                    "DenyTCPPorts" : [],
+                    "AllowUDPPorts" : [%s],
+                    "DenyUDPPorts" : []
+                }
+            }
+        ]
+    }
+    `
+
+	trafficRulesJSON := fmt.Sprintf(
+		trafficRulesJSONFormat, sponsorID, allowTCPPort, allowUDPPort)
+
+	err := ioutil.WriteFile(trafficRulesFilename, []byte(trafficRulesJSON), 0600)
+	if err != nil {
+		t.Fatalf("error paving traffic rules file: %s", err)
+	}
 }
