@@ -70,6 +70,8 @@ func RunServices(configJSON []byte) error {
 		return common.ContextError(err)
 	}
 
+	supportServices.TunnelServer = tunnelServer
+
 	if config.RunLoadMonitor() {
 		waitGroup.Add(1)
 		go func() {
@@ -130,6 +132,9 @@ loop:
 		select {
 		case <-reloadSupportServicesSignal:
 			supportServices.Reload()
+			// Reset traffic rules for established clients to reflect reloaded config
+			// TODO: only update when traffic rules config has changed
+			tunnelServer.ResetAllClientTrafficRules()
 		case <-logServerLoadSignal:
 			logServerLoad(tunnelServer)
 		case <-systemStopSignal:
@@ -187,6 +192,7 @@ type SupportServices struct {
 	PsinetDatabase  *psinet.Database
 	GeoIPService    *GeoIPService
 	DNSResolver     *DNSResolver
+	TunnelServer    *TunnelServer
 }
 
 // NewSupportServices initializes a new SupportServices.

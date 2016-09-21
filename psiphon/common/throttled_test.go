@@ -40,40 +40,47 @@ const (
 func TestThrottledConn(t *testing.T) {
 
 	run(t, RateLimits{
-		DownstreamUnlimitedBytes: 0,
-		DownstreamBytesPerSecond: 0,
-		UpstreamUnlimitedBytes:   0,
-		UpstreamBytesPerSecond:   0,
+		ReadUnthrottledBytes:  0,
+		ReadBytesPerSecond:    0,
+		WriteUnthrottledBytes: 0,
+		WriteBytesPerSecond:   0,
 	})
 
 	run(t, RateLimits{
-		DownstreamUnlimitedBytes: 0,
-		DownstreamBytesPerSecond: 5 * 1024 * 1024,
-		UpstreamUnlimitedBytes:   0,
-		UpstreamBytesPerSecond:   5 * 1024 * 1024,
+		ReadUnthrottledBytes:  0,
+		ReadBytesPerSecond:    5 * 1024 * 1024,
+		WriteUnthrottledBytes: 0,
+		WriteBytesPerSecond:   5 * 1024 * 1024,
 	})
 
 	run(t, RateLimits{
-		DownstreamUnlimitedBytes: 0,
-		DownstreamBytesPerSecond: 2 * 1024 * 1024,
-		UpstreamUnlimitedBytes:   0,
-		UpstreamBytesPerSecond:   2 * 1024 * 1024,
+		ReadUnthrottledBytes:  0,
+		ReadBytesPerSecond:    5 * 1024 * 1024,
+		WriteUnthrottledBytes: 0,
+		WriteBytesPerSecond:   1024 * 1024,
 	})
 
 	run(t, RateLimits{
-		DownstreamUnlimitedBytes: 0,
-		DownstreamBytesPerSecond: 1024 * 1024,
-		UpstreamUnlimitedBytes:   0,
-		UpstreamBytesPerSecond:   1024 * 1024,
+		ReadUnthrottledBytes:  0,
+		ReadBytesPerSecond:    2 * 1024 * 1024,
+		WriteUnthrottledBytes: 0,
+		WriteBytesPerSecond:   2 * 1024 * 1024,
+	})
+
+	run(t, RateLimits{
+		ReadUnthrottledBytes:  0,
+		ReadBytesPerSecond:    1024 * 1024,
+		WriteUnthrottledBytes: 0,
+		WriteBytesPerSecond:   1024 * 1024,
 	})
 
 	// This test takes > 1 min to run, so disabled for now
 	/*
 		run(t, RateLimits{
-			DownstreamUnlimitedBytes: 0,
-			DownstreamBytesPerSecond: 1024 * 1024 / 8,
-			UpstreamUnlimitedBytes:   0,
-			UpstreamBytesPerSecond:   1024 * 1024 / 8,
+			ReadUnthrottledBytes: 0,
+			ReadBytesPerSecond: 1024 * 1024 / 8,
+			WriteUnthrottledBytes:   0,
+			WriteBytesPerSecond:   1024 * 1024 / 8,
 		})
 	*/
 }
@@ -136,7 +143,7 @@ func run(t *testing.T, rateLimits RateLimits) {
 
 	// Test: elapsed upload time must reflect rate limit
 
-	checkElapsedTime(t, testDataSize, rateLimits.UpstreamBytesPerSecond, monotime.Since(startTime))
+	checkElapsedTime(t, testDataSize, rateLimits.WriteBytesPerSecond, monotime.Since(startTime))
 
 	startTime = monotime.Now()
 
@@ -150,7 +157,7 @@ func run(t *testing.T, rateLimits RateLimits) {
 
 	// Test: elapsed download time must reflect rate limit
 
-	checkElapsedTime(t, testDataSize, rateLimits.DownstreamBytesPerSecond, monotime.Since(startTime))
+	checkElapsedTime(t, testDataSize, rateLimits.ReadBytesPerSecond, monotime.Since(startTime))
 }
 
 func checkElapsedTime(t *testing.T, dataSize int, rateLimit int64, duration time.Duration) {

@@ -72,13 +72,19 @@ func sshAPIRequestHandler(
 			fmt.Errorf("invalid payload for request name: %s: %s", name, err))
 	}
 
-	return dispatchAPIRequestHandler(support, geoIPData, name, params)
+	return dispatchAPIRequestHandler(
+		support,
+		common.PSIPHON_SSH_API_PROTOCOL,
+		geoIPData,
+		name,
+		params)
 }
 
 // dispatchAPIRequestHandler is the common dispatch point for both
 // web and SSH API requests.
 func dispatchAPIRequestHandler(
 	support *SupportServices,
+	apiProtocol string,
 	geoIPData GeoIPData,
 	name string,
 	params requestJSONObject) (response []byte, reterr error) {
@@ -97,7 +103,7 @@ func dispatchAPIRequestHandler(
 
 	switch name {
 	case common.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
-		return handshakeAPIRequestHandler(support, geoIPData, params)
+		return handshakeAPIRequestHandler(support, apiProtocol, geoIPData, params)
 	case common.PSIPHON_API_CONNECTED_REQUEST_NAME:
 		return connectedAPIRequestHandler(support, geoIPData, params)
 	case common.PSIPHON_API_STATUS_REQUEST_NAME:
@@ -115,6 +121,7 @@ func dispatchAPIRequestHandler(
 // stats to record, etc.
 func handshakeAPIRequestHandler(
 	support *SupportServices,
+	apiProtocol string,
 	geoIPData GeoIPData,
 	params requestJSONObject) ([]byte, error) {
 
@@ -133,40 +140,42 @@ func handshakeAPIRequestHandler(
 			params,
 			baseRequestParams))
 
-	// TODO: share struct definition with psiphon/serverApi.go?
-	var handshakeResponse struct {
-		Homepages            []string            `json:"homepages"`
-		UpgradeClientVersion string              `json:"upgrade_client_version"`
-		PageViewRegexes      []map[string]string `json:"page_view_regexes"`
-		HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
-		EncodedServerList    []string            `json:"encoded_server_list"`
-		ClientRegion         string              `json:"client_region"`
-		ServerTimestamp      string              `json:"server_timestamp"`
-	}
+	// Note: ignoring param format errors as params have been validated
 
-	// Ignoring errors as params are validated
+	sessionID, _ := getStringRequestParam(params, "client_session_id")
 	sponsorID, _ := getStringRequestParam(params, "sponsor_id")
 	clientVersion, _ := getStringRequestParam(params, "client_version")
 	clientPlatform, _ := getStringRequestParam(params, "client_platform")
-	clientRegion := geoIPData.Country
+	isMobile := isMobileClientPlatform(clientPlatform)
+	normalizedPlatform := normalizeClientPlatform(clientPlatform)
 
-	// Note: no guarantee that PsinetDatabase won't reload between calls
+	// Flag the SSH client as having completed its handshake. This
+	// may reselect traffic rules and starts allowing port forwards.
 
-	handshakeResponse.Homepages = support.PsinetDatabase.GetHomepages(
-		sponsorID, clientRegion, isMobileClientPlatform(clientPlatform))
+	// TODO: in the case of SSH API requests, the actual sshClient could
+	// be passed in and used here. The session ID lookup is only strictly
+	// necessary to support web API requests.
+	err = support.TunnelServer.SetClientHandshakeState(
+		sessionID,
+		handshakeState{
+			completed:   true,
+			apiProtocol: apiProtocol,
+			apiParams:   copyBaseRequestParams(params),
+		})
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
 
-	handshakeResponse.UpgradeClientVersion = support.PsinetDatabase.GetUpgradeClientVersion(
-		clientVersion, normalizeClientPlatform(clientPlatform))
-
-	handshakeResponse.HttpsRequestRegexes = support.PsinetDatabase.GetHttpsRequestRegexes(
-		sponsorID)
-
-	handshakeResponse.EncodedServerList = support.PsinetDatabase.DiscoverServers(
-		geoIPData.DiscoveryValue)
-
-	handshakeResponse.ClientRegion = clientRegion
-
-	handshakeResponse.ServerTimestamp = common.GetCurrentTimestamp()
+	// Note: no guarantee that PsinetDatabase won't reload between database calls
+	db := support.PsinetDatabase
+	handshakeResponse := common.HandshakeResponse{
+		Homepages:            db.GetHomepages(sponsorID, geoIPData.Country, isMobile),
+		UpgradeClientVersion: db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
+		HttpsRequestRegexes:  db.GetHttpsRequestRegexes(sponsorID),
+		EncodedServerList:    db.DiscoverServers(geoIPData.DiscoveryValue),
+		ClientRegion:         geoIPData.Country,
+		ServerTimestamp:      common.GetCurrentTimestamp(),
+	}
 
 	responsePayload, err := json.Marshal(handshakeResponse)
 	if err != nil {
@@ -205,12 +214,9 @@ func connectedAPIRequestHandler(
 			params,
 			connectedRequestParams))
 
-	var connectedResponse struct {
-		ConnectedTimestamp string `json:"connected_timestamp"`
+	connectedResponse := common.ConnectedResponse{
+		ConnectedTimestamp: common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
 	}
-
-	connectedResponse.ConnectedTimestamp =
-		common.TruncateTimestampToHour(common.GetCurrentTimestamp())
 
 	responsePayload, err := json.Marshal(connectedResponse)
 	if err != nil {
@@ -446,7 +452,7 @@ var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"client_session_id", isHexDigits, requestParamOptional | requestParamNotLogged},
 	requestParamSpec{"propagation_channel_id", isHexDigits, 0},
 	requestParamSpec{"sponsor_id", isHexDigits, 0},
-	requestParamSpec{"client_version", isDigits, 0},
+	requestParamSpec{"client_version", isIntString, 0},
 	requestParamSpec{"client_platform", isClientPlatform, 0},
 	requestParamSpec{"relay_protocol", isRelayProtocol, 0},
 	requestParamSpec{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
@@ -489,6 +495,26 @@ func validateRequestParams(
 	}
 
 	return nil
+}
+
+// copyBaseRequestParams makes a copy of the params which
+// includes only the baseRequestParams.
+func copyBaseRequestParams(params requestJSONObject) requestJSONObject {
+
+	// Note: not a deep copy; assumes baseRequestParams values
+	// are all scalar types (int, string, etc.)
+
+	paramsCopy := make(requestJSONObject)
+	for _, baseParam := range baseRequestParams {
+		value := params[baseParam.name]
+		if value == nil {
+			continue
+		}
+
+		paramsCopy[baseParam.name] = value
+	}
+
+	return paramsCopy
 }
 
 func validateStringRequestParam(
@@ -548,6 +574,10 @@ func getRequestLogFields(
 	logFields["client_region"] = strings.Replace(geoIPData.Country, " ", "_", -1)
 	logFields["client_city"] = strings.Replace(geoIPData.City, " ", "_", -1)
 	logFields["client_isp"] = strings.Replace(geoIPData.ISP, " ", "_", -1)
+
+	if params == nil {
+		return logFields
+	}
 
 	for _, expectedParam := range expectedParams {
 
@@ -728,6 +758,11 @@ func isDigits(_ *SupportServices, value string) bool {
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		return c < '0' || c > '9'
 	})
+}
+
+func isIntString(_ *SupportServices, value string) bool {
+	_, err := strconv.Atoi(value)
+	return err == nil
 }
 
 func isClientPlatform(_ *SupportServices, value string) bool {

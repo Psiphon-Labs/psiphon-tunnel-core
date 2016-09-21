@@ -234,6 +234,12 @@ type Config struct {
 	// status, etc. This is used for special case temporary tunnels (Windows VPN mode).
 	DisableApi bool
 
+	// TargetApiProtocol specifies whether to force use of "ssh" or "web" API protocol.
+	// When blank, the default, the optimal API protocol is used. Note that this
+	// capability check is not applied before the "CandidateServers" count is emitted.
+	// This parameter is intended for testing and debugging only.
+	TargetApiProtocol string
+
 	// DisableRemoteServerListFetcher disables fetching remote server lists. This is
 	// used for special case temporary tunnels.
 	DisableRemoteServerListFetcher bool
@@ -468,6 +474,14 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	if config.HostNameTransformer != nil {
 		return nil, common.ContextError(
 			errors.New("HostNameTransformer interface must be set at runtime"))
+	}
+
+	if !common.Contains(
+		[]string{"", common.PSIPHON_SSH_API_PROTOCOL, common.PSIPHON_WEB_API_PROTOCOL},
+		config.TargetApiProtocol) {
+
+		return nil, common.ContextError(
+			errors.New("invalid TargetApiProtocol"))
 	}
 
 	if config.UpgradeDownloadUrl != "" &&
