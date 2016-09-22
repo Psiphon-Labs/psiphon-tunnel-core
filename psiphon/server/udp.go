@@ -434,7 +434,7 @@ func readUdpgwMessage(
 			copy(remoteIP, buffer[5:21])
 			remotePort = binary.BigEndian.Uint16(buffer[21:23])
 			packetStart = 23
-			packetEnd = 23 + int(size) - 2
+			packetEnd = 23 + int(size) - 21
 
 		} else {
 
@@ -446,7 +446,7 @@ func readUdpgwMessage(
 			copy(remoteIP, buffer[5:9])
 			remotePort = binary.BigEndian.Uint16(buffer[9:11])
 			packetStart = 11
-			packetEnd = 11 + int(size) - 2
+			packetEnd = 11 + int(size) - 9
 		}
 
 		// Assemble message
