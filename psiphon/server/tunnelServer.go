@@ -958,10 +958,10 @@ func (sshClient *sshClient) isPortForwardPermitted(
 	var allowPorts, denyPorts []int
 	if portForwardType == portForwardTypeTCP {
 		allowPorts = sshClient.trafficRules.AllowTCPPorts
-		denyPorts = sshClient.trafficRules.AllowTCPPorts
+		denyPorts = sshClient.trafficRules.DenyTCPPorts
 	} else {
 		allowPorts = sshClient.trafficRules.AllowUDPPorts
-		denyPorts = sshClient.trafficRules.AllowUDPPorts
+		denyPorts = sshClient.trafficRules.DenyUDPPorts
 
 	}
 
