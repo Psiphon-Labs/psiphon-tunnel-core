@@ -21,6 +21,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -28,6 +29,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"sync"
 	"syscall"
 	"testing"
@@ -381,19 +383,19 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
-	// Test: tunneled UDP packet
+	// Test: tunneled UDP packets
 
 	udpgwServerAddress := serverConfig.(map[string]interface{})["UDPInterceptUdpgwServerAddress"].(string)
 
-	err = makeTunneledDNSRequest(t, localSOCKSProxyPort, udpgwServerAddress)
+	err = makeTunneledNTPRequest(t, localSOCKSProxyPort, udpgwServerAddress)
 
 	if err == nil {
 		if runConfig.denyTrafficRules {
-			t.Fatalf("unexpected tunneled DNS request success")
+			t.Fatalf("unexpected tunneled NTP request success")
 		}
 	} else {
 		if !runConfig.denyTrafficRules {
-			t.Fatalf("tunneled DNS request failed: %s", err)
+			t.Fatalf("tunneled NTP request failed: %s", err)
 		}
 	}
 }
@@ -429,9 +431,9 @@ func makeTunneledWebRequest(t *testing.T, localHTTPProxyPort int) error {
 	return nil
 }
 
-func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAddress string) error {
+func makeTunneledNTPRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAddress string) error {
 
-	testHostname := "psiphon.ca"
+	testHostname := "pool.ntp.org"
 	timeout := 5 * time.Second
 
 	localUDPProxyAddress, err := net.ResolveUDPAddr("udp", "127.0.0.1:7301")
@@ -439,11 +441,20 @@ func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAd
 		t.Fatalf("ResolveUDPAddr failed: %s", err)
 	}
 
-	go func() {
+	// Note: this proxy is intended for this test only -- it only accepts a single connection,
+	// handles it, and then terminates.
+
+	localUDPProxy := func(destinationIP net.IP, destinationPort uint16, waitGroup *sync.WaitGroup) {
+
+		if waitGroup != nil {
+			defer waitGroup.Done()
+		}
+
+		destination := net.JoinHostPort(destinationIP.String(), strconv.Itoa(int(destinationPort)))
 
 		serverUDPConn, err := net.ListenUDP("udp", localUDPProxyAddress)
 		if err != nil {
-			t.Logf("ListenUDP failed: %s", err)
+			t.Logf("ListenUDP for %s failed: %s", destination, err)
 			return
 		}
 		defer serverUDPConn.Close()
@@ -453,7 +464,7 @@ func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAd
 		packetSize, clientAddr, err := serverUDPConn.ReadFromUDP(
 			buffer[udpgwPreambleSize:len(buffer)])
 		if err != nil {
-			t.Logf("serverUDPConn.Read failed: %s", err)
+			t.Logf("serverUDPConn.Read for %s failed: %s", destination, err)
 			return
 		}
 
@@ -461,64 +472,137 @@ func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAd
 
 		dialer, err := proxy.SOCKS5("tcp", socksProxyAddress, nil, proxy.Direct)
 		if err != nil {
-			t.Logf("proxy.SOCKS5 failed: %s", err)
+			t.Logf("proxy.SOCKS5 for %s failed: %s", destination, err)
 			return
 		}
 
 		socksTCPConn, err := dialer.Dial("tcp", udpgwServerAddress)
 		if err != nil {
-			t.Logf("dialer.Dial failed: %s", err)
+			t.Logf("dialer.Dial for %s failed: %s", destination, err)
 			return
 		}
 		defer socksTCPConn.Close()
 
+		flags := uint8(0)
+		if destinationPort == 53 {
+			flags = udpgwProtocolFlagDNS
+		}
+
 		err = writeUdpgwPreamble(
 			udpgwPreambleSize,
-			udpgwProtocolFlagDNS,
+			flags,
 			0,
-			make([]byte, 4), // ignored due to transparent DNS forwarding
-			53,
+			destinationIP,
+			destinationPort,
 			uint16(packetSize),
 			buffer)
 		if err != nil {
-			t.Logf("writeUdpgwPreamble failed: %s", err)
+			t.Logf("writeUdpgwPreamble for %s failed: %s", destination, err)
 			return
 		}
 
 		_, err = socksTCPConn.Write(buffer[0 : udpgwPreambleSize+packetSize])
 		if err != nil {
-			t.Logf("socksTCPConn.Write failed: %s", err)
+			t.Logf("socksTCPConn.Write for %s failed: %s", destination, err)
 			return
 		}
 
 		updgwProtocolMessage, err := readUdpgwMessage(socksTCPConn, buffer)
 		if err != nil {
-			t.Logf("readUdpgwMessage failed: %s", err)
+			t.Logf("readUdpgwMessage for %s failed: %s", destination, err)
 			return
 		}
 
 		_, err = serverUDPConn.WriteToUDP(updgwProtocolMessage.packet, clientAddr)
 		if err != nil {
-			t.Logf("serverUDPConn.Write failed: %s", err)
+			t.Logf("serverUDPConn.Write for %s failed: %s", destination, err)
 			return
 		}
-	}()
+	}
 
-	// TODO: properly synchronize with server startup
+	// Tunneled DNS request
+
+	waitGroup := new(sync.WaitGroup)
+	waitGroup.Add(1)
+	go localUDPProxy(
+		net.IP(make([]byte, 4)), // ignored due to transparent DNS forwarding
+		53,
+		waitGroup)
+	// TODO: properly synchronize with local UDP proxy startup
 	time.Sleep(1 * time.Second)
 
 	clientUDPConn, err := net.DialUDP("udp", nil, localUDPProxyAddress)
 	if err != nil {
 		return fmt.Errorf("DialUDP failed: %s", err)
 	}
-	defer clientUDPConn.Close()
 
 	clientUDPConn.SetReadDeadline(time.Now().Add(timeout))
 	clientUDPConn.SetWriteDeadline(time.Now().Add(timeout))
 
-	_, _, err = psiphon.ResolveIP(testHostname, clientUDPConn)
+	addrs, _, err := psiphon.ResolveIP(testHostname, clientUDPConn)
+
+	clientUDPConn.Close()
+
+	if err == nil && (len(addrs) == 0 || len(addrs[0]) < 4) {
+		err = errors.New("no address")
+	}
 	if err != nil {
 		return fmt.Errorf("ResolveIP failed: %s", err)
+	}
+
+	waitGroup.Wait()
+
+	// Tunneled NTP request
+
+	go localUDPProxy(addrs[0][len(addrs[0])-4:], 123, nil)
+	// TODO: properly synchronize with local UDP proxy startup
+	time.Sleep(1 * time.Second)
+
+	clientUDPConn, err = net.DialUDP("udp", nil, localUDPProxyAddress)
+	if err != nil {
+		return fmt.Errorf("DialUDP failed: %s", err)
+	}
+
+	clientUDPConn.SetReadDeadline(time.Now().Add(timeout))
+	clientUDPConn.SetWriteDeadline(time.Now().Add(timeout))
+
+	// NTP protocol code from: https://groups.google.com/d/msg/golang-nuts/FlcdMU5fkLQ/CAeoD9eqm-IJ
+
+	ntpData := make([]byte, 48)
+	ntpData[0] = 3<<3 | 3
+
+	_, err = clientUDPConn.Write(ntpData)
+	if err != nil {
+		clientUDPConn.Close()
+		return fmt.Errorf("NTP Write failed: %s", err)
+	}
+
+	_, err = clientUDPConn.Read(ntpData)
+	if err != nil {
+		clientUDPConn.Close()
+		return fmt.Errorf("NTP Read failed: %s", err)
+	}
+
+	clientUDPConn.Close()
+
+	var sec, frac uint64
+	sec = uint64(ntpData[43]) | uint64(ntpData[42])<<8 | uint64(ntpData[41])<<16 | uint64(ntpData[40])<<24
+	frac = uint64(ntpData[47]) | uint64(ntpData[46])<<8 | uint64(ntpData[45])<<16 | uint64(ntpData[44])<<24
+
+	nsec := sec * 1e9
+	nsec += (frac * 1e9) >> 32
+
+	ntpNow := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(nsec)).Local()
+
+	now := time.Now()
+
+	diff := ntpNow.Sub(now)
+	if diff < 0 {
+		diff = -diff
+	}
+
+	if diff > 1*time.Minute {
+		return fmt.Errorf("Unexpected NTP time: %s; local time: %s", ntpNow, now)
 	}
 
 	return nil
@@ -560,12 +644,12 @@ func pavePsinetDatabaseFile(t *testing.T, psinetFilename string) (string, string
 
 func paveTrafficRulesFile(t *testing.T, trafficRulesFilename, sponsorID string, deny bool) {
 
-	allowTCPPort := "443"
-	allowUDPPort := "53"
+	allowTCPPorts := "443"
+	allowUDPPorts := "53, 123"
 
 	if deny {
-		allowTCPPort = "0"
-		allowUDPPort = "0"
+		allowTCPPorts = "0"
+		allowUDPPorts = "0"
 	}
 
 	trafficRulesJSONFormat := `
@@ -601,7 +685,7 @@ func paveTrafficRulesFile(t *testing.T, trafficRulesFilename, sponsorID string, 
     `
 
 	trafficRulesJSON := fmt.Sprintf(
-		trafficRulesJSONFormat, sponsorID, allowTCPPort, allowUDPPort)
+		trafficRulesJSONFormat, sponsorID, allowTCPPorts, allowUDPPorts)
 
 	err := ioutil.WriteFile(trafficRulesFilename, []byte(trafficRulesJSON), 0600)
 	if err != nil {
