@@ -21,6 +21,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -396,9 +397,9 @@ func readUdpgwMessage(
 			return nil, common.ContextError(err)
 		}
 
-		size := uint16(buffer[0]) + uint16(buffer[1])<<8
+		size := binary.LittleEndian.Uint16(buffer[0:2])
 
-		if int(size) > len(buffer)-2 {
+		if size < 3 || int(size) > len(buffer)-2 {
 			return nil, common.ContextError(errors.New("invalid udpgw message size"))
 		}
 
@@ -409,7 +410,7 @@ func readUdpgwMessage(
 
 		flags := buffer[2]
 
-		connID := uint16(buffer[3]) + uint16(buffer[4])<<8
+		connID := binary.LittleEndian.Uint16(buffer[3:5])
 
 		// Ignore udpgw keep-alive messages -- read another message
 
@@ -431,7 +432,7 @@ func readUdpgwMessage(
 
 			remoteIP = make([]byte, 16)
 			copy(remoteIP, buffer[5:21])
-			remotePort = uint16(buffer[21]) + uint16(buffer[22])<<8
+			remotePort = binary.BigEndian.Uint16(buffer[21:23])
 			packetStart = 23
 			packetEnd = 23 + int(size) - 2
 
@@ -443,7 +444,7 @@ func readUdpgwMessage(
 
 			remoteIP = make([]byte, 4)
 			copy(remoteIP, buffer[5:9])
-			remotePort = uint16(buffer[9]) + uint16(buffer[10])<<8
+			remotePort = binary.BigEndian.Uint16(buffer[9:11])
 			packetStart = 11
 			packetEnd = 11 + int(size) - 2
 		}
@@ -481,20 +482,17 @@ func writeUdpgwPreamble(
 	size := uint16(preambleSize-2) + packetSize
 
 	// size
-	buffer[0] = byte(size & 0xFF)
-	buffer[1] = byte(size >> 8)
+	binary.LittleEndian.PutUint16(buffer[0:2], size)
 
 	// flags
 	buffer[2] = flags
 
 	// connID
-	buffer[3] = byte(connID & 0xFF)
-	buffer[4] = byte(connID >> 8)
+	binary.LittleEndian.PutUint16(buffer[3:5], connID)
 
 	// addr
 	copy(buffer[5:5+len(remoteIP)], remoteIP)
-	buffer[5+len(remoteIP)] = byte(remotePort & 0xFF)
-	buffer[6+len(remoteIP)] = byte(remotePort >> 8)
+	binary.BigEndian.PutUint16(buffer[5+len(remoteIP):7+len(remoteIP)], remotePort)
 
 	return nil
 }
