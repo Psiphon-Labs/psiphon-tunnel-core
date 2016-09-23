@@ -955,14 +955,15 @@ func (sshClient *sshClient) isPortForwardPermitted(
 		return false
 	}
 
-	var allowPorts, denyPorts []int
+	var allowPorts []int
 	if portForwardType == portForwardTypeTCP {
 		allowPorts = sshClient.trafficRules.AllowTCPPorts
-		denyPorts = sshClient.trafficRules.DenyTCPPorts
 	} else {
 		allowPorts = sshClient.trafficRules.AllowUDPPorts
-		denyPorts = sshClient.trafficRules.DenyUDPPorts
+	}
 
+	if len(allowPorts) == 0 {
+		return true
 	}
 
 	// TODO: faster lookup?
@@ -972,18 +973,23 @@ func (sshClient *sshClient) isPortForwardPermitted(
 				return true
 			}
 		}
-		return false
 	}
 
-	if len(denyPorts) > 0 {
-		for _, denyPort := range denyPorts {
-			if port == denyPort {
-				return false
+	// TODO: AllowSubnets won't match when host is a domain.
+	// Callers should resolve domain host before checking
+	// isPortForwardPermitted.
+
+	if ip := net.ParseIP(host); ip != nil {
+		for _, subnet := range sshClient.trafficRules.AllowSubnets {
+			// Note: ignoring error as config has been validated
+			_, network, _ := net.ParseCIDR(subnet)
+			if network.Contains(ip) {
+				return true
 			}
 		}
 	}
 
-	return true
+	return false
 }
 
 func (sshClient *sshClient) isPortForwardLimitExceeded(
@@ -1150,7 +1156,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	select {
 	case result = <-resultChannel:
 	case <-sshClient.stopBroadcast:
-		// Note: may leave dial in progress
+		// Note: may leave dial in progress (TODO: use DialContext to cancel)
 		return
 	}
 
