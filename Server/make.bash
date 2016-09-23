@@ -54,7 +54,7 @@ build_for_linux () {
     exit $?
   fi
 
-  GOOS=linux GOARCH=amd64 go build -race -ldflags "$LDFLAGS" -o psiphond main.go
+  GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o psiphond main.go
   if [ $? != 0 ]; then
     echo "...'go build' failed, exiting"
     exit $?
