@@ -26,7 +26,9 @@ package server
 import (
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"sync"
 	"syscall"
 	"time"
@@ -121,7 +123,7 @@ func RunServices(configJSON []byte) error {
 	reloadSupportServicesSignal := make(chan os.Signal, 1)
 	signal.Notify(reloadSupportServicesSignal, syscall.SIGUSR1)
 
-	// SIGUSR2 triggers an immediate load log
+	// SIGUSR2 triggers an immediate load log and optional profile dump
 	logServerLoadSignal := make(chan os.Signal, 1)
 	signal.Notify(logServerLoadSignal, syscall.SIGUSR2)
 
@@ -135,11 +137,17 @@ loop:
 			// Reset traffic rules for established clients to reflect reloaded config
 			// TODO: only update when traffic rules config has changed
 			tunnelServer.ResetAllClientTrafficRules()
+
 		case <-logServerLoadSignal:
+			// Profiles are dumped first to ensure some diagnostics are
+			// available in case logServerLoad deadlocks.
+			dumpProcessProfiles(supportServices.Config)
 			logServerLoad(tunnelServer)
+
 		case <-systemStopSignal:
 			log.WithContext().Info("shutdown by system")
 			break loop
+
 		case err = <-errors:
 			log.WithContextFields(LogFields{"error": err}).Error("service failed")
 			break loop
@@ -150,6 +158,35 @@ loop:
 	waitGroup.Wait()
 
 	return err
+}
+
+func dumpProcessProfiles(config *Config) {
+
+	if config.ProcessProfileOutputDirectory != "" {
+
+		for _, profileName := range []string{
+			"goroutine", "heap", "threadcreate", "block"} {
+
+			fileName := filepath.Join(
+				config.ProcessProfileOutputDirectory, profileName+".profile")
+
+			writer, err := os.OpenFile(
+				fileName, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+
+			if err == nil {
+				err = pprof.Lookup(profileName).WriteTo(writer, 1)
+				writer.Close()
+			}
+
+			if err != nil {
+				log.WithContextFields(
+					LogFields{
+						"error":       err,
+						"profileName": profileName}).Error("write profile failed")
+			}
+		}
+	}
+
 }
 
 func logServerLoad(server *TunnelServer) {

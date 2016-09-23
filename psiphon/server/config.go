@@ -206,6 +206,13 @@ type Config struct {
 	// The default, 0, disables load logging.
 	LoadMonitorPeriodSeconds int
 
+	// ProcessProfileOutputDirectory is the path of a directory to which
+	// process profiles will be written when signaled with SIGUSR2. The
+	// files are overwritten on each invocation. When set to the default
+	// value, blank, no profiles are written on SIGUSR2. Profiles include
+	// the default profiles here: https://golang.org/pkg/runtime/pprof/#Profile.
+	ProcessProfileOutputDirectory string
+
 	// TrafficRulesFilename is the path of a file containing a
 	// JSON-encoded TrafficRulesSet, the traffic rules to apply to
 	// Psiphon client tunnels.
