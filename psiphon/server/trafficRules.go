@@ -21,7 +21,9 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
+	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
@@ -113,15 +115,15 @@ type TrafficRules struct {
 	// in the list are accessible to clients.
 	AllowUDPPorts []int
 
-	// DenyTCPPorts specifies a blacklist of TCP ports that
-	// are not permitted for port forwarding. When set, the
-	// ports in the list are inaccessible to clients.
-	DenyTCPPorts []int
-
-	// DenyUDPPorts specifies a blacklist of UDP ports that
-	// are not permitted for port forwarding. When set, the
-	// ports in the list are inaccessible to clients.
-	DenyUDPPorts []int
+	// AllowSubnets specifies a list of IP address subnets for
+	// which all TCP and UDP ports are allowed. This list is
+	// consulted if a port is disallowed by the AllowTCPPorts
+	// or AllowUDPPorts configuration. Each entry is a IP subnet
+	// in CIDR notation.
+	// Limitation: currently, AllowSubnets only matches port
+	// forwards where the client sends an IP address. Domain
+	// names aren not resolved before checking AllowSubnets.
+	AllowSubnets []string
 }
 
 // RateLimits is a clone of common.RateLimits with pointers
@@ -161,13 +163,18 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 				// On error, state remains the same
 				return common.ContextError(err)
 			}
-			err = json.Unmarshal(configJSON, &set)
+			var newSet TrafficRulesSet
+			err = json.Unmarshal(configJSON, &newSet)
 			if err != nil {
-				// On error, state remains the same
-				// (Unmarshal first validates the provided
-				//  JOSN and then populates the interface)
 				return common.ContextError(err)
 			}
+			err = newSet.Validate()
+			if err != nil {
+				return common.ContextError(err)
+			}
+			// Modify actual traffic rules only after validation
+			set.DefaultRules = newSet.DefaultRules
+			set.FilteredRules = newSet.FilteredRules
 			return nil
 		})
 
@@ -177,6 +184,50 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 	}
 
 	return set, nil
+}
+
+// Validate checks for correct input formats in a TrafficRulesSet.
+func (set *TrafficRulesSet) Validate() error {
+
+	validateTrafficRules := func(rules *TrafficRules) error {
+		for _, subnet := range rules.AllowSubnets {
+			_, _, err := net.ParseCIDR(subnet)
+			if err != nil {
+				return common.ContextError(
+					fmt.Errorf("invalid subnet: %s %s", subnet, err))
+			}
+		}
+		return nil
+	}
+
+	err := validateTrafficRules(&set.DefaultRules)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	for _, filteredRule := range set.FilteredRules {
+
+		for paramName, _ := range filteredRule.Filter.HandshakeParameters {
+			validParamName := false
+			for _, paramSpec := range baseRequestParams {
+				if paramSpec.name == paramName {
+					validParamName = true
+					break
+				}
+			}
+			if !validParamName {
+				return common.ContextError(
+					fmt.Errorf("invalid parameter name: %s", paramName))
+			}
+		}
+
+		err := validateTrafficRules(&filteredRule.Rules)
+		if err != nil {
+			return common.ContextError(err)
+		}
+	}
+
+	return nil
 }
 
 // GetTrafficRules determines the traffic rules for a client based on its attributes.
@@ -248,14 +299,6 @@ func (set *TrafficRulesSet) GetTrafficRules(
 
 	if trafficRules.AllowUDPPorts == nil {
 		trafficRules.AllowUDPPorts = make([]int, 0)
-	}
-
-	if trafficRules.DenyTCPPorts == nil {
-		trafficRules.DenyTCPPorts = make([]int, 0)
-	}
-
-	if trafficRules.DenyUDPPorts == nil {
-		trafficRules.DenyUDPPorts = make([]int, 0)
 	}
 
 	// TODO: faster lookup?
@@ -339,14 +382,6 @@ func (set *TrafficRulesSet) GetTrafficRules(
 
 		if filteredRules.Rules.AllowUDPPorts != nil {
 			trafficRules.AllowUDPPorts = filteredRules.Rules.AllowUDPPorts
-		}
-
-		if filteredRules.Rules.DenyTCPPorts != nil {
-			trafficRules.DenyTCPPorts = filteredRules.Rules.DenyTCPPorts
-		}
-
-		if filteredRules.Rules.DenyUDPPorts != nil {
-			trafficRules.DenyUDPPorts = filteredRules.Rules.DenyUDPPorts
 		}
 
 		break

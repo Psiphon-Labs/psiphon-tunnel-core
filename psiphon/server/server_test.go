@@ -659,8 +659,8 @@ func paveTrafficRulesFile(t *testing.T, trafficRulesFilename, sponsorID string, 
                 "ReadBytesPerSecond": 16384,
                 "WriteBytesPerSecond": 16384
             },
-            "DenyTCPPorts" : [443],
-            "DenyUDPPorts" : [53]
+            "AllowTCPPorts" : [0],
+            "AllowUDPPorts" : [0]
         },
         "FilteredRules" : [
             {
@@ -675,9 +675,7 @@ func paveTrafficRulesFile(t *testing.T, trafficRulesFilename, sponsorID string, 
                         "WriteUnthrottledBytes": 132352
                     },
                     "AllowTCPPorts" : [%s],
-                    "DenyTCPPorts" : [],
-                    "AllowUDPPorts" : [%s],
-                    "DenyUDPPorts" : []
+                    "AllowUDPPorts" : [%s]
                 }
             }
         ]

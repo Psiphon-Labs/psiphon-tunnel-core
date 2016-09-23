@@ -107,7 +107,7 @@ type Config struct {
 	// HostToConnect and PortToConnect when the client is making a
 	// tunneled connection to the web server. This address is always
 	// exempted from validation against SSH_DISALLOWED_PORT_FORWARD_HOSTS
-	// and AllowTCPPorts/DenyTCPPorts.
+	// and AllowTCPPorts.
 	WebServerPortForwardAddress string
 
 	// WebServerPortForwardRedirectAddress specifies an alternate
@@ -190,8 +190,8 @@ type Config struct {
 	//
 	// The intercept is applied before the port forward destination is
 	// validated against SSH_DISALLOWED_PORT_FORWARD_HOSTS and
-	// AllowTCPPorts/DenyTCPPorts. So the intercept address may be any
-	// otherwise prohibited destination.
+	// AllowTCPPorts. So the intercept address may be any otherwise
+	// prohibited destination.
 	UDPInterceptUdpgwServerAddress string
 
 	// DNSResolverIPAddress specifies the IP address of a DNS server
@@ -205,6 +205,13 @@ type Config struct {
 	// number of running goroutines, amount of memory allocated, etc.)
 	// The default, 0, disables load logging.
 	LoadMonitorPeriodSeconds int
+
+	// ProcessProfileOutputDirectory is the path of a directory to which
+	// process profiles will be written when signaled with SIGUSR2. The
+	// files are overwritten on each invocation. When set to the default
+	// value, blank, no profiles are written on SIGUSR2. Profiles include
+	// the default profiles here: https://golang.org/pkg/runtime/pprof/#Profile.
+	ProcessProfileOutputDirectory string
 
 	// TrafficRulesFilename is the path of a file containing a
 	// JSON-encoded TrafficRulesSet, the traffic rules to apply to
@@ -533,8 +540,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 			MaxUDPPortForwardCount:                intPtr(32),
 			AllowTCPPorts:                         nil,
 			AllowUDPPorts:                         nil,
-			DenyTCPPorts:                          nil,
-			DenyUDPPorts:                          nil,
 		},
 	}
 
