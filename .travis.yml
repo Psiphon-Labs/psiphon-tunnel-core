@@ -9,10 +9,14 @@ install:
 - go get -t -d -v ./... && go build -v ./...
 script:
 - cd psiphon
-- go test -race -v -covermode=count -coverprofile=common.coverprofile ./common
-- go test -race -v -covermode=count -coverprofile=transferstats.coverprofile ./transferstats
-- go test -race -v -covermode=count -coverprofile=server.coverprofile ./server
-- go test -race -v -covermode=count -coverprofile=psiphon.coverprofile
+- go test -race -v ./common
+- go test -race -v ./transferstats
+- go test -race -v ./server
+- go test -race -v
+- go test -v -covermode=count -coverprofile=common.coverprofile ./common
+- go test -v -covermode=count -coverprofile=transferstats.coverprofile ./transferstats
+- go test -v -covermode=count -coverprofile=server.coverprofile ./server
+- go test -v -covermode=count -coverprofile=psiphon.coverprofile
 - $HOME/gopath/bin/gover
 - $HOME/gopath/bin/goveralls -coverprofile=gover.coverprofile -service=travis-ci -repotoken $COVERALLS_TOKEN
 before_install:
