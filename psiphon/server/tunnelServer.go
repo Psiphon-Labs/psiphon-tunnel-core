@@ -338,9 +338,9 @@ func (sshServer *sshServer) unregisterAcceptedClient(tunnelProtocol string) {
 func (sshServer *sshServer) registerEstablishedClient(client *sshClient) bool {
 
 	sshServer.clientsMutex.Lock()
-	defer sshServer.clientsMutex.Unlock()
 
 	if sshServer.stoppingClients {
+		sshServer.clientsMutex.Unlock()
 		return false
 	}
 
@@ -353,11 +353,14 @@ func (sshServer *sshServer) registerEstablishedClient(client *sshClient) bool {
 	//   will be hit; closing the old, dangling client is desirable.
 	// - Multi-tunnel clients should not normally use one server for multiple tunnels.
 	existingClient := sshServer.clients[client.sessionID]
+
+	sshServer.clients[client.sessionID] = client
+	sshServer.clientsMutex.Unlock()
+
+	// Call stop() outside the mutex to avoid deadlock.
 	if existingClient != nil {
 		existingClient.stop()
 	}
-
-	sshServer.clients[client.sessionID] = client
 
 	return true
 }
@@ -369,6 +372,7 @@ func (sshServer *sshServer) unregisterEstablishedClient(sessionID string) {
 	delete(sshServer.clients, sessionID)
 	sshServer.clientsMutex.Unlock()
 
+	// Call stop() outside the mutex to avoid deadlock.
 	if client != nil {
 		client.stop()
 	}
