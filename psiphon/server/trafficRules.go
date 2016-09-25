@@ -28,6 +28,13 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
+const (
+	DEFAULT_IDLE_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS = 30000
+	DEFAULT_IDLE_UDP_PORT_FORWARD_TIMEOUT_MILLISECONDS = 30000
+	DEFAULT_MAX_TCP_PORT_FORWARD_COUNT                 = 512
+	DEFAULT_MAX_UDP_PORT_FORWARD_COUNT                 = 32
+)
+
 // TrafficRulesSet represents the various traffic rules to
 // apply to Psiphon client tunnels. The Reload function supports
 // hot reloading of rules data while the server is running.
@@ -86,23 +93,29 @@ type TrafficRules struct {
 	// IdleTCPPortForwardTimeoutMilliseconds is the timeout period
 	// after which idle (no bytes flowing in either direction)
 	// client TCP port forwards are preemptively closed.
-	// The default, 0, is no idle timeout.
+	// A value of 0 specifies no idle timeout. When omitted in
+	// DefaultRules, DEFAULT_IDLE_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS
+	// is used.
 	IdleTCPPortForwardTimeoutMilliseconds *int
 
 	// IdleUDPPortForwardTimeoutMilliseconds is the timeout period
 	// after which idle (no bytes flowing in either direction)
 	// client UDP port forwards are preemptively closed.
-	// The default, 0, is no idle timeout.
+	// A value of 0 specifies no idle timeout. When omitted in
+	// DefaultRules, DEFAULT_IDLE_UDP_PORT_FORWARD_TIMEOUT_MILLISECONDS
+	// is used.
 	IdleUDPPortForwardTimeoutMilliseconds *int
 
 	// MaxTCPPortForwardCount is the maximum number of TCP port
 	// forwards each client may have open concurrently.
-	// The default, 0, is no maximum.
+	// A value of 0 specifies no maximum. When omitted in
+	// DefaultRules, DEFAULT_MAX_TCP_PORT_FORWARD_COUNT is used.
 	MaxTCPPortForwardCount *int
 
 	// MaxUDPPortForwardCount is the maximum number of UDP port
 	// forwards each client may have open concurrently.
-	// The default, 0, is no maximum.
+	// A value of 0 specifies no maximum. When omitted in
+	// DefaultRules, DEFAULT_MAX_UDP_PORT_FORWARD_COUNT is used.
 	MaxUDPPortForwardCount *int
 
 	// AllowTCPPorts specifies a whitelist of TCP ports that
@@ -277,20 +290,28 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		trafficRules.RateLimits.CloseAfterExhausted = new(bool)
 	}
 
+	intPtr := func(i int) *int {
+		return &i
+	}
+
 	if trafficRules.IdleTCPPortForwardTimeoutMilliseconds == nil {
-		trafficRules.IdleTCPPortForwardTimeoutMilliseconds = new(int)
+		trafficRules.IdleTCPPortForwardTimeoutMilliseconds =
+			intPtr(DEFAULT_IDLE_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS)
 	}
 
 	if trafficRules.IdleUDPPortForwardTimeoutMilliseconds == nil {
-		trafficRules.IdleUDPPortForwardTimeoutMilliseconds = new(int)
+		trafficRules.IdleUDPPortForwardTimeoutMilliseconds =
+			intPtr(DEFAULT_IDLE_UDP_PORT_FORWARD_TIMEOUT_MILLISECONDS)
 	}
 
 	if trafficRules.MaxTCPPortForwardCount == nil {
-		trafficRules.MaxTCPPortForwardCount = new(int)
+		trafficRules.MaxTCPPortForwardCount =
+			intPtr(DEFAULT_MAX_TCP_PORT_FORWARD_COUNT)
 	}
 
 	if trafficRules.MaxUDPPortForwardCount == nil {
-		trafficRules.MaxUDPPortForwardCount = new(int)
+		trafficRules.MaxUDPPortForwardCount =
+			intPtr(DEFAULT_MAX_UDP_PORT_FORWARD_COUNT)
 	}
 
 	if trafficRules.AllowTCPPorts == nil {
