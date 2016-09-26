@@ -81,12 +81,13 @@ func (sshClient *sshClient) handleUDPChannel(newChannel ssh.NewChannel) {
 }
 
 type udpPortForwardMultiplexer struct {
-	sshClient         *sshClient
-	sshChannel        ssh.Channel
-	portForwardsMutex sync.Mutex
-	portForwards      map[uint16]*udpPortForward
-	portForwardLRU    *common.LRUConns
-	relayWaitGroup    *sync.WaitGroup
+	sshClient            *sshClient
+	sshChannelWriteMutex sync.Mutex
+	sshChannel           ssh.Channel
+	portForwardsMutex    sync.Mutex
+	portForwards         map[uint16]*udpPortForward
+	portForwardLRU       *common.LRUConns
+	relayWaitGroup       *sync.WaitGroup
 }
 
 func (mux *udpPortForwardMultiplexer) run() {
@@ -326,7 +327,12 @@ func (portForward *udpPortForward) relayDownstream() {
 			uint16(packetSize),
 			buffer)
 		if err == nil {
+			// ssh.Channel.Write cannot be called concurrently.
+			// See: https://github.com/Psiphon-Inc/crypto/blob/82d98b4c7c05e81f92545f6fddb45d4541e6da00/ssh/channel.go#L272,
+			// https://codereview.appspot.com/136420043/diff/80002/ssh/channel.go
+			portForward.mux.sshChannelWriteMutex.Lock()
 			_, err = portForward.mux.sshChannel.Write(buffer[0 : portForward.preambleSize+packetSize])
+			portForward.mux.sshChannelWriteMutex.Unlock()
 		}
 
 		if err != nil {
