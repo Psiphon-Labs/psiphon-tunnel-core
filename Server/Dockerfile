@@ -1,12 +1,7 @@
-FROM alpine:latest
+FROM debian:testing
 
 MAINTAINER Psiphon Inc. <info@psiphon.ca>
-LABEL Description="Alpine Linux based Psiphon Tunnel-Core Server" Vendor="Psiphon Inc." Version="1.0"
-
-RUN apk add --update \
-      bash \
-      ca-certificates \
-    && rm -rf /var/cache/apk/*
+LABEL Description="Debian Linux based Psiphon Tunnel-Core Server" Vendor="Psiphon Inc." Version="1.0"
 
 RUN mkdir -p /opt/psiphon
 

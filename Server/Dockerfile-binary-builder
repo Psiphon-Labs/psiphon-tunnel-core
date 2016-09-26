@@ -1,26 +1,27 @@
-FROM alpine:latest
+FROM debian:testing
 
-ENV GOLANG_VERSION 1.7.1
-ENV GOLANG_SRC_URL https://golang.org/dl/go$GOLANG_VERSION.src.tar.gz
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update -y && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    curl \
+    gcc-mingw-w64-i686 \
+    gcc-mingw-w64-x86-64 \
+    gcc-multilib \
+    git \
+    mingw-w64 \
+    mercurial \
+    pkg-config \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
 
-RUN set -ex \
-	&& apk add --no-cache \
-		bash \
-		ca-certificates \
-		gcc \
-		git \
-		go \
-		musl-dev \
-		openssl \
-		perl \
-	\
-	&& export GOROOT_BOOTSTRAP="$(go env GOROOT)" \
-	\
-	&& wget -q "$GOLANG_SRC_URL" -O golang.tar.gz \
-	&& tar -C /usr/local -xzf golang.tar.gz \
-	&& rm golang.tar.gz \
-	&& cd /usr/local/go/src \
-	&& ./make.bash
+# Install Go.
+ENV GOVERSION=go1.7.1 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
+
+RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz -o /tmp/go.tar.gz \
+   && tar -C /usr/local -xzf /tmp/go.tar.gz \
+   && rm /tmp/go.tar.gz \
+   && echo $GOVERSION > $GOROOT/VERSION
 
 ENV GOPATH /go
 ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH
