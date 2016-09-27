@@ -23,6 +23,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
+	go_log "log"
 	"os"
 
 	"github.com/Psiphon-Inc/logrus"
@@ -170,6 +172,12 @@ func InitLogging(config *Config) error {
 }
 
 func init() {
+
+	// Suppress standard "log" package logging performed by other packages.
+	// For example, "net/http" logs messages such as:
+	// "http: TLS handshake error from <client-ip-addr>:<port>: [...]: i/o timeout"
+	go_log.SetOutput(ioutil.Discard)
+
 	log = &ContextLogger{
 		&logrus.Logger{
 			Out:       os.Stderr,
