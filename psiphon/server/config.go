@@ -213,6 +213,14 @@ type Config struct {
 	// the default profiles here: https://golang.org/pkg/runtime/pprof/#Profile.
 	ProcessProfileOutputDirectory string
 
+	// ProcessBlockProfileDurationSeconds specifies the sample duration for
+	// "block" profiling. For the default, 0, no "block" profile is taken.
+	ProcessBlockProfileDurationSeconds int
+
+	// ProcessCPUProfileDurationSeconds specifies the sample duration for
+	// CPU profiling. For the default, 0, no CPU profile is taken.
+	ProcessCPUProfileDurationSeconds int
+
 	// TrafficRulesFilename is the path of a file containing a
 	// JSON-encoded TrafficRulesSet, the traffic rules to apply to
 	// Psiphon client tunnels.
