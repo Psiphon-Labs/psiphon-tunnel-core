@@ -764,7 +764,7 @@ func (TestHostNameTransformer) TransformHostName(string) (string, bool) {
 func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) {
 
 	testUrl := "https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core/master/LICENSE"
-	roundTripTimeout := 10 * time.Second
+	roundTripTimeout := 30 * time.Second
 	expectedResponsePrefix := "                    GNU GENERAL PUBLIC LICENSE"
 	expectedResponseSize := 35148
 	checkResponse := func(responseBody string) bool {

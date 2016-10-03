@@ -847,12 +847,15 @@ func (sshClient *sshClient) runClient(
 }
 
 func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, reason ssh.RejectionReason, logMessage string) {
+
+	// Note: Debug level, as logMessage may contain user traffic destination address information
 	log.WithContextFields(
 		LogFields{
 			"channelType":  newChannel.ChannelType(),
 			"logMessage":   logMessage,
 			"rejectReason": reason.String(),
-		}).Warning("reject new channel")
+		}).Debug("reject new channel")
+
 	// Note: logMessage is internal, for logging only; just the RejectionReason is sent to the client
 	newChannel.Reject(reason, reason.String())
 }

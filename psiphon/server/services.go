@@ -115,6 +115,21 @@ func RunServices(configJSON []byte) error {
 		}
 	}()
 
+	// Shutdown doesn't wait for the outputProcessProfiles goroutine
+	// to complete, as it may be sleeping while running a "block" or
+	// CPU profile.
+	signalProcessProfiles := make(chan struct{}, 1)
+	go func() {
+		for {
+			select {
+			case <-signalProcessProfiles:
+				outputProcessProfiles(supportServices.Config)
+			case <-shutdownBroadcast:
+				return
+			}
+		}
+	}()
+
 	// An OS signal triggers an orderly shutdown
 	systemStopSignal := make(chan os.Signal, 1)
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill, syscall.SIGTERM)
@@ -123,7 +138,7 @@ func RunServices(configJSON []byte) error {
 	reloadSupportServicesSignal := make(chan os.Signal, 1)
 	signal.Notify(reloadSupportServicesSignal, syscall.SIGUSR1)
 
-	// SIGUSR2 triggers an immediate load log and optional profile dump
+	// SIGUSR2 triggers an immediate load log and optional process profile output
 	logServerLoadSignal := make(chan os.Signal, 1)
 	signal.Notify(logServerLoadSignal, syscall.SIGUSR2)
 
@@ -139,9 +154,13 @@ loop:
 			tunnelServer.ResetAllClientTrafficRules()
 
 		case <-logServerLoadSignal:
-			// Profiles are dumped first to ensure some diagnostics are
-			// available in case logServerLoad deadlocks.
-			dumpProcessProfiles(supportServices.Config)
+			// Signal profiles writes first to ensure some diagnostics are
+			// available in case logServerLoad hangs (which has happened
+			// in the past due to a deadlock bug).
+			select {
+			case signalProcessProfiles <- *new(struct{}):
+			default:
+			}
 			logServerLoad(tunnelServer)
 
 		case <-systemStopSignal:
@@ -160,24 +179,33 @@ loop:
 	return err
 }
 
-func dumpProcessProfiles(config *Config) {
+func outputProcessProfiles(config *Config) {
 
 	if config.ProcessProfileOutputDirectory != "" {
 
-		for _, profileName := range []string{
-			"goroutine", "heap", "threadcreate", "block"} {
-
+		openProfileFile := func(profileName string) *os.File {
 			fileName := filepath.Join(
 				config.ProcessProfileOutputDirectory, profileName+".profile")
-
-			writer, err := os.OpenFile(
+			file, err := os.OpenFile(
 				fileName, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
-
-			if err == nil {
-				err = pprof.Lookup(profileName).WriteTo(writer, 1)
-				writer.Close()
+			if err != nil {
+				log.WithContextFields(
+					LogFields{
+						"error":    err,
+						"fileName": fileName}).Error("open profile file failed")
+				return nil
 			}
+			return file
+		}
 
+		writeProfile := func(profileName string) {
+
+			file := openProfileFile(profileName)
+			if file == nil {
+				return
+			}
+			err := pprof.Lookup(profileName).WriteTo(file, 1)
+			file.Close()
 			if err != nil {
 				log.WithContextFields(
 					LogFields{
@@ -185,8 +213,51 @@ func dumpProcessProfiles(config *Config) {
 						"profileName": profileName}).Error("write profile failed")
 			}
 		}
-	}
 
+		// TODO: capture https://golang.org/pkg/runtime/debug/#WriteHeapDump?
+		// May not be useful in its current state, as per:
+		// https://groups.google.com/forum/#!topic/golang-dev/cYAkuU45Qyw
+
+		// Write goroutine, heap, and threadcreate profiles
+		// https://golang.org/pkg/runtime/pprof/#Profile
+		writeProfile("goroutine")
+		writeProfile("heap")
+		writeProfile("threadcreate")
+
+		// Write block profile (after sampling)
+		// https://golang.org/pkg/runtime/pprof/#Profile
+
+		if config.ProcessBlockProfileDurationSeconds > 0 {
+			log.WithContext().Info("start block profiling")
+			runtime.SetBlockProfileRate(1)
+			time.Sleep(
+				time.Duration(config.ProcessBlockProfileDurationSeconds) * time.Second)
+			runtime.SetBlockProfileRate(0)
+			log.WithContext().Info("end block profiling")
+			writeProfile("block")
+		}
+
+		// Write CPU profile (after sampling)
+		// https://golang.org/pkg/runtime/pprof/#StartCPUProfile
+
+		if config.ProcessCPUProfileDurationSeconds > 0 {
+			file := openProfileFile("cpu")
+			if file != nil {
+				log.WithContext().Info("start cpu profiling")
+				err := pprof.StartCPUProfile(file)
+				if err != nil {
+					log.WithContextFields(
+						LogFields{"error": err}).Error("StartCPUProfile failed")
+				} else {
+					time.Sleep(time.Duration(
+						config.ProcessCPUProfileDurationSeconds) * time.Second)
+					pprof.StopCPUProfile()
+					log.WithContext().Info("end cpu profiling")
+				}
+				file.Close()
+			}
+		}
+	}
 }
 
 func logServerLoad(server *TunnelServer) {
