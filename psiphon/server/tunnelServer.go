@@ -919,6 +919,11 @@ func (sshClient *sshClient) setTrafficRules() {
 
 	sshClient.trafficRules = sshClient.sshServer.support.TrafficRulesSet.GetTrafficRules(
 		sshClient.tunnelProtocol, sshClient.geoIPData, sshClient.handshakeState)
+
+	if sshClient.throttledConn != nil {
+		sshClient.throttledConn.SetLimits(
+			sshClient.trafficRules.RateLimits.CommonRateLimits())
+	}
 }
 
 func (sshClient *sshClient) rateLimits() common.RateLimits {
