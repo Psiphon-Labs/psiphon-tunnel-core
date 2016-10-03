@@ -63,9 +63,10 @@ type TrafficRulesSet struct {
 // TrafficRulesFilter defines a filter to match against client attributes.
 type TrafficRulesFilter struct {
 
-	// Protocols is a list of client tunnel protocols that must be in use
-	// to match this filter. When omitted or empty, any protocol matches.
-	Protocols []string
+	// TunnelProtocols is a list of client tunnel protocols that must be
+	// in use to match this filter. When omitted or empty, any protocol
+	// matches.
+	TunnelProtocols []string
 
 	// Regions is a list of client GeoIP countries that the client must
 	// reolve to to match this filter. When omitted or empty, any client
@@ -325,8 +326,10 @@ func (set *TrafficRulesSet) GetTrafficRules(
 	// TODO: faster lookup?
 	for _, filteredRules := range set.FilteredRules {
 
-		if len(filteredRules.Filter.Protocols) > 0 {
-			if !common.Contains(filteredRules.Filter.Protocols, tunnelProtocol) {
+		log.WithContextFields(LogFields{"filter": filteredRules.Filter}).Debug("filter check")
+
+		if len(filteredRules.Filter.TunnelProtocols) > 0 {
+			if !common.Contains(filteredRules.Filter.TunnelProtocols, tunnelProtocol) {
 				continue
 			}
 		}
@@ -351,13 +354,20 @@ func (set *TrafficRulesSet) GetTrafficRules(
 				continue
 			}
 
+			mismatch := false
 			for name, values := range filteredRules.Filter.HandshakeParameters {
 				clientValue, err := getStringRequestParam(state.apiParams, name)
 				if err != nil || !common.Contains(values, clientValue) {
-					continue
+					mismatch = true
+					break
 				}
 			}
+			if mismatch {
+				continue
+			}
 		}
+
+		log.WithContextFields(LogFields{"filter": filteredRules.Filter}).Debug("filter match")
 
 		// This is the first match. Override defaults using provided fields from selected rules, and return result.
 
@@ -407,6 +417,8 @@ func (set *TrafficRulesSet) GetTrafficRules(
 
 		break
 	}
+
+	log.WithContextFields(LogFields{"trafficRules": trafficRules}).Debug("selected traffic rules")
 
 	return trafficRules
 }
