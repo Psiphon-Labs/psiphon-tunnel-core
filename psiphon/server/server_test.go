@@ -181,7 +181,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	psinetFilename := "psinet.json"
 	sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(t, psinetFilename)
 
-	// Pave traffic rules file which exercises handshake parameter filtering
+	// Pave traffic rules file which exercises handshake parameter filtering. Client
+	// must handshake with specified sponsor ID in order to allow ports for tunneled
+	// requests.
 	trafficRulesFilename := "traffic_rules.json"
 	paveTrafficRulesFile(t, trafficRulesFilename, sponsorID, runConfig.denyTrafficRules)
 
@@ -232,14 +234,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}()
 
-	// Test: hot reload (of psinet)
+	// Test: hot reload (of psinet and traffic rules)
 
 	if runConfig.doHotReload {
 		// TODO: monitor logs for more robust wait-until-loaded
 		time.Sleep(1 * time.Second)
 
-		// Pave a new psinet with different random values.
+		// Pave a new psinet and traffic rules with different random values.
 		sponsorID, expectedHomepageURL = pavePsinetDatabaseFile(t, psinetFilename)
+		paveTrafficRulesFile(t, trafficRulesFilename, sponsorID, runConfig.denyTrafficRules)
 
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(syscall.SIGUSR1)
