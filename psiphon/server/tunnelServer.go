@@ -389,28 +389,28 @@ func (sshServer *sshServer) getLoadStats() map[string]map[string]int64 {
 
 	for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
 		loadStats[tunnelProtocol] = make(map[string]int64)
-		loadStats[tunnelProtocol]["AcceptedClients"] = 0
-		loadStats[tunnelProtocol]["EstablishedClients"] = 0
-		loadStats[tunnelProtocol]["TCPPortForwards"] = 0
-		loadStats[tunnelProtocol]["TotalTCPPortForwards"] = 0
-		loadStats[tunnelProtocol]["UDPPortForwards"] = 0
-		loadStats[tunnelProtocol]["TotalUDPPortForwards"] = 0
+		loadStats[tunnelProtocol]["accepted_clients"] = 0
+		loadStats[tunnelProtocol]["established_clients"] = 0
+		loadStats[tunnelProtocol]["tcp_port_forwards"] = 0
+		loadStats[tunnelProtocol]["total_tcp_port_forwards"] = 0
+		loadStats[tunnelProtocol]["udp_port_forwards"] = 0
+		loadStats[tunnelProtocol]["total_udp_port_forwards"] = 0
 	}
 
 	// Note: as currently tracked/counted, each established client is also an accepted client
 
 	for tunnelProtocol, acceptedClientCount := range sshServer.acceptedClientCounts {
-		loadStats[tunnelProtocol]["AcceptedClients"] = acceptedClientCount
+		loadStats[tunnelProtocol]["accepted_clients"] = acceptedClientCount
 	}
 
 	for _, client := range sshServer.clients {
 		// Note: can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
-		loadStats[client.tunnelProtocol]["EstablishedClients"] += 1
+		loadStats[client.tunnelProtocol]["established_clients"] += 1
 		client.Lock()
-		loadStats[client.tunnelProtocol]["TCPPortForwards"] += client.tcpTrafficState.concurrentPortForwardCount
-		loadStats[client.tunnelProtocol]["TotalTCPPortForwards"] += client.tcpTrafficState.totalPortForwardCount
-		loadStats[client.tunnelProtocol]["UDPPortForwards"] += client.udpTrafficState.concurrentPortForwardCount
-		loadStats[client.tunnelProtocol]["TotalUDPPortForwards"] += client.udpTrafficState.totalPortForwardCount
+		loadStats[client.tunnelProtocol]["tcp_port_forwards"] += client.tcpTrafficState.concurrentPortForwardCount
+		loadStats[client.tunnelProtocol]["total_tcp_port_forwards"] += client.tcpTrafficState.totalPortForwardCount
+		loadStats[client.tunnelProtocol]["udp_port_forwards"] += client.udpTrafficState.concurrentPortForwardCount
+		loadStats[client.tunnelProtocol]["total_udp_port_forwards"] += client.udpTrafficState.totalPortForwardCount
 		client.Unlock()
 	}
 

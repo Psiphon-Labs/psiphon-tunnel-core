@@ -266,18 +266,18 @@ func logServerLoad(server *TunnelServer) {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	fields := LogFields{
-		"event_name":   "server_load",
-		"BuildRev":     common.GetBuildInfo().BuildRev,
-		"HostID":       server.sshServer.support.Config.HostID,
-		"NumGoroutine": runtime.NumGoroutine(),
-		"MemStats": map[string]interface{}{
-			"Alloc":         memStats.Alloc,
-			"TotalAlloc":    memStats.TotalAlloc,
-			"Sys":           memStats.Sys,
-			"PauseTotalNs":  memStats.PauseTotalNs,
-			"PauseNs":       memStats.PauseNs,
-			"NumGC":         memStats.NumGC,
-			"GCCPUFraction": memStats.GCCPUFraction,
+		"event_name":    "server_load",
+		"build_rev":     common.GetBuildInfo().BuildRev,
+		"host_id":       server.sshServer.support.Config.HostID,
+		"num_goroutine": runtime.NumGoroutine(),
+		"mem_stats": map[string]interface{}{
+			"alloc":           memStats.Alloc,
+			"total_alloc":     memStats.TotalAlloc,
+			"sys":             memStats.Sys,
+			"pause_total_ns":  memStats.PauseTotalNs,
+			"pause_ns":        memStats.PauseNs,
+			"num_gc":          memStats.NumGC,
+			"gc_cpu_fraction": memStats.GCCPUFraction,
 		},
 	}
 
