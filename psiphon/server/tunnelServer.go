@@ -772,17 +772,17 @@ func (sshClient *sshClient) stop() {
 		baseRequestParams)
 
 	// TODO: match legacy log field naming convention?
-	logFields["HandshakeCompleted"] = sshClient.handshakeState.completed
-	logFields["startTime"] = sshClient.activityConn.GetStartTime()
-	logFields["Duration"] = sshClient.activityConn.GetActiveDuration()
-	logFields["BytesUpTCP"] = sshClient.tcpTrafficState.bytesUp
-	logFields["BytesDownTCP"] = sshClient.tcpTrafficState.bytesDown
-	logFields["PeakConcurrentPortForwardCountTCP"] = sshClient.tcpTrafficState.peakConcurrentPortForwardCount
-	logFields["TotalPortForwardCountTCP"] = sshClient.tcpTrafficState.totalPortForwardCount
-	logFields["BytesUpUDP"] = sshClient.udpTrafficState.bytesUp
-	logFields["BytesDownUDP"] = sshClient.udpTrafficState.bytesDown
-	logFields["PeakConcurrentPortForwardCountUDP"] = sshClient.udpTrafficState.peakConcurrentPortForwardCount
-	logFields["TotalPortForwardCountUDP"] = sshClient.udpTrafficState.totalPortForwardCount
+	logFields["handshake_completed"] = sshClient.handshakeState.completed
+	logFields["start_time"] = sshClient.activityConn.GetStartTime()
+	logFields["duration"] = sshClient.activityConn.GetActiveDuration()
+	logFields["bytes_up_tcp"] = sshClient.tcpTrafficState.bytesUp
+	logFields["bytes_down_tcp"] = sshClient.tcpTrafficState.bytesDown
+	logFields["peak_concurrent_port_forward_count_tcp"] = sshClient.tcpTrafficState.peakConcurrentPortForwardCount
+	logFields["total_port_forward_count_tcp"] = sshClient.tcpTrafficState.totalPortForwardCount
+	logFields["bytes_up_udp"] = sshClient.udpTrafficState.bytesUp
+	logFields["bytes_down_udp"] = sshClient.udpTrafficState.bytesDown
+	logFields["peak_concurrent_port_forward_count_udp"] = sshClient.udpTrafficState.peakConcurrentPortForwardCount
+	logFields["total_port_forward_count_udp"] = sshClient.udpTrafficState.totalPortForwardCount
 
 	sshClient.Unlock()
 
