@@ -771,7 +771,6 @@ func (sshClient *sshClient) stop() {
 		sshClient.handshakeState.apiParams,
 		baseRequestParams)
 
-	// TODO: match legacy log field naming convention?
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["start_time"] = sshClient.activityConn.GetStartTime()
 	logFields["duration"] = sshClient.activityConn.GetActiveDuration()

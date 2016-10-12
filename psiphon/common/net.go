@@ -225,9 +225,9 @@ func NewActivityMonitoredConn(
 }
 
 // GetStartTime gets the time when the ActivityMonitoredConn was
-// initialized.
+// initialized. Reported time is UTC.
 func (conn *ActivityMonitoredConn) GetStartTime() time.Time {
-	return conn.realStartTime
+	return conn.realStartTime.UTC()
 }
 
 // GetActiveDuration returns the time elapsed between the initialization
