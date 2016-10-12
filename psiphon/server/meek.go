@@ -33,10 +33,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Psiphon-Inc/crypto/nacl/box"
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"golang.org/x/crypto/nacl/box"
 )
 
 // MeekServer is based on meek-server.go from Tor and Psiphon:

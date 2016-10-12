@@ -34,10 +34,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Psiphon-Inc/crypto/nacl/box"
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
-	"golang.org/x/crypto/nacl/box"
 )
 
 // MeekConn is based on meek-client.go from Tor and Psiphon:

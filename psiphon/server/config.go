@@ -32,10 +32,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Psiphon-Inc/crypto/nacl/box"
 	"github.com/Psiphon-Inc/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"golang.org/x/crypto/nacl/box"
 )
 
 const (
