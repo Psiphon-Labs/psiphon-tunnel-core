@@ -258,6 +258,9 @@ func (sshServer *sshServer) setEstablishTunnels(establish bool) {
 		establishFlag = 0
 	}
 	atomic.StoreInt32(&sshServer.establishTunnels, establishFlag)
+
+	log.WithContextFields(
+		LogFields{"establish": establish}).Info("establishing tunnels")
 }
 
 // runListener is intended to run an a goroutine; it blocks
