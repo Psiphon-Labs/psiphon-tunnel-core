@@ -142,11 +142,25 @@ func RunServices(configJSON []byte) error {
 	logServerLoadSignal := make(chan os.Signal, 1)
 	signal.Notify(logServerLoadSignal, syscall.SIGUSR2)
 
+	// SIGTSTP triggers tunnelServer to stop establishing new tunnels
+	stopEstablishingTunnelsSignal := make(chan os.Signal, 1)
+	signal.Notify(stopEstablishingTunnelsSignal, syscall.SIGTSTP)
+
+	// SIGCONT triggers tunnelServer to resume establishing new tunnels
+	resumeEstablishingTunnelsSignal := make(chan os.Signal, 1)
+	signal.Notify(resumeEstablishingTunnelsSignal, syscall.SIGCONT)
+
 	err = nil
 
 loop:
 	for {
 		select {
+		case <-stopEstablishingTunnelsSignal:
+			tunnelServer.SetEstablishTunnels(false)
+
+		case <-resumeEstablishingTunnelsSignal:
+			tunnelServer.SetEstablishTunnels(true)
+
 		case <-reloadSupportServicesSignal:
 			supportServices.Reload()
 			// Reset traffic rules for established clients to reflect reloaded config
