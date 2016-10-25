@@ -277,6 +277,7 @@ func outputProcessProfiles(config *Config) {
 func logServerLoad(server *TunnelServer) {
 
 	// golang runtime stats
+
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	fields := LogFields{
@@ -296,6 +297,9 @@ func logServerLoad(server *TunnelServer) {
 	}
 
 	// tunnel server stats
+
+	fields["establish_tunnels"] = server.GetEstablishTunnels()
+
 	for tunnelProtocol, stats := range server.GetLoadStats() {
 		fields[tunnelProtocol] = stats
 	}

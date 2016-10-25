@@ -217,6 +217,11 @@ func (server *TunnelServer) SetEstablishTunnels(establish bool) {
 	server.sshServer.setEstablishTunnels(establish)
 }
 
+// GetEstablishTunnels returns whether new tunnels may be established or not.
+func (server *TunnelServer) GetEstablishTunnels() bool {
+	return server.sshServer.getEstablishTunnels()
+}
+
 type sshServer struct {
 	support              *SupportServices
 	establishTunnels     int32
@@ -264,6 +269,10 @@ func (sshServer *sshServer) setEstablishTunnels(establish bool) {
 		LogFields{"establish": establish}).Info("establishing tunnels")
 }
 
+func (sshServer *sshServer) getEstablishTunnels() bool {
+	return atomic.LoadInt32(&sshServer.establishTunnels) == 1
+}
+
 // runListener is intended to run an a goroutine; it blocks
 // running a particular listener. If an unrecoverable error
 // occurs, it will send the error to the listenerError channel.
@@ -278,7 +287,7 @@ func (sshServer *sshServer) runListener(
 		// listeners in all cases (e.g., meek) since SSH tunnel can
 		// span multiple TCP connections.
 
-		if atomic.LoadInt32(&sshServer.establishTunnels) != 1 {
+		if !sshServer.getEstablishTunnels() {
 			log.WithContext().Debug("not establishing tunnels")
 			clientConn.Close()
 			return
@@ -835,7 +844,7 @@ func (sshClient *sshClient) stop() {
 
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["start_time"] = sshClient.activityConn.GetStartTime()
-	logFields["duration"] = sshClient.activityConn.GetActiveDuration()
+	logFields["duration"] = sshClient.activityConn.GetActiveDuration() / time.Millisecond
 	logFields["bytes_up_tcp"] = sshClient.tcpTrafficState.bytesUp
 	logFields["bytes_down_tcp"] = sshClient.tcpTrafficState.bytesDown
 	logFields["peak_concurrent_port_forward_count_tcp"] = sshClient.tcpTrafficState.peakConcurrentPortForwardCount
