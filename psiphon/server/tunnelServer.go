@@ -844,7 +844,7 @@ func (sshClient *sshClient) stop() {
 
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["start_time"] = sshClient.activityConn.GetStartTime()
-	logFields["duration"] = sshClient.activityConn.GetActiveDuration()
+	logFields["duration"] = sshClient.activityConn.GetActiveDuration() / time.Millisecond
 	logFields["bytes_up_tcp"] = sshClient.tcpTrafficState.bytesUp
 	logFields["bytes_down_tcp"] = sshClient.tcpTrafficState.bytesDown
 	logFields["peak_concurrent_port_forward_count_tcp"] = sshClient.tcpTrafficState.peakConcurrentPortForwardCount
