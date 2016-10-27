@@ -43,26 +43,17 @@ import (
 type Database struct {
 	common.ReloadableFile
 
-	AlternateMeekFrontingAddresses      map[string][]string        `json:"alternate_meek_fronting_addresses"`
-	AlternateMeekFrontingAddressesRegex map[string]string          `json:"alternate_meek_fronting_addresses_regex"`
-	Hosts                               map[string]Host            `json:"hosts"`
-	MeekFrontingDisableSNI              map[string]bool            `json:"meek_fronting_disable_SNI"`
-	Servers                             []Server                   `json:"servers"`
-	Sponsors                            map[string]Sponsor         `json:"sponsors"`
-	Versions                            map[string][]ClientVersion `json:"client_versions"`
+	Hosts    map[string]Host            `json:"hosts"`
+	Servers  []Server                   `json:"servers"`
+	Sponsors map[string]Sponsor         `json:"sponsors"`
+	Versions map[string][]ClientVersion `json:"client_versions"`
 }
 
 type Host struct {
-	AlternateMeekServerFrontingHosts []string `json:"alternate_meek_server_fronting_hosts"`
-	DatacenterName                   string   `json:"datacenter_name"`
-	Id                               string   `json:"id"`
-	IpAddress                        string   `json:"ip_address"`
-	MeekCookieEncryptionPublicKey    string   `json:"meek_cookie_encryption_public_key"`
-	MeekServerFrontingDomain         string   `json:"meek_server_fronting_domain"`
-	MeekServerFrontingHost           string   `json:"meek_server_fronting_host"`
-	MeekServerObfuscatedKey          string   `json:"meek_server_obfuscated_key"`
-	MeekServerPort                   int      `json:"meek_server_port"`
-	Region                           string   `json:"region"`
+	DatacenterName string `json:"datacenter_name"`
+	Id             string `json:"id"`
+	IpAddress      string `json:"ip_address"`
+	Region         string `json:"region"`
 }
 
 type Server struct {
@@ -385,27 +376,18 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 
 	// Extended (new) entry fields are in a JSON string
 	var extendedConfig struct {
-		IpAddress                     string
-		WebServerPort                 string
-		WebServerSecret               string
-		WebServerCertificate          string
-		SshPort                       int
-		SshUsername                   string
-		SshPassword                   string
-		SshHostKey                    string
-		SshObfuscatedPort             int
-		SshObfuscatedKey              string
-		Region                        string
-		MeekServerPort                int
-		MeekObfuscatedKey             string
-		MeekFrontingDomain            string
-		MeekFrontingHost              string
-		MeekCookieEncryptionPublicKey string
-		meekFrontingAddresses         []string
-		meekFrontingAddressesRegex    string
-		meekFrontingDisableSNI        bool
-		meekFrontingHosts             []string
-		capabilities                  []string
+		IpAddress            string
+		WebServerPort        string
+		WebServerSecret      string
+		WebServerCertificate string
+		SshPort              int
+		SshUsername          string
+		SshPassword          string
+		SshHostKey           string
+		SshObfuscatedPort    int
+		SshObfuscatedKey     string
+		Region               string
+		capabilities         []string
 	}
 
 	// NOTE: also putting original values in extended config for easier parsing by new clients
@@ -433,8 +415,8 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	}
 
 	extendedConfig.SshObfuscatedPort = server.SshObfuscatedPort
-	// Use the latest alternate port unless tunneling through meek
-	if len(server.AlternateSshObfuscatedPorts) > 0 && !(server.Capabilities["FRONTED-MEEK"] || server.Capabilities["UNFRONTED-MEEK"]) {
+	// Use the latest alternate port
+	if len(server.AlternateSshObfuscatedPorts) > 0 {
 		port, err := strconv.Atoi(server.AlternateSshObfuscatedPorts[len(server.AlternateSshObfuscatedPorts)-1])
 		if err == nil {
 			extendedConfig.SshObfuscatedPort = port
@@ -446,48 +428,10 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	host := db.Hosts[server.HostId]
 
 	extendedConfig.Region = host.Region
-	extendedConfig.MeekServerPort = host.MeekServerPort
-	extendedConfig.MeekObfuscatedKey = host.MeekServerObfuscatedKey
-	extendedConfig.MeekFrontingDomain = host.MeekServerFrontingDomain
-	extendedConfig.MeekFrontingHost = host.MeekServerFrontingHost
-	extendedConfig.MeekCookieEncryptionPublicKey = host.MeekCookieEncryptionPublicKey
 
 	serverCapabilities := make(map[string]bool, 0)
 	for capability, enabled := range server.Capabilities {
 		serverCapabilities[capability] = enabled
-	}
-
-	if serverCapabilities["UNFRONTED-MEEK"] && host.MeekServerPort == 443 {
-		serverCapabilities["UNFRONTED-MEEK"] = false
-		serverCapabilities["UNFRONTED-MEEK-HTTPS"] = true
-	}
-
-	if host.MeekServerFrontingDomain != "" {
-		alternateMeekFrontingAddresses := db.AlternateMeekFrontingAddresses[host.MeekServerFrontingDomain]
-		if len(alternateMeekFrontingAddresses) > 0 {
-			// Choose 3 addresses randomly
-			perm := rand.Perm(len(alternateMeekFrontingAddresses))[:int(math.Min(float64(len(alternateMeekFrontingAddresses)), float64(3)))]
-
-			for i := range perm {
-				extendedConfig.meekFrontingAddresses = append(extendedConfig.meekFrontingAddresses, alternateMeekFrontingAddresses[perm[i]])
-			}
-		}
-
-		extendedConfig.meekFrontingAddressesRegex = db.AlternateMeekFrontingAddressesRegex[host.MeekServerFrontingDomain]
-		extendedConfig.meekFrontingDisableSNI = db.MeekFrontingDisableSNI[host.MeekServerFrontingDomain]
-	}
-
-	if host.AlternateMeekServerFrontingHosts != nil {
-		// Choose 3 addresses randomly
-		perm := rand.Perm(len(host.AlternateMeekServerFrontingHosts))[:int(math.Min(float64(len(host.AlternateMeekServerFrontingHosts)), float64(3)))]
-
-		for i := range perm {
-			extendedConfig.meekFrontingHosts = append(extendedConfig.meekFrontingHosts, host.AlternateMeekServerFrontingHosts[i])
-		}
-
-		if serverCapabilities["FRONTED-MEEK"] == true {
-			serverCapabilities["FRONTED-MEEK-HTTP"] = true
-		}
 	}
 
 	for capability, enabled := range serverCapabilities {
