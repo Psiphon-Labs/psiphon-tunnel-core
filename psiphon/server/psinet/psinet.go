@@ -29,7 +29,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math"
-	"math/rand"
 	"strconv"
 	"strings"
 	"time"
@@ -50,14 +49,14 @@ type Database struct {
 }
 
 type Host struct {
-	DatacenterName                   string `json:"datacenter_name"`
-	Id                               string `json:"id"`
-	IpAddress                        string `json:"ip_address"`
-	IsTCS                            bool   `json:"is_TCS"`
-	MeekCookieEncryptionPublicKey    string `json:"meek_cookie_encryption_public_key"`
-	MeekServerObfuscatedKey          string `json:"meek_server_obfuscated_key"`
-	MeekServerPort                   int    `json:"meek_server_port"`
-	Region                           string `json:"region"`
+	DatacenterName                string `json:"datacenter_name"`
+	Id                            string `json:"id"`
+	IpAddress                     string `json:"ip_address"`
+	IsTCS                         bool   `json:"is_TCS"`
+	MeekCookieEncryptionPublicKey string `json:"meek_cookie_encryption_public_key"`
+	MeekServerObfuscatedKey       string `json:"meek_server_obfuscated_key"`
+	MeekServerPort                int    `json:"meek_server_port"`
+	Region                        string `json:"region"`
 }
 
 type Server struct {
@@ -383,7 +382,7 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	webServerCertificate := server.WebServerCertificate
 	if host.IsTCS {
 		splitCert := strings.Split(server.WebServerCertificate, "\n")
-		if (len(splitCert) <= 2) {
+		if len(splitCert) <= 2 {
 			webServerCertificate = ""
 		} else {
 			webServerCertificate = strings.Join(splitCert[1:len(splitCert)-2], "")
