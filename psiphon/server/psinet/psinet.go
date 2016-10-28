@@ -43,26 +43,21 @@ import (
 type Database struct {
 	common.ReloadableFile
 
-	AlternateMeekFrontingAddresses      map[string][]string        `json:"alternate_meek_fronting_addresses"`
-	AlternateMeekFrontingAddressesRegex map[string]string          `json:"alternate_meek_fronting_addresses_regex"`
-	Hosts                               map[string]Host            `json:"hosts"`
-	MeekFrontingDisableSNI              map[string]bool            `json:"meek_fronting_disable_SNI"`
-	Servers                             []Server                   `json:"servers"`
-	Sponsors                            map[string]Sponsor         `json:"sponsors"`
-	Versions                            map[string][]ClientVersion `json:"client_versions"`
+	Hosts    map[string]Host            `json:"hosts"`
+	Servers  []Server                   `json:"servers"`
+	Sponsors map[string]Sponsor         `json:"sponsors"`
+	Versions map[string][]ClientVersion `json:"client_versions"`
 }
 
 type Host struct {
-	AlternateMeekServerFrontingHosts []string `json:"alternate_meek_server_fronting_hosts"`
-	DatacenterName                   string   `json:"datacenter_name"`
-	Id                               string   `json:"id"`
-	IpAddress                        string   `json:"ip_address"`
-	MeekCookieEncryptionPublicKey    string   `json:"meek_cookie_encryption_public_key"`
-	MeekServerFrontingDomain         string   `json:"meek_server_fronting_domain"`
-	MeekServerFrontingHost           string   `json:"meek_server_fronting_host"`
-	MeekServerObfuscatedKey          string   `json:"meek_server_obfuscated_key"`
-	MeekServerPort                   int      `json:"meek_server_port"`
-	Region                           string   `json:"region"`
+	DatacenterName                   string `json:"datacenter_name"`
+	Id                               string `json:"id"`
+	IpAddress                        string `json:"ip_address"`
+	IsTCS                            bool   `json:"is_TCS"`
+	MeekCookieEncryptionPublicKey    string `json:"meek_cookie_encryption_public_key"`
+	MeekServerObfuscatedKey          string `json:"meek_server_obfuscated_key"`
+	MeekServerPort                   int    `json:"meek_server_port"`
+	Region                           string `json:"region"`
 }
 
 type Server struct {
@@ -378,8 +373,25 @@ func bucketizeServerList(servers []Server, bucketCount int) [][]Server {
 // Newer clients ignore the legacy fields and only utilize the extended (new) config.
 func (db *Database) getEncodedServerEntry(server Server) string {
 
+	host, hostExists := db.Hosts[server.HostId]
+	if !hostExists {
+		return ""
+	}
+
+	// TCS web server certificate has PEM headers and newlines, so strip those now
+	// for legacy format compatibility
+	webServerCertificate := server.WebServerCertificate
+	if host.IsTCS {
+		splitCert := strings.Split(server.WebServerCertificate, "\n")
+		if (len(splitCert) <= 2) {
+			webServerCertificate = ""
+		} else {
+			webServerCertificate = strings.Join(splitCert[1:len(splitCert)-2], "")
+		}
+	}
+
 	// Double-check that we're not giving our blank server credentials
-	if len(server.IpAddress) <= 1 || len(server.WebServerPort) <= 1 || len(server.WebServerSecret) <= 1 || len(server.WebServerCertificate) <= 1 {
+	if len(server.IpAddress) <= 1 || len(server.WebServerPort) <= 1 || len(server.WebServerSecret) <= 1 || len(webServerCertificate) <= 1 {
 		return ""
 	}
 
@@ -396,15 +408,9 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 		SshObfuscatedPort             int
 		SshObfuscatedKey              string
 		Region                        string
-		MeekServerPort                int
-		MeekObfuscatedKey             string
-		MeekFrontingDomain            string
-		MeekFrontingHost              string
 		MeekCookieEncryptionPublicKey string
-		meekFrontingAddresses         []string
-		meekFrontingAddressesRegex    string
-		meekFrontingDisableSNI        bool
-		meekFrontingHosts             []string
+		MeekObfuscatedKey             string
+		MeekServerPort                int
 		capabilities                  []string
 	}
 
@@ -412,7 +418,7 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	extendedConfig.IpAddress = server.IpAddress
 	extendedConfig.WebServerPort = server.WebServerPort
 	extendedConfig.WebServerSecret = server.WebServerSecret
-	extendedConfig.WebServerCertificate = server.WebServerCertificate
+	extendedConfig.WebServerCertificate = webServerCertificate
 
 	sshPort, err := strconv.Atoi(server.SshPort)
 	if err != nil {
@@ -434,7 +440,7 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 
 	extendedConfig.SshObfuscatedPort = server.SshObfuscatedPort
 	// Use the latest alternate port unless tunneling through meek
-	if len(server.AlternateSshObfuscatedPorts) > 0 && !(server.Capabilities["FRONTED-MEEK"] || server.Capabilities["UNFRONTED-MEEK"]) {
+	if len(server.AlternateSshObfuscatedPorts) > 0 && !server.Capabilities["UNFRONTED-MEEK"] {
 		port, err := strconv.Atoi(server.AlternateSshObfuscatedPorts[len(server.AlternateSshObfuscatedPorts)-1])
 		if err == nil {
 			extendedConfig.SshObfuscatedPort = port
@@ -442,15 +448,10 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	}
 
 	extendedConfig.SshObfuscatedKey = server.SshObfuscatedKey
-
-	host := db.Hosts[server.HostId]
-
 	extendedConfig.Region = host.Region
+	extendedConfig.MeekCookieEncryptionPublicKey = host.MeekCookieEncryptionPublicKey
 	extendedConfig.MeekServerPort = host.MeekServerPort
 	extendedConfig.MeekObfuscatedKey = host.MeekServerObfuscatedKey
-	extendedConfig.MeekFrontingDomain = host.MeekServerFrontingDomain
-	extendedConfig.MeekFrontingHost = host.MeekServerFrontingHost
-	extendedConfig.MeekCookieEncryptionPublicKey = host.MeekCookieEncryptionPublicKey
 
 	serverCapabilities := make(map[string]bool, 0)
 	for capability, enabled := range server.Capabilities {
@@ -460,34 +461,6 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	if serverCapabilities["UNFRONTED-MEEK"] && host.MeekServerPort == 443 {
 		serverCapabilities["UNFRONTED-MEEK"] = false
 		serverCapabilities["UNFRONTED-MEEK-HTTPS"] = true
-	}
-
-	if host.MeekServerFrontingDomain != "" {
-		alternateMeekFrontingAddresses := db.AlternateMeekFrontingAddresses[host.MeekServerFrontingDomain]
-		if len(alternateMeekFrontingAddresses) > 0 {
-			// Choose 3 addresses randomly
-			perm := rand.Perm(len(alternateMeekFrontingAddresses))[:int(math.Min(float64(len(alternateMeekFrontingAddresses)), float64(3)))]
-
-			for i := range perm {
-				extendedConfig.meekFrontingAddresses = append(extendedConfig.meekFrontingAddresses, alternateMeekFrontingAddresses[perm[i]])
-			}
-		}
-
-		extendedConfig.meekFrontingAddressesRegex = db.AlternateMeekFrontingAddressesRegex[host.MeekServerFrontingDomain]
-		extendedConfig.meekFrontingDisableSNI = db.MeekFrontingDisableSNI[host.MeekServerFrontingDomain]
-	}
-
-	if host.AlternateMeekServerFrontingHosts != nil {
-		// Choose 3 addresses randomly
-		perm := rand.Perm(len(host.AlternateMeekServerFrontingHosts))[:int(math.Min(float64(len(host.AlternateMeekServerFrontingHosts)), float64(3)))]
-
-		for i := range perm {
-			extendedConfig.meekFrontingHosts = append(extendedConfig.meekFrontingHosts, host.AlternateMeekServerFrontingHosts[i])
-		}
-
-		if serverCapabilities["FRONTED-MEEK"] == true {
-			serverCapabilities["FRONTED-MEEK-HTTP"] = true
-		}
 	}
 
 	for capability, enabled := range serverCapabilities {
@@ -502,7 +475,7 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	}
 
 	// Legacy format + extended (new) config
-	prefixString := fmt.Sprintf("%s %s %s %s ", server.IpAddress, server.WebServerPort, server.WebServerSecret, server.WebServerCertificate)
+	prefixString := fmt.Sprintf("%s %s %s %s ", server.IpAddress, server.WebServerPort, server.WebServerSecret, webServerCertificate)
 
 	return hex.EncodeToString(append([]byte(prefixString)[:], []byte(jsonDump)[:]...))
 }
