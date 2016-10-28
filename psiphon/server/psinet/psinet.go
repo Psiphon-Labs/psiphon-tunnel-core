@@ -53,6 +53,7 @@ type Host struct {
 	DatacenterName string `json:"datacenter_name"`
 	Id             string `json:"id"`
 	IpAddress      string `json:"ip_address"`
+	IsTCS          bool   `json:"is_TCS"`
 	Region         string `json:"region"`
 }
 
@@ -369,8 +370,20 @@ func bucketizeServerList(servers []Server, bucketCount int) [][]Server {
 // Newer clients ignore the legacy fields and only utilize the extended (new) config.
 func (db *Database) getEncodedServerEntry(server Server) string {
 
+	host := db.Hosts[server.HostId]
+
+	// TCS web server certificate has PEM headers and newlines, so strip those now
+	// for legacy format compatibility
+	webServerCertificate := server.WebServerCertificate
+	if host.IsTCS {
+		splitCert := strings.Split(server.WebServerCertificate, "\n")
+		if (len(splitCert) > 2) {
+			webServerCertificate = strings.Join(splitCert[1:len(splitCert)-2], "")
+		}
+	}
+
 	// Double-check that we're not giving our blank server credentials
-	if len(server.IpAddress) <= 1 || len(server.WebServerPort) <= 1 || len(server.WebServerSecret) <= 1 || len(server.WebServerCertificate) <= 1 {
+	if len(server.IpAddress) <= 1 || len(server.WebServerPort) <= 1 || len(server.WebServerSecret) <= 1 || len(webServerCertificate) <= 1 {
 		return ""
 	}
 
@@ -394,7 +407,7 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	extendedConfig.IpAddress = server.IpAddress
 	extendedConfig.WebServerPort = server.WebServerPort
 	extendedConfig.WebServerSecret = server.WebServerSecret
-	extendedConfig.WebServerCertificate = server.WebServerCertificate
+	extendedConfig.WebServerCertificate = webServerCertificate
 
 	sshPort, err := strconv.Atoi(server.SshPort)
 	if err != nil {
@@ -424,9 +437,6 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	}
 
 	extendedConfig.SshObfuscatedKey = server.SshObfuscatedKey
-
-	host := db.Hosts[server.HostId]
-
 	extendedConfig.Region = host.Region
 
 	serverCapabilities := make(map[string]bool, 0)
@@ -446,7 +456,7 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	}
 
 	// Legacy format + extended (new) config
-	prefixString := fmt.Sprintf("%s %s %s %s ", server.IpAddress, server.WebServerPort, server.WebServerSecret, server.WebServerCertificate)
+	prefixString := fmt.Sprintf("%s %s %s %s ", server.IpAddress, server.WebServerPort, server.WebServerSecret, webServerCertificate)
 
 	return hex.EncodeToString(append([]byte(prefixString)[:], []byte(jsonDump)[:]...))
 }
