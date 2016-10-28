@@ -259,6 +259,14 @@ func newSSHServer(
 }
 
 func (sshServer *sshServer) setEstablishTunnels(establish bool) {
+
+	// Do nothing when the setting is already correct. This avoids
+	// spurious log messages when setEstablishTunnels is called
+	// periodically with the same setting.
+	if establish == sshServer.getEstablishTunnels() {
+		return
+	}
+
 	establishFlag := int32(1)
 	if !establish {
 		establishFlag = 0
