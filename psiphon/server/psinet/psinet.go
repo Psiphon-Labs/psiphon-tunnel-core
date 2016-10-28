@@ -50,11 +50,14 @@ type Database struct {
 }
 
 type Host struct {
-	DatacenterName string `json:"datacenter_name"`
-	Id             string `json:"id"`
-	IpAddress      string `json:"ip_address"`
-	IsTCS          bool   `json:"is_TCS"`
-	Region         string `json:"region"`
+	DatacenterName                   string `json:"datacenter_name"`
+	Id                               string `json:"id"`
+	IpAddress                        string `json:"ip_address"`
+	IsTCS                            bool   `json:"is_TCS"`
+	MeekCookieEncryptionPublicKey    string `json:"meek_cookie_encryption_public_key"`
+	MeekServerObfuscatedKey          string `json:"meek_server_obfuscated_key"`
+	MeekServerPort                   int    `json:"meek_server_port"`
+	Region                           string `json:"region"`
 }
 
 type Server struct {
@@ -394,18 +397,21 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 
 	// Extended (new) entry fields are in a JSON string
 	var extendedConfig struct {
-		IpAddress            string
-		WebServerPort        string
-		WebServerSecret      string
-		WebServerCertificate string
-		SshPort              int
-		SshUsername          string
-		SshPassword          string
-		SshHostKey           string
-		SshObfuscatedPort    int
-		SshObfuscatedKey     string
-		Region               string
-		capabilities         []string
+		IpAddress                     string
+		WebServerPort                 string
+		WebServerSecret               string
+		WebServerCertificate          string
+		SshPort                       int
+		SshUsername                   string
+		SshPassword                   string
+		SshHostKey                    string
+		SshObfuscatedPort             int
+		SshObfuscatedKey              string
+		Region                        string
+		MeekCookieEncryptionPublicKey string
+		MeekObfuscatedKey             string
+		MeekServerPort                int
+		capabilities                  []string
 	}
 
 	// NOTE: also putting original values in extended config for easier parsing by new clients
@@ -433,8 +439,8 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	}
 
 	extendedConfig.SshObfuscatedPort = server.SshObfuscatedPort
-	// Use the latest alternate port
-	if len(server.AlternateSshObfuscatedPorts) > 0 {
+	// Use the latest alternate port unless tunneling through meek
+	if len(server.AlternateSshObfuscatedPorts) > 0 && !server.Capabilities["UNFRONTED-MEEK"] {
 		port, err := strconv.Atoi(server.AlternateSshObfuscatedPorts[len(server.AlternateSshObfuscatedPorts)-1])
 		if err == nil {
 			extendedConfig.SshObfuscatedPort = port
@@ -443,10 +449,18 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 
 	extendedConfig.SshObfuscatedKey = server.SshObfuscatedKey
 	extendedConfig.Region = host.Region
+	extendedConfig.MeekCookieEncryptionPublicKey = host.MeekCookieEncryptionPublicKey
+	extendedConfig.MeekServerPort = host.MeekServerPort
+	extendedConfig.MeekObfuscatedKey = host.MeekServerObfuscatedKey
 
 	serverCapabilities := make(map[string]bool, 0)
 	for capability, enabled := range server.Capabilities {
 		serverCapabilities[capability] = enabled
+	}
+
+	if serverCapabilities["UNFRONTED-MEEK"] && host.MeekServerPort == 443 {
+		serverCapabilities["UNFRONTED-MEEK"] = false
+		serverCapabilities["UNFRONTED-MEEK-HTTPS"] = true
 	}
 
 	for capability, enabled := range serverCapabilities {
