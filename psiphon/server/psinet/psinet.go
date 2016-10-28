@@ -370,14 +370,19 @@ func bucketizeServerList(servers []Server, bucketCount int) [][]Server {
 // Newer clients ignore the legacy fields and only utilize the extended (new) config.
 func (db *Database) getEncodedServerEntry(server Server) string {
 
-	host := db.Hosts[server.HostId]
+	host, hostExists := db.Hosts[server.HostId]
+	if !hostExists {
+		return ""
+	}
 
 	// TCS web server certificate has PEM headers and newlines, so strip those now
 	// for legacy format compatibility
 	webServerCertificate := server.WebServerCertificate
 	if host.IsTCS {
 		splitCert := strings.Split(server.WebServerCertificate, "\n")
-		if (len(splitCert) > 2) {
+		if (len(splitCert) <= 2) {
+			webServerCertificate = ""
+		} else {
 			webServerCertificate = strings.Join(splitCert[1:len(splitCert)-2], "")
 		}
 	}
