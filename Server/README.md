@@ -1,9 +1,9 @@
 ## Psiphon Tunnel Core Server README
 
 ### Overview
-The `Server`/`psiphond` program and the `github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server` package contain an experimental Psiphon server stack.
+The `Server`/`psiphond` program and the `github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server` package contain the Psiphon server software.
 
-Functionality is based on the [production server stack](https://bitbucket.org/psiphon/psiphon-circumvention-system/src/tip/Server/) but only a small subset is implemented. Currently, this stack supports the `SSH` and `OSSH` protocols and has a minimal web server to support the API calls the tunnel-core client requires.
+Functionality is based on the [legacy server stack](https://bitbucket.org/psiphon/psiphon-circumvention-system/src/tip/Server/). `psiphond` has entered production.
 
 ### Build
 Prerequisites:
