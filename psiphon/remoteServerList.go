@@ -101,7 +101,7 @@ func FetchRemoteServerList(
 		return common.ContextError(err)
 	}
 
-	remoteServerList, err := ReadAuthenticatedDataPackage(
+	remoteServerList, err := common.ReadAuthenticatedDataPackage(
 		dataPackage, config.RemoteServerListSignaturePublicKey)
 	if err != nil {
 		return common.ContextError(err)
