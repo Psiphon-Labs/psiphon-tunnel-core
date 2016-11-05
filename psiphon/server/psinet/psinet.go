@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math"
+	"math/rand"
 	"strconv"
 	"strings"
 	"time"
@@ -150,7 +151,18 @@ func NewDatabase(filename string) (*Database, error) {
 	return database, nil
 }
 
-// GetHomepages returns a list of  home pages for the specified sponsor,
+// GetRandomHomepage returns a random home page from a set of home pages
+// for the specified sponsor, region, and platform.
+func (db *Database) GetRandomHomepage(sponsorID, clientRegion string, isMobilePlatform bool) []string {
+	homepage := make([]string, 0)
+	homepages := db.GetHomepages(sponsorID, clientRegion, isMobilePlatform)
+	if len(homepages) > 0 {
+		homepage = append(homepage, homepages[rand.Intn(len(homepages))])
+	}
+	return homepage
+}
+
+// GetHomepages returns a list of home pages for the specified sponsor,
 // region, and platform.
 func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatform bool) []string {
 	db.ReloadableFile.RLock()

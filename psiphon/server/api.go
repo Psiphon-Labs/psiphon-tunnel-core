@@ -169,7 +169,7 @@ func handshakeAPIRequestHandler(
 	// Note: no guarantee that PsinetDatabase won't reload between database calls
 	db := support.PsinetDatabase
 	handshakeResponse := common.HandshakeResponse{
-		Homepages:            db.GetHomepages(sponsorID, geoIPData.Country, isMobile),
+		Homepages:            db.GetRandomHomepage(sponsorID, geoIPData.Country, isMobile),
 		UpgradeClientVersion: db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
 		HttpsRequestRegexes:  db.GetHttpsRequestRegexes(sponsorID),
 		EncodedServerList:    db.DiscoverServers(geoIPData.DiscoveryValue),
