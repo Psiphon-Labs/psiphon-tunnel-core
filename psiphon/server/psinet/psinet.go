@@ -193,7 +193,7 @@ func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatfor
 	}
 
 	// Case: lookup failed or no corresponding homepages found for region --> use default
-	if sponsorHomePages == nil {
+	if len(sponsorHomePages) == 0 {
 		defaultHomePages, ok := homePages["None"]
 		if ok {
 			for _, homePage := range defaultHomePages {
