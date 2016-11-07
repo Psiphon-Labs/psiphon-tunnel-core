@@ -154,12 +154,12 @@ func NewDatabase(filename string) (*Database, error) {
 // GetRandomHomepage returns a random home page from a set of home pages
 // for the specified sponsor, region, and platform.
 func (db *Database) GetRandomHomepage(sponsorID, clientRegion string, isMobilePlatform bool) []string {
-	homepage := make([]string, 0)
 	homepages := db.GetHomepages(sponsorID, clientRegion, isMobilePlatform)
 	if len(homepages) > 0 {
-		homepage = append(homepage, homepages[rand.Intn(len(homepages))])
+		index := rand.Intn(len(homepages))
+		return homepages[index:index+1]
 	}
-	return homepage
+	return nil
 }
 
 // GetHomepages returns a list of home pages for the specified sponsor,
