@@ -32,10 +32,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Psiphon-Inc/crypto/nacl/box"
 	"github.com/Psiphon-Inc/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"golang.org/x/crypto/nacl/box"
 )
 
 const (
@@ -101,6 +101,20 @@ type Config struct {
 	// WebServerPrivateKey is the private key the web server uses to
 	// authenticate itself to clients.
 	WebServerPrivateKey string
+
+	// WebServerPortForwardAddress specifies the expected network
+	// address ("<host>:<port>") specified in a client's port forward
+	// HostToConnect and PortToConnect when the client is making a
+	// tunneled connection to the web server. This address is always
+	// exempted from validation against SSH_DISALLOWED_PORT_FORWARD_HOSTS
+	// and AllowTCPPorts.
+	WebServerPortForwardAddress string
+
+	// WebServerPortForwardRedirectAddress specifies an alternate
+	// destination address to be substituted and dialed instead of
+	// the original destination when the port forward destination is
+	// WebServerPortForwardAddress.
+	WebServerPortForwardRedirectAddress string
 
 	// TunnelProtocolPorts specifies which tunnel protocols to run
 	// and which ports to listen on for each protocol. Valid tunnel
@@ -176,8 +190,8 @@ type Config struct {
 	//
 	// The intercept is applied before the port forward destination is
 	// validated against SSH_DISALLOWED_PORT_FORWARD_HOSTS and
-	// AllowTCPPorts/DenyTCPPorts. So the intercept address may be any
-	// otherwise prohibited destination.
+	// AllowTCPPorts. So the intercept address may be any otherwise
+	// prohibited destination.
 	UDPInterceptUdpgwServerAddress string
 
 	// DNSResolverIPAddress specifies the IP address of a DNS server
@@ -186,26 +200,26 @@ type Config struct {
 	// "nameserver" entry.
 	DNSResolverIPAddress string
 
-	// TCPPortForwardRedirects is a mapping from client port forward
-	// destination to an alternate destination address. When the client's
-	// port forward HostToConnect and PortToConnect matches a redirect,
-	// the redirect is substituted and dialed instead of the original
-	// destination.
-	//
-	// The redirect is applied after the original destination is
-	// validated against SSH_DISALLOWED_PORT_FORWARD_HOSTS and
-	// AllowTCPPorts/DenyTCPPorts. So the redirect may map to any
-	// otherwise prohibited destination.
-	//
-	// The redirect is applied after UDPInterceptUdpgwServerAddress is
-	// checked. So the redirect address will not be intercepted.
-	TCPPortForwardRedirects map[string]string
-
 	// LoadMonitorPeriodSeconds indicates how frequently to log server
 	// load information (number of connected clients per tunnel protocol,
 	// number of running goroutines, amount of memory allocated, etc.)
 	// The default, 0, disables load logging.
 	LoadMonitorPeriodSeconds int
+
+	// ProcessProfileOutputDirectory is the path of a directory to which
+	// process profiles will be written when signaled with SIGUSR2. The
+	// files are overwritten on each invocation. When set to the default
+	// value, blank, no profiles are written on SIGUSR2. Profiles include
+	// the default profiles here: https://golang.org/pkg/runtime/pprof/#Profile.
+	ProcessProfileOutputDirectory string
+
+	// ProcessBlockProfileDurationSeconds specifies the sample duration for
+	// "block" profiling. For the default, 0, no "block" profile is taken.
+	ProcessBlockProfileDurationSeconds int
+
+	// ProcessCPUProfileDurationSeconds specifies the sample duration for
+	// CPU profiling. For the default, 0, no CPU profile is taken.
+	ProcessCPUProfileDurationSeconds int
 
 	// TrafficRulesFilename is the path of a file containing a
 	// JSON-encoded TrafficRulesSet, the traffic rules to apply to
@@ -233,7 +247,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	}
 
 	if config.ServerIPAddress == "" {
-		return nil, errors.New("ServerIPAddress is missing from config file")
+		return nil, errors.New("ServerIPAddress is required")
 	}
 
 	if config.WebServerPort > 0 && (config.WebServerSecret == "" || config.WebServerCertificate == "" ||
@@ -241,6 +255,24 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 
 		return nil, errors.New(
 			"Web server requires WebServerSecret, WebServerCertificate, WebServerPrivateKey")
+	}
+
+	if config.WebServerPortForwardAddress != "" {
+		if err := validateNetworkAddress(config.WebServerPortForwardAddress, false); err != nil {
+			return nil, errors.New("WebServerPortForwardAddress is invalid")
+		}
+	}
+
+	if config.WebServerPortForwardRedirectAddress != "" {
+
+		if config.WebServerPortForwardAddress == "" {
+			return nil, errors.New(
+				"WebServerPortForwardRedirectAddress requires WebServerPortForwardAddress")
+		}
+
+		if err := validateNetworkAddress(config.WebServerPortForwardRedirectAddress, false); err != nil {
+			return nil, errors.New("WebServerPortForwardRedirectAddress is invalid")
+		}
 	}
 
 	for tunnelProtocol, _ := range config.TunnelProtocolPorts {
@@ -280,24 +312,6 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		}
 	}
 
-	validateNetworkAddress := func(address string, requireIPaddress bool) error {
-		host, portStr, err := net.SplitHostPort(address)
-		if err != nil {
-			return err
-		}
-		if requireIPaddress && net.ParseIP(host) == nil {
-			return errors.New("host must be an IP address")
-		}
-		port, err := strconv.Atoi(portStr)
-		if err != nil {
-			return err
-		}
-		if port < 0 || port > 65535 {
-			return errors.New("invalid port")
-		}
-		return nil
-	}
-
 	if config.UDPInterceptUdpgwServerAddress != "" {
 		if err := validateNetworkAddress(config.UDPInterceptUdpgwServerAddress, true); err != nil {
 			return nil, fmt.Errorf("UDPInterceptUdpgwServerAddress is invalid: %s", err)
@@ -310,18 +324,25 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		}
 	}
 
-	if config.TCPPortForwardRedirects != nil {
-		for destination, redirect := range config.TCPPortForwardRedirects {
-			if err := validateNetworkAddress(destination, false); err != nil {
-				return nil, fmt.Errorf("TCPPortForwardRedirects destination %s is invalid: %s", destination, err)
-			}
-			if err := validateNetworkAddress(redirect, false); err != nil {
-				return nil, fmt.Errorf("TCPPortForwardRedirects redirect %s is invalid: %s", redirect, err)
-			}
-		}
-	}
-
 	return &config, nil
+}
+
+func validateNetworkAddress(address string, requireIPaddress bool) error {
+	host, portStr, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	if requireIPaddress && net.ParseIP(host) == nil {
+		return errors.New("host must be an IP address")
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return err
+	}
+	if port < 0 || port > 65535 {
+		return errors.New("invalid port")
+	}
+	return nil
 }
 
 // GenerateConfigParams specifies customizations to be applied to
@@ -380,7 +401,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	// Web server config
 
-	var webServerSecret, webServerCertificate, webServerPrivateKey string
+	var webServerSecret, webServerCertificate,
+		webServerPrivateKey, webServerPortForwardAddress string
 
 	if params.WebServerPort != 0 {
 		var err error
@@ -393,6 +415,9 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		if err != nil {
 			return nil, nil, nil, common.ContextError(err)
 		}
+
+		webServerPortForwardAddress = net.JoinHostPort(
+			params.ServerIPAddress, strconv.Itoa(params.WebServerPort))
 	}
 
 	// SSH config
@@ -482,6 +507,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		WebServerSecret:                webServerSecret,
 		WebServerCertificate:           webServerCertificate,
 		WebServerPrivateKey:            webServerPrivateKey,
+		WebServerPortForwardAddress:    webServerPortForwardAddress,
 		SSHPrivateKey:                  string(sshPrivateKey),
 		SSHServerVersion:               sshServerVersion,
 		SSHUserName:                    sshUserName,
@@ -504,22 +530,24 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		return nil, nil, nil, common.ContextError(err)
 	}
 
+	intPtr := func(i int) *int {
+		return &i
+	}
+
 	trafficRulesSet := &TrafficRulesSet{
 		DefaultRules: TrafficRules{
-			DefaultLimits: common.RateLimits{
-				DownstreamUnlimitedBytes: 0,
-				DownstreamBytesPerSecond: 0,
-				UpstreamUnlimitedBytes:   0,
-				UpstreamBytesPerSecond:   0,
+			RateLimits: RateLimits{
+				ReadUnthrottledBytes:  new(int64),
+				ReadBytesPerSecond:    new(int64),
+				WriteUnthrottledBytes: new(int64),
+				WriteBytesPerSecond:   new(int64),
 			},
-			IdleTCPPortForwardTimeoutMilliseconds: 30000,
-			IdleUDPPortForwardTimeoutMilliseconds: 30000,
-			MaxTCPPortForwardCount:                1024,
-			MaxUDPPortForwardCount:                32,
+			IdleTCPPortForwardTimeoutMilliseconds: intPtr(DEFAULT_IDLE_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS),
+			IdleUDPPortForwardTimeoutMilliseconds: intPtr(DEFAULT_IDLE_UDP_PORT_FORWARD_TIMEOUT_MILLISECONDS),
+			MaxTCPPortForwardCount:                intPtr(DEFAULT_MAX_TCP_PORT_FORWARD_COUNT),
+			MaxUDPPortForwardCount:                intPtr(DEFAULT_MAX_UDP_PORT_FORWARD_COUNT),
 			AllowTCPPorts:                         nil,
 			AllowUDPPorts:                         nil,
-			DenyTCPPorts:                          nil,
-			DenyUDPPorts:                          nil,
 		},
 	}
 

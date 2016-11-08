@@ -21,6 +21,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -28,6 +29,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"sync"
 	"syscall"
 	"testing"
@@ -54,6 +56,7 @@ func TestSSH(t *testing.T) {
 			tunnelProtocol:       "SSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
+			denyTrafficRules:     false,
 		})
 }
 
@@ -63,6 +66,7 @@ func TestOSSH(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
+			denyTrafficRules:     false,
 		})
 }
 
@@ -72,6 +76,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
+			denyTrafficRules:     false,
 		})
 }
 
@@ -81,6 +86,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
+			denyTrafficRules:     false,
 		})
 }
 
@@ -90,6 +96,7 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: false,
 			doHotReload:          false,
+			denyTrafficRules:     false,
 		})
 }
 
@@ -99,6 +106,17 @@ func TestHotReload(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
+			denyTrafficRules:     false,
+		})
+}
+
+func TestDenyTrafficRules(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          true,
+			denyTrafficRules:     true,
 		})
 }
 
@@ -106,6 +124,7 @@ type runServerConfig struct {
 	tunnelProtocol       string
 	enableSSHAPIRequests bool
 	doHotReload          bool
+	denyTrafficRules     bool
 }
 
 func sendNotificationReceived(c chan<- struct{}) {
@@ -162,11 +181,17 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	psinetFilename := "psinet.json"
 	sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(t, psinetFilename)
 
+	// Pave traffic rules file which exercises handshake parameter filtering. Client
+	// must handshake with specified sponsor ID in order to allow ports for tunneled
+	// requests.
+	trafficRulesFilename := "traffic_rules.json"
+	paveTrafficRulesFile(t, trafficRulesFilename, sponsorID, runConfig.denyTrafficRules)
+
 	var serverConfig interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
 	serverConfig.(map[string]interface{})["GeoIPDatabaseFilename"] = ""
 	serverConfig.(map[string]interface{})["PsinetDatabaseFilename"] = psinetFilename
-	serverConfig.(map[string]interface{})["TrafficRulesFilename"] = ""
+	serverConfig.(map[string]interface{})["TrafficRulesFilename"] = trafficRulesFilename
 	serverConfig.(map[string]interface{})["LogLevel"] = "debug"
 
 	// 1 second is the minimum period; should be small enough to emit a log during the
@@ -209,14 +234,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}()
 
-	// Test: hot reload (of psinet)
+	// Test: hot reload (of psinet and traffic rules)
 
 	if runConfig.doHotReload {
 		// TODO: monitor logs for more robust wait-until-loaded
 		time.Sleep(1 * time.Second)
 
-		// Pave a new psinet with different random values.
+		// Pave a new psinet and traffic rules with different random values.
 		sponsorID, expectedHomepageURL = pavePsinetDatabaseFile(t, psinetFilename)
+		paveTrafficRulesFile(t, trafficRulesFilename, sponsorID, runConfig.denyTrafficRules)
 
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(syscall.SIGUSR1)
@@ -348,22 +374,43 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// Test: tunneled web site fetch
 
-	makeTunneledWebRequest(t, localHTTPProxyPort)
+	err = makeTunneledWebRequest(t, localHTTPProxyPort)
 
-	// Test: tunneled UDP packet
+	if err == nil {
+		if runConfig.denyTrafficRules {
+			t.Fatalf("unexpected tunneled web request success")
+		}
+	} else {
+		if !runConfig.denyTrafficRules {
+			t.Fatalf("tunneled web request failed: %s", err)
+		}
+	}
+
+	// Test: tunneled UDP packets
 
 	udpgwServerAddress := serverConfig.(map[string]interface{})["UDPInterceptUdpgwServerAddress"].(string)
-	makeTunneledDNSRequest(t, localSOCKSProxyPort, udpgwServerAddress)
+
+	err = makeTunneledNTPRequest(t, localSOCKSProxyPort, udpgwServerAddress)
+
+	if err == nil {
+		if runConfig.denyTrafficRules {
+			t.Fatalf("unexpected tunneled NTP request success")
+		}
+	} else {
+		if !runConfig.denyTrafficRules {
+			t.Fatalf("tunneled NTP request failed: %s", err)
+		}
+	}
 }
 
-func makeTunneledWebRequest(t *testing.T, localHTTPProxyPort int) {
+func makeTunneledWebRequest(t *testing.T, localHTTPProxyPort int) error {
 
 	testUrl := "https://psiphon.ca"
 	roundTripTimeout := 30 * time.Second
 
 	proxyUrl, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", localHTTPProxyPort))
 	if err != nil {
-		t.Fatalf("error initializing proxied HTTP request: %s", err)
+		return fmt.Errorf("error initializing proxied HTTP request: %s", err)
 	}
 
 	httpClient := &http.Client{
@@ -375,19 +422,21 @@ func makeTunneledWebRequest(t *testing.T, localHTTPProxyPort int) {
 
 	response, err := httpClient.Get(testUrl)
 	if err != nil {
-		t.Fatalf("error sending proxied HTTP request: %s", err)
+		return fmt.Errorf("error sending proxied HTTP request: %s", err)
 	}
 
 	_, err = ioutil.ReadAll(response.Body)
 	if err != nil {
-		t.Fatalf("error reading proxied HTTP response: %s", err)
+		return fmt.Errorf("error reading proxied HTTP response: %s", err)
 	}
 	response.Body.Close()
+
+	return nil
 }
 
-func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAddress string) {
+func makeTunneledNTPRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAddress string) error {
 
-	testHostname := "psiphon.ca"
+	testHostname := "pool.ntp.org"
 	timeout := 10 * time.Second
 
 	localUDPProxyAddress, err := net.ResolveUDPAddr("udp", "127.0.0.1:7301")
@@ -395,11 +444,21 @@ func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAd
 		t.Fatalf("ResolveUDPAddr failed: %s", err)
 	}
 
-	go func() {
+	// Note: this proxy is intended for this test only -- it only accepts a single connection,
+	// handles it, and then terminates.
+
+	localUDPProxy := func(destinationIP net.IP, destinationPort uint16, waitGroup *sync.WaitGroup) {
+
+		if waitGroup != nil {
+			defer waitGroup.Done()
+		}
+
+		destination := net.JoinHostPort(destinationIP.String(), strconv.Itoa(int(destinationPort)))
 
 		serverUDPConn, err := net.ListenUDP("udp", localUDPProxyAddress)
 		if err != nil {
-			t.Fatalf("ListenUDP failed: %s", err)
+			t.Logf("ListenUDP for %s failed: %s", destination, err)
+			return
 		}
 		defer serverUDPConn.Close()
 
@@ -408,66 +467,148 @@ func makeTunneledDNSRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAd
 		packetSize, clientAddr, err := serverUDPConn.ReadFromUDP(
 			buffer[udpgwPreambleSize:len(buffer)])
 		if err != nil {
-			t.Fatalf("serverUDPConn.Read failed: %s", err)
+			t.Logf("serverUDPConn.Read for %s failed: %s", destination, err)
+			return
 		}
 
 		socksProxyAddress := fmt.Sprintf("127.0.0.1:%d", localSOCKSProxyPort)
 
 		dialer, err := proxy.SOCKS5("tcp", socksProxyAddress, nil, proxy.Direct)
 		if err != nil {
-			t.Fatalf("proxy.SOCKS5 failed: %s", err)
+			t.Logf("proxy.SOCKS5 for %s failed: %s", destination, err)
+			return
 		}
 
 		socksTCPConn, err := dialer.Dial("tcp", udpgwServerAddress)
 		if err != nil {
-			t.Fatalf("dialer.Dial failed: %s", err)
+			t.Logf("dialer.Dial for %s failed: %s", destination, err)
+			return
 		}
 		defer socksTCPConn.Close()
 
+		flags := uint8(0)
+		if destinationPort == 53 {
+			flags = udpgwProtocolFlagDNS
+		}
+
 		err = writeUdpgwPreamble(
 			udpgwPreambleSize,
-			udpgwProtocolFlagDNS,
+			flags,
 			0,
-			make([]byte, 4), // ignored due to transparent DNS forwarding
-			53,
+			destinationIP,
+			destinationPort,
 			uint16(packetSize),
 			buffer)
 		if err != nil {
-			t.Fatalf("writeUdpgwPreamble failed: %s", err)
+			t.Logf("writeUdpgwPreamble for %s failed: %s", destination, err)
+			return
 		}
 
 		_, err = socksTCPConn.Write(buffer[0 : udpgwPreambleSize+packetSize])
 		if err != nil {
-			t.Fatalf("socksTCPConn.Write failed: %s", err)
+			t.Logf("socksTCPConn.Write for %s failed: %s", destination, err)
+			return
 		}
 
 		updgwProtocolMessage, err := readUdpgwMessage(socksTCPConn, buffer)
 		if err != nil {
-			t.Fatalf("readUdpgwMessage failed: %s", err)
+			t.Logf("readUdpgwMessage for %s failed: %s", destination, err)
+			return
 		}
 
 		_, err = serverUDPConn.WriteToUDP(updgwProtocolMessage.packet, clientAddr)
 		if err != nil {
-			t.Fatalf("serverUDPConn.Write failed: %s", err)
+			t.Logf("serverUDPConn.Write for %s failed: %s", destination, err)
+			return
 		}
-	}()
+	}
 
-	// TODO: properly synchronize with server startup
+	// Tunneled DNS request
+
+	waitGroup := new(sync.WaitGroup)
+	waitGroup.Add(1)
+	go localUDPProxy(
+		net.IP(make([]byte, 4)), // ignored due to transparent DNS forwarding
+		53,
+		waitGroup)
+	// TODO: properly synchronize with local UDP proxy startup
 	time.Sleep(1 * time.Second)
 
 	clientUDPConn, err := net.DialUDP("udp", nil, localUDPProxyAddress)
 	if err != nil {
-		t.Fatalf("DialUDP failed: %s", err)
+		return fmt.Errorf("DialUDP failed: %s", err)
 	}
-	defer clientUDPConn.Close()
 
 	clientUDPConn.SetReadDeadline(time.Now().Add(timeout))
 	clientUDPConn.SetWriteDeadline(time.Now().Add(timeout))
 
-	_, _, err = psiphon.ResolveIP(testHostname, clientUDPConn)
-	if err != nil {
-		t.Fatalf("ResolveIP failed: %s", err)
+	addrs, _, err := psiphon.ResolveIP(testHostname, clientUDPConn)
+
+	clientUDPConn.Close()
+
+	if err == nil && (len(addrs) == 0 || len(addrs[0]) < 4) {
+		err = errors.New("no address")
 	}
+	if err != nil {
+		return fmt.Errorf("ResolveIP failed: %s", err)
+	}
+
+	waitGroup.Wait()
+
+	// Tunneled NTP request
+
+	go localUDPProxy(addrs[0][len(addrs[0])-4:], 123, nil)
+	// TODO: properly synchronize with local UDP proxy startup
+	time.Sleep(1 * time.Second)
+
+	clientUDPConn, err = net.DialUDP("udp", nil, localUDPProxyAddress)
+	if err != nil {
+		return fmt.Errorf("DialUDP failed: %s", err)
+	}
+
+	clientUDPConn.SetReadDeadline(time.Now().Add(timeout))
+	clientUDPConn.SetWriteDeadline(time.Now().Add(timeout))
+
+	// NTP protocol code from: https://groups.google.com/d/msg/golang-nuts/FlcdMU5fkLQ/CAeoD9eqm-IJ
+
+	ntpData := make([]byte, 48)
+	ntpData[0] = 3<<3 | 3
+
+	_, err = clientUDPConn.Write(ntpData)
+	if err != nil {
+		clientUDPConn.Close()
+		return fmt.Errorf("NTP Write failed: %s", err)
+	}
+
+	_, err = clientUDPConn.Read(ntpData)
+	if err != nil {
+		clientUDPConn.Close()
+		return fmt.Errorf("NTP Read failed: %s", err)
+	}
+
+	clientUDPConn.Close()
+
+	var sec, frac uint64
+	sec = uint64(ntpData[43]) | uint64(ntpData[42])<<8 | uint64(ntpData[41])<<16 | uint64(ntpData[40])<<24
+	frac = uint64(ntpData[47]) | uint64(ntpData[46])<<8 | uint64(ntpData[45])<<16 | uint64(ntpData[44])<<24
+
+	nsec := sec * 1e9
+	nsec += (frac * 1e9) >> 32
+
+	ntpNow := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(nsec)).Local()
+
+	now := time.Now()
+
+	diff := ntpNow.Sub(now)
+	if diff < 0 {
+		diff = -diff
+	}
+
+	if diff > 1*time.Minute {
+		return fmt.Errorf("Unexpected NTP time: %s; local time: %s", ntpNow, now)
+	}
+
+	return nil
 }
 
 func pavePsinetDatabaseFile(t *testing.T, psinetFilename string) (string, string) {
@@ -498,8 +639,57 @@ func pavePsinetDatabaseFile(t *testing.T, psinetFilename string) (string, string
 
 	err := ioutil.WriteFile(psinetFilename, []byte(psinetJSON), 0600)
 	if err != nil {
-		t.Fatalf("error paving psinet database: %s", err)
+		t.Fatalf("error paving psinet database file: %s", err)
 	}
 
 	return sponsorID, expectedHomepageURL
+}
+
+func paveTrafficRulesFile(t *testing.T, trafficRulesFilename, sponsorID string, deny bool) {
+
+	allowTCPPorts := "443"
+	allowUDPPorts := "53, 123"
+
+	if deny {
+		allowTCPPorts = "0"
+		allowUDPPorts = "0"
+	}
+
+	trafficRulesJSONFormat := `
+    {
+        "DefaultRules" :  {
+            "RateLimits" : {
+                "ReadBytesPerSecond": 16384,
+                "WriteBytesPerSecond": 16384
+            },
+            "AllowTCPPorts" : [0],
+            "AllowUDPPorts" : [0]
+        },
+        "FilteredRules" : [
+            {
+                "Filter" : {
+                    "HandshakeParameters" : {
+                        "sponsor_id" : ["%s"]
+                    }
+                },
+                "Rules" : {
+                    "RateLimits" : {
+                        "ReadUnthrottledBytes": 132352,
+                        "WriteUnthrottledBytes": 132352
+                    },
+                    "AllowTCPPorts" : [%s],
+                    "AllowUDPPorts" : [%s]
+                }
+            }
+        ]
+    }
+    `
+
+	trafficRulesJSON := fmt.Sprintf(
+		trafficRulesJSONFormat, sponsorID, allowTCPPorts, allowUDPPorts)
+
+	err := ioutil.WriteFile(trafficRulesFilename, []byte(trafficRulesJSON), 0600)
+	if err != nil {
+		t.Fatalf("error paving traffic rules file: %s", err)
+	}
 }

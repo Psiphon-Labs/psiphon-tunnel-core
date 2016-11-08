@@ -111,7 +111,7 @@ func TestActivityMonitoredConn(t *testing.T) {
 		t.Fatalf("NewActivityMonitoredConn failed")
 	}
 
-	realStartTime := time.Now()
+	realStartTime := time.Now().UTC()
 
 	monotonicStartTime := monotime.Now()
 

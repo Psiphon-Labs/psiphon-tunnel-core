@@ -33,10 +33,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Psiphon-Inc/crypto/nacl/box"
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"golang.org/x/crypto/nacl/box"
 )
 
 // MeekServer is based on meek-server.go from Tor and Psiphon:
@@ -328,7 +328,7 @@ func (server *MeekServer) getSession(
 				// Some headers, such as X-Forwarded-For, are a comma-separated
 				// list of IPs (each proxy in a chain). The first IP should be
 				// the client IP.
-				proxyClientIP := strings.Split(header, ",")[0]
+				proxyClientIP := strings.Split(value, ",")[0]
 				if net.ParseIP(proxyClientIP) != nil {
 					clientIP = proxyClientIP
 					break

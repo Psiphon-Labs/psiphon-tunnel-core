@@ -87,7 +87,9 @@ func NewServerContext(tunnel *Tunnel, sessionId string) (*ServerContext, error) 
 	// For legacy servers, set up psiphonHttpsClient for
 	// accessing the Psiphon API via the web service.
 	var psiphonHttpsClient *http.Client
-	if !tunnel.serverEntry.SupportsSSHAPIRequests() {
+	if !tunnel.serverEntry.SupportsSSHAPIRequests() ||
+		tunnel.config.TargetApiProtocol == common.PSIPHON_WEB_API_PROTOCOL {
+
 		var err error
 		psiphonHttpsClient, err = makePsiphonHttpsClient(tunnel)
 		if err != nil {
@@ -167,18 +169,11 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 		}
 	}
 
-	// Note:
-	// - 'preemptive_reconnect_lifetime_milliseconds' is currently unused
+	// Legacy fields:
+	// - 'preemptive_reconnect_lifetime_milliseconds' is unused and ignored
 	// - 'ssh_session_id' is ignored; client session ID is used instead
-	var handshakeResponse struct {
-		Homepages            []string            `json:"homepages"`
-		UpgradeClientVersion string              `json:"upgrade_client_version"`
-		PageViewRegexes      []map[string]string `json:"page_view_regexes"`
-		HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
-		EncodedServerList    []string            `json:"encoded_server_list"`
-		ClientRegion         string              `json:"client_region"`
-		ServerTimestamp      string              `json:"server_timestamp"`
-	}
+
+	var handshakeResponse common.HandshakeResponse
 	err := json.Unmarshal(response, &handshakeResponse)
 	if err != nil {
 		return common.ContextError(err)
@@ -292,9 +287,7 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 		}
 	}
 
-	var connectedResponse struct {
-		ConnectedTimestamp string `json:"connected_timestamp"`
-	}
+	var connectedResponse common.ConnectedResponse
 	err = json.Unmarshal(response, &connectedResponse)
 	if err != nil {
 		return common.ContextError(err)

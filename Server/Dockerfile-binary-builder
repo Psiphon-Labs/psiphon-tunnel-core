@@ -1,6 +1,6 @@
 FROM alpine:latest
 
-ENV GOLANG_VERSION 1.7
+ENV GOLANG_VERSION 1.7.1
 ENV GOLANG_SRC_URL https://golang.org/dl/go$GOLANG_VERSION.src.tar.gz
 
 RUN set -ex \

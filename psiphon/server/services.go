@@ -24,9 +24,12 @@
 package server
 
 import (
+	"math/rand"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"sync"
 	"syscall"
 	"time"
@@ -39,6 +42,8 @@ import (
 // and then starts the server components and runs them until os.Interrupt or
 // os.Kill signals are received. The config determines which components are run.
 func RunServices(configJSON []byte) error {
+
+	rand.Seed(int64(time.Now().Nanosecond()))
 
 	config, err := LoadConfig(configJSON)
 	if err != nil {
@@ -69,6 +74,8 @@ func RunServices(configJSON []byte) error {
 		log.WithContextFields(LogFields{"error": err}).Error("init tunnel server failed")
 		return common.ContextError(err)
 	}
+
+	supportServices.TunnelServer = tunnelServer
 
 	if config.RunLoadMonitor() {
 		waitGroup.Add(1)
@@ -111,6 +118,21 @@ func RunServices(configJSON []byte) error {
 		}
 	}()
 
+	// Shutdown doesn't wait for the outputProcessProfiles goroutine
+	// to complete, as it may be sleeping while running a "block" or
+	// CPU profile.
+	signalProcessProfiles := make(chan struct{}, 1)
+	go func() {
+		for {
+			select {
+			case <-signalProcessProfiles:
+				outputProcessProfiles(supportServices.Config)
+			case <-shutdownBroadcast:
+				return
+			}
+		}
+	}()
+
 	// An OS signal triggers an orderly shutdown
 	systemStopSignal := make(chan os.Signal, 1)
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill, syscall.SIGTERM)
@@ -119,22 +141,49 @@ func RunServices(configJSON []byte) error {
 	reloadSupportServicesSignal := make(chan os.Signal, 1)
 	signal.Notify(reloadSupportServicesSignal, syscall.SIGUSR1)
 
-	// SIGUSR2 triggers an immediate load log
+	// SIGUSR2 triggers an immediate load log and optional process profile output
 	logServerLoadSignal := make(chan os.Signal, 1)
 	signal.Notify(logServerLoadSignal, syscall.SIGUSR2)
+
+	// SIGTSTP triggers tunnelServer to stop establishing new tunnels
+	stopEstablishingTunnelsSignal := make(chan os.Signal, 1)
+	signal.Notify(stopEstablishingTunnelsSignal, syscall.SIGTSTP)
+
+	// SIGCONT triggers tunnelServer to resume establishing new tunnels
+	resumeEstablishingTunnelsSignal := make(chan os.Signal, 1)
+	signal.Notify(resumeEstablishingTunnelsSignal, syscall.SIGCONT)
 
 	err = nil
 
 loop:
 	for {
 		select {
+		case <-stopEstablishingTunnelsSignal:
+			tunnelServer.SetEstablishTunnels(false)
+
+		case <-resumeEstablishingTunnelsSignal:
+			tunnelServer.SetEstablishTunnels(true)
+
 		case <-reloadSupportServicesSignal:
 			supportServices.Reload()
+			// Reset traffic rules for established clients to reflect reloaded config
+			// TODO: only update when traffic rules config has changed
+			tunnelServer.ResetAllClientTrafficRules()
+
 		case <-logServerLoadSignal:
+			// Signal profiles writes first to ensure some diagnostics are
+			// available in case logServerLoad hangs (which has happened
+			// in the past due to a deadlock bug).
+			select {
+			case signalProcessProfiles <- *new(struct{}):
+			default:
+			}
 			logServerLoad(tunnelServer)
+
 		case <-systemStopSignal:
 			log.WithContext().Info("shutdown by system")
 			break loop
+
 		case err = <-errors:
 			log.WithContextFields(LogFields{"error": err}).Error("service failed")
 			break loop
@@ -147,28 +196,113 @@ loop:
 	return err
 }
 
+func outputProcessProfiles(config *Config) {
+
+	if config.ProcessProfileOutputDirectory != "" {
+
+		openProfileFile := func(profileName string) *os.File {
+			fileName := filepath.Join(
+				config.ProcessProfileOutputDirectory, profileName+".profile")
+			file, err := os.OpenFile(
+				fileName, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+			if err != nil {
+				log.WithContextFields(
+					LogFields{
+						"error":    err,
+						"fileName": fileName}).Error("open profile file failed")
+				return nil
+			}
+			return file
+		}
+
+		writeProfile := func(profileName string) {
+
+			file := openProfileFile(profileName)
+			if file == nil {
+				return
+			}
+			err := pprof.Lookup(profileName).WriteTo(file, 1)
+			file.Close()
+			if err != nil {
+				log.WithContextFields(
+					LogFields{
+						"error":       err,
+						"profileName": profileName}).Error("write profile failed")
+			}
+		}
+
+		// TODO: capture https://golang.org/pkg/runtime/debug/#WriteHeapDump?
+		// May not be useful in its current state, as per:
+		// https://groups.google.com/forum/#!topic/golang-dev/cYAkuU45Qyw
+
+		// Write goroutine, heap, and threadcreate profiles
+		// https://golang.org/pkg/runtime/pprof/#Profile
+		writeProfile("goroutine")
+		writeProfile("heap")
+		writeProfile("threadcreate")
+
+		// Write block profile (after sampling)
+		// https://golang.org/pkg/runtime/pprof/#Profile
+
+		if config.ProcessBlockProfileDurationSeconds > 0 {
+			log.WithContext().Info("start block profiling")
+			runtime.SetBlockProfileRate(1)
+			time.Sleep(
+				time.Duration(config.ProcessBlockProfileDurationSeconds) * time.Second)
+			runtime.SetBlockProfileRate(0)
+			log.WithContext().Info("end block profiling")
+			writeProfile("block")
+		}
+
+		// Write CPU profile (after sampling)
+		// https://golang.org/pkg/runtime/pprof/#StartCPUProfile
+
+		if config.ProcessCPUProfileDurationSeconds > 0 {
+			file := openProfileFile("cpu")
+			if file != nil {
+				log.WithContext().Info("start cpu profiling")
+				err := pprof.StartCPUProfile(file)
+				if err != nil {
+					log.WithContextFields(
+						LogFields{"error": err}).Error("StartCPUProfile failed")
+				} else {
+					time.Sleep(time.Duration(
+						config.ProcessCPUProfileDurationSeconds) * time.Second)
+					pprof.StopCPUProfile()
+					log.WithContext().Info("end cpu profiling")
+				}
+				file.Close()
+			}
+		}
+	}
+}
+
 func logServerLoad(server *TunnelServer) {
 
 	// golang runtime stats
+
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	fields := LogFields{
-		"event_name":   "server_load",
-		"BuildRev":     common.GetBuildInfo().BuildRev,
-		"HostID":       server.sshServer.support.Config.HostID,
-		"NumGoroutine": runtime.NumGoroutine(),
-		"MemStats": map[string]interface{}{
-			"Alloc":         memStats.Alloc,
-			"TotalAlloc":    memStats.TotalAlloc,
-			"Sys":           memStats.Sys,
-			"PauseTotalNs":  memStats.PauseTotalNs,
-			"PauseNs":       memStats.PauseNs,
-			"NumGC":         memStats.NumGC,
-			"GCCPUFraction": memStats.GCCPUFraction,
+		"event_name":    "server_load",
+		"build_rev":     common.GetBuildInfo().BuildRev,
+		"host_id":       server.sshServer.support.Config.HostID,
+		"num_goroutine": runtime.NumGoroutine(),
+		"mem_stats": map[string]interface{}{
+			"alloc":           memStats.Alloc,
+			"total_alloc":     memStats.TotalAlloc,
+			"sys":             memStats.Sys,
+			"pause_total_ns":  memStats.PauseTotalNs,
+			"pause_ns":        memStats.PauseNs,
+			"num_gc":          memStats.NumGC,
+			"gc_cpu_fraction": memStats.GCCPUFraction,
 		},
 	}
 
 	// tunnel server stats
+
+	fields["establish_tunnels"] = server.GetEstablishTunnels()
+
 	for tunnelProtocol, stats := range server.GetLoadStats() {
 		fields[tunnelProtocol] = stats
 	}
@@ -187,6 +321,7 @@ type SupportServices struct {
 	PsinetDatabase  *psinet.Database
 	GeoIPService    *GeoIPService
 	DNSResolver     *DNSResolver
+	TunnelServer    *TunnelServer
 }
 
 // NewSupportServices initializes a new SupportServices.

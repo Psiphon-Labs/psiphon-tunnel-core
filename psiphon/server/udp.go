@@ -21,6 +21,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -28,7 +29,6 @@ import (
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/Psiphon-Inc/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -81,12 +81,13 @@ func (sshClient *sshClient) handleUDPChannel(newChannel ssh.NewChannel) {
 }
 
 type udpPortForwardMultiplexer struct {
-	sshClient         *sshClient
-	sshChannel        ssh.Channel
-	portForwardsMutex sync.Mutex
-	portForwards      map[uint16]*udpPortForward
-	portForwardLRU    *common.LRUConns
-	relayWaitGroup    *sync.WaitGroup
+	sshClient            *sshClient
+	sshChannelWriteMutex sync.Mutex
+	sshChannel           ssh.Channel
+	portForwardsMutex    sync.Mutex
+	portForwards         map[uint16]*udpPortForward
+	portForwardLRU       *common.LRUConns
+	relayWaitGroup       *sync.WaitGroup
 }
 
 func (mux *udpPortForwardMultiplexer) run() {
@@ -162,23 +163,18 @@ func (mux *udpPortForwardMultiplexer) run() {
 			}
 
 			if !mux.sshClient.isPortForwardPermitted(
-				dialIP.String(),
-				int(message.remotePort),
-				mux.sshClient.trafficRules.AllowUDPPorts,
-				mux.sshClient.trafficRules.DenyUDPPorts) {
+				portForwardTypeUDP, dialIP.String(), int(message.remotePort)) {
 				// The udpgw protocol has no error response, so
 				// we just discard the message and read another.
 				continue
 			}
 
-			mux.sshClient.openedPortForward(mux.sshClient.udpTrafficState)
+			mux.sshClient.openedPortForward(portForwardTypeUDP)
 			// Note: can't defer sshClient.closedPortForward() here
 
 			// TOCTOU note: important to increment the port forward count (via
 			// openPortForward) _before_ checking isPortForwardLimitExceeded
-			if mux.sshClient.isPortForwardLimitExceeded(
-				mux.sshClient.tcpTrafficState,
-				mux.sshClient.trafficRules.MaxUDPPortForwardCount) {
+			if maxCount, exceeded := mux.sshClient.isPortForwardLimitExceeded(portForwardTypeUDP); exceeded {
 
 				// Close the oldest UDP port forward. CloseOldest() closes
 				// the conn and the port forward's goroutine will complete
@@ -190,7 +186,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 
 				log.WithContextFields(
 					LogFields{
-						"maxCount": mux.sshClient.trafficRules.MaxUDPPortForwardCount,
+						"maxCount": maxCount,
 					}).Debug("closed LRU UDP port forward")
 			}
 
@@ -203,7 +199,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 			udpConn, err := net.DialUDP(
 				"udp", nil, &net.UDPAddr{IP: dialIP, Port: dialPort})
 			if err != nil {
-				mux.sshClient.closedPortForward(mux.sshClient.udpTrafficState, 0, 0)
+				mux.sshClient.closedPortForward(portForwardTypeUDP, 0, 0)
 				log.WithContextFields(LogFields{"error": err}).Warning("DialUDP failed")
 				continue
 			}
@@ -217,12 +213,12 @@ func (mux *udpPortForwardMultiplexer) run() {
 
 			conn, err := common.NewActivityMonitoredConn(
 				udpConn,
-				time.Duration(mux.sshClient.trafficRules.IdleUDPPortForwardTimeoutMilliseconds)*time.Millisecond,
+				mux.sshClient.idleUDPPortForwardTimeout(),
 				true,
 				lruEntry)
 			if err != nil {
 				lruEntry.Remove()
-				mux.sshClient.closedPortForward(mux.sshClient.udpTrafficState, 0, 0)
+				mux.sshClient.closedPortForward(portForwardTypeUDP, 0, 0)
 				log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
 				continue
 			}
@@ -331,7 +327,12 @@ func (portForward *udpPortForward) relayDownstream() {
 			uint16(packetSize),
 			buffer)
 		if err == nil {
+			// ssh.Channel.Write cannot be called concurrently.
+			// See: https://github.com/Psiphon-Inc/crypto/blob/82d98b4c7c05e81f92545f6fddb45d4541e6da00/ssh/channel.go#L272,
+			// https://codereview.appspot.com/136420043/diff/80002/ssh/channel.go
+			portForward.mux.sshChannelWriteMutex.Lock()
 			_, err = portForward.mux.sshChannel.Write(buffer[0 : portForward.preambleSize+packetSize])
+			portForward.mux.sshChannelWriteMutex.Unlock()
 		}
 
 		if err != nil {
@@ -354,8 +355,7 @@ func (portForward *udpPortForward) relayDownstream() {
 
 	bytesUp := atomic.LoadInt64(&portForward.bytesUp)
 	bytesDown := atomic.LoadInt64(&portForward.bytesDown)
-	portForward.mux.sshClient.closedPortForward(
-		portForward.mux.sshClient.udpTrafficState, bytesUp, bytesDown)
+	portForward.mux.sshClient.closedPortForward(portForwardTypeUDP, bytesUp, bytesDown)
 
 	log.WithContextFields(
 		LogFields{
@@ -403,9 +403,9 @@ func readUdpgwMessage(
 			return nil, common.ContextError(err)
 		}
 
-		size := uint16(buffer[0]) + uint16(buffer[1])<<8
+		size := binary.LittleEndian.Uint16(buffer[0:2])
 
-		if int(size) > len(buffer)-2 {
+		if size < 3 || int(size) > len(buffer)-2 {
 			return nil, common.ContextError(errors.New("invalid udpgw message size"))
 		}
 
@@ -416,7 +416,7 @@ func readUdpgwMessage(
 
 		flags := buffer[2]
 
-		connID := uint16(buffer[3]) + uint16(buffer[4])<<8
+		connID := binary.LittleEndian.Uint16(buffer[3:5])
 
 		// Ignore udpgw keep-alive messages -- read another message
 
@@ -438,9 +438,9 @@ func readUdpgwMessage(
 
 			remoteIP = make([]byte, 16)
 			copy(remoteIP, buffer[5:21])
-			remotePort = uint16(buffer[21]) + uint16(buffer[22])<<8
+			remotePort = binary.BigEndian.Uint16(buffer[21:23])
 			packetStart = 23
-			packetEnd = 23 + int(size) - 2
+			packetEnd = 23 + int(size) - 21
 
 		} else {
 
@@ -450,9 +450,9 @@ func readUdpgwMessage(
 
 			remoteIP = make([]byte, 4)
 			copy(remoteIP, buffer[5:9])
-			remotePort = uint16(buffer[9]) + uint16(buffer[10])<<8
+			remotePort = binary.BigEndian.Uint16(buffer[9:11])
 			packetStart = 11
-			packetEnd = 11 + int(size) - 2
+			packetEnd = 11 + int(size) - 9
 		}
 
 		// Assemble message
@@ -488,20 +488,17 @@ func writeUdpgwPreamble(
 	size := uint16(preambleSize-2) + packetSize
 
 	// size
-	buffer[0] = byte(size & 0xFF)
-	buffer[1] = byte(size >> 8)
+	binary.LittleEndian.PutUint16(buffer[0:2], size)
 
 	// flags
 	buffer[2] = flags
 
 	// connID
-	buffer[3] = byte(connID & 0xFF)
-	buffer[4] = byte(connID >> 8)
+	binary.LittleEndian.PutUint16(buffer[3:5], connID)
 
 	// addr
 	copy(buffer[5:5+len(remoteIP)], remoteIP)
-	buffer[5+len(remoteIP)] = byte(remotePort & 0xFF)
-	buffer[6+len(remoteIP)] = byte(remotePort >> 8)
+	binary.BigEndian.PutUint16(buffer[5+len(remoteIP):7+len(remoteIP)], remotePort)
 
 	return nil
 }
