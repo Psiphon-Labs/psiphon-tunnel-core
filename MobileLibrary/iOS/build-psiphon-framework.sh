@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
+
+set -e
+
 BASE_DIR=$(cd "$(dirname "$0")" ; pwd -P)
 cd ${BASE_DIR}
+
+# The location of the final framework build
+BUILD_DIR="${BASE_DIR}/build"
 
 # Ensure go is installed
 which go 2>&1 > /dev/null
@@ -11,18 +17,23 @@ fi
 
 VALID_ARCHS="arm64 armv7 armv7s"
 FRAMEWORK="Psi"
-INTERMEDIATE_OUPUT_DIR="${BASE_DIR}/PsiphonTunnelController/PsiphonTunnelController"
+INTERMEDIATE_OUPUT_DIR="${BASE_DIR}/PsiphonTunnel/PsiphonTunnel"
 INTERMEDIATE_OUPUT_FILE="${FRAMEWORK}.framework"
 FRAMEWORK_BINARY="${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}/Versions/A/${FRAMEWORK}"
 
 LIBSSL=${BASE_DIR}/OpenSSL-for-iPhone/lib/libssl.a
 LIBCRYPTO=${BASE_DIR}/OpenSSL-for-iPhone/lib/libcrypto.a
 OPENSSL_INCLUDE=${BASE_DIR}/OpenSSL-for-iPhone/include/
-UMBRELLA_FRAMEWORK_XCODE_PROJECT=${BASE_DIR}/PsiphonTunnelController/PsiphonTunnelController.xcodeproj/
-TRUSTED_ROOT_CA_FILE=${BASE_DIR}/PsiphonTunnelController/PsiphonTunnelController/rootCAs.txt
+UMBRELLA_FRAMEWORK_XCODE_PROJECT=${BASE_DIR}/PsiphonTunnel/PsiphonTunnel.xcodeproj/
+TRUSTED_ROOT_CA_FILE=${BASE_DIR}/PsiphonTunnel/PsiphonTunnel/rootCAs.txt
 
-#Download trustedroot CAs off curl website, see https://curl.haxx.se/docs/caextract.html for details
+# Download trustedroot CAs off curl website, see https://curl.haxx.se/docs/caextract.html for details
 curl -o $TRUSTED_ROOT_CA_FILE https://curl.haxx.se/ca/cacert.pem
+
+rc=$?; if [[ $rc != 0 ]]; then
+  echo "FAILURE: curl -o $TRUSTED_ROOT_CA_FILE https://curl.haxx.se/ca/cacert.pem"
+  exit $rc
+fi
 
 # Not exporting this breaks go commands later if run via jenkins
 export GOPATH=${PWD}/go-ios-build
@@ -37,7 +48,16 @@ OPENSSL_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Inc/openssl
 PATH=${PATH}:${GOPATH}/bin
 
 mkdir -p ${GOPATH}
+rc=$?; if [[ $rc != 0 ]]; then
+  echo "FAILURE: mkdir -p ${GOPATH}"
+  exit $rc
+fi
+
 mkdir -p ${INTERMEDIATE_OUPUT_DIR}
+rc=$?; if [[ $rc != 0 ]]; then
+  echo "FAILURE: mkdir -p ${INTERMEDIATE_OUPUT_DIR}"
+  exit $rc
+fi
 
 if [ ! -e ${IOS_SRC_DIR} ]; then
   echo "iOS source directory (${IOS_SRC_DIR}) not found, creating link"
@@ -52,7 +72,16 @@ fi
 cd OpenSSL-for-iPhone && ./build-libssl.sh; cd -
 
 go get -d  -u -v github.com/Psiphon-Inc/openssl
+rc=$?; if [[ $rc != 0 ]]; then
+  echo "FAILURE: go get -d  -u -v github.com/Psiphon-Inc/openssl"
+  exit $rc
+fi
+
 go get -d -u -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+rc=$?; if [[ $rc != 0 ]]; then
+  echo "FAILURE: go get -d -u -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
+  exit $rc
+fi
 
 function check_pinned_version() {
   echo "Checking for gomobile revision: '${GOMOBILE_PINNED_REV}'"
@@ -77,7 +106,7 @@ check_pinned_version
 if [ $? -ne 0 ]; then
     go get -u golang.org/x/mobile/cmd/gomobile
     cd ${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
-    git checkout master 
+    git checkout master
     git branch -d pinned
     git checkout -b pinned ${GOMOBILE_PINNED_REV}
     go install
@@ -122,14 +151,38 @@ IOS_CGO_BUILD_FLAGS='// #cgo darwin CFLAGS: -I'"${OPENSSL_INCLUDE}"'\
 
 LC_ALL=C sed -i -- "s|// #cgo pkg-config: libssl|${IOS_CGO_BUILD_FLAGS}|" "${OPENSSL_SRC_DIR}/build.go"
 
-gomobile bind  -target ios -ldflags="${LDFLAGS}" -o ${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE} github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+gomobile init
+
+gomobile bind -target ios -ldflags="${LDFLAGS}" -o ${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE} github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+rc=$?; if [[ $rc != 0 ]]; then
+  echo "FAILURE: gomobile bind"
+  exit $rc
+fi
+
 ARCHS="$(lipo -info "${FRAMEWORK_BINARY}" | rev | cut -d ':' -f1 | rev)"
 for ARCH in $ARCHS; do
   if ! [[ "${VALID_ARCHS}" == *"$ARCH"* ]]; then
     echo "Stripping ARCH ${ARCH} from ${FRAMEWORK_BINARY}"
-    lipo -remove "$ARCH" -output "$FRAMEWORK_BINARY" "$FRAMEWORK_BINARY" || exit 1
+    lipo -remove "$ARCH" -output "$FRAMEWORK_BINARY" "$FRAMEWORK_BINARY"
+    rc=$?; if [[ $rc != 0 ]]; then
+      echo "FAILURE: lipo"
+      exit $rc
+    fi
   fi
 done
 
-xcodebuild clean build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -configuration Release -sdk iphoneos -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT} CONFIGURATION_BUILD_DIR="${BASE_DIR}/build"
+#
+# Do the outer framework build using Xcode
+#
+
+# Clean previous output
+rm -rf "${BUILD_DIR}"
+
+# Build the outer framework
+xcodebuild clean build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -configuration Release -sdk iphoneos ONLY_ACTIVE_ARCH=NO -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT} CONFIGURATION_BUILD_DIR="${BUILD_DIR}"
+rc=$?; if [[ $rc != 0 ]]; then
+  echo "FAILURE: xcodebuild"
+  exit $rc
+fi
+
 echo "Done."
