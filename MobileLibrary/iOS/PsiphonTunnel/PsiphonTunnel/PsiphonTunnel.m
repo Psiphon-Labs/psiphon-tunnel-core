@@ -58,7 +58,7 @@
 -(BOOL) start:(NSString * _Nullable)embeddedServerEntries {
     @synchronized (PsiphonTunnel.self) {
         [self stop];
-        [self.tunneledAppDelegate onDiagnosticMessage:@"Starting Psiphon library"];
+        [self logMessage:@"Starting Psiphon library"];
 
         // Not supported on iOS.
         const BOOL useDeviceBinder = FALSE;
@@ -78,17 +78,17 @@
                            useDeviceBinder,
                            &e);
             
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"GoPsiStart: %@", res ? @"TRUE" : @"FALSE"]];
+            [self logMessage:[NSString stringWithFormat: @"GoPsiStart: %@", res ? @"TRUE" : @"FALSE"]];
             
             if (e != nil) {
-                [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"Psiphon tunnel start failed: %@", e.localizedDescription]];
+                [self logMessage:[NSString stringWithFormat: @"Psiphon tunnel start failed: %@", e.localizedDescription]];
                 return FALSE;
             }
         }
         @catch(NSException *exception) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"Failed to start Psiphon library: %@", exception.reason]];
+            [self logMessage:[NSString stringWithFormat: @"Failed to start Psiphon library: %@", exception.reason]];
         }
-        [self.tunneledAppDelegate onDiagnosticMessage:@"Psiphon tunnel started"];
+        [self logMessage:@"Psiphon tunnel started"];
         
         return TRUE;
     }
@@ -97,15 +97,20 @@
 // See comment in header.
 -(void) stop {
     @synchronized (PsiphonTunnel.self) {
-        [self.tunneledAppDelegate onDiagnosticMessage: @"Stopping Psiphon library"];
+        [self logMessage: @"Stopping Psiphon library"];
         GoPsiStop();
-        [self.tunneledAppDelegate onDiagnosticMessage: @"Psiphon library stopped"];
+        [self logMessage: @"Psiphon library stopped"];
     }
 }
 
 // See comment in header.
-+ (void)sendFeedback:(NSString * _Nonnull)connectionConfigJson diagnostics:(NSString * _Nonnull)diagnosticsJson publicKey:(NSString * _Nonnull)b64EncodedPublicKey uploadServer:(NSString * _Nonnull)uploadServer uploadPath:(NSString * _Nonnull)uploadPath uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders {
-    GoPsiSendFeedback(connectionConfigJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders);
++ (void)sendFeedback:(NSString * _Nonnull)feedbackJson
+    connectionConfig:(NSString * _Nonnull)connectionConfigJson
+           publicKey:(NSString * _Nonnull)b64EncodedPublicKey
+        uploadServer:(NSString * _Nonnull)uploadServer
+          uploadPath:(NSString * _Nonnull)uploadPath
+ uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders {
+    GoPsiSendFeedback(connectionConfigJson, feedbackJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders);
 }
 
 
@@ -118,13 +123,13 @@
 -(NSString * _Nullable)getConfig {
     // tunneledAppDelegate is a weak reference, so check it.
     if (self.tunneledAppDelegate == nil) {
-        [self.tunneledAppDelegate onDiagnosticMessage:@"tunneledApp delegate lost"];
+        [self logMessage:@"tunneledApp delegate lost"];
         return nil;
     }
     
     NSString *configStr = [self.tunneledAppDelegate getPsiphonConfig];
     if (configStr == nil) {
-        [self.tunneledAppDelegate onDiagnosticMessage:@"Error getting config from delegate"];
+        [self logMessage:@"Error getting config from delegate"];
         return nil;
     }
     
@@ -138,7 +143,7 @@
     
     id eh = ^(NSError *err) {
         initialConfig = nil;
-        [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"Config JSON parse failed: %@", err.description]];
+        [self logMessage:[NSString stringWithFormat: @"Config JSON parse failed: %@", err.description]];
     };
     
     id parser = [SBJson4Parser parserWithBlock:block allowMultiRoot:NO unwrapRootArray:NO errorHandler:eh];
@@ -155,12 +160,12 @@
     //
     
     if (config[@"PropagationChannelId"] == nil) {
-        [self.tunneledAppDelegate onDiagnosticMessage:@"Config missing PropagationChannelId"];
+        [self logMessage:@"Config missing PropagationChannelId"];
         return nil;
     }
 
     if (config[@"SponsorId"] == nil) {
-        [self.tunneledAppDelegate onDiagnosticMessage:@"Config missing SponsorId"];
+        [self logMessage:@"Config missing SponsorId"];
         return nil;
     }
     
@@ -174,7 +179,7 @@
     NSURL *libraryURL = [fileManager URLForDirectory:NSLibraryDirectory inDomain:NSUserDomainMask appropriateForURL:nil create:YES error:&err];
     
     if (libraryURL == nil) {
-        [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"Unable to get Library URL: %@", err.localizedDescription]];
+        [self logMessage:[NSString stringWithFormat: @"Unable to get Library URL: %@", err.localizedDescription]];
         return nil;
     }
     
@@ -183,28 +188,28 @@
     NSURL *defaultDataStoreDirectoryURL = [libraryURL URLByAppendingPathComponent:@"datastore" isDirectory:YES];
     
     if (defaultDataStoreDirectoryURL == nil) {
-        [self.tunneledAppDelegate onDiagnosticMessage:@"Unable to create defaultDataStoreDirectoryURL"];
+        [self logMessage:@"Unable to create defaultDataStoreDirectoryURL"];
         return nil;
     }
     
     if (config[@"DataStoreDirectory"] == nil) {
         [fileManager createDirectoryAtURL:defaultDataStoreDirectoryURL withIntermediateDirectories:YES attributes:nil error:&err];
         if (err != nil) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"Unable to create defaultDataStoreDirectoryURL: %@", err.localizedDescription]];
+            [self logMessage:[NSString stringWithFormat: @"Unable to create defaultDataStoreDirectoryURL: %@", err.localizedDescription]];
             return nil;
         }
         
         config[@"DataStoreDirectory"] = [defaultDataStoreDirectoryURL path];
     }
     else {
-        [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"DataStoreDirectory overridden from '%@' to '%@'", [defaultDataStoreDirectoryURL path], config[@"DataStoreDirectory"]]];
+        [self logMessage:[NSString stringWithFormat: @"DataStoreDirectory overridden from '%@' to '%@'", [defaultDataStoreDirectoryURL path], config[@"DataStoreDirectory"]]];
     }
     
     // See previous comment.
     NSString *defaultRemoteServerListFilename = [[libraryURL URLByAppendingPathComponent:@"remote_server_list" isDirectory:NO] path];
     
     if (defaultRemoteServerListFilename == nil) {
-        [self.tunneledAppDelegate onDiagnosticMessage:@"Unable to create defaultRemoteServerListFilename"];
+        [self logMessage:@"Unable to create defaultRemoteServerListFilename"];
         return nil;
     }
     
@@ -212,14 +217,14 @@
         config[@"RemoteServerListDownloadFilename"] = defaultRemoteServerListFilename;
     }
     else {
-        [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"RemoteServerListDownloadFilename overridden from '%@' to '%@'", defaultRemoteServerListFilename, config[@"RemoteServerListDownloadFilename"]]];
+        [self logMessage:[NSString stringWithFormat: @"RemoteServerListDownloadFilename overridden from '%@' to '%@'", defaultRemoteServerListFilename, config[@"RemoteServerListDownloadFilename"]]];
     }
     
     // If RemoteServerListUrl and RemoteServerListSignaturePublicKey are absent,
     // we'll just leave them out, but we'll log about it.
     if (config[@"RemoteServerListUrl"] == nil ||
         config[@"RemoteServerListSignaturePublicKey"] == nil) {
-        [self.tunneledAppDelegate onDiagnosticMessage:@"Remote server list functionality will be disabled"];
+        [self logMessage:@"Remote server list functionality will be disabled"];
     }
 
     // Other optional fields not being altered. If not set, their defaults will be used:
@@ -254,7 +259,7 @@
     if (rootCAsURL == nil ||
         (bundledTrustedCAPath = [rootCAsURL path]) == nil ||
         ![[NSFileManager defaultManager] fileExistsAtPath:bundledTrustedCAPath]) {
-        [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"Unable to find Root CAs file in bundle: %@", bundledTrustedCAPath]];
+        [self logMessage:[NSString stringWithFormat: @"Unable to find Root CAs file in bundle: %@", bundledTrustedCAPath]];
         return nil;
     }
     config[@"TrustedCACertificatesFilename"] = bundledTrustedCAPath;
@@ -269,13 +274,13 @@
         config[@"ClientPlatform"] = @"iOS-Library";
     }
     else {
-        [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"ClientPlatform overridden from 'iOS-Library' to '%@'", config[@"ClientPlatform"]]];
+        [self logMessage:[NSString stringWithFormat: @"ClientPlatform overridden from 'iOS-Library' to '%@'", config[@"ClientPlatform"]]];
     }
 
     NSString *finalConfigStr = [[[SBJson4Writer alloc] init] stringWithObject:config];
     
     if (finalConfigStr == nil) {
-        [self.tunneledAppDelegate onDiagnosticMessage:@"Failed to convert config to JSON string"];
+        [self logMessage:@"Failed to convert config to JSON string"];
         return nil;
     }
     
@@ -299,7 +304,7 @@
     
     id eh = ^(NSError *err) {
         notice = nil;
-        [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"Notice JSON parse failed: %@", err.description]];
+        [self logMessage:[NSString stringWithFormat: @"Notice JSON parse failed: %@", err.description]];
     };
     
     id parser = [SBJson4Parser parserWithBlock:block allowMultiRoot:NO unwrapRootArray:NO errorHandler:eh];
@@ -311,127 +316,157 @@
 
     NSString *noticeType = notice[@"noticeType"];
     if (noticeType == nil) {
-        [self.tunneledAppDelegate onDiagnosticMessage:@"Notice missing noticeType"];
+        [self logMessage:@"Notice missing noticeType"];
         return;
     }
     
     if ([noticeType isEqualToString:@"Tunnels"]) {
         id count = [notice valueForKeyPath:@"data.count"];
         if (![count isKindOfClass:[NSNumber class]]) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"Tunnels notice missing data.count: %@", noticeJSON]];
+            [self logMessage:[NSString stringWithFormat: @"Tunnels notice missing data.count: %@", noticeJSON]];
             return;
         }
 
         if ([count integerValue] > 0) {
-            [self.tunneledAppDelegate onConnected];
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onConnected)]) {
+                [self.tunneledAppDelegate onConnected];
+            }
         } else {
-            [self.tunneledAppDelegate onConnecting];
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onConnecting)]) {
+                [self.tunneledAppDelegate onConnecting];
+            }
         }
     }
     else if ([noticeType isEqualToString:@"Exiting"]) {
-        [self.tunneledAppDelegate onExiting];
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onExiting)]) {
+            [self.tunneledAppDelegate onExiting];
+        }
     }
     else if ([noticeType isEqualToString:@"AvailableEgressRegions"]) {
         id regions = [notice valueForKeyPath:@"data.regions"];
         if (![regions isKindOfClass:[NSArray class]]) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"AvailableEgressRegions notice missing data.regions: %@", noticeJSON]];
+            [self logMessage:[NSString stringWithFormat: @"AvailableEgressRegions notice missing data.regions: %@", noticeJSON]];
             return;
         }
 
-        [self.tunneledAppDelegate onAvailableEgressRegions:regions];
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onAvailableEgressRegions:)]) {
+            [self.tunneledAppDelegate onAvailableEgressRegions:regions];
+        }
     }
     else if ([noticeType isEqualToString:@"SocksProxyPortInUse"]) {
         id port = [notice valueForKeyPath:@"data.port"];
         if (![port isKindOfClass:[NSNumber class]]) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"SocksProxyPortInUse notice missing data.port: %@", noticeJSON]];
+            [self logMessage:[NSString stringWithFormat: @"SocksProxyPortInUse notice missing data.port: %@", noticeJSON]];
             return;
         }
 
-        [self.tunneledAppDelegate onSocksProxyPortInUse:[port integerValue]];
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onSocksProxyPortInUse:)]) {
+            [self.tunneledAppDelegate onSocksProxyPortInUse:[port integerValue]];
+        }
     }
     else if ([noticeType isEqualToString:@"HttpProxyPortInUse"]) {
         id port = [notice valueForKeyPath:@"data.port"];
         if (![port isKindOfClass:[NSNumber class]]) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"HttpProxyPortInUse notice missing data.port: %@", noticeJSON]];
+            [self logMessage:[NSString stringWithFormat: @"HttpProxyPortInUse notice missing data.port: %@", noticeJSON]];
             return;
         }
         
-        [self.tunneledAppDelegate onHttpProxyPortInUse:[port integerValue]];
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onHttpProxyPortInUse:)]) {
+            [self.tunneledAppDelegate onHttpProxyPortInUse:[port integerValue]];
+        }
     }
     else if ([noticeType isEqualToString:@"ListeningSocksProxyPort"]) {
         id port = [notice valueForKeyPath:@"data.port"];
         if (![port isKindOfClass:[NSNumber class]]) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"ListeningSocksProxyPort notice missing data.port: %@", noticeJSON]];
+            [self logMessage:[NSString stringWithFormat: @"ListeningSocksProxyPort notice missing data.port: %@", noticeJSON]];
             return;
         }
         
-        [self.tunneledAppDelegate onListeningSocksProxyPort:[port integerValue]];
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningSocksProxyPort:)]) {
+            [self.tunneledAppDelegate onListeningSocksProxyPort:[port integerValue]];
+        }
     }
     else if ([noticeType isEqualToString:@"ListeningHttpProxyPort"]) {
         id port = [notice valueForKeyPath:@"data.port"];
         if (![port isKindOfClass:[NSNumber class]]) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"ListeningHttpProxyPort notice missing data.port: %@", noticeJSON]];
+            [self logMessage:[NSString stringWithFormat: @"ListeningHttpProxyPort notice missing data.port: %@", noticeJSON]];
             return;
         }
         
-        [self.tunneledAppDelegate onListeningHttpProxyPort:[port integerValue]];
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningHttpProxyPort:)]) {
+            [self.tunneledAppDelegate onListeningHttpProxyPort:[port integerValue]];
+        }
     }
     else if ([noticeType isEqualToString:@"UpstreamProxyError"]) {
         id message = [notice valueForKeyPath:@"data.message"];
         if (![message isKindOfClass:[NSString class]]) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"UpstreamProxyError notice missing data.message: %@", noticeJSON]];
+            [self logMessage:[NSString stringWithFormat: @"UpstreamProxyError notice missing data.message: %@", noticeJSON]];
             return;
         }
         
-        [self.tunneledAppDelegate onUpstreamProxyError:message];
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onUpstreamProxyError:)]) {
+            [self.tunneledAppDelegate onUpstreamProxyError:message];
+        }
     }
     else if ([noticeType isEqualToString:@"ClientUpgradeDownloaded"]) {
         id filename = [notice valueForKeyPath:@"data.filename"];
         if (![filename isKindOfClass:[NSString class]]) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"ClientUpgradeDownloaded notice missing data.filename: %@", noticeJSON]];
+            [self logMessage:[NSString stringWithFormat: @"ClientUpgradeDownloaded notice missing data.filename: %@", noticeJSON]];
             return;
         }
         
-        [self.tunneledAppDelegate onClientUpgradeDownloaded:filename];
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onClientUpgradeDownloaded:)]) {
+            [self.tunneledAppDelegate onClientUpgradeDownloaded:filename];
+        }
     }
     else if ([noticeType isEqualToString:@"ClientIsLatestVersion"]) {
-        [self.tunneledAppDelegate onClientIsLatestVersion];
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onClientIsLatestVersion)]) {
+            [self.tunneledAppDelegate onClientIsLatestVersion];
+        }
     }
     else if ([noticeType isEqualToString:@"Homepage"]) {
         id url = [notice valueForKeyPath:@"data.url"];
         if (![url isKindOfClass:[NSString class]]) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"Homepage notice missing data.url: %@", noticeJSON]];
+            [self logMessage:[NSString stringWithFormat: @"Homepage notice missing data.url: %@", noticeJSON]];
             return;
         }
         
-        [self.tunneledAppDelegate onHomepage:url];
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onHomepage:)]) {
+            [self.tunneledAppDelegate onHomepage:url];
+        }
     }
     else if ([noticeType isEqualToString:@"ClientRegion"]) {
         id region = [notice valueForKeyPath:@"data.region"];
         if (![region isKindOfClass:[NSString class]]) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"ClientRegion notice missing data.region: %@", noticeJSON]];
+            [self logMessage:[NSString stringWithFormat: @"ClientRegion notice missing data.region: %@", noticeJSON]];
             return;
         }
         
-        [self.tunneledAppDelegate onClientRegion:region];
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onClientRegion:)]) {
+            [self.tunneledAppDelegate onClientRegion:region];
+        }
     }
     else if ([noticeType isEqualToString:@"SplitTunnelRegion"]) {
         id region = [notice valueForKeyPath:@"data.region"];
         if (![region isKindOfClass:[NSString class]]) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"SplitTunnelRegion notice missing data.region: %@", noticeJSON]];
+            [self logMessage:[NSString stringWithFormat: @"SplitTunnelRegion notice missing data.region: %@", noticeJSON]];
             return;
         }
         
-        [self.tunneledAppDelegate onSplitTunnelRegion:region];
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onSplitTunnelRegion:)]) {
+            [self.tunneledAppDelegate onSplitTunnelRegion:region];
+        }
     }
     else if ([noticeType isEqualToString:@"Untunneled"]) {
         id address = [notice valueForKeyPath:@"data.address"];
         if (![address isKindOfClass:[NSString class]]) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"Untunneled notice missing data.address: %@", noticeJSON]];
+            [self logMessage:[NSString stringWithFormat: @"Untunneled notice missing data.address: %@", noticeJSON]];
             return;
         }
         
-        [self.tunneledAppDelegate onUntunneledAddress:address];
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onUntunneledAddress:)]) {
+            [self.tunneledAppDelegate onUntunneledAddress:address];
+        }
     }
     else if ([noticeType isEqualToString:@"BytesTransferred"]) {
         diagnostic = FALSE;
@@ -439,11 +474,13 @@
         id sent = [notice valueForKeyPath:@"data.sent"];
         id received = [notice valueForKeyPath:@"data.received"];
         if (![sent isKindOfClass:[NSNumber class]] || ![received isKindOfClass:[NSNumber class]]) {
-            [self.tunneledAppDelegate onDiagnosticMessage:[NSString stringWithFormat: @"BytesTransferred notice missing data.sent or data.received: %@", noticeJSON]];
+            [self logMessage:[NSString stringWithFormat: @"BytesTransferred notice missing data.sent or data.received: %@", noticeJSON]];
             return;
         }
         
-        [self.tunneledAppDelegate onBytesTransferred:[sent longLongValue]:[received longLongValue]];
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onBytesTransferred::)]) {
+            [self.tunneledAppDelegate onBytesTransferred:[sent longLongValue]:[received longLongValue]];
+        }
     }
     
     // Pass diagnostic messages to onDiagnosticMessage.
@@ -456,7 +493,7 @@
         NSString *dataStr = [[[SBJson4Writer alloc] init] stringWithObject:data];
 
         NSString *diagnosticMessage = [NSString stringWithFormat:@"%@: %@", noticeType, dataStr];
-        [self. tunneledAppDelegate onDiagnosticMessage:diagnosticMessage];
+        [self logMessage:diagnosticMessage];
     }
 }
 
@@ -491,7 +528,13 @@
 
 #pragma mark - Helpers (private)
 
-/*! 
+- (void)logMessage:(NSString *)message {
+    if ([self.tunneledAppDelegate respondsToSelector:@selector(onDiagnosticMessage:)]) {
+        [self.tunneledAppDelegate onDiagnosticMessage:message];
+    }
+}
+
+/*!
  Determine the device's region. Makes a best guess based on available info.
  @returns The two-letter country code that the device is probably located in.
  */
