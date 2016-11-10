@@ -171,6 +171,7 @@ func handshakeAPIRequestHandler(
 	handshakeResponse := common.HandshakeResponse{
 		Homepages:            db.GetRandomHomepage(sponsorID, geoIPData.Country, isMobile),
 		UpgradeClientVersion: db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
+		PageViewRegexes:      make([]map[string]string, 0),
 		HttpsRequestRegexes:  db.GetHttpsRequestRegexes(sponsorID),
 		EncodedServerList:    db.DiscoverServers(geoIPData.DiscoveryValue),
 		ClientRegion:         geoIPData.Country,
