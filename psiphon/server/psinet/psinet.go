@@ -173,7 +173,7 @@ func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatfor
 	// Sponsor id does not exist: fail gracefully
 	sponsor, ok := db.Sponsors[sponsorID]
 	if !ok {
-		return nil
+		return sponsorHomePages
 	}
 
 	homePages := sponsor.HomePages
