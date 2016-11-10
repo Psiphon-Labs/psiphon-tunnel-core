@@ -157,9 +157,9 @@ func (db *Database) GetRandomHomepage(sponsorID, clientRegion string, isMobilePl
 	homepages := db.GetHomepages(sponsorID, clientRegion, isMobilePlatform)
 	if len(homepages) > 0 {
 		index := rand.Intn(len(homepages))
-		return homepages[index:index+1]
+		return homepages[index : index+1]
 	}
-	return nil
+	return homepages
 }
 
 // GetHomepages returns a list of home pages for the specified sponsor,
