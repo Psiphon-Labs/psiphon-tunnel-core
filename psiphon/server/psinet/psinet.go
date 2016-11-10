@@ -408,21 +408,21 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 
 	// Extended (new) entry fields are in a JSON string
 	var extendedConfig struct {
-		IpAddress                     string
-		WebServerPort                 string
-		WebServerSecret               string
-		WebServerCertificate          string
-		SshPort                       int
-		SshUsername                   string
-		SshPassword                   string
-		SshHostKey                    string
-		SshObfuscatedPort             int
-		SshObfuscatedKey              string
-		Region                        string
-		MeekCookieEncryptionPublicKey string
-		MeekObfuscatedKey             string
-		MeekServerPort                int
-		capabilities                  []string
+		IpAddress                     string   `json:"ipAddress"`
+		WebServerPort                 string   `json:"webServerPort"` // not an int
+		WebServerSecret               string   `json:"webServerSecret"`
+		WebServerCertificate          string   `json:"webServerCertificate"`
+		SshPort                       int      `json:"sshPort"`
+		SshUsername                   string   `json:"sshUsername"`
+		SshPassword                   string   `json:"sshPassword"`
+		SshHostKey                    string   `json:"sshHostKey"`
+		SshObfuscatedPort             int      `json:"sshObfuscatedPort"`
+		SshObfuscatedKey              string   `json:"sshObfuscatedKey"`
+		Capabilities                  []string `json:"capabilities"`
+		Region                        string   `json:"region"`
+		MeekServerPort                int      `json:"meekServerPort"`
+		MeekCookieEncryptionPublicKey string   `json:"meekCookieEncryptionPublicKey"`
+		MeekObfuscatedKey             string   `json:"meekObfuscatedKey"`
 	}
 
 	// NOTE: also putting original values in extended config for easier parsing by new clients
@@ -476,7 +476,7 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 
 	for capability, enabled := range serverCapabilities {
 		if enabled == true {
-			extendedConfig.capabilities = append(extendedConfig.capabilities, capability)
+			extendedConfig.Capabilities = append(extendedConfig.Capabilities, capability)
 		}
 	}
 
