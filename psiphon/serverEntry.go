@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 // ServerEntry represents a Psiphon server. It contains information
@@ -82,7 +83,7 @@ func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 // by the ServerEntry's capabilities.
 func (serverEntry *ServerEntry) GetSupportedProtocols() []string {
 	supportedProtocols := make([]string, 0)
-	for _, protocol := range common.SupportedTunnelProtocols {
+	for _, protocol := range protocol.SupportedTunnelProtocols {
 		if serverEntry.SupportsProtocol(protocol) {
 			supportedProtocols = append(supportedProtocols, protocol)
 		}
@@ -114,16 +115,16 @@ func (serverEntry *ServerEntry) DisableImpairedProtocols(impairedProtocols []str
 // SupportsSSHAPIRequests returns true when the server supports
 // SSH API requests.
 func (serverEntry *ServerEntry) SupportsSSHAPIRequests() bool {
-	return common.Contains(serverEntry.Capabilities, common.CAPABILITY_SSH_API_REQUESTS)
+	return common.Contains(serverEntry.Capabilities, protocol.CAPABILITY_SSH_API_REQUESTS)
 }
 
 func (serverEntry *ServerEntry) GetUntunneledWebRequestPorts() []string {
 	ports := make([]string, 0)
-	if common.Contains(serverEntry.Capabilities, common.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS) {
+	if common.Contains(serverEntry.Capabilities, protocol.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS) {
 		// Server-side configuration quirk: there's a port forward from
 		// port 443 to the web server, which we can try, except on servers
 		// running FRONTED_MEEK, which listens on port 443.
-		if !serverEntry.SupportsProtocol(common.TUNNEL_PROTOCOL_FRONTED_MEEK) {
+		if !serverEntry.SupportsProtocol(protocol.TUNNEL_PROTOCOL_FRONTED_MEEK) {
 			ports = append(ports, "443")
 		}
 		ports = append(ports, serverEntry.WebServerPort)

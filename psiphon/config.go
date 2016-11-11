@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 // TODO: allow all params to be configured
@@ -393,6 +394,11 @@ type Config struct {
 
 	// RateLimits specify throttling configuration for the tunnel.
 	RateLimits common.RateLimits
+
+	// ReportSLOKs indicates whether to emit notices for each seeded SLOK. As this
+	// could reveal user browsing activity, it's intended for debugging and testing
+	// only.
+	ReportSLOKs bool
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON
@@ -437,7 +443,7 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	}
 
 	if config.TunnelProtocol != "" {
-		if !common.Contains(common.SupportedTunnelProtocols, config.TunnelProtocol) {
+		if !common.Contains(protocol.SupportedTunnelProtocols, config.TunnelProtocol) {
 			return nil, common.ContextError(
 				errors.New("invalid tunnel protocol"))
 		}
@@ -477,7 +483,7 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	}
 
 	if !common.Contains(
-		[]string{"", common.PSIPHON_SSH_API_PROTOCOL, common.PSIPHON_WEB_API_PROTOCOL},
+		[]string{"", protocol.PSIPHON_SSH_API_PROTOCOL, protocol.PSIPHON_WEB_API_PROTOCOL},
 		config.TargetApiProtocol) {
 
 		return nil, common.ContextError(

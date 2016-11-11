@@ -17,7 +17,11 @@
  *
  */
 
-package common
+package protocol
+
+import (
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
+)
 
 const (
 	TUNNEL_PROTOCOL_SSH                  = "SSH"
@@ -92,4 +96,8 @@ type HandshakeResponse struct {
 
 type ConnectedResponse struct {
 	ConnectedTimestamp string `json:"connected_timestamp"`
+}
+
+type StatusResponse struct {
+	SeedPayload *osl.SeedPayload `json:"seed_payload"`
 }

@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 )
 
@@ -163,9 +164,6 @@ loop:
 
 		case <-reloadSupportServicesSignal:
 			supportServices.Reload()
-			// Reset traffic rules for established clients to reflect reloaded config
-			// TODO: only update when traffic rules config has changed
-			tunnelServer.ResetAllClientTrafficRules()
 
 		case <-logServerLoadSignal:
 			// Signal profiles writes first to ensure some diagnostics are
@@ -315,6 +313,7 @@ func logServerLoad(server *TunnelServer) {
 type SupportServices struct {
 	Config          *Config
 	TrafficRulesSet *TrafficRulesSet
+	OSLConfig       *osl.Config
 	PsinetDatabase  *psinet.Database
 	GeoIPService    *GeoIPService
 	DNSResolver     *DNSResolver
@@ -323,7 +322,13 @@ type SupportServices struct {
 
 // NewSupportServices initializes a new SupportServices.
 func NewSupportServices(config *Config) (*SupportServices, error) {
+
 	trafficRulesSet, err := NewTrafficRulesSet(config.TrafficRulesFilename)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	oslConfig, err := osl.NewConfig(config.OSLConfigFilename)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -347,6 +352,7 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 	return &SupportServices{
 		Config:          config,
 		TrafficRulesSet: trafficRulesSet,
+		OSLConfig:       oslConfig,
 		PsinetDatabase:  psinetDatabase,
 		GeoIPService:    geoIPService,
 		DNSResolver:     dnsResolver,
@@ -356,14 +362,22 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 // Reload reinitializes traffic rules, psinet database, and geo IP database
 // components. If any component fails to reload, an error is logged and
 // Reload proceeds, using the previous state of the component.
-//
-// Limitation: reload of traffic rules currently doesn't apply to existing,
-// established clients.
 func (support *SupportServices) Reload() {
 
 	reloaders := append(
-		[]common.Reloader{support.TrafficRulesSet, support.PsinetDatabase},
+		[]common.Reloader{
+			support.TrafficRulesSet,
+			support.OSLConfig,
+			support.PsinetDatabase},
 		support.GeoIPService.Reloaders()...)
+
+	// Take these actions only after the corresponding Reloader has reloaded.
+	// In both the traffic rules and OSL cases, there is some impact from state
+	// reset, so the reset should be avoided where possible.
+	reloadPostActions := map[common.Reloader]func(){
+		support.TrafficRulesSet: func() { support.TunnelServer.ResetAllClientTrafficRules() },
+		support.OSLConfig:       func() { support.TunnelServer.ResetAllClientOSLConfigs() },
+	}
 
 	for _, reloader := range reloaders {
 
@@ -374,6 +388,13 @@ func (support *SupportServices) Reload() {
 
 		// "reloaded" flag indicates if file was actually reloaded or ignored
 		reloaded, err := reloader.Reload()
+
+		if reloaded {
+			if action, ok := reloadPostActions[reloader]; ok {
+				action()
+			}
+		}
+
 		if err != nil {
 			log.WithContextFields(
 				LogFields{

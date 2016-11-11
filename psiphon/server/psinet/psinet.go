@@ -27,7 +27,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"strconv"
 	"strings"
@@ -126,13 +125,8 @@ func NewDatabase(filename string) (*Database, error) {
 
 	database.ReloadableFile = common.NewReloadableFile(
 		filename,
-		func(filename string) error {
-			psinetJSON, err := ioutil.ReadFile(filename)
-			if err != nil {
-				// On error, state remains the same
-				return common.ContextError(err)
-			}
-			err = json.Unmarshal(psinetJSON, &database)
+		func(fileContent []byte) error {
+			err := json.Unmarshal(fileContent, &database)
 			if err != nil {
 				// On error, state remains the same
 				// (Unmarshal first validates the provided

@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 // FetchRemoteServerList downloads a remote server list JSON record from
@@ -110,7 +111,7 @@ func FetchRemoteServerList(
 	serverEntries, err := DecodeAndValidateServerEntryList(
 		remoteServerList,
 		common.GetCurrentTimestamp(),
-		common.SERVER_ENTRY_SOURCE_REMOTE)
+		protocol.SERVER_ENTRY_SOURCE_REMOTE)
 	if err != nil {
 		return common.ContextError(err)
 	}

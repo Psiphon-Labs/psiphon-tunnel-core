@@ -22,7 +22,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -171,14 +170,9 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 
 	set.ReloadableFile = common.NewReloadableFile(
 		filename,
-		func(filename string) error {
-			configJSON, err := ioutil.ReadFile(filename)
-			if err != nil {
-				// On error, state remains the same
-				return common.ContextError(err)
-			}
+		func(fileContent []byte) error {
 			var newSet TrafficRulesSet
-			err = json.Unmarshal(configJSON, &newSet)
+			err := json.Unmarshal(fileContent, &newSet)
 			if err != nil {
 				return common.ContextError(err)
 			}

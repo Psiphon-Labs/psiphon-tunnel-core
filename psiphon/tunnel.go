@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Inc/goarista/monotime"
 	regen "github.com/Psiphon-Inc/goregen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 )
 
@@ -471,7 +472,7 @@ func initMeekConfig(
 	transformedHostName := false
 
 	switch selectedProtocol {
-	case common.TUNNEL_PROTOCOL_FRONTED_MEEK:
+	case protocol.TUNNEL_PROTOCOL_FRONTED_MEEK:
 		frontingAddress, frontingHost, err := selectFrontingParameters(serverEntry)
 		if err != nil {
 			return nil, common.ContextError(err)
@@ -484,7 +485,7 @@ func initMeekConfig(
 		}
 		hostHeader = frontingHost
 
-	case common.TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
+	case protocol.TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
 		frontingAddress, frontingHost, err := selectFrontingParameters(serverEntry)
 		if err != nil {
 			return nil, common.ContextError(err)
@@ -492,7 +493,7 @@ func initMeekConfig(
 		dialAddress = fmt.Sprintf("%s:80", frontingAddress)
 		hostHeader = frontingHost
 
-	case common.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
+	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 		dialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
 		hostname := serverEntry.IpAddress
 		hostname, transformedHostName = config.HostNameTransformer.TransformHostName(hostname)
@@ -502,7 +503,7 @@ func initMeekConfig(
 			hostHeader = fmt.Sprintf("%s:%d", hostname, serverEntry.MeekServerPort)
 		}
 
-	case common.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS:
+	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS:
 		dialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
 		useHTTPS = true
 		SNIServerName, transformedHostName =
@@ -559,11 +560,11 @@ func dialSsh(
 	var err error
 
 	switch selectedProtocol {
-	case common.TUNNEL_PROTOCOL_OBFUSCATED_SSH:
+	case protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH:
 		useObfuscatedSsh = true
 		directTCPDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
 
-	case common.TUNNEL_PROTOCOL_SSH:
+	case protocol.TUNNEL_PROTOCOL_SSH:
 		directTCPDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshPort)
 
 	default:
@@ -629,7 +630,7 @@ func dialSsh(
 	}()
 
 	// Activity monitoring is used to measure tunnel duration
-	monitoredConn, err := common.NewActivityMonitoredConn(dialConn, 0, false, nil)
+	monitoredConn, err := common.NewActivityMonitoredConn(dialConn, 0, false, nil, nil)
 	if err != nil {
 		return nil, nil, nil, nil, common.ContextError(err)
 	}

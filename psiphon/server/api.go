@@ -31,6 +31,7 @@ import (
 	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 const (
@@ -74,7 +75,7 @@ func sshAPIRequestHandler(
 
 	return dispatchAPIRequestHandler(
 		support,
-		common.PSIPHON_SSH_API_PROTOCOL,
+		protocol.PSIPHON_SSH_API_PROTOCOL,
 		geoIPData,
 		name,
 		params)
@@ -102,13 +103,13 @@ func dispatchAPIRequestHandler(
 	}()
 
 	switch name {
-	case common.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
+	case protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
 		return handshakeAPIRequestHandler(support, apiProtocol, geoIPData, params)
-	case common.PSIPHON_API_CONNECTED_REQUEST_NAME:
+	case protocol.PSIPHON_API_CONNECTED_REQUEST_NAME:
 		return connectedAPIRequestHandler(support, geoIPData, params)
-	case common.PSIPHON_API_STATUS_REQUEST_NAME:
+	case protocol.PSIPHON_API_STATUS_REQUEST_NAME:
 		return statusAPIRequestHandler(support, geoIPData, params)
-	case common.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME:
+	case protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME:
 		return clientVerificationAPIRequestHandler(support, geoIPData, params)
 	}
 
@@ -168,7 +169,7 @@ func handshakeAPIRequestHandler(
 
 	// Note: no guarantee that PsinetDatabase won't reload between database calls
 	db := support.PsinetDatabase
-	handshakeResponse := common.HandshakeResponse{
+	handshakeResponse := protocol.HandshakeResponse{
 		Homepages:            db.GetHomepages(sponsorID, geoIPData.Country, isMobile),
 		UpgradeClientVersion: db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
 		HttpsRequestRegexes:  db.GetHttpsRequestRegexes(sponsorID),
@@ -214,7 +215,7 @@ func connectedAPIRequestHandler(
 			params,
 			connectedRequestParams))
 
-	connectedResponse := common.ConnectedResponse{
+	connectedResponse := protocol.ConnectedResponse{
 		ConnectedTimestamp: common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
 	}
 
@@ -253,6 +254,13 @@ func statusAPIRequestHandler(
 		return nil, common.ContextError(err)
 	}
 
+	// Logs are queued until the input is fully validated. Otherwise, stats
+	// could be double counted if the client has a bug in its request
+	// formatting: partial stats would be logged (counted), the request would
+	// fail, and clients would then resend all the same stats again.
+
+	logQueue := make([]LogFields, 0)
+
 	// Overall bytes transferred stats
 
 	bytesTransferred, err := getInt64RequestParam(statusData, "bytes_transferred")
@@ -262,7 +270,7 @@ func statusAPIRequestHandler(
 	bytesTransferredFields := getRequestLogFields(
 		support, "bytes_transferred", geoIPData, params, statusRequestParams)
 	bytesTransferredFields["bytes"] = bytesTransferred
-	log.LogRawFieldsWithTimestamp(bytesTransferredFields)
+	logQueue = append(logQueue, bytesTransferredFields)
 
 	// Domain bytes transferred stats
 	// Older clients may not submit this data
@@ -278,7 +286,7 @@ func statusAPIRequestHandler(
 		for domain, bytes := range hostBytes {
 			domainBytesFields["domain"] = domain
 			domainBytesFields["bytes"] = bytes
-			log.LogRawFieldsWithTimestamp(domainBytesFields)
+			logQueue = append(logQueue, domainBytesFields)
 		}
 	}
 
@@ -357,11 +365,34 @@ func statusAPIRequestHandler(
 			}
 			sessionFields["total_bytes_received"] = totalBytesReceived
 
-			log.LogRawFieldsWithTimestamp(sessionFields)
+			logQueue = append(logQueue, sessionFields)
 		}
 	}
 
-	return make([]byte, 0), nil
+	// Note: ignoring param format errors as params have been validated
+	sessionID, _ := getStringRequestParam(params, "client_session_id")
+
+	// TODO: in the case of SSH API requests, the actual sshClient could
+	// be passed in and used directly.
+	seedPayload, err := support.TunnelServer.GetClientSeedPayload(sessionID)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	statusResponse := protocol.StatusResponse{
+		SeedPayload: seedPayload,
+	}
+
+	responsePayload, err := json.Marshal(statusResponse)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	for _, logItem := range logQueue {
+		log.LogRawFieldsWithTimestamp(logItem)
+	}
+
+	return responsePayload, nil
 }
 
 // clientVerificationAPIRequestHandler implements the
@@ -773,7 +804,7 @@ func isClientPlatform(_ *SupportServices, value string) bool {
 }
 
 func isRelayProtocol(_ *SupportServices, value string) bool {
-	return common.Contains(common.SupportedTunnelProtocols, value)
+	return common.Contains(protocol.SupportedTunnelProtocols, value)
 }
 
 func isBooleanFlag(_ *SupportServices, value string) bool {
@@ -855,7 +886,7 @@ func isHostHeader(support *SupportServices, value string) bool {
 }
 
 func isServerEntrySource(_ *SupportServices, value string) bool {
-	return common.Contains(common.SupportedServerEntrySources, value)
+	return common.Contains(protocol.SupportedServerEntrySources, value)
 }
 
 var isISO8601DateRegex = regexp.MustCompile(

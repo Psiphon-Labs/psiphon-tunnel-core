@@ -376,7 +376,14 @@ func NoticeRemoteServerListDownloaded(filename string) {
 }
 
 func NoticeClientVerificationRequestCompleted(ipAddress string) {
+	// TODO: remove "Notice" prefix
 	outputNotice("NoticeClientVerificationRequestCompleted", noticeIsDiagnostic, "ipAddress", ipAddress)
+}
+
+// NoticeSLOKSeeded indicates that the SLOK with the specified ID was received from
+// the Psiphon server. The "duplicate" flags indicates whether the SLOK was previously known.
+func NoticeSLOKSeeded(slokID string, duplicate bool) {
+	outputNotice("SLOKSeeded", noticeIsDiagnostic, "slokID", slokID, "duplicate", duplicate)
 }
 
 type repetitiveNoticeState struct {

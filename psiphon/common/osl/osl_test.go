@@ -52,7 +52,7 @@ func TestOSL(t *testing.T) {
           {
               "BytesRead" : 1,
               "BytesWritten" : 1,
-              "PortForwardDurationMilliseconds" : 1
+              "PortForwardDurationNanoseconds" : 1
           }
         },
         {
@@ -63,7 +63,7 @@ func TestOSL(t *testing.T) {
           {
               "BytesRead" : 10,
               "BytesWritten" : 10,
-              "PortForwardDurationMilliseconds" : 10
+              "PortForwardDurationNanoseconds" : 10
           }
         },
         {
@@ -74,7 +74,7 @@ func TestOSL(t *testing.T) {
           {
               "BytesRead" : 100,
               "BytesWritten" : 100,
-              "PortForwardDurationMilliseconds" : 100
+              "PortForwardDurationNanoseconds" : 100
           }
         }
       ],
@@ -112,7 +112,7 @@ func TestOSL(t *testing.T) {
           {
               "BytesRead" : 1,
               "BytesWritten" : 1,
-              "PortForwardDurationMilliseconds" : 1
+              "PortForwardDurationNanoseconds" : 1
           }
         },
         {
@@ -123,7 +123,7 @@ func TestOSL(t *testing.T) {
           {
               "BytesRead" : 10,
               "BytesWritten" : 10,
-              "PortForwardDurationMilliseconds" : 10
+              "PortForwardDurationNanoseconds" : 10
           }
         },
         {
@@ -134,7 +134,7 @@ func TestOSL(t *testing.T) {
           {
               "BytesRead" : 0,
               "BytesWritten" : 0,
-              "PortForwardDurationMilliseconds" : 0
+              "PortForwardDurationNanoseconds" : 0
           }
         }
       ],
@@ -162,14 +162,14 @@ func TestOSL(t *testing.T) {
 	// periods and 5/10 10 millisecond longer periods. The second scheme requires
 	// sufficient activity within 25/100 1 millisecond periods.
 
-	config, err := LoadConfig([]byte(configJSON))
+	config, err := loadConfig([]byte(configJSON))
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %s", err)
 	}
 
 	t.Run("ineligible client, sufficient transfer", func(t *testing.T) {
 
-		clientSeedState := NewClientSeedState(config, "US", "C5E8D2EDFD093B50D8D65CF59D0263CA")
+		clientSeedState := config.NewClientSeedState("US", "C5E8D2EDFD093B50D8D65CF59D0263CA")
 
 		seedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1"))
 
@@ -179,7 +179,7 @@ func TestOSL(t *testing.T) {
 	})
 
 	// This clientSeedState is used across multiple tests.
-	clientSeedState := NewClientSeedState(config, "US", "2995DB0C968C59C4F23E87988D9C0D41")
+	clientSeedState := config.NewClientSeedState("US", "2995DB0C968C59C4F23E87988D9C0D41")
 
 	t.Run("eligible client, no transfer", func(t *testing.T) {
 
@@ -190,12 +190,7 @@ func TestOSL(t *testing.T) {
 
 	t.Run("eligible client, insufficient transfer", func(t *testing.T) {
 
-		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(
-			&TrafficValues{
-				BytesRead:                       5,
-				BytesWritten:                    5,
-				PortForwardDurationMilliseconds: 5,
-			})
+		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(5, 5, 5)
 
 		if len(clientSeedState.GetSeedPayload().SLOKs) != 0 {
 			t.Fatalf("expected 0 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
@@ -212,12 +207,7 @@ func TestOSL(t *testing.T) {
 
 		rolloverToNextSLOKTime()
 
-		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(
-			&TrafficValues{
-				BytesRead:                       5,
-				BytesWritten:                    5,
-				PortForwardDurationMilliseconds: 5,
-			})
+		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(5, 5, 5)
 
 		if len(clientSeedState.GetSeedPayload().SLOKs) != 0 {
 			t.Fatalf("expected 0 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
@@ -230,19 +220,9 @@ func TestOSL(t *testing.T) {
 
 		clientSeedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1"))
 
-		clientSeedPortForward.UpdateProgress(
-			&TrafficValues{
-				BytesRead:                       5,
-				BytesWritten:                    5,
-				PortForwardDurationMilliseconds: 5,
-			})
+		clientSeedPortForward.UpdateProgress(5, 5, 5)
 
-		clientSeedPortForward.UpdateProgress(
-			&TrafficValues{
-				BytesRead:                       5,
-				BytesWritten:                    5,
-				PortForwardDurationMilliseconds: 5,
-			})
+		clientSeedPortForward.UpdateProgress(5, 5, 5)
 
 		if len(clientSeedState.GetSeedPayload().SLOKs) != 1 {
 			t.Fatalf("expected 1 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
@@ -253,19 +233,9 @@ func TestOSL(t *testing.T) {
 
 		rolloverToNextSLOKTime()
 
-		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(
-			&TrafficValues{
-				BytesRead:                       5,
-				BytesWritten:                    5,
-				PortForwardDurationMilliseconds: 5,
-			})
+		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(5, 5, 5)
 
-		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(
-			&TrafficValues{
-				BytesRead:                       5,
-				BytesWritten:                    5,
-				PortForwardDurationMilliseconds: 5,
-			})
+		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(5, 5, 5)
 
 		// Expect 2 SLOKS: 1 new, and 1 remaining in payload.
 		if len(clientSeedState.GetSeedPayload().SLOKs) != 2 {
@@ -277,19 +247,9 @@ func TestOSL(t *testing.T) {
 
 		rolloverToNextSLOKTime()
 
-		clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1")).UpdateProgress(
-			&TrafficValues{
-				BytesRead:                       5,
-				BytesWritten:                    5,
-				PortForwardDurationMilliseconds: 5,
-			})
+		clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1")).UpdateProgress(5, 5, 5)
 
-		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(
-			&TrafficValues{
-				BytesRead:                       5,
-				BytesWritten:                    5,
-				PortForwardDurationMilliseconds: 5,
-			})
+		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(5, 5, 5)
 
 		// Expect 4 SLOKS: 2 new, and 2 remaining in payload.
 		if len(clientSeedState.GetSeedPayload().SLOKs) != 4 {
@@ -301,7 +261,7 @@ func TestOSL(t *testing.T) {
 
 		rolloverToNextSLOKTime()
 
-		clientSeedState := NewClientSeedState(config, "US", "36F1CF2DF1250BF0C7BA0629CE3DC657")
+		clientSeedState := config.NewClientSeedState("US", "36F1CF2DF1250BF0C7BA0629CE3DC657")
 
 		if len(clientSeedState.GetSeedPayload().SLOKs) != 1 {
 			t.Fatalf("expected 1 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))

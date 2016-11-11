@@ -30,6 +30,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 func main() {
@@ -141,7 +142,7 @@ func main() {
 			serverEntries, err := psiphon.DecodeAndValidateServerEntryList(
 				string(serverEntryList),
 				common.GetCurrentTimestamp(),
-				common.SERVER_ENTRY_SOURCE_EMBEDDED)
+				protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
 			if err != nil {
 				psiphon.NoticeError("error decoding embedded server entry list file: %s", err)
 				return

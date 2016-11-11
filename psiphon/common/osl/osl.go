@@ -57,7 +57,11 @@ const (
 )
 
 // Config is an OSL configuration, which consists of a list of schemes.
+// The Reload function supports hot reloading of rules data while the
+// process is running.
 type Config struct {
+	common.ReloadableFile
+
 	Schemes []*Scheme
 }
 
@@ -160,14 +164,14 @@ type SeedSpec struct {
 // TrafficValues defines a client traffic level that seeds a SLOK.
 // BytesRead and BytesWritten are the minimum bytes transferred counts to
 // seed a SLOK. Both UDP and TCP data will be counted towards these totals.
-// PortForwardDurationMilliseconds is the duration that a TCP or UDP port
+// PortForwardDurationNanoseconds is the duration that a TCP or UDP port
 // forward is active (not connected, in the UDP case). All threshold
 // settings must be met to seed a SLOK; any threshold may be set to 0 to
 // be trivially satisfied.
 type TrafficValues struct {
-	BytesRead                       int64
-	BytesWritten                    int64
-	PortForwardDurationMilliseconds int64
+	BytesRead                      int64
+	BytesWritten                   int64
+	PortForwardDurationNanoseconds int64
 }
 
 // KeySplit defines a secret key splitting scheme where the secret is split
@@ -222,9 +226,35 @@ type SeedPayload struct {
 	SLOKs []*SLOK
 }
 
-// LoadConfig loads, vaildates, and initializes a JSON encoded OSL
+// NewConfig initializes a Config with the settings in the specified
+// file.
+func NewConfig(filename string) (*Config, error) {
+
+	config := &Config{}
+
+	config.ReloadableFile = common.NewReloadableFile(
+		filename,
+		func(fileContent []byte) error {
+			newConfig, err := loadConfig(fileContent)
+			if err != nil {
+				return common.ContextError(err)
+			}
+			// Modify actual traffic rules only after validation
+			config.Schemes = newConfig.Schemes
+			return nil
+		})
+
+	_, err := config.Reload()
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return config, nil
+}
+
+// loadConfig loads, vaildates, and initializes a JSON encoded OSL
 // configuration.
-func LoadConfig(configJSON []byte) (*Config, error) {
+func loadConfig(configJSON []byte) (*Config, error) {
 
 	var config Config
 	err := json.Unmarshal(configJSON, &config)
@@ -298,8 +328,11 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 // NewClientSeedState creates a new client seed state to track
 // client progress towards seeding SLOKs. psiphond maintains one
 // ClientSeedState for each connected client.
-func NewClientSeedState(
-	config *Config, clientRegion, propagationChannelID string) *ClientSeedState {
+func (config *Config) NewClientSeedState(
+	clientRegion, propagationChannelID string) *ClientSeedState {
+
+	config.ReloadableFile.RLock()
+	defer config.ReloadableFile.RUnlock()
 
 	for _, scheme := range config.Schemes {
 		// Only the first matching scheme is selected.
@@ -308,7 +341,7 @@ func NewClientSeedState(
 		// maps for more efficient lookup.
 		if scheme.epoch.Before(time.Now().UTC()) &&
 			common.Contains(scheme.PropagationChannelIDs, propagationChannelID) &&
-			common.Contains(scheme.Regions, clientRegion) {
+			(len(scheme.Regions) == 0 || common.Contains(scheme.Regions, clientRegion)) {
 
 			// Empty progress is initialized up front for all seed specs. Once
 			// created, the progress map structure is read-only (the map, not the
@@ -383,7 +416,8 @@ func (state *ClientSeedState) NewClientSeedPortForward(
 // not blocking port forward relaying; a consequence of this lock-free
 // design is that progress reported at the exact time of SLOK time period
 // rollover may be dropped.
-func (portForward *ClientSeedPortForward) UpdateProgress(progressDelta *TrafficValues) {
+func (portForward *ClientSeedPortForward) UpdateProgress(
+	bytesRead, bytesWritten int64, durationNanoseconds int64) {
 
 	// Concurrency: access to ClientSeedState is unsynchronized to read-only
 	// fields or atomic, except in the case of a time period rollover, in which
@@ -411,9 +445,9 @@ func (portForward *ClientSeedPortForward) UpdateProgress(progressDelta *TrafficV
 	// As a consequence, progress may be dropped at the exact time of
 	// time period rollover.
 	for _, progress := range portForward.progress {
-		atomic.AddInt64(&progress.BytesRead, progressDelta.BytesRead)
-		atomic.AddInt64(&progress.BytesWritten, progressDelta.BytesWritten)
-		atomic.AddInt64(&progress.PortForwardDurationMilliseconds, progressDelta.PortForwardDurationMilliseconds)
+		atomic.AddInt64(&progress.BytesRead, bytesRead)
+		atomic.AddInt64(&progress.BytesWritten, bytesWritten)
+		atomic.AddInt64(&progress.PortForwardDurationNanoseconds, durationNanoseconds)
 	}
 }
 
@@ -441,8 +475,8 @@ func (state *ClientSeedState) issueSLOKs() {
 
 		if atomic.LoadInt64(&progress.BytesRead) >= seedSpec.Targets.BytesRead &&
 			atomic.LoadInt64(&progress.BytesWritten) >= seedSpec.Targets.BytesWritten &&
-			atomic.LoadInt64(&progress.PortForwardDurationMilliseconds) >=
-				seedSpec.Targets.PortForwardDurationMilliseconds {
+			atomic.LoadInt64(&progress.PortForwardDurationNanoseconds) >=
+				seedSpec.Targets.PortForwardDurationNanoseconds {
 
 			ref := &slokReference{
 				PropagationChannelID: state.propagationChannelID,
@@ -474,7 +508,7 @@ func (state *ClientSeedState) issueSLOKs() {
 		for _, progress := range state.progress {
 			atomic.StoreInt64(&progress.BytesRead, 0)
 			atomic.StoreInt64(&progress.BytesWritten, 0)
-			atomic.StoreInt64(&progress.PortForwardDurationMilliseconds, 0)
+			atomic.StoreInt64(&progress.PortForwardDurationNanoseconds, 0)
 		}
 	}
 }
@@ -597,6 +631,9 @@ func (config *Config) Pave(
 	signingPublicKey string,
 	signingPrivateKey string,
 	paveServerEntries []map[time.Time][]byte) ([]*PaveFile, error) {
+
+	config.ReloadableFile.RLock()
+	defer config.ReloadableFile.RUnlock()
 
 	var paveFiles []*PaveFile
 

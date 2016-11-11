@@ -187,11 +187,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	trafficRulesFilename := "traffic_rules.json"
 	paveTrafficRulesFile(t, trafficRulesFilename, sponsorID, runConfig.denyTrafficRules)
 
+	oslConfigFilename := "osl_config.json"
+	propagationChannelID := paveOSLConfigFile(t, oslConfigFilename)
+
 	var serverConfig interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
 	serverConfig.(map[string]interface{})["GeoIPDatabaseFilename"] = ""
 	serverConfig.(map[string]interface{})["PsinetDatabaseFilename"] = psinetFilename
 	serverConfig.(map[string]interface{})["TrafficRulesFilename"] = trafficRulesFilename
+	serverConfig.(map[string]interface{})["OSLConfigFilename"] = oslConfigFilename
 	serverConfig.(map[string]interface{})["LogLevel"] = "debug"
 
 	// 1 second is the minimum period; should be small enough to emit a log during the
@@ -274,6 +278,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
 
 	clientConfig.SponsorId = sponsorID
+	clientConfig.PropagationChannelId = propagationChannelID
 	clientConfig.ConnectionWorkerPoolSize = numTunnels
 	clientConfig.TunnelPoolSize = numTunnels
 	clientConfig.DisableRemoteServerListFetcher = true
@@ -295,6 +300,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	tunnelsEstablished := make(chan struct{}, 1)
 	homepageReceived := make(chan struct{}, 1)
+	slokSeeded := make(chan struct{}, 1)
 	verificationRequired := make(chan struct{}, 1)
 	verificationCompleted := make(chan struct{}, 1)
 
@@ -324,6 +330,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 					t.Fatalf("unexpected homepage: %s", homepageURL)
 				}
 				sendNotificationReceived(homepageReceived)
+			case "SLOKSeeded":
+				sendNotificationReceived(slokSeeded)
 			case "ClientVerificationRequired":
 				sendNotificationReceived(verificationRequired)
 				controller.SetClientVerificationPayloadForActiveTunnels(dummyClientVerificationPayload)
@@ -400,6 +408,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		if !runConfig.denyTrafficRules {
 			t.Fatalf("tunneled NTP request failed: %s", err)
 		}
+	}
+
+	if !runConfig.denyTrafficRules {
+		waitOnNotification(t, slokSeeded, timeoutSignal, "SLOK seeded timeout exceeded")
 	}
 }
 
@@ -692,4 +704,66 @@ func paveTrafficRulesFile(t *testing.T, trafficRulesFilename, sponsorID string, 
 	if err != nil {
 		t.Fatalf("error paving traffic rules file: %s", err)
 	}
+}
+
+func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
+
+	oslConfigJSONFormat := `
+    {
+      "Schemes" : [
+        {
+          "Epoch" : "%s",
+          "Regions" : [],
+          "PropagationChannelIDs" : ["%s"],
+          "MasterKey" : "wFuSbqU/pJ/35vRmoM8T9ys1PgDa8uzJps1Y+FNKa5U=",
+          "SeedSpecs" : [
+            {
+              "ID" : "IXHWfVgWFkEKvgqsjmnJuN3FpaGuCzQMETya+DSQvsk=",
+              "UpstreamSubnets" : ["0.0.0.0/32"],
+              "Targets" :
+              {
+                  "BytesRead" : 1,
+                  "BytesWritten" : 1,
+                  "PortForwardDurationNanoseconds" : 1
+              }
+            },
+            {
+              "ID" : "qvpIcORLE2Pi5TZmqRtVkEp+OKov0MhfsYPLNV7FYtI=",
+              "UpstreamSubnets" : ["0.0.0.0/32"],
+              "Targets" :
+              {
+                  "BytesRead" : 1,
+                  "BytesWritten" : 1,
+                  "PortForwardDurationNanoseconds" : 1
+              }
+            }
+          ],
+          "SeedSpecThreshold" : 2,
+          "SeedPeriodNanoseconds" : 1000000,
+          "SeedPeriodKeySplits": [
+            {
+              "Total": 2,
+              "Threshold": 2
+            }
+          ]
+        }
+      ]
+    }
+    `
+
+	propagationChannelID, _ := common.MakeRandomStringHex(8)
+
+	now := time.Now().UTC()
+	epoch := now.Truncate(1 * time.Millisecond)
+	epochStr := epoch.Format(time.RFC3339Nano)
+
+	oslConfigJSON := fmt.Sprintf(
+		oslConfigJSONFormat, epochStr, propagationChannelID)
+
+	err := ioutil.WriteFile(oslConfigFilename, []byte(oslConfigJSON), 0600)
+	if err != nil {
+		t.Fatalf("error paving osl config file: %s", err)
+	}
+
+	return propagationChannelID
 }

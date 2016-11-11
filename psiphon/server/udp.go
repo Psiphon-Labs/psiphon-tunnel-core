@@ -163,7 +163,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 			}
 
 			if !mux.sshClient.isPortForwardPermitted(
-				portForwardTypeUDP, dialIP.String(), int(message.remotePort)) {
+				portForwardTypeUDP, dialIP, int(message.remotePort)) {
 				// The udpgw protocol has no error response, so
 				// we just discard the message and read another.
 				continue
@@ -211,10 +211,18 @@ func (mux *udpPortForwardMultiplexer) run() {
 
 			lruEntry := mux.portForwardLRU.Add(udpConn)
 
+			// Ensure nil interface if newClientSeedPortForward returns nil
+			var updater common.ActivityUpdater
+			seedUpdater := mux.sshClient.newClientSeedPortForward(dialIP)
+			if seedUpdater != nil {
+				updater = seedUpdater
+			}
+
 			conn, err := common.NewActivityMonitoredConn(
 				udpConn,
 				mux.sshClient.idleUDPPortForwardTimeout(),
 				true,
+				updater,
 				lruEntry)
 			if err != nil {
 				lruEntry.Remove()

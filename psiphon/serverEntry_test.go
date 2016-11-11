@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 const (
@@ -43,7 +44,7 @@ func TestDecodeAndValidateServerEntryList(t *testing.T) {
 		hex.EncodeToString([]byte(_INVALID_MALFORMED_IP_ADDRESS_SERVER_ENTRY))
 
 	serverEntries, err := DecodeAndValidateServerEntryList(
-		testEncodedServerEntryList, common.GetCurrentTimestamp(), common.SERVER_ENTRY_SOURCE_EMBEDDED)
+		testEncodedServerEntryList, common.GetCurrentTimestamp(), protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
 	if err != nil {
 		t.Error(err.Error())
 		t.FailNow()
@@ -66,7 +67,7 @@ func TestInvalidServerEntries(t *testing.T) {
 	for _, testCase := range testCases {
 		encodedServerEntry := hex.EncodeToString([]byte(testCase))
 		serverEntry, err := DecodeServerEntry(
-			encodedServerEntry, common.GetCurrentTimestamp(), common.SERVER_ENTRY_SOURCE_EMBEDDED)
+			encodedServerEntry, common.GetCurrentTimestamp(), protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
 		if err != nil {
 			t.Error(err.Error())
 		}

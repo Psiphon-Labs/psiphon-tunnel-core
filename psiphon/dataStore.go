@@ -33,6 +33,7 @@ import (
 
 	"github.com/Psiphon-Inc/bolt"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 // The BoltDB dataStore implementation is an alternative to the sqlite3-based
@@ -57,6 +58,7 @@ const (
 	urlETagsBucket              = "urlETags"
 	keyValueBucket              = "keyValues"
 	tunnelStatsBucket           = "tunnelStats"
+	slokBucket                  = "SLOKs"
 	rankedServerEntryCount      = 100
 )
 
@@ -103,6 +105,7 @@ func InitDataStore(config *Config) (err error) {
 				urlETagsBucket,
 				keyValueBucket,
 				tunnelStatsBucket,
+				slokBucket,
 			}
 			for _, bucket := range requiredBuckets {
 				_, err := tx.CreateBucketIfNotExists([]byte(bucket))
@@ -398,7 +401,7 @@ func NewServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err 
 // newTargetServerEntryIterator is a helper for initializing the TargetServerEntry case
 func newTargetServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err error) {
 	serverEntry, err := DecodeServerEntry(
-		config.TargetServerEntry, common.GetCurrentTimestamp(), common.SERVER_ENTRY_SOURCE_TARGET)
+		config.TargetServerEntry, common.GetCurrentTimestamp(), protocol.SERVER_ENTRY_SOURCE_TARGET)
 	if err != nil {
 		return nil, err
 	}
@@ -994,4 +997,43 @@ func resetAllTunnelStatsToUnreported() error {
 		return common.ContextError(err)
 	}
 	return nil
+}
+
+// SetSLOK stores a SLOK key, referenced by its ID. The bool
+// return value indicates whether the SLOK was already stored.
+func SetSLOK(id, key []byte) (bool, error) {
+	checkInitDataStore()
+
+	var duplicate bool
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(slokBucket))
+		duplicate = bucket.Get(id) != nil
+		err := bucket.Put([]byte(id), []byte(key))
+		return err
+	})
+
+	if err != nil {
+		return false, common.ContextError(err)
+	}
+
+	return duplicate, nil
+}
+
+// GetSLOK returns a SLOK key for the specified ID. The return
+// value is nil if the SLOK is not found.
+func GetSLOK(id []byte) (key []byte, err error) {
+	checkInitDataStore()
+
+	err = singleton.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(slokBucket))
+		key = bucket.Get(id)
+		return nil
+	})
+
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return key, nil
 }

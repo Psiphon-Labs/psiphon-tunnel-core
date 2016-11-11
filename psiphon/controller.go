@@ -32,6 +32,7 @@ import (
 
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 // Controller is a tunnel lifecycle coordinator. It manages lists of servers to
@@ -155,6 +156,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 // - a local SOCKS proxy that port forwards through the pool of tunnels
 // - a local HTTP proxy that port forwards through the pool of tunnels
 func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
+
 	ReportAvailableRegions()
 
 	// Start components
@@ -677,7 +679,7 @@ func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
 	} else {
 		controller.impairedProtocolClassification[failedTunnel.protocol] = 0
 	}
-	if len(controller.getImpairedProtocols()) == len(common.SupportedTunnelProtocols) {
+	if len(controller.getImpairedProtocols()) == len(protocol.SupportedTunnelProtocols) {
 		// Reset classification if all protocols are classified as impaired as
 		// the network situation (or attack) may not be protocol-specific.
 		// TODO: compare against count of distinct supported protocols for
@@ -1045,7 +1047,7 @@ loop:
 				break
 			}
 
-			if controller.config.TargetApiProtocol == common.PSIPHON_SSH_API_PROTOCOL &&
+			if controller.config.TargetApiProtocol == protocol.PSIPHON_SSH_API_PROTOCOL &&
 				!serverEntry.SupportsSSHAPIRequests() {
 				continue
 			}

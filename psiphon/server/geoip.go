@@ -89,8 +89,8 @@ func NewGeoIPService(
 		database := &geoIPDatabase{}
 		database.ReloadableFile = common.NewReloadableFile(
 			filename,
-			func(filename string) error {
-				maxMindReader, err := maxminddb.Open(filename)
+			func(fileContent []byte) error {
+				maxMindReader, err := maxminddb.FromBytes(fileContent)
 				if err != nil {
 					// On error, database state remains the same
 					return common.ContextError(err)
