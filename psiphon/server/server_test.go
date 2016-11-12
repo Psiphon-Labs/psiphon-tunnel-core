@@ -57,6 +57,8 @@ func TestSSH(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			denyTrafficRules:     false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
 		})
 }
 
@@ -67,6 +69,8 @@ func TestOSSH(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			denyTrafficRules:     false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
 		})
 }
 
@@ -77,6 +81,8 @@ func TestUnfrontedMeek(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			denyTrafficRules:     false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
 		})
 }
 
@@ -87,6 +93,8 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			denyTrafficRules:     false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
 		})
 }
 
@@ -97,6 +105,8 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			enableSSHAPIRequests: false,
 			doHotReload:          false,
 			denyTrafficRules:     false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
 		})
 }
 
@@ -107,6 +117,8 @@ func TestHotReload(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
 			denyTrafficRules:     false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
 		})
 }
 
@@ -117,6 +129,32 @@ func TestDenyTrafficRules(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
 			denyTrafficRules:     true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
+func TestTCPOnlySLOK(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			denyTrafficRules:     false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: false,
+		})
+}
+
+func TestUDPOnlySLOK(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			denyTrafficRules:     false,
+			doTunneledWebRequest: false,
+			doTunneledNTPRequest: true,
 		})
 }
 
@@ -125,6 +163,8 @@ type runServerConfig struct {
 	enableSSHAPIRequests bool
 	doHotReload          bool
 	denyTrafficRules     bool
+	doTunneledWebRequest bool
+	doTunneledNTPRequest bool
 }
 
 func sendNotificationReceived(c chan<- struct{}) {
@@ -381,37 +421,44 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	waitOnNotification(t, verificationRequired, timeoutSignal, "verification required timeout exceeded")
 	waitOnNotification(t, verificationCompleted, timeoutSignal, "verification completed timeout exceeded")
 
-	// Test: tunneled web site fetch
+	if runConfig.doTunneledWebRequest {
 
-	err = makeTunneledWebRequest(t, localHTTPProxyPort)
+		// Test: tunneled web site fetch
 
-	if err == nil {
-		if runConfig.denyTrafficRules {
-			t.Fatalf("unexpected tunneled web request success")
-		}
-	} else {
-		if !runConfig.denyTrafficRules {
-			t.Fatalf("tunneled web request failed: %s", err)
-		}
-	}
+		err = makeTunneledWebRequest(t, localHTTPProxyPort)
 
-	// Test: tunneled UDP packets
-
-	udpgwServerAddress := serverConfig.(map[string]interface{})["UDPInterceptUdpgwServerAddress"].(string)
-
-	err = makeTunneledNTPRequest(t, localSOCKSProxyPort, udpgwServerAddress)
-
-	if err == nil {
-		if runConfig.denyTrafficRules {
-			t.Fatalf("unexpected tunneled NTP request success")
-		}
-	} else {
-		if !runConfig.denyTrafficRules {
-			t.Fatalf("tunneled NTP request failed: %s", err)
+		if err == nil {
+			if runConfig.denyTrafficRules {
+				t.Fatalf("unexpected tunneled web request success")
+			}
+		} else {
+			if !runConfig.denyTrafficRules {
+				t.Fatalf("tunneled web request failed: %s", err)
+			}
 		}
 	}
 
-	// Stop client to trigger a final status request and receive SLOK payload
+	if runConfig.doTunneledNTPRequest {
+
+		// Test: tunneled UDP packets
+
+		udpgwServerAddress := serverConfig.(map[string]interface{})["UDPInterceptUdpgwServerAddress"].(string)
+
+		err = makeTunneledNTPRequest(t, localSOCKSProxyPort, udpgwServerAddress)
+
+		if err == nil {
+			if runConfig.denyTrafficRules {
+				t.Fatalf("unexpected tunneled NTP request success")
+			}
+		} else {
+			if !runConfig.denyTrafficRules {
+				t.Fatalf("tunneled NTP request failed: %s", err)
+			}
+		}
+	}
+
+	// Test: stop client to trigger a final status request and receive SLOK payload
+
 	stopClient()
 
 	if !runConfig.denyTrafficRules {
