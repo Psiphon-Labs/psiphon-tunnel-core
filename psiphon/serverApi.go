@@ -357,26 +357,29 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 
 	confirmStatusRequestPayload(statusPayloadInfo)
 
-	var statusResponse protocol.StatusResponse
-	err = json.Unmarshal(response, &statusResponse)
-	if err != nil {
-		return common.ContextError(err)
-	}
+	if len(response) > 0 {
 
-	for _, slok := range statusResponse.SeedPayload.SLOKs {
-		duplicate, err := SetSLOK(slok.ID, slok.Key)
+		var statusResponse protocol.StatusResponse
+		err = json.Unmarshal(response, &statusResponse)
 		if err != nil {
-
-			NoticeAlert("SetSLOK failed: %s", common.ContextError(err))
-
-			// Proceed with next SLOK. Also, no immediate retry.
-			// For an ongoing session, another status request will occur within
-			// PSIPHON_API_STATUS_REQUEST_PERIOD_MIN/MAX and the server will
-			// resend the same SLOKs, giving another opportunity to store.
+			return common.ContextError(err)
 		}
 
-		if tunnel.config.ReportSLOKs {
-			NoticeSLOKSeeded(base64.StdEncoding.EncodeToString(slok.ID), duplicate)
+		for _, slok := range statusResponse.SeedPayload.SLOKs {
+			duplicate, err := SetSLOK(slok.ID, slok.Key)
+			if err != nil {
+
+				NoticeAlert("SetSLOK failed: %s", common.ContextError(err))
+
+				// Proceed with next SLOK. Also, no immediate retry.
+				// For an ongoing session, another status request will occur within
+				// PSIPHON_API_STATUS_REQUEST_PERIOD_MIN/MAX and the server will
+				// resend the same SLOKs, giving another opportunity to store.
+			}
+
+			if tunnel.config.ReportSLOKs {
+				NoticeSLOKSeeded(base64.StdEncoding.EncodeToString(slok.ID), duplicate)
+			}
 		}
 	}
 

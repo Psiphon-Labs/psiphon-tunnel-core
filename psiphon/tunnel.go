@@ -202,7 +202,7 @@ func EstablishTunnel(
 
 // Close stops operating the tunnel and closes the underlying connection.
 // Supports multiple and/or concurrent calls to Close().
-// When isDicarded is set, operateTunnel will not attempt to send final
+// When isDiscarded is set, operateTunnel will not attempt to send final
 // status requests.
 func (tunnel *Tunnel) Close(isDiscarded bool) {
 
@@ -231,13 +231,6 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 	}
 }
 
-// IsClosed returns the tunnel's closed status.
-func (tunnel *Tunnel) IsClosed() bool {
-	tunnel.mutex.Lock()
-	defer tunnel.mutex.Unlock()
-	return tunnel.isClosed
-}
-
 // IsDiscarded returns the tunnel's discarded flag.
 func (tunnel *Tunnel) IsDiscarded() bool {
 	tunnel.mutex.Lock()
@@ -251,10 +244,6 @@ func (tunnel *Tunnel) IsDiscarded() bool {
 // receives its response (or the SSH connection is terminated).
 func (tunnel *Tunnel) SendAPIRequest(
 	name string, requestPayload []byte) ([]byte, error) {
-
-	if tunnel.IsClosed() {
-		return nil, common.ContextError(errors.New("tunnel is closed"))
-	}
 
 	ok, responsePayload, err := tunnel.sshClient.Conn.SendRequest(
 		name, true, requestPayload)
@@ -274,10 +263,6 @@ func (tunnel *Tunnel) SendAPIRequest(
 // This Dial doesn't support split tunnel, so alwaysTunnel is not referenced
 func (tunnel *Tunnel) Dial(
 	remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error) {
-
-	if tunnel.IsClosed() {
-		return nil, common.ContextError(errors.New("tunnel is closed"))
-	}
 
 	type tunnelDialResult struct {
 		sshPortForwardConn net.Conn

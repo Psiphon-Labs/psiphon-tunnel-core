@@ -285,8 +285,9 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 
 	params, err := convertHTTPRequestToAPIRequest(w, r, "statusData")
 
+	var responsePayload []byte
 	if err == nil {
-		_, err = dispatchAPIRequestHandler(
+		responsePayload, err = dispatchAPIRequestHandler(
 			webServer.support,
 			protocol.PSIPHON_WEB_API_PROTOCOL,
 			webServer.lookupGeoIPData(params),
@@ -301,6 +302,7 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusOK)
+	w.Write(responsePayload)
 }
 
 func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *http.Request) {

@@ -287,6 +287,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.TunnelProtocol = runConfig.tunnelProtocol
 	clientConfig.LocalSocksProxyPort = localSOCKSProxyPort
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
+	clientConfig.ReportSLOKs = true
 
 	err = psiphon.InitDataStore(clientConfig)
 	if err != nil {
@@ -347,7 +348,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		defer controllerWaitGroup.Done()
 		controller.Run(controllerShutdownBroadcast)
 	}()
-	defer func() {
+	stopClient := func() {
 		close(controllerShutdownBroadcast)
 
 		shutdownTimeout := time.NewTimer(20 * time.Second)
@@ -363,7 +364,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		case <-shutdownTimeout.C:
 			t.Fatalf("controller shutdown timeout exceeded")
 		}
-	}()
+	}
 
 	// Test: tunnels must be established, and correct homepage
 	// must be received, within 30 seconds
@@ -409,6 +410,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			t.Fatalf("tunneled NTP request failed: %s", err)
 		}
 	}
+
+	// Stop client to trigger a final status request and receive SLOK payload
+	stopClient()
 
 	if !runConfig.denyTrafficRules {
 		waitOnNotification(t, slokSeeded, timeoutSignal, "SLOK seeded timeout exceeded")
@@ -719,7 +723,7 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
           "SeedSpecs" : [
             {
               "ID" : "IXHWfVgWFkEKvgqsjmnJuN3FpaGuCzQMETya+DSQvsk=",
-              "UpstreamSubnets" : ["0.0.0.0/32"],
+              "UpstreamSubnets" : ["0.0.0.0/0"],
               "Targets" :
               {
                   "BytesRead" : 1,
@@ -729,7 +733,7 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
             },
             {
               "ID" : "qvpIcORLE2Pi5TZmqRtVkEp+OKov0MhfsYPLNV7FYtI=",
-              "UpstreamSubnets" : ["0.0.0.0/32"],
+              "UpstreamSubnets" : ["0.0.0.0/0"],
               "Targets" :
               {
                   "BytesRead" : 1,
@@ -739,7 +743,7 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
             }
           ],
           "SeedSpecThreshold" : 2,
-          "SeedPeriodNanoseconds" : 1000000,
+          "SeedPeriodNanoseconds" : 10000000000,
           "SeedPeriodKeySplits": [
             {
               "Total": 2,
@@ -754,7 +758,7 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
 	propagationChannelID, _ := common.MakeRandomStringHex(8)
 
 	now := time.Now().UTC()
-	epoch := now.Truncate(1 * time.Millisecond)
+	epoch := now.Truncate(10 * time.Second)
 	epochStr := epoch.Format(time.RFC3339Nano)
 
 	oslConfigJSON := fmt.Sprintf(
