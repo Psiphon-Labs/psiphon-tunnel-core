@@ -999,6 +999,24 @@ func resetAllTunnelStatsToUnreported() error {
 	return nil
 }
 
+// DeleteSLOKs deletes all SLOK records.
+func DeleteSLOKs() error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(slokBucket))
+		return bucket.ForEach(
+			func(id, _ []byte) error {
+				return bucket.Delete(id)
+			})
+	})
+
+	if err != nil {
+		return common.ContextError(err)
+	}
+	return nil
+}
+
 // SetSLOK stores a SLOK key, referenced by its ID. The bool
 // return value indicates whether the SLOK was already stored.
 func SetSLOK(id, key []byte) (bool, error) {

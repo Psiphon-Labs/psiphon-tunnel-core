@@ -924,6 +924,10 @@ func HandleOSLRequest(tunnel *Tunnel, payload []byte) error {
 		return common.ContextError(err)
 	}
 
+	if oslRequest.ClearLocalSLOKs {
+		DeleteSLOKs()
+	}
+
 	for _, slok := range oslRequest.SeedPayload.SLOKs {
 		duplicate, err := SetSLOK(slok.ID, slok.Key)
 		if err != nil {

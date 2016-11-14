@@ -102,7 +102,8 @@ type ConnectedResponse struct {
 }
 
 type OSLRequest struct {
-	SeedPayload *osl.SeedPayload `json:"seed_payload"`
+	ClearLocalSLOKs bool             `json:"clear_local_sloks"`
+	SeedPayload     *osl.SeedPayload `json:"seed_payload"`
 }
 
 type SSHPasswordPayload struct {
