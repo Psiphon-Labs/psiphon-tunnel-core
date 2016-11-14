@@ -140,8 +140,7 @@ type Scheme struct {
 	// The following fields are ephemeral state.
 
 	epoch                 time.Time
-	subnetLookups         map[*SeedSpec]common.SubnetLookup
-	subnetLookup          common.SubnetLookup
+	subnetLookups         []common.SubnetLookup
 	derivedSLOKCacheMutex sync.RWMutex
 	derivedSLOKCache      map[slokReference]*SLOK
 }
@@ -186,10 +185,12 @@ type KeySplit struct {
 type ClientSeedState struct {
 	scheme               *Scheme
 	propagationChannelID string
-	progressSLOKTime     int64
-	progress             map[*SeedSpec]*TrafficValues
+	signalIssueSLOKs     chan struct{}
+	progress             []*TrafficValues
 	mutex                sync.Mutex
+	progressSLOKTime     int64
 	issuedSLOKs          map[string]*SLOK
+	payloadSLOKs         []*SLOK
 }
 
 // ClientSeedPortForward map a client port forward, which is relaying
@@ -199,8 +200,8 @@ type ClientSeedState struct {
 // and duration count towards the progress of these SeedSpecs and
 // associated SLOKs.
 type ClientSeedPortForward struct {
-	state    *ClientSeedState
-	progress []*TrafficValues
+	state           *ClientSeedState
+	progressIndexes []int
 }
 
 // slokReference uniquely identifies a SLOK by specifying all the fields
@@ -286,14 +287,14 @@ func loadConfig(configJSON []byte) (*Config, error) {
 		previousEpoch = epoch
 
 		scheme.epoch = epoch
-		scheme.subnetLookups = make(map[*SeedSpec]common.SubnetLookup)
+		scheme.subnetLookups = make([]common.SubnetLookup, len(scheme.SeedSpecs))
 		scheme.derivedSLOKCache = make(map[slokReference]*SLOK)
 
 		if len(scheme.MasterKey) != KEY_LENGTH_BYTES {
 			return nil, common.ContextError(errors.New("invalid master key"))
 		}
 
-		for _, seedSpec := range scheme.SeedSpecs {
+		for index, seedSpec := range scheme.SeedSpecs {
 			if len(seedSpec.ID) != KEY_LENGTH_BYTES {
 				return nil, common.ContextError(errors.New("invalid seed spec ID"))
 			}
@@ -304,7 +305,7 @@ func loadConfig(configJSON []byte) (*Config, error) {
 				return nil, common.ContextError(fmt.Errorf("invalid upstream subnets: %s", err))
 			}
 
-			scheme.subnetLookups[seedSpec] = subnetLookup
+			scheme.subnetLookups[index] = subnetLookup
 		}
 
 		if !isValidShamirSplit(len(scheme.SeedSpecs), scheme.SeedSpecThreshold) {
@@ -328,8 +329,16 @@ func loadConfig(configJSON []byte) (*Config, error) {
 // NewClientSeedState creates a new client seed state to track
 // client progress towards seeding SLOKs. psiphond maintains one
 // ClientSeedState for each connected client.
+//
+// A signal is sent on signalIssueSLOKs when sufficient progress
+// has been made that a new SLOK *may* be issued. psiphond will
+// receive the signal and then call GetClientSeedPayload/IssueSLOKs
+// to issue SLOKs, generate payload, and send to the client. The
+// sender will not block sending to signalIssueSLOKs; the channel
+// should be appropriately buffered.
 func (config *Config) NewClientSeedState(
-	clientRegion, propagationChannelID string) *ClientSeedState {
+	clientRegion, propagationChannelID string,
+	signalIssueSLOKs chan struct{}) *ClientSeedState {
 
 	config.ReloadableFile.RLock()
 	defer config.ReloadableFile.RUnlock()
@@ -344,19 +353,21 @@ func (config *Config) NewClientSeedState(
 			(len(scheme.Regions) == 0 || common.Contains(scheme.Regions, clientRegion)) {
 
 			// Empty progress is initialized up front for all seed specs. Once
-			// created, the progress map structure is read-only (the map, not the
+			// created, the progress structure is read-only (the slice, not the
 			// TrafficValue fields); this permits lock-free operation.
-			progress := make(map[*SeedSpec]*TrafficValues)
-			for _, seedSpec := range scheme.SeedSpecs {
-				progress[seedSpec] = &TrafficValues{}
+			progress := make([]*TrafficValues, len(scheme.SeedSpecs))
+			for index := 0; index < len(scheme.SeedSpecs); index++ {
+				progress[index] = &TrafficValues{}
 			}
 
 			return &ClientSeedState{
 				scheme:               scheme,
 				propagationChannelID: propagationChannelID,
+				signalIssueSLOKs:     signalIssueSLOKs,
 				progressSLOKTime:     getSLOKTime(scheme.SeedPeriodNanoseconds),
 				progress:             progress,
 				issuedSLOKs:          make(map[string]*SLOK),
+				payloadSLOKs:         nil,
 			}
 		}
 	}
@@ -382,28 +393,39 @@ func (state *ClientSeedState) NewClientSeedPortForward(
 		return nil
 	}
 
-	var progress []*TrafficValues
+	var progressIndexes []int
 
 	// Determine which seed spec subnets contain upstreamIPAddress
 	// and point to the progress for each. When progress is reported,
 	// it is added directly to all of these TrafficValues instances.
+	// Assumes state.progress entries correspond 1-to-1 with
+	// state.scheme.subnetLookups.
 	// Note: this implementation assumes a small number of seed specs.
 	// For larger numbers, instead of N SubnetLookups, create a single
 	// SubnetLookup which returns, for a given IP address, all matching
 	// subnets and associated seed specs.
-	for seedSpec, subnetLookup := range state.scheme.subnetLookups {
+	for index, subnetLookup := range state.scheme.subnetLookups {
 		if subnetLookup.ContainsIPAddress(upstreamIPAddress) {
-			progress = append(progress, state.progress[seedSpec])
+			progressIndexes = append(progressIndexes, index)
 		}
 	}
 
-	if progress == nil {
+	if progressIndexes == nil {
 		return nil
 	}
 
 	return &ClientSeedPortForward{
-		state:    state,
-		progress: progress,
+		state:           state,
+		progressIndexes: progressIndexes,
+	}
+}
+
+func (state *ClientSeedState) sendIssueSLOKsSignal() {
+	if state.signalIssueSLOKs != nil {
+		select {
+		case state.signalIssueSLOKs <- *new(struct{}):
+		default:
+		}
 	}
 }
 
@@ -419,9 +441,9 @@ func (state *ClientSeedState) NewClientSeedPortForward(
 func (portForward *ClientSeedPortForward) UpdateProgress(
 	bytesRead, bytesWritten int64, durationNanoseconds int64) {
 
-	// Concurrency: access to ClientSeedState is unsynchronized to read-only
-	// fields or atomic, except in the case of a time period rollover, in which
-	// case a mutex is acquired.
+	// Concurrency: non-blocking -- access to ClientSeedState is unsynchronized
+	// to read-only fields, atomic, or channels, except in the case of a time
+	// period rollover, in which case a mutex is acquired.
 
 	slokTime := getSLOKTime(portForward.state.scheme.SeedPeriodNanoseconds)
 
@@ -436,6 +458,12 @@ func (portForward *ClientSeedPortForward) UpdateProgress(
 		portForward.state.mutex.Lock()
 		portForward.state.issueSLOKs()
 		portForward.state.mutex.Unlock()
+
+		// Call to issueSLOKs may have issued new SLOKs. Note that
+		// this will only happen if the time period rolls over with
+		// sufficient progress pending while the signalIssueSLOKs
+		// receiver did not call IssueSLOKs soon enough.
+		portForward.state.sendIssueSLOKsSignal()
 	}
 
 	// Add directly to the permanent TrafficValues progress accumulators
@@ -444,23 +472,40 @@ func (portForward *ClientSeedPortForward) UpdateProgress(
 	// goroutine may be invoking issueSLOKs, which zeros all the accumulators.
 	// As a consequence, progress may be dropped at the exact time of
 	// time period rollover.
-	for _, progress := range portForward.progress {
+	for _, progressIndex := range portForward.progressIndexes {
+
+		seedSpec := portForward.state.scheme.SeedSpecs[progressIndex]
+		progress := portForward.state.progress[progressIndex]
+
+		alreadyExceedsTargets := progress.exceeds(&seedSpec.Targets)
+
 		atomic.AddInt64(&progress.BytesRead, bytesRead)
 		atomic.AddInt64(&progress.BytesWritten, bytesWritten)
 		atomic.AddInt64(&progress.PortForwardDurationNanoseconds, durationNanoseconds)
+
+		// With the target newly met for a SeedSpec, a new
+		// SLOK *may* be issued.
+		if !alreadyExceedsTargets && progress.exceeds(&seedSpec.Targets) {
+			portForward.state.sendIssueSLOKsSignal()
+		}
 	}
 }
 
-// IssueSLOKs checks client progress against each candidate seed spec
+func (lhs *TrafficValues) exceeds(rhs *TrafficValues) bool {
+	return atomic.LoadInt64(&lhs.BytesRead) >= atomic.LoadInt64(&rhs.BytesRead) &&
+		atomic.LoadInt64(&lhs.BytesWritten) >= atomic.LoadInt64(&rhs.BytesWritten) &&
+		atomic.LoadInt64(&lhs.PortForwardDurationNanoseconds) >=
+			atomic.LoadInt64(&rhs.PortForwardDurationNanoseconds)
+}
+
+// issueSLOKs checks client progress against each candidate seed spec
 // and seeds SLOKs when the client traffic levels are achieved. After
 // checking progress, and if the SLOK time period has changed since
 // progress was last recorded, progress is reset. Partial, insufficient
 // progress is intentionally dropped when the time period rolls over.
 // Derived SLOKs are cached to avoid redundant CPU intensive operations.
 // All issued SLOKs are retained in the client state for the duration
-// of the client's session. As there is no mechanism for the client to
-// explicitly acknowledge recieved SLOKs, it is intended that SLOKs
-// will be resent to the client.
+// of the client's session.
 func (state *ClientSeedState) issueSLOKs() {
 
 	// Concurrency: the caller must lock state.mutex.
@@ -471,12 +516,11 @@ func (state *ClientSeedState) issueSLOKs() {
 
 	progressSLOKTime := time.Unix(0, state.progressSLOKTime)
 
-	for seedSpec, progress := range state.progress {
+	for index, progress := range state.progress {
 
-		if atomic.LoadInt64(&progress.BytesRead) >= seedSpec.Targets.BytesRead &&
-			atomic.LoadInt64(&progress.BytesWritten) >= seedSpec.Targets.BytesWritten &&
-			atomic.LoadInt64(&progress.PortForwardDurationNanoseconds) >=
-				seedSpec.Targets.PortForwardDurationNanoseconds {
+		seedSpec := state.scheme.SeedSpecs[index]
+
+		if progress.exceeds(&seedSpec.Targets) {
 
 			ref := &slokReference{
 				PropagationChannelID: state.propagationChannelID,
@@ -494,7 +538,12 @@ func (state *ClientSeedState) issueSLOKs() {
 				state.scheme.derivedSLOKCacheMutex.Unlock()
 			}
 
-			state.issuedSLOKs[string(slok.ID)] = slok
+			// Previously issued SLOKs are not re-added to
+			// the payload.
+			if state.issuedSLOKs[string(slok.ID)] == nil {
+				state.issuedSLOKs[string(slok.ID)] = slok
+				state.payloadSLOKs = append(state.payloadSLOKs, slok)
+			}
 		}
 	}
 
@@ -543,8 +592,8 @@ func deriveSLOK(
 }
 
 // GetSeedPayload issues any pending SLOKs and returns the accumulated
-// SLOKs for a given client. psiphond will periodically call this and
-// return the SLOKs in API request responses.
+// SLOKs for a given client. psiphond will calls this when it receives
+// signalIssueSLOKs which is the trigger to check for new SLOKs.
 // Note: caller must not modify the SLOKs in SeedPayload.SLOKs
 // as these are shared data.
 func (state *ClientSeedState) GetSeedPayload() *SeedPayload {
@@ -552,22 +601,31 @@ func (state *ClientSeedState) GetSeedPayload() *SeedPayload {
 	state.mutex.Lock()
 	defer state.mutex.Unlock()
 
-	state.issueSLOKs()
-
 	if state.scheme == nil {
 		return &SeedPayload{}
 	}
 
-	sloks := make([]*SLOK, len(state.issuedSLOKs))
-	index := 0
-	for _, slok := range state.issuedSLOKs {
+	state.issueSLOKs()
+
+	sloks := make([]*SLOK, len(state.payloadSLOKs))
+	for index, slok := range state.payloadSLOKs {
 		sloks[index] = slok
-		index++
 	}
 
 	return &SeedPayload{
 		SLOKs: sloks,
 	}
+}
+
+// ClearSeedPayload resets the accumulated SLOK payload (but not SLOK
+// progress). psiphond calls this after the client has acknowledged
+// receipt of a payload.
+func (state *ClientSeedState) ClearSeedPayload() {
+
+	state.mutex.Lock()
+	defer state.mutex.Unlock()
+
+	state.payloadSLOKs = nil
 }
 
 // PaveFile describes an OSL data file to be paved to an out-of-band

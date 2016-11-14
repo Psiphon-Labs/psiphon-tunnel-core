@@ -322,7 +322,6 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 		return common.ContextError(err)
 	}
 
-	var response []byte
 	if serverContext.psiphonHttpsClient == nil {
 
 		rawMessage := json.RawMessage(statusPayload)
@@ -332,14 +331,14 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 		request, err = makeSSHAPIRequestPayload(params)
 
 		if err == nil {
-			response, err = serverContext.tunnel.SendAPIRequest(
+			_, err = serverContext.tunnel.SendAPIRequest(
 				protocol.PSIPHON_API_STATUS_REQUEST_NAME, request)
 		}
 
 	} else {
 
 		// Legacy web service API request
-		response, err = serverContext.doPostRequest(
+		_, err = serverContext.doPostRequest(
 			makeRequestUrl(serverContext.tunnel, "", "status", params),
 			"application/json",
 			bytes.NewReader(statusPayload))
@@ -356,32 +355,6 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 	}
 
 	confirmStatusRequestPayload(statusPayloadInfo)
-
-	if len(response) > 0 {
-
-		var statusResponse protocol.StatusResponse
-		err = json.Unmarshal(response, &statusResponse)
-		if err != nil {
-			return common.ContextError(err)
-		}
-
-		for _, slok := range statusResponse.SeedPayload.SLOKs {
-			duplicate, err := SetSLOK(slok.ID, slok.Key)
-			if err != nil {
-
-				NoticeAlert("SetSLOK failed: %s", common.ContextError(err))
-
-				// Proceed with next SLOK. Also, no immediate retry.
-				// For an ongoing session, another status request will occur within
-				// PSIPHON_API_STATUS_REQUEST_PERIOD_MIN/MAX and the server will
-				// resend the same SLOKs, giving another opportunity to store.
-			}
-
-			if tunnel.config.ReportSLOKs {
-				NoticeSLOKSeeded(base64.StdEncoding.EncodeToString(slok.ID), duplicate)
-			}
-		}
-	}
 
 	return nil
 }
@@ -931,4 +904,37 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 		Transport: transport,
 		Timeout:   timeout,
 	}, nil
+}
+
+func HandleServerRequest(tunnel *Tunnel, name string, payload []byte) error {
+
+	switch name {
+	case protocol.PSIPHON_API_OSL_REQUEST_NAME:
+		return HandleOSLRequest(tunnel, payload)
+	}
+
+	return common.ContextError(fmt.Errorf("invalid request name: %s", name))
+}
+
+func HandleOSLRequest(tunnel *Tunnel, payload []byte) error {
+
+	var oslRequest protocol.OSLRequest
+	err := json.Unmarshal(payload, &oslRequest)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	for _, slok := range oslRequest.SeedPayload.SLOKs {
+		duplicate, err := SetSLOK(slok.ID, slok.Key)
+		if err != nil {
+			// TODO: return error to trigger retry?
+			NoticeAlert("SetSLOK failed: %s", common.ContextError(err))
+		}
+
+		if tunnel.config.ReportSLOKs {
+			NoticeSLOKSeeded(base64.StdEncoding.EncodeToString(slok.ID), duplicate)
+		}
+	}
+
+	return nil
 }

@@ -369,30 +369,11 @@ func statusAPIRequestHandler(
 		}
 	}
 
-	// Note: ignoring param format errors as params have been validated
-	sessionID, _ := getStringRequestParam(params, "client_session_id")
-
-	// TODO: in the case of SSH API requests, the actual sshClient could
-	// be passed in and used directly.
-	seedPayload, err := support.TunnelServer.GetClientSeedPayload(sessionID)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-
-	statusResponse := protocol.StatusResponse{
-		SeedPayload: seedPayload,
-	}
-
-	responsePayload, err := json.Marshal(statusResponse)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-
 	for _, logItem := range logQueue {
 		log.LogRawFieldsWithTimestamp(logItem)
 	}
 
-	return responsePayload, nil
+	return make([]byte, 0), nil
 }
 
 // clientVerificationAPIRequestHandler implements the

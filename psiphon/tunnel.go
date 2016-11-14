@@ -77,6 +77,7 @@ type Tunnel struct {
 	protocol                     string
 	conn                         *common.ActivityMonitoredConn
 	sshClient                    *ssh.Client
+	sshServerRequests            <-chan *ssh.Request
 	operateWaitGroup             *sync.WaitGroup
 	shutdownOperateBroadcast     chan struct{}
 	signalPortForwardFailure     chan struct{}
@@ -129,7 +130,7 @@ func EstablishTunnel(
 
 	// Build transport layers and establish SSH connection. Note that
 	// dialConn and monitoredConn are the same network connection.
-	dialConn, monitoredConn, sshClient, dialStats, err := dialSsh(
+	dialResult, err := dialSsh(
 		config, pendingConns, serverEntry, selectedProtocol, sessionId)
 	if err != nil {
 		return nil, common.ContextError(err)
@@ -138,9 +139,9 @@ func EstablishTunnel(
 	// Cleanup on error
 	defer func() {
 		if err != nil {
-			sshClient.Close()
-			monitoredConn.Close()
-			pendingConns.Remove(dialConn)
+			dialResult.sshClient.Close()
+			dialResult.monitoredConn.Close()
+			pendingConns.Remove(dialResult.dialConn)
 		}
 	}()
 
@@ -152,14 +153,15 @@ func EstablishTunnel(
 		isClosed:                 false,
 		serverEntry:              serverEntry,
 		protocol:                 selectedProtocol,
-		conn:                     monitoredConn,
-		sshClient:                sshClient,
+		conn:                     dialResult.monitoredConn,
+		sshClient:                dialResult.sshClient,
+		sshServerRequests:        dialResult.sshRequests,
 		operateWaitGroup:         new(sync.WaitGroup),
 		shutdownOperateBroadcast: make(chan struct{}),
 		// A buffer allows at least one signal to be sent even when the receiver is
 		// not listening. Senders should not block.
 		signalPortForwardFailure: make(chan struct{}, 1),
-		dialStats:                dialStats,
+		dialStats:                dialResult.dialStats,
 		// Buffer allows SetClientVerificationPayload to submit one new payload
 		// without blocking or dropping it.
 		newClientVerificationPayload: make(chan string, 1),
@@ -191,7 +193,7 @@ func EstablishTunnel(
 	tunnel.establishedTime = monotime.Now()
 
 	// Now that network operations are complete, cancel interruptibility
-	pendingConns.Remove(dialConn)
+	pendingConns.Remove(dialResult.dialConn)
 
 	// Spawn the operateTunnel goroutine, which monitors the tunnel and handles periodic stats updates.
 	tunnel.operateWaitGroup.Add(1)
@@ -522,6 +524,14 @@ func initMeekConfig(
 	}, nil
 }
 
+type dialResult struct {
+	dialConn      net.Conn
+	monitoredConn *common.ActivityMonitoredConn
+	sshClient     *ssh.Client
+	sshRequests   <-chan *ssh.Request
+	dialStats     *TunnelDialStats
+}
+
 // dialSsh is a helper that builds the transport layers and establishes the SSH connection.
 // When additional dial configuration is used, DialStats are recorded and returned.
 //
@@ -534,7 +544,7 @@ func dialSsh(
 	pendingConns *common.Conns,
 	serverEntry *ServerEntry,
 	selectedProtocol,
-	sessionId string) (net.Conn, *common.ActivityMonitoredConn, *ssh.Client, *TunnelDialStats, error) {
+	sessionId string) (*dialResult, error) {
 
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
@@ -556,7 +566,7 @@ func dialSsh(
 		useObfuscatedSsh = true
 		meekConfig, err = initMeekConfig(config, serverEntry, selectedProtocol, sessionId)
 		if err != nil {
-			return nil, nil, nil, nil, common.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 	}
 
@@ -596,12 +606,12 @@ func dialSsh(
 	if meekConfig != nil {
 		dialConn, err = DialMeek(meekConfig, dialConfig)
 		if err != nil {
-			return nil, nil, nil, nil, common.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 	} else {
 		dialConn, err = DialTCP(directTCPDialAddress, dialConfig)
 		if err != nil {
-			return nil, nil, nil, nil, common.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 	}
 
@@ -617,7 +627,7 @@ func dialSsh(
 	// Activity monitoring is used to measure tunnel duration
 	monitoredConn, err := common.NewActivityMonitoredConn(dialConn, 0, false, nil, nil)
 	if err != nil {
-		return nil, nil, nil, nil, common.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	// Apply throttling (if configured)
@@ -629,14 +639,14 @@ func dialSsh(
 		sshConn, err = NewObfuscatedSshConn(
 			OBFUSCATION_CONN_MODE_CLIENT, throttledConn, serverEntry.SshObfuscatedKey)
 		if err != nil {
-			return nil, nil, nil, nil, common.ContextError(err)
+			return nil, common.ContextError(err)
 		}
 	}
 
 	// Now establish the SSH session over the conn transport
 	expectedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.SshHostKey)
 	if err != nil {
-		return nil, nil, nil, nil, common.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	sshCertChecker := &ssh.CertChecker{
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
@@ -646,18 +656,21 @@ func dialSsh(
 			return nil
 		},
 	}
-	sshPasswordPayload, err := json.Marshal(
-		struct {
-			SessionId   string `json:"SessionId"`
-			SshPassword string `json:"SshPassword"`
-		}{sessionId, serverEntry.SshPassword})
+
+	sshPasswordPayload := &protocol.SSHPasswordPayload{
+		SessionId:          sessionId,
+		SshPassword:        serverEntry.SshPassword,
+		ClientCapabilities: []string{protocol.CLIENT_CAPABILITY_SERVER_REQUESTS},
+	}
+
+	payload, err := json.Marshal(sshPasswordPayload)
 	if err != nil {
-		return nil, nil, nil, nil, common.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	sshClientConfig := &ssh.ClientConfig{
 		User: serverEntry.SshUsername,
 		Auth: []ssh.AuthMethod{
-			ssh.Password(string(sshPasswordPayload)),
+			ssh.Password(string(payload)),
 		},
 		HostKeyCallback: sshCertChecker.CheckHostKey,
 	}
@@ -674,13 +687,14 @@ func dialSsh(
 	// TODO: adjust the timeout to account for time-elapsed-from-start
 
 	type sshNewClientResult struct {
-		sshClient *ssh.Client
-		err       error
+		sshClient   *ssh.Client
+		sshRequests <-chan *ssh.Request
+		err         error
 	}
 	resultChannel := make(chan *sshNewClientResult, 2)
 	if *config.TunnelConnectTimeoutSeconds > 0 {
 		time.AfterFunc(time.Duration(*config.TunnelConnectTimeoutSeconds)*time.Second, func() {
-			resultChannel <- &sshNewClientResult{nil, errors.New("ssh dial timeout")}
+			resultChannel <- &sshNewClientResult{nil, nil, errors.New("ssh dial timeout")}
 		})
 	}
 
@@ -688,17 +702,18 @@ func dialSsh(
 		// The following is adapted from ssh.Dial(), here using a custom conn
 		// The sshAddress is passed through to host key verification callbacks; we don't use it.
 		sshAddress := ""
-		sshClientConn, sshChans, sshReqs, err := ssh.NewClientConn(sshConn, sshAddress, sshClientConfig)
+		sshClientConn, sshChannels, sshRequests, err := ssh.NewClientConn(
+			sshConn, sshAddress, sshClientConfig)
 		var sshClient *ssh.Client
 		if err == nil {
-			sshClient = ssh.NewClient(sshClientConn, sshChans, sshReqs)
+			sshClient = ssh.NewClient(sshClientConn, sshChannels, nil)
 		}
-		resultChannel <- &sshNewClientResult{sshClient, err}
+		resultChannel <- &sshNewClientResult{sshClient, sshRequests, err}
 	}()
 
 	result := <-resultChannel
 	if result.err != nil {
-		return nil, nil, nil, nil, common.ContextError(result.err)
+		return nil, common.ContextError(result.err)
 	}
 
 	var dialStats *TunnelDialStats
@@ -737,7 +752,13 @@ func dialSsh(
 	// but should not be used to perform I/O as that would interfere with SSH
 	// (and also bypasses throttling).
 
-	return dialConn, monitoredConn, result.sshClient, dialStats, nil
+	return &dialResult{
+			dialConn:      dialConn,
+			monitoredConn: monitoredConn,
+			sshClient:     result.sshClient,
+			sshRequests:   result.sshRequests,
+			dialStats:     dialStats},
+		nil
 }
 
 func makeRandomPeriod(min, max time.Duration) time.Duration {
@@ -977,6 +998,18 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			}
 
 		case err = <-sshKeepAliveError:
+
+		case serverRequest := <-tunnel.sshServerRequests:
+			if serverRequest != nil {
+				err := HandleServerRequest(tunnel, serverRequest.Type, serverRequest.Payload)
+				if err == nil {
+					serverRequest.Reply(true, nil)
+				} else {
+					NoticeAlert("HandleServerRequest for %s failed: %s", serverRequest.Type, err)
+					serverRequest.Reply(false, nil)
+
+				}
+			}
 
 		case <-tunnel.shutdownOperateBroadcast:
 			shutdown = true

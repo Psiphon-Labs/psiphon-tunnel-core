@@ -45,6 +45,8 @@ const (
 	SSH_TCP_PORT_FORWARD_IP_LOOKUP_TIMEOUT = 30 * time.Second
 	SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT      = 30 * time.Second
 	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE  = 8192
+	SSH_SEND_OSL_INITIAL_RETRY_DELAY       = 30 * time.Second
+	SSH_SEND_OSL_RETRY_FACTOR              = 2
 )
 
 // TunnelServer is the main server that accepts Psiphon client
@@ -215,14 +217,6 @@ func (server *TunnelServer) SetClientHandshakeState(
 	sessionID string, state handshakeState) error {
 
 	return server.sshServer.setClientHandshakeState(sessionID, state)
-}
-
-// GetClientSeedPayload gets the current OSL seed payload for the specified
-// client session. Any seeded SLOKs are issued and included in the payload.
-func (server *TunnelServer) GetClientSeedPayload(
-	sessionID string) (*osl.SeedPayload, error) {
-
-	return server.sshServer.getClientSeedPayload(sessionID)
 }
 
 // SetEstablishTunnels sets whether new tunnels may be established or not.
@@ -558,20 +552,6 @@ func (sshServer *sshServer) setClientHandshakeState(
 	return nil
 }
 
-func (sshServer *sshServer) getClientSeedPayload(
-	sessionID string) (*osl.SeedPayload, error) {
-
-	sshServer.clientsMutex.Lock()
-	client := sshServer.clients[sessionID]
-	sshServer.clientsMutex.Unlock()
-
-	if client == nil {
-		return nil, common.ContextError(errors.New("unknown session ID"))
-	}
-
-	return client.getClientSeedPayload(), nil
-}
-
 func (sshServer *sshServer) stopClients() {
 
 	sshServer.clientsMutex.Lock()
@@ -607,6 +587,7 @@ type sshClient struct {
 	throttledConn           *common.ThrottledConn
 	geoIPData               GeoIPData
 	sessionID               string
+	supportsServerRequests  bool
 	handshakeState          handshakeState
 	udpChannel              ssh.Channel
 	trafficRules            TrafficRules
@@ -616,6 +597,7 @@ type sshClient struct {
 	channelHandlerWaitGroup *sync.WaitGroup
 	tcpPortForwardLRU       *common.LRUConns
 	oslClientSeedState      *osl.ClientSeedState
+	signalIssueSLOKs        chan struct{}
 	stopBroadcast           chan struct{}
 }
 
@@ -653,6 +635,7 @@ func newSshClient(
 		geoIPData:               geoIPData,
 		channelHandlerWaitGroup: new(sync.WaitGroup),
 		tcpPortForwardLRU:       common.NewLRUConns(),
+		signalIssueSLOKs:        make(chan struct{}, 1),
 		stopBroadcast:           make(chan struct{}),
 	}
 }
@@ -784,10 +767,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 	expectedSessionIDLength := 2 * protocol.PSIPHON_API_CLIENT_SESSION_ID_LENGTH
 	expectedSSHPasswordLength := 2 * SSH_PASSWORD_BYTE_LENGTH
 
-	var sshPasswordPayload struct {
-		SessionId   string `json:"SessionId"`
-		SshPassword string `json:"SshPassword"`
-	}
+	var sshPasswordPayload protocol.SSHPasswordPayload
 	err := json.Unmarshal(password, &sshPasswordPayload)
 	if err != nil {
 
@@ -820,8 +800,12 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 
 	sessionID := sshPasswordPayload.SessionId
 
+	supportsServerRequests := common.Contains(
+		sshPasswordPayload.ClientCapabilities, protocol.CLIENT_CAPABILITY_SERVER_REQUESTS)
+
 	sshClient.Lock()
 	sshClient.sessionID = sessionID
+	sshClient.supportsServerRequests = supportsServerRequests
 	geoIPData := sshClient.geoIPData
 	sshClient.Unlock()
 
@@ -920,7 +904,10 @@ func (sshClient *sshClient) stop() {
 func (sshClient *sshClient) runTunnel(
 	channels <-chan ssh.NewChannel, requests <-chan *ssh.Request) {
 
+	stopBroadcast := make(chan struct{})
+
 	requestsWaitGroup := new(sync.WaitGroup)
+
 	requestsWaitGroup.Add(1)
 	go func() {
 		defer requestsWaitGroup.Done()
@@ -956,6 +943,14 @@ func (sshClient *sshClient) runTunnel(
 		}
 	}()
 
+	if sshClient.supportsServerRequests {
+		requestsWaitGroup.Add(1)
+		go func() {
+			defer requestsWaitGroup.Done()
+			sshClient.runOSLSender(stopBroadcast)
+		}()
+	}
+
 	for newChannel := range channels {
 
 		if newChannel.ChannelType() != "direct-tcpip" {
@@ -968,7 +963,81 @@ func (sshClient *sshClient) runTunnel(
 		go sshClient.handleNewPortForwardChannel(newChannel)
 	}
 
+	close(stopBroadcast)
+
 	requestsWaitGroup.Wait()
+}
+
+func (sshClient *sshClient) runOSLSender(stopBroadcast <-chan struct{}) {
+
+	for {
+		// Await a signal that there are SLOKs to send
+		// TODO: use reflect.SelectCase, and optionally await timer here?
+		select {
+		case <-sshClient.signalIssueSLOKs:
+		case <-stopBroadcast:
+			return
+		}
+
+		retryDelay := SSH_SEND_OSL_INITIAL_RETRY_DELAY
+		for {
+			err := sshClient.sendOSLRequest()
+			if err == nil {
+				break
+			}
+			log.WithContextFields(LogFields{"error": err}).Warning("sendOSLRequest failed")
+
+			// If the request failed, retry after a delay (with exponential backoff)
+			// or when signaled that there are additional SLOKs to send
+			retryTimer := time.NewTimer(retryDelay)
+			select {
+			case <-retryTimer.C:
+			case <-sshClient.signalIssueSLOKs:
+			case <-stopBroadcast:
+				retryTimer.Stop()
+				return
+			}
+			retryTimer.Stop()
+			retryDelay *= SSH_SEND_OSL_RETRY_FACTOR
+		}
+	}
+}
+
+// sendOSLRequest will invoke osl.GetSeedPayload to issue SLOKs and
+// generate a payload, and send an OSL request to the client when
+// there are new SLOKs in the payload.
+func (sshClient *sshClient) sendOSLRequest() error {
+
+	seedPayload := sshClient.getOSLSeedPayload()
+
+	// Don't send when no SLOKs. This will happen when signalIssueSLOKs
+	// is received but no new SLOKs are issued.
+	if len(seedPayload.SLOKs) == 0 {
+		return nil
+	}
+
+	oslRequest := protocol.OSLRequest{
+		SeedPayload: seedPayload,
+	}
+	requestPayload, err := json.Marshal(oslRequest)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	ok, _, err := sshClient.sshConn.SendRequest(
+		protocol.PSIPHON_API_OSL_REQUEST_NAME,
+		true,
+		requestPayload)
+	if err != nil {
+		return common.ContextError(err)
+	}
+	if !ok {
+		return common.ContextError(errors.New("client rejected request"))
+	}
+
+	sshClient.clearOSLSeedPayload()
+
+	return nil
 }
 
 func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, reason ssh.RejectionReason, logMessage string) {
@@ -1083,7 +1152,8 @@ func (sshClient *sshClient) setOSLConfig() {
 
 	sshClient.oslClientSeedState = sshClient.sshServer.support.OSLConfig.NewClientSeedState(
 		sshClient.geoIPData.Country,
-		propagationChannelID)
+		propagationChannelID,
+		sshClient.signalIssueSLOKs)
 }
 
 // newClientSeedPortForward will return nil when no seeding is
@@ -1100,9 +1170,9 @@ func (sshClient *sshClient) newClientSeedPortForward(ipAddress net.IP) *osl.Clie
 	return sshClient.oslClientSeedState.NewClientSeedPortForward(ipAddress)
 }
 
-// getClientSeedPayload returns a payload containing all seeded SLOKs for
+// getOSLSeedPayload returns a payload containing all seeded SLOKs for
 // this client's session.
-func (sshClient *sshClient) getClientSeedPayload() *osl.SeedPayload {
+func (sshClient *sshClient) getOSLSeedPayload() *osl.SeedPayload {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
@@ -1112,6 +1182,13 @@ func (sshClient *sshClient) getClientSeedPayload() *osl.SeedPayload {
 	}
 
 	return sshClient.oslClientSeedState.GetSeedPayload()
+}
+
+func (sshClient *sshClient) clearOSLSeedPayload() {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	sshClient.oslClientSeedState.ClearSeedPayload()
 }
 
 func (sshClient *sshClient) rateLimits() common.RateLimits {
