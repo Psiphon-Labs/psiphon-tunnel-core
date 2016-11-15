@@ -187,8 +187,8 @@ type ClientSeedState struct {
 	propagationChannelID string
 	signalIssueSLOKs     chan struct{}
 	progress             []*TrafficValues
-	mutex                sync.Mutex
 	progressSLOKTime     int64
+	mutex                sync.Mutex
 	issuedSLOKs          map[string]*SLOK
 	payloadSLOKs         []*SLOK
 }
@@ -549,8 +549,8 @@ func (state *ClientSeedState) issueSLOKs() {
 
 	slokTime := getSLOKTime(state.scheme.SeedPeriodNanoseconds)
 
-	if slokTime != state.progressSLOKTime {
-		state.progressSLOKTime = slokTime
+	if slokTime != atomic.LoadInt64(&state.progressSLOKTime) {
+		atomic.StoreInt64(&state.progressSLOKTime, slokTime)
 		// The progress map structure is not reset or modifed; instead
 		// the mapped accumulator values are zeroed. Concurrently, port
 		// forward relay goroutines continue to add to these accumulators.
