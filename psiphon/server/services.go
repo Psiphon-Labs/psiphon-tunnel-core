@@ -24,6 +24,7 @@
 package server
 
 import (
+	"math/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -42,6 +43,8 @@ import (
 // and then starts the server components and runs them until os.Interrupt or
 // os.Kill signals are received. The config determines which components are run.
 func RunServices(configJSON []byte) error {
+
+	rand.Seed(int64(time.Now().Nanosecond()))
 
 	config, err := LoadConfig(configJSON)
 	if err != nil {

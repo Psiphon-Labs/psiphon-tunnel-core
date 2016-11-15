@@ -1,0 +1,13 @@
+/*
+These are the minimum values required to use the Psiphon Tunnel.
+ClientVersion is the version number of your software, which will be tracked in Psiphon stats.
+All other values will be provided to you by Psiphon Inc.
+*/
+
+{
+  "ClientVersion": "123", /* Must be a number in a string. */
+  "PropagationChannelId": "...",
+  "SponsorId": "...",
+  "RemoteServerListSignaturePublicKey": "...",
+  "RemoteServerListUrl": "..."
+}

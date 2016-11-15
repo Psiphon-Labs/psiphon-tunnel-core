@@ -1,0 +1,579 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		662658EE1DCB8CF300872F6C /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662658ED1DCB8CF300872F6C /* AppDelegate.swift */; };
+		662658F01DCB8CF300872F6C /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662658EF1DCB8CF300872F6C /* ViewController.swift */; };
+		662658F31DCB8CF300872F6C /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 662658F11DCB8CF300872F6C /* Main.storyboard */; };
+		662658F51DCB8CF300872F6C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 662658F41DCB8CF300872F6C /* Assets.xcassets */; };
+		662658F81DCB8CF300872F6C /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 662658F61DCB8CF300872F6C /* LaunchScreen.storyboard */; };
+		662659031DCB8CF400872F6C /* TunneledWebRequestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662659021DCB8CF400872F6C /* TunneledWebRequestTests.swift */; };
+		6626590E1DCB8CF400872F6C /* TunneledWebRequestUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6626590D1DCB8CF400872F6C /* TunneledWebRequestUITests.swift */; };
+		662659211DCBC7C300872F6C /* PsiphonTunnel.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 662659201DCBC7C300872F6C /* PsiphonTunnel.framework */; };
+		662659231DCBC8D800872F6C /* PsiphonTunnel.framework in CopyFiles */ = {isa = PBXBuildFile; fileRef = 662659201DCBC7C300872F6C /* PsiphonTunnel.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		6688DBB61DCD684B00721A9E /* psiphon-config.json in Resources */ = {isa = PBXBuildFile; fileRef = 6688DBB51DCD684B00721A9E /* psiphon-config.json */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		662658FF1DCB8CF400872F6C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 662658E21DCB8CF300872F6C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 662658E91DCB8CF300872F6C;
+			remoteInfo = TunneledWebRequest;
+		};
+		6626590A1DCB8CF400872F6C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 662658E21DCB8CF300872F6C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 662658E91DCB8CF300872F6C;
+			remoteInfo = TunneledWebRequest;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		662659221DCBC8CB00872F6C /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				662659231DCBC8D800872F6C /* PsiphonTunnel.framework in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		662658EA1DCB8CF300872F6C /* TunneledWebRequest.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TunneledWebRequest.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		662658ED1DCB8CF300872F6C /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		662658EF1DCB8CF300872F6C /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
+		662658F21DCB8CF300872F6C /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+		662658F41DCB8CF300872F6C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		662658F71DCB8CF300872F6C /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		662658F91DCB8CF300872F6C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		662658FE1DCB8CF400872F6C /* TunneledWebRequestTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TunneledWebRequestTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		662659021DCB8CF400872F6C /* TunneledWebRequestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunneledWebRequestTests.swift; sourceTree = "<group>"; };
+		662659041DCB8CF400872F6C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		662659091DCB8CF400872F6C /* TunneledWebRequestUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TunneledWebRequestUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		6626590D1DCB8CF400872F6C /* TunneledWebRequestUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunneledWebRequestUITests.swift; sourceTree = "<group>"; };
+		6626590F1DCB8CF400872F6C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		662659201DCBC7C300872F6C /* PsiphonTunnel.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = PsiphonTunnel.framework; sourceTree = "<group>"; };
+		6688DBB51DCD684B00721A9E /* psiphon-config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = "psiphon-config.json"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		662658E71DCB8CF300872F6C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				662659211DCBC7C300872F6C /* PsiphonTunnel.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		662658FB1DCB8CF400872F6C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		662659061DCB8CF400872F6C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		662658E11DCB8CF300872F6C = {
+			isa = PBXGroup;
+			children = (
+				662658EC1DCB8CF300872F6C /* TunneledWebRequest */,
+				662659011DCB8CF400872F6C /* TunneledWebRequestTests */,
+				6626590C1DCB8CF400872F6C /* TunneledWebRequestUITests */,
+				662658EB1DCB8CF300872F6C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		662658EB1DCB8CF300872F6C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				662658EA1DCB8CF300872F6C /* TunneledWebRequest.app */,
+				662658FE1DCB8CF400872F6C /* TunneledWebRequestTests.xctest */,
+				662659091DCB8CF400872F6C /* TunneledWebRequestUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		662658EC1DCB8CF300872F6C /* TunneledWebRequest */ = {
+			isa = PBXGroup;
+			children = (
+				662658ED1DCB8CF300872F6C /* AppDelegate.swift */,
+				662658EF1DCB8CF300872F6C /* ViewController.swift */,
+				662658F11DCB8CF300872F6C /* Main.storyboard */,
+				662658F41DCB8CF300872F6C /* Assets.xcassets */,
+				662658F61DCB8CF300872F6C /* LaunchScreen.storyboard */,
+				662658F91DCB8CF300872F6C /* Info.plist */,
+				6688DBB51DCD684B00721A9E /* psiphon-config.json */,
+				662659201DCBC7C300872F6C /* PsiphonTunnel.framework */,
+			);
+			path = TunneledWebRequest;
+			sourceTree = "<group>";
+		};
+		662659011DCB8CF400872F6C /* TunneledWebRequestTests */ = {
+			isa = PBXGroup;
+			children = (
+				662659021DCB8CF400872F6C /* TunneledWebRequestTests.swift */,
+				662659041DCB8CF400872F6C /* Info.plist */,
+			);
+			path = TunneledWebRequestTests;
+			sourceTree = "<group>";
+		};
+		6626590C1DCB8CF400872F6C /* TunneledWebRequestUITests */ = {
+			isa = PBXGroup;
+			children = (
+				6626590D1DCB8CF400872F6C /* TunneledWebRequestUITests.swift */,
+				6626590F1DCB8CF400872F6C /* Info.plist */,
+			);
+			path = TunneledWebRequestUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		662658E91DCB8CF300872F6C /* TunneledWebRequest */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 662659121DCB8CF400872F6C /* Build configuration list for PBXNativeTarget "TunneledWebRequest" */;
+			buildPhases = (
+				662658E61DCB8CF300872F6C /* Sources */,
+				662658E71DCB8CF300872F6C /* Frameworks */,
+				662658E81DCB8CF300872F6C /* Resources */,
+				662659221DCBC8CB00872F6C /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TunneledWebRequest;
+			productName = TunneledWebRequest;
+			productReference = 662658EA1DCB8CF300872F6C /* TunneledWebRequest.app */;
+			productType = "com.apple.product-type.application";
+		};
+		662658FD1DCB8CF400872F6C /* TunneledWebRequestTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 662659151DCB8CF400872F6C /* Build configuration list for PBXNativeTarget "TunneledWebRequestTests" */;
+			buildPhases = (
+				662658FA1DCB8CF400872F6C /* Sources */,
+				662658FB1DCB8CF400872F6C /* Frameworks */,
+				662658FC1DCB8CF400872F6C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				662659001DCB8CF400872F6C /* PBXTargetDependency */,
+			);
+			name = TunneledWebRequestTests;
+			productName = TunneledWebRequestTests;
+			productReference = 662658FE1DCB8CF400872F6C /* TunneledWebRequestTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		662659081DCB8CF400872F6C /* TunneledWebRequestUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 662659181DCB8CF400872F6C /* Build configuration list for PBXNativeTarget "TunneledWebRequestUITests" */;
+			buildPhases = (
+				662659051DCB8CF400872F6C /* Sources */,
+				662659061DCB8CF400872F6C /* Frameworks */,
+				662659071DCB8CF400872F6C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				6626590B1DCB8CF400872F6C /* PBXTargetDependency */,
+			);
+			name = TunneledWebRequestUITests;
+			productName = TunneledWebRequestUITests;
+			productReference = 662659091DCB8CF400872F6C /* TunneledWebRequestUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		662658E21DCB8CF300872F6C /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 0800;
+				LastUpgradeCheck = 0810;
+				ORGANIZATIONNAME = "Psiphon Inc.";
+				TargetAttributes = {
+					662658E91DCB8CF300872F6C = {
+						CreatedOnToolsVersion = 8.0;
+						DevelopmentTeam = Q6HLNEX92A;
+						ProvisioningStyle = Automatic;
+					};
+					662658FD1DCB8CF400872F6C = {
+						CreatedOnToolsVersion = 8.0;
+						DevelopmentTeam = Q6HLNEX92A;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 662658E91DCB8CF300872F6C;
+					};
+					662659081DCB8CF400872F6C = {
+						CreatedOnToolsVersion = 8.0;
+						DevelopmentTeam = Q6HLNEX92A;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 662658E91DCB8CF300872F6C;
+					};
+				};
+			};
+			buildConfigurationList = 662658E51DCB8CF300872F6C /* Build configuration list for PBXProject "TunneledWebRequest" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = English;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 662658E11DCB8CF300872F6C;
+			productRefGroup = 662658EB1DCB8CF300872F6C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				662658E91DCB8CF300872F6C /* TunneledWebRequest */,
+				662658FD1DCB8CF400872F6C /* TunneledWebRequestTests */,
+				662659081DCB8CF400872F6C /* TunneledWebRequestUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		662658E81DCB8CF300872F6C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				662658F81DCB8CF300872F6C /* LaunchScreen.storyboard in Resources */,
+				662658F51DCB8CF300872F6C /* Assets.xcassets in Resources */,
+				662658F31DCB8CF300872F6C /* Main.storyboard in Resources */,
+				6688DBB61DCD684B00721A9E /* psiphon-config.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		662658FC1DCB8CF400872F6C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		662659071DCB8CF400872F6C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		662658E61DCB8CF300872F6C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				662658F01DCB8CF300872F6C /* ViewController.swift in Sources */,
+				662658EE1DCB8CF300872F6C /* AppDelegate.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		662658FA1DCB8CF400872F6C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				662659031DCB8CF400872F6C /* TunneledWebRequestTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		662659051DCB8CF400872F6C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6626590E1DCB8CF400872F6C /* TunneledWebRequestUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		662659001DCB8CF400872F6C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 662658E91DCB8CF300872F6C /* TunneledWebRequest */;
+			targetProxy = 662658FF1DCB8CF400872F6C /* PBXContainerItemProxy */;
+		};
+		6626590B1DCB8CF400872F6C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 662658E91DCB8CF300872F6C /* TunneledWebRequest */;
+			targetProxy = 6626590A1DCB8CF400872F6C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		662658F11DCB8CF300872F6C /* Main.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				662658F21DCB8CF300872F6C /* Base */,
+			);
+			name = Main.storyboard;
+			sourceTree = "<group>";
+		};
+		662658F61DCB8CF300872F6C /* LaunchScreen.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				662658F71DCB8CF300872F6C /* Base */,
+			);
+			name = LaunchScreen.storyboard;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		662659101DCB8CF400872F6C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_SUSPICIOUS_MOVES = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_BITCODE = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 9.3;
+				MTL_ENABLE_DEBUG_INFO = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		662659111DCB8CF400872F6C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_SUSPICIOUS_MOVES = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_BITCODE = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 9.3;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_OPTIMIZATION_LEVEL = "-Owholemodule";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		662659131DCB8CF400872F6C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				DEVELOPMENT_TEAM = Q6HLNEX92A;
+				ENABLE_BITCODE = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/TunneledWebRequest",
+				);
+				INFOPLIST_FILE = TunneledWebRequest/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebRequest;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRIP_BITCODE_FROM_COPIED_FILES = NO;
+				SWIFT_VERSION = 3.0;
+			};
+			name = Debug;
+		};
+		662659141DCB8CF400872F6C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				DEVELOPMENT_TEAM = Q6HLNEX92A;
+				ENABLE_BITCODE = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/TunneledWebRequest",
+				);
+				INFOPLIST_FILE = TunneledWebRequest/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebRequest;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRIP_BITCODE_FROM_COPIED_FILES = NO;
+				SWIFT_VERSION = 3.0;
+			};
+			name = Release;
+		};
+		662659161DCB8CF400872F6C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = Q6HLNEX92A;
+				INFOPLIST_FILE = TunneledWebRequestTests/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebRequestTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 3.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TunneledWebRequest.app/TunneledWebRequest";
+			};
+			name = Debug;
+		};
+		662659171DCB8CF400872F6C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = Q6HLNEX92A;
+				INFOPLIST_FILE = TunneledWebRequestTests/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebRequestTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 3.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TunneledWebRequest.app/TunneledWebRequest";
+			};
+			name = Release;
+		};
+		662659191DCB8CF400872F6C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				DEVELOPMENT_TEAM = Q6HLNEX92A;
+				INFOPLIST_FILE = TunneledWebRequestUITests/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebRequestUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 3.0;
+				TEST_TARGET_NAME = TunneledWebRequest;
+			};
+			name = Debug;
+		};
+		6626591A1DCB8CF400872F6C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				DEVELOPMENT_TEAM = Q6HLNEX92A;
+				INFOPLIST_FILE = TunneledWebRequestUITests/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebRequestUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 3.0;
+				TEST_TARGET_NAME = TunneledWebRequest;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		662658E51DCB8CF300872F6C /* Build configuration list for PBXProject "TunneledWebRequest" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				662659101DCB8CF400872F6C /* Debug */,
+				662659111DCB8CF400872F6C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		662659121DCB8CF400872F6C /* Build configuration list for PBXNativeTarget "TunneledWebRequest" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				662659131DCB8CF400872F6C /* Debug */,
+				662659141DCB8CF400872F6C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		662659151DCB8CF400872F6C /* Build configuration list for PBXNativeTarget "TunneledWebRequestTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				662659161DCB8CF400872F6C /* Debug */,
+				662659171DCB8CF400872F6C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		662659181DCB8CF400872F6C /* Build configuration list for PBXNativeTarget "TunneledWebRequestUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				662659191DCB8CF400872F6C /* Debug */,
+				6626591A1DCB8CF400872F6C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 662658E21DCB8CF300872F6C /* Project object */;
+}

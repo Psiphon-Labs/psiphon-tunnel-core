@@ -328,7 +328,7 @@ func (server *MeekServer) getSession(
 				// Some headers, such as X-Forwarded-For, are a comma-separated
 				// list of IPs (each proxy in a chain). The first IP should be
 				// the client IP.
-				proxyClientIP := strings.Split(header, ",")[0]
+				proxyClientIP := strings.Split(value, ",")[0]
 				if net.ParseIP(proxyClientIP) != nil {
 					clientIP = proxyClientIP
 					break

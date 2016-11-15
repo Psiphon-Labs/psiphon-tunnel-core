@@ -683,40 +683,44 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 			}
 		}
 
-		// Test: fetch website through tunnel
+		// Cannot establish port forwards in DisableApi mode
+		if !runConfig.disableApi {
 
-		// Allow for known race condition described in NewHttpProxy():
-		time.Sleep(1 * time.Second)
+			// Test: fetch website through tunnel
 
-		fetchAndVerifyWebsite(t, httpProxyPort)
-
-		// Test: run for duration, periodically using the tunnel to
-		// ensure failed tunnel detection, and ultimately hitting
-		// impaired protocol checks.
-
-		startTime := monotime.Now()
-
-		for {
-
+			// Allow for known race condition described in NewHttpProxy():
 			time.Sleep(1 * time.Second)
-			useTunnel(t, httpProxyPort)
 
-			if startTime.Add(runConfig.runDuration).Before(monotime.Now()) {
-				break
+			fetchAndVerifyWebsite(t, httpProxyPort)
+
+			// Test: run for duration, periodically using the tunnel to
+			// ensure failed tunnel detection, and ultimately hitting
+			// impaired protocol checks.
+
+			startTime := monotime.Now()
+
+			for {
+
+				time.Sleep(1 * time.Second)
+				useTunnel(t, httpProxyPort)
+
+				if startTime.Add(runConfig.runDuration).Before(monotime.Now()) {
+					break
+				}
 			}
-		}
 
-		// Test: with disruptNetwork, impaired protocols should be exercised
+			// Test: with disruptNetwork, impaired protocols should be exercised
 
-		if runConfig.runDuration > 0 && runConfig.disruptNetwork {
-			count := atomic.LoadInt32(&impairedProtocolCount)
-			if count <= 0 {
-				t.Fatalf("unexpected impaired protocol count: %d", count)
-			} else {
-				impairedProtocolClassification.RLock()
-				t.Logf("impaired protocol classification: %+v",
-					impairedProtocolClassification.classification)
-				impairedProtocolClassification.RUnlock()
+			if runConfig.runDuration > 0 && runConfig.disruptNetwork {
+				count := atomic.LoadInt32(&impairedProtocolCount)
+				if count <= 0 {
+					t.Fatalf("unexpected impaired protocol count: %d", count)
+				} else {
+					impairedProtocolClassification.RLock()
+					t.Logf("impaired protocol classification: %+v",
+						impairedProtocolClassification.classification)
+					impairedProtocolClassification.RUnlock()
+				}
 			}
 		}
 	}
