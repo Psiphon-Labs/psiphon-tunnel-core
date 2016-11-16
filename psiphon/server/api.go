@@ -36,12 +36,13 @@ import (
 const (
 	MAX_API_PARAMS_SIZE = 256 * 1024 // 256KB
 
-	CLIENT_VERIFICATION_REQUIRED    = true
 	CLIENT_VERIFICATION_TTL_SECONDS = 60 * 60 * 24 * 7 // 7 days
 
 	CLIENT_PLATFORM_ANDROID = "Android"
 	CLIENT_PLATFORM_WINDOWS = "Windows"
 )
+
+var CLIENT_VERIFICATION_REQUIRED = false
 
 type requestJSONObject map[string]interface{}
 

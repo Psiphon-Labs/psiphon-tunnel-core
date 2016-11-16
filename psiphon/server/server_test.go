@@ -44,6 +44,7 @@ func TestMain(m *testing.M) {
 	flag.Parse()
 	os.Remove(psiphon.DATA_STORE_FILENAME)
 	psiphon.SetEmitDiagnosticNotices(true)
+	CLIENT_VERIFICATION_REQUIRED = true
 	os.Exit(m.Run())
 }
 
