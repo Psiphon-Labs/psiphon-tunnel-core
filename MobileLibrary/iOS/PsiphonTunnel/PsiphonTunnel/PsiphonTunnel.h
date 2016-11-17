@@ -35,7 +35,12 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  Used to communicate with the application that is using the PsiphonTunnel framework,
  and retrieve config info from it.
  */
-@protocol TunneledAppDelegate
+@protocol TunneledAppDelegate <NSObject>
+
+//
+// Required delegate methods
+//
+@required
 
 /*!
  Called when tunnel is started to get the library consumer's desired configuration.
@@ -85,30 +90,36 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  */
 - (NSString * _Nullable)getPsiphonConfig;
 
+//
+// Optional delegate methods. Note that some of these are probably necessary for
+// for a functioning app to implement, for example `onConnected`.
+//
+@optional
+
 /*!
  Gets runtime errors info that may be useful for debugging.
  @param message  The diagnostic message string.
  Swift: @code func onDiagnosticMessage(_ message: String) @endcode
  */
-- (void) onDiagnosticMessage: (NSString * _Nonnull)message;
+- (void)onDiagnosticMessage:(NSString * _Nonnull)message;
 
 /*! 
  Called when the tunnel is in the process of connecting.
  Swift: @code func onConnecting() @endcode
  */
-- (void) onConnecting;
+- (void)onConnecting;
 /*!
  Called when the tunnel has successfully connected.
  Swift: @code func onConnected() @endcode
  */
-- (void) onConnected;
+- (void)onConnected;
 
 /*!
  Called to indicate that tunnel-core is exiting imminently (usually do to
  a `stop()` call, but could be due to an unexpected error).
  Swift: @code func onExiting() @endcode
  */
-- (void) onExiting;
+- (void)onExiting;
 
 /*!
  Called when tunnel-core determines which server egress regions are available
@@ -117,7 +128,7 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  @param regions  A string array containing the available egress region country codes.
  Swift: @code func onAvailableEgressRegions(_ regions: [Any]) @endcode
  */
-- (void) onAvailableEgressRegions: (NSArray * _Nonnull)regions;
+- (void)onAvailableEgressRegions:(NSArray * _Nonnull)regions;
 
 /*!
  If the tunnel is started with a fixed SOCKS proxy port, and that port is
@@ -125,48 +136,48 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  @param port  The port number.
  Swift: @code func onSocksProxyPort(inUse port: Int) @endcode
  */
-- (void) onSocksProxyPortInUse: (NSInteger)port;
+- (void)onSocksProxyPortInUse:(NSInteger)port;
 /*!
  If the tunnel is started with a fixed HTTP proxy port, and that port is
  already in use, this will be called.
  @param port  The port number.
  Swift: @code func onHttpProxyPort(inUse port: Int) @endcode
  */
-- (void) onHttpProxyPortInUse: (NSInteger)port;
+- (void)onHttpProxyPortInUse:(NSInteger)port;
 
 /*!
  Called when tunnel-core determines what port will be used for the local SOCKS proxy.
  @param port  The port number.
  Swift: @code func onListeningSocksProxyPort(_ port: Int) @endcode
  */
-- (void) onListeningSocksProxyPort: (NSInteger)port;
+- (void)onListeningSocksProxyPort:(NSInteger)port;
 /*!
  Called when tunnel-core determines what port will be used for the local HTTP proxy.
  @param port  The port number.
  Swift: @code func onListeningHttpProxyPort(_ port: Int) @endcode
  */
-- (void) onListeningHttpProxyPort: (NSInteger)port;
+- (void)onListeningHttpProxyPort:(NSInteger)port;
 
 /*!
  Called when a error occurs when trying to utilize a configured upstream proxy.
  @param message  A message giving additional info about the error.
  Swift: @code func onUpstreamProxyError(_ message: String) @endcode
  */
-- (void) onUpstreamProxyError: (NSString * _Nonnull)message;
+- (void)onUpstreamProxyError:(NSString * _Nonnull)message;
 
 /*!
  Called after the handshake with the Psiphon server, with the client region as determined by the server.
  @param region  The country code of the client, as determined by the server.
  Swift: @code func onClientRegion(_ region: String) @endcode
  */
-- (void) onClientRegion: (NSString * _Nonnull)region;
+- (void)onClientRegion:(NSString * _Nonnull)region;
 
 /*!
  Called to report that split tunnel is on for the given region.
  @param region  The region split tunnel is on for.
  Swift: @code func onSplitTunnelRegion(_ region: String) @endcode
  */
-- (void) onSplitTunnelRegion: (NSString * _Nonnull)region;
+- (void)onSplitTunnelRegion:(NSString * _Nonnull)region;
 
 /*!
  Called to indicate that an address has been classified as being within the
@@ -176,7 +187,7 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  @param address  The IP or hostname that is not being tunneled.
  Swift: @code func onUntunneledAddress(_ address: String) @endcode
  */
-- (void) onUntunneledAddress: (NSString * _Nonnull) address;
+- (void)onUntunneledAddress:(NSString * _Nonnull)address;
 
 /*!
  Called to report how many bytes have been transferred since the last time
@@ -185,7 +196,7 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  @param received  The number of bytes received.
  Swift: @code func onBytesTransferred(_ sent: Int64, _ received: Int64) @endcode
  */
-- (void) onBytesTransferred: (int64_t)sent : (int64_t)received;
+- (void)onBytesTransferred:(int64_t)sent :(int64_t)received;
 
 // TODO: Only applicable to Psiphon proper?
 /*!
@@ -195,14 +206,14 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  @param url  The URL of the home page.
  Swift: @code func onHomepage(_ url: String) @endcode
  */
-- (void) onHomepage: (NSString * _Nonnull)url;
+- (void)onHomepage:(NSString * _Nonnull)url;
 
 // TODO: Only applicable to Psiphon proper?
 /*!
  Called if the current version of the client is the latest (i.e., there is no upgrade available).
  Swift: @code func onClientIsLatestVersion() @endcode
  */
-- (void) onClientIsLatestVersion;
+- (void)onClientIsLatestVersion;
 
 // TODO: Only applicable to Psiphon proper?
 /*!
@@ -210,7 +221,7 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  @param filename  The name of the file containing the upgrade.
  Swift: @code func onClientUpgradeDownloaded(_ filename: String) @endcode
  */
-- (void) onClientUpgradeDownloaded: (NSString * _Nonnull)filename;
+- (void)onClientUpgradeDownloaded:(NSString * _Nonnull)filename;
 
 // TODO: Applies to iOS?
 //func onClientVerificationRequired(nonce: String, ttlSeconds: Int, resetCache: Bool)
@@ -227,30 +238,35 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  @param tunneledAppDelegate  The delegate implementation to use for callbacks.
  @return  The PsiphonTunnel instance.
  */
-+(PsiphonTunnel * _Nonnull) newPsiphonTunnel:(id<TunneledAppDelegate> _Nonnull)tunneledAppDelegate;
++ (PsiphonTunnel * _Nonnull)newPsiphonTunnel:(id<TunneledAppDelegate> _Nonnull)tunneledAppDelegate;
 
 /*!
  Start connecting the PsiphonTunnel. Returns before connection is complete -- delegate callbacks (such as `onConnected`) are used to indicate progress and state.
  @param embeddedServerEntries  Pre-existing server entries to use when attempting to connect to a server. May be null if there are no embedded server entries.
  @return TRUE if the connection start was successful, FALSE otherwise.
  */
--(BOOL) start:(NSString * _Nullable)embeddedServerEntries;
+- (BOOL)start:(NSString * _Nullable)embeddedServerEntries;
 
 /*!
  Stop the tunnel (regardless of its current connection state). Returns before full stop is complete -- `TunneledAppDelegate::onExiting` is called when complete.
  */
--(void) stop;
+- (void)stop;
 
 /*!
  Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics information in a particular format, then calls this function to upload it for later investigation.
  @note The key, server, path, and headers must be provided by Psiphon Inc.
+ @param feedbackJson  The feedback and diagnostics data to upload.
  @param connectionConfigJson  This function may create a tunnel to perform the upload, and this configuration is used to create that tunnel.
- @param diagnosticsJson  The feedback and diagnostics data to upload.
  @param b64EncodedPublicKey  The key that will be used to encrypt the payload before uploading.
  @param uploadServer  The server to which the data will be uploaded.
  @param uploadPath  The path on the server to which the data will be loaded.
  @param uploadServerHeaders  The request headers that will be used when uploading.
  */
-+ (void)sendFeedback:(NSString * _Nonnull)connectionConfigJson diagnostics:(NSString * _Nonnull)diagnosticsJson publicKey:(NSString * _Nonnull)b64EncodedPublicKey uploadServer:(NSString * _Nonnull)uploadServer uploadPath:(NSString * _Nonnull)uploadPath uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders;
++ (void)sendFeedback:(NSString * _Nonnull)feedbackJson
+    connectionConfig:(NSString * _Nonnull)connectionConfigJson
+           publicKey:(NSString * _Nonnull)b64EncodedPublicKey
+        uploadServer:(NSString * _Nonnull)uploadServer
+          uploadPath:(NSString * _Nonnull)uploadPath
+ uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders;
 
 @end

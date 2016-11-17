@@ -48,7 +48,9 @@ class ViewController: UIViewController {
 }
 
 // MARK: TunneledAppDelegate implementation
-// See the protocol definition for details about the functions.
+// See the protocol definition for details about the methods.
+// Note that we're excluding all the optional methods that we aren't using, 
+// however your needs may be different.
 extension ViewController: TunneledAppDelegate {
     func getPsiphonConfig() -> String? {
         // In this example, we're going to retrieve our Psiphon config from a file in the app bundle.
@@ -69,10 +71,6 @@ extension ViewController: TunneledAppDelegate {
     
     func onDiagnosticMessage(_ message: String) {
         NSLog("onDiagnosticMessage: %@", message)
-    }
-    
-    func onConnecting() {
-        NSLog("onConnecting")
     }
     
     func onConnected() {
@@ -143,23 +141,6 @@ extension ViewController: TunneledAppDelegate {
         }
     }
     
-    func onExiting() {
-        // TODO: After updating tunnel-core, make sure this is getting hit.
-        NSLog("onExiting")
-    }
-    
-    func onAvailableEgressRegions(_ regions: [Any]) {
-        NSLog("onAvailableEgressRegions: %@", regions)
-    }
-    
-    func onSocksProxyPort(inUse port: Int) {
-        NSLog("onSocksProxyPort: %d", port)
-    }
-    
-    func onHttpProxyPort(inUse port: Int) {
-        NSLog("onHttpProxyPort: %d", port)
-    }
-    
     func onListeningSocksProxyPort(_ port: Int) {
         NSLog("onListeningSocksProxyPort: %d", port)
         // Record the port being used so that we can proxy through it later.
@@ -174,37 +155,5 @@ extension ViewController: TunneledAppDelegate {
         DispatchQueue.main.async {
             self.httpProxyPort = port
         }
-    }
-    
-    func onUpstreamProxyError(_ message: String) {
-        NSLog("onUpstreamProxyError: %@", message)
-    }
-    
-    func onClientRegion(_ region: String) {
-        NSLog("onClientRegion: %@", region)
-    }
-    
-    func onSplitTunnelRegion(_ region: String) {
-        NSLog("onSplitTunnelRegion: %@", region)
-    }
-    
-    func onUntunneledAddress(_ address: String) {
-        NSLog("onUntunneledAddress: %@", address)
-    }
-    
-    func onBytesTransferred(_ sent: Int64, _ received: Int64) {
-        NSLog("onBytesTransferred: sent:%d, received:%d", sent, received)
-    }
-    
-    func onHomepage(_ url: String) {
-        NSLog("onHomepage: %@", url)
-    }
-    
-    func onClientIsLatestVersion() {
-        NSLog("onClientIsLatestVersion")
-    }
-    
-    func onClientUpgradeDownloaded(_ filename: String) {
-        NSLog("onClientUpgradeDownloaded: %@", filename)
     }
 }
