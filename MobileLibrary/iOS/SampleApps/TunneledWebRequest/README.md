@@ -22,3 +22,7 @@ The sample app requires some extra files and configuration before building.
 ### Ready!
 
 TunneledWebRequest should now compile and run.
+
+## License
+
+See the [LICENSE](../LICENSE) file.
