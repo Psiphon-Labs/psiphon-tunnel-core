@@ -154,3 +154,7 @@ public class MainActivity extends ActionBarActivity
 }
 
 ```
+
+## License
+
+See the [LICENSE](../LICENSE) file.
