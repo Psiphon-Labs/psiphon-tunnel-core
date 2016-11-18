@@ -176,7 +176,8 @@ func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
 }
 
 func (geoIP *GeoIPService) SetSessionCache(sessionID string, geoIPData GeoIPData) {
-	geoIP.sessionCache.Add(sessionID, geoIPData, cache.DefaultExpiration)
+	// Ignore errors. If this fails, related logs will not have Geo IP data.
+	_ = geoIP.sessionCache.Set(sessionID, geoIPData, cache.DefaultExpiration)
 }
 
 func (geoIP *GeoIPService) GetSessionCache(
@@ -185,8 +186,11 @@ func (geoIP *GeoIPService) GetSessionCache(
 	if !found {
 		return NewGeoIPData()
 	}
-	// Extend the TTL for this item
-	geoIP.sessionCache.Replace(sessionID, geoIPData, cache.DefaultExpiration)
+	// Extend the TTL for this item. If this fails, the cache entry
+	// value remains the same but the TTL is not extended.
+	// Note: sessionCache.Replace can clobber sessionCache.Set changes,
+	// but this is not a concern in practise.
+	_ = geoIP.sessionCache.Replace(sessionID, geoIPData, cache.DefaultExpiration)
 	return geoIPData.(GeoIPData)
 }
 
