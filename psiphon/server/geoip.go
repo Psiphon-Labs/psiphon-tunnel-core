@@ -176,8 +176,7 @@ func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
 }
 
 func (geoIP *GeoIPService) SetSessionCache(sessionID string, geoIPData GeoIPData) {
-	// Ignore errors. If this fails, related logs will not have Geo IP data.
-	_ = geoIP.sessionCache.Set(sessionID, geoIPData, cache.DefaultExpiration)
+	geoIP.sessionCache.Set(sessionID, geoIPData, cache.DefaultExpiration)
 }
 
 func (geoIP *GeoIPService) GetSessionCache(
