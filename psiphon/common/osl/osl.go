@@ -41,6 +41,7 @@ import (
 	"net"
 	"net/url"
 	"path"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -910,18 +911,24 @@ func divideKeyWithSeedSpecSLOKs(
 	}, nil
 }
 
-// GetDirectoryURL returns the URL for an OSL directory. Clients
+// GetOSLDirectoryURL returns the URL for an OSL directory. Clients
 // call this when fetching the directory from out-of-band
 // distribution sites.
 // Clients are responsible for tracking whether the remote file has
 // changed or not before downloading.
-func GetDirectoryURL(baseURL string) string {
+func GetOSLDirectoryURL(baseURL string) string {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return ""
 	}
 	u.Path = path.Join(u.Path, DIRECTORY_FILENAME)
 	return u.String()
+}
+
+// GetOSLDirectoryFilename returns an appropriate filename for
+// the resumable download destination for the OSL directory.
+func GetOSLDirectoryFilename(baseDirectory string) string {
+	return filepath.Join(baseDirectory, DIRECTORY_FILENAME)
 }
 
 // GetOSLFileURL returns the URL for an OSL file. Once the client
@@ -937,6 +944,13 @@ func GetOSLFileURL(baseURL string, oslID []byte) string {
 	u.Path = path.Join(
 		u.Path, fmt.Sprintf(OSL_FILENAME_FORMAT, hex.EncodeToString(oslID)))
 	return u.String()
+}
+
+// GetOSLFilename returns an appropriate filename for the resumable
+// download destination for the OSL file.
+func GetOSLFilename(baseDirectory string, oslID []byte) string {
+	return filepath.Join(
+		baseDirectory, fmt.Sprintf(OSL_FILENAME_FORMAT, hex.EncodeToString(oslID)))
 }
 
 // LoadDirectory authenticates the signed directory package -- which is the

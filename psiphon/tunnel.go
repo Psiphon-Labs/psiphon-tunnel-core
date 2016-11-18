@@ -60,6 +60,7 @@ type Tunneler interface {
 // owner when it has failed. The owner may, as in the case of the Controller,
 // remove the tunnel from its list of active tunnels.
 type TunnelOwner interface {
+	SignalSeededNewSLOK()
 	SignalTunnelFailure(tunnel *Tunnel)
 }
 
@@ -842,16 +843,16 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	defer statsTimer.Stop()
 
 	// Schedule an immediate status request to deliver any unreported
-	// tunnel stats.
+	// persistent stats.
 	// Note: this may not be effective when there's an outstanding
 	// asynchronous untunneled final status request is holding the
-	// tunnel stats records. It may also conflict with other
+	// persistent stats records. It may also conflict with other
 	// tunnel candidates which attempt to send an immediate request
 	// before being discarded. For now, we mitigate this with a short,
 	// random delay.
-	unreported := CountUnreportedTunnelStats()
+	unreported := CountUnreportedPersistentStats()
 	if unreported > 0 {
-		NoticeInfo("Unreported tunnel stats: %d", unreported)
+		NoticeInfo("Unreported persistent stats: %d", unreported)
 		statsTimer.Reset(makeRandomPeriod(
 			PSIPHON_API_STATUS_REQUEST_SHORT_PERIOD_MIN,
 			PSIPHON_API_STATUS_REQUEST_SHORT_PERIOD_MAX))
@@ -1001,7 +1002,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 		case serverRequest := <-tunnel.sshServerRequests:
 			if serverRequest != nil {
-				err := HandleServerRequest(tunnel, serverRequest.Type, serverRequest.Payload)
+				err := HandleServerRequest(tunnelOwner, tunnel, serverRequest.Type, serverRequest.Payload)
 				if err == nil {
 					serverRequest.Reply(true, nil)
 				} else {
@@ -1064,7 +1065,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 		tunnelDuration := tunnel.conn.GetLastActivityMonotime().Sub(tunnel.establishedTime)
 
-		err := RecordTunnelStats(
+		err := RecordTunnelStat(
 			tunnel.serverContext.sessionId,
 			tunnel.serverContext.tunnelNumber,
 			tunnel.serverEntry.IpAddress,

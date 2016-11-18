@@ -67,7 +67,7 @@ const (
 	PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES         = 256
 	PSIPHON_API_CONNECTED_REQUEST_PERIOD                 = 24 * time.Hour
 	PSIPHON_API_CONNECTED_REQUEST_RETRY_PERIOD           = 5 * time.Second
-	PSIPHON_API_TUNNEL_STATS_MAX_COUNT                   = 100
+	PSIPHON_API_PERSISTENT_STATS_MAX_COUNT               = 100
 	PSIPHON_API_CLIENT_VERIFICATION_REQUEST_RETRY_PERIOD = 5 * time.Second
 	PSIPHON_API_CLIENT_VERIFICATION_REQUEST_MAX_RETRIES  = 10
 	FETCH_ROUTES_TIMEOUT_SECONDS                         = 60
@@ -123,9 +123,7 @@ type Config struct {
 	// RemoteServerListDownloadFilename specifies a target filename for
 	// storing the remote server list download. Data is stored in co-located
 	// files (RemoteServerListDownloadFilename.part*) to allow for resumable
-	// downloading. If not specified, the default is to use the
-	// remote object name as the filename, stored in the current working
-	// directory.
+	// downloading.
 	RemoteServerListDownloadFilename string
 
 	// RemoteServerListSignaturePublicKey specifies a public key that's
@@ -133,6 +131,18 @@ type Config struct {
 	// This value is supplied by and depends on the Psiphon Network, and is
 	// typically embedded in the client binary.
 	RemoteServerListSignaturePublicKey string
+
+	// ObfuscatedServerListRootURL is a URL which specifies the root location
+	// from which to fetch obfuscated server list files.
+	// This value is supplied by and depends on the Psiphon Network, and is
+	// typically embedded in the client binary.
+	ObfuscatedServerListRootURL string
+
+	// ObfuscatedServerListDownloadDirectory specifies a target directory for
+	// storing the obfuscated remote server list downloads. Data is stored in
+	// co-located files (<OSL filename>.part*) to allow for resumable
+	// downloading.
+	ObfuscatedServerListDownloadDirectory string
 
 	// ClientVersion is the client version number that the client reports
 	// to the server. The version number refers to the host client application,
@@ -494,6 +504,29 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		(config.UpgradeDownloadClientVersionHeader == "" || config.UpgradeDownloadFilename == "") {
 		return nil, common.ContextError(errors.New(
 			"UpgradeDownloadUrl requires UpgradeDownloadClientVersionHeader and UpgradeDownloadFilename"))
+	}
+
+	if !config.DisableRemoteServerListFetcher {
+
+		if config.RemoteServerListSignaturePublicKey == "" {
+			return nil, common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
+		}
+
+		if config.RemoteServerListUrl == "" {
+			return nil, common.ContextError(errors.New("missing RemoteServerListUrl"))
+		}
+
+		if config.RemoteServerListDownloadFilename == "" {
+			return nil, common.ContextError(errors.New("missing RemoteServerListDownloadFilename"))
+		}
+
+		if config.ObfuscatedServerListRootURL == "" {
+			return nil, common.ContextError(errors.New("missing ObfuscatedServerListRootURL"))
+		}
+
+		if config.ObfuscatedServerListDownloadDirectory == "" {
+			return nil, common.ContextError(errors.New("missing ObfuscatedServerListDownloadDirectory"))
+		}
 	}
 
 	if config.TunnelConnectTimeoutSeconds == nil {

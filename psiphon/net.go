@@ -373,7 +373,7 @@ func MakeDownloadHttpClient(
 // downloadFilename.part and downloadFilename.part.etag.
 // Any existing downloadFilename file will be overwritten.
 //
-// In the case where the remote object has change while a partial download
+// In the case where the remote object has changed while a partial download
 // is to be resumed, the partial state is reset and resumeDownload fails.
 // The caller must restart the download.
 //

@@ -252,7 +252,6 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 
 	params := serverContext.getBaseParams()
 
-	const DATA_STORE_LAST_CONNECTED_KEY = "lastConnected"
 	lastConnected, err := GetKeyValue(DATA_STORE_LAST_CONNECTED_KEY)
 	if err != nil {
 		return common.ContextError(err)
@@ -397,25 +396,25 @@ func (serverContext *ServerContext) getStatusParams(isTunneled bool) requestJSON
 // either "clear" or "put back" status request payload data depending
 // on whether or not the request succeeded.
 type statusRequestPayloadInfo struct {
-	serverId      string
-	transferStats *transferstats.AccumulatedStats
-	tunnelStats   [][]byte
+	serverId        string
+	transferStats   *transferstats.AccumulatedStats
+	persistentStats map[string][][]byte
 }
 
 func makeStatusRequestPayload(
 	serverId string) ([]byte, *statusRequestPayloadInfo, error) {
 
 	transferStats := transferstats.TakeOutStatsForServer(serverId)
-	tunnelStats, err := TakeOutUnreportedTunnelStats(
-		PSIPHON_API_TUNNEL_STATS_MAX_COUNT)
+	persistentStats, err := TakeOutUnreportedPersistentStats(
+		PSIPHON_API_PERSISTENT_STATS_MAX_COUNT)
 	if err != nil {
 		NoticeAlert(
-			"TakeOutUnreportedTunnelStats failed: %s", common.ContextError(err))
-		tunnelStats = nil
+			"TakeOutUnreportedPersistentStats failed: %s", common.ContextError(err))
+		persistentStats = nil
 		// Proceed with transferStats only
 	}
 	payloadInfo := &statusRequestPayloadInfo{
-		serverId, transferStats, tunnelStats}
+		serverId, transferStats, persistentStats}
 
 	payload := make(map[string]interface{})
 
@@ -427,12 +426,19 @@ func makeStatusRequestPayload(
 	payload["page_views"] = make([]string, 0)
 	payload["https_requests"] = make([]string, 0)
 
-	// Tunnel stats records are already in JSON format
-	jsonTunnelStats := make([]json.RawMessage, len(tunnelStats))
-	for i, tunnelStatsRecord := range tunnelStats {
-		jsonTunnelStats[i] = json.RawMessage(tunnelStatsRecord)
+	persistentStatPayloadNames := make(map[string]string)
+	persistentStatPayloadNames[PERSISTENT_STAT_TYPE_TUNNEL] = "tunnel_stats"
+	persistentStatPayloadNames[PERSISTENT_STAT_TYPE_REMOTE_SERVER_LIST] = "remote_server_list"
+
+	for statType, stats := range persistentStats {
+
+		// Persistent stats records are already in JSON format
+		jsonStats := make([]json.RawMessage, len(stats))
+		for i, stat := range stats {
+			jsonStats[i] = json.RawMessage(stat)
+		}
+		payload[persistentStatPayloadNames[statType]] = jsonStats
 	}
-	payload["tunnel_stats"] = jsonTunnelStats
 
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
@@ -449,21 +455,21 @@ func makeStatusRequestPayload(
 func putBackStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 	transferstats.PutBackStatsForServer(
 		payloadInfo.serverId, payloadInfo.transferStats)
-	err := PutBackUnreportedTunnelStats(payloadInfo.tunnelStats)
+	err := PutBackUnreportedPersistentStats(payloadInfo.persistentStats)
 	if err != nil {
-		// These tunnel stats records won't be resent under after a
+		// These persistent stats records won't be resent until after a
 		// datastore re-initialization.
 		NoticeAlert(
-			"PutBackUnreportedTunnelStats failed: %s", common.ContextError(err))
+			"PutBackUnreportedPersistentStats failed: %s", common.ContextError(err))
 	}
 }
 
 func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
-	err := ClearReportedTunnelStats(payloadInfo.tunnelStats)
+	err := ClearReportedPersistentStats(payloadInfo.persistentStats)
 	if err != nil {
-		// These tunnel stats records may be resent.
+		// These persistent stats records may be resent.
 		NoticeAlert(
-			"ClearReportedTunnelStats failed: %s", common.ContextError(err))
+			"ClearReportedPersistentStats failed: %s", common.ContextError(err))
 	}
 }
 
@@ -552,7 +558,7 @@ func (serverContext *ServerContext) doUntunneledStatusRequest(
 	return nil
 }
 
-// RecordTunnelStats records a tunnel duration and bytes
+// RecordTunnelStat records a tunnel duration and bytes
 // sent and received for subsequent reporting and quality
 // analysis.
 //
@@ -595,7 +601,7 @@ func (serverContext *ServerContext) doUntunneledStatusRequest(
 // Duplicate reporting may also occur when a server receives and
 // processes a status request but the client fails to receive
 // the response.
-func RecordTunnelStats(
+func RecordTunnelStat(
 	sessionId string,
 	tunnelNumber int64,
 	tunnelServerIpAddress string,
@@ -605,7 +611,7 @@ func RecordTunnelStats(
 	totalBytesSent int64,
 	totalBytesReceived int64) error {
 
-	tunnelStats := struct {
+	tunnelStat := struct {
 		SessionId                string `json:"session_id"`
 		TunnelNumber             int64  `json:"tunnel_number"`
 		TunnelServerIpAddress    string `json:"tunnel_server_ip_address"`
@@ -625,12 +631,38 @@ func RecordTunnelStats(
 		totalBytesReceived,
 	}
 
-	tunnelStatsJson, err := json.Marshal(tunnelStats)
+	tunnelStatJson, err := json.Marshal(tunnelStat)
 	if err != nil {
 		return common.ContextError(err)
 	}
 
-	return StoreTunnelStats(tunnelStatsJson)
+	return StorePersistentStat(
+		PERSISTENT_STAT_TYPE_TUNNEL, tunnelStatJson)
+}
+
+// RecordRemoteServerListStat records a completed common or OSL
+// remote server list resource download. These stats use the same
+// persist-until-reported mechanism described in RecordTunnelStats.
+func RecordRemoteServerListStat(
+	url, etag string) error {
+
+	remoteServerListStat := struct {
+		ClientDownloadTimestamp string `json:"client_download_timestamp"`
+		URL                     string `json:"url"`
+		ETag                    string `json:"etag"`
+	}{
+		common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
+		url,
+		etag,
+	}
+
+	remoteServerListStatJson, err := json.Marshal(remoteServerListStat)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	return StorePersistentStat(
+		PERSISTENT_STAT_TYPE_REMOTE_SERVER_LIST, remoteServerListStatJson)
 }
 
 // DoClientVerificationRequest performs the "client_verification" API
@@ -906,17 +938,19 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 	}, nil
 }
 
-func HandleServerRequest(tunnel *Tunnel, name string, payload []byte) error {
+func HandleServerRequest(
+	tunnelOwner TunnelOwner, tunnel *Tunnel, name string, payload []byte) error {
 
 	switch name {
 	case protocol.PSIPHON_API_OSL_REQUEST_NAME:
-		return HandleOSLRequest(tunnel, payload)
+		return HandleOSLRequest(tunnelOwner, tunnel, payload)
 	}
 
 	return common.ContextError(fmt.Errorf("invalid request name: %s", name))
 }
 
-func HandleOSLRequest(tunnel *Tunnel, payload []byte) error {
+func HandleOSLRequest(
+	tunnelOwner TunnelOwner, tunnel *Tunnel, payload []byte) error {
 
 	var oslRequest protocol.OSLRequest
 	err := json.Unmarshal(payload, &oslRequest)
@@ -928,16 +962,24 @@ func HandleOSLRequest(tunnel *Tunnel, payload []byte) error {
 		DeleteSLOKs()
 	}
 
+	seededNewSLOK := false
+
 	for _, slok := range oslRequest.SeedPayload.SLOKs {
 		duplicate, err := SetSLOK(slok.ID, slok.Key)
 		if err != nil {
 			// TODO: return error to trigger retry?
 			NoticeAlert("SetSLOK failed: %s", common.ContextError(err))
+		} else if !duplicate {
+			seededNewSLOK = true
 		}
 
 		if tunnel.config.ReportSLOKs {
 			NoticeSLOKSeeded(base64.StdEncoding.EncodeToString(slok.ID), duplicate)
 		}
+	}
+
+	if seededNewSLOK {
+		tunnelOwner.SignalSeededNewSLOK()
 	}
 
 	return nil

@@ -21,115 +21,318 @@ package psiphon
 
 import (
 	"compress/zlib"
+	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
-// FetchRemoteServerList downloads a remote server list JSON record from
-// config.RemoteServerListUrl; validates its digital signature using the
-// public key config.RemoteServerListSignaturePublicKey; and parses the
+type RemoteServerListFetcher func(
+	config *Config, tunnel *Tunnel, untunneledDialConfig *DialConfig) error
+
+// FetchCommonRemoteServerList downloads the common remote server list from
+// config.RemoteServerListUrl. It validates its digital signature using the
+// public key config.RemoteServerListSignaturePublicKey and parses the
 // data field into ServerEntry records.
-func FetchRemoteServerList(
+// config.RemoteServerListDownloadFilename is the location to store the
+// download. As the download is resumed after failure, this filename must
+// be unique and persistent.
+func FetchCommonRemoteServerList(
 	config *Config,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig) error {
 
-	NoticeInfo("fetching remote server list")
+	NoticeInfo("fetching common remote server list")
 
-	// Select tunneled or untunneled configuration
-
-	httpClient, requestUrl, err := MakeDownloadHttpClient(
+	newETag, err := downloadRemoteServerListFile(
 		config,
 		tunnel,
 		untunneledDialConfig,
 		config.RemoteServerListUrl,
-		time.Duration(*config.FetchRemoteServerListTimeoutSeconds)*time.Second)
+		config.RemoteServerListDownloadFilename)
 	if err != nil {
-		return common.ContextError(err)
+		return fmt.Errorf("failed to download common remote server list: %s", common.ContextError(err))
 	}
 
-	// Proceed with download
-
-	downloadFilename := config.RemoteServerListDownloadFilename
-	if downloadFilename == "" {
-		splitPath := strings.Split(config.RemoteServerListUrl, "/")
-		downloadFilename = splitPath[len(splitPath)-1]
-	}
-
-	lastETag, err := GetUrlETag(config.RemoteServerListUrl)
-	if err != nil {
-		return common.ContextError(err)
-	}
-
-	n, responseETag, err := ResumeDownload(
-		httpClient, requestUrl, downloadFilename, lastETag)
-
-	NoticeRemoteServerListDownloadedBytes(n)
-
-	if err != nil {
-		return common.ContextError(err)
-	}
-
-	if responseETag == lastETag {
-		// The remote server list is unchanged and no data was downloaded
+	// When the resource is unchanged, skip.
+	if newETag == "" {
 		return nil
 	}
 
-	NoticeRemoteServerListDownloaded(downloadFilename)
-
-	// The downloaded content is a zlib compressed authenticated
-	// data package containing a list of encoded server entries.
-
-	downloadContent, err := os.Open(downloadFilename)
+	serverListPayload, err := unpackRemoteServerListFile(config, config.RemoteServerListDownloadFilename)
 	if err != nil {
-		return common.ContextError(err)
+		return fmt.Errorf("failed to unpack common remote server list: %s", common.ContextError(err))
 	}
-	defer downloadContent.Close()
 
-	zlibReader, err := zlib.NewReader(downloadContent)
+	err = storeServerEntries(serverListPayload)
 	if err != nil {
-		return common.ContextError(err)
+		return fmt.Errorf("failed to store common remote server list: %s", common.ContextError(err))
+	}
+
+	// Now that the server entries are successfully imported, store the response
+	// ETag so we won't re-download this same data again.
+	err = SetUrlETag(config.RemoteServerListUrl, newETag)
+	if err != nil {
+		NoticeAlert("failed to set ETag for common remote server list: %s", common.ContextError(err))
+		// This fetch is still reported as a success, even if we can't store the etag
+	}
+
+	return nil
+}
+
+// FetchObfuscatedServerLists downloads the obfuscated remote server lists
+// from config.ObfuscatedServerListRootURL.
+// It first downloads the OSL directory, and then downloads each seeded OSL
+// advertised in the directory. All downloads are resumable, ETags are used
+// to skip both an unchanged directory or unchanged OSL files, and when an
+// individual download fails, the fetch proceeds if it can.
+// Authenticated package digital signatures are validated using the
+// public key config.RemoteServerListSignaturePublicKey.
+// config.ObfuscatedServerListDownloadDirectory is the location to store the
+// downloaded files. As  downloads are resumed after failure, this directory
+// must be unique and persistent.
+func FetchObfuscatedServerLists(
+	config *Config,
+	tunnel *Tunnel,
+	untunneledDialConfig *DialConfig) error {
+
+	NoticeInfo("fetching obfuscated remote server lists")
+
+	downloadFilename := osl.GetOSLDirectoryFilename(config.ObfuscatedServerListDownloadDirectory)
+	downloadURL := osl.GetOSLDirectoryURL(config.ObfuscatedServerListRootURL)
+
+	// failed is set if any operation fails and should trigger a retry. When the OSL directory
+	// fails to download, any cached directory is used instead; when any single OSL fails
+	// to download, the overall operation proceeds. So this flag records whether to report
+	// failure at the end when downloading has proceeded after a failure.
+	// TODO: should disk-full conditions not trigger retries?
+	var failed bool
+
+	var oslDirectoryPayload string
+
+	newETag, err := downloadRemoteServerListFile(
+		config,
+		tunnel,
+		untunneledDialConfig,
+		downloadURL,
+		downloadFilename)
+	if err != nil {
+		failed = true
+		NoticeAlert("failed to download obfuscated server list directory: %s", common.ContextError(err))
+	} else if newETag != "" {
+		oslDirectoryPayload, err = unpackRemoteServerListFile(config, downloadFilename)
+		if err != nil {
+			failed = true
+			NoticeAlert("failed to unpack obfuscated server list directory: %s", common.ContextError(err))
+		}
+		err = SetKeyValue(DATA_STORE_OSL_DIRECTORY_KEY, string(oslDirectoryPayload))
+		if err != nil {
+			failed = true
+			NoticeAlert("failed to set cached obfuscated server list directory: %s", common.ContextError(err))
+		}
+	}
+
+	if failed || newETag == "" {
+		// Proceed with the cached OSL directory.
+		oslDirectoryPayload, err = GetKeyValue(DATA_STORE_OSL_DIRECTORY_KEY)
+		if err != nil {
+			return fmt.Errorf("failed to get cache obfuscated server list directory: %s", common.ContextError(err))
+		}
+	}
+
+	// *TODO* fix double authenticated package unwrapping: make LoadDirectory take JSON string
+
+	oslDirectory, err := osl.LoadDirectory([]byte(oslDirectoryPayload), config.RemoteServerListSignaturePublicKey)
+	if err != nil {
+		return fmt.Errorf("failed to load obfuscated server list directory: %s", common.ContextError(err))
+	}
+
+	// When a new directory is downloaded, validated, and parsed, store the
+	// response ETag so we won't re-download this same data again.
+	if !failed && newETag != "" {
+		err = SetUrlETag(config.RemoteServerListUrl, newETag)
+		if err != nil {
+			NoticeAlert("failed to set ETag for obfuscated server list directory: %s", common.ContextError(err))
+			// This fetch is still reported as a success, even if we can't store the etag
+		}
+	}
+
+	// Note: we proceed to check individual OSLs even if the direcory is unchanged,
+	// as the set of local SLOKs may have changed.
+
+	oslIDs := oslDirectory.GetSeededOSLIDs(
+
+		// Lookup SLOKs in local datastore
+		func(slokID []byte) []byte {
+			key, err := GetSLOK(slokID)
+			if err != nil {
+				NoticeAlert("GetSLOK failed: %s", err)
+			}
+			return key
+		},
+
+		func(err error) {
+			NoticeAlert("GetSeededOSLIDs failed: %s", err)
+		})
+
+	for _, oslID := range oslIDs {
+		downloadFilename := osl.GetOSLFilename(config.ObfuscatedServerListDownloadDirectory, oslID)
+		downloadURL := osl.GetOSLFileURL(config.ObfuscatedServerListRootURL, oslID)
+
+		// *TODO* ETags in OSL directory to enable skipping request entirely
+
+		newETag, err := downloadRemoteServerListFile(
+			config,
+			tunnel,
+			untunneledDialConfig,
+			downloadURL,
+			downloadFilename)
+		if err != nil {
+			failed = true
+			NoticeAlert("failed to download obfuscated server list file (%s): %s", oslID, common.ContextError(err))
+			continue
+		}
+
+		// When the resource is unchanged, skip.
+		if newETag == "" {
+			continue
+		}
+
+		// *TODO* DecryptOSL; also, compress before encrypt?
+
+		serverListPayload, err := unpackRemoteServerListFile(config, downloadFilename)
+		if err != nil {
+			failed = true
+			NoticeAlert("failed to unpack obfuscated server list file (%s): %s", oslID, common.ContextError(err))
+			continue
+		}
+
+		err = storeServerEntries(serverListPayload)
+		if err != nil {
+			failed = true
+			NoticeAlert("failed to store obfuscated server list file (%s): %s", oslID, common.ContextError(err))
+			continue
+		}
+
+		// Now that the server entries are successfully imported, store the response
+		// ETag so we won't re-download this same data again.
+		err = SetUrlETag(config.RemoteServerListUrl, newETag)
+		if err != nil {
+			failed = true
+			NoticeAlert("failed to set Etag for obfuscated server list file (%s): %s", oslID, common.ContextError(err))
+			continue
+			// This fetch is still reported as a success, even if we can't store the etag
+		}
+	}
+
+	if failed {
+		return errors.New("failed to fetch obfuscated remote server lists")
+	}
+	return nil
+}
+
+// downloadRemoteServerListFile downloads the source URL to
+// the destination file, performing a resumable download. When
+// the download completes and the file content has changed, the
+// new resource ETag is returned. Otherwise, blank is returned.
+// The caller is responsible for calling SetUrlETag once the file
+// content has been validated.
+func downloadRemoteServerListFile(
+	config *Config,
+	tunnel *Tunnel,
+	untunneledDialConfig *DialConfig,
+	sourceURL, destinationFilename string) (string, error) {
+
+	// MakeDownloadHttpClient will select either a tunneled
+	// or untunneled configuration.
+
+	httpClient, requestURL, err := MakeDownloadHttpClient(
+		config,
+		tunnel,
+		untunneledDialConfig,
+		sourceURL,
+		time.Duration(*config.FetchRemoteServerListTimeoutSeconds)*time.Second)
+	if err != nil {
+		return "", common.ContextError(err)
+	}
+
+	lastETag, err := GetUrlETag(sourceURL)
+	if err != nil {
+		return "", common.ContextError(err)
+	}
+
+	n, responseETag, err := ResumeDownload(
+		httpClient, requestURL, destinationFilename, lastETag)
+
+	NoticeRemoteServerListResourceDownloadedBytes(sourceURL, n)
+
+	if err != nil {
+		return "", common.ContextError(err)
+	}
+
+	if responseETag == lastETag {
+		return "", nil
+	}
+
+	NoticeRemoteServerListResourceDownloaded(sourceURL)
+
+	RecordRemoteServerListStat(sourceURL, responseETag)
+
+	return responseETag, nil
+}
+
+// unpackRemoteServerListFile reads a file that contains a
+// zlib compressed authenticated data package, validates
+// the package, and returns the payload.
+func unpackRemoteServerListFile(
+	config *Config, filename string) (string, error) {
+
+	fileReader, err := os.Open(filename)
+	if err != nil {
+		return "", common.ContextError(err)
+	}
+	defer fileReader.Close()
+
+	zlibReader, err := zlib.NewReader(fileReader)
+	if err != nil {
+		return "", common.ContextError(err)
 	}
 
 	dataPackage, err := ioutil.ReadAll(zlibReader)
 	zlibReader.Close()
 	if err != nil {
-		return common.ContextError(err)
+		return "", common.ContextError(err)
 	}
 
-	remoteServerList, err := common.ReadAuthenticatedDataPackage(
+	payload, err := common.ReadAuthenticatedDataPackage(
 		dataPackage, config.RemoteServerListSignaturePublicKey)
 	if err != nil {
-		return common.ContextError(err)
+		return "", common.ContextError(err)
 	}
 
+	return payload, nil
+}
+
+func storeServerEntries(serverList string) error {
+
 	serverEntries, err := DecodeAndValidateServerEntryList(
-		remoteServerList,
+		serverList,
 		common.GetCurrentTimestamp(),
 		protocol.SERVER_ENTRY_SOURCE_REMOTE)
 	if err != nil {
 		return common.ContextError(err)
 	}
 
+	// TODO: record stats for newly discovered servers
+
 	err = StoreServerEntries(serverEntries, true)
 	if err != nil {
 		return common.ContextError(err)
-	}
-
-	// Now that the server entries are successfully imported, store the response
-	// ETag so we won't re-download this same data again.
-
-	if responseETag != "" {
-		err := SetUrlETag(config.RemoteServerListUrl, responseETag)
-		if err != nil {
-			NoticeAlert("failed to set remote server list ETag: %s", common.ContextError(err))
-			// This fetch is still reported as a success, even if we can't store the etag
-		}
 	}
 
 	return nil
