@@ -176,7 +176,7 @@ func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
 }
 
 func (geoIP *GeoIPService) SetSessionCache(sessionID string, geoIPData GeoIPData) {
-	geoIP.sessionCache.Set(sessionID, geoIPData, cache.DefaultExpiration)
+	geoIP.sessionCache.Add(sessionID, geoIPData, cache.DefaultExpiration)
 }
 
 func (geoIP *GeoIPService) GetSessionCache(
@@ -185,6 +185,8 @@ func (geoIP *GeoIPService) GetSessionCache(
 	if !found {
 		return NewGeoIPData()
 	}
+	// Extend the TTL for this item
+	geoIP.sessionCache.Replace(sessionID, geoIPData, cache.DefaultExpiration)
 	return geoIPData.(GeoIPData)
 }
 
