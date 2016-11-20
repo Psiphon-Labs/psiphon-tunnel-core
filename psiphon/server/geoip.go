@@ -175,12 +175,33 @@ func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
 	return result
 }
 
+// SetSessionCache adds the sessionID/geoIPData pair to the
+// session cache. This value will not expire; the caller must
+// call MarkSessionCacheToExpire to initiate expiry.
+// Calling SetSessionCache for an existing sessionID will
+// replace the previous value and reset any expiry.
 func (geoIP *GeoIPService) SetSessionCache(sessionID string, geoIPData GeoIPData) {
-	geoIP.sessionCache.Set(sessionID, geoIPData, cache.DefaultExpiration)
+	geoIP.sessionCache.Set(sessionID, geoIPData, cache.NoExpiration)
 }
 
-func (geoIP *GeoIPService) GetSessionCache(
-	sessionID string) GeoIPData {
+// MarkSessionCacheToExpire initiates expiry for an existing
+// session cache entry, if the session ID is found in the cache.
+// Concurrency note: SetSessionCache and MarkSessionCacheToExpire
+// should not be called concurrently for a single session ID.
+func (geoIP *GeoIPService) MarkSessionCacheToExpire(sessionID string) {
+	geoIPData, found := geoIP.sessionCache.Get(sessionID)
+	// Note: potential race condition between Get and Set. In practice,
+	// the tunnel server won't clobber a SetSessionCache value by calling
+	// MarkSessionCacheToExpire concurrently.
+	if found {
+		geoIP.sessionCache.Set(sessionID, geoIPData, cache.DefaultExpiration)
+	}
+}
+
+// GetSessionCache returns the cached GeoIPData for the
+// specified session ID; a blank GeoIPData is returned
+// if the session ID is not found in the cache.
+func (geoIP *GeoIPService) GetSessionCache(sessionID string) GeoIPData {
 	geoIPData, found := geoIP.sessionCache.Get(sessionID)
 	if !found {
 		return NewGeoIPData()

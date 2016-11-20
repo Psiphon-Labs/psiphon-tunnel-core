@@ -709,8 +709,8 @@ func (conn *meekConn) pumpWrites(writer io.Writer) error {
 				return err
 			}
 
-			if conn.protocolVersion < MEEK_PROTOCOL_VERSION_2 {
-				// Protocol v1 clients expect at most
+			if conn.protocolVersion < MEEK_PROTOCOL_VERSION_1 {
+				// Pre-protocol version 1 clients expect at most
 				// MEEK_MAX_PAYLOAD_LENGTH response bodies
 				return nil
 			}
