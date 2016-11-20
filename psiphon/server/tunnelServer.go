@@ -778,10 +778,12 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 	geoIPData := sshClient.geoIPData
 	sshClient.Unlock()
 
-	// Store the GeoIP data associated with the session ID. This makes the GeoIP data
-	// available to the web server for web transport Psiphon API requests. To allow for
-	// post-tunnel final status requests, the lifetime of cached GeoIP records exceeds
-	// the lifetime of the sshClient, and that's why this distinct session cache exists.
+	// Store the GeoIP data associated with the session ID. This makes
+	// the GeoIP data available to the web server for web API requests.
+	// A cache that's distinct from the sshClient record is used to allow
+	// for or post-tunnel final status requests.
+	// If the client is reconnecting with the same session ID, this call
+	// will undo the expiry set by MarkSessionCacheToExpire.
 	sshClient.sshServer.support.GeoIPService.SetSessionCache(sessionID, geoIPData)
 
 	return nil, nil
@@ -862,7 +864,14 @@ func (sshClient *sshClient) stop() {
 	logFields["peak_concurrent_port_forward_count_udp"] = sshClient.udpTrafficState.peakConcurrentPortForwardCount
 	logFields["total_port_forward_count_udp"] = sshClient.udpTrafficState.totalPortForwardCount
 
+	sessionID := sshClient.sessionID
+
 	sshClient.Unlock()
+
+	// Initiate cleanup of the GeoIP session cache. To allow for post-tunnel
+	// final status requests, the lifetime of cached GeoIP records exceeds the
+	// lifetime of the sshClient.
+	sshClient.sshServer.support.GeoIPService.MarkSessionCacheToExpire(sessionID)
 
 	log.LogRawFieldsWithTimestamp(logFields)
 }
