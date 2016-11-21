@@ -241,10 +241,14 @@ func ResolveIP(host string, conn net.Conn) (addrs []net.IP, ttls []time.Duration
 // UseIndistinguishableTLS, etc. -- for a specific HTTPS request URL.
 // If verifyLegacyCertificate is not nil, it's used for certificate
 // verification.
+//
 // Because UseIndistinguishableTLS requires a hack to work with
 // net/http, MakeUntunneledHttpClient may return a modified request URL
 // to be used. Callers should always use this return value to make
 // requests, not the input value.
+//
+// MakeUntunneledHttpsClient ignores the input requestUrl scheme,
+// which may be "http" or "https", and always performs HTTPS requests.
 func MakeUntunneledHttpsClient(
 	dialConfig *DialConfig,
 	verifyLegacyCertificate *x509.Certificate,
@@ -352,15 +356,30 @@ func MakeDownloadHttpClient(
 	var err error
 
 	if tunnel != nil {
+		// MakeTunneledHttpClient works with both "http" and "https" schemes
 		httpClient, err = MakeTunneledHttpClient(config, tunnel, requestTimeout)
 		if err != nil {
 			return nil, "", common.ContextError(err)
 		}
 	} else {
-		httpClient, requestUrl, err = MakeUntunneledHttpsClient(
-			untunneledDialConfig, nil, requestUrl, requestTimeout)
+		urlComponents, err := url.Parse(requestUrl)
 		if err != nil {
 			return nil, "", common.ContextError(err)
+		}
+		// MakeUntunneledHttpsClient works only with "https" schemes
+		if urlComponents.Scheme == "https" {
+			httpClient, requestUrl, err = MakeUntunneledHttpsClient(
+				untunneledDialConfig, nil, requestUrl, requestTimeout)
+			if err != nil {
+				return nil, "", common.ContextError(err)
+			}
+		} else {
+			httpClient = &http.Client{
+				Timeout: requestTimeout,
+				Transport: &http.Transport{
+					Dial: NewTCPDialer(untunneledDialConfig),
+				},
+			}
 		}
 	}
 

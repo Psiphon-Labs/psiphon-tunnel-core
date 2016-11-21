@@ -30,6 +30,8 @@
 package osl
 
 import (
+	"bytes"
+	"compress/zlib"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -38,6 +40,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"net/url"
 	"path"
@@ -237,7 +240,7 @@ func NewConfig(filename string) (*Config, error) {
 	config.ReloadableFile = common.NewReloadableFile(
 		filename,
 		func(fileContent []byte) error {
-			newConfig, err := loadConfig(fileContent)
+			newConfig, err := LoadConfig(fileContent)
 			if err != nil {
 				return common.ContextError(err)
 			}
@@ -254,9 +257,9 @@ func NewConfig(filename string) (*Config, error) {
 	return config, nil
 }
 
-// loadConfig loads, vaildates, and initializes a JSON encoded OSL
+// LoadConfig loads, vaildates, and initializes a JSON encoded OSL
 // configuration.
-func loadConfig(configJSON []byte) (*Config, error) {
+func LoadConfig(configJSON []byte) (*Config, error) {
 
 	var config Config
 	err := json.Unmarshal(configJSON, &config)
@@ -689,14 +692,14 @@ func (config *Config) Pave(
 	propagationChannelID string,
 	signingPublicKey string,
 	signingPrivateKey string,
-	paveServerEntries []map[time.Time][]byte) ([]*PaveFile, error) {
+	paveServerEntries []map[time.Time]string) ([]*PaveFile, error) {
 
 	config.ReloadableFile.RLock()
 	defer config.ReloadableFile.RUnlock()
 
 	var paveFiles []*PaveFile
 
-	Directory := &Directory{}
+	directory := &Directory{}
 
 	if len(paveServerEntries) != len(config.Schemes) {
 		return nil, common.ContextError(errors.New("invalid paveServerEntries"))
@@ -711,7 +714,7 @@ func (config *Config) Pave(
 
 		if common.Contains(scheme.PropagationChannelIDs, propagationChannelID) {
 			oslTime := scheme.epoch
-			for oslTime.Before(endTime) {
+			for !oslTime.After(endTime) {
 
 				firstSLOKTime := oslTime
 				fileKey, fileSpec, err := makeOSLFileSpec(
@@ -720,11 +723,20 @@ func (config *Config) Pave(
 					return nil, common.ContextError(err)
 				}
 
-				Directory.FileSpecs = append(Directory.FileSpecs, fileSpec)
+				directory.FileSpecs = append(directory.FileSpecs, fileSpec)
 
 				serverEntries, ok := paveServerEntries[schemeIndex][oslTime]
 				if ok {
-					boxedServerEntries, err := box(fileKey, serverEntries)
+
+					signedServerEntries, err := common.WriteAuthenticatedDataPackage(
+						serverEntries,
+						signingPublicKey,
+						signingPrivateKey)
+					if err != nil {
+						return nil, common.ContextError(err)
+					}
+
+					boxedServerEntries, err := box(fileKey, compress(signedServerEntries))
 					if err != nil {
 						return nil, common.ContextError(err)
 					}
@@ -745,13 +757,13 @@ func (config *Config) Pave(
 		}
 	}
 
-	jsonDirectory, err := json.Marshal(Directory)
+	directoryJSON, err := json.Marshal(directory)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
 	signedDirectory, err := common.WriteAuthenticatedDataPackage(
-		base64.StdEncoding.EncodeToString(jsonDirectory),
+		base64.StdEncoding.EncodeToString(directoryJSON),
 		signingPublicKey,
 		signingPrivateKey)
 	if err != nil {
@@ -760,7 +772,7 @@ func (config *Config) Pave(
 
 	paveFiles = append(paveFiles, &PaveFile{
 		Name:     DIRECTORY_FILENAME,
-		Contents: signedDirectory,
+		Contents: compress(signedDirectory),
 	})
 
 	return paveFiles, nil
@@ -953,23 +965,36 @@ func GetOSLFilename(baseDirectory string, oslID []byte) string {
 		baseDirectory, fmt.Sprintf(OSL_FILENAME_FORMAT, hex.EncodeToString(oslID)))
 }
 
-// LoadDirectory authenticates the signed directory package -- which is the
-// contents of the paved directory file. It then returns the directory data.
-// Clients call this to process downloaded directory files.
-func LoadDirectory(directoryPackage []byte, signingPublicKey string) (*Directory, error) {
+// UnpackDirectory decompresses, validates, and loads a
+// JSON encoded OSL directory.
+func UnpackDirectory(
+	compressedDirectory []byte, signingPublicKey string) (*Directory, []byte, error) {
+
+	directoryPackage, err := uncompress(compressedDirectory)
+	if err != nil {
+		return nil, nil, common.ContextError(err)
+	}
 
 	encodedDirectory, err := common.ReadAuthenticatedDataPackage(directoryPackage, signingPublicKey)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 
 	directoryJSON, err := base64.StdEncoding.DecodeString(encodedDirectory)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 
+	directory, err := LoadDirectory(directoryJSON)
+	return directory, directoryJSON, err
+}
+
+// LoadDirectory loads a JSON encoded OSL directory.
+// Clients call this to process downloaded directory files.
+func LoadDirectory(directoryJSON []byte) (*Directory, error) {
+
 	var directory Directory
-	err = json.Unmarshal(directoryJSON, &directory)
+	err := json.Unmarshal(directoryJSON, &directory)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -1085,29 +1110,48 @@ func (keyShares *KeyShares) reassembleKey(lookup SLOKLookup, unboxKey bool) (boo
 	return true, joinedKey, nil
 }
 
-// DecryptOSL reassembles the key for the OSL specified by oslID and uses
-// that key to decrypt oslFileContents. Clients will call DecryptOSL for
-// OSLs indicated by GetSeededOSLIDs along with their downloaded content.
+// UnpackOSL reassembles the key for the OSL specified by oslID and uses
+// that key to decrypt oslFileContents, uncompress the contents, validate
+// the authenticated package, and extract the payload.
+// Clients will call UnpackOSL for OSLs indicated by GetSeededOSLIDs along
+// with their downloaded content.
 // SLOKLookup is called to determine which SLOKs are seeded with the client.
-func (directory *Directory) DecryptOSL(
-	lookup SLOKLookup, oslID []byte, oslFileContents []byte) ([]byte, error) {
+func (directory *Directory) UnpackOSL(
+	lookup SLOKLookup,
+	oslID []byte,
+	oslFileContents []byte,
+	signingPublicKey string) (string, error) {
 
 	fileSpec, ok := directory.oslIDLookup[string(oslID)]
 	if !ok {
-		return nil, common.ContextError(errors.New("unknown OSL ID"))
+		return "", common.ContextError(errors.New("unknown OSL ID"))
 	}
+
 	ok, fileKey, err := fileSpec.KeyShares.reassembleKey(lookup, true)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return "", common.ContextError(err)
 	}
 	if !ok {
-		return nil, common.ContextError(errors.New("unseeded OSL"))
+		return "", common.ContextError(errors.New("unseeded OSL"))
 	}
-	decryptedOSLFileContents, err := unbox(fileKey, oslFileContents)
+
+	decryptedContents, err := unbox(fileKey, oslFileContents)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return "", common.ContextError(err)
 	}
-	return decryptedOSLFileContents, nil
+
+	dataPackage, err := uncompress(decryptedContents)
+	if err != nil {
+		return "", common.ContextError(err)
+	}
+
+	oslPayload, err := common.ReadAuthenticatedDataPackage(
+		dataPackage, signingPublicKey)
+	if err != nil {
+		return "", common.ContextError(err)
+	}
+
+	return oslPayload, nil
 }
 
 // deriveKeyHKDF implements HKDF-Expand as defined in https://tools.ietf.org/html/rfc5869
@@ -1123,7 +1167,7 @@ func deriveKeyHKDF(masterKey []byte, context ...[]byte) []byte {
 
 // isValidShamirSplit checks sss.Split constraints
 func isValidShamirSplit(total, threshold int) bool {
-	if total < 2 || total > 254 || threshold < 2 || threshold > total {
+	if total < 1 || total > 254 || threshold < 1 || threshold > total {
 		return false
 	}
 	return true
@@ -1133,6 +1177,15 @@ func isValidShamirSplit(total, threshold int) bool {
 func shamirSplit(secret []byte, total, threshold int) ([][]byte, error) {
 	if !isValidShamirSplit(total, threshold) {
 		return nil, common.ContextError(errors.New("invalid parameters"))
+	}
+
+	if threshold == 1 {
+		// Special case: each share is simply the secret
+		shares := make([][]byte, total)
+		for i := 0; i < total; i++ {
+			shares[i] = secret
+		}
+		return shares, nil
 	}
 
 	shareMap, err := sss.Split(byte(total), byte(threshold), secret)
@@ -1151,6 +1204,11 @@ func shamirSplit(secret []byte, total, threshold int) ([][]byte, error) {
 
 // shamirCombine is a helper wrapper for sss.Combine
 func shamirCombine(shares [][]byte) []byte {
+
+	if len(shares) == 1 {
+		// Special case: each share is simply the secret
+		return shares[0]
+	}
 
 	// Convert a sparse list into a map
 	shareMap := make(map[byte][]byte)
@@ -1191,4 +1249,25 @@ func unbox(key, box []byte) ([]byte, error) {
 		return nil, common.ContextError(errors.New("unbox failed"))
 	}
 	return plaintext, nil
+}
+
+func compress(data []byte) []byte {
+	var compressedData bytes.Buffer
+	writer := zlib.NewWriter(&compressedData)
+	writer.Write(data)
+	writer.Close()
+	return compressedData.Bytes()
+}
+
+func uncompress(data []byte) ([]byte, error) {
+	reader, err := zlib.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+	uncompressedData, err := ioutil.ReadAll(reader)
+	reader.Close()
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+	return uncompressedData, nil
 }

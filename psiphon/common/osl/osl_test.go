@@ -20,7 +20,7 @@
 package osl
 
 import (
-	"bytes"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"testing"
@@ -162,7 +162,7 @@ func TestOSL(t *testing.T) {
 	// periods and 5/10 10 millisecond longer periods. The second scheme requires
 	// sufficient activity within 25/100 1 millisecond periods.
 
-	config, err := loadConfig([]byte(configJSON))
+	config, err := LoadConfig([]byte(configJSON))
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %s", err)
 	}
@@ -317,10 +317,10 @@ func TestOSL(t *testing.T) {
 
 			// Dummy server entry payloads will be the OSL ID, which the following
 			// tests use to verify that the correct OSL file decrypts successfully.
-			paveServerEntries := make([]map[time.Time][]byte, len(config.Schemes))
+			paveServerEntries := make([]map[time.Time]string, len(config.Schemes))
 			for schemeIndex, scheme := range config.Schemes {
 
-				paveServerEntries[schemeIndex] = make(map[time.Time][]byte)
+				paveServerEntries[schemeIndex] = make(map[time.Time]string)
 
 				slokTimePeriodsPerOSL := 1
 				for _, keySplit := range scheme.SeedPeriodKeySplits {
@@ -336,7 +336,8 @@ func TestOSL(t *testing.T) {
 					}
 					firstSLOK := deriveSLOK(scheme, firstSLOKRef)
 					oslID := firstSLOK.ID
-					paveServerEntries[schemeIndex][oslTime] = oslID
+					paveServerEntries[schemeIndex][oslTime] =
+						base64.StdEncoding.EncodeToString(oslID)
 
 					oslTime = oslTime.Add(
 						time.Duration(
@@ -355,7 +356,7 @@ func TestOSL(t *testing.T) {
 			}
 
 			// Check that the paved file name matches the name the client will look for.
-			if len(paveFiles) < 1 || paveFiles[len(paveFiles)-1].Name != GetDirectoryURL("") {
+			if len(paveFiles) < 1 || paveFiles[len(paveFiles)-1].Name != GetOSLDirectoryURL("") {
 				t.Fatalf("invalid directory pave file")
 			}
 
@@ -511,7 +512,7 @@ func TestOSL(t *testing.T) {
 
 			checkDirectoryStartTime := time.Now()
 
-			directory, err := LoadDirectory(
+			directory, _, err := UnpackDirectory(
 				pavedDirectories[testCase.propagationChannelID], signingPublicKey)
 			if err != nil {
 				t.Fatalf("LoadDirectory failed: %s", err)
@@ -539,13 +540,14 @@ func TestOSL(t *testing.T) {
 					t.Fatalf("unknown OSL file name")
 				}
 
-				plaintextOSL, err := directory.DecryptOSL(slokLookup, oslID, oslFileContents)
+				plaintextOSL, err := directory.UnpackOSL(
+					slokLookup, oslID, oslFileContents, signingPublicKey)
 				if err != nil {
 					t.Fatalf("DecryptOSL failed: %s", err)
 				}
 
 				// The decrypted OSL should contain its own ID.
-				if bytes.Compare(plaintextOSL, oslID) != 0 {
+				if plaintextOSL != base64.StdEncoding.EncodeToString(oslID) {
 					t.Fatalf("unexpected OSL file contents")
 				}
 			}

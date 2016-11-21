@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"compress/zlib"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -113,7 +114,7 @@ func FetchObfuscatedServerLists(
 	// TODO: should disk-full conditions not trigger retries?
 	var failed bool
 
-	var oslDirectoryPayload string
+	var oslDirectory *osl.Directory
 
 	newETag, err := downloadRemoteServerListFile(
 		config,
@@ -125,31 +126,46 @@ func FetchObfuscatedServerLists(
 		failed = true
 		NoticeAlert("failed to download obfuscated server list directory: %s", common.ContextError(err))
 	} else if newETag != "" {
-		oslDirectoryPayload, err = unpackRemoteServerListFile(config, downloadFilename)
+
+		fileContent, err := ioutil.ReadFile(downloadFilename)
 		if err != nil {
 			failed = true
-			NoticeAlert("failed to unpack obfuscated server list directory: %s", common.ContextError(err))
+			NoticeAlert("failed to read obfuscated server list directory: %s", common.ContextError(err))
 		}
-		err = SetKeyValue(DATA_STORE_OSL_DIRECTORY_KEY, string(oslDirectoryPayload))
-		if err != nil {
-			failed = true
-			NoticeAlert("failed to set cached obfuscated server list directory: %s", common.ContextError(err))
+
+		var oslDirectoryJSON []byte
+		if err == nil {
+			oslDirectory, oslDirectoryJSON, err = osl.UnpackDirectory(
+				fileContent, config.RemoteServerListSignaturePublicKey)
+			if err != nil {
+				failed = true
+				NoticeAlert("failed to unpack obfuscated server list directory: %s", common.ContextError(err))
+			}
+		}
+
+		if err == nil {
+			err = SetKeyValue(DATA_STORE_OSL_DIRECTORY_KEY, string(oslDirectoryJSON))
+			if err != nil {
+				failed = true
+				NoticeAlert("failed to set cached obfuscated server list directory: %s", common.ContextError(err))
+			}
 		}
 	}
 
 	if failed || newETag == "" {
 		// Proceed with the cached OSL directory.
-		oslDirectoryPayload, err = GetKeyValue(DATA_STORE_OSL_DIRECTORY_KEY)
-		if err != nil {
-			return fmt.Errorf("failed to get cache obfuscated server list directory: %s", common.ContextError(err))
+		oslDirectoryJSON, err := GetKeyValue(DATA_STORE_OSL_DIRECTORY_KEY)
+		if err == nil && oslDirectoryJSON == "" {
+			err = errors.New("not found")
 		}
-	}
+		if err != nil {
+			return fmt.Errorf("failed to get cached obfuscated server list directory: %s", common.ContextError(err))
+		}
 
-	// *TODO* fix double authenticated package unwrapping: make LoadDirectory take JSON string
-
-	oslDirectory, err := osl.LoadDirectory([]byte(oslDirectoryPayload), config.RemoteServerListSignaturePublicKey)
-	if err != nil {
-		return fmt.Errorf("failed to load obfuscated server list directory: %s", common.ContextError(err))
+		oslDirectory, err = osl.LoadDirectory([]byte(oslDirectoryJSON))
+		if err != nil {
+			return fmt.Errorf("failed to load obfuscated server list directory: %s", common.ContextError(err))
+		}
 	}
 
 	// When a new directory is downloaded, validated, and parsed, store the
@@ -165,17 +181,17 @@ func FetchObfuscatedServerLists(
 	// Note: we proceed to check individual OSLs even if the direcory is unchanged,
 	// as the set of local SLOKs may have changed.
 
-	oslIDs := oslDirectory.GetSeededOSLIDs(
-
+	lookupSLOKs := func(slokID []byte) []byte {
 		// Lookup SLOKs in local datastore
-		func(slokID []byte) []byte {
-			key, err := GetSLOK(slokID)
-			if err != nil {
-				NoticeAlert("GetSLOK failed: %s", err)
-			}
-			return key
-		},
+		key, err := GetSLOK(slokID)
+		if err != nil {
+			NoticeAlert("GetSLOK failed: %s", err)
+		}
+		return key
+	}
 
+	oslIDs := oslDirectory.GetSeededOSLIDs(
+		lookupSLOKs,
 		func(err error) {
 			NoticeAlert("GetSeededOSLIDs failed: %s", err)
 		})
@@ -183,8 +199,9 @@ func FetchObfuscatedServerLists(
 	for _, oslID := range oslIDs {
 		downloadFilename := osl.GetOSLFilename(config.ObfuscatedServerListDownloadDirectory, oslID)
 		downloadURL := osl.GetOSLFileURL(config.ObfuscatedServerListRootURL, oslID)
+		hexID := hex.EncodeToString(oslID)
 
-		// *TODO* ETags in OSL directory to enable skipping request entirely
+		// TODO: store ETags in OSL directory to enable skipping requests entirely
 
 		newETag, err := downloadRemoteServerListFile(
 			config,
@@ -194,7 +211,7 @@ func FetchObfuscatedServerLists(
 			downloadFilename)
 		if err != nil {
 			failed = true
-			NoticeAlert("failed to download obfuscated server list file (%s): %s", oslID, common.ContextError(err))
+			NoticeAlert("failed to download obfuscated server list file (%s): %s", hexID, common.ContextError(err))
 			continue
 		}
 
@@ -203,19 +220,25 @@ func FetchObfuscatedServerLists(
 			continue
 		}
 
-		// *TODO* DecryptOSL; also, compress before encrypt?
-
-		serverListPayload, err := unpackRemoteServerListFile(config, downloadFilename)
+		fileContent, err := ioutil.ReadFile(downloadFilename)
 		if err != nil {
 			failed = true
-			NoticeAlert("failed to unpack obfuscated server list file (%s): %s", oslID, common.ContextError(err))
+			NoticeAlert("failed to read obfuscated server list file (%s): %s", hexID, common.ContextError(err))
+			continue
+		}
+
+		serverListPayload, err := oslDirectory.UnpackOSL(
+			lookupSLOKs, oslID, fileContent, config.RemoteServerListSignaturePublicKey)
+		if err != nil {
+			failed = true
+			NoticeAlert("failed to unpack obfuscated server list file (%s): %s", hexID, common.ContextError(err))
 			continue
 		}
 
 		err = storeServerEntries(serverListPayload)
 		if err != nil {
 			failed = true
-			NoticeAlert("failed to store obfuscated server list file (%s): %s", oslID, common.ContextError(err))
+			NoticeAlert("failed to store obfuscated server list file (%s): %s", hexID, common.ContextError(err))
 			continue
 		}
 
@@ -224,7 +247,7 @@ func FetchObfuscatedServerLists(
 		err = SetUrlETag(config.RemoteServerListUrl, newETag)
 		if err != nil {
 			failed = true
-			NoticeAlert("failed to set Etag for obfuscated server list file (%s): %s", oslID, common.ContextError(err))
+			NoticeAlert("failed to set Etag for obfuscated server list file (%s): %s", hexID, common.ContextError(err))
 			continue
 			// This fetch is still reported as a success, even if we can't store the etag
 		}

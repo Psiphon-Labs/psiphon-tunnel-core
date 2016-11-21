@@ -758,7 +758,7 @@ func (sshClient *sshClient) run(clientConn net.Conn) {
 
 	sshClient.runTunnel(result.channels, result.requests)
 
-	// Note: sshServer.unregisterEstablishedClient calls sshClient.Close(),
+	// Note: sshServer.unregisterEstablishedClient calls sshClient.stop(),
 	// which also closes underlying transport Conn.
 }
 
