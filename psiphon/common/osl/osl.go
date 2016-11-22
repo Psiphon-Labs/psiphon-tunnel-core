@@ -21,7 +21,7 @@
 // mechanism is a method of distributing server lists only to clients that
 // demonstrate certain behavioral traits. Clients are seeded with Server
 // List Obfuscation Keys (SLOKs) as they meet the configured criteria. These
-// keys are stored and later comboined to assemble keys to decrypt out-of-band
+// keys are stored and later combined to assemble keys to decrypt out-of-band
 // distributed OSL files that contain server lists.
 //
 // This package contains the core routines used in psiphond (to track client
@@ -33,6 +33,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"crypto/hmac"
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -653,9 +654,16 @@ type Registry struct {
 // An OSLFileSpec includes an ID which is used to reference the
 // OSL file and describes the key splits used to divide the OSL
 // file key along with the SLOKs required to reassemble those keys.
+//
+// The MD5Sum field is a checksum of the contents of the OSL file
+// to be used to skip redownloading previously downloaded files.
+// MD5 is not cryptogrpahically secure and this checksum is not
+// relied upon for OSL verification. MD5 is used for compatibility
+// with out-of-band distribution hosts.
 type OSLFileSpec struct {
 	ID        []byte
 	KeyShares *KeyShares
+	MD5Sum    []byte
 }
 
 // KeyShares is a tree data structure which describes the
@@ -684,6 +692,10 @@ type KeyShares struct {
 // paveServerEntries. paveServerEntries is a list of maps, one for each
 // scheme, from the first SLOK time period identifying an OSL to a
 // payload to encrypt and pave.
+// The registry file spec MD5 checksum values are populated only for
+// OSLs referenced in paveServerEntries. To ensure a registry is fully
+// populated with hashes for skipping redownloading, all OSLs should
+// be paved.
 //
 // Automation is responsible for consistently distributing server entries
 // to OSLs in the case where OSLs are repaved in subsequent calls.
@@ -740,6 +752,9 @@ func (config *Config) Pave(
 					if err != nil {
 						return nil, common.ContextError(err)
 					}
+
+					md5sum := md5.Sum(boxedServerEntries)
+					fileSpec.MD5Sum = md5sum[:]
 
 					fileName := fmt.Sprintf(
 						OSL_FILENAME_FORMAT, hex.EncodeToString(fileSpec.ID))
@@ -1043,6 +1058,17 @@ func (registry *Registry) GetSeededOSLIDs(lookup SLOKLookup, errorLogger func(er
 	}
 
 	return OSLIDs
+}
+
+// GetOSLMD5Sum returns the MD5 checksum for the specified OSL.
+func (registry *Registry) GetOSLMD5Sum(oslID []byte) ([]byte, error) {
+
+	fileSpec, ok := registry.oslIDLookup[string(oslID)]
+	if !ok {
+		return nil, common.ContextError(errors.New("unknown OSL ID"))
+	}
+
+	return fileSpec.MD5Sum, nil
 }
 
 // reassembleKey recursively traverses a KeyShares tree, determining

@@ -55,6 +55,7 @@ func FetchCommonRemoteServerList(
 		tunnel,
 		untunneledDialConfig,
 		config.RemoteServerListUrl,
+		"",
 		config.RemoteServerListDownloadFilename)
 	if err != nil {
 		return fmt.Errorf("failed to download common remote server list: %s", common.ContextError(err))
@@ -121,6 +122,7 @@ func FetchObfuscatedServerLists(
 		tunnel,
 		untunneledDialConfig,
 		downloadURL,
+		"",
 		downloadFilename)
 	if err != nil {
 		failed = true
@@ -201,6 +203,14 @@ func FetchObfuscatedServerLists(
 		downloadURL := osl.GetOSLFileURL(config.ObfuscatedServerListRootURL, oslID)
 		hexID := hex.EncodeToString(oslID)
 
+		// Note: the MD5 checksum step assumes the remote server list host's ETag uses MD5
+		// with a hex encoding. If this is not the case, the remoteETag should be left blank.
+		remoteETag := ""
+		md5sum, err := oslRegistry.GetOSLMD5Sum(oslID)
+		if err == nil {
+			remoteETag = hex.EncodeToString(md5sum)
+		}
+
 		// TODO: store ETags in OSL registry to enable skipping requests entirely
 
 		newETag, err := downloadRemoteServerListFile(
@@ -208,6 +218,7 @@ func FetchObfuscatedServerLists(
 			tunnel,
 			untunneledDialConfig,
 			downloadURL,
+			remoteETag,
 			downloadFilename)
 		if err != nil {
 			failed = true
@@ -254,7 +265,7 @@ func FetchObfuscatedServerLists(
 	}
 
 	if failed {
-		return errors.New("failed to fetch obfuscated remote server lists")
+		return errors.New("one or more operations failed")
 	}
 	return nil
 }
@@ -269,7 +280,21 @@ func downloadRemoteServerListFile(
 	config *Config,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
-	sourceURL, destinationFilename string) (string, error) {
+	sourceURL, sourceETag, destinationFilename string) (string, error) {
+
+	lastETag, err := GetUrlETag(sourceURL)
+	if err != nil {
+		return "", common.ContextError(err)
+	}
+
+	// sourceETag, when specified, is prior knowlegde of the
+	// remote ETag that can be used to skip the request entirely.
+	// This will be set in the case of OSL files, from the MD5Sum
+	// values stored in the registry.
+	if lastETag != "" && sourceETag == lastETag {
+		// TODO: notice?
+		return "", nil
+	}
 
 	// MakeDownloadHttpClient will select either a tunneled
 	// or untunneled configuration.
@@ -280,11 +305,6 @@ func downloadRemoteServerListFile(
 		untunneledDialConfig,
 		sourceURL,
 		time.Duration(*config.FetchRemoteServerListTimeoutSeconds)*time.Second)
-	if err != nil {
-		return "", common.ContextError(err)
-	}
-
-	lastETag, err := GetUrlETag(sourceURL)
 	if err != nil {
 		return "", common.ContextError(err)
 	}
