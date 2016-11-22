@@ -15,7 +15,8 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-VALID_ARCHS="arm64 armv7 armv7s"
+VALID_IOS_ARCHS="arm64 armv7 armv7s"
+VALID_SIMULATOR_ARCHS="x86_64"
 FRAMEWORK="Psi"
 INTERMEDIATE_OUPUT_DIR="${BASE_DIR}/PsiphonTunnel/PsiphonTunnel"
 INTERMEDIATE_OUPUT_FILE="${FRAMEWORK}.framework"
@@ -69,7 +70,27 @@ if [ ! -e ${IOS_SRC_DIR} ]; then
   fi
 fi
 
+# arg: binary_path
+function strip_architectures() {
+  valid_archs="${VALID_IOS_ARCHS} ${VALID_SIMULATOR_ARCHS}"
+  ARCHS="$(lipo -info "$1" | rev | cut -d ':' -f1 | rev)"
+  for ARCH in "${valid_archs}"; do
+    if ! [[ "${valid_archs}" == *"$ARCH"* ]]; then
+      echo "Stripping ARCH ${ARCH} from $1"
+      lipo -remove "$ARCH" -output "$1" "$1"
+      rc=$?; if [[ $rc != 0 ]]; then
+        echo "FAILURE: lipo $1"
+        exit $rc
+      fi
+    fi
+  done
+  return 0
+}
+
 cd OpenSSL-for-iPhone && ./build-libssl.sh; cd -
+
+strip_architectures "${LIBSSL}"
+strip_architectures "${LIBCRYPTO}"
 
 go get -d  -u -v github.com/Psiphon-Inc/openssl
 rc=$?; if [[ $rc != 0 ]]; then
@@ -153,23 +174,13 @@ LC_ALL=C sed -i -- "s|// #cgo pkg-config: libssl|${IOS_CGO_BUILD_FLAGS}|" "${OPE
 
 gomobile init
 
-gomobile bind -target ios -ldflags="${LDFLAGS}" -o ${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE} github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+gomobile bind -target ios -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 rc=$?; if [[ $rc != 0 ]]; then
   echo "FAILURE: gomobile bind"
   exit $rc
 fi
 
-ARCHS="$(lipo -info "${FRAMEWORK_BINARY}" | rev | cut -d ':' -f1 | rev)"
-for ARCH in $ARCHS; do
-  if ! [[ "${VALID_ARCHS}" == *"$ARCH"* ]]; then
-    echo "Stripping ARCH ${ARCH} from ${FRAMEWORK_BINARY}"
-    lipo -remove "$ARCH" -output "$FRAMEWORK_BINARY" "$FRAMEWORK_BINARY"
-    rc=$?; if [[ $rc != 0 ]]; then
-      echo "FAILURE: lipo"
-      exit $rc
-    fi
-  fi
-done
+strip_architectures "${FRAMEWORK_BINARY}"
 
 #
 # Do the outer framework build using Xcode
@@ -177,12 +188,30 @@ done
 
 # Clean previous output
 rm -rf "${BUILD_DIR}"
+rm -rf "${BUILD_DIR}-SIMULATOR"
 
-# Build the outer framework
+# Build the outer framework for phones...
 xcodebuild clean build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -configuration Release -sdk iphoneos ONLY_ACTIVE_ARCH=NO -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT} CONFIGURATION_BUILD_DIR="${BUILD_DIR}"
 rc=$?; if [[ $rc != 0 ]]; then
-  echo "FAILURE: xcodebuild"
+  echo "FAILURE: xcodebuild iphoneos"
   exit $rc
 fi
+
+# ...and for the simulator.
+xcodebuild clean build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -configuration Release -sdk iphonesimulator ARCHS=x86_64 VALID_ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT} CONFIGURATION_BUILD_DIR="${BUILD_DIR}-SIMULATOR"
+rc=$?; if [[ $rc != 0 ]]; then
+  echo "FAILURE: xcodebuild iphonesimulator"
+  exit $rc
+fi
+
+# Add the simulator x86_64 binary into the main framework binary.
+lipo -create "${BUILD_DIR}/PsiphonTunnel.framework/PsiphonTunnel" "${BUILD_DIR}-SIMULATOR/PsiphonTunnel.framework/PsiphonTunnel" -output "${BUILD_DIR}/PsiphonTunnel.framework/PsiphonTunnel"
+rc=$?; if [[ $rc != 0 ]]; then
+  echo "FAILURE: lipo create"
+  exit $rc
+fi
+
+# Delete the temporary simulator build files.
+rm -rf "${BUILD_DIR}-SIMULATOR"
 
 echo "Done."
