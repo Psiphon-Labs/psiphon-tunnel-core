@@ -518,6 +518,7 @@ func TestOSL(t *testing.T) {
 				t.Fatalf("UnpackRegistry failed: %s", err)
 			}
 
+			t.Logf("registry size: %d", len(pavedDirectories[testCase.propagationChannelID]))
 			t.Logf("registry OSL count: %d", len(registry.FileSpecs))
 
 			oslIDs := registry.GetSeededOSLIDs(
