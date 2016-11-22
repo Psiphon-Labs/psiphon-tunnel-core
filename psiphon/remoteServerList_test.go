@@ -28,7 +28,9 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -352,5 +354,15 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 	case <-tunnelEstablished:
 	case <-establishTimeout.C:
 		t.Fatalf("tunnel establish timeout exceeded")
+	}
+
+	for _, paveFile := range paveFiles {
+		u, _ := url.Parse(obfuscatedServerListRootURL)
+		u.Path = path.Join(u.Path, paveFile.Name)
+		etag, _ := GetUrlETag(u.String())
+		md5sum := md5.Sum(paveFile.Contents)
+		if etag != hex.EncodeToString(md5sum[:]) {
+			t.Fatalf("unexpected ETag for %s", u)
+		}
 	}
 }

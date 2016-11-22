@@ -88,9 +88,9 @@ func FetchCommonRemoteServerList(
 
 // FetchObfuscatedServerLists downloads the obfuscated remote server lists
 // from config.ObfuscatedServerListRootURL.
-// It first downloads the OSL directory, and then downloads each seeded OSL
-// advertised in the directory. All downloads are resumable, ETags are used
-// to skip both an unchanged directory or unchanged OSL files, and when an
+// It first downloads the OSL registry, and then downloads each seeded OSL
+// advertised in the registry. All downloads are resumable, ETags are used
+// to skip both an unchanged registry or unchanged OSL files, and when an
 // individual download fails, the fetch proceeds if it can.
 // Authenticated package digital signatures are validated using the
 // public key config.RemoteServerListSignaturePublicKey.
@@ -104,17 +104,17 @@ func FetchObfuscatedServerLists(
 
 	NoticeInfo("fetching obfuscated remote server lists")
 
-	downloadFilename := osl.GetOSLDirectoryFilename(config.ObfuscatedServerListDownloadDirectory)
-	downloadURL := osl.GetOSLDirectoryURL(config.ObfuscatedServerListRootURL)
+	downloadFilename := osl.GetOSLRegistryFilename(config.ObfuscatedServerListDownloadDirectory)
+	downloadURL := osl.GetOSLRegistryURL(config.ObfuscatedServerListRootURL)
 
-	// failed is set if any operation fails and should trigger a retry. When the OSL directory
-	// fails to download, any cached directory is used instead; when any single OSL fails
+	// failed is set if any operation fails and should trigger a retry. When the OSL registry
+	// fails to download, any cached registry is used instead; when any single OSL fails
 	// to download, the overall operation proceeds. So this flag records whether to report
 	// failure at the end when downloading has proceeded after a failure.
 	// TODO: should disk-full conditions not trigger retries?
 	var failed bool
 
-	var oslDirectory *osl.Directory
+	var oslRegistry *osl.Registry
 
 	newETag, err := downloadRemoteServerListFile(
 		config,
@@ -124,56 +124,56 @@ func FetchObfuscatedServerLists(
 		downloadFilename)
 	if err != nil {
 		failed = true
-		NoticeAlert("failed to download obfuscated server list directory: %s", common.ContextError(err))
+		NoticeAlert("failed to download obfuscated server list registry: %s", common.ContextError(err))
 	} else if newETag != "" {
 
 		fileContent, err := ioutil.ReadFile(downloadFilename)
 		if err != nil {
 			failed = true
-			NoticeAlert("failed to read obfuscated server list directory: %s", common.ContextError(err))
+			NoticeAlert("failed to read obfuscated server list registry: %s", common.ContextError(err))
 		}
 
-		var oslDirectoryJSON []byte
+		var oslRegistryJSON []byte
 		if err == nil {
-			oslDirectory, oslDirectoryJSON, err = osl.UnpackDirectory(
+			oslRegistry, oslRegistryJSON, err = osl.UnpackRegistry(
 				fileContent, config.RemoteServerListSignaturePublicKey)
 			if err != nil {
 				failed = true
-				NoticeAlert("failed to unpack obfuscated server list directory: %s", common.ContextError(err))
+				NoticeAlert("failed to unpack obfuscated server list registry: %s", common.ContextError(err))
 			}
 		}
 
 		if err == nil {
-			err = SetKeyValue(DATA_STORE_OSL_DIRECTORY_KEY, string(oslDirectoryJSON))
+			err = SetKeyValue(DATA_STORE_OSL_REGISTRY_KEY, string(oslRegistryJSON))
 			if err != nil {
 				failed = true
-				NoticeAlert("failed to set cached obfuscated server list directory: %s", common.ContextError(err))
+				NoticeAlert("failed to set cached obfuscated server list registry: %s", common.ContextError(err))
 			}
 		}
 	}
 
 	if failed || newETag == "" {
-		// Proceed with the cached OSL directory.
-		oslDirectoryJSON, err := GetKeyValue(DATA_STORE_OSL_DIRECTORY_KEY)
-		if err == nil && oslDirectoryJSON == "" {
+		// Proceed with the cached OSL registry.
+		oslRegistryJSON, err := GetKeyValue(DATA_STORE_OSL_REGISTRY_KEY)
+		if err == nil && oslRegistryJSON == "" {
 			err = errors.New("not found")
 		}
 		if err != nil {
-			return fmt.Errorf("failed to get cached obfuscated server list directory: %s", common.ContextError(err))
+			return fmt.Errorf("failed to get cached obfuscated server list registry: %s", common.ContextError(err))
 		}
 
-		oslDirectory, err = osl.LoadDirectory([]byte(oslDirectoryJSON))
+		oslRegistry, err = osl.LoadRegistry([]byte(oslRegistryJSON))
 		if err != nil {
-			return fmt.Errorf("failed to load obfuscated server list directory: %s", common.ContextError(err))
+			return fmt.Errorf("failed to load obfuscated server list registry: %s", common.ContextError(err))
 		}
 	}
 
-	// When a new directory is downloaded, validated, and parsed, store the
+	// When a new registry is downloaded, validated, and parsed, store the
 	// response ETag so we won't re-download this same data again.
 	if !failed && newETag != "" {
-		err = SetUrlETag(config.RemoteServerListUrl, newETag)
+		err = SetUrlETag(downloadURL, newETag)
 		if err != nil {
-			NoticeAlert("failed to set ETag for obfuscated server list directory: %s", common.ContextError(err))
+			NoticeAlert("failed to set ETag for obfuscated server list registry: %s", common.ContextError(err))
 			// This fetch is still reported as a success, even if we can't store the etag
 		}
 	}
@@ -190,7 +190,7 @@ func FetchObfuscatedServerLists(
 		return key
 	}
 
-	oslIDs := oslDirectory.GetSeededOSLIDs(
+	oslIDs := oslRegistry.GetSeededOSLIDs(
 		lookupSLOKs,
 		func(err error) {
 			NoticeAlert("GetSeededOSLIDs failed: %s", err)
@@ -201,7 +201,7 @@ func FetchObfuscatedServerLists(
 		downloadURL := osl.GetOSLFileURL(config.ObfuscatedServerListRootURL, oslID)
 		hexID := hex.EncodeToString(oslID)
 
-		// TODO: store ETags in OSL directory to enable skipping requests entirely
+		// TODO: store ETags in OSL registry to enable skipping requests entirely
 
 		newETag, err := downloadRemoteServerListFile(
 			config,
@@ -227,7 +227,7 @@ func FetchObfuscatedServerLists(
 			continue
 		}
 
-		serverListPayload, err := oslDirectory.UnpackOSL(
+		serverListPayload, err := oslRegistry.UnpackOSL(
 			lookupSLOKs, oslID, fileContent, config.RemoteServerListSignaturePublicKey)
 		if err != nil {
 			failed = true
@@ -244,7 +244,7 @@ func FetchObfuscatedServerLists(
 
 		// Now that the server entries are successfully imported, store the response
 		// ETag so we won't re-download this same data again.
-		err = SetUrlETag(config.RemoteServerListUrl, newETag)
+		err = SetUrlETag(downloadURL, newETag)
 		if err != nil {
 			failed = true
 			NoticeAlert("failed to set Etag for obfuscated server list file (%s): %s", hexID, common.ContextError(err))

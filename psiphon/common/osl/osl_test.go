@@ -352,12 +352,12 @@ func TestOSL(t *testing.T) {
 				signingPrivateKey,
 				paveServerEntries)
 			if err != nil {
-				t.Fatalf("PaveDirectory failed: %s", err)
+				t.Fatalf("Pave failed: %s", err)
 			}
 
 			// Check that the paved file name matches the name the client will look for.
-			if len(paveFiles) < 1 || paveFiles[len(paveFiles)-1].Name != GetOSLDirectoryURL("") {
-				t.Fatalf("invalid directory pave file")
+			if len(paveFiles) < 1 || paveFiles[len(paveFiles)-1].Name != GetOSLRegistryURL("") {
+				t.Fatalf("invalid registry pave file")
 			}
 
 			pavedDirectories[propagationChannelID] = paveFiles[len(paveFiles)-1].Contents
@@ -510,24 +510,24 @@ func TestOSL(t *testing.T) {
 				return slokMap[string(slokID)]
 			}
 
-			checkDirectoryStartTime := time.Now()
+			checkRegistryStartTime := time.Now()
 
-			directory, _, err := UnpackDirectory(
+			registry, _, err := UnpackRegistry(
 				pavedDirectories[testCase.propagationChannelID], signingPublicKey)
 			if err != nil {
-				t.Fatalf("LoadDirectory failed: %s", err)
+				t.Fatalf("UnpackRegistry failed: %s", err)
 			}
 
-			t.Logf("directory OSL count: %d", len(directory.FileSpecs))
+			t.Logf("registry OSL count: %d", len(registry.FileSpecs))
 
-			oslIDs := directory.GetSeededOSLIDs(
+			oslIDs := registry.GetSeededOSLIDs(
 				slokLookup,
 				func(err error) {
 					// Actual client will treat errors as warnings.
 					t.Fatalf("GetSeededOSLIDs failed: %s", err)
 				})
 
-			t.Logf("check directory elapsed time: %s", time.Since(checkDirectoryStartTime))
+			t.Logf("check registry elapsed time: %s", time.Since(checkRegistryStartTime))
 
 			if len(oslIDs) != testCase.expectedOSLCount {
 				t.Fatalf("expected %d OSLs got %d", testCase.expectedOSLCount, len(oslIDs))
@@ -540,7 +540,7 @@ func TestOSL(t *testing.T) {
 					t.Fatalf("unknown OSL file name")
 				}
 
-				plaintextOSL, err := directory.UnpackOSL(
+				plaintextOSL, err := registry.UnpackOSL(
 					slokLookup, oslID, oslFileContents, signingPublicKey)
 				if err != nil {
 					t.Fatalf("DecryptOSL failed: %s", err)

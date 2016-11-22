@@ -56,7 +56,7 @@ import (
 
 const (
 	KEY_LENGTH_BYTES    = 32
-	DIRECTORY_FILENAME  = "osl-dir"
+	REGISTRY_FILENAME   = "osl-registry"
 	OSL_FILENAME_FORMAT = "osl-%s"
 )
 
@@ -633,7 +633,7 @@ func (state *ClientSeedState) ClearSeedPayload() {
 }
 
 // PaveFile describes an OSL data file to be paved to an out-of-band
-// distribution drop site. There are two types of files: a directory,
+// distribution drop site. There are two types of files: a registry,
 // which describes how to assemble keys for OSLs, and the encrypted
 // OSL files.
 type PaveFile struct {
@@ -641,8 +641,8 @@ type PaveFile struct {
 	Contents []byte
 }
 
-// Directory describes a set of OSL files.
-type Directory struct {
+// Registry describes a set of OSL files.
+type Registry struct {
 	FileSpecs []*OSLFileSpec
 
 	// The following fields are ephemeral state.
@@ -677,9 +677,9 @@ type KeyShares struct {
 // distribution site are paved. This function is used by automation.
 //
 // The Name component of each file relates to the values returned by
-// the client functions GetDirectoryURL and GetOSLFileURL.
+// the client functions GetRegistryURL and GetOSLFileURL.
 //
-// Pave returns a pave file for the entire directory of all OSLs from
+// Pave returns a pave file for the entire registry of all OSLs from
 // epoch. It only returns pave files for OSLs referenced in
 // paveServerEntries. paveServerEntries is a list of maps, one for each
 // scheme, from the first SLOK time period identifying an OSL to a
@@ -699,7 +699,7 @@ func (config *Config) Pave(
 
 	var paveFiles []*PaveFile
 
-	directory := &Directory{}
+	registry := &Registry{}
 
 	if len(paveServerEntries) != len(config.Schemes) {
 		return nil, common.ContextError(errors.New("invalid paveServerEntries"))
@@ -723,7 +723,7 @@ func (config *Config) Pave(
 					return nil, common.ContextError(err)
 				}
 
-				directory.FileSpecs = append(directory.FileSpecs, fileSpec)
+				registry.FileSpecs = append(registry.FileSpecs, fileSpec)
 
 				serverEntries, ok := paveServerEntries[schemeIndex][oslTime]
 				if ok {
@@ -757,13 +757,13 @@ func (config *Config) Pave(
 		}
 	}
 
-	directoryJSON, err := json.Marshal(directory)
+	registryJSON, err := json.Marshal(registry)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
-	signedDirectory, err := common.WriteAuthenticatedDataPackage(
-		base64.StdEncoding.EncodeToString(directoryJSON),
+	signedRegistry, err := common.WriteAuthenticatedDataPackage(
+		base64.StdEncoding.EncodeToString(registryJSON),
 		signingPublicKey,
 		signingPrivateKey)
 	if err != nil {
@@ -771,8 +771,8 @@ func (config *Config) Pave(
 	}
 
 	paveFiles = append(paveFiles, &PaveFile{
-		Name:     DIRECTORY_FILENAME,
-		Contents: compress(signedDirectory),
+		Name:     REGISTRY_FILENAME,
+		Contents: compress(signedRegistry),
 	})
 
 	return paveFiles, nil
@@ -923,24 +923,24 @@ func divideKeyWithSeedSpecSLOKs(
 	}, nil
 }
 
-// GetOSLDirectoryURL returns the URL for an OSL directory. Clients
-// call this when fetching the directory from out-of-band
+// GetOSLRegistryURL returns the URL for an OSL registry. Clients
+// call this when fetching the registry from out-of-band
 // distribution sites.
 // Clients are responsible for tracking whether the remote file has
 // changed or not before downloading.
-func GetOSLDirectoryURL(baseURL string) string {
+func GetOSLRegistryURL(baseURL string) string {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return ""
 	}
-	u.Path = path.Join(u.Path, DIRECTORY_FILENAME)
+	u.Path = path.Join(u.Path, REGISTRY_FILENAME)
 	return u.String()
 }
 
-// GetOSLDirectoryFilename returns an appropriate filename for
-// the resumable download destination for the OSL directory.
-func GetOSLDirectoryFilename(baseDirectory string) string {
-	return filepath.Join(baseDirectory, DIRECTORY_FILENAME)
+// GetOSLRegistryFilename returns an appropriate filename for
+// the resumable download destination for the OSL registry.
+func GetOSLRegistryFilename(baseDirectory string) string {
+	return filepath.Join(baseDirectory, REGISTRY_FILENAME)
 }
 
 // GetOSLFileURL returns the URL for an OSL file. Once the client
@@ -965,52 +965,53 @@ func GetOSLFilename(baseDirectory string, oslID []byte) string {
 		baseDirectory, fmt.Sprintf(OSL_FILENAME_FORMAT, hex.EncodeToString(oslID)))
 }
 
-// UnpackDirectory decompresses, validates, and loads a
-// JSON encoded OSL directory.
-func UnpackDirectory(
-	compressedDirectory []byte, signingPublicKey string) (*Directory, []byte, error) {
+// UnpackRegistry decompresses, validates, and loads a
+// JSON encoded OSL registry.
+func UnpackRegistry(
+	compressedRegistry []byte, signingPublicKey string) (*Registry, []byte, error) {
 
-	directoryPackage, err := uncompress(compressedDirectory)
+	packagedRegistry, err := uncompress(compressedRegistry)
 	if err != nil {
 		return nil, nil, common.ContextError(err)
 	}
 
-	encodedDirectory, err := common.ReadAuthenticatedDataPackage(directoryPackage, signingPublicKey)
+	encodedRegistry, err := common.ReadAuthenticatedDataPackage(
+		packagedRegistry, signingPublicKey)
 	if err != nil {
 		return nil, nil, common.ContextError(err)
 	}
 
-	directoryJSON, err := base64.StdEncoding.DecodeString(encodedDirectory)
+	registryJSON, err := base64.StdEncoding.DecodeString(encodedRegistry)
 	if err != nil {
 		return nil, nil, common.ContextError(err)
 	}
 
-	directory, err := LoadDirectory(directoryJSON)
-	return directory, directoryJSON, err
+	registry, err := LoadRegistry(registryJSON)
+	return registry, registryJSON, err
 }
 
-// LoadDirectory loads a JSON encoded OSL directory.
-// Clients call this to process downloaded directory files.
-func LoadDirectory(directoryJSON []byte) (*Directory, error) {
+// LoadRegistry loads a JSON encoded OSL registry.
+// Clients call this to process downloaded registry files.
+func LoadRegistry(registryJSON []byte) (*Registry, error) {
 
-	var directory Directory
-	err := json.Unmarshal(directoryJSON, &directory)
+	var registry Registry
+	err := json.Unmarshal(registryJSON, &registry)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
-	directory.oslIDLookup = make(map[string]*OSLFileSpec)
-	for _, fileSpec := range directory.FileSpecs {
-		directory.oslIDLookup[string(fileSpec.ID)] = fileSpec
+	registry.oslIDLookup = make(map[string]*OSLFileSpec)
+	for _, fileSpec := range registry.FileSpecs {
+		registry.oslIDLookup[string(fileSpec.ID)] = fileSpec
 	}
 
-	return &directory, nil
+	return &registry, nil
 }
 
 // SLOKLookup is a callback to lookup SLOK keys by ID.
 type SLOKLookup func([]byte) []byte
 
-// GetSeededOSLIDs examines each OSL in the directory and returns a list for
+// GetSeededOSLIDs examines each OSL in the registry and returns a list for
 // which the client has sufficient SLOKs to reassemble the OSL key and
 // decrypt. This function simply does SLOK ID lookups and threshold counting
 // and does not derive keys for every OSL.
@@ -1018,19 +1019,19 @@ type SLOKLookup func([]byte) []byte
 // the OSL files and process.
 //
 // The client's propagation channel ID is used implicitly: it determines the
-// base URL used to download the directory and OSL files. If the client has
+// base URL used to download the registry and OSL files. If the client has
 // seeded SLOKs from a propagation channel ID different than the one associated
-// with its present base URL, they will not appear in the directory and not
+// with its present base URL, they will not appear in the registry and not
 // be used.
 //
 // SLOKLookup is called to determine which SLOKs are seeded with the client.
 // errorLogger is a callback to log errors; GetSeededOSLIDs will continue to
 // process each candidate OSL even in the case of an error processing a
 // particular one.
-func (directory *Directory) GetSeededOSLIDs(lookup SLOKLookup, errorLogger func(error)) [][]byte {
+func (registry *Registry) GetSeededOSLIDs(lookup SLOKLookup, errorLogger func(error)) [][]byte {
 
 	var OSLIDs [][]byte
-	for _, fileSpec := range directory.FileSpecs {
+	for _, fileSpec := range registry.FileSpecs {
 		ok, _, err := fileSpec.KeyShares.reassembleKey(lookup, false)
 		if err != nil {
 			errorLogger(err)
@@ -1116,13 +1117,13 @@ func (keyShares *KeyShares) reassembleKey(lookup SLOKLookup, unboxKey bool) (boo
 // Clients will call UnpackOSL for OSLs indicated by GetSeededOSLIDs along
 // with their downloaded content.
 // SLOKLookup is called to determine which SLOKs are seeded with the client.
-func (directory *Directory) UnpackOSL(
+func (registry *Registry) UnpackOSL(
 	lookup SLOKLookup,
 	oslID []byte,
 	oslFileContents []byte,
 	signingPublicKey string) (string, error) {
 
-	fileSpec, ok := directory.oslIDLookup[string(oslID)]
+	fileSpec, ok := registry.oslIDLookup[string(oslID)]
 	if !ok {
 		return "", common.ContextError(errors.New("unknown OSL ID"))
 	}

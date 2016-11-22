@@ -65,7 +65,7 @@ const (
 
 const (
 	DATA_STORE_LAST_CONNECTED_KEY           = "lastConnected"
-	DATA_STORE_OSL_DIRECTORY_KEY            = "OSLDirectory"
+	DATA_STORE_OSL_REGISTRY_KEY             = "OSLRegistry"
 	PERSISTENT_STAT_TYPE_TUNNEL             = tunnelStatsBucket
 	PERSISTENT_STAT_TYPE_REMOTE_SERVER_LIST = remoteServerListStatsBucket
 )
