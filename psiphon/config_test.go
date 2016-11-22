@@ -59,6 +59,10 @@ func (suite *ConfigTestSuite) SetupSuite() {
 			suite.nonRequiredFields = append(suite.nonRequiredFields, k)
 		}
 	}
+
+	// Force skipping required RSL fields
+	obj["DisableRemoteServerListFetcher"] = true
+	suite.confStubBlob, _ = json.Marshal(obj)
 }
 
 func TestConfigTestSuite(t *testing.T) {

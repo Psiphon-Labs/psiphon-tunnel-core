@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,12 +43,26 @@ import (
 	"github.com/elazarl/goproxy"
 )
 
+var testDataDirName string
+
 func TestMain(m *testing.M) {
 	flag.Parse()
-	os.Remove(DATA_STORE_FILENAME)
+
+	var err error
+	testDataDirName, err = ioutil.TempDir("", "psiphon-controller-test")
+	if err != nil {
+		fmt.Printf("TempDir failed: %s", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(testDataDirName)
+
+	os.Remove(filepath.Join(testDataDirName, DATA_STORE_FILENAME))
+
+	SetEmitDiagnosticNotices(true)
+
 	initDisruptor()
 	initUpstreamProxy()
-	SetEmitDiagnosticNotices(true)
+
 	os.Exit(m.Run())
 }
 
@@ -125,7 +141,7 @@ func TestUntunneledUpgradeClientIsLatestVersion(t *testing.T) {
 		})
 }
 
-func TestUntunneledResumableFetchRemoveServerList(t *testing.T) {
+func TestUntunneledResumableFetchRemoteServerList(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    true,
@@ -421,12 +437,23 @@ type controllerRunConfig struct {
 
 func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
-	configFileContents, err := ioutil.ReadFile("controller_test.config")
+	configJSON, err := ioutil.ReadFile("controller_test.config")
 	if err != nil {
 		// Skip, don't fail, if config file is not present
 		t.Skipf("error loading configuration file: %s", err)
 	}
-	config, err := LoadConfig(configFileContents)
+
+	// These fields must be filled in before calling LoadConfig
+	var modifyConfig map[string]interface{}
+	json.Unmarshal(configJSON, &modifyConfig)
+	modifyConfig["DataStoreDirectory"] = testDataDirName
+	modifyConfig["RemoteServerListDownloadFilename"] = filepath.Join(testDataDirName, "server_list_compressed")
+	modifyConfig["ObfuscatedServerListDownloadDirectory"] = testDataDirName
+	modifyConfig["ObfuscatedServerListRootURL"] = "http://127.0.0.1/osl" // will fail
+	modifyConfig["UpgradeDownloadFilename"] = filepath.Join(testDataDirName, "upgrade")
+	configJSON, _ = json.Marshal(modifyConfig)
+
+	config, err := LoadConfig(configJSON)
 	if err != nil {
 		t.Fatalf("error processing configuration file: %s", err)
 	}
@@ -438,7 +465,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	if runConfig.disableEstablishing {
 		// Clear remote server list so tunnel cannot be established.
 		// TODO: also delete all server entries in the datastore.
-		config.RemoteServerListUrl = ""
+		config.DisableRemoteServerListFetcher = true
 	}
 
 	if runConfig.disableApi {
@@ -475,9 +502,10 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	establishTunnelPausePeriodSeconds := 1
 	config.EstablishTunnelPausePeriodSeconds = &establishTunnelPausePeriodSeconds
 
-	os.Remove(config.UpgradeDownloadFilename)
-
 	config.TunnelProtocol = runConfig.protocol
+
+	os.Remove(config.UpgradeDownloadFilename)
+	os.Remove(config.RemoteServerListDownloadFilename)
 
 	err = InitDataStore(config)
 	if err != nil {
@@ -573,16 +601,23 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 				default:
 				}
 
-			case "RemoteServerListDownloadedBytes":
+			case "RemoteServerListResourceDownloadedBytes":
 
-				atomic.AddInt32(&remoteServerListDownloadedBytesCount, 1)
-				t.Logf("RemoteServerListDownloadedBytes: %d", int(payload["bytes"].(float64)))
+				url := payload["url"].(string)
+				if url == config.RemoteServerListUrl {
+					t.Logf("RemoteServerListResourceDownloadedBytes: %d", int(payload["bytes"].(float64)))
+					atomic.AddInt32(&remoteServerListDownloadedBytesCount, 1)
+				}
 
-			case "RemoteServerListDownloaded":
+			case "RemoteServerListResourceDownloaded":
 
-				select {
-				case remoteServerListDownloaded <- *new(struct{}):
-				default:
+				url := payload["url"].(string)
+				if url == config.RemoteServerListUrl {
+					t.Logf("RemoteServerListResourceDownloaded")
+					select {
+					case remoteServerListDownloaded <- *new(struct{}):
+					default:
+					}
 				}
 
 			case "ImpairedProtocolClassification":

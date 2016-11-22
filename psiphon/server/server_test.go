@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -40,11 +41,25 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+var testDataDirName string
+
 func TestMain(m *testing.M) {
 	flag.Parse()
-	os.Remove(psiphon.DATA_STORE_FILENAME)
+
+	var err error
+	testDataDirName, err = ioutil.TempDir("", "psiphon-server-test")
+	if err != nil {
+		fmt.Printf("TempDir failed: %s", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(testDataDirName)
+
+	os.Remove(filepath.Join(testDataDirName, psiphon.DATA_STORE_FILENAME))
+
 	psiphon.SetEmitDiagnosticNotices(true)
+
 	CLIENT_VERIFICATION_REQUIRED = true
+
 	os.Exit(m.Run())
 }
 
@@ -219,29 +234,29 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// customize server config
 
 	// Pave psinet with random values to test handshake homepages.
-	psinetFilename := "psinet.json"
+	psinetFilename := filepath.Join(testDataDirName, "psinet.json")
 	sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(t, psinetFilename)
 
 	// Pave traffic rules file which exercises handshake parameter filtering. Client
 	// must handshake with specified sponsor ID in order to allow ports for tunneled
 	// requests.
-	trafficRulesFilename := "traffic_rules.json"
+	trafficRulesFilename := filepath.Join(testDataDirName, "traffic_rules.json")
 	paveTrafficRulesFile(t, trafficRulesFilename, sponsorID, runConfig.denyTrafficRules)
 
-	oslConfigFilename := "osl_config.json"
+	oslConfigFilename := filepath.Join(testDataDirName, "osl_config.json")
 	propagationChannelID := paveOSLConfigFile(t, oslConfigFilename)
 
-	var serverConfig interface{}
+	var serverConfig map[string]interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
-	serverConfig.(map[string]interface{})["GeoIPDatabaseFilename"] = ""
-	serverConfig.(map[string]interface{})["PsinetDatabaseFilename"] = psinetFilename
-	serverConfig.(map[string]interface{})["TrafficRulesFilename"] = trafficRulesFilename
-	serverConfig.(map[string]interface{})["OSLConfigFilename"] = oslConfigFilename
-	serverConfig.(map[string]interface{})["LogLevel"] = "debug"
+	serverConfig["GeoIPDatabaseFilename"] = ""
+	serverConfig["PsinetDatabaseFilename"] = psinetFilename
+	serverConfig["TrafficRulesFilename"] = trafficRulesFilename
+	serverConfig["OSLConfigFilename"] = oslConfigFilename
+	serverConfig["LogLevel"] = "error"
 
 	// 1 second is the minimum period; should be small enough to emit a log during the
 	// test run, but not guaranteed
-	serverConfig.(map[string]interface{})["LoadMonitorPeriodSeconds"] = 1
+	serverConfig["LoadMonitorPeriodSeconds"] = 1
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
@@ -314,7 +329,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "ClientPlatform" : "Android",
         "ClientVersion" : "0",
         "SponsorId" : "0",
-        "PropagationChannelId" : "0"
+        "PropagationChannelId" : "0",
+        "DisableRemoteServerListFetcher" : true
     }`
 	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
 
@@ -322,7 +338,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.PropagationChannelId = propagationChannelID
 	clientConfig.ConnectionWorkerPoolSize = numTunnels
 	clientConfig.TunnelPoolSize = numTunnels
-	clientConfig.DisableRemoteServerListFetcher = true
 	clientConfig.EstablishTunnelPausePeriodSeconds = &establishTunnelPausePeriodSeconds
 	clientConfig.TargetServerEntry = string(encodedServerEntry)
 	clientConfig.TunnelProtocol = runConfig.tunnelProtocol
@@ -330,6 +345,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
 	clientConfig.ReportSLOKs = true
 
+	clientConfig.DataStoreDirectory = testDataDirName
 	err = psiphon.InitDataStore(clientConfig)
 	if err != nil {
 		t.Fatalf("error initializing client datastore: %s", err)
@@ -443,7 +459,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		// Test: tunneled UDP packets
 
-		udpgwServerAddress := serverConfig.(map[string]interface{})["UDPInterceptUdpgwServerAddress"].(string)
+		udpgwServerAddress := serverConfig["UDPInterceptUdpgwServerAddress"].(string)
 
 		err = makeTunneledNTPRequest(t, localSOCKSProxyPort, udpgwServerAddress)
 

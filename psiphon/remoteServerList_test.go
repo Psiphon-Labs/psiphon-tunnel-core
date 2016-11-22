@@ -25,6 +25,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -43,11 +44,16 @@ import (
 
 func TestObfuscatedRemoteServerLists(t *testing.T) {
 
+	testDataDirName, err := ioutil.TempDir("", "psiphon-remote-server-list-test")
+	if err != nil {
+		t.Fatalf("TempDir failed: %s", err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
 	//
 	// create a server
 	//
 
-	var err error
 	serverIPaddress := ""
 	for _, interfaceName := range []string{"eth0", "en0"} {
 		serverIPaddress, err = GetInterfaceIPAddress(interfaceName)
@@ -147,12 +153,16 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 	// mock seeding SLOKs
 	//
 
-	singleton.db = nil
-	os.Remove(DATA_STORE_FILENAME)
+	singleton = dataStore{}
+	os.Remove(filepath.Join(testDataDirName, DATA_STORE_FILENAME))
 
-	err = InitDataStore(&Config{})
+	err = InitDataStore(&Config{DataStoreDirectory: testDataDirName})
 	if err != nil {
 		t.Fatalf("error initializing client datastore: %s", err)
+	}
+
+	if CountServerEntries("", "") > 0 {
+		t.Fatalf("unexpected server entries")
 	}
 
 	seedState := oslConfig.NewClientSeedState("", propagationChannelID, nil)
@@ -169,17 +179,14 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 	// run mock remote server list host
 	//
 
-	downloadRoot := "test-data"
-	os.MkdirAll(downloadRoot, 0700)
-
 	remoteServerListHostAddress := net.JoinHostPort(serverIPaddress, "8080")
 
 	// The common remote server list fetches will 404
 	remoteServerListURL := fmt.Sprintf("http://%s/server_list_compressed", remoteServerListHostAddress)
-	remoteServerListDownloadFilename := filepath.Join(downloadRoot, "server_list_compressed")
+	remoteServerListDownloadFilename := filepath.Join(testDataDirName, "server_list_compressed")
 
 	obfuscatedServerListRootURL := fmt.Sprintf("http://%s/", remoteServerListHostAddress)
-	obfuscatedServerListDownloadDirectory := downloadRoot
+	obfuscatedServerListDownloadDirectory := testDataDirName
 
 	go func() {
 		startTime := time.Now()

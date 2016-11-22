@@ -22,12 +22,21 @@ package common
 import (
 	"bytes"
 	"io/ioutil"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
 func TestReloader(t *testing.T) {
 
-	fileName := "reloader_test.dat"
+	dirname, err := ioutil.TempDir("", "psiphon-reloader-test")
+	if err != nil {
+		t.Fatalf("TempDir failed: %s", err)
+	}
+	defer os.RemoveAll(dirname)
+
+	fileName := filepath.Join(dirname, "reloader_test.dat")
+
 	initialContents := []byte("contents1\n")
 	modifiedContents := []byte("contents2\n")
 
@@ -45,7 +54,7 @@ func TestReloader(t *testing.T) {
 
 	// Test: initial load
 
-	err := ioutil.WriteFile(fileName, initialContents, 0600)
+	err = ioutil.WriteFile(fileName, initialContents, 0600)
 	if err != nil {
 		t.Fatalf("WriteFile failed: %s", err)
 	}
