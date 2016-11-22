@@ -329,7 +329,9 @@ func (server *MeekServer) getSession(
 				// list of IPs (each proxy in a chain). The first IP should be
 				// the client IP.
 				proxyClientIP := strings.Split(value, ",")[0]
-				if net.ParseIP(proxyClientIP) != nil {
+				if net.ParseIP(proxyClientIP) != nil &&
+					server.support.GeoIPService.Lookup(proxyClientIP).Country != GEOIP_UNKNOWN_VALUE {
+
 					clientIP = proxyClientIP
 					break
 				}
