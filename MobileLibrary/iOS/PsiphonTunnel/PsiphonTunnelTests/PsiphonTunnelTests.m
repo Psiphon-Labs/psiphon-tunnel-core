@@ -8,8 +8,22 @@
 
 #import <XCTest/XCTest.h>
 
-@interface PsiphonTunnelTests : XCTestCase
+#import "PsiphonTunnel.h"
 
+
+@interface PsiphonTunnelDelegate : NSObject <TunneledAppDelegate>
+@end
+@implementation PsiphonTunnelDelegate
+
+- (NSString * _Nullable)getPsiphonConfig {
+    return @"";
+}
+
+@end
+
+
+@interface PsiphonTunnelTests : XCTestCase
+@property PsiphonTunnelDelegate *psiphonTunnelDelegate;
 @end
 
 @implementation PsiphonTunnelTests
@@ -17,6 +31,7 @@
 - (void)setUp {
     [super setUp];
     // Put setup code here. This method is called before the invocation of each test method in the class.
+    self.psiphonTunnelDelegate = [[PsiphonTunnelDelegate alloc] init];
 }
 
 - (void)tearDown {
@@ -27,6 +42,9 @@
 - (void)testExample {
     // This is an example of a functional test case.
     // Use XCTAssert and related functions to verify your tests produce the correct results.
+    
+    PsiphonTunnel *tunnel = [PsiphonTunnel newPsiphonTunnel:self.psiphonTunnelDelegate];
+    XCTAssertNotNil(tunnel);
 }
 
 - (void)testPerformanceExample {
@@ -37,3 +55,4 @@
 }
 
 @end
+
