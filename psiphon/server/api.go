@@ -284,11 +284,14 @@ func statusAPIRequestHandler(
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
-		domainBytesFields := getRequestLogFields(
-			support, "domain_bytes", geoIPData, params, statusRequestParams)
 		for domain, bytes := range hostBytes {
+
+			domainBytesFields := getRequestLogFields(
+				support, "domain_bytes", geoIPData, params, statusRequestParams)
+
 			domainBytesFields["domain"] = domain
 			domainBytesFields["bytes"] = bytes
+
 			logQueue = append(logQueue, domainBytesFields)
 		}
 	}
@@ -302,9 +305,10 @@ func statusAPIRequestHandler(
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
-		sessionFields := getRequestLogFields(
-			support, "session", geoIPData, params, statusRequestParams)
 		for _, tunnelStat := range tunnelStats {
+
+			sessionFields := getRequestLogFields(
+				support, "session", geoIPData, params, statusRequestParams)
 
 			sessionID, err := getStringRequestParam(tunnelStat, "session_id")
 			if err != nil {
@@ -369,6 +373,42 @@ func statusAPIRequestHandler(
 			sessionFields["total_bytes_received"] = totalBytesReceived
 
 			logQueue = append(logQueue, sessionFields)
+		}
+	}
+
+	// Remote server list download stats
+	// Older clients may not submit this data
+
+	if statusData["remote_server_list_stats"] != nil {
+
+		remoteServerListStats, err := getJSONObjectArrayRequestParam(statusData, "remote_server_list_stats")
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+		for _, tunnelStat := range tunnelStats {
+
+			remoteServerListFields := getRequestLogFields(
+				support, "remote_server_list", geoIPData, params, statusRequestParams)
+
+			clientDownloadTimestamp, err := getStringRequestParam(tunnelStat, "client_download_timestamp")
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+			remoteServerListFields["client_download_timestamp"] = clientDownloadTimestamp
+
+			url, err := getStringRequestParam(tunnelStat, "url")
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+			remoteServerListFields["url"] = url
+
+			etag, err := getStringRequestParam(tunnelStat, "etag")
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+			remoteServerListFields["etag"] = etag
+
+			logQueue = append(logQueue, remoteServerListFields)
 		}
 	}
 
