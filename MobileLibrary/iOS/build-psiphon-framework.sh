@@ -222,7 +222,6 @@ echo "BUILD DONE"
 
 cd ${BASE_DIR}
 
-echo "PWD $(pwd)"
 # Run the framework projects tests
 xcodebuild test -project "PsiphonTunnel/PsiphonTunnel.xcodeproj" -scheme "PsiphonTunnel" -destination 'platform=iOS Simulator,name=iPhone 7'
 rc=$?; if [[ $rc != 0 ]]; then
