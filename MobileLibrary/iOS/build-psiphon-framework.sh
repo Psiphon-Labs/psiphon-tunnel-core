@@ -214,4 +214,4 @@ fi
 # Delete the temporary simulator build files.
 rm -rf "${BUILD_DIR}-SIMULATOR"
 
-echo "Done."
+echo "BUILD DONE"
