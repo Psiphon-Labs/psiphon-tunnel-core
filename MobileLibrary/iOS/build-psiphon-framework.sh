@@ -215,27 +215,3 @@ fi
 rm -rf "${BUILD_DIR}-SIMULATOR"
 
 echo "BUILD DONE"
-
-#
-# Run tests
-# 
-
-cd ${BASE_DIR}
-
-# Run the framework projects tests
-xcodebuild test -project "PsiphonTunnel/PsiphonTunnel.xcodeproj" -scheme "PsiphonTunnel" -destination 'platform=iOS Simulator,name=iPhone 7'
-rc=$?; if [[ $rc != 0 ]]; then
-  echo "FAILURE: PsiphonTunnel tests"
-  exit $rc
-fi
-
-# Run the sample app project tests
-rm -rf "SampleApps/TunneledWebRequest/TunneledWebRequest/PsiphonTunnel.framework" 
-cp -R "${BUILD_DIR}/PsiphonTunnel.framework" "SampleApps/TunneledWebRequest/TunneledWebRequest"
-xcodebuild test -project "SampleApps/TunneledWebRequest/TunneledWebRequest.xcodeproj" -scheme "TunneledWebRequest" -destination 'platform=iOS Simulator,name=iPhone 7'
-rc=$?; if [[ $rc != 0 ]]; then
-  echo "FAILURE: TunneledWebRequest tests"
-  exit $rc
-fi
-
-echo "TESTS DONE"
