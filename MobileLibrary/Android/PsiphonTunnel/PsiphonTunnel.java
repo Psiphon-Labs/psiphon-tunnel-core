@@ -384,7 +384,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
                 && !oslDownloadDir.mkdirs()) {
             // Failed to create osl directory
             // TODO: proceed anyway?
-            throw new IOException("failed to create OSL download directory")
+            throw new IOException("failed to create OSL download directory");
         }
         json.put("ObfuscatedServerListDownloadDirectory", oslDownloadDir.getAbsolutePath());
 
