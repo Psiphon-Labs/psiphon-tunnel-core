@@ -185,6 +185,11 @@ func (entry *LRUConnsEntry) Touch() {
 // When a LRUConnsEntry is specified, then the LRU entry is promoted on
 // either a successful read or write.
 //
+// When an ActivityUpdater is set, then its UpdateActivity method is
+// called on each read and write with the number of bytes transferred.
+// The durationNanoseconds, which is the time since the last read, is
+// reported only on reads.
+//
 type ActivityMonitoredConn struct {
 	// Note: 64-bit ints used with atomic operations are at placed
 	// at the start of struct to ensure 64-bit alignment.
@@ -195,13 +200,23 @@ type ActivityMonitoredConn struct {
 	net.Conn
 	inactivityTimeout time.Duration
 	activeOnWrite     bool
+	activityUpdater   ActivityUpdater
 	lruEntry          *LRUConnsEntry
 }
 
+// ActivityUpdater defines an interface for receiving updates for
+// ActivityMonitoredConn activity. Values passed to UpdateProgress are
+// bytes transferred and conn duration since the previous UpdateProgress.
+type ActivityUpdater interface {
+	UpdateProgress(bytesRead, bytesWritten int64, durationNanoseconds int64)
+}
+
+// NewActivityMonitoredConn creates a new ActivityMonitoredConn.
 func NewActivityMonitoredConn(
 	conn net.Conn,
 	inactivityTimeout time.Duration,
 	activeOnWrite bool,
+	activityUpdater ActivityUpdater,
 	lruEntry *LRUConnsEntry) (*ActivityMonitoredConn, error) {
 
 	if inactivityTimeout > 0 {
@@ -220,6 +235,7 @@ func NewActivityMonitoredConn(
 		realStartTime:        time.Now(),
 		monotonicStartTime:   now,
 		lastReadActivityTime: now,
+		activityUpdater:      activityUpdater,
 		lruEntry:             lruEntry,
 	}, nil
 }
@@ -252,11 +268,19 @@ func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 				return n, ContextError(err)
 			}
 		}
+
+		readActivityTime := int64(monotime.Now())
+
+		if conn.activityUpdater != nil {
+			conn.activityUpdater.UpdateProgress(
+				int64(n), 0, readActivityTime-atomic.LoadInt64(&conn.lastReadActivityTime))
+		}
+
 		if conn.lruEntry != nil {
 			conn.lruEntry.Touch()
 		}
 
-		atomic.StoreInt64(&conn.lastReadActivityTime, int64(monotime.Now()))
+		atomic.StoreInt64(&conn.lastReadActivityTime, readActivityTime)
 
 	}
 	// Note: no context error to preserve error type
@@ -272,6 +296,10 @@ func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 			if err != nil {
 				return n, ContextError(err)
 			}
+		}
+
+		if conn.activityUpdater != nil {
+			conn.activityUpdater.UpdateProgress(0, int64(n), 0)
 		}
 
 		if conn.lruEntry != nil {

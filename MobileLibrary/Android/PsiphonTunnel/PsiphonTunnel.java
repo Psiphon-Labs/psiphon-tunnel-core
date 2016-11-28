@@ -379,6 +379,15 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             json.put("RemoteServerListDownloadFilename", remoteServerListDownload.getAbsolutePath());
         }
 
+        File oslDownloadDir = new File(context.getFilesDir(), "osl");
+        if (!oslDownloadDir.exists()
+                && !oslDownloadDir.mkdirs()) {
+            // Failed to create osl directory
+            // TODO: proceed anyway?
+            throw new IOException("failed to create OSL download directory")
+        }
+        json.put("ObfuscatedServerListDownloadDirectory", oslDownloadDir.getAbsolutePath());
+
         // Note: onConnecting/onConnected logic assumes 1 tunnel connection
         json.put("TunnelPoolSize", 1);
 

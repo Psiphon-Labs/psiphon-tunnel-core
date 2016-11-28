@@ -30,6 +30,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 func main() {
@@ -67,16 +68,19 @@ func main() {
 	// Handle required config file parameter
 
 	if configFilename == "" {
+		psiphon.SetEmitDiagnosticNotices(true)
 		psiphon.NoticeError("configuration file is required")
 		os.Exit(1)
 	}
 	configFileContents, err := ioutil.ReadFile(configFilename)
 	if err != nil {
+		psiphon.SetEmitDiagnosticNotices(true)
 		psiphon.NoticeError("error loading configuration file: %s", err)
 		os.Exit(1)
 	}
 	config, err := psiphon.LoadConfig(configFileContents)
 	if err != nil {
+		psiphon.SetEmitDiagnosticNotices(true)
 		psiphon.NoticeError("error processing configuration file: %s", err)
 		os.Exit(1)
 	}
@@ -141,7 +145,7 @@ func main() {
 			serverEntries, err := psiphon.DecodeAndValidateServerEntryList(
 				string(serverEntryList),
 				common.GetCurrentTimestamp(),
-				common.SERVER_ENTRY_SOURCE_EMBEDDED)
+				protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
 			if err != nil {
 				psiphon.NoticeError("error decoding embedded server entry list file: %s", err)
 				return
