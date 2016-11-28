@@ -912,7 +912,7 @@ func TakeOutUnreportedPersistentStats(maxCount int) (map[string][][]byte, error)
 
 			stats[statType] = make([][]byte, 0)
 
-			bucket := tx.Bucket([]byte(tunnelStatsBucket))
+			bucket := tx.Bucket([]byte(statType))
 			cursor := bucket.Cursor()
 			for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
 
