@@ -508,24 +508,26 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	if !config.DisableRemoteServerListFetcher {
 
-		if config.RemoteServerListSignaturePublicKey == "" {
-			return nil, common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
+		if config.RemoteServerListUrl != "" {
+
+			if config.RemoteServerListSignaturePublicKey == "" {
+				return nil, common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
+			}
+
+			if config.RemoteServerListDownloadFilename == "" {
+				return nil, common.ContextError(errors.New("missing RemoteServerListDownloadFilename"))
+			}
 		}
 
-		if config.RemoteServerListUrl == "" {
-			return nil, common.ContextError(errors.New("missing RemoteServerListUrl"))
-		}
+		if config.ObfuscatedServerListRootURL != "" {
 
-		if config.RemoteServerListDownloadFilename == "" {
-			return nil, common.ContextError(errors.New("missing RemoteServerListDownloadFilename"))
-		}
+			if config.RemoteServerListSignaturePublicKey == "" {
+				return nil, common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
+			}
 
-		if config.ObfuscatedServerListRootURL == "" {
-			return nil, common.ContextError(errors.New("missing ObfuscatedServerListRootURL"))
-		}
-
-		if config.ObfuscatedServerListDownloadDirectory == "" {
-			return nil, common.ContextError(errors.New("missing ObfuscatedServerListDownloadDirectory"))
+			if config.ObfuscatedServerListDownloadDirectory == "" {
+				return nil, common.ContextError(errors.New("missing ObfuscatedServerListDownloadDirectory"))
+			}
 		}
 	}
 

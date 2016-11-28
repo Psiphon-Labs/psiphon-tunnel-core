@@ -189,21 +189,25 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 		retryPeriod := time.Duration(
 			*controller.config.FetchRemoteServerListRetryPeriodSeconds) * time.Second
 
-		controller.runWaitGroup.Add(1)
-		go controller.remoteServerListFetcher(
-			"common",
-			FetchCommonRemoteServerList,
-			controller.signalFetchCommonRemoteServerList,
-			retryPeriod,
-			FETCH_REMOTE_SERVER_LIST_STALE_PERIOD)
+		if controller.config.RemoteServerListUrl != "" {
+			controller.runWaitGroup.Add(1)
+			go controller.remoteServerListFetcher(
+				"common",
+				FetchCommonRemoteServerList,
+				controller.signalFetchCommonRemoteServerList,
+				retryPeriod,
+				FETCH_REMOTE_SERVER_LIST_STALE_PERIOD)
+		}
 
-		controller.runWaitGroup.Add(1)
-		go controller.remoteServerListFetcher(
-			"obfuscated",
-			FetchObfuscatedServerLists,
-			controller.signalFetchObfuscatedServerLists,
-			retryPeriod,
-			FETCH_REMOTE_SERVER_LIST_STALE_PERIOD)
+		if controller.config.ObfuscatedServerListRootURL != "" {
+			controller.runWaitGroup.Add(1)
+			go controller.remoteServerListFetcher(
+				"obfuscated",
+				FetchObfuscatedServerLists,
+				controller.signalFetchObfuscatedServerLists,
+				retryPeriod,
+				FETCH_REMOTE_SERVER_LIST_STALE_PERIOD)
+		}
 	}
 
 	if controller.config.UpgradeDownloadUrl != "" &&

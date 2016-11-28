@@ -343,7 +343,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.TunnelProtocol = runConfig.tunnelProtocol
 	clientConfig.LocalSocksProxyPort = localSOCKSProxyPort
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
-	clientConfig.ReportSLOKs = true
+	clientConfig.EmitSLOKs = true
 
 	clientConfig.DataStoreDirectory = testDataDirName
 	err = psiphon.InitDataStore(clientConfig)

@@ -385,24 +385,24 @@ func statusAPIRequestHandler(
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
-		for _, tunnelStat := range tunnelStats {
+		for _, remoteServerListStat := range remoteServerListStats {
 
 			remoteServerListFields := getRequestLogFields(
 				support, "remote_server_list", geoIPData, params, statusRequestParams)
 
-			clientDownloadTimestamp, err := getStringRequestParam(tunnelStat, "client_download_timestamp")
+			clientDownloadTimestamp, err := getStringRequestParam(remoteServerListStat, "client_download_timestamp")
 			if err != nil {
 				return nil, common.ContextError(err)
 			}
 			remoteServerListFields["client_download_timestamp"] = clientDownloadTimestamp
 
-			url, err := getStringRequestParam(tunnelStat, "url")
+			url, err := getStringRequestParam(remoteServerListStat, "url")
 			if err != nil {
 				return nil, common.ContextError(err)
 			}
 			remoteServerListFields["url"] = url
 
-			etag, err := getStringRequestParam(tunnelStat, "etag")
+			etag, err := getStringRequestParam(remoteServerListStat, "etag")
 			if err != nil {
 				return nil, common.ContextError(err)
 			}
