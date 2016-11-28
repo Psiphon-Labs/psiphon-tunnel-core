@@ -405,10 +405,10 @@ type Config struct {
 	// RateLimits specify throttling configuration for the tunnel.
 	RateLimits common.RateLimits
 
-	// ReportSLOKs indicates whether to emit notices for each seeded SLOK. As this
+	// EmitSLOKs indicates whether to emit notices for each seeded SLOK. As this
 	// could reveal user browsing activity, it's intended for debugging and testing
 	// only.
-	ReportSLOKs bool
+	EmitSLOKs bool
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON

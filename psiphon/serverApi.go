@@ -973,7 +973,7 @@ func HandleOSLRequest(
 			seededNewSLOK = true
 		}
 
-		if tunnel.config.ReportSLOKs {
+		if tunnel.config.EmitSLOKs {
 			NoticeSLOKSeeded(base64.StdEncoding.EncodeToString(slok.ID), duplicate)
 		}
 	}
