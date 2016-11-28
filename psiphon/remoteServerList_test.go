@@ -19,6 +19,9 @@
 
 package psiphon
 
+// Note: disabled until import cycle can be resolved
+
+/*
 import (
 	"bytes"
 	"crypto/md5"
@@ -368,3 +371,4 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 		}
 	}
 }
+*/
