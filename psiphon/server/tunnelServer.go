@@ -33,7 +33,6 @@ import (
 
 	"github.com/Psiphon-Inc/crypto/ssh"
 	"github.com/Psiphon-Inc/goarista/monotime"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -706,8 +705,8 @@ func (sshClient *sshClient) run(clientConn net.Conn) {
 		if protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
 			// Note: NewObfuscatedSshConn blocks on network I/O
 			// TODO: ensure this won't block shutdown
-			conn, result.err = psiphon.NewObfuscatedSshConn(
-				psiphon.OBFUSCATION_CONN_MODE_SERVER,
+			conn, result.err = common.NewObfuscatedSshConn(
+				common.OBFUSCATION_CONN_MODE_SERVER,
 				conn,
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey)
 			if result.err != nil {

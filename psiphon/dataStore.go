@@ -169,12 +169,12 @@ func checkInitDataStore() {
 // overwritten; otherwise, the existing record is unchanged.
 // If the server entry data is malformed, an alert notice is issued and
 // the entry is skipped; no error is returned.
-func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
+func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) error {
 	checkInitDataStore()
 
 	// Server entries should already be validated before this point,
 	// so instead of skipping we fail with an error.
-	err := ValidateServerEntry(serverEntry)
+	err := protocol.ValidateServerEntry(serverEntry)
 	if err != nil {
 		return common.ContextError(errors.New("invalid server entry"))
 	}
@@ -196,7 +196,7 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 		existingServerEntryValid := false
 		existingData := serverEntries.Get([]byte(serverEntry.IpAddress))
 		if existingData != nil {
-			existingServerEntry := new(ServerEntry)
+			existingServerEntry := new(protocol.ServerEntry)
 			if json.Unmarshal(existingData, existingServerEntry) == nil {
 				existingServerEntryValid = true
 			}
@@ -239,7 +239,7 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 // Shuffling is performed on imported server entrues as part of client-side
 // load balancing.
 // There is an independent transaction for each entry insert/update.
-func StoreServerEntries(serverEntries []*ServerEntry, replaceIfExists bool) error {
+func StoreServerEntries(serverEntries []*protocol.ServerEntry, replaceIfExists bool) error {
 	checkInitDataStore()
 
 	for index := len(serverEntries) - 1; index > 0; index-- {
@@ -365,7 +365,7 @@ func insertRankedServerEntry(tx *bolt.Tx, serverEntryId string, position int) er
 	return nil
 }
 
-func serverEntrySupportsProtocol(serverEntry *ServerEntry, protocol string) bool {
+func serverEntrySupportsProtocol(serverEntry *protocol.ServerEntry, protocol string) bool {
 	// Note: for meek, the capabilities are FRONTED-MEEK and UNFRONTED-MEEK
 	// and the additonal OSSH service is assumed to be available internally.
 	requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
@@ -382,7 +382,7 @@ type ServerEntryIterator struct {
 	serverEntryIndex            int
 	isTargetServerEntryIterator bool
 	hasNextTargetServerEntry    bool
-	targetServerEntry           *ServerEntry
+	targetServerEntry           *protocol.ServerEntry
 }
 
 // NewServerEntryIterator creates a new ServerEntryIterator
@@ -409,7 +409,7 @@ func NewServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err 
 
 // newTargetServerEntryIterator is a helper for initializing the TargetServerEntry case
 func newTargetServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err error) {
-	serverEntry, err := DecodeServerEntry(
+	serverEntry, err := protocol.DecodeServerEntry(
 		config.TargetServerEntry, common.GetCurrentTimestamp(), protocol.SERVER_ENTRY_SOURCE_TARGET)
 	if err != nil {
 		return nil, err
@@ -513,7 +513,7 @@ func (iterator *ServerEntryIterator) Close() {
 
 // Next returns the next server entry, by rank, for a ServerEntryIterator.
 // Returns nil with no error when there is no next item.
-func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error) {
+func (iterator *ServerEntryIterator) Next() (serverEntry *protocol.ServerEntry, err error) {
 	defer func() {
 		if err != nil {
 			iterator.Close()
@@ -562,7 +562,7 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 			continue
 		}
 
-		serverEntry = new(ServerEntry)
+		serverEntry = new(protocol.ServerEntry)
 		err = json.Unmarshal(data, serverEntry)
 		if err != nil {
 			// In case of data corruption or a bug causing this condition,
@@ -586,7 +586,7 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 // which have a single meekFrontingDomain and not a meekFrontingAddresses array.
 // By copying this one meekFrontingDomain into meekFrontingAddresses, this client effectively
 // uses that single value as legacy clients do.
-func MakeCompatibleServerEntry(serverEntry *ServerEntry) *ServerEntry {
+func MakeCompatibleServerEntry(serverEntry *protocol.ServerEntry) *protocol.ServerEntry {
 	if len(serverEntry.MeekFrontingAddresses) == 0 && serverEntry.MeekFrontingDomain != "" {
 		serverEntry.MeekFrontingAddresses =
 			append(serverEntry.MeekFrontingAddresses, serverEntry.MeekFrontingDomain)
@@ -595,13 +595,13 @@ func MakeCompatibleServerEntry(serverEntry *ServerEntry) *ServerEntry {
 	return serverEntry
 }
 
-func scanServerEntries(scanner func(*ServerEntry)) error {
+func scanServerEntries(scanner func(*protocol.ServerEntry)) error {
 	err := singleton.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(serverEntriesBucket))
 		cursor := bucket.Cursor()
 
 		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
-			serverEntry := new(ServerEntry)
+			serverEntry := new(protocol.ServerEntry)
 			err := json.Unmarshal(value, serverEntry)
 			if err != nil {
 				// In case of data corruption or a bug causing this condition,
@@ -624,13 +624,13 @@ func scanServerEntries(scanner func(*ServerEntry)) error {
 
 // CountServerEntries returns a count of stored servers for the
 // specified region and protocol.
-func CountServerEntries(region, protocol string) int {
+func CountServerEntries(region, tunnelProtocol string) int {
 	checkInitDataStore()
 
 	count := 0
-	err := scanServerEntries(func(serverEntry *ServerEntry) {
+	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 		if (region == "" || serverEntry.Region == region) &&
-			(protocol == "" || serverEntrySupportsProtocol(serverEntry, protocol)) {
+			(tunnelProtocol == "" || serverEntrySupportsProtocol(serverEntry, tunnelProtocol)) {
 			count += 1
 		}
 	})
@@ -649,7 +649,7 @@ func ReportAvailableRegions() {
 	checkInitDataStore()
 
 	regions := make(map[string]bool)
-	err := scanServerEntries(func(serverEntry *ServerEntry) {
+	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 		regions[serverEntry.Region] = true
 	})
 
@@ -676,7 +676,7 @@ func GetServerEntryIpAddresses() (ipAddresses []string, err error) {
 	checkInitDataStore()
 
 	ipAddresses = make([]string, 0)
-	err = scanServerEntries(func(serverEntry *ServerEntry) {
+	err = scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 		ipAddresses = append(ipAddresses, serverEntry.IpAddress)
 	})
 

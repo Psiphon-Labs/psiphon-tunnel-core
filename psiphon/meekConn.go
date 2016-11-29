@@ -578,7 +578,7 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (io.ReadCloser, error) {
 
 		request.Header.Set("Content-Type", "application/octet-stream")
 
-		// Set additional headers to the HTTP request using the same method we use for adding 
+		// Set additional headers to the HTTP request using the same method we use for adding
 		// custom headers to HTTP proxy requests
 		for name, value := range meek.additionalHeaders {
 			// hack around special case of "Host" header
@@ -705,8 +705,8 @@ func makeMeekCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
 	copy(encryptedCookie[32:], box)
 
 	// Obfuscate the encrypted data
-	obfuscator, err := NewClientObfuscator(
-		&ObfuscatorConfig{Keyword: meekConfig.MeekObfuscatedKey, MaxPadding: MEEK_COOKIE_MAX_PADDING})
+	obfuscator, err := common.NewClientObfuscator(
+		&common.ObfuscatorConfig{Keyword: meekConfig.MeekObfuscatedKey, MaxPadding: MEEK_COOKIE_MAX_PADDING})
 	if err != nil {
 		return nil, common.ContextError(err)
 	}

@@ -19,9 +19,6 @@
 
 package psiphon
 
-// Note: disabled until import cycle can be resolved
-
-/*
 import (
 	"bytes"
 	"crypto/md5"
@@ -61,7 +58,7 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 
 	serverIPaddress := ""
 	for _, interfaceName := range []string{"eth0", "en0"} {
-		serverIPaddress, err = GetInterfaceIPAddress(interfaceName)
+		serverIPaddress, err = common.GetInterfaceIPAddress(interfaceName)
 		if err == nil {
 			break
 		}
@@ -74,8 +71,8 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 		&server.GenerateConfigParams{
 			ServerIPAddress:      serverIPaddress,
 			EnableSSHAPIRequests: true,
-			WebServerPort:        8000,
-			TunnelProtocolPorts:  map[string]int{"OSSH": 4000},
+			WebServerPort:        8001,
+			TunnelProtocolPorts:  map[string]int{"OSSH": 4001},
 		})
 	if err != nil {
 		t.Fatalf("error generating server config: %s", err)
@@ -184,7 +181,7 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 	// run mock remote server list host
 	//
 
-	remoteServerListHostAddress := net.JoinHostPort(serverIPaddress, "8080")
+	remoteServerListHostAddress := net.JoinHostPort(serverIPaddress, "8081")
 
 	// The common remote server list fetches will 404
 	remoteServerListURL := fmt.Sprintf("http://%s/server_list_compressed", remoteServerListHostAddress)
@@ -371,4 +368,3 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 		}
 	}
 }
-*/

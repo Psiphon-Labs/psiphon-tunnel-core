@@ -34,7 +34,6 @@ import (
 
 	"github.com/Psiphon-Inc/crypto/nacl/box"
 	"github.com/Psiphon-Inc/crypto/ssh"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
@@ -570,8 +569,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		capabilities = append(capabilities, protocol.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS)
 	}
 
-	for protocol, _ := range params.TunnelProtocolPorts {
-		capabilities = append(capabilities, psiphon.GetCapability(protocol))
+	for tunnelProtocol, _ := range params.TunnelProtocolPorts {
+		capabilities = append(capabilities, protocol.GetCapability(tunnelProtocol))
 	}
 
 	sshPort := params.TunnelProtocolPorts["SSH"]
@@ -600,7 +599,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		strippedWebServerCertificate = strings.Join(lines[1:len(lines)-2], "")
 	}
 
-	serverEntry := &psiphon.ServerEntry{
+	serverEntry := &protocol.ServerEntry{
 		IpAddress:                     params.ServerIPAddress,
 		WebServerPort:                 serverEntryWebServerPort,
 		WebServerSecret:               webServerSecret,
@@ -621,7 +620,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		MeekFrontingDisableSNI:        false,
 	}
 
-	encodedServerEntry, err := psiphon.EncodeServerEntry(serverEntry)
+	encodedServerEntry, err := protocol.EncodeServerEntry(serverEntry)
 	if err != nil {
 		return nil, nil, nil, common.ContextError(err)
 	}

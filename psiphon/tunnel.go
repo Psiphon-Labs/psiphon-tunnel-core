@@ -73,7 +73,7 @@ type Tunnel struct {
 	untunneledDialConfig         *DialConfig
 	isDiscarded                  bool
 	isClosed                     bool
-	serverEntry                  *ServerEntry
+	serverEntry                  *protocol.ServerEntry
 	serverContext                *ServerContext
 	protocol                     string
 	conn                         *common.ActivityMonitoredConn
@@ -120,7 +120,7 @@ func EstablishTunnel(
 	untunneledDialConfig *DialConfig,
 	sessionId string,
 	pendingConns *common.Conns,
-	serverEntry *ServerEntry,
+	serverEntry *protocol.ServerEntry,
 	adjustedEstablishStartTime monotime.Time,
 	tunnelOwner TunnelOwner) (tunnel *Tunnel, err error) {
 
@@ -372,7 +372,9 @@ func (conn *TunneledConn) Close() error {
 }
 
 // selectProtocol is a helper that picks the tunnel protocol
-func selectProtocol(config *Config, serverEntry *ServerEntry) (selectedProtocol string, err error) {
+func selectProtocol(
+	config *Config, serverEntry *protocol.ServerEntry) (selectedProtocol string, err error) {
+
 	// TODO: properly handle protocols (e.g. FRONTED-MEEK-OSSH) vs. capabilities (e.g., {FRONTED-MEEK, OSSH})
 	// for now, the code is simply assuming that MEEK capabilities imply OSSH capability.
 	if config.TunnelProtocol != "" {
@@ -404,7 +406,7 @@ func selectProtocol(config *Config, serverEntry *ServerEntry) (selectedProtocol 
 // selectFrontingParameters is a helper which selects/generates meek fronting
 // parameters where the server entry provides multiple options or patterns.
 func selectFrontingParameters(
-	serverEntry *ServerEntry) (frontingAddress, frontingHost string, err error) {
+	serverEntry *protocol.ServerEntry) (frontingAddress, frontingHost string, err error) {
 
 	if len(serverEntry.MeekFrontingAddressesRegex) > 0 {
 
@@ -447,7 +449,7 @@ func selectFrontingParameters(
 // selected meek tunnel protocol.
 func initMeekConfig(
 	config *Config,
-	serverEntry *ServerEntry,
+	serverEntry *protocol.ServerEntry,
 	selectedProtocol,
 	sessionId string) (*MeekConfig, error) {
 
@@ -543,7 +545,7 @@ type dialResult struct {
 func dialSsh(
 	config *Config,
 	pendingConns *common.Conns,
-	serverEntry *ServerEntry,
+	serverEntry *protocol.ServerEntry,
 	selectedProtocol,
 	sessionId string) (*dialResult, error) {
 
@@ -637,8 +639,8 @@ func dialSsh(
 	// Add obfuscated SSH layer
 	var sshConn net.Conn = throttledConn
 	if useObfuscatedSsh {
-		sshConn, err = NewObfuscatedSshConn(
-			OBFUSCATION_CONN_MODE_CLIENT, throttledConn, serverEntry.SshObfuscatedKey)
+		sshConn, err = common.NewObfuscatedSshConn(
+			common.OBFUSCATION_CONN_MODE_CLIENT, throttledConn, serverEntry.SshObfuscatedKey)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
