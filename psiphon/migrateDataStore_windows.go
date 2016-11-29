@@ -33,8 +33,8 @@ import (
 
 var legacyDb *sql.DB
 
-func prepareMigrationEntries(config *Config) []*ServerEntry {
-	var migratableServerEntries []*ServerEntry
+func prepareMigrationEntries(config *Config) []*protocol.ServerEntry {
+	var migratableServerEntries []*protocol.ServerEntry
 
 	// If DATA_STORE_FILENAME does not exist on disk
 	if _, err := os.Stat(filepath.Join(config.DataStoreDirectory, DATA_STORE_FILENAME)); os.IsNotExist(err) {
