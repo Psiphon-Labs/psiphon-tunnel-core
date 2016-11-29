@@ -183,14 +183,14 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	serverContext.clientRegion = handshakeResponse.ClientRegion
 	NoticeClientRegion(serverContext.clientRegion)
 
-	var decodedServerEntries []*ServerEntry
+	var decodedServerEntries []*protocol.ServerEntry
 
 	// Store discovered server entries
 	// We use the server's time, as it's available here, for the server entry
 	// timestamp since this is more reliable than the client time.
 	for _, encodedServerEntry := range handshakeResponse.EncodedServerList {
 
-		serverEntry, err := DecodeServerEntry(
+		serverEntry, err := protocol.DecodeServerEntry(
 			encodedServerEntry,
 			common.TruncateTimestampToHour(handshakeResponse.ServerTimestamp),
 			protocol.SERVER_ENTRY_SOURCE_DISCOVERY)
@@ -198,9 +198,10 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 			return common.ContextError(err)
 		}
 
-		err = ValidateServerEntry(serverEntry)
+		err = protocol.ValidateServerEntry(serverEntry)
 		if err != nil {
 			// Skip this entry and continue with the next one
+			NoticeAlert("invalid server entry: %s", err)
 			continue
 		}
 

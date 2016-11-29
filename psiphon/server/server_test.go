@@ -73,6 +73,7 @@ func TestSSH(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			denyTrafficRules:     false,
+			doClientVerification: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -85,6 +86,7 @@ func TestOSSH(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			denyTrafficRules:     false,
+			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -97,6 +99,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			denyTrafficRules:     false,
+			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -109,6 +112,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			denyTrafficRules:     false,
+			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -121,6 +125,7 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			enableSSHAPIRequests: false,
 			doHotReload:          false,
 			denyTrafficRules:     false,
+			doClientVerification: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -133,6 +138,7 @@ func TestHotReload(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
 			denyTrafficRules:     false,
+			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -145,6 +151,7 @@ func TestDenyTrafficRules(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
 			denyTrafficRules:     true,
+			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -157,6 +164,7 @@ func TestTCPOnlySLOK(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			denyTrafficRules:     false,
+			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: false,
 		})
@@ -169,6 +177,7 @@ func TestUDPOnlySLOK(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			denyTrafficRules:     false,
+			doClientVerification: false,
 			doTunneledWebRequest: false,
 			doTunneledNTPRequest: true,
 		})
@@ -179,6 +188,7 @@ type runServerConfig struct {
 	enableSSHAPIRequests bool
 	doHotReload          bool
 	denyTrafficRules     bool
+	doClientVerification bool
 	doTunneledWebRequest bool
 	doTunneledNTPRequest bool
 }
@@ -211,7 +221,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	var err error
 	serverIPaddress := ""
 	for _, interfaceName := range []string{"eth0", "en0"} {
-		serverIPaddress, err = psiphon.GetInterfaceIPAddress(interfaceName)
+		serverIPaddress, err = common.GetInterfaceIPAddress(interfaceName)
 		if err == nil {
 			break
 		}
@@ -253,10 +263,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig["TrafficRulesFilename"] = trafficRulesFilename
 	serverConfig["OSLConfigFilename"] = oslConfigFilename
 	serverConfig["LogLevel"] = "error"
-
-	// 1 second is the minimum period; should be small enough to emit a log during the
-	// test run, but not guaranteed
-	serverConfig["LoadMonitorPeriodSeconds"] = 1
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
@@ -315,6 +321,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		// handler below.
 	}
 
+	// Exercise server_load logging
+	p, _ := os.FindProcess(os.Getpid())
+	p.Signal(syscall.SIGUSR2)
+	time.Sleep(1 * time.Second)
+
 	// connect to server with client
 
 	// TODO: currently, TargetServerEntry only works with one tunnel
@@ -326,7 +337,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Note: calling LoadConfig ensures all *int config fields are initialized
 	clientConfigJSON := `
     {
-        "ClientPlatform" : "Android",
+        "ClientPlatform" : "Windows",
         "ClientVersion" : "0",
         "SponsorId" : "0",
         "PropagationChannelId" : "0",
@@ -344,6 +355,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.LocalSocksProxyPort = localSOCKSProxyPort
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
 	clientConfig.EmitSLOKs = true
+
+	if runConfig.doClientVerification {
+		clientConfig.ClientPlatform = "Android"
+	}
 
 	clientConfig.DataStoreDirectory = testDataDirName
 	err = psiphon.InitDataStore(clientConfig)
@@ -405,7 +420,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		defer controllerWaitGroup.Done()
 		controller.Run(controllerShutdownBroadcast)
 	}()
-	stopClient := func() {
+	defer func() {
 		close(controllerShutdownBroadcast)
 
 		shutdownTimeout := time.NewTimer(20 * time.Second)
@@ -421,7 +436,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		case <-shutdownTimeout.C:
 			t.Fatalf("controller shutdown timeout exceeded")
 		}
-	}
+	}()
 
 	// Test: tunnels must be established, and correct homepage
 	// must be received, within 30 seconds
@@ -435,8 +450,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel establish timeout exceeded")
 	waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
-	waitOnNotification(t, verificationRequired, timeoutSignal, "verification required timeout exceeded")
-	waitOnNotification(t, verificationCompleted, timeoutSignal, "verification completed timeout exceeded")
+
+	if runConfig.doClientVerification {
+		waitOnNotification(t, verificationRequired, timeoutSignal, "verification required timeout exceeded")
+		waitOnNotification(t, verificationCompleted, timeoutSignal, "verification completed timeout exceeded")
+	}
 
 	if runConfig.doTunneledWebRequest {
 
@@ -474,11 +492,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
-	// Test: stop client to trigger a final status request and receive SLOK payload
-
-	stopClient()
+	// Test: await SLOK payload
 
 	if !runConfig.denyTrafficRules {
+		time.Sleep(1 * time.Second)
 		waitOnNotification(t, slokSeeded, timeoutSignal, "SLOK seeded timeout exceeded")
 	}
 }

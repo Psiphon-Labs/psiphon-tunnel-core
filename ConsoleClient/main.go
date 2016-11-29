@@ -142,7 +142,7 @@ func main() {
 				return
 			}
 			// TODO: stream embedded server list data? also, the cast makes an unnecessary copy of a large buffer?
-			serverEntries, err := psiphon.DecodeAndValidateServerEntryList(
+			serverEntries, err := protocol.DecodeAndValidateServerEntryList(
 				string(serverEntryList),
 				common.GetCurrentTimestamp(),
 				protocol.SERVER_ENTRY_SOURCE_EMBEDDED)

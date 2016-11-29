@@ -69,7 +69,7 @@ type Controller struct {
 }
 
 type candidateServerEntry struct {
-	serverEntry                *ServerEntry
+	serverEntry                *protocol.ServerEntry
 	isServerAffinityCandidate  bool
 	adjustedEstablishStartTime monotime.Time
 }
@@ -163,7 +163,7 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 
 	// Start components
 
-	listenIP, err := GetInterfaceIPAddress(controller.config.ListenInterface)
+	listenIP, err := common.GetInterfaceIPAddress(controller.config.ListenInterface)
 	if err != nil {
 		NoticeError("error getting listener IP: %s", err)
 		return
@@ -876,7 +876,9 @@ func (controller *Controller) getNextActiveTunnel() (tunnel *Tunnel) {
 
 // isActiveTunnelServerEntry is used to check if there's already
 // an existing tunnel to a candidate server.
-func (controller *Controller) isActiveTunnelServerEntry(serverEntry *ServerEntry) bool {
+func (controller *Controller) isActiveTunnelServerEntry(
+	serverEntry *protocol.ServerEntry) bool {
+
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
 	for _, activeTunnel := range controller.tunnels {

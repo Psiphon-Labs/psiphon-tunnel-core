@@ -21,11 +21,15 @@
 
 package psiphon
 
+import (
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+)
+
 // Stub function to return an empty list for non-Windows builds
-func prepareMigrationEntries(config *Config) []*ServerEntry {
+func prepareMigrationEntries(config *Config) []*protocol.ServerEntry {
 	return nil
 }
 
 // Stub function to return immediately for non-Windows builds
-func migrateEntries(serverEntries []*ServerEntry, legacyDataStoreFilename string) {
+func migrateEntries(serverEntries []*protocol.ServerEntry, legacyDataStoreFilename string) {
 }

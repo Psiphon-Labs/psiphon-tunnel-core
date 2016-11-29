@@ -363,7 +363,7 @@ func unpackRemoteServerListFile(
 
 func storeServerEntries(serverList string) error {
 
-	serverEntries, err := DecodeAndValidateServerEntryList(
+	serverEntries, err := protocol.DecodeAndValidateServerEntryList(
 		serverList,
 		common.GetCurrentTimestamp(),
 		protocol.SERVER_ENTRY_SOURCE_REMOTE)
