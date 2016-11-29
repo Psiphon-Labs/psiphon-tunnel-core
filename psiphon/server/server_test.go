@@ -300,11 +300,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}()
 
+	// TODO: monitor logs for more robust wait-until-loaded
+	time.Sleep(1 * time.Second)
+
 	// Test: hot reload (of psinet and traffic rules)
 
 	if runConfig.doHotReload {
-		// TODO: monitor logs for more robust wait-until-loaded
-		time.Sleep(1 * time.Second)
 
 		// Pave a new psinet and traffic rules with different random values.
 		sponsorID, expectedHomepageURL = pavePsinetDatabaseFile(t, psinetFilename)
@@ -324,7 +325,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Exercise server_load logging
 	p, _ := os.FindProcess(os.Getpid())
 	p.Signal(syscall.SIGUSR2)
-	time.Sleep(1 * time.Second)
 
 	// connect to server with client
 
