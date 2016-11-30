@@ -22,6 +22,9 @@
 
 * The result will be in `MobileLibrary/iOS/build`.
 
+#### Testing
+
+Run `test-psiphon-framework.sh`.
 
 ## Automatic Build -- Jenkins
 

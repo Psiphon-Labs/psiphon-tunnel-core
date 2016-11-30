@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Psiphon Inc.
+ * Copyright (c) 2016, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -45,12 +45,14 @@ import (
 // Android Media Player (http://developer.android.com/reference/android/media/MediaPlayer.html).
 // To make the Media Player use the Psiphon tunnel, construct a URL such as:
 // "http://127.0.0.1:<proxy-port>/tunneled/<origin media URL>"; and pass this to the player.
+// The <origin media URL> must be escaped in such a way that it can be used inside a URL query.
 // TODO: add ICY protocol to support certain streaming media (e.g., https://gist.github.com/tulskiy/1008126)
 //
 // An example use case for direct, untunneled, relaying is to make use of Go's TLS
 // stack for HTTPS requests in cases where the native TLS stack is lacking (e.g.,
 // WinHTTP on Windows XP). The URL for direct relaying is:
 // "http://127.0.0.1:<proxy-port>/direct/<origin URL>".
+// Again, the <origin URL> must be escaped in such a way that it can be used inside a URL query.
 //
 // Origin URLs must include the scheme prefix ("http://" or "https://") and must be
 // URL encoded.
@@ -255,11 +257,11 @@ func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, requ
 	// Request URL should be "/tunneled/<origin URL>" or  "/direct/<origin URL>" and the
 	// origin URL must be URL encoded.
 	switch {
-	case strings.HasPrefix(request.URL.Path, URL_PROXY_TUNNELED_REQUEST_PATH):
-		originUrl, err = url.QueryUnescape(request.URL.Path[len(URL_PROXY_TUNNELED_REQUEST_PATH):])
+	case strings.HasPrefix(request.URL.RawPath, URL_PROXY_TUNNELED_REQUEST_PATH):
+		originUrl, err = url.QueryUnescape(request.URL.RawPath[len(URL_PROXY_TUNNELED_REQUEST_PATH):])
 		client = proxy.urlProxyTunneledClient
-	case strings.HasPrefix(request.URL.Path, URL_PROXY_DIRECT_REQUEST_PATH):
-		originUrl, err = url.QueryUnescape(request.URL.Path[len(URL_PROXY_DIRECT_REQUEST_PATH):])
+	case strings.HasPrefix(request.URL.RawPath, URL_PROXY_DIRECT_REQUEST_PATH):
+		originUrl, err = url.QueryUnescape(request.URL.RawPath[len(URL_PROXY_DIRECT_REQUEST_PATH):])
 		client = proxy.urlProxyDirectClient
 	default:
 		err = errors.New("missing origin URL")
