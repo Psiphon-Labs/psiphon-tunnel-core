@@ -534,7 +534,7 @@ func makeTunneledWebRequest(t *testing.T, localHTTPProxyPort int) error {
 func makeTunneledNTPRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAddress string) error {
 
 	testHostname := "pool.ntp.org"
-	timeout := 10 * time.Second
+	timeout := 20 * time.Second
 
 	localUDPProxyAddress, err := net.ResolveUDPAddr("udp", "127.0.0.1:7301")
 	if err != nil {
