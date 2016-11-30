@@ -87,9 +87,9 @@ type Scheme struct {
 	// If empty, the scheme applies to all regions.
 	Regions []string
 
-	// PropagationChannelIDs is a list of client propagation channel IDs
-	// this scheme applies to.
-	// If empty, the scheme applies to all propagation channels IDs.
+	// PropagationChannelIDs is a list of client propagtion channel IDs
+	// this scheme applies to. Propagation channel IDs are an input
+	// to SLOK key derivation.
 	PropagationChannelIDs []string
 
 	// MasterKey is the base random key used for SLOK key derivation. It
@@ -189,13 +189,14 @@ type KeySplit struct {
 
 // ClientSeedState tracks the progress of a client towards seeding SLOKs.
 type ClientSeedState struct {
-	scheme           *Scheme
-	signalIssueSLOKs chan struct{}
-	progress         []*TrafficValues
-	progressSLOKTime int64
-	mutex            sync.Mutex
-	issuedSLOKs      map[string]*SLOK
-	payloadSLOKs     []*SLOK
+	scheme               *Scheme
+	propagationChannelID string
+	signalIssueSLOKs     chan struct{}
+	progress             []*TrafficValues
+	progressSLOKTime     int64
+	mutex                sync.Mutex
+	issuedSLOKs          map[string]*SLOK
+	payloadSLOKs         []*SLOK
 }
 
 // ClientSeedPortForward map a client port forward, which is relaying
@@ -213,8 +214,9 @@ type ClientSeedPortForward struct {
 // used to derive the SLOK secret key and ID.
 // Note: SeedSpecID is not a []byte as slokReference is used as a map key.
 type slokReference struct {
-	SeedSpecID string
-	Time       time.Time
+	PropagationChannelID string
+	SeedSpecID           string
+	Time                 time.Time
 }
 
 // SLOK is a seeded SLOK issued to a client. The client will store the
@@ -334,10 +336,6 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 // client progress towards seeding SLOKs. psiphond maintains one
 // ClientSeedState for each connected client.
 //
-// NewClientSeedState selects the first Scheme in config.Schemes
-// with an active Epoch and which permits the client's region and
-// propagation channel ID. Only the first matching scheme is selected.
-//
 // A signal is sent on signalIssueSLOKs when sufficient progress
 // has been made that a new SLOK *may* be issued. psiphond will
 // receive the signal and then call GetClientSeedPayload/IssueSLOKs
@@ -357,10 +355,8 @@ func (config *Config) NewClientSeedState(
 		// schemes with many propagation channel IDs or region filters, use
 		// maps for more efficient lookup.
 		if scheme.epoch.Before(time.Now().UTC()) &&
-			(len(scheme.PropagationChannelIDs) == 0 ||
-				common.Contains(scheme.PropagationChannelIDs, propagationChannelID)) &&
-			(len(scheme.Regions) == 0 ||
-				common.Contains(scheme.Regions, clientRegion)) {
+			common.Contains(scheme.PropagationChannelIDs, propagationChannelID) &&
+			(len(scheme.Regions) == 0 || common.Contains(scheme.Regions, clientRegion)) {
 
 			// Empty progress is initialized up front for all seed specs. Once
 			// created, the progress structure is read-only (the slice, not the
@@ -371,12 +367,13 @@ func (config *Config) NewClientSeedState(
 			}
 
 			return &ClientSeedState{
-				scheme:           scheme,
-				signalIssueSLOKs: signalIssueSLOKs,
-				progressSLOKTime: getSLOKTime(scheme.SeedPeriodNanoseconds),
-				progress:         progress,
-				issuedSLOKs:      make(map[string]*SLOK),
-				payloadSLOKs:     nil,
+				scheme:               scheme,
+				propagationChannelID: propagationChannelID,
+				signalIssueSLOKs:     signalIssueSLOKs,
+				progressSLOKTime:     getSLOKTime(scheme.SeedPeriodNanoseconds),
+				progress:             progress,
+				issuedSLOKs:          make(map[string]*SLOK),
+				payloadSLOKs:         nil,
 			}
 		}
 	}
@@ -532,8 +529,9 @@ func (state *ClientSeedState) issueSLOKs() {
 		if progress.exceeds(&seedSpec.Targets) {
 
 			ref := &slokReference{
-				SeedSpecID: string(seedSpec.ID),
-				Time:       progressSLOKTime,
+				PropagationChannelID: state.propagationChannelID,
+				SeedSpecID:           string(seedSpec.ID),
+				Time:                 progressSLOKTime,
 			}
 
 			state.scheme.derivedSLOKCacheMutex.RLock()
@@ -584,6 +582,7 @@ func deriveSLOK(
 
 	key := deriveKeyHKDF(
 		scheme.MasterKey,
+		[]byte(ref.PropagationChannelID),
 		[]byte(ref.SeedSpecID),
 		timeBytes)
 
@@ -683,6 +682,8 @@ type KeyShares struct {
 
 // Pave creates the full set of OSL files, for all schemes in the
 // configuration, to be dropped in an out-of-band distribution site.
+// Only OSLs for the propagation channel ID associated with the
+// distribution site are paved. This function is used by automation.
 //
 // The Name component of each file relates to the values returned by
 // the client functions GetRegistryURL and GetOSLFileURL.
@@ -701,6 +702,7 @@ type KeyShares struct {
 // to OSLs in the case where OSLs are repaved in subsequent calls.
 func (config *Config) Pave(
 	endTime time.Time,
+	propagationChannelID string,
 	signingPublicKey string,
 	signingPrivateKey string,
 	paveServerEntries []map[time.Time]string) ([]*PaveFile, error) {
@@ -723,48 +725,51 @@ func (config *Config) Pave(
 			slokTimePeriodsPerOSL *= keySplit.Total
 		}
 
-		oslTime := scheme.epoch
-		for !oslTime.After(endTime) {
+		if common.Contains(scheme.PropagationChannelIDs, propagationChannelID) {
+			oslTime := scheme.epoch
+			for !oslTime.After(endTime) {
 
-			firstSLOKTime := oslTime
-			fileKey, fileSpec, err := makeOSLFileSpec(scheme, firstSLOKTime)
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-
-			registry.FileSpecs = append(registry.FileSpecs, fileSpec)
-
-			serverEntries, ok := paveServerEntries[schemeIndex][oslTime]
-			if ok {
-
-				signedServerEntries, err := common.WriteAuthenticatedDataPackage(
-					serverEntries,
-					signingPublicKey,
-					signingPrivateKey)
+				firstSLOKTime := oslTime
+				fileKey, fileSpec, err := makeOSLFileSpec(
+					scheme, propagationChannelID, firstSLOKTime)
 				if err != nil {
 					return nil, common.ContextError(err)
 				}
 
-				boxedServerEntries, err := box(fileKey, compress(signedServerEntries))
-				if err != nil {
-					return nil, common.ContextError(err)
+				registry.FileSpecs = append(registry.FileSpecs, fileSpec)
+
+				serverEntries, ok := paveServerEntries[schemeIndex][oslTime]
+				if ok {
+
+					signedServerEntries, err := common.WriteAuthenticatedDataPackage(
+						serverEntries,
+						signingPublicKey,
+						signingPrivateKey)
+					if err != nil {
+						return nil, common.ContextError(err)
+					}
+
+					boxedServerEntries, err := box(fileKey, compress(signedServerEntries))
+					if err != nil {
+						return nil, common.ContextError(err)
+					}
+
+					md5sum := md5.Sum(boxedServerEntries)
+					fileSpec.MD5Sum = md5sum[:]
+
+					fileName := fmt.Sprintf(
+						OSL_FILENAME_FORMAT, hex.EncodeToString(fileSpec.ID))
+
+					paveFiles = append(paveFiles, &PaveFile{
+						Name:     fileName,
+						Contents: boxedServerEntries,
+					})
 				}
 
-				md5sum := md5.Sum(boxedServerEntries)
-				fileSpec.MD5Sum = md5sum[:]
-
-				fileName := fmt.Sprintf(
-					OSL_FILENAME_FORMAT, hex.EncodeToString(fileSpec.ID))
-
-				paveFiles = append(paveFiles, &PaveFile{
-					Name:     fileName,
-					Contents: boxedServerEntries,
-				})
+				oslTime = oslTime.Add(
+					time.Duration(
+						int64(slokTimePeriodsPerOSL) * scheme.SeedPeriodNanoseconds))
 			}
-
-			oslTime = oslTime.Add(
-				time.Duration(
-					int64(slokTimePeriodsPerOSL) * scheme.SeedPeriodNanoseconds))
 		}
 	}
 
@@ -796,11 +801,13 @@ func (config *Config) Pave(
 // tree, given sufficient SLOKs.
 func makeOSLFileSpec(
 	scheme *Scheme,
+	propagationChannelID string,
 	firstSLOKTime time.Time) ([]byte, *OSLFileSpec, error) {
 
 	ref := &slokReference{
-		SeedSpecID: string(scheme.SeedSpecs[0].ID),
-		Time:       firstSLOKTime,
+		PropagationChannelID: propagationChannelID,
+		SeedSpecID:           string(scheme.SeedSpecs[0].ID),
+		Time:                 firstSLOKTime,
 	}
 	firstSLOK := deriveSLOK(scheme, ref)
 	oslID := firstSLOK.ID
@@ -814,6 +821,7 @@ func makeOSLFileSpec(
 		scheme,
 		fileKey,
 		scheme.SeedPeriodKeySplits,
+		propagationChannelID,
 		&firstSLOKTime)
 	if err != nil {
 		return nil, nil, common.ContextError(err)
@@ -832,6 +840,7 @@ func divideKey(
 	scheme *Scheme,
 	key []byte,
 	keySplits []KeySplit,
+	propagationChannelID string,
 	nextSLOKTime *time.Time) (*KeyShares, error) {
 
 	keySplitIndex := len(keySplits) - 1
@@ -855,6 +864,7 @@ func divideKey(
 				scheme,
 				shareKey,
 				keySplits[0:keySplitIndex],
+				propagationChannelID,
 				nextSLOKTime)
 			if err != nil {
 				return nil, common.ContextError(err)
@@ -864,6 +874,7 @@ func divideKey(
 			keyShare, err := divideKeyWithSeedSpecSLOKs(
 				scheme,
 				shareKey,
+				propagationChannelID,
 				nextSLOKTime)
 			if err != nil {
 				return nil, common.ContextError(err)
@@ -890,6 +901,7 @@ func divideKey(
 func divideKeyWithSeedSpecSLOKs(
 	scheme *Scheme,
 	key []byte,
+	propagationChannelID string,
 	nextSLOKTime *time.Time) (*KeyShares, error) {
 
 	var boxedShares [][]byte
@@ -904,8 +916,9 @@ func divideKeyWithSeedSpecSLOKs(
 	for index, seedSpec := range scheme.SeedSpecs {
 
 		ref := &slokReference{
-			SeedSpecID: string(seedSpec.ID),
-			Time:       *nextSLOKTime,
+			PropagationChannelID: propagationChannelID,
+			SeedSpecID:           string(seedSpec.ID),
+			Time:                 *nextSLOKTime,
 		}
 		slok := deriveSLOK(scheme, ref)
 
