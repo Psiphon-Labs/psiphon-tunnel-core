@@ -489,17 +489,24 @@ func (sshServer *sshServer) getLoadStats() map[string]map[string]int64 {
 	// than futher down the stats stack. Also useful for glancing at log files.
 
 	allProtocolsStats := make(map[string]int64)
+	allProtocolsStats["accepted_clients"] = 0
+	allProtocolsStats["established_clients"] = 0
+	allProtocolsStats["tcp_port_forwards"] = 0
+	allProtocolsStats["total_tcp_port_forwards"] = 0
+	allProtocolsStats["udp_port_forwards"] = 0
+	allProtocolsStats["total_udp_port_forwards"] = 0
+	allProtocolsStats["tcp_port_forward_dialed_count"] = aggregatedQualityMetrics.tcpPortForwardDialedCount
+	allProtocolsStats["tcp_port_forward_dialed_duration"] = int64(aggregatedQualityMetrics.tcpPortForwardDialedDuration)
+	allProtocolsStats["tcp_port_forward_failed_count"] = aggregatedQualityMetrics.tcpPortForwardFailedCount
+	allProtocolsStats["tcp_port_forward_failed_duration"] = int64(aggregatedQualityMetrics.tcpPortForwardFailedDuration)
+
 	for _, stats := range loadStats {
 		for name, value := range stats {
 			allProtocolsStats[name] += value
 		}
 	}
-	loadStats["ALL"] = allProtocolsStats
 
-	loadStats["ALL"]["tcp_port_forward_dialed_count"] = aggregatedQualityMetrics.tcpPortForwardDialedCount
-	loadStats["ALL"]["tcp_port_forward_dialed_duration"] = int64(aggregatedQualityMetrics.tcpPortForwardDialedDuration)
-	loadStats["ALL"]["tcp_port_forward_failed_count"] = aggregatedQualityMetrics.tcpPortForwardFailedCount
-	loadStats["ALL"]["tcp_port_forward_failed_duration"] = int64(aggregatedQualityMetrics.tcpPortForwardFailedDuration)
+	loadStats["ALL"] = allProtocolsStats
 
 	return loadStats
 }
