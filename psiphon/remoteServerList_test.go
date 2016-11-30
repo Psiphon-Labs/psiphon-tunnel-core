@@ -139,7 +139,6 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 
 	paveFiles, err := oslConfig.Pave(
 		epoch,
-		propagationChannelID,
 		signingPublicKey,
 		signingPrivateKey,
 		[]map[time.Time]string{
