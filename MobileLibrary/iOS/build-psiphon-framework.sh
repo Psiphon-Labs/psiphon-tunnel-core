@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -e
+set -x
 
 BASE_DIR=$(cd "$(dirname "$0")" ; pwd -P)
 cd ${BASE_DIR}
@@ -39,7 +39,8 @@ fi
 # Not exporting this breaks go commands later if run via jenkins
 export GOPATH=${PWD}/go-ios-build
 
-GOMOBILE_PINNED_REV=e99a906c3a3ac5959fa4b8d08f90dd5f75d3b27c
+# When updating the pinned rev, you will have to manually delete go-ios-build
+GOMOBILE_PINNED_REV=aa9922ad4c79ee8a56cd45bf433f2aa943712b09
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
 IOS_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-ios
@@ -92,9 +93,9 @@ cd OpenSSL-for-iPhone && ./build-libssl.sh; cd -
 strip_architectures "${LIBSSL}"
 strip_architectures "${LIBCRYPTO}"
 
-go get -d  -u -v github.com/Psiphon-Inc/openssl
+go get -d -u -v github.com/Psiphon-Inc/openssl
 rc=$?; if [[ $rc != 0 ]]; then
-  echo "FAILURE: go get -d  -u -v github.com/Psiphon-Inc/openssl"
+  echo "FAILURE: go get -d -u -v github.com/Psiphon-Inc/openssl"
   exit $rc
 fi
 
@@ -171,8 +172,6 @@ IOS_CGO_BUILD_FLAGS='// #cgo darwin CFLAGS: -I'"${OPENSSL_INCLUDE}"'\
 // #cgo darwin LDFLAGS:'"${LIBCRYPTO}"''
 
 LC_ALL=C sed -i -- "s|// #cgo pkg-config: libssl|${IOS_CGO_BUILD_FLAGS}|" "${OPENSSL_SRC_DIR}/build.go"
-
-gomobile init
 
 gomobile bind -target ios -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 rc=$?; if [[ $rc != 0 ]]; then
