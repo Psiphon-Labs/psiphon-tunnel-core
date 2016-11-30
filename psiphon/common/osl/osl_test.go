@@ -300,76 +300,62 @@ func TestOSL(t *testing.T) {
 		t.Fatalf("GenerateAuthenticatedDataPackageKeys failed: %s", err)
 	}
 
-	pavedDirectories := make(map[string][]byte)
-	pavedOSLFileContents := make(map[string]map[string][]byte)
+	files := make(map[string][]byte)
 
 	t.Run("pave OSLs", func(t *testing.T) {
 
 		// Pave sufficient OSLs to cover simulated elapsed time of all test cases.
 		endTime := epoch.Add(1000 * time.Millisecond)
 
-		// In actual deployment, paved files for each propagation channel ID
-		// are dropped in distinct distribution sites.
-		for _, propagationChannelID := range []string{
-			"2995DB0C968C59C4F23E87988D9C0D41",
-			"E742C25A6D8BA8C17F37E725FA628569",
-			"36F1CF2DF1250BF0C7BA0629CE3DC657"} {
+		// Dummy server entry payloads will be the OSL ID, which the following
+		// tests use to verify that the correct OSL file decrypts successfully.
+		paveServerEntries := make([]map[time.Time]string, len(config.Schemes))
+		for schemeIndex, scheme := range config.Schemes {
 
-			// Dummy server entry payloads will be the OSL ID, which the following
-			// tests use to verify that the correct OSL file decrypts successfully.
-			paveServerEntries := make([]map[time.Time]string, len(config.Schemes))
-			for schemeIndex, scheme := range config.Schemes {
+			paveServerEntries[schemeIndex] = make(map[time.Time]string)
 
-				paveServerEntries[schemeIndex] = make(map[time.Time]string)
+			slokTimePeriodsPerOSL := 1
+			for _, keySplit := range scheme.SeedPeriodKeySplits {
+				slokTimePeriodsPerOSL *= keySplit.Total
+			}
 
-				slokTimePeriodsPerOSL := 1
-				for _, keySplit := range scheme.SeedPeriodKeySplits {
-					slokTimePeriodsPerOSL *= keySplit.Total
+			oslTime := scheme.epoch
+			for oslTime.Before(endTime) {
+				firstSLOKRef := &slokReference{
+					SeedSpecID: string(scheme.SeedSpecs[0].ID),
+					Time:       oslTime,
 				}
+				firstSLOK := deriveSLOK(scheme, firstSLOKRef)
+				oslID := firstSLOK.ID
+				paveServerEntries[schemeIndex][oslTime] =
+					base64.StdEncoding.EncodeToString(oslID)
 
-				oslTime := scheme.epoch
-				for oslTime.Before(endTime) {
-					firstSLOKRef := &slokReference{
-						PropagationChannelID: propagationChannelID,
-						SeedSpecID:           string(scheme.SeedSpecs[0].ID),
-						Time:                 oslTime,
-					}
-					firstSLOK := deriveSLOK(scheme, firstSLOKRef)
-					oslID := firstSLOK.ID
-					paveServerEntries[schemeIndex][oslTime] =
-						base64.StdEncoding.EncodeToString(oslID)
-
-					oslTime = oslTime.Add(
-						time.Duration(
-							int64(slokTimePeriodsPerOSL) * scheme.SeedPeriodNanoseconds))
-				}
+				oslTime = oslTime.Add(
+					time.Duration(
+						int64(slokTimePeriodsPerOSL) * scheme.SeedPeriodNanoseconds))
 			}
+		}
 
-			paveFiles, err := config.Pave(
-				endTime,
-				propagationChannelID,
-				signingPublicKey,
-				signingPrivateKey,
-				paveServerEntries)
-			if err != nil {
-				t.Fatalf("Pave failed: %s", err)
-			}
+		paveFiles, err := config.Pave(
+			endTime,
+			signingPublicKey,
+			signingPrivateKey,
+			paveServerEntries)
+		if err != nil {
+			t.Fatalf("Pave failed: %s", err)
+		}
 
-			// Check that the paved file name matches the name the client will look for.
-			if len(paveFiles) < 1 || paveFiles[len(paveFiles)-1].Name != GetOSLRegistryURL("") {
-				t.Fatalf("invalid registry pave file")
-			}
+		// Check that the paved file name matches the name the client will look for.
+		if len(paveFiles) < 1 || paveFiles[len(paveFiles)-1].Name != GetOSLRegistryURL("") {
+			t.Fatalf("invalid registry pave file")
+		}
 
-			pavedDirectories[propagationChannelID] = paveFiles[len(paveFiles)-1].Contents
-
-			pavedOSLFileContents[propagationChannelID] = make(map[string][]byte)
-			for _, paveFile := range paveFiles[0:len(paveFiles)] {
-				pavedOSLFileContents[propagationChannelID][paveFile.Name] = paveFile.Contents
-			}
+		for _, paveFile := range paveFiles {
+			files[paveFile.Name] = paveFile.Contents
 		}
 	})
 
-	if len(pavedDirectories) != 3 {
+	if len(files) == 0 {
 		// Previous subtest failed. Following tests cannot be completed, so abort.
 		t.Fatalf("pave failed")
 	}
@@ -494,9 +480,8 @@ func TestOSL(t *testing.T) {
 					slok := deriveSLOK(
 						testCase.scheme,
 						&slokReference{
-							PropagationChannelID: testCase.propagationChannelID,
-							SeedSpecID:           string(testCase.scheme.SeedSpecs[seedSpecIndex].ID),
-							Time:                 epoch.Add(time.Duration(timePeriod) * time.Millisecond),
+							SeedSpecID: string(testCase.scheme.SeedSpecs[seedSpecIndex].ID),
+							Time:       epoch.Add(time.Duration(timePeriod) * time.Millisecond),
 						})
 
 					slokMap[string(slok.ID)] = slok.Key
@@ -512,13 +497,12 @@ func TestOSL(t *testing.T) {
 
 			checkRegistryStartTime := time.Now()
 
-			registry, _, err := UnpackRegistry(
-				pavedDirectories[testCase.propagationChannelID], signingPublicKey)
+			registry, _, err := UnpackRegistry(files[GetOSLRegistryURL("")], signingPublicKey)
 			if err != nil {
 				t.Fatalf("UnpackRegistry failed: %s", err)
 			}
 
-			t.Logf("registry size: %d", len(pavedDirectories[testCase.propagationChannelID]))
+			t.Logf("registry size: %d", len(files[GetOSLRegistryURL("")]))
 			t.Logf("registry OSL count: %d", len(registry.FileSpecs))
 
 			oslIDs := registry.GetSeededOSLIDs(
@@ -535,8 +519,7 @@ func TestOSL(t *testing.T) {
 			}
 
 			for _, oslID := range oslIDs {
-				oslFileContents, ok :=
-					pavedOSLFileContents[testCase.propagationChannelID][GetOSLFileURL("", oslID)]
+				oslFileContents, ok := files[GetOSLFileURL("", oslID)]
 				if !ok {
 					t.Fatalf("unknown OSL file name")
 				}
