@@ -190,9 +190,6 @@ echo " Gomobile version: ${GOMOBILEVERSION}"
 echo ""
 
 # Patch source files to build on Darwin
-LC_ALL=C sed -i -- 's/+build android windows$/+build android windows darwin/' "${TUNNEL_CORE_SRC_DIR}/psiphon/opensslConn.go"
-LC_ALL=C sed -i -- 's/+build !android,!windows$/+build !android,!windows,!darwin/' "${TUNNEL_CORE_SRC_DIR}/psiphon/opensslConn_unsupported.go"
-
 IOS_CGO_BUILD_FLAGS='// #cgo darwin CFLAGS: -I'"${OPENSSL_INCLUDE}"'\
 // #cgo darwin LDFLAGS:'"${LIBSSL}"'\
 // #cgo darwin LDFLAGS:'"${LIBCRYPTO}"''

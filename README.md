@@ -18,7 +18,7 @@ This project is in production and used as the tunneling engine in our Windows an
 Client Setup
 --------------------------------------------------------------------------------
 
-#### Build
+### Build
 
 * Go 1.5 (or higher) is required.
 * This project builds and runs on recent versions of Windows, Linux, and Mac OS X.
@@ -42,7 +42,18 @@ Client Setup
     "
     ```
 
-#### Configure
+#### Platform-specific instructions
+
+##### macOS
+
+1. You must have [Homebrew](http://brew.sh/) installed.
+2. `brew install openssl pkg-config`
+3. Set `PKG_CONFIG_PATH=/usr/local/opt/openssl/lib/pkgconfig` when building. This can be easily done on the build command line like so:
+   ```
+   PKG_CONFIG_PATH=/usr/local/opt/openssl/lib/pkgconfig go build
+   ```
+
+### Configure
 
  * Configuration files are standard text files containing a valid JSON object. Example:
 
@@ -64,7 +75,7 @@ Client Setup
 * Replace each `<placeholder>` with a value from your Psiphon server. The Psiphon server-side stack is open source and can be found in our [Psiphon 3 repository](https://bitbucket.org/psiphon/psiphon-circumvention-system).
 
 
-#### Run
+### Run
 
 * Run `./ConsoleClient --config psiphon.config` where `psiphon.config` is created as described in the [Configure](#configure) section above
 
