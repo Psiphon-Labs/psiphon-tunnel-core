@@ -2,6 +2,10 @@
 
 set -x
 
+# Reset the PATH to macOS default. This is mainly so we don't execute the wrong
+# gomobile executable.
+PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
 BASE_DIR=$(cd "$(dirname "$0")" ; pwd -P)
 cd ${BASE_DIR}
 
@@ -36,8 +40,12 @@ rc=$?; if [[ $rc != 0 ]]; then
   exit $rc
 fi
 
-# Not exporting this breaks go commands later if run via jenkins
+# Exporting these seems necessary for subcommands to pick them up.
 export GOPATH=${PWD}/go-ios-build
+export PATH=${GOPATH}/bin:${PATH}
+
+# The GOPATH we're using is temporary, so make sure there isn't one from a previous run.
+rm -rf ${GOPATH}
 
 # When updating the pinned rev, you will have to manually delete go-ios-build
 GOMOBILE_PINNED_REV=aa9922ad4c79ee8a56cd45bf433f2aa943712b09
@@ -52,6 +60,19 @@ PATH=${PATH}:${GOPATH}/bin
 mkdir -p ${GOPATH}
 rc=$?; if [[ $rc != 0 ]]; then
   echo "FAILURE: mkdir -p ${GOPATH}"
+  exit $rc
+fi
+
+# Symlink the current source directory into GOPATH, so that we're building the
+# code in this local repo, rather than pulling from Github and building that.
+mkdir -p ${GOPATH}/src/github.com/Psiphon-Labs
+rc=$?; if [[ $rc != 0 ]]; then
+  echo "mkdir -p ${GOPATH}/src/github.com/Psiphon-Labs"
+  exit $rc
+fi
+ln -s "${BASE_DIR}/../.." "${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core"
+rc=$?; if [[ $rc != 0 ]]; then
+  echo "ln -s ../.. ${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core"
   exit $rc
 fi
 
@@ -99,9 +120,10 @@ rc=$?; if [[ $rc != 0 ]]; then
   exit $rc
 fi
 
-go get -d -u -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+# Don't use -u, because this path points to our local repo, and we don't want it overridden.
+go get -d -v -u github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 rc=$?; if [[ $rc != 0 ]]; then
-  echo "FAILURE: go get -d -u -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
+  echo "FAILURE: go get -d -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
   exit $rc
 fi
 
@@ -132,7 +154,11 @@ if [ $? -ne 0 ]; then
     git branch -d pinned
     git checkout -b pinned ${GOMOBILE_PINNED_REV}
     go install
-    gomobile init -v
+    ${GOPATH}/bin/gomobile init -v
+    if [ $? -ne 0 ]; then
+      echo "FAILURE: ${GOPATH}/bin/gomobile init -v"
+      exit 1
+    fi
     check_pinned_version
     if [ $? -ne 0 ]; then
       echo "gomobile not found, aborting"
@@ -144,7 +170,7 @@ BUILDDATE=$(date +%Y-%m-%dT%H:%M:%S%z)
 BUILDREPO=$(git config --get remote.origin.url)
 BUILDREV=$(git rev-parse --short HEAD)
 GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
-GOMOBILEVERSION=$(gomobile version | perl -ne '/gomobile version (.*?) / && print $1')
+GOMOBILEVERSION=$(${GOPATH}/bin/gomobile version | perl -ne '/gomobile version (.*?) / && print $1')
 
 LDFLAGS="\
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildDate=${BUILDDATE} \
@@ -164,18 +190,15 @@ echo " Gomobile version: ${GOMOBILEVERSION}"
 echo ""
 
 # Patch source files to build on Darwin
-LC_ALL=C sed -i -- 's/+build android windows$/+build android windows darwin/' "${TUNNEL_CORE_SRC_DIR}/psiphon/opensslConn.go"
-LC_ALL=C sed -i -- 's/+build !android,!windows$/+build !android,!windows,!darwin/' "${TUNNEL_CORE_SRC_DIR}/psiphon/opensslConn_unsupported.go"
-
 IOS_CGO_BUILD_FLAGS='// #cgo darwin CFLAGS: -I'"${OPENSSL_INCLUDE}"'\
 // #cgo darwin LDFLAGS:'"${LIBSSL}"'\
 // #cgo darwin LDFLAGS:'"${LIBCRYPTO}"''
 
 LC_ALL=C sed -i -- "s|// #cgo pkg-config: libssl|${IOS_CGO_BUILD_FLAGS}|" "${OPENSSL_SRC_DIR}/build.go"
 
-gomobile bind -target ios -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+${GOPATH}/bin/gomobile bind -target ios -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 rc=$?; if [[ $rc != 0 ]]; then
-  echo "FAILURE: gomobile bind"
+  echo "FAILURE: ${GOPATH}/bin/gomobile bind -target ios -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
   exit $rc
 fi
 
