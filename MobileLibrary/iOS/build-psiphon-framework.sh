@@ -2,6 +2,10 @@
 
 set -x
 
+# Reset the PATH to macOS default. This is mainly so we don't execute the wrong
+# gomobile executable.
+PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
 BASE_DIR=$(cd "$(dirname "$0")" ; pwd -P)
 cd ${BASE_DIR}
 
@@ -36,8 +40,11 @@ rc=$?; if [[ $rc != 0 ]]; then
   exit $rc
 fi
 
-# If this is needed in the Jenkins script, we'll have to export it.
-GOPATH=${PWD}/go-ios-build
+# Exporting these seems necessary for subcommands to pick them up.
+export GOPATH=${PWD}/go-ios-build
+export PATH=${GOPATH}/bin:${PATH}
+
+# The GOPATH we're using is temporary, so make sure there isn't one from a previous run.
 rm -rf ${GOPATH}
 
 # When updating the pinned rev, you will have to manually delete go-ios-build
