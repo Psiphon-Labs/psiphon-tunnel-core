@@ -20,7 +20,7 @@
 package server
 
 import (
-	"crypto/tls"
+	golangtls "crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -32,6 +32,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
 )
 
 const WEB_SERVER_IO_TIMEOUT = 10 * time.Second
@@ -92,13 +93,12 @@ func RunWebServer(
 		http.Server{
 			MaxHeaderBytes: MAX_API_PARAMS_SIZE,
 			Handler:        serveMux,
-			TLSConfig:      tlsConfig,
 			ReadTimeout:    WEB_SERVER_IO_TIMEOUT,
 			WriteTimeout:   WEB_SERVER_IO_TIMEOUT,
 			ErrorLog:       golanglog.New(logWriter, "", 0),
 
 			// Disable auto HTTP/2 (https://golang.org/doc/go1.6)
-			TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
+			TLSNextProto: make(map[string]func(*http.Server, *golangtls.Conn, http.Handler)),
 		},
 	}
 
@@ -122,7 +122,7 @@ func RunWebServer(
 		defer waitGroup.Done()
 
 		// Note: will be interrupted by listener.Close()
-		err := server.ServeTLS(listener)
+		err := server.ServeTLS(listener, tlsConfig)
 
 		// Can't check for the exact error that Close() will cause in Accept(),
 		// (see: https://code.google.com/p/go/issues/detail?id=4373). So using an

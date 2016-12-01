@@ -118,6 +118,19 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 		})
 }
 
+func TestUnfrontedMeekSessionTicket(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			denyTrafficRules:     false,
+			doClientVerification: false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
 func TestWebTransportAPIRequests(t *testing.T) {
 	runServer(t,
 		&runServerConfig{

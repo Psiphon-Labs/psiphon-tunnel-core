@@ -73,6 +73,10 @@ type MeekConfig struct {
 	// UseHTTPS indicates whether to use HTTPS (true) or HTTP (false).
 	UseHTTPS bool
 
+	// UseObfuscatedSessionTickets indicates whether to use obfuscated
+	// session tickets. Assumes UseHTTPS is true.
+	UseObfuscatedSessionTickets bool
+
 	// SNIServerName is the value to place in the TLS SNI server_name
 	// field when HTTPS is used.
 	SNIServerName string
@@ -190,7 +194,7 @@ func DialMeek(
 		// exclusively connect to non-MiM CDNs); then the adversary kills the underlying TCP connection after
 		// some short period. This is mitigated by the "impaired" protocol classification mechanism.
 
-		dialer := NewCustomTLSDialer(&CustomTLSConfig{
+		tlsConfig := &CustomTLSConfig{
 			DialAddr:                      meekConfig.DialAddress,
 			Dial:                          NewTCPDialer(meekDialConfig),
 			Timeout:                       meekDialConfig.ConnectTimeout,
@@ -198,7 +202,13 @@ func DialMeek(
 			SkipVerify:                    true,
 			UseIndistinguishableTLS:       meekDialConfig.UseIndistinguishableTLS,
 			TrustedCACertificatesFilename: meekDialConfig.TrustedCACertificatesFilename,
-		})
+		}
+
+		if meekConfig.UseObfuscatedSessionTickets {
+			tlsConfig.ObfuscatedSessionTicketKey = meekConfig.MeekObfuscatedKey
+		}
+
+		dialer := NewCustomTLSDialer(tlsConfig)
 
 		// TODO: wrap in an http.Client and use http.Client.Timeout which actually covers round trip
 		transport = &http.Transport{

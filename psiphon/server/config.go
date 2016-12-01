@@ -583,6 +583,9 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 	if meekPort == 0 {
 		meekPort = params.TunnelProtocolPorts["UNFRONTED-MEEK-HTTPS-OSSH"]
 	}
+	if meekPort == 0 {
+		meekPort = params.TunnelProtocolPorts["UNFRONTED-MEEK-SESSION-TICKET-OSSH"]
+	}
 
 	// Note: fronting params are a stub; this server entry will exercise
 	// client and server fronting code paths, but not actually traverse

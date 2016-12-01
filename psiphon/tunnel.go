@@ -458,11 +458,13 @@ func initMeekConfig(
 
 	var dialAddress string
 	useHTTPS := false
+	useObfuscatedSessionTickets := false
 	var SNIServerName, hostHeader string
 	transformedHostName := false
 
 	switch selectedProtocol {
 	case protocol.TUNNEL_PROTOCOL_FRONTED_MEEK:
+
 		frontingAddress, frontingHost, err := selectFrontingParameters(serverEntry)
 		if err != nil {
 			return nil, common.ContextError(err)
@@ -476,6 +478,7 @@ func initMeekConfig(
 		hostHeader = frontingHost
 
 	case protocol.TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
+
 		frontingAddress, frontingHost, err := selectFrontingParameters(serverEntry)
 		if err != nil {
 			return nil, common.ContextError(err)
@@ -484,6 +487,7 @@ func initMeekConfig(
 		hostHeader = frontingHost
 
 	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
+
 		dialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
 		hostname := serverEntry.IpAddress
 		hostname, transformedHostName = config.HostNameTransformer.TransformHostName(hostname)
@@ -493,9 +497,14 @@ func initMeekConfig(
 			hostHeader = fmt.Sprintf("%s:%d", hostname, serverEntry.MeekServerPort)
 		}
 
-	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS:
+	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
+		protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET:
+
 		dialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
 		useHTTPS = true
+		if selectedProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET {
+			useObfuscatedSessionTickets = true
+		}
 		SNIServerName, transformedHostName =
 			config.HostNameTransformer.TransformHostName(serverEntry.IpAddress)
 		if serverEntry.MeekServerPort == 443 {
@@ -517,6 +526,7 @@ func initMeekConfig(
 	return &MeekConfig{
 		DialAddress:                   dialAddress,
 		UseHTTPS:                      useHTTPS,
+		UseObfuscatedSessionTickets:   useObfuscatedSessionTickets,
 		SNIServerName:                 SNIServerName,
 		HostHeader:                    hostHeader,
 		TransformedHostName:           transformedHostName,

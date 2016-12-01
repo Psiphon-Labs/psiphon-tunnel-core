@@ -324,6 +324,7 @@ func (sshServer *sshServer) runListener(
 			sshServer.support,
 			listener,
 			protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol),
+			protocol.TunnelProtocolUsesObfuscatedSessionTickets(tunnelProtocol),
 			handleClient,
 			sshServer.shutdownBroadcast)
 		if err != nil {
