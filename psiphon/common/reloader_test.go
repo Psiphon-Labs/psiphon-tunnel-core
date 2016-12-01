@@ -23,13 +23,20 @@ import (
 	"bytes"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestReloader(t *testing.T) {
 
-	fileName := "reloader_test.dat"
+	dirname, err := ioutil.TempDir("", "psiphon-reloader-test")
+	if err != nil {
+		t.Fatalf("TempDir failed: %s", err)
+	}
+	defer os.RemoveAll(dirname)
+
+	fileName := filepath.Join(dirname, "reloader_test.dat")
+
 	initialContents := []byte("contents1\n")
 	modifiedContents := []byte("contents2\n")
 
@@ -40,28 +47,17 @@ func TestReloader(t *testing.T) {
 
 	file.ReloadableFile = NewReloadableFile(
 		fileName,
-		func(filename string) error {
-			contents, err := ioutil.ReadFile(filename)
-			if err != nil {
-				return err
-			}
-			file.contents = contents
+		func(fileContent []byte) error {
+			file.contents = fileContent
 			return nil
 		})
 
 	// Test: initial load
 
-	err := ioutil.WriteFile(fileName, initialContents, 0600)
+	err = ioutil.WriteFile(fileName, initialContents, 0600)
 	if err != nil {
 		t.Fatalf("WriteFile failed: %s", err)
 	}
-
-	time.Sleep(2 * time.Second)
-	fileInfo, err := os.Stat(fileName)
-	if err != nil {
-		t.Fatalf("Stat failed: %s", err)
-	}
-	t.Logf("ModTime: %s", fileInfo.ModTime())
 
 	reloaded, err := file.Reload()
 	if err != nil {
@@ -97,16 +93,6 @@ func TestReloader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteFile failed: %s", err)
 	}
-
-	// TODO: without the sleeps, the os.Stat ModTime doesn't
-	// change and IsFileChanged fails to detect the modification.
-
-	time.Sleep(2 * time.Second)
-	fileInfo, err = os.Stat(fileName)
-	if err != nil {
-		t.Fatalf("Stat failed: %s", err)
-	}
-	t.Logf("ModTime: %s", fileInfo.ModTime())
 
 	reloaded, err = file.Reload()
 	if err != nil {

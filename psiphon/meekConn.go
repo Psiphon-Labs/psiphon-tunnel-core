@@ -105,7 +105,7 @@ type MeekConfig struct {
 // through a CDN.
 type MeekConn struct {
 	url                  *url.URL
-	additionalHeaders    map[string]string
+	additionalHeaders    http.Header
 	cookie               *http.Cookie
 	pendingConns         *common.Conns
 	transport            transporter
@@ -153,6 +153,8 @@ func DialMeek(
 	meekDialConfig.PendingConns = pendingConns
 
 	var transport transporter
+	var additionalHeaders http.Header
+	var proxyUrl func(*http.Request) (*url.URL, error)
 
 	if meekConfig.UseHTTPS {
 		// Custom TLS dialer:
@@ -216,7 +218,6 @@ func DialMeek(
 		// http.Transport will put the the HTTP server address in the HTTP
 		// request line. In this one case, we can use an HTTP proxy that does
 		// not offer CONNECT support.
-		var proxyUrl func(*http.Request) (*url.URL, error)
 		if strings.HasPrefix(meekDialConfig.UpstreamProxyUrl, "http://") &&
 			(meekConfig.DialAddress == meekConfig.HostHeader ||
 				meekConfig.DialAddress == meekConfig.HostHeader+":80") {
@@ -257,14 +258,17 @@ func DialMeek(
 		Path:   "/",
 	}
 
-	var additionalHeaders map[string]string
 	if meekConfig.UseHTTPS {
 		host, _, err := net.SplitHostPort(meekConfig.DialAddress)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
-		additionalHeaders = map[string]string{
-			"X-Psiphon-Fronting-Address": host,
+		additionalHeaders = map[string][]string{
+			"X-Psiphon-Fronting-Address": {host},
+		}
+	} else {
+		if proxyUrl == nil {
+			additionalHeaders = meekDialConfig.UpstreamProxyCustomHeaders
 		}
 	}
 
@@ -574,8 +578,22 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (io.ReadCloser, error) {
 
 		request.Header.Set("Content-Type", "application/octet-stream")
 
+		// Set additional headers to the HTTP request using the same method we use for adding
+		// custom headers to HTTP proxy requests
 		for name, value := range meek.additionalHeaders {
-			request.Header.Set(name, value)
+			// hack around special case of "Host" header
+			// https://golang.org/src/net/http/request.go#L474
+			// using URL.Opaque, see URL.RequestURI() https://golang.org/src/net/url/url.go#L915
+			if name == "Host" {
+				if len(value) > 0 {
+					if request.URL.Opaque == "" {
+						request.URL.Opaque = request.URL.Scheme + "://" + request.Host + request.URL.RequestURI()
+					}
+					request.Host = value[0]
+				}
+			} else {
+				request.Header[name] = value
+			}
 		}
 
 		request.AddCookie(meek.cookie)
@@ -687,8 +705,8 @@ func makeMeekCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
 	copy(encryptedCookie[32:], box)
 
 	// Obfuscate the encrypted data
-	obfuscator, err := NewClientObfuscator(
-		&ObfuscatorConfig{Keyword: meekConfig.MeekObfuscatedKey, MaxPadding: MEEK_COOKIE_MAX_PADDING})
+	obfuscator, err := common.NewClientObfuscator(
+		&common.ObfuscatorConfig{Keyword: meekConfig.MeekObfuscatedKey, MaxPadding: MEEK_COOKIE_MAX_PADDING})
 	if err != nil {
 		return nil, common.ContextError(err)
 	}

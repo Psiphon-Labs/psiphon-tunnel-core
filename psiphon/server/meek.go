@@ -35,7 +35,6 @@ import (
 
 	"github.com/Psiphon-Inc/crypto/nacl/box"
 	"github.com/Psiphon-Inc/goarista/monotime"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
@@ -329,7 +328,9 @@ func (server *MeekServer) getSession(
 				// list of IPs (each proxy in a chain). The first IP should be
 				// the client IP.
 				proxyClientIP := strings.Split(value, ",")[0]
-				if net.ParseIP(proxyClientIP) != nil {
+				if net.ParseIP(proxyClientIP) != nil &&
+					server.support.GeoIPService.Lookup(proxyClientIP).Country != GEOIP_UNKNOWN_VALUE {
+
 					clientIP = proxyClientIP
 					break
 				}
@@ -529,9 +530,9 @@ func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte,
 
 	reader := bytes.NewReader(decodedValue[:])
 
-	obfuscator, err := psiphon.NewServerObfuscator(
+	obfuscator, err := common.NewServerObfuscator(
 		reader,
-		&psiphon.ObfuscatorConfig{Keyword: support.Config.MeekObfuscatedKey})
+		&common.ObfuscatorConfig{Keyword: support.Config.MeekObfuscatedKey})
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -709,8 +710,8 @@ func (conn *meekConn) pumpWrites(writer io.Writer) error {
 				return err
 			}
 
-			if conn.protocolVersion < MEEK_PROTOCOL_VERSION_2 {
-				// Protocol v1 clients expect at most
+			if conn.protocolVersion < MEEK_PROTOCOL_VERSION_1 {
+				// Pre-protocol version 1 clients expect at most
 				// MEEK_MAX_PAYLOAD_LENGTH response bodies
 				return nil
 			}

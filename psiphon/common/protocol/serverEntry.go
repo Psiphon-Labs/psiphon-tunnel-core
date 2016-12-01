@@ -17,7 +17,7 @@
  *
  */
 
-package psiphon
+package protocol
 
 import (
 	"bytes"
@@ -82,7 +82,7 @@ func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 // by the ServerEntry's capabilities.
 func (serverEntry *ServerEntry) GetSupportedProtocols() []string {
 	supportedProtocols := make([]string, 0)
-	for _, protocol := range common.SupportedTunnelProtocols {
+	for _, protocol := range SupportedTunnelProtocols {
 		if serverEntry.SupportsProtocol(protocol) {
 			supportedProtocols = append(supportedProtocols, protocol)
 		}
@@ -114,16 +114,16 @@ func (serverEntry *ServerEntry) DisableImpairedProtocols(impairedProtocols []str
 // SupportsSSHAPIRequests returns true when the server supports
 // SSH API requests.
 func (serverEntry *ServerEntry) SupportsSSHAPIRequests() bool {
-	return common.Contains(serverEntry.Capabilities, common.CAPABILITY_SSH_API_REQUESTS)
+	return common.Contains(serverEntry.Capabilities, CAPABILITY_SSH_API_REQUESTS)
 }
 
 func (serverEntry *ServerEntry) GetUntunneledWebRequestPorts() []string {
 	ports := make([]string, 0)
-	if common.Contains(serverEntry.Capabilities, common.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS) {
+	if common.Contains(serverEntry.Capabilities, CAPABILITY_UNTUNNELED_WEB_API_REQUESTS) {
 		// Server-side configuration quirk: there's a port forward from
 		// port 443 to the web server, which we can try, except on servers
 		// running FRONTED_MEEK, which listens on port 443.
-		if !serverEntry.SupportsProtocol(common.TUNNEL_PROTOCOL_FRONTED_MEEK) {
+		if !serverEntry.SupportsProtocol(TUNNEL_PROTOCOL_FRONTED_MEEK) {
 			ports = append(ports, "443")
 		}
 		ports = append(ports, serverEntry.WebServerPort)
@@ -195,9 +195,6 @@ func ValidateServerEntry(serverEntry *ServerEntry) error {
 	ipAddr := net.ParseIP(serverEntry.IpAddress)
 	if ipAddr == nil {
 		errMsg := fmt.Sprintf("server entry has invalid IpAddress: '%s'", serverEntry.IpAddress)
-		// Some callers skip invalid server entries without propagating
-		// the error mesage, so issue a notice.
-		NoticeAlert(errMsg)
 		return common.ContextError(errors.New(errMsg))
 	}
 	return nil
@@ -225,6 +222,7 @@ func DecodeAndValidateServerEntryList(
 
 		if ValidateServerEntry(serverEntry) != nil {
 			// Skip this entry and continue with the next one
+			// TODO: invoke a logging callback
 			continue
 		}
 

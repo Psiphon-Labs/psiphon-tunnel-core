@@ -364,19 +364,26 @@ func NoticeExiting() {
 	outputNotice("Exiting", 0)
 }
 
-// NoticeRemoteServerListDownloadedBytes reports remote server list download progress.
-func NoticeRemoteServerListDownloadedBytes(bytes int64) {
-	outputNotice("RemoteServerListDownloadedBytes", noticeIsDiagnostic, "bytes", bytes)
+// NoticeRemoteServerListResourceDownloadedBytes reports remote server list download progress.
+func NoticeRemoteServerListResourceDownloadedBytes(url string, bytes int64) {
+	outputNotice("RemoteServerListResourceDownloadedBytes", noticeIsDiagnostic, "url", url, "bytes", bytes)
 }
 
-// NoticeRemoteServerListDownloaded indicates that a remote server list download
+// NoticeRemoteServerListResourceDownloaded indicates that a remote server list download
 // completed successfully.
-func NoticeRemoteServerListDownloaded(filename string) {
-	outputNotice("RemoteServerListDownloaded", noticeIsDiagnostic, "filename", filename)
+func NoticeRemoteServerListResourceDownloaded(url string) {
+	outputNotice("RemoteServerListResourceDownloaded", noticeIsDiagnostic, "url", url)
 }
 
 func NoticeClientVerificationRequestCompleted(ipAddress string) {
+	// TODO: remove "Notice" prefix
 	outputNotice("NoticeClientVerificationRequestCompleted", noticeIsDiagnostic, "ipAddress", ipAddress)
+}
+
+// NoticeSLOKSeeded indicates that the SLOK with the specified ID was received from
+// the Psiphon server. The "duplicate" flags indicates whether the SLOK was previously known.
+func NoticeSLOKSeeded(slokID string, duplicate bool) {
+	outputNotice("SLOKSeeded", noticeIsDiagnostic, "slokID", slokID, "duplicate", duplicate)
 }
 
 type repetitiveNoticeState struct {

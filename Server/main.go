@@ -27,7 +27,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
 )
 
@@ -111,7 +111,7 @@ func main() {
 
 		if generateServerNetworkInterface != "" {
 			var err error
-			serverIPaddress, err = psiphon.GetInterfaceIPAddress(generateServerNetworkInterface)
+			serverIPaddress, err = common.GetInterfaceIPAddress(generateServerNetworkInterface)
 			if err != nil {
 				fmt.Printf("generate failed: %s\n", err)
 				os.Exit(1)

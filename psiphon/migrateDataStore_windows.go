@@ -28,12 +28,13 @@ import (
 
 	_ "github.com/Psiphon-Inc/go-sqlite3"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 var legacyDb *sql.DB
 
-func prepareMigrationEntries(config *Config) []*ServerEntry {
-	var migratableServerEntries []*ServerEntry
+func prepareMigrationEntries(config *Config) []*protocol.ServerEntry {
+	var migratableServerEntries []*protocol.ServerEntry
 
 	// If DATA_STORE_FILENAME does not exist on disk
 	if _, err := os.Stat(filepath.Join(config.DataStoreDirectory, DATA_STORE_FILENAME)); os.IsNotExist(err) {
@@ -84,7 +85,7 @@ func prepareMigrationEntries(config *Config) []*ServerEntry {
 // migrateEntries calls the BoltDB data store method to shuffle
 // and store an array of server entries (StoreServerEntries)
 // Failing to migrate entries, or delete the legacy file is never fatal
-func migrateEntries(serverEntries []*ServerEntry, legacyDataStoreFilename string) {
+func migrateEntries(serverEntries []*protocol.ServerEntry, legacyDataStoreFilename string) {
 	checkInitDataStore()
 
 	err := StoreServerEntries(serverEntries, false)
@@ -149,7 +150,7 @@ func (iterator *legacyServerEntryIterator) Close() {
 
 // Next returns the next server entry, by rank, for a legacyServerEntryIterator.
 // Returns nil with no error when there is no next item.
-func (iterator *legacyServerEntryIterator) Next() (serverEntry *ServerEntry, err error) {
+func (iterator *legacyServerEntryIterator) Next() (serverEntry *protocol.ServerEntry, err error) {
 	defer func() {
 		if err != nil {
 			iterator.Close()
@@ -170,7 +171,7 @@ func (iterator *legacyServerEntryIterator) Next() (serverEntry *ServerEntry, err
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
-	serverEntry = new(ServerEntry)
+	serverEntry = new(protocol.ServerEntry)
 	err = json.Unmarshal(data, serverEntry)
 	if err != nil {
 		return nil, common.ContextError(err)

@@ -27,7 +27,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/rand"
 	"strconv"
@@ -127,13 +126,8 @@ func NewDatabase(filename string) (*Database, error) {
 
 	database.ReloadableFile = common.NewReloadableFile(
 		filename,
-		func(filename string) error {
-			psinetJSON, err := ioutil.ReadFile(filename)
-			if err != nil {
-				// On error, state remains the same
-				return common.ContextError(err)
-			}
-			err = json.Unmarshal(psinetJSON, &database)
+		func(fileContent []byte) error {
+			err := json.Unmarshal(fileContent, &database)
 			if err != nil {
 				// On error, state remains the same
 				// (Unmarshal first validates the provided
@@ -157,9 +151,9 @@ func (db *Database) GetRandomHomepage(sponsorID, clientRegion string, isMobilePl
 	homepages := db.GetHomepages(sponsorID, clientRegion, isMobilePlatform)
 	if len(homepages) > 0 {
 		index := rand.Intn(len(homepages))
-		return homepages[index:index+1]
+		return homepages[index : index+1]
 	}
-	return nil
+	return homepages
 }
 
 // GetHomepages returns a list of home pages for the specified sponsor,
@@ -173,7 +167,7 @@ func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatfor
 	// Sponsor id does not exist: fail gracefully
 	sponsor, ok := db.Sponsors[sponsorID]
 	if !ok {
-		return nil
+		return sponsorHomePages
 	}
 
 	homePages := sponsor.HomePages
@@ -408,21 +402,21 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 
 	// Extended (new) entry fields are in a JSON string
 	var extendedConfig struct {
-		IpAddress                     string
-		WebServerPort                 string
-		WebServerSecret               string
-		WebServerCertificate          string
-		SshPort                       int
-		SshUsername                   string
-		SshPassword                   string
-		SshHostKey                    string
-		SshObfuscatedPort             int
-		SshObfuscatedKey              string
-		Region                        string
-		MeekCookieEncryptionPublicKey string
-		MeekObfuscatedKey             string
-		MeekServerPort                int
-		capabilities                  []string
+		IpAddress                     string   `json:"ipAddress"`
+		WebServerPort                 string   `json:"webServerPort"` // not an int
+		WebServerSecret               string   `json:"webServerSecret"`
+		WebServerCertificate          string   `json:"webServerCertificate"`
+		SshPort                       int      `json:"sshPort"`
+		SshUsername                   string   `json:"sshUsername"`
+		SshPassword                   string   `json:"sshPassword"`
+		SshHostKey                    string   `json:"sshHostKey"`
+		SshObfuscatedPort             int      `json:"sshObfuscatedPort"`
+		SshObfuscatedKey              string   `json:"sshObfuscatedKey"`
+		Capabilities                  []string `json:"capabilities"`
+		Region                        string   `json:"region"`
+		MeekServerPort                int      `json:"meekServerPort"`
+		MeekCookieEncryptionPublicKey string   `json:"meekCookieEncryptionPublicKey"`
+		MeekObfuscatedKey             string   `json:"meekObfuscatedKey"`
 	}
 
 	// NOTE: also putting original values in extended config for easier parsing by new clients
@@ -476,7 +470,7 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 
 	for capability, enabled := range serverCapabilities {
 		if enabled == true {
-			extendedConfig.capabilities = append(extendedConfig.capabilities, capability)
+			extendedConfig.Capabilities = append(extendedConfig.Capabilities, capability)
 		}
 	}
 
