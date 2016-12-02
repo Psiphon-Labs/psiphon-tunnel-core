@@ -121,7 +121,7 @@ rc=$?; if [[ $rc != 0 ]]; then
 fi
 
 # Don't use -u, because this path points to our local repo, and we don't want it overridden.
-go get -d -v -u github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+go get -d -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 rc=$?; if [[ $rc != 0 ]]; then
   echo "FAILURE: go get -d -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
   exit $rc
