@@ -48,9 +48,14 @@ Client Setup
 
 1. You must have [Homebrew](http://brew.sh/) installed.
 2. `brew install openssl pkg-config`
-3. Set `PKG_CONFIG_PATH=/usr/local/opt/openssl/lib/pkgconfig` when building. This can be easily done on the build command line like so:
+3. Find out where Homebrew put the `pkgconfig` files for OpenSSL -- the location depends on your Homebrew installation. Run this command:
    ```
-   PKG_CONFIG_PATH=/usr/local/opt/openssl/lib/pkgconfig go build
+   brew info openssl
+   ```
+   Make note of the "build variable" path for `PKG_CONFIG_PATH`.
+4. Set `PKG_CONFIG_PATH=<path discovered above>` when building. This can be easily done on the build command line like so:
+   ```
+   PKG_CONFIG_PATH=<path discovered above> go build
    ```
 
 ### Configure
