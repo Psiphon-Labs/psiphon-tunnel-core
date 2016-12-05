@@ -1,4 +1,4 @@
-// +build android windows
+// +build android windows darwin
 
 /*
  * Copyright (c) 2015, Psiphon Inc.

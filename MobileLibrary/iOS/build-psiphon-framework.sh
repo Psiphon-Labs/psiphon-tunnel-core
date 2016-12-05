@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 
-set -x
+# -x echos commands. -u exits if an unintialized variable is used.
+# -e exits if a command returns an error.
+set -x -u -e
+
+# Reset the PATH to macOS default. This is mainly so we don't execute the wrong
+# gomobile executable.
+PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
 BASE_DIR=$(cd "$(dirname "$0")" ; pwd -P)
 cd ${BASE_DIR}
@@ -10,7 +16,7 @@ BUILD_DIR="${BASE_DIR}/build"
 
 # Ensure go is installed
 which go 2>&1 > /dev/null
-if [ $? -ne 0 ]; then
+if [[ $? != 0 ]]; then
   echo "Go is not installed in the path, aborting"
   exit 1
 fi
@@ -31,16 +37,20 @@ TRUSTED_ROOT_CA_FILE=${BASE_DIR}/PsiphonTunnel/PsiphonTunnel/rootCAs.txt
 # Download trustedroot CAs off curl website, see https://curl.haxx.se/docs/caextract.html for details
 curl -o $TRUSTED_ROOT_CA_FILE https://curl.haxx.se/ca/cacert.pem
 
-rc=$?; if [[ $rc != 0 ]]; then
+if [[ $? != 0 ]]; then
   echo "FAILURE: curl -o $TRUSTED_ROOT_CA_FILE https://curl.haxx.se/ca/cacert.pem"
-  exit $rc
+  exit 1
 fi
 
-# Not exporting this breaks go commands later if run via jenkins
+# Exporting these seems necessary for subcommands to pick them up.
 export GOPATH=${PWD}/go-ios-build
+export PATH=${GOPATH}/bin:${PATH}
+
+# The GOPATH we're using is temporary, so make sure there isn't one from a previous run.
+rm -rf ${GOPATH}
 
 # When updating the pinned rev, you will have to manually delete go-ios-build
-GOMOBILE_PINNED_REV=aa9922ad4c79ee8a56cd45bf433f2aa943712b09
+GOMOBILE_PINNED_REV=72eef9d09307f0b437153fd152229f56edc0ab20
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
 IOS_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-ios
@@ -50,22 +60,35 @@ OPENSSL_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Inc/openssl
 PATH=${PATH}:${GOPATH}/bin
 
 mkdir -p ${GOPATH}
-rc=$?; if [[ $rc != 0 ]]; then
+if [[ $? != 0 ]]; then
   echo "FAILURE: mkdir -p ${GOPATH}"
-  exit $rc
+  exit 1
+fi
+
+# Symlink the current source directory into GOPATH, so that we're building the
+# code in this local repo, rather than pulling from Github and building that.
+mkdir -p ${GOPATH}/src/github.com/Psiphon-Labs
+if [[ $? != 0 ]]; then
+  echo "mkdir -p ${GOPATH}/src/github.com/Psiphon-Labs"
+  exit 1
+fi
+ln -s "${BASE_DIR}/../.." "${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core"
+if [[ $? != 0 ]]; then
+  echo "ln -s ../.. ${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core"
+  exit 1
 fi
 
 mkdir -p ${INTERMEDIATE_OUPUT_DIR}
-rc=$?; if [[ $rc != 0 ]]; then
+if [[ $? != 0 ]]; then
   echo "FAILURE: mkdir -p ${INTERMEDIATE_OUPUT_DIR}"
-  exit $rc
+  exit 1
 fi
 
 if [ ! -e ${IOS_SRC_DIR} ]; then
   echo "iOS source directory (${IOS_SRC_DIR}) not found, creating link"
   mkdir -p $(dirname ${IOS_SRC_DIR})
   ln -s $(pwd -P) $IOS_SRC_DIR
-  if [ $? -ne 0 ]; then
+  if [[ $? != 0 ]]; then
     echo "..Could not create symlink, aborting"
     exit 1
   fi
@@ -79,9 +102,9 @@ function strip_architectures() {
     if ! [[ "${valid_archs}" == *"$ARCH"* ]]; then
       echo "Stripping ARCH ${ARCH} from $1"
       lipo -remove "$ARCH" -output "$1" "$1"
-      rc=$?; if [[ $rc != 0 ]]; then
+      if [[ $? != 0 ]]; then
         echo "FAILURE: lipo $1"
-        exit $rc
+        exit 1
       fi
     fi
   done
@@ -94,15 +117,16 @@ strip_architectures "${LIBSSL}"
 strip_architectures "${LIBCRYPTO}"
 
 go get -d -u -v github.com/Psiphon-Inc/openssl
-rc=$?; if [[ $rc != 0 ]]; then
+if [[ $? != 0 ]]; then
   echo "FAILURE: go get -d -u -v github.com/Psiphon-Inc/openssl"
-  exit $rc
+  exit 1
 fi
 
-go get -d -u -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
-rc=$?; if [[ $rc != 0 ]]; then
-  echo "FAILURE: go get -d -u -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
-  exit $rc
+# Don't use -u, because this path points to our local repo, and we don't want it overridden.
+go get -d -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+if [[ $? != 0 ]]; then
+  echo "FAILURE: go get -d -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
+  exit 1
 fi
 
 function check_pinned_version() {
@@ -124,17 +148,23 @@ function check_pinned_version() {
   fi
 }
 
+set +e
 check_pinned_version
-if [ $? -ne 0 ]; then
+rc=$?
+set -e
+if [[ rc != 0 ]]; then
     go get -u golang.org/x/mobile/cmd/gomobile
     cd ${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
     git checkout master
-    git branch -d pinned
     git checkout -b pinned ${GOMOBILE_PINNED_REV}
     go install
-    gomobile init -v
+    ${GOPATH}/bin/gomobile init -v
+    if [[ $? != 0 ]]; then
+      echo "FAILURE: ${GOPATH}/bin/gomobile init -v"
+      exit 1
+    fi
     check_pinned_version
-    if [ $? -ne 0 ]; then
+    if [[ $? != 0 ]]; then
       echo "gomobile not found, aborting"
       exit 1
     fi
@@ -144,7 +174,7 @@ BUILDDATE=$(date +%Y-%m-%dT%H:%M:%S%z)
 BUILDREPO=$(git config --get remote.origin.url)
 BUILDREV=$(git rev-parse --short HEAD)
 GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
-GOMOBILEVERSION=$(gomobile version | perl -ne '/gomobile version (.*?) / && print $1')
+GOMOBILEVERSION=$(${GOPATH}/bin/gomobile version | perl -ne '/gomobile version (.*?) / && print $1')
 
 LDFLAGS="\
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildDate=${BUILDDATE} \
@@ -164,18 +194,15 @@ echo " Gomobile version: ${GOMOBILEVERSION}"
 echo ""
 
 # Patch source files to build on Darwin
-LC_ALL=C sed -i -- 's/+build android windows$/+build android windows darwin/' "${TUNNEL_CORE_SRC_DIR}/psiphon/opensslConn.go"
-LC_ALL=C sed -i -- 's/+build !android,!windows$/+build !android,!windows,!darwin/' "${TUNNEL_CORE_SRC_DIR}/psiphon/opensslConn_unsupported.go"
-
 IOS_CGO_BUILD_FLAGS='// #cgo darwin CFLAGS: -I'"${OPENSSL_INCLUDE}"'\
 // #cgo darwin LDFLAGS:'"${LIBSSL}"'\
 // #cgo darwin LDFLAGS:'"${LIBCRYPTO}"''
 
 LC_ALL=C sed -i -- "s|// #cgo pkg-config: libssl|${IOS_CGO_BUILD_FLAGS}|" "${OPENSSL_SRC_DIR}/build.go"
 
-gomobile bind -target ios -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+${GOPATH}/bin/gomobile bind -target ios -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 rc=$?; if [[ $rc != 0 ]]; then
-  echo "FAILURE: gomobile bind"
+  echo "FAILURE: ${GOPATH}/bin/gomobile bind -target ios -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
   exit $rc
 fi
 
