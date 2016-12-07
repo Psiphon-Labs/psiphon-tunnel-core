@@ -152,7 +152,7 @@ set +e
 check_pinned_version
 rc=$?
 set -e
-if [[ rc != 0 ]]; then
+if [[ $rc != 0 ]]; then
     go get -u golang.org/x/mobile/cmd/gomobile
     cd ${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
     git checkout master
