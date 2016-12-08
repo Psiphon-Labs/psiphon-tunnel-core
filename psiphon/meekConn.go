@@ -84,8 +84,8 @@ type MeekConfig struct {
 	// HostHeader is the value to place in the HTTP request Host header.
 	HostHeader string
 
-	// TransformedHostName records whether a HostNameTransformer
-	// transformation is in effect. This value is used for stats reporting.
+	// TransformedHostName records whether a hostname transformation is
+	// in effect. This value is used for stats reporting.
 	TransformedHostName bool
 
 	// The following values are used to create the obfuscated meek cookie.

@@ -157,12 +157,6 @@ type Config struct {
 	// meek protocols run by this server instance.
 	MeekObfuscatedKey string
 
-	// MeekCertificateCommonName is the value used for the hostname
-	// in the self-signed certificate generated and used for meek
-	// HTTPS modes. The same value is used for all HTTPS meek
-	// protocols.
-	MeekCertificateCommonName string
-
 	// MeekProhibitedHeaders is a list of HTTP headers to check for
 	// in client requests. If one of these headers is found, the
 	// request fails. This is used to defend against abuse.
@@ -303,13 +297,6 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 			if config.MeekCookieEncryptionPrivateKey == "" || config.MeekObfuscatedKey == "" {
 				return nil, fmt.Errorf(
 					"Tunnel protocol %s requires MeekCookieEncryptionPrivateKey, MeekObfuscatedKey",
-					tunnelProtocol)
-			}
-		}
-		if protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
-			if config.MeekCertificateCommonName == "" {
-				return nil, fmt.Errorf(
-					"Tunnel protocol %s requires MeekCertificateCommonName",
 					tunnelProtocol)
 			}
 		}
@@ -521,7 +508,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		UDPInterceptUdpgwServerAddress: "127.0.0.1:7300",
 		MeekCookieEncryptionPrivateKey: meekCookieEncryptionPrivateKey,
 		MeekObfuscatedKey:              meekObfuscatedKey,
-		MeekCertificateCommonName:      "www.example.org",
 		MeekProhibitedHeaders:          nil,
 		MeekProxyForwardedForHeaders:   []string{"X-Forwarded-For"},
 		LoadMonitorPeriodSeconds:       300,

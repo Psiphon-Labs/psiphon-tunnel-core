@@ -445,6 +445,16 @@ func selectFrontingParameters(
 	return
 }
 
+func doMeekTransformHostName(config *Config) bool {
+	switch config.TransformHostNames {
+	case TRANSFORM_HOST_NAMES_ALWAYS:
+		return true
+	case TRANSFORM_HOST_NAMES_NEVER:
+		return false
+	}
+	return common.FlipCoin()
+}
+
 // initMeekConfig is a helper that creates a MeekConfig suitable for the
 // selected meek tunnel protocol.
 func initMeekConfig(
@@ -472,8 +482,11 @@ func initMeekConfig(
 		dialAddress = fmt.Sprintf("%s:443", frontingAddress)
 		useHTTPS = true
 		if !serverEntry.MeekFrontingDisableSNI {
-			SNIServerName, transformedHostName =
-				config.HostNameTransformer.TransformHostName(frontingAddress)
+			SNIServerName = frontingAddress
+			if doMeekTransformHostName(config) {
+				SNIServerName = common.GenerateHostName()
+				transformedHostName = true
+			}
 		}
 		hostHeader = frontingHost
 
@@ -490,7 +503,10 @@ func initMeekConfig(
 
 		dialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
 		hostname := serverEntry.IpAddress
-		hostname, transformedHostName = config.HostNameTransformer.TransformHostName(hostname)
+		if doMeekTransformHostName(config) {
+			hostname = common.GenerateHostName()
+			transformedHostName = true
+		}
 		if serverEntry.MeekServerPort == 80 {
 			hostHeader = hostname
 		} else {
@@ -505,8 +521,11 @@ func initMeekConfig(
 		if selectedProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET {
 			useObfuscatedSessionTickets = true
 		}
-		SNIServerName, transformedHostName =
-			config.HostNameTransformer.TransformHostName(serverEntry.IpAddress)
+		SNIServerName = serverEntry.IpAddress
+		if doMeekTransformHostName(config) {
+			SNIServerName = common.GenerateHostName()
+			transformedHostName = true
+		}
 		if serverEntry.MeekServerPort == 443 {
 			hostHeader = serverEntry.IpAddress
 		} else {

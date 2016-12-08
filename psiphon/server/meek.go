@@ -474,8 +474,7 @@ func makeMeekTLSConfig(
 	support *SupportServices,
 	useObfuscatedSessionTickets bool) (*tls.Config, error) {
 
-	certificate, privateKey, err := GenerateWebServerCertificate(
-		support.Config.MeekCertificateCommonName)
+	certificate, privateKey, err := GenerateWebServerCertificate(common.GenerateHostName())
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
