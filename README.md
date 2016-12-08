@@ -46,6 +46,9 @@ Client Setup
 
 ##### macOS
 
+Building without OpenSSL support (that is, without indistinguishable TLS support) requires no extra steps. 
+To compile with OpenSSL support, follow these steps:
+
 1. You must have [Homebrew](http://brew.sh/) installed.
 
 2. `brew install openssl pkg-config`
@@ -58,10 +61,11 @@ Client Setup
    
    Make note of the "build variable" path for `PKG_CONFIG_PATH`.
    
-4. Set `PKG_CONFIG_PATH=<path discovered above>` when building. This can be easily done on the build command line like so:
+4. Set `PKG_CONFIG_PATH=<path discovered above>` when building, and provide the `-tags OPENSSL` flag. 
+   This can be easily done on the build command line like so:
 
    ```
-   $ PKG_CONFIG_PATH=<path discovered above> go build
+   $ PKG_CONFIG_PATH=<path discovered above> go build -tags OPENSSL
    ```
 
 ### Configure
