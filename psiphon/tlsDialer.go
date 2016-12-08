@@ -197,8 +197,6 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 
 	if config.ObfuscatedSessionTicketKey != "" {
 
-		// TODO: OpenSSL obfuscated session tickets
-
 		// See obfuscated session ticket overview
 		// in tls.NewObfuscatedClientSessionCache
 
@@ -220,6 +218,7 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 
 	// When supported, use OpenSSL TLS as a more indistinguishable TLS.
 	if config.UseIndistinguishableTLS &&
+		config.ObfuscatedSessionTicketKey == "" &&
 		(config.SkipVerify ||
 			// TODO: config.VerifyLegacyCertificate != nil ||
 			config.TrustedCACertificatesFilename != "") {
