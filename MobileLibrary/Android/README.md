@@ -1,38 +1,40 @@
-##Psiphon Android Library README
+## Psiphon Android Library README
 
-###Overview
+### Overview
 
 Psiphon Library for Android enables you to easily embed Psiphon in your Android
 app. The Psiphon Library for Android is implemented in Go and follows the standard
 conventions for using a Go library in an Android app.
 
-###Building with Docker
+### Building with Docker
 
 Note that you may need to use `sudo docker` below, depending on your OS.
 
-#####Create the build image:
+##### Create the build image:
 
-  1. Run the command: `docker build --no-cache=true -t psiandroid .` (this may take some time to complete)
-  2. Once completed, verify that you see an image named `psiandroid` when running: `docker images`
+1. While in the `MobileLibrary/Android` directory, run the command: `docker build --no-cache=true -t psiandroid .`
 
-#####Run the build:
+2. Once completed, verify that you see an image named `psiandroid` when running: `docker images`
 
-  *Ensure that the command below is run from within the `AndroidLibrary` directory*
+##### Run the build:
 
-  ```bash
-  cd ../.. && \
-    docker run \
-    --rm \
-    -v $(pwd):/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core \
-    psiandroid \
-    /bin/bash -c 'source /tmp/setenv-android.sh && cd /go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/Android && ./make.bash' \
-  ; cd -
-  ```
+*Ensure that the command below is run from within the `MobileLibrary/Android` directory*
+
+```bash
+cd ../.. && \
+  docker run \
+  --rm \
+  -v $(pwd):/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core \
+  psiandroid \
+  /bin/bash -c 'source /tmp/setenv-android.sh && cd /go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/Android && ./make.bash' \
+; cd -
+```
+
 When that command completes, the compiled `.aar` files (suitable for use in an Android Studio project) will be located in the current directory (it will likely be owned by root, so be sure to `chown` to an appropriate user).
 
-###Building without Docker (from source)
+### Building without Docker (from source)
 
-#####Prerequisites:
+##### Prerequisites:
 
  - The `build-essential` package (on Debian based systems - or its equivalent for your platform)
  - Go 1.5 or later
@@ -42,17 +44,17 @@ When that command completes, the compiled `.aar` files (suitable for use in an A
  - OpenSSL (tested against the version [here](../../openssl))
   - Follow its [README](../../openssl/README.md) to prepare the environment before you follow the steps below
 
-#####Steps:
+##### Steps:
 
  1. Follow Go Android documentation ([gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile))
  2. Run `make.bash`
 
-###Using the Library
+### Using the Library
 
  1. Build `ca.psiphon.aar` from via the docker container, from source, or use the [binary release](https://github.com/Psiphon-Labs/psiphon-tunnel-core/releases)
  2. Add `ca.psiphon.aar` to your Android Studio project as described in the [gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile)
  3. Example usage in [TunneledWebView sample app](./SampleApps/TunneledWebView/README.md)
 
-#####Limitations
+##### Limitations
 
  - Only supports one concurrent instance of Psiphon.
