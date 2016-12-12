@@ -28,6 +28,9 @@ INTERMEDIATE_OUPUT_DIR="${BASE_DIR}/PsiphonTunnel/PsiphonTunnel"
 INTERMEDIATE_OUPUT_FILE="${FRAMEWORK}.framework"
 FRAMEWORK_BINARY="${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}/Versions/A/${FRAMEWORK}"
 
+# The "OPENSSL" tag enables support of OpenSSL for use by IndistinguishableTLS.
+BUILD_TAGS="OPENSSL IOS"
+
 LIBSSL=${BASE_DIR}/OpenSSL-for-iPhone/lib/libssl.a
 LIBCRYPTO=${BASE_DIR}/OpenSSL-for-iPhone/lib/libcrypto.a
 OPENSSL_INCLUDE=${BASE_DIR}/OpenSSL-for-iPhone/include/
@@ -116,16 +119,16 @@ cd OpenSSL-for-iPhone && ./build-libssl.sh; cd -
 strip_architectures "${LIBSSL}"
 strip_architectures "${LIBCRYPTO}"
 
-go get -d -u -v github.com/Psiphon-Inc/openssl
+go get -d -u -v -tags "${BUILD_TAGS}" github.com/Psiphon-Inc/openssl
 if [[ $? != 0 ]]; then
-  echo "FAILURE: go get -d -u -v github.com/Psiphon-Inc/openssl"
+  echo "FAILURE: go get -d -u -v -tags "${BUILD_TAGS}" github.com/Psiphon-Inc/openssl"
   exit 1
 fi
 
 # Don't use -u, because this path points to our local repo, and we don't want it overridden.
-go get -d -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+go get -d -v -tags "${BUILD_TAGS}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 if [[ $? != 0 ]]; then
-  echo "FAILURE: go get -d -v github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
+  echo "FAILURE: go get -d -v -tags "${BUILD_TAGS}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
   exit 1
 fi
 
@@ -200,7 +203,7 @@ IOS_CGO_BUILD_FLAGS='// #cgo darwin CFLAGS: -I'"${OPENSSL_INCLUDE}"'\
 
 LC_ALL=C sed -i -- "s|// #cgo pkg-config: libssl|${IOS_CGO_BUILD_FLAGS}|" "${OPENSSL_SRC_DIR}/build.go"
 
-${GOPATH}/bin/gomobile bind -v -x -target ios -tags="OPENSSL IOS" -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+${GOPATH}/bin/gomobile bind -v -x -target ios -tags "${BUILD_TAGS}" -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 rc=$?; if [[ $rc != 0 ]]; then
   echo "FAILURE: ${GOPATH}/bin/gomobile bind -target ios -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
   exit $rc
