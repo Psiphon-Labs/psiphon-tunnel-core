@@ -938,10 +938,10 @@ func (sshClient *sshClient) runTunnel(
 
 		// process each port forward concurrently
 		waitGroup.Add(1)
-		go func() {
+		go func(channel ssh.NewChannel) {
 			defer waitGroup.Done()
-			sshClient.handleNewPortForwardChannel(newChannel)
-		}()
+			sshClient.handleNewPortForwardChannel(channel)
+		}(newChannel)
 	}
 
 	// The channel loop is interrupted by a client
