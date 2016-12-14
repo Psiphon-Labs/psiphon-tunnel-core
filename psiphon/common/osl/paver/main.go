@@ -122,7 +122,7 @@ func main() {
 		}
 
 		paveFiles, err := config.Pave(
-			epoch.Add(time.Duration(oslCount)*oslTimePeriod),
+			epoch.Add(time.Duration(oslOffset+oslCount)*oslTimePeriod),
 			propagationChannelID,
 			signingPublicKey,
 			signingPrivateKey,
