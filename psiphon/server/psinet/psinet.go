@@ -42,11 +42,11 @@ import (
 type Database struct {
 	common.ReloadableFile
 
-	Hosts    map[string]Host            `json:"hosts"`
-	Servers  []Server                   `json:"servers"`
-	Sponsors map[string]Sponsor         `json:"sponsors"`
-	Versions map[string][]ClientVersion `json:"client_versions"`
-	string   DefaultSponsorID           `json:"default_sponsor_id"`
+	Hosts            map[string]Host            `json:"hosts"`
+	Servers          []Server                   `json:"servers"`
+	Sponsors         map[string]Sponsor         `json:"sponsors"`
+	Versions         map[string][]ClientVersion `json:"client_versions"`
+	DefaultSponsorID string                     `json:"default_sponsor_id"`
 }
 
 type Host struct {
