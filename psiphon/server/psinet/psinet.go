@@ -42,10 +42,11 @@ import (
 type Database struct {
 	common.ReloadableFile
 
-	Hosts    map[string]Host            `json:"hosts"`
-	Servers  []Server                   `json:"servers"`
-	Sponsors map[string]Sponsor         `json:"sponsors"`
-	Versions map[string][]ClientVersion `json:"client_versions"`
+	Hosts            map[string]Host            `json:"hosts"`
+	Servers          []Server                   `json:"servers"`
+	Sponsors         map[string]Sponsor         `json:"sponsors"`
+	Versions         map[string][]ClientVersion `json:"client_versions"`
+	DefaultSponsorID string                     `json:"default_sponsor_id"`
 }
 
 type Host struct {
@@ -167,7 +168,10 @@ func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatfor
 	// Sponsor id does not exist: fail gracefully
 	sponsor, ok := db.Sponsors[sponsorID]
 	if !ok {
-		return sponsorHomePages
+		sponsor, ok = db.Sponsors[db.DefaultSponsorID]
+		if !ok {
+			return sponsorHomePages
+		}
 	}
 
 	homePages := sponsor.HomePages
@@ -239,14 +243,21 @@ func (db *Database) GetUpgradeClientVersion(clientVersion, clientPlatform string
 }
 
 // GetHttpsRequestRegexes returns bytes transferred stats regexes for the
-// specified sponsor. The result is nil when an unknown sponsorID is provided.
+// specified sponsor.
 func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string {
 	db.ReloadableFile.RLock()
 	defer db.ReloadableFile.RUnlock()
 
 	regexes := make([]map[string]string, 0)
 
-	for i := range db.Sponsors[sponsorID].HttpsRequestRegexes {
+	sponsor, ok := db.Sponsors[sponsorID]
+	if !ok {
+		sponsor, ok = db.Sponsors[db.DefaultSponsorID]
+	}
+
+	// If neither sponsorID or DefaultSponsorID were found, sponsor will be the
+	// zero value of the map, an empty Sponsor struct.
+	for i := range sponsor.HttpsRequestRegexes {
 		regex := make(map[string]string)
 		regex["replace"] = db.Sponsors[sponsorID].HttpsRequestRegexes[i].Replace
 		regex["regex"] = db.Sponsors[sponsorID].HttpsRequestRegexes[i].Regex

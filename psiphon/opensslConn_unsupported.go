@@ -1,4 +1,4 @@
-// +build !android,!windows,!darwin
+// +build !OPENSSL
 
 /*
  * Copyright (c) 2015, Psiphon Inc.
