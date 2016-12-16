@@ -257,10 +257,10 @@ func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string
 
 	// If neither sponsorID or DefaultSponsorID were found, sponsor will be the
 	// zero value of the map, an empty Sponsor struct.
-	for i := range sponsor.HttpsRequestRegexes {
+	for _, sponsorRegex := range sponsor.HttpsRequestRegexes {
 		regex := make(map[string]string)
-		regex["replace"] = db.Sponsors[sponsorID].HttpsRequestRegexes[i].Replace
-		regex["regex"] = db.Sponsors[sponsorID].HttpsRequestRegexes[i].Regex
+		regex["replace"] = sponsorRegex.Replace
+		regex["regex"] = sponsorRegex.Regex
 		regexes = append(regexes, regex)
 	}
 
