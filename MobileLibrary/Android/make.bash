@@ -60,7 +60,7 @@ echo " Gomobile version: ${GOMOBILEVERSION}"
 echo " Dependencies: ${DEPENDENCIES}"
 echo ""
 
-gomobile bind -v -target=android/arm -tags "${BUILD_TAGS}" -ldflags="$LDFLAGS" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+gomobile bind -v -target=android/arm -tags="${BUILD_TAGS}" -ldflags="$LDFLAGS" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 if [ $? != 0 ]; then
   echo "..'gomobile bind' failed, exiting"
   exit $?
