@@ -10,7 +10,8 @@ if [ ! -f make.bash ]; then
   exit 1
 fi
 
-BUILD_TAGS="PRIVATE_PLUGINS"
+PRIVATE_PLUGINS_TAG=""
+BUILD_TAGS="${PRIVATE_PLUGINS_TAG}"
 
 prepare_build () {
   BUILDINFOFILE="${EXE_BASENAME}_buildinfo.txt"
