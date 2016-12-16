@@ -77,6 +77,8 @@ const (
 	IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION            = 2 * time.Minute
 	IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD           = 3
 	TOTAL_BYTES_TRANSFERRED_NOTICE_PERIOD                = 5 * time.Minute
+	TRANSFORM_HOST_NAMES_ALWAYS                          = "always"
+	TRANSFORM_HOST_NAMES_NEVER                           = "never"
 )
 
 // To distinguish omitted timeout params from explicit 0 value timeout
@@ -233,9 +235,10 @@ type Config struct {
 	// This parameter is only applicable to library deployments.
 	DnsServerGetter DnsServerGetter
 
-	// HostNameTransformer is an interface that enables pluggable hostname
-	// transformation circumvention strategies.
-	HostNameTransformer HostNameTransformer
+	// TransformHostNames specifies whether to use hostname transformation circumvention
+	// strategies. Set to "always" to always transform, "never" to never transform, and
+	// "", the default, for the default transformation strategy.
+	TransformHostNames string
 
 	// TargetServerEntry is an encoded server entry. When specified, this server entry
 	// is used exclusively and all other known servers are ignored.
@@ -487,9 +490,12 @@ func LoadConfig(configJson []byte) (*Config, error) {
 			errors.New("DnsServerGetter interface must be set at runtime"))
 	}
 
-	if config.HostNameTransformer != nil {
+	if !common.Contains(
+		[]string{"", TRANSFORM_HOST_NAMES_ALWAYS, TRANSFORM_HOST_NAMES_NEVER},
+		config.TransformHostNames) {
+
 		return nil, common.ContextError(
-			errors.New("HostNameTransformer interface must be set at runtime"))
+			errors.New("invalid TransformHostNames"))
 	}
 
 	if !common.Contains(

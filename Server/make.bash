@@ -10,6 +10,8 @@ if [ ! -f make.bash ]; then
   exit 1
 fi
 
+BUILD_TAGS="PRIVATE_PLUGINS"
+
 prepare_build () {
   BUILDINFOFILE="${EXE_BASENAME}_buildinfo.txt"
   BUILDDATE=$(date -Iseconds)
@@ -24,7 +26,7 @@ prepare_build () {
   # - pipes to `xargs` again, specifiying `pkg` as the placeholder name for each item being operated on (which is the list of non standard library import paths from the previous step)
   #  - `xargs` runs a bash script (via `-c`) which changes to each import path in sequence, then echoes out `"<import path>":"<subshell output of getting the short git revision>",`
   # - this leaves a trailing `,` at the end, and no close to the JSON object, so simply `sed` replace the comma before the end of the line with `}` and you now have valid JSON
-  DEPENDENCIES=$(echo -n "{" && go list -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
+  DEPENDENCIES=$(echo -n "{" && go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
 
   LDFLAGS="\
   -linkmode external -extldflags \"-static\" \
@@ -47,14 +49,14 @@ prepare_build () {
 
 build_for_linux () {
   echo "Getting project dependencies (via go get) for Linux. Parameter is: '$1'"
-  GOOS=linux GOARCH=amd64 go get -d -v ./...
+  GOOS=linux GOARCH=amd64 go get -d -v -tags "${BUILD_TAGS}" ./...
   prepare_build
   if [ $? != 0 ]; then
     echo "...'go get' failed, exiting"
     exit $?
   fi
 
-  GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o psiphond main.go
+  GOOS=linux GOARCH=amd64 go build -tags "${BUILD_TAGS}" -ldflags "$LDFLAGS" -o psiphond main.go
   if [ $? != 0 ]; then
     echo "...'go build' failed, exiting"
     exit $?

@@ -102,7 +102,7 @@ func TestUntunneledUpgradeDownload(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -119,7 +119,7 @@ func TestUntunneledResumableUpgradeDownload(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           true,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -136,7 +136,7 @@ func TestUntunneledUpgradeClientIsLatestVersion(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -153,7 +153,7 @@ func TestUntunneledResumableFetchRemoteServerList(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           true,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -170,7 +170,7 @@ func TestTunneledUpgradeClientIsLatestVersion(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -195,7 +195,7 @@ func TestImpairedProtocols(t *testing.T) {
 			tunnelPoolSize:           40,
 			useUpstreamProxy:         false,
 			disruptNetwork:           true,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              1 * time.Minute,
 		})
 }
@@ -212,7 +212,7 @@ func TestSSH(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -229,7 +229,7 @@ func TestObfuscatedSSH(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -246,7 +246,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -263,7 +263,7 @@ func TestUnfrontedMeekWithTransformer(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
-			useHostNameTransformer:   true,
+			transformHostNames:       true,
 			runDuration:              0,
 		})
 }
@@ -280,7 +280,7 @@ func TestFrontedMeek(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -297,7 +297,7 @@ func TestFrontedMeekWithTransformer(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
-			useHostNameTransformer:   true,
+			transformHostNames:       true,
 			runDuration:              0,
 		})
 }
@@ -314,7 +314,7 @@ func TestFrontedMeekHTTP(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -331,7 +331,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -348,7 +348,7 @@ func TestUnfrontedMeekHTTPSWithTransformer(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
-			useHostNameTransformer:   true,
+			transformHostNames:       true,
 			runDuration:              0,
 		})
 }
@@ -365,7 +365,7 @@ func TestDisabledApi(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -382,7 +382,7 @@ func TestObfuscatedSSHWithUpstreamProxy(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         true,
 			disruptNetwork:           false,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -399,7 +399,7 @@ func TestUnfrontedMeekWithUpstreamProxy(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         true,
 			disruptNetwork:           false,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -416,7 +416,7 @@ func TestUnfrontedMeekHTTPSWithUpstreamProxy(t *testing.T) {
 			tunnelPoolSize:           1,
 			useUpstreamProxy:         true,
 			disruptNetwork:           false,
-			useHostNameTransformer:   false,
+			transformHostNames:       false,
 			runDuration:              0,
 		})
 }
@@ -431,7 +431,7 @@ type controllerRunConfig struct {
 	tunnelPoolSize           int
 	useUpstreamProxy         bool
 	disruptNetwork           bool
-	useHostNameTransformer   bool
+	transformHostNames       bool
 	runDuration              time.Duration
 }
 
@@ -489,8 +489,10 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		config.UpstreamProxyCustomHeaders = upstreamProxyCustomHeaders
 	}
 
-	if runConfig.useHostNameTransformer {
-		config.HostNameTransformer = &TestHostNameTransformer{}
+	if runConfig.transformHostNames {
+		config.TransformHostNames = "always"
+	} else {
+		config.TransformHostNames = "never"
 	}
 
 	// Override client retry throttle values to speed up automated

@@ -11,9 +11,10 @@ EXE_BASENAME="psiphon-tunnel-core"
 
 # The "OPENSSL" tag enables support of OpenSSL for use by IndistinguishableTLS.
 # This needs to be outside of prepare_build because it's used by go-get.
-WINDOWS_BUILD_TAGS="OPENSSL"
-LINUX_BUILD_TAGS=
-OSX_BUILD_TAGS=
+BUILD_TAGS="PRIVATE_PLUGINS"
+WINDOWS_BUILD_TAGS="OPENSSL ${BUILD_TAGS}"
+LINUX_BUILD_TAGS="${BUILD_TAGS}"
+OSX_BUILD_TAGS="${BUILD_TAGS}"
 
 prepare_build () {
   BUILDINFOFILE="${EXE_BASENAME}_buildinfo.txt"
@@ -29,7 +30,7 @@ prepare_build () {
   # - pipes to `xargs` again, specifiying `pkg` as the placeholder name for each item being operated on (which is the list of non standard library import paths from the previous step)
   #  - `xargs` runs a bash script (via `-c`) which changes to each import path in sequence, then echoes out `"<import path>":"<subshell output of getting the short git revision>",`
   # - this leaves a trailing `,` at the end, and no close to the JSON object, so simply `sed` replace the comma before the end of the line with `}` and you now have valid JSON
-  DEPENDENCIES=$(echo -n "{" && go list -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
+  DEPENDENCIES=$(echo -n "{" && go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
 
   LDFLAGS="\
   -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildDate=$BUILDDATE \

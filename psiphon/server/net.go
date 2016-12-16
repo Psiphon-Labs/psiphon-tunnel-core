@@ -51,10 +51,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package server
 
 import (
-	"crypto/tls"
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
 )
 
 // HTTPSServer is a wrapper around http.Server which adds the
@@ -63,16 +64,21 @@ type HTTPSServer struct {
 	http.Server
 }
 
-// ServeTLS is a offers the equivalent interface as http.Serve.
+// ServeTLS is similar to http.Serve, but uses TLS.
+//
 // The http package has both ListenAndServe and ListenAndServeTLS higher-
 // level interfaces, but only Serve (not TLS) offers a lower-level interface that
 // allows the caller to keep a refererence to the Listener, allowing for external
 // shutdown. ListenAndServeTLS also requires the TLS cert and key to be in files
 // and we avoid that here.
+//
+// Note that the http.Server.TLSConfig field is ignored and the
+// psiphon/common/tls.Config parameter is used intead.
+//
 // tcpKeepAliveListener is used in http.ListenAndServeTLS but not exported,
 // so we use a copy from https://golang.org/src/net/http/server.go.
-func (server *HTTPSServer) ServeTLS(listener net.Listener) error {
-	tlsListener := tls.NewListener(tcpKeepAliveListener{listener.(*net.TCPListener)}, server.TLSConfig)
+func (server *HTTPSServer) ServeTLS(listener net.Listener, config *tls.Config) error {
+	tlsListener := tls.NewListener(tcpKeepAliveListener{listener.(*net.TCPListener)}, config)
 	return server.Serve(tlsListener)
 }
 

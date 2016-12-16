@@ -123,20 +123,6 @@ type DnsServerGetter interface {
 	GetSecondaryDnsServer() string
 }
 
-// HostNameTransformer defines the interface for pluggable hostname
-// transformation circumvention strategies.
-type HostNameTransformer interface {
-	TransformHostName(hostname string) (string, bool)
-}
-
-// IdentityHostNameTransformer is the default HostNameTransformer, which
-// returns the hostname unchanged.
-type IdentityHostNameTransformer struct{}
-
-func (IdentityHostNameTransformer) TransformHostName(hostname string) (string, bool) {
-	return hostname, false
-}
-
 // TimeoutError implements the error interface
 type TimeoutError struct{}
 
