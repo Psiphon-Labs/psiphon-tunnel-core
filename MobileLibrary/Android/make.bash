@@ -9,7 +9,7 @@ fi
 
 # The "OPENSSL" tag enables support of OpenSSL for use by IndistinguishableTLS.
 
-PRIVATE_PLUGINS_TAG=""
+PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"
 BUILD_TAGS="OPENSSL ${PRIVATE_PLUGINS_TAG}"
 
 # Don't use '-u' to force updates because the docker builds always pull
