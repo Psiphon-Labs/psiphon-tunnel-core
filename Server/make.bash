@@ -57,7 +57,7 @@ build_for_linux () {
     exit $?
   fi
 
-  GOOS=linux GOARCH=amd64 go build -tags "${BUILD_TAGS}" -ldflags "$LDFLAGS" -o psiphond main.go
+  GOOS=linux GOARCH=amd64 go build -tags "${BUILD_TAGS}" -ldflags "$LDFLAGS" -o psiphond
   if [ $? != 0 ]; then
     echo "...'go build' failed, exiting"
     exit $?
