@@ -128,13 +128,19 @@ func NewDatabase(filename string) (*Database, error) {
 	database.ReloadableFile = common.NewReloadableFile(
 		filename,
 		func(fileContent []byte) error {
-			err := json.Unmarshal(fileContent, &database)
+			var newDatabase Database
+			err := json.Unmarshal(fileContent, &newDatabase)
 			if err != nil {
-				// On error, state remains the same
-				// (Unmarshal first validates the provided
-				//  JOSN and then populates the interface)
 				return common.ContextError(err)
 			}
+			// Note: an unmarshal directly into &database would fail
+			// to reset to zero value fields not present in the JSON.
+			database.Hosts = newDatabase.Hosts
+			database.Servers = newDatabase.Servers
+			database.Sponsors = newDatabase.Sponsors
+			database.Versions = newDatabase.Versions
+			database.DefaultSponsorID = newDatabase.DefaultSponsorID
+
 			return nil
 		})
 
