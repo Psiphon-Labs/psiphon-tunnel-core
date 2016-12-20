@@ -109,14 +109,14 @@ func main() {
 	for _, keySplit := range config.Schemes[scheme].SeedPeriodKeySplits {
 		slokTimePeriodsPerOSL *= keySplit.Total
 	}
-	oslTimePeriod := time.Duration(config.Schemes[0].SeedPeriodNanoseconds * int64(slokTimePeriodsPerOSL))
+	oslTimePeriod := time.Duration(config.Schemes[scheme].SeedPeriodNanoseconds * int64(slokTimePeriodsPerOSL))
 
-	for _, propagationChannelID := range config.Schemes[0].PropagationChannelIDs {
+	for _, propagationChannelID := range config.Schemes[scheme].PropagationChannelIDs {
 
 		paveServerEntries := make([]map[time.Time]string, len(config.Schemes))
 		paveServerEntries[0] = make(map[time.Time]string)
 
-		epoch, _ := time.Parse(time.RFC3339, config.Schemes[0].Epoch)
+		epoch, _ := time.Parse(time.RFC3339, config.Schemes[scheme].Epoch)
 		for i := oslOffset; i < oslOffset+oslCount; i++ {
 			paveServerEntries[0][epoch.Add(time.Duration(i)*oslTimePeriod)] = ""
 		}

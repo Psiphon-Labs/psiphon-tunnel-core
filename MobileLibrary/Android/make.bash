@@ -16,11 +16,6 @@ BUILD_TAGS="OPENSSL ${PRIVATE_PLUGINS_TAG}"
 # the latest versions. Outside of Docker, be aware that these dependencies
 # will not be overridden w/ new versions if they already exist in $GOPATH
 
-GOOS=arm go get -d -v -tags "${BUILD_TAGS}" github.com/Psiphon-Inc/openssl
-if [ $? != 0 ]; then
-  echo "..'go get -d -v github.com/psiphon-inc/openssl' failed, exiting"
-  exit $?
-fi
 GOOS=arm go get -d -v -tags "${BUILD_TAGS}" github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon
 if [ $? != 0 ]; then
   echo "..'go get -d -v github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon' failed, exiting"
