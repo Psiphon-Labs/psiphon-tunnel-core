@@ -6,7 +6,7 @@ set -x -u -e
 
 # Reset the PATH to macOS default. This is mainly so we don't execute the wrong
 # gomobile executable.
-PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/go/bin
 
 BASE_DIR=$(cd "$(dirname "$0")" ; pwd -P)
 cd ${BASE_DIR}
@@ -162,6 +162,10 @@ if [[ $rc != 0 ]]; then
     cd ${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
     git checkout master
     git checkout -b pinned ${GOMOBILE_PINNED_REV}
+    mv ./build.go ./build.go.orig
+    sed -e 's/"-tags="+strconv.Quote(strings.Join(ctx.BuildTags, ",")),/"-tags",strings.Join(ctx.BuildTags, " "),/g' ./build.go.orig > ./build.go
+    mv ./build.go ./build.go.orig
+    sed -e 's/"strconv"//g' ./build.go.orig > ./build.go
     go install
     ${GOPATH}/bin/gomobile init -v
     if [[ $? != 0 ]]; then
