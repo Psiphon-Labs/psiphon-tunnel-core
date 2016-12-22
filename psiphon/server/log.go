@@ -28,6 +28,7 @@ import (
 	"os"
 
 	"github.com/Psiphon-Inc/logrus"
+	"github.com/Psiphon-Inc/rotate-safe-writer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
@@ -150,14 +151,15 @@ func InitLogging(config *Config) error {
 		return common.ContextError(err)
 	}
 
-	logWriter := os.Stderr
+	var logWriter io.Writer
 
 	if config.LogFilename != "" {
-		logWriter, err = os.OpenFile(
-			config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+		logWriter, err = rotate.NewRotatableFileWriter(config.LogFilename, 0666)
 		if err != nil {
 			return common.ContextError(err)
 		}
+	} else {
+		logWriter = os.Stderr
 	}
 
 	log = &ContextLogger{
