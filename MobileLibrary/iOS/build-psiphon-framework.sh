@@ -162,10 +162,30 @@ if [[ $rc != 0 ]]; then
     cd ${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
     git checkout master
     git checkout -b pinned ${GOMOBILE_PINNED_REV}
-    mv ./build.go ./build.go.orig
-    sed -e 's/"-tags="+strconv.Quote(strings.Join(ctx.BuildTags, ",")),/"-tags",strings.Join(ctx.BuildTags, " "),/g' ./build.go.orig > ./build.go
-    mv ./build.go ./build.go.orig
-    sed -e 's/"strconv"//g' ./build.go.orig > ./build.go
+
+    # Gomobile messes up the build tags by quoting them incorrectly. We'll hack a fix for it.
+    # First do a grep to see if this code is still there (or has been fixed upstream).
+    grep -q 'strconv.Quote' ./build.go 
+    if [[ $? != 0 ]]; then
+      echo "Upstream gomobile code has changed, breaking hacks."
+      exit 1
+    fi
+    # Then do the hack-fix-replacement.
+    perl -i -pe 's/"-tags="\+strconv\.Quote\(strings.Join\(ctx\.BuildTags, ","\)\),/"-tags",strings.Join(ctx.BuildTags, " "),/g' ./build.go
+    # We also need to remove the now-unused strconv import.
+    perl -i -pe 's/"strconv"//g' ./build.go
+    
+    # Gomobile's iOS code puts an *additional* build tags flag at the end of the command line. This
+    # overrides any existing build tags and messes up our builds. So we'll hack a fix for that, too.
+    # First do a grep to see if this code is still there (or has been fixed upstream).
+    grep -q '"-tags=ios",' ./bind_iosapp.go 
+    if [[ $? != 0 ]]; then
+      echo "Upstream gomobile code has changed, breaking hacks."
+      exit 1
+    fi
+    # Then do the hack-fix-replacement.
+    perl -i -pe 's/(.+)"-tags=ios",(.+)/\tctx.BuildTags = append(ctx.BuildTags, "ios")\n\1\2/g' ./bind_iosapp.go
+    
     go install
     ${GOPATH}/bin/gomobile init -v
     if [[ $? != 0 ]]; then
