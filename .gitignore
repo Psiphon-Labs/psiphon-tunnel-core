@@ -4,6 +4,7 @@ psiphon.config
 controller_test.config
 psiphon.db*
 psiphon.boltdb
+remote_server_list
 
 # Exclude compiled tunnel core binaries
 ConsoleClient/ConsoleClient
@@ -49,3 +50,6 @@ Thumbs.db
 # Ignore gradle files
 .gradle/
 build/
+
+# Visual Studio Code
+.vscode/
