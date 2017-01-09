@@ -9,11 +9,13 @@ import (
 	"crypto/cipher"
 	"crypto/des"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/rc4"
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/x509"
 	"hash"
+	"math/big"
 
 	"github.com/Psiphon-Inc/crypto/chacha20poly1305"
 )
@@ -102,6 +104,70 @@ var cipherSuites = []*cipherSuite{
 	{TLS_RSA_WITH_RC4_128_SHA, 16, 20, 0, rsaKA, suiteDefaultOff, cipherRC4, macSHA1, nil},
 	{TLS_ECDHE_RSA_WITH_RC4_128_SHA, 16, 20, 0, ecdheRSAKA, suiteECDHE | suiteDefaultOff, cipherRC4, macSHA1, nil},
 	{TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, 16, 20, 0, ecdheECDSAKA, suiteECDHE | suiteECDSA | suiteDefaultOff, cipherRC4, macSHA1, nil},
+
+	{TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_OLD, 32, 0, 12, ecdheRSAKA, suiteDefaultOff | suiteECDHE | suiteTLS12, nil, nil, aeadChaCha20Poly1305},
+	{TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_OLD, 32, 0, 12, ecdheECDSAKA, suiteDefaultOff | suiteECDHE | suiteECDSA | suiteTLS12, nil, nil, aeadChaCha20Poly1305},
+	{TLS_GREASE_0A0A, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_1A1A, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_2A2A, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_3A3A, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_4A4A, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_5A5A, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_6A6A, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_7A7A, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_8A8A, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_9A9A, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_AAAA, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_BABA, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_CACA, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_DADA, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_EAEA, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+	{TLS_GREASE_FAFA, 0, 0, 0, nil, suiteDefaultOff, nil, nil, nil},
+}
+
+var ignoreCipherSuites = []uint16{
+	TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_OLD,
+	TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_OLD,
+	TLS_GREASE_0A0A,
+	TLS_GREASE_1A1A,
+	TLS_GREASE_2A2A,
+	TLS_GREASE_3A3A,
+	TLS_GREASE_4A4A,
+	TLS_GREASE_5A5A,
+	TLS_GREASE_6A6A,
+	TLS_GREASE_7A7A,
+	TLS_GREASE_8A8A,
+	TLS_GREASE_9A9A,
+	TLS_GREASE_AAAA,
+	TLS_GREASE_BABA,
+	TLS_GREASE_CACA,
+	TLS_GREASE_DADA,
+	TLS_GREASE_EAEA,
+	TLS_GREASE_FAFA,
+}
+
+func RandomGREASESuite() uint16 {
+	suites := []uint16{
+		TLS_GREASE_0A0A,
+		TLS_GREASE_1A1A,
+		TLS_GREASE_2A2A,
+		TLS_GREASE_3A3A,
+		TLS_GREASE_4A4A,
+		TLS_GREASE_5A5A,
+		TLS_GREASE_6A6A,
+		TLS_GREASE_7A7A,
+		TLS_GREASE_8A8A,
+		TLS_GREASE_9A9A,
+		TLS_GREASE_AAAA,
+		TLS_GREASE_BABA,
+		TLS_GREASE_CACA,
+		TLS_GREASE_DADA,
+		TLS_GREASE_EAEA,
+		TLS_GREASE_FAFA,
+	}
+
+	i, _ := rand.Int(rand.Reader, big.NewInt(int64(len(suites))))
+	return suites[int(i.Int64())]
 }
 
 func cipherRC4(key, iv []byte, isRead bool) interface{} {
@@ -393,4 +459,24 @@ const (
 	// that the client is doing version fallback. See
 	// https://tools.ietf.org/html/rfc7507.
 	TLS_FALLBACK_SCSV uint16 = 0x5600
+
+	// Psiphon suites for indistinguishable TLS.
+	TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_OLD   uint16 = 0xcc13
+	TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_OLD uint16 = 0xcc14
+	TLS_GREASE_0A0A                            uint16 = 0x1A1A
+	TLS_GREASE_1A1A                            uint16 = 0x2A2A
+	TLS_GREASE_2A2A                            uint16 = 0x3A3A
+	TLS_GREASE_3A3A                            uint16 = 0x4A4A
+	TLS_GREASE_4A4A                            uint16 = 0x5A5A
+	TLS_GREASE_5A5A                            uint16 = 0x6A6A
+	TLS_GREASE_6A6A                            uint16 = 0x7A7A
+	TLS_GREASE_7A7A                            uint16 = 0x8A8A
+	TLS_GREASE_8A8A                            uint16 = 0x9A9A
+	TLS_GREASE_9A9A                            uint16 = 0xAAAA
+	TLS_GREASE_AAAA                            uint16 = 0xBABA
+	TLS_GREASE_BABA                            uint16 = 0xCACA
+	TLS_GREASE_CACA                            uint16 = 0xDADA
+	TLS_GREASE_DADA                            uint16 = 0xEAEA
+	TLS_GREASE_EAEA                            uint16 = 0xFAFA
+	TLS_GREASE_FAFA                            uint16 = 0x0A0A
 )
