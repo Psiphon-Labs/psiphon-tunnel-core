@@ -252,4 +252,10 @@ fi
 # Delete the temporary simulator build files.
 rm -rf "${BUILD_DIR}-SIMULATOR"
 
+# Jenkins loses symlinks from the framework directory, which results in a build
+# artifact that is invalid to use in an App Store app. Instead, we will zip the
+# resulting build and use that as the artifact.
+cd "${BUILD_DIR}"
+zip --recurse-paths --symlinks build.zip * --exclude "*.DS_Store"
+
 echo "BUILD DONE"
