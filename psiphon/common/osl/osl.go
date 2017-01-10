@@ -705,7 +705,8 @@ func (config *Config) Pave(
 	propagationChannelID string,
 	signingPublicKey string,
 	signingPrivateKey string,
-	paveServerEntries []map[time.Time]string) ([]*PaveFile, error) {
+	paveServerEntries []map[time.Time]string,
+	logCallback func(int, time.Time, string)) ([]*PaveFile, error) {
 
 	config.ReloadableFile.RLock()
 	defer config.ReloadableFile.RUnlock()
@@ -764,6 +765,10 @@ func (config *Config) Pave(
 						Name:     fileName,
 						Contents: boxedServerEntries,
 					})
+
+					if logCallback != nil {
+						logCallback(schemeIndex, oslTime, fileName)
+					}
 				}
 
 				oslTime = oslTime.Add(
