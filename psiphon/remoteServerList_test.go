@@ -146,7 +146,8 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 			map[time.Time]string{
 				epoch: string(encodedServerEntry),
 			},
-		})
+		},
+		nil)
 	if err != nil {
 		t.Fatalf("error paving OSL files: %s", err)
 	}
