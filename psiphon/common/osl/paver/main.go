@@ -38,14 +38,11 @@ func main() {
 	var configFilename string
 	flag.StringVar(&configFilename, "config", "", "OSL configuration file")
 
-	var scheme int
-	flag.IntVar(&scheme, "scheme", 0, "scheme to pave")
+	var offset time.Duration
+	flag.DurationVar(&offset, "offset", 0, "pave OSL start time (offset from now)")
 
-	var oslOffset int
-	flag.IntVar(&oslOffset, "offset", 0, "OSL offset")
-
-	var oslCount int
-	flag.IntVar(&oslCount, "count", 1, "OSL count")
+	var period time.Duration
+	flag.DurationVar(&period, "period", 0, "pave OSL total period (starting from offset)")
 
 	var signingKeyPairFilename string
 	flag.StringVar(&signingKeyPairFilename, "key", "", "signing public key pair")
@@ -64,11 +61,6 @@ func main() {
 	config, err := osl.LoadConfig(configJSON)
 	if err != nil {
 		fmt.Printf("failed processing configuration file: %s\n", err)
-		os.Exit(1)
-	}
-
-	if scheme < 0 || scheme >= len(config.Schemes) {
-		fmt.Printf("failed: invalid scheme\n")
 		os.Exit(1)
 	}
 
@@ -105,28 +97,57 @@ func main() {
 	signingPublicKey := base64.StdEncoding.EncodeToString(publicKeyBytes)
 	signingPrivateKey := base64.StdEncoding.EncodeToString(privateKeyBytes)
 
-	slokTimePeriodsPerOSL := 1
-	for _, keySplit := range config.Schemes[scheme].SeedPeriodKeySplits {
-		slokTimePeriodsPerOSL *= keySplit.Total
-	}
-	oslTimePeriod := time.Duration(config.Schemes[scheme].SeedPeriodNanoseconds * int64(slokTimePeriodsPerOSL))
+	paveTime := time.Now().UTC()
+	startTime := paveTime.Add(offset)
+	endTime := startTime.Add(period)
 
-	for _, propagationChannelID := range config.Schemes[scheme].PropagationChannelIDs {
+	schemeOSLTimePeriods := make(map[int]time.Duration)
+	for index, scheme := range config.Schemes {
+		slokTimePeriodsPerOSL := 1
+		for _, keySplit := range scheme.SeedPeriodKeySplits {
+			slokTimePeriodsPerOSL *= keySplit.Total
+		}
+		schemeOSLTimePeriods[index] =
+			time.Duration(scheme.SeedPeriodNanoseconds * int64(slokTimePeriodsPerOSL))
+	}
+
+	allPropagationChannelIDs := make(map[string][]int)
+	for index, scheme := range config.Schemes {
+		for _, propagationChannelID := range scheme.PropagationChannelIDs {
+			allPropagationChannelIDs[propagationChannelID] =
+				append(allPropagationChannelIDs[propagationChannelID], index)
+		}
+	}
+
+	for propagationChannelID, schemeIndexes := range allPropagationChannelIDs {
 
 		paveServerEntries := make([]map[time.Time]string, len(config.Schemes))
-		paveServerEntries[0] = make(map[time.Time]string)
 
-		epoch, _ := time.Parse(time.RFC3339, config.Schemes[scheme].Epoch)
-		for i := oslOffset; i < oslOffset+oslCount; i++ {
-			paveServerEntries[0][epoch.Add(time.Duration(i)*oslTimePeriod)] = ""
+		for _, index := range schemeIndexes {
+
+			paveServerEntries[index] = make(map[time.Time]string)
+
+			oslTime, _ := time.Parse(time.RFC3339, config.Schemes[index].Epoch)
+			for !oslTime.After(endTime) {
+				if !oslTime.Before(startTime) {
+					paveServerEntries[index][oslTime] = ""
+				}
+				oslTime = oslTime.Add(schemeOSLTimePeriods[index])
+			}
+
+			fmt.Printf("Paving propagation channel %s, scheme #%d, [%s - %s], %s\n",
+				propagationChannelID, index, startTime, endTime, schemeOSLTimePeriods[index])
 		}
 
 		paveFiles, err := config.Pave(
-			epoch.Add(time.Duration(oslOffset+oslCount)*oslTimePeriod),
+			endTime,
 			propagationChannelID,
 			signingPublicKey,
 			signingPrivateKey,
-			paveServerEntries)
+			paveServerEntries,
+			func(schemeIndex int, oslTime time.Time, fileName string) {
+				fmt.Printf("\tPaved scheme %d %s: %s\n", schemeIndex, oslTime, fileName)
+			})
 		if err != nil {
 			fmt.Printf("failed paving: %s\n", err)
 			os.Exit(1)
