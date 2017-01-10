@@ -205,11 +205,15 @@
         [self logMessage:[NSString stringWithFormat: @"DataStoreDirectory overridden from '%@' to '%@'", [defaultDataStoreDirectoryURL path], config[@"DataStoreDirectory"]]];
     }
     
-    // See previous comment.
     NSString *defaultRemoteServerListFilename = [[libraryURL URLByAppendingPathComponent:@"remote_server_list" isDirectory:NO] path];
-    
     if (defaultRemoteServerListFilename == nil) {
         [self logMessage:@"Unable to create defaultRemoteServerListFilename"];
+        return nil;
+    }
+    
+    NSString *defaultOSLDirectory = [[libraryURL URLByAppendingPathComponent:@"osl" isDirectory:YES] path];
+    if (defaultOSLDirectory == nil) {
+        [self logMessage:@"Unable to create defaultOSLDirectory"];
         return nil;
     }
     
@@ -225,6 +229,18 @@
     if (config[@"RemoteServerListUrl"] == nil ||
         config[@"RemoteServerListSignaturePublicKey"] == nil) {
         [self logMessage:@"Remote server list functionality will be disabled"];
+    }
+    
+    if (config[@"ObfuscatedServerListDownloadDirectory"] == nil) {
+        config[@"ObfuscatedServerListDownloadDirectory"] = defaultOSLDirectory;
+    }
+    else {
+        [self logMessage:[NSString stringWithFormat: @"ObfuscatedServerListDownloadDirectory overridden from '%@' to '%@'", defaultOSLDirectory, config[@"ObfuscatedServerListDownloadDirectory"]]];
+    }
+    
+    // If ObfuscatedServerListRootURL is absent, we'll leave it out, but log the absence.
+    if (config[@"ObfuscatedServerListRootURL"] == nil) {
+        [self logMessage:@"Obfuscated server list functionality will be disabled"];
     }
 
     // Other optional fields not being altered. If not set, their defaults will be used:
