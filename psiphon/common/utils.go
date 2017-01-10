@@ -20,11 +20,14 @@
 package common
 
 import (
+	"bytes"
+	"compress/zlib"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math/big"
 	"runtime"
 	"strings"
@@ -175,4 +178,27 @@ func ContextError(err error) error {
 	}
 	pc, _, line, _ := runtime.Caller(1)
 	return fmt.Errorf("%s#%d: %s", getFunctionName(pc), line, err)
+}
+
+// Compress returns zlib compressed data
+func Compress(data []byte) []byte {
+	var compressedData bytes.Buffer
+	writer := zlib.NewWriter(&compressedData)
+	writer.Write(data)
+	writer.Close()
+	return compressedData.Bytes()
+}
+
+// Decompress returns zlib decompressed data
+func Decompress(data []byte) ([]byte, error) {
+	reader, err := zlib.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	uncompressedData, err := ioutil.ReadAll(reader)
+	reader.Close()
+	if err != nil {
+		return nil, ContextError(err)
+	}
+	return uncompressedData, nil
 }
