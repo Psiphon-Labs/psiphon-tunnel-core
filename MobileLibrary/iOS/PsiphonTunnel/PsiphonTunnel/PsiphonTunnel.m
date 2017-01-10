@@ -183,6 +183,10 @@
         return nil;
     }
     
+    //
+    // DataStoreDirectory
+    //
+    
     // Some clients will have a data directory that they'd prefer the Psiphon
     // library use, but if not we'll default to the user Library directory.
     NSURL *defaultDataStoreDirectoryURL = [libraryURL URLByAppendingPathComponent:@"datastore" isDirectory:YES];
@@ -205,15 +209,13 @@
         [self logMessage:[NSString stringWithFormat: @"DataStoreDirectory overridden from '%@' to '%@'", [defaultDataStoreDirectoryURL path], config[@"DataStoreDirectory"]]];
     }
     
+    //
+    // Remote Server List
+    //
+    
     NSString *defaultRemoteServerListFilename = [[libraryURL URLByAppendingPathComponent:@"remote_server_list" isDirectory:NO] path];
     if (defaultRemoteServerListFilename == nil) {
         [self logMessage:@"Unable to create defaultRemoteServerListFilename"];
-        return nil;
-    }
-    
-    NSString *defaultOSLDirectory = [[libraryURL URLByAppendingPathComponent:@"osl" isDirectory:YES] path];
-    if (defaultOSLDirectory == nil) {
-        [self logMessage:@"Unable to create defaultOSLDirectory"];
         return nil;
     }
     
@@ -231,11 +233,27 @@
         [self logMessage:@"Remote server list functionality will be disabled"];
     }
     
+    //
+    // Obfuscated Server List
+    //
+    
+    NSURL *defaultOSLDirectoryURL = [libraryURL URLByAppendingPathComponent:@"osl" isDirectory:YES];
+    if (defaultOSLDirectoryURL == nil) {
+        [self logMessage:@"Unable to create defaultOSLDirectory"];
+        return nil;
+    }
+    
     if (config[@"ObfuscatedServerListDownloadDirectory"] == nil) {
-        config[@"ObfuscatedServerListDownloadDirectory"] = defaultOSLDirectory;
+        [fileManager createDirectoryAtURL:defaultOSLDirectoryURL withIntermediateDirectories:YES attributes:nil error:&err];
+        if (err != nil) {
+            [self logMessage:[NSString stringWithFormat: @"Unable to create defaultOSLDirectoryURL: %@", err.localizedDescription]];
+            return nil;
+        }
+        
+        config[@"ObfuscatedServerListDownloadDirectory"] = [defaultOSLDirectoryURL path];
     }
     else {
-        [self logMessage:[NSString stringWithFormat: @"ObfuscatedServerListDownloadDirectory overridden from '%@' to '%@'", defaultOSLDirectory, config[@"ObfuscatedServerListDownloadDirectory"]]];
+        [self logMessage:[NSString stringWithFormat: @"ObfuscatedServerListDownloadDirectory overridden from '%@' to '%@'", [defaultOSLDirectoryURL path], config[@"ObfuscatedServerListDownloadDirectory"]]];
     }
     
     // If ObfuscatedServerListRootURL is absent, we'll leave it out, but log the absence.

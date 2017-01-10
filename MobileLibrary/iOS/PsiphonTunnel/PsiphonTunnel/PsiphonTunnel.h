@@ -56,8 +56,9 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
    - `ObfuscatedServerListRootURL`
 
  Optional fields (if you don't need them, don't set them):
- - `DataStoreDirectory`: If not set, the library will use a sane location. Override if the client wants to restrict where operational data is kept.
- - `RemoteServerListDownloadFilename`: See comment for `DataStoreDirectory`.
+ - `DataStoreDirectory`: If not set, the library will use a sane location. Override if the client wants to restrict where operational data is kept. If overridden, the directory must already exist and be writable.
+ - `RemoteServerListDownloadFilename`: If not set, the library will use a sane location. Override if the client wants to restrict where operational data is kept.
+ - `ObfuscatedServerListDownloadDirectory`: If not set, the library will use a sane location. Override if the client wants to restrict where operational data is kept. If overridden, the directory must already exist and be writable.
  - `ClientPlatform`: Should not be set by most library consumers.
  - `UpstreamProxyUrl`
  - `EmitDiagnosticNotices`
