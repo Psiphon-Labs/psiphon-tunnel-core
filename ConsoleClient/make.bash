@@ -12,7 +12,7 @@ EXE_BASENAME="psiphon-tunnel-core"
 # The "OPENSSL" tag enables support of OpenSSL for use by IndistinguishableTLS.
 # This needs to be outside of prepare_build because it's used by go-get.
 
-PRIVATE_PLUGINS_TAG=""
+PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"
 BUILD_TAGS="${PRIVATE_PLUGINS_TAG}"
 WINDOWS_BUILD_TAGS="OPENSSL ${BUILD_TAGS}"
 LINUX_BUILD_TAGS="${BUILD_TAGS}"
