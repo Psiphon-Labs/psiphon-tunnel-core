@@ -58,7 +58,6 @@ rm -rf ${GOPATH}
 GOMOBILE_PINNED_REV=72eef9d09307f0b437153fd152229f56edc0ab20
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
-IOS_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-ios
 TUNNEL_CORE_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core
 OPENSSL_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Inc/openssl
 
@@ -87,16 +86,6 @@ mkdir -p ${INTERMEDIATE_OUPUT_DIR}
 if [[ $? != 0 ]]; then
   echo "FAILURE: mkdir -p ${INTERMEDIATE_OUPUT_DIR}"
   exit 1
-fi
-
-if [ ! -e ${IOS_SRC_DIR} ]; then
-  echo "iOS source directory (${IOS_SRC_DIR}) not found, creating link"
-  mkdir -p $(dirname ${IOS_SRC_DIR})
-  ln -s $(pwd -P) $IOS_SRC_DIR
-  if [[ $? != 0 ]]; then
-    echo "..Could not create symlink, aborting"
-    exit 1
-  fi
 fi
 
 # arg: binary_path
@@ -229,14 +218,14 @@ rm -rf "${BUILD_DIR}"
 rm -rf "${BUILD_DIR}-SIMULATOR"
 
 # Build the outer framework for phones...
-xcodebuild clean build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -configuration Release -sdk iphoneos ONLY_ACTIVE_ARCH=NO -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT} CONFIGURATION_BUILD_DIR="${BUILD_DIR}"
+xcodebuild clean build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" CODE_SIGNING_ALLOWED="NO" -configuration Release -sdk iphoneos ONLY_ACTIVE_ARCH=NO -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT} CONFIGURATION_BUILD_DIR="${BUILD_DIR}"
 rc=$?; if [[ $rc != 0 ]]; then
   echo "FAILURE: xcodebuild iphoneos"
   exit $rc
 fi
 
 # ...and for the simulator.
-xcodebuild clean build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -configuration Release -sdk iphonesimulator ARCHS=x86_64 VALID_ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT} CONFIGURATION_BUILD_DIR="${BUILD_DIR}-SIMULATOR"
+xcodebuild clean build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" CODE_SIGNING_ALLOWED="NO" -configuration Release -sdk iphonesimulator ARCHS=x86_64 VALID_ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT} CONFIGURATION_BUILD_DIR="${BUILD_DIR}-SIMULATOR"
 rc=$?; if [[ $rc != 0 ]]; then
   echo "FAILURE: xcodebuild iphonesimulator"
   exit $rc
