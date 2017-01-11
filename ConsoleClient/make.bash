@@ -75,7 +75,7 @@ build_for_windows () {
     CGO_CFLAGS="-I $PKG_CONFIG_PATH/include/" \
     CGO_LDFLAGS="-L $PKG_CONFIG_PATH -L /usr/i686-w64-mingw32/lib/ -lssl -lcrypto -lwsock32 -lcrypt32 -lgdi32" \
     CC=/usr/bin/i686-w64-mingw32-gcc \
-    GOOS=windows GOARCH=386 go build -v -x -ldflags "$LDFLAGS" -tags "$WINDOWS_BUILD_TAGS" -o bin/windows/${EXE_BASENAME}-i686
+    GOOS=windows GOARCH=386 go build -v -x -ldflags "$LDFLAGS" -tags "$WINDOWS_BUILD_TAGS" -o bin/windows/${EXE_BASENAME}-i686.exe
     RETVAL=$?
     echo ".....gox completed, exit code: $?"
     if [ $RETVAL != 0 ]; then
@@ -98,7 +98,7 @@ build_for_windows () {
     CGO_CFLAGS="-I $PKG_CONFIG_PATH/include/" \
     CGO_LDFLAGS="-L $PKG_CONFIG_PATH -L /usr/x86_64-w64-mingw32/lib/ -lssl -lcrypto -lwsock32 -lcrypt32 -lgdi32" \
     CC=/usr/bin/x86_64-w64-mingw32-gcc \
-    GOOS=windows GOARCH=amd64 go build -v -x -ldflags "$LDFLAGS" -tags "$WINDOWS_BUILD_TAGS" -o bin/windows/${EXE_BASENAME}-x86_64
+    GOOS=windows GOARCH=amd64 go build -v -x -ldflags "$LDFLAGS" -tags "$WINDOWS_BUILD_TAGS" -o bin/windows/${EXE_BASENAME}-x86_64.exe
     RETVAL=$?
     if [ $RETVAL != 0 ]; then
       echo ".....gox failed, exiting"
