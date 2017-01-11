@@ -30,8 +30,7 @@ RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz 
    && echo $GOVERSION > $GOROOT/VERSION
 
 # Get external Go dependencies.
-RUN go get github.com/mitchellh/gox \
-    && go get github.com/pwaller/goupx
+RUN go get github.com/pwaller/goupx
 
 # Setup OpenSSL libray.
 ENV OPENSSL_VERSION=1.0.2h
