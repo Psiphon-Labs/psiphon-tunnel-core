@@ -32,7 +32,7 @@ prepare_build () {
   # - pipes to `xargs` again, specifiying `pkg` as the placeholder name for each item being operated on (which is the list of non standard library import paths from the previous step)
   #  - `xargs` runs a bash script (via `-c`) which changes to each import path in sequence, then echoes out `"<import path>":"<subshell output of getting the short git revision>",`
   # - this leaves a trailing `,` at the end, and no close to the JSON object, so simply `sed` replace the comma before the end of the line with `}` and you now have valid JSON
-  DEPENDENCIES=$(echo -n "{" && go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
+  DEPENDENCIES=$(echo -n "{" && go list -tags "$1" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
 
   LDFLAGS="\
   -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildDate=$BUILDDATE \
@@ -59,7 +59,7 @@ fi
 build_for_windows () {
   echo "...Getting project dependencies (via go get) for Windows. Parameter is: '$1'"
   GOOS=windows go get -d -v -tags "$WINDOWS_BUILD_TAGS" ./...
-  prepare_build
+  prepare_build $WINDOWS_BUILD_TAGS
   if [ $? != 0 ]; then
     echo "....'go get' failed, exiting"
     exit $?
@@ -75,7 +75,7 @@ build_for_windows () {
     CGO_CFLAGS="-I $PKG_CONFIG_PATH/include/" \
     CGO_LDFLAGS="-L $PKG_CONFIG_PATH -L /usr/i686-w64-mingw32/lib/ -lssl -lcrypto -lwsock32 -lcrypt32 -lgdi32" \
     CC=/usr/bin/i686-w64-mingw32-gcc \
-    gox -verbose -ldflags "$LDFLAGS" -osarch windows/386 -tags "$WINDOWS_BUILD_TAGS" -output bin/windows/${EXE_BASENAME}-i686
+    GOOS=windows GOARCH=386 go build -v -x -ldflags "$LDFLAGS" -tags "$WINDOWS_BUILD_TAGS" -o bin/windows/${EXE_BASENAME}-i686
     RETVAL=$?
     echo ".....gox completed, exit code: $?"
     if [ $RETVAL != 0 ]; then
@@ -98,7 +98,7 @@ build_for_windows () {
     CGO_CFLAGS="-I $PKG_CONFIG_PATH/include/" \
     CGO_LDFLAGS="-L $PKG_CONFIG_PATH -L /usr/x86_64-w64-mingw32/lib/ -lssl -lcrypto -lwsock32 -lcrypt32 -lgdi32" \
     CC=/usr/bin/x86_64-w64-mingw32-gcc \
-    gox -verbose -ldflags "$LDFLAGS" -osarch windows/amd64 -tags "$WINDOWS_BUILD_TAGS" -output bin/windows/${EXE_BASENAME}-x86_64
+    GOOS=windows GOARCH=amd64 go build -v -x -ldflags "$LDFLAGS" -tags "$WINDOWS_BUILD_TAGS" -o bin/windows/${EXE_BASENAME}-x86_64
     RETVAL=$?
     if [ $RETVAL != 0 ]; then
       echo ".....gox failed, exiting"
@@ -114,7 +114,7 @@ build_for_windows () {
 build_for_linux () {
   echo "Getting project dependencies (via go get) for Linux. Parameter is: '$1'"
   GOOS=linux go get -d -v -tags "$LINUX_BUILD_TAGS" ./...
-  prepare_build
+  prepare_build $LINUX_BUILD_TAGS
   if [ $? != 0 ]; then
     echo "...'go get' failed, exiting"
     exit $?
@@ -122,7 +122,8 @@ build_for_linux () {
 
   if [ -z $1 ] || [ "$1" == "32" ]; then
     echo "...Building linux-i686"
-    CFLAGS=-m32 gox -verbose -ldflags "$LDFLAGS" -osarch linux/386 -tags "$LINUX_BUILD_TAGS" -output bin/linux/${EXE_BASENAME}-i686
+    # TODO: is "CFLAGS=-m32" required?
+    CFLAGS=-m32 GOOS=linux GOARCH=386 go build -v -x -ldflags "$LDFLAGS" -tags "$LINUX_BUILD_TAGS" -o bin/linux/${EXE_BASENAME}-i686
     RETVAL=$?
     if [ $RETVAL != 0 ]; then
       echo ".....gox failed, exiting"
@@ -142,7 +143,7 @@ build_for_linux () {
 
   if [ -z $1 ] || [ "$1" == "64" ]; then
     echo "...Building linux-x86_64"
-    gox -verbose -ldflags "$LDFLAGS" -osarch linux/amd64 -tags "$LINUX_BUILD_TAGS" -output bin/linux/${EXE_BASENAME}-x86_64
+    GOOS=linux GOARCH=amd64 go build -v -x -ldflags "$LDFLAGS" -tags "$LINUX_BUILD_TAGS" -o bin/linux/${EXE_BASENAME}-x86_64
     RETVAL=$?
     if [ $RETVAL != 0 ]; then
       echo "....gox failed, exiting"
@@ -164,7 +165,7 @@ build_for_linux () {
 build_for_osx () {
   echo "Getting project dependencies (via go get) for OSX"
   GOOS=darwin go get -d -v -tags "$OSX_BUILD_TAGS" ./...
-  prepare_build
+  prepare_build $OSX_BUILD_TAGS
   if [ $? != 0 ]; then
     echo "..'go get' failed, exiting"
     exit $?
@@ -172,7 +173,8 @@ build_for_osx () {
 
   echo "Building darwin-x86_64..."
   echo "..Disabling CGO for this build"
-  CGO_ENABLED=0 gox -verbose -ldflags "$LDFLAGS" -osarch darwin/amd64 -tags "$OSX_BUILD_TAGS" -output bin/darwin/${EXE_BASENAME}-x86_64
+  # TODO: is "CGO_ENABLED=0" required?
+  CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -v -x -ldflags "$LDFLAGS" -tags "$OSX_BUILD_TAGS" -o bin/darwin/${EXE_BASENAME}-x86_64
   # Darwin binaries don't seem to be UPXable when built this way
   echo "..No UPX for this build"
 }

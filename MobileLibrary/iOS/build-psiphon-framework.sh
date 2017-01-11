@@ -134,50 +134,48 @@ if [[ $? != 0 ]]; then
   exit 1
 fi
 
-function check_pinned_version() {
-  echo "Checking for gomobile revision: '${GOMOBILE_PINNED_REV}'"
-  if [ -e ${GOMOBILE_PATH} ]; then
-    echo "..Gomobile path found"
-    cd ${GOMOBILE_PATH}
-    CURRENT_REVISION=$(git rev-parse HEAD)
-    if [ ${CURRENT_REVISION} != ${GOMOBILE_PINNED_REV} ]; then
-      echo "..Current revision '${CURRENT_REVISION}' does not match"
-      return 1
-    else
-      echo "..Current revision matches"
-      return 0
-    fi
-  else
-    echo "Could not find GOMOBILE_PATH (${GOMOBILE_PATH})"
-    return 1
-  fi
-}
+#
+# Get and install gomobile, using our pinned revision
+#
 
-set +e
-check_pinned_version
-rc=$?
-set -e
-if [[ $rc != 0 ]]; then
-    go get -u golang.org/x/mobile/cmd/gomobile
-    cd ${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
-    git checkout master
-    git checkout -b pinned ${GOMOBILE_PINNED_REV}
-    mv ./build.go ./build.go.orig
-    sed -e 's/"-tags="+strconv.Quote(strings.Join(ctx.BuildTags, ",")),/"-tags",strings.Join(ctx.BuildTags, " "),/g' ./build.go.orig > ./build.go
-    mv ./build.go ./build.go.orig
-    sed -e 's/"strconv"//g' ./build.go.orig > ./build.go
-    go install
-    ${GOPATH}/bin/gomobile init -v
-    if [[ $? != 0 ]]; then
-      echo "FAILURE: ${GOPATH}/bin/gomobile init -v"
-      exit 1
-    fi
-    check_pinned_version
-    if [[ $? != 0 ]]; then
-      echo "gomobile not found, aborting"
-      exit 1
-    fi
+go get -u golang.org/x/mobile/cmd/gomobile
+cd ${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
+git checkout master
+git checkout -b pinned ${GOMOBILE_PINNED_REV}
+
+# Gomobile messes up the build tags by quoting them incorrectly. We'll hack a fix for it.
+# First do a grep to see if this code is still there (or has been fixed upstream).
+grep -q 'strconv.Quote' ./build.go 
+if [[ $? != 0 ]]; then
+  echo "Upstream gomobile code has changed, breaking hacks."
+  exit 1
 fi
+# Then do the hack-fix-replacement.
+perl -i -pe 's/"-tags="\+strconv\.Quote\(strings.Join\(ctx\.BuildTags, ","\)\),/"-tags",strings.Join(ctx.BuildTags, " "),/g' ./build.go
+# We also need to remove the now-unused strconv import.
+perl -i -pe 's/"strconv"//g' ./build.go
+
+# Gomobile's iOS code puts an *additional* build tags flag at the end of the command line. This
+# overrides any existing build tags and messes up our builds. So we'll hack a fix for that, too.
+# First do a grep to see if this code is still there (or has been fixed upstream).
+grep -q '"-tags=ios",' ./bind_iosapp.go 
+if [[ $? != 0 ]]; then
+  echo "Upstream gomobile code has changed, breaking hacks."
+  exit 1
+fi
+# Then do the hack-fix-replacement.
+perl -i -pe 's/(.+)"-tags=ios",(.+)/\tctx.BuildTags = append(ctx.BuildTags, "ios")\n\1\2/g' ./bind_iosapp.go
+
+go install
+${GOPATH}/bin/gomobile init -v
+if [[ $? != 0 ]]; then
+  echo "FAILURE: ${GOPATH}/bin/gomobile init -v"
+  exit 1
+fi
+
+#
+# gomobile bind
+#
 
 BUILDDATE=$(date +%Y-%m-%dT%H:%M:%S%z)
 BUILDREPO=$(git config --get remote.origin.url)
@@ -253,5 +251,11 @@ fi
 
 # Delete the temporary simulator build files.
 rm -rf "${BUILD_DIR}-SIMULATOR"
+
+# Jenkins loses symlinks from the framework directory, which results in a build
+# artifact that is invalid to use in an App Store app. Instead, we will zip the
+# resulting build and use that as the artifact.
+cd "${BUILD_DIR}"
+zip --recurse-paths --symlinks build.zip * --exclude "*.DS_Store"
 
 echo "BUILD DONE"

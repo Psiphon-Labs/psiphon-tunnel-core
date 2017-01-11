@@ -580,12 +580,26 @@ func makeTunneledWebRequest(t *testing.T, localHTTPProxyPort int) error {
 
 func makeTunneledNTPRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAddress string) error {
 
-	testHostname := "pool.ntp.org"
 	timeout := 20 * time.Second
+	var err error
+
+	for _, testHostname := range []string{"time.google.com", "time.nist.gov", "pool.ntp.org"} {
+		err = makeTunneledNTPRequestAttempt(t, testHostname, timeout, localSOCKSProxyPort, udpgwServerAddress)
+		if err == nil {
+			break
+		}
+		t.Logf("makeTunneledNTPRequestAttempt failed: %s", err)
+	}
+
+	return err
+}
+
+func makeTunneledNTPRequestAttempt(
+	t *testing.T, testHostname string, timeout time.Duration, localSOCKSProxyPort int, udpgwServerAddress string) error {
 
 	localUDPProxyAddress, err := net.ResolveUDPAddr("udp", "127.0.0.1:7301")
 	if err != nil {
-		t.Fatalf("ResolveUDPAddr failed: %s", err)
+		return fmt.Errorf("ResolveUDPAddr failed: %s", err)
 	}
 
 	// Note: this proxy is intended for this test only -- it only accepts a single connection,
