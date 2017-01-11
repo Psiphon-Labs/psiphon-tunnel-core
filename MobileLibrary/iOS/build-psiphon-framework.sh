@@ -58,7 +58,6 @@ rm -rf ${GOPATH}
 GOMOBILE_PINNED_REV=72eef9d09307f0b437153fd152229f56edc0ab20
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
-IOS_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-ios
 TUNNEL_CORE_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core
 OPENSSL_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Inc/openssl
 
@@ -87,16 +86,6 @@ mkdir -p ${INTERMEDIATE_OUPUT_DIR}
 if [[ $? != 0 ]]; then
   echo "FAILURE: mkdir -p ${INTERMEDIATE_OUPUT_DIR}"
   exit 1
-fi
-
-if [ ! -e ${IOS_SRC_DIR} ]; then
-  echo "iOS source directory (${IOS_SRC_DIR}) not found, creating link"
-  mkdir -p $(dirname ${IOS_SRC_DIR})
-  ln -s $(pwd -P) $IOS_SRC_DIR
-  if [[ $? != 0 ]]; then
-    echo "..Could not create symlink, aborting"
-    exit 1
-  fi
 fi
 
 # arg: binary_path
