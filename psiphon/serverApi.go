@@ -525,6 +525,7 @@ func (serverContext *ServerContext) doUntunneledStatusRequest(
 		dialConfig,
 		certificate,
 		url,
+		false,
 		timeout)
 	if err != nil {
 		return common.ContextError(err)

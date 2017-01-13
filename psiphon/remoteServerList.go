@@ -34,7 +34,7 @@ import (
 )
 
 type RemoteServerListFetcher func(
-	config *Config, tunnel *Tunnel, untunneledDialConfig *DialConfig) error
+	config *Config, attempt int, tunnel *Tunnel, untunneledDialConfig *DialConfig) error
 
 // FetchCommonRemoteServerList downloads the common remote server list from
 // config.RemoteServerListUrl. It validates its digital signature using the
@@ -45,16 +45,20 @@ type RemoteServerListFetcher func(
 // be unique and persistent.
 func FetchCommonRemoteServerList(
 	config *Config,
+	attempt int,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig) error {
 
 	NoticeInfo("fetching common remote server list")
 
+	downloadURL, skipVerify := selectDownloadURL(attempt, config.RemoteServerListURLs)
+
 	newETag, err := downloadRemoteServerListFile(
 		config,
 		tunnel,
 		untunneledDialConfig,
-		config.RemoteServerListUrl,
+		downloadURL,
+		skipVerify,
 		"",
 		config.RemoteServerListDownloadFilename)
 	if err != nil {
@@ -100,13 +104,16 @@ func FetchCommonRemoteServerList(
 // must be unique and persistent.
 func FetchObfuscatedServerLists(
 	config *Config,
+	attempt int,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig) error {
 
 	NoticeInfo("fetching obfuscated remote server lists")
 
 	downloadFilename := osl.GetOSLRegistryFilename(config.ObfuscatedServerListDownloadDirectory)
-	downloadURL := osl.GetOSLRegistryURL(config.ObfuscatedServerListRootURL)
+
+	rootURL, skipVerify := selectDownloadURL(attempt, config.ObfuscatedServerListRootURLs)
+	downloadURL := osl.GetOSLRegistryURL(rootURL)
 
 	// failed is set if any operation fails and should trigger a retry. When the OSL registry
 	// fails to download, any cached registry is used instead; when any single OSL fails
@@ -122,6 +129,7 @@ func FetchObfuscatedServerLists(
 		tunnel,
 		untunneledDialConfig,
 		downloadURL,
+		skipVerify,
 		"",
 		downloadFilename)
 	if err != nil {
@@ -199,8 +207,11 @@ func FetchObfuscatedServerLists(
 		})
 
 	for _, oslID := range oslIDs {
+
 		downloadFilename := osl.GetOSLFilename(config.ObfuscatedServerListDownloadDirectory, oslID)
-		downloadURL := osl.GetOSLFileURL(config.ObfuscatedServerListRootURL, oslID)
+
+		downloadURL := osl.GetOSLFileURL(rootURL, oslID)
+
 		hexID := hex.EncodeToString(oslID)
 
 		// Note: the MD5 checksum step assumes the remote server list host's ETag uses MD5
@@ -218,6 +229,7 @@ func FetchObfuscatedServerLists(
 			tunnel,
 			untunneledDialConfig,
 			downloadURL,
+			skipVerify,
 			remoteETag,
 			downloadFilename)
 		if err != nil {
@@ -280,7 +292,10 @@ func downloadRemoteServerListFile(
 	config *Config,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
-	sourceURL, sourceETag, destinationFilename string) (string, error) {
+	sourceURL string,
+	skipVerify bool,
+	sourceETag string,
+	destinationFilename string) (string, error) {
 
 	lastETag, err := GetUrlETag(sourceURL)
 	if err != nil {
@@ -304,6 +319,7 @@ func downloadRemoteServerListFile(
 		tunnel,
 		untunneledDialConfig,
 		sourceURL,
+		skipVerify,
 		time.Duration(*config.FetchRemoteServerListTimeoutSeconds)*time.Second)
 	if err != nil {
 		return "", common.ContextError(err)

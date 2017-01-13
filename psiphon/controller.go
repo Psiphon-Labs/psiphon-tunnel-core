@@ -184,7 +184,7 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 		retryPeriod := time.Duration(
 			*controller.config.FetchRemoteServerListRetryPeriodSeconds) * time.Second
 
-		if controller.config.RemoteServerListUrl != "" {
+		if controller.config.RemoteServerListURLs != nil {
 			controller.runWaitGroup.Add(1)
 			go controller.remoteServerListFetcher(
 				"common",
@@ -194,7 +194,7 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 				FETCH_REMOTE_SERVER_LIST_STALE_PERIOD)
 		}
 
-		if controller.config.ObfuscatedServerListRootURL != "" {
+		if controller.config.ObfuscatedServerListRootURLs != nil {
 			controller.runWaitGroup.Add(1)
 			go controller.remoteServerListFetcher(
 				"obfuscated",
@@ -205,9 +205,7 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 		}
 	}
 
-	if controller.config.UpgradeDownloadUrl != "" &&
-		controller.config.UpgradeDownloadFilename != "" {
-
+	if controller.config.UpgradeDownloadURLs != nil {
 		controller.runWaitGroup.Add(1)
 		go controller.upgradeDownloader()
 	}
@@ -324,7 +322,7 @@ fetcherLoop:
 		}
 
 	retryLoop:
-		for {
+		for attempt := 0; ; attempt++ {
 			// Don't attempt to fetch while there is no network connectivity,
 			// to avoid alert notice noise.
 			if !WaitForNetworkConnectivity(
@@ -339,6 +337,7 @@ fetcherLoop:
 
 			err := fetcher(
 				controller.config,
+				attempt,
 				tunnel,
 				controller.untunneledDialConfig)
 
@@ -491,7 +490,7 @@ downloadLoop:
 		}
 
 	retryLoop:
-		for {
+		for attempt := 0; ; attempt++ {
 			// Don't attempt to download while there is no network connectivity,
 			// to avoid alert notice noise.
 			if !WaitForNetworkConnectivity(
@@ -506,6 +505,7 @@ downloadLoop:
 
 			err := DownloadUpgrade(
 				controller.config,
+				attempt,
 				handshakeVersion,
 				tunnel,
 				controller.untunneledDialConfig)

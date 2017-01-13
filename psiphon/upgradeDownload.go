@@ -55,6 +55,7 @@ import (
 // upgrade is still pending install by the outer client.
 func DownloadUpgrade(
 	config *Config,
+	attempt int,
 	handshakeVersion string,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig) error {
@@ -68,11 +69,14 @@ func DownloadUpgrade(
 
 	// Select tunneled or untunneled configuration
 
+	downloadURL, skipVerify := selectDownloadURL(attempt, config.UpgradeDownloadURLs)
+
 	httpClient, requestUrl, err := MakeDownloadHttpClient(
 		config,
 		tunnel,
 		untunneledDialConfig,
-		config.UpgradeDownloadUrl,
+		downloadURL,
+		skipVerify,
 		DOWNLOAD_UPGRADE_TIMEOUT)
 
 	// If no handshake version is supplied, make an initial HEAD request
