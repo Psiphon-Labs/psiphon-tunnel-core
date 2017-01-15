@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io/ioutil"
 	"strings"
@@ -156,4 +157,146 @@ func (suite *ConfigTestSuite) Test_LoadConfig_GoodJson() {
 	testObjJSON, _ = json.Marshal(testObj)
 	_, err = LoadConfig(testObjJSON)
 	suite.Nil(err, "JSON with null for optional values should succeed")
+}
+
+func TestDownloadURLs(t *testing.T) {
+
+	a := base64.StdEncoding.EncodeToString([]byte("a.example.com"))
+	b := base64.StdEncoding.EncodeToString([]byte("b.example.com"))
+	c := base64.StdEncoding.EncodeToString([]byte("c.example.com"))
+
+	testCases := []struct {
+		description                string
+		downloadURLs               []*DownloadURL
+		attempts                   int
+		expectedValid              bool
+		expectedDistinctSelections int
+	}{
+		{
+			"missing OnlyAfterAttempts = 0",
+			[]*DownloadURL{
+				&DownloadURL{
+					URL:               a,
+					OnlyAfterAttempts: 1,
+				},
+			},
+			1,
+			false,
+			0,
+		},
+		{
+			"single URL, multiple attempts",
+			[]*DownloadURL{
+				&DownloadURL{
+					URL:               a,
+					OnlyAfterAttempts: 0,
+				},
+			},
+			2,
+			true,
+			1,
+		},
+		{
+			"multiple URLs, single attempt",
+			[]*DownloadURL{
+				&DownloadURL{
+					URL:               a,
+					OnlyAfterAttempts: 0,
+				},
+				&DownloadURL{
+					URL:               b,
+					OnlyAfterAttempts: 1,
+				},
+				&DownloadURL{
+					URL:               c,
+					OnlyAfterAttempts: 1,
+				},
+			},
+			1,
+			true,
+			1,
+		},
+		{
+			"multiple URLs, multiple attempts",
+			[]*DownloadURL{
+				&DownloadURL{
+					URL:               a,
+					OnlyAfterAttempts: 0,
+				},
+				&DownloadURL{
+					URL:               b,
+					OnlyAfterAttempts: 1,
+				},
+				&DownloadURL{
+					URL:               c,
+					OnlyAfterAttempts: 1,
+				},
+			},
+			2,
+			true,
+			3,
+		},
+		{
+			"multiple URLs, multiple attempts",
+			[]*DownloadURL{
+				&DownloadURL{
+					URL:               a,
+					OnlyAfterAttempts: 0,
+				},
+				&DownloadURL{
+					URL:               b,
+					OnlyAfterAttempts: 1,
+				},
+				&DownloadURL{
+					URL:               c,
+					OnlyAfterAttempts: 3,
+				},
+			},
+			4,
+			true,
+			3,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.description, func(t *testing.T) {
+
+			err := decodeAndValidateDownloadURLs(
+				testCase.description,
+				testCase.downloadURLs)
+
+			if testCase.expectedValid {
+				if err != nil {
+					t.Fatal("unexpected validation error: %s", err)
+				}
+			} else {
+				if err == nil {
+					t.Fatal("expected validation error")
+				}
+				return
+			}
+
+			distinctSelections := make(map[string]int)
+
+			// Perform enough runs to account for random selection
+			runs := 1000
+
+			attempt := 0
+			for i := 0; i < runs; i++ {
+				url, skipVerify := selectDownloadURL(attempt, testCase.downloadURLs)
+				if skipVerify {
+					t.Fatal("expected skipVerify")
+				}
+				distinctSelections[url] += 1
+				attempt = (attempt + 1) % testCase.attempts
+			}
+
+			if len(distinctSelections) != testCase.expectedDistinctSelections {
+				t.Fatal("got %d distinct selections, expected %d",
+					len(distinctSelections),
+					testCase.expectedDistinctSelections)
+			}
+		})
+	}
+
 }
