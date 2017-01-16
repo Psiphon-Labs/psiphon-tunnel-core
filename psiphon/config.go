@@ -716,7 +716,19 @@ func decodeAndValidateDownloadURLs(name string, downloadURLs []*DownloadURL) err
 	return err
 }
 
-func selectDownloadURL(attempt int, downloadURLs []*DownloadURL) (string, bool) {
+func selectDownloadURL(attempt int, downloadURLs []*DownloadURL) (string, string, bool) {
+
+	// The first OnlyAfterAttempts = 0 URL is the canonical URL. This
+	// is the value used as the key for SetUrlETag when multiple download
+	// URLs can be used to fetch a single entity.
+
+	canonicalURL := ""
+	for _, downloadURL := range downloadURLs {
+		if downloadURL.OnlyAfterAttempts == 0 {
+			canonicalURL = downloadURL.URL
+			break
+		}
+	}
 
 	candidates := make([]int, 0)
 	for index, URL := range downloadURLs {
@@ -729,13 +741,14 @@ func selectDownloadURL(attempt int, downloadURLs []*DownloadURL) (string, bool) 
 		// This case is not expected, as decodeAndValidateDownloadURLs
 		// should reject configs that would have no candidates for
 		// 0 attempts.
-		return "", true
+		return "", "", true
 	}
 
 	selection, err := common.MakeSecureRandomInt(len(candidates))
 	if err != nil {
 		selection = 0
 	}
+	downloadURL := downloadURLs[candidates[selection]]
 
-	return downloadURLs[candidates[selection]].URL, downloadURLs[candidates[selection]].SkipVerify
+	return downloadURL.URL, canonicalURL, downloadURL.SkipVerify
 }

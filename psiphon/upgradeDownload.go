@@ -60,6 +60,9 @@ func DownloadUpgrade(
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig) error {
 
+	// Note: this downloader doesn't use ETags since many client binaries, with
+	// different embedded values, exist for a single version.
+
 	// Check if complete file already downloaded
 
 	if _, err := os.Stat(config.UpgradeDownloadFilename); err == nil {
@@ -69,7 +72,7 @@ func DownloadUpgrade(
 
 	// Select tunneled or untunneled configuration
 
-	downloadURL, skipVerify := selectDownloadURL(attempt, config.UpgradeDownloadURLs)
+	downloadURL, _, skipVerify := selectDownloadURL(attempt, config.UpgradeDownloadURLs)
 
 	httpClient, requestUrl, err := MakeDownloadHttpClient(
 		config,
