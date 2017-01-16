@@ -276,9 +276,15 @@ func TestDownloadURLs(t *testing.T) {
 				return
 			}
 
-			distinctSelections := make(map[string]int)
+			// Track distinct selections for each attempt; the
+			// expected number of distinct should be for at least
+			// one particular attempt.
+			attemptDistinctSelections := make(map[int]map[string]int)
+			for i := 0; i < testCase.attempts; i++ {
+				attemptDistinctSelections[i] = make(map[string]int)
+			}
 
-			// Perform enough runs to account for random selection
+			// Perform enough runs to account for random selection.
 			runs := 1000
 
 			attempt := 0
@@ -287,13 +293,20 @@ func TestDownloadURLs(t *testing.T) {
 				if skipVerify {
 					t.Fatal("expected skipVerify")
 				}
-				distinctSelections[url] += 1
+				attemptDistinctSelections[attempt][url] += 1
 				attempt = (attempt + 1) % testCase.attempts
 			}
 
-			if len(distinctSelections) != testCase.expectedDistinctSelections {
+			maxDistinctSelections := 0
+			for _, m := range attemptDistinctSelections {
+				if len(m) > maxDistinctSelections {
+					maxDistinctSelections = len(m)
+				}
+			}
+
+			if maxDistinctSelections != testCase.expectedDistinctSelections {
 				t.Fatal("got %d distinct selections, expected %d",
-					len(distinctSelections),
+					maxDistinctSelections,
 					testCase.expectedDistinctSelections)
 			}
 		})
