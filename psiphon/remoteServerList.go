@@ -82,7 +82,7 @@ func FetchCommonRemoteServerList(
 
 	// Now that the server entries are successfully imported, store the response
 	// ETag so we won't re-download this same data again.
-	err = SetUrlETag(config.RemoteServerListUrl, newETag)
+	err = SetUrlETag(downloadURL, newETag)
 	if err != nil {
 		NoticeAlert("failed to set ETag for common remote server list: %s", common.ContextError(err))
 		// This fetch is still reported as a success, even if we can't store the etag
@@ -302,7 +302,7 @@ func downloadRemoteServerListFile(
 		return "", common.ContextError(err)
 	}
 
-	// sourceETag, when specified, is prior knowlegde of the
+	// sourceETag, when specified, is prior knowledge of the
 	// remote ETag that can be used to skip the request entirely.
 	// This will be set in the case of OSL files, from the MD5Sum
 	// values stored in the registry.
