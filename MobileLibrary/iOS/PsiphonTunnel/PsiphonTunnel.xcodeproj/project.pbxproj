@@ -10,11 +10,11 @@
 		660E0B7A1E2D6EB6002BF5D4 /* Psi in Frameworks */ = {isa = PBXBuildFile; fileRef = 660E0B791E2D6EB6002BF5D4 /* Psi */; };
 		662659271DD270E900872F6C /* Reachability.h in Headers */ = {isa = PBXBuildFile; fileRef = 662659251DD270E900872F6C /* Reachability.h */; };
 		662659281DD270E900872F6C /* Reachability.m in Sources */ = {isa = PBXBuildFile; fileRef = 662659261DD270E900872F6C /* Reachability.m */; };
-		6685BDC81E2E882800F0E414 /* GoPsi.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDC41E2E882800F0E414 /* GoPsi.h */; };
-		6685BDC91E2E882800F0E414 /* GoUniverse.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDC51E2E882800F0E414 /* GoUniverse.h */; };
 		6685BDCA1E2E882800F0E414 /* Psi.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDC61E2E882800F0E414 /* Psi.h */; };
 		6685BDCB1E2E882800F0E414 /* ref.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDC71E2E882800F0E414 /* ref.h */; };
 		6685BDCD1E2E88A200F0E414 /* Psi-meta.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDCC1E2E88A200F0E414 /* Psi-meta.h */; };
+		6685BDD41E2EBB1000F0E414 /* GoPsi.objc.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDD21E2EBB1000F0E414 /* GoPsi.objc.h */; };
+		6685BDD51E2EBB1000F0E414 /* Universe.objc.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDD31E2EBB1000F0E414 /* Universe.objc.h */; };
 		66BDB02A1DA6BFCC0079384C /* PsiphonTunnel.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 66BDB0201DA6BFCC0079384C /* PsiphonTunnel.framework */; };
 		66BDB02F1DA6BFCC0079384C /* PsiphonTunnelTests.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB02E1DA6BFCC0079384C /* PsiphonTunnelTests.m */; };
 		66BDB0311DA6BFCC0079384C /* PsiphonTunnel.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB0231DA6BFCC0079384C /* PsiphonTunnel.h */; settings = {ATTRIBUTES = (Public, ); }; };
@@ -63,11 +63,11 @@
 		660E0B791E2D6EB6002BF5D4 /* Psi */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = Psi; path = PsiphonTunnel/Psi.framework/Versions/A/Psi; sourceTree = "<group>"; };
 		662659251DD270E900872F6C /* Reachability.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Reachability.h; sourceTree = "<group>"; };
 		662659261DD270E900872F6C /* Reachability.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Reachability.m; sourceTree = "<group>"; };
-		6685BDC41E2E882800F0E414 /* GoPsi.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = GoPsi.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/GoPsi.h; sourceTree = "<group>"; };
-		6685BDC51E2E882800F0E414 /* GoUniverse.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = GoUniverse.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/GoUniverse.h; sourceTree = "<group>"; };
 		6685BDC61E2E882800F0E414 /* Psi.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Psi.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/Psi.h; sourceTree = "<group>"; };
 		6685BDC71E2E882800F0E414 /* ref.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ref.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/ref.h; sourceTree = "<group>"; };
 		6685BDCC1E2E88A200F0E414 /* Psi-meta.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "Psi-meta.h"; path = "PsiphonTunnel/Psi-meta.h"; sourceTree = "<group>"; };
+		6685BDD21E2EBB1000F0E414 /* GoPsi.objc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = GoPsi.objc.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/GoPsi.objc.h; sourceTree = "<group>"; };
+		6685BDD31E2EBB1000F0E414 /* Universe.objc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Universe.objc.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/Universe.objc.h; sourceTree = "<group>"; };
 		66BDB0201DA6BFCC0079384C /* PsiphonTunnel.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = PsiphonTunnel.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		66BDB0231DA6BFCC0079384C /* PsiphonTunnel.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PsiphonTunnel.h; sourceTree = "<group>"; };
 		66BDB0241DA6BFCC0079384C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -127,10 +127,10 @@
 			children = (
 				660E0B791E2D6EB6002BF5D4 /* Psi */,
 				6685BDCC1E2E88A200F0E414 /* Psi-meta.h */,
-				6685BDC41E2E882800F0E414 /* GoPsi.h */,
-				6685BDC51E2E882800F0E414 /* GoUniverse.h */,
 				6685BDC61E2E882800F0E414 /* Psi.h */,
 				6685BDC71E2E882800F0E414 /* ref.h */,
+				6685BDD21E2EBB1000F0E414 /* GoPsi.objc.h */,
+				6685BDD31E2EBB1000F0E414 /* Universe.objc.h */,
 			);
 			name = Psi;
 			sourceTree = "<group>";
@@ -214,13 +214,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				6685BDCB1E2E882800F0E414 /* ref.h in Headers */,
-				6685BDC81E2E882800F0E414 /* GoPsi.h in Headers */,
 				66BDB05D1DC26CCC0079384C /* SBJson4StreamParser.h in Headers */,
+				6685BDD41E2EBB1000F0E414 /* GoPsi.objc.h in Headers */,
+				6685BDD51E2EBB1000F0E414 /* Universe.objc.h in Headers */,
 				66BDB05F1DC26CCC0079384C /* SBJson4StreamParserState.h in Headers */,
 				66BDB0311DA6BFCC0079384C /* PsiphonTunnel.h in Headers */,
 				6685BDCA1E2E882800F0E414 /* Psi.h in Headers */,
 				66BDB0651DC26CCC0079384C /* SBJson4StreamWriterState.h in Headers */,
-				6685BDC91E2E882800F0E414 /* GoUniverse.h in Headers */,
 				66BDB05B1DC26CCC0079384C /* SBJson4Parser.h in Headers */,
 				6685BDCD1E2E88A200F0E414 /* Psi-meta.h in Headers */,
 				66BDB05A1DC26CCC0079384C /* SBJson4.h in Headers */,
