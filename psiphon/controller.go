@@ -683,16 +683,22 @@ loop:
 //
 // Concurrency note: only the runTunnels() goroutine may call classifyImpairedProtocol
 func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
+
 	if failedTunnel.establishedTime.Add(IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION).After(monotime.Now()) {
 		controller.impairedProtocolClassification[failedTunnel.protocol] += 1
 	} else {
 		controller.impairedProtocolClassification[failedTunnel.protocol] = 0
 	}
-	if len(controller.getImpairedProtocols()) == len(protocol.SupportedTunnelProtocols) {
-		// Reset classification if all protocols are classified as impaired as
-		// the network situation (or attack) may not be protocol-specific.
-		// TODO: compare against count of distinct supported protocols for
-		// current known server entries.
+
+	// Reset classification once all known protocols are classified as impaired, as
+	// there is now no way to proceed with only unimpaired protocols. The network
+	// situation (or attack) resulting in classification may not be protocol-specific.
+	//
+	// Note: with controller.config.TunnelProtocol set, this will always reset once
+	// that protocol has reached IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD.
+	if len(controller.getImpairedProtocols()) ==
+		CountSupportedProtocols(
+			controller.config.EgressRegion, controller.config.TunnelProtocol) {
 		controller.impairedProtocolClassification = make(map[string]int)
 	}
 }
@@ -1080,11 +1086,9 @@ loop:
 			// evade the attack; (b) there's a good chance of false
 			// positives (such as short tunnel durations due to network
 			// hopping on a mobile device).
-			// Impaired protocols logic is not applied when
-			// config.TunnelProtocol is specified.
 			// The edited serverEntry is temporary copy which is not
 			// stored or reused.
-			if i == 0 && controller.config.TunnelProtocol == "" {
+			if i == 0 {
 				serverEntry.DisableImpairedProtocols(impairedProtocols)
 				if len(serverEntry.GetSupportedProtocols()) == 0 {
 					// Skip this server entry, as it has no supported

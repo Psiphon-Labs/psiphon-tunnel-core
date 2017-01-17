@@ -365,13 +365,6 @@ func insertRankedServerEntry(tx *bolt.Tx, serverEntryId string, position int) er
 	return nil
 }
 
-func serverEntrySupportsProtocol(serverEntry *protocol.ServerEntry, protocol string) bool {
-	// Note: for meek, the capabilities are FRONTED-MEEK and UNFRONTED-MEEK
-	// and the additonal OSSH service is assumed to be available internally.
-	requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
-	return common.Contains(serverEntry.Capabilities, requiredCapability)
-}
-
 // ServerEntryIterator is used to iterate over
 // stored server entries in rank order.
 type ServerEntryIterator struct {
@@ -573,7 +566,7 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *protocol.ServerEntry, 
 
 		// Check filter requirements
 		if (iterator.region == "" || serverEntry.Region == iterator.region) &&
-			(iterator.protocol == "" || serverEntrySupportsProtocol(serverEntry, iterator.protocol)) {
+			(iterator.protocol == "" || serverEntry.SupportsProtocol(iterator.protocol)) {
 
 			break
 		}
@@ -630,7 +623,7 @@ func CountServerEntries(region, tunnelProtocol string) int {
 	count := 0
 	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 		if (region == "" || serverEntry.Region == region) &&
-			(tunnelProtocol == "" || serverEntrySupportsProtocol(serverEntry, tunnelProtocol)) {
+			(tunnelProtocol == "" || serverEntry.SupportsProtocol(tunnelProtocol)) {
 			count += 1
 		}
 	})
@@ -641,6 +634,39 @@ func CountServerEntries(region, tunnelProtocol string) int {
 	}
 
 	return count
+}
+
+// CountSupportedProtocols returns the number of distinct tunnel
+// protocols supported by stored server entries.
+func CountSupportedProtocols(region, tunnelProtocol string) int {
+	checkInitDataStore()
+
+	distinctProtocols := make(map[string]bool)
+
+	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
+		if region == "" || serverEntry.Region == region {
+			if tunnelProtocol != "" {
+				if serverEntry.SupportsProtocol(tunnelProtocol) {
+					distinctProtocols[tunnelProtocol] = true
+					// Exit early, since only one protocol is enabled
+					return
+				}
+			} else {
+				for _, protocol := range protocol.SupportedTunnelProtocols {
+					if serverEntry.SupportsProtocol(protocol) {
+						distinctProtocols[protocol] = true
+					}
+				}
+			}
+		}
+	})
+
+	if err != nil {
+		NoticeAlert("CountSupportedProtocols failed: %s", err)
+		return 0
+	}
+
+	return len(distinctProtocols)
 }
 
 // ReportAvailableRegions prints a notice with the available egress regions.
