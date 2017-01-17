@@ -8,7 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		660E0B7A1E2D6EB6002BF5D4 /* Psi in Frameworks */ = {isa = PBXBuildFile; fileRef = 660E0B791E2D6EB6002BF5D4 /* Psi */; };
-		662659271DD270E900872F6C /* Reachability.h in Headers */ = {isa = PBXBuildFile; fileRef = 662659251DD270E900872F6C /* Reachability.h */; };
+		662659271DD270E900872F6C /* Reachability.h in Headers */ = {isa = PBXBuildFile; fileRef = 662659251DD270E900872F6C /* Reachability.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		662659281DD270E900872F6C /* Reachability.m in Sources */ = {isa = PBXBuildFile; fileRef = 662659261DD270E900872F6C /* Reachability.m */; };
 		6685BDCA1E2E882800F0E414 /* Psi.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDC61E2E882800F0E414 /* Psi.h */; };
 		6685BDCB1E2E882800F0E414 /* ref.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDC71E2E882800F0E414 /* ref.h */; };
@@ -214,6 +214,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6685BDCB1E2E882800F0E414 /* ref.h in Headers */,
+				662659271DD270E900872F6C /* Reachability.h in Headers */,
 				66BDB05D1DC26CCC0079384C /* SBJson4StreamParser.h in Headers */,
 				6685BDD41E2EBB1000F0E414 /* GoPsi.objc.h in Headers */,
 				6685BDD51E2EBB1000F0E414 /* Universe.objc.h in Headers */,
@@ -227,7 +228,6 @@
 				66BDB0611DC26CCC0079384C /* SBJson4StreamTokeniser.h in Headers */,
 				66BDB0631DC26CCC0079384C /* SBJson4StreamWriter.h in Headers */,
 				66BDB0671DC26CCC0079384C /* SBJson4Writer.h in Headers */,
-				662659271DD270E900872F6C /* Reachability.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
