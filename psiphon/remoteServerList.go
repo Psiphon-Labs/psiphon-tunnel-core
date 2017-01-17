@@ -219,11 +219,11 @@ func FetchObfuscatedServerLists(
 		hexID := hex.EncodeToString(oslID)
 
 		// Note: the MD5 checksum step assumes the remote server list host's ETag uses MD5
-		// with a hex encoding. If this is not the case, the remoteETag should be left blank.
-		remoteETag := ""
+		// with a hex encoding. If this is not the case, the sourceETag should be left blank.
+		sourceETag := ""
 		md5sum, err := oslRegistry.GetOSLMD5Sum(oslID)
 		if err == nil {
-			remoteETag = hex.EncodeToString(md5sum)
+			sourceETag = fmt.Sprintf("\"%s\"", hex.EncodeToString(md5sum))
 		}
 
 		// TODO: store ETags in OSL registry to enable skipping requests entirely
@@ -235,7 +235,7 @@ func FetchObfuscatedServerLists(
 			downloadURL,
 			canonicalURL,
 			skipVerify,
-			remoteETag,
+			sourceETag,
 			downloadFilename)
 		if err != nil {
 			failed = true

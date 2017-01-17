@@ -215,7 +215,7 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 				serveMux.HandleFunc("/"+file.Name, func(w http.ResponseWriter, req *http.Request) {
 					md5sum := md5.Sum(file.Contents)
 					w.Header().Add("Content-Type", "application/octet-stream")
-					w.Header().Add("ETag", hex.EncodeToString(md5sum[:]))
+					w.Header().Add("ETag", fmt.Sprintf("\"%s\"", hex.EncodeToString(md5sum[:])))
 					http.ServeContent(w, req, file.Name, startTime, bytes.NewReader(file.Contents))
 				})
 			}
@@ -382,7 +382,7 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 		u.Path = path.Join(u.Path, paveFile.Name)
 		etag, _ := GetUrlETag(u.String())
 		md5sum := md5.Sum(paveFile.Contents)
-		if etag != hex.EncodeToString(md5sum[:]) {
+		if etag != fmt.Sprintf("\"%s\"", hex.EncodeToString(md5sum[:])) {
 			t.Fatalf("unexpected ETag for %s", u)
 		}
 	}
