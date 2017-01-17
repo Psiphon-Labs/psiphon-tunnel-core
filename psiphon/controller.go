@@ -696,9 +696,11 @@ func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
 	//
 	// Note: with controller.config.TunnelProtocol set, this will always reset once
 	// that protocol has reached IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD.
-	if len(controller.getImpairedProtocols()) ==
-		CountSupportedProtocols(
-			controller.config.EgressRegion, controller.config.TunnelProtocol) {
+	if CountNonImpairedProtocols(
+		controller.config.EgressRegion,
+		controller.config.TunnelProtocol,
+		controller.getImpairedProtocols()) == 0 {
+
 		controller.impairedProtocolClassification = make(map[string]int)
 	}
 }

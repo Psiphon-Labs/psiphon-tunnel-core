@@ -636,9 +636,13 @@ func CountServerEntries(region, tunnelProtocol string) int {
 	return count
 }
 
-// CountSupportedProtocols returns the number of distinct tunnel
-// protocols supported by stored server entries.
-func CountSupportedProtocols(region, tunnelProtocol string) int {
+// CountNonImpairedProtocols returns the number of distinct tunnel
+// protocols supported by stored server entries, excluding the
+// specified impaired protocols.
+func CountNonImpairedProtocols(
+	region, tunnelProtocol string,
+	impairedProtocols []string) int {
+
 	checkInitDataStore()
 
 	distinctProtocols := make(map[string]bool)
@@ -661,8 +665,12 @@ func CountSupportedProtocols(region, tunnelProtocol string) int {
 		}
 	})
 
+	for _, protocol := range impairedProtocols {
+		delete(distinctProtocols, protocol)
+	}
+
 	if err != nil {
-		NoticeAlert("CountSupportedProtocols failed: %s", err)
+		NoticeAlert("CountNonImpairedProtocols failed: %s", err)
 		return 0
 	}
 
