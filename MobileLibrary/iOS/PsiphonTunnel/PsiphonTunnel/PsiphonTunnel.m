@@ -19,7 +19,7 @@
 
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
-#import <Psi/Psi.h>
+#import "Psi-meta.h"
 #import "PsiphonTunnel.h"
 #import "Reachability.h"
 #import "json-framework/SBJson4.h"
