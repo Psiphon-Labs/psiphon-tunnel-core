@@ -584,25 +584,15 @@ loop:
 
 			if controller.isImpairedProtocol(establishedTunnel.protocol) {
 
+				// Protocol was classified as impaired while this tunnel established.
+				// This is most likely to occur with TunnelPoolSize > 0. We log the
+				// event but take no action. Discarding the tunnel would break the
+				// impaired logic unless we did that (a) only if there are other
+				// unimpaired protocols; (b) only during the first interation of the
+				// ESTABLISH_TUNNEL_WORK_TIME loop. By not discarding here, a true
+				// impaired protocol may require an extra reconnect.
+
 				NoticeAlert("established tunnel with impaired protocol: %s", establishedTunnel.protocol)
-
-				// Take action only when TunnelProtocol is unset, as it limits the
-				// controller to a single protocol. For testing and diagnostics, we
-				// still allow classification when TunnelProtocol is set.
-				if controller.config.TunnelProtocol == "" {
-
-					// Protocol was classified as impaired while this tunnel
-					// established, so discard.
-					controller.discardTunnel(establishedTunnel)
-
-					// Reset establish generator to stop producing tunnels
-					// with impaired protocols.
-					if controller.isEstablishing {
-						controller.stopEstablishing()
-						controller.startEstablishing()
-					}
-					break
-				}
 			}
 
 			tunnelCount, registered := controller.registerTunnel(establishedTunnel)
