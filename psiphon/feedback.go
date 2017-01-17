@@ -113,6 +113,7 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 		UpstreamProxyCustomHeaders:    config.UpstreamProxyCustomHeaders,
 		PendingConns:                  nil,
 		DeviceBinder:                  nil,
+		IPv6Synthesizer:               nil,
 		DnsServerGetter:               nil,
 		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,

@@ -19,6 +19,7 @@
 
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
+#import "LookupIPv6.h"
 #import "Psi-meta.h"
 #import "PsiphonTunnel.h"
 #import "Reachability.h"
@@ -62,6 +63,9 @@
 
         // Not supported on iOS.
         const BOOL useDeviceBinder = FALSE;
+
+        // Must always use IPv6Synthesizer for iOS
+        const BOOL useIPv6Synthesizer = TRUE;
         
         NSString *configStr = [self getConfig];
         if (configStr == nil) {
@@ -76,6 +80,7 @@
                            embeddedServerEntries,
                            self,
                            useDeviceBinder,
+                           useIPv6Synthesizer,
                            &e);
             
             [self logMessage:[NSString stringWithFormat: @"GoPsiStart: %@", res ? @"TRUE" : @"FALSE"]];
@@ -553,6 +558,17 @@
     Reachability *reachability = [Reachability reachabilityForInternetConnection];
     NetworkStatus netstat = [reachability currentReachabilityStatus];
     return (netstat != NotReachable) ? 1 : 0;
+}
+
+- (NSString *)iPv6Synthesize:(NSString *)IPv4Addr {
+    // This function is called to synthesize an ipv6 address from an ipv4 one on a DNS64/NAT64 network
+    char *result = getIPv6ForIPv4([IPv4Addr UTF8String]);
+    if (result != NULL) {
+        NSString *IPv6Addr = [NSString stringWithUTF8String:result];
+        free(result);
+        return IPv6Addr;
+    }
+    return @"";
 }
 
 - (void)notice:(NSString *)noticeJSON {

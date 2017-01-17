@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4E89F7FE1E2ED3CE00005F4C /* LookupIPv6.c in Sources */ = {isa = PBXBuildFile; fileRef = 4E89F7FC1E2ED3CE00005F4C /* LookupIPv6.c */; };
+		4E89F7FF1E2ED3CE00005F4C /* LookupIPv6.h in Headers */ = {isa = PBXBuildFile; fileRef = 4E89F7FD1E2ED3CE00005F4C /* LookupIPv6.h */; };
 		660E0B7A1E2D6EB6002BF5D4 /* Psi in Frameworks */ = {isa = PBXBuildFile; fileRef = 660E0B791E2D6EB6002BF5D4 /* Psi */; };
 		662659271DD270E900872F6C /* Reachability.h in Headers */ = {isa = PBXBuildFile; fileRef = 662659251DD270E900872F6C /* Reachability.h */; };
 		662659281DD270E900872F6C /* Reachability.m in Sources */ = {isa = PBXBuildFile; fileRef = 662659261DD270E900872F6C /* Reachability.m */; };
@@ -60,6 +62,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		4E89F7FC1E2ED3CE00005F4C /* LookupIPv6.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = LookupIPv6.c; sourceTree = "<group>"; };
+		4E89F7FD1E2ED3CE00005F4C /* LookupIPv6.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = LookupIPv6.h; sourceTree = "<group>"; };
 		660E0B791E2D6EB6002BF5D4 /* Psi */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = Psi; path = PsiphonTunnel/Psi.framework/Versions/A/Psi; sourceTree = "<group>"; };
 		662659251DD270E900872F6C /* Reachability.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Reachability.h; sourceTree = "<group>"; };
 		662659261DD270E900872F6C /* Reachability.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Reachability.m; sourceTree = "<group>"; };
@@ -118,6 +122,8 @@
 			children = (
 				662659251DD270E900872F6C /* Reachability.h */,
 				662659261DD270E900872F6C /* Reachability.m */,
+				4E89F7FC1E2ED3CE00005F4C /* LookupIPv6.c */,
+				4E89F7FD1E2ED3CE00005F4C /* LookupIPv6.h */,
 			);
 			path = Reachability;
 			sourceTree = "<group>";
@@ -214,6 +220,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6685BDCB1E2E882800F0E414 /* ref.h in Headers */,
+				4E89F7FF1E2ED3CE00005F4C /* LookupIPv6.h in Headers */,
 				66BDB05D1DC26CCC0079384C /* SBJson4StreamParser.h in Headers */,
 				6685BDD41E2EBB1000F0E414 /* GoPsi.objc.h in Headers */,
 				6685BDD51E2EBB1000F0E414 /* Universe.objc.h in Headers */,
@@ -337,6 +344,7 @@
 				66BDB0641DC26CCC0079384C /* SBJson4StreamWriter.m in Sources */,
 				66BDB0661DC26CCC0079384C /* SBJson4StreamWriterState.m in Sources */,
 				66BDB05C1DC26CCC0079384C /* SBJson4Parser.m in Sources */,
+				4E89F7FE1E2ED3CE00005F4C /* LookupIPv6.c in Sources */,
 				66BDB0681DC26CCC0079384C /* SBJson4Writer.m in Sources */,
 				66BDB0621DC26CCC0079384C /* SBJson4StreamTokeniser.m in Sources */,
 				66BDB0441DA6C7DD0079384C /* PsiphonTunnel.m in Sources */,

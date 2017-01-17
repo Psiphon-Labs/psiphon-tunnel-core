@@ -230,6 +230,11 @@ type Config struct {
 	// deployments.
 	DeviceBinder DeviceBinder
 
+	// IPv6Synthesizer is an interface that allows the core tunnel to call
+	// into the host application to synthesize IPv6 addresses from IPv4 ones. This
+	// is used to correctly lookup IPs on DNS64/NAT64 networks.
+	IPv6Synthesizer IPv6Synthesizer
+
 	// DnsServerGetter is an interface that enables the core tunnel to call
 	// into the host application to discover the native network DNS server settings.
 	// This parameter is only applicable to library deployments.

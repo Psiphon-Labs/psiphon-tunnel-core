@@ -78,12 +78,23 @@ func tcpDial(addr string, config *DialConfig, dialResult chan error) (net.Conn, 
 		return nil, common.ContextError(err)
 	}
 
-	// TODO: IPv6 support
-	var ip [4]byte
-	copy(ip[:], ipAddrs[index].To4())
+	var ip []byte
+	var domain int
+	ipAddr := ipAddrs[index]
+
+	// Get address type (IPv4 or IPv6)
+	if len(ipAddr) == net.IPv4len {
+		ip = make([]byte, 4)
+		copy(ip[:], ipAddr.To4())
+		domain = syscall.AF_INET
+	} else if len(ipAddr) == net.IPv6len {
+		ip = make([]byte, 16)
+		copy(ip[:], ipAddr.To16())
+		domain = syscall.AF_INET6
+	}
 
 	// Create a socket and bind to device, when configured to do so
-	socketFd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+	socketFd, err := syscall.Socket(domain, syscall.SOCK_STREAM, 0)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -100,8 +111,18 @@ func tcpDial(addr string, config *DialConfig, dialResult chan error) (net.Conn, 
 		}
 	}
 
-	sockAddr := syscall.SockaddrInet4{Addr: ip, Port: port}
-	err = syscall.Connect(socketFd, &sockAddr)
+	// Connect socket fd to the address
+	if domain == syscall.AF_INET {
+		var inet4Addr [4]byte
+		copy(inet4Addr[:], ip)
+		servAddr := syscall.SockaddrInet4{Addr: inet4Addr, Port: port}
+		err = syscall.Connect(socketFd, &servAddr)
+	} else if domain == syscall.AF_INET6 {
+		var inet6Addr [16]byte
+		copy(inet6Addr[:], ip)
+		servAddr := syscall.SockaddrInet6{Addr: inet6Addr, Port: port}
+		err = syscall.Connect(socketFd, &servAddr)
+	}
 	if err != nil {
 		syscall.Close(socketFd)
 		return nil, common.ContextError(err)
