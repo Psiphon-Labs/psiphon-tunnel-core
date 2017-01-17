@@ -7,15 +7,19 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		660E0B7A1E2D6EB6002BF5D4 /* Psi in Frameworks */ = {isa = PBXBuildFile; fileRef = 660E0B791E2D6EB6002BF5D4 /* Psi */; };
 		662659271DD270E900872F6C /* Reachability.h in Headers */ = {isa = PBXBuildFile; fileRef = 662659251DD270E900872F6C /* Reachability.h */; };
 		662659281DD270E900872F6C /* Reachability.m in Sources */ = {isa = PBXBuildFile; fileRef = 662659261DD270E900872F6C /* Reachability.m */; };
+		6685BDC81E2E882800F0E414 /* GoPsi.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDC41E2E882800F0E414 /* GoPsi.h */; };
+		6685BDC91E2E882800F0E414 /* GoUniverse.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDC51E2E882800F0E414 /* GoUniverse.h */; };
+		6685BDCA1E2E882800F0E414 /* Psi.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDC61E2E882800F0E414 /* Psi.h */; };
+		6685BDCB1E2E882800F0E414 /* ref.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDC71E2E882800F0E414 /* ref.h */; };
+		6685BDCD1E2E88A200F0E414 /* Psi-meta.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDCC1E2E88A200F0E414 /* Psi-meta.h */; };
 		66BDB02A1DA6BFCC0079384C /* PsiphonTunnel.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 66BDB0201DA6BFCC0079384C /* PsiphonTunnel.framework */; };
 		66BDB02F1DA6BFCC0079384C /* PsiphonTunnelTests.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB02E1DA6BFCC0079384C /* PsiphonTunnelTests.m */; };
 		66BDB0311DA6BFCC0079384C /* PsiphonTunnel.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB0231DA6BFCC0079384C /* PsiphonTunnel.h */; settings = {ATTRIBUTES = (Public, ); }; };
-		66BDB03B1DA6C4A70079384C /* Psi.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 66BDB03A1DA6C4A70079384C /* Psi.framework */; };
 		66BDB03E1DA6C79E0079384C /* rootCAs.txt in Resources */ = {isa = PBXBuildFile; fileRef = 66BDB03D1DA6C79E0079384C /* rootCAs.txt */; };
 		66BDB0441DA6C7DD0079384C /* PsiphonTunnel.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0431DA6C7DD0079384C /* PsiphonTunnel.m */; };
-		66BDB0491DA6D7050079384C /* Psi.framework in CopyFiles */ = {isa = PBXBuildFile; fileRef = 66BDB03A1DA6C4A70079384C /* Psi.framework */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		66BDB05A1DC26CCC0079384C /* SBJson4.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB04B1DC26CCC0079384C /* SBJson4.h */; };
 		66BDB05B1DC26CCC0079384C /* SBJson4Parser.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB04C1DC26CCC0079384C /* SBJson4Parser.h */; };
 		66BDB05C1DC26CCC0079384C /* SBJson4Parser.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB04D1DC26CCC0079384C /* SBJson4Parser.m */; };
@@ -50,22 +54,26 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				66BDB0491DA6D7050079384C /* Psi.framework in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		660E0B791E2D6EB6002BF5D4 /* Psi */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = Psi; path = PsiphonTunnel/Psi.framework/Versions/A/Psi; sourceTree = "<group>"; };
 		662659251DD270E900872F6C /* Reachability.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Reachability.h; sourceTree = "<group>"; };
 		662659261DD270E900872F6C /* Reachability.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Reachability.m; sourceTree = "<group>"; };
+		6685BDC41E2E882800F0E414 /* GoPsi.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = GoPsi.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/GoPsi.h; sourceTree = "<group>"; };
+		6685BDC51E2E882800F0E414 /* GoUniverse.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = GoUniverse.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/GoUniverse.h; sourceTree = "<group>"; };
+		6685BDC61E2E882800F0E414 /* Psi.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Psi.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/Psi.h; sourceTree = "<group>"; };
+		6685BDC71E2E882800F0E414 /* ref.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ref.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/ref.h; sourceTree = "<group>"; };
+		6685BDCC1E2E88A200F0E414 /* Psi-meta.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "Psi-meta.h"; path = "PsiphonTunnel/Psi-meta.h"; sourceTree = "<group>"; };
 		66BDB0201DA6BFCC0079384C /* PsiphonTunnel.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = PsiphonTunnel.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		66BDB0231DA6BFCC0079384C /* PsiphonTunnel.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PsiphonTunnel.h; sourceTree = "<group>"; };
 		66BDB0241DA6BFCC0079384C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		66BDB0291DA6BFCC0079384C /* PsiphonTunnelTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PsiphonTunnelTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		66BDB02E1DA6BFCC0079384C /* PsiphonTunnelTests.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PsiphonTunnelTests.m; sourceTree = "<group>"; };
 		66BDB0301DA6BFCC0079384C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		66BDB03A1DA6C4A70079384C /* Psi.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = Psi.framework; sourceTree = "<group>"; };
 		66BDB03D1DA6C79E0079384C /* rootCAs.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = rootCAs.txt; path = PsiphonTunnel/rootCAs.txt; sourceTree = "<group>"; };
 		66BDB0431DA6C7DD0079384C /* PsiphonTunnel.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = PsiphonTunnel.m; sourceTree = "<group>"; };
 		66BDB04B1DC26CCC0079384C /* SBJson4.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SBJson4.h; sourceTree = "<group>"; };
@@ -90,7 +98,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				66BDB03B1DA6C4A70079384C /* Psi.framework in Frameworks */,
+				660E0B7A1E2D6EB6002BF5D4 /* Psi in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -114,11 +122,25 @@
 			path = Reachability;
 			sourceTree = "<group>";
 		};
+		6685BDC31E2E881200F0E414 /* Psi */ = {
+			isa = PBXGroup;
+			children = (
+				660E0B791E2D6EB6002BF5D4 /* Psi */,
+				6685BDCC1E2E88A200F0E414 /* Psi-meta.h */,
+				6685BDC41E2E882800F0E414 /* GoPsi.h */,
+				6685BDC51E2E882800F0E414 /* GoUniverse.h */,
+				6685BDC61E2E882800F0E414 /* Psi.h */,
+				6685BDC71E2E882800F0E414 /* ref.h */,
+			);
+			name = Psi;
+			sourceTree = "<group>";
+		};
 		66BDB0161DA6BFCC0079384C = {
 			isa = PBXGroup;
 			children = (
 				66BDB03C1DA6C7940079384C /* Resources */,
 				66BDB0221DA6BFCC0079384C /* PsiphonTunnel */,
+				6685BDC31E2E881200F0E414 /* Psi */,
 				66BDB02D1DA6BFCC0079384C /* PsiphonTunnelTests */,
 				66BDB0211DA6BFCC0079384C /* Products */,
 			);
@@ -141,7 +163,6 @@
 				66BDB0231DA6BFCC0079384C /* PsiphonTunnel.h */,
 				66BDB0431DA6C7DD0079384C /* PsiphonTunnel.m */,
 				66BDB0241DA6BFCC0079384C /* Info.plist */,
-				66BDB03A1DA6C4A70079384C /* Psi.framework */,
 			);
 			path = PsiphonTunnel;
 			sourceTree = "<group>";
@@ -192,11 +213,16 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6685BDCB1E2E882800F0E414 /* ref.h in Headers */,
+				6685BDC81E2E882800F0E414 /* GoPsi.h in Headers */,
 				66BDB05D1DC26CCC0079384C /* SBJson4StreamParser.h in Headers */,
 				66BDB05F1DC26CCC0079384C /* SBJson4StreamParserState.h in Headers */,
 				66BDB0311DA6BFCC0079384C /* PsiphonTunnel.h in Headers */,
+				6685BDCA1E2E882800F0E414 /* Psi.h in Headers */,
 				66BDB0651DC26CCC0079384C /* SBJson4StreamWriterState.h in Headers */,
+				6685BDC91E2E882800F0E414 /* GoUniverse.h in Headers */,
 				66BDB05B1DC26CCC0079384C /* SBJson4Parser.h in Headers */,
+				6685BDCD1E2E88A200F0E414 /* Psi-meta.h in Headers */,
 				66BDB05A1DC26CCC0079384C /* SBJson4.h in Headers */,
 				66BDB0611DC26CCC0079384C /* SBJson4StreamTokeniser.h in Headers */,
 				66BDB0631DC26CCC0079384C /* SBJson4StreamWriter.h in Headers */,
@@ -251,7 +277,7 @@
 		66BDB0171DA6BFCC0079384C /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 0810;
+				LastUpgradeCheck = 0820;
 				ORGANIZATIONNAME = "Psiphon Inc.";
 				TargetAttributes = {
 					66BDB01F1DA6BFCC0079384C = {
@@ -342,7 +368,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = "$(ARCHS_STANDARD)";
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
@@ -386,7 +411,6 @@
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				VALID_ARCHS = "";
 				VERSIONING_SYSTEM = "apple-generic";
 				VERSION_INFO_PREFIX = "";
 			};
@@ -396,7 +420,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = "$(ARCHS_STANDARD)";
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
@@ -434,7 +457,6 @@
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALIDATE_PRODUCT = YES;
-				VALID_ARCHS = "";
 				VERSIONING_SYSTEM = "apple-generic";
 				VERSION_INFO_PREFIX = "";
 			};
@@ -450,18 +472,17 @@
 				DYLIB_CURRENT_VERSION = 1;
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
 				ENABLE_BITCODE = NO;
-				FRAMEWORK_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(PROJECT_DIR)/PsiphonTunnel",
-				);
 				INFOPLIST_FILE = PsiphonTunnel/Info.plist;
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
 				IPHONEOS_DEPLOYMENT_TARGET = 9.3;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/PsiphonTunnel/Psi.framework/Versions/A",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.PsiphonTunnel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
-				VALID_ARCHS = "$(ARCHS) x86_64";
 			};
 			name = Debug;
 		};
@@ -475,18 +496,17 @@
 				DYLIB_CURRENT_VERSION = 1;
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
 				ENABLE_BITCODE = NO;
-				FRAMEWORK_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(PROJECT_DIR)/PsiphonTunnel",
-				);
 				INFOPLIST_FILE = PsiphonTunnel/Info.plist;
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
 				IPHONEOS_DEPLOYMENT_TARGET = 9.3;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/PsiphonTunnel/Psi.framework/Versions/A",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.PsiphonTunnel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
-				VALID_ARCHS = "$(ARCHS) x86_64";
 			};
 			name = Release;
 		};
