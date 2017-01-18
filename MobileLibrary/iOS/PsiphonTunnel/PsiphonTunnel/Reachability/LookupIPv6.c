@@ -31,7 +31,7 @@ char *getIPv6ForIPv4(const char *ipv4_str) {
     int error;
     
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = PF_UNSPEC;
+    hints.ai_family = AF_INET6;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_DEFAULT;
     error = getaddrinfo(ipv4_str, NULL, &hints, &res0);

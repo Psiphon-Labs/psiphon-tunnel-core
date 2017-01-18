@@ -23,6 +23,8 @@
  */
 
 #import <UIKit/UIKit.h>
+#import "Reachability.h"
+
 
 //! Project version number for PsiphonTunnel.
 FOUNDATION_EXPORT double PsiphonTunnelVersionNumber;
