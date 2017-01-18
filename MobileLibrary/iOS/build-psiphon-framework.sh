@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 
+# This script takes one optional argument: 'private', if private plugins should
+# be used. It should be omitted if private plugins are not desired.
+if [[ $1 == "private" ]]; then
+  FORCE_PRIVATE_PLUGINS=true
+  echo "TRUE"
+else
+  FORCE_PRIVATE_PLUGINS=false
+  echo "FALSE"
+fi
+
 # -x echos commands. -u exits if an unintialized variable is used.
 # -e exits if a command returns an error.
 set -x -u -e
@@ -31,6 +41,7 @@ FRAMEWORK_BINARY="${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}/Versions/
 # The "OPENSSL" tag enables support of OpenSSL for use by IndistinguishableTLS.
 
 PRIVATE_PLUGINS_TAG=""
+if [[ ${FORCE_PRIVATE_PLUGINS} == true ]]; then PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"; fi
 BUILD_TAGS="OPENSSL IOS ${PRIVATE_PLUGINS_TAG}"
 
 LIBSSL=${BASE_DIR}/OpenSSL-for-iPhone/lib/libssl.a
@@ -55,7 +66,7 @@ export PATH=${GOPATH}/bin:${PATH}
 rm -rf ${GOPATH}
 
 # When updating the pinned rev, you will have to manually delete go-ios-build
-GOMOBILE_PINNED_REV=c4d780faeb85123ee32b88e84fd022739ed8c124
+GOMOBILE_PINNED_REV=a0f998b2d8c7ee81ddbead9202dd5e0184a998ad
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
 TUNNEL_CORE_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core
