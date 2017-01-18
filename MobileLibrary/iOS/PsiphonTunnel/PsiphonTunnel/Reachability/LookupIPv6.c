@@ -19,9 +19,9 @@
 
 #include "LookupIPv6.h"
 
-#include <netdb.h>
 #include <arpa/inet.h>
 #include <err.h>
+#include <netdb.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -41,13 +41,12 @@ char *getIPv6ForIPv4(const char *ipv4_str) {
     }
 
     for (res = res0; res; res = res->ai_next) {
-        if (res->ai_addr->sa_family != AF_INET6) {
-            continue;
+        if (res->ai_family == AF_INET6) {
+            struct sockaddr_in6 *sockaddr = (struct sockaddr_in6*)res->ai_addr;
+            ipv6_str = (char *)malloc(sizeof(char)*(INET6_ADDRSTRLEN)); // INET6_ADDRSTRLEN includes null terminating character
+            inet_ntop(AF_INET6, &(sockaddr->sin6_addr), ipv6_str, INET6_ADDRSTRLEN);
+            break;
         }
-        struct sockaddr_in6 *sockaddr = (struct sockaddr_in6*)res->ai_addr;
-        ipv6_str = (char *)malloc(sizeof(char)*(INET6_ADDRSTRLEN)); // INET6_ADDRSTRLEN includes null terminating character
-        inet_ntop(AF_INET6, &(sockaddr->sin6_addr), ipv6_str, INET6_ADDRSTRLEN);
-        break;
     }
     
     freeaddrinfo(res0);

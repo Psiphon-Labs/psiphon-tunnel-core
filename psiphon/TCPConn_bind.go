@@ -83,14 +83,16 @@ func tcpDial(addr string, config *DialConfig, dialResult chan error) (net.Conn, 
 	ipAddr := ipAddrs[index]
 
 	// Get address type (IPv4 or IPv6)
-	if len(ipAddr) == net.IPv4len {
+	if ipAddr != nil && ipAddr.To4() != nil {
 		ip = make([]byte, 4)
-		copy(ip[:], ipAddr.To4())
+		copy(ip, ipAddr.To4())
 		domain = syscall.AF_INET
-	} else if len(ipAddr) == net.IPv6len {
+	} else if ipAddr != nil && ipAddr.To16() != nil {
 		ip = make([]byte, 16)
-		copy(ip[:], ipAddr.To16())
+		copy(ip, ipAddr.To16())
 		domain = syscall.AF_INET6
+	} else {
+		return nil, common.ContextError(fmt.Errorf("Got invalid ip address: %s", ipAddr.String()))
 	}
 
 	// Create a socket and bind to device, when configured to do so

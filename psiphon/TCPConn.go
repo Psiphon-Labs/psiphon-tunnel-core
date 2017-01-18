@@ -105,14 +105,18 @@ func interruptibleTCPDial(addr string, config *DialConfig) (*TCPConn, error) {
 	// call.
 	go func() {
 		if config.IPv6Synthesizer != nil {
-			// Synthesize an ipv6 address from an ipv4 one
+			// Synthesize an IPv6 address from an IPv4 one
 			// This is for compatibility on DNS64/NAT64 networks
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
+				select {
+				case conn.dialResult <- err:
+				default:
+				}
 				return
 			}
 			ip := net.ParseIP(host)
-			if ip != nil && len(ip) == net.IPv4len {
+			if ip != nil && ip.To4() != nil {
 				synthesizedAddr := config.IPv6Synthesizer.IPv6Synthesize(host)
 				if synthesizedAddr != "" {
 					addr = net.JoinHostPort(synthesizedAddr, port)
