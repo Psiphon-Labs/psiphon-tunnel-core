@@ -184,7 +184,7 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 		retryPeriod := time.Duration(
 			*controller.config.FetchRemoteServerListRetryPeriodSeconds) * time.Second
 
-		if controller.config.RemoteServerListUrl != "" {
+		if controller.config.RemoteServerListURLs != nil {
 			controller.runWaitGroup.Add(1)
 			go controller.remoteServerListFetcher(
 				"common",
@@ -194,7 +194,7 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 				FETCH_REMOTE_SERVER_LIST_STALE_PERIOD)
 		}
 
-		if controller.config.ObfuscatedServerListRootURL != "" {
+		if controller.config.ObfuscatedServerListRootURLs != nil {
 			controller.runWaitGroup.Add(1)
 			go controller.remoteServerListFetcher(
 				"obfuscated",
@@ -205,9 +205,7 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 		}
 	}
 
-	if controller.config.UpgradeDownloadUrl != "" &&
-		controller.config.UpgradeDownloadFilename != "" {
-
+	if controller.config.UpgradeDownloadURLs != nil {
 		controller.runWaitGroup.Add(1)
 		go controller.upgradeDownloader()
 	}
@@ -324,7 +322,7 @@ fetcherLoop:
 		}
 
 	retryLoop:
-		for {
+		for attempt := 0; ; attempt++ {
 			// Don't attempt to fetch while there is no network connectivity,
 			// to avoid alert notice noise.
 			if !WaitForNetworkConnectivity(
@@ -339,6 +337,7 @@ fetcherLoop:
 
 			err := fetcher(
 				controller.config,
+				attempt,
 				tunnel,
 				controller.untunneledDialConfig)
 
@@ -491,7 +490,7 @@ downloadLoop:
 		}
 
 	retryLoop:
-		for {
+		for attempt := 0; ; attempt++ {
 			// Don't attempt to download while there is no network connectivity,
 			// to avoid alert notice noise.
 			if !WaitForNetworkConnectivity(
@@ -506,6 +505,7 @@ downloadLoop:
 
 			err := DownloadUpgrade(
 				controller.config,
+				attempt,
 				handshakeVersion,
 				tunnel,
 				controller.untunneledDialConfig)
@@ -584,25 +584,15 @@ loop:
 
 			if controller.isImpairedProtocol(establishedTunnel.protocol) {
 
+				// Protocol was classified as impaired while this tunnel established.
+				// This is most likely to occur with TunnelPoolSize > 0. We log the
+				// event but take no action. Discarding the tunnel would break the
+				// impaired logic unless we did that (a) only if there are other
+				// unimpaired protocols; (b) only during the first interation of the
+				// ESTABLISH_TUNNEL_WORK_TIME loop. By not discarding here, a true
+				// impaired protocol may require an extra reconnect.
+
 				NoticeAlert("established tunnel with impaired protocol: %s", establishedTunnel.protocol)
-
-				// Take action only when TunnelProtocol is unset, as it limits the
-				// controller to a single protocol. For testing and diagnostics, we
-				// still allow classification when TunnelProtocol is set.
-				if controller.config.TunnelProtocol == "" {
-
-					// Protocol was classified as impaired while this tunnel
-					// established, so discard.
-					controller.discardTunnel(establishedTunnel)
-
-					// Reset establish generator to stop producing tunnels
-					// with impaired protocols.
-					if controller.isEstablishing {
-						controller.stopEstablishing()
-						controller.startEstablishing()
-					}
-					break
-				}
 			}
 
 			tunnelCount, registered := controller.registerTunnel(establishedTunnel)
@@ -693,16 +683,24 @@ loop:
 //
 // Concurrency note: only the runTunnels() goroutine may call classifyImpairedProtocol
 func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
+
 	if failedTunnel.establishedTime.Add(IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION).After(monotime.Now()) {
 		controller.impairedProtocolClassification[failedTunnel.protocol] += 1
 	} else {
 		controller.impairedProtocolClassification[failedTunnel.protocol] = 0
 	}
-	if len(controller.getImpairedProtocols()) == len(protocol.SupportedTunnelProtocols) {
-		// Reset classification if all protocols are classified as impaired as
-		// the network situation (or attack) may not be protocol-specific.
-		// TODO: compare against count of distinct supported protocols for
-		// current known server entries.
+
+	// Reset classification once all known protocols are classified as impaired, as
+	// there is now no way to proceed with only unimpaired protocols. The network
+	// situation (or attack) resulting in classification may not be protocol-specific.
+	//
+	// Note: with controller.config.TunnelProtocol set, this will always reset once
+	// that protocol has reached IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD.
+	if CountNonImpairedProtocols(
+		controller.config.EgressRegion,
+		controller.config.TunnelProtocol,
+		controller.getImpairedProtocols()) == 0 {
+
 		controller.impairedProtocolClassification = make(map[string]int)
 	}
 }
@@ -1090,11 +1088,9 @@ loop:
 			// evade the attack; (b) there's a good chance of false
 			// positives (such as short tunnel durations due to network
 			// hopping on a mobile device).
-			// Impaired protocols logic is not applied when
-			// config.TunnelProtocol is specified.
 			// The edited serverEntry is temporary copy which is not
 			// stored or reused.
-			if i == 0 && controller.config.TunnelProtocol == "" {
+			if i == 0 {
 				serverEntry.DisableImpairedProtocols(impairedProtocols)
 				if len(serverEntry.GetSupportedProtocols()) == 0 {
 					// Skip this server entry, as it has no supported

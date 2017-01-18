@@ -239,11 +239,16 @@ func MakeUntunneledHttpsClient(
 	dialConfig *DialConfig,
 	verifyLegacyCertificate *x509.Certificate,
 	requestUrl string,
+	skipVerify bool,
 	requestTimeout time.Duration) (*http.Client, string, error) {
 
 	// Change the scheme to "http"; otherwise http.Transport will try to do
 	// another TLS handshake inside the explicit TLS session. Also need to
 	// force an explicit port, as the default for "http", 80, won't talk TLS.
+	//
+	// TODO: set http.Transport.DialTLS instead of Dial to avoid this hack?
+	// See: https://golang.org/pkg/net/http/#Transport. DialTLS was added in
+	// Go 1.4 but this code may pre-date that.
 
 	urlComponents, err := url.Parse(requestUrl)
 	if err != nil {
@@ -272,7 +277,7 @@ func MakeUntunneledHttpsClient(
 			Dial: NewTCPDialer(dialConfig),
 			VerifyLegacyCertificate:       verifyLegacyCertificate,
 			SNIServerName:                 host,
-			SkipVerify:                    false,
+			SkipVerify:                    skipVerify,
 			UseIndistinguishableTLS:       useIndistinguishableTLS,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
 		})
@@ -297,6 +302,7 @@ func MakeUntunneledHttpsClient(
 func MakeTunneledHttpClient(
 	config *Config,
 	tunnel *Tunnel,
+	skipVerify bool,
 	requestTimeout time.Duration) (*http.Client, error) {
 
 	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
@@ -307,7 +313,12 @@ func MakeTunneledHttpClient(
 		Dial: tunneledDialer,
 	}
 
-	if config.UseTrustedCACertificatesForStockTLS {
+	if skipVerify {
+
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
+	} else if config.UseTrustedCACertificatesForStockTLS {
+
 		if config.TrustedCACertificatesFilename == "" {
 			return nil, common.ContextError(errors.New(
 				"UseTrustedCACertificatesForStockTLS requires TrustedCACertificatesFilename"))
@@ -336,6 +347,7 @@ func MakeDownloadHttpClient(
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
 	requestUrl string,
+	skipVerify bool,
 	requestTimeout time.Duration) (*http.Client, string, error) {
 
 	var httpClient *http.Client
@@ -343,7 +355,8 @@ func MakeDownloadHttpClient(
 
 	if tunnel != nil {
 		// MakeTunneledHttpClient works with both "http" and "https" schemes
-		httpClient, err = MakeTunneledHttpClient(config, tunnel, requestTimeout)
+		httpClient, err = MakeTunneledHttpClient(
+			config, tunnel, skipVerify, requestTimeout)
 		if err != nil {
 			return nil, "", common.ContextError(err)
 		}
@@ -355,7 +368,7 @@ func MakeDownloadHttpClient(
 		// MakeUntunneledHttpsClient works only with "https" schemes
 		if urlComponents.Scheme == "https" {
 			httpClient, requestUrl, err = MakeUntunneledHttpsClient(
-				untunneledDialConfig, nil, requestUrl, requestTimeout)
+				untunneledDialConfig, nil, requestUrl, skipVerify, requestTimeout)
 			if err != nil {
 				return nil, "", common.ContextError(err)
 			}
@@ -467,6 +480,10 @@ func ResumeDownload(
 	// receive 412 on ETag mismatch.
 	if err == nil &&
 		(response.StatusCode != http.StatusPartialContent &&
+
+			// Certain http servers return 200 OK where we expect 206, so accept that.
+			response.StatusCode != http.StatusOK &&
+
 			response.StatusCode != http.StatusRequestedRangeNotSatisfiable &&
 			response.StatusCode != http.StatusPreconditionFailed &&
 			response.StatusCode != http.StatusNotModified) {
