@@ -118,6 +118,10 @@ func interruptibleTCPDial(addr string, config *DialConfig) (*TCPConn, error) {
 			ip := net.ParseIP(host)
 			if ip != nil && ip.To4() != nil {
 				synthesizedAddr := config.IPv6Synthesizer.IPv6Synthesize(host)
+				// If IPv6Synthesize fails we will try dialing with the
+				// original IPv4 address instead of logging an error. If
+				// the address is unreachable an error will be emitted
+				// from tcpDial.
 				if synthesizedAddr != "" {
 					addr = net.JoinHostPort(synthesizedAddr, port)
 				}

@@ -78,21 +78,20 @@ func tcpDial(addr string, config *DialConfig, dialResult chan error) (net.Conn, 
 		return nil, common.ContextError(err)
 	}
 
-	var ip []byte
+	var ipv4 [4]byte
+	var ipv6 [16]byte
 	var domain int
 	ipAddr := ipAddrs[index]
 
 	// Get address type (IPv4 or IPv6)
 	if ipAddr != nil && ipAddr.To4() != nil {
-		ip = make([]byte, 4)
-		copy(ip, ipAddr.To4())
+		copy(ipv4[:], ipAddr.To4())
 		domain = syscall.AF_INET
 	} else if ipAddr != nil && ipAddr.To16() != nil {
-		ip = make([]byte, 16)
-		copy(ip, ipAddr.To16())
+		copy(ipv6[:], ipAddr.To16())
 		domain = syscall.AF_INET6
 	} else {
-		return nil, common.ContextError(fmt.Errorf("Got invalid ip address: %s", ipAddr.String()))
+		return nil, common.ContextError(fmt.Errorf("Got invalid IP address: %s", ipAddr.String()))
 	}
 
 	// Create a socket and bind to device, when configured to do so
@@ -113,17 +112,13 @@ func tcpDial(addr string, config *DialConfig, dialResult chan error) (net.Conn, 
 		}
 	}
 
-	// Connect socket fd to the address
+	// Connect socket to the server's IP address
 	if domain == syscall.AF_INET {
-		var inet4Addr [4]byte
-		copy(inet4Addr[:], ip)
-		servAddr := syscall.SockaddrInet4{Addr: inet4Addr, Port: port}
-		err = syscall.Connect(socketFd, &servAddr)
+		sockAddr := syscall.SockaddrInet4{Addr: ipv4, Port: port}
+		err = syscall.Connect(socketFd, &sockAddr)
 	} else if domain == syscall.AF_INET6 {
-		var inet6Addr [16]byte
-		copy(inet6Addr[:], ip)
-		servAddr := syscall.SockaddrInet6{Addr: inet6Addr, Port: port}
-		err = syscall.Connect(socketFd, &servAddr)
+		sockAddr := syscall.SockaddrInet6{Addr: ipv6, Port: port}
+		err = syscall.Connect(socketFd, &sockAddr)
 	}
 	if err != nil {
 		syscall.Close(socketFd)
