@@ -55,7 +55,7 @@ export PATH=${GOPATH}/bin:${PATH}
 rm -rf ${GOPATH}
 
 # When updating the pinned rev, you will have to manually delete go-ios-build
-GOMOBILE_PINNED_REV=6a96d4c7cfa48b88f4239efd650b525de7617dc5
+GOMOBILE_PINNED_REV=a0f998b2d8c7ee81ddbead9202dd5e0184a998ad
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
 TUNNEL_CORE_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core
