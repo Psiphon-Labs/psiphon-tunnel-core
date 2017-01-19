@@ -69,7 +69,28 @@ func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, e
 		return []net.IP{ipAddr}, nil
 	}
 
-	socketFd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, 0)
+	// config.DnsServerGetter.GetDnsServers() must return IP addresses
+	ipAddr = net.ParseIP(dnsServer)
+	if ipAddr == nil {
+		return nil, common.ContextError(errors.New("invalid IP address"))
+	}
+
+	var ipv4 [4]byte
+	var ipv6 [16]byte
+	var domain int
+
+	// Get address type (IPv4 or IPv6)
+	if ipAddr.To4() != nil {
+		copy(ipv4[:], ipAddr.To4())
+		domain = syscall.AF_INET
+	} else if ipAddr.To16() != nil {
+		copy(ipv6[:], ipAddr.To16())
+		domain = syscall.AF_INET6
+	} else {
+		return nil, common.ContextError(fmt.Errorf("Got invalid IP address for dns server: %s", ipAddr.String()))
+	}
+
+	socketFd, err := syscall.Socket(domain, syscall.SOCK_DGRAM, 0)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -80,18 +101,15 @@ func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, e
 		return nil, common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))
 	}
 
-	// config.DnsServerGetter.GetDnsServers() must return IP addresses
-	ipAddr = net.ParseIP(dnsServer)
-	if ipAddr == nil {
-		return nil, common.ContextError(errors.New("invalid IP address"))
-	}
-
-	// TODO: IPv6 support
-	var ip [4]byte
-	copy(ip[:], ipAddr.To4())
-	sockAddr := syscall.SockaddrInet4{Addr: ip, Port: DNS_PORT}
+	// Connect socket to the server's IP address
 	// Note: no timeout or interrupt for this connect, as it's a datagram socket
-	err = syscall.Connect(socketFd, &sockAddr)
+	if domain == syscall.AF_INET {
+		sockAddr := syscall.SockaddrInet4{Addr: ipv4, Port: DNS_PORT}
+		err = syscall.Connect(socketFd, &sockAddr)
+	} else if domain == syscall.AF_INET6 {
+		sockAddr := syscall.SockaddrInet6{Addr: ipv6, Port: DNS_PORT}
+		err = syscall.Connect(socketFd, &sockAddr)
+	}
 	if err != nil {
 		return nil, common.ContextError(err)
 	}

@@ -79,6 +79,7 @@ type DialConfig struct {
 	// current active untunneled network DNS server.
 	DeviceBinder    DeviceBinder
 	DnsServerGetter DnsServerGetter
+	IPv6Synthesizer IPv6Synthesizer
 
 	// UseIndistinguishableTLS specifies whether to try to use an
 	// alternative stack for TLS. From a circumvention perspective,
@@ -121,6 +122,11 @@ type DeviceBinder interface {
 type DnsServerGetter interface {
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
+}
+
+// IPv6Synthesizer defines the interface to the external IPv6Synthesize provider
+type IPv6Synthesizer interface {
+	IPv6Synthesize(IPv4Addr string) string
 }
 
 // TimeoutError implements the error interface
