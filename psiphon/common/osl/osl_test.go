@@ -350,7 +350,8 @@ func TestOSL(t *testing.T) {
 				propagationChannelID,
 				signingPublicKey,
 				signingPrivateKey,
-				paveServerEntries)
+				paveServerEntries,
+				nil)
 			if err != nil {
 				t.Fatalf("Pave failed: %s", err)
 			}

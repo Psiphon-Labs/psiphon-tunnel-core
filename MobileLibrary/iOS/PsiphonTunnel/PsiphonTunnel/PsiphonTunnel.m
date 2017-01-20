@@ -19,9 +19,9 @@
 
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
-#import <Psi/Psi.h>
+#import "LookupIPv6.h"
+#import "Psi-meta.h"
 #import "PsiphonTunnel.h"
-#import "Reachability.h"
 #import "json-framework/SBJson4.h"
 
 
@@ -62,6 +62,9 @@
 
         // Not supported on iOS.
         const BOOL useDeviceBinder = FALSE;
+
+        // Must always use IPv6Synthesizer for iOS
+        const BOOL useIPv6Synthesizer = TRUE;
         
         NSString *configStr = [self getConfig];
         if (configStr == nil) {
@@ -76,6 +79,7 @@
                            embeddedServerEntries,
                            self,
                            useDeviceBinder,
+                           useIPv6Synthesizer,
                            &e);
             
             [self logMessage:[NSString stringWithFormat: @"GoPsiStart: %@", res ? @"TRUE" : @"FALSE"]];
@@ -183,6 +187,10 @@
         return nil;
     }
     
+    //
+    // DataStoreDirectory
+    //
+    
     // Some clients will have a data directory that they'd prefer the Psiphon
     // library use, but if not we'll default to the user Library directory.
     NSURL *defaultDataStoreDirectoryURL = [libraryURL URLByAppendingPathComponent:@"datastore" isDirectory:YES];
@@ -205,9 +213,11 @@
         [self logMessage:[NSString stringWithFormat: @"DataStoreDirectory overridden from '%@' to '%@'", [defaultDataStoreDirectoryURL path], config[@"DataStoreDirectory"]]];
     }
     
-    // See previous comment.
-    NSString *defaultRemoteServerListFilename = [[libraryURL URLByAppendingPathComponent:@"remote_server_list" isDirectory:NO] path];
+    //
+    // Remote Server List
+    //
     
+    NSString *defaultRemoteServerListFilename = [[libraryURL URLByAppendingPathComponent:@"remote_server_list" isDirectory:NO] path];
     if (defaultRemoteServerListFilename == nil) {
         [self logMessage:@"Unable to create defaultRemoteServerListFilename"];
         return nil;
@@ -225,6 +235,34 @@
     if (config[@"RemoteServerListUrl"] == nil ||
         config[@"RemoteServerListSignaturePublicKey"] == nil) {
         [self logMessage:@"Remote server list functionality will be disabled"];
+    }
+    
+    //
+    // Obfuscated Server List
+    //
+    
+    NSURL *defaultOSLDirectoryURL = [libraryURL URLByAppendingPathComponent:@"osl" isDirectory:YES];
+    if (defaultOSLDirectoryURL == nil) {
+        [self logMessage:@"Unable to create defaultOSLDirectory"];
+        return nil;
+    }
+    
+    if (config[@"ObfuscatedServerListDownloadDirectory"] == nil) {
+        [fileManager createDirectoryAtURL:defaultOSLDirectoryURL withIntermediateDirectories:YES attributes:nil error:&err];
+        if (err != nil) {
+            [self logMessage:[NSString stringWithFormat: @"Unable to create defaultOSLDirectoryURL: %@", err.localizedDescription]];
+            return nil;
+        }
+        
+        config[@"ObfuscatedServerListDownloadDirectory"] = [defaultOSLDirectoryURL path];
+    }
+    else {
+        [self logMessage:[NSString stringWithFormat: @"ObfuscatedServerListDownloadDirectory overridden from '%@' to '%@'", [defaultOSLDirectoryURL path], config[@"ObfuscatedServerListDownloadDirectory"]]];
+    }
+    
+    // If ObfuscatedServerListRootURL is absent, we'll leave it out, but log the absence.
+    if (config[@"ObfuscatedServerListRootURL"] == nil) {
+        [self logMessage:@"Obfuscated server list functionality will be disabled"];
     }
 
     // Other optional fields not being altered. If not set, their defaults will be used:
@@ -519,6 +557,17 @@
     Reachability *reachability = [Reachability reachabilityForInternetConnection];
     NetworkStatus netstat = [reachability currentReachabilityStatus];
     return (netstat != NotReachable) ? 1 : 0;
+}
+
+- (NSString *)iPv6Synthesize:(NSString *)IPv4Addr {
+    // This function is called to synthesize an ipv6 address from an ipv4 one on a DNS64/NAT64 network
+    char *result = getIPv6ForIPv4([IPv4Addr UTF8String]);
+    if (result != NULL) {
+        NSString *IPv6Addr = [NSString stringWithUTF8String:result];
+        free(result);
+        return IPv6Addr;
+    }
+    return @"";
 }
 
 - (void)notice:(NSString *)noticeJSON {

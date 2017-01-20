@@ -113,6 +113,7 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 		UpstreamProxyCustomHeaders:    config.UpstreamProxyCustomHeaders,
 		PendingConns:                  nil,
 		DeviceBinder:                  nil,
+		IPv6Synthesizer:               nil,
 		DnsServerGetter:               nil,
 		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
@@ -151,7 +152,8 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 
 // Attempt to upload feedback data to server.
 func uploadFeedback(config *DialConfig, feedbackData []byte, url string, headerPieces []string) error {
-	client, parsedUrl, err := MakeUntunneledHttpsClient(config, nil, url, time.Duration(FEEDBACK_UPLOAD_TIMEOUT_SECONDS*time.Second))
+	client, parsedUrl, err := MakeUntunneledHttpsClient(
+		config, nil, url, false, time.Duration(FEEDBACK_UPLOAD_TIMEOUT_SECONDS*time.Second))
 	if err != nil {
 		return err
 	}

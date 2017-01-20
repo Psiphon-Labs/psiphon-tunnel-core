@@ -157,6 +157,7 @@
 				662658E71DCB8CF300872F6C /* Frameworks */,
 				662658E81DCB8CF300872F6C /* Resources */,
 				662659221DCBC8CB00872F6C /* CopyFiles */,
+				6685BDD71E300A7800F0E414 /* ShellScript */,
 			);
 			buildRules = (
 			);
@@ -279,6 +280,22 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		6685BDD71E300A7800F0E414 /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "bash \"${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}/PsiphonTunnel.framework/strip-frameworks.sh\"";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		662658E61DCB8CF300872F6C /* Sources */ = {

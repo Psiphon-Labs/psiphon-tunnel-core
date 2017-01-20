@@ -55,9 +55,13 @@ import (
 // upgrade is still pending install by the outer client.
 func DownloadUpgrade(
 	config *Config,
+	attempt int,
 	handshakeVersion string,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig) error {
+
+	// Note: this downloader doesn't use ETags since many client binaries, with
+	// different embedded values, exist for a single version.
 
 	// Check if complete file already downloaded
 
@@ -68,11 +72,14 @@ func DownloadUpgrade(
 
 	// Select tunneled or untunneled configuration
 
+	downloadURL, _, skipVerify := selectDownloadURL(attempt, config.UpgradeDownloadURLs)
+
 	httpClient, requestUrl, err := MakeDownloadHttpClient(
 		config,
 		tunnel,
 		untunneledDialConfig,
-		config.UpgradeDownloadUrl,
+		downloadURL,
+		skipVerify,
 		DOWNLOAD_UPGRADE_TIMEOUT)
 
 	// If no handshake version is supplied, make an initial HEAD request

@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -120,7 +121,19 @@ type Config struct {
 	// be established to known servers.
 	// This value is supplied by and depends on the Psiphon Network, and is
 	// typically embedded in the client binary.
+	//
+	// Deprecated: Use RemoteServerListURLs. When RemoteServerListURLs is
+	// not nil, this parameter is ignored.
 	RemoteServerListUrl string
+
+	// RemoteServerListURLs is list of URLs which specify locations to fetch
+	// out-of-band server entries. This facility is used when a tunnel cannot
+	// be established to known servers.
+	// This value is supplied by and depends on the Psiphon Network, and is
+	// typically embedded in the client binary.
+	// All URLs must point to the same entity with the same ETag. At least
+	// one DownloadURL must have OnlyAfterAttempts = 0.
+	RemoteServerListURLs []*DownloadURL
 
 	// RemoteServerListDownloadFilename specifies a target filename for
 	// storing the remote server list download. Data is stored in co-located
@@ -138,7 +151,18 @@ type Config struct {
 	// from which to fetch obfuscated server list files.
 	// This value is supplied by and depends on the Psiphon Network, and is
 	// typically embedded in the client binary.
+	//
+	// Deprecated: Use ObfuscatedServerListRootURLs. When
+	// ObfuscatedServerListRootURLs is not nil, this parameter is ignored.
 	ObfuscatedServerListRootURL string
+
+	// ObfuscatedServerListRootURLs is a list of URLs which specify root
+	// locations from which to fetch obfuscated server list files.
+	// This value is supplied by and depends on the Psiphon Network, and is
+	// typically embedded in the client binary.
+	// All URLs must point to the same entity with the same ETag. At least
+	// one DownloadURL must have OnlyAfterAttempts = 0.
+	ObfuscatedServerListRootURLs []*DownloadURL
 
 	// ObfuscatedServerListDownloadDirectory specifies a target directory for
 	// storing the obfuscated remote server list downloads. Data is stored in
@@ -230,6 +254,11 @@ type Config struct {
 	// deployments.
 	DeviceBinder DeviceBinder
 
+	// IPv6Synthesizer is an interface that allows the core tunnel to call
+	// into the host application to synthesize IPv6 addresses from IPv4 ones. This
+	// is used to correctly lookup IPs on DNS64/NAT64 networks.
+	IPv6Synthesizer IPv6Synthesizer
+
 	// DnsServerGetter is an interface that enables the core tunnel to call
 	// into the host application to discover the native network DNS server settings.
 	// This parameter is only applicable to library deployments.
@@ -284,17 +313,30 @@ type Config struct {
 	// download facility which downloads this resource and emits a notice when complete.
 	// This value is supplied by and depends on the Psiphon Network, and is
 	// typically embedded in the client binary.
+	//
+	// Deprecated: Use UpgradeDownloadURLs. When UpgradeDownloadURLs
+	// is not nil, this parameter is ignored.
 	UpgradeDownloadUrl string
 
+	// UpgradeDownloadURLs is list of URLs which specify locations from which to
+	// download a host client upgrade file, when one is available. The core tunnel
+	// controller provides a resumable download facility which downloads this resource
+	// and emits a notice when complete.
+	// This value is supplied by and depends on the Psiphon Network, and is
+	// typically embedded in the client binary.
+	// All URLs must point to the same entity with the same ETag. At least
+	// one DownloadURL must have OnlyAfterAttempts = 0.
+	UpgradeDownloadURLs []*DownloadURL
+
 	// UpgradeDownloadClientVersionHeader specifies the HTTP header name for the
-	// entity at UpgradeDownloadUrl which specifies the client version (an integer
+	// entity at UpgradeDownloadURLs which specifies the client version (an integer
 	// value). A HEAD request may be made to check the version number available at
-	// UpgradeDownloadUrl. UpgradeDownloadClientVersionHeader is required when
-	// UpgradeDownloadUrl is specified.
+	// UpgradeDownloadURLs. UpgradeDownloadClientVersionHeader is required when
+	// UpgradeDownloadURLs is specified.
 	UpgradeDownloadClientVersionHeader string
 
 	// UpgradeDownloadFilename is the local target filename for an upgrade download.
-	// This parameter is required when UpgradeDownloadUrl is specified.
+	// This parameter is required when UpgradeDownloadURLs is specified.
 	// Data is stored in co-located files (UpgradeDownloadFilename.part*) to allow
 	// for resumable downloading.
 	UpgradeDownloadFilename string
@@ -414,6 +456,26 @@ type Config struct {
 	EmitSLOKs bool
 }
 
+// DownloadURL specifies a URL for downloading resources along with parameters
+// for the download strategy.
+type DownloadURL struct {
+
+	// URL is the location of the resource. This string is slightly obfuscated
+	// with base64 encoding to mitigate trivial binary executable string scanning.
+	URL string
+
+	// SkipVerify indicates whether to verify HTTPS certificates. It some
+	// circumvention scenarios, verification is not possible. This must
+	// only be set to true when the resource its own verification mechanism.
+	SkipVerify bool
+
+	// OnlyAfterAttempts specifies how to schedule this URL when downloading
+	// the same resource (same entity, same ETag) from multiple different
+	// candidate locations. For a value of N, this URL is only a candidate
+	// after N rounds of attempting the download from other URLs.
+	OnlyAfterAttempts int
+}
+
 // LoadConfig parses and validates a JSON format Psiphon config JSON
 // string and returns a Config struct populated with config values.
 func LoadConfig(configJson []byte) (*Config, error) {
@@ -506,15 +568,37 @@ func LoadConfig(configJson []byte) (*Config, error) {
 			errors.New("invalid TargetApiProtocol"))
 	}
 
-	if config.UpgradeDownloadUrl != "" &&
-		(config.UpgradeDownloadClientVersionHeader == "" || config.UpgradeDownloadFilename == "") {
-		return nil, common.ContextError(errors.New(
-			"UpgradeDownloadUrl requires UpgradeDownloadClientVersionHeader and UpgradeDownloadFilename"))
+	if config.UpgradeDownloadUrl != "" && config.UpgradeDownloadURLs == nil {
+		config.UpgradeDownloadURLs = promoteLegacyDownloadURL(config.UpgradeDownloadUrl)
+	}
+
+	if config.UpgradeDownloadURLs != nil {
+
+		err := decodeAndValidateDownloadURLs("UpgradeDownloadURLs", config.UpgradeDownloadURLs)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
+		if config.UpgradeDownloadClientVersionHeader == "" {
+			return nil, common.ContextError(errors.New("missing UpgradeDownloadClientVersionHeader"))
+		}
+		if config.UpgradeDownloadFilename == "" {
+			return nil, common.ContextError(errors.New("missing UpgradeDownloadFilename"))
+		}
 	}
 
 	if !config.DisableRemoteServerListFetcher {
 
-		if config.RemoteServerListUrl != "" {
+		if config.RemoteServerListUrl != "" && config.RemoteServerListURLs == nil {
+			config.RemoteServerListURLs = promoteLegacyDownloadURL(config.RemoteServerListUrl)
+		}
+
+		if config.RemoteServerListURLs != nil {
+
+			err := decodeAndValidateDownloadURLs("RemoteServerListURLs", config.RemoteServerListURLs)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
 
 			if config.RemoteServerListSignaturePublicKey == "" {
 				return nil, common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
@@ -525,7 +609,16 @@ func LoadConfig(configJson []byte) (*Config, error) {
 			}
 		}
 
-		if config.ObfuscatedServerListRootURL != "" {
+		if config.ObfuscatedServerListRootURL != "" && config.ObfuscatedServerListRootURLs == nil {
+			config.ObfuscatedServerListRootURLs = promoteLegacyDownloadURL(config.ObfuscatedServerListRootURL)
+		}
+
+		if config.ObfuscatedServerListRootURLs != nil {
+
+			err := decodeAndValidateDownloadURLs("ObfuscatedServerListRootURLs", config.ObfuscatedServerListRootURLs)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
 
 			if config.RemoteServerListSignaturePublicKey == "" {
 				return nil, common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
@@ -593,4 +686,74 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+func promoteLegacyDownloadURL(URL string) []*DownloadURL {
+	downloadURLs := make([]*DownloadURL, 1)
+	downloadURLs[0] = &DownloadURL{
+		URL:               base64.StdEncoding.EncodeToString([]byte(URL)),
+		SkipVerify:        false,
+		OnlyAfterAttempts: 0,
+	}
+	return downloadURLs
+}
+
+func decodeAndValidateDownloadURLs(name string, downloadURLs []*DownloadURL) error {
+
+	hasOnlyAfterZero := false
+	for _, downloadURL := range downloadURLs {
+		if downloadURL.OnlyAfterAttempts == 0 {
+			hasOnlyAfterZero = true
+		}
+		decodedURL, err := base64.StdEncoding.DecodeString(downloadURL.URL)
+		if err != nil {
+			return fmt.Errorf("failed to decode URL in %s: %s", name, err)
+		}
+
+		downloadURL.URL = string(decodedURL)
+	}
+
+	var err error
+	if !hasOnlyAfterZero {
+		err = fmt.Errorf("must be at least one DownloadURL with OnlyAfterAttempts = 0 in %s", name)
+	}
+
+	return err
+}
+
+func selectDownloadURL(attempt int, downloadURLs []*DownloadURL) (string, string, bool) {
+
+	// The first OnlyAfterAttempts = 0 URL is the canonical URL. This
+	// is the value used as the key for SetUrlETag when multiple download
+	// URLs can be used to fetch a single entity.
+
+	canonicalURL := ""
+	for _, downloadURL := range downloadURLs {
+		if downloadURL.OnlyAfterAttempts == 0 {
+			canonicalURL = downloadURL.URL
+			break
+		}
+	}
+
+	candidates := make([]int, 0)
+	for index, URL := range downloadURLs {
+		if attempt >= URL.OnlyAfterAttempts {
+			candidates = append(candidates, index)
+		}
+	}
+
+	if len(candidates) < 1 {
+		// This case is not expected, as decodeAndValidateDownloadURLs
+		// should reject configs that would have no candidates for
+		// 0 attempts.
+		return "", "", true
+	}
+
+	selection, err := common.MakeSecureRandomInt(len(candidates))
+	if err != nil {
+		selection = 0
+	}
+	downloadURL := downloadURLs[candidates[selection]]
+
+	return downloadURL.URL, canonicalURL, downloadURL.SkipVerify
 }

@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 
+# This script takes one optional argument: 'private', if private plugins should
+# be used. It should be omitted if private plugins are not desired.
+if [[ $1 == "private" ]]; then
+  FORCE_PRIVATE_PLUGINS=true
+  echo "TRUE"
+else
+  FORCE_PRIVATE_PLUGINS=false
+  echo "FALSE"
+fi
+
 # -x echos commands. -u exits if an unintialized variable is used.
 # -e exits if a command returns an error.
 set -x -u -e
@@ -31,6 +41,7 @@ FRAMEWORK_BINARY="${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}/Versions/
 # The "OPENSSL" tag enables support of OpenSSL for use by IndistinguishableTLS.
 
 PRIVATE_PLUGINS_TAG=""
+if [[ ${FORCE_PRIVATE_PLUGINS} == true ]]; then PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"; fi
 BUILD_TAGS="OPENSSL IOS ${PRIVATE_PLUGINS_TAG}"
 
 LIBSSL=${BASE_DIR}/OpenSSL-for-iPhone/lib/libssl.a
@@ -55,10 +66,9 @@ export PATH=${GOPATH}/bin:${PATH}
 rm -rf ${GOPATH}
 
 # When updating the pinned rev, you will have to manually delete go-ios-build
-GOMOBILE_PINNED_REV=72eef9d09307f0b437153fd152229f56edc0ab20
+GOMOBILE_PINNED_REV=a0f998b2d8c7ee81ddbead9202dd5e0184a998ad
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
-IOS_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-ios
 TUNNEL_CORE_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core
 OPENSSL_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Inc/openssl
 
@@ -87,16 +97,6 @@ mkdir -p ${INTERMEDIATE_OUPUT_DIR}
 if [[ $? != 0 ]]; then
   echo "FAILURE: mkdir -p ${INTERMEDIATE_OUPUT_DIR}"
   exit 1
-fi
-
-if [ ! -e ${IOS_SRC_DIR} ]; then
-  echo "iOS source directory (${IOS_SRC_DIR}) not found, creating link"
-  mkdir -p $(dirname ${IOS_SRC_DIR})
-  ln -s $(pwd -P) $IOS_SRC_DIR
-  if [[ $? != 0 ]]; then
-    echo "..Could not create symlink, aborting"
-    exit 1
-  fi
 fi
 
 # arg: binary_path
@@ -142,29 +142,6 @@ go get -u golang.org/x/mobile/cmd/gomobile
 cd ${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 git checkout master
 git checkout -b pinned ${GOMOBILE_PINNED_REV}
-
-# Gomobile messes up the build tags by quoting them incorrectly. We'll hack a fix for it.
-# First do a grep to see if this code is still there (or has been fixed upstream).
-grep -q 'strconv.Quote' ./build.go 
-if [[ $? != 0 ]]; then
-  echo "Upstream gomobile code has changed, breaking hacks."
-  exit 1
-fi
-# Then do the hack-fix-replacement.
-perl -i -pe 's/"-tags="\+strconv\.Quote\(strings.Join\(ctx\.BuildTags, ","\)\),/"-tags",strings.Join(ctx.BuildTags, " "),/g' ./build.go
-# We also need to remove the now-unused strconv import.
-perl -i -pe 's/"strconv"//g' ./build.go
-
-# Gomobile's iOS code puts an *additional* build tags flag at the end of the command line. This
-# overrides any existing build tags and messes up our builds. So we'll hack a fix for that, too.
-# First do a grep to see if this code is still there (or has been fixed upstream).
-grep -q '"-tags=ios",' ./bind_iosapp.go 
-if [[ $? != 0 ]]; then
-  echo "Upstream gomobile code has changed, breaking hacks."
-  exit 1
-fi
-# Then do the hack-fix-replacement.
-perl -i -pe 's/(.+)"-tags=ios",(.+)/\tctx.BuildTags = append(ctx.BuildTags, "ios")\n\1\2/g' ./bind_iosapp.go
 
 go install
 ${GOPATH}/bin/gomobile init -v
@@ -212,7 +189,8 @@ IOS_CGO_BUILD_FLAGS='// #cgo darwin CFLAGS: -I'"${OPENSSL_INCLUDE}"'\
 
 LC_ALL=C sed -i -- "s|// #cgo pkg-config: libssl|${IOS_CGO_BUILD_FLAGS}|" "${OPENSSL_SRC_DIR}/build.go"
 
-${GOPATH}/bin/gomobile bind -v -x -target ios -tags="${BUILD_TAGS}" -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+# We're using a generated-code prefix to workaround https://github.com/golang/go/issues/18693
+${GOPATH}/bin/gomobile bind -v -x -target ios -prefix Go -tags="${BUILD_TAGS}" -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 rc=$?; if [[ $rc != 0 ]]; then
   echo "FAILURE: ${GOPATH}/bin/gomobile bind -target ios -tags="${BUILD_TAGS}" -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
   exit $rc
@@ -229,14 +207,14 @@ rm -rf "${BUILD_DIR}"
 rm -rf "${BUILD_DIR}-SIMULATOR"
 
 # Build the outer framework for phones...
-xcodebuild clean build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -configuration Release -sdk iphoneos ONLY_ACTIVE_ARCH=NO -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT} CONFIGURATION_BUILD_DIR="${BUILD_DIR}"
+xcodebuild clean build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" CODE_SIGNING_ALLOWED="NO" -configuration Release -sdk iphoneos ONLY_ACTIVE_ARCH=NO -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT} CONFIGURATION_BUILD_DIR="${BUILD_DIR}"
 rc=$?; if [[ $rc != 0 ]]; then
   echo "FAILURE: xcodebuild iphoneos"
   exit $rc
 fi
 
 # ...and for the simulator.
-xcodebuild clean build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -configuration Release -sdk iphonesimulator ARCHS=x86_64 VALID_ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT} CONFIGURATION_BUILD_DIR="${BUILD_DIR}-SIMULATOR"
+xcodebuild clean build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" CODE_SIGNING_ALLOWED="NO" -configuration Release -sdk iphonesimulator ARCHS=x86_64 VALID_ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO -project ${UMBRELLA_FRAMEWORK_XCODE_PROJECT} CONFIGURATION_BUILD_DIR="${BUILD_DIR}-SIMULATOR"
 rc=$?; if [[ $rc != 0 ]]; then
   echo "FAILURE: xcodebuild iphonesimulator"
   exit $rc
@@ -251,5 +229,11 @@ fi
 
 # Delete the temporary simulator build files.
 rm -rf "${BUILD_DIR}-SIMULATOR"
+
+# Jenkins loses symlinks from the framework directory, which results in a build
+# artifact that is invalid to use in an App Store app. Instead, we will zip the
+# resulting build and use that as the artifact.
+cd "${BUILD_DIR}"
+zip --recurse-paths --symlinks build.zip * --exclude "*.DS_Store"
 
 echo "BUILD DONE"

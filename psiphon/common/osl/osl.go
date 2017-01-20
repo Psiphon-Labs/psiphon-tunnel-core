@@ -30,8 +30,6 @@
 package osl
 
 import (
-	"bytes"
-	"compress/zlib"
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/sha256"
@@ -41,7 +39,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/url"
 	"path"
@@ -705,7 +702,8 @@ func (config *Config) Pave(
 	propagationChannelID string,
 	signingPublicKey string,
 	signingPrivateKey string,
-	paveServerEntries []map[time.Time]string) ([]*PaveFile, error) {
+	paveServerEntries []map[time.Time]string,
+	logCallback func(int, time.Time, string)) ([]*PaveFile, error) {
 
 	config.ReloadableFile.RLock()
 	defer config.ReloadableFile.RUnlock()
@@ -749,7 +747,7 @@ func (config *Config) Pave(
 						return nil, common.ContextError(err)
 					}
 
-					boxedServerEntries, err := box(fileKey, compress(signedServerEntries))
+					boxedServerEntries, err := box(fileKey, common.Compress(signedServerEntries))
 					if err != nil {
 						return nil, common.ContextError(err)
 					}
@@ -764,6 +762,10 @@ func (config *Config) Pave(
 						Name:     fileName,
 						Contents: boxedServerEntries,
 					})
+
+					if logCallback != nil {
+						logCallback(schemeIndex, oslTime, fileName)
+					}
 				}
 
 				oslTime = oslTime.Add(
@@ -788,7 +790,7 @@ func (config *Config) Pave(
 
 	paveFiles = append(paveFiles, &PaveFile{
 		Name:     REGISTRY_FILENAME,
-		Contents: compress(signedRegistry),
+		Contents: common.Compress(signedRegistry),
 	})
 
 	return paveFiles, nil
@@ -986,7 +988,7 @@ func GetOSLFilename(baseDirectory string, oslID []byte) string {
 func UnpackRegistry(
 	compressedRegistry []byte, signingPublicKey string) (*Registry, []byte, error) {
 
-	packagedRegistry, err := uncompress(compressedRegistry)
+	packagedRegistry, err := common.Decompress(compressedRegistry)
 	if err != nil {
 		return nil, nil, common.ContextError(err)
 	}
@@ -1168,7 +1170,7 @@ func (registry *Registry) UnpackOSL(
 		return "", common.ContextError(err)
 	}
 
-	dataPackage, err := uncompress(decryptedContents)
+	dataPackage, err := common.Decompress(decryptedContents)
 	if err != nil {
 		return "", common.ContextError(err)
 	}
@@ -1277,25 +1279,4 @@ func unbox(key, box []byte) ([]byte, error) {
 		return nil, common.ContextError(errors.New("unbox failed"))
 	}
 	return plaintext, nil
-}
-
-func compress(data []byte) []byte {
-	var compressedData bytes.Buffer
-	writer := zlib.NewWriter(&compressedData)
-	writer.Write(data)
-	writer.Close()
-	return compressedData.Bytes()
-}
-
-func uncompress(data []byte) ([]byte, error) {
-	reader, err := zlib.NewReader(bytes.NewReader(data))
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-	uncompressedData, err := ioutil.ReadAll(reader)
-	reader.Close()
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-	return uncompressedData, nil
 }

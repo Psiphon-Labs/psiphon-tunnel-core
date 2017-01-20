@@ -37,6 +37,7 @@ type PsiphonProvider interface {
 	Notice(noticeJSON string)
 	HasNetworkConnectivity() int
 	BindToDevice(fileDescriptor int) error
+	IPv6Synthesize(IPv4Addr string) string
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
 }
@@ -49,7 +50,7 @@ var controllerWaitGroup *sync.WaitGroup
 func Start(
 	configJson, embeddedServerEntryList string,
 	provider PsiphonProvider,
-	useDeviceBinder bool) error {
+	useDeviceBinder bool, useIPv6Synthesizer bool) error {
 
 	controllerMutex.Lock()
 	defer controllerMutex.Unlock()
@@ -67,6 +68,10 @@ func Start(
 	if useDeviceBinder {
 		config.DeviceBinder = provider
 		config.DnsServerGetter = provider
+	}
+
+	if useIPv6Synthesizer {
+		config.IPv6Synthesizer = provider
 	}
 
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(

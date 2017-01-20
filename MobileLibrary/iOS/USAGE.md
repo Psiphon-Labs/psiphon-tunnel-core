@@ -9,6 +9,10 @@ blocked by censors.
 The Psiphon Library is available as a `.framework` that can be easily included
 in your project using these instructions.
 
+## Using the Psiphon network
+
+In order to use a Psiphon library over the Psiphon network, you need to contact Psiphon to obtain connection parameters to use with your application. Please email us at [info@psiphon.ca](mailto:info@psiphon.ca).
+
 ## Using the Library in your App
 
 **First step:** Review the sample app, located under `SampleApps`.
@@ -28,7 +32,15 @@ This code is a canonical guide for integrating the Library.
 
 5. In the "Build Settings" for the target, click the `+` at the top, then "Add User-Defined Setting". Name the new setting `STRIP_BITCODE_FROM_COPIED_FILES` and set it to `NO`.
 
-6. In target Build Phases, add a "Copy Files" phase. Set "Destination" to "Frameworks". Add `PsiphonTunnel.framework` to the list. Ensure "Code Sign on Copy" is checked.
+6. In the "Build Phases" for the target, add a "Copy Files" phase. Set "Destination" to "Frameworks". Add `PsiphonTunnel.framework` to the list. Ensure "Code Sign on Copy" is checked.
+
+7. In the "Build Phases" for the target, add a "Run Script" phase. Set the script contents to:
+
+   ```no-highlight
+   bash "${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}/PsiphonTunnel.framework/strip-frameworks.sh"
+   ```
+
+   This step is required to work around an [App Store submission validation bug](http://www.openradar.me/23681704) that rejects apps containing a framework with simulator slices.
 
 ## Compiling and testing
 

@@ -20,6 +20,7 @@
 package common
 
 import (
+	"bytes"
 	"testing"
 	"time"
 )
@@ -50,5 +51,21 @@ func TestMakeRandomPeriod(t *testing.T) {
 
 	if res1 == res2 {
 		t.Error("duration should have randomness difference between calls")
+	}
+}
+
+func TestCompress(t *testing.T) {
+
+	originalData := []byte("test data")
+
+	compressedData := Compress(originalData)
+
+	decompressedData, err := Decompress(compressedData)
+	if err != nil {
+		t.Error("Uncompress failed: %s", err)
+	}
+
+	if bytes.Compare(originalData, decompressedData) != 0 {
+		t.Error("decompressed data doesn't match original data")
 	}
 }
