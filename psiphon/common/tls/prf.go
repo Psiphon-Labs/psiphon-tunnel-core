@@ -189,6 +189,10 @@ func lookupTLSHash(hash uint8) (crypto.Hash, error) {
 		return crypto.SHA256, nil
 	case hashSHA384:
 		return crypto.SHA384, nil
+	// [Psiphon]
+	// hashSHA512 is required for EmulateChrome.
+	case hashSHA512:
+		return crypto.SHA512, nil
 	default:
 		return 0, errors.New("tls: unsupported hash algorithm")
 	}

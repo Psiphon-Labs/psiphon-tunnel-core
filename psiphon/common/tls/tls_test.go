@@ -333,6 +333,8 @@ func TestTLSUniqueMatches(t *testing.T) {
 }
 
 func TestVerifyHostname(t *testing.T) {
+	// [Psiphon]
+	// Disable due to internal import
 	//testenv.MustHaveExternalNetwork(t)
 
 	c, err := Dial("tcp", "www.google.com:https", nil)
@@ -359,6 +361,8 @@ func TestVerifyHostname(t *testing.T) {
 }
 
 func TestVerifyHostnameResumed(t *testing.T) {
+	// [Psiphon]
+	// Disable due to internal import
 	//testenv.MustHaveExternalNetwork(t)
 
 	config := &Config{

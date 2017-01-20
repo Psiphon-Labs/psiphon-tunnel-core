@@ -39,6 +39,9 @@ var testConfig *Config
 
 func allCipherSuites() []uint16 {
 
+	// [Psiphon]
+	// Ignore cipher suites added for EmulateChrome.
+
 	//ids := make([]uint16, len(cipherSuites))
 	//for i, suite := range cipherSuites {
 	//	ids[i] = suite.id

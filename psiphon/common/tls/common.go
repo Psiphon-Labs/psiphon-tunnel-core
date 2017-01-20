@@ -83,6 +83,11 @@ const (
 	extensionSessionTicket       uint16 = 35
 	extensionNextProtoNeg        uint16 = 13172 // not IANA assigned
 	extensionRenegotiationInfo   uint16 = 0xff01
+
+	// [Psiphon]
+	// Additional extensions required for EmulateChrome.
+	extensionExtendedMasterSecret uint16 = 23
+	extensionChannelID            uint16 = 30032 // not IANA assigned
 )
 
 // TLS signaling cipher suite values
@@ -132,6 +137,10 @@ const (
 	hashSHA1   uint8 = 2
 	hashSHA256 uint8 = 4
 	hashSHA384 uint8 = 5
+
+	// [Psiphon]
+	// hashSHA512 is required for EmulateChrome.
+	hashSHA512 uint8 = 6
 )
 
 // Signature algorithms for TLS 1.2 (See RFC 5246, section A.4.1)
@@ -506,6 +515,14 @@ type Config struct {
 	// Use of KeyLogWriter compromises security and should only be
 	// used for debugging.
 	KeyLogWriter io.Writer
+
+	// [Psiphon]
+	// EmulateChrome enables a network traffic obfuscation facility that
+	// configures the client hello to match the traffic signature of modern
+	// Chrome browsers using BoringSSL. This affects the selection and
+	// preference order of ciphersuites, and selection and order of extentions.
+	// CipherSuites is ignored when EmulateChrome is on.
+	EmulateChrome bool
 
 	serverInitOnce sync.Once // guards calling (*Config).serverInit
 

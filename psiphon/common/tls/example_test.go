@@ -73,6 +73,9 @@ yuGnBXj8ytqU0CwIPX4WecigUCAkVDNx
 	conn.Close()
 }
 
+// [Psiphon]
+// Disable test due to TLSClientConfig type mismatch
+
 /*
 func ExampleConfig_keyLogWriter() {
 	// Debugging TLS applications by decrypting a network traffic capture.

@@ -23,6 +23,7 @@ import (
 	"crypto/rand"
 )
 
+// [Psiphon]
 // Obfuscated Session Tickets
 //
 // Obfuscated session tickets is a network traffic obfuscation protocol that appears

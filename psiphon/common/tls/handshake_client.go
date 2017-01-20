@@ -7,6 +7,9 @@ package tls
 import (
 	"bytes"
 	"crypto"
+	"crypto/rand"
+	"math/big"
+
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/subtle"
@@ -152,6 +155,85 @@ NextCipherSuite:
 		}
 	}
 
+	// [Psiphon]
+	// Re-configure extensions as required for EmulateChrome.
+	if c.config.EmulateChrome {
+
+		hello.emulateChrome = true
+
+		// Sanity check that expected and required configuration is present
+		if len(hello.compressionMethods) != 1 ||
+			hello.compressionMethods[0] != compressionNone ||
+			!hello.ticketSupported ||
+			!hello.ocspStapling ||
+			!hello.scts ||
+			len(hello.supportedPoints) != 1 ||
+			hello.supportedPoints[0] != pointFormatUncompressed ||
+			!hello.secureRenegotiationSupported {
+
+			return errors.New("tls: unexpected configuration for EmulateChrome")
+		}
+
+		hello.supportedCurves = []CurveID{
+			CurveID(randomGREASEValue()),
+			X25519,
+			CurveP256, // secp256r1
+			CurveP384, // secp384r1
+		}
+
+		hello.cipherSuites = []uint16{
+			randomGREASEValue(),
+			TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+			TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+			TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_OLD,
+			TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_OLD,
+			TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+			TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+			TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+			TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			TLS_RSA_WITH_AES_128_GCM_SHA256,
+			TLS_RSA_WITH_AES_256_GCM_SHA384,
+			TLS_RSA_WITH_AES_128_CBC_SHA,
+			TLS_RSA_WITH_AES_256_CBC_SHA,
+			TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+		}
+
+		if hello.vers >= VersionTLS12 {
+			hello.signatureAndHashes = []signatureAndHash{
+				{hashSHA512, signatureRSA},
+				{hashSHA512, signatureECDSA},
+				{hashSHA256, signatureRSA},
+				{hashSHA256, signatureECDSA},
+				{hashSHA384, signatureRSA},
+				{hashSHA384, signatureECDSA},
+				{hashSHA1, signatureRSA},
+				{hashSHA1, signatureECDSA},
+			}
+		}
+
+		hello.nextProtoNeg = false
+
+		hello.alpnProtocols = []string{"h2", "http/1.1"}
+
+		// The extended master secret and channel ID extensions
+		// code is from:
+		//
+		// https://github.com/google/boringssl/tree/master/ssl/test/runner
+		// https://github.com/google/boringssl/blob/master/LICENSE
+
+		hello.extendedMasterSecretSupported = true
+		// TODO: implement actual support, in case negotiated
+		// https://github.com/google/boringssl/commit/7571292eaca1745f3ecda2374ba1e8163b58c3b5
+
+		hello.channelIDSupported = true
+		// TODO: implement actual support, in case negotiated
+		// https://github.com/google/boringssl/commit/d30a990850457657e3209cb0c27fbe89b3df7ad2
+	}
+
 	if _, err := c.writeRecord(recordTypeHandshake, hello.marshal()); err != nil {
 		return err
 	}
@@ -254,6 +336,12 @@ NextCipherSuite:
 	c.handshakeComplete = true
 	c.cipherSuite = suite.id
 	return nil
+}
+
+func randomGREASEValue() uint16 {
+	values := []uint16{0x0A0A, 0x1A1A, 0x2A2A, 0x3A3A, 0x4A4A, 0x5A5A, 0x6A6A, 0x7A7A, 0x8A8A, 0x9A9A, 0xAAAA, 0xBABA, 0xCACA, 0xDADA, 0xEAEA, 0xFAFA}
+	i, _ := rand.Int(rand.Reader, big.NewInt(int64(len(values))))
+	return values[int(i.Int64())]
 }
 
 func (hs *clientHandshakeState) doFullHandshake() error {
