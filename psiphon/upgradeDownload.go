@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
@@ -80,7 +81,7 @@ func DownloadUpgrade(
 		untunneledDialConfig,
 		downloadURL,
 		skipVerify,
-		DOWNLOAD_UPGRADE_TIMEOUT)
+		time.Duration(*config.DownloadUpgradeTimeoutSeconds)*time.Second)
 
 	// If no handshake version is supplied, make an initial HEAD request
 	// to get the current version from the version header.
