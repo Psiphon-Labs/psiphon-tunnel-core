@@ -408,6 +408,7 @@ func MakeDownloadHttpClient(
 func ResumeDownload(
 	httpClient *http.Client,
 	requestUrl string,
+	userAgent string,
 	downloadFilename string,
 	ifNoneMatchETag string) (int64, string, error) {
 
@@ -450,6 +451,8 @@ func ResumeDownload(
 	if err != nil {
 		return 0, "", common.ContextError(err)
 	}
+
+	request.Header.Set("User-Agent", userAgent)
 
 	request.Header.Add("Range", fmt.Sprintf("bytes=%d-", fileInfo.Size()))
 

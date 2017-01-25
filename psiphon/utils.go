@@ -32,6 +32,21 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
+// MakePsiphonUserAgent constructs a User-Agent value to use for web API,
+// download, etc. requests. The User-Agent includes useful stats information.
+// This User-Agent is to be used only for HTTPS requests, where the header
+// cannot be seen by an adversary.
+func MakePsiphonUserAgent(config *Config) string {
+	userAgent := "psiphon-tunnel-core"
+	if config.ClientVersion != "" {
+		userAgent += fmt.Sprintf("/%s", config.ClientVersion)
+	}
+	if config.ClientPlatform != "" {
+		userAgent += fmt.Sprintf(" (%s)", config.ClientPlatform)
+	}
+	return userAgent
+}
+
 func DecodeCertificate(encodedCertificate string) (certificate *x509.Certificate, err error) {
 	derEncodedCertificate, err := base64.StdEncoding.DecodeString(encodedCertificate)
 	if err != nil {

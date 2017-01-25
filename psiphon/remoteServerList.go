@@ -334,7 +334,11 @@ func downloadRemoteServerListFile(
 	}
 
 	n, responseETag, err := ResumeDownload(
-		httpClient, requestURL, destinationFilename, lastETag)
+		httpClient,
+		requestURL,
+		MakePsiphonUserAgent(config),
+		destinationFilename,
+		lastETag)
 
 	NoticeRemoteServerListResourceDownloadedBytes(sourceURL, n)
 
