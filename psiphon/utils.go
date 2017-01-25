@@ -32,9 +32,9 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
-// MakePsiphonUserAgent constructs a User-Agent value to use for web API,
-// download, etc. requests. The User-Agent includes useful stats information.
-// This User-Agent is to be used only for HTTPS requests, where the header
+// MakePsiphonUserAgent constructs a User-Agent value to use for web service
+// requests made by the tunnel-core client. The User-Agent includes useful stats
+// information; it is to be used only for HTTPS requests, where the header
 // cannot be seen by an adversary.
 func MakePsiphonUserAgent(config *Config) string {
 	userAgent := "psiphon-tunnel-core"
