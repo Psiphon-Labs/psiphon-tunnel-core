@@ -139,7 +139,12 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 	}
 
 	for i := 0; i < FEEDBACK_UPLOAD_MAX_RETRIES; i++ {
-		err := uploadFeedback(untunneledDialConfig, secureFeedback, url, headerPieces)
+		err := uploadFeedback(
+			untunneledDialConfig,
+			secureFeedback,
+			url,
+			MakePsiphonUserAgent(config),
+			headerPieces)
 		if err != nil {
 			NoticeAlert("failed to upload feedback: %s", err)
 			time.Sleep(FEEDBACK_UPLOAD_RETRY_DELAY_SECONDS * time.Second)
@@ -151,7 +156,7 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 }
 
 // Attempt to upload feedback data to server.
-func uploadFeedback(config *DialConfig, feedbackData []byte, url string, headerPieces []string) error {
+func uploadFeedback(config *DialConfig, feedbackData []byte, url, userAgent string, headerPieces []string) error {
 	client, parsedUrl, err := MakeUntunneledHttpsClient(
 		config, nil, url, false, time.Duration(FEEDBACK_UPLOAD_TIMEOUT_SECONDS*time.Second))
 	if err != nil {
@@ -162,6 +167,9 @@ func uploadFeedback(config *DialConfig, feedbackData []byte, url string, headerP
 	if err != nil {
 		return common.ContextError(err)
 	}
+
+	req.Header.Set("User-Agent", userAgent)
+
 	req.Header.Set(headerPieces[0], headerPieces[1])
 
 	resp, err := client.Do(req)

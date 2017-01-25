@@ -139,7 +139,11 @@ func DownloadUpgrade(
 		"%s.%s", config.UpgradeDownloadFilename, availableClientVersion)
 
 	n, _, err := ResumeDownload(
-		httpClient, requestUrl, downloadFilename, "")
+		httpClient,
+		requestUrl,
+		MakePsiphonUserAgent(config),
+		downloadFilename,
+		"")
 
 	NoticeClientUpgradeDownloadedBytes(n)
 
