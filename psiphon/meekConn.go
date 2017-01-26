@@ -584,6 +584,8 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (io.ReadCloser, error) {
 
 		request.Header.Set("Content-Type", "application/octet-stream")
 
+		meek.additionalHeaders, _ = common.UserAgentIfUnset(meek.additionalHeaders)
+
 		// Set additional headers to the HTTP request using the same method we use for adding
 		// custom headers to HTTP proxy requests
 		for name, value := range meek.additionalHeaders {

@@ -20,6 +20,7 @@
 package common
 
 import (
+	"net/http"
 	"sync/atomic"
 )
 
@@ -35,4 +36,23 @@ func PickUserAgent() string {
 		return generator.(func() string)()
 	}
 	return ""
+}
+
+func UserAgentIfUnset(h http.Header) (http.Header, bool) {
+	internalUserAgent := false
+	if _, ok := h["User-Agent"]; !ok {
+		if h == nil {
+			h = make(map[string][]string)
+		}
+
+		if FlipCoin() {
+			h.Set("User-Agent", PickUserAgent())
+		} else {
+			h.Set("User-Agent", "")
+		}
+
+		internalUserAgent = true
+	}
+
+	return h, internalUserAgent
 }

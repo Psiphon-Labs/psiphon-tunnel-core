@@ -834,7 +834,7 @@ func (serverContext *ServerContext) getBaseParams() requestJSONObject {
 		}
 		params["meek_transformed_host_name"] = transformedHostName
 
-		if tunnel.dialStats.HasUserAgent {
+		if tunnel.dialStats.InternalUserAgent {
 			params["user_agent"] = tunnel.dialStats.UserAgent
 		}
 	}
