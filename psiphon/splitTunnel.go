@@ -69,6 +69,7 @@ import (
 type SplitTunnelClassifier struct {
 	mutex                    sync.RWMutex
 	fetchRoutesUrlFormat     string
+	userAgent                string
 	routesSignaturePublicKey string
 	dnsServerAddress         string
 	dnsTunneler              Tunneler
@@ -86,6 +87,7 @@ type classification struct {
 func NewSplitTunnelClassifier(config *Config, tunneler Tunneler) *SplitTunnelClassifier {
 	return &SplitTunnelClassifier{
 		fetchRoutesUrlFormat:     config.SplitTunnelRoutesUrlFormat,
+		userAgent:                MakePsiphonUserAgent(config),
 		routesSignaturePublicKey: config.SplitTunnelRoutesSignaturePublicKey,
 		dnsServerAddress:         config.SplitTunnelDnsServer,
 		dnsTunneler:              tunneler,
@@ -220,6 +222,8 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
+
+	request.Header.Set("User-Agent", classifier.userAgent)
 
 	etag, err := GetSplitTunnelRoutesETag(tunnel.serverContext.clientRegion)
 	if err != nil {
