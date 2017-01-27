@@ -273,13 +273,10 @@
     // * UpgradeDownloadFilename
     // * timeout fields
     
-    // TODO: Is LocalSocksProxyPort relevant for iOS?
-    
     //
     // Fill in the rest of the values.
     //
     
-    // TODO: Should be configurable?
     config[@"EmitBytesTransferred"] = [NSNumber numberWithBool:TRUE];
 
     config[@"DeviceRegion"] = [PsiphonTunnel getDeviceRegion];
@@ -302,7 +299,6 @@
     // Some of them require default values.
     //
     
-    // TODO: After updating tunnel-core in the framework, verify that this value is getting through to Kibana.
     if (config[@"ClientPlatform"] == nil) {
         config[@"ClientPlatform"] = @"iOS-Library";
     }
