@@ -21,6 +21,7 @@ package osl
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"testing"
@@ -317,31 +318,25 @@ func TestOSL(t *testing.T) {
 
 			// Dummy server entry payloads will be the OSL ID, which the following
 			// tests use to verify that the correct OSL file decrypts successfully.
-			paveServerEntries := make([]map[time.Time]string, len(config.Schemes))
-			for schemeIndex, scheme := range config.Schemes {
+			paveServerEntries := make(map[string][]string)
+			for _, scheme := range config.Schemes {
 
-				paveServerEntries[schemeIndex] = make(map[time.Time]string)
-
-				slokTimePeriodsPerOSL := 1
-				for _, keySplit := range scheme.SeedPeriodKeySplits {
-					slokTimePeriodsPerOSL *= keySplit.Total
-				}
+				oslDuration := scheme.GetOSLDuration()
 
 				oslTime := scheme.epoch
 				for oslTime.Before(endTime) {
+
 					firstSLOKRef := &slokReference{
 						PropagationChannelID: propagationChannelID,
 						SeedSpecID:           string(scheme.SeedSpecs[0].ID),
 						Time:                 oslTime,
 					}
-					firstSLOK := deriveSLOK(scheme, firstSLOKRef)
+					firstSLOK := scheme.deriveSLOK(firstSLOKRef)
 					oslID := firstSLOK.ID
-					paveServerEntries[schemeIndex][oslTime] =
-						base64.StdEncoding.EncodeToString(oslID)
+					paveServerEntries[hex.EncodeToString(oslID)] =
+						[]string{base64.StdEncoding.EncodeToString(oslID)}
 
-					oslTime = oslTime.Add(
-						time.Duration(
-							int64(slokTimePeriodsPerOSL) * scheme.SeedPeriodNanoseconds))
+					oslTime = oslTime.Add(oslDuration)
 				}
 			}
 
@@ -492,8 +487,7 @@ func TestOSL(t *testing.T) {
 			for _, timePeriod := range testCase.issueSLOKTimePeriods {
 				for _, seedSpecIndex := range testCase.issueSLOKSeedSpecIndexes {
 
-					slok := deriveSLOK(
-						testCase.scheme,
+					slok := testCase.scheme.deriveSLOK(
 						&slokReference{
 							PropagationChannelID: testCase.propagationChannelID,
 							SeedSpecID:           string(testCase.scheme.SeedSpecs[seedSpecIndex].ID),

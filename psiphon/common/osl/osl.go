@@ -43,6 +43,7 @@ import (
 	"net/url"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -535,7 +536,7 @@ func (state *ClientSeedState) issueSLOKs() {
 			slok, ok := state.scheme.derivedSLOKCache[*ref]
 			state.scheme.derivedSLOKCacheMutex.RUnlock()
 			if !ok {
-				slok = deriveSLOK(state.scheme, ref)
+				slok = state.scheme.deriveSLOK(ref)
 				state.scheme.derivedSLOKCacheMutex.Lock()
 				state.scheme.derivedSLOKCache[*ref] = slok
 				state.scheme.derivedSLOKCacheMutex.Unlock()
@@ -567,31 +568,6 @@ func (state *ClientSeedState) issueSLOKs() {
 
 func getSLOKTime(seedPeriodNanoseconds int64) int64 {
 	return time.Now().UTC().Truncate(time.Duration(seedPeriodNanoseconds)).UnixNano()
-}
-
-// deriveSLOK produces SLOK secret keys and IDs using HKDF-Expand
-// defined in https://tools.ietf.org/html/rfc5869.
-func deriveSLOK(
-	scheme *Scheme, ref *slokReference) *SLOK {
-
-	timeBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(timeBytes, uint64(ref.Time.UnixNano()))
-
-	key := deriveKeyHKDF(
-		scheme.MasterKey,
-		[]byte(ref.PropagationChannelID),
-		[]byte(ref.SeedSpecID),
-		timeBytes)
-
-	// TODO: is ID derivation cryptographically sound?
-	id := deriveKeyHKDF(
-		scheme.MasterKey,
-		key)
-
-	return &SLOK{
-		ID:  id,
-		Key: key,
-	}
 }
 
 // GetSeedPayload issues any pending SLOKs and returns the accumulated
@@ -629,6 +605,44 @@ func (state *ClientSeedState) ClearSeedPayload() {
 	defer state.mutex.Unlock()
 
 	state.payloadSLOKs = nil
+}
+
+// deriveSLOK produces SLOK secret keys and IDs using HKDF-Expand
+// defined in https://tools.ietf.org/html/rfc5869.
+func (scheme *Scheme) deriveSLOK(ref *slokReference) *SLOK {
+
+	timeBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(timeBytes, uint64(ref.Time.UnixNano()))
+
+	key := deriveKeyHKDF(
+		scheme.MasterKey,
+		[]byte(ref.PropagationChannelID),
+		[]byte(ref.SeedSpecID),
+		timeBytes)
+
+	// TODO: is ID derivation cryptographically sound?
+	id := deriveKeyHKDF(
+		scheme.MasterKey,
+		key)
+
+	return &SLOK{
+		ID:  id,
+		Key: key,
+	}
+}
+
+// GetOSLDuration returns the total time duration of an OSL,
+// which is a function of the scheme's SeedPeriodNanoSeconds,
+// the duration of a single SLOK, and the scheme's SeedPeriodKeySplits,
+// the number of SLOKs associated with an OSL.
+func (scheme *Scheme) GetOSLDuration() time.Duration {
+	slokTimePeriodsPerOSL := 1
+	for _, keySplit := range scheme.SeedPeriodKeySplits {
+		slokTimePeriodsPerOSL *= keySplit.Total
+	}
+
+	return time.Duration(
+		int64(slokTimePeriodsPerOSL) * scheme.SeedPeriodNanoseconds)
 }
 
 // PaveFile describes an OSL data file to be paved to an out-of-band
@@ -677,6 +691,16 @@ type KeyShares struct {
 	KeyShares   []*KeyShares
 }
 
+type PaveLogInfo struct {
+	FileName             string
+	SchemeIndex          int
+	PropagationChannelID string
+	OSLID                string
+	OSLTime              time.Time
+	OSLDuration          time.Duration
+	ServerEntryCount     int
+}
+
 // Pave creates the full set of OSL files, for all schemes in the
 // configuration, to be dropped in an out-of-band distribution site.
 // Only OSLs for the propagation channel ID associated with the
@@ -686,14 +710,14 @@ type KeyShares struct {
 // the client functions GetRegistryURL and GetOSLFileURL.
 //
 // Pave returns a pave file for the entire registry of all OSLs from
-// epoch. It only returns pave files for OSLs referenced in
-// paveServerEntries. paveServerEntries is a list of maps, one for each
-// scheme, from the first SLOK time period identifying an OSL to a
-// payload to encrypt and pave.
-// The registry file spec MD5 checksum values are populated only for
-// OSLs referenced in paveServerEntries. To ensure a registry is fully
-// populated with hashes for skipping redownloading, all OSLs should
-// be paved.
+// epoch to endTime, and a pave file for each OSL. paveServerEntries is
+// a map from hex-encoded OSL IDs to server entries to pave into that OSL.
+// When entries are found, OSL will contain those entries, newline
+// seperated. Otherwise the OSL will still be issued, but be empty.
+//
+// As OSLs outside the epoch-endTime range will no longer appear in
+// the registry, Pave is intended to be used to create the full set
+// of OSLs for a distribution site; i.e., not incrementally.
 //
 // Automation is responsible for consistently distributing server entries
 // to OSLs in the case where OSLs are repaved in subsequent calls.
@@ -702,8 +726,8 @@ func (config *Config) Pave(
 	propagationChannelID string,
 	signingPublicKey string,
 	signingPrivateKey string,
-	paveServerEntries []map[time.Time]string,
-	logCallback func(int, time.Time, string)) ([]*PaveFile, error) {
+	paveServerEntries map[string][]string,
+	logCallback func(*PaveLogInfo)) ([]*PaveFile, error) {
 
 	config.ReloadableFile.RLock()
 	defer config.ReloadableFile.RUnlock()
@@ -712,19 +736,13 @@ func (config *Config) Pave(
 
 	registry := &Registry{}
 
-	if len(paveServerEntries) != len(config.Schemes) {
-		return nil, common.ContextError(errors.New("invalid paveServerEntries"))
-	}
-
 	for schemeIndex, scheme := range config.Schemes {
-
-		slokTimePeriodsPerOSL := 1
-		for _, keySplit := range scheme.SeedPeriodKeySplits {
-			slokTimePeriodsPerOSL *= keySplit.Total
-		}
-
 		if common.Contains(scheme.PropagationChannelIDs, propagationChannelID) {
+
+			oslDuration := scheme.GetOSLDuration()
+
 			oslTime := scheme.epoch
+
 			for !oslTime.After(endTime) {
 
 				firstSLOKTime := oslTime
@@ -734,43 +752,52 @@ func (config *Config) Pave(
 					return nil, common.ContextError(err)
 				}
 
+				hexEncodedOSLID := hex.EncodeToString(fileSpec.ID)
+
 				registry.FileSpecs = append(registry.FileSpecs, fileSpec)
 
-				serverEntries, ok := paveServerEntries[schemeIndex][oslTime]
-				if ok {
+				serverEntryCount := len(paveServerEntries[hexEncodedOSLID])
 
-					signedServerEntries, err := common.WriteAuthenticatedDataPackage(
-						serverEntries,
-						signingPublicKey,
-						signingPrivateKey)
-					if err != nil {
-						return nil, common.ContextError(err)
-					}
+				// serverEntries will be "" when nothing is found in paveServerEntries
+				serverEntries := strings.Join(paveServerEntries[hexEncodedOSLID], "\n")
 
-					boxedServerEntries, err := box(fileKey, common.Compress(signedServerEntries))
-					if err != nil {
-						return nil, common.ContextError(err)
-					}
-
-					md5sum := md5.Sum(boxedServerEntries)
-					fileSpec.MD5Sum = md5sum[:]
-
-					fileName := fmt.Sprintf(
-						OSL_FILENAME_FORMAT, hex.EncodeToString(fileSpec.ID))
-
-					paveFiles = append(paveFiles, &PaveFile{
-						Name:     fileName,
-						Contents: boxedServerEntries,
-					})
-
-					if logCallback != nil {
-						logCallback(schemeIndex, oslTime, fileName)
-					}
+				signedServerEntries, err := common.WriteAuthenticatedDataPackage(
+					serverEntries,
+					signingPublicKey,
+					signingPrivateKey)
+				if err != nil {
+					return nil, common.ContextError(err)
 				}
 
-				oslTime = oslTime.Add(
-					time.Duration(
-						int64(slokTimePeriodsPerOSL) * scheme.SeedPeriodNanoseconds))
+				boxedServerEntries, err := box(fileKey, common.Compress(signedServerEntries))
+				if err != nil {
+					return nil, common.ContextError(err)
+				}
+
+				md5sum := md5.Sum(boxedServerEntries)
+				fileSpec.MD5Sum = md5sum[:]
+
+				fileName := fmt.Sprintf(
+					OSL_FILENAME_FORMAT, hexEncodedOSLID)
+
+				paveFiles = append(paveFiles, &PaveFile{
+					Name:     fileName,
+					Contents: boxedServerEntries,
+				})
+
+				if logCallback != nil {
+					logCallback(&PaveLogInfo{
+						FileName:             fileName,
+						SchemeIndex:          schemeIndex,
+						PropagationChannelID: propagationChannelID,
+						OSLID:                hexEncodedOSLID,
+						OSLTime:              oslTime,
+						OSLDuration:          oslDuration,
+						ServerEntryCount:     serverEntryCount,
+					})
+				}
+
+				oslTime = oslTime.Add(oslDuration)
 			}
 		}
 	}
@@ -811,7 +838,7 @@ func makeOSLFileSpec(
 		SeedSpecID:           string(scheme.SeedSpecs[0].ID),
 		Time:                 firstSLOKTime,
 	}
-	firstSLOK := deriveSLOK(scheme, ref)
+	firstSLOK := scheme.deriveSLOK(ref)
 	oslID := firstSLOK.ID
 
 	fileKey, err := common.MakeSecureRandomBytes(KEY_LENGTH_BYTES)
@@ -922,7 +949,7 @@ func divideKeyWithSeedSpecSLOKs(
 			SeedSpecID:           string(seedSpec.ID),
 			Time:                 *nextSLOKTime,
 		}
-		slok := deriveSLOK(scheme, ref)
+		slok := scheme.deriveSLOK(ref)
 
 		boxedShare, err := box(slok.Key, shares[index])
 		if err != nil {
