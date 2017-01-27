@@ -147,8 +147,8 @@ func SetClientVerificationPayload(clientVerificationPayload string) {
 func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders string) {
 	err := psiphon.SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders)
 	if err != nil {
-		psiphon.NoticeAlert("failed to upload feedback: %s", err)
+		psiphon.NoticeAlert("Failed to upload feedback: %s", err)
 	} else {
-		psiphon.NoticeInfo("feedback uploaded successfully")
+		psiphon.NoticeInfo("Feedback uploaded successfully")
 	}
 }

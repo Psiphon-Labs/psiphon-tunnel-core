@@ -108,13 +108,15 @@
 }
 
 // See comment in header.
-+ (void)sendFeedback:(NSString * _Nonnull)feedbackJson
-    connectionConfig:(NSString * _Nonnull)connectionConfigJson
+- (void)sendFeedback:(NSString * _Nonnull)feedbackJson
            publicKey:(NSString * _Nonnull)b64EncodedPublicKey
         uploadServer:(NSString * _Nonnull)uploadServer
-          uploadPath:(NSString * _Nonnull)uploadPath
  uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders {
-    GoPsiSendFeedback(connectionConfigJson, feedbackJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders);
+    NSString *connectionConfigJson = [self getConfig];
+    if (connectionConfigJson == nil) {
+       [self logMessage:@"Error getting config for feedback upload"];
+    }
+    GoPsiSendFeedback(connectionConfigJson, feedbackJson, b64EncodedPublicKey, uploadServer, @"", uploadServerHeaders);
 }
 
 

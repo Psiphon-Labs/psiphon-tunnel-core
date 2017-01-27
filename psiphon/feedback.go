@@ -139,20 +139,20 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 	}
 
 	for i := 0; i < FEEDBACK_UPLOAD_MAX_RETRIES; i++ {
-		err := uploadFeedback(
+		err = uploadFeedback(
 			untunneledDialConfig,
 			secureFeedback,
 			url,
 			MakePsiphonUserAgent(config),
 			headerPieces)
 		if err != nil {
-			NoticeAlert("failed to upload feedback: %s", err)
 			time.Sleep(FEEDBACK_UPLOAD_RETRY_DELAY_SECONDS * time.Second)
 		} else {
 			break
 		}
 	}
-	return nil
+
+	return err
 }
 
 // Attempt to upload feedback data to server.
