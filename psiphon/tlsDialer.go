@@ -177,6 +177,25 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 
 	tlsConfig := &tls.Config{}
 
+	// Select indistinguishable TLS implementation
+	useOpenSSL := false
+	if config.UseIndistinguishableTLS {
+
+		// OpenSSL cannot be used in all cases
+		canUseOpenSSL := openSSLSupported() &&
+			config.ObfuscatedSessionTicketKey == "" &&
+			(config.SkipVerify ||
+				// TODO: config.VerifyLegacyCertificate != nil ||
+				config.TrustedCACertificatesFilename != "")
+
+		if canUseOpenSSL && common.FlipCoin() {
+			useOpenSSL = true
+		} else {
+			tlsConfig.EmulateChrome = true
+			tlsConfig.ClientSessionCache = tls.NewLRUClientSessionCache(0)
+		}
+	}
+
 	if config.SkipVerify {
 		tlsConfig.InsecureSkipVerify = true
 	}
@@ -217,12 +236,7 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 	var conn handshakeConn
 
 	// When supported, use OpenSSL TLS as a more indistinguishable TLS.
-	if config.UseIndistinguishableTLS &&
-		config.ObfuscatedSessionTicketKey == "" &&
-		(config.SkipVerify ||
-			// TODO: config.VerifyLegacyCertificate != nil ||
-			config.TrustedCACertificatesFilename != "") {
-
+	if useOpenSSL {
 		conn, err = newOpenSSLConn(rawConn, hostname, config)
 		if err != nil {
 			rawConn.Close()

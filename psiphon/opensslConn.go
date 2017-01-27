@@ -30,6 +30,10 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
+func openSSLSupported() bool {
+	return true
+}
+
 // newOpenSSLConn wraps a connection with TLS which mimicks stock Android TLS.
 // This facility is used as a circumvention measure to ensure Psiphon client
 // TLS ClientHello messages match common TLS ClientHellos vs. the more
