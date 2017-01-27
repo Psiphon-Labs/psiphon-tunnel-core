@@ -138,15 +138,30 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 		t.Fatalf("error generating package keys: %s", err)
 	}
 
+	// First Pave() call is to get the OSL ID to pave into
+
+	oslID := ""
+
 	paveFiles, err := oslConfig.Pave(
 		epoch,
 		propagationChannelID,
 		signingPublicKey,
 		signingPrivateKey,
-		[]map[time.Time]string{
-			map[time.Time]string{
-				epoch: string(encodedServerEntry),
-			},
+		map[string][]string{},
+		func(logInfo *osl.PaveLogInfo) {
+			oslID = logInfo.OSLID
+		})
+	if err != nil {
+		t.Fatalf("error paving OSL files: %s", err)
+	}
+
+	paveFiles, err = oslConfig.Pave(
+		epoch,
+		propagationChannelID,
+		signingPublicKey,
+		signingPrivateKey,
+		map[string][]string{
+			oslID: []string{string(encodedServerEntry)},
 		},
 		nil)
 	if err != nil {
