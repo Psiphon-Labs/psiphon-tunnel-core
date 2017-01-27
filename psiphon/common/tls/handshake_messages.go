@@ -128,6 +128,10 @@ func (m *clientHelloMsg) marshal() []byte {
 	if m.channelIDSupported {
 		numExtensions++
 	}
+	if m.emulateChrome {
+		// GREASE extensions
+		numExtensions += 2
+	}
 
 	if numExtensions > 0 {
 		extensionsLength += 4 * numExtensions
@@ -333,6 +337,12 @@ func (m *clientHelloMsg) marshal() []byte {
 			z = z[4:]
 		}
 	}
+	marshalGREASE := func() {
+		value := randomGREASEValue()
+		z[0] = byte(value >> 8)
+		z[1] = byte(value & 0xff)
+		z = z[4:]
+	}
 
 	z = z[1+len(m.compressionMethods):]
 	if numExtensions > 0 {
@@ -347,6 +357,8 @@ func (m *clientHelloMsg) marshal() []byte {
 		// This code handles extension ordering only; configuration
 		// of extensions as required for EmulateChrome is handled
 		// in Conn.clientHandshae().
+
+		marshalGREASE()
 
 		if m.secureRenegotiationSupported {
 			marshalRenegotiationInfo()
@@ -384,6 +396,8 @@ func (m *clientHelloMsg) marshal() []byte {
 		if len(m.supportedCurves) > 0 {
 			marshalSupportedCurves()
 		}
+
+		marshalGREASE()
 
 	} else {
 		if m.nextProtoNeg {
