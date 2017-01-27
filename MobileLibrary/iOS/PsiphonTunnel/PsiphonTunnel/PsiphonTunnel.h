@@ -261,17 +261,13 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics information in a particular format, then calls this function to upload it for later investigation.
  @note The key, server, path, and headers must be provided by Psiphon Inc.
  @param feedbackJson  The feedback and diagnostics data to upload.
- @param connectionConfigJson  This function may create a tunnel to perform the upload, and this configuration is used to create that tunnel.
  @param b64EncodedPublicKey  The key that will be used to encrypt the payload before uploading.
- @param uploadServer  The server to which the data will be uploaded.
- @param uploadPath  The path on the server to which the data will be loaded.
+ @param uploadServer  The server and path to which the data will be uploaded.
  @param uploadServerHeaders  The request headers that will be used when uploading.
  */
-+ (void)sendFeedback:(NSString * _Nonnull)feedbackJson
-    connectionConfig:(NSString * _Nonnull)connectionConfigJson
+- (void)sendFeedback:(NSString * _Nonnull)feedbackJson
            publicKey:(NSString * _Nonnull)b64EncodedPublicKey
         uploadServer:(NSString * _Nonnull)uploadServer
-          uploadPath:(NSString * _Nonnull)uploadPath
  uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders;
 
 @end
