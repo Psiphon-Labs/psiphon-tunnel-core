@@ -623,13 +623,12 @@ func dialSsh(
 		resolvedIPAddress.Store(IPAddress)
 	}
 
-	var selectedUserAgent bool
-	config.UpstreamProxyCustomHeaders, selectedUserAgent = common.UserAgentIfUnset(config.UpstreamProxyCustomHeaders)
+	dialHeaders, selectedUserAgent := common.UserAgentIfUnset(config.UpstreamProxyCustomHeaders)
 
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
-		UpstreamProxyCustomHeaders:    config.UpstreamProxyCustomHeaders,
+		UpstreamProxyCustomHeaders:    dialHeaders,
 		ConnectTimeout:                time.Duration(*config.TunnelConnectTimeoutSeconds) * time.Second,
 		PendingConns:                  pendingConns,
 		DeviceBinder:                  config.DeviceBinder,

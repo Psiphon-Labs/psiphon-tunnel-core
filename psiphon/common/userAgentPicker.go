@@ -38,21 +38,29 @@ func PickUserAgent() string {
 	return ""
 }
 
+// UserAgentIfUnset returns an http.Header object and a boolean
+// representing whether or not its User-Agent header was modified.
+// Any modifications are made to a copy of the original header map
 func UserAgentIfUnset(h http.Header) (http.Header, bool) {
-	selectedUserAgent := false
+	var dialHeaders http.Header
+
 	if _, ok := h["User-Agent"]; !ok {
-		if h == nil {
-			h = make(map[string][]string)
+		dialHeaders = make(map[string][]string)
+
+		if h != nil {
+			for k, v := range h {
+				dialHeaders[k] = v
+			}
 		}
 
 		if FlipCoin() {
-			h.Set("User-Agent", PickUserAgent())
+			dialHeaders.Set("User-Agent", PickUserAgent())
 		} else {
-			h.Set("User-Agent", "")
+			dialHeaders.Set("User-Agent", "")
 		}
 
-		selectedUserAgent = true
+		return dialHeaders, true
 	}
 
-	return h, selectedUserAgent
+	return h, false
 }
