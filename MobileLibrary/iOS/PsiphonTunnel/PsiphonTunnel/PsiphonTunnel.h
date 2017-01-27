@@ -64,11 +64,8 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  - `ClientPlatform`: Should not be set by most library consumers.
  - `UpstreamProxyUrl`
  - `EmitDiagnosticNotices`
- - `LocalHttpProxyPort` // TODO: Should this be set-able for iOS?
- - `LocalSocksProxyPort` // TODO: Should this be set-able for iOS?
  - `EgressRegion`
  - `EstablishTunnelTimeoutSeconds`
- - `TunnelWholeDevice`: For stats purposes, but must be accurate. Defaults to 0 (false).
  - Should only be set if the Psiphon library is handling upgrade downloading (which it usually is _not_):
    - `UpgradeDownloadUrl`
    - `UpgradeDownloadClientVersionHeader`
@@ -82,6 +79,11 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
    - `PsiphonApiServerTimeoutSeconds`
    - `FetchRoutesTimeoutSeconds`
    - `HttpProxyOriginServerTimeoutSeconds`
+ - Fields which should only be set by Psiphon proper:
+   - `LocalHttpProxyPort`
+   - `LocalSocksProxyPort`
+   - `TunnelWholeDevice`: For stats purposes, but must be accurate. Defaults to 0 (false).
+
  @endcode
 
  @note All other config fields must not be set.
@@ -203,33 +205,30 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  */
 - (void)onBytesTransferred:(int64_t)sent :(int64_t)received;
 
-// TODO: Only applicable to Psiphon proper?
 /*!
  Called when tunnel-core discovers a home page associated with this client.
  If there are no home pages, it will not be called. May be called more than
  once, for multiple home pages.
+ Note: This is probably only applicable to Psiphon Inc.'s apps.
  @param url  The URL of the home page.
  Swift: @code func onHomepage(_ url: String) @endcode
  */
 - (void)onHomepage:(NSString * _Nonnull)url;
 
-// TODO: Only applicable to Psiphon proper?
 /*!
  Called if the current version of the client is the latest (i.e., there is no upgrade available).
+ Note: This is probably only applicable to Psiphon Inc.'s apps.
  Swift: @code func onClientIsLatestVersion() @endcode
  */
 - (void)onClientIsLatestVersion;
 
-// TODO: Only applicable to Psiphon proper?
 /*!
  Called when a client upgrade has been downloaded.
  @param filename  The name of the file containing the upgrade.
+ Note: This is probably only applicable to Psiphon Inc.'s apps.
  Swift: @code func onClientUpgradeDownloaded(_ filename: String) @endcode
  */
 - (void)onClientUpgradeDownloaded:(NSString * _Nonnull)filename;
-
-// TODO: Applies to iOS?
-//func onClientVerificationRequired(nonce: String, ttlSeconds: Int, resetCache: Bool)
 
 @end
 
