@@ -103,6 +103,8 @@ type TunnelDialStats struct {
 	MeekSNIServerName              string
 	MeekHostHeader                 string
 	MeekTransformedHostName        bool
+	SelectedUserAgent              bool
+	UserAgent                      string
 }
 
 // EstablishTunnel first makes a network transport connection to the
@@ -621,6 +623,9 @@ func dialSsh(
 		resolvedIPAddress.Store(IPAddress)
 	}
 
+	var selectedUserAgent bool
+	config.UpstreamProxyCustomHeaders, selectedUserAgent = common.UserAgentIfUnset(config.UpstreamProxyCustomHeaders)
+
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
@@ -754,6 +759,11 @@ func dialSsh(
 	if dialConfig.UpstreamProxyUrl != "" || meekConfig != nil {
 		dialStats = &TunnelDialStats{}
 
+		if selectedUserAgent {
+			dialStats.SelectedUserAgent = true
+			dialStats.UserAgent = dialConfig.UpstreamProxyCustomHeaders.Get("User-Agent")
+		}
+
 		if dialConfig.UpstreamProxyUrl != "" {
 
 			// Note: UpstreamProxyUrl should have parsed correctly in the dial
@@ -764,6 +774,9 @@ func dialSsh(
 
 			dialStats.UpstreamProxyCustomHeaderNames = make([]string, 0)
 			for name, _ := range dialConfig.UpstreamProxyCustomHeaders {
+				if selectedUserAgent && name == "User-Agent" {
+					continue
+				}
 				dialStats.UpstreamProxyCustomHeaderNames = append(dialStats.UpstreamProxyCustomHeaderNames, name)
 			}
 		}

@@ -22,5 +22,6 @@
 package psi
 
 import (
+	_ "github.com/Psiphon-Inc/psiphon-tunnel-core-private-plugins/client_plugins"
 	_ "github.com/Psiphon-Inc/psiphon-tunnel-core-private-plugins/common_plugins"
 )

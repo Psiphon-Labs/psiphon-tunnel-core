@@ -848,6 +848,10 @@ func (serverContext *ServerContext) getBaseParams() requestJSONObject {
 			transformedHostName = "1"
 		}
 		params["meek_transformed_host_name"] = transformedHostName
+
+		if tunnel.dialStats.SelectedUserAgent {
+			params["user_agent"] = tunnel.dialStats.UserAgent
+		}
 	}
 
 	if tunnel.serverEntry.Region != "" {
