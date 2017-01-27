@@ -204,9 +204,7 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 		// Set the ServerName and rely on the usual logic in
 		// tls.Conn.Handshake() to do its verification.
 		// Note: Go TLS will automatically omit this ServerName when it's an IP address
-		if net.ParseIP(hostname) == nil {
-			tlsConfig.ServerName = config.SNIServerName
-		}
+		tlsConfig.ServerName = config.SNIServerName
 	} else {
 		// No SNI.
 		// Disable verification in tls.Conn.Handshake().  We'll verify manually
