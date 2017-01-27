@@ -39,7 +39,7 @@ func PickUserAgent() string {
 }
 
 func UserAgentIfUnset(h http.Header) (http.Header, bool) {
-	internalUserAgent := false
+	selectedUserAgent := false
 	if _, ok := h["User-Agent"]; !ok {
 		if h == nil {
 			h = make(map[string][]string)
@@ -51,8 +51,8 @@ func UserAgentIfUnset(h http.Header) (http.Header, bool) {
 			h.Set("User-Agent", "")
 		}
 
-		internalUserAgent = true
+		selectedUserAgent = true
 	}
 
-	return h, internalUserAgent
+	return h, selectedUserAgent
 }

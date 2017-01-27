@@ -352,7 +352,7 @@ func NoticeConnectedTunnelDialStats(ipAddress string, tunnelDialStats *TunnelDia
 		"meekSNIServerName", tunnelDialStats.MeekSNIServerName,
 		"meekHostHeader", tunnelDialStats.MeekHostHeader,
 		"meekTransformedHostName", tunnelDialStats.MeekTransformedHostName,
-		"internalUserAgent", tunnelDialStats.InternalUserAgent,
+		"selectedUserAgent", tunnelDialStats.SelectedUserAgent,
 		"userAgent", tunnelDialStats.UserAgent)
 }
 
