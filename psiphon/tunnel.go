@@ -586,6 +586,8 @@ func dialSsh(
 	useObfuscatedSsh := false
 	var directTCPDialAddress string
 	var meekConfig *MeekConfig
+	var dialHeaders map[string][]string
+	var selectedUserAgent bool
 	var err error
 
 	switch selectedProtocol {
@@ -598,6 +600,8 @@ func dialSsh(
 
 	default:
 		useObfuscatedSsh = true
+		dialHeaders, selectedUserAgent = common.UserAgentIfUnset(config.UpstreamProxyCustomHeaders)
+
 		meekConfig, err = initMeekConfig(config, serverEntry, selectedProtocol, sessionId)
 		if err != nil {
 			return nil, common.ContextError(err)
@@ -623,13 +627,10 @@ func dialSsh(
 		resolvedIPAddress.Store(IPAddress)
 	}
 
-	var selectedUserAgent bool
-	config.UpstreamProxyCustomHeaders, selectedUserAgent = common.UserAgentIfUnset(config.UpstreamProxyCustomHeaders)
-
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
-		UpstreamProxyCustomHeaders:    config.UpstreamProxyCustomHeaders,
+		UpstreamProxyCustomHeaders:    dialHeaders,
 		ConnectTimeout:                time.Duration(*config.TunnelConnectTimeoutSeconds) * time.Second,
 		PendingConns:                  pendingConns,
 		DeviceBinder:                  config.DeviceBinder,

@@ -177,13 +177,13 @@ func proxiedTcpDial(
 		return tcpDial(addr, config, dialResult)
 	}
 
-	config.UpstreamProxyCustomHeaders, _ = common.UserAgentIfUnset(config.UpstreamProxyCustomHeaders)
+	dialHeaders, _ := common.UserAgentIfUnset(config.UpstreamProxyCustomHeaders)
 
 	upstreamDialer := upstreamproxy.NewProxyDialFunc(
 		&upstreamproxy.UpstreamProxyConfig{
 			ForwardDialFunc: dialer,
 			ProxyURIString:  config.UpstreamProxyUrl,
-			CustomHeaders:   config.UpstreamProxyCustomHeaders,
+			CustomHeaders:   dialHeaders,
 		})
 	netConn, err := upstreamDialer("tcp", addr)
 	if _, ok := err.(*upstreamproxy.Error); ok {
