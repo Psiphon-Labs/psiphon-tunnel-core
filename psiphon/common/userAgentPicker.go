@@ -30,7 +30,7 @@ func RegisterUserAgentPicker(generator func() string) {
 	registeredUserAgentPicker.Store(generator)
 }
 
-func PickUserAgent() string {
+func pickUserAgent() string {
 	generator := registeredUserAgentPicker.Load()
 	if generator != nil {
 		return generator.(func() string)()
@@ -49,12 +49,13 @@ func UserAgentIfUnset(h http.Header) (http.Header, bool) {
 
 		if h != nil {
 			for k, v := range h {
-				dialHeaders[k] = v
+				dialHeaders[k] = make([]string, len(v))
+				copy(dialHeaders[k], v)
 			}
 		}
 
 		if FlipCoin() {
-			dialHeaders.Set("User-Agent", PickUserAgent())
+			dialHeaders.Set("User-Agent", pickUserAgent())
 		} else {
 			dialHeaders.Set("User-Agent", "")
 		}
