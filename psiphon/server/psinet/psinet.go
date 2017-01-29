@@ -353,7 +353,17 @@ func selectServers(servers []Server, discoveryValue int) []Server {
 	bucketCount := calculateBucketCount(len(servers))
 
 	buckets := bucketizeServerList(servers, bucketCount)
+
+	if len(buckets) == 0 {
+		return nil
+	}
+
 	bucket := buckets[discoveryValue%len(buckets)]
+
+	if len(bucket) == 0 {
+		return nil
+	}
+
 	server := bucket[timeStrategyValue%len(bucket)]
 
 	serverList := make([]Server, 1)
@@ -368,24 +378,14 @@ func calculateBucketCount(length int) int {
 	return int(math.Ceil(math.Sqrt(float64(length))))
 }
 
-// Create bucketCount buckets.
-// Each bucket will be of size division or divison-1.
+// Create bucketCount nearly equal sized buckets.
 func bucketizeServerList(servers []Server, bucketCount int) [][]Server {
-	division := float64(len(servers)) / float64(bucketCount)
 
 	buckets := make([][]Server, bucketCount)
 
-	var currentBucketIndex int = 0
-	var serverIndex int = 0
-	for _, server := range servers {
-		bucketEndIndex := int(math.Floor(division * (float64(currentBucketIndex) + 1)))
-
-		buckets[currentBucketIndex] = append(buckets[currentBucketIndex], server)
-
-		serverIndex++
-		if serverIndex > bucketEndIndex {
-			currentBucketIndex++
-		}
+	for index, server := range servers {
+		bucketIndex := index % bucketCount
+		buckets[bucketIndex] = append(buckets[bucketIndex], server)
 	}
 
 	return buckets
