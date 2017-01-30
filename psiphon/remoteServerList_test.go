@@ -22,6 +22,7 @@ package psiphon
 import (
 	"bytes"
 	"crypto/md5"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -137,15 +138,30 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 		t.Fatalf("error generating package keys: %s", err)
 	}
 
+	// First Pave() call is to get the OSL ID to pave into
+
+	oslID := ""
+
 	paveFiles, err := oslConfig.Pave(
 		epoch,
 		propagationChannelID,
 		signingPublicKey,
 		signingPrivateKey,
-		[]map[time.Time]string{
-			map[time.Time]string{
-				epoch: string(encodedServerEntry),
-			},
+		map[string][]string{},
+		func(logInfo *osl.PaveLogInfo) {
+			oslID = logInfo.OSLID
+		})
+	if err != nil {
+		t.Fatalf("error paving OSL files: %s", err)
+	}
+
+	paveFiles, err = oslConfig.Pave(
+		epoch,
+		propagationChannelID,
+		signingPublicKey,
+		signingPrivateKey,
+		map[string][]string{
+			oslID: []string{string(encodedServerEntry)},
 		},
 		nil)
 	if err != nil {
@@ -182,38 +198,55 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 	// run mock remote server list host
 	//
 
-	remoteServerListHostAddress := net.JoinHostPort(serverIPaddress, "8081")
+	// Exercise using multiple download URLs
+	remoteServerListHostAddresses := []string{
+		net.JoinHostPort(serverIPaddress, "8081"),
+		net.JoinHostPort(serverIPaddress, "8082"),
+	}
 
 	// The common remote server list fetches will 404
-	remoteServerListURL := fmt.Sprintf("http://%s/server_list_compressed", remoteServerListHostAddress)
+	remoteServerListURL := fmt.Sprintf("http://%s/server_list_compressed", remoteServerListHostAddresses[0])
 	remoteServerListDownloadFilename := filepath.Join(testDataDirName, "server_list_compressed")
 
-	obfuscatedServerListRootURL := fmt.Sprintf("http://%s/", remoteServerListHostAddress)
+	obfuscatedServerListRootURLsJSONConfig := "["
+	obfuscatedServerListRootURLs := make([]string, len(remoteServerListHostAddresses))
+	for i := 0; i < len(remoteServerListHostAddresses); i++ {
+
+		obfuscatedServerListRootURLs[i] = fmt.Sprintf("http://%s/", remoteServerListHostAddresses[i])
+
+		obfuscatedServerListRootURLsJSONConfig += fmt.Sprintf(
+			"{\"URL\" : \"%s\"}", base64.StdEncoding.EncodeToString([]byte(obfuscatedServerListRootURLs[i])))
+		if i == len(remoteServerListHostAddresses)-1 {
+			obfuscatedServerListRootURLsJSONConfig += "]"
+		} else {
+			obfuscatedServerListRootURLsJSONConfig += ","
+		}
+
+		go func(remoteServerListHostAddress string) {
+			startTime := time.Now()
+			serveMux := http.NewServeMux()
+			for _, paveFile := range paveFiles {
+				file := paveFile
+				serveMux.HandleFunc("/"+file.Name, func(w http.ResponseWriter, req *http.Request) {
+					md5sum := md5.Sum(file.Contents)
+					w.Header().Add("Content-Type", "application/octet-stream")
+					w.Header().Add("ETag", fmt.Sprintf("\"%s\"", hex.EncodeToString(md5sum[:])))
+					http.ServeContent(w, req, file.Name, startTime, bytes.NewReader(file.Contents))
+				})
+			}
+			httpServer := &http.Server{
+				Addr:    remoteServerListHostAddress,
+				Handler: serveMux,
+			}
+			err := httpServer.ListenAndServe()
+			if err != nil {
+				// TODO: wrong goroutine for t.FatalNow()
+				t.Fatalf("error running remote server list host: %s", err)
+			}
+		}(remoteServerListHostAddresses[i])
+	}
+
 	obfuscatedServerListDownloadDirectory := testDataDirName
-
-	go func() {
-		startTime := time.Now()
-		serveMux := http.NewServeMux()
-		for _, paveFile := range paveFiles {
-			file := paveFile
-			serveMux.HandleFunc("/"+file.Name, func(w http.ResponseWriter, req *http.Request) {
-				md5sum := md5.Sum(file.Contents)
-				w.Header().Add("Content-Type", "application/octet-stream")
-				w.Header().Add("ETag", hex.EncodeToString(md5sum[:]))
-				http.ServeContent(w, req, file.Name, startTime, bytes.NewReader(file.Contents))
-			})
-		}
-		httpServer := &http.Server{
-			Addr:    remoteServerListHostAddress,
-			Handler: serveMux,
-		}
-		err := httpServer.ListenAndServe()
-		if err != nil {
-			// TODO: wrong goroutine for t.FatalNow()
-			t.Fatalf("error running remote server list host: %s", err)
-
-		}
-	}()
 
 	//
 	// run Psiphon server
@@ -237,24 +270,24 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 	go func() {
 		listener, err := socks.ListenSocks("tcp", disruptorProxyAddress)
 		if err != nil {
-			fmt.Errorf("disruptor proxy listen error: %s", err)
+			fmt.Printf("disruptor proxy listen error: %s\n", err)
 			return
 		}
 		for {
 			localConn, err := listener.AcceptSocks()
 			if err != nil {
-				fmt.Errorf("disruptor proxy accept error: %s", err)
+				fmt.Printf("disruptor proxy accept error: %s\n", err)
 				return
 			}
 			go func() {
 				remoteConn, err := net.Dial("tcp", localConn.Req.Target)
 				if err != nil {
-					fmt.Errorf("disruptor proxy dial error: %s", err)
+					fmt.Printf("disruptor proxy dial error: %s\n", err)
 					return
 				}
 				err = localConn.Grant(&net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0})
 				if err != nil {
-					fmt.Errorf("disruptor proxy grant error: %s", err)
+					fmt.Printf("disruptor proxy grant error: %s\n", err)
 					return
 				}
 
@@ -264,7 +297,7 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 					defer waitGroup.Done()
 					io.Copy(remoteConn, localConn)
 				}()
-				if localConn.Req.Target == remoteServerListHostAddress {
+				if common.Contains(remoteServerListHostAddresses, localConn.Req.Target) {
 					io.CopyN(localConn, remoteConn, 500)
 				} else {
 					io.Copy(localConn, remoteConn)
@@ -295,7 +328,7 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 		"RemoteServerListSignaturePublicKey" : "%s",
 		"RemoteServerListUrl" : "%s",
 		"RemoteServerListDownloadFilename" : "%s",
-		"ObfuscatedServerListRootURL" : "%s",
+		"ObfuscatedServerListRootURLs" : %s,
 		"ObfuscatedServerListDownloadDirectory" : "%s",
 		"UpstreamProxyUrl" : "%s"
     }`
@@ -305,7 +338,7 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 		signingPublicKey,
 		remoteServerListURL,
 		remoteServerListDownloadFilename,
-		obfuscatedServerListRootURL,
+		obfuscatedServerListRootURLsJSONConfig,
 		obfuscatedServerListDownloadDirectory,
 		disruptorProxyURL)
 
@@ -360,11 +393,11 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 	}
 
 	for _, paveFile := range paveFiles {
-		u, _ := url.Parse(obfuscatedServerListRootURL)
+		u, _ := url.Parse(obfuscatedServerListRootURLs[0])
 		u.Path = path.Join(u.Path, paveFile.Name)
 		etag, _ := GetUrlETag(u.String())
 		md5sum := md5.Sum(paveFile.Contents)
-		if etag != hex.EncodeToString(md5sum[:]) {
+		if etag != fmt.Sprintf("\"%s\"", hex.EncodeToString(md5sum[:])) {
 			t.Fatalf("unexpected ETag for %s", u)
 		}
 	}

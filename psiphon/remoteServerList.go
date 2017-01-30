@@ -34,7 +34,7 @@ import (
 )
 
 type RemoteServerListFetcher func(
-	config *Config, tunnel *Tunnel, untunneledDialConfig *DialConfig) error
+	config *Config, attempt int, tunnel *Tunnel, untunneledDialConfig *DialConfig) error
 
 // FetchCommonRemoteServerList downloads the common remote server list from
 // config.RemoteServerListUrl. It validates its digital signature using the
@@ -45,16 +45,21 @@ type RemoteServerListFetcher func(
 // be unique and persistent.
 func FetchCommonRemoteServerList(
 	config *Config,
+	attempt int,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig) error {
 
 	NoticeInfo("fetching common remote server list")
 
+	downloadURL, canonicalURL, skipVerify := selectDownloadURL(attempt, config.RemoteServerListURLs)
+
 	newETag, err := downloadRemoteServerListFile(
 		config,
 		tunnel,
 		untunneledDialConfig,
-		config.RemoteServerListUrl,
+		downloadURL,
+		canonicalURL,
+		skipVerify,
 		"",
 		config.RemoteServerListDownloadFilename)
 	if err != nil {
@@ -78,7 +83,7 @@ func FetchCommonRemoteServerList(
 
 	// Now that the server entries are successfully imported, store the response
 	// ETag so we won't re-download this same data again.
-	err = SetUrlETag(config.RemoteServerListUrl, newETag)
+	err = SetUrlETag(canonicalURL, newETag)
 	if err != nil {
 		NoticeAlert("failed to set ETag for common remote server list: %s", common.ContextError(err))
 		// This fetch is still reported as a success, even if we can't store the etag
@@ -100,13 +105,17 @@ func FetchCommonRemoteServerList(
 // must be unique and persistent.
 func FetchObfuscatedServerLists(
 	config *Config,
+	attempt int,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig) error {
 
 	NoticeInfo("fetching obfuscated remote server lists")
 
 	downloadFilename := osl.GetOSLRegistryFilename(config.ObfuscatedServerListDownloadDirectory)
-	downloadURL := osl.GetOSLRegistryURL(config.ObfuscatedServerListRootURL)
+
+	rootURL, canonicalRootURL, skipVerify := selectDownloadURL(attempt, config.ObfuscatedServerListRootURLs)
+	downloadURL := osl.GetOSLRegistryURL(rootURL)
+	canonicalURL := osl.GetOSLRegistryURL(canonicalRootURL)
 
 	// failed is set if any operation fails and should trigger a retry. When the OSL registry
 	// fails to download, any cached registry is used instead; when any single OSL fails
@@ -122,6 +131,8 @@ func FetchObfuscatedServerLists(
 		tunnel,
 		untunneledDialConfig,
 		downloadURL,
+		canonicalURL,
+		skipVerify,
 		"",
 		downloadFilename)
 	if err != nil {
@@ -173,7 +184,7 @@ func FetchObfuscatedServerLists(
 	// When a new registry is downloaded, validated, and parsed, store the
 	// response ETag so we won't re-download this same data again.
 	if !failed && newETag != "" {
-		err = SetUrlETag(downloadURL, newETag)
+		err = SetUrlETag(canonicalURL, newETag)
 		if err != nil {
 			NoticeAlert("failed to set ETag for obfuscated server list registry: %s", common.ContextError(err))
 			// This fetch is still reported as a success, even if we can't store the etag
@@ -199,16 +210,20 @@ func FetchObfuscatedServerLists(
 		})
 
 	for _, oslID := range oslIDs {
+
 		downloadFilename := osl.GetOSLFilename(config.ObfuscatedServerListDownloadDirectory, oslID)
-		downloadURL := osl.GetOSLFileURL(config.ObfuscatedServerListRootURL, oslID)
+
+		downloadURL := osl.GetOSLFileURL(rootURL, oslID)
+		canonicalURL := osl.GetOSLFileURL(canonicalRootURL, oslID)
+
 		hexID := hex.EncodeToString(oslID)
 
 		// Note: the MD5 checksum step assumes the remote server list host's ETag uses MD5
-		// with a hex encoding. If this is not the case, the remoteETag should be left blank.
-		remoteETag := ""
+		// with a hex encoding. If this is not the case, the sourceETag should be left blank.
+		sourceETag := ""
 		md5sum, err := oslRegistry.GetOSLMD5Sum(oslID)
 		if err == nil {
-			remoteETag = hex.EncodeToString(md5sum)
+			sourceETag = fmt.Sprintf("\"%s\"", hex.EncodeToString(md5sum))
 		}
 
 		// TODO: store ETags in OSL registry to enable skipping requests entirely
@@ -218,7 +233,9 @@ func FetchObfuscatedServerLists(
 			tunnel,
 			untunneledDialConfig,
 			downloadURL,
-			remoteETag,
+			canonicalURL,
+			skipVerify,
+			sourceETag,
 			downloadFilename)
 		if err != nil {
 			failed = true
@@ -255,7 +272,7 @@ func FetchObfuscatedServerLists(
 
 		// Now that the server entries are successfully imported, store the response
 		// ETag so we won't re-download this same data again.
-		err = SetUrlETag(downloadURL, newETag)
+		err = SetUrlETag(canonicalURL, newETag)
 		if err != nil {
 			failed = true
 			NoticeAlert("failed to set Etag for obfuscated server list file (%s): %s", hexID, common.ContextError(err))
@@ -280,14 +297,20 @@ func downloadRemoteServerListFile(
 	config *Config,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
-	sourceURL, sourceETag, destinationFilename string) (string, error) {
+	sourceURL string,
+	canonicalURL string,
+	skipVerify bool,
+	sourceETag string,
+	destinationFilename string) (string, error) {
 
-	lastETag, err := GetUrlETag(sourceURL)
+	// All download URLs with the same canonicalURL
+	// must have the same entity and ETag.
+	lastETag, err := GetUrlETag(canonicalURL)
 	if err != nil {
 		return "", common.ContextError(err)
 	}
 
-	// sourceETag, when specified, is prior knowlegde of the
+	// sourceETag, when specified, is prior knowledge of the
 	// remote ETag that can be used to skip the request entirely.
 	// This will be set in the case of OSL files, from the MD5Sum
 	// values stored in the registry.
@@ -304,13 +327,18 @@ func downloadRemoteServerListFile(
 		tunnel,
 		untunneledDialConfig,
 		sourceURL,
+		skipVerify,
 		time.Duration(*config.FetchRemoteServerListTimeoutSeconds)*time.Second)
 	if err != nil {
 		return "", common.ContextError(err)
 	}
 
 	n, responseETag, err := ResumeDownload(
-		httpClient, requestURL, destinationFilename, lastETag)
+		httpClient,
+		requestURL,
+		MakePsiphonUserAgent(config),
+		destinationFilename,
+		lastETag)
 
 	NoticeRemoteServerListResourceDownloadedBytes(sourceURL, n)
 

@@ -351,7 +351,9 @@ func NoticeConnectedTunnelDialStats(ipAddress string, tunnelDialStats *TunnelDia
 		"meekResolvedIPAddress", tunnelDialStats.MeekResolvedIPAddress,
 		"meekSNIServerName", tunnelDialStats.MeekSNIServerName,
 		"meekHostHeader", tunnelDialStats.MeekHostHeader,
-		"meekTransformedHostName", tunnelDialStats.MeekTransformedHostName)
+		"meekTransformedHostName", tunnelDialStats.MeekTransformedHostName,
+		"selectedUserAgent", tunnelDialStats.SelectedUserAgent,
+		"userAgent", tunnelDialStats.UserAgent)
 }
 
 // NoticeBuildInfo reports build version info.

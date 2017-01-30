@@ -335,6 +335,9 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         return DEFAULT_SECONDARY_DNS_SERVER;
     }
 
+    @Override
+    public String IPv6Synthesize(String IPv4Addr) { return IPv4Addr; }
+
     //----------------------------------------------------------------------------------------------
     // Psiphon Tunnel Core
     //----------------------------------------------------------------------------------------------
@@ -347,7 +350,8 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
                     loadPsiphonConfig(mHostService.getContext()),
                     embeddedServerEntries,
                     this,
-                    isVpnMode());
+                    isVpnMode(),
+                    false /* Do not use IPv6 synthesizer for android */);
         } catch (java.lang.Exception e) {
             throw new Exception("failed to start Psiphon library", e);
         }

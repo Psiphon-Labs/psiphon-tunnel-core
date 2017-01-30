@@ -1,7 +1,5 @@
-// +build PRIVATE_PLUGINS
-
 /*
- * Copyright (c) 2015, Psiphon Inc.
+ * Copyright (c) 2016, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,9 +17,9 @@
  *
  */
 
-package psi
+#ifndef LookupIPv6_h
+#define LookupIPv6_h
 
-import (
-	_ "github.com/Psiphon-Inc/psiphon-tunnel-core-private-plugins/client_plugins"
-	_ "github.com/Psiphon-Inc/psiphon-tunnel-core-private-plugins/common_plugins"
-)
+char *getIPv6ForIPv4(const char *ipv4_str);
+
+#endif /* LookupIPv6_h */

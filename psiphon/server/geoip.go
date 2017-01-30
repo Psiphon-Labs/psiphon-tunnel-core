@@ -145,7 +145,7 @@ func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
 	}
 
 	// Each database will populate geoIPFields with the values it contains. In the
-	// currnt MaxMind deployment, the City database populates Country and City and
+	// current MaxMind deployment, the City database populates Country and City and
 	// the separate ISP database populates ISP.
 	for _, database := range geoIP.databases {
 		database.ReloadableFile.RLock()
