@@ -19,9 +19,9 @@
 
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
-#import <Psi/Psi.h>
+#import "LookupIPv6.h"
+#import "Psi-meta.h"
 #import "PsiphonTunnel.h"
-#import "Reachability.h"
 #import "json-framework/SBJson4.h"
 
 
@@ -62,6 +62,9 @@
 
         // Not supported on iOS.
         const BOOL useDeviceBinder = FALSE;
+
+        // Must always use IPv6Synthesizer for iOS
+        const BOOL useIPv6Synthesizer = TRUE;
         
         NSString *configStr = [self getConfig];
         if (configStr == nil) {
@@ -76,6 +79,7 @@
                            embeddedServerEntries,
                            self,
                            useDeviceBinder,
+                           useIPv6Synthesizer,
                            &e);
             
             [self logMessage:[NSString stringWithFormat: @"GoPsiStart: %@", res ? @"TRUE" : @"FALSE"]];
@@ -104,13 +108,15 @@
 }
 
 // See comment in header.
-+ (void)sendFeedback:(NSString * _Nonnull)feedbackJson
-    connectionConfig:(NSString * _Nonnull)connectionConfigJson
+- (void)sendFeedback:(NSString * _Nonnull)feedbackJson
            publicKey:(NSString * _Nonnull)b64EncodedPublicKey
         uploadServer:(NSString * _Nonnull)uploadServer
-          uploadPath:(NSString * _Nonnull)uploadPath
  uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders {
-    GoPsiSendFeedback(connectionConfigJson, feedbackJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders);
+    NSString *connectionConfigJson = [self getConfig];
+    if (connectionConfigJson == nil) {
+       [self logMessage:@"Error getting config for feedback upload"];
+    }
+    GoPsiSendFeedback(connectionConfigJson, feedbackJson, b64EncodedPublicKey, uploadServer, @"", uploadServerHeaders);
 }
 
 
@@ -274,13 +280,10 @@
     // * UpgradeDownloadFilename
     // * timeout fields
     
-    // TODO: Is LocalSocksProxyPort relevant for iOS?
-    
     //
     // Fill in the rest of the values.
     //
     
-    // TODO: Should be configurable?
     config[@"EmitBytesTransferred"] = [NSNumber numberWithBool:TRUE];
 
     config[@"DeviceRegion"] = [PsiphonTunnel getDeviceRegion];
@@ -303,7 +306,6 @@
     // Some of them require default values.
     //
     
-    // TODO: After updating tunnel-core in the framework, verify that this value is getting through to Kibana.
     if (config[@"ClientPlatform"] == nil) {
         config[@"ClientPlatform"] = @"iOS-Library";
     }
@@ -553,6 +555,17 @@
     Reachability *reachability = [Reachability reachabilityForInternetConnection];
     NetworkStatus netstat = [reachability currentReachabilityStatus];
     return (netstat != NotReachable) ? 1 : 0;
+}
+
+- (NSString *)iPv6Synthesize:(NSString *)IPv4Addr {
+    // This function is called to synthesize an ipv6 address from an ipv4 one on a DNS64/NAT64 network
+    char *result = getIPv6ForIPv4([IPv4Addr UTF8String]);
+    if (result != NULL) {
+        NSString *IPv6Addr = [NSString stringWithUTF8String:result];
+        free(result);
+        return IPv6Addr;
+    }
+    return @"";
 }
 
 - (void)notice:(NSString *)noticeJSON {

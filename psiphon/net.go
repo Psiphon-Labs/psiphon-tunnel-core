@@ -79,6 +79,7 @@ type DialConfig struct {
 	// current active untunneled network DNS server.
 	DeviceBinder    DeviceBinder
 	DnsServerGetter DnsServerGetter
+	IPv6Synthesizer IPv6Synthesizer
 
 	// UseIndistinguishableTLS specifies whether to try to use an
 	// alternative stack for TLS. From a circumvention perspective,
@@ -121,6 +122,11 @@ type DeviceBinder interface {
 type DnsServerGetter interface {
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
+}
+
+// IPv6Synthesizer defines the interface to the external IPv6Synthesize provider
+type IPv6Synthesizer interface {
+	IPv6Synthesize(IPv4Addr string) string
 }
 
 // TimeoutError implements the error interface
@@ -239,11 +245,16 @@ func MakeUntunneledHttpsClient(
 	dialConfig *DialConfig,
 	verifyLegacyCertificate *x509.Certificate,
 	requestUrl string,
+	skipVerify bool,
 	requestTimeout time.Duration) (*http.Client, string, error) {
 
 	// Change the scheme to "http"; otherwise http.Transport will try to do
 	// another TLS handshake inside the explicit TLS session. Also need to
 	// force an explicit port, as the default for "http", 80, won't talk TLS.
+	//
+	// TODO: set http.Transport.DialTLS instead of Dial to avoid this hack?
+	// See: https://golang.org/pkg/net/http/#Transport. DialTLS was added in
+	// Go 1.4 but this code may pre-date that.
 
 	urlComponents, err := url.Parse(requestUrl)
 	if err != nil {
@@ -272,7 +283,7 @@ func MakeUntunneledHttpsClient(
 			Dial: NewTCPDialer(dialConfig),
 			VerifyLegacyCertificate:       verifyLegacyCertificate,
 			SNIServerName:                 host,
-			SkipVerify:                    false,
+			SkipVerify:                    skipVerify,
 			UseIndistinguishableTLS:       useIndistinguishableTLS,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
 		})
@@ -297,6 +308,7 @@ func MakeUntunneledHttpsClient(
 func MakeTunneledHttpClient(
 	config *Config,
 	tunnel *Tunnel,
+	skipVerify bool,
 	requestTimeout time.Duration) (*http.Client, error) {
 
 	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
@@ -307,7 +319,12 @@ func MakeTunneledHttpClient(
 		Dial: tunneledDialer,
 	}
 
-	if config.UseTrustedCACertificatesForStockTLS {
+	if skipVerify {
+
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
+	} else if config.UseTrustedCACertificatesForStockTLS {
+
 		if config.TrustedCACertificatesFilename == "" {
 			return nil, common.ContextError(errors.New(
 				"UseTrustedCACertificatesForStockTLS requires TrustedCACertificatesFilename"))
@@ -336,6 +353,7 @@ func MakeDownloadHttpClient(
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
 	requestUrl string,
+	skipVerify bool,
 	requestTimeout time.Duration) (*http.Client, string, error) {
 
 	var httpClient *http.Client
@@ -343,7 +361,8 @@ func MakeDownloadHttpClient(
 
 	if tunnel != nil {
 		// MakeTunneledHttpClient works with both "http" and "https" schemes
-		httpClient, err = MakeTunneledHttpClient(config, tunnel, requestTimeout)
+		httpClient, err = MakeTunneledHttpClient(
+			config, tunnel, skipVerify, requestTimeout)
 		if err != nil {
 			return nil, "", common.ContextError(err)
 		}
@@ -355,7 +374,7 @@ func MakeDownloadHttpClient(
 		// MakeUntunneledHttpsClient works only with "https" schemes
 		if urlComponents.Scheme == "https" {
 			httpClient, requestUrl, err = MakeUntunneledHttpsClient(
-				untunneledDialConfig, nil, requestUrl, requestTimeout)
+				untunneledDialConfig, nil, requestUrl, skipVerify, requestTimeout)
 			if err != nil {
 				return nil, "", common.ContextError(err)
 			}
@@ -389,6 +408,7 @@ func MakeDownloadHttpClient(
 func ResumeDownload(
 	httpClient *http.Client,
 	requestUrl string,
+	userAgent string,
 	downloadFilename string,
 	ifNoneMatchETag string) (int64, string, error) {
 
@@ -432,6 +452,8 @@ func ResumeDownload(
 		return 0, "", common.ContextError(err)
 	}
 
+	request.Header.Set("User-Agent", userAgent)
+
 	request.Header.Add("Range", fmt.Sprintf("bytes=%d-", fileInfo.Size()))
 
 	if partialETag != nil {
@@ -467,6 +489,10 @@ func ResumeDownload(
 	// receive 412 on ETag mismatch.
 	if err == nil &&
 		(response.StatusCode != http.StatusPartialContent &&
+
+			// Certain http servers return 200 OK where we expect 206, so accept that.
+			response.StatusCode != http.StatusOK &&
+
 			response.StatusCode != http.StatusRequestedRangeNotSatisfiable &&
 			response.StatusCode != http.StatusPreconditionFailed &&
 			response.StatusCode != http.StatusNotModified) {

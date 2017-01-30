@@ -582,10 +582,6 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (io.ReadCloser, error) {
 			break
 		}
 
-		// Don't use the default user agent ("Go 1.1 package http").
-		// For now, just omit the header (net/http/request.go: "may be blank to not send the header").
-		request.Header.Set("User-Agent", "")
-
 		request.Header.Set("Content-Type", "application/octet-stream")
 
 		// Set additional headers to the HTTP request using the same method we use for adding

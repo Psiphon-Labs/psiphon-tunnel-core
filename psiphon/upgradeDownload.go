@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
@@ -55,9 +56,13 @@ import (
 // upgrade is still pending install by the outer client.
 func DownloadUpgrade(
 	config *Config,
+	attempt int,
 	handshakeVersion string,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig) error {
+
+	// Note: this downloader doesn't use ETags since many client binaries, with
+	// different embedded values, exist for a single version.
 
 	// Check if complete file already downloaded
 
@@ -68,12 +73,15 @@ func DownloadUpgrade(
 
 	// Select tunneled or untunneled configuration
 
+	downloadURL, _, skipVerify := selectDownloadURL(attempt, config.UpgradeDownloadURLs)
+
 	httpClient, requestUrl, err := MakeDownloadHttpClient(
 		config,
 		tunnel,
 		untunneledDialConfig,
-		config.UpgradeDownloadUrl,
-		DOWNLOAD_UPGRADE_TIMEOUT)
+		downloadURL,
+		skipVerify,
+		time.Duration(*config.DownloadUpgradeTimeoutSeconds)*time.Second)
 
 	// If no handshake version is supplied, make an initial HEAD request
 	// to get the current version from the version header.
@@ -131,7 +139,11 @@ func DownloadUpgrade(
 		"%s.%s", config.UpgradeDownloadFilename, availableClientVersion)
 
 	n, _, err := ResumeDownload(
-		httpClient, requestUrl, downloadFilename, "")
+		httpClient,
+		requestUrl,
+		MakePsiphonUserAgent(config),
+		downloadFilename,
+		"")
 
 	NoticeClientUpgradeDownloadedBytes(n)
 

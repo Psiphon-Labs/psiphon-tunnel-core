@@ -22,6 +22,7 @@ package main
 import (
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -36,21 +37,32 @@ import (
 func main() {
 
 	var configFilename string
-	flag.StringVar(&configFilename, "config", "", "OSL configuration file")
+	flag.StringVar(&configFilename, "config", "", "OSL configuration filename")
 
 	var offset time.Duration
-	flag.DurationVar(&offset, "offset", 0, "pave OSL start time (offset from now)")
+	flag.DurationVar(
+		&offset, "offset", 0,
+		"pave OSL start time (offset from now); default, 0, selects earliest epoch")
 
 	var period time.Duration
-	flag.DurationVar(&period, "period", 0, "pave OSL total period (starting from offset)")
+	flag.DurationVar(
+		&period, "period", 0,
+		"pave OSL total period (starting from offset); default, 0, selects at least one OSL period from now for all schemes")
 
 	var signingKeyPairFilename string
-	flag.StringVar(&signingKeyPairFilename, "key", "", "signing public key pair")
+	flag.StringVar(&signingKeyPairFilename, "key", "", "signing public key pair filename")
+
+	var payloadFilename string
+	flag.StringVar(&payloadFilename, "payload", "", "server entries to pave into OSLs")
 
 	var destinationDirectory string
-	flag.StringVar(&destinationDirectory, "output", "", "destination directory for output files")
+	flag.StringVar(
+		&destinationDirectory, "output", "",
+		"destination directory for output files; when omitted, no files are written (dry run mode)")
 
 	flag.Parse()
+
+	// load config
 
 	configJSON, err := ioutil.ReadFile(configFilename)
 	if err != nil {
@@ -63,6 +75,8 @@ func main() {
 		fmt.Printf("failed processing configuration file: %s\n", err)
 		os.Exit(1)
 	}
+
+	// load key pair
 
 	keyPairPEM, err := ioutil.ReadFile(signingKeyPairFilename)
 	if err != nil {
@@ -97,47 +111,84 @@ func main() {
 	signingPublicKey := base64.StdEncoding.EncodeToString(publicKeyBytes)
 	signingPrivateKey := base64.StdEncoding.EncodeToString(privateKeyBytes)
 
-	paveTime := time.Now().UTC()
-	startTime := paveTime.Add(offset)
-	endTime := startTime.Add(period)
+	// load payload
 
-	schemeOSLTimePeriods := make(map[int]time.Duration)
-	for index, scheme := range config.Schemes {
-		slokTimePeriodsPerOSL := 1
-		for _, keySplit := range scheme.SeedPeriodKeySplits {
-			slokTimePeriodsPerOSL *= keySplit.Total
+	paveServerEntries := make(map[string][]string)
+
+	pavedPayloadOSLID := make(map[string]bool)
+
+	if payloadFilename != "" {
+		payloadJSON, err := ioutil.ReadFile(payloadFilename)
+		if err != nil {
+			fmt.Printf("failed loading payload file: %s\n", err)
+			os.Exit(1)
 		}
-		schemeOSLTimePeriods[index] =
-			time.Duration(scheme.SeedPeriodNanoseconds * int64(slokTimePeriodsPerOSL))
-	}
 
-	allPropagationChannelIDs := make(map[string][]int)
-	for index, scheme := range config.Schemes {
-		for _, propagationChannelID := range scheme.PropagationChannelIDs {
-			allPropagationChannelIDs[propagationChannelID] =
-				append(allPropagationChannelIDs[propagationChannelID], index)
+		var payload []*struct {
+			OSLIDs      []string
+			ServerEntry string
 		}
-	}
 
-	for propagationChannelID, schemeIndexes := range allPropagationChannelIDs {
+		err = json.Unmarshal(payloadJSON, &payload)
+		if err != nil {
+			fmt.Printf("failed unmarshaling payload file: %s\n", err)
+			os.Exit(1)
+		}
 
-		paveServerEntries := make([]map[time.Time]string, len(config.Schemes))
-
-		for _, index := range schemeIndexes {
-
-			paveServerEntries[index] = make(map[time.Time]string)
-
-			oslTime, _ := time.Parse(time.RFC3339, config.Schemes[index].Epoch)
-			for !oslTime.After(endTime) {
-				if !oslTime.Before(startTime) {
-					paveServerEntries[index][oslTime] = ""
-				}
-				oslTime = oslTime.Add(schemeOSLTimePeriods[index])
+		for _, item := range payload {
+			for _, oslID := range item.OSLIDs {
+				paveServerEntries[oslID] = append(
+					paveServerEntries[oslID], item.ServerEntry)
+				pavedPayloadOSLID[oslID] = false
 			}
-
-			fmt.Printf("Paving propagation channel %s, scheme #%d, [%s - %s], %s\n",
-				propagationChannelID, index, startTime, endTime, schemeOSLTimePeriods[index])
 		}
+	}
+
+	// determine pave time range
+
+	paveTime := time.Now().UTC()
+
+	var startTime, endTime time.Time
+
+	if offset != 0 {
+		startTime = paveTime.Add(offset)
+	} else {
+		// Default to the earliest scheme epoch.
+		startTime = paveTime
+		for _, scheme := range config.Schemes {
+			epoch, _ := time.Parse(time.RFC3339, scheme.Epoch)
+			if epoch.Before(startTime) {
+				startTime = epoch
+			}
+		}
+	}
+
+	if period != 0 {
+		endTime = startTime.Add(period)
+	} else {
+		// Default to at least one OSL period after "now",
+		// considering all schemes.
+		endTime = paveTime
+		for _, scheme := range config.Schemes {
+			oslDuration := scheme.GetOSLDuration()
+			if endTime.Add(oslDuration).After(endTime) {
+				endTime = endTime.Add(oslDuration)
+			}
+		}
+	}
+
+	// build list of all participating propagation channel IDs
+
+	allPropagationChannelIDs := make(map[string]bool)
+	for _, scheme := range config.Schemes {
+		for _, propagationChannelID := range scheme.PropagationChannelIDs {
+			allPropagationChannelIDs[propagationChannelID] = true
+		}
+	}
+
+	// pave a directory for each propagation channel
+
+	for propagationChannelID, _ := range allPropagationChannelIDs {
 
 		paveFiles, err := config.Pave(
 			endTime,
@@ -145,29 +196,58 @@ func main() {
 			signingPublicKey,
 			signingPrivateKey,
 			paveServerEntries,
-			func(schemeIndex int, oslTime time.Time, fileName string) {
-				fmt.Printf("\tPaved scheme %d %s: %s\n", schemeIndex, oslTime, fileName)
+			func(logInfo *osl.PaveLogInfo) {
+				pavedPayloadOSLID[logInfo.OSLID] = true
+				fmt.Printf(
+					"paved %s: scheme %d, propagation channel ID %s, "+
+						"OSL time %s, OSL duration %s, server entries: %d\n",
+					logInfo.FileName,
+					logInfo.SchemeIndex,
+					logInfo.PropagationChannelID,
+					logInfo.OSLTime,
+					logInfo.OSLDuration,
+					logInfo.ServerEntryCount)
 			})
 		if err != nil {
 			fmt.Printf("failed paving: %s\n", err)
 			os.Exit(1)
 		}
 
-		directory := filepath.Join(destinationDirectory, propagationChannelID)
+		if destinationDirectory != "" {
 
-		err = os.MkdirAll(directory, 0755)
-		if err != nil {
-			fmt.Printf("failed creating output directory: %s\n", err)
-			os.Exit(1)
-		}
+			directory := filepath.Join(destinationDirectory, propagationChannelID)
 
-		for _, paveFile := range paveFiles {
-			filename := filepath.Join(directory, paveFile.Name)
-			err = ioutil.WriteFile(filename, paveFile.Contents, 0755)
+			err = os.MkdirAll(directory, 0755)
 			if err != nil {
-				fmt.Printf("error writing output file: %s\n", err)
+				fmt.Printf("failed creating output directory: %s\n", err)
 				os.Exit(1)
 			}
+
+			for _, paveFile := range paveFiles {
+				filename := filepath.Join(directory, paveFile.Name)
+				err = ioutil.WriteFile(filename, paveFile.Contents, 0755)
+				if err != nil {
+					fmt.Printf("error writing output file: %s\n", err)
+					os.Exit(1)
+				}
+			}
 		}
+	}
+
+	// fail if payload contains OSL IDs not in the config and time range
+
+	unknown := false
+	for oslID, paved := range pavedPayloadOSLID {
+		if !paved {
+			fmt.Printf(
+				"ignored %d server entries for unknown OSL ID: %s\n",
+				len(paveServerEntries[oslID]),
+				oslID)
+			unknown = true
+		}
+	}
+	if unknown {
+		fmt.Printf("payload contains unknown OSL IDs\n")
+		os.Exit(1)
 	}
 }

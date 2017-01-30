@@ -104,6 +104,30 @@ func interruptibleTCPDial(addr string, config *DialConfig) (*TCPConn, error) {
 	// when tcpDial, amoung other things, when makes a blocking syscall.Connect()
 	// call.
 	go func() {
+		if config.IPv6Synthesizer != nil {
+			// Synthesize an IPv6 address from an IPv4 one
+			// This is for compatibility on DNS64/NAT64 networks
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				select {
+				case conn.dialResult <- err:
+				default:
+				}
+				return
+			}
+			ip := net.ParseIP(host)
+			if ip != nil && ip.To4() != nil {
+				synthesizedAddr := config.IPv6Synthesizer.IPv6Synthesize(host)
+				// If IPv6Synthesize fails we will try dialing with the
+				// original IPv4 address instead of logging an error. If
+				// the address is unreachable an error will be emitted
+				// from tcpDial.
+				if synthesizedAddr != "" {
+					addr = net.JoinHostPort(synthesizedAddr, port)
+				}
+			}
+		}
+
 		var netConn net.Conn
 		var err error
 		if config.UpstreamProxyUrl != "" {
@@ -152,11 +176,14 @@ func proxiedTcpDial(
 	dialer := func(network, addr string) (net.Conn, error) {
 		return tcpDial(addr, config, dialResult)
 	}
+
+	dialHeaders, _ := common.UserAgentIfUnset(config.UpstreamProxyCustomHeaders)
+
 	upstreamDialer := upstreamproxy.NewProxyDialFunc(
 		&upstreamproxy.UpstreamProxyConfig{
 			ForwardDialFunc: dialer,
 			ProxyURIString:  config.UpstreamProxyUrl,
-			CustomHeaders:   config.UpstreamProxyCustomHeaders,
+			CustomHeaders:   dialHeaders,
 		})
 	netConn, err := upstreamDialer("tcp", addr)
 	if _, ok := err.(*upstreamproxy.Error); ok {
