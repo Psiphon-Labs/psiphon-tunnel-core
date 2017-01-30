@@ -584,9 +584,9 @@ func dialSsh(
 	// So depending on which protocol is used, multiple layers are initialized.
 
 	useObfuscatedSsh := false
+	dialHeaders := config.UpstreamProxyCustomHeaders
 	var directTCPDialAddress string
 	var meekConfig *MeekConfig
-	var dialHeaders map[string][]string
 	var selectedUserAgent bool
 	var err error
 
