@@ -51,7 +51,7 @@ func TestMain(m *testing.M) {
 	var err error
 	testDataDirName, err = ioutil.TempDir("", "psiphon-controller-test")
 	if err != nil {
-		fmt.Printf("TempDir failed: %s", err)
+		fmt.Printf("TempDir failed: %s\n", err)
 		os.Exit(1)
 	}
 	defer os.RemoveAll(testDataDirName)
@@ -943,26 +943,26 @@ func initDisruptor() {
 	go func() {
 		listener, err := socks.ListenSocks("tcp", disruptorProxyAddress)
 		if err != nil {
-			fmt.Errorf("disruptor proxy listen error: %s", err)
+			fmt.Printf("disruptor proxy listen error: %s\n", err)
 			return
 		}
 		for {
 			localConn, err := listener.AcceptSocks()
 			if err != nil {
-				fmt.Errorf("disruptor proxy accept error: %s", err)
+				fmt.Printf("disruptor proxy accept error: %s\n", err)
 				return
 			}
 			go func() {
 				defer localConn.Close()
 				remoteConn, err := net.Dial("tcp", localConn.Req.Target)
 				if err != nil {
-					fmt.Errorf("disruptor proxy dial error: %s", err)
+					fmt.Printf("disruptor proxy dial error: %s\n", err)
 					return
 				}
 				defer remoteConn.Close()
 				err = localConn.Grant(&net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0})
 				if err != nil {
-					fmt.Errorf("disruptor proxy grant error: %s", err)
+					fmt.Printf("disruptor proxy grant error: %s\n", err)
 					return
 				}
 
@@ -1012,7 +1012,7 @@ func initUpstreamProxy() {
 		proxy.OnRequest().DoFunc(
 			func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 				if !hasExpectedCustomHeaders(r.Header) {
-					ctx.Logf("missing expected headers: %+v", ctx.Req.Header)
+					fmt.Printf("missing expected headers: %+v\n", ctx.Req.Header)
 					return nil, goproxy.NewResponse(r, goproxy.ContentTypeText, http.StatusUnauthorized, "")
 				}
 				return r, nil
@@ -1021,7 +1021,7 @@ func initUpstreamProxy() {
 		proxy.OnRequest().HandleConnectFunc(
 			func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
 				if !hasExpectedCustomHeaders(ctx.Req.Header) {
-					ctx.Logf("missing expected headers: %+v", ctx.Req.Header)
+					fmt.Printf("missing expected headers: %+v\n", ctx.Req.Header)
 					return goproxy.RejectConnect, host
 				}
 				return goproxy.OkConnect, host
@@ -1029,7 +1029,7 @@ func initUpstreamProxy() {
 
 		err := http.ListenAndServe("127.0.0.1:2161", proxy)
 		if err != nil {
-			fmt.Printf("upstream proxy failed: %s", err)
+			fmt.Printf("upstream proxy failed: %s\n", err)
 		}
 	}()
 

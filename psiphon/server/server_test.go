@@ -49,7 +49,7 @@ func TestMain(m *testing.M) {
 	var err error
 	testDataDirName, err = ioutil.TempDir("", "psiphon-server-test")
 	if err != nil {
-		fmt.Printf("TempDir failed: %s", err)
+		fmt.Printf("TempDir failed: %s\n", err)
 		os.Exit(1)
 	}
 	defer os.RemoveAll(testDataDirName)

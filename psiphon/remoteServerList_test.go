@@ -270,24 +270,24 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 	go func() {
 		listener, err := socks.ListenSocks("tcp", disruptorProxyAddress)
 		if err != nil {
-			fmt.Errorf("disruptor proxy listen error: %s", err)
+			fmt.Printf("disruptor proxy listen error: %s\n", err)
 			return
 		}
 		for {
 			localConn, err := listener.AcceptSocks()
 			if err != nil {
-				fmt.Errorf("disruptor proxy accept error: %s", err)
+				fmt.Printf("disruptor proxy accept error: %s\n", err)
 				return
 			}
 			go func() {
 				remoteConn, err := net.Dial("tcp", localConn.Req.Target)
 				if err != nil {
-					fmt.Errorf("disruptor proxy dial error: %s", err)
+					fmt.Printf("disruptor proxy dial error: %s\n", err)
 					return
 				}
 				err = localConn.Grant(&net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0})
 				if err != nil {
-					fmt.Errorf("disruptor proxy grant error: %s", err)
+					fmt.Printf("disruptor proxy grant error: %s\n", err)
 					return
 				}
 
