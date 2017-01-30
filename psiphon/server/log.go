@@ -100,12 +100,12 @@ func (logger *ContextLogger) LogRawFieldsWithTimestamp(fields LogFields) {
 
 // LogPanicRecover calls LogRawFieldsWithTimestamp with standard fields
 // for logging recovered panics.
-func (logger *ContextLogger) LogPanicRecover(recoverValue interface{}, stack string) {
+func (logger *ContextLogger) LogPanicRecover(recoverValue interface{}, stack []byte) {
 	log.LogRawFieldsWithTimestamp(
 		LogFields{
 			"event_name":    "panic",
 			"recover_value": recoverValue,
-			"stack":         stack,
+			"stack":         string(stack),
 		})
 }
 

@@ -98,7 +98,7 @@ func dispatchAPIRequestHandler(
 	// terminating in the case of a bug.
 	defer func() {
 		if e := recover(); e != nil {
-			log.LogPanicRecover(e, string(debug.Stack()))
+			log.LogPanicRecover(e, debug.Stack())
 			reterr = common.ContextError(errors.New("request handler panic"))
 		}
 	}()
