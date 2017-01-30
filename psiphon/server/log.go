@@ -98,6 +98,17 @@ func (logger *ContextLogger) LogRawFieldsWithTimestamp(fields LogFields) {
 		customJSONFormatterLogRawFieldsWithTimestamp)
 }
 
+// LogPanicRecover calls LogRawFieldsWithTimestamp with standard fields
+// for logging recovered panics.
+func (logger *ContextLogger) LogPanicRecover(recoverValue interface{}, stack string) {
+	log.LogRawFieldsWithTimestamp(
+		LogFields{
+			"event_name":    "panic",
+			"recover_value": recoverValue,
+			"stack":         stack,
+		})
+}
+
 // NewLogWriter returns an io.PipeWriter that can be used to write
 // to the global logger. Caller must Close() the writer.
 func NewLogWriter() *io.PipeWriter {

@@ -22,6 +22,7 @@ package server
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"regexp"
@@ -97,9 +98,8 @@ func dispatchAPIRequestHandler(
 	// terminating in the case of a bug.
 	defer func() {
 		if e := recover(); e != nil {
-			reterr = common.ContextError(
-				fmt.Errorf(
-					"request handler panic: %s: %s", e, debug.Stack()))
+			log.LogPanicRecover(e, string(debug.Stack()))
+			reterr = common.ContextError(errors.New("request handler panic"))
 		}
 	}()
 
