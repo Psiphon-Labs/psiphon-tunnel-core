@@ -22,6 +22,7 @@ package server
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"regexp"
@@ -97,9 +98,8 @@ func dispatchAPIRequestHandler(
 	// terminating in the case of a bug.
 	defer func() {
 		if e := recover(); e != nil {
-			reterr = common.ContextError(
-				fmt.Errorf(
-					"request handler panic: %s: %s", e, debug.Stack()))
+			log.LogPanicRecover(e, debug.Stack())
+			reterr = common.ContextError(errors.New("request handler panic"))
 		}
 	}()
 
@@ -620,8 +620,6 @@ func getRequestLogFields(
 	logFields := make(LogFields)
 
 	logFields["event_name"] = eventName
-	logFields["host_id"] = support.Config.HostID
-	logFields["build_rev"] = common.GetBuildInfo().BuildRev
 
 	// In psi_web, the space replacement was done to accommodate space
 	// delimited logging, which is no longer required; we retain the
