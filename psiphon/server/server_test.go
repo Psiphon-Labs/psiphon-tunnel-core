@@ -715,7 +715,12 @@ func makeTunneledNTPRequestAttempt(
 
 	// Tunneled NTP request
 
-	go localUDPProxy(addrs[0][len(addrs[0])-4:], 123, nil)
+	waitGroup = new(sync.WaitGroup)
+	waitGroup.Add(1)
+	go localUDPProxy(
+		addrs[0][len(addrs[0])-4:],
+		123,
+		waitGroup)
 	// TODO: properly synchronize with local UDP proxy startup
 	time.Sleep(1 * time.Second)
 
@@ -765,6 +770,8 @@ func makeTunneledNTPRequestAttempt(
 	if diff > 1*time.Minute {
 		return fmt.Errorf("Unexpected NTP time: %s; local time: %s", ntpNow, now)
 	}
+
+	waitGroup.Wait()
 
 	return nil
 }
