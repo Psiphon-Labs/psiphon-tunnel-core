@@ -302,7 +302,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig["PsinetDatabaseFilename"] = psinetFilename
 	serverConfig["TrafficRulesFilename"] = trafficRulesFilename
 	serverConfig["OSLConfigFilename"] = oslConfigFilename
-	serverConfig["LogLevel"] = "error"
+	serverConfig["LogFilename"] = "psiphond.log"
+	serverConfig["LogLevel"] = "debug"
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 

@@ -968,7 +968,8 @@ func initDisruptor() {
 				defer localConn.Close()
 				remoteConn, err := net.Dial("tcp", localConn.Req.Target)
 				if err != nil {
-					fmt.Printf("disruptor proxy dial error: %s\n", err)
+					// TODO: log "err" without logging server IPs
+					fmt.Printf("disruptor proxy dial error\n")
 					return
 				}
 				defer remoteConn.Close()

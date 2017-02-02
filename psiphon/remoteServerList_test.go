@@ -74,6 +74,8 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 			EnableSSHAPIRequests: true,
 			WebServerPort:        8001,
 			TunnelProtocolPorts:  map[string]int{"OSSH": 4001},
+			LogFilename:          "psiphond.log",
+			LogLevel:             "debug",
 		})
 	if err != nil {
 		t.Fatalf("error generating server config: %s", err)
@@ -371,7 +373,8 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 			case "RemoteServerListResourceDownloadedBytes":
 				// TODO: check for resumed download for each URL
 				//url := payload["url"].(string)
-				printNotice = true
+				//printNotice = true
+				printNotice = false
 			case "RemoteServerListResourceDownloaded":
 				printNotice = true
 			}
