@@ -1237,10 +1237,14 @@ func (sshClient *sshClient) idleUDPPortForwardTimeout() time.Duration {
 const (
 	portForwardTypeTCP = iota
 	portForwardTypeUDP
+	portForwardTypeTransparentDNS
 )
 
 func (sshClient *sshClient) isPortForwardPermitted(
-	portForwardType int, remoteIP net.IP, port int) bool {
+	portForwardType int,
+	isTransparentDNSForwarding bool,
+	remoteIP net.IP,
+	port int) bool {
 
 	sshClient.Lock()
 	defer sshClient.Unlock()
@@ -1251,7 +1255,9 @@ func (sshClient *sshClient) isPortForwardPermitted(
 
 	// Disallow connection to loopback. This is a failsafe. The server
 	// should be run on a host with correctly configured firewall rules.
-	if remoteIP.IsLoopback() {
+	// And exception is made in the case of tranparent DNS forwarding,
+	// where the remoteIP has been rewritten.
+	if !isTransparentDNSForwarding && remoteIP.IsLoopback() {
 		return false
 	}
 
@@ -1423,6 +1429,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	if !isWebServerPortForward &&
 		!sshClient.isPortForwardPermitted(
 			portForwardTypeTCP,
+			false,
 			lookupResult.IP,
 			portToConnect) {
 
