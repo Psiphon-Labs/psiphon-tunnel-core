@@ -509,6 +509,7 @@ var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"sponsor_id", isHexDigits, 0},
 	requestParamSpec{"client_version", isIntString, 0},
 	requestParamSpec{"client_platform", isClientPlatform, 0},
+	requestParamSpec{"client_build_rev", isHexDigits, requestParamOptional},
 	requestParamSpec{"relay_protocol", isRelayProtocol, 0},
 	requestParamSpec{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
 	requestParamSpec{"device_region", isRegionCode, requestParamOptional},
