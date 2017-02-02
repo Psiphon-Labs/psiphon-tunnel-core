@@ -339,6 +339,7 @@ func validateNetworkAddress(address string, requireIPaddress bool) error {
 // a generated server config.
 type GenerateConfigParams struct {
 	LogFilename          string
+	LogLevel             string
 	ServerIPAddress      string
 	WebServerPort        int
 	EnableSSHAPIRequests bool
@@ -486,8 +487,13 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 	// Note: this config is intended for either testing or as an illustrative
 	// example or template and is not intended for production deployment.
 
+	logLevel := params.LogLevel
+	if logLevel == "" {
+		logLevel = "info"
+	}
+
 	config := &Config{
-		LogLevel:                       "info",
+		LogLevel:                       logLevel,
 		LogFilename:                    params.LogFilename,
 		GeoIPDatabaseFilenames:         nil,
 		HostID:                         "example-host-id",
