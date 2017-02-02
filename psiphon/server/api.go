@@ -519,6 +519,7 @@ var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"meek_sni_server_name", isDomain, requestParamOptional},
 	requestParamSpec{"meek_host_header", isHostHeader, requestParamOptional},
 	requestParamSpec{"meek_transformed_host_name", isBooleanFlag, requestParamOptional},
+	requestParamSpec{"user_agent", isAnyString, requestParamOptional},
 	requestParamSpec{"server_entry_region", isRegionCode, requestParamOptional},
 	requestParamSpec{"server_entry_source", isServerEntrySource, requestParamOptional},
 	requestParamSpec{"server_entry_timestamp", isISO8601Date, requestParamOptional},
