@@ -448,8 +448,6 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	json.Unmarshal(configJSON, &modifyConfig)
 	modifyConfig["DataStoreDirectory"] = testDataDirName
 	modifyConfig["RemoteServerListDownloadFilename"] = filepath.Join(testDataDirName, "server_list_compressed")
-	modifyConfig["ObfuscatedServerListDownloadDirectory"] = testDataDirName
-	modifyConfig["ObfuscatedServerListRootURL"] = "http://127.0.0.1/osl" // will fail
 	modifyConfig["UpgradeDownloadFilename"] = filepath.Join(testDataDirName, "upgrade")
 	configJSON, _ = json.Marshal(modifyConfig)
 
