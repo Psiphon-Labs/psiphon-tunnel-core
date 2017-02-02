@@ -98,6 +98,9 @@ func NewTunnelServer(
 // forward tracks its bytes transferred. Overall per-client stats for connection duration,
 // GeoIP, number of port forwards, and bytes transferred are tracked and logged when the
 // client shuts down.
+//
+// Note: client handler goroutines may still be shutting down after Run() returns. See
+// comment in sshClient.stop(). TODO: fully synchronized shutdown.
 func (server *TunnelServer) Run() error {
 
 	type sshListener struct {

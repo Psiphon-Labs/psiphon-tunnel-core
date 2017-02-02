@@ -26,6 +26,7 @@ import (
 	"io/ioutil"
 	go_log "log"
 	"os"
+	"sync"
 
 	"github.com/Psiphon-Inc/logrus"
 	"github.com/Psiphon-Inc/rotate-safe-writer"
@@ -171,44 +172,51 @@ func (f *CustomJSONFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 }
 
 var log *ContextLogger
-
 var logHostID, logBuildRev string
+var initLogging sync.Once
 
 // InitLogging configures a logger according to the specified
 // config params. If not called, the default logger set by the
 // package init() is used.
-// Concurrenty note: should only be called from the main
-// goroutine.
-func InitLogging(config *Config) error {
+// Concurrency notes: this should only be called from the main
+// goroutine; InitLogging only has effect on the first call, as
+// the logging facilities it initializes may be in use by other
+// goroutines after that point.
+func InitLogging(config *Config) (retErr error) {
 
-	logHostID = config.HostID
-	logBuildRev = common.GetBuildInfo().BuildRev
+	initLogging.Do(func() {
 
-	level, err := logrus.ParseLevel(config.LogLevel)
-	if err != nil {
-		return common.ContextError(err)
-	}
+		logHostID = config.HostID
+		logBuildRev = common.GetBuildInfo().BuildRev
 
-	var logWriter io.Writer
-
-	if config.LogFilename != "" {
-		logWriter, err = rotate.NewRotatableFileWriter(config.LogFilename, 0666)
+		level, err := logrus.ParseLevel(config.LogLevel)
 		if err != nil {
-			return common.ContextError(err)
+			retErr = common.ContextError(err)
+			return
 		}
-	} else {
-		logWriter = os.Stderr
-	}
 
-	log = &ContextLogger{
-		&logrus.Logger{
-			Out:       logWriter,
-			Formatter: &CustomJSONFormatter{},
-			Level:     level,
-		},
-	}
+		var logWriter io.Writer
 
-	return nil
+		if config.LogFilename != "" {
+			logWriter, err = rotate.NewRotatableFileWriter(config.LogFilename, 0666)
+			if err != nil {
+				retErr = common.ContextError(err)
+				return
+			}
+		} else {
+			logWriter = os.Stderr
+		}
+
+		log = &ContextLogger{
+			&logrus.Logger{
+				Out:       logWriter,
+				Formatter: &CustomJSONFormatter{},
+				Level:     level,
+			},
+		}
+	})
+
+	return retErr
 }
 
 func init() {
