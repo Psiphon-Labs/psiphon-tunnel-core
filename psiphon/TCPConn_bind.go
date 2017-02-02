@@ -24,12 +24,14 @@ package psiphon
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 	"strconv"
 	"syscall"
-	"time"
 
+	"github.com/Psiphon-Inc/goarista/monotime"
+	"github.com/Psiphon-Inc/goselect"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
@@ -37,19 +39,9 @@ import (
 //
 // To implement socket device binding, the lower-level syscall APIs are used.
 // The sequence of syscalls in this implementation are taken from:
-// https://code.google.com/p/go/issues/detail?id=6966
-func tcpDial(addr string, config *DialConfig, dialResult chan error) (net.Conn, error) {
-
-	// Like interruption, this timeout doesn't stop this connection goroutine,
-	// it just unblocks the calling interruptibleTCPDial.
-	if config.ConnectTimeout != 0 {
-		time.AfterFunc(config.ConnectTimeout, func() {
-			select {
-			case dialResult <- errors.New("connect timeout"):
-			default:
-			}
-		})
-	}
+// https://github.com/golang/go/issues/6966
+// (originally: https://code.google.com/p/go/issues/detail?id=6966)
+func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 
 	// Get the remote IP and port, resolving a domain name if necessary
 	host, strPort, err := net.SplitHostPort(addr)
@@ -68,70 +60,138 @@ func tcpDial(addr string, config *DialConfig, dialResult chan error) (net.Conn, 
 		return nil, common.ContextError(errors.New("no IP address"))
 	}
 
-	// Select an IP at random from the list, so we're not always
-	// trying the same IP (when > 1) which may be blocked.
-	// TODO: retry all IPs until one connects? For now, this retry
-	// will happen on subsequent TCPDial calls, when a different IP
-	// is selected.
-	index, err := common.MakeSecureRandomInt(len(ipAddrs))
-	if err != nil {
-		return nil, common.ContextError(err)
+	// Iterate over a pseudorandom permutation of the destination
+	// IPs and attempt connections.
+	//
+	// Only continue retrying as long as the initial ConnectTimeout
+	// has not expired. Unlike net.Dial, we do not fractionalize the
+	// timeout, as the ConnectTimeout is generally intended to apply
+	// to a single attempt. So these serial retries are most useful
+	// in cases of immediate failure, such as "no route to host"
+	// errors when a host resolves to both IPv4 and IPv6 but IPv6
+	// addresses are unreachable.
+	// Retries at higher levels cover other cases: e.g.,
+	// Controller.remoteServerListFetcher will retry its entire
+	// operation and tcpDial will try a new permutation; or similarly,
+	// Controller.establishCandidateGenerator will retry a candidate
+	// tunnel server dials.
+
+	permutedIndexes := rand.Perm(len(ipAddrs))
+
+	lastErr := errors.New("unknown error")
+
+	var deadline monotime.Time
+	if config.ConnectTimeout != 0 {
+		deadline = monotime.Now().Add(config.ConnectTimeout)
 	}
 
-	var ipv4 [4]byte
-	var ipv6 [16]byte
-	var domain int
-	ipAddr := ipAddrs[index]
+	for iteration, index := range permutedIndexes {
 
-	// Get address type (IPv4 or IPv6)
-	if ipAddr != nil && ipAddr.To4() != nil {
-		copy(ipv4[:], ipAddr.To4())
-		domain = syscall.AF_INET
-	} else if ipAddr != nil && ipAddr.To16() != nil {
-		copy(ipv6[:], ipAddr.To16())
-		domain = syscall.AF_INET6
-	} else {
-		return nil, common.ContextError(fmt.Errorf("Got invalid IP address: %s", ipAddr.String()))
-	}
+		if iteration > 0 && deadline != 0 && monotime.Now().After(deadline) {
+			// lastErr should be set by the previous iteration
+			break
+		}
 
-	// Create a socket and bind to device, when configured to do so
-	socketFd, err := syscall.Socket(domain, syscall.SOCK_STREAM, 0)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
+		// Get address type (IPv4 or IPv6)
 
-	if config.DeviceBinder != nil {
-		// WARNING: this potentially violates the direction to not call into
-		// external components after the Controller may have been stopped.
-		// TODO: rework DeviceBinder as an internal 'service' which can trap
-		// external calls when they should not be made?
-		err = config.DeviceBinder.BindToDevice(socketFd)
+		var ipv4 [4]byte
+		var ipv6 [16]byte
+		var domain int
+		var sockAddr syscall.Sockaddr
+
+		ipAddr := ipAddrs[index]
+		if ipAddr != nil && ipAddr.To4() != nil {
+			copy(ipv4[:], ipAddr.To4())
+			domain = syscall.AF_INET
+		} else if ipAddr != nil && ipAddr.To16() != nil {
+			copy(ipv6[:], ipAddr.To16())
+			domain = syscall.AF_INET6
+		} else {
+			lastErr = common.ContextError(fmt.Errorf("Got invalid IP address: %s", ipAddr.String()))
+			continue
+		}
+		if domain == syscall.AF_INET {
+			sockAddr = &syscall.SockaddrInet4{Addr: ipv4, Port: port}
+		} else if domain == syscall.AF_INET6 {
+			sockAddr = &syscall.SockaddrInet6{Addr: ipv6, Port: port}
+		}
+
+		// Create a socket and bind to device, when configured to do so
+
+		socketFd, err := syscall.Socket(domain, syscall.SOCK_STREAM, 0)
+		if err != nil {
+			lastErr = common.ContextError(err)
+			continue
+		}
+
+		if config.DeviceBinder != nil {
+			// WARNING: this potentially violates the direction to not call into
+			// external components after the Controller may have been stopped.
+			// TODO: rework DeviceBinder as an internal 'service' which can trap
+			// external calls when they should not be made?
+			err = config.DeviceBinder.BindToDevice(socketFd)
+			if err != nil {
+				syscall.Close(socketFd)
+				lastErr = common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))
+				continue
+			}
+		}
+
+		// Connect socket to the server's IP address
+
+		err = syscall.SetNonblock(socketFd, true)
 		if err != nil {
 			syscall.Close(socketFd)
-			return nil, common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))
+			lastErr = common.ContextError(err)
+			continue
 		}
+
+		err = syscall.Connect(socketFd, sockAddr)
+		if err != nil {
+			if errno, ok := err.(syscall.Errno); !ok || errno != syscall.EINPROGRESS {
+				syscall.Close(socketFd)
+				lastErr = common.ContextError(err)
+				continue
+			}
+		}
+
+		fdset := &goselect.FDSet{}
+		fdset.Set(uintptr(socketFd))
+
+		timeout := config.ConnectTimeout
+		if config.ConnectTimeout == 0 {
+			timeout = -1
+		}
+
+		err = goselect.Select(socketFd+1, nil, fdset, nil, timeout)
+		if err != nil {
+			lastErr = common.ContextError(err)
+			continue
+		}
+		if !fdset.IsSet(uintptr(socketFd)) {
+			lastErr = common.ContextError(errors.New("file descriptor not set"))
+			continue
+		}
+
+		err = syscall.SetNonblock(socketFd, false)
+		if err != nil {
+			syscall.Close(socketFd)
+			lastErr = common.ContextError(err)
+			continue
+		}
+
+		// Convert the socket fd to a net.Conn
+
+		file := os.NewFile(uintptr(socketFd), "")
+		netConn, err := net.FileConn(file) // net.FileConn() dups socketFd
+		file.Close()                       // file.Close() closes socketFd
+		if err != nil {
+			lastErr = common.ContextError(err)
+			continue
+		}
+
+		return netConn, nil
 	}
 
-	// Connect socket to the server's IP address
-	if domain == syscall.AF_INET {
-		sockAddr := syscall.SockaddrInet4{Addr: ipv4, Port: port}
-		err = syscall.Connect(socketFd, &sockAddr)
-	} else if domain == syscall.AF_INET6 {
-		sockAddr := syscall.SockaddrInet6{Addr: ipv6, Port: port}
-		err = syscall.Connect(socketFd, &sockAddr)
-	}
-	if err != nil {
-		syscall.Close(socketFd)
-		return nil, common.ContextError(err)
-	}
-
-	// Convert the socket fd to a net.Conn
-	file := os.NewFile(uintptr(socketFd), "")
-	netConn, err := net.FileConn(file) // net.FileConn() dups socketFd
-	file.Close()                       // file.Close() closes socketFd
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-
-	return netConn, nil
+	return nil, lastErr
 }
