@@ -1,0 +1,226 @@
+/*
+ * Copyright (c) 2017, Psiphon Inc.
+ * All rights reserved.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+package psiphon
+
+import (
+	"fmt"
+	"net/http"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/Psiphon-Inc/goproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
+)
+
+// TODO: test that emitted NoticeConnectedTunnelDialStats reports correct userAgent value
+// TODO: test that server receives and records correct user_agent value
+
+func TestOSSHUserAgent(t *testing.T) {
+	attemptConnectionsWithUserAgent(t, "OSSH", true)
+}
+
+func TestUnfrontedMeekUserAgent(t *testing.T) {
+	attemptConnectionsWithUserAgent(t, "UNFRONTED-MEEK-OSSH", false)
+}
+
+func TestUnfrontedMeekHTTPSUserAgent(t *testing.T) {
+	attemptConnectionsWithUserAgent(t, "UNFRONTED-MEEK-HTTPS-OSSH", true)
+}
+
+var mockUserAgents = []string{"UserAgentA", "UserAgentB"}
+var userAgentCountsMutex sync.Mutex
+var userAgentCounts map[string]int
+var initUserAgentCounter sync.Once
+
+func pickUserAgent() string {
+	index, _ := common.MakeSecureRandomInt(len(mockUserAgents))
+	return mockUserAgents[index]
+}
+
+func initMockUserAgentPicker() {
+	common.RegisterUserAgentPicker(pickUserAgent)
+}
+
+func resetUserAgentCounts() {
+	userAgentCountsMutex.Lock()
+	defer userAgentCountsMutex.Unlock()
+	userAgentCounts = make(map[string]int)
+}
+
+func countUserAgent(headers http.Header, isCONNECT bool) {
+	userAgentCountsMutex.Lock()
+	defer userAgentCountsMutex.Unlock()
+	if _, ok := headers["User-Agent"]; !ok {
+		userAgentCounts["BLANK"]++
+	} else if isCONNECT {
+		userAgentCounts["CONNECT-"+headers.Get("User-Agent")]++
+	} else {
+		userAgentCounts[headers.Get("User-Agent")]++
+	}
+}
+
+func checkUserAgentCounts(t *testing.T, isCONNECT bool) {
+	userAgentCountsMutex.Lock()
+	defer userAgentCountsMutex.Unlock()
+
+	for _, userAgent := range mockUserAgents {
+
+		if isCONNECT {
+			if userAgentCounts["CONNECT-"+userAgent] == 0 {
+				t.Fatalf("unexpected CONNECT user agent count of 0: %+v", userAgentCounts)
+				return
+			}
+		} else {
+
+			if userAgentCounts[userAgent] == 0 {
+				t.Fatalf("unexpected non-CONNECT user agent count of 0: %+v", userAgentCounts)
+				return
+			}
+		}
+	}
+
+	if userAgentCounts["BLANK"] == 0 {
+		t.Fatalf("unexpected BLANK user agent count of 0: %+v", userAgentCounts)
+		return
+	}
+
+	// TODO: check proporations
+	t.Logf("%+v", userAgentCounts)
+}
+
+func initUserAgentCounterUpstreamProxy() {
+	initUserAgentCounter.Do(func() {
+		go func() {
+			proxy := goproxy.NewProxyHttpServer()
+
+			proxy.OnRequest().DoFunc(
+				func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+					countUserAgent(r.Header, false)
+					return nil, goproxy.NewResponse(r, goproxy.ContentTypeText, http.StatusUnauthorized, "")
+				})
+
+			proxy.OnRequest().HandleConnectFunc(
+				func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
+					countUserAgent(ctx.Req.Header, true)
+					return goproxy.RejectConnect, host
+				})
+
+			err := http.ListenAndServe("127.0.0.1:2162", proxy)
+			if err != nil {
+				fmt.Printf("upstream proxy failed: %s\n", err)
+			}
+		}()
+
+		// TODO: more robust wait-until-listening
+		time.Sleep(1 * time.Second)
+	})
+}
+
+func attemptConnectionsWithUserAgent(
+	t *testing.T, tunnelProtocol string, isCONNECT bool) {
+
+	initMockUserAgentPicker()
+	initUserAgentCounterUpstreamProxy()
+	resetUserAgentCounts()
+
+	// create a server entry
+
+	var err error
+	serverIPaddress := ""
+	for _, interfaceName := range []string{"eth0", "en0"} {
+		serverIPaddress, err = common.GetInterfaceIPAddress(interfaceName)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		t.Fatalf("error getting server IP address: %s", err)
+	}
+
+	_, _, encodedServerEntry, err := server.GenerateConfig(
+		&server.GenerateConfigParams{
+			ServerIPAddress:      serverIPaddress,
+			EnableSSHAPIRequests: true,
+			WebServerPort:        8000,
+			TunnelProtocolPorts:  map[string]int{tunnelProtocol: 4000},
+		})
+	if err != nil {
+		t.Fatalf("error generating server config: %s", err)
+	}
+
+	// attempt connections with client
+
+	// Connections are made through a mock upstream proxy that
+	// counts user agents. No server is running, and the upstream
+	// proxy rejects connections after counting the user agent.
+
+	// Note: calling LoadConfig ensures all *int config fields are initialized
+	clientConfigJSON := `
+    {
+        "ClientPlatform" : "Windows",
+        "ClientVersion" : "0",
+        "SponsorId" : "0",
+        "PropagationChannelId" : "0",
+        "ConnectionPoolSize" : 1,
+        "EstablishTunnelPausePeriodSeconds" : 1,
+        "DisableRemoteServerListFetcher" : true,
+        "TransformHostNames" : "never",
+        "UpstreamProxyUrl" : "http://127.0.0.1:2162"
+    }`
+	clientConfig, _ := LoadConfig([]byte(clientConfigJSON))
+
+	clientConfig.TargetServerEntry = string(encodedServerEntry)
+	clientConfig.TunnelProtocol = tunnelProtocol
+	clientConfig.DataStoreDirectory = testDataDirName
+
+	err = InitDataStore(clientConfig)
+	if err != nil {
+		t.Fatalf("error initializing client datastore: %s", err)
+	}
+
+	SetNoticeOutput(NewNoticeReceiver(
+		func(notice []byte) {
+			// (inspect notices here)
+		}))
+
+	controller, err := NewController(clientConfig)
+	if err != nil {
+		t.Fatalf("error creating client controller: %s", err)
+	}
+
+	controllerShutdownBroadcast := make(chan struct{})
+	controllerWaitGroup := new(sync.WaitGroup)
+	controllerWaitGroup.Add(1)
+	go func() {
+		defer controllerWaitGroup.Done()
+		controller.Run(controllerShutdownBroadcast)
+	}()
+
+	// repeat attempts for long enough to select each user agent
+
+	time.Sleep(20 * time.Second)
+
+	close(controllerShutdownBroadcast)
+	controllerWaitGroup.Wait()
+
+	checkUserAgentCounts(t, isCONNECT)
+}
