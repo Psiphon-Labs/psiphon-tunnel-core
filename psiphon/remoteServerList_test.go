@@ -74,7 +74,7 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 			EnableSSHAPIRequests: true,
 			WebServerPort:        8001,
 			TunnelProtocolPorts:  map[string]int{"OSSH": 4001},
-			LogFilename:          "psiphond.log",
+			LogFilename:          filepath.Join(testDataDirName, "psiphond.log"),
 			LogLevel:             "debug",
 		})
 	if err != nil {
