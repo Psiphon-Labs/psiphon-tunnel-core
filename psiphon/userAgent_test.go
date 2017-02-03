@@ -103,7 +103,7 @@ func checkUserAgentCounts(t *testing.T, isCONNECT bool) {
 		return
 	}
 
-	// TODO: check proporations
+	// TODO: check proportions
 	t.Logf("%+v", userAgentCounts)
 }
 
