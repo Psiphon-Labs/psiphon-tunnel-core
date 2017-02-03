@@ -816,6 +816,7 @@ func (serverContext *ServerContext) getBaseParams() requestJSONObject {
 	// TODO: client_tunnel_core_version?
 	params["relay_protocol"] = tunnel.protocol
 	params["client_platform"] = tunnel.config.ClientPlatform
+	params["client_build_rev"] = common.GetBuildInfo().BuildRev
 	params["tunnel_whole_device"] = strconv.Itoa(tunnel.config.TunnelWholeDevice)
 
 	// The following parameters may be blank and must
