@@ -29,7 +29,7 @@ import (
 )
 
 // tcpDial is the platform-specific part of interruptibleTCPDial
-func tcpDial(addr string, config *DialConfig, dialResult chan error) (net.Conn, error) {
+func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 
 	if config.DeviceBinder != nil {
 		return nil, common.ContextError(errors.New("psiphon.interruptibleTCPDial with DeviceBinder not supported"))
