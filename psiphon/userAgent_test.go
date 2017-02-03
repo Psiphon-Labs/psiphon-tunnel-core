@@ -124,7 +124,7 @@ func initUserAgentCounterUpstreamProxy() {
 					return goproxy.RejectConnect, host
 				})
 
-			err := http.ListenAndServe("127.0.0.1:2162", proxy)
+			err := http.ListenAndServe("127.0.0.1:2163", proxy)
 			if err != nil {
 				fmt.Printf("upstream proxy failed: %s\n", err)
 			}
@@ -184,7 +184,7 @@ func attemptConnectionsWithUserAgent(
         "EstablishTunnelPausePeriodSeconds" : 1,
         "DisableRemoteServerListFetcher" : true,
         "TransformHostNames" : "never",
-        "UpstreamProxyUrl" : "http://127.0.0.1:2162"
+        "UpstreamProxyUrl" : "http://127.0.0.1:2163"
     }`
 	clientConfig, _ := LoadConfig([]byte(clientConfigJSON))
 
