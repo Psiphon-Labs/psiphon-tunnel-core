@@ -167,25 +167,31 @@ func NoticeAvailableEgressRegions(regions []string) {
 		"AvailableEgressRegions", 0, "regions", sortedRegions)
 }
 
-// NoticeConnectingServer is details on a connection attempt
-func NoticeConnectingServer(ipAddress, region, protocol, directTCPDialAddress string, meekConfig *MeekConfig) {
-	if meekConfig == nil {
-		outputNotice("ConnectingServer", noticeIsDiagnostic,
-			"ipAddress", ipAddress,
-			"region", region,
-			"protocol", protocol,
-			"directTCPDialAddress", directTCPDialAddress)
-	} else {
-		outputNotice("ConnectingServer", noticeIsDiagnostic,
-			"ipAddress", ipAddress,
-			"region", region,
-			"protocol", protocol,
-			"meekDialAddress", meekConfig.DialAddress,
-			"meekUseHTTPS", meekConfig.UseHTTPS,
-			"meekSNIServerName", meekConfig.SNIServerName,
-			"meekHostHeader", meekConfig.HostHeader,
-			"meekTransformedHostName", meekConfig.TransformedHostName)
-	}
+func noticeServerDialStats(noticeType, ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
+	outputNotice(noticeType, noticeIsDiagnostic,
+		"ipAddress", ipAddress,
+		"region", region,
+		"protocol", protocol,
+		"upstreamProxyType", tunnelDialStats.UpstreamProxyType,
+		"upstreamProxyCustomHeaderNames", strings.Join(tunnelDialStats.UpstreamProxyCustomHeaderNames, ","),
+		"meekDialAddress", tunnelDialStats.MeekDialAddress,
+		"meekDialAddress", tunnelDialStats.MeekDialAddress,
+		"meekResolvedIPAddress", tunnelDialStats.MeekResolvedIPAddress,
+		"meekSNIServerName", tunnelDialStats.MeekSNIServerName,
+		"meekHostHeader", tunnelDialStats.MeekHostHeader,
+		"meekTransformedHostName", tunnelDialStats.MeekTransformedHostName,
+		"selectedUserAgent", tunnelDialStats.SelectedUserAgent,
+		"userAgent", tunnelDialStats.UserAgent)
+}
+
+// NoticeConnectingServer reports parameters and details for a single connection attempt
+func NoticeConnectingServer(ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
+	noticeServerDialStats("ConnectingServer", ipAddress, region, protocol, tunnelDialStats)
+}
+
+// NoticeConnectedServer reports parameters and details for a single successful connection
+func NoticeConnectedServer(ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
+	noticeServerDialStats("ConnectedServer", ipAddress, region, protocol, tunnelDialStats)
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
@@ -338,22 +344,6 @@ func NoticeLocalProxyError(proxyType string, err error) {
 	outputRepetitiveNotice(
 		"LocalProxyError"+proxyType, repetitionMessage, 1,
 		"LocalProxyError", noticeIsDiagnostic, "message", err.Error())
-}
-
-// NoticeConnectedTunnelDialStats reports extra network details for tunnel connections that required extra configuration.
-func NoticeConnectedTunnelDialStats(ipAddress string, tunnelDialStats *TunnelDialStats) {
-	outputNotice("ConnectedTunnelDialStats", noticeIsDiagnostic,
-		"ipAddress", ipAddress,
-		"upstreamProxyType", tunnelDialStats.UpstreamProxyType,
-		"upstreamProxyCustomHeaderNames", strings.Join(tunnelDialStats.UpstreamProxyCustomHeaderNames, ","),
-		"meekDialAddress", tunnelDialStats.MeekDialAddress,
-		"meekDialAddress", tunnelDialStats.MeekDialAddress,
-		"meekResolvedIPAddress", tunnelDialStats.MeekResolvedIPAddress,
-		"meekSNIServerName", tunnelDialStats.MeekSNIServerName,
-		"meekHostHeader", tunnelDialStats.MeekHostHeader,
-		"meekTransformedHostName", tunnelDialStats.MeekTransformedHostName,
-		"selectedUserAgent", tunnelDialStats.SelectedUserAgent,
-		"userAgent", tunnelDialStats.UserAgent)
 }
 
 // NoticeBuildInfo reports build version info.
