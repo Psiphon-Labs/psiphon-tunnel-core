@@ -440,8 +440,20 @@ func ResumeDownload(
 		// that the controller's upgradeDownloader will shortly call DownloadUpgrade
 		// again.
 		if err != nil {
-			os.Remove(partialFilename)
-			os.Remove(partialETagFilename)
+
+			// On Windows, file must be closed before it can be deleted
+			file.Close()
+
+			tempErr := os.Remove(partialFilename)
+			if tempErr != nil && !os.IsNotExist(tempErr) {
+				NoticeAlert("reset partial download failed: %s", tempErr)
+			}
+
+			tempErr = os.Remove(partialETagFilename)
+			if tempErr != nil && !os.IsNotExist(tempErr) {
+				NoticeAlert("reset partial download ETag failed: %s", tempErr)
+			}
+
 			return 0, "", common.ContextError(
 				fmt.Errorf("failed to load partial download ETag: %s", err))
 		}
