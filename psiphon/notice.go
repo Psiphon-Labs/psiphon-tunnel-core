@@ -168,20 +168,27 @@ func NoticeAvailableEgressRegions(regions []string) {
 }
 
 func noticeServerDialStats(noticeType, ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
-	outputNotice(noticeType, noticeIsDiagnostic,
-		"ipAddress", ipAddress,
-		"region", region,
-		"protocol", protocol,
-		"upstreamProxyType", tunnelDialStats.UpstreamProxyType,
-		"upstreamProxyCustomHeaderNames", strings.Join(tunnelDialStats.UpstreamProxyCustomHeaderNames, ","),
-		"meekDialAddress", tunnelDialStats.MeekDialAddress,
-		"meekDialAddress", tunnelDialStats.MeekDialAddress,
-		"meekResolvedIPAddress", tunnelDialStats.MeekResolvedIPAddress,
-		"meekSNIServerName", tunnelDialStats.MeekSNIServerName,
-		"meekHostHeader", tunnelDialStats.MeekHostHeader,
-		"meekTransformedHostName", tunnelDialStats.MeekTransformedHostName,
-		"selectedUserAgent", tunnelDialStats.SelectedUserAgent,
-		"userAgent", tunnelDialStats.UserAgent)
+	if tunnelDialStats != nil {
+		outputNotice(noticeType, noticeIsDiagnostic,
+			"ipAddress", ipAddress,
+			"region", region,
+			"protocol", protocol,
+			"upstreamProxyType", tunnelDialStats.UpstreamProxyType,
+			"upstreamProxyCustomHeaderNames", strings.Join(tunnelDialStats.UpstreamProxyCustomHeaderNames, ","),
+			"meekDialAddress", tunnelDialStats.MeekDialAddress,
+			"meekDialAddress", tunnelDialStats.MeekDialAddress,
+			"meekResolvedIPAddress", tunnelDialStats.MeekResolvedIPAddress,
+			"meekSNIServerName", tunnelDialStats.MeekSNIServerName,
+			"meekHostHeader", tunnelDialStats.MeekHostHeader,
+			"meekTransformedHostName", tunnelDialStats.MeekTransformedHostName,
+			"selectedUserAgent", tunnelDialStats.SelectedUserAgent,
+			"userAgent", tunnelDialStats.UserAgent)
+	} else {
+		outputNotice(noticeType, noticeIsDiagnostic,
+			"ipAddress", ipAddress,
+			"region", region,
+			"protocol", protocol)
+	}
 }
 
 // NoticeConnectingServer reports parameters and details for a single connection attempt
