@@ -181,7 +181,7 @@ func proxiedTcpDial(
 		&upstreamproxy.UpstreamProxyConfig{
 			ForwardDialFunc: dialer,
 			ProxyURIString:  config.UpstreamProxyUrl,
-			CustomHeaders:   config.UpstreamProxyCustomHeaders,
+			CustomHeaders:   config.CustomHeaders,
 		})
 	netConn, err := upstreamDialer("tcp", addr)
 	if _, ok := err.(*upstreamproxy.Error); ok {

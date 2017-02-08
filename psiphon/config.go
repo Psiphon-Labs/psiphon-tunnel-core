@@ -238,9 +238,13 @@ type Config struct {
 	// https://github.com/Psiphon-Labs/psiphon-tunnel-core/tree/master/psiphon/upstreamproxy
 	UpstreamProxyUrl string
 
-	// UpstreamProxyCustomHeaders is a set of additional arbitrary HTTP headers that are
-	// added to all requests made through the upstream proxy specified by UpstreamProxyUrl
-	// NOTE: Only HTTP(s) proxies use this if specified
+	// CustomHeaders is a set of additional arbitrary HTTP headers that are
+	// added to all plaintext HTTP requests and requests made through an HTTP
+	// upstream proxy when specified by UpstreamProxyUrl.
+	CustomHeaders http.Header
+
+	// Deprecated: Use CustomHeaders. When CustomHeaders is
+	// not nil, this parameter is ignored.
 	UpstreamProxyCustomHeaders http.Header
 
 	// NetworkConnectivityChecker is an interface that enables the core tunnel to call
@@ -540,6 +544,12 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	if config.TunnelPoolSize == 0 {
 		config.TunnelPoolSize = TUNNEL_POOL_SIZE
+	}
+
+	if config.CustomHeaders == nil {
+		// Promote legacy parameter
+		config.CustomHeaders = config.UpstreamProxyCustomHeaders
+		config.UpstreamProxyCustomHeaders = nil
 	}
 
 	if config.NetworkConnectivityChecker != nil {

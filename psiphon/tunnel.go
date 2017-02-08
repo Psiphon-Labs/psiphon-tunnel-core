@@ -584,7 +584,7 @@ func dialSsh(
 	// So depending on which protocol is used, multiple layers are initialized.
 
 	useObfuscatedSsh := false
-	dialHeaders := config.UpstreamProxyCustomHeaders
+	dialCustomHeaders := config.CustomHeaders
 	var directTCPDialAddress string
 	var meekConfig *MeekConfig
 	var selectedUserAgent bool
@@ -625,12 +625,12 @@ func dialSsh(
 		resolvedIPAddress.Store(IPAddress)
 	}
 
-	dialHeaders, selectedUserAgent = common.UserAgentIfUnset(config.UpstreamProxyCustomHeaders)
+	dialCustomHeaders, selectedUserAgent = common.UserAgentIfUnset(config.CustomHeaders)
 
 	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
-		UpstreamProxyCustomHeaders:    dialHeaders,
+		CustomHeaders:                 dialCustomHeaders,
 		ConnectTimeout:                time.Duration(*config.TunnelConnectTimeoutSeconds) * time.Second,
 		PendingConns:                  pendingConns,
 		DeviceBinder:                  config.DeviceBinder,
@@ -762,7 +762,7 @@ func dialSsh(
 
 		if selectedUserAgent {
 			dialStats.SelectedUserAgent = true
-			dialStats.UserAgent = dialConfig.UpstreamProxyCustomHeaders.Get("User-Agent")
+			dialStats.UserAgent = dialConfig.CustomHeaders.Get("User-Agent")
 		}
 
 		if dialConfig.UpstreamProxyUrl != "" {
@@ -774,7 +774,7 @@ func dialSsh(
 			}
 
 			dialStats.UpstreamProxyCustomHeaderNames = make([]string, 0)
-			for name, _ := range dialConfig.UpstreamProxyCustomHeaders {
+			for name, _ := range dialConfig.CustomHeaders {
 				if selectedUserAgent && name == "User-Agent" {
 					continue
 				}

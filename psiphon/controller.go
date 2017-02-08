@@ -96,7 +96,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 	untunneledPendingConns := new(common.Conns)
 	untunneledDialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
-		UpstreamProxyCustomHeaders:    config.UpstreamProxyCustomHeaders,
+		CustomHeaders:                 config.CustomHeaders,
 		PendingConns:                  untunneledPendingConns,
 		DeviceBinder:                  config.DeviceBinder,
 		DnsServerGetter:               config.DnsServerGetter,

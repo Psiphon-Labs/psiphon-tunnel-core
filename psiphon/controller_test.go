@@ -484,7 +484,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		config.UpstreamProxyUrl = disruptorProxyURL
 	} else if runConfig.useUpstreamProxy {
 		config.UpstreamProxyUrl = upstreamProxyURL
-		config.UpstreamProxyCustomHeaders = upstreamProxyCustomHeaders
+		config.CustomHeaders = upstreamProxyCustomHeaders
 	}
 
 	if runConfig.transformHostNames {
