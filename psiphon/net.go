@@ -55,10 +55,10 @@ type DialConfig struct {
 	// supported, those protocols will not connect.
 	UpstreamProxyUrl string
 
-	// UpstreamProxyCustomHeader is a set of additional arbitrary HTTP headers that are
-	// added to all HTTP requests made through the upstream proxy specified by UpstreamProxyUrl
-	// in case of HTTP proxy
-	UpstreamProxyCustomHeaders http.Header
+	// CustomHeaders is a set of additional arbitrary HTTP headers that are
+	// added to all plaintext HTTP requests and requests made through an HTTP
+	// upstream proxy when specified by UpstreamProxyUrl.
+	CustomHeaders http.Header
 
 	ConnectTimeout time.Duration
 

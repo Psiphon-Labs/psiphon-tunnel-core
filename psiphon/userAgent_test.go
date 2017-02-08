@@ -31,7 +31,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
 )
 
-// TODO: test that emitted NoticeConnectedTunnelDialStats reports correct userAgent value
 // TODO: test that server receives and records correct user_agent value
 
 func TestOSSHUserAgent(t *testing.T) {
@@ -66,7 +65,7 @@ func resetUserAgentCounts() {
 	userAgentCounts = make(map[string]int)
 }
 
-func countUserAgent(headers http.Header, isCONNECT bool) {
+func countHTTPUserAgent(headers http.Header, isCONNECT bool) {
 	userAgentCountsMutex.Lock()
 	defer userAgentCountsMutex.Unlock()
 	if _, ok := headers["User-Agent"]; !ok {
@@ -76,6 +75,12 @@ func countUserAgent(headers http.Header, isCONNECT bool) {
 	} else {
 		userAgentCounts[headers.Get("User-Agent")]++
 	}
+}
+
+func countNoticeUserAgent(userAgent string) {
+	userAgentCountsMutex.Lock()
+	defer userAgentCountsMutex.Unlock()
+	userAgentCounts["NOTICE-"+userAgent]++
 }
 
 func checkUserAgentCounts(t *testing.T, isCONNECT bool) {
@@ -96,6 +101,11 @@ func checkUserAgentCounts(t *testing.T, isCONNECT bool) {
 				return
 			}
 		}
+
+		if userAgentCounts["NOTICE-"+userAgent] == 0 {
+			t.Fatalf("unexpected NOTICE user agent count of 0: %+v", userAgentCounts)
+			return
+		}
 	}
 
 	if userAgentCounts["BLANK"] == 0 {
@@ -114,13 +124,13 @@ func initUserAgentCounterUpstreamProxy() {
 
 			proxy.OnRequest().DoFunc(
 				func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-					countUserAgent(r.Header, false)
+					countHTTPUserAgent(r.Header, false)
 					return nil, goproxy.NewResponse(r, goproxy.ContentTypeText, http.StatusUnauthorized, "")
 				})
 
 			proxy.OnRequest().HandleConnectFunc(
 				func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
-					countUserAgent(ctx.Req.Header, true)
+					countHTTPUserAgent(ctx.Req.Header, true)
 					return goproxy.RejectConnect, host
 				})
 
@@ -199,7 +209,17 @@ func attemptConnectionsWithUserAgent(
 
 	SetNoticeOutput(NewNoticeReceiver(
 		func(notice []byte) {
-			// (inspect notices here)
+			noticeType, payload, err := GetNotice(notice)
+			if err != nil {
+				return
+			}
+			if noticeType == "ConnectingServer" {
+				selectedUserAgent := payload["selectedUserAgent"].(bool)
+				userAgent := payload["userAgent"].(string)
+				if selectedUserAgent {
+					countNoticeUserAgent(userAgent)
+				}
+			}
 		}))
 
 	controller, err := NewController(clientConfig)
