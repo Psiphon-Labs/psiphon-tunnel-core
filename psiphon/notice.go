@@ -501,3 +501,19 @@ func NewNoticeConsoleRewriter(writer io.Writer) *NoticeReceiver {
 			string(object.Data))
 	})
 }
+
+// ...
+type NoticeWriter struct {
+	noticeType string
+}
+
+// ...
+func NewNoticeWriter(noticeType string) *NoticeWriter {
+	return &NoticeWriter{noticeType: noticeType}
+}
+
+// Write implements io.Writer.
+func (writer *NoticeWriter) Write(p []byte) (n int, err error) {
+	outputNotice(writer.noticeType, noticeIsDiagnostic, "message", string(p))
+	return len(p), nil
+}
