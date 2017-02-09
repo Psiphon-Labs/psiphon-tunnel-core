@@ -502,12 +502,14 @@ func NewNoticeConsoleRewriter(writer io.Writer) *NoticeReceiver {
 	})
 }
 
-// ...
+// NoticeWriter implements io.Writer and emits the contents of Write() calls
+// as Notices. This is to transform logger messages, if they can be redirected
+// to an io.Writer, to notices.
 type NoticeWriter struct {
 	noticeType string
 }
 
-// ...
+// NewNoticeWriter initializes a new NoticeWriter
 func NewNoticeWriter(noticeType string) *NoticeWriter {
 	return &NoticeWriter{noticeType: noticeType}
 }
