@@ -74,6 +74,8 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 			EnableSSHAPIRequests: true,
 			WebServerPort:        8001,
 			TunnelProtocolPorts:  map[string]int{"OSSH": 4001},
+			LogFilename:          filepath.Join(testDataDirName, "psiphond.log"),
+			LogLevel:             "debug",
 		})
 	if err != nil {
 		t.Fatalf("error generating server config: %s", err)
@@ -138,15 +140,30 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 		t.Fatalf("error generating package keys: %s", err)
 	}
 
+	// First Pave() call is to get the OSL ID to pave into
+
+	oslID := ""
+
 	paveFiles, err := oslConfig.Pave(
 		epoch,
 		propagationChannelID,
 		signingPublicKey,
 		signingPrivateKey,
-		[]map[time.Time]string{
-			map[time.Time]string{
-				epoch: string(encodedServerEntry),
-			},
+		map[string][]string{},
+		func(logInfo *osl.PaveLogInfo) {
+			oslID = logInfo.OSLID
+		})
+	if err != nil {
+		t.Fatalf("error paving OSL files: %s", err)
+	}
+
+	paveFiles, err = oslConfig.Pave(
+		epoch,
+		propagationChannelID,
+		signingPublicKey,
+		signingPrivateKey,
+		map[string][]string{
+			oslID: []string{string(encodedServerEntry)},
 		},
 		nil)
 	if err != nil {
@@ -255,24 +272,24 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 	go func() {
 		listener, err := socks.ListenSocks("tcp", disruptorProxyAddress)
 		if err != nil {
-			fmt.Errorf("disruptor proxy listen error: %s", err)
+			fmt.Printf("disruptor proxy listen error: %s\n", err)
 			return
 		}
 		for {
 			localConn, err := listener.AcceptSocks()
 			if err != nil {
-				fmt.Errorf("disruptor proxy accept error: %s", err)
+				fmt.Printf("disruptor proxy accept error: %s\n", err)
 				return
 			}
 			go func() {
 				remoteConn, err := net.Dial("tcp", localConn.Req.Target)
 				if err != nil {
-					fmt.Errorf("disruptor proxy dial error: %s", err)
+					fmt.Printf("disruptor proxy dial error: %s\n", err)
 					return
 				}
 				err = localConn.Grant(&net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0})
 				if err != nil {
-					fmt.Errorf("disruptor proxy grant error: %s", err)
+					fmt.Printf("disruptor proxy grant error: %s\n", err)
 					return
 				}
 
@@ -356,7 +373,8 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 			case "RemoteServerListResourceDownloadedBytes":
 				// TODO: check for resumed download for each URL
 				//url := payload["url"].(string)
-				printNotice = true
+				//printNotice = true
+				printNotice = false
 			case "RemoteServerListResourceDownloaded":
 				printNotice = true
 			}

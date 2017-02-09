@@ -1,4 +1,4 @@
-FROM alpine:latest
+FROM alpine:3.4
 
 MAINTAINER Psiphon Inc. <info@psiphon.ca>
 LABEL Description="Alpine Linux based Psiphon Tunnel-Core Server" Vendor="Psiphon Inc." Version="1.0"

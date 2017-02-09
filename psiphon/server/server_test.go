@@ -49,7 +49,7 @@ func TestMain(m *testing.M) {
 	var err error
 	testDataDirName, err = ioutil.TempDir("", "psiphon-server-test")
 	if err != nil {
-		fmt.Printf("TempDir failed: %s", err)
+		fmt.Printf("TempDir failed: %s\n", err)
 		os.Exit(1)
 	}
 	defer os.RemoveAll(testDataDirName)
@@ -302,7 +302,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig["PsinetDatabaseFilename"] = psinetFilename
 	serverConfig["TrafficRulesFilename"] = trafficRulesFilename
 	serverConfig["OSLConfigFilename"] = oslConfigFilename
-	serverConfig["LogLevel"] = "error"
+	serverConfig["LogFilename"] = filepath.Join(testDataDirName, "psiphond.log")
+	serverConfig["LogLevel"] = "debug"
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
@@ -716,7 +717,12 @@ func makeTunneledNTPRequestAttempt(
 
 	// Tunneled NTP request
 
-	go localUDPProxy(addrs[0][len(addrs[0])-4:], 123, nil)
+	waitGroup = new(sync.WaitGroup)
+	waitGroup.Add(1)
+	go localUDPProxy(
+		addrs[0][len(addrs[0])-4:],
+		123,
+		waitGroup)
 	// TODO: properly synchronize with local UDP proxy startup
 	time.Sleep(1 * time.Second)
 
@@ -766,6 +772,8 @@ func makeTunneledNTPRequestAttempt(
 	if diff > 1*time.Minute {
 		return fmt.Errorf("Unexpected NTP time: %s; local time: %s", ntpNow, now)
 	}
+
+	waitGroup.Wait()
 
 	return nil
 }

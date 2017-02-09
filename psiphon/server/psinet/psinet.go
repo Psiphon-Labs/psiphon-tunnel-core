@@ -274,7 +274,8 @@ func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string
 }
 
 // DiscoverServers selects new encoded server entries to be "discovered" by
-// the client, using the discoveryValue as the input into the discovery algorithm.
+// the client, using the discoveryValue -- a function of the client's IP
+// address -- as the input into the discovery algorithm.
 // The server list (db.Servers) loaded from JSON is stored as an array instead of
 // a map to ensure servers are discovered deterministically. Each iteration over a
 // map in go is seeded with a random value which causes non-deterministic ordering.
@@ -307,7 +308,9 @@ func (db *Database) DiscoverServers(discoveryValue int) []string {
 			}
 		}
 	}
-	servers = selectServers(candidateServers, discoveryValue)
+
+	timeInSeconds := int(discoveryDate.Unix())
+	servers = selectServers(candidateServers, timeInSeconds, discoveryValue)
 
 	encodedServerEntries := make([]string, 0)
 
@@ -333,15 +336,14 @@ func (db *Database) DiscoverServers(discoveryValue int) []string {
 // both aspects determine which server is selected. IP address is given the
 // priority: if there are only a couple of servers, for example, IP address alone
 // determines the outcome.
-func selectServers(servers []Server, discoveryValue int) []Server {
+func selectServers(servers []Server, timeInSeconds, discoveryValue int) []Server {
 	TIME_GRANULARITY := 3600
 
 	if len(servers) == 0 {
 		return nil
 	}
 
-	// Current time truncated to an hour
-	timeInSeconds := int(time.Now().Unix())
+	// Time truncated to an hour
 	timeStrategyValue := timeInSeconds / TIME_GRANULARITY
 
 	// Divide servers into buckets. The bucket count is chosen such that the number
@@ -350,10 +352,21 @@ func selectServers(servers []Server, discoveryValue int) []Server {
 
 	// NOTE: this code assumes that the range of possible timeStrategyValues
 	// and discoveryValues are sufficient to index to all bucket items.
+
 	bucketCount := calculateBucketCount(len(servers))
 
 	buckets := bucketizeServerList(servers, bucketCount)
+
+	if len(buckets) == 0 {
+		return nil
+	}
+
 	bucket := buckets[discoveryValue%len(buckets)]
+
+	if len(bucket) == 0 {
+		return nil
+	}
+
 	server := bucket[timeStrategyValue%len(bucket)]
 
 	serverList := make([]Server, 1)
@@ -368,24 +381,26 @@ func calculateBucketCount(length int) int {
 	return int(math.Ceil(math.Sqrt(float64(length))))
 }
 
-// Create bucketCount buckets.
-// Each bucket will be of size division or divison-1.
+// bucketizeServerList creates nearly equal sized slices of the input list.
 func bucketizeServerList(servers []Server, bucketCount int) [][]Server {
-	division := float64(len(servers)) / float64(bucketCount)
+
+	// This code creates the same partitions as legacy servers:
+	// https://bitbucket.org/psiphon/psiphon-circumvention-system/src/03bc1a7e51e7c85a816e370bb3a6c755fd9c6fee/Automation/psi_ops_discovery.py
+	//
+	// Both use the same algorithm from:
+	// http://stackoverflow.com/questions/2659900/python-slicing-a-list-into-n-nearly-equal-length-partitions
+
+	// TODO: this partition is constant for fixed Database content, so it could
+	// be done once and cached in the Database ReloadableFile reloadAction.
 
 	buckets := make([][]Server, bucketCount)
 
-	var currentBucketIndex int = 0
-	var serverIndex int = 0
-	for _, server := range servers {
-		bucketEndIndex := int(math.Floor(division * (float64(currentBucketIndex) + 1)))
+	division := float64(len(servers)) / float64(bucketCount)
 
-		buckets[currentBucketIndex] = append(buckets[currentBucketIndex], server)
-
-		serverIndex++
-		if serverIndex > bucketEndIndex {
-			currentBucketIndex++
-		}
+	for i := 0; i < bucketCount; i++ {
+		start := int((division * float64(i)) + 0.5)
+		end := int((division * (float64(i) + 1)) + 0.5)
+		buckets[i] = servers[start:end]
 	}
 
 	return buckets

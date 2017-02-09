@@ -22,6 +22,7 @@ package server
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"regexp"
@@ -97,9 +98,8 @@ func dispatchAPIRequestHandler(
 	// terminating in the case of a bug.
 	defer func() {
 		if e := recover(); e != nil {
-			reterr = common.ContextError(
-				fmt.Errorf(
-					"request handler panic: %s: %s", e, debug.Stack()))
+			log.LogPanicRecover(e, debug.Stack())
+			reterr = common.ContextError(errors.New("request handler panic"))
 		}
 	}()
 
@@ -509,6 +509,7 @@ var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"sponsor_id", isHexDigits, 0},
 	requestParamSpec{"client_version", isIntString, 0},
 	requestParamSpec{"client_platform", isClientPlatform, 0},
+	requestParamSpec{"client_build_rev", isHexDigits, requestParamOptional},
 	requestParamSpec{"relay_protocol", isRelayProtocol, 0},
 	requestParamSpec{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
 	requestParamSpec{"device_region", isRegionCode, requestParamOptional},
@@ -519,6 +520,7 @@ var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"meek_sni_server_name", isDomain, requestParamOptional},
 	requestParamSpec{"meek_host_header", isHostHeader, requestParamOptional},
 	requestParamSpec{"meek_transformed_host_name", isBooleanFlag, requestParamOptional},
+	requestParamSpec{"user_agent", isAnyString, requestParamOptional},
 	requestParamSpec{"server_entry_region", isRegionCode, requestParamOptional},
 	requestParamSpec{"server_entry_source", isServerEntrySource, requestParamOptional},
 	requestParamSpec{"server_entry_timestamp", isISO8601Date, requestParamOptional},
@@ -620,8 +622,6 @@ func getRequestLogFields(
 	logFields := make(LogFields)
 
 	logFields["event_name"] = eventName
-	logFields["host_id"] = support.Config.HostID
-	logFields["build_rev"] = common.GetBuildInfo().BuildRev
 
 	// In psi_web, the space replacement was done to accommodate space
 	// delimited logging, which is no longer required; we retain the

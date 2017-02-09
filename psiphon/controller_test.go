@@ -51,7 +51,7 @@ func TestMain(m *testing.M) {
 	var err error
 	testDataDirName, err = ioutil.TempDir("", "psiphon-controller-test")
 	if err != nil {
-		fmt.Printf("TempDir failed: %s", err)
+		fmt.Printf("TempDir failed: %s\n", err)
 		os.Exit(1)
 	}
 	defer os.RemoveAll(testDataDirName)
@@ -448,8 +448,6 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	json.Unmarshal(configJSON, &modifyConfig)
 	modifyConfig["DataStoreDirectory"] = testDataDirName
 	modifyConfig["RemoteServerListDownloadFilename"] = filepath.Join(testDataDirName, "server_list_compressed")
-	modifyConfig["ObfuscatedServerListDownloadDirectory"] = testDataDirName
-	modifyConfig["ObfuscatedServerListRootURL"] = "http://127.0.0.1/osl" // will fail
 	modifyConfig["UpgradeDownloadFilename"] = filepath.Join(testDataDirName, "upgrade")
 	configJSON, _ = json.Marshal(modifyConfig)
 
@@ -486,7 +484,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		config.UpstreamProxyUrl = disruptorProxyURL
 	} else if runConfig.useUpstreamProxy {
 		config.UpstreamProxyUrl = upstreamProxyURL
-		config.UpstreamProxyCustomHeaders = upstreamProxyCustomHeaders
+		config.CustomHeaders = upstreamProxyCustomHeaders
 	}
 
 	if runConfig.transformHostNames {
@@ -812,12 +810,11 @@ func (TestHostNameTransformer) TransformHostName(string) (string, bool) {
 
 func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) {
 
-	testUrl := "https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core/master/LICENSE"
+	testUrl := "https://psiphon.ca"
 	roundTripTimeout := 30 * time.Second
-	expectedResponsePrefix := "                    GNU GENERAL PUBLIC LICENSE"
-	expectedResponseSize := 35148
+	expectedResponseContains := "Psiphon"
 	checkResponse := func(responseBody string) bool {
-		return strings.HasPrefix(responseBody, expectedResponsePrefix) && len(responseBody) == expectedResponseSize
+		return strings.Contains(responseBody, expectedResponseContains)
 	}
 
 	// Test: use HTTP proxy
@@ -827,18 +824,20 @@ func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) {
 		t.Fatalf("error initializing proxied HTTP request: %s", err)
 	}
 
+	httpTransport := &http.Transport{
+		Proxy:             http.ProxyURL(proxyUrl),
+		DisableKeepAlives: true,
+	}
+
 	httpClient := &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyUrl),
-		},
-		Timeout: roundTripTimeout,
+		Transport: httpTransport,
+		Timeout:   roundTripTimeout,
 	}
 
 	request, err := http.NewRequest("GET", testUrl, nil)
 	if err != nil {
 		t.Fatalf("error preparing proxied HTTP request: %s", err)
 	}
-	request.Close = true
 
 	response, err := httpClient.Do(request)
 	if err != nil {
@@ -860,8 +859,12 @@ func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) {
 
 	// Test: use direct URL proxy
 
+	httpTransport = &http.Transport{
+		DisableKeepAlives: true,
+	}
+
 	httpClient = &http.Client{
-		Transport: http.DefaultTransport,
+		Transport: httpTransport,
 		Timeout:   roundTripTimeout,
 	}
 
@@ -873,7 +876,6 @@ func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) {
 	if err != nil {
 		t.Fatalf("error preparing direct URL request: %s", err)
 	}
-	request.Close = true
 
 	response, err = httpClient.Do(request)
 	if err != nil {
@@ -890,11 +892,21 @@ func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) {
 		t.Fatalf("unexpected direct URL response")
 	}
 
+	// Delay before requesting from external service again
+	time.Sleep(1 * time.Second)
+
 	// Test: use tunneled URL proxy
 
-	response, err = httpClient.Get(
+	request, err = http.NewRequest(
+		"GET",
 		fmt.Sprintf("http://127.0.0.1:%d/tunneled/%s",
-			httpProxyPort, url.QueryEscape(testUrl)))
+			httpProxyPort, url.QueryEscape(testUrl)),
+		nil)
+	if err != nil {
+		t.Fatalf("error preparing tunneled URL request: %s", err)
+	}
+
+	response, err = httpClient.Do(request)
 	if err != nil {
 		t.Fatalf("error sending tunneled URL request: %s", err)
 	}
@@ -943,26 +955,27 @@ func initDisruptor() {
 	go func() {
 		listener, err := socks.ListenSocks("tcp", disruptorProxyAddress)
 		if err != nil {
-			fmt.Errorf("disruptor proxy listen error: %s", err)
+			fmt.Printf("disruptor proxy listen error: %s\n", err)
 			return
 		}
 		for {
 			localConn, err := listener.AcceptSocks()
 			if err != nil {
-				fmt.Errorf("disruptor proxy accept error: %s", err)
+				fmt.Printf("disruptor proxy accept error: %s\n", err)
 				return
 			}
 			go func() {
 				defer localConn.Close()
 				remoteConn, err := net.Dial("tcp", localConn.Req.Target)
 				if err != nil {
-					fmt.Errorf("disruptor proxy dial error: %s", err)
+					// TODO: log "err" without logging server IPs
+					fmt.Printf("disruptor proxy dial error\n")
 					return
 				}
 				defer remoteConn.Close()
 				err = localConn.Grant(&net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0})
 				if err != nil {
-					fmt.Errorf("disruptor proxy grant error: %s", err)
+					fmt.Printf("disruptor proxy grant error: %s\n", err)
 					return
 				}
 
@@ -1012,7 +1025,7 @@ func initUpstreamProxy() {
 		proxy.OnRequest().DoFunc(
 			func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 				if !hasExpectedCustomHeaders(r.Header) {
-					ctx.Logf("missing expected headers: %+v", ctx.Req.Header)
+					fmt.Printf("missing expected headers: %+v\n", ctx.Req.Header)
 					return nil, goproxy.NewResponse(r, goproxy.ContentTypeText, http.StatusUnauthorized, "")
 				}
 				return r, nil
@@ -1021,7 +1034,7 @@ func initUpstreamProxy() {
 		proxy.OnRequest().HandleConnectFunc(
 			func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
 				if !hasExpectedCustomHeaders(ctx.Req.Header) {
-					ctx.Logf("missing expected headers: %+v", ctx.Req.Header)
+					fmt.Printf("missing expected headers: %+v\n", ctx.Req.Header)
 					return goproxy.RejectConnect, host
 				}
 				return goproxy.OkConnect, host
@@ -1029,7 +1042,7 @@ func initUpstreamProxy() {
 
 		err := http.ListenAndServe("127.0.0.1:2161", proxy)
 		if err != nil {
-			fmt.Printf("upstream proxy failed: %s", err)
+			fmt.Printf("upstream proxy failed: %s\n", err)
 		}
 	}()
 

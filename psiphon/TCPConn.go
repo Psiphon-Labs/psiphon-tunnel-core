@@ -131,9 +131,9 @@ func interruptibleTCPDial(addr string, config *DialConfig) (*TCPConn, error) {
 		var netConn net.Conn
 		var err error
 		if config.UpstreamProxyUrl != "" {
-			netConn, err = proxiedTcpDial(addr, config, conn.dialResult)
+			netConn, err = proxiedTcpDial(addr, config)
 		} else {
-			netConn, err = tcpDial(addr, config, conn.dialResult)
+			netConn, err = tcpDial(addr, config)
 		}
 
 		// Mutex is necessary for referencing conn.isClosed and conn.Conn as
@@ -172,15 +172,16 @@ func interruptibleTCPDial(addr string, config *DialConfig) (*TCPConn, error) {
 
 // proxiedTcpDial wraps a tcpDial call in an upstreamproxy dial.
 func proxiedTcpDial(
-	addr string, config *DialConfig, dialResult chan error) (net.Conn, error) {
+	addr string, config *DialConfig) (net.Conn, error) {
 	dialer := func(network, addr string) (net.Conn, error) {
-		return tcpDial(addr, config, dialResult)
+		return tcpDial(addr, config)
 	}
+
 	upstreamDialer := upstreamproxy.NewProxyDialFunc(
 		&upstreamproxy.UpstreamProxyConfig{
 			ForwardDialFunc: dialer,
 			ProxyURIString:  config.UpstreamProxyUrl,
-			CustomHeaders:   config.UpstreamProxyCustomHeaders,
+			CustomHeaders:   config.CustomHeaders,
 		})
 	netConn, err := upstreamDialer("tcp", addr)
 	if _, ok := err.(*upstreamproxy.Error); ok {

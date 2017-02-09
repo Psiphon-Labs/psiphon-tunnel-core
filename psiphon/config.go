@@ -72,7 +72,7 @@ const (
 	PSIPHON_API_CLIENT_VERIFICATION_REQUEST_RETRY_PERIOD = 5 * time.Second
 	PSIPHON_API_CLIENT_VERIFICATION_REQUEST_MAX_RETRIES  = 10
 	FETCH_ROUTES_TIMEOUT_SECONDS                         = 60
-	DOWNLOAD_UPGRADE_TIMEOUT                             = 15 * time.Minute
+	DOWNLOAD_UPGRADE_TIMEOUT_SECONDS                     = 60
 	DOWNLOAD_UPGRADE_RETRY_PERIOD_SECONDS                = 30
 	DOWNLOAD_UPGRADE_STALE_PERIOD                        = 6 * time.Hour
 	IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION            = 2 * time.Minute
@@ -238,9 +238,13 @@ type Config struct {
 	// https://github.com/Psiphon-Labs/psiphon-tunnel-core/tree/master/psiphon/upstreamproxy
 	UpstreamProxyUrl string
 
-	// UpstreamProxyCustomHeaders is a set of additional arbitrary HTTP headers that are
-	// added to all requests made through the upstream proxy specified by UpstreamProxyUrl
-	// NOTE: Only HTTP(s) proxies use this if specified
+	// CustomHeaders is a set of additional arbitrary HTTP headers that are
+	// added to all plaintext HTTP requests and requests made through an HTTP
+	// upstream proxy when specified by UpstreamProxyUrl.
+	CustomHeaders http.Header
+
+	// Deprecated: Use CustomHeaders. When CustomHeaders is
+	// not nil, this parameter is ignored.
 	UpstreamProxyCustomHeaders http.Header
 
 	// NetworkConnectivityChecker is an interface that enables the core tunnel to call
@@ -408,7 +412,7 @@ type Config struct {
 	TunnelSshKeepAlivePeriodicTimeoutSeconds *int
 
 	// FetchRemoteServerListTimeoutSeconds specifies a timeout value for remote server list
-	// HTTP request. Zero value means that request will not time out.
+	// HTTP requests. Zero value means that request will not time out.
 	// If omitted, the default value is FETCH_REMOTE_SERVER_LIST_TIMEOUT_SECONDS.
 	FetchRemoteServerListTimeoutSeconds *int
 
@@ -421,9 +425,14 @@ type Config struct {
 	PsiphonApiServerTimeoutSeconds *int
 
 	// FetchRoutesTimeoutSeconds specifies a timeout value for split tunnel routes
-	// HTTP request. Zero value means that request will not time out.
+	// HTTP requests. Zero value means that request will not time out.
 	// If omitted, the default value is FETCH_ROUTES_TIMEOUT_SECONDS.
 	FetchRoutesTimeoutSeconds *int
+
+	// UpgradeDownloadTimeoutSeconds specifies a timeout value for upgrade download
+	// HTTP requests. Zero value means that request will not time out.
+	// If omitted, the default value is DOWNLOAD_UPGRADE_TIMEOUT_SECONDS.
+	DownloadUpgradeTimeoutSeconds *int
 
 	// HttpProxyOriginServerTimeoutSeconds specifies an HTTP response header timeout
 	// value in various HTTP relays found in httpProxy.
@@ -535,6 +544,12 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	if config.TunnelPoolSize == 0 {
 		config.TunnelPoolSize = TUNNEL_POOL_SIZE
+	}
+
+	if config.CustomHeaders == nil {
+		// Promote legacy parameter
+		config.CustomHeaders = config.UpstreamProxyCustomHeaders
+		config.UpstreamProxyCustomHeaders = nil
 	}
 
 	if config.NetworkConnectivityChecker != nil {
@@ -663,6 +678,11 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	if config.FetchRoutesTimeoutSeconds == nil {
 		defaultFetchRoutesTimeoutSeconds := FETCH_ROUTES_TIMEOUT_SECONDS
 		config.FetchRoutesTimeoutSeconds = &defaultFetchRoutesTimeoutSeconds
+	}
+
+	if config.DownloadUpgradeTimeoutSeconds == nil {
+		defaultDownloadUpgradeTimeoutSeconds := DOWNLOAD_UPGRADE_TIMEOUT_SECONDS
+		config.DownloadUpgradeTimeoutSeconds = &defaultDownloadUpgradeTimeoutSeconds
 	}
 
 	if config.HttpProxyOriginServerTimeoutSeconds == nil {

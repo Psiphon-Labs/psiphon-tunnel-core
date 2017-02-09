@@ -108,13 +108,15 @@
 }
 
 // See comment in header.
-+ (void)sendFeedback:(NSString * _Nonnull)feedbackJson
-    connectionConfig:(NSString * _Nonnull)connectionConfigJson
+- (void)sendFeedback:(NSString * _Nonnull)feedbackJson
            publicKey:(NSString * _Nonnull)b64EncodedPublicKey
         uploadServer:(NSString * _Nonnull)uploadServer
-          uploadPath:(NSString * _Nonnull)uploadPath
  uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders {
-    GoPsiSendFeedback(connectionConfigJson, feedbackJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders);
+    NSString *connectionConfigJson = [self getConfig];
+    if (connectionConfigJson == nil) {
+       [self logMessage:@"Error getting config for feedback upload"];
+    }
+    GoPsiSendFeedback(connectionConfigJson, feedbackJson, b64EncodedPublicKey, uploadServer, @"", uploadServerHeaders);
 }
 
 
@@ -278,13 +280,10 @@
     // * UpgradeDownloadFilename
     // * timeout fields
     
-    // TODO: Is LocalSocksProxyPort relevant for iOS?
-    
     //
     // Fill in the rest of the values.
     //
     
-    // TODO: Should be configurable?
     config[@"EmitBytesTransferred"] = [NSNumber numberWithBool:TRUE];
 
     config[@"DeviceRegion"] = [PsiphonTunnel getDeviceRegion];
@@ -307,7 +306,6 @@
     // Some of them require default values.
     //
     
-    // TODO: After updating tunnel-core in the framework, verify that this value is getting through to Kibana.
     if (config[@"ClientPlatform"] == nil) {
         config[@"ClientPlatform"] = @"iOS-Library";
     }

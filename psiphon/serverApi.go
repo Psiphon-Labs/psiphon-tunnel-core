@@ -743,7 +743,14 @@ func (serverContext *ServerContext) DoClientVerificationRequest(
 func (serverContext *ServerContext) doGetRequest(
 	requestUrl string) (responseBody []byte, err error) {
 
-	response, err := serverContext.psiphonHttpsClient.Get(requestUrl)
+	request, err := http.NewRequest("GET", requestUrl, nil)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	request.Header.Set("User-Agent", MakePsiphonUserAgent(serverContext.tunnel.config))
+
+	response, err := serverContext.psiphonHttpsClient.Do(request)
 	if err == nil && response.StatusCode != http.StatusOK {
 		response.Body.Close()
 		err = fmt.Errorf("HTTP GET request failed with response code: %d", response.StatusCode)
@@ -764,7 +771,15 @@ func (serverContext *ServerContext) doGetRequest(
 func (serverContext *ServerContext) doPostRequest(
 	requestUrl string, bodyType string, body io.Reader) (responseBody []byte, err error) {
 
-	response, err := serverContext.psiphonHttpsClient.Post(requestUrl, bodyType, body)
+	request, err := http.NewRequest("POST", requestUrl, body)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	request.Header.Set("User-Agent", MakePsiphonUserAgent(serverContext.tunnel.config))
+	request.Header.Set("Content-Type", bodyType)
+
+	response, err := serverContext.psiphonHttpsClient.Do(request)
 	if err == nil && response.StatusCode != http.StatusOK {
 		response.Body.Close()
 		err = fmt.Errorf("HTTP POST request failed with response code: %d", response.StatusCode)
@@ -801,6 +816,7 @@ func (serverContext *ServerContext) getBaseParams() requestJSONObject {
 	// TODO: client_tunnel_core_version?
 	params["relay_protocol"] = tunnel.protocol
 	params["client_platform"] = tunnel.config.ClientPlatform
+	params["client_build_rev"] = common.GetBuildInfo().BuildRev
 	params["tunnel_whole_device"] = strconv.Itoa(tunnel.config.TunnelWholeDevice)
 
 	// The following parameters may be blank and must
@@ -833,6 +849,10 @@ func (serverContext *ServerContext) getBaseParams() requestJSONObject {
 			transformedHostName = "1"
 		}
 		params["meek_transformed_host_name"] = transformedHostName
+
+		if tunnel.dialStats.SelectedUserAgent {
+			params["user_agent"] = tunnel.dialStats.UserAgent
+		}
 	}
 
 	if tunnel.serverEntry.Region != "" {

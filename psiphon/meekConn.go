@@ -251,7 +251,7 @@ func DialMeek(
 		}
 		if proxyUrl != nil {
 			// Wrap transport with a transport that can perform HTTP proxy auth negotiation
-			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport, meekDialConfig.UpstreamProxyCustomHeaders)
+			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport, meekDialConfig.CustomHeaders)
 			if err != nil {
 				return nil, common.ContextError(err)
 			}
@@ -278,7 +278,7 @@ func DialMeek(
 		}
 	} else {
 		if proxyUrl == nil {
-			additionalHeaders = meekDialConfig.UpstreamProxyCustomHeaders
+			additionalHeaders = meekDialConfig.CustomHeaders
 		}
 	}
 
@@ -581,10 +581,6 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (io.ReadCloser, error) {
 			// Don't retry when can't initialize a Request
 			break
 		}
-
-		// Don't use the default user agent ("Go 1.1 package http").
-		// For now, just omit the header (net/http/request.go: "may be blank to not send the header").
-		request.Header.Set("User-Agent", "")
 
 		request.Header.Set("Content-Type", "application/octet-stream")
 

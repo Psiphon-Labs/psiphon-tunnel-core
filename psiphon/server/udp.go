@@ -163,7 +163,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 			}
 
 			if !mux.sshClient.isPortForwardPermitted(
-				portForwardTypeUDP, dialIP, int(message.remotePort)) {
+				portForwardTypeUDP, message.forwardDNS, dialIP, int(message.remotePort)) {
 				// The udpgw protocol has no error response, so
 				// we just discard the message and read another.
 				continue
