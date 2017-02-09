@@ -653,6 +653,11 @@ type serverHelloMsg struct {
 	secureRenegotiation          []byte
 	secureRenegotiationSupported bool
 	alpnProtocol                 string
+
+	// [Psiphon]
+	// Additional extensions required for EmulateChrome.
+	// Note: omitted from serverHelloMsg.equal()
+	extendedMasterSecret bool
 }
 
 func (m *serverHelloMsg) equal(i interface{}) bool {
@@ -855,6 +860,8 @@ func (m *serverHelloMsg) unmarshal(data []byte) bool {
 	m.scts = nil
 	m.ticketSupported = false
 	m.alpnProtocol = ""
+	// [Psiphon]
+	m.extendedMasterSecret = false
 
 	if len(data) == 0 {
 		// ServerHello is optionally followed by extension data
@@ -962,6 +969,12 @@ func (m *serverHelloMsg) unmarshal(data []byte) bool {
 				m.scts = append(m.scts, d[:sctLen])
 				d = d[sctLen:]
 			}
+		// [Psiphon]
+		case extensionExtendedMasterSecret:
+			if length != 0 {
+				return false
+			}
+			m.extendedMasterSecret = true
 		}
 		data = data[length:]
 	}

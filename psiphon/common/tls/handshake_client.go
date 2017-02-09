@@ -163,7 +163,8 @@ NextCipherSuite:
 		hello.emulateChrome = true
 
 		// Sanity check that expected and required configuration is present
-		if len(hello.compressionMethods) != 1 ||
+		if hello.vers != VersionTLS12 ||
+			len(hello.compressionMethods) != 1 ||
 			hello.compressionMethods[0] != compressionNone ||
 			!hello.ticketSupported ||
 			!hello.ocspStapling ||
@@ -227,8 +228,6 @@ NextCipherSuite:
 		// https://github.com/google/boringssl/blob/master/LICENSE
 
 		hello.extendedMasterSecretSupported = true
-		// TODO: implement actual support, in case negotiated
-		// https://github.com/google/boringssl/commit/7571292eaca1745f3ecda2374ba1e8163b58c3b5
 
 		hello.channelIDSupported = true
 		// TODO: implement actual support, in case negotiated
@@ -563,7 +562,15 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 		}
 	}
 
-	hs.masterSecret = masterFromPreMasterSecret(c.vers, hs.suite, preMasterSecret, hs.hello.random, hs.serverHello.random)
+	// [Psiphon]
+	// extended master secret implementation from https://github.com/google/boringssl/commit/7571292eaca1745f3ecda2374ba1e8163b58c3b5
+	if hs.serverHello.extendedMasterSecret && c.config.EmulateChrome {
+		hs.masterSecret = extendedMasterFromPreMasterSecret(c.vers, hs.suite, preMasterSecret, hs.finishedHash)
+		c.extendedMasterSecret = true
+	} else {
+		hs.masterSecret = masterFromPreMasterSecret(c.vers, hs.suite, preMasterSecret, hs.hello.random, hs.serverHello.random)
+	}
+
 	if err := c.config.writeKeyLog(hs.hello.random, hs.masterSecret); err != nil {
 		c.sendAlert(alertInternalError)
 		return errors.New("tls: failed to write to key log: " + err.Error())
@@ -673,6 +680,8 @@ func (hs *clientHandshakeState) processServerHello() (bool, error) {
 	hs.masterSecret = hs.session.masterSecret
 	c.peerCertificates = hs.session.serverCertificates
 	c.verifiedChains = hs.session.verifiedChains
+	// [Psiphon]
+	c.extendedMasterSecret = hs.session.extendedMasterSecret
 	return true, nil
 }
 

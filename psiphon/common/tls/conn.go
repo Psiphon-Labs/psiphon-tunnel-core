@@ -43,12 +43,13 @@ type Conn struct {
 	// handshakes counts the number of handshakes performed on the
 	// connection so far. If renegotiation is disabled then this is either
 	// zero or one.
-	handshakes       int
-	didResume        bool // whether this connection was a session resumption
-	cipherSuite      uint16
-	ocspResponse     []byte   // stapled OCSP response
-	scts             [][]byte // signed certificate timestamps from server
-	peerCertificates []*x509.Certificate
+	handshakes           int
+	didResume            bool // whether this connection was a session resumption
+	extendedMasterSecret bool // [Psiphon] whether this session used an extended master secret
+	cipherSuite          uint16
+	ocspResponse         []byte   // stapled OCSP response
+	scts                 [][]byte // signed certificate timestamps from server
+	peerCertificates     []*x509.Certificate
 	// verifiedChains contains the certificate chains that we built, as
 	// opposed to the ones presented by the server.
 	verifiedChains [][]*x509.Certificate
