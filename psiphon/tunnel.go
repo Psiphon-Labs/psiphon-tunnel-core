@@ -689,7 +689,26 @@ func dialSsh(
 			return nil, common.ContextError(err)
 		}
 	} else {
-		dialConn, err = DialTCP(directTCPDialAddress, dialConfig)
+
+		tcpDialer := func(_, addr string) (net.Conn, error) {
+			return DialTCP(addr, dialConfig)
+		}
+
+		// For some direct connect servers, DialPluginProtocol
+		// will layer on another obfuscation protocol.
+		var dialedPlugin bool
+		dialedPlugin, dialConn, err = common.DialPluginProtocol(
+			NewNoticeWriter("DialPluginProtocol"),
+			tcpDialer,
+			directTCPDialAddress)
+
+		if dialedPlugin {
+			NoticeInfo("dialed plugin protocol for %s", serverEntry.IpAddress)
+		} else {
+			// Standard direct connection.
+			dialConn, err = tcpDialer("", directTCPDialAddress)
+		}
+
 		if err != nil {
 			return nil, common.ContextError(err)
 		}

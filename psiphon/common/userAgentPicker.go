@@ -26,14 +26,14 @@ import (
 
 var registeredUserAgentPicker atomic.Value
 
-func RegisterUserAgentPicker(generator func() string) {
-	registeredUserAgentPicker.Store(generator)
+func RegisterUserAgentPicker(picker func() string) {
+	registeredUserAgentPicker.Store(picker)
 }
 
 func pickUserAgent() string {
-	generator := registeredUserAgentPicker.Load()
-	if generator != nil {
-		return generator.(func() string)()
+	picker := registeredUserAgentPicker.Load()
+	if picker != nil {
+		return picker.(func() string)()
 	}
 	return ""
 }
