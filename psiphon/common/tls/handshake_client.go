@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"crypto"
 	"crypto/rand"
+	"crypto/sha256"
 	"math/big"
 
 	"crypto/ecdsa"
@@ -232,6 +233,15 @@ NextCipherSuite:
 		hello.channelIDSupported = true
 		// TODO: implement actual support, in case negotiated
 		// https://github.com/google/boringssl/commit/d30a990850457657e3209cb0c27fbe89b3df7ad2
+
+		// In BoringSSL, the session ID is a SHA256 digest of the
+		// session ticket:
+		// https://github.com/google/boringssl/blob/33fe4a0d1406f423e7424ea7367e1d1a51c2edc1/ssl/handshake_client.c#L1901-L1908
+		if session != nil {
+			hello.sessionTicket = session.sessionTicket
+			sessionId := sha256.Sum256(session.sessionTicket)
+			hello.sessionId = sessionId[:]
+		}
 	}
 
 	if _, err := c.writeRecord(recordTypeHandshake, hello.marshal()); err != nil {
