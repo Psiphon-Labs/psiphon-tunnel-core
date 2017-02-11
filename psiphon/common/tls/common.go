@@ -86,6 +86,7 @@ const (
 
 	// [Psiphon]
 	// Additional extensions required for EmulateChrome.
+	extensionPadding              uint16 = 21
 	extensionExtendedMasterSecret uint16 = 23
 	extensionChannelID            uint16 = 30032 // not IANA assigned
 )

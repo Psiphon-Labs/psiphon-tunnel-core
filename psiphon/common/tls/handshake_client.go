@@ -191,11 +191,13 @@ NextCipherSuite:
 			TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
 			TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
 			TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+
+			// TODO: remove these soon
+			// See: https://github.com/google/boringssl/commit/2e839244b078205ff677ada3fb83cf9d60ef055b
 			TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_OLD,
 			TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_OLD,
-			TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+
 			TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-			TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
 			TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
 			TLS_RSA_WITH_AES_128_GCM_SHA256,
 			TLS_RSA_WITH_AES_256_GCM_SHA384,
@@ -204,17 +206,18 @@ NextCipherSuite:
 			TLS_RSA_WITH_3DES_EDE_CBC_SHA,
 		}
 
-		if hello.vers >= VersionTLS12 {
-			hello.signatureAndHashes = []signatureAndHash{
-				{hashSHA512, signatureRSA},
-				{hashSHA512, signatureECDSA},
-				{hashSHA256, signatureRSA},
-				{hashSHA256, signatureECDSA},
-				{hashSHA384, signatureRSA},
-				{hashSHA384, signatureECDSA},
-				{hashSHA1, signatureRSA},
-				{hashSHA1, signatureECDSA},
-			}
+		// From: https://github.com/google/boringssl/blob/7d7554b6b3c79e707e25521e61e066ce2b996e4c/ssl/t1_lib.c#L442
+		// TODO: handle RSA-PSS (0x08)
+		hello.signatureAndHashes = []signatureAndHash{
+			{hashSHA256, signatureECDSA},
+			{0x08, 0x04},
+			{hashSHA256, signatureRSA},
+			{hashSHA384, signatureECDSA},
+			{0x08, 0x05},
+			{hashSHA384, signatureRSA},
+			{0x08, 0x06},
+			{hashSHA512, signatureRSA},
+			{hashSHA1, signatureRSA},
 		}
 
 		hello.nextProtoNeg = false
