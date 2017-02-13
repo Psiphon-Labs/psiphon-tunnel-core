@@ -55,10 +55,10 @@ type DialConfig struct {
 	// supported, those protocols will not connect.
 	UpstreamProxyUrl string
 
-	// UpstreamProxyCustomHeader is a set of additional arbitrary HTTP headers that are
-	// added to all HTTP requests made through the upstream proxy specified by UpstreamProxyUrl
-	// in case of HTTP proxy
-	UpstreamProxyCustomHeaders http.Header
+	// CustomHeaders is a set of additional arbitrary HTTP headers that are
+	// added to all plaintext HTTP requests and requests made through an HTTP
+	// upstream proxy when specified by UpstreamProxyUrl.
+	CustomHeaders http.Header
 
 	ConnectTimeout time.Duration
 
@@ -440,8 +440,20 @@ func ResumeDownload(
 		// that the controller's upgradeDownloader will shortly call DownloadUpgrade
 		// again.
 		if err != nil {
-			os.Remove(partialFilename)
-			os.Remove(partialETagFilename)
+
+			// On Windows, file must be closed before it can be deleted
+			file.Close()
+
+			tempErr := os.Remove(partialFilename)
+			if tempErr != nil && !os.IsNotExist(tempErr) {
+				NoticeAlert("reset partial download failed: %s", tempErr)
+			}
+
+			tempErr = os.Remove(partialETagFilename)
+			if tempErr != nil && !os.IsNotExist(tempErr) {
+				NoticeAlert("reset partial download ETag failed: %s", tempErr)
+			}
+
 			return 0, "", common.ContextError(
 				fmt.Errorf("failed to load partial download ETag: %s", err))
 		}
