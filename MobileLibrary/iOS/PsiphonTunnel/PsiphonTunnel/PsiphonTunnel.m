@@ -23,6 +23,7 @@
 #import "Psi-meta.h"
 #import "PsiphonTunnel.h"
 #import "json-framework/SBJson4.h"
+#import "JailbreakCheck/JailbreakCheck.h"
 
 
 @interface PsiphonTunnel () <GoPsiPsiphonProvider>
@@ -284,6 +285,27 @@
     // Fill in the rest of the values.
     //
     
+    // Ensure the elements of the ClientPlatform do not contain underscores, as that's what we use to separate the elements.
+    // Like "iOS"
+    NSString *systemName = [[[UIDevice currentDevice] systemName] stringByReplacingOccurrencesOfString:@"_" withString:@"-"];
+    // Like "10.2.1"
+    NSString *systemVersion = [[[UIDevice currentDevice]systemVersion] stringByReplacingOccurrencesOfString:@"_" withString:@"-"];
+    // "unjailbroken"/"jailbroken"
+    NSString *jailbroken = @"unjailbroken";
+    if (isDeviceJailbroken()) {
+        jailbroken = @"jailbroken";
+    }
+    // Like "com.psiphon3.browser"
+    NSString *bundleIdentifier = [[[NSBundle mainBundle] bundleIdentifier] stringByReplacingOccurrencesOfString:@"_" withString:@"-"];
+    
+    NSString *clientPlatform = [NSString stringWithFormat:@"%@_%@_%@_%@",
+                                systemName,
+                                systemVersion,
+                                jailbroken,
+                                bundleIdentifier];
+    
+    config[@"ClientPlatform"] = clientPlatform;
+        
     config[@"EmitBytesTransferred"] = [NSNumber numberWithBool:TRUE];
 
     config[@"DeviceRegion"] = [PsiphonTunnel getDeviceRegion];
@@ -301,18 +323,6 @@
     }
     config[@"TrustedCACertificatesFilename"] = bundledTrustedCAPath;
     
-    //
-    // Many other fields must *only* be modified by official Psiphon clients.
-    // Some of them require default values.
-    //
-    
-    if (config[@"ClientPlatform"] == nil) {
-        config[@"ClientPlatform"] = @"iOS-Library";
-    }
-    else {
-        [self logMessage:[NSString stringWithFormat: @"ClientPlatform overridden from 'iOS-Library' to '%@'", config[@"ClientPlatform"]]];
-    }
-
     NSString *finalConfigStr = [[[SBJson4Writer alloc] init] stringWithObject:config];
     
     if (finalConfigStr == nil) {
