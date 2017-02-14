@@ -42,6 +42,15 @@ class ViewController: UIViewController {
             NSLog("psiphonTunnel.start returned false")
             return
         }
+        
+        // The Psiphon Library exposes reachability functions, which can be used for detecting internet status.
+        let reachability = Reachability.forInternetConnection()
+        let networkStatus = reachability?.currentReachabilityStatus()
+        NSLog("Internet is reachable? \(networkStatus != NotReachable)")
+        
+        // The Psiphon Library exposes a function to test if the device is jailbroken. 
+        let jailbroken = JailbreakCheck.isDeviceJailbroken()
+        NSLog("Device is jailbroken? \(jailbroken)")
     }
     
     override func didReceiveMemoryWarning() {

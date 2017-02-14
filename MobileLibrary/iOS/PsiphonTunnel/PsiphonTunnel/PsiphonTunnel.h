@@ -24,6 +24,7 @@
 
 #import <UIKit/UIKit.h>
 #import "Reachability.h"
+#import "JailbreakCheck.h"
 
 
 //! Project version number for PsiphonTunnel.
@@ -61,7 +62,6 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  - `DataStoreDirectory`: If not set, the library will use a sane location. Override if the client wants to restrict where operational data is kept. If overridden, the directory must already exist and be writable.
  - `RemoteServerListDownloadFilename`: If not set, the library will use a sane location. Override if the client wants to restrict where operational data is kept.
  - `ObfuscatedServerListDownloadDirectory`: If not set, the library will use a sane location. Override if the client wants to restrict where operational data is kept. If overridden, the directory must already exist and be writable.
- - `ClientPlatform`: Should not be set by most library consumers.
  - `UpstreamProxyUrl`
  - `EmitDiagnosticNotices`
  - `EgressRegion`
