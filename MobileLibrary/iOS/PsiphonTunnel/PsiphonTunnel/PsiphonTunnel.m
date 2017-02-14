@@ -292,7 +292,7 @@
     NSString *systemVersion = [[[UIDevice currentDevice]systemVersion] stringByReplacingOccurrencesOfString:@"_" withString:@"-"];
     // "unjailbroken"/"jailbroken"
     NSString *jailbroken = @"unjailbroken";
-    if (isDeviceJailbroken()) {
+    if ([JailbreakCheck isDeviceJailbroken]) {
         jailbroken = @"jailbroken";
     }
     // Like "com.psiphon3.browser"

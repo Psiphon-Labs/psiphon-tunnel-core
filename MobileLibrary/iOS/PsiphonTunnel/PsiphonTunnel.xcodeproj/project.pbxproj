@@ -18,7 +18,7 @@
 		6685BDD41E2EBB1000F0E414 /* GoPsi.objc.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDD21E2EBB1000F0E414 /* GoPsi.objc.h */; };
 		6685BDD51E2EBB1000F0E414 /* Universe.objc.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDD31E2EBB1000F0E414 /* Universe.objc.h */; };
 		6685BDD91E300AC200F0E414 /* strip-frameworks.sh in Resources */ = {isa = PBXBuildFile; fileRef = 6685BDD81E300AC200F0E414 /* strip-frameworks.sh */; };
-		66BAD3351E525FBC00CD06DE /* JailbreakCheck.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BAD3331E525FBC00CD06DE /* JailbreakCheck.h */; };
+		66BAD3351E525FBC00CD06DE /* JailbreakCheck.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BAD3331E525FBC00CD06DE /* JailbreakCheck.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		66BAD3361E525FBC00CD06DE /* JailbreakCheck.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BAD3341E525FBC00CD06DE /* JailbreakCheck.m */; };
 		66BDB02A1DA6BFCC0079384C /* PsiphonTunnel.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 66BDB0201DA6BFCC0079384C /* PsiphonTunnel.framework */; };
 		66BDB02F1DA6BFCC0079384C /* PsiphonTunnelTests.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB02E1DA6BFCC0079384C /* PsiphonTunnelTests.m */; };
@@ -236,8 +236,8 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				66BAD3351E525FBC00CD06DE /* JailbreakCheck.h in Headers */,
 				6685BDCB1E2E882800F0E414 /* ref.h in Headers */,
+				66BAD3351E525FBC00CD06DE /* JailbreakCheck.h in Headers */,
 				4E89F7FF1E2ED3CE00005F4C /* LookupIPv6.h in Headers */,
 				662659271DD270E900872F6C /* Reachability.h in Headers */,
 				66BDB05D1DC26CCC0079384C /* SBJson4StreamParser.h in Headers */,

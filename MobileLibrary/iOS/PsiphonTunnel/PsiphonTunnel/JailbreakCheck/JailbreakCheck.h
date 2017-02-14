@@ -22,4 +22,8 @@
  *
  */
 
-BOOL isDeviceJailbroken();
+@interface JailbreakCheck : NSObject
+
++ (BOOL)isDeviceJailbroken;
+
+@end

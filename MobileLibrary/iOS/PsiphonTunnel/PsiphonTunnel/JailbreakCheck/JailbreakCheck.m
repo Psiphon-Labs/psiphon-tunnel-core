@@ -27,6 +27,10 @@
 #import <Foundation/Foundation.h>
 #import "UIKit/UIKit.h"
 #import <sys/stat.h>
+#import "JailbreakCheck.h"
+
+
+@implementation JailbreakCheck
 
 
 BOOL checkReadWritePermissions()
@@ -116,10 +120,12 @@ BOOL checkJailbreakFiles()
     return FALSE;
 }
 
-BOOL isDeviceJailbroken()
++ (BOOL)isDeviceJailbroken
 {
     return
         checkJailbreakSymlinks()
         || checkJailbreakFiles()
         || checkReadWritePermissions();
 }
+
+@end

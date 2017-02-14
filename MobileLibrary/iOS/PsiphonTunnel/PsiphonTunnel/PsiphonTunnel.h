@@ -24,6 +24,7 @@
 
 #import <UIKit/UIKit.h>
 #import "Reachability.h"
+#import "JailbreakCheck.h"
 
 
 //! Project version number for PsiphonTunnel.
