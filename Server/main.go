@@ -28,6 +28,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Psiphon-Inc/panicwrap"
@@ -189,15 +190,19 @@ func main() {
 
 		loadedConfigJSON = configJSON
 
+		// Comments from: https://github.com/mitchellh/panicwrap#usage
 		// Unhandled panic wrapper. Logs it, then re-executes the current executable
-		exitStatus, exitErr := panicwrap.BasicWrap(panicHandler)
-		if exitErr != nil {
+		exitStatus, err := panicwrap.Wrap(&panicwrap.WrapConfig{
+			Handler:        panicHandler,
+			ForwardSignals: []os.Signal{os.Interrupt, os.Kill, syscall.SIGTERM, syscall.SIGUSR1, syscall.SIGUSR2, syscall.SIGTSTP, syscall.SIGCONT},
+		})
+		if err != nil {
 			fmt.Printf("failed to set up the panic wrapper: %s\n", err)
 			os.Exit(1)
 		}
 
 		// If exitStatus >= 0, then we're the parent process and the panicwrap
-		// re-executed ourselves and completed. Just exit with the proper status.
+		// e-executed ourselves and completed. Just exit with the proper status.
 		if exitStatus >= 0 {
 			os.Exit(exitStatus)
 		}
@@ -226,7 +231,7 @@ func panicHandler(output string) {
 	if len(loadedConfigJSON) > 0 {
 		config, err := server.LoadConfig([]byte(loadedConfigJSON))
 		if err != nil {
-			fmt.Errorf("error parsing configuration file: %s", err)
+			fmt.Printf("error parsing configuration file: %s\n%s\n", err, output)
 			os.Exit(1)
 		}
 
@@ -241,7 +246,7 @@ func panicHandler(output string) {
 		if config.PanicLogFilename != "" {
 			panicLog, err := rotate.NewRotatableFileWriter(config.PanicLogFilename, 0666)
 			if err != nil {
-				fmt.Printf("unable to set panic log output: %s\n", err)
+				fmt.Printf("unable to set panic log output: %s\n%s\n", err, output)
 				os.Exit(1)
 			}
 			jsonWriter = panicLog
@@ -252,11 +257,11 @@ func panicHandler(output string) {
 		enc := json.NewEncoder(jsonWriter)
 		err = enc.Encode(logEvent)
 		if err != nil {
-			fmt.Printf("unable to serialize panic message to JSON: %s\n", err)
+			fmt.Printf("unable to serialize panic message to JSON: %s\n%s\n", err, output)
 			os.Exit(1)
 		}
 	} else {
-		fmt.Errorf("no configuration JSON was loaded, cannot continue")
+		fmt.Printf("no configuration JSON was loaded, cannot continue\n%s\n", output)
 		os.Exit(1)
 	}
 
