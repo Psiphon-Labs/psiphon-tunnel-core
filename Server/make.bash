@@ -65,7 +65,7 @@ build_for_linux () {
   chmod 555 psiphond
 
   if [ "$1" == "generate" ]; then
-    ./psiphond --ipaddress 0.0.0.0 --web 3000 --protocol SSH:3001 --protocol OSSH:3002 --logFilename /var/log/psiphond/psiphond.log generate
+    ./psiphond --ipaddress 0.0.0.0 --web 3000 --protocol SSH:3001 --protocol OSSH:3002 --logFilename /var/log/psiphond/psiphond.log --panicLogFilename /var/log/psiphond/psiphond-panics.log generate
 
     chmod 666 psiphond.config
     chmod 666 psiphond-traffic-rules.config

@@ -134,6 +134,12 @@ func RunServices(configJSON []byte) error {
 		}
 	}()
 
+	// In addition to the actual signal handling here, there is
+	// a list of signals that need to be passed through panicwrap
+	// in 'github.com/Psiphon-Labs/psiphon-tunnel-core/Server/main.go'
+	// where 'panicwrap.Wrap' is called. The handled signals below, and the
+	// list there must be kept in sync to ensure proper signal handling
+
 	// An OS signal triggers an orderly shutdown
 	systemStopSignal := make(chan os.Signal, 1)
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill, syscall.SIGTERM)
