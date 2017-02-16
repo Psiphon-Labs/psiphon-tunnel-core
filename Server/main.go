@@ -202,7 +202,7 @@ func main() {
 		}
 
 		// If exitStatus >= 0, then we're the parent process and the panicwrap
-		// e-executed ourselves and completed. Just exit with the proper status.
+		// re-executed ourselves and completed. Just exit with the proper status.
 		if exitStatus >= 0 {
 			os.Exit(exitStatus)
 		}
