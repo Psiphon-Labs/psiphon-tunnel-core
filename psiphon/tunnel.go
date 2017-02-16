@@ -584,7 +584,7 @@ func dialSsh(
 	// So depending on which protocol is used, multiple layers are initialized.
 
 	useObfuscatedSsh := false
-	dialHeaders := config.UpstreamProxyCustomHeaders
+	dialCustomHeaders := config.CustomHeaders
 	var directTCPDialAddress string
 	var meekConfig *MeekConfig
 	var selectedUserAgent bool
@@ -606,12 +606,7 @@ func dialSsh(
 		}
 	}
 
-	NoticeConnectingServer(
-		serverEntry.IpAddress,
-		serverEntry.Region,
-		selectedProtocol,
-		directTCPDialAddress,
-		meekConfig)
+	dialCustomHeaders, selectedUserAgent = common.UserAgentIfUnset(config.CustomHeaders)
 
 	// Use an asynchronous callback to record the resolved IP address when
 	// dialing a domain name. Note that DialMeek doesn't immediately
@@ -625,12 +620,9 @@ func dialSsh(
 		resolvedIPAddress.Store(IPAddress)
 	}
 
-	dialHeaders, selectedUserAgent = common.UserAgentIfUnset(config.UpstreamProxyCustomHeaders)
-
-	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
-		UpstreamProxyCustomHeaders:    dialHeaders,
+		CustomHeaders:                 dialCustomHeaders,
 		ConnectTimeout:                time.Duration(*config.TunnelConnectTimeoutSeconds) * time.Second,
 		PendingConns:                  pendingConns,
 		DeviceBinder:                  config.DeviceBinder,
@@ -641,6 +633,55 @@ func dialSsh(
 		DeviceRegion:                  config.DeviceRegion,
 		ResolvedIPCallback:            setResolvedIPAddress,
 	}
+
+	// Gather dial parameters for diagnostic logging and stats reporting
+
+	var dialStats *TunnelDialStats
+
+	if dialConfig.UpstreamProxyUrl != "" || meekConfig != nil {
+		dialStats = &TunnelDialStats{}
+
+		if selectedUserAgent {
+			dialStats.SelectedUserAgent = true
+			dialStats.UserAgent = dialConfig.CustomHeaders.Get("User-Agent")
+		}
+
+		if dialConfig.UpstreamProxyUrl != "" {
+
+			// Note: UpstreamProxyUrl will be validated in the dial
+			proxyURL, err := url.Parse(dialConfig.UpstreamProxyUrl)
+			if err == nil {
+				dialStats.UpstreamProxyType = proxyURL.Scheme
+			}
+
+			dialStats.UpstreamProxyCustomHeaderNames = make([]string, 0)
+			for name, _ := range dialConfig.CustomHeaders {
+				if selectedUserAgent && name == "User-Agent" {
+					continue
+				}
+				dialStats.UpstreamProxyCustomHeaderNames = append(dialStats.UpstreamProxyCustomHeaderNames, name)
+			}
+		}
+
+		if meekConfig != nil {
+			// Note: dialStats.MeekResolvedIPAddress isn't set until the dial begins,
+			// so it will always be blank in NoticeConnectingServer.
+			dialStats.MeekDialAddress = meekConfig.DialAddress
+			dialStats.MeekResolvedIPAddress = ""
+			dialStats.MeekSNIServerName = meekConfig.SNIServerName
+			dialStats.MeekHostHeader = meekConfig.HostHeader
+			dialStats.MeekTransformedHostName = meekConfig.TransformedHostName
+		}
+	}
+
+	NoticeConnectingServer(
+		serverEntry.IpAddress,
+		serverEntry.Region,
+		selectedProtocol,
+		dialStats)
+
+	// Create the base transport: meek or direct connection
+
 	var dialConn net.Conn
 	if meekConfig != nil {
 		dialConn, err = DialMeek(meekConfig, dialConfig)
@@ -648,7 +689,26 @@ func dialSsh(
 			return nil, common.ContextError(err)
 		}
 	} else {
-		dialConn, err = DialTCP(directTCPDialAddress, dialConfig)
+
+		tcpDialer := func(_, addr string) (net.Conn, error) {
+			return DialTCP(addr, dialConfig)
+		}
+
+		// For some direct connect servers, DialPluginProtocol
+		// will layer on another obfuscation protocol.
+		var dialedPlugin bool
+		dialedPlugin, dialConn, err = common.DialPluginProtocol(
+			NewNoticeWriter("DialPluginProtocol"),
+			tcpDialer,
+			directTCPDialAddress)
+
+		if dialedPlugin {
+			NoticeInfo("dialed plugin protocol for %s", serverEntry.IpAddress)
+		} else {
+			// Standard direct connection.
+			dialConn, err = tcpDialer("", directTCPDialAddress)
+		}
+
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -755,43 +815,17 @@ func dialSsh(
 		return nil, common.ContextError(result.err)
 	}
 
-	var dialStats *TunnelDialStats
+	// Update dial parameters determined during dial
 
-	if dialConfig.UpstreamProxyUrl != "" || meekConfig != nil {
-		dialStats = &TunnelDialStats{}
-
-		if selectedUserAgent {
-			dialStats.SelectedUserAgent = true
-			dialStats.UserAgent = dialConfig.UpstreamProxyCustomHeaders.Get("User-Agent")
-		}
-
-		if dialConfig.UpstreamProxyUrl != "" {
-
-			// Note: UpstreamProxyUrl should have parsed correctly in the dial
-			proxyURL, err := url.Parse(dialConfig.UpstreamProxyUrl)
-			if err == nil {
-				dialStats.UpstreamProxyType = proxyURL.Scheme
-			}
-
-			dialStats.UpstreamProxyCustomHeaderNames = make([]string, 0)
-			for name, _ := range dialConfig.UpstreamProxyCustomHeaders {
-				if selectedUserAgent && name == "User-Agent" {
-					continue
-				}
-				dialStats.UpstreamProxyCustomHeaderNames = append(dialStats.UpstreamProxyCustomHeaderNames, name)
-			}
-		}
-
-		if meekConfig != nil {
-			dialStats.MeekDialAddress = meekConfig.DialAddress
-			dialStats.MeekResolvedIPAddress = resolvedIPAddress.Load().(string)
-			dialStats.MeekSNIServerName = meekConfig.SNIServerName
-			dialStats.MeekHostHeader = meekConfig.HostHeader
-			dialStats.MeekTransformedHostName = meekConfig.TransformedHostName
-		}
-
-		NoticeConnectedTunnelDialStats(serverEntry.IpAddress, dialStats)
+	if dialStats != nil && meekConfig != nil {
+		dialStats.MeekResolvedIPAddress = resolvedIPAddress.Load().(string)
 	}
+
+	NoticeConnectedServer(
+		serverEntry.IpAddress,
+		serverEntry.Region,
+		selectedProtocol,
+		dialStats)
 
 	cleanupConn = nil
 

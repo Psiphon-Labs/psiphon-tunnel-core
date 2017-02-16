@@ -251,7 +251,7 @@ func DialMeek(
 		}
 		if proxyUrl != nil {
 			// Wrap transport with a transport that can perform HTTP proxy auth negotiation
-			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport, meekDialConfig.UpstreamProxyCustomHeaders)
+			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport, meekDialConfig.CustomHeaders)
 			if err != nil {
 				return nil, common.ContextError(err)
 			}
@@ -278,7 +278,7 @@ func DialMeek(
 		}
 	} else {
 		if proxyUrl == nil {
-			additionalHeaders = meekDialConfig.UpstreamProxyCustomHeaders
+			additionalHeaders = meekDialConfig.CustomHeaders
 		}
 	}
 
