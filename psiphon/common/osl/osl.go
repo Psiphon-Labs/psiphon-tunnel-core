@@ -823,11 +823,11 @@ func (config *Config) Pave(
 	return paveFiles, nil
 }
 
-// makeOSLFileSpec creates a random OSL file key, splits it according
-// the the scheme's key splits, and sets the OSL ID as its first SLOK
-// ID. The returned key is used to encrypt the OSL payload and then
-// discarded; the key may be reassembled using the data in the KeyShares
-// tree, given sufficient SLOKs.
+// makeOSLFileSpec creates an OSL file key, splits it according to the
+// scheme's key splits, and sets the OSL ID as its first SLOK ID. The
+// returned key is used to encrypt the OSL payload and then discarded;
+// the key may be reassembled using the data in the KeyShares tree,
+// given sufficient SLOKs.
 func makeOSLFileSpec(
 	scheme *Scheme,
 	propagationChannelID string,
@@ -841,10 +841,16 @@ func makeOSLFileSpec(
 	firstSLOK := scheme.deriveSLOK(ref)
 	oslID := firstSLOK.ID
 
-	fileKey, err := common.MakeSecureRandomBytes(KEY_LENGTH_BYTES)
-	if err != nil {
-		return nil, nil, common.ContextError(err)
-	}
+	// Note: previously, this was a random key. Now, the file key
+	// is derived from the master key and OSL ID. This deterministic
+	// derivation ensures that repeated paves of the same OSL
+	// with the same ID and same content yields the same MD5Sum
+	// to avoid wastful downloads.
+
+	fileKey := deriveKeyHKDF(
+		scheme.MasterKey,
+		[]byte("osl-file-key"),
+		oslID)
 
 	keyShares, err := divideKey(
 		scheme,
@@ -884,10 +890,20 @@ func divideKey(
 	var keyShares []*KeyShares
 
 	for _, share := range shares {
+
+		// Note: for a fully deterministic pave, where the OSL registry
+		// is unchanged when no OSLs change, the share key would need
+		// to be derived (e.g., from the master key, OSL ID, key split
+		// index, and share index). However, since the OSL registry file
+		// content is nondeterministic in any case due to aspects of the
+		// Shamir secret splitting algorithm, there's no reason not to
+		// use a random key here.
+
 		shareKey, err := common.MakeSecureRandomBytes(KEY_LENGTH_BYTES)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
+
 		if keySplitIndex > 0 {
 			keyShare, err := divideKey(
 				scheme,
