@@ -249,6 +249,8 @@ func panicHandler(output string) {
 				fmt.Printf("unable to set panic log output: %s\n%s\n", err, output)
 				os.Exit(1)
 			}
+			defer panicLog.Close()
+
 			jsonWriter = panicLog
 		} else {
 			jsonWriter = os.Stderr
