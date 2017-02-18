@@ -1,4 +1,4 @@
-FROM debian:testing
+FROM debian:8
 
 MAINTAINER Psiphon Inc. <info@psiphon.ca>
 LABEL Description="Debian Linux based Psiphon Tunnel-Core Server" Vendor="Psiphon Inc." Version="1.0"
