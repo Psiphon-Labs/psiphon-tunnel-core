@@ -30,12 +30,14 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 type PsiphonProvider interface {
 	Notice(noticeJSON string)
 	HasNetworkConnectivity() int
 	BindToDevice(fileDescriptor int) error
+	IPv6Synthesize(IPv4Addr string) string
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
 }
@@ -48,7 +50,7 @@ var controllerWaitGroup *sync.WaitGroup
 func Start(
 	configJson, embeddedServerEntryList string,
 	provider PsiphonProvider,
-	useDeviceBinder bool) error {
+	useDeviceBinder bool, useIPv6Synthesizer bool) error {
 
 	controllerMutex.Lock()
 	defer controllerMutex.Unlock()
@@ -68,6 +70,10 @@ func Start(
 		config.DnsServerGetter = provider
 	}
 
+	if useIPv6Synthesizer {
+		config.IPv6Synthesizer = provider
+	}
+
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 			provider.Notice(string(notice))
@@ -82,10 +88,10 @@ func Start(
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
-	serverEntries, err := psiphon.DecodeAndValidateServerEntryList(
+	serverEntries, err := protocol.DecodeAndValidateServerEntryList(
 		embeddedServerEntryList,
 		common.GetCurrentTimestamp(),
-		common.SERVER_ENTRY_SOURCE_EMBEDDED)
+		protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
 	if err != nil {
 		return fmt.Errorf("error decoding embedded server entry list: %s", err)
 	}
@@ -141,8 +147,8 @@ func SetClientVerificationPayload(clientVerificationPayload string) {
 func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders string) {
 	err := psiphon.SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders)
 	if err != nil {
-		psiphon.NoticeAlert("failed to upload feedback: %s", err)
+		psiphon.NoticeAlert("Failed to upload feedback: %s", err)
 	} else {
-		psiphon.NoticeInfo("feedback uploaded successfully")
+		psiphon.NoticeInfo("Feedback uploaded successfully")
 	}
 }

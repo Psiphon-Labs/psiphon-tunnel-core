@@ -1,6 +1,6 @@
 language: go
 go:
-- 1.6
+- 1.8
 addons:
   apt_packages:
     - libx11-dev
@@ -10,12 +10,18 @@ install:
 script:
 - cd psiphon
 - go test -race -v ./common
+- go test -race -v ./common/osl
+- go test -race -v ./common/protocol
 - go test -race -v ./transferstats
 - go test -race -v ./server
+- go test -race -v ./server/psinet
 - go test -race -v
 - go test -v -covermode=count -coverprofile=common.coverprofile ./common
+- go test -v -covermode=count -coverprofile=osl.coverprofile ./common/osl
+- go test -v -covermode=count -coverprofile=protocol.coverprofile ./common/protocol
 - go test -v -covermode=count -coverprofile=transferstats.coverprofile ./transferstats
 - go test -v -covermode=count -coverprofile=server.coverprofile ./server
+- go test -v -covermode=count -coverprofile=psinet.coverprofile ./server/psinet
 - go test -v -covermode=count -coverprofile=psiphon.coverprofile
 - $HOME/gopath/bin/gover
 - $HOME/gopath/bin/goveralls -coverprofile=gover.coverprofile -service=travis-ci -repotoken $COVERALLS_TOKEN
@@ -24,5 +30,14 @@ before_install:
 - go get github.com/modocache/gover
 - go get github.com/mattn/goveralls
 - if ! go get github.com/golang/tools/cmd/cover; then go get golang.org/x/tools/cmd/cover; fi
+- git rev-parse --short HEAD > psiphon/git_rev
 - openssl aes-256-cbc -K $encrypted_bf83b4ab4874_key -iv $encrypted_bf83b4ab4874_iv
   -in psiphon/controller_test.config.enc -out psiphon/controller_test.config -d
+- openssl aes-256-cbc -K $encrypted_sq6sgjwvsppj_key -iv $encrypted_sq6sgjwvsppj_iv
+  -in psiphon/feedback_test.config.enc -out psiphon/feedback_test.config -d
+notifications:
+  slack:
+    rooms:
+      secure: jVo/BZ1iFtg4g5V+eNxETwXPnbhwVwGzN1vkHJnCLAhV/md3/uHGsZQIMfitqgrX/T+9JBVRbRezjBwfJHYLs40IJTCWt167Lz8R1NlazLyEpcGcdesG05cTl9oEcBb7X52kZt7r8ZIBwdB7W6U/E0/i41qKamiEJqISMsdOoFA=
+    on_success: always
+    on_failure: always

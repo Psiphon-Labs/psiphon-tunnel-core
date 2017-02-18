@@ -19,7 +19,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Go.
-ENV GOVERSION=go1.7.1 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
+ENV GOVERSION=go1.8 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
 
 RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz -o /tmp/go.tar.gz \
   && tar -C /usr/local -xzf /tmp/go.tar.gz \
@@ -92,6 +92,10 @@ RUN mkdir -p $GOPATH/pkg/gomobile/dl \
   && git clone https://github.com/golang/mobile \
   && cd mobile \
   && git checkout -b pinned $GOMOBILE_PINNED_REV \
+  && mv ./cmd/gomobile/build.go ./cmd/gomobile/build.go.orig \
+  && sed -e 's/"-tags="+strconv.Quote(strings.Join(ctx.BuildTags, ",")),/"-tags",strings.Join(ctx.BuildTags, " "),/g' ./cmd/gomobile/build.go.orig > ./cmd/gomobile/build.go \
+  && mv ./cmd/gomobile/build.go ./cmd/gomobile/build.go.orig \
+  && sed -e 's/"strconv"//g' ./cmd/gomobile/build.go.orig > ./cmd/gomobile/build.go \
   && echo "master: $(git rev-parse master)\npinned: $(git rev-parse pinned)" | tee $GOROOT/MOBILE \
   && go install golang.org/x/mobile/cmd/gomobile \
   && gomobile init -v

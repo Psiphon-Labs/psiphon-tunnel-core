@@ -20,32 +20,10 @@
 package common
 
 import (
-	"os"
+	"hash/crc64"
+	"io/ioutil"
 	"sync"
 )
-
-// IsFileChanged uses os.Stat to check if the name, size, or last mod time of the
-// file has changed (which is a heuristic, but sufficiently robust for users of this
-// function). Returns nil if file has not changed; otherwise, returns a changed
-// os.FileInfo which may be used to check for subsequent changes.
-func IsFileChanged(path string, previousFileInfo os.FileInfo) (os.FileInfo, error) {
-
-	fileInfo, err := os.Stat(path)
-	if err != nil {
-		return nil, ContextError(err)
-	}
-
-	changed := previousFileInfo == nil ||
-		fileInfo.Name() != previousFileInfo.Name() ||
-		fileInfo.Size() != previousFileInfo.Size() ||
-		fileInfo.ModTime() != previousFileInfo.ModTime()
-
-	if !changed {
-		return nil, nil
-	}
-
-	return fileInfo, nil
-}
 
 // Reloader represents a read-only, in-memory reloadable data object. For example,
 // a JSON data file that is loaded into memory and accessed for read-only lookups;
@@ -71,10 +49,11 @@ type Reloader interface {
 // in other types that add the actual reloadable data structures.
 //
 // ReloadableFile has a multi-reader mutex for synchronization. Its Reload() function
-// will obtain a write lock before reloading the data structures. Actually reloading
-// action is to be provided via the reloadAction callback (for example, read the contents
-// of the file and unmarshall the contents into data structures). All read access to
-// the data structures should be guarded by RLocks on the ReloadableFile mutex.
+// will obtain a write lock before reloading the data structures. The actual reloading
+// action is to be provided via the reloadAction callback, which receives the content
+// of reloaded files and must process the new data (for example, unmarshall the contents
+// into data structures). All read access to the data structures should be guarded by
+// RLocks on the ReloadableFile mutex.
 //
 // reloadAction must ensure that data structures revert to their previous state when
 // a reload fails.
@@ -82,14 +61,14 @@ type Reloader interface {
 type ReloadableFile struct {
 	sync.RWMutex
 	fileName     string
-	fileInfo     os.FileInfo
-	reloadAction func(string) error
+	checksum     uint64
+	reloadAction func([]byte) error
 }
 
 // NewReloadableFile initializes a new ReloadableFile
 func NewReloadableFile(
 	fileName string,
-	reloadAction func(string) error) ReloadableFile {
+	reloadAction func([]byte) error) ReloadableFile {
 
 	return ReloadableFile{
 		fileName:     fileName,
@@ -103,10 +82,23 @@ func (reloadable *ReloadableFile) WillReload() bool {
 	return reloadable.fileName != ""
 }
 
-// Reload checks if the underlying file has changed (using IsFileChanged semantics, which
-// are heuristics) and, when changed, invokes the reloadAction callback which should
-// reload, from the file, the in-memory data structures.
+var crc64table = crc64.MakeTable(crc64.ISO)
+
+// Reload checks if the underlying file has changed and, when changed, invokes
+// the reloadAction callback which should reload the in-memory data structures.
+//
+// In some case (e.g., traffic rules and OSL), there are penalties associated
+// with proceeding with reload, so care is taken to not invoke the reload action
+// unless the contents have changed.
+//
+// The file content is loaded and a checksum is taken to determine whether it
+// has changed. Neither file size (may not change when content changes) nor
+// modified date (may change when identical file is repaved) is a sufficient
+// indicator.
+//
 // All data structure readers should be blocked by the ReloadableFile mutex.
+//
+// Reload must not be called from multiple concurrent goroutines.
 func (reloadable *ReloadableFile) Reload() (bool, error) {
 
 	if !reloadable.WillReload() {
@@ -116,13 +108,18 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 	// Check whether the file has changed _before_ blocking readers
 
 	reloadable.RLock()
-	changedFileInfo, err := IsFileChanged(reloadable.fileName, reloadable.fileInfo)
+	fileName := reloadable.fileName
+	previousChecksum := reloadable.checksum
 	reloadable.RUnlock()
+
+	content, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		return false, ContextError(err)
 	}
 
-	if changedFileInfo == nil {
+	checksum := crc64.Checksum(content, crc64table)
+
+	if checksum == previousChecksum {
 		return false, nil
 	}
 
@@ -131,12 +128,12 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 	reloadable.Lock()
 	defer reloadable.Unlock()
 
-	err = reloadable.reloadAction(reloadable.fileName)
+	err = reloadable.reloadAction(content)
 	if err != nil {
 		return false, ContextError(err)
 	}
 
-	reloadable.fileInfo = changedFileInfo
+	reloadable.checksum = checksum
 
 	return true, nil
 }

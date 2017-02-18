@@ -1,0 +1,580 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		4E89F7FE1E2ED3CE00005F4C /* LookupIPv6.c in Sources */ = {isa = PBXBuildFile; fileRef = 4E89F7FC1E2ED3CE00005F4C /* LookupIPv6.c */; };
+		4E89F7FF1E2ED3CE00005F4C /* LookupIPv6.h in Headers */ = {isa = PBXBuildFile; fileRef = 4E89F7FD1E2ED3CE00005F4C /* LookupIPv6.h */; };
+		660E0B7A1E2D6EB6002BF5D4 /* Psi in Frameworks */ = {isa = PBXBuildFile; fileRef = 660E0B791E2D6EB6002BF5D4 /* Psi */; };
+		662659271DD270E900872F6C /* Reachability.h in Headers */ = {isa = PBXBuildFile; fileRef = 662659251DD270E900872F6C /* Reachability.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		662659281DD270E900872F6C /* Reachability.m in Sources */ = {isa = PBXBuildFile; fileRef = 662659261DD270E900872F6C /* Reachability.m */; };
+		6685BDCA1E2E882800F0E414 /* Psi.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDC61E2E882800F0E414 /* Psi.h */; };
+		6685BDCB1E2E882800F0E414 /* ref.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDC71E2E882800F0E414 /* ref.h */; };
+		6685BDCD1E2E88A200F0E414 /* Psi-meta.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDCC1E2E88A200F0E414 /* Psi-meta.h */; };
+		6685BDD41E2EBB1000F0E414 /* GoPsi.objc.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDD21E2EBB1000F0E414 /* GoPsi.objc.h */; };
+		6685BDD51E2EBB1000F0E414 /* Universe.objc.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDD31E2EBB1000F0E414 /* Universe.objc.h */; };
+		6685BDD91E300AC200F0E414 /* strip-frameworks.sh in Resources */ = {isa = PBXBuildFile; fileRef = 6685BDD81E300AC200F0E414 /* strip-frameworks.sh */; };
+		66BDB02A1DA6BFCC0079384C /* PsiphonTunnel.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 66BDB0201DA6BFCC0079384C /* PsiphonTunnel.framework */; };
+		66BDB02F1DA6BFCC0079384C /* PsiphonTunnelTests.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB02E1DA6BFCC0079384C /* PsiphonTunnelTests.m */; };
+		66BDB0311DA6BFCC0079384C /* PsiphonTunnel.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB0231DA6BFCC0079384C /* PsiphonTunnel.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		66BDB03E1DA6C79E0079384C /* rootCAs.txt in Resources */ = {isa = PBXBuildFile; fileRef = 66BDB03D1DA6C79E0079384C /* rootCAs.txt */; };
+		66BDB0441DA6C7DD0079384C /* PsiphonTunnel.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0431DA6C7DD0079384C /* PsiphonTunnel.m */; };
+		66BDB05A1DC26CCC0079384C /* SBJson4.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB04B1DC26CCC0079384C /* SBJson4.h */; };
+		66BDB05B1DC26CCC0079384C /* SBJson4Parser.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB04C1DC26CCC0079384C /* SBJson4Parser.h */; };
+		66BDB05C1DC26CCC0079384C /* SBJson4Parser.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB04D1DC26CCC0079384C /* SBJson4Parser.m */; };
+		66BDB05D1DC26CCC0079384C /* SBJson4StreamParser.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB04E1DC26CCC0079384C /* SBJson4StreamParser.h */; };
+		66BDB05E1DC26CCC0079384C /* SBJson4StreamParser.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB04F1DC26CCC0079384C /* SBJson4StreamParser.m */; };
+		66BDB05F1DC26CCC0079384C /* SBJson4StreamParserState.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB0501DC26CCC0079384C /* SBJson4StreamParserState.h */; };
+		66BDB0601DC26CCC0079384C /* SBJson4StreamParserState.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0511DC26CCC0079384C /* SBJson4StreamParserState.m */; };
+		66BDB0611DC26CCC0079384C /* SBJson4StreamTokeniser.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB0521DC26CCC0079384C /* SBJson4StreamTokeniser.h */; };
+		66BDB0621DC26CCC0079384C /* SBJson4StreamTokeniser.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0531DC26CCC0079384C /* SBJson4StreamTokeniser.m */; };
+		66BDB0631DC26CCC0079384C /* SBJson4StreamWriter.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB0541DC26CCC0079384C /* SBJson4StreamWriter.h */; };
+		66BDB0641DC26CCC0079384C /* SBJson4StreamWriter.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0551DC26CCC0079384C /* SBJson4StreamWriter.m */; };
+		66BDB0651DC26CCC0079384C /* SBJson4StreamWriterState.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB0561DC26CCC0079384C /* SBJson4StreamWriterState.h */; };
+		66BDB0661DC26CCC0079384C /* SBJson4StreamWriterState.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0571DC26CCC0079384C /* SBJson4StreamWriterState.m */; };
+		66BDB0671DC26CCC0079384C /* SBJson4Writer.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB0581DC26CCC0079384C /* SBJson4Writer.h */; };
+		66BDB0681DC26CCC0079384C /* SBJson4Writer.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0591DC26CCC0079384C /* SBJson4Writer.m */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		66BDB02B1DA6BFCC0079384C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 66BDB0171DA6BFCC0079384C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 66BDB01F1DA6BFCC0079384C;
+			remoteInfo = PsiphonTunnel;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		66BDB0481DA6D6FA0079384C /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		4E89F7FC1E2ED3CE00005F4C /* LookupIPv6.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = LookupIPv6.c; sourceTree = "<group>"; };
+		4E89F7FD1E2ED3CE00005F4C /* LookupIPv6.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = LookupIPv6.h; sourceTree = "<group>"; };
+		660E0B791E2D6EB6002BF5D4 /* Psi */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = Psi; path = PsiphonTunnel/Psi.framework/Versions/A/Psi; sourceTree = "<group>"; };
+		662659251DD270E900872F6C /* Reachability.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Reachability.h; sourceTree = "<group>"; };
+		662659261DD270E900872F6C /* Reachability.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Reachability.m; sourceTree = "<group>"; };
+		6685BDC61E2E882800F0E414 /* Psi.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Psi.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/Psi.h; sourceTree = "<group>"; };
+		6685BDC71E2E882800F0E414 /* ref.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ref.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/ref.h; sourceTree = "<group>"; };
+		6685BDCC1E2E88A200F0E414 /* Psi-meta.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "Psi-meta.h"; path = "PsiphonTunnel/Psi-meta.h"; sourceTree = "<group>"; };
+		6685BDD21E2EBB1000F0E414 /* GoPsi.objc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = GoPsi.objc.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/GoPsi.objc.h; sourceTree = "<group>"; };
+		6685BDD31E2EBB1000F0E414 /* Universe.objc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Universe.objc.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/Universe.objc.h; sourceTree = "<group>"; };
+		6685BDD81E300AC200F0E414 /* strip-frameworks.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; name = "strip-frameworks.sh"; path = "scripts/strip-frameworks.sh"; sourceTree = "<group>"; };
+		66BDB0201DA6BFCC0079384C /* PsiphonTunnel.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = PsiphonTunnel.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		66BDB0231DA6BFCC0079384C /* PsiphonTunnel.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PsiphonTunnel.h; sourceTree = "<group>"; };
+		66BDB0241DA6BFCC0079384C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		66BDB0291DA6BFCC0079384C /* PsiphonTunnelTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PsiphonTunnelTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		66BDB02E1DA6BFCC0079384C /* PsiphonTunnelTests.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PsiphonTunnelTests.m; sourceTree = "<group>"; };
+		66BDB0301DA6BFCC0079384C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		66BDB03D1DA6C79E0079384C /* rootCAs.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = rootCAs.txt; path = PsiphonTunnel/rootCAs.txt; sourceTree = "<group>"; };
+		66BDB0431DA6C7DD0079384C /* PsiphonTunnel.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = PsiphonTunnel.m; sourceTree = "<group>"; };
+		66BDB04B1DC26CCC0079384C /* SBJson4.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SBJson4.h; sourceTree = "<group>"; };
+		66BDB04C1DC26CCC0079384C /* SBJson4Parser.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SBJson4Parser.h; sourceTree = "<group>"; };
+		66BDB04D1DC26CCC0079384C /* SBJson4Parser.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SBJson4Parser.m; sourceTree = "<group>"; };
+		66BDB04E1DC26CCC0079384C /* SBJson4StreamParser.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SBJson4StreamParser.h; sourceTree = "<group>"; };
+		66BDB04F1DC26CCC0079384C /* SBJson4StreamParser.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SBJson4StreamParser.m; sourceTree = "<group>"; };
+		66BDB0501DC26CCC0079384C /* SBJson4StreamParserState.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SBJson4StreamParserState.h; sourceTree = "<group>"; };
+		66BDB0511DC26CCC0079384C /* SBJson4StreamParserState.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SBJson4StreamParserState.m; sourceTree = "<group>"; };
+		66BDB0521DC26CCC0079384C /* SBJson4StreamTokeniser.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SBJson4StreamTokeniser.h; sourceTree = "<group>"; };
+		66BDB0531DC26CCC0079384C /* SBJson4StreamTokeniser.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SBJson4StreamTokeniser.m; sourceTree = "<group>"; };
+		66BDB0541DC26CCC0079384C /* SBJson4StreamWriter.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SBJson4StreamWriter.h; sourceTree = "<group>"; };
+		66BDB0551DC26CCC0079384C /* SBJson4StreamWriter.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SBJson4StreamWriter.m; sourceTree = "<group>"; };
+		66BDB0561DC26CCC0079384C /* SBJson4StreamWriterState.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SBJson4StreamWriterState.h; sourceTree = "<group>"; };
+		66BDB0571DC26CCC0079384C /* SBJson4StreamWriterState.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SBJson4StreamWriterState.m; sourceTree = "<group>"; };
+		66BDB0581DC26CCC0079384C /* SBJson4Writer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SBJson4Writer.h; sourceTree = "<group>"; };
+		66BDB0591DC26CCC0079384C /* SBJson4Writer.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SBJson4Writer.m; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		66BDB01C1DA6BFCC0079384C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				660E0B7A1E2D6EB6002BF5D4 /* Psi in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		66BDB0261DA6BFCC0079384C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				66BDB02A1DA6BFCC0079384C /* PsiphonTunnel.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		662659241DD270E900872F6C /* Reachability */ = {
+			isa = PBXGroup;
+			children = (
+				662659251DD270E900872F6C /* Reachability.h */,
+				662659261DD270E900872F6C /* Reachability.m */,
+				4E89F7FC1E2ED3CE00005F4C /* LookupIPv6.c */,
+				4E89F7FD1E2ED3CE00005F4C /* LookupIPv6.h */,
+			);
+			path = Reachability;
+			sourceTree = "<group>";
+		};
+		6685BDC31E2E881200F0E414 /* Psi */ = {
+			isa = PBXGroup;
+			children = (
+				660E0B791E2D6EB6002BF5D4 /* Psi */,
+				6685BDCC1E2E88A200F0E414 /* Psi-meta.h */,
+				6685BDC61E2E882800F0E414 /* Psi.h */,
+				6685BDC71E2E882800F0E414 /* ref.h */,
+				6685BDD21E2EBB1000F0E414 /* GoPsi.objc.h */,
+				6685BDD31E2EBB1000F0E414 /* Universe.objc.h */,
+			);
+			name = Psi;
+			sourceTree = "<group>";
+		};
+		66BDB0161DA6BFCC0079384C = {
+			isa = PBXGroup;
+			children = (
+				66BDB03C1DA6C7940079384C /* Resources */,
+				66BDB0221DA6BFCC0079384C /* PsiphonTunnel */,
+				6685BDC31E2E881200F0E414 /* Psi */,
+				66BDB02D1DA6BFCC0079384C /* PsiphonTunnelTests */,
+				66BDB0211DA6BFCC0079384C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		66BDB0211DA6BFCC0079384C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				66BDB0201DA6BFCC0079384C /* PsiphonTunnel.framework */,
+				66BDB0291DA6BFCC0079384C /* PsiphonTunnelTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		66BDB0221DA6BFCC0079384C /* PsiphonTunnel */ = {
+			isa = PBXGroup;
+			children = (
+				662659241DD270E900872F6C /* Reachability */,
+				66BDB04A1DC26CCC0079384C /* json-framework */,
+				66BDB0231DA6BFCC0079384C /* PsiphonTunnel.h */,
+				66BDB0431DA6C7DD0079384C /* PsiphonTunnel.m */,
+				66BDB0241DA6BFCC0079384C /* Info.plist */,
+			);
+			path = PsiphonTunnel;
+			sourceTree = "<group>";
+		};
+		66BDB02D1DA6BFCC0079384C /* PsiphonTunnelTests */ = {
+			isa = PBXGroup;
+			children = (
+				66BDB02E1DA6BFCC0079384C /* PsiphonTunnelTests.m */,
+				66BDB0301DA6BFCC0079384C /* Info.plist */,
+			);
+			path = PsiphonTunnelTests;
+			sourceTree = "<group>";
+		};
+		66BDB03C1DA6C7940079384C /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				6685BDD81E300AC200F0E414 /* strip-frameworks.sh */,
+				66BDB03D1DA6C79E0079384C /* rootCAs.txt */,
+			);
+			name = Resources;
+			sourceTree = "<group>";
+		};
+		66BDB04A1DC26CCC0079384C /* json-framework */ = {
+			isa = PBXGroup;
+			children = (
+				66BDB04B1DC26CCC0079384C /* SBJson4.h */,
+				66BDB04C1DC26CCC0079384C /* SBJson4Parser.h */,
+				66BDB04D1DC26CCC0079384C /* SBJson4Parser.m */,
+				66BDB04E1DC26CCC0079384C /* SBJson4StreamParser.h */,
+				66BDB04F1DC26CCC0079384C /* SBJson4StreamParser.m */,
+				66BDB0501DC26CCC0079384C /* SBJson4StreamParserState.h */,
+				66BDB0511DC26CCC0079384C /* SBJson4StreamParserState.m */,
+				66BDB0521DC26CCC0079384C /* SBJson4StreamTokeniser.h */,
+				66BDB0531DC26CCC0079384C /* SBJson4StreamTokeniser.m */,
+				66BDB0541DC26CCC0079384C /* SBJson4StreamWriter.h */,
+				66BDB0551DC26CCC0079384C /* SBJson4StreamWriter.m */,
+				66BDB0561DC26CCC0079384C /* SBJson4StreamWriterState.h */,
+				66BDB0571DC26CCC0079384C /* SBJson4StreamWriterState.m */,
+				66BDB0581DC26CCC0079384C /* SBJson4Writer.h */,
+				66BDB0591DC26CCC0079384C /* SBJson4Writer.m */,
+			);
+			path = "json-framework";
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXHeadersBuildPhase section */
+		66BDB01D1DA6BFCC0079384C /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6685BDCB1E2E882800F0E414 /* ref.h in Headers */,
+				4E89F7FF1E2ED3CE00005F4C /* LookupIPv6.h in Headers */,
+				662659271DD270E900872F6C /* Reachability.h in Headers */,
+				66BDB05D1DC26CCC0079384C /* SBJson4StreamParser.h in Headers */,
+				6685BDD41E2EBB1000F0E414 /* GoPsi.objc.h in Headers */,
+				6685BDD51E2EBB1000F0E414 /* Universe.objc.h in Headers */,
+				66BDB05F1DC26CCC0079384C /* SBJson4StreamParserState.h in Headers */,
+				66BDB0311DA6BFCC0079384C /* PsiphonTunnel.h in Headers */,
+				6685BDCA1E2E882800F0E414 /* Psi.h in Headers */,
+				66BDB0651DC26CCC0079384C /* SBJson4StreamWriterState.h in Headers */,
+				66BDB05B1DC26CCC0079384C /* SBJson4Parser.h in Headers */,
+				6685BDCD1E2E88A200F0E414 /* Psi-meta.h in Headers */,
+				66BDB05A1DC26CCC0079384C /* SBJson4.h in Headers */,
+				66BDB0611DC26CCC0079384C /* SBJson4StreamTokeniser.h in Headers */,
+				66BDB0631DC26CCC0079384C /* SBJson4StreamWriter.h in Headers */,
+				66BDB0671DC26CCC0079384C /* SBJson4Writer.h in Headers */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXHeadersBuildPhase section */
+
+/* Begin PBXNativeTarget section */
+		66BDB01F1DA6BFCC0079384C /* PsiphonTunnel */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 66BDB0341DA6BFCC0079384C /* Build configuration list for PBXNativeTarget "PsiphonTunnel" */;
+			buildPhases = (
+				66BDB01B1DA6BFCC0079384C /* Sources */,
+				66BDB01C1DA6BFCC0079384C /* Frameworks */,
+				66BDB01D1DA6BFCC0079384C /* Headers */,
+				66BDB01E1DA6BFCC0079384C /* Resources */,
+				66BDB0481DA6D6FA0079384C /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PsiphonTunnel;
+			productName = PsiphonTunnel;
+			productReference = 66BDB0201DA6BFCC0079384C /* PsiphonTunnel.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		66BDB0281DA6BFCC0079384C /* PsiphonTunnelTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 66BDB0371DA6BFCC0079384C /* Build configuration list for PBXNativeTarget "PsiphonTunnelTests" */;
+			buildPhases = (
+				66BDB0251DA6BFCC0079384C /* Sources */,
+				66BDB0261DA6BFCC0079384C /* Frameworks */,
+				66BDB0271DA6BFCC0079384C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				66BDB02C1DA6BFCC0079384C /* PBXTargetDependency */,
+			);
+			name = PsiphonTunnelTests;
+			productName = PsiphonTunnelTests;
+			productReference = 66BDB0291DA6BFCC0079384C /* PsiphonTunnelTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		66BDB0171DA6BFCC0079384C /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 0820;
+				ORGANIZATIONNAME = "Psiphon Inc.";
+				TargetAttributes = {
+					66BDB01F1DA6BFCC0079384C = {
+						CreatedOnToolsVersion = 8.0;
+						DevelopmentTeam = Q6HLNEX92A;
+						ProvisioningStyle = Automatic;
+					};
+					66BDB0281DA6BFCC0079384C = {
+						CreatedOnToolsVersion = 8.0;
+						DevelopmentTeam = Q6HLNEX92A;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 66BDB01A1DA6BFCC0079384C /* Build configuration list for PBXProject "PsiphonTunnel" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = English;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+			);
+			mainGroup = 66BDB0161DA6BFCC0079384C;
+			productRefGroup = 66BDB0211DA6BFCC0079384C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				66BDB01F1DA6BFCC0079384C /* PsiphonTunnel */,
+				66BDB0281DA6BFCC0079384C /* PsiphonTunnelTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		66BDB01E1DA6BFCC0079384C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				66BDB03E1DA6C79E0079384C /* rootCAs.txt in Resources */,
+				6685BDD91E300AC200F0E414 /* strip-frameworks.sh in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		66BDB0271DA6BFCC0079384C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		66BDB01B1DA6BFCC0079384C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				66BDB05E1DC26CCC0079384C /* SBJson4StreamParser.m in Sources */,
+				66BDB0641DC26CCC0079384C /* SBJson4StreamWriter.m in Sources */,
+				66BDB0661DC26CCC0079384C /* SBJson4StreamWriterState.m in Sources */,
+				66BDB05C1DC26CCC0079384C /* SBJson4Parser.m in Sources */,
+				4E89F7FE1E2ED3CE00005F4C /* LookupIPv6.c in Sources */,
+				66BDB0681DC26CCC0079384C /* SBJson4Writer.m in Sources */,
+				66BDB0621DC26CCC0079384C /* SBJson4StreamTokeniser.m in Sources */,
+				66BDB0441DA6C7DD0079384C /* PsiphonTunnel.m in Sources */,
+				662659281DD270E900872F6C /* Reachability.m in Sources */,
+				66BDB0601DC26CCC0079384C /* SBJson4StreamParserState.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		66BDB0251DA6BFCC0079384C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				66BDB02F1DA6BFCC0079384C /* PsiphonTunnelTests.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		66BDB02C1DA6BFCC0079384C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 66BDB01F1DA6BFCC0079384C /* PsiphonTunnel */;
+			targetProxy = 66BDB02B1DA6BFCC0079384C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		66BDB0321DA6BFCC0079384C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_SUSPICIOUS_MOVES = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 10.0;
+				MTL_ENABLE_DEBUG_INFO = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+				VERSION_INFO_PREFIX = "";
+			};
+			name = Debug;
+		};
+		66BDB0331DA6BFCC0079384C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_SUSPICIOUS_MOVES = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 10.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+				VERSION_INFO_PREFIX = "";
+			};
+			name = Release;
+		};
+		66BDB0351DA6BFCC0079384C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				DEFINES_MODULE = YES;
+				DEVELOPMENT_TEAM = Q6HLNEX92A;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_BITCODE = NO;
+				INFOPLIST_FILE = PsiphonTunnel/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				IPHONEOS_DEPLOYMENT_TARGET = 9.3;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/PsiphonTunnel/Psi.framework/Versions/A",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.PsiphonTunnel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		66BDB0361DA6BFCC0079384C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				DEFINES_MODULE = YES;
+				DEVELOPMENT_TEAM = Q6HLNEX92A;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_BITCODE = NO;
+				INFOPLIST_FILE = PsiphonTunnel/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				IPHONEOS_DEPLOYMENT_TARGET = 9.3;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/PsiphonTunnel/Psi.framework/Versions/A",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.PsiphonTunnel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		66BDB0381DA6BFCC0079384C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEVELOPMENT_TEAM = Q6HLNEX92A;
+				INFOPLIST_FILE = PsiphonTunnelTests/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.PsiphonTunnelTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		66BDB0391DA6BFCC0079384C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEVELOPMENT_TEAM = Q6HLNEX92A;
+				INFOPLIST_FILE = PsiphonTunnelTests/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.PsiphonTunnelTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		66BDB01A1DA6BFCC0079384C /* Build configuration list for PBXProject "PsiphonTunnel" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				66BDB0321DA6BFCC0079384C /* Debug */,
+				66BDB0331DA6BFCC0079384C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		66BDB0341DA6BFCC0079384C /* Build configuration list for PBXNativeTarget "PsiphonTunnel" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				66BDB0351DA6BFCC0079384C /* Debug */,
+				66BDB0361DA6BFCC0079384C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		66BDB0371DA6BFCC0079384C /* Build configuration list for PBXNativeTarget "PsiphonTunnelTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				66BDB0381DA6BFCC0079384C /* Debug */,
+				66BDB0391DA6BFCC0079384C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 66BDB0171DA6BFCC0079384C /* Project object */;
+}

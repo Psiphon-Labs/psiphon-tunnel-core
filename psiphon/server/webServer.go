@@ -20,7 +20,7 @@
 package server
 
 import (
-	"crypto/tls"
+	golangtls "crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -31,6 +31,8 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
 )
 
 const WEB_SERVER_IO_TIMEOUT = 10 * time.Second
@@ -91,13 +93,12 @@ func RunWebServer(
 		http.Server{
 			MaxHeaderBytes: MAX_API_PARAMS_SIZE,
 			Handler:        serveMux,
-			TLSConfig:      tlsConfig,
 			ReadTimeout:    WEB_SERVER_IO_TIMEOUT,
 			WriteTimeout:   WEB_SERVER_IO_TIMEOUT,
 			ErrorLog:       golanglog.New(logWriter, "", 0),
 
 			// Disable auto HTTP/2 (https://golang.org/doc/go1.6)
-			TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
+			TLSNextProto: make(map[string]func(*http.Server, *golangtls.Conn, http.Handler)),
 		},
 	}
 
@@ -121,7 +122,7 @@ func RunWebServer(
 		defer waitGroup.Done()
 
 		// Note: will be interrupted by listener.Close()
-		err := server.ServeTLS(listener)
+		err := server.ServeTLS(listener, tlsConfig)
 
 		// Can't check for the exact error that Close() will cause in Accept(),
 		// (see: https://code.google.com/p/go/issues/detail?id=4373). So using an
@@ -234,9 +235,9 @@ func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Requ
 	if err == nil {
 		responsePayload, err = dispatchAPIRequestHandler(
 			webServer.support,
-			common.PSIPHON_WEB_API_PROTOCOL,
+			protocol.PSIPHON_WEB_API_PROTOCOL,
 			webServer.lookupGeoIPData(params),
-			common.PSIPHON_API_HANDSHAKE_REQUEST_NAME,
+			protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME,
 			params)
 	}
 
@@ -264,9 +265,9 @@ func (webServer *webServer) connectedHandler(w http.ResponseWriter, r *http.Requ
 	if err == nil {
 		responsePayload, err = dispatchAPIRequestHandler(
 			webServer.support,
-			common.PSIPHON_WEB_API_PROTOCOL,
+			protocol.PSIPHON_WEB_API_PROTOCOL,
 			webServer.lookupGeoIPData(params),
-			common.PSIPHON_API_CONNECTED_REQUEST_NAME,
+			protocol.PSIPHON_API_CONNECTED_REQUEST_NAME,
 			params)
 	}
 
@@ -284,12 +285,13 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 
 	params, err := convertHTTPRequestToAPIRequest(w, r, "statusData")
 
+	var responsePayload []byte
 	if err == nil {
-		_, err = dispatchAPIRequestHandler(
+		responsePayload, err = dispatchAPIRequestHandler(
 			webServer.support,
-			common.PSIPHON_WEB_API_PROTOCOL,
+			protocol.PSIPHON_WEB_API_PROTOCOL,
 			webServer.lookupGeoIPData(params),
-			common.PSIPHON_API_STATUS_REQUEST_NAME,
+			protocol.PSIPHON_API_STATUS_REQUEST_NAME,
 			params)
 	}
 
@@ -300,6 +302,7 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusOK)
+	w.Write(responsePayload)
 }
 
 func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *http.Request) {
@@ -310,9 +313,9 @@ func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *
 	if err == nil {
 		responsePayload, err = dispatchAPIRequestHandler(
 			webServer.support,
-			common.PSIPHON_WEB_API_PROTOCOL,
+			protocol.PSIPHON_WEB_API_PROTOCOL,
 			webServer.lookupGeoIPData(params),
-			common.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME,
+			protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME,
 			params)
 	}
 

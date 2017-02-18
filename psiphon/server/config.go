@@ -32,10 +32,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Psiphon-Inc/crypto/nacl/box"
 	"github.com/Psiphon-Inc/crypto/ssh"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"golang.org/x/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 const (
@@ -63,11 +63,16 @@ type Config struct {
 	// to. When blank, logs are written to stderr.
 	LogFilename string
 
+	// PanicLogFilename specifies the path of the file to
+	// log unrecovered panics to. When blank, logs are
+	// written to stderr
+	PanicLogFilename string
+
 	// DiscoveryValueHMACKey is the network-wide secret value
 	// used to determine a unique discovery strategy.
 	DiscoveryValueHMACKey string
 
-	// GeoIPDatabaseFilenames ares paths of GeoIP2/GeoLite2
+	// GeoIPDatabaseFilenames are paths of GeoIP2/GeoLite2
 	// MaxMind database files. When empty, no GeoIP lookups are
 	// performed. Each file is queried, in order, for the
 	// logged fields: country code, city, and ISP. Multiple
@@ -157,12 +162,6 @@ type Config struct {
 	// meek protocols run by this server instance.
 	MeekObfuscatedKey string
 
-	// MeekCertificateCommonName is the value used for the hostname
-	// in the self-signed certificate generated and used for meek
-	// HTTPS modes. The same value is used for all HTTPS meek
-	// protocols.
-	MeekCertificateCommonName string
-
 	// MeekProhibitedHeaders is a list of HTTP headers to check for
 	// in client requests. If one of these headers is found, the
 	// request fails. This is used to defend against abuse.
@@ -213,10 +212,21 @@ type Config struct {
 	// the default profiles here: https://golang.org/pkg/runtime/pprof/#Profile.
 	ProcessProfileOutputDirectory string
 
-	// TrafficRulesFilename is the path of a file containing a
-	// JSON-encoded TrafficRulesSet, the traffic rules to apply to
-	// Psiphon client tunnels.
+	// ProcessBlockProfileDurationSeconds specifies the sample duration for
+	// "block" profiling. For the default, 0, no "block" profile is taken.
+	ProcessBlockProfileDurationSeconds int
+
+	// ProcessCPUProfileDurationSeconds specifies the sample duration for
+	// CPU profiling. For the default, 0, no CPU profile is taken.
+	ProcessCPUProfileDurationSeconds int
+
+	// TrafficRulesFilename is the path of a file containing a JSON-encoded
+	// TrafficRulesSet, the traffic rules to apply to Psiphon client tunnels.
 	TrafficRulesFilename string
+
+	// OSLConfigFilename is the path of a file containing a JSON-encoded
+	// OSL Config, the OSL schemes to apply to Psiphon client tunnels.
+	OSLConfigFilename string
 }
 
 // RunWebServer indicates whether to run a web server component.
@@ -268,11 +278,11 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	}
 
 	for tunnelProtocol, _ := range config.TunnelProtocolPorts {
-		if !common.Contains(common.SupportedTunnelProtocols, tunnelProtocol) {
+		if !common.Contains(protocol.SupportedTunnelProtocols, tunnelProtocol) {
 			return nil, fmt.Errorf("Unsupported tunnel protocol: %s", tunnelProtocol)
 		}
-		if common.TunnelProtocolUsesSSH(tunnelProtocol) ||
-			common.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
+		if protocol.TunnelProtocolUsesSSH(tunnelProtocol) ||
+			protocol.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
 			if config.SSHPrivateKey == "" || config.SSHServerVersion == "" ||
 				config.SSHUserName == "" || config.SSHPassword == "" {
 				return nil, fmt.Errorf(
@@ -280,25 +290,18 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 					tunnelProtocol)
 			}
 		}
-		if common.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
+		if protocol.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
 			if config.ObfuscatedSSHKey == "" {
 				return nil, fmt.Errorf(
 					"Tunnel protocol %s requires ObfuscatedSSHKey",
 					tunnelProtocol)
 			}
 		}
-		if common.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
-			common.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+		if protocol.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
+			protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
 			if config.MeekCookieEncryptionPrivateKey == "" || config.MeekObfuscatedKey == "" {
 				return nil, fmt.Errorf(
 					"Tunnel protocol %s requires MeekCookieEncryptionPrivateKey, MeekObfuscatedKey",
-					tunnelProtocol)
-			}
-		}
-		if common.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
-			if config.MeekCertificateCommonName == "" {
-				return nil, fmt.Errorf(
-					"Tunnel protocol %s requires MeekCertificateCommonName",
 					tunnelProtocol)
 			}
 		}
@@ -341,6 +344,8 @@ func validateNetworkAddress(address string, requireIPaddress bool) error {
 // a generated server config.
 type GenerateConfigParams struct {
 	LogFilename          string
+	PanicLogFilename     string
+	LogLevel             string
 	ServerIPAddress      string
 	WebServerPort        int
 	EnableSSHAPIRequests bool
@@ -374,9 +379,9 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	usingMeek := false
 
-	for protocol, port := range params.TunnelProtocolPorts {
+	for tunnelProtocol, port := range params.TunnelProtocolPorts {
 
-		if !common.Contains(common.SupportedTunnelProtocols, protocol) {
+		if !common.Contains(protocol.SupportedTunnelProtocols, tunnelProtocol) {
 			return nil, nil, nil, common.ContextError(errors.New("invalid tunnel protocol"))
 		}
 
@@ -385,8 +390,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		}
 		usedPort[port] = true
 
-		if common.TunnelProtocolUsesMeekHTTP(protocol) ||
-			common.TunnelProtocolUsesMeekHTTPS(protocol) {
+		if protocol.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
+			protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
 			usingMeek = true
 		}
 	}
@@ -488,9 +493,15 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 	// Note: this config is intended for either testing or as an illustrative
 	// example or template and is not intended for production deployment.
 
+	logLevel := params.LogLevel
+	if logLevel == "" {
+		logLevel = "info"
+	}
+
 	config := &Config{
-		LogLevel:                       "info",
+		LogLevel:                       logLevel,
 		LogFilename:                    params.LogFilename,
+		PanicLogFilename:               params.PanicLogFilename,
 		GeoIPDatabaseFilenames:         nil,
 		HostID:                         "example-host-id",
 		ServerIPAddress:                params.ServerIPAddress,
@@ -510,7 +521,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		UDPInterceptUdpgwServerAddress: "127.0.0.1:7300",
 		MeekCookieEncryptionPrivateKey: meekCookieEncryptionPrivateKey,
 		MeekObfuscatedKey:              meekObfuscatedKey,
-		MeekCertificateCommonName:      "www.example.org",
 		MeekProhibitedHeaders:          nil,
 		MeekProxyForwardedForHeaders:   []string{"X-Forwarded-For"},
 		LoadMonitorPeriodSeconds:       300,
@@ -551,15 +561,15 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 	capabilities := []string{}
 
 	if params.EnableSSHAPIRequests {
-		capabilities = append(capabilities, common.CAPABILITY_SSH_API_REQUESTS)
+		capabilities = append(capabilities, protocol.CAPABILITY_SSH_API_REQUESTS)
 	}
 
 	if params.WebServerPort != 0 {
-		capabilities = append(capabilities, common.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS)
+		capabilities = append(capabilities, protocol.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS)
 	}
 
-	for protocol, _ := range params.TunnelProtocolPorts {
-		capabilities = append(capabilities, psiphon.GetCapability(protocol))
+	for tunnelProtocol, _ := range params.TunnelProtocolPorts {
+		capabilities = append(capabilities, protocol.GetCapability(tunnelProtocol))
 	}
 
 	sshPort := params.TunnelProtocolPorts["SSH"]
@@ -571,6 +581,9 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 	meekPort := params.TunnelProtocolPorts["UNFRONTED-MEEK-OSSH"]
 	if meekPort == 0 {
 		meekPort = params.TunnelProtocolPorts["UNFRONTED-MEEK-HTTPS-OSSH"]
+	}
+	if meekPort == 0 {
+		meekPort = params.TunnelProtocolPorts["UNFRONTED-MEEK-SESSION-TICKET-OSSH"]
 	}
 
 	// Note: fronting params are a stub; this server entry will exercise
@@ -588,7 +601,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		strippedWebServerCertificate = strings.Join(lines[1:len(lines)-2], "")
 	}
 
-	serverEntry := &psiphon.ServerEntry{
+	serverEntry := &protocol.ServerEntry{
 		IpAddress:                     params.ServerIPAddress,
 		WebServerPort:                 serverEntryWebServerPort,
 		WebServerSecret:               webServerSecret,
@@ -609,7 +622,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		MeekFrontingDisableSNI:        false,
 	}
 
-	encodedServerEntry, err := psiphon.EncodeServerEntry(serverEntry)
+	encodedServerEntry, err := protocol.EncodeServerEntry(serverEntry)
 	if err != nil {
 		return nil, nil, nil, common.ContextError(err)
 	}

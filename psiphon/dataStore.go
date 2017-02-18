@@ -33,6 +33,7 @@ import (
 
 	"github.com/Psiphon-Inc/bolt"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 // The BoltDB dataStore implementation is an alternative to the sqlite3-based
@@ -57,7 +58,16 @@ const (
 	urlETagsBucket              = "urlETags"
 	keyValueBucket              = "keyValues"
 	tunnelStatsBucket           = "tunnelStats"
+	remoteServerListStatsBucket = "remoteServerListStats"
+	slokBucket                  = "SLOKs"
 	rankedServerEntryCount      = 100
+)
+
+const (
+	DATA_STORE_LAST_CONNECTED_KEY           = "lastConnected"
+	DATA_STORE_OSL_REGISTRY_KEY             = "OSLRegistry"
+	PERSISTENT_STAT_TYPE_TUNNEL             = tunnelStatsBucket
+	PERSISTENT_STAT_TYPE_REMOTE_SERVER_LIST = remoteServerListStatsBucket
 )
 
 var singleton dataStore
@@ -79,13 +89,37 @@ func InitDataStore(config *Config) (err error) {
 
 		filename := filepath.Join(config.DataStoreDirectory, DATA_STORE_FILENAME)
 		var db *bolt.DB
-		db, err = bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
 
-		// The datastore file may be corrupt, so attempt to delete and try again
-		if err != nil {
-			NoticeAlert("retry on initDataStore error: %s", err)
-			os.Remove(filename)
+		for retry := 0; retry < 3; retry++ {
+
+			if retry > 0 {
+				NoticeAlert("InitDataStore retry: %d", retry)
+			}
+
 			db, err = bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
+
+			// The datastore file may be corrupt, so attempt to delete and try again
+			if err != nil {
+				NoticeAlert("bolt.Open error: %s", err)
+				os.Remove(filename)
+				continue
+			}
+
+			// Run consistency checks on datastore and emit errors for diagnostics purposes
+			// We assume this will complete quickly for typical size Psiphon datastores.
+			err = db.View(func(tx *bolt.Tx) error {
+				return tx.SynchronousCheck()
+			})
+
+			// The datastore file may be corrupt, so attempt to delete and try again
+			if err != nil {
+				NoticeAlert("bolt.SynchronousCheck error: %s", err)
+				db.Close()
+				os.Remove(filename)
+				continue
+			}
+
+			break
 		}
 
 		if err != nil {
@@ -103,6 +137,8 @@ func InitDataStore(config *Config) (err error) {
 				urlETagsBucket,
 				keyValueBucket,
 				tunnelStatsBucket,
+				remoteServerListStatsBucket,
+				slokBucket,
 			}
 			for _, bucket := range requiredBuckets {
 				_, err := tx.CreateBucketIfNotExists([]byte(bucket))
@@ -117,16 +153,6 @@ func InitDataStore(config *Config) (err error) {
 			return
 		}
 
-		// Run consistency checks on datastore and emit errors for diagnostics purposes
-		// We assume this will complete quickly for typical size Psiphon datastores.
-		db.View(func(tx *bolt.Tx) error {
-			err := <-tx.Check()
-			if err != nil {
-				NoticeAlert("boltdb Check(): %s", err)
-			}
-			return nil
-		})
-
 		singleton.db = db
 
 		// The migrateServerEntries function requires the data store is
@@ -136,7 +162,7 @@ func InitDataStore(config *Config) (err error) {
 			migrateEntries(migratableServerEntries, filepath.Join(config.DataStoreDirectory, LEGACY_DATA_STORE_FILENAME))
 		}
 
-		resetAllTunnelStatsToUnreported()
+		resetAllPersistentStatsToUnreported()
 	})
 
 	return err
@@ -157,12 +183,12 @@ func checkInitDataStore() {
 // overwritten; otherwise, the existing record is unchanged.
 // If the server entry data is malformed, an alert notice is issued and
 // the entry is skipped; no error is returned.
-func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
+func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) error {
 	checkInitDataStore()
 
 	// Server entries should already be validated before this point,
 	// so instead of skipping we fail with an error.
-	err := ValidateServerEntry(serverEntry)
+	err := protocol.ValidateServerEntry(serverEntry)
 	if err != nil {
 		return common.ContextError(errors.New("invalid server entry"))
 	}
@@ -184,7 +210,7 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 		existingServerEntryValid := false
 		existingData := serverEntries.Get([]byte(serverEntry.IpAddress))
 		if existingData != nil {
-			existingServerEntry := new(ServerEntry)
+			existingServerEntry := new(protocol.ServerEntry)
 			if json.Unmarshal(existingData, existingServerEntry) == nil {
 				existingServerEntryValid = true
 			}
@@ -227,7 +253,7 @@ func StoreServerEntry(serverEntry *ServerEntry, replaceIfExists bool) error {
 // Shuffling is performed on imported server entrues as part of client-side
 // load balancing.
 // There is an independent transaction for each entry insert/update.
-func StoreServerEntries(serverEntries []*ServerEntry, replaceIfExists bool) error {
+func StoreServerEntries(serverEntries []*protocol.ServerEntry, replaceIfExists bool) error {
 	checkInitDataStore()
 
 	for index := len(serverEntries) - 1; index > 0; index-- {
@@ -353,13 +379,6 @@ func insertRankedServerEntry(tx *bolt.Tx, serverEntryId string, position int) er
 	return nil
 }
 
-func serverEntrySupportsProtocol(serverEntry *ServerEntry, protocol string) bool {
-	// Note: for meek, the capabilities are FRONTED-MEEK and UNFRONTED-MEEK
-	// and the additonal OSSH service is assumed to be available internally.
-	requiredCapability := strings.TrimSuffix(protocol, "-OSSH")
-	return common.Contains(serverEntry.Capabilities, requiredCapability)
-}
-
 // ServerEntryIterator is used to iterate over
 // stored server entries in rank order.
 type ServerEntryIterator struct {
@@ -370,7 +389,7 @@ type ServerEntryIterator struct {
 	serverEntryIndex            int
 	isTargetServerEntryIterator bool
 	hasNextTargetServerEntry    bool
-	targetServerEntry           *ServerEntry
+	targetServerEntry           *protocol.ServerEntry
 }
 
 // NewServerEntryIterator creates a new ServerEntryIterator
@@ -397,8 +416,8 @@ func NewServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err 
 
 // newTargetServerEntryIterator is a helper for initializing the TargetServerEntry case
 func newTargetServerEntryIterator(config *Config) (iterator *ServerEntryIterator, err error) {
-	serverEntry, err := DecodeServerEntry(
-		config.TargetServerEntry, common.GetCurrentTimestamp(), common.SERVER_ENTRY_SOURCE_TARGET)
+	serverEntry, err := protocol.DecodeServerEntry(
+		config.TargetServerEntry, common.GetCurrentTimestamp(), protocol.SERVER_ENTRY_SOURCE_TARGET)
 	if err != nil {
 		return nil, err
 	}
@@ -501,7 +520,7 @@ func (iterator *ServerEntryIterator) Close() {
 
 // Next returns the next server entry, by rank, for a ServerEntryIterator.
 // Returns nil with no error when there is no next item.
-func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error) {
+func (iterator *ServerEntryIterator) Next() (serverEntry *protocol.ServerEntry, err error) {
 	defer func() {
 		if err != nil {
 			iterator.Close()
@@ -550,7 +569,7 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 			continue
 		}
 
-		serverEntry = new(ServerEntry)
+		serverEntry = new(protocol.ServerEntry)
 		err = json.Unmarshal(data, serverEntry)
 		if err != nil {
 			// In case of data corruption or a bug causing this condition,
@@ -561,7 +580,7 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 
 		// Check filter requirements
 		if (iterator.region == "" || serverEntry.Region == iterator.region) &&
-			(iterator.protocol == "" || serverEntrySupportsProtocol(serverEntry, iterator.protocol)) {
+			(iterator.protocol == "" || serverEntry.SupportsProtocol(iterator.protocol)) {
 
 			break
 		}
@@ -574,7 +593,7 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *ServerEntry, err error
 // which have a single meekFrontingDomain and not a meekFrontingAddresses array.
 // By copying this one meekFrontingDomain into meekFrontingAddresses, this client effectively
 // uses that single value as legacy clients do.
-func MakeCompatibleServerEntry(serverEntry *ServerEntry) *ServerEntry {
+func MakeCompatibleServerEntry(serverEntry *protocol.ServerEntry) *protocol.ServerEntry {
 	if len(serverEntry.MeekFrontingAddresses) == 0 && serverEntry.MeekFrontingDomain != "" {
 		serverEntry.MeekFrontingAddresses =
 			append(serverEntry.MeekFrontingAddresses, serverEntry.MeekFrontingDomain)
@@ -583,13 +602,13 @@ func MakeCompatibleServerEntry(serverEntry *ServerEntry) *ServerEntry {
 	return serverEntry
 }
 
-func scanServerEntries(scanner func(*ServerEntry)) error {
+func scanServerEntries(scanner func(*protocol.ServerEntry)) error {
 	err := singleton.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(serverEntriesBucket))
 		cursor := bucket.Cursor()
 
 		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
-			serverEntry := new(ServerEntry)
+			serverEntry := new(protocol.ServerEntry)
 			err := json.Unmarshal(value, serverEntry)
 			if err != nil {
 				// In case of data corruption or a bug causing this condition,
@@ -612,13 +631,13 @@ func scanServerEntries(scanner func(*ServerEntry)) error {
 
 // CountServerEntries returns a count of stored servers for the
 // specified region and protocol.
-func CountServerEntries(region, protocol string) int {
+func CountServerEntries(region, tunnelProtocol string) int {
 	checkInitDataStore()
 
 	count := 0
-	err := scanServerEntries(func(serverEntry *ServerEntry) {
+	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 		if (region == "" || serverEntry.Region == region) &&
-			(protocol == "" || serverEntrySupportsProtocol(serverEntry, protocol)) {
+			(tunnelProtocol == "" || serverEntry.SupportsProtocol(tunnelProtocol)) {
 			count += 1
 		}
 	})
@@ -631,13 +650,54 @@ func CountServerEntries(region, protocol string) int {
 	return count
 }
 
+// CountNonImpairedProtocols returns the number of distinct tunnel
+// protocols supported by stored server entries, excluding the
+// specified impaired protocols.
+func CountNonImpairedProtocols(
+	region, tunnelProtocol string,
+	impairedProtocols []string) int {
+
+	checkInitDataStore()
+
+	distinctProtocols := make(map[string]bool)
+
+	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
+		if region == "" || serverEntry.Region == region {
+			if tunnelProtocol != "" {
+				if serverEntry.SupportsProtocol(tunnelProtocol) {
+					distinctProtocols[tunnelProtocol] = true
+					// Exit early, since only one protocol is enabled
+					return
+				}
+			} else {
+				for _, protocol := range protocol.SupportedTunnelProtocols {
+					if serverEntry.SupportsProtocol(protocol) {
+						distinctProtocols[protocol] = true
+					}
+				}
+			}
+		}
+	})
+
+	for _, protocol := range impairedProtocols {
+		delete(distinctProtocols, protocol)
+	}
+
+	if err != nil {
+		NoticeAlert("CountNonImpairedProtocols failed: %s", err)
+		return 0
+	}
+
+	return len(distinctProtocols)
+}
+
 // ReportAvailableRegions prints a notice with the available egress regions.
 // Note that this report ignores config.TunnelProtocol.
 func ReportAvailableRegions() {
 	checkInitDataStore()
 
 	regions := make(map[string]bool)
-	err := scanServerEntries(func(serverEntry *ServerEntry) {
+	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 		regions[serverEntry.Region] = true
 	})
 
@@ -664,7 +724,7 @@ func GetServerEntryIpAddresses() (ipAddresses []string, err error) {
 	checkInitDataStore()
 
 	ipAddresses = make([]string, 0)
-	err = scanServerEntries(func(serverEntry *ServerEntry) {
+	err = scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 		ipAddresses = append(ipAddresses, serverEntry.IpAddress)
 	})
 
@@ -803,195 +863,298 @@ func GetKeyValue(key string) (value string, err error) {
 	return value, nil
 }
 
-// Tunnel stats records in the tunnelStatsStateUnreported
+// Persistent stat records in the persistentStatStateUnreported
 // state are available for take out.
-// Records in the tunnelStatsStateReporting have been
-// taken out and are pending either deleting (for a
-// successful request) or change to StateUnreported (for
-// a failed request).
-// All tunnel stats records are reverted to StateUnreported
+//
+// Records in the persistentStatStateReporting have been taken
+// out and are pending either deletion (for a successful request)
+// or change to StateUnreported (for a failed request).
+//
+// All persistent stat records are reverted to StateUnreported
 // when the datastore is initialized at start up.
 
-var tunnelStatsStateUnreported = []byte("0")
-var tunnelStatsStateReporting = []byte("1")
+var persistentStatStateUnreported = []byte("0")
+var persistentStatStateReporting = []byte("1")
 
-// StoreTunnelStats adds a new tunnel stats record, which is
-// set to StateUnreported and is an immediate candidate for
+var persistentStatTypes = []string{
+	PERSISTENT_STAT_TYPE_REMOTE_SERVER_LIST,
+	PERSISTENT_STAT_TYPE_TUNNEL,
+}
+
+// StorePersistentStats adds a new persistent stat record, which
+// is set to StateUnreported and is an immediate candidate for
 // reporting.
-// tunnelStats is a JSON byte array containing fields as
-// required by the Psiphon server API (see RecordTunnelStats).
-// It's assumed that the JSON value contains enough unique
-// information for the value to function as a key in the
-// key/value datastore. This assumption is currently satisfied
-// by the fields sessionId + tunnelNumber.
-func StoreTunnelStats(tunnelStats []byte) error {
+//
+// The stat is a JSON byte array containing fields as
+// required by the Psiphon server API. It's assumed that the
+// JSON value contains enough unique information for the value to
+// function as a key in the key/value datastore. This assumption
+// is currently satisfied by the fields sessionId + tunnelNumber
+// for tunnel stats, and URL + ETag for remote server list stats.
+func StorePersistentStat(statType string, stat []byte) error {
 	checkInitDataStore()
 
+	if !common.Contains(persistentStatTypes, statType) {
+		return common.ContextError(fmt.Errorf("invalid persistent stat type: %s", statType))
+	}
+
 	err := singleton.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(tunnelStatsBucket))
-		err := bucket.Put(tunnelStats, tunnelStatsStateUnreported)
+		bucket := tx.Bucket([]byte(statType))
+		err := bucket.Put(stat, persistentStatStateUnreported)
 		return err
 	})
 
 	if err != nil {
 		return common.ContextError(err)
 	}
+
 	return nil
 }
 
-// CountUnreportedTunnelStats returns the number of tunnel
-// stats records in StateUnreported.
-func CountUnreportedTunnelStats() int {
+// CountUnreportedPersistentStats returns the number of persistent
+// stat records in StateUnreported.
+func CountUnreportedPersistentStats() int {
 	checkInitDataStore()
 
 	unreported := 0
 
 	err := singleton.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(tunnelStatsBucket))
-		cursor := bucket.Cursor()
-		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
-			if 0 == bytes.Compare(value, tunnelStatsStateUnreported) {
-				unreported++
-				break
+
+		for _, statType := range persistentStatTypes {
+
+			bucket := tx.Bucket([]byte(statType))
+			cursor := bucket.Cursor()
+			for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+				if 0 == bytes.Compare(value, persistentStatStateUnreported) {
+					unreported++
+					break
+				}
 			}
 		}
 		return nil
 	})
 
 	if err != nil {
-		NoticeAlert("CountUnreportedTunnelStats failed: %s", err)
+		NoticeAlert("CountUnreportedPersistentStats failed: %s", err)
 		return 0
 	}
 
 	return unreported
 }
 
-// TakeOutUnreportedTunnelStats returns up to maxCount tunnel
-// stats records that are in StateUnreported. The records are set
-// to StateReporting. If the records are successfully reported,
-// clear them with ClearReportedTunnelStats. If the records are
-// not successfully reported, restore them with
-// PutBackUnreportedTunnelStats.
-func TakeOutUnreportedTunnelStats(maxCount int) ([][]byte, error) {
+// TakeOutUnreportedPersistentStats returns up to maxCount persistent
+// stats records that are in StateUnreported. The records are set to
+// StateReporting. If the records are successfully reported, clear them
+// with ClearReportedPersistentStats. If the records are not successfully
+// reported, restore them with PutBackUnreportedPersistentStats.
+func TakeOutUnreportedPersistentStats(maxCount int) (map[string][][]byte, error) {
 	checkInitDataStore()
 
-	tunnelStats := make([][]byte, 0)
+	stats := make(map[string][][]byte)
 
 	err := singleton.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(tunnelStatsBucket))
-		cursor := bucket.Cursor()
-		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
 
-			// Perform a test JSON unmarshaling. In case of data corruption or a bug,
-			// skip the record.
-			var jsonData interface{}
-			err := json.Unmarshal(key, &jsonData)
-			if err != nil {
-				NoticeAlert(
-					"Invalid key in TakeOutUnreportedTunnelStats: %s: %s",
-					string(key), err)
-				continue
-			}
+		count := 0
 
-			if 0 == bytes.Compare(value, tunnelStatsStateUnreported) {
-				// Must make a copy as slice is only valid within transaction.
-				data := make([]byte, len(key))
-				copy(data, key)
-				tunnelStats = append(tunnelStats, data)
-				if len(tunnelStats) >= maxCount {
+		for _, statType := range persistentStatTypes {
+
+			stats[statType] = make([][]byte, 0)
+
+			bucket := tx.Bucket([]byte(statType))
+			cursor := bucket.Cursor()
+			for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+
+				if count >= maxCount {
 					break
 				}
-			}
-		}
-		for _, key := range tunnelStats {
-			err := bucket.Put(key, tunnelStatsStateReporting)
-			if err != nil {
-				return err
-			}
-		}
 
+				// Perform a test JSON unmarshaling. In case of data corruption or a bug,
+				// skip the record.
+				var jsonData interface{}
+				err := json.Unmarshal(key, &jsonData)
+				if err != nil {
+					NoticeAlert(
+						"Invalid key in TakeOutUnreportedPersistentStats: %s: %s",
+						string(key), err)
+					continue
+				}
+
+				if 0 == bytes.Compare(value, persistentStatStateUnreported) {
+					// Must make a copy as slice is only valid within transaction.
+					data := make([]byte, len(key))
+					copy(data, key)
+					stats[statType] = append(stats[statType], data)
+					count += 1
+				}
+			}
+
+			for _, key := range stats[statType] {
+				err := bucket.Put(key, persistentStatStateReporting)
+				if err != nil {
+					return err
+				}
+			}
+
+		}
 		return nil
 	})
 
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
-	return tunnelStats, nil
+
+	return stats, nil
 }
 
-// PutBackUnreportedTunnelStats restores a list of tunnel
-// stats records to StateUnreported.
-func PutBackUnreportedTunnelStats(tunnelStats [][]byte) error {
+// PutBackUnreportedPersistentStats restores a list of persistent
+// stat records to StateUnreported.
+func PutBackUnreportedPersistentStats(stats map[string][][]byte) error {
 	checkInitDataStore()
 
 	err := singleton.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(tunnelStatsBucket))
-		for _, key := range tunnelStats {
-			err := bucket.Put(key, tunnelStatsStateUnreported)
-			if err != nil {
-				return err
+
+		for _, statType := range persistentStatTypes {
+
+			bucket := tx.Bucket([]byte(statType))
+			for _, key := range stats[statType] {
+				err := bucket.Put(key, persistentStatStateUnreported)
+				if err != nil {
+					return err
+				}
 			}
 		}
+
 		return nil
 	})
 
 	if err != nil {
 		return common.ContextError(err)
 	}
+
 	return nil
 }
 
-// ClearReportedTunnelStats deletes a list of tunnel
-// stats records that were succesdfully reported.
-func ClearReportedTunnelStats(tunnelStats [][]byte) error {
+// ClearReportedPersistentStats deletes a list of persistent
+// stat records that were successfully reported.
+func ClearReportedPersistentStats(stats map[string][][]byte) error {
 	checkInitDataStore()
 
 	err := singleton.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(tunnelStatsBucket))
-		for _, key := range tunnelStats {
-			err := bucket.Delete(key)
-			if err != nil {
-				return err
+
+		for _, statType := range persistentStatTypes {
+
+			bucket := tx.Bucket([]byte(statType))
+			for _, key := range stats[statType] {
+				err := bucket.Delete(key)
+				if err != nil {
+					return err
+				}
 			}
 		}
+
 		return nil
 	})
 
 	if err != nil {
 		return common.ContextError(err)
 	}
+
 	return nil
 }
 
-// resetAllTunnelStatsToUnreported sets all tunnel
-// stats records to StateUnreported. This reset is called
-// when the datastore is initialized at start up, as we do
-// not know if tunnel records in StateReporting were reported
-// or not.
-func resetAllTunnelStatsToUnreported() error {
+// resetAllPersistentStatsToUnreported sets all persistent stat
+// records to StateUnreported. This reset is called when the
+// datastore is initialized at start up, as we do not know if
+// persistent records in StateReporting were reported or not.
+func resetAllPersistentStatsToUnreported() error {
 	checkInitDataStore()
 
 	err := singleton.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(tunnelStatsBucket))
-		resetKeys := make([][]byte, 0)
-		cursor := bucket.Cursor()
-		for key, _ := cursor.First(); key != nil; key, _ = cursor.Next() {
-			resetKeys = append(resetKeys, key)
-		}
-		// TODO: data mutation is done outside cursor. Is this
-		// strictly necessary in this case?
-		// https://godoc.org/github.com/boltdb/bolt#Cursor
-		for _, key := range resetKeys {
-			err := bucket.Put(key, tunnelStatsStateUnreported)
-			if err != nil {
-				return err
+
+		for _, statType := range persistentStatTypes {
+
+			bucket := tx.Bucket([]byte(statType))
+			resetKeys := make([][]byte, 0)
+			cursor := bucket.Cursor()
+			for key, _ := cursor.First(); key != nil; key, _ = cursor.Next() {
+				resetKeys = append(resetKeys, key)
+			}
+			// TODO: data mutation is done outside cursor. Is this
+			// strictly necessary in this case? As is, this means
+			// all stats need to be loaded into memory at once.
+			// https://godoc.org/github.com/boltdb/bolt#Cursor
+			for _, key := range resetKeys {
+				err := bucket.Put(key, persistentStatStateUnreported)
+				if err != nil {
+					return err
+				}
 			}
 		}
+
 		return nil
 	})
 
 	if err != nil {
 		return common.ContextError(err)
 	}
+
 	return nil
+}
+
+// DeleteSLOKs deletes all SLOK records.
+func DeleteSLOKs() error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(slokBucket))
+		return bucket.ForEach(
+			func(id, _ []byte) error {
+				return bucket.Delete(id)
+			})
+	})
+
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	return nil
+}
+
+// SetSLOK stores a SLOK key, referenced by its ID. The bool
+// return value indicates whether the SLOK was already stored.
+func SetSLOK(id, key []byte) (bool, error) {
+	checkInitDataStore()
+
+	var duplicate bool
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(slokBucket))
+		duplicate = bucket.Get(id) != nil
+		err := bucket.Put([]byte(id), []byte(key))
+		return err
+	})
+
+	if err != nil {
+		return false, common.ContextError(err)
+	}
+
+	return duplicate, nil
+}
+
+// GetSLOK returns a SLOK key for the specified ID. The return
+// value is nil if the SLOK is not found.
+func GetSLOK(id []byte) (key []byte, err error) {
+	checkInitDataStore()
+
+	err = singleton.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(slokBucket))
+		key = bucket.Get(id)
+		return nil
+	})
+
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return key, nil
 }

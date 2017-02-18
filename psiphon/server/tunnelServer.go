@@ -32,21 +32,21 @@ import (
 	"time"
 
 	"github.com/Psiphon-Inc/crypto/ssh"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 const (
-	SSH_HANDSHAKE_TIMEOUT                 = 30 * time.Second
-	SSH_CONNECTION_READ_DEADLINE          = 5 * time.Minute
-	SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT     = 30 * time.Second
-	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE = 8192
+	SSH_HANDSHAKE_TIMEOUT                  = 30 * time.Second
+	SSH_CONNECTION_READ_DEADLINE           = 5 * time.Minute
+	SSH_TCP_PORT_FORWARD_IP_LOOKUP_TIMEOUT = 30 * time.Second
+	SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT      = 30 * time.Second
+	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE  = 8192
+	SSH_SEND_OSL_INITIAL_RETRY_DELAY       = 30 * time.Second
+	SSH_SEND_OSL_RETRY_FACTOR              = 2
 )
-
-// Disallowed port forward hosts is a failsafe. The server should
-// be run on a host with correctly configured firewall rules, or
-// containerization, or both.
-var SSH_DISALLOWED_PORT_FORWARD_HOSTS = []string{"localhost", "127.0.0.1"}
 
 // TunnelServer is the main server that accepts Psiphon client
 // connections, via various obfuscation protocols, and provides
@@ -98,6 +98,9 @@ func NewTunnelServer(
 // forward tracks its bytes transferred. Overall per-client stats for connection duration,
 // GeoIP, number of port forwards, and bytes transferred are tracked and logged when the
 // client shuts down.
+//
+// Note: client handler goroutines may still be shutting down after Run() returns. See
+// comment in sshClient.stop(). TODO: fully synchronized shutdown.
 func (server *TunnelServer) Run() error {
 
 	type sshListener struct {
@@ -193,9 +196,17 @@ func (server *TunnelServer) GetLoadStats() map[string]map[string]int64 {
 }
 
 // ResetAllClientTrafficRules resets all established client traffic rules
-// to use the latest server config and client state.
+// to use the latest config and client properties. Any existing traffic
+// rule state is lost, including throttling state.
 func (server *TunnelServer) ResetAllClientTrafficRules() {
 	server.sshServer.resetAllClientTrafficRules()
+}
+
+// ResetAllClientOSLConfigs resets all established client OSL state to use
+// the latest OSL config. Any existing OSL state is lost, including partial
+// progress towards SLOKs.
+func (server *TunnelServer) ResetAllClientOSLConfigs() {
+	server.sshServer.resetAllClientOSLConfigs()
 }
 
 // SetClientHandshakeState sets the handshake state -- that it completed and
@@ -210,8 +221,20 @@ func (server *TunnelServer) SetClientHandshakeState(
 	return server.sshServer.setClientHandshakeState(sessionID, state)
 }
 
+// SetEstablishTunnels sets whether new tunnels may be established or not.
+// When not establishing, incoming connections are immediately closed.
+func (server *TunnelServer) SetEstablishTunnels(establish bool) {
+	server.sshServer.setEstablishTunnels(establish)
+}
+
+// GetEstablishTunnels returns whether new tunnels may be established or not.
+func (server *TunnelServer) GetEstablishTunnels() bool {
+	return server.sshServer.getEstablishTunnels()
+}
+
 type sshServer struct {
 	support              *SupportServices
+	establishTunnels     int32
 	shutdownBroadcast    <-chan struct{}
 	sshHostKey           ssh.Signer
 	clientsMutex         sync.Mutex
@@ -237,11 +260,35 @@ func newSSHServer(
 
 	return &sshServer{
 		support:              support,
+		establishTunnels:     1,
 		shutdownBroadcast:    shutdownBroadcast,
 		sshHostKey:           signer,
 		acceptedClientCounts: make(map[string]int64),
 		clients:              make(map[string]*sshClient),
 	}, nil
+}
+
+func (sshServer *sshServer) setEstablishTunnels(establish bool) {
+
+	// Do nothing when the setting is already correct. This avoids
+	// spurious log messages when setEstablishTunnels is called
+	// periodically with the same setting.
+	if establish == sshServer.getEstablishTunnels() {
+		return
+	}
+
+	establishFlag := int32(1)
+	if !establish {
+		establishFlag = 0
+	}
+	atomic.StoreInt32(&sshServer.establishTunnels, establishFlag)
+
+	log.WithContextFields(
+		LogFields{"establish": establish}).Info("establishing tunnels")
+}
+
+func (sshServer *sshServer) getEstablishTunnels() bool {
+	return atomic.LoadInt32(&sshServer.establishTunnels) == 1
 }
 
 // runListener is intended to run an a goroutine; it blocks
@@ -253,6 +300,17 @@ func (sshServer *sshServer) runListener(
 	tunnelProtocol string) {
 
 	handleClient := func(clientConn net.Conn) {
+
+		// Note: establish tunnel limiter cannot simply stop TCP
+		// listeners in all cases (e.g., meek) since SSH tunnel can
+		// span multiple TCP connections.
+
+		if !sshServer.getEstablishTunnels() {
+			log.WithContext().Debug("not establishing tunnels")
+			clientConn.Close()
+			return
+		}
+
 		// process each client connection concurrently
 		go sshServer.handleClient(tunnelProtocol, clientConn)
 	}
@@ -262,13 +320,14 @@ func (sshServer *sshServer) runListener(
 	// TunnelServer.Run will properly shut down instead of remaining
 	// running.
 
-	if common.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
-		common.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
+		protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
 
 		meekServer, err := NewMeekServer(
 			sshServer.support,
 			listener,
-			common.TunnelProtocolUsesMeekHTTPS(tunnelProtocol),
+			protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol),
+			protocol.TunnelProtocolUsesObfuscatedSessionTickets(tunnelProtocol),
 			handleClient,
 			sshServer.shutdownBroadcast)
 		if err != nil {
@@ -389,28 +448,44 @@ func (sshServer *sshServer) getLoadStats() map[string]map[string]int64 {
 
 	for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
 		loadStats[tunnelProtocol] = make(map[string]int64)
-		loadStats[tunnelProtocol]["AcceptedClients"] = 0
-		loadStats[tunnelProtocol]["EstablishedClients"] = 0
-		loadStats[tunnelProtocol]["TCPPortForwards"] = 0
-		loadStats[tunnelProtocol]["TotalTCPPortForwards"] = 0
-		loadStats[tunnelProtocol]["UDPPortForwards"] = 0
-		loadStats[tunnelProtocol]["TotalUDPPortForwards"] = 0
+		loadStats[tunnelProtocol]["accepted_clients"] = 0
+		loadStats[tunnelProtocol]["established_clients"] = 0
+		loadStats[tunnelProtocol]["tcp_port_forwards"] = 0
+		loadStats[tunnelProtocol]["total_tcp_port_forwards"] = 0
+		loadStats[tunnelProtocol]["udp_port_forwards"] = 0
+		loadStats[tunnelProtocol]["total_udp_port_forwards"] = 0
 	}
 
 	// Note: as currently tracked/counted, each established client is also an accepted client
 
 	for tunnelProtocol, acceptedClientCount := range sshServer.acceptedClientCounts {
-		loadStats[tunnelProtocol]["AcceptedClients"] = acceptedClientCount
+		loadStats[tunnelProtocol]["accepted_clients"] = acceptedClientCount
 	}
+
+	var aggregatedQualityMetrics qualityMetrics
 
 	for _, client := range sshServer.clients {
 		// Note: can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
-		loadStats[client.tunnelProtocol]["EstablishedClients"] += 1
+		loadStats[client.tunnelProtocol]["established_clients"] += 1
+
 		client.Lock()
-		loadStats[client.tunnelProtocol]["TCPPortForwards"] += client.tcpTrafficState.concurrentPortForwardCount
-		loadStats[client.tunnelProtocol]["TotalTCPPortForwards"] += client.tcpTrafficState.totalPortForwardCount
-		loadStats[client.tunnelProtocol]["UDPPortForwards"] += client.udpTrafficState.concurrentPortForwardCount
-		loadStats[client.tunnelProtocol]["TotalUDPPortForwards"] += client.udpTrafficState.totalPortForwardCount
+
+		loadStats[client.tunnelProtocol]["tcp_port_forwards"] += client.tcpTrafficState.concurrentPortForwardCount
+		loadStats[client.tunnelProtocol]["total_tcp_port_forwards"] += client.tcpTrafficState.totalPortForwardCount
+		loadStats[client.tunnelProtocol]["udp_port_forwards"] += client.udpTrafficState.concurrentPortForwardCount
+		loadStats[client.tunnelProtocol]["total_udp_port_forwards"] += client.udpTrafficState.totalPortForwardCount
+
+		aggregatedQualityMetrics.tcpPortForwardDialedCount += client.qualityMetrics.tcpPortForwardDialedCount
+		aggregatedQualityMetrics.tcpPortForwardDialedDuration +=
+			client.qualityMetrics.tcpPortForwardDialedDuration / time.Millisecond
+		aggregatedQualityMetrics.tcpPortForwardFailedCount += client.qualityMetrics.tcpPortForwardFailedCount
+		aggregatedQualityMetrics.tcpPortForwardFailedDuration +=
+			client.qualityMetrics.tcpPortForwardFailedDuration / time.Millisecond
+		client.qualityMetrics.tcpPortForwardDialedCount = 0
+		client.qualityMetrics.tcpPortForwardDialedDuration = 0
+		client.qualityMetrics.tcpPortForwardFailedCount = 0
+		client.qualityMetrics.tcpPortForwardFailedDuration = 0
+
 		client.Unlock()
 	}
 
@@ -418,11 +493,23 @@ func (sshServer *sshServer) getLoadStats() map[string]map[string]int64 {
 	// than futher down the stats stack. Also useful for glancing at log files.
 
 	allProtocolsStats := make(map[string]int64)
+	allProtocolsStats["accepted_clients"] = 0
+	allProtocolsStats["established_clients"] = 0
+	allProtocolsStats["tcp_port_forwards"] = 0
+	allProtocolsStats["total_tcp_port_forwards"] = 0
+	allProtocolsStats["udp_port_forwards"] = 0
+	allProtocolsStats["total_udp_port_forwards"] = 0
+	allProtocolsStats["tcp_port_forward_dialed_count"] = aggregatedQualityMetrics.tcpPortForwardDialedCount
+	allProtocolsStats["tcp_port_forward_dialed_duration"] = int64(aggregatedQualityMetrics.tcpPortForwardDialedDuration)
+	allProtocolsStats["tcp_port_forward_failed_count"] = aggregatedQualityMetrics.tcpPortForwardFailedCount
+	allProtocolsStats["tcp_port_forward_failed_duration"] = int64(aggregatedQualityMetrics.tcpPortForwardFailedDuration)
+
 	for _, stats := range loadStats {
 		for name, value := range stats {
 			allProtocolsStats[name] += value
 		}
 	}
+
 	loadStats["ALL"] = allProtocolsStats
 
 	return loadStats
@@ -442,6 +529,20 @@ func (sshServer *sshServer) resetAllClientTrafficRules() {
 	}
 }
 
+func (sshServer *sshServer) resetAllClientOSLConfigs() {
+
+	sshServer.clientsMutex.Lock()
+	clients := make(map[string]*sshClient)
+	for sessionID, client := range sshServer.clients {
+		clients[sessionID] = client
+	}
+	sshServer.clientsMutex.Unlock()
+
+	for _, client := range clients {
+		client.setOSLConfig()
+	}
+}
+
 func (sshServer *sshServer) setClientHandshakeState(
 	sessionID string, state handshakeState) error {
 
@@ -457,8 +558,6 @@ func (sshServer *sshServer) setClientHandshakeState(
 	if err != nil {
 		return common.ContextError(err)
 	}
-
-	client.setTrafficRules()
 
 	return nil
 }
@@ -486,6 +585,71 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 
 	sshClient := newSshClient(sshServer, tunnelProtocol, geoIPData)
 
+	sshClient.run(clientConn)
+}
+
+type sshClient struct {
+	sync.Mutex
+	sshServer              *sshServer
+	tunnelProtocol         string
+	sshConn                ssh.Conn
+	activityConn           *common.ActivityMonitoredConn
+	throttledConn          *common.ThrottledConn
+	geoIPData              GeoIPData
+	sessionID              string
+	supportsServerRequests bool
+	handshakeState         handshakeState
+	udpChannel             ssh.Channel
+	trafficRules           TrafficRules
+	tcpTrafficState        trafficState
+	udpTrafficState        trafficState
+	qualityMetrics         qualityMetrics
+	tcpPortForwardLRU      *common.LRUConns
+	oslClientSeedState     *osl.ClientSeedState
+	signalIssueSLOKs       chan struct{}
+	stopBroadcast          chan struct{}
+}
+
+type trafficState struct {
+	bytesUp                        int64
+	bytesDown                      int64
+	concurrentPortForwardCount     int64
+	peakConcurrentPortForwardCount int64
+	totalPortForwardCount          int64
+}
+
+// qualityMetrics records upstream TCP dial attempts and
+// elapsed time. Elapsed time includes the full TCP handshake
+// and, in aggregate, is a measure of the quality of the
+// upstream link. These stats are recorded by each sshClient
+// and then reported and reset in sshServer.getLoadStats().
+type qualityMetrics struct {
+	tcpPortForwardDialedCount    int64
+	tcpPortForwardDialedDuration time.Duration
+	tcpPortForwardFailedCount    int64
+	tcpPortForwardFailedDuration time.Duration
+}
+
+type handshakeState struct {
+	completed   bool
+	apiProtocol string
+	apiParams   requestJSONObject
+}
+
+func newSshClient(
+	sshServer *sshServer, tunnelProtocol string, geoIPData GeoIPData) *sshClient {
+	return &sshClient{
+		sshServer:         sshServer,
+		tunnelProtocol:    tunnelProtocol,
+		geoIPData:         geoIPData,
+		tcpPortForwardLRU: common.NewLRUConns(),
+		signalIssueSLOKs:  make(chan struct{}, 1),
+		stopBroadcast:     make(chan struct{}),
+	}
+}
+
+func (sshClient *sshClient) run(clientConn net.Conn) {
+
 	// Set initial traffic rules, pre-handshake, based on currently known info.
 	sshClient.setTrafficRules()
 
@@ -500,6 +664,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 		clientConn,
 		SSH_CONNECTION_READ_DEADLINE,
 		false,
+		nil,
 		nil)
 	if err != nil {
 		clientConn.Close()
@@ -538,21 +703,21 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 		sshServerConfig := &ssh.ServerConfig{
 			PasswordCallback: sshClient.passwordCallback,
 			AuthLogCallback:  sshClient.authLogCallback,
-			ServerVersion:    sshServer.support.Config.SSHServerVersion,
+			ServerVersion:    sshClient.sshServer.support.Config.SSHServerVersion,
 		}
-		sshServerConfig.AddHostKey(sshServer.sshHostKey)
+		sshServerConfig.AddHostKey(sshClient.sshServer.sshHostKey)
 
 		result := &sshNewServerConnResult{}
 
 		// Wrap the connection in an SSH deobfuscator when required.
 
-		if common.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
+		if protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
 			// Note: NewObfuscatedSshConn blocks on network I/O
 			// TODO: ensure this won't block shutdown
-			conn, result.err = psiphon.NewObfuscatedSshConn(
-				psiphon.OBFUSCATION_CONN_MODE_SERVER,
+			conn, result.err = common.NewObfuscatedSshConn(
+				common.OBFUSCATION_CONN_MODE_SERVER,
 				conn,
-				sshServer.support.Config.ObfuscatedSSHKey)
+				sshClient.sshServer.support.Config.ObfuscatedSSHKey)
 			if result.err != nil {
 				result.err = common.ContextError(result.err)
 			}
@@ -570,7 +735,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	var result *sshNewServerConnResult
 	select {
 	case result = <-resultChannel:
-	case <-sshServer.shutdownBroadcast:
+	case <-sshClient.sshServer.shutdownBroadcast:
 		// Close() will interrupt an ongoing handshake
 		// TODO: wait for goroutine to exit before returning?
 		clientConn.Close()
@@ -592,76 +757,33 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	sshClient.throttledConn = throttledConn
 	sshClient.Unlock()
 
-	if !sshServer.registerEstablishedClient(sshClient) {
+	if !sshClient.sshServer.registerEstablishedClient(sshClient) {
 		clientConn.Close()
 		log.WithContext().Warning("register failed")
 		return
 	}
-	defer sshServer.unregisterEstablishedClient(sshClient.sessionID)
 
-	sshClient.runClient(result.channels, result.requests)
+	sshClient.runTunnel(result.channels, result.requests)
 
-	// Note: sshServer.unregisterClient calls sshClient.Close(),
+	// Note: sshServer.unregisterEstablishedClient calls sshClient.stop(),
 	// which also closes underlying transport Conn.
-}
 
-type sshClient struct {
-	sync.Mutex
-	sshServer               *sshServer
-	tunnelProtocol          string
-	sshConn                 ssh.Conn
-	activityConn            *common.ActivityMonitoredConn
-	throttledConn           *common.ThrottledConn
-	geoIPData               GeoIPData
-	sessionID               string
-	handshakeState          handshakeState
-	udpChannel              ssh.Channel
-	trafficRules            TrafficRules
-	tcpTrafficState         trafficState
-	udpTrafficState         trafficState
-	channelHandlerWaitGroup *sync.WaitGroup
-	tcpPortForwardLRU       *common.LRUConns
-	stopBroadcast           chan struct{}
-}
+	sshClient.sshServer.unregisterEstablishedClient(sshClient.sessionID)
 
-type trafficState struct {
-	// Note: 64-bit ints used with atomic operations are at placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	bytesUp                        int64
-	bytesDown                      int64
-	concurrentPortForwardCount     int64
-	peakConcurrentPortForwardCount int64
-	totalPortForwardCount          int64
-}
+	sshClient.logTunnel()
 
-type handshakeState struct {
-	completed   bool
-	apiProtocol string
-	apiParams   requestJSONObject
-}
-
-func newSshClient(
-	sshServer *sshServer, tunnelProtocol string, geoIPData GeoIPData) *sshClient {
-	return &sshClient{
-		sshServer:               sshServer,
-		tunnelProtocol:          tunnelProtocol,
-		geoIPData:               geoIPData,
-		channelHandlerWaitGroup: new(sync.WaitGroup),
-		tcpPortForwardLRU:       common.NewLRUConns(),
-		stopBroadcast:           make(chan struct{}),
-	}
+	// Initiate cleanup of the GeoIP session cache. To allow for post-tunnel
+	// final status requests, the lifetime of cached GeoIP records exceeds the
+	// lifetime of the sshClient.
+	sshClient.sshServer.support.GeoIPService.MarkSessionCacheToExpire(sshClient.sessionID)
 }
 
 func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
 
-	expectedSessionIDLength := 2 * common.PSIPHON_API_CLIENT_SESSION_ID_LENGTH
+	expectedSessionIDLength := 2 * protocol.PSIPHON_API_CLIENT_SESSION_ID_LENGTH
 	expectedSSHPasswordLength := 2 * SSH_PASSWORD_BYTE_LENGTH
 
-	var sshPasswordPayload struct {
-		SessionId   string `json:"SessionId"`
-		SshPassword string `json:"SshPassword"`
-	}
+	var sshPasswordPayload protocol.SSHPasswordPayload
 	err := json.Unmarshal(password, &sshPasswordPayload)
 	if err != nil {
 
@@ -694,15 +816,21 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 
 	sessionID := sshPasswordPayload.SessionId
 
+	supportsServerRequests := common.Contains(
+		sshPasswordPayload.ClientCapabilities, protocol.CLIENT_CAPABILITY_SERVER_REQUESTS)
+
 	sshClient.Lock()
 	sshClient.sessionID = sessionID
+	sshClient.supportsServerRequests = supportsServerRequests
 	geoIPData := sshClient.geoIPData
 	sshClient.Unlock()
 
-	// Store the GeoIP data associated with the session ID. This makes the GeoIP data
-	// available to the web server for web transport Psiphon API requests. To allow for
-	// post-tunnel final status requests, the lifetime of cached GeoIP records exceeds
-	// the lifetime of the sshClient, and that's why this distinct session cache exists.
+	// Store the GeoIP data associated with the session ID. This makes
+	// the GeoIP data available to the web server for web API requests.
+	// A cache that's distinct from the sshClient record is used to allow
+	// for or post-tunnel final status requests.
+	// If the client is reconnecting with the same session ID, this call
+	// will undo the expiry set by MarkSessionCacheToExpire.
 	sshClient.sshServer.support.GeoIPService.SetSessionCache(sessionID, geoIPData)
 
 	return nil, nil
@@ -745,60 +873,26 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 	}
 }
 
+// stop signals the ssh connection to shutdown. After sshConn() returns,
+// the connection has terminated but sshClient.run() may still be
+// running and in the process of exiting.
 func (sshClient *sshClient) stop() {
 
 	sshClient.sshConn.Close()
 	sshClient.sshConn.Wait()
-
-	close(sshClient.stopBroadcast)
-	sshClient.channelHandlerWaitGroup.Wait()
-
-	// Note: reporting duration based on last confirmed data transfer, which
-	// is reads for sshClient.activityConn.GetActiveDuration(), and not
-	// connection closing is important for protocols such as meek. For
-	// meek, the connection remains open until the HTTP session expires,
-	// which may be some time after the tunnel has closed. (The meek
-	// protocol has no allowance for signalling payload EOF, and even if
-	// it did the client may not have the opportunity to send a final
-	// request with an EOF flag set.)
-
-	sshClient.Lock()
-
-	logFields := getRequestLogFields(
-		sshClient.sshServer.support,
-		"server_tunnel",
-		sshClient.geoIPData,
-		sshClient.handshakeState.apiParams,
-		baseRequestParams)
-
-	// TODO: match legacy log field naming convention?
-	logFields["HandshakeCompleted"] = sshClient.handshakeState.completed
-	logFields["startTime"] = sshClient.activityConn.GetStartTime()
-	logFields["Duration"] = sshClient.activityConn.GetActiveDuration()
-	logFields["BytesUpTCP"] = sshClient.tcpTrafficState.bytesUp
-	logFields["BytesDownTCP"] = sshClient.tcpTrafficState.bytesDown
-	logFields["PeakConcurrentPortForwardCountTCP"] = sshClient.tcpTrafficState.peakConcurrentPortForwardCount
-	logFields["TotalPortForwardCountTCP"] = sshClient.tcpTrafficState.totalPortForwardCount
-	logFields["BytesUpUDP"] = sshClient.udpTrafficState.bytesUp
-	logFields["BytesDownUDP"] = sshClient.udpTrafficState.bytesDown
-	logFields["PeakConcurrentPortForwardCountUDP"] = sshClient.udpTrafficState.peakConcurrentPortForwardCount
-	logFields["TotalPortForwardCountUDP"] = sshClient.udpTrafficState.totalPortForwardCount
-
-	sshClient.Unlock()
-
-	log.LogRawFieldsWithTimestamp(logFields)
 }
 
-// runClient handles/dispatches new channel and new requests from the client.
+// runTunnel handles/dispatches new channel and new requests from the client.
 // When the SSH client connection closes, both the channels and requests channels
 // will close and runClient will exit.
-func (sshClient *sshClient) runClient(
+func (sshClient *sshClient) runTunnel(
 	channels <-chan ssh.NewChannel, requests <-chan *ssh.Request) {
 
-	requestsWaitGroup := new(sync.WaitGroup)
-	requestsWaitGroup.Add(1)
+	waitGroup := new(sync.WaitGroup)
+
+	waitGroup.Add(1)
 	go func() {
-		defer requestsWaitGroup.Done()
+		defer waitGroup.Done()
 
 		for request := range requests {
 
@@ -831,6 +925,14 @@ func (sshClient *sshClient) runClient(
 		}
 	}()
 
+	if sshClient.supportsServerRequests {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			sshClient.runOSLSender()
+		}()
+	}
+
 	for newChannel := range channels {
 
 		if newChannel.ChannelType() != "direct-tcpip" {
@@ -839,26 +941,145 @@ func (sshClient *sshClient) runClient(
 		}
 
 		// process each port forward concurrently
-		sshClient.channelHandlerWaitGroup.Add(1)
-		go sshClient.handleNewPortForwardChannel(newChannel)
+		waitGroup.Add(1)
+		go func(channel ssh.NewChannel) {
+			defer waitGroup.Done()
+			sshClient.handleNewPortForwardChannel(channel)
+		}(newChannel)
 	}
 
-	requestsWaitGroup.Wait()
+	// The channel loop is interrupted by a client
+	// disconnect or by calling sshClient.stop().
+
+	close(sshClient.stopBroadcast)
+
+	waitGroup.Wait()
+}
+
+func (sshClient *sshClient) logTunnel() {
+
+	// Note: reporting duration based on last confirmed data transfer, which
+	// is reads for sshClient.activityConn.GetActiveDuration(), and not
+	// connection closing is important for protocols such as meek. For
+	// meek, the connection remains open until the HTTP session expires,
+	// which may be some time after the tunnel has closed. (The meek
+	// protocol has no allowance for signalling payload EOF, and even if
+	// it did the client may not have the opportunity to send a final
+	// request with an EOF flag set.)
+
+	sshClient.Lock()
+
+	logFields := getRequestLogFields(
+		sshClient.sshServer.support,
+		"server_tunnel",
+		sshClient.geoIPData,
+		sshClient.handshakeState.apiParams,
+		baseRequestParams)
+
+	logFields["handshake_completed"] = sshClient.handshakeState.completed
+	logFields["start_time"] = sshClient.activityConn.GetStartTime()
+	logFields["duration"] = sshClient.activityConn.GetActiveDuration() / time.Millisecond
+	logFields["bytes_up_tcp"] = sshClient.tcpTrafficState.bytesUp
+	logFields["bytes_down_tcp"] = sshClient.tcpTrafficState.bytesDown
+	logFields["peak_concurrent_port_forward_count_tcp"] = sshClient.tcpTrafficState.peakConcurrentPortForwardCount
+	logFields["total_port_forward_count_tcp"] = sshClient.tcpTrafficState.totalPortForwardCount
+	logFields["bytes_up_udp"] = sshClient.udpTrafficState.bytesUp
+	logFields["bytes_down_udp"] = sshClient.udpTrafficState.bytesDown
+	logFields["peak_concurrent_port_forward_count_udp"] = sshClient.udpTrafficState.peakConcurrentPortForwardCount
+	logFields["total_port_forward_count_udp"] = sshClient.udpTrafficState.totalPortForwardCount
+
+	sshClient.Unlock()
+
+	log.LogRawFieldsWithTimestamp(logFields)
+}
+
+func (sshClient *sshClient) runOSLSender() {
+
+	for {
+		// Await a signal that there are SLOKs to send
+		// TODO: use reflect.SelectCase, and optionally await timer here?
+		select {
+		case <-sshClient.signalIssueSLOKs:
+		case <-sshClient.stopBroadcast:
+			return
+		}
+
+		retryDelay := SSH_SEND_OSL_INITIAL_RETRY_DELAY
+		for {
+			err := sshClient.sendOSLRequest()
+			if err == nil {
+				break
+			}
+			log.WithContextFields(LogFields{"error": err}).Warning("sendOSLRequest failed")
+
+			// If the request failed, retry after a delay (with exponential backoff)
+			// or when signaled that there are additional SLOKs to send
+			retryTimer := time.NewTimer(retryDelay)
+			select {
+			case <-retryTimer.C:
+			case <-sshClient.signalIssueSLOKs:
+			case <-sshClient.stopBroadcast:
+				retryTimer.Stop()
+				return
+			}
+			retryTimer.Stop()
+			retryDelay *= SSH_SEND_OSL_RETRY_FACTOR
+		}
+	}
+}
+
+// sendOSLRequest will invoke osl.GetSeedPayload to issue SLOKs and
+// generate a payload, and send an OSL request to the client when
+// there are new SLOKs in the payload.
+func (sshClient *sshClient) sendOSLRequest() error {
+
+	seedPayload := sshClient.getOSLSeedPayload()
+
+	// Don't send when no SLOKs. This will happen when signalIssueSLOKs
+	// is received but no new SLOKs are issued.
+	if len(seedPayload.SLOKs) == 0 {
+		return nil
+	}
+
+	oslRequest := protocol.OSLRequest{
+		SeedPayload: seedPayload,
+	}
+	requestPayload, err := json.Marshal(oslRequest)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	ok, _, err := sshClient.sshConn.SendRequest(
+		protocol.PSIPHON_API_OSL_REQUEST_NAME,
+		true,
+		requestPayload)
+	if err != nil {
+		return common.ContextError(err)
+	}
+	if !ok {
+		return common.ContextError(errors.New("client rejected request"))
+	}
+
+	sshClient.clearOSLSeedPayload()
+
+	return nil
 }
 
 func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, reason ssh.RejectionReason, logMessage string) {
+
+	// Note: Debug level, as logMessage may contain user traffic destination address information
 	log.WithContextFields(
 		LogFields{
 			"channelType":  newChannel.ChannelType(),
 			"logMessage":   logMessage,
 			"rejectReason": reason.String(),
-		}).Warning("reject new channel")
+		}).Debug("reject new channel")
+
 	// Note: logMessage is internal, for logging only; just the RejectionReason is sent to the client
 	newChannel.Reject(reason, reason.String())
 }
 
 func (sshClient *sshClient) handleNewPortForwardChannel(newChannel ssh.NewChannel) {
-	defer sshClient.channelHandlerWaitGroup.Done()
 
 	// http://tools.ietf.org/html/rfc4254#section-7.2
 	var directTcpipExtraData struct {
@@ -894,28 +1115,104 @@ func (sshClient *sshClient) handleNewPortForwardChannel(newChannel ssh.NewChanne
 // handshake parameters are included in the session summary log recorded in
 // sshClient.stop().
 func (sshClient *sshClient) setHandshakeState(state handshakeState) error {
+
 	sshClient.Lock()
-	defer sshClient.Unlock()
+	completed := sshClient.handshakeState.completed
+	if !completed {
+		sshClient.handshakeState = state
+	}
+	sshClient.Unlock()
 
 	// Client must only perform one handshake
-	if sshClient.handshakeState.completed {
+	if completed {
 		return common.ContextError(errors.New("handshake already completed"))
 	}
 
-	sshClient.handshakeState = state
+	sshClient.setTrafficRules()
+	sshClient.setOSLConfig()
 
 	return nil
 }
 
 // setTrafficRules resets the client's traffic rules based on the latest server config
-// and client state. As sshClient.trafficRules may be reset by a concurrent goroutine,
-// trafficRules must only be accessed within the sshClient mutex.
+// and client properties. As sshClient.trafficRules may be reset by a concurrent
+// goroutine, trafficRules must only be accessed within the sshClient mutex.
 func (sshClient *sshClient) setTrafficRules() {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
 	sshClient.trafficRules = sshClient.sshServer.support.TrafficRulesSet.GetTrafficRules(
 		sshClient.tunnelProtocol, sshClient.geoIPData, sshClient.handshakeState)
+
+	if sshClient.throttledConn != nil {
+		// Any existing throttling state is reset.
+		sshClient.throttledConn.SetLimits(
+			sshClient.trafficRules.RateLimits.CommonRateLimits())
+	}
+}
+
+// setOSLConfig resets the client's OSL seed state based on the latest OSL config
+// As sshClient.oslClientSeedState may be reset by a concurrent goroutine,
+// oslClientSeedState must only be accessed within the sshClient mutex.
+func (sshClient *sshClient) setOSLConfig() {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	propagationChannelID, err := getStringRequestParam(
+		sshClient.handshakeState.apiParams, "propagation_channel_id")
+	if err != nil {
+		// This should not fail as long as client has sent valid handshake
+		return
+	}
+
+	// Two limitations when setOSLConfig() is invoked due to an
+	// OSL config hot reload:
+	//
+	// 1. any partial progress towards SLOKs is lost.
+	//
+	// 2. all existing osl.ClientSeedPortForwards for existing
+	//    port forwards will not send progress to the new client
+	//    seed state.
+
+	sshClient.oslClientSeedState = sshClient.sshServer.support.OSLConfig.NewClientSeedState(
+		sshClient.geoIPData.Country,
+		propagationChannelID,
+		sshClient.signalIssueSLOKs)
+}
+
+// newClientSeedPortForward will return nil when no seeding is
+// associated with the specified ipAddress.
+func (sshClient *sshClient) newClientSeedPortForward(ipAddress net.IP) *osl.ClientSeedPortForward {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	// Will not be initialized before handshake.
+	if sshClient.oslClientSeedState == nil {
+		return nil
+	}
+
+	return sshClient.oslClientSeedState.NewClientSeedPortForward(ipAddress)
+}
+
+// getOSLSeedPayload returns a payload containing all seeded SLOKs for
+// this client's session.
+func (sshClient *sshClient) getOSLSeedPayload() *osl.SeedPayload {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	// Will not be initialized before handshake.
+	if sshClient.oslClientSeedState == nil {
+		return &osl.SeedPayload{SLOKs: make([]*osl.SLOK, 0)}
+	}
+
+	return sshClient.oslClientSeedState.GetSeedPayload()
+}
+
+func (sshClient *sshClient) clearOSLSeedPayload() {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	sshClient.oslClientSeedState.ClearSeedPayload()
 }
 
 func (sshClient *sshClient) rateLimits() common.RateLimits {
@@ -943,10 +1240,14 @@ func (sshClient *sshClient) idleUDPPortForwardTimeout() time.Duration {
 const (
 	portForwardTypeTCP = iota
 	portForwardTypeUDP
+	portForwardTypeTransparentDNS
 )
 
 func (sshClient *sshClient) isPortForwardPermitted(
-	portForwardType int, host string, port int) bool {
+	portForwardType int,
+	isTransparentDNSForwarding bool,
+	remoteIP net.IP,
+	port int) bool {
 
 	sshClient.Lock()
 	defer sshClient.Unlock()
@@ -955,7 +1256,11 @@ func (sshClient *sshClient) isPortForwardPermitted(
 		return false
 	}
 
-	if common.Contains(SSH_DISALLOWED_PORT_FORWARD_HOSTS, host) {
+	// Disallow connection to loopback. This is a failsafe. The server
+	// should be run on a host with correctly configured firewall rules.
+	// And exception is made in the case of tranparent DNS forwarding,
+	// where the remoteIP has been rewritten.
+	if !isTransparentDNSForwarding && remoteIP.IsLoopback() {
 		return false
 	}
 
@@ -979,17 +1284,11 @@ func (sshClient *sshClient) isPortForwardPermitted(
 		}
 	}
 
-	// TODO: AllowSubnets won't match when host is a domain.
-	// Callers should resolve domain host before checking
-	// isPortForwardPermitted.
-
-	if ip := net.ParseIP(host); ip != nil {
-		for _, subnet := range sshClient.trafficRules.AllowSubnets {
-			// Note: ignoring error as config has been validated
-			_, network, _ := net.ParseCIDR(subnet)
-			if network.Contains(ip) {
-				return true
-			}
+	for _, subnet := range sshClient.trafficRules.AllowSubnets {
+		// Note: ignoring error as config has been validated
+		_, network, _ := net.ParseCIDR(subnet)
+		if network.Contains(remoteIP) {
+			return true
 		}
 	}
 
@@ -1038,6 +1337,22 @@ func (sshClient *sshClient) openedPortForward(
 	state.totalPortForwardCount += 1
 }
 
+func (sshClient *sshClient) updateQualityMetrics(
+	tcpPortForwardDialSuccess bool, dialDuration time.Duration) {
+
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	if tcpPortForwardDialSuccess {
+		sshClient.qualityMetrics.tcpPortForwardDialedCount += 1
+		sshClient.qualityMetrics.tcpPortForwardDialedDuration += dialDuration
+
+	} else {
+		sshClient.qualityMetrics.tcpPortForwardFailedCount += 1
+		sshClient.qualityMetrics.tcpPortForwardFailedDuration += dialDuration
+	}
+}
+
 func (sshClient *sshClient) closedPortForward(
 	portForwardType int, bytesUp, bytesDown int64) {
 
@@ -1077,8 +1392,49 @@ func (sshClient *sshClient) handleTCPChannel(
 		}
 	}
 
-	if !isWebServerPortForward && !sshClient.isPortForwardPermitted(
-		portForwardTypeTCP, hostToConnect, portToConnect) {
+	type lookupIPResult struct {
+		IP  net.IP
+		err error
+	}
+	lookupResultChannel := make(chan *lookupIPResult, 1)
+
+	go func() {
+		// TODO: explicit timeout for DNS resolution?
+		IPs, err := net.LookupIP(hostToConnect)
+		// TODO: shuffle list to try other IPs
+		// TODO: IPv6 support
+		var IP net.IP
+		for _, ip := range IPs {
+			if ip.To4() != nil {
+				IP = ip
+			}
+		}
+		if err == nil && IP == nil {
+			err = errors.New("no IP address")
+		}
+		lookupResultChannel <- &lookupIPResult{IP, err}
+	}()
+
+	var lookupResult *lookupIPResult
+	select {
+	case lookupResult = <-lookupResultChannel:
+	case <-sshClient.stopBroadcast:
+		// Note: may leave LookupIP in progress
+		return
+	}
+
+	if lookupResult.err != nil {
+		sshClient.rejectNewChannel(
+			newChannel, ssh.ConnectionFailed, fmt.Sprintf("LookupIP failed: %s", lookupResult.err))
+		return
+	}
+
+	if !isWebServerPortForward &&
+		!sshClient.isPortForwardPermitted(
+			portForwardTypeTCP,
+			false,
+			lookupResult.IP,
+			portToConnect) {
 
 		sshClient.rejectNewChannel(
 			newChannel, ssh.Prohibited, "port forward not permitted")
@@ -1137,42 +1493,47 @@ func (sshClient *sshClient) handleTCPChannel(
 	// Dial the target remote address. This is done in a goroutine to
 	// ensure the shutdown signal is handled immediately.
 
-	remoteAddr := fmt.Sprintf("%s:%d", hostToConnect, portToConnect)
+	remoteAddr := net.JoinHostPort(lookupResult.IP.String(), strconv.Itoa(portToConnect))
 
 	log.WithContextFields(LogFields{"remoteAddr": remoteAddr}).Debug("dialing")
 
-	type dialTcpResult struct {
+	type dialTCPResult struct {
 		conn net.Conn
 		err  error
 	}
+	dialResultChannel := make(chan *dialTCPResult, 1)
 
-	resultChannel := make(chan *dialTcpResult, 1)
+	dialStartTime := monotime.Now()
 
 	go func() {
 		// TODO: on EADDRNOTAVAIL, temporarily suspend new clients
-		// TODO: IPv6 support
 		conn, err := net.DialTimeout(
-			"tcp4", remoteAddr, SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT)
-		resultChannel <- &dialTcpResult{conn, err}
+			"tcp", remoteAddr, SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT)
+		dialResultChannel <- &dialTCPResult{conn, err}
 	}()
 
-	var result *dialTcpResult
+	var dialResult *dialTCPResult
 	select {
-	case result = <-resultChannel:
+	case dialResult = <-dialResultChannel:
 	case <-sshClient.stopBroadcast:
-		// Note: may leave dial in progress (TODO: use DialContext to cancel)
+		// Note: may leave Dial in progress
+		// TODO: use net.Dialer.DialContext to be able to cancel
 		return
 	}
 
-	if result.err != nil {
-		sshClient.rejectNewChannel(newChannel, ssh.ConnectionFailed, result.err.Error())
+	sshClient.updateQualityMetrics(
+		dialResult.err == nil, monotime.Since(dialStartTime))
+
+	if dialResult.err != nil {
+		sshClient.rejectNewChannel(
+			newChannel, ssh.ConnectionFailed, fmt.Sprintf("DialTimeout failed: %s", dialResult.err))
 		return
 	}
 
 	// The upstream TCP port forward connection has been established. Schedule
 	// some cleanup and notify the SSH client that the channel is accepted.
 
-	fwdConn := result.conn
+	fwdConn := dialResult.conn
 	defer fwdConn.Close()
 
 	fwdChannel, requests, err := newChannel.Accept()
@@ -1191,12 +1552,20 @@ func (sshClient *sshClient) handleTCPChannel(
 	lruEntry := sshClient.tcpPortForwardLRU.Add(fwdConn)
 	defer lruEntry.Remove()
 
+	// Ensure nil interface if newClientSeedPortForward returns nil
+	var updater common.ActivityUpdater
+	seedUpdater := sshClient.newClientSeedPortForward(lookupResult.IP)
+	if seedUpdater != nil {
+		updater = seedUpdater
+	}
+
 	fwdConn, err = common.NewActivityMonitoredConn(
 		fwdConn,
 		sshClient.idleTCPPortForwardTimeout(),
 		true,
+		updater,
 		lruEntry)
-	if result.err != nil {
+	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
 		return
 	}

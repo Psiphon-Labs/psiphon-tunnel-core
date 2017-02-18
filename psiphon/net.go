@@ -55,10 +55,10 @@ type DialConfig struct {
 	// supported, those protocols will not connect.
 	UpstreamProxyUrl string
 
-	// UpstreamProxyCustomHeader is a set of additional arbitrary HTTP headers that are
-	// added to all HTTP requests made through the upstream proxy specified by UpstreamProxyUrl
-	// in case of HTTP proxy
-	UpstreamProxyCustomHeaders http.Header
+	// CustomHeaders is a set of additional arbitrary HTTP headers that are
+	// added to all plaintext HTTP requests and requests made through an HTTP
+	// upstream proxy when specified by UpstreamProxyUrl.
+	CustomHeaders http.Header
 
 	ConnectTimeout time.Duration
 
@@ -79,6 +79,7 @@ type DialConfig struct {
 	// current active untunneled network DNS server.
 	DeviceBinder    DeviceBinder
 	DnsServerGetter DnsServerGetter
+	IPv6Synthesizer IPv6Synthesizer
 
 	// UseIndistinguishableTLS specifies whether to try to use an
 	// alternative stack for TLS. From a circumvention perspective,
@@ -123,18 +124,9 @@ type DnsServerGetter interface {
 	GetSecondaryDnsServer() string
 }
 
-// HostNameTransformer defines the interface for pluggable hostname
-// transformation circumvention strategies.
-type HostNameTransformer interface {
-	TransformHostName(hostname string) (string, bool)
-}
-
-// IdentityHostNameTransformer is the default HostNameTransformer, which
-// returns the hostname unchanged.
-type IdentityHostNameTransformer struct{}
-
-func (IdentityHostNameTransformer) TransformHostName(hostname string) (string, bool) {
-	return hostname, false
+// IPv6Synthesizer defines the interface to the external IPv6Synthesize provider
+type IPv6Synthesizer interface {
+	IPv6Synthesize(IPv4Addr string) string
 }
 
 // TimeoutError implements the error interface
@@ -241,19 +233,28 @@ func ResolveIP(host string, conn net.Conn) (addrs []net.IP, ttls []time.Duration
 // UseIndistinguishableTLS, etc. -- for a specific HTTPS request URL.
 // If verifyLegacyCertificate is not nil, it's used for certificate
 // verification.
+//
 // Because UseIndistinguishableTLS requires a hack to work with
 // net/http, MakeUntunneledHttpClient may return a modified request URL
 // to be used. Callers should always use this return value to make
 // requests, not the input value.
+//
+// MakeUntunneledHttpsClient ignores the input requestUrl scheme,
+// which may be "http" or "https", and always performs HTTPS requests.
 func MakeUntunneledHttpsClient(
 	dialConfig *DialConfig,
 	verifyLegacyCertificate *x509.Certificate,
 	requestUrl string,
+	skipVerify bool,
 	requestTimeout time.Duration) (*http.Client, string, error) {
 
 	// Change the scheme to "http"; otherwise http.Transport will try to do
 	// another TLS handshake inside the explicit TLS session. Also need to
 	// force an explicit port, as the default for "http", 80, won't talk TLS.
+	//
+	// TODO: set http.Transport.DialTLS instead of Dial to avoid this hack?
+	// See: https://golang.org/pkg/net/http/#Transport. DialTLS was added in
+	// Go 1.4 but this code may pre-date that.
 
 	urlComponents, err := url.Parse(requestUrl)
 	if err != nil {
@@ -282,7 +283,7 @@ func MakeUntunneledHttpsClient(
 			Dial: NewTCPDialer(dialConfig),
 			VerifyLegacyCertificate:       verifyLegacyCertificate,
 			SNIServerName:                 host,
-			SkipVerify:                    false,
+			SkipVerify:                    skipVerify,
 			UseIndistinguishableTLS:       useIndistinguishableTLS,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
 		})
@@ -307,6 +308,7 @@ func MakeUntunneledHttpsClient(
 func MakeTunneledHttpClient(
 	config *Config,
 	tunnel *Tunnel,
+	skipVerify bool,
 	requestTimeout time.Duration) (*http.Client, error) {
 
 	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
@@ -317,7 +319,12 @@ func MakeTunneledHttpClient(
 		Dial: tunneledDialer,
 	}
 
-	if config.UseTrustedCACertificatesForStockTLS {
+	if skipVerify {
+
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
+	} else if config.UseTrustedCACertificatesForStockTLS {
+
 		if config.TrustedCACertificatesFilename == "" {
 			return nil, common.ContextError(errors.New(
 				"UseTrustedCACertificatesForStockTLS requires TrustedCACertificatesFilename"))
@@ -346,21 +353,38 @@ func MakeDownloadHttpClient(
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
 	requestUrl string,
+	skipVerify bool,
 	requestTimeout time.Duration) (*http.Client, string, error) {
 
 	var httpClient *http.Client
 	var err error
 
 	if tunnel != nil {
-		httpClient, err = MakeTunneledHttpClient(config, tunnel, requestTimeout)
+		// MakeTunneledHttpClient works with both "http" and "https" schemes
+		httpClient, err = MakeTunneledHttpClient(
+			config, tunnel, skipVerify, requestTimeout)
 		if err != nil {
 			return nil, "", common.ContextError(err)
 		}
 	} else {
-		httpClient, requestUrl, err = MakeUntunneledHttpsClient(
-			untunneledDialConfig, nil, requestUrl, requestTimeout)
+		urlComponents, err := url.Parse(requestUrl)
 		if err != nil {
 			return nil, "", common.ContextError(err)
+		}
+		// MakeUntunneledHttpsClient works only with "https" schemes
+		if urlComponents.Scheme == "https" {
+			httpClient, requestUrl, err = MakeUntunneledHttpsClient(
+				untunneledDialConfig, nil, requestUrl, skipVerify, requestTimeout)
+			if err != nil {
+				return nil, "", common.ContextError(err)
+			}
+		} else {
+			httpClient = &http.Client{
+				Timeout: requestTimeout,
+				Transport: &http.Transport{
+					Dial: NewTCPDialer(untunneledDialConfig),
+				},
+			}
 		}
 	}
 
@@ -373,7 +397,7 @@ func MakeDownloadHttpClient(
 // downloadFilename.part and downloadFilename.part.etag.
 // Any existing downloadFilename file will be overwritten.
 //
-// In the case where the remote object has change while a partial download
+// In the case where the remote object has changed while a partial download
 // is to be resumed, the partial state is reset and resumeDownload fails.
 // The caller must restart the download.
 //
@@ -384,6 +408,7 @@ func MakeDownloadHttpClient(
 func ResumeDownload(
 	httpClient *http.Client,
 	requestUrl string,
+	userAgent string,
 	downloadFilename string,
 	ifNoneMatchETag string) (int64, string, error) {
 
@@ -415,8 +440,20 @@ func ResumeDownload(
 		// that the controller's upgradeDownloader will shortly call DownloadUpgrade
 		// again.
 		if err != nil {
-			os.Remove(partialFilename)
-			os.Remove(partialETagFilename)
+
+			// On Windows, file must be closed before it can be deleted
+			file.Close()
+
+			tempErr := os.Remove(partialFilename)
+			if tempErr != nil && !os.IsNotExist(tempErr) {
+				NoticeAlert("reset partial download failed: %s", tempErr)
+			}
+
+			tempErr = os.Remove(partialETagFilename)
+			if tempErr != nil && !os.IsNotExist(tempErr) {
+				NoticeAlert("reset partial download ETag failed: %s", tempErr)
+			}
+
 			return 0, "", common.ContextError(
 				fmt.Errorf("failed to load partial download ETag: %s", err))
 		}
@@ -426,6 +463,8 @@ func ResumeDownload(
 	if err != nil {
 		return 0, "", common.ContextError(err)
 	}
+
+	request.Header.Set("User-Agent", userAgent)
 
 	request.Header.Add("Range", fmt.Sprintf("bytes=%d-", fileInfo.Size()))
 
@@ -462,6 +501,10 @@ func ResumeDownload(
 	// receive 412 on ETag mismatch.
 	if err == nil &&
 		(response.StatusCode != http.StatusPartialContent &&
+
+			// Certain http servers return 200 OK where we expect 206, so accept that.
+			response.StatusCode != http.StatusOK &&
+
 			response.StatusCode != http.StatusRequestedRangeNotSatisfiable &&
 			response.StatusCode != http.StatusPreconditionFailed &&
 			response.StatusCode != http.StatusNotModified) {

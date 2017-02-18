@@ -72,13 +72,14 @@ package psiphon
 
 import (
 	"bytes"
-	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"errors"
 	"net"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
 )
 
 // CustomTLSConfig contains parameters to determine the behavior
@@ -121,6 +122,10 @@ type CustomTLSConfig struct {
 	// SSL_CTX_load_verify_locations
 	// Only applies to UseIndistinguishableTLS connections.
 	TrustedCACertificatesFilename string
+
+	// ObfuscatedSessionTicketKey enables obfuscated session tickets
+	// using the specified key.
+	ObfuscatedSessionTicketKey string
 }
 
 func NewCustomTLSDialer(config *CustomTLSConfig) Dialer {
@@ -190,10 +195,30 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 		tlsConfig.InsecureSkipVerify = true
 	}
 
+	if config.ObfuscatedSessionTicketKey != "" {
+
+		// See obfuscated session ticket overview
+		// in tls.NewObfuscatedClientSessionCache
+
+		var obfuscatedSessionTicketKey [32]byte
+		key, err := hex.DecodeString(config.ObfuscatedSessionTicketKey)
+		if err == nil && len(key) != 32 {
+			err = errors.New("invalid obfuscated session key length")
+		}
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+		copy(obfuscatedSessionTicketKey[:], key)
+
+		tlsConfig.ClientSessionCache = tls.NewObfuscatedClientSessionCache(
+			obfuscatedSessionTicketKey)
+	}
+
 	var conn handshakeConn
 
 	// When supported, use OpenSSL TLS as a more indistinguishable TLS.
 	if config.UseIndistinguishableTLS &&
+		config.ObfuscatedSessionTicketKey == "" &&
 		(config.SkipVerify ||
 			// TODO: config.VerifyLegacyCertificate != nil ||
 			config.TrustedCACertificatesFilename != "") {

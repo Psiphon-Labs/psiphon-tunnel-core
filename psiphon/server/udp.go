@@ -81,12 +81,13 @@ func (sshClient *sshClient) handleUDPChannel(newChannel ssh.NewChannel) {
 }
 
 type udpPortForwardMultiplexer struct {
-	sshClient         *sshClient
-	sshChannel        ssh.Channel
-	portForwardsMutex sync.Mutex
-	portForwards      map[uint16]*udpPortForward
-	portForwardLRU    *common.LRUConns
-	relayWaitGroup    *sync.WaitGroup
+	sshClient            *sshClient
+	sshChannelWriteMutex sync.Mutex
+	sshChannel           ssh.Channel
+	portForwardsMutex    sync.Mutex
+	portForwards         map[uint16]*udpPortForward
+	portForwardLRU       *common.LRUConns
+	relayWaitGroup       *sync.WaitGroup
 }
 
 func (mux *udpPortForwardMultiplexer) run() {
@@ -162,7 +163,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 			}
 
 			if !mux.sshClient.isPortForwardPermitted(
-				portForwardTypeUDP, dialIP.String(), int(message.remotePort)) {
+				portForwardTypeUDP, message.forwardDNS, dialIP, int(message.remotePort)) {
 				// The udpgw protocol has no error response, so
 				// we just discard the message and read another.
 				continue
@@ -210,10 +211,18 @@ func (mux *udpPortForwardMultiplexer) run() {
 
 			lruEntry := mux.portForwardLRU.Add(udpConn)
 
+			// Ensure nil interface if newClientSeedPortForward returns nil
+			var updater common.ActivityUpdater
+			seedUpdater := mux.sshClient.newClientSeedPortForward(dialIP)
+			if seedUpdater != nil {
+				updater = seedUpdater
+			}
+
 			conn, err := common.NewActivityMonitoredConn(
 				udpConn,
 				mux.sshClient.idleUDPPortForwardTimeout(),
 				true,
+				updater,
 				lruEntry)
 			if err != nil {
 				lruEntry.Remove()
@@ -326,7 +335,12 @@ func (portForward *udpPortForward) relayDownstream() {
 			uint16(packetSize),
 			buffer)
 		if err == nil {
+			// ssh.Channel.Write cannot be called concurrently.
+			// See: https://github.com/Psiphon-Inc/crypto/blob/82d98b4c7c05e81f92545f6fddb45d4541e6da00/ssh/channel.go#L272,
+			// https://codereview.appspot.com/136420043/diff/80002/ssh/channel.go
+			portForward.mux.sshChannelWriteMutex.Lock()
 			_, err = portForward.mux.sshChannel.Write(buffer[0 : portForward.preambleSize+packetSize])
+			portForward.mux.sshChannelWriteMutex.Unlock()
 		}
 
 		if err != nil {

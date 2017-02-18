@@ -10,6 +10,9 @@ if [ ! -f make.bash ]; then
   exit 1
 fi
 
+PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"
+BUILD_TAGS="${PRIVATE_PLUGINS_TAG}"
+
 prepare_build () {
   BUILDINFOFILE="${EXE_BASENAME}_buildinfo.txt"
   BUILDDATE=$(date -Iseconds)
@@ -24,7 +27,7 @@ prepare_build () {
   # - pipes to `xargs` again, specifiying `pkg` as the placeholder name for each item being operated on (which is the list of non standard library import paths from the previous step)
   #  - `xargs` runs a bash script (via `-c`) which changes to each import path in sequence, then echoes out `"<import path>":"<subshell output of getting the short git revision>",`
   # - this leaves a trailing `,` at the end, and no close to the JSON object, so simply `sed` replace the comma before the end of the line with `}` and you now have valid JSON
-  DEPENDENCIES=$(echo -n "{" && go list -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
+  DEPENDENCIES=$(echo -n "{" && go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
 
   LDFLAGS="\
   -linkmode external -extldflags \"-static\" \
@@ -47,14 +50,14 @@ prepare_build () {
 
 build_for_linux () {
   echo "Getting project dependencies (via go get) for Linux. Parameter is: '$1'"
-  GOOS=linux GOARCH=amd64 go get -d -v ./...
+  GOOS=linux GOARCH=amd64 go get -d -v -tags "${BUILD_TAGS}" ./...
   prepare_build
   if [ $? != 0 ]; then
     echo "...'go get' failed, exiting"
     exit $?
   fi
 
-  GOOS=linux GOARCH=amd64 go build -race -ldflags "$LDFLAGS" -o psiphond main.go
+  GOOS=linux GOARCH=amd64 go build -race -v -x -tags "${BUILD_TAGS}" -ldflags "$LDFLAGS" -o psiphond
   if [ $? != 0 ]; then
     echo "...'go build' failed, exiting"
     exit $?
@@ -62,7 +65,7 @@ build_for_linux () {
   chmod 555 psiphond
 
   if [ "$1" == "generate" ]; then
-    ./psiphond --ipaddress 0.0.0.0 --web 3000 --protocol SSH:3001 --protocol OSSH:3002 --logFilename /var/log/psiphond/psiphond.log generate
+    ./psiphond --ipaddress 0.0.0.0 --web 3000 --protocol SSH:3001 --protocol OSSH:3002 --logFilename /var/log/psiphond/psiphond.log --panicLogFilename /var/log/psiphond/psiphond-panics.log generate
 
     chmod 666 psiphond.config
     chmod 666 psiphond-traffic-rules.config

@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 
-set -e
+set -e -x
 
 if [ ! -f make.bash ]; then
   echo "make.bash must be run from $GOPATH/src/github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/Android"
   exit 1
 fi
 
+# The "OPENSSL" tag enables support of OpenSSL for use by IndistinguishableTLS.
+
+PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"
+BUILD_TAGS="OPENSSL ${PRIVATE_PLUGINS_TAG}"
+
 # Don't use '-u' to force updates because the docker builds always pull
 # the latest versions. Outside of Docker, be aware that these dependencies
 # will not be overridden w/ new versions if they already exist in $GOPATH
 
-GOOS=arm go get -d -v github.com/Psiphon-Inc/openssl
-if [ $? != 0 ]; then
-  echo "..'go get -d -v github.com/psiphon-inc/openssl' failed, exiting"
-  exit $?
-fi
-GOOS=arm go get -d -v github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon
+GOOS=arm go get -d -v -tags "${BUILD_TAGS}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 if [ $? != 0 ]; then
   echo "..'go get -d -v github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon' failed, exiting"
   exit $?
@@ -35,7 +35,7 @@ GOMOBILEVERSION=$(gomobile version | perl -ne '/gomobile version (.*?) / && prin
 # - pipes to `xargs` again, specifiying `pkg` as the placeholder name for each item being operated on (which is the list of non standard library import paths from the previous step)
 #  - `xargs` runs a bash script (via `-c`) which changes to each import path in sequence, then echoes out `"<import path>":"<subshell output of getting the short git revision>",`
 # - this leaves a trailing `,` at the end, and no close to the JSON object, so simply `sed` replace the comma before the end of the line with `}` and you now have valid JSON
-DEPENDENCIES=$(cd ../psi && echo -n "{" && go list -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
+DEPENDENCIES=$(cd ../psi && echo -n "{" && go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
 
 LDFLAGS="\
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildDate=$BUILDDATE \
@@ -55,7 +55,7 @@ echo " Gomobile version: ${GOMOBILEVERSION}"
 echo " Dependencies: ${DEPENDENCIES}"
 echo ""
 
-gomobile bind -v -target=android/arm -ldflags="$LDFLAGS" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+gomobile bind -v -x -target=android/arm -tags="${BUILD_TAGS}" -ldflags="$LDFLAGS" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 if [ $? != 0 ]; then
   echo "..'gomobile bind' failed, exiting"
   exit $?
@@ -66,7 +66,7 @@ unzip -o psi.aar -d build-tmp/psi
 yes | cp -f PsiphonTunnel/AndroidManifest.xml build-tmp/psi/AndroidManifest.xml
 yes | cp -f PsiphonTunnel/libs/libtun2socks.so build-tmp/psi/jni/armeabi-v7a/libtun2socks.so
 
-javac -d build-tmp -bootclasspath $ANDROID_HOME/platforms/android-23/android.jar -source 1.7 -target 1.7 -classpath build-tmp/psi/classes.jar:$ANDROID_HOME/platforms/android-23/optional/org.apache.http.legacy.jar PsiphonTunnel/PsiphonTunnel.java 
+javac -d build-tmp -bootclasspath $ANDROID_HOME/platforms/android-23/android.jar -source 1.7 -target 1.7 -classpath build-tmp/psi/classes.jar:$ANDROID_HOME/platforms/android-23/optional/org.apache.http.legacy.jar PsiphonTunnel/PsiphonTunnel.java
 if [ $? != 0 ]; then
   echo "..'javac' compiling PsiphonTunnel failed, exiting"
   exit $?

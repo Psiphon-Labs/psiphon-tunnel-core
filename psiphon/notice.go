@@ -167,25 +167,38 @@ func NoticeAvailableEgressRegions(regions []string) {
 		"AvailableEgressRegions", 0, "regions", sortedRegions)
 }
 
-// NoticeConnectingServer is details on a connection attempt
-func NoticeConnectingServer(ipAddress, region, protocol, directTCPDialAddress string, meekConfig *MeekConfig) {
-	if meekConfig == nil {
-		outputNotice("ConnectingServer", noticeIsDiagnostic,
+func noticeServerDialStats(noticeType, ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
+	if tunnelDialStats != nil {
+		outputNotice(noticeType, noticeIsDiagnostic,
 			"ipAddress", ipAddress,
 			"region", region,
 			"protocol", protocol,
-			"directTCPDialAddress", directTCPDialAddress)
+			"upstreamProxyType", tunnelDialStats.UpstreamProxyType,
+			"upstreamProxyCustomHeaderNames", strings.Join(tunnelDialStats.UpstreamProxyCustomHeaderNames, ","),
+			"meekDialAddress", tunnelDialStats.MeekDialAddress,
+			"meekDialAddress", tunnelDialStats.MeekDialAddress,
+			"meekResolvedIPAddress", tunnelDialStats.MeekResolvedIPAddress,
+			"meekSNIServerName", tunnelDialStats.MeekSNIServerName,
+			"meekHostHeader", tunnelDialStats.MeekHostHeader,
+			"meekTransformedHostName", tunnelDialStats.MeekTransformedHostName,
+			"selectedUserAgent", tunnelDialStats.SelectedUserAgent,
+			"userAgent", tunnelDialStats.UserAgent)
 	} else {
-		outputNotice("ConnectingServer", noticeIsDiagnostic,
+		outputNotice(noticeType, noticeIsDiagnostic,
 			"ipAddress", ipAddress,
 			"region", region,
-			"protocol", protocol,
-			"meekDialAddress", meekConfig.DialAddress,
-			"meekUseHTTPS", meekConfig.UseHTTPS,
-			"meekSNIServerName", meekConfig.SNIServerName,
-			"meekHostHeader", meekConfig.HostHeader,
-			"meekTransformedHostName", meekConfig.TransformedHostName)
+			"protocol", protocol)
 	}
+}
+
+// NoticeConnectingServer reports parameters and details for a single connection attempt
+func NoticeConnectingServer(ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
+	noticeServerDialStats("ConnectingServer", ipAddress, region, protocol, tunnelDialStats)
+}
+
+// NoticeConnectedServer reports parameters and details for a single successful connection
+func NoticeConnectedServer(ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
+	noticeServerDialStats("ConnectedServer", ipAddress, region, protocol, tunnelDialStats)
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
@@ -340,20 +353,6 @@ func NoticeLocalProxyError(proxyType string, err error) {
 		"LocalProxyError", noticeIsDiagnostic, "message", err.Error())
 }
 
-// NoticeConnectedTunnelDialStats reports extra network details for tunnel connections that required extra configuration.
-func NoticeConnectedTunnelDialStats(ipAddress string, tunnelDialStats *TunnelDialStats) {
-	outputNotice("ConnectedTunnelDialStats", noticeIsDiagnostic,
-		"ipAddress", ipAddress,
-		"upstreamProxyType", tunnelDialStats.UpstreamProxyType,
-		"upstreamProxyCustomHeaderNames", strings.Join(tunnelDialStats.UpstreamProxyCustomHeaderNames, ","),
-		"meekDialAddress", tunnelDialStats.MeekDialAddress,
-		"meekDialAddress", tunnelDialStats.MeekDialAddress,
-		"meekResolvedIPAddress", tunnelDialStats.MeekResolvedIPAddress,
-		"meekSNIServerName", tunnelDialStats.MeekSNIServerName,
-		"meekHostHeader", tunnelDialStats.MeekHostHeader,
-		"meekTransformedHostName", tunnelDialStats.MeekTransformedHostName)
-}
-
 // NoticeBuildInfo reports build version info.
 func NoticeBuildInfo() {
 	outputNotice("BuildInfo", 0, "buildInfo", common.GetBuildInfo())
@@ -364,19 +363,26 @@ func NoticeExiting() {
 	outputNotice("Exiting", 0)
 }
 
-// NoticeRemoteServerListDownloadedBytes reports remote server list download progress.
-func NoticeRemoteServerListDownloadedBytes(bytes int64) {
-	outputNotice("RemoteServerListDownloadedBytes", noticeIsDiagnostic, "bytes", bytes)
+// NoticeRemoteServerListResourceDownloadedBytes reports remote server list download progress.
+func NoticeRemoteServerListResourceDownloadedBytes(url string, bytes int64) {
+	outputNotice("RemoteServerListResourceDownloadedBytes", noticeIsDiagnostic, "url", url, "bytes", bytes)
 }
 
-// NoticeRemoteServerListDownloaded indicates that a remote server list download
+// NoticeRemoteServerListResourceDownloaded indicates that a remote server list download
 // completed successfully.
-func NoticeRemoteServerListDownloaded(filename string) {
-	outputNotice("RemoteServerListDownloaded", noticeIsDiagnostic, "filename", filename)
+func NoticeRemoteServerListResourceDownloaded(url string) {
+	outputNotice("RemoteServerListResourceDownloaded", noticeIsDiagnostic, "url", url)
 }
 
 func NoticeClientVerificationRequestCompleted(ipAddress string) {
+	// TODO: remove "Notice" prefix
 	outputNotice("NoticeClientVerificationRequestCompleted", noticeIsDiagnostic, "ipAddress", ipAddress)
+}
+
+// NoticeSLOKSeeded indicates that the SLOK with the specified ID was received from
+// the Psiphon server. The "duplicate" flags indicates whether the SLOK was previously known.
+func NoticeSLOKSeeded(slokID string, duplicate bool) {
+	outputNotice("SLOKSeeded", noticeIsDiagnostic, "slokID", slokID, "duplicate", duplicate)
 }
 
 type repetitiveNoticeState struct {
@@ -494,4 +500,22 @@ func NewNoticeConsoleRewriter(writer io.Writer) *NoticeReceiver {
 			object.NoticeType,
 			string(object.Data))
 	})
+}
+
+// NoticeWriter implements io.Writer and emits the contents of Write() calls
+// as Notices. This is to transform logger messages, if they can be redirected
+// to an io.Writer, to notices.
+type NoticeWriter struct {
+	noticeType string
+}
+
+// NewNoticeWriter initializes a new NoticeWriter
+func NewNoticeWriter(noticeType string) *NoticeWriter {
+	return &NoticeWriter{noticeType: noticeType}
+}
+
+// Write implements io.Writer.
+func (writer *NoticeWriter) Write(p []byte) (n int, err error) {
+	outputNotice(writer.noticeType, noticeIsDiagnostic, "message", string(p))
+	return len(p), nil
 }

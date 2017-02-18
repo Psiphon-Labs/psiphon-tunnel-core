@@ -21,8 +21,10 @@ package server
 
 import (
 	"bytes"
-	"crypto/tls"
+	"crypto/rand"
+	golangtls "crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -33,10 +35,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Psiphon-Inc/crypto/nacl/box"
 	"github.com/Psiphon-Inc/goarista/monotime"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"golang.org/x/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
 )
 
 // MeekServer is based on meek-server.go from Tor and Psiphon:
@@ -94,7 +96,7 @@ type MeekServer struct {
 func NewMeekServer(
 	support *SupportServices,
 	listener net.Listener,
-	useTLS bool,
+	useTLS, useObfuscatedSessionTickets bool,
 	clientHandler func(clientConn net.Conn),
 	stopBroadcast <-chan struct{}) (*MeekServer, error) {
 
@@ -108,7 +110,8 @@ func NewMeekServer(
 	}
 
 	if useTLS {
-		tlsConfig, err := makeMeekTLSConfig(support)
+		tlsConfig, err := makeMeekTLSConfig(
+			support, useObfuscatedSessionTickets)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -163,15 +166,14 @@ func (server *MeekServer) Run() error {
 		ConnState:    server.httpConnStateCallback,
 
 		// Disable auto HTTP/2 (https://golang.org/doc/go1.6)
-		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
+		TLSNextProto: make(map[string]func(*http.Server, *golangtls.Conn, http.Handler)),
 	}
 
 	// Note: Serve() will be interrupted by listener.Close() call
 	var err error
 	if server.tlsConfig != nil {
-		httpServer.TLSConfig = server.tlsConfig
 		httpsServer := HTTPSServer{Server: *httpServer}
-		err = httpsServer.ServeTLS(server.listener)
+		err = httpsServer.ServeTLS(server.listener, server.tlsConfig)
 	} else {
 		err = httpServer.Serve(server.listener)
 	}
@@ -328,8 +330,10 @@ func (server *MeekServer) getSession(
 				// Some headers, such as X-Forwarded-For, are a comma-separated
 				// list of IPs (each proxy in a chain). The first IP should be
 				// the client IP.
-				proxyClientIP := strings.Split(header, ",")[0]
-				if net.ParseIP(proxyClientIP) != nil {
+				proxyClientIP := strings.Split(value, ",")[0]
+				if net.ParseIP(proxyClientIP) != nil &&
+					server.support.GeoIPService.Lookup(proxyClientIP).Country != GEOIP_UNKNOWN_VALUE {
+
 					clientIP = proxyClientIP
 					break
 				}
@@ -466,10 +470,11 @@ func (session *meekSession) expired() bool {
 // Currently, this config is optimized for fronted meek where the nature
 // of the connection is non-circumvention; it's optimized for performance
 // assuming the peer is an uncensored CDN.
-func makeMeekTLSConfig(support *SupportServices) (*tls.Config, error) {
+func makeMeekTLSConfig(
+	support *SupportServices,
+	useObfuscatedSessionTickets bool) (*tls.Config, error) {
 
-	certificate, privateKey, err := GenerateWebServerCertificate(
-		support.Config.MeekCertificateCommonName)
+	certificate, privateKey, err := GenerateWebServerCertificate(common.GenerateHostName())
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -480,7 +485,7 @@ func makeMeekTLSConfig(support *SupportServices) (*tls.Config, error) {
 		return nil, common.ContextError(err)
 	}
 
-	return &tls.Config{
+	config := &tls.Config{
 		Certificates: []tls.Certificate{tlsCertificate},
 		NextProtos:   []string{"http/1.1"},
 		MinVersion:   tls.VersionTLS10,
@@ -511,7 +516,39 @@ func makeMeekTLSConfig(support *SupportServices) (*tls.Config, error) {
 			tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
 		},
 		PreferServerCipherSuites: true,
-	}, nil
+	}
+
+	if useObfuscatedSessionTickets {
+
+		// See obfuscated session ticket overview
+		// in tls.NewObfuscatedClientSessionCache
+
+		var obfuscatedSessionTicketKey [32]byte
+		key, err := hex.DecodeString(support.Config.MeekObfuscatedKey)
+		if err == nil && len(key) != 32 {
+			err = errors.New("invalid obfuscated session key length")
+		}
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+		copy(obfuscatedSessionTicketKey[:], key)
+
+		var standardSessionTicketKey [32]byte
+		_, err = rand.Read(standardSessionTicketKey[:])
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
+		// Note: SessionTicketKey needs to be set, or else, it appears,
+		// tls.Config.serverInit() will clobber the value set by
+		// SetSessionTicketKeys.
+		config.SessionTicketKey = obfuscatedSessionTicketKey
+		config.SetSessionTicketKeys([][32]byte{
+			standardSessionTicketKey,
+			obfuscatedSessionTicketKey})
+	}
+
+	return config, nil
 }
 
 // getMeekCookiePayload extracts the payload from a meek cookie. The cookie
@@ -529,9 +566,9 @@ func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte,
 
 	reader := bytes.NewReader(decodedValue[:])
 
-	obfuscator, err := psiphon.NewServerObfuscator(
+	obfuscator, err := common.NewServerObfuscator(
 		reader,
-		&psiphon.ObfuscatorConfig{Keyword: support.Config.MeekObfuscatedKey})
+		&common.ObfuscatorConfig{Keyword: support.Config.MeekObfuscatedKey})
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -709,8 +746,8 @@ func (conn *meekConn) pumpWrites(writer io.Writer) error {
 				return err
 			}
 
-			if conn.protocolVersion < MEEK_PROTOCOL_VERSION_2 {
-				// Protocol v1 clients expect at most
+			if conn.protocolVersion < MEEK_PROTOCOL_VERSION_1 {
+				// Pre-protocol version 1 clients expect at most
 				// MEEK_MAX_PAYLOAD_LENGTH response bodies
 				return nil
 			}

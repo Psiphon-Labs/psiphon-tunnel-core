@@ -23,9 +23,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
+	go_log "log"
 	"os"
+	"sync"
 
 	"github.com/Psiphon-Inc/logrus"
+	"github.com/Psiphon-Inc/rotate-safe-writer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
@@ -40,37 +44,70 @@ type ContextLogger struct {
 type LogFields logrus.Fields
 
 // WithContext adds a "context" field containing the caller's
-// function name and source file line number. Use this function
-// when the log has no fields.
+// function name and source file line number; and "host_id" and
+// "build_rev" fields identifying this server and build.
+// Use this function when the log has no fields.
 func (logger *ContextLogger) WithContext() *logrus.Entry {
-	return log.WithFields(
+	return logger.WithFields(
 		logrus.Fields{
-			"context": common.GetParentContext(),
+			"context":   common.GetParentContext(),
+			"host_id":   logHostID,
+			"build_rev": logBuildRev,
 		})
 }
 
-// WithContextFields adds a "context" field containing the caller's
-// function name and source file line number. Use this function
-// when the log has fields. Note that any existing "context" field
-// will be renamed to "field.context".
-func (logger *ContextLogger) WithContextFields(fields LogFields) *logrus.Entry {
-	_, ok := fields["context"]
-	if ok {
+func renameLogFields(fields LogFields) {
+	if _, ok := fields["context"]; ok {
 		fields["fields.context"] = fields["context"]
 	}
+	if _, ok := fields["host_id"]; ok {
+		fields["fields.host_id"] = fields["host_id"]
+	}
+	if _, ok := fields["build_rev"]; ok {
+		fields["fields.build_rev"] = fields["build_rev"]
+	}
+}
+
+// WithContextFields adds a "context" field containing the caller's
+// function name and source file line number; and "host_id" and
+// "build_rev" fields identifying this server and build.
+// Use this function when the log has fields.
+// Note that any existing "context"/"host_id"/"build_rev" field will
+// be renamed to "field.<name>".
+func (logger *ContextLogger) WithContextFields(fields LogFields) *logrus.Entry {
+	renameLogFields(fields)
 	fields["context"] = common.GetParentContext()
-	return log.WithFields(logrus.Fields(fields))
+	fields["host_id"] = logHostID
+	fields["build_rev"] = logBuildRev
+	return logger.WithFields(logrus.Fields(fields))
 }
 
 // LogRawFieldsWithTimestamp directly logs the supplied fields adding only
-// an additional "timestamp" field. The stock "msg" and "level" fields are
+// an additional "timestamp" field; and "host_id" and "build_rev" fields
+// identifying this server and build. The stock "msg" and "level" fields are
 // omitted. This log is emitted at the Error level. This function exists to
 // support API logs which have neither a natural message nor severity; and
 // omitting these values here makes it easier to ship these logs to existing
 // API log consumers.
+// Note that any existing "context"/"host_id"/"build_rev" field will
+// be renamed to "field.<name>".
 func (logger *ContextLogger) LogRawFieldsWithTimestamp(fields LogFields) {
+	renameLogFields(fields)
+	fields["host_id"] = logHostID
+	fields["build_rev"] = logBuildRev
 	logger.WithFields(logrus.Fields(fields)).Error(
 		customJSONFormatterLogRawFieldsWithTimestamp)
+}
+
+// LogPanicRecover calls LogRawFieldsWithTimestamp with standard fields
+// for logging recovered panics.
+func (logger *ContextLogger) LogPanicRecover(recoverValue interface{}, stack []byte) {
+	log.LogRawFieldsWithTimestamp(
+		LogFields{
+			"event_name":    "panic",
+			"recover_value": recoverValue,
+			"stack":         string(stack),
+		})
 }
 
 // NewLogWriter returns an io.PipeWriter that can be used to write
@@ -135,41 +172,60 @@ func (f *CustomJSONFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 }
 
 var log *ContextLogger
+var logHostID, logBuildRev string
+var initLogging sync.Once
 
 // InitLogging configures a logger according to the specified
 // config params. If not called, the default logger set by the
 // package init() is used.
-// Concurrenty note: should only be called from the main
-// goroutine.
-func InitLogging(config *Config) error {
+// Concurrency notes: this should only be called from the main
+// goroutine; InitLogging only has effect on the first call, as
+// the logging facilities it initializes may be in use by other
+// goroutines after that point.
+func InitLogging(config *Config) (retErr error) {
 
-	level, err := logrus.ParseLevel(config.LogLevel)
-	if err != nil {
-		return common.ContextError(err)
-	}
+	initLogging.Do(func() {
 
-	logWriter := os.Stderr
+		logHostID = config.HostID
+		logBuildRev = common.GetBuildInfo().BuildRev
 
-	if config.LogFilename != "" {
-		logWriter, err = os.OpenFile(
-			config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+		level, err := logrus.ParseLevel(config.LogLevel)
 		if err != nil {
-			return common.ContextError(err)
+			retErr = common.ContextError(err)
+			return
 		}
-	}
 
-	log = &ContextLogger{
-		&logrus.Logger{
-			Out:       logWriter,
-			Formatter: &CustomJSONFormatter{},
-			Level:     level,
-		},
-	}
+		var logWriter io.Writer
 
-	return nil
+		if config.LogFilename != "" {
+			logWriter, err = rotate.NewRotatableFileWriter(config.LogFilename, 0666)
+			if err != nil {
+				retErr = common.ContextError(err)
+				return
+			}
+		} else {
+			logWriter = os.Stderr
+		}
+
+		log = &ContextLogger{
+			&logrus.Logger{
+				Out:       logWriter,
+				Formatter: &CustomJSONFormatter{},
+				Level:     level,
+			},
+		}
+	})
+
+	return retErr
 }
 
 func init() {
+
+	// Suppress standard "log" package logging performed by other packages.
+	// For example, "net/http" logs messages such as:
+	// "http: TLS handshake error from <client-ip-addr>:<port>: [...]: i/o timeout"
+	go_log.SetOutput(ioutil.Discard)
+
 	log = &ContextLogger{
 		&logrus.Logger{
 			Out:       os.Stderr,

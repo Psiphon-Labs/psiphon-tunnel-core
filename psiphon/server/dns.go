@@ -21,9 +21,9 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"net"
-	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -77,9 +77,9 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 
 	dns.ReloadableFile = common.NewReloadableFile(
 		DNS_SYSTEM_CONFIG_FILENAME,
-		func(filename string) error {
+		func(fileContent []byte) error {
 
-			resolver, err := parseResolveConf(filename)
+			resolver, err := parseResolveConf(fileContent)
 			if err != nil {
 				// On error, state remains the same
 				return common.ContextError(err)
@@ -161,14 +161,10 @@ func (dns *DNSResolver) Get() net.IP {
 	return dns.resolver
 }
 
-func parseResolveConf(filename string) (net.IP, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-	defer file.Close()
+func parseResolveConf(fileContent []byte) (net.IP, error) {
 
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(bytes.NewReader(fileContent))
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, ";") || strings.HasPrefix(line, "#") {
@@ -182,9 +178,11 @@ func parseResolveConf(filename string) (net.IP, error) {
 			return parseResolver(fields[1])
 		}
 	}
+
 	if err := scanner.Err(); err != nil {
 		return nil, common.ContextError(err)
 	}
+
 	return nil, common.ContextError(errors.New("nameserver not found"))
 }
 

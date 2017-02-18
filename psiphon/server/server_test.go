@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -40,10 +41,25 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+var testDataDirName string
+
 func TestMain(m *testing.M) {
 	flag.Parse()
-	os.Remove(psiphon.DATA_STORE_FILENAME)
+
+	var err error
+	testDataDirName, err = ioutil.TempDir("", "psiphon-server-test")
+	if err != nil {
+		fmt.Printf("TempDir failed: %s\n", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(testDataDirName)
+
+	os.Remove(filepath.Join(testDataDirName, psiphon.DATA_STORE_FILENAME))
+
 	psiphon.SetEmitDiagnosticNotices(true)
+
+	CLIENT_VERIFICATION_REQUIRED = true
+
 	os.Exit(m.Run())
 }
 
@@ -56,7 +72,11 @@ func TestSSH(t *testing.T) {
 			tunnelProtocol:       "SSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
+			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			doClientVerification: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
 		})
 }
 
@@ -66,7 +86,11 @@ func TestOSSH(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
+			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			doClientVerification: false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
 		})
 }
 
@@ -76,7 +100,11 @@ func TestUnfrontedMeek(t *testing.T) {
 			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
+			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			doClientVerification: false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
 		})
 }
 
@@ -86,7 +114,25 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
+			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			doClientVerification: false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
+func TestUnfrontedMeekSessionTicket(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSessionID:   false,
+			denyTrafficRules:     false,
+			doClientVerification: false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
 		})
 }
 
@@ -96,7 +142,11 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: false,
 			doHotReload:          false,
+			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			doClientVerification: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
 		})
 }
 
@@ -106,7 +156,25 @@ func TestHotReload(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
+			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			doClientVerification: false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
+func TestDefaultSessionID(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          true,
+			doDefaultSessionID:   true,
+			denyTrafficRules:     false,
+			doClientVerification: false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
 		})
 }
 
@@ -116,7 +184,39 @@ func TestDenyTrafficRules(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
+			doDefaultSessionID:   false,
 			denyTrafficRules:     true,
+			doClientVerification: false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
+func TestTCPOnlySLOK(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSessionID:   false,
+			denyTrafficRules:     false,
+			doClientVerification: false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: false,
+		})
+}
+
+func TestUDPOnlySLOK(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSessionID:   false,
+			denyTrafficRules:     false,
+			doClientVerification: false,
+			doTunneledWebRequest: false,
+			doTunneledNTPRequest: true,
 		})
 }
 
@@ -124,7 +224,11 @@ type runServerConfig struct {
 	tunnelProtocol       string
 	enableSSHAPIRequests bool
 	doHotReload          bool
+	doDefaultSessionID   bool
 	denyTrafficRules     bool
+	doClientVerification bool
+	doTunneledWebRequest bool
+	doTunneledNTPRequest bool
 }
 
 func sendNotificationReceived(c chan<- struct{}) {
@@ -155,7 +259,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	var err error
 	serverIPaddress := ""
 	for _, interfaceName := range []string{"eth0", "en0"} {
-		serverIPaddress, err = psiphon.GetInterfaceIPAddress(interfaceName)
+		serverIPaddress, err = common.GetInterfaceIPAddress(interfaceName)
 		if err == nil {
 			break
 		}
@@ -178,23 +282,28 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// customize server config
 
 	// Pave psinet with random values to test handshake homepages.
-	psinetFilename := "psinet.json"
-	sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(t, psinetFilename)
+	psinetFilename := filepath.Join(testDataDirName, "psinet.json")
+	sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(
+		t, runConfig.doDefaultSessionID, psinetFilename)
 
-	// Pave traffic rules file which exercises handshake parameter filtering
-	trafficRulesFilename := "traffic_rules.json"
-	paveTrafficRulesFile(t, trafficRulesFilename, sponsorID, runConfig.denyTrafficRules)
+	// Pave OSL config for SLOk testing
+	oslConfigFilename := filepath.Join(testDataDirName, "osl_config.json")
+	propagationChannelID := paveOSLConfigFile(t, oslConfigFilename)
 
-	var serverConfig interface{}
+	// Pave traffic rules file which exercises handshake parameter filtering. Client
+	// must handshake with specified sponsor ID in order to allow ports for tunneled
+	// requests.
+	trafficRulesFilename := filepath.Join(testDataDirName, "traffic_rules.json")
+	paveTrafficRulesFile(t, trafficRulesFilename, propagationChannelID, runConfig.denyTrafficRules)
+
+	var serverConfig map[string]interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
-	serverConfig.(map[string]interface{})["GeoIPDatabaseFilename"] = ""
-	serverConfig.(map[string]interface{})["PsinetDatabaseFilename"] = psinetFilename
-	serverConfig.(map[string]interface{})["TrafficRulesFilename"] = trafficRulesFilename
-	serverConfig.(map[string]interface{})["LogLevel"] = "debug"
-
-	// 1 second is the minimum period; should be small enough to emit a log during the
-	// test run, but not guaranteed
-	serverConfig.(map[string]interface{})["LoadMonitorPeriodSeconds"] = 1
+	serverConfig["GeoIPDatabaseFilename"] = ""
+	serverConfig["PsinetDatabaseFilename"] = psinetFilename
+	serverConfig["TrafficRulesFilename"] = trafficRulesFilename
+	serverConfig["OSLConfigFilename"] = oslConfigFilename
+	serverConfig["LogFilename"] = filepath.Join(testDataDirName, "psiphond.log")
+	serverConfig["LogLevel"] = "debug"
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
@@ -232,14 +341,21 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}()
 
-	// Test: hot reload (of psinet)
+	// TODO: monitor logs for more robust wait-until-loaded
+	time.Sleep(1 * time.Second)
+
+	// Test: hot reload (of psinet and traffic rules)
 
 	if runConfig.doHotReload {
-		// TODO: monitor logs for more robust wait-until-loaded
-		time.Sleep(1 * time.Second)
 
-		// Pave a new psinet with different random values.
-		sponsorID, expectedHomepageURL = pavePsinetDatabaseFile(t, psinetFilename)
+		// Pave new config files with different random values.
+		sponsorID, expectedHomepageURL = pavePsinetDatabaseFile(
+			t, runConfig.doDefaultSessionID, psinetFilename)
+
+		propagationChannelID = paveOSLConfigFile(t, oslConfigFilename)
+
+		paveTrafficRulesFile(
+			t, trafficRulesFilename, propagationChannelID, runConfig.denyTrafficRules)
 
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(syscall.SIGUSR1)
@@ -252,6 +368,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		// handler below.
 	}
 
+	// Exercise server_load logging
+	p, _ := os.FindProcess(os.Getpid())
+	p.Signal(syscall.SIGUSR2)
+
 	// connect to server with client
 
 	// TODO: currently, TargetServerEntry only works with one tunnel
@@ -263,23 +383,32 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Note: calling LoadConfig ensures all *int config fields are initialized
 	clientConfigJSON := `
     {
-        "ClientPlatform" : "Android",
+        "ClientPlatform" : "Windows",
         "ClientVersion" : "0",
         "SponsorId" : "0",
-        "PropagationChannelId" : "0"
+        "PropagationChannelId" : "0",
+        "DisableRemoteServerListFetcher" : true
     }`
 	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
 
-	clientConfig.SponsorId = sponsorID
+	if !runConfig.doDefaultSessionID {
+		clientConfig.SponsorId = sponsorID
+	}
+	clientConfig.PropagationChannelId = propagationChannelID
 	clientConfig.ConnectionWorkerPoolSize = numTunnels
 	clientConfig.TunnelPoolSize = numTunnels
-	clientConfig.DisableRemoteServerListFetcher = true
 	clientConfig.EstablishTunnelPausePeriodSeconds = &establishTunnelPausePeriodSeconds
 	clientConfig.TargetServerEntry = string(encodedServerEntry)
 	clientConfig.TunnelProtocol = runConfig.tunnelProtocol
 	clientConfig.LocalSocksProxyPort = localSOCKSProxyPort
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
+	clientConfig.EmitSLOKs = true
 
+	if runConfig.doClientVerification {
+		clientConfig.ClientPlatform = "Android"
+	}
+
+	clientConfig.DataStoreDirectory = testDataDirName
 	err = psiphon.InitDataStore(clientConfig)
 	if err != nil {
 		t.Fatalf("error initializing client datastore: %s", err)
@@ -292,6 +421,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	tunnelsEstablished := make(chan struct{}, 1)
 	homepageReceived := make(chan struct{}, 1)
+	slokSeeded := make(chan struct{}, 1)
 	verificationRequired := make(chan struct{}, 1)
 	verificationCompleted := make(chan struct{}, 1)
 
@@ -321,6 +451,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 					t.Fatalf("unexpected homepage: %s", homepageURL)
 				}
 				sendNotificationReceived(homepageReceived)
+			case "SLOKSeeded":
+				sendNotificationReceived(slokSeeded)
 			case "ClientVerificationRequired":
 				sendNotificationReceived(verificationRequired)
 				controller.SetClientVerificationPayloadForActiveTunnels(dummyClientVerificationPayload)
@@ -366,37 +498,53 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel establish timeout exceeded")
 	waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
-	waitOnNotification(t, verificationRequired, timeoutSignal, "verification required timeout exceeded")
-	waitOnNotification(t, verificationCompleted, timeoutSignal, "verification completed timeout exceeded")
 
-	// Test: tunneled web site fetch
+	if runConfig.doClientVerification {
+		waitOnNotification(t, verificationRequired, timeoutSignal, "verification required timeout exceeded")
+		waitOnNotification(t, verificationCompleted, timeoutSignal, "verification completed timeout exceeded")
+	}
 
-	err = makeTunneledWebRequest(t, localHTTPProxyPort)
+	if runConfig.doTunneledWebRequest {
 
-	if err == nil {
-		if runConfig.denyTrafficRules {
-			t.Fatalf("unexpected tunneled web request success")
-		}
-	} else {
-		if !runConfig.denyTrafficRules {
-			t.Fatalf("tunneled web request failed: %s", err)
+		// Test: tunneled web site fetch
+
+		err = makeTunneledWebRequest(t, localHTTPProxyPort)
+
+		if err == nil {
+			if runConfig.denyTrafficRules {
+				t.Fatalf("unexpected tunneled web request success")
+			}
+		} else {
+			if !runConfig.denyTrafficRules {
+				t.Fatalf("tunneled web request failed: %s", err)
+			}
 		}
 	}
 
-	// Test: tunneled UDP packets
+	if runConfig.doTunneledNTPRequest {
 
-	udpgwServerAddress := serverConfig.(map[string]interface{})["UDPInterceptUdpgwServerAddress"].(string)
+		// Test: tunneled UDP packets
 
-	err = makeTunneledNTPRequest(t, localSOCKSProxyPort, udpgwServerAddress)
+		udpgwServerAddress := serverConfig["UDPInterceptUdpgwServerAddress"].(string)
 
-	if err == nil {
-		if runConfig.denyTrafficRules {
-			t.Fatalf("unexpected tunneled NTP request success")
+		err = makeTunneledNTPRequest(t, localSOCKSProxyPort, udpgwServerAddress)
+
+		if err == nil {
+			if runConfig.denyTrafficRules {
+				t.Fatalf("unexpected tunneled NTP request success")
+			}
+		} else {
+			if !runConfig.denyTrafficRules {
+				t.Fatalf("tunneled NTP request failed: %s", err)
+			}
 		}
-	} else {
-		if !runConfig.denyTrafficRules {
-			t.Fatalf("tunneled NTP request failed: %s", err)
-		}
+	}
+
+	// Test: await SLOK payload
+
+	if !runConfig.denyTrafficRules {
+		time.Sleep(1 * time.Second)
+		waitOnNotification(t, slokSeeded, timeoutSignal, "SLOK seeded timeout exceeded")
 	}
 }
 
@@ -433,12 +581,26 @@ func makeTunneledWebRequest(t *testing.T, localHTTPProxyPort int) error {
 
 func makeTunneledNTPRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAddress string) error {
 
-	testHostname := "pool.ntp.org"
-	timeout := 5 * time.Second
+	timeout := 20 * time.Second
+	var err error
+
+	for _, testHostname := range []string{"time.google.com", "time.nist.gov", "pool.ntp.org"} {
+		err = makeTunneledNTPRequestAttempt(t, testHostname, timeout, localSOCKSProxyPort, udpgwServerAddress)
+		if err == nil {
+			break
+		}
+		t.Logf("makeTunneledNTPRequestAttempt failed: %s", err)
+	}
+
+	return err
+}
+
+func makeTunneledNTPRequestAttempt(
+	t *testing.T, testHostname string, timeout time.Duration, localSOCKSProxyPort int, udpgwServerAddress string) error {
 
 	localUDPProxyAddress, err := net.ResolveUDPAddr("udp", "127.0.0.1:7301")
 	if err != nil {
-		t.Fatalf("ResolveUDPAddr failed: %s", err)
+		return fmt.Errorf("ResolveUDPAddr failed: %s", err)
 	}
 
 	// Note: this proxy is intended for this test only -- it only accepts a single connection,
@@ -554,7 +716,12 @@ func makeTunneledNTPRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAd
 
 	// Tunneled NTP request
 
-	go localUDPProxy(addrs[0][len(addrs[0])-4:], 123, nil)
+	waitGroup = new(sync.WaitGroup)
+	waitGroup.Add(1)
+	go localUDPProxy(
+		addrs[0][len(addrs[0])-4:],
+		123,
+		waitGroup)
 	// TODO: properly synchronize with local UDP proxy startup
 	time.Sleep(1 * time.Second)
 
@@ -605,10 +772,13 @@ func makeTunneledNTPRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAd
 		return fmt.Errorf("Unexpected NTP time: %s; local time: %s", ntpNow, now)
 	}
 
+	waitGroup.Wait()
+
 	return nil
 }
 
-func pavePsinetDatabaseFile(t *testing.T, psinetFilename string) (string, string) {
+func pavePsinetDatabaseFile(
+	t *testing.T, useDefaultSponsorID bool, psinetFilename string) (string, string) {
 
 	sponsorID, _ := common.MakeRandomStringHex(8)
 
@@ -618,6 +788,7 @@ func pavePsinetDatabaseFile(t *testing.T, psinetFilename string) (string, string
 
 	psinetJSONFormat := `
     {
+        "default_sponsor_id" : "%s",
         "sponsors": {
             "%s": {
                 "home_pages": {
@@ -632,7 +803,14 @@ func pavePsinetDatabaseFile(t *testing.T, psinetFilename string) (string, string
         }
     }
 	`
-	psinetJSON := fmt.Sprintf(psinetJSONFormat, sponsorID, expectedHomepageURL)
+
+	defaultSponsorID := ""
+	if useDefaultSponsorID {
+		defaultSponsorID = sponsorID
+	}
+
+	psinetJSON := fmt.Sprintf(
+		psinetJSONFormat, defaultSponsorID, sponsorID, expectedHomepageURL)
 
 	err := ioutil.WriteFile(psinetFilename, []byte(psinetJSON), 0600)
 	if err != nil {
@@ -642,7 +820,8 @@ func pavePsinetDatabaseFile(t *testing.T, psinetFilename string) (string, string
 	return sponsorID, expectedHomepageURL
 }
 
-func paveTrafficRulesFile(t *testing.T, trafficRulesFilename, sponsorID string, deny bool) {
+func paveTrafficRulesFile(
+	t *testing.T, trafficRulesFilename, propagationChannelID string, deny bool) {
 
 	allowTCPPorts := "443"
 	allowUDPPorts := "53, 123"
@@ -666,7 +845,7 @@ func paveTrafficRulesFile(t *testing.T, trafficRulesFilename, sponsorID string, 
             {
                 "Filter" : {
                     "HandshakeParameters" : {
-                        "sponsor_id" : ["%s"]
+                        "propagation_channel_id" : ["%s"]
                     }
                 },
                 "Rules" : {
@@ -683,10 +862,72 @@ func paveTrafficRulesFile(t *testing.T, trafficRulesFilename, sponsorID string, 
     `
 
 	trafficRulesJSON := fmt.Sprintf(
-		trafficRulesJSONFormat, sponsorID, allowTCPPorts, allowUDPPorts)
+		trafficRulesJSONFormat, propagationChannelID, allowTCPPorts, allowUDPPorts)
 
 	err := ioutil.WriteFile(trafficRulesFilename, []byte(trafficRulesJSON), 0600)
 	if err != nil {
 		t.Fatalf("error paving traffic rules file: %s", err)
 	}
+}
+
+func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
+
+	oslConfigJSONFormat := `
+    {
+      "Schemes" : [
+        {
+          "Epoch" : "%s",
+          "Regions" : [],
+          "PropagationChannelIDs" : ["%s"],
+          "MasterKey" : "wFuSbqU/pJ/35vRmoM8T9ys1PgDa8uzJps1Y+FNKa5U=",
+          "SeedSpecs" : [
+            {
+              "ID" : "IXHWfVgWFkEKvgqsjmnJuN3FpaGuCzQMETya+DSQvsk=",
+              "UpstreamSubnets" : ["0.0.0.0/0"],
+              "Targets" :
+              {
+                  "BytesRead" : 1,
+                  "BytesWritten" : 1,
+                  "PortForwardDurationNanoseconds" : 1
+              }
+            },
+            {
+              "ID" : "qvpIcORLE2Pi5TZmqRtVkEp+OKov0MhfsYPLNV7FYtI=",
+              "UpstreamSubnets" : ["0.0.0.0/0"],
+              "Targets" :
+              {
+                  "BytesRead" : 1,
+                  "BytesWritten" : 1,
+                  "PortForwardDurationNanoseconds" : 1
+              }
+            }
+          ],
+          "SeedSpecThreshold" : 2,
+          "SeedPeriodNanoseconds" : 10000000000,
+          "SeedPeriodKeySplits": [
+            {
+              "Total": 2,
+              "Threshold": 2
+            }
+          ]
+        }
+      ]
+    }
+    `
+
+	propagationChannelID, _ := common.MakeRandomStringHex(8)
+
+	now := time.Now().UTC()
+	epoch := now.Truncate(10 * time.Second)
+	epochStr := epoch.Format(time.RFC3339Nano)
+
+	oslConfigJSON := fmt.Sprintf(
+		oslConfigJSONFormat, epochStr, propagationChannelID)
+
+	err := ioutil.WriteFile(oslConfigFilename, []byte(oslConfigJSON), 0600)
+	if err != nil {
+		t.Fatalf("error paving osl config file: %s", err)
+	}
+
+	return propagationChannelID
 }

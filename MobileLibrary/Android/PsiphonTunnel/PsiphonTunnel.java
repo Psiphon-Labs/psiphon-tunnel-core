@@ -335,6 +335,9 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         return DEFAULT_SECONDARY_DNS_SERVER;
     }
 
+    @Override
+    public String IPv6Synthesize(String IPv4Addr) { return IPv4Addr; }
+
     //----------------------------------------------------------------------------------------------
     // Psiphon Tunnel Core
     //----------------------------------------------------------------------------------------------
@@ -347,7 +350,8 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
                     loadPsiphonConfig(mHostService.getContext()),
                     embeddedServerEntries,
                     this,
-                    isVpnMode());
+                    isVpnMode(),
+                    false /* Do not use IPv6 synthesizer for android */);
         } catch (java.lang.Exception e) {
             throw new Exception("failed to start Psiphon library", e);
         }
@@ -378,6 +382,15 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             File remoteServerListDownload = new File(context.getFilesDir(), "remote_server_list");
             json.put("RemoteServerListDownloadFilename", remoteServerListDownload.getAbsolutePath());
         }
+
+        File oslDownloadDir = new File(context.getFilesDir(), "osl");
+        if (!oslDownloadDir.exists()
+                && !oslDownloadDir.mkdirs()) {
+            // Failed to create osl directory
+            // TODO: proceed anyway?
+            throw new IOException("failed to create OSL download directory");
+        }
+        json.put("ObfuscatedServerListDownloadDirectory", oslDownloadDir.getAbsolutePath());
 
         // Note: onConnecting/onConnected logic assumes 1 tunnel connection
         json.put("TunnelPoolSize", 1);

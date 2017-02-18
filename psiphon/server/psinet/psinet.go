@@ -27,7 +27,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/rand"
 	"strconv"
@@ -43,26 +42,22 @@ import (
 type Database struct {
 	common.ReloadableFile
 
-	AlternateMeekFrontingAddresses      map[string][]string        `json:"alternate_meek_fronting_addresses"`
-	AlternateMeekFrontingAddressesRegex map[string]string          `json:"alternate_meek_fronting_addresses_regex"`
-	Hosts                               map[string]Host            `json:"hosts"`
-	MeekFrontingDisableSNI              map[string]bool            `json:"meek_fronting_disable_SNI"`
-	Servers                             []Server                   `json:"servers"`
-	Sponsors                            map[string]Sponsor         `json:"sponsors"`
-	Versions                            map[string][]ClientVersion `json:"client_versions"`
+	Hosts            map[string]Host            `json:"hosts"`
+	Servers          []Server                   `json:"servers"`
+	Sponsors         map[string]Sponsor         `json:"sponsors"`
+	Versions         map[string][]ClientVersion `json:"client_versions"`
+	DefaultSponsorID string                     `json:"default_sponsor_id"`
 }
 
 type Host struct {
-	AlternateMeekServerFrontingHosts []string `json:"alternate_meek_server_fronting_hosts"`
-	DatacenterName                   string   `json:"datacenter_name"`
-	Id                               string   `json:"id"`
-	IpAddress                        string   `json:"ip_address"`
-	MeekCookieEncryptionPublicKey    string   `json:"meek_cookie_encryption_public_key"`
-	MeekServerFrontingDomain         string   `json:"meek_server_fronting_domain"`
-	MeekServerFrontingHost           string   `json:"meek_server_fronting_host"`
-	MeekServerObfuscatedKey          string   `json:"meek_server_obfuscated_key"`
-	MeekServerPort                   int      `json:"meek_server_port"`
-	Region                           string   `json:"region"`
+	DatacenterName                string `json:"datacenter_name"`
+	Id                            string `json:"id"`
+	IpAddress                     string `json:"ip_address"`
+	IsTCS                         bool   `json:"is_TCS"`
+	MeekCookieEncryptionPublicKey string `json:"meek_cookie_encryption_public_key"`
+	MeekServerObfuscatedKey       string `json:"meek_server_obfuscated_key"`
+	MeekServerPort                int    `json:"meek_server_port"`
+	Region                        string `json:"region"`
 }
 
 type Server struct {
@@ -132,19 +127,20 @@ func NewDatabase(filename string) (*Database, error) {
 
 	database.ReloadableFile = common.NewReloadableFile(
 		filename,
-		func(filename string) error {
-			psinetJSON, err := ioutil.ReadFile(filename)
+		func(fileContent []byte) error {
+			var newDatabase Database
+			err := json.Unmarshal(fileContent, &newDatabase)
 			if err != nil {
-				// On error, state remains the same
 				return common.ContextError(err)
 			}
-			err = json.Unmarshal(psinetJSON, &database)
-			if err != nil {
-				// On error, state remains the same
-				// (Unmarshal first validates the provided
-				//  JOSN and then populates the interface)
-				return common.ContextError(err)
-			}
+			// Note: an unmarshal directly into &database would fail
+			// to reset to zero value fields not present in the JSON.
+			database.Hosts = newDatabase.Hosts
+			database.Servers = newDatabase.Servers
+			database.Sponsors = newDatabase.Sponsors
+			database.Versions = newDatabase.Versions
+			database.DefaultSponsorID = newDatabase.DefaultSponsorID
+
 			return nil
 		})
 
@@ -156,7 +152,18 @@ func NewDatabase(filename string) (*Database, error) {
 	return database, nil
 }
 
-// GetHomepages returns a list of  home pages for the specified sponsor,
+// GetRandomHomepage returns a random home page from a set of home pages
+// for the specified sponsor, region, and platform.
+func (db *Database) GetRandomHomepage(sponsorID, clientRegion string, isMobilePlatform bool) []string {
+	homepages := db.GetHomepages(sponsorID, clientRegion, isMobilePlatform)
+	if len(homepages) > 0 {
+		index := rand.Intn(len(homepages))
+		return homepages[index : index+1]
+	}
+	return homepages
+}
+
+// GetHomepages returns a list of home pages for the specified sponsor,
 // region, and platform.
 func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatform bool) []string {
 	db.ReloadableFile.RLock()
@@ -167,7 +174,10 @@ func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatfor
 	// Sponsor id does not exist: fail gracefully
 	sponsor, ok := db.Sponsors[sponsorID]
 	if !ok {
-		return nil
+		sponsor, ok = db.Sponsors[db.DefaultSponsorID]
+		if !ok {
+			return sponsorHomePages
+		}
 	}
 
 	homePages := sponsor.HomePages
@@ -187,7 +197,7 @@ func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatfor
 	}
 
 	// Case: lookup failed or no corresponding homepages found for region --> use default
-	if sponsorHomePages == nil {
+	if len(sponsorHomePages) == 0 {
 		defaultHomePages, ok := homePages["None"]
 		if ok {
 			for _, homePage := range defaultHomePages {
@@ -239,17 +249,24 @@ func (db *Database) GetUpgradeClientVersion(clientVersion, clientPlatform string
 }
 
 // GetHttpsRequestRegexes returns bytes transferred stats regexes for the
-// specified sponsor. The result is nil when an unknown sponsorID is provided.
+// specified sponsor.
 func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string {
 	db.ReloadableFile.RLock()
 	defer db.ReloadableFile.RUnlock()
 
 	regexes := make([]map[string]string, 0)
 
-	for i := range db.Sponsors[sponsorID].HttpsRequestRegexes {
+	sponsor, ok := db.Sponsors[sponsorID]
+	if !ok {
+		sponsor, ok = db.Sponsors[db.DefaultSponsorID]
+	}
+
+	// If neither sponsorID or DefaultSponsorID were found, sponsor will be the
+	// zero value of the map, an empty Sponsor struct.
+	for _, sponsorRegex := range sponsor.HttpsRequestRegexes {
 		regex := make(map[string]string)
-		regex["replace"] = db.Sponsors[sponsorID].HttpsRequestRegexes[i].Replace
-		regex["regex"] = db.Sponsors[sponsorID].HttpsRequestRegexes[i].Regex
+		regex["replace"] = sponsorRegex.Replace
+		regex["regex"] = sponsorRegex.Regex
 		regexes = append(regexes, regex)
 	}
 
@@ -257,7 +274,8 @@ func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string
 }
 
 // DiscoverServers selects new encoded server entries to be "discovered" by
-// the client, using the discoveryValue as the input into the discovery algorithm.
+// the client, using the discoveryValue -- a function of the client's IP
+// address -- as the input into the discovery algorithm.
 // The server list (db.Servers) loaded from JSON is stored as an array instead of
 // a map to ensure servers are discovered deterministically. Each iteration over a
 // map in go is seeded with a random value which causes non-deterministic ordering.
@@ -290,7 +308,9 @@ func (db *Database) DiscoverServers(discoveryValue int) []string {
 			}
 		}
 	}
-	servers = selectServers(candidateServers, discoveryValue)
+
+	timeInSeconds := int(discoveryDate.Unix())
+	servers = selectServers(candidateServers, timeInSeconds, discoveryValue)
 
 	encodedServerEntries := make([]string, 0)
 
@@ -316,15 +336,14 @@ func (db *Database) DiscoverServers(discoveryValue int) []string {
 // both aspects determine which server is selected. IP address is given the
 // priority: if there are only a couple of servers, for example, IP address alone
 // determines the outcome.
-func selectServers(servers []Server, discoveryValue int) []Server {
+func selectServers(servers []Server, timeInSeconds, discoveryValue int) []Server {
 	TIME_GRANULARITY := 3600
 
 	if len(servers) == 0 {
 		return nil
 	}
 
-	// Current time truncated to an hour
-	timeInSeconds := int(time.Now().Unix())
+	// Time truncated to an hour
 	timeStrategyValue := timeInSeconds / TIME_GRANULARITY
 
 	// Divide servers into buckets. The bucket count is chosen such that the number
@@ -333,10 +352,21 @@ func selectServers(servers []Server, discoveryValue int) []Server {
 
 	// NOTE: this code assumes that the range of possible timeStrategyValues
 	// and discoveryValues are sufficient to index to all bucket items.
+
 	bucketCount := calculateBucketCount(len(servers))
 
 	buckets := bucketizeServerList(servers, bucketCount)
+
+	if len(buckets) == 0 {
+		return nil
+	}
+
 	bucket := buckets[discoveryValue%len(buckets)]
+
+	if len(bucket) == 0 {
+		return nil
+	}
+
 	server := bucket[timeStrategyValue%len(bucket)]
 
 	serverList := make([]Server, 1)
@@ -351,24 +381,26 @@ func calculateBucketCount(length int) int {
 	return int(math.Ceil(math.Sqrt(float64(length))))
 }
 
-// Create bucketCount buckets.
-// Each bucket will be of size division or divison-1.
+// bucketizeServerList creates nearly equal sized slices of the input list.
 func bucketizeServerList(servers []Server, bucketCount int) [][]Server {
-	division := float64(len(servers)) / float64(bucketCount)
+
+	// This code creates the same partitions as legacy servers:
+	// https://bitbucket.org/psiphon/psiphon-circumvention-system/src/03bc1a7e51e7c85a816e370bb3a6c755fd9c6fee/Automation/psi_ops_discovery.py
+	//
+	// Both use the same algorithm from:
+	// http://stackoverflow.com/questions/2659900/python-slicing-a-list-into-n-nearly-equal-length-partitions
+
+	// TODO: this partition is constant for fixed Database content, so it could
+	// be done once and cached in the Database ReloadableFile reloadAction.
 
 	buckets := make([][]Server, bucketCount)
 
-	var currentBucketIndex int = 0
-	var serverIndex int = 0
-	for _, server := range servers {
-		bucketEndIndex := int(math.Floor(division * (float64(currentBucketIndex) + 1)))
+	division := float64(len(servers)) / float64(bucketCount)
 
-		buckets[currentBucketIndex] = append(buckets[currentBucketIndex], server)
-
-		serverIndex++
-		if serverIndex > bucketEndIndex {
-			currentBucketIndex++
-		}
+	for i := 0; i < bucketCount; i++ {
+		start := int((division * float64(i)) + 0.5)
+		end := int((division * (float64(i) + 1)) + 0.5)
+		buckets[i] = servers[start:end]
 	}
 
 	return buckets
@@ -378,41 +410,52 @@ func bucketizeServerList(servers []Server, bucketCount int) [][]Server {
 // Newer clients ignore the legacy fields and only utilize the extended (new) config.
 func (db *Database) getEncodedServerEntry(server Server) string {
 
+	host, hostExists := db.Hosts[server.HostId]
+	if !hostExists {
+		return ""
+	}
+
+	// TCS web server certificate has PEM headers and newlines, so strip those now
+	// for legacy format compatibility
+	webServerCertificate := server.WebServerCertificate
+	if host.IsTCS {
+		splitCert := strings.Split(server.WebServerCertificate, "\n")
+		if len(splitCert) <= 2 {
+			webServerCertificate = ""
+		} else {
+			webServerCertificate = strings.Join(splitCert[1:len(splitCert)-2], "")
+		}
+	}
+
 	// Double-check that we're not giving our blank server credentials
-	if len(server.IpAddress) <= 1 || len(server.WebServerPort) <= 1 || len(server.WebServerSecret) <= 1 || len(server.WebServerCertificate) <= 1 {
+	if len(server.IpAddress) <= 1 || len(server.WebServerPort) <= 1 || len(server.WebServerSecret) <= 1 || len(webServerCertificate) <= 1 {
 		return ""
 	}
 
 	// Extended (new) entry fields are in a JSON string
 	var extendedConfig struct {
-		IpAddress                     string
-		WebServerPort                 string
-		WebServerSecret               string
-		WebServerCertificate          string
-		SshPort                       int
-		SshUsername                   string
-		SshPassword                   string
-		SshHostKey                    string
-		SshObfuscatedPort             int
-		SshObfuscatedKey              string
-		Region                        string
-		MeekServerPort                int
-		MeekObfuscatedKey             string
-		MeekFrontingDomain            string
-		MeekFrontingHost              string
-		MeekCookieEncryptionPublicKey string
-		meekFrontingAddresses         []string
-		meekFrontingAddressesRegex    string
-		meekFrontingDisableSNI        bool
-		meekFrontingHosts             []string
-		capabilities                  []string
+		IpAddress                     string   `json:"ipAddress"`
+		WebServerPort                 string   `json:"webServerPort"` // not an int
+		WebServerSecret               string   `json:"webServerSecret"`
+		WebServerCertificate          string   `json:"webServerCertificate"`
+		SshPort                       int      `json:"sshPort"`
+		SshUsername                   string   `json:"sshUsername"`
+		SshPassword                   string   `json:"sshPassword"`
+		SshHostKey                    string   `json:"sshHostKey"`
+		SshObfuscatedPort             int      `json:"sshObfuscatedPort"`
+		SshObfuscatedKey              string   `json:"sshObfuscatedKey"`
+		Capabilities                  []string `json:"capabilities"`
+		Region                        string   `json:"region"`
+		MeekServerPort                int      `json:"meekServerPort"`
+		MeekCookieEncryptionPublicKey string   `json:"meekCookieEncryptionPublicKey"`
+		MeekObfuscatedKey             string   `json:"meekObfuscatedKey"`
 	}
 
 	// NOTE: also putting original values in extended config for easier parsing by new clients
 	extendedConfig.IpAddress = server.IpAddress
 	extendedConfig.WebServerPort = server.WebServerPort
 	extendedConfig.WebServerSecret = server.WebServerSecret
-	extendedConfig.WebServerCertificate = server.WebServerCertificate
+	extendedConfig.WebServerCertificate = webServerCertificate
 
 	sshPort, err := strconv.Atoi(server.SshPort)
 	if err != nil {
@@ -434,7 +477,7 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 
 	extendedConfig.SshObfuscatedPort = server.SshObfuscatedPort
 	// Use the latest alternate port unless tunneling through meek
-	if len(server.AlternateSshObfuscatedPorts) > 0 && !(server.Capabilities["FRONTED-MEEK"] || server.Capabilities["UNFRONTED-MEEK"]) {
+	if len(server.AlternateSshObfuscatedPorts) > 0 && !server.Capabilities["UNFRONTED-MEEK"] {
 		port, err := strconv.Atoi(server.AlternateSshObfuscatedPorts[len(server.AlternateSshObfuscatedPorts)-1])
 		if err == nil {
 			extendedConfig.SshObfuscatedPort = port
@@ -442,15 +485,10 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	}
 
 	extendedConfig.SshObfuscatedKey = server.SshObfuscatedKey
-
-	host := db.Hosts[server.HostId]
-
 	extendedConfig.Region = host.Region
+	extendedConfig.MeekCookieEncryptionPublicKey = host.MeekCookieEncryptionPublicKey
 	extendedConfig.MeekServerPort = host.MeekServerPort
 	extendedConfig.MeekObfuscatedKey = host.MeekServerObfuscatedKey
-	extendedConfig.MeekFrontingDomain = host.MeekServerFrontingDomain
-	extendedConfig.MeekFrontingHost = host.MeekServerFrontingHost
-	extendedConfig.MeekCookieEncryptionPublicKey = host.MeekCookieEncryptionPublicKey
 
 	serverCapabilities := make(map[string]bool, 0)
 	for capability, enabled := range server.Capabilities {
@@ -462,37 +500,9 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 		serverCapabilities["UNFRONTED-MEEK-HTTPS"] = true
 	}
 
-	if host.MeekServerFrontingDomain != "" {
-		alternateMeekFrontingAddresses := db.AlternateMeekFrontingAddresses[host.MeekServerFrontingDomain]
-		if len(alternateMeekFrontingAddresses) > 0 {
-			// Choose 3 addresses randomly
-			perm := rand.Perm(len(alternateMeekFrontingAddresses))[:int(math.Min(float64(len(alternateMeekFrontingAddresses)), float64(3)))]
-
-			for i := range perm {
-				extendedConfig.meekFrontingAddresses = append(extendedConfig.meekFrontingAddresses, alternateMeekFrontingAddresses[perm[i]])
-			}
-		}
-
-		extendedConfig.meekFrontingAddressesRegex = db.AlternateMeekFrontingAddressesRegex[host.MeekServerFrontingDomain]
-		extendedConfig.meekFrontingDisableSNI = db.MeekFrontingDisableSNI[host.MeekServerFrontingDomain]
-	}
-
-	if host.AlternateMeekServerFrontingHosts != nil {
-		// Choose 3 addresses randomly
-		perm := rand.Perm(len(host.AlternateMeekServerFrontingHosts))[:int(math.Min(float64(len(host.AlternateMeekServerFrontingHosts)), float64(3)))]
-
-		for i := range perm {
-			extendedConfig.meekFrontingHosts = append(extendedConfig.meekFrontingHosts, host.AlternateMeekServerFrontingHosts[i])
-		}
-
-		if serverCapabilities["FRONTED-MEEK"] == true {
-			serverCapabilities["FRONTED-MEEK-HTTP"] = true
-		}
-	}
-
 	for capability, enabled := range serverCapabilities {
 		if enabled == true {
-			extendedConfig.capabilities = append(extendedConfig.capabilities, capability)
+			extendedConfig.Capabilities = append(extendedConfig.Capabilities, capability)
 		}
 	}
 
@@ -502,7 +512,7 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	}
 
 	// Legacy format + extended (new) config
-	prefixString := fmt.Sprintf("%s %s %s %s ", server.IpAddress, server.WebServerPort, server.WebServerSecret, server.WebServerCertificate)
+	prefixString := fmt.Sprintf("%s %s %s %s ", server.IpAddress, server.WebServerPort, server.WebServerSecret, webServerCertificate)
 
 	return hex.EncodeToString(append([]byte(prefixString)[:], []byte(jsonDump)[:]...))
 }
