@@ -234,8 +234,9 @@ func panicHandler(output string) {
 		logEvent["event_name"] = "panic"
 		logEvent["panic"] = output
 
+		// Logs are written to the configured file name. If no name is specified, logs are written to stderr
 		var jsonWriter io.Writer
-		if config.PanicLogFilename != "" {
+		if config.LogFilename != "" {
 			panicLog, err := rotate.NewRotatableFileWriter(config.LogFilename, 0666)
 			if err != nil {
 				fmt.Printf("unable to set panic log output: %s\n%s\n", err, output)
