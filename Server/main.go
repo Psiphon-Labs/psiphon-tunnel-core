@@ -44,7 +44,6 @@ func main() {
 	var generateTrafficRulesFilename string
 	var generateServerEntryFilename string
 	var generateLogFilename string
-	var generatePanicLogFilename string
 	var generateServerIPaddress string
 	var generateServerNetworkInterface string
 	var generateWebServerPort int
@@ -68,12 +67,6 @@ func main() {
 		"logFilename",
 		"",
 		"set application log file name and path; blank for stderr")
-
-	flag.StringVar(
-		&generatePanicLogFilename,
-		"panicLogFilename",
-		"",
-		"set application log file name and path for recording un-recovered panics; blank for stderr")
 
 	flag.StringVar(
 		&generateServerIPaddress,
@@ -150,7 +143,6 @@ func main() {
 			server.GenerateConfig(
 				&server.GenerateConfigParams{
 					LogFilename:          generateLogFilename,
-					PanicLogFilename:     generatePanicLogFilename,
 					ServerIPAddress:      serverIPaddress,
 					EnableSSHAPIRequests: true,
 					WebServerPort:        generateWebServerPort,
@@ -244,7 +236,7 @@ func panicHandler(output string) {
 
 		var jsonWriter io.Writer
 		if config.PanicLogFilename != "" {
-			panicLog, err := rotate.NewRotatableFileWriter(config.PanicLogFilename, 0666)
+			panicLog, err := rotate.NewRotatableFileWriter(config.LogFilename, 0666)
 			if err != nil {
 				fmt.Printf("unable to set panic log output: %s\n%s\n", err, output)
 				os.Exit(1)
