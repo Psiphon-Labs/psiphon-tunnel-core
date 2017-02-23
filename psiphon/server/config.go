@@ -63,11 +63,6 @@ type Config struct {
 	// to. When blank, logs are written to stderr.
 	LogFilename string
 
-	// PanicLogFilename specifies the path of the file to
-	// log unrecovered panics to. When blank, logs are
-	// written to stderr
-	PanicLogFilename string
-
 	// DiscoveryValueHMACKey is the network-wide secret value
 	// used to determine a unique discovery strategy.
 	DiscoveryValueHMACKey string
@@ -344,7 +339,6 @@ func validateNetworkAddress(address string, requireIPaddress bool) error {
 // a generated server config.
 type GenerateConfigParams struct {
 	LogFilename          string
-	PanicLogFilename     string
 	LogLevel             string
 	ServerIPAddress      string
 	WebServerPort        int
@@ -501,7 +495,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 	config := &Config{
 		LogLevel:                       logLevel,
 		LogFilename:                    params.LogFilename,
-		PanicLogFilename:               params.PanicLogFilename,
 		GeoIPDatabaseFilenames:         nil,
 		HostID:                         "example-host-id",
 		ServerIPAddress:                params.ServerIPAddress,
