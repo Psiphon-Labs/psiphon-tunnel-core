@@ -20,16 +20,24 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
+	"github.com/Psiphon-Inc/panicwrap"
+	"github.com/Psiphon-Inc/rotate-safe-writer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
 )
+
+var loadedConfigJSON []byte
 
 func main() {
 
@@ -172,6 +180,26 @@ func main() {
 			os.Exit(1)
 		}
 
+		loadedConfigJSON = configJSON
+
+		// Comments from: https://github.com/mitchellh/panicwrap#usage
+		// Unhandled panic wrapper. Logs it, then re-executes the current executable
+		exitStatus, err := panicwrap.Wrap(&panicwrap.WrapConfig{
+			Handler:        panicHandler,
+			ForwardSignals: []os.Signal{os.Interrupt, os.Kill, syscall.SIGTERM, syscall.SIGUSR1, syscall.SIGUSR2, syscall.SIGTSTP, syscall.SIGCONT},
+		})
+		if err != nil {
+			fmt.Printf("failed to set up the panic wrapper: %s\n", err)
+			os.Exit(1)
+		}
+
+		// If exitStatus >= 0, then we're the parent process and the panicwrap
+		// re-executed ourselves and completed. Just exit with the proper status.
+		if exitStatus >= 0 {
+			os.Exit(exitStatus)
+		}
+		// Otherwise, exitStatus < 0 means we're the child. Continue executing as normal
+
 		err = server.RunServices(configJSON)
 		if err != nil {
 			fmt.Printf("run failed: %s\n", err)
@@ -189,4 +217,48 @@ func (list *stringListFlag) String() string {
 func (list *stringListFlag) Set(flagValue string) error {
 	*list = append(*list, flagValue)
 	return nil
+}
+
+func panicHandler(output string) {
+	if len(loadedConfigJSON) > 0 {
+		config, err := server.LoadConfig([]byte(loadedConfigJSON))
+		if err != nil {
+			fmt.Printf("error parsing configuration file: %s\n%s\n", err, output)
+			os.Exit(1)
+		}
+
+		logEvent := make(map[string]string)
+		logEvent["host_id"] = config.HostID
+		logEvent["build_rev"] = common.GetBuildInfo().BuildRev
+		logEvent["timestamp"] = time.Now().Format(time.RFC3339)
+		logEvent["event_name"] = "panic"
+		logEvent["panic"] = output
+
+		// Logs are written to the configured file name. If no name is specified, logs are written to stderr
+		var jsonWriter io.Writer
+		if config.LogFilename != "" {
+			panicLog, err := rotate.NewRotatableFileWriter(config.LogFilename, 0666)
+			if err != nil {
+				fmt.Printf("unable to set panic log output: %s\n%s\n", err, output)
+				os.Exit(1)
+			}
+			defer panicLog.Close()
+
+			jsonWriter = panicLog
+		} else {
+			jsonWriter = os.Stderr
+		}
+
+		enc := json.NewEncoder(jsonWriter)
+		err = enc.Encode(logEvent)
+		if err != nil {
+			fmt.Printf("unable to serialize panic message to JSON: %s\n%s\n", err, output)
+			os.Exit(1)
+		}
+	} else {
+		fmt.Printf("no configuration JSON was loaded, cannot continue\n%s\n", output)
+		os.Exit(1)
+	}
+
+	os.Exit(1)
 }
