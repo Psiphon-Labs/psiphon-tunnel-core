@@ -690,23 +690,28 @@ func dialSsh(
 		}
 	} else {
 
-		tcpDialer := func(_, addr string) (net.Conn, error) {
-			return DialTCP(addr, dialConfig)
-		}
-
 		// For some direct connect servers, DialPluginProtocol
 		// will layer on another obfuscation protocol.
 		var dialedPlugin bool
 		dialedPlugin, dialConn, err = common.DialPluginProtocol(
 			NewNoticeWriter("DialPluginProtocol"),
-			tcpDialer,
+			func(_, addr string) (net.Conn, error) {
+
+				// Use a copy of DialConfig without pendingConns
+				// TODO: distinct pendingConns for plugins?
+				pluginDialConfig := new(DialConfig)
+				*pluginDialConfig = *dialConfig
+				pluginDialConfig.PendingConns = nil
+
+				return DialTCP(addr, pluginDialConfig)
+			},
 			directTCPDialAddress)
 
 		if dialedPlugin {
 			NoticeInfo("dialed plugin protocol for %s", serverEntry.IpAddress)
 		} else {
 			// Standard direct connection.
-			dialConn, err = tcpDialer("", directTCPDialAddress)
+			dialConn, err = DialTCP(directTCPDialAddress, dialConfig)
 		}
 
 		if err != nil {
