@@ -510,7 +510,7 @@ func (portForward *ClientSeedPortForward) UpdateProgress(
 		// As a consequence, progress may be dropped at the exact time of
 		// time period rollover.
 
-		seedSpec := seedProgress.scheme.SeedSpecs[progressReference.seedProgressIndex]
+		seedSpec := seedProgress.scheme.SeedSpecs[progressReference.trafficProgressIndex]
 
 		alreadyExceedsTargets := trafficProgress.exceeds(&seedSpec.Targets)
 
