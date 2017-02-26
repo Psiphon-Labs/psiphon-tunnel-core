@@ -40,7 +40,7 @@ func TestOSL(t *testing.T) {
 
       "Regions" : ["US", "CA"],
 
-      "PropagationChannelIDs" : ["2995DB0C968C59C4F23E87988D9C0D41", "E742C25A6D8BA8C17F37E725FA628569"],
+      "PropagationChannelIDs" : ["2995DB0C968C59C4F23E87988D9C0D41", "E742C25A6D8BA8C17F37E725FA628569", "B4A780E67695595FA486E9B900EA7335"],
 
       "MasterKey" : "wFuSbqU/pJ/35vRmoM8T9ys1PgDa8uzJps1Y+FNKa5U=",
 
@@ -100,7 +100,7 @@ func TestOSL(t *testing.T) {
 
       "Regions" : ["US", "CA"],
 
-      "PropagationChannelIDs" : ["36F1CF2DF1250BF0C7BA0629CE3DC657"],
+      "PropagationChannelIDs" : ["36F1CF2DF1250BF0C7BA0629CE3DC657", "B4A780E67695595FA486E9B900EA7335"],
 
       "MasterKey" : "fcyQy8JSxLXHt/Iom9Qj9wMnSjrsccTiiSPEsJicet4=",
 
@@ -293,6 +293,23 @@ func TestOSL(t *testing.T) {
 
 		if len(clientSeedState.GetSeedPayload().SLOKs) != 1 {
 			t.Fatalf("expected 1 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
+		}
+	})
+
+	t.Run("concurrent schemes", func(t *testing.T) {
+
+		rolloverToNextSLOKTime()
+
+		clientSeedState := config.NewClientSeedState("US", "B4A780E67695595FA486E9B900EA7335", nil)
+
+		clientSeedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1"))
+
+		clientSeedPortForward.UpdateProgress(5, 5, 5)
+
+		clientSeedPortForward.UpdateProgress(5, 5, 5)
+
+		if len(clientSeedState.GetSeedPayload().SLOKs) != 5 {
+			t.Fatalf("expected 5 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
 		}
 	})
 

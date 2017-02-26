@@ -414,6 +414,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if err != nil {
 		t.Fatalf("error initializing client datastore: %s", err)
 	}
+	psiphon.DeleteSLOKs()
 
 	controller, err := psiphon.NewController(clientConfig)
 	if err != nil {
@@ -544,8 +545,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Test: await SLOK payload
 
 	if !runConfig.denyTrafficRules {
+
 		time.Sleep(1 * time.Second)
 		waitOnNotification(t, slokSeeded, timeoutSignal, "SLOK seeded timeout exceeded")
+
+		numSLOKs := psiphon.CountSLOKs()
+		if numSLOKs != expectedNumSLOKs {
+			t.Fatalf("unexpected number of SLOKs: %d", numSLOKs)
+		}
 	}
 }
 
@@ -871,6 +878,8 @@ func paveTrafficRulesFile(
 	}
 }
 
+var expectedNumSLOKs = 3
+
 func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
 
 	oslConfigJSONFormat := `
@@ -911,6 +920,32 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
               "Threshold": 2
             }
           ]
+        },
+        {
+          "Epoch" : "%s",
+          "Regions" : [],
+          "PropagationChannelIDs" : ["%s"],
+          "MasterKey" : "HDc/mvd7e+lKDJD0fMpJW66YJ/VW4iqDRjeclEsMnro=",
+          "SeedSpecs" : [
+            {
+              "ID" : "/M0vsT0IjzmI0MvTI9IYe8OVyeQGeaPZN2xGxfLw/UQ=",
+              "UpstreamSubnets" : ["0.0.0.0/0"],
+              "Targets" :
+              {
+                  "BytesRead" : 1,
+                  "BytesWritten" : 1,
+                  "PortForwardDurationNanoseconds" : 1
+              }
+            }
+          ],
+          "SeedSpecThreshold" : 1,
+          "SeedPeriodNanoseconds" : 10000000000,
+          "SeedPeriodKeySplits": [
+            {
+              "Total": 1,
+              "Threshold": 1
+            }
+          ]
         }
       ]
     }
@@ -923,7 +958,9 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
 	epochStr := epoch.Format(time.RFC3339Nano)
 
 	oslConfigJSON := fmt.Sprintf(
-		oslConfigJSONFormat, epochStr, propagationChannelID)
+		oslConfigJSONFormat,
+		epochStr, propagationChannelID,
+		epochStr, propagationChannelID)
 
 	err := ioutil.WriteFile(oslConfigFilename, []byte(oslConfigJSON), 0600)
 	if err != nil {
