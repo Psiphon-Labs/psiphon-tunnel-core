@@ -695,6 +695,7 @@ func dialSsh(
 		var dialedPlugin bool
 		dialedPlugin, dialConn, err = common.DialPluginProtocol(
 			NewNoticeWriter("DialPluginProtocol"),
+			pendingConns,
 			func(_, addr string) (net.Conn, error) {
 
 				// Use a copy of DialConfig without pendingConns
