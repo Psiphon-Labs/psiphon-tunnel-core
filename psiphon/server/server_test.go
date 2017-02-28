@@ -387,7 +387,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "ClientVersion" : "0",
         "SponsorId" : "0",
         "PropagationChannelId" : "0",
-        "DisableRemoteServerListFetcher" : true
+        "DisableRemoteServerListFetcher" : true,
+        "UseIndistinguishableTLS" : true
     }`
 	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
 

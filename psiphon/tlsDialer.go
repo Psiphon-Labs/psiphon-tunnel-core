@@ -177,6 +177,25 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 
 	tlsConfig := &tls.Config{}
 
+	// Select indistinguishable TLS implementation
+	useOpenSSL := false
+	if config.UseIndistinguishableTLS {
+
+		// OpenSSL cannot be used in all cases
+		canUseOpenSSL := openSSLSupported() &&
+			config.ObfuscatedSessionTicketKey == "" &&
+			(config.SkipVerify ||
+				// TODO: config.VerifyLegacyCertificate != nil ||
+				config.TrustedCACertificatesFilename != "")
+
+		if canUseOpenSSL && common.FlipCoin() {
+			useOpenSSL = true
+		} else {
+			tlsConfig.EmulateChrome = true
+			tlsConfig.ClientSessionCache = tls.NewLRUClientSessionCache(0)
+		}
+	}
+
 	if config.SkipVerify {
 		tlsConfig.InsecureSkipVerify = true
 	}
@@ -185,9 +204,7 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 		// Set the ServerName and rely on the usual logic in
 		// tls.Conn.Handshake() to do its verification.
 		// Note: Go TLS will automatically omit this ServerName when it's an IP address
-		if net.ParseIP(hostname) == nil {
-			tlsConfig.ServerName = config.SNIServerName
-		}
+		tlsConfig.ServerName = config.SNIServerName
 	} else {
 		// No SNI.
 		// Disable verification in tls.Conn.Handshake().  We'll verify manually
@@ -217,12 +234,7 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 	var conn handshakeConn
 
 	// When supported, use OpenSSL TLS as a more indistinguishable TLS.
-	if config.UseIndistinguishableTLS &&
-		config.ObfuscatedSessionTicketKey == "" &&
-		(config.SkipVerify ||
-			// TODO: config.VerifyLegacyCertificate != nil ||
-			config.TrustedCACertificatesFilename != "") {
-
+	if useOpenSSL {
 		conn, err = newOpenSSLConn(rawConn, hostname, config)
 		if err != nil {
 			rawConn.Close()
