@@ -677,13 +677,13 @@ func makeTunneledNTPRequestAttempt(
 			return
 		}
 
-		updgwProtocolMessage, err := readUdpgwMessage(socksTCPConn, buffer)
+		udpgwProtocolMessage, err := readUdpgwMessage(socksTCPConn, buffer)
 		if err != nil {
 			t.Logf("readUdpgwMessage for %s failed: %s", destination, err)
 			return
 		}
 
-		_, err = serverUDPConn.WriteToUDP(updgwProtocolMessage.packet, clientAddr)
+		_, err = serverUDPConn.WriteToUDP(udpgwProtocolMessage.packet, clientAddr)
 		if err != nil {
 			t.Logf("serverUDPConn.Write for %s failed: %s", destination, err)
 			return
