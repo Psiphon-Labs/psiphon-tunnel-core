@@ -82,6 +82,11 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
 )
 
+const (
+	TLSProfileAndroid = "Android"
+	TLSProfileChrome  = "Chrome"
+)
+
 // CustomTLSConfig contains parameters to determine the behavior
 // of CustomTLSDial.
 type CustomTLSConfig struct {
@@ -117,6 +122,18 @@ type CustomTLSConfig struct {
 	// Go's TLS has a distinct fingerprint that may be used for blocking.
 	UseIndistinguishableTLS bool
 
+	// TLSProfile specifies a particular indistinguishable TLS profile
+	// to use for the TLS dial. UseIndistinguishableTLS must be set for
+	// TLSProfile to take effect.
+	// When TLSProfile is "" and UseIndistinguishableTLS is set, a profile
+	// is selected at random. Setting TLSProfile allows the caller to pin
+	// the selection so all TLS connections in a certain context (e.g. a
+	// single meek connection) use a consistent value.
+	// Valid values include "Android" and "Chrome". The value should be
+	// selected by calling SelectTLSProfile, which will pick a value at
+	// random, but subject to compatibility constraints.
+	TLSProfile string
+
 	// TrustedCACertificatesFilename specifies a file containing trusted
 	// CA certs. Directory contents should be compatible with OpenSSL's
 	// SSL_CTX_load_verify_locations
@@ -126,6 +143,30 @@ type CustomTLSConfig struct {
 	// ObfuscatedSessionTicketKey enables obfuscated session tickets
 	// using the specified key.
 	ObfuscatedSessionTicketKey string
+}
+
+func SelectTLSProfile(
+	useIndistinguishableTLS, useObfuscatedSessionTickets,
+	skipVerify, haveTrustedCACertificates bool) string {
+
+	selectedTLSProfile := ""
+
+	if useIndistinguishableTLS {
+
+		// OpenSSL cannot be used in all cases
+		canUseOpenSSL := openSSLSupported() &&
+			!useObfuscatedSessionTickets &&
+			// TODO: (... || config.VerifyLegacyCertificate != nil)
+			(skipVerify || haveTrustedCACertificates)
+
+		if canUseOpenSSL && common.FlipCoin() {
+			selectedTLSProfile = TLSProfileAndroid
+		} else {
+			selectedTLSProfile = TLSProfileChrome
+		}
+	}
+
+	return selectedTLSProfile
 }
 
 func NewCustomTLSDialer(config *CustomTLSConfig) Dialer {
@@ -181,16 +222,32 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 	useOpenSSL := false
 	if config.UseIndistinguishableTLS {
 
-		// OpenSSL cannot be used in all cases
-		canUseOpenSSL := openSSLSupported() &&
-			config.ObfuscatedSessionTicketKey == "" &&
-			(config.SkipVerify ||
-				// TODO: config.VerifyLegacyCertificate != nil ||
-				config.TrustedCACertificatesFilename != "")
+		selectedTLSProfile := config.TLSProfile
 
-		if canUseOpenSSL && common.FlipCoin() {
+		if selectedTLSProfile == "" {
+			selectedTLSProfile = SelectTLSProfile(
+				true,
+				config.ObfuscatedSessionTicketKey != "",
+				config.SkipVerify,
+				config.TrustedCACertificatesFilename != "")
+		}
+
+		switch selectedTLSProfile {
+		case TLSProfileAndroid:
+
+			// Validate selection; if config.TLSProfile was preset, it should
+			// have been selected using SelectTLSProfile.
+			if !openSSLSupported() ||
+				config.ObfuscatedSessionTicketKey != "" ||
+				// TODO: (... || config.VerifyLegacyCertificate != nil)
+				!(config.SkipVerify || config.TrustedCACertificatesFilename != "") {
+				return nil, common.ContextError(errors.New("TLSProfileAndroid not supported"))
+			}
+
 			useOpenSSL = true
-		} else {
+
+		case TLSProfileChrome:
+
 			tlsConfig.EmulateChrome = true
 			tlsConfig.ClientSessionCache = tls.NewLRUClientSessionCache(0)
 		}

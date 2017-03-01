@@ -182,7 +182,9 @@ func noticeServerDialStats(noticeType, ipAddress, region, protocol string, tunne
 			"meekHostHeader", tunnelDialStats.MeekHostHeader,
 			"meekTransformedHostName", tunnelDialStats.MeekTransformedHostName,
 			"selectedUserAgent", tunnelDialStats.SelectedUserAgent,
-			"userAgent", tunnelDialStats.UserAgent)
+			"userAgent", tunnelDialStats.UserAgent,
+			"selectedTLSProfile", tunnelDialStats.SelectedTLSProfile,
+			"TLSProfile", tunnelDialStats.TLSProfile)
 	} else {
 		outputNotice(noticeType, noticeIsDiagnostic,
 			"ipAddress", ipAddress,

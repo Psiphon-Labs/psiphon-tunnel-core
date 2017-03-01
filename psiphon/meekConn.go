@@ -73,6 +73,13 @@ type MeekConfig struct {
 	// UseHTTPS indicates whether to use HTTPS (true) or HTTP (false).
 	UseHTTPS bool
 
+	// TLSProfile specifies the TLS profile to use for all underlying
+	// TLS connections created by this meek connection. Valid values
+	// are the possible values for CustomTLSConfig.TLSProfile.
+	// TLSProfile will be used only when DialConfig.UseIndistinguishableTLS
+	// is set in the DialConfig passed in to DialMeek.
+	TLSProfile string
+
 	// UseObfuscatedSessionTickets indicates whether to use obfuscated
 	// session tickets. Assumes UseHTTPS is true.
 	UseObfuscatedSessionTickets bool
@@ -201,6 +208,7 @@ func DialMeek(
 			SNIServerName:                 meekConfig.SNIServerName,
 			SkipVerify:                    true,
 			UseIndistinguishableTLS:       meekDialConfig.UseIndistinguishableTLS,
+			TLSProfile:                    meekConfig.TLSProfile,
 			TrustedCACertificatesFilename: meekDialConfig.TrustedCACertificatesFilename,
 		}
 
