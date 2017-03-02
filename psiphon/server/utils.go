@@ -26,6 +26,8 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
+	"io"
 	"math/big"
 	"time"
 
@@ -125,4 +127,61 @@ func GenerateWebServerCertificate(commonName string) (string, string, error) {
 	)
 
 	return string(webServerCertificate), string(webServerPrivateKey), nil
+}
+
+// IntentionalPanicError is an error type that is used
+// when calling panic() in a situation where recovers
+// should propagate the panic.
+type IntentionalPanicError struct {
+	message string
+}
+
+// NewIntentionalPanicError creates a new IntentionalPanicError.
+func NewIntentionalPanicError(message string) error {
+	return IntentionalPanicError{message: message}
+}
+
+// Error implements the error interface.
+func (err IntentionalPanicError) Error() string {
+	return err.message
+}
+
+// AddStack creates a new IntentionalPanicError which
+// records the given stack. When a IntentionalPanicError is
+// recovered, call AddStack with the debug.Stack() at the
+// point of recovery, and panic with the resulting
+// IntentionalPanicError.
+func (err IntentionalPanicError) AddStack(debugStack []byte) string {
+	return NewIntentionalPanicError(
+		fmt.Sprintf("intentional panic error: %s\nstack: %s\n",
+			intentionalPanic.Error(),
+			string(debugStack)))
+}
+
+// PanickingLogWriter wraps an io.Writer and intentionally
+// panics when a Write() fails.
+type PanickingLogWriter struct {
+	name   string
+	writer io.Writer
+}
+
+// NewPanickingLogWriter creates a new PanickingLogWriter.
+func NewPanickingLogWriter(
+	name string, writer io.Writer) *PanickingLogWriter {
+
+	return &PanickingLogWriter{
+		name:   name,
+		writer: writer,
+	}
+}
+
+// Write implements the io.Writer interface.
+func (w *PanickingLogWriter) Write(p []byte) (n int, err error) {
+	n, err = w.writer.Write(p)
+	if err != nil {
+		panic(
+			NewIntentionalPanicError(
+				fmt.Sprintf("fatal write to %s failed: %s", w.name, err)))
+	}
+	return
 }

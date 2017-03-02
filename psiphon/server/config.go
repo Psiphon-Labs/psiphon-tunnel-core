@@ -63,10 +63,9 @@ type Config struct {
 	// to. When blank, logs are written to stderr.
 	LogFilename string
 
-	// PanicLogFilename specifies the path of the file to
-	// log unrecovered panics to. When blank, logs are
-	// written to stderr
-	PanicLogFilename string
+	// SkipPanickingLogWriter disables panicking when
+	// unable to write any logs.
+	SkipPanickingLogWriter bool
 
 	// DiscoveryValueHMACKey is the network-wide secret value
 	// used to determine a unique discovery strategy.
@@ -343,14 +342,14 @@ func validateNetworkAddress(address string, requireIPaddress bool) error {
 // GenerateConfigParams specifies customizations to be applied to
 // a generated server config.
 type GenerateConfigParams struct {
-	LogFilename          string
-	PanicLogFilename     string
-	LogLevel             string
-	ServerIPAddress      string
-	WebServerPort        int
-	EnableSSHAPIRequests bool
-	TunnelProtocolPorts  map[string]int
-	TrafficRulesFilename string
+	LogFilename            string
+	SkipPanickingLogWriter bool
+	LogLevel               string
+	ServerIPAddress        string
+	WebServerPort          int
+	EnableSSHAPIRequests   bool
+	TunnelProtocolPorts    map[string]int
+	TrafficRulesFilename   string
 }
 
 // GenerateConfig creates a new Psiphon server config. It returns JSON
@@ -501,7 +500,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 	config := &Config{
 		LogLevel:                       logLevel,
 		LogFilename:                    params.LogFilename,
-		PanicLogFilename:               params.PanicLogFilename,
+		SkipPanickingLogWriter:         params.SkipPanickingLogWriter,
 		GeoIPDatabaseFilenames:         nil,
 		HostID:                         "example-host-id",
 		ServerIPAddress:                params.ServerIPAddress,

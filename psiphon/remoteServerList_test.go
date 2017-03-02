@@ -76,6 +76,9 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 			TunnelProtocolPorts:  map[string]int{"OSSH": 4001},
 			LogFilename:          filepath.Join(testDataDirName, "psiphond.log"),
 			LogLevel:             "debug",
+
+			// "defer os.RemoveAll" will cause a log write error
+			SkipPanickingLogWriter: true,
 		})
 	if err != nil {
 		t.Fatalf("error generating server config: %s", err)
