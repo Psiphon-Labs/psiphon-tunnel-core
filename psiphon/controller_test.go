@@ -497,7 +497,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	// tests and ensure tests complete within fixed deadlines.
 	fetchRemoteServerListRetryPeriodSeconds := 0
 	config.FetchRemoteServerListRetryPeriodSeconds = &fetchRemoteServerListRetryPeriodSeconds
-	downloadUpgradeRetryPeriodSeconds := 0
+	downloadUpgradeRetryPeriodSeconds := 1
 	config.DownloadUpgradeRetryPeriodSeconds = &downloadUpgradeRetryPeriodSeconds
 	establishTunnelPausePeriodSeconds := 1
 	config.EstablishTunnelPausePeriodSeconds = &establishTunnelPausePeriodSeconds
