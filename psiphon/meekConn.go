@@ -477,9 +477,15 @@ func (meek *MeekConn) relay() {
 	// Note: meek.Close() calls here in relay() are made asynchronously
 	// (using goroutines) since Close() will wait on this WaitGroup.
 	defer meek.relayWaitGroup.Done()
-	interval := MIN_POLL_INTERVAL
+
+	interval := common.JitterDuration(
+		MIN_POLL_INTERVAL,
+		MIN_POLL_INTERVAL_JITTER)
+
 	timeout := time.NewTimer(interval)
+
 	sendPayload := make([]byte, MAX_SEND_PAYLOAD_LENGTH)
+
 	for {
 		timeout.Reset(interval)
 		// Block until there is payload to send or it is time to poll
@@ -541,6 +547,10 @@ func (meek *MeekConn) relay() {
 
 			if common.FlipCoin() {
 				interval = common.JitterDuration(
+					interval,
+					POLL_INTERVAL_JITTER)
+			} else {
+				interval = common.JitterDuration(
 					time.Duration(float64(interval)*POLL_INTERVAL_MULTIPLIER),
 					POLL_INTERVAL_JITTER)
 			}
@@ -550,7 +560,6 @@ func (meek *MeekConn) relay() {
 					MAX_POLL_INTERVAL,
 					MAX_POLL_INTERVAL_JITTER)
 			}
-
 		}
 	}
 }
