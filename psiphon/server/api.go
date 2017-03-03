@@ -99,7 +99,7 @@ func dispatchAPIRequestHandler(
 	defer func() {
 		if e := recover(); e != nil {
 			if intentionalPanic, ok := e.(IntentionalPanicError); ok {
-				panic(intentionalPanic.AddStack(debug.Stack()))
+				panic(intentionalPanic)
 			} else {
 				log.LogPanicRecover(e, debug.Stack())
 				reterr = common.ContextError(errors.New("request handler panic"))

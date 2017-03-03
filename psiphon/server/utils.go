@@ -137,25 +137,14 @@ type IntentionalPanicError struct {
 }
 
 // NewIntentionalPanicError creates a new IntentionalPanicError.
-func NewIntentionalPanicError(message string) error {
-	return IntentionalPanicError{message: message}
+func NewIntentionalPanicError(errorMessage string) error {
+	return IntentionalPanicError{
+		message: fmt.Sprintf("intentional panic error: %s", errorMessage)}
 }
 
 // Error implements the error interface.
 func (err IntentionalPanicError) Error() string {
 	return err.message
-}
-
-// AddStack creates a new IntentionalPanicError which
-// records the given stack. When a IntentionalPanicError is
-// recovered, call AddStack with the debug.Stack() at the
-// point of recovery, and panic with the resulting
-// IntentionalPanicError.
-func (err IntentionalPanicError) AddStack(debugStack []byte) error {
-	return NewIntentionalPanicError(
-		fmt.Sprintf("intentional panic error: %s\nstack: %s\n",
-			err.Error(),
-			string(debugStack)))
 }
 
 // PanickingLogWriter wraps an io.Writer and intentionally
