@@ -21,6 +21,8 @@ package common
 
 import (
 	"bytes"
+	"fmt"
+	"math"
 	"testing"
 	"time"
 )
@@ -51,6 +53,46 @@ func TestMakeRandomPeriod(t *testing.T) {
 
 	if res1 == res2 {
 		t.Error("duration should have randomness difference between calls")
+	}
+}
+
+func TestJitterPercentage(t *testing.T) {
+
+	testCases := []struct {
+		n           int64
+		p           float64
+		expectedMin int64
+		expectedMax int64
+	}{
+		{100, 0.1, 90, 110},
+		{1000, 0.3, 700, 1300},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(fmt.Sprintf("jitter case: %+v", testCase), func(t *testing.T) {
+
+			min := int64(math.MaxInt64)
+			max := int64(0)
+
+			for i := 0; i < 100000; i++ {
+
+				x := JitterPercentage(testCase.n, testCase.p)
+				if x < min {
+					min = x
+				}
+				if x > max {
+					max = x
+				}
+			}
+
+			if min != testCase.expectedMin {
+				t.Errorf("unexpected minimum jittered value: %d", min)
+			}
+
+			if max != testCase.expectedMax {
+				t.Errorf("unexpected maximum jittered value: %d", max)
+			}
+		})
 	}
 }
 

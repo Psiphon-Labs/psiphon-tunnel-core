@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"math/big"
 	"runtime"
 	"strings"
@@ -132,6 +133,22 @@ func MakeRandomStringBase64(byteLength int) (string, error) {
 		return "", ContextError(err)
 	}
 	return base64.RawURLEncoding.EncodeToString(bytes), nil
+}
+
+// JitterPercentage returns n +/- the given percentage.
+// For example, for n = 100 and p = 0.1, the return value
+// will be in the range [90, 110].
+func JitterPercentage(n int64, percentage float64) int64 {
+	a := int64(math.Ceil(float64(n) * percentage))
+	r, _ := MakeSecureRandomInt64(2*a + 1)
+	return n + r - a
+}
+
+// JitterDurationPercentage is a helper function that
+// wraps JitterPercentage.
+func JitterDurationPercentage(
+	d time.Duration, percentage float64) time.Duration {
+	return time.Duration(JitterPercentage(int64(d), percentage))
 }
 
 // GetCurrentTimestamp returns the current time in UTC as
