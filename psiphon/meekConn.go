@@ -533,20 +533,20 @@ func (meek *MeekConn) relay() {
 
 		} else if interval == 0 {
 
-			interval = common.JitterDurationPercentage(
+			interval = common.JitterDuration(
 				MIN_POLL_INTERVAL,
 				MIN_POLL_INTERVAL_JITTER)
 
 		} else {
 
 			if common.FlipCoin() {
-				interval = common.JitterDurationPercentage(
+				interval = common.JitterDuration(
 					time.Duration(float64(interval)*POLL_INTERVAL_MULTIPLIER),
 					POLL_INTERVAL_JITTER)
 			}
 
 			if interval >= MAX_POLL_INTERVAL {
-				interval = common.JitterDurationPercentage(
+				interval = common.JitterDuration(
 					MAX_POLL_INTERVAL,
 					MAX_POLL_INTERVAL_JITTER)
 			}

@@ -56,11 +56,11 @@ func TestMakeRandomPeriod(t *testing.T) {
 	}
 }
 
-func TestJitterPercentage(t *testing.T) {
+func TestJitter(t *testing.T) {
 
 	testCases := []struct {
 		n           int64
-		p           float64
+		factor      float64
 		expectedMin int64
 		expectedMax int64
 	}{
@@ -76,7 +76,7 @@ func TestJitterPercentage(t *testing.T) {
 
 			for i := 0; i < 100000; i++ {
 
-				x := JitterPercentage(testCase.n, testCase.p)
+				x := Jitter(testCase.n, testCase.factor)
 				if x < min {
 					min = x
 				}
