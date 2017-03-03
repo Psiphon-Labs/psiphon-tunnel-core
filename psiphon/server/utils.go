@@ -151,10 +151,10 @@ func (err IntentionalPanicError) Error() string {
 // recovered, call AddStack with the debug.Stack() at the
 // point of recovery, and panic with the resulting
 // IntentionalPanicError.
-func (err IntentionalPanicError) AddStack(debugStack []byte) string {
+func (err IntentionalPanicError) AddStack(debugStack []byte) error {
 	return NewIntentionalPanicError(
 		fmt.Sprintf("intentional panic error: %s\nstack: %s\n",
-			intentionalPanic.Error(),
+			err.Error(),
 			string(debugStack)))
 }
 
