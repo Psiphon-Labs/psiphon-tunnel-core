@@ -616,7 +616,7 @@ func dialSsh(
 		}
 	}
 
-	dialCustomHeaders, selectedUserAgent = common.UserAgentIfUnset(config.CustomHeaders)
+	dialCustomHeaders, selectedUserAgent = UserAgentIfUnset(config.CustomHeaders)
 
 	// Use an asynchronous callback to record the resolved IP address when
 	// dialing a domain name. Note that DialMeek doesn't immediately
@@ -705,7 +705,8 @@ func dialSsh(
 		// For some direct connect servers, DialPluginProtocol
 		// will layer on another obfuscation protocol.
 		var dialedPlugin bool
-		dialedPlugin, dialConn, err = common.DialPluginProtocol(
+		dialedPlugin, dialConn, err = DialPluginProtocol(
+			config,
 			NewNoticeWriter("DialPluginProtocol"),
 			pendingConns,
 			func(_, addr string) (net.Conn, error) {
