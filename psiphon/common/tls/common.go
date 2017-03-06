@@ -166,6 +166,9 @@ var supportedSignatureAlgorithms = []signatureAndHash{
 	{hashSHA384, signatureECDSA},
 	{hashSHA1, signatureRSA},
 	{hashSHA1, signatureECDSA},
+
+	// [Psiphon]
+	{hashSHA512, signatureRSA},
 }
 
 // ConnectionState records basic TLS details about the connection.
