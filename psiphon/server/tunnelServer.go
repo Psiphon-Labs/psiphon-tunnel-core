@@ -483,8 +483,8 @@ func (sshServer *sshServer) getLoadStats() map[string]interface{} {
 
 		for _, region := range []string{"ALL", client.geoIPData.Country} {
 
-			if protocolStats[tunnelProtocol][region] == nil {
-				protocolStats[tunnelProtocol][region] = make(map[string]int64)
+			if protocolStats[client.tunnelProtocol][region] == nil {
+				protocolStats[client.tunnelProtocol][region] = make(map[string]int64)
 			}
 
 			// Note: can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
