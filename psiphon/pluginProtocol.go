@@ -17,12 +17,14 @@
  *
  */
 
-package common
+package psiphon
 
 import (
 	"io"
 	"net"
 	"sync/atomic"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 var registeredPluginProtocolDialer atomic.Value
@@ -41,8 +43,9 @@ type PluginProtocolNetDialer func(network, addr string) (net.Conn, error)
 // PluginProtocolDialer must add its connection to pendingConns
 // before the initial dial to allow for interruption.
 type PluginProtocolDialer func(
+	config *Config,
 	loggerOutput io.Writer,
-	pendingConns *Conns,
+	pendingConns *common.Conns,
 	netDialer PluginProtocolNetDialer,
 	addr string) (
 	bool, net.Conn, error)
@@ -56,8 +59,9 @@ func RegisterPluginProtocol(protcolDialer PluginProtocolDialer) {
 // DialPluginProtocol uses the current plugin protocol dialer,
 // if set, to connect to addr over the plugin protocol.
 func DialPluginProtocol(
+	config *Config,
 	loggerOutput io.Writer,
-	pendingConns *Conns,
+	pendingConns *common.Conns,
 	netDialer PluginProtocolNetDialer,
 	addr string) (
 	bool, net.Conn, error) {
@@ -65,7 +69,7 @@ func DialPluginProtocol(
 	dialer := registeredPluginProtocolDialer.Load()
 	if dialer != nil {
 		return dialer.(PluginProtocolDialer)(
-			loggerOutput, pendingConns, netDialer, addr)
+			config, loggerOutput, pendingConns, netDialer, addr)
 	}
 	return false, nil, nil
 }

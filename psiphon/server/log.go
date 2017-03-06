@@ -203,6 +203,33 @@ func InitLogging(config *Config) (retErr error) {
 				retErr = common.ContextError(err)
 				return
 			}
+
+			if !config.SkipPanickingLogWriter {
+
+				// Use PanickingLogWriter, which will intentionally
+				// panic when a Write fails. Set SkipPanickingLogWriter
+				// if this behavior is not desired.
+				//
+				// Note that NewRotatableFileWriter will first attempt
+				// a retry when a Write fails.
+				//
+				// It is assumed that continuing operation while unable
+				// to log is unacceptable; and that the psiphond service
+				// is managed and will restart when it terminates.
+				//
+				// It is further assumed that panicking will result in
+				// an error that is externally logged and reported to a
+				// monitoring system.
+				//
+				// TODO: An orderly shutdown may be preferred, as some
+				// data will be lost in a panic (e.g., server_tunnel logs).
+				// It may be possible to perform an orderly shutdown first
+				// and then panic, or perform an orderly shutdown and
+				// simulate a panic message that will be reported.
+
+				logWriter = NewPanickingLogWriter(config.LogFilename, logWriter)
+			}
+
 		} else {
 			logWriter = os.Stderr
 		}

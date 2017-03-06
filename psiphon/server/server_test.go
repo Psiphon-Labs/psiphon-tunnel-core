@@ -913,7 +913,7 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
             }
           ],
           "SeedSpecThreshold" : 2,
-          "SeedPeriodNanoseconds" : 3600000000000,
+          "SeedPeriodNanoseconds" : 2592000000000000,
           "SeedPeriodKeySplits": [
             {
               "Total": 2,
@@ -939,7 +939,7 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
             }
           ],
           "SeedSpecThreshold" : 1,
-          "SeedPeriodNanoseconds" : 3600000000000,
+          "SeedPeriodNanoseconds" : 2592000000000000,
           "SeedPeriodKeySplits": [
             {
               "Total": 1,
@@ -954,7 +954,7 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
 	propagationChannelID, _ := common.MakeRandomStringHex(8)
 
 	now := time.Now().UTC()
-	epoch := now.Truncate(1 * time.Hour)
+	epoch := now.Truncate(720 * time.Hour)
 	epochStr := epoch.Format(time.RFC3339Nano)
 
 	oslConfigJSON := fmt.Sprintf(

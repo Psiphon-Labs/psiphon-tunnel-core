@@ -54,8 +54,11 @@ const (
 	FULL_RECEIVE_BUFFER_LENGTH     = 4194304
 	READ_PAYLOAD_CHUNK_LENGTH      = 65536
 	MIN_POLL_INTERVAL              = 100 * time.Millisecond
+	MIN_POLL_INTERVAL_JITTER       = 0.3
 	MAX_POLL_INTERVAL              = 5 * time.Second
-	POLL_INTERNAL_MULTIPLIER       = 1.5
+	MAX_POLL_INTERVAL_JITTER       = 0.1
+	POLL_INTERVAL_MULTIPLIER       = 1.5
+	POLL_INTERVAL_JITTER           = 0.1
 	MEEK_ROUND_TRIP_RETRY_DEADLINE = 1 * time.Second
 	MEEK_ROUND_TRIP_RETRY_DELAY    = 50 * time.Millisecond
 	MEEK_ROUND_TRIP_TIMEOUT        = 20 * time.Second
@@ -474,9 +477,15 @@ func (meek *MeekConn) relay() {
 	// Note: meek.Close() calls here in relay() are made asynchronously
 	// (using goroutines) since Close() will wait on this WaitGroup.
 	defer meek.relayWaitGroup.Done()
-	interval := MIN_POLL_INTERVAL
+
+	interval := common.JitterDuration(
+		MIN_POLL_INTERVAL,
+		MIN_POLL_INTERVAL_JITTER)
+
 	timeout := time.NewTimer(interval)
+
 	sendPayload := make([]byte, MAX_SEND_PAYLOAD_LENGTH)
+
 	for {
 		timeout.Reset(interval)
 		// Block until there is payload to send or it is time to poll
@@ -517,14 +526,39 @@ func (meek *MeekConn) relay() {
 			go meek.Close()
 			return
 		}
+
+		// Calculate polling interval. When data is received,
+		// immediately request more. Otherwise, schedule next
+		// poll with exponential back off. Jitter and coin
+		// flips are used to avoid trivial, static traffic
+		// timing patterns.
+
 		if receivedPayloadSize > 0 || sendPayloadSize > 0 {
+
 			interval = 0
+
 		} else if interval == 0 {
-			interval = MIN_POLL_INTERVAL
+
+			interval = common.JitterDuration(
+				MIN_POLL_INTERVAL,
+				MIN_POLL_INTERVAL_JITTER)
+
 		} else {
-			interval = time.Duration(float64(interval) * POLL_INTERNAL_MULTIPLIER)
+
+			if common.FlipCoin() {
+				interval = common.JitterDuration(
+					interval,
+					POLL_INTERVAL_JITTER)
+			} else {
+				interval = common.JitterDuration(
+					time.Duration(float64(interval)*POLL_INTERVAL_MULTIPLIER),
+					POLL_INTERVAL_JITTER)
+			}
+
 			if interval >= MAX_POLL_INTERVAL {
-				interval = MAX_POLL_INTERVAL
+				interval = common.JitterDuration(
+					MAX_POLL_INTERVAL,
+					MAX_POLL_INTERVAL_JITTER)
 			}
 		}
 	}
