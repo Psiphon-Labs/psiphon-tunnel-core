@@ -466,11 +466,19 @@ func (sshServer *sshServer) getLoadStats() map[string]interface{} {
 	for tunnelProtocol, regionAcceptedClientCounts := range sshServer.acceptedClientCounts {
 		total := int64(0)
 		for region, acceptedClientCount := range regionAcceptedClientCounts {
-			if protocolStats[tunnelProtocol][region] == nil {
-				protocolStats[tunnelProtocol][region] = make(map[string]int64)
+			if acceptedClientCount > 0 {
+				if protocolStats[tunnelProtocol][region] == nil {
+					protocolStats[tunnelProtocol][region] = make(map[string]int64)
+					protocolStats[tunnelProtocol][region]["accepted_clients"] = 0
+					protocolStats[tunnelProtocol][region]["established_clients"] = 0
+					protocolStats[tunnelProtocol][region]["tcp_port_forwards"] = 0
+					protocolStats[tunnelProtocol][region]["total_tcp_port_forwards"] = 0
+					protocolStats[tunnelProtocol][region]["udp_port_forwards"] = 0
+					protocolStats[tunnelProtocol][region]["total_udp_port_forwards"] = 0
+				}
+				protocolStats[tunnelProtocol][region]["accepted_clients"] = acceptedClientCount
+				total += acceptedClientCount
 			}
-			protocolStats[tunnelProtocol][region]["accepted_clients"] = acceptedClientCount
-			total += acceptedClientCount
 		}
 		protocolStats[tunnelProtocol]["ALL"]["accepted_clients"] = total
 	}
@@ -485,6 +493,12 @@ func (sshServer *sshServer) getLoadStats() map[string]interface{} {
 
 			if protocolStats[client.tunnelProtocol][region] == nil {
 				protocolStats[client.tunnelProtocol][region] = make(map[string]int64)
+				protocolStats[client.tunnelProtocol][region]["accepted_clients"] = 0
+				protocolStats[client.tunnelProtocol][region]["established_clients"] = 0
+				protocolStats[client.tunnelProtocol][region]["tcp_port_forwards"] = 0
+				protocolStats[client.tunnelProtocol][region]["total_tcp_port_forwards"] = 0
+				protocolStats[client.tunnelProtocol][region]["udp_port_forwards"] = 0
+				protocolStats[client.tunnelProtocol][region]["total_udp_port_forwards"] = 0
 			}
 
 			// Note: can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
