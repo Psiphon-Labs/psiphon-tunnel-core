@@ -196,7 +196,7 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 	if config.Timeout != 0 {
 		errChannel = make(chan error, 2)
 		time.AfterFunc(config.Timeout, func() {
-			errChannel <- TimeoutError{}
+			errChannel <- errors.New("timed out")
 		})
 	}
 

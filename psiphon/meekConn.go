@@ -364,7 +364,9 @@ func (meek *MeekConn) Close() (err error) {
 	return nil
 }
 
-func (meek *MeekConn) closed() bool {
+// IsClosed implements the Closer iterface. The return value
+// indicates whether the MeekConn has been closed.
+func (meek *MeekConn) IsClosed() bool {
 
 	meek.mutex.Lock()
 	isClosed := meek.isClosed
@@ -376,7 +378,7 @@ func (meek *MeekConn) closed() bool {
 // Read reads data from the connection.
 // net.Conn Deadlines are ignored. net.Conn concurrency semantics are supported.
 func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
-	if meek.closed() {
+	if meek.IsClosed() {
 		return 0, common.ContextError(errors.New("meek connection is closed"))
 	}
 	// Block until there is received data to consume
@@ -395,7 +397,7 @@ func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
 // Write writes data to the connection.
 // net.Conn Deadlines are ignored. net.Conn concurrency semantics are supported.
 func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
-	if meek.closed() {
+	if meek.IsClosed() {
 		return 0, common.ContextError(errors.New("meek connection is closed"))
 	}
 	// Repeats until all n bytes are written

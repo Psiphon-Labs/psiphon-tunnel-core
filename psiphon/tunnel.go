@@ -721,8 +721,12 @@ func dialSsh(
 			},
 			directTCPDialAddress)
 
+		if !dialedPlugin && err != nil {
+			NoticeInfo("DialPluginProtocol intialization failed: %s", err)
+		}
+
 		if dialedPlugin {
-			NoticeInfo("dialed plugin protocol for %s", serverEntry.IpAddress)
+			NoticeInfo("using DialPluginProtocol for %s", serverEntry.IpAddress)
 		} else {
 			// Standard direct connection.
 			dialConn, err = DialTCP(directTCPDialAddress, dialConfig)
@@ -731,6 +735,12 @@ func dialSsh(
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
+	}
+
+	// If dialConn is not a Closer, tunnel failure detection may be slower
+	_, ok := dialConn.(common.Closer)
+	if !ok {
+		NoticeAlert("tunnel.dialSsh: dialConn is not a Closer")
 	}
 
 	cleanupConn := dialConn
@@ -1087,14 +1097,23 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			NoticeInfo("port forward failures for %s: %d",
 				tunnel.serverEntry.IpAddress, tunnel.totalPortForwardFailures)
 
-			if lastBytesReceivedTime.Add(TUNNEL_SSH_KEEP_ALIVE_PROBE_INACTIVE_PERIOD).Before(monotime.Now()) {
-				select {
-				case signalSshKeepAlive <- time.Duration(*tunnel.config.TunnelSshKeepAliveProbeTimeoutSeconds) * time.Second:
-				default:
+			// If the underlying Conn has closed (meek and other plugin protocols may close
+			// themselves in certain error conditions), the tunnel has certainly failed.
+			// Otherwise, probe with an SSH keep alive.
+
+			if tunnel.conn.IsClosed() {
+				err = errors.New("underlying conn is closed")
+			} else {
+				if lastBytesReceivedTime.Add(TUNNEL_SSH_KEEP_ALIVE_PROBE_INACTIVE_PERIOD).Before(monotime.Now()) {
+					select {
+					case signalSshKeepAlive <- time.Duration(*tunnel.config.TunnelSshKeepAliveProbeTimeoutSeconds) * time.Second:
+					default:
+					}
 				}
-			}
-			if !tunnel.config.DisablePeriodicSshKeepAlive {
-				sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
+				if !tunnel.config.DisablePeriodicSshKeepAlive {
+					sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
+				}
+
 			}
 
 		case err = <-sshKeepAliveError:
@@ -1226,7 +1245,7 @@ func sendSshKeepAlive(
 	errChannel := make(chan error, 2)
 	if timeout > 0 {
 		time.AfterFunc(timeout, func() {
-			errChannel <- TimeoutError{}
+			errChannel <- errors.New("timed out")
 		})
 	}
 
