@@ -174,6 +174,12 @@ func (entry *LRUConnsEntry) Touch() {
 	entry.lruConns.list.MoveToFront(entry.element)
 }
 
+// Closer defines the interface to a type, typically
+// a net.Conn, that can be closed.
+type Closer interface {
+	IsClosed() bool
+}
+
 // ActivityMonitoredConn wraps a net.Conn, adding logic to deal with
 // events triggered by I/O activity.
 //
@@ -309,4 +315,14 @@ func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 	}
 	// Note: no context error to preserve error type
 	return n, err
+}
+
+// IsClosed implements the Closer iterface. The return value
+// indicates whether the underlying conn has been closed.
+func (conn *ActivityMonitoredConn) IsClosed() bool {
+	closer, ok := conn.Conn.(Closer)
+	if !ok {
+		return false
+	}
+	return closer.IsClosed()
 }
