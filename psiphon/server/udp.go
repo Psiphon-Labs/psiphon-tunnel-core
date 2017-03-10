@@ -120,7 +120,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 		message, err := readUdpgwMessage(mux.sshChannel, buffer)
 		if err != nil {
 			if err != io.EOF {
-				log.WithContextFields(LogFields{"error": err}).Warning("readUpdgwMessage failed")
+				log.WithContextFields(LogFields{"error": err}).Warning("readUdpgwMessage failed")
 			}
 			break
 		}

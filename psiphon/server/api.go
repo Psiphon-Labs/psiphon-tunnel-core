@@ -98,8 +98,12 @@ func dispatchAPIRequestHandler(
 	// terminating in the case of a bug.
 	defer func() {
 		if e := recover(); e != nil {
-			log.LogPanicRecover(e, debug.Stack())
-			reterr = common.ContextError(errors.New("request handler panic"))
+			if intentionalPanic, ok := e.(IntentionalPanicError); ok {
+				panic(intentionalPanic)
+			} else {
+				log.LogPanicRecover(e, debug.Stack())
+				reterr = common.ContextError(errors.New("request handler panic"))
+			}
 		}
 	}()
 
@@ -521,6 +525,7 @@ var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"meek_host_header", isHostHeader, requestParamOptional},
 	requestParamSpec{"meek_transformed_host_name", isBooleanFlag, requestParamOptional},
 	requestParamSpec{"user_agent", isAnyString, requestParamOptional},
+	requestParamSpec{"tls_profile", isAnyString, requestParamOptional},
 	requestParamSpec{"server_entry_region", isRegionCode, requestParamOptional},
 	requestParamSpec{"server_entry_source", isServerEntrySource, requestParamOptional},
 	requestParamSpec{"server_entry_timestamp", isISO8601Date, requestParamOptional},

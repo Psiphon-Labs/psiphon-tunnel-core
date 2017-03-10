@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"math/big"
 	"runtime"
 	"strings"
@@ -132,6 +133,21 @@ func MakeRandomStringBase64(byteLength int) (string, error) {
 		return "", ContextError(err)
 	}
 	return base64.RawURLEncoding.EncodeToString(bytes), nil
+}
+
+// Jitter returns n +/- the given factor.
+// For example, for n = 100 and factor = 0.1, the
+// return value will be in the range [90, 110].
+func Jitter(n int64, factor float64) int64 {
+	a := int64(math.Ceil(float64(n) * factor))
+	r, _ := MakeSecureRandomInt64(2*a + 1)
+	return n + r - a
+}
+
+// JitterDuration is a helper function that wraps Jitter.
+func JitterDuration(
+	d time.Duration, factor float64) time.Duration {
+	return time.Duration(Jitter(int64(d), factor))
 }
 
 // GetCurrentTimestamp returns the current time in UTC as

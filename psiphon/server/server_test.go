@@ -302,7 +302,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig["PsinetDatabaseFilename"] = psinetFilename
 	serverConfig["TrafficRulesFilename"] = trafficRulesFilename
 	serverConfig["OSLConfigFilename"] = oslConfigFilename
-	serverConfig["LogFilename"] = "psiphond.log"
+	serverConfig["LogFilename"] = filepath.Join(testDataDirName, "psiphond.log")
 	serverConfig["LogLevel"] = "debug"
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
@@ -387,7 +387,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "ClientVersion" : "0",
         "SponsorId" : "0",
         "PropagationChannelId" : "0",
-        "DisableRemoteServerListFetcher" : true
+        "DisableRemoteServerListFetcher" : true,
+        "UseIndistinguishableTLS" : true
     }`
 	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
 
@@ -413,6 +414,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if err != nil {
 		t.Fatalf("error initializing client datastore: %s", err)
 	}
+	psiphon.DeleteSLOKs()
 
 	controller, err := psiphon.NewController(clientConfig)
 	if err != nil {
@@ -543,8 +545,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Test: await SLOK payload
 
 	if !runConfig.denyTrafficRules {
+
 		time.Sleep(1 * time.Second)
 		waitOnNotification(t, slokSeeded, timeoutSignal, "SLOK seeded timeout exceeded")
+
+		numSLOKs := psiphon.CountSLOKs()
+		if numSLOKs != expectedNumSLOKs {
+			t.Fatalf("unexpected number of SLOKs: %d", numSLOKs)
+		}
 	}
 }
 
@@ -669,13 +677,13 @@ func makeTunneledNTPRequestAttempt(
 			return
 		}
 
-		updgwProtocolMessage, err := readUdpgwMessage(socksTCPConn, buffer)
+		udpgwProtocolMessage, err := readUdpgwMessage(socksTCPConn, buffer)
 		if err != nil {
 			t.Logf("readUdpgwMessage for %s failed: %s", destination, err)
 			return
 		}
 
-		_, err = serverUDPConn.WriteToUDP(updgwProtocolMessage.packet, clientAddr)
+		_, err = serverUDPConn.WriteToUDP(udpgwProtocolMessage.packet, clientAddr)
 		if err != nil {
 			t.Logf("serverUDPConn.Write for %s failed: %s", destination, err)
 			return
@@ -870,6 +878,8 @@ func paveTrafficRulesFile(
 	}
 }
 
+var expectedNumSLOKs = 3
+
 func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
 
 	oslConfigJSONFormat := `
@@ -903,11 +913,37 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
             }
           ],
           "SeedSpecThreshold" : 2,
-          "SeedPeriodNanoseconds" : 10000000000,
+          "SeedPeriodNanoseconds" : 2592000000000000,
           "SeedPeriodKeySplits": [
             {
               "Total": 2,
               "Threshold": 2
+            }
+          ]
+        },
+        {
+          "Epoch" : "%s",
+          "Regions" : [],
+          "PropagationChannelIDs" : ["%s"],
+          "MasterKey" : "HDc/mvd7e+lKDJD0fMpJW66YJ/VW4iqDRjeclEsMnro=",
+          "SeedSpecs" : [
+            {
+              "ID" : "/M0vsT0IjzmI0MvTI9IYe8OVyeQGeaPZN2xGxfLw/UQ=",
+              "UpstreamSubnets" : ["0.0.0.0/0"],
+              "Targets" :
+              {
+                  "BytesRead" : 1,
+                  "BytesWritten" : 1,
+                  "PortForwardDurationNanoseconds" : 1
+              }
+            }
+          ],
+          "SeedSpecThreshold" : 1,
+          "SeedPeriodNanoseconds" : 2592000000000000,
+          "SeedPeriodKeySplits": [
+            {
+              "Total": 1,
+              "Threshold": 1
             }
           ]
         }
@@ -918,11 +954,13 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
 	propagationChannelID, _ := common.MakeRandomStringHex(8)
 
 	now := time.Now().UTC()
-	epoch := now.Truncate(10 * time.Second)
+	epoch := now.Truncate(720 * time.Hour)
 	epochStr := epoch.Format(time.RFC3339Nano)
 
 	oslConfigJSON := fmt.Sprintf(
-		oslConfigJSONFormat, epochStr, propagationChannelID)
+		oslConfigJSONFormat,
+		epochStr, propagationChannelID,
+		epochStr, propagationChannelID)
 
 	err := ioutil.WriteFile(oslConfigFilename, []byte(oslConfigJSON), 0600)
 	if err != nil {

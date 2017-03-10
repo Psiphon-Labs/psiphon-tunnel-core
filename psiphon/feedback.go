@@ -110,7 +110,7 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 
 	untunneledDialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
-		UpstreamProxyCustomHeaders:    config.UpstreamProxyCustomHeaders,
+		CustomHeaders:                 config.CustomHeaders,
 		PendingConns:                  nil,
 		DeviceBinder:                  nil,
 		IPv6Synthesizer:               nil,

@@ -74,8 +74,11 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 			EnableSSHAPIRequests: true,
 			WebServerPort:        8001,
 			TunnelProtocolPorts:  map[string]int{"OSSH": 4001},
-			LogFilename:          "psiphond.log",
+			LogFilename:          filepath.Join(testDataDirName, "psiphond.log"),
 			LogLevel:             "debug",
+
+			// "defer os.RemoveAll" will cause a log write error
+			SkipPanickingLogWriter: true,
 		})
 	if err != nil {
 		t.Fatalf("error generating server config: %s", err)

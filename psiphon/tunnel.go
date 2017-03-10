@@ -105,6 +105,8 @@ type TunnelDialStats struct {
 	MeekTransformedHostName        bool
 	SelectedUserAgent              bool
 	UserAgent                      string
+	SelectedTLSProfile             bool
+	TLSProfile                     string
 }
 
 // EstablishTunnel first makes a network transport connection to the
@@ -538,15 +540,23 @@ func initMeekConfig(
 		return nil, common.ContextError(errors.New("unexpected selectedProtocol"))
 	}
 
-	// The unnderlying TLS will automatically disable SNI for IP address server name
+	// The underlying TLS will automatically disable SNI for IP address server name
 	// values; we have this explicit check here so we record the correct value for stats.
 	if net.ParseIP(SNIServerName) != nil {
 		SNIServerName = ""
 	}
 
+	// Pin the TLS profile for the entire meek connection.
+	selectedTLSProfile := SelectTLSProfile(
+		config.UseIndistinguishableTLS,
+		useObfuscatedSessionTickets,
+		true,
+		config.TrustedCACertificatesFilename != "")
+
 	return &MeekConfig{
 		DialAddress:                   dialAddress,
 		UseHTTPS:                      useHTTPS,
+		TLSProfile:                    selectedTLSProfile,
 		UseObfuscatedSessionTickets:   useObfuscatedSessionTickets,
 		SNIServerName:                 SNIServerName,
 		HostHeader:                    hostHeader,
@@ -584,7 +594,7 @@ func dialSsh(
 	// So depending on which protocol is used, multiple layers are initialized.
 
 	useObfuscatedSsh := false
-	dialHeaders := config.UpstreamProxyCustomHeaders
+	dialCustomHeaders := config.CustomHeaders
 	var directTCPDialAddress string
 	var meekConfig *MeekConfig
 	var selectedUserAgent bool
@@ -606,12 +616,7 @@ func dialSsh(
 		}
 	}
 
-	NoticeConnectingServer(
-		serverEntry.IpAddress,
-		serverEntry.Region,
-		selectedProtocol,
-		directTCPDialAddress,
-		meekConfig)
+	dialCustomHeaders, selectedUserAgent = UserAgentIfUnset(config.CustomHeaders)
 
 	// Use an asynchronous callback to record the resolved IP address when
 	// dialing a domain name. Note that DialMeek doesn't immediately
@@ -625,12 +630,9 @@ func dialSsh(
 		resolvedIPAddress.Store(IPAddress)
 	}
 
-	dialHeaders, selectedUserAgent = common.UserAgentIfUnset(config.UpstreamProxyCustomHeaders)
-
-	// Create the base transport: meek or direct connection
 	dialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
-		UpstreamProxyCustomHeaders:    dialHeaders,
+		CustomHeaders:                 dialCustomHeaders,
 		ConnectTimeout:                time.Duration(*config.TunnelConnectTimeoutSeconds) * time.Second,
 		PendingConns:                  pendingConns,
 		DeviceBinder:                  config.DeviceBinder,
@@ -641,6 +643,57 @@ func dialSsh(
 		DeviceRegion:                  config.DeviceRegion,
 		ResolvedIPCallback:            setResolvedIPAddress,
 	}
+
+	// Gather dial parameters for diagnostic logging and stats reporting
+
+	var dialStats *TunnelDialStats
+
+	if dialConfig.UpstreamProxyUrl != "" || meekConfig != nil {
+		dialStats = &TunnelDialStats{}
+
+		if selectedUserAgent {
+			dialStats.SelectedUserAgent = true
+			dialStats.UserAgent = dialConfig.CustomHeaders.Get("User-Agent")
+		}
+
+		if dialConfig.UpstreamProxyUrl != "" {
+
+			// Note: UpstreamProxyUrl will be validated in the dial
+			proxyURL, err := url.Parse(dialConfig.UpstreamProxyUrl)
+			if err == nil {
+				dialStats.UpstreamProxyType = proxyURL.Scheme
+			}
+
+			dialStats.UpstreamProxyCustomHeaderNames = make([]string, 0)
+			for name, _ := range dialConfig.CustomHeaders {
+				if selectedUserAgent && name == "User-Agent" {
+					continue
+				}
+				dialStats.UpstreamProxyCustomHeaderNames = append(dialStats.UpstreamProxyCustomHeaderNames, name)
+			}
+		}
+
+		if meekConfig != nil {
+			// Note: dialStats.MeekResolvedIPAddress isn't set until the dial begins,
+			// so it will always be blank in NoticeConnectingServer.
+			dialStats.MeekDialAddress = meekConfig.DialAddress
+			dialStats.MeekResolvedIPAddress = ""
+			dialStats.MeekSNIServerName = meekConfig.SNIServerName
+			dialStats.MeekHostHeader = meekConfig.HostHeader
+			dialStats.MeekTransformedHostName = meekConfig.TransformedHostName
+			dialStats.SelectedTLSProfile = true
+			dialStats.TLSProfile = meekConfig.TLSProfile
+		}
+	}
+
+	NoticeConnectingServer(
+		serverEntry.IpAddress,
+		serverEntry.Region,
+		selectedProtocol,
+		dialStats)
+
+	// Create the base transport: meek or direct connection
+
 	var dialConn net.Conn
 	if meekConfig != nil {
 		dialConn, err = DialMeek(meekConfig, dialConfig)
@@ -648,10 +701,46 @@ func dialSsh(
 			return nil, common.ContextError(err)
 		}
 	} else {
-		dialConn, err = DialTCP(directTCPDialAddress, dialConfig)
+
+		// For some direct connect servers, DialPluginProtocol
+		// will layer on another obfuscation protocol.
+		var dialedPlugin bool
+		dialedPlugin, dialConn, err = DialPluginProtocol(
+			config,
+			NewNoticeWriter("DialPluginProtocol"),
+			pendingConns,
+			func(_, addr string) (net.Conn, error) {
+
+				// Use a copy of DialConfig without pendingConns
+				// TODO: distinct pendingConns for plugins?
+				pluginDialConfig := new(DialConfig)
+				*pluginDialConfig = *dialConfig
+				pluginDialConfig.PendingConns = nil
+
+				return DialTCP(addr, pluginDialConfig)
+			},
+			directTCPDialAddress)
+
+		if !dialedPlugin && err != nil {
+			NoticeInfo("DialPluginProtocol intialization failed: %s", err)
+		}
+
+		if dialedPlugin {
+			NoticeInfo("using DialPluginProtocol for %s", serverEntry.IpAddress)
+		} else {
+			// Standard direct connection.
+			dialConn, err = DialTCP(directTCPDialAddress, dialConfig)
+		}
+
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
+	}
+
+	// If dialConn is not a Closer, tunnel failure detection may be slower
+	_, ok := dialConn.(common.Closer)
+	if !ok {
+		NoticeAlert("tunnel.dialSsh: dialConn is not a Closer")
 	}
 
 	cleanupConn := dialConn
@@ -755,43 +844,17 @@ func dialSsh(
 		return nil, common.ContextError(result.err)
 	}
 
-	var dialStats *TunnelDialStats
+	// Update dial parameters determined during dial
 
-	if dialConfig.UpstreamProxyUrl != "" || meekConfig != nil {
-		dialStats = &TunnelDialStats{}
-
-		if selectedUserAgent {
-			dialStats.SelectedUserAgent = true
-			dialStats.UserAgent = dialConfig.UpstreamProxyCustomHeaders.Get("User-Agent")
-		}
-
-		if dialConfig.UpstreamProxyUrl != "" {
-
-			// Note: UpstreamProxyUrl should have parsed correctly in the dial
-			proxyURL, err := url.Parse(dialConfig.UpstreamProxyUrl)
-			if err == nil {
-				dialStats.UpstreamProxyType = proxyURL.Scheme
-			}
-
-			dialStats.UpstreamProxyCustomHeaderNames = make([]string, 0)
-			for name, _ := range dialConfig.UpstreamProxyCustomHeaders {
-				if selectedUserAgent && name == "User-Agent" {
-					continue
-				}
-				dialStats.UpstreamProxyCustomHeaderNames = append(dialStats.UpstreamProxyCustomHeaderNames, name)
-			}
-		}
-
-		if meekConfig != nil {
-			dialStats.MeekDialAddress = meekConfig.DialAddress
-			dialStats.MeekResolvedIPAddress = resolvedIPAddress.Load().(string)
-			dialStats.MeekSNIServerName = meekConfig.SNIServerName
-			dialStats.MeekHostHeader = meekConfig.HostHeader
-			dialStats.MeekTransformedHostName = meekConfig.TransformedHostName
-		}
-
-		NoticeConnectedTunnelDialStats(serverEntry.IpAddress, dialStats)
+	if dialStats != nil && meekConfig != nil {
+		dialStats.MeekResolvedIPAddress = resolvedIPAddress.Load().(string)
 	}
+
+	NoticeConnectedServer(
+		serverEntry.IpAddress,
+		serverEntry.Region,
+		selectedProtocol,
+		dialStats)
 
 	cleanupConn = nil
 
@@ -1034,14 +1097,23 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			NoticeInfo("port forward failures for %s: %d",
 				tunnel.serverEntry.IpAddress, tunnel.totalPortForwardFailures)
 
-			if lastBytesReceivedTime.Add(TUNNEL_SSH_KEEP_ALIVE_PROBE_INACTIVE_PERIOD).Before(monotime.Now()) {
-				select {
-				case signalSshKeepAlive <- time.Duration(*tunnel.config.TunnelSshKeepAliveProbeTimeoutSeconds) * time.Second:
-				default:
+			// If the underlying Conn has closed (meek and other plugin protocols may close
+			// themselves in certain error conditions), the tunnel has certainly failed.
+			// Otherwise, probe with an SSH keep alive.
+
+			if tunnel.conn.IsClosed() {
+				err = errors.New("underlying conn is closed")
+			} else {
+				if lastBytesReceivedTime.Add(TUNNEL_SSH_KEEP_ALIVE_PROBE_INACTIVE_PERIOD).Before(monotime.Now()) {
+					select {
+					case signalSshKeepAlive <- time.Duration(*tunnel.config.TunnelSshKeepAliveProbeTimeoutSeconds) * time.Second:
+					default:
+					}
 				}
-			}
-			if !tunnel.config.DisablePeriodicSshKeepAlive {
-				sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
+				if !tunnel.config.DisablePeriodicSshKeepAlive {
+					sshKeepAliveTimer.Reset(nextSshKeepAlivePeriod())
+				}
+
 			}
 
 		case err = <-sshKeepAliveError:
@@ -1173,7 +1245,7 @@ func sendSshKeepAlive(
 	errChannel := make(chan error, 2)
 	if timeout > 0 {
 		time.AfterFunc(timeout, func() {
-			errChannel <- TimeoutError{}
+			errChannel <- errors.New("timed out")
 		})
 	}
 

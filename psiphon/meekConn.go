@@ -54,8 +54,11 @@ const (
 	FULL_RECEIVE_BUFFER_LENGTH     = 4194304
 	READ_PAYLOAD_CHUNK_LENGTH      = 65536
 	MIN_POLL_INTERVAL              = 100 * time.Millisecond
+	MIN_POLL_INTERVAL_JITTER       = 0.3
 	MAX_POLL_INTERVAL              = 5 * time.Second
-	POLL_INTERNAL_MULTIPLIER       = 1.5
+	MAX_POLL_INTERVAL_JITTER       = 0.1
+	POLL_INTERVAL_MULTIPLIER       = 1.5
+	POLL_INTERVAL_JITTER           = 0.1
 	MEEK_ROUND_TRIP_RETRY_DEADLINE = 1 * time.Second
 	MEEK_ROUND_TRIP_RETRY_DELAY    = 50 * time.Millisecond
 	MEEK_ROUND_TRIP_TIMEOUT        = 20 * time.Second
@@ -72,6 +75,13 @@ type MeekConfig struct {
 
 	// UseHTTPS indicates whether to use HTTPS (true) or HTTP (false).
 	UseHTTPS bool
+
+	// TLSProfile specifies the TLS profile to use for all underlying
+	// TLS connections created by this meek connection. Valid values
+	// are the possible values for CustomTLSConfig.TLSProfile.
+	// TLSProfile will be used only when DialConfig.UseIndistinguishableTLS
+	// is set in the DialConfig passed in to DialMeek.
+	TLSProfile string
 
 	// UseObfuscatedSessionTickets indicates whether to use obfuscated
 	// session tickets. Assumes UseHTTPS is true.
@@ -201,6 +211,7 @@ func DialMeek(
 			SNIServerName:                 meekConfig.SNIServerName,
 			SkipVerify:                    true,
 			UseIndistinguishableTLS:       meekDialConfig.UseIndistinguishableTLS,
+			TLSProfile:                    meekConfig.TLSProfile,
 			TrustedCACertificatesFilename: meekDialConfig.TrustedCACertificatesFilename,
 		}
 
@@ -251,7 +262,7 @@ func DialMeek(
 		}
 		if proxyUrl != nil {
 			// Wrap transport with a transport that can perform HTTP proxy auth negotiation
-			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport, meekDialConfig.UpstreamProxyCustomHeaders)
+			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport, meekDialConfig.CustomHeaders)
 			if err != nil {
 				return nil, common.ContextError(err)
 			}
@@ -278,7 +289,7 @@ func DialMeek(
 		}
 	} else {
 		if proxyUrl == nil {
-			additionalHeaders = meekDialConfig.UpstreamProxyCustomHeaders
+			additionalHeaders = meekDialConfig.CustomHeaders
 		}
 	}
 
@@ -353,7 +364,9 @@ func (meek *MeekConn) Close() (err error) {
 	return nil
 }
 
-func (meek *MeekConn) closed() bool {
+// IsClosed implements the Closer iterface. The return value
+// indicates whether the MeekConn has been closed.
+func (meek *MeekConn) IsClosed() bool {
 
 	meek.mutex.Lock()
 	isClosed := meek.isClosed
@@ -365,7 +378,7 @@ func (meek *MeekConn) closed() bool {
 // Read reads data from the connection.
 // net.Conn Deadlines are ignored. net.Conn concurrency semantics are supported.
 func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
-	if meek.closed() {
+	if meek.IsClosed() {
 		return 0, common.ContextError(errors.New("meek connection is closed"))
 	}
 	// Block until there is received data to consume
@@ -384,7 +397,7 @@ func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
 // Write writes data to the connection.
 // net.Conn Deadlines are ignored. net.Conn concurrency semantics are supported.
 func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
-	if meek.closed() {
+	if meek.IsClosed() {
 		return 0, common.ContextError(errors.New("meek connection is closed"))
 	}
 	// Repeats until all n bytes are written
@@ -466,9 +479,15 @@ func (meek *MeekConn) relay() {
 	// Note: meek.Close() calls here in relay() are made asynchronously
 	// (using goroutines) since Close() will wait on this WaitGroup.
 	defer meek.relayWaitGroup.Done()
-	interval := MIN_POLL_INTERVAL
+
+	interval := common.JitterDuration(
+		MIN_POLL_INTERVAL,
+		MIN_POLL_INTERVAL_JITTER)
+
 	timeout := time.NewTimer(interval)
+
 	sendPayload := make([]byte, MAX_SEND_PAYLOAD_LENGTH)
+
 	for {
 		timeout.Reset(interval)
 		// Block until there is payload to send or it is time to poll
@@ -509,14 +528,39 @@ func (meek *MeekConn) relay() {
 			go meek.Close()
 			return
 		}
+
+		// Calculate polling interval. When data is received,
+		// immediately request more. Otherwise, schedule next
+		// poll with exponential back off. Jitter and coin
+		// flips are used to avoid trivial, static traffic
+		// timing patterns.
+
 		if receivedPayloadSize > 0 || sendPayloadSize > 0 {
+
 			interval = 0
+
 		} else if interval == 0 {
-			interval = MIN_POLL_INTERVAL
+
+			interval = common.JitterDuration(
+				MIN_POLL_INTERVAL,
+				MIN_POLL_INTERVAL_JITTER)
+
 		} else {
-			interval = time.Duration(float64(interval) * POLL_INTERNAL_MULTIPLIER)
+
+			if common.FlipCoin() {
+				interval = common.JitterDuration(
+					interval,
+					POLL_INTERVAL_JITTER)
+			} else {
+				interval = common.JitterDuration(
+					time.Duration(float64(interval)*POLL_INTERVAL_MULTIPLIER),
+					POLL_INTERVAL_JITTER)
+			}
+
 			if interval >= MAX_POLL_INTERVAL {
-				interval = MAX_POLL_INTERVAL
+				interval = common.JitterDuration(
+					MAX_POLL_INTERVAL,
+					MAX_POLL_INTERVAL_JITTER)
 			}
 		}
 	}
