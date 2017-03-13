@@ -204,8 +204,8 @@ func NoticeConnectedServer(ipAddress, region, protocol string, tunnelDialStats *
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
-func NoticeActiveTunnel(ipAddress, protocol string) {
-	outputNotice("ActiveTunnel", noticeIsDiagnostic, "ipAddress", ipAddress, "protocol", protocol)
+func NoticeActiveTunnel(ipAddress, protocol string, isTCS bool) {
+	outputNotice("ActiveTunnel", noticeIsDiagnostic, "ipAddress", ipAddress, "protocol", protocol, "isTCS", isTCS)
 }
 
 // NoticeSocksProxyPortInUse is a failure to use the configured LocalSocksProxyPort

@@ -603,7 +603,7 @@ loop:
 				break
 			}
 
-			NoticeActiveTunnel(establishedTunnel.serverEntry.IpAddress, establishedTunnel.protocol)
+			NoticeActiveTunnel(establishedTunnel.serverEntry.IpAddress, establishedTunnel.protocol, establishedTunnel.serverEntry.SupportsSSHAPIRequests())
 
 			if tunnelCount == 1 {
 
