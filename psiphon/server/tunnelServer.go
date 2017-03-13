@@ -540,11 +540,9 @@ func (sshServer *sshServer) getLoadStats() map[string]interface{} {
 	allProtocolsStats["tcp_port_forward_failed_count"] = aggregatedQualityMetrics.tcpPortForwardFailedCount
 	allProtocolsStats["tcp_port_forward_failed_duration"] = int64(aggregatedQualityMetrics.tcpPortForwardFailedDuration)
 
-	for _, regionStats := range protocolStats {
-		for _, stats := range regionStats {
-			for name, value := range stats {
-				allProtocolsStats[name] += value
-			}
+	for _, stats := range protocolStats {
+		for name, value := range stats["ALL"] {
+			allProtocolsStats[name] += value
 		}
 	}
 
