@@ -497,7 +497,12 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             } else if(noticeType.equals("ClientVerificationRequired")) {
                 JSONObject data = notice.getJSONObject("data");
                 mHostService.onClientVerificationRequired(data.getString("nonce"), data.getInt("ttlSeconds"), data.getBoolean("resetCache"));
-
+            } else if (noticeType.equals("ActiveTunnel")) {
+                if (notice.getJSONObject("data").getBoolean("isTCS")) {
+                  disableUdpGwKeepalive();
+                } else {
+                  enableUdpGwKeepalive();
+                }
             }
 
             if (diagnostic) {
@@ -677,6 +682,9 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             int udpgwTransparentDNS);
 
     private native static int terminateTun2Socks();
+
+    private native static int enableUdpGwKeepalive();
+    private native static int disableUdpGwKeepalive();
 
     //----------------------------------------------------------------------------------------------
     // Implementation: Network Utils

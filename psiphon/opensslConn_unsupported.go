@@ -28,6 +28,10 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
+func openSSLSupported() bool {
+	return false
+}
+
 // newOpenSSLConn simply returns an error when used on an unsupported platform.
 func newOpenSSLConn(rawConn net.Conn, hostname string, config *CustomTLSConfig) (handshakeConn, error) {
 	return nil, common.ContextError(errors.New("newOpenSSLConn not supported on this platform"))

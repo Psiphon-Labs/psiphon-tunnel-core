@@ -105,6 +105,8 @@ type TunnelDialStats struct {
 	MeekTransformedHostName        bool
 	SelectedUserAgent              bool
 	UserAgent                      string
+	SelectedTLSProfile             bool
+	TLSProfile                     string
 }
 
 // EstablishTunnel first makes a network transport connection to the
@@ -538,15 +540,23 @@ func initMeekConfig(
 		return nil, common.ContextError(errors.New("unexpected selectedProtocol"))
 	}
 
-	// The unnderlying TLS will automatically disable SNI for IP address server name
+	// The underlying TLS will automatically disable SNI for IP address server name
 	// values; we have this explicit check here so we record the correct value for stats.
 	if net.ParseIP(SNIServerName) != nil {
 		SNIServerName = ""
 	}
 
+	// Pin the TLS profile for the entire meek connection.
+	selectedTLSProfile := SelectTLSProfile(
+		config.UseIndistinguishableTLS,
+		useObfuscatedSessionTickets,
+		true,
+		config.TrustedCACertificatesFilename != "")
+
 	return &MeekConfig{
 		DialAddress:                   dialAddress,
 		UseHTTPS:                      useHTTPS,
+		TLSProfile:                    selectedTLSProfile,
 		UseObfuscatedSessionTickets:   useObfuscatedSessionTickets,
 		SNIServerName:                 SNIServerName,
 		HostHeader:                    hostHeader,
@@ -671,6 +681,8 @@ func dialSsh(
 			dialStats.MeekSNIServerName = meekConfig.SNIServerName
 			dialStats.MeekHostHeader = meekConfig.HostHeader
 			dialStats.MeekTransformedHostName = meekConfig.TransformedHostName
+			dialStats.SelectedTLSProfile = true
+			dialStats.TLSProfile = meekConfig.TLSProfile
 		}
 	}
 

@@ -853,6 +853,10 @@ func (serverContext *ServerContext) getBaseParams() requestJSONObject {
 		if tunnel.dialStats.SelectedUserAgent {
 			params["user_agent"] = tunnel.dialStats.UserAgent
 		}
+
+		if tunnel.dialStats.SelectedTLSProfile {
+			params["tls_profile"] = tunnel.dialStats.TLSProfile
+		}
 	}
 
 	if tunnel.serverEntry.Region != "" {
