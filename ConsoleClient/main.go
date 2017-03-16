@@ -20,12 +20,16 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/signal"
 	"runtime/pprof"
+	"sort"
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
@@ -52,7 +56,50 @@ func main() {
 	var interfaceName string
 	flag.StringVar(&interfaceName, "listenInterface", "", "Interface Name")
 
+	var versionDetails bool
+	flag.BoolVar(&versionDetails, "version", false, "Print build information and exit")
+	flag.BoolVar(&versionDetails, "v", false, "Print build information and exit")
+
 	flag.Parse()
+
+	if versionDetails {
+		b := common.GetBuildInfo()
+
+		var builtWith bytes.Buffer
+		builtWith.WriteString(b.GoVersion)
+		if b.GomobileVersion != "" {
+			builtWith.WriteString(" (")
+			builtWith.WriteString(b.GomobileVersion)
+			builtWith.WriteString(")")
+		}
+
+		var printableDependencies bytes.Buffer
+		var dependencyMap map[string]string
+		longestRepoUrl := 0
+		json.Unmarshal(b.Dependencies, &dependencyMap)
+
+		sortedRepoUrls := make([]string, 0, len(dependencyMap))
+		for repoUrl := range dependencyMap {
+			repoUrlLength := len(repoUrl)
+			if repoUrlLength > longestRepoUrl {
+				longestRepoUrl = repoUrlLength
+			}
+
+			sortedRepoUrls = append(sortedRepoUrls, repoUrl)
+		}
+		sort.Strings(sortedRepoUrls)
+
+		for repoUrl := range sortedRepoUrls {
+			printableDependencies.WriteString(fmt.Sprintf("    %s  ", sortedRepoUrls[repoUrl]))
+			for i := 0; i < (longestRepoUrl - len(sortedRepoUrls[repoUrl])); i++ {
+				printableDependencies.WriteString(" ")
+			}
+			printableDependencies.WriteString(fmt.Sprintf("%s\n", dependencyMap[sortedRepoUrls[repoUrl]]))
+		}
+
+		fmt.Printf("Psiphon Console Client\n  Build Date: %s\n  Built With: %s\n  Repository: %s\n  Revision: %s\n  Dependencies:\n%s\n", b.BuildDate, builtWith.String(), b.BuildRepo, b.BuildRev, printableDependencies.String())
+		os.Exit(0)
+	}
 
 	// Initialize default Notice output (stderr)
 
