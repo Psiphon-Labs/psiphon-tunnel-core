@@ -65,14 +65,6 @@ func main() {
 	if versionDetails {
 		b := common.GetBuildInfo()
 
-		var builtWith bytes.Buffer
-		builtWith.WriteString(b.GoVersion)
-		if b.GomobileVersion != "" {
-			builtWith.WriteString(" (")
-			builtWith.WriteString(b.GomobileVersion)
-			builtWith.WriteString(")")
-		}
-
 		var printableDependencies bytes.Buffer
 		var dependencyMap map[string]string
 		longestRepoUrl := 0
@@ -97,7 +89,7 @@ func main() {
 			printableDependencies.WriteString(fmt.Sprintf("%s\n", dependencyMap[sortedRepoUrls[repoUrl]]))
 		}
 
-		fmt.Printf("Psiphon Console Client\n  Build Date: %s\n  Built With: %s\n  Repository: %s\n  Revision: %s\n  Dependencies:\n%s\n", b.BuildDate, builtWith.String(), b.BuildRepo, b.BuildRev, printableDependencies.String())
+		fmt.Printf("Psiphon Console Client\n  Build Date: %s\n  Built With: %s\n  Repository: %s\n  Revision: %s\n  Dependencies:\n%s\n", b.BuildDate, b.GoVersion, b.BuildRepo, b.BuildRev, printableDependencies.String())
 		os.Exit(0)
 	}
 
