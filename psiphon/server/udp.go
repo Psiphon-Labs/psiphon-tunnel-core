@@ -195,12 +195,13 @@ func (mux *udpPortForwardMultiplexer) run() {
 					"remoteAddr": fmt.Sprintf("%s:%d", dialIP.String(), dialPort),
 					"connID":     message.connID}).Debug("dialing")
 
-			// TODO: on EADDRNOTAVAIL, temporarily suspend new clients
 			udpConn, err := net.DialUDP(
 				"udp", nil, &net.UDPAddr{IP: dialIP, Port: dialPort})
 			if err != nil {
 				mux.sshClient.closedPortForward(portForwardTypeUDP, 0, 0)
-				log.WithContextFields(LogFields{"error": err}).Warning("DialUDP failed")
+				mux.sshClient.sshServer.handlePortForwardDialError(err)
+				// Note: Debug level, as logMessage may contain user traffic destination address information
+				log.WithContextFields(LogFields{"error": err}).Debug("DialUDP failed")
 				continue
 			}
 

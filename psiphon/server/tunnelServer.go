@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/Psiphon-Inc/crypto/ssh"
@@ -626,6 +627,33 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	sshClient := newSshClient(sshServer, tunnelProtocol, geoIPData)
 
 	sshClient.run(clientConn)
+}
+
+func (sshServer *sshServer) handlePortForwardDialError(err error) {
+
+	// "err" is the error returned from a failed TCP or UDP port
+	// forward dial. Certain system error codes indicate low resource
+	// conditions: insufficient file descriptors, ephemeral ports, or
+	// memory. For these cases, log an alert.
+
+	// TODO: also temporarily suspend new clients
+
+	// Note: don't log net.OpError.Error() as the full error string
+	// may contain client destination addresses.
+
+	opErr, ok := err.(*net.OpError)
+	if ok {
+		if opErr.Err == syscall.EADDRNOTAVAIL ||
+			opErr.Err == syscall.EAGAIN ||
+			opErr.Err == syscall.ENOMEM ||
+			opErr.Err == syscall.EMFILE ||
+			opErr.Err == syscall.ENFILE {
+
+			log.WithContextFields(
+				LogFields{"error": opErr.Err}).Error(
+				"port forward dial failed due to unavailable resource")
+		}
+	}
 }
 
 type sshClient struct {
@@ -1544,7 +1572,6 @@ func (sshClient *sshClient) handleTCPChannel(
 	dialStartTime := monotime.Now()
 
 	go func() {
-		// TODO: on EADDRNOTAVAIL, temporarily suspend new clients
 		conn, err := net.DialTimeout(
 			"tcp", remoteAddr, SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT)
 		dialResultChannel <- &dialTCPResult{conn, err}
@@ -1563,6 +1590,7 @@ func (sshClient *sshClient) handleTCPChannel(
 		dialResult.err == nil, monotime.Since(dialStartTime))
 
 	if dialResult.err != nil {
+		sshClient.sshServer.handlePortForwardDialError(dialResult.err)
 		sshClient.rejectNewChannel(
 			newChannel, ssh.ConnectionFailed, fmt.Sprintf("DialTimeout failed: %s", dialResult.err))
 		return
