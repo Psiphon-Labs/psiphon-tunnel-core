@@ -1492,8 +1492,6 @@ func (sshClient *sshClient) handleTCPChannel(
 	// openPortForward) _before_ checking isPortForwardLimitExceeded
 	// otherwise, the client could potentially consume excess resources
 	// by initiating many port forwards concurrently.
-	// TODO: close LRU connection (after successful Dial) instead of
-	// rejecting new connection?
 	if maxCount, exceeded := sshClient.isPortForwardLimitExceeded(portForwardTypeTCP); exceeded {
 
 		// Close the oldest TCP port forward. CloseOldest() closes
