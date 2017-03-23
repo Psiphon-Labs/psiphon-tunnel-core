@@ -169,25 +169,22 @@ func (mux *udpPortForwardMultiplexer) run() {
 				continue
 			}
 
-			mux.sshClient.openedPortForward(portForwardTypeUDP)
-			// Note: can't defer sshClient.closedPortForward() here
+			// Note: UDP port forward counting has no dialing phase
+
+			mux.sshClient.establishedPortForward(portForwardTypeUDP)
+			// Can't defer sshClient.closedPortForward() here;
+			// relayDownstream will call sshClient.closedPortForward()
 
 			// TOCTOU note: important to increment the port forward count (via
 			// openPortForward) _before_ checking isPortForwardLimitExceeded
-			if maxCount, exceeded := mux.sshClient.isPortForwardLimitExceeded(portForwardTypeUDP); exceeded {
+			if exceeded := mux.sshClient.isPortForwardLimitExceeded(portForwardTypeUDP); exceeded {
 
 				// Close the oldest UDP port forward. CloseOldest() closes
 				// the conn and the port forward's goroutine will complete
 				// the cleanup asynchronously.
-				//
-				// See LRU comment in handleTCPChannel() for a known
-				// limitations regarding CloseOldest().
 				mux.portForwardLRU.CloseOldest()
 
-				log.WithContextFields(
-					LogFields{
-						"maxCount": maxCount,
-					}).Debug("closed LRU UDP port forward")
+				log.WithContext().Debug("closed LRU UDP port forward")
 			}
 
 			log.WithContextFields(
@@ -199,18 +196,23 @@ func (mux *udpPortForwardMultiplexer) run() {
 				"udp", nil, &net.UDPAddr{IP: dialIP, Port: dialPort})
 			if err != nil {
 				mux.sshClient.closedPortForward(portForwardTypeUDP, 0, 0)
-				mux.sshClient.sshServer.handlePortForwardDialError(err)
+
+				// Monitor for low resource error conditions
+				mux.sshClient.sshServer.monitorPortForwardDialError(err)
+
 				// Note: Debug level, as logMessage may contain user traffic destination address information
 				log.WithContextFields(LogFields{"error": err}).Debug("DialUDP failed")
 				continue
 			}
 
+			lruEntry := mux.portForwardLRU.Add(udpConn)
+			// Can't defer lruEntry.Remove() here;
+			// relayDownstream will call lruEntry.Remove()
+
 			// ActivityMonitoredConn monitors the TCP port forward I/O and updates
 			// its LRU status. ActivityMonitoredConn also times out I/O on the port
 			// forward if both reads and writes have been idle for the specified
 			// duration.
-
-			lruEntry := mux.portForwardLRU.Add(udpConn)
 
 			// Ensure nil interface if newClientSeedPortForward returns nil
 			var updater common.ActivityUpdater
@@ -247,7 +249,6 @@ func (mux *udpPortForwardMultiplexer) run() {
 			mux.portForwards[portForward.connID] = portForward
 			mux.portForwardsMutex.Unlock()
 
-			// relayDownstream will call sshClient.closedPortForward()
 			mux.relayWaitGroup.Add(1)
 			go portForward.relayDownstream()
 		}

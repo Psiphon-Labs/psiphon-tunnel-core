@@ -30,6 +30,7 @@ import (
 const (
 	DEFAULT_IDLE_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS = 30000
 	DEFAULT_IDLE_UDP_PORT_FORWARD_TIMEOUT_MILLISECONDS = 30000
+	DEFAULT_MAX_TCP_DIALING_PORT_FORWARD_COUNT         = 64
 	DEFAULT_MAX_TCP_PORT_FORWARD_COUNT                 = 512
 	DEFAULT_MAX_UDP_PORT_FORWARD_COUNT                 = 32
 )
@@ -106,14 +107,25 @@ type TrafficRules struct {
 	// is used.
 	IdleUDPPortForwardTimeoutMilliseconds *int
 
-	// MaxTCPPortForwardCount is the maximum number of TCP port
-	// forwards each client may have open concurrently.
+	// MaxTCPDialingPortForwardCount is the maximum number of dialing
+	// TCP port forwards each client may have open concurrently. When
+	// at the limit, new TCP port forwards are rejected.
+	// A value of 0 specifies no maximum. When omitted in
+	// DefaultRules, DEFAULT_MAX_TCP_DIALING_PORT_FORWARD_COUNT is used.
+	MaxTCPDialingPortForwardCount *int
+
+	// MaxTCPPortForwardCount is the maximum number of established TCP
+	// port forwards each client may have open concurrently. If at the
+	// limit when a new TCP port forward is established, the LRU
+	// established TCP port forward is closed.
 	// A value of 0 specifies no maximum. When omitted in
 	// DefaultRules, DEFAULT_MAX_TCP_PORT_FORWARD_COUNT is used.
 	MaxTCPPortForwardCount *int
 
 	// MaxUDPPortForwardCount is the maximum number of UDP port
-	// forwards each client may have open concurrently.
+	// forwards each client may have open concurrently. If at the
+	// limit when a new UDP port forward is created, the LRU
+	// UDP port forward is closed.
 	// A value of 0 specifies no maximum. When omitted in
 	// DefaultRules, DEFAULT_MAX_UDP_PORT_FORWARD_COUNT is used.
 	MaxUDPPortForwardCount *int
@@ -299,6 +311,11 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			intPtr(DEFAULT_IDLE_UDP_PORT_FORWARD_TIMEOUT_MILLISECONDS)
 	}
 
+	if trafficRules.MaxTCPDialingPortForwardCount == nil {
+		trafficRules.MaxTCPDialingPortForwardCount =
+			intPtr(DEFAULT_MAX_TCP_DIALING_PORT_FORWARD_COUNT)
+	}
+
 	if trafficRules.MaxTCPPortForwardCount == nil {
 		trafficRules.MaxTCPPortForwardCount =
 			intPtr(DEFAULT_MAX_TCP_PORT_FORWARD_COUNT)
@@ -391,6 +408,10 @@ func (set *TrafficRulesSet) GetTrafficRules(
 
 		if filteredRules.Rules.IdleUDPPortForwardTimeoutMilliseconds != nil {
 			trafficRules.IdleUDPPortForwardTimeoutMilliseconds = filteredRules.Rules.IdleUDPPortForwardTimeoutMilliseconds
+		}
+
+		if filteredRules.Rules.MaxTCPDialingPortForwardCount != nil {
+			trafficRules.MaxTCPDialingPortForwardCount = filteredRules.Rules.MaxTCPDialingPortForwardCount
 		}
 
 		if filteredRules.Rules.MaxTCPPortForwardCount != nil {
