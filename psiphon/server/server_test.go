@@ -603,10 +603,13 @@ func makeTunneledNTPRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAd
 	return err
 }
 
+var nextUDPProxyPort = 7300
+
 func makeTunneledNTPRequestAttempt(
 	t *testing.T, testHostname string, timeout time.Duration, localSOCKSProxyPort int, udpgwServerAddress string) error {
 
-	localUDPProxyAddress, err := net.ResolveUDPAddr("udp", "127.0.0.1:7301")
+	nextUDPProxyPort++
+	localUDPProxyAddress, err := net.ResolveUDPAddr("udp", fmt.Sprintf("127.0.0.1:%d", nextUDPProxyPort))
 	if err != nil {
 		return fmt.Errorf("ResolveUDPAddr failed: %s", err)
 	}
