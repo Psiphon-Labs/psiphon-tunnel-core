@@ -109,7 +109,7 @@ type TrafficRules struct {
 
 	// MaxTCPDialingPortForwardCount is the maximum number of dialing
 	// TCP port forwards each client may have open concurrently. When
-	// at the limit, new TCP port forwards are rejected.
+	// persistently at the limit, new TCP port forwards are rejected.
 	// A value of 0 specifies no maximum. When omitted in
 	// DefaultRules, DEFAULT_MAX_TCP_DIALING_PORT_FORWARD_COUNT is used.
 	MaxTCPDialingPortForwardCount *int
