@@ -202,6 +202,20 @@ loop:
 
 func outputProcessProfiles(config *Config) {
 
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+	log.WithContextFields(
+		LogFields{
+			"num_goroutine":   runtime.NumGoroutine(),
+			"alloc":           memStats.Alloc,
+			"total_alloc":     memStats.TotalAlloc,
+			"sys":             memStats.Sys,
+			"pause_total_ns":  memStats.PauseTotalNs,
+			"pause_ns":        memStats.PauseNs,
+			"num_gc":          memStats.NumGC,
+			"gc_cpu_fraction": memStats.GCCPUFraction,
+		}).Info("runtime_stats")
+
 	if config.ProcessProfileOutputDirectory != "" {
 
 		openProfileFile := func(profileName string) *os.File {
@@ -283,33 +297,34 @@ func outputProcessProfiles(config *Config) {
 
 func logServerLoad(server *TunnelServer) {
 
-	// golang runtime stats
+	protocolStats, regionStats := server.GetLoadStats()
 
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-	fields := LogFields{
-		"event_name":    "server_load",
-		"num_goroutine": runtime.NumGoroutine(),
-		"mem_stats": map[string]interface{}{
-			"alloc":           memStats.Alloc,
-			"total_alloc":     memStats.TotalAlloc,
-			"sys":             memStats.Sys,
-			"pause_total_ns":  memStats.PauseTotalNs,
-			"pause_ns":        memStats.PauseNs,
-			"num_gc":          memStats.NumGC,
-			"gc_cpu_fraction": memStats.GCCPUFraction,
-		},
+	serverLoad := LogFields{
+		"event_name": "server_load",
 	}
-
-	// tunnel server stats
-
-	fields["establish_tunnels"] = server.GetEstablishTunnels()
-
-	for tunnelProtocol, stats := range server.GetLoadStats() {
-		fields[tunnelProtocol] = stats
+	for protocol, stats := range protocolStats {
+		serverLoad[protocol] = stats
 	}
+	serverLoad["establish_tunnels"] = server.GetEstablishTunnels()
 
-	log.LogRawFieldsWithTimestamp(fields)
+	log.LogRawFieldsWithTimestamp(serverLoad)
+
+	for protocol, regions := range regionStats {
+		for region, stats := range regions {
+
+			serverRegionLoad := LogFields{
+				"event_name": "server_region_load",
+				"protocol":   protocol,
+				"region":     region,
+			}
+
+			for name, value := range stats {
+				serverRegionLoad[name] = value
+			}
+
+			log.LogRawFieldsWithTimestamp(serverRegionLoad)
+		}
+	}
 }
 
 // SupportServices carries common and shared data components
