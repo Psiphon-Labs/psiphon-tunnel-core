@@ -1066,7 +1066,7 @@ func (sshClient *sshClient) runTunnel(
 	//     a. Dial the target, using the dial timeout remaining after queue and blocking
 	//        time is deducted.
 	//
-	//     b. If the dial fails, call failedTCPPortForward() to decrement
+	//     b. If the dial fails, call abortedTCPPortForward() to decrement
 	//        concurrentDialingPortForwardCount, freeing up a dial slot.
 	//
 	//     c. If the dial succeeds, call establishedPortForward(), which decrements
@@ -1142,7 +1142,7 @@ func (sshClient *sshClient) runTunnel(
 			if remainingDialTimeout <= 0 {
 
 				// Release the dialing slot here since handleTCPChannel() won't be called.
-				sshClient.failedTCPPortForward()
+				sshClient.abortedTCPPortForward()
 
 				sshClient.updateQualityMetricsWithRejectedDialingLimit()
 				sshClient.rejectNewChannel(
@@ -1620,7 +1620,7 @@ func (sshClient *sshClient) dialingTCPPortForward() {
 	}
 }
 
-func (sshClient *sshClient) failedTCPPortForward() {
+func (sshClient *sshClient) abortedTCPPortForward() {
 
 	sshClient.Lock()
 	defer sshClient.Unlock()
@@ -1715,7 +1715,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	established := false
 	defer func() {
 		if !established {
-			sshClient.failedTCPPortForward()
+			sshClient.abortedTCPPortForward()
 		}
 	}()
 
@@ -1838,7 +1838,7 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	// Release the dialing slot and acquire an established slot.
 
-	// "established = true" cancels the deferred failedTCPPortForward()
+	// "established = true" cancels the deferred abortedTCPPortForward()
 	established = true
 	sshClient.establishedPortForward(portForwardTypeTCP)
 
