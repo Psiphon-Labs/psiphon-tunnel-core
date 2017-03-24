@@ -1140,6 +1140,10 @@ func (sshClient *sshClient) runTunnel(
 			}
 
 			if remainingDialTimeout <= 0 {
+
+				// Release the dialing slot here since handleTCPChannel() won't be called.
+				sshClient.failedTCPPortForward()
+
 				sshClient.updateQualityMetricsWithRejectedDialingLimit()
 				sshClient.rejectNewChannel(
 					newPortForward.newChannel, ssh.Prohibited, "TCP port forward timed out before dialing")
