@@ -1033,7 +1033,7 @@ func (sshClient *sshClient) runTunnel(
 	//    port forward dial limit.
 	//
 	//    Enqueuing new requests allows for reading further SSH requests from the
-	//    client without blocking when the dial limit is hit; this is to allow new
+	//    client without blocking when the dial limit is hit; this is to permit new
 	//    UDP/udpgw port forwards to be restablished without delay. The maximum size
 	//    of the queue enforces a hard cap on resources consumed by a client in the
 	//    pre-dial phase. When the queue is full, new TCP port forwards are
@@ -1094,11 +1094,11 @@ func (sshClient *sshClient) runTunnel(
 		newChannel    ssh.NewChannel
 	}
 
-	// The queue size is set to the traffic rules MaxTCPDialingPortForwardCount, which is a
-	// reasonable indication of resource limits per client; when that value is not set, a default
-	// is used.
-	// A limitation: this queue size is set once and doesn't change, for this client, when
-	// traffic rules are reloaded.
+	// The queue size is set to the traffic rules MaxTCPDPortForwardCount, which is a
+	// reasonable indication of resource limits per client; when that value is not set,
+	// a default is used.
+	// A limitation: this queue size is set once and doesn't change, for this client,
+	// when traffic rules are reloaded.
 	queueSize := sshClient.getTCPPortForwardLimit()
 	if queueSize == 0 {
 		queueSize = SSH_TCP_PORT_FORWARD_QUEUE_SIZE
