@@ -470,24 +470,25 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 	}
 
 	zeroProtocolStats := func() map[string]map[string]int64 {
-		zeroProtocolStats := make(map[string]map[string]int64)
-		zeroProtocolStats["ALL"] = zeroStats()
+		stats := make(map[string]map[string]int64)
+		stats["ALL"] = zeroStats()
 		for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
-			zeroProtocolStats[tunnelProtocol] = zeroStats()
+			stats[tunnelProtocol] = zeroStats()
 		}
-		return zeroProtocolStats
+		return stats
 	}
 
-	// [<protocol or ALL>][<stat name] -> count
+	// [<protocol or ALL>][<stat name>] -> count
 	protocolStats := zeroProtocolStats()
 
-	// [<region][<protocol or ALL>][<stat name] -> count
+	// [<region][<protocol or ALL>][<stat name>] -> count
 	regionStats := make(RegionStats)
 
 	// Note: as currently tracked/counted, each established client is also an accepted client
 
 	for tunnelProtocol, regionAcceptedClientCounts := range sshServer.acceptedClientCounts {
 		for region, acceptedClientCount := range regionAcceptedClientCounts {
+
 			if acceptedClientCount > 0 {
 				if regionStats[region] == nil {
 					regionStats[region] = zeroProtocolStats()
@@ -513,8 +514,6 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 			regionStats[region] = zeroProtocolStats()
 		}
 
-		// Note: can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
-
 		stats := []map[string]int64{
 			protocolStats["ALL"],
 			protocolStats[tunnelProtocol],
@@ -524,6 +523,8 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 		for _, stat := range stats {
 
 			stat["established_clients"] += 1
+
+			// Note: can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
 
 			stat["dialing_tcp_port_forwards"] += client.tcpTrafficState.concurrentDialingPortForwardCount
 			stat["tcp_port_forwards"] += client.tcpTrafficState.concurrentPortForwardCount
