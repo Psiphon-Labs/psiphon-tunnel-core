@@ -451,12 +451,6 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 	sshServer.clientsMutex.Lock()
 	defer sshServer.clientsMutex.Unlock()
 
-	// [<protocol or ALL>][<stat name] -> count
-	protocolStats := make(ProtocolStats)
-
-	// [<region][<protocol or ALL>][<stat name] -> count
-	regionStats := make(RegionStats)
-
 	// Explicitly populate with zeros to ensure 0 counts in log messages
 	zeroStats := func() map[string]int64 {
 		stats := make(map[string]int64)
@@ -475,19 +469,20 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 		return stats
 	}
 
-	zeroRegionProtocolStats := func() map[string]map[string]int64 {
-		zeroRegionProtocolStats := make(map[string]map[string]int64)
-		zeroRegionProtocolStats["ALL"] = zeroStats()
+	zeroProtocolStats := func() map[string]map[string]int64 {
+		zeroProtocolStats := make(map[string]map[string]int64)
+		zeroProtocolStats["ALL"] = zeroStats()
 		for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
-			zeroRegionProtocolStats[tunnelProtocol] = zeroStats()
+			zeroProtocolStats[tunnelProtocol] = zeroStats()
 		}
-		return zeroRegionProtocolStats
+		return zeroProtocolStats
 	}
 
-	protocolStats["ALL"] = zeroStats()
-	for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
-		protocolStats[tunnelProtocol] = zeroStats()
-	}
+	// [<protocol or ALL>][<stat name] -> count
+	protocolStats := zeroProtocolStats()
+
+	// [<region][<protocol or ALL>][<stat name] -> count
+	regionStats := make(RegionStats)
 
 	// Note: as currently tracked/counted, each established client is also an accepted client
 
@@ -495,7 +490,7 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 		for region, acceptedClientCount := range regionAcceptedClientCounts {
 			if acceptedClientCount > 0 {
 				if regionStats[region] == nil {
-					regionStats[region] = zeroRegionProtocolStats()
+					regionStats[region] = zeroProtocolStats()
 				}
 
 				protocolStats["ALL"]["accepted_clients"] += acceptedClientCount
@@ -515,7 +510,7 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 		region := client.geoIPData.Country
 
 		if regionStats[region] == nil {
-			regionStats[region] = zeroRegionProtocolStats()
+			regionStats[region] = zeroProtocolStats()
 		}
 
 		// Note: can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
