@@ -309,21 +309,18 @@ func logServerLoad(server *TunnelServer) {
 
 	log.LogRawFieldsWithTimestamp(serverLoad)
 
-	for protocol, regions := range regionStats {
-		for region, stats := range regions {
+	for region, regionProtocolStats := range regionStats {
 
-			serverRegionLoad := LogFields{
-				"event_name": "server_region_load",
-				"protocol":   protocol,
-				"region":     region,
-			}
-
-			for name, value := range stats {
-				serverRegionLoad[name] = value
-			}
-
-			log.LogRawFieldsWithTimestamp(serverRegionLoad)
+		serverLoad := LogFields{
+			"event_name": "server_load",
+			"region":     region,
 		}
+
+		for protocol, stats := range regionProtocolStats {
+			serverLoad[protocol] = stats
+		}
+
+		log.LogRawFieldsWithTimestamp(serverLoad)
 	}
 }
 

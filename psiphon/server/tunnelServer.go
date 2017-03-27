@@ -454,7 +454,7 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 	// [<protocol or ALL>][<stat name] -> count
 	protocolStats := make(ProtocolStats)
 
-	// [<protocol>][<region][<stat name] -> count
+	// [<region][<protocol or ALL>][<stat name] -> count
 	regionStats := make(RegionStats)
 
 	// Explicitly populate with zeros to ensure 0 counts in log messages
@@ -475,10 +475,18 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 		return stats
 	}
 
+	zeroRegionProtocolStats := func() map[string]map[string]int64 {
+		zeroRegionProtocolStats := make(map[string]map[string]int64)
+		zeroRegionProtocolStats["ALL"] = zeroStats()
+		for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
+			zeroRegionProtocolStats[tunnelProtocol] = zeroStats()
+		}
+		return zeroRegionProtocolStats
+	}
+
 	protocolStats["ALL"] = zeroStats()
 	for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
 		protocolStats[tunnelProtocol] = zeroStats()
-		regionStats[tunnelProtocol] = make(map[string]map[string]int64)
 	}
 
 	// Note: as currently tracked/counted, each established client is also an accepted client
@@ -486,12 +494,15 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 	for tunnelProtocol, regionAcceptedClientCounts := range sshServer.acceptedClientCounts {
 		for region, acceptedClientCount := range regionAcceptedClientCounts {
 			if acceptedClientCount > 0 {
-				if regionStats[tunnelProtocol][region] == nil {
-					regionStats[tunnelProtocol][region] = zeroStats()
+				if regionStats[region] == nil {
+					regionStats[region] = zeroRegionProtocolStats()
 				}
+
 				protocolStats["ALL"]["accepted_clients"] += acceptedClientCount
 				protocolStats[tunnelProtocol]["accepted_clients"] += acceptedClientCount
-				regionStats[tunnelProtocol][region]["accepted_clients"] += acceptedClientCount
+
+				regionStats[region]["ALL"]["accepted_clients"] += acceptedClientCount
+				regionStats[region][tunnelProtocol]["accepted_clients"] += acceptedClientCount
 			}
 		}
 	}
@@ -503,8 +514,8 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 		tunnelProtocol := client.tunnelProtocol
 		region := client.geoIPData.Country
 
-		if regionStats[tunnelProtocol][region] == nil {
-			regionStats[tunnelProtocol][region] = zeroStats()
+		if regionStats[region] == nil {
+			regionStats[region] = zeroRegionProtocolStats()
 		}
 
 		// Note: can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
@@ -512,7 +523,8 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 		stats := []map[string]int64{
 			protocolStats["ALL"],
 			protocolStats[tunnelProtocol],
-			regionStats[tunnelProtocol][region]}
+			regionStats[region]["ALL"],
+			regionStats[region][tunnelProtocol]}
 
 		for _, stat := range stats {
 
