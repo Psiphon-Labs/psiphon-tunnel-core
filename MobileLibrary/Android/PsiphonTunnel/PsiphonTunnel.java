@@ -498,10 +498,12 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
                 JSONObject data = notice.getJSONObject("data");
                 mHostService.onClientVerificationRequired(data.getString("nonce"), data.getInt("ttlSeconds"), data.getBoolean("resetCache"));
             } else if (noticeType.equals("ActiveTunnel")) {
-                if (notice.getJSONObject("data").getBoolean("isTCS")) {
-                  disableUdpGwKeepalive();
-                } else {
-                  enableUdpGwKeepalive();
+                if (isVPNMode()) {
+                    if (notice.getJSONObject("data").getBoolean("isTCS")) {
+                      disableUdpGwKeepalive();
+                    } else {
+                      enableUdpGwKeepalive();
+                    }
                 }
             }
 
