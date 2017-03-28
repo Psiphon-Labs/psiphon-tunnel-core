@@ -30,6 +30,7 @@ import (
 const (
 	DEFAULT_IDLE_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS = 30000
 	DEFAULT_IDLE_UDP_PORT_FORWARD_TIMEOUT_MILLISECONDS = 30000
+	DEFAULT_DIAL_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS = 10000
 	DEFAULT_MAX_TCP_DIALING_PORT_FORWARD_COUNT         = 64
 	DEFAULT_MAX_TCP_PORT_FORWARD_COUNT                 = 512
 	DEFAULT_MAX_UDP_PORT_FORWARD_COUNT                 = 32
@@ -90,6 +91,12 @@ type TrafficRules struct {
 	// RateLimits specifies data transfer rate limits for the
 	// client traffic.
 	RateLimits RateLimits
+
+	// DialTCPPortForwardTimeoutMilliseconds is the timeout period
+	// for dialing TCP port forwards. A value of 0 specifies no timeout.
+	// When omitted in DefaultRules,
+	// DEFAULT_TCP_PORT_FORWARD_DIAL_TIMEOUT_MILLISECONDS is used.
+	DialTCPPortForwardTimeoutMilliseconds *int
 
 	// IdleTCPPortForwardTimeoutMilliseconds is the timeout period
 	// after which idle (no bytes flowing in either direction)
@@ -301,6 +308,11 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		return &i
 	}
 
+	if trafficRules.DialTCPPortForwardTimeoutMilliseconds == nil {
+		trafficRules.DialTCPPortForwardTimeoutMilliseconds =
+			intPtr(DEFAULT_DIAL_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS)
+	}
+
 	if trafficRules.IdleTCPPortForwardTimeoutMilliseconds == nil {
 		trafficRules.IdleTCPPortForwardTimeoutMilliseconds =
 			intPtr(DEFAULT_IDLE_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS)
@@ -400,6 +412,10 @@ func (set *TrafficRulesSet) GetTrafficRules(
 
 		if filteredRules.Rules.RateLimits.CloseAfterExhausted != nil {
 			trafficRules.RateLimits.CloseAfterExhausted = filteredRules.Rules.RateLimits.CloseAfterExhausted
+		}
+
+		if filteredRules.Rules.DialTCPPortForwardTimeoutMilliseconds != nil {
+			trafficRules.DialTCPPortForwardTimeoutMilliseconds = filteredRules.Rules.DialTCPPortForwardTimeoutMilliseconds
 		}
 
 		if filteredRules.Rules.IdleTCPPortForwardTimeoutMilliseconds != nil {

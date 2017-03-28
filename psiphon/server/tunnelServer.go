@@ -43,7 +43,6 @@ import (
 const (
 	SSH_HANDSHAKE_TIMEOUT                 = 30 * time.Second
 	SSH_CONNECTION_READ_DEADLINE          = 5 * time.Minute
-	SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT     = 10 * time.Second
 	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE = 8192
 	SSH_TCP_PORT_FORWARD_QUEUE_SIZE       = 1024
 	SSH_SEND_OSL_INITIAL_RETRY_DELAY      = 30 * time.Second
@@ -1099,7 +1098,9 @@ func (sshClient *sshClient) runTunnel(
 		defer waitGroup.Done()
 		for newPortForward := range newTCPPortForwards {
 
-			remainingDialTimeout := SSH_TCP_PORT_FORWARD_DIAL_TIMEOUT - monotime.Since(newPortForward.enqueueTime)
+			remainingDialTimeout :=
+				time.Duration(sshClient.getDialTCPPortForwardTimeoutMilliseconds())*time.Millisecond -
+					monotime.Since(newPortForward.enqueueTime)
 
 			if remainingDialTimeout <= 0 {
 				sshClient.updateQualityMetricsWithRejectedDialingLimit()
@@ -1595,6 +1596,14 @@ func (sshClient *sshClient) getTCPPortForwardQueueSize() int {
 
 	return *sshClient.trafficRules.MaxTCPPortForwardCount +
 		*sshClient.trafficRules.MaxTCPDialingPortForwardCount
+}
+
+func (sshClient *sshClient) getDialTCPPortForwardTimeoutMilliseconds() int {
+
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	return *sshClient.trafficRules.DialTCPPortForwardTimeoutMilliseconds
 }
 
 func (sshClient *sshClient) dialingTCPPortForward() {
