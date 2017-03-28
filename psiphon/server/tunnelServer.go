@@ -193,7 +193,7 @@ func (server *TunnelServer) Run() error {
 // broken down by protocol ("SSH", "OSSH", etc.) and type. Types of stats
 // include current connected client count, total number of current port
 // forwards.
-func (server *TunnelServer) GetLoadStats() map[string]interface{} {
+func (server *TunnelServer) GetLoadStats() (ProtocolStats, RegionStats) {
 	return server.sshServer.getLoadStats()
 }
 
@@ -443,88 +443,106 @@ func (sshServer *sshServer) unregisterEstablishedClient(sessionID string) {
 	}
 }
 
-func (sshServer *sshServer) getLoadStats() map[string]interface{} {
+type ProtocolStats map[string]map[string]int64
+type RegionStats map[string]map[string]map[string]int64
+
+func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 
 	sshServer.clientsMutex.Lock()
 	defer sshServer.clientsMutex.Unlock()
 
-	protocolStats := make(map[string]map[string]map[string]int64)
-
-	// Explicitly populate with zeros to get 0 counts in log messages derived from getLoadStats()
-
-	for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
-		protocolStats[tunnelProtocol] = make(map[string]map[string]int64)
-		protocolStats[tunnelProtocol]["ALL"] = make(map[string]int64)
-		protocolStats[tunnelProtocol]["ALL"]["accepted_clients"] = 0
-		protocolStats[tunnelProtocol]["ALL"]["established_clients"] = 0
-		protocolStats[tunnelProtocol]["ALL"]["dialing_tcp_port_forwards"] = 0
-		protocolStats[tunnelProtocol]["ALL"]["tcp_port_forwards"] = 0
-		protocolStats[tunnelProtocol]["ALL"]["total_tcp_port_forwards"] = 0
-		protocolStats[tunnelProtocol]["ALL"]["udp_port_forwards"] = 0
-		protocolStats[tunnelProtocol]["ALL"]["total_udp_port_forwards"] = 0
+	// Explicitly populate with zeros to ensure 0 counts in log messages
+	zeroStats := func() map[string]int64 {
+		stats := make(map[string]int64)
+		stats["accepted_clients"] = 0
+		stats["established_clients"] = 0
+		stats["dialing_tcp_port_forwards"] = 0
+		stats["tcp_port_forwards"] = 0
+		stats["total_tcp_port_forwards"] = 0
+		stats["udp_port_forwards"] = 0
+		stats["total_udp_port_forwards"] = 0
+		stats["tcp_port_forward_dialed_count"] = 0
+		stats["tcp_port_forward_dialed_duration"] = 0
+		stats["tcp_port_forward_failed_count"] = 0
+		stats["tcp_port_forward_failed_duration"] = 0
+		stats["tcp_port_forward_rejected_dialing_limit_count"] = 0
+		return stats
 	}
+
+	zeroProtocolStats := func() map[string]map[string]int64 {
+		stats := make(map[string]map[string]int64)
+		stats["ALL"] = zeroStats()
+		for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
+			stats[tunnelProtocol] = zeroStats()
+		}
+		return stats
+	}
+
+	// [<protocol or ALL>][<stat name>] -> count
+	protocolStats := zeroProtocolStats()
+
+	// [<region][<protocol or ALL>][<stat name>] -> count
+	regionStats := make(RegionStats)
 
 	// Note: as currently tracked/counted, each established client is also an accepted client
 
 	for tunnelProtocol, regionAcceptedClientCounts := range sshServer.acceptedClientCounts {
-		total := int64(0)
 		for region, acceptedClientCount := range regionAcceptedClientCounts {
+
 			if acceptedClientCount > 0 {
-				if protocolStats[tunnelProtocol][region] == nil {
-					protocolStats[tunnelProtocol][region] = make(map[string]int64)
-					protocolStats[tunnelProtocol][region]["accepted_clients"] = 0
-					protocolStats[tunnelProtocol][region]["established_clients"] = 0
-					protocolStats[tunnelProtocol][region]["dialing_tcp_port_forwards"] = 0
-					protocolStats[tunnelProtocol][region]["tcp_port_forwards"] = 0
-					protocolStats[tunnelProtocol][region]["total_tcp_port_forwards"] = 0
-					protocolStats[tunnelProtocol][region]["udp_port_forwards"] = 0
-					protocolStats[tunnelProtocol][region]["total_udp_port_forwards"] = 0
+				if regionStats[region] == nil {
+					regionStats[region] = zeroProtocolStats()
 				}
-				protocolStats[tunnelProtocol][region]["accepted_clients"] = acceptedClientCount
-				total += acceptedClientCount
+
+				protocolStats["ALL"]["accepted_clients"] += acceptedClientCount
+				protocolStats[tunnelProtocol]["accepted_clients"] += acceptedClientCount
+
+				regionStats[region]["ALL"]["accepted_clients"] += acceptedClientCount
+				regionStats[region][tunnelProtocol]["accepted_clients"] += acceptedClientCount
 			}
 		}
-		protocolStats[tunnelProtocol]["ALL"]["accepted_clients"] = total
 	}
-
-	var aggregatedQualityMetrics qualityMetrics
 
 	for _, client := range sshServer.clients {
 
 		client.Lock()
 
-		for _, region := range []string{"ALL", client.geoIPData.Country} {
+		tunnelProtocol := client.tunnelProtocol
+		region := client.geoIPData.Country
 
-			if protocolStats[client.tunnelProtocol][region] == nil {
-				protocolStats[client.tunnelProtocol][region] = make(map[string]int64)
-				protocolStats[client.tunnelProtocol][region]["accepted_clients"] = 0
-				protocolStats[client.tunnelProtocol][region]["established_clients"] = 0
-				protocolStats[client.tunnelProtocol][region]["dialing_tcp_port_forwards"] = 0
-				protocolStats[client.tunnelProtocol][region]["tcp_port_forwards"] = 0
-				protocolStats[client.tunnelProtocol][region]["total_tcp_port_forwards"] = 0
-				protocolStats[client.tunnelProtocol][region]["udp_port_forwards"] = 0
-				protocolStats[client.tunnelProtocol][region]["total_udp_port_forwards"] = 0
-			}
-
-			// Note: can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
-			protocolStats[client.tunnelProtocol][region]["established_clients"] += 1
-
-			protocolStats[client.tunnelProtocol][region]["dialing_tcp_port_forwards"] += client.tcpTrafficState.concurrentDialingPortForwardCount
-			protocolStats[client.tunnelProtocol][region]["tcp_port_forwards"] += client.tcpTrafficState.concurrentPortForwardCount
-			protocolStats[client.tunnelProtocol][region]["total_tcp_port_forwards"] += client.tcpTrafficState.totalPortForwardCount
-			// client.udpTrafficState.concurrentDialingPortForwardCount isn't meaningful
-			protocolStats[client.tunnelProtocol][region]["udp_port_forwards"] += client.udpTrafficState.concurrentPortForwardCount
-			protocolStats[client.tunnelProtocol][region]["total_udp_port_forwards"] += client.udpTrafficState.totalPortForwardCount
-
+		if regionStats[region] == nil {
+			regionStats[region] = zeroProtocolStats()
 		}
 
-		aggregatedQualityMetrics.tcpPortForwardDialedCount += client.qualityMetrics.tcpPortForwardDialedCount
-		aggregatedQualityMetrics.tcpPortForwardDialedDuration +=
-			client.qualityMetrics.tcpPortForwardDialedDuration / time.Millisecond
-		aggregatedQualityMetrics.tcpPortForwardFailedCount += client.qualityMetrics.tcpPortForwardFailedCount
-		aggregatedQualityMetrics.tcpPortForwardFailedDuration +=
-			client.qualityMetrics.tcpPortForwardFailedDuration / time.Millisecond
-		aggregatedQualityMetrics.tcpPortForwardRejectedDialingLimitCount += client.qualityMetrics.tcpPortForwardRejectedDialingLimitCount
+		stats := []map[string]int64{
+			protocolStats["ALL"],
+			protocolStats[tunnelProtocol],
+			regionStats[region]["ALL"],
+			regionStats[region][tunnelProtocol]}
+
+		for _, stat := range stats {
+
+			stat["established_clients"] += 1
+
+			// Note: can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
+
+			stat["dialing_tcp_port_forwards"] += client.tcpTrafficState.concurrentDialingPortForwardCount
+			stat["tcp_port_forwards"] += client.tcpTrafficState.concurrentPortForwardCount
+			stat["total_tcp_port_forwards"] += client.tcpTrafficState.totalPortForwardCount
+			// client.udpTrafficState.concurrentDialingPortForwardCount isn't meaningful
+			stat["udp_port_forwards"] += client.udpTrafficState.concurrentPortForwardCount
+			stat["total_udp_port_forwards"] += client.udpTrafficState.totalPortForwardCount
+
+			stat["tcp_port_forward_dialed_count"] += client.qualityMetrics.tcpPortForwardDialedCount
+			stat["tcp_port_forward_dialed_duration"] +=
+				int64(client.qualityMetrics.tcpPortForwardDialedDuration / time.Millisecond)
+			stat["tcp_port_forward_failed_count"] += client.qualityMetrics.tcpPortForwardFailedCount
+			stat["tcp_port_forward_failed_duration"] +=
+				int64(client.qualityMetrics.tcpPortForwardFailedDuration / time.Millisecond)
+			stat["tcp_port_forward_rejected_dialing_limit_count"] +=
+				client.qualityMetrics.tcpPortForwardRejectedDialingLimitCount
+		}
+
 		client.qualityMetrics.tcpPortForwardDialedCount = 0
 		client.qualityMetrics.tcpPortForwardDialedDuration = 0
 		client.qualityMetrics.tcpPortForwardFailedCount = 0
@@ -534,36 +552,7 @@ func (sshServer *sshServer) getLoadStats() map[string]interface{} {
 		client.Unlock()
 	}
 
-	// Calculate and report totals across all protocols. It's easier to do this here
-	// than futher down the stats stack. Also useful for glancing at log files.
-
-	allProtocolsStats := make(map[string]int64)
-	allProtocolsStats["accepted_clients"] = 0
-	allProtocolsStats["established_clients"] = 0
-	allProtocolsStats["dialing_tcp_port_forwards"] = 0
-	allProtocolsStats["tcp_port_forwards"] = 0
-	allProtocolsStats["total_tcp_port_forwards"] = 0
-	allProtocolsStats["udp_port_forwards"] = 0
-	allProtocolsStats["total_udp_port_forwards"] = 0
-	allProtocolsStats["tcp_port_forward_dialed_count"] = aggregatedQualityMetrics.tcpPortForwardDialedCount
-	allProtocolsStats["tcp_port_forward_dialed_duration"] = int64(aggregatedQualityMetrics.tcpPortForwardDialedDuration)
-	allProtocolsStats["tcp_port_forward_failed_count"] = aggregatedQualityMetrics.tcpPortForwardFailedCount
-	allProtocolsStats["tcp_port_forward_failed_duration"] = int64(aggregatedQualityMetrics.tcpPortForwardFailedDuration)
-	allProtocolsStats["tcp_port_forward_rejected_dialing_limit_count"] = aggregatedQualityMetrics.tcpPortForwardRejectedDialingLimitCount
-
-	for _, stats := range protocolStats {
-		for name, value := range stats["ALL"] {
-			allProtocolsStats[name] += value
-		}
-	}
-
-	loadStats := make(map[string]interface{})
-	loadStats["ALL"] = allProtocolsStats
-	for tunnelProtocol, stats := range protocolStats {
-		loadStats[tunnelProtocol] = stats
-	}
-
-	return loadStats
+	return protocolStats, regionStats
 }
 
 func (sshServer *sshServer) resetAllClientTrafficRules() {
