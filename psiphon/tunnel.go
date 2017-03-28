@@ -235,6 +235,11 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 		tunnel.sshClient.Close()
 		// tunnel.conn.Close() may get called multiple times, which is allowed.
 		tunnel.conn.Close()
+
+		err := tunnel.sshClient.Wait()
+		if err != nil {
+			NoticeAlert("close tunnel ssh error: %s", err)
+		}
 	}
 }
 
