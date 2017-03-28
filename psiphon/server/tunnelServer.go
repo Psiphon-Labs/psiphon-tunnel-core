@@ -1083,12 +1083,12 @@ func (sshClient *sshClient) runTunnel(
 		newChannel    ssh.NewChannel
 	}
 
-	// The queue size is set to the traffic rules MaxTCPDPortForwardCount, which is a
-	// reasonable indication of resource limits per client; when that value is not set,
-	// a default is used.
+	// The queue size is set to the traffic rules (MaxTCPPortForwardCount +
+	// MaxTCPDialingPortForwardCount), which is a reasonable indication of resource
+	// limits per client; when that value is not set, a default is used.
 	// A limitation: this queue size is set once and doesn't change, for this client,
 	// when traffic rules are reloaded.
-	queueSize := sshClient.getTCPPortForwardLimit()
+	queueSize := sshClient.getTCPPortForwardQueueSize()
 	if queueSize == 0 {
 		queueSize = SSH_TCP_PORT_FORWARD_QUEUE_SIZE
 	}
@@ -1588,12 +1588,13 @@ func (sshClient *sshClient) isPortForwardLimitExceeded(
 	return false
 }
 
-func (sshClient *sshClient) getTCPPortForwardLimit() int {
+func (sshClient *sshClient) getTCPPortForwardQueueSize() int {
 
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
-	return *sshClient.trafficRules.MaxTCPPortForwardCount
+	return *sshClient.trafficRules.MaxTCPPortForwardCount +
+		*sshClient.trafficRules.MaxTCPDialingPortForwardCount
 }
 
 func (sshClient *sshClient) dialingTCPPortForward() {
