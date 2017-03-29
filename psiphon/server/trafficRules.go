@@ -30,6 +30,8 @@ import (
 const (
 	DEFAULT_IDLE_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS = 30000
 	DEFAULT_IDLE_UDP_PORT_FORWARD_TIMEOUT_MILLISECONDS = 30000
+	DEFAULT_DIAL_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS = 10000
+	DEFAULT_MAX_TCP_DIALING_PORT_FORWARD_COUNT         = 64
 	DEFAULT_MAX_TCP_PORT_FORWARD_COUNT                 = 512
 	DEFAULT_MAX_UDP_PORT_FORWARD_COUNT                 = 32
 )
@@ -90,6 +92,12 @@ type TrafficRules struct {
 	// client traffic.
 	RateLimits RateLimits
 
+	// DialTCPPortForwardTimeoutMilliseconds is the timeout period
+	// for dialing TCP port forwards. A value of 0 specifies no timeout.
+	// When omitted in DefaultRules,
+	// DEFAULT_TCP_PORT_FORWARD_DIAL_TIMEOUT_MILLISECONDS is used.
+	DialTCPPortForwardTimeoutMilliseconds *int
+
 	// IdleTCPPortForwardTimeoutMilliseconds is the timeout period
 	// after which idle (no bytes flowing in either direction)
 	// client TCP port forwards are preemptively closed.
@@ -106,14 +114,25 @@ type TrafficRules struct {
 	// is used.
 	IdleUDPPortForwardTimeoutMilliseconds *int
 
-	// MaxTCPPortForwardCount is the maximum number of TCP port
-	// forwards each client may have open concurrently.
+	// MaxTCPDialingPortForwardCount is the maximum number of dialing
+	// TCP port forwards each client may have open concurrently. When
+	// persistently at the limit, new TCP port forwards are rejected.
+	// A value of 0 specifies no maximum. When omitted in
+	// DefaultRules, DEFAULT_MAX_TCP_DIALING_PORT_FORWARD_COUNT is used.
+	MaxTCPDialingPortForwardCount *int
+
+	// MaxTCPPortForwardCount is the maximum number of established TCP
+	// port forwards each client may have open concurrently. If at the
+	// limit when a new TCP port forward is established, the LRU
+	// established TCP port forward is closed.
 	// A value of 0 specifies no maximum. When omitted in
 	// DefaultRules, DEFAULT_MAX_TCP_PORT_FORWARD_COUNT is used.
 	MaxTCPPortForwardCount *int
 
 	// MaxUDPPortForwardCount is the maximum number of UDP port
-	// forwards each client may have open concurrently.
+	// forwards each client may have open concurrently. If at the
+	// limit when a new UDP port forward is created, the LRU
+	// UDP port forward is closed.
 	// A value of 0 specifies no maximum. When omitted in
 	// DefaultRules, DEFAULT_MAX_UDP_PORT_FORWARD_COUNT is used.
 	MaxUDPPortForwardCount *int
@@ -289,6 +308,11 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		return &i
 	}
 
+	if trafficRules.DialTCPPortForwardTimeoutMilliseconds == nil {
+		trafficRules.DialTCPPortForwardTimeoutMilliseconds =
+			intPtr(DEFAULT_DIAL_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS)
+	}
+
 	if trafficRules.IdleTCPPortForwardTimeoutMilliseconds == nil {
 		trafficRules.IdleTCPPortForwardTimeoutMilliseconds =
 			intPtr(DEFAULT_IDLE_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS)
@@ -297,6 +321,11 @@ func (set *TrafficRulesSet) GetTrafficRules(
 	if trafficRules.IdleUDPPortForwardTimeoutMilliseconds == nil {
 		trafficRules.IdleUDPPortForwardTimeoutMilliseconds =
 			intPtr(DEFAULT_IDLE_UDP_PORT_FORWARD_TIMEOUT_MILLISECONDS)
+	}
+
+	if trafficRules.MaxTCPDialingPortForwardCount == nil {
+		trafficRules.MaxTCPDialingPortForwardCount =
+			intPtr(DEFAULT_MAX_TCP_DIALING_PORT_FORWARD_COUNT)
 	}
 
 	if trafficRules.MaxTCPPortForwardCount == nil {
@@ -385,12 +414,20 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			trafficRules.RateLimits.CloseAfterExhausted = filteredRules.Rules.RateLimits.CloseAfterExhausted
 		}
 
+		if filteredRules.Rules.DialTCPPortForwardTimeoutMilliseconds != nil {
+			trafficRules.DialTCPPortForwardTimeoutMilliseconds = filteredRules.Rules.DialTCPPortForwardTimeoutMilliseconds
+		}
+
 		if filteredRules.Rules.IdleTCPPortForwardTimeoutMilliseconds != nil {
 			trafficRules.IdleTCPPortForwardTimeoutMilliseconds = filteredRules.Rules.IdleTCPPortForwardTimeoutMilliseconds
 		}
 
 		if filteredRules.Rules.IdleUDPPortForwardTimeoutMilliseconds != nil {
 			trafficRules.IdleUDPPortForwardTimeoutMilliseconds = filteredRules.Rules.IdleUDPPortForwardTimeoutMilliseconds
+		}
+
+		if filteredRules.Rules.MaxTCPDialingPortForwardCount != nil {
+			trafficRules.MaxTCPDialingPortForwardCount = filteredRules.Rules.MaxTCPDialingPortForwardCount
 		}
 
 		if filteredRules.Rules.MaxTCPPortForwardCount != nil {

@@ -105,7 +105,7 @@ func MakeSecureRandomPadding(minLength, maxLength int) ([]byte, error) {
 }
 
 // MakeRandomPeriod returns a random duration, within a given range.
-// In the unlikely case where an  underlying MakeRandom functions fails,
+// In the unlikely case where an underlying MakeRandom functions fails,
 // the period is the minimum.
 func MakeRandomPeriod(min, max time.Duration) (time.Duration, error) {
 	period, err := MakeSecureRandomInt64(max.Nanoseconds() - min.Nanoseconds())

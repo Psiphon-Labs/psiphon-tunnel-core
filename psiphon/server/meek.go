@@ -243,7 +243,9 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	err = session.clientConn.pumpReads(request.Body)
 	if err != nil {
 		if err != io.EOF {
-			log.WithContextFields(LogFields{"error": err}).Warning("pump reads failed")
+			// Debug since errors such as "i/o timeout" occur during normal operation;
+			// also, golang network error messages may contain client IP.
+			log.WithContextFields(LogFields{"error": err}).Debug("pump reads failed")
 		}
 		server.terminateConnection(responseWriter, request)
 		server.closeSession(sessionID)
@@ -266,7 +268,9 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	err = session.clientConn.pumpWrites(responseWriter)
 	if err != nil {
 		if err != io.EOF {
-			log.WithContextFields(LogFields{"error": err}).Warning("pump writes failed")
+			// Debug since errors such as "i/o timeout" occur during normal operation;
+			// also, golang network error messages may contain client IP.
+			log.WithContextFields(LogFields{"error": err}).Debug("pump writes failed")
 		}
 		server.terminateConnection(responseWriter, request)
 		server.closeSession(sessionID)

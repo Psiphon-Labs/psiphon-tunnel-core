@@ -23,6 +23,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"math/rand"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -38,7 +39,7 @@ const (
 	DNS_RESOLVER_PORT               = 53
 )
 
-// DNSResolver maintains a fresh DNS resolver value, monitoring
+// DNSResolver maintains fresh DNS resolver values, monitoring
 // "/etc/resolv.conf" on platforms where it is available; and
 // otherwise using a default value.
 type DNSResolver struct {
@@ -48,12 +49,12 @@ type DNSResolver struct {
 	lastReloadTime int64
 	common.ReloadableFile
 	isReloading int32
-	resolver    net.IP
+	resolvers   []net.IP
 }
 
 // NewDNSResolver initializes a new DNSResolver, loading it with
-// a fresh resolver value. The load must succeed, so either
-// "/etc/resolv.conf" must contain a valid "nameserver" line with
+// fresh resolver values. The load must succeed, so either
+// "/etc/resolv.conf" must contain valid "nameserver" lines with
 // a DNS server IP address, or a valid "defaultResolver" default
 // value must be provided.
 // On systems without "/etc/resolv.conf", "defaultResolver" is
@@ -79,18 +80,18 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 		DNS_SYSTEM_CONFIG_FILENAME,
 		func(fileContent []byte) error {
 
-			resolver, err := parseResolveConf(fileContent)
+			resolvers, err := parseResolveConf(fileContent)
 			if err != nil {
 				// On error, state remains the same
 				return common.ContextError(err)
 			}
 
-			dns.resolver = resolver
+			dns.resolvers = resolvers
 
 			log.WithContextFields(
 				LogFields{
-					"resolver": resolver.String(),
-				}).Debug("loaded system DNS resolver")
+					"resolvers": resolvers,
+				}).Debug("loaded system DNS resolvers")
 
 			return nil
 		})
@@ -110,15 +111,19 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 			return nil, common.ContextError(err)
 		}
 
-		dns.resolver = resolver
+		dns.resolvers = []net.IP{resolver}
 	}
 
 	return dns, nil
 }
 
-// Get returns the cached resolver, first updating the cached
-// value if it's stale. If reloading fails, the previous value
-// is used.
+// Get returns one of the cached resolvers, selected at random,
+// after first updating the cached values if they're stale. If
+// reloading fails, the previous values are used.
+//
+// Randomly selecting any one of the configured resolvers is
+// expected to be more resiliant to failure; e.g., if one of
+// the resolvers becomes unavailable.
 func (dns *DNSResolver) Get() net.IP {
 
 	// Every UDP DNS port forward frequently calls Get(), so this code
@@ -158,12 +163,14 @@ func (dns *DNSResolver) Get() net.IP {
 	dns.ReloadableFile.RLock()
 	defer dns.ReloadableFile.RUnlock()
 
-	return dns.resolver
+	return dns.resolvers[rand.Intn(len(dns.resolvers))]
 }
 
-func parseResolveConf(fileContent []byte) (net.IP, error) {
+func parseResolveConf(fileContent []byte) ([]net.IP, error) {
 
 	scanner := bufio.NewScanner(bytes.NewReader(fileContent))
+
+	var resolvers []net.IP
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -172,10 +179,10 @@ func parseResolveConf(fileContent []byte) (net.IP, error) {
 		}
 		fields := strings.Fields(line)
 		if len(fields) == 2 && fields[0] == "nameserver" {
-			// TODO: parseResolverAddress will fail when the nameserver
-			// is not an IP address. It may be a domain name. To support
-			// this case, should proceed to the next "nameserver" line.
-			return parseResolver(fields[1])
+			resolver, err := parseResolver(fields[1])
+			if err == nil {
+				resolvers = append(resolvers, resolver)
+			}
 		}
 	}
 
@@ -183,7 +190,11 @@ func parseResolveConf(fileContent []byte) (net.IP, error) {
 		return nil, common.ContextError(err)
 	}
 
-	return nil, common.ContextError(errors.New("nameserver not found"))
+	if len(resolvers) == 0 {
+		return nil, common.ContextError(errors.New("no nameservers found"))
+	}
+
+	return resolvers, nil
 }
 
 func parseResolver(resolver string) (net.IP, error) {
