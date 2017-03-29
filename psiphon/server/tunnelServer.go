@@ -437,27 +437,37 @@ func (sshServer *sshServer) registerEstablishedClient(client *sshClient) bool {
 	existingClient := sshServer.clients[client.sessionID]
 
 	sshServer.clients[client.sessionID] = client
+
 	sshServer.clientsMutex.Unlock()
 
 	// Call stop() outside the mutex to avoid deadlock.
 	if existingClient != nil {
 		existingClient.stop()
+		log.WithContext().Info(
+			"stopped existing client with duplicate session ID")
 	}
 
 	return true
 }
 
-func (sshServer *sshServer) unregisterEstablishedClient(sessionID string) {
+func (sshServer *sshServer) unregisterEstablishedClient(client *sshClient) {
 
 	sshServer.clientsMutex.Lock()
-	client := sshServer.clients[sessionID]
-	delete(sshServer.clients, sessionID)
+
+	registeredClient := sshServer.clients[client.sessionID]
+
+	// registeredClient will differ from client when client
+	// is the existingClient terminated in registerEstablishedClient.
+	// In that case, registeredClient remains connected, and
+	// the sshServer.clients entry should be retained.
+	if registeredClient == client {
+		delete(sshServer.clients, client.sessionID)
+	}
+
 	sshServer.clientsMutex.Unlock()
 
 	// Call stop() outside the mutex to avoid deadlock.
-	if client != nil {
-		client.stop()
-	}
+	client.stop()
 }
 
 type ProtocolStats map[string]map[string]int64
@@ -868,7 +878,7 @@ func (sshClient *sshClient) run(clientConn net.Conn) {
 	// Note: sshServer.unregisterEstablishedClient calls sshClient.stop(),
 	// which also closes underlying transport Conn.
 
-	sshClient.sshServer.unregisterEstablishedClient(sshClient.sessionID)
+	sshClient.sshServer.unregisterEstablishedClient(sshClient)
 
 	sshClient.logTunnel()
 
