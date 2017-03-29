@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Inc/crypto/ssh"
+	cache "github.com/Psiphon-Inc/go-cache"
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
@@ -47,6 +48,7 @@ const (
 	SSH_TCP_PORT_FORWARD_QUEUE_SIZE       = 1024
 	SSH_SEND_OSL_INITIAL_RETRY_DELAY      = 30 * time.Second
 	SSH_SEND_OSL_RETRY_FACTOR             = 2
+	OSL_SESSION_CACHE_TTL                 = 5 * time.Minute
 )
 
 // TunnelServer is the main server that accepts Psiphon client
@@ -242,6 +244,8 @@ type sshServer struct {
 	stoppingClients      bool
 	acceptedClientCounts map[string]map[string]int64
 	clients              map[string]*sshClient
+	oslSessionCacheMutex sync.Mutex
+	oslSessionCache      *cache.Cache
 }
 
 func newSSHServer(
@@ -259,6 +263,19 @@ func newSSHServer(
 		return nil, common.ContextError(err)
 	}
 
+	// The OSL session cache temporarily retains OSL seed state
+	// progress for disconnected clients. This enables clients
+	// that disconnect and immediately reconnect to the same
+	// server to resume their OSL progress. Cached progress
+	// is referenced by session ID and is retained for
+	// OSL_SESSION_CACHE_TTL after disconnect.
+	//
+	// Note: session IDs are assumed to be unpredictable. If a
+	// rogue client could guess the session ID of another client,
+	// it could resume its OSL progress and, if the OSL config
+	// were known, infer some activity.
+	oslSessionCache := cache.New(OSL_SESSION_CACHE_TTL, 1*time.Minute)
+
 	return &sshServer{
 		support:              support,
 		establishTunnels:     1,
@@ -266,6 +283,7 @@ func newSSHServer(
 		sshHostKey:           signer,
 		acceptedClientCounts: make(map[string]map[string]int64),
 		clients:              make(map[string]*sshClient),
+		oslSessionCache:      oslSessionCache,
 	}, nil
 }
 
@@ -419,27 +437,37 @@ func (sshServer *sshServer) registerEstablishedClient(client *sshClient) bool {
 	existingClient := sshServer.clients[client.sessionID]
 
 	sshServer.clients[client.sessionID] = client
+
 	sshServer.clientsMutex.Unlock()
 
 	// Call stop() outside the mutex to avoid deadlock.
 	if existingClient != nil {
 		existingClient.stop()
+		log.WithContext().Info(
+			"stopped existing client with duplicate session ID")
 	}
 
 	return true
 }
 
-func (sshServer *sshServer) unregisterEstablishedClient(sessionID string) {
+func (sshServer *sshServer) unregisterEstablishedClient(client *sshClient) {
 
 	sshServer.clientsMutex.Lock()
-	client := sshServer.clients[sessionID]
-	delete(sshServer.clients, sessionID)
+
+	registeredClient := sshServer.clients[client.sessionID]
+
+	// registeredClient will differ from client when client
+	// is the existingClient terminated in registerEstablishedClient.
+	// In that case, registeredClient remains connected, and
+	// the sshServer.clients entry should be retained.
+	if registeredClient == client {
+		delete(sshServer.clients, client.sessionID)
+	}
+
 	sshServer.clientsMutex.Unlock()
 
 	// Call stop() outside the mutex to avoid deadlock.
-	if client != nil {
-		client.stop()
-	}
+	client.stop()
 }
 
 type ProtocolStats map[string]map[string]int64
@@ -569,6 +597,13 @@ func (sshServer *sshServer) resetAllClientTrafficRules() {
 }
 
 func (sshServer *sshServer) resetAllClientOSLConfigs() {
+
+	// Flush cached seed state. This has the same effect
+	// and same limitations as calling setOSLConfig for
+	// currently connected clients -- all progress is lost.
+	sshServer.oslSessionCacheMutex.Lock()
+	sshServer.oslSessionCache.Flush()
+	sshServer.oslSessionCacheMutex.Unlock()
 
 	sshServer.clientsMutex.Lock()
 	clients := make(map[string]*sshClient)
@@ -843,9 +878,25 @@ func (sshClient *sshClient) run(clientConn net.Conn) {
 	// Note: sshServer.unregisterEstablishedClient calls sshClient.stop(),
 	// which also closes underlying transport Conn.
 
-	sshClient.sshServer.unregisterEstablishedClient(sshClient.sessionID)
+	sshClient.sshServer.unregisterEstablishedClient(sshClient)
 
 	sshClient.logTunnel()
+
+	// Transfer OSL seed state -- the OSL progress -- from the closing
+	// client to the session cache so the client can resume its progress
+	// if it reconnects to this same server.
+	// Note: following setOSLConfig order of locking.
+
+	sshClient.Lock()
+	if sshClient.oslClientSeedState != nil {
+		sshClient.sshServer.oslSessionCacheMutex.Lock()
+		sshClient.oslClientSeedState.Hibernate()
+		sshClient.sshServer.oslSessionCache.Set(
+			sshClient.sessionID, sshClient.oslClientSeedState, cache.DefaultExpiration)
+		sshClient.sshServer.oslSessionCacheMutex.Unlock()
+		sshClient.oslClientSeedState = nil
+	}
+	sshClient.Unlock()
 
 	// Initiate cleanup of the GeoIP session cache. To allow for post-tunnel
 	// final status requests, the lifetime of cached GeoIP records exceeds the
@@ -1416,6 +1467,25 @@ func (sshClient *sshClient) setOSLConfig() {
 		// This should not fail as long as client has sent valid handshake
 		return
 	}
+
+	// Use a cached seed state if one is found for the client's
+	// session ID. This enables resuming progress made in a previous
+	// tunnel.
+	// Note: go-cache is already concurency safe; the additional mutex
+	// is necessary to guarantee that Get/Delete is atomic; although in
+	// practice no two concurrent clients should ever supply the same
+	// session ID.
+
+	sshClient.sshServer.oslSessionCacheMutex.Lock()
+	oslClientSeedState, found := sshClient.sshServer.oslSessionCache.Get(sshClient.sessionID)
+	if found {
+		sshClient.sshServer.oslSessionCache.Delete(sshClient.sessionID)
+		sshClient.sshServer.oslSessionCacheMutex.Unlock()
+		sshClient.oslClientSeedState = oslClientSeedState.(*osl.ClientSeedState)
+		sshClient.oslClientSeedState.Resume(sshClient.signalIssueSLOKs)
+		return
+	}
+	sshClient.sshServer.oslSessionCacheMutex.Unlock()
 
 	// Two limitations when setOSLConfig() is invoked due to an
 	// OSL config hot reload:
