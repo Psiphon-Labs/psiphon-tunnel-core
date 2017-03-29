@@ -189,9 +189,9 @@ type KeySplit struct {
 // across all schemes the client qualifies for.
 type ClientSeedState struct {
 	propagationChannelID string
-	signalIssueSLOKs     chan struct{}
 	seedProgress         []*ClientSeedProgress
 	mutex                sync.Mutex
+	signalIssueSLOKs     chan struct{}
 	issuedSLOKs          map[string]*SLOK
 	payloadSLOKs         []*SLOK
 }
@@ -400,6 +400,36 @@ func (config *Config) NewClientSeedState(
 	return state
 }
 
+// Hibernate clears references to short-lived objects (currently,
+// signalIssueSLOKs) so that a ClientSeedState can be stored for
+// later resumption without blocking garbage collection of the
+// short-lived objects.
+//
+// The ClientSeedState will still hold references to its Config;
+// the caller is responsible for discarding hibernated seed states
+// when the config changes.
+//
+// The caller should ensure that all ClientSeedPortForwards
+// associated with this ClientSeedState are closed before
+// hibernation.
+func (state *ClientSeedState) Hibernate() {
+	state.mutex.Lock()
+	defer state.mutex.Unlock()
+
+	state.signalIssueSLOKs = nil
+}
+
+// Resume resumes a hibernated ClientSeedState by resetting the required
+// objects (currently, signalIssueSLOKs) cleared by Hibernate.
+func (state *ClientSeedState) Resume(
+	signalIssueSLOKs chan struct{}) {
+
+	state.mutex.Lock()
+	defer state.mutex.Unlock()
+
+	state.signalIssueSLOKs = signalIssueSLOKs
+}
+
 // NewClientSeedPortForwardState creates a new client port forward
 // traffic progress tracker. Port forward progress reported to the
 // ClientSeedPortForward is added to seed state progress for all
@@ -453,6 +483,9 @@ func (state *ClientSeedState) NewClientSeedPortForward(
 }
 
 func (state *ClientSeedState) sendIssueSLOKsSignal() {
+	state.mutex.Lock()
+	defer state.mutex.Unlock()
+
 	if state.signalIssueSLOKs != nil {
 		select {
 		case state.signalIssueSLOKs <- *new(struct{}):
