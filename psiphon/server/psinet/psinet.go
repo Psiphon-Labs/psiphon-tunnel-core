@@ -183,7 +183,7 @@ func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatfor
 	homePages := sponsor.HomePages
 
 	if isMobilePlatform {
-		if sponsor.MobileHomePages != nil {
+		if sponsor.MobileHomePages != nil && len(sponsor.MobileHomePages) > 0 {
 			homePages = sponsor.MobileHomePages
 		}
 	}
