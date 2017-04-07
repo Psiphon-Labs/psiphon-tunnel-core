@@ -825,38 +825,49 @@ func (serverContext *ServerContext) getBaseParams() requestJSONObject {
 	if tunnel.config.DeviceRegion != "" {
 		params["device_region"] = tunnel.config.DeviceRegion
 	}
-	if tunnel.dialStats != nil {
-		if tunnel.dialStats.UpstreamProxyType != "" {
-			params["upstream_proxy_type"] = tunnel.dialStats.UpstreamProxyType
-		}
-		if tunnel.dialStats.UpstreamProxyCustomHeaderNames != nil {
-			params["upstream_proxy_custom_header_names"] = tunnel.dialStats.UpstreamProxyCustomHeaderNames
-		}
-		if tunnel.dialStats.MeekDialAddress != "" {
-			params["meek_dial_address"] = tunnel.dialStats.MeekDialAddress
-		}
-		if tunnel.dialStats.MeekResolvedIPAddress != "" {
-			params["meek_resolved_ip_address"] = tunnel.dialStats.MeekResolvedIPAddress
-		}
-		if tunnel.dialStats.MeekSNIServerName != "" {
-			params["meek_sni_server_name"] = tunnel.dialStats.MeekSNIServerName
-		}
-		if tunnel.dialStats.MeekHostHeader != "" {
-			params["meek_host_header"] = tunnel.dialStats.MeekHostHeader
-		}
+
+	if tunnel.dialStats.SelectedSSHClientVersion {
+		params["ssh_client_version"] = tunnel.dialStats.SSHClientVersion
+	}
+
+	if tunnel.dialStats.UpstreamProxyType != "" {
+		params["upstream_proxy_type"] = tunnel.dialStats.UpstreamProxyType
+	}
+
+	if tunnel.dialStats.UpstreamProxyCustomHeaderNames != nil {
+		params["upstream_proxy_custom_header_names"] = tunnel.dialStats.UpstreamProxyCustomHeaderNames
+	}
+
+	if tunnel.dialStats.MeekDialAddress != "" {
+		params["meek_dial_address"] = tunnel.dialStats.MeekDialAddress
+	}
+
+	if tunnel.dialStats.MeekResolvedIPAddress != "" {
+		params["meek_resolved_ip_address"] = tunnel.dialStats.MeekResolvedIPAddress
+	}
+
+	if tunnel.dialStats.MeekSNIServerName != "" {
+		params["meek_sni_server_name"] = tunnel.dialStats.MeekSNIServerName
+	}
+
+	if tunnel.dialStats.MeekHostHeader != "" {
+		params["meek_host_header"] = tunnel.dialStats.MeekHostHeader
+	}
+
+	if tunnel.dialStats.MeekDialAddress != "" {
 		transformedHostName := "0"
 		if tunnel.dialStats.MeekTransformedHostName {
 			transformedHostName = "1"
 		}
 		params["meek_transformed_host_name"] = transformedHostName
+	}
 
-		if tunnel.dialStats.SelectedUserAgent {
-			params["user_agent"] = tunnel.dialStats.UserAgent
-		}
+	if tunnel.dialStats.SelectedUserAgent {
+		params["user_agent"] = tunnel.dialStats.UserAgent
+	}
 
-		if tunnel.dialStats.SelectedTLSProfile {
-			params["tls_profile"] = tunnel.dialStats.TLSProfile
-		}
+	if tunnel.dialStats.SelectedTLSProfile {
+		params["tls_profile"] = tunnel.dialStats.TLSProfile
 	}
 
 	if tunnel.serverEntry.Region != "" {
