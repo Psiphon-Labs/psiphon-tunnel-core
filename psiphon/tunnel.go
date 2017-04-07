@@ -600,6 +600,8 @@ func dialSsh(
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
 
+	// Note: when SSHClientVersion is "", a default is supplied by the ssh package:
+	// https://godoc.org/golang.org/x/crypto/ssh#ClientConfig
 	var selectedSSHClientVersion bool
 	SSHClientVersion := ""
 	useObfuscatedSsh := false

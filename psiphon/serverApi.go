@@ -854,6 +854,7 @@ func (serverContext *ServerContext) getBaseParams() requestJSONObject {
 		params["meek_host_header"] = tunnel.dialStats.MeekHostHeader
 	}
 
+	// MeekTransformedHostName is meaningful when meek is used, which is when MeekDialAddress != ""
 	if tunnel.dialStats.MeekDialAddress != "" {
 		transformedHostName := "0"
 		if tunnel.dialStats.MeekTransformedHostName {

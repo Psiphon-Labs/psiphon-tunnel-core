@@ -203,12 +203,9 @@ func noticeServerDialStats(noticeType, ipAddress, region, protocol string, tunne
 		args = append(args, "meekHostHeader", tunnelDialStats.MeekHostHeader)
 	}
 
+	// MeekTransformedHostName is meaningful when meek is used, which is when MeekDialAddress != ""
 	if tunnelDialStats.MeekDialAddress != "" {
-		transformedHostName := "0"
-		if tunnelDialStats.MeekTransformedHostName {
-			transformedHostName = "1"
-		}
-		args = append(args, "meekTransformedHostName", transformedHostName)
+		args = append(args, "meekTransformedHostName", tunnelDialStats.MeekTransformedHostName)
 	}
 
 	if tunnelDialStats.SelectedUserAgent {
