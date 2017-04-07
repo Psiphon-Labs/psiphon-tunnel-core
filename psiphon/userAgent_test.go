@@ -214,10 +214,9 @@ func attemptConnectionsWithUserAgent(
 				return
 			}
 			if noticeType == "ConnectingServer" {
-				selectedUserAgent := payload["selectedUserAgent"].(bool)
-				userAgent := payload["userAgent"].(string)
-				if selectedUserAgent {
-					countNoticeUserAgent(userAgent)
+				userAgent, ok := payload["userAgent"]
+				if ok {
+					countNoticeUserAgent(userAgent.(string))
 				}
 			}
 		}))
