@@ -168,27 +168,58 @@ func NoticeAvailableEgressRegions(regions []string) {
 }
 
 func noticeServerDialStats(noticeType, ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
-	if tunnelDialStats != nil {
-		outputNotice(noticeType, noticeIsDiagnostic,
-			"ipAddress", ipAddress,
-			"region", region,
-			"protocol", protocol,
-			"upstreamProxyType", tunnelDialStats.UpstreamProxyType,
-			"upstreamProxyCustomHeaderNames", strings.Join(tunnelDialStats.UpstreamProxyCustomHeaderNames, ","),
-			"meekDialAddress", tunnelDialStats.MeekDialAddress,
-			"meekDialAddress", tunnelDialStats.MeekDialAddress,
-			"meekResolvedIPAddress", tunnelDialStats.MeekResolvedIPAddress,
-			"meekSNIServerName", tunnelDialStats.MeekSNIServerName,
-			"meekHostHeader", tunnelDialStats.MeekHostHeader,
-			"meekTransformedHostName", tunnelDialStats.MeekTransformedHostName,
-			"selectedUserAgent", tunnelDialStats.SelectedUserAgent,
-			"userAgent", tunnelDialStats.UserAgent)
-	} else {
-		outputNotice(noticeType, noticeIsDiagnostic,
-			"ipAddress", ipAddress,
-			"region", region,
-			"protocol", protocol)
+
+	args := []interface{}{
+		"ipAddress", ipAddress,
+		"region", region,
+		"protocol", protocol,
 	}
+
+	if tunnelDialStats.SelectedSSHClientVersion {
+		args = append(args, "SSHClientVersion", tunnelDialStats.SSHClientVersion)
+	}
+
+	if tunnelDialStats.UpstreamProxyType != "" {
+		args = append(args, "upstreamProxyType", tunnelDialStats.UpstreamProxyType)
+	}
+
+	if tunnelDialStats.UpstreamProxyCustomHeaderNames != nil {
+		args = append(args, "upstreamProxyCustomHeaderNames", strings.Join(tunnelDialStats.UpstreamProxyCustomHeaderNames, ","))
+	}
+
+	if tunnelDialStats.MeekDialAddress != "" {
+		args = append(args, "meekDialAddress", tunnelDialStats.MeekDialAddress)
+	}
+
+	if tunnelDialStats.MeekResolvedIPAddress != "" {
+		args = append(args, "meekResolvedIPAddress", tunnelDialStats.MeekResolvedIPAddress)
+	}
+
+	if tunnelDialStats.MeekSNIServerName != "" {
+		args = append(args, "meekSNIServerName", tunnelDialStats.MeekSNIServerName)
+	}
+
+	if tunnelDialStats.MeekHostHeader != "" {
+		args = append(args, "meekHostHeader", tunnelDialStats.MeekHostHeader)
+	}
+
+	// MeekTransformedHostName is meaningful when meek is used, which is when MeekDialAddress != ""
+	if tunnelDialStats.MeekDialAddress != "" {
+		args = append(args, "meekTransformedHostName", tunnelDialStats.MeekTransformedHostName)
+	}
+
+	if tunnelDialStats.SelectedUserAgent {
+		args = append(args, "userAgent", tunnelDialStats.UserAgent)
+	}
+
+	if tunnelDialStats.SelectedTLSProfile {
+		args = append(args, "TLSProfile", tunnelDialStats.TLSProfile)
+	}
+
+	outputNotice(
+		noticeType,
+		noticeIsDiagnostic,
+		args...)
 }
 
 // NoticeConnectingServer reports parameters and details for a single connection attempt
@@ -202,8 +233,8 @@ func NoticeConnectedServer(ipAddress, region, protocol string, tunnelDialStats *
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
-func NoticeActiveTunnel(ipAddress, protocol string) {
-	outputNotice("ActiveTunnel", noticeIsDiagnostic, "ipAddress", ipAddress, "protocol", protocol)
+func NoticeActiveTunnel(ipAddress, protocol string, isTCS bool) {
+	outputNotice("ActiveTunnel", noticeIsDiagnostic, "ipAddress", ipAddress, "protocol", protocol, "isTCS", isTCS)
 }
 
 // NoticeSocksProxyPortInUse is a failure to use the configured LocalSocksProxyPort

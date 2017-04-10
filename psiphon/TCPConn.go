@@ -211,3 +211,29 @@ func (conn *TCPConn) Close() (err error) {
 
 	return err
 }
+
+// IsClosed implements the Closer iterface. The return value
+// indicates whether the TCPConn has been closed.
+func (conn *TCPConn) IsClosed() bool {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+	return conn.isClosed
+}
+
+// CloseWrite calls net.TCPConn.CloseWrite when the underlying
+// conn is a *net.TCPConn.
+func (conn *TCPConn) CloseWrite() (err error) {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	if conn.isClosed {
+		return errors.New("already closed")
+	}
+
+	tcpConn, ok := conn.Conn.(*net.TCPConn)
+	if !ok {
+		return errors.New("conn is not a *net.TCPConn")
+	}
+
+	return tcpConn.CloseWrite()
+}

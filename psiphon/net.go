@@ -129,13 +129,6 @@ type IPv6Synthesizer interface {
 	IPv6Synthesize(IPv4Addr string) string
 }
 
-// TimeoutError implements the error interface
-type TimeoutError struct{}
-
-func (TimeoutError) Error() string   { return "timed out" }
-func (TimeoutError) Timeout() bool   { return true }
-func (TimeoutError) Temporary() bool { return true }
-
 // Dialer is a custom dialer compatible with http.Transport.Dial.
 type Dialer func(string, string) (net.Conn, error)
 

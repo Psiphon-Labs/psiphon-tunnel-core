@@ -1101,6 +1101,29 @@ func resetAllPersistentStatsToUnreported() error {
 	return nil
 }
 
+// CountSLOKs returns the total number of SLOK records.
+func CountSLOKs() int {
+	checkInitDataStore()
+
+	count := 0
+
+	err := singleton.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(slokBucket))
+		cursor := bucket.Cursor()
+		for key, _ := cursor.First(); key != nil; key, _ = cursor.Next() {
+			count++
+		}
+		return nil
+	})
+
+	if err != nil {
+		NoticeAlert("CountSLOKs failed: %s", err)
+		return 0
+	}
+
+	return count
+}
+
 // DeleteSLOKs deletes all SLOK records.
 func DeleteSLOKs() error {
 	checkInitDataStore()

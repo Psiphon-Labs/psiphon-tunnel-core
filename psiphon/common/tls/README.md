@@ -1,5 +1,7 @@
-This is a fork of go 1.7.3 `crypto/tls`. Changes are almost entirely contained in two new files, `obfuscated.go` and `obfuscated_test.go`, which implement obfuscated session tickets, a network obfuscation protocol based on TLS.
+This is a fork of go 1.8 `crypto/tls`.
 
-The obfuscated session tickets protocol is implemented as an optional mode enabled through the `Config`. The implementation requires access to `crypto.tls` internals.
+The files `obfuscated.go` and `obfuscated_test.go` implement obfuscated session tickets, a network obfuscation protocol based on TLS. The obfuscated session tickets protocol is implemented as an optional mode enabled through the `Config`. The implementation requires access to `crypto.tls` internals.
 
-Apart from this optional mode, this is a stock `crypto/tls`.
+The `EmulateChrome` feature configures the TLS ClientHello to match the ClientHello message sent by a modern Chrome browser.
+
+All customizations are tagged with `// [Psiphon]` comments.

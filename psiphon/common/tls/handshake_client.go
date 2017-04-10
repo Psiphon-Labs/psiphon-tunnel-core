@@ -7,6 +7,10 @@ package tls
 import (
 	"bytes"
 	"crypto"
+	"crypto/rand"
+	"crypto/sha256"
+	"math/big"
+
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/subtle"
@@ -115,8 +119,14 @@ NextCipherSuite:
 
 	// Session resumption is not allowed if renegotiating because
 	// renegotiation is primarily used to allow a client to send a client
-	// certificate, which would be skipped if session resumption occured.
-	if sessionCache != nil && c.handshakes == 0 {
+	// certificate, which would be skipped if session resumption occurred.
+	if sessionCache != nil && c.handshakes == 0 &&
+		// [Psiphon]
+		// Add nil guard as conn.RemoteAddr may be nil. When nil and
+		// when no ServerName for clientSessionCacheKey to use, skip
+		// caching entrely.
+		(c.conn.RemoteAddr() != nil || len(c.config.ServerName) > 0) {
+
 		// Try to resume a previously negotiated TLS session, if
 		// available.
 		cacheKey = clientSessionCacheKey(c.conn.RemoteAddr(), c.config)
@@ -149,6 +159,96 @@ NextCipherSuite:
 		if _, err := io.ReadFull(c.config.rand(), hello.sessionId); err != nil {
 			c.sendAlert(alertInternalError)
 			return errors.New("tls: short read from Rand: " + err.Error())
+		}
+	}
+
+	// [Psiphon]
+	// Re-configure extensions as required for EmulateChrome.
+	if c.config.EmulateChrome {
+
+		hello.emulateChrome = true
+
+		// Sanity check that expected and required configuration is present
+		if hello.vers != VersionTLS12 ||
+			len(hello.compressionMethods) != 1 ||
+			hello.compressionMethods[0] != compressionNone ||
+			!hello.ticketSupported ||
+			!hello.ocspStapling ||
+			!hello.scts ||
+			len(hello.supportedPoints) != 1 ||
+			hello.supportedPoints[0] != pointFormatUncompressed ||
+			!hello.secureRenegotiationSupported {
+
+			return errors.New("tls: unexpected configuration for EmulateChrome")
+		}
+
+		hello.supportedCurves = []CurveID{
+			CurveID(randomGREASEValue()),
+			X25519,
+			CurveP256, // secp256r1
+			CurveP384, // secp384r1
+		}
+
+		hello.cipherSuites = []uint16{
+			randomGREASEValue(),
+			TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+			TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+
+			// TODO: remove these soon
+			// See: https://github.com/google/boringssl/commit/2e839244b078205ff677ada3fb83cf9d60ef055b
+			TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_OLD,
+			TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_OLD,
+
+			TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+			TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			TLS_RSA_WITH_AES_128_GCM_SHA256,
+			TLS_RSA_WITH_AES_256_GCM_SHA384,
+			TLS_RSA_WITH_AES_128_CBC_SHA,
+			TLS_RSA_WITH_AES_256_CBC_SHA,
+			TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+		}
+
+		// From: https://github.com/google/boringssl/blob/7d7554b6b3c79e707e25521e61e066ce2b996e4c/ssl/t1_lib.c#L442
+		// TODO: handle RSA-PSS (0x08)
+		hello.signatureAndHashes = []signatureAndHash{
+			{hashSHA256, signatureECDSA},
+			{0x08, 0x04},
+			{hashSHA256, signatureRSA},
+			{hashSHA384, signatureECDSA},
+			{0x08, 0x05},
+			{hashSHA384, signatureRSA},
+			{0x08, 0x06},
+			{hashSHA512, signatureRSA},
+			{hashSHA1, signatureRSA},
+		}
+
+		hello.nextProtoNeg = false
+
+		hello.alpnProtocols = []string{"h2", "http/1.1"}
+
+		// The extended master secret and channel ID extensions
+		// code is from:
+		//
+		// https://github.com/google/boringssl/tree/master/ssl/test/runner
+		// https://github.com/google/boringssl/blob/master/LICENSE
+
+		hello.extendedMasterSecretSupported = true
+
+		hello.channelIDSupported = true
+		// TODO: implement actual support, in case negotiated
+		// https://github.com/google/boringssl/commit/d30a990850457657e3209cb0c27fbe89b3df7ad2
+
+		// In BoringSSL, the session ID is a SHA256 digest of the
+		// session ticket:
+		// https://github.com/google/boringssl/blob/33fe4a0d1406f423e7424ea7367e1d1a51c2edc1/ssl/handshake_client.c#L1901-L1908
+		if session != nil {
+			hello.sessionTicket = session.sessionTicket
+			sessionId := sha256.Sum256(session.sessionTicket)
+			hello.sessionId = sessionId[:]
 		}
 	}
 
@@ -199,7 +299,7 @@ NextCipherSuite:
 	// Otherwise, in a full handshake, if we don't have any certificates
 	// configured then we will never send a CertificateVerify message and
 	// thus no signatures are needed in that case either.
-	if isResume || len(c.config.Certificates) == 0 {
+	if isResume || (len(c.config.Certificates) == 0 && c.config.GetClientCertificate == nil) {
 		hs.finishedHash.discardHandshakeBuffer()
 	}
 
@@ -256,6 +356,12 @@ NextCipherSuite:
 	return nil
 }
 
+func randomGREASEValue() uint16 {
+	values := []uint16{0x0A0A, 0x1A1A, 0x2A2A, 0x3A3A, 0x4A4A, 0x5A5A, 0x6A6A, 0x7A7A, 0x8A8A, 0x9A9A, 0xAAAA, 0xBABA, 0xCACA, 0xDADA, 0xEAEA, 0xFAFA}
+	i, _ := rand.Int(rand.Reader, big.NewInt(int64(len(values))))
+	return values[int(i.Int64())]
+}
+
 func (hs *clientHandshakeState) doFullHandshake() error {
 	c := hs.c
 
@@ -299,6 +405,13 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 			}
 			c.verifiedChains, err = certs[0].Verify(opts)
 			if err != nil {
+				c.sendAlert(alertBadCertificate)
+				return err
+			}
+		}
+
+		if c.config.VerifyPeerCertificate != nil {
+			if err := c.config.VerifyPeerCertificate(certMsg.certificates, c.verifiedChains); err != nil {
 				c.sendAlert(alertBadCertificate)
 				return err
 			}
@@ -370,71 +483,11 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 	certReq, ok := msg.(*certificateRequestMsg)
 	if ok {
 		certRequested = true
-
-		// RFC 4346 on the certificateAuthorities field:
-		// A list of the distinguished names of acceptable certificate
-		// authorities. These distinguished names may specify a desired
-		// distinguished name for a root CA or for a subordinate CA;
-		// thus, this message can be used to describe both known roots
-		// and a desired authorization space. If the
-		// certificate_authorities list is empty then the client MAY
-		// send any certificate of the appropriate
-		// ClientCertificateType, unless there is some external
-		// arrangement to the contrary.
-
 		hs.finishedHash.Write(certReq.marshal())
 
-		var rsaAvail, ecdsaAvail bool
-		for _, certType := range certReq.certificateTypes {
-			switch certType {
-			case certTypeRSASign:
-				rsaAvail = true
-			case certTypeECDSASign:
-				ecdsaAvail = true
-			}
-		}
-
-		// We need to search our list of client certs for one
-		// where SignatureAlgorithm is acceptable to the server and the
-		// Issuer is in certReq.certificateAuthorities
-	findCert:
-		for i, chain := range c.config.Certificates {
-			if !rsaAvail && !ecdsaAvail {
-				continue
-			}
-
-			for j, cert := range chain.Certificate {
-				x509Cert := chain.Leaf
-				// parse the certificate if this isn't the leaf
-				// node, or if chain.Leaf was nil
-				if j != 0 || x509Cert == nil {
-					if x509Cert, err = x509.ParseCertificate(cert); err != nil {
-						c.sendAlert(alertInternalError)
-						return errors.New("tls: failed to parse client certificate #" + strconv.Itoa(i) + ": " + err.Error())
-					}
-				}
-
-				switch {
-				case rsaAvail && x509Cert.PublicKeyAlgorithm == x509.RSA:
-				case ecdsaAvail && x509Cert.PublicKeyAlgorithm == x509.ECDSA:
-				default:
-					continue findCert
-				}
-
-				if len(certReq.certificateAuthorities) == 0 {
-					// they gave us an empty list, so just take the
-					// first cert from c.config.Certificates
-					chainToSend = &chain
-					break findCert
-				}
-
-				for _, ca := range certReq.certificateAuthorities {
-					if bytes.Equal(x509Cert.RawIssuer, ca) {
-						chainToSend = &chain
-						break findCert
-					}
-				}
-			}
+		if chainToSend, err = hs.getCertificate(certReq); err != nil {
+			c.sendAlert(alertInternalError)
+			return err
 		}
 
 		msg, err = c.readHandshake()
@@ -455,9 +508,7 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 	// certificate to send.
 	if certRequested {
 		certMsg = new(certificateMsg)
-		if chainToSend != nil {
-			certMsg.certificates = chainToSend.Certificate
-		}
+		certMsg.certificates = chainToSend.Certificate
 		hs.finishedHash.Write(certMsg.marshal())
 		if _, err := c.writeRecord(recordTypeHandshake, certMsg.marshal()); err != nil {
 			return err
@@ -476,7 +527,7 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 		}
 	}
 
-	if chainToSend != nil {
+	if chainToSend != nil && len(chainToSend.Certificate) > 0 {
 		certVerify := &certificateVerifyMsg{
 			hasSignatureAndHash: c.vers >= VersionTLS12,
 		}
@@ -520,7 +571,19 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 		}
 	}
 
-	hs.masterSecret = masterFromPreMasterSecret(c.vers, hs.suite, preMasterSecret, hs.hello.random, hs.serverHello.random)
+	// [Psiphon]
+	// extended master secret implementation from https://github.com/google/boringssl/commit/7571292eaca1745f3ecda2374ba1e8163b58c3b5
+	if hs.serverHello.extendedMasterSecret && c.config.EmulateChrome {
+		hs.masterSecret = extendedMasterFromPreMasterSecret(c.vers, hs.suite, preMasterSecret, hs.finishedHash)
+		c.extendedMasterSecret = true
+	} else {
+		hs.masterSecret = masterFromPreMasterSecret(c.vers, hs.suite, preMasterSecret, hs.hello.random, hs.serverHello.random)
+	}
+
+	if err := c.config.writeKeyLog(hs.hello.random, hs.masterSecret); err != nil {
+		c.sendAlert(alertInternalError)
+		return errors.New("tls: failed to write to key log: " + err.Error())
+	}
 
 	hs.finishedHash.discardHandshakeBuffer()
 
@@ -626,6 +689,8 @@ func (hs *clientHandshakeState) processServerHello() (bool, error) {
 	hs.masterSecret = hs.session.masterSecret
 	c.peerCertificates = hs.session.serverCertificates
 	c.verifiedChains = hs.session.verifiedChains
+	// [Psiphon]
+	c.extendedMasterSecret = hs.session.extendedMasterSecret
 	return true, nil
 }
 
@@ -714,6 +779,117 @@ func (hs *clientHandshakeState) sendFinished(out []byte) error {
 	}
 	copy(out, finished.verifyData)
 	return nil
+}
+
+// tls11SignatureSchemes contains the signature schemes that we synthesise for
+// a TLS <= 1.1 connection, based on the supported certificate types.
+var tls11SignatureSchemes = []SignatureScheme{ECDSAWithP256AndSHA256, ECDSAWithP384AndSHA384, ECDSAWithP521AndSHA512, PKCS1WithSHA256, PKCS1WithSHA384, PKCS1WithSHA512, PKCS1WithSHA1}
+
+const (
+	// tls11SignatureSchemesNumECDSA is the number of initial elements of
+	// tls11SignatureSchemes that use ECDSA.
+	tls11SignatureSchemesNumECDSA = 3
+	// tls11SignatureSchemesNumRSA is the number of trailing elements of
+	// tls11SignatureSchemes that use RSA.
+	tls11SignatureSchemesNumRSA = 4
+)
+
+func (hs *clientHandshakeState) getCertificate(certReq *certificateRequestMsg) (*Certificate, error) {
+	c := hs.c
+
+	var rsaAvail, ecdsaAvail bool
+	for _, certType := range certReq.certificateTypes {
+		switch certType {
+		case certTypeRSASign:
+			rsaAvail = true
+		case certTypeECDSASign:
+			ecdsaAvail = true
+		}
+	}
+
+	if c.config.GetClientCertificate != nil {
+		var signatureSchemes []SignatureScheme
+
+		if !certReq.hasSignatureAndHash {
+			// Prior to TLS 1.2, the signature schemes were not
+			// included in the certificate request message. In this
+			// case we use a plausible list based on the acceptable
+			// certificate types.
+			signatureSchemes = tls11SignatureSchemes
+			if !ecdsaAvail {
+				signatureSchemes = signatureSchemes[tls11SignatureSchemesNumECDSA:]
+			}
+			if !rsaAvail {
+				signatureSchemes = signatureSchemes[:len(signatureSchemes)-tls11SignatureSchemesNumRSA]
+			}
+		} else {
+			signatureSchemes = make([]SignatureScheme, 0, len(certReq.signatureAndHashes))
+			for _, sah := range certReq.signatureAndHashes {
+				signatureSchemes = append(signatureSchemes, SignatureScheme(sah.hash)<<8+SignatureScheme(sah.signature))
+			}
+		}
+
+		return c.config.GetClientCertificate(&CertificateRequestInfo{
+			AcceptableCAs:    certReq.certificateAuthorities,
+			SignatureSchemes: signatureSchemes,
+		})
+	}
+
+	// RFC 4346 on the certificateAuthorities field: A list of the
+	// distinguished names of acceptable certificate authorities.
+	// These distinguished names may specify a desired
+	// distinguished name for a root CA or for a subordinate CA;
+	// thus, this message can be used to describe both known roots
+	// and a desired authorization space. If the
+	// certificate_authorities list is empty then the client MAY
+	// send any certificate of the appropriate
+	// ClientCertificateType, unless there is some external
+	// arrangement to the contrary.
+
+	// We need to search our list of client certs for one
+	// where SignatureAlgorithm is acceptable to the server and the
+	// Issuer is in certReq.certificateAuthorities
+findCert:
+	for i, chain := range c.config.Certificates {
+		if !rsaAvail && !ecdsaAvail {
+			continue
+		}
+
+		for j, cert := range chain.Certificate {
+			x509Cert := chain.Leaf
+			// parse the certificate if this isn't the leaf
+			// node, or if chain.Leaf was nil
+			if j != 0 || x509Cert == nil {
+				var err error
+				if x509Cert, err = x509.ParseCertificate(cert); err != nil {
+					c.sendAlert(alertInternalError)
+					return nil, errors.New("tls: failed to parse client certificate #" + strconv.Itoa(i) + ": " + err.Error())
+				}
+			}
+
+			switch {
+			case rsaAvail && x509Cert.PublicKeyAlgorithm == x509.RSA:
+			case ecdsaAvail && x509Cert.PublicKeyAlgorithm == x509.ECDSA:
+			default:
+				continue findCert
+			}
+
+			if len(certReq.certificateAuthorities) == 0 {
+				// they gave us an empty list, so just take the
+				// first cert from c.config.Certificates
+				return &chain, nil
+			}
+
+			for _, ca := range certReq.certificateAuthorities {
+				if bytes.Equal(x509Cert.RawIssuer, ca) {
+					return &chain, nil
+				}
+			}
+		}
+	}
+
+	// No acceptable certificate found. Don't send a certificate.
+	return new(Certificate), nil
 }
 
 // clientSessionCacheKey returns a key used to cache sessionTickets that could

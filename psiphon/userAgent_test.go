@@ -50,13 +50,13 @@ var userAgentCountsMutex sync.Mutex
 var userAgentCounts map[string]int
 var initUserAgentCounter sync.Once
 
-func pickUserAgent() string {
+func pickMockUserAgent() string {
 	index, _ := common.MakeSecureRandomInt(len(mockUserAgents))
 	return mockUserAgents[index]
 }
 
 func initMockUserAgentPicker() {
-	common.RegisterUserAgentPicker(pickUserAgent)
+	RegisterUserAgentPicker(pickMockUserAgent)
 }
 
 func resetUserAgentCounts() {
@@ -214,10 +214,9 @@ func attemptConnectionsWithUserAgent(
 				return
 			}
 			if noticeType == "ConnectingServer" {
-				selectedUserAgent := payload["selectedUserAgent"].(bool)
-				userAgent := payload["userAgent"].(string)
-				if selectedUserAgent {
-					countNoticeUserAgent(userAgent)
+				userAgent, ok := payload["userAgent"]
+				if ok {
+					countNoticeUserAgent(userAgent.(string))
 				}
 			}
 		}))

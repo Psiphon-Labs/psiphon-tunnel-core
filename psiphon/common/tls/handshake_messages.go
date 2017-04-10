@@ -7,6 +7,13 @@ package tls
 import "bytes"
 
 type clientHelloMsg struct {
+	// [Psiphon]
+	// emulateChrome indicates whether to use Chrome/BoringSSL-like
+	// extension order. This order is used only when emulateChrome
+	// is set to ensure the automated tests run against pre-recorded
+	// "testdata".
+	emulateChrome bool
+
 	raw                          []byte
 	vers                         uint16
 	random                       []byte
@@ -25,6 +32,12 @@ type clientHelloMsg struct {
 	secureRenegotiation          []byte
 	secureRenegotiationSupported bool
 	alpnProtocols                []string
+
+	// [Psiphon]
+	// Additional extensions required for EmulateChrome.
+	// Note: omitted from clientHelloMsg.equal()
+	extendedMasterSecretSupported bool
+	channelIDSupported            bool
 }
 
 func (m *clientHelloMsg) equal(i interface{}) bool {
@@ -106,6 +119,41 @@ func (m *clientHelloMsg) marshal() []byte {
 	if m.scts {
 		numExtensions++
 	}
+
+	// [Psiphon]
+	// Additional extensions required for EmulateChrome.
+	if m.extendedMasterSecretSupported {
+		numExtensions++
+	}
+	if m.channelIDSupported {
+		numExtensions++
+	}
+	if m.emulateChrome {
+		// GREASE extensions
+		numExtensions += 2
+		extensionsLength++
+	}
+
+	// [Psiphon]
+	// Padding extension required for EmulateChrome.
+	// Logic from:
+	//
+	// https://github.com/google/boringssl/blob/7d7554b6b3c79e707e25521e61e066ce2b996e4c/ssl/t1_lib.c#L2803
+	// https://github.com/google/boringssl/blob/master/LICENSE
+
+	unpaddedLength := length + 2 + 4*numExtensions + extensionsLength
+	paddingLength := uint16(0)
+	if unpaddedLength > 0xff && unpaddedLength < 0x200 {
+		paddingLength = 0x200 - uint16(unpaddedLength)
+		if paddingLength >= 4+1 {
+			paddingLength -= 4
+		} else {
+			paddingLength = 1
+		}
+		extensionsLength += int(paddingLength)
+		numExtensions++
+	}
+
 	if numExtensions > 0 {
 		extensionsLength += 4 * numExtensions
 		length += 2 + extensionsLength
@@ -132,19 +180,17 @@ func (m *clientHelloMsg) marshal() []byte {
 	z[0] = uint8(len(m.compressionMethods))
 	copy(z[1:], m.compressionMethods)
 
-	z = z[1+len(m.compressionMethods):]
-	if numExtensions > 0 {
-		z[0] = byte(extensionsLength >> 8)
-		z[1] = byte(extensionsLength)
-		z = z[2:]
-	}
-	if m.nextProtoNeg {
+	// [Psiphon]
+	// The extension marshal order changes as required for EmulateChrome.
+
+	marshalNextProtoNeg := func() {
 		z[0] = byte(extensionNextProtoNeg >> 8)
 		z[1] = byte(extensionNextProtoNeg & 0xff)
 		// The length is always 0
 		z = z[4:]
 	}
-	if len(m.serverName) > 0 {
+
+	marshalServerName := func() {
 		z[0] = byte(extensionServerName >> 8)
 		z[1] = byte(extensionServerName & 0xff)
 		l := len(m.serverName) + 5
@@ -178,7 +224,8 @@ func (m *clientHelloMsg) marshal() []byte {
 		copy(z[5:], []byte(m.serverName))
 		z = z[l:]
 	}
-	if m.ocspStapling {
+
+	marshalStatusRequest := func() {
 		// RFC 4366, section 3.6
 		z[0] = byte(extensionStatusRequest >> 8)
 		z[1] = byte(extensionStatusRequest)
@@ -188,7 +235,8 @@ func (m *clientHelloMsg) marshal() []byte {
 		// Two zero valued uint16s for the two lengths.
 		z = z[9:]
 	}
-	if len(m.supportedCurves) > 0 {
+
+	marshalSupportedCurves := func() {
 		// http://tools.ietf.org/html/rfc4492#section-5.5.1
 		z[0] = byte(extensionSupportedCurves >> 8)
 		z[1] = byte(extensionSupportedCurves)
@@ -205,7 +253,8 @@ func (m *clientHelloMsg) marshal() []byte {
 			z = z[2:]
 		}
 	}
-	if len(m.supportedPoints) > 0 {
+
+	marshalSupportedPoints := func() {
 		// http://tools.ietf.org/html/rfc4492#section-5.5.2
 		z[0] = byte(extensionSupportedPoints >> 8)
 		z[1] = byte(extensionSupportedPoints)
@@ -220,7 +269,8 @@ func (m *clientHelloMsg) marshal() []byte {
 			z = z[1:]
 		}
 	}
-	if m.ticketSupported {
+
+	marshalSessionTicket := func() {
 		// http://tools.ietf.org/html/rfc5077#section-3.2
 		z[0] = byte(extensionSessionTicket >> 8)
 		z[1] = byte(extensionSessionTicket)
@@ -231,7 +281,8 @@ func (m *clientHelloMsg) marshal() []byte {
 		copy(z, m.sessionTicket)
 		z = z[len(m.sessionTicket):]
 	}
-	if len(m.signatureAndHashes) > 0 {
+
+	marshalSignatureAlgorithms := func() {
 		// https://tools.ietf.org/html/rfc5246#section-7.4.1.4.1
 		z[0] = byte(extensionSignatureAlgorithms >> 8)
 		z[1] = byte(extensionSignatureAlgorithms)
@@ -250,7 +301,8 @@ func (m *clientHelloMsg) marshal() []byte {
 			z = z[2:]
 		}
 	}
-	if m.secureRenegotiationSupported {
+
+	marshalRenegotiationInfo := func() {
 		z[0] = byte(extensionRenegotiationInfo >> 8)
 		z[1] = byte(extensionRenegotiationInfo & 0xff)
 		z[2] = 0
@@ -260,7 +312,8 @@ func (m *clientHelloMsg) marshal() []byte {
 		copy(z, m.secureRenegotiation)
 		z = z[len(m.secureRenegotiation):]
 	}
-	if len(m.alpnProtocols) > 0 {
+
+	marshalALPN := func() {
 		z[0] = byte(extensionALPN >> 8)
 		z[1] = byte(extensionALPN & 0xff)
 		lengths := z[2:]
@@ -281,12 +334,145 @@ func (m *clientHelloMsg) marshal() []byte {
 		lengths[0] = byte(stringsLength >> 8)
 		lengths[1] = byte(stringsLength)
 	}
-	if m.scts {
+
+	marshalSCT := func() {
 		// https://tools.ietf.org/html/rfc6962#section-3.3.1
 		z[0] = byte(extensionSCT >> 8)
 		z[1] = byte(extensionSCT)
 		// zero uint16 for the zero-length extension_data
 		z = z[4:]
+	}
+
+	// [Psiphon]
+	// Additional extensions required for EmulateChrome.
+	marshalExtendedMasterSecret := func() {
+		// https://tools.ietf.org/html/draft-ietf-tls-session-hash-01
+		z[0] = byte(extensionExtendedMasterSecret >> 8)
+		z[1] = byte(extensionExtendedMasterSecret & 0xff)
+		z = z[4:]
+	}
+	marshalChannelID := func() {
+		if m.channelIDSupported {
+			z[0] = byte(extensionChannelID >> 8)
+			z[1] = byte(extensionChannelID & 0xff)
+			z = z[4:]
+		}
+	}
+	marshalGREASE := func(value uint16, isEmpty bool) {
+		// See: // https://github.com/google/boringssl/blob/46db7af2c998cf8514d606408546d9be9699f03c/ssl/t1_lib.c#L2784
+		z[0] = byte(value >> 8)
+		z[1] = byte(value & 0xff)
+		if isEmpty {
+			z = z[4:]
+		} else {
+			z[2] = 0
+			z[3] = 1
+			z[4] = 0
+			z = z[5:]
+		}
+	}
+	marshalPadding := func(paddingLength uint16) {
+		z[0] = byte(extensionPadding >> 8)
+		z[1] = byte(extensionPadding & 0xff)
+		z[2] = byte(paddingLength >> 8)
+		z[3] = byte(paddingLength)
+		z = z[4+paddingLength:]
+	}
+
+	z = z[1+len(m.compressionMethods):]
+	if numExtensions > 0 {
+		z[0] = byte(extensionsLength >> 8)
+		z[1] = byte(extensionsLength)
+		z = z[2:]
+	}
+
+	if m.emulateChrome {
+
+		// [Psiphon]
+		// This code handles extension ordering only; configuration
+		// of extensions as required for EmulateChrome is handled
+		// in Conn.clientHandshae().
+
+		value := randomGREASEValue()
+		marshalGREASE(value, true)
+
+		if m.secureRenegotiationSupported {
+			marshalRenegotiationInfo()
+		}
+		if len(m.serverName) > 0 {
+			marshalServerName()
+		}
+		if m.extendedMasterSecretSupported {
+			marshalExtendedMasterSecret()
+		}
+		if m.ticketSupported {
+			marshalSessionTicket()
+		}
+		if len(m.signatureAndHashes) > 0 {
+			marshalSignatureAlgorithms()
+		}
+		if m.ocspStapling {
+			marshalStatusRequest()
+		}
+		if m.scts {
+			marshalSCT()
+		}
+		if m.nextProtoNeg {
+			marshalNextProtoNeg()
+		}
+		if len(m.alpnProtocols) > 0 {
+			marshalALPN()
+		}
+		if m.channelIDSupported {
+			marshalChannelID()
+		}
+		if len(m.supportedPoints) > 0 {
+			marshalSupportedPoints()
+		}
+		if len(m.supportedCurves) > 0 {
+			marshalSupportedCurves()
+		}
+
+		previousGREASEValue := value
+		for value == previousGREASEValue {
+			value = randomGREASEValue()
+		}
+		marshalGREASE(value, false)
+
+		if paddingLength > 0 {
+			marshalPadding(paddingLength)
+		}
+	} else {
+		if m.nextProtoNeg {
+			marshalNextProtoNeg()
+		}
+		if len(m.serverName) > 0 {
+			marshalServerName()
+		}
+		if m.ocspStapling {
+			marshalStatusRequest()
+		}
+		if len(m.supportedCurves) > 0 {
+			marshalSupportedCurves()
+		}
+		if len(m.supportedPoints) > 0 {
+			marshalSupportedPoints()
+		}
+		if m.ticketSupported {
+			marshalSessionTicket()
+		}
+		if len(m.signatureAndHashes) > 0 {
+			marshalSignatureAlgorithms()
+		}
+		if m.secureRenegotiationSupported {
+			marshalRenegotiationInfo()
+		}
+		if len(m.alpnProtocols) > 0 {
+			marshalALPN()
+		}
+		if m.scts {
+			marshalSCT()
+		}
 	}
 
 	m.raw = x
@@ -510,6 +696,11 @@ type serverHelloMsg struct {
 	secureRenegotiation          []byte
 	secureRenegotiationSupported bool
 	alpnProtocol                 string
+
+	// [Psiphon]
+	// Additional extensions required for EmulateChrome.
+	// Note: omitted from serverHelloMsg.equal()
+	extendedMasterSecret bool
 }
 
 func (m *serverHelloMsg) equal(i interface{}) bool {
@@ -712,6 +903,8 @@ func (m *serverHelloMsg) unmarshal(data []byte) bool {
 	m.scts = nil
 	m.ticketSupported = false
 	m.alpnProtocol = ""
+	// [Psiphon]
+	m.extendedMasterSecret = false
 
 	if len(data) == 0 {
 		// ServerHello is optionally followed by extension data
@@ -802,11 +995,8 @@ func (m *serverHelloMsg) unmarshal(data []byte) bool {
 			}
 			l := int(d[0])<<8 | int(d[1])
 			d = d[2:]
-			if len(d) != l {
+			if len(d) != l || l == 0 {
 				return false
-			}
-			if l == 0 {
-				continue
 			}
 
 			m.scts = make([][]byte, 0, 3)
@@ -816,12 +1006,18 @@ func (m *serverHelloMsg) unmarshal(data []byte) bool {
 				}
 				sctLen := int(d[0])<<8 | int(d[1])
 				d = d[2:]
-				if len(d) < sctLen {
+				if sctLen == 0 || len(d) < sctLen {
 					return false
 				}
 				m.scts = append(m.scts, d[:sctLen])
 				d = d[sctLen:]
 			}
+		// [Psiphon]
+		case extensionExtendedMasterSecret:
+			if length != 0 {
+				return false
+			}
+			m.extendedMasterSecret = true
 		}
 		data = data[length:]
 	}

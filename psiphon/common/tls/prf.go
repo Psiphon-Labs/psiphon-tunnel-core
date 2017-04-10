@@ -117,6 +117,7 @@ const (
 )
 
 var masterSecretLabel = []byte("master secret")
+var extendedMasterSecretLabel = []byte("extended master secret") // [Psiphon]
 var keyExpansionLabel = []byte("key expansion")
 var clientFinishedLabel = []byte("client finished")
 var serverFinishedLabel = []byte("server finished")
@@ -151,6 +152,18 @@ func masterFromPreMasterSecret(version uint16, suite *cipherSuite, preMasterSecr
 
 	masterSecret := make([]byte, masterSecretLength)
 	prfForVersion(version, suite)(masterSecret, preMasterSecret, masterSecretLabel, seed)
+	return masterSecret
+}
+
+// [Psiphon]
+// from: https://github.com/google/boringssl/commit/7571292eaca1745f3ecda2374ba1e8163b58c3b5
+//
+// extendedMasterFromPreMasterSecret generates the master secret from the
+// pre-master secret when the Triple Handshake fix is in effect. See
+// https://tools.ietf.org/html/draft-ietf-tls-session-hash-01
+func extendedMasterFromPreMasterSecret(version uint16, suite *cipherSuite, preMasterSecret []byte, h finishedHash) []byte {
+	masterSecret := make([]byte, masterSecretLength)
+	prfForVersion(version, suite)(masterSecret, preMasterSecret, extendedMasterSecretLabel, h.Sum())
 	return masterSecret
 }
 
@@ -189,6 +202,10 @@ func lookupTLSHash(hash uint8) (crypto.Hash, error) {
 		return crypto.SHA256, nil
 	case hashSHA384:
 		return crypto.SHA384, nil
+	// [Psiphon]
+	// hashSHA512 is required for EmulateChrome.
+	case hashSHA512:
+		return crypto.SHA512, nil
 	default:
 		return 0, errors.New("tls: unsupported hash algorithm")
 	}
