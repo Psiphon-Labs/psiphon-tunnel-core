@@ -311,7 +311,7 @@
 
     config[@"DeviceRegion"] = [PsiphonTunnel getDeviceRegion];
     
-    config[@"UseIndistinguishableTLS"] = [NSNumber numberWithBool:FALSE];
+    config[@"UseIndistinguishableTLS"] = [NSNumber numberWithBool:TRUE];
     
     // Get the location of the root CAs file in the bundle resources.
     NSURL *rootCAsURL = [[NSBundle bundleForClass:[self class]] URLForResource:@"rootCAs" withExtension:@"txt"];
