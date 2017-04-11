@@ -400,9 +400,9 @@ func readSshPacket(
 		return nil, false, ContextError(err)
 	}
 	deobfuscate(prefix)
-	packetLength, _, payloadLength, messageLength := getSshPacketPrefix(prefix)
-	if packetLength > SSH_MAX_PACKET_LENGTH {
-		return nil, false, ContextError(errors.New("ssh packet length too large"))
+	_, _, payloadLength, messageLength, err := getSshPacketPrefix(prefix)
+	if err != nil {
+		return nil, false, ContextError(err)
 	}
 	readBuffer := make([]byte, messageLength)
 	copy(readBuffer, prefix)
@@ -472,7 +472,11 @@ func extractSshPackets(writeBuffer []byte) ([]byte, []byte, bool, error) {
 	var packetBuffer, packetsBuffer []byte
 	hasMsgNewKeys := false
 	for len(writeBuffer) >= SSH_PACKET_PREFIX_LENGTH {
-		packetLength, paddingLength, payloadLength, messageLength := getSshPacketPrefix(writeBuffer)
+		packetLength, paddingLength,
+			payloadLength, messageLength, err := getSshPacketPrefix(writeBuffer)
+		if err != nil {
+			return nil, nil, false, ContextError(err)
+		}
 		if len(writeBuffer) < messageLength {
 			// We don't have the complete packet yet
 			break
@@ -508,13 +512,19 @@ func extractSshPackets(writeBuffer []byte) ([]byte, []byte, bool, error) {
 	return writeBuffer, packetsBuffer, hasMsgNewKeys, nil
 }
 
-func getSshPacketPrefix(buffer []byte) (packetLength, paddingLength, payloadLength, messageLength int) {
-	// TODO: handle malformed packet [lengths]
-	packetLength = int(binary.BigEndian.Uint32(buffer[0 : SSH_PACKET_PREFIX_LENGTH-1]))
-	paddingLength = int(buffer[SSH_PACKET_PREFIX_LENGTH-1])
-	payloadLength = packetLength - paddingLength - 1
-	messageLength = SSH_PACKET_PREFIX_LENGTH + packetLength - 1
-	return
+func getSshPacketPrefix(buffer []byte) (int, int, int, int, error) {
+
+	packetLength := int(binary.BigEndian.Uint32(buffer[0 : SSH_PACKET_PREFIX_LENGTH-1]))
+
+	if packetLength < 0 || packetLength > SSH_MAX_PACKET_LENGTH {
+		return 0, 0, 0, 0, ContextError(errors.New("invalid ssh packet length"))
+	}
+
+	paddingLength := int(buffer[SSH_PACKET_PREFIX_LENGTH-1])
+	payloadLength := packetLength - paddingLength - 1
+	messageLength := SSH_PACKET_PREFIX_LENGTH + packetLength - 1
+
+	return packetLength, paddingLength, payloadLength, messageLength, nil
 }
 
 func setSshPacketPrefix(buffer []byte, packetLength, paddingLength int) {

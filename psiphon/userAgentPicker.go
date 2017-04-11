@@ -17,23 +17,25 @@
  *
  */
 
-package common
+package psiphon
 
 import (
 	"net/http"
 	"sync/atomic"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 var registeredUserAgentPicker atomic.Value
 
-func RegisterUserAgentPicker(generator func() string) {
-	registeredUserAgentPicker.Store(generator)
+func RegisterUserAgentPicker(picker func() string) {
+	registeredUserAgentPicker.Store(picker)
 }
 
 func pickUserAgent() string {
-	generator := registeredUserAgentPicker.Load()
-	if generator != nil {
-		return generator.(func() string)()
+	picker := registeredUserAgentPicker.Load()
+	if picker != nil {
+		return picker.(func() string)()
 	}
 	return ""
 }
@@ -54,7 +56,7 @@ func UserAgentIfUnset(h http.Header) (http.Header, bool) {
 			}
 		}
 
-		if FlipCoin() {
+		if common.FlipCoin() {
 			dialHeaders.Set("User-Agent", pickUserAgent())
 		} else {
 			dialHeaders.Set("User-Agent", "")

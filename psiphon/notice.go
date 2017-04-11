@@ -167,30 +167,74 @@ func NoticeAvailableEgressRegions(regions []string) {
 		"AvailableEgressRegions", 0, "regions", sortedRegions)
 }
 
-// NoticeConnectingServer is details on a connection attempt
-func NoticeConnectingServer(ipAddress, region, protocol, directTCPDialAddress string, meekConfig *MeekConfig) {
-	if meekConfig == nil {
-		outputNotice("ConnectingServer", noticeIsDiagnostic,
-			"ipAddress", ipAddress,
-			"region", region,
-			"protocol", protocol,
-			"directTCPDialAddress", directTCPDialAddress)
-	} else {
-		outputNotice("ConnectingServer", noticeIsDiagnostic,
-			"ipAddress", ipAddress,
-			"region", region,
-			"protocol", protocol,
-			"meekDialAddress", meekConfig.DialAddress,
-			"meekUseHTTPS", meekConfig.UseHTTPS,
-			"meekSNIServerName", meekConfig.SNIServerName,
-			"meekHostHeader", meekConfig.HostHeader,
-			"meekTransformedHostName", meekConfig.TransformedHostName)
+func noticeServerDialStats(noticeType, ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
+
+	args := []interface{}{
+		"ipAddress", ipAddress,
+		"region", region,
+		"protocol", protocol,
 	}
+
+	if tunnelDialStats.SelectedSSHClientVersion {
+		args = append(args, "SSHClientVersion", tunnelDialStats.SSHClientVersion)
+	}
+
+	if tunnelDialStats.UpstreamProxyType != "" {
+		args = append(args, "upstreamProxyType", tunnelDialStats.UpstreamProxyType)
+	}
+
+	if tunnelDialStats.UpstreamProxyCustomHeaderNames != nil {
+		args = append(args, "upstreamProxyCustomHeaderNames", strings.Join(tunnelDialStats.UpstreamProxyCustomHeaderNames, ","))
+	}
+
+	if tunnelDialStats.MeekDialAddress != "" {
+		args = append(args, "meekDialAddress", tunnelDialStats.MeekDialAddress)
+	}
+
+	if tunnelDialStats.MeekResolvedIPAddress != "" {
+		args = append(args, "meekResolvedIPAddress", tunnelDialStats.MeekResolvedIPAddress)
+	}
+
+	if tunnelDialStats.MeekSNIServerName != "" {
+		args = append(args, "meekSNIServerName", tunnelDialStats.MeekSNIServerName)
+	}
+
+	if tunnelDialStats.MeekHostHeader != "" {
+		args = append(args, "meekHostHeader", tunnelDialStats.MeekHostHeader)
+	}
+
+	// MeekTransformedHostName is meaningful when meek is used, which is when MeekDialAddress != ""
+	if tunnelDialStats.MeekDialAddress != "" {
+		args = append(args, "meekTransformedHostName", tunnelDialStats.MeekTransformedHostName)
+	}
+
+	if tunnelDialStats.SelectedUserAgent {
+		args = append(args, "userAgent", tunnelDialStats.UserAgent)
+	}
+
+	if tunnelDialStats.SelectedTLSProfile {
+		args = append(args, "TLSProfile", tunnelDialStats.TLSProfile)
+	}
+
+	outputNotice(
+		noticeType,
+		noticeIsDiagnostic,
+		args...)
+}
+
+// NoticeConnectingServer reports parameters and details for a single connection attempt
+func NoticeConnectingServer(ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
+	noticeServerDialStats("ConnectingServer", ipAddress, region, protocol, tunnelDialStats)
+}
+
+// NoticeConnectedServer reports parameters and details for a single successful connection
+func NoticeConnectedServer(ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
+	noticeServerDialStats("ConnectedServer", ipAddress, region, protocol, tunnelDialStats)
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
-func NoticeActiveTunnel(ipAddress, protocol string) {
-	outputNotice("ActiveTunnel", noticeIsDiagnostic, "ipAddress", ipAddress, "protocol", protocol)
+func NoticeActiveTunnel(ipAddress, protocol string, isTCS bool) {
+	outputNotice("ActiveTunnel", noticeIsDiagnostic, "ipAddress", ipAddress, "protocol", protocol, "isTCS", isTCS)
 }
 
 // NoticeSocksProxyPortInUse is a failure to use the configured LocalSocksProxyPort
@@ -340,22 +384,6 @@ func NoticeLocalProxyError(proxyType string, err error) {
 		"LocalProxyError", noticeIsDiagnostic, "message", err.Error())
 }
 
-// NoticeConnectedTunnelDialStats reports extra network details for tunnel connections that required extra configuration.
-func NoticeConnectedTunnelDialStats(ipAddress string, tunnelDialStats *TunnelDialStats) {
-	outputNotice("ConnectedTunnelDialStats", noticeIsDiagnostic,
-		"ipAddress", ipAddress,
-		"upstreamProxyType", tunnelDialStats.UpstreamProxyType,
-		"upstreamProxyCustomHeaderNames", strings.Join(tunnelDialStats.UpstreamProxyCustomHeaderNames, ","),
-		"meekDialAddress", tunnelDialStats.MeekDialAddress,
-		"meekDialAddress", tunnelDialStats.MeekDialAddress,
-		"meekResolvedIPAddress", tunnelDialStats.MeekResolvedIPAddress,
-		"meekSNIServerName", tunnelDialStats.MeekSNIServerName,
-		"meekHostHeader", tunnelDialStats.MeekHostHeader,
-		"meekTransformedHostName", tunnelDialStats.MeekTransformedHostName,
-		"selectedUserAgent", tunnelDialStats.SelectedUserAgent,
-		"userAgent", tunnelDialStats.UserAgent)
-}
-
 // NoticeBuildInfo reports build version info.
 func NoticeBuildInfo() {
 	outputNotice("BuildInfo", 0, "buildInfo", common.GetBuildInfo())
@@ -503,4 +531,22 @@ func NewNoticeConsoleRewriter(writer io.Writer) *NoticeReceiver {
 			object.NoticeType,
 			string(object.Data))
 	})
+}
+
+// NoticeWriter implements io.Writer and emits the contents of Write() calls
+// as Notices. This is to transform logger messages, if they can be redirected
+// to an io.Writer, to notices.
+type NoticeWriter struct {
+	noticeType string
+}
+
+// NewNoticeWriter initializes a new NoticeWriter
+func NewNoticeWriter(noticeType string) *NoticeWriter {
+	return &NoticeWriter{noticeType: noticeType}
+}
+
+// Write implements io.Writer.
+func (writer *NoticeWriter) Write(p []byte) (n int, err error) {
+	outputNotice(writer.noticeType, noticeIsDiagnostic, "message", string(p))
+	return len(p), nil
 }

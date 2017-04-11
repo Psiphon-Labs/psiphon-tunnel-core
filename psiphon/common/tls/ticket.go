@@ -25,6 +25,10 @@ type sessionState struct {
 	// usedOldKey is true if the ticket from which this session came from
 	// was encrypted with an older key and thus should be refreshed.
 	usedOldKey bool
+
+	// [Psiphon]
+	// Padding for obfuscated session tickets
+	paddingSize int
 }
 
 func (s *sessionState) equal(i interface{}) bool {
@@ -57,6 +61,10 @@ func (s *sessionState) marshal() []byte {
 	for _, cert := range s.certificates {
 		length += 4 + len(cert)
 	}
+
+	// [Psiphon]
+	// Add padding for obfuscated session tickets
+	length += s.paddingSize
 
 	ret := make([]byte, length)
 	x := ret
@@ -126,7 +134,11 @@ func (s *sessionState) unmarshal(data []byte) bool {
 		data = data[certLen:]
 	}
 
-	return len(data) == 0
+	// [Psiphon]
+	// Ignore padding for obfuscated session tickets
+	//return len(data) == 0
+	return true
+
 }
 
 func (c *Conn) encryptTicket(state *sessionState) ([]byte, error) {

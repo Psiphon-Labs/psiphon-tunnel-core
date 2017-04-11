@@ -12,7 +12,7 @@ EXE_BASENAME="psiphon-tunnel-core"
 # The "OPENSSL" tag enables support of OpenSSL for use by IndistinguishableTLS.
 # This needs to be outside of prepare_build because it's used by go-get.
 
-PRIVATE_PLUGINS_TAG=""
+PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"
 BUILD_TAGS="${PRIVATE_PLUGINS_TAG}"
 WINDOWS_BUILD_TAGS="OPENSSL ${BUILD_TAGS}"
 LINUX_BUILD_TAGS="${BUILD_TAGS}"
@@ -59,7 +59,7 @@ fi
 build_for_windows () {
   echo "...Getting project dependencies (via go get) for Windows. Parameter is: '$1'"
   GOOS=windows go get -d -v -tags "$WINDOWS_BUILD_TAGS" ./...
-  prepare_build $WINDOWS_BUILD_TAGS
+  prepare_build "$WINDOWS_BUILD_TAGS"
   if [ $? != 0 ]; then
     echo "....'go get' failed, exiting"
     exit $?
@@ -114,7 +114,7 @@ build_for_windows () {
 build_for_linux () {
   echo "Getting project dependencies (via go get) for Linux. Parameter is: '$1'"
   GOOS=linux go get -d -v -tags "$LINUX_BUILD_TAGS" ./...
-  prepare_build $LINUX_BUILD_TAGS
+  prepare_build "$LINUX_BUILD_TAGS"
   if [ $? != 0 ]; then
     echo "...'go get' failed, exiting"
     exit $?
@@ -165,7 +165,7 @@ build_for_linux () {
 build_for_osx () {
   echo "Getting project dependencies (via go get) for OSX"
   GOOS=darwin go get -d -v -tags "$OSX_BUILD_TAGS" ./...
-  prepare_build $OSX_BUILD_TAGS
+  prepare_build "$OSX_BUILD_TAGS"
   if [ $? != 0 ]; then
     echo "..'go get' failed, exiting"
     exit $?

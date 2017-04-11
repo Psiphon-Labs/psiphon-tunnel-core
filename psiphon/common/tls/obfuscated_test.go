@@ -34,6 +34,8 @@ import (
 	"time"
 )
 
+// [Psiphon]
+// TestObfuscatedSessionTicket exercises the Obfuscated Session Tickets facility.
 func TestObfuscatedSessionTicket(t *testing.T) {
 
 	var standardSessionTicketKey [32]byte

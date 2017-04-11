@@ -89,13 +89,37 @@ func InitDataStore(config *Config) (err error) {
 
 		filename := filepath.Join(config.DataStoreDirectory, DATA_STORE_FILENAME)
 		var db *bolt.DB
-		db, err = bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
 
-		// The datastore file may be corrupt, so attempt to delete and try again
-		if err != nil {
-			NoticeAlert("retry on initDataStore error: %s", err)
-			os.Remove(filename)
+		for retry := 0; retry < 3; retry++ {
+
+			if retry > 0 {
+				NoticeAlert("InitDataStore retry: %d", retry)
+			}
+
 			db, err = bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
+
+			// The datastore file may be corrupt, so attempt to delete and try again
+			if err != nil {
+				NoticeAlert("bolt.Open error: %s", err)
+				os.Remove(filename)
+				continue
+			}
+
+			// Run consistency checks on datastore and emit errors for diagnostics purposes
+			// We assume this will complete quickly for typical size Psiphon datastores.
+			err = db.View(func(tx *bolt.Tx) error {
+				return tx.SynchronousCheck()
+			})
+
+			// The datastore file may be corrupt, so attempt to delete and try again
+			if err != nil {
+				NoticeAlert("bolt.SynchronousCheck error: %s", err)
+				db.Close()
+				os.Remove(filename)
+				continue
+			}
+
+			break
 		}
 
 		if err != nil {
@@ -128,16 +152,6 @@ func InitDataStore(config *Config) (err error) {
 			err = fmt.Errorf("initDataStore failed to create buckets: %s", err)
 			return
 		}
-
-		// Run consistency checks on datastore and emit errors for diagnostics purposes
-		// We assume this will complete quickly for typical size Psiphon datastores.
-		db.View(func(tx *bolt.Tx) error {
-			err := <-tx.Check()
-			if err != nil {
-				NoticeAlert("boltdb Check(): %s", err)
-			}
-			return nil
-		})
 
 		singleton.db = db
 
@@ -1085,6 +1099,29 @@ func resetAllPersistentStatsToUnreported() error {
 	}
 
 	return nil
+}
+
+// CountSLOKs returns the total number of SLOK records.
+func CountSLOKs() int {
+	checkInitDataStore()
+
+	count := 0
+
+	err := singleton.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(slokBucket))
+		cursor := bucket.Cursor()
+		for key, _ := cursor.First(); key != nil; key, _ = cursor.Next() {
+			count++
+		}
+		return nil
+	})
+
+	if err != nil {
+		NoticeAlert("CountSLOKs failed: %s", err)
+		return 0
+	}
+
+	return count
 }
 
 // DeleteSLOKs deletes all SLOK records.

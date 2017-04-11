@@ -134,6 +134,12 @@ func RunServices(configJSON []byte) error {
 		}
 	}()
 
+	// In addition to the actual signal handling here, there is
+	// a list of signals that need to be passed through panicwrap
+	// in 'github.com/Psiphon-Labs/psiphon-tunnel-core/Server/main.go'
+	// where 'panicwrap.Wrap' is called. The handled signals below, and the
+	// list there must be kept in sync to ensure proper signal handling
+
 	// An OS signal triggers an orderly shutdown
 	systemStopSignal := make(chan os.Signal, 1)
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill, syscall.SIGTERM)
@@ -195,6 +201,20 @@ loop:
 }
 
 func outputProcessProfiles(config *Config) {
+
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+	log.WithContextFields(
+		LogFields{
+			"num_goroutine":   runtime.NumGoroutine(),
+			"alloc":           memStats.Alloc,
+			"total_alloc":     memStats.TotalAlloc,
+			"sys":             memStats.Sys,
+			"pause_total_ns":  memStats.PauseTotalNs,
+			"pause_ns":        memStats.PauseNs,
+			"num_gc":          memStats.NumGC,
+			"gc_cpu_fraction": memStats.GCCPUFraction,
+		}).Info("runtime_stats")
 
 	if config.ProcessProfileOutputDirectory != "" {
 
@@ -277,33 +297,31 @@ func outputProcessProfiles(config *Config) {
 
 func logServerLoad(server *TunnelServer) {
 
-	// golang runtime stats
+	protocolStats, regionStats := server.GetLoadStats()
 
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-	fields := LogFields{
-		"event_name":    "server_load",
-		"num_goroutine": runtime.NumGoroutine(),
-		"mem_stats": map[string]interface{}{
-			"alloc":           memStats.Alloc,
-			"total_alloc":     memStats.TotalAlloc,
-			"sys":             memStats.Sys,
-			"pause_total_ns":  memStats.PauseTotalNs,
-			"pause_ns":        memStats.PauseNs,
-			"num_gc":          memStats.NumGC,
-			"gc_cpu_fraction": memStats.GCCPUFraction,
-		},
+	serverLoad := LogFields{
+		"event_name": "server_load",
 	}
-
-	// tunnel server stats
-
-	fields["establish_tunnels"] = server.GetEstablishTunnels()
-
-	for tunnelProtocol, stats := range server.GetLoadStats() {
-		fields[tunnelProtocol] = stats
+	for protocol, stats := range protocolStats {
+		serverLoad[protocol] = stats
 	}
+	serverLoad["establish_tunnels"] = server.GetEstablishTunnels()
 
-	log.LogRawFieldsWithTimestamp(fields)
+	log.LogRawFieldsWithTimestamp(serverLoad)
+
+	for region, regionProtocolStats := range regionStats {
+
+		serverLoad := LogFields{
+			"event_name": "server_load",
+			"region":     region,
+		}
+
+		for protocol, stats := range regionProtocolStats {
+			serverLoad[protocol] = stats
+		}
+
+		log.LogRawFieldsWithTimestamp(serverLoad)
+	}
 }
 
 // SupportServices carries common and shared data components
