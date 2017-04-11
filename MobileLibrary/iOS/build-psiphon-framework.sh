@@ -42,7 +42,7 @@ FRAMEWORK_BINARY="${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}/Versions/
 
 PRIVATE_PLUGINS_TAG=""
 if [[ ${FORCE_PRIVATE_PLUGINS} == true ]]; then PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"; fi
-BUILD_TAGS="OPENSSL IOS ${PRIVATE_PLUGINS_TAG}"
+BUILD_TAGS="IOS ${PRIVATE_PLUGINS_TAG}"
 
 LIBSSL=${BASE_DIR}/OpenSSL-for-iPhone/lib/libssl.a
 LIBCRYPTO=${BASE_DIR}/OpenSSL-for-iPhone/lib/libcrypto.a
@@ -66,7 +66,7 @@ export PATH=${GOPATH}/bin:${PATH}
 rm -rf ${GOPATH}
 
 # When updating the pinned rev, you will have to manually delete go-ios-build
-GOMOBILE_PINNED_REV=a0f998b2d8c7ee81ddbead9202dd5e0184a998ad
+GOMOBILE_PINNED_REV=eb9032959f05f108b05721914dfe09cfa0c5131d
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
 TUNNEL_CORE_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core

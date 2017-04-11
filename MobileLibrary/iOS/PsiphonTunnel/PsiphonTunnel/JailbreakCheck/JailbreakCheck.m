@@ -35,6 +35,10 @@
 
 BOOL checkReadWritePermissions()
 {
+    // UIApplication:sharedApplication is disallowed in an application exetension
+    // (such as would be used by a whole-device Psiphon VPN). We may re-enable
+    // this code later, but leave it out for now to avoid confusion.
+    /*
     if([[UIApplication sharedApplication] canOpenURL:
         [NSURL URLWithString:@"cydia://package/com.com.com"]])
     {
@@ -50,6 +54,7 @@ BOOL checkReadWritePermissions()
     {
         return TRUE;
     }
+     */
     
     return FALSE;
 }

@@ -17,6 +17,7 @@
  *
  */
 
+#import <net/if.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
 #import "LookupIPv6.h"
@@ -310,7 +311,7 @@
 
     config[@"DeviceRegion"] = [PsiphonTunnel getDeviceRegion];
     
-    config[@"UseIndistinguishableTLS"] = [NSNumber numberWithBool:TRUE];
+    config[@"UseIndistinguishableTLS"] = [NSNumber numberWithBool:FALSE];
     
     // Get the location of the root CAs file in the bundle resources.
     NSURL *rootCAsURL = [[NSBundle bundleForClass:[self class]] URLForResource:@"rootCAs" withExtension:@"txt"];
@@ -547,7 +548,25 @@
 #pragma mark - GoPsiPsiphonProvider protocol implementation (private)
 
 - (BOOL)bindToDevice:(long)fileDescriptor error:(NSError **)error {
-    // This PsiphonProvider function is only called in TunnelWholeDevice mode
+    /*
+    This code is not currently used, so we won't leave it in untested. However, 
+    this implementation info will probably be useful later.
+     
+    // DEBUG
+    [self logMessage:[NSString stringWithFormat: @"***** DEBUG: bindToDevice called"]];
+    
+    // This function is only called in TunnelWholeDevice mode
+    
+    // TODO: Determine if this is robust.
+    unsigned int interfaceIndex = if_nametoindex("ap1");
+    
+    int ret = setsockopt(fileDescriptor, IPPROTO_TCP, IP_BOUND_IF, &interfaceIndex, sizeof(interfaceIndex));
+    if (ret != 0) {
+        [self logMessage:[NSString stringWithFormat: @"bindToDevice: setsockopt failed; errno: %d", errno]];
+        return FALSE;
+    }
+    */
+
     return TRUE;
 }
 
