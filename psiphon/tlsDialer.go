@@ -118,7 +118,7 @@ type CustomTLSConfig struct {
 	VerifyLegacyCertificate *x509.Certificate
 
 	// UseIndistinguishableTLS specifies whether to try to use an
-	// alternative stack for TLS. From a circumvention perspective,
+	// alternative profile for TLS dials. From a circumvention perspective,
 	// Go's TLS has a distinct fingerprint that may be used for blocking.
 	UseIndistinguishableTLS bool
 

@@ -517,6 +517,7 @@ var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"relay_protocol", isRelayProtocol, 0},
 	requestParamSpec{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
 	requestParamSpec{"device_region", isRegionCode, requestParamOptional},
+	requestParamSpec{"ssh_client_version", isAnyString, requestParamOptional},
 	requestParamSpec{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
 	requestParamSpec{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
 	requestParamSpec{"meek_dial_address", isDialAddress, requestParamOptional},

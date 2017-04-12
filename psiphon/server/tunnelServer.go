@@ -42,6 +42,7 @@ import (
 )
 
 const (
+	SSH_AUTH_LOG_PERIOD                   = 30 * time.Minute
 	SSH_HANDSHAKE_TIMEOUT                 = 30 * time.Second
 	SSH_CONNECTION_READ_DEADLINE          = 5 * time.Minute
 	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE = 8192
@@ -236,6 +237,11 @@ func (server *TunnelServer) GetEstablishTunnels() bool {
 }
 
 type sshServer struct {
+	// Note: 64-bit ints used with atomic operations are at placed
+	// at the start of struct to ensure 64-bit alignment.
+	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
+	lastAuthLog          int64
+	authFailedCount      int64
 	support              *SupportServices
 	establishTunnels     int32
 	shutdownBroadcast    <-chan struct{}
@@ -986,12 +992,24 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 		//   deliberately blocked; and in any case fail2ban adds iptables rules which can only block
 		//   by direct remote IP, not by original client IP. Fronted meek has the same iptables issue.
 		//
-		// TODO: random scanning and brute forcing of port 22 will result in log noise. To eliminate
-		// this, and to also cover meek protocols, and bad obfuscation keys, and bad inputs to the web
-		// server, consider implementing fail2ban-type logic directly in this server, with the ability
-		// to use X-Forwarded-For (when trustworthy; e.g, from a CDN).
+		// Random scanning and brute forcing of port 22 will result in log noise. To mitigate this,
+		// not every authentication failure is logged. A summary log is emitted periodically to
+		// retain some record of this activity in case this is relevent to, e.g., a performance
+		// investigation.
 
-		log.WithContextFields(LogFields{"error": err, "method": method}).Warning("authentication failed")
+		atomic.AddInt64(&sshClient.sshServer.authFailedCount, 1)
+
+		lastAuthLog := monotime.Time(atomic.LoadInt64(&sshClient.sshServer.lastAuthLog))
+		if monotime.Since(lastAuthLog) > SSH_AUTH_LOG_PERIOD {
+			now := int64(monotime.Now())
+			if atomic.CompareAndSwapInt64(&sshClient.sshServer.lastAuthLog, int64(lastAuthLog), now) {
+				count := atomic.SwapInt64(&sshClient.sshServer.authFailedCount, 0)
+				log.WithContextFields(
+					LogFields{"lastError": err, "failedCount": count}).Warning("authentication failures")
+			}
+		}
+
+		log.WithContextFields(LogFields{"error": err, "method": method}).Debug("authentication failed")
 
 	} else {
 
@@ -1911,6 +1929,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	established = true
 	sshClient.establishedPortForward(portForwardTypeTCP)
 
+	// TODO: 64-bit alignment? https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	var bytesUp, bytesDown int64
 	defer func() {
 		sshClient.closedPortForward(
