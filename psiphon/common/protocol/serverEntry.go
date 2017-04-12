@@ -153,7 +153,8 @@ func EncodeServerEntry(serverEntry *ServerEntry) (string, error) {
 //
 // The resulting ServerEntry.LocalSource is populated with serverEntrySource,
 // which should be one of SERVER_ENTRY_SOURCE_EMBEDDED, SERVER_ENTRY_SOURCE_REMOTE,
-// SERVER_ENTRY_SOURCE_DISCOVERY, SERVER_ENTRY_SOURCE_TARGET.
+// SERVER_ENTRY_SOURCE_DISCOVERY, SERVER_ENTRY_SOURCE_TARGET,
+// SERVER_ENTRY_SOURCE_OBFUSCATED.
 // ServerEntry.LocalTimestamp is populated with the provided timestamp, which
 // should be a RFC 3339 formatted string. These local fields are stored with the
 // server entry and reported to the server as stats (a coarse granularity timestamp

@@ -199,9 +199,12 @@ type ClientSeedState struct {
 // ClientSeedProgress tracks client progress towards seeding SLOKs for
 // a particular scheme.
 type ClientSeedProgress struct {
+	// Note: 64-bit ints used with atomic operations are at placed
+	// at the start of struct to ensure 64-bit alignment.
+	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
+	progressSLOKTime int64
 	scheme           *Scheme
 	trafficProgress  []*TrafficValues
-	progressSLOKTime int64
 }
 
 // ClientSeedPortForward map a client port forward, which is relaying
