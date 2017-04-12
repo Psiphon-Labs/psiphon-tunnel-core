@@ -286,7 +286,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(
 		t, runConfig.doDefaultSessionID, psinetFilename)
 
-	// Pave OSL config for SLOk testing
+	// Pave OSL config for SLOK testing
 	oslConfigFilename := filepath.Join(testDataDirName, "osl_config.json")
 	propagationChannelID := paveOSLConfigFile(t, oslConfigFilename)
 

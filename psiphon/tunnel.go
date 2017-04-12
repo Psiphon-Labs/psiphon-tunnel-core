@@ -605,10 +605,8 @@ func dialSsh(
 	var selectedSSHClientVersion bool
 	SSHClientVersion := ""
 	useObfuscatedSsh := false
-	dialCustomHeaders := config.CustomHeaders
 	var directTCPDialAddress string
 	var meekConfig *MeekConfig
-	var selectedUserAgent bool
 	var err error
 
 	switch selectedProtocol {
@@ -629,7 +627,23 @@ func dialSsh(
 		}
 	}
 
-	dialCustomHeaders, selectedUserAgent = UserAgentIfUnset(config.CustomHeaders)
+	// Set User Agent when using meek or an upstream HTTP proxy
+
+	var selectedUserAgent bool
+	dialCustomHeaders := config.CustomHeaders
+	var upstreamProxyType string
+
+	if config.UpstreamProxyUrl != "" {
+		// Note: UpstreamProxyUrl will be validated in the dial
+		proxyURL, err := url.Parse(config.UpstreamProxyUrl)
+		if err == nil {
+			upstreamProxyType = proxyURL.Scheme
+		}
+	}
+
+	if meekConfig != nil || upstreamProxyType == "http" {
+		dialCustomHeaders, selectedUserAgent = UserAgentIfUnset(config.CustomHeaders)
+	}
 
 	// Use an asynchronous callback to record the resolved IP address when
 	// dialing a domain name. Note that DialMeek doesn't immediately
@@ -671,14 +685,8 @@ func dialSsh(
 		dialStats.UserAgent = dialConfig.CustomHeaders.Get("User-Agent")
 	}
 
-	if dialConfig.UpstreamProxyUrl != "" {
-
-		// Note: UpstreamProxyUrl will be validated in the dial
-		proxyURL, err := url.Parse(dialConfig.UpstreamProxyUrl)
-		if err == nil {
-			dialStats.UpstreamProxyType = proxyURL.Scheme
-		}
-
+	if upstreamProxyType != "" {
+		dialStats.UpstreamProxyType = upstreamProxyType
 		dialStats.UpstreamProxyCustomHeaderNames = make([]string, 0)
 		for name, _ := range dialConfig.CustomHeaders {
 			if selectedUserAgent && name == "User-Agent" {

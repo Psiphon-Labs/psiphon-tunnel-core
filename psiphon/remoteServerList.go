@@ -76,7 +76,7 @@ func FetchCommonRemoteServerList(
 		return fmt.Errorf("failed to unpack common remote server list: %s", common.ContextError(err))
 	}
 
-	err = storeServerEntries(serverListPayload)
+	err = storeServerEntries(serverListPayload, protocol.SERVER_ENTRY_SOURCE_REMOTE)
 	if err != nil {
 		return fmt.Errorf("failed to store common remote server list: %s", common.ContextError(err))
 	}
@@ -263,7 +263,7 @@ func FetchObfuscatedServerLists(
 			continue
 		}
 
-		err = storeServerEntries(serverListPayload)
+		err = storeServerEntries(serverListPayload, protocol.SERVER_ENTRY_SOURCE_OBFUSCATED)
 		if err != nil {
 			failed = true
 			NoticeAlert("failed to store obfuscated server list file (%s): %s", hexID, common.ContextError(err))
@@ -389,12 +389,12 @@ func unpackRemoteServerListFile(
 	return payload, nil
 }
 
-func storeServerEntries(serverList string) error {
+func storeServerEntries(serverList, serverEntrySource string) error {
 
 	serverEntries, err := protocol.DecodeAndValidateServerEntryList(
 		serverList,
 		common.GetCurrentTimestamp(),
-		protocol.SERVER_ENTRY_SOURCE_REMOTE)
+		serverEntrySource)
 	if err != nil {
 		return common.ContextError(err)
 	}
