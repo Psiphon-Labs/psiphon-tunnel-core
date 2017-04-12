@@ -472,7 +472,7 @@ type DownloadURL struct {
 
 	// SkipVerify indicates whether to verify HTTPS certificates. It some
 	// circumvention scenarios, verification is not possible. This must
-	// only be set to true when the resource its own verification mechanism.
+	// only be set to true when the resource has its own verification mechanism.
 	SkipVerify bool
 
 	// OnlyAfterAttempts specifies how to schedule this URL when downloading
