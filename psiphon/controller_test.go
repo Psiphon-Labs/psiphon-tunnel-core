@@ -820,10 +820,10 @@ func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) error {
 		return strings.Contains(responseBody, expectedResponseContains)
 	}
 
-	// Retries are made in case of intermittent failure due
+	// Retries are made to compensate for intermittent failures due
 	// to external network conditions.
 	fetchWithRetries := func(fetchName string, fetchFunc func() error) error {
-		retryCount := 5
+		retryCount := 6
 		retryDelay := 5 * time.Second
 		var err error
 		for i := 0; i < retryCount; i++ {
