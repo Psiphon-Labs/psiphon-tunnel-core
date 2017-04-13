@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -733,7 +734,9 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 			// Allow for known race condition described in NewHttpProxy():
 			time.Sleep(1 * time.Second)
 
-			fetchAndVerifyWebsite(t, httpProxyPort)
+			if !runConfig.disruptNetwork {
+				fetchAndVerifyWebsite(t, httpProxyPort)
+			}
 
 			// Test: run for duration, periodically using the tunnel to
 			// ensure failed tunnel detection, and ultimately hitting
@@ -808,7 +811,7 @@ func (TestHostNameTransformer) TransformHostName(string) (string, bool) {
 	return "example.com", true
 }
 
-func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) {
+func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) error {
 
 	testUrl := "https://psiphon.ca"
 	roundTripTimeout := 30 * time.Second
@@ -817,41 +820,68 @@ func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) {
 		return strings.Contains(responseBody, expectedResponseContains)
 	}
 
+	// Retries are made in case of intermittent failure due
+	// to external network conditions.
+	fetchWithRetries := func(fetchName string, fetchFunc func() error) error {
+		retryCount := 5
+		retryDelay := 5 * time.Second
+		var err error
+		for i := 0; i < retryCount; i++ {
+			err = fetchFunc()
+			if err == nil || i == retryCount-1 {
+				break
+			}
+			time.Sleep(retryDelay)
+			t.Logf("retrying %s...", fetchName)
+		}
+		return err
+	}
+
 	// Test: use HTTP proxy
 
-	proxyUrl, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", httpProxyPort))
+	fetchUsingHTTPProxy := func() error {
+
+		proxyUrl, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", httpProxyPort))
+		if err != nil {
+			return fmt.Errorf("error initializing proxied HTTP request: %s", err)
+		}
+
+		httpTransport := &http.Transport{
+			Proxy:             http.ProxyURL(proxyUrl),
+			DisableKeepAlives: true,
+		}
+
+		httpClient := &http.Client{
+			Transport: httpTransport,
+			Timeout:   roundTripTimeout,
+		}
+
+		request, err := http.NewRequest("GET", testUrl, nil)
+		if err != nil {
+			return fmt.Errorf("error preparing proxied HTTP request: %s", err)
+		}
+
+		response, err := httpClient.Do(request)
+		if err != nil {
+			return fmt.Errorf("error sending proxied HTTP request: %s", err)
+		}
+		defer response.Body.Close()
+
+		body, err := ioutil.ReadAll(response.Body)
+		if err != nil {
+			return fmt.Errorf("error reading proxied HTTP response: %s", err)
+		}
+
+		if !checkResponse(string(body)) {
+			return fmt.Errorf("unexpected proxied HTTP response")
+		}
+
+		return nil
+	}
+
+	err := fetchWithRetries("proxied HTTP request", fetchUsingHTTPProxy)
 	if err != nil {
-		t.Fatalf("error initializing proxied HTTP request: %s", err)
-	}
-
-	httpTransport := &http.Transport{
-		Proxy:             http.ProxyURL(proxyUrl),
-		DisableKeepAlives: true,
-	}
-
-	httpClient := &http.Client{
-		Transport: httpTransport,
-		Timeout:   roundTripTimeout,
-	}
-
-	request, err := http.NewRequest("GET", testUrl, nil)
-	if err != nil {
-		t.Fatalf("error preparing proxied HTTP request: %s", err)
-	}
-
-	response, err := httpClient.Do(request)
-	if err != nil {
-		t.Fatalf("error sending proxied HTTP request: %s", err)
-	}
-
-	body, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		t.Fatalf("error reading proxied HTTP response: %s", err)
-	}
-	response.Body.Close()
-
-	if !checkResponse(string(body)) {
-		t.Fatalf("unexpected proxied HTTP response")
+		return err
 	}
 
 	// Delay before requesting from external service again
@@ -859,37 +889,47 @@ func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) {
 
 	// Test: use direct URL proxy
 
-	httpTransport = &http.Transport{
-		DisableKeepAlives: true,
+	fetchUsingURLProxyDirect := func() error {
+
+		httpTransport := &http.Transport{
+			DisableKeepAlives: true,
+		}
+
+		httpClient := &http.Client{
+			Transport: httpTransport,
+			Timeout:   roundTripTimeout,
+		}
+
+		request, err := http.NewRequest(
+			"GET",
+			fmt.Sprintf("http://127.0.0.1:%d/direct/%s",
+				httpProxyPort, url.QueryEscape(testUrl)),
+			nil)
+		if err != nil {
+			return fmt.Errorf("error preparing direct URL request: %s", err)
+		}
+
+		response, err := httpClient.Do(request)
+		if err != nil {
+			return fmt.Errorf("error sending direct URL request: %s", err)
+		}
+		defer response.Body.Close()
+
+		body, err := ioutil.ReadAll(response.Body)
+		if err != nil {
+			return fmt.Errorf("error reading direct URL response: %s", err)
+		}
+
+		if !checkResponse(string(body)) {
+			return fmt.Errorf("unexpected direct URL response")
+		}
+
+		return nil
 	}
 
-	httpClient = &http.Client{
-		Transport: httpTransport,
-		Timeout:   roundTripTimeout,
-	}
-
-	request, err = http.NewRequest(
-		"GET",
-		fmt.Sprintf("http://127.0.0.1:%d/direct/%s",
-			httpProxyPort, url.QueryEscape(testUrl)),
-		nil)
+	err = fetchWithRetries("direct URL request", fetchUsingURLProxyDirect)
 	if err != nil {
-		t.Fatalf("error preparing direct URL request: %s", err)
-	}
-
-	response, err = httpClient.Do(request)
-	if err != nil {
-		t.Fatalf("error sending direct URL request: %s", err)
-	}
-
-	body, err = ioutil.ReadAll(response.Body)
-	if err != nil {
-		t.Fatalf("error reading direct URL response: %s", err)
-	}
-	response.Body.Close()
-
-	if !checkResponse(string(body)) {
-		t.Fatalf("unexpected direct URL response")
+		return err
 	}
 
 	// Delay before requesting from external service again
@@ -897,29 +937,50 @@ func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) {
 
 	// Test: use tunneled URL proxy
 
-	request, err = http.NewRequest(
-		"GET",
-		fmt.Sprintf("http://127.0.0.1:%d/tunneled/%s",
-			httpProxyPort, url.QueryEscape(testUrl)),
-		nil)
-	if err != nil {
-		t.Fatalf("error preparing tunneled URL request: %s", err)
+	fetchUsingURLProxyTunneled := func() error {
+
+		httpTransport := &http.Transport{
+			DisableKeepAlives: true,
+		}
+
+		httpClient := &http.Client{
+			Transport: httpTransport,
+			Timeout:   roundTripTimeout,
+		}
+
+		request, err := http.NewRequest(
+			"GET",
+			fmt.Sprintf("http://127.0.0.1:%d/tunneled/%s",
+				httpProxyPort, url.QueryEscape(testUrl)),
+			nil)
+		if err != nil {
+			return fmt.Errorf("error preparing tunneled URL request: %s", err)
+		}
+
+		response, err := httpClient.Do(request)
+		if err != nil {
+			return fmt.Errorf("error sending tunneled URL request: %s", err)
+		}
+		defer response.Body.Close()
+
+		body, err := ioutil.ReadAll(response.Body)
+		if err != nil {
+			return fmt.Errorf("error reading tunneled URL response: %s", err)
+		}
+
+		if !checkResponse(string(body)) {
+			return fmt.Errorf("unexpected tunneled URL response")
+		}
+
+		return nil
 	}
 
-	response, err = httpClient.Do(request)
+	err = fetchWithRetries("tunneled URL request", fetchUsingURLProxyTunneled)
 	if err != nil {
-		t.Fatalf("error sending tunneled URL request: %s", err)
+		return err
 	}
 
-	body, err = ioutil.ReadAll(response.Body)
-	if err != nil {
-		t.Fatalf("error reading tunneled URL response: %s", err)
-	}
-	response.Body.Close()
-
-	if !checkResponse(string(body)) {
-		t.Fatalf("unexpected tunneled URL response")
-	}
+	return nil
 }
 
 func useTunnel(t *testing.T, httpProxyPort int) {
@@ -1021,6 +1082,7 @@ func hasExpectedCustomHeaders(h http.Header) bool {
 func initUpstreamProxy() {
 	go func() {
 		proxy := goproxy.NewProxyHttpServer()
+		proxy.Logger = log.New(ioutil.Discard, "", 0)
 
 		proxy.OnRequest().DoFunc(
 			func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
