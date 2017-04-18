@@ -65,7 +65,6 @@ export PATH=${GOPATH}/bin:${PATH}
 # The GOPATH we're using is temporary, so make sure there isn't one from a previous run.
 rm -rf ${GOPATH}
 
-# When updating the pinned rev, you will have to manually delete go-ios-build
 GOMOBILE_PINNED_REV=eb9032959f05f108b05721914dfe09cfa0c5131d
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
@@ -144,9 +143,9 @@ git checkout master
 git checkout -b pinned ${GOMOBILE_PINNED_REV}
 
 go install
-${GOPATH}/bin/gomobile init -v
+${GOPATH}/bin/gomobile init -v -x
 if [[ $? != 0 ]]; then
-  echo "FAILURE: ${GOPATH}/bin/gomobile init -v"
+  echo "FAILURE: ${GOPATH}/bin/gomobile init"
   exit 1
 fi
 
