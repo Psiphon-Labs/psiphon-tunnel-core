@@ -286,18 +286,31 @@
     // Fill in the rest of the values.
     //
     
-    // Ensure the elements of the ClientPlatform do not contain underscores, as that's what we use to separate the elements.
-    // Like "iOS"
-    NSString *systemName = [[[UIDevice currentDevice] systemName] stringByReplacingOccurrencesOfString:@"_" withString:@"-"];
+    // ClientPlatform must not contain:
+    //   - underscores, which are used by us to separate the constituent parts
+    //   - spaces, which are considered invalid by the server
+    // Like "iOS". Older iOS reports "iPhone OS", which we will convert.
+    NSString *systemName = [[UIDevice currentDevice] systemName];
+    if ([systemName isEqual: @"iPhone OS"]) {
+        systemName = @"iOS";
+    }
+    systemName = [[systemName
+                   stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
+                  stringByReplacingOccurrencesOfString:@" " withString:@"-"];
     // Like "10.2.1"
-    NSString *systemVersion = [[[UIDevice currentDevice]systemVersion] stringByReplacingOccurrencesOfString:@"_" withString:@"-"];
+    NSString *systemVersion = [[[[UIDevice currentDevice]systemVersion]
+                                stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
+                               stringByReplacingOccurrencesOfString:@" " withString:@"-"];
+    
     // "unjailbroken"/"jailbroken"
     NSString *jailbroken = @"unjailbroken";
     if ([JailbreakCheck isDeviceJailbroken]) {
         jailbroken = @"jailbroken";
     }
     // Like "com.psiphon3.browser"
-    NSString *bundleIdentifier = [[[NSBundle mainBundle] bundleIdentifier] stringByReplacingOccurrencesOfString:@"_" withString:@"-"];
+    NSString *bundleIdentifier = [[[[NSBundle mainBundle] bundleIdentifier]
+                                   stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
+                                  stringByReplacingOccurrencesOfString:@" " withString:@"-"];
     
     NSString *clientPlatform = [NSString stringWithFormat:@"%@_%@_%@_%@",
                                 systemName,
