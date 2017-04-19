@@ -176,7 +176,7 @@ func handshakeAPIRequestHandler(
 	db := support.PsinetDatabase
 	handshakeResponse := protocol.HandshakeResponse{
 		SSHSessionID:         sessionID,
-		Homepages:            db.GetRandomHomepage(sponsorID, geoIPData.Country, isMobile),
+		Homepages:            db.GetRandomizedHomepages(sponsorID, geoIPData.Country, isMobile),
 		UpgradeClientVersion: db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
 		PageViewRegexes:      make([]map[string]string, 0),
 		HttpsRequestRegexes:  db.GetHttpsRequestRegexes(sponsorID),
