@@ -642,7 +642,7 @@ func dialSsh(
 	}
 
 	if meekConfig != nil || upstreamProxyType == "http" {
-		dialCustomHeaders, selectedUserAgent = UserAgentIfUnset(config.CustomHeaders)
+		dialCustomHeaders, selectedUserAgent = UserAgentIfUnset(dialCustomHeaders)
 	}
 
 	// Use an asynchronous callback to record the resolved IP address when
