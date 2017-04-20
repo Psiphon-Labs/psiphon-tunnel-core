@@ -61,7 +61,7 @@ import (
 // HTTPSServer is a wrapper around http.Server which adds the
 // ServeTLS function.
 type HTTPSServer struct {
-	http.Server
+	*http.Server
 }
 
 // ServeTLS is similar to http.Serve, but uses TLS.
