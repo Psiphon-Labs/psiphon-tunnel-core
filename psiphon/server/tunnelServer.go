@@ -1191,10 +1191,11 @@ func (sshClient *sshClient) runTunnel(
 
 			if sshClient.isTCPDialingPortForwardLimitExceeded() {
 				blockStartTime := monotime.Now()
-				ctx, cancelFunc := context.WithTimeout(sshClient.runContext, remainingDialTimeout)
-				sshClient.setTCPPortForwardDialingAvailableSignal(cancelFunc)
+				ctx, cancelCtx := context.WithTimeout(sshClient.runContext, remainingDialTimeout)
+				sshClient.setTCPPortForwardDialingAvailableSignal(cancelCtx)
 				<-ctx.Done()
 				sshClient.setTCPPortForwardDialingAvailableSignal(nil)
+				cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 				remainingDialTimeout -= monotime.Since(blockStartTime)
 			}
 
@@ -1836,8 +1837,9 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	log.WithContextFields(LogFields{"hostToConnect": hostToConnect}).Debug("resolving")
 
-	ctx, _ := context.WithTimeout(sshClient.runContext, remainingDialTimeout)
+	ctx, cancelCtx := context.WithTimeout(sshClient.runContext, remainingDialTimeout)
 	IPs, err := (&net.Resolver{}).LookupIPAddr(ctx, hostToConnect)
+	cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 
 	// TODO: shuffle list to try other IPs?
 	// TODO: IPv6 support
@@ -1894,8 +1896,9 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	log.WithContextFields(LogFields{"remoteAddr": remoteAddr}).Debug("dialing")
 
-	ctx, _ = context.WithTimeout(sshClient.runContext, remainingDialTimeout)
+	ctx, cancelCtx = context.WithTimeout(sshClient.runContext, remainingDialTimeout)
 	fwdConn, err := (&net.Dialer{}).DialContext(ctx, "tcp", remoteAddr)
+	cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 
 	// Record port forward success or failure
 	sshClient.updateQualityMetricsWithDialResult(err == nil, monotime.Since(dialStartTime))
