@@ -528,13 +528,13 @@ func (meek *MeekConn) relay() {
 
 		receivedPayloadSize, err := meek.roundTrip(sendPayload[:sendPayloadSize])
 
-		select {
-		case <-meek.runContext.Done():
-			// In this case, meek.roundTrip encountered Done(). Exit without logging error.
-			return
-		default:
-		}
 		if err != nil {
+			select {
+			case <-meek.runContext.Done():
+				// In this case, meek.roundTrip encountered Done(). Exit without logging error.
+				return
+			default:
+			}
 			NoticeAlert("%s", common.ContextError(err))
 			go meek.Close()
 			return
@@ -655,6 +655,12 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (int64, error) {
 
 		response, err := meek.transport.RoundTrip(request)
 		if err != nil {
+			select {
+			case <-meek.runContext.Done():
+				// Exit without retrying and without logging error.
+				return 0, common.ContextError(err)
+			default:
+			}
 			NoticeAlert("meek round trip failed: %s", err)
 			// ...continue to retry
 		}
@@ -666,7 +672,7 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (int64, error) {
 				response.Body.Close()
 				return 0, common.ContextError(
 					fmt.Errorf(
-						"unexpected status code: %d instead of %d ",
+						"unexpected status code: %d instead of %d",
 						response.StatusCode, expectedStatusCode))
 			}
 
