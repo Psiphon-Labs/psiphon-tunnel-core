@@ -21,23 +21,27 @@ package server
 
 import (
 	"bytes"
+	crypto_rand "crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"math/rand"
+	"net"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Psiphon-Inc/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
-func TestMeekResiliency(t *testing.T) {
-	// TODO: implement
-}
+var KB = 1024
+var MB = KB * KB
 
 func TestCachedResponse(t *testing.T) {
 
 	rand.Seed(time.Now().Unix())
-
-	KB := 1024
-	MB := KB * KB
 
 	testCases := []struct {
 		concurrentResponses int
@@ -155,4 +159,184 @@ func TestCachedResponse(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMeekResiliency(t *testing.T) {
+
+	upstreamData := make([]byte, 10*MB)
+	_, _ = rand.Read(upstreamData)
+
+	downstreamData := make([]byte, 10*MB)
+	_, _ = rand.Read(downstreamData)
+
+	minWrite, maxWrite := 1, 128*KB
+	minRead, maxRead := 1, 128*KB
+	minWait, maxWait := 1*time.Millisecond, 500*time.Millisecond
+
+	sendFunc := func(name string, conn net.Conn, data []byte) {
+		for sent := 0; sent < len(data); {
+			writeLen := minWrite + rand.Intn(maxWrite-minWrite+1)
+			writeLen = min(writeLen, len(data)-sent)
+			_, err := conn.Write(data[sent : sent+writeLen])
+			if err != nil {
+				t.Fatalf("conn.Write failed: %s", err)
+			}
+			sent += writeLen
+			fmt.Printf("%s sent %d/%d...\n", name, sent, len(data))
+			wait := minWait + time.Duration(rand.Int63n(int64(maxWait-minWait)+1))
+			time.Sleep(wait)
+		}
+	}
+
+	recvFunc := func(conn net.Conn, expectedData []byte) {
+		data := make([]byte, len(expectedData))
+		for received := 0; received < len(data); {
+			readLen := minRead + rand.Intn(maxRead-minRead+1)
+			readLen = min(readLen, len(data)-received)
+			n, err := conn.Read(data[received : received+readLen])
+			if err != nil {
+				t.Fatalf("conn.Read failed: %s", err)
+			}
+			received += n
+			wait := minWait + time.Duration(rand.Int63n(int64(maxWait-minWait)+1))
+			time.Sleep(wait)
+		}
+		if bytes.Compare(data, expectedData) != 0 {
+			t.Fatalf("unexpected data")
+		}
+	}
+
+	// Run meek server
+
+	rawMeekCookieEncryptionPublicKey, rawMeekCookieEncryptionPrivateKey, err := box.GenerateKey(crypto_rand.Reader)
+	if err != nil {
+		t.Fatalf("box.GenerateKey failed: %s", err)
+	}
+	meekCookieEncryptionPublicKey := base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPublicKey[:])
+	meekCookieEncryptionPrivateKey := base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPrivateKey[:])
+	meekObfuscatedKey, err := common.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+	if err != nil {
+		t.Fatalf("common.MakeRandomStringHex failed: %s", err)
+	}
+
+	mockSupport := &SupportServices{
+		Config: &Config{
+			MeekObfuscatedKey:              meekObfuscatedKey,
+			MeekCookieEncryptionPrivateKey: meekCookieEncryptionPrivateKey,
+		},
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen failed: %s", err)
+	}
+	defer listener.Close()
+
+	serverAddress := listener.Addr().String()
+
+	serverWaitGroup := new(sync.WaitGroup)
+
+	clientHandler := func(conn net.Conn) {
+		serverWaitGroup.Add(1)
+		go func() {
+			defer serverWaitGroup.Done()
+			sendFunc("server", conn, downstreamData)
+		}()
+		serverWaitGroup.Add(1)
+		go func() {
+			defer serverWaitGroup.Done()
+			recvFunc(conn, upstreamData)
+		}()
+	}
+
+	stopBroadcast := make(chan struct{})
+
+	useTLS := false
+	useObfuscatedSessionTickets := false
+
+	server, err := NewMeekServer(
+		mockSupport,
+		listener,
+		useTLS,
+		useObfuscatedSessionTickets,
+		clientHandler,
+		stopBroadcast)
+	if err != nil {
+		t.Fatalf("NewMeekServer failed: %s", err)
+	}
+
+	serverWaitGroup.Add(1)
+	go func() {
+		defer serverWaitGroup.Done()
+		err := server.Run()
+		if err != nil {
+			t.Fatalf("MeekServer.Run failed: %s", err)
+		}
+	}()
+
+	// Run meek client
+
+	dialConfig := &psiphon.DialConfig{
+		PendingConns:            new(common.Conns),
+		UseIndistinguishableTLS: true,
+		DeviceBinder:            new(fileDescriptorInterruptor),
+	}
+
+	meekConfig := &psiphon.MeekConfig{
+		DialAddress:                   serverAddress,
+		UseHTTPS:                      useTLS,
+		UseObfuscatedSessionTickets:   useObfuscatedSessionTickets,
+		HostHeader:                    "example.com",
+		MeekCookieEncryptionPublicKey: meekCookieEncryptionPublicKey,
+		MeekObfuscatedKey:             meekObfuscatedKey,
+	}
+
+	clientConn, err := psiphon.DialMeek(meekConfig, dialConfig)
+	if err != nil {
+		t.Fatalf("psiphon.DialMeek failed: %s", err)
+	}
+
+	// Relay data through meek
+
+	clientWaitGroup := new(sync.WaitGroup)
+
+	clientWaitGroup.Add(1)
+	go func() {
+		defer clientWaitGroup.Done()
+		sendFunc("client", clientConn, upstreamData)
+	}()
+
+	clientWaitGroup.Add(1)
+	go func() {
+		defer clientWaitGroup.Done()
+		recvFunc(clientConn, downstreamData)
+	}()
+
+	clientWaitGroup.Wait()
+
+	clientConn.Close()
+
+	// Graceful shutdown
+
+	listener.Close()
+	close(stopBroadcast)
+
+	// This wait will hang if shutdown is broken, and the test will ultimately panic
+	serverWaitGroup.Wait()
+}
+
+type fileDescriptorInterruptor struct {
+}
+
+func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) error {
+	fdDup, err := syscall.Dup(fileDescriptor)
+	if err != nil {
+		return err
+	}
+	time.AfterFunc(time.Second*2, func() {
+		syscall.Shutdown(fdDup, 2)
+		syscall.Close(fdDup)
+		fmt.Printf("interrupted TCP connection\n")
+	})
+	return nil
 }
