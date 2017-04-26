@@ -345,6 +345,10 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		// newly acquired buffers.
 		session.cachedResponse.Reset()
 
+		// Note: this code depends on an implementation detail of
+		// io.MultiWriter: a Write() to the MultiWriter writes first
+		// to the cache, and then to the response writer. So if the
+		// write to the reponse writer fails, the payload is cached.
 		multiWriter := io.MultiWriter(session.cachedResponse, responseWriter)
 
 		// The client expects 206, not 200, whenever it sets a Range header,
@@ -864,6 +868,8 @@ func (conn *meekConn) pumpReads(reader io.Reader) error {
 	return nil
 }
 
+var errMeekConnectionHasClosed = errors.New("meek connection has closed")
+
 // Read reads from the meekConn into buffer. Read blocks until
 // some data is read or the meekConn closes. Under the hood, it
 // waits for pumpReads to submit a reader to read from.
@@ -877,7 +883,7 @@ func (conn *meekConn) Read(buffer []byte) (int, error) {
 	case readBuffer = <-conn.partialReadBuffer:
 	case readBuffer = <-conn.fullReadBuffer:
 	case <-conn.closeBroadcast:
-		return 0, io.EOF
+		return 0, common.ContextError(errMeekConnectionHasClosed)
 	}
 
 	n, err := readBuffer.Read(buffer)
@@ -936,7 +942,7 @@ func (conn *meekConn) pumpWrites(writer io.Writer) error {
 		case <-timeout.C:
 			return nil
 		case <-conn.closeBroadcast:
-			return io.EOF
+			return common.ContextError(errMeekConnectionHasClosed)
 		}
 	}
 }
@@ -968,17 +974,28 @@ func (conn *meekConn) Write(buffer []byte) (int, error) {
 		select {
 		case conn.nextWriteBuffer <- chunk:
 		case <-conn.closeBroadcast:
-			return n, io.EOF
+			return n, common.ContextError(errMeekConnectionHasClosed)
 		}
 
 		// Wait for the buffer to be processed.
 		select {
-		case err := <-conn.writeResult:
-			if err != nil {
-				return n, err
-			}
+		case _ = <-conn.writeResult:
+			// The err from conn.writeResult comes from the
+			// io.MultiWriter used in pumpWrites, which writes
+			// to both the cached response and the HTTP response.
+			//
+			// Don't stop on error here, since only writing
+			// to the HTTP response will fail, and the client
+			// may retry and use the cached response.
+			//
+			// It's possible that the cached response buffer
+			// is too small for the client to successfully
+			// retry, but that cannot be determined. In this
+			// case, the meek connection will eventually fail.
+			//
+			// err is already logged in ServeHTTP.
 		case <-conn.closeBroadcast:
-			return n, io.EOF
+			return n, common.ContextError(errMeekConnectionHasClosed)
 		}
 		n += len(chunk)
 	}
@@ -1011,7 +1028,7 @@ func (conn *meekConn) RemoteAddr() net.Addr {
 // SetDeadline is not a true implementation of net.Conn.SetDeadline. It
 // merely checks that the requested timeout exceeds the MEEK_MAX_SESSION_STALENESS
 // period. When it does, and the session is idle, the meekConn Read/Write will
-// be interrupted and return io.EOF (not a timeout error) before the deadline.
+// be interrupted and return an error (not a timeout error) before the deadline.
 // In other words, this conn will approximate the desired functionality of
 // timing out on idle on or before the requested deadline.
 func (conn *meekConn) SetDeadline(t time.Time) error {
