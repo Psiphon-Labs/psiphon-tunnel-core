@@ -347,6 +347,12 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 		multiWriter := io.MultiWriter(session.cachedResponse, responseWriter)
 
+		// The client expects 206, not 200, whenever it sets a Range header,
+		// which it may do even when no cached response is prepared.
+		if isRetry {
+			responseWriter.WriteHeader(http.StatusPartialContent)
+		}
+
 		// pumpWrites causes a TunnelServer/SSH goroutine blocking on a Write to
 		// write its downstream traffic through to the response body.
 
