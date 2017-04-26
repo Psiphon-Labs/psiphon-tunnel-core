@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -59,7 +60,7 @@ const (
 	MAX_POLL_INTERVAL_JITTER       = 0.1
 	POLL_INTERVAL_MULTIPLIER       = 1.5
 	POLL_INTERVAL_JITTER           = 0.1
-	MEEK_ROUND_TRIP_RETRY_DEADLINE = 1 * time.Second
+	MEEK_ROUND_TRIP_RETRY_DEADLINE = 5 * time.Second
 	MEEK_ROUND_TRIP_RETRY_DELAY    = 50 * time.Millisecond
 	MEEK_ROUND_TRIP_TIMEOUT        = 20 * time.Second
 )
@@ -125,7 +126,8 @@ type MeekConn struct {
 	transport            transporter
 	mutex                sync.Mutex
 	isClosed             bool
-	broadcastClosed      chan struct{}
+	runContext           context.Context
+	stopRunning          context.CancelFunc
 	relayWaitGroup       *sync.WaitGroup
 	emptyReceiveBuffer   chan *bytes.Buffer
 	partialReceiveBuffer chan *bytes.Buffer
@@ -298,6 +300,8 @@ func DialMeek(
 		return nil, common.ContextError(err)
 	}
 
+	runContext, stopRunning := context.WithCancel(context.Background())
+
 	// The main loop of a MeekConn is run in the relay() goroutine.
 	// A MeekConn implements net.Conn concurrency semantics:
 	// "Multiple goroutines may invoke methods on a Conn simultaneously."
@@ -321,7 +325,8 @@ func DialMeek(
 		pendingConns:         pendingConns,
 		transport:            transport,
 		isClosed:             false,
-		broadcastClosed:      make(chan struct{}),
+		runContext:           runContext,
+		stopRunning:          stopRunning,
 		relayWaitGroup:       new(sync.WaitGroup),
 		emptyReceiveBuffer:   make(chan *bytes.Buffer, 1),
 		partialReceiveBuffer: make(chan *bytes.Buffer, 1),
@@ -356,7 +361,7 @@ func (meek *MeekConn) Close() (err error) {
 	meek.mutex.Unlock()
 
 	if !isClosed {
-		close(meek.broadcastClosed)
+		meek.stopRunning()
 		meek.pendingConns.CloseAll()
 		meek.relayWaitGroup.Wait()
 		meek.transport.CloseIdleConnections()
@@ -386,7 +391,7 @@ func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
 	select {
 	case receiveBuffer = <-meek.partialReceiveBuffer:
 	case receiveBuffer = <-meek.fullReceiveBuffer:
-	case <-meek.broadcastClosed:
+	case <-meek.runContext.Done():
 		return 0, common.ContextError(errors.New("meek connection has closed"))
 	}
 	n, err = receiveBuffer.Read(buffer)
@@ -408,7 +413,7 @@ func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
 		select {
 		case sendBuffer = <-meek.emptySendBuffer:
 		case sendBuffer = <-meek.partialSendBuffer:
-		case <-meek.broadcastClosed:
+		case <-meek.runContext.Done():
 			return 0, common.ContextError(errors.New("meek connection has closed"))
 		}
 		writeLen := MAX_SEND_PAYLOAD_LENGTH - sendBuffer.Len()
@@ -490,6 +495,7 @@ func (meek *MeekConn) relay() {
 
 	for {
 		timeout.Reset(interval)
+
 		// Block until there is payload to send or it is time to poll
 		var sendBuffer *bytes.Buffer
 		select {
@@ -497,10 +503,17 @@ func (meek *MeekConn) relay() {
 		case sendBuffer = <-meek.fullSendBuffer:
 		case <-timeout.C:
 			// In the polling case, send an empty payload
-		case <-meek.broadcastClosed:
-			// TODO: timeout case may be selected when broadcastClosed is set?
-			return
+		case <-meek.runContext.Done():
+			// Drop through to second Done() check
 		}
+
+		// Check Done() again, to ensure it takes precedence
+		select {
+		case <-meek.runContext.Done():
+			return
+		default:
+		}
+
 		sendPayloadSize := 0
 		if sendBuffer != nil {
 			var err error
@@ -512,17 +525,15 @@ func (meek *MeekConn) relay() {
 				return
 			}
 		}
-		receivedPayload, err := meek.roundTrip(sendPayload[:sendPayloadSize])
-		if err != nil {
-			NoticeAlert("%s", common.ContextError(err))
-			go meek.Close()
+
+		receivedPayloadSize, err := meek.roundTrip(sendPayload[:sendPayloadSize])
+
+		select {
+		case <-meek.runContext.Done():
+			// In this case, meek.roundTrip encountered Done(). Exit without logging error.
 			return
+		default:
 		}
-		if receivedPayload == nil {
-			// In this case, meek.roundTrip encountered broadcastClosed. Exit without error.
-			return
-		}
-		receivedPayloadSize, err := meek.readPayload(receivedPayload)
 		if err != nil {
 			NoticeAlert("%s", common.ContextError(err))
 			go meek.Close()
@@ -566,10 +577,173 @@ func (meek *MeekConn) relay() {
 	}
 }
 
-// readPayload reads the HTTP response  in chunks, making the read buffer available
+// roundTrip configures and makes the actual HTTP POST request
+func (meek *MeekConn) roundTrip(sendPayload []byte) (int64, error) {
+
+	// Retries are made when the round trip fails. This adds resiliency
+	// to connection interruption and intermittent failures.
+	//
+	// At least one retry is always attempted, and retries continue
+	// while still within a brief deadline -- 5 seconds, currently the
+	// deadline for an actively probed SSH connection to timeout. There
+	// is a brief delay between retries, allowing for intermittent
+	// failure states to resolve.
+	//
+	// Failure may occur at various stages of the HTTP request:
+	//
+	// 1. Before the request begins. In this case, the entire request
+	//    may be rerun.
+	//
+	// 2. While sending the request payload. In this case, the client
+	//    must resend its request payload. The server will not have
+	//    relayed its partially received request payload.
+	//
+	// 3. After sending the request payload but before receiving
+	//    a response. The client cannot distinguish between case 2 and
+	//    this case, case 3. The client resends its payload and the
+	//    server detects this and skips relaying the request payload.
+	//
+	// 4. While reading the response payload. The client will omit its
+	//    request payload when retrying, as the server has already
+	//    acknowleged it. The client will also indicate to the server
+	//    the amount of response payload already received, and the
+	//    server will skip resending the indicated amount of response
+	//    payload.
+	//
+	// Retries are indicated to the server by adding a Range header,
+	// which includes the response payload resend position.
+
+	retries := uint(0)
+	retryDeadline := monotime.Now().Add(MEEK_ROUND_TRIP_RETRY_DEADLINE)
+	serverAcknowlegedRequestPayload := false
+	receivedPayloadSize := int64(0)
+
+	for try := 0; ; try++ {
+
+		// Omit the request payload when retrying after receiving a
+		// partial server response.
+
+		var sendPayloadReader io.Reader
+		if !serverAcknowlegedRequestPayload {
+			sendPayloadReader = bytes.NewReader(sendPayload)
+		}
+
+		var request *http.Request
+		request, err := http.NewRequest("POST", meek.url.String(), sendPayloadReader)
+		if err != nil {
+			// Don't retry when can't initialize a Request
+			return 0, common.ContextError(err)
+		}
+
+		// Note: meek.stopRunning() will abort a round trip in flight
+		request = request.WithContext(meek.runContext)
+
+		meek.addAdditionalHeaders(request)
+
+		request.Header.Set("Content-Type", "application/octet-stream")
+		request.AddCookie(meek.cookie)
+
+		expectedStatusCode := http.StatusOK
+
+		// When retrying, add a Range header to indicate how much
+		// of the response was already received.
+
+		if try > 0 {
+			expectedStatusCode = http.StatusPartialContent
+			request.Header.Set("Range", fmt.Sprintf("bytes=%d-", receivedPayloadSize))
+		}
+
+		response, err := meek.transport.RoundTrip(request)
+		if err != nil {
+			NoticeAlert("meek round trip failed: %s", err)
+			// ...continue to retry
+		}
+
+		if err == nil {
+
+			if response.StatusCode != expectedStatusCode {
+				// Don't retry when the status code is incorrect
+				response.Body.Close()
+				return 0, common.ContextError(
+					fmt.Errorf(
+						"unexpected status code: %d instead of %d ",
+						response.StatusCode, expectedStatusCode))
+			}
+
+			// Update meek session cookie
+			for _, c := range response.Cookies() {
+				if meek.cookie.Name == c.Name {
+					meek.cookie.Value = c.Value
+					break
+				}
+			}
+
+			// Received the response status code, so the server
+			// must have received the request payload.
+			serverAcknowlegedRequestPayload = true
+
+			readPayloadSize, err := meek.readPayload(response.Body)
+			if err != nil {
+				NoticeAlert("meek read payload failed: %s", err)
+				// ...continue to retry
+			}
+			response.Body.Close()
+
+			// receivedPayloadSize is the number of response
+			// payload bytes received and relayed. A retry can
+			// resume after this position.
+
+			receivedPayloadSize += readPayloadSize
+
+			if err == nil {
+				// Round trip completed successfully
+				break
+			}
+		}
+
+		// Either the request failed entirely, or there was a failure
+		// streaming the response payload. Retry, if time remains.
+
+		if retries >= 1 && monotime.Now().After(retryDeadline) {
+			return 0, common.ContextError(err)
+		}
+		retries += 1
+
+		time.Sleep(MEEK_ROUND_TRIP_RETRY_DELAY)
+	}
+
+	return receivedPayloadSize, nil
+}
+
+// Add additional headers to the HTTP request using the same method we use for adding
+// custom headers to HTTP proxy requests.
+func (meek *MeekConn) addAdditionalHeaders(request *http.Request) {
+	for name, value := range meek.additionalHeaders {
+		// hack around special case of "Host" header
+		// https://golang.org/src/net/http/request.go#L474
+		// using URL.Opaque, see URL.RequestURI() https://golang.org/src/net/url/url.go#L915
+		if name == "Host" {
+			if len(value) > 0 {
+				if request.URL.Opaque == "" {
+					request.URL.Opaque = request.URL.Scheme + "://" + request.Host + request.URL.RequestURI()
+				}
+				request.Host = value[0]
+			}
+		} else {
+			request.Header[name] = value
+		}
+	}
+}
+
+// readPayload reads the HTTP response in chunks, making the read buffer available
 // to MeekConn.Read() calls after each chunk; the intention is to allow bytes to
 // flow back to the reader as soon as possible instead of buffering the entire payload.
-func (meek *MeekConn) readPayload(receivedPayload io.ReadCloser) (totalSize int64, err error) {
+//
+// When readPayload returns an error, the totalSize output is remains valid -- it's the
+// number of payload bytes successfully read and relayed.
+func (meek *MeekConn) readPayload(
+	receivedPayload io.ReadCloser) (totalSize int64, err error) {
+
 	defer receivedPayload.Close()
 	totalSize = 0
 	for {
@@ -579,124 +753,22 @@ func (meek *MeekConn) readPayload(receivedPayload io.ReadCloser) (totalSize int6
 		select {
 		case receiveBuffer = <-meek.emptyReceiveBuffer:
 		case receiveBuffer = <-meek.partialReceiveBuffer:
-		case <-meek.broadcastClosed:
+		case <-meek.runContext.Done():
 			return 0, nil
 		}
 		// Note: receiveBuffer size may exceed FULL_RECEIVE_BUFFER_LENGTH by up to the size
-		// of one received payload. The FULL_RECEIVE_BUFFER_LENGTH value is just a threshold.
+		// of one received payload. The FULL_RECEIVE_BUFFER_LENGTH value is just a guideline.
 		n, err := receiveBuffer.ReadFrom(reader)
 		meek.replaceReceiveBuffer(receiveBuffer)
-		if err != nil {
-			return 0, common.ContextError(err)
-		}
 		totalSize += n
+		if err != nil {
+			return totalSize, common.ContextError(err)
+		}
 		if n == 0 {
 			break
 		}
 	}
 	return totalSize, nil
-}
-
-// roundTrip configures and makes the actual HTTP POST request
-func (meek *MeekConn) roundTrip(sendPayload []byte) (io.ReadCloser, error) {
-
-	// The retry mitigates intermittent failures between the client and front/server.
-	//
-	// Note: Retry will only be effective if entire request failed (underlying transport protocol
-	// such as SSH will fail if extra bytes are replayed in either direction due to partial relay
-	// success followed by retry).
-	// At least one retry is always attempted. We retry when still within a brief deadline and wait
-	// for a short time before re-dialing.
-	//
-	// TODO: in principle, we could retry for min(TUNNEL_WRITE_TIMEOUT, meek-server.MAX_SESSION_STALENESS),
-	// i.e., as long as the underlying tunnel has not timed out and as long as the server has not
-	// expired the current meek session. Presently not doing this to avoid excessive connection attempts
-	// through the first hop. In addition, this will require additional support for timely shutdown.
-	retries := uint(0)
-	retryDeadline := monotime.Now().Add(MEEK_ROUND_TRIP_RETRY_DEADLINE)
-
-	var err error
-	var response *http.Response
-	for {
-
-		var request *http.Request
-		request, err = http.NewRequest("POST", meek.url.String(), bytes.NewReader(sendPayload))
-		if err != nil {
-			// Don't retry when can't initialize a Request
-			break
-		}
-
-		request.Header.Set("Content-Type", "application/octet-stream")
-
-		// Set additional headers to the HTTP request using the same method we use for adding
-		// custom headers to HTTP proxy requests
-		for name, value := range meek.additionalHeaders {
-			// hack around special case of "Host" header
-			// https://golang.org/src/net/http/request.go#L474
-			// using URL.Opaque, see URL.RequestURI() https://golang.org/src/net/url/url.go#L915
-			if name == "Host" {
-				if len(value) > 0 {
-					if request.URL.Opaque == "" {
-						request.URL.Opaque = request.URL.Scheme + "://" + request.Host + request.URL.RequestURI()
-					}
-					request.Host = value[0]
-				}
-			} else {
-				request.Header[name] = value
-			}
-		}
-
-		request.AddCookie(meek.cookie)
-
-		// The http.Transport.RoundTrip is run in a goroutine to enable cancelling a request in-flight.
-		type roundTripResponse struct {
-			response *http.Response
-			err      error
-		}
-		roundTripResponseChannel := make(chan *roundTripResponse, 1)
-		roundTripWaitGroup := new(sync.WaitGroup)
-		roundTripWaitGroup.Add(1)
-		go func() {
-			defer roundTripWaitGroup.Done()
-			r, err := meek.transport.RoundTrip(request)
-			roundTripResponseChannel <- &roundTripResponse{r, err}
-		}()
-		select {
-		case roundTripResponse := <-roundTripResponseChannel:
-			response = roundTripResponse.response
-			err = roundTripResponse.err
-		case <-meek.broadcastClosed:
-			meek.transport.CancelRequest(request)
-			return nil, nil
-		}
-		roundTripWaitGroup.Wait()
-
-		if err == nil {
-			break
-		}
-
-		if retries >= 1 && monotime.Now().After(retryDeadline) {
-			break
-		}
-		retries += 1
-
-		time.Sleep(MEEK_ROUND_TRIP_RETRY_DELAY)
-	}
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-	if response.StatusCode != http.StatusOK {
-		return nil, common.ContextError(fmt.Errorf("http request failed %d", response.StatusCode))
-	}
-	// observe response cookies for meek session key token.
-	// Once found it must be used for all consecutive requests made to the server
-	for _, c := range response.Cookies() {
-		if meek.cookie.Name == c.Name {
-			meek.cookie.Value = c.Value
-			break
-		}
-	}
-	return response.Body, nil
 }
 
 type meekCookieData struct {

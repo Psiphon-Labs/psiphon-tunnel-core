@@ -27,9 +27,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"hash/crc64"
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -61,13 +63,16 @@ const (
 	// session ID on all subsequent requests for the remainder of the session.
 	MEEK_PROTOCOL_VERSION_2 = 2
 
-	MEEK_MAX_PAYLOAD_LENGTH           = 0x10000
-	MEEK_TURN_AROUND_TIMEOUT          = 20 * time.Millisecond
-	MEEK_EXTENDED_TURN_AROUND_TIMEOUT = 100 * time.Millisecond
-	MEEK_MAX_SESSION_STALENESS        = 45 * time.Second
-	MEEK_HTTP_CLIENT_IO_TIMEOUT       = 45 * time.Second
-	MEEK_MIN_SESSION_ID_LENGTH        = 8
-	MEEK_MAX_SESSION_ID_LENGTH        = 20
+	MEEK_MAX_REQUEST_PAYLOAD_LENGTH     = 65536
+	MEEK_TURN_AROUND_TIMEOUT            = 20 * time.Millisecond
+	MEEK_EXTENDED_TURN_AROUND_TIMEOUT   = 100 * time.Millisecond
+	MEEK_MAX_SESSION_STALENESS          = 45 * time.Second
+	MEEK_HTTP_CLIENT_IO_TIMEOUT         = 45 * time.Second
+	MEEK_MIN_SESSION_ID_LENGTH          = 8
+	MEEK_MAX_SESSION_ID_LENGTH          = 20
+	MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH = 65536
+	MEEK_DEFAULT_POOL_BUFFER_LENGTH     = 65536
+	MEEK_DEFAULT_POOL_BUFFER_COUNT      = 2048
 )
 
 // MeekServer implements the meek protocol, which tunnels TCP traffic (in the case of Psiphon,
@@ -90,6 +95,8 @@ type MeekServer struct {
 	stopBroadcast <-chan struct{}
 	sessionsLock  sync.RWMutex
 	sessions      map[string]*meekSession
+	checksumTable *crc64.Table
+	bufferPool    *CachedResponseBufferPool
 }
 
 // NewMeekServer initializes a new meek server.
@@ -100,6 +107,13 @@ func NewMeekServer(
 	clientHandler func(clientConn net.Conn),
 	stopBroadcast <-chan struct{}) (*MeekServer, error) {
 
+	checksumTable := crc64.MakeTable(crc64.ECMA)
+
+	// TODO: configurable buffer parameters
+	bufferPool := NewCachedResponseBufferPool(
+		MEEK_DEFAULT_POOL_BUFFER_LENGTH,
+		MEEK_DEFAULT_POOL_BUFFER_COUNT)
+
 	meekServer := &MeekServer{
 		support:       support,
 		listener:      listener,
@@ -107,6 +121,8 @@ func NewMeekServer(
 		openConns:     new(common.Conns),
 		stopBroadcast: stopBroadcast,
 		sessions:      make(map[string]*meekSession),
+		checksumTable: checksumTable,
+		bufferPool:    bufferPool,
 	}
 
 	if useTLS {
@@ -240,15 +256,23 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	// read the request body as upstream traffic.
 	// TODO: run pumpReads and pumpWrites concurrently?
 
+	// pumpReads checksums the request payload and skips relaying it when
+	// it matches the immediately previous request payload. This allows
+	// clients to resend request payloads, when retrying due to connection
+	// interruption, without knowing whether the server has received or
+	// relayed the data.
+
 	err = session.clientConn.pumpReads(request.Body)
 	if err != nil {
 		if err != io.EOF {
 			// Debug since errors such as "i/o timeout" occur during normal operation;
 			// also, golang network error messages may contain client IP.
-			log.WithContextFields(LogFields{"error": err}).Debug("pump reads failed")
+			log.WithContextFields(LogFields{"error": err}).Debug("read request failed")
 		}
 		server.terminateConnection(responseWriter, request)
-		server.closeSession(sessionID)
+
+		// Note: keep session open to allow client to retry
+
 		return
 	}
 
@@ -262,20 +286,112 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		session.sessionIDSent = true
 	}
 
-	// pumpWrites causes a TunnelServer/SSH goroutine blocking on a Write to
-	// write its downstream traffic through to the response body.
+	// When streaming data into the response body, a copy is
+	// retained in the cachedResponse buffer. This allows the
+	// client to retry and request that the response be resent
+	// when the HTTP connection is interrupted.
+	//
+	// If a Range header is present, the client is retrying,
+	// possibly after having received a partial response. In
+	// this case, use any cached response to attempt to resend
+	// the response, starting from the resend position the client
+	// indicates.
+	//
+	// When the resend position is not available -- because the
+	// cachedResponse buffer could not hold it -- the client session
+	// is closed, as there's no way to resume streaming the payload
+	// uninterrupted.
+	//
+	// The client may retry before a cached response is prepared,
+	// so a cached response is not always used when a Range header
+	// is present.
+	//
+	// TODO: invalid Range header is ignored; should it be otherwise?
 
-	err = session.clientConn.pumpWrites(responseWriter)
+	position, isRetry := checkRangeHeader(request)
+
+	hasCachedResponse := session.cachedResponse.HasPosition(0)
+
+	// The client is not expected to send position > 0 when there is
+	// no cached response; let that case fall through to the next
+	// HasPosition check which will fail and close the session.
+
+	if isRetry && (hasCachedResponse || position > 0) {
+
+		if !session.cachedResponse.HasPosition(position) {
+			server.terminateConnection(responseWriter, request)
+			server.closeSession(sessionID)
+			return
+		}
+
+		responseWriter.WriteHeader(http.StatusPartialContent)
+
+		// TODO:
+		// - enforce a max extended buffer count per client, for
+		//   fairness? Throttling may make this unnecessary.
+		// - cachedResponse can now start releasing extended buffers,
+		//   as response bytes before "position" will never be requested
+		//   again?
+
+		err = session.cachedResponse.CopyFromPosition(position, responseWriter)
+
+		// The client may again fail to receive the payload and may again
+		// retry, so not yet releasing cachedReponse buffers.
+
+	} else {
+
+		// _Now_ we release buffers holding data from the previous
+		// response. And then immediately stream the new response into
+		// newly acquired buffers.
+		session.cachedResponse.Reset()
+
+		multiWriter := io.MultiWriter(session.cachedResponse, responseWriter)
+
+		// pumpWrites causes a TunnelServer/SSH goroutine blocking on a Write to
+		// write its downstream traffic through to the response body.
+
+		err = session.clientConn.pumpWrites(multiWriter)
+	}
+
+	// err is the result of writing the body either from CopyFromPosition or pumpWrites
 	if err != nil {
 		if err != io.EOF {
 			// Debug since errors such as "i/o timeout" occur during normal operation;
 			// also, golang network error messages may contain client IP.
-			log.WithContextFields(LogFields{"error": err}).Debug("pump writes failed")
+			log.WithContextFields(LogFields{"error": err}).Debug("write response failed")
 		}
 		server.terminateConnection(responseWriter, request)
-		server.closeSession(sessionID)
+
+		// Note: keep session open to allow client to retry
+
 		return
 	}
+}
+
+func checkRangeHeader(request *http.Request) (int, bool) {
+	rangeHeader := request.Header.Get("Range")
+	if rangeHeader == "" {
+		return 0, false
+	}
+
+	prefix := "bytes="
+	suffix := "-"
+
+	if !strings.HasPrefix(rangeHeader, prefix) ||
+		!strings.HasSuffix(rangeHeader, suffix) {
+
+		return 0, false
+	}
+
+	rangeHeader = strings.TrimPrefix(rangeHeader, prefix)
+	rangeHeader = strings.TrimSuffix(rangeHeader, suffix)
+	position, err := strconv.Atoi(rangeHeader)
+
+	if err != nil {
+		return 0, false
+	}
+
+	return position, true
 }
 
 // getSession returns the meek client session corresponding the
@@ -354,16 +470,22 @@ func (server *MeekServer) getSession(
 	// Assumes clientIP is a valid IP address; the port value is a stub
 	// and is expected to be ignored.
 	clientConn := newMeekConn(
+		server,
 		&net.TCPAddr{
 			IP:   net.ParseIP(clientIP),
 			Port: 0,
 		},
 		clientSessionData.MeekProtocolVersion)
 
+	// TODO: configurable buffer parameters
+	cachedResponse := NewCachedResponse(
+		MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH, server.bufferPool)
+
 	session = &meekSession{
 		clientConn:          clientConn,
 		meekProtocolVersion: clientSessionData.MeekProtocolVersion,
 		sessionIDSent:       false,
+		cachedResponse:      cachedResponse,
 	}
 	session.touch()
 
@@ -398,6 +520,10 @@ func (server *MeekServer) closeSessionHelper(
 
 	// TODO: close the persistent HTTP client connection, if one exists
 	session.clientConn.Close()
+
+	// Release all extended buffers back to the pool
+	session.cachedResponse.Reset()
+
 	// Note: assumes caller holds lock on sessionsLock
 	delete(server.sessions, sessionID)
 }
@@ -459,6 +585,7 @@ type meekSession struct {
 	clientConn          *meekConn
 	meekProtocolVersion int
 	sessionIDSent       bool
+	cachedResponse      *CachedResponse
 }
 
 func (session *meekSession) touch() {
@@ -629,10 +756,12 @@ func makeMeekSessionID() (string, error) {
 // meekConn bridges net/http request/response payload readers and writers
 // and goroutines calling Read()s and Write()s.
 type meekConn struct {
+	meekServer        *MeekServer
 	remoteAddr        net.Addr
 	protocolVersion   int
 	closeBroadcast    chan struct{}
 	closed            int32
+	lastReadChecksum  *uint64
 	readLock          sync.Mutex
 	emptyReadBuffer   chan *bytes.Buffer
 	partialReadBuffer chan *bytes.Buffer
@@ -642,8 +771,9 @@ type meekConn struct {
 	writeResult       chan error
 }
 
-func newMeekConn(remoteAddr net.Addr, protocolVersion int) *meekConn {
+func newMeekConn(meekServer *MeekServer, remoteAddr net.Addr, protocolVersion int) *meekConn {
 	conn := &meekConn{
+		meekServer:        meekServer,
 		remoteAddr:        remoteAddr,
 		protocolVersion:   protocolVersion,
 		closeBroadcast:    make(chan struct{}),
@@ -664,31 +794,68 @@ func newMeekConn(remoteAddr net.Addr, protocolVersion int) *meekConn {
 // pumpReads causes goroutines blocking on meekConn.Read() to read
 // from the specified reader. This function blocks until the reader
 // is fully consumed or the meekConn is closed. A read buffer allows
-// up to MEEK_MAX_PAYLOAD_LENGTH bytes to be read and buffered without
-// a Read() immediately consuming the bytes, but there's still a
-// possibility of a stall if no Read() calls are made after this
+// up to MEEK_MAX_REQUEST_PAYLOAD_LENGTH bytes to be read and buffered
+// without a Read() immediately consuming the bytes, but there's still
+// a possibility of a stall if no Read() calls are made after this
 // read buffer is full.
 // Note: assumes only one concurrent call to pumpReads
 func (conn *meekConn) pumpReads(reader io.Reader) error {
-	for {
 
-		var readBuffer *bytes.Buffer
-		select {
-		case readBuffer = <-conn.emptyReadBuffer:
-		case readBuffer = <-conn.partialReadBuffer:
-		case <-conn.closeBroadcast:
-			return io.EOF
-		}
+	// Wait for a full capacity empty buffer. This ensures we can read
+	// the maximum MEEK_MAX_REQUEST_PAYLOAD_LENGTH request payload and
+	// checksum before relaying.
+	//
+	// Note: previously, this code would select conn.partialReadBuffer
+	// and write to that, looping until the entire request payload was
+	// read. Now, the consumer, the Read() caller, must fully drain the
+	// read buffer first.
 
-		limitReader := io.LimitReader(reader, int64(MEEK_MAX_PAYLOAD_LENGTH-readBuffer.Len()))
-		n, err := readBuffer.ReadFrom(limitReader)
-
-		conn.replaceReadBuffer(readBuffer)
-
-		if n == 0 || err != nil {
-			return err
-		}
+	var readBuffer *bytes.Buffer
+	select {
+	case readBuffer = <-conn.emptyReadBuffer:
+	case <-conn.closeBroadcast:
+		return io.EOF
 	}
+
+	// +1 allows for an explict check for request payloads that
+	// exceed the maximum permitted length.
+	limitReader := io.LimitReader(reader, MEEK_MAX_REQUEST_PAYLOAD_LENGTH+1)
+	n, err := readBuffer.ReadFrom(limitReader)
+
+	if err == nil && n == MEEK_MAX_REQUEST_PAYLOAD_LENGTH+1 {
+		err = errors.New("invalid request payload length")
+	}
+
+	// If the request read fails, don't relay any data. This allows
+	// the client to retry and resend its request payload without
+	// interrupting/duplicating the payload flow.
+	if err != nil {
+		readBuffer.Reset()
+		conn.replaceReadBuffer(readBuffer)
+		return common.ContextError(err)
+	}
+
+	// Check if request payload checksum matches immediately
+	// previous payload. On match, assume this is a client retry
+	// sending payload that was already relayed and skip this
+	// payload. Payload is OSSH ciphertext and almost surely
+	// will not repeat. In the highly unlikely case that it does,
+	// the underlying SSH connection will fail and the client
+	// must reconnect.
+
+	checksum := crc64.Checksum(readBuffer.Bytes(), conn.meekServer.checksumTable)
+
+	if conn.lastReadChecksum == nil {
+		conn.lastReadChecksum = new(uint64)
+	} else if *conn.lastReadChecksum == checksum {
+		readBuffer.Reset()
+	}
+
+	*conn.lastReadChecksum = checksum
+
+	conn.replaceReadBuffer(readBuffer)
+
+	return nil
 }
 
 // Read reads from the meekConn into buffer. Read blocks until
@@ -716,7 +883,7 @@ func (conn *meekConn) Read(buffer []byte) (int, error) {
 
 func (conn *meekConn) replaceReadBuffer(readBuffer *bytes.Buffer) {
 	switch readBuffer.Len() {
-	case MEEK_MAX_PAYLOAD_LENGTH:
+	case MEEK_MAX_REQUEST_PAYLOAD_LENGTH:
 		conn.fullReadBuffer <- readBuffer
 	case 0:
 		conn.emptyReadBuffer <- readBuffer
@@ -752,7 +919,7 @@ func (conn *meekConn) pumpWrites(writer io.Writer) error {
 
 			if conn.protocolVersion < MEEK_PROTOCOL_VERSION_1 {
 				// Pre-protocol version 1 clients expect at most
-				// MEEK_MAX_PAYLOAD_LENGTH response bodies
+				// MEEK_MAX_REQUEST_PAYLOAD_LENGTH response bodies
 				return nil
 			}
 			totalElapsedTime := monotime.Since(startTime) / time.Millisecond
@@ -783,12 +950,12 @@ func (conn *meekConn) Write(buffer []byte) (int, error) {
 
 	n := 0
 	for n < len(buffer) {
-		end := n + MEEK_MAX_PAYLOAD_LENGTH
+		end := n + MEEK_MAX_REQUEST_PAYLOAD_LENGTH
 		if end > len(buffer) {
 			end = len(buffer)
 		}
 
-		// Only write MEEK_MAX_PAYLOAD_LENGTH at a time,
+		// Only write MEEK_MAX_REQUEST_PAYLOAD_LENGTH at a time,
 		// to ensure compatibility with v1 protocol.
 		chunk := buffer[n:end]
 
