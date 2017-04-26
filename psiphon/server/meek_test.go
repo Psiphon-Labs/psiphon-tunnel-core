@@ -186,6 +186,7 @@ func TestMeekResiliency(t *testing.T) {
 			wait := minWait + time.Duration(rand.Int63n(int64(maxWait-minWait)+1))
 			time.Sleep(wait)
 		}
+		fmt.Printf("%s send complete\n", name)
 	}
 
 	recvFunc := func(conn net.Conn, expectedData []byte) {
@@ -296,7 +297,7 @@ func TestMeekResiliency(t *testing.T) {
 		t.Fatalf("psiphon.DialMeek failed: %s", err)
 	}
 
-	// Relay data through meek
+	// Relay data through meek while interrupting underlying TCP connections
 
 	clientWaitGroup := new(sync.WaitGroup)
 
@@ -334,7 +335,7 @@ func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) e
 		return err
 	}
 	time.AfterFunc(time.Second*2, func() {
-		syscall.Shutdown(fdDup, 2)
+		syscall.Shutdown(fdDup, syscall.SHUT_RDWR)
 		syscall.Close(fdDup)
 		fmt.Printf("interrupted TCP connection\n")
 	})
