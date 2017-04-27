@@ -252,6 +252,26 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		return
 	}
 
+	// Ensure that there's only one concurrent request handler per client
+	// session. Depending on the nature of a network disruption, it can
+	// happen that a client detects a failure and retries while the server
+	// is still streaming response in the handler for the _previous_ client
+	// request.
+	//
+	// Even if the session.cachedResponse were safe for concurrent
+	// use (it is not), concurrent handling could lead to loss of session
+	// since upstream data read by the first request may not reach the
+	// cached response before the second request reads the cached data.
+	//
+	// The existing handler will stream response data, holding the lock,
+	// for no more than MEEK_EXTENDED_TURN_AROUND_TIMEOUT.
+	//
+	// TODO: interrupt an existing handler? The existing handler will be
+	// sending data to the cached response, but if that buffer fills, the
+	// session will be lost.
+	session.lock.Lock()
+	defer session.lock.Unlock()
+
 	// pumpReads causes a TunnelServer/SSH goroutine blocking on a Read to
 	// read the request body as upstream traffic.
 	// TODO: run pumpReads and pumpWrites concurrently?
@@ -592,6 +612,7 @@ type meekSession struct {
 	// at the start of struct to ensure 64-bit alignment.
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	lastActivity        int64
+	lock                sync.Mutex
 	clientConn          *meekConn
 	meekProtocolVersion int
 	sessionIDSent       bool
