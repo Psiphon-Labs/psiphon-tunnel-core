@@ -689,19 +689,17 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (int64, error) {
 			serverAcknowlegedRequestPayload = true
 
 			readPayloadSize, err := meek.readPayload(response.Body)
-			if err != nil {
-				NoticeAlert("meek read payload failed: %s", err)
-				// ...continue to retry
-			}
 			response.Body.Close()
 
 			// receivedPayloadSize is the number of response
 			// payload bytes received and relayed. A retry can
 			// resume after this position.
-
 			receivedPayloadSize += readPayloadSize
 
-			if err == nil {
+			if err != nil {
+				NoticeAlert("meek read payload failed: %s", err)
+				// ...continue to retry
+			} else {
 				// Round trip completed successfully
 				break
 			}
