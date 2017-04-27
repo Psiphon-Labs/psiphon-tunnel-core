@@ -189,7 +189,7 @@ func TestMeekResiliency(t *testing.T) {
 		fmt.Printf("%s send complete\n", name)
 	}
 
-	recvFunc := func(conn net.Conn, expectedData []byte) {
+	recvFunc := func(name string, conn net.Conn, expectedData []byte) {
 		data := make([]byte, len(expectedData))
 		for received := 0; received < len(data); {
 			readLen := minRead + rand.Intn(maxRead-minRead+1)
@@ -199,12 +199,14 @@ func TestMeekResiliency(t *testing.T) {
 				t.Fatalf("conn.Read failed: %s", err)
 			}
 			received += n
+			fmt.Printf("%s received %d/%d...\n", name, received, len(expectedData))
 			wait := minWait + time.Duration(rand.Int63n(int64(maxWait-minWait)+1))
 			time.Sleep(wait)
 		}
 		if bytes.Compare(data, expectedData) != 0 {
 			t.Fatalf("unexpected data")
 		}
+		fmt.Printf("%s receive complete\n", name)
 	}
 
 	// Run meek server
@@ -235,18 +237,19 @@ func TestMeekResiliency(t *testing.T) {
 
 	serverAddress := listener.Addr().String()
 
-	serverWaitGroup := new(sync.WaitGroup)
+	relayWaitGroup := new(sync.WaitGroup)
 
 	clientHandler := func(conn net.Conn) {
-		serverWaitGroup.Add(1)
+		name := "server"
+		relayWaitGroup.Add(1)
 		go func() {
-			defer serverWaitGroup.Done()
-			sendFunc("server", conn, downstreamData)
+			defer relayWaitGroup.Done()
+			sendFunc(name, conn, downstreamData)
 		}()
-		serverWaitGroup.Add(1)
+		relayWaitGroup.Add(1)
 		go func() {
-			defer serverWaitGroup.Done()
-			recvFunc(conn, upstreamData)
+			defer relayWaitGroup.Done()
+			recvFunc(name, conn, upstreamData)
 		}()
 	}
 
@@ -265,6 +268,8 @@ func TestMeekResiliency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewMeekServer failed: %s", err)
 	}
+
+	serverWaitGroup := new(sync.WaitGroup)
 
 	serverWaitGroup.Add(1)
 	go func() {
@@ -299,25 +304,25 @@ func TestMeekResiliency(t *testing.T) {
 
 	// Relay data through meek while interrupting underlying TCP connections
 
-	clientWaitGroup := new(sync.WaitGroup)
+	name := "client"
 
-	clientWaitGroup.Add(1)
+	relayWaitGroup.Add(1)
 	go func() {
-		defer clientWaitGroup.Done()
-		sendFunc("client", clientConn, upstreamData)
+		defer relayWaitGroup.Done()
+		sendFunc(name, clientConn, upstreamData)
 	}()
 
-	clientWaitGroup.Add(1)
+	relayWaitGroup.Add(1)
 	go func() {
-		defer clientWaitGroup.Done()
-		recvFunc(clientConn, downstreamData)
+		defer relayWaitGroup.Done()
+		recvFunc(name, clientConn, downstreamData)
 	}()
 
-	clientWaitGroup.Wait()
-
-	clientConn.Close()
+	relayWaitGroup.Wait()
 
 	// Graceful shutdown
+
+	clientConn.Close()
 
 	listener.Close()
 	close(stopBroadcast)
