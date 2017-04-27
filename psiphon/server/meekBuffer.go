@@ -144,8 +144,10 @@ func (response *CachedResponse) CopyFromPosition(
 
 		toCopy := min(len(buffer)-index, available)
 
+		available -= toCopy
+
 		if skip > 0 {
-			if toCopy > skip {
+			if toCopy >= skip {
 				index += skip
 				toCopy -= skip
 				skip = 0
@@ -160,8 +162,6 @@ func (response *CachedResponse) CopyFromPosition(
 				return err
 			}
 		}
-
-		available -= toCopy
 
 		index = 0
 		bufferIndex = (bufferIndex + 1) % len(response.buffers)
