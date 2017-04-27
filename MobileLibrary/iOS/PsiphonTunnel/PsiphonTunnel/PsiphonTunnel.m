@@ -234,9 +234,9 @@
         [self logMessage:[NSString stringWithFormat: @"RemoteServerListDownloadFilename overridden from '%@' to '%@'", defaultRemoteServerListFilename, config[@"RemoteServerListDownloadFilename"]]];
     }
     
-    // If RemoteServerListUrl and RemoteServerListSignaturePublicKey are absent,
-    // we'll just leave them out, but we'll log about it.
-    if (config[@"RemoteServerListUrl"] == nil ||
+    // If RemoteServerListUrl/RemoteServerListURLs and RemoteServerListSignaturePublicKey
+    // are absent, we'll just leave them out, but we'll log about it.
+    if ((config[@"RemoteServerListUrl"] == nil && config[@"RemoteServerListURLs"] == nil) ||
         config[@"RemoteServerListSignaturePublicKey"] == nil) {
         [self logMessage:@"Remote server list functionality will be disabled"];
     }
@@ -264,9 +264,27 @@
         [self logMessage:[NSString stringWithFormat: @"ObfuscatedServerListDownloadDirectory overridden from '%@' to '%@'", [defaultOSLDirectoryURL path], config[@"ObfuscatedServerListDownloadDirectory"]]];
     }
     
-    // If ObfuscatedServerListRootURL is absent, we'll leave it out, but log the absence.
-    if (config[@"ObfuscatedServerListRootURL"] == nil) {
+    // If ObfuscatedServerListRootURL/ObfuscatedServerListRootURLs is absent,
+    // we'll leave it out, but log the absence.
+    if (config[@"ObfuscatedServerListRootURL"] == nil && config[@"ObfuscatedServerListRootURLs"] == nil) {
         [self logMessage:@"Obfuscated server list functionality will be disabled"];
+    }
+
+    //
+    // Upgrade Download Filename
+    //
+
+    NSString *defaultUpgradeDownloadFilename = [[libraryURL URLByAppendingPathComponent:@"upgrade_download_file" isDirectory:NO] path];
+    if (defaultUpgradeDownloadFilename == nil) {
+        [self logMessage:@"Unable to create defaultUpgradeDownloadFilename"];
+        return nil;
+    }
+
+    if (config[@"UpgradeDownloadFilename"] == nil) {
+        config[@"UpgradeDownloadFilename"] = defaultUpgradeDownloadFilename;
+    }
+    else {
+        [self logMessage:[NSString stringWithFormat: @"UpgradeDownloadFilename overridden from '%@' to '%@'", defaultUpgradeDownloadFilename, config[@"UpgradeDownloadFilename"]]];
     }
 
     // Other optional fields not being altered. If not set, their defaults will be used:
@@ -277,9 +295,8 @@
     // * UpstreamProxyUrl
     // * EmitDiagnosticNotices
     // * EgressRegion
-    // * UpgradeDownloadUrl
+    // * UpgradeDownloadUrl/UpgradeDownloadURLs
     // * UpgradeDownloadClientVersionHeader
-    // * UpgradeDownloadFilename
     // * timeout fields
     
     //

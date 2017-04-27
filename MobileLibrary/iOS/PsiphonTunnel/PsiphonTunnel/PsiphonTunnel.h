@@ -53,10 +53,11 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  - `PropagationChannelId`
  - `SponsorId`
  - Remote server list functionality is not strictly required, but absence greatly undermines circumvention ability.
-   - `RemoteServerListUrl`
+   - `RemoteServerListURLs`
    - `RemoteServerListSignaturePublicKey`
  - Obfuscated server list functionality is also not strictly required, but aids circumvention ability.
-   - `ObfuscatedServerListRootURL`
+   - `ObfuscatedServerListRootURLs`
+   - `RemoteServerListSignaturePublicKey`: This is the same field as above. It is required if either `RemoteServerListURLs` or `ObfuscatedServerListRootURLs` is supplied.
 
  Optional fields (if you don't need them, don't set them):
  - `DataStoreDirectory`: If not set, the library will use a sane location. Override if the client wants to restrict where operational data is kept. If overridden, the directory must already exist and be writable.
@@ -67,9 +68,9 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  - `EgressRegion`
  - `EstablishTunnelTimeoutSeconds`
  - Should only be set if the Psiphon library is handling upgrade downloading (which it usually is _not_):
-   - `UpgradeDownloadUrl`
+   - `UpgradeDownloadURLs`
    - `UpgradeDownloadClientVersionHeader`
-   - `UpgradeDownloadFilename`
+   - `UpgradeDownloadFilename`: Will be set to a sane default if not supplied.
  - Only set if disabling timeouts (for very slow network connections):
    - `TunnelConnectTimeoutSeconds`
    - `TunnelPortForwardDialTimeoutSeconds`
@@ -83,7 +84,6 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
    - `LocalHttpProxyPort`
    - `LocalSocksProxyPort`
    - `TunnelWholeDevice`: For stats purposes, but must be accurate. Defaults to 0 (false).
-
  @endcode
 
  @note All other config fields must not be set.
