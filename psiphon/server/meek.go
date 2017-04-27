@@ -269,8 +269,19 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	// TODO: interrupt an existing handler? The existing handler will be
 	// sending data to the cached response, but if that buffer fills, the
 	// session will be lost.
+
+	requestNumber := atomic.AddInt32(&session.requestCount, 1)
+
+	// Wait for the existing request to complete.
 	session.lock.Lock()
 	defer session.lock.Unlock()
+
+	// If a newer request has arrived while waiting, discard this one.
+	// Do not delay processing the newest request.
+	if atomic.LoadInt32(&session.requestCount) > requestNumber {
+		server.terminateConnection(responseWriter, request)
+		return
+	}
 
 	// pumpReads causes a TunnelServer/SSH goroutine blocking on a Read to
 	// read the request body as upstream traffic.
@@ -612,6 +623,7 @@ type meekSession struct {
 	// at the start of struct to ensure 64-bit alignment.
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	lastActivity        int64
+	requestCount        int32
 	lock                sync.Mutex
 	clientConn          *meekConn
 	meekProtocolVersion int
@@ -940,7 +952,6 @@ func (conn *meekConn) pumpWrites(writer io.Writer) error {
 		select {
 		case buffer := <-conn.nextWriteBuffer:
 			_, err := writer.Write(buffer)
-
 			// Assumes that writeResult won't block.
 			// Note: always send the err to writeResult,
 			// as the Write() caller is blocking on this.
