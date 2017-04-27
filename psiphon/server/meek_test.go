@@ -62,6 +62,8 @@ func TestCachedResponse(t *testing.T) {
 
 		{1, 31, 15, 3, 5, 1, 1, 1, true},
 
+		{1, 16, 16, 0, 0, 1, 1, 16, true},
+
 		{1, 10 * MB, 64 * KB, 64 * KB, 158, 1, 32 * KB, 0, false},
 
 		{1, 10 * MB, 64 * KB, 64 * KB, 159, 1, 32 * KB, 0, true},

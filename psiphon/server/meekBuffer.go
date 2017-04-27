@@ -102,6 +102,8 @@ func (response *CachedResponse) HasPosition(position int) bool {
 // the specified position, to writer. Any data before the
 // position is skipped. CopyFromPosition will return an error
 // if the specified position is not available.
+// CopyFromPosition will copy no data and return no error if
+// the position is at the end of its available data.
 // CopyFromPosition can be called repeatedly to read the
 // same data -- it does not advance or modify the CachedResponse.
 func (response *CachedResponse) CopyFromPosition(
@@ -109,6 +111,11 @@ func (response *CachedResponse) CopyFromPosition(
 
 	if response.readAvailable > 0 && response.readPosition > position {
 		return errors.New("position unavailable")
+	}
+
+	// Special case: position is end of available data
+	if position == response.readPosition+response.readAvailable {
+		return nil
 	}
 
 	// Begin at the start of the response data, which may
