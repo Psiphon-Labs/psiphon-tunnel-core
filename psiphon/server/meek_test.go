@@ -116,9 +116,7 @@ func TestCachedResponse(t *testing.T) {
 							}
 
 							offset := len(responseData) - remainingSize
-
 							response.Write(responseData[offset : offset+writeSize])
-
 							remainingSize -= writeSize
 						}
 					}(response)
@@ -135,13 +133,10 @@ func TestCachedResponse(t *testing.T) {
 					err := response.CopyFromPosition(testCase.copyPosition, cachedResponseData)
 
 					if testCase.expectedSuccess {
-
 						if err != nil {
 							t.Fatalf("CopyFromPosition unexpectedly failed for response %d: %s", i, err)
 						}
-
 						if bytes.Compare(responseData[testCase.copyPosition:], cachedResponseData.Bytes()) != 0 {
-
 							t.Fatalf("cached response data mismatch for response %d", i)
 						}
 					} else {
@@ -175,6 +170,8 @@ func TestMeekResiliency(t *testing.T) {
 
 	sendFunc := func(name string, conn net.Conn, data []byte) {
 		for sent := 0; sent < len(data); {
+			wait := minWait + time.Duration(rand.Int63n(int64(maxWait-minWait)+1))
+			time.Sleep(wait)
 			writeLen := minWrite + rand.Intn(maxWrite-minWrite+1)
 			writeLen = min(writeLen, len(data)-sent)
 			_, err := conn.Write(data[sent : sent+writeLen])
@@ -183,8 +180,6 @@ func TestMeekResiliency(t *testing.T) {
 			}
 			sent += writeLen
 			fmt.Printf("%s sent %d/%d...\n", name, sent, len(data))
-			wait := minWait + time.Duration(rand.Int63n(int64(maxWait-minWait)+1))
-			time.Sleep(wait)
 		}
 		fmt.Printf("%s send complete\n", name)
 	}
@@ -192,6 +187,8 @@ func TestMeekResiliency(t *testing.T) {
 	recvFunc := func(name string, conn net.Conn, expectedData []byte) {
 		data := make([]byte, len(expectedData))
 		for received := 0; received < len(data); {
+			wait := minWait + time.Duration(rand.Int63n(int64(maxWait-minWait)+1))
+			time.Sleep(wait)
 			readLen := minRead + rand.Intn(maxRead-minRead+1)
 			readLen = min(readLen, len(data)-received)
 			n, err := conn.Read(data[received : received+readLen])
@@ -199,12 +196,19 @@ func TestMeekResiliency(t *testing.T) {
 				t.Fatalf("conn.Read failed: %s", err)
 			}
 			received += n
+			if bytes.Compare(data[0:received], expectedData[0:received]) != 0 {
+				fmt.Printf("%s data check has failed...\n", name)
+				additionalInfo := ""
+				index := bytes.Index(expectedData, data[received-n:received])
+				if index != -1 {
+					// Helpful for debugging missing or repeated data...
+					additionalInfo = fmt.Sprintf(
+						" (last read of %d appears at %d)", n, index)
+				}
+				t.Fatalf("%s got unexpected data with %d/%d%s",
+					name, received, len(expectedData), additionalInfo)
+			}
 			fmt.Printf("%s received %d/%d...\n", name, received, len(expectedData))
-			wait := minWait + time.Duration(rand.Int63n(int64(maxWait-minWait)+1))
-			time.Sleep(wait)
-		}
-		if bytes.Compare(data, expectedData) != 0 {
-			t.Fatalf("unexpected data")
 		}
 		fmt.Printf("%s receive complete\n", name)
 	}
@@ -339,7 +343,7 @@ func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) e
 	if err != nil {
 		return err
 	}
-	time.AfterFunc(time.Second*2, func() {
+	time.AfterFunc(1*time.Second, func() {
 		syscall.Shutdown(fdDup, syscall.SHUT_RDWR)
 		syscall.Close(fdDup)
 		fmt.Printf("interrupted TCP connection\n")
