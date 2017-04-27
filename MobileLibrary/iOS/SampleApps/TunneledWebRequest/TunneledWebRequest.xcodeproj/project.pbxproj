@@ -16,6 +16,7 @@
 		6626590E1DCB8CF400872F6C /* TunneledWebRequestUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6626590D1DCB8CF400872F6C /* TunneledWebRequestUITests.swift */; };
 		662659211DCBC7C300872F6C /* PsiphonTunnel.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 662659201DCBC7C300872F6C /* PsiphonTunnel.framework */; };
 		662659231DCBC8D800872F6C /* PsiphonTunnel.framework in CopyFiles */ = {isa = PBXBuildFile; fileRef = 662659201DCBC7C300872F6C /* PsiphonTunnel.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		6682D90E1EB1334000329958 /* psiphon-embedded-server-entries.txt in Resources */ = {isa = PBXBuildFile; fileRef = 6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */; };
 		6688DBB61DCD684B00721A9E /* psiphon-config.json in Resources */ = {isa = PBXBuildFile; fileRef = 6688DBB51DCD684B00721A9E /* psiphon-config.json */; };
 /* End PBXBuildFile section */
 
@@ -64,6 +65,7 @@
 		6626590D1DCB8CF400872F6C /* TunneledWebRequestUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunneledWebRequestUITests.swift; sourceTree = "<group>"; };
 		6626590F1DCB8CF400872F6C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		662659201DCBC7C300872F6C /* PsiphonTunnel.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = PsiphonTunnel.framework; sourceTree = "<group>"; };
+		6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "psiphon-embedded-server-entries.txt"; sourceTree = "<group>"; };
 		6688DBB51DCD684B00721A9E /* psiphon-config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = "psiphon-config.json"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -123,6 +125,7 @@
 				662658F61DCB8CF300872F6C /* LaunchScreen.storyboard */,
 				662658F91DCB8CF300872F6C /* Info.plist */,
 				6688DBB51DCD684B00721A9E /* psiphon-config.json */,
+				6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */,
 				662659201DCBC7C300872F6C /* PsiphonTunnel.framework */,
 			);
 			path = TunneledWebRequest;
@@ -260,6 +263,7 @@
 			files = (
 				662658F81DCB8CF300872F6C /* LaunchScreen.storyboard in Resources */,
 				662658F51DCB8CF300872F6C /* Assets.xcassets in Resources */,
+				6682D90E1EB1334000329958 /* psiphon-embedded-server-entries.txt in Resources */,
 				662658F31DCB8CF300872F6C /* Main.storyboard in Resources */,
 				6688DBB61DCD684B00721A9E /* psiphon-config.json in Resources */,
 			);

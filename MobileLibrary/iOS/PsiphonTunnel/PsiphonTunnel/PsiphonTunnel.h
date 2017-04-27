@@ -57,6 +57,7 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
    - `RemoteServerListSignaturePublicKey`
  - Obfuscated server list functionality is also not strictly required, but aids circumvention ability.
    - `ObfuscatedServerListRootURLs`
+   - `RemoteServerListSignaturePublicKey`: This is the same field as above. It is required if either `RemoteServerListURLs` or `ObfuscatedServerListRootURLs` is supplied.
 
  Optional fields (if you don't need them, don't set them):
  - `DataStoreDirectory`: If not set, the library will use a sane location. Override if the client wants to restrict where operational data is kept. If overridden, the directory must already exist and be writable.

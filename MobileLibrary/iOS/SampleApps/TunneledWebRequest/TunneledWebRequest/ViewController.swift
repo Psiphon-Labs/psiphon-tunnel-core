@@ -37,7 +37,12 @@ class ViewController: UIViewController {
         // Start up the tunnel and begin connecting.
         // This could be started elsewhere or earlier.
         NSLog("Starting tunnel")
-        let embeddedServerEntries = ""
+
+        guard let embeddedServerEntries = getEmbeddedServerEntries() else {
+            NSLog("getEmbeddedServerEntries failed!")
+            return
+        }
+
         guard let success = self.psiphonTunnel?.start(embeddedServerEntries), success else {
             NSLog("psiphonTunnel.start returned false")
             return
@@ -62,6 +67,22 @@ class ViewController: UIViewController {
         let escapedText = text.replacingOccurrences(of: "\n", with: "\\n")
                               .replacingOccurrences(of: "\r", with: "")
         self.webView.stringByEvaluatingJavaScript(from: String.init(format: "document.body.innerHTML+='<br><pre>%@</pre><br>'", arguments: [escapedText]))
+    }
+
+    /// Read the Psiphon embedded server entries resource file and return the contents.
+    /// * returns: The string of the contents of the file.
+    func getEmbeddedServerEntries() -> String? {
+        guard let psiphonEmbeddedServerEntriesUrl = Bundle.main.url(forResource: "psiphon-embedded-server-entries", withExtension: "txt") else {
+            NSLog("Error getting Psiphon embedded server entries resource file URL!")
+            return nil
+        }
+
+        do {
+            return try String.init(contentsOf: psiphonEmbeddedServerEntriesUrl)
+        } catch {
+            NSLog("Error reading Psiphon embedded server entries resource file!")
+            return nil
+        }
     }
     
     /// Request URL using URLSession configured to use the current proxy.
@@ -209,7 +230,7 @@ extension ViewController: TunneledAppDelegate {
         do {
             return try String.init(contentsOf: psiphonConfigUrl)
         } catch {
-            NSLog("Error getting Psiphon config resource file URL!")
+            NSLog("Error reading Psiphon config resource file!")
             return nil
         }
     }
