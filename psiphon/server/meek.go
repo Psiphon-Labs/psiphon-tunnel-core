@@ -72,7 +72,7 @@ const (
 	MEEK_MAX_SESSION_ID_LENGTH          = 20
 	MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH = 65536
 	MEEK_DEFAULT_POOL_BUFFER_LENGTH     = 65536
-	MEEK_DEFAULT_POOL_BUFFER_COUNT      = 2048
+	MEEK_DEFAULT_POOL_BUFFER_COUNT      = 1024
 )
 
 // MeekServer implements the meek protocol, which tunnels TCP traffic (in the case of Psiphon,
@@ -109,10 +109,17 @@ func NewMeekServer(
 
 	checksumTable := crc64.MakeTable(crc64.ECMA)
 
-	// TODO: configurable buffer parameters
-	bufferPool := NewCachedResponseBufferPool(
-		MEEK_DEFAULT_POOL_BUFFER_LENGTH,
-		MEEK_DEFAULT_POOL_BUFFER_COUNT)
+	bufferLength := MEEK_DEFAULT_POOL_BUFFER_LENGTH
+	if support.Config.MeekCachedResponsePoolBufferSize != 0 {
+		bufferLength = support.Config.MeekCachedResponsePoolBufferSize
+	}
+
+	bufferCount := MEEK_DEFAULT_POOL_BUFFER_COUNT
+	if support.Config.MeekCachedResponsePoolBufferCount != 0 {
+		bufferCount = support.Config.MeekCachedResponsePoolBufferCount
+	}
+
+	bufferPool := NewCachedResponseBufferPool(bufferLength, bufferCount)
 
 	meekServer := &MeekServer{
 		support:       support,
@@ -518,9 +525,12 @@ func (server *MeekServer) getSession(
 		},
 		clientSessionData.MeekProtocolVersion)
 
-	// TODO: configurable buffer parameters
-	cachedResponse := NewCachedResponse(
-		MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH, server.bufferPool)
+	bufferLength := MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH
+	if server.support.Config.MeekCachedResponseBufferSize != 0 {
+		bufferLength = server.support.Config.MeekCachedResponseBufferSize
+	}
+
+	cachedResponse := NewCachedResponse(bufferLength, server.bufferPool)
 
 	session = &meekSession{
 		clientConn:          clientConn,
