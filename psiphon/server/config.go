@@ -205,7 +205,7 @@ type Config struct {
 	// buffers. Shared buffers are allocated on first use and remain
 	// allocated, so shared buffer count * size is roughly the memory
 	// overhead of this facility.
-	// A default of 1024 is used when MeekCachedResponsePoolBufferCount
+	// A default of 2048 is used when MeekCachedResponsePoolBufferCount
 	// is 0.
 	MeekCachedResponsePoolBufferCount int
 
