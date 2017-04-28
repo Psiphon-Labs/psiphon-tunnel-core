@@ -247,7 +247,7 @@ func TestMeekResiliency(t *testing.T) {
 
 	relayWaitGroup := new(sync.WaitGroup)
 
-	clientHandler := func(conn net.Conn) {
+	clientHandler := func(_ string, conn net.Conn) {
 		name := "server"
 		relayWaitGroup.Add(1)
 		go func() {

@@ -20,6 +20,7 @@
 package protocol
 
 import (
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 )
 
@@ -96,6 +97,26 @@ func TunnelProtocolUsesObfuscatedSessionTickets(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
 }
 
+func UseClientTunnelProtocol(
+	clientProtocol string,
+	serverProtocols []string) bool {
+
+	// When the server is running _both_ fronted HTTP and
+	// fronted HTTPS, use the client's reported tunnel
+	// protocol since some CDNs forward both to the same
+	// server port; in this case the server port is not
+	// sufficient to distinguish these protocols.
+	if (clientProtocol == TUNNEL_PROTOCOL_FRONTED_MEEK ||
+		clientProtocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP) &&
+		common.Contains(serverProtocols, TUNNEL_PROTOCOL_FRONTED_MEEK) &&
+		common.Contains(serverProtocols, TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP) {
+
+		return true
+	}
+
+	return false
+}
+
 type HandshakeResponse struct {
 	SSHSessionID         string              `json:"ssh_session_id"`
 	Homepages            []string            `json:"homepages"`
@@ -120,4 +141,11 @@ type SSHPasswordPayload struct {
 	SessionId          string   `json:"SessionId"`
 	SshPassword        string   `json:"SshPassword"`
 	ClientCapabilities []string `json:"ClientCapabilities"`
+}
+
+type MeekCookieData struct {
+	ServerAddress        string `json:"p"`
+	SessionID            string `json:"s"`
+	MeekProtocolVersion  int    `json:"v"`
+	ClientTunnelProtocol string `json:"t"`
 }

@@ -40,6 +40,7 @@ import (
 	"github.com/Psiphon-Inc/crypto/nacl/box"
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
 )
 
@@ -90,7 +91,7 @@ type MeekServer struct {
 	support       *SupportServices
 	listener      net.Listener
 	tlsConfig     *tls.Config
-	clientHandler func(clientConn net.Conn)
+	clientHandler func(clientTunnelProtocol string, clientConn net.Conn)
 	openConns     *common.Conns
 	stopBroadcast <-chan struct{}
 	sessionsLock  sync.RWMutex
@@ -104,7 +105,7 @@ func NewMeekServer(
 	support *SupportServices,
 	listener net.Listener,
 	useTLS, useObfuscatedSessionTickets bool,
-	clientHandler func(clientConn net.Conn),
+	clientHandler func(clientTunnelProtocol string, clientConn net.Conn),
 	stopBroadcast <-chan struct{}) (*MeekServer, error) {
 
 	checksumTable := crc64.MakeTable(crc64.ECMA)
@@ -471,13 +472,9 @@ func (server *MeekServer) getSession(
 		return "", nil, common.ContextError(err)
 	}
 
-	// Note: this meek server ignores all but Version MeekProtocolVersion;
-	// the other values are legacy or currently unused.
-	var clientSessionData struct {
-		MeekProtocolVersion    int    `json:"v"`
-		PsiphonClientSessionId string `json:"s"`
-		PsiphonServerAddress   string `json:"p"`
-	}
+	// Note: this meek server ignores legacy values PsiphonClientSessionId
+	// and PsiphonServerAddress.
+	var clientSessionData protocol.MeekCookieData
 
 	err = json.Unmarshal(payloadJSON, &clientSessionData)
 	if err != nil {
@@ -561,7 +558,7 @@ func (server *MeekServer) getSession(
 
 	// Note: from the tunnel server's perspective, this client connection
 	// will close when closeSessionHelper calls Close() on the meekConn.
-	server.clientHandler(session.clientConn)
+	server.clientHandler(clientSessionData.ClientTunnelProtocol, session.clientConn)
 
 	return sessionID, session, nil
 }

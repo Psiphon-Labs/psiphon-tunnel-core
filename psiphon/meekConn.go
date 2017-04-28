@@ -38,6 +38,7 @@ import (
 	"github.com/Psiphon-Inc/crypto/nacl/box"
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 )
 
@@ -98,6 +99,12 @@ type MeekConfig struct {
 	// TransformedHostName records whether a hostname transformation is
 	// in effect. This value is used for stats reporting.
 	TransformedHostName bool
+
+	// ClientTunnelProtocol is the protocol the client is using. It's
+	// included in the meek cookie for optional use by the server, in
+	// cases where the server cannot unambiguously determine the
+	// tunnel protocol.
+	ClientTunnelProtocol string
 
 	// The following values are used to create the obfuscated meek cookie.
 
@@ -775,12 +782,6 @@ func (meek *MeekConn) readPayload(
 	return totalSize, nil
 }
 
-type meekCookieData struct {
-	ServerAddress       string `json:"p"`
-	SessionID           string `json:"s"`
-	MeekProtocolVersion int    `json:"v"`
-}
-
 // makeCookie creates the cookie to be sent with initial meek HTTP request.
 // The purpose of the cookie is to send the following to the server:
 //   ServerAddress -- the Psiphon Server address the meek server should relay to
@@ -797,7 +798,7 @@ func makeMeekCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
 
 	// Make the JSON data
 	serverAddress := meekConfig.PsiphonServerAddress
-	cookieData := &meekCookieData{
+	cookieData := &protocol.MeekCookieData{
 		ServerAddress:       serverAddress,
 		SessionID:           meekConfig.SessionID,
 		MeekProtocolVersion: MEEK_PROTOCOL_VERSION,

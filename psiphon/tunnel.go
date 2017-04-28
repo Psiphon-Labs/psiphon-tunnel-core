@@ -570,6 +570,7 @@ func initMeekConfig(
 		TransformedHostName:           transformedHostName,
 		PsiphonServerAddress:          psiphonServerAddress,
 		SessionID:                     sessionId,
+		ClientTunnelProtocol:          selectedProtocol,
 		MeekCookieEncryptionPublicKey: serverEntry.MeekCookieEncryptionPublicKey,
 		MeekObfuscatedKey:             serverEntry.MeekObfuscatedKey,
 	}, nil

@@ -322,9 +322,14 @@ func (sshServer *sshServer) getEstablishTunnels() bool {
 func (sshServer *sshServer) runListener(
 	listener net.Listener,
 	listenerError chan<- error,
-	tunnelProtocol string) {
+	listenerTunnelProtocol string) {
 
-	handleClient := func(clientConn net.Conn) {
+	runningProtocols := make([]string, 0)
+	for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
+		runningProtocols = append(runningProtocols, tunnelProtocol)
+	}
+
+	handleClient := func(clientTunnelProtocol string, clientConn net.Conn) {
 
 		// Note: establish tunnel limiter cannot simply stop TCP
 		// listeners in all cases (e.g., meek) since SSH tunnel can
@@ -336,6 +341,19 @@ func (sshServer *sshServer) runListener(
 			return
 		}
 
+		// The tunnelProtocol passed to handleClient is used for stats,
+		// throttling, etc. When the tunnel protocol can be determined
+		// unambiguously from the listening port, use that protocol and
+		// don't use any client-declared value. Only use the client's
+		// value, if present, in special cases where the listenting port
+		// cannot distinguish the protocol.
+		tunnelProtocol := listenerTunnelProtocol
+		if clientTunnelProtocol != "" &&
+			protocol.UseClientTunnelProtocol(
+				clientTunnelProtocol, runningProtocols) {
+			tunnelProtocol = clientTunnelProtocol
+		}
+
 		// process each client connection concurrently
 		go sshServer.handleClient(tunnelProtocol, clientConn)
 	}
@@ -345,14 +363,14 @@ func (sshServer *sshServer) runListener(
 	// TunnelServer.Run will properly shut down instead of remaining
 	// running.
 
-	if protocol.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
-		protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTP(listenerTunnelProtocol) ||
+		protocol.TunnelProtocolUsesMeekHTTPS(listenerTunnelProtocol) {
 
 		meekServer, err := NewMeekServer(
 			sshServer.support,
 			listener,
-			protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol),
-			protocol.TunnelProtocolUsesObfuscatedSessionTickets(tunnelProtocol),
+			protocol.TunnelProtocolUsesMeekHTTPS(listenerTunnelProtocol),
+			protocol.TunnelProtocolUsesObfuscatedSessionTickets(listenerTunnelProtocol),
 			handleClient,
 			sshServer.shutdownBroadcast)
 		if err != nil {
@@ -393,7 +411,7 @@ func (sshServer *sshServer) runListener(
 				return
 			}
 
-			handleClient(conn)
+			handleClient("", conn)
 		}
 	}
 }
