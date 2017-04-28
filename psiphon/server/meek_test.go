@@ -162,10 +162,10 @@ func TestCachedResponse(t *testing.T) {
 
 func TestMeekResiliency(t *testing.T) {
 
-	upstreamData := make([]byte, 10*MB)
+	upstreamData := make([]byte, 5*MB)
 	_, _ = rand.Read(upstreamData)
 
-	downstreamData := make([]byte, 10*MB)
+	downstreamData := make([]byte, 5*MB)
 	_, _ = rand.Read(downstreamData)
 
 	minWrite, maxWrite := 1, 128*KB
@@ -347,7 +347,10 @@ func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) e
 	if err != nil {
 		return err
 	}
-	time.AfterFunc(1*time.Second, func() {
+	minAfter := 500 * time.Millisecond
+	maxAfter := 1 * time.Second
+	after := minAfter + time.Duration(rand.Int63n(int64(maxAfter-minAfter)+1))
+	time.AfterFunc(after, func() {
 		syscall.Shutdown(fdDup, syscall.SHUT_RDWR)
 		syscall.Close(fdDup)
 		fmt.Printf("interrupted TCP connection\n")
