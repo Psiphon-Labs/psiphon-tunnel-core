@@ -1207,6 +1207,13 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 		tunnelDuration := tunnel.conn.GetLastActivityMonotime().Sub(tunnel.establishedTime)
 
+		// tunnelDuration can be < 0 when tunnel.establishedTime is recorded after the
+		// last tunnel.conn.Read() succeeds. In that case, the last read would be the
+		// handshake response, so the tunnel had, essentially, no duration.
+		if tunnelDuration < 0 {
+			tunnelDuration = 0
+		}
+
 		err := RecordTunnelStat(
 			tunnel.serverContext.sessionId,
 			tunnel.serverContext.tunnelNumber,
