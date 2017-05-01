@@ -50,7 +50,7 @@ import (
 // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/default/go/meek-client/meek-client.go
 
 const (
-	MEEK_PROTOCOL_VERSION          = 2
+	MEEK_PROTOCOL_VERSION          = 3
 	MEEK_COOKIE_MAX_PADDING        = 32
 	MAX_SEND_PAYLOAD_LENGTH        = 65536
 	FULL_RECEIVE_BUFFER_LENGTH     = 4194304

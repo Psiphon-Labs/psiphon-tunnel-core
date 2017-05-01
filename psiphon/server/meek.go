@@ -57,12 +57,16 @@ const (
 	// report no version number and expect at most 64K response bodies.
 	MEEK_PROTOCOL_VERSION_1 = 1
 
-	// Protocol version 2 clients initiate a session by sending a encrypted and obfuscated meek
+	// Protocol version 2 clients initiate a session by sending an encrypted and obfuscated meek
 	// cookie with their initial HTTP request. Connection information is contained within the
 	// encrypted cookie payload. The server inspects the cookie and establishes a new session and
 	// returns a new random session ID back to client via Set-Cookie header. The client uses this
 	// session ID on all subsequent requests for the remainder of the session.
 	MEEK_PROTOCOL_VERSION_2 = 2
+
+	// Protocol version 3 clients include resiliency enhancements and will add a Range header
+	// when retrying a request for a partially downloaded response payload.
+	MEEK_PROTOCOL_VERSION_3 = 3
 
 	MEEK_MAX_REQUEST_PAYLOAD_LENGTH     = 65536
 	MEEK_TURN_AROUND_TIMEOUT            = 20 * time.Millisecond
