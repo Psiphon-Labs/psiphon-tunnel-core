@@ -84,11 +84,9 @@ func (response *CachedResponse) Reset() {
 	response.overwriting = false
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+// Available returns the size of the buffered response data.
+func (response *CachedResponse) Available() int {
+	return response.readAvailable
 }
 
 // HasPosition checks if the CachedResponse has buffered
@@ -107,15 +105,15 @@ func (response *CachedResponse) HasPosition(position int) bool {
 // CopyFromPosition can be called repeatedly to read the
 // same data -- it does not advance or modify the CachedResponse.
 func (response *CachedResponse) CopyFromPosition(
-	position int, writer io.Writer) error {
+	position int, writer io.Writer) (int, error) {
 
 	if response.readAvailable > 0 && response.readPosition > position {
-		return errors.New("position unavailable")
+		return 0, errors.New("position unavailable")
 	}
 
 	// Special case: position is end of available data
 	if position == response.readPosition+response.readAvailable {
-		return nil
+		return 0, nil
 	}
 
 	// Begin at the start of the response data, which may
@@ -134,6 +132,8 @@ func (response *CachedResponse) CopyFromPosition(
 
 	// Iterate over all available data, skipping until at the
 	// requested position.
+
+	n := 0
 
 	skip := position - response.readPosition
 	available := response.readAvailable
@@ -157,9 +157,10 @@ func (response *CachedResponse) CopyFromPosition(
 		}
 
 		if skip == 0 {
-			_, err := writer.Write(buffer[index : index+toCopy])
+			written, err := writer.Write(buffer[index : index+toCopy])
+			n += written
 			if err != nil {
-				return err
+				return n, err
 			}
 		}
 
@@ -167,7 +168,7 @@ func (response *CachedResponse) CopyFromPosition(
 		bufferIndex = (bufferIndex + 1) % len(response.buffers)
 	}
 
-	return nil
+	return n, nil
 }
 
 // Write appends data to the CachedResponse. All writes will

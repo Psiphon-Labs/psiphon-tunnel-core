@@ -790,6 +790,9 @@ func newSshClient(
 
 func (sshClient *sshClient) run(clientConn net.Conn) {
 
+	// Some conns report additional metrics
+	metricsSource, isMetricsSource := clientConn.(MetricsSource)
+
 	// Set initial traffic rules, pre-handshake, based on currently known info.
 	sshClient.setTrafficRules()
 
@@ -910,7 +913,11 @@ func (sshClient *sshClient) run(clientConn net.Conn) {
 
 	sshClient.sshServer.unregisterEstablishedClient(sshClient)
 
-	sshClient.logTunnel()
+	var additionalMetrics LogFields
+	if isMetricsSource {
+		additionalMetrics = metricsSource.GetMetrics()
+	}
+	sshClient.logTunnel(additionalMetrics)
 
 	// Transfer OSL seed state -- the OSL progress -- from the closing
 	// client to the session cache so the client can resume its progress
@@ -1330,7 +1337,7 @@ func (sshClient *sshClient) runTunnel(
 	waitGroup.Wait()
 }
 
-func (sshClient *sshClient) logTunnel() {
+func (sshClient *sshClient) logTunnel(additionalMetrics LogFields) {
 
 	// Note: reporting duration based on last confirmed data transfer, which
 	// is reads for sshClient.activityConn.GetActiveDuration(), and not
@@ -1363,6 +1370,16 @@ func (sshClient *sshClient) logTunnel() {
 	// sshClient.udpTrafficState.peakConcurrentDialingPortForwardCount isn't meaningful
 	logFields["peak_concurrent_port_forward_count_udp"] = sshClient.udpTrafficState.peakConcurrentPortForwardCount
 	logFields["total_port_forward_count_udp"] = sshClient.udpTrafficState.totalPortForwardCount
+
+	// Merge in additional metrics from the optional metrics source
+	if additionalMetrics != nil {
+		for name, value := range additionalMetrics {
+			// Don't overwrite any basic fields
+			if logFields[name] == nil {
+				logFields[name] = value
+			}
+		}
+	}
 
 	sshClient.Unlock()
 
