@@ -140,7 +140,7 @@ func TestCachedResponse(t *testing.T) {
 						if err != nil {
 							t.Fatalf("CopyFromPosition unexpectedly failed for response %d: %s", i, err)
 						}
-						if n != cachedResponseData.Len() || n != response.Available() {
+						if n != cachedResponseData.Len() || n > response.Available() {
 							t.Fatalf("cached response size mismatch for response %d", i)
 						}
 						if bytes.Compare(responseData[testCase.copyPosition:], cachedResponseData.Bytes()) != 0 {
