@@ -727,22 +727,21 @@ func dialSsh(
 
 		// For some direct connect servers, DialPluginProtocol
 		// will layer on another obfuscation protocol.
+
+		// Use a copy of DialConfig without pendingConns; the
+		// DialPluginProtocol must supply and manage its own
+		// for its base network connections.
+		pluginDialConfig := new(DialConfig)
+		*pluginDialConfig = *dialConfig
+		pluginDialConfig.PendingConns = nil
+
 		var dialedPlugin bool
 		dialedPlugin, dialConn, err = DialPluginProtocol(
 			config,
 			NewNoticeWriter("DialPluginProtocol"),
 			pendingConns,
-			func(_, addr string) (net.Conn, error) {
-
-				// Use a copy of DialConfig without pendingConns
-				// TODO: distinct pendingConns for plugins?
-				pluginDialConfig := new(DialConfig)
-				*pluginDialConfig = *dialConfig
-				pluginDialConfig.PendingConns = nil
-
-				return DialTCP(addr, pluginDialConfig)
-			},
-			directTCPDialAddress)
+			directTCPDialAddress,
+			dialConfig)
 
 		if !dialedPlugin && err != nil {
 			NoticeInfo("DialPluginProtocol intialization failed: %s", err)
