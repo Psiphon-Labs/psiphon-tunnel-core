@@ -90,7 +90,7 @@ func RunWebServer(
 	// https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts
 
 	server := &HTTPSServer{
-		http.Server{
+		&http.Server{
 			MaxHeaderBytes: MAX_API_PARAMS_SIZE,
 			Handler:        serveMux,
 			ReadTimeout:    WEB_SERVER_IO_TIMEOUT,

@@ -171,21 +171,13 @@ func (mux *udpPortForwardMultiplexer) run() {
 
 			// Note: UDP port forward counting has no dialing phase
 
-			mux.sshClient.establishedPortForward(portForwardTypeUDP)
+			// establishedPortForward increments the concurrent UDP port
+			// forward counter and closes the LRU existing UDP port forward
+			// when already at the limit.
+
+			mux.sshClient.establishedPortForward(portForwardTypeUDP, mux.portForwardLRU)
 			// Can't defer sshClient.closedPortForward() here;
 			// relayDownstream will call sshClient.closedPortForward()
-
-			// TOCTOU note: important to increment the port forward count (via
-			// openPortForward) _before_ checking isPortForwardLimitExceeded
-			if exceeded := mux.sshClient.isPortForwardLimitExceeded(portForwardTypeUDP); exceeded {
-
-				// Close the oldest UDP port forward. CloseOldest() closes
-				// the conn and the port forward's goroutine will complete
-				// the cleanup asynchronously.
-				mux.portForwardLRU.CloseOldest()
-
-				log.WithContext().Debug("closed LRU UDP port forward")
-			}
 
 			log.WithContextFields(
 				LogFields{

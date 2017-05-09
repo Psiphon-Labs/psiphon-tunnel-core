@@ -34,7 +34,7 @@ func TestMakeRandomPeriod(t *testing.T) {
 	res1, err := MakeRandomPeriod(min, max)
 
 	if err != nil {
-		t.Error("MakeRandomPeriod failed: %s", err)
+		t.Errorf("MakeRandomPeriod failed: %s", err)
 	}
 
 	if res1 < min {
@@ -48,7 +48,7 @@ func TestMakeRandomPeriod(t *testing.T) {
 	res2, err := MakeRandomPeriod(min, max)
 
 	if err != nil {
-		t.Error("MakeRandomPeriod failed: %s", err)
+		t.Errorf("MakeRandomPeriod failed: %s", err)
 	}
 
 	if res1 == res2 {
@@ -104,7 +104,7 @@ func TestCompress(t *testing.T) {
 
 	decompressedData, err := Decompress(compressedData)
 	if err != nil {
-		t.Error("Uncompress failed: %s", err)
+		t.Errorf("Uncompress failed: %s", err)
 	}
 
 	if bytes.Compare(originalData, decompressedData) != 0 {
