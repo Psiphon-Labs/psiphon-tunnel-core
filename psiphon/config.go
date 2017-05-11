@@ -340,7 +340,8 @@ type Config struct {
 	UpgradeDownloadClientVersionHeader string
 
 	// UpgradeDownloadFilename is the local target filename for an upgrade download.
-	// This parameter is required when UpgradeDownloadURLs is specified.
+	// This parameter is required when UpgradeDownloadURLs (or UpgradeDownloadUrl)
+	// is specified.
 	// Data is stored in co-located files (UpgradeDownloadFilename.part*) to allow
 	// for resumable downloading.
 	UpgradeDownloadFilename string

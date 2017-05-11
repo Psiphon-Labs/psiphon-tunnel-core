@@ -29,26 +29,28 @@ import (
 
 var registeredPluginProtocolDialer atomic.Value
 
-// PluginProtocolNetDialer is a base network dialer that's used
-// by PluginProtocolDialer to make its IP network connections. This
-// is used, for example, to create TCPConns as the base TCP
-// connections used by the plugin protocol.
-type PluginProtocolNetDialer func(network, addr string) (net.Conn, error)
-
 // PluginProtocolDialer creates a connection to addr over a
-// plugin protocol. It uses netDialer to create its base network
+// plugin protocol. It uses dialConfig to create its base network
 // connection(s) and sends its log messages to loggerOutput.
+//
+// To ensure timely interruption and shutdown, each
+// PluginProtocolDialerimplementation must:
+//
+// - Places its outer net.Conn in pendingConns and leave it
+//   there unless an error occurs
+// - Replace the dialConfig.pendingConns with its own
+//   PendingConns and use that to ensure base network
+//   connections are interrupted when Close() is invoked on
+//   the returned net.Conn.
+//
 // PluginProtocolDialer returns true if it attempts to create
 // a connection, or false if it decides not to attempt a connection.
-// PluginProtocolDialer must add its connection to pendingConns
-// before the initial dial to allow for interruption.
 type PluginProtocolDialer func(
 	config *Config,
 	loggerOutput io.Writer,
 	pendingConns *common.Conns,
-	netDialer PluginProtocolNetDialer,
-	addr string) (
-	bool, net.Conn, error)
+	addr string,
+	dialConfig *DialConfig) (bool, net.Conn, error)
 
 // RegisterPluginProtocol sets the current plugin protocol
 // dialer.
@@ -62,14 +64,13 @@ func DialPluginProtocol(
 	config *Config,
 	loggerOutput io.Writer,
 	pendingConns *common.Conns,
-	netDialer PluginProtocolNetDialer,
-	addr string) (
-	bool, net.Conn, error) {
+	addr string,
+	dialConfig *DialConfig) (bool, net.Conn, error) {
 
 	dialer := registeredPluginProtocolDialer.Load()
 	if dialer != nil {
 		return dialer.(PluginProtocolDialer)(
-			config, loggerOutput, pendingConns, netDialer, addr)
+			config, loggerOutput, pendingConns, addr, dialConfig)
 	}
 	return false, nil, nil
 }
