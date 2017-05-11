@@ -179,6 +179,36 @@ type Config struct {
 	// used as the client IP.
 	MeekProxyForwardedForHeaders []string
 
+	// MeekCachedResponseBufferSize is the size of a private,
+	// fixed-size buffer allocated for every meek client. The buffer
+	// is used to cache response payload, allowing the client to retry
+	// fetching when a network connection is interrupted. This retry
+	// makes the OSSH tunnel within meek resilient to interruptions
+	// at the HTTP TCP layer.
+	// Larger buffers increase resiliency to interruption, but consume
+	// more memory as buffers as never freed. The maximum size of a
+	// response payload is a function of client activity, network
+	// throughput and throttling.
+	// A default of 64K is used when MeekCachedResponseBufferSize is 0.
+	MeekCachedResponseBufferSize int
+
+	// MeekCachedResponsePoolBufferSize is the size of a fixed-size,
+	// shared buffer used to temporarily extend a private buffer when
+	// MeekCachedResponseBufferSize is insufficient. Shared buffers
+	// allow some clients to sucessfully retry longer response payloads
+	// without allocating large buffers for all clients.
+	// A default of 64K is used when MeekCachedResponsePoolBufferSize
+	// is 0.
+	MeekCachedResponsePoolBufferSize int
+
+	// MeekCachedResponsePoolBufferCount is the number of shared
+	// buffers. Shared buffers are allocated on first use and remain
+	// allocated, so shared buffer count * size is roughly the memory
+	// overhead of this facility.
+	// A default of 2048 is used when MeekCachedResponsePoolBufferCount
+	// is 0.
+	MeekCachedResponsePoolBufferCount int
+
 	// UDPInterceptUdpgwServerAddress specifies the network address of
 	// a udpgw server which clients may be port forwarding to. When
 	// specified, these TCP port forwards are intercepted and handled

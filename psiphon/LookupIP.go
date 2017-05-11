@@ -38,6 +38,13 @@ import (
 // socket, binds it to the device, and makes an explicit DNS request
 // to the specified DNS resolver.
 func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
+
+	// When the input host is an IP address, echo it back
+	ipAddr := net.ParseIP(host)
+	if ipAddr != nil {
+		return []net.IP{ipAddr}, nil
+	}
+
 	if config.DeviceBinder != nil {
 		addrs, err = bindLookupIP(host, config.DnsServerGetter.GetPrimaryDnsServer(), config)
 		if err == nil {
@@ -63,14 +70,8 @@ func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
 // https://code.google.com/p/go/issues/detail?id=6966
 func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, err error) {
 
-	// When the input host is an IP address, echo it back
-	ipAddr := net.ParseIP(host)
-	if ipAddr != nil {
-		return []net.IP{ipAddr}, nil
-	}
-
 	// config.DnsServerGetter.GetDnsServers() must return IP addresses
-	ipAddr = net.ParseIP(dnsServer)
+	ipAddr := net.ParseIP(dnsServer)
 	if ipAddr == nil {
 		return nil, common.ContextError(errors.New("invalid IP address"))
 	}
