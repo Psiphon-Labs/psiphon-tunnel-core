@@ -119,7 +119,7 @@ class ViewController: UIViewController {
         let task = session.dataTask(with: request) {
             (data: Data?, response: URLResponse?, error: Error?) in
             if error != nil {
-                NSLog("Client-side error in request to \(url): \(error)")
+                NSLog("Client-side error in request to \(url): \(String(describing: error))")
                 // Invoke the callback indicating error.
                 completion(nil)
                 return
@@ -134,7 +134,7 @@ class ViewController: UIViewController {
             
             let httpResponse = response as? HTTPURLResponse
             if httpResponse?.statusCode != 200 {
-                NSLog("Server-side error in request to \(url): \(httpResponse)")
+                NSLog("Server-side error in request to \(url): \(String(describing: httpResponse))")
                 // Invoke the callback indicating error.
                 completion(nil)
                 return
@@ -178,7 +178,7 @@ class ViewController: UIViewController {
         let task = URLSession.shared.dataTask(with: URL(string: proxiedURL)!) {
             (data: Data?, response: URLResponse?, error: Error?) in
             if error != nil {
-                NSLog("Client-side error in request to \(url): \(error)")
+                NSLog("Client-side error in request to \(url): \(String(describing: error))")
                 // Invoke the callback indicating error.
                 completion(nil)
                 return
@@ -193,7 +193,7 @@ class ViewController: UIViewController {
             
             let httpResponse = response as? HTTPURLResponse
             if httpResponse?.statusCode != 200 {
-                NSLog("Server-side error in request to \(url): \(httpResponse)")
+                NSLog("Server-side error in request to \(url): \(String(describing: httpResponse))")
                 // Invoke the callback indicating error.
                 completion(nil)
                 return
