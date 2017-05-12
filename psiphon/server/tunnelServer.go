@@ -1755,7 +1755,7 @@ func (sshClient *sshClient) allocatePortForward(portForwardType int) bool {
 		state = &sshClient.udpTrafficState
 	}
 
-	if max == 0 && state.concurrentPortForwardCount >= int64(max) {
+	if max > 0 && state.concurrentPortForwardCount >= int64(max) {
 		return false
 	}
 
