@@ -42,6 +42,7 @@ const (
 
 	CLIENT_PLATFORM_ANDROID = "Android"
 	CLIENT_PLATFORM_WINDOWS = "Windows"
+	CLIENT_PLATFORM_IOS     = "iOS"
 )
 
 var CLIENT_VERIFICATION_REQUIRED = false
@@ -788,6 +789,8 @@ func normalizeClientPlatform(clientPlatform string) string {
 
 	if strings.Contains(strings.ToLower(clientPlatform), strings.ToLower(CLIENT_PLATFORM_ANDROID)) {
 		return CLIENT_PLATFORM_ANDROID
+	} else if strings.HasPrefix(clientPlatform, CLIENT_PLATFORM_IOS) {
+		return CLIENT_PLATFORM_IOS
 	}
 
 	return CLIENT_PLATFORM_WINDOWS
@@ -798,7 +801,9 @@ func isAnyString(support *SupportServices, value string) bool {
 }
 
 func isMobileClientPlatform(clientPlatform string) bool {
-	return normalizeClientPlatform(clientPlatform) == CLIENT_PLATFORM_ANDROID
+	normalizedClientPlatform := normalizeClientPlatform(clientPlatform)
+	return normalizedClientPlatform == CLIENT_PLATFORM_ANDROID ||
+		normalizedClientPlatform == CLIENT_PLATFORM_IOS
 }
 
 // Input validators follow the legacy validations rules in psi_web.
