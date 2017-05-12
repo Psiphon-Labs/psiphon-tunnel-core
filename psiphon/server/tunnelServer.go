@@ -1773,7 +1773,6 @@ func (sshClient *sshClient) allocatePortForward(portForwardType int) bool {
 				sshClient.tcpPortForwardDialingAvailableSignal()
 			}
 		}
-
 	}
 
 	state.concurrentPortForwardCount += 1
