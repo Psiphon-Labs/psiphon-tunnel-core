@@ -1697,28 +1697,6 @@ func (sshClient *sshClient) isTCPDialingPortForwardLimitExceeded() bool {
 	return false
 }
 
-func (sshClient *sshClient) isAtPortForwardLimit(
-	portForwardType int) bool {
-
-	sshClient.Lock()
-	defer sshClient.Unlock()
-
-	var max int
-	var state *trafficState
-	if portForwardType == portForwardTypeTCP {
-		max = *sshClient.trafficRules.MaxTCPPortForwardCount
-		state = &sshClient.tcpTrafficState
-	} else {
-		max = *sshClient.trafficRules.MaxUDPPortForwardCount
-		state = &sshClient.udpTrafficState
-	}
-
-	if max > 0 && state.concurrentPortForwardCount >= int64(max) {
-		return true
-	}
-	return false
-}
-
 func (sshClient *sshClient) getTCPPortForwardQueueSize() int {
 
 	sshClient.Lock()
@@ -1757,55 +1735,31 @@ func (sshClient *sshClient) abortedTCPPortForward() {
 	sshClient.tcpTrafficState.concurrentDialingPortForwardCount -= 1
 }
 
-// establishedPortForward increments the concurrent port
-// forward counter. closedPortForward decrements it, so it
-// must always be called for each establishedPortForward
-// call.
-//
-// When at the limit of established port forwards, the LRU
-// existing port forward is closed to make way for the newly
-// established one. There can be a minor delay as, in addition
-// to calling Close() on the port forward net.Conn,
-// establishedPortForward waits for the LRU's closedPortForward()
-// call which will decrement the concurrent counter. This
-// ensures all resources associated with the LRU (socket,
-// goroutine) are released or will very soon be released before
-// proceeding.
-func (sshClient *sshClient) establishedPortForward(
-	portForwardType int, portForwardLRU *common.LRUConns) {
+func (sshClient *sshClient) allocatePortForward(portForwardType int) bool {
 
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	// Check if at port forward limit. The subsequent counter
+	// changes must be atomic with the limit check to ensure
+	// the counter never exceeds the limit in the case of
+	// concurrent allocations.
+
+	var max int
 	var state *trafficState
 	if portForwardType == portForwardTypeTCP {
+		max = *sshClient.trafficRules.MaxTCPPortForwardCount
 		state = &sshClient.tcpTrafficState
 	} else {
+		max = *sshClient.trafficRules.MaxUDPPortForwardCount
 		state = &sshClient.udpTrafficState
 	}
 
-	// When the maximum number of port forwards is already
-	// established, close the LRU. CloseOldest will call
-	// Close on the port forward net.Conn. Both TCP and
-	// UDP port forwards have handler goroutines that may
-	// be blocked calling Read on the net.Conn. Close will
-	// eventually interrupt the Read and cause the handlers
-	// to exit, but not immediately. So the following logic
-	// waits for a LRU handler to be interrupted and signal
-	// availability.
-	//
-	// Note: the port forward limit can change via a traffic
-	// rules hot reload; the condition variable handles this
-	// case whereas a channel-based semaphore would not.
-
-	if sshClient.isAtPortForwardLimit(portForwardType) {
-		portForwardLRU.CloseOldest()
-		log.WithContext().Debug("closed LRU port forward")
-		state.availablePortForwardCond.L.Lock()
-		for sshClient.isAtPortForwardLimit(portForwardType) {
-			state.availablePortForwardCond.Wait()
-		}
-		state.availablePortForwardCond.L.Unlock()
+	if max == 0 && state.concurrentPortForwardCount >= int64(max) {
+		return false
 	}
 
-	sshClient.Lock()
+	// Update port forward counters.
 
 	if portForwardType == portForwardTypeTCP {
 
@@ -1828,7 +1782,72 @@ func (sshClient *sshClient) establishedPortForward(
 	}
 	state.totalPortForwardCount += 1
 
-	sshClient.Unlock()
+	return true
+}
+
+// establishedPortForward increments the concurrent port
+// forward counter. closedPortForward decrements it, so it
+// must always be called for each establishedPortForward
+// call.
+//
+// When at the limit of established port forwards, the LRU
+// existing port forward is closed to make way for the newly
+// established one. There can be a minor delay as, in addition
+// to calling Close() on the port forward net.Conn,
+// establishedPortForward waits for the LRU's closedPortForward()
+// call which will decrement the concurrent counter. This
+// ensures all resources associated with the LRU (socket,
+// goroutine) are released or will very soon be released before
+// proceeding.
+func (sshClient *sshClient) establishedPortForward(
+	portForwardType int, portForwardLRU *common.LRUConns) {
+
+	// Do not lock sshClient here.
+
+	var state *trafficState
+	if portForwardType == portForwardTypeTCP {
+		state = &sshClient.tcpTrafficState
+	} else {
+		state = &sshClient.udpTrafficState
+	}
+
+	// When the maximum number of port forwards is already
+	// established, close the LRU. CloseOldest will call
+	// Close on the port forward net.Conn. Both TCP and
+	// UDP port forwards have handler goroutines that may
+	// be blocked calling Read on the net.Conn. Close will
+	// eventually interrupt the Read and cause the handlers
+	// to exit, but not immediately. So the following logic
+	// waits for a LRU handler to be interrupted and signal
+	// availability.
+	//
+	// Notes:
+	//
+	// - the port forward limit can change via a traffic
+	//   rules hot reload; the condition variable handles
+	//   this case whereas a channel-based semaphore would
+	//   not.
+	//
+	// - if a number of goroutines exceeding the total limit
+	//   arrive here all concurrently, some CloseOldest() calls
+	//   will have no effect as there can be less existing port
+	//   forwards than new ones. In this case, the new port
+	//   forward will be delayed. This is highly unlikely in
+	//   practise since UDP calls to establishedPortForward are
+	//   serialized and TCP calls are limited by the dial
+	//   queue/count.
+
+	if !sshClient.allocatePortForward(portForwardType) {
+
+		portForwardLRU.CloseOldest()
+		log.WithContext().Debug("closed LRU port forward")
+
+		state.availablePortForwardCond.L.Lock()
+		for !sshClient.allocatePortForward(portForwardType) {
+			state.availablePortForwardCond.Wait()
+		}
+		state.availablePortForwardCond.L.Unlock()
+	}
 }
 
 func (sshClient *sshClient) closedPortForward(
