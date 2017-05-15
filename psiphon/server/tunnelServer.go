@@ -225,6 +225,14 @@ func (server *TunnelServer) SetClientHandshakeState(
 	return server.sshServer.setClientHandshakeState(sessionID, state)
 }
 
+// GetClientHandshaked indicates whether the client has completed a handshake
+// and whether its traffic rules are immediately exhausted.
+func (server *TunnelServer) GetClientHandshaked(
+	sessionID string) (bool, bool, error) {
+
+	return server.sshServer.getClientHandshaked(sessionID)
+}
+
 // SetEstablishTunnels sets whether new tunnels may be established or not.
 // When not establishing, incoming connections are immediately closed.
 func (server *TunnelServer) SetEstablishTunnels(establish bool) {
@@ -658,6 +666,22 @@ func (sshServer *sshServer) setClientHandshakeState(
 	}
 
 	return nil
+}
+
+func (sshServer *sshServer) getClientHandshaked(
+	sessionID string) (bool, bool, error) {
+
+	sshServer.clientsMutex.Lock()
+	client := sshServer.clients[sessionID]
+	sshServer.clientsMutex.Unlock()
+
+	if client == nil {
+		return false, false, common.ContextError(errors.New("unknown session ID"))
+	}
+
+	completed, exhausted := client.getHandshaked()
+
+	return completed, exhausted, nil
 }
 
 func (sshServer *sshServer) stopClients() {
@@ -1495,6 +1519,40 @@ func (sshClient *sshClient) setHandshakeState(state handshakeState) error {
 	sshClient.setOSLConfig()
 
 	return nil
+}
+
+// getHandshaked returns whether the client has completed a handshake API
+// request and whether the traffic rules that were selected after the
+// handshake immediately exhaust the client.
+//
+// When the client is immediately exhausted it will be closed; but this
+// takes effect asynchronously. The "exhausted" return value is used to
+// prevent API requests by clients that will close.
+func (sshClient *sshClient) getHandshaked() (bool, bool) {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	completed := sshClient.handshakeState.completed
+
+	exhausted := false
+
+	// Notes:
+	// - "Immediately exhausted" is when CloseAfterExhausted is set and
+	//   either ReadUnthrottledBytes or WriteUnthrottledBytes starts from
+	//   0, so no bytes would be read or written. This check does not
+	//   examine whether 0 bytes _remain_ in the ThrottledConn.
+	// - This check is made against the current traffic rules, which
+	//   could have changed in a hot reload since the handshake.
+
+	if completed &&
+		*sshClient.trafficRules.RateLimits.CloseAfterExhausted == true &&
+		(*sshClient.trafficRules.RateLimits.ReadUnthrottledBytes == 0 ||
+			*sshClient.trafficRules.RateLimits.WriteUnthrottledBytes == 0) {
+
+		exhausted = true
+	}
+
+	return completed, exhausted
 }
 
 // setTrafficRules resets the client's traffic rules based on the latest server config
