@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -173,4 +174,19 @@ func (w *PanickingLogWriter) Write(p []byte) (n int, err error) {
 				fmt.Sprintf("fatal write to %s failed: %s", w.name, err)))
 	}
 	return
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func greaterThanSwapInt64(addr *int64, new int64) bool {
+	old := atomic.LoadInt64(addr)
+	if new > old {
+		return atomic.CompareAndSwapInt64(addr, old, new)
+	}
+	return false
 }

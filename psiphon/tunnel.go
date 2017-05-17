@@ -570,6 +570,7 @@ func initMeekConfig(
 		TransformedHostName:           transformedHostName,
 		PsiphonServerAddress:          psiphonServerAddress,
 		SessionID:                     sessionId,
+		ClientTunnelProtocol:          selectedProtocol,
 		MeekCookieEncryptionPublicKey: serverEntry.MeekCookieEncryptionPublicKey,
 		MeekObfuscatedKey:             serverEntry.MeekObfuscatedKey,
 	}, nil
@@ -642,7 +643,7 @@ func dialSsh(
 	}
 
 	if meekConfig != nil || upstreamProxyType == "http" {
-		dialCustomHeaders, selectedUserAgent = UserAgentIfUnset(config.CustomHeaders)
+		dialCustomHeaders, selectedUserAgent = UserAgentIfUnset(dialCustomHeaders)
 	}
 
 	// Use an asynchronous callback to record the resolved IP address when
@@ -1204,6 +1205,13 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		// TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX for idle tunnels.
 
 		tunnelDuration := tunnel.conn.GetLastActivityMonotime().Sub(tunnel.establishedTime)
+
+		// tunnelDuration can be < 0 when tunnel.establishedTime is recorded after the
+		// last tunnel.conn.Read() succeeds. In that case, the last read would be the
+		// handshake response, so the tunnel had, essentially, no duration.
+		if tunnelDuration < 0 {
+			tunnelDuration = 0
+		}
 
 		err := RecordTunnelStat(
 			tunnel.serverContext.sessionId,

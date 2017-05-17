@@ -322,9 +322,14 @@ func (sshServer *sshServer) getEstablishTunnels() bool {
 func (sshServer *sshServer) runListener(
 	listener net.Listener,
 	listenerError chan<- error,
-	tunnelProtocol string) {
+	listenerTunnelProtocol string) {
 
-	handleClient := func(clientConn net.Conn) {
+	runningProtocols := make([]string, 0)
+	for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
+		runningProtocols = append(runningProtocols, tunnelProtocol)
+	}
+
+	handleClient := func(clientTunnelProtocol string, clientConn net.Conn) {
 
 		// Note: establish tunnel limiter cannot simply stop TCP
 		// listeners in all cases (e.g., meek) since SSH tunnel can
@@ -336,6 +341,19 @@ func (sshServer *sshServer) runListener(
 			return
 		}
 
+		// The tunnelProtocol passed to handleClient is used for stats,
+		// throttling, etc. When the tunnel protocol can be determined
+		// unambiguously from the listening port, use that protocol and
+		// don't use any client-declared value. Only use the client's
+		// value, if present, in special cases where the listenting port
+		// cannot distinguish the protocol.
+		tunnelProtocol := listenerTunnelProtocol
+		if clientTunnelProtocol != "" &&
+			protocol.UseClientTunnelProtocol(
+				clientTunnelProtocol, runningProtocols) {
+			tunnelProtocol = clientTunnelProtocol
+		}
+
 		// process each client connection concurrently
 		go sshServer.handleClient(tunnelProtocol, clientConn)
 	}
@@ -345,14 +363,14 @@ func (sshServer *sshServer) runListener(
 	// TunnelServer.Run will properly shut down instead of remaining
 	// running.
 
-	if protocol.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
-		protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTP(listenerTunnelProtocol) ||
+		protocol.TunnelProtocolUsesMeekHTTPS(listenerTunnelProtocol) {
 
 		meekServer, err := NewMeekServer(
 			sshServer.support,
 			listener,
-			protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol),
-			protocol.TunnelProtocolUsesObfuscatedSessionTickets(tunnelProtocol),
+			protocol.TunnelProtocolUsesMeekHTTPS(listenerTunnelProtocol),
+			protocol.TunnelProtocolUsesObfuscatedSessionTickets(listenerTunnelProtocol),
 			handleClient,
 			sshServer.shutdownBroadcast)
 		if err != nil {
@@ -393,7 +411,7 @@ func (sshServer *sshServer) runListener(
 				return
 			}
 
-			handleClient(conn)
+			handleClient("", conn)
 		}
 	}
 }
@@ -727,6 +745,7 @@ type trafficState struct {
 	concurrentPortForwardCount            int64
 	peakConcurrentPortForwardCount        int64
 	totalPortForwardCount                 int64
+	availablePortForwardCond              *sync.Cond
 }
 
 // qualityMetrics records upstream TCP dial attempts and
@@ -753,7 +772,7 @@ func newSshClient(
 
 	runContext, stopRunning := context.WithCancel(context.Background())
 
-	return &sshClient{
+	client := &sshClient{
 		sshServer:         sshServer,
 		tunnelProtocol:    tunnelProtocol,
 		geoIPData:         geoIPData,
@@ -762,9 +781,17 @@ func newSshClient(
 		runContext:        runContext,
 		stopRunning:       stopRunning,
 	}
+
+	client.tcpTrafficState.availablePortForwardCond = sync.NewCond(new(sync.Mutex))
+	client.udpTrafficState.availablePortForwardCond = sync.NewCond(new(sync.Mutex))
+
+	return client
 }
 
 func (sshClient *sshClient) run(clientConn net.Conn) {
+
+	// Some conns report additional metrics
+	metricsSource, isMetricsSource := clientConn.(MetricsSource)
 
 	// Set initial traffic rules, pre-handshake, based on currently known info.
 	sshClient.setTrafficRules()
@@ -886,7 +913,11 @@ func (sshClient *sshClient) run(clientConn net.Conn) {
 
 	sshClient.sshServer.unregisterEstablishedClient(sshClient)
 
-	sshClient.logTunnel()
+	var additionalMetrics LogFields
+	if isMetricsSource {
+		additionalMetrics = metricsSource.GetMetrics()
+	}
+	sshClient.logTunnel(additionalMetrics)
 
 	// Transfer OSL seed state -- the OSL progress -- from the closing
 	// client to the session cache so the client can resume its progress
@@ -1191,10 +1222,11 @@ func (sshClient *sshClient) runTunnel(
 
 			if sshClient.isTCPDialingPortForwardLimitExceeded() {
 				blockStartTime := monotime.Now()
-				ctx, cancelFunc := context.WithTimeout(sshClient.runContext, remainingDialTimeout)
-				sshClient.setTCPPortForwardDialingAvailableSignal(cancelFunc)
+				ctx, cancelCtx := context.WithTimeout(sshClient.runContext, remainingDialTimeout)
+				sshClient.setTCPPortForwardDialingAvailableSignal(cancelCtx)
 				<-ctx.Done()
 				sshClient.setTCPPortForwardDialingAvailableSignal(nil)
+				cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 				remainingDialTimeout -= monotime.Since(blockStartTime)
 			}
 
@@ -1305,7 +1337,7 @@ func (sshClient *sshClient) runTunnel(
 	waitGroup.Wait()
 }
 
-func (sshClient *sshClient) logTunnel() {
+func (sshClient *sshClient) logTunnel(additionalMetrics LogFields) {
 
 	// Note: reporting duration based on last confirmed data transfer, which
 	// is reads for sshClient.activityConn.GetActiveDuration(), and not
@@ -1338,6 +1370,16 @@ func (sshClient *sshClient) logTunnel() {
 	// sshClient.udpTrafficState.peakConcurrentDialingPortForwardCount isn't meaningful
 	logFields["peak_concurrent_port_forward_count_udp"] = sshClient.udpTrafficState.peakConcurrentPortForwardCount
 	logFields["total_port_forward_count_udp"] = sshClient.udpTrafficState.totalPortForwardCount
+
+	// Merge in additional metrics from the optional metrics source
+	if additionalMetrics != nil {
+		for name, value := range additionalMetrics {
+			// Don't overwrite any basic fields
+			if logFields[name] == nil {
+				logFields[name] = value
+			}
+		}
+	}
 
 	sshClient.Unlock()
 
@@ -1655,7 +1697,7 @@ func (sshClient *sshClient) isTCPDialingPortForwardLimitExceeded() bool {
 	return false
 }
 
-func (sshClient *sshClient) isPortForwardLimitExceeded(
+func (sshClient *sshClient) isAtPortForwardLimit(
 	portForwardType int) bool {
 
 	sshClient.Lock()
@@ -1715,15 +1757,57 @@ func (sshClient *sshClient) abortedTCPPortForward() {
 	sshClient.tcpTrafficState.concurrentDialingPortForwardCount -= 1
 }
 
+// establishedPortForward increments the concurrent port
+// forward counter. closedPortForward decrements it, so it
+// must always be called for each establishedPortForward
+// call.
+//
+// When at the limit of established port forwards, the LRU
+// existing port forward is closed to make way for the newly
+// established one. There can be a minor delay as, in addition
+// to calling Close() on the port forward net.Conn,
+// establishedPortForward waits for the LRU's closedPortForward()
+// call which will decrement the concurrent counter. This
+// ensures all resources associated with the LRU (socket,
+// goroutine) are released or will very soon be released before
+// proceeding.
 func (sshClient *sshClient) establishedPortForward(
-	portForwardType int) {
-
-	sshClient.Lock()
-	defer sshClient.Unlock()
+	portForwardType int, portForwardLRU *common.LRUConns) {
 
 	var state *trafficState
 	if portForwardType == portForwardTypeTCP {
 		state = &sshClient.tcpTrafficState
+	} else {
+		state = &sshClient.udpTrafficState
+	}
+
+	// When the maximum number of port forwards is already
+	// established, close the LRU. CloseOldest will call
+	// Close on the port forward net.Conn. Both TCP and
+	// UDP port forwards have handler goroutines that may
+	// be blocked calling Read on the net.Conn. Close will
+	// eventually interrupt the Read and cause the handlers
+	// to exit, but not immediately. So the following logic
+	// waits for a LRU handler to be interrupted and signal
+	// availability.
+	//
+	// Note: the port forward limit can change via a traffic
+	// rules hot reload; the condition variable handles this
+	// case whereas a channel-based semaphore would not.
+
+	if sshClient.isAtPortForwardLimit(portForwardType) {
+		portForwardLRU.CloseOldest()
+		log.WithContext().Debug("closed LRU port forward")
+		state.availablePortForwardCond.L.Lock()
+		for sshClient.isAtPortForwardLimit(portForwardType) {
+			state.availablePortForwardCond.Wait()
+		}
+		state.availablePortForwardCond.L.Unlock()
+	}
+
+	sshClient.Lock()
+
+	if portForwardType == portForwardTypeTCP {
 
 		// Assumes TCP port forwards called dialingTCPPortForward
 		state.concurrentDialingPortForwardCount -= 1
@@ -1736,8 +1820,6 @@ func (sshClient *sshClient) establishedPortForward(
 			}
 		}
 
-	} else {
-		state = &sshClient.udpTrafficState
 	}
 
 	state.concurrentPortForwardCount += 1
@@ -1745,13 +1827,14 @@ func (sshClient *sshClient) establishedPortForward(
 		state.peakConcurrentPortForwardCount = state.concurrentPortForwardCount
 	}
 	state.totalPortForwardCount += 1
+
+	sshClient.Unlock()
 }
 
 func (sshClient *sshClient) closedPortForward(
 	portForwardType int, bytesUp, bytesDown int64) {
 
 	sshClient.Lock()
-	defer sshClient.Unlock()
 
 	var state *trafficState
 	if portForwardType == portForwardTypeTCP {
@@ -1763,6 +1846,12 @@ func (sshClient *sshClient) closedPortForward(
 	state.concurrentPortForwardCount -= 1
 	state.bytesUp += bytesUp
 	state.bytesDown += bytesDown
+
+	sshClient.Unlock()
+
+	// Signal any goroutine waiting in establishedPortForward
+	// that an established port forward slot is available.
+	state.availablePortForwardCond.Signal()
 }
 
 func (sshClient *sshClient) updateQualityMetricsWithDialResult(
@@ -1836,8 +1925,9 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	log.WithContextFields(LogFields{"hostToConnect": hostToConnect}).Debug("resolving")
 
-	ctx, _ := context.WithTimeout(sshClient.runContext, remainingDialTimeout)
+	ctx, cancelCtx := context.WithTimeout(sshClient.runContext, remainingDialTimeout)
 	IPs, err := (&net.Resolver{}).LookupIPAddr(ctx, hostToConnect)
+	cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 
 	// TODO: shuffle list to try other IPs?
 	// TODO: IPv6 support
@@ -1894,8 +1984,9 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	log.WithContextFields(LogFields{"remoteAddr": remoteAddr}).Debug("dialing")
 
-	ctx, _ = context.WithTimeout(sshClient.runContext, remainingDialTimeout)
+	ctx, cancelCtx = context.WithTimeout(sshClient.runContext, remainingDialTimeout)
 	fwdConn, err := (&net.Dialer{}).DialContext(ctx, "tcp", remoteAddr)
+	cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 
 	// Record port forward success or failure
 	sshClient.updateQualityMetricsWithDialResult(err == nil, monotime.Since(dialStartTime))
@@ -1924,10 +2015,20 @@ func (sshClient *sshClient) handleTCPChannel(
 	defer fwdChannel.Close()
 
 	// Release the dialing slot and acquire an established slot.
+	//
+	// establishedPortForward increments the concurrent TCP port
+	// forward counter and closes the LRU existing TCP port forward
+	// when already at the limit.
+	//
+	// Known limitations:
+	//
+	// - Closed LRU TCP sockets will enter the TIME_WAIT state,
+	//   continuing to consume some resources.
+
+	sshClient.establishedPortForward(portForwardTypeTCP, sshClient.tcpPortForwardLRU)
 
 	// "established = true" cancels the deferred abortedTCPPortForward()
 	established = true
-	sshClient.establishedPortForward(portForwardTypeTCP)
 
 	// TODO: 64-bit alignment? https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	var bytesUp, bytesDown int64
@@ -1935,30 +2036,6 @@ func (sshClient *sshClient) handleTCPChannel(
 		sshClient.closedPortForward(
 			portForwardTypeTCP, atomic.LoadInt64(&bytesUp), atomic.LoadInt64(&bytesDown))
 	}()
-
-	if exceeded := sshClient.isPortForwardLimitExceeded(portForwardTypeTCP); exceeded {
-
-		// Close the oldest TCP port forward. CloseOldest() closes
-		// the conn and the port forward's goroutines will complete
-		// the cleanup asynchronously.
-		//
-		// Some known limitations:
-		//
-		// - Since CloseOldest() closes the upstream socket but does not
-		//   clean up all resources associated with the port forward. These
-		//   include the goroutine(s) relaying traffic as well as the SSH
-		//   channel. Closing the socket will interrupt the goroutines which
-		//   will then complete the cleanup. But, since the full cleanup is
-		//   asynchronous, there exists a possibility that a client can consume
-		//   more than max port forward resources -- just not upstream sockets.
-		//
-		// - Closed sockets will enter the TIME_WAIT state, consuming some
-		//   resources.
-
-		sshClient.tcpPortForwardLRU.CloseOldest()
-
-		log.WithContext().Debug("closed LRU TCP port forward")
-	}
 
 	lruEntry := sshClient.tcpPortForwardLRU.Add(fwdConn)
 	defer lruEntry.Remove()
