@@ -17,12 +17,14 @@
  *
  */
 
+#import <net/if.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
 #import "LookupIPv6.h"
 #import "Psi-meta.h"
 #import "PsiphonTunnel.h"
 #import "json-framework/SBJson4.h"
+#import "JailbreakCheck/JailbreakCheck.h"
 
 
 @interface PsiphonTunnel () <GoPsiPsiphonProvider>
@@ -232,9 +234,9 @@
         [self logMessage:[NSString stringWithFormat: @"RemoteServerListDownloadFilename overridden from '%@' to '%@'", defaultRemoteServerListFilename, config[@"RemoteServerListDownloadFilename"]]];
     }
     
-    // If RemoteServerListUrl and RemoteServerListSignaturePublicKey are absent,
-    // we'll just leave them out, but we'll log about it.
-    if (config[@"RemoteServerListUrl"] == nil ||
+    // If RemoteServerListUrl/RemoteServerListURLs and RemoteServerListSignaturePublicKey
+    // are absent, we'll just leave them out, but we'll log about it.
+    if ((config[@"RemoteServerListUrl"] == nil && config[@"RemoteServerListURLs"] == nil) ||
         config[@"RemoteServerListSignaturePublicKey"] == nil) {
         [self logMessage:@"Remote server list functionality will be disabled"];
     }
@@ -262,9 +264,27 @@
         [self logMessage:[NSString stringWithFormat: @"ObfuscatedServerListDownloadDirectory overridden from '%@' to '%@'", [defaultOSLDirectoryURL path], config[@"ObfuscatedServerListDownloadDirectory"]]];
     }
     
-    // If ObfuscatedServerListRootURL is absent, we'll leave it out, but log the absence.
-    if (config[@"ObfuscatedServerListRootURL"] == nil) {
+    // If ObfuscatedServerListRootURL/ObfuscatedServerListRootURLs is absent,
+    // we'll leave it out, but log the absence.
+    if (config[@"ObfuscatedServerListRootURL"] == nil && config[@"ObfuscatedServerListRootURLs"] == nil) {
         [self logMessage:@"Obfuscated server list functionality will be disabled"];
+    }
+
+    //
+    // Upgrade Download Filename
+    //
+
+    NSString *defaultUpgradeDownloadFilename = [[libraryURL URLByAppendingPathComponent:@"upgrade_download_file" isDirectory:NO] path];
+    if (defaultUpgradeDownloadFilename == nil) {
+        [self logMessage:@"Unable to create defaultUpgradeDownloadFilename"];
+        return nil;
+    }
+
+    if (config[@"UpgradeDownloadFilename"] == nil) {
+        config[@"UpgradeDownloadFilename"] = defaultUpgradeDownloadFilename;
+    }
+    else {
+        [self logMessage:[NSString stringWithFormat: @"UpgradeDownloadFilename overridden from '%@' to '%@'", defaultUpgradeDownloadFilename, config[@"UpgradeDownloadFilename"]]];
     }
 
     // Other optional fields not being altered. If not set, their defaults will be used:
@@ -275,15 +295,48 @@
     // * UpstreamProxyUrl
     // * EmitDiagnosticNotices
     // * EgressRegion
-    // * UpgradeDownloadUrl
+    // * UpgradeDownloadUrl/UpgradeDownloadURLs
     // * UpgradeDownloadClientVersionHeader
-    // * UpgradeDownloadFilename
     // * timeout fields
     
     //
     // Fill in the rest of the values.
     //
     
+    // ClientPlatform must not contain:
+    //   - underscores, which are used by us to separate the constituent parts
+    //   - spaces, which are considered invalid by the server
+    // Like "iOS". Older iOS reports "iPhone OS", which we will convert.
+    NSString *systemName = [[UIDevice currentDevice] systemName];
+    if ([systemName isEqual: @"iPhone OS"]) {
+        systemName = @"iOS";
+    }
+    systemName = [[systemName
+                   stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
+                  stringByReplacingOccurrencesOfString:@" " withString:@"-"];
+    // Like "10.2.1"
+    NSString *systemVersion = [[[[UIDevice currentDevice]systemVersion]
+                                stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
+                               stringByReplacingOccurrencesOfString:@" " withString:@"-"];
+    
+    // "unjailbroken"/"jailbroken"
+    NSString *jailbroken = @"unjailbroken";
+    if ([JailbreakCheck isDeviceJailbroken]) {
+        jailbroken = @"jailbroken";
+    }
+    // Like "com.psiphon3.browser"
+    NSString *bundleIdentifier = [[[[NSBundle mainBundle] bundleIdentifier]
+                                   stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
+                                  stringByReplacingOccurrencesOfString:@" " withString:@"-"];
+    
+    NSString *clientPlatform = [NSString stringWithFormat:@"%@_%@_%@_%@",
+                                systemName,
+                                systemVersion,
+                                jailbroken,
+                                bundleIdentifier];
+    
+    config[@"ClientPlatform"] = clientPlatform;
+        
     config[@"EmitBytesTransferred"] = [NSNumber numberWithBool:TRUE];
 
     config[@"DeviceRegion"] = [PsiphonTunnel getDeviceRegion];
@@ -301,18 +354,6 @@
     }
     config[@"TrustedCACertificatesFilename"] = bundledTrustedCAPath;
     
-    //
-    // Many other fields must *only* be modified by official Psiphon clients.
-    // Some of them require default values.
-    //
-    
-    if (config[@"ClientPlatform"] == nil) {
-        config[@"ClientPlatform"] = @"iOS-Library";
-    }
-    else {
-        [self logMessage:[NSString stringWithFormat: @"ClientPlatform overridden from 'iOS-Library' to '%@'", config[@"ClientPlatform"]]];
-    }
-
     NSString *finalConfigStr = [[[SBJson4Writer alloc] init] stringWithObject:config];
     
     if (finalConfigStr == nil) {
@@ -537,7 +578,19 @@
 #pragma mark - GoPsiPsiphonProvider protocol implementation (private)
 
 - (BOOL)bindToDevice:(long)fileDescriptor error:(NSError **)error {
-    // This PsiphonProvider function is only called in TunnelWholeDevice mode
+    // This function is only called in TunnelWholeDevice mode
+    
+    // TODO: Does this function ever get called?
+    
+    // TODO: Determine if this is robust.
+    unsigned int interfaceIndex = if_nametoindex("ap1");
+    
+    int ret = setsockopt(fileDescriptor, IPPROTO_TCP, IP_BOUND_IF, &interfaceIndex, sizeof(interfaceIndex));
+    if (ret != 0) {
+        [self logMessage:[NSString stringWithFormat: @"bindToDevice: setsockopt failed; errno: %d", errno]];
+        return FALSE;
+    }
+
     return TRUE;
 }
 
