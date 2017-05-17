@@ -54,8 +54,8 @@ type PluginProtocolDialer func(
 
 // RegisterPluginProtocol sets the current plugin protocol
 // dialer.
-func RegisterPluginProtocol(protcolDialer PluginProtocolDialer) {
-	registeredPluginProtocolDialer.Store(protcolDialer)
+func RegisterPluginProtocol(protocolDialer PluginProtocolDialer) {
+	registeredPluginProtocolDialer.Store(protocolDialer)
 }
 
 // DialPluginProtocol uses the current plugin protocol dialer,
