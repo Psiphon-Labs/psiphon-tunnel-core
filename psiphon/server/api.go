@@ -116,9 +116,12 @@ func dispatchAPIRequestHandler(
 	//   may succeed. This case ensures that blocked clients do
 	//   not log "connected", etc.
 	//
-	// Note that sshClient.setHandshakeState enforces that only a
-	// single handshake is made; enforcing that there ensures no
-	// race condition even if concurrent requests are in flight.
+	// Only one handshake request may be made. There is no check here
+	// to enforce that handshakeAPIRequestHandler will be called at
+	// most once. The SetHandshakeState call in handshakeAPIRequestHandler
+	// enforces that only a single handshake is made; enforcing that there
+	// ensures no race condition even if concurrent requests are
+	// in flight.
 
 	if name != protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME {
 
@@ -179,14 +182,6 @@ func handshakeAPIRequestHandler(
 		return nil, common.ContextError(err)
 	}
 
-	log.LogRawFieldsWithTimestamp(
-		getRequestLogFields(
-			support,
-			"handshake",
-			geoIPData,
-			params,
-			baseRequestParams))
-
 	sessionID, _ := getStringRequestParam(params, "client_session_id")
 	sponsorID, _ := getStringRequestParam(params, "sponsor_id")
 	clientVersion, _ := getStringRequestParam(params, "client_version")
@@ -210,6 +205,17 @@ func handshakeAPIRequestHandler(
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
+
+	// The log comes _after_ SetClientHandshakeState, in case that call rejects
+	// the state change (for example, if a second handshake is performed)
+
+	log.LogRawFieldsWithTimestamp(
+		getRequestLogFields(
+			support,
+			"handshake",
+			geoIPData,
+			params,
+			baseRequestParams))
 
 	// Note: no guarantee that PsinetDatabase won't reload between database calls
 	db := support.PsinetDatabase
