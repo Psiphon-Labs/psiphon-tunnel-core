@@ -18,6 +18,8 @@
 		6685BDD41E2EBB1000F0E414 /* GoPsi.objc.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDD21E2EBB1000F0E414 /* GoPsi.objc.h */; };
 		6685BDD51E2EBB1000F0E414 /* Universe.objc.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDD31E2EBB1000F0E414 /* Universe.objc.h */; };
 		6685BDD91E300AC200F0E414 /* strip-frameworks.sh in Resources */ = {isa = PBXBuildFile; fileRef = 6685BDD81E300AC200F0E414 /* strip-frameworks.sh */; };
+		66BAD3351E525FBC00CD06DE /* JailbreakCheck.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BAD3331E525FBC00CD06DE /* JailbreakCheck.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		66BAD3361E525FBC00CD06DE /* JailbreakCheck.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BAD3341E525FBC00CD06DE /* JailbreakCheck.m */; };
 		66BDB02A1DA6BFCC0079384C /* PsiphonTunnel.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 66BDB0201DA6BFCC0079384C /* PsiphonTunnel.framework */; };
 		66BDB02F1DA6BFCC0079384C /* PsiphonTunnelTests.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB02E1DA6BFCC0079384C /* PsiphonTunnelTests.m */; };
 		66BDB0311DA6BFCC0079384C /* PsiphonTunnel.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB0231DA6BFCC0079384C /* PsiphonTunnel.h */; settings = {ATTRIBUTES = (Public, ); }; };
@@ -74,6 +76,8 @@
 		6685BDD21E2EBB1000F0E414 /* GoPsi.objc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = GoPsi.objc.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/GoPsi.objc.h; sourceTree = "<group>"; };
 		6685BDD31E2EBB1000F0E414 /* Universe.objc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Universe.objc.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/Universe.objc.h; sourceTree = "<group>"; };
 		6685BDD81E300AC200F0E414 /* strip-frameworks.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; name = "strip-frameworks.sh"; path = "scripts/strip-frameworks.sh"; sourceTree = "<group>"; };
+		66BAD3331E525FBC00CD06DE /* JailbreakCheck.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = JailbreakCheck.h; sourceTree = "<group>"; };
+		66BAD3341E525FBC00CD06DE /* JailbreakCheck.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = JailbreakCheck.m; sourceTree = "<group>"; };
 		66BDB0201DA6BFCC0079384C /* PsiphonTunnel.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = PsiphonTunnel.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		66BDB0231DA6BFCC0079384C /* PsiphonTunnel.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PsiphonTunnel.h; sourceTree = "<group>"; };
 		66BDB0241DA6BFCC0079384C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -143,6 +147,15 @@
 			name = Psi;
 			sourceTree = "<group>";
 		};
+		66BAD3321E525FBC00CD06DE /* JailbreakCheck */ = {
+			isa = PBXGroup;
+			children = (
+				66BAD3331E525FBC00CD06DE /* JailbreakCheck.h */,
+				66BAD3341E525FBC00CD06DE /* JailbreakCheck.m */,
+			);
+			path = JailbreakCheck;
+			sourceTree = "<group>";
+		};
 		66BDB0161DA6BFCC0079384C = {
 			isa = PBXGroup;
 			children = (
@@ -166,6 +179,7 @@
 		66BDB0221DA6BFCC0079384C /* PsiphonTunnel */ = {
 			isa = PBXGroup;
 			children = (
+				66BAD3321E525FBC00CD06DE /* JailbreakCheck */,
 				662659241DD270E900872F6C /* Reachability */,
 				66BDB04A1DC26CCC0079384C /* json-framework */,
 				66BDB0231DA6BFCC0079384C /* PsiphonTunnel.h */,
@@ -223,6 +237,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6685BDCB1E2E882800F0E414 /* ref.h in Headers */,
+				66BAD3351E525FBC00CD06DE /* JailbreakCheck.h in Headers */,
 				4E89F7FF1E2ED3CE00005F4C /* LookupIPv6.h in Headers */,
 				662659271DD270E900872F6C /* Reachability.h in Headers */,
 				66BDB05D1DC26CCC0079384C /* SBJson4StreamParser.h in Headers */,
@@ -349,6 +364,7 @@
 				66BDB0661DC26CCC0079384C /* SBJson4StreamWriterState.m in Sources */,
 				66BDB05C1DC26CCC0079384C /* SBJson4Parser.m in Sources */,
 				4E89F7FE1E2ED3CE00005F4C /* LookupIPv6.c in Sources */,
+				66BAD3361E525FBC00CD06DE /* JailbreakCheck.m in Sources */,
 				66BDB0681DC26CCC0079384C /* SBJson4Writer.m in Sources */,
 				66BDB0621DC26CCC0079384C /* SBJson4StreamTokeniser.m in Sources */,
 				66BDB0441DA6C7DD0079384C /* PsiphonTunnel.m in Sources */,
@@ -477,6 +493,7 @@
 		66BDB0351DA6BFCC0079384C /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_IDENTITY = "";
 				DEFINES_MODULE = YES;
 				DEVELOPMENT_TEAM = Q6HLNEX92A;
@@ -501,6 +518,7 @@
 		66BDB0361DA6BFCC0079384C /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_IDENTITY = "";
 				DEFINES_MODULE = YES;
 				DEVELOPMENT_TEAM = Q6HLNEX92A;
