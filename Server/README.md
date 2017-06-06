@@ -7,7 +7,7 @@ Functionality is based on the [legacy server stack](https://bitbucket.org/psipho
 
 ### Build
 Prerequisites:
- - Go 1.6.2 or later
+ - Go 1.8 or later
 
 Build Steps:
  - Get dependencies: `go get -d -v ./...`
