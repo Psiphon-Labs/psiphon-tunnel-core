@@ -15,7 +15,7 @@ Build Steps:
 
 #### MUSL `libc` build (for Alpine Linux on Docker)
 Prerequisites:
- - Go 1.6.2 or later
+ - Go 1.8 or later
  - Docker 1.10 or later
  - MUSL libc toolchain
 
