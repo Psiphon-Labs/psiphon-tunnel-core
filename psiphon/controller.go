@@ -159,10 +159,22 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 
 	// Start components
 
-	listenIP, err := common.GetInterfaceIPAddress(controller.config.ListenInterface)
-	if err != nil {
-		NoticeError("error getting listener IP: %s", err)
-		return
+	// TODO: IPv6 support
+	var listenIP string
+	if controller.config.ListenInterface == "" {
+		listenIP = "127.0.0.1"
+	} else if controller.config.ListenInterface == "any" {
+		listenIP = "0.0.0.0"
+	} else {
+		IPv4Address, IPv6Address, err := common.GetInterfaceIPAddresses(controller.config.ListenInterface)
+		if err == nil && IPv4Address == nil {
+			err = fmt.Errorf("no IPv4 address for interface %s", controller.config.ListenInterface)
+		}
+		if err != nil {
+			NoticeError("error getting listener IP: %s", err)
+			return
+		}
+		listenIP = IPv4Address.String()
 	}
 
 	socksProxy, err := NewSocksProxy(controller.config, controller, listenIP)
