@@ -25,6 +25,7 @@ package psiphon
 
 import (
 	"errors"
+	"fmt"
 	"math/rand"
 	"net"
 	"sync"
@@ -166,7 +167,7 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	} else if controller.config.ListenInterface == "any" {
 		listenIP = "0.0.0.0"
 	} else {
-		IPv4Address, IPv6Address, err := common.GetInterfaceIPAddresses(controller.config.ListenInterface)
+		IPv4Address, _, err := common.GetInterfaceIPAddresses(controller.config.ListenInterface)
 		if err == nil && IPv4Address == nil {
 			err = fmt.Errorf("no IPv4 address for interface %s", controller.config.ListenInterface)
 		}
