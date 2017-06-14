@@ -122,6 +122,13 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
 - (void)onConnected;
 
 /*!
+ Called when the tunnel notices that the device has no network connectivity and
+ begins waiting to regain it. When connecitvity is regained, `onConnecting`
+ will be called.
+ */
+- (void)onStartedWaitingForNetworkConnectivity;
+
+/*!
  Called to indicate that tunnel-core is exiting imminently (usually do to
  a `stop()` call, but could be due to an unexpected error).
  Swift: @code func onExiting() @endcode
