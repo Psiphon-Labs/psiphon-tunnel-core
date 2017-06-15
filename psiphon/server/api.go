@@ -42,6 +42,7 @@ const (
 
 	CLIENT_PLATFORM_ANDROID = "Android"
 	CLIENT_PLATFORM_WINDOWS = "Windows"
+	CLIENT_PLATFORM_IOS     = "iOS"
 )
 
 var CLIENT_VERIFICATION_REQUIRED = false
@@ -107,6 +108,49 @@ func dispatchAPIRequestHandler(
 		}
 	}()
 
+	// Before invoking the handlers, enforce some preconditions:
+	//
+	// - A handshake request must preceed any other requests.
+	// - When the handshake results in a traffic rules state where
+	//   the client is immediately exhausted, no requests
+	//   may succeed. This case ensures that blocked clients do
+	//   not log "connected", etc.
+	//
+	// Only one handshake request may be made. There is no check here
+	// to enforce that handshakeAPIRequestHandler will be called at
+	// most once. The SetHandshakeState call in handshakeAPIRequestHandler
+	// enforces that only a single handshake is made; enforcing that there
+	// ensures no race condition even if concurrent requests are
+	// in flight.
+
+	if name != protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME {
+
+		// TODO: same session-ID-lookup TODO in handshakeAPIRequestHandler
+		// applies here.
+
+		sessionID, err := getStringRequestParam(params, "client_session_id")
+		if err == nil {
+			// Note: follows/duplicates baseRequestParams validation
+			if !isHexDigits(support, sessionID) {
+				err = errors.New("invalid param: client_session_id")
+			}
+		}
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
+		completed, exhausted, err := support.TunnelServer.GetClientHandshaked(sessionID)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+		if !completed {
+			return nil, common.ContextError(errors.New("handshake not completed"))
+		}
+		if exhausted {
+			return nil, common.ContextError(errors.New("exhausted after handshake"))
+		}
+	}
+
 	switch name {
 	case protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
 		return handshakeAPIRequestHandler(support, apiProtocol, geoIPData, params)
@@ -138,16 +182,6 @@ func handshakeAPIRequestHandler(
 		return nil, common.ContextError(err)
 	}
 
-	log.LogRawFieldsWithTimestamp(
-		getRequestLogFields(
-			support,
-			"handshake",
-			geoIPData,
-			params,
-			baseRequestParams))
-
-	// Note: ignoring param format errors as params have been validated
-
 	sessionID, _ := getStringRequestParam(params, "client_session_id")
 	sponsorID, _ := getStringRequestParam(params, "sponsor_id")
 	clientVersion, _ := getStringRequestParam(params, "client_version")
@@ -171,6 +205,17 @@ func handshakeAPIRequestHandler(
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
+
+	// The log comes _after_ SetClientHandshakeState, in case that call rejects
+	// the state change (for example, if a second handshake is performed)
+
+	log.LogRawFieldsWithTimestamp(
+		getRequestLogFields(
+			support,
+			"handshake",
+			geoIPData,
+			params,
+			baseRequestParams))
 
 	// Note: no guarantee that PsinetDatabase won't reload between database calls
 	db := support.PsinetDatabase
@@ -508,7 +553,7 @@ const (
 // is specified, in which case an array of string is expected.
 var baseRequestParams = []requestParamSpec{
 	requestParamSpec{"server_secret", isServerSecret, requestParamNotLogged},
-	requestParamSpec{"client_session_id", isHexDigits, requestParamOptional | requestParamNotLogged},
+	requestParamSpec{"client_session_id", isHexDigits, requestParamNotLogged},
 	requestParamSpec{"propagation_channel_id", isHexDigits, 0},
 	requestParamSpec{"sponsor_id", isHexDigits, 0},
 	requestParamSpec{"client_version", isIntString, 0},
@@ -788,6 +833,8 @@ func normalizeClientPlatform(clientPlatform string) string {
 
 	if strings.Contains(strings.ToLower(clientPlatform), strings.ToLower(CLIENT_PLATFORM_ANDROID)) {
 		return CLIENT_PLATFORM_ANDROID
+	} else if strings.HasPrefix(clientPlatform, CLIENT_PLATFORM_IOS) {
+		return CLIENT_PLATFORM_IOS
 	}
 
 	return CLIENT_PLATFORM_WINDOWS
@@ -798,7 +845,9 @@ func isAnyString(support *SupportServices, value string) bool {
 }
 
 func isMobileClientPlatform(clientPlatform string) bool {
-	return normalizeClientPlatform(clientPlatform) == CLIENT_PLATFORM_ANDROID
+	normalizedClientPlatform := normalizeClientPlatform(clientPlatform)
+	return normalizedClientPlatform == CLIENT_PLATFORM_ANDROID ||
+		normalizedClientPlatform == CLIENT_PLATFORM_IOS
 }
 
 // Input validators follow the legacy validations rules in psi_web.

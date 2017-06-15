@@ -38,11 +38,9 @@ INTERMEDIATE_OUPUT_DIR="${BASE_DIR}/PsiphonTunnel/PsiphonTunnel"
 INTERMEDIATE_OUPUT_FILE="${FRAMEWORK}.framework"
 FRAMEWORK_BINARY="${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}/Versions/A/${FRAMEWORK}"
 
-# The "OPENSSL" tag enables support of OpenSSL for use by IndistinguishableTLS.
-
 PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"
 if [[ ${FORCE_PRIVATE_PLUGINS} == true ]]; then PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"; fi
-BUILD_TAGS="OPENSSL IOS ${PRIVATE_PLUGINS_TAG}"
+BUILD_TAGS="IOS ${PRIVATE_PLUGINS_TAG}"
 
 LIBSSL=${BASE_DIR}/OpenSSL-for-iPhone/lib/libssl.a
 LIBCRYPTO=${BASE_DIR}/OpenSSL-for-iPhone/lib/libcrypto.a
@@ -65,8 +63,7 @@ export PATH=${GOPATH}/bin:${PATH}
 # The GOPATH we're using is temporary, so make sure there isn't one from a previous run.
 rm -rf ${GOPATH}
 
-# When updating the pinned rev, you will have to manually delete go-ios-build
-GOMOBILE_PINNED_REV=a0f998b2d8c7ee81ddbead9202dd5e0184a998ad
+GOMOBILE_PINNED_REV=eb9032959f05f108b05721914dfe09cfa0c5131d
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
 TUNNEL_CORE_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core
@@ -144,9 +141,9 @@ git checkout master
 git checkout -b pinned ${GOMOBILE_PINNED_REV}
 
 go install
-${GOPATH}/bin/gomobile init -v
+${GOPATH}/bin/gomobile init -v -x
 if [[ $? != 0 ]]; then
-  echo "FAILURE: ${GOPATH}/bin/gomobile init -v"
+  echo "FAILURE: ${GOPATH}/bin/gomobile init"
   exit 1
 fi
 

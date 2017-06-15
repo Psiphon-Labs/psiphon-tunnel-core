@@ -9,5 +9,7 @@ All other values will be provided to you by Psiphon Inc.
   "PropagationChannelId": "...",
   "SponsorId": "...",
   "RemoteServerListSignaturePublicKey": "...",
-  "RemoteServerListUrl": "..."
+  "RemoteServerListURLs": "[...]",
+  "ObfuscatedServerListRootURLs": "[...]",
+  "EmitDiagnosticNotices": true /* Useful when testing */
 }
