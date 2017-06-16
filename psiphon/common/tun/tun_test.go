@@ -242,7 +242,7 @@ type testServer struct {
 
 func startTestServer(MTU int) (*testServer, error) {
 
-	logger := newTestLogger()
+	logger := newTestLogger(true)
 
 	noDNSResolvers := func() []net.IP { return make([]net.IP, 0) }
 
@@ -386,7 +386,7 @@ func startTestClient(
 		return nil, fmt.Errorf("startTestClient(): net.Dial failed: %s", err)
 	}
 
-	logger := newTestLogger()
+	logger := newTestLogger(false)
 
 	// Assumes IP addresses are available on test host
 
