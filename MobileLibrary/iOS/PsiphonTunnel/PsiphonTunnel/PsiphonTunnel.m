@@ -35,9 +35,16 @@
 @end
 
 @implementation PsiphonTunnel {
-    _Atomic BOOL _isWaitingForNetworkConnectivity;
+    _Atomic BOOL isWaitingForNetworkConnectivity;
+    _Atomic PsiphonConnectionState connectionState;
+
 }
 
+- (id)init {
+    atomic_init(&isWaitingForNetworkConnectivity, NO);
+    atomic_init(&connectionState, PsiphonConnectionStateDisconnected);
+    return self;
+}
 
 #pragma mark - PsiphonTunnel public methods
 
@@ -55,7 +62,7 @@
         
         [sharedInstance stop];
         sharedInstance.tunneledAppDelegate = tunneledAppDelegate;
-        
+
         return sharedInstance;
     }
 }
@@ -77,6 +84,8 @@
             return FALSE;
         }
 
+        [self changeConnectionStateTo:PsiphonConnectionStateConnecting];
+
         @try {
             NSError *e = nil;
             
@@ -92,12 +101,16 @@
             
             if (e != nil) {
                 [self logMessage:[NSString stringWithFormat: @"Psiphon tunnel start failed: %@", e.localizedDescription]];
+                [self changeConnectionStateTo:PsiphonConnectionStateDisconnected];
                 return FALSE;
             }
         }
         @catch(NSException *exception) {
             [self logMessage:[NSString stringWithFormat: @"Failed to start Psiphon library: %@", exception.reason]];
+            [self changeConnectionStateTo:PsiphonConnectionStateDisconnected];
+            return FALSE;
         }
+
         [self logMessage:@"Psiphon tunnel started"];
         
         return TRUE;
@@ -111,8 +124,14 @@
         GoPsiStop();
         [self logMessage: @"Psiphon library stopped"];
 
-        atomic_init(&_isWaitingForNetworkConnectivity, NO);
+        atomic_store(&isWaitingForNetworkConnectivity, NO);
+        [self changeConnectionStateTo:PsiphonConnectionStateDisconnected];
     }
+}
+
+// See comment in header.
+-(PsiphonConnectionState) getConnectionState {
+    return atomic_load(&connectionState);
 }
 
 // See comment in header.
@@ -412,10 +431,12 @@
 
         if ([count integerValue] > 0) {
             if ([self.tunneledAppDelegate respondsToSelector:@selector(onConnected)]) {
+                [self changeConnectionStateTo:PsiphonConnectionStateConnected];
                 [self.tunneledAppDelegate onConnected];
             }
         } else {
             if ([self.tunneledAppDelegate respondsToSelector:@selector(onConnecting)]) {
+                [self changeConnectionStateTo:PsiphonConnectionStateConnecting];
                 [self.tunneledAppDelegate onConnecting];
             }
         }
@@ -615,8 +636,10 @@
     BOOL hasConnectivity = [reachability currentReachabilityStatus] != NotReachable;
 
     // If we had connectivity and now we've lost it, let the app know by calling onStartedWaitingForNetworkConnectivity.
-    BOOL wasWaitingForNetworkConnectivity = atomic_exchange(&_isWaitingForNetworkConnectivity, !hasConnectivity);
+    BOOL wasWaitingForNetworkConnectivity = atomic_exchange(&isWaitingForNetworkConnectivity, !hasConnectivity);
     if (!hasConnectivity && !wasWaitingForNetworkConnectivity) {
+        [self changeConnectionStateTo:PsiphonConnectionStateWaitingForNetwork];
+
         // HasNetworkConnectivity may be called many times, but only call
         // onStartedWaitingForNetworkConnectivity once per loss of connectivity,
         // so the library consumer may log a single message.
@@ -649,6 +672,18 @@
 - (void)logMessage:(NSString *)message {
     if ([self.tunneledAppDelegate respondsToSelector:@selector(onDiagnosticMessage:)]) {
         [self.tunneledAppDelegate onDiagnosticMessage:message];
+    }
+}
+
+- (void)changeConnectionStateTo:(PsiphonConnectionState)newState {
+    // Store the new state and get the old state.
+    PsiphonConnectionState oldState = atomic_exchange(&connectionState, newState);
+
+    // If the state has changed, inform the app.
+    if (oldState != newState) {
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onConnectionStateChangedFrom:to:)]) {
+            [self.tunneledAppDelegate onConnectionStateChangedFrom:oldState to:newState];
+        }
     }
 }
 

@@ -267,7 +267,7 @@ extension ViewController: TunneledAppDelegate {
                 
                 // Then we'll make a different "what is my IP" request via makeRequestViaUrlProxy().
                 DispatchQueue.global(qos: .default).async {
-                    let url = "http://ipinfo.io/json"
+                    let url = "http://ifconfig.co/json"
                     self.makeRequestViaUrlProxy(url) {
                         (_ result: String?) in
                         
@@ -276,9 +276,14 @@ extension ViewController: TunneledAppDelegate {
                             return
                         }
                         
+						// Do a little pretty-printing.
+						let prettyResult = result?.replacingOccurrences(of: ",", with: ",\n  ")
+							.replacingOccurrences(of: "{", with: "{\n  ")
+							.replacingOccurrences(of: "}", with: "\n}")
+
                         DispatchQueue.main.sync {
                             // Load the result into the view.
-                            self.appendToView("Result from \(url):\n\(result!)")
+                            self.appendToView("Result from \(url):\n\(prettyResult!)")
                         }
                         
                         // We're done with the Psiphon tunnel, so stop it.
@@ -290,7 +295,7 @@ extension ViewController: TunneledAppDelegate {
             }
         }
     }
-    
+
     func onListeningSocksProxyPort(_ port: Int) {
         NSLog("onListeningSocksProxyPort: %d", port)
         // Record the port being used so that we can proxy through it later.

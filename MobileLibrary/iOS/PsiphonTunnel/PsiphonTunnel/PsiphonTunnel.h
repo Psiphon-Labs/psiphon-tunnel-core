@@ -33,6 +33,28 @@ FOUNDATION_EXPORT double PsiphonTunnelVersionNumber;
 //! Project version string for PsiphonTunnel.
 FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
 
+
+/*!
+ The set of possible connection states the tunnel can be in.
+ Swift:
+ @code
+ public enum PsiphonConnectionState : Int {
+     case disconnected
+     case connecting
+     case connected
+     case waitingForNetwork
+ }
+ @endcode
+ */
+typedef NS_ENUM(NSInteger, PsiphonConnectionState)
+{
+    PsiphonConnectionStateDisconnected,
+    PsiphonConnectionStateConnecting,
+    PsiphonConnectionStateConnected,
+    PsiphonConnectionStateWaitingForNetwork
+};
+
+
 /*!
  @protocol TunneledAppDelegate
  Used to communicate with the application that is using the PsiphonTunnel framework,
@@ -125,8 +147,20 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  Called when the tunnel notices that the device has no network connectivity and
  begins waiting to regain it. When connecitvity is regained, `onConnecting`
  will be called.
+ Swift: @code func onStartedWaitingForNetworkConnectivity @endcode
  */
 - (void)onStartedWaitingForNetworkConnectivity;
+
+/*!
+ Called when the tunnel's connection state changes.
+ Note that this will be called _in addition to, but before_ `onConnecting`, etc.
+ Also note that this will not be called for the initial disconnected state
+ (since it didn't change from anything).
+ @param oldState  The previous connection state.
+ @param newState  The new connection state.
+ Swift: @code func onConnectionStateChanged(from oldState: PsiphonConnectionState, to newState: PsiphonConnectionState) @endcode
+ */
+- (void)onConnectionStateChangedFrom:(PsiphonConnectionState)oldState to:(PsiphonConnectionState)newState;
 
 /*!
  Called to indicate that tunnel-core is exiting imminently (usually do to
@@ -248,6 +282,7 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  Returns an instance of PsiphonTunnel. This is either a new instance or the pre-existing singleton. If an instance already exists, it will be stopped when this function is called.
  @param tunneledAppDelegate  The delegate implementation to use for callbacks.
  @return  The PsiphonTunnel instance.
+ Swift: @code open class func newPsiphonTunnel(_ tunneledAppDelegate: TunneledAppDelegate) -> Self @endcode
  */
 + (PsiphonTunnel * _Nonnull)newPsiphonTunnel:(id<TunneledAppDelegate> _Nonnull)tunneledAppDelegate;
 
@@ -255,13 +290,22 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  Start connecting the PsiphonTunnel. Returns before connection is complete -- delegate callbacks (such as `onConnected`) are used to indicate progress and state.
  @param embeddedServerEntries  Pre-existing server entries to use when attempting to connect to a server. May be null if there are no embedded server entries.
  @return TRUE if the connection start was successful, FALSE otherwise.
+ Swift: @code open func start(_ embeddedServerEntries: String?) -> Bool @endcode
  */
 - (BOOL)start:(NSString * _Nullable)embeddedServerEntries;
 
 /*!
  Stop the tunnel (regardless of its current connection state). Returns before full stop is complete -- `TunneledAppDelegate::onExiting` is called when complete.
+ Swift: @code open func stop() @endcode
  */
 - (void)stop;
+
+/*!
+ Returns the current tunnel connection state.
+ @return  The current connection state.
+ Swift: @code open func getConnectionState() -> PsiphonConnectionState @endcode
+ */
+- (PsiphonConnectionState)getConnectionState;
 
 /*!
  Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics information in a particular format, then calls this function to upload it for later investigation.
@@ -270,6 +314,7 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  @param b64EncodedPublicKey  The key that will be used to encrypt the payload before uploading.
  @param uploadServer  The server and path to which the data will be uploaded.
  @param uploadServerHeaders  The request headers that will be used when uploading.
+ Swift: @code open func sendFeedback(_ feedbackJson: String, publicKey b64EncodedPublicKey: String, uploadServer: String, uploadServerHeaders: String) @endcode
  */
 - (void)sendFeedback:(NSString * _Nonnull)feedbackJson
            publicKey:(NSString * _Nonnull)b64EncodedPublicKey
