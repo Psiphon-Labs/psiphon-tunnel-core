@@ -33,10 +33,10 @@ type Logger interface {
 // LogContext is interface-compatible with the return values from
 // psiphon/server.ContextLogger.WithContext/WithContextFields.
 type LogContext interface {
-	Debug(message string)
-	Info(message string)
-	Warning(message string)
-	Error(message string)
+	Debug(args ...interface{})
+	Info(args ...interface{})
+	Warning(args ...interface{})
+	Error(args ...interface{})
 }
 
 // LogFields is type-compatible with psiphon/server.LogFields

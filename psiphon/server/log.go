@@ -118,6 +118,34 @@ func (logger *ContextLogger) LogPanicRecover(recoverValue interface{}, stack []b
 		})
 }
 
+type commonLogger struct {
+	contextLogger *ContextLogger
+}
+
+func (logger *commonLogger) WithContext() common.LogContext {
+	// Patch context to be correct parent
+	return logger.contextLogger.WithContext().WithField("context", common.GetParentContext())
+}
+
+func (logger *commonLogger) WithContextFields(fields common.LogFields) common.LogContext {
+	// Patch context to be correct parent
+	return logger.contextLogger.WithContextFields(LogFields(fields)).WithField("context", common.GetParentContext())
+}
+
+func (logger *commonLogger) LogMetric(metric string, fields common.LogFields) {
+	fields["event_name"] = metric
+	logger.contextLogger.LogRawFieldsWithTimestamp(LogFields(fields))
+}
+
+// CommonLogger wraps a ContextLogger instance with an interface
+// that conforms to common.Logger. This is used to make the ContextLogger
+// available to other packages that don't import the "server" package.
+func CommonLogger(contextLogger *ContextLogger) *commonLogger {
+	return &commonLogger{
+		contextLogger: contextLogger,
+	}
+}
+
 // NewLogWriter returns an io.PipeWriter that can be used to write
 // to the global logger. Caller must Close() the writer.
 func NewLogWriter() *io.PipeWriter {

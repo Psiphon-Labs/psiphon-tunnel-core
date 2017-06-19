@@ -34,19 +34,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
-// setUDPChannel sets the single UDP channel for this sshClient.
-// Each sshClient may have only one concurrent UDP channel. Each
-// UDP channel multiplexes many UDP port forwards via the udpgw
-// protocol. Any existing UDP channel is closed.
-func (sshClient *sshClient) setUDPChannel(channel ssh.Channel) {
-	sshClient.Lock()
-	if sshClient.udpChannel != nil {
-		sshClient.udpChannel.Close()
-	}
-	sshClient.udpChannel = channel
-	sshClient.Unlock()
-}
-
 // handleUDPChannel implements UDP port forwarding. A single UDP
 // SSH channel follows the udpgw protocol, which multiplexes many
 // UDP port forwards.

@@ -141,7 +141,6 @@ import (
 )
 
 const (
-	CHANNEL_NAME                         = "tun@psiphon.ca"
 	DEFAULT_MTU                          = 1500
 	DEFAULT_DOWNSTREAM_PACKET_QUEUE_SIZE = 64
 	DEFAULT_IDLE_SESSION_EXPIRY_SECONDS  = 300
@@ -300,12 +299,14 @@ func (server *Server) Stop() {
 	server.config.Logger.WithContext().Info("stopped")
 }
 
+type AllowedPortChecker func(upstreamIPAddress net.IP, port int) bool
+
 // ClientConnected handles new client connections, creating or resuming
 // a session and returns with client packet handlers running.
 //
 // sessionID is used to identify sessions for resumption.
 //
-// transportConn provides the channel for relaying packets to and from
+// transport provides the channel for relaying packets to and from
 // the client.
 //
 // checkAllowedTCPPortFunc/checkAllowedUDPPortFunc are callbacks used
@@ -324,8 +325,8 @@ func (server *Server) Stop() {
 // a new SSH client connection.)
 func (server *Server) ClientConnected(
 	sessionID string,
-	transportConn net.Conn,
-	checkAllowedTCPPortFunc, checkAllowedUDPPortFunc func(port int) bool) error {
+	transport io.ReadWriteCloser,
+	checkAllowedTCPPortFunc, checkAllowedUDPPortFunc AllowedPortChecker) error {
 
 	// It's unusual to call both sync.WaitGroup.Add() _and_ Done() in the same
 	// goroutine. There's no other place to call Add() since ClientConnected is
@@ -408,7 +409,7 @@ func (server *Server) ClientConnected(
 		}
 	}
 
-	server.resumeSession(clientSession, NewChannel(transportConn, MTU))
+	server.resumeSession(clientSession, NewChannel(transport, MTU))
 
 	return nil
 }
@@ -921,8 +922,8 @@ type session struct {
 	assignedIPv6Address      net.IP
 	setOriginalIPv6Address   int32
 	originalIPv6Address      net.IP
-	checkAllowedTCPPortFunc  func(port int) bool
-	checkAllowedUDPPortFunc  func(port int) bool
+	checkAllowedTCPPortFunc  AllowedPortChecker
+	checkAllowedUDPPortFunc  AllowedPortChecker
 	downstreamPackets        chan []byte
 	freePackets              chan []byte
 	workers                  *sync.WaitGroup
@@ -1135,10 +1136,10 @@ type ClientConfig struct {
 	// should be obtained from the packet tunnel server.
 	MTU int
 
-	// TransportConn is an established transport channel
-	// that will be used to relay packets to and from a
-	// packet tunnel server.
-	TransportConn net.Conn
+	// Transport is an established transport channel that
+	// will be used to relay packets to and from a packet
+	// tunnel server.
+	Transport io.ReadWriteCloser
 
 	// TunFD specifies a file descriptor to use to read
 	// and write packets to be relayed to the client. When
@@ -1204,7 +1205,7 @@ func NewClient(config *ClientConfig) (*Client, error) {
 	return &Client{
 		config:      config,
 		device:      device,
-		channel:     NewChannel(config.TransportConn, config.MTU),
+		channel:     NewChannel(config.Transport, config.MTU),
 		metrics:     new(packetMetrics),
 		runContext:  runContext,
 		stopRunning: stopRunning,
@@ -1646,6 +1647,16 @@ func processPacket(
 		}
 	}
 
+	var upstreamIPAddress net.IP
+	if direction == packetDirectionServerUpstream {
+
+		upstreamIPAddress = destinationIPAddress
+
+	} else if direction == packetDirectionServerDownstream {
+
+		upstreamIPAddress = sourceIPAddress
+	}
+
 	// Enforce traffic rules (allowed TCP/UDP ports).
 
 	if direction == packetDirectionServerUpstream ||
@@ -1653,7 +1664,8 @@ func processPacket(
 
 		if protocol == internetProtocolTCP {
 
-			if !session.checkAllowedTCPPortFunc(int(destinationPort)) {
+			if !session.checkAllowedTCPPortFunc(
+				upstreamIPAddress, int(destinationPort)) {
 
 				metrics.rejectedPacket(direction, packetRejectTCPPort)
 				return false
@@ -1661,7 +1673,8 @@ func processPacket(
 
 		} else if protocol == internetProtocolUDP {
 
-			if !session.checkAllowedUDPPortFunc(int(destinationPort)) {
+			if !session.checkAllowedUDPPortFunc(
+				upstreamIPAddress, int(destinationPort)) {
 
 				metrics.rejectedPacket(direction, packetRejectUDPPort)
 				return false
@@ -1683,7 +1696,6 @@ func processPacket(
 
 	// Configure rewriting.
 
-	var upstreamIPAddress net.IP
 	var checksumAccumulator int32
 	var rewriteSourceIPAddress, rewriteDestinationIPAddress net.IP
 
@@ -1711,8 +1723,6 @@ func processPacket(
 				rewriteDestinationIPAddress = session.DNSResolverIPv6Addresses[rand.Intn(len(session.DNSResolverIPv6Addresses))]
 			}
 		}
-
-		upstreamIPAddress = destinationIPAddress
 
 	} else if direction == packetDirectionServerDownstream {
 
@@ -1755,8 +1765,6 @@ func processPacket(
 				}
 			}
 		}
-
-		upstreamIPAddress = sourceIPAddress
 	}
 
 	// Apply rewrites. IP (v4 only) and TCP/UDP all have packet
@@ -1990,13 +1998,13 @@ func (device *Device) Close() error {
 	return device.deviceIO.Close()
 }
 
-// Channel manages packet transport over a communications
-// channel. Any net.Conn can provide transport. In psiphond,
-// the net.Conn will be an SSH channel. Channel I/O frames
+// Channel manages packet transport over a communications channel.
+// Any io.ReadWriteCloser can provide transport. In psiphond, the
+// io.ReadWriteCloser will be an SSH channel. Channel I/O frames
 // packets with a length header and uses static, preallocated
 // buffers to avoid GC churn.
 type Channel struct {
-	conn           net.Conn
+	transport      io.ReadWriteCloser
 	inboundBuffer  []byte
 	outboundBuffer []byte
 }
@@ -2008,9 +2016,9 @@ const (
 )
 
 // NewChannel initializes a new Channel.
-func NewChannel(conn net.Conn, MTU int) *Channel {
+func NewChannel(transport io.ReadWriteCloser, MTU int) *Channel {
 	return &Channel{
-		conn:           conn,
+		transport:      transport,
 		inboundBuffer:  make([]byte, channelHeaderSize+MTU),
 		outboundBuffer: make([]byte, channelHeaderSize+MTU),
 	}
@@ -2023,7 +2031,7 @@ func NewChannel(conn net.Conn, MTU int) *Channel {
 func (channel *Channel) ReadPacket() ([]byte, error) {
 
 	header := channel.inboundBuffer[0:channelHeaderSize]
-	_, err := io.ReadFull(channel.conn, header)
+	_, err := io.ReadFull(channel.transport, header)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -2034,7 +2042,7 @@ func (channel *Channel) ReadPacket() ([]byte, error) {
 	}
 
 	packet := channel.inboundBuffer[channelHeaderSize : channelHeaderSize+size]
-	_, err = io.ReadFull(channel.conn, packet)
+	_, err = io.ReadFull(channel.transport, packet)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -2046,36 +2054,31 @@ func (channel *Channel) ReadPacket() ([]byte, error) {
 // Concurrent calls to WritePacket are not supported.
 func (channel *Channel) WritePacket(packet []byte) error {
 
-	// Flow control assumed to be provided by the
-	// transport conn. In the case of SSH, the channel
-	// window size will determine whether the packet
-	// data is transmitted immediately or whether the
-	// conn.Write will block. When the channel window
-	// is full and conn.Write blocks, the sender's tun
-	// device will not be read (client case) or the send
-	// queue will fill (server case) and packets will
-	// be dropped. In this way, the channel window size
-	// will influence the TCP window size for tunneled
-	// traffic.
+	// Flow control assumed to be provided by the transport. In the case
+	// of SSH, the channel window size will determine whether the packet
+	// data is transmitted immediately or whether the transport.Write will
+	// block. When the channel window is full and transport.Write blocks,
+	// the sender's tun device will not be read (client case) or the send
+	// queue will fill (server case) and packets will be dropped. In this
+	// way, the channel window size will influence the TCP window size for
+	// tunneled traffic.
 
-	// Writes are not batched up but dispatched immediately.
-	// When the transport is an SSH channel, the overhead
-	// per tunneled packet includes:
+	// Writes are not batched up but dispatched immediately. When the
+	// transport is an SSH channel, the overhead per tunneled packet includes:
 	//
 	// - SSH_MSG_CHANNEL_DATA: 5 bytes (https://tools.ietf.org/html/rfc4254#section-5.2)
 	// - SSH packet: ~28 bytes (https://tools.ietf.org/html/rfc4253#section-5.3), with MAC
 	// - TCP/IP transport for SSH: 40 bytes for IPv4
 	//
-	// Also, when the transport in an SSH channel, batching
-	// of packets will naturally occur when the SSH channel
-	// window is full.
+	// Also, when the transport in an SSH channel, batching of packets will
+	// naturally occur when the SSH channel window is full.
 
 	// Assumes MTU <= 64K and len(packet) <= MTU
 
 	size := len(packet)
 	binary.BigEndian.PutUint16(channel.outboundBuffer, uint16(size))
 	copy(channel.outboundBuffer[channelHeaderSize:], packet)
-	_, err := channel.conn.Write(channel.outboundBuffer[0 : channelHeaderSize+size])
+	_, err := channel.transport.Write(channel.outboundBuffer[0 : channelHeaderSize+size])
 	if err != nil {
 		return common.ContextError(err)
 	}
@@ -2086,5 +2089,5 @@ func (channel *Channel) WritePacket(packet []byte) error {
 // Close interrupts any blocking Read/Write calls and
 // closes the channel transport.
 func (channel *Channel) Close() error {
-	return channel.conn.Close()
+	return channel.transport.Close()
 }

@@ -36,6 +36,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 )
 
@@ -77,6 +78,38 @@ func RunServices(configJSON []byte) error {
 	}
 
 	supportServices.TunnelServer = tunnelServer
+
+	if config.RunPacketTunnel {
+
+		packetTunnelServer, err := tun.NewServer(&tun.ServerConfig{
+			Logger: CommonLogger(log),
+			GetDNSResolverIPv4Addresses: supportServices.DNSResolver.GetAllIPv4,
+			GetDNSResolverIPv6Addresses: supportServices.DNSResolver.GetAllIPv6,
+			EgressInterface:             config.PacketTunnelEgressInterface,
+			DownStreamPacketQueueSize:   config.PacketTunnelDownStreamPacketQueueSize,
+			SessionIdleExpirySeconds:    config.PacketTunnelSessionIdleExpirySeconds,
+		})
+		if err != nil {
+			log.WithContextFields(LogFields{"error": err}).Error("init packet tunnel failed")
+			return common.ContextError(err)
+		}
+
+		supportServices.PacketTunnelServer = packetTunnelServer
+	}
+
+	// After this point, errors should be delivered to the "errors" channel and
+	// orderly shutdown should flow through to the end of the function to ensure
+	// all workers are synchronously stopped.
+
+	if config.RunPacketTunnel {
+		supportServices.PacketTunnelServer.Start()
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			<-shutdownBroadcast
+			supportServices.PacketTunnelServer.Stop()
+		}()
+	}
 
 	if config.RunLoadMonitor() {
 		waitGroup.Add(1)
@@ -330,13 +363,14 @@ func logServerLoad(server *TunnelServer) {
 // components, which allows these data components to be refreshed
 // without restarting the server process.
 type SupportServices struct {
-	Config          *Config
-	TrafficRulesSet *TrafficRulesSet
-	OSLConfig       *osl.Config
-	PsinetDatabase  *psinet.Database
-	GeoIPService    *GeoIPService
-	DNSResolver     *DNSResolver
-	TunnelServer    *TunnelServer
+	Config             *Config
+	TrafficRulesSet    *TrafficRulesSet
+	OSLConfig          *osl.Config
+	PsinetDatabase     *psinet.Database
+	GeoIPService       *GeoIPService
+	DNSResolver        *DNSResolver
+	TunnelServer       *TunnelServer
+	PacketTunnelServer *tun.Server
 }
 
 // NewSupportServices initializes a new SupportServices.

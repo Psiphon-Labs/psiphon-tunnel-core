@@ -308,7 +308,7 @@ func (server *testServer) run() {
 				return
 			}
 
-			checkAllowedPortFunc := func(int) bool { return true }
+			checkAllowedPortFunc := func(net.IP, int) bool { return true }
 
 			server.tunServer.ClientConnected(
 				sessionID,
@@ -396,7 +396,7 @@ func startTestClient(
 		IPv6AddressCIDR:   "fd26:b6a6:4454:310a:0000:0000:0000:0001/64",
 		RouteDestinations: routeDestinations,
 		TunFD:             -1,
-		TransportConn:     unixConn,
+		Transport:         unixConn,
 		MTU:               MTU,
 	}
 
@@ -679,18 +679,18 @@ func (context *testLoggerContext) log(priority, message string) {
 	}
 }
 
-func (context *testLoggerContext) Debug(message string) {
-	context.log("DEBUG", message)
+func (context *testLoggerContext) Debug(args ...interface{}) {
+	context.log("DEBUG", fmt.Sprint(args...))
 }
 
-func (context *testLoggerContext) Info(message string) {
-	context.log("INFO", message)
+func (context *testLoggerContext) Info(args ...interface{}) {
+	context.log("INFO", fmt.Sprint(args...))
 }
 
-func (context *testLoggerContext) Warning(message string) {
-	context.log("WARNING", message)
+func (context *testLoggerContext) Warning(args ...interface{}) {
+	context.log("WARNING", fmt.Sprint(args...))
 }
 
-func (context *testLoggerContext) Error(message string) {
-	context.log("ERROR", message)
+func (context *testLoggerContext) Error(args ...interface{}) {
+	context.log("ERROR", fmt.Sprint(args...))
 }
