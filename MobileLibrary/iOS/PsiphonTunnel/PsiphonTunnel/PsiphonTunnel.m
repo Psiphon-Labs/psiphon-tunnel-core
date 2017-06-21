@@ -47,6 +47,8 @@
 
 - (id)init {
     atomic_init(&connectionState, PsiphonConnectionStateDisconnected);
+    atomic_init(&localSocksProxyPort, 0);
+    atomic_init(&localHttpProxyPort, 0);
     reachability = [Reachability reachabilityForInternetConnection];
 
     return self;
@@ -171,6 +173,9 @@
         GoPsiStop();
         
         [self logMessage: @"Psiphon library stopped"];
+
+        atomic_store(&localSocksProxyPort, 0);
+        atomic_store(&localHttpProxyPort, 0);
 
         [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
     }
