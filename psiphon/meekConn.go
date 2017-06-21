@@ -799,9 +799,10 @@ func makeMeekCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
 	// Make the JSON data
 	serverAddress := meekConfig.PsiphonServerAddress
 	cookieData := &protocol.MeekCookieData{
-		ServerAddress:       serverAddress,
-		SessionID:           meekConfig.SessionID,
-		MeekProtocolVersion: MEEK_PROTOCOL_VERSION,
+		ServerAddress:        serverAddress,
+		SessionID:            meekConfig.SessionID,
+		MeekProtocolVersion:  MEEK_PROTOCOL_VERSION,
+		ClientTunnelProtocol: meekConfig.ClientTunnelProtocol,
 	}
 	serializedCookie, err := json.Marshal(cookieData)
 	if err != nil {
