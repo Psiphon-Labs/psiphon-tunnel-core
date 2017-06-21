@@ -28,7 +28,9 @@ import (
 	"net/url"
 	"os"
 	"syscall"
+	"time"
 
+	"github.com/Psiphon-Inc/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
@@ -135,4 +137,51 @@ func (writer *SyncFileWriter) Write(p []byte) (n int, err error) {
 		writer.count = 0
 	}
 	return
+}
+
+// emptyAddr implements the net.Addr interface. emptyAddr is intended to be
+// used as a stub, when a net.Addr is required but not used.
+type emptyAddr struct {
+}
+
+func (e *emptyAddr) String() string {
+	return ""
+}
+
+func (e *emptyAddr) Network() string {
+	return ""
+}
+
+// channelConn implements the net.Conn interface. channelConn allows use of
+// SSH.Channels in contexts where a net.Conn is expected. Only Read/Write/Close
+// are implemented and the remaining functions are stubs and expected to not
+// be used.
+type channelConn struct {
+	ssh.Channel
+}
+
+func newChannelConn(channel ssh.Channel) *channelConn {
+	return &channelConn{
+		Channel: channel,
+	}
+}
+
+func (conn *channelConn) LocalAddr() net.Addr {
+	return new(emptyAddr)
+}
+
+func (conn *channelConn) RemoteAddr() net.Addr {
+	return new(emptyAddr)
+}
+
+func (conn *channelConn) SetDeadline(_ time.Time) error {
+	return common.ContextError(errors.New("unsupported"))
+}
+
+func (conn *channelConn) SetReadDeadline(_ time.Time) error {
+	return common.ContextError(errors.New("unsupported"))
+}
+
+func (conn *channelConn) SetWriteDeadline(_ time.Time) error {
+	return common.ContextError(errors.New("unsupported"))
 }

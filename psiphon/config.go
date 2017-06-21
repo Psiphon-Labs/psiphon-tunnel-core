@@ -212,6 +212,9 @@ type Config struct {
 	// If there are multiple IP addresses on an interface use the first IPv4 address.
 	ListenInterface string
 
+	// DisableLocalSocksProxy disables running the local SOCKS proxy.
+	DisableLocalSocksProxy bool
+
 	// LocalSocksProxyPort specifies a port number for the local SOCKS proxy
 	// running at 127.0.0.1. For the default value, 0, the system selects a free
 	// port (a notice reporting the selected port is emitted).
@@ -221,6 +224,9 @@ type Config struct {
 	// running at 127.0.0.1. For the default value, 0, the system selects a free
 	// port (a notice reporting the selected port is emitted).
 	LocalHttpProxyPort int
+
+	// DisableLocalHTTPProxy disables running the local HTTP proxy.
+	DisableLocalHTTPProxy bool
 
 	// ConnectionWorkerPoolSize specifies how many connection attempts to attempt
 	// in parallel. The default, 0, uses CONNECTION_WORKER_POOL_SIZE which is
@@ -461,6 +467,13 @@ type Config struct {
 	// could reveal user browsing activity, it's intended for debugging and testing
 	// only.
 	EmitSLOKs bool
+
+	// PacketTunnelTunDeviceFileDescriptor specifies a tun device file descriptor
+	// to use for running a packet tunnel. When set, a packet tunnel is established
+	// through the server and packets are relayed via the tun device. The file
+	// descriptor is duped in NewController.
+	// When PacketTunnelTunDeviceFileDescriptor is set, TunnelPoolSize must be 1.
+	PacketTunnelTunFileDescriptor *int
 }
 
 // DownloadURL specifies a URL for downloading resources along with parameters
@@ -641,6 +654,11 @@ func LoadConfig(configJson []byte) (*Config, error) {
 				return nil, common.ContextError(errors.New("missing ObfuscatedServerListDownloadDirectory"))
 			}
 		}
+	}
+
+	// This constraint is expected by logic in Controller.runTunnels()
+	if config.PacketTunnelTunFileDescriptor != nil && config.TunnelPoolSize != 1 {
+		return nil, common.ContextError(errors.New("PacketTunnelTunFileDescriptor requires TunnelPoolSize to be 1"))
 	}
 
 	if config.TunnelConnectTimeoutSeconds == nil {
