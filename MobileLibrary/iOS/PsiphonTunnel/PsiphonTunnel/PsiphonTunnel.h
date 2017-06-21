@@ -325,14 +325,14 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 - (PsiphonConnectionState)getConnectionState;
 
 /*!
- Provides the port number of the local SOCKS proxy. Only valid when currently connected.
+ Provides the port number of the local SOCKS proxy. Only valid when currently connected (will return 0 otherwise).
  @return  The current local SOCKS proxy port number.
  Swift: @code open func getLocalSocksProxyPort() -> Int @endcode
  */
 -(NSInteger)getLocalSocksProxyPort;
 
 /*!
- Provides the port number of the local HTTP proxy. Only valid when currently connected.
+ Provides the port number of the local HTTP proxy. Only valid when currently connected (will return 0 otherwise).
  @return  The current local HTTP proxy port number.
  Swift: @code open func getLocalHttpProxyPort() -> Int @endcode
  */
