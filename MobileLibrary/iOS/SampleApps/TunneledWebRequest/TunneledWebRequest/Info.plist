@@ -22,6 +22,18 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>ifconfig.co</key>
+			<string>YES</string>
+			<key>ip-api.com</key>
+			<string>YES</string>
+			<key>ipinfo.io</key>
+			<string>YES</string>
+		</dict>
+	</dict>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
