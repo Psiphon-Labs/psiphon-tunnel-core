@@ -90,3 +90,12 @@ func splitIPPrefixLen(IPAddressCIDR string) (string, string, error) {
 
 	return IP.String(), strconv.Itoa(prefixLen), nil
 }
+
+func getMTU(configMTU int) int {
+	if configMTU <= 0 {
+		return DEFAULT_MTU
+	} else if configMTU > 65536 {
+		return 65536
+	}
+	return configMTU
+}

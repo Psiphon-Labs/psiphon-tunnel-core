@@ -200,6 +200,7 @@ type ServerConfig struct {
 	// tunnel. Clients must be configured with the same MTU. The
 	// server's tun device will be set to this MTU value and is
 	// assumed not to change for the duration of the server.
+	// When MTU is 0, a default value is used.
 	MTU int
 
 	// SessionIdleExpirySeconds specifies how long to retain client
@@ -347,10 +348,7 @@ func (server *Server) ClientConnected(
 	server.config.Logger.WithContextFields(
 		common.LogFields{"sessionID": sessionID}).Info("client connected")
 
-	MTU := DEFAULT_MTU
-	if server.config.MTU > 0 {
-		MTU = server.config.MTU
-	}
+	MTU := getMTU(server.config.MTU)
 
 	clientSession := server.getSession(sessionID)
 
@@ -1134,6 +1132,7 @@ type ClientConfig struct {
 
 	// MTU is the packet MTU value to use; this value
 	// should be obtained from the packet tunnel server.
+	// When MTU is 0, a default value is used.
 	MTU int
 
 	// Transport is an established transport channel that
@@ -1205,7 +1204,7 @@ func NewClient(config *ClientConfig) (*Client, error) {
 	return &Client{
 		config:      config,
 		device:      device,
-		channel:     NewChannel(config.Transport, config.MTU),
+		channel:     NewChannel(config.Transport, getMTU(config.MTU)),
 		metrics:     new(packetMetrics),
 		runContext:  runContext,
 		stopRunning: stopRunning,
@@ -1903,7 +1902,7 @@ func NewServerDevice(config *ServerConfig) (*Device, error) {
 		return nil, common.ContextError(err)
 	}
 
-	return newDevice(deviceName, deviceIO, config.MTU), nil
+	return newDevice(deviceName, deviceIO, getMTU(config.MTU)), nil
 }
 
 // NewClientDevice creates and configures a new client tun device.
@@ -1921,7 +1920,7 @@ func NewClientDevice(config *ClientConfig) (*Device, error) {
 		return nil, common.ContextError(err)
 	}
 
-	return newDevice(deviceName, deviceIO, config.MTU), nil
+	return newDevice(deviceName, deviceIO, getMTU(config.MTU)), nil
 }
 
 func newDevice(
@@ -1946,11 +1945,13 @@ func NewClientDeviceFromFD(config *ClientConfig) (*Device, error) {
 		return nil, common.ContextError(err)
 	}
 
+	MTU := getMTU(config.MTU)
+
 	return &Device{
 		name:           "",
 		deviceIO:       fileConn,
-		inboundBuffer:  makeDeviceInboundBuffer(config.MTU),
-		outboundBuffer: makeDeviceOutboundBuffer(config.MTU),
+		inboundBuffer:  makeDeviceInboundBuffer(MTU),
+		outboundBuffer: makeDeviceOutboundBuffer(MTU),
 	}, nil
 }
 
