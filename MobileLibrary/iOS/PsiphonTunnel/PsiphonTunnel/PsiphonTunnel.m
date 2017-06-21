@@ -17,6 +17,7 @@
  *
  */
 
+#import <arpa/inet.h>
 #import <net/if.h>
 #import <stdatomic.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
@@ -35,14 +36,19 @@
 @end
 
 @implementation PsiphonTunnel {
-    _Atomic BOOL isWaitingForNetworkConnectivity;
     _Atomic PsiphonConnectionState connectionState;
 
+    _Atomic NSInteger localSocksProxyPort;
+    _Atomic NSInteger localHttpProxyPort;
+
+    Reachability* reachability;
+    NetworkStatus previousNetworkStatus;
 }
 
 - (id)init {
-    atomic_init(&isWaitingForNetworkConnectivity, NO);
     atomic_init(&connectionState, PsiphonConnectionStateDisconnected);
+    reachability = [Reachability reachabilityForInternetConnection];
+
     return self;
 }
 
@@ -68,7 +74,15 @@
 }
 
 // See comment in header
--(BOOL) start:(NSString * _Nullable)embeddedServerEntries {
+-(BOOL) start:(BOOL)ifNeeded {
+    if (ifNeeded) {
+        return [self startIfNeeded];
+    }
+
+    return [self start];
+}
+
+-(BOOL) start {
     @synchronized (PsiphonTunnel.self) {
         [self stop];
         [self logMessage:@"Starting Psiphon library"];
@@ -81,14 +95,21 @@
         
         NSString *configStr = [self getConfig];
         if (configStr == nil) {
+            [self logMessage:@"Error getting config from delegate"];
             return FALSE;
         }
 
-        [self changeConnectionStateTo:PsiphonConnectionStateConnecting];
+        NSString *embeddedServerEntries = [self.tunneledAppDelegate getEmbeddedServerEntries];
+        if (embeddedServerEntries == nil) {
+            [self logMessage:@"Error getting embedded server entries from delegate"];
+            return FALSE;
+        }
+
+        [self changeConnectionStateTo:PsiphonConnectionStateConnecting evenIfSameState:NO];
 
         @try {
             NSError *e = nil;
-            
+
             BOOL res = GoPsiStart(
                            configStr,
                            embeddedServerEntries,
@@ -101,15 +122,17 @@
             
             if (e != nil) {
                 [self logMessage:[NSString stringWithFormat: @"Psiphon tunnel start failed: %@", e.localizedDescription]];
-                [self changeConnectionStateTo:PsiphonConnectionStateDisconnected];
+                [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
                 return FALSE;
             }
         }
         @catch(NSException *exception) {
             [self logMessage:[NSString stringWithFormat: @"Failed to start Psiphon library: %@", exception.reason]];
-            [self changeConnectionStateTo:PsiphonConnectionStateDisconnected];
+            [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
             return FALSE;
         }
+
+        [self startInternetReachabilityMonitoring];
 
         [self logMessage:@"Psiphon tunnel started"];
         
@@ -117,21 +140,55 @@
     }
 }
 
+-(BOOL) startIfNeeded {
+    PsiphonConnectionState connState = [self getConnectionState];
+    BOOL localProxyAlive = [self isLocalProxyAlive];
+
+    // We have found that on iOS, the local proxies will get killed before the
+    // tunnel gets disconnected (or before it realizes it's dead). So we need to
+    // start if we either in a disconnected state or if our local proxies are dead.
+    if ((connState == PsiphonConnectionStateDisconnected) ||
+        (connState == PsiphonConnectionStateConnected && !localProxyAlive)) {
+        return [self start];
+    }
+
+    // Otherwise we're already connected, so let the app know via the same signaling
+    // that we'd use if we were doing a connection sequence.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self changeConnectionStateTo:connState evenIfSameState:YES];
+    });
+
+    return TRUE;
+}
+
 // See comment in header.
 -(void) stop {
     @synchronized (PsiphonTunnel.self) {
         [self logMessage: @"Stopping Psiphon library"];
+
+        [self stopInternetReachabilityMonitoring];
+
         GoPsiStop();
+        
         [self logMessage: @"Psiphon library stopped"];
 
-        atomic_store(&isWaitingForNetworkConnectivity, NO);
-        [self changeConnectionStateTo:PsiphonConnectionStateDisconnected];
+        [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
     }
 }
 
 // See comment in header.
 -(PsiphonConnectionState) getConnectionState {
     return atomic_load(&connectionState);
+}
+
+// See comment in header.
+-(NSInteger) getLocalSocksProxyPort {
+    return atomic_load(&localSocksProxyPort);
+}
+
+// See comment in header.
+-(NSInteger) getLocalHttpProxyPort {
+    return atomic_load(&localHttpProxyPort);
 }
 
 // See comment in header.
@@ -430,15 +487,9 @@
         }
 
         if ([count integerValue] > 0) {
-            if ([self.tunneledAppDelegate respondsToSelector:@selector(onConnected)]) {
-                [self changeConnectionStateTo:PsiphonConnectionStateConnected];
-                [self.tunneledAppDelegate onConnected];
-            }
+            [self changeConnectionStateTo:PsiphonConnectionStateConnected evenIfSameState:NO];
         } else {
-            if ([self.tunneledAppDelegate respondsToSelector:@selector(onConnecting)]) {
-                [self changeConnectionStateTo:PsiphonConnectionStateConnecting];
-                [self.tunneledAppDelegate onConnecting];
-            }
+            [self changeConnectionStateTo:PsiphonConnectionStateConnecting evenIfSameState:NO];
         }
     }
     else if ([noticeType isEqualToString:@"Exiting"]) {
@@ -474,7 +525,7 @@
             [self logMessage:[NSString stringWithFormat: @"HttpProxyPortInUse notice missing data.port: %@", noticeJSON]];
             return;
         }
-        
+
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onHttpProxyPortInUse:)]) {
             [self.tunneledAppDelegate onHttpProxyPortInUse:[port integerValue]];
         }
@@ -485,9 +536,13 @@
             [self logMessage:[NSString stringWithFormat: @"ListeningSocksProxyPort notice missing data.port: %@", noticeJSON]];
             return;
         }
-        
+
+        NSInteger portInt = [port integerValue];
+
+        atomic_store(&localSocksProxyPort, portInt);
+
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningSocksProxyPort:)]) {
-            [self.tunneledAppDelegate onListeningSocksProxyPort:[port integerValue]];
+            [self.tunneledAppDelegate onListeningSocksProxyPort:portInt];
         }
     }
     else if ([noticeType isEqualToString:@"ListeningHttpProxyPort"]) {
@@ -496,9 +551,13 @@
             [self logMessage:[NSString stringWithFormat: @"ListeningHttpProxyPort notice missing data.port: %@", noticeJSON]];
             return;
         }
-        
+
+        NSInteger portInt = [port integerValue];
+
+        atomic_store(&localHttpProxyPort, portInt);
+
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningHttpProxyPort:)]) {
-            [self.tunneledAppDelegate onListeningHttpProxyPort:[port integerValue]];
+            [self.tunneledAppDelegate onListeningHttpProxyPort:portInt];
         }
     }
     else if ([noticeType isEqualToString:@"UpstreamProxyError"]) {
@@ -632,20 +691,12 @@
 }
 
 - (long)hasNetworkConnectivity {
-    Reachability *reachability = [Reachability reachabilityForInternetConnection];
     BOOL hasConnectivity = [reachability currentReachabilityStatus] != NotReachable;
 
-    // If we had connectivity and now we've lost it, let the app know by calling onStartedWaitingForNetworkConnectivity.
-    BOOL wasWaitingForNetworkConnectivity = atomic_exchange(&isWaitingForNetworkConnectivity, !hasConnectivity);
-    if (!hasConnectivity && !wasWaitingForNetworkConnectivity) {
-        [self changeConnectionStateTo:PsiphonConnectionStateWaitingForNetwork];
-
-        // HasNetworkConnectivity may be called many times, but only call
-        // onStartedWaitingForNetworkConnectivity once per loss of connectivity,
-        // so the library consumer may log a single message.
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onStartedWaitingForNetworkConnectivity)]) {
-            [self.tunneledAppDelegate onStartedWaitingForNetworkConnectivity];
-        }
+    if (!hasConnectivity) {
+        // changeConnectionStateTo self-throttles, so even if called multiple
+        // times it won't send multiple messages to the app.
+        [self changeConnectionStateTo:PsiphonConnectionStateWaitingForNetwork evenIfSameState:NO];
     }
 
     return hasConnectivity;
@@ -675,16 +726,112 @@
     }
 }
 
-- (void)changeConnectionStateTo:(PsiphonConnectionState)newState {
+- (void)changeConnectionStateTo:(PsiphonConnectionState)newState evenIfSameState:(BOOL)forceNotification {
     // Store the new state and get the old state.
     PsiphonConnectionState oldState = atomic_exchange(&connectionState, newState);
 
     // If the state has changed, inform the app.
-    if (oldState != newState) {
+    if (forceNotification || oldState != newState) {
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onConnectionStateChangedFrom:to:)]) {
             [self.tunneledAppDelegate onConnectionStateChangedFrom:oldState to:newState];
         }
+
+        if (newState == PsiphonConnectionStateDisconnected) {
+            // This isn't a message sent to the app.
+        }
+        else if (newState == PsiphonConnectionStateConnecting &&
+                 [self.tunneledAppDelegate respondsToSelector:@selector(onConnecting)]) {
+            [self.tunneledAppDelegate onConnecting];
+        }
+        else if (newState == PsiphonConnectionStateConnected &&
+                 [self.tunneledAppDelegate respondsToSelector:@selector(onConnected)]) {
+            [self.tunneledAppDelegate onConnected];
+        }
+        else if (newState == PsiphonConnectionStateWaitingForNetwork &&
+                 [self.tunneledAppDelegate respondsToSelector:@selector(onStartedWaitingForNetworkConnectivity)]) {
+            [self.tunneledAppDelegate onStartedWaitingForNetworkConnectivity];
+        }
     }
+}
+
+/*!
+ Checks if the local SOCKS proxy is responding. 
+ NOTE: This must only be called when there's a valid SOCKS proxy port (i.e., when
+ we're in a connected state.)
+ @return  TRUE if the local proxy is responding, FALSE otherwise.
+ */
+- (BOOL)isLocalProxyAlive {
+    CFSocketRef sockfd;
+    sockfd = CFSocketCreate(NULL, AF_INET, SOCK_STREAM, IPPROTO_TCP, 0, NULL, NULL);
+    if (sockfd == NULL) {
+        // An error occurred creating the socket. It's impossible to complete
+        // the test. We'll be optimistic.
+        return YES;
+    }
+
+    struct sockaddr_in servaddr;
+    memset(&servaddr, 0, sizeof(servaddr));
+    servaddr.sin_len = sizeof(servaddr);
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons([self getLocalSocksProxyPort]);
+    inet_pton(AF_INET, [@"127.0.0.1" cStringUsingEncoding:NSUTF8StringEncoding], &servaddr.sin_addr);
+
+    CFDataRef connectAddr = CFDataCreate(NULL, (unsigned char *)&servaddr, sizeof(servaddr));
+    if (connectAddr == NULL) {
+        CFSocketInvalidate(sockfd);
+        CFRelease(sockfd);
+        // Again, be optimistic.
+        return YES;
+    }
+
+    BOOL proxyTestSuccess = YES;
+    if (CFSocketConnectToAddress(sockfd, connectAddr, 1) != kCFSocketSuccess) {
+        proxyTestSuccess = NO;
+    }
+
+    CFSocketInvalidate(sockfd);
+    CFRelease(sockfd);
+    CFRelease(connectAddr);
+
+    return proxyTestSuccess;
+}
+
+// We are going to do our own monitoring of the network reachability, rather
+// than relying on the tunnel to inform us. This is because it can take a long
+// time for the tunnel to notice the network is gone (depending on attempts to
+// use the tunnel).
+- (void)startInternetReachabilityMonitoring {
+    previousNetworkStatus = [reachability currentReachabilityStatus];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(internetReachabilityChanged:) name:kReachabilityChangedNotification object:nil];
+    [reachability startNotifier];
+}
+
+- (void)stopInternetReachabilityMonitoring {
+    [reachability stopNotifier];
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:kReachabilityChangedNotification object:nil];
+}
+
+- (void)internetReachabilityChanged:(NSNotification *)note
+{
+    // If we lose network while connected, we're going to force a reconnect in
+    // order to trigger the waiting-for-network state. The reason we don't wait
+    // for the tunnel to notice the network loss is that it might take 30 seconds.
+
+    Reachability* currentReachability = [note object];
+    NetworkStatus networkStatus = [currentReachability currentReachabilityStatus];
+
+    PsiphonConnectionState currentConnectionState = [self getConnectionState];
+
+    if (currentConnectionState == PsiphonConnectionStateConnected &&
+        previousNetworkStatus != NotReachable &&
+        previousNetworkStatus != networkStatus) {
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onDeviceInternetConnectivityInterrupted)]) {
+            [self.tunneledAppDelegate onDeviceInternetConnectivityInterrupted];
+        }
+    }
+
+    previousNetworkStatus = networkStatus;
 }
 
 /*!

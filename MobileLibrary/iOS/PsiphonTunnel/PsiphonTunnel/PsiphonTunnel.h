@@ -48,7 +48,7 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
  */
 typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 {
-    PsiphonConnectionStateDisconnected,
+    PsiphonConnectionStateDisconnected = 0,
     PsiphonConnectionStateConnecting,
     PsiphonConnectionStateConnected,
     PsiphonConnectionStateWaitingForNetwork
@@ -68,7 +68,7 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 @required
 
 /*!
- Called when tunnel is started to get the library consumer's desired configuration.
+ Called when tunnel is starting to get the library consumer's desired configuration.
 
  @code
  Required fields:
@@ -113,11 +113,17 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  See the tunnel-core config code for details about the fields.
  https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/psiphon/config.go
  
- @return NSString  JSON string with config that should used to run the Psiphon tunnel, or nil on error.
+ @return  JSON string with config that should used to run the Psiphon tunnel, or NULL on error.
  
  Swift: @code func getPsiphonConfig() -> String? @endcode
  */
 - (NSString * _Nullable)getPsiphonConfig;
+
+/*!
+ Called when the tunnel is starting to get the initial server entries (typically embedded in the app) that will be used to bootstrap the Psiphon tunnel connection. This value is in a particular format and will be supplied by Psiphon Inc.
+ @return  Pre-existing server entries to use when attempting to connect to a server. Must return an empty string if there are no embedded server entries. Must return NULL if there is an error and the tunnel starting should abort.
+ */
+- (NSString * _Nullable)getEmbeddedServerEntries;
 
 //
 // Optional delegate methods. Note that some of these are probably necessary for
@@ -168,6 +174,17 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  Swift: @code func onExiting() @endcode
  */
 - (void)onExiting;
+
+/*!
+ Called when the device's Internet connection state is interrupted.
+ This may mean that it had connectivity and now doesn't, or went from Wi-Fi to
+ WWAN or vice versa. 
+ @note For many/most apps, the response to this callback should be to restart 
+ the Psiphon tunnel. It will eventually notice and begin reconnecting, but it
+ may take much longer, depending on attempts to use the tunnel.
+ Swift: @code func onDeviceInternetConnectivityInterrupted() @endcode
+ */
+- (void)onDeviceInternetConnectivityInterrupted;
 
 /*!
  Called when tunnel-core determines which server egress regions are available
@@ -287,12 +304,12 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 + (PsiphonTunnel * _Nonnull)newPsiphonTunnel:(id<TunneledAppDelegate> _Nonnull)tunneledAppDelegate;
 
 /*!
- Start connecting the PsiphonTunnel. Returns before connection is complete -- delegate callbacks (such as `onConnected`) are used to indicate progress and state.
- @param embeddedServerEntries  Pre-existing server entries to use when attempting to connect to a server. May be null if there are no embedded server entries.
+ Start connecting the PsiphonTunnel. Returns before connection is complete -- delegate callbacks (such as `onConnected` and `onConnectionStateChanged`) are used to indicate progress and state.
+ @param ifNeeded  If TRUE, the tunnel will only be started if it's not already connected and healthy. If FALSE, the tunnel will be forced to stop and reconnect.
  @return TRUE if the connection start was successful, FALSE otherwise.
- Swift: @code open func start(_ embeddedServerEntries: String?) -> Bool @endcode
+ Swift: @code open func start(_ ifNeeded: Bool) -> Bool @endcode
  */
-- (BOOL)start:(NSString * _Nullable)embeddedServerEntries;
+- (BOOL)start:(BOOL)ifNeeded;
 
 /*!
  Stop the tunnel (regardless of its current connection state). Returns before full stop is complete -- `TunneledAppDelegate::onExiting` is called when complete.
@@ -306,6 +323,20 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  Swift: @code open func getConnectionState() -> PsiphonConnectionState @endcode
  */
 - (PsiphonConnectionState)getConnectionState;
+
+/*!
+ Provides the port number of the local SOCKS proxy. Only valid when currently connected.
+ @return  The current local SOCKS proxy port number.
+ Swift: @code open func getLocalSocksProxyPort() -> Int @endcode
+ */
+-(NSInteger)getLocalSocksProxyPort;
+
+/*!
+ Provides the port number of the local HTTP proxy. Only valid when currently connected.
+ @return  The current local HTTP proxy port number.
+ Swift: @code open func getLocalHttpProxyPort() -> Int @endcode
+ */
+-(NSInteger)getLocalHttpProxyPort;
 
 /*!
  Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics information in a particular format, then calls this function to upload it for later investigation.
