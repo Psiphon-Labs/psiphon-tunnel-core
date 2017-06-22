@@ -250,7 +250,7 @@ func configureServerInterface(
 		"ifconfig",
 		tunDeviceName,
 		IPv4Address, IPv4Address, IPv4Netmask,
-		"mtu", strconv.Itoa(config.MTU),
+		"mtu", strconv.Itoa(getMTU(config.MTU)),
 		"up")
 	if err != nil {
 		return common.ContextError(err)
@@ -364,7 +364,7 @@ func configureClientInterface(
 		tunDeviceName,
 		IPv4Address, IPv4Address,
 		"netmask", IPv4Netmask,
-		"mtu", strconv.Itoa(config.MTU),
+		"mtu", strconv.Itoa(getMTU(config.MTU)),
 		"up")
 	if err != nil {
 		return common.ContextError(err)
