@@ -468,7 +468,7 @@ func (server *Server) resumeSession(session *session, channel *Channel) {
 func (server *Server) interruptSession(session *session) {
 
 	session.mutex.Lock()
-	session.mutex.Unlock()
+	defer session.mutex.Unlock()
 
 	wasRunning := (session.channel != nil)
 
