@@ -223,7 +223,7 @@ func (device *Device) writeTunPacket(packet []byte) error {
 	return nil
 }
 
-func configureSubprocessCapabilities() error {
+func configureNetworkConfigSubprocessCapabilities() error {
 	// Not supported on Darwin
 	return nil
 }
@@ -245,8 +245,9 @@ func configureServerInterface(
 		return common.ContextError(err)
 	}
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"ifconfig",
 		tunDeviceName,
 		IPv4Address, IPv4Address, IPv4Netmask,
@@ -261,8 +262,9 @@ func configureServerInterface(
 		return common.ContextError(err)
 	}
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"ifconfig",
 		tunDeviceName,
 		"inet6", IPv6Address, "prefixlen", IPv6Prefixlen)
@@ -280,16 +282,18 @@ func configureServerInterface(
 		egressInterface = DEFAULT_PUBLIC_INTERFACE_NAME
 	}
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"sysctl",
 		"net.inet.ip.forwarding=1")
 	if err != nil {
 		return common.ContextError(err)
 	}
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"sysctl",
 		"net.inet6.ip6.forwarding=1")
 	if err != nil {
@@ -328,14 +332,16 @@ func configureServerInterface(
 	}).Debug("pf.conf")
 
 	// Disable first to avoid "pfctl: pf already enabled"
-	_ = runCommand(
+	_ = runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"pfctl",
 		"-q",
 		"-d")
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"pfctl",
 		"-q",
 		"-e",
@@ -358,8 +364,9 @@ func configureClientInterface(
 		return common.ContextError(err)
 	}
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"ifconfig",
 		tunDeviceName,
 		IPv4Address, IPv4Address,
@@ -375,8 +382,9 @@ func configureClientInterface(
 		return common.ContextError(err)
 	}
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"ifconfig",
 		tunDeviceName,
 		"inet6", IPv6Address, "prefixlen", IPv6Prefixlen)
@@ -391,8 +399,9 @@ func configureClientInterface(
 
 		// TODO: IPv6
 
-		err = runCommand(
+		err = runNetworkConfigCommand(
 			config.Logger,
+			config.SudoNetworkConfigCommands,
 			"route",
 			"add",
 			"-ifscope", tunDeviceName,
@@ -406,7 +415,7 @@ func configureClientInterface(
 	return nil
 }
 
-func fixBindToDevice(_ common.Logger, _ string) error {
+func fixBindToDevice(_ common.Logger, _ bool, _ string) error {
 	// Not required on Darwin
 	return nil
 }

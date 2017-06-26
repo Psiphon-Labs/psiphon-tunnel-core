@@ -153,6 +153,16 @@ type ServerConfig struct {
 	// Logger is used for logging events and metrics.
 	Logger common.Logger
 
+	// SudoNetworkConfigCommands specifies whether to use "sudo"
+	// when executing network configuration commands. This is required
+	// when the packet tunnel server is not run as root and when
+	// process capabilities are not available (only Linux kernel 4.3+
+	// has the required capabilities support). The host sudoers file
+	// must be configured to allow the tunnel server process user to
+	// execute the commands invoked in configureServerInterface; see
+	// the implementation for the appropriate platform.
+	SudoNetworkConfigCommands bool
+
 	// EgressInterface is the interface to which client traffic is
 	// masqueraded/NATed. For example, "eth0". If blank, a platform-
 	// appropriate default is used.
@@ -1130,6 +1140,11 @@ type ClientConfig struct {
 	// Logger is used for logging events and metrics.
 	Logger common.Logger
 
+	// SudoNetworkConfigCommands specifies whether to use "sudo"
+	// when executing network configuration commands. See description
+	// for ServerConfig.SudoNetworkConfigCommands.
+	SudoNetworkConfigCommands bool
+
 	// MTU is the packet MTU value to use; this value
 	// should be obtained from the packet tunnel server.
 	// When MTU is 0, a default value is used.
@@ -1996,6 +2011,55 @@ func (device *Device) WritePacket(packet []byte) error {
 // Close interrupts any blocking Read/Write calls and
 // tears down the tun device.
 func (device *Device) Close() error {
+
+	// TODO: dangerous data race exists until Go 1.9
+	//
+	// https://github.com/golang/go/issues/7970
+	//
+	// Unlike net.Conns, os.File doesn't use the poller and
+	// it's not correct to use Close() cannot to interrupt
+	// blocking reads and writes. This changes in Go 1.9,
+	// which changes os.File to use the poller.
+	//
+	// Severity may be high since there's a remote possibility
+	// that a Write could send a packet to wrong fd, including
+	// sending as plaintext to a network socket.
+	//
+	// As of this writing, we do not expect to put this
+	// code into production before Go 1.9 is released. Since
+	// interrupting blocking Read/Writes is necessary, the
+	// race condition is left as-is.
+	//
+	// This appears running tun_test with the race detector
+	// enabled:
+	//
+	// ==================
+	// WARNING: DATA RACE
+	// Write at 0x00c4200ce220 by goroutine 16:
+	//   os.(*file).close()
+	//       /usr/local/go/src/os/file_unix.go:143 +0x10a
+	//   os.(*File).Close()
+	//       /usr/local/go/src/os/file_unix.go:132 +0x55
+	//   _/root/psiphon-tunnel-core/psiphon/common/tun.(*Device).Close()
+	//       /root/psiphon-tunnel-core/psiphon/common/tun/tun.go:1999 +0x53
+	//   _/root/psiphon-tunnel-core/psiphon/common/tun.(*Client).Stop()
+	//       /root/psiphon-tunnel-core/psiphon/common/tun/tun.go:1314 +0x1a8
+	//   _/root/psiphon-tunnel-core/psiphon/common/tun.(*testClient).stop()
+	//       /root/psiphon-tunnel-core/psiphon/common/tun/tun_test.go:426 +0x77
+	//   _/root/psiphon-tunnel-core/psiphon/common/tun.testTunneledTCP.func1()
+	//       /root/psiphon-tunnel-core/psiphon/common/tun/tun_test.go:172 +0x550
+	//
+	// Previous read at 0x00c4200ce220 by goroutine 100:
+	//   os.(*File).Read()
+	//       /usr/local/go/src/os/file.go:98 +0x70
+	//   _/root/psiphon-tunnel-core/psiphon/common/tun.(*Device).readTunPacket()
+	//       /root/psiphon-tunnel-core/psiphon/common/tun/tun_linux.go:109 +0x84
+	//   _/root/psiphon-tunnel-core/psiphon/common/tun.(*Device).ReadPacket()
+	//       /root/psiphon-tunnel-core/psiphon/common/tun/tun.go:1974 +0x3c
+	//   _/root/psiphon-tunnel-core/psiphon/common/tun.(*Client).Start.func1()
+	//       /root/psiphon-tunnel-core/psiphon/common/tun/tun.go:1224 +0xaf
+	// ==================
+
 	return device.deviceIO.Close()
 }
 

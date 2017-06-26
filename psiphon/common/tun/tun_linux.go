@@ -124,11 +124,13 @@ func (device *Device) writeTunPacket(packet []byte) error {
 	return nil
 }
 
-func configureSubprocessCapabilities() error {
+func configureNetworkConfigSubprocessCapabilities() error {
 
 	// If this process has CAP_NET_ADMIN, make it available to be inherited
 	// be child processes via ambient mechanism described here:
 	// https://github.com/torvalds/linux/commit/58319057b7847667f0c9585b9de0e8932b0fdb08
+	//
+	// The ambient mechanim is available in Linux kernel 4.3 and later.
 
 	// When using capabilities, this process should have CAP_NET_ADMIN in order
 	// to create tun devices. And the subprocess operations such as using "ifconfig"
@@ -164,8 +166,9 @@ func resetNATTables(
 	// the already unlikely event that there's still in-flight traffic when the address is
 	// recycled.
 
-	err := runCommand(
+	err := runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"conntrack",
 		"--delete",
 		"--src-nat",
@@ -189,8 +192,9 @@ func configureServerInterface(
 		return common.ContextError(err)
 	}
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"ifconfig",
 		tunDeviceName,
 		IPv4Address, "netmask", IPv4Netmask,
@@ -200,8 +204,9 @@ func configureServerInterface(
 		return common.ContextError(err)
 	}
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"ifconfig",
 		tunDeviceName,
 		"add", serverIPv6AddressCIDR)
@@ -218,8 +223,9 @@ func configureServerInterface(
 
 	// TODO: appear to not need sysctl net.ipv4.conf.[all|<device>].forwarding=1?
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"iptables",
 		"-t", "nat",
 		"-A", "POSTROUTING",
@@ -230,8 +236,9 @@ func configureServerInterface(
 		return common.ContextError(err)
 	}
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"ip6tables",
 		"-t", "nat",
 		"-A", "POSTROUTING",
@@ -256,8 +263,9 @@ func configureClientInterface(
 		return common.ContextError(err)
 	}
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"ifconfig",
 		tunDeviceName,
 		IPv4Address,
@@ -268,8 +276,9 @@ func configureClientInterface(
 		return common.ContextError(err)
 	}
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		config.Logger,
+		config.SudoNetworkConfigCommands,
 		"ifconfig",
 		tunDeviceName,
 		"add", config.IPv6AddressCIDR)
@@ -301,8 +310,9 @@ func configureClientInterface(
 		// Note: use "replace" instead of "add" as route from
 		// previous run (e.g., tun_test case) may not yet be cleared.
 
-		err = runCommand(
+		err = runNetworkConfigCommand(
 			config.Logger,
+			config.SudoNetworkConfigCommands,
 			"ip",
 			"-6",
 			"route", "replace",
@@ -316,29 +326,32 @@ func configureClientInterface(
 	return nil
 }
 
-func fixBindToDevice(logger common.Logger, tunDeviceName string) error {
+func fixBindToDevice(logger common.Logger, useSudo bool, tunDeviceName string) error {
 
 	// Fix the problem described here:
 	// https://stackoverflow.com/questions/24011205/cant-perform-tcp-handshake-through-a-nat-between-two-nics-with-so-bindtodevice/
 
-	err := runCommand(
+	err := runNetworkConfigCommand(
 		logger,
+		useSudo,
 		"sysctl",
 		"net.ipv4.conf.all.accept_local=1")
 	if err != nil {
 		return common.ContextError(err)
 	}
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		logger,
+		useSudo,
 		"sysctl",
 		"net.ipv4.conf.all.rp_filter=0")
 	if err != nil {
 		return common.ContextError(err)
 	}
 
-	err = runCommand(
+	err = runNetworkConfigCommand(
 		logger,
+		useSudo,
 		"sysctl",
 		fmt.Sprintf("net.ipv4.conf.%s.rp_filter=0", tunDeviceName))
 	if err != nil {

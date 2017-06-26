@@ -407,7 +407,7 @@ func startTestClient(
 
 	// Configure kernel to fix issue described in fixBindToDevice
 
-	err = fixBindToDevice(logger, tunClient.device.Name())
+	err = fixBindToDevice(logger, config.SudoNetworkConfigCommands, tunClient.device.Name())
 	if err != nil {
 		return nil, fmt.Errorf("startTestClient(): fixBindToDevice failed: %s", err)
 	}
