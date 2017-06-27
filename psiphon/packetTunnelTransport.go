@@ -205,13 +205,13 @@ func (p *PacketTunnelTransport) setChannel(
 	channelConn net.Conn, channelTunnel *Tunnel) {
 
 	p.channelMutex.Lock()
-	defer p.channelMutex.Unlock()
 
 	// Concurrency note: this check is within the mutex to ensure that a
 	// UseNewTunnel call concurrent with a Close call doesn't leave a channel
 	// set.
 	select {
 	case <-p.runContext.Done():
+		p.channelMutex.Unlock()
 		return
 	default:
 	}
