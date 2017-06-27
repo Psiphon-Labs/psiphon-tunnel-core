@@ -1673,26 +1673,36 @@ func processPacket(
 
 	// Enforce traffic rules (allowed TCP/UDP ports).
 
+	checkPort := 0
 	if direction == packetDirectionServerUpstream ||
-		direction == packetDirectionServerDownstream {
+		direction == packetDirectionClientUpstream {
 
-		if protocol == internetProtocolTCP {
+		checkPort = int(destinationPort)
 
-			if !session.checkAllowedTCPPortFunc(
-				upstreamIPAddress, int(destinationPort)) {
+	} else if direction == packetDirectionServerDownstream ||
+		direction == packetDirectionClientDownstream {
 
-				metrics.rejectedPacket(direction, packetRejectTCPPort)
-				return false
-			}
+		checkPort = int(sourcePort)
+	}
 
-		} else if protocol == internetProtocolUDP {
+	if protocol == internetProtocolTCP {
 
-			if !session.checkAllowedUDPPortFunc(
-				upstreamIPAddress, int(destinationPort)) {
+		if checkPort == 0 ||
+			(session != nil &&
+				!session.checkAllowedTCPPortFunc(upstreamIPAddress, checkPort)) {
 
-				metrics.rejectedPacket(direction, packetRejectUDPPort)
-				return false
-			}
+			metrics.rejectedPacket(direction, packetRejectTCPPort)
+			return false
+		}
+
+	} else if protocol == internetProtocolUDP {
+
+		if checkPort == 0 ||
+			(session != nil &&
+				!session.checkAllowedUDPPortFunc(upstreamIPAddress, checkPort)) {
+
+			metrics.rejectedPacket(direction, packetRejectUDPPort)
+			return false
 		}
 	}
 
@@ -1700,9 +1710,14 @@ func processPacket(
 	// no client-to-client packets.
 
 	if !destinationIPAddress.IsGlobalUnicast() ||
+
 		(direction == packetDirectionServerUpstream &&
-			((version == 4 && privateSubnetIPv4.Contains(destinationIPAddress)) ||
-				(version == 6 && privateSubnetIPv6.Contains(destinationIPAddress)))) {
+			((version == 4 &&
+				!destinationIPAddress.Equal(transparentDNSResolverIPv4Address) &&
+				privateSubnetIPv4.Contains(destinationIPAddress)) ||
+				(version == 6 &&
+					!destinationIPAddress.Equal(transparentDNSResolverIPv6Address) &&
+					privateSubnetIPv6.Contains(destinationIPAddress)))) {
 
 		metrics.rejectedPacket(direction, packetRejectDestinationAddress)
 		return false
