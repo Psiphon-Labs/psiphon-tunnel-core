@@ -221,17 +221,13 @@ func configureServerInterface(
 
 	// NAT tun device to external interface
 
-	// TODO: appear to not need sysctl net.ipv4.conf.[all|<device>].forwarding=1?
+	// TODO: need only set forwarding for specific interfaces?
 
 	err = runNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
-		"iptables",
-		"-t", "nat",
-		"-A", "POSTROUTING",
-		"-s", privateSubnetIPv4.String(),
-		"-o", egressInterface,
-		"-j", "MASQUERADE")
+		"sysctl",
+		"net.ipv4.conf.all.forwarding=1")
 	if err != nil {
 		return common.ContextError(err)
 	}
@@ -239,14 +235,41 @@ func configureServerInterface(
 	err = runNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
-		"ip6tables",
-		"-t", "nat",
-		"-A", "POSTROUTING",
-		"-s", privateSubnetIPv6.String(),
-		"-o", egressInterface,
-		"-j", "MASQUERADE")
+		"sysctl",
+		"net.ipv6.conf.all.forwarding=1")
 	if err != nil {
 		return common.ContextError(err)
+	}
+
+	// To avoid duplicates, first try to drop existing rule, then add
+
+	for _, mode := range []string{"-D", "-A"} {
+
+		err = runNetworkConfigCommand(
+			config.Logger,
+			config.SudoNetworkConfigCommands,
+			"iptables",
+			"-t", "nat",
+			mode, "POSTROUTING",
+			"-s", privateSubnetIPv4.String(),
+			"-o", egressInterface,
+			"-j", "MASQUERADE")
+		if mode != "-D" && err != nil {
+			return common.ContextError(err)
+		}
+
+		err = runNetworkConfigCommand(
+			config.Logger,
+			config.SudoNetworkConfigCommands,
+			"ip6tables",
+			"-t", "nat",
+			mode, "POSTROUTING",
+			"-s", privateSubnetIPv6.String(),
+			"-o", egressInterface,
+			"-j", "MASQUERADE")
+		if mode != "-D" && err != nil {
+			return common.ContextError(err)
+		}
 	}
 
 	return nil
