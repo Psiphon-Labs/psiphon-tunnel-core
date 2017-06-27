@@ -575,7 +575,24 @@ func (logger *commonLogger) WithContextFields(fields common.LogFields) common.Lo
 }
 
 func (logger *commonLogger) LogMetric(metric string, fields common.LogFields) {
-	outputNotice(metric, noticeIsDiagnostic, "fields", fmt.Sprintf("%#v", fields))
+	outputNotice(
+		metric,
+		noticeIsDiagnostic,
+		listCommonFields(fields)...)
+}
+
+func listCommonFields(fields common.LogFields) []interface{} {
+	fieldList := make([]interface{}, 0)
+	for name, value := range fields {
+		var formattedValue string
+		if err, ok := value.(error); ok {
+			formattedValue = err.Error()
+		} else {
+			formattedValue = fmt.Sprintf("%#v", value)
+		}
+		fieldList = append(fieldList, name, formattedValue)
+	}
+	return fieldList
 }
 
 type commonLogContext struct {
@@ -589,9 +606,11 @@ func (context *commonLogContext) outputNotice(
 	outputNotice(
 		noticeType,
 		noticeIsDiagnostic,
-		"message", fmt.Sprint(args...),
-		"context", context.context,
-		"fields", fmt.Sprintf("%#v", context.fields))
+		append(
+			[]interface{}{
+				"message", fmt.Sprint(args...),
+				"context", context.context},
+			listCommonFields(context.fields)...)...)
 }
 
 func (context *commonLogContext) Debug(args ...interface{}) {
