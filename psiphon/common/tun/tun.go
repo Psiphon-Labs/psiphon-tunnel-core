@@ -383,11 +383,20 @@ func (server *Server) ClientConnected(
 			downStreamPacketQueueSize = server.config.DownStreamPacketQueueSize
 		}
 
+		// Store IPv4 resolver addresses in 4-byte representation
+		// for use in rewritting.
+		resolvers := server.config.GetDNSResolverIPv4Addresses()
+		DNSResolverIPv4Addresses := make([]net.IP, len(resolvers))
+		for i, resolver := range resolvers {
+			// Assumes To4 is non-nil
+			DNSResolverIPv4Addresses[i] = resolver.To4()
+		}
+
 		clientSession = &session{
 			lastActivity:             int64(monotime.Now()),
 			sessionID:                sessionID,
 			metrics:                  new(packetMetrics),
-			DNSResolverIPv4Addresses: append([]net.IP(nil), server.config.GetDNSResolverIPv4Addresses()...),
+			DNSResolverIPv4Addresses: append([]net.IP(nil), DNSResolverIPv4Addresses...),
 			DNSResolverIPv6Addresses: append([]net.IP(nil), server.config.GetDNSResolverIPv6Addresses()...),
 			checkAllowedTCPPortFunc:  checkAllowedTCPPortFunc,
 			checkAllowedUDPPortFunc:  checkAllowedUDPPortFunc,
@@ -777,7 +786,7 @@ func (server *Server) runClientDownstream(session *session) {
 
 var (
 	serverIPv4AddressCIDR             = "10.0.0.1/8"
-	transparentDNSResolverIPv4Address = net.ParseIP("10.0.0.2")
+	transparentDNSResolverIPv4Address = net.ParseIP("10.0.0.2").To4() // 4-byte for rewriting
 	_, privateSubnetIPv4, _           = net.ParseCIDR("10.0.0.0/8")
 	assignedIPv4AddressTemplate       = "10.%02d.%02d.%02d"
 
@@ -1445,7 +1454,7 @@ const (
 	packetRejectTCPPort            = 8
 	packetRejectUDPPort            = 9
 	packetRejectNoOriginalAddress  = 10
-	packetRejectLastCode           = 11
+	packetRejectNoDNSResolvers     = 11
 	packetRejectReasonCount        = 12
 	packetOk                       = 12
 )
@@ -1482,6 +1491,8 @@ func packetRejectReasonDescription(reason packetRejectReason) string {
 		return "disallowed_udp_destination_port"
 	case packetRejectNoOriginalAddress:
 		return "no_original_address"
+	case packetRejectNoDNSResolvers:
+		return "no_dns_resolvers"
 	}
 
 	return "unknown_reason"
@@ -1746,10 +1757,22 @@ func processPacket(
 
 		if destinationPort == portNumberDNS {
 			if version == 4 && destinationIPAddress.Equal(transparentDNSResolverIPv4Address) {
-				rewriteDestinationIPAddress = session.DNSResolverIPv4Addresses[rand.Intn(len(session.DNSResolverIPv4Addresses))]
+				numResolvers := len(session.DNSResolverIPv4Addresses)
+				if numResolvers > 0 {
+					rewriteDestinationIPAddress = session.DNSResolverIPv4Addresses[rand.Intn(numResolvers)]
+				} else {
+					metrics.rejectedPacket(direction, packetRejectNoDNSResolvers)
+					return false
+				}
 
 			} else if version == 6 && destinationIPAddress.Equal(transparentDNSResolverIPv6Address) {
-				rewriteDestinationIPAddress = session.DNSResolverIPv6Addresses[rand.Intn(len(session.DNSResolverIPv6Addresses))]
+				numResolvers := len(session.DNSResolverIPv6Addresses)
+				if numResolvers > 0 {
+					rewriteDestinationIPAddress = session.DNSResolverIPv6Addresses[rand.Intn(numResolvers)]
+				} else {
+					metrics.rejectedPacket(direction, packetRejectNoDNSResolvers)
+					return false
+				}
 			}
 		}
 
