@@ -268,8 +268,12 @@ type Config struct {
 	PacketTunnelDownStreamPacketQueueSize int
 
 	// PacketTunnelSessionIdleExpirySeconds specifies
-	// tun.ServerConfig.SessionIdleExpirySeconds
+	// tun.ServerConfig.SessionIdleExpirySeconds.
 	PacketTunnelSessionIdleExpirySeconds int
+
+	// PacketTunnelSudoNetworkConfigCommands sets
+	// tun.ServerConfig.SudoNetworkConfigCommands.
+	PacketTunnelSudoNetworkConfigCommands bool
 }
 
 // RunWebServer indicates whether to run a web server component.

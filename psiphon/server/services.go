@@ -83,6 +83,7 @@ func RunServices(configJSON []byte) error {
 
 		packetTunnelServer, err := tun.NewServer(&tun.ServerConfig{
 			Logger: CommonLogger(log),
+			SudoNetworkConfigCommands:   config.PacketTunnelSudoNetworkConfigCommands,
 			GetDNSResolverIPv4Addresses: supportServices.DNSResolver.GetAllIPv4,
 			GetDNSResolverIPv6Addresses: supportServices.DNSResolver.GetAllIPv6,
 			EgressInterface:             config.PacketTunnelEgressInterface,
