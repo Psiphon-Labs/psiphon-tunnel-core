@@ -395,7 +395,6 @@ func startTestClient(
 		IPv4AddressCIDR:   "172.16.0.1/24",
 		IPv6AddressCIDR:   "fd26:b6a6:4454:310a:0000:0000:0000:0001/64",
 		RouteDestinations: routeDestinations,
-		TunFD:             -1,
 		Transport:         unixConn,
 		MTU:               MTU,
 	}

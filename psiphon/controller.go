@@ -145,7 +145,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 
 	controller.splitTunnelClassifier = NewSplitTunnelClassifier(config, controller)
 
-	if config.PacketTunnelTunFileDescriptor != nil {
+	if config.PacketTunnelTunFileDescriptor > 0 {
 
 		// Run a packet tunnel client. The lifetime of the tun.Client is the
 		// lifetime of the Controller, so it exists across tunnel establishments
@@ -156,9 +156,9 @@ func NewController(config *Config) (controller *Controller, err error) {
 		packetTunnelTransport := NewPacketTunnelTransport()
 
 		packetTunnelClient, err := tun.NewClient(&tun.ClientConfig{
-			Logger:    NoticeCommonLogger(),
-			TunFD:     *config.PacketTunnelTunFileDescriptor,
-			Transport: packetTunnelTransport,
+			Logger:            NoticeCommonLogger(),
+			TunFileDescriptor: config.PacketTunnelTunFileDescriptor,
+			Transport:         packetTunnelTransport,
 		})
 		if err != nil {
 			return nil, common.ContextError(err)

@@ -469,11 +469,11 @@ type Config struct {
 	EmitSLOKs bool
 
 	// PacketTunnelTunDeviceFileDescriptor specifies a tun device file descriptor
-	// to use for running a packet tunnel. When set, a packet tunnel is established
-	// through the server and packets are relayed via the tun device. The file
-	// descriptor is duped in NewController.
+	// to use for running a packet tunnel. When this value is > 0, a packet tunnel
+	// is established through the server and packets are relayed via the tun device
+	// file descriptor. The file descriptor is duped in NewController.
 	// When PacketTunnelTunDeviceFileDescriptor is set, TunnelPoolSize must be 1.
-	PacketTunnelTunFileDescriptor *int
+	PacketTunnelTunFileDescriptor int
 }
 
 // DownloadURL specifies a URL for downloading resources along with parameters
@@ -657,7 +657,7 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	}
 
 	// This constraint is expected by logic in Controller.runTunnels()
-	if config.PacketTunnelTunFileDescriptor != nil && config.TunnelPoolSize != 1 {
+	if config.PacketTunnelTunFileDescriptor > 0 && config.TunnelPoolSize != 1 {
 		return nil, common.ContextError(errors.New("PacketTunnelTunFileDescriptor requires TunnelPoolSize to be 1"))
 	}
 

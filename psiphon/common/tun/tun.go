@@ -1164,20 +1164,19 @@ type ClientConfig struct {
 	// tunnel server.
 	Transport io.ReadWriteCloser
 
-	// TunFD specifies a file descriptor to use to read
-	// and write packets to be relayed to the client. When
-	// TuFD is specified, the Client will use this existing
-	// tun device and not create its own; in this case,
-	// network address and routing configuration is not
-	// performed by the Client. As the packet tunnel server
-	// performs transparent source IP address and DNS rewriting,
-	// the tun device may have any assigned IP address, but
-	// should be configured with the given MTU; and DNS should
-	// be configured to use the transparent DNS target
-	// resolver addresses.
-	// Set TunFD to -1 to ignore this parameter and create
-	// and configure a tun device.
-	TunFD int
+	// TunFileDescriptor specifies a file descriptor to use to
+	// read and write packets to be relayed to the client. When
+	// TunFileDescriptor is specified, the Client will use this
+	// existing tun device and not create its own; in this case,
+	// network address and routing configuration is not performed
+	// by the Client. As the packet tunnel server performs
+	// transparent source IP address and DNS rewriting, the tun
+	// device may have any assigned IP address, but should be
+	// configured with the given MTU; and DNS should be configured
+	// to use the transparent DNS target resolver addresses.
+	// Set TunFileDescriptor to <= 0 to ignore this parameter
+	// and create and configure a tun device.
+	TunFileDescriptor int
 
 	// IPv4AddressCIDR is the IPv4 address and netmask to
 	// assign to a newly created tun device.
@@ -1207,14 +1206,14 @@ type Client struct {
 }
 
 // NewClient initializes a new Client. Unless using the
-// TunFD configuration parameter, a new tun device is
-// created for the client.
+// TunFileDescriptor configuration parameter, a new tun
+// device is created for the client.
 func NewClient(config *ClientConfig) (*Client, error) {
 
 	var device *Device
 	var err error
 
-	if config.TunFD == -1 {
+	if config.TunFileDescriptor <= 0 {
 		device, err = NewClientDevice(config)
 	} else {
 		device, err = NewClientDeviceFromFD(config)
@@ -1990,7 +1989,7 @@ func newDevice(
 // NewClientDeviceFromFD wraps an existing tun device.
 func NewClientDeviceFromFD(config *ClientConfig) (*Device, error) {
 
-	dupFD, err := dupCloseOnExec(config.TunFD)
+	dupFD, err := dupCloseOnExec(config.TunFileDescriptor)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
