@@ -80,6 +80,10 @@ func makeDeviceOutboundBuffer(MTU int) []byte {
 
 func createTunDevice() (io.ReadWriteCloser, string, error) {
 
+	// Prevent fork between creating fd and setting CLOEXEC
+	syscall.ForkLock.RLock()
+	defer syscall.ForkLock.RUnlock()
+
 	// Darwin utun code based on:
 	// https://github.com/songgao/water/blob/70591d249921d075889cc49aaef072987e6b354a/syscalls_darwin.go
 
@@ -102,6 +106,9 @@ func createTunDevice() (io.ReadWriteCloser, string, error) {
 	if err != nil {
 		return nil, "", common.ContextError(err)
 	}
+
+	// Set CLOEXEC so file descriptor not leaked to network config command subprocesses
+	syscall.CloseOnExec(fd)
 
 	var tunControlName [96]byte
 	copy(tunControlName[:], TUN_CONTROL_NAME)
@@ -168,9 +175,6 @@ func createTunDevice() (io.ReadWriteCloser, string, error) {
 
 	deviceName := string(ifName.name[:ifNameSize-1])
 	file := os.NewFile(uintptr(fd), deviceName)
-
-	// TODO: set CLOEXEC on tun fds?
-	// https://github.com/OpenVPN/openvpn/blob/3e4e300d6c5ea9c320e62def79e5b70f8e255248/src/openvpn/tun.c#L3060
 
 	return file, deviceName, nil
 }

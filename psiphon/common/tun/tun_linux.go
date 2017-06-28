@@ -48,6 +48,10 @@ func makeDeviceOutboundBuffer(MTU int) []byte {
 
 func createTunDevice() (io.ReadWriteCloser, string, error) {
 
+	// Prevent fork between creating fd and setting CLOEXEC
+	syscall.ForkLock.RLock()
+	defer syscall.ForkLock.RUnlock()
+
 	// Requires process to run as root or have CAP_NET_ADMIN.
 
 	// This code follows snippets in this thread:
@@ -57,6 +61,9 @@ func createTunDevice() (io.ReadWriteCloser, string, error) {
 	if err != nil {
 		return nil, "", common.ContextError(err)
 	}
+
+	// Set CLOEXEC so file descriptor not leaked to network config command subprocesses
+	syscall.CloseOnExec(int(file.Fd()))
 
 	// Definitions from <linux/if.h>, <linux/if_tun.h>
 
@@ -94,9 +101,6 @@ func createTunDevice() (io.ReadWriteCloser, string, error) {
 	}
 
 	deviceName := strings.Trim(string(ifReq.name[:]), "\x00")
-
-	// TODO: set CLOEXEC on tun fds?
-	// https://github.com/OpenVPN/openvpn/blob/3e4e300d6c5ea9c320e62def79e5b70f8e255248/src/openvpn/tun.c#L3060
 
 	return file, deviceName, nil
 }

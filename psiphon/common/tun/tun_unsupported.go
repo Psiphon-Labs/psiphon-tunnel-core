@@ -59,7 +59,7 @@ func (device *Device) writeTunPacket(_ []byte) error {
 	return common.ContextError(unsupportedError)
 }
 
-func configureSubprocessCapabilities() error {
+func configureNetworkConfigSubprocessCapabilities() error {
 	return common.ContextError(unsupportedError)
 }
 
