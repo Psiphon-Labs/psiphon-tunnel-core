@@ -70,3 +70,7 @@ func resetNATTables(_ *ServerConfig, _ net.IP) error {
 func routeServerInterface(_ string, _ int) error {
 	return common.ContextError(unsupportedError)
 }
+
+func dupCloseOnExec(_ int) (int, error) {
+	return -1, common.ContextError(unsupportedError)
+}

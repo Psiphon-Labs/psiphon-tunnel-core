@@ -1990,19 +1990,18 @@ func newDevice(
 // NewClientDeviceFromFD wraps an existing tun device.
 func NewClientDeviceFromFD(config *ClientConfig) (*Device, error) {
 
-	file := os.NewFile(uintptr(config.TunFD), "")
-
-	// net.FileConn() dups TunFD
-	fileConn, err := net.FileConn(file)
+	dupFD, err := dupCloseOnExec(config.TunFD)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
+
+	file := os.NewFile(uintptr(dupFD), "")
 
 	MTU := getMTU(config.MTU)
 
 	return &Device{
 		name:           "",
-		deviceIO:       fileConn,
+		deviceIO:       file,
 		inboundBuffer:  makeDeviceInboundBuffer(MTU),
 		outboundBuffer: makeDeviceOutboundBuffer(MTU),
 	}, nil
