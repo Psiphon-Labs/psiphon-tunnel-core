@@ -286,6 +286,8 @@ func (p *PacketTunnelTransport) monitor() {
 	monitorTicker := time.NewTicker(1 * time.Second)
 	defer monitorTicker.Stop()
 
+	lastSignalTime := monotime.Time(0)
+
 	for {
 		select {
 		case <-p.runContext.Done():
@@ -309,11 +311,16 @@ func (p *PacketTunnelTransport) monitor() {
 				lastWriteStart.Sub(lastWriteComplete) > PACKET_TUNNEL_PROBE_SLOW_WRITE) ||
 				(lastWriteComplete.Sub(lastReadComplete) > PACKET_TUNNEL_PROBE_SLOW_READ) {
 
+				// Don't keep signalling due to an old condition
+				if lastWriteStart.Add(PACKET_TUNNEL_PROBE_SLOW_WRITE).Before(lastSignalTime) &&
+					lastWriteComplete.Add(PACKET_TUNNEL_PROBE_SLOW_READ).Before(lastSignalTime) {
+
+					break
+				}
+
 				p.channelMutex.Lock()
 				channelTunnel := p.channelTunnel
 				p.channelMutex.Unlock()
-
-				// TODO: store/check last probe signal time to prevent continuous probe signals?
 
 				if channelTunnel != nil {
 					select {
@@ -321,6 +328,8 @@ func (p *PacketTunnelTransport) monitor() {
 					default:
 					}
 				}
+
+				lastSignalTime = monotime.Now()
 			}
 		}
 	}
