@@ -72,7 +72,7 @@ both IPv4 and IPv6.
 
 The client relays IP packets between a local tun device and a channel, which
 is a transport to the server. In Psiphon, the channel will be an SSH channel
-within an SSH connection to a Psiphom server.
+within an SSH connection to a Psiphon server.
 
 The server relays packets between each client and its own tun device. The
 server tun device is NATed to the Internet via an external network interface.
