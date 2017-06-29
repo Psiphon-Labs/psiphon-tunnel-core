@@ -31,6 +31,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
 type PsiphonProvider interface {
@@ -151,4 +152,16 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 	} else {
 		psiphon.NoticeInfo("Feedback uploaded successfully")
 	}
+}
+
+func GetPacketTunnelMTU() int {
+	return tun.DEFAULT_MTU
+}
+
+func GetPacketTunnelDNSResolverIPv4Address() string {
+	return tun.GetTransparentDNSResolverIPv4Address().String()
+}
+
+func GetPacketTunnelDNSResolverIPv6Address() string {
+	return tun.GetTransparentDNSResolverIPv6Address().String()
 }
