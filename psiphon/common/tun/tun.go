@@ -917,9 +917,9 @@ func GetTransparentDNSResolverIPv4Address() net.IP {
 	return transparentDNSResolverIPv4Address
 }
 
-// GetTransparentDNSResolverIPv4Address returns the static IPv6 address
+// GetTransparentDNSResolverIPv6Address returns the static IPv6 address
 // to use as a DNS resolver when transparent DNS rewriting is desired.
-func GeTransparentDNSResolverIPv6Address() net.IP {
+func GetTransparentDNSResolverIPv6Address() net.IP {
 	return transparentDNSResolverIPv6Address
 }
 
@@ -1989,7 +1989,7 @@ func newDevice(
 // NewClientDeviceFromFD wraps an existing tun device.
 func NewClientDeviceFromFD(config *ClientConfig) (*Device, error) {
 
-	dupFD, err := dupCloseOnExec(config.TunFileDescriptor)
+	dupFD, err := dupFD(config.TunFileDescriptor)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}

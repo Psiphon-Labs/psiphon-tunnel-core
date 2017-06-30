@@ -32,15 +32,26 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
-// dupCloseOnExec is dupCloseOnExecOld from:
-// https://github.com/golang/go/blob/bf0f69220255941196c684f235727fd6dc747b5c/src/net/fd_unix.go#L293
-func dupCloseOnExec(fd int) (newfd int, err error) {
+// dupFD is essentially this function:
+// https://github.com/golang/go/blob/bf0f69220255941196c684f235727fd6dc747b5c/src/net/fd_unix.go#L306
+//
+// dupFD duplicates the file descriptor; sets O_CLOEXEC to avoid leaking
+// to child processes; and sets the mode to blocking for use with os.NewFile.
+func dupFD(fd int) (newfd int, err error) {
+
 	syscall.ForkLock.RLock()
 	defer syscall.ForkLock.RUnlock()
+
 	newfd, err = syscall.Dup(fd)
 	if err != nil {
 		return -1, common.ContextError(os.NewSyscallError("dup", err))
 	}
+
 	syscall.CloseOnExec(newfd)
+
+	if err = syscall.SetNonblock(newfd, false); err != nil {
+		return -1, common.ContextError(os.NewSyscallError("setnonblock", err))
+	}
+
 	return
 }
