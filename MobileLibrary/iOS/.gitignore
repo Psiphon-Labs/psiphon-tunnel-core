@@ -5,6 +5,7 @@ Psi.framework
 PsiphonTunnel.framework
 rootCAs.txt
 psiphon-config.json
+PsiphonTunnel/build-git-commit.txt
 
 #
 # Xcode
