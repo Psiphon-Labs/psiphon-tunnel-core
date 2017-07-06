@@ -18,6 +18,7 @@
 		6685BDD41E2EBB1000F0E414 /* GoPsi.objc.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDD21E2EBB1000F0E414 /* GoPsi.objc.h */; };
 		6685BDD51E2EBB1000F0E414 /* Universe.objc.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDD31E2EBB1000F0E414 /* Universe.objc.h */; };
 		6685BDD91E300AC200F0E414 /* strip-frameworks.sh in Resources */ = {isa = PBXBuildFile; fileRef = 6685BDD81E300AC200F0E414 /* strip-frameworks.sh */; };
+		669541B71EF9FECF0038E125 /* build-git-commit.txt in Resources */ = {isa = PBXBuildFile; fileRef = 669541B61EF9FECF0038E125 /* build-git-commit.txt */; };
 		66BAD3351E525FBC00CD06DE /* JailbreakCheck.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BAD3331E525FBC00CD06DE /* JailbreakCheck.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		66BAD3361E525FBC00CD06DE /* JailbreakCheck.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BAD3341E525FBC00CD06DE /* JailbreakCheck.m */; };
 		66BDB02A1DA6BFCC0079384C /* PsiphonTunnel.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 66BDB0201DA6BFCC0079384C /* PsiphonTunnel.framework */; };
@@ -76,6 +77,7 @@
 		6685BDD21E2EBB1000F0E414 /* GoPsi.objc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = GoPsi.objc.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/GoPsi.objc.h; sourceTree = "<group>"; };
 		6685BDD31E2EBB1000F0E414 /* Universe.objc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Universe.objc.h; path = PsiphonTunnel/Psi.framework/Versions/A/Headers/Universe.objc.h; sourceTree = "<group>"; };
 		6685BDD81E300AC200F0E414 /* strip-frameworks.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; name = "strip-frameworks.sh"; path = "scripts/strip-frameworks.sh"; sourceTree = "<group>"; };
+		669541B61EF9FECF0038E125 /* build-git-commit.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "build-git-commit.txt"; sourceTree = "<group>"; };
 		66BAD3331E525FBC00CD06DE /* JailbreakCheck.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = JailbreakCheck.h; sourceTree = "<group>"; };
 		66BAD3341E525FBC00CD06DE /* JailbreakCheck.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = JailbreakCheck.m; sourceTree = "<group>"; };
 		66BDB0201DA6BFCC0079384C /* PsiphonTunnel.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = PsiphonTunnel.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -201,6 +203,7 @@
 		66BDB03C1DA6C7940079384C /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				669541B61EF9FECF0038E125 /* build-git-commit.txt */,
 				6685BDD81E300AC200F0E414 /* strip-frameworks.sh */,
 				66BDB03D1DA6C79E0079384C /* rootCAs.txt */,
 			);
@@ -266,6 +269,7 @@
 				66BDB01B1DA6BFCC0079384C /* Sources */,
 				66BDB01C1DA6BFCC0079384C /* Frameworks */,
 				66BDB01D1DA6BFCC0079384C /* Headers */,
+				669541B51EF9FDB60038E125 /* ShellScript */,
 				66BDB01E1DA6BFCC0079384C /* Resources */,
 				66BDB0481DA6D6FA0079384C /* CopyFiles */,
 			);
@@ -340,6 +344,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				669541B71EF9FECF0038E125 /* build-git-commit.txt in Resources */,
 				66BDB03E1DA6C79E0079384C /* rootCAs.txt in Resources */,
 				6685BDD91E300AC200F0E414 /* strip-frameworks.sh in Resources */,
 			);
@@ -353,6 +358,22 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		669541B51EF9FDB60038E125 /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "git rev-parse --verify HEAD > build-git-commit.txt";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		66BDB01B1DA6BFCC0079384C /* Sources */ = {

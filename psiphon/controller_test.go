@@ -775,7 +775,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	expectUpgrade := !runConfig.disableApi && !runConfig.disableUntunneledUpgrade
 
 	if expectUpgrade {
-		upgradeTimeout := time.NewTimer(180 * time.Second)
+		upgradeTimeout := time.NewTimer(120 * time.Second)
 
 		select {
 		case <-upgradeDownloaded:
@@ -1006,9 +1006,23 @@ func useTunnel(t *testing.T, httpProxyPort int) {
 	response.Body.Close()
 }
 
+// Note: Valid values for disruptorMaxConnectionBytes depend on the production
+// network; for example, the size of the remote server list resource must exceed
+// disruptorMaxConnectionBytes or else TestUntunneledResumableFetchRemoteServerList
+// will fail since no retries are required. But if disruptorMaxConnectionBytes is
+// too small, the test will take longer to run since more retries are necessary.
+//
+// Tests such as TestUntunneledResumableFetchRemoteServerList could be rewritten to
+// use mock components (for example, see TestObfuscatedRemoteServerLists); however
+// these test in controller_test serve the dual purpose of ensuring that tunnel
+// core works with the production network.
+//
+// TODO: set disruptorMaxConnectionBytes (and disruptorMaxConnectionTime) dynamically,
+// based on current production network configuration?
+
 const disruptorProxyAddress = "127.0.0.1:2160"
 const disruptorProxyURL = "socks4a://" + disruptorProxyAddress
-const disruptorMaxConnectionBytes = 500000
+const disruptorMaxConnectionBytes = 250000
 const disruptorMaxConnectionTime = 10 * time.Second
 
 func initDisruptor() {
@@ -1052,8 +1066,12 @@ func initDisruptor() {
 				go func() {
 					defer waitGroup.Done()
 					io.CopyN(localConn, remoteConn, disruptorMaxConnectionBytes)
+					localConn.Close()
+					remoteConn.Close()
 				}()
 				io.CopyN(remoteConn, localConn, disruptorMaxConnectionBytes)
+				localConn.Close()
+				remoteConn.Close()
 				waitGroup.Wait()
 			}()
 		}

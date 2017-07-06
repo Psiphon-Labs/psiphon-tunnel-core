@@ -5,6 +5,7 @@ controller_test.config
 psiphon.db*
 psiphon.boltdb
 remote_server_list
+psiphon-embedded-server-entries.txt
 
 # Exclude compiled tunnel core binaries
 ConsoleClient/ConsoleClient
