@@ -19,7 +19,7 @@
 
 package psi
 
-// This package is a shim between Java and the "psiphon" package. Due to limitations
+// This package is a shim between Java/Obj-C and the "psiphon" package. Due to limitations
 // on what Go types may be exposed (http://godoc.org/golang.org/x/mobile/cmd/gobind),
 // a psiphon.Controller cannot be directly used by Java. This shim exposes a trivial
 // Start/Stop interface on top of a single Controller instance.
@@ -41,6 +41,7 @@ type PsiphonProvider interface {
 	IPv6Synthesize(IPv4Addr string) string
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
+	GetPacketTunnelDeviceBridge() *PacketTunnelDeviceBridge
 }
 
 var controllerMutex sync.Mutex
@@ -73,6 +74,11 @@ func Start(
 
 	if useIPv6Synthesizer {
 		config.IPv6Synthesizer = provider
+	}
+
+	deviceBridge := provider.GetPacketTunnelDeviceBridge()
+	if deviceBridge != nil {
+		config.PacketTunnelDeviceBridge = deviceBridge.bridge
 	}
 
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
@@ -164,4 +170,38 @@ func GetPacketTunnelDNSResolverIPv4Address() string {
 
 func GetPacketTunnelDNSResolverIPv6Address() string {
 	return tun.GetTransparentDNSResolverIPv6Address().String()
+}
+
+// PacketTunnelDeviceBridge is a shim for tun.DeviceBeidge,
+// exposing just the necessary "psi" caller integration points.
+//
+// For performant packet tunneling, it's important to avoid memory
+// allocation and garbage collection per packet I/O.
+//
+// In Obj-C, gobind generates code that will not allocate/copy byte
+// slices _as long as a NSMutableData is passed to ReadFromDevice_;
+// and generates code that will not allocate/copy when calling
+// WriteToDevice. E.g., generated code calls go_seq_to_objc_bytearray
+// and go_seq_from_objc_bytearray with copy set to 0.
+type PacketTunnelDeviceBridge struct {
+	bridge *tun.DeviceBridge
+}
+
+type PacketTunnelDeviceWriter interface {
+	WriteToDevice(packet []byte) error
+}
+
+func NewPacketTunnelDeviceBridge(
+	writer PacketTunnelDeviceWriter) *PacketTunnelDeviceBridge {
+
+	return &PacketTunnelDeviceBridge{
+		bridge: tun.NewDeviceBridge(
+			GetPacketTunnelMTU(),
+			0,
+			writer.WriteToDevice),
+	}
+}
+
+func (r *PacketTunnelDeviceBridge) ReadFromDevice(packet []byte) {
+	r.bridge.ReadFromDevice(packet)
 }

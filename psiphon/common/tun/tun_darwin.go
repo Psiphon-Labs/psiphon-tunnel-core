@@ -68,12 +68,20 @@ const (
 	DEFAULT_PUBLIC_INTERFACE_NAME = "en0"
 )
 
-func makeDeviceInboundBuffer(MTU int) []byte {
+func makeDeviceInboundBuffer(usingBridge bool, MTU int) []byte {
+	if usingBridge {
+		// No utun packet header when using a bridge
+		return make([]byte, MTU)
+	}
 	// 4 extra bytes to read a utun packet header
 	return make([]byte, 4+MTU)
 }
 
-func makeDeviceOutboundBuffer(MTU int) []byte {
+func makeDeviceOutboundBuffer(usingBridge bool, MTU int) []byte {
+	if usingBridge {
+		// No outbound buffer is used
+		return nil
+	}
 	// 4 extra bytes to write a utun packet header
 	return make([]byte, 4+MTU)
 }
@@ -189,13 +197,29 @@ func (device *Device) readTunPacket() (int, int, error) {
 	if err != nil {
 		return 0, 0, common.ContextError(err)
 	}
+
+	if device.usingBridge {
+		// No utun packet header when using a bridge
+		return 0, n, nil
+	}
+
 	if n < 4 {
 		return 0, 0, common.ContextError(errors.New("missing packet prefix"))
 	}
+
 	return 4, n - 4, nil
 }
 
 func (device *Device) writeTunPacket(packet []byte) error {
+
+	if device.usingBridge {
+		// No utun packet header when using a bridge
+		_, err := device.deviceIO.Write(packet)
+		if err != nil {
+			return common.ContextError(err)
+		}
+		return nil
+	}
 
 	// Note: can't use writev via net.Buffers. os.File isn't
 	// a net.Conn and can't wrap with net.FileConn due to

@@ -37,12 +37,12 @@ const (
 	DEFAULT_PUBLIC_INTERFACE_NAME = "eth0"
 )
 
-func makeDeviceInboundBuffer(MTU int) []byte {
+func makeDeviceInboundBuffer(usingBridge bool, MTU int) []byte {
 	return make([]byte, MTU)
 }
 
-func makeDeviceOutboundBuffer(MTU int) []byte {
-	// On Linux, no outbound buffer is used.
+func makeDeviceOutboundBuffer(usingBridge bool, MTU int) []byte {
+	// On Linux, no outbound buffer is used
 	return nil
 }
 
@@ -52,7 +52,7 @@ func createTunDevice() (io.ReadWriteCloser, string, error) {
 	syscall.ForkLock.RLock()
 	defer syscall.ForkLock.RUnlock()
 
-	// Requires process to run as root or have CAP_NET_ADMIN.
+	// Requires process to run as root or have CAP_NET_ADMIN
 
 	// This code follows snippets in this thread:
 	// https://groups.google.com/forum/#!msg/golang-nuts/x_c_pZ6p95c/8T0JBZLpTwAJ
