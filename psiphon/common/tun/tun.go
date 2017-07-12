@@ -2276,10 +2276,9 @@ func (bridge *DeviceBridge) Write(p []byte) (int, error) {
 	bridge.writeMutex.Lock()
 	defer bridge.writeMutex.Unlock()
 
-	n := len(p)
 	bridge.sendToDevice(p)
 
-	return n, nil
+	return len(p), nil
 }
 
 // Close interrupts blocking reads.
