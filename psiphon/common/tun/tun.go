@@ -2209,25 +2209,25 @@ func (device *Device) Close() error {
 // API, such as Apple's NEPacketTunnelFlow, and the Device interface,
 // which expects an io.ReadWriteCloser.
 //
-// The API side provides a writeToDevice call back to write packets
-// to the tun device and calls ReadFromDevice with packets that have
-// been read from the tun device. The Device uses Read/Write/Close.
+// The API side provides a sendToDevice call back to write packets
+// to the tun device and calls ReceivedFromDevice with packets that
+// have been read from the tun device. The Device uses Read/Write/Close.
 type DeviceBridge struct {
-	runContext    context.Context
-	stopRunning   context.CancelFunc
-	readPackets   *PacketQueue
-	writeMutex    sync.Mutex
-	writeToDevice func(p []byte) error
+	runContext   context.Context
+	stopRunning  context.CancelFunc
+	readPackets  *PacketQueue
+	writeMutex   sync.Mutex
+	sendToDevice func(p []byte)
 }
 
 // NewDeviceBridge creates a new DeviceBridge.
-// Calls to writeToDevice are serialized, so it need not be safe for
-// concurrent access. Calls to writeToDevice will block calls to
-// Write and will not be interrupted by Close; writeToDevice _should_
+// Calls to sendToDevice are serialized, so it need not be safe for
+// concurrent access. Calls to sendToDevice will block calls to
+// Write and will not be interrupted by Close; sendToDevice _should_
 // not block.
 func NewDeviceBridge(
 	MTU, readPacketQueueSize int,
-	writeToDevice func(p []byte) error) *DeviceBridge {
+	sendToDevice func(p []byte)) *DeviceBridge {
 
 	runContext, stopRunning := context.WithCancel(context.Background())
 
@@ -2236,18 +2236,18 @@ func NewDeviceBridge(
 	}
 
 	return &DeviceBridge{
-		runContext:    runContext,
-		stopRunning:   stopRunning,
-		readPackets:   NewPacketQueue(runContext, MTU, readPacketQueueSize),
-		writeToDevice: writeToDevice,
+		runContext:   runContext,
+		stopRunning:  stopRunning,
+		readPackets:  NewPacketQueue(runContext, MTU, readPacketQueueSize),
+		sendToDevice: sendToDevice,
 	}
 }
 
-// ReadFromDevice accepts packets read from the tun device. Packets are
-// enqueued for subsequent return to callers of Read. ReadFromDevice does
-// not block when the queue is full or waiting for a Read call. When the
-// queue is full, packets are dropped.
-func (bridge *DeviceBridge) ReadFromDevice(p []byte) {
+// ReceivedFromDevice accepts packets read from the tun device. Packets
+// are enqueued for subsequent return to callers of Read. ReceivedFromDevice
+// does not block when the queue is full or waiting for a Read call. When
+// the queue is full, packets are dropped.
+func (bridge *DeviceBridge) ReceivedFromDevice(p []byte) {
 	_ = bridge.readPackets.Enqueue(p)
 }
 
@@ -2267,7 +2267,7 @@ func (bridge *DeviceBridge) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Write calls through to writeToDevice. Close will not interrupt a
+// Write calls through to sendToDevice. Close will not interrupt a
 // blocking call to writeToDevice.
 func (bridge *DeviceBridge) Write(p []byte) (int, error) {
 
@@ -2277,13 +2277,9 @@ func (bridge *DeviceBridge) Write(p []byte) (int, error) {
 	defer bridge.writeMutex.Unlock()
 
 	n := len(p)
-	err := bridge.writeToDevice(p)
-	if err != nil {
-		n = 0
-		err = common.ContextError(err)
-	}
+	bridge.sendToDevice(p)
 
-	return n, err
+	return n, nil
 }
 
 // Close interrupts blocking reads.

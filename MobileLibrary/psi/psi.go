@@ -179,29 +179,29 @@ func GetPacketTunnelDNSResolverIPv6Address() string {
 // allocation and garbage collection per packet I/O.
 //
 // In Obj-C, gobind generates code that will not allocate/copy byte
-// slices _as long as a NSMutableData is passed to ReadFromDevice_;
+// slices _as long as a NSMutableData is passed to ReceivedFromDevice_;
 // and generates code that will not allocate/copy when calling
-// WriteToDevice. E.g., generated code calls go_seq_to_objc_bytearray
+// SendToDevice. E.g., generated code calls go_seq_to_objc_bytearray
 // and go_seq_from_objc_bytearray with copy set to 0.
 type PacketTunnelDeviceBridge struct {
 	bridge *tun.DeviceBridge
 }
 
-type PacketTunnelDeviceWriter interface {
-	WriteToDevice(packet []byte) error
+type PacketTunnelDeviceSender interface {
+	SendToDevice(packet []byte)
 }
 
 func NewPacketTunnelDeviceBridge(
-	writer PacketTunnelDeviceWriter) *PacketTunnelDeviceBridge {
+	sender PacketTunnelDeviceSender) *PacketTunnelDeviceBridge {
 
 	return &PacketTunnelDeviceBridge{
 		bridge: tun.NewDeviceBridge(
 			GetPacketTunnelMTU(),
 			0,
-			writer.WriteToDevice),
+			sender.SendToDevice),
 	}
 }
 
-func (r *PacketTunnelDeviceBridge) ReadFromDevice(packet []byte) {
-	r.bridge.ReadFromDevice(packet)
+func (r *PacketTunnelDeviceBridge) ReceivedFromDevice(packet []byte) {
+	r.bridge.ReceivedFromDevice(packet)
 }
