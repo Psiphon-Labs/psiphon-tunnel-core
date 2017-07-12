@@ -29,7 +29,7 @@
 #import "JailbreakCheck/JailbreakCheck.h"
 
 
-@interface PsiphonTunnel () <GoPsiPsiphonProvider>
+@interface PsiphonTunnel () <GoPsiPsiphonProvider, GoPsiPacketTunnelDeviceSender>
 
 @property (weak) id <TunneledAppDelegate> tunneledAppDelegate;
 
@@ -43,6 +43,9 @@
 
     Reachability* reachability;
     NetworkStatus previousNetworkStatus;
+
+    BOOL tunnelWholeDevice;
+    GoPsiPacketTunnelDeviceBridge* packetTunnelDeviceBridge; // only used in whole device mode
 }
 
 - (id)init {
@@ -50,6 +53,8 @@
     atomic_init(&localSocksProxyPort, 0);
     atomic_init(&localHttpProxyPort, 0);
     reachability = [Reachability reachabilityForInternetConnection];
+    tunnelWholeDevice = FALSE;
+    packetTunnelDeviceBridge = NULL;
 
     return self;
 }
@@ -57,7 +62,7 @@
 #pragma mark - PsiphonTunnel public methods
 
 // See comment in header
-+(PsiphonTunnel * _Nonnull) newPsiphonTunnel:(id<TunneledAppDelegate> _Nonnull)tunneledAppDelegate {
++ (PsiphonTunnel * _Nonnull)newPsiphonTunnel:(id<TunneledAppDelegate> _Nonnull)tunneledAppDelegate {
     @synchronized (PsiphonTunnel.self) {
         // Only one PsiphonTunnel instance may exist at a time, as the underlying
         // go.psi.Psi and tun2socks implementations each contain global state.
@@ -67,7 +72,7 @@
         dispatch_once(&onceToken, ^{
             sharedInstance = [[self alloc] init];
         });
-        
+
         [sharedInstance stop];
         sharedInstance.tunneledAppDelegate = tunneledAppDelegate;
 
@@ -76,7 +81,7 @@
 }
 
 // See comment in header
--(BOOL) start:(BOOL)ifNeeded {
+- (BOOL)start:(BOOL)ifNeeded {
     if (ifNeeded) {
         return [self startIfNeeded];
     }
@@ -84,13 +89,10 @@
     return [self start];
 }
 
--(BOOL) start {
+- (BOOL)start {
     @synchronized (PsiphonTunnel.self) {
         [self stop];
         [self logMessage:@"Starting Psiphon library"];
-
-        // Not supported on iOS.
-        const BOOL useDeviceBinder = FALSE;
 
         // Must always use IPv6Synthesizer for iOS
         const BOOL useIPv6Synthesizer = TRUE;
@@ -116,7 +118,7 @@
                            configStr,
                            embeddedServerEntries,
                            self,
-                           useDeviceBinder,
+                           tunnelWholeDevice, // useDeviceBinder
                            useIPv6Synthesizer,
                            &e);
             
@@ -142,7 +144,7 @@
     }
 }
 
--(BOOL) startIfNeeded {
+- (BOOL)startIfNeeded {
     PsiphonConnectionState connState = [self getConnectionState];
     BOOL localProxyAlive = [self isLocalProxyAlive];
 
@@ -164,7 +166,7 @@
 }
 
 // See comment in header.
--(void) stop {
+- (void)stop {
     @synchronized (PsiphonTunnel.self) {
         [self logMessage: @"Stopping Psiphon library"];
 
@@ -176,24 +178,45 @@
 
         atomic_store(&localSocksProxyPort, 0);
         atomic_store(&localHttpProxyPort, 0);
+        packetTunnelDeviceBridge = NULL;
 
         [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
     }
 }
 
 // See comment in header.
--(PsiphonConnectionState) getConnectionState {
+- (PsiphonConnectionState)getConnectionState {
     return atomic_load(&connectionState);
 }
 
 // See comment in header.
--(NSInteger) getLocalSocksProxyPort {
+- (NSInteger)getLocalSocksProxyPort {
     return atomic_load(&localSocksProxyPort);
 }
 
 // See comment in header.
--(NSInteger) getLocalHttpProxyPort {
+- (NSInteger)getLocalHttpProxyPort {
     return atomic_load(&localHttpProxyPort);
+}
+
+// See comment in header.
+- (long)getPacketTunnelMTU {
+    return GoPsiGetPacketTunnelMTU();
+}
+
+// See comment in header.
+- (NSString * _Nonnull)getPacketTunnelDNSResolverIPv4Address {
+    return GoPsiGetPacketTunnelDNSResolverIPv4Address();
+}
+
+// See comment in header.
+- (NSString * _Nonnull)getPacketTunnelDNSResolverIPv6Address {
+    return GoPsiGetPacketTunnelDNSResolverIPv6Address();
+}
+
+// See comment in header.
+- (void)receivedFromDevice:(NSMutableData * _Nonnull)packet {
+    [packetTunnelDeviceBridge receivedFromDevice:packet];
 }
 
 // See comment in header.
@@ -215,7 +238,7 @@
  Build the config string for the tunnel.
  @returns String containing the JSON config. `nil` on error.
  */
--(NSString * _Nullable)getConfig {
+- (NSString * _Nullable)getConfig {
     // tunneledAppDelegate is a weak reference, so check it.
     if (self.tunneledAppDelegate == nil) {
         [self logMessage:@"tunneledApp delegate lost"];
@@ -374,9 +397,19 @@
         [self logMessage:[NSString stringWithFormat: @"UpgradeDownloadFilename overridden from '%@' to '%@'", defaultUpgradeDownloadFilename, config[@"UpgradeDownloadFilename"]]];
     }
 
+    //
+    // Tunnel Whole Device (defaults to not whole device)
+    //
+
+    // We'll record our state about what mode we're in.
+    tunnelWholeDevice = ([config[@"TunnelWholeDevice"] integerValue] == 1);
+    if (tunnelWholeDevice && ![self.tunneledAppDelegate respondsToSelector:@selector(sendToDevice:)]) {
+        [self logMessage:@"If TunnelWholeDevice is desired, then sendToDevice must be implemented"];
+        return nil;
+    }
+
     // Other optional fields not being altered. If not set, their defaults will be used:
     // * EstablishTunnelTimeoutSeconds
-    // * TunnelWholeDevice
     // * LocalSocksProxyPort
     // * LocalHttpProxyPort
     // * UpstreamProxyUrl
@@ -669,10 +702,10 @@
 #pragma mark - GoPsiPsiphonProvider protocol implementation (private)
 
 - (BOOL)bindToDevice:(long)fileDescriptor error:(NSError **)error {
-    // This function is only called in TunnelWholeDevice mode
-    
-    // TODO: Does this function ever get called?
-    
+    if (!tunnelWholeDevice) {
+        return FALSE;
+    }
+
     // TODO: Determine if this is robust.
     unsigned int interfaceIndex = if_nametoindex("ap1");
     
@@ -687,11 +720,13 @@
 
 - (NSString *)getPrimaryDnsServer {
     // This function is only called when BindToDevice is used/supported.
+    // TODO: Implement correctly
     return @"8.8.8.8";
 }
 
 - (NSString *)getSecondaryDnsServer {
     // This function is only called when BindToDevice is used/supported.
+    // TODO: Implement correctly
     return @"8.8.4.4";
 }
 
@@ -720,6 +755,22 @@
 
 - (void)notice:(NSString *)noticeJSON {
     [self handlePsiphonNotice:noticeJSON];
+}
+
+- (GoPsiPacketTunnelDeviceBridge*)getPacketTunnelDeviceBridge {
+    if (!packetTunnelDeviceBridge) {
+        packetTunnelDeviceBridge = GoPsiNewPacketTunnelDeviceBridge(self);
+    }
+    return packetTunnelDeviceBridge;
+}
+
+
+#pragma mark - GoPsiPacketTunnelDeviceWriter protocol implementation (private)
+
+- (void)sendToDevice:(NSMutableData *)packet {
+    // The check to see if the delegate responds to this optional selector was
+    // done when processing the config, so we're not going to do it again for every packet.
+    [self.tunneledAppDelegate sendToDevice:packet];
 }
 
 
