@@ -31,6 +31,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
 // TODO: allow all params to be configured
@@ -212,6 +213,9 @@ type Config struct {
 	// If there are multiple IP addresses on an interface use the first IPv4 address.
 	ListenInterface string
 
+	// DisableLocalSocksProxy disables running the local SOCKS proxy.
+	DisableLocalSocksProxy bool
+
 	// LocalSocksProxyPort specifies a port number for the local SOCKS proxy
 	// running at 127.0.0.1. For the default value, 0, the system selects a free
 	// port (a notice reporting the selected port is emitted).
@@ -221,6 +225,9 @@ type Config struct {
 	// running at 127.0.0.1. For the default value, 0, the system selects a free
 	// port (a notice reporting the selected port is emitted).
 	LocalHttpProxyPort int
+
+	// DisableLocalHTTPProxy disables running the local HTTP proxy.
+	DisableLocalHTTPProxy bool
 
 	// ConnectionWorkerPoolSize specifies how many connection attempts to attempt
 	// in parallel. The default, 0, uses CONNECTION_WORKER_POOL_SIZE which is
@@ -461,6 +468,19 @@ type Config struct {
 	// could reveal user browsing activity, it's intended for debugging and testing
 	// only.
 	EmitSLOKs bool
+
+	// PacketTunnelTunDeviceFileDescriptor specifies a tun device file descriptor
+	// to use for running a packet tunnel. When this value is > 0, a packet tunnel
+	// is established through the server and packets are relayed via the tun device
+	// file descriptor. The file descriptor is duped in NewController.
+	// When PacketTunnelTunDeviceFileDescriptor is set, TunnelPoolSize must be 1.
+	PacketTunnelTunFileDescriptor int
+
+	// PacketTunnelDeviceBridge specifies a tun device bridge to use for running a
+	// packet tunnel. This is an alternate interface to a tun device when a file
+	// descriptor is not directly available.
+	// When PacketTunnelDeviceBridge is set, TunnelPoolSize must be 1.
+	PacketTunnelDeviceBridge *tun.DeviceBridge
 }
 
 // DownloadURL specifies a URL for downloading resources along with parameters
@@ -565,6 +585,11 @@ func LoadConfig(configJson []byte) (*Config, error) {
 			errors.New("DnsServerGetter interface must be set at runtime"))
 	}
 
+	if config.PacketTunnelDeviceBridge != nil {
+		return nil, common.ContextError(
+			errors.New("PacketTunnelDeviceBridge value must be set at runtime"))
+	}
+
 	if !common.Contains(
 		[]string{"", TRANSFORM_HOST_NAMES_ALWAYS, TRANSFORM_HOST_NAMES_NEVER},
 		config.TransformHostNames) {
@@ -641,6 +666,16 @@ func LoadConfig(configJson []byte) (*Config, error) {
 				return nil, common.ContextError(errors.New("missing ObfuscatedServerListDownloadDirectory"))
 			}
 		}
+	}
+
+	if config.PacketTunnelTunFileDescriptor > 0 && config.PacketTunnelDeviceBridge != nil {
+		return nil, common.ContextError(errors.New("only one of PacketTunnelTunFileDescriptor and PacketTunnelDeviceBridge may be set"))
+	}
+
+	// This constraint is expected by logic in Controller.runTunnels()
+	if (config.PacketTunnelTunFileDescriptor > 0 || config.PacketTunnelDeviceBridge != nil) &&
+		config.TunnelPoolSize != 1 {
+		return nil, common.ContextError(errors.New("packet tunnel mode requires TunnelPoolSize to be 1"))
 	}
 
 	if config.TunnelConnectTimeoutSeconds == nil {

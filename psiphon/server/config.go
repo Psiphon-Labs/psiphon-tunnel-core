@@ -256,6 +256,24 @@ type Config struct {
 	// OSLConfigFilename is the path of a file containing a JSON-encoded
 	// OSL Config, the OSL schemes to apply to Psiphon client tunnels.
 	OSLConfigFilename string
+
+	// RunPacketTunnel specifies whether to run a packet tunnel.
+	RunPacketTunnel bool
+
+	// PacketTunnelEgressInterface specifies tun.ServerConfig.EgressInterface.
+	PacketTunnelEgressInterface string
+
+	// PacketTunnelDownStreamPacketQueueSize specifies
+	// tun.ServerConfig.DownStreamPacketQueueSize.
+	PacketTunnelDownStreamPacketQueueSize int
+
+	// PacketTunnelSessionIdleExpirySeconds specifies
+	// tun.ServerConfig.SessionIdleExpirySeconds.
+	PacketTunnelSessionIdleExpirySeconds int
+
+	// PacketTunnelSudoNetworkConfigCommands sets
+	// tun.ServerConfig.SudoNetworkConfigCommands.
+	PacketTunnelSudoNetworkConfigCommands bool
 }
 
 // RunWebServer indicates whether to run a web server component.

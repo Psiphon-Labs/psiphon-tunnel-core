@@ -118,12 +118,16 @@ func main() {
 		serverIPaddress := generateServerIPaddress
 
 		if generateServerNetworkInterface != "" {
-			var err error
-			serverIPaddress, err = common.GetInterfaceIPAddress(generateServerNetworkInterface)
+			// TODO: IPv6 support
+			serverIPv4Address, _, err := common.GetInterfaceIPAddresses(generateServerNetworkInterface)
+			if err == nil && serverIPv4Address == nil {
+				err = fmt.Errorf("no IPv4 address for interface %s", generateServerNetworkInterface)
+			}
 			if err != nil {
 				fmt.Printf("generate failed: %s\n", err)
 				os.Exit(1)
 			}
+			serverIPaddress = serverIPv4Address.String()
 		}
 
 		tunnelProtocolPorts := make(map[string]int)

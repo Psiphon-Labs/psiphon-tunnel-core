@@ -19,7 +19,7 @@
 
 package psi
 
-// This package is a shim between Java and the "psiphon" package. Due to limitations
+// This package is a shim between Java/Obj-C and the "psiphon" package. Due to limitations
 // on what Go types may be exposed (http://godoc.org/golang.org/x/mobile/cmd/gobind),
 // a psiphon.Controller cannot be directly used by Java. This shim exposes a trivial
 // Start/Stop interface on top of a single Controller instance.
@@ -31,6 +31,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
 type PsiphonProvider interface {
@@ -40,6 +41,7 @@ type PsiphonProvider interface {
 	IPv6Synthesize(IPv4Addr string) string
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
+	GetPacketTunnelDeviceBridge() *PacketTunnelDeviceBridge
 }
 
 var controllerMutex sync.Mutex
@@ -72,6 +74,11 @@ func Start(
 
 	if useIPv6Synthesizer {
 		config.IPv6Synthesizer = provider
+	}
+
+	deviceBridge := provider.GetPacketTunnelDeviceBridge()
+	if deviceBridge != nil {
+		config.PacketTunnelDeviceBridge = deviceBridge.bridge
 	}
 
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
@@ -151,4 +158,50 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 	} else {
 		psiphon.NoticeInfo("Feedback uploaded successfully")
 	}
+}
+
+func GetPacketTunnelMTU() int {
+	return tun.DEFAULT_MTU
+}
+
+func GetPacketTunnelDNSResolverIPv4Address() string {
+	return tun.GetTransparentDNSResolverIPv4Address().String()
+}
+
+func GetPacketTunnelDNSResolverIPv6Address() string {
+	return tun.GetTransparentDNSResolverIPv6Address().String()
+}
+
+// PacketTunnelDeviceBridge is a shim for tun.DeviceBeidge,
+// exposing just the necessary "psi" caller integration points.
+//
+// For performant packet tunneling, it's important to avoid memory
+// allocation and garbage collection per packet I/O.
+//
+// In Obj-C, gobind generates code that will not allocate/copy byte
+// slices _as long as a NSMutableData is passed to ReceivedFromDevice_;
+// and generates code that will not allocate/copy when calling
+// SendToDevice. E.g., generated code calls go_seq_to_objc_bytearray
+// and go_seq_from_objc_bytearray with copy set to 0.
+type PacketTunnelDeviceBridge struct {
+	bridge *tun.DeviceBridge
+}
+
+type PacketTunnelDeviceSender interface {
+	SendToDevice(packet []byte)
+}
+
+func NewPacketTunnelDeviceBridge(
+	sender PacketTunnelDeviceSender) *PacketTunnelDeviceBridge {
+
+	return &PacketTunnelDeviceBridge{
+		bridge: tun.NewDeviceBridge(
+			GetPacketTunnelMTU(),
+			0,
+			sender.SendToDevice),
+	}
+}
+
+func (r *PacketTunnelDeviceBridge) ReceivedFromDevice(packet []byte) {
+	r.bridge.ReceivedFromDevice(packet)
 }

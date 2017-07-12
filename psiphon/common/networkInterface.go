@@ -20,48 +20,53 @@
 package common
 
 import (
-	"errors"
+	"fmt"
 	"net"
 )
 
-// Take in an interface name ("lo", "eth0", "any") passed from either
-// a config setting, by using the -listenInterface flag on client or
-// -interface flag on server from the command line and return the IP
-// address associated with it.
-// If no interface is provided use the default loopback interface (127.0.0.1).
-// If "any" is passed then listen on 0.0.0.0 for client (invalid with server)
-func GetInterfaceIPAddress(listenInterface string) (string, error) {
-	var ip net.IP
-	if listenInterface == "" {
-		ip = net.ParseIP("127.0.0.1")
-		return ip.String(), nil
-	} else if listenInterface == "any" {
-		ip = net.ParseIP("0.0.0.0")
-		return ip.String(), nil
-	} else {
-		availableInterfaces, err := net.InterfaceByName(listenInterface)
-		if err != nil {
-			return "", ContextError(err)
+// GetInterfaceIPAddress takes an interface name, such as "eth0", and returns
+// the first IPv4 and IPv6 addresses associated with it. Either of the IPv4 or
+// IPv6 address may be nil. If neither type of address is found, an error
+// is returned.
+func GetInterfaceIPAddresses(interfaceName string) (net.IP, net.IP, error) {
+
+	var IPv4Address, IPv6Address net.IP
+
+	availableInterfaces, err := net.InterfaceByName(interfaceName)
+	if err != nil {
+		return nil, nil, ContextError(err)
+	}
+
+	addrs, err := availableInterfaces.Addrs()
+	if err != nil {
+		return nil, nil, ContextError(err)
+	}
+
+	for _, addr := range addrs {
+
+		ipNet := addr.(*net.IPNet)
+		if ipNet == nil {
+			continue
 		}
 
-		addrs, err := availableInterfaces.Addrs()
-		if err != nil {
-			return "", ContextError(err)
+		if ipNet.IP.To4() != nil {
+			if IPv4Address == nil {
+				IPv4Address = ipNet.IP
+			}
+		} else {
+			if IPv6Address == nil {
+				IPv6Address = ipNet.IP
+			}
 		}
-		for _, addr := range addrs {
-			iptype := addr.(*net.IPNet)
-			if iptype == nil {
-				continue
-			}
-			// TODO: IPv6 support
-			ip = iptype.IP.To4()
-			if ip == nil {
-				continue
-			}
-			return ip.String(), nil
+
+		if IPv4Address != nil && IPv6Address != nil {
+			break
 		}
 	}
 
-	return "", ContextError(errors.New("Could not find IP address of specified interface"))
+	if IPv4Address != nil || IPv6Address != nil {
+		return IPv4Address, IPv6Address, nil
+	}
 
+	return nil, nil, ContextError(fmt.Errorf("Could not find any IP address for interface %s", interfaceName))
 }

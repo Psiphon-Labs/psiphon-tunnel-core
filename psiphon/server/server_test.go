@@ -50,8 +50,14 @@ func TestMain(m *testing.M) {
 
 	var err error
 	for _, interfaceName := range []string{"eth0", "en0"} {
-		serverIPAddress, err = common.GetInterfaceIPAddress(interfaceName)
+		var serverIPv4Address, serverIPv6Address net.IP
+		serverIPv4Address, serverIPv6Address, err = common.GetInterfaceIPAddresses(interfaceName)
 		if err == nil {
+			if serverIPv4Address != nil {
+				serverIPAddress = serverIPv4Address.String()
+			} else {
+				serverIPAddress = serverIPv6Address.String()
+			}
 			break
 		}
 	}
