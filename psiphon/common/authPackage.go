@@ -20,6 +20,7 @@
 package common
 
 import (
+	"bufio"
 	"bytes"
 	"compress/zlib"
 	"crypto"
@@ -268,8 +269,10 @@ func StreamingReadAuthenticatedDataPackage(
 			return false, ContextError(fmt.Errorf("unexpected key '%s'", key))
 		}
 
+		// Using a buffered reader to consume zlib output in batches
+		// yields a significant speed up in the BenchmarkAuthenticatedPackage.
 		jsonStreamer := &limitedJSONStreamer{
-			reader:  decompressor,
+			reader:  bufio.NewReader(decompressor),
 			handler: jsonHandler,
 		}
 
