@@ -292,6 +292,7 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  Implementing this method is *required* if whole device mode is enabled (and otherwise should not be implemented).
  The implementation of this must send the given packet to the device.
  @param packet  The data packet to send to the device.
+ Swift: @code func send(toDevice packet: NSMutableData) @endcode
  */
 - (void)sendToDevice:(NSMutableData * _Nonnull)packet;
 
