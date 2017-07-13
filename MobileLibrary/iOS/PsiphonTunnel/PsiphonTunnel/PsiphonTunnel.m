@@ -706,10 +706,10 @@
         return FALSE;
     }
 
-    // TODO: Determine if this is robust.
-    unsigned int interfaceIndex = if_nametoindex("ap1");
-    
-    int ret = setsockopt((int)fileDescriptor, IPPROTO_TCP, IP_BOUND_IF, &interfaceIndex, sizeof(interfaceIndex));
+    // TODO: Select correct WiFi or mobile data interface.
+    unsigned int interfaceIndex = if_nametoindex("en0");
+
+    int ret = setsockopt((int)fileDescriptor, IPPROTO_IP, IP_BOUND_IF, &interfaceIndex, sizeof(interfaceIndex));
     if (ret != 0) {
         [self logMessage:[NSString stringWithFormat: @"bindToDevice: setsockopt failed; errno: %d", errno]];
         return FALSE;
