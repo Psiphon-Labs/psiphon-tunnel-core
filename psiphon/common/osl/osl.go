@@ -831,7 +831,7 @@ func (config *Config) Pave(
 				// serverEntries will be "" when nothing is found in paveServerEntries
 				serverEntries := strings.Join(paveServerEntries[hexEncodedOSLID], "\n")
 
-				signedServerEntries, err := common.WriteAuthenticatedDataPackage(
+				serverEntriesPackage, err := common.WriteAuthenticatedDataPackage(
 					serverEntries,
 					signingPublicKey,
 					signingPrivateKey)
@@ -839,7 +839,7 @@ func (config *Config) Pave(
 					return nil, common.ContextError(err)
 				}
 
-				boxedServerEntries, err := box(fileKey, common.Compress(signedServerEntries))
+				boxedServerEntries, err := box(fileKey, serverEntriesPackage)
 				if err != nil {
 					return nil, common.ContextError(err)
 				}
@@ -877,7 +877,7 @@ func (config *Config) Pave(
 		return nil, common.ContextError(err)
 	}
 
-	signedRegistry, err := common.WriteAuthenticatedDataPackage(
+	registryPackage, err := common.WriteAuthenticatedDataPackage(
 		base64.StdEncoding.EncodeToString(registryJSON),
 		signingPublicKey,
 		signingPrivateKey)
@@ -887,7 +887,7 @@ func (config *Config) Pave(
 
 	paveFiles = append(paveFiles, &PaveFile{
 		Name:     REGISTRY_FILENAME,
-		Contents: common.Compress(signedRegistry),
+		Contents: registryPackage,
 	})
 
 	return paveFiles, nil
@@ -1096,18 +1096,12 @@ func GetOSLFilename(baseDirectory string, oslID []byte) string {
 		baseDirectory, fmt.Sprintf(OSL_FILENAME_FORMAT, hex.EncodeToString(oslID)))
 }
 
-// UnpackRegistry decompresses, validates, and loads a
-// JSON encoded OSL registry.
+// UnpackRegistry validates and loads a JSON encoded OSL registry.
 func UnpackRegistry(
-	compressedRegistry []byte, signingPublicKey string) (*Registry, []byte, error) {
-
-	packagedRegistry, err := common.Decompress(compressedRegistry)
-	if err != nil {
-		return nil, nil, common.ContextError(err)
-	}
+	registryPackage []byte, signingPublicKey string) (*Registry, []byte, error) {
 
 	encodedRegistry, err := common.ReadAuthenticatedDataPackage(
-		packagedRegistry, signingPublicKey)
+		registryPackage, signingPublicKey)
 	if err != nil {
 		return nil, nil, common.ContextError(err)
 	}
@@ -1254,8 +1248,8 @@ func (keyShares *KeyShares) reassembleKey(lookup SLOKLookup, unboxKey bool) (boo
 }
 
 // UnpackOSL reassembles the key for the OSL specified by oslID and uses
-// that key to decrypt oslFileContents, uncompress the contents, validate
-// the authenticated package, and extract the payload.
+// that key to decrypt oslFileContents, validate the authenticated package,
+// and extract the payload.
 // Clients will call UnpackOSL for OSLs indicated by GetSeededOSLIDs along
 // with their downloaded content.
 // SLOKLookup is called to determine which SLOKs are seeded with the client.
@@ -1278,12 +1272,7 @@ func (registry *Registry) UnpackOSL(
 		return "", common.ContextError(errors.New("unseeded OSL"))
 	}
 
-	decryptedContents, err := unbox(fileKey, oslFileContents)
-	if err != nil {
-		return "", common.ContextError(err)
-	}
-
-	dataPackage, err := common.Decompress(decryptedContents)
+	dataPackage, err := unbox(fileKey, oslFileContents)
 	if err != nil {
 		return "", common.ContextError(err)
 	}

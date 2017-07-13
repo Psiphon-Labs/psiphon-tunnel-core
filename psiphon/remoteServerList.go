@@ -20,7 +20,6 @@
 package psiphon
 
 import (
-	"compress/zlib"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -357,9 +356,9 @@ func downloadRemoteServerListFile(
 	return responseETag, nil
 }
 
-// unpackRemoteServerListFile reads a file that contains a
-// zlib compressed authenticated data package, validates
-// the package, and returns the payload.
+// unpackRemoteServerListFile reads a file that contains an
+// authenticated data package, validates the package, and
+// returns the payload.
 func unpackRemoteServerListFile(
 	config *Config, filename string) (string, error) {
 
@@ -369,13 +368,7 @@ func unpackRemoteServerListFile(
 	}
 	defer fileReader.Close()
 
-	zlibReader, err := zlib.NewReader(fileReader)
-	if err != nil {
-		return "", common.ContextError(err)
-	}
-
-	dataPackage, err := ioutil.ReadAll(zlibReader)
-	zlibReader.Close()
+	dataPackage, err := ioutil.ReadAll(fileReader)
 	if err != nil {
 		return "", common.ContextError(err)
 	}
