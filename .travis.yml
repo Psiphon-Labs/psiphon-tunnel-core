@@ -1,4 +1,5 @@
 language: go
+sudo: required
 go:
 - 1.8.3
 addons:
@@ -13,7 +14,7 @@ script:
 - go test -race -v ./common/osl
 - go test -race -v ./common/protocol
 # TODO: enable once known race condition is addressed
-#- go test -race -v ./common/tun
+#- sudo go test -race -v ./common/tun
 - go test -race -v ./transferstats
 - go test -race -v ./server
 - go test -race -v ./server/psinet
@@ -21,7 +22,7 @@ script:
 - go test -v -covermode=count -coverprofile=common.coverprofile ./common
 - go test -v -covermode=count -coverprofile=osl.coverprofile ./common/osl
 - go test -v -covermode=count -coverprofile=protocol.coverprofile ./common/protocol
-- go test -v -covermode=count -coverprofile=tun.coverprofile ./common/tun
+- sudo go test -v -covermode=count -coverprofile=tun.coverprofile ./common/tun
 - go test -v -covermode=count -coverprofile=transferstats.coverprofile ./transferstats
 - go test -v -covermode=count -coverprofile=server.coverprofile ./server
 - go test -v -covermode=count -coverprofile=psinet.coverprofile ./server/psinet
