@@ -466,7 +466,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	// SSH config
 
-	// TODO: use other key types: anti-fingerprint by varying params
 	rsaKey, err := rsa.GenerateKey(rand.Reader, SSH_RSA_HOST_KEY_BITS)
 	if err != nil {
 		return nil, nil, nil, common.ContextError(err)
@@ -498,7 +497,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		return nil, nil, nil, common.ContextError(err)
 	}
 
-	// TODO: vary version string for anti-fingerprint
 	sshServerVersion := "SSH-2.0-Psiphon"
 
 	// Obfuscated SSH config
