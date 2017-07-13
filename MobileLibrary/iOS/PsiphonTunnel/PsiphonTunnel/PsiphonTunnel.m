@@ -765,9 +765,9 @@
 }
 
 
-#pragma mark - GoPsiPacketTunnelDeviceWriter protocol implementation (private)
+#pragma mark - GoPsiPacketTunnelDeviceSender protocol implementation (private)
 
-- (void)sendToDevice:(NSMutableData *)packet {
+- (void)sendToDevice:(NSData *)packet {
     // The check to see if the delegate responds to this optional selector was
     // done when processing the config, so we're not going to do it again for every packet.
     [self.tunneledAppDelegate sendToDevice:packet];
