@@ -101,7 +101,7 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 		t.Fatalf("startTestTCPServer failed: %s", err)
 	}
 
-	testServer, err := startTestServer(MTU)
+	testServer, err := startTestServer(useIPv6, MTU)
 	if err != nil {
 		t.Fatalf("startTestServer failed: %s", err)
 	}
@@ -112,7 +112,7 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 		go func() {
 
 			testClient, err := startTestClient(
-				MTU, []string{testTCPServer.getListenerIPAddress()})
+				useIPv6, MTU, []string{testTCPServer.getListenerIPAddress()})
 			if err != nil {
 				results <- fmt.Errorf("startTestClient failed: %s", err)
 				return
@@ -240,7 +240,7 @@ type testServer struct {
 	workers      *sync.WaitGroup
 }
 
-func startTestServer(MTU int) (*testServer, error) {
+func startTestServer(useIPv6 bool, MTU int) (*testServer, error) {
 
 	logger := newTestLogger(true)
 
@@ -248,10 +248,11 @@ func startTestServer(MTU int) (*testServer, error) {
 
 	config := &ServerConfig{
 		Logger: logger,
-		GetDNSResolverIPv4Addresses: noDNSResolvers,
-		GetDNSResolverIPv6Addresses: noDNSResolvers,
+		SudoNetworkConfigCommands:       os.Getenv("TUN_TEST_SUDO") != "",
+		AllowNoIPv6NetworkConfiguration: !useIPv6,
+		GetDNSResolverIPv4Addresses:     noDNSResolvers,
+		GetDNSResolverIPv6Addresses:     noDNSResolvers,
 		MTU: MTU,
-		SudoNetworkConfigCommands: os.Getenv("TUN_TEST_SUDO") != "",
 	}
 
 	tunServer, err := NewServer(config)
@@ -379,6 +380,7 @@ type testClient struct {
 }
 
 func startTestClient(
+	useIPv6 bool,
 	MTU int,
 	routeDestinations []string) (*testClient, error) {
 
@@ -392,12 +394,14 @@ func startTestClient(
 	// Assumes IP addresses are available on test host
 
 	config := &ClientConfig{
-		Logger:            logger,
-		IPv4AddressCIDR:   "172.16.0.1/24",
-		IPv6AddressCIDR:   "fd26:b6a6:4454:310a:0000:0000:0000:0001/64",
-		RouteDestinations: routeDestinations,
-		Transport:         unixConn,
-		MTU:               MTU,
+		Logger: logger,
+		SudoNetworkConfigCommands:       os.Getenv("TUN_TEST_SUDO") != "",
+		AllowNoIPv6NetworkConfiguration: !useIPv6,
+		IPv4AddressCIDR:                 "172.16.0.1/24",
+		IPv6AddressCIDR:                 "fd26:b6a6:4454:310a:0000:0000:0000:0001/64",
+		RouteDestinations:               routeDestinations,
+		Transport:                       unixConn,
+		MTU:                             MTU,
 	}
 
 	tunClient, err := NewClient(config)

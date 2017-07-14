@@ -164,6 +164,16 @@ type ServerConfig struct {
 	// the implementation for the appropriate platform.
 	SudoNetworkConfigCommands bool
 
+	// AllowNoIPv6NetworkConfiguration indicates that failures while
+	// configuring tun interfaces and routing for IPv6 are to be
+	// logged as warnings only. This option is intended to support
+	// test cases on hosts without IPv6 and is not for production use;
+	// the packet tunnel server will still accept IPv6 packets and
+	// replay them to the tun device.
+	// AllowNoIPv6NetworkConfiguration may not be supported on all
+	// platforms.
+	AllowNoIPv6NetworkConfiguration bool
+
 	// EgressInterface is the interface to which client traffic is
 	// masqueraded/NATed. For example, "eth0". If blank, a platform-
 	// appropriate default is used.
@@ -1226,6 +1236,12 @@ type ClientConfig struct {
 	// when executing network configuration commands. See description
 	// for ServerConfig.SudoNetworkConfigCommands.
 	SudoNetworkConfigCommands bool
+
+	// AllowNoIPv6NetworkConfiguration indicates that failures while
+	// configuring tun interfaces and routing for IPv6 are to be
+	// logged as warnings only. See description for
+	// ServerConfig.AllowNoIPv6NetworkConfiguration.
+	AllowNoIPv6NetworkConfiguration bool
 
 	// MTU is the packet MTU value to use; this value
 	// should be obtained from the packet tunnel server.

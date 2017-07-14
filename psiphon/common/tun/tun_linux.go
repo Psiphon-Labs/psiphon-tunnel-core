@@ -215,7 +215,14 @@ func configureServerInterface(
 		tunDeviceName,
 		"add", serverIPv6AddressCIDR)
 	if err != nil {
-		return common.ContextError(err)
+		if config.AllowNoIPv6NetworkConfiguration {
+			config.Logger.WithContextFields(
+				common.LogFields{
+					"error": err}).Warning(
+				"assign IPv6 address failed")
+		} else {
+			return common.ContextError(err)
+		}
 	}
 
 	egressInterface := config.EgressInterface
@@ -242,7 +249,14 @@ func configureServerInterface(
 		"sysctl",
 		"net.ipv6.conf.all.forwarding=1")
 	if err != nil {
-		return common.ContextError(err)
+		if config.AllowNoIPv6NetworkConfiguration {
+			config.Logger.WithContextFields(
+				common.LogFields{
+					"error": err}).Warning(
+				"allow IPv6 forwarding failed")
+		} else {
+			return common.ContextError(err)
+		}
 	}
 
 	// To avoid duplicates, first try to drop existing rule, then add
@@ -272,7 +286,14 @@ func configureServerInterface(
 			"-o", egressInterface,
 			"-j", "MASQUERADE")
 		if mode != "-D" && err != nil {
-			return common.ContextError(err)
+			if config.AllowNoIPv6NetworkConfiguration {
+				config.Logger.WithContextFields(
+					common.LogFields{
+						"error": err}).Warning(
+					"configure IPv6 masquerading failed")
+			} else {
+				return common.ContextError(err)
+			}
 		}
 	}
 
@@ -310,7 +331,14 @@ func configureClientInterface(
 		tunDeviceName,
 		"add", config.IPv6AddressCIDR)
 	if err != nil {
-		return common.ContextError(err)
+		if config.AllowNoIPv6NetworkConfiguration {
+			config.Logger.WithContextFields(
+				common.LogFields{
+					"error": err}).Warning(
+				"assign IPv6 address failed")
+		} else {
+			return common.ContextError(err)
+		}
 	}
 
 	// Set routing. Routes set here should automatically
@@ -346,7 +374,13 @@ func configureClientInterface(
 			destination,
 			"dev", tunDeviceName)
 		if err != nil {
-			return common.ContextError(err)
+			if config.AllowNoIPv6NetworkConfiguration {
+				config.Logger.WithContextFields(
+					common.LogFields{
+						"error": err}).Warning("add IPv6 route failed")
+			} else {
+				return common.ContextError(err)
+			}
 		}
 	}
 
