@@ -242,8 +242,7 @@ func NewStreamingServerEntryDecoder(
 //   will allocate memory to hex decode and JSON deserialze the server
 //   entry. As this is not presently reusing a fixed buffer, each call
 //   will allocate additional memory; garbage collection is necessary to
-//   reclaim that memory for reuse for the next server entry. Memory-
-//   constrained users could call runtime.GC() after each call to Next.
+//   reclaim that memory for reuse for the next server entry.
 //
 func (decoder *StreamingServerEntryDecoder) Next() (*ServerEntry, error) {
 

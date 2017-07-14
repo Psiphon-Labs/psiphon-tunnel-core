@@ -28,7 +28,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -277,6 +276,10 @@ func StreamingStoreServerEntries(
 
 	checkInitDataStore()
 
+	// Note: both StreamingServerEntryDecoder.Next and StoreServerEntry
+	// allocate temporary memory buffers for hex/JSON decoding/encoding,
+	// so this isn't true constant-memory streaming (it depends on garbage
+	// collection).
 	for {
 		serverEntry, err := serverEntries.Next()
 		if err != nil {
@@ -292,12 +295,6 @@ func StreamingStoreServerEntries(
 		if err != nil {
 			return common.ContextError(err)
 		}
-
-		// Both StreamingServerEntryDecoder.Next and StoreServerEntry allocate
-		// memory. To approximate true fixed-memory streaming, garbage collect
-		// to reclaim that memory for the next iteration.
-		// TODO: measure effectiveness and performance penalty of this call
-		runtime.GC()
 	}
 
 	// Since there has possibly been a significant change in the server entries,
