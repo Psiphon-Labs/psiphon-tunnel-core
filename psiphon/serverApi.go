@@ -198,6 +198,13 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 			return common.ContextError(err)
 		}
 
+		err = protocol.ValidateServerEntry(serverEntry)
+		if err != nil {
+			// Skip this entry and continue with the next one
+			NoticeAlert("invalid server entry: %s", err)
+			continue
+		}
+
 		decodedServerEntries = append(decodedServerEntries, serverEntry)
 	}
 

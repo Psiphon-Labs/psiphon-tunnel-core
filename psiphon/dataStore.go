@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -187,11 +186,11 @@ func checkInitDataStore() {
 func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) error {
 	checkInitDataStore()
 
-	ipAddr := net.ParseIP(serverEntry.IpAddress)
-	if ipAddr == nil {
-		NoticeAlert("skip storing server with invalid IP address: %s", serverEntry.IpAddress)
-		// Returns no error so callers such as StoreServerEntries won't abort
-		return nil
+	// Server entries should already be validated before this point,
+	// so instead of skipping we fail with an error.
+	err := protocol.ValidateServerEntry(serverEntry)
+	if err != nil {
+		return common.ContextError(errors.New("invalid server entry"))
 	}
 
 	// BoltDB implementation note:
@@ -202,7 +201,7 @@ func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) e
 	// values (e.g., many servers support all protocols), performance
 	// is expected to be acceptable.
 
-	err := singleton.db.Update(func(tx *bolt.Tx) error {
+	err = singleton.db.Update(func(tx *bolt.Tx) error {
 
 		serverEntries := tx.Bucket([]byte(serverEntriesBucket))
 
@@ -280,6 +279,7 @@ func StreamingStoreServerEntries(
 	// allocate temporary memory buffers for hex/JSON decoding/encoding,
 	// so this isn't true constant-memory streaming (it depends on garbage
 	// collection).
+
 	for {
 		serverEntry, err := serverEntries.Next()
 		if err != nil {

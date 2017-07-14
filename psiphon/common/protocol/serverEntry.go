@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"strings"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -188,8 +189,22 @@ func DecodeServerEntry(
 	return serverEntry, nil
 }
 
+// ValidateServerEntry checks for malformed server entries.
+// Currently, it checks for a valid ipAddress. This is important since
+// the IP address is the key used to store/lookup the server entry.
+// TODO: validate more fields?
+func ValidateServerEntry(serverEntry *ServerEntry) error {
+	ipAddr := net.ParseIP(serverEntry.IpAddress)
+	if ipAddr == nil {
+		errMsg := fmt.Sprintf("server entry has invalid ipAddress: '%s'", serverEntry.IpAddress)
+		return common.ContextError(errors.New(errMsg))
+	}
+	return nil
+}
+
 // DecodeServerEntryList extracts server entries from the list encoding
 // used by remote server lists and Psiphon server handshake requests.
+// Each server entry is validated and invalid entries are skipped.
 // See DecodeServerEntry for note on serverEntrySource/timestamp.
 func DecodeServerEntryList(
 	encodedServerEntryList, timestamp,
@@ -205,6 +220,12 @@ func DecodeServerEntryList(
 		serverEntry, err := DecodeServerEntry(encodedServerEntry, timestamp, serverEntrySource)
 		if err != nil {
 			return nil, common.ContextError(err)
+		}
+
+		if ValidateServerEntry(serverEntry) != nil {
+			// Skip this entry and continue with the next one
+			// TODO: invoke a logging callback
+			continue
 		}
 
 		serverEntries = append(serverEntries, serverEntry)
@@ -232,8 +253,8 @@ func NewStreamingServerEntryDecoder(
 	}
 }
 
-// Next reads and decodes the next server entry from the input stream,
-// returning a nil server entry when the stream is complete.
+// Next reads and decodes, and validates the next server entry from the
+// input stream, returning a nil server entry when the stream is complete.
 //
 // Limitations:
 // - Each encoded server entry line cannot exceed bufio.MaxScanTokenSize,
@@ -246,18 +267,26 @@ func NewStreamingServerEntryDecoder(
 //
 func (decoder *StreamingServerEntryDecoder) Next() (*ServerEntry, error) {
 
-	if !decoder.scanner.Scan() {
-		return nil, common.ContextError(decoder.scanner.Err())
+	for {
+		if !decoder.scanner.Scan() {
+			return nil, common.ContextError(decoder.scanner.Err())
+		}
+
+		// TODO: use scanner.Bytes which doesn't allocate, instead of scanner.Text
+
+		// TODO: skip this entry and continue if can't decode?
+		serverEntry, err := DecodeServerEntry(
+			decoder.scanner.Text(), decoder.timestamp, decoder.serverEntrySource)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
+		if ValidateServerEntry(serverEntry) != nil {
+			// Skip this entry and continue with the next one
+			// TODO: invoke a logging callback
+			continue
+		}
+
+		return serverEntry, nil
 	}
-
-	// TODO: use scanner.Bytes which doesn't allocate, instead of scanner.Text
-
-	// TODO: skip this entry and continue if can't decode?
-	serverEntry, err := DecodeServerEntry(
-		decoder.scanner.Text(), decoder.timestamp, decoder.serverEntrySource)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-
-	return serverEntry, nil
 }
