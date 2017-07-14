@@ -95,7 +95,7 @@ func Start(
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
-	serverEntries, err := protocol.DecodeAndValidateServerEntryList(
+	serverEntries, err := protocol.DecodeServerEntryList(
 		embeddedServerEntryList,
 		common.GetCurrentTimestamp(),
 		protocol.SERVER_ENTRY_SOURCE_EMBEDDED)

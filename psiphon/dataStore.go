@@ -25,8 +25,10 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -186,11 +188,11 @@ func checkInitDataStore() {
 func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) error {
 	checkInitDataStore()
 
-	// Server entries should already be validated before this point,
-	// so instead of skipping we fail with an error.
-	err := protocol.ValidateServerEntry(serverEntry)
-	if err != nil {
-		return common.ContextError(errors.New("invalid server entry"))
+	ipAddr := net.ParseIP(serverEntry.IpAddress)
+	if ipAddr == nil {
+		NoticeAlert("skip storing server with invalid IP address: %s", serverEntry.IpAddress)
+		// Returns no error so callers such as StoreServerEntries won't abort
+		return nil
 	}
 
 	// BoltDB implementation note:
@@ -201,7 +203,7 @@ func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) e
 	// values (e.g., many servers support all protocols), performance
 	// is expected to be acceptable.
 
-	err = singleton.db.Update(func(tx *bolt.Tx) error {
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
 
 		serverEntries := tx.Bucket([]byte(serverEntriesBucket))
 
@@ -249,23 +251,53 @@ func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) e
 	return nil
 }
 
-// StoreServerEntries shuffles and stores a list of server entries.
-// Shuffling is performed on imported server entrues as part of client-side
-// load balancing.
+// StoreServerEntries stores a list of server entries.
 // There is an independent transaction for each entry insert/update.
 func StoreServerEntries(serverEntries []*protocol.ServerEntry, replaceIfExists bool) error {
 	checkInitDataStore()
-
-	for index := len(serverEntries) - 1; index > 0; index-- {
-		swapIndex := rand.Intn(index + 1)
-		serverEntries[index], serverEntries[swapIndex] = serverEntries[swapIndex], serverEntries[index]
-	}
 
 	for _, serverEntry := range serverEntries {
 		err := StoreServerEntry(serverEntry, replaceIfExists)
 		if err != nil {
 			return common.ContextError(err)
 		}
+	}
+
+	// Since there has possibly been a significant change in the server entries,
+	// take this opportunity to update the available egress regions.
+	ReportAvailableRegions()
+
+	return nil
+}
+
+// StreamingStoreServerEntries stores a list of server entries.
+// There is an independent transaction for each entry insert/update.
+func StreamingStoreServerEntries(
+	serverEntries *protocol.StreamingServerEntryDecoder, replaceIfExists bool) error {
+
+	checkInitDataStore()
+
+	for {
+		serverEntry, err := serverEntries.Next()
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		if serverEntry == nil {
+			// No more server entries
+			return nil
+		}
+
+		err = StoreServerEntry(serverEntry, replaceIfExists)
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		// Both StreamingServerEntryDecoder.Next and StoreServerEntry allocate
+		// memory. To approximate true fixed-memory streaming, garbage collect
+		// to reclaim that memory for the next iteration.
+		// TODO: measure effectiveness and performance penalty of this call
+		runtime.GC()
 	}
 
 	// Since there has possibly been a significant change in the server entries,

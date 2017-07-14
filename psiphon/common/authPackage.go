@@ -510,14 +510,22 @@ func (streamer *limitedJSONValueStreamer) Read(p []byte) (int, error) {
 		var n int
 		n, err = streamer.reader.Read(p[i : i+1])
 
+		// process n == 1 before handling err, in case err is io.EOF
 		if n == 1 {
 			if p[i] == '"' {
-				n = 0
 				streamer.eof = true
 				err = io.EOF
 			} else if p[i] == '\\' {
-				n = 0
-				err = ContextError(errors.New("unsupported escaped character"))
+				if err == nil {
+					// Psiphon server list string values contain '\n', so support
+					// that required case.
+					n, err = streamer.reader.Read(p[i : i+1])
+					if n == 1 && p[i] == 'n' {
+						p[i] = '\n'
+					} else {
+						err = ContextError(errors.New("unsupported escaped character"))
+					}
+				}
 			}
 		}
 
