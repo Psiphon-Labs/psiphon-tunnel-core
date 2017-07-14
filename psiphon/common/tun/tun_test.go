@@ -95,8 +95,8 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 
 	testTCPServer, err := startTestTCPServer(useIPv6)
 	if err != nil {
-		if err == errLinkLocalAddress {
-			t.Skipf("test unsupported: %s", errLinkLocalAddress)
+		if err == errNoIPAddress {
+			t.Skipf("test unsupported: %s", errNoIPAddress)
 		}
 		t.Fatalf("startTestTCPServer failed: %s", err)
 	}
@@ -251,6 +251,7 @@ func startTestServer(MTU int) (*testServer, error) {
 		GetDNSResolverIPv4Addresses: noDNSResolvers,
 		GetDNSResolverIPv6Addresses: noDNSResolvers,
 		MTU: MTU,
+		SudoNetworkConfigCommands: os.Getenv("TUN_TEST_SUDO") != "",
 	}
 
 	tunServer, err := NewServer(config)
@@ -432,7 +433,7 @@ type testTCPServer struct {
 	workers           *sync.WaitGroup
 }
 
-var errLinkLocalAddress = errors.New("interface has link local address")
+var errNoIPAddress = errors.New("no IP address")
 
 func startTestTCPServer(useIPv6 bool) (*testTCPServer, error) {
 
@@ -446,21 +447,14 @@ func startTestTCPServer(useIPv6 bool) (*testTCPServer, error) {
 	}
 
 	if useIPv6 {
-		if IPv6Address == nil {
-			return nil, fmt.Errorf("startTestTCPServer(): no IPv6 address")
-		}
-		if IPv6Address.IsLinkLocalUnicast() {
-			// Cannot route to link local address
-			return nil, errLinkLocalAddress
+		// Cannot route to link local address
+		if IPv6Address == nil || IPv6Address.IsLinkLocalUnicast() {
+			return nil, errNoIPAddress
 		}
 		hostIPaddress = IPv6Address.String()
 	} else {
-		if IPv4Address == nil {
-			return nil, fmt.Errorf("startTestTCPServer(): no IPv4 address")
-		}
-		if IPv4Address.IsLinkLocalUnicast() {
-			// Cannot route to link local address
-			return nil, errLinkLocalAddress
+		if IPv4Address == nil || IPv4Address.IsLinkLocalUnicast() {
+			return nil, errNoIPAddress
 		}
 		hostIPaddress = IPv4Address.String()
 	}
