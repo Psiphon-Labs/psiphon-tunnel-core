@@ -288,14 +288,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  */
 - (void)onClientUpgradeDownloaded:(NSString * _Nonnull)filename;
 
-/*!
- Implementing this method is *required* if whole device mode is enabled (and otherwise should not be implemented).
- The implementation of this must send the given packet to the device.
- @param packet  The data packet to send to the device.
- Swift: @code func send(toDevice packet: Data) @endcode
- */
-- (void)sendToDevice:(NSData * _Nonnull)packet;
-
 @end
 
 /*!
@@ -366,13 +358,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
   Swift: @code func getPacketTunnelDNSResolverIPv6Address() -> String @endcode
  */
 - (NSString * _Nonnull)getPacketTunnelDNSResolverIPv6Address;
-
-/*!
- Only valid in whole device mode. This function should be called when a packet has been read from the device and should be sent through the tunnel.
- @param packet  The data packet.
- Swift: @code func received(fromDevice packet: Data) @endcode
- */
-- (void)receivedFromDevice:(NSMutableData *_Nonnull)packet;
 
 /*!
  Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics information in a particular format, then calls this function to upload it for later investigation.

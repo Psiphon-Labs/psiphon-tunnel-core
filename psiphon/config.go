@@ -31,7 +31,6 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
 // TODO: allow all params to be configured
@@ -475,12 +474,6 @@ type Config struct {
 	// file descriptor. The file descriptor is duped in NewController.
 	// When PacketTunnelTunDeviceFileDescriptor is set, TunnelPoolSize must be 1.
 	PacketTunnelTunFileDescriptor int
-
-	// PacketTunnelDeviceBridge specifies a tun device bridge to use for running a
-	// packet tunnel. This is an alternate interface to a tun device when a file
-	// descriptor is not directly available.
-	// When PacketTunnelDeviceBridge is set, TunnelPoolSize must be 1.
-	PacketTunnelDeviceBridge *tun.DeviceBridge
 }
 
 // DownloadURL specifies a URL for downloading resources along with parameters
@@ -585,11 +578,6 @@ func LoadConfig(configJson []byte) (*Config, error) {
 			errors.New("DnsServerGetter interface must be set at runtime"))
 	}
 
-	if config.PacketTunnelDeviceBridge != nil {
-		return nil, common.ContextError(
-			errors.New("PacketTunnelDeviceBridge value must be set at runtime"))
-	}
-
 	if !common.Contains(
 		[]string{"", TRANSFORM_HOST_NAMES_ALWAYS, TRANSFORM_HOST_NAMES_NEVER},
 		config.TransformHostNames) {
@@ -668,13 +656,8 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		}
 	}
 
-	if config.PacketTunnelTunFileDescriptor > 0 && config.PacketTunnelDeviceBridge != nil {
-		return nil, common.ContextError(errors.New("only one of PacketTunnelTunFileDescriptor and PacketTunnelDeviceBridge may be set"))
-	}
-
 	// This constraint is expected by logic in Controller.runTunnels()
-	if (config.PacketTunnelTunFileDescriptor > 0 || config.PacketTunnelDeviceBridge != nil) &&
-		config.TunnelPoolSize != 1 {
+	if config.PacketTunnelTunFileDescriptor > 0 && config.TunnelPoolSize != 1 {
 		return nil, common.ContextError(errors.New("packet tunnel mode requires TunnelPoolSize to be 1"))
 	}
 

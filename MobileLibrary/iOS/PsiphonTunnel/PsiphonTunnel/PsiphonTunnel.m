@@ -29,7 +29,7 @@
 #import "JailbreakCheck/JailbreakCheck.h"
 
 
-@interface PsiphonTunnel () <GoPsiPsiphonProvider, GoPsiPacketTunnelDeviceSender>
+@interface PsiphonTunnel () <GoPsiPsiphonProvider>
 
 @property (weak) id <TunneledAppDelegate> tunneledAppDelegate;
 
@@ -45,7 +45,6 @@
     NetworkStatus previousNetworkStatus;
 
     BOOL tunnelWholeDevice;
-    GoPsiPacketTunnelDeviceBridge* packetTunnelDeviceBridge; // only used in whole device mode
 }
 
 - (id)init {
@@ -54,7 +53,6 @@
     atomic_init(&localHttpProxyPort, 0);
     reachability = [Reachability reachabilityForInternetConnection];
     tunnelWholeDevice = FALSE;
-    packetTunnelDeviceBridge = NULL;
 
     return self;
 }
@@ -178,7 +176,6 @@
 
         atomic_store(&localSocksProxyPort, 0);
         atomic_store(&localHttpProxyPort, 0);
-        packetTunnelDeviceBridge = NULL;
 
         [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
     }
@@ -212,11 +209,6 @@
 // See comment in header.
 - (NSString * _Nonnull)getPacketTunnelDNSResolverIPv6Address {
     return GoPsiGetPacketTunnelDNSResolverIPv6Address();
-}
-
-// See comment in header.
-- (void)receivedFromDevice:(NSMutableData * _Nonnull)packet {
-    [packetTunnelDeviceBridge receivedFromDevice:packet];
 }
 
 // See comment in header.
@@ -403,10 +395,6 @@
 
     // We'll record our state about what mode we're in.
     tunnelWholeDevice = ([config[@"TunnelWholeDevice"] integerValue] == 1);
-    if (tunnelWholeDevice && ![self.tunneledAppDelegate respondsToSelector:@selector(sendToDevice:)]) {
-        [self logMessage:@"If TunnelWholeDevice is desired, then sendToDevice must be implemented"];
-        return nil;
-    }
 
     // Other optional fields not being altered. If not set, their defaults will be used:
     // * EstablishTunnelTimeoutSeconds
@@ -755,22 +743,6 @@
 
 - (void)notice:(NSString *)noticeJSON {
     [self handlePsiphonNotice:noticeJSON];
-}
-
-- (GoPsiPacketTunnelDeviceBridge*)getPacketTunnelDeviceBridge {
-    if (!packetTunnelDeviceBridge) {
-        packetTunnelDeviceBridge = GoPsiNewPacketTunnelDeviceBridge(self);
-    }
-    return packetTunnelDeviceBridge;
-}
-
-
-#pragma mark - GoPsiPacketTunnelDeviceSender protocol implementation (private)
-
-- (void)sendToDevice:(NSData *)packet {
-    // The check to see if the delegate responds to this optional selector was
-    // done when processing the config, so we're not going to do it again for every packet.
-    [self.tunneledAppDelegate sendToDevice:packet];
 }
 
 

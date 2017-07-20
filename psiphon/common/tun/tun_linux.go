@@ -37,11 +37,11 @@ const (
 	DEFAULT_PUBLIC_INTERFACE_NAME = "eth0"
 )
 
-func makeDeviceInboundBuffer(usingBridge bool, MTU int) []byte {
+func makeDeviceInboundBuffer(MTU int) []byte {
 	return make([]byte, MTU)
 }
 
-func makeDeviceOutboundBuffer(usingBridge bool, MTU int) []byte {
+func makeDeviceOutboundBuffer(MTU int) []byte {
 	// On Linux, no outbound buffer is used
 	return nil
 }
