@@ -87,7 +87,7 @@ func RunServices(configJSON []byte) error {
 			GetDNSResolverIPv4Addresses: supportServices.DNSResolver.GetAllIPv4,
 			GetDNSResolverIPv6Addresses: supportServices.DNSResolver.GetAllIPv6,
 			EgressInterface:             config.PacketTunnelEgressInterface,
-			DownStreamPacketQueueSize:   config.PacketTunnelDownStreamPacketQueueSize,
+			DownstreamPacketQueueSize:   config.PacketTunnelDownstreamPacketQueueSize,
 			SessionIdleExpirySeconds:    config.PacketTunnelSessionIdleExpirySeconds,
 		})
 		if err != nil {

@@ -263,9 +263,9 @@ type Config struct {
 	// PacketTunnelEgressInterface specifies tun.ServerConfig.EgressInterface.
 	PacketTunnelEgressInterface string
 
-	// PacketTunnelDownStreamPacketQueueSize specifies
+	// PacketTunnelDownstreamPacketQueueSize specifies
 	// tun.ServerConfig.DownStreamPacketQueueSize.
-	PacketTunnelDownStreamPacketQueueSize int
+	PacketTunnelDownstreamPacketQueueSize int
 
 	// PacketTunnelSessionIdleExpirySeconds specifies
 	// tun.ServerConfig.SessionIdleExpirySeconds.
