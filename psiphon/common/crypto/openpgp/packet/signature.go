@@ -17,8 +17,8 @@ import (
 	"strconv"
 	"time"
 
-	"golang.org/x/crypto/openpgp/errors"
-	"golang.org/x/crypto/openpgp/s2k"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/openpgp/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/openpgp/s2k"
 )
 
 const (

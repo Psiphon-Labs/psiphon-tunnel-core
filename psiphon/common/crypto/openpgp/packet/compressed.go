@@ -8,7 +8,7 @@ import (
 	"compress/bzip2"
 	"compress/flate"
 	"compress/zlib"
-	"golang.org/x/crypto/openpgp/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/openpgp/errors"
 	"io"
 	"strconv"
 )

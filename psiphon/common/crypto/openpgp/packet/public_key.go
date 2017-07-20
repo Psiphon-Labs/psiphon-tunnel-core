@@ -22,8 +22,8 @@ import (
 	"strconv"
 	"time"
 
-	"golang.org/x/crypto/openpgp/elgamal"
-	"golang.org/x/crypto/openpgp/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/openpgp/elgamal"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/openpgp/errors"
 )
 
 var (

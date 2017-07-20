@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // Package openpgp implements high level operations on OpenPGP messages.
-package openpgp // import "golang.org/x/crypto/openpgp"
+package openpgp // import "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/openpgp"
 
 import (
 	"crypto"
@@ -12,9 +12,9 @@ import (
 	"io"
 	"strconv"
 
-	"golang.org/x/crypto/openpgp/armor"
-	"golang.org/x/crypto/openpgp/errors"
-	"golang.org/x/crypto/openpgp/packet"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/openpgp/armor"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/openpgp/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/openpgp/packet"
 )
 
 // SignatureType is the armor type for a PGP signature.

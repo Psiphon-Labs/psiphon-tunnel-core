@@ -21,7 +21,7 @@ import (
 	"io"
 	"strconv"
 
-	"golang.org/x/crypto/ed25519/internal/edwards25519"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ed25519/internal/edwards25519"
 )
 
 const (

@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/acme"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/acme"
 )
 
 var discoTmpl = template.Must(template.New("disco").Parse(`{

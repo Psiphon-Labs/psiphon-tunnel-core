@@ -14,7 +14,7 @@ import (
 	"io"
 	"math/big"
 
-	"golang.org/x/crypto/curve25519"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/curve25519"
 )
 
 const (

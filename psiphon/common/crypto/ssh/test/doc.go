@@ -3,5 +3,5 @@
 // license that can be found in the LICENSE file.
 
 // This package contains integration tests for the
-// golang.org/x/crypto/ssh package.
-package test // import "golang.org/x/crypto/ssh/test"
+// github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh package.
+package test // import "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh/test"

@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"io"
 
-	"golang.org/x/crypto/nacl/secretbox"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/secretbox"
 )
 
 func Example() {

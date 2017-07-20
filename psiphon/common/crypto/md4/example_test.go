@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 
-	"golang.org/x/crypto/md4"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/md4"
 )
 
 func ExampleNew() {

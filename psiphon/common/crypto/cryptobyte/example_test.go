@@ -7,7 +7,7 @@ package cryptobyte_test
 import (
 	"encoding/asn1"
 	"fmt"
-	"golang.org/x/crypto/cryptobyte"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/cryptobyte"
 )
 
 func ExampleString_lengthPrefixed() {

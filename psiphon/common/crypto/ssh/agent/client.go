@@ -9,7 +9,7 @@
 //
 // References:
 //  [PROTOCOL.agent]:    http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.agent?rev=HEAD
-package agent // import "golang.org/x/crypto/ssh/agent"
+package agent // import "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh/agent"
 
 import (
 	"bytes"
@@ -25,8 +25,8 @@ import (
 	"math/big"
 	"sync"
 
-	"golang.org/x/crypto/ed25519"
-	"golang.org/x/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ed25519"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 )
 
 // Agent represents the capabilities of an ssh-agent.

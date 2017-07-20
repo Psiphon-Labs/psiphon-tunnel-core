@@ -10,7 +10,7 @@ import (
 	"net"
 	"sync"
 
-	"golang.org/x/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 )
 
 // RequestAgentForwarding sets up agent forwarding for the session.

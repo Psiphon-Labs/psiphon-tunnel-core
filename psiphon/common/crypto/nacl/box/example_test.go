@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"golang.org/x/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 )
 
 func Example() {

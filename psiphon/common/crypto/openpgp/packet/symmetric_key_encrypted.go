@@ -10,8 +10,8 @@ import (
 	"io"
 	"strconv"
 
-	"golang.org/x/crypto/openpgp/errors"
-	"golang.org/x/crypto/openpgp/s2k"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/openpgp/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/openpgp/s2k"
 )
 
 // This is the largest session key that we'll support. Since no 512-bit cipher
