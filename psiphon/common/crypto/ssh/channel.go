@@ -19,8 +19,34 @@ const (
 	// sent in a single packet. As per RFC 4253, section 6.1, 32k is also
 	// the minimum.
 	channelMaxPacket = 1 << 15
+
 	// We follow OpenSSH here.
-	channelWindowSize = 64 * channelMaxPacket
+	//channelWindowSize = 64 * channelMaxPacket
+
+	// PSIPHON
+	// =======
+	// - Use a smaller initial/max channel window size.
+	// - Testing with the full Psiphon stack shows that
+	//   this smaller channel window size is more performant
+	//   for low bandwidth connections while still adequate for
+	//   higher bandwidth connections.
+	// - In Psiphon, a single SSH connection is used for all
+	//   client port forwards. Bulk data transfers with large
+	//   channel windows can immediately backlog the connection
+	//   with many large SSH packets, introducing large latency
+	//   for opening new channels. For Psiphon, we don't wish to
+	//   optimize for a single bulk transfer throughput.
+	// - TODO: can we implement some sort of adaptive max
+	//   channel window size, starting with this small initial
+	//   value and only growing based on connection properties?
+	// - channelWindowSize directly defines the local channel
+	//   window initial and max size. We also cap remote channel
+	//   window sizes via an extra customization in the
+	//   channelOpenConfirmMsg handler. Both upstream and
+	//   downstream bulk data transfers have the same latency
+	//   issue.
+
+	channelWindowSize = 4 * channelMaxPacket
 )
 
 // NewChannel represents an incoming request to a channel. It must either be
@@ -433,7 +459,15 @@ func (c *channel) handlePacket(packet []byte) error {
 		}
 		c.remoteId = msg.MyId
 		c.maxRemotePayload = msg.MaxPacketSize
-		c.remoteWin.add(msg.MyWindow)
+
+		// PSIPHON
+		// =======
+		// - Use a smaller initial/max channel window size.
+		// - See comments above channelWindowSize definition.
+
+		//c.remoteWin.add(msg.MyWindow)
+		c.remoteWin.add(min(msg.MyWindow, channelWindowSize))
+
 		c.msg <- msg
 	case *windowAdjustMsg:
 		if !c.remoteWin.add(msg.AdditionalBytes) {
