@@ -17,7 +17,7 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls/crypto/curve25519"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/curve25519"
 )
 
 var errClientKeyExchange = errors.New("tls: invalid ClientKeyExchange message")

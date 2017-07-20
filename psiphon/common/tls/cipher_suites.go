@@ -15,7 +15,7 @@ import (
 	"crypto/x509"
 	"hash"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls/crypto/chacha20poly1305"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/chacha20poly1305"
 )
 
 // a keyAgreement implements the client and server side of a TLS key agreement
