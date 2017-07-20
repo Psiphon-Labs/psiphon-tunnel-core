@@ -30,8 +30,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/Psiphon-Inc/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 )
 
 // handleUDPChannel implements UDP port forwarding. A single UDP

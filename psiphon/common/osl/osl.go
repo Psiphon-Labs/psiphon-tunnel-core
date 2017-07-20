@@ -48,9 +48,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Psiphon-Inc/crypto/nacl/secretbox"
 	"github.com/Psiphon-Inc/sss"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/secretbox"
 )
 
 const (

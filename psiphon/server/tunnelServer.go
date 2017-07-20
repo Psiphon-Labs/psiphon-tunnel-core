@@ -33,10 +33,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Psiphon-Inc/crypto/ssh"
 	cache "github.com/Psiphon-Inc/go-cache"
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )

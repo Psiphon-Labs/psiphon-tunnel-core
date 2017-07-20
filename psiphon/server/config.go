@@ -32,9 +32,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Psiphon-Inc/crypto/nacl/box"
-	"github.com/Psiphon-Inc/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
