@@ -71,6 +71,6 @@ func routeServerInterface(_ string, _ int) error {
 	return common.ContextError(unsupportedError)
 }
 
-func dupCloseOnExec(_ int) (int, error) {
+func dupFD(_ int) (int, error) {
 	return -1, common.ContextError(unsupportedError)
 }
