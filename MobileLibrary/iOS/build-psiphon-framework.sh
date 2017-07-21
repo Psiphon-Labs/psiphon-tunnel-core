@@ -42,9 +42,6 @@ PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"
 if [[ ${FORCE_PRIVATE_PLUGINS} == true ]]; then PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"; fi
 BUILD_TAGS="IOS ${PRIVATE_PLUGINS_TAG}"
 
-LIBSSL=${BASE_DIR}/OpenSSL-for-iPhone/lib/libssl.a
-LIBCRYPTO=${BASE_DIR}/OpenSSL-for-iPhone/lib/libcrypto.a
-OPENSSL_INCLUDE=${BASE_DIR}/OpenSSL-for-iPhone/include/
 UMBRELLA_FRAMEWORK_XCODE_PROJECT=${BASE_DIR}/PsiphonTunnel/PsiphonTunnel.xcodeproj/
 TRUSTED_ROOT_CA_FILE=${BASE_DIR}/PsiphonTunnel/PsiphonTunnel/rootCAs.txt
 
@@ -67,7 +64,6 @@ GOMOBILE_PINNED_REV=eb9032959f05f108b05721914dfe09cfa0c5131d
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
 TUNNEL_CORE_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core
-OPENSSL_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Inc/openssl
 
 PATH=${PATH}:${GOPATH}/bin
 
@@ -112,17 +108,6 @@ function strip_architectures() {
   done
   return 0
 }
-
-cd OpenSSL-for-iPhone && ./build-libssl.sh; cd -
-
-strip_architectures "${LIBSSL}"
-strip_architectures "${LIBCRYPTO}"
-
-go get -d -u -v -tags "${BUILD_TAGS}" github.com/Psiphon-Inc/openssl
-if [[ $? != 0 ]]; then
-  echo "FAILURE: go get -d -u -v -tags "${BUILD_TAGS}" github.com/Psiphon-Inc/openssl"
-  exit 1
-fi
 
 # Don't use -u, because this path points to our local repo, and we don't want it overridden.
 go get -d -v -tags "${BUILD_TAGS}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
@@ -178,13 +163,6 @@ echo " Build revision: ${BUILDREV}"
 echo " Go version: ${GOVERSION}"
 echo " Gomobile version: ${GOMOBILEVERSION}"
 echo ""
-
-# Patch source files to build on Darwin
-IOS_CGO_BUILD_FLAGS='// #cgo darwin CFLAGS: -I'"${OPENSSL_INCLUDE}"'\
-// #cgo darwin LDFLAGS:'"${LIBSSL}"'\
-// #cgo darwin LDFLAGS:'"${LIBCRYPTO}"''
-
-LC_ALL=C sed -i -- "s|// #cgo pkg-config: libssl|${IOS_CGO_BUILD_FLAGS}|" "${OPENSSL_SRC_DIR}/build.go"
 
 # We're using a generated-code prefix to workaround https://github.com/golang/go/issues/18693
 ${GOPATH}/bin/gomobile bind -v -x -target ios -prefix Go -tags="${BUILD_TAGS}" -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
