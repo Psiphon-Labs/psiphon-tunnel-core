@@ -11,8 +11,6 @@ import (
 	"io"
 	"log"
 	"sync"
-
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 const (
@@ -57,7 +55,12 @@ const (
 //   channel; we still select a size smaller than the stock
 //   channelWindowSize due to client memory constraints.
 func getChannelWindowSize(chanType string) int {
-	if chanType == protocol.PACKET_TUNNEL_CHANNEL_TYPE {
+
+	// From "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol".
+	// Copied here to avoid import cycle.
+	packetTunnelChannelType := "tun@psiphon.ca"
+
+	if chanType == packetTunnelChannelType {
 		return 16 * channelMaxPacket
 	}
 	return 4 * channelMaxPacket
