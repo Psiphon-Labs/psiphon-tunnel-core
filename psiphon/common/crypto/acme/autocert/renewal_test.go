@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/crypto/acme"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/acme"
 )
 
 func TestRenewalNext(t *testing.T) {
