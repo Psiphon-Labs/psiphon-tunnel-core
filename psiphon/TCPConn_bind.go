@@ -165,11 +165,13 @@ func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 
 		err = goselect.Select(socketFd+1, nil, fdset, nil, timeout)
 		if err != nil {
+			syscall.Close(socketFd)
 			lastErr = common.ContextError(err)
 			continue
 		}
 		if !fdset.IsSet(uintptr(socketFd)) {
-			lastErr = common.ContextError(errors.New("file descriptor not set"))
+			syscall.Close(socketFd)
+			lastErr = common.ContextError(errors.New("connect timed out"))
 			continue
 		}
 
