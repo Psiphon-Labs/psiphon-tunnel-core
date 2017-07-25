@@ -719,8 +719,9 @@
     
     // Getting list of all active interfaces
     NSMutableArray *upIffList = [NSMutableArray new];
+    
     struct ifaddrs *interfaces;
-    if (EXIT_FAILURE == getifaddrs(&interfaces)) {
+    if (getifaddrs(&interfaces) != 0) {
         return nil;
     }
     
@@ -731,20 +732,23 @@
         if (interface->ifa_flags & IFF_UP && !(interface->ifa_flags & IFF_LOOPBACK)) {
             
             if (interface->ifa_addr && (interface->ifa_addr->sa_family==AF_INET || interface->ifa_addr->sa_family==AF_INET6)) {
+                
                 NSString *interfaceName = [NSString stringWithUTF8String:interface->ifa_name];
                 [upIffList addObject:interfaceName];
             }
         }
     }
     
-    [self logMessage:[NSString stringWithFormat:@"getActiveInterace: List of UP interfaces: %@", upIffList]];
+    // Free getifaddrs data
+    freeifaddrs(interfaces);
     
+    [self logMessage:[NSString stringWithFormat:@"getActiveInterace: List of UP interfaces: %@", upIffList]];
     
     // TODO: following is a heuristic for choosing active network interface
     // Only Wi-Fi and Cellular interfaces are considered
     // @see : https://forums.developer.apple.com/thread/76711
     NSArray *iffPriorityList = @[ @"en0", @"pdp_ip0"];
-    for ( NSString * key in iffPriorityList) {
+    for (NSString * key in iffPriorityList) {
         for (NSString * upIff in upIffList) {
             if ([key isEqualToString:upIff]) {
                 return [NSString stringWithString:upIff];
@@ -752,7 +756,7 @@
         }
     }
     
-    [self logMessage:@"getActiveInterface: No active interface found"];
+    [self logMessage:@"getActiveInterface: No active interface found."];
     
     return nil;
 }
