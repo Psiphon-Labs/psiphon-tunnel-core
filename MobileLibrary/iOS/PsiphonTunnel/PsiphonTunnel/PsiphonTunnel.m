@@ -702,6 +702,11 @@
     [self logMessage:[NSString stringWithFormat:@"bindToDevice: Active interface: %@", activeInterface]];
     
     unsigned int interfaceIndex = if_nametoindex([activeInterface UTF8String]);
+    if (interfaceIndex == 0) {
+        // if_nametoindex returns 0 on error.
+        [self logMessage:[NSString stringWithFormat:@"bindToDevice: if_nametoindex error for interface (%@)", activeInterface]];
+        return FALSE;
+    }
     
     int ret = setsockopt((int)fileDescriptor, IPPROTO_IP, IP_BOUND_IF, &interfaceIndex, sizeof(interfaceIndex));
     if (ret != 0) {
