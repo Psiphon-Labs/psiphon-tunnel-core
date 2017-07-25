@@ -27,6 +27,7 @@
 #import "PsiphonTunnel.h"
 #import "json-framework/SBJson4.h"
 #import "JailbreakCheck/JailbreakCheck.h"
+#include <ifaddrs.h>
 
 
 @interface PsiphonTunnel () <GoPsiPsiphonProvider>
