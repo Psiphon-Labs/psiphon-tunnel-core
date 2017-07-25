@@ -102,6 +102,11 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     private Thread mTun2SocksThread;
     private AtomicBoolean mIsWaitingForNetworkConnectivity;
 
+    // mUsePacketTunnel specifies whether to use the packet
+    // tunnel instead of tun2socks; currently this is for
+    // testing only and is disabled.
+    private boolean mUsePacketTunnel = false;
+
     // Only one PsiphonVpn instance may exist at a time, as the underlying
     // go.psi.Psi and tun2socks implementations each contain global state.
     private static PsiphonTunnel mPsiphonTunnel;
@@ -134,12 +139,17 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     //----------------------------------------------------------------------------------------------
 
     // To start, call in sequence: startRouting(), then startTunneling(). After startRouting()
-    // succeeds, the caller must call stop() to clean up.
+    // succeeds, the caller must call stop() to clean up. These functions should not be called
+    // concurrently. Do not call stop() while startRouting() or startTunneling() is in progress.
 
     // Returns true when the VPN routing is established; returns false if the VPN could not
     // be started due to lack of prepare or revoked permissions (called should re-prepare and
     // try again); throws exception for other error conditions.
     public synchronized boolean startRouting() throws Exception {
+
+        // Note: tun2socks is loaded even in mUsePacketTunnel mode,
+        // as disableUdpGwKeepalive will still be called.
+
         // Load tun2socks library embedded in the aar
         // If this method is called more than once with the same library name, the second and subsequent calls are ignored.
         // http://docs.oracle.com/javase/7/docs/api/java/lang/Runtime.html#loadLibrary%28java.lang.String%29
@@ -210,14 +220,22 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             // Workaround for https://code.google.com/p/android/issues/detail?id=61096
             Locale.setDefault(new Locale("en"));
 
+            int mtu = VPN_INTERFACE_MTU;
+            String dnsResolver = mPrivateAddress.mRouter;
+
+            if (mUsePacketTunnel) {
+                mtu = (int)Psi.GetPacketTunnelMTU();
+                dnsResolver = Psi.GetPacketTunnelDNSResolverIPv4Address();
+            }
+
             ParcelFileDescriptor tunFd =
                     ((VpnService.Builder) mHostService.newVpnServiceBuilder())
                             .setSession(mHostService.getAppName())
-                            .setMtu(VPN_INTERFACE_MTU)
+                            .setMtu(mtu)
                             .addAddress(mPrivateAddress.mIpAddress, mPrivateAddress.mPrefixLength)
                             .addRoute("0.0.0.0", 0)
                             .addRoute(mPrivateAddress.mSubnet, mPrivateAddress.mPrefixLength)
-                            .addDnsServer(mPrivateAddress.mRouter)
+                            .addDnsServer(dnsResolver)
                             .establish();
             if (tunFd == null) {
                 // As per http://developer.android.com/reference/android/net/VpnService.Builder.html#establish%28%29,
@@ -255,20 +273,24 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         if (!mRoutingThroughTunnel.compareAndSet(false, true)) {
             return;
         }
-        ParcelFileDescriptor tunFd = mTunFd.getAndSet(null);
-        if (tunFd == null) {
-            return;
+
+        if (!mUsePacketTunnel) {
+            ParcelFileDescriptor tunFd = mTunFd.getAndSet(null);
+            if (tunFd == null) {
+                return;
+            }
+            String socksServerAddress = "127.0.0.1:" + Integer.toString(mLocalSocksProxyPort.get());
+            String udpgwServerAddress = "127.0.0.1:" + Integer.toString(UDPGW_SERVER_PORT);
+            startTun2Socks(
+                    tunFd,
+                    VPN_INTERFACE_MTU,
+                    mPrivateAddress.mRouter,
+                    VPN_INTERFACE_NETMASK,
+                    socksServerAddress,
+                    udpgwServerAddress,
+                    true);
         }
-        String socksServerAddress = "127.0.0.1:" + Integer.toString(mLocalSocksProxyPort.get());
-        String udpgwServerAddress = "127.0.0.1:" + Integer.toString(UDPGW_SERVER_PORT);
-        startTun2Socks(
-                tunFd,
-                VPN_INTERFACE_MTU,
-                mPrivateAddress.mRouter,
-                VPN_INTERFACE_NETMASK,
-                socksServerAddress,
-                udpgwServerAddress,
-                true);
+
         mHostService.onDiagnosticMessage("routing through tunnel");
 
         // TODO: should double-check tunnel routing; see:
@@ -276,7 +298,11 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     }
 
     private void stopVpn() {
-        stopTun2Socks();
+
+        if (!mUsePacketTunnel) {
+            stopTun2Socks();
+        }
+
         ParcelFileDescriptor tunFd = mTunFd.getAndSet(null);
         if (tunFd != null) {
             try {
@@ -345,16 +371,50 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     private void startPsiphon(String embeddedServerEntries) throws Exception {
         stopPsiphon();
         mHostService.onDiagnosticMessage("starting Psiphon library");
+
+        // In packet tunnel mode, Psi.Start will dup the tun file descriptor
+        // passed in via the config. So here we "check out" mTunFd, to ensure
+        // it can't be closed before it's duplicated. (This would only happen
+        // if stop() is called concurrently with startTunneling(), which should
+        // not be done -- this could also cause file descriptor issues in
+        // tun2socks mode. With the "check out", a closed and recycled file
+        // descriptor will not be copied; but a different race condition takes
+        // the place of that one: stop() may fail to close the tun fd. So the
+        // prohibition on concurrent calls remains.)
+        //
+        // In tun2socks mode, the ownership of the fd is transferred to tun2socks.
+        // In packet tunnel mode, tunnel code dups the fd and manages  that copy
+        // while PsiphonTunnel retains ownership of the original mTunFd copy. Both
+        // file descriptors must be closed to halt VpnService, and stop() does
+        // this.
+
+        ParcelFileDescriptor tunFd = null;
+        int fd = -1;
+        if (mUsePacketTunnel) {
+            tunFd = mTunFd.getAndSet(null);
+            if (tunFd != null) {
+                fd = tunFd.getFd();
+            }
+        }
+
         try {
             Psi.Start(
-                    loadPsiphonConfig(mHostService.getContext()),
+                    loadPsiphonConfig(mHostService.getContext(), fd),
                     embeddedServerEntries,
                     this,
                     isVpnMode(),
-                    false /* Do not use IPv6 synthesizer for android */);
+                    false // Do not use IPv6 synthesizer for android
+                    );
         } catch (java.lang.Exception e) {
             throw new Exception("failed to start Psiphon library", e);
+        } finally {
+
+            if (mUsePacketTunnel) {
+                mTunFd.getAndSet(tunFd);
+            }
+
         }
+
         mHostService.onDiagnosticMessage("Psiphon library started");
     }
 
@@ -364,7 +424,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         mHostService.onDiagnosticMessage("Psiphon library stopped");
     }
 
-    private String loadPsiphonConfig(Context context)
+    private String loadPsiphonConfig(Context context, int tunFd)
             throws IOException, JSONException {
 
         // Load settings from the raw resource JSON config file and
@@ -432,6 +492,12 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         }
 
         json.put("DeviceRegion", getDeviceRegion(mHostService.getContext()));
+
+        if (mUsePacketTunnel) {
+            json.put("PacketTunnelTunFileDescriptor", tunFd);
+            json.put("DisableLocalSocksProxy", true);
+            json.put("DisableLocalHTTPProxy", true);
+        }
 
         return json.toString();
     }

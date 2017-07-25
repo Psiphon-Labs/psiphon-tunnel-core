@@ -103,18 +103,18 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
    - `FetchRoutesTimeoutSeconds`
    - `HttpProxyOriginServerTimeoutSeconds`
  - Fields which should only be set by Psiphon proper:
+   - `TunnelWholeDevice`
    - `LocalHttpProxyPort`
    - `LocalSocksProxyPort`
-   - `TunnelWholeDevice`: For stats purposes, but must be accurate. Defaults to 0 (false).
  @endcode
 
  @note All other config fields must not be set.
 
  See the tunnel-core config code for details about the fields.
  https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/psiphon/config.go
- 
+
  @return  JSON string with config that should used to run the Psiphon tunnel, or NULL on error.
- 
+
  Swift: @code func getPsiphonConfig() -> String? @endcode
  */
 - (NSString * _Nullable)getPsiphonConfig;
@@ -138,7 +138,7 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  */
 - (void)onDiagnosticMessage:(NSString * _Nonnull)message;
 
-/*! 
+/*!
  Called when the tunnel is in the process of connecting.
  Swift: @code func onConnecting() @endcode
  */
@@ -178,8 +178,8 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 /*!
  Called when the device's Internet connection state is interrupted.
  This may mean that it had connectivity and now doesn't, or went from Wi-Fi to
- WWAN or vice versa. 
- @note For many/most apps, the response to this callback should be to restart 
+ WWAN or vice versa.
+ @note For many/most apps, the response to this callback should be to restart
  the Psiphon tunnel. It will eventually notice and begin reconnecting, but it
  may take much longer, depending on attempts to use the tunnel.
  Swift: @code func onDeviceInternetConnectivityInterrupted() @endcode
@@ -299,7 +299,7 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  Returns an instance of PsiphonTunnel. This is either a new instance or the pre-existing singleton. If an instance already exists, it will be stopped when this function is called.
  @param tunneledAppDelegate  The delegate implementation to use for callbacks.
  @return  The PsiphonTunnel instance.
- Swift: @code open class func newPsiphonTunnel(_ tunneledAppDelegate: TunneledAppDelegate) -> Self @endcode
+ Swift: @code class func newPsiphonTunnel(_ tunneledAppDelegate: TunneledAppDelegate) -> Self @endcode
  */
 + (PsiphonTunnel * _Nonnull)newPsiphonTunnel:(id<TunneledAppDelegate> _Nonnull)tunneledAppDelegate;
 
@@ -307,36 +307,57 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  Start connecting the PsiphonTunnel. Returns before connection is complete -- delegate callbacks (such as `onConnected` and `onConnectionStateChanged`) are used to indicate progress and state.
  @param ifNeeded  If TRUE, the tunnel will only be started if it's not already connected and healthy. If FALSE, the tunnel will be forced to stop and reconnect.
  @return TRUE if the connection start was successful, FALSE otherwise.
- Swift: @code open func start(_ ifNeeded: Bool) -> Bool @endcode
+ Swift: @code func start(_ ifNeeded: Bool) -> Bool @endcode
  */
 - (BOOL)start:(BOOL)ifNeeded;
 
 /*!
  Stop the tunnel (regardless of its current connection state). Returns before full stop is complete -- `TunneledAppDelegate::onExiting` is called when complete.
- Swift: @code open func stop() @endcode
+ Swift: @code func stop() @endcode
  */
 - (void)stop;
 
 /*!
  Returns the current tunnel connection state.
  @return  The current connection state.
- Swift: @code open func getConnectionState() -> PsiphonConnectionState @endcode
+ Swift: @code func getConnectionState() -> PsiphonConnectionState @endcode
  */
 - (PsiphonConnectionState)getConnectionState;
 
 /*!
  Provides the port number of the local SOCKS proxy. Only valid when currently connected (will return 0 otherwise).
  @return  The current local SOCKS proxy port number.
- Swift: @code open func getLocalSocksProxyPort() -> Int @endcode
+ Swift: @code func getLocalSocksProxyPort() -> Int @endcode
  */
--(NSInteger)getLocalSocksProxyPort;
+- (NSInteger)getLocalSocksProxyPort;
 
 /*!
  Provides the port number of the local HTTP proxy. Only valid when currently connected (will return 0 otherwise).
  @return  The current local HTTP proxy port number.
- Swift: @code open func getLocalHttpProxyPort() -> Int @endcode
+ Swift: @code func getLocalHttpProxyPort() -> Int @endcode
  */
--(NSInteger)getLocalHttpProxyPort;
+- (NSInteger)getLocalHttpProxyPort;
+
+/*!
+ Only valid in whole device mode. Provides the MTU the packet tunnel requires the device to use.
+ @return  The MTU size.
+ Swift: @code func getPacketTunnelMTU() -> Int @endcode
+ */
+- (long)getPacketTunnelMTU;
+
+/*!
+ Only valid in whole device mode. Provides the DNS resolver IP address that is provided by the packet tunnel to the device.
+  @return  The IP address of the DNS resolver as a string.
+  Swift: @code func getPacketTunnelDNSResolverIPv4Address() -> String @endcode
+ */
+- (NSString * _Nonnull)getPacketTunnelDNSResolverIPv4Address;
+
+/*!
+ Only valid in whole device mode. Provides the DNS resolver IP address that is provided by the packet tunnel to the device.
+ @return  The IP address of the DNS resolver as a string.
+  Swift: @code func getPacketTunnelDNSResolverIPv6Address() -> String @endcode
+ */
+- (NSString * _Nonnull)getPacketTunnelDNSResolverIPv6Address;
 
 /*!
  Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics information in a particular format, then calls this function to upload it for later investigation.
@@ -345,11 +366,11 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  @param b64EncodedPublicKey  The key that will be used to encrypt the payload before uploading.
  @param uploadServer  The server and path to which the data will be uploaded.
  @param uploadServerHeaders  The request headers that will be used when uploading.
- Swift: @code open func sendFeedback(_ feedbackJson: String, publicKey b64EncodedPublicKey: String, uploadServer: String, uploadServerHeaders: String) @endcode
+ Swift: @code func sendFeedback(_ feedbackJson: String, publicKey b64EncodedPublicKey: String, uploadServer: String, uploadServerHeaders: String) @endcode
  */
 - (void)sendFeedback:(NSString * _Nonnull)feedbackJson
            publicKey:(NSString * _Nonnull)b64EncodedPublicKey
         uploadServer:(NSString * _Nonnull)uploadServer
  uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders;
 
-@end
+ @end

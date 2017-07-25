@@ -550,3 +550,81 @@ func (writer *NoticeWriter) Write(p []byte) (n int, err error) {
 	outputNotice(writer.noticeType, noticeIsDiagnostic, "message", string(p))
 	return len(p), nil
 }
+
+// NoticeCommonLogger maps the common.Logger interface to the notice facility.
+// This is used to make the notice facility available to other packages that
+// don't import the "psiphon" package.
+func NoticeCommonLogger() common.Logger {
+	return &commonLogger{}
+}
+
+type commonLogger struct {
+}
+
+func (logger *commonLogger) WithContext() common.LogContext {
+	return &commonLogContext{
+		context: common.GetParentContext(),
+	}
+}
+
+func (logger *commonLogger) WithContextFields(fields common.LogFields) common.LogContext {
+	return &commonLogContext{
+		context: common.GetParentContext(),
+		fields:  fields,
+	}
+}
+
+func (logger *commonLogger) LogMetric(metric string, fields common.LogFields) {
+	outputNotice(
+		metric,
+		noticeIsDiagnostic,
+		listCommonFields(fields)...)
+}
+
+func listCommonFields(fields common.LogFields) []interface{} {
+	fieldList := make([]interface{}, 0)
+	for name, value := range fields {
+		var formattedValue string
+		if err, ok := value.(error); ok {
+			formattedValue = err.Error()
+		} else {
+			formattedValue = fmt.Sprintf("%#v", value)
+		}
+		fieldList = append(fieldList, name, formattedValue)
+	}
+	return fieldList
+}
+
+type commonLogContext struct {
+	context string
+	fields  common.LogFields
+}
+
+func (context *commonLogContext) outputNotice(
+	noticeType string, args ...interface{}) {
+
+	outputNotice(
+		noticeType,
+		noticeIsDiagnostic,
+		append(
+			[]interface{}{
+				"message", fmt.Sprint(args...),
+				"context", context.context},
+			listCommonFields(context.fields)...)...)
+}
+
+func (context *commonLogContext) Debug(args ...interface{}) {
+	// Ignored.
+}
+
+func (context *commonLogContext) Info(args ...interface{}) {
+	context.outputNotice("Info", args)
+}
+
+func (context *commonLogContext) Warning(args ...interface{}) {
+	context.outputNotice("Alert", args)
+}
+
+func (context *commonLogContext) Error(args ...interface{}) {
+	context.outputNotice("Error", args)
+}

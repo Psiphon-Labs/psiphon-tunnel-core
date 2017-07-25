@@ -43,6 +43,8 @@
 
     Reachability* reachability;
     NetworkStatus previousNetworkStatus;
+
+    BOOL tunnelWholeDevice;
 }
 
 - (id)init {
@@ -50,6 +52,7 @@
     atomic_init(&localSocksProxyPort, 0);
     atomic_init(&localHttpProxyPort, 0);
     reachability = [Reachability reachabilityForInternetConnection];
+    tunnelWholeDevice = FALSE;
 
     return self;
 }
@@ -57,7 +60,7 @@
 #pragma mark - PsiphonTunnel public methods
 
 // See comment in header
-+(PsiphonTunnel * _Nonnull) newPsiphonTunnel:(id<TunneledAppDelegate> _Nonnull)tunneledAppDelegate {
++ (PsiphonTunnel * _Nonnull)newPsiphonTunnel:(id<TunneledAppDelegate> _Nonnull)tunneledAppDelegate {
     @synchronized (PsiphonTunnel.self) {
         // Only one PsiphonTunnel instance may exist at a time, as the underlying
         // go.psi.Psi and tun2socks implementations each contain global state.
@@ -67,7 +70,7 @@
         dispatch_once(&onceToken, ^{
             sharedInstance = [[self alloc] init];
         });
-        
+
         [sharedInstance stop];
         sharedInstance.tunneledAppDelegate = tunneledAppDelegate;
 
@@ -76,7 +79,7 @@
 }
 
 // See comment in header
--(BOOL) start:(BOOL)ifNeeded {
+- (BOOL)start:(BOOL)ifNeeded {
     if (ifNeeded) {
         return [self startIfNeeded];
     }
@@ -84,13 +87,10 @@
     return [self start];
 }
 
--(BOOL) start {
+- (BOOL)start {
     @synchronized (PsiphonTunnel.self) {
         [self stop];
         [self logMessage:@"Starting Psiphon library"];
-
-        // Not supported on iOS.
-        const BOOL useDeviceBinder = FALSE;
 
         // Must always use IPv6Synthesizer for iOS
         const BOOL useIPv6Synthesizer = TRUE;
@@ -116,7 +116,7 @@
                            configStr,
                            embeddedServerEntries,
                            self,
-                           useDeviceBinder,
+                           tunnelWholeDevice, // useDeviceBinder
                            useIPv6Synthesizer,
                            &e);
             
@@ -142,7 +142,7 @@
     }
 }
 
--(BOOL) startIfNeeded {
+- (BOOL)startIfNeeded {
     PsiphonConnectionState connState = [self getConnectionState];
     BOOL localProxyAlive = [self isLocalProxyAlive];
 
@@ -164,7 +164,7 @@
 }
 
 // See comment in header.
--(void) stop {
+- (void)stop {
     @synchronized (PsiphonTunnel.self) {
         [self logMessage: @"Stopping Psiphon library"];
 
@@ -182,18 +182,33 @@
 }
 
 // See comment in header.
--(PsiphonConnectionState) getConnectionState {
+- (PsiphonConnectionState)getConnectionState {
     return atomic_load(&connectionState);
 }
 
 // See comment in header.
--(NSInteger) getLocalSocksProxyPort {
+- (NSInteger)getLocalSocksProxyPort {
     return atomic_load(&localSocksProxyPort);
 }
 
 // See comment in header.
--(NSInteger) getLocalHttpProxyPort {
+- (NSInteger)getLocalHttpProxyPort {
     return atomic_load(&localHttpProxyPort);
+}
+
+// See comment in header.
+- (long)getPacketTunnelMTU {
+    return GoPsiGetPacketTunnelMTU();
+}
+
+// See comment in header.
+- (NSString * _Nonnull)getPacketTunnelDNSResolverIPv4Address {
+    return GoPsiGetPacketTunnelDNSResolverIPv4Address();
+}
+
+// See comment in header.
+- (NSString * _Nonnull)getPacketTunnelDNSResolverIPv6Address {
+    return GoPsiGetPacketTunnelDNSResolverIPv6Address();
 }
 
 // See comment in header.
@@ -215,7 +230,7 @@
  Build the config string for the tunnel.
  @returns String containing the JSON config. `nil` on error.
  */
--(NSString * _Nullable)getConfig {
+- (NSString * _Nullable)getConfig {
     // tunneledAppDelegate is a weak reference, so check it.
     if (self.tunneledAppDelegate == nil) {
         [self logMessage:@"tunneledApp delegate lost"];
@@ -374,9 +389,15 @@
         [self logMessage:[NSString stringWithFormat: @"UpgradeDownloadFilename overridden from '%@' to '%@'", defaultUpgradeDownloadFilename, config[@"UpgradeDownloadFilename"]]];
     }
 
+    //
+    // Tunnel Whole Device (defaults to not whole device)
+    //
+
+    // We'll record our state about what mode we're in.
+    tunnelWholeDevice = ([config[@"TunnelWholeDevice"] integerValue] == 1);
+
     // Other optional fields not being altered. If not set, their defaults will be used:
     // * EstablishTunnelTimeoutSeconds
-    // * TunnelWholeDevice
     // * LocalSocksProxyPort
     // * LocalHttpProxyPort
     // * UpstreamProxyUrl
@@ -669,29 +690,82 @@
 #pragma mark - GoPsiPsiphonProvider protocol implementation (private)
 
 - (BOOL)bindToDevice:(long)fileDescriptor error:(NSError **)error {
-    // This function is only called in TunnelWholeDevice mode
+    if (!tunnelWholeDevice) {
+        return FALSE;
+    }
     
-    // TODO: Does this function ever get called?
+    NSString *activeInterface = [self getActiveInterface];
+    if (activeInterface == nil) {
+        return FALSE;
+    }
+    [self logMessage:[NSString stringWithFormat:@"bindToDevice: Active interface: %@", activeInterface]];
     
-    // TODO: Determine if this is robust.
-    unsigned int interfaceIndex = if_nametoindex("ap1");
+    unsigned int interfaceIndex = if_nametoindex([activeInterface UTF8String]);
     
-    int ret = setsockopt((int)fileDescriptor, IPPROTO_TCP, IP_BOUND_IF, &interfaceIndex, sizeof(interfaceIndex));
+    int ret = setsockopt((int)fileDescriptor, IPPROTO_IP, IP_BOUND_IF, &interfaceIndex, sizeof(interfaceIndex));
     if (ret != 0) {
         [self logMessage:[NSString stringWithFormat: @"bindToDevice: setsockopt failed; errno: %d", errno]];
         return FALSE;
     }
-
+    
     return TRUE;
+}
+
+/*!
+ @brief Returns name of active network interface.
+ @return Active interface name, nil otherwise.
+ */
+- (NSString *)getActiveInterface {
+    
+    // Getting list of all active interfaces
+    NSMutableArray *upIffList = [NSMutableArray new];
+    struct ifaddrs *interfaces;
+    if (EXIT_FAILURE == getifaddrs(&interfaces)) {
+        return nil;
+    }
+    
+    struct ifaddrs *interface;
+    for (interface=interfaces; interface; interface=interface->ifa_next) {
+        
+        // Only IFF_UP interfaces. Loopback is ignored.
+        if (interface->ifa_flags & IFF_UP && !(interface->ifa_flags & IFF_LOOPBACK)) {
+            
+            if (interface->ifa_addr && (interface->ifa_addr->sa_family==AF_INET || interface->ifa_addr->sa_family==AF_INET6)) {
+                NSString *interfaceName = [NSString stringWithUTF8String:interface->ifa_name];
+                [upIffList addObject:interfaceName];
+            }
+        }
+    }
+    
+    [self logMessage:[NSString stringWithFormat:@"getActiveInterace: List of UP interfaces: %@", upIffList]];
+    
+    
+    // TODO: following is a heuristic for choosing active network interface
+    // Only Wi-Fi and Cellular interfaces are considered
+    // @see : https://forums.developer.apple.com/thread/76711
+    NSArray *iffPriorityList = @[ @"en0", @"pdp_ip0"];
+    for ( NSString * key in iffPriorityList) {
+        for (NSString * upIff in upIffList) {
+            if ([key isEqualToString:upIff]) {
+                return [NSString stringWithString:upIff];
+            }
+        }
+    }
+    
+    [self logMessage:@"getActiveInterface: No active interface found"];
+    
+    return nil;
 }
 
 - (NSString *)getPrimaryDnsServer {
     // This function is only called when BindToDevice is used/supported.
+    // TODO: Implement correctly
     return @"8.8.8.8";
 }
 
 - (NSString *)getSecondaryDnsServer {
     // This function is only called when BindToDevice is used/supported.
+    // TODO: Implement correctly
     return @"8.8.4.4";
 }
 
