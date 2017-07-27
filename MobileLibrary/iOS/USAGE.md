@@ -48,6 +48,10 @@ The following architecture targets are compiled into the Library's framework bin
 
 When run in a simulator, there may be errors shown in the device log. This does not seem to affect the execution of the app (or Library).
 
+## Proxying a web view
+
+`WKWebView` _cannot_ be proxied. `UIWebView` _can_ be. Some [googling](https://www.google.ca/search?q=uiwebview+nsurlprotocol+proxy) should provide many example of how to do this. Here is some extensive information for [Objective-C](https://www.raywenderlich.com/59982/nsurlprotocol-tutorial) and [Swift](https://www.raywenderlich.com/76735/using-nsurlprotocol-swift).
+
 ## Other notes
 
 If you encounter an app crash due to `SIGPIPE`, please let us know. This occurs in the debugger, but it's not clear if it happens in a production app (or is a problem). If you encounter a `SIGPIPE` breakpoint while running under the debugger, follow [these instructions](https://plus.google.com/113241179738681655641/posts/BmMiY8mpsB7) to disable it.
