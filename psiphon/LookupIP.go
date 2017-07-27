@@ -95,10 +95,10 @@ func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, e
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
-	defer syscall.Close(socketFd)
 
 	err = config.DeviceBinder.BindToDevice(socketFd)
 	if err != nil {
+		syscall.Close(socketFd)
 		return nil, common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))
 	}
 
@@ -112,23 +112,26 @@ func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, e
 		err = syscall.Connect(socketFd, &sockAddr)
 	}
 	if err != nil {
+		syscall.Close(socketFd)
 		return nil, common.ContextError(err)
 	}
 
 	// Convert the syscall socket to a net.Conn, for use in the dns package
 	file := os.NewFile(uintptr(socketFd), "")
-	defer file.Close()
-	conn, err := net.FileConn(file)
+	netConn, err := net.FileConn(file) // net.FileConn() dups socketFd
+	file.Close()                       // file.Close() closes socketFd
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
 	// Set DNS query timeouts, using the ConnectTimeout from the overall Dial
 	if config.ConnectTimeout != 0 {
-		conn.SetReadDeadline(time.Now().Add(config.ConnectTimeout))
-		conn.SetWriteDeadline(time.Now().Add(config.ConnectTimeout))
+		netConn.SetReadDeadline(time.Now().Add(config.ConnectTimeout))
+		netConn.SetWriteDeadline(time.Now().Add(config.ConnectTimeout))
 	}
 
-	addrs, _, err = ResolveIP(host, conn)
-	return
+	addrs, _, err = ResolveIP(host, netConn)
+	netConn.Close()
+
+	return addrs, err
 }
