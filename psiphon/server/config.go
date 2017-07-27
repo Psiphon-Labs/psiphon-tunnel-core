@@ -123,8 +123,8 @@ type Config struct {
 	// TunnelProtocolPorts specifies which tunnel protocols to run
 	// and which ports to listen on for each protocol. Valid tunnel
 	// protocols include: "SSH", "OSSH", "UNFRONTED-MEEK-OSSH",
-	// "UNFRONTED-MEEK-HTTPS-OSSH", "FRONTED-MEEK-OSSH",
-	// "FRONTED-MEEK-HTTP-OSSH".
+	// "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+	// "FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH".
 	TunnelProtocolPorts map[string]int
 
 	// SSHPrivateKey is the SSH host key. The same key is used for
