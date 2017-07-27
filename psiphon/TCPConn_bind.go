@@ -169,6 +169,7 @@ func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 			lastErr = common.ContextError(err)
 			continue
 		}
+
 		if !fdset.IsSet(uintptr(socketFd)) {
 			syscall.Close(socketFd)
 			lastErr = common.ContextError(errors.New("connect timed out"))

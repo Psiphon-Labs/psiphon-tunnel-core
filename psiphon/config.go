@@ -197,8 +197,9 @@ type Config struct {
 
 	// TunnelProtocol indicates which protocol to use. Valid values include:
 	// "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
-	// "FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH". For the default, "",
-	// the best performing protocol is used.
+	// "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH",
+	// "FRONTED-MEEK-HTTP-OSSH".
+	// For the default, "", the best performing protocol is used.
 	TunnelProtocol string
 
 	// EstablishTunnelTimeoutSeconds specifies a time limit after which to halt
