@@ -1417,9 +1417,9 @@ func (client *Client) Start() {
 			if err != nil {
 				client.config.Logger.WithContextFields(
 					common.LogFields{"error": err}).Info("write channel packets failed")
-				// Only this goroutine exits and no alarm is raised. It's assumed
-				// that if the channel fails, the outer client will know about it.
-				return
+				// May be temporary error condition, such as reconnecting the tunnel;
+				// keep working. The packets are most likely dropped.
+				continue
 			}
 		}
 	}()
@@ -1440,9 +1440,9 @@ func (client *Client) Start() {
 			if err != nil {
 				client.config.Logger.WithContextFields(
 					common.LogFields{"error": err}).Info("read channel packet failed")
-				// Only this goroutine exits and no alarm is raised. It's assumed
-				// that if the channel fails, the outer client will know about it.
-				return
+				// May be temporary error condition, such as reconnecting the tunnel;
+				// keep working.
+				continue
 			}
 
 			if !processPacket(

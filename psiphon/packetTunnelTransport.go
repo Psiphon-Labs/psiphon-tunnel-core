@@ -111,7 +111,7 @@ func (p *PacketTunnelTransport) Read(data []byte) (int, error) {
 		p.failedChannel(channelConn, channelTunnel)
 	}
 
-	return n, err
+	return n, common.ContextError(err)
 }
 
 // Write implements the io.Writer interface. It uses the current transport channel
@@ -146,7 +146,7 @@ func (p *PacketTunnelTransport) Write(data []byte) (int, error) {
 		p.failedChannel(channelConn, channelTunnel)
 	}
 
-	return n, err
+	return n, common.ContextError(err)
 }
 
 // Close implements the io.Closer interface. Any underlying transport channel is
@@ -214,6 +214,11 @@ func (p *PacketTunnelTransport) setChannel(
 		p.channelMutex.Unlock()
 		return
 	default:
+	}
+
+	// Interrupt Read/Write calls blocking on any previous channel.
+	if p.channelConn != nil {
+		p.channelConn.Close()
 	}
 
 	p.channelConn = channelConn
