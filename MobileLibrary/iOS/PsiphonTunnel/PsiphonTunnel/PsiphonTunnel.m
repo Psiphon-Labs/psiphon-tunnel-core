@@ -27,6 +27,7 @@
 #import "PsiphonTunnel.h"
 #import "json-framework/SBJson4.h"
 #import "JailbreakCheck/JailbreakCheck.h"
+#include <ifaddrs.h>
 
 
 @interface PsiphonTunnel () <GoPsiPsiphonProvider>
@@ -693,17 +694,77 @@
     if (!tunnelWholeDevice) {
         return FALSE;
     }
-
-    // TODO: Select correct WiFi or mobile data interface.
-    unsigned int interfaceIndex = if_nametoindex("en0");
-
+    
+    NSString *activeInterface = [self getActiveInterface];
+    if (activeInterface == nil) {
+        return FALSE;
+    }
+    [self logMessage:[NSString stringWithFormat:@"bindToDevice: Active interface: %@", activeInterface]];
+    
+    unsigned int interfaceIndex = if_nametoindex([activeInterface UTF8String]);
+    if (interfaceIndex == 0) {
+        // if_nametoindex returns 0 on error.
+        [self logMessage:[NSString stringWithFormat:@"bindToDevice: if_nametoindex error for interface (%@)", activeInterface]];
+        return FALSE;
+    }
+    
     int ret = setsockopt((int)fileDescriptor, IPPROTO_IP, IP_BOUND_IF, &interfaceIndex, sizeof(interfaceIndex));
     if (ret != 0) {
         [self logMessage:[NSString stringWithFormat: @"bindToDevice: setsockopt failed; errno: %d", errno]];
         return FALSE;
     }
-
+    
     return TRUE;
+}
+
+/*!
+ @brief Returns name of active network interface.
+ @return Active interface name, nil otherwise.
+ */
+- (NSString *)getActiveInterface {
+    
+    // Getting list of all active interfaces
+    NSMutableArray *upIffList = [NSMutableArray new];
+    
+    struct ifaddrs *interfaces;
+    if (getifaddrs(&interfaces) != 0) {
+        return nil;
+    }
+    
+    struct ifaddrs *interface;
+    for (interface=interfaces; interface; interface=interface->ifa_next) {
+        
+        // Only IFF_UP interfaces. Loopback is ignored.
+        if (interface->ifa_flags & IFF_UP && !(interface->ifa_flags & IFF_LOOPBACK)) {
+            
+            if (interface->ifa_addr && (interface->ifa_addr->sa_family==AF_INET || interface->ifa_addr->sa_family==AF_INET6)) {
+                
+                NSString *interfaceName = [NSString stringWithUTF8String:interface->ifa_name];
+                [upIffList addObject:interfaceName];
+            }
+        }
+    }
+    
+    // Free getifaddrs data
+    freeifaddrs(interfaces);
+    
+    [self logMessage:[NSString stringWithFormat:@"getActiveInterace: List of UP interfaces: %@", upIffList]];
+    
+    // TODO: following is a heuristic for choosing active network interface
+    // Only Wi-Fi and Cellular interfaces are considered
+    // @see : https://forums.developer.apple.com/thread/76711
+    NSArray *iffPriorityList = @[ @"en0", @"pdp_ip0"];
+    for (NSString * key in iffPriorityList) {
+        for (NSString * upIff in upIffList) {
+            if ([key isEqualToString:upIff]) {
+                return [NSString stringWithString:upIff];
+            }
+        }
+    }
+    
+    [self logMessage:@"getActiveInterface: No active interface found."];
+    
+    return nil;
 }
 
 - (NSString *)getPrimaryDnsServer {
