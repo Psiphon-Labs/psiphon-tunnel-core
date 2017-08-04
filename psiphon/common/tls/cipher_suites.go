@@ -407,7 +407,8 @@ const (
 	// https://tools.ietf.org/html/rfc7507.
 	TLS_FALLBACK_SCSV uint16 = 0x5600
 
-	// Psiphon suites for indistinguishable TLS.
+	// [Psiphon]
+	// TLS_..._CHACHA20_POLY1305_OLD are required for EmulateChrome.
 	TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_OLD   uint16 = 0xcc13
 	TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_OLD uint16 = 0xcc14
 )
