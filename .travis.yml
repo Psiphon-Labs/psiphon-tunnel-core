@@ -12,6 +12,7 @@ script:
 - go test -race -v ./common
 - go test -race -v ./common/osl
 - go test -race -v ./common/protocol
+- go test -race -v -run TestObfuscatedSessionTicket ./common/tls
 - go test -race -v ./transferstats
 - go test -race -v ./server
 - go test -race -v ./server/psinet
@@ -19,6 +20,7 @@ script:
 - go test -v -covermode=count -coverprofile=common.coverprofile ./common
 - go test -v -covermode=count -coverprofile=osl.coverprofile ./common/osl
 - go test -v -covermode=count -coverprofile=protocol.coverprofile ./common/protocol
+- go test -v -covermode=count -coverprofile=tls.coverprofile -run TestObfuscatedSessionTicket ./common/tls
 - go test -v -covermode=count -coverprofile=transferstats.coverprofile ./transferstats
 - go test -v -covermode=count -coverprofile=server.coverprofile ./server
 - go test -v -covermode=count -coverprofile=psinet.coverprofile ./server/psinet

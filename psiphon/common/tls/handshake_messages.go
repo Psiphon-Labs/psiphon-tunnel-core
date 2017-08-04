@@ -140,18 +140,19 @@ func (m *clientHelloMsg) marshal() []byte {
 	//
 	// https://github.com/google/boringssl/blob/46db7af2c998cf8514d606408546d9be9699f03c/ssl/t1_lib.c#L2803
 	// https://github.com/google/boringssl/blob/master/LICENSE
-
-	unpaddedLength := length + 2 + 4*numExtensions + extensionsLength
 	paddingLength := uint16(0)
-	if unpaddedLength > 0xff && unpaddedLength < 0x200 {
-		paddingLength = 0x200 - uint16(unpaddedLength)
-		if paddingLength >= 4+1 {
-			paddingLength -= 4
-		} else {
-			paddingLength = 1
+	if m.emulateChrome {
+		unpaddedLength := length + 2 + 4*numExtensions + extensionsLength
+		if unpaddedLength > 0xff && unpaddedLength < 0x200 {
+			paddingLength = 0x200 - uint16(unpaddedLength)
+			if paddingLength >= 4+1 {
+				paddingLength -= 4
+			} else {
+				paddingLength = 1
+			}
+			extensionsLength += int(paddingLength)
+			numExtensions++
 		}
-		extensionsLength += int(paddingLength)
-		numExtensions++
 	}
 
 	if numExtensions > 0 {
