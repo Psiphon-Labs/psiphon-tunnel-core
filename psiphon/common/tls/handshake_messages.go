@@ -138,7 +138,7 @@ func (m *clientHelloMsg) marshal() []byte {
 	// Padding extension required for EmulateChrome.
 	// Logic from:
 	//
-	// https://github.com/google/boringssl/blob/7d7554b6b3c79e707e25521e61e066ce2b996e4c/ssl/t1_lib.c#L2803
+	// https://github.com/google/boringssl/blob/46db7af2c998cf8514d606408546d9be9699f03c/ssl/t1_lib.c#L2803
 	// https://github.com/google/boringssl/blob/master/LICENSE
 
 	unpaddedLength := length + 2 + 4*numExtensions + extensionsLength
@@ -393,8 +393,8 @@ func (m *clientHelloMsg) marshal() []byte {
 		// of extensions as required for EmulateChrome is handled
 		// in Conn.clientHandshae().
 
-		value := randomGREASEValue()
-		marshalGREASE(value, true)
+		greaseValue := getGREASEValue(m.random, greaseExtension1)
+		marshalGREASE(greaseValue, true)
 
 		if m.secureRenegotiationSupported {
 			marshalRenegotiationInfo()
@@ -433,11 +433,14 @@ func (m *clientHelloMsg) marshal() []byte {
 			marshalSupportedCurves()
 		}
 
-		previousGREASEValue := value
-		for value == previousGREASEValue {
-			value = randomGREASEValue()
+		previousValue := greaseValue
+		greaseValue = getGREASEValue(m.random, greaseExtension2)
+		if greaseValue == previousValue {
+			// See: https://github.com/google/boringssl/blob/46db7af2c998cf8514d606408546d9be9699f03c/ssl/t1_lib.c#L2787-L2792
+			greaseValue ^= 0x1010
 		}
-		marshalGREASE(value, false)
+
+		marshalGREASE(greaseValue, false)
 
 		if paddingLength > 0 {
 			marshalPadding(paddingLength)
