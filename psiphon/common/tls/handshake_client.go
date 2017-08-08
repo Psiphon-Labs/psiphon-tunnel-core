@@ -7,12 +7,9 @@ package tls
 import (
 	"bytes"
 	"crypto"
-	"crypto/rand"
-	"crypto/sha256"
-	"math/big"
-
 	"crypto/ecdsa"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
 	"errors"
@@ -183,14 +180,14 @@ NextCipherSuite:
 		}
 
 		hello.supportedCurves = []CurveID{
-			CurveID(randomGREASEValue()),
+			CurveID(getGREASEValue(hello.random, greaseGroup)),
 			X25519,
 			CurveP256, // secp256r1
 			CurveP384, // secp384r1
 		}
 
 		hello.cipherSuites = []uint16{
-			randomGREASEValue(),
+			getGREASEValue(hello.random, greaseCipher),
 			TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 			TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 			TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
@@ -212,7 +209,7 @@ NextCipherSuite:
 			TLS_RSA_WITH_3DES_EDE_CBC_SHA,
 		}
 
-		// From: https://github.com/google/boringssl/blob/7d7554b6b3c79e707e25521e61e066ce2b996e4c/ssl/t1_lib.c#L442
+		// From: https://github.com/google/boringssl/blob/46db7af2c998cf8514d606408546d9be9699f03c/ssl/t1_lib.c#L442
 		// TODO: handle RSA-PSS (0x08)
 		hello.signatureAndHashes = []signatureAndHash{
 			{hashSHA256, signatureECDSA},
@@ -244,7 +241,7 @@ NextCipherSuite:
 
 		// In BoringSSL, the session ID is a SHA256 digest of the
 		// session ticket:
-		// https://github.com/google/boringssl/blob/33fe4a0d1406f423e7424ea7367e1d1a51c2edc1/ssl/handshake_client.c#L1901-L1908
+		// https://github.com/google/boringssl/blob/46db7af2c998cf8514d606408546d9be9699f03c/ssl/handshake_client.c#L1895-L1902
 		if session != nil {
 			hello.sessionTicket = session.sessionTicket
 			sessionId := sha256.Sum256(session.sessionTicket)
@@ -356,10 +353,20 @@ NextCipherSuite:
 	return nil
 }
 
-func randomGREASEValue() uint16 {
-	values := []uint16{0x0A0A, 0x1A1A, 0x2A2A, 0x3A3A, 0x4A4A, 0x5A5A, 0x6A6A, 0x7A7A, 0x8A8A, 0x9A9A, 0xAAAA, 0xBABA, 0xCACA, 0xDADA, 0xEAEA, 0xFAFA}
-	i, _ := rand.Int(rand.Reader, big.NewInt(int64(len(values))))
-	return values[int(i.Int64())]
+// From: https://github.com/google/boringssl/blob/46db7af2c998cf8514d606408546d9be9699f03c/ssl/internal.h#L1225-L1231
+const (
+	greaseCipher     = 0
+	greaseGroup      = 1
+	greaseExtension1 = 2
+	greaseExtension2 = 3
+)
+
+func getGREASEValue(random []byte, index int) uint16 {
+	// From: https://github.com/google/boringssl/blob/46db7af2c998cf8514d606408546d9be9699f03c/ssl/handshake_client.c#L545-L555
+	value := uint16(random[index])
+	value = (value & 0xf0) | 0x0a
+	value |= value << 8
+	return value
 }
 
 func (hs *clientHandshakeState) doFullHandshake() error {

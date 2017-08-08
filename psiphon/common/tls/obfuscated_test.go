@@ -37,6 +37,14 @@ import (
 // [Psiphon]
 // TestObfuscatedSessionTicket exercises the Obfuscated Session Tickets facility.
 func TestObfuscatedSessionTicket(t *testing.T) {
+	runObfuscatedSessionTicket(t, false)
+}
+
+func TestObfuscatedSessionTicketEmulateChrome(t *testing.T) {
+	runObfuscatedSessionTicket(t, true)
+}
+
+func runObfuscatedSessionTicket(t *testing.T, emulateChrome bool) {
 
 	var standardSessionTicketKey [32]byte
 	rand.Read(standardSessionTicketKey[:])
@@ -46,7 +54,8 @@ func TestObfuscatedSessionTicket(t *testing.T) {
 
 	// Note: SNI and certificate CN don't match
 	clientConfig := &Config{
-		ServerName: "www.example.com",
+		ServerName:    "www.example.com",
+		EmulateChrome: emulateChrome,
 		ClientSessionCache: NewObfuscatedClientSessionCache(
 			obfuscatedSessionTicketSharedSecret),
 	}
@@ -72,9 +81,14 @@ func TestObfuscatedSessionTicket(t *testing.T) {
 
 	result := make(chan error, 1)
 
+	listening := make(chan struct{}, 1)
+
 	go func() {
 
 		listener, err := Listen("tcp", serverAddress, serverConfig)
+		defer listener.Close()
+
+		listening <- *new(struct{})
 
 		var conn net.Conn
 		if err == nil {
@@ -102,6 +116,8 @@ func TestObfuscatedSessionTicket(t *testing.T) {
 	}()
 
 	go func() {
+
+		<-listening
 
 		conn, err := Dial("tcp", serverAddress, clientConfig)
 

@@ -71,6 +71,14 @@ func NewPacketTunnelTransport() *PacketTunnelTransport {
 		stopRunning:  stopRunning,
 		workers:      new(sync.WaitGroup),
 		channelReady: sync.NewCond(new(sync.Mutex)),
+
+		// Initialize lastReadComplete to now to avoid a false positive
+		// in monitoring: lastWriteComplete.Sub(lastReadComplete) will
+		// easily exceed PACKET_TUNNEL_PROBE_SLOW_READ when a write
+		// completes before any read. If lastReadComplete were to be
+		// used by logic other than the monitoring heuristics, this
+		// initial value may need to be revisited.
+		lastReadComplete: int64(monotime.Now()),
 	}
 
 	// The monitor worker will signal the tunnel channel when it
