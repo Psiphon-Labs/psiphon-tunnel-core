@@ -692,7 +692,7 @@ loop:
 
 			// Set the new tunnel as the transport for the packet tunnel. The packet tunnel
 			// client remains up when reestablishing, but no packets are relayed while there
-			// is no connected tunnel. UseNewTunnel will establish a new packet tunnel SSH
+			// is no connected tunnel. UseTunnel will establish a new packet tunnel SSH
 			// channel over the new SSH tunnel and configure the packet tunnel client to use
 			// the new SSH channel as its transport.
 			//
@@ -702,7 +702,7 @@ loop:
 			// the packet tunnel is used.
 
 			if controller.packetTunnelTransport != nil {
-				controller.packetTunnelTransport.UseNewTunnel(establishedTunnel)
+				controller.packetTunnelTransport.UseTunnel(establishedTunnel)
 			}
 
 			// TODO: design issue -- might not be enough server entries with region/caps to ever fill tunnel slots;

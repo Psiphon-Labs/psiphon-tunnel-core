@@ -529,6 +529,13 @@ func (server *Server) runSessionReaper() {
 	// sessions. This action, removing the index from server.indexToSession,
 	// releases the IP addresses assigned  to the session.
 
+	// TODO: As-is, this will discard sessions for live SSH tunnels,
+	// as long as the SSH channel for such a session has been idle for
+	// a sufficient period. Should the session be retained as long as
+	// the SSH tunnel is alive (e.g., expose and call session.touch()
+	// on keepalive events)? Or is it better to free up resources held
+	// by idle sessions?
+
 	idleExpiry := server.sessionIdleExpiry()
 
 	ticker := time.NewTicker(idleExpiry / 2)
