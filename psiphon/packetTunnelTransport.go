@@ -71,6 +71,14 @@ func NewPacketTunnelTransport() *PacketTunnelTransport {
 		stopRunning:  stopRunning,
 		workers:      new(sync.WaitGroup),
 		channelReady: sync.NewCond(new(sync.Mutex)),
+
+		// Initialize lastReadComplete to now to avoid a false positive
+		// in monitoring: lastWriteComplete.Sub(lastReadComplete) will
+		// easily exceed PACKET_TUNNEL_PROBE_SLOW_READ when a write
+		// completes before any read. If lastReadComplete were to be
+		// used by logic other than the monitoring heuristics, this
+		// initial value may need to be revisited.
+		lastReadComplete: int64(monotime.Now()),
 	}
 
 	// The monitor worker will signal the tunnel channel when it
@@ -172,10 +180,10 @@ func (p *PacketTunnelTransport) Close() error {
 	return nil
 }
 
-// UseNewTunnel sets the PacketTunnelTransport to use a new transport channel within
-// the specified tunnel. UseNewTunnel does not block on the open channel call; it spawns
+// UseTunnel sets the PacketTunnelTransport to use a new transport channel within
+// the specified tunnel. UseTunnel does not block on the open channel call; it spawns
 // a worker that calls tunnel.DialPacketTunnelChannel and uses the resulting channel.
-func (p *PacketTunnelTransport) UseNewTunnel(tunnel *Tunnel) {
+func (p *PacketTunnelTransport) UseTunnel(tunnel *Tunnel) {
 
 	p.workers.Add(1)
 	go func(tunnel *Tunnel) {
@@ -207,7 +215,7 @@ func (p *PacketTunnelTransport) setChannel(
 	p.channelMutex.Lock()
 
 	// Concurrency note: this check is within the mutex to ensure that a
-	// UseNewTunnel call concurrent with a Close call doesn't leave a channel
+	// UseTunnel call concurrent with a Close call doesn't leave a channel
 	// set.
 	select {
 	case <-p.runContext.Done():
@@ -282,6 +290,15 @@ func (p *PacketTunnelTransport) failedChannel(
 		p.channelTunnel = nil
 	}
 	p.channelMutex.Unlock()
+
+	// Try to establish a new channel within the current tunnel. If this
+	// fails, a port forward failure probe will be triggered which will
+	// ultimately trigger a SSH keep alive probe.
+	//
+	// One case where this is necessary is when the server closes an idle
+	// packet tunnel port forward for a live SSH tunnel.
+
+	p.UseTunnel(channelTunnel)
 }
 
 func (p *PacketTunnelTransport) monitor() {
