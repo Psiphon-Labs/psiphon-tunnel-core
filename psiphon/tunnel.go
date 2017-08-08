@@ -891,7 +891,17 @@ func dialSsh(
 			sshConn, sshAddress, sshClientConfig)
 		var sshClient *ssh.Client
 		if err == nil {
-			sshClient = ssh.NewClient(sshClientConn, sshChannels, nil)
+
+			// sshRequests is handled by operateTunnel.
+			// ssh.NewClient also expects to handle the sshRequests
+			// value from ssh.NewClientConn and will spawn a goroutine
+			// to handle the  <-chan *ssh.Request, so we must provide
+			// a closed channel to ensure that goroutine halts instead
+			// of hanging on a nil channel.
+			noRequests := make(chan *ssh.Request)
+			close(noRequests)
+
+			sshClient = ssh.NewClient(sshClientConn, sshChannels, noRequests)
 		}
 		resultChannel <- &sshNewClientResult{sshClient, sshRequests, err}
 	}()
