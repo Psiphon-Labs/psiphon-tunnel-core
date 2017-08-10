@@ -20,16 +20,21 @@
 package psiphon
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Psiphon-Inc/m3u8"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
@@ -53,6 +58,12 @@ import (
 // WinHTTP on Windows XP). The URL for direct relaying is:
 // "http://127.0.0.1:<proxy-port>/direct/<origin URL>".
 // Again, the <origin URL> must be escaped in such a way that it can be used inside a URL query.
+//
+// An example use case for tunneled relaying with rewriting (/tunneled-rewrite/) is when the
+// content of retrieved files contains URLs that also need to be modified to be tunneled.
+// For example, in iOS 10 the UIWebView media player does not put requests through the
+// NSURLProtocol, so they are no tunneled. Instead, we rewrite those URLs to use the URL
+// proxy, and rewrite retrieved playlist files so they also contain proxied URLs.
 //
 // Origin URLs must include the scheme prefix ("http://" or "https://") and must be
 // URL encoded.
@@ -240,28 +251,34 @@ func (proxy *HttpProxy) httpConnectHandler(localConn net.Conn, target string) (e
 }
 
 func (proxy *HttpProxy) httpProxyHandler(responseWriter http.ResponseWriter, request *http.Request) {
-	relayHttpRequest(nil, proxy.httpProxyTunneledRelay, request, responseWriter)
+	proxy.relayHTTPRequest(nil, proxy.httpProxyTunneledRelay, request, responseWriter, nil)
 }
 
 const (
 	URL_PROXY_TUNNELED_REQUEST_PATH = "/tunneled/"
+	URL_PROXY_REWRITE_REQUEST_PATH  = "/tunneled-rewrite/"
 	URL_PROXY_DIRECT_REQUEST_PATH   = "/direct/"
 )
 
 func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, request *http.Request) {
 
 	var client *http.Client
-	var originUrl string
+	var originURLString string
 	var err error
+	var rewrites url.Values
 
 	// Request URL should be "/tunneled/<origin URL>" or  "/direct/<origin URL>" and the
 	// origin URL must be URL encoded.
 	switch {
 	case strings.HasPrefix(request.URL.RawPath, URL_PROXY_TUNNELED_REQUEST_PATH):
-		originUrl, err = url.QueryUnescape(request.URL.RawPath[len(URL_PROXY_TUNNELED_REQUEST_PATH):])
+		originURLString, err = url.QueryUnescape(request.URL.RawPath[len(URL_PROXY_TUNNELED_REQUEST_PATH):])
 		client = proxy.urlProxyTunneledClient
+	case strings.HasPrefix(request.URL.RawPath, URL_PROXY_REWRITE_REQUEST_PATH):
+		originURLString, err = url.QueryUnescape(request.URL.RawPath[len(URL_PROXY_REWRITE_REQUEST_PATH):])
+		client = proxy.urlProxyTunneledClient
+		rewrites = request.URL.Query()
 	case strings.HasPrefix(request.URL.RawPath, URL_PROXY_DIRECT_REQUEST_PATH):
-		originUrl, err = url.QueryUnescape(request.URL.RawPath[len(URL_PROXY_DIRECT_REQUEST_PATH):])
+		originURLString, err = url.QueryUnescape(request.URL.RawPath[len(URL_PROXY_DIRECT_REQUEST_PATH):])
 		client = proxy.urlProxyDirectClient
 	default:
 		err = errors.New("missing origin URL")
@@ -272,31 +289,32 @@ func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, requ
 		return
 	}
 
-	// Origin URL must be well-formed, absolute, and have a scheme of  "http" or "https"
-	url, err := url.ParseRequestURI(originUrl)
+	// Origin URL must be well-formed, absolute, and have a scheme of "http" or "https"
+	originURL, err := url.ParseRequestURI(originURLString)
 	if err != nil {
 		NoticeAlert("%s", common.ContextError(FilterUrlError(err)))
 		forceClose(responseWriter)
 		return
 	}
-	if !url.IsAbs() || (url.Scheme != "http" && url.Scheme != "https") {
+	if !originURL.IsAbs() || (originURL.Scheme != "http" && originURL.Scheme != "https") {
 		NoticeAlert("invalid origin URL")
 		forceClose(responseWriter)
 		return
 	}
 
 	// Transform received request to directly reference the origin URL
-	request.Host = url.Host
-	request.URL = url
+	request.Host = originURL.Host
+	request.URL = originURL
 
-	relayHttpRequest(client, nil, request, responseWriter)
+	proxy.relayHTTPRequest(client, nil, request, responseWriter, rewrites)
 }
 
-func relayHttpRequest(
+func (proxy *HttpProxy) relayHTTPRequest(
 	client *http.Client,
 	transport *http.Transport,
 	request *http.Request,
-	responseWriter http.ResponseWriter) {
+	responseWriter http.ResponseWriter,
+	rewrites url.Values) {
 
 	// Transform received request struct before using as input to relayed request
 	request.Close = false
@@ -321,13 +339,33 @@ func relayHttpRequest(
 		forceClose(responseWriter)
 		return
 	}
-	defer response.Body.Close()
+
+	if rewrites != nil {
+		// NOTE: Rewrite functions are responsible for leaving response.Body in
+		// a valid, readable state if there's no error.
+
+		for key := range rewrites {
+			var err error
+
+			switch key {
+			case "m3u8":
+				err = rewriteM3U8(proxy.listener.Addr().(*net.TCPAddr).Port, response)
+			}
+
+			if err != nil {
+				NoticeAlert("URL proxy rewrite failed for %s: %s", key, common.ContextError(err))
+				forceClose(responseWriter)
+				response.Body.Close()
+				return
+			}
+		}
+	}
 
 	// Relay the remote response headers
 	for _, key := range hopHeaders {
 		response.Header.Del(key)
 	}
-	for key, _ := range responseWriter.Header() {
+	for key := range responseWriter.Header() {
 		responseWriter.Header().Del(key)
 	}
 	for key, values := range response.Header {
@@ -335,6 +373,8 @@ func relayHttpRequest(
 			responseWriter.Header().Add(key, value)
 		}
 	}
+
+	defer response.Body.Close()
 
 	// Relay the response code and body
 	responseWriter.WriteHeader(response.StatusCode)
@@ -410,4 +450,142 @@ func (proxy *HttpProxy) serve() {
 		}
 	}
 	NoticeInfo("HTTP proxy stopped")
+}
+
+//
+// Rewrite functions
+//
+
+// toAbsoluteURL takes a base URL and a relative URL and constructs an appropriate absolute URL.
+func toAbsoluteURL(baseURL *url.URL, relativeURLString string) string {
+	relativeURL, err := url.Parse(relativeURLString)
+
+	if err != nil {
+		return ""
+	}
+
+	if relativeURL.IsAbs() {
+		return relativeURL.String()
+	}
+
+	return baseURL.ResolveReference(relativeURL).String()
+}
+
+// proxifyURL takes an absolute URL and rewrites it to go through the local URL proxy.
+// urlProxy port is the local HTTP proxy port.
+// If rewriteParams is nil, then no rewriting will be done. Otherwise, it should contain
+// supported rewriting flags (like "m3u8").
+func proxifyURL(urlProxyPort int, urlString string, rewriteParams []string) string {
+	// Note that we need to use the "opaque" form of URL so that it doesn't double-escape the path. See: https://github.com/golang/go/issues/10887
+
+	opaqueFormat := "//127.0.0.1:%d/tunneled/%s"
+	if rewriteParams != nil {
+		opaqueFormat = "//127.0.0.1:%d/tunneled-rewrite/%s"
+	}
+
+	var proxifiedURL url.URL
+
+	proxifiedURL.Scheme = "http"
+	proxifiedURL.Opaque = fmt.Sprintf(opaqueFormat, urlProxyPort, url.QueryEscape(urlString))
+
+	qp := proxifiedURL.Query()
+	for _, rewrite := range rewriteParams {
+		qp.Set(rewrite, "")
+	}
+	proxifiedURL.RawQuery = qp.Encode()
+
+	return proxifiedURL.String()
+}
+
+// Rewrite the contents of the M3U8 file in body to be compatible with URL proxying.
+// If error is returned, response body may not be valid.
+func rewriteM3U8(httpProxyPort int, response *http.Response) error {
+	// Check URL path extension
+	extension := filepath.Ext(response.Request.URL.Path)
+	var shouldHandle = (extension == ".m3u8")
+
+	// If not .m3u8 then check content type
+	if !shouldHandle {
+		contentType := response.Header.Get("Content-Type")
+		shouldHandle = (contentType == "application/x-mpegURL" || contentType == "vnd.apple.mpegURL")
+	}
+
+	if !shouldHandle {
+		return nil
+	}
+
+	bodyBytes, err := ioutil.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	p, listType, err := m3u8.Decode(*bytes.NewBuffer(bodyBytes), true)
+	if err != nil {
+		// Don't pass this error up. Just don't change anything.
+		response.Body = ioutil.NopCloser(bytes.NewReader(bodyBytes))
+		return nil
+	}
+
+	var newBody string
+
+	switch listType {
+	case m3u8.MEDIA:
+		mediapl := p.(*m3u8.MediaPlaylist)
+		for _, segment := range mediapl.Segments {
+			if segment == nil {
+				break
+			}
+
+			if segment.URI != "" {
+				segment.URI = proxifyURL(httpProxyPort, toAbsoluteURL(response.Request.URL, segment.URI), nil)
+			}
+
+			if segment.Key != nil && segment.Key.URI != "" {
+				segment.Key.URI = proxifyURL(httpProxyPort, toAbsoluteURL(response.Request.URL, segment.Key.URI), nil)
+			}
+
+			if segment.Map != nil && segment.Map.URI != "" {
+				segment.Map.URI = proxifyURL(httpProxyPort, toAbsoluteURL(response.Request.URL, segment.Map.URI), nil)
+			}
+		}
+		newBody = mediapl.String()
+	case m3u8.MASTER:
+		masterpl := p.(*m3u8.MasterPlaylist)
+		for _, variant := range masterpl.Variants {
+			if variant == nil {
+				break
+			}
+
+			if variant.URI != "" {
+				variant.URI = proxifyURL(httpProxyPort, toAbsoluteURL(response.Request.URL, variant.URI), []string{"m3u8"})
+			}
+
+			for _, alternative := range variant.Alternatives {
+				if alternative == nil {
+					break
+				}
+
+				if alternative.URI != "" {
+					alternative.URI = proxifyURL(httpProxyPort, toAbsoluteURL(response.Request.URL, alternative.URI), []string{"m3u8"})
+				}
+			}
+		}
+		newBody = masterpl.String()
+	}
+
+	if newBody == "" {
+		// Unknown playlist type. Leave the response unaltered.
+		response.Body = ioutil.NopCloser(bytes.NewReader(bodyBytes))
+		return nil
+	}
+
+	response.Body = ioutil.NopCloser(strings.NewReader(newBody))
+	response.Header.Set("Content-Length", strconv.FormatInt(int64(len(newBody)), 10))
+
+	// When rewriting the original URL so that it was URL-proxied, we lost the
+	// file extension of it. That means we'd better make sure the Content-Type is set.
+	response.Header.Set("Content-Type", "application/x-mpegURL")
+
+	return nil
 }
