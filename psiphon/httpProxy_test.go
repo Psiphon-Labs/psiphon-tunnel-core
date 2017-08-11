@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -55,18 +56,19 @@ func TestToAbsoluteURL(t *testing.T) {
 
 func TestProxifyURL(t *testing.T) {
 	var urlTests = []struct {
+		ip            string
 		port          int
 		urlString     string
 		rewriteParams []string
 		expected      string
 	}{
-		{1234, "http://example.com/media/pl.m3u8?q=p&p=q#hash", []string{"rewriter1"}, "http://127.0.0.1:1234/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fmedia%2Fpl.m3u8%3Fq%3Dp%26p%3Dq%23hash?rewriter1="},
-		{12345, "http://example.com/media/pl.aaa", []string{"rewriter1", "rewriter2"}, "http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fmedia%2Fpl.aaa?rewriter1=&rewriter2="},
-		{12346, "http://example.com/media/bbb", nil, "http://127.0.0.1:12346/tunneled/http%3A%2F%2Fexample.com%2Fmedia%2Fbbb"},
+		{"127.0.0.1", 1234, "http://example.com/media/pl.m3u8?q=p&p=q#hash", []string{"rewriter1"}, "http://127.0.0.1:1234/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fmedia%2Fpl.m3u8%3Fq%3Dp%26p%3Dq%23hash?rewriter1="},
+		{"127.0.0.2", 12345, "http://example.com/media/pl.aaa", []string{"rewriter1", "rewriter2"}, "http://127.0.0.2:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fmedia%2Fpl.aaa?rewriter1=&rewriter2="},
+		{"127.0.0.3", 12346, "http://example.com/media/bbb", nil, "http://127.0.0.3:12346/tunneled/http%3A%2F%2Fexample.com%2Fmedia%2Fbbb"},
 	}
 
 	for _, tt := range urlTests {
-		actual := proxifyURL(tt.port, tt.urlString, tt.rewriteParams)
+		actual := proxifyURL(tt.ip, tt.port, tt.urlString, tt.rewriteParams)
 		if actual != tt.expected {
 			t.Errorf("proxifyURL(%d, %s, %v): expected %s, actual %s", tt.port, tt.urlString, tt.rewriteParams, tt.expected, actual)
 		}
@@ -115,7 +117,7 @@ func TestRewriteM3U8(t *testing.T) {
 		response.Body = inFile
 		response.Header.Set("Content-Length", strconv.FormatInt(inFileInfo.Size(), 10))
 
-		err := rewriteM3U8(12345, &response)
+		err := rewriteM3U8("127.0.0.1", 12345, &response)
 		if err != nil {
 			t.Errorf("rewriteM3U8 returned error: %s", err)
 		}
@@ -129,7 +131,7 @@ func TestRewriteM3U8(t *testing.T) {
 			t.Errorf("rewriteM3U8 body mismatch for test %d", i)
 		}
 
-		if tt.expectedContentType != "" && response.Header.Get("Content-Type") != tt.expectedContentType {
+		if tt.expectedContentType != "" && strings.ToLower(response.Header.Get("Content-Type")) != strings.ToLower(tt.expectedContentType) {
 			t.Errorf("rewriteM3U8 Content-Type mismatch for test %d: %s %s", i, tt.expectedContentType, response.Header.Get("Content-Type"))
 		}
 
