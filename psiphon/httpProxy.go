@@ -534,18 +534,18 @@ func rewriteM3U8(httpProxyPort int, response *http.Response) error {
 		reader = response.Body
 	}
 
-	origBodyBytes, err := ioutil.ReadAll(reader)
+	contentBodyBytes, err := ioutil.ReadAll(reader)
 	response.Body.Close()
 
 	if err != nil {
 		return common.ContextError(err)
 	}
 
-	p, listType, err := m3u8.Decode(*bytes.NewBuffer(origBodyBytes), true)
+	p, listType, err := m3u8.Decode(*bytes.NewBuffer(contentBodyBytes), true)
 	if err != nil {
 		// Don't pass this error up. Just don't change anything.
-		response.Body = ioutil.NopCloser(bytes.NewReader(origBodyBytes))
-		response.Header.Set("Content-Length", strconv.FormatInt(int64(len(origBodyBytes)), 10))
+		response.Body = ioutil.NopCloser(bytes.NewReader(contentBodyBytes))
+		response.Header.Set("Content-Length", strconv.FormatInt(int64(len(contentBodyBytes)), 10))
 		return nil
 	}
 
@@ -599,7 +599,7 @@ func rewriteM3U8(httpProxyPort int, response *http.Response) error {
 	var responseBodyBytes []byte
 
 	if len(rewrittenBodyBytes) == 0 {
-		responseBodyBytes = origBodyBytes[:]
+		responseBodyBytes = contentBodyBytes[:]
 	} else {
 		responseBodyBytes = rewrittenBodyBytes[:]
 		// When rewriting the original URL so that it was URL-proxied, we lost the
