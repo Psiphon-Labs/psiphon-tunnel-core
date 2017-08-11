@@ -79,26 +79,32 @@ func TestRewriteM3U8(t *testing.T) {
 	var tests = []struct {
 		url                 string
 		contentType         string
+		contentEncoding     string
 		inFilename          string
 		expectedFilename    string
 		expectedContentType string
+		expectError         bool
 	}{
 		// Relying on file extension to indicate type
-		{"http://example.com/test.m3u8", "", "testdata/master.m3u8.1", "testdata/master.m3u8.1.target", "application/x-mpegURL"},
+		{"http://example.com/test.m3u8", "", "", "testdata/master.m3u8.1", "testdata/master.m3u8.1.target", "application/x-mpegURL", false},
 		// No file extension, Content-Type set
-		{"http://example.com/test", "application/x-mpegURL", "testdata/master.m3u8.1", "testdata/master.m3u8.1.target", "application/x-mpegURL"},
+		{"http://example.com/test", "application/x-mpegURL", "", "testdata/master.m3u8.1", "testdata/master.m3u8.1.target", "application/x-mpegURL", false},
 		// No file extension, Content-Type set
-		{"http://example.com/test", "vnd.apple.mpegURL", "testdata/master.m3u8.1", "testdata/master.m3u8.1.target", "application/x-mpegURL"},
+		{"http://example.com/test", "vnd.apple.mpegURL", "", "testdata/master.m3u8.1", "testdata/master.m3u8.1.target", "application/x-mpegURL", false},
 		// No file extension, no Content-Type, so no change
-		{"http://example.com/test", "", "testdata/master.m3u8.1", "testdata/master.m3u8.1", ""},
+		{"http://example.com/test", "", "", "testdata/master.m3u8.1", "testdata/master.m3u8.1", "", false},
 		// Media playlist
-		{"http://example.com/test.m3u8", "", "testdata/media.m3u8.1", "testdata/media.m3u8.1.target", "application/x-mpegURL"},
+		{"http://example.com/test.m3u8", "", "", "testdata/media.m3u8.1", "testdata/media.m3u8.1.target", "application/x-mpegURL", false},
 		// Complex master playlist
-		{"http://example.com/test.m3u8", "", "testdata/master.m3u8.2", "testdata/master.m3u8.2.target", "application/x-mpegURL"},
+		{"http://example.com/test.m3u8", "", "", "testdata/master.m3u8.2", "testdata/master.m3u8.2.target", "application/x-mpegURL", false},
 		// Complex media playlist
-		{"http://example.com/test.m3u8", "", "testdata/media.m3u8.2", "testdata/media.m3u8.2.target", "application/x-mpegURL"},
+		{"http://example.com/test.m3u8", "", "", "testdata/media.m3u8.2", "testdata/media.m3u8.2.target", "application/x-mpegURL", false},
 		// Invalid file
-		{"http://example.com/test.m3u8", "application/x-mpegURL", "httpProxy.go", "httpProxy.go", ""},
+		{"http://example.com/test.m3u8", "application/x-mpegURL", "", "httpProxy.go", "httpProxy.go", "", false},
+		// Gzipped file
+		{"http://example.com/test.m3u8", "", "gzip", "testdata/master.m3u8.1.gz", "testdata/master.m3u8.1.target", "application/x-mpegURL", false},
+		// Invalid Gzip file
+		{"http://example.com/test.m3u8", "", "gzip", "testdata/master.m3u8.1", "", "", true},
 	}
 
 	for i, tt := range tests {
@@ -111,6 +117,10 @@ func TestRewriteM3U8(t *testing.T) {
 		if tt.contentType != "" {
 			response.Header.Set("Content-Type", tt.contentType)
 		}
+		if tt.contentEncoding != "" {
+			response.Header.Set("Content-Encoding", tt.contentEncoding)
+		}
+
 		inFile, _ := os.Open(tt.inFilename)
 		inFileInfo, _ := inFile.Stat()
 
@@ -119,7 +129,10 @@ func TestRewriteM3U8(t *testing.T) {
 
 		err := rewriteM3U8("127.0.0.1", 12345, &response)
 		if err != nil {
-			t.Errorf("rewriteM3U8 returned error: %s", err)
+			if !tt.expectError {
+				t.Errorf("rewriteM3U8 returned error: %s", err)
+			}
+			continue
 		}
 
 		rewrittenBody, _ := ioutil.ReadAll(response.Body)
