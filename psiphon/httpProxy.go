@@ -515,26 +515,26 @@ func rewriteM3U8(httpProxyPort int, response *http.Response) error {
 		return nil
 	}
 
-	var origBodyBytes []byte
-
-	isGzipped := (response.Header.Get("Content-Encoding") == "gzip")
-
 	var reader io.ReadCloser
 
-	if isGzipped {
+	switch response.Header.Get("Content-Encoding") {
+	case "gzip":
 		var err error
+
 		reader, err = gzip.NewReader(response.Body)
 		if err != nil {
 			return common.ContextError(err)
 		}
-	} else {
+
+		// Unset Content-Encoding.
+		// There's is no point in deflating the decoded/rewritten content
+		response.Header.Del("Content-Encoding")
+		defer reader.Close()
+	default:
 		reader = response.Body
 	}
 
 	origBodyBytes, err := ioutil.ReadAll(reader)
-	if isGzipped {
-		reader.Close()
-	}
 	response.Body.Close()
 
 	if err != nil {
@@ -545,6 +545,7 @@ func rewriteM3U8(httpProxyPort int, response *http.Response) error {
 	if err != nil {
 		// Don't pass this error up. Just don't change anything.
 		response.Body = ioutil.NopCloser(bytes.NewReader(origBodyBytes))
+		response.Header.Set("Content-Length", strconv.FormatInt(int64(len(origBodyBytes)), 10))
 		return nil
 	}
 
@@ -596,6 +597,7 @@ func rewriteM3U8(httpProxyPort int, response *http.Response) error {
 	}
 
 	var responseBodyBytes []byte
+
 	if len(rewrittenBodyBytes) == 0 {
 		responseBodyBytes = origBodyBytes[:]
 	} else {
@@ -603,24 +605,10 @@ func rewriteM3U8(httpProxyPort int, response *http.Response) error {
 		// When rewriting the original URL so that it was URL-proxied, we lost the
 		// file extension of it. That means we'd better make sure the Content-Type is set.
 		response.Header.Set("Content-Type", "application/x-mpegurl")
-
 	}
 
-	var bodyReader io.ReadCloser
-	var contentLength string
-	if isGzipped {
-		var buf bytes.Buffer
-		gz := gzip.NewWriter(&buf)
-		gz.Write(responseBodyBytes)
-		gz.Close()
-		bodyReader = ioutil.NopCloser(&buf)
-		contentLength = strconv.FormatInt(int64(buf.Len()), 10)
-	} else {
-		bodyReader = ioutil.NopCloser(bytes.NewReader(responseBodyBytes))
-		contentLength = strconv.FormatInt(int64(len(responseBodyBytes)), 10)
-	}
+	response.Header.Set("Content-Length", strconv.FormatInt(int64(len(responseBodyBytes)), 10))
+	response.Body = ioutil.NopCloser(bytes.NewReader(responseBodyBytes))
 
-	response.Header.Set("Content-Length", contentLength)
-	response.Body = bodyReader
 	return nil
 }
