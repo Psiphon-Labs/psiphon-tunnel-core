@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"bytes"
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
@@ -506,28 +507,49 @@ func rewriteM3U8(httpProxyPort int, response *http.Response) error {
 
 	// If not .m3u8 then check content type
 	if !shouldHandle {
-		contentType := response.Header.Get("Content-Type")
-		shouldHandle = (contentType == "application/x-mpegURL" || contentType == "vnd.apple.mpegURL")
+		contentType := strings.ToLower(response.Header.Get("Content-Type"))
+		shouldHandle = (contentType == "application/x-mpegurl" || contentType == "vnd.apple.mpegurl")
 	}
 
 	if !shouldHandle {
 		return nil
 	}
 
-	bodyBytes, err := ioutil.ReadAll(response.Body)
+	var reader io.ReadCloser
+
+	switch response.Header.Get("Content-Encoding") {
+	case "gzip":
+		var err error
+
+		reader, err = gzip.NewReader(response.Body)
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		// Unset Content-Encoding.
+		// There's is no point in deflating the decoded/rewritten content
+		response.Header.Del("Content-Encoding")
+		defer reader.Close()
+	default:
+		reader = response.Body
+	}
+
+	contentBodyBytes, err := ioutil.ReadAll(reader)
 	response.Body.Close()
+
 	if err != nil {
 		return common.ContextError(err)
 	}
 
-	p, listType, err := m3u8.Decode(*bytes.NewBuffer(bodyBytes), true)
+	p, listType, err := m3u8.Decode(*bytes.NewBuffer(contentBodyBytes), true)
 	if err != nil {
 		// Don't pass this error up. Just don't change anything.
-		response.Body = ioutil.NopCloser(bytes.NewReader(bodyBytes))
+		response.Body = ioutil.NopCloser(bytes.NewReader(contentBodyBytes))
+		response.Header.Set("Content-Length", strconv.FormatInt(int64(len(contentBodyBytes)), 10))
 		return nil
 	}
 
-	var newBody string
+	var rewrittenBodyBytes []byte
 
 	switch listType {
 	case m3u8.MEDIA:
@@ -549,7 +571,7 @@ func rewriteM3U8(httpProxyPort int, response *http.Response) error {
 				segment.Map.URI = proxifyURL(httpProxyPort, toAbsoluteURL(response.Request.URL, segment.Map.URI), nil)
 			}
 		}
-		newBody = mediapl.String()
+		rewrittenBodyBytes = []byte(mediapl.String())
 	case m3u8.MASTER:
 		masterpl := p.(*m3u8.MasterPlaylist)
 		for _, variant := range masterpl.Variants {
@@ -571,21 +593,22 @@ func rewriteM3U8(httpProxyPort int, response *http.Response) error {
 				}
 			}
 		}
-		newBody = masterpl.String()
+		rewrittenBodyBytes = []byte(masterpl.String())
 	}
 
-	if newBody == "" {
-		// Unknown playlist type. Leave the response unaltered.
-		response.Body = ioutil.NopCloser(bytes.NewReader(bodyBytes))
-		return nil
+	var responseBodyBytes []byte
+
+	if len(rewrittenBodyBytes) == 0 {
+		responseBodyBytes = contentBodyBytes[:]
+	} else {
+		responseBodyBytes = rewrittenBodyBytes[:]
+		// When rewriting the original URL so that it was URL-proxied, we lost the
+		// file extension of it. That means we'd better make sure the Content-Type is set.
+		response.Header.Set("Content-Type", "application/x-mpegurl")
 	}
 
-	response.Body = ioutil.NopCloser(strings.NewReader(newBody))
-	response.Header.Set("Content-Length", strconv.FormatInt(int64(len(newBody)), 10))
-
-	// When rewriting the original URL so that it was URL-proxied, we lost the
-	// file extension of it. That means we'd better make sure the Content-Type is set.
-	response.Header.Set("Content-Type", "application/x-mpegURL")
+	response.Header.Set("Content-Length", strconv.FormatInt(int64(len(responseBodyBytes)), 10))
+	response.Body = ioutil.NopCloser(bytes.NewReader(responseBodyBytes))
 
 	return nil
 }
