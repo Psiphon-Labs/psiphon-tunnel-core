@@ -1,0 +1,29 @@
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="bipbop_audio",NAME="BipBop Audio 1",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="eng"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="bipbop_audio",NAME="BipBop Audio 2",DEFAULT=NO,AUTOSELECT=NO,LANGUAGE="eng",URI="http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Falternate_audio_aac_sinewave%2Fprog_index.m3u8?m3u8="
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="en",FORCED="NO",CHARACTERISTICS="public.accessibility.transcribes-spoken-dialog, public.accessibility.describes-music-and-sound",URI="http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fsubtitles%2Feng%2Fprog_index.m3u8?m3u8="
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English (Forced)",DEFAULT=NO,AUTOSELECT=NO,LANGUAGE="en",FORCED="YES",URI="http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fsubtitles%2Feng_forced%2Fprog_index.m3u8?m3u8="
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="Français",DEFAULT=NO,AUTOSELECT=YES,LANGUAGE="fr",FORCED="NO",CHARACTERISTICS="public.accessibility.transcribes-spoken-dialog, public.accessibility.describes-music-and-sound",URI="http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fsubtitles%2Ffra%2Fprog_index.m3u8?m3u8="
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="Français (Forced)",DEFAULT=NO,AUTOSELECT=NO,LANGUAGE="fr",FORCED="YES",URI="http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fsubtitles%2Ffra_forced%2Fprog_index.m3u8?m3u8="
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="Español",DEFAULT=NO,AUTOSELECT=YES,LANGUAGE="es",FORCED="NO",CHARACTERISTICS="public.accessibility.transcribes-spoken-dialog, public.accessibility.describes-music-and-sound",URI="http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fsubtitles%2Fspa%2Fprog_index.m3u8?m3u8="
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="Español (Forced)",DEFAULT=NO,AUTOSELECT=NO,LANGUAGE="es",FORCED="YES",URI="http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fsubtitles%2Fspa_forced%2Fprog_index.m3u8?m3u8="
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="日本語",DEFAULT=NO,AUTOSELECT=YES,LANGUAGE="ja",FORCED="NO",CHARACTERISTICS="public.accessibility.transcribes-spoken-dialog, public.accessibility.describes-music-and-sound",URI="http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fsubtitles%2Fjpn%2Fprog_index.m3u8?m3u8="
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="日本語 (Forced)",DEFAULT=NO,AUTOSELECT=NO,LANGUAGE="ja",FORCED="YES",URI="http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fsubtitles%2Fjpn_forced%2Fprog_index.m3u8?m3u8="
+#EXT-X-STREAM-INF:PROGRAM-ID=0,BANDWIDTH=263851,CODECS="mp4a.40.2, avc1.4d400d",RESOLUTION=416x234,AUDIO="bipbop_audio",SUBTITLES="subs"
+http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fgear1%2Fprog_index.m3u8?m3u8=
+#EXT-X-I-FRAME-STREAM-INF:PROGRAM-ID=0,BANDWIDTH=28451,CODECS="avc1.4d400d",URI="http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fgear1%2Fiframe_index.m3u8?m3u8="
+#EXT-X-STREAM-INF:PROGRAM-ID=0,BANDWIDTH=577610,CODECS="mp4a.40.2, avc1.4d401e",RESOLUTION=640x360,AUDIO="bipbop_audio",SUBTITLES="subs"
+http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fgear2%2Fprog_index.m3u8?m3u8=
+#EXT-X-I-FRAME-STREAM-INF:PROGRAM-ID=0,BANDWIDTH=181534,CODECS="avc1.4d401e",URI="http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fgear2%2Fiframe_index.m3u8?m3u8="
+#EXT-X-STREAM-INF:PROGRAM-ID=0,BANDWIDTH=915905,CODECS="mp4a.40.2, avc1.4d401f",RESOLUTION=960x540,AUDIO="bipbop_audio",SUBTITLES="subs"
+http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fgear3%2Fprog_index.m3u8?m3u8=
+#EXT-X-I-FRAME-STREAM-INF:PROGRAM-ID=0,BANDWIDTH=297056,CODECS="avc1.4d401f",URI="http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fgear3%2Fiframe_index.m3u8?m3u8="
+#EXT-X-STREAM-INF:PROGRAM-ID=0,BANDWIDTH=1030138,CODECS="mp4a.40.2, avc1.4d401f",RESOLUTION=1280x720,AUDIO="bipbop_audio",SUBTITLES="subs"
+http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fgear4%2Fprog_index.m3u8?m3u8=
+#EXT-X-I-FRAME-STREAM-INF:PROGRAM-ID=0,BANDWIDTH=339492,CODECS="avc1.4d401f",URI="http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fgear4%2Fiframe_index.m3u8?m3u8="
+#EXT-X-STREAM-INF:PROGRAM-ID=0,BANDWIDTH=1924009,CODECS="mp4a.40.2, avc1.4d401f",RESOLUTION=1920x1080,AUDIO="bipbop_audio",SUBTITLES="subs"
+http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fgear5%2Fprog_index.m3u8?m3u8=
+#EXT-X-I-FRAME-STREAM-INF:PROGRAM-ID=0,BANDWIDTH=669554,CODECS="avc1.4d401f",URI="http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fgear5%2Fiframe_index.m3u8?m3u8="
+#EXT-X-STREAM-INF:PROGRAM-ID=0,BANDWIDTH=41457,CODECS="mp4a.40.2",AUDIO="bipbop_audio",SUBTITLES="subs"
+http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fgear0%2Fprog_index.m3u8?m3u8=

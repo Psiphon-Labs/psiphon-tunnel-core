@@ -1,0 +1,14 @@
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=192000,CODECS="avc1.66.30, mp4a.40.2",RESOLUTION=256x144
+http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fi%2Fptv_1%4078015%2Findex_192_av-p.m3u8%3Fsd%3D10%26rebase%3Don?m3u8=
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=192000,CODECS="avc1.66.30, mp4a.40.2",RESOLUTION=256x144
+http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fi%2Fptv_1%4078015%2Findex_192_av-b.m3u8%3Fsd%3D10%26rebase%3Don?m3u8=
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=400000,CODECS="avc1.66.30, mp4a.40.2",RESOLUTION=512x288
+http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fi%2Fptv_1%4078015%2Findex_400_av-p.m3u8%3Fsd%3D10%26rebase%3Don?m3u8=
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=400000,CODECS="avc1.66.30, mp4a.40.2",RESOLUTION=512x288
+http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fi%2Fptv_1%4078015%2Findex_400_av-b.m3u8%3Fsd%3D10%26rebase%3Don?m3u8=
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=800000,CODECS="avc1.66.30, mp4a.40.2",RESOLUTION=640x360
+http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fi%2Fptv_1%4078015%2Findex_800_av-p.m3u8%3Fsd%3D10%26rebase%3Don?m3u8=
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=800000,CODECS="avc1.66.30, mp4a.40.2",RESOLUTION=640x360
+http://127.0.0.1:12345/tunneled-rewrite/http%3A%2F%2Fexample.com%2Fi%2Fptv_1%4078015%2Findex_800_av-b.m3u8%3Fsd%3D10%26rebase%3Don?m3u8=
