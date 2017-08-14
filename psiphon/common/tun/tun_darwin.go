@@ -244,6 +244,9 @@ func configureServerInterface(
 	config *ServerConfig,
 	tunDeviceName string) error {
 
+	// TODO: fix or remove the following broken code
+	return common.ContextError(unsupportedError)
+
 	// Set tun device network addresses and MTU
 
 	IPv4Address, IPv4Netmask, err := splitIPMask(serverIPv4AddressCIDR)
@@ -362,6 +365,9 @@ func configureServerInterface(
 func configureClientInterface(
 	config *ClientConfig,
 	tunDeviceName string) error {
+
+	// TODO: fix or remove the following broken code
+	return common.ContextError(unsupportedError)
 
 	// Set tun device network addresses and MTU
 

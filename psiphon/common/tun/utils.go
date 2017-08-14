@@ -20,6 +20,7 @@
 package tun
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os/exec"
@@ -27,6 +28,8 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
+
+var unsupportedError = errors.New("operation unsupported on this platform")
 
 // runNetworkConfigCommand execs a network config command, such as "ifconfig"
 // or "iptables". On platforms that support capabilities, the network config

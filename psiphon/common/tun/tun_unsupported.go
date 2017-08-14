@@ -22,14 +22,11 @@
 package tun
 
 import (
-	"errors"
 	"net"
 	"os"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
-
-var unsupportedError = errors.New("operation unsupported on this platform")
 
 func makeDeviceInboundBuffer(_ int) []byte {
 	return nil
