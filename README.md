@@ -107,16 +107,22 @@ Acknowledgements
 Psiphon Tunnel Core uses:
 
 * [Go](https://golang.org/)
-* [Logrus](https://github.com/Sirupsen/logrus)
-* [MaxMind DB Reader for Go](https://github.com/oschwald/maxminddb-golang)
-* [go-cache](https://github.com/patrickmn/go-cache)
-* [ratelimit](https://github.com/juju/ratelimit)
 * [Bolt](https://github.com/boltdb/bolt)
+* [go-cache](https://github.com/patrickmn/go-cache)
 * [Go DNS](https://github.com/miekg/dns)
-* [OpenSSL Bindings for Go](https://github.com/spacemonkeygo/openssl)
+* [go-ntlm](https://github.com/ThomsonReutersEikon/go-ntlm)
 * [goptlib](https://github.com/Yawning/goptlib)
 * [goregen](https://github.com/zach-klippenstein/goregen)
+* [goselect](https://github.com/creack/goselect)
+* [Logrus](https://github.com/Sirupsen/logrus)
+* [m3u8](https://github.com/grafov/m3u8)
+* [MaxMind DB Reader for Go](https://github.com/oschwald/maxminddb-golang)
 * [monotime](https://github.com/aristanetworks/goarista)
+* [OpenSSL Bindings for Go](https://github.com/spacemonkeygo/openssl)
+* [osext](https://github.com/kardianos/osext)
+* [panicwrap](https://github.com/mitchellh/panicwrap)
+* [ratelimit](https://github.com/juju/ratelimit)
+* [sss](https://github.com/codahale/sss)
 
 Licensing
 --------------------------------------------------------------------------------
