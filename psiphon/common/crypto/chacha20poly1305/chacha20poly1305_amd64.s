@@ -4,7 +4,10 @@
 
 // This file was originally from https://golang.org/cl/24717 by Vlad Krasnov of CloudFlare.
 
-// +build go1.7,amd64,!gccgo,!appengine
+// [Psiphon]
+// disable for windows builds due to multiple definition error in mingw
+
+// +build go1.7,amd64,!gccgo,!appengine,!windows
 
 #include "textflag.h"
 // General register allocation
