@@ -1,0 +1,10 @@
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-MEDIA-SEQUENCE:150237918
+#EXT-X-TARGETDURATION:10
+#EXTINF:10.000,
+http://127.0.0.1:12345/tunneled/http%3A%2F%2Fexample.com%2Fi%2Fptv_1%4078015%2Fsegment150237918_192_av-p.ts%3Fsd%3D10%26rebase%3Don
+#EXTINF:10.000,
+http://127.0.0.1:12345/tunneled/http%3A%2F%2Fexample.com%2Fi%2Fptv_1%4078015%2Fsegment150237919_192_av-p.ts%3Fsd%3D10%26rebase%3Don
+#EXTINF:10.000,
+http://127.0.0.1:12345/tunneled/http%3A%2F%2Fexample.com%2Fi%2Fptv_1%4078015%2Fsegment150237920_192_av-p.ts%3Fsd%3D10%26rebase%3Don
