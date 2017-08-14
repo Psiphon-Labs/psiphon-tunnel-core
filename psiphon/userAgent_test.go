@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"testing"
@@ -157,8 +158,14 @@ func attemptConnectionsWithUserAgent(
 	var err error
 	serverIPaddress := ""
 	for _, interfaceName := range []string{"eth0", "en0"} {
-		serverIPaddress, err = common.GetInterfaceIPAddress(interfaceName)
+		var serverIPv4Address, serverIPv6Address net.IP
+		serverIPv4Address, serverIPv6Address, err = common.GetInterfaceIPAddresses(interfaceName)
 		if err == nil {
+			if serverIPv4Address != nil {
+				serverIPaddress = serverIPv4Address.String()
+			} else {
+				serverIPaddress = serverIPv6Address.String()
+			}
 			break
 		}
 	}

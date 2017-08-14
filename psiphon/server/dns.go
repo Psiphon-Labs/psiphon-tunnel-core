@@ -126,6 +126,16 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 // the resolvers becomes unavailable.
 func (dns *DNSResolver) Get() net.IP {
 
+	dns.reloadWhenStale()
+
+	dns.ReloadableFile.RLock()
+	defer dns.ReloadableFile.RUnlock()
+
+	return dns.resolvers[rand.Intn(len(dns.resolvers))]
+}
+
+func (dns *DNSResolver) reloadWhenStale() {
+
 	// Every UDP DNS port forward frequently calls Get(), so this code
 	// is intended to minimize blocking. Most callers will hit just the
 	// atomic.LoadInt64 reload time check and the RLock (an atomic.AddInt32
@@ -159,11 +169,36 @@ func (dns *DNSResolver) Get() net.IP {
 			atomic.StoreInt32(&dns.isReloading, 0)
 		}
 	}
+}
+
+// GetAllIPv4 returns a list of all IPv4 DNS resolver addresses.
+// Cached values are updated if they're stale. If reloading fails,
+// the previous values are used.
+func (dns *DNSResolver) GetAllIPv4() []net.IP {
+	return dns.getAll(false)
+}
+
+// GetAllIPv6 returns a list of all IPv6 DNS resolver addresses.
+// Cached values are updated if they're stale. If reloading fails,
+// the previous values are used.
+func (dns *DNSResolver) GetAllIPv6() []net.IP {
+	return dns.getAll(true)
+}
+
+func (dns *DNSResolver) getAll(wantIPv6 bool) []net.IP {
+
+	dns.reloadWhenStale()
 
 	dns.ReloadableFile.RLock()
 	defer dns.ReloadableFile.RUnlock()
 
-	return dns.resolvers[rand.Intn(len(dns.resolvers))]
+	resolvers := make([]net.IP, 0)
+	for _, resolver := range dns.resolvers {
+		if (resolver.To4() == nil) == wantIPv6 {
+			resolvers = append(resolvers, resolver)
+		}
+	}
+	return resolvers
 }
 
 func parseResolveConf(fileContent []byte) ([]net.IP, error) {

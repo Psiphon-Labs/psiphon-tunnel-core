@@ -19,7 +19,7 @@
 
 package psi
 
-// This package is a shim between Java and the "psiphon" package. Due to limitations
+// This package is a shim between Java/Obj-C and the "psiphon" package. Due to limitations
 // on what Go types may be exposed (http://godoc.org/golang.org/x/mobile/cmd/gobind),
 // a psiphon.Controller cannot be directly used by Java. This shim exposes a trivial
 // Start/Stop interface on top of a single Controller instance.
@@ -31,6 +31,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
 type PsiphonProvider interface {
@@ -88,7 +89,7 @@ func Start(
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
-	serverEntries, err := protocol.DecodeAndValidateServerEntryList(
+	serverEntries, err := protocol.DecodeServerEntryList(
 		embeddedServerEntryList,
 		common.GetCurrentTimestamp(),
 		protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
@@ -151,4 +152,16 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 	} else {
 		psiphon.NoticeInfo("Feedback uploaded successfully")
 	}
+}
+
+func GetPacketTunnelMTU() int {
+	return tun.DEFAULT_MTU
+}
+
+func GetPacketTunnelDNSResolverIPv4Address() string {
+	return tun.GetTransparentDNSResolverIPv4Address().String()
+}
+
+func GetPacketTunnelDNSResolverIPv6Address() string {
+	return tun.GetTransparentDNSResolverIPv6Address().String()
 }

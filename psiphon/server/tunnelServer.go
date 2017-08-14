@@ -33,10 +33,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Psiphon-Inc/crypto/ssh"
 	cache "github.com/Psiphon-Inc/go-cache"
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
@@ -749,6 +749,7 @@ type sshClient struct {
 	supportsServerRequests               bool
 	handshakeState                       handshakeState
 	udpChannel                           ssh.Channel
+	packetTunnelChannel                  ssh.Channel
 	trafficRules                         TrafficRules
 	tcpTrafficState                      trafficState
 	udpTrafficState                      trafficState
@@ -1283,6 +1284,9 @@ func (sshClient *sshClient) runTunnel(
 
 	// Handle new channel (port forward) requests from the client.
 	//
+	// packet tunnel channels are handled by the packet tunnel server
+	// component. Each client may have at most one packet tunnel channel.
+	//
 	// udpgw client connections are dispatched immediately (clients use this for
 	// DNS, so it's essential to not block; and only one udpgw connection is
 	// retained at a time).
@@ -1291,6 +1295,39 @@ func (sshClient *sshClient) runTunnel(
 	// manager queue.
 
 	for newChannel := range channels {
+
+		if newChannel.ChannelType() == protocol.PACKET_TUNNEL_CHANNEL_TYPE {
+
+			// Accept this channel immediately. This channel will replace any
+			// previously existing packet tunnel channel for this client.
+
+			packetTunnelChannel, requests, err := newChannel.Accept()
+			if err != nil {
+				log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
+				continue
+			}
+			go ssh.DiscardRequests(requests)
+
+			sshClient.setPacketTunnelChannel(packetTunnelChannel)
+
+			// PacketTunnelServer will run the client's packet tunnel. ClientDisconnected will
+			// be called by setPacketTunnelChannel: either if the client starts a new packet
+			// tunnel channel, or on exit of this function.
+
+			checkAllowedTCPPortFunc := func(upstreamIPAddress net.IP, port int) bool {
+				return sshClient.isPortForwardPermitted(portForwardTypeTCP, false, upstreamIPAddress, port)
+			}
+
+			checkAllowedUDPPortFunc := func(upstreamIPAddress net.IP, port int) bool {
+				return sshClient.isPortForwardPermitted(portForwardTypeUDP, false, upstreamIPAddress, port)
+			}
+
+			sshClient.sshServer.support.PacketTunnelServer.ClientConnected(
+				sshClient.sessionID,
+				packetTunnelChannel,
+				checkAllowedTCPPortFunc,
+				checkAllowedUDPPortFunc)
+		}
 
 		if newChannel.ChannelType() != "direct-tcpip" {
 			sshClient.rejectNewChannel(newChannel, ssh.Prohibited, "unknown or unsupported channel type")
@@ -1358,7 +1395,38 @@ func (sshClient *sshClient) runTunnel(
 	// Stop all other worker goroutines
 	sshClient.stopRunning()
 
+	// This calls PacketTunnelServer.ClientDisconnected,
+	// which stops packet tunnel workers.
+	sshClient.setPacketTunnelChannel(nil)
+
 	waitGroup.Wait()
+}
+
+// setPacketTunnelChannel sets the single packet tunnel channel
+// for this sshClient. Any existing packet tunnel channel is
+// closed and its underlying session idled.
+func (sshClient *sshClient) setPacketTunnelChannel(channel ssh.Channel) {
+	sshClient.Lock()
+	if sshClient.packetTunnelChannel != nil {
+		sshClient.packetTunnelChannel.Close()
+		sshClient.sshServer.support.PacketTunnelServer.ClientDisconnected(
+			sshClient.sessionID)
+	}
+	sshClient.packetTunnelChannel = channel
+	sshClient.Unlock()
+}
+
+// setUDPChannel sets the single UDP channel for this sshClient.
+// Each sshClient may have only one concurrent UDP channel. Each
+// UDP channel multiplexes many UDP port forwards via the udpgw
+// protocol. Any existing UDP channel is closed.
+func (sshClient *sshClient) setUDPChannel(channel ssh.Channel) {
+	sshClient.Lock()
+	if sshClient.udpChannel != nil {
+		sshClient.udpChannel.Close()
+	}
+	sshClient.udpChannel = channel
+	sshClient.Unlock()
 }
 
 func (sshClient *sshClient) logTunnel(additionalMetrics LogFields) {
@@ -1704,7 +1772,7 @@ func (sshClient *sshClient) isPortForwardPermitted(
 
 	// Disallow connection to loopback. This is a failsafe. The server
 	// should be run on a host with correctly configured firewall rules.
-	// And exception is made in the case of tranparent DNS forwarding,
+	// An exception is made in the case of tranparent DNS forwarding,
 	// where the remoteIP has been rewritten.
 	if !isTransparentDNSForwarding && remoteIP.IsLoopback() {
 		return false
