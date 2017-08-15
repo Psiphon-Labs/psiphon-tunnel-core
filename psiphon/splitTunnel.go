@@ -281,7 +281,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	var encodedRoutesData string
 	if !useCachedRoutes {
 		encodedRoutesData, err = common.ReadAuthenticatedDataPackage(
-			routesDataPackage, classifier.routesSignaturePublicKey)
+			routesDataPackage, false, classifier.routesSignaturePublicKey)
 		if err != nil {
 			NoticeAlert("failed to read split tunnel routes package: %s", common.ContextError(err))
 			useCachedRoutes = true

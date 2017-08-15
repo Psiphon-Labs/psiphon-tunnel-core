@@ -1101,7 +1101,7 @@ func UnpackRegistry(
 	registryPackage []byte, signingPublicKey string) (*Registry, []byte, error) {
 
 	encodedRegistry, err := common.ReadAuthenticatedDataPackage(
-		registryPackage, signingPublicKey)
+		registryPackage, true, signingPublicKey)
 	if err != nil {
 		return nil, nil, common.ContextError(err)
 	}
@@ -1278,7 +1278,7 @@ func (registry *Registry) UnpackOSL(
 	}
 
 	oslPayload, err := common.ReadAuthenticatedDataPackage(
-		dataPackage, signingPublicKey)
+		dataPackage, true, signingPublicKey)
 	if err != nil {
 		return "", common.ContextError(err)
 	}
