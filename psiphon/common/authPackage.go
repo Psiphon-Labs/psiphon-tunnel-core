@@ -115,12 +115,21 @@ func WriteAuthenticatedDataPackage(
 // ReadAuthenticatedDataPackage extracts and verifies authenticated
 // data from an AuthenticatedDataPackage. The package must have been
 // signed with the given key.
+//
+// Set isCompressed to false to read packages that are not compressed.
 func ReadAuthenticatedDataPackage(
-	compressedPackage []byte, signingPublicKey string) (string, error) {
+	dataPackage []byte, isCompressed bool, signingPublicKey string) (string, error) {
 
-	packageJSON, err := Decompress(compressedPackage)
-	if err != nil {
-		return "", ContextError(err)
+	var packageJSON []byte
+	var err error
+
+	if isCompressed {
+		packageJSON, err = Decompress(dataPackage)
+		if err != nil {
+			return "", ContextError(err)
+		}
+	} else {
+		packageJSON = dataPackage
 	}
 
 	var authenticatedDataPackage *AuthenticatedDataPackage

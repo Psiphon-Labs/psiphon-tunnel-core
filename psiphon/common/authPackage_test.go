@@ -84,7 +84,7 @@ func TestAuthenticatedPackage(t *testing.T) {
 
 	t.Run("read package: success", func(t *testing.T) {
 		content, err := ReadAuthenticatedDataPackage(
-			packagePayload, signingPublicKey)
+			packagePayload, true, signingPublicKey)
 		if err != nil {
 			t.Fatalf("ReadAuthenticatedDataPackage failed: %s", err)
 		}
@@ -114,7 +114,7 @@ func TestAuthenticatedPackage(t *testing.T) {
 
 	t.Run("read package: wrong signing key", func(t *testing.T) {
 		_, err = ReadAuthenticatedDataPackage(
-			packagePayload, wrongSigningPublicKey)
+			packagePayload, true, wrongSigningPublicKey)
 		if err == nil {
 			t.Fatalf("ReadAuthenticatedDataPackage unexpectedly succeeded")
 		}
@@ -130,7 +130,7 @@ func TestAuthenticatedPackage(t *testing.T) {
 
 	t.Run("read package: tampered data", func(t *testing.T) {
 		_, err = ReadAuthenticatedDataPackage(
-			tamperedPackagePayload, signingPublicKey)
+			tamperedPackagePayload, true, signingPublicKey)
 		if err == nil {
 			t.Fatalf("ReadAuthenticatedDataPackage unexpectedly succeeded")
 		}
@@ -172,7 +172,7 @@ func BenchmarkAuthenticatedPackage(b *testing.B) {
 	b.Run("read package", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			_, err := ReadAuthenticatedDataPackage(
-				packagePayload, signingPublicKey)
+				packagePayload, true, signingPublicKey)
 			if err != nil {
 				b.Fatalf("ReadAuthenticatedDataPackage failed: %s", err)
 			}
