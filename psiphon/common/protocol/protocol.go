@@ -54,6 +54,8 @@ const (
 
 	PSIPHON_SSH_API_PROTOCOL = "ssh"
 	PSIPHON_WEB_API_PROTOCOL = "web"
+
+	PACKET_TUNNEL_CHANNEL_TYPE = "tun@psiphon.ca"
 )
 
 var SupportedTunnelProtocols = []string{

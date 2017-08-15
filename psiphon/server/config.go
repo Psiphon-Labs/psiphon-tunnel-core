@@ -32,9 +32,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Psiphon-Inc/crypto/nacl/box"
-	"github.com/Psiphon-Inc/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
@@ -123,8 +123,8 @@ type Config struct {
 	// TunnelProtocolPorts specifies which tunnel protocols to run
 	// and which ports to listen on for each protocol. Valid tunnel
 	// protocols include: "SSH", "OSSH", "UNFRONTED-MEEK-OSSH",
-	// "UNFRONTED-MEEK-HTTPS-OSSH", "FRONTED-MEEK-OSSH",
-	// "FRONTED-MEEK-HTTP-OSSH".
+	// "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+	// "FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH".
 	TunnelProtocolPorts map[string]int
 
 	// SSHPrivateKey is the SSH host key. The same key is used for
@@ -256,6 +256,24 @@ type Config struct {
 	// OSLConfigFilename is the path of a file containing a JSON-encoded
 	// OSL Config, the OSL schemes to apply to Psiphon client tunnels.
 	OSLConfigFilename string
+
+	// RunPacketTunnel specifies whether to run a packet tunnel.
+	RunPacketTunnel bool
+
+	// PacketTunnelEgressInterface specifies tun.ServerConfig.EgressInterface.
+	PacketTunnelEgressInterface string
+
+	// PacketTunnelDownstreamPacketQueueSize specifies
+	// tun.ServerConfig.DownStreamPacketQueueSize.
+	PacketTunnelDownstreamPacketQueueSize int
+
+	// PacketTunnelSessionIdleExpirySeconds specifies
+	// tun.ServerConfig.SessionIdleExpirySeconds.
+	PacketTunnelSessionIdleExpirySeconds int
+
+	// PacketTunnelSudoNetworkConfigCommands sets
+	// tun.ServerConfig.SudoNetworkConfigCommands.
+	PacketTunnelSudoNetworkConfigCommands bool
 }
 
 // RunWebServer indicates whether to run a web server component.
@@ -448,7 +466,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	// SSH config
 
-	// TODO: use other key types: anti-fingerprint by varying params
 	rsaKey, err := rsa.GenerateKey(rand.Reader, SSH_RSA_HOST_KEY_BITS)
 	if err != nil {
 		return nil, nil, nil, common.ContextError(err)
@@ -480,7 +497,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		return nil, nil, nil, common.ContextError(err)
 	}
 
-	// TODO: vary version string for anti-fingerprint
 	sshServerVersion := "SSH-2.0-Psiphon"
 
 	// Obfuscated SSH config

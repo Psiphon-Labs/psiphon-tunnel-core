@@ -32,10 +32,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Psiphon-Inc/crypto/ssh"
 	"github.com/Psiphon-Inc/goarista/monotime"
 	regen "github.com/Psiphon-Inc/goregen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 )
@@ -308,6 +308,41 @@ func (tunnel *Tunnel) Dial(
 		tunnel:         tunnel,
 		downstreamConn: downstreamConn}
 
+	return tunnel.wrapWithTransferStats(conn), nil
+}
+
+func (tunnel *Tunnel) DialPacketTunnelChannel() (net.Conn, error) {
+
+	channel, requests, err := tunnel.sshClient.OpenChannel(
+		protocol.PACKET_TUNNEL_CHANNEL_TYPE, nil)
+	if err != nil {
+
+		// TODO: conditional on type of error or error message?
+		select {
+		case tunnel.signalPortForwardFailure <- *new(struct{}):
+		default:
+		}
+
+		return nil, common.ContextError(err)
+	}
+	go ssh.DiscardRequests(requests)
+
+	conn := newChannelConn(channel)
+
+	// wrapWithTransferStats will track bytes transferred for the
+	// packet tunnel. It will count packet overhead (TCP/UDP/IP headers).
+	//
+	// Since the data in the channel is not HTTP or TLS, no domain bytes
+	// counting is expected.
+	//
+	// transferstats are also used to determine that there's been recent
+	// activity and skip periodic SSH keep alives; see Tunnel.operateTunnel.
+
+	return tunnel.wrapWithTransferStats(conn), nil
+}
+
+func (tunnel *Tunnel) wrapWithTransferStats(conn net.Conn) net.Conn {
+
 	// Tunnel does not have a serverContext when DisableApi is set. We still use
 	// transferstats.Conn to count bytes transferred for monitoring tunnel
 	// quality.
@@ -315,9 +350,8 @@ func (tunnel *Tunnel) Dial(
 	if tunnel.serverContext != nil {
 		regexps = tunnel.serverContext.StatsRegexps()
 	}
-	conn = transferstats.NewConn(conn, tunnel.serverEntry.IpAddress, regexps)
 
-	return conn, nil
+	return transferstats.NewConn(conn, tunnel.serverEntry.IpAddress, regexps)
 }
 
 // SignalComponentFailure notifies the tunnel that an associated component has failed.
@@ -857,7 +891,17 @@ func dialSsh(
 			sshConn, sshAddress, sshClientConfig)
 		var sshClient *ssh.Client
 		if err == nil {
-			sshClient = ssh.NewClient(sshClientConn, sshChannels, nil)
+
+			// sshRequests is handled by operateTunnel.
+			// ssh.NewClient also expects to handle the sshRequests
+			// value from ssh.NewClientConn and will spawn a goroutine
+			// to handle the  <-chan *ssh.Request, so we must provide
+			// a closed channel to ensure that goroutine halts instead
+			// of hanging on a nil channel.
+			noRequests := make(chan *ssh.Request)
+			close(noRequests)
+
+			sshClient = ssh.NewClient(sshClientConn, sshChannels, noRequests)
 		}
 		resultChannel <- &sshNewClientResult{sshClient, sshRequests, err}
 	}()

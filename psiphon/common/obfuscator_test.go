@@ -28,7 +28,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Psiphon-Inc/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 )
 
 func TestObfuscator(t *testing.T) {

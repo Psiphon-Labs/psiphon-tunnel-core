@@ -107,16 +107,22 @@ Acknowledgements
 Psiphon Tunnel Core uses:
 
 * [Go](https://golang.org/)
-* [Logrus](https://github.com/Sirupsen/logrus)
-* [MaxMind DB Reader for Go](https://github.com/oschwald/maxminddb-golang)
-* [go-cache](https://github.com/patrickmn/go-cache)
-* [ratelimit](https://github.com/juju/ratelimit)
-* [Bolt](https://github.com/boltdb/bolt)
-* [Go DNS](https://github.com/miekg/dns)
-* [OpenSSL Bindings for Go](https://github.com/spacemonkeygo/openssl)
-* [goptlib](https://github.com/Yawning/goptlib)
-* [goregen](https://github.com/zach-klippenstein/goregen)
-* [monotime](https://github.com/aristanetworks/goarista)
+* [boltdb/bolt](https://github.com/boltdb/bolt)
+* [patrickmn/go-cache](https://github.com/patrickmn/go-cache)
+* [miekg/dns](https://github.com/miekg/dns)
+* [ThomsonReutersEikon/go-ntlm](https://github.com/ThomsonReutersEikon/go-ntlm)
+* [Yawning/goptlib](https://github.com/Yawning/goptlib)
+* [zach-klippenstein/goregen](https://github.com/zach-klippenstein/goregen)
+* [creack/goselect](https://github.com/creack/goselect)
+* [Sirupsen/logrus](https://github.com/Sirupsen/logrus)
+* [grafov/m3u8](https://github.com/grafov/m3u8)
+* [oschwald/maxminddb-golang](https://github.com/oschwald/maxminddb-golang)
+* [goarista/monotime](https://github.com/aristanetworks/goarista)
+* [spacemonkeygo/openssl](https://github.com/spacemonkeygo/openssl)
+* [kardianos/osext](https://github.com/kardianos/osext)
+* [mitchellh/panicwrap](https://github.com/mitchellh/panicwrap)
+* [juju/ratelimit](https://github.com/juju/ratelimit)
+* [codahale/sss](https://github.com/codahale/sss)
 
 Licensing
 --------------------------------------------------------------------------------
