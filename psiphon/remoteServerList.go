@@ -20,12 +20,11 @@
 package psiphon
 
 import (
-	"compress/zlib"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
-	"os"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -71,12 +70,15 @@ func FetchCommonRemoteServerList(
 		return nil
 	}
 
-	serverListPayload, err := unpackRemoteServerListFile(config, config.RemoteServerListDownloadFilename)
+	serverListPayload, err := common.StreamingReadAuthenticatedDataPackage(
+		config.RemoteServerListDownloadFilename,
+		config.RemoteServerListSignaturePublicKey)
 	if err != nil {
-		return fmt.Errorf("failed to unpack common remote server list: %s", common.ContextError(err))
+		return fmt.Errorf("failed to read remote server list: %s", common.ContextError(err))
 	}
+	defer serverListPayload.Close()
 
-	err = storeServerEntries(serverListPayload, protocol.SERVER_ENTRY_SOURCE_REMOTE)
+	err = streamingStoreServerEntries(serverListPayload, protocol.SERVER_ENTRY_SOURCE_REMOTE)
 	if err != nil {
 		return fmt.Errorf("failed to store common remote server list: %s", common.ContextError(err))
 	}
@@ -357,41 +359,9 @@ func downloadRemoteServerListFile(
 	return responseETag, nil
 }
 
-// unpackRemoteServerListFile reads a file that contains a
-// zlib compressed authenticated data package, validates
-// the package, and returns the payload.
-func unpackRemoteServerListFile(
-	config *Config, filename string) (string, error) {
-
-	fileReader, err := os.Open(filename)
-	if err != nil {
-		return "", common.ContextError(err)
-	}
-	defer fileReader.Close()
-
-	zlibReader, err := zlib.NewReader(fileReader)
-	if err != nil {
-		return "", common.ContextError(err)
-	}
-
-	dataPackage, err := ioutil.ReadAll(zlibReader)
-	zlibReader.Close()
-	if err != nil {
-		return "", common.ContextError(err)
-	}
-
-	payload, err := common.ReadAuthenticatedDataPackage(
-		dataPackage, config.RemoteServerListSignaturePublicKey)
-	if err != nil {
-		return "", common.ContextError(err)
-	}
-
-	return payload, nil
-}
-
 func storeServerEntries(serverList, serverEntrySource string) error {
 
-	serverEntries, err := protocol.DecodeAndValidateServerEntryList(
+	serverEntries, err := protocol.DecodeServerEntryList(
 		serverList,
 		common.GetCurrentTimestamp(),
 		serverEntrySource)
@@ -402,6 +372,23 @@ func storeServerEntries(serverList, serverEntrySource string) error {
 	// TODO: record stats for newly discovered servers
 
 	err = StoreServerEntries(serverEntries, true)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	return nil
+}
+
+func streamingStoreServerEntries(serverListReader io.Reader, serverEntrySource string) error {
+
+	serverEntries := protocol.NewStreamingServerEntryDecoder(
+		serverListReader,
+		common.GetCurrentTimestamp(),
+		serverEntrySource)
+
+	// TODO: record stats for newly discovered servers
+
+	err := StreamingStoreServerEntries(serverEntries, true)
 	if err != nil {
 		return common.ContextError(err)
 	}

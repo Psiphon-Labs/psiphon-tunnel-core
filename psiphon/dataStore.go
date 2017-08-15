@@ -249,20 +249,49 @@ func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) e
 	return nil
 }
 
-// StoreServerEntries shuffles and stores a list of server entries.
-// Shuffling is performed on imported server entrues as part of client-side
-// load balancing.
+// StoreServerEntries stores a list of server entries.
 // There is an independent transaction for each entry insert/update.
 func StoreServerEntries(serverEntries []*protocol.ServerEntry, replaceIfExists bool) error {
 	checkInitDataStore()
 
-	for index := len(serverEntries) - 1; index > 0; index-- {
-		swapIndex := rand.Intn(index + 1)
-		serverEntries[index], serverEntries[swapIndex] = serverEntries[swapIndex], serverEntries[index]
-	}
-
 	for _, serverEntry := range serverEntries {
 		err := StoreServerEntry(serverEntry, replaceIfExists)
+		if err != nil {
+			return common.ContextError(err)
+		}
+	}
+
+	// Since there has possibly been a significant change in the server entries,
+	// take this opportunity to update the available egress regions.
+	ReportAvailableRegions()
+
+	return nil
+}
+
+// StreamingStoreServerEntries stores a list of server entries.
+// There is an independent transaction for each entry insert/update.
+func StreamingStoreServerEntries(
+	serverEntries *protocol.StreamingServerEntryDecoder, replaceIfExists bool) error {
+
+	checkInitDataStore()
+
+	// Note: both StreamingServerEntryDecoder.Next and StoreServerEntry
+	// allocate temporary memory buffers for hex/JSON decoding/encoding,
+	// so this isn't true constant-memory streaming (it depends on garbage
+	// collection).
+
+	for {
+		serverEntry, err := serverEntries.Next()
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		if serverEntry == nil {
+			// No more server entries
+			return nil
+		}
+
+		err = StoreServerEntry(serverEntry, replaceIfExists)
 		if err != nil {
 			return common.ContextError(err)
 		}

@@ -25,6 +25,7 @@ package psiphon
 
 import (
 	"errors"
+	"fmt"
 	"math/rand"
 	"net"
 	"sync"
@@ -33,6 +34,7 @@ import (
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
 // Controller is a tunnel lifecycle coordinator. It manages lists of servers to
@@ -66,6 +68,8 @@ type Controller struct {
 	signalReportConnected             chan struct{}
 	serverAffinityDoneBroadcast       chan struct{}
 	newClientVerificationPayload      chan string
+	packetTunnelClient                *tun.Client
+	packetTunnelTransport             *PacketTunnelTransport
 }
 
 type candidateServerEntry struct {
@@ -141,6 +145,29 @@ func NewController(config *Config) (controller *Controller, err error) {
 
 	controller.splitTunnelClassifier = NewSplitTunnelClassifier(config, controller)
 
+	if config.PacketTunnelTunFileDescriptor > 0 {
+
+		// Run a packet tunnel client. The lifetime of the tun.Client is the
+		// lifetime of the Controller, so it exists across tunnel establishments
+		// and reestablishments. The PacketTunnelTransport provides a layer
+		// that presents a continuosuly existing transport to the tun.Client;
+		// it's set to use new SSH channels after new SSH tunnel establishes.
+
+		packetTunnelTransport := NewPacketTunnelTransport()
+
+		packetTunnelClient, err := tun.NewClient(&tun.ClientConfig{
+			Logger:            NoticeCommonLogger(),
+			TunFileDescriptor: config.PacketTunnelTunFileDescriptor,
+			Transport:         packetTunnelTransport,
+		})
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
+		controller.packetTunnelClient = packetTunnelClient
+		controller.packetTunnelTransport = packetTunnelTransport
+	}
+
 	return controller, nil
 }
 
@@ -159,26 +186,42 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 
 	// Start components
 
-	listenIP, err := common.GetInterfaceIPAddress(controller.config.ListenInterface)
-	if err != nil {
-		NoticeError("error getting listener IP: %s", err)
-		return
+	// TODO: IPv6 support
+	var listenIP string
+	if controller.config.ListenInterface == "" {
+		listenIP = "127.0.0.1"
+	} else if controller.config.ListenInterface == "any" {
+		listenIP = "0.0.0.0"
+	} else {
+		IPv4Address, _, err := common.GetInterfaceIPAddresses(controller.config.ListenInterface)
+		if err == nil && IPv4Address == nil {
+			err = fmt.Errorf("no IPv4 address for interface %s", controller.config.ListenInterface)
+		}
+		if err != nil {
+			NoticeError("error getting listener IP: %s", err)
+			return
+		}
+		listenIP = IPv4Address.String()
 	}
 
-	socksProxy, err := NewSocksProxy(controller.config, controller, listenIP)
-	if err != nil {
-		NoticeAlert("error initializing local SOCKS proxy: %s", err)
-		return
+	if !controller.config.DisableLocalSocksProxy {
+		socksProxy, err := NewSocksProxy(controller.config, controller, listenIP)
+		if err != nil {
+			NoticeAlert("error initializing local SOCKS proxy: %s", err)
+			return
+		}
+		defer socksProxy.Close()
 	}
-	defer socksProxy.Close()
 
-	httpProxy, err := NewHttpProxy(
-		controller.config, controller.untunneledDialConfig, controller, listenIP)
-	if err != nil {
-		NoticeAlert("error initializing local HTTP proxy: %s", err)
-		return
+	if !controller.config.DisableLocalHTTPProxy {
+		httpProxy, err := NewHttpProxy(
+			controller.config, controller.untunneledDialConfig, controller, listenIP)
+		if err != nil {
+			NoticeAlert("error initializing local HTTP proxy: %s", err)
+			return
+		}
+		defer httpProxy.Close()
 	}
-	defer httpProxy.Close()
 
 	if !controller.config.DisableRemoteServerListFetcher {
 
@@ -222,6 +265,10 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 		go controller.establishTunnelWatcher()
 	}
 
+	if controller.packetTunnelClient != nil {
+		controller.packetTunnelClient.Start()
+	}
+
 	// Wait while running
 
 	select {
@@ -232,6 +279,10 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	}
 
 	close(controller.shutdownBroadcast)
+
+	if controller.packetTunnelClient != nil {
+		controller.packetTunnelClient.Stop()
+	}
 
 	// Interrupts and stops establish workers blocking on
 	// tunnel establishment network operations.
@@ -637,6 +688,21 @@ loop:
 					default:
 					}
 				}
+			}
+
+			// Set the new tunnel as the transport for the packet tunnel. The packet tunnel
+			// client remains up when reestablishing, but no packets are relayed while there
+			// is no connected tunnel. UseTunnel will establish a new packet tunnel SSH
+			// channel over the new SSH tunnel and configure the packet tunnel client to use
+			// the new SSH channel as its transport.
+			//
+			// Note: as is, this logic is suboptimal for TunnelPoolSize > 1, as this would
+			// continuously initialize new packet tunnel sessions for each established
+			// server. For now, config validation requires TunnelPoolSize == 1 when
+			// the packet tunnel is used.
+
+			if controller.packetTunnelTransport != nil {
+				controller.packetTunnelTransport.UseTunnel(establishedTunnel)
 			}
 
 			// TODO: design issue -- might not be enough server entries with region/caps to ever fill tunnel slots;

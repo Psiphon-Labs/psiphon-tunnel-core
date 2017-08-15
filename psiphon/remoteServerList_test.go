@@ -57,10 +57,16 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 	// create a server
 	//
 
-	serverIPaddress := ""
+	serverIPAddress := ""
 	for _, interfaceName := range []string{"eth0", "en0"} {
-		serverIPaddress, err = common.GetInterfaceIPAddress(interfaceName)
+		var serverIPv4Address, serverIPv6Address net.IP
+		serverIPv4Address, serverIPv6Address, err = common.GetInterfaceIPAddresses(interfaceName)
 		if err == nil {
+			if serverIPv4Address != nil {
+				serverIPAddress = serverIPv4Address.String()
+			} else {
+				serverIPAddress = serverIPv6Address.String()
+			}
 			break
 		}
 	}
@@ -70,7 +76,7 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 
 	serverConfigJSON, _, encodedServerEntry, err := server.GenerateConfig(
 		&server.GenerateConfigParams{
-			ServerIPAddress:      serverIPaddress,
+			ServerIPAddress:      serverIPAddress,
 			EnableSSHAPIRequests: true,
 			WebServerPort:        8001,
 			TunnelProtocolPorts:  map[string]int{"OSSH": 4001},
@@ -205,8 +211,8 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 
 	// Exercise using multiple download URLs
 	remoteServerListHostAddresses := []string{
-		net.JoinHostPort(serverIPaddress, "8081"),
-		net.JoinHostPort(serverIPaddress, "8082"),
+		net.JoinHostPort(serverIPAddress, "8081"),
+		net.JoinHostPort(serverIPAddress, "8082"),
 	}
 
 	// The common remote server list fetches will 404

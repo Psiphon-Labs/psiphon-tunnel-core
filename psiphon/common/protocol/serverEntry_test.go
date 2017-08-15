@@ -20,6 +20,7 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/hex"
 	"testing"
 
@@ -34,20 +35,52 @@ const (
 	_EXPECTED_IP_ADDRESS                          = `192.168.0.1`
 )
 
-// DecodeAndValidateServerEntryList should return 2 valid decoded entries from the input list of 4
-func TestDecodeAndValidateServerEntryList(t *testing.T) {
+var testEncodedServerEntryList = hex.EncodeToString([]byte(_VALID_NORMAL_SERVER_ENTRY)) + "\n" +
+	hex.EncodeToString([]byte(_VALID_BLANK_LEGACY_SERVER_ENTRY)) + "\n" +
+	hex.EncodeToString([]byte(_INVALID_WINDOWS_REGISTRY_LEGACY_SERVER_ENTRY)) + "\n" +
+	hex.EncodeToString([]byte(_INVALID_MALFORMED_IP_ADDRESS_SERVER_ENTRY))
 
-	testEncodedServerEntryList := hex.EncodeToString([]byte(_VALID_NORMAL_SERVER_ENTRY)) + "\n" +
-		hex.EncodeToString([]byte(_VALID_BLANK_LEGACY_SERVER_ENTRY)) + "\n" +
-		hex.EncodeToString([]byte(_INVALID_WINDOWS_REGISTRY_LEGACY_SERVER_ENTRY)) + "\n" +
-		hex.EncodeToString([]byte(_INVALID_MALFORMED_IP_ADDRESS_SERVER_ENTRY))
+// DecodeServerEntryList should return 2 valid decoded entries from the input list of 4
+func TestDecodeServerEntryList(t *testing.T) {
 
-	serverEntries, err := DecodeAndValidateServerEntryList(
+	serverEntries, err := DecodeServerEntryList(
 		testEncodedServerEntryList, common.GetCurrentTimestamp(), SERVER_ENTRY_SOURCE_EMBEDDED)
 	if err != nil {
 		t.Error(err.Error())
 		t.FailNow()
 	}
+	if len(serverEntries) != 2 {
+		t.Error("unexpected number of valid server entries")
+	}
+	for _, serverEntry := range serverEntries {
+		if serverEntry.IpAddress != _EXPECTED_IP_ADDRESS {
+			t.Error("unexpected IP address in decoded server entry: %s", serverEntry.IpAddress)
+		}
+	}
+}
+
+func TestStreamingServerEntryDecoder(t *testing.T) {
+
+	decoder := NewStreamingServerEntryDecoder(
+		bytes.NewReader([]byte(testEncodedServerEntryList)),
+		common.GetCurrentTimestamp(), SERVER_ENTRY_SOURCE_EMBEDDED)
+
+	serverEntries := make([]*ServerEntry, 0)
+
+	for {
+		serverEntry, err := decoder.Next()
+		if err != nil {
+			t.Error(err.Error())
+			t.FailNow()
+		}
+
+		if serverEntry == nil {
+			break
+		}
+
+		serverEntries = append(serverEntries, serverEntry)
+	}
+
 	if len(serverEntries) != 2 {
 		t.Error("unexpected number of valid server entries")
 	}
