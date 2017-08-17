@@ -105,7 +105,7 @@ func TestInvalidServerEntries(t *testing.T) {
 		}
 		err = ValidateServerEntry(serverEntry)
 		if err == nil {
-			t.Error("server entry should not validate: %s", testCase)
+			t.Errorf("server entry should not validate: %s", testCase)
 		}
 	}
 }

@@ -309,7 +309,7 @@ func (server *Server) Stop() {
 	// Wait for any in-progress ClientConnected calls to complete.
 	server.connectedInProgress.Wait()
 
-	// After this point, no futher clients will be added: all
+	// After this point, no further clients will be added: all
 	// in-progress ClientConnected calls have finished; and any
 	// later ClientConnected calls won't get past their
 	// server.runContext.Done() checks.
@@ -345,7 +345,7 @@ type AllowedPortChecker func(upstreamIPAddress net.IP, port int) bool
 //
 // It is safe to make concurrent calls to ClientConnected for distinct
 // session IDs. The caller is responsible for serializing calls with the
-// same session ID. Futher, the caller must ensure, in the case of a client
+// same session ID. Further, the caller must ensure, in the case of a client
 // transport reconnect when an existing transport has not yet disconnected,
 // that ClientDisconnected is called first -- so it doesn't undo the new
 // ClientConnected. (psiphond meets these constraints by closing any
@@ -625,7 +625,7 @@ func (server *Server) runDeviceDownstream() {
 			continue
 		}
 
-		// destinationIPAddress determines which client recieves this packet.
+		// destinationIPAddress determines which client receives this packet.
 		// At this point, only enough of the packet is inspected to determine
 		// this routing info; further validation happens in subsequent
 		// processPacket in runClientDownstream.
@@ -830,9 +830,9 @@ func (server *Server) allocateIndex(newSession *session) error {
 		//   the network identifier (10.0.0.0) and broadcast
 		//   address (10.255.255.255) respectively
 		// - 1 is reserved as the server tun device address,
-		//   (10.0.0.1, and IPv6 equivilent)
+		//   (10.0.0.1, and IPv6 equivalent)
 		// - 2 is reserver as the transparent DNS target
-		//   address (10.0.0.2, and IPv6 equivilent)
+		//   address (10.0.0.2, and IPv6 equivalent)
 
 		if index <= 2 {
 			continue
@@ -842,7 +842,7 @@ func (server *Server) allocateIndex(newSession *session) error {
 			continue
 		}
 		if s, ok := server.indexToSession.LoadOrStore(index, newSession); ok {
-			// Index is already in use or aquired concurrently.
+			// Index is already in use or acquired concurrently.
 			// If the existing session is expired, reap it and use index.
 			existingSession := s.(*session)
 			if existingSession.expired(idleExpiry) {
@@ -1037,7 +1037,7 @@ func (metrics *packetMetrics) relayedPacket(
 	// - For port forwards, OSL progress tracking involves one SeedSpecs subnets
 	//   lookup per port forward; this may be too much overhead per packet; OSL
 	//   progress tracking also uses port forward duration as an input.
-	// - Can we do simple flow tracking to achive the same (a) lookup rate,
+	// - Can we do simple flow tracking to achieve the same (a) lookup rate,
 	//   (b) duration measurement? E.g., track flow via 4-tuple of source/dest
 	//   IP/port?
 
@@ -1683,8 +1683,6 @@ func getPacketDestinationIPAddress(
 
 		return packet[24:40], true
 	}
-
-	return nil, false
 }
 
 func processPacket(

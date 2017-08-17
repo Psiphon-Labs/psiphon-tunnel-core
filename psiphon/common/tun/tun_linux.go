@@ -134,7 +134,7 @@ func configureNetworkConfigSubprocessCapabilities() error {
 	// be child processes via ambient mechanism described here:
 	// https://github.com/torvalds/linux/commit/58319057b7847667f0c9585b9de0e8932b0fdb08
 	//
-	// The ambient mechanim is available in Linux kernel 4.3 and later.
+	// The ambient mechanism is available in Linux kernel 4.3 and later.
 
 	// When using capabilities, this process should have CAP_NET_ADMIN in order
 	// to create tun devices. And the subprocess operations such as using "ifconfig"
@@ -344,7 +344,7 @@ func configureClientInterface(
 	// Set routing. Routes set here should automatically
 	// drop when the tun device is removed.
 
-	// TODO: appear to need explict routing only for IPv6?
+	// TODO: appear to need explicit routing only for IPv6?
 
 	for _, destination := range config.RouteDestinations {
 
