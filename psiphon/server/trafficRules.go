@@ -234,7 +234,7 @@ func (set *TrafficRulesSet) Validate() error {
 
 	for _, filteredRule := range set.FilteredRules {
 
-		for paramName, _ := range filteredRule.Filter.HandshakeParameters {
+		for paramName := range filteredRule.Filter.HandshakeParameters {
 			validParamName := false
 			for _, paramSpec := range baseRequestParams {
 				if paramSpec.name == paramName {

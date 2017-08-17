@@ -131,7 +131,8 @@ func Stop() {
 	}
 }
 
-// This is a passthrough to Controller.SetClientVerificationPayloadForActiveTunnels.
+// SetClientVerificationPayload is a passthrough to
+// Controller.SetClientVerificationPayloadForActiveTunnels.
 // Note: should only be called after Start() and before Stop(); otherwise,
 // will silently take no action.
 func SetClientVerificationPayload(clientVerificationPayload string) {

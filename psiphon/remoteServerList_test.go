@@ -172,7 +172,7 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 		signingPublicKey,
 		signingPrivateKey,
 		map[string][]string{
-			oslID: []string{string(encodedServerEntry)},
+			oslID: {string(encodedServerEntry)},
 		},
 		nil)
 	if err != nil {

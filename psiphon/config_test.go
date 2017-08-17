@@ -177,7 +177,7 @@ func TestDownloadURLs(t *testing.T) {
 		{
 			"missing OnlyAfterAttempts = 0",
 			[]*DownloadURL{
-				&DownloadURL{
+				{
 					URL:               encodedA,
 					OnlyAfterAttempts: 1,
 				},
@@ -190,7 +190,7 @@ func TestDownloadURLs(t *testing.T) {
 		{
 			"single URL, multiple attempts",
 			[]*DownloadURL{
-				&DownloadURL{
+				{
 					URL:               encodedA,
 					OnlyAfterAttempts: 0,
 				},
@@ -203,15 +203,15 @@ func TestDownloadURLs(t *testing.T) {
 		{
 			"multiple URLs, single attempt",
 			[]*DownloadURL{
-				&DownloadURL{
+				{
 					URL:               encodedA,
 					OnlyAfterAttempts: 0,
 				},
-				&DownloadURL{
+				{
 					URL:               encodedB,
 					OnlyAfterAttempts: 1,
 				},
-				&DownloadURL{
+				{
 					URL:               encodedC,
 					OnlyAfterAttempts: 1,
 				},
@@ -224,15 +224,15 @@ func TestDownloadURLs(t *testing.T) {
 		{
 			"multiple URLs, multiple attempts",
 			[]*DownloadURL{
-				&DownloadURL{
+				{
 					URL:               encodedA,
 					OnlyAfterAttempts: 0,
 				},
-				&DownloadURL{
+				{
 					URL:               encodedB,
 					OnlyAfterAttempts: 1,
 				},
-				&DownloadURL{
+				{
 					URL:               encodedC,
 					OnlyAfterAttempts: 1,
 				},
@@ -245,15 +245,15 @@ func TestDownloadURLs(t *testing.T) {
 		{
 			"multiple URLs, multiple attempts",
 			[]*DownloadURL{
-				&DownloadURL{
+				{
 					URL:               encodedA,
 					OnlyAfterAttempts: 0,
 				},
-				&DownloadURL{
+				{
 					URL:               encodedB,
 					OnlyAfterAttempts: 1,
 				},
-				&DownloadURL{
+				{
 					URL:               encodedC,
 					OnlyAfterAttempts: 3,
 				},

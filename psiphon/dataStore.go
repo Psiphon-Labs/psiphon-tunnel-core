@@ -736,7 +736,7 @@ func ReportAvailableRegions() {
 	}
 
 	regionList := make([]string, 0, len(regions))
-	for region, _ := range regions {
+	for region := range regions {
 		// Some server entries do not have a region, but it makes no sense to return
 		// an empty string as an "available region".
 		if region != "" {
@@ -910,7 +910,7 @@ var persistentStatTypes = []string{
 	PERSISTENT_STAT_TYPE_TUNNEL,
 }
 
-// StorePersistentStats adds a new persistent stat record, which
+// StorePersistentStat adds a new persistent stat record, which
 // is set to StateUnreported and is an immediate candidate for
 // reporting.
 //

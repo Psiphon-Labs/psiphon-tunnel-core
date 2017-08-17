@@ -95,7 +95,7 @@ func (tr *ProxyAuthTransport) RoundTrip(req *http.Request) (resp *http.Response,
 		return nil, err
 	}
 
-	var ha HttpAuthenticator = nil
+	var ha HttpAuthenticator
 
 	// Clone request early because RoundTrip will destroy request Body
 	// Also add custom headers to the cloned request
@@ -249,8 +249,8 @@ func newTransportConn(c net.Conn, tr *ProxyAuthTransport) *transportConn {
 // If so, the last intercepted request is authenticated against the response
 // in case of connection based auth scheme(i.e. NTLM)
 // All the non-connection based schemes are handled by the ProxyAuthTransport.RoundTrip()
-func (tc *transportConn) Read(p []byte) (n int, read_err error) {
-	n, read_err = tc.Conn.Read(p)
+func (tc *transportConn) Read(p []byte) (n int, readErr error) {
+	n, readErr = tc.Conn.Read(p)
 	if n < HTTP_STAT_LINE_LENGTH {
 		return
 	}

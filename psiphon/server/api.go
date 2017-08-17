@@ -110,7 +110,7 @@ func dispatchAPIRequestHandler(
 
 	// Before invoking the handlers, enforce some preconditions:
 	//
-	// - A handshake request must preceed any other requests.
+	// - A handshake request must precede any other requests.
 	// - When the handshake results in a traffic rules state where
 	//   the client is immediately exhausted, no requests
 	//   may succeed. This case ensures that blocked clients do
@@ -240,8 +240,8 @@ func handshakeAPIRequestHandler(
 
 var connectedRequestParams = append(
 	[]requestParamSpec{
-		requestParamSpec{"session_id", isHexDigits, 0},
-		requestParamSpec{"last_connected", isLastConnected, 0}},
+		{"session_id", isHexDigits, 0},
+		{"last_connected", isLastConnected, 0}},
 	baseRequestParams...)
 
 // connectedAPIRequestHandler implements the "connected" API request.
@@ -281,8 +281,8 @@ func connectedAPIRequestHandler(
 
 var statusRequestParams = append(
 	[]requestParamSpec{
-		requestParamSpec{"session_id", isHexDigits, 0},
-		requestParamSpec{"connected", isBooleanFlag, 0}},
+		{"session_id", isHexDigits, 0},
+		{"connected", isBooleanFlag, 0}},
 	baseRequestParams...)
 
 // statusAPIRequestHandler implements the "status" API request.
@@ -501,9 +501,8 @@ func clientVerificationAPIRequestHandler(
 			}
 
 			return responsePayload, nil
-		} else {
-			return make([]byte, 0), nil
 		}
+		return make([]byte, 0), nil
 	} else {
 		verificationData, err := getJSONObjectRequestParam(params, "verificationData")
 		if err != nil {
@@ -552,29 +551,29 @@ const (
 // Each param is expected to be a string, unless requestParamArray
 // is specified, in which case an array of string is expected.
 var baseRequestParams = []requestParamSpec{
-	requestParamSpec{"server_secret", isServerSecret, requestParamNotLogged},
-	requestParamSpec{"client_session_id", isHexDigits, requestParamNotLogged},
-	requestParamSpec{"propagation_channel_id", isHexDigits, 0},
-	requestParamSpec{"sponsor_id", isHexDigits, 0},
-	requestParamSpec{"client_version", isIntString, 0},
-	requestParamSpec{"client_platform", isClientPlatform, 0},
-	requestParamSpec{"client_build_rev", isHexDigits, requestParamOptional},
-	requestParamSpec{"relay_protocol", isRelayProtocol, 0},
-	requestParamSpec{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
-	requestParamSpec{"device_region", isRegionCode, requestParamOptional},
-	requestParamSpec{"ssh_client_version", isAnyString, requestParamOptional},
-	requestParamSpec{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
-	requestParamSpec{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
-	requestParamSpec{"meek_dial_address", isDialAddress, requestParamOptional},
-	requestParamSpec{"meek_resolved_ip_address", isIPAddress, requestParamOptional},
-	requestParamSpec{"meek_sni_server_name", isDomain, requestParamOptional},
-	requestParamSpec{"meek_host_header", isHostHeader, requestParamOptional},
-	requestParamSpec{"meek_transformed_host_name", isBooleanFlag, requestParamOptional},
-	requestParamSpec{"user_agent", isAnyString, requestParamOptional},
-	requestParamSpec{"tls_profile", isAnyString, requestParamOptional},
-	requestParamSpec{"server_entry_region", isRegionCode, requestParamOptional},
-	requestParamSpec{"server_entry_source", isServerEntrySource, requestParamOptional},
-	requestParamSpec{"server_entry_timestamp", isISO8601Date, requestParamOptional},
+	{"server_secret", isServerSecret, requestParamNotLogged},
+	{"client_session_id", isHexDigits, requestParamNotLogged},
+	{"propagation_channel_id", isHexDigits, 0},
+	{"sponsor_id", isHexDigits, 0},
+	{"client_version", isIntString, 0},
+	{"client_platform", isClientPlatform, 0},
+	{"client_build_rev", isHexDigits, requestParamOptional},
+	{"relay_protocol", isRelayProtocol, 0},
+	{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
+	{"device_region", isRegionCode, requestParamOptional},
+	{"ssh_client_version", isAnyString, requestParamOptional},
+	{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
+	{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
+	{"meek_dial_address", isDialAddress, requestParamOptional},
+	{"meek_resolved_ip_address", isIPAddress, requestParamOptional},
+	{"meek_sni_server_name", isDomain, requestParamOptional},
+	{"meek_host_header", isHostHeader, requestParamOptional},
+	{"meek_transformed_host_name", isBooleanFlag, requestParamOptional},
+	{"user_agent", isAnyString, requestParamOptional},
+	{"tls_profile", isAnyString, requestParamOptional},
+	{"server_entry_region", isRegionCode, requestParamOptional},
+	{"server_entry_source", isServerEntrySource, requestParamOptional},
+	{"server_entry_timestamp", isISO8601Date, requestParamOptional},
 }
 
 func validateRequestParams(

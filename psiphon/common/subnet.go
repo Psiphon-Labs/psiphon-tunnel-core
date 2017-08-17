@@ -53,8 +53,8 @@ func NewSubnetLookup(CIDRs []string) (SubnetLookup, error) {
 	return lookup, nil
 }
 
-// NewSubnetLookup creates a SubnetLookup from text routes data.
-// The input format is expected to be text lines where each line
+// NewSubnetLookupFromRoutes creates a SubnetLookup from text routes
+// data. The input format is expected to be text lines where each line
 // is, e.g., "1.2.3.0\t255.255.255.0\n"
 func NewSubnetLookupFromRoutes(routesData []byte) (SubnetLookup, error) {
 

@@ -24,7 +24,7 @@ import (
 	"net"
 )
 
-// GetInterfaceIPAddress takes an interface name, such as "eth0", and returns
+// GetInterfaceIPAddresses takes an interface name, such as "eth0", and returns
 // the first IPv4 and IPv6 addresses associated with it. Either of the IPv4 or
 // IPv6 address may be nil. If neither type of address is found, an error
 // is returned.

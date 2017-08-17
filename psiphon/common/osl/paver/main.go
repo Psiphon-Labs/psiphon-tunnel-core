@@ -188,7 +188,7 @@ func main() {
 
 	// pave a directory for each propagation channel
 
-	for propagationChannelID, _ := range allPropagationChannelIDs {
+	for propagationChannelID := range allPropagationChannelIDs {
 
 		paveFiles, err := config.Pave(
 			endTime,

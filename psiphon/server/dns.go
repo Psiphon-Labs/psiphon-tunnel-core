@@ -142,7 +142,7 @@ func (dns *DNSResolver) reloadWhenStale() {
 	// when no write lock is pending). An atomic.CompareAndSwapInt32 is
 	// used to ensure only one goroutine enters Reload() and blocks on
 	// its write lock. Finally, since since ReloadableFile.Reload
-	// checks whether the underlying file has changed _before_ aquiring a
+	// checks whether the underlying file has changed _before_ acquiring a
 	// write lock, we only incur write lock blocking when "/etc/resolv.conf"
 	// has actually changed.
 

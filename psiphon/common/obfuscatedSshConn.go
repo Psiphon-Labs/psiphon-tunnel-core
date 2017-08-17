@@ -125,7 +125,7 @@ func NewObfuscatedSshConn(
 		obfuscator, err = NewServerObfuscator(
 			conn, &ObfuscatorConfig{Keyword: obfuscationKeyword})
 		if err != nil {
-			// TODO: readForver() equivilent
+			// TODO: readForver() equivalent
 			return nil, ContextError(err)
 		}
 		readDeobfuscate = obfuscator.ObfuscateClientToServer
@@ -295,7 +295,7 @@ func (conn *ObfuscatedSshConn) readAndTransform(buffer []byte) (n int, err error
 // http://www.ietf.org/rfc/rfc4253.txt sec 7.3, 12:
 // The payload for SSH_MSG_NEWKEYS is one byte, the packet type, value 21.
 //
-// SSH packet padding values are transformed to achive random, variable length
+// SSH packet padding values are transformed to achieve random, variable length
 // padding during the KEX phase as a partial defense against traffic analysis.
 // (The transformer can do this since only the payload and not the padding of
 // these packets is authenticated in the "exchange hash").
