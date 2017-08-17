@@ -288,7 +288,7 @@ func StreamingStoreServerEntries(
 
 		if serverEntry == nil {
 			// No more server entries
-			return nil
+			break
 		}
 
 		err = StoreServerEntry(serverEntry, replaceIfExists)
