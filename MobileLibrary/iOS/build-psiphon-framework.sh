@@ -43,15 +43,6 @@ if [[ ${FORCE_PRIVATE_PLUGINS} == true ]]; then PRIVATE_PLUGINS_TAG="PRIVATE_PLU
 BUILD_TAGS="IOS ${PRIVATE_PLUGINS_TAG}"
 
 UMBRELLA_FRAMEWORK_XCODE_PROJECT=${BASE_DIR}/PsiphonTunnel/PsiphonTunnel.xcodeproj/
-TRUSTED_ROOT_CA_FILE=${BASE_DIR}/PsiphonTunnel/PsiphonTunnel/rootCAs.txt
-
-# Download trustedroot CAs off curl website, see https://curl.haxx.se/docs/caextract.html for details
-curl -o $TRUSTED_ROOT_CA_FILE https://curl.haxx.se/ca/cacert.pem
-
-if [[ $? != 0 ]]; then
-  echo "FAILURE: curl -o $TRUSTED_ROOT_CA_FILE https://curl.haxx.se/ca/cacert.pem"
-  exit 1
-fi
 
 # Exporting these seems necessary for subcommands to pick them up.
 export GOPATH=${PWD}/go-ios-build
