@@ -384,7 +384,7 @@ func MakeDownloadHttpClient(
 	return httpClient, requestUrl, nil
 }
 
-// ResumeDownload is a resuable helper that downloads requestUrl via the
+// ResumeDownload is a reusable helper that downloads requestUrl via the
 // httpClient, storing the result in downloadFilename when the download is
 // complete. Intermediate, partial downloads state is stored in
 // downloadFilename.part and downloadFilename.part.etag.

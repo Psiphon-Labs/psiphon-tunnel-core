@@ -182,7 +182,7 @@ func (server *MeekServer) Run() error {
 	// Notes:
 	// - WriteTimeout may include time awaiting request, as per:
 	//   https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts
-	// - Legacy meek-server wrapped each client HTTP connection with an explict idle
+	// - Legacy meek-server wrapped each client HTTP connection with an explicit idle
 	//   timeout net.Conn and didn't use http.Server timeouts. We could do the same
 	//   here (use ActivityMonitoredConn) but the stock http.Server timeouts should
 	//   now be sufficient.
@@ -387,7 +387,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		greaterThanSwapInt64(&session.metricPeakCachedResponseHitSize, int64(responseSize))
 
 		// The client may again fail to receive the payload and may again
-		// retry, so not yet releasing cachedReponse buffers.
+		// retry, so not yet releasing cachedResponse buffers.
 
 	} else {
 
@@ -399,7 +399,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		// Note: this code depends on an implementation detail of
 		// io.MultiWriter: a Write() to the MultiWriter writes first
 		// to the cache, and then to the response writer. So if the
-		// write to the reponse writer fails, the payload is cached.
+		// write to the response writer fails, the payload is cached.
 		multiWriter := io.MultiWriter(session.cachedResponse, responseWriter)
 
 		// The client expects 206, not 200, whenever it sets a Range header,
@@ -919,7 +919,7 @@ func (conn *meekConn) pumpReads(reader io.Reader) error {
 	// take its checksum before relaying it, the read buffer can
 	// grow to up to 2 x MEEK_MAX_REQUEST_PAYLOAD_LENGTH + 1.
 
-	// +1 allows for an explict check for request payloads that
+	// +1 allows for an explicit check for request payloads that
 	// exceed the maximum permitted length.
 	limitReader := io.LimitReader(reader, MEEK_MAX_REQUEST_PAYLOAD_LENGTH+1)
 	n, err := readBuffer.ReadFrom(limitReader)

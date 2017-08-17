@@ -70,7 +70,7 @@ func (conns *Conns) CloseAll() {
 	conns.mutex.Lock()
 	defer conns.mutex.Unlock()
 	conns.isClosed = true
-	for conn, _ := range conns.conns {
+	for conn := range conns.conns {
 		conn.Close()
 	}
 	conns.conns = make(map[net.Conn]bool)
@@ -259,7 +259,7 @@ func (conn *ActivityMonitoredConn) GetActiveDuration() time.Duration {
 	return time.Duration(atomic.LoadInt64(&conn.lastReadActivityTime) - conn.monotonicStartTime)
 }
 
-// GetLastActivityTime returns the arbitrary monotonic time of the last Read.
+// GetLastActivityMonotime returns the arbitrary monotonic time of the last Read.
 func (conn *ActivityMonitoredConn) GetLastActivityMonotime() monotime.Time {
 	return monotime.Time(atomic.LoadInt64(&conn.lastReadActivityTime))
 }

@@ -376,7 +376,7 @@ func TestOSL(t *testing.T) {
 			pavedRegistries[propagationChannelID] = paveFiles[len(paveFiles)-1].Contents
 
 			pavedOSLFileContents[propagationChannelID] = make(map[string][]byte)
-			for _, paveFile := range paveFiles[0:len(paveFiles)] {
+			for _, paveFile := range paveFiles[0:] {
 				pavedOSLFileContents[propagationChannelID][paveFile.Name] = paveFile.Contents
 			}
 		}

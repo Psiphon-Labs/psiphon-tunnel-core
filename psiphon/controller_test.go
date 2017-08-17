@@ -1080,7 +1080,7 @@ func initDisruptor() {
 
 const upstreamProxyURL = "http://127.0.0.1:2161"
 
-var upstreamProxyCustomHeaders = map[string][]string{"X-Test-Header-Name": []string{"test-header-value1", "test-header-value2"}}
+var upstreamProxyCustomHeaders = map[string][]string{"X-Test-Header-Name": {"test-header-value1", "test-header-value2"}}
 
 func hasExpectedCustomHeaders(h http.Header) bool {
 	for name, values := range upstreamProxyCustomHeaders {

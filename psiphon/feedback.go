@@ -187,7 +187,7 @@ func uploadFeedback(config *DialConfig, feedbackData []byte, url, userAgent stri
 
 // Pad src to the next block boundary with PKCS7 padding
 // (https://tools.ietf.org/html/rfc5652#section-6.3).
-func AddPKCS7Padding(src []byte, blockSize int) []byte {
+func addPKCS7Padding(src []byte, blockSize int) []byte {
 	paddingLen := blockSize - (len(src) % blockSize)
 	padding := bytes.Repeat([]byte{byte(paddingLen)}, paddingLen)
 	return append(src, padding...)
@@ -197,7 +197,7 @@ func AddPKCS7Padding(src []byte, blockSize int) []byte {
 func encryptAESCBC(plaintext []byte) ([]byte, []byte, []byte, error) {
 	// CBC mode works on blocks so plaintexts need to be padded to the
 	// next whole block (https://tools.ietf.org/html/rfc5246#section-6.2.3.2).
-	plaintext = AddPKCS7Padding(plaintext, aes.BlockSize)
+	plaintext = addPKCS7Padding(plaintext, aes.BlockSize)
 
 	ciphertext := make([]byte, len(plaintext))
 	iv, err := common.MakeSecureRandomBytes(aes.BlockSize)

@@ -17,10 +17,10 @@
  *
  */
 
-// Package psiphon/server/psinet implements psinet database services. The psinet
-// database is a JSON-format file containing information about the Psiphon network,
-// including sponsors, home pages, stats regexes, available upgrades, and other
-// servers for discovery. This package also implements the Psiphon discovery algorithm.
+// Package psinet implements psinet database services. The psinet database is a
+// JSON-format file containing information about the Psiphon network, including
+// sponsors, home pages, stats regexes, available upgrades, and other servers for
+// discovery. This package also implements the Psiphon discovery algorithm.
 package psinet
 
 import (
@@ -262,7 +262,7 @@ func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string
 
 	sponsor, ok := db.Sponsors[sponsorID]
 	if !ok {
-		sponsor, ok = db.Sponsors[db.DefaultSponsorID]
+		sponsor, _ = db.Sponsors[db.DefaultSponsorID]
 	}
 
 	// If neither sponsorID or DefaultSponsorID were found, sponsor will be the
@@ -297,7 +297,7 @@ func (db *Database) DiscoverServers(discoveryValue int) []string {
 		var end time.Time
 		var err error
 
-		// All servers that are discoverable on this day are eligable for discovery
+		// All servers that are discoverable on this day are eligible for discovery
 		if len(server.DiscoveryDateRange) != 0 {
 			start, err = time.Parse("2006-01-02T15:04:05", server.DiscoveryDateRange[0])
 			if err != nil {

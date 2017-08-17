@@ -486,6 +486,7 @@ func toAbsoluteURL(baseURL *url.URL, relativeURLString string) string {
 func proxifyURL(localHTTPProxyIP string, localHTTPProxyPort int, urlString string, rewriteParams []string) string {
 	// Note that we need to use the "opaque" form of URL so that it doesn't double-escape the path. See: https://github.com/golang/go/issues/10887
 
+	// TODO: IPv6 support
 	if localHTTPProxyIP == "0.0.0.0" {
 		localHTTPProxyIP = "127.0.0.1"
 	}

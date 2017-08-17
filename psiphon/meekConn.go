@@ -436,27 +436,27 @@ func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
 	return n, err
 }
 
-// Stub implementation of net.Conn.LocalAddr
+// LocalAddr is a stub implementation of net.Conn.LocalAddr
 func (meek *MeekConn) LocalAddr() net.Addr {
 	return nil
 }
 
-// Stub implementation of net.Conn.RemoteAddr
+// RemoteAddr is a stub implementation of net.Conn.RemoteAddr
 func (meek *MeekConn) RemoteAddr() net.Addr {
 	return nil
 }
 
-// Stub implementation of net.Conn.SetDeadline
+// SetDeadline is a stub implementation of net.Conn.SetDeadline
 func (meek *MeekConn) SetDeadline(t time.Time) error {
 	return common.ContextError(errors.New("not supported"))
 }
 
-// Stub implementation of net.Conn.SetReadDeadline
+// SetReadDeadline is a stub implementation of net.Conn.SetReadDeadline
 func (meek *MeekConn) SetReadDeadline(t time.Time) error {
 	return common.ContextError(errors.New("not supported"))
 }
 
-// Stub implementation of net.Conn.SetWriteDeadline
+// SetWriteDeadline is a stub implementation of net.Conn.SetWriteDeadline
 func (meek *MeekConn) SetWriteDeadline(t time.Time) error {
 	return common.ContextError(errors.New("not supported"))
 }
@@ -612,7 +612,7 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (int64, error) {
 	//
 	// 4. While reading the response payload. The client will omit its
 	//    request payload when retrying, as the server has already
-	//    acknowleged it. The client will also indicate to the server
+	//    acknowledged it. The client will also indicate to the server
 	//    the amount of response payload already received, and the
 	//    server will skip resending the indicated amount of response
 	//    payload.
@@ -622,7 +622,7 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (int64, error) {
 
 	retries := uint(0)
 	retryDeadline := monotime.Now().Add(MEEK_ROUND_TRIP_RETRY_DEADLINE)
-	serverAcknowlegedRequestPayload := false
+	serverAcknowledgedRequestPayload := false
 	receivedPayloadSize := int64(0)
 
 	for try := 0; ; try++ {
@@ -631,7 +631,7 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (int64, error) {
 		// partial server response.
 
 		var sendPayloadReader io.Reader
-		if !serverAcknowlegedRequestPayload {
+		if !serverAcknowledgedRequestPayload {
 			sendPayloadReader = bytes.NewReader(sendPayload)
 		}
 
@@ -693,7 +693,7 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (int64, error) {
 
 			// Received the response status code, so the server
 			// must have received the request payload.
-			serverAcknowlegedRequestPayload = true
+			serverAcknowledgedRequestPayload = true
 
 			readPayloadSize, err := meek.readPayload(response.Body)
 			response.Body.Close()

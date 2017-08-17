@@ -50,9 +50,8 @@ func (a *BasicHttpAuthenticator) Authenticate(req *http.Request, resp *http.Resp
 	if a.state == BASIC_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
 		a.state = BASIC_HTTP_AUTH_STATE_RESPONSE_GENERATED
 		return a.PreAuthenticate(req)
-	} else {
-		return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
 	}
+	return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
 }
 
 func (a *BasicHttpAuthenticator) IsConnectionBased() bool {
