@@ -24,6 +24,8 @@ import (
 	"math/big"
 )
 
+// NewObfuscatedClientSessionCache produces obfuscated session tickets.
+//
 // [Psiphon]
 // Obfuscated Session Tickets
 //
