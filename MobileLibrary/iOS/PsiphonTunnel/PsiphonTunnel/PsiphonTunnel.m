@@ -283,6 +283,12 @@
     //
     // Fill in optional config values.
     //
+
+    if (config[@"EstablishTunnelTimeoutSeconds"] == nil) {
+        // If not otherwise set, we want no tunnel establishment timeout
+        config[@"EstablishTunnelTimeoutSeconds"] = [NSNumber numberWithInt:0];
+    }
+
     
     NSFileManager *fileManager = [NSFileManager defaultManager];
     
@@ -374,23 +380,6 @@
     }
 
     //
-    // Upgrade Download Filename
-    //
-
-    NSString *defaultUpgradeDownloadFilename = [[libraryURL URLByAppendingPathComponent:@"upgrade_download_file" isDirectory:NO] path];
-    if (defaultUpgradeDownloadFilename == nil) {
-        [self logMessage:@"Unable to create defaultUpgradeDownloadFilename"];
-        return nil;
-    }
-
-    if (config[@"UpgradeDownloadFilename"] == nil) {
-        config[@"UpgradeDownloadFilename"] = defaultUpgradeDownloadFilename;
-    }
-    else {
-        [self logMessage:[NSString stringWithFormat: @"UpgradeDownloadFilename overridden from '%@' to '%@'", defaultUpgradeDownloadFilename, config[@"UpgradeDownloadFilename"]]];
-    }
-
-    //
     // Tunnel Whole Device (defaults to not whole device)
     //
 
@@ -398,14 +387,12 @@
     tunnelWholeDevice = ([config[@"TunnelWholeDevice"] integerValue] == 1);
 
     // Other optional fields not being altered. If not set, their defaults will be used:
-    // * EstablishTunnelTimeoutSeconds
+    // * TunnelWholeDevice
     // * LocalSocksProxyPort
     // * LocalHttpProxyPort
     // * UpstreamProxyUrl
     // * EmitDiagnosticNotices
     // * EgressRegion
-    // * UpgradeDownloadUrl/UpgradeDownloadURLs
-    // * UpgradeDownloadClientVersionHeader
     // * timeout fields
     
     //
@@ -451,25 +438,26 @@
     config[@"DeviceRegion"] = [PsiphonTunnel getDeviceRegion];
     
     config[@"UseIndistinguishableTLS"] = [NSNumber numberWithBool:TRUE];
-    
-    // Get the location of the root CAs file in the bundle resources.
-    NSURL *rootCAsURL = [[NSBundle bundleForClass:[self class]] URLForResource:@"rootCAs" withExtension:@"txt"];
-    NSString *bundledTrustedCAPath = nil;
-    if (rootCAsURL == nil ||
-        (bundledTrustedCAPath = [rootCAsURL path]) == nil ||
-        ![[NSFileManager defaultManager] fileExistsAtPath:bundledTrustedCAPath]) {
-        [self logMessage:[NSString stringWithFormat: @"Unable to find Root CAs file in bundle: %@", bundledTrustedCAPath]];
-        return nil;
-    }
-    config[@"TrustedCACertificatesFilename"] = bundledTrustedCAPath;
-    
+
+    // We don't use OpenSSL, so we don't use a CA certs file
+    config[@"TrustedCACertificatesFilename"] = nil;
+
+    // This library expects a pool size of 1
+    config[@"TunnelPoolSize"] = [NSNumber numberWithInt:1];
+
+    // We don't support upgrade downloading
+    config[@"UpgradeDownloadURLs"] = nil;
+    config[@"UpgradeDownloadUrl"] = nil;
+    config[@"UpgradeDownloadClientVersionHeader"] = nil;
+    config[@"UpgradeDownloadFilename"] = nil;
+
     NSString *finalConfigStr = [[[SBJson4Writer alloc] init] stringWithObject:config];
     
     if (finalConfigStr == nil) {
         [self logMessage:@"Failed to convert config to JSON string"];
         return nil;
     }
-    
+
     return finalConfigStr;
 }
 
@@ -599,20 +587,10 @@
         }
     }
     else if ([noticeType isEqualToString:@"ClientUpgradeDownloaded"]) {
-        id filename = [notice valueForKeyPath:@"data.filename"];
-        if (![filename isKindOfClass:[NSString class]]) {
-            [self logMessage:[NSString stringWithFormat: @"ClientUpgradeDownloaded notice missing data.filename: %@", noticeJSON]];
-            return;
-        }
-        
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onClientUpgradeDownloaded:)]) {
-            [self.tunneledAppDelegate onClientUpgradeDownloaded:filename];
-        }
+        // We don't support upgrade downloading
     }
     else if ([noticeType isEqualToString:@"ClientIsLatestVersion"]) {
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onClientIsLatestVersion)]) {
-            [self.tunneledAppDelegate onClientIsLatestVersion];
-        }
+        // We don't support upgrade downloading
     }
     else if ([noticeType isEqualToString:@"Homepage"]) {
         id url = [notice valueForKeyPath:@"data.url"];
