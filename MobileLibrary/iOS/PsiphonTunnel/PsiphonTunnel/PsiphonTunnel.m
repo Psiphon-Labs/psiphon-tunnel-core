@@ -37,6 +37,9 @@
 @end
 
 @implementation PsiphonTunnel {
+    dispatch_queue_t workQueue;
+    dispatch_queue_t callbackQueue;
+
     _Atomic PsiphonConnectionState connectionState;
 
     _Atomic NSInteger localSocksProxyPort;
@@ -49,11 +52,16 @@
 }
 
 - (id)init {
-    atomic_init(&connectionState, PsiphonConnectionStateDisconnected);
-    atomic_init(&localSocksProxyPort, 0);
-    atomic_init(&localHttpProxyPort, 0);
-    reachability = [Reachability reachabilityForInternetConnection];
-    tunnelWholeDevice = FALSE;
+    self.tunneledAppDelegate = nil;
+
+    self->workQueue = dispatch_queue_create("com.psiphon3.library.WorkQueue", DISPATCH_QUEUE_SERIAL);
+    self->callbackQueue = dispatch_queue_create("com.psiphon3.library.CallbackQueue", DISPATCH_QUEUE_SERIAL);
+
+    atomic_init(&self->connectionState, PsiphonConnectionStateDisconnected);
+    atomic_init(&self->localSocksProxyPort, 0);
+    atomic_init(&self->localHttpProxyPort, 0);
+    self->reachability = [Reachability reachabilityForInternetConnection];
+    self->tunnelWholeDevice = FALSE;
 
     return self;
 }
@@ -88,6 +96,9 @@
     return [self start];
 }
 
+/*!
+ Start the tunnel. If the tunnel is already started it will be stopped first.
+ */
 - (BOOL)start {
     @synchronized (PsiphonTunnel.self) {
         [self stop];
@@ -102,7 +113,11 @@
             return FALSE;
         }
 
-        NSString *embeddedServerEntries = [self.tunneledAppDelegate getEmbeddedServerEntries];
+        __block NSString *embeddedServerEntries = nil;
+        dispatch_sync(self->callbackQueue, ^{
+            embeddedServerEntries = [self.tunneledAppDelegate getEmbeddedServerEntries];
+        });
+
         if (embeddedServerEntries == nil) {
             [self logMessage:@"Error getting embedded server entries from delegate"];
             return FALSE;
@@ -117,7 +132,7 @@
                            configStr,
                            embeddedServerEntries,
                            self,
-                           tunnelWholeDevice, // useDeviceBinder
+                           self->tunnelWholeDevice, // useDeviceBinder
                            useIPv6Synthesizer,
                            &e);
             
@@ -143,6 +158,9 @@
     }
 }
 
+/*!
+ Start the tunnel if it's not already started.
+ */
 - (BOOL)startIfNeeded {
     PsiphonConnectionState connState = [self getConnectionState];
     BOOL localProxyAlive = [self isLocalProxyAlive];
@@ -157,9 +175,7 @@
 
     // Otherwise we're already connected, so let the app know via the same signaling
     // that we'd use if we were doing a connection sequence.
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self changeConnectionStateTo:connState evenIfSameState:YES];
-    });
+    [self changeConnectionStateTo:connState evenIfSameState:YES];
 
     return TRUE;
 }
@@ -175,8 +191,8 @@
         
         [self logMessage: @"Psiphon library stopped"];
 
-        atomic_store(&localSocksProxyPort, 0);
-        atomic_store(&localHttpProxyPort, 0);
+        atomic_store(&self->localSocksProxyPort, 0);
+        atomic_store(&self->localHttpProxyPort, 0);
 
         [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
     }
@@ -184,17 +200,17 @@
 
 // See comment in header.
 - (PsiphonConnectionState)getConnectionState {
-    return atomic_load(&connectionState);
+    return atomic_load(&self->connectionState);
 }
 
 // See comment in header.
 - (NSInteger)getLocalSocksProxyPort {
-    return atomic_load(&localSocksProxyPort);
+    return atomic_load(&self->localSocksProxyPort);
 }
 
 // See comment in header.
 - (NSInteger)getLocalHttpProxyPort {
-    return atomic_load(&localHttpProxyPort);
+    return atomic_load(&self->localHttpProxyPort);
 }
 
 // See comment in header.
@@ -217,11 +233,14 @@
            publicKey:(NSString * _Nonnull)b64EncodedPublicKey
         uploadServer:(NSString * _Nonnull)uploadServer
  uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders {
-    NSString *connectionConfigJson = [self getConfig];
-    if (connectionConfigJson == nil) {
-       [self logMessage:@"Error getting config for feedback upload"];
-    }
-    GoPsiSendFeedback(connectionConfigJson, feedbackJson, b64EncodedPublicKey, uploadServer, @"", uploadServerHeaders);
+    dispatch_async(self->workQueue, ^{
+        NSString *connectionConfigJson = [self getConfig];
+        if (connectionConfigJson == nil) {
+           [self logMessage:@"Error getting config for feedback upload"];
+        }
+
+        GoPsiSendFeedback(connectionConfigJson, feedbackJson, b64EncodedPublicKey, uploadServer, @"", uploadServerHeaders);
+    });
 }
 
 
@@ -237,8 +256,11 @@
         [self logMessage:@"tunneledApp delegate lost"];
         return nil;
     }
-    
-    NSString *configStr = [self.tunneledAppDelegate getPsiphonConfig];
+
+    __block NSString *configStr = nil;
+    dispatch_sync(self->callbackQueue, ^{
+        configStr = [self.tunneledAppDelegate getPsiphonConfig];
+    });
     if (configStr == nil) {
         [self logMessage:@"Error getting config from delegate"];
         return nil;
@@ -395,7 +417,7 @@
     //
 
     // We'll record our state about what mode we're in.
-    tunnelWholeDevice = ([config[@"TunnelWholeDevice"] integerValue] == 1);
+    self->tunnelWholeDevice = ([config[@"TunnelWholeDevice"] integerValue] == 1);
 
     // Other optional fields not being altered. If not set, their defaults will be used:
     // * EstablishTunnelTimeoutSeconds
@@ -478,220 +500,250 @@
  @param noticeJSON  The notice data, JSON encoded.
  */
 - (void)handlePsiphonNotice:(NSString * _Nonnull)noticeJSON {
-    BOOL diagnostic = TRUE;
-    
-    __block NSDictionary *notice = nil;
-    id block = ^(id obj, BOOL *ignored) {
-        if (ignored == nil || *ignored == YES) {
-            return;
-        }
-        notice = (NSDictionary *)obj;
-    };
-    
-    id eh = ^(NSError *err) {
-        notice = nil;
-        [self logMessage:[NSString stringWithFormat: @"Notice JSON parse failed: %@", err.description]];
-    };
-    
-    id parser = [SBJson4Parser parserWithBlock:block allowMultiRoot:NO unwrapRootArray:NO errorHandler:eh];
-    [parser parse:[noticeJSON dataUsingEncoding:NSUTF8StringEncoding]];
-    
-    if (notice == nil) {
-        return;
-    }
-
-    NSString *noticeType = notice[@"noticeType"];
-    if (noticeType == nil) {
-        [self logMessage:@"Notice missing noticeType"];
-        return;
-    }
-    
-    if ([noticeType isEqualToString:@"Tunnels"]) {
-        id count = [notice valueForKeyPath:@"data.count"];
-        if (![count isKindOfClass:[NSNumber class]]) {
-            [self logMessage:[NSString stringWithFormat: @"Tunnels notice missing data.count: %@", noticeJSON]];
+    dispatch_async(self->workQueue, ^{
+        BOOL diagnostic = TRUE;
+        
+        __block NSDictionary *notice = nil;
+        id block = ^(id obj, BOOL *ignored) {
+            if (ignored == nil || *ignored == YES) {
+                return;
+            }
+            notice = (NSDictionary *)obj;
+        };
+        
+        id eh = ^(NSError *err) {
+            notice = nil;
+            [self logMessage:[NSString stringWithFormat: @"Notice JSON parse failed: %@", err.description]];
+        };
+        
+        id parser = [SBJson4Parser parserWithBlock:block allowMultiRoot:NO unwrapRootArray:NO errorHandler:eh];
+        [parser parse:[noticeJSON dataUsingEncoding:NSUTF8StringEncoding]];
+        
+        if (notice == nil) {
             return;
         }
 
-        if ([count integerValue] > 0) {
-            [self changeConnectionStateTo:PsiphonConnectionStateConnected evenIfSameState:NO];
-        } else {
-            [self changeConnectionStateTo:PsiphonConnectionStateConnecting evenIfSameState:NO];
-        }
-    }
-    else if ([noticeType isEqualToString:@"Exiting"]) {
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onExiting)]) {
-            [self.tunneledAppDelegate onExiting];
-        }
-    }
-    else if ([noticeType isEqualToString:@"AvailableEgressRegions"]) {
-        id regions = [notice valueForKeyPath:@"data.regions"];
-        if (![regions isKindOfClass:[NSArray class]]) {
-            [self logMessage:[NSString stringWithFormat: @"AvailableEgressRegions notice missing data.regions: %@", noticeJSON]];
-            return;
-        }
-
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onAvailableEgressRegions:)]) {
-            [self.tunneledAppDelegate onAvailableEgressRegions:regions];
-        }
-    }
-    else if ([noticeType isEqualToString:@"SocksProxyPortInUse"]) {
-        id port = [notice valueForKeyPath:@"data.port"];
-        if (![port isKindOfClass:[NSNumber class]]) {
-            [self logMessage:[NSString stringWithFormat: @"SocksProxyPortInUse notice missing data.port: %@", noticeJSON]];
-            return;
-        }
-
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onSocksProxyPortInUse:)]) {
-            [self.tunneledAppDelegate onSocksProxyPortInUse:[port integerValue]];
-        }
-    }
-    else if ([noticeType isEqualToString:@"HttpProxyPortInUse"]) {
-        id port = [notice valueForKeyPath:@"data.port"];
-        if (![port isKindOfClass:[NSNumber class]]) {
-            [self logMessage:[NSString stringWithFormat: @"HttpProxyPortInUse notice missing data.port: %@", noticeJSON]];
-            return;
-        }
-
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onHttpProxyPortInUse:)]) {
-            [self.tunneledAppDelegate onHttpProxyPortInUse:[port integerValue]];
-        }
-    }
-    else if ([noticeType isEqualToString:@"ListeningSocksProxyPort"]) {
-        id port = [notice valueForKeyPath:@"data.port"];
-        if (![port isKindOfClass:[NSNumber class]]) {
-            [self logMessage:[NSString stringWithFormat: @"ListeningSocksProxyPort notice missing data.port: %@", noticeJSON]];
-            return;
-        }
-
-        NSInteger portInt = [port integerValue];
-
-        atomic_store(&localSocksProxyPort, portInt);
-
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningSocksProxyPort:)]) {
-            [self.tunneledAppDelegate onListeningSocksProxyPort:portInt];
-        }
-    }
-    else if ([noticeType isEqualToString:@"ListeningHttpProxyPort"]) {
-        id port = [notice valueForKeyPath:@"data.port"];
-        if (![port isKindOfClass:[NSNumber class]]) {
-            [self logMessage:[NSString stringWithFormat: @"ListeningHttpProxyPort notice missing data.port: %@", noticeJSON]];
-            return;
-        }
-
-        NSInteger portInt = [port integerValue];
-
-        atomic_store(&localHttpProxyPort, portInt);
-
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningHttpProxyPort:)]) {
-            [self.tunneledAppDelegate onListeningHttpProxyPort:portInt];
-        }
-    }
-    else if ([noticeType isEqualToString:@"UpstreamProxyError"]) {
-        id message = [notice valueForKeyPath:@"data.message"];
-        if (![message isKindOfClass:[NSString class]]) {
-            [self logMessage:[NSString stringWithFormat: @"UpstreamProxyError notice missing data.message: %@", noticeJSON]];
+        NSString *noticeType = notice[@"noticeType"];
+        if (noticeType == nil) {
+            [self logMessage:@"Notice missing noticeType"];
             return;
         }
         
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onUpstreamProxyError:)]) {
-            [self.tunneledAppDelegate onUpstreamProxyError:message];
-        }
-    }
-    else if ([noticeType isEqualToString:@"ClientUpgradeDownloaded"]) {
-        id filename = [notice valueForKeyPath:@"data.filename"];
-        if (![filename isKindOfClass:[NSString class]]) {
-            [self logMessage:[NSString stringWithFormat: @"ClientUpgradeDownloaded notice missing data.filename: %@", noticeJSON]];
-            return;
-        }
-        
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onClientUpgradeDownloaded:)]) {
-            [self.tunneledAppDelegate onClientUpgradeDownloaded:filename];
-        }
-    }
-    else if ([noticeType isEqualToString:@"ClientIsLatestVersion"]) {
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onClientIsLatestVersion)]) {
-            [self.tunneledAppDelegate onClientIsLatestVersion];
-        }
-    }
-    else if ([noticeType isEqualToString:@"Homepage"]) {
-        id url = [notice valueForKeyPath:@"data.url"];
-        if (![url isKindOfClass:[NSString class]]) {
-            [self logMessage:[NSString stringWithFormat: @"Homepage notice missing data.url: %@", noticeJSON]];
-            return;
-        }
-        
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onHomepage:)]) {
-            [self.tunneledAppDelegate onHomepage:url];
-        }
-    }
-    else if ([noticeType isEqualToString:@"ClientRegion"]) {
-        id region = [notice valueForKeyPath:@"data.region"];
-        if (![region isKindOfClass:[NSString class]]) {
-            [self logMessage:[NSString stringWithFormat: @"ClientRegion notice missing data.region: %@", noticeJSON]];
-            return;
-        }
-        
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onClientRegion:)]) {
-            [self.tunneledAppDelegate onClientRegion:region];
-        }
-    }
-    else if ([noticeType isEqualToString:@"SplitTunnelRegion"]) {
-        id region = [notice valueForKeyPath:@"data.region"];
-        if (![region isKindOfClass:[NSString class]]) {
-            [self logMessage:[NSString stringWithFormat: @"SplitTunnelRegion notice missing data.region: %@", noticeJSON]];
-            return;
-        }
-        
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onSplitTunnelRegion:)]) {
-            [self.tunneledAppDelegate onSplitTunnelRegion:region];
-        }
-    }
-    else if ([noticeType isEqualToString:@"Untunneled"]) {
-        id address = [notice valueForKeyPath:@"data.address"];
-        if (![address isKindOfClass:[NSString class]]) {
-            [self logMessage:[NSString stringWithFormat: @"Untunneled notice missing data.address: %@", noticeJSON]];
-            return;
-        }
-        
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onUntunneledAddress:)]) {
-            [self.tunneledAppDelegate onUntunneledAddress:address];
-        }
-    }
-    else if ([noticeType isEqualToString:@"BytesTransferred"]) {
-        diagnostic = FALSE;
-        
-        id sent = [notice valueForKeyPath:@"data.sent"];
-        id received = [notice valueForKeyPath:@"data.received"];
-        if (![sent isKindOfClass:[NSNumber class]] || ![received isKindOfClass:[NSNumber class]]) {
-            [self logMessage:[NSString stringWithFormat: @"BytesTransferred notice missing data.sent or data.received: %@", noticeJSON]];
-            return;
-        }
-        
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onBytesTransferred::)]) {
-            [self.tunneledAppDelegate onBytesTransferred:[sent longLongValue]:[received longLongValue]];
-        }
-    }
-    
-    // Pass diagnostic messages to onDiagnosticMessage.
-    if (diagnostic) {
-        NSDictionary *data = notice[@"data"];
-        if (data == nil) {
-            return;
-        }
-        
-        NSString *dataStr = [[[SBJson4Writer alloc] init] stringWithObject:data];
+        if ([noticeType isEqualToString:@"Tunnels"]) {
+            id count = [notice valueForKeyPath:@"data.count"];
+            if (![count isKindOfClass:[NSNumber class]]) {
+                [self logMessage:[NSString stringWithFormat: @"Tunnels notice missing data.count: %@", noticeJSON]];
+                return;
+            }
 
-        NSString *diagnosticMessage = [NSString stringWithFormat:@"%@: %@", noticeType, dataStr];
-        [self logMessage:diagnosticMessage];
-    }
+            if ([count integerValue] > 0) {
+                [self changeConnectionStateTo:PsiphonConnectionStateConnected evenIfSameState:NO];
+            } else {
+                [self changeConnectionStateTo:PsiphonConnectionStateConnecting evenIfSameState:NO];
+            }
+        }
+        else if ([noticeType isEqualToString:@"Exiting"]) {
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onExiting)]) {
+                dispatch_async(self->callbackQueue, ^{
+                    [self.tunneledAppDelegate onExiting];
+                });
+            }
+        }
+        else if ([noticeType isEqualToString:@"AvailableEgressRegions"]) {
+            id regions = [notice valueForKeyPath:@"data.regions"];
+            if (![regions isKindOfClass:[NSArray class]]) {
+                [self logMessage:[NSString stringWithFormat: @"AvailableEgressRegions notice missing data.regions: %@", noticeJSON]];
+                return;
+            }
+
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onAvailableEgressRegions:)]) {
+                dispatch_async(self->callbackQueue, ^{
+                    [self.tunneledAppDelegate onAvailableEgressRegions:regions];
+                });
+            }
+        }
+        else if ([noticeType isEqualToString:@"SocksProxyPortInUse"]) {
+            id port = [notice valueForKeyPath:@"data.port"];
+            if (![port isKindOfClass:[NSNumber class]]) {
+                [self logMessage:[NSString stringWithFormat: @"SocksProxyPortInUse notice missing data.port: %@", noticeJSON]];
+                return;
+            }
+
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onSocksProxyPortInUse:)]) {
+                dispatch_async(self->callbackQueue, ^{
+                    [self.tunneledAppDelegate onSocksProxyPortInUse:[port integerValue]];
+                });
+            }
+        }
+        else if ([noticeType isEqualToString:@"HttpProxyPortInUse"]) {
+            id port = [notice valueForKeyPath:@"data.port"];
+            if (![port isKindOfClass:[NSNumber class]]) {
+                [self logMessage:[NSString stringWithFormat: @"HttpProxyPortInUse notice missing data.port: %@", noticeJSON]];
+                return;
+            }
+
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onHttpProxyPortInUse:)]) {
+                dispatch_async(self->callbackQueue, ^{
+                    [self.tunneledAppDelegate onHttpProxyPortInUse:[port integerValue]];
+                });
+            }
+        }
+        else if ([noticeType isEqualToString:@"ListeningSocksProxyPort"]) {
+            id port = [notice valueForKeyPath:@"data.port"];
+            if (![port isKindOfClass:[NSNumber class]]) {
+                [self logMessage:[NSString stringWithFormat: @"ListeningSocksProxyPort notice missing data.port: %@", noticeJSON]];
+                return;
+            }
+
+            NSInteger portInt = [port integerValue];
+
+            atomic_store(&self->localSocksProxyPort, portInt);
+
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningSocksProxyPort:)]) {
+                dispatch_async(self->callbackQueue, ^{
+                    [self.tunneledAppDelegate onListeningSocksProxyPort:portInt];
+                });
+            }
+        }
+        else if ([noticeType isEqualToString:@"ListeningHttpProxyPort"]) {
+            id port = [notice valueForKeyPath:@"data.port"];
+            if (![port isKindOfClass:[NSNumber class]]) {
+                [self logMessage:[NSString stringWithFormat: @"ListeningHttpProxyPort notice missing data.port: %@", noticeJSON]];
+                return;
+            }
+
+            NSInteger portInt = [port integerValue];
+
+            atomic_store(&self->localHttpProxyPort, portInt);
+
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningHttpProxyPort:)]) {
+                dispatch_async(self->callbackQueue, ^{
+                    [self.tunneledAppDelegate onListeningHttpProxyPort:portInt];
+                });
+            }
+        }
+        else if ([noticeType isEqualToString:@"UpstreamProxyError"]) {
+            id message = [notice valueForKeyPath:@"data.message"];
+            if (![message isKindOfClass:[NSString class]]) {
+                [self logMessage:[NSString stringWithFormat: @"UpstreamProxyError notice missing data.message: %@", noticeJSON]];
+                return;
+            }
+            
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onUpstreamProxyError:)]) {
+                dispatch_async(self->callbackQueue, ^{
+                    [self.tunneledAppDelegate onUpstreamProxyError:message];
+                });
+            }
+        }
+        else if ([noticeType isEqualToString:@"ClientUpgradeDownloaded"]) {
+            id filename = [notice valueForKeyPath:@"data.filename"];
+            if (![filename isKindOfClass:[NSString class]]) {
+                [self logMessage:[NSString stringWithFormat: @"ClientUpgradeDownloaded notice missing data.filename: %@", noticeJSON]];
+                return;
+            }
+            
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onClientUpgradeDownloaded:)]) {
+                dispatch_async(self->callbackQueue, ^{
+                    [self.tunneledAppDelegate onClientUpgradeDownloaded:filename];
+                });
+            }
+        }
+        else if ([noticeType isEqualToString:@"ClientIsLatestVersion"]) {
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onClientIsLatestVersion)]) {
+                dispatch_async(self->callbackQueue, ^{
+                    [self.tunneledAppDelegate onClientIsLatestVersion];
+                });
+            }
+        }
+        else if ([noticeType isEqualToString:@"Homepage"]) {
+            id url = [notice valueForKeyPath:@"data.url"];
+            if (![url isKindOfClass:[NSString class]]) {
+                [self logMessage:[NSString stringWithFormat: @"Homepage notice missing data.url: %@", noticeJSON]];
+                return;
+            }
+            
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onHomepage:)]) {
+                dispatch_async(self->callbackQueue, ^{
+                    [self.tunneledAppDelegate onHomepage:url];
+                });
+            }
+        }
+        else if ([noticeType isEqualToString:@"ClientRegion"]) {
+            id region = [notice valueForKeyPath:@"data.region"];
+            if (![region isKindOfClass:[NSString class]]) {
+                [self logMessage:[NSString stringWithFormat: @"ClientRegion notice missing data.region: %@", noticeJSON]];
+                return;
+            }
+            
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onClientRegion:)]) {
+                dispatch_async(self->callbackQueue, ^{
+                    [self.tunneledAppDelegate onClientRegion:region];
+                });
+            }
+        }
+        else if ([noticeType isEqualToString:@"SplitTunnelRegion"]) {
+            id region = [notice valueForKeyPath:@"data.region"];
+            if (![region isKindOfClass:[NSString class]]) {
+                [self logMessage:[NSString stringWithFormat: @"SplitTunnelRegion notice missing data.region: %@", noticeJSON]];
+                return;
+            }
+            
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onSplitTunnelRegion:)]) {
+                dispatch_async(self->callbackQueue, ^{
+                    [self.tunneledAppDelegate onSplitTunnelRegion:region];
+                });
+            }
+        }
+        else if ([noticeType isEqualToString:@"Untunneled"]) {
+            id address = [notice valueForKeyPath:@"data.address"];
+            if (![address isKindOfClass:[NSString class]]) {
+                [self logMessage:[NSString stringWithFormat: @"Untunneled notice missing data.address: %@", noticeJSON]];
+                return;
+            }
+            
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onUntunneledAddress:)]) {
+                dispatch_async(self->callbackQueue, ^{
+                    [self.tunneledAppDelegate onUntunneledAddress:address];
+                });
+            }
+        }
+        else if ([noticeType isEqualToString:@"BytesTransferred"]) {
+            diagnostic = FALSE;
+            
+            id sent = [notice valueForKeyPath:@"data.sent"];
+            id received = [notice valueForKeyPath:@"data.received"];
+            if (![sent isKindOfClass:[NSNumber class]] || ![received isKindOfClass:[NSNumber class]]) {
+                [self logMessage:[NSString stringWithFormat: @"BytesTransferred notice missing data.sent or data.received: %@", noticeJSON]];
+                return;
+            }
+            
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(onBytesTransferred::)]) {
+                dispatch_async(self->callbackQueue, ^{
+                    [self.tunneledAppDelegate onBytesTransferred:[sent longLongValue]:[received longLongValue]];
+                });
+            }
+        }
+        
+        // Pass diagnostic messages to onDiagnosticMessage.
+        if (diagnostic) {
+            NSDictionary *data = notice[@"data"];
+            if (data == nil) {
+                return;
+            }
+            
+            NSString *dataStr = [[[SBJson4Writer alloc] init] stringWithObject:data];
+
+            NSString *diagnosticMessage = [NSString stringWithFormat:@"%@: %@", noticeType, dataStr];
+            [self logMessage:diagnosticMessage];
+        }
+    });
 }
 
 
 #pragma mark - GoPsiPsiphonProvider protocol implementation (private)
 
 - (BOOL)bindToDevice:(long)fileDescriptor error:(NSError **)error {
-    if (!tunnelWholeDevice) {
+    if (!self->tunnelWholeDevice) {
         return FALSE;
     }
     
@@ -780,7 +832,7 @@
 }
 
 - (long)hasNetworkConnectivity {
-    BOOL hasConnectivity = [reachability currentReachabilityStatus] != NotReachable;
+    BOOL hasConnectivity = [self->reachability currentReachabilityStatus] != NotReachable;
 
     if (!hasConnectivity) {
         // changeConnectionStateTo self-throttles, so even if called multiple
@@ -811,18 +863,22 @@
 
 - (void)logMessage:(NSString *)message {
     if ([self.tunneledAppDelegate respondsToSelector:@selector(onDiagnosticMessage:)]) {
-        [self.tunneledAppDelegate onDiagnosticMessage:message];
+        dispatch_async(self->callbackQueue, ^{
+            [self.tunneledAppDelegate onDiagnosticMessage:message];
+        });
     }
 }
 
 - (void)changeConnectionStateTo:(PsiphonConnectionState)newState evenIfSameState:(BOOL)forceNotification {
     // Store the new state and get the old state.
-    PsiphonConnectionState oldState = atomic_exchange(&connectionState, newState);
+    PsiphonConnectionState oldState = atomic_exchange(&self->connectionState, newState);
 
     // If the state has changed, inform the app.
     if (forceNotification || oldState != newState) {
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onConnectionStateChangedFrom:to:)]) {
-            [self.tunneledAppDelegate onConnectionStateChangedFrom:oldState to:newState];
+            dispatch_async(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onConnectionStateChangedFrom:oldState to:newState];
+            });
         }
 
         if (newState == PsiphonConnectionStateDisconnected) {
@@ -830,15 +886,21 @@
         }
         else if (newState == PsiphonConnectionStateConnecting &&
                  [self.tunneledAppDelegate respondsToSelector:@selector(onConnecting)]) {
-            [self.tunneledAppDelegate onConnecting];
+            dispatch_async(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onConnecting];
+            });
         }
         else if (newState == PsiphonConnectionStateConnected &&
                  [self.tunneledAppDelegate respondsToSelector:@selector(onConnected)]) {
-            [self.tunneledAppDelegate onConnected];
+            dispatch_async(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onConnected];
+            });
         }
         else if (newState == PsiphonConnectionStateWaitingForNetwork &&
                  [self.tunneledAppDelegate respondsToSelector:@selector(onStartedWaitingForNetworkConnectivity)]) {
-            [self.tunneledAppDelegate onStartedWaitingForNetworkConnectivity];
+            dispatch_async(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onStartedWaitingForNetworkConnectivity];
+            });
         }
     }
 }
@@ -890,14 +952,14 @@
 // time for the tunnel to notice the network is gone (depending on attempts to
 // use the tunnel).
 - (void)startInternetReachabilityMonitoring {
-    previousNetworkStatus = [reachability currentReachabilityStatus];
+    self->previousNetworkStatus = [self->reachability currentReachabilityStatus];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(internetReachabilityChanged:) name:kReachabilityChangedNotification object:nil];
-    [reachability startNotifier];
+    [self->reachability startNotifier];
 }
 
 - (void)stopInternetReachabilityMonitoring {
-    [reachability stopNotifier];
+    [self->reachability stopNotifier];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:kReachabilityChangedNotification object:nil];
 }
 
@@ -913,14 +975,16 @@
     PsiphonConnectionState currentConnectionState = [self getConnectionState];
 
     if (currentConnectionState == PsiphonConnectionStateConnected &&
-        previousNetworkStatus != NotReachable &&
-        previousNetworkStatus != networkStatus) {
+        self->previousNetworkStatus != NotReachable &&
+        self->previousNetworkStatus != networkStatus) {
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onDeviceInternetConnectivityInterrupted)]) {
-            [self.tunneledAppDelegate onDeviceInternetConnectivityInterrupted];
+            dispatch_async(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onDeviceInternetConnectivityInterrupted];
+            });
         }
     }
 
-    previousNetworkStatus = networkStatus;
+    self->previousNetworkStatus = networkStatus;
 }
 
 /*!

@@ -59,6 +59,8 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  @protocol TunneledAppDelegate
  Used to communicate with the application that is using the PsiphonTunnel framework,
  and retrieve config info from it.
+
+ All delegate methods will be called on a single serial dispatch queue. They will be made asynchronously unless otherwise noted (specifically when calling getPsiphonConfig and getEmbeddedServerEntries).
  */
 @protocol TunneledAppDelegate <NSObject>
 
