@@ -237,14 +237,17 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 		}
 	}
 
+	// Note: reported bytes transferred can exceed expected bytes
+	// transferred due to resent packets.
+
 	upstreamBytesTransferred, downstreamBytesTransferred, _ := counter.Get()
 	expectedBytesTransferred := CONCURRENT_CLIENT_COUNT * TCP_RELAY_TOTAL_SIZE
-	if upstreamBytesTransferred != expectedBytesTransferred {
-		t.Fatalf("unexpected upstreamBytesTransferred: %d: %d",
+	if upstreamBytesTransferred < expectedBytesTransferred {
+		t.Fatalf("unexpected upstreamBytesTransferred: %d; expected at least %d",
 			upstreamBytesTransferred, expectedBytesTransferred)
 	}
-	if downstreamBytesTransferred != expectedBytesTransferred {
-		t.Fatalf("unexpected downstreamBytesTransferred: %d: %d",
+	if downstreamBytesTransferred < expectedBytesTransferred {
+		t.Fatalf("unexpected downstreamBytesTransferred: %d; expected at least %d",
 			downstreamBytesTransferred, expectedBytesTransferred)
 	}
 

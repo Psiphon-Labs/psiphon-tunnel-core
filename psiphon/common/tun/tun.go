@@ -1110,6 +1110,13 @@ func (session *session) isTrackingFlow(ID flowID) bool {
 // TLS payload. The session's FlowActivityUpdaterMaker is invoked
 // to determine a list of updaters to track flow activity.
 //
+// Updaters receive reports with the number of application data
+// bytes in each flow packet. This number, totalled for all packets
+// in a flow, may exceed the total bytes transferred at the
+// application level due to TCP retransmission. Currently, the flow
+// tracking logic doesn't exclude retransmitted packets from update
+// reporting.
+//
 // Flows are untracked after an idle expiry period. Transport
 // protocol indicators of end of flow, such as FIN or RST for TCP,
 // which may or may not appear in a flow, are not currently used.
