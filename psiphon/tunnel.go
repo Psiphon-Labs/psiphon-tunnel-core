@@ -316,7 +316,6 @@ func (tunnel *Tunnel) DialPacketTunnelChannel() (net.Conn, error) {
 	channel, requests, err := tunnel.sshClient.OpenChannel(
 		protocol.PACKET_TUNNEL_CHANNEL_TYPE, nil)
 	if err != nil {
-
 		// TODO: conditional on type of error or error message?
 		select {
 		case tunnel.signalPortForwardFailure <- *new(struct{}):

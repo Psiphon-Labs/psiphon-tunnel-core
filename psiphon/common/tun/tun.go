@@ -289,8 +289,12 @@ func (server *Server) Start() {
 
 	// TODO: this is a hack workaround for deviceIO.Read()
 	// not getting interrupted by deviceIO.Close(), and, as a
-	// result, runDeviceDownstream no terminating. This
-	// workaround breaks synchronized shutdown.
+	// result, runDeviceDownstream not terminating.
+	//
+	// This workaround breaks synchronized shutdown and leaves
+	// behind a hung goroutine which holds references to various
+	// objects; it's only suitable when Server.Stop() is
+	// followed by termination of the process.
 	//
 	//server.workers.Add(1)
 	go server.runDeviceDownstream()
@@ -1362,7 +1366,10 @@ func (client *Client) Start() {
 
 	client.config.Logger.WithContext().Info("starting")
 
-	client.workers.Add(1)
+	// TODO: this is a hack workaround for the same issue
+	// documented in Server.Start().
+	//
+	//client.workers.Add(1)
 	go func() {
 		defer client.workers.Done()
 		for {
