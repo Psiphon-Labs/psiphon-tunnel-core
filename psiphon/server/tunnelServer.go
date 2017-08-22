@@ -39,6 +39,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
 const (
@@ -1322,11 +1323,23 @@ func (sshClient *sshClient) runTunnel(
 				return sshClient.isPortForwardPermitted(portForwardTypeUDP, false, upstreamIPAddress, port)
 			}
 
+			flowActivityUpdaterMaker := func(
+				upstreamHostname string, upstreamIPAddress net.IP) []tun.FlowActivityUpdater {
+
+				var updaters []tun.FlowActivityUpdater
+				oslUpdater := sshClient.newClientSeedPortForward(upstreamIPAddress)
+				if oslUpdater != nil {
+					updaters = append(updaters, oslUpdater)
+				}
+				return updaters
+			}
+
 			sshClient.sshServer.support.PacketTunnelServer.ClientConnected(
 				sshClient.sessionID,
 				packetTunnelChannel,
 				checkAllowedTCPPortFunc,
-				checkAllowedUDPPortFunc)
+				checkAllowedUDPPortFunc,
+				flowActivityUpdaterMaker)
 		}
 
 		if newChannel.ChannelType() != "direct-tcpip" {
