@@ -238,7 +238,7 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 	}
 
 	// Note: reported bytes transferred can exceed expected bytes
-	// transferred due to resent packets.
+	// transferred due to retransmission of packets.
 
 	upstreamBytesTransferred, downstreamBytesTransferred, _ := counter.Get()
 	expectedBytesTransferred := CONCURRENT_CLIENT_COUNT * TCP_RELAY_TOTAL_SIZE
