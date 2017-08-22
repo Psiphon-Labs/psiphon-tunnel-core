@@ -629,7 +629,9 @@ func (server *Server) runOrphanMetricsCheckpointer() {
 
 func (server *Server) runDeviceDownstream() {
 
-	defer server.workers.Done()
+	// TODO: this is a hack workaround for the issue documented in
+	// Server.Start().
+	//defer server.workers.Done()
 
 	// Read incoming packets from the tun device, parse and validate the
 	// packets, map them to a session/client, perform rewriting, and relay
@@ -1561,7 +1563,7 @@ func (client *Client) Start() {
 	//
 	//client.workers.Add(1)
 	go func() {
-		defer client.workers.Done()
+		//defer client.workers.Done()
 		for {
 			readPacket, err := client.device.ReadPacket()
 
