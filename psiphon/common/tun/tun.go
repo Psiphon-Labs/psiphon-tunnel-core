@@ -17,6 +17,10 @@
  *
  */
 
+// Copyright 2009 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 /*
 
 Package tun is an IP packet tunnel server and client. It supports tunneling
@@ -982,11 +986,40 @@ type session struct {
 // flowID identifies an IP traffic flow using the conventional
 // network 5-tuple. flowIDs track bidirectional flows.
 type flowID struct {
-	downstreamIPAddress net.IP
+	downstreamIPAddress [net.IPv6len]byte
 	downstreamPort      uint16
-	upstreamIPAddress   net.IP
+	upstreamIPAddress   [net.IPv6len]byte
 	upstreamPort        uint16
 	protocol            internetProtocol
+}
+
+// From: https://github.com/golang/go/blob/b88efc7e7ac15f9e0b5d8d9c82f870294f6a3839/src/net/ip.go#L55
+var v4InV6Prefix = []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff}
+
+func (f *flowID) set(
+	downstreamIPAddress net.IP,
+	downstreamPort uint16,
+	upstreamIPAddress net.IP,
+	upstreamPort uint16,
+	protocol internetProtocol) {
+
+	if len(downstreamIPAddress) == net.IPv4len {
+		copy(f.downstreamIPAddress[:], v4InV6Prefix)
+		copy(f.downstreamIPAddress[len(v4InV6Prefix):], downstreamIPAddress)
+	} else { // net.IPv6len
+		copy(f.downstreamIPAddress[:], downstreamIPAddress)
+	}
+	f.downstreamPort = downstreamPort
+
+	if len(upstreamIPAddress) == net.IPv4len {
+		copy(f.upstreamIPAddress[:], v4InV6Prefix)
+		copy(f.upstreamIPAddress[len(v4InV6Prefix):], upstreamIPAddress)
+	} else { // net.IPv6len
+		copy(f.upstreamIPAddress[:], upstreamIPAddress)
+	}
+	f.upstreamPort = upstreamPort
+
+	f.protocol = protocol
 }
 
 type flowState struct {
@@ -1101,7 +1134,9 @@ func (session *session) startTrackingFlow(
 	}
 
 	flowState := &flowState{
-		activityUpdaters: session.flowActivityUpdaterMaker(hostname, ID.upstreamIPAddress),
+		activityUpdaters: session.flowActivityUpdaterMaker(
+			hostname,
+			net.IP(ID.upstreamIPAddress[:])),
 	}
 
 	if direction == packetDirectionServerUpstream {
@@ -2083,30 +2118,22 @@ func processPacket(
 	doFlowTracking := !doTransparentDNS && isServer
 
 	// TODO: verify this struct is stack allocated
-	var flowID flowID
+	var ID flowID
 
 	isTrackingFlow := false
 
 	if doFlowTracking {
 
-		flowID.protocol = protocol
-
 		if direction == packetDirectionServerUpstream {
-
-			flowID.upstreamIPAddress = destinationIPAddress
-			flowID.upstreamPort = destinationPort
-			flowID.downstreamIPAddress = sourceIPAddress
-			flowID.downstreamPort = sourcePort
+			ID.set(
+				destinationIPAddress, destinationPort, sourceIPAddress, sourcePort, protocol)
 
 		} else if direction == packetDirectionServerDownstream {
-
-			flowID.upstreamIPAddress = sourceIPAddress
-			flowID.upstreamPort = sourcePort
-			flowID.downstreamIPAddress = destinationIPAddress
-			flowID.downstreamPort = destinationPort
+			ID.set(
+				sourceIPAddress, sourcePort, destinationIPAddress, destinationPort, protocol)
 		}
 
-		isTrackingFlow = session.isTrackingFlow(flowID)
+		isTrackingFlow = session.isTrackingFlow(ID)
 	}
 
 	// Check packet source/destination is permitted; except for:
@@ -2132,7 +2159,8 @@ func processPacket(
 		if protocol == internetProtocolTCP {
 
 			if checkPort == 0 ||
-				(isServer && !session.checkAllowedTCPPortFunc(flowID.upstreamIPAddress, checkPort)) {
+				(isServer &&
+					!session.checkAllowedTCPPortFunc(net.IP(ID.upstreamIPAddress[:]), checkPort)) {
 
 				metrics.rejectedPacket(direction, packetRejectTCPPort)
 				return false
@@ -2141,7 +2169,8 @@ func processPacket(
 		} else if protocol == internetProtocolUDP {
 
 			if checkPort == 0 ||
-				(isServer && !session.checkAllowedUDPPortFunc(flowID.upstreamIPAddress, checkPort)) {
+				(isServer &&
+					!session.checkAllowedUDPPortFunc(net.IP(ID.upstreamIPAddress[:]), checkPort)) {
 
 				metrics.rejectedPacket(direction, packetRejectUDPPort)
 				return false
@@ -2259,9 +2288,9 @@ func processPacket(
 
 	if doFlowTracking {
 		if !isTrackingFlow {
-			session.startTrackingFlow(flowID, direction, applicationData)
+			session.startTrackingFlow(ID, direction, applicationData)
 		} else {
-			session.updateFlow(flowID, direction, applicationData)
+			session.updateFlow(ID, direction, applicationData)
 		}
 	}
 
