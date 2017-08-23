@@ -118,9 +118,12 @@
         __block NSString *embeddedServerEntriesPath = nil;
         __block NSString *embeddedServerEntries = nil;
         
-        dispatch_sync(self->callbackQueue, ^{
-            embeddedServerEntriesPath = [self.tunneledAppDelegate getEmbeddedServerEntriesPath];
-        });
+        // getEmbeddedServerEntriesPath is optional in the protocol
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(getEmbeddedServerEntriesPath)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                embeddedServerEntriesPath = [self.tunneledAppDelegate getEmbeddedServerEntriesPath];
+            });
+        }
         
         // If getEmbeddedServerEntriesPath returns nil or empty string,
         // call getEmbeddedServerEntries

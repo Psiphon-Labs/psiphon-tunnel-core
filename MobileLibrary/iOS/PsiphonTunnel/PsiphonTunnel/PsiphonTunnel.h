@@ -119,21 +119,24 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 
 /*!
  Called when the tunnel is starting to get the initial server entries (typically embedded in the app) that will be used to bootstrap the Psiphon tunnel connection. This value is in a particular format and will be supplied by Psiphon Inc.
+ If getEmbeddedServerEntriesPath is also implemented, it will take precedence over this method, unless getEmbeddedServerEntriesPath returns NULL or an empty string.
  @return  Pre-existing server entries to use when attempting to connect to a server. Must return an empty string if there are no embedded server entries. Must return NULL if there is an error and the tunnel starting should abort.
  */
 - (NSString * _Nullable)getEmbeddedServerEntries;
 
-/*!
-  Called when the tunnel is starting to get the initial server entries (typically embedded in the app) that will be used to bootstrap the Psiphon tunnel connection. This value is in a particular format and will be supplied by Psiphon Inc. 
-  @return File path where embedded server entries file is located. This file should be accessible by the Network Extension.
- */
-- (NSString * _Nullable)getEmbeddedServerEntriesPath;
 
 //
 // Optional delegate methods. Note that some of these are probably necessary for
 // for a functioning app to implement, for example `onConnected`.
 //
 @optional
+
+/*!
+  Called when the tunnel is starting to get the initial server entries (typically embedded in the app) that will be used to bootstrap the Psiphon tunnel connection. This value is in a particular format and will be supplied by Psiphon Inc.
+  If this method is implemented, it takes precedence over getEmbeddedServerEntries, and getEmbeddedServerEntries will not be called unless this method returns NULL or an empty string.
+  @return Optional path where embedded server entries file is located. This file should be accessible by the Network Extension.
+ */
+- (NSString * _Nullable)getEmbeddedServerEntriesPath;
 
 /*!
  Gets runtime errors info that may be useful for debugging.
