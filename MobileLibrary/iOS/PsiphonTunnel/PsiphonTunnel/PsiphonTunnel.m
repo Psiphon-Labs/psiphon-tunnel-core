@@ -115,14 +115,25 @@
             return FALSE;
         }
 
+        __block NSString *embeddedServerEntriesPath = nil;
         __block NSString *embeddedServerEntries = nil;
+        
         dispatch_sync(self->callbackQueue, ^{
-            embeddedServerEntries = [self.tunneledAppDelegate getEmbeddedServerEntries];
+            embeddedServerEntriesPath = [self.tunneledAppDelegate getEmbeddedServerEntriesPath];
         });
-
-        if (embeddedServerEntries == nil) {
-            [self logMessage:@"Error getting embedded server entries from delegate"];
-            return FALSE;
+        
+        // If getEmbeddedServerEntriesPath returns nil or empty string,
+        // call getEmbeddedServerEntries
+        if (embeddedServerEntriesPath == nil || [embeddedServerEntriesPath length] == 0) {
+            
+            dispatch_sync(self->callbackQueue, ^{
+                embeddedServerEntries = [self.tunneledAppDelegate getEmbeddedServerEntries];
+            });
+            
+            if (embeddedServerEntries == nil) {
+                [self logMessage:@"Error getting embedded server entries from delegate"];
+                return FALSE;
+            }
         }
 
         [self changeConnectionStateTo:PsiphonConnectionStateConnecting evenIfSameState:NO];
@@ -133,6 +144,7 @@
             BOOL res = GoPsiStart(
                            configStr,
                            embeddedServerEntries,
+                           embeddedServerEntriesPath,
                            self,
                            self->tunnelWholeDevice, // useDeviceBinder
                            useIPv6Synthesizer,

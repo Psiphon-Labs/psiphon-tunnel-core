@@ -30,6 +30,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"io"
 
 	"github.com/Psiphon-Inc/bolt"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -264,6 +265,25 @@ func StoreServerEntries(serverEntries []*protocol.ServerEntry, replaceIfExists b
 	// Since there has possibly been a significant change in the server entries,
 	// take this opportunity to update the available egress regions.
 	ReportAvailableRegions()
+
+	return nil
+}
+
+// Wrapper around StreamingStoreServerEntries
+// an io.Reader is passed instead of an instance of StreamingServerEntryDecoder
+func StreamingStoreServerEntriesWithIOReader(serverListReader io.Reader, serverEntrySource string) error {
+
+	serverEntries := protocol.NewStreamingServerEntryDecoder(
+		serverListReader,
+		common.GetCurrentTimestamp(),
+		serverEntrySource)
+
+	// TODO: record stats for newly discovered servers
+
+	err := StreamingStoreServerEntries(serverEntries, true)
+	if err != nil {
+		return common.ContextError(err)
+	}
 
 	return nil
 }
