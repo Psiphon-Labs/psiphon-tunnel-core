@@ -114,7 +114,7 @@ func outputNotice(noticeType string, noticeFlags uint32, args ...interface{}) {
 		output = string(encodedJson)
 	} else {
 		// Try to emit a properly formatted Alert notice that the outer client can
-		// report. One scenario where this is useful is if the preceeding Marshal
+		// report. One scenario where this is useful is if the preceding Marshal
 		// fails due to bad data in the args. This has happened for a json.RawMessage
 		// field.
 		obj := make(map[string]interface{})
@@ -247,12 +247,12 @@ func NoticeListeningSocksProxyPort(port int) {
 	outputNotice("ListeningSocksProxyPort", 0, "port", port)
 }
 
-// NoticeSocksProxyPortInUse is a failure to use the configured LocalHttpProxyPort
+// NoticeHttpProxyPortInUse is a failure to use the configured LocalHttpProxyPort
 func NoticeHttpProxyPortInUse(port int) {
 	outputNotice("HttpProxyPortInUse", noticeShowUser, "port", port)
 }
 
-// NoticeListeningSocksProxyPort is the selected port for the listening local HTTP proxy
+// NoticeListeningHttpProxyPort is the selected port for the listening local HTTP proxy
 func NoticeListeningHttpProxyPort(port int) {
 	outputNotice("ListeningHttpProxyPort", 0, "port", port)
 }

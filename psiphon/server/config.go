@@ -75,7 +75,7 @@ type Config struct {
 	// MaxMind database files. When empty, no GeoIP lookups are
 	// performed. Each file is queried, in order, for the
 	// logged fields: country code, city, and ISP. Multiple
-	// file support accomodates the MaxMind distribution where
+	// file support accommodates the MaxMind distribution where
 	// ISP data in a separate file.
 	GeoIPDatabaseFilenames []string
 
@@ -195,7 +195,7 @@ type Config struct {
 	// MeekCachedResponsePoolBufferSize is the size of a fixed-size,
 	// shared buffer used to temporarily extend a private buffer when
 	// MeekCachedResponseBufferSize is insufficient. Shared buffers
-	// allow some clients to sucessfully retry longer response payloads
+	// allow some clients to successfully retry longer response payloads
 	// without allocating large buffers for all clients.
 	// A default of 64K is used when MeekCachedResponsePoolBufferSize
 	// is 0.
@@ -324,7 +324,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		}
 	}
 
-	for tunnelProtocol, _ := range config.TunnelProtocolPorts {
+	for tunnelProtocol := range config.TunnelProtocolPorts {
 		if !common.Contains(protocol.SupportedTunnelProtocols, tunnelProtocol) {
 			return nil, fmt.Errorf("Unsupported tunnel protocol: %s", tunnelProtocol)
 		}
@@ -613,7 +613,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		capabilities = append(capabilities, protocol.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS)
 	}
 
-	for tunnelProtocol, _ := range params.TunnelProtocolPorts {
+	for tunnelProtocol := range params.TunnelProtocolPorts {
 		capabilities = append(capabilities, protocol.GetCapability(tunnelProtocol))
 	}
 

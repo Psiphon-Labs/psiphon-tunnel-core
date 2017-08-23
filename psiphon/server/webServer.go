@@ -247,7 +247,7 @@ func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// The legacy response format is newline seperated, name prefixed values.
+	// The legacy response format is newline separated, name prefixed values.
 	// Within that legacy format, the modern JSON response (containing all the
 	// legacy response values and more) is single value with a "Config:" prefix.
 	// This response uses the legacy format but omits all but the JSON value.

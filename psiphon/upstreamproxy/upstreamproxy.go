@@ -48,8 +48,8 @@ type UpstreamProxyConfig struct {
 	CustomHeaders   http.Header
 }
 
-// UpstreamProxyConfig implements proxy.Dialer interface
-// so we can pass it to proxy.FromURL
+// Dial implements the proxy.Dialer interface, allowing a UpstreamProxyConfig
+// to be passed to proxy.FromURL.
 func (u *UpstreamProxyConfig) Dial(network, addr string) (net.Conn, error) {
 	return u.ForwardDialFunc(network, addr)
 }

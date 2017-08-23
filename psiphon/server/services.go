@@ -17,7 +17,7 @@
  *
  */
 
-// Package psiphon/server implements the core tunnel functionality of a Psiphon server.
+// Package server implements the core tunnel functionality of a Psiphon server.
 // The main function is RunServices, which runs one or all of a Psiphon API web server,
 // a tunneling SSH server, and an Obfuscated SSH protocol server. The server configuration
 // is created by the GenerateConfig function.

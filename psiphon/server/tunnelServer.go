@@ -214,7 +214,7 @@ func (server *TunnelServer) ResetAllClientOSLConfigs() {
 }
 
 // SetClientHandshakeState sets the handshake state -- that it completed and
-// what paramaters were passed -- in sshClient. This state is used for allowing
+// what parameters were passed -- in sshClient. This state is used for allowing
 // port forwards and for future traffic rule selection. SetClientHandshakeState
 // also triggers an immediate traffic rule re-selection, as the rules selected
 // upon tunnel establishment may no longer apply now that handshake values are
@@ -333,7 +333,7 @@ func (sshServer *sshServer) runListener(
 	listenerTunnelProtocol string) {
 
 	runningProtocols := make([]string, 0)
-	for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
+	for tunnelProtocol := range sshServer.support.Config.TunnelProtocolPorts {
 		runningProtocols = append(runningProtocols, tunnelProtocol)
 	}
 
@@ -460,7 +460,7 @@ func (sshServer *sshServer) registerEstablishedClient(client *sshClient) bool {
 
 	// In the case of a duplicate client sessionID, the previous client is closed.
 	// - Well-behaved clients generate pick a random sessionID that should be
-	//   unique (won't accidentally conflict) and hard to guess (can't be targetted
+	//   unique (won't accidentally conflict) and hard to guess (can't be targeted
 	//   by a malicious client).
 	// - Clients reuse the same sessionID when a tunnel is unexpectedly disconnected
 	//   and resestablished. In this case, when the same server is selected, this logic
@@ -531,7 +531,7 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 	zeroProtocolStats := func() map[string]map[string]int64 {
 		stats := make(map[string]map[string]int64)
 		stats["ALL"] = zeroStats()
-		for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
+		for tunnelProtocol := range sshServer.support.Config.TunnelProtocolPorts {
 			stats[tunnelProtocol] = zeroStats()
 		}
 		return stats
@@ -981,7 +981,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 		// but that's no longer supported.
 		if len(password) == expectedSessionIDLength+expectedSSHPasswordLength {
 			sshPasswordPayload.SessionId = string(password[0:expectedSessionIDLength])
-			sshPasswordPayload.SshPassword = string(password[expectedSSHPasswordLength:len(password)])
+			sshPasswordPayload.SshPassword = string(password[expectedSSHPasswordLength:])
 		} else {
 			return nil, common.ContextError(fmt.Errorf("invalid password payload for %q", conn.User()))
 		}
@@ -1036,7 +1036,7 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 		// Note: here we previously logged messages for fail2ban to act on. This is no longer
 		// done as the complexity outweighs the benefits.
 		//
-		// - The SSH credential is not secret -- it's in the server entry. Attackers targetting
+		// - The SSH credential is not secret -- it's in the server entry. Attackers targeting
 		//   the server likely already have the credential. On the other hand, random scanning and
 		//   brute forcing is mitigated with high entropy random passwords, rate limiting
 		//   (implemented on the host via iptables), and limited capabilities (the SSH session can
@@ -1050,7 +1050,7 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 		//
 		// Random scanning and brute forcing of port 22 will result in log noise. To mitigate this,
 		// not every authentication failure is logged. A summary log is emitted periodically to
-		// retain some record of this activity in case this is relevent to, e.g., a performance
+		// retain some record of this activity in case this is relevant to, e.g., a performance
 		// investigation.
 
 		atomic.AddInt64(&sshClient.sshServer.authFailedCount, 1)
@@ -2059,7 +2059,7 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	// Dial the remote address.
 	//
-	// Hostname resolution is performed explicitly, as a seperate step, as the target IP
+	// Hostname resolution is performed explicitly, as a separate step, as the target IP
 	// address is used for traffic rules (AllowSubnets) and OSL seed progress.
 	//
 	// Contexts are used for cancellation (via sshClient.runContext, which is cancelled

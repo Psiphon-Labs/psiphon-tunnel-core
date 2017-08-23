@@ -59,6 +59,8 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  @protocol TunneledAppDelegate
  Used to communicate with the application that is using the PsiphonTunnel framework,
  and retrieve config info from it.
+
+ All delegate methods will be called on a single serial dispatch queue. They will be made asynchronously unless otherwise noted (specifically when calling getPsiphonConfig and getEmbeddedServerEntries).
  */
 @protocol TunneledAppDelegate <NSObject>
 
@@ -89,10 +91,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  - `EmitDiagnosticNotices`
  - `EgressRegion`
  - `EstablishTunnelTimeoutSeconds`
- - Should only be set if the Psiphon library is handling upgrade downloading (which it usually is _not_):
-   - `UpgradeDownloadURLs`
-   - `UpgradeDownloadClientVersionHeader`
-   - `UpgradeDownloadFilename`: Will be set to a sane default if not supplied.
  - Only set if disabling timeouts (for very slow network connections):
    - `TunnelConnectTimeoutSeconds`
    - `TunnelPortForwardDialTimeoutSeconds`
@@ -272,21 +270,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  Swift: @code func onHomepage(_ url: String) @endcode
  */
 - (void)onHomepage:(NSString * _Nonnull)url;
-
-/*!
- Called if the current version of the client is the latest (i.e., there is no upgrade available).
- Note: This is probably only applicable to Psiphon Inc.'s apps.
- Swift: @code func onClientIsLatestVersion() @endcode
- */
-- (void)onClientIsLatestVersion;
-
-/*!
- Called when a client upgrade has been downloaded.
- @param filename  The name of the file containing the upgrade.
- Note: This is probably only applicable to Psiphon Inc.'s apps.
- Swift: @code func onClientUpgradeDownloaded(_ filename: String) @endcode
- */
-- (void)onClientUpgradeDownloaded:(NSString * _Nonnull)filename;
 
 @end
 

@@ -501,7 +501,7 @@ func (controller *Controller) startOrSignalConnectedReporter() {
 	}
 }
 
-// upgradeDownloader makes periodic attemps to complete a client upgrade
+// upgradeDownloader makes periodic attempts to complete a client upgrade
 // download. DownloadUpgrade() is resumable, so each attempt has potential for
 // getting closer to completion, even in conditions where the download or
 // tunnel is repeatedly interrupted.
@@ -970,7 +970,7 @@ func (controller *Controller) setClientVerificationPayloadForActiveTunnels(
 
 // Dial selects an active tunnel and establishes a port forward
 // connection through the selected tunnel. Failure to connect is considered
-// a port foward failure, for the purpose of monitoring tunnel health.
+// a port forward failure, for the purpose of monitoring tunnel health.
 func (controller *Controller) Dial(
 	remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error) {
 

@@ -679,7 +679,7 @@ func makeTunneledNTPRequestAttempt(
 		udpgwPreambleSize := 11 // see writeUdpgwPreamble
 		buffer := make([]byte, udpgwProtocolMaxMessageSize)
 		packetSize, clientAddr, err := serverUDPConn.ReadFromUDP(
-			buffer[udpgwPreambleSize:len(buffer)])
+			buffer[udpgwPreambleSize:])
 		if err != nil {
 			t.Logf("serverUDPConn.Read for %s failed: %s", destination, err)
 			return

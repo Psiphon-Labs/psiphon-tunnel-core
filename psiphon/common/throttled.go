@@ -90,7 +90,7 @@ func NewThrottledConn(conn net.Conn, limits RateLimits) *ThrottledConn {
 // other goroutines are calling Read/Write. This function
 // will not block, and the new rate limits will be
 // applied within Read/Write, but not necessarily until
-// some futher I/O at previous rates.
+// some further I/O at previous rates.
 func (conn *ThrottledConn) SetLimits(limits RateLimits) {
 
 	// Using atomic instead of mutex to avoid blocking

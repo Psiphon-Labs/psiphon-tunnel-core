@@ -51,7 +51,7 @@ var gomobileVersion string
 // Dependencies should be listed as a JSON object like the following (no spaces) {"github.com/Psiphon-Labs/psiphon-tunnel-core":"abcdef","...":"..."}
 var dependencies string
 
-// Capture relevant build information here for use in clients or servers
+// BuildInfo captures relevant build information here for use in clients or servers
 type BuildInfo struct {
 	BuildDate       string          `json:"buildDate"`
 	BuildRepo       string          `json:"buildRepo"`
@@ -61,7 +61,7 @@ type BuildInfo struct {
 	Dependencies    json.RawMessage `json:"dependencies"`
 }
 
-// Convert 'BuildInfo' struct to 'map[string]interface{}'
+// ToMap converts 'BuildInfo' struct to 'map[string]interface{}'
 func (bi *BuildInfo) ToMap() *map[string]interface{} {
 
 	var dependenciesMap map[string]interface{}
@@ -78,7 +78,7 @@ func (bi *BuildInfo) ToMap() *map[string]interface{} {
 	return &buildInfoMap
 }
 
-// Return an instance of the BuildInfo struct
+// GetBuildInfo returns an instance of the BuildInfo struct
 func GetBuildInfo() *BuildInfo {
 	if strings.TrimSpace(dependencies) == "" {
 		dependencies = "{}"

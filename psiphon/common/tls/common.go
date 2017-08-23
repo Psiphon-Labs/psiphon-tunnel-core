@@ -525,7 +525,7 @@ type Config struct {
 	// EmulateChrome enables a network traffic obfuscation facility that
 	// configures the client hello to match the traffic signature of modern
 	// Chrome browsers using BoringSSL. This affects the selection and
-	// preference order of ciphersuites, and selection and order of extentions.
+	// preference order of ciphersuites, and selection and order of extensions.
 	// CipherSuites is ignored when EmulateChrome is on.
 	EmulateChrome bool
 
