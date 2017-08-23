@@ -32,6 +32,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
+	"os"
 )
 
 type PsiphonProvider interface {
@@ -49,7 +50,8 @@ var shutdownBroadcast chan struct{}
 var controllerWaitGroup *sync.WaitGroup
 
 func Start(
-	configJson, embeddedServerEntryList string,
+	configJson, embeddedServerEntryList,
+	embeddedServerEntryListPath string,
 	provider PsiphonProvider,
 	useDeviceBinder bool, useIPv6Synthesizer bool) error {
 
@@ -89,16 +91,10 @@ func Start(
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
-	serverEntries, err := protocol.DecodeServerEntryList(
-		embeddedServerEntryList,
-		common.GetCurrentTimestamp(),
-		protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
+	// Stores list of server entries.
+	err = storeServerEntries(embeddedServerEntryListPath, embeddedServerEntryList)
 	if err != nil {
-		return fmt.Errorf("error decoding embedded server entry list: %s", err)
-	}
-	err = psiphon.StoreServerEntries(serverEntries, false)
-	if err != nil {
-		return fmt.Errorf("error storing embedded server entry list: %s", err)
+		return err
 	}
 
 	controller, err = psiphon.NewController(config)
@@ -165,4 +161,40 @@ func GetPacketTunnelDNSResolverIPv4Address() string {
 
 func GetPacketTunnelDNSResolverIPv6Address() string {
 	return tun.GetTransparentDNSResolverIPv6Address().String()
+}
+
+// Helper function to store a list of server entries.
+// if embeddedServerEntryListPath is not empty, embeddedServerEntryList will be ignored.
+func storeServerEntries(embeddedServerEntryListPath, embeddedServerEntryList string) error {
+
+	// if embeddedServerEntryListPath is not empty, ignore embeddedServerEntryList.
+	if embeddedServerEntryListPath != "" {
+
+		serverEntriesFile, err := os.Open(embeddedServerEntryListPath)
+		if err != nil {
+			return fmt.Errorf("failed to read remote server list: %s", common.ContextError(err))
+		}
+		defer serverEntriesFile.Close()
+
+		err = psiphon.StreamingStoreServerEntriesWithIOReader(serverEntriesFile, protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
+		if err != nil {
+			return fmt.Errorf("failed to store common remote server list: %s", common.ContextError(err))
+		}
+
+	} else {
+
+		serverEntries, err := protocol.DecodeServerEntryList(
+			embeddedServerEntryList,
+			common.GetCurrentTimestamp(),
+			protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
+		if err != nil {
+			return fmt.Errorf("error decoding embedded server entry list: %s", err)
+		}
+		err = psiphon.StoreServerEntries(serverEntries, false)
+		if err != nil {
+			return fmt.Errorf("error storing embedded server entry list: %s", err)
+		}
+	}
+
+	return nil
 }
