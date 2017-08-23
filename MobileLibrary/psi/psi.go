@@ -92,7 +92,10 @@ func Start(
 	}
 
 	// Stores list of server entries.
-	storeServerEntries(embeddedServerEntryListPath, embeddedServerEntryList)
+	err = storeServerEntries(embeddedServerEntryListPath, embeddedServerEntryList)
+	if err != nil {
+		return err
+	}
 
 	controller, err = psiphon.NewController(config)
 	if err != nil {
