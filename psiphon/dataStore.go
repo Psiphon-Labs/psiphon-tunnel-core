@@ -24,13 +24,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-	"io"
 
 	"github.com/Psiphon-Inc/bolt"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -269,7 +269,7 @@ func StoreServerEntries(serverEntries []*protocol.ServerEntry, replaceIfExists b
 	return nil
 }
 
-// Wrapper around StreamingStoreServerEntries
+// StreamingStoreServerEntriesWithIOReader is a wrapper around StreamingStoreServerEntries
 // an io.Reader is passed instead of an instance of StreamingServerEntryDecoder
 func StreamingStoreServerEntriesWithIOReader(serverListReader io.Reader, serverEntrySource string) error {
 

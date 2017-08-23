@@ -51,7 +51,7 @@ var controllerWaitGroup *sync.WaitGroup
 
 func Start(
 	configJson, embeddedServerEntryList,
-	embeddedServerEntryListFileName string,
+	embeddedServerEntryListPath string,
 	provider PsiphonProvider,
 	useDeviceBinder bool, useIPv6Synthesizer bool) error {
 
@@ -91,19 +91,15 @@ func Start(
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
-	// if embeddedServerEntryListFileName is not empty, ignore embeddedServerEntryList.
-	if embeddedServerEntryListFileName != "" {
+	// if embeddedServerEntryListPath is not empty, ignore embeddedServerEntryList.
+	if embeddedServerEntryListPath != "" {
 
-		serverEntriesFile, err := os.Open(embeddedServerEntryListFileName)
-		if err != nil {
-			return fmt.Errorf("failed to read remote server list: %s", common.ContextError(err))
-		}
-		defer serverEntriesFile.Close()
+		err := streamingStoreEntriesWithIOReader(embeddedServerEntryListPath)
 
-		err = psiphon.StreamingStoreServerEntriesWithIOReader(serverEntriesFile, protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
 		if err != nil {
-			return fmt.Errorf("failed to store common remote server list: %s", common.ContextError(err))
+			return err
 		}
+
 	} else {
 
 		serverEntries, err := protocol.DecodeServerEntryList(
@@ -183,4 +179,21 @@ func GetPacketTunnelDNSResolverIPv4Address() string {
 
 func GetPacketTunnelDNSResolverIPv6Address() string {
 	return tun.GetTransparentDNSResolverIPv6Address().String()
+}
+
+// Opens file pointed to by embeddedServerEntryListPath, and stores the entries
+// using StreamingStoreServerEntries
+func streamingStoreEntriesWithIOReader(embeddedServerEntryListPath string) error {
+	serverEntriesFile, err := os.Open(embeddedServerEntryListPath)
+	if err != nil {
+		return fmt.Errorf("failed to read remote server list: %s", common.ContextError(err))
+	}
+	defer serverEntriesFile.Close()
+
+	err = psiphon.StreamingStoreServerEntriesWithIOReader(serverEntriesFile, protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
+	if err != nil {
+		return fmt.Errorf("failed to store common remote server list: %s", common.ContextError(err))
+	}
+
+	return nil
 }
