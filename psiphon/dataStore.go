@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -264,6 +265,25 @@ func StoreServerEntries(serverEntries []*protocol.ServerEntry, replaceIfExists b
 	// Since there has possibly been a significant change in the server entries,
 	// take this opportunity to update the available egress regions.
 	ReportAvailableRegions()
+
+	return nil
+}
+
+// StreamingStoreServerEntriesWithIOReader is a wrapper around StreamingStoreServerEntries
+// an io.Reader is passed instead of an instance of StreamingServerEntryDecoder
+func StreamingStoreServerEntriesWithIOReader(serverListReader io.Reader, serverEntrySource string) error {
+
+	serverEntries := protocol.NewStreamingServerEntryDecoder(
+		serverListReader,
+		common.GetCurrentTimestamp(),
+		serverEntrySource)
+
+	// TODO: record stats for newly discovered servers
+
+	err := StreamingStoreServerEntries(serverEntries, true)
+	if err != nil {
+		return common.ContextError(err)
+	}
 
 	return nil
 }
