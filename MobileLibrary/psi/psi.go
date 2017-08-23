@@ -163,7 +163,6 @@ func GetPacketTunnelDNSResolverIPv6Address() string {
 	return tun.GetTransparentDNSResolverIPv6Address().String()
 }
 
-
 // Helper function to store a list of server entries.
 // if embeddedServerEntryListPath is not empty, embeddedServerEntryList will be ignored.
 func storeServerEntries(embeddedServerEntryListPath, embeddedServerEntryList string) error {
