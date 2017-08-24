@@ -54,6 +54,9 @@ type Controller struct {
 	nextTunnel                        int
 	startedConnectedReporter          bool
 	isEstablishing                    bool
+	concurrentEstablishTunnelsMutex   sync.Mutex
+	concurrentEstablishTunnels        int32
+	peakConcurrentEstablishTunnels    int32
 	establishWaitGroup                *sync.WaitGroup
 	stopEstablishingBroadcast         chan struct{}
 	candidateServerEntries            chan *candidateServerEntry
@@ -1017,6 +1020,16 @@ func (controller *Controller) startEstablishing() {
 	}
 	NoticeInfo("start establishing")
 
+	controller.concurrentEstablishTunnelsMutex.Lock()
+	controller.concurrentEstablishTunnels = 0
+	controller.peakConcurrentEstablishTunnels = 0
+	controller.concurrentEstablishTunnelsMutex.Unlock()
+
+	if controller.config.LimitedMemoryEnvironment {
+		setAggressiveGarbageCollection()
+		emitMemoryMetrics()
+	}
+
 	controller.isEstablishing = true
 	controller.establishWaitGroup = new(sync.WaitGroup)
 	controller.stopEstablishingBroadcast = make(chan struct{})
@@ -1081,6 +1094,18 @@ func (controller *Controller) stopEstablishing() {
 	controller.stopEstablishingBroadcast = nil
 	controller.candidateServerEntries = nil
 	controller.serverAffinityDoneBroadcast = nil
+
+	controller.concurrentEstablishTunnelsMutex.Lock()
+	peakConcurrent := controller.peakConcurrentEstablishTunnels
+	controller.concurrentEstablishTunnels = 0
+	controller.peakConcurrentEstablishTunnels = 0
+	controller.concurrentEstablishTunnelsMutex.Unlock()
+	NoticeInfo("peak concurrent establish tunnels: %d", peakConcurrent)
+
+	if controller.config.LimitedMemoryEnvironment {
+		emitMemoryMetrics()
+		setStandardGarbageCollection()
+	}
 }
 
 // establishCandidateGenerator populates the candidate queue with server entries
@@ -1267,6 +1292,13 @@ loop:
 			continue
 		}
 
+		controller.concurrentEstablishTunnelsMutex.Lock()
+		controller.concurrentEstablishTunnels += 1
+		if controller.concurrentEstablishTunnels > controller.peakConcurrentEstablishTunnels {
+			controller.peakConcurrentEstablishTunnels = controller.concurrentEstablishTunnels
+		}
+		controller.concurrentEstablishTunnelsMutex.Unlock()
+
 		tunnel, err := EstablishTunnel(
 			controller.config,
 			controller.untunneledDialConfig,
@@ -1275,6 +1307,11 @@ loop:
 			candidateServerEntry.serverEntry,
 			candidateServerEntry.adjustedEstablishStartTime,
 			controller) // TunnelOwner
+
+		controller.concurrentEstablishTunnelsMutex.Lock()
+		controller.concurrentEstablishTunnels -= 1
+		controller.concurrentEstablishTunnelsMutex.Unlock()
+
 		if err != nil {
 
 			// Unblock other candidates immediately when

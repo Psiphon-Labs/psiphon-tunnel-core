@@ -475,6 +475,11 @@ type Config struct {
 	// file descriptor. The file descriptor is duped in NewController.
 	// When PacketTunnelTunDeviceFileDescriptor is set, TunnelPoolSize must be 1.
 	PacketTunnelTunFileDescriptor int
+
+	// LimitedMemoryEnvironment enables memory usage metrics logging, to track
+	// memory usage, and selective aggressively garbage collection at high memory
+	// pressure phases of operation.
+	LimitedMemoryEnvironment bool
 }
 
 // DownloadURL specifies a URL for downloading resources along with parameters
