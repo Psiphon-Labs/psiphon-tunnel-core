@@ -115,19 +115,23 @@
             return FALSE;
         }
 
-        __block NSString *embeddedServerEntriesPath = nil;
-        __block NSString *embeddedServerEntries = nil;
+        __block NSString *embeddedServerEntriesPath = @"";
+        __block NSString *embeddedServerEntries = @"";
         
         // getEmbeddedServerEntriesPath is optional in the protocol
         if ([self.tunneledAppDelegate respondsToSelector:@selector(getEmbeddedServerEntriesPath)]) {
             dispatch_sync(self->callbackQueue, ^{
                 embeddedServerEntriesPath = [self.tunneledAppDelegate getEmbeddedServerEntriesPath];
+                if (embeddedServerEntriesPath == nil) {
+                    // Don't pass NULL to go.
+                    embeddedServerEntriesPath = @"";
+                }
             });
         }
         
-        // If getEmbeddedServerEntriesPath returns nil or empty string,
+        // If getEmbeddedServerEntriesPath returns an empty string,
         // call getEmbeddedServerEntries
-        if (embeddedServerEntriesPath == nil || [embeddedServerEntriesPath length] == 0) {
+        if ([embeddedServerEntriesPath length] == 0) {
             
             dispatch_sync(self->callbackQueue, ^{
                 embeddedServerEntries = [self.tunneledAppDelegate getEmbeddedServerEntries];
