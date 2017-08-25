@@ -204,8 +204,8 @@ func emitMemoryMetrics() {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	NoticeInfo("Memory metrics at %s: goroutines %d | total alloc %s | sys %s | heap alloc/sys/idle/inuse/released/objects %s/%s/%s/%s/%s/%d | stack inuse/sys %s/%s | mspan inuse/sys %s/%s | mcached inuse/sys %s/%s | buckhash/gc/other sys %s/%s/%s | nextgc %s",
-		runtime.NumGoroutine(),
 		common.GetParentContext(),
+		runtime.NumGoroutine(),
 		byteCountFormatter(memStats.TotalAlloc),
 		byteCountFormatter(memStats.Sys),
 		byteCountFormatter(memStats.HeapAlloc),
