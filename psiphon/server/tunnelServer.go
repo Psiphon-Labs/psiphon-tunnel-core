@@ -1299,6 +1299,12 @@ func (sshClient *sshClient) runTunnel(
 
 		if newChannel.ChannelType() == protocol.PACKET_TUNNEL_CHANNEL_TYPE {
 
+			if !sshClient.sshServer.support.Config.RunPacketTunnel {
+				sshClient.rejectNewChannel(
+					newChannel, ssh.Prohibited, "unsupported packet tunnel channel type")
+				continue
+			}
+
 			// Accept this channel immediately. This channel will replace any
 			// previously existing packet tunnel channel for this client.
 
@@ -1311,9 +1317,8 @@ func (sshClient *sshClient) runTunnel(
 
 			sshClient.setPacketTunnelChannel(packetTunnelChannel)
 
-			// PacketTunnelServer will run the client's packet tunnel. ClientDisconnected will
-			// be called by setPacketTunnelChannel: either if the client starts a new packet
-			// tunnel channel, or on exit of this function.
+			// PacketTunnelServer will run the client's packet tunnel. If neessary, ClientConnected
+			// will stop packet tunnel workers for any previous packet tunnel channel.
 
 			checkAllowedTCPPortFunc := func(upstreamIPAddress net.IP, port int) bool {
 				return sshClient.isPortForwardPermitted(portForwardTypeTCP, false, upstreamIPAddress, port)
@@ -1408,22 +1413,22 @@ func (sshClient *sshClient) runTunnel(
 	// Stop all other worker goroutines
 	sshClient.stopRunning()
 
-	// This calls PacketTunnelServer.ClientDisconnected,
-	// which stops packet tunnel workers.
-	sshClient.setPacketTunnelChannel(nil)
+	if sshClient.sshServer.support.Config.RunPacketTunnel {
+		// PacketTunnelServer.ClientDisconnected stops packet tunnel workers.
+		sshClient.sshServer.support.PacketTunnelServer.ClientDisconnected(
+			sshClient.sessionID)
+	}
 
 	waitGroup.Wait()
 }
 
 // setPacketTunnelChannel sets the single packet tunnel channel
 // for this sshClient. Any existing packet tunnel channel is
-// closed and its underlying session idled.
+// closed.
 func (sshClient *sshClient) setPacketTunnelChannel(channel ssh.Channel) {
 	sshClient.Lock()
 	if sshClient.packetTunnelChannel != nil {
 		sshClient.packetTunnelChannel.Close()
-		sshClient.sshServer.support.PacketTunnelServer.ClientDisconnected(
-			sshClient.sessionID)
 	}
 	sshClient.packetTunnelChannel = channel
 	sshClient.Unlock()
