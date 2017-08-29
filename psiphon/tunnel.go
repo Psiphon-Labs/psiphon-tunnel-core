@@ -179,7 +179,8 @@ func EstablishTunnel(
 	// fails.
 	if !config.DisableApi {
 		NoticeInfo("starting server context for %s", tunnel.serverEntry.IpAddress)
-		tunnel.serverContext, err = NewServerContext(tunnel, sessionId)
+		tunnel.serverContext, err = NewServerContext(
+			tunnel, sessionId, config.IgnoreHandshakeStatsRegexps)
 		if err != nil {
 			return nil, common.ContextError(
 				fmt.Errorf("error starting server context for %s: %s",

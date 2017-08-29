@@ -1025,9 +1025,31 @@ func (controller *Controller) startEstablishing() {
 	controller.peakConcurrentEstablishTunnels = 0
 	controller.concurrentEstablishTunnelsMutex.Unlock()
 
+	workerCount := controller.config.ConnectionWorkerPoolSize
+
 	if controller.config.LimitedMemoryEnvironment {
 		setAggressiveGarbageCollection()
-		emitMemoryMetrics()
+		totalMemory := emitMemoryMetrics()
+
+		// When total memory size exceeds the threshold, minimize
+		// the number of concurrent connection workers.
+		//
+		// Limitations:
+		// - totalMemory is, at this time, runtime.MemStats.Sys,
+		//   which is virtual memory, not RSS; and which may not
+		//   shrink; so this trigger could be premature and
+		//   permanent.
+		// - Only 1 concurrent worker means a candidate that is
+		//   slow to fail will severely delay the establishment;
+		//   and that it may take significant time to cycle through
+		//   all protocols to find one that works when network
+		//   conditions change.
+
+		if controller.config.LimitedMemoryThreshold > 0 &&
+			totalMemory >= uint64(controller.config.LimitedMemoryThreshold) {
+
+			workerCount = 1
+		}
 	}
 
 	controller.isEstablishing = true
@@ -1063,7 +1085,7 @@ func (controller *Controller) startEstablishing() {
 	// TODO: should not favor the first server in this case
 	controller.serverAffinityDoneBroadcast = make(chan struct{})
 
-	for i := 0; i < controller.config.ConnectionWorkerPoolSize; i++ {
+	for i := 0; i < workerCount; i++ {
 		controller.establishWaitGroup.Add(1)
 		go controller.establishTunnelWorker()
 	}
