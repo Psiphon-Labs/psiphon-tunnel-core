@@ -480,6 +480,16 @@ type Config struct {
 	// memory usage, and selective aggressively garbage collection at high memory
 	// pressure phases of operation.
 	LimitedMemoryEnvironment bool
+
+	// LimitedMemoryThreshold limits costly operations when the total memory
+	// allocation exceeds the specified value. This includes limiting the number
+	// of concurrent connection workers to 1.
+	// This option is enabled when LimitedMemoryEnvironment is true and when
+	// LimitedMemoryThreshold > 0.
+	LimitedMemoryThreshold int
+
+	// IgnoreHandshakeStatsRegexps skips compiling and using stats regexes.
+	IgnoreHandshakeStatsRegexps bool
 }
 
 // DownloadURL specifies a URL for downloading resources along with parameters

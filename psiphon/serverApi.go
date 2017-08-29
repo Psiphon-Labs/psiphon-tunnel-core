@@ -83,7 +83,8 @@ func MakeSessionId() (sessionId string, err error) {
 // NewServerContext makes the tunnelled handshake request to the Psiphon server
 // and returns a ServerContext struct for use with subsequent Psiphon server API
 // requests (e.g., periodic connected and status requests).
-func NewServerContext(tunnel *Tunnel, sessionId string) (*ServerContext, error) {
+func NewServerContext(
+	tunnel *Tunnel, sessionId string, ignoreStatsRegexps bool) (*ServerContext, error) {
 
 	// For legacy servers, set up psiphonHttpsClient for
 	// accessing the Psiphon API via the web service.
@@ -105,7 +106,7 @@ func NewServerContext(tunnel *Tunnel, sessionId string) (*ServerContext, error) 
 		psiphonHttpsClient: psiphonHttpsClient,
 	}
 
-	err := serverContext.doHandshakeRequest()
+	err := serverContext.doHandshakeRequest(ignoreStatsRegexps)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -116,7 +117,8 @@ func NewServerContext(tunnel *Tunnel, sessionId string) (*ServerContext, error) 
 // doHandshakeRequest performs the "handshake" API request. The handshake
 // returns upgrade info, newly discovered server entries -- which are
 // stored -- and sponsor info (home pages, stat regexes).
-func (serverContext *ServerContext) doHandshakeRequest() error {
+func (serverContext *ServerContext) doHandshakeRequest(
+	ignoreStatsRegexps bool) error {
 
 	params := serverContext.getBaseParams()
 
@@ -229,13 +231,16 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 		NoticeClientIsLatestVersion("")
 	}
 
-	var regexpsNotices []string
-	serverContext.statsRegexps, regexpsNotices = transferstats.MakeRegexps(
-		handshakeResponse.PageViewRegexes,
-		handshakeResponse.HttpsRequestRegexes)
+	if !ignoreStatsRegexps {
 
-	for _, notice := range regexpsNotices {
-		NoticeAlert(notice)
+		var regexpsNotices []string
+		serverContext.statsRegexps, regexpsNotices = transferstats.MakeRegexps(
+			handshakeResponse.PageViewRegexes,
+			handshakeResponse.HttpsRequestRegexes)
+
+		for _, notice := range regexpsNotices {
+			NoticeAlert(notice)
+		}
 	}
 
 	serverContext.serverHandshakeTimestamp = handshakeResponse.ServerTimestamp

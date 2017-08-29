@@ -793,7 +793,7 @@
     // Free getifaddrs data
     freeifaddrs(interfaces);
     
-    [self logMessage:[NSString stringWithFormat:@"getActiveInterace: List of UP interfaces: %@", upIffList]];
+    [self logMessage:[NSString stringWithFormat:@"getActiveInterface: List of UP interfaces: %@", upIffList]];
     
     // TODO: following is a heuristic for choosing active network interface
     // Only Wi-Fi and Cellular interfaces are considered
