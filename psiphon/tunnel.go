@@ -595,6 +595,7 @@ func initMeekConfig(
 		config.TrustedCACertificatesFilename != "")
 
 	return &MeekConfig{
+		LimitedMemoryEnvironment:      config.LimitedMemoryEnvironment,
 		DialAddress:                   dialAddress,
 		UseHTTPS:                      useHTTPS,
 		TLSProfile:                    selectedTLSProfile,

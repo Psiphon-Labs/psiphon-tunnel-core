@@ -161,22 +161,26 @@ func LocalProxyRelay(proxyType string, localConn, remoteConn net.Conn) {
 // If any stop is broadcast, false is returned immediately.
 func WaitForNetworkConnectivity(
 	connectivityChecker NetworkConnectivityChecker, stopBroadcasts ...<-chan struct{}) bool {
+
 	if connectivityChecker == nil || 1 == connectivityChecker.HasNetworkConnectivity() {
 		return true
 	}
+
 	NoticeInfo("waiting for network connectivity")
+
 	ticker := time.NewTicker(1 * time.Second)
+
+	selectCases := make([]reflect.SelectCase, 1+len(stopBroadcasts))
+	selectCases[0] = reflect.SelectCase{
+		Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ticker.C)}
+	for i, stopBroadcast := range stopBroadcasts {
+		selectCases[i+1] = reflect.SelectCase{
+			Dir: reflect.SelectRecv, Chan: reflect.ValueOf(stopBroadcast)}
+	}
+
 	for {
 		if 1 == connectivityChecker.HasNetworkConnectivity() {
 			return true
-		}
-
-		selectCases := make([]reflect.SelectCase, 1+len(stopBroadcasts))
-		selectCases[0] = reflect.SelectCase{
-			Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ticker.C)}
-		for i, stopBroadcast := range stopBroadcasts {
-			selectCases[i+1] = reflect.SelectCase{
-				Dir: reflect.SelectRecv, Chan: reflect.ValueOf(stopBroadcast)}
 		}
 
 		chosen, _, ok := reflect.Select(selectCases)

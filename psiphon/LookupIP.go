@@ -88,7 +88,7 @@ func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, e
 		copy(ipv6[:], ipAddr.To16())
 		domain = syscall.AF_INET6
 	} else {
-		return nil, common.ContextError(fmt.Errorf("Got invalid IP address for dns server: %s", ipAddr.String()))
+		return nil, common.ContextError(fmt.Errorf("invalid IP address for dns server: %s", ipAddr.String()))
 	}
 
 	socketFd, err := syscall.Socket(domain, syscall.SOCK_DGRAM, 0)
@@ -132,6 +132,9 @@ func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, e
 
 	addrs, _, err = ResolveIP(host, netConn)
 	netConn.Close()
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
 
-	return addrs, err
+	return addrs, nil
 }

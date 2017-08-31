@@ -1028,7 +1028,7 @@ func (controller *Controller) startEstablishing() {
 	workerCount := controller.config.ConnectionWorkerPoolSize
 
 	if controller.config.LimitedMemoryEnvironment {
-		setAggressiveGarbageCollection()
+		aggressiveGarbageCollection()
 		totalMemory := emitMemoryMetrics()
 
 		// When total memory size exceeds the threshold, minimize
@@ -1045,8 +1045,8 @@ func (controller *Controller) startEstablishing() {
 		//   all protocols to find one that works when network
 		//   conditions change.
 
-		if controller.config.LimitedMemoryThreshold > 0 &&
-			totalMemory >= uint64(controller.config.LimitedMemoryThreshold) {
+		if controller.config.LimitedMemorySingleConnectionWorkerThreshold > 0 &&
+			totalMemory >= uint64(controller.config.LimitedMemorySingleConnectionWorkerThreshold) {
 
 			workerCount = 1
 		}
@@ -1126,7 +1126,7 @@ func (controller *Controller) stopEstablishing() {
 
 	if controller.config.LimitedMemoryEnvironment {
 		emitMemoryMetrics()
-		setStandardGarbageCollection()
+		standardGarbageCollection()
 	}
 }
 
@@ -1243,7 +1243,23 @@ loop:
 				// entries, and potentially some newly fetched server entries.
 				break
 			}
+
+			if controller.config.LimitedMemoryEnvironment &&
+				controller.config.LimitedMemoryStaggerConnectionWorkersMilliseconds != 0 {
+
+				timer := time.NewTimer(
+					time.Duration(
+						controller.config.LimitedMemoryStaggerConnectionWorkersMilliseconds) * time.Millisecond)
+				select {
+				case <-timer.C:
+				case <-controller.stopEstablishingBroadcast:
+					break loop
+				case <-controller.shutdownBroadcast:
+					break loop
+				}
+			}
 		}
+
 		// Free up resources now, but don't reset until after the pause.
 		iterator.Close()
 
@@ -1314,6 +1330,13 @@ loop:
 			continue
 		}
 
+		// EstablishTunnel will allocate significant memory, so first attempt to
+		// reclaim as much as possible.
+		if controller.config.LimitedMemoryEnvironment && !controller.isStopEstablishingBroadcast() {
+			emitMemoryMetrics()
+			aggressiveGarbageCollection()
+		}
+
 		controller.concurrentEstablishTunnelsMutex.Lock()
 		controller.concurrentEstablishTunnels += 1
 		if controller.concurrentEstablishTunnels > controller.peakConcurrentEstablishTunnels {
@@ -1335,6 +1358,13 @@ loop:
 		controller.concurrentEstablishTunnelsMutex.Unlock()
 
 		if err != nil {
+
+			// Immediately reclaim memory allocated by the failed establishment.
+			if controller.config.LimitedMemoryEnvironment && !controller.isStopEstablishingBroadcast() {
+				tunnel = nil
+				emitMemoryMetrics()
+				aggressiveGarbageCollection()
+			}
 
 			// Unblock other candidates immediately when
 			// server affinity candidate fails.
