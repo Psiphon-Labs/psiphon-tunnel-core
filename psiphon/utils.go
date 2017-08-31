@@ -227,12 +227,12 @@ func emitMemoryMetrics() uint64 {
 	return memStats.Sys
 }
 
-func setAggressiveGarbageCollection() {
+func aggressiveGarbageCollection() {
 	debug.SetGCPercent(5)
 	debug.FreeOSMemory()
 }
 
-func setStandardGarbageCollection() {
+func standardGarbageCollection() {
 	debug.SetGCPercent(100)
 	debug.FreeOSMemory()
 }

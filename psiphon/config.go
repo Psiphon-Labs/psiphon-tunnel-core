@@ -481,12 +481,18 @@ type Config struct {
 	// pressure phases of operation.
 	LimitedMemoryEnvironment bool
 
-	// LimitedMemoryThreshold limits costly operations when the total memory
-	// allocation exceeds the specified value. This includes limiting the number
-	// of concurrent connection workers to 1.
+	// LimitedMemorySingleConnectionWorkerThreshold limits the number of concurrent
+	// connection workers to 1 when the total memory allocation exceeds the specified
+	// value.
 	// This option is enabled when LimitedMemoryEnvironment is true and when
-	// LimitedMemoryThreshold > 0.
-	LimitedMemoryThreshold int
+	// LimitedMemorySingleConnectionWorkerThreshold > 0.
+	LimitedMemorySingleConnectionWorkerThreshold int
+
+	// LimitedMemoryStaggerConnectionWorkersMilliseconds adds a specified delay
+	// before making each server candidate available to connection workers.
+	// This option is enabled when LimitedMemoryEnvironment is true and when
+	// LimitedMemorySingleConnectionWorkersThreshold > 0.
+	LimitedMemoryStaggerConnectionWorkersMilliseconds int
 
 	// IgnoreHandshakeStatsRegexps skips compiling and using stats regexes.
 	IgnoreHandshakeStatsRegexps bool
