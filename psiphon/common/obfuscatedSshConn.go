@@ -158,7 +158,7 @@ func (conn *ObfuscatedSshConn) Read(buffer []byte) (int, error) {
 	if err != nil {
 		err = ContextError(err)
 	}
-	return n, nil
+	return n, err
 }
 
 // Write wraps standard Write, transparently applying the obfuscation
