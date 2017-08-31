@@ -27,8 +27,13 @@
 #import "PsiphonTunnel.h"
 #import "json-framework/SBJson4.h"
 #import "JailbreakCheck/JailbreakCheck.h"
-#include <ifaddrs.h>
+#import <ifaddrs.h>
+#import <resolv.h>
+#import <netdb.h>
 
+
+#define GOOGLE_DNS_1 @"8.8.4.4"
+#define GOOGLE_DNS_2 @"8.8.8.8"
 
 @interface PsiphonTunnel () <GoPsiPsiphonProvider>
 
@@ -50,6 +55,14 @@
     NetworkStatus previousNetworkStatus;
 
     BOOL tunnelWholeDevice;
+
+    // DNS
+    NSString *primaryGoogleDNS;
+    NSString *secondaryGoogleDNS;
+
+    // This cache becomes void if internetReachabilityChanged is called.
+    // Cache can be invalidated by setting it to nil.
+    NSArray<NSString *> *initialDNSCache;
 }
 
 - (id)init {
@@ -64,6 +77,19 @@
     atomic_init(&self->localHttpProxyPort, 0);
     self->reachability = [Reachability reachabilityForInternetConnection];
     self->tunnelWholeDevice = FALSE;
+
+    // Randomize order of Google DNS servers on start,
+    // and consistently return in that fixed order.
+    if (arc4random_uniform(2) == 0) {
+        self->primaryGoogleDNS = GOOGLE_DNS_1;
+        self->secondaryGoogleDNS = GOOGLE_DNS_2;
+    } else {
+        self->primaryGoogleDNS = GOOGLE_DNS_2;
+        self->secondaryGoogleDNS = GOOGLE_DNS_1;
+    }
+
+    self->initialDNSCache = [self getDNSServers];
+
 
     return self;
 }
@@ -815,13 +841,23 @@
 - (NSString *)getPrimaryDnsServer {
     // This function is only called when BindToDevice is used/supported.
     // TODO: Implement correctly
-    return @"8.8.8.8";
+
+    if (self->initialDNSCache && [initialDNSCache count] > 0) {
+        return self->initialDNSCache[0];
+    } else {
+        return self->primaryGoogleDNS;
+    }
 }
 
 - (NSString *)getSecondaryDnsServer {
     // This function is only called when BindToDevice is used/supported.
     // TODO: Implement correctly
-    return @"8.8.4.4";
+
+    if (self->initialDNSCache && [initialDNSCache count] > 1) {
+        return self->initialDNSCache[1];
+    } else {
+        return self->secondaryGoogleDNS;
+    }
 }
 
 - (long)hasNetworkConnectivity {
@@ -861,6 +897,55 @@
 
 
 #pragma mark - Helpers (private)
+
+/**
+    @brief Returns NSString array of DNS addresses for current active
+           network interface using libresolv.
+    @return Array of DNS addresses, nil on failure.
+ */
+
+- (NSArray<NSString *> *)getDNSServers {
+    NSMutableArray<NSString *> *serverList = [NSMutableArray new];
+
+    res_state _state;
+    _state = malloc(sizeof(struct __res_state));
+
+    if (res_ninit(_state) < 0) {
+        NSLog(@"res_ninit failed.");
+        free(_state);
+        return nil;
+    }
+
+    union res_sockaddr_union servers[NI_MAXSERV];  // Default max 32
+
+    int numServersFound = res_getservers(_state, servers, NI_MAXSERV);
+
+    char hostBuf[NI_MAXHOST];
+    for (int i = 0; i < numServersFound; i++) {
+        union res_sockaddr_union s = servers[i];
+        if (s.sin.sin_len > 0) {
+            int ret_code = getnameinfo((struct sockaddr *)&s.sin,
+              (socklen_t)s.sin.sin_len,
+              (char *)&hostBuf,
+              sizeof(hostBuf),
+              nil,
+              0,
+              NI_NUMERICHOST); // Flag "numeric form of hostname"
+
+            if (EXIT_SUCCESS == ret_code) {
+                [serverList addObject:[NSString stringWithUTF8String:hostBuf]];
+            } else {
+                NSLog(@"getnameinfo failed. Retcode: %d", ret_code);
+            }
+        }
+    }
+
+    // Clear memory used by res_ninit
+    res_ndestroy(_state);
+    free(_state);
+
+    return serverList;
+}
 
 - (void)logMessage:(NSString *)message {
     if ([self.tunneledAppDelegate respondsToSelector:@selector(onDiagnosticMessage:)]) {
@@ -964,8 +1049,10 @@
     [[NSNotificationCenter defaultCenter] removeObserver:self name:kReachabilityChangedNotification object:nil];
 }
 
-- (void)internetReachabilityChanged:(NSNotification *)note
-{
+- (void)internetReachabilityChanged:(NSNotification *)note {
+    // Invalidate initialDNSCache.
+    self->initialDNSCache = nil;
+
     // If we lose network while connected, we're going to force a reconnect in
     // order to trigger the waiting-for-network state. The reason we don't wait
     // for the tunnel to notice the network loss is that it might take 30 seconds.
