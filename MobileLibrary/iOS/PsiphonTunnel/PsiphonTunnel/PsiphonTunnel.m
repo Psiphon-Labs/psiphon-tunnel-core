@@ -62,6 +62,7 @@
 
     // This cache becomes void if internetReachabilityChanged is called.
     // Cache can be invalidated by setting it to nil.
+    NSLock *dnsCacheLock;
     NSArray<NSString *> *initialDNSCache;
 }
 
@@ -88,6 +89,7 @@
         self->secondaryGoogleDNS = GOOGLE_DNS_1;
     }
 
+    dnsCacheLock = [[NSLock alloc] init];
     self->initialDNSCache = [self getDNSServers];
 
 
@@ -842,22 +844,34 @@
     // This function is only called when BindToDevice is used/supported.
     // TODO: Implement correctly
 
+    NSString *dns = nil;
+
+    [dnsCacheLock lock];
     if (self->initialDNSCache && [initialDNSCache count] > 0) {
-        return self->initialDNSCache[0];
+        dns = self->initialDNSCache[0];
     } else {
-        return self->primaryGoogleDNS;
+        dns = self->primaryGoogleDNS;
     }
+    [dnsCacheLock unlock];
+
+    return dns;
 }
 
 - (NSString *)getSecondaryDnsServer {
     // This function is only called when BindToDevice is used/supported.
     // TODO: Implement correctly
 
-    if (self->initialDNSCache && [initialDNSCache count] > 1) {
-        return self->initialDNSCache[1];
+    NSString *dns = nil;
+
+    [dnsCacheLock lock];
+    if (self->initialDNSCache && [initialDNSCache count] > 0) {
+        dns = self->initialDNSCache[0];
     } else {
-        return self->secondaryGoogleDNS;
+        dns = self->secondaryGoogleDNS;
     }
+    [dnsCacheLock unlock];
+
+    return dns;
 }
 
 - (long)hasNetworkConnectivity {
@@ -1051,7 +1065,9 @@
 
 - (void)internetReachabilityChanged:(NSNotification *)note {
     // Invalidate initialDNSCache.
+    [dnsCacheLock lock];
     self->initialDNSCache = nil;
+    [dnsCacheLock unlock];
 
     // If we lose network while connected, we're going to force a reconnect in
     // order to trigger the waiting-for-network state. The reason we don't wait
