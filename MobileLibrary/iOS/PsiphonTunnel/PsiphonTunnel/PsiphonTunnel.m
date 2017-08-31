@@ -62,7 +62,6 @@
 
     // This cache becomes void if internetReachabilityChanged is called.
     // Cache can be invalidated by setting it to nil.
-    NSLock *dnsCacheLock;
     NSArray<NSString *> *initialDNSCache;
 }
 
@@ -89,7 +88,6 @@
         self->secondaryGoogleDNS = GOOGLE_DNS_1;
     }
 
-    dnsCacheLock = [[NSLock alloc] init];
     self->initialDNSCache = [self getDNSServers];
 
 
@@ -844,15 +842,15 @@
     // This function is only called when BindToDevice is used/supported.
     // TODO: Implement correctly
 
-    NSString *dns = nil;
+    __block NSString *dns = nil;
 
-    [dnsCacheLock lock];
-    if (self->initialDNSCache && [initialDNSCache count] > 0) {
-        dns = self->initialDNSCache[0];
-    } else {
-        dns = self->primaryGoogleDNS;
-    }
-    [dnsCacheLock unlock];
+    dispatch_sync(workQueue, ^{
+        if (self->initialDNSCache && [initialDNSCache count] > 0) {
+            dns = self->initialDNSCache[0];
+        } else {
+            dns = self->primaryGoogleDNS;
+        }
+    });
 
     return dns;
 }
@@ -861,15 +859,15 @@
     // This function is only called when BindToDevice is used/supported.
     // TODO: Implement correctly
 
-    NSString *dns = nil;
+    __block NSString *dns = nil;
 
-    [dnsCacheLock lock];
-    if (self->initialDNSCache && [initialDNSCache count] > 0) {
-        dns = self->initialDNSCache[0];
-    } else {
-        dns = self->secondaryGoogleDNS;
-    }
-    [dnsCacheLock unlock];
+    dispatch_sync(workQueue, ^{
+        if (self->initialDNSCache && [initialDNSCache count] > 1) {
+            dns = self->initialDNSCache[1];
+        } else {
+            dns = self->secondaryGoogleDNS;
+        }
+    });
 
     return dns;
 }
@@ -1065,9 +1063,9 @@
 
 - (void)internetReachabilityChanged:(NSNotification *)note {
     // Invalidate initialDNSCache.
-    [dnsCacheLock lock];
-    self->initialDNSCache = nil;
-    [dnsCacheLock unlock];
+    dispatch_sync(self->workQueue, ^{
+        self->initialDNSCache = nil;
+    });
 
     // If we lose network while connected, we're going to force a reconnect in
     // order to trigger the waiting-for-network state. The reason we don't wait
