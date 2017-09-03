@@ -60,9 +60,9 @@
     NSString *primaryGoogleDNS;
     NSString *secondaryGoogleDNS;
 
-    // This cache becomes void if internetReachabilityChanged is called.
-    // Cache can be invalidated by setting it to nil.
-    NSArray<NSString *> *initialDNSCache;
+    
+    volatile BOOL useInitialDNS; // initialDNSCache vailidity flag.
+    NSArray<NSString *> *initialDNSCache;  // This cache becomes void if internetReachabilityChanged is called.
 }
 
 - (id)init {
@@ -89,7 +89,7 @@
     }
 
     self->initialDNSCache = [self getDNSServers];
-
+    self->useInitialDNS = [self->initialDNSCache count] > 0;
 
     return self;
 }
@@ -842,34 +842,22 @@
     // This function is only called when BindToDevice is used/supported.
     // TODO: Implement correctly
 
-    __block NSString *dns = nil;
-
-    dispatch_sync(workQueue, ^{
-        if (self->initialDNSCache && [initialDNSCache count] > 0) {
-            dns = self->initialDNSCache[0];
-        } else {
-            dns = self->primaryGoogleDNS;
-        }
-    });
-
-    return dns;
+    if (self->useInitialDNS) {
+        return self->initialDNSCache[0];
+    } else {
+        return self->primaryGoogleDNS;
+    }
 }
 
 - (NSString *)getSecondaryDnsServer {
     // This function is only called when BindToDevice is used/supported.
     // TODO: Implement correctly
 
-    __block NSString *dns = nil;
-
-    dispatch_sync(workQueue, ^{
-        if (self->initialDNSCache && [initialDNSCache count] > 1) {
-            dns = self->initialDNSCache[1];
-        } else {
-            dns = self->secondaryGoogleDNS;
-        }
-    });
-
-    return dns;
+    if (self->useInitialDNS && [self->initialDNSCache count] > 1) {
+        return self->initialDNSCache[1];
+    } else {
+        return self->secondaryGoogleDNS;
+    }
 }
 
 - (long)hasNetworkConnectivity {
@@ -1063,9 +1051,8 @@
 
 - (void)internetReachabilityChanged:(NSNotification *)note {
     // Invalidate initialDNSCache.
-    dispatch_sync(self->workQueue, ^{
-        self->initialDNSCache = nil;
-    });
+    __sync_bool_compare_and_swap(&self->useInitialDNS, TRUE, FALSE);
+    
 
     // If we lose network while connected, we're going to force a reconnect in
     // order to trigger the waiting-for-network state. The reason we don't wait
