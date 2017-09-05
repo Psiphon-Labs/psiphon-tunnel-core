@@ -124,7 +124,7 @@ func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 			continue
 		}
 
-		syscall.SetsockoptInt(socketFd, syscall.SOL_SOCKET, syscall.SO_NOSIGPIPE, 1)
+		tcpDialSetAdditionalSocketOptions(socketFd)
 
 		if config.DeviceBinder != nil {
 			// WARNING: this potentially violates the direction to not call into
