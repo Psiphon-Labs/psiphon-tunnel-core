@@ -84,6 +84,11 @@ func TunnelProtocolUsesObfuscatedSSH(protocol string) bool {
 	return protocol != TUNNEL_PROTOCOL_SSH
 }
 
+func TunnelProtocolUsesMeek(protocol string) bool {
+	return TunnelProtocolUsesMeekHTTP(protocol) ||
+		TunnelProtocolUsesMeekHTTPS(protocol)
+}
+
 func TunnelProtocolUsesMeekHTTP(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP
