@@ -40,6 +40,7 @@
 		66BDB0661DC26CCC0079384C /* SBJson4StreamWriterState.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0571DC26CCC0079384C /* SBJson4StreamWriterState.m */; };
 		66BDB0671DC26CCC0079384C /* SBJson4Writer.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB0581DC26CCC0079384C /* SBJson4Writer.h */; };
 		66BDB0681DC26CCC0079384C /* SBJson4Writer.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0591DC26CCC0079384C /* SBJson4Writer.m */; };
+		EFED7EBF1F587F6E0078980F /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = EFED7EBE1F587F6E0078980F /* libresolv.tbd */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -101,6 +102,7 @@
 		66BDB0571DC26CCC0079384C /* SBJson4StreamWriterState.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SBJson4StreamWriterState.m; sourceTree = "<group>"; };
 		66BDB0581DC26CCC0079384C /* SBJson4Writer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SBJson4Writer.h; sourceTree = "<group>"; };
 		66BDB0591DC26CCC0079384C /* SBJson4Writer.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SBJson4Writer.m; sourceTree = "<group>"; };
+		EFED7EBE1F587F6E0078980F /* libresolv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libresolv.tbd; path = usr/lib/libresolv.tbd; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -108,6 +110,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EFED7EBF1F587F6E0078980F /* libresolv.tbd in Frameworks */,
 				660E0B7A1E2D6EB6002BF5D4 /* Psi in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -164,6 +167,7 @@
 				6685BDC31E2E881200F0E414 /* Psi */,
 				66BDB02D1DA6BFCC0079384C /* PsiphonTunnelTests */,
 				66BDB0211DA6BFCC0079384C /* Products */,
+				EFED7EBD1F587F6E0078980F /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -227,6 +231,14 @@
 				66BDB0591DC26CCC0079384C /* SBJson4Writer.m */,
 			);
 			path = "json-framework";
+			sourceTree = "<group>";
+		};
+		EFED7EBD1F587F6E0078980F /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				EFED7EBE1F587F6E0078980F /* libresolv.tbd */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
