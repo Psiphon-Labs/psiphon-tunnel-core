@@ -82,9 +82,12 @@ func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 
 // GetSupportedProtocols returns a list of tunnel protocols supported
 // by the ServerEntry's capabilities.
-func (serverEntry *ServerEntry) GetSupportedProtocols() []string {
+func (serverEntry *ServerEntry) GetSupportedProtocols(excludeMeek bool) []string {
 	supportedProtocols := make([]string, 0)
 	for _, protocol := range SupportedTunnelProtocols {
+		if excludeMeek && TunnelProtocolUsesMeek(protocol) {
+			continue
+		}
 		if serverEntry.SupportsProtocol(protocol) {
 			supportedProtocols = append(supportedProtocols, protocol)
 		}

@@ -476,23 +476,18 @@ type Config struct {
 	// When PacketTunnelTunDeviceFileDescriptor is set, TunnelPoolSize must be 1.
 	PacketTunnelTunFileDescriptor int
 
-	// LimitedMemoryEnvironment enables memory usage metrics logging, to track
-	// memory usage, and selective aggressively garbage collection at high memory
-	// pressure phases of operation.
-	LimitedMemoryEnvironment bool
+	// StaggerConnectionWorkersMilliseconds adds a specified delay before making each
+	// server candidate available to connection workers. This option is enabled when
+	// StaggerConnectionWorkersMilliseconds > 0.
+	StaggerConnectionWorkersMilliseconds int
 
-	// LimitedMemorySingleConnectionWorkerThreshold limits the number of concurrent
-	// connection workers to 1 when the total memory allocation exceeds the specified
-	// value.
-	// This option is enabled when LimitedMemoryEnvironment is true and when
-	// LimitedMemorySingleConnectionWorkerThreshold > 0.
-	LimitedMemorySingleConnectionWorkerThreshold int
+	// LimitMeekConnectionWorkers limits the number of concurrent connection workers
+	// attempting connections with meek protocols.
+	// This option is enabled when LimitMeekConnectionWorkers > 0.
+	LimitMeekConnectionWorkers int
 
-	// LimitedMemoryStaggerConnectionWorkersMilliseconds adds a specified delay
-	// before making each server candidate available to connection workers.
-	// This option is enabled when LimitedMemoryEnvironment is true and when
-	// LimitedMemorySingleConnectionWorkersThreshold > 0.
-	LimitedMemoryStaggerConnectionWorkersMilliseconds int
+	// LimitMeekBufferSizes selects smaller buffers for meek protocols.
+	LimitMeekBufferSizes bool
 
 	// IgnoreHandshakeStatsRegexps skips compiling and using stats regexes.
 	IgnoreHandshakeStatsRegexps bool

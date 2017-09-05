@@ -62,6 +62,14 @@ func Start(
 		return fmt.Errorf("already started")
 	}
 
+	// Wrap the provider in a layer that locks a mutex before calling a provider function.
+	// The the provider callbacks are Java/Obj-C via gomobile, they are cgo calls that
+	// can cause OS threads to be spawned. The mutex prevents many calling goroutines from
+	// causing unbounded numbers of OS threads to be spawned.
+	// TODO: replace the mutex with a semaphore, to allow a larger but still bounded concurrent
+	// number of calls to the provider?
+	provider = newMutexPsiphonProvider(provider)
+
 	config, err := psiphon.LoadConfig([]byte(configJson))
 	if err != nil {
 		return fmt.Errorf("error loading configuration file: %s", err)
@@ -197,4 +205,49 @@ func storeServerEntries(embeddedServerEntryListPath, embeddedServerEntryList str
 	}
 
 	return nil
+}
+
+type mutexPsiphonProvider struct {
+	sync.Mutex
+	p PsiphonProvider
+}
+
+func newMutexPsiphonProvider(p PsiphonProvider) *mutexPsiphonProvider {
+	return &mutexPsiphonProvider{p: p}
+}
+
+func (p *mutexPsiphonProvider) Notice(noticeJSON string) {
+	p.Lock()
+	defer p.Unlock()
+	p.p.Notice(noticeJSON)
+}
+
+func (p *mutexPsiphonProvider) HasNetworkConnectivity() int {
+	p.Lock()
+	defer p.Unlock()
+	return p.p.HasNetworkConnectivity()
+}
+
+func (p *mutexPsiphonProvider) BindToDevice(fileDescriptor int) error {
+	p.Lock()
+	defer p.Unlock()
+	return p.p.BindToDevice(fileDescriptor)
+}
+
+func (p *mutexPsiphonProvider) IPv6Synthesize(IPv4Addr string) string {
+	p.Lock()
+	defer p.Unlock()
+	return p.p.IPv6Synthesize(IPv4Addr)
+}
+
+func (p *mutexPsiphonProvider) GetPrimaryDnsServer() string {
+	p.Lock()
+	defer p.Unlock()
+	return p.p.GetPrimaryDnsServer()
+}
+
+func (p *mutexPsiphonProvider) GetSecondaryDnsServer() string {
+	p.Lock()
+	defer p.Unlock()
+	return p.p.GetSecondaryDnsServer()
 }

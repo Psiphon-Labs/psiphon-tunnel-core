@@ -200,7 +200,7 @@ func byteCountFormatter(bytes uint64) string {
 		"%.1f%c", float64(bytes)/math.Pow(float64(base), float64(exp)), "KMGTPEZ"[exp-1])
 }
 
-func emitMemoryMetrics() uint64 {
+func emitMemoryMetrics() {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	NoticeInfo("Memory metrics at %s: goroutines %d | total alloc %s | sys %s | heap alloc/sys/idle/inuse/released/objects %s/%s/%s/%s/%s/%d | stack inuse/sys %s/%s | mspan inuse/sys %s/%s | mcached inuse/sys %s/%s | buckhash/gc/other sys %s/%s/%s | nextgc %s",
@@ -224,7 +224,6 @@ func emitMemoryMetrics() uint64 {
 		byteCountFormatter(memStats.GCSys),
 		byteCountFormatter(memStats.OtherSys),
 		byteCountFormatter(memStats.NextGC))
-	return memStats.Sys
 }
 
 func aggressiveGarbageCollection() {

@@ -71,9 +71,9 @@ const (
 // MeekConfig specifies the behavior of a MeekConn
 type MeekConfig struct {
 
-	// LimitedMemoryEnvironment indicates whether to use smaller
-	// buffers to conserve memory.
-	LimitedMemoryEnvironment bool
+	// LimitBufferSizes indicates whether to use smaller buffers to
+	// conserve memory.
+	LimitBufferSizes bool
 
 	// DialAddress is the actual network address to dial to establish a
 	// connection to the meek server. This may be either a fronted or
@@ -357,7 +357,7 @@ func DialMeek(
 	meek.emptySendBuffer <- new(bytes.Buffer)
 	meek.relayWaitGroup.Add(1)
 
-	if meekConfig.LimitedMemoryEnvironment {
+	if meekConfig.LimitBufferSizes {
 		meek.fullReceiveBufferLength = LIMITED_FULL_RECEIVE_BUFFER_LENGTH
 		meek.readPayloadChunkLength = LIMITED_READ_PAYLOAD_CHUNK_LENGTH
 	}
