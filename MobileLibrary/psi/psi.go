@@ -25,6 +25,7 @@ package psi
 // Start/Stop interface on top of a single Controller instance.
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -157,6 +158,15 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 	} else {
 		psiphon.NoticeInfo("Feedback uploaded successfully")
 	}
+}
+
+// Get build info from tunnel-core
+func GetBuildInfo() string {
+	buildInfo, err := json.Marshal(common.GetBuildInfo())
+	if err != nil {
+		return ""
+	}
+	return string(buildInfo)
 }
 
 func GetPacketTunnelMTU() int {

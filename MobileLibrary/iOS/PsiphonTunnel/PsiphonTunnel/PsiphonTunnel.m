@@ -290,6 +290,10 @@
     });
 }
 
+// See comment in header.
++ (NSString * _Nonnull)getBuildInfo {
+    return GoPsiGetBuildInfo();
+}
 
 #pragma mark - PsiphonTunnel logic implementation methods (private)
 
