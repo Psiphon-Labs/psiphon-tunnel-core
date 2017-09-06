@@ -183,15 +183,12 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 - (void)onExiting;
 
 /*!
- Called when the device's Internet connection state is interrupted.
- This may mean that it had connectivity and now doesn't, or went from Wi-Fi to
- WWAN or vice versa.
- @note For many/most apps, the response to this callback should be to restart
- the Psiphon tunnel. It will eventually notice and begin reconnecting, but it
- may take much longer, depending on attempts to use the tunnel.
- Swift: @code func onDeviceInternetConnectivityInterrupted() @endcode
- */
-- (void)onDeviceInternetConnectivityInterrupted;
+Called when the device's Internet connection state has changed.
+This may mean that it had connectivity and now doesn't, or went from Wi-Fi to
+WWAN or vice versa or VPN state changed
+Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachability) @endcode
+*/
+- (void)onInternetReachabilityChanged:(Reachability*_Nonnull)currentReachability;
 
 /*!
  Called when tunnel-core determines which server egress regions are available
