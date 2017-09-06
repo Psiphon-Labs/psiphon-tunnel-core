@@ -365,4 +365,11 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
         uploadServer:(NSString * _Nonnull)uploadServer
  uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders;
 
+/*!
+ Provides the tunnel-core build info json as a string. See the tunnel-core build info code for details https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/psiphon/common/buildinfo.go.
+ @return  The build info json as a string.
+ Swift: @code func getBuildInfo() -> String @endcode
+ */
++ (NSString * _Nonnull)getBuildInfo;
+
  @end
