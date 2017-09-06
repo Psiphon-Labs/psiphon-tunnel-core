@@ -2390,6 +2390,7 @@ packet debugging snippet:
 // preallocated buffers to avoid GC churn.
 type Device struct {
 	name           string
+	writeMutex     sync.Mutex
 	deviceIO       io.ReadWriteCloser
 	inboundBuffer  []byte
 	outboundBuffer []byte
@@ -2481,7 +2482,7 @@ func (device *Device) Name() string {
 // ReadPacket reads one full packet from the tun device. The
 // return value is a slice of a static, reused buffer, so the
 // value is only valid until the next ReadPacket call.
-// Concurrent calls to ReadPacket are not supported.
+// Concurrent calls to ReadPacket are _not_ supported.
 func (device *Device) ReadPacket() ([]byte, error) {
 
 	// readTunPacket performs the platform dependent
@@ -2495,8 +2496,22 @@ func (device *Device) ReadPacket() ([]byte, error) {
 }
 
 // WritePacket writes one full packet to the tun device.
-// Concurrent calls to WritePacket are not supported.
+// Concurrent calls to WritePacket are supported.
 func (device *Device) WritePacket(packet []byte) error {
+
+	// This mutex serves two purposes:
+	//
+	// - It ensures only one concurrent goroutine can use
+	//   outboundBuffer, for those platforms that use that
+	//   buffer when writing.
+	// - It ensures that only one concurrent goroutine will
+	//   reach the underlying blocking Write syscall;
+	//   concurrent callers should hold at the mutex and not
+	//   spawn an unbounded number of OS threads for the
+	//   syscall.
+
+	device.writeMutex.Lock()
+	defer device.writeMutex.Unlock()
 
 	// writeTunPacket performs the platform dependent
 	// packet write operation.
