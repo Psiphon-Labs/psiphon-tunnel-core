@@ -29,6 +29,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -82,6 +83,8 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 	// - each TCP client transfers TCP_RELAY_TOTAL_SIZE bytes to the TCP server
 	// - the test checks that all data echoes back correctly and that the server packet
 	//   metrics reflects the expected amount of data transferred through the tunnel
+	// - the test also checks that the flow activity updater mechanism correctly reports
+	//   the total bytes transferred
 	// - this test runs in either IPv4 or IPv6 mode
 	// - the test host's public IP address is used as the TCP server IP address; it is
 	//   expected that the server tun device will NAT to the public interface; clients
@@ -90,6 +93,10 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 	//
 	// Note: this test can modify host network configuration; in addition to tun device
 	// and routing config, see the changes made in fixBindToDevice.
+
+	if TCP_RELAY_TOTAL_SIZE%TCP_RELAY_CHUNK_SIZE != 0 {
+		t.Fatalf("startTestTCPServer failed: invalid relay size")
+	}
 
 	MTU := DEFAULT_MTU
 
@@ -101,7 +108,12 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 		t.Fatalf("startTestTCPServer failed: %s", err)
 	}
 
-	testServer, err := startTestServer(useIPv6, MTU)
+	var counter bytesTransferredCounter
+	flowActivityUpdaterMaker := func(_ string, _ net.IP) []FlowActivityUpdater {
+		return []FlowActivityUpdater{&counter}
+	}
+
+	testServer, err := startTestServer(useIPv6, MTU, flowActivityUpdaterMaker)
 	if err != nil {
 		t.Fatalf("startTestServer failed: %s", err)
 	}
@@ -139,8 +151,6 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 
 			sendChunk, receiveChunk := make([]byte, TCP_RELAY_CHUNK_SIZE), make([]byte, TCP_RELAY_CHUNK_SIZE)
 
-			// Note: data transfer doesn't have to be exactly TCP_RELAY_TOTAL_SIZE,
-			// so not handling TCP_RELAY_TOTAL_SIZE%TCP_RELAY_CHUNK_SIZE != 0.
 			for i := int64(0); i < TCP_RELAY_TOTAL_SIZE; i += TCP_RELAY_CHUNK_SIZE {
 
 				_, err := rand.Read(sendChunk)
@@ -227,20 +237,59 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 		}
 	}
 
+	// Note: reported bytes transferred can exceed expected bytes
+	// transferred due to retransmission of packets.
+
+	upstreamBytesTransferred, downstreamBytesTransferred, _ := counter.Get()
+	expectedBytesTransferred := CONCURRENT_CLIENT_COUNT * TCP_RELAY_TOTAL_SIZE
+	if upstreamBytesTransferred < expectedBytesTransferred {
+		t.Fatalf("unexpected upstreamBytesTransferred: %d; expected at least %d",
+			upstreamBytesTransferred, expectedBytesTransferred)
+	}
+	if downstreamBytesTransferred < expectedBytesTransferred {
+		t.Fatalf("unexpected downstreamBytesTransferred: %d; expected at least %d",
+			downstreamBytesTransferred, expectedBytesTransferred)
+	}
+
 	testServer.stop()
 
 	testTCPServer.stop()
 }
 
+type bytesTransferredCounter struct {
+	// Note: 64-bit ints used with atomic operations are placed
+	// at the start of struct to ensure 64-bit alignment.
+	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
+	upstreamBytes       int64
+	downstreamBytes     int64
+	durationNanoseconds int64
+}
+
+func (counter *bytesTransferredCounter) UpdateProgress(
+	upstreamBytes, downstreamBytes int64, durationNanoseconds int64) {
+
+	atomic.AddInt64(&counter.upstreamBytes, upstreamBytes)
+	atomic.AddInt64(&counter.downstreamBytes, downstreamBytes)
+	atomic.AddInt64(&counter.durationNanoseconds, durationNanoseconds)
+}
+
+func (counter *bytesTransferredCounter) Get() (int64, int64, int64) {
+	return atomic.LoadInt64(&counter.upstreamBytes),
+		atomic.LoadInt64(&counter.downstreamBytes),
+		atomic.LoadInt64(&counter.durationNanoseconds)
+}
+
 type testServer struct {
 	logger       *testLogger
+	updaterMaker FlowActivityUpdaterMaker
 	tunServer    *Server
 	unixListener net.Listener
 	clientConns  *common.Conns
 	workers      *sync.WaitGroup
 }
 
-func startTestServer(useIPv6 bool, MTU int) (*testServer, error) {
+func startTestServer(
+	useIPv6 bool, MTU int, updaterMaker FlowActivityUpdaterMaker) (*testServer, error) {
 
 	logger := newTestLogger(true)
 
@@ -271,6 +320,7 @@ func startTestServer(useIPv6 bool, MTU int) (*testServer, error) {
 
 	server := &testServer{
 		logger:       logger,
+		updaterMaker: updaterMaker,
 		tunServer:    tunServer,
 		unixListener: unixListener,
 		clientConns:  new(common.Conns),
@@ -316,7 +366,8 @@ func (server *testServer) run() {
 				sessionID,
 				signalConn,
 				checkAllowedPortFunc,
-				checkAllowedPortFunc)
+				checkAllowedPortFunc,
+				server.updaterMaker)
 
 			signalConn.Wait()
 

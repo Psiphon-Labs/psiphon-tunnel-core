@@ -101,7 +101,7 @@ func interruptibleTCPDial(addr string, config *DialConfig) (*TCPConn, error) {
 	// Note: since this goroutine may be left running after an interrupt, don't
 	// call Notice() or perform other actions unexpected after a Controller stops.
 	// The lifetime of the goroutine may depend on the host OS TCP connect timeout
-	// when tcpDial, amoung other things, when makes a blocking syscall.Connect()
+	// when tcpDial, among other things, when makes a blocking syscall.Connect()
 	// call.
 	go func() {
 		if config.IPv6Synthesizer != nil {

@@ -59,6 +59,8 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  @protocol TunneledAppDelegate
  Used to communicate with the application that is using the PsiphonTunnel framework,
  and retrieve config info from it.
+
+ All delegate methods will be called on a single serial dispatch queue. They will be made asynchronously unless otherwise noted (specifically when calling getPsiphonConfig and getEmbeddedServerEntries).
  */
 @protocol TunneledAppDelegate <NSObject>
 
@@ -89,10 +91,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  - `EmitDiagnosticNotices`
  - `EgressRegion`
  - `EstablishTunnelTimeoutSeconds`
- - Should only be set if the Psiphon library is handling upgrade downloading (which it usually is _not_):
-   - `UpgradeDownloadURLs`
-   - `UpgradeDownloadClientVersionHeader`
-   - `UpgradeDownloadFilename`: Will be set to a sane default if not supplied.
  - Only set if disabling timeouts (for very slow network connections):
    - `TunnelConnectTimeoutSeconds`
    - `TunnelPortForwardDialTimeoutSeconds`
@@ -121,15 +119,24 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 
 /*!
  Called when the tunnel is starting to get the initial server entries (typically embedded in the app) that will be used to bootstrap the Psiphon tunnel connection. This value is in a particular format and will be supplied by Psiphon Inc.
+ If getEmbeddedServerEntriesPath is also implemented, it will take precedence over this method, unless getEmbeddedServerEntriesPath returns NULL or an empty string.
  @return  Pre-existing server entries to use when attempting to connect to a server. Must return an empty string if there are no embedded server entries. Must return NULL if there is an error and the tunnel starting should abort.
  */
 - (NSString * _Nullable)getEmbeddedServerEntries;
+
 
 //
 // Optional delegate methods. Note that some of these are probably necessary for
 // for a functioning app to implement, for example `onConnected`.
 //
 @optional
+
+/*!
+  Called when the tunnel is starting to get the initial server entries (typically embedded in the app) that will be used to bootstrap the Psiphon tunnel connection. This value is in a particular format and will be supplied by Psiphon Inc.
+  If this method is implemented, it takes precedence over getEmbeddedServerEntries, and getEmbeddedServerEntries will not be called unless this method returns NULL or an empty string.
+  @return Optional path where embedded server entries file is located. This file should be accessible by the Network Extension.
+ */
+- (NSString * _Nullable)getEmbeddedServerEntriesPath;
 
 /*!
  Gets runtime errors info that may be useful for debugging.
@@ -273,21 +280,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  */
 - (void)onHomepage:(NSString * _Nonnull)url;
 
-/*!
- Called if the current version of the client is the latest (i.e., there is no upgrade available).
- Note: This is probably only applicable to Psiphon Inc.'s apps.
- Swift: @code func onClientIsLatestVersion() @endcode
- */
-- (void)onClientIsLatestVersion;
-
-/*!
- Called when a client upgrade has been downloaded.
- @param filename  The name of the file containing the upgrade.
- Note: This is probably only applicable to Psiphon Inc.'s apps.
- Swift: @code func onClientUpgradeDownloaded(_ filename: String) @endcode
- */
-- (void)onClientUpgradeDownloaded:(NSString * _Nonnull)filename;
-
 @end
 
 /*!
@@ -372,5 +364,12 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
            publicKey:(NSString * _Nonnull)b64EncodedPublicKey
         uploadServer:(NSString * _Nonnull)uploadServer
  uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders;
+
+/*!
+ Provides the tunnel-core build info json as a string. See the tunnel-core build info code for details https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/psiphon/common/buildinfo.go.
+ @return  The build info json as a string.
+ Swift: @code func getBuildInfo() -> String @endcode
+ */
++ (NSString * _Nonnull)getBuildInfo;
 
  @end

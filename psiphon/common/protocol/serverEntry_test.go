@@ -54,7 +54,7 @@ func TestDecodeServerEntryList(t *testing.T) {
 	}
 	for _, serverEntry := range serverEntries {
 		if serverEntry.IpAddress != _EXPECTED_IP_ADDRESS {
-			t.Error("unexpected IP address in decoded server entry: %s", serverEntry.IpAddress)
+			t.Errorf("unexpected IP address in decoded server entry: %s", serverEntry.IpAddress)
 		}
 	}
 }
@@ -86,7 +86,7 @@ func TestStreamingServerEntryDecoder(t *testing.T) {
 	}
 	for _, serverEntry := range serverEntries {
 		if serverEntry.IpAddress != _EXPECTED_IP_ADDRESS {
-			t.Error("unexpected IP address in decoded server entry: %s", serverEntry.IpAddress)
+			t.Errorf("unexpected IP address in decoded server entry: %s", serverEntry.IpAddress)
 		}
 	}
 }
@@ -105,7 +105,7 @@ func TestInvalidServerEntries(t *testing.T) {
 		}
 		err = ValidateServerEntry(serverEntry)
 		if err == nil {
-			t.Error("server entry should not validate: %s", testCase)
+			t.Errorf("server entry should not validate: %s", testCase)
 		}
 	}
 }

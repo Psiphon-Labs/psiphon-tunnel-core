@@ -24,7 +24,6 @@
 		66BDB02A1DA6BFCC0079384C /* PsiphonTunnel.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 66BDB0201DA6BFCC0079384C /* PsiphonTunnel.framework */; };
 		66BDB02F1DA6BFCC0079384C /* PsiphonTunnelTests.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB02E1DA6BFCC0079384C /* PsiphonTunnelTests.m */; };
 		66BDB0311DA6BFCC0079384C /* PsiphonTunnel.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB0231DA6BFCC0079384C /* PsiphonTunnel.h */; settings = {ATTRIBUTES = (Public, ); }; };
-		66BDB03E1DA6C79E0079384C /* rootCAs.txt in Resources */ = {isa = PBXBuildFile; fileRef = 66BDB03D1DA6C79E0079384C /* rootCAs.txt */; };
 		66BDB0441DA6C7DD0079384C /* PsiphonTunnel.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0431DA6C7DD0079384C /* PsiphonTunnel.m */; };
 		66BDB05A1DC26CCC0079384C /* SBJson4.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB04B1DC26CCC0079384C /* SBJson4.h */; };
 		66BDB05B1DC26CCC0079384C /* SBJson4Parser.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB04C1DC26CCC0079384C /* SBJson4Parser.h */; };
@@ -41,6 +40,7 @@
 		66BDB0661DC26CCC0079384C /* SBJson4StreamWriterState.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0571DC26CCC0079384C /* SBJson4StreamWriterState.m */; };
 		66BDB0671DC26CCC0079384C /* SBJson4Writer.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB0581DC26CCC0079384C /* SBJson4Writer.h */; };
 		66BDB0681DC26CCC0079384C /* SBJson4Writer.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0591DC26CCC0079384C /* SBJson4Writer.m */; };
+		EFED7EBF1F587F6E0078980F /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = EFED7EBE1F587F6E0078980F /* libresolv.tbd */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -86,7 +86,6 @@
 		66BDB0291DA6BFCC0079384C /* PsiphonTunnelTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PsiphonTunnelTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		66BDB02E1DA6BFCC0079384C /* PsiphonTunnelTests.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PsiphonTunnelTests.m; sourceTree = "<group>"; };
 		66BDB0301DA6BFCC0079384C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		66BDB03D1DA6C79E0079384C /* rootCAs.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = rootCAs.txt; path = PsiphonTunnel/rootCAs.txt; sourceTree = "<group>"; };
 		66BDB0431DA6C7DD0079384C /* PsiphonTunnel.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = PsiphonTunnel.m; sourceTree = "<group>"; };
 		66BDB04B1DC26CCC0079384C /* SBJson4.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SBJson4.h; sourceTree = "<group>"; };
 		66BDB04C1DC26CCC0079384C /* SBJson4Parser.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SBJson4Parser.h; sourceTree = "<group>"; };
@@ -103,6 +102,7 @@
 		66BDB0571DC26CCC0079384C /* SBJson4StreamWriterState.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SBJson4StreamWriterState.m; sourceTree = "<group>"; };
 		66BDB0581DC26CCC0079384C /* SBJson4Writer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SBJson4Writer.h; sourceTree = "<group>"; };
 		66BDB0591DC26CCC0079384C /* SBJson4Writer.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SBJson4Writer.m; sourceTree = "<group>"; };
+		EFED7EBE1F587F6E0078980F /* libresolv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libresolv.tbd; path = usr/lib/libresolv.tbd; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -110,6 +110,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EFED7EBF1F587F6E0078980F /* libresolv.tbd in Frameworks */,
 				660E0B7A1E2D6EB6002BF5D4 /* Psi in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -166,6 +167,7 @@
 				6685BDC31E2E881200F0E414 /* Psi */,
 				66BDB02D1DA6BFCC0079384C /* PsiphonTunnelTests */,
 				66BDB0211DA6BFCC0079384C /* Products */,
+				EFED7EBD1F587F6E0078980F /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -205,7 +207,6 @@
 			children = (
 				669541B61EF9FECF0038E125 /* build-git-commit.txt */,
 				6685BDD81E300AC200F0E414 /* strip-frameworks.sh */,
-				66BDB03D1DA6C79E0079384C /* rootCAs.txt */,
 			);
 			name = Resources;
 			sourceTree = "<group>";
@@ -230,6 +231,14 @@
 				66BDB0591DC26CCC0079384C /* SBJson4Writer.m */,
 			);
 			path = "json-framework";
+			sourceTree = "<group>";
+		};
+		EFED7EBD1F587F6E0078980F /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				EFED7EBE1F587F6E0078980F /* libresolv.tbd */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -345,7 +354,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				669541B71EF9FECF0038E125 /* build-git-commit.txt in Resources */,
-				66BDB03E1DA6C79E0079384C /* rootCAs.txt in Resources */,
 				6685BDD91E300AC200F0E414 /* strip-frameworks.sh in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

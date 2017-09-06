@@ -25,6 +25,7 @@ package psi
 // Start/Stop interface on top of a single Controller instance.
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
+	"os"
 )
 
 type PsiphonProvider interface {
@@ -49,7 +51,8 @@ var shutdownBroadcast chan struct{}
 var controllerWaitGroup *sync.WaitGroup
 
 func Start(
-	configJson, embeddedServerEntryList string,
+	configJson, embeddedServerEntryList,
+	embeddedServerEntryListPath string,
 	provider PsiphonProvider,
 	useDeviceBinder bool, useIPv6Synthesizer bool) error {
 
@@ -59,6 +62,14 @@ func Start(
 	if controller != nil {
 		return fmt.Errorf("already started")
 	}
+
+	// Wrap the provider in a layer that locks a mutex before calling a provider function.
+	// The the provider callbacks are Java/Obj-C via gomobile, they are cgo calls that
+	// can cause OS threads to be spawned. The mutex prevents many calling goroutines from
+	// causing unbounded numbers of OS threads to be spawned.
+	// TODO: replace the mutex with a semaphore, to allow a larger but still bounded concurrent
+	// number of calls to the provider?
+	provider = newMutexPsiphonProvider(provider)
 
 	config, err := psiphon.LoadConfig([]byte(configJson))
 	if err != nil {
@@ -89,16 +100,10 @@ func Start(
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
-	serverEntries, err := protocol.DecodeServerEntryList(
-		embeddedServerEntryList,
-		common.GetCurrentTimestamp(),
-		protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
+	// Stores list of server entries.
+	err = storeServerEntries(embeddedServerEntryListPath, embeddedServerEntryList)
 	if err != nil {
-		return fmt.Errorf("error decoding embedded server entry list: %s", err)
-	}
-	err = psiphon.StoreServerEntries(serverEntries, false)
-	if err != nil {
-		return fmt.Errorf("error storing embedded server entry list: %s", err)
+		return err
 	}
 
 	controller, err = psiphon.NewController(config)
@@ -131,7 +136,8 @@ func Stop() {
 	}
 }
 
-// This is a passthrough to Controller.SetClientVerificationPayloadForActiveTunnels.
+// SetClientVerificationPayload is a passthrough to
+// Controller.SetClientVerificationPayloadForActiveTunnels.
 // Note: should only be called after Start() and before Stop(); otherwise,
 // will silently take no action.
 func SetClientVerificationPayload(clientVerificationPayload string) {
@@ -154,6 +160,15 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 	}
 }
 
+// Get build info from tunnel-core
+func GetBuildInfo() string {
+	buildInfo, err := json.Marshal(common.GetBuildInfo())
+	if err != nil {
+		return ""
+	}
+	return string(buildInfo)
+}
+
 func GetPacketTunnelMTU() int {
 	return tun.DEFAULT_MTU
 }
@@ -164,4 +179,85 @@ func GetPacketTunnelDNSResolverIPv4Address() string {
 
 func GetPacketTunnelDNSResolverIPv6Address() string {
 	return tun.GetTransparentDNSResolverIPv6Address().String()
+}
+
+// Helper function to store a list of server entries.
+// if embeddedServerEntryListPath is not empty, embeddedServerEntryList will be ignored.
+func storeServerEntries(embeddedServerEntryListPath, embeddedServerEntryList string) error {
+
+	// if embeddedServerEntryListPath is not empty, ignore embeddedServerEntryList.
+	if embeddedServerEntryListPath != "" {
+
+		serverEntriesFile, err := os.Open(embeddedServerEntryListPath)
+		if err != nil {
+			return fmt.Errorf("failed to read remote server list: %s", common.ContextError(err))
+		}
+		defer serverEntriesFile.Close()
+
+		err = psiphon.StreamingStoreServerEntriesWithIOReader(serverEntriesFile, protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
+		if err != nil {
+			return fmt.Errorf("failed to store common remote server list: %s", common.ContextError(err))
+		}
+
+	} else {
+
+		serverEntries, err := protocol.DecodeServerEntryList(
+			embeddedServerEntryList,
+			common.GetCurrentTimestamp(),
+			protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
+		if err != nil {
+			return fmt.Errorf("error decoding embedded server entry list: %s", err)
+		}
+		err = psiphon.StoreServerEntries(serverEntries, false)
+		if err != nil {
+			return fmt.Errorf("error storing embedded server entry list: %s", err)
+		}
+	}
+
+	return nil
+}
+
+type mutexPsiphonProvider struct {
+	sync.Mutex
+	p PsiphonProvider
+}
+
+func newMutexPsiphonProvider(p PsiphonProvider) *mutexPsiphonProvider {
+	return &mutexPsiphonProvider{p: p}
+}
+
+func (p *mutexPsiphonProvider) Notice(noticeJSON string) {
+	p.Lock()
+	defer p.Unlock()
+	p.p.Notice(noticeJSON)
+}
+
+func (p *mutexPsiphonProvider) HasNetworkConnectivity() int {
+	p.Lock()
+	defer p.Unlock()
+	return p.p.HasNetworkConnectivity()
+}
+
+func (p *mutexPsiphonProvider) BindToDevice(fileDescriptor int) error {
+	p.Lock()
+	defer p.Unlock()
+	return p.p.BindToDevice(fileDescriptor)
+}
+
+func (p *mutexPsiphonProvider) IPv6Synthesize(IPv4Addr string) string {
+	p.Lock()
+	defer p.Unlock()
+	return p.p.IPv6Synthesize(IPv4Addr)
+}
+
+func (p *mutexPsiphonProvider) GetPrimaryDnsServer() string {
+	p.Lock()
+	defer p.Unlock()
+	return p.p.GetPrimaryDnsServer()
+}
+
+func (p *mutexPsiphonProvider) GetSecondaryDnsServer() string {
+	p.Lock()
+	defer p.Unlock()
+	return p.p.GetSecondaryDnsServer()
 }

@@ -17,8 +17,8 @@
  *
  */
 
-// Package stats counts and keeps track of session stats. These are per-domain
-// bytes transferred and total bytes transferred.
+// Package transferstats counts and keeps track of session stats. These are
+// per-domain bytes transferred and total bytes transferred.
 package transferstats
 
 /*

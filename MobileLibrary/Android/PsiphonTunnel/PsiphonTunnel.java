@@ -401,6 +401,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             Psi.Start(
                     loadPsiphonConfig(mHostService.getContext(), fd),
                     embeddedServerEntries,
+                    "",
                     this,
                     isVpnMode(),
                     false // Do not use IPv6 synthesizer for android

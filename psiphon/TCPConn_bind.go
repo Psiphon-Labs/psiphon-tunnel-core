@@ -107,7 +107,7 @@ func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 			copy(ipv6[:], ipAddr.To16())
 			domain = syscall.AF_INET6
 		} else {
-			lastErr = common.ContextError(fmt.Errorf("Got invalid IP address: %s", ipAddr.String()))
+			lastErr = common.ContextError(fmt.Errorf("invalid IP address: %s", ipAddr.String()))
 			continue
 		}
 		if domain == syscall.AF_INET {
@@ -123,6 +123,8 @@ func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 			lastErr = common.ContextError(err)
 			continue
 		}
+
+		tcpDialSetAdditionalSocketOptions(socketFd)
 
 		if config.DeviceBinder != nil {
 			// WARNING: this potentially violates the direction to not call into

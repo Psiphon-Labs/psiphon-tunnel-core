@@ -433,7 +433,7 @@ func (state *ClientSeedState) Resume(
 	state.signalIssueSLOKs = signalIssueSLOKs
 }
 
-// NewClientSeedPortForwardState creates a new client port forward
+// NewClientSeedPortForward creates a new client port forward
 // traffic progress tracker. Port forward progress reported to the
 // ClientSeedPortForward is added to seed state progress for all
 // seed specs containing upstreamIPAddress in their subnets.
@@ -497,7 +497,7 @@ func (state *ClientSeedState) sendIssueSLOKsSignal() {
 	}
 }
 
-// UpdateProgress adds port forward bytes transfered and duration to
+// UpdateProgress adds port forward bytes transferred and duration to
 // all seed spec progresses associated with the port forward.
 // If UpdateProgress is invoked after the SLOK time period has rolled
 // over, any pending seeded SLOKs are issued and all progress is reset.
@@ -783,7 +783,7 @@ type PaveLogInfo struct {
 // epoch to endTime, and a pave file for each OSL. paveServerEntries is
 // a map from hex-encoded OSL IDs to server entries to pave into that OSL.
 // When entries are found, OSL will contain those entries, newline
-// seperated. Otherwise the OSL will still be issued, but be empty.
+// separated. Otherwise the OSL will still be issued, but be empty.
 //
 // As OSLs outside the epoch-endTime range will no longer appear in
 // the registry, Pave is intended to be used to create the full set
@@ -1101,7 +1101,7 @@ func UnpackRegistry(
 	registryPackage []byte, signingPublicKey string) (*Registry, []byte, error) {
 
 	encodedRegistry, err := common.ReadAuthenticatedDataPackage(
-		registryPackage, signingPublicKey)
+		registryPackage, true, signingPublicKey)
 	if err != nil {
 		return nil, nil, common.ContextError(err)
 	}
@@ -1278,7 +1278,7 @@ func (registry *Registry) UnpackOSL(
 	}
 
 	oslPayload, err := common.ReadAuthenticatedDataPackage(
-		dataPackage, signingPublicKey)
+		dataPackage, true, signingPublicKey)
 	if err != nil {
 		return "", common.ContextError(err)
 	}

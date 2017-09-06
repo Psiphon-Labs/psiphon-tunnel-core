@@ -39,6 +39,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
 const (
@@ -214,7 +215,7 @@ func (server *TunnelServer) ResetAllClientOSLConfigs() {
 }
 
 // SetClientHandshakeState sets the handshake state -- that it completed and
-// what paramaters were passed -- in sshClient. This state is used for allowing
+// what parameters were passed -- in sshClient. This state is used for allowing
 // port forwards and for future traffic rule selection. SetClientHandshakeState
 // also triggers an immediate traffic rule re-selection, as the rules selected
 // upon tunnel establishment may no longer apply now that handshake values are
@@ -333,7 +334,7 @@ func (sshServer *sshServer) runListener(
 	listenerTunnelProtocol string) {
 
 	runningProtocols := make([]string, 0)
-	for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
+	for tunnelProtocol := range sshServer.support.Config.TunnelProtocolPorts {
 		runningProtocols = append(runningProtocols, tunnelProtocol)
 	}
 
@@ -460,7 +461,7 @@ func (sshServer *sshServer) registerEstablishedClient(client *sshClient) bool {
 
 	// In the case of a duplicate client sessionID, the previous client is closed.
 	// - Well-behaved clients generate pick a random sessionID that should be
-	//   unique (won't accidentally conflict) and hard to guess (can't be targetted
+	//   unique (won't accidentally conflict) and hard to guess (can't be targeted
 	//   by a malicious client).
 	// - Clients reuse the same sessionID when a tunnel is unexpectedly disconnected
 	//   and resestablished. In this case, when the same server is selected, this logic
@@ -531,7 +532,7 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 	zeroProtocolStats := func() map[string]map[string]int64 {
 		stats := make(map[string]map[string]int64)
 		stats["ALL"] = zeroStats()
-		for tunnelProtocol, _ := range sshServer.support.Config.TunnelProtocolPorts {
+		for tunnelProtocol := range sshServer.support.Config.TunnelProtocolPorts {
 			stats[tunnelProtocol] = zeroStats()
 		}
 		return stats
@@ -981,7 +982,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 		// but that's no longer supported.
 		if len(password) == expectedSessionIDLength+expectedSSHPasswordLength {
 			sshPasswordPayload.SessionId = string(password[0:expectedSessionIDLength])
-			sshPasswordPayload.SshPassword = string(password[expectedSSHPasswordLength:len(password)])
+			sshPasswordPayload.SshPassword = string(password[expectedSSHPasswordLength:])
 		} else {
 			return nil, common.ContextError(fmt.Errorf("invalid password payload for %q", conn.User()))
 		}
@@ -1036,7 +1037,7 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 		// Note: here we previously logged messages for fail2ban to act on. This is no longer
 		// done as the complexity outweighs the benefits.
 		//
-		// - The SSH credential is not secret -- it's in the server entry. Attackers targetting
+		// - The SSH credential is not secret -- it's in the server entry. Attackers targeting
 		//   the server likely already have the credential. On the other hand, random scanning and
 		//   brute forcing is mitigated with high entropy random passwords, rate limiting
 		//   (implemented on the host via iptables), and limited capabilities (the SSH session can
@@ -1050,7 +1051,7 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 		//
 		// Random scanning and brute forcing of port 22 will result in log noise. To mitigate this,
 		// not every authentication failure is logged. A summary log is emitted periodically to
-		// retain some record of this activity in case this is relevent to, e.g., a performance
+		// retain some record of this activity in case this is relevant to, e.g., a performance
 		// investigation.
 
 		atomic.AddInt64(&sshClient.sshServer.authFailedCount, 1)
@@ -1298,6 +1299,12 @@ func (sshClient *sshClient) runTunnel(
 
 		if newChannel.ChannelType() == protocol.PACKET_TUNNEL_CHANNEL_TYPE {
 
+			if !sshClient.sshServer.support.Config.RunPacketTunnel {
+				sshClient.rejectNewChannel(
+					newChannel, ssh.Prohibited, "unsupported packet tunnel channel type")
+				continue
+			}
+
 			// Accept this channel immediately. This channel will replace any
 			// previously existing packet tunnel channel for this client.
 
@@ -1310,9 +1317,8 @@ func (sshClient *sshClient) runTunnel(
 
 			sshClient.setPacketTunnelChannel(packetTunnelChannel)
 
-			// PacketTunnelServer will run the client's packet tunnel. ClientDisconnected will
-			// be called by setPacketTunnelChannel: either if the client starts a new packet
-			// tunnel channel, or on exit of this function.
+			// PacketTunnelServer will run the client's packet tunnel. If neessary, ClientConnected
+			// will stop packet tunnel workers for any previous packet tunnel channel.
 
 			checkAllowedTCPPortFunc := func(upstreamIPAddress net.IP, port int) bool {
 				return sshClient.isPortForwardPermitted(portForwardTypeTCP, false, upstreamIPAddress, port)
@@ -1322,11 +1328,23 @@ func (sshClient *sshClient) runTunnel(
 				return sshClient.isPortForwardPermitted(portForwardTypeUDP, false, upstreamIPAddress, port)
 			}
 
+			flowActivityUpdaterMaker := func(
+				upstreamHostname string, upstreamIPAddress net.IP) []tun.FlowActivityUpdater {
+
+				var updaters []tun.FlowActivityUpdater
+				oslUpdater := sshClient.newClientSeedPortForward(upstreamIPAddress)
+				if oslUpdater != nil {
+					updaters = append(updaters, oslUpdater)
+				}
+				return updaters
+			}
+
 			sshClient.sshServer.support.PacketTunnelServer.ClientConnected(
 				sshClient.sessionID,
 				packetTunnelChannel,
 				checkAllowedTCPPortFunc,
-				checkAllowedUDPPortFunc)
+				checkAllowedUDPPortFunc,
+				flowActivityUpdaterMaker)
 		}
 
 		if newChannel.ChannelType() != "direct-tcpip" {
@@ -1395,22 +1413,22 @@ func (sshClient *sshClient) runTunnel(
 	// Stop all other worker goroutines
 	sshClient.stopRunning()
 
-	// This calls PacketTunnelServer.ClientDisconnected,
-	// which stops packet tunnel workers.
-	sshClient.setPacketTunnelChannel(nil)
+	if sshClient.sshServer.support.Config.RunPacketTunnel {
+		// PacketTunnelServer.ClientDisconnected stops packet tunnel workers.
+		sshClient.sshServer.support.PacketTunnelServer.ClientDisconnected(
+			sshClient.sessionID)
+	}
 
 	waitGroup.Wait()
 }
 
 // setPacketTunnelChannel sets the single packet tunnel channel
 // for this sshClient. Any existing packet tunnel channel is
-// closed and its underlying session idled.
+// closed.
 func (sshClient *sshClient) setPacketTunnelChannel(channel ssh.Channel) {
 	sshClient.Lock()
 	if sshClient.packetTunnelChannel != nil {
 		sshClient.packetTunnelChannel.Close()
-		sshClient.sshServer.support.PacketTunnelServer.ClientDisconnected(
-			sshClient.sessionID)
 	}
 	sshClient.packetTunnelChannel = channel
 	sshClient.Unlock()
@@ -2059,7 +2077,7 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	// Dial the remote address.
 	//
-	// Hostname resolution is performed explicitly, as a seperate step, as the target IP
+	// Hostname resolution is performed explicitly, as a separate step, as the target IP
 	// address is used for traffic rules (AllowSubnets) and OSL seed progress.
 	//
 	// Contexts are used for cancellation (via sshClient.runContext, which is cancelled

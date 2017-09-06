@@ -48,7 +48,7 @@ import (
 // is not set, the connection may be made directly, depending on split tunnel
 // classification, when that feature is supported and active.
 // downstreamConn is an optional parameter which specifies a connection to be
-// explictly closed when the Dialed connection is closed. For instance, this
+// explicitly closed when the Dialed connection is closed. For instance, this
 // is used to close downstreamConn App<->LocalProxy connections when the related
 // LocalProxy<->SshPortForward connections close.
 type Tunneler interface {
@@ -56,7 +56,7 @@ type Tunneler interface {
 	SignalComponentFailure()
 }
 
-// TunnerOwner specifies the interface required by Tunnel to notify its
+// TunnelOwner specifies the interface required by Tunnel to notify its
 // owner when it has failed. The owner may, as in the case of the Controller,
 // remove the tunnel from its list of active tunnels.
 type TunnelOwner interface {
@@ -127,12 +127,12 @@ func EstablishTunnel(
 	sessionId string,
 	pendingConns *common.Conns,
 	serverEntry *protocol.ServerEntry,
+	selectedProtocol string,
 	adjustedEstablishStartTime monotime.Time,
 	tunnelOwner TunnelOwner) (tunnel *Tunnel, err error) {
 
-	selectedProtocol, err := selectProtocol(config, serverEntry)
-	if err != nil {
-		return nil, common.ContextError(err)
+	if !serverEntry.SupportsProtocol(selectedProtocol) {
+		return nil, common.ContextError(fmt.Errorf("server does not support selected protocol"))
 	}
 
 	// Build transport layers and establish SSH connection. Note that
@@ -179,7 +179,8 @@ func EstablishTunnel(
 	// fails.
 	if !config.DisableApi {
 		NoticeInfo("starting server context for %s", tunnel.serverEntry.IpAddress)
-		tunnel.serverContext, err = NewServerContext(tunnel, sessionId)
+		tunnel.serverContext, err = NewServerContext(
+			tunnel, sessionId, config.IgnoreHandshakeStatsRegexps)
 		if err != nil {
 			return nil, common.ContextError(
 				fmt.Errorf("error starting server context for %s: %s",
@@ -316,7 +317,6 @@ func (tunnel *Tunnel) DialPacketTunnelChannel() (net.Conn, error) {
 	channel, requests, err := tunnel.sshClient.OpenChannel(
 		protocol.PACKET_TUNNEL_CHANNEL_TYPE, nil)
 	if err != nil {
-
 		// TODO: conditional on type of error or error message?
 		select {
 		case tunnel.signalPortForwardFailure <- *new(struct{}):
@@ -372,10 +372,10 @@ func (tunnel *Tunnel) SetClientVerificationPayload(clientVerificationPayload str
 	}
 }
 
-// TunneledConn implements net.Conn and wraps a port foward connection.
+// TunneledConn implements net.Conn and wraps a port forward connection.
 // It is used to hook into Read and Write to observe I/O errors and
 // report these errors back to the tunnel monitor as port forward failures.
-// TunneledConn optionally tracks a peer connection to be explictly closed
+// TunneledConn optionally tracks a peer connection to be explicitly closed
 // when the TunneledConn is closed.
 type TunneledConn struct {
 	net.Conn
@@ -416,15 +416,20 @@ func (conn *TunneledConn) Close() error {
 	return conn.Conn.Close()
 }
 
+var errProtocolNotSupported = errors.New("server does not support required protocol(s)")
+
 // selectProtocol is a helper that picks the tunnel protocol
 func selectProtocol(
-	config *Config, serverEntry *protocol.ServerEntry) (selectedProtocol string, err error) {
+	config *Config,
+	serverEntry *protocol.ServerEntry,
+	excludeMeek bool) (selectedProtocol string, err error) {
 
 	// TODO: properly handle protocols (e.g. FRONTED-MEEK-OSSH) vs. capabilities (e.g., {FRONTED-MEEK, OSSH})
 	// for now, the code is simply assuming that MEEK capabilities imply OSSH capability.
 	if config.TunnelProtocol != "" {
-		if !serverEntry.SupportsProtocol(config.TunnelProtocol) {
-			return "", common.ContextError(fmt.Errorf("server does not have required capability"))
+		if !serverEntry.SupportsProtocol(config.TunnelProtocol) ||
+			(excludeMeek && protocol.TunnelProtocolUsesMeek(config.TunnelProtocol)) {
+			return "", errProtocolNotSupported
 		}
 		selectedProtocol = config.TunnelProtocol
 	} else {
@@ -434,9 +439,9 @@ func selectProtocol(
 		// and a simpler ranked preference of protocols could lead to that protocol never
 		// being selected.
 
-		candidateProtocols := serverEntry.GetSupportedProtocols()
+		candidateProtocols := serverEntry.GetSupportedProtocols(excludeMeek)
 		if len(candidateProtocols) == 0 {
-			return "", common.ContextError(fmt.Errorf("server does not have any supported capabilities"))
+			return "", errProtocolNotSupported
 		}
 
 		index, err := common.MakeSecureRandomInt(len(candidateProtocols))
@@ -595,6 +600,7 @@ func initMeekConfig(
 		config.TrustedCACertificatesFilename != "")
 
 	return &MeekConfig{
+		LimitBufferSizes:              config.LimitMeekBufferSizes,
 		DialAddress:                   dialAddress,
 		UseHTTPS:                      useHTTPS,
 		TLSProfile:                    selectedTLSProfile,
@@ -723,7 +729,7 @@ func dialSsh(
 	if upstreamProxyType != "" {
 		dialStats.UpstreamProxyType = upstreamProxyType
 		dialStats.UpstreamProxyCustomHeaderNames = make([]string, 0)
-		for name, _ := range dialConfig.CustomHeaders {
+		for name := range dialConfig.CustomHeaders {
 			if selectedUserAgent && name == "User-Agent" {
 				continue
 			}
@@ -968,7 +974,7 @@ func makeRandomPeriod(min, max time.Duration) time.Duration {
 // failed dial or failed read/write. This keep alive has a shorter
 // timeout.
 //
-// Note that port foward failures may be due to non-failure conditions.
+// Note that port forward failures may be due to non-failure conditions.
 // For example, when the user inputs an invalid domain name and
 // resolution is done by the ssh server; or trying to connect to a
 // non-white-listed port; and the error message in these cases is not
@@ -1056,7 +1062,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	signalStatusRequest := make(chan struct{})
 	go func() {
 		defer requestsWaitGroup.Done()
-		for _ = range signalStatusRequest {
+		for range signalStatusRequest {
 			sendStats(tunnel)
 		}
 	}()
@@ -1237,7 +1243,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		// we use the last data received time as the estimated tunnel end time.
 		//
 		// One potential issue with using the last received time is receiving data
-		// after an extended sleep because the device sleep occured with data still in
+		// after an extended sleep because the device sleep occurred with data still in
 		// the OS socket read buffer. This is not expected to happen on Android, as the
 		// OS will wake a process when it has TCP data available to read. (For this reason,
 		// the actual long sleep issue is only with an idle tunnel; in this case the client

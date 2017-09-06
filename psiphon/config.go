@@ -475,6 +475,22 @@ type Config struct {
 	// file descriptor. The file descriptor is duped in NewController.
 	// When PacketTunnelTunDeviceFileDescriptor is set, TunnelPoolSize must be 1.
 	PacketTunnelTunFileDescriptor int
+
+	// StaggerConnectionWorkersMilliseconds adds a specified delay before making each
+	// server candidate available to connection workers. This option is enabled when
+	// StaggerConnectionWorkersMilliseconds > 0.
+	StaggerConnectionWorkersMilliseconds int
+
+	// LimitMeekConnectionWorkers limits the number of concurrent connection workers
+	// attempting connections with meek protocols.
+	// This option is enabled when LimitMeekConnectionWorkers > 0.
+	LimitMeekConnectionWorkers int
+
+	// LimitMeekBufferSizes selects smaller buffers for meek protocols.
+	LimitMeekBufferSizes bool
+
+	// IgnoreHandshakeStatsRegexps skips compiling and using stats regexes.
+	IgnoreHandshakeStatsRegexps bool
 }
 
 // DownloadURL specifies a URL for downloading resources along with parameters

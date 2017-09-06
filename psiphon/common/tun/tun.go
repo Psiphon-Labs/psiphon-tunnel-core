@@ -17,6 +17,10 @@
  *
  */
 
+// Copyright 2009 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 /*
 
 Package tun is an IP packet tunnel server and client. It supports tunneling
@@ -146,6 +150,7 @@ const (
 	DEFAULT_UPSTREAM_PACKET_QUEUE_SIZE   = 32768
 	DEFAULT_IDLE_SESSION_EXPIRY_SECONDS  = 300
 	ORPHAN_METRICS_CHECKPOINTER_PERIOD   = 30 * time.Minute
+	FLOW_IDLE_EXPIRY                     = 60 * time.Second
 )
 
 // ServerConfig specifies the configuration of a packet tunnel server.
@@ -289,8 +294,12 @@ func (server *Server) Start() {
 
 	// TODO: this is a hack workaround for deviceIO.Read()
 	// not getting interrupted by deviceIO.Close(), and, as a
-	// result, runDeviceDownstream no terminating. This
-	// workaround breaks synchronized shutdown.
+	// result, runDeviceDownstream not terminating.
+	//
+	// This workaround breaks synchronized shutdown and leaves
+	// behind a hung goroutine which holds references to various
+	// objects; it's only suitable when Server.Stop() is
+	// followed by termination of the process.
 	//
 	//server.workers.Add(1)
 	go server.runDeviceDownstream()
@@ -309,7 +318,7 @@ func (server *Server) Stop() {
 	// Wait for any in-progress ClientConnected calls to complete.
 	server.connectedInProgress.Wait()
 
-	// After this point, no futher clients will be added: all
+	// After this point, no further clients will be added: all
 	// in-progress ClientConnected calls have finished; and any
 	// later ClientConnected calls won't get past their
 	// server.runContext.Done() checks.
@@ -327,7 +336,23 @@ func (server *Server) Stop() {
 	server.config.Logger.WithContext().Info("stopped")
 }
 
+// AllowedPortChecker is a function which returns true when it is
+// permitted to relay packets to the specified upstream IP address
+// and/or port.
 type AllowedPortChecker func(upstreamIPAddress net.IP, port int) bool
+
+// FlowActivityUpdater defines an interface for receiving updates for
+// flow activity. Values passed to UpdateProgress are bytes transferred
+// and flow duration since the previous UpdateProgress.
+type FlowActivityUpdater interface {
+	UpdateProgress(upstreamBytes, downstreamBytes int64, durationNanoseconds int64)
+}
+
+// FlowActivityUpdaterMaker is a function which returns a list of
+// appropriate updaters for a new flow to the specified upstream
+// hostname (if known -- may be ""), and IP address.
+type FlowActivityUpdaterMaker func(
+	upstreamHostname string, upstreamIPAddress net.IP) []FlowActivityUpdater
 
 // ClientConnected handles new client connections, creating or resuming
 // a session and returns with client packet handlers running.
@@ -345,7 +370,7 @@ type AllowedPortChecker func(upstreamIPAddress net.IP, port int) bool
 //
 // It is safe to make concurrent calls to ClientConnected for distinct
 // session IDs. The caller is responsible for serializing calls with the
-// same session ID. Futher, the caller must ensure, in the case of a client
+// same session ID. Further, the caller must ensure, in the case of a client
 // transport reconnect when an existing transport has not yet disconnected,
 // that ClientDisconnected is called first -- so it doesn't undo the new
 // ClientConnected. (psiphond meets these constraints by closing any
@@ -354,7 +379,8 @@ type AllowedPortChecker func(upstreamIPAddress net.IP, port int) bool
 func (server *Server) ClientConnected(
 	sessionID string,
 	transport io.ReadWriteCloser,
-	checkAllowedTCPPortFunc, checkAllowedUDPPortFunc AllowedPortChecker) error {
+	checkAllowedTCPPortFunc, checkAllowedUDPPortFunc AllowedPortChecker,
+	flowActivityUpdaterMaker FlowActivityUpdaterMaker) error {
 
 	// It's unusual to call both sync.WaitGroup.Add() _and_ Done() in the same
 	// goroutine. There's no other place to call Add() since ClientConnected is
@@ -417,6 +443,7 @@ func (server *Server) ClientConnected(
 			DNSResolverIPv6Addresses: append([]net.IP(nil), server.config.GetDNSResolverIPv6Addresses()...),
 			checkAllowedTCPPortFunc:  checkAllowedTCPPortFunc,
 			checkAllowedUDPPortFunc:  checkAllowedUDPPortFunc,
+			flowActivityUpdaterMaker: flowActivityUpdaterMaker,
 			downstreamPackets:        NewPacketQueue(downstreamPacketQueueSize),
 			workers:                  new(sync.WaitGroup),
 		}
@@ -602,7 +629,9 @@ func (server *Server) runOrphanMetricsCheckpointer() {
 
 func (server *Server) runDeviceDownstream() {
 
-	defer server.workers.Done()
+	// TODO: this is a hack workaround for the issue documented in
+	// Server.Start().
+	//defer server.workers.Done()
 
 	// Read incoming packets from the tun device, parse and validate the
 	// packets, map them to a session/client, perform rewriting, and relay
@@ -625,7 +654,7 @@ func (server *Server) runDeviceDownstream() {
 			continue
 		}
 
-		// destinationIPAddress determines which client recieves this packet.
+		// destinationIPAddress determines which client receives this packet.
 		// At this point, only enough of the packet is inspected to determine
 		// this routing info; further validation happens in subsequent
 		// processPacket in runClientDownstream.
@@ -830,9 +859,9 @@ func (server *Server) allocateIndex(newSession *session) error {
 		//   the network identifier (10.0.0.0) and broadcast
 		//   address (10.255.255.255) respectively
 		// - 1 is reserved as the server tun device address,
-		//   (10.0.0.1, and IPv6 equivilent)
+		//   (10.0.0.1, and IPv6 equivalent)
 		// - 2 is reserver as the transparent DNS target
-		//   address (10.0.0.2, and IPv6 equivilent)
+		//   address (10.0.0.2, and IPv6 equivalent)
 
 		if index <= 2 {
 			continue
@@ -842,7 +871,7 @@ func (server *Server) allocateIndex(newSession *session) error {
 			continue
 		}
 		if s, ok := server.indexToSession.LoadOrStore(index, newSession); ok {
-			// Index is already in use or aquired concurrently.
+			// Index is already in use or acquired concurrently.
 			// If the existing session is expired, reap it and use index.
 			existingSession := s.(*session)
 			if existingSession.expired(idleExpiry) {
@@ -932,6 +961,7 @@ type session struct {
 	// at the start of struct to ensure 64-bit alignment.
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	lastActivity             int64
+	lastFlowReapIndex        int64
 	metrics                  *packetMetrics
 	sessionID                string
 	index                    int32
@@ -945,12 +975,68 @@ type session struct {
 	originalIPv6Address      net.IP
 	checkAllowedTCPPortFunc  AllowedPortChecker
 	checkAllowedUDPPortFunc  AllowedPortChecker
+	flowActivityUpdaterMaker FlowActivityUpdaterMaker
 	downstreamPackets        *PacketQueue
+	flows                    syncmap.Map
 	workers                  *sync.WaitGroup
 	mutex                    sync.Mutex
 	channel                  *Channel
 	runContext               context.Context
 	stopRunning              context.CancelFunc
+}
+
+// flowID identifies an IP traffic flow using the conventional
+// network 5-tuple. flowIDs track bidirectional flows.
+type flowID struct {
+	downstreamIPAddress [net.IPv6len]byte
+	downstreamPort      uint16
+	upstreamIPAddress   [net.IPv6len]byte
+	upstreamPort        uint16
+	protocol            internetProtocol
+}
+
+// From: https://github.com/golang/go/blob/b88efc7e7ac15f9e0b5d8d9c82f870294f6a3839/src/net/ip.go#L55
+var v4InV6Prefix = []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff}
+
+func (f *flowID) set(
+	downstreamIPAddress net.IP,
+	downstreamPort uint16,
+	upstreamIPAddress net.IP,
+	upstreamPort uint16,
+	protocol internetProtocol) {
+
+	if len(downstreamIPAddress) == net.IPv4len {
+		copy(f.downstreamIPAddress[:], v4InV6Prefix)
+		copy(f.downstreamIPAddress[len(v4InV6Prefix):], downstreamIPAddress)
+	} else { // net.IPv6len
+		copy(f.downstreamIPAddress[:], downstreamIPAddress)
+	}
+	f.downstreamPort = downstreamPort
+
+	if len(upstreamIPAddress) == net.IPv4len {
+		copy(f.upstreamIPAddress[:], v4InV6Prefix)
+		copy(f.upstreamIPAddress[len(v4InV6Prefix):], upstreamIPAddress)
+	} else { // net.IPv6len
+		copy(f.upstreamIPAddress[:], upstreamIPAddress)
+	}
+	f.upstreamPort = upstreamPort
+
+	f.protocol = protocol
+}
+
+type flowState struct {
+	// Note: 64-bit ints used with atomic operations are placed
+	// at the start of struct to ensure 64-bit alignment.
+	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
+	lastUpstreamPacketTime   int64
+	lastDownstreamPacketTime int64
+	activityUpdaters         []FlowActivityUpdater
+}
+
+func (flowState *flowState) expired(idleExpiry time.Duration) bool {
+	now := monotime.Now()
+	return (now.Sub(monotime.Time(atomic.LoadInt64(&flowState.lastUpstreamPacketTime))) > idleExpiry) ||
+		(now.Sub(monotime.Time(atomic.LoadInt64(&flowState.lastDownstreamPacketTime))) > idleExpiry)
 }
 
 func (session *session) touch() {
@@ -993,6 +1079,133 @@ func (session *session) getOriginalIPv6Address() net.IP {
 	return session.originalIPv6Address
 }
 
+// isTrackingFlow checks if a flow is being tracked.
+func (session *session) isTrackingFlow(ID flowID) bool {
+
+	f, ok := session.flows.Load(ID)
+	if !ok {
+		return false
+	}
+	flowState := f.(*flowState)
+
+	// Check if flow is expired but not yet reaped.
+	if flowState.expired(FLOW_IDLE_EXPIRY) {
+		session.flows.Delete(ID)
+		return false
+	}
+
+	return true
+}
+
+// startTrackingFlow starts flow tracking for the flow identified
+// by ID.
+//
+// Flow tracking is used to implement:
+// - one-time permissions checks for a flow
+// - OSLs
+// - domain bytes transferred [TODO]
+//
+// The applicationData from the first packet in the flow is
+// inspected to determine any associated hostname, using HTTP or
+// TLS payload. The session's FlowActivityUpdaterMaker is invoked
+// to determine a list of updaters to track flow activity.
+//
+// Updaters receive reports with the number of application data
+// bytes in each flow packet. This number, totalled for all packets
+// in a flow, may exceed the total bytes transferred at the
+// application level due to TCP retransmission. Currently, the flow
+// tracking logic doesn't exclude retransmitted packets from update
+// reporting.
+//
+// Flows are untracked after an idle expiry period. Transport
+// protocol indicators of end of flow, such as FIN or RST for TCP,
+// which may or may not appear in a flow, are not currently used.
+//
+// startTrackingFlow may be called from concurrent goroutines; if
+// the flow is already tracked, it is simply updated.
+func (session *session) startTrackingFlow(
+	ID flowID, direction packetDirection, applicationData []byte) {
+
+	now := int64(monotime.Now())
+
+	// Once every period, iterate over flows and reap expired entries.
+	reapIndex := now / int64(monotime.Time(FLOW_IDLE_EXPIRY/2))
+	previousReapIndex := atomic.LoadInt64(&session.lastFlowReapIndex)
+	if reapIndex != previousReapIndex &&
+		atomic.CompareAndSwapInt64(&session.lastFlowReapIndex, previousReapIndex, reapIndex) {
+		session.reapFlows()
+	}
+
+	var hostname string
+	if ID.protocol == internetProtocolTCP {
+		// TODO: implement
+		// hostname = common.ExtractHostnameFromTCPFlow(applicationData)
+	}
+
+	flowState := &flowState{
+		activityUpdaters: session.flowActivityUpdaterMaker(
+			hostname,
+			net.IP(ID.upstreamIPAddress[:])),
+	}
+
+	if direction == packetDirectionServerUpstream {
+		flowState.lastUpstreamPacketTime = now
+	} else {
+		flowState.lastDownstreamPacketTime = now
+	}
+
+	// LoadOrStore will retain any existing entry
+	session.flows.LoadOrStore(ID, flowState)
+
+	session.updateFlow(ID, direction, applicationData)
+}
+
+func (session *session) updateFlow(
+	ID flowID, direction packetDirection, applicationData []byte) {
+
+	f, ok := session.flows.Load(ID)
+	if !ok {
+		return
+	}
+	flowState := f.(*flowState)
+
+	// Note: no expired check here, since caller is assumed to
+	// have just called isTrackingFlow.
+
+	now := int64(monotime.Now())
+	var upstreamBytes, downstreamBytes, durationNanoseconds int64
+
+	if direction == packetDirectionServerUpstream {
+		upstreamBytes = int64(len(applicationData))
+		atomic.StoreInt64(&flowState.lastUpstreamPacketTime, now)
+	} else {
+		downstreamBytes = int64(len(applicationData))
+
+		// Follows common.ActivityMonitoredConn semantics, where
+		// duration is updated only for downstream activity. This
+		// is intened to produce equivalent behaviour for port
+		// forward clients (tracked with ActivityUpdaters) and
+		// packet tunnel clients (tracked with FlowActivityUpdaters).
+
+		durationNanoseconds = now - atomic.SwapInt64(&flowState.lastDownstreamPacketTime, now)
+	}
+
+	for _, updater := range flowState.activityUpdaters {
+		updater.UpdateProgress(upstreamBytes, downstreamBytes, durationNanoseconds)
+	}
+}
+
+// reapFlows removes expired idle flows.
+func (session *session) reapFlows() {
+	session.flows.Range(func(key, value interface{}) bool {
+		flowState := value.(*flowState)
+		if flowState.expired(FLOW_IDLE_EXPIRY) {
+			session.flows.Delete(key)
+		}
+		return true
+	})
+}
+
 type packetMetrics struct {
 	upstreamRejectReasons   [packetRejectReasonCount]int64
 	downstreamRejectReasons [packetRejectReasonCount]int64
@@ -1029,17 +1242,7 @@ func (metrics *packetMetrics) relayedPacket(
 	direction packetDirection,
 	version int,
 	protocol internetProtocol,
-	upstreamIPAddress net.IP,
 	packetLength int) {
-
-	// TODO: OSL integration
-	// - Update OSL up/down progress for upstreamIPAddress.
-	// - For port forwards, OSL progress tracking involves one SeedSpecs subnets
-	//   lookup per port forward; this may be too much overhead per packet; OSL
-	//   progress tracking also uses port forward duration as an input.
-	// - Can we do simple flow tracking to achive the same (a) lookup rate,
-	//   (b) duration measurement? E.g., track flow via 4-tuple of source/dest
-	//   IP/port?
 
 	var packetsMetric, bytesMetric *int64
 
@@ -1362,9 +1565,12 @@ func (client *Client) Start() {
 
 	client.config.Logger.WithContext().Info("starting")
 
-	client.workers.Add(1)
+	// TODO: this is a hack workaround for the same issue
+	// documented in Server.Start().
+	//
+	//client.workers.Add(1)
 	go func() {
-		defer client.workers.Done()
+		//defer client.workers.Done()
 		for {
 			readPacket, err := client.device.ReadPacket()
 
@@ -1683,22 +1889,26 @@ func getPacketDestinationIPAddress(
 
 		return packet[24:40], true
 	}
-
-	return nil, false
 }
 
+// processPacket parses IP packets, applies relaying rules,
+// and rewrites packet elements as required. processPacket
+// returns true if a packet parses correctly, is accepted
+// by the relay rules, and is successfully rewritten.
+//
+// When a packet is rejected, processPacket returns false
+// and updates a reason in the supplied metrics.
+//
+// Rejection may result in partially rewritten packets.
 func processPacket(
 	metrics *packetMetrics,
 	session *session,
 	direction packetDirection,
 	packet []byte) bool {
 
-	// Parse and validate packets and perform either upstream
-	// or downstream rewriting.
-	// Failures may result in partially rewritten packets.
+	// Parse and validate IP packet structure
 
 	// Must have an IP version field.
-
 	if len(packet) < 1 {
 		metrics.rejectedPacket(direction, packetRejectLength)
 		return false
@@ -1707,7 +1917,6 @@ func processPacket(
 	version := packet[0] >> 4
 
 	// Must be IPv4 or IPv6.
-
 	if version != 4 && version != 6 {
 		metrics.rejectedPacket(direction, packetRejectVersion)
 		return false
@@ -1717,6 +1926,7 @@ func processPacket(
 	var sourceIPAddress, destinationIPAddress net.IP
 	var sourcePort, destinationPort uint16
 	var IPChecksum, TCPChecksum, UDPChecksum []byte
+	var applicationData []byte
 
 	if version == 4 {
 
@@ -1738,14 +1948,21 @@ func processPacket(
 		// Protocol must be TCP or UDP.
 
 		protocol = internetProtocol(packet[9])
+		dataOffset := 0
 
 		if protocol == internetProtocolTCP {
-			if len(packet) < 40 {
+			if len(packet) < 32 {
+				metrics.rejectedPacket(direction, packetRejectTCPProtocolLength)
+				return false
+			}
+			dataOffset = 20 + 4*int(packet[32]>>4)
+			if len(packet) < dataOffset {
 				metrics.rejectedPacket(direction, packetRejectTCPProtocolLength)
 				return false
 			}
 		} else if protocol == internetProtocolUDP {
-			if len(packet) < 28 {
+			dataOffset := 28
+			if len(packet) < dataOffset {
 				metrics.rejectedPacket(direction, packetRejectUDPProtocolLength)
 				return false
 			}
@@ -1753,6 +1970,8 @@ func processPacket(
 			metrics.rejectedPacket(direction, packetRejectProtocol)
 			return false
 		}
+
+		applicationData = packet[dataOffset:]
 
 		// Slices reference packet bytes to be rewritten.
 
@@ -1783,14 +2002,21 @@ func processPacket(
 		nextHeader := packet[6]
 
 		protocol = internetProtocol(nextHeader)
+		dataOffset := 0
 
 		if protocol == internetProtocolTCP {
-			if len(packet) < 60 {
+			if len(packet) < 52 {
+				metrics.rejectedPacket(direction, packetRejectTCPProtocolLength)
+				return false
+			}
+			dataOffset = 40 + 4*int(packet[52]>>4)
+			if len(packet) < dataOffset {
 				metrics.rejectedPacket(direction, packetRejectTCPProtocolLength)
 				return false
 			}
 		} else if protocol == internetProtocolUDP {
-			if len(packet) < 48 {
+			dataOffset := 48
+			if len(packet) < dataOffset {
 				metrics.rejectedPacket(direction, packetRejectUDPProtocolLength)
 				return false
 			}
@@ -1798,6 +2024,8 @@ func processPacket(
 			metrics.rejectedPacket(direction, packetRejectProtocol)
 			return false
 		}
+
+		applicationData = packet[dataOffset:]
 
 		// Slices reference packet bytes to be rewritten.
 
@@ -1816,66 +2044,164 @@ func processPacket(
 		}
 	}
 
-	var upstreamIPAddress net.IP
-	if direction == packetDirectionServerUpstream {
+	// Apply rules
+	//
+	// Most of this logic is only applied on the server, as only
+	// the server knows the traffic rules configuration, and is
+	// tracking flows.
 
-		upstreamIPAddress = destinationIPAddress
+	isServer := (direction == packetDirectionServerUpstream ||
+		direction == packetDirectionServerDownstream)
 
-	} else if direction == packetDirectionServerDownstream {
+	// Check if the packet qualifies for transparent DNS rewriting
+	//
+	// - Both TCP and UDP DNS packets may qualify
+	// - Transparent DNS flows are not tracked, as most DNS
+	//   resolutions are very-short lived exchanges
+	// - The traffic rules checks are bypassed, since transparent
+	//   DNS is essential
 
-		upstreamIPAddress = sourceIPAddress
+	doTransparentDNS := false
+
+	if isServer {
+		if direction == packetDirectionServerUpstream {
+
+			// DNS packets destinated for the transparent DNS target addresses
+			// will be rewritten to go to one of the server's resolvers.
+
+			if destinationPort == portNumberDNS {
+				if version == 4 && destinationIPAddress.Equal(transparentDNSResolverIPv4Address) {
+					numResolvers := len(session.DNSResolverIPv4Addresses)
+					if numResolvers > 0 {
+						doTransparentDNS = true
+					} else {
+						metrics.rejectedPacket(direction, packetRejectNoDNSResolvers)
+						return false
+					}
+
+				} else if version == 6 && destinationIPAddress.Equal(transparentDNSResolverIPv6Address) {
+					numResolvers := len(session.DNSResolverIPv6Addresses)
+					if numResolvers > 0 {
+						doTransparentDNS = true
+					} else {
+						metrics.rejectedPacket(direction, packetRejectNoDNSResolvers)
+						return false
+					}
+				}
+			}
+
+		} else { // packetDirectionServerDownstream
+
+			// DNS packets with a source address of any of the server's
+			// resolvers will be rewritten back to the transparent DNS target
+			// address.
+
+			// Limitation: responses to client DNS packets _originally
+			// destined_ for a resolver in GetDNSResolverIPv4Addresses will
+			// be lost. This would happen if some process on the client
+			// ignores the system set DNS values; and forces use of the same
+			// resolvers as the server.
+
+			if sourcePort == portNumberDNS {
+				if version == 4 {
+					for _, IPAddress := range session.DNSResolverIPv4Addresses {
+						if sourceIPAddress.Equal(IPAddress) {
+							doTransparentDNS = true
+							break
+						}
+					}
+				} else if version == 6 {
+					for _, IPAddress := range session.DNSResolverIPv6Addresses {
+						if sourceIPAddress.Equal(IPAddress) {
+							doTransparentDNS = true
+							break
+						}
+					}
+				}
+			}
+		}
 	}
 
-	// Enforce traffic rules (allowed TCP/UDP ports).
+	// Check if flow is tracked before checking traffic permission
 
-	checkPort := 0
-	if direction == packetDirectionServerUpstream ||
-		direction == packetDirectionClientUpstream {
+	doFlowTracking := !doTransparentDNS && isServer
 
-		checkPort = int(destinationPort)
+	// TODO: verify this struct is stack allocated
+	var ID flowID
 
-	} else if direction == packetDirectionServerDownstream ||
-		direction == packetDirectionClientDownstream {
+	isTrackingFlow := false
 
-		checkPort = int(sourcePort)
-	}
+	if doFlowTracking {
 
-	if protocol == internetProtocolTCP {
+		if direction == packetDirectionServerUpstream {
+			ID.set(
+				destinationIPAddress, destinationPort, sourceIPAddress, sourcePort, protocol)
 
-		if checkPort == 0 ||
-			(session != nil &&
-				!session.checkAllowedTCPPortFunc(upstreamIPAddress, checkPort)) {
-
-			metrics.rejectedPacket(direction, packetRejectTCPPort)
-			return false
+		} else if direction == packetDirectionServerDownstream {
+			ID.set(
+				sourceIPAddress, sourcePort, destinationIPAddress, destinationPort, protocol)
 		}
 
-	} else if protocol == internetProtocolUDP {
-
-		if checkPort == 0 ||
-			(session != nil &&
-				!session.checkAllowedUDPPortFunc(upstreamIPAddress, checkPort)) {
-
-			metrics.rejectedPacket(direction, packetRejectUDPPort)
-			return false
-		}
+		isTrackingFlow = session.isTrackingFlow(ID)
 	}
 
-	// Enforce no localhost, multicast or broadcast packets; and
-	// no client-to-client packets.
+	// Check packet source/destination is permitted; except for:
+	// - existing flows, which have already been checked
+	// - transparent DNS, which is always allowed
 
-	if !destinationIPAddress.IsGlobalUnicast() ||
+	if !doTransparentDNS && !isTrackingFlow {
 
-		(direction == packetDirectionServerUpstream &&
-			((version == 4 &&
-				!destinationIPAddress.Equal(transparentDNSResolverIPv4Address) &&
-				privateSubnetIPv4.Contains(destinationIPAddress)) ||
-				(version == 6 &&
-					!destinationIPAddress.Equal(transparentDNSResolverIPv6Address) &&
-					privateSubnetIPv6.Contains(destinationIPAddress)))) {
+		// Enforce traffic rules (allowed TCP/UDP ports).
 
-		metrics.rejectedPacket(direction, packetRejectDestinationAddress)
-		return false
+		checkPort := 0
+		if direction == packetDirectionServerUpstream ||
+			direction == packetDirectionClientUpstream {
+
+			checkPort = int(destinationPort)
+
+		} else if direction == packetDirectionServerDownstream ||
+			direction == packetDirectionClientDownstream {
+
+			checkPort = int(sourcePort)
+		}
+
+		if protocol == internetProtocolTCP {
+
+			if checkPort == 0 ||
+				(isServer &&
+					!session.checkAllowedTCPPortFunc(net.IP(ID.upstreamIPAddress[:]), checkPort)) {
+
+				metrics.rejectedPacket(direction, packetRejectTCPPort)
+				return false
+			}
+
+		} else if protocol == internetProtocolUDP {
+
+			if checkPort == 0 ||
+				(isServer &&
+					!session.checkAllowedUDPPortFunc(net.IP(ID.upstreamIPAddress[:]), checkPort)) {
+
+				metrics.rejectedPacket(direction, packetRejectUDPPort)
+				return false
+			}
+		}
+
+		// Enforce no localhost, multicast or broadcast packets; and
+		// no client-to-client packets.
+
+		if !destinationIPAddress.IsGlobalUnicast() ||
+
+			(direction == packetDirectionServerUpstream &&
+				((version == 4 &&
+					!destinationIPAddress.Equal(transparentDNSResolverIPv4Address) &&
+					privateSubnetIPv4.Contains(destinationIPAddress)) ||
+					(version == 6 &&
+						!destinationIPAddress.Equal(transparentDNSResolverIPv6Address) &&
+						privateSubnetIPv6.Contains(destinationIPAddress)))) {
+
+			metrics.rejectedPacket(direction, packetRejectDestinationAddress)
+			return false
+		}
 	}
 
 	// Configure rewriting.
@@ -1899,24 +2225,14 @@ func processPacket(
 		// Rewrite DNS packets destinated for the transparent DNS target
 		// addresses to go to one of the server's resolvers.
 
-		if destinationPort == portNumberDNS {
-			if version == 4 && destinationIPAddress.Equal(transparentDNSResolverIPv4Address) {
-				numResolvers := len(session.DNSResolverIPv4Addresses)
-				if numResolvers > 0 {
-					rewriteDestinationIPAddress = session.DNSResolverIPv4Addresses[rand.Intn(numResolvers)]
-				} else {
-					metrics.rejectedPacket(direction, packetRejectNoDNSResolvers)
-					return false
-				}
+		if doTransparentDNS {
 
-			} else if version == 6 && destinationIPAddress.Equal(transparentDNSResolverIPv6Address) {
-				numResolvers := len(session.DNSResolverIPv6Addresses)
-				if numResolvers > 0 {
-					rewriteDestinationIPAddress = session.DNSResolverIPv6Addresses[rand.Intn(numResolvers)]
-				} else {
-					metrics.rejectedPacket(direction, packetRejectNoDNSResolvers)
-					return false
-				}
+			if version == 4 {
+				rewriteDestinationIPAddress = session.DNSResolverIPv4Addresses[rand.Intn(
+					len(session.DNSResolverIPv4Addresses))]
+			} else { // version == 6
+				rewriteDestinationIPAddress = session.DNSResolverIPv6Addresses[rand.Intn(
+					len(session.DNSResolverIPv6Addresses))]
 			}
 		}
 
@@ -1935,30 +2251,15 @@ func processPacket(
 			return false
 		}
 
-		// Source address for DNS packets from the server's resolvers
-		// will be changed to transparent DNS target address.
+		// Rewrite source address  of packets from servers' resolvers
+		// to transparent DNS target address.
 
-		// Limitation: responses to client DNS packets _originally
-		// destined_ for a resolver in GetDNSResolverIPv4Addresses will
-		// be lost. This would happen if some process on the client
-		// ignores the system set DNS values; and forces use of the same
-		// resolvers as the server.
+		if doTransparentDNS {
 
-		if sourcePort == portNumberDNS {
 			if version == 4 {
-				for _, IPAddress := range session.DNSResolverIPv4Addresses {
-					if sourceIPAddress.Equal(IPAddress) {
-						rewriteSourceIPAddress = transparentDNSResolverIPv4Address
-						break
-					}
-				}
-			} else if version == 6 {
-				for _, IPAddress := range session.DNSResolverIPv6Addresses {
-					if sourceIPAddress.Equal(IPAddress) {
-						rewriteSourceIPAddress = transparentDNSResolverIPv6Address
-						break
-					}
-				}
+				rewriteSourceIPAddress = transparentDNSResolverIPv4Address
+			} else { // version == 6
+				rewriteSourceIPAddress = transparentDNSResolverIPv6Address
 			}
 		}
 	}
@@ -1992,7 +2293,17 @@ func processPacket(
 		}
 	}
 
-	metrics.relayedPacket(direction, int(version), protocol, upstreamIPAddress, len(packet))
+	// Start/update flow tracking, only once past all possible packet rejects
+
+	if doFlowTracking {
+		if !isTrackingFlow {
+			session.startTrackingFlow(ID, direction, applicationData)
+		} else {
+			session.updateFlow(ID, direction, applicationData)
+		}
+	}
+
+	metrics.relayedPacket(direction, int(version), protocol, len(packet))
 
 	return true
 }
@@ -2079,6 +2390,7 @@ packet debugging snippet:
 // preallocated buffers to avoid GC churn.
 type Device struct {
 	name           string
+	writeMutex     sync.Mutex
 	deviceIO       io.ReadWriteCloser
 	inboundBuffer  []byte
 	outboundBuffer []byte
@@ -2170,7 +2482,7 @@ func (device *Device) Name() string {
 // ReadPacket reads one full packet from the tun device. The
 // return value is a slice of a static, reused buffer, so the
 // value is only valid until the next ReadPacket call.
-// Concurrent calls to ReadPacket are not supported.
+// Concurrent calls to ReadPacket are _not_ supported.
 func (device *Device) ReadPacket() ([]byte, error) {
 
 	// readTunPacket performs the platform dependent
@@ -2184,8 +2496,22 @@ func (device *Device) ReadPacket() ([]byte, error) {
 }
 
 // WritePacket writes one full packet to the tun device.
-// Concurrent calls to WritePacket are not supported.
+// Concurrent calls to WritePacket are supported.
 func (device *Device) WritePacket(packet []byte) error {
+
+	// This mutex serves two purposes:
+	//
+	// - It ensures only one concurrent goroutine can use
+	//   outboundBuffer, for those platforms that use that
+	//   buffer when writing.
+	// - It ensures that only one concurrent goroutine will
+	//   reach the underlying blocking Write syscall;
+	//   concurrent callers should hold at the mutex and not
+	//   spawn an unbounded number of OS threads for the
+	//   syscall.
+
+	device.writeMutex.Lock()
+	defer device.writeMutex.Unlock()
 
 	// writeTunPacket performs the platform dependent
 	// packet write operation.
