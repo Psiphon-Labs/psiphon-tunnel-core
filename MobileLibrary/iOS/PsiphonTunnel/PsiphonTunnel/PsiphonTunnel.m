@@ -1056,27 +1056,18 @@
 - (void)internetReachabilityChanged:(NSNotification *)note {
     // Invalidate initialDNSCache.
     __sync_bool_compare_and_swap(&self->useInitialDNS, TRUE, FALSE);
-    
-
-    // If we lose network while connected, we're going to force a reconnect in
-    // order to trigger the waiting-for-network state. The reason we don't wait
-    // for the tunnel to notice the network loss is that it might take 30 seconds.
 
     Reachability* currentReachability = [note object];
-    NetworkStatus networkStatus = [currentReachability currentReachabilityStatus];
 
-    PsiphonConnectionState currentConnectionState = [self getConnectionState];
-
-    if (currentConnectionState == PsiphonConnectionStateConnected &&
-        self->previousNetworkStatus != NotReachable &&
-        self->previousNetworkStatus != networkStatus) {
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onDeviceInternetConnectivityInterrupted)]) {
-            dispatch_async(self->callbackQueue, ^{
-                [self.tunneledAppDelegate onDeviceInternetConnectivityInterrupted];
-            });
-        }
+    // Just pass current reachability through to the delegate
+    // as soon as we network reachability change is detected
+    if ([self.tunneledAppDelegate respondsToSelector:@selector(onInternetReachabilityChanged:)]) {
+        dispatch_async(self->callbackQueue, ^{
+            [self.tunneledAppDelegate onInternetReachabilityChanged:currentReachability];
+        });
     }
 
+    NetworkStatus networkStatus = [currentReachability currentReachabilityStatus];
     self->previousNetworkStatus = networkStatus;
 }
 
