@@ -14,6 +14,9 @@ fi
 # -e exits if a command returns an error.
 set -x -u -e
 
+# Modify this value as we use newer Go versions.
+GO_VERSION_REQUIRED="1.9"
+
 # Reset the PATH to macOS default. This is mainly so we don't execute the wrong
 # gomobile executable.
 PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/go/bin
@@ -99,6 +102,13 @@ function strip_architectures() {
   done
   return 0
 }
+
+# Check Go version
+GO_VERSION=$(go version | sed -E -n 's/.*go([0-9]\.[0-9]+(\.[0-9]+)?).*/\1/p')
+if [[ ${GO_VERSION} != ${GO_VERSION_REQUIRED} ]]; then
+  echo "FAILURE: go version mismatch; require ${GO_VERSION_REQUIRED}; got ${GO_VERSION}"
+  exit 1
+fi
 
 # Don't use -u, because this path points to our local repo, and we don't want it overridden.
 go get -d -v -tags "${BUILD_TAGS}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
