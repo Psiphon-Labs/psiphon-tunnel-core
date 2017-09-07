@@ -46,10 +46,10 @@
     dispatch_queue_t callbackQueue;
     dispatch_semaphore_t noticeHandlingSemaphore;
 
-    _Atomic PsiphonConnectionState connectionState;
+    volatile _Atomic PsiphonConnectionState connectionState;
 
-    _Atomic NSInteger localSocksProxyPort;
-    _Atomic NSInteger localHttpProxyPort;
+    volatile _Atomic NSInteger localSocksProxyPort;
+    volatile _Atomic NSInteger localHttpProxyPort;
 
     Reachability* reachability;
     NetworkStatus previousNetworkStatus;
