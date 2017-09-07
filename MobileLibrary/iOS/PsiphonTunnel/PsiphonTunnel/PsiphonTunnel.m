@@ -61,7 +61,7 @@
     NSString *secondaryGoogleDNS;
 
     
-    volatile _Atomic BOOL useInitialDNS; // initialDNSCache vailidity flag.
+    volatile _Atomic BOOL useInitialDNS; // initialDNSCache validity flag.
     NSArray<NSString *> *initialDNSCache;  // This cache becomes void if internetReachabilityChanged is called.
 }
 
