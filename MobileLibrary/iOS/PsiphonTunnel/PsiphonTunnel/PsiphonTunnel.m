@@ -61,7 +61,7 @@
     NSString *secondaryGoogleDNS;
 
     
-    volatile BOOL useInitialDNS; // initialDNSCache vailidity flag.
+    volatile _Atomic BOOL useInitialDNS; // initialDNSCache vailidity flag.
     NSArray<NSString *> *initialDNSCache;  // This cache becomes void if internetReachabilityChanged is called.
 }
 
@@ -89,7 +89,7 @@
     }
 
     self->initialDNSCache = [self getDNSServers];
-    self->useInitialDNS = [self->initialDNSCache count] > 0;
+    atomic_init(&self->useInitialDNS, [self->initialDNSCache count] > 0);
 
     return self;
 }
@@ -846,7 +846,7 @@
     // This function is only called when BindToDevice is used/supported.
     // TODO: Implement correctly
 
-    if (self->useInitialDNS) {
+    if (atomic_load(&self->useInitialDNS)) {
         return self->initialDNSCache[0];
     } else {
         return self->primaryGoogleDNS;
@@ -857,7 +857,7 @@
     // This function is only called when BindToDevice is used/supported.
     // TODO: Implement correctly
 
-    if (self->useInitialDNS && [self->initialDNSCache count] > 1) {
+    if (atomic_load(&self->useInitialDNS) && [self->initialDNSCache count] > 1) {
         return self->initialDNSCache[1];
     } else {
         return self->secondaryGoogleDNS;
@@ -1055,7 +1055,7 @@
 
 - (void)internetReachabilityChanged:(NSNotification *)note {
     // Invalidate initialDNSCache.
-    __sync_bool_compare_and_swap(&self->useInitialDNS, TRUE, FALSE);
+    atomic_store(&self->useInitialDNS, FALSE);
 
     Reachability* currentReachability = [note object];
 
