@@ -76,6 +76,19 @@ func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, e
 		return nil, common.ContextError(errors.New("invalid IP address"))
 	}
 
+	// When configured, attempt to synthesize an IPv6 address from
+	// an IPv4 address for compatibility on DNS64/NAT64 networks.
+	// If synthesize fails, try the original address.
+	if config.IPv6Synthesizer != nil && ipAddr.To4() != nil {
+		synthesizedIPAddress := config.IPv6Synthesizer.IPv6Synthesize(dnsServer)
+		if synthesizedIPAddress != "" {
+			synthesizedAddr := net.ParseIP(synthesizedIPAddress)
+			if synthesizedAddr != nil {
+				ipAddr = synthesizedAddr
+			}
+		}
+	}
+
 	var ipv4 [4]byte
 	var ipv6 [16]byte
 	var domain int
