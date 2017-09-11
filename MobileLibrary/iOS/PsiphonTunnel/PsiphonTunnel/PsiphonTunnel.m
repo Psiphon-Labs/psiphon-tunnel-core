@@ -52,7 +52,7 @@
     volatile _Atomic NSInteger localHttpProxyPort;
 
     Reachability* reachability;
-    NetworkStatus previousNetworkStatus;
+    volatile _Atomic NetworkStatus currentNetworkStatus;
 
     BOOL tunnelWholeDevice;
 
@@ -76,6 +76,7 @@
     atomic_init(&self->localSocksProxyPort, 0);
     atomic_init(&self->localHttpProxyPort, 0);
     self->reachability = [Reachability reachabilityForInternetConnection];
+    atomic_init(&self->currentNetworkStatus, NotReachable);
     self->tunnelWholeDevice = FALSE;
 
     // Randomize order of Google DNS servers on start,
@@ -829,7 +830,7 @@
     // Only Wi-Fi and Cellular interfaces are considered
     // @see : https://forums.developer.apple.com/thread/76711
     NSArray *iffPriorityList = @[@"en0", @"pdp_ip0"];
-    if (previousNetworkStatus == ReachableViaWWAN) {
+    if (atomic_load(&self->currentNetworkStatus) == ReachableViaWWAN) {
         iffPriorityList = @[@"pdp_ip0", @"en0"];
     }
     for (NSString * key in iffPriorityList) {
@@ -1045,7 +1046,7 @@
 // time for the tunnel to notice the network is gone (depending on attempts to
 // use the tunnel).
 - (void)startInternetReachabilityMonitoring {
-    self->previousNetworkStatus = [self->reachability currentReachabilityStatus];
+    atomic_store(&self->currentNetworkStatus, [self->reachability currentReachabilityStatus]);
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(internetReachabilityChanged:) name:kReachabilityChangedNotification object:nil];
     [self->reachability startNotifier];
@@ -1062,16 +1063,22 @@
 
     Reachability* currentReachability = [note object];
 
-    // Just pass current reachability through to the delegate
-    // as soon as we network reachability change is detected
+    // Pass current reachability through to the delegate
+    // as soon as a network reachability change is detected
     if ([self.tunneledAppDelegate respondsToSelector:@selector(onInternetReachabilityChanged:)]) {
         dispatch_async(self->callbackQueue, ^{
             [self.tunneledAppDelegate onInternetReachabilityChanged:currentReachability];
         });
     }
-
+    
     NetworkStatus networkStatus = [currentReachability currentReachabilityStatus];
-    self->previousNetworkStatus = networkStatus;
+    NetworkStatus previousNetworkStatus = atomic_exchange(&self->currentNetworkStatus, networkStatus);
+    
+    // Restart if the state has changed, unless the previous state was NotReachable, because
+    // the tunnel should be waiting for connectivity in that case.
+    if (networkStatus != previousNetworkStatus && previousNetworkStatus != NotReachable) {
+        [self start];
+    }
 }
 
 /*!
