@@ -828,7 +828,10 @@
     // TODO: following is a heuristic for choosing active network interface
     // Only Wi-Fi and Cellular interfaces are considered
     // @see : https://forums.developer.apple.com/thread/76711
-    NSArray *iffPriorityList = @[ @"en0", @"pdp_ip0"];
+    NSArray *iffPriorityList = @[@"en0", @"pdp_ip0"];
+    if (previousNetworkStatus == ReachableViaWWAN) {
+        iffPriorityList = @[@"pdp_ip0", @"en0"];
+    }
     for (NSString * key in iffPriorityList) {
         for (NSString * upIff in upIffList) {
             if ([key isEqualToString:upIff]) {
