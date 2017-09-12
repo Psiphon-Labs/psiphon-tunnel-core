@@ -20,8 +20,6 @@
 package tun
 
 import (
-	"fmt"
-	"io"
 	"net"
 	"os"
 	"strconv"
@@ -46,7 +44,7 @@ func makeDeviceOutboundBuffer(MTU int) []byte {
 	return nil
 }
 
-func createTunDevice() (io.ReadWriteCloser, string, error) {
+func createTunDevice() (*os.File, string, error) {
 
 	// Prevent fork between creating fd and setting CLOEXEC
 	syscall.ForkLock.RLock()
@@ -382,41 +380,6 @@ func configureClientInterface(
 				return common.ContextError(err)
 			}
 		}
-	}
-
-	return nil
-}
-
-func fixBindToDevice(logger common.Logger, useSudo bool, tunDeviceName string) error {
-
-	// Fix the problem described here:
-	// https://stackoverflow.com/questions/24011205/cant-perform-tcp-handshake-through-a-nat-between-two-nics-with-so-bindtodevice/
-
-	err := runNetworkConfigCommand(
-		logger,
-		useSudo,
-		"sysctl",
-		"net.ipv4.conf.all.accept_local=1")
-	if err != nil {
-		return common.ContextError(err)
-	}
-
-	err = runNetworkConfigCommand(
-		logger,
-		useSudo,
-		"sysctl",
-		"net.ipv4.conf.all.rp_filter=0")
-	if err != nil {
-		return common.ContextError(err)
-	}
-
-	err = runNetworkConfigCommand(
-		logger,
-		useSudo,
-		"sysctl",
-		fmt.Sprintf("net.ipv4.conf.%s.rp_filter=0", tunDeviceName))
-	if err != nil {
-		return common.ContextError(err)
 	}
 
 	return nil

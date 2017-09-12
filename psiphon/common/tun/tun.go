@@ -132,7 +132,6 @@ import (
 	"io"
 	"math/rand"
 	"net"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -292,16 +291,7 @@ func (server *Server) Start() {
 	server.workers.Add(1)
 	go server.runOrphanMetricsCheckpointer()
 
-	// TODO: this is a hack workaround for deviceIO.Read()
-	// not getting interrupted by deviceIO.Close(), and, as a
-	// result, runDeviceDownstream not terminating.
-	//
-	// This workaround breaks synchronized shutdown and leaves
-	// behind a hung goroutine which holds references to various
-	// objects; it's only suitable when Server.Stop() is
-	// followed by termination of the process.
-	//
-	//server.workers.Add(1)
+	server.workers.Add(1)
 	go server.runDeviceDownstream()
 }
 
@@ -629,9 +619,7 @@ func (server *Server) runOrphanMetricsCheckpointer() {
 
 func (server *Server) runDeviceDownstream() {
 
-	// TODO: this is a hack workaround for the issue documented in
-	// Server.Start().
-	//defer server.workers.Done()
+	defer server.workers.Done()
 
 	// Read incoming packets from the tun device, parse and validate the
 	// packets, map them to a session/client, perform rewriting, and relay
@@ -1565,12 +1553,9 @@ func (client *Client) Start() {
 
 	client.config.Logger.WithContext().Info("starting")
 
-	// TODO: this is a hack workaround for the same issue
-	// documented in Server.Start().
-	//
-	//client.workers.Add(1)
+	client.workers.Add(1)
 	go func() {
-		//defer client.workers.Done()
+		defer client.workers.Done()
 		for {
 			readPacket, err := client.device.ReadPacket()
 
@@ -2401,19 +2386,25 @@ type Device struct {
 // device may exist per host.
 func NewServerDevice(config *ServerConfig) (*Device, error) {
 
-	deviceIO, deviceName, err := createTunDevice()
+	file, deviceName, err := createTunDevice()
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
+	defer file.Close()
 
 	err = configureServerInterface(config, deviceName)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
+	nio, err := NewNonblockingIO(int(file.Fd()))
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
 	return newDevice(
 		deviceName,
-		deviceIO,
+		nio,
 		getMTU(config.MTU)), nil
 }
 
@@ -2421,10 +2412,11 @@ func NewServerDevice(config *ServerConfig) (*Device, error) {
 // Multiple client tun devices may exist per host.
 func NewClientDevice(config *ClientConfig) (*Device, error) {
 
-	deviceIO, deviceName, err := createTunDevice()
+	file, deviceName, err := createTunDevice()
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
+	defer file.Close()
 
 	err = configureClientInterface(
 		config, deviceName)
@@ -2432,9 +2424,14 @@ func NewClientDevice(config *ClientConfig) (*Device, error) {
 		return nil, common.ContextError(err)
 	}
 
+	nio, err := NewNonblockingIO(int(file.Fd()))
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
 	return newDevice(
 		deviceName,
-		deviceIO,
+		nio,
 		getMTU(config.MTU)), nil
 }
 
@@ -2454,18 +2451,16 @@ func newDevice(
 // NewClientDeviceFromFD wraps an existing tun device.
 func NewClientDeviceFromFD(config *ClientConfig) (*Device, error) {
 
-	dupFD, err := dupFD(config.TunFileDescriptor)
+	nio, err := NewNonblockingIO(config.TunFileDescriptor)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
-
-	file := os.NewFile(uintptr(dupFD), "")
 
 	MTU := getMTU(config.MTU)
 
 	return &Device{
 		name:           "",
-		deviceIO:       file,
+		deviceIO:       nio,
 		inboundBuffer:  makeDeviceInboundBuffer(MTU),
 		outboundBuffer: makeDeviceOutboundBuffer(MTU),
 	}, nil
@@ -2499,17 +2494,8 @@ func (device *Device) ReadPacket() ([]byte, error) {
 // Concurrent calls to WritePacket are supported.
 func (device *Device) WritePacket(packet []byte) error {
 
-	// This mutex serves two purposes:
-	//
-	// - It ensures only one concurrent goroutine can use
-	//   outboundBuffer, for those platforms that use that
-	//   buffer when writing.
-	// - It ensures that only one concurrent goroutine will
-	//   reach the underlying blocking Write syscall;
-	//   concurrent callers should hold at the mutex and not
-	//   spawn an unbounded number of OS threads for the
-	//   syscall.
-
+	// This mutex ensures that only one concurrent goroutine
+	// can use outboundBuffer when writing.
 	device.writeMutex.Lock()
 	defer device.writeMutex.Unlock()
 
@@ -2526,55 +2512,6 @@ func (device *Device) WritePacket(packet []byte) error {
 // Close interrupts any blocking Read/Write calls and
 // tears down the tun device.
 func (device *Device) Close() error {
-
-	// TODO: dangerous data race exists until Go 1.9
-	//
-	// https://github.com/golang/go/issues/7970
-	//
-	// Unlike net.Conns, os.File doesn't use the poller and
-	// it's not correct to use Close() cannot to interrupt
-	// blocking reads and writes. This changes in Go 1.9,
-	// which changes os.File to use the poller.
-	//
-	// Severity may be high since there's a remote possibility
-	// that a Write could send a packet to wrong fd, including
-	// sending as plaintext to a network socket.
-	//
-	// As of this writing, we do not expect to put this
-	// code into production before Go 1.9 is released. Since
-	// interrupting blocking Read/Writes is necessary, the
-	// race condition is left as-is.
-	//
-	// This appears running tun_test with the race detector
-	// enabled:
-	//
-	// ==================
-	// WARNING: DATA RACE
-	// Write at 0x00c4200ce220 by goroutine 16:
-	//   os.(*file).close()
-	//       /usr/local/go/src/os/file_unix.go:143 +0x10a
-	//   os.(*File).Close()
-	//       /usr/local/go/src/os/file_unix.go:132 +0x55
-	//   _/root/psiphon-tunnel-core/psiphon/common/tun.(*Device).Close()
-	//       /root/psiphon-tunnel-core/psiphon/common/tun/tun.go:1999 +0x53
-	//   _/root/psiphon-tunnel-core/psiphon/common/tun.(*Client).Stop()
-	//       /root/psiphon-tunnel-core/psiphon/common/tun/tun.go:1314 +0x1a8
-	//   _/root/psiphon-tunnel-core/psiphon/common/tun.(*testClient).stop()
-	//       /root/psiphon-tunnel-core/psiphon/common/tun/tun_test.go:426 +0x77
-	//   _/root/psiphon-tunnel-core/psiphon/common/tun.testTunneledTCP.func1()
-	//       /root/psiphon-tunnel-core/psiphon/common/tun/tun_test.go:172 +0x550
-	//
-	// Previous read at 0x00c4200ce220 by goroutine 100:
-	//   os.(*File).Read()
-	//       /usr/local/go/src/os/file.go:98 +0x70
-	//   _/root/psiphon-tunnel-core/psiphon/common/tun.(*Device).readTunPacket()
-	//       /root/psiphon-tunnel-core/psiphon/common/tun/tun_linux.go:109 +0x84
-	//   _/root/psiphon-tunnel-core/psiphon/common/tun.(*Device).ReadPacket()
-	//       /root/psiphon-tunnel-core/psiphon/common/tun/tun.go:1974 +0x3c
-	//   _/root/psiphon-tunnel-core/psiphon/common/tun.(*Client).Start.func1()
-	//       /root/psiphon-tunnel-core/psiphon/common/tun/tun.go:1224 +0xaf
-	// ==================
-
 	return device.deviceIO.Close()
 }
 

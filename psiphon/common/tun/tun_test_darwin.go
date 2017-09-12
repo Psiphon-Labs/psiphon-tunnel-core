@@ -44,3 +44,8 @@ func bindToDevice(fd int, deviceName string) error {
 
 	return nil
 }
+
+func fixBindToDevice(_ common.Logger, _ bool, _ string) error {
+	// Not required on Darwin
+	return nil
+}
