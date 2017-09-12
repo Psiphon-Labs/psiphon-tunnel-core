@@ -20,8 +20,6 @@
 package tun
 
 import (
-	"fmt"
-	"io"
 	"net"
 	"os"
 	"strconv"

@@ -20,6 +20,7 @@
 package tun
 
 import (
+	"fmt"
 	"syscall"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
