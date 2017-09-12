@@ -46,13 +46,13 @@
     dispatch_queue_t callbackQueue;
     dispatch_semaphore_t noticeHandlingSemaphore;
 
-    volatile _Atomic PsiphonConnectionState connectionState;
+    _Atomic PsiphonConnectionState connectionState;
 
-    volatile _Atomic NSInteger localSocksProxyPort;
-    volatile _Atomic NSInteger localHttpProxyPort;
+    _Atomic NSInteger localSocksProxyPort;
+    _Atomic NSInteger localHttpProxyPort;
 
     Reachability* reachability;
-    volatile _Atomic NetworkStatus currentNetworkStatus;
+    _Atomic NetworkStatus currentNetworkStatus;
 
     BOOL tunnelWholeDevice;
 
@@ -61,7 +61,7 @@
     NSString *secondaryGoogleDNS;
 
     
-    volatile _Atomic BOOL useInitialDNS; // initialDNSCache validity flag.
+    _Atomic BOOL useInitialDNS; // initialDNSCache validity flag.
     NSArray<NSString *> *initialDNSCache;  // This cache becomes void if internetReachabilityChanged is called.
 }
 
