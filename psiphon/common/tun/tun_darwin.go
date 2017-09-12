@@ -53,7 +53,6 @@ package tun
 import (
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net"
 	"os"
@@ -78,7 +77,7 @@ func makeDeviceOutboundBuffer(MTU int) []byte {
 	return make([]byte, 4+MTU)
 }
 
-func createTunDevice() (io.ReadWriteCloser, string, error) {
+func createTunDevice() (*os.File, string, error) {
 
 	// Prevent fork between creating fd and setting CLOEXEC
 	syscall.ForkLock.RLock()
@@ -424,10 +423,5 @@ func configureClientInterface(
 		}
 	}
 
-	return nil
-}
-
-func fixBindToDevice(_ common.Logger, _ bool, _ string) error {
-	// Not required on Darwin
 	return nil
 }
