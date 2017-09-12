@@ -1,3 +1,5 @@
+// +build darwin linux
+
 /*
  * Copyright (c) 2017, Psiphon Inc.
  * All rights reserved.
