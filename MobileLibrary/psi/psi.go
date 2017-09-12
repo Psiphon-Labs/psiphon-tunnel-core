@@ -194,7 +194,12 @@ func storeServerEntries(embeddedServerEntryListPath, embeddedServerEntryList str
 		}
 		defer serverEntriesFile.Close()
 
-		err = psiphon.StreamingStoreServerEntriesWithIOReader(serverEntriesFile, protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
+		err = psiphon.StreamingStoreServerEntries(
+			protocol.NewStreamingServerEntryDecoder(
+				serverEntriesFile,
+				common.GetCurrentTimestamp(),
+				protocol.SERVER_ENTRY_SOURCE_EMBEDDED),
+			false)
 		if err != nil {
 			return fmt.Errorf("failed to store common remote server list: %s", common.ContextError(err))
 		}

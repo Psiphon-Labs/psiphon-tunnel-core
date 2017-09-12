@@ -77,7 +77,12 @@ func FetchCommonRemoteServerList(
 	}
 	defer serverListPayload.Close()
 
-	err = StreamingStoreServerEntriesWithIOReader(serverListPayload, protocol.SERVER_ENTRY_SOURCE_REMOTE)
+	err = StreamingStoreServerEntries(
+		protocol.NewStreamingServerEntryDecoder(
+			serverListPayload,
+			common.GetCurrentTimestamp(),
+			protocol.SERVER_ENTRY_SOURCE_REMOTE),
+		true)
 	if err != nil {
 		return fmt.Errorf("failed to store common remote server list: %s", common.ContextError(err))
 	}
@@ -367,8 +372,6 @@ func storeServerEntries(serverList, serverEntrySource string) error {
 	if err != nil {
 		return common.ContextError(err)
 	}
-
-	// TODO: record stats for newly discovered servers
 
 	err = StoreServerEntries(serverEntries, true)
 	if err != nil {
