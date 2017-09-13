@@ -277,6 +277,35 @@
 }
 
 // See comment in header.
+- (NSArray * _Nonnull)getPacketTunnelInterfacesIPv4Addresses {
+    
+    // Getting list of all interfaces' IPv4 addresses
+    NSMutableArray *upIfIpAddressList = [NSMutableArray new];
+    
+    struct ifaddrs *interfaces;
+    if (getifaddrs(&interfaces) == 0) {
+        struct ifaddrs *interface;
+        for (interface=interfaces; interface; interface=interface->ifa_next) {
+            
+            // Only IFF_UP interfaces. Loopback is ignored.
+            if (interface->ifa_flags & IFF_UP && !(interface->ifa_flags & IFF_LOOPBACK)) {
+                
+                if (interface->ifa_addr && interface->ifa_addr->sa_family==AF_INET) {
+                    struct sockaddr_in *in = (struct sockaddr_in*) interface->ifa_addr;
+                    NSString *interfaceAddress = [NSString stringWithUTF8String:inet_ntoa(in->sin_addr)];
+                    [upIfIpAddressList addObject:interfaceAddress];
+                }
+            }
+        }
+    }
+    
+    // Free getifaddrs data
+    freeifaddrs(interfaces);
+    
+    return upIfIpAddressList;
+}
+
+// See comment in header.
 - (void)sendFeedback:(NSString * _Nonnull)feedbackJson
            publicKey:(NSString * _Nonnull)b64EncodedPublicKey
         uploadServer:(NSString * _Nonnull)uploadServer
