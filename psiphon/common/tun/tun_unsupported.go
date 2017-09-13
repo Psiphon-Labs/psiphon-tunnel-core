@@ -28,6 +28,14 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
+const (
+	DEFAULT_PUBLIC_INTERFACE_NAME = ""
+)
+
+func IsSupported() bool {
+	return false
+}
+
 func makeDeviceInboundBuffer(_ int) []byte {
 	return nil
 }
@@ -36,15 +44,7 @@ func makeDeviceOutboundBuffer(_ int) []byte {
 	return nil
 }
 
-func configureServerInterface(_ *ServerConfig, _ string) error {
-	return common.ContextError(unsupportedError)
-}
-
-func configureClientInterface(_ *ClientConfig, _ string) error {
-	return common.ContextError(unsupportedError)
-}
-
-func createTunDevice() (*os.File, string, error) {
+func OpenTunDevice(_ string) (*os.File, string, error) {
 	return nil, "", common.ContextError(unsupportedError)
 }
 
@@ -64,10 +64,42 @@ func resetNATTables(_ *ServerConfig, _ net.IP) error {
 	return common.ContextError(unsupportedError)
 }
 
-func routeServerInterface(_ string, _ int) error {
+func configureServerInterface(_ *ServerConfig, _ string) error {
 	return common.ContextError(unsupportedError)
 }
 
-func dupFD(_ int) (int, error) {
-	return -1, common.ContextError(unsupportedError)
+func configureClientInterface(_ *ClientConfig, _ string) error {
+	return common.ContextError(unsupportedError)
+}
+
+func BindToDevice(_ int, _ string) error {
+	return common.ContextError(unsupportedError)
+}
+
+func fixBindToDevice(_ common.Logger, _ bool, _ string) error {
+	// Not required
+	return nil
+}
+
+type NonblockingIO struct {
+}
+
+func NewNonblockingIO(ioFD int) (*NonblockingIO, error) {
+	return nil, common.ContextError(unsupportedError)
+}
+
+func (nio *NonblockingIO) Read(p []byte) (int, error) {
+	return 0, common.ContextError(unsupportedError)
+}
+
+func (nio *NonblockingIO) Write(p []byte) (int, error) {
+	return 0, common.ContextError(unsupportedError)
+}
+
+func (nio *NonblockingIO) IsClosed() bool {
+	return false
+}
+
+func (nio *NonblockingIO) Close() error {
+	return common.ContextError(unsupportedError)
 }

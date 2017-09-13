@@ -2386,7 +2386,7 @@ type Device struct {
 // device may exist per host.
 func NewServerDevice(config *ServerConfig) (*Device, error) {
 
-	file, deviceName, err := createTunDevice()
+	file, deviceName, err := OpenTunDevice("")
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -2412,7 +2412,7 @@ func NewServerDevice(config *ServerConfig) (*Device, error) {
 // Multiple client tun devices may exist per host.
 func NewClientDevice(config *ClientConfig) (*Device, error) {
 
-	file, deviceName, err := createTunDevice()
+	file, deviceName, err := OpenTunDevice("")
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
