@@ -20,6 +20,7 @@
 package tun
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -35,6 +36,10 @@ const (
 	DEFAULT_PUBLIC_INTERFACE_NAME = "eth0"
 )
 
+func IsSupported() bool {
+	return true
+}
+
 func makeDeviceInboundBuffer(MTU int) []byte {
 	return make([]byte, MTU)
 }
@@ -44,7 +49,10 @@ func makeDeviceOutboundBuffer(MTU int) []byte {
 	return nil
 }
 
-func createTunDevice() (*os.File, string, error) {
+// OpenTunDevice opens a file for performing device I/O with
+// either a specified tun device, or a new tun device (when
+// name is "").
+func OpenTunDevice(name string) (*os.File, string, error) {
 
 	// Prevent fork between creating fd and setting CLOEXEC
 	syscall.ForkLock.RLock()
@@ -77,7 +85,11 @@ func createTunDevice() (*os.File, string, error) {
 	)
 
 	var ifName [IFNAMSIZ]byte
-	copy(ifName[:], []byte("tun%d"))
+	if name == "" {
+		copy(ifName[:], []byte("tun%d"))
+	} else {
+		copy(ifName[:], []byte(name))
+	}
 
 	ifReq := struct {
 		name  [IFNAMSIZ]byte
@@ -95,6 +107,7 @@ func createTunDevice() (*os.File, string, error) {
 		uintptr(syscall.TUNSETIFF),
 		uintptr(unsafe.Pointer(&ifReq)))
 	if errno != 0 {
+		file.Close()
 		return nil, "", common.ContextError(errno)
 	}
 
@@ -380,6 +393,50 @@ func configureClientInterface(
 				return common.ContextError(err)
 			}
 		}
+	}
+
+	return nil
+}
+
+// BindToDevice binds a socket to the specified interface.
+func BindToDevice(fd int, deviceName string) error {
+	err := syscall.BindToDevice(fd, deviceName)
+	if err != nil {
+		return common.ContextError(err)
+	}
+	return nil
+}
+
+func fixBindToDevice(logger common.Logger, useSudo bool, tunDeviceName string) error {
+
+	// Fix the problem described here:
+	// https://stackoverflow.com/questions/24011205/cant-perform-tcp-handshake-through-a-nat-between-two-nics-with-so-bindtodevice/
+
+	err := runNetworkConfigCommand(
+		logger,
+		useSudo,
+		"sysctl",
+		"net.ipv4.conf.all.accept_local=1")
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	err = runNetworkConfigCommand(
+		logger,
+		useSudo,
+		"sysctl",
+		"net.ipv4.conf.all.rp_filter=0")
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	err = runNetworkConfigCommand(
+		logger,
+		useSudo,
+		"sysctl",
+		fmt.Sprintf("net.ipv4.conf.%s.rp_filter=0", tunDeviceName))
+	if err != nil {
+		return common.ContextError(err)
 	}
 
 	return nil
