@@ -349,13 +349,6 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
 - (NSString * _Nonnull)getPacketTunnelDNSResolverIPv6Address;
 
 /*!
- Only valid in whole device mode. Provides the IP addresses of the network interfaces that are up.
- @return  The IP addresses of the network interfaces.
- Swift: @code func getPacketTunnelInterfacesIPv4Addresses() -> Array @endcode
- */
-- (NSArray * _Nonnull)getPacketTunnelInterfacesIPv4Addresses;
-
-/*!
  Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics information in a particular format, then calls this function to upload it for later investigation.
  @note The key, server, path, and headers must be provided by Psiphon Inc.
  @param feedbackJson  The feedback and diagnostics data to upload.
