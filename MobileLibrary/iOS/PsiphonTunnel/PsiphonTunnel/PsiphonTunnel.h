@@ -176,8 +176,9 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 - (void)onConnectionStateChangedFrom:(PsiphonConnectionState)oldState to:(PsiphonConnectionState)newState;
 
 /*!
- Called to indicate that tunnel-core is exiting imminently (usually do to
+ Called to indicate that tunnel-core is exiting imminently (usually due to
  a `stop()` call, but could be due to an unexpected error).
+ onExiting may be called before or after `stop()` returns.
  Swift: @code func onExiting() @endcode
  */
 - (void)onExiting;
@@ -301,7 +302,7 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
 - (BOOL)start:(BOOL)ifNeeded;
 
 /*!
- Stop the tunnel (regardless of its current connection state). Returns before full stop is complete -- `TunneledAppDelegate::onExiting` is called when complete.
+ Stop the tunnel (regardless of its current connection state).
  Swift: @code func stop() @endcode
  */
 - (void)stop;

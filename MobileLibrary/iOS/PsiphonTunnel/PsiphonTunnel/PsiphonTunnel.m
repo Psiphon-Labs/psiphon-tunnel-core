@@ -39,6 +39,8 @@
 
 @property (weak) id <TunneledAppDelegate> tunneledAppDelegate;
 
+@property (atomic, strong) NSString *sessionID;
+
 @end
 
 @implementation PsiphonTunnel {
@@ -59,8 +61,6 @@
     // DNS
     NSString *primaryGoogleDNS;
     NSString *secondaryGoogleDNS;
-
-    
     _Atomic BOOL useInitialDNS; // initialDNSCache validity flag.
     NSArray<NSString *> *initialDNSCache;  // This cache becomes void if internetReachabilityChanged is called.
 }
@@ -118,6 +118,15 @@
 
 // See comment in header
 - (BOOL)start:(BOOL)ifNeeded {
+
+    // Set a new session ID, as this is a user-initiated session start.
+    NSString *sessionID = [self generateSessionID];
+    if (sessionID == nil) {
+        // generateSessionID logs error message
+        return FALSE;
+    }
+    self.sessionID = sessionID;
+
     if (ifNeeded) {
         return [self startIfNeeded];
     }
@@ -127,10 +136,14 @@
 
 /*!
  Start the tunnel. If the tunnel is already started it will be stopped first.
+ Assumes self.sessionID has been initialized -- i.e., assumes that
+ start:(BOOL)ifNeeded has been called at least once.
  */
 - (BOOL)start {
     @synchronized (PsiphonTunnel.self) {
+
         [self stop];
+
         [self logMessage:@"Starting Psiphon library"];
 
         // Must always use IPv6Synthesizer for iOS
@@ -524,6 +537,8 @@
     config[@"UpgradeDownloadUrl"] = nil;
     config[@"UpgradeDownloadClientVersionHeader"] = nil;
     config[@"UpgradeDownloadFilename"] = nil;
+
+    config[@"SessionID"] = self.sessionID;
 
     NSString *finalConfigStr = [[[SBJson4Writer alloc] init] stringWithObject:config];
     
@@ -919,7 +934,7 @@
     _state = malloc(sizeof(struct __res_state));
 
     if (res_ninit(_state) < 0) {
-        NSLog(@"res_ninit failed.");
+        [self logMessage:@"getDNSServers: res_ninit failed."];
         free(_state);
         return nil;
     }
@@ -943,7 +958,7 @@
             if (EXIT_SUCCESS == ret_code) {
                 [serverList addObject:[NSString stringWithUTF8String:hostBuf]];
             } else {
-                NSLog(@"getnameinfo failed. Retcode: %d", ret_code);
+                [self logMessage:[NSString stringWithFormat: @"getDNSServers: getnameinfo failed: %d", ret_code]];
             }
         }
     }
@@ -1117,6 +1132,24 @@
     
     // Generic-ish default
     return @"US";
+}
+
+/*!
+ generateSessionID generates a session ID suitable for use with the Psiphon API.
+ */
+- (NSString *)generateSessionID {
+    const int sessionIDLen = 16;
+    uint8_t sessionID[sessionIDLen];
+    int result = SecRandomCopyBytes(kSecRandomDefault, sessionIDLen, sessionID);
+    if (result != errSecSuccess) {
+        [self logMessage:[NSString stringWithFormat: @"Error generating session ID: %d", result]];
+        return nil;
+    }
+    NSMutableString *hexEncodedSessionID = [NSMutableString stringWithCapacity:(sessionIDLen*2)];
+    for (int i = 0; i < sessionIDLen; i++) {
+        [hexEncodedSessionID appendFormat:@"%02x", sessionID[i]];
+    }
+    return hexEncodedSessionID;
 }
 
 @end
