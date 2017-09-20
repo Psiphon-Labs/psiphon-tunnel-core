@@ -244,6 +244,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	}
 
 	serverContext.serverHandshakeTimestamp = handshakeResponse.ServerTimestamp
+	NoticeServerTimeStamp(serverContext.serverHandshakeTimestamp)
 
 	return nil
 }

@@ -416,6 +416,11 @@ func NoticeSLOKSeeded(slokID string, duplicate bool) {
 	outputNotice("SLOKSeeded", noticeIsDiagnostic, "slokID", slokID, "duplicate", duplicate)
 }
 
+// NoticeServerTimeStamp reports server side timestamp seen in the handshake
+func NoticeServerTimeStamp(serverTimestamp string) {
+	outputNotice("ServerTimeStamp", 0, "timestamp", serverTimestamp)
+}
+
 type repetitiveNoticeState struct {
 	message string
 	repeats int
