@@ -53,7 +53,6 @@ package tun
 import (
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net"
 	"os"
@@ -68,6 +67,10 @@ const (
 	DEFAULT_PUBLIC_INTERFACE_NAME = "en0"
 )
 
+func IsSupported() bool {
+	return true
+}
+
 func makeDeviceInboundBuffer(MTU int) []byte {
 	// 4 extra bytes to read a utun packet header
 	return make([]byte, 4+MTU)
@@ -78,11 +81,25 @@ func makeDeviceOutboundBuffer(MTU int) []byte {
 	return make([]byte, 4+MTU)
 }
 
-func createTunDevice() (io.ReadWriteCloser, string, error) {
+// OpenTunDevice opens a file for performing device I/O with
+// either a specified tun device, or a new tun device (when
+// name is "").
+func OpenTunDevice(name string) (*os.File, string, error) {
 
 	// Prevent fork between creating fd and setting CLOEXEC
 	syscall.ForkLock.RLock()
 	defer syscall.ForkLock.RUnlock()
+
+	unit := uint32(0)
+	if name != "" {
+		n, err := fmt.Sscanf(name, "utun%d", &unit)
+		if err == nil && n != 1 {
+			err = errors.New("failed to scan device name")
+		}
+		if err != nil {
+			return nil, "", common.ContextError(err)
+		}
+	}
 
 	// Darwin utun code based on:
 	// https://github.com/songgao/water/blob/70591d249921d075889cc49aaef072987e6b354a/syscalls_darwin.go
@@ -143,7 +160,7 @@ func createTunDevice() (io.ReadWriteCloser, string, error) {
 		syscall.AF_SYSTEM,
 		AF_SYS_CONTROL,
 		ctlInfo.ctlID,
-		0,
+		unit,
 		[5]uint32{},
 	}
 
@@ -422,6 +439,26 @@ func configureClientInterface(
 		if err != nil {
 			return common.ContextError(err)
 		}
+	}
+
+	return nil
+}
+
+// BindToDevice binds a socket to the specified interface.
+func BindToDevice(fd int, deviceName string) error {
+
+	netInterface, err := net.InterfaceByName(deviceName)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	// IP_BOUND_IF definition from <netinet/in.h>
+
+	const IP_BOUND_IF = 25
+
+	err = syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, IP_BOUND_IF, netInterface.Index)
+	if err != nil {
+		return common.ContextError(err)
 	}
 
 	return nil

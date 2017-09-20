@@ -21,7 +21,6 @@ package tun
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"strconv"
@@ -37,6 +36,10 @@ const (
 	DEFAULT_PUBLIC_INTERFACE_NAME = "eth0"
 )
 
+func IsSupported() bool {
+	return true
+}
+
 func makeDeviceInboundBuffer(MTU int) []byte {
 	return make([]byte, MTU)
 }
@@ -46,7 +49,10 @@ func makeDeviceOutboundBuffer(MTU int) []byte {
 	return nil
 }
 
-func createTunDevice() (io.ReadWriteCloser, string, error) {
+// OpenTunDevice opens a file for performing device I/O with
+// either a specified tun device, or a new tun device (when
+// name is "").
+func OpenTunDevice(name string) (*os.File, string, error) {
 
 	// Prevent fork between creating fd and setting CLOEXEC
 	syscall.ForkLock.RLock()
@@ -79,7 +85,11 @@ func createTunDevice() (io.ReadWriteCloser, string, error) {
 	)
 
 	var ifName [IFNAMSIZ]byte
-	copy(ifName[:], []byte("tun%d"))
+	if name == "" {
+		copy(ifName[:], []byte("tun%d"))
+	} else {
+		copy(ifName[:], []byte(name))
+	}
 
 	ifReq := struct {
 		name  [IFNAMSIZ]byte
@@ -97,6 +107,7 @@ func createTunDevice() (io.ReadWriteCloser, string, error) {
 		uintptr(syscall.TUNSETIFF),
 		uintptr(unsafe.Pointer(&ifReq)))
 	if errno != 0 {
+		file.Close()
 		return nil, "", common.ContextError(errno)
 	}
 
@@ -384,6 +395,15 @@ func configureClientInterface(
 		}
 	}
 
+	return nil
+}
+
+// BindToDevice binds a socket to the specified interface.
+func BindToDevice(fd int, deviceName string) error {
+	err := syscall.BindToDevice(fd, deviceName)
+	if err != nil {
+		return common.ContextError(err)
+	}
 	return nil
 }
 

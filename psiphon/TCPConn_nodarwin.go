@@ -1,3 +1,5 @@
+// +build !darwin
+
 /*
  * Copyright (c) 2017, Psiphon Inc.
  * All rights reserved.
@@ -17,18 +19,7 @@
  *
  */
 
-package tun
+package psiphon
 
-import (
-	"syscall"
-
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-)
-
-func bindToDevice(fd int, deviceName string) error {
-	err := syscall.BindToDevice(fd, deviceName)
-	if err != nil {
-		return common.ContextError(err)
-	}
-	return nil
+func tcpDialSetAdditionalSocketOptions(_ int) {
 }

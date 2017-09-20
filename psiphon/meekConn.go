@@ -50,24 +50,30 @@ import (
 // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/default/go/meek-client/meek-client.go
 
 const (
-	MEEK_PROTOCOL_VERSION          = 3
-	MEEK_COOKIE_MAX_PADDING        = 32
-	MAX_SEND_PAYLOAD_LENGTH        = 65536
-	FULL_RECEIVE_BUFFER_LENGTH     = 4194304
-	READ_PAYLOAD_CHUNK_LENGTH      = 65536
-	MIN_POLL_INTERVAL              = 100 * time.Millisecond
-	MIN_POLL_INTERVAL_JITTER       = 0.3
-	MAX_POLL_INTERVAL              = 5 * time.Second
-	MAX_POLL_INTERVAL_JITTER       = 0.1
-	POLL_INTERVAL_MULTIPLIER       = 1.5
-	POLL_INTERVAL_JITTER           = 0.1
-	MEEK_ROUND_TRIP_RETRY_DEADLINE = 5 * time.Second
-	MEEK_ROUND_TRIP_RETRY_DELAY    = 50 * time.Millisecond
-	MEEK_ROUND_TRIP_TIMEOUT        = 20 * time.Second
+	MEEK_PROTOCOL_VERSION              = 3
+	MEEK_COOKIE_MAX_PADDING            = 32
+	MAX_SEND_PAYLOAD_LENGTH            = 65536
+	FULL_RECEIVE_BUFFER_LENGTH         = 4194304
+	READ_PAYLOAD_CHUNK_LENGTH          = 65536
+	LIMITED_FULL_RECEIVE_BUFFER_LENGTH = 131072
+	LIMITED_READ_PAYLOAD_CHUNK_LENGTH  = 4096
+	MIN_POLL_INTERVAL                  = 100 * time.Millisecond
+	MIN_POLL_INTERVAL_JITTER           = 0.3
+	MAX_POLL_INTERVAL                  = 5 * time.Second
+	MAX_POLL_INTERVAL_JITTER           = 0.1
+	POLL_INTERVAL_MULTIPLIER           = 1.5
+	POLL_INTERVAL_JITTER               = 0.1
+	MEEK_ROUND_TRIP_RETRY_DEADLINE     = 5 * time.Second
+	MEEK_ROUND_TRIP_RETRY_DELAY        = 50 * time.Millisecond
+	MEEK_ROUND_TRIP_TIMEOUT            = 20 * time.Second
 )
 
 // MeekConfig specifies the behavior of a MeekConn
 type MeekConfig struct {
+
+	// LimitBufferSizes indicates whether to use smaller buffers to
+	// conserve memory.
+	LimitBufferSizes bool
 
 	// DialAddress is the actual network address to dial to establish a
 	// connection to the meek server. This may be either a fronted or
@@ -126,22 +132,24 @@ type MeekConfig struct {
 // MeekConn also operates in unfronted mode, in which plain HTTP connections are made without routing
 // through a CDN.
 type MeekConn struct {
-	url                  *url.URL
-	additionalHeaders    http.Header
-	cookie               *http.Cookie
-	pendingConns         *common.Conns
-	transport            transporter
-	mutex                sync.Mutex
-	isClosed             bool
-	runContext           context.Context
-	stopRunning          context.CancelFunc
-	relayWaitGroup       *sync.WaitGroup
-	emptyReceiveBuffer   chan *bytes.Buffer
-	partialReceiveBuffer chan *bytes.Buffer
-	fullReceiveBuffer    chan *bytes.Buffer
-	emptySendBuffer      chan *bytes.Buffer
-	partialSendBuffer    chan *bytes.Buffer
-	fullSendBuffer       chan *bytes.Buffer
+	url                     *url.URL
+	additionalHeaders       http.Header
+	cookie                  *http.Cookie
+	pendingConns            *common.Conns
+	transport               transporter
+	mutex                   sync.Mutex
+	isClosed                bool
+	runContext              context.Context
+	stopRunning             context.CancelFunc
+	relayWaitGroup          *sync.WaitGroup
+	fullReceiveBufferLength int
+	readPayloadChunkLength  int
+	emptyReceiveBuffer      chan *bytes.Buffer
+	partialReceiveBuffer    chan *bytes.Buffer
+	fullReceiveBuffer       chan *bytes.Buffer
+	emptySendBuffer         chan *bytes.Buffer
+	partialSendBuffer       chan *bytes.Buffer
+	fullSendBuffer          chan *bytes.Buffer
 }
 
 // transporter is implemented by both http.Transport and upstreamproxy.ProxyAuthTransport.
@@ -326,26 +334,34 @@ func DialMeek(
 	// Write() calls and relay() are synchronized in a similar way, using a single
 	// sendBuffer.
 	meek = &MeekConn{
-		url:                  url,
-		additionalHeaders:    additionalHeaders,
-		cookie:               cookie,
-		pendingConns:         pendingConns,
-		transport:            transport,
-		isClosed:             false,
-		runContext:           runContext,
-		stopRunning:          stopRunning,
-		relayWaitGroup:       new(sync.WaitGroup),
-		emptyReceiveBuffer:   make(chan *bytes.Buffer, 1),
-		partialReceiveBuffer: make(chan *bytes.Buffer, 1),
-		fullReceiveBuffer:    make(chan *bytes.Buffer, 1),
-		emptySendBuffer:      make(chan *bytes.Buffer, 1),
-		partialSendBuffer:    make(chan *bytes.Buffer, 1),
-		fullSendBuffer:       make(chan *bytes.Buffer, 1),
+		url:                     url,
+		additionalHeaders:       additionalHeaders,
+		cookie:                  cookie,
+		pendingConns:            pendingConns,
+		transport:               transport,
+		isClosed:                false,
+		runContext:              runContext,
+		stopRunning:             stopRunning,
+		relayWaitGroup:          new(sync.WaitGroup),
+		fullReceiveBufferLength: FULL_RECEIVE_BUFFER_LENGTH,
+		readPayloadChunkLength:  READ_PAYLOAD_CHUNK_LENGTH,
+		emptyReceiveBuffer:      make(chan *bytes.Buffer, 1),
+		partialReceiveBuffer:    make(chan *bytes.Buffer, 1),
+		fullReceiveBuffer:       make(chan *bytes.Buffer, 1),
+		emptySendBuffer:         make(chan *bytes.Buffer, 1),
+		partialSendBuffer:       make(chan *bytes.Buffer, 1),
+		fullSendBuffer:          make(chan *bytes.Buffer, 1),
 	}
-	// TODO: benchmark bytes.Buffer vs. built-in append with slices?
+
 	meek.emptyReceiveBuffer <- new(bytes.Buffer)
 	meek.emptySendBuffer <- new(bytes.Buffer)
 	meek.relayWaitGroup.Add(1)
+
+	if meekConfig.LimitBufferSizes {
+		meek.fullReceiveBufferLength = LIMITED_FULL_RECEIVE_BUFFER_LENGTH
+		meek.readPayloadChunkLength = LIMITED_READ_PAYLOAD_CHUNK_LENGTH
+	}
+
 	go meek.relay()
 
 	// Enable interruption
@@ -465,7 +481,7 @@ func (meek *MeekConn) replaceReceiveBuffer(receiveBuffer *bytes.Buffer) {
 	switch {
 	case receiveBuffer.Len() == 0:
 		meek.emptyReceiveBuffer <- receiveBuffer
-	case receiveBuffer.Len() >= FULL_RECEIVE_BUFFER_LENGTH:
+	case receiveBuffer.Len() >= meek.fullReceiveBufferLength:
 		meek.fullReceiveBuffer <- receiveBuffer
 	default:
 		meek.partialReceiveBuffer <- receiveBuffer
@@ -498,8 +514,6 @@ func (meek *MeekConn) relay() {
 
 	timeout := time.NewTimer(interval)
 
-	sendPayload := make([]byte, MAX_SEND_PAYLOAD_LENGTH)
-
 	for {
 		timeout.Reset(interval)
 
@@ -523,17 +537,19 @@ func (meek *MeekConn) relay() {
 
 		sendPayloadSize := 0
 		if sendBuffer != nil {
-			var err error
-			sendPayloadSize, err = sendBuffer.Read(sendPayload)
-			meek.replaceSendBuffer(sendBuffer)
-			if err != nil {
-				NoticeAlert("%s", common.ContextError(err))
-				go meek.Close()
-				return
-			}
+			sendPayloadSize = sendBuffer.Len()
 		}
 
-		receivedPayloadSize, err := meek.roundTrip(sendPayload[:sendPayloadSize])
+		// roundTrip will replace sendBuffer (by calling replaceSendBuffer). This is
+		// a compromise to conserve memory. Using a second buffer here, we could copy
+		// sendBuffer and immediately replace it, unblocking meekConn.Write() and
+		// allowing more upstream payload to immediately enqueue. Instead, the request
+		// payload is read directly from sendBuffer, including retries. Only once the
+		// server has acknowledged the request payload is sendBuffer replaced. This
+		// still allows meekConn.Write() to unblock before the round trip response is
+		// read.
+
+		receivedPayloadSize, err := meek.roundTrip(sendBuffer)
 
 		if err != nil {
 			select {
@@ -584,8 +600,42 @@ func (meek *MeekConn) relay() {
 	}
 }
 
+// readCloseSignaller is an io.ReadCloser wrapper for an io.Reader
+// that is passed, as the request body, to http.Transport.RoundTrip.
+// readCloseSignaller adds the AwaitClosed call, which is used
+// to schedule recycling the buffer underlying the reader only after
+// RoundTrip has called Close and will no longer use the buffer.
+// See: https://golang.org/pkg/net/http/#RoundTripper
+type readCloseSignaller struct {
+	reader io.Reader
+	closed chan struct{}
+}
+
+func NewReadCloseSignaller(reader io.Reader) *readCloseSignaller {
+	return &readCloseSignaller{
+		reader: reader,
+		closed: make(chan struct{}, 1),
+	}
+}
+
+func (r *readCloseSignaller) Read(p []byte) (int, error) {
+	return r.reader.Read(p)
+}
+
+func (r *readCloseSignaller) Close() error {
+	select {
+	case r.closed <- *new(struct{}):
+	default:
+	}
+	return nil
+}
+
+func (r *readCloseSignaller) AwaitClosed() {
+	<-r.closed
+}
+
 // roundTrip configures and makes the actual HTTP POST request
-func (meek *MeekConn) roundTrip(sendPayload []byte) (int64, error) {
+func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 
 	// Retries are made when the round trip fails. This adds resiliency
 	// to connection interruption and intermittent failures.
@@ -620,6 +670,14 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (int64, error) {
 	// Retries are indicated to the server by adding a Range header,
 	// which includes the response payload resend position.
 
+	defer func() {
+		// Ensure sendBuffer is replaced, even in error code paths.
+		if sendBuffer != nil {
+			sendBuffer.Truncate(0)
+			meek.replaceSendBuffer(sendBuffer)
+		}
+	}()
+
 	retries := uint(0)
 	retryDeadline := monotime.Now().Add(MEEK_ROUND_TRIP_RETRY_DEADLINE)
 	serverAcknowledgedRequestPayload := false
@@ -630,13 +688,15 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (int64, error) {
 		// Omit the request payload when retrying after receiving a
 		// partial server response.
 
-		var sendPayloadReader io.Reader
-		if !serverAcknowledgedRequestPayload {
-			sendPayloadReader = bytes.NewReader(sendPayload)
+		var signaller *readCloseSignaller
+		var requestBody io.ReadCloser
+		if !serverAcknowledgedRequestPayload && sendBuffer != nil {
+			signaller = NewReadCloseSignaller(bytes.NewReader(sendBuffer.Bytes()))
+			requestBody = signaller
 		}
 
 		var request *http.Request
-		request, err := http.NewRequest("POST", meek.url.String(), sendPayloadReader)
+		request, err := http.NewRequest("POST", meek.url.String(), requestBody)
 		if err != nil {
 			// Don't retry when can't initialize a Request
 			return 0, common.ContextError(err)
@@ -659,6 +719,11 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (int64, error) {
 			expectedStatusCode = http.StatusPartialContent
 			request.Header.Set("Range", fmt.Sprintf("bytes=%d-", receivedPayloadSize))
 		}
+
+		// sendBuffer will be replaced once the data is no longer needed,
+		// when RoundTrip calls Close on the Body; this allows meekConn.Write()
+		// to unblock and start buffering data for the next roung trip while
+		// still reading the current round trip response.
 
 		response, err := meek.transport.RoundTrip(request)
 		if err != nil {
@@ -694,6 +759,17 @@ func (meek *MeekConn) roundTrip(sendPayload []byte) (int64, error) {
 			// Received the response status code, so the server
 			// must have received the request payload.
 			serverAcknowledgedRequestPayload = true
+
+			// sendBuffer is now no longer required for retries, ane the
+			// buffer may be replaced; this allows meekConn.Write() to unblock
+			// and start buffering data for the next roung trip while still
+			// reading the current round trip response.
+			if signaller != nil {
+				signaller.AwaitClosed()
+				sendBuffer.Truncate(0)
+				meek.replaceSendBuffer(sendBuffer)
+				sendBuffer = nil
+			}
 
 			readPayloadSize, err := meek.readPayload(response.Body)
 			response.Body.Close()
@@ -758,7 +834,7 @@ func (meek *MeekConn) readPayload(
 	defer receivedPayload.Close()
 	totalSize = 0
 	for {
-		reader := io.LimitReader(receivedPayload, READ_PAYLOAD_CHUNK_LENGTH)
+		reader := io.LimitReader(receivedPayload, int64(meek.readPayloadChunkLength))
 		// Block until there is capacity in the receive buffer
 		var receiveBuffer *bytes.Buffer
 		select {
@@ -767,8 +843,8 @@ func (meek *MeekConn) readPayload(
 		case <-meek.runContext.Done():
 			return 0, nil
 		}
-		// Note: receiveBuffer size may exceed FULL_RECEIVE_BUFFER_LENGTH by up to the size
-		// of one received payload. The FULL_RECEIVE_BUFFER_LENGTH value is just a guideline.
+		// Note: receiveBuffer size may exceed meek.fullReceiveBufferLength by up to the size
+		// of one received payload. The meek.fullReceiveBufferLength value is just a guideline.
 		n, err := receiveBuffer.ReadFrom(reader)
 		meek.replaceReceiveBuffer(receiveBuffer)
 		totalSize += n

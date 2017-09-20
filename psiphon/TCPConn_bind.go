@@ -60,6 +60,23 @@ func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 		return nil, common.ContextError(errors.New("no IP address"))
 	}
 
+	// When configured, attempt to synthesize IPv6 addresses from
+	// an IPv4 addresses for compatibility on DNS64/NAT64 networks.
+	// If synthesize fails, try the original addresses.
+	if config.IPv6Synthesizer != nil {
+		for i, ipAddr := range ipAddrs {
+			if ipAddr.To4() != nil {
+				synthesizedIPAddress := config.IPv6Synthesizer.IPv6Synthesize(ipAddr.String())
+				if synthesizedIPAddress != "" {
+					synthesizedAddr := net.ParseIP(synthesizedIPAddress)
+					if synthesizedAddr != nil {
+						ipAddrs[i] = synthesizedAddr
+					}
+				}
+			}
+		}
+	}
+
 	// Iterate over a pseudorandom permutation of the destination
 	// IPs and attempt connections.
 	//
@@ -107,7 +124,7 @@ func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 			copy(ipv6[:], ipAddr.To16())
 			domain = syscall.AF_INET6
 		} else {
-			lastErr = common.ContextError(fmt.Errorf("Got invalid IP address: %s", ipAddr.String()))
+			lastErr = common.ContextError(fmt.Errorf("invalid IP address: %s", ipAddr.String()))
 			continue
 		}
 		if domain == syscall.AF_INET {
@@ -123,6 +140,8 @@ func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 			lastErr = common.ContextError(err)
 			continue
 		}
+
+		tcpDialSetAdditionalSocketOptions(socketFd)
 
 		if config.DeviceBinder != nil {
 			// WARNING: this potentially violates the direction to not call into

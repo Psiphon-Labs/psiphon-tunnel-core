@@ -54,3 +54,6 @@ build/
 
 # Visual Studio Code
 .vscode/
+
+# Intellij IDEs
+.idea/

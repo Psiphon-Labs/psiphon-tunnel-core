@@ -27,12 +27,19 @@
 #import "PsiphonTunnel.h"
 #import "json-framework/SBJson4.h"
 #import "JailbreakCheck/JailbreakCheck.h"
-#include <ifaddrs.h>
+#import <ifaddrs.h>
+#import <resolv.h>
+#import <netdb.h>
 
+
+#define GOOGLE_DNS_1 @"8.8.4.4"
+#define GOOGLE_DNS_2 @"8.8.8.8"
 
 @interface PsiphonTunnel () <GoPsiPsiphonProvider>
 
 @property (weak) id <TunneledAppDelegate> tunneledAppDelegate;
+
+@property (atomic, strong) NSString *sessionID;
 
 @end
 
@@ -47,9 +54,15 @@
     _Atomic NSInteger localHttpProxyPort;
 
     Reachability* reachability;
-    NetworkStatus previousNetworkStatus;
+    _Atomic NetworkStatus currentNetworkStatus;
 
     BOOL tunnelWholeDevice;
+
+    // DNS
+    NSString *primaryGoogleDNS;
+    NSString *secondaryGoogleDNS;
+    _Atomic BOOL useInitialDNS; // initialDNSCache validity flag.
+    NSArray<NSString *> *initialDNSCache;  // This cache becomes void if internetReachabilityChanged is called.
 }
 
 - (id)init {
@@ -63,7 +76,21 @@
     atomic_init(&self->localSocksProxyPort, 0);
     atomic_init(&self->localHttpProxyPort, 0);
     self->reachability = [Reachability reachabilityForInternetConnection];
+    atomic_init(&self->currentNetworkStatus, NotReachable);
     self->tunnelWholeDevice = FALSE;
+
+    // Randomize order of Google DNS servers on start,
+    // and consistently return in that fixed order.
+    if (arc4random_uniform(2) == 0) {
+        self->primaryGoogleDNS = GOOGLE_DNS_1;
+        self->secondaryGoogleDNS = GOOGLE_DNS_2;
+    } else {
+        self->primaryGoogleDNS = GOOGLE_DNS_2;
+        self->secondaryGoogleDNS = GOOGLE_DNS_1;
+    }
+
+    self->initialDNSCache = [self getDNSServers];
+    atomic_init(&self->useInitialDNS, [self->initialDNSCache count] > 0);
 
     return self;
 }
@@ -91,6 +118,15 @@
 
 // See comment in header
 - (BOOL)start:(BOOL)ifNeeded {
+
+    // Set a new session ID, as this is a user-initiated session start.
+    NSString *sessionID = [self generateSessionID];
+    if (sessionID == nil) {
+        // generateSessionID logs error message
+        return FALSE;
+    }
+    self.sessionID = sessionID;
+
     if (ifNeeded) {
         return [self startIfNeeded];
     }
@@ -100,10 +136,14 @@
 
 /*!
  Start the tunnel. If the tunnel is already started it will be stopped first.
+ Assumes self.sessionID has been initialized -- i.e., assumes that
+ start:(BOOL)ifNeeded has been called at least once.
  */
 - (BOOL)start {
     @synchronized (PsiphonTunnel.self) {
+
         [self stop];
+
         [self logMessage:@"Starting Psiphon library"];
 
         // Must always use IPv6Synthesizer for iOS
@@ -115,14 +155,32 @@
             return FALSE;
         }
 
-        __block NSString *embeddedServerEntries = nil;
-        dispatch_sync(self->callbackQueue, ^{
-            embeddedServerEntries = [self.tunneledAppDelegate getEmbeddedServerEntries];
-        });
-
-        if (embeddedServerEntries == nil) {
-            [self logMessage:@"Error getting embedded server entries from delegate"];
-            return FALSE;
+        __block NSString *embeddedServerEntriesPath = @"";
+        __block NSString *embeddedServerEntries = @"";
+        
+        // getEmbeddedServerEntriesPath is optional in the protocol
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(getEmbeddedServerEntriesPath)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                embeddedServerEntriesPath = [self.tunneledAppDelegate getEmbeddedServerEntriesPath];
+                if (embeddedServerEntriesPath == nil) {
+                    // Don't pass NULL to go.
+                    embeddedServerEntriesPath = @"";
+                }
+            });
+        }
+        
+        // If getEmbeddedServerEntriesPath returns an empty string,
+        // call getEmbeddedServerEntries
+        if ([embeddedServerEntriesPath length] == 0) {
+            
+            dispatch_sync(self->callbackQueue, ^{
+                embeddedServerEntries = [self.tunneledAppDelegate getEmbeddedServerEntries];
+            });
+            
+            if (embeddedServerEntries == nil) {
+                [self logMessage:@"Error getting embedded server entries from delegate"];
+                return FALSE;
+            }
         }
 
         [self changeConnectionStateTo:PsiphonConnectionStateConnecting evenIfSameState:NO];
@@ -133,6 +191,7 @@
             BOOL res = GoPsiStart(
                            configStr,
                            embeddedServerEntries,
+                           embeddedServerEntriesPath,
                            self,
                            self->tunnelWholeDevice, // useDeviceBinder
                            useIPv6Synthesizer,
@@ -245,6 +304,10 @@
     });
 }
 
+// See comment in header.
++ (NSString * _Nonnull)getBuildInfo {
+    return GoPsiGetBuildInfo();
+}
 
 #pragma mark - PsiphonTunnel logic implementation methods (private)
 
@@ -474,6 +537,8 @@
     config[@"UpgradeDownloadUrl"] = nil;
     config[@"UpgradeDownloadClientVersionHeader"] = nil;
     config[@"UpgradeDownloadFilename"] = nil;
+
+    config[@"SessionID"] = self.sessionID;
 
     NSString *finalConfigStr = [[[SBJson4Writer alloc] init] stringWithObject:config];
     
@@ -774,12 +839,15 @@
     // Free getifaddrs data
     freeifaddrs(interfaces);
     
-    [self logMessage:[NSString stringWithFormat:@"getActiveInterace: List of UP interfaces: %@", upIffList]];
+    [self logMessage:[NSString stringWithFormat:@"getActiveInterface: List of UP interfaces: %@", upIffList]];
     
     // TODO: following is a heuristic for choosing active network interface
     // Only Wi-Fi and Cellular interfaces are considered
     // @see : https://forums.developer.apple.com/thread/76711
-    NSArray *iffPriorityList = @[ @"en0", @"pdp_ip0"];
+    NSArray *iffPriorityList = @[@"en0", @"pdp_ip0"];
+    if (atomic_load(&self->currentNetworkStatus) == ReachableViaWWAN) {
+        iffPriorityList = @[@"pdp_ip0", @"en0"];
+    }
     for (NSString * key in iffPriorityList) {
         for (NSString * upIff in upIffList) {
             if ([key isEqualToString:upIff]) {
@@ -796,13 +864,23 @@
 - (NSString *)getPrimaryDnsServer {
     // This function is only called when BindToDevice is used/supported.
     // TODO: Implement correctly
-    return @"8.8.8.8";
+
+    if (atomic_load(&self->useInitialDNS)) {
+        return self->initialDNSCache[0];
+    } else {
+        return self->primaryGoogleDNS;
+    }
 }
 
 - (NSString *)getSecondaryDnsServer {
     // This function is only called when BindToDevice is used/supported.
     // TODO: Implement correctly
-    return @"8.8.4.4";
+
+    if (atomic_load(&self->useInitialDNS) && [self->initialDNSCache count] > 1) {
+        return self->initialDNSCache[1];
+    } else {
+        return self->secondaryGoogleDNS;
+    }
 }
 
 - (long)hasNetworkConnectivity {
@@ -842,6 +920,55 @@
 
 
 #pragma mark - Helpers (private)
+
+/**
+    @brief Returns NSString array of DNS addresses for current active
+           network interface using libresolv.
+    @return Array of DNS addresses, nil on failure.
+ */
+
+- (NSArray<NSString *> *)getDNSServers {
+    NSMutableArray<NSString *> *serverList = [NSMutableArray new];
+
+    res_state _state;
+    _state = malloc(sizeof(struct __res_state));
+
+    if (res_ninit(_state) < 0) {
+        [self logMessage:@"getDNSServers: res_ninit failed."];
+        free(_state);
+        return nil;
+    }
+
+    union res_sockaddr_union servers[NI_MAXSERV];  // Default max 32
+
+    int numServersFound = res_getservers(_state, servers, NI_MAXSERV);
+
+    char hostBuf[NI_MAXHOST];
+    for (int i = 0; i < numServersFound; i++) {
+        union res_sockaddr_union s = servers[i];
+        if (s.sin.sin_len > 0) {
+            int ret_code = getnameinfo((struct sockaddr *)&s.sin,
+              (socklen_t)s.sin.sin_len,
+              (char *)&hostBuf,
+              sizeof(hostBuf),
+              nil,
+              0,
+              NI_NUMERICHOST); // Flag "numeric form of hostname"
+
+            if (EXIT_SUCCESS == ret_code) {
+                [serverList addObject:[NSString stringWithUTF8String:hostBuf]];
+            } else {
+                [self logMessage:[NSString stringWithFormat: @"getDNSServers: getnameinfo failed: %d", ret_code]];
+            }
+        }
+    }
+
+    // Clear memory used by res_ninit
+    res_ndestroy(_state);
+    free(_state);
+
+    return serverList;
+}
 
 - (void)logMessage:(NSString *)message {
     if ([self.tunneledAppDelegate respondsToSelector:@selector(onDiagnosticMessage:)]) {
@@ -934,7 +1061,7 @@
 // time for the tunnel to notice the network is gone (depending on attempts to
 // use the tunnel).
 - (void)startInternetReachabilityMonitoring {
-    self->previousNetworkStatus = [self->reachability currentReachabilityStatus];
+    atomic_store(&self->currentNetworkStatus, [self->reachability currentReachabilityStatus]);
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(internetReachabilityChanged:) name:kReachabilityChangedNotification object:nil];
     [self->reachability startNotifier];
@@ -945,28 +1072,28 @@
     [[NSNotificationCenter defaultCenter] removeObserver:self name:kReachabilityChangedNotification object:nil];
 }
 
-- (void)internetReachabilityChanged:(NSNotification *)note
-{
-    // If we lose network while connected, we're going to force a reconnect in
-    // order to trigger the waiting-for-network state. The reason we don't wait
-    // for the tunnel to notice the network loss is that it might take 30 seconds.
+- (void)internetReachabilityChanged:(NSNotification *)note {
+    // Invalidate initialDNSCache.
+    atomic_store(&self->useInitialDNS, FALSE);
 
     Reachability* currentReachability = [note object];
-    NetworkStatus networkStatus = [currentReachability currentReachabilityStatus];
 
-    PsiphonConnectionState currentConnectionState = [self getConnectionState];
-
-    if (currentConnectionState == PsiphonConnectionStateConnected &&
-        self->previousNetworkStatus != NotReachable &&
-        self->previousNetworkStatus != networkStatus) {
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onDeviceInternetConnectivityInterrupted)]) {
-            dispatch_async(self->callbackQueue, ^{
-                [self.tunneledAppDelegate onDeviceInternetConnectivityInterrupted];
-            });
-        }
+    // Pass current reachability through to the delegate
+    // as soon as a network reachability change is detected
+    if ([self.tunneledAppDelegate respondsToSelector:@selector(onInternetReachabilityChanged:)]) {
+        dispatch_async(self->callbackQueue, ^{
+            [self.tunneledAppDelegate onInternetReachabilityChanged:currentReachability];
+        });
     }
-
-    self->previousNetworkStatus = networkStatus;
+    
+    NetworkStatus networkStatus = [currentReachability currentReachabilityStatus];
+    NetworkStatus previousNetworkStatus = atomic_exchange(&self->currentNetworkStatus, networkStatus);
+    
+    // Restart if the state has changed, unless the previous state was NotReachable, because
+    // the tunnel should be waiting for connectivity in that case.
+    if (networkStatus != previousNetworkStatus && previousNetworkStatus != NotReachable) {
+        [self start];
+    }
 }
 
 /*!
@@ -1005,6 +1132,24 @@
     
     // Generic-ish default
     return @"US";
+}
+
+/*!
+ generateSessionID generates a session ID suitable for use with the Psiphon API.
+ */
+- (NSString *)generateSessionID {
+    const int sessionIDLen = 16;
+    uint8_t sessionID[sessionIDLen];
+    int result = SecRandomCopyBytes(kSecRandomDefault, sessionIDLen, sessionID);
+    if (result != errSecSuccess) {
+        [self logMessage:[NSString stringWithFormat: @"Error generating session ID: %d", result]];
+        return nil;
+    }
+    NSMutableString *hexEncodedSessionID = [NSMutableString stringWithCapacity:(sessionIDLen*2)];
+    for (int i = 0; i < sessionIDLen; i++) {
+        [hexEncodedSessionID appendFormat:@"%02x", sessionID[i]];
+    }
+    return hexEncodedSessionID;
 }
 
 @end

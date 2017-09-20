@@ -35,6 +35,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
 func main() {
@@ -54,11 +55,34 @@ func main() {
 	flag.StringVar(&profileFilename, "profile", "", "CPU profile output file")
 
 	var interfaceName string
-	flag.StringVar(&interfaceName, "listenInterface", "", "Interface Name")
+	flag.StringVar(&interfaceName, "listenInterface", "", "bind local proxies to specified interface")
 
 	var versionDetails bool
-	flag.BoolVar(&versionDetails, "version", false, "Print build information and exit")
-	flag.BoolVar(&versionDetails, "v", false, "Print build information and exit")
+	flag.BoolVar(&versionDetails, "version", false, "print build information and exit")
+	flag.BoolVar(&versionDetails, "v", false, "print build information and exit")
+
+	var tunDevice, tunBindInterface, tunPrimaryDNS, tunSecondaryDNS string
+	if tun.IsSupported() {
+
+		// When tunDevice is specified, a packet tunnel is run and packets are relayed between
+		// the specified tun device and the server.
+		//
+		// The tun device is expected to exist and should be configured with an IP address and
+		// routing.
+		//
+		// The tunBindInterface/tunPrimaryDNS/tunSecondaryDNS parameters are used to bypass any
+		// tun device routing when connecting to Psiphon servers.
+		//
+		// For transparent tunneled DNS, set the host or DNS clients to use the address specfied
+		// in tun.GetTransparentDNSResolverIPv4Address().
+		//
+		// Packet tunnel mode is supported only on certains platforms.
+
+		flag.StringVar(&tunDevice, "tunDevice", "", "run packet tunnel for specified tun device")
+		flag.StringVar(&tunBindInterface, "tunBindInterface", tun.DEFAULT_PUBLIC_INTERFACE_NAME, "bypass tun device via specified interface")
+		flag.StringVar(&tunPrimaryDNS, "tunPrimaryDNS", "8.8.8.8", "primary DNS resolver for bypass")
+		flag.StringVar(&tunSecondaryDNS, "tunSecondaryDNS", "8.8.4.4", "secondary DNS resolver for bypass")
+	}
 
 	flag.Parse()
 
@@ -209,6 +233,18 @@ func main() {
 		config.ListenInterface = interfaceName
 	}
 
+	// Configure packet tunnel
+
+	if tun.IsSupported() && tunDevice != "" {
+		tunDeviceFile, err := configurePacketTunnel(
+			config, tunDevice, tunBindInterface, tunPrimaryDNS, tunSecondaryDNS)
+		if err != nil {
+			psiphon.NoticeError("error configuring packet tunnel: %s", err)
+			os.Exit(1)
+		}
+		defer tunDeviceFile.Close()
+	}
+
 	// Run Psiphon
 
 	controller, err := psiphon.NewController(config)
@@ -239,4 +275,47 @@ func main() {
 	case <-controllerStopSignal:
 		psiphon.NoticeInfo("shutdown by controller")
 	}
+}
+
+func configurePacketTunnel(
+	config *psiphon.Config,
+	tunDevice, tunBindInterface, tunPrimaryDNS, tunSecondaryDNS string) (*os.File, error) {
+
+	file, _, err := tun.OpenTunDevice(tunDevice)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	provider := &tunProvider{
+		bindInterface: tunBindInterface,
+		primaryDNS:    tunPrimaryDNS,
+		secondaryDNS:  tunSecondaryDNS,
+	}
+
+	config.PacketTunnelTunFileDescriptor = int(file.Fd())
+	config.DeviceBinder = provider
+	config.DnsServerGetter = provider
+
+	return file, nil
+}
+
+type tunProvider struct {
+	bindInterface string
+	primaryDNS    string
+	secondaryDNS  string
+}
+
+// BindToDevice implements the psiphon.DeviceBinder interface.
+func (p *tunProvider) BindToDevice(fileDescriptor int) error {
+	return tun.BindToDevice(fileDescriptor, p.bindInterface)
+}
+
+// GetPrimaryDnsServer implements the psiphon.DnsServerGetter interface.
+func (p *tunProvider) GetPrimaryDnsServer() string {
+	return p.primaryDNS
+}
+
+// GetSecondaryDnsServer implements the psiphon.DnsServerGetter interface.
+func (p *tunProvider) GetSecondaryDnsServer() string {
+	return p.secondaryDNS
 }

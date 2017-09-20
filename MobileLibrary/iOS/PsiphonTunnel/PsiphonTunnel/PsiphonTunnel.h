@@ -119,15 +119,24 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 
 /*!
  Called when the tunnel is starting to get the initial server entries (typically embedded in the app) that will be used to bootstrap the Psiphon tunnel connection. This value is in a particular format and will be supplied by Psiphon Inc.
+ If getEmbeddedServerEntriesPath is also implemented, it will take precedence over this method, unless getEmbeddedServerEntriesPath returns NULL or an empty string.
  @return  Pre-existing server entries to use when attempting to connect to a server. Must return an empty string if there are no embedded server entries. Must return NULL if there is an error and the tunnel starting should abort.
  */
 - (NSString * _Nullable)getEmbeddedServerEntries;
+
 
 //
 // Optional delegate methods. Note that some of these are probably necessary for
 // for a functioning app to implement, for example `onConnected`.
 //
 @optional
+
+/*!
+  Called when the tunnel is starting to get the initial server entries (typically embedded in the app) that will be used to bootstrap the Psiphon tunnel connection. This value is in a particular format and will be supplied by Psiphon Inc.
+  If this method is implemented, it takes precedence over getEmbeddedServerEntries, and getEmbeddedServerEntries will not be called unless this method returns NULL or an empty string.
+  @return Optional path where embedded server entries file is located. This file should be accessible by the Network Extension.
+ */
+- (NSString * _Nullable)getEmbeddedServerEntriesPath;
 
 /*!
  Gets runtime errors info that may be useful for debugging.
@@ -167,22 +176,20 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 - (void)onConnectionStateChangedFrom:(PsiphonConnectionState)oldState to:(PsiphonConnectionState)newState;
 
 /*!
- Called to indicate that tunnel-core is exiting imminently (usually do to
+ Called to indicate that tunnel-core is exiting imminently (usually due to
  a `stop()` call, but could be due to an unexpected error).
+ onExiting may be called before or after `stop()` returns.
  Swift: @code func onExiting() @endcode
  */
 - (void)onExiting;
 
 /*!
- Called when the device's Internet connection state is interrupted.
- This may mean that it had connectivity and now doesn't, or went from Wi-Fi to
- WWAN or vice versa.
- @note For many/most apps, the response to this callback should be to restart
- the Psiphon tunnel. It will eventually notice and begin reconnecting, but it
- may take much longer, depending on attempts to use the tunnel.
- Swift: @code func onDeviceInternetConnectivityInterrupted() @endcode
- */
-- (void)onDeviceInternetConnectivityInterrupted;
+Called when the device's Internet connection state has changed.
+This may mean that it had connectivity and now doesn't, or went from Wi-Fi to
+WWAN or vice versa or VPN state changed
+Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachability) @endcode
+*/
+- (void)onInternetReachabilityChanged:(Reachability*_Nonnull)currentReachability;
 
 /*!
  Called when tunnel-core determines which server egress regions are available
@@ -295,7 +302,7 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 - (BOOL)start:(BOOL)ifNeeded;
 
 /*!
- Stop the tunnel (regardless of its current connection state). Returns before full stop is complete -- `TunneledAppDelegate::onExiting` is called when complete.
+ Stop the tunnel (regardless of its current connection state).
  Swift: @code func stop() @endcode
  */
 - (void)stop;
@@ -355,5 +362,12 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
            publicKey:(NSString * _Nonnull)b64EncodedPublicKey
         uploadServer:(NSString * _Nonnull)uploadServer
  uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders;
+
+/*!
+ Provides the tunnel-core build info json as a string. See the tunnel-core build info code for details https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/psiphon/common/buildinfo.go.
+ @return  The build info json as a string.
+ Swift: @code func getBuildInfo() -> String @endcode
+ */
++ (NSString * _Nonnull)getBuildInfo;
 
  @end

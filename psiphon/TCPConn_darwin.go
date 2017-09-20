@@ -17,30 +17,12 @@
  *
  */
 
-package tun
+package psiphon
 
 import (
-	"net"
 	"syscall"
-
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
-func bindToDevice(fd int, deviceName string) error {
-
-	netInterface, err := net.InterfaceByName(deviceName)
-	if err != nil {
-		return common.ContextError(err)
-	}
-
-	// IP_BOUND_IF definition from <netinet/in.h>
-
-	const IP_BOUND_IF = 25
-
-	err = syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, IP_BOUND_IF, netInterface.Index)
-	if err != nil {
-		return common.ContextError(err)
-	}
-
-	return nil
+func tcpDialSetAdditionalSocketOptions(socketFd int) {
+	syscall.SetsockoptInt(socketFd, syscall.SOL_SOCKET, syscall.SO_NOSIGPIPE, 1)
 }

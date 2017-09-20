@@ -127,12 +127,12 @@ func EstablishTunnel(
 	sessionId string,
 	pendingConns *common.Conns,
 	serverEntry *protocol.ServerEntry,
+	selectedProtocol string,
 	adjustedEstablishStartTime monotime.Time,
 	tunnelOwner TunnelOwner) (tunnel *Tunnel, err error) {
 
-	selectedProtocol, err := selectProtocol(config, serverEntry)
-	if err != nil {
-		return nil, common.ContextError(err)
+	if !serverEntry.SupportsProtocol(selectedProtocol) {
+		return nil, common.ContextError(fmt.Errorf("server does not support selected protocol"))
 	}
 
 	// Build transport layers and establish SSH connection. Note that
@@ -179,7 +179,8 @@ func EstablishTunnel(
 	// fails.
 	if !config.DisableApi {
 		NoticeInfo("starting server context for %s", tunnel.serverEntry.IpAddress)
-		tunnel.serverContext, err = NewServerContext(tunnel, sessionId)
+		tunnel.serverContext, err = NewServerContext(
+			tunnel, sessionId, config.IgnoreHandshakeStatsRegexps)
 		if err != nil {
 			return nil, common.ContextError(
 				fmt.Errorf("error starting server context for %s: %s",
@@ -415,15 +416,20 @@ func (conn *TunneledConn) Close() error {
 	return conn.Conn.Close()
 }
 
+var errProtocolNotSupported = errors.New("server does not support required protocol(s)")
+
 // selectProtocol is a helper that picks the tunnel protocol
 func selectProtocol(
-	config *Config, serverEntry *protocol.ServerEntry) (selectedProtocol string, err error) {
+	config *Config,
+	serverEntry *protocol.ServerEntry,
+	excludeMeek bool) (selectedProtocol string, err error) {
 
 	// TODO: properly handle protocols (e.g. FRONTED-MEEK-OSSH) vs. capabilities (e.g., {FRONTED-MEEK, OSSH})
 	// for now, the code is simply assuming that MEEK capabilities imply OSSH capability.
 	if config.TunnelProtocol != "" {
-		if !serverEntry.SupportsProtocol(config.TunnelProtocol) {
-			return "", common.ContextError(fmt.Errorf("server does not have required capability"))
+		if !serverEntry.SupportsProtocol(config.TunnelProtocol) ||
+			(excludeMeek && protocol.TunnelProtocolUsesMeek(config.TunnelProtocol)) {
+			return "", errProtocolNotSupported
 		}
 		selectedProtocol = config.TunnelProtocol
 	} else {
@@ -433,9 +439,9 @@ func selectProtocol(
 		// and a simpler ranked preference of protocols could lead to that protocol never
 		// being selected.
 
-		candidateProtocols := serverEntry.GetSupportedProtocols()
+		candidateProtocols := serverEntry.GetSupportedProtocols(excludeMeek)
 		if len(candidateProtocols) == 0 {
-			return "", common.ContextError(fmt.Errorf("server does not have any supported capabilities"))
+			return "", errProtocolNotSupported
 		}
 
 		index, err := common.MakeSecureRandomInt(len(candidateProtocols))
@@ -594,6 +600,7 @@ func initMeekConfig(
 		config.TrustedCACertificatesFilename != "")
 
 	return &MeekConfig{
+		LimitBufferSizes:              config.LimitMeekBufferSizes,
 		DialAddress:                   dialAddress,
 		UseHTTPS:                      useHTTPS,
 		TLSProfile:                    selectedTLSProfile,
