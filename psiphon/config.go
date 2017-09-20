@@ -27,7 +27,9 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -491,6 +493,15 @@ type Config struct {
 
 	// IgnoreHandshakeStatsRegexps skips compiling and using stats regexes.
 	IgnoreHandshakeStatsRegexps bool
+
+	// SessionID specifies a client session ID to use in the Psiphon API. The session
+	// ID should be a randomly generated value that is used only for a single session,
+	// which is defined as the period between a user starting a Psiphon client and
+	// stopping the client.
+	// A session ID must be 32 hex digits (lower case). When blank, a random session
+	// ID is automatically generated. Supply a session ID when a single client session
+	// will cross multiple Controller instances.
+	SessionID string
 }
 
 // DownloadURL specifies a URL for downloading resources along with parameters
@@ -736,6 +747,22 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	if config.EstablishTunnelPausePeriodSeconds == nil {
 		defaultEstablishTunnelPausePeriodSeconds := ESTABLISH_TUNNEL_PAUSE_PERIOD_SECONDS
 		config.EstablishTunnelPausePeriodSeconds = &defaultEstablishTunnelPausePeriodSeconds
+	}
+
+	if config.SessionID == "" {
+		sessionID, err := MakeSessionId()
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+		config.SessionID = sessionID
+	}
+
+	// SessionID must be PSIPHON_API_CLIENT_SESSION_ID_LENGTH lowercase hex-encoded bytes
+	if len(config.SessionID) != 2*protocol.PSIPHON_API_CLIENT_SESSION_ID_LENGTH ||
+		-1 != strings.IndexFunc(config.SessionID, func(c rune) bool {
+			return !unicode.Is(unicode.ASCII_Hex_Digit, c) || unicode.IsUpper(c)
+		}) {
+		return nil, common.ContextError(errors.New("invalid SessionID"))
 	}
 
 	return &config, nil

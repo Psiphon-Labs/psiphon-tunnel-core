@@ -89,13 +89,9 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// Needed by regen, at least
 	rand.Seed(int64(time.Now().Nanosecond()))
 
-	// Generate a session ID for the Psiphon server API. This session ID is
-	// used across all tunnels established by the controller.
-	sessionId, err := MakeSessionId()
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-	NoticeSessionId(sessionId)
+	// The session ID for the Psiphon server API is used across all
+	// tunnels established by the controller.
+	NoticeSessionId(config.SessionID)
 
 	// untunneledPendingConns may be used to interrupt the fetch remote server list
 	// request and other untunneled connection establishments. BindToDevice may be
@@ -117,7 +113,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 
 	controller = &Controller{
 		config:    config,
-		sessionId: sessionId,
+		sessionId: config.SessionID,
 		// componentFailureSignal receives a signal from a component (including socks and
 		// http local proxies) if they unexpectedly fail. Senders should not block.
 		// Buffer allows at least one stop signal to be sent before there is a receiver.
