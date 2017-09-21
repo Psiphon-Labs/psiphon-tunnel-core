@@ -690,9 +690,11 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 
 		var signaller *readCloseSignaller
 		var requestBody io.ReadCloser
+		contentLength := 0
 		if !serverAcknowledgedRequestPayload && sendBuffer != nil {
 			signaller = NewReadCloseSignaller(bytes.NewReader(sendBuffer.Bytes()))
 			requestBody = signaller
+			contentLength = sendBuffer.Len()
 		}
 
 		var request *http.Request
@@ -700,6 +702,12 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		if err != nil {
 			// Don't retry when can't initialize a Request
 			return 0, common.ContextError(err)
+		}
+
+		// Content-Length won't be set automatically due to the underlying
+		// type of requestBody.
+		if contentLength > 0 {
+			request.ContentLength = int64(contentLength)
 		}
 
 		// Note: meek.stopRunning() will abort a round trip in flight
