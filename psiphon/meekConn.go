@@ -64,7 +64,9 @@ const (
 	POLL_INTERVAL_MULTIPLIER           = 1.5
 	POLL_INTERVAL_JITTER               = 0.1
 	MEEK_ROUND_TRIP_RETRY_DEADLINE     = 5 * time.Second
-	MEEK_ROUND_TRIP_RETRY_DELAY        = 50 * time.Millisecond
+	MEEK_ROUND_TRIP_RETRY_MIN_DELAY    = 50 * time.Millisecond
+	MEEK_ROUND_TRIP_RETRY_MAX_DELAY    = 1000 * time.Millisecond
+	MEEK_ROUND_TRIP_RETRY_MULTIPLIER   = 2
 	MEEK_ROUND_TRIP_TIMEOUT            = 20 * time.Second
 )
 
@@ -680,6 +682,7 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 
 	retries := uint(0)
 	retryDeadline := monotime.Now().Add(MEEK_ROUND_TRIP_RETRY_DEADLINE)
+	retryDelay := MEEK_ROUND_TRIP_RETRY_MIN_DELAY
 	serverAcknowledgedRequestPayload := false
 	receivedPayloadSize := int64(0)
 
@@ -690,9 +693,11 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 
 		var signaller *readCloseSignaller
 		var requestBody io.ReadCloser
+		contentLength := 0
 		if !serverAcknowledgedRequestPayload && sendBuffer != nil {
 			signaller = NewReadCloseSignaller(bytes.NewReader(sendBuffer.Bytes()))
 			requestBody = signaller
+			contentLength = sendBuffer.Len()
 		}
 
 		var request *http.Request
@@ -700,6 +705,12 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		if err != nil {
 			// Don't retry when can't initialize a Request
 			return 0, common.ContextError(err)
+		}
+
+		// Content-Length won't be set automatically due to the underlying
+		// type of requestBody.
+		if contentLength > 0 {
+			request.ContentLength = int64(contentLength)
 		}
 
 		// Note: meek.stopRunning() will abort a round trip in flight
@@ -790,13 +801,32 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 
 		// Either the request failed entirely, or there was a failure
 		// streaming the response payload. Retry, if time remains.
+		// When the next delay exceeds the time remainind until the
+		// deadline, do not retry.
 
-		if retries >= 1 && monotime.Now().After(retryDeadline) {
+		now := monotime.Now()
+
+		if retries >= 1 &&
+			(now.After(retryDeadline) || now.Sub(retryDeadline) <= retryDelay) {
 			return 0, common.ContextError(err)
 		}
 		retries += 1
 
-		time.Sleep(MEEK_ROUND_TRIP_RETRY_DELAY)
+		delayTimer := time.NewTimer(retryDelay)
+
+		select {
+		case <-delayTimer.C:
+		case <-meek.runContext.Done():
+			return 0, common.ContextError(err)
+		}
+
+		// Increase the next delay, to back off and avoid excessive
+		// activity in conditions such as no network connectivity.
+
+		retryDelay *= MEEK_ROUND_TRIP_RETRY_MULTIPLIER
+		if retryDelay >= MEEK_ROUND_TRIP_RETRY_MAX_DELAY {
+			retryDelay = MEEK_ROUND_TRIP_RETRY_MAX_DELAY
+		}
 	}
 
 	return receivedPayloadSize, nil

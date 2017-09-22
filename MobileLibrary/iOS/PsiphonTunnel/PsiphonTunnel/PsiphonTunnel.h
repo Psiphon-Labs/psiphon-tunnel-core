@@ -278,6 +278,13 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
  */
 - (void)onHomepage:(NSString * _Nonnull)url;
 
+/*!
+ Called when tunnel-core receives server timetamp in the handshake
+ @param timestamp  The server timestamp in RFC3339 format.
+ Swift: @code func onServerTimestamp(_ timestamp: String) @endcode
+ */
+- (void)onServerTimestamp:(NSString * _Nonnull)timestamp;
+
 @end
 
 /*!
