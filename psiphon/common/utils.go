@@ -218,3 +218,16 @@ func Decompress(data []byte) ([]byte, error) {
 	}
 	return uncompressedData, nil
 }
+
+// FormatByteCount returns a string representation of the specified
+// byte count in conventional, human-readable format.
+func FormatByteCount(bytes uint64) string {
+	// Based on: https://bitbucket.org/psiphon/psiphon-circumvention-system/src/b2884b0d0a491e55420ed1888aea20d00fefdb45/Android/app/src/main/java/com/psiphon3/psiphonlibrary/Utils.java?at=default#Utils.java-646
+	base := uint64(1024)
+	if bytes < base {
+		return fmt.Sprintf("%dB", bytes)
+	}
+	exp := int(math.Log(float64(bytes)) / math.Log(float64(base)))
+	return fmt.Sprintf(
+		"%.1f%c", float64(bytes)/math.Pow(float64(base), float64(exp)), "KMGTPEZ"[exp-1])
+}
