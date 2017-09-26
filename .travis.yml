@@ -33,6 +33,7 @@ script:
 - go test -v -covermode=count -coverprofile=server.coverprofile ./server
 - go test -v -covermode=count -coverprofile=psinet.coverprofile ./server/psinet
 - go test -v -covermode=count -coverprofile=psiphon.coverprofile
+- go test -v ./memory_test
 - $HOME/gopath/bin/gover
 - $HOME/gopath/bin/goveralls -coverprofile=gover.coverprofile -service=travis-ci -repotoken $COVERALLS_TOKEN
 before_install:

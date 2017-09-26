@@ -189,8 +189,10 @@ func (conn *channelConn) SetWriteDeadline(_ time.Time) error {
 	return common.ContextError(errors.New("unsupported"))
 }
 
-// Based on: https://bitbucket.org/psiphon/psiphon-circumvention-system/src/b2884b0d0a491e55420ed1888aea20d00fefdb45/Android/app/src/main/java/com/psiphon3/psiphonlibrary/Utils.java?at=default#Utils.java-646
-func byteCountFormatter(bytes uint64) string {
+// FormatByteCount returns a string representation of the specified
+// byte count in conventional, human-readable format.
+func FormatByteCount(bytes uint64) string {
+	// Based on: https://bitbucket.org/psiphon/psiphon-circumvention-system/src/b2884b0d0a491e55420ed1888aea20d00fefdb45/Android/app/src/main/java/com/psiphon3/psiphonlibrary/Utils.java?at=default#Utils.java-646
 	base := uint64(1024)
 	if bytes < base {
 		return fmt.Sprintf("%dB", bytes)
@@ -206,24 +208,24 @@ func emitMemoryMetrics() {
 	NoticeInfo("Memory metrics at %s: goroutines %d | total alloc %s | sys %s | heap alloc/sys/idle/inuse/released/objects %s/%s/%s/%s/%s/%d | stack inuse/sys %s/%s | mspan inuse/sys %s/%s | mcached inuse/sys %s/%s | buckhash/gc/other sys %s/%s/%s | nextgc %s",
 		common.GetParentContext(),
 		runtime.NumGoroutine(),
-		byteCountFormatter(memStats.TotalAlloc),
-		byteCountFormatter(memStats.Sys),
-		byteCountFormatter(memStats.HeapAlloc),
-		byteCountFormatter(memStats.HeapSys),
-		byteCountFormatter(memStats.HeapIdle),
-		byteCountFormatter(memStats.HeapInuse),
-		byteCountFormatter(memStats.HeapReleased),
+		FormatByteCount(memStats.TotalAlloc),
+		FormatByteCount(memStats.Sys),
+		FormatByteCount(memStats.HeapAlloc),
+		FormatByteCount(memStats.HeapSys),
+		FormatByteCount(memStats.HeapIdle),
+		FormatByteCount(memStats.HeapInuse),
+		FormatByteCount(memStats.HeapReleased),
 		memStats.HeapObjects,
-		byteCountFormatter(memStats.StackInuse),
-		byteCountFormatter(memStats.StackSys),
-		byteCountFormatter(memStats.MSpanInuse),
-		byteCountFormatter(memStats.MSpanSys),
-		byteCountFormatter(memStats.MCacheInuse),
-		byteCountFormatter(memStats.MCacheSys),
-		byteCountFormatter(memStats.BuckHashSys),
-		byteCountFormatter(memStats.GCSys),
-		byteCountFormatter(memStats.OtherSys),
-		byteCountFormatter(memStats.NextGC))
+		FormatByteCount(memStats.StackInuse),
+		FormatByteCount(memStats.StackSys),
+		FormatByteCount(memStats.MSpanInuse),
+		FormatByteCount(memStats.MSpanSys),
+		FormatByteCount(memStats.MCacheInuse),
+		FormatByteCount(memStats.MCacheSys),
+		FormatByteCount(memStats.BuckHashSys),
+		FormatByteCount(memStats.GCSys),
+		FormatByteCount(memStats.OtherSys),
+		FormatByteCount(memStats.NextGC))
 }
 
 func aggressiveGarbageCollection() {
