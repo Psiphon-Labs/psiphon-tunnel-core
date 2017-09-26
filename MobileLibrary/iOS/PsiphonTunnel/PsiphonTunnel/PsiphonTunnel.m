@@ -763,19 +763,19 @@
             });
         }
     }
-	else if ([noticeType isEqualToString:@"ServerTimestamp"]) {
-		id timestamp = [notice valueForKeyPath:@"data.timestamp"];
-		if (![timestamp isKindOfClass:[NSString class]]) {
-			[self logMessage:[NSString stringWithFormat: @"ServerTimestamp notice missing data.timestamp: %@", noticeJSON]];
-			return;
-		}
+    else if ([noticeType isEqualToString:@"ServerTimestamp"]) {
+        id timestamp = [notice valueForKeyPath:@"data.timestamp"];
+        if (![timestamp isKindOfClass:[NSString class]]) {
+            [self logMessage:[NSString stringWithFormat: @"ServerTimestamp notice missing data.timestamp: %@", noticeJSON]];
+            return;
+        }
 
-		if ([self.tunneledAppDelegate respondsToSelector:@selector(onServerTimestamp:)]) {
-			dispatch_sync(self->callbackQueue, ^{
-				[self.tunneledAppDelegate onServerTimestamp:timestamp];
-			});
-		}
-	}
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onServerTimestamp:)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onServerTimestamp:timestamp];
+            });
+        }
+    }
     
     // Pass diagnostic messages to onDiagnosticMessage.
     if (diagnostic) {
