@@ -598,7 +598,7 @@
     }
     else if ([noticeType isEqualToString:@"Exiting"]) {
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onExiting)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onExiting];
             });
         }
@@ -611,7 +611,7 @@
         }
 
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onAvailableEgressRegions:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onAvailableEgressRegions:regions];
             });
         }
@@ -624,7 +624,7 @@
         }
 
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onSocksProxyPortInUse:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onSocksProxyPortInUse:[port integerValue]];
             });
         }
@@ -637,7 +637,7 @@
         }
 
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onHttpProxyPortInUse:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onHttpProxyPortInUse:[port integerValue]];
             });
         }
@@ -654,7 +654,7 @@
         atomic_store(&self->localSocksProxyPort, portInt);
 
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningSocksProxyPort:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onListeningSocksProxyPort:portInt];
             });
         }
@@ -671,7 +671,7 @@
         atomic_store(&self->localHttpProxyPort, portInt);
 
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningHttpProxyPort:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onListeningHttpProxyPort:portInt];
             });
         }
@@ -684,7 +684,7 @@
         }
         
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onUpstreamProxyError:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onUpstreamProxyError:message];
             });
         }
@@ -703,7 +703,7 @@
         }
         
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onHomepage:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onHomepage:url];
             });
         }
@@ -716,7 +716,7 @@
         }
         
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onClientRegion:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onClientRegion:region];
             });
         }
@@ -729,7 +729,7 @@
         }
         
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onSplitTunnelRegion:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onSplitTunnelRegion:region];
             });
         }
@@ -742,7 +742,7 @@
         }
         
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onUntunneledAddress:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onUntunneledAddress:address];
             });
         }
@@ -758,7 +758,7 @@
         }
         
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onBytesTransferred::)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onBytesTransferred:[sent longLongValue]:[received longLongValue]];
             });
         }
@@ -771,7 +771,7 @@
 		}
 
 		if ([self.tunneledAppDelegate respondsToSelector:@selector(onServerTimestamp:)]) {
-			dispatch_async(self->callbackQueue, ^{
+			dispatch_sync(self->callbackQueue, ^{
 				[self.tunneledAppDelegate onServerTimestamp:timestamp];
 			});
 		}
@@ -985,7 +985,7 @@
 
 - (void)logMessage:(NSString *)message {
     if ([self.tunneledAppDelegate respondsToSelector:@selector(onDiagnosticMessage:)]) {
-        dispatch_async(self->callbackQueue, ^{
+        dispatch_sync(self->callbackQueue, ^{
             [self.tunneledAppDelegate onDiagnosticMessage:message];
         });
     }
@@ -998,7 +998,7 @@
     // If the state has changed, inform the app.
     if (forceNotification || oldState != newState) {
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onConnectionStateChangedFrom:to:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onConnectionStateChangedFrom:oldState to:newState];
             });
         }
@@ -1008,19 +1008,19 @@
         }
         else if (newState == PsiphonConnectionStateConnecting &&
                  [self.tunneledAppDelegate respondsToSelector:@selector(onConnecting)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onConnecting];
             });
         }
         else if (newState == PsiphonConnectionStateConnected &&
                  [self.tunneledAppDelegate respondsToSelector:@selector(onConnected)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onConnected];
             });
         }
         else if (newState == PsiphonConnectionStateWaitingForNetwork &&
                  [self.tunneledAppDelegate respondsToSelector:@selector(onStartedWaitingForNetworkConnectivity)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onStartedWaitingForNetworkConnectivity];
             });
         }
@@ -1094,7 +1094,7 @@
     // Pass current reachability through to the delegate
     // as soon as a network reachability change is detected
     if ([self.tunneledAppDelegate respondsToSelector:@selector(onInternetReachabilityChanged:)]) {
-        dispatch_async(self->callbackQueue, ^{
+        dispatch_sync(self->callbackQueue, ^{
             [self.tunneledAppDelegate onInternetReachabilityChanged:currentReachability];
         });
     }
