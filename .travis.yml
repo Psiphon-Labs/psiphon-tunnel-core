@@ -7,7 +7,7 @@ addons:
     - libx11-dev
     - libgles2-mesa-dev
 install:
-- go get -t -d -v ./... && go build -v ./...
+- go get -t -d -v ./...
 script:
 - cd psiphon
 - go test -race -v ./common
