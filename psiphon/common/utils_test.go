@@ -111,3 +111,26 @@ func TestCompress(t *testing.T) {
 		t.Error("decompressed data doesn't match original data")
 	}
 }
+
+func TestFormatByteCount(t *testing.T) {
+
+	testCases := []struct {
+		n              uint64
+		expectedOutput string
+	}{
+		{500, "500B"},
+		{1024, "1.0K"},
+		{10000, "9.8K"},
+		{1024*1024 + 1, "1.0M"},
+		{100*1024*1024 + 99999, "100.1M"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.expectedOutput, func(t *testing.T) {
+			output := FormatByteCount(testCase.n)
+			if output != testCase.expectedOutput {
+				t.Errorf("unexpected output: %s", output)
+			}
+		})
+	}
+}

@@ -33,20 +33,44 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
-// TestMemoryUsage is a memory stress test that repeatedly
-// establishes a tunnel, immediately terminates it, and
-// start reestablishing.
+// memory_test is a memory stress test suite that repeatedly
+// reestablishes tunnels and restarts the Controller.
 //
 // runtime.MemStats is used to monitor system memory usage
 // during the test.
 //
-// This test is in its own package as its runtime.MemStats
+// These tests are in its own package as its runtime.MemStats
 // checks must not be impacted by other test runs; this
-// test is also long-running.
+// test is also long-running and _may_ require setting the
+// test flag "-timeout" beyond the default of 10 minutes
+// (check the testDuration configured below).
+//
+// For the most accurate memory reporting, run each test
+// individually; e.g.,
+// go test -run [TestReconnectTunnel|TestRestartController|etc.]
 
-func TestMemoryUsage(t *testing.T) {
+const (
+	testModeReconnectTunnel = iota
+	testModeRestartController
+	testModeReconnectAndRestart
+)
+
+func TestReconnectTunnel(t *testing.T) {
+	runMemoryTest(t, testModeReconnectTunnel)
+}
+
+func TestRestartController(t *testing.T) {
+	runMemoryTest(t, testModeRestartController)
+}
+
+func TestReconnectAndRestart(t *testing.T) {
+	runMemoryTest(t, testModeReconnectAndRestart)
+}
+
+func runMemoryTest(t *testing.T, testMode int) {
 
 	testDataDirName, err := ioutil.TempDir("", "psiphon-memory-test")
 	if err != nil {
@@ -80,7 +104,7 @@ func TestMemoryUsage(t *testing.T) {
 	postActiveTunnelTerminateDelay := 250 * time.Millisecond
 	testDuration := 5 * time.Minute
 	memInspectionFrequency := 10 * time.Second
-	maxSysMemory := uint64(10 * 1024 * 1024)
+	maxSysMemory := uint64(11 * 1024 * 1024)
 
 	config.ClientVersion = "999999999"
 	config.TunnelPoolSize = 1
@@ -103,6 +127,10 @@ func TestMemoryUsage(t *testing.T) {
 	}
 
 	var controller *psiphon.Controller
+	var controllerShutdown chan struct{}
+	var controllerWaitGroup *sync.WaitGroup
+	restartController := make(chan bool, 1)
+	reconnectTunnel := make(chan bool, 1)
 	tunnelsEstablished := int32(0)
 
 	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
@@ -116,8 +144,24 @@ func TestMemoryUsage(t *testing.T) {
 				count := int(payload["count"].(float64))
 				if count > 0 {
 					atomic.AddInt32(&tunnelsEstablished, 1)
+
 					time.Sleep(postActiveTunnelTerminateDelay)
-					go controller.TerminateNextActiveTunnel()
+
+					doRestartController := (testMode == testModeRestartController)
+					if testMode == testModeReconnectAndRestart {
+						doRestartController = common.FlipCoin()
+					}
+					if doRestartController {
+						select {
+						case restartController <- true:
+						default:
+						}
+					} else {
+						select {
+						case reconnectTunnel <- true:
+						default:
+						}
+					}
 				}
 			case "Info":
 				message := payload["message"].(string)
@@ -129,28 +173,39 @@ func TestMemoryUsage(t *testing.T) {
 			}
 		}))
 
-	controller, err = psiphon.NewController(config)
-	if err != nil {
-		t.Fatalf("error creating controller: %s", err)
+	startController := func() {
+		controller, err = psiphon.NewController(config)
+		if err != nil {
+			t.Fatalf("error creating controller: %s", err)
+		}
+
+		controllerShutdown = make(chan struct{})
+		controllerWaitGroup = new(sync.WaitGroup)
+		controllerWaitGroup.Add(1)
+		go func() {
+			defer controllerWaitGroup.Done()
+			controller.Run(controllerShutdown)
+		}()
 	}
 
-	shutdownBroadcast := make(chan struct{})
-	controllerWaitGroup := new(sync.WaitGroup)
-	controllerWaitGroup.Add(1)
-	go func() {
-		defer controllerWaitGroup.Done()
-		controller.Run(shutdownBroadcast)
-	}()
+	stopController := func() {
+		close(controllerShutdown)
+		controllerWaitGroup.Wait()
+	}
 
 	testTimer := time.NewTimer(testDuration)
 	memInspectionTicker := time.NewTicker(memInspectionFrequency)
-
 	lastTunnelsEstablished := int32(0)
+
+	startController()
+
 test_loop:
 	for {
 		select {
+
 		case <-testTimer.C:
 			break test_loop
+
 		case <-memInspectionTicker.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
@@ -159,15 +214,21 @@ test_loop:
 			} else {
 				n := atomic.LoadInt32(&tunnelsEstablished)
 				fmt.Printf("Tunnels established: %d, MemStats.Sys (peak system memory used): %s, MemStats.TotalAlloc (cumulative allocations): %s\n",
-					n, psiphon.FormatByteCount(m.Sys), psiphon.FormatByteCount(m.TotalAlloc))
+					n, common.FormatByteCount(m.Sys), common.FormatByteCount(m.TotalAlloc))
 				if lastTunnelsEstablished-n >= 0 {
 					t.Fatalf("expected established tunnels")
 				}
 				lastTunnelsEstablished = n
 			}
+
+		case <-reconnectTunnel:
+			controller.TerminateNextActiveTunnel()
+
+		case <-restartController:
+			stopController()
+			startController()
 		}
 	}
 
-	close(shutdownBroadcast)
-	controllerWaitGroup.Wait()
+	stopController()
 }
