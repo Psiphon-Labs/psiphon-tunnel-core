@@ -1004,7 +1004,7 @@
 
 - (void)logMessage:(NSString *)message withTimestamp:(NSString * _Nonnull)timestamp {
     if ([self.tunneledAppDelegate respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
-        dispatch_async(self->callbackQueue, ^{
+        dispatch_sync(self->callbackQueue, ^{
             [self.tunneledAppDelegate onDiagnosticMessage:message withTimestamp:timestamp];
         });
     }
