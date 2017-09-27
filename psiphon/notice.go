@@ -100,7 +100,7 @@ func outputNotice(noticeType string, noticeFlags uint32, args ...interface{}) {
 	obj["noticeType"] = noticeType
 	obj["showUser"] = (noticeFlags&noticeShowUser != 0)
 	obj["data"] = noticeData
-	obj["timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
+	obj["timestamp"] = time.Now().UTC().Format(common.RFC3339Milli)
 	for i := 0; i < len(args)-1; i += 2 {
 		name, ok := args[i].(string)
 		value := args[i+1]
@@ -123,7 +123,8 @@ func outputNotice(noticeType string, noticeFlags uint32, args ...interface{}) {
 		obj["data"] = map[string]interface{}{
 			"message": fmt.Sprintf("Marshal notice failed: %s", common.ContextError(err)),
 		}
-		obj["timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
+
+		obj["timestamp"] = time.Now().UTC().Format(common.RFC3339Milli)
 		encodedJson, err := json.Marshal(obj)
 		if err == nil {
 			output = string(encodedJson)
