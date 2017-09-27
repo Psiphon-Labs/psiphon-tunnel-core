@@ -64,7 +64,7 @@ func GetEmitDiagnoticNotices() bool {
 //
 // Notices are encoded in JSON. Here's an example:
 //
-// {"data":{"message":"shutdown operate tunnel"},"noticeType":"Info","showUser":false,"timestamp":"2015-01-28T17:35:13Z"}
+// {"data":{"message":"shutdown operate tunnel"},"noticeType":"Info","showUser":false,"timestamp":"2006-01-02T15:04:05.999999999Z07:00"}
 //
 // All notices have the following fields:
 // - "noticeType": the type of notice, which indicates the meaning of the notice along with what's in the data payload.
@@ -73,7 +73,7 @@ func GetEmitDiagnoticNotices() bool {
 // - "showUser": whether the information should be displayed to the user. For example, this flag is set for "SocksProxyPortInUse"
 // as the user should be informed that their configured choice of listening port could not be used. Core clients should
 // anticipate that the core will add additional "showUser"=true notices in the future and emit at least the raw notice.
-// - "timestamp": UTC timezone, RFC3339 format timestamp for notice event
+// - "timestamp": UTC timezone, RFC3339Nano format timestamp for notice event
 //
 // See the Notice* functions for details on each notice meaning and payload.
 //
@@ -100,7 +100,7 @@ func outputNotice(noticeType string, noticeFlags uint32, args ...interface{}) {
 	obj["noticeType"] = noticeType
 	obj["showUser"] = (noticeFlags&noticeShowUser != 0)
 	obj["data"] = noticeData
-	obj["timestamp"] = time.Now().UTC().Format(time.RFC3339)
+	obj["timestamp"] = time.Now().UTC().Format(common.RFC3339Milli)
 	for i := 0; i < len(args)-1; i += 2 {
 		name, ok := args[i].(string)
 		value := args[i+1]
@@ -123,7 +123,8 @@ func outputNotice(noticeType string, noticeFlags uint32, args ...interface{}) {
 		obj["data"] = map[string]interface{}{
 			"message": fmt.Sprintf("Marshal notice failed: %s", common.ContextError(err)),
 		}
-		obj["timestamp"] = time.Now().UTC().Format(time.RFC3339)
+
+		obj["timestamp"] = time.Now().UTC().Format(common.RFC3339Milli)
 		encodedJson, err := json.Marshal(obj)
 		if err == nil {
 			output = string(encodedJson)

@@ -35,6 +35,8 @@ import (
 	"time"
 )
 
+const RFC3339Milli = "2006-01-02T15:04:05.999Z07:00"
+
 // Contains is a helper function that returns true
 // if the target string is in the list.
 func Contains(list []string, target string) bool {
