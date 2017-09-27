@@ -101,8 +101,8 @@
     rfc3339Formatter = [[NSDateFormatter alloc] init];
     [rfc3339Formatter setLocale:enUSPOSIXLocale];
     
-    // Example: notice time format from Go code: "2006-01-02T15:04:05.999999999Z07:00"
-    [rfc3339Formatter setDateFormat:@"yyyy'-'MM'-'dd'T'HH':'mm':'ss.SSSSSSSSSZZZZZ"];
+    // Example: notice time format from Go code: "2006-01-02T15:04:05.999Z07:00"
+    [rfc3339Formatter setDateFormat:@"yyyy'-'MM'-'dd'T'HH':'mm':'ss.SSSZZZZZ"];
     [rfc3339Formatter setTimeZone:[NSTimeZone timeZoneForSecondsFromGMT:0]];
     
     return self;
