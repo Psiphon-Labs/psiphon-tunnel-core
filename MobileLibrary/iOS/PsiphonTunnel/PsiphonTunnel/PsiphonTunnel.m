@@ -31,7 +31,6 @@
 #import <resolv.h>
 #import <netdb.h>
 
-
 #define GOOGLE_DNS_1 @"8.8.4.4"
 #define GOOGLE_DNS_2 @"8.8.8.8"
 
@@ -63,6 +62,11 @@
     NSString *secondaryGoogleDNS;
     _Atomic BOOL useInitialDNS; // initialDNSCache validity flag.
     NSArray<NSString *> *initialDNSCache;  // This cache becomes void if internetReachabilityChanged is called.
+    
+    // Log timestamp formatter
+    // Note: NSDateFormatter is threadsafe.
+    NSDateFormatter *rfc3339Formatter;
+    
 }
 
 - (id)init {
@@ -92,6 +96,15 @@
     self->initialDNSCache = [self getDNSServers];
     atomic_init(&self->useInitialDNS, [self->initialDNSCache count] > 0);
 
+    // RFC3339 formatter.
+    NSLocale *enUSPOSIXLocale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    rfc3339Formatter = [[NSDateFormatter alloc] init];
+    [rfc3339Formatter setLocale:enUSPOSIXLocale];
+    
+    // Example: notice time format from Go code: "2006-01-02T15:04:05.999999999Z07:00"
+    [rfc3339Formatter setDateFormat:@"yyyy'-'MM'-'dd'T'HH':'mm':'ss.SSSSSSSSSZZZZZ"];
+    [rfc3339Formatter setTimeZone:[NSTimeZone timeZoneForSecondsFromGMT:0]];
+    
     return self;
 }
 
@@ -785,9 +798,10 @@
         }
         
         NSString *dataStr = [[[SBJson4Writer alloc] init] stringWithObject:data];
+        NSString *timestampStr = notice[@"timestamp"];
 
         NSString *diagnosticMessage = [NSString stringWithFormat:@"%@: %@", noticeType, dataStr];
-        [self logMessage:diagnosticMessage];
+        [self logMessage:diagnosticMessage withTimestamp:timestampStr];
     }
 }
 
@@ -984,9 +998,14 @@
 }
 
 - (void)logMessage:(NSString *)message {
-    if ([self.tunneledAppDelegate respondsToSelector:@selector(onDiagnosticMessage:)]) {
+    NSString *timestamp = [rfc3339Formatter stringFromDate:[NSDate date]];
+    [self logMessage:message withTimestamp:timestamp];
+}
+
+- (void)logMessage:(NSString *)message withTimestamp:(NSString * _Nonnull)timestamp {
+    if ([self.tunneledAppDelegate respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
         dispatch_async(self->callbackQueue, ^{
-            [self.tunneledAppDelegate onDiagnosticMessage:message];
+            [self.tunneledAppDelegate onDiagnosticMessage:message withTimestamp:timestamp];
         });
     }
 }
