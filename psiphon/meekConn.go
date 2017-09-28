@@ -800,14 +800,14 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		}
 
 		// Either the request failed entirely, or there was a failure
-		// streaming the response payload. Retry, if time remains.
-		// When the next delay exceeds the time remainind until the
-		// deadline, do not retry.
+		// streaming the response payload. Always retry once. Then
+		// retry if time remains; when the next delay exceeds the time
+		// remaining until the deadline, do not retry.
 
 		now := monotime.Now()
 
 		if retries >= 1 &&
-			(now.After(retryDeadline) || now.Sub(retryDeadline) <= retryDelay) {
+			(now.After(retryDeadline) || retryDeadline.Sub(now) <= retryDelay) {
 			return 0, common.ContextError(err)
 		}
 		retries += 1
