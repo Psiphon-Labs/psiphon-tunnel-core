@@ -7,7 +7,7 @@ addons:
     - libx11-dev
     - libgles2-mesa-dev
 install:
-- go get -t -d -v ./... && go build -v ./...
+- go get -t -d -v ./...
 script:
 - cd psiphon
 - go test -race -v ./common
@@ -33,6 +33,8 @@ script:
 - go test -v -covermode=count -coverprofile=server.coverprofile ./server
 - go test -v -covermode=count -coverprofile=psinet.coverprofile ./server/psinet
 - go test -v -covermode=count -coverprofile=psiphon.coverprofile
+- go test -v ./memory_test -run TestReconnectTunnels
+- go test -v ./memory_test -run TestRestartController
 - $HOME/gopath/bin/gover
 - $HOME/gopath/bin/goveralls -coverprofile=gover.coverprofile -service=travis-ci -repotoken $COVERALLS_TOKEN
 before_install:

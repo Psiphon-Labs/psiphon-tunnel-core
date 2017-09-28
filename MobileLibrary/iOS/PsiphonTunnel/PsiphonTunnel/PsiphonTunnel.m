@@ -31,7 +31,6 @@
 #import <resolv.h>
 #import <netdb.h>
 
-
 #define GOOGLE_DNS_1 @"8.8.4.4"
 #define GOOGLE_DNS_2 @"8.8.8.8"
 
@@ -63,6 +62,11 @@
     NSString *secondaryGoogleDNS;
     _Atomic BOOL useInitialDNS; // initialDNSCache validity flag.
     NSArray<NSString *> *initialDNSCache;  // This cache becomes void if internetReachabilityChanged is called.
+    
+    // Log timestamp formatter
+    // Note: NSDateFormatter is threadsafe.
+    NSDateFormatter *rfc3339Formatter;
+    
 }
 
 - (id)init {
@@ -92,6 +96,15 @@
     self->initialDNSCache = [self getDNSServers];
     atomic_init(&self->useInitialDNS, [self->initialDNSCache count] > 0);
 
+    // RFC3339 formatter.
+    NSLocale *enUSPOSIXLocale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    rfc3339Formatter = [[NSDateFormatter alloc] init];
+    [rfc3339Formatter setLocale:enUSPOSIXLocale];
+    
+    // Example: notice time format from Go code: "2006-01-02T15:04:05.999Z07:00"
+    [rfc3339Formatter setDateFormat:@"yyyy'-'MM'-'dd'T'HH':'mm':'ss.SSSZZZZZ"];
+    [rfc3339Formatter setTimeZone:[NSTimeZone timeZoneForSecondsFromGMT:0]];
+    
     return self;
 }
 
@@ -598,7 +611,7 @@
     }
     else if ([noticeType isEqualToString:@"Exiting"]) {
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onExiting)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onExiting];
             });
         }
@@ -611,7 +624,7 @@
         }
 
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onAvailableEgressRegions:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onAvailableEgressRegions:regions];
             });
         }
@@ -624,7 +637,7 @@
         }
 
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onSocksProxyPortInUse:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onSocksProxyPortInUse:[port integerValue]];
             });
         }
@@ -637,7 +650,7 @@
         }
 
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onHttpProxyPortInUse:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onHttpProxyPortInUse:[port integerValue]];
             });
         }
@@ -654,7 +667,7 @@
         atomic_store(&self->localSocksProxyPort, portInt);
 
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningSocksProxyPort:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onListeningSocksProxyPort:portInt];
             });
         }
@@ -671,7 +684,7 @@
         atomic_store(&self->localHttpProxyPort, portInt);
 
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningHttpProxyPort:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onListeningHttpProxyPort:portInt];
             });
         }
@@ -684,7 +697,7 @@
         }
         
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onUpstreamProxyError:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onUpstreamProxyError:message];
             });
         }
@@ -703,7 +716,7 @@
         }
         
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onHomepage:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onHomepage:url];
             });
         }
@@ -716,7 +729,7 @@
         }
         
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onClientRegion:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onClientRegion:region];
             });
         }
@@ -729,7 +742,7 @@
         }
         
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onSplitTunnelRegion:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onSplitTunnelRegion:region];
             });
         }
@@ -742,7 +755,7 @@
         }
         
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onUntunneledAddress:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onUntunneledAddress:address];
             });
         }
@@ -758,24 +771,24 @@
         }
         
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onBytesTransferred::)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onBytesTransferred:[sent longLongValue]:[received longLongValue]];
             });
         }
     }
-	else if ([noticeType isEqualToString:@"ServerTimestamp"]) {
-		id timestamp = [notice valueForKeyPath:@"data.timestamp"];
-		if (![timestamp isKindOfClass:[NSString class]]) {
-			[self logMessage:[NSString stringWithFormat: @"ServerTimestamp notice missing data.timestamp: %@", noticeJSON]];
-			return;
-		}
+    else if ([noticeType isEqualToString:@"ServerTimestamp"]) {
+        id timestamp = [notice valueForKeyPath:@"data.timestamp"];
+        if (![timestamp isKindOfClass:[NSString class]]) {
+            [self logMessage:[NSString stringWithFormat: @"ServerTimestamp notice missing data.timestamp: %@", noticeJSON]];
+            return;
+        }
 
-		if ([self.tunneledAppDelegate respondsToSelector:@selector(onServerTimestamp:)]) {
-			dispatch_async(self->callbackQueue, ^{
-				[self.tunneledAppDelegate onServerTimestamp:timestamp];
-			});
-		}
-	}
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onServerTimestamp:)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onServerTimestamp:timestamp];
+            });
+        }
+    }
     
     // Pass diagnostic messages to onDiagnosticMessage.
     if (diagnostic) {
@@ -785,9 +798,10 @@
         }
         
         NSString *dataStr = [[[SBJson4Writer alloc] init] stringWithObject:data];
+        NSString *timestampStr = notice[@"timestamp"];
 
         NSString *diagnosticMessage = [NSString stringWithFormat:@"%@: %@", noticeType, dataStr];
-        [self logMessage:diagnosticMessage];
+        [self logMessage:diagnosticMessage withTimestamp:timestampStr];
     }
 }
 
@@ -984,9 +998,14 @@
 }
 
 - (void)logMessage:(NSString *)message {
-    if ([self.tunneledAppDelegate respondsToSelector:@selector(onDiagnosticMessage:)]) {
-        dispatch_async(self->callbackQueue, ^{
-            [self.tunneledAppDelegate onDiagnosticMessage:message];
+    NSString *timestamp = [rfc3339Formatter stringFromDate:[NSDate date]];
+    [self logMessage:message withTimestamp:timestamp];
+}
+
+- (void)logMessage:(NSString *)message withTimestamp:(NSString * _Nonnull)timestamp {
+    if ([self.tunneledAppDelegate respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
+        dispatch_sync(self->callbackQueue, ^{
+            [self.tunneledAppDelegate onDiagnosticMessage:message withTimestamp:timestamp];
         });
     }
 }
@@ -998,7 +1017,7 @@
     // If the state has changed, inform the app.
     if (forceNotification || oldState != newState) {
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onConnectionStateChangedFrom:to:)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onConnectionStateChangedFrom:oldState to:newState];
             });
         }
@@ -1008,19 +1027,19 @@
         }
         else if (newState == PsiphonConnectionStateConnecting &&
                  [self.tunneledAppDelegate respondsToSelector:@selector(onConnecting)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onConnecting];
             });
         }
         else if (newState == PsiphonConnectionStateConnected &&
                  [self.tunneledAppDelegate respondsToSelector:@selector(onConnected)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onConnected];
             });
         }
         else if (newState == PsiphonConnectionStateWaitingForNetwork &&
                  [self.tunneledAppDelegate respondsToSelector:@selector(onStartedWaitingForNetworkConnectivity)]) {
-            dispatch_async(self->callbackQueue, ^{
+            dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onStartedWaitingForNetworkConnectivity];
             });
         }
@@ -1094,7 +1113,7 @@
     // Pass current reachability through to the delegate
     // as soon as a network reachability change is detected
     if ([self.tunneledAppDelegate respondsToSelector:@selector(onInternetReachabilityChanged:)]) {
-        dispatch_async(self->callbackQueue, ^{
+        dispatch_sync(self->callbackQueue, ^{
             [self.tunneledAppDelegate onInternetReachabilityChanged:currentReachability];
         });
     }

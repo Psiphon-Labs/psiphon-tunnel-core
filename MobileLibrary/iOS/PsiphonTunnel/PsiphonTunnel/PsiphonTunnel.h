@@ -141,9 +141,10 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 /*!
  Gets runtime errors info that may be useful for debugging.
  @param message  The diagnostic message string.
+ @param timestamp RFC3339 encoded timestamp.
  Swift: @code func onDiagnosticMessage(_ message: String) @endcode
  */
-- (void)onDiagnosticMessage:(NSString * _Nonnull)message;
+- (void)onDiagnosticMessage:(NSString * _Nonnull)message withTimestamp:(NSString * _Nonnull)timestamp;
 
 /*!
  Called when the tunnel is in the process of connecting.

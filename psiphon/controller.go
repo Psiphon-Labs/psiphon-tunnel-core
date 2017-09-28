@@ -748,6 +748,17 @@ loop:
 	NoticeInfo("exiting run tunnels")
 }
 
+// TerminateNextActiveTunnel is a support routine for
+// test code that must terminate the active tunnel and
+// restart establishing. This function is not guaranteed
+// to be safe for use in other cases.
+func (controller *Controller) TerminateNextActiveTunnel() {
+	tunnel := controller.getNextActiveTunnel()
+	if tunnel != nil {
+		controller.SignalTunnelFailure(tunnel)
+	}
+}
+
 // classifyImpairedProtocol tracks "impaired" protocol classifications for failed
 // tunnels. A protocol is classified as impaired if a tunnel using that protocol
 // fails, repeatedly, shortly after the start of the connection. During tunnel
