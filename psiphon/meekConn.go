@@ -189,6 +189,7 @@ func DialMeek(
 	meekDialConfig.PendingConns = pendingConns
 
 	var scheme string
+	cleanupCachedTLSDialer := true
 	var cachedTLSDialer *cachedTLSDialer
 	var transport transporter
 	var additionalHeaders http.Header
@@ -196,7 +197,7 @@ func DialMeek(
 
 	// Close any cached pre-dialed conn in error cases
 	defer func() {
-		if cachedTLSDialer != nil {
+		if cleanupCachedTLSDialer {
 			cachedTLSDialer.Close()
 		}
 	}()
@@ -310,19 +311,16 @@ func DialMeek(
 
 		cachedTLSDialer = NewCachedTLSDialer(preConn, tlsDialer)
 
-		// transports will use this pointer since cachedTLSDialer gets set to nil
-		dialer := cachedTLSDialer
-
 		if isHTTP2 {
 			NoticeInfo("negotiated HTTP/2 for %s", meekConfig.DialAddress)
 			transport = &http2.Transport{
 				DialTLS: func(network, addr string, _ *golangtls.Config) (net.Conn, error) {
-					return dialer.Dial(network, addr)
+					return cachedTLSDialer.Dial(network, addr)
 				},
 			}
 		} else {
 			transport = &http.Transport{
-				DialTLS: dialer.Dial,
+				DialTLS: cachedTLSDialer.Dial,
 			}
 		}
 
@@ -437,7 +435,7 @@ func DialMeek(
 	}
 
 	// cachedTLSDialer will now be closed in meek.Close()
-	cachedTLSDialer = nil
+	cleanupCachedTLSDialer = false
 
 	meek.emptyReceiveBuffer <- new(bytes.Buffer)
 	meek.emptySendBuffer <- new(bytes.Buffer)
