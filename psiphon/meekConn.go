@@ -197,7 +197,7 @@ func DialMeek(
 
 	// Close any cached pre-dialed conn in error cases
 	defer func() {
-		if cleanupCachedTLSDialer {
+		if cleanupCachedTLSDialer && cachedTLSDialer != nil {
 			cachedTLSDialer.Close()
 		}
 	}()
