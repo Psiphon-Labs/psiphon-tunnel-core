@@ -171,7 +171,8 @@ func runMemoryTest(t *testing.T, testMode int) {
 					fmt.Printf("%s\n", message)
 				}
 			}
-		}))
+		}),
+		"", "", 0, 0)
 
 	startController := func() {
 		controller, err = psiphon.NewController(config)

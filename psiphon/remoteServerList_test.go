@@ -391,7 +391,8 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 			if printNotice {
 				fmt.Printf("%s\n", string(notice))
 			}
-		}))
+		}),
+		"", "", 0, 0)
 
 	go func() {
 		controller.Run(make(chan struct{}))

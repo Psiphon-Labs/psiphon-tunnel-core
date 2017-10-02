@@ -498,7 +498,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			case "NoticeClientVerificationRequestCompleted":
 				sendNotificationReceived(verificationCompleted)
 			}
-		}))
+		}),
+		"", "", 0, 0)
 
 	controllerShutdownBroadcast := make(chan struct{})
 	controllerWaitGroup := new(sync.WaitGroup)

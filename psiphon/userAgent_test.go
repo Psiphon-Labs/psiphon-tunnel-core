@@ -226,7 +226,8 @@ func attemptConnectionsWithUserAgent(
 					countNoticeUserAgent(userAgent.(string))
 				}
 			}
-		}))
+		}),
+		"", "", 0, 0)
 
 	controller, err := NewController(clientConfig)
 	if err != nil {
