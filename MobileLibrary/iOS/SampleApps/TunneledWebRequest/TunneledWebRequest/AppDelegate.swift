@@ -249,8 +249,6 @@ extension AppDelegate: TunneledAppDelegate {
 		// After we're connected, make tunneled requests and populate the webview.
 
 		DispatchQueue.global(qos: .default).async {
-			let mainView = self.window?.rootViewController as! ViewController
-			
 			// First we'll make a "what is my IP" request via makeRequestViaUrlSessionProxy().
 			let url = "https://freegeoip.net/json/"
 			self.makeRequestViaUrlSessionProxy(url) {
@@ -268,6 +266,7 @@ extension AppDelegate: TunneledAppDelegate {
 
 				DispatchQueue.main.sync {
 					// Load the result into the view.
+                    let mainView = self.window?.rootViewController as! ViewController
 					mainView.appendToView("Result from \(url):\n\(prettyResult!)")
 				}
 
@@ -289,6 +288,7 @@ extension AppDelegate: TunneledAppDelegate {
 
 						DispatchQueue.main.sync {
 							// Load the result into the view.
+                            let mainView = self.window?.rootViewController as! ViewController
 							mainView.appendToView("Result from \(url):\n\(prettyResult!)")
 						}
 
