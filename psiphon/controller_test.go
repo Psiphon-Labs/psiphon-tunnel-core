@@ -662,7 +662,8 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 				}
 
 			}
-		}))
+		}),
+		"", "", 0, 0)
 
 	// Run controller, which establishes tunnels
 
