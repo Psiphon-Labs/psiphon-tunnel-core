@@ -401,10 +401,16 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             Psi.Start(
                     loadPsiphonConfig(mHostService.getContext(), fd),
                     embeddedServerEntries,
-                    "",
+
+                    "",          // Not using embedded server entry file
+                    "",          // ... or homepage notice file
+                    "",          // ... or rotating notice file
+                    0,
+                    0,
+
                     this,
                     isVpnMode(),
-                    false // Do not use IPv6 synthesizer for android
+                    false        // Do not use IPv6 synthesizer for android
                     );
         } catch (java.lang.Exception e) {
             throw new Exception("failed to start Psiphon library", e);

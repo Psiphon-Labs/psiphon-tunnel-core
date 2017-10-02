@@ -176,6 +176,8 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	// - 'preemptive_reconnect_lifetime_milliseconds' is unused and ignored
 	// - 'ssh_session_id' is ignored; client session ID is used instead
 
+	NoticeInfo("response body len: %d", len(response))
+
 	var handshakeResponse protocol.HandshakeResponse
 	err := json.Unmarshal(response, &handshakeResponse)
 	if err != nil {
@@ -218,11 +220,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		return common.ContextError(err)
 	}
 
-	// TODO: formally communicate the sponsor and upgrade info to an
-	// outer client via some control interface.
-	for _, homepage := range handshakeResponse.Homepages {
-		NoticeHomepage(homepage)
-	}
+	NoticeHomepages(handshakeResponse.Homepages)
 
 	serverContext.clientUpgradeVersion = handshakeResponse.UpgradeClientVersion
 	if handshakeResponse.UpgradeClientVersion != "" {

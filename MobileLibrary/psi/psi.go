@@ -51,10 +51,16 @@ var shutdownBroadcast chan struct{}
 var controllerWaitGroup *sync.WaitGroup
 
 func Start(
-	configJson, embeddedServerEntryList,
-	embeddedServerEntryListPath string,
+	configJson,
+	embeddedServerEntryList,
+	embeddedServerEntryListFilename,
+	homepageFilename,
+	rotatingFilename string,
+	rotatingFileSize int,
+	rotatingSyncFrequency int,
 	provider PsiphonProvider,
-	useDeviceBinder bool, useIPv6Synthesizer bool) error {
+	useDeviceBinder,
+	useIPv6Synthesizer bool) error {
 
 	controllerMutex.Lock()
 	defer controllerMutex.Unlock()
@@ -86,10 +92,17 @@ func Start(
 		config.IPv6Synthesizer = provider
 	}
 
-	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
+	err = psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 			provider.Notice(string(notice))
-		}))
+		}),
+		homepageFilename,
+		rotatingFilename,
+		rotatingFileSize,
+		rotatingSyncFrequency)
+	if err != nil {
+		return fmt.Errorf("error initializing notice output: %s\n", err)
+	}
 
 	psiphon.NoticeBuildInfo()
 
@@ -101,7 +114,7 @@ func Start(
 	}
 
 	// Stores list of server entries.
-	err = storeServerEntries(embeddedServerEntryListPath, embeddedServerEntryList)
+	err = storeServerEntries(embeddedServerEntryListFilename, embeddedServerEntryList)
 	if err != nil {
 		return err
 	}
@@ -154,9 +167,9 @@ func SetClientVerificationPayload(clientVerificationPayload string) {
 func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders string) {
 	err := psiphon.SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders)
 	if err != nil {
-		psiphon.NoticeAlert("Failed to upload feedback: %s", err)
+		psiphon.NoticeAlert("error uploading feedback: %s", err)
 	} else {
-		psiphon.NoticeInfo("Feedback uploaded successfully")
+		psiphon.NoticeInfo("feedback uploaded successfully")
 	}
 }
 
@@ -182,26 +195,25 @@ func GetPacketTunnelDNSResolverIPv6Address() string {
 }
 
 // Helper function to store a list of server entries.
-// if embeddedServerEntryListPath is not empty, embeddedServerEntryList will be ignored.
-func storeServerEntries(embeddedServerEntryListPath, embeddedServerEntryList string) error {
+// if embeddedServerEntryListFilename is not empty, embeddedServerEntryList will be ignored.
+func storeServerEntries(embeddedServerEntryListFilename, embeddedServerEntryList string) error {
 
-	// if embeddedServerEntryListPath is not empty, ignore embeddedServerEntryList.
-	if embeddedServerEntryListPath != "" {
+	if embeddedServerEntryListFilename != "" {
 
-		serverEntriesFile, err := os.Open(embeddedServerEntryListPath)
+		file, err := os.Open(embeddedServerEntryListFilename)
 		if err != nil {
-			return fmt.Errorf("failed to read remote server list: %s", common.ContextError(err))
+			return fmt.Errorf("error reading embedded server list file: %s", common.ContextError(err))
 		}
-		defer serverEntriesFile.Close()
+		defer file.Close()
 
 		err = psiphon.StreamingStoreServerEntries(
 			protocol.NewStreamingServerEntryDecoder(
-				serverEntriesFile,
+				file,
 				common.GetCurrentTimestamp(),
 				protocol.SERVER_ENTRY_SOURCE_EMBEDDED),
 			false)
 		if err != nil {
-			return fmt.Errorf("failed to store common remote server list: %s", common.ContextError(err))
+			return fmt.Errorf("error storing embedded server list: %s", common.ContextError(err))
 		}
 
 	} else {
@@ -211,11 +223,11 @@ func storeServerEntries(embeddedServerEntryListPath, embeddedServerEntryList str
 			common.GetCurrentTimestamp(),
 			protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
 		if err != nil {
-			return fmt.Errorf("error decoding embedded server entry list: %s", err)
+			return fmt.Errorf("error decoding embedded server list: %s", err)
 		}
 		err = psiphon.StoreServerEntries(serverEntries, false)
 		if err != nil {
-			return fmt.Errorf("error storing embedded server entry list: %s", err)
+			return fmt.Errorf("error storing embedded server list: %s", err)
 		}
 	}
 

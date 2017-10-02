@@ -196,6 +196,26 @@
             }
         }
 
+        __block NSString *homepageNoticesPath = @"";
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(getHomepageNoticesPath)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                homepageNoticesPath = [self.tunneledAppDelegate getHomepageNoticesPath];
+                if (homepageNoticesPath == nil) {
+                    homepageNoticesPath = @"";
+                }
+            });
+        }
+
+        __block NSString *rotatingNoticesPath = @"";
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(getRotatingNoticesPath)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                rotatingNoticesPath = [self.tunneledAppDelegate getRotatingNoticesPath];
+                if (rotatingNoticesPath == nil) {
+                    rotatingNoticesPath = @"";
+                }
+            });
+        }
+
         [self changeConnectionStateTo:PsiphonConnectionStateConnecting evenIfSameState:NO];
 
         @try {
@@ -205,6 +225,10 @@
                            configStr,
                            embeddedServerEntries,
                            embeddedServerEntriesPath,
+                           homepageNoticesPath,
+                           rotatingNoticesPath,
+                           0, // Use default rotating settings
+                           0, // ...
                            self,
                            self->tunnelWholeDevice, // useDeviceBinder
                            useIPv6Synthesizer,

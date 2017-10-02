@@ -22,10 +22,8 @@ package psiphon
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"sort"
 	"strings"
@@ -36,9 +34,24 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
-var noticeLoggerMutex sync.Mutex
-var noticeLogger = log.New(os.Stderr, "", 0)
-var noticeLogDiagnostics = int32(0)
+type noticeLogger struct {
+	logDiagnostics             int32
+	mutex                      sync.Mutex
+	writer                     io.Writer
+	homepageFilename           string
+	homepageFile               *os.File
+	rotatingFilename           string
+	rotatingOlderFilename      string
+	rotatingFile               *os.File
+	rotatingFileSize           int64
+	rotatingCurrentFileSize    int64
+	rotatingSyncFrequency      int
+	rotatingCurrentNoticeCount int
+}
+
+var singletonNoticeLogger = noticeLogger{
+	writer: os.Stderr,
+}
 
 // SetEmitDiagnosticNotices toggles whether diagnostic notices
 // are emitted. Diagnostic notices contain potentially sensitive
@@ -47,20 +60,38 @@ var noticeLogDiagnostics = int32(0)
 // notices in log files which users could post to public forums).
 func SetEmitDiagnosticNotices(enable bool) {
 	if enable {
-		atomic.StoreInt32(&noticeLogDiagnostics, 1)
+		atomic.StoreInt32(&singletonNoticeLogger.logDiagnostics, 1)
 	} else {
-		atomic.StoreInt32(&noticeLogDiagnostics, 0)
+		atomic.StoreInt32(&singletonNoticeLogger.logDiagnostics, 0)
 	}
 }
 
 // GetEmitDiagnoticNotices returns the current state
 // of emitting diagnostic notices.
 func GetEmitDiagnoticNotices() bool {
-	return atomic.LoadInt32(&noticeLogDiagnostics) == 1
+	return atomic.LoadInt32(&singletonNoticeLogger.logDiagnostics) == 1
 }
 
 // SetNoticeOutput sets a target writer to receive notices. By default,
-// notices are written to stderr.
+// notices are written to stderr. Notices are newline delimited.
+//
+// - writer specifies an alternate io.Writer where notices are to be written.
+//
+// - When homepageFilename is not "", homepages are written to the specified file
+//   and omitted from the writer. The file may be read after the Tunnels notice
+//   with count of 1. The file should be opened read-only for reading.
+//
+// - When rotatingFilename is not "", all notices are are written to the specified
+//   file. Diagnostic notices are omitted from the writer. The file is rotated
+//   when its size exceeds rotatingFileSize. One rotated older file,
+//   <rotatingFilename>.1, is retained. The files may be read at any time; and
+//   should be opened read-only for reading. rotatingSyncFrequency specifies how
+//   many notices are written before syncing the file.
+//   If either rotatingFileSize or rotatingSyncFrequency are <= 0, default values
+//   are used.
+//
+// - If an error occurs when writing to a file, an Alert notice is emitted to
+//   the writer.
 //
 // Notices are encoded in JSON. Here's an example:
 //
@@ -73,25 +104,75 @@ func GetEmitDiagnoticNotices() bool {
 // - "showUser": whether the information should be displayed to the user. For example, this flag is set for "SocksProxyPortInUse"
 // as the user should be informed that their configured choice of listening port could not be used. Core clients should
 // anticipate that the core will add additional "showUser"=true notices in the future and emit at least the raw notice.
-// - "timestamp": UTC timezone, RFC3339Nano format timestamp for notice event
+// - "timestamp": UTC timezone, RFC3339Milli format timestamp for notice event
 //
 // See the Notice* functions for details on each notice meaning and payload.
 //
-func SetNoticeOutput(output io.Writer) {
-	noticeLoggerMutex.Lock()
-	defer noticeLoggerMutex.Unlock()
-	noticeLogger = log.New(output, "", 0)
+func SetNoticeOutput(
+	writer io.Writer,
+	homepageFilename string,
+	rotatingFilename string,
+	rotatingFileSize int,
+	rotatingSyncFrequency int) error {
+
+	singletonNoticeLogger.mutex.Lock()
+	defer singletonNoticeLogger.mutex.Unlock()
+
+	singletonNoticeLogger.writer = writer
+
+	if homepageFilename != "" {
+		var err error
+		singletonNoticeLogger.homepageFile, err = os.OpenFile(
+			homepageFilename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+		if err != nil {
+			return common.ContextError(err)
+		}
+	}
+
+	if rotatingFilename != "" {
+		var err error
+		singletonNoticeLogger.rotatingFile, err = os.OpenFile(
+			rotatingFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		fileInfo, err := singletonNoticeLogger.rotatingFile.Stat()
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		if rotatingFileSize <= 0 {
+			rotatingFileSize = 1 << 20
+		}
+
+		if rotatingSyncFrequency <= 0 {
+			rotatingSyncFrequency = 100
+		}
+
+		singletonNoticeLogger.rotatingFilename = rotatingFilename
+		singletonNoticeLogger.rotatingOlderFilename = rotatingFilename + ".1"
+		singletonNoticeLogger.rotatingFileSize = int64(rotatingFileSize)
+		singletonNoticeLogger.rotatingCurrentFileSize = fileInfo.Size()
+		singletonNoticeLogger.rotatingSyncFrequency = rotatingSyncFrequency
+		singletonNoticeLogger.rotatingCurrentNoticeCount = 0
+	}
+
+	return nil
 }
 
 const (
-	noticeIsDiagnostic = 1
-	noticeShowUser     = 2
+	noticeShowUser       = 1
+	noticeIsDiagnostic   = 2
+	noticeIsHomepage     = 4
+	noticeClearHomepages = 8
+	noticeSyncHomepages  = 16
 )
 
 // outputNotice encodes a notice in JSON and writes it to the output writer.
-func outputNotice(noticeType string, noticeFlags uint32, args ...interface{}) {
+func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args ...interface{}) {
 
-	if (noticeFlags&noticeIsDiagnostic != 0) && !GetEmitDiagnoticNotices() {
+	if (noticeFlags&noticeIsDiagnostic != 0) && atomic.LoadInt32(&nl.logDiagnostics) != 1 {
 		return
 	}
 
@@ -109,52 +190,171 @@ func outputNotice(noticeType string, noticeFlags uint32, args ...interface{}) {
 		}
 	}
 	encodedJson, err := json.Marshal(obj)
-	var output string
+	var output []byte
 	if err == nil {
-		output = string(encodedJson)
+		output = append(encodedJson, byte('\n'))
+
 	} else {
 		// Try to emit a properly formatted Alert notice that the outer client can
 		// report. One scenario where this is useful is if the preceding Marshal
 		// fails due to bad data in the args. This has happened for a json.RawMessage
 		// field.
-		obj := make(map[string]interface{})
-		obj["noticeType"] = "Alert"
-		obj["showUser"] = false
-		obj["data"] = map[string]interface{}{
-			"message": fmt.Sprintf("Marshal notice failed: %s", common.ContextError(err)),
-		}
+		output = makeOutputNoticeError(
+			fmt.Sprintf("marshal notice failed: %s", common.ContextError(err)))
+	}
 
-		obj["timestamp"] = time.Now().UTC().Format(common.RFC3339Milli)
-		encodedJson, err := json.Marshal(obj)
-		if err == nil {
-			output = string(encodedJson)
-		} else {
-			output = common.ContextError(errors.New("failed to marshal notice")).Error()
+	nl.mutex.Lock()
+	defer nl.mutex.Unlock()
+
+	skipWriter := false
+
+	if nl.homepageFile != nil &&
+		(noticeFlags&noticeIsHomepage != 0) {
+
+		skipWriter = true
+
+		err := nl.outputNoticeToHomepageFile(noticeFlags, output)
+
+		if err != nil {
+			output := makeOutputNoticeError(
+				fmt.Sprintf("write homepage file failed: %s", err))
+			nl.writer.Write(output)
 		}
 	}
-	noticeLoggerMutex.Lock()
-	defer noticeLoggerMutex.Unlock()
-	noticeLogger.Print(output)
+
+	if nl.rotatingFile != nil {
+
+		if !skipWriter {
+			skipWriter = (noticeFlags&noticeIsDiagnostic != 0)
+		}
+
+		err := nl.outputNoticeToRotatingFile(output)
+
+		if err != nil {
+			output := makeOutputNoticeError(
+				fmt.Sprintf("write rotating file failed: %s", err))
+			nl.writer.Write(output)
+		}
+	}
+
+	if !skipWriter {
+		_, _ = nl.writer.Write(output)
+	}
+}
+
+func makeOutputNoticeError(errorMessage string) []byte {
+	// Format an Alert Notice (_without_ using json.Marshal, since that can fail)
+	alertNoticeFormat := "{\"noticeType\":\"Alert\",\"showUser\":false,\"timestamp\":\"%s\",\"data\":{\"message\":\"%s\"}}\n"
+	return []byte(fmt.Sprintf(alertNoticeFormat, time.Now().UTC().Format(common.RFC3339Milli), errorMessage))
+
+}
+
+func (nl *noticeLogger) outputNoticeToHomepageFile(noticeFlags uint32, output []byte) error {
+
+	if (noticeFlags & noticeClearHomepages) != 0 {
+		err := nl.homepageFile.Truncate(0)
+		if err != nil {
+			return common.ContextError(err)
+		}
+		_, err = nl.homepageFile.Seek(0, 0)
+		if err != nil {
+			return common.ContextError(err)
+		}
+	}
+
+	_, err := nl.homepageFile.Write(output)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	if (noticeFlags & noticeSyncHomepages) != 0 {
+		err = nl.homepageFile.Sync()
+		if err != nil {
+			return common.ContextError(err)
+		}
+	}
+
+	return nil
+}
+
+func (nl *noticeLogger) outputNoticeToRotatingFile(output []byte) error {
+
+	nl.rotatingCurrentFileSize += int64(len(output) + 1)
+	if nl.rotatingCurrentFileSize >= nl.rotatingFileSize {
+
+		// Note: all errors are fatal in order to preserve the
+		// rotatingFileSize limit; e.g., no attempt is made to
+		// continue writing to the file if it can't be rotated.
+
+		err := nl.rotatingFile.Sync()
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		err = nl.rotatingFile.Close()
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		err = os.Rename(nl.rotatingFilename, nl.rotatingOlderFilename)
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		nl.rotatingFile, err = os.OpenFile(
+			nl.rotatingFilename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		nl.rotatingCurrentFileSize = 0
+	}
+
+	_, err := nl.rotatingFile.Write(output)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	nl.rotatingCurrentNoticeCount += 1
+	if nl.rotatingCurrentNoticeCount >= nl.rotatingSyncFrequency {
+		nl.rotatingCurrentNoticeCount = 0
+		err = nl.rotatingFile.Sync()
+		if err != nil {
+			return common.ContextError(err)
+		}
+	}
+
+	return nil
 }
 
 // NoticeInfo is an informational message
 func NoticeInfo(format string, args ...interface{}) {
-	outputNotice("Info", noticeIsDiagnostic, "message", fmt.Sprintf(format, args...))
+	singletonNoticeLogger.outputNotice(
+		"Info", noticeIsDiagnostic,
+		"message", fmt.Sprintf(format, args...))
 }
 
 // NoticeAlert is an alert message; typically a recoverable error condition
 func NoticeAlert(format string, args ...interface{}) {
-	outputNotice("Alert", noticeIsDiagnostic, "message", fmt.Sprintf(format, args...))
+	singletonNoticeLogger.outputNotice(
+		"Alert", noticeIsDiagnostic,
+		"message", fmt.Sprintf(format, args...))
 }
 
 // NoticeError is an error message; typically an unrecoverable error condition
 func NoticeError(format string, args ...interface{}) {
-	outputNotice("Error", noticeIsDiagnostic, "message", fmt.Sprintf(format, args...))
+	singletonNoticeLogger.outputNotice(
+		"Error", noticeIsDiagnostic,
+		"message", fmt.Sprintf(format, args...))
 }
 
 // NoticeCandidateServers is how many possible servers are available for the selected region and protocol
 func NoticeCandidateServers(region, protocol string, count int) {
-	outputNotice("CandidateServers", 0, "region", region, "protocol", protocol, "count", count)
+	singletonNoticeLogger.outputNotice(
+		"CandidateServers", noticeIsDiagnostic,
+		"region", region,
+		"protocol", protocol,
+		"count", count)
 }
 
 // NoticeAvailableEgressRegions is what regions are available for egress from.
@@ -217,64 +417,92 @@ func noticeServerDialStats(noticeType, ipAddress, region, protocol string, tunne
 		args = append(args, "TLSProfile", tunnelDialStats.TLSProfile)
 	}
 
-	outputNotice(
-		noticeType,
-		noticeIsDiagnostic,
+	singletonNoticeLogger.outputNotice(
+		noticeType, noticeIsDiagnostic,
 		args...)
 }
 
 // NoticeConnectingServer reports parameters and details for a single connection attempt
 func NoticeConnectingServer(ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
-	noticeServerDialStats("ConnectingServer", ipAddress, region, protocol, tunnelDialStats)
+	noticeServerDialStats(
+		"ConnectingServer", ipAddress, region, protocol, tunnelDialStats)
 }
 
 // NoticeConnectedServer reports parameters and details for a single successful connection
 func NoticeConnectedServer(ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
-	noticeServerDialStats("ConnectedServer", ipAddress, region, protocol, tunnelDialStats)
+	noticeServerDialStats(
+		"ConnectedServer", ipAddress, region, protocol, tunnelDialStats)
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
 func NoticeActiveTunnel(ipAddress, protocol string, isTCS bool) {
-	outputNotice("ActiveTunnel", noticeIsDiagnostic, "ipAddress", ipAddress, "protocol", protocol, "isTCS", isTCS)
+	singletonNoticeLogger.outputNotice(
+		"ActiveTunnel", noticeIsDiagnostic,
+		"ipAddress", ipAddress,
+		"protocol", protocol,
+		"isTCS", isTCS)
 }
 
 // NoticeSocksProxyPortInUse is a failure to use the configured LocalSocksProxyPort
 func NoticeSocksProxyPortInUse(port int) {
-	outputNotice("SocksProxyPortInUse", noticeShowUser, "port", port)
+	singletonNoticeLogger.outputNotice(
+		"SocksProxyPortInUse",
+		noticeShowUser, "port", port)
 }
 
 // NoticeListeningSocksProxyPort is the selected port for the listening local SOCKS proxy
 func NoticeListeningSocksProxyPort(port int) {
-	outputNotice("ListeningSocksProxyPort", 0, "port", port)
+	singletonNoticeLogger.outputNotice(
+		"ListeningSocksProxyPort", 0,
+		"port", port)
 }
 
 // NoticeHttpProxyPortInUse is a failure to use the configured LocalHttpProxyPort
 func NoticeHttpProxyPortInUse(port int) {
-	outputNotice("HttpProxyPortInUse", noticeShowUser, "port", port)
+	singletonNoticeLogger.outputNotice(
+		"HttpProxyPortInUse", noticeShowUser,
+		"port", port)
 }
 
 // NoticeListeningHttpProxyPort is the selected port for the listening local HTTP proxy
 func NoticeListeningHttpProxyPort(port int) {
-	outputNotice("ListeningHttpProxyPort", 0, "port", port)
+	singletonNoticeLogger.outputNotice(
+		"ListeningHttpProxyPort", 0,
+		"port", port)
 }
 
 // NoticeClientUpgradeAvailable is an available client upgrade, as per the handshake. The
 // client should download and install an upgrade.
 func NoticeClientUpgradeAvailable(version string) {
-	outputNotice("ClientUpgradeAvailable", 0, "version", version)
+	singletonNoticeLogger.outputNotice(
+		"ClientUpgradeAvailable", 0,
+		"version", version)
 }
 
 // NoticeClientIsLatestVersion reports that an upgrade check was made and the client
 // is already the latest version. availableVersion is the version available for download,
 // if known.
 func NoticeClientIsLatestVersion(availableVersion string) {
-	outputNotice("ClientIsLatestVersion", 0, "availableVersion", availableVersion)
+	singletonNoticeLogger.outputNotice(
+		"ClientIsLatestVersion", 0,
+		"availableVersion", availableVersion)
 }
 
-// NoticeHomepage is a sponsor homepage, as per the handshake. The client
-// should display the sponsor's homepage.
-func NoticeHomepage(url string) {
-	outputNotice("Homepage", 0, "url", url)
+// NoticeHomepages emits a series of NoticeHomepage, the sponsor homepages. The client
+// should display the sponsor's homepages.
+func NoticeHomepages(urls []string) {
+	for i, url := range urls {
+		noticeFlags := uint32(noticeIsHomepage)
+		if i == 0 {
+			noticeFlags |= noticeClearHomepages
+		}
+		if i == len(urls)-1 {
+			noticeFlags |= noticeSyncHomepages
+		}
+		singletonNoticeLogger.outputNotice(
+			"Homepage", noticeFlags,
+			"url", url)
+	}
 }
 
 // NoticeClientVerificationRequired indicates that client verification is required, as
@@ -283,29 +511,40 @@ func NoticeHomepage(url string) {
 // payload to the server. If resetCache is set the client must always perform a new
 // verification and update its cache
 func NoticeClientVerificationRequired(nonce string, ttlSeconds int, resetCache bool) {
-	outputNotice("ClientVerificationRequired", 0, "nonce", nonce, "ttlSeconds", ttlSeconds, "resetCache", resetCache)
+	singletonNoticeLogger.outputNotice(
+		"ClientVerificationRequired", 0,
+		"nonce", nonce,
+		"ttlSeconds", ttlSeconds,
+		"resetCache", resetCache)
 }
 
 // NoticeClientRegion is the client's region, as determined by the server and
 // reported to the client in the handshake.
 func NoticeClientRegion(region string) {
-	outputNotice("ClientRegion", 0, "region", region)
+	singletonNoticeLogger.outputNotice(
+		"ClientRegion", 0,
+		"region", region)
 }
 
 // NoticeTunnels is how many active tunnels are available. The client should use this to
 // determine connecting/unexpected disconnect state transitions. When count is 0, the core is
 // disconnected; when count > 1, the core is connected.
 func NoticeTunnels(count int) {
-	outputNotice("Tunnels", 0, "count", count)
+	singletonNoticeLogger.outputNotice(
+		"Tunnels", 0,
+		"count", count)
 }
 
 // NoticeSessionId is the session ID used across all tunnels established by the controller.
 func NoticeSessionId(sessionId string) {
-	outputNotice("SessionId", noticeIsDiagnostic, "sessionId", sessionId)
+	singletonNoticeLogger.outputNotice(
+		"SessionId", noticeIsDiagnostic,
+		"sessionId", sessionId)
 }
 
 func NoticeImpairedProtocolClassification(impairedProtocolClassification map[string]int) {
-	outputNotice("ImpairedProtocolClassification", noticeIsDiagnostic,
+	singletonNoticeLogger.outputNotice(
+		"ImpairedProtocolClassification", noticeIsDiagnostic,
 		"classification", impairedProtocolClassification)
 }
 
@@ -316,29 +555,39 @@ func NoticeImpairedProtocolClassification(impairedProtocolClassification map[str
 // users, not for diagnostics logs.
 //
 func NoticeUntunneled(address string) {
-	outputNotice("Untunneled", noticeShowUser, "address", address)
+	singletonNoticeLogger.outputNotice(
+		"Untunneled", noticeShowUser,
+		"address", address)
 }
 
 // NoticeSplitTunnelRegion reports that split tunnel is on for the given region.
 func NoticeSplitTunnelRegion(region string) {
-	outputNotice("SplitTunnelRegion", noticeShowUser, "region", region)
+	singletonNoticeLogger.outputNotice(
+		"SplitTunnelRegion", noticeShowUser,
+		"region", region)
 }
 
 // NoticeUpstreamProxyError reports an error when connecting to an upstream proxy. The
 // user may have input, for example, an incorrect address or incorrect credentials.
 func NoticeUpstreamProxyError(err error) {
-	outputNotice("UpstreamProxyError", noticeShowUser, "message", err.Error())
+	singletonNoticeLogger.outputNotice(
+		"UpstreamProxyError", noticeShowUser,
+		"message", err.Error())
 }
 
 // NoticeClientUpgradeDownloadedBytes reports client upgrade download progress.
 func NoticeClientUpgradeDownloadedBytes(bytes int64) {
-	outputNotice("ClientUpgradeDownloadedBytes", noticeIsDiagnostic, "bytes", bytes)
+	singletonNoticeLogger.outputNotice(
+		"ClientUpgradeDownloadedBytes", noticeIsDiagnostic,
+		"bytes", bytes)
 }
 
 // NoticeClientUpgradeDownloaded indicates that a client upgrade download
 // is complete and available at the destination specified.
 func NoticeClientUpgradeDownloaded(filename string) {
-	outputNotice("ClientUpgradeDownloaded", 0, "filename", filename)
+	singletonNoticeLogger.outputNotice(
+		"ClientUpgradeDownloaded", 0,
+		"filename", filename)
 }
 
 // NoticeBytesTransferred reports how many tunneled bytes have been
@@ -346,10 +595,17 @@ func NoticeClientUpgradeDownloaded(filename string) {
 // to the server at ipAddress.
 func NoticeBytesTransferred(ipAddress string, sent, received int64) {
 	if GetEmitDiagnoticNotices() {
-		outputNotice("BytesTransferred", noticeIsDiagnostic, "ipAddress", ipAddress, "sent", sent, "received", received)
+		singletonNoticeLogger.outputNotice(
+			"BytesTransferred", noticeIsDiagnostic,
+			"ipAddress", ipAddress,
+			"sent", sent,
+			"received", received)
 	} else {
 		// This case keeps the EmitBytesTransferred and EmitDiagnosticNotices config options independent
-		outputNotice("BytesTransferred", 0, "sent", sent, "received", received)
+		singletonNoticeLogger.outputNotice(
+			"BytesTransferred", 0,
+			"sent", sent,
+			"received", received)
 	}
 }
 
@@ -358,10 +614,17 @@ func NoticeBytesTransferred(ipAddress string, sent, received int64) {
 // at ipAddress.
 func NoticeTotalBytesTransferred(ipAddress string, sent, received int64) {
 	if GetEmitDiagnoticNotices() {
-		outputNotice("TotalBytesTransferred", noticeIsDiagnostic, "ipAddress", ipAddress, "sent", sent, "received", received)
+		singletonNoticeLogger.outputNotice(
+			"TotalBytesTransferred", noticeIsDiagnostic,
+			"ipAddress", ipAddress,
+			"sent", sent,
+			"received", received)
 	} else {
 		// This case keeps the EmitBytesTransferred and EmitDiagnosticNotices config options independent
-		outputNotice("TotalBytesTransferred", 0, "sent", sent, "received", received)
+		singletonNoticeLogger.outputNotice(
+			"TotalBytesTransferred", 0,
+			"sent", sent,
+			"received", received)
 	}
 }
 
@@ -382,44 +645,60 @@ func NoticeLocalProxyError(proxyType string, err error) {
 
 	outputRepetitiveNotice(
 		"LocalProxyError"+proxyType, repetitionMessage, 1,
-		"LocalProxyError", noticeIsDiagnostic, "message", err.Error())
+		"LocalProxyError", noticeIsDiagnostic,
+		"message", err.Error())
 }
 
 // NoticeBuildInfo reports build version info.
 func NoticeBuildInfo() {
-	outputNotice("BuildInfo", 0, "buildInfo", common.GetBuildInfo())
+	singletonNoticeLogger.outputNotice(
+		"BuildInfo", noticeIsDiagnostic,
+		"buildInfo", common.GetBuildInfo())
 }
 
 // NoticeExiting indicates that tunnel-core is exiting imminently.
 func NoticeExiting() {
-	outputNotice("Exiting", 0)
+	singletonNoticeLogger.outputNotice(
+		"Exiting", 0)
 }
 
 // NoticeRemoteServerListResourceDownloadedBytes reports remote server list download progress.
 func NoticeRemoteServerListResourceDownloadedBytes(url string, bytes int64) {
-	outputNotice("RemoteServerListResourceDownloadedBytes", noticeIsDiagnostic, "url", url, "bytes", bytes)
+	singletonNoticeLogger.outputNotice(
+		"RemoteServerListResourceDownloadedBytes", noticeIsDiagnostic,
+		"url", url,
+		"bytes", bytes)
 }
 
 // NoticeRemoteServerListResourceDownloaded indicates that a remote server list download
 // completed successfully.
 func NoticeRemoteServerListResourceDownloaded(url string) {
-	outputNotice("RemoteServerListResourceDownloaded", noticeIsDiagnostic, "url", url)
+	singletonNoticeLogger.outputNotice(
+		"RemoteServerListResourceDownloaded", noticeIsDiagnostic,
+		"url", url)
 }
 
 func NoticeClientVerificationRequestCompleted(ipAddress string) {
 	// TODO: remove "Notice" prefix
-	outputNotice("NoticeClientVerificationRequestCompleted", noticeIsDiagnostic, "ipAddress", ipAddress)
+	singletonNoticeLogger.outputNotice(
+		"NoticeClientVerificationRequestCompleted", noticeIsDiagnostic,
+		"ipAddress", ipAddress)
 }
 
 // NoticeSLOKSeeded indicates that the SLOK with the specified ID was received from
 // the Psiphon server. The "duplicate" flags indicates whether the SLOK was previously known.
 func NoticeSLOKSeeded(slokID string, duplicate bool) {
-	outputNotice("SLOKSeeded", noticeIsDiagnostic, "slokID", slokID, "duplicate", duplicate)
+	singletonNoticeLogger.outputNotice(
+		"SLOKSeeded", noticeIsDiagnostic,
+		"slokID", slokID,
+		"duplicate", duplicate)
 }
 
 // NoticeServerTimestamp reports server side timestamp as seen in the handshake
 func NoticeServerTimestamp(timestamp string) {
-	outputNotice("ServerTimestamp", 0, "timestamp", timestamp)
+	singletonNoticeLogger.outputNotice(
+		"ServerTimestamp", 0,
+		"timestamp", timestamp)
 }
 
 type repetitiveNoticeState struct {
@@ -462,7 +741,9 @@ func outputRepetitiveNotice(
 		if state.repeats > 0 {
 			args = append(args, "repeats", state.repeats)
 		}
-		outputNotice(noticeType, noticeFlags, args...)
+		singletonNoticeLogger.outputNotice(
+			noticeType, noticeFlags,
+			args...)
 	}
 }
 
@@ -516,9 +797,14 @@ func (receiver *NoticeReceiver) Write(p []byte) (n int, err error) {
 	}
 
 	notice := receiver.buffer[:index]
-	receiver.buffer = receiver.buffer[index+1:]
 
 	receiver.callback(notice)
+
+	if index == len(receiver.buffer)-1 {
+		receiver.buffer = receiver.buffer[0:0]
+	} else {
+		receiver.buffer = receiver.buffer[index+1:]
+	}
 
 	return len(p), nil
 }
@@ -553,7 +839,9 @@ func NewNoticeWriter(noticeType string) *NoticeWriter {
 
 // Write implements io.Writer.
 func (writer *NoticeWriter) Write(p []byte) (n int, err error) {
-	outputNotice(writer.noticeType, noticeIsDiagnostic, "message", string(p))
+	singletonNoticeLogger.outputNotice(
+		writer.noticeType, noticeIsDiagnostic,
+		"message", string(p))
 	return len(p), nil
 }
 
@@ -581,9 +869,8 @@ func (logger *commonLogger) WithContextFields(fields common.LogFields) common.Lo
 }
 
 func (logger *commonLogger) LogMetric(metric string, fields common.LogFields) {
-	outputNotice(
-		metric,
-		noticeIsDiagnostic,
+	singletonNoticeLogger.outputNotice(
+		metric, noticeIsDiagnostic,
 		listCommonFields(fields)...)
 }
 
@@ -609,9 +896,8 @@ type commonLogContext struct {
 func (context *commonLogContext) outputNotice(
 	noticeType string, args ...interface{}) {
 
-	outputNotice(
-		noticeType,
-		noticeIsDiagnostic,
+	singletonNoticeLogger.outputNotice(
+		noticeType, noticeIsDiagnostic,
 		append(
 			[]interface{}{
 				"message", fmt.Sprint(args...),
