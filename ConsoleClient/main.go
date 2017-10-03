@@ -150,14 +150,14 @@ func main() {
 	if formatNotices {
 		noticeWriter = psiphon.NewNoticeConsoleRewriter(noticeWriter)
 	}
-	err := psiphon.SetNoticeOutput(
-		noticeWriter,
+	psiphon.SetNoticeWriter(noticeWriter)
+	err = psiphon.SetNoticeFiles(
 		homepageFilename,
 		rotatingFilename,
 		rotatingFileSize,
 		rotatingSyncFrequency)
 	if err != nil {
-		fmt.Printf("error initializing notice output: %s\n", err)
+		fmt.Printf("error initializing notice files: %s\n", err)
 		os.Exit(1)
 	}
 
