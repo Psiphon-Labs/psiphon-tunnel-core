@@ -290,7 +290,7 @@ func newLoggingDeviceBinder(p PsiphonProvider) *loggingDeviceBinder {
 func (d *loggingDeviceBinder) BindToDevice(fileDescriptor int) error {
 	deviceInfo, err := d.p.BindToDevice(fileDescriptor)
 	if err == nil && deviceInfo != "" {
-		NoticeInfo("BindToDevice: %s", deviceInfo)
+		psiphon.NoticeInfo("BindToDevice: %s", deviceInfo)
 	}
 	return err
 }
