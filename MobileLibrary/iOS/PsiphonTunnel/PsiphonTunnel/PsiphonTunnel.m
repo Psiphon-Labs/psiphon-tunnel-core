@@ -832,31 +832,32 @@
 
 #pragma mark - GoPsiPsiphonProvider protocol implementation (private)
 
-- (BOOL)bindToDevice:(long)fileDescriptor error:(NSError **)error {
+- (NSString *)bindToDevice:(long)fileDescriptor error:(NSError **)error {
+
     if (!self->tunnelWholeDevice) {
-        return FALSE;
+        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: invalid mode"}];
+        return @"";
     }
     
     NSString *activeInterface = [self getActiveInterface];
     if (activeInterface == nil) {
-        return FALSE;
+        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: not active interface"}];
+        return @"";
     }
-    [self logMessage:[NSString stringWithFormat:@"bindToDevice: Active interface: %@", activeInterface]];
     
     unsigned int interfaceIndex = if_nametoindex([activeInterface UTF8String]);
     if (interfaceIndex == 0) {
-        // if_nametoindex returns 0 on error.
-        [self logMessage:[NSString stringWithFormat:@"bindToDevice: if_nametoindex error for interface (%@)", activeInterface]];
-        return FALSE;
+        *error = [[NSError alloc] initWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: if_nametoindex failed"}];
+        return @"";
     }
     
     int ret = setsockopt((int)fileDescriptor, IPPROTO_IP, IP_BOUND_IF, &interfaceIndex, sizeof(interfaceIndex));
     if (ret != 0) {
-        [self logMessage:[NSString stringWithFormat: @"bindToDevice: setsockopt failed; errno: %d", errno]];
-        return FALSE;
+        *error = [[NSError alloc] initWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: setsockopt failed"}];
+        return @"";
     }
     
-    return TRUE;
+    return [NSString stringWithFormat:@"active interface: %@", activeInterface];
 }
 
 /*!
@@ -889,8 +890,6 @@
     
     // Free getifaddrs data
     freeifaddrs(interfaces);
-    
-    [self logMessage:[NSString stringWithFormat:@"getActiveInterface: List of UP interfaces: %@", upIffList]];
     
     // TODO: following is a heuristic for choosing active network interface
     // Only Wi-Fi and Cellular interfaces are considered

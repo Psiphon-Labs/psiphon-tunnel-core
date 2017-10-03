@@ -39,7 +39,7 @@ import (
 type PsiphonProvider interface {
 	Notice(noticeJSON string)
 	HasNetworkConnectivity() int
-	BindToDevice(fileDescriptor int) error
+	BindToDevice(fileDescriptor int) (string, error)
 	IPv6Synthesize(IPv4Addr string) string
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
@@ -84,7 +84,7 @@ func Start(
 	config.NetworkConnectivityChecker = provider
 
 	if useDeviceBinder {
-		config.DeviceBinder = provider
+		config.DeviceBinder = newLoggingDeviceBinder(provider)
 		config.DnsServerGetter = provider
 	}
 
@@ -255,7 +255,7 @@ func (p *mutexPsiphonProvider) HasNetworkConnectivity() int {
 	return p.p.HasNetworkConnectivity()
 }
 
-func (p *mutexPsiphonProvider) BindToDevice(fileDescriptor int) error {
+func (p *mutexPsiphonProvider) BindToDevice(fileDescriptor int) (string, error) {
 	p.Lock()
 	defer p.Unlock()
 	return p.p.BindToDevice(fileDescriptor)
@@ -277,4 +277,20 @@ func (p *mutexPsiphonProvider) GetSecondaryDnsServer() string {
 	p.Lock()
 	defer p.Unlock()
 	return p.p.GetSecondaryDnsServer()
+}
+
+type loggingDeviceBinder struct {
+	p PsiphonProvider
+}
+
+func newLoggingDeviceBinder(p PsiphonProvider) *loggingDeviceBinder {
+	return &loggingDeviceBinder{p: p}
+}
+
+func (d *loggingDeviceBinder) BindToDevice(fileDescriptor int) error {
+	deviceInfo, err := d.p.BindToDevice(fileDescriptor)
+	if err == nil && deviceInfo != "" {
+		NoticeInfo("BindToDevice: %s", deviceInfo)
+	}
+	return err
 }
