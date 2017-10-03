@@ -149,6 +149,17 @@ func Stop() {
 	}
 }
 
+func ReconnectTunnel() {
+
+	controllerMutex.Lock()
+	defer controllerMutex.Unlock()
+
+	if controller != nil {
+		// TODO: ensure TerminateNextActiveTunnel is safe for use (see godoc)
+		controller.TerminateNextActiveTunnel()
+	}
+}
+
 // SetClientVerificationPayload is a passthrough to
 // Controller.SetClientVerificationPayloadForActiveTunnels.
 // Note: should only be called after Start() and before Stop(); otherwise,

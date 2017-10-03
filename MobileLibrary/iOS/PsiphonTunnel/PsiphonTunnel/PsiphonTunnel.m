@@ -1147,7 +1147,7 @@
     // Restart if the state has changed, unless the previous state was NotReachable, because
     // the tunnel should be waiting for connectivity in that case.
     if (networkStatus != previousNetworkStatus && previousNetworkStatus != NotReachable) {
-        [self start];
+        GoPsiReconnectTunnel();
     }
 }
 
