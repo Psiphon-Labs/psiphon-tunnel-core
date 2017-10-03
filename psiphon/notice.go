@@ -122,6 +122,9 @@ func SetNoticeOutput(
 
 	if homepageFilename != "" {
 		var err error
+		if singletonNoticeLogger.homepageFile != nil {
+			singletonNoticeLogger.homepageFile.Close()
+		}
 		singletonNoticeLogger.homepageFile, err = os.OpenFile(
 			homepageFilename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 		if err != nil {
@@ -131,6 +134,9 @@ func SetNoticeOutput(
 
 	if rotatingFilename != "" {
 		var err error
+		if singletonNoticeLogger.rotatingFile != nil {
+			singletonNoticeLogger.rotatingFile.Close()
+		}
 		singletonNoticeLogger.rotatingFile, err = os.OpenFile(
 			rotatingFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
