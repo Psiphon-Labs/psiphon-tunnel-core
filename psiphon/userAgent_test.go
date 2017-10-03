@@ -214,7 +214,7 @@ func attemptConnectionsWithUserAgent(
 		t.Fatalf("error initializing client datastore: %s", err)
 	}
 
-	SetNoticeOutput(NewNoticeReceiver(
+	SetNoticeWriter(NewNoticeReceiver(
 		func(notice []byte) {
 			noticeType, payload, err := GetNotice(notice)
 			if err != nil {
@@ -226,8 +226,7 @@ func attemptConnectionsWithUserAgent(
 					countNoticeUserAgent(userAgent.(string))
 				}
 			}
-		}),
-		"", "", 0, 0)
+		}))
 
 	controller, err := NewController(clientConfig)
 	if err != nil {

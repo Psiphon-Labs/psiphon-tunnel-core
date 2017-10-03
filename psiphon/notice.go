@@ -72,26 +72,10 @@ func GetEmitDiagnoticNotices() bool {
 	return atomic.LoadInt32(&singletonNoticeLogger.logDiagnostics) == 1
 }
 
-// SetNoticeOutput sets a target writer to receive notices. By default,
+// SetNoticeWriter sets a target writer to receive notices. By default,
 // notices are written to stderr. Notices are newline delimited.
 //
-// - writer specifies an alternate io.Writer where notices are to be written.
-//
-// - When homepageFilename is not "", homepages are written to the specified file
-//   and omitted from the writer. The file may be read after the Tunnels notice
-//   with count of 1. The file should be opened read-only for reading.
-//
-// - When rotatingFilename is not "", all notices are are written to the specified
-//   file. Diagnostic notices are omitted from the writer. The file is rotated
-//   when its size exceeds rotatingFileSize. One rotated older file,
-//   <rotatingFilename>.1, is retained. The files may be read at any time; and
-//   should be opened read-only for reading. rotatingSyncFrequency specifies how
-//   many notices are written before syncing the file.
-//   If either rotatingFileSize or rotatingSyncFrequency are <= 0, default values
-//   are used.
-//
-// - If an error occurs when writing to a file, an Alert notice is emitted to
-//   the writer.
+// writer specifies an alternate io.Writer where notices are to be written.
 //
 // Notices are encoded in JSON. Here's an example:
 //
@@ -108,8 +92,36 @@ func GetEmitDiagnoticNotices() bool {
 //
 // See the Notice* functions for details on each notice meaning and payload.
 //
-func SetNoticeOutput(
-	writer io.Writer,
+func SetNoticeWriter(writer io.Writer) {
+
+	singletonNoticeLogger.mutex.Lock()
+	defer singletonNoticeLogger.mutex.Unlock()
+
+	singletonNoticeLogger.writer = writer
+}
+
+// SetNoticeFiles configures files for notice writing.
+//
+// - When homepageFilename is not "", homepages are written to the specified file
+//   and omitted from the writer. The file may be read after the Tunnels notice
+//   with count of 1. The file should be opened read-only for reading.
+//
+// - When rotatingFilename is not "", all notices are are written to the specified
+//   file. Diagnostic notices are omitted from the writer. The file is rotated
+//   when its size exceeds rotatingFileSize. One rotated older file,
+//   <rotatingFilename>.1, is retained. The files may be read at any time; and
+//   should be opened read-only for reading. rotatingSyncFrequency specifies how
+//   many notices are written before syncing the file.
+//   If either rotatingFileSize or rotatingSyncFrequency are <= 0, default values
+//   are used.
+//
+// - If an error occurs when writing to a file, an InternalError notice is emitted to
+//   the writer.
+//
+// SetNoticeFiles closes open homepage or rotating files before applying the new
+// configuration.
+//
+func SetNoticeFiles(
 	homepageFilename string,
 	rotatingFilename string,
 	rotatingFileSize int,
@@ -117,8 +129,6 @@ func SetNoticeOutput(
 
 	singletonNoticeLogger.mutex.Lock()
 	defer singletonNoticeLogger.mutex.Unlock()
-
-	singletonNoticeLogger.writer = writer
 
 	if homepageFilename != "" {
 		var err error
@@ -201,11 +211,10 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 		output = append(encodedJson, byte('\n'))
 
 	} else {
-		// Try to emit a properly formatted Alert notice that the outer client can
-		// report. One scenario where this is useful is if the preceding Marshal
-		// fails due to bad data in the args. This has happened for a json.RawMessage
-		// field.
-		output = makeOutputNoticeError(
+		// Try to emit a properly formatted notice that the outer client can report.
+		// One scenario where this is useful is if the preceding Marshal fails due to
+		// bad data in the args. This has happened for a json.RawMessage field.
+		output = makeNoticeInternalError(
 			fmt.Sprintf("marshal notice failed: %s", common.ContextError(err)))
 	}
 
@@ -222,7 +231,7 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 		err := nl.outputNoticeToHomepageFile(noticeFlags, output)
 
 		if err != nil {
-			output := makeOutputNoticeError(
+			output := makeNoticeInternalError(
 				fmt.Sprintf("write homepage file failed: %s", err))
 			nl.writer.Write(output)
 		}
@@ -237,7 +246,7 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 		err := nl.outputNoticeToRotatingFile(output)
 
 		if err != nil {
-			output := makeOutputNoticeError(
+			output := makeNoticeInternalError(
 				fmt.Sprintf("write rotating file failed: %s", err))
 			nl.writer.Write(output)
 		}
@@ -248,9 +257,11 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 	}
 }
 
-func makeOutputNoticeError(errorMessage string) []byte {
+// NoticeInteralError is an error formatting or writing notices.
+// A NoticeInteralError handler must not call a Notice function.
+func makeNoticeInternalError(errorMessage string) []byte {
 	// Format an Alert Notice (_without_ using json.Marshal, since that can fail)
-	alertNoticeFormat := "{\"noticeType\":\"Alert\",\"showUser\":false,\"timestamp\":\"%s\",\"data\":{\"message\":\"%s\"}}\n"
+	alertNoticeFormat := "{\"noticeType\":\"InternalError\",\"showUser\":false,\"timestamp\":\"%s\",\"data\":{\"message\":\"%s\"}}\n"
 	return []byte(fmt.Sprintf(alertNoticeFormat, time.Now().UTC().Format(common.RFC3339Milli), errorMessage))
 
 }
@@ -352,6 +363,13 @@ func NoticeError(format string, args ...interface{}) {
 	singletonNoticeLogger.outputNotice(
 		"Error", noticeIsDiagnostic,
 		"message", fmt.Sprintf(format, args...))
+}
+
+// NoticeUserLog is a log message from the outer client user of tunnel-core
+func NoticeUserLog(message string) {
+	singletonNoticeLogger.outputNotice(
+		"UserLog", noticeIsDiagnostic,
+		"message", message)
 }
 
 // NoticeCandidateServers is how many possible servers are available for the selected region and protocol

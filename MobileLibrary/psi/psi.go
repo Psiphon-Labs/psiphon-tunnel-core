@@ -45,6 +45,23 @@ type PsiphonProvider interface {
 	GetSecondaryDnsServer() string
 }
 
+func SetNoticeFiles(
+	homepageFilename,
+	rotatingFilename string,
+	rotatingFileSize,
+	rotatingSyncFrequency int) error {
+
+	return psiphon.SetNoticeFiles(
+		homepageFilename,
+		rotatingFilename,
+		rotatingFileSize,
+		rotatingSyncFrequency)
+}
+
+func NoticeUserLog(message string) {
+	psiphon.NoticeUserLog(message)
+}
+
 var controllerMutex sync.Mutex
 var controller *psiphon.Controller
 var shutdownBroadcast chan struct{}
@@ -53,11 +70,7 @@ var controllerWaitGroup *sync.WaitGroup
 func Start(
 	configJson,
 	embeddedServerEntryList,
-	embeddedServerEntryListFilename,
-	homepageFilename,
-	rotatingFilename string,
-	rotatingFileSize int,
-	rotatingSyncFrequency int,
+	embeddedServerEntryListFilename string,
 	provider PsiphonProvider,
 	useDeviceBinder,
 	useIPv6Synthesizer bool) error {
@@ -92,21 +105,12 @@ func Start(
 		config.IPv6Synthesizer = provider
 	}
 
-	err = psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
+	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 			provider.Notice(string(notice))
-		}),
-		homepageFilename,
-		rotatingFilename,
-		rotatingFileSize,
-		rotatingSyncFrequency)
-	if err != nil {
-		return fmt.Errorf("error initializing notice output: %s\n", err)
-	}
+		}))
 
 	psiphon.NoticeBuildInfo()
-
-	// TODO: should following errors be Notices?
 
 	err = psiphon.InitDataStore(config)
 	if err != nil {

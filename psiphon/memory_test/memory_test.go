@@ -133,7 +133,7 @@ func runMemoryTest(t *testing.T, testMode int) {
 	reconnectTunnel := make(chan bool, 1)
 	tunnelsEstablished := int32(0)
 
-	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
+	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 			noticeType, payload, err := psiphon.GetNotice(notice)
 			if err != nil {
@@ -171,8 +171,7 @@ func runMemoryTest(t *testing.T, testMode int) {
 					fmt.Printf("%s\n", message)
 				}
 			}
-		}),
-		"", "", 0, 0)
+		}))
 
 	startController := func() {
 		controller, err = psiphon.NewController(config)

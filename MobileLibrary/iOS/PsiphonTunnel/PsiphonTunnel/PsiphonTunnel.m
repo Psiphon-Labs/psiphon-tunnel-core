@@ -56,6 +56,7 @@
     _Atomic NetworkStatus currentNetworkStatus;
 
     BOOL tunnelWholeDevice;
+    _Atomic BOOL usingRotatingNotices;
 
     // DNS
     NSString *primaryGoogleDNS;
@@ -82,6 +83,7 @@
     self->reachability = [Reachability reachabilityForInternetConnection];
     atomic_init(&self->currentNetworkStatus, NotReachable);
     self->tunnelWholeDevice = FALSE;
+    atomic_init(&self->usingRotatingNotices, FALSE);
 
     // Randomize order of Google DNS servers on start,
     // and consistently return in that fixed order.
@@ -113,8 +115,8 @@
 // See comment in header
 + (PsiphonTunnel * _Nonnull)newPsiphonTunnel:(id<TunneledAppDelegate> _Nonnull)tunneledAppDelegate {
     @synchronized (PsiphonTunnel.self) {
-        // Only one PsiphonTunnel instance may exist at a time, as the underlying
-        // go.psi.Psi and tun2socks implementations each contain global state.
+        // Only one PsiphonTunnel instance may exist at a time, as the
+        // underlying GoPsi implementation contains global state.
         
         static PsiphonTunnel *sharedInstance = nil;
         static dispatch_once_t onceToken = 0;
@@ -155,6 +157,13 @@
 - (BOOL)start {
     @synchronized (PsiphonTunnel.self) {
 
+        // Initialize notice files for writing as early as possible, so all
+        // logMessages will be written, as NoticeUserLogs, to the rotating
+        // file when tunnel-core is managing diagnostics.
+        if ([self initNoticeFiles] == FALSE) {
+            return FALSE;
+        }
+
         [self stop];
 
         [self logMessage:@"Starting Psiphon library"];
@@ -164,7 +173,7 @@
         
         NSString *configStr = [self getConfig];
         if (configStr == nil) {
-            [self logMessage:@"Error getting config from delegate"];
+            [self logMessage:@"Error getting config"];
             return FALSE;
         }
 
@@ -196,48 +205,22 @@
             }
         }
 
-        __block NSString *homepageNoticesPath = @"";
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(getHomepageNoticesPath)]) {
-            dispatch_sync(self->callbackQueue, ^{
-                homepageNoticesPath = [self.tunneledAppDelegate getHomepageNoticesPath];
-                if (homepageNoticesPath == nil) {
-                    homepageNoticesPath = @"";
-                }
-            });
-        }
-
-        __block NSString *rotatingNoticesPath = @"";
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(getRotatingNoticesPath)]) {
-            dispatch_sync(self->callbackQueue, ^{
-                rotatingNoticesPath = [self.tunneledAppDelegate getRotatingNoticesPath];
-                if (rotatingNoticesPath == nil) {
-                    rotatingNoticesPath = @"";
-                }
-            });
-        }
-
         [self changeConnectionStateTo:PsiphonConnectionStateConnecting evenIfSameState:NO];
 
         @try {
             NSError *e = nil;
 
-            BOOL res = GoPsiStart(
-                           configStr,
-                           embeddedServerEntries,
-                           embeddedServerEntriesPath,
-                           homepageNoticesPath,
-                           rotatingNoticesPath,
-                           0, // Use default rotating settings
-                           0, // ...
-                           self,
-                           self->tunnelWholeDevice, // useDeviceBinder
-                           useIPv6Synthesizer,
-                           &e);
-            
-            [self logMessage:[NSString stringWithFormat: @"GoPsiStart: %@", res ? @"TRUE" : @"FALSE"]];
+            GoPsiStart(
+                configStr,
+                embeddedServerEntries,
+                embeddedServerEntriesPath,
+                self,
+                self->tunnelWholeDevice, // useDeviceBinder
+                useIPv6Synthesizer,
+                &e);
             
             if (e != nil) {
-                [self logMessage:[NSString stringWithFormat: @"Psiphon tunnel start failed: %@", e.localizedDescription]];
+                [self logMessage:[NSString stringWithFormat: @"Psiphon library start failed: %@", e.localizedDescription]];
                 [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
                 return FALSE;
             }
@@ -250,10 +233,52 @@
 
         [self startInternetReachabilityMonitoring];
 
-        [self logMessage:@"Psiphon tunnel started"];
+        [self logMessage:@"Psiphon library started"];
         
         return TRUE;
     }
+}
+
+- (BOOL)initNoticeFiles {
+
+    __block NSString *homepageNoticesPath = @"";
+    if ([self.tunneledAppDelegate respondsToSelector:@selector(getHomepageNoticesPath)]) {
+        dispatch_sync(self->callbackQueue, ^{
+            homepageNoticesPath = [self.tunneledAppDelegate getHomepageNoticesPath];
+            if (homepageNoticesPath == nil) {
+                homepageNoticesPath = @"";
+            }
+        });
+    }
+
+    __block NSString *rotatingNoticesPath = @"";
+    if ([self.tunneledAppDelegate respondsToSelector:@selector(getRotatingNoticesPath)]) {
+        dispatch_sync(self->callbackQueue, ^{
+            rotatingNoticesPath = [self.tunneledAppDelegate getRotatingNoticesPath];
+            if (rotatingNoticesPath == nil) {
+                rotatingNoticesPath = @"";
+            }
+        });
+    }
+
+    if (rotatingNoticesPath.length > 0) {
+        atomic_store(&self->usingRotatingNotices, TRUE);
+    }
+
+    NSError *e = nil;
+    GoPsiSetNoticeFiles(
+        homepageNoticesPath,
+        rotatingNoticesPath,
+        0, // Use default rotating settings
+        0, // ...
+        &e);
+    if (e != nil) {
+        [self logMessage:[NSString stringWithFormat: @"Psiphon library initialize notices failed: %@", e.localizedDescription]];
+        [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 /*!
@@ -592,7 +617,9 @@
  @param noticeJSON  The notice data, JSON encoded.
  */
 - (void)handlePsiphonNotice:(NSString * _Nonnull)noticeJSON {
+
     BOOL diagnostic = TRUE;
+    BOOL internalError = FALSE;
     
     __block NSDictionary *notice = nil;
     id block = ^(id obj, BOOL *ignored) {
@@ -813,9 +840,25 @@
             });
         }
     }
+    else if ([noticeType isEqualToString:@"InternalError"]) {
+        internalError = TRUE;
+    }
     
-    // Pass diagnostic messages to onDiagnosticMessage.
-    if (diagnostic) {
+    // When tunnel-core is managing diagnostics, onDiagnosticMessage is
+    // typically not called: the user app will get callbacks for specific
+    // events such as onConnected, and for all other notices tunnel-core
+    // is recording them and the overhead of posting to the user app is
+    // redundant and unnecessary.
+    //
+    // The only exception is NoticeInternalError, where tunnel-core has
+    // failed to log a notice. In this case, the user app receives
+    // onDiagnosticMessage and a chance to report the error.
+    //
+    // Otherwise, when tunnel-core is not managing diagnosrics, pass
+    // diagnostic messages to onDiagnosticMessage.
+    if (diagnostic &&
+        (atomic_load(&self->usingRotatingNotices) == FALSE || internalError == TRUE)) {
+
         NSDictionary *data = notice[@"data"];
         if (data == nil) {
             return;
@@ -825,10 +868,32 @@
         NSString *timestampStr = notice[@"timestamp"];
 
         NSString *diagnosticMessage = [NSString stringWithFormat:@"%@: %@", noticeType, dataStr];
-        [self logMessage:diagnosticMessage withTimestamp:timestampStr];
+        [self postDiagnosticMessage:diagnosticMessage withTimestamp:timestampStr];
     }
 }
 
+- (void)logMessage:(NSString *)message {
+
+    // When tunnel-core is configured to manage diagnostics,
+    // library logMessages are sent to tunnel-core.
+    // Otherwise, they are posted to onDiagnosticMessage for
+    // the user app to manage.
+
+    if (atomic_load(&self->usingRotatingNotices) == TRUE) {
+        GoPsiNoticeUserLog(message);
+    } else {
+        NSString *timestamp = [rfc3339Formatter stringFromDate:[NSDate date]];
+        [self postDiagnosticMessage:message withTimestamp:timestamp];
+    }
+}
+
+- (void)postDiagnosticMessage:(NSString *)message withTimestamp:(NSString * _Nonnull)timestamp {
+    if ([self.tunneledAppDelegate respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
+        dispatch_sync(self->callbackQueue, ^{
+            [self.tunneledAppDelegate onDiagnosticMessage:message withTimestamp:timestamp];
+        });
+    }
+}
 
 #pragma mark - GoPsiPsiphonProvider protocol implementation (private)
 
@@ -1018,19 +1083,6 @@
     free(_state);
 
     return serverList;
-}
-
-- (void)logMessage:(NSString *)message {
-    NSString *timestamp = [rfc3339Formatter stringFromDate:[NSDate date]];
-    [self logMessage:message withTimestamp:timestamp];
-}
-
-- (void)logMessage:(NSString *)message withTimestamp:(NSString * _Nonnull)timestamp {
-    if ([self.tunneledAppDelegate respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
-        dispatch_sync(self->callbackQueue, ^{
-            [self.tunneledAppDelegate onDiagnosticMessage:message withTimestamp:timestamp];
-        });
-    }
 }
 
 - (void)changeConnectionStateTo:(PsiphonConnectionState)newState evenIfSameState:(BOOL)forceNotification {

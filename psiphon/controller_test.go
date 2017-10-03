@@ -546,7 +546,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		classification map[string]int
 	}{classification: make(map[string]int)}
 
-	SetNoticeOutput(NewNoticeReceiver(
+	SetNoticeWriter(NewNoticeReceiver(
 		func(notice []byte) {
 			// TODO: log notices without logging server IPs:
 			// fmt.Fprintf(os.Stderr, "%s\n", string(notice))
@@ -662,8 +662,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 				}
 
 			}
-		}),
-		"", "", 0, 0)
+		}))
 
 	// Run controller, which establishes tunnels
 

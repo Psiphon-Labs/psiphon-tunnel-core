@@ -756,6 +756,7 @@ func (controller *Controller) TerminateNextActiveTunnel() {
 	tunnel := controller.getNextActiveTunnel()
 	if tunnel != nil {
 		controller.SignalTunnelFailure(tunnel)
+		NoticeInfo("terminated tunnel: %s", tunnel.serverEntry.IpAddress)
 	}
 }
 
