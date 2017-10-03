@@ -401,13 +401,6 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             Psi.Start(
                     loadPsiphonConfig(mHostService.getContext(), fd),
                     embeddedServerEntries,
-
-                    "",          // Not using embedded server entry file
-                    "",          // ... or homepage notice file
-                    "",          // ... or rotating notice file
-                    0,
-                    0,
-
                     this,
                     isVpnMode(),
                     false        // Do not use IPv6 synthesizer for android
