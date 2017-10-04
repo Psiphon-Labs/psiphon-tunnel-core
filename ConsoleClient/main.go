@@ -151,7 +151,7 @@ func main() {
 		noticeWriter = psiphon.NewNoticeConsoleRewriter(noticeWriter)
 	}
 	psiphon.SetNoticeWriter(noticeWriter)
-	err = psiphon.SetNoticeFiles(
+	err := psiphon.SetNoticeFiles(
 		homepageFilename,
 		rotatingFilename,
 		rotatingFileSize,

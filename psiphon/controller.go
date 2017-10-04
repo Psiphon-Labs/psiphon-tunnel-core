@@ -645,7 +645,7 @@ loop:
 				// This is most likely to occur with TunnelPoolSize > 0. We log the
 				// event but take no action. Discarding the tunnel would break the
 				// impaired logic unless we did that (a) only if there are other
-				// unimpaired protocols; (b) only during the first interation of the
+				// unimpaired protocols; (b) only during the first iteration of the
 				// ESTABLISH_TUNNEL_WORK_TIME loop. By not discarding here, a true
 				// impaired protocol may require an extra reconnect.
 
