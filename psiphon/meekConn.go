@@ -893,9 +893,9 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			// must have received the request payload.
 			serverAcknowledgedRequestPayload = true
 
-			// sendBuffer is now no longer required for retries, ane the
+			// sendBuffer is now no longer required for retries, and the
 			// buffer may be replaced; this allows meekConn.Write() to unblock
-			// and start buffering data for the next roung trip while still
+			// and start buffering data for the next round trip while still
 			// reading the current round trip response.
 			if signaller != nil {
 				signaller.AwaitClosed()
