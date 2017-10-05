@@ -80,11 +80,10 @@ func MakeSessionId() (sessionId string, err error) {
 	return hex.EncodeToString(randomId), nil
 }
 
-// NewServerContext makes the tunnelled handshake request to the Psiphon server
+// NewServerContext makes the tunneled handshake request to the Psiphon server
 // and returns a ServerContext struct for use with subsequent Psiphon server API
 // requests (e.g., periodic connected and status requests).
-func NewServerContext(
-	tunnel *Tunnel, sessionId string, ignoreStatsRegexps bool) (*ServerContext, error) {
+func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 
 	// For legacy servers, set up psiphonHttpsClient for
 	// accessing the Psiphon API via the web service.
@@ -100,13 +99,13 @@ func NewServerContext(
 	}
 
 	serverContext := &ServerContext{
-		sessionId:          sessionId,
+		sessionId:          tunnel.sessionId,
 		tunnelNumber:       atomic.AddInt64(&nextTunnelNumber, 1),
 		tunnel:             tunnel,
 		psiphonHttpsClient: psiphonHttpsClient,
 	}
 
-	err := serverContext.doHandshakeRequest(ignoreStatsRegexps)
+	err := serverContext.doHandshakeRequest(tunnel.config.IgnoreHandshakeStatsRegexps)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}

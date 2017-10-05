@@ -46,7 +46,7 @@ type Controller struct {
 	componentFailureSignal             chan struct{}
 	shutdownBroadcast                  chan struct{}
 	runWaitGroup                       *sync.WaitGroup
-	establishedTunnels                 chan *Tunnel
+	connectedTunnels                   chan *Tunnel
 	failedTunnels                      chan *Tunnel
 	tunnelMutex                        sync.Mutex
 	establishedOnce                    bool
@@ -120,9 +120,9 @@ func NewController(config *Config) (controller *Controller, err error) {
 		componentFailureSignal: make(chan struct{}, 1),
 		shutdownBroadcast:      make(chan struct{}),
 		runWaitGroup:           new(sync.WaitGroup),
-		// establishedTunnels and failedTunnels buffer sizes are large enough to
+		// connectedTunnels and failedTunnels buffer sizes are large enough to
 		// receive full pools of tunnels without blocking. Senders should not block.
-		establishedTunnels:             make(chan *Tunnel, config.TunnelPoolSize),
+		connectedTunnels:               make(chan *Tunnel, config.TunnelPoolSize),
 		failedTunnels:                  make(chan *Tunnel, config.TunnelPoolSize),
 		tunnels:                        make([]*Tunnel, 0),
 		establishedOnce:                false,
@@ -631,15 +631,13 @@ loop:
 			// which will invoke a garbage collection.
 			failedTunnel = nil
 
-			// Concurrency note: only this goroutine may call startEstablishing/stopEstablishing
-			// and access isEstablishing.
-			if !controller.isEstablishing {
-				controller.startEstablishing()
-			}
+			// Concurrency note: only this goroutine may call startEstablishing/stopEstablishing,
+			// which reference controller.isEstablishing.
+			controller.startEstablishing()
 
-		case establishedTunnel := <-controller.establishedTunnels:
+		case connectedTunnel := <-controller.connectedTunnels:
 
-			if controller.isImpairedProtocol(establishedTunnel.protocol) {
+			if controller.isImpairedProtocol(connectedTunnel.protocol) {
 
 				// Protocol was classified as impaired while this tunnel established.
 				// This is most likely to occur with TunnelPoolSize > 0. We log the
@@ -649,25 +647,107 @@ loop:
 				// ESTABLISH_TUNNEL_WORK_TIME loop. By not discarding here, a true
 				// impaired protocol may require an extra reconnect.
 
-				NoticeAlert("established tunnel with impaired protocol: %s", establishedTunnel.protocol)
+				NoticeAlert("connected tunnel with impaired protocol: %s", connectedTunnel.protocol)
 			}
 
-			tunnelCount, registered := controller.registerTunnel(establishedTunnel)
-			if !registered {
+			// Tunnel establishment has two phases: connection and activation.
+			//
+			// Connection is run concurrently by the establishTunnelWorkers, to minimize
+			// delay when it's not yet known which server and protocol will be available
+			// and unblocked.
+			//
+			// Activation is run serially, here, to minimize the overhead of making a
+			// handshake request and starting the operateTunnel management worker for a
+			// tunnel which may be discarded.
+			//
+			// When the active tunnel will complete establishment, establishment is
+			// stopped before activation. This interrupts all connecting tunnels and
+			// garbage collects their memory. The purpose is to minimize memory
+			// pressure when the handshake request is made. In the unlikely case that the
+			// handshake fails, establishment is restarted.
+			//
+			// Any delays in stopEstablishing will delay the handshake for the last
+			// active tunnel.
+			//
+			// In the typical case of TunnelPoolSize of 1, only a single handshake is
+			// performed and the homepages notices file, when used, will not be modifed
+			// after the NoticeTunnels(1) [i.e., connected] until NoticeTunnels(0) [i.e.,
+			// disconnected]. For TunnelPoolSize > 1, serial handshakes only ensures that
+			// each set of emitted NoticeHomepages is contiguous.
+
+			active, outstanding := controller.numTunnels()
+
+			discardTunnel := (outstanding <= 0)
+			isFirstTunnel := (active == 0)
+			isLastTunnel := (outstanding == 1)
+
+			if !discardTunnel {
+
+				if isLastTunnel {
+					controller.stopEstablishing()
+				}
+
+				// Call connectedTunnel.Activate in a goroutine, as it blocks on a network
+				// operation and would block shutdown. If the shutdown signal is received,
+				// discard the tunnel, which will interrupt the handshake request that may
+				// be blocking Activate.
+
+				activatedTunnelResult := make(chan error)
+
+				go func() {
+					activatedTunnelResult <- connectedTunnel.Activate(controller)
+				}()
+
+				var err error
+				select {
+				case err = <-activatedTunnelResult:
+				case <-controller.shutdownBroadcast:
+					controller.discardTunnel(connectedTunnel)
+					// Await the interrupted goroutine.
+					<-activatedTunnelResult
+					break loop
+				}
+
+				if err != nil {
+
+					if isLastTunnel {
+						controller.startEstablishing()
+					}
+
+					NoticeAlert("failed to activate %s: %s", connectedTunnel.serverEntry.IpAddress, err)
+					discardTunnel = true
+
+				} else {
+
+					// It's unlikely that registerTunnel will fail, since only this goroutine
+					// calls registerTunnel -- and after checking numTunnels; so failure is not
+					// expected.
+					if !controller.registerTunnel(connectedTunnel) {
+						NoticeAlert("failed to register %s: %s", connectedTunnel.serverEntry.IpAddress)
+						discardTunnel = true
+					}
+				}
+			}
+
+			if discardTunnel {
 				// Already fully established, so discard.
-				controller.discardTunnel(establishedTunnel)
+				controller.discardTunnel(connectedTunnel)
 
 				// Clear the reference to this discarded tunnel and immediately run
 				// a garbage collection to reclaim its memory.
-				establishedTunnel = nil
+				connectedTunnel = nil
 				aggressiveGarbageCollection()
 
+				// Skip the rest of this case
 				break
 			}
 
-			NoticeActiveTunnel(establishedTunnel.serverEntry.IpAddress, establishedTunnel.protocol, establishedTunnel.serverEntry.SupportsSSHAPIRequests())
+			NoticeActiveTunnel(
+				connectedTunnel.serverEntry.IpAddress,
+				connectedTunnel.protocol,
+				connectedTunnel.serverEntry.SupportsSSHAPIRequests())
 
-			if tunnelCount == 1 {
+			if isFirstTunnel {
 
 				// The split tunnel classifier is started once the first tunnel is
 				// established. This first tunnel is passed in to be used to make
@@ -680,7 +760,7 @@ loop:
 				// change, and so all tunnels will fail and be re-established. Under
 				// that assumption, the classifier will be re-Start()-ed here when
 				// the region has changed.
-				controller.splitTunnelClassifier.Start(establishedTunnel)
+				controller.splitTunnelClassifier.Start(connectedTunnel)
 
 				// Signal a connected request on each 1st tunnel establishment. For
 				// multi-tunnels, the session is connected as long as at least one
@@ -690,10 +770,10 @@ loop:
 				// If the handshake indicated that a new client version is available,
 				// trigger an upgrade download.
 				// Note: serverContext is nil when DisableApi is set
-				if establishedTunnel.serverContext != nil &&
-					establishedTunnel.serverContext.clientUpgradeVersion != "" {
+				if connectedTunnel.serverContext != nil &&
+					connectedTunnel.serverContext.clientUpgradeVersion != "" {
 
-					handshakeVersion := establishedTunnel.serverContext.clientUpgradeVersion
+					handshakeVersion := connectedTunnel.serverContext.clientUpgradeVersion
 					select {
 					case controller.signalDownloadUpgrade <- handshakeVersion:
 					default:
@@ -713,7 +793,7 @@ loop:
 			// the packet tunnel is used.
 
 			if controller.packetTunnelTransport != nil {
-				controller.packetTunnelTransport.UseTunnel(establishedTunnel)
+				controller.packetTunnelTransport.UseTunnel(connectedTunnel)
 			}
 
 			// TODO: design issue -- might not be enough server entries with region/caps to ever fill tunnel slots;
@@ -736,8 +816,8 @@ loop:
 	controller.terminateAllTunnels()
 
 	// Drain tunnel channels
-	close(controller.establishedTunnels)
-	for tunnel := range controller.establishedTunnels {
+	close(controller.connectedTunnels)
+	for tunnel := range controller.connectedTunnels {
 		controller.discardTunnel(tunnel)
 	}
 	close(controller.failedTunnels)
@@ -858,18 +938,18 @@ func (controller *Controller) discardTunnel(tunnel *Tunnel) {
 // registerTunnel adds the connected tunnel to the pool of active tunnels
 // which are candidates for port forwarding. Returns true if the pool has an
 // empty slot and false if the pool is full (caller should discard the tunnel).
-func (controller *Controller) registerTunnel(tunnel *Tunnel) (int, bool) {
+func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
 	if len(controller.tunnels) >= controller.config.TunnelPoolSize {
-		return len(controller.tunnels), false
+		return false
 	}
 	// Perform a final check just in case we've established
 	// a duplicate connection.
 	for _, activeTunnel := range controller.tunnels {
 		if activeTunnel.serverEntry.IpAddress == tunnel.serverEntry.IpAddress {
 			NoticeAlert("duplicate tunnel: %s", tunnel.serverEntry.IpAddress)
-			return len(controller.tunnels), false
+			return false
 		}
 	}
 	controller.establishedOnce = true
@@ -884,7 +964,7 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) (int, bool) {
 		PromoteServerEntry(tunnel.serverEntry.IpAddress)
 	}
 
-	return len(controller.tunnels), true
+	return true
 }
 
 // hasEstablishedOnce indicates if at least one active tunnel has
@@ -901,6 +981,17 @@ func (controller *Controller) isFullyEstablished() bool {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
 	return len(controller.tunnels) >= controller.config.TunnelPoolSize
+}
+
+// numTunnels returns the number of active and outstanding tunnels.
+// Oustanding is the number of tunnels required to fill the pool of
+// active tunnels.
+func (controller *Controller) numTunnels() (int, int) {
+	controller.tunnelMutex.Lock()
+	defer controller.tunnelMutex.Unlock()
+	active := len(controller.tunnels)
+	outstanding := controller.config.TunnelPoolSize - len(controller.tunnels)
+	return active, outstanding
 }
 
 // terminateTunnel removes a tunnel from the pool of active tunnels
@@ -1108,6 +1199,7 @@ func (controller *Controller) stopEstablishing() {
 	// Note: establishCandidateGenerator closes controller.candidateServerEntries
 	// (as it may be sending to that channel).
 	controller.establishWaitGroup.Wait()
+	NoticeInfo("stopped establishing")
 
 	controller.isEstablishing = false
 	controller.establishWaitGroup = nil
@@ -1326,12 +1418,10 @@ loop:
 
 		iterator.Reset()
 	}
-
-	NoticeInfo("stopped candidate generator")
 }
 
 // establishTunnelWorker pulls candidates from the candidate queue, establishes
-// a connection to the tunnel server, and delivers the established tunnel to a channel.
+// a connection to the tunnel server, and delivers the connected tunnel to a channel.
 func (controller *Controller) establishTunnelWorker() {
 	defer controller.establishWaitGroup.Done()
 loop:
@@ -1347,7 +1437,7 @@ loop:
 			continue
 		}
 
-		// EstablishTunnel will allocate significant memory, so first attempt to
+		// ConnectTunnel will allocate significant memory, so first attempt to
 		// reclaim as much as possible.
 		aggressiveGarbageCollection()
 
@@ -1412,15 +1502,14 @@ loop:
 			}
 			controller.concurrentEstablishTunnelsMutex.Unlock()
 
-			tunnel, err = EstablishTunnel(
+			tunnel, err = ConnectTunnel(
 				controller.config,
 				controller.untunneledDialConfig,
 				controller.sessionId,
 				controller.establishPendingConns,
 				candidateServerEntry.serverEntry,
 				selectedProtocol,
-				candidateServerEntry.adjustedEstablishStartTime,
-				controller) // TunnelOwner
+				candidateServerEntry.adjustedEstablishStartTime)
 
 			controller.concurrentEstablishTunnelsMutex.Lock()
 			if isMeek {
@@ -1464,12 +1553,12 @@ loop:
 			continue
 		}
 
-		// Deliver established tunnel.
+		// Deliver connected tunnel.
 		// Don't block. Assumes the receiver has a buffer large enough for
 		// the number of desired tunnels. If there's no room, the tunnel must
 		// not be required so it's discarded.
 		select {
-		case controller.establishedTunnels <- tunnel:
+		case controller.connectedTunnels <- tunnel:
 		default:
 			controller.discardTunnel(tunnel)
 
@@ -1485,7 +1574,6 @@ loop:
 			close(controller.serverAffinityDoneBroadcast)
 		}
 	}
-	NoticeInfo("stopped establish worker")
 }
 
 func (controller *Controller) isStopEstablishingBroadcast() bool {
