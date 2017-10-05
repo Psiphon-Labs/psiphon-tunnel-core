@@ -616,40 +616,26 @@ func NoticeClientUpgradeDownloaded(filename string) {
 
 // NoticeBytesTransferred reports how many tunneled bytes have been
 // transferred since the last NoticeBytesTransferred, for the tunnel
-// to the server at ipAddress.
+// to the server at ipAddress. This is not a diagnostic notice: the
+// user app has requested this notice with EmitBytesTransferred for
+// functionality such as traffic display; and this frequent notice
+// is not intended to be included with feedback.
 func NoticeBytesTransferred(ipAddress string, sent, received int64) {
-	if GetEmitDiagnoticNotices() {
-		singletonNoticeLogger.outputNotice(
-			"BytesTransferred", noticeIsDiagnostic,
-			"ipAddress", ipAddress,
-			"sent", sent,
-			"received", received)
-	} else {
-		// This case keeps the EmitBytesTransferred and EmitDiagnosticNotices config options independent
-		singletonNoticeLogger.outputNotice(
-			"BytesTransferred", 0,
-			"sent", sent,
-			"received", received)
-	}
+	singletonNoticeLogger.outputNotice(
+		"BytesTransferred", 0,
+		"sent", sent,
+		"received", received)
 }
 
 // NoticeTotalBytesTransferred reports how many tunneled bytes have been
 // transferred in total up to this point, for the tunnel to the server
-// at ipAddress.
+// at ipAddress. This is a diagnostic notice.
 func NoticeTotalBytesTransferred(ipAddress string, sent, received int64) {
-	if GetEmitDiagnoticNotices() {
-		singletonNoticeLogger.outputNotice(
-			"TotalBytesTransferred", noticeIsDiagnostic,
-			"ipAddress", ipAddress,
-			"sent", sent,
-			"received", received)
-	} else {
-		// This case keeps the EmitBytesTransferred and EmitDiagnosticNotices config options independent
-		singletonNoticeLogger.outputNotice(
-			"TotalBytesTransferred", 0,
-			"sent", sent,
-			"received", received)
-	}
+	singletonNoticeLogger.outputNotice(
+		"TotalBytesTransferred", noticeIsDiagnostic,
+		"ipAddress", ipAddress,
+		"sent", sent,
+		"received", received)
 }
 
 // NoticeLocalProxyError reports a local proxy error message. Repetitive

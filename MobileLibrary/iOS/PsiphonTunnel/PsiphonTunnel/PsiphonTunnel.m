@@ -582,8 +582,6 @@
     
     config[@"ClientPlatform"] = clientPlatform;
         
-    config[@"EmitBytesTransferred"] = [NSNumber numberWithBool:TRUE];
-
     config[@"DeviceRegion"] = [PsiphonTunnel getDeviceRegion];
     
     config[@"UseIndistinguishableTLS"] = [NSNumber numberWithBool:TRUE];
