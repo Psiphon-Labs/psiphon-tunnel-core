@@ -709,16 +709,9 @@ loop:
 				}
 
 				if err != nil {
-
-					if isLastTunnel {
-						controller.startEstablishing()
-					}
-
 					NoticeAlert("failed to activate %s: %s", connectedTunnel.serverEntry.IpAddress, err)
 					discardTunnel = true
-
 				} else {
-
 					// It's unlikely that registerTunnel will fail, since only this goroutine
 					// calls registerTunnel -- and after checking numTunnels; so failure is not
 					// expected.
@@ -727,6 +720,12 @@ loop:
 						discardTunnel = true
 					}
 				}
+
+				// May need to replace this tunnel
+				if isLastTunnel && discardTunnel {
+					controller.startEstablishing()
+				}
+
 			}
 
 			if discardTunnel {
