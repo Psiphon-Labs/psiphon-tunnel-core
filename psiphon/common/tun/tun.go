@@ -136,9 +136,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	// TODO: use stdlib in Go 1.9
-	"golang.org/x/sync/syncmap"
-
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
@@ -250,8 +247,8 @@ type ServerConfig struct {
 type Server struct {
 	config              *ServerConfig
 	device              *Device
-	indexToSession      syncmap.Map
-	sessionIDToIndex    syncmap.Map
+	indexToSession      sync.Map
+	sessionIDToIndex    sync.Map
 	connectedInProgress *sync.WaitGroup
 	workers             *sync.WaitGroup
 	runContext          context.Context
@@ -965,7 +962,7 @@ type session struct {
 	checkAllowedUDPPortFunc  AllowedPortChecker
 	flowActivityUpdaterMaker FlowActivityUpdaterMaker
 	downstreamPackets        *PacketQueue
-	flows                    syncmap.Map
+	flows                    sync.Map
 	workers                  *sync.WaitGroup
 	mutex                    sync.Mutex
 	channel                  *Channel
