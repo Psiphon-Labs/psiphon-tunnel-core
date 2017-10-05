@@ -274,6 +274,8 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
 /*!
  Called to report how many bytes have been transferred since the last time
  this function was called.
+ By default onBytesTransferred is disabled. Enable it by setting
+ EmitBytesTransferred to true in the Psiphon config.
  @param sent  The number of bytes sent.
  @param received  The number of bytes received.
  Swift: @code func onBytesTransferred(_ sent: Int64, _ received: Int64) @endcode
