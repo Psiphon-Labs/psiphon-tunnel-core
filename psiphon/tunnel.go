@@ -205,8 +205,14 @@ func (tunnel *Tunnel) Activate(tunnelOwner TunnelOwner) error {
 
 	tunnel.mutex.Lock()
 
-	tunnel.isActivated = true
+	// It may happen that the tunnel gets closed while Activate is running.
+	// In this case, abort here, to ensure that the operateTunnel goroutine
+	// will not be launched after Close is called.
+	if tunnel.isClosed {
+		return common.ContextError(errors.New("tunnel is closed"))
+	}
 
+	tunnel.isActivated = true
 	tunnel.serverContext = serverContext
 
 	// establishDuration is the elapsed time between the controller starting tunnel
@@ -217,9 +223,7 @@ func (tunnel *Tunnel) Activate(tunnelOwner TunnelOwner) error {
 	//
 	// This time period may include time spent unsuccessfully connecting to other
 	// servers. Time spent waiting for network connectivity is excluded.
-	tunnel.establishDuration = monotime.Since(
-		tunnel.adjustedEstablishStartTime)
-
+	tunnel.establishDuration = monotime.Since(tunnel.adjustedEstablishStartTime)
 	tunnel.establishedTime = monotime.Now()
 
 	// Spawn the operateTunnel goroutine, which monitors the tunnel and handles periodic
