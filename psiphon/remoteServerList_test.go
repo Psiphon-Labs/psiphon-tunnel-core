@@ -362,7 +362,7 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 
 	tunnelEstablished := make(chan struct{}, 1)
 
-	SetNoticeOutput(NewNoticeReceiver(
+	SetNoticeWriter(NewNoticeReceiver(
 		func(notice []byte) {
 
 			noticeType, payload, err := GetNotice(notice)

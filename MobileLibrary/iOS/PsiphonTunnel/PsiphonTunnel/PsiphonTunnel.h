@@ -124,7 +124,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  */
 - (NSString * _Nullable)getEmbeddedServerEntries;
 
-
 //
 // Optional delegate methods. Note that some of these are probably necessary for
 // for a functioning app to implement, for example `onConnected`.
@@ -134,9 +133,21 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 /*!
   Called when the tunnel is starting to get the initial server entries (typically embedded in the app) that will be used to bootstrap the Psiphon tunnel connection. This value is in a particular format and will be supplied by Psiphon Inc.
   If this method is implemented, it takes precedence over getEmbeddedServerEntries, and getEmbeddedServerEntries will not be called unless this method returns NULL or an empty string.
-  @return Optional path where embedded server entries file is located. This file should be accessible by the Network Extension.
+  @return Optional path where embedded server entries file is located. This file should be readable by the library.
  */
 - (NSString * _Nullable)getEmbeddedServerEntriesPath;
+
+/*!
+  Called when the tunnel is starting. If this method is implemented, it should return the path where a homepage
+  notices file is to be written. This path should be writable by the library.
+ */
+- (NSString * _Nullable)getHomepageNoticesPath;
+
+/*!
+  Called when the tunnel is starting. If this method is implemented, it should return the path where a rotating
+  notice file set is to be written. path file should be writable by the library.
+ */
+- (NSString * _Nullable)getRotatingNoticesPath;
 
 /*!
  Gets runtime errors info that may be useful for debugging.
@@ -263,6 +274,8 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
 /*!
  Called to report how many bytes have been transferred since the last time
  this function was called.
+ By default onBytesTransferred is disabled. Enable it by setting
+ EmitBytesTransferred to true in the Psiphon config.
  @param sent  The number of bytes sent.
  @param received  The number of bytes received.
  Swift: @code func onBytesTransferred(_ sent: Int64, _ received: Int64) @endcode

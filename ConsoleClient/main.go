@@ -84,6 +84,21 @@ func main() {
 		flag.StringVar(&tunSecondaryDNS, "tunSecondaryDNS", "8.8.4.4", "secondary DNS resolver for bypass")
 	}
 
+	var noticeFilename string
+	flag.StringVar(&noticeFilename, "notices", "", "notices output file (defaults to stderr)")
+
+	var homepageFilename string
+	flag.StringVar(&homepageFilename, "homepages", "", "homepages notices output file")
+
+	var rotatingFilename string
+	flag.StringVar(&rotatingFilename, "rotating", "", "rotating notices output file")
+
+	var rotatingFileSize int
+	flag.IntVar(&rotatingFileSize, "rotatingFileSize", 1<<20, "rotating notices file size")
+
+	var rotatingSyncFrequency int
+	flag.IntVar(&rotatingSyncFrequency, "rotatingSyncFrequency", 100, "rotating notices file sync frequency")
+
 	flag.Parse()
 
 	if versionDetails {
@@ -117,14 +132,34 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Initialize default Notice output (stderr)
+	// Initialize notice output
 
 	var noticeWriter io.Writer
 	noticeWriter = os.Stderr
+
+	if noticeFilename != "" {
+		noticeFile, err := os.OpenFile(noticeFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			fmt.Printf("error opening notice file: %s\n", err)
+			os.Exit(1)
+		}
+		defer noticeFile.Close()
+		noticeWriter = noticeFile
+	}
+
 	if formatNotices {
 		noticeWriter = psiphon.NewNoticeConsoleRewriter(noticeWriter)
 	}
-	psiphon.SetNoticeOutput(noticeWriter)
+	psiphon.SetNoticeWriter(noticeWriter)
+	err := psiphon.SetNoticeFiles(
+		homepageFilename,
+		rotatingFilename,
+		rotatingFileSize,
+		rotatingSyncFrequency)
+	if err != nil {
+		fmt.Printf("error initializing notice files: %s\n", err)
+		os.Exit(1)
+	}
 
 	psiphon.NoticeBuildInfo()
 
@@ -146,23 +181,6 @@ func main() {
 		psiphon.SetEmitDiagnosticNotices(true)
 		psiphon.NoticeError("error processing configuration file: %s", err)
 		os.Exit(1)
-	}
-
-	// When a logfile is configured, reinitialize Notice output
-
-	if config.LogFilename != "" {
-		logFile, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-		if err != nil {
-			psiphon.NoticeError("error opening log file: %s", err)
-			os.Exit(1)
-		}
-		defer logFile.Close()
-		var noticeWriter io.Writer
-		noticeWriter = logFile
-		if formatNotices {
-			noticeWriter = psiphon.NewNoticeConsoleRewriter(noticeWriter)
-		}
-		psiphon.SetNoticeOutput(noticeWriter)
 	}
 
 	// Handle optional profiling parameter

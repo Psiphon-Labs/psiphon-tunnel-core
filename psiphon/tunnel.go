@@ -71,8 +71,10 @@ type Tunnel struct {
 	mutex                        *sync.Mutex
 	config                       *Config
 	untunneledDialConfig         *DialConfig
+	isActivated                  bool
 	isDiscarded                  bool
 	isClosed                     bool
+	sessionId                    string
 	serverEntry                  *protocol.ServerEntry
 	serverContext                *ServerContext
 	protocol                     string
@@ -83,6 +85,7 @@ type Tunnel struct {
 	shutdownOperateBroadcast     chan struct{}
 	signalPortForwardFailure     chan struct{}
 	totalPortForwardFailures     int
+	adjustedEstablishStartTime   monotime.Time
 	establishDuration            time.Duration
 	establishedTime              monotime.Time
 	dialStats                    *TunnelDialStats
@@ -111,7 +114,7 @@ type TunnelDialStats struct {
 	TLSProfile                     string
 }
 
-// EstablishTunnel first makes a network transport connection to the
+// ConnectTunnel first makes a network transport connection to the
 // Psiphon server and then establishes an SSH client session on top of
 // that transport. The SSH server is authenticated using the public
 // key in the server entry.
@@ -121,15 +124,25 @@ type TunnelDialStats struct {
 // When requiredProtocol is not blank, that protocol is used. Otherwise,
 // the a random supported protocol is used.
 // untunneledDialConfig is used for untunneled final status requests.
-func EstablishTunnel(
+//
+// Call Activate on a connected tunnel to complete its establishment
+// before using.
+//
+// Tunnel establishment is split into two phases: connection, and
+// activation. The Controller will run many ConnectTunnel calls
+// concurrently and then, to avoid unnecessary overhead from making
+// handshake requests and starting operateTunnel from tunnels which
+// may be discarded, call Activate on connected tunnels sequentially
+// as necessary.
+//
+func ConnectTunnel(
 	config *Config,
 	untunneledDialConfig *DialConfig,
 	sessionId string,
 	pendingConns *common.Conns,
 	serverEntry *protocol.ServerEntry,
 	selectedProtocol string,
-	adjustedEstablishStartTime monotime.Time,
-	tunnelOwner TunnelOwner) (tunnel *Tunnel, err error) {
+	adjustedEstablishStartTime monotime.Time) (*Tunnel, error) {
 
 	if !serverEntry.SupportsProtocol(selectedProtocol) {
 		return nil, common.ContextError(fmt.Errorf("server does not support selected protocol"))
@@ -143,21 +156,15 @@ func EstablishTunnel(
 		return nil, common.ContextError(err)
 	}
 
-	// Cleanup on error
-	defer func() {
-		if err != nil {
-			dialResult.sshClient.Close()
-			dialResult.monitoredConn.Close()
-			pendingConns.Remove(dialResult.dialConn)
-		}
-	}()
+	// Now that connection dials are complete, cancel interruptibility
+	pendingConns.Remove(dialResult.dialConn)
 
 	// The tunnel is now connected
-	tunnel = &Tunnel{
+	return &Tunnel{
 		mutex:                    new(sync.Mutex),
 		config:                   config,
 		untunneledDialConfig:     untunneledDialConfig,
-		isClosed:                 false,
+		sessionId:                sessionId,
 		serverEntry:              serverEntry,
 		protocol:                 selectedProtocol,
 		conn:                     dialResult.monitoredConn,
@@ -167,26 +174,40 @@ func EstablishTunnel(
 		shutdownOperateBroadcast: make(chan struct{}),
 		// A buffer allows at least one signal to be sent even when the receiver is
 		// not listening. Senders should not block.
-		signalPortForwardFailure: make(chan struct{}, 1),
-		dialStats:                dialResult.dialStats,
+		signalPortForwardFailure:   make(chan struct{}, 1),
+		adjustedEstablishStartTime: adjustedEstablishStartTime,
+		dialStats:                  dialResult.dialStats,
 		// Buffer allows SetClientVerificationPayload to submit one new payload
 		// without blocking or dropping it.
 		newClientVerificationPayload: make(chan string, 1),
-	}
+	}, nil
+}
+
+// Activate completes the tunnel establishment, performing the handshake
+// request and starting operateTunnel, the worker that monitors the tunnel
+// and handles periodic management.
+func (tunnel *Tunnel) Activate(tunnelOwner TunnelOwner) error {
 
 	// Create a new Psiphon API server context for this tunnel. This includes
-	// performing a handshake request. If the handshake fails, this establishment
+	// performing a handshake request. If the handshake fails, this activation
 	// fails.
-	if !config.DisableApi {
+	var serverContext *ServerContext
+	if !tunnel.config.DisableApi {
 		NoticeInfo("starting server context for %s", tunnel.serverEntry.IpAddress)
-		tunnel.serverContext, err = NewServerContext(
-			tunnel, sessionId, config.IgnoreHandshakeStatsRegexps)
+		var err error
+		serverContext, err = NewServerContext(tunnel)
 		if err != nil {
-			return nil, common.ContextError(
+			return common.ContextError(
 				fmt.Errorf("error starting server context for %s: %s",
 					tunnel.serverEntry.IpAddress, err))
 		}
 	}
+
+	tunnel.mutex.Lock()
+
+	tunnel.isActivated = true
+
+	tunnel.serverContext = serverContext
 
 	// establishDuration is the elapsed time between the controller starting tunnel
 	// establishment and this tunnel being established. The reported value represents
@@ -196,18 +217,19 @@ func EstablishTunnel(
 	//
 	// This time period may include time spent unsuccessfully connecting to other
 	// servers. Time spent waiting for network connectivity is excluded.
-	tunnel.establishDuration = monotime.Since(adjustedEstablishStartTime)
+	tunnel.establishDuration = monotime.Since(
+		tunnel.adjustedEstablishStartTime)
 
 	tunnel.establishedTime = monotime.Now()
 
-	// Now that network operations are complete, cancel interruptibility
-	pendingConns.Remove(dialResult.dialConn)
-
-	// Spawn the operateTunnel goroutine, which monitors the tunnel and handles periodic stats updates.
+	// Spawn the operateTunnel goroutine, which monitors the tunnel and handles periodic
+	// stats updates.
 	tunnel.operateWaitGroup.Add(1)
 	go tunnel.operateTunnel(tunnelOwner)
 
-	return tunnel, nil
+	tunnel.mutex.Unlock()
+
+	return nil
 }
 
 // Close stops operating the tunnel and closes the underlying connection.
@@ -218,6 +240,7 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 
 	tunnel.mutex.Lock()
 	tunnel.isDiscarded = isDiscarded
+	isActivated := tunnel.isActivated
 	isClosed := tunnel.isClosed
 	tunnel.isClosed = true
 	tunnel.mutex.Unlock()
@@ -231,10 +254,12 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 		// In effect, the TUNNEL_OPERATE_SHUTDOWN_TIMEOUT value will take
 		// precedence over the PSIPHON_API_SERVER_TIMEOUT http.Client.Timeout
 		// value set in makePsiphonHttpsClient.
-		timer := time.AfterFunc(TUNNEL_OPERATE_SHUTDOWN_TIMEOUT, func() { tunnel.conn.Close() })
-		close(tunnel.shutdownOperateBroadcast)
-		tunnel.operateWaitGroup.Wait()
-		timer.Stop()
+		if isActivated {
+			timer := time.AfterFunc(TUNNEL_OPERATE_SHUTDOWN_TIMEOUT, func() { tunnel.conn.Close() })
+			close(tunnel.shutdownOperateBroadcast)
+			tunnel.operateWaitGroup.Wait()
+			timer.Stop()
+		}
 		tunnel.sshClient.Close()
 		// tunnel.conn.Close() may get called multiple times, which is allowed.
 		tunnel.conn.Close()
@@ -244,6 +269,13 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 			NoticeAlert("close tunnel ssh error: %s", err)
 		}
 	}
+}
+
+// IsActivated returns the tunnel's activated flag.
+func (tunnel *Tunnel) IsActivated() bool {
+	tunnel.mutex.Lock()
+	defer tunnel.mutex.Unlock()
+	return tunnel.isActivated
 }
 
 // IsDiscarded returns the tunnel's discarded flag.
@@ -278,6 +310,10 @@ func (tunnel *Tunnel) SendAPIRequest(
 // This Dial doesn't support split tunnel, so alwaysTunnel is not referenced
 func (tunnel *Tunnel) Dial(
 	remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error) {
+
+	if !tunnel.IsActivated() {
+		return nil, common.ContextError(errors.New("tunnel is not activated"))
+	}
 
 	type tunnelDialResult struct {
 		sshPortForwardConn net.Conn
@@ -314,6 +350,9 @@ func (tunnel *Tunnel) Dial(
 
 func (tunnel *Tunnel) DialPacketTunnelChannel() (net.Conn, error) {
 
+	if !tunnel.IsActivated() {
+		return nil, common.ContextError(errors.New("tunnel is not activated"))
+	}
 	channel, requests, err := tunnel.sshClient.OpenChannel(
 		protocol.PACKET_TUNNEL_CHANNEL_TYPE, nil)
 	if err != nil {
