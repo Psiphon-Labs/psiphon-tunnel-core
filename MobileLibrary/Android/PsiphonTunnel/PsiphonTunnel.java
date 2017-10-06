@@ -324,10 +324,11 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
 
     @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
     @Override
-    public void BindToDevice(long fileDescriptor) throws Exception {
+    public String BindToDevice(long fileDescriptor) throws Exception {
         if (!((VpnService)mHostService.getVpnService()).protect((int)fileDescriptor)) {
             throw new Exception("protect socket failed");
         }
+        return "";
     }
 
     @Override
@@ -401,6 +402,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             Psi.Start(
                     loadPsiphonConfig(mHostService.getContext(), fd),
                     embeddedServerEntries,
+                    "",
                     this,
                     isVpnMode(),
                     false        // Do not use IPv6 synthesizer for android
