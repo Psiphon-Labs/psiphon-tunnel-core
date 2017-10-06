@@ -464,7 +464,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	verificationRequired := make(chan struct{}, 1)
 	verificationCompleted := make(chan struct{}, 1)
 
-	psiphon.SetNoticeOutput(psiphon.NewNoticeReceiver(
+	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 
 			//fmt.Printf("%s\n", string(notice))

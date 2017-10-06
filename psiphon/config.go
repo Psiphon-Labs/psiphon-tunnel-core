@@ -91,9 +91,6 @@ const (
 // Config is the Psiphon configuration specified by the application. This
 // configuration controls the behavior of the core tunnel functionality.
 type Config struct {
-	// LogFilename specifies a file to receive event notices (JSON format)
-	// By default, notices are emitted to stdout.
-	LogFilename string
 
 	// DataStoreDirectory is the directory in which to store the persistent
 	// database, which contains information such as server entries.

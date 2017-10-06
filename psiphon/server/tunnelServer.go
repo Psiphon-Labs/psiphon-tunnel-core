@@ -382,6 +382,11 @@ func (sshServer *sshServer) runListener(
 			protocol.TunnelProtocolUsesObfuscatedSessionTickets(listenerTunnelProtocol),
 			handleClient,
 			sshServer.shutdownBroadcast)
+
+		if err == nil {
+			err = meekServer.Run()
+		}
+
 		if err != nil {
 			select {
 			case listenerError <- common.ContextError(err):
@@ -389,8 +394,6 @@ func (sshServer *sshServer) runListener(
 			}
 			return
 		}
-
-		meekServer.Run()
 
 	} else {
 
