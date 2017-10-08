@@ -186,7 +186,9 @@ func ConnectTunnel(
 // Activate completes the tunnel establishment, performing the handshake
 // request and starting operateTunnel, the worker that monitors the tunnel
 // and handles periodic management.
-func (tunnel *Tunnel) Activate(tunnelOwner TunnelOwner) error {
+func (tunnel *Tunnel) Activate(
+	tunnelOwner TunnelOwner,
+	shutdownBroadcast chan struct{}) error {
 
 	// Create a new Psiphon API server context for this tunnel. This includes
 	// performing a handshake request. If the handshake fails, this activation
@@ -194,13 +196,71 @@ func (tunnel *Tunnel) Activate(tunnelOwner TunnelOwner) error {
 	var serverContext *ServerContext
 	if !tunnel.config.DisableApi {
 		NoticeInfo("starting server context for %s", tunnel.serverEntry.IpAddress)
-		var err error
-		serverContext, err = NewServerContext(tunnel)
-		if err != nil {
+
+		// Call NewServerContext in a goroutine, as it blocks on a network operation,
+		// the handshake request, and would block shutdown. If the shutdown signal is
+		// received, close the tunnel, which will interrupt the handshake request
+		// that may be blocking NewServerContext.
+		//
+		// Timeout after PsiphonApiServerTimeoutSeconds. NewServerContext may not
+		// return if the tunnel network connection is unstable during the handshake
+		// request. At this point, there is no operateTunnel monitor that will detect
+		// this condition with SSH keep alives.
+
+		type newServerContextResult struct {
+			serverContext *ServerContext
+			err           error
+		}
+
+		resultChannel := make(chan newServerContextResult)
+
+		go func() {
+			serverContext, err := NewServerContext(tunnel)
+			resultChannel <- newServerContextResult{
+				serverContext: serverContext,
+				err:           err,
+			}
+		}()
+
+		var result newServerContextResult
+
+		if *tunnel.config.PsiphonApiServerTimeoutSeconds > 0 {
+
+			timer := time.NewTimer(
+				time.Second *
+					time.Duration(
+						*tunnel.config.PsiphonApiServerTimeoutSeconds))
+
+			select {
+			case result = <-resultChannel:
+			case <-timer.C:
+				result.err = errors.New("timed out")
+				// Interrupt the Activate goroutine and await its completion.
+				tunnel.Close(true)
+				<-resultChannel
+			case <-shutdownBroadcast:
+				result.err = errors.New("shutdown")
+				tunnel.Close(true)
+				<-resultChannel
+			}
+		} else {
+
+			select {
+			case result = <-resultChannel:
+			case <-shutdownBroadcast:
+				result.err = errors.New("shutdown")
+				tunnel.Close(true)
+				<-resultChannel
+			}
+		}
+
+		if result.err != nil {
 			return common.ContextError(
 				fmt.Errorf("error starting server context for %s: %s",
-					tunnel.serverEntry.IpAddress, err))
+					tunnel.serverEntry.IpAddress, result.err))
 		}
+
+		serverContext = result.serverContext
 	}
 
 	tunnel.mutex.Lock()
