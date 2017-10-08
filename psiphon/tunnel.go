@@ -202,12 +202,10 @@ func (tunnel *Tunnel) Activate(
 		// received, close the tunnel, which will interrupt the handshake request
 		// that may be blocking NewServerContext.
 		//
-		// Timeout after SshKeepAliveProbeTimeoutSeconds. NewServerContext may not
+		// Timeout after PsiphonApiServerTimeoutSeconds. NewServerContext may not
 		// return if the tunnel network connection is unstable during the handshake
 		// request. At this point, there is no operateTunnel monitor that will detect
-		// this condition with SSH keep alives. SshKeepAliveProbeTimeoutSeconds is
-		// used as the timeout deadline as it represents the time after which we wish
-		// to restart establishing when a tunnel has died.
+		// this condition with SSH keep alives.
 
 		type newServerContextResult struct {
 			serverContext *ServerContext
@@ -226,12 +224,12 @@ func (tunnel *Tunnel) Activate(
 
 		var result newServerContextResult
 
-		if *tunnel.config.TunnelSshKeepAliveProbeTimeoutSeconds > 0 {
+		if *tunnel.config.PsiphonApiServerTimeoutSeconds > 0 {
 
 			timer := time.NewTimer(
 				time.Second *
 					time.Duration(
-						*tunnel.config.TunnelSshKeepAliveProbeTimeoutSeconds))
+						*tunnel.config.PsiphonApiServerTimeoutSeconds))
 
 			select {
 			case result = <-resultChannel:
