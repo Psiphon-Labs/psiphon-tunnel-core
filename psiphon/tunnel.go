@@ -224,23 +224,36 @@ func (tunnel *Tunnel) Activate(
 			}
 		}()
 
-		timer := time.NewTimer(
-			time.Second *
-				time.Duration(
-					*tunnel.config.TunnelSshKeepAliveProbeTimeoutSeconds))
-
 		var result newServerContextResult
-		select {
-		case result = <-resultChannel:
-		case <-timer.C:
-			result.err = errors.New("timed out")
-			// Interrupt the Activate goroutine and await its completion.
-			tunnel.Close(true)
-			<-resultChannel
-		case <-shutdownBroadcast:
-			result.err = errors.New("shutdown")
-			tunnel.Close(true)
-			<-resultChannel
+
+		if *tunnel.config.TunnelSshKeepAliveProbeTimeoutSeconds > 0 {
+
+			timer := time.NewTimer(
+				time.Second *
+					time.Duration(
+						*tunnel.config.TunnelSshKeepAliveProbeTimeoutSeconds))
+
+			select {
+			case result = <-resultChannel:
+			case <-timer.C:
+				result.err = errors.New("timed out")
+				// Interrupt the Activate goroutine and await its completion.
+				tunnel.Close(true)
+				<-resultChannel
+			case <-shutdownBroadcast:
+				result.err = errors.New("shutdown")
+				tunnel.Close(true)
+				<-resultChannel
+			}
+		} else {
+
+			select {
+			case result = <-resultChannel:
+			case <-shutdownBroadcast:
+				result.err = errors.New("shutdown")
+				tunnel.Close(true)
+				<-resultChannel
+			}
 		}
 
 		if result.err != nil {
