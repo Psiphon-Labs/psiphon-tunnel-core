@@ -677,6 +677,8 @@ loop:
 
 			active, outstanding := controller.numTunnels()
 
+			// discardTunnel will be true here when already fully established.
+
 			discardTunnel := (outstanding <= 0)
 			isFirstTunnel := (active == 0)
 			isLastTunnel := (outstanding == 1)
@@ -687,26 +689,7 @@ loop:
 					controller.stopEstablishing()
 				}
 
-				// Call connectedTunnel.Activate in a goroutine, as it blocks on a network
-				// operation and would block shutdown. If the shutdown signal is received,
-				// discard the tunnel, which will interrupt the handshake request that may
-				// be blocking Activate.
-
-				activatedTunnelResult := make(chan error)
-
-				go func() {
-					activatedTunnelResult <- connectedTunnel.Activate(controller)
-				}()
-
-				var err error
-				select {
-				case err = <-activatedTunnelResult:
-				case <-controller.shutdownBroadcast:
-					controller.discardTunnel(connectedTunnel)
-					// Await the interrupted goroutine.
-					<-activatedTunnelResult
-					break loop
-				}
+				err := connectedTunnel.Activate(controller, controller.shutdownBroadcast)
 
 				if err != nil {
 					NoticeAlert("failed to activate %s: %s", connectedTunnel.serverEntry.IpAddress, err)
@@ -729,7 +712,6 @@ loop:
 			}
 
 			if discardTunnel {
-				// Already fully established, so discard.
 				controller.discardTunnel(connectedTunnel)
 
 				// Clear the reference to this discarded tunnel and immediately run
