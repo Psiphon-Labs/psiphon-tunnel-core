@@ -692,6 +692,13 @@ loop:
 				err := connectedTunnel.Activate(controller, controller.shutdownBroadcast)
 
 				if err != nil {
+
+					// Assume the Activate failed due to a broken tunnel connection,
+					// currently the most likely case, and classify as impaired, as in
+					// the failed tunnel case above.
+					// TODO: distinguish between network and other errors
+					controller.classifyImpairedProtocol(connectedTunnel)
+
 					NoticeAlert("failed to activate %s: %s", connectedTunnel.serverEntry.IpAddress, err)
 					discardTunnel = true
 				} else {
@@ -835,7 +842,10 @@ func (controller *Controller) TerminateNextActiveTunnel() {
 // Concurrency note: only the runTunnels() goroutine may call classifyImpairedProtocol
 func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
 
-	if failedTunnel.establishedTime.Add(IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION).After(monotime.Now()) {
+	// If the tunnel failed while activating, its establishedTime will be 0.
+
+	if failedTunnel.establishedTime == 0 ||
+		failedTunnel.establishedTime.Add(IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION).After(monotime.Now()) {
 		controller.impairedProtocolClassification[failedTunnel.protocol] += 1
 	} else {
 		controller.impairedProtocolClassification[failedTunnel.protocol] = 0
