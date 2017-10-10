@@ -38,27 +38,9 @@ func (zeroSource) Read(b []byte) (n int, err error) {
 var testConfig *Config
 
 func allCipherSuites() []uint16 {
-
-	// [Psiphon]
-	// Ignore cipher suites added for EmulateChrome.
-
-	//ids := make([]uint16, len(cipherSuites))
-	//for i, suite := range cipherSuites {
-	//	ids[i] = suite.id
-	//}
-
-	ids := make([]uint16, 0)
-	for _, suite := range cipherSuites {
-		ignore := false
-		for _, ignoreSuiteID := range ignoreCipherSuites {
-			if ignoreSuiteID == suite.id {
-				ignore = true
-				break
-			}
-		}
-		if !ignore {
-			ids = append(ids, suite.id)
-		}
+	ids := make([]uint16, len(cipherSuites))
+	for i, suite := range cipherSuites {
+		ids[i] = suite.id
 	}
 
 	return ids
