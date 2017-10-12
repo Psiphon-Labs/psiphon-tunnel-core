@@ -910,13 +910,34 @@
     
     unsigned int interfaceIndex = if_nametoindex([activeInterface UTF8String]);
     if (interfaceIndex == 0) {
-        *error = [[NSError alloc] initWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: if_nametoindex failed"}];
+        *error = [[NSError alloc] initWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"bindToDevice: if_nametoindex failed: %d", errno]}];
         return @"";
     }
-    
-    int ret = setsockopt((int)fileDescriptor, IPPROTO_IP, IP_BOUND_IF, &interfaceIndex, sizeof(interfaceIndex));
+
+    struct sockaddr sa;
+    socklen_t len = sizeof(sa);
+    int ret = getsockname((int)fileDescriptor, &sa, &len);
     if (ret != 0) {
-        *error = [[NSError alloc] initWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: setsockopt failed"}];
+        *error = [[NSError alloc] initWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"bindToDevice: getsockname failed: %d", errno]}];
+        return @"";
+    }
+
+    int level = 0;
+    int optname = 0;
+    if (sa.sa_family == PF_INET) {
+        level = IPPROTO_IP;
+        optname = IP_BOUND_IF;
+    } else if (sa.sa_family == PF_INET6) {
+        level = IPPROTO_IPV6;
+        optname = IPV6_BOUND_IF;
+    } else {
+        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"bindToDevice: unsupported domain: %d", (int)sa.sa_family]}];
+        return @"";
+    }
+
+    ret = setsockopt((int)fileDescriptor, level, optname, &interfaceIndex, sizeof(interfaceIndex));
+    if (ret != 0) {
+        *error = [[NSError alloc] initWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"bindToDevice: setsockopt failed: %d", errno]}];
         return @"";
     }
     
