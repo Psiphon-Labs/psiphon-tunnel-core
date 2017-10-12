@@ -305,9 +305,7 @@ func TestOSL(t *testing.T) {
 
 		clientSeedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1"))
 
-		clientSeedPortForward.UpdateProgress(5, 5, 5)
-
-		clientSeedPortForward.UpdateProgress(5, 5, 5)
+		clientSeedPortForward.UpdateProgress(10, 10, 10)
 
 		if len(clientSeedState.GetSeedPayload().SLOKs) != 5 {
 			t.Fatalf("expected 5 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
