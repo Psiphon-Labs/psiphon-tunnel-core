@@ -809,6 +809,13 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		var requestBody io.ReadCloser
 		contentLength := 0
 		if !serverAcknowledgedRequestPayload && sendBuffer != nil {
+
+			// sendBuffer will be replaced once the data is no longer needed,
+			// when RoundTrip calls Close on the Body; this allows meekConn.Write()
+			// to unblock and start buffering data for the next roung trip while
+			// still reading the current round trip response. signaller provides
+			// the hook for awaiting RoundTrip's call to Close.
+
 			signaller = NewReadCloseSignaller(bytes.NewReader(sendBuffer.Bytes()))
 			requestBody = signaller
 			contentLength = sendBuffer.Len()
@@ -850,12 +857,16 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			request.Header.Set("Range", fmt.Sprintf("bytes=%d-", receivedPayloadSize))
 		}
 
-		// sendBuffer will be replaced once the data is no longer needed,
-		// when RoundTrip calls Close on the Body; this allows meekConn.Write()
-		// to unblock and start buffering data for the next roung trip while
-		// still reading the current round trip response.
-
 		response, err := meek.transport.RoundTrip(request)
+
+		// Wait for RoundTrip to call Close on the request body, when
+		// there is one. This is necessary to ensure it's safe to
+		// subsequently replace sendBuffer in both the success and
+		// error cases.
+		if signaller != nil {
+			signaller.AwaitClosed()
+		}
+
 		if err != nil {
 			select {
 			case <-meek.runContext.Done():
@@ -897,8 +908,9 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			// buffer may be replaced; this allows meekConn.Write() to unblock
 			// and start buffering data for the next round trip while still
 			// reading the current round trip response.
-			if signaller != nil {
-				signaller.AwaitClosed()
+			if sendBuffer != nil {
+				// Assumes signaller.AwaitClosed is called above, so
+				// sendBuffer will no longer be accessed by RoundTrip.
 				sendBuffer.Truncate(0)
 				meek.replaceSendBuffer(sendBuffer)
 				sendBuffer = nil
