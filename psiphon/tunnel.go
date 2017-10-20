@@ -831,6 +831,9 @@ func dialSsh(
 
 	if upstreamProxyType != "" {
 		dialStats.UpstreamProxyType = upstreamProxyType
+	}
+
+	if len(dialConfig.CustomHeaders) > 0 {
 		dialStats.UpstreamProxyCustomHeaderNames = make([]string, 0)
 		for name := range dialConfig.CustomHeaders {
 			if selectedUserAgent && name == "User-Agent" {
