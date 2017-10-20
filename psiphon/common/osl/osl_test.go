@@ -82,7 +82,7 @@ func TestOSL(t *testing.T) {
 
       "SeedSpecThreshold" : 2,
 
-      "SeedPeriodNanoseconds" : 1000000,
+      "SeedPeriodNanoseconds" : 5000000,
 
       "SeedPeriodKeySplits": [
         {
@@ -142,7 +142,7 @@ func TestOSL(t *testing.T) {
 
       "SeedSpecThreshold" : 2,
 
-      "SeedPeriodNanoseconds" : 1000000,
+      "SeedPeriodNanoseconds" : 5000000,
 
       "SeedPeriodKeySplits": [
         {
@@ -154,14 +154,15 @@ func TestOSL(t *testing.T) {
   ]
 }
 `
+	seedPeriod := 5 * time.Millisecond // "SeedPeriodNanoseconds" : 5000000
 	now := time.Now().UTC()
-	epoch := now.Truncate(1 * time.Millisecond)
+	epoch := now.Add(-seedPeriod).Truncate(seedPeriod)
 	epochStr := epoch.Format(time.RFC3339Nano)
 	configJSON := fmt.Sprintf(configJSONTemplate, epochStr, epochStr)
 
-	// The first scheme requires sufficient activity within 5/10 1 millisecond
-	// periods and 5/10 10 millisecond longer periods. The second scheme requires
-	// sufficient activity within 25/100 1 millisecond periods.
+	// The first scheme requires sufficient activity within 5/10 5 millisecond
+	// periods and 5/10 50 millisecond longer periods. The second scheme requires
+	// sufficient activity within 25/100 5 millisecond periods.
 
 	config, err := LoadConfig([]byte(configJSON))
 	if err != nil {
@@ -202,7 +203,7 @@ func TestOSL(t *testing.T) {
 	rolloverToNextSLOKTime := func() {
 		// Rollover to the next SLOK time, so accrued data transfer will be reset.
 		now := time.Now().UTC()
-		time.Sleep(now.Add(1 * time.Millisecond).Truncate(1 * time.Millisecond).Sub(now))
+		time.Sleep(now.Add(seedPeriod).Truncate(seedPeriod).Sub(now))
 	}
 
 	t.Run("eligible client, insufficient transfer after rollover", func(t *testing.T) {
@@ -304,9 +305,7 @@ func TestOSL(t *testing.T) {
 
 		clientSeedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1"))
 
-		clientSeedPortForward.UpdateProgress(5, 5, 5)
-
-		clientSeedPortForward.UpdateProgress(5, 5, 5)
+		clientSeedPortForward.UpdateProgress(10, 10, 10)
 
 		if len(clientSeedState.GetSeedPayload().SLOKs) != 5 {
 			t.Fatalf("expected 5 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
@@ -324,7 +323,7 @@ func TestOSL(t *testing.T) {
 	t.Run("pave OSLs", func(t *testing.T) {
 
 		// Pave sufficient OSLs to cover simulated elapsed time of all test cases.
-		endTime := epoch.Add(1000 * time.Millisecond)
+		endTime := epoch.Add(1000 * seedPeriod)
 
 		// In actual deployment, paved files for each propagation channel ID
 		// are dropped in distinct distribution sites.
@@ -508,7 +507,7 @@ func TestOSL(t *testing.T) {
 						&slokReference{
 							PropagationChannelID: testCase.propagationChannelID,
 							SeedSpecID:           string(testCase.scheme.SeedSpecs[seedSpecIndex].ID),
-							Time:                 epoch.Add(time.Duration(timePeriod) * time.Millisecond),
+							Time:                 epoch.Add(time.Duration(timePeriod) * seedPeriod),
 						})
 
 					slokMap[string(slok.ID)] = slok.Key
