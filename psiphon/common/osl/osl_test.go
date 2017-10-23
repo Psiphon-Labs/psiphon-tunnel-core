@@ -20,9 +20,11 @@
 package osl
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"testing"
 	"time"
@@ -515,53 +517,68 @@ func TestOSL(t *testing.T) {
 				}
 			}
 
-			t.Logf("SLOK count: %d", len(slokMap))
+			startTime := time.Now()
 
-			slokLookup := func(slokID []byte) []byte {
+			lookupSLOKs := func(slokID []byte) []byte {
 				return slokMap[string(slokID)]
 			}
 
-			checkRegistryStartTime := time.Now()
-
-			registry, _, err := UnpackRegistry(
-				pavedRegistries[testCase.propagationChannelID], signingPublicKey)
+			registryStreamer, err := NewRegistryStreamer(
+				bytes.NewReader(pavedRegistries[testCase.propagationChannelID]),
+				signingPublicKey,
+				lookupSLOKs)
 			if err != nil {
-				t.Fatalf("UnpackRegistry failed: %s", err)
+				t.Fatalf("NewRegistryStreamer failed: %s", err)
 			}
 
-			t.Logf("registry size: %d", len(pavedRegistries[testCase.propagationChannelID]))
-			t.Logf("registry OSL count: %d", len(registry.FileSpecs))
+			seededOSLCount := 0
 
-			oslIDs := registry.GetSeededOSLIDs(
-				slokLookup,
-				func(err error) {
-					// Actual client will treat errors as warnings.
-					t.Fatalf("GetSeededOSLIDs failed: %s", err)
-				})
+			for {
 
-			t.Logf("check registry elapsed time: %s", time.Since(checkRegistryStartTime))
+				fileSpec, err := registryStreamer.Next()
+				if err != nil {
+					t.Fatalf("Next failed: %s", err)
+				}
 
-			if len(oslIDs) != testCase.expectedOSLCount {
-				t.Fatalf("expected %d OSLs got %d", testCase.expectedOSLCount, len(oslIDs))
-			}
+				if fileSpec == nil {
+					break
+				}
 
-			for _, oslID := range oslIDs {
+				seededOSLCount += 1
+
 				oslFileContents, ok :=
-					pavedOSLFileContents[testCase.propagationChannelID][GetOSLFileURL("", oslID)]
+					pavedOSLFileContents[testCase.propagationChannelID][GetOSLFileURL("", fileSpec.ID)]
 				if !ok {
 					t.Fatalf("unknown OSL file name")
 				}
 
-				plaintextOSL, err := registry.UnpackOSL(
-					slokLookup, oslID, oslFileContents, signingPublicKey)
+				payloadReader, err := NewOSLReader(
+					bytes.NewReader(oslFileContents),
+					fileSpec,
+					lookupSLOKs,
+					signingPublicKey)
 				if err != nil {
-					t.Fatalf("DecryptOSL failed: %s", err)
+					t.Fatalf("NewOSLReader failed: %s", err)
+				}
+
+				payload, err := ioutil.ReadAll(payloadReader)
+				if err != nil {
+					t.Fatalf("ReadAll failed: %s", err)
 				}
 
 				// The decrypted OSL should contain its own ID.
-				if plaintextOSL != base64.StdEncoding.EncodeToString(oslID) {
+				if string(payload) != base64.StdEncoding.EncodeToString(fileSpec.ID) {
 					t.Fatalf("unexpected OSL file contents")
 				}
+			}
+
+			t.Logf("registry size: %d", len(pavedRegistries[testCase.propagationChannelID]))
+			t.Logf("SLOK count: %d", len(slokMap))
+			t.Logf("seeded OSL count: %d", seededOSLCount)
+			t.Logf("elapsed time: %s", time.Since(startTime))
+
+			if seededOSLCount != testCase.expectedOSLCount {
+				t.Fatalf("expected %d OSLs got %d", testCase.expectedOSLCount, seededOSLCount)
 			}
 		})
 	}

@@ -34,7 +34,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"os"
 	"sync"
 )
 
@@ -170,30 +169,15 @@ func ReadAuthenticatedDataPackage(
 	return authenticatedDataPackage.Data, nil
 }
 
-// StreamingReadAuthenticatedDataPackage extracts and verifies authenticated
+// NewAuthenticatedDataPackageReader extracts and verifies authenticated
 // data from an AuthenticatedDataPackage stored in the specified file. The
 // package must have been signed with the given key.
-// StreamingReadAuthenticatedDataPackage does not load the entire package nor
+// NewAuthenticatedDataPackageReader does not load the entire package nor
 // the entire data into memory. It streams the package while verifying, and
-// returns an io.ReadCloser that the caller may use to stream the authenticated
-// data payload. The caller _must_ close the io.Closer to free resources and
-// close the underlying file.
-func StreamingReadAuthenticatedDataPackage(
-	packageFileName string, signingPublicKey string) (io.ReadCloser, error) {
-
-	file, err := os.Open(packageFileName)
-	if err != nil {
-		return nil, ContextError(err)
-	}
-
-	closeOnError := file
-	defer func() {
-		if closeOnError != nil {
-			closeOnError.Close()
-		}
-	}()
-
-	var payload io.ReadCloser
+// returns an io.Reader that the caller may use to stream the authenticated
+// data payload.
+func NewAuthenticatedDataPackageReader(
+	dataPackage io.ReadSeeker, signingPublicKey string) (io.Reader, error) {
 
 	// The file is streamed in 2 passes. The first pass verifies the package
 	// signature. No payload data should be accepted/processed until the signature
@@ -203,18 +187,19 @@ func StreamingReadAuthenticatedDataPackage(
 	// Note: No exclusive file lock is held between passes, so it's possible to
 	// verify the data in one pass, and read different data in the second pass.
 	// For Psiphon's use cases, this will not happen in practise -- the packageFileName
-	// will not change while StreamingReadAuthenticatedDataPackage is running -- unless
-	// the client host is compromised; a compromised client host is outside of our threat
-	// model.
+	// will not change while the returned io.Reader is used -- unless the client host
+	// is compromised; a compromised client host is outside of our threat model.
+
+	var payload io.Reader
 
 	for pass := 0; pass < 2; pass++ {
 
-		_, err = file.Seek(0, 0)
+		_, err := dataPackage.Seek(0, io.SeekStart)
 		if err != nil {
 			return nil, ContextError(err)
 		}
 
-		decompressor, err := zlib.NewReader(file)
+		decompressor, err := zlib.NewReader(dataPackage)
 		if err != nil {
 			return nil, ContextError(err)
 		}
@@ -328,17 +313,9 @@ func StreamingReadAuthenticatedDataPackage(
 				return nil, ContextError(errors.New("missing expected field"))
 			}
 
-			payload = struct {
-				io.Reader
-				io.Closer
-			}{
-				jsonData,
-				file,
-			}
+			payload = jsonData
 		}
 	}
-
-	closeOnError = nil
 
 	return payload, nil
 }
