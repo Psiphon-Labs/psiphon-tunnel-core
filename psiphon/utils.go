@@ -223,3 +223,7 @@ func standardGarbageCollection() {
 	debug.SetGCPercent(100)
 	debug.FreeOSMemory()
 }
+
+func defaultdGarbageCollection() {
+	debug.FreeOSMemory()
+}

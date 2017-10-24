@@ -282,6 +282,12 @@ func FetchObfuscatedServerLists(
 		}
 
 		file.Close()
+
+		// Clear the reference to this OSL file streamer and immediately run
+		// a garbage collection to reclaim its memory before processing the
+		// next file.
+		serverListPayloadReader = nil
+		defaultGarbageCollection()
 	}
 
 	// Now that a new registry is downloaded, validated, and parsed, store
