@@ -224,6 +224,6 @@ func standardGarbageCollection() {
 	debug.FreeOSMemory()
 }
 
-func defaultdGarbageCollection() {
+func defaultGarbageCollection() {
 	debug.FreeOSMemory()
 }
