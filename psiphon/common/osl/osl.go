@@ -890,6 +890,34 @@ func (config *Config) Pave(
 	return paveFiles, nil
 }
 
+// CurrentOSLIDs returns a mapping from each propagation channel ID in the
+// specified scheme to the corresponding current time period, hex-encoded OSL ID.
+func (config *Config) CurrentOSLIDs(schemeIndex int) (map[string]string, error) {
+
+	config.ReloadableFile.RLock()
+	defer config.ReloadableFile.RUnlock()
+
+	if schemeIndex < 0 || schemeIndex >= len(config.Schemes) {
+		return nil, common.ContextError(errors.New("invalid scheme index"))
+	}
+
+	scheme := config.Schemes[schemeIndex]
+	now := time.Now().UTC()
+	oslDuration := scheme.GetOSLDuration()
+	oslTime := scheme.epoch.Add((now.Sub(scheme.epoch) / oslDuration) * oslDuration)
+
+	OSLIDs := make(map[string]string)
+	for _, propagationChannelID := range scheme.PropagationChannelIDs {
+		_, fileSpec, err := makeOSLFileSpec(scheme, propagationChannelID, oslTime)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+		OSLIDs[propagationChannelID] = hex.EncodeToString(fileSpec.ID)
+	}
+
+	return OSLIDs, nil
+}
+
 // makeOSLFileSpec creates an OSL file key, splits it according to the
 // scheme's key splits, and sets the OSL ID as its first SLOK ID. The
 // returned key is used to encrypt the OSL payload and then discarded;
