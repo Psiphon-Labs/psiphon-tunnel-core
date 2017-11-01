@@ -23,7 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -69,17 +69,23 @@ func FetchCommonRemoteServerList(
 		return nil
 	}
 
-	serverListPayload, err := common.StreamingReadAuthenticatedDataPackage(
-		config.RemoteServerListDownloadFilename,
+	file, err := os.Open(config.RemoteServerListDownloadFilename)
+	if err != nil {
+		return fmt.Errorf("failed to open common remote server list: %s", common.ContextError(err))
+
+	}
+	defer file.Close()
+
+	serverListPayloadReader, err := common.NewAuthenticatedDataPackageReader(
+		file,
 		config.RemoteServerListSignaturePublicKey)
 	if err != nil {
 		return fmt.Errorf("failed to read remote server list: %s", common.ContextError(err))
 	}
-	defer serverListPayload.Close()
 
 	err = StreamingStoreServerEntries(
 		protocol.NewStreamingServerEntryDecoder(
-			serverListPayload,
+			serverListPayloadReader,
 			common.GetCurrentTimestamp(),
 			protocol.SERVER_ENTRY_SOURCE_REMOTE),
 		true)
@@ -118,6 +124,7 @@ func FetchObfuscatedServerLists(
 	NoticeInfo("fetching obfuscated remote server lists")
 
 	downloadFilename := osl.GetOSLRegistryFilename(config.ObfuscatedServerListDownloadDirectory)
+	cachedFilename := downloadFilename + ".cached"
 
 	rootURL, canonicalRootURL, skipVerify := selectDownloadURL(attempt, config.ObfuscatedServerListRootURLs)
 	downloadURL := osl.GetOSLRegistryURL(rootURL)
@@ -130,7 +137,11 @@ func FetchObfuscatedServerLists(
 	// TODO: should disk-full conditions not trigger retries?
 	var failed bool
 
-	var oslRegistry *osl.Registry
+	// updateCache is set when modifed registry content is downloaded. Both the cached
+	// file and the persisted ETag will be updated in this case. The update is deferred
+	// until after the registry has been authenticated.
+	updateCache := false
+	registryFilename := cachedFilename
 
 	newETag, err := downloadRemoteServerListFile(
 		config,
@@ -144,61 +155,11 @@ func FetchObfuscatedServerLists(
 	if err != nil {
 		failed = true
 		NoticeAlert("failed to download obfuscated server list registry: %s", common.ContextError(err))
+		// Proceed with any existing cached OSL registry.
 	} else if newETag != "" {
-
-		fileContent, err := ioutil.ReadFile(downloadFilename)
-		if err != nil {
-			failed = true
-			NoticeAlert("failed to read obfuscated server list registry: %s", common.ContextError(err))
-		}
-
-		var oslRegistryJSON []byte
-		if err == nil {
-			oslRegistry, oslRegistryJSON, err = osl.UnpackRegistry(
-				fileContent, config.RemoteServerListSignaturePublicKey)
-			if err != nil {
-				failed = true
-				NoticeAlert("failed to unpack obfuscated server list registry: %s", common.ContextError(err))
-			}
-		}
-
-		if err == nil {
-			err = SetKeyValue(DATA_STORE_OSL_REGISTRY_KEY, string(oslRegistryJSON))
-			if err != nil {
-				failed = true
-				NoticeAlert("failed to set cached obfuscated server list registry: %s", common.ContextError(err))
-			}
-		}
+		updateCache = true
+		registryFilename = downloadFilename
 	}
-
-	if failed || newETag == "" {
-		// Proceed with the cached OSL registry.
-		oslRegistryJSON, err := GetKeyValue(DATA_STORE_OSL_REGISTRY_KEY)
-		if err == nil && oslRegistryJSON == "" {
-			err = errors.New("not found")
-		}
-		if err != nil {
-			return fmt.Errorf("failed to get cached obfuscated server list registry: %s", common.ContextError(err))
-		}
-
-		oslRegistry, err = osl.LoadRegistry([]byte(oslRegistryJSON))
-		if err != nil {
-			return fmt.Errorf("failed to load obfuscated server list registry: %s", common.ContextError(err))
-		}
-	}
-
-	// When a new registry is downloaded, validated, and parsed, store the
-	// response ETag so we won't re-download this same data again.
-	if !failed && newETag != "" {
-		err = SetUrlETag(canonicalURL, newETag)
-		if err != nil {
-			NoticeAlert("failed to set ETag for obfuscated server list registry: %s", common.ContextError(err))
-			// This fetch is still reported as a success, even if we can't store the etag
-		}
-	}
-
-	// Note: we proceed to check individual OSLs even if the direcory is unchanged,
-	// as the set of local SLOKs may have changed.
 
 	lookupSLOKs := func(slokID []byte) []byte {
 		// Lookup SLOKs in local datastore
@@ -209,30 +170,53 @@ func FetchObfuscatedServerLists(
 		return key
 	}
 
-	oslIDs := oslRegistry.GetSeededOSLIDs(
-		lookupSLOKs,
-		func(err error) {
-			NoticeAlert("GetSeededOSLIDs failed: %s", err)
-		})
+	registryFile, err := os.Open(registryFilename)
+	if err != nil {
+		return fmt.Errorf("failed to read obfuscated server list registry: %s", common.ContextError(err))
+	}
+	defer registryFile.Close()
 
-	for _, oslID := range oslIDs {
+	registryStreamer, err := osl.NewRegistryStreamer(
+		registryFile,
+		config.RemoteServerListSignaturePublicKey,
+		lookupSLOKs)
+	if err != nil {
+		// TODO: delete file? redownload if corrupt?
+		return fmt.Errorf("failed to read obfuscated server list registry: %s", common.ContextError(err))
+	}
 
-		downloadFilename := osl.GetOSLFilename(config.ObfuscatedServerListDownloadDirectory, oslID)
+	// NewRegistryStreamer authenticates the downloaded registry, so now it would be
+	// ok to update the cache. However, we defer that until after processing so we
+	// can close the file first before copying it, avoiding related complications on
+	// platforms such as Windows.
 
-		downloadURL := osl.GetOSLFileURL(rootURL, oslID)
-		canonicalURL := osl.GetOSLFileURL(canonicalRootURL, oslID)
+	// Note: we proceed to check individual OSLs even if the directory is unchanged,
+	// as the set of local SLOKs may have changed.
 
-		hexID := hex.EncodeToString(oslID)
+	for {
+
+		oslFileSpec, err := registryStreamer.Next()
+		if err != nil {
+			failed = true
+			NoticeAlert("failed to stream obfuscated server list registry: %s", common.ContextError(err))
+			break
+		}
+
+		if oslFileSpec == nil {
+			break
+		}
+
+		downloadFilename := osl.GetOSLFilename(
+			config.ObfuscatedServerListDownloadDirectory, oslFileSpec.ID)
+
+		downloadURL := osl.GetOSLFileURL(rootURL, oslFileSpec.ID)
+		canonicalURL := osl.GetOSLFileURL(canonicalRootURL, oslFileSpec.ID)
+
+		hexID := hex.EncodeToString(oslFileSpec.ID)
 
 		// Note: the MD5 checksum step assumes the remote server list host's ETag uses MD5
 		// with a hex encoding. If this is not the case, the sourceETag should be left blank.
-		sourceETag := ""
-		md5sum, err := oslRegistry.GetOSLMD5Sum(oslID)
-		if err == nil {
-			sourceETag = fmt.Sprintf("\"%s\"", hex.EncodeToString(md5sum))
-		}
-
-		// TODO: store ETags in OSL registry to enable skipping requests entirely
+		sourceETag := fmt.Sprintf("\"%s\"", hex.EncodeToString(oslFileSpec.MD5Sum))
 
 		newETag, err := downloadRemoteServerListFile(
 			config,
@@ -254,23 +238,34 @@ func FetchObfuscatedServerLists(
 			continue
 		}
 
-		fileContent, err := ioutil.ReadFile(downloadFilename)
+		file, err := os.Open(downloadFilename)
 		if err != nil {
+			failed = true
+			NoticeAlert("failed to open obfuscated server list file (%s): %s", hexID, common.ContextError(err))
+			continue
+		}
+		// Note: don't defer file.Close() since we're in a loop
+
+		serverListPayloadReader, err := osl.NewOSLReader(
+			file,
+			oslFileSpec,
+			lookupSLOKs,
+			config.RemoteServerListSignaturePublicKey)
+		if err != nil {
+			file.Close()
 			failed = true
 			NoticeAlert("failed to read obfuscated server list file (%s): %s", hexID, common.ContextError(err))
 			continue
 		}
 
-		serverListPayload, err := oslRegistry.UnpackOSL(
-			lookupSLOKs, oslID, fileContent, config.RemoteServerListSignaturePublicKey)
+		err = StreamingStoreServerEntries(
+			protocol.NewStreamingServerEntryDecoder(
+				serverListPayloadReader,
+				common.GetCurrentTimestamp(),
+				protocol.SERVER_ENTRY_SOURCE_OBFUSCATED),
+			true)
 		if err != nil {
-			failed = true
-			NoticeAlert("failed to unpack obfuscated server list file (%s): %s", hexID, common.ContextError(err))
-			continue
-		}
-
-		err = storeServerEntries(serverListPayload, protocol.SERVER_ENTRY_SOURCE_OBFUSCATED)
-		if err != nil {
+			file.Close()
 			failed = true
 			NoticeAlert("failed to store obfuscated server list file (%s): %s", hexID, common.ContextError(err))
 			continue
@@ -280,16 +275,45 @@ func FetchObfuscatedServerLists(
 		// ETag so we won't re-download this same data again.
 		err = SetUrlETag(canonicalURL, newETag)
 		if err != nil {
-			failed = true
-			NoticeAlert("failed to set Etag for obfuscated server list file (%s): %s", hexID, common.ContextError(err))
+			file.Close()
+			NoticeAlert("failed to set ETag for obfuscated server list file (%s): %s", hexID, common.ContextError(err))
 			continue
-			// This fetch is still reported as a success, even if we can't store the etag
+			// This fetch is still reported as a success, even if we can't store the ETag
+		}
+
+		file.Close()
+
+		// Clear the reference to this OSL file streamer and immediately run
+		// a garbage collection to reclaim its memory before processing the
+		// next file.
+		serverListPayloadReader = nil
+		defaultGarbageCollection()
+	}
+
+	// Now that a new registry is downloaded, validated, and parsed, store
+	// the response ETag so we won't re-download this same data again. First
+	// close the file to avoid complications on platforms such as Windows.
+	if updateCache {
+
+		registryFile.Close()
+
+		err := os.Rename(downloadFilename, cachedFilename)
+		if err != nil {
+			NoticeAlert("failed to set cached obfuscated server list registry: %s", common.ContextError(err))
+			// This fetch is still reported as a success, even if we can't update the cache
+		}
+
+		err = SetUrlETag(canonicalURL, newETag)
+		if err != nil {
+			NoticeAlert("failed to set ETag for obfuscated server list registry: %s", common.ContextError(err))
+			// This fetch is still reported as a success, even if we can't store the ETag
 		}
 	}
 
 	if failed {
 		return errors.New("one or more operations failed")
 	}
+
 	return nil
 }
 
@@ -361,22 +385,4 @@ func downloadRemoteServerListFile(
 	RecordRemoteServerListStat(sourceURL, responseETag)
 
 	return responseETag, nil
-}
-
-func storeServerEntries(serverList, serverEntrySource string) error {
-
-	serverEntries, err := protocol.DecodeServerEntryList(
-		serverList,
-		common.GetCurrentTimestamp(),
-		serverEntrySource)
-	if err != nil {
-		return common.ContextError(err)
-	}
-
-	err = StoreServerEntries(serverEntries, true)
-	if err != nil {
-		return common.ContextError(err)
-	}
-
-	return nil
 }

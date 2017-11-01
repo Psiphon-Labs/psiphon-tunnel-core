@@ -60,6 +60,9 @@ func main() {
 		&destinationDirectory, "output", "",
 		"destination directory for output files; when omitted, no files are written (dry run mode)")
 
+	var listScheme int
+	flag.IntVar(&listScheme, "list-scheme", -1, "list current period OSL IDs for specified scheme; no files are written")
+
 	flag.Parse()
 
 	// load config
@@ -74,6 +77,18 @@ func main() {
 	if err != nil {
 		fmt.Printf("failed processing configuration file: %s\n", err)
 		os.Exit(1)
+	}
+
+	if listScheme != -1 {
+		OSLIDs, err := config.CurrentOSLIDs(listScheme)
+		if err != nil {
+			fmt.Printf("failed listing scheme OSL IDs: %s\n", err)
+			os.Exit(1)
+		}
+		for propagationChannelID, OSLID := range OSLIDs {
+			fmt.Printf("%s %s\n", propagationChannelID, OSLID)
+		}
+		return
 	}
 
 	// load key pair
