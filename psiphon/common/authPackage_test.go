@@ -96,10 +96,15 @@ func TestAuthenticatedPackage(t *testing.T) {
 	})
 
 	t.Run("streaming read package: success", func(t *testing.T) {
-		contentReader, err := StreamingReadAuthenticatedDataPackage(
-			tempFileName, signingPublicKey)
+		file, err := os.Open(tempFileName)
 		if err != nil {
-			t.Fatalf("StreamingReadAuthenticatedDataPackage failed: %s", err)
+			t.Fatalf("Open failed: %s", err)
+		}
+		defer file.Close()
+		contentReader, err := NewAuthenticatedDataPackageReader(
+			file, signingPublicKey)
+		if err != nil {
+			t.Fatalf("NewAuthenticatedDataPackageReader failed: %s", err)
 		}
 		content, err := ioutil.ReadAll(contentReader)
 		if err != nil {
@@ -121,10 +126,15 @@ func TestAuthenticatedPackage(t *testing.T) {
 	})
 
 	t.Run("streaming read package: wrong signing key", func(t *testing.T) {
-		_, err = StreamingReadAuthenticatedDataPackage(
-			tempFileName, wrongSigningPublicKey)
+		file, err := os.Open(tempFileName)
+		if err != nil {
+			t.Fatalf("Open failed: %s", err)
+		}
+		defer file.Close()
+		_, err = NewAuthenticatedDataPackageReader(
+			file, wrongSigningPublicKey)
 		if err == nil {
-			t.Fatalf("StreamingReadAuthenticatedDataPackage unexpectedly succeeded")
+			t.Fatalf("NewAuthenticatedDataPackageReader unexpectedly succeeded")
 		}
 	})
 
@@ -137,10 +147,15 @@ func TestAuthenticatedPackage(t *testing.T) {
 	})
 
 	t.Run("streaming read package: tampered data", func(t *testing.T) {
-		_, err = StreamingReadAuthenticatedDataPackage(
-			tamperedTempFileName, signingPublicKey)
+		file, err := os.Open(tamperedTempFileName)
+		if err != nil {
+			t.Fatalf("Open failed: %s", err)
+		}
+		defer file.Close()
+		_, err = NewAuthenticatedDataPackageReader(
+			file, signingPublicKey)
 		if err == nil {
-			t.Fatalf("StreamingReadAuthenticatedDataPackage unexpectedly succeeded")
+			t.Fatalf("NewAuthenticatedDataPackageReader unexpectedly succeeded")
 		}
 	})
 }
@@ -181,15 +196,22 @@ func BenchmarkAuthenticatedPackage(b *testing.B) {
 
 	b.Run("streaming read package", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			contentReader, err := StreamingReadAuthenticatedDataPackage(
-				tempFileName, signingPublicKey)
+			file, err := os.Open(tempFileName)
 			if err != nil {
-				b.Fatalf("StreamingReadAuthenticatedDataPackage failed: %s", err)
+				b.Fatalf("Open failed: %s", err)
+			}
+			contentReader, err := NewAuthenticatedDataPackageReader(
+				file, signingPublicKey)
+			if err != nil {
+				file.Close()
+				b.Fatalf("NewAuthenticatedDataPackageReader failed: %s", err)
 			}
 			_, err = io.Copy(ioutil.Discard, contentReader)
 			if err != nil {
+				file.Close()
 				b.Fatalf("Read failed: %s", err)
 			}
+			file.Close()
 		}
 	})
 }
