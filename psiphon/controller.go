@@ -472,13 +472,16 @@ loop:
 			duration = PSIPHON_API_CONNECTED_REQUEST_RETRY_PERIOD
 		}
 		timer := time.NewTimer(duration)
+		doBreak := false
 		select {
 		case <-controller.signalReportConnected:
-			timer.Stop()
 		case <-timer.C:
 			// Make another connected request
 		case <-controller.shutdownBroadcast:
-			timer.Stop()
+			doBreak = true
+		}
+		timer.Stop()
+		if doBreak {
 			break loop
 		}
 	}
@@ -1341,14 +1344,17 @@ loop:
 				// and the grace period has elapsed.
 
 				timer := time.NewTimer(ESTABLISH_TUNNEL_SERVER_AFFINITY_GRACE_PERIOD)
+				doBreak := false
 				select {
 				case <-timer.C:
 				case <-controller.serverAffinityDoneBroadcast:
 				case <-controller.stopEstablishingBroadcast:
-					timer.Stop()
-					break loop
+					doBreak = true
 				case <-controller.shutdownBroadcast:
-					timer.Stop()
+					doBreak = true
+				}
+				timer.Stop()
+				if doBreak {
 					break loop
 				}
 			} else if controller.config.StaggerConnectionWorkersMilliseconds != 0 {
@@ -1357,13 +1363,16 @@ loop:
 
 				timer := time.NewTimer(time.Millisecond * time.Duration(
 					controller.config.StaggerConnectionWorkersMilliseconds))
+				doBreak := false
 				select {
 				case <-timer.C:
 				case <-controller.stopEstablishingBroadcast:
-					timer.Stop()
-					break loop
+					doBreak = true
 				case <-controller.shutdownBroadcast:
-					timer.Stop()
+					doBreak = true
+				}
+				timer.Stop()
+				if doBreak {
 					break loop
 				}
 			}
@@ -1407,14 +1416,17 @@ loop:
 		// be more rounds if required).
 		timer := time.NewTimer(
 			time.Duration(*controller.config.EstablishTunnelPausePeriodSeconds) * time.Second)
+		doBreak := false
 		select {
 		case <-timer.C:
 			// Retry iterating
 		case <-controller.stopEstablishingBroadcast:
-			timer.Stop()
-			break loop
+			doBreak = true
 		case <-controller.shutdownBroadcast:
-			timer.Stop()
+			doBreak = true
+		}
+		timer.Stop()
+		if doBreak {
 			break loop
 		}
 

@@ -1222,12 +1222,15 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 					return
 				}
 				timer := time.NewTimer(PSIPHON_API_CLIENT_VERIFICATION_REQUEST_RETRY_PERIOD)
+				doReturn := false
 				select {
 				case <-timer.C:
 				case clientVerificationPayload = <-tunnel.newClientVerificationPayload:
-					timer.Stop()
 				case <-signalStopClientVerificationRequests:
-					timer.Stop()
+					doReturn = true
+				}
+				timer.Stop()
+				if doReturn {
 					return
 				}
 			}
