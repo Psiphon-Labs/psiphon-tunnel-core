@@ -401,10 +401,11 @@ fetcherLoop:
 
 			NoticeAlert("failed to fetch %s remote server list: %s", name, err)
 
-			timeout := time.After(retryPeriod)
+			timer := time.NewTimer(retryPeriod)
 			select {
-			case <-timeout:
+			case <-timer.C:
 			case <-controller.shutdownBroadcast:
+				timer.Stop()
 				break fetcherLoop
 			}
 		}
@@ -421,10 +422,12 @@ fetcherLoop:
 func (controller *Controller) establishTunnelWatcher() {
 	defer controller.runWaitGroup.Done()
 
-	timeout := time.After(
+	timer := time.NewTimer(
 		time.Duration(*controller.config.EstablishTunnelTimeoutSeconds) * time.Second)
+	defer timer.Stop()
+
 	select {
-	case <-timeout:
+	case <-timer.C:
 		if !controller.hasEstablishedOnce() {
 			NoticeAlert("failed to establish tunnel before timeout")
 			controller.SignalComponentFailure()
@@ -468,13 +471,14 @@ loop:
 		} else {
 			duration = PSIPHON_API_CONNECTED_REQUEST_RETRY_PERIOD
 		}
-		timeout := time.After(duration)
+		timer := time.NewTimer(duration)
 		select {
 		case <-controller.signalReportConnected:
-		case <-timeout:
+			timer.Stop()
+		case <-timer.C:
 			// Make another connected request
-
 		case <-controller.shutdownBroadcast:
+			timer.Stop()
 			break loop
 		}
 	}
@@ -570,11 +574,12 @@ downloadLoop:
 
 			NoticeAlert("failed to download upgrade: %s", err)
 
-			timeout := time.After(
+			timer := time.NewTimer(
 				time.Duration(*controller.config.DownloadUpgradeRetryPeriodSeconds) * time.Second)
 			select {
-			case <-timeout:
+			case <-timer.C:
 			case <-controller.shutdownBroadcast:
+				timer.Stop()
 				break downloadLoop
 			}
 		}
@@ -1340,8 +1345,10 @@ loop:
 				case <-timer.C:
 				case <-controller.serverAffinityDoneBroadcast:
 				case <-controller.stopEstablishingBroadcast:
+					timer.Stop()
 					break loop
 				case <-controller.shutdownBroadcast:
+					timer.Stop()
 					break loop
 				}
 			} else if controller.config.StaggerConnectionWorkersMilliseconds != 0 {
@@ -1353,8 +1360,10 @@ loop:
 				select {
 				case <-timer.C:
 				case <-controller.stopEstablishingBroadcast:
+					timer.Stop()
 					break loop
 				case <-controller.shutdownBroadcast:
+					timer.Stop()
 					break loop
 				}
 			}
@@ -1396,14 +1405,16 @@ loop:
 		// network conditions to change. Also allows for fetch remote to complete,
 		// in typical conditions (it isn't strictly necessary to wait for this, there will
 		// be more rounds if required).
-		timeout := time.After(
+		timer := time.NewTimer(
 			time.Duration(*controller.config.EstablishTunnelPausePeriodSeconds) * time.Second)
 		select {
-		case <-timeout:
+		case <-timer.C:
 			// Retry iterating
 		case <-controller.stopEstablishingBroadcast:
+			timer.Stop()
 			break loop
 		case <-controller.shutdownBroadcast:
+			timer.Stop()
 			break loop
 		}
 

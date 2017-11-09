@@ -629,6 +629,7 @@ func (meek *MeekConn) relay() {
 		MIN_POLL_INTERVAL_JITTER)
 
 	timeout := time.NewTimer(interval)
+	defer timeout.Stop()
 
 	for {
 		timeout.Reset(interval)
@@ -954,6 +955,7 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		select {
 		case <-delayTimer.C:
 		case <-meek.runContext.Done():
+			delayTimer.Stop()
 			return 0, common.ContextError(err)
 		}
 
