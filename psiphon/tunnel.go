@@ -243,6 +243,9 @@ func (tunnel *Tunnel) Activate(
 				tunnel.Close(true)
 				<-resultChannel
 			}
+
+			timer.Stop()
+
 		} else {
 
 			select {
@@ -319,10 +322,10 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 		// precedence over the PSIPHON_API_SERVER_TIMEOUT http.Client.Timeout
 		// value set in makePsiphonHttpsClient.
 		if isActivated {
-			timer := time.AfterFunc(TUNNEL_OPERATE_SHUTDOWN_TIMEOUT, func() { tunnel.conn.Close() })
+			afterFunc := time.AfterFunc(TUNNEL_OPERATE_SHUTDOWN_TIMEOUT, func() { tunnel.conn.Close() })
 			close(tunnel.shutdownOperateBroadcast)
 			tunnel.operateWaitGroup.Wait()
-			timer.Stop()
+			afterFunc.Stop()
 		}
 		tunnel.sshClient.Close()
 		// tunnel.conn.Close() may get called multiple times, which is allowed.
@@ -385,9 +388,10 @@ func (tunnel *Tunnel) Dial(
 	}
 	resultChannel := make(chan *tunnelDialResult, 2)
 	if *tunnel.config.TunnelPortForwardDialTimeoutSeconds > 0 {
-		time.AfterFunc(time.Duration(*tunnel.config.TunnelPortForwardDialTimeoutSeconds)*time.Second, func() {
+		afterFunc := time.AfterFunc(time.Duration(*tunnel.config.TunnelPortForwardDialTimeoutSeconds)*time.Second, func() {
 			resultChannel <- &tunnelDialResult{nil, errors.New("tunnel dial timeout")}
 		})
+		defer afterFunc.Stop()
 	}
 	go func() {
 		sshPortForwardConn, err := tunnel.sshClient.Dial("tcp", remoteAddr)
@@ -990,9 +994,10 @@ func dialSsh(
 	}
 	resultChannel := make(chan *sshNewClientResult, 2)
 	if *config.TunnelConnectTimeoutSeconds > 0 {
-		time.AfterFunc(time.Duration(*config.TunnelConnectTimeoutSeconds)*time.Second, func() {
+		afterFunc := time.AfterFunc(time.Duration(*config.TunnelConnectTimeoutSeconds)*time.Second, func() {
 			resultChannel <- &sshNewClientResult{nil, nil, errors.New("ssh dial timeout")}
 		})
+		defer afterFunc.Stop()
 	}
 
 	go func() {
@@ -1216,11 +1221,16 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 				if failCount > PSIPHON_API_CLIENT_VERIFICATION_REQUEST_MAX_RETRIES {
 					return
 				}
-				timeout := time.After(PSIPHON_API_CLIENT_VERIFICATION_REQUEST_RETRY_PERIOD)
+				timer := time.NewTimer(PSIPHON_API_CLIENT_VERIFICATION_REQUEST_RETRY_PERIOD)
+				doReturn := false
 				select {
-				case <-timeout:
+				case <-timer.C:
 				case clientVerificationPayload = <-tunnel.newClientVerificationPayload:
 				case <-signalStopClientVerificationRequests:
+					doReturn = true
+				}
+				timer.Stop()
+				if doReturn {
 					return
 				}
 			}
@@ -1430,9 +1440,10 @@ func sendSshKeepAlive(
 
 	errChannel := make(chan error, 2)
 	if timeout > 0 {
-		time.AfterFunc(timeout, func() {
+		afterFunc := time.AfterFunc(timeout, func() {
 			errChannel <- errors.New("timed out")
 		})
+		defer afterFunc.Stop()
 	}
 
 	go func() {

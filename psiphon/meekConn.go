@@ -629,6 +629,7 @@ func (meek *MeekConn) relay() {
 		MIN_POLL_INTERVAL_JITTER)
 
 	timeout := time.NewTimer(interval)
+	defer timeout.Stop()
 
 	for {
 		timeout.Reset(interval)
@@ -723,14 +724,19 @@ func (meek *MeekConn) relay() {
 // RoundTrip has called Close and will no longer use the buffer.
 // See: https://golang.org/pkg/net/http/#RoundTripper
 type readCloseSignaller struct {
-	reader io.Reader
-	closed chan struct{}
+	context context.Context
+	reader  io.Reader
+	closed  chan struct{}
 }
 
-func NewReadCloseSignaller(reader io.Reader) *readCloseSignaller {
+func NewReadCloseSignaller(
+	context context.Context,
+	reader io.Reader) *readCloseSignaller {
+
 	return &readCloseSignaller{
-		reader: reader,
-		closed: make(chan struct{}, 1),
+		context: context,
+		reader:  reader,
+		closed:  make(chan struct{}, 1),
 	}
 }
 
@@ -746,8 +752,13 @@ func (r *readCloseSignaller) Close() error {
 	return nil
 }
 
-func (r *readCloseSignaller) AwaitClosed() {
-	<-r.closed
+func (r *readCloseSignaller) AwaitClosed() bool {
+	select {
+	case <-r.context.Done():
+	case <-r.closed:
+		return true
+	}
+	return false
 }
 
 // roundTrip configures and makes the actual HTTP POST request
@@ -816,7 +827,7 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			// still reading the current round trip response. signaller provides
 			// the hook for awaiting RoundTrip's call to Close.
 
-			signaller = NewReadCloseSignaller(bytes.NewReader(sendBuffer.Bytes()))
+			signaller = NewReadCloseSignaller(meek.runContext, bytes.NewReader(sendBuffer.Bytes()))
 			requestBody = signaller
 			contentLength = sendBuffer.Len()
 		}
@@ -864,7 +875,14 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		// subsequently replace sendBuffer in both the success and
 		// error cases.
 		if signaller != nil {
-			signaller.AwaitClosed()
+			if !signaller.AwaitClosed() {
+				// AwaitClosed encountered Done(). Abort immediately. Do not
+				// replace sendBuffer, as we cannot be certain RoundTrip is
+				// done with it. MeekConn.Write will exit on Done and not hang
+				// awaiting sendBuffer.
+				sendBuffer = nil
+				return 0, common.ContextError(errors.New("meek connection has closed"))
+			}
 		}
 
 		if err != nil {
@@ -954,6 +972,7 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		select {
 		case <-delayTimer.C:
 		case <-meek.runContext.Done():
+			delayTimer.Stop()
 			return 0, common.ContextError(err)
 		}
 

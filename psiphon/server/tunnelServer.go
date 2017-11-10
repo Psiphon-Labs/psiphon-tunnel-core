@@ -865,8 +865,9 @@ func (sshClient *sshClient) run(clientConn net.Conn) {
 
 	resultChannel := make(chan *sshNewServerConnResult, 2)
 
+	var afterFunc *time.Timer
 	if SSH_HANDSHAKE_TIMEOUT > 0 {
-		time.AfterFunc(time.Duration(SSH_HANDSHAKE_TIMEOUT), func() {
+		afterFunc = time.AfterFunc(time.Duration(SSH_HANDSHAKE_TIMEOUT), func() {
 			resultChannel <- &sshNewServerConnResult{err: errors.New("ssh handshake timeout")}
 		})
 	}
@@ -909,9 +910,13 @@ func (sshClient *sshClient) run(clientConn net.Conn) {
 	case result = <-resultChannel:
 	case <-sshClient.sshServer.shutdownBroadcast:
 		// Close() will interrupt an ongoing handshake
-		// TODO: wait for goroutine to exit before returning?
+		// TODO: wait for SSH handshake goroutines to exit before returning?
 		clientConn.Close()
 		return
+	}
+
+	if afterFunc != nil {
+		afterFunc.Stop()
 	}
 
 	if result.err != nil {

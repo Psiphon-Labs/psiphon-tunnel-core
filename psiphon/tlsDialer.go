@@ -195,9 +195,10 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 	var errChannel chan error
 	if config.Timeout != 0 {
 		errChannel = make(chan error, 2)
-		time.AfterFunc(config.Timeout, func() {
+		timeoutFunc := time.AfterFunc(config.Timeout, func() {
 			errChannel <- errors.New("timed out")
 		})
+		defer timeoutFunc.Stop()
 	}
 
 	dialAddr := addr
