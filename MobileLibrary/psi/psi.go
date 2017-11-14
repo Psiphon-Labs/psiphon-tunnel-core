@@ -179,13 +179,8 @@ func SetClientVerificationPayload(clientVerificationPayload string) {
 }
 
 // Encrypt and upload feedback.
-func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders string) {
-	err := psiphon.SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders)
-	if err != nil {
-		psiphon.NoticeAlert("error uploading feedback: %s", err)
-	} else {
-		psiphon.NoticeInfo("feedback uploaded successfully")
-	}
+func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders string) error {
+	return psiphon.SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders)
 }
 
 // Get build info from tunnel-core
