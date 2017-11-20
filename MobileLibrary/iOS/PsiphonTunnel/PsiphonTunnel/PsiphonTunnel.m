@@ -362,7 +362,15 @@
            [self logMessage:@"Error getting config for feedback upload"];
         }
 
-        GoPsiSendFeedback(connectionConfigJson, feedbackJson, b64EncodedPublicKey, uploadServer, @"", uploadServerHeaders);
+        NSError *e;
+
+        GoPsiSendFeedback(connectionConfigJson, feedbackJson, b64EncodedPublicKey, uploadServer, @"", uploadServerHeaders, &e);
+
+        if (e != nil) {
+            [self logMessage:[NSString stringWithFormat: @"Feedback upload error: %@", e.localizedDescription]];
+        } else {
+            [self logMessage:@"Feedback upload successful"];
+        }
     });
 }
 
