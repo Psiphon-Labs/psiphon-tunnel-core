@@ -761,7 +761,7 @@ type sshClient struct {
 	tcpPortForwardLRU                    *common.LRUConns
 	oslClientSeedState                   *osl.ClientSeedState
 	signalIssueSLOKs                     chan struct{}
-	runContext                           context.Context
+	runCtx                               context.Context
 	stopRunning                          context.CancelFunc
 	tcpPortForwardDialingAvailableSignal context.CancelFunc
 }
@@ -799,7 +799,7 @@ type handshakeState struct {
 func newSshClient(
 	sshServer *sshServer, tunnelProtocol string, geoIPData GeoIPData) *sshClient {
 
-	runContext, stopRunning := context.WithCancel(context.Background())
+	runCtx, stopRunning := context.WithCancel(context.Background())
 
 	client := &sshClient{
 		sshServer:         sshServer,
@@ -807,7 +807,7 @@ func newSshClient(
 		geoIPData:         geoIPData,
 		tcpPortForwardLRU: common.NewLRUConns(),
 		signalIssueSLOKs:  make(chan struct{}, 1),
-		runContext:        runContext,
+		runCtx:            runCtx,
 		stopRunning:       stopRunning,
 	}
 
@@ -1256,7 +1256,7 @@ func (sshClient *sshClient) runTunnel(
 
 			if sshClient.isTCPDialingPortForwardLimitExceeded() {
 				blockStartTime := monotime.Now()
-				ctx, cancelCtx := context.WithTimeout(sshClient.runContext, remainingDialTimeout)
+				ctx, cancelCtx := context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
 				sshClient.setTCPPortForwardDialingAvailableSignal(cancelCtx)
 				<-ctx.Done()
 				sshClient.setTCPPortForwardDialingAvailableSignal(nil)
@@ -1511,7 +1511,7 @@ func (sshClient *sshClient) runOSLSender() {
 		// TODO: use reflect.SelectCase, and optionally await timer here?
 		select {
 		case <-sshClient.signalIssueSLOKs:
-		case <-sshClient.runContext.Done():
+		case <-sshClient.runCtx.Done():
 			return
 		}
 
@@ -1529,7 +1529,7 @@ func (sshClient *sshClient) runOSLSender() {
 			select {
 			case <-retryTimer.C:
 			case <-sshClient.signalIssueSLOKs:
-			case <-sshClient.runContext.Done():
+			case <-sshClient.runCtx.Done():
 				retryTimer.Stop()
 				return
 			}
@@ -2088,14 +2088,14 @@ func (sshClient *sshClient) handleTCPChannel(
 	// Hostname resolution is performed explicitly, as a separate step, as the target IP
 	// address is used for traffic rules (AllowSubnets) and OSL seed progress.
 	//
-	// Contexts are used for cancellation (via sshClient.runContext, which is cancelled
+	// Contexts are used for cancellation (via sshClient.runCtx, which is cancelled
 	// when the client is stopping) and timeouts.
 
 	dialStartTime := monotime.Now()
 
 	log.WithContextFields(LogFields{"hostToConnect": hostToConnect}).Debug("resolving")
 
-	ctx, cancelCtx := context.WithTimeout(sshClient.runContext, remainingDialTimeout)
+	ctx, cancelCtx := context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
 	IPs, err := (&net.Resolver{}).LookupIPAddr(ctx, hostToConnect)
 	cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 
@@ -2154,7 +2154,7 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	log.WithContextFields(LogFields{"remoteAddr": remoteAddr}).Debug("dialing")
 
-	ctx, cancelCtx = context.WithTimeout(sshClient.runContext, remainingDialTimeout)
+	ctx, cancelCtx = context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
 	fwdConn, err := (&net.Dialer{}).DialContext(ctx, "tcp", remoteAddr)
 	cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 

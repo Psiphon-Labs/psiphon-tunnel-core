@@ -89,7 +89,6 @@ var _HTTP_PROXY_TYPE = "HTTP"
 // NewHttpProxy initializes and runs a new HTTP proxy server.
 func NewHttpProxy(
 	config *Config,
-	untunneledDialConfig *DialConfig,
 	tunneler Tunneler,
 	listenIP string) (proxy *HttpProxy, err error) {
 
@@ -106,11 +105,10 @@ func NewHttpProxy(
 		// downstreamConn is not set in this case, as there is not a fixed
 		// association between a downstream client connection and a particular
 		// tunnel.
-		// TODO: connect timeout?
 		return tunneler.Dial(addr, false, nil)
 	}
 	directDialer := func(_, addr string) (conn net.Conn, err error) {
-		return DialTCP(addr, untunneledDialConfig)
+		return tunneler.DirectDial(addr)
 	}
 
 	responseHeaderTimeout := time.Duration(*config.HttpProxyOriginServerTimeoutSeconds) * time.Second

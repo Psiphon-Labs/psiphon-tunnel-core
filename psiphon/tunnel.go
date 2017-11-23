@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -44,15 +45,22 @@ import (
 // Components which use this interface may be serviced by a single Tunnel instance,
 // or a Controller which manages a pool of tunnels, or any other object which
 // implements Tunneler.
-// alwaysTunnel indicates that the connection should always be tunneled. If this
-// is not set, the connection may be made directly, depending on split tunnel
-// classification, when that feature is supported and active.
-// downstreamConn is an optional parameter which specifies a connection to be
-// explicitly closed when the Dialed connection is closed. For instance, this
-// is used to close downstreamConn App<->LocalProxy connections when the related
-// LocalProxy<->SshPortForward connections close.
 type Tunneler interface {
+
+	// Dial creates a tunneled connection.
+	//
+	// alwaysTunnel indicates that the connection should always be tunneled. If this
+	// is not set, the connection may be made directly, depending on split tunnel
+	// classification, when that feature is supported and active.
+	//
+	// downstreamConn is an optional parameter which specifies a connection to be
+	// explicitly closed when the Dialed connection is closed. For instance, this
+	// is used to close downstreamConn App<->LocalProxy connections when the related
+	// LocalProxy<->SshPortForward connections close.
 	Dial(remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error)
+
+	DirectDial(remoteAddr string) (conn net.Conn, err error)
+
 	SignalComponentFailure()
 }
 
@@ -70,7 +78,6 @@ type TunnelOwner interface {
 type Tunnel struct {
 	mutex                        *sync.Mutex
 	config                       *Config
-	untunneledDialConfig         *DialConfig
 	isActivated                  bool
 	isDiscarded                  bool
 	isClosed                     bool
@@ -82,7 +89,8 @@ type Tunnel struct {
 	sshClient                    *ssh.Client
 	sshServerRequests            <-chan *ssh.Request
 	operateWaitGroup             *sync.WaitGroup
-	shutdownOperateBroadcast     chan struct{}
+	operateCtx                   context.Context
+	stopOperate                  context.CancelFunc
 	signalPortForwardFailure     chan struct{}
 	totalPortForwardFailures     int
 	adjustedEstablishStartTime   monotime.Time
@@ -123,7 +131,6 @@ type TunnelDialStats struct {
 // HTTP (meek protocol).
 // When requiredProtocol is not blank, that protocol is used. Otherwise,
 // the a random supported protocol is used.
-// untunneledDialConfig is used for untunneled final status requests.
 //
 // Call Activate on a connected tunnel to complete its establishment
 // before using.
@@ -136,10 +143,9 @@ type TunnelDialStats struct {
 // as necessary.
 //
 func ConnectTunnel(
+	ctx context.Context,
 	config *Config,
-	untunneledDialConfig *DialConfig,
 	sessionId string,
-	pendingConns *common.Conns,
 	serverEntry *protocol.ServerEntry,
 	selectedProtocol string,
 	adjustedEstablishStartTime monotime.Time) (*Tunnel, error) {
@@ -151,27 +157,21 @@ func ConnectTunnel(
 	// Build transport layers and establish SSH connection. Note that
 	// dialConn and monitoredConn are the same network connection.
 	dialResult, err := dialSsh(
-		config, pendingConns, serverEntry, selectedProtocol, sessionId)
+		ctx, config, serverEntry, selectedProtocol, sessionId)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
-	// Now that connection dials are complete, cancel interruptibility
-	pendingConns.Remove(dialResult.dialConn)
-
 	// The tunnel is now connected
 	return &Tunnel{
-		mutex:                    new(sync.Mutex),
-		config:                   config,
-		untunneledDialConfig:     untunneledDialConfig,
-		sessionId:                sessionId,
-		serverEntry:              serverEntry,
-		protocol:                 selectedProtocol,
-		conn:                     dialResult.monitoredConn,
-		sshClient:                dialResult.sshClient,
-		sshServerRequests:        dialResult.sshRequests,
-		operateWaitGroup:         new(sync.WaitGroup),
-		shutdownOperateBroadcast: make(chan struct{}),
+		mutex:             new(sync.Mutex),
+		config:            config,
+		sessionId:         sessionId,
+		serverEntry:       serverEntry,
+		protocol:          selectedProtocol,
+		conn:              dialResult.monitoredConn,
+		sshClient:         dialResult.sshClient,
+		sshServerRequests: dialResult.sshRequests,
 		// A buffer allows at least one signal to be sent even when the receiver is
 		// not listening. Senders should not block.
 		signalPortForwardFailure:   make(chan struct{}, 1),
@@ -187,8 +187,8 @@ func ConnectTunnel(
 // request and starting operateTunnel, the worker that monitors the tunnel
 // and handles periodic management.
 func (tunnel *Tunnel) Activate(
-	tunnelOwner TunnelOwner,
-	shutdownBroadcast chan struct{}) error {
+	ctx context.Context,
+	tunnelOwner TunnelOwner) error {
 
 	// Create a new Psiphon API server context for this tunnel. This includes
 	// performing a handshake request. If the handshake fails, this activation
@@ -207,6 +207,13 @@ func (tunnel *Tunnel) Activate(
 		// request. At this point, there is no operateTunnel monitor that will detect
 		// this condition with SSH keep alives.
 
+		if *tunnel.config.PsiphonApiServerTimeoutSeconds > 0 {
+			var cancelFunc context.CancelFunc
+			ctx, cancelFunc = context.WithTimeout(
+				ctx, time.Second*time.Duration(*tunnel.config.PsiphonApiServerTimeoutSeconds))
+			defer cancelFunc()
+		}
+
 		type newServerContextResult struct {
 			serverContext *ServerContext
 			err           error
@@ -224,37 +231,13 @@ func (tunnel *Tunnel) Activate(
 
 		var result newServerContextResult
 
-		if *tunnel.config.PsiphonApiServerTimeoutSeconds > 0 {
-
-			timer := time.NewTimer(
-				time.Second *
-					time.Duration(
-						*tunnel.config.PsiphonApiServerTimeoutSeconds))
-
-			select {
-			case result = <-resultChannel:
-			case <-timer.C:
-				result.err = errors.New("timed out")
-				// Interrupt the Activate goroutine and await its completion.
-				tunnel.Close(true)
-				<-resultChannel
-			case <-shutdownBroadcast:
-				result.err = errors.New("shutdown")
-				tunnel.Close(true)
-				<-resultChannel
-			}
-
-			timer.Stop()
-
-		} else {
-
-			select {
-			case result = <-resultChannel:
-			case <-shutdownBroadcast:
-				result.err = errors.New("shutdown")
-				tunnel.Close(true)
-				<-resultChannel
-			}
+		select {
+		case result = <-resultChannel:
+		case <-ctx.Done():
+			result.err = ctx.Err()
+			// Interrupt the goroutine
+			tunnel.Close(true)
+			<-resultChannel
 		}
 
 		if result.err != nil {
@@ -289,6 +272,11 @@ func (tunnel *Tunnel) Activate(
 	tunnel.establishDuration = monotime.Since(tunnel.adjustedEstablishStartTime)
 	tunnel.establishedTime = monotime.Now()
 
+	// Use the Background context instead of the controller run context, as tunnels
+	// are terminated when the controller calls tunnel.Close.
+	tunnel.operateCtx, tunnel.stopOperate = context.WithCancel(context.Background())
+	tunnel.operateWaitGroup = new(sync.WaitGroup)
+
 	// Spawn the operateTunnel goroutine, which monitors the tunnel and handles periodic
 	// stats updates.
 	tunnel.operateWaitGroup.Add(1)
@@ -318,12 +306,9 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 		// shutdown.
 		// A timer is set, so if operateTunnel takes too long to stop, the
 		// tunnel is closed, which will interrupt any slow final status request.
-		// In effect, the TUNNEL_OPERATE_SHUTDOWN_TIMEOUT value will take
-		// precedence over the PSIPHON_API_SERVER_TIMEOUT http.Client.Timeout
-		// value set in makePsiphonHttpsClient.
 		if isActivated {
 			afterFunc := time.AfterFunc(TUNNEL_OPERATE_SHUTDOWN_TIMEOUT, func() { tunnel.conn.Close() })
-			close(tunnel.shutdownOperateBroadcast)
+			tunnel.stopOperate()
 			tunnel.operateWaitGroup.Wait()
 			afterFunc.Stop()
 		}
@@ -386,17 +371,28 @@ func (tunnel *Tunnel) Dial(
 		sshPortForwardConn net.Conn
 		err                error
 	}
-	resultChannel := make(chan *tunnelDialResult, 2)
+
+	// Note: there is no dial context since SSH port forward dials cannot
+	// be interrupted directly. Closing the tunnel will interrupt the dials.
+	// A timeout is set to unblock this function, but the goroutine may
+	// not exit until the tunnel is closed.
+
+	// Use a buffer of 1 as there are two senders and only one guaranteed receive.
+
+	resultChannel := make(chan *tunnelDialResult, 1)
+
 	if *tunnel.config.TunnelPortForwardDialTimeoutSeconds > 0 {
 		afterFunc := time.AfterFunc(time.Duration(*tunnel.config.TunnelPortForwardDialTimeoutSeconds)*time.Second, func() {
 			resultChannel <- &tunnelDialResult{nil, errors.New("tunnel dial timeout")}
 		})
 		defer afterFunc.Stop()
 	}
+
 	go func() {
 		sshPortForwardConn, err := tunnel.sshClient.Dial("tcp", remoteAddr)
 		resultChannel <- &tunnelDialResult{sshPortForwardConn, err}
 	}()
+
 	result := <-resultChannel
 
 	if result.err != nil {
@@ -739,11 +735,18 @@ type dialResult struct {
 // base dial conn. The *ActivityMonitoredConn return value is the layered conn passed into
 // the ssh.Client.
 func dialSsh(
+	ctx context.Context,
 	config *Config,
-	pendingConns *common.Conns,
 	serverEntry *protocol.ServerEntry,
 	selectedProtocol,
 	sessionId string) (*dialResult, error) {
+
+	if *config.TunnelConnectTimeoutSeconds > 0 {
+		var cancelFunc context.CancelFunc
+		ctx, cancelFunc = context.WithTimeout(
+			ctx, time.Second*time.Duration(*config.TunnelConnectTimeoutSeconds))
+		defer cancelFunc()
+	}
 
 	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
 	// So depending on which protocol is used, multiple layers are initialized.
@@ -808,8 +811,6 @@ func dialSsh(
 	dialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
 		CustomHeaders:                 dialCustomHeaders,
-		ConnectTimeout:                time.Duration(*config.TunnelConnectTimeoutSeconds) * time.Second,
-		PendingConns:                  pendingConns,
 		DeviceBinder:                  config.DeviceBinder,
 		DnsServerGetter:               config.DnsServerGetter,
 		IPv6Synthesizer:               config.IPv6Synthesizer,
@@ -869,41 +870,12 @@ func dialSsh(
 
 	var dialConn net.Conn
 	if meekConfig != nil {
-		dialConn, err = DialMeek(meekConfig, dialConfig)
+		dialConn, err = DialMeek(ctx, meekConfig, dialConfig)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
 	} else {
-
-		// For some direct connect servers, DialPluginProtocol
-		// will layer on another obfuscation protocol.
-
-		// Use a copy of DialConfig without pendingConns; the
-		// DialPluginProtocol must supply and manage its own
-		// for its base network connections.
-		pluginDialConfig := new(DialConfig)
-		*pluginDialConfig = *dialConfig
-		pluginDialConfig.PendingConns = nil
-
-		var dialedPlugin bool
-		dialedPlugin, dialConn, err = DialPluginProtocol(
-			config,
-			NewNoticeWriter("DialPluginProtocol"),
-			pendingConns,
-			directTCPDialAddress,
-			dialConfig)
-
-		if !dialedPlugin && err != nil {
-			NoticeInfo("DialPluginProtocol intialization failed: %s", err)
-		}
-
-		if dialedPlugin {
-			NoticeInfo("using DialPluginProtocol for %s", serverEntry.IpAddress)
-		} else {
-			// Standard direct connection.
-			dialConn, err = DialTCP(directTCPDialAddress, dialConfig)
-		}
-
+		dialConn, err = DialTCP(ctx, directTCPDialAddress, dialConfig)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -920,7 +892,6 @@ func dialSsh(
 		// Cleanup on error
 		if cleanupConn != nil {
 			cleanupConn.Close()
-			pendingConns.Remove(cleanupConn)
 		}
 	}()
 
@@ -967,6 +938,7 @@ func dialSsh(
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
+
 	sshClientConfig := &ssh.ClientConfig{
 		User: serverEntry.SshUsername,
 		Auth: []ssh.AuthMethod{
@@ -985,20 +957,19 @@ func dialSsh(
 	// Note: TCP handshake timeouts are provided by TCPConn, and session
 	// timeouts *after* ssh establishment are provided by the ssh keep alive
 	// in operate tunnel.
-	// TODO: adjust the timeout to account for time-elapsed-from-start
 
 	type sshNewClientResult struct {
 		sshClient   *ssh.Client
 		sshRequests <-chan *ssh.Request
 		err         error
 	}
-	resultChannel := make(chan *sshNewClientResult, 2)
-	if *config.TunnelConnectTimeoutSeconds > 0 {
-		afterFunc := time.AfterFunc(time.Duration(*config.TunnelConnectTimeoutSeconds)*time.Second, func() {
-			resultChannel <- &sshNewClientResult{nil, nil, errors.New("ssh dial timeout")}
-		})
-		defer afterFunc.Stop()
-	}
+
+	resultChannel := make(chan sshNewClientResult)
+
+	// Call NewClientConn in a goroutine, as it blocks on SSH handshake network
+	// operations, and would block canceling or shutdown. If the parent context
+	// is canceled, close the net.Conn underlying SSH, which will interrupt the
+	// SSH handshake that may be blocking NewClientConn.
 
 	go func() {
 		// The following is adapted from ssh.Dial(), here using a custom conn
@@ -1020,10 +991,20 @@ func dialSsh(
 
 			sshClient = ssh.NewClient(sshClientConn, sshChannels, noRequests)
 		}
-		resultChannel <- &sshNewClientResult{sshClient, sshRequests, err}
+		resultChannel <- sshNewClientResult{sshClient, sshRequests, err}
 	}()
 
-	result := <-resultChannel
+	var result sshNewClientResult
+
+	select {
+	case result = <-resultChannel:
+	case <-ctx.Done():
+		result.err = ctx.Err()
+		// Interrupt the goroutine
+		sshConn.Close()
+		<-resultChannel
+	}
+
 	if result.err != nil {
 		return nil, common.ContextError(result.err)
 	}
@@ -1135,14 +1116,8 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	statsTimer := time.NewTimer(nextStatusRequestPeriod())
 	defer statsTimer.Stop()
 
-	// Schedule an immediate status request to deliver any unreported
+	// Schedule an almost-immediate status request to deliver any unreported
 	// persistent stats.
-	// Note: this may not be effective when there's an outstanding
-	// asynchronous untunneled final status request is holding the
-	// persistent stats records. It may also conflict with other
-	// tunnel candidates which attempt to send an immediate request
-	// before being discarded. For now, we mitigate this with a short,
-	// random delay.
 	unreported := CountUnreportedPersistentStats()
 	if unreported > 0 {
 		NoticeInfo("Unreported persistent stats: %d", unreported)
@@ -1319,7 +1294,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 				}
 			}
 
-		case <-tunnel.shutdownOperateBroadcast:
+		case <-tunnel.operateCtx.Done():
 			shutdown = true
 		}
 	}
@@ -1393,40 +1368,18 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		}
 	}
 
-	// Final status request notes:
-	//
-	// It's highly desirable to send a final status request in order to report
-	// domain bytes transferred stats as well as to report tunnel stats as
-	// soon as possible. For this reason, we attempt untunneled requests when
-	// the tunneled request isn't possible or has failed.
-	//
-	// In an orderly shutdown (err == nil), the Controller is stopping and
-	// everything must be wrapped up quickly. Also, we still have a working
-	// tunnel. So we first attempt a tunneled status request (with a short
-	// timeout) and then attempt, synchronously -- otherwise the Contoller's
-	// runWaitGroup.Wait() will return while a request is still in progress
-	// -- untunneled requests (also with short timeouts). Note that in this
-	// case the untunneled request will opt out of untunneledPendingConns so
-	// that it's not inadvertently canceled by the Controller shutdown
-	// sequence (see doUntunneledStatusRequest).
-	//
-	// If the tunnel has failed, the Controller may continue working. We want
-	// to re-establish as soon as possible (so don't want to block on status
-	// requests, even for a second). We may have a long time to attempt
-	// untunneled requests in the background. And there is no tunnel through
-	// which to attempt tunneled requests. So we spawn a goroutine to run the
-	// untunneled requests, which are allowed a longer timeout. These requests
-	// will be interrupted by the Controller's untunneledPendingConns.CloseAll()
-	// in the case of a shutdown.
-
 	if err == nil {
 		NoticeInfo("shutdown operate tunnel")
-		if !sendStats(tunnel) {
-			sendUntunneledStats(tunnel, true)
-		}
+
+		// Send a final status request in order to report any outstanding
+		// domain bytes transferred stats as well as to report session stats
+		// as soon as possible.
+		// This request will be interrupted when the tunnel is closed after
+		// TUNNEL_OPERATE_SHUTDOWN_TIMEOUT.
+		sendStats(tunnel)
+
 	} else {
 		NoticeAlert("operate tunnel error for %s: %s", tunnel.serverEntry.IpAddress, err)
-		go sendUntunneledStats(tunnel, false)
 		tunnelOwner.SignalTunnelFailure(tunnel)
 	}
 }
@@ -1438,7 +1391,14 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 func sendSshKeepAlive(
 	sshClient *ssh.Client, conn net.Conn, timeout time.Duration) error {
 
-	errChannel := make(chan error, 2)
+	// Note: there is no request context since SSH requests cannot be
+	// interrupted directly. Closing the tunnel will interrupt the request.
+	// A timeout is set to unblock this function, but the goroutine may
+	// not exit until the tunnel is closed.
+
+	// Use a buffer of 1 as there are two senders and only one guaranteed receive.
+
+	errChannel := make(chan error, 1)
 	if timeout > 0 {
 		afterFunc := time.AfterFunc(timeout, func() {
 			errChannel <- errors.New("timed out")
@@ -1488,27 +1448,6 @@ func sendStats(tunnel *Tunnel) bool {
 	}
 
 	return err == nil
-}
-
-// sendUntunnelStats sends final status requests directly to Psiphon
-// servers after the tunnel has already failed. This is an attempt
-// to retain useful bytes transferred stats.
-func sendUntunneledStats(tunnel *Tunnel, isShutdown bool) {
-
-	// Tunnel does not have a serverContext when DisableApi is set
-	if tunnel.serverContext == nil {
-		return
-	}
-
-	// Skip when tunnel is discarded
-	if tunnel.IsDiscarded() {
-		return
-	}
-
-	err := tunnel.serverContext.TryUntunneledStatusRequest(isShutdown)
-	if err != nil {
-		NoticeAlert("TryUntunneledStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
-	}
 }
 
 // sendClientVerification is a helper for sending a client verification request

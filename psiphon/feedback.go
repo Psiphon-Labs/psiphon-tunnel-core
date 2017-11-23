@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -111,7 +112,6 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 	untunneledDialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
 		CustomHeaders:                 config.CustomHeaders,
-		PendingConns:                  nil,
 		DeviceBinder:                  nil,
 		IPv6Synthesizer:               nil,
 		DnsServerGetter:               nil,
@@ -157,13 +157,22 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 
 // Attempt to upload feedback data to server.
 func uploadFeedback(config *DialConfig, feedbackData []byte, url, userAgent string, headerPieces []string) error {
-	client, parsedUrl, err := MakeUntunneledHttpsClient(
-		config, nil, url, false, time.Duration(FEEDBACK_UPLOAD_TIMEOUT_SECONDS*time.Second))
+
+	ctx, cancelFunc := context.WithTimeout(
+		context.Background(),
+		time.Duration(FEEDBACK_UPLOAD_TIMEOUT_SECONDS*time.Second))
+	defer cancelFunc()
+
+	client, err := MakeUntunneledHTTPClient(
+		ctx,
+		config,
+		nil,
+		false)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest("PUT", parsedUrl, bytes.NewBuffer(feedbackData))
+	req, err := http.NewRequest("PUT", url, bytes.NewBuffer(feedbackData))
 	if err != nil {
 		return common.ContextError(err)
 	}

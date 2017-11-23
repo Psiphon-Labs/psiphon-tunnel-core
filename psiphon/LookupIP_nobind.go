@@ -22,6 +22,7 @@
 package psiphon
 
 import (
+	"context"
 	"errors"
 	"net"
 
@@ -30,9 +31,21 @@ import (
 
 // LookupIP resolves a hostname. When BindToDevice is not required, it
 // simply uses net.LookupIP.
-func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
+func LookupIP(ctx context.Context, host string, _ *DialConfig) ([]net.IP, error) {
+
 	if config.DeviceBinder != nil {
 		return nil, common.ContextError(errors.New("LookupIP with DeviceBinder not supported on this platform"))
 	}
-	return net.LookupIP(host)
+
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	ips := make([]netIP, len(addrs))
+	for i, addr := range addrs {
+		ips[i] = addr.IP
+	}
+
+	return ips, nil
 }

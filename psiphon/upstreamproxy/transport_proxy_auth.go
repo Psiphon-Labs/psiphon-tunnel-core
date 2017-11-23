@@ -22,6 +22,7 @@ package upstreamproxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -38,7 +39,6 @@ const HTTP_STAT_LINE_LENGTH = 12
 // when requested by server
 type ProxyAuthTransport struct {
 	*http.Transport
-	Dial          DialFunc
 	Username      string
 	Password      string
 	Authenticator HttpAuthenticator
@@ -46,34 +46,53 @@ type ProxyAuthTransport struct {
 	CustomHeaders http.Header
 }
 
-func NewProxyAuthTransport(rawTransport *http.Transport, customHeaders http.Header) (*ProxyAuthTransport, error) {
-	dialFn := rawTransport.Dial
-	if dialFn == nil {
-		dialFn = net.Dial
+func NewProxyAuthTransport(
+	rawTransport *http.Transport,
+	customHeaders http.Header) (*ProxyAuthTransport, error) {
+
+	if rawTransport.DialContext == nil {
+		return nil, fmt.Errorf("rawTransport must have DialContext")
 	}
-	tr := &ProxyAuthTransport{Dial: dialFn, CustomHeaders: customHeaders}
-	proxyUrlFn := rawTransport.Proxy
-	if proxyUrlFn != nil {
-		wrappedDialFn := tr.wrapTransportDial()
-		rawTransport.Dial = wrappedDialFn
-		proxyUrl, err := proxyUrlFn(nil)
+
+	if rawTransport.Proxy == nil {
+		return nil, fmt.Errorf("rawTransport must have Proxy")
+	}
+
+	tr := &ProxyAuthTransport{
+		Transport:     rawTransport,
+		CustomHeaders: customHeaders,
+	}
+
+	// Wrap the original transport's custom dialed conns in transportConns,
+	// which handle connection-based authentication.
+	originalDialContext := rawTransport.DialContext
+	rawTransport.DialContext = func(
+		ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := originalDialContext(ctx, "tcp", addr)
 		if err != nil {
 			return nil, err
 		}
-		if proxyUrl.Scheme != "http" {
-			return nil, fmt.Errorf("Only HTTP proxy supported, for SOCKS use http.Transport with custom dialers & upstreamproxy.NewProxyDialFunc")
-		}
-		if proxyUrl.User != nil {
-			tr.Username = proxyUrl.User.Username()
-			tr.Password, _ = proxyUrl.User.Password()
-		}
-		// strip username and password from the proxyURL because
-		// we do not want the wrapped transport to handle authentication
-		proxyUrl.User = nil
-		rawTransport.Proxy = http.ProxyURL(proxyUrl)
+		// Any additional dials made by transportConn are within
+		// the original dial context.
+		return newTransportConn(ctx, conn, tr), nil
 	}
 
-	tr.Transport = rawTransport
+	proxyUrl, err := rawTransport.Proxy(nil)
+	if err != nil {
+		return nil, err
+	}
+	if proxyUrl.Scheme != "http" {
+		return nil, fmt.Errorf("%s unsupported", proxyUrl.Scheme)
+	}
+	if proxyUrl.User != nil {
+		tr.Username = proxyUrl.User.Username()
+		tr.Password, _ = proxyUrl.User.Password()
+	}
+	// strip username and password from the proxyURL because
+	// we do not want the wrapped transport to handle authentication
+	proxyUrl.User = nil
+	rawTransport.Proxy = http.ProxyURL(proxyUrl)
+
 	return tr, nil
 }
 
@@ -88,7 +107,7 @@ func (tr *ProxyAuthTransport) preAuthenticateRequest(req *http.Request) error {
 
 func (tr *ProxyAuthTransport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	if req.URL.Scheme != "http" {
-		return nil, fmt.Errorf("Only plain HTTP supported, for HTTPS use http.Transport with DialTLS & upstreamproxy.NewProxyDialFunc")
+		return nil, fmt.Errorf("%s unsupported", req.URL.Scheme)
 	}
 	err = tr.preAuthenticateRequest(req)
 	if err != nil {
@@ -143,21 +162,6 @@ func (tr *ProxyAuthTransport) RoundTrip(req *http.Request) (resp *http.Response,
 
 }
 
-// wrapTransportDial wraps original transport Dial function
-// and returns a new net.Conn interface provided by transportConn
-// that allows us to intercept both outgoing requests and incoming
-// responses and examine / mutate them
-func (tr *ProxyAuthTransport) wrapTransportDial() DialFunc {
-	return func(network, addr string) (net.Conn, error) {
-		c, err := tr.Dial("tcp", addr)
-		if err != nil {
-			return nil, err
-		}
-		tc := newTransportConn(c, tr)
-		return tc, nil
-	}
-}
-
 // Based on https://github.com/golang/oauth2/blob/master/transport.go
 // Copyright 2014 The Go Authors. All rights reserved.
 func cloneRequest(r *http.Request, ch http.Header) *http.Request {
@@ -197,11 +201,16 @@ func cloneRequest(r *http.Request, ch http.Header) *http.Request {
 
 		r2.Body = ioutil.NopCloser(bytes.NewReader(body))
 	}
+
+	// A replayed request inherits the original request's deadline (and interruptability).
+	r2 = r2.WithContext(r.Context())
+
 	return r2
 }
 
 type transportConn struct {
 	net.Conn
+	ctx                context.Context
 	requestInterceptor io.Writer
 	reqDone            chan struct{}
 	errChannel         chan error
@@ -210,9 +219,42 @@ type transportConn struct {
 	transport          *ProxyAuthTransport
 }
 
-func newTransportConn(c net.Conn, tr *ProxyAuthTransport) *transportConn {
+func newTransportConn(
+	ctx context.Context,
+	c net.Conn,
+	tr *ProxyAuthTransport) *transportConn {
+
+	// TODOs:
+	//
+	// - Additional dials made by transportConn, for authentication, use the
+	//   original conn's dial context. If authentication can be requested at any
+	//   time, instead of just at the start of a connection, then any deadline for
+	//   this context will be inappropriate.
+	//
+	// - The "intercept" goroutine spawned below will never terminate? Even if the
+	//   transportConn is closed, nothing will unblock reads of the pipe made by
+	//   http.ReadRequest. There should be a call to pw.Close() in transportConn.Close().
+	//
+	// - The ioutil.ReadAll in the "intercept" goroutine allocates new buffers for
+	//   every request. To avoid GC churn it should use a byte.Buffer to reuse a
+	//   single buffer. In practise, there will be a reasonably small maximum request
+	//   body size, so its better to retain and reuse a buffer than to continously
+	//   reallocate.
+	//
+	// - transportConn.Read will not do anything if the caller passes in a very small
+	//   read buffer. This should be documented, as its assuming that the caller is
+	//   fully reading at least HTTP_STAT_LINE_LENGTH at the start of request.
+	//
+	// - As a net.Conn, transportConn.Read should always be interrupted by a call to
+	//   Close, but it may be possible for Read to remain blocked:
+	//   1. caller writes less than a full request to Write
+	//   2. "intercept" call to http.ReadRequest will not return
+	//   3. caller calls Close, which just calls transportConn.Conn.Close
+	//   4. any existing call to Read remains blocked in the select
+
 	tc := &transportConn{
 		Conn:       c,
+		ctx:        ctx,
 		reqDone:    make(chan struct{}),
 		errChannel: make(chan error),
 		transport:  tr,
@@ -301,7 +343,15 @@ func (tc *transportConn) Read(p []byte) (n int, readErr error) {
 				// dial a new one
 				addr := tc.Conn.RemoteAddr()
 				tc.Conn.Close()
-				tc.Conn, err = tc.transport.Dial(addr.Network(), addr.String())
+
+				// Additional dials are made within the context of the dial of the
+				// outer conn this transportConn is wrapping, so the scope of outer
+				// dial timeouts includes these additional dials. This is also to
+				// ensure these dials are interrupted when the context is canceled.
+
+				tc.Conn, err = tc.transport.Transport.DialContext(
+					tc.ctx, addr.Network(), addr.String())
+
 				if err != nil {
 					return 0, err
 				}

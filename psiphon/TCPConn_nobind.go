@@ -22,18 +22,27 @@
 package psiphon
 
 import (
+	"context"
 	"errors"
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
-// tcpDial is the platform-specific part of interruptibleTCPDial
-func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
+// tcpDial is the platform-specific part of DialTCP
+func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, error) {
 
 	if config.DeviceBinder != nil {
 		return nil, common.ContextError(errors.New("psiphon.interruptibleTCPDial with DeviceBinder not supported"))
 	}
 
-	return net.DialTimeout("tcp", addr, config.ConnectTimeout)
+	dialer := net.Dialer{}
+
+	conn, err := dialer.DialContext(ctx, "tcp", addr, config.ConnectTimeout)
+
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return &TCPConn{Conn: conn}, nil
 }
