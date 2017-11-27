@@ -31,7 +31,7 @@ import (
 
 // LookupIP resolves a hostname. When BindToDevice is not required, it
 // simply uses net.LookupIP.
-func LookupIP(ctx context.Context, host string, _ *DialConfig) ([]net.IP, error) {
+func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, error) {
 
 	if config.DeviceBinder != nil {
 		return nil, common.ContextError(errors.New("LookupIP with DeviceBinder not supported on this platform"))
@@ -42,7 +42,7 @@ func LookupIP(ctx context.Context, host string, _ *DialConfig) ([]net.IP, error)
 		return nil, common.ContextError(err)
 	}
 
-	ips := make([]netIP, len(addrs))
+	ips := make([]net.IP, len(addrs))
 	for i, addr := range addrs {
 		ips[i] = addr.IP
 	}

@@ -38,7 +38,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 
 	dialer := net.Dialer{}
 
-	conn, err := dialer.DialContext(ctx, "tcp", addr, config.ConnectTimeout)
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 
 	if err != nil {
 		return nil, common.ContextError(err)
