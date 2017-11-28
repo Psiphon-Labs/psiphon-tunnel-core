@@ -29,6 +29,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
@@ -62,6 +63,12 @@ func main() {
 
 	var listScheme int
 	flag.IntVar(&listScheme, "list-scheme", -1, "list current period OSL IDs for specified scheme; no files are written")
+
+	var omitMD5SumsSchemes ints
+	flag.Var(&omitMD5SumsSchemes, "omit-md5sums", "omit MD5Sum fields for specified scheme(s)")
+
+	var omitEmptyOSLsSchemes ints
+	flag.Var(&omitEmptyOSLsSchemes, "omit-empty", "omit empty OSLs for specified scheme(s)")
 
 	flag.Parse()
 
@@ -211,6 +218,8 @@ func main() {
 			signingPublicKey,
 			signingPrivateKey,
 			paveServerEntries,
+			omitMD5SumsSchemes,
+			omitEmptyOSLsSchemes,
 			func(logInfo *osl.PaveLogInfo) {
 				pavedPayloadOSLID[logInfo.OSLID] = true
 				fmt.Printf(
@@ -265,4 +274,19 @@ func main() {
 		fmt.Printf("payload contains unknown OSL IDs\n")
 		os.Exit(1)
 	}
+}
+
+type ints []int
+
+func (i *ints) String() string {
+	return fmt.Sprint(*i)
+}
+
+func (i *ints) Set(strValue string) error {
+	value, err := strconv.Atoi(strValue)
+	if err != nil {
+		return err
+	}
+	*i = append(*i, value)
+	return nil
 }
