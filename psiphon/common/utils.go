@@ -48,6 +48,17 @@ func Contains(list []string, target string) bool {
 	return false
 }
 
+// ContainsInt returns true if the target int is
+// in the list.
+func ContainsInt(list []int, target int) bool {
+	for _, listItem := range list {
+		if listItem == target {
+			return true
+		}
+	}
+	return false
+}
+
 // FlipCoin is a helper function that randomly
 // returns true or false. If the underlying random
 // number generator fails, FlipCoin still returns

@@ -30,6 +30,8 @@
 package osl
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/sha256"
@@ -49,9 +51,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Psiphon-Inc/sss"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/secretbox"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/sss"
 )
 
 const (
@@ -123,7 +125,6 @@ type Scheme struct {
 	// sufficiently seeded. And so on. The first level in the list is the
 	// lowest level. The time period for OSLs is determined by the totals in
 	// the KeySplits.
-	// Limitation: thresholds must be at least 2.
 	//
 	// Example:
 	//
@@ -276,7 +277,7 @@ func NewConfig(filename string) (*Config, error) {
 	return config, nil
 }
 
-// LoadConfig loads, vaildates, and initializes a JSON encoded OSL
+// LoadConfig loads, validates, and initializes a JSON encoded OSL
 // configuration.
 func LoadConfig(configJSON []byte) (*Config, error) {
 
@@ -780,7 +781,8 @@ type PaveLogInfo struct {
 // epoch to endTime, and a pave file for each OSL. paveServerEntries is
 // a map from hex-encoded OSL IDs to server entries to pave into that OSL.
 // When entries are found, OSL will contain those entries, newline
-// separated. Otherwise the OSL will still be issued, but be empty.
+// separated. Otherwise the OSL will still be issued, but be empty (unless
+// the scheme is in skipEmptyOSLsSchemes).
 //
 // As OSLs outside the epoch-endTime range will no longer appear in
 // the registry, Pave is intended to be used to create the full set
@@ -794,6 +796,8 @@ func (config *Config) Pave(
 	signingPublicKey string,
 	signingPrivateKey string,
 	paveServerEntries map[string][]string,
+	omitMD5SumsSchemes []int,
+	omitEmptyOSLsSchemes []int,
 	logCallback func(*PaveLogInfo)) ([]*PaveFile, error) {
 
 	config.ReloadableFile.RLock()
@@ -805,6 +809,10 @@ func (config *Config) Pave(
 
 	for schemeIndex, scheme := range config.Schemes {
 		if common.Contains(scheme.PropagationChannelIDs, propagationChannelID) {
+
+			omitMD5Sums := common.ContainsInt(omitMD5SumsSchemes, schemeIndex)
+
+			omitEmptyOSLs := common.ContainsInt(omitEmptyOSLsSchemes, schemeIndex)
 
 			oslDuration := scheme.GetOSLDuration()
 
@@ -821,47 +829,52 @@ func (config *Config) Pave(
 
 				hexEncodedOSLID := hex.EncodeToString(fileSpec.ID)
 
-				registry.FileSpecs = append(registry.FileSpecs, fileSpec)
-
 				serverEntryCount := len(paveServerEntries[hexEncodedOSLID])
 
-				// serverEntries will be "" when nothing is found in paveServerEntries
-				serverEntries := strings.Join(paveServerEntries[hexEncodedOSLID], "\n")
+				if serverEntryCount > 0 || !omitEmptyOSLs {
 
-				serverEntriesPackage, err := common.WriteAuthenticatedDataPackage(
-					serverEntries,
-					signingPublicKey,
-					signingPrivateKey)
-				if err != nil {
-					return nil, common.ContextError(err)
-				}
+					registry.FileSpecs = append(registry.FileSpecs, fileSpec)
 
-				boxedServerEntries, err := box(fileKey, serverEntriesPackage)
-				if err != nil {
-					return nil, common.ContextError(err)
-				}
+					// serverEntries will be "" when nothing is found in paveServerEntries
+					serverEntries := strings.Join(paveServerEntries[hexEncodedOSLID], "\n")
 
-				md5sum := md5.Sum(boxedServerEntries)
-				fileSpec.MD5Sum = md5sum[:]
+					serverEntriesPackage, err := common.WriteAuthenticatedDataPackage(
+						serverEntries,
+						signingPublicKey,
+						signingPrivateKey)
+					if err != nil {
+						return nil, common.ContextError(err)
+					}
 
-				fileName := fmt.Sprintf(
-					OSL_FILENAME_FORMAT, hexEncodedOSLID)
+					boxedServerEntries, err := box(fileKey, serverEntriesPackage)
+					if err != nil {
+						return nil, common.ContextError(err)
+					}
 
-				paveFiles = append(paveFiles, &PaveFile{
-					Name:     fileName,
-					Contents: boxedServerEntries,
-				})
+					if !omitMD5Sums {
+						md5sum := md5.Sum(boxedServerEntries)
+						fileSpec.MD5Sum = md5sum[:]
+					}
 
-				if logCallback != nil {
-					logCallback(&PaveLogInfo{
-						FileName:             fileName,
-						SchemeIndex:          schemeIndex,
-						PropagationChannelID: propagationChannelID,
-						OSLID:                hexEncodedOSLID,
-						OSLTime:              oslTime,
-						OSLDuration:          oslDuration,
-						ServerEntryCount:     serverEntryCount,
+					fileName := fmt.Sprintf(
+						OSL_FILENAME_FORMAT, hexEncodedOSLID)
+
+					paveFiles = append(paveFiles, &PaveFile{
+						Name:     fileName,
+						Contents: boxedServerEntries,
 					})
+
+					if logCallback != nil {
+						logCallback(&PaveLogInfo{
+							FileName:             fileName,
+							SchemeIndex:          schemeIndex,
+							PropagationChannelID: propagationChannelID,
+							OSLID:                hexEncodedOSLID,
+							OSLTime:              oslTime,
+							OSLDuration:          oslDuration,
+							ServerEntryCount:     serverEntryCount,
+						})
+					}
 				}
 
 				oslTime = oslTime.Add(oslDuration)
@@ -936,19 +949,53 @@ func makeOSLFileSpec(
 	firstSLOK := scheme.deriveSLOK(ref)
 	oslID := firstSLOK.ID
 
-	// Note: previously, this was a random key. Now, the file key
+	// Note: previously, fileKey was a random key. Now, the key
 	// is derived from the master key and OSL ID. This deterministic
 	// derivation ensures that repeated paves of the same OSL
 	// with the same ID and same content yields the same MD5Sum
 	// to avoid wasteful downloads.
+	//
+	// Similarly, the shareKeys generated in divideKey and the Shamir
+	// key splitting random polynomials are now both determinisitcally
+	// generated from a seeded CSPRNG. This ensures that the OSL
+	// registry remains identical for repeated paves of the same config
+	// and parameters.
+	//
+	// The split structure is added to the deterministic key
+	// derivation so that changes to the split configuration will not
+	// expose the same key material to different SLOK combinations.
+
+	splitStructure := make([]byte, 16*(1+len(scheme.SeedPeriodKeySplits)))
+	i := 0
+	binary.LittleEndian.PutUint64(splitStructure[i:], uint64(len(scheme.SeedSpecs)))
+	binary.LittleEndian.PutUint64(splitStructure[i+8:], uint64(scheme.SeedSpecThreshold))
+	i += 16
+	for _, keySplit := range scheme.SeedPeriodKeySplits {
+		binary.LittleEndian.PutUint64(splitStructure[i:], uint64(keySplit.Total))
+		binary.LittleEndian.PutUint64(splitStructure[i+8:], uint64(keySplit.Threshold))
+		i += 16
+	}
 
 	fileKey := deriveKeyHKDF(
 		scheme.MasterKey,
+		splitStructure,
 		[]byte("osl-file-key"),
 		oslID)
 
+	splitKeyMaterialSeed := deriveKeyHKDF(
+		scheme.MasterKey,
+		splitStructure,
+		[]byte("osl-file-split-key-material-seed"),
+		oslID)
+
+	keyMaterialReader, err := newSeededKeyMaterialReader(splitKeyMaterialSeed)
+	if err != nil {
+		return nil, nil, common.ContextError(err)
+	}
+
 	keyShares, err := divideKey(
 		scheme,
+		keyMaterialReader,
 		fileKey,
 		scheme.SeedPeriodKeySplits,
 		propagationChannelID,
@@ -968,6 +1015,7 @@ func makeOSLFileSpec(
 // divideKey recursively constructs a KeyShares tree.
 func divideKey(
 	scheme *Scheme,
+	keyMaterialReader io.Reader,
 	key []byte,
 	keySplits []KeySplit,
 	propagationChannelID string,
@@ -976,7 +1024,11 @@ func divideKey(
 	keySplitIndex := len(keySplits) - 1
 	keySplit := keySplits[keySplitIndex]
 
-	shares, err := shamirSplit(key, keySplit.Total, keySplit.Threshold)
+	shares, err := shamirSplit(
+		key,
+		keySplit.Total,
+		keySplit.Threshold,
+		keyMaterialReader)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -986,15 +1038,12 @@ func divideKey(
 
 	for _, share := range shares {
 
-		// Note: for a fully deterministic pave, where the OSL registry
-		// is unchanged when no OSLs change, the share key would need
-		// to be derived (e.g., from the master key, OSL ID, key split
-		// index, and share index). However, since the OSL registry file
-		// content is nondeterministic in any case due to aspects of the
-		// Shamir secret splitting algorithm, there's no reason not to
-		// use a random key here.
+		var shareKey [KEY_LENGTH_BYTES]byte
 
-		shareKey, err := common.MakeSecureRandomBytes(KEY_LENGTH_BYTES)
+		n, err := keyMaterialReader.Read(shareKey[:])
+		if err == nil && n != len(shareKey) {
+			err = errors.New("unexpected length")
+		}
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -1002,7 +1051,8 @@ func divideKey(
 		if keySplitIndex > 0 {
 			keyShare, err := divideKey(
 				scheme,
-				shareKey,
+				keyMaterialReader,
+				shareKey[:],
 				keySplits[0:keySplitIndex],
 				propagationChannelID,
 				nextSLOKTime)
@@ -1013,7 +1063,8 @@ func divideKey(
 		} else {
 			keyShare, err := divideKeyWithSeedSpecSLOKs(
 				scheme,
-				shareKey,
+				keyMaterialReader,
+				shareKey[:],
 				propagationChannelID,
 				nextSLOKTime)
 			if err != nil {
@@ -1023,7 +1074,7 @@ func divideKey(
 
 			*nextSLOKTime = nextSLOKTime.Add(time.Duration(scheme.SeedPeriodNanoseconds))
 		}
-		boxedShare, err := box(shareKey, share)
+		boxedShare, err := box(shareKey[:], share)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -1040,6 +1091,7 @@ func divideKey(
 
 func divideKeyWithSeedSpecSLOKs(
 	scheme *Scheme,
+	keyMaterialReader io.Reader,
 	key []byte,
 	propagationChannelID string,
 	nextSLOKTime *time.Time) (*KeyShares, error) {
@@ -1048,7 +1100,10 @@ func divideKeyWithSeedSpecSLOKs(
 	var slokIDs [][]byte
 
 	shares, err := shamirSplit(
-		key, len(scheme.SeedSpecs), scheme.SeedSpecThreshold)
+		key,
+		len(scheme.SeedSpecs),
+		scheme.SeedSpecThreshold,
+		keyMaterialReader)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -1352,6 +1407,38 @@ func NewOSLReader(
 		signingPublicKey)
 }
 
+// zeroReader reads an unlimited stream of zeroes.
+type zeroReader struct {
+}
+
+func (z *zeroReader) Read(p []byte) (int, error) {
+	for i := 0; i < len(p); i++ {
+		p[i] = 0
+	}
+	return len(p), nil
+}
+
+// newSeededKeyMaterialReader constructs a CSPRNG using AES-CTR.
+// The seed is the AES key and the IV is fixed and constant.
+// Using same seed will always produce the same output stream.
+// The data stream is intended to be used to determinisically
+// generate key material and is not intended as a general
+// purpose CSPRNG.
+func newSeededKeyMaterialReader(seed []byte) (io.Reader, error) {
+
+	aesCipher, err := aes.NewCipher(seed)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	var iv [aes.BlockSize]byte
+
+	return &cipher.StreamReader{
+		S: cipher.NewCTR(aesCipher, iv[:]),
+		R: new(zeroReader),
+	}, nil
+}
+
 // deriveKeyHKDF implements HKDF-Expand as defined in https://tools.ietf.org/html/rfc5869
 // where masterKey = PRK, context = info, and L = 32; SHA-256 is used so HashLen = 32
 func deriveKeyHKDF(masterKey []byte, context ...[]byte) []byte {
@@ -1372,7 +1459,11 @@ func isValidShamirSplit(total, threshold int) bool {
 }
 
 // shamirSplit is a helper wrapper for sss.Split
-func shamirSplit(secret []byte, total, threshold int) ([][]byte, error) {
+func shamirSplit(
+	secret []byte,
+	total, threshold int,
+	randReader io.Reader) ([][]byte, error) {
+
 	if !isValidShamirSplit(total, threshold) {
 		return nil, common.ContextError(errors.New("invalid parameters"))
 	}
@@ -1386,7 +1477,8 @@ func shamirSplit(secret []byte, total, threshold int) ([][]byte, error) {
 		return shares, nil
 	}
 
-	shareMap, err := sss.Split(byte(total), byte(threshold), secret)
+	shareMap, err := sss.SplitUsingReader(
+		byte(total), byte(threshold), secret, randReader)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
