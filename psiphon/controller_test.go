@@ -1040,6 +1040,10 @@ func initDisruptor() {
 		for {
 			localConn, err := listener.AcceptSocks()
 			if err != nil {
+				if e, ok := err.(net.Error); ok && e.Temporary() {
+					fmt.Printf("disruptor proxy temporary accept error: %s", err)
+					continue
+				}
 				fmt.Printf("disruptor proxy accept error: %s\n", err)
 				return
 			}
