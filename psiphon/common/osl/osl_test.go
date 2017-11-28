@@ -395,7 +395,7 @@ func TestOSL(t *testing.T) {
 			}
 
 			// Check that the content of two paves is the same: all the crypto should be
-			// deterministc.
+			// deterministic.
 
 			for index, paveFile := range paveFiles {
 				if paveFile.Name != firstPaveFiles[index].Name {

@@ -1421,7 +1421,7 @@ func (z *zeroReader) Read(p []byte) (int, error) {
 // newSeededKeyMaterialReader constructs a CSPRNG using AES-CTR.
 // The seed is the AES key and the IV is fixed and constant.
 // Using same seed will always produce the same output stream.
-// The data stream is intended to be used to determinisically
+// The data stream is intended to be used to deterministically
 // generate key material and is not intended as a general
 // purpose CSPRNG.
 func newSeededKeyMaterialReader(seed []byte) (io.Reader, error) {
