@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -32,7 +33,7 @@ import (
 )
 
 type RemoteServerListFetcher func(
-	config *Config, attempt int, tunnel *Tunnel, untunneledDialConfig *DialConfig) error
+	ctx context.Context, config *Config, attempt int, tunnel *Tunnel, untunneledDialConfig *DialConfig) error
 
 // FetchCommonRemoteServerList downloads the common remote server list from
 // config.RemoteServerListUrl. It validates its digital signature using the
@@ -42,6 +43,7 @@ type RemoteServerListFetcher func(
 // download. As the download is resumed after failure, this filename must
 // be unique and persistent.
 func FetchCommonRemoteServerList(
+	ctx context.Context,
 	config *Config,
 	attempt int,
 	tunnel *Tunnel,
@@ -52,6 +54,7 @@ func FetchCommonRemoteServerList(
 	downloadURL, canonicalURL, skipVerify := selectDownloadURL(attempt, config.RemoteServerListURLs)
 
 	newETag, err := downloadRemoteServerListFile(
+		ctx,
 		config,
 		tunnel,
 		untunneledDialConfig,
@@ -116,6 +119,7 @@ func FetchCommonRemoteServerList(
 // downloaded files. As  downloads are resumed after failure, this directory
 // must be unique and persistent.
 func FetchObfuscatedServerLists(
+	ctx context.Context,
 	config *Config,
 	attempt int,
 	tunnel *Tunnel,
@@ -144,6 +148,7 @@ func FetchObfuscatedServerLists(
 	registryFilename := cachedFilename
 
 	newETag, err := downloadRemoteServerListFile(
+		ctx,
 		config,
 		tunnel,
 		untunneledDialConfig,
@@ -219,6 +224,7 @@ func FetchObfuscatedServerLists(
 		sourceETag := fmt.Sprintf("\"%s\"", hex.EncodeToString(oslFileSpec.MD5Sum))
 
 		newETag, err := downloadRemoteServerListFile(
+			ctx,
 			config,
 			tunnel,
 			untunneledDialConfig,
@@ -324,6 +330,7 @@ func FetchObfuscatedServerLists(
 // The caller is responsible for calling SetUrlETag once the file
 // content has been validated.
 func downloadRemoteServerListFile(
+	ctx context.Context,
 	config *Config,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
@@ -349,23 +356,30 @@ func downloadRemoteServerListFile(
 		return "", nil
 	}
 
+	if *config.FetchRemoteServerListTimeoutSeconds > 0 {
+		var cancelFunc context.CancelFunc
+		ctx, cancelFunc = context.WithTimeout(
+			ctx, time.Duration(*config.FetchRemoteServerListTimeoutSeconds)*time.Second)
+		defer cancelFunc()
+	}
+
 	// MakeDownloadHttpClient will select either a tunneled
 	// or untunneled configuration.
 
-	httpClient, requestURL, err := MakeDownloadHttpClient(
+	httpClient, err := MakeDownloadHTTPClient(
+		ctx,
 		config,
 		tunnel,
 		untunneledDialConfig,
-		sourceURL,
-		skipVerify,
-		time.Duration(*config.FetchRemoteServerListTimeoutSeconds)*time.Second)
+		skipVerify)
 	if err != nil {
 		return "", common.ContextError(err)
 	}
 
 	n, responseETag, err := ResumeDownload(
+		ctx,
 		httpClient,
-		requestURL,
+		sourceURL,
 		MakePsiphonUserAgent(config),
 		destinationFilename,
 		lastETag)

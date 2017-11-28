@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -666,18 +667,21 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	// Run controller, which establishes tunnels
 
-	shutdownBroadcast := make(chan struct{})
+	ctx, cancelFunc := context.WithCancel(context.Background())
+
 	controllerWaitGroup := new(sync.WaitGroup)
+
 	controllerWaitGroup.Add(1)
 	go func() {
 		defer controllerWaitGroup.Done()
-		controller.Run(shutdownBroadcast)
+		controller.Run(ctx)
 	}()
 
 	defer func() {
+
 		// Test: shutdown must complete within 20 seconds
 
-		close(shutdownBroadcast)
+		cancelFunc()
 
 		shutdownTimeout := time.NewTimer(20 * time.Second)
 
@@ -1036,6 +1040,10 @@ func initDisruptor() {
 		for {
 			localConn, err := listener.AcceptSocks()
 			if err != nil {
+				if e, ok := err.(net.Error); ok && e.Temporary() {
+					fmt.Printf("disruptor proxy temporary accept error: %s", err)
+					continue
+				}
 				fmt.Printf("disruptor proxy accept error: %s\n", err)
 				return
 			}

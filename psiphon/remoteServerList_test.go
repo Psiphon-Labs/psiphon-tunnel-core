@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"bytes"
+	"context"
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/hex"
@@ -393,8 +394,11 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 			}
 		}))
 
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
+
 	go func() {
-		controller.Run(make(chan struct{}))
+		controller.Run(ctx)
 	}()
 
 	establishTimeout := time.NewTimer(30 * time.Second)

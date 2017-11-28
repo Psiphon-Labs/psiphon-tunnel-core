@@ -33,7 +33,7 @@ import (
 // disconnect from and reconnect to the same or different Psiphon servers. PacketTunnelTransport
 // allows the Psiphon client to substitute new transport channels on-the-fly.
 type PacketTunnelTransport struct {
-	runContext    context.Context
+	runCtx        context.Context
 	stopRunning   context.CancelFunc
 	workers       *sync.WaitGroup
 	readMutex     sync.Mutex
@@ -47,10 +47,10 @@ type PacketTunnelTransport struct {
 // NewPacketTunnelTransport initializes a PacketTunnelTransport.
 func NewPacketTunnelTransport() *PacketTunnelTransport {
 
-	runContext, stopRunning := context.WithCancel(context.Background())
+	runCtx, stopRunning := context.WithCancel(context.Background())
 
 	return &PacketTunnelTransport{
-		runContext:   runContext,
+		runCtx:       runCtx,
 		stopRunning:  stopRunning,
 		workers:      new(sync.WaitGroup),
 		channelReady: sync.NewCond(new(sync.Mutex)),
@@ -122,7 +122,7 @@ func (p *PacketTunnelTransport) Close() error {
 	p.workers.Wait()
 
 	// This broadcast is to wake up reads or writes blocking in getChannel; those
-	// getChannel calls should then abort on the p.runContext.Done() check.
+	// getChannel calls should then abort on the p.runCtx.Done() check.
 	p.channelReady.Broadcast()
 
 	p.channelMutex.Lock()
@@ -173,7 +173,7 @@ func (p *PacketTunnelTransport) setChannel(
 	// UseTunnel call concurrent with a Close call doesn't leave a channel
 	// set.
 	select {
-	case <-p.runContext.Done():
+	case <-p.runCtx.Done():
 		p.channelMutex.Unlock()
 		return
 	default:
@@ -202,7 +202,7 @@ func (p *PacketTunnelTransport) getChannel() (net.Conn, *Tunnel, error) {
 	for {
 
 		select {
-		case <-p.runContext.Done():
+		case <-p.runCtx.Done():
 			return nil, nil, common.ContextError(errors.New("already closed"))
 		default:
 		}

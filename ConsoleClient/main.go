@@ -21,6 +21,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -271,26 +272,31 @@ func main() {
 		os.Exit(1)
 	}
 
-	controllerStopSignal := make(chan struct{}, 1)
-	shutdownBroadcast := make(chan struct{})
+	controllerCtx, stopController := context.WithCancel(context.Background())
+	defer stopController()
+
 	controllerWaitGroup := new(sync.WaitGroup)
 	controllerWaitGroup.Add(1)
 	go func() {
 		defer controllerWaitGroup.Done()
-		controller.Run(shutdownBroadcast)
-		controllerStopSignal <- *new(struct{})
-	}()
+		controller.Run(controllerCtx)
 
-	// Wait for an OS signal or a Run stop signal, then stop Psiphon and exit
+		// Signal the <-controllerCtx.Done() case below. If the <-systemStopSignal
+		// case already called stopController, this is a noop.
+		stopController()
+	}()
 
 	systemStopSignal := make(chan os.Signal, 1)
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill)
+
+	// Wait for an OS signal or a Run stop signal, then stop Psiphon and exit
+
 	select {
 	case <-systemStopSignal:
 		psiphon.NoticeInfo("shutdown by system")
-		close(shutdownBroadcast)
+		stopController()
 		controllerWaitGroup.Wait()
-	case <-controllerStopSignal:
+	case <-controllerCtx.Done():
 		psiphon.NoticeInfo("shutdown by controller")
 	}
 }

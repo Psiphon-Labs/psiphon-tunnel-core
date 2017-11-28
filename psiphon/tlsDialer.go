@@ -72,6 +72,7 @@ package psiphon
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"encoding/hex"
 	"errors"
@@ -95,17 +96,19 @@ type CustomTLSConfig struct {
 	// top of a new network connection created with dialer.
 	Dial Dialer
 
-	// Timeout is and optional timeout for combined network
-	// connection dial and TLS handshake.
-	Timeout time.Duration
-
 	// DialAddr overrides the "addr" input to Dial when specified
 	DialAddr string
+
+	// UseDialAddrSNI specifies whether to always use the dial "addr"
+	// host name in the SNI server_name field. When DialAddr is set,
+	// its host name is used.
+	UseDialAddrSNI bool
 
 	// SNIServerName specifies the value to set in the SNI
 	// server_name field. When blank, SNI is omitted. Note that
 	// underlying TLS code also automatically omits SNI when
 	// the server_name is an IP address.
+	// SNIServerName is ignored when UseDialAddrSNI is true.
 	SNIServerName string
 
 	// SkipVerify completely disables server certificate verification.
@@ -170,8 +173,8 @@ func SelectTLSProfile(
 }
 
 func NewCustomTLSDialer(config *CustomTLSConfig) Dialer {
-	return func(network, addr string) (net.Conn, error) {
-		return CustomTLSDial(network, addr, config)
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return CustomTLSDial(ctx, network, addr, config)
 	}
 }
 
@@ -187,26 +190,17 @@ type handshakeConn interface {
 // tlsdialer comment:
 //   Note - if sendServerName is false, the VerifiedChains field on the
 //   connection's ConnectionState will never get populated.
-func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, error) {
-
-	// We want the Timeout and Deadline values from dialer to cover the
-	// whole process: TCP connection and TLS handshake. This means that we
-	// also need to start our own timers now.
-	var errChannel chan error
-	if config.Timeout != 0 {
-		errChannel = make(chan error, 2)
-		timeoutFunc := time.AfterFunc(config.Timeout, func() {
-			errChannel <- errors.New("timed out")
-		})
-		defer timeoutFunc.Stop()
-	}
+func CustomTLSDial(
+	ctx context.Context,
+	network, addr string,
+	config *CustomTLSConfig) (net.Conn, error) {
 
 	dialAddr := addr
 	if config.DialAddr != "" {
 		dialAddr = config.DialAddr
 	}
 
-	rawConn, err := config.Dial(network, dialAddr)
+	rawConn, err := config.Dial(ctx, network, dialAddr)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -258,7 +252,9 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 		tlsConfig.InsecureSkipVerify = true
 	}
 
-	if config.SNIServerName != "" && config.VerifyLegacyCertificate == nil {
+	if config.UseDialAddrSNI {
+		tlsConfig.ServerName = hostname
+	} else if config.SNIServerName != "" && config.VerifyLegacyCertificate == nil {
 		// Set the ServerName and rely on the usual logic in
 		// tls.Conn.Handshake() to do its verification.
 		// Note: Go TLS will automatically omit this ServerName when it's an IP address
@@ -302,13 +298,19 @@ func CustomTLSDial(network, addr string, config *CustomTLSConfig) (net.Conn, err
 		conn = tls.Client(rawConn, tlsConfig)
 	}
 
-	if config.Timeout == 0 {
-		err = conn.Handshake()
-	} else {
-		go func() {
-			errChannel <- conn.Handshake()
-		}()
-		err = <-errChannel
+	resultChannel := make(chan error)
+
+	go func() {
+		resultChannel <- conn.Handshake()
+	}()
+
+	select {
+	case err = <-resultChannel:
+	case <-ctx.Done():
+		err = ctx.Err()
+		// Interrupt the goroutine
+		rawConn.Close()
+		<-resultChannel
 	}
 
 	// openSSLConns complete verification automatically. For Go TLS,
