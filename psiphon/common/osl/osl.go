@@ -782,7 +782,7 @@ type PaveLogInfo struct {
 // a map from hex-encoded OSL IDs to server entries to pave into that OSL.
 // When entries are found, OSL will contain those entries, newline
 // separated. Otherwise the OSL will still be issued, but be empty (unless
-// the scheme is in skipEmptyOSLsSchemes).
+// the scheme is in omitEmptyOSLsSchemes).
 //
 // As OSLs outside the epoch-endTime range will no longer appear in
 // the registry, Pave is intended to be used to create the full set
