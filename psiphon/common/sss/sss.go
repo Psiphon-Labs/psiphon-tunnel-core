@@ -41,6 +41,7 @@ package sss
 import (
 	"crypto/rand"
 	"errors"
+	"io"
 )
 
 var (
@@ -53,6 +54,19 @@ var (
 // Split the given secret into N shares of which K are required to recover the
 // secret. Returns a map of share IDs (1-255) to shares.
 func Split(n, k byte, secret []byte) (map[byte][]byte, error) {
+	return split(n, k, secret, rand.Reader)
+}
+
+// SplitUsingReader splits the given secret, as Split does, but using the
+// specified reader to create random polynomials. Use for deterministic
+// splitting; caller must ensure reader is cryptographically secure.
+func SplitUsingReader(
+	n, k byte, secret []byte, reader io.Reader) (map[byte][]byte, error) {
+
+	return split(n, k, secret, reader)
+}
+
+func split(n, k byte, secret []byte, randReader io.Reader) (map[byte][]byte, error) {
 	if k <= 1 {
 		return nil, ErrInvalidThreshold
 	}
@@ -64,7 +78,7 @@ func Split(n, k byte, secret []byte) (map[byte][]byte, error) {
 	shares := make(map[byte][]byte, n)
 
 	for _, b := range secret {
-		p, err := generate(k-1, b, rand.Reader)
+		p, err := generate(k-1, b, randReader)
 		if err != nil {
 			return nil, err
 		}
