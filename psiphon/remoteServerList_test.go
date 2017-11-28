@@ -35,6 +35,7 @@ import (
 	"path"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -47,6 +48,14 @@ import (
 // TODO: TestCommonRemoteServerList (this is currently covered by controller_test.go)
 
 func TestObfuscatedRemoteServerLists(t *testing.T) {
+	testObfuscatedRemoteServerLists(t, false)
+}
+
+func TestObfuscatedRemoteServerListsOmitMD5Sums(t *testing.T) {
+	testObfuscatedRemoteServerLists(t, true)
+}
+
+func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 
 	testDataDirName, err := ioutil.TempDir("", "psiphon-remote-server-list-test")
 	if err != nil {
@@ -150,9 +159,15 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 		t.Fatalf("error generating package keys: %s", err)
 	}
 
+	var omitMD5SumsSchemes []int
+	if omitMD5Sums {
+		omitMD5SumsSchemes = []int{0}
+	}
 	// First Pave() call is to get the OSL ID to pave into
 
 	oslID := ""
+
+	omitEmptyOSLsSchemes := []int{}
 
 	paveFiles, err := oslConfig.Pave(
 		epoch,
@@ -160,12 +175,16 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 		signingPublicKey,
 		signingPrivateKey,
 		map[string][]string{},
+		omitMD5SumsSchemes,
+		omitEmptyOSLsSchemes,
 		func(logInfo *osl.PaveLogInfo) {
 			oslID = logInfo.OSLID
 		})
 	if err != nil {
 		t.Fatalf("error paving OSL files: %s", err)
 	}
+
+	omitEmptyOSLsSchemes = []int{0}
 
 	paveFiles, err = oslConfig.Pave(
 		epoch,
@@ -175,6 +194,8 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 		map[string][]string{
 			oslID: {string(encodedServerEntry)},
 		},
+		omitMD5SumsSchemes,
+		omitEmptyOSLsSchemes,
 		nil)
 	if err != nil {
 		t.Fatalf("error paving OSL files: %s", err)
@@ -211,9 +232,17 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 	//
 
 	// Exercise using multiple download URLs
-	remoteServerListHostAddresses := []string{
-		net.JoinHostPort(serverIPAddress, "8081"),
-		net.JoinHostPort(serverIPAddress, "8082"),
+
+	var remoteServerListListeners [2]net.Listener
+	var remoteServerListHostAddresses [2]string
+
+	for i := 0; i < len(remoteServerListListeners); i++ {
+		remoteServerListListeners[i], err = net.Listen("tcp", net.JoinHostPort(serverIPAddress, "0"))
+		if err != nil {
+			t.Fatalf("net.Listen error: %s", err)
+		}
+		defer remoteServerListListeners[i].Close()
+		remoteServerListHostAddresses[i] = remoteServerListListeners[i].Addr().String()
 	}
 
 	// The common remote server list fetches will 404
@@ -234,7 +263,7 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 			obfuscatedServerListRootURLsJSONConfig += ","
 		}
 
-		go func(remoteServerListHostAddress string) {
+		go func(listener net.Listener, remoteServerListHostAddress string) {
 			startTime := time.Now()
 			serveMux := http.NewServeMux()
 			for _, paveFile := range paveFiles {
@@ -250,12 +279,8 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 				Addr:    remoteServerListHostAddress,
 				Handler: serveMux,
 			}
-			err := httpServer.ListenAndServe()
-			if err != nil {
-				// TODO: wrong goroutine for t.FatalNow()
-				t.Fatalf("error running remote server list host: %s", err)
-			}
-		}(remoteServerListHostAddresses[i])
+			httpServer.Serve(listener)
+		}(remoteServerListListeners[i], remoteServerListHostAddresses[i])
 	}
 
 	obfuscatedServerListDownloadDirectory := testDataDirName
@@ -272,22 +297,34 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 		}
 	}()
 
+	process, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("os.FindProcess error: %s", err)
+	}
+	defer process.Signal(syscall.SIGTERM)
+
 	//
 	// disrupt remote server list downloads
 	//
 
-	disruptorProxyAddress := "127.0.0.1:2162"
+	disruptorListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen error: %s", err)
+	}
+	defer disruptorListener.Close()
+
+	disruptorProxyAddress := disruptorListener.Addr().String()
 	disruptorProxyURL := "socks4a://" + disruptorProxyAddress
 
 	go func() {
-		listener, err := socks.ListenSocks("tcp", disruptorProxyAddress)
-		if err != nil {
-			fmt.Printf("disruptor proxy listen error: %s\n", err)
-			return
-		}
+		listener := socks.NewSocksListener(disruptorListener)
 		for {
 			localConn, err := listener.AcceptSocks()
 			if err != nil {
+				if e, ok := err.(net.Error); ok && e.Temporary() {
+					fmt.Printf("disruptor proxy temporary accept error: %s\n", err)
+					continue
+				}
 				fmt.Printf("disruptor proxy accept error: %s\n", err)
 				return
 			}
@@ -309,7 +346,7 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 					defer waitGroup.Done()
 					io.Copy(remoteConn, localConn)
 				}()
-				if common.Contains(remoteServerListHostAddresses, localConn.Req.Target) {
+				if common.Contains(remoteServerListHostAddresses[:], localConn.Req.Target) {
 					io.CopyN(localConn, remoteConn, 500)
 				} else {
 					io.Copy(localConn, remoteConn)
