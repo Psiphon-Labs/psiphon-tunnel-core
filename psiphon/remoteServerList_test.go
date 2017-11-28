@@ -322,7 +322,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 			localConn, err := listener.AcceptSocks()
 			if err != nil {
 				if e, ok := err.(net.Error); ok && e.Temporary() {
-					fmt.Printf("disruptor proxy temporary accept error: %s", err)
+					fmt.Printf("disruptor proxy temporary accept error: %s\n", err)
 					continue
 				}
 				fmt.Printf("disruptor proxy accept error: %s\n", err)

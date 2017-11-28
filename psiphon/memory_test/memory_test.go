@@ -20,6 +20,7 @@
 package memory_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -127,7 +128,8 @@ func runMemoryTest(t *testing.T, testMode int) {
 	}
 
 	var controller *psiphon.Controller
-	var controllerShutdown chan struct{}
+	var controllerCtx context.Context
+	var controllerStopRunning context.CancelFunc
 	var controllerWaitGroup *sync.WaitGroup
 	restartController := make(chan bool, 1)
 	reconnectTunnel := make(chan bool, 1)
@@ -179,21 +181,23 @@ func runMemoryTest(t *testing.T, testMode int) {
 			t.Fatalf("error creating controller: %s", err)
 		}
 
-		controllerShutdown = make(chan struct{})
+		controllerCtx, controllerStopRunning = context.WithCancel(context.Background())
 		controllerWaitGroup = new(sync.WaitGroup)
+
 		controllerWaitGroup.Add(1)
 		go func() {
 			defer controllerWaitGroup.Done()
-			controller.Run(controllerShutdown)
+			controller.Run(controllerCtx)
 		}()
 	}
 
 	stopController := func() {
-		close(controllerShutdown)
+		controllerStopRunning()
 		controllerWaitGroup.Wait()
 	}
 
 	testTimer := time.NewTimer(testDuration)
+	defer testTimer.Stop()
 	memInspectionTicker := time.NewTicker(memInspectionFrequency)
 	lastTunnelsEstablished := int32(0)
 
