@@ -163,11 +163,11 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	if omitMD5Sums {
 		omitMD5SumsSchemes = []int{0}
 	}
-	omitEmptyOSLsSchemes := []int{0}
-
 	// First Pave() call is to get the OSL ID to pave into
 
 	oslID := ""
+
+	omitEmptyOSLsSchemes := []int{}
 
 	paveFiles, err := oslConfig.Pave(
 		epoch,
@@ -183,6 +183,8 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	if err != nil {
 		t.Fatalf("error paving OSL files: %s", err)
 	}
+
+	omitEmptyOSLsSchemes = []int{0}
 
 	paveFiles, err = oslConfig.Pave(
 		epoch,

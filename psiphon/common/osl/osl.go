@@ -125,7 +125,6 @@ type Scheme struct {
 	// sufficiently seeded. And so on. The first level in the list is the
 	// lowest level. The time period for OSLs is determined by the totals in
 	// the KeySplits.
-	// Limitation: thresholds must be at least 2.
 	//
 	// Example:
 	//
@@ -278,7 +277,7 @@ func NewConfig(filename string) (*Config, error) {
 	return config, nil
 }
 
-// LoadConfig loads, vaildates, and initializes a JSON encoded OSL
+// LoadConfig loads, validates, and initializes a JSON encoded OSL
 // configuration.
 func LoadConfig(configJSON []byte) (*Config, error) {
 
