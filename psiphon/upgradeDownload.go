@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -55,6 +56,7 @@ import (
 // necessary to re-download; (b) newer upgrades will be downloaded even when an older
 // upgrade is still pending install by the outer client.
 func DownloadUpgrade(
+	ctx context.Context,
 	config *Config,
 	attempt int,
 	handshakeVersion string,
@@ -71,28 +73,38 @@ func DownloadUpgrade(
 		return nil
 	}
 
+	if *config.DownloadUpgradeTimeoutSeconds > 0 {
+		var cancelFunc context.CancelFunc
+		ctx, cancelFunc = context.WithTimeout(
+			ctx, time.Duration(*config.DownloadUpgradeTimeoutSeconds)*time.Second)
+		defer cancelFunc()
+	}
 	// Select tunneled or untunneled configuration
 
 	downloadURL, _, skipVerify := selectDownloadURL(attempt, config.UpgradeDownloadURLs)
 
-	httpClient, requestUrl, err := MakeDownloadHttpClient(
+	httpClient, err := MakeDownloadHTTPClient(
+		ctx,
 		config,
 		tunnel,
 		untunneledDialConfig,
-		downloadURL,
-		skipVerify,
-		time.Duration(*config.DownloadUpgradeTimeoutSeconds)*time.Second)
+		skipVerify)
 
 	// If no handshake version is supplied, make an initial HEAD request
 	// to get the current version from the version header.
 
 	availableClientVersion := handshakeVersion
 	if availableClientVersion == "" {
-		request, err := http.NewRequest("HEAD", requestUrl, nil)
+
+		request, err := http.NewRequest("HEAD", downloadURL, nil)
 		if err != nil {
 			return common.ContextError(err)
 		}
+
+		request = request.WithContext(ctx)
+
 		response, err := httpClient.Do(request)
+
 		if err == nil && response.StatusCode != http.StatusOK {
 			response.Body.Close()
 			err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
@@ -139,8 +151,9 @@ func DownloadUpgrade(
 		"%s.%s", config.UpgradeDownloadFilename, availableClientVersion)
 
 	n, _, err := ResumeDownload(
+		ctx,
 		httpClient,
-		requestUrl,
+		downloadURL,
 		MakePsiphonUserAgent(config),
 		downloadFilename,
 		"")

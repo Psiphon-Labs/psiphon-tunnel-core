@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -233,19 +234,22 @@ func attemptConnectionsWithUserAgent(
 		t.Fatalf("error creating client controller: %s", err)
 	}
 
-	controllerShutdownBroadcast := make(chan struct{})
+	ctx, cancelFunc := context.WithCancel(context.Background())
+
 	controllerWaitGroup := new(sync.WaitGroup)
+
 	controllerWaitGroup.Add(1)
 	go func() {
 		defer controllerWaitGroup.Done()
-		controller.Run(controllerShutdownBroadcast)
+		controller.Run(ctx)
 	}()
 
 	// repeat attempts for long enough to select each user agent
 
 	time.Sleep(20 * time.Second)
 
-	close(controllerShutdownBroadcast)
+	cancelFunc()
+
 	controllerWaitGroup.Wait()
 
 	checkUserAgentCounts(t, isCONNECT)

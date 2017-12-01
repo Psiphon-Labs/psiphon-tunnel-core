@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -28,9 +29,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
-	"reflect"
 	"sync"
 	"time"
 
@@ -59,15 +58,6 @@ type DialConfig struct {
 	// added to all plaintext HTTP requests and requests made through an HTTP
 	// upstream proxy when specified by UpstreamProxyUrl.
 	CustomHeaders http.Header
-
-	ConnectTimeout time.Duration
-
-	// PendingConns is used to track and interrupt dials in progress.
-	// Dials may be interrupted using PendingConns.CloseAll(). Once instantiated,
-	// a conn is added to pendingConns before the network connect begins and
-	// removed from pendingConns once the connect succeeds or fails.
-	// May be nil.
-	PendingConns *common.Conns
 
 	// BindToDevice parameters are used to exclude connections and
 	// associated DNS requests from VPN routing.
@@ -129,8 +119,8 @@ type IPv6Synthesizer interface {
 	IPv6Synthesize(IPv4Addr string) string
 }
 
-// Dialer is a custom dialer compatible with http.Transport.Dial.
-type Dialer func(string, string) (net.Conn, error)
+// Dialer is a custom network dialer.
+type Dialer func(context.Context, string, string) (net.Conn, error)
 
 // LocalProxyRelay sends to remoteConn bytes received from localConn,
 // and sends to localConn bytes received from remoteConn.
@@ -158,9 +148,9 @@ func LocalProxyRelay(proxyType string, localConn, remoteConn net.Conn) {
 // no NetworkConnectivityChecker is provided (waiting is disabled)
 // or when NetworkConnectivityChecker.HasNetworkConnectivity()
 // indicates connectivity. It waits and polls the checker once a second.
-// If any stop is broadcast, false is returned immediately.
+// When the context is done, false is returned immediately.
 func WaitForNetworkConnectivity(
-	connectivityChecker NetworkConnectivityChecker, stopBroadcasts ...<-chan struct{}) bool {
+	ctx context.Context, connectivityChecker NetworkConnectivityChecker) bool {
 
 	if connectivityChecker == nil || 1 == connectivityChecker.HasNetworkConnectivity() {
 		return true
@@ -169,25 +159,17 @@ func WaitForNetworkConnectivity(
 	NoticeInfo("waiting for network connectivity")
 
 	ticker := time.NewTicker(1 * time.Second)
-
-	selectCases := make([]reflect.SelectCase, 1+len(stopBroadcasts))
-	selectCases[0] = reflect.SelectCase{
-		Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ticker.C)}
-	for i, stopBroadcast := range stopBroadcasts {
-		selectCases[i+1] = reflect.SelectCase{
-			Dir: reflect.SelectRecv, Chan: reflect.ValueOf(stopBroadcast)}
-	}
+	defer ticker.Stop()
 
 	for {
 		if 1 == connectivityChecker.HasNetworkConnectivity() {
 			return true
 		}
 
-		chosen, _, ok := reflect.Select(selectCases)
-		if chosen == 0 && ok {
-			// Ticker case, so check again
-		} else {
-			// Stop case
+		select {
+		case <-ticker.C:
+			// Check HasNetworkConnectivity again
+		case <-ctx.Done():
 			return false
 		}
 	}
@@ -225,88 +207,64 @@ func ResolveIP(host string, conn net.Conn) (addrs []net.IP, ttls []time.Duration
 	return addrs, ttls, nil
 }
 
-// MakeUntunneledHttpsClient returns a net/http.Client which is
+// MakeUntunneledHTTPClient returns a net/http.Client which is
 // configured to use custom dialing features -- including BindToDevice,
-// UseIndistinguishableTLS, etc. -- for a specific HTTPS request URL.
-// If verifyLegacyCertificate is not nil, it's used for certificate
-// verification.
-//
-// Because UseIndistinguishableTLS requires a hack to work with
-// net/http, MakeUntunneledHttpClient may return a modified request URL
-// to be used. Callers should always use this return value to make
-// requests, not the input value.
-//
-// MakeUntunneledHttpsClient ignores the input requestUrl scheme,
-// which may be "http" or "https", and always performs HTTPS requests.
-func MakeUntunneledHttpsClient(
-	dialConfig *DialConfig,
+// UseIndistinguishableTLS, etc. If verifyLegacyCertificate is not nil,
+// it's used for certificate verification.
+// The context is applied to underlying TCP dials. The caller is responsible
+// for applying the context to requests made with the returned http.Client.
+func MakeUntunneledHTTPClient(
+	ctx context.Context,
+	untunneledDialConfig *DialConfig,
 	verifyLegacyCertificate *x509.Certificate,
-	requestUrl string,
-	skipVerify bool,
-	requestTimeout time.Duration) (*http.Client, string, error) {
-
-	// Change the scheme to "http"; otherwise http.Transport will try to do
-	// another TLS handshake inside the explicit TLS session. Also need to
-	// force an explicit port, as the default for "http", 80, won't talk TLS.
-	//
-	// TODO: set http.Transport.DialTLS instead of Dial to avoid this hack?
-	// See: https://golang.org/pkg/net/http/#Transport. DialTLS was added in
-	// Go 1.4 but this code may pre-date that.
-
-	urlComponents, err := url.Parse(requestUrl)
-	if err != nil {
-		return nil, "", common.ContextError(err)
-	}
-
-	urlComponents.Scheme = "http"
-	host, port, err := net.SplitHostPort(urlComponents.Host)
-	if err != nil {
-		// Assume there's no port
-		host = urlComponents.Host
-		port = ""
-	}
-	if port == "" {
-		port = "443"
-	}
-	urlComponents.Host = net.JoinHostPort(host, port)
+	skipVerify bool) (*http.Client, error) {
 
 	// Note: IndistinguishableTLS mode doesn't support VerifyLegacyCertificate
-	useIndistinguishableTLS := dialConfig.UseIndistinguishableTLS && verifyLegacyCertificate == nil
+	useIndistinguishableTLS := untunneledDialConfig.UseIndistinguishableTLS &&
+		verifyLegacyCertificate == nil
 
-	dialer := NewCustomTLSDialer(
+	dialer := NewTCPDialer(untunneledDialConfig)
+
+	tlsDialer := NewCustomTLSDialer(
 		// Note: when verifyLegacyCertificate is not nil, some
 		// of the other CustomTLSConfig is overridden.
 		&CustomTLSConfig{
-			Dial: NewTCPDialer(dialConfig),
+			Dial: dialer,
 			VerifyLegacyCertificate:       verifyLegacyCertificate,
-			SNIServerName:                 host,
+			UseDialAddrSNI:                true,
+			SNIServerName:                 "",
 			SkipVerify:                    skipVerify,
 			UseIndistinguishableTLS:       useIndistinguishableTLS,
-			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
+			TrustedCACertificatesFilename: untunneledDialConfig.TrustedCACertificatesFilename,
 		})
 
 	transport := &http.Transport{
-		Dial: dialer,
+		Dial: func(network, addr string) (net.Conn, error) {
+			return dialer(ctx, network, addr)
+		},
+		DialTLS: func(network, addr string) (net.Conn, error) {
+			return tlsDialer(ctx, network, addr)
+		},
 	}
+
 	httpClient := &http.Client{
-		Timeout:   requestTimeout,
 		Transport: transport,
 	}
 
-	return httpClient, urlComponents.String(), nil
+	return httpClient, nil
 }
 
-// MakeTunneledHttpClient returns a net/http.Client which is
+// MakeTunneledHTTPClient returns a net/http.Client which is
 // configured to use custom dialing features including tunneled
 // dialing and, optionally, UseTrustedCACertificatesForStockTLS.
-// Unlike MakeUntunneledHttpsClient and makePsiphonHttpsClient,
-// This http.Client uses stock TLS and no scheme transformation
-// hack is required.
-func MakeTunneledHttpClient(
+// This http.Client uses stock TLS for HTTPS.
+func MakeTunneledHTTPClient(
 	config *Config,
 	tunnel *Tunnel,
-	skipVerify bool,
-	requestTimeout time.Duration) (*http.Client, error) {
+	skipVerify bool) (*http.Client, error) {
+
+	// Note: there is no dial context since SSH port forward dials cannot
+	// be interrupted directly. Closing the tunnel will interrupt the dials.
 
 	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
 		return tunnel.sshClient.Dial("tcp", addr)
@@ -337,55 +295,39 @@ func MakeTunneledHttpClient(
 
 	return &http.Client{
 		Transport: transport,
-		Timeout:   requestTimeout,
 	}, nil
 }
 
-// MakeDownloadHttpClient is a resusable helper that sets up a
-// http.Client for use either untunneled or through a tunnel.
-// See MakeUntunneledHttpsClient for a note about request URL
-// rewritting.
-func MakeDownloadHttpClient(
+// MakeDownloadHTTPClient is a helper that sets up a http.Client
+// for use either untunneled or through a tunnel.
+func MakeDownloadHTTPClient(
+	ctx context.Context,
 	config *Config,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
-	requestUrl string,
-	skipVerify bool,
-	requestTimeout time.Duration) (*http.Client, string, error) {
+	skipVerify bool) (*http.Client, error) {
 
 	var httpClient *http.Client
 	var err error
 
 	if tunnel != nil {
-		// MakeTunneledHttpClient works with both "http" and "https" schemes
-		httpClient, err = MakeTunneledHttpClient(
-			config, tunnel, skipVerify, requestTimeout)
+
+		httpClient, err = MakeTunneledHTTPClient(
+			config, tunnel, skipVerify)
 		if err != nil {
-			return nil, "", common.ContextError(err)
+			return nil, common.ContextError(err)
 		}
+
 	} else {
-		urlComponents, err := url.Parse(requestUrl)
+
+		httpClient, err = MakeUntunneledHTTPClient(
+			ctx, untunneledDialConfig, nil, skipVerify)
 		if err != nil {
-			return nil, "", common.ContextError(err)
-		}
-		// MakeUntunneledHttpsClient works only with "https" schemes
-		if urlComponents.Scheme == "https" {
-			httpClient, requestUrl, err = MakeUntunneledHttpsClient(
-				untunneledDialConfig, nil, requestUrl, skipVerify, requestTimeout)
-			if err != nil {
-				return nil, "", common.ContextError(err)
-			}
-		} else {
-			httpClient = &http.Client{
-				Timeout: requestTimeout,
-				Transport: &http.Transport{
-					Dial: NewTCPDialer(untunneledDialConfig),
-				},
-			}
+			return nil, common.ContextError(err)
 		}
 	}
 
-	return httpClient, requestUrl, nil
+	return httpClient, nil
 }
 
 // ResumeDownload is a reusable helper that downloads requestUrl via the
@@ -403,8 +345,9 @@ func MakeDownloadHttpClient(
 // partial download is in progress.
 //
 func ResumeDownload(
+	ctx context.Context,
 	httpClient *http.Client,
-	requestUrl string,
+	downloadURL string,
 	userAgent string,
 	downloadFilename string,
 	ifNoneMatchETag string) (int64, string, error) {
@@ -456,10 +399,12 @@ func ResumeDownload(
 		}
 	}
 
-	request, err := http.NewRequest("GET", requestUrl, nil)
+	request, err := http.NewRequest("GET", downloadURL, nil)
 	if err != nil {
 		return 0, "", common.ContextError(err)
 	}
+
+	request = request.WithContext(ctx)
 
 	request.Header.Set("User-Agent", userAgent)
 

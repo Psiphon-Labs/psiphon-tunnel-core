@@ -24,6 +24,7 @@
 package psiphon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -43,8 +44,8 @@ import (
 type Controller struct {
 	config                             *Config
 	sessionId                          string
-	componentFailureSignal             chan struct{}
-	shutdownBroadcast                  chan struct{}
+	runCtx                             context.Context
+	stopRunning                        context.CancelFunc
 	runWaitGroup                       *sync.WaitGroup
 	connectedTunnels                   chan *Tunnel
 	failedTunnels                      chan *Tunnel
@@ -59,11 +60,10 @@ type Controller struct {
 	concurrentMeekEstablishTunnels     int
 	peakConcurrentEstablishTunnels     int
 	peakConcurrentMeekEstablishTunnels int
+	establishCtx                       context.Context
+	stopEstablish                      context.CancelFunc
 	establishWaitGroup                 *sync.WaitGroup
-	stopEstablishingBroadcast          chan struct{}
 	candidateServerEntries             chan *candidateServerEntry
-	establishPendingConns              *common.Conns
-	untunneledPendingConns             *common.Conns
 	untunneledDialConfig               *DialConfig
 	splitTunnelClassifier              *SplitTunnelClassifier
 	signalFetchCommonRemoteServerList  chan struct{}
@@ -93,16 +93,9 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// tunnels established by the controller.
 	NoticeSessionId(config.SessionID)
 
-	// untunneledPendingConns may be used to interrupt the fetch remote server list
-	// request and other untunneled connection establishments. BindToDevice may be
-	// used to exclude these requests and connection from VPN routing.
-	// TODO: fetch remote server list and untunneled upgrade download should remove
-	// their completed conns from untunneledPendingConns.
-	untunneledPendingConns := new(common.Conns)
 	untunneledDialConfig := &DialConfig{
 		UpstreamProxyUrl:              config.UpstreamProxyUrl,
 		CustomHeaders:                 config.CustomHeaders,
-		PendingConns:                  untunneledPendingConns,
 		DeviceBinder:                  config.DeviceBinder,
 		DnsServerGetter:               config.DnsServerGetter,
 		IPv6Synthesizer:               config.IPv6Synthesizer,
@@ -112,14 +105,9 @@ func NewController(config *Config) (controller *Controller, err error) {
 	}
 
 	controller = &Controller{
-		config:    config,
-		sessionId: config.SessionID,
-		// componentFailureSignal receives a signal from a component (including socks and
-		// http local proxies) if they unexpectedly fail. Senders should not block.
-		// Buffer allows at least one stop signal to be sent before there is a receiver.
-		componentFailureSignal: make(chan struct{}, 1),
-		shutdownBroadcast:      make(chan struct{}),
-		runWaitGroup:           new(sync.WaitGroup),
+		config:       config,
+		sessionId:    config.SessionID,
+		runWaitGroup: new(sync.WaitGroup),
 		// connectedTunnels and failedTunnels buffer sizes are large enough to
 		// receive full pools of tunnels without blocking. Senders should not block.
 		connectedTunnels:               make(chan *Tunnel, config.TunnelPoolSize),
@@ -128,8 +116,6 @@ func NewController(config *Config) (controller *Controller, err error) {
 		establishedOnce:                false,
 		startedConnectedReporter:       false,
 		isEstablishing:                 false,
-		establishPendingConns:          new(common.Conns),
-		untunneledPendingConns:         untunneledPendingConns,
 		untunneledDialConfig:           untunneledDialConfig,
 		impairedProtocolClassification: make(map[string]int),
 		// TODO: Add a buffer of 1 so we don't miss a signal while receiver is
@@ -172,18 +158,17 @@ func NewController(config *Config) (controller *Controller, err error) {
 	return controller, nil
 }
 
-// Run executes the controller. It launches components and then monitors
-// for a shutdown signal; after receiving the signal it shuts down the
-// controller.
-// The components include:
-// - the periodic remote server list fetcher
-// - the connected reporter
-// - the tunnel manager
-// - a local SOCKS proxy that port forwards through the pool of tunnels
-// - a local HTTP proxy that port forwards through the pool of tunnels
-func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
+// Run executes the controller. Run exits if a controller
+// component fails or the parent context is canceled.
+func (controller *Controller) Run(ctx context.Context) {
 
 	ReportAvailableRegions()
+
+	runCtx, stopRunning := context.WithCancel(ctx)
+	defer stopRunning()
+
+	controller.runCtx = runCtx
+	controller.stopRunning = stopRunning
 
 	// Start components
 
@@ -215,8 +200,7 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 	}
 
 	if !controller.config.DisableLocalHTTPProxy {
-		httpProxy, err := NewHttpProxy(
-			controller.config, controller.untunneledDialConfig, controller, listenIP)
+		httpProxy, err := NewHttpProxy(controller.config, controller, listenIP)
 		if err != nil {
 			NoticeAlert("error initializing local HTTP proxy: %s", err)
 			return
@@ -272,38 +256,18 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 
 	// Wait while running
 
-	select {
-	case <-shutdownBroadcast:
-		NoticeInfo("controller shutdown by request")
-	case <-controller.componentFailureSignal:
-		NoticeAlert("controller shutdown due to component failure")
-	}
-
-	close(controller.shutdownBroadcast)
+	<-controller.runCtx.Done()
+	NoticeInfo("controller stopped")
 
 	if controller.packetTunnelClient != nil {
 		controller.packetTunnelClient.Stop()
 	}
 
-	// Interrupts and stops establish workers blocking on
-	// tunnel establishment network operations.
-	controller.establishPendingConns.CloseAll()
+	// All workers -- runTunnels, establishment workers, and auxilliary
+	// workers such as fetch remote server list and untunneled uprade
+	// download -- operate with the controller run context and will all
+	// be interrupted when the run context is done.
 
-	// Interrupts and stops workers blocking on untunneled
-	// network operations. This includes fetch remote server
-	// list and untunneled uprade download.
-	// Note: this doesn't interrupt the final, untunneled status
-	// requests started in operateTunnel after shutdownBroadcast.
-	// This is by design -- we want to give these requests a short
-	// timer period to succeed and deliver stats. These particular
-	// requests opt out of untunneledPendingConns and use the
-	// PSIPHON_API_SHUTDOWN_SERVER_TIMEOUT timeout (see
-	// doUntunneledStatusRequest).
-	controller.untunneledPendingConns.CloseAll()
-
-	// Now with all workers signaled to stop and with all
-	// blocking network operations interrupted, wait for
-	// all workers to terminate.
 	controller.runWaitGroup.Wait()
 
 	controller.splitTunnelClassifier.Shutdown()
@@ -316,10 +280,8 @@ func (controller *Controller) Run(shutdownBroadcast <-chan struct{}) {
 // SignalComponentFailure notifies the controller that an associated component has failed.
 // This will terminate the controller.
 func (controller *Controller) SignalComponentFailure() {
-	select {
-	case controller.componentFailureSignal <- *new(struct{}):
-	default:
-	}
+	NoticeAlert("controller shutdown due to component failure")
+	controller.stopRunning()
 }
 
 // SetClientVerificationPayloadForActiveTunnels sets the client verification
@@ -363,7 +325,7 @@ fetcherLoop:
 		// Wait for a signal before fetching
 		select {
 		case <-signal:
-		case <-controller.shutdownBroadcast:
+		case <-controller.runCtx.Done():
 			break fetcherLoop
 		}
 
@@ -379,8 +341,8 @@ fetcherLoop:
 			// Don't attempt to fetch while there is no network connectivity,
 			// to avoid alert notice noise.
 			if !WaitForNetworkConnectivity(
-				controller.config.NetworkConnectivityChecker,
-				controller.shutdownBroadcast) {
+				controller.runCtx,
+				controller.config.NetworkConnectivityChecker) {
 				break fetcherLoop
 			}
 
@@ -389,6 +351,7 @@ fetcherLoop:
 			tunnel := controller.getNextActiveTunnel()
 
 			err := fetcher(
+				controller.runCtx,
 				controller.config,
 				attempt,
 				tunnel,
@@ -404,7 +367,7 @@ fetcherLoop:
 			timer := time.NewTimer(retryPeriod)
 			select {
 			case <-timer.C:
-			case <-controller.shutdownBroadcast:
+			case <-controller.runCtx.Done():
 				timer.Stop()
 				break fetcherLoop
 			}
@@ -432,7 +395,7 @@ func (controller *Controller) establishTunnelWatcher() {
 			NoticeAlert("failed to establish tunnel before timeout")
 			controller.SignalComponentFailure()
 		}
-	case <-controller.shutdownBroadcast:
+	case <-controller.runCtx.Done():
 	}
 
 	NoticeInfo("exiting establish tunnel watcher")
@@ -477,7 +440,7 @@ loop:
 		case <-controller.signalReportConnected:
 		case <-timer.C:
 			// Make another connected request
-		case <-controller.shutdownBroadcast:
+		case <-controller.runCtx.Done():
 			doBreak = true
 		}
 		timer.Stop()
@@ -537,7 +500,7 @@ downloadLoop:
 		var handshakeVersion string
 		select {
 		case handshakeVersion = <-controller.signalDownloadUpgrade:
-		case <-controller.shutdownBroadcast:
+		case <-controller.runCtx.Done():
 			break downloadLoop
 		}
 
@@ -554,8 +517,8 @@ downloadLoop:
 			// Don't attempt to download while there is no network connectivity,
 			// to avoid alert notice noise.
 			if !WaitForNetworkConnectivity(
-				controller.config.NetworkConnectivityChecker,
-				controller.shutdownBroadcast) {
+				controller.runCtx,
+				controller.config.NetworkConnectivityChecker) {
 				break downloadLoop
 			}
 
@@ -564,6 +527,7 @@ downloadLoop:
 			tunnel := controller.getNextActiveTunnel()
 
 			err := DownloadUpgrade(
+				controller.runCtx,
 				controller.config,
 				attempt,
 				handshakeVersion,
@@ -581,7 +545,7 @@ downloadLoop:
 				time.Duration(*controller.config.DownloadUpgradeRetryPeriodSeconds) * time.Second)
 			select {
 			case <-timer.C:
-			case <-controller.shutdownBroadcast:
+			case <-controller.runCtx.Done():
 				timer.Stop()
 				break downloadLoop
 			}
@@ -619,19 +583,6 @@ loop:
 		case failedTunnel := <-controller.failedTunnels:
 			NoticeAlert("tunnel failed: %s", failedTunnel.serverEntry.IpAddress)
 			controller.terminateTunnel(failedTunnel)
-
-			// Note: we make this extra check to ensure the shutdown signal takes priority
-			// and that we do not start establishing. Critically, startEstablishing() calls
-			// establishPendingConns.Reset() which clears the closed flag in
-			// establishPendingConns; this causes the pendingConns.Add() within
-			// interruptibleTCPDial to succeed instead of aborting, and the result
-			// is that it's possible for establish goroutines to run all the way through
-			// NewServerContext before being discarded... delaying shutdown.
-			select {
-			case <-controller.shutdownBroadcast:
-				break loop
-			default:
-			}
 
 			controller.classifyImpairedProtocol(failedTunnel)
 
@@ -697,7 +648,7 @@ loop:
 					controller.stopEstablishing()
 				}
 
-				err := connectedTunnel.Activate(controller, controller.shutdownBroadcast)
+				err := connectedTunnel.Activate(controller.runCtx, controller)
 
 				if err != nil {
 
@@ -801,7 +752,7 @@ loop:
 		case clientVerificationPayload = <-controller.newClientVerificationPayload:
 			controller.setClientVerificationPayloadForActiveTunnels(clientVerificationPayload)
 
-		case <-controller.shutdownBroadcast:
+		case <-controller.runCtx.Done():
 			break loop
 		}
 	}
@@ -1108,8 +1059,7 @@ func (controller *Controller) Dial(
 		// relative to the outbound network.
 
 		if controller.splitTunnelClassifier.IsUntunneled(host) {
-			// TODO: track downstreamConn and close it when the DialTCP conn closes, as with tunnel.Dial conns?
-			return DialTCP(remoteAddr, controller.untunneledDialConfig)
+			return controller.DirectDial(remoteAddr)
 		}
 	}
 
@@ -1119,6 +1069,11 @@ func (controller *Controller) Dial(
 	}
 
 	return tunneledConn, nil
+}
+
+// DirectDial dials an untunneled TCP connection within the controller run context.
+func (controller *Controller) DirectDial(remoteAddr string) (conn net.Conn, err error) {
+	return DialTCP(controller.runCtx, remoteAddr, controller.untunneledDialConfig)
 }
 
 // startEstablishing creates a pool of worker goroutines which will
@@ -1140,11 +1095,13 @@ func (controller *Controller) startEstablishing() {
 	aggressiveGarbageCollection()
 	emitMemoryMetrics()
 
+	// Note: the establish context cancelFunc, controller.stopEstablish,
+	// is called in controller.stopEstablishing.
+
 	controller.isEstablishing = true
+	controller.establishCtx, controller.stopEstablish = context.WithCancel(controller.runCtx)
 	controller.establishWaitGroup = new(sync.WaitGroup)
-	controller.stopEstablishingBroadcast = make(chan struct{})
 	controller.candidateServerEntries = make(chan *candidateServerEntry)
-	controller.establishPendingConns.Reset()
 
 	// The server affinity mechanism attempts to favor the previously
 	// used server when reconnecting. This is beneficial for user
@@ -1184,25 +1141,22 @@ func (controller *Controller) startEstablishing() {
 }
 
 // stopEstablishing signals the establish goroutines to stop and waits
-// for the group to halt. pendingConns is used to interrupt any worker
-// blocked on a socket connect.
+// for the group to halt.
 func (controller *Controller) stopEstablishing() {
 	if !controller.isEstablishing {
 		return
 	}
 	NoticeInfo("stop establishing")
-	close(controller.stopEstablishingBroadcast)
-	// Note: interruptibleTCPClose doesn't really interrupt socket connects
-	// and may leave goroutines running for a time after the Wait call.
-	controller.establishPendingConns.CloseAll()
+	controller.stopEstablish()
 	// Note: establishCandidateGenerator closes controller.candidateServerEntries
 	// (as it may be sending to that channel).
 	controller.establishWaitGroup.Wait()
 	NoticeInfo("stopped establishing")
 
 	controller.isEstablishing = false
+	controller.establishCtx = nil
+	controller.stopEstablish = nil
 	controller.establishWaitGroup = nil
-	controller.stopEstablishingBroadcast = nil
 	controller.candidateServerEntries = nil
 	controller.serverAffinityDoneBroadcast = nil
 
@@ -1260,9 +1214,8 @@ loop:
 		networkWaitStartTime := monotime.Now()
 
 		if !WaitForNetworkConnectivity(
-			controller.config.NetworkConnectivityChecker,
-			controller.stopEstablishingBroadcast,
-			controller.shutdownBroadcast) {
+			controller.establishCtx,
+			controller.config.NetworkConnectivityChecker) {
 			break loop
 		}
 
@@ -1325,9 +1278,7 @@ loop:
 
 			select {
 			case controller.candidateServerEntries <- candidate:
-			case <-controller.stopEstablishingBroadcast:
-				break loop
-			case <-controller.shutdownBroadcast:
+			case <-controller.establishCtx.Done():
 				break loop
 			}
 
@@ -1344,37 +1295,27 @@ loop:
 				// and the grace period has elapsed.
 
 				timer := time.NewTimer(ESTABLISH_TUNNEL_SERVER_AFFINITY_GRACE_PERIOD)
-				doBreak := false
 				select {
 				case <-timer.C:
 				case <-controller.serverAffinityDoneBroadcast:
-				case <-controller.stopEstablishingBroadcast:
-					doBreak = true
-				case <-controller.shutdownBroadcast:
-					doBreak = true
-				}
-				timer.Stop()
-				if doBreak {
+				case <-controller.establishCtx.Done():
+					timer.Stop()
 					break loop
 				}
+				timer.Stop()
 			} else if controller.config.StaggerConnectionWorkersMilliseconds != 0 {
 
 				// Stagger concurrent connection workers.
 
 				timer := time.NewTimer(time.Millisecond * time.Duration(
 					controller.config.StaggerConnectionWorkersMilliseconds))
-				doBreak := false
 				select {
 				case <-timer.C:
-				case <-controller.stopEstablishingBroadcast:
-					doBreak = true
-				case <-controller.shutdownBroadcast:
-					doBreak = true
-				}
-				timer.Stop()
-				if doBreak {
+				case <-controller.establishCtx.Done():
+					timer.Stop()
 					break loop
 				}
+				timer.Stop()
 			}
 		}
 
@@ -1416,19 +1357,14 @@ loop:
 		// be more rounds if required).
 		timer := time.NewTimer(
 			time.Duration(*controller.config.EstablishTunnelPausePeriodSeconds) * time.Second)
-		doBreak := false
 		select {
 		case <-timer.C:
 			// Retry iterating
-		case <-controller.stopEstablishingBroadcast:
-			doBreak = true
-		case <-controller.shutdownBroadcast:
-			doBreak = true
-		}
-		timer.Stop()
-		if doBreak {
+		case <-controller.establishCtx.Done():
+			timer.Stop()
 			break loop
 		}
+		timer.Stop()
 
 		iterator.Reset()
 	}
@@ -1440,9 +1376,9 @@ func (controller *Controller) establishTunnelWorker() {
 	defer controller.establishWaitGroup.Done()
 loop:
 	for candidateServerEntry := range controller.candidateServerEntries {
-		// Note: don't receive from candidateServerEntries and stopEstablishingBroadcast
+		// Note: don't receive from candidateServerEntries and isStopEstablishing
 		// in the same select, since we want to prioritize receiving the stop signal
-		if controller.isStopEstablishingBroadcast() {
+		if controller.isStopEstablishing() {
 			break loop
 		}
 
@@ -1517,10 +1453,9 @@ loop:
 			controller.concurrentEstablishTunnelsMutex.Unlock()
 
 			tunnel, err = ConnectTunnel(
+				controller.establishCtx,
 				controller.config,
-				controller.untunneledDialConfig,
 				controller.sessionId,
-				controller.establishPendingConns,
 				candidateServerEntry.serverEntry,
 				selectedProtocol,
 				candidateServerEntry.adjustedEstablishStartTime)
@@ -1534,7 +1469,7 @@ loop:
 		}
 
 		// Periodically emit memory metrics during the establishment cycle.
-		if !controller.isStopEstablishingBroadcast() {
+		if !controller.isStopEstablishing() {
 			emitMemoryMetrics()
 		}
 
@@ -1559,7 +1494,7 @@ loop:
 
 			// Before emitting error, check if establish interrupted, in which
 			// case the error is noise.
-			if controller.isStopEstablishingBroadcast() {
+			if controller.isStopEstablishing() {
 				break loop
 			}
 
@@ -1590,9 +1525,9 @@ loop:
 	}
 }
 
-func (controller *Controller) isStopEstablishingBroadcast() bool {
+func (controller *Controller) isStopEstablishing() bool {
 	select {
-	case <-controller.stopEstablishingBroadcast:
+	case <-controller.establishCtx.Done():
 		return true
 	default:
 	}

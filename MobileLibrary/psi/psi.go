@@ -25,6 +25,7 @@ package psi
 // Start/Stop interface on top of a single Controller instance.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -64,7 +65,8 @@ func NoticeUserLog(message string) {
 
 var controllerMutex sync.Mutex
 var controller *psiphon.Controller
-var shutdownBroadcast chan struct{}
+var controllerCtx context.Context
+var stopController context.CancelFunc
 var controllerWaitGroup *sync.WaitGroup
 
 func Start(
@@ -128,12 +130,13 @@ func Start(
 		return fmt.Errorf("error initializing controller: %s", err)
 	}
 
-	shutdownBroadcast = make(chan struct{})
+	controllerCtx, stopController = context.WithCancel(context.Background())
+
 	controllerWaitGroup = new(sync.WaitGroup)
 	controllerWaitGroup.Add(1)
 	go func() {
 		defer controllerWaitGroup.Done()
-		controller.Run(shutdownBroadcast)
+		controller.Run(controllerCtx)
 	}()
 
 	return nil
@@ -145,10 +148,11 @@ func Stop() {
 	defer controllerMutex.Unlock()
 
 	if controller != nil {
-		close(shutdownBroadcast)
+		stopController()
 		controllerWaitGroup.Wait()
 		controller = nil
-		shutdownBroadcast = nil
+		controllerCtx = nil
+		stopController = nil
 		controllerWaitGroup = nil
 	}
 }

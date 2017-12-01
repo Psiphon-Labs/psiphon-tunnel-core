@@ -21,6 +21,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	crypto_rand "crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -294,7 +295,6 @@ func TestMeekResiliency(t *testing.T) {
 	// Run meek client
 
 	dialConfig := &psiphon.DialConfig{
-		PendingConns:            new(common.Conns),
 		UseIndistinguishableTLS: true,
 		DeviceBinder:            new(fileDescriptorInterruptor),
 	}
@@ -308,7 +308,11 @@ func TestMeekResiliency(t *testing.T) {
 		MeekObfuscatedKey:             meekObfuscatedKey,
 	}
 
-	clientConn, err := psiphon.DialMeek(meekConfig, dialConfig)
+	ctx, cancelFunc := context.WithTimeout(
+		context.Background(), time.Second*5)
+	defer cancelFunc()
+
+	clientConn, err := psiphon.DialMeek(ctx, meekConfig, dialConfig)
 	if err != nil {
 		t.Fatalf("psiphon.DialMeek failed: %s", err)
 	}

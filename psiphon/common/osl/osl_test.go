@@ -358,21 +358,55 @@ func TestOSL(t *testing.T) {
 				}
 			}
 
+			// Note: these options are exercised in remoteServerList_test.go
+			omitMD5SumsSchemes := []int{}
+			omitEmptyOSLsSchemes := []int{}
+
+			firstPaveFiles, err := config.Pave(
+				endTime,
+				propagationChannelID,
+				signingPublicKey,
+				signingPrivateKey,
+				paveServerEntries,
+				omitMD5SumsSchemes,
+				omitEmptyOSLsSchemes,
+				nil)
+			if err != nil {
+				t.Fatalf("Pave failed: %s", err)
+			}
+
 			paveFiles, err := config.Pave(
 				endTime,
 				propagationChannelID,
 				signingPublicKey,
 				signingPrivateKey,
 				paveServerEntries,
+				omitMD5SumsSchemes,
+				omitEmptyOSLsSchemes,
 				nil)
 			if err != nil {
 				t.Fatalf("Pave failed: %s", err)
 			}
 
 			// Check that the paved file name matches the name the client will look for.
+
 			if len(paveFiles) < 1 || paveFiles[len(paveFiles)-1].Name != GetOSLRegistryURL("") {
 				t.Fatalf("invalid registry pave file")
 			}
+
+			// Check that the content of two paves is the same: all the crypto should be
+			// deterministic.
+
+			for index, paveFile := range paveFiles {
+				if paveFile.Name != firstPaveFiles[index].Name {
+					t.Fatalf("Pave name mismatch")
+				}
+				if bytes.Compare(paveFile.Contents, firstPaveFiles[index].Contents) != 0 {
+					t.Fatalf("Pave content mismatch")
+				}
+			}
+
+			// Use the paved content in the following tests.
 
 			pavedRegistries[propagationChannelID] = paveFiles[len(paveFiles)-1].Contents
 

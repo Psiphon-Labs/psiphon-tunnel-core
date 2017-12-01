@@ -22,12 +22,12 @@
 package psiphon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"os"
 	"syscall"
-	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
@@ -37,38 +37,53 @@ import (
 // When BindToDevice is required, LookupIP explicitly creates a UDP
 // socket, binds it to the device, and makes an explicit DNS request
 // to the specified DNS resolver.
-func LookupIP(host string, config *DialConfig) (addrs []net.IP, err error) {
+func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, error) {
 
-	// When the input host is an IP address, echo it back
-	ipAddr := net.ParseIP(host)
-	if ipAddr != nil {
-		return []net.IP{ipAddr}, nil
+	ip := net.ParseIP(host)
+	if ip != nil {
+		return []net.IP{ip}, nil
 	}
 
 	if config.DeviceBinder != nil {
-		addrs, err = bindLookupIP(host, config.DnsServerGetter.GetPrimaryDnsServer(), config)
+
+		dnsServer := config.DnsServerGetter.GetPrimaryDnsServer()
+
+		ips, err := bindLookupIP(ctx, host, dnsServer, config)
 		if err == nil {
-			if len(addrs) == 0 {
+			if len(ips) == 0 {
 				err = errors.New("empty address list")
 			} else {
-				return addrs, err
+				return ips, err
 			}
 		}
-		NoticeAlert("retry resolve host %s: %s", host, err)
-		dnsServer := config.DnsServerGetter.GetSecondaryDnsServer()
+
+		dnsServer = config.DnsServerGetter.GetSecondaryDnsServer()
 		if dnsServer == "" {
-			return addrs, err
+			return ips, err
 		}
-		return bindLookupIP(host, dnsServer, config)
+
+		NoticeAlert("retry resolve host %s: %s", host, err)
+
+		return bindLookupIP(ctx, host, dnsServer, config)
 	}
-	return net.LookupIP(host)
+
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	ips := make([]net.IP, len(addrs))
+	for i, addr := range addrs {
+		ips[i] = addr.IP
+	}
+
+	return ips, nil
 }
 
 // bindLookupIP implements the BindToDevice LookupIP case.
 // To implement socket device binding, the lower-level syscall APIs are used.
-// The sequence of syscalls in this implementation are taken from:
-// https://code.google.com/p/go/issues/detail?id=6966
-func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, err error) {
+func bindLookupIP(
+	ctx context.Context, host, dnsServer string, config *DialConfig) ([]net.IP, error) {
 
 	// config.DnsServerGetter.GetDnsServers() must return IP addresses
 	ipAddr := net.ParseIP(dnsServer)
@@ -130,6 +145,9 @@ func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, e
 	}
 
 	// Convert the syscall socket to a net.Conn, for use in the dns package
+	// This code block is from:
+	// https://github.com/golang/go/issues/6966
+
 	file := os.NewFile(uintptr(socketFd), "")
 	netConn, err := net.FileConn(file) // net.FileConn() dups socketFd
 	file.Close()                       // file.Close() closes socketFd
@@ -137,17 +155,33 @@ func bindLookupIP(host, dnsServer string, config *DialConfig) (addrs []net.IP, e
 		return nil, common.ContextError(err)
 	}
 
-	// Set DNS query timeouts, using the ConnectTimeout from the overall Dial
-	if config.ConnectTimeout != 0 {
-		netConn.SetReadDeadline(time.Now().Add(config.ConnectTimeout))
-		netConn.SetWriteDeadline(time.Now().Add(config.ConnectTimeout))
+	type resolveIPResult struct {
+		ips []net.IP
+		err error
 	}
 
-	addrs, _, err = ResolveIP(host, netConn)
-	netConn.Close()
-	if err != nil {
+	resultChannel := make(chan resolveIPResult)
+
+	go func() {
+		ips, _, err := ResolveIP(host, netConn)
+		netConn.Close()
+		resultChannel <- resolveIPResult{ips: ips, err: err}
+	}()
+
+	var result resolveIPResult
+
+	select {
+	case result = <-resultChannel:
+	case <-ctx.Done():
+		result.err = ctx.Err()
+		// Interrupt the goroutine
+		netConn.Close()
+		<-resultChannel
+	}
+
+	if result.err != nil {
 		return nil, common.ContextError(err)
 	}
 
-	return addrs, nil
+	return result.ips, nil
 }

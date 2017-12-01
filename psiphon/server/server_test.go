@@ -20,6 +20,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -500,15 +501,18 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			}
 		}))
 
-	controllerShutdownBroadcast := make(chan struct{})
+	ctx, cancelFunc := context.WithCancel(context.Background())
+
 	controllerWaitGroup := new(sync.WaitGroup)
+
 	controllerWaitGroup.Add(1)
 	go func() {
 		defer controllerWaitGroup.Done()
-		controller.Run(controllerShutdownBroadcast)
+		controller.Run(ctx)
 	}()
+
 	defer func() {
-		close(controllerShutdownBroadcast)
+		cancelFunc()
 
 		shutdownTimeout := time.NewTimer(20 * time.Second)
 
