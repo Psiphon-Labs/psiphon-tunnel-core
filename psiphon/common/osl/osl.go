@@ -1389,12 +1389,12 @@ func NewOSLReader(
 		return nil, common.ContextError(errors.New("unseeded OSL"))
 	}
 
-	if len(fileKey) != 32 {
+	if len(fileKey) != KEY_LENGTH_BYTES {
 		return nil, common.ContextError(errors.New("invalid key length"))
 	}
 
 	var nonce [24]byte
-	var key [32]byte
+	var key [KEY_LENGTH_BYTES]byte
 	copy(key[:], fileKey)
 
 	unboxer, err := secretbox.NewOpenReadSeeker(oslFileContent, &nonce, &key)
@@ -1425,6 +1425,10 @@ func (z *zeroReader) Read(p []byte) (int, error) {
 // generate key material and is not intended as a general
 // purpose CSPRNG.
 func newSeededKeyMaterialReader(seed []byte) (io.Reader, error) {
+
+	if len(seed) != KEY_LENGTH_BYTES {
+		return nil, common.ContextError(errors.New("invalid key length"))
+	}
 
 	aesCipher, err := aes.NewCipher(seed)
 	if err != nil {
@@ -1516,11 +1520,11 @@ func shamirCombine(shares [][]byte) []byte {
 // A constant nonce is used, which is secure so long as
 // each key is used to encrypt only one message.
 func box(key, plaintext []byte) ([]byte, error) {
-	if len(key) != 32 {
+	if len(key) != KEY_LENGTH_BYTES {
 		return nil, common.ContextError(errors.New("invalid key length"))
 	}
 	var nonce [24]byte
-	var secretboxKey [32]byte
+	var secretboxKey [KEY_LENGTH_BYTES]byte
 	copy(secretboxKey[:], key)
 	box := secretbox.Seal(nil, plaintext, &nonce, &secretboxKey)
 	return box, nil
@@ -1528,11 +1532,11 @@ func box(key, plaintext []byte) ([]byte, error) {
 
 // unbox is a helper wrapper for secretbox.Open
 func unbox(key, box []byte) ([]byte, error) {
-	if len(key) != 32 {
+	if len(key) != KEY_LENGTH_BYTES {
 		return nil, common.ContextError(errors.New("invalid key length"))
 	}
 	var nonce [24]byte
-	var secretboxKey [32]byte
+	var secretboxKey [KEY_LENGTH_BYTES]byte
 	copy(secretboxKey[:], key)
 	plaintext, ok := secretbox.Open(nil, box, &nonce, &secretboxKey)
 	if !ok {
