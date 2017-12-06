@@ -377,7 +377,7 @@ func hasServerEntryFilterChanged(config *Config) (bool, error) {
 
 		bucket := tx.Bucket([]byte(keyValueBucket))
 		previousFilter := bucket.Get([]byte(DATA_STORE_LAST_SERVER_ENTRY_FILTER_KEY))
-		if bytes.Compare(previousFilter, currentFilter) == 0 {
+		if bytes.Compare(previousFilter, currentFilter) != 0 {
 			changed = true
 		}
 		return nil
@@ -498,10 +498,12 @@ func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) 
 
 	checkInitDataStore()
 
-	applyServerAffinity, err := hasServerEntryFilterChanged(config)
+	filterChanged, err := hasServerEntryFilterChanged(config)
 	if err != nil {
 		return false, nil, common.ContextError(err)
 	}
+
+	applyServerAffinity := !filterChanged
 
 	iterator := &ServerEntryIterator{
 		region:                      config.EgressRegion,
