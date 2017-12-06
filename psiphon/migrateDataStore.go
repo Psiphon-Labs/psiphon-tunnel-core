@@ -31,5 +31,5 @@ func prepareMigrationEntries(config *Config) []*protocol.ServerEntry {
 }
 
 // Stub function to return immediately for non-Windows builds
-func migrateEntries(serverEntries []*protocol.ServerEntry, legacyDataStoreFilename string) {
+func migrateEntries(config *Config, serverEntries []*protocol.ServerEntry, legacyDataStoreFilename string) {
 }

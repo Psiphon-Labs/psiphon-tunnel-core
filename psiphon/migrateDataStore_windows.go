@@ -85,7 +85,7 @@ func prepareMigrationEntries(config *Config) []*protocol.ServerEntry {
 // migrateEntries calls the BoltDB data store method to shuffle
 // and store an array of server entries (StoreServerEntries)
 // Failing to migrate entries, or delete the legacy file is never fatal
-func migrateEntries(serverEntries []*protocol.ServerEntry, legacyDataStoreFilename string) {
+func migrateEntries(config *Config, serverEntries []*protocol.ServerEntry, legacyDataStoreFilename string) {
 	checkInitDataStore()
 
 	err := StoreServerEntries(serverEntries, false)
@@ -95,7 +95,16 @@ func migrateEntries(serverEntries []*protocol.ServerEntry, legacyDataStoreFilena
 		// Retain server affinity from old datastore by taking the first
 		// array element (previous top ranked server) and promoting it
 		// to the top rank before the server selection process begins
-		err = PromoteServerEntry(serverEntries[0].IpAddress)
+		//
+		// TODO: we don't know what server entry filters were in place
+		// at the time when the legacy datastore was last updated.
+		// PromoteServerEntry now records the server entry filter in
+		// order to break server affinity when the filter changes.
+		// For now, we promote with the current server entry filter
+		// so the legacy server affinity is retained. This is the same
+		// logic as was in place before we added recording the server
+		// entry filter.
+		err = PromoteServerEntry(config, serverEntries[0].IpAddress)
 		if err != nil {
 			NoticeAlert("migrateEntries: PromoteServerEntry failed: %s", err)
 		}

@@ -974,8 +974,12 @@
             
             if (interface->ifa_addr && (interface->ifa_addr->sa_family==AF_INET || interface->ifa_addr->sa_family==AF_INET6)) {
                 
-                NSString *interfaceName = [NSString stringWithUTF8String:interface->ifa_name];
-                [upIffList addObject:interfaceName];
+                // ifa_name could be NULL
+                // https://sourceware.org/bugzilla/show_bug.cgi?id=21812
+                if (interface->ifa_name != NULL) {
+                    NSString *interfaceName = [NSString stringWithUTF8String:interface->ifa_name];
+                    [upIffList addObject:interfaceName];
+                }
             }
         }
     }

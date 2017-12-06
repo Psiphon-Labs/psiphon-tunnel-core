@@ -911,7 +911,7 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 	// Connecting to a TargetServerEntry does not change the
 	// ranking.
 	if controller.config.TargetServerEntry == "" {
-		PromoteServerEntry(tunnel.serverEntry.IpAddress)
+		PromoteServerEntry(controller.config, tunnel.serverEntry.IpAddress)
 	}
 
 	return true
@@ -1191,7 +1191,7 @@ func (controller *Controller) establishCandidateGenerator(impairedProtocols []st
 	establishStartTime := monotime.Now()
 	var networkWaitDuration time.Duration
 
-	iterator, err := NewServerEntryIterator(controller.config)
+	applyServerAffinity, iterator, err := NewServerEntryIterator(controller.config)
 	if err != nil {
 		NoticeAlert("failed to iterate over candidates: %s", err)
 		controller.SignalComponentFailure()
@@ -1199,10 +1199,13 @@ func (controller *Controller) establishCandidateGenerator(impairedProtocols []st
 	}
 	defer iterator.Close()
 
-	isServerAffinityCandidate := true
-
 	// TODO: reconcile server affinity scheme with multi-tunnel mode
 	if controller.config.TunnelPoolSize > 1 {
+		applyServerAffinity = false
+	}
+
+	isServerAffinityCandidate := true
+	if !applyServerAffinity {
 		isServerAffinityCandidate = false
 		close(controller.serverAffinityDoneBroadcast)
 	}
