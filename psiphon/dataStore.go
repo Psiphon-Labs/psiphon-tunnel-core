@@ -159,7 +159,8 @@ func InitDataStore(config *Config) (err error) {
 		// initialized prior to execution so that migrated entries can be stored
 
 		if len(migratableServerEntries) > 0 {
-			migrateEntries(migratableServerEntries, filepath.Join(config.DataStoreDirectory, LEGACY_DATA_STORE_FILENAME))
+			migrateEntries(
+				config, migratableServerEntries, filepath.Join(config.DataStoreDirectory, LEGACY_DATA_STORE_FILENAME))
 		}
 
 		resetAllPersistentStatsToUnreported()
