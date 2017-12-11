@@ -203,8 +203,31 @@ static CFIndex FixEmptyHost(NSURL *url, NSMutableData *urlData, CFIndex bytesIns
     if (range.length == 0) {
         NSUInteger  localhostLength;
         
-        assert(range.location >= 0);
+        /* Note:
+         *     We have updated this Apple provided (and JAHPAuthenticatingHTTPProtocol subsumed) code
+         *    to fix a bug in this function inherited from the original source. The comments below
+         *     detail the fix.
+         *
+         * Source: https://developer.apple.com/library/content/samplecode/CustomHTTPProtocol/Listings/CustomHTTPProtocol_Core_Code_CanonicalRequest_m.html
+         *
+         * Fix:
+         *    Removed `assert(range.location >= 0)` which fails every time because
+         *     if there is an empty host then range.location == kCFNotFound == -1.
+         * Fix:
+         *    Added rangeWithSeperator assertion. Length should always be non-negative.
+         *
+         * Please refer to the comments in CFURL.h for CFURLGetByteRangeForComponent:.
+         * An excerpt:
+         *     If non-NULL, rangeIncludingSeparators gives the range of component
+         *    including the sequences that separate component from the previous and
+         *    next components.  If there is no previous or next component, that end of
+         *    rangeIncludingSeparators will match the range of the component itself.
+         *    If url does not contain the given component type, (kCFNotFound, 0) is
+         *    returned, and rangeIncludingSeparators is set to the location where the
+         *    component would be inserted.
+         */
         assert(range.length >= 0);
+        assert(rangeWithSeparator.length >= 0);
         
         localhostLength = strlen("localhost");
         if (range.location != kCFNotFound) {
