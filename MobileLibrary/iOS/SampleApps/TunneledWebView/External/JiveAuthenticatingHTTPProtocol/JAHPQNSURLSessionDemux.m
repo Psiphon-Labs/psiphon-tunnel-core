@@ -171,13 +171,27 @@
 
 - (JAHPQNSURLSessionDemuxTaskInfo *)taskInfoForTask:(NSURLSessionTask *)task
 {
+    // rdar://21484589
+    // This is called from each NSURLSessionTaskDelegate
+    // method implemented by JAHPQNSURLSessionDemux,
+    // which are called from the NSURLSession delegateQueue,
+    // which is a different thread than self.clientThread.
+    // It is possible that -stopLoading was called on self.clientThread
+    // just before this method if so, we cannot make the
+    // assertion (task != nil).
+
+    // rdar://24042545
+    // URLSession:task:didCompleteWithError: should always
+    // be the last NSURLSessionTaskDelegate method called.
+    // Although, it is possible that this is not always
+    // the case. Therefore we cannot make the assertion
+    // (self.taskInfoByTaskID[@(task.taskIdentifier)] != nil)
+    // because [self.taskInfoByTaskID removeObjectForKey:@(taskInfo.task.taskIdentifier)]
+    // is called in URLSession:task:didCompleteWithError:.
     JAHPQNSURLSessionDemuxTaskInfo *    result;
-    
-    assert(task != nil);
-    
+
     @synchronized (self) {
         result = self.taskInfoByTaskID[@(task.taskIdentifier)];
-        assert(result != nil);
     }
     return result;
 }
@@ -187,7 +201,7 @@
     JAHPQNSURLSessionDemuxTaskInfo *    taskInfo;
     
     taskInfo = [self taskInfoForTask:task];
-    if ([taskInfo.delegate respondsToSelector:@selector(URLSession:task:willPerformHTTPRedirection:newRequest:completionHandler:)]) {
+    if (taskInfo && [taskInfo.delegate respondsToSelector:@selector(URLSession:task:willPerformHTTPRedirection:newRequest:completionHandler:)]) {
         [taskInfo performBlock:^{
             [taskInfo.delegate URLSession:session task:task willPerformHTTPRedirection:response newRequest:newRequest completionHandler:completionHandler];
         }];
@@ -201,7 +215,7 @@
     JAHPQNSURLSessionDemuxTaskInfo *    taskInfo;
     
     taskInfo = [self taskInfoForTask:task];
-    if ([taskInfo.delegate respondsToSelector:@selector(URLSession:task:didReceiveChallenge:completionHandler:)]) {
+    if (taskInfo && [taskInfo.delegate respondsToSelector:@selector(URLSession:task:didReceiveChallenge:completionHandler:)]) {
         [taskInfo performBlock:^{
             [taskInfo.delegate URLSession:session task:task didReceiveChallenge:challenge completionHandler:completionHandler];
         }];
@@ -215,7 +229,7 @@
     JAHPQNSURLSessionDemuxTaskInfo *    taskInfo;
     
     taskInfo = [self taskInfoForTask:task];
-    if ([taskInfo.delegate respondsToSelector:@selector(URLSession:task:needNewBodyStream:)]) {
+    if (taskInfo && [taskInfo.delegate respondsToSelector:@selector(URLSession:task:needNewBodyStream:)]) {
         [taskInfo performBlock:^{
             [taskInfo.delegate URLSession:session task:task needNewBodyStream:completionHandler];
         }];
@@ -229,7 +243,7 @@
     JAHPQNSURLSessionDemuxTaskInfo *    taskInfo;
     
     taskInfo = [self taskInfoForTask:task];
-    if ([taskInfo.delegate respondsToSelector:@selector(URLSession:task:didSendBodyData:totalBytesSent:totalBytesExpectedToSend:)]) {
+    if (taskInfo && [taskInfo.delegate respondsToSelector:@selector(URLSession:task:didSendBodyData:totalBytesSent:totalBytesExpectedToSend:)]) {
         [taskInfo performBlock:^{
             [taskInfo.delegate URLSession:session task:task didSendBodyData:bytesSent totalBytesSent:totalBytesSent totalBytesExpectedToSend:totalBytesExpectedToSend];
         }];
@@ -267,7 +281,7 @@
     JAHPQNSURLSessionDemuxTaskInfo *    taskInfo;
     
     taskInfo = [self taskInfoForTask:dataTask];
-    if ([taskInfo.delegate respondsToSelector:@selector(URLSession:dataTask:didReceiveResponse:completionHandler:)]) {
+    if (taskInfo && [taskInfo.delegate respondsToSelector:@selector(URLSession:dataTask:didReceiveResponse:completionHandler:)]) {
         [taskInfo performBlock:^{
             [taskInfo.delegate URLSession:session dataTask:dataTask didReceiveResponse:response completionHandler:completionHandler];
         }];
@@ -281,7 +295,7 @@
     JAHPQNSURLSessionDemuxTaskInfo *    taskInfo;
     
     taskInfo = [self taskInfoForTask:dataTask];
-    if ([taskInfo.delegate respondsToSelector:@selector(URLSession:dataTask:didBecomeDownloadTask:)]) {
+    if (taskInfo && [taskInfo.delegate respondsToSelector:@selector(URLSession:dataTask:didBecomeDownloadTask:)]) {
         [taskInfo performBlock:^{
             [taskInfo.delegate URLSession:session dataTask:dataTask didBecomeDownloadTask:downloadTask];
         }];
@@ -293,7 +307,7 @@
     JAHPQNSURLSessionDemuxTaskInfo *    taskInfo;
     
     taskInfo = [self taskInfoForTask:dataTask];
-    if ([taskInfo.delegate respondsToSelector:@selector(URLSession:dataTask:didReceiveData:)]) {
+    if (taskInfo && [taskInfo.delegate respondsToSelector:@selector(URLSession:dataTask:didReceiveData:)]) {
         [taskInfo performBlock:^{
             [taskInfo.delegate URLSession:session dataTask:dataTask didReceiveData:data];
         }];
@@ -305,7 +319,7 @@
     JAHPQNSURLSessionDemuxTaskInfo *    taskInfo;
     
     taskInfo = [self taskInfoForTask:dataTask];
-    if ([taskInfo.delegate respondsToSelector:@selector(URLSession:dataTask:willCacheResponse:completionHandler:)]) {
+    if (taskInfo && [taskInfo.delegate respondsToSelector:@selector(URLSession:dataTask:willCacheResponse:completionHandler:)]) {
         [taskInfo performBlock:^{
             [taskInfo.delegate URLSession:session dataTask:dataTask willCacheResponse:proposedResponse completionHandler:completionHandler];
         }];
