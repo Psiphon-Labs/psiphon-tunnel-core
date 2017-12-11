@@ -30,7 +30,7 @@ import (
 )
 
 // SubnetLookup provides an efficient lookup for individual
-// IP addresses within a list of subnets.
+// IPv4 addresses within a list of subnets.
 type SubnetLookup []net.IPNet
 
 // NewSubnetLookup creates a SubnetLookup from a list of
@@ -143,7 +143,11 @@ func (lookup SubnetLookup) ContainsIPAddress(addr net.IP) bool {
 	// idx == array_length means that address_IP is larger than the last (largest)
 	// network_IP so we need to check the last element for condition 1.
 
-	addrValue := binary.BigEndian.Uint32(addr.To4())
+	ipv4 := addr.To4()
+	if ipv4 == nil {
+		return false
+	}
+	addrValue := binary.BigEndian.Uint32(ipv4)
 	index := sort.Search(len(lookup), func(i int) bool {
 		networkValue := binary.BigEndian.Uint32(lookup[i].IP)
 		return networkValue > addrValue
