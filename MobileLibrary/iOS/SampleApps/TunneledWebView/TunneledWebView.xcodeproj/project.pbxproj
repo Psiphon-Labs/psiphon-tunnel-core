@@ -11,6 +11,7 @@
 		4E0CA9691FDE554B00B48BCA /* JAHPCacheStoragePolicy.m in Sources */ = {isa = PBXBuildFile; fileRef = 4E0CA9631FDE554B00B48BCA /* JAHPCacheStoragePolicy.m */; };
 		4E0CA96A1FDE554B00B48BCA /* JAHPCanonicalRequest.m in Sources */ = {isa = PBXBuildFile; fileRef = 4E0CA9651FDE554B00B48BCA /* JAHPCanonicalRequest.m */; };
 		4E0CA96B1FDE554B00B48BCA /* JAHPQNSURLSessionDemux.m in Sources */ = {isa = PBXBuildFile; fileRef = 4E0CA9671FDE554B00B48BCA /* JAHPQNSURLSessionDemux.m */; };
+		4EE9CDD91FE0830600BCE310 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 4EE9CDD81FE0830600BCE310 /* README.md */; };
 		662658EE1DCB8CF300872F6C /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662658ED1DCB8CF300872F6C /* AppDelegate.swift */; };
 		662658F01DCB8CF300872F6C /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662658EF1DCB8CF300872F6C /* ViewController.swift */; };
 		662658F31DCB8CF300872F6C /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 662658F11DCB8CF300872F6C /* Main.storyboard */; };
@@ -64,6 +65,7 @@
 		4E0CA9661FDE554B00B48BCA /* JAHPQNSURLSessionDemux.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = JAHPQNSURLSessionDemux.h; sourceTree = "<group>"; };
 		4E0CA9671FDE554B00B48BCA /* JAHPQNSURLSessionDemux.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = JAHPQNSURLSessionDemux.m; sourceTree = "<group>"; };
 		4E5A8DF51FDA7541009F8702 /* TunneledWebView-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "TunneledWebView-Bridging-Header.h"; sourceTree = "<group>"; };
+		4EE9CDD81FE0830600BCE310 /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = SOURCE_ROOT; };
 		662658EA1DCB8CF300872F6C /* TunneledWebView.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TunneledWebView.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		662658ED1DCB8CF300872F6C /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		662658EF1DCB8CF300872F6C /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
@@ -147,6 +149,7 @@
 		662658EC1DCB8CF300872F6C /* TunneledWebView */ = {
 			isa = PBXGroup;
 			children = (
+				4EE9CDD81FE0830600BCE310 /* README.md */,
 				4E5A8DF51FDA7541009F8702 /* TunneledWebView-Bridging-Header.h */,
 				662658ED1DCB8CF300872F6C /* AppDelegate.swift */,
 				662658EF1DCB8CF300872F6C /* ViewController.swift */,
@@ -292,6 +295,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4EE9CDD91FE0830600BCE310 /* README.md in Resources */,
 				662658F81DCB8CF300872F6C /* LaunchScreen.storyboard in Resources */,
 				662658F51DCB8CF300872F6C /* Assets.xcassets in Resources */,
 				6682D90E1EB1334000329958 /* psiphon-embedded-server-entries.txt in Resources */,

@@ -41,6 +41,24 @@ import PsiphonTunnel
         // JAHPAuthenticatingHTTPProtocol with NSURLProtocol.
         // See comments for `setDelegate` and `start` in
         // JAHPAuthenticatingHTTPProtocol.h
+        /*******************************************************/
+        /*****                                             *****/
+        /*****               !!! WARNING !!!               *****/
+        /*****                                             *****/
+        /*******************************************************/
+        /*****                                             *****/
+        /*****  This methood of proxying UIWebView is not  *****/
+        /*****  officially supported and requires extra    *****/
+        /*****  steps to proxy audio / video content.      *****/
+        /*****  Otherwise audio / video fetching may be    *****/
+        /*****  untunneled!                                *****/
+        /*****                                             *****/
+        /*****  It is strongly advised that you read the   *****/
+        /*****  "Caveats" section of README.md before      *****/
+        /*****  using PsiphonTunnel to proxy UIWebView     *****/
+        /*****  traffic.                                   *****/
+        /*****                                             *****/
+        /*******************************************************/
         JAHPAuthenticatingHTTPProtocol.setDelegate(self)
         JAHPAuthenticatingHTTPProtocol.start()
 
