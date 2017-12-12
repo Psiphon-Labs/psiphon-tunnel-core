@@ -156,42 +156,43 @@ static JAHPQNSURLSessionDemux *sharedDemuxInstance = nil;
 
 + (JAHPQNSURLSessionDemux *)sharedDemux
 {
-    static dispatch_once_t      sOnceToken;
-    static JAHPQNSURLSessionDemux * sharedDemuxInstance;
-    dispatch_once(&sOnceToken, ^{
-        NSURLSessionConfiguration *     config;
-        
-        config = [NSURLSessionConfiguration defaultSessionConfiguration];
-        // You have to explicitly configure the session to use your own protocol subclass here
-        // otherwise you don't see redirects <rdar://problem/17384498>.
-        if (config.protocolClasses) {
-            config.protocolClasses = [config.protocolClasses arrayByAddingObject:self];
-        } else {
-            config.protocolClasses = @[ self ];
+    @synchronized(self) {
+        if (sharedDemuxInstance == nil) {
+            NSURLSessionConfiguration *     config;
+
+            config = [NSURLSessionConfiguration defaultSessionConfiguration];
+            // You have to explicitly configure the session to use your own protocol subclass here
+            // otherwise you don't see redirects <rdar://problem/17384498>.
+            if (config.protocolClasses) {
+                config.protocolClasses = [config.protocolClasses arrayByAddingObject:self];
+            } else {
+                config.protocolClasses = @[ self ];
+            }
+
+            // Set proxy
+            NSString* proxyHost = @"localhost";
+            NSNumber* socksProxyPort = [NSNumber numberWithInt: (int)[AppDelegate sharedDelegate].socksProxyPort];
+            NSNumber* httpProxyPort = [NSNumber numberWithInt: (int)[AppDelegate sharedDelegate].httpProxyPort];
+
+            NSDictionary *proxyDict = @{
+                                        /* Disable SOCKS (to enable set to 1 and set "HTTPEnable" and "HTTPSEnable" to 0) */
+                                        @"SOCKSEnable" : [NSNumber numberWithInt:0],
+                                        (NSString *)kCFStreamPropertySOCKSProxyHost : proxyHost,
+                                        (NSString *)kCFStreamPropertySOCKSProxyPort : socksProxyPort,
+
+                                        @"HTTPEnable"  : [NSNumber numberWithInt:1],
+                                        (NSString *)kCFStreamPropertyHTTPProxyHost  : proxyHost,
+                                        (NSString *)kCFStreamPropertyHTTPProxyPort  : httpProxyPort,
+
+                                        @"HTTPSEnable" : [NSNumber numberWithInt:1],
+                                        (NSString *)kCFStreamPropertyHTTPSProxyHost : proxyHost,
+                                        (NSString *)kCFStreamPropertyHTTPSProxyPort : httpProxyPort,
+                                        };
+            config.connectionProxyDictionary = proxyDict;
+
+            sharedDemuxInstance = [[JAHPQNSURLSessionDemux alloc] initWithConfiguration:config];
         }
-        
-        // Set proxy
-        NSString* proxyHost = @"localhost";
-        NSNumber* socksProxyPort = [NSNumber numberWithInt: (int)[AppDelegate sharedDelegate].socksProxyPort];
-        NSNumber* httpProxyPort = [NSNumber numberWithInt: (int)[AppDelegate sharedDelegate].httpProxyPort];
-
-        NSDictionary *proxyDict = @{
-                                    @"SOCKSEnable" : [NSNumber numberWithInt:0],
-                                    (NSString *)kCFStreamPropertySOCKSProxyHost : proxyHost,
-                                    (NSString *)kCFStreamPropertySOCKSProxyPort : socksProxyPort,
-
-                                    @"HTTPEnable"  : [NSNumber numberWithInt:1],
-                                    (NSString *)kCFStreamPropertyHTTPProxyHost  : proxyHost,
-                                    (NSString *)kCFStreamPropertyHTTPProxyPort  : httpProxyPort,
-
-                                    @"HTTPSEnable" : [NSNumber numberWithInt:1],
-                                    (NSString *)kCFStreamPropertyHTTPSProxyHost : proxyHost,
-                                    (NSString *)kCFStreamPropertyHTTPSProxyPort : httpProxyPort,
-                                    };
-        config.connectionProxyDictionary = proxyDict;
-
-        sharedDemuxInstance = [[JAHPQNSURLSessionDemux alloc] initWithConfiguration:config];
-    });
+    }
     return sharedDemuxInstance;
 }
 
