@@ -22,6 +22,7 @@
 package psiphon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -30,18 +31,17 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Inc/goselect"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
-// tcpDial is the platform-specific part of interruptibleTCPDial
+// tcpDial is the platform-specific part of DialTCP
 //
 // To implement socket device binding, the lower-level syscall APIs are used.
 // The sequence of syscalls in this implementation are taken from:
 // https://github.com/golang/go/issues/6966
 // (originally: https://code.google.com/p/go/issues/detail?id=6966)
-func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
+func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, error) {
 
 	// Get the remote IP and port, resolving a domain name if necessary
 	host, strPort, err := net.SplitHostPort(addr)
@@ -52,7 +52,7 @@ func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
-	ipAddrs, err := LookupIP(host, config)
+	ipAddrs, err := LookupIP(ctx, host, config)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -60,16 +60,34 @@ func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 		return nil, common.ContextError(errors.New("no IP address"))
 	}
 
+	// When configured, attempt to synthesize IPv6 addresses from
+	// an IPv4 addresses for compatibility on DNS64/NAT64 networks.
+	// If synthesize fails, try the original addresses.
+	if config.IPv6Synthesizer != nil {
+		for i, ipAddr := range ipAddrs {
+			if ipAddr.To4() != nil {
+				synthesizedIPAddress := config.IPv6Synthesizer.IPv6Synthesize(ipAddr.String())
+				if synthesizedIPAddress != "" {
+					synthesizedAddr := net.ParseIP(synthesizedIPAddress)
+					if synthesizedAddr != nil {
+						ipAddrs[i] = synthesizedAddr
+					}
+				}
+			}
+		}
+	}
+
 	// Iterate over a pseudorandom permutation of the destination
 	// IPs and attempt connections.
 	//
-	// Only continue retrying as long as the initial ConnectTimeout
-	// has not expired. Unlike net.Dial, we do not fractionalize the
-	// timeout, as the ConnectTimeout is generally intended to apply
-	// to a single attempt. So these serial retries are most useful
-	// in cases of immediate failure, such as "no route to host"
+	// Only continue retrying as long as the dial context is not
+	// done. Unlike net.Dial, we do not fractionalize the context
+	// deadline, as the dial is generally intended to apply to a
+	// single attempt. So these serial retries are most useful in
+	// cases of immediate failure, such as "no route to host"
 	// errors when a host resolves to both IPv4 and IPv6 but IPv6
 	// addresses are unreachable.
+	//
 	// Retries at higher levels cover other cases: e.g.,
 	// Controller.remoteServerListFetcher will retry its entire
 	// operation and tcpDial will try a new permutation; or similarly,
@@ -80,17 +98,7 @@ func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 
 	lastErr := errors.New("unknown error")
 
-	var deadline monotime.Time
-	if config.ConnectTimeout != 0 {
-		deadline = monotime.Now().Add(config.ConnectTimeout)
-	}
-
-	for iteration, index := range permutedIndexes {
-
-		if iteration > 0 && deadline != 0 && monotime.Now().After(deadline) {
-			// lastErr should be set by the previous iteration
-			break
-		}
+	for _, index := range permutedIndexes {
 
 		// Get address type (IPv4 or IPv6)
 
@@ -118,22 +126,20 @@ func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 
 		// Create a socket and bind to device, when configured to do so
 
-		socketFd, err := syscall.Socket(domain, syscall.SOCK_STREAM, 0)
+		socketFD, err := syscall.Socket(domain, syscall.SOCK_STREAM, 0)
 		if err != nil {
 			lastErr = common.ContextError(err)
 			continue
 		}
 
-		tcpDialSetAdditionalSocketOptions(socketFd)
+		syscall.CloseOnExec(socketFD)
+
+		tcpDialSetAdditionalSocketOptions(socketFD)
 
 		if config.DeviceBinder != nil {
-			// WARNING: this potentially violates the direction to not call into
-			// external components after the Controller may have been stopped.
-			// TODO: rework DeviceBinder as an internal 'service' which can trap
-			// external calls when they should not be made?
-			err = config.DeviceBinder.BindToDevice(socketFd)
+			err = config.DeviceBinder.BindToDevice(socketFD)
 			if err != nil {
-				syscall.Close(socketFd)
+				syscall.Close(socketFD)
 				lastErr = common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))
 				continue
 			}
@@ -141,61 +147,119 @@ func tcpDial(addr string, config *DialConfig) (net.Conn, error) {
 
 		// Connect socket to the server's IP address
 
-		err = syscall.SetNonblock(socketFd, true)
+		err = syscall.SetNonblock(socketFD, true)
 		if err != nil {
-			syscall.Close(socketFd)
+			syscall.Close(socketFD)
 			lastErr = common.ContextError(err)
 			continue
 		}
 
-		err = syscall.Connect(socketFd, sockAddr)
+		err = syscall.Connect(socketFD, sockAddr)
 		if err != nil {
 			if errno, ok := err.(syscall.Errno); !ok || errno != syscall.EINPROGRESS {
-				syscall.Close(socketFd)
+				syscall.Close(socketFD)
 				lastErr = common.ContextError(err)
 				continue
 			}
 		}
 
-		fdset := &goselect.FDSet{}
-		fdset.Set(uintptr(socketFd))
+		// Use a control pipe to interrupt if the dial context is done (timeout or
+		// interrupted) before the TCP connection is established.
 
-		timeout := config.ConnectTimeout
-		if config.ConnectTimeout == 0 {
-			timeout = -1
+		var controlFDs [2]int
+		err = syscall.Pipe(controlFDs[:])
+		if err != nil {
+			syscall.Close(socketFD)
+			lastErr = common.ContextError(err)
+			continue
+
 		}
 
-		err = goselect.Select(socketFd+1, nil, fdset, nil, timeout)
+		for _, controlFD := range controlFDs {
+			syscall.CloseOnExec(controlFD)
+			err = syscall.SetNonblock(controlFD, true)
+			if err != nil {
+				break
+			}
+		}
+
 		if err != nil {
-			syscall.Close(socketFd)
+			syscall.Close(socketFD)
 			lastErr = common.ContextError(err)
 			continue
 		}
 
-		if !fdset.IsSet(uintptr(socketFd)) {
-			syscall.Close(socketFd)
-			lastErr = common.ContextError(errors.New("connect timed out"))
+		resultChannel := make(chan error)
+
+		go func() {
+
+			readSet := goselect.FDSet{}
+			readSet.Set(uintptr(controlFDs[0]))
+			writeSet := goselect.FDSet{}
+			writeSet.Set(uintptr(socketFD))
+
+			max := socketFD
+			if controlFDs[0] > max {
+				max = controlFDs[0]
+			}
+
+			err := goselect.Select(max+1, &readSet, &writeSet, nil, -1)
+
+			if err == nil && !writeSet.IsSet(uintptr(socketFD)) {
+				err = errors.New("interrupted")
+			}
+
+			resultChannel <- err
+		}()
+
+		done := false
+		select {
+		case err = <-resultChannel:
+		case <-ctx.Done():
+			err = ctx.Err()
+			// Interrupt the goroutine
+			// TODO: if this Write fails, abandon the goroutine instead of hanging?
+			var b [1]byte
+			syscall.Write(controlFDs[1], b[:])
+			<-resultChannel
+			done = true
+		}
+
+		syscall.Close(controlFDs[0])
+		syscall.Close(controlFDs[1])
+
+		if err != nil {
+			syscall.Close(socketFD)
+
+			if done {
+				// Skip retry as dial context has timed out of been canceled.
+				return nil, common.ContextError(err)
+			}
+
+			lastErr = common.ContextError(err)
 			continue
 		}
 
-		err = syscall.SetNonblock(socketFd, false)
+		err = syscall.SetNonblock(socketFD, false)
 		if err != nil {
-			syscall.Close(socketFd)
+			syscall.Close(socketFD)
 			lastErr = common.ContextError(err)
 			continue
 		}
 
 		// Convert the socket fd to a net.Conn
+		// This code block is from:
+		// https://github.com/golang/go/issues/6966
 
-		file := os.NewFile(uintptr(socketFd), "")
-		netConn, err := net.FileConn(file) // net.FileConn() dups socketFd
-		file.Close()                       // file.Close() closes socketFd
+		file := os.NewFile(uintptr(socketFD), "")
+		conn, err := net.FileConn(file) // net.FileConn() dups socketFD
+		file.Close()                    // file.Close() closes socketFD
 		if err != nil {
 			lastErr = common.ContextError(err)
 			continue
 		}
 
-		return netConn, nil
+		return &TCPConn{Conn: conn}, nil
 	}
 
 	return nil, lastErr

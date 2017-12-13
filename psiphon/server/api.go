@@ -858,6 +858,7 @@ func isServerSecret(support *SupportServices, value string) bool {
 }
 
 func isHexDigits(_ *SupportServices, value string) bool {
+	// Allows both uppercase in addition to lowercase, for legacy support.
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		return !unicode.Is(unicode.ASCII_Hex_Digit, c)
 	})

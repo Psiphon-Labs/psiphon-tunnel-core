@@ -53,6 +53,8 @@ extern NSString *kReachabilityChangedNotification;
 - (void)stopNotifier;
 
 - (NetworkStatus)currentReachabilityStatus;
+- (NSString*)currentReachabilityFlagsToString;
+
 
 /*!
  * WWAN may be available, but not active until a connection has been established. WiFi may require a connection for VPN on Demand.

@@ -20,147 +20,153 @@
 package upstreamproxy
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"io/ioutil"
-	"net"
 	"net/http"
-	"strings"
-	"sync"
 )
-
-const HTTP_STAT_LINE_LENGTH = 12
 
 // ProxyAuthTransport provides support for proxy authentication when doing plain HTTP
 // by tapping into HTTP conversation and adding authentication headers to the requests
 // when requested by server
+//
+// Limitation: in violation of https://golang.org/pkg/net/http/#RoundTripper,
+// ProxyAuthTransport is _not_ safe for concurrent RoundTrip calls. This is acceptable
+// for its use in Psiphon to provide upstream proxy support for meek, which makes only
+// serial RoundTrip calls. Concurrent RoundTrip calls will result in data race conditions
+// and undefined behavior during an authentication handshake.
 type ProxyAuthTransport struct {
 	*http.Transport
-	Dial          DialFunc
-	Username      string
-	Password      string
-	Authenticator HttpAuthenticator
-	mu            sync.Mutex
-	CustomHeaders http.Header
+	username         string
+	password         string
+	authenticator    HttpAuthenticator
+	customHeaders    http.Header
+	clonedBodyBuffer bytes.Buffer
 }
 
-func NewProxyAuthTransport(rawTransport *http.Transport, customHeaders http.Header) (*ProxyAuthTransport, error) {
-	dialFn := rawTransport.Dial
-	if dialFn == nil {
-		dialFn = net.Dial
-	}
-	tr := &ProxyAuthTransport{Dial: dialFn, CustomHeaders: customHeaders}
-	proxyUrlFn := rawTransport.Proxy
-	if proxyUrlFn != nil {
-		wrappedDialFn := tr.wrapTransportDial()
-		rawTransport.Dial = wrappedDialFn
-		proxyUrl, err := proxyUrlFn(nil)
-		if err != nil {
-			return nil, err
-		}
-		if proxyUrl.Scheme != "http" {
-			return nil, fmt.Errorf("Only HTTP proxy supported, for SOCKS use http.Transport with custom dialers & upstreamproxy.NewProxyDialFunc")
-		}
-		if proxyUrl.User != nil {
-			tr.Username = proxyUrl.User.Username()
-			tr.Password, _ = proxyUrl.User.Password()
-		}
-		// strip username and password from the proxyURL because
-		// we do not want the wrapped transport to handle authentication
-		proxyUrl.User = nil
-		rawTransport.Proxy = http.ProxyURL(proxyUrl)
+func NewProxyAuthTransport(
+	rawTransport *http.Transport,
+	customHeaders http.Header) (*ProxyAuthTransport, error) {
+
+	if rawTransport.Proxy == nil {
+		return nil, fmt.Errorf("rawTransport must have Proxy")
 	}
 
-	tr.Transport = rawTransport
-	return tr, nil
-}
-
-func (tr *ProxyAuthTransport) preAuthenticateRequest(req *http.Request) error {
-	tr.mu.Lock()
-	defer tr.mu.Unlock()
-	if tr.Authenticator == nil {
-		return nil
+	tr := &ProxyAuthTransport{
+		Transport:     rawTransport,
+		customHeaders: customHeaders,
 	}
-	return tr.Authenticator.PreAuthenticate(req)
-}
 
-func (tr *ProxyAuthTransport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	if req.URL.Scheme != "http" {
-		return nil, fmt.Errorf("Only plain HTTP supported, for HTTPS use http.Transport with DialTLS & upstreamproxy.NewProxyDialFunc")
-	}
-	err = tr.preAuthenticateRequest(req)
+	proxyUrl, err := rawTransport.Proxy(nil)
 	if err != nil {
 		return nil, err
 	}
+	if proxyUrl.Scheme != "http" {
+		return nil, fmt.Errorf("%s unsupported", proxyUrl.Scheme)
+	}
+	if proxyUrl.User != nil {
+		tr.username = proxyUrl.User.Username()
+		tr.password, _ = proxyUrl.User.Password()
+	}
+	// strip username and password from the proxyURL because
+	// we do not want the wrapped transport to handle authentication
+	proxyUrl.User = nil
+	rawTransport.Proxy = http.ProxyURL(proxyUrl)
 
-	var ha HttpAuthenticator
+	return tr, nil
+}
 
-	// Clone request early because RoundTrip will destroy request Body
-	// Also add custom headers to the cloned request
-	newReq := cloneRequest(req, tr.CustomHeaders)
+func (tr *ProxyAuthTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 
-	resp, err = tr.Transport.RoundTrip(newReq)
-
-	if err != nil {
-		return resp, proxyError(err)
+	if request.URL.Scheme != "http" {
+		return nil, fmt.Errorf("%s unsupported", request.URL.Scheme)
 	}
 
-	if resp.StatusCode == 407 {
-		tr.mu.Lock()
-		defer tr.mu.Unlock()
-		ha, err = NewHttpAuthenticator(resp, tr.Username, tr.Password)
+	// Notes:
+	//
+	// - The 407 authentication loop assumes no concurrent calls of RoundTrip
+	//   and additionally assumes that serial RoundTrip calls will always
+	//   resuse any existing HTTP persistent conn. The entire authentication
+	//   handshake must occur on the same HTTP persistent conn.
+	//
+	// - Requests are cloned for the lifetime of the ProxyAuthTransport,
+	//   since we don't know when the next initial RoundTrip may need to enter
+	//   the 407 authentication loop, which requires the initial request to be
+	//   cloned and replayable. Even if we hook into the Close call for any
+	//   existing HTTP persistent conn, it could be that it closes only after
+	//   RoundTrip is called.
+	//
+	// - Cloning reuses a buffer (clonedBodyBuffer) to store the request body
+	//   to avoid excessive allocations.
+
+	var cachedRequestBody []byte
+	if request.Body != nil {
+		tr.clonedBodyBuffer.Reset()
+		tr.clonedBodyBuffer.ReadFrom(request.Body)
+		request.Body.Close()
+		cachedRequestBody = tr.clonedBodyBuffer.Bytes()
+	}
+
+	clonedRequest := cloneRequest(
+		request, tr.customHeaders, cachedRequestBody)
+
+	if tr.authenticator != nil {
+
+		// For some authentication schemes (e.g., non-connection-based), once
+		// an initial 407 has been handled, add necessary and sufficient
+		// authentication headers to every request.
+
+		err := tr.authenticator.PreAuthenticate(clonedRequest)
 		if err != nil {
 			return nil, err
 		}
-		if ha.IsConnectionBased() {
-			return nil, proxyError(fmt.Errorf("Connection based auth was not handled by transportConn!"))
+	}
+
+	response, err := tr.Transport.RoundTrip(clonedRequest)
+	if err != nil {
+		return response, proxyError(err)
+	}
+
+	if response.StatusCode == 407 {
+
+		authenticator, err := NewHttpAuthenticator(
+			response, tr.username, tr.password)
+		if err != nil {
+			response.Body.Close()
+			return nil, err
 		}
-		tr.Authenticator = ha
-	authenticationLoop:
+
 		for {
-			newReq = cloneRequest(req, tr.CustomHeaders)
-			err = tr.Authenticator.Authenticate(newReq, resp)
+			clonedRequest = cloneRequest(
+				request, tr.customHeaders, cachedRequestBody)
+
+			err = authenticator.Authenticate(clonedRequest, response)
+			response.Body.Close()
 			if err != nil {
 				return nil, err
 			}
-			resp, err = tr.Transport.RoundTrip(newReq)
 
+			response, err = tr.Transport.RoundTrip(clonedRequest)
 			if err != nil {
-				return resp, proxyError(err)
+				return nil, proxyError(err)
 			}
-			if resp.StatusCode != 407 {
-				if tr.Authenticator != nil && tr.Authenticator.IsComplete() {
-					tr.Authenticator.Reset()
-				}
-				break authenticationLoop
-			} else {
+
+			if response.StatusCode != 407 {
+
+				// Save the authenticator result to use for PreAuthenticate.
+
+				tr.authenticator = authenticator
+				break
 			}
 		}
 	}
-	return resp, err
 
-}
-
-// wrapTransportDial wraps original transport Dial function
-// and returns a new net.Conn interface provided by transportConn
-// that allows us to intercept both outgoing requests and incoming
-// responses and examine / mutate them
-func (tr *ProxyAuthTransport) wrapTransportDial() DialFunc {
-	return func(network, addr string) (net.Conn, error) {
-		c, err := tr.Dial("tcp", addr)
-		if err != nil {
-			return nil, err
-		}
-		tc := newTransportConn(c, tr)
-		return tc, nil
-	}
+	return response, nil
 }
 
 // Based on https://github.com/golang/oauth2/blob/master/transport.go
 // Copyright 2014 The Go Authors. All rights reserved.
-func cloneRequest(r *http.Request, ch http.Header) *http.Request {
+func cloneRequest(r *http.Request, ch http.Header, body []byte) *http.Request {
 	// shallow copy of the struct
 	r2 := new(http.Request)
 	*r2 = *r
@@ -188,143 +194,12 @@ func cloneRequest(r *http.Request, ch http.Header) *http.Request {
 		}
 	}
 
-	if r.Body != nil {
-		body, _ := ioutil.ReadAll(r.Body)
-		defer r.Body.Close()
-		// restore original request Body
-		// drained by ReadAll()
-		r.Body = ioutil.NopCloser(bytes.NewReader(body))
-
+	if body != nil {
 		r2.Body = ioutil.NopCloser(bytes.NewReader(body))
 	}
+
+	// A replayed request inherits the original request's deadline (and interruptability).
+	r2 = r2.WithContext(r.Context())
+
 	return r2
-}
-
-type transportConn struct {
-	net.Conn
-	requestInterceptor io.Writer
-	reqDone            chan struct{}
-	errChannel         chan error
-	lastRequest        *http.Request
-	authenticator      HttpAuthenticator
-	transport          *ProxyAuthTransport
-}
-
-func newTransportConn(c net.Conn, tr *ProxyAuthTransport) *transportConn {
-	tc := &transportConn{
-		Conn:       c,
-		reqDone:    make(chan struct{}),
-		errChannel: make(chan error),
-		transport:  tr,
-	}
-	// Intercept outgoing request as it is written out to server and store it
-	// in case it needs to be authenticated and replayed
-	//NOTE that pipelining is currently not supported
-	pr, pw := io.Pipe()
-	tc.requestInterceptor = pw
-	requestReader := bufio.NewReader(pr)
-	go func() {
-	requestInterceptLoop:
-		for {
-			req, err := http.ReadRequest(requestReader)
-			if err != nil {
-				tc.Conn.Close()
-				pr.Close()
-				pw.Close()
-				tc.errChannel <- fmt.Errorf("intercept request loop http.ReadRequest error: %s", err)
-				break requestInterceptLoop
-			}
-			//read and copy entire body
-			body, _ := ioutil.ReadAll(req.Body)
-			tc.lastRequest = req
-			tc.lastRequest.Body = ioutil.NopCloser(bytes.NewReader(body))
-			//Signal when we have a complete request
-			tc.reqDone <- struct{}{}
-		}
-	}()
-	return tc
-}
-
-// Read peeks into the new response and checks if the proxy requests authentication
-// If so, the last intercepted request is authenticated against the response
-// in case of connection based auth scheme(i.e. NTLM)
-// All the non-connection based schemes are handled by the ProxyAuthTransport.RoundTrip()
-func (tc *transportConn) Read(p []byte) (n int, readErr error) {
-	n, readErr = tc.Conn.Read(p)
-	if n < HTTP_STAT_LINE_LENGTH {
-		return
-	}
-	select {
-	case _ = <-tc.reqDone:
-		line := string(p[:HTTP_STAT_LINE_LENGTH])
-		//This is a new response
-		//Let's see if proxy requests authentication
-		f := strings.SplitN(line, " ", 2)
-
-		readBufferReader := io.NewSectionReader(bytes.NewReader(p), 0, int64(n))
-		responseReader := bufio.NewReader(readBufferReader)
-		if (f[0] == "HTTP/1.0" || f[0] == "HTTP/1.1") && f[1] == "407" {
-			resp, err := http.ReadResponse(responseReader, nil)
-			if err != nil {
-				return 0, err
-			}
-			ha, err := NewHttpAuthenticator(resp, tc.transport.Username, tc.transport.Password)
-			if err != nil {
-				return 0, err
-			}
-			// If connection based auth is requested, we are going to
-			// authenticate request on this very connection
-			// otherwise just return what we read
-			if !ha.IsConnectionBased() {
-				return
-			}
-
-			// Drain the rest of the response
-			// in order to perform auth handshake
-			// on the connection
-			readBufferReader.Seek(0, 0)
-			responseReader = bufio.NewReader(io.MultiReader(readBufferReader, tc.Conn))
-			resp, err = http.ReadResponse(responseReader, nil)
-			if err != nil {
-				return 0, err
-			}
-
-			ioutil.ReadAll(resp.Body)
-			resp.Body.Close()
-
-			if tc.authenticator == nil {
-				tc.authenticator = ha
-			}
-
-			if resp.Close == true {
-				// Server side indicated that it is closing this connection,
-				// dial a new one
-				addr := tc.Conn.RemoteAddr()
-				tc.Conn.Close()
-				tc.Conn, err = tc.transport.Dial(addr.Network(), addr.String())
-				if err != nil {
-					return 0, err
-				}
-			}
-
-			// Authenticate and replay the request on the connection
-			err = tc.authenticator.Authenticate(tc.lastRequest, resp)
-			if err != nil {
-				return 0, err
-			}
-			tc.lastRequest.WriteProxy(tc)
-			return tc.Read(p)
-		}
-	case err := <-tc.errChannel:
-		return 0, err
-	default:
-	}
-	return
-}
-
-func (tc *transportConn) Write(p []byte) (n int, err error) {
-	n, err = tc.Conn.Write(p)
-	//also write data to the request interceptor
-	tc.requestInterceptor.Write(p[:n])
-	return n, err
 }

@@ -102,19 +102,6 @@ var cipherSuites = []*cipherSuite{
 	{TLS_RSA_WITH_RC4_128_SHA, 16, 20, 0, rsaKA, suiteDefaultOff, cipherRC4, macSHA1, nil},
 	{TLS_ECDHE_RSA_WITH_RC4_128_SHA, 16, 20, 0, ecdheRSAKA, suiteECDHE | suiteDefaultOff, cipherRC4, macSHA1, nil},
 	{TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, 16, 20, 0, ecdheECDSAKA, suiteECDHE | suiteECDSA | suiteDefaultOff, cipherRC4, macSHA1, nil},
-
-	// [Psiphon]
-	// TLS_..._CHACHA20_POLY1305_OLD are required for EmulateChrome.
-	{TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_OLD, 32, 0, 12, ecdheRSAKA, suiteDefaultOff | suiteECDHE | suiteTLS12, nil, nil, aeadChaCha20Poly1305},
-	{TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_OLD, 32, 0, 12, ecdheECDSAKA, suiteDefaultOff | suiteECDHE | suiteECDSA | suiteTLS12, nil, nil, aeadChaCha20Poly1305},
-}
-
-// [Psiphon]
-// The following are not stock golang cipher suites and must be ignored
-// when running automated tests against pre-recorded "testdata".
-var ignoreCipherSuites = []uint16{
-	TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_OLD,
-	TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_OLD,
 }
 
 func cipherRC4(key, iv []byte, isRead bool) interface{} {
@@ -406,9 +393,4 @@ const (
 	// that the client is doing version fallback. See
 	// https://tools.ietf.org/html/rfc7507.
 	TLS_FALLBACK_SCSV uint16 = 0x5600
-
-	// [Psiphon]
-	// TLS_..._CHACHA20_POLY1305_OLD are required for EmulateChrome.
-	TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_OLD   uint16 = 0xcc13
-	TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_OLD uint16 = 0xcc14
 )

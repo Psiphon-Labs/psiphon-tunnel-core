@@ -20,9 +20,11 @@
 package osl
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"testing"
 	"time"
@@ -82,7 +84,7 @@ func TestOSL(t *testing.T) {
 
       "SeedSpecThreshold" : 2,
 
-      "SeedPeriodNanoseconds" : 1000000,
+      "SeedPeriodNanoseconds" : 5000000,
 
       "SeedPeriodKeySplits": [
         {
@@ -142,7 +144,7 @@ func TestOSL(t *testing.T) {
 
       "SeedSpecThreshold" : 2,
 
-      "SeedPeriodNanoseconds" : 1000000,
+      "SeedPeriodNanoseconds" : 5000000,
 
       "SeedPeriodKeySplits": [
         {
@@ -154,14 +156,15 @@ func TestOSL(t *testing.T) {
   ]
 }
 `
+	seedPeriod := 5 * time.Millisecond // "SeedPeriodNanoseconds" : 5000000
 	now := time.Now().UTC()
-	epoch := now.Truncate(1 * time.Millisecond)
+	epoch := now.Add(-seedPeriod).Truncate(seedPeriod)
 	epochStr := epoch.Format(time.RFC3339Nano)
 	configJSON := fmt.Sprintf(configJSONTemplate, epochStr, epochStr)
 
-	// The first scheme requires sufficient activity within 5/10 1 millisecond
-	// periods and 5/10 10 millisecond longer periods. The second scheme requires
-	// sufficient activity within 25/100 1 millisecond periods.
+	// The first scheme requires sufficient activity within 5/10 5 millisecond
+	// periods and 5/10 50 millisecond longer periods. The second scheme requires
+	// sufficient activity within 25/100 5 millisecond periods.
 
 	config, err := LoadConfig([]byte(configJSON))
 	if err != nil {
@@ -202,7 +205,7 @@ func TestOSL(t *testing.T) {
 	rolloverToNextSLOKTime := func() {
 		// Rollover to the next SLOK time, so accrued data transfer will be reset.
 		now := time.Now().UTC()
-		time.Sleep(now.Add(1 * time.Millisecond).Truncate(1 * time.Millisecond).Sub(now))
+		time.Sleep(now.Add(seedPeriod).Truncate(seedPeriod).Sub(now))
 	}
 
 	t.Run("eligible client, insufficient transfer after rollover", func(t *testing.T) {
@@ -304,9 +307,7 @@ func TestOSL(t *testing.T) {
 
 		clientSeedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1"))
 
-		clientSeedPortForward.UpdateProgress(5, 5, 5)
-
-		clientSeedPortForward.UpdateProgress(5, 5, 5)
+		clientSeedPortForward.UpdateProgress(10, 10, 10)
 
 		if len(clientSeedState.GetSeedPayload().SLOKs) != 5 {
 			t.Fatalf("expected 5 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
@@ -324,7 +325,7 @@ func TestOSL(t *testing.T) {
 	t.Run("pave OSLs", func(t *testing.T) {
 
 		// Pave sufficient OSLs to cover simulated elapsed time of all test cases.
-		endTime := epoch.Add(1000 * time.Millisecond)
+		endTime := epoch.Add(1000 * seedPeriod)
 
 		// In actual deployment, paved files for each propagation channel ID
 		// are dropped in distinct distribution sites.
@@ -357,21 +358,55 @@ func TestOSL(t *testing.T) {
 				}
 			}
 
+			// Note: these options are exercised in remoteServerList_test.go
+			omitMD5SumsSchemes := []int{}
+			omitEmptyOSLsSchemes := []int{}
+
+			firstPaveFiles, err := config.Pave(
+				endTime,
+				propagationChannelID,
+				signingPublicKey,
+				signingPrivateKey,
+				paveServerEntries,
+				omitMD5SumsSchemes,
+				omitEmptyOSLsSchemes,
+				nil)
+			if err != nil {
+				t.Fatalf("Pave failed: %s", err)
+			}
+
 			paveFiles, err := config.Pave(
 				endTime,
 				propagationChannelID,
 				signingPublicKey,
 				signingPrivateKey,
 				paveServerEntries,
+				omitMD5SumsSchemes,
+				omitEmptyOSLsSchemes,
 				nil)
 			if err != nil {
 				t.Fatalf("Pave failed: %s", err)
 			}
 
 			// Check that the paved file name matches the name the client will look for.
+
 			if len(paveFiles) < 1 || paveFiles[len(paveFiles)-1].Name != GetOSLRegistryURL("") {
 				t.Fatalf("invalid registry pave file")
 			}
+
+			// Check that the content of two paves is the same: all the crypto should be
+			// deterministic.
+
+			for index, paveFile := range paveFiles {
+				if paveFile.Name != firstPaveFiles[index].Name {
+					t.Fatalf("Pave name mismatch")
+				}
+				if bytes.Compare(paveFile.Contents, firstPaveFiles[index].Contents) != 0 {
+					t.Fatalf("Pave content mismatch")
+				}
+			}
+
+			// Use the paved content in the following tests.
 
 			pavedRegistries[propagationChannelID] = paveFiles[len(paveFiles)-1].Contents
 
@@ -508,7 +543,7 @@ func TestOSL(t *testing.T) {
 						&slokReference{
 							PropagationChannelID: testCase.propagationChannelID,
 							SeedSpecID:           string(testCase.scheme.SeedSpecs[seedSpecIndex].ID),
-							Time:                 epoch.Add(time.Duration(timePeriod) * time.Millisecond),
+							Time:                 epoch.Add(time.Duration(timePeriod) * seedPeriod),
 						})
 
 					slokMap[string(slok.ID)] = slok.Key
@@ -516,53 +551,68 @@ func TestOSL(t *testing.T) {
 				}
 			}
 
-			t.Logf("SLOK count: %d", len(slokMap))
+			startTime := time.Now()
 
-			slokLookup := func(slokID []byte) []byte {
+			lookupSLOKs := func(slokID []byte) []byte {
 				return slokMap[string(slokID)]
 			}
 
-			checkRegistryStartTime := time.Now()
-
-			registry, _, err := UnpackRegistry(
-				pavedRegistries[testCase.propagationChannelID], signingPublicKey)
+			registryStreamer, err := NewRegistryStreamer(
+				bytes.NewReader(pavedRegistries[testCase.propagationChannelID]),
+				signingPublicKey,
+				lookupSLOKs)
 			if err != nil {
-				t.Fatalf("UnpackRegistry failed: %s", err)
+				t.Fatalf("NewRegistryStreamer failed: %s", err)
 			}
 
-			t.Logf("registry size: %d", len(pavedRegistries[testCase.propagationChannelID]))
-			t.Logf("registry OSL count: %d", len(registry.FileSpecs))
+			seededOSLCount := 0
 
-			oslIDs := registry.GetSeededOSLIDs(
-				slokLookup,
-				func(err error) {
-					// Actual client will treat errors as warnings.
-					t.Fatalf("GetSeededOSLIDs failed: %s", err)
-				})
+			for {
 
-			t.Logf("check registry elapsed time: %s", time.Since(checkRegistryStartTime))
+				fileSpec, err := registryStreamer.Next()
+				if err != nil {
+					t.Fatalf("Next failed: %s", err)
+				}
 
-			if len(oslIDs) != testCase.expectedOSLCount {
-				t.Fatalf("expected %d OSLs got %d", testCase.expectedOSLCount, len(oslIDs))
-			}
+				if fileSpec == nil {
+					break
+				}
 
-			for _, oslID := range oslIDs {
+				seededOSLCount += 1
+
 				oslFileContents, ok :=
-					pavedOSLFileContents[testCase.propagationChannelID][GetOSLFileURL("", oslID)]
+					pavedOSLFileContents[testCase.propagationChannelID][GetOSLFileURL("", fileSpec.ID)]
 				if !ok {
 					t.Fatalf("unknown OSL file name")
 				}
 
-				plaintextOSL, err := registry.UnpackOSL(
-					slokLookup, oslID, oslFileContents, signingPublicKey)
+				payloadReader, err := NewOSLReader(
+					bytes.NewReader(oslFileContents),
+					fileSpec,
+					lookupSLOKs,
+					signingPublicKey)
 				if err != nil {
-					t.Fatalf("DecryptOSL failed: %s", err)
+					t.Fatalf("NewOSLReader failed: %s", err)
+				}
+
+				payload, err := ioutil.ReadAll(payloadReader)
+				if err != nil {
+					t.Fatalf("ReadAll failed: %s", err)
 				}
 
 				// The decrypted OSL should contain its own ID.
-				if plaintextOSL != base64.StdEncoding.EncodeToString(oslID) {
+				if string(payload) != base64.StdEncoding.EncodeToString(fileSpec.ID) {
 					t.Fatalf("unexpected OSL file contents")
 				}
+			}
+
+			t.Logf("registry size: %d", len(pavedRegistries[testCase.propagationChannelID]))
+			t.Logf("SLOK count: %d", len(slokMap))
+			t.Logf("seeded OSL count: %d", seededOSLCount)
+			t.Logf("elapsed time: %s", time.Since(startTime))
+
+			if seededOSLCount != testCase.expectedOSLCount {
+				t.Fatalf("expected %d OSLs got %d", testCase.expectedOSLCount, seededOSLCount)
 			}
 		})
 	}

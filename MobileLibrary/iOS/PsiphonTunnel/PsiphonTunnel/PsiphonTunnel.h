@@ -124,7 +124,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  */
 - (NSString * _Nullable)getEmbeddedServerEntries;
 
-
 //
 // Optional delegate methods. Note that some of these are probably necessary for
 // for a functioning app to implement, for example `onConnected`.
@@ -134,16 +133,29 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 /*!
   Called when the tunnel is starting to get the initial server entries (typically embedded in the app) that will be used to bootstrap the Psiphon tunnel connection. This value is in a particular format and will be supplied by Psiphon Inc.
   If this method is implemented, it takes precedence over getEmbeddedServerEntries, and getEmbeddedServerEntries will not be called unless this method returns NULL or an empty string.
-  @return Optional path where embedded server entries file is located. This file should be accessible by the Network Extension.
+  @return Optional path where embedded server entries file is located. This file should be readable by the library.
  */
 - (NSString * _Nullable)getEmbeddedServerEntriesPath;
 
 /*!
+  Called when the tunnel is starting. If this method is implemented, it should return the path where a homepage
+  notices file is to be written. This path should be writable by the library.
+ */
+- (NSString * _Nullable)getHomepageNoticesPath;
+
+/*!
+  Called when the tunnel is starting. If this method is implemented, it should return the path where a rotating
+  notice file set is to be written. path file should be writable by the library.
+ */
+- (NSString * _Nullable)getRotatingNoticesPath;
+
+/*!
  Gets runtime errors info that may be useful for debugging.
  @param message  The diagnostic message string.
+ @param timestamp RFC3339 encoded timestamp.
  Swift: @code func onDiagnosticMessage(_ message: String) @endcode
  */
-- (void)onDiagnosticMessage:(NSString * _Nonnull)message;
+- (void)onDiagnosticMessage:(NSString * _Nonnull)message withTimestamp:(NSString * _Nonnull)timestamp;
 
 /*!
  Called when the tunnel is in the process of connecting.
@@ -176,22 +188,20 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 - (void)onConnectionStateChangedFrom:(PsiphonConnectionState)oldState to:(PsiphonConnectionState)newState;
 
 /*!
- Called to indicate that tunnel-core is exiting imminently (usually do to
+ Called to indicate that tunnel-core is exiting imminently (usually due to
  a `stop()` call, but could be due to an unexpected error).
+ onExiting may be called before or after `stop()` returns.
  Swift: @code func onExiting() @endcode
  */
 - (void)onExiting;
 
 /*!
- Called when the device's Internet connection state is interrupted.
- This may mean that it had connectivity and now doesn't, or went from Wi-Fi to
- WWAN or vice versa.
- @note For many/most apps, the response to this callback should be to restart
- the Psiphon tunnel. It will eventually notice and begin reconnecting, but it
- may take much longer, depending on attempts to use the tunnel.
- Swift: @code func onDeviceInternetConnectivityInterrupted() @endcode
- */
-- (void)onDeviceInternetConnectivityInterrupted;
+Called when the device's Internet connection state has changed.
+This may mean that it had connectivity and now doesn't, or went from Wi-Fi to
+WWAN or vice versa or VPN state changed
+Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachability) @endcode
+*/
+- (void)onInternetReachabilityChanged:(Reachability*_Nonnull)currentReachability;
 
 /*!
  Called when tunnel-core determines which server egress regions are available
@@ -264,6 +274,8 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 /*!
  Called to report how many bytes have been transferred since the last time
  this function was called.
+ By default onBytesTransferred is disabled. Enable it by setting
+ EmitBytesTransferred to true in the Psiphon config.
  @param sent  The number of bytes sent.
  @param received  The number of bytes received.
  Swift: @code func onBytesTransferred(_ sent: Int64, _ received: Int64) @endcode
@@ -279,6 +291,13 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  Swift: @code func onHomepage(_ url: String) @endcode
  */
 - (void)onHomepage:(NSString * _Nonnull)url;
+
+/*!
+ Called when tunnel-core receives server timetamp in the handshake
+ @param timestamp  The server timestamp in RFC3339 format.
+ Swift: @code func onServerTimestamp(_ timestamp: String) @endcode
+ */
+- (void)onServerTimestamp:(NSString * _Nonnull)timestamp;
 
 @end
 
@@ -304,7 +323,7 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 - (BOOL)start:(BOOL)ifNeeded;
 
 /*!
- Stop the tunnel (regardless of its current connection state). Returns before full stop is complete -- `TunneledAppDelegate::onExiting` is called when complete.
+ Stop the tunnel (regardless of its current connection state).
  Swift: @code func stop() @endcode
  */
 - (void)stop;

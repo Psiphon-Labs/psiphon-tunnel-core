@@ -21,6 +21,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -35,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
 func main() {
@@ -54,11 +56,49 @@ func main() {
 	flag.StringVar(&profileFilename, "profile", "", "CPU profile output file")
 
 	var interfaceName string
-	flag.StringVar(&interfaceName, "listenInterface", "", "Interface Name")
+	flag.StringVar(&interfaceName, "listenInterface", "", "bind local proxies to specified interface")
 
 	var versionDetails bool
-	flag.BoolVar(&versionDetails, "version", false, "Print build information and exit")
-	flag.BoolVar(&versionDetails, "v", false, "Print build information and exit")
+	flag.BoolVar(&versionDetails, "version", false, "print build information and exit")
+	flag.BoolVar(&versionDetails, "v", false, "print build information and exit")
+
+	var tunDevice, tunBindInterface, tunPrimaryDNS, tunSecondaryDNS string
+	if tun.IsSupported() {
+
+		// When tunDevice is specified, a packet tunnel is run and packets are relayed between
+		// the specified tun device and the server.
+		//
+		// The tun device is expected to exist and should be configured with an IP address and
+		// routing.
+		//
+		// The tunBindInterface/tunPrimaryDNS/tunSecondaryDNS parameters are used to bypass any
+		// tun device routing when connecting to Psiphon servers.
+		//
+		// For transparent tunneled DNS, set the host or DNS clients to use the address specfied
+		// in tun.GetTransparentDNSResolverIPv4Address().
+		//
+		// Packet tunnel mode is supported only on certains platforms.
+
+		flag.StringVar(&tunDevice, "tunDevice", "", "run packet tunnel for specified tun device")
+		flag.StringVar(&tunBindInterface, "tunBindInterface", tun.DEFAULT_PUBLIC_INTERFACE_NAME, "bypass tun device via specified interface")
+		flag.StringVar(&tunPrimaryDNS, "tunPrimaryDNS", "8.8.8.8", "primary DNS resolver for bypass")
+		flag.StringVar(&tunSecondaryDNS, "tunSecondaryDNS", "8.8.4.4", "secondary DNS resolver for bypass")
+	}
+
+	var noticeFilename string
+	flag.StringVar(&noticeFilename, "notices", "", "notices output file (defaults to stderr)")
+
+	var homepageFilename string
+	flag.StringVar(&homepageFilename, "homepages", "", "homepages notices output file")
+
+	var rotatingFilename string
+	flag.StringVar(&rotatingFilename, "rotating", "", "rotating notices output file")
+
+	var rotatingFileSize int
+	flag.IntVar(&rotatingFileSize, "rotatingFileSize", 1<<20, "rotating notices file size")
+
+	var rotatingSyncFrequency int
+	flag.IntVar(&rotatingSyncFrequency, "rotatingSyncFrequency", 100, "rotating notices file sync frequency")
 
 	flag.Parse()
 
@@ -93,14 +133,34 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Initialize default Notice output (stderr)
+	// Initialize notice output
 
 	var noticeWriter io.Writer
 	noticeWriter = os.Stderr
+
+	if noticeFilename != "" {
+		noticeFile, err := os.OpenFile(noticeFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			fmt.Printf("error opening notice file: %s\n", err)
+			os.Exit(1)
+		}
+		defer noticeFile.Close()
+		noticeWriter = noticeFile
+	}
+
 	if formatNotices {
 		noticeWriter = psiphon.NewNoticeConsoleRewriter(noticeWriter)
 	}
-	psiphon.SetNoticeOutput(noticeWriter)
+	psiphon.SetNoticeWriter(noticeWriter)
+	err := psiphon.SetNoticeFiles(
+		homepageFilename,
+		rotatingFilename,
+		rotatingFileSize,
+		rotatingSyncFrequency)
+	if err != nil {
+		fmt.Printf("error initializing notice files: %s\n", err)
+		os.Exit(1)
+	}
 
 	psiphon.NoticeBuildInfo()
 
@@ -122,23 +182,6 @@ func main() {
 		psiphon.SetEmitDiagnosticNotices(true)
 		psiphon.NoticeError("error processing configuration file: %s", err)
 		os.Exit(1)
-	}
-
-	// When a logfile is configured, reinitialize Notice output
-
-	if config.LogFilename != "" {
-		logFile, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-		if err != nil {
-			psiphon.NoticeError("error opening log file: %s", err)
-			os.Exit(1)
-		}
-		defer logFile.Close()
-		var noticeWriter io.Writer
-		noticeWriter = logFile
-		if formatNotices {
-			noticeWriter = psiphon.NewNoticeConsoleRewriter(noticeWriter)
-		}
-		psiphon.SetNoticeOutput(noticeWriter)
 	}
 
 	// Handle optional profiling parameter
@@ -209,6 +252,18 @@ func main() {
 		config.ListenInterface = interfaceName
 	}
 
+	// Configure packet tunnel
+
+	if tun.IsSupported() && tunDevice != "" {
+		tunDeviceFile, err := configurePacketTunnel(
+			config, tunDevice, tunBindInterface, tunPrimaryDNS, tunSecondaryDNS)
+		if err != nil {
+			psiphon.NoticeError("error configuring packet tunnel: %s", err)
+			os.Exit(1)
+		}
+		defer tunDeviceFile.Close()
+	}
+
 	// Run Psiphon
 
 	controller, err := psiphon.NewController(config)
@@ -217,26 +272,74 @@ func main() {
 		os.Exit(1)
 	}
 
-	controllerStopSignal := make(chan struct{}, 1)
-	shutdownBroadcast := make(chan struct{})
+	controllerCtx, stopController := context.WithCancel(context.Background())
+	defer stopController()
+
 	controllerWaitGroup := new(sync.WaitGroup)
 	controllerWaitGroup.Add(1)
 	go func() {
 		defer controllerWaitGroup.Done()
-		controller.Run(shutdownBroadcast)
-		controllerStopSignal <- *new(struct{})
-	}()
+		controller.Run(controllerCtx)
 
-	// Wait for an OS signal or a Run stop signal, then stop Psiphon and exit
+		// Signal the <-controllerCtx.Done() case below. If the <-systemStopSignal
+		// case already called stopController, this is a noop.
+		stopController()
+	}()
 
 	systemStopSignal := make(chan os.Signal, 1)
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill)
+
+	// Wait for an OS signal or a Run stop signal, then stop Psiphon and exit
+
 	select {
 	case <-systemStopSignal:
 		psiphon.NoticeInfo("shutdown by system")
-		close(shutdownBroadcast)
+		stopController()
 		controllerWaitGroup.Wait()
-	case <-controllerStopSignal:
+	case <-controllerCtx.Done():
 		psiphon.NoticeInfo("shutdown by controller")
 	}
+}
+
+func configurePacketTunnel(
+	config *psiphon.Config,
+	tunDevice, tunBindInterface, tunPrimaryDNS, tunSecondaryDNS string) (*os.File, error) {
+
+	file, _, err := tun.OpenTunDevice(tunDevice)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	provider := &tunProvider{
+		bindInterface: tunBindInterface,
+		primaryDNS:    tunPrimaryDNS,
+		secondaryDNS:  tunSecondaryDNS,
+	}
+
+	config.PacketTunnelTunFileDescriptor = int(file.Fd())
+	config.DeviceBinder = provider
+	config.DnsServerGetter = provider
+
+	return file, nil
+}
+
+type tunProvider struct {
+	bindInterface string
+	primaryDNS    string
+	secondaryDNS  string
+}
+
+// BindToDevice implements the psiphon.DeviceBinder interface.
+func (p *tunProvider) BindToDevice(fileDescriptor int) error {
+	return tun.BindToDevice(fileDescriptor, p.bindInterface)
+}
+
+// GetPrimaryDnsServer implements the psiphon.DnsServerGetter interface.
+func (p *tunProvider) GetPrimaryDnsServer() string {
+	return p.primaryDNS
+}
+
+// GetSecondaryDnsServer implements the psiphon.DnsServerGetter interface.
+func (p *tunProvider) GetSecondaryDnsServer() string {
+	return p.secondaryDNS
 }

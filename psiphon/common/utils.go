@@ -35,9 +35,22 @@ import (
 	"time"
 )
 
+const RFC3339Milli = "2006-01-02T15:04:05.000Z07:00"
+
 // Contains is a helper function that returns true
 // if the target string is in the list.
 func Contains(list []string, target string) bool {
+	for _, listItem := range list {
+		if listItem == target {
+			return true
+		}
+	}
+	return false
+}
+
+// ContainsInt returns true if the target int is
+// in the list.
+func ContainsInt(list []int, target int) bool {
 	for _, listItem := range list {
 		if listItem == target {
 			return true
@@ -217,4 +230,17 @@ func Decompress(data []byte) ([]byte, error) {
 		return nil, ContextError(err)
 	}
 	return uncompressedData, nil
+}
+
+// FormatByteCount returns a string representation of the specified
+// byte count in conventional, human-readable format.
+func FormatByteCount(bytes uint64) string {
+	// Based on: https://bitbucket.org/psiphon/psiphon-circumvention-system/src/b2884b0d0a491e55420ed1888aea20d00fefdb45/Android/app/src/main/java/com/psiphon3/psiphonlibrary/Utils.java?at=default#Utils.java-646
+	base := uint64(1024)
+	if bytes < base {
+		return fmt.Sprintf("%dB", bytes)
+	}
+	exp := int(math.Log(float64(bytes)) / math.Log(float64(base)))
+	return fmt.Sprintf(
+		"%.1f%c", float64(bytes)/math.Pow(float64(base), float64(exp)), "KMGTPEZ"[exp-1])
 }

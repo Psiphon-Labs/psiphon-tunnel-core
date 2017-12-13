@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	golangtls "crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -33,13 +34,16 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
+	"golang.org/x/net/http2"
 )
 
 // MeekConn is based on meek-client.go from Tor and Psiphon:
@@ -64,7 +68,9 @@ const (
 	POLL_INTERVAL_MULTIPLIER           = 1.5
 	POLL_INTERVAL_JITTER               = 0.1
 	MEEK_ROUND_TRIP_RETRY_DEADLINE     = 5 * time.Second
-	MEEK_ROUND_TRIP_RETRY_DELAY        = 50 * time.Millisecond
+	MEEK_ROUND_TRIP_RETRY_MIN_DELAY    = 50 * time.Millisecond
+	MEEK_ROUND_TRIP_RETRY_MAX_DELAY    = 1000 * time.Millisecond
+	MEEK_ROUND_TRIP_RETRY_MULTIPLIER   = 2
 	MEEK_ROUND_TRIP_TIMEOUT            = 20 * time.Second
 )
 
@@ -135,11 +141,11 @@ type MeekConn struct {
 	url                     *url.URL
 	additionalHeaders       http.Header
 	cookie                  *http.Cookie
-	pendingConns            *common.Conns
+	cachedTLSDialer         *cachedTLSDialer
 	transport               transporter
 	mutex                   sync.Mutex
 	isClosed                bool
-	runContext              context.Context
+	runCtx                  context.Context
 	stopRunning             context.CancelFunc
 	relayWaitGroup          *sync.WaitGroup
 	fullReceiveBufferLength int
@@ -154,9 +160,7 @@ type MeekConn struct {
 
 // transporter is implemented by both http.Transport and upstreamproxy.ProxyAuthTransport.
 type transporter interface {
-	CancelRequest(req *http.Request)
 	CloseIdleConnections()
-	RegisterProtocol(scheme string, rt http.RoundTripper)
 	RoundTrip(req *http.Request) (resp *http.Response, err error)
 }
 
@@ -168,26 +172,35 @@ type transporter interface {
 // When frontingAddress is not "", fronting is used. This option assumes caller has
 // already checked server entry capabilities.
 func DialMeek(
+	ctx context.Context,
 	meekConfig *MeekConfig,
 	dialConfig *DialConfig) (meek *MeekConn, err error) {
 
-	// Configure transport
-	// Note: MeekConn has its own PendingConns to manage the underlying HTTP transport connections,
-	// which may be interrupted on MeekConn.Close(). This code previously used the establishTunnel
-	// pendingConns here, but that was a lifecycle mismatch: we don't want to abort HTTP transport
-	// connections while MeekConn is still in use
-	pendingConns := new(common.Conns)
+	runCtx, stopRunning := context.WithCancel(context.Background())
 
-	// Use a copy of DialConfig with the meek pendingConns
-	meekDialConfig := new(DialConfig)
-	*meekDialConfig = *dialConfig
-	meekDialConfig.PendingConns = pendingConns
+	cleanupStopRunning := true
+	cleanupCachedTLSDialer := true
+	var cachedTLSDialer *cachedTLSDialer
 
+	// Cleanup in error cases
+	defer func() {
+		if cleanupStopRunning {
+			stopRunning()
+		}
+		if cleanupCachedTLSDialer && cachedTLSDialer != nil {
+			cachedTLSDialer.close()
+		}
+	}()
+
+	// Configure transport: HTTP or HTTPS
+
+	var scheme string
 	var transport transporter
 	var additionalHeaders http.Header
 	var proxyUrl func(*http.Request) (*url.URL, error)
 
 	if meekConfig.UseHTTPS {
+
 		// Custom TLS dialer:
 		//
 		//  1. ignores the HTTP request address and uses the fronting domain
@@ -221,34 +234,102 @@ func DialMeek(
 		// exclusively connect to non-MiM CDNs); then the adversary kills the underlying TCP connection after
 		// some short period. This is mitigated by the "impaired" protocol classification mechanism.
 
+		scheme = "https"
+
 		tlsConfig := &CustomTLSConfig{
 			DialAddr:                      meekConfig.DialAddress,
-			Dial:                          NewTCPDialer(meekDialConfig),
-			Timeout:                       meekDialConfig.ConnectTimeout,
+			Dial:                          NewTCPDialer(dialConfig),
 			SNIServerName:                 meekConfig.SNIServerName,
 			SkipVerify:                    true,
-			UseIndistinguishableTLS:       meekDialConfig.UseIndistinguishableTLS,
+			UseIndistinguishableTLS:       dialConfig.UseIndistinguishableTLS,
 			TLSProfile:                    meekConfig.TLSProfile,
-			TrustedCACertificatesFilename: meekDialConfig.TrustedCACertificatesFilename,
+			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
 		}
 
 		if meekConfig.UseObfuscatedSessionTickets {
 			tlsConfig.ObfuscatedSessionTicketKey = meekConfig.MeekObfuscatedKey
 		}
 
-		dialer := NewCustomTLSDialer(tlsConfig)
+		tlsDialer := NewCustomTLSDialer(tlsConfig)
 
-		// TODO: wrap in an http.Client and use http.Client.Timeout which actually covers round trip
-		transport = &http.Transport{
-			Dial: dialer,
-			ResponseHeaderTimeout: MEEK_ROUND_TRIP_TIMEOUT,
+		// Pre-dial one TLS connection in order to inspect the negotiated
+		// application protocol. Then we create an HTTP/2 or HTTP/1.1 transport
+		// depending on which protocol was negotiated. The TLS dialer
+		// is assumed to negotiate only "h2" or "http/1.1"; or not negotiate
+		// an application protocol.
+		//
+		// We cannot rely on net/http's HTTP/2 support since it's only
+		// activated when http.Transport.DialTLS returns a golang crypto/tls.Conn;
+		// e.g., https://github.com/golang/go/blob/c8aec4095e089ff6ac50d18e97c3f46561f14f48/src/net/http/transport.go#L1040
+		//
+		// The pre-dialed connection is stored in a cachedTLSDialer, which will
+		// return the cached pre-dialed connection to its first Dial caller, and
+		// use the tlsDialer for all other Dials.
+		//
+		// cachedTLSDialer.close() must be called on all exits paths from this
+		// function and in meek.Close() to ensure the cached conn is closed in
+		// any case where no Dial call is made.
+		//
+		// The pre-dial must be interruptible so that DialMeek doesn't block and
+		// hang/delay a shutdown or end of establishment. So the pre-dial uses
+		// the Controller's PendingConns, not the MeekConn PendingConns. For this
+		// purpose, a special preDialer is configured.
+		//
+		// Only one pre-dial attempt is made; there are no retries. This differs
+		// from roundTrip, which retries and may redial for each retry. Retries
+		// at the pre-dial phase are less useful since there's no active session
+		// to preserve, and establishment will simply try another server. Note
+		// that the underlying TCPDial may still try multiple IP addreses when
+		// the destination is a domain and ir resolves to multiple IP adresses.
+
+		// The pre-dial is made within the parent dial context, so that DialMeek
+		// may be interrupted. Subsequent dials are made within the meek round trip
+		// request context. Since http.DialTLS doesn't take a context argument
+		// (yet; as of Go 1.9 this issue is still open: https://github.com/golang/go/issues/21526),
+		// cachedTLSDialer is used as a conduit to send the request context.
+		// meekConn.roundTrip sets its request context into cachedTLSDialer, and
+		// cachedTLSDialer.dial uses that context.
+
+		// As DialAddr is set in the CustomTLSConfig, no address is required here.
+		preConn, err := tlsDialer(ctx, "tcp", "")
+		if err != nil {
+			return nil, common.ContextError(err)
 		}
+
+		isHTTP2 := false
+		if tlsConn, ok := preConn.(*tls.Conn); ok {
+			state := tlsConn.ConnectionState()
+			if state.NegotiatedProtocolIsMutual &&
+				state.NegotiatedProtocol == "h2" {
+				isHTTP2 = true
+			}
+		}
+
+		cachedTLSDialer = newCachedTLSDialer(preConn, tlsDialer)
+
+		if isHTTP2 {
+			NoticeInfo("negotiated HTTP/2 for %s", meekConfig.DialAddress)
+			transport = &http2.Transport{
+				DialTLS: func(network, addr string, _ *golangtls.Config) (net.Conn, error) {
+					return cachedTLSDialer.dial(network, addr)
+				},
+			}
+		} else {
+			transport = &http.Transport{
+				DialTLS: func(network, addr string) (net.Conn, error) {
+					return cachedTLSDialer.dial(network, addr)
+				},
+			}
+		}
+
 	} else {
+
+		scheme = "http"
 
 		// The dialer ignores address that http.Transport will pass in (derived
 		// from the HTTP request URL) and always dials meekConfig.DialAddress.
-		dialer := func(string, string) (net.Conn, error) {
-			return NewTCPDialer(meekDialConfig)("tcp", meekConfig.DialAddress)
+		dialer := func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return NewTCPDialer(dialConfig)(ctx, network, meekConfig.DialAddress)
 		}
 
 		// For HTTP, and when the meekConfig.DialAddress matches the
@@ -256,30 +337,33 @@ func DialMeek(
 		// http.Transport will put the the HTTP server address in the HTTP
 		// request line. In this one case, we can use an HTTP proxy that does
 		// not offer CONNECT support.
-		if strings.HasPrefix(meekDialConfig.UpstreamProxyUrl, "http://") &&
+		if strings.HasPrefix(dialConfig.UpstreamProxyUrl, "http://") &&
 			(meekConfig.DialAddress == meekConfig.HostHeader ||
 				meekConfig.DialAddress == meekConfig.HostHeader+":80") {
-			url, err := url.Parse(meekDialConfig.UpstreamProxyUrl)
+
+			url, err := url.Parse(dialConfig.UpstreamProxyUrl)
 			if err != nil {
 				return nil, common.ContextError(err)
 			}
 			proxyUrl = http.ProxyURL(url)
-			meekDialConfig.UpstreamProxyUrl = ""
 
 			// Here, the dialer must use the address that http.Transport
 			// passes in (which will be proxy address).
-			dialer = NewTCPDialer(meekDialConfig)
+			copyDialConfig := new(DialConfig)
+			*copyDialConfig = *dialConfig
+			copyDialConfig.UpstreamProxyUrl = ""
+
+			dialer = NewTCPDialer(copyDialConfig)
 		}
 
-		// TODO: wrap in an http.Client and use http.Client.Timeout which actually covers round trip
 		httpTransport := &http.Transport{
-			Proxy: proxyUrl,
-			Dial:  dialer,
-			ResponseHeaderTimeout: MEEK_ROUND_TRIP_TIMEOUT,
+			Proxy:       proxyUrl,
+			DialContext: dialer,
 		}
+
 		if proxyUrl != nil {
 			// Wrap transport with a transport that can perform HTTP proxy auth negotiation
-			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport, meekDialConfig.CustomHeaders)
+			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport, dialConfig.CustomHeaders)
 			if err != nil {
 				return nil, common.ContextError(err)
 			}
@@ -288,10 +372,8 @@ func DialMeek(
 		}
 	}
 
-	// Scheme is always "http". Otherwise http.Transport will try to do another TLS
-	// handshake inside the explicit TLS session (in fronting mode).
 	url := &url.URL{
-		Scheme: "http",
+		Scheme: scheme,
 		Host:   meekConfig.HostHeader,
 		Path:   "/",
 	}
@@ -306,7 +388,7 @@ func DialMeek(
 		}
 	} else {
 		if proxyUrl == nil {
-			additionalHeaders = meekDialConfig.CustomHeaders
+			additionalHeaders = dialConfig.CustomHeaders
 		}
 	}
 
@@ -314,8 +396,6 @@ func DialMeek(
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
-
-	runContext, stopRunning := context.WithCancel(context.Background())
 
 	// The main loop of a MeekConn is run in the relay() goroutine.
 	// A MeekConn implements net.Conn concurrency semantics:
@@ -337,10 +417,10 @@ func DialMeek(
 		url:                     url,
 		additionalHeaders:       additionalHeaders,
 		cookie:                  cookie,
-		pendingConns:            pendingConns,
+		cachedTLSDialer:         cachedTLSDialer,
 		transport:               transport,
 		isClosed:                false,
-		runContext:              runContext,
+		runCtx:                  runCtx,
 		stopRunning:             stopRunning,
 		relayWaitGroup:          new(sync.WaitGroup),
 		fullReceiveBufferLength: FULL_RECEIVE_BUFFER_LENGTH,
@@ -353,6 +433,10 @@ func DialMeek(
 		fullSendBuffer:          make(chan *bytes.Buffer, 1),
 	}
 
+	// stopRunning and cachedTLSDialer will now be closed in meek.Close()
+	cleanupStopRunning = false
+	cleanupCachedTLSDialer = false
+
 	meek.emptyReceiveBuffer <- new(bytes.Buffer)
 	meek.emptySendBuffer <- new(bytes.Buffer)
 	meek.relayWaitGroup.Add(1)
@@ -364,13 +448,45 @@ func DialMeek(
 
 	go meek.relay()
 
-	// Enable interruption
-	if !dialConfig.PendingConns.Add(meek) {
-		meek.Close()
-		return nil, common.ContextError(errors.New("pending connections already closed"))
-	}
-
 	return meek, nil
+}
+
+type cachedTLSDialer struct {
+	usedCachedConn int32
+	cachedConn     net.Conn
+	requestContext atomic.Value
+	dialer         Dialer
+}
+
+func newCachedTLSDialer(cachedConn net.Conn, dialer Dialer) *cachedTLSDialer {
+	return &cachedTLSDialer{
+		cachedConn: cachedConn,
+		dialer:     dialer,
+	}
+}
+
+func (c *cachedTLSDialer) setRequestContext(requestContext context.Context) {
+	c.requestContext.Store(requestContext)
+}
+
+func (c *cachedTLSDialer) dial(network, addr string) (net.Conn, error) {
+	if atomic.CompareAndSwapInt32(&c.usedCachedConn, 0, 1) {
+		conn := c.cachedConn
+		c.cachedConn = nil
+		return conn, nil
+	}
+	ctx := c.requestContext.Load().(context.Context)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return c.dialer(ctx, network, addr)
+}
+
+func (c *cachedTLSDialer) close() {
+	if atomic.CompareAndSwapInt32(&c.usedCachedConn, 0, 1) {
+		c.cachedConn.Close()
+		c.cachedConn = nil
+	}
 }
 
 // Close terminates the meek connection. Close waits for the relay processing goroutine
@@ -385,7 +501,9 @@ func (meek *MeekConn) Close() (err error) {
 
 	if !isClosed {
 		meek.stopRunning()
-		meek.pendingConns.CloseAll()
+		if meek.cachedTLSDialer != nil {
+			meek.cachedTLSDialer.close()
+		}
 		meek.relayWaitGroup.Wait()
 		meek.transport.CloseIdleConnections()
 	}
@@ -414,7 +532,7 @@ func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
 	select {
 	case receiveBuffer = <-meek.partialReceiveBuffer:
 	case receiveBuffer = <-meek.fullReceiveBuffer:
-	case <-meek.runContext.Done():
+	case <-meek.runCtx.Done():
 		return 0, common.ContextError(errors.New("meek connection has closed"))
 	}
 	n, err = receiveBuffer.Read(buffer)
@@ -436,7 +554,7 @@ func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
 		select {
 		case sendBuffer = <-meek.emptySendBuffer:
 		case sendBuffer = <-meek.partialSendBuffer:
-		case <-meek.runContext.Done():
+		case <-meek.runCtx.Done():
 			return 0, common.ContextError(errors.New("meek connection has closed"))
 		}
 		writeLen := MAX_SEND_PAYLOAD_LENGTH - sendBuffer.Len()
@@ -513,6 +631,7 @@ func (meek *MeekConn) relay() {
 		MIN_POLL_INTERVAL_JITTER)
 
 	timeout := time.NewTimer(interval)
+	defer timeout.Stop()
 
 	for {
 		timeout.Reset(interval)
@@ -524,13 +643,13 @@ func (meek *MeekConn) relay() {
 		case sendBuffer = <-meek.fullSendBuffer:
 		case <-timeout.C:
 			// In the polling case, send an empty payload
-		case <-meek.runContext.Done():
+		case <-meek.runCtx.Done():
 			// Drop through to second Done() check
 		}
 
 		// Check Done() again, to ensure it takes precedence
 		select {
-		case <-meek.runContext.Done():
+		case <-meek.runCtx.Done():
 			return
 		default:
 		}
@@ -553,7 +672,7 @@ func (meek *MeekConn) relay() {
 
 		if err != nil {
 			select {
-			case <-meek.runContext.Done():
+			case <-meek.runCtx.Done():
 				// In this case, meek.roundTrip encountered Done(). Exit without logging error.
 				return
 			default:
@@ -598,6 +717,50 @@ func (meek *MeekConn) relay() {
 			}
 		}
 	}
+}
+
+// readCloseSignaller is an io.ReadCloser wrapper for an io.Reader
+// that is passed, as the request body, to http.Transport.RoundTrip.
+// readCloseSignaller adds the AwaitClosed call, which is used
+// to schedule recycling the buffer underlying the reader only after
+// RoundTrip has called Close and will no longer use the buffer.
+// See: https://golang.org/pkg/net/http/#RoundTripper
+type readCloseSignaller struct {
+	context context.Context
+	reader  io.Reader
+	closed  chan struct{}
+}
+
+func NewReadCloseSignaller(
+	context context.Context,
+	reader io.Reader) *readCloseSignaller {
+
+	return &readCloseSignaller{
+		context: context,
+		reader:  reader,
+		closed:  make(chan struct{}, 1),
+	}
+}
+
+func (r *readCloseSignaller) Read(p []byte) (int, error) {
+	return r.reader.Read(p)
+}
+
+func (r *readCloseSignaller) Close() error {
+	select {
+	case r.closed <- *new(struct{}):
+	default:
+	}
+	return nil
+}
+
+func (r *readCloseSignaller) AwaitClosed() bool {
+	select {
+	case <-r.context.Done():
+	case <-r.closed:
+		return true
+	}
+	return false
 }
 
 // roundTrip configures and makes the actual HTTP POST request
@@ -646,6 +809,7 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 
 	retries := uint(0)
 	retryDeadline := monotime.Now().Add(MEEK_ROUND_TRIP_RETRY_DEADLINE)
+	retryDelay := MEEK_ROUND_TRIP_RETRY_MIN_DELAY
 	serverAcknowledgedRequestPayload := false
 	receivedPayloadSize := int64(0)
 
@@ -654,20 +818,48 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		// Omit the request payload when retrying after receiving a
 		// partial server response.
 
-		var payloadReader io.Reader
+		var signaller *readCloseSignaller
+		var requestBody io.ReadCloser
+		contentLength := 0
 		if !serverAcknowledgedRequestPayload && sendBuffer != nil {
-			payloadReader = bytes.NewReader(sendBuffer.Bytes())
+
+			// sendBuffer will be replaced once the data is no longer needed,
+			// when RoundTrip calls Close on the Body; this allows meekConn.Write()
+			// to unblock and start buffering data for the next roung trip while
+			// still reading the current round trip response. signaller provides
+			// the hook for awaiting RoundTrip's call to Close.
+
+			signaller = NewReadCloseSignaller(meek.runCtx, bytes.NewReader(sendBuffer.Bytes()))
+			requestBody = signaller
+			contentLength = sendBuffer.Len()
 		}
 
 		var request *http.Request
-		request, err := http.NewRequest("POST", meek.url.String(), payloadReader)
+		request, err := http.NewRequest("POST", meek.url.String(), requestBody)
 		if err != nil {
 			// Don't retry when can't initialize a Request
 			return 0, common.ContextError(err)
 		}
 
-		// Note: meek.stopRunning() will abort a round trip in flight
-		request = request.WithContext(meek.runContext)
+		// Content-Length won't be set automatically due to the underlying
+		// type of requestBody.
+		if contentLength > 0 {
+			request.ContentLength = int64(contentLength)
+		}
+
+		// - meek.stopRunning() will abort a round trip in flight
+		// - round trip will abort if it exceeds MEEK_ROUND_TRIP_TIMEOUT
+		requestContext, cancelFunc := context.WithTimeout(
+			meek.runCtx,
+			MEEK_ROUND_TRIP_TIMEOUT)
+		defer cancelFunc()
+
+		// Ensure TLS dials are made within the current request context.
+		if meek.cachedTLSDialer != nil {
+			meek.cachedTLSDialer.setRequestContext(requestContext)
+		}
+
+		request = request.WithContext(requestContext)
 
 		meek.addAdditionalHeaders(request)
 
@@ -685,9 +877,25 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		}
 
 		response, err := meek.transport.RoundTrip(request)
+
+		// Wait for RoundTrip to call Close on the request body, when
+		// there is one. This is necessary to ensure it's safe to
+		// subsequently replace sendBuffer in both the success and
+		// error cases.
+		if signaller != nil {
+			if !signaller.AwaitClosed() {
+				// AwaitClosed encountered Done(). Abort immediately. Do not
+				// replace sendBuffer, as we cannot be certain RoundTrip is
+				// done with it. MeekConn.Write will exit on Done and not hang
+				// awaiting sendBuffer.
+				sendBuffer = nil
+				return 0, common.ContextError(errors.New("meek connection has closed"))
+			}
+		}
+
 		if err != nil {
 			select {
-			case <-meek.runContext.Done():
+			case <-meek.runCtx.Done():
 				// Exit without retrying and without logging error.
 				return 0, common.ContextError(err)
 			default:
@@ -698,7 +906,10 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 
 		if err == nil {
 
-			if response.StatusCode != expectedStatusCode {
+			if response.StatusCode != expectedStatusCode &&
+				// Certain http servers return 200 OK where we expect 206, so accept that.
+				!(expectedStatusCode == http.StatusPartialContent && response.StatusCode == http.StatusOK) {
+
 				// Don't retry when the status code is incorrect
 				response.Body.Close()
 				return 0, common.ContextError(
@@ -719,11 +930,13 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			// must have received the request payload.
 			serverAcknowledgedRequestPayload = true
 
-			// sendBuffer can now be replaced, as the data is no longer
-			// needed; this allows meekConn.Write() to unblock and start
-			// buffering data for the next roung trip while still reading
-			// the current round trip response.
+			// sendBuffer is now no longer required for retries, and the
+			// buffer may be replaced; this allows meekConn.Write() to unblock
+			// and start buffering data for the next round trip while still
+			// reading the current round trip response.
 			if sendBuffer != nil {
+				// Assumes signaller.AwaitClosed is called above, so
+				// sendBuffer will no longer be accessed by RoundTrip.
 				sendBuffer.Truncate(0)
 				meek.replaceSendBuffer(sendBuffer)
 				sendBuffer = nil
@@ -746,15 +959,38 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			}
 		}
 
-		// Either the request failed entirely, or there was a failure
-		// streaming the response payload. Retry, if time remains.
+		// Release context resources now.
+		cancelFunc()
 
-		if retries >= 1 && monotime.Now().After(retryDeadline) {
+		// Either the request failed entirely, or there was a failure
+		// streaming the response payload. Always retry once. Then
+		// retry if time remains; when the next delay exceeds the time
+		// remaining until the deadline, do not retry.
+
+		now := monotime.Now()
+
+		if retries >= 1 &&
+			(now.After(retryDeadline) || retryDeadline.Sub(now) <= retryDelay) {
 			return 0, common.ContextError(err)
 		}
 		retries += 1
 
-		time.Sleep(MEEK_ROUND_TRIP_RETRY_DELAY)
+		delayTimer := time.NewTimer(retryDelay)
+
+		select {
+		case <-delayTimer.C:
+		case <-meek.runCtx.Done():
+			delayTimer.Stop()
+			return 0, common.ContextError(err)
+		}
+
+		// Increase the next delay, to back off and avoid excessive
+		// activity in conditions such as no network connectivity.
+
+		retryDelay *= MEEK_ROUND_TRIP_RETRY_MULTIPLIER
+		if retryDelay >= MEEK_ROUND_TRIP_RETRY_MAX_DELAY {
+			retryDelay = MEEK_ROUND_TRIP_RETRY_MAX_DELAY
+		}
 	}
 
 	return receivedPayloadSize, nil
@@ -798,7 +1034,7 @@ func (meek *MeekConn) readPayload(
 		select {
 		case receiveBuffer = <-meek.emptyReceiveBuffer:
 		case receiveBuffer = <-meek.partialReceiveBuffer:
-		case <-meek.runContext.Done():
+		case <-meek.runCtx.Done():
 			return 0, nil
 		}
 		// Note: receiveBuffer size may exceed meek.fullReceiveBufferLength by up to the size

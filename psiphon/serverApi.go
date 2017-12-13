@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -33,7 +34,6 @@ import (
 	"net/url"
 	"strconv"
 	"sync/atomic"
-	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -80,11 +80,10 @@ func MakeSessionId() (sessionId string, err error) {
 	return hex.EncodeToString(randomId), nil
 }
 
-// NewServerContext makes the tunnelled handshake request to the Psiphon server
+// NewServerContext makes the tunneled handshake request to the Psiphon server
 // and returns a ServerContext struct for use with subsequent Psiphon server API
 // requests (e.g., periodic connected and status requests).
-func NewServerContext(
-	tunnel *Tunnel, sessionId string, ignoreStatsRegexps bool) (*ServerContext, error) {
+func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 
 	// For legacy servers, set up psiphonHttpsClient for
 	// accessing the Psiphon API via the web service.
@@ -100,13 +99,13 @@ func NewServerContext(
 	}
 
 	serverContext := &ServerContext{
-		sessionId:          sessionId,
+		sessionId:          tunnel.sessionId,
 		tunnelNumber:       atomic.AddInt64(&nextTunnelNumber, 1),
 		tunnel:             tunnel,
 		psiphonHttpsClient: psiphonHttpsClient,
 	}
 
-	err := serverContext.doHandshakeRequest(ignoreStatsRegexps)
+	err := serverContext.doHandshakeRequest(tunnel.config.IgnoreHandshakeStatsRegexps)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -218,11 +217,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		return common.ContextError(err)
 	}
 
-	// TODO: formally communicate the sponsor and upgrade info to an
-	// outer client via some control interface.
-	for _, homepage := range handshakeResponse.Homepages {
-		NoticeHomepage(homepage)
-	}
+	NoticeHomepages(handshakeResponse.Homepages)
 
 	serverContext.clientUpgradeVersion = handshakeResponse.UpgradeClientVersion
 	if handshakeResponse.UpgradeClientVersion != "" {
@@ -244,6 +239,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	}
 
 	serverContext.serverHandshakeTimestamp = handshakeResponse.ServerTimestamp
+	NoticeServerTimestamp(serverContext.serverHandshakeTimestamp)
 
 	return nil
 }
@@ -477,92 +473,6 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 		NoticeAlert(
 			"ClearReportedPersistentStats failed: %s", common.ContextError(err))
 	}
-}
-
-// TryUntunneledStatusRequest makes direct connections to the specified
-// server (if supported) in an attempt to send useful bytes transferred
-// and tunnel duration stats after a tunnel has alreay failed.
-// The tunnel is assumed to be closed, but its config, protocol, and
-// context values must still be valid.
-// TryUntunneledStatusRequest emits notices detailing failed attempts.
-func (serverContext *ServerContext) TryUntunneledStatusRequest(isShutdown bool) error {
-
-	for _, port := range serverContext.tunnel.serverEntry.GetUntunneledWebRequestPorts() {
-		err := serverContext.doUntunneledStatusRequest(port, isShutdown)
-		if err == nil {
-			return nil
-		}
-		NoticeAlert("doUntunneledStatusRequest failed for %s:%s: %s",
-			serverContext.tunnel.serverEntry.IpAddress, port, err)
-	}
-
-	return errors.New("all attempts failed")
-}
-
-// doUntunneledStatusRequest attempts an untunneled status request.
-func (serverContext *ServerContext) doUntunneledStatusRequest(
-	port string, isShutdown bool) error {
-
-	tunnel := serverContext.tunnel
-
-	certificate, err := DecodeCertificate(tunnel.serverEntry.WebServerCertificate)
-	if err != nil {
-		return common.ContextError(err)
-	}
-
-	timeout := time.Duration(*tunnel.config.PsiphonApiServerTimeoutSeconds) * time.Second
-
-	dialConfig := tunnel.untunneledDialConfig
-
-	if isShutdown {
-		timeout = PSIPHON_API_SHUTDOWN_SERVER_TIMEOUT
-
-		// Use a copy of DialConfig without pendingConns. This ensures
-		// this request isn't interrupted/canceled. This measure should
-		// be used only with the very short PSIPHON_API_SHUTDOWN_SERVER_TIMEOUT.
-		dialConfig = new(DialConfig)
-		*dialConfig = *tunnel.untunneledDialConfig
-	}
-
-	url := makeRequestUrl(tunnel, port, "status", serverContext.getStatusParams(false))
-
-	httpClient, url, err := MakeUntunneledHttpsClient(
-		dialConfig,
-		certificate,
-		url,
-		false,
-		timeout)
-	if err != nil {
-		return common.ContextError(err)
-	}
-
-	statusPayload, statusPayloadInfo, err := makeStatusRequestPayload(tunnel.serverEntry.IpAddress)
-	if err != nil {
-		return common.ContextError(err)
-	}
-
-	bodyType := "application/json"
-	body := bytes.NewReader(statusPayload)
-
-	response, err := httpClient.Post(url, bodyType, body)
-	if err == nil && response.StatusCode != http.StatusOK {
-		response.Body.Close()
-		err = fmt.Errorf("HTTP POST request failed with response code: %d", response.StatusCode)
-	}
-	if err != nil {
-
-		// Resend the transfer stats and tunnel stats later
-		// Note: potential duplicate reports if the server received and processed
-		// the request but the client failed to receive the response.
-		putBackStatusRequestPayload(statusPayloadInfo)
-
-		// Trim this error since it may include long URLs
-		return common.ContextError(TrimError(err))
-	}
-	confirmStatusRequestPayload(statusPayloadInfo)
-	response.Body.Close()
-
-	return nil
 }
 
 // RecordTunnelStat records a tunnel duration and bytes
@@ -913,9 +823,7 @@ func makeRequestUrl(tunnel *Tunnel, port, path string, params requestJSONObject)
 		port = tunnel.serverEntry.WebServerPort
 	}
 
-	// Note: don't prefix with HTTPS scheme, see comment in doGetRequest.
-	// e.g., don't do this: requestUrl.WriteString("https://")
-	requestUrl.WriteString("http://")
+	requestUrl.WriteString("https://")
 	requestUrl.WriteString(tunnel.serverEntry.IpAddress)
 	requestUrl.WriteString(":")
 	requestUrl.WriteString(port)
@@ -952,32 +860,41 @@ func makeRequestUrl(tunnel *Tunnel, port, path string, params requestJSONObject)
 
 // makePsiphonHttpsClient creates a Psiphon HTTPS client that tunnels web service API
 // requests and which validates the web server using the Psiphon server entry web server
-// certificate. This is not a general purpose HTTPS client.
-// As the custom dialer makes an explicit TLS connection, URLs submitted to the returned
-// http.Client should use the "http://" scheme. Otherwise http.Transport will try to do another TLS
-// handshake inside the explicit TLS session.
+// certificate.
 func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error) {
+
 	certificate, err := DecodeCertificate(tunnel.serverEntry.WebServerCertificate)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
-	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
-		// TODO: check tunnel.isClosed, and apply TUNNEL_PORT_FORWARD_DIAL_TIMEOUT as in Tunnel.Dial?
+
+	tunneledDialer := func(_ context.Context, _, addr string) (conn net.Conn, err error) {
 		return tunnel.sshClient.Dial("tcp", addr)
 	}
-	timeout := time.Duration(*tunnel.config.PsiphonApiServerTimeoutSeconds) * time.Second
+
+	// Note: as with SSH API requests, there no dial context here. SSH port forward dials
+	// cannot be interrupted directly. Closing the tunnel will interrupt both the dial and
+	// the request. While it's possible to add a timeout here, we leave it with no explicit
+	// timeout which is the same as SSH API requests: if the tunnel has stalled then SSH keep
+	// alives will cause the tunnel to close.
+
 	dialer := NewCustomTLSDialer(
 		&CustomTLSConfig{
-			Dial:                    tunneledDialer,
-			Timeout:                 timeout,
+			Dial: tunneledDialer,
 			VerifyLegacyCertificate: certificate,
 		})
+
 	transport := &http.Transport{
-		Dial: dialer,
+		DialTLS: func(network, addr string) (net.Conn, error) {
+			return dialer(context.Background(), network, addr)
+		},
+		Dial: func(network, addr string) (net.Conn, error) {
+			return nil, errors.New("HTTP not supported")
+		},
 	}
+
 	return &http.Client{
 		Transport: transport,
-		Timeout:   timeout,
 	}, nil
 }
 

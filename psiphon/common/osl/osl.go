@@ -30,6 +30,8 @@
 package osl
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/sha256"
@@ -39,6 +41,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"path"
@@ -48,9 +51,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Psiphon-Inc/sss"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/secretbox"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/sss"
 )
 
 const (
@@ -122,7 +125,6 @@ type Scheme struct {
 	// sufficiently seeded. And so on. The first level in the list is the
 	// lowest level. The time period for OSLs is determined by the totals in
 	// the KeySplits.
-	// Limitation: thresholds must be at least 2.
 	//
 	// Example:
 	//
@@ -275,7 +277,7 @@ func NewConfig(filename string) (*Config, error) {
 	return config, nil
 }
 
-// LoadConfig loads, vaildates, and initializes a JSON encoded OSL
+// LoadConfig loads, validates, and initializes a JSON encoded OSL
 // configuration.
 func LoadConfig(configJSON []byte) (*Config, error) {
 
@@ -727,10 +729,6 @@ type PaveFile struct {
 // Registry describes a set of OSL files.
 type Registry struct {
 	FileSpecs []*OSLFileSpec
-
-	// The following fields are ephemeral state.
-
-	oslIDLookup map[string]*OSLFileSpec
 }
 
 // An OSLFileSpec includes an ID which is used to reference the
@@ -739,7 +737,7 @@ type Registry struct {
 //
 // The MD5Sum field is a checksum of the contents of the OSL file
 // to be used to skip redownloading previously downloaded files.
-// MD5 is not cryptogrpahically secure and this checksum is not
+// MD5 is not cryptographically secure and this checksum is not
 // relied upon for OSL verification. MD5 is used for compatibility
 // with out-of-band distribution hosts.
 type OSLFileSpec struct {
@@ -783,7 +781,8 @@ type PaveLogInfo struct {
 // epoch to endTime, and a pave file for each OSL. paveServerEntries is
 // a map from hex-encoded OSL IDs to server entries to pave into that OSL.
 // When entries are found, OSL will contain those entries, newline
-// separated. Otherwise the OSL will still be issued, but be empty.
+// separated. Otherwise the OSL will still be issued, but be empty (unless
+// the scheme is in omitEmptyOSLsSchemes).
 //
 // As OSLs outside the epoch-endTime range will no longer appear in
 // the registry, Pave is intended to be used to create the full set
@@ -797,6 +796,8 @@ func (config *Config) Pave(
 	signingPublicKey string,
 	signingPrivateKey string,
 	paveServerEntries map[string][]string,
+	omitMD5SumsSchemes []int,
+	omitEmptyOSLsSchemes []int,
 	logCallback func(*PaveLogInfo)) ([]*PaveFile, error) {
 
 	config.ReloadableFile.RLock()
@@ -808,6 +809,10 @@ func (config *Config) Pave(
 
 	for schemeIndex, scheme := range config.Schemes {
 		if common.Contains(scheme.PropagationChannelIDs, propagationChannelID) {
+
+			omitMD5Sums := common.ContainsInt(omitMD5SumsSchemes, schemeIndex)
+
+			omitEmptyOSLs := common.ContainsInt(omitEmptyOSLsSchemes, schemeIndex)
 
 			oslDuration := scheme.GetOSLDuration()
 
@@ -824,47 +829,52 @@ func (config *Config) Pave(
 
 				hexEncodedOSLID := hex.EncodeToString(fileSpec.ID)
 
-				registry.FileSpecs = append(registry.FileSpecs, fileSpec)
-
 				serverEntryCount := len(paveServerEntries[hexEncodedOSLID])
 
-				// serverEntries will be "" when nothing is found in paveServerEntries
-				serverEntries := strings.Join(paveServerEntries[hexEncodedOSLID], "\n")
+				if serverEntryCount > 0 || !omitEmptyOSLs {
 
-				serverEntriesPackage, err := common.WriteAuthenticatedDataPackage(
-					serverEntries,
-					signingPublicKey,
-					signingPrivateKey)
-				if err != nil {
-					return nil, common.ContextError(err)
-				}
+					registry.FileSpecs = append(registry.FileSpecs, fileSpec)
 
-				boxedServerEntries, err := box(fileKey, serverEntriesPackage)
-				if err != nil {
-					return nil, common.ContextError(err)
-				}
+					// serverEntries will be "" when nothing is found in paveServerEntries
+					serverEntries := strings.Join(paveServerEntries[hexEncodedOSLID], "\n")
 
-				md5sum := md5.Sum(boxedServerEntries)
-				fileSpec.MD5Sum = md5sum[:]
+					serverEntriesPackage, err := common.WriteAuthenticatedDataPackage(
+						serverEntries,
+						signingPublicKey,
+						signingPrivateKey)
+					if err != nil {
+						return nil, common.ContextError(err)
+					}
 
-				fileName := fmt.Sprintf(
-					OSL_FILENAME_FORMAT, hexEncodedOSLID)
+					boxedServerEntries, err := box(fileKey, serverEntriesPackage)
+					if err != nil {
+						return nil, common.ContextError(err)
+					}
 
-				paveFiles = append(paveFiles, &PaveFile{
-					Name:     fileName,
-					Contents: boxedServerEntries,
-				})
+					if !omitMD5Sums {
+						md5sum := md5.Sum(boxedServerEntries)
+						fileSpec.MD5Sum = md5sum[:]
+					}
 
-				if logCallback != nil {
-					logCallback(&PaveLogInfo{
-						FileName:             fileName,
-						SchemeIndex:          schemeIndex,
-						PropagationChannelID: propagationChannelID,
-						OSLID:                hexEncodedOSLID,
-						OSLTime:              oslTime,
-						OSLDuration:          oslDuration,
-						ServerEntryCount:     serverEntryCount,
+					fileName := fmt.Sprintf(
+						OSL_FILENAME_FORMAT, hexEncodedOSLID)
+
+					paveFiles = append(paveFiles, &PaveFile{
+						Name:     fileName,
+						Contents: boxedServerEntries,
 					})
+
+					if logCallback != nil {
+						logCallback(&PaveLogInfo{
+							FileName:             fileName,
+							SchemeIndex:          schemeIndex,
+							PropagationChannelID: propagationChannelID,
+							OSLID:                hexEncodedOSLID,
+							OSLTime:              oslTime,
+							OSLDuration:          oslDuration,
+							ServerEntryCount:     serverEntryCount,
+						})
+					}
 				}
 
 				oslTime = oslTime.Add(oslDuration)
@@ -893,6 +903,34 @@ func (config *Config) Pave(
 	return paveFiles, nil
 }
 
+// CurrentOSLIDs returns a mapping from each propagation channel ID in the
+// specified scheme to the corresponding current time period, hex-encoded OSL ID.
+func (config *Config) CurrentOSLIDs(schemeIndex int) (map[string]string, error) {
+
+	config.ReloadableFile.RLock()
+	defer config.ReloadableFile.RUnlock()
+
+	if schemeIndex < 0 || schemeIndex >= len(config.Schemes) {
+		return nil, common.ContextError(errors.New("invalid scheme index"))
+	}
+
+	scheme := config.Schemes[schemeIndex]
+	now := time.Now().UTC()
+	oslDuration := scheme.GetOSLDuration()
+	oslTime := scheme.epoch.Add((now.Sub(scheme.epoch) / oslDuration) * oslDuration)
+
+	OSLIDs := make(map[string]string)
+	for _, propagationChannelID := range scheme.PropagationChannelIDs {
+		_, fileSpec, err := makeOSLFileSpec(scheme, propagationChannelID, oslTime)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+		OSLIDs[propagationChannelID] = hex.EncodeToString(fileSpec.ID)
+	}
+
+	return OSLIDs, nil
+}
+
 // makeOSLFileSpec creates an OSL file key, splits it according to the
 // scheme's key splits, and sets the OSL ID as its first SLOK ID. The
 // returned key is used to encrypt the OSL payload and then discarded;
@@ -911,19 +949,53 @@ func makeOSLFileSpec(
 	firstSLOK := scheme.deriveSLOK(ref)
 	oslID := firstSLOK.ID
 
-	// Note: previously, this was a random key. Now, the file key
+	// Note: previously, fileKey was a random key. Now, the key
 	// is derived from the master key and OSL ID. This deterministic
 	// derivation ensures that repeated paves of the same OSL
 	// with the same ID and same content yields the same MD5Sum
-	// to avoid wastful downloads.
+	// to avoid wasteful downloads.
+	//
+	// Similarly, the shareKeys generated in divideKey and the Shamir
+	// key splitting random polynomials are now both determinisitcally
+	// generated from a seeded CSPRNG. This ensures that the OSL
+	// registry remains identical for repeated paves of the same config
+	// and parameters.
+	//
+	// The split structure is added to the deterministic key
+	// derivation so that changes to the split configuration will not
+	// expose the same key material to different SLOK combinations.
+
+	splitStructure := make([]byte, 16*(1+len(scheme.SeedPeriodKeySplits)))
+	i := 0
+	binary.LittleEndian.PutUint64(splitStructure[i:], uint64(len(scheme.SeedSpecs)))
+	binary.LittleEndian.PutUint64(splitStructure[i+8:], uint64(scheme.SeedSpecThreshold))
+	i += 16
+	for _, keySplit := range scheme.SeedPeriodKeySplits {
+		binary.LittleEndian.PutUint64(splitStructure[i:], uint64(keySplit.Total))
+		binary.LittleEndian.PutUint64(splitStructure[i+8:], uint64(keySplit.Threshold))
+		i += 16
+	}
 
 	fileKey := deriveKeyHKDF(
 		scheme.MasterKey,
+		splitStructure,
 		[]byte("osl-file-key"),
 		oslID)
 
+	splitKeyMaterialSeed := deriveKeyHKDF(
+		scheme.MasterKey,
+		splitStructure,
+		[]byte("osl-file-split-key-material-seed"),
+		oslID)
+
+	keyMaterialReader, err := newSeededKeyMaterialReader(splitKeyMaterialSeed)
+	if err != nil {
+		return nil, nil, common.ContextError(err)
+	}
+
 	keyShares, err := divideKey(
 		scheme,
+		keyMaterialReader,
 		fileKey,
 		scheme.SeedPeriodKeySplits,
 		propagationChannelID,
@@ -943,6 +1015,7 @@ func makeOSLFileSpec(
 // divideKey recursively constructs a KeyShares tree.
 func divideKey(
 	scheme *Scheme,
+	keyMaterialReader io.Reader,
 	key []byte,
 	keySplits []KeySplit,
 	propagationChannelID string,
@@ -951,7 +1024,11 @@ func divideKey(
 	keySplitIndex := len(keySplits) - 1
 	keySplit := keySplits[keySplitIndex]
 
-	shares, err := shamirSplit(key, keySplit.Total, keySplit.Threshold)
+	shares, err := shamirSplit(
+		key,
+		keySplit.Total,
+		keySplit.Threshold,
+		keyMaterialReader)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -961,15 +1038,12 @@ func divideKey(
 
 	for _, share := range shares {
 
-		// Note: for a fully deterministic pave, where the OSL registry
-		// is unchanged when no OSLs change, the share key would need
-		// to be derived (e.g., from the master key, OSL ID, key split
-		// index, and share index). However, since the OSL registry file
-		// content is nondeterministic in any case due to aspects of the
-		// Shamir secret splitting algorithm, there's no reason not to
-		// use a random key here.
+		var shareKey [KEY_LENGTH_BYTES]byte
 
-		shareKey, err := common.MakeSecureRandomBytes(KEY_LENGTH_BYTES)
+		n, err := keyMaterialReader.Read(shareKey[:])
+		if err == nil && n != len(shareKey) {
+			err = errors.New("unexpected length")
+		}
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -977,7 +1051,8 @@ func divideKey(
 		if keySplitIndex > 0 {
 			keyShare, err := divideKey(
 				scheme,
-				shareKey,
+				keyMaterialReader,
+				shareKey[:],
 				keySplits[0:keySplitIndex],
 				propagationChannelID,
 				nextSLOKTime)
@@ -988,7 +1063,8 @@ func divideKey(
 		} else {
 			keyShare, err := divideKeyWithSeedSpecSLOKs(
 				scheme,
-				shareKey,
+				keyMaterialReader,
+				shareKey[:],
 				propagationChannelID,
 				nextSLOKTime)
 			if err != nil {
@@ -998,7 +1074,7 @@ func divideKey(
 
 			*nextSLOKTime = nextSLOKTime.Add(time.Duration(scheme.SeedPeriodNanoseconds))
 		}
-		boxedShare, err := box(shareKey, share)
+		boxedShare, err := box(shareKey[:], share)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -1015,6 +1091,7 @@ func divideKey(
 
 func divideKeyWithSeedSpecSLOKs(
 	scheme *Scheme,
+	keyMaterialReader io.Reader,
 	key []byte,
 	propagationChannelID string,
 	nextSLOKTime *time.Time) (*KeyShares, error) {
@@ -1023,7 +1100,10 @@ func divideKeyWithSeedSpecSLOKs(
 	var slokIDs [][]byte
 
 	shares, err := shamirSplit(
-		key, len(scheme.SeedSpecs), scheme.SeedSpecThreshold)
+		key,
+		len(scheme.SeedSpecs),
+		scheme.SeedSpecThreshold,
+		keyMaterialReader)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -1052,133 +1132,6 @@ func divideKeyWithSeedSpecSLOKs(
 		SLOKIDs:     slokIDs,
 		KeyShares:   nil,
 	}, nil
-}
-
-// GetOSLRegistryURL returns the URL for an OSL registry. Clients
-// call this when fetching the registry from out-of-band
-// distribution sites.
-// Clients are responsible for tracking whether the remote file has
-// changed or not before downloading.
-func GetOSLRegistryURL(baseURL string) string {
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return ""
-	}
-	u.Path = path.Join(u.Path, REGISTRY_FILENAME)
-	return u.String()
-}
-
-// GetOSLRegistryFilename returns an appropriate filename for
-// the resumable download destination for the OSL registry.
-func GetOSLRegistryFilename(baseDirectory string) string {
-	return filepath.Join(baseDirectory, REGISTRY_FILENAME)
-}
-
-// GetOSLFileURL returns the URL for an OSL file. Once the client
-// has determined, from GetSeededOSLIDs, which OSLs it has sufficiently
-// seeded, it calls this to fetch the OSLs for download and decryption.
-// Clients are responsible for tracking whether the remote file has
-// changed or not before downloading.
-func GetOSLFileURL(baseURL string, oslID []byte) string {
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return ""
-	}
-	u.Path = path.Join(
-		u.Path, fmt.Sprintf(OSL_FILENAME_FORMAT, hex.EncodeToString(oslID)))
-	return u.String()
-}
-
-// GetOSLFilename returns an appropriate filename for the resumable
-// download destination for the OSL file.
-func GetOSLFilename(baseDirectory string, oslID []byte) string {
-	return filepath.Join(
-		baseDirectory, fmt.Sprintf(OSL_FILENAME_FORMAT, hex.EncodeToString(oslID)))
-}
-
-// UnpackRegistry validates and loads a JSON encoded OSL registry.
-func UnpackRegistry(
-	registryPackage []byte, signingPublicKey string) (*Registry, []byte, error) {
-
-	encodedRegistry, err := common.ReadAuthenticatedDataPackage(
-		registryPackage, true, signingPublicKey)
-	if err != nil {
-		return nil, nil, common.ContextError(err)
-	}
-
-	registryJSON, err := base64.StdEncoding.DecodeString(encodedRegistry)
-	if err != nil {
-		return nil, nil, common.ContextError(err)
-	}
-
-	registry, err := LoadRegistry(registryJSON)
-	return registry, registryJSON, err
-}
-
-// LoadRegistry loads a JSON encoded OSL registry.
-// Clients call this to process downloaded registry files.
-func LoadRegistry(registryJSON []byte) (*Registry, error) {
-
-	var registry Registry
-	err := json.Unmarshal(registryJSON, &registry)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-
-	registry.oslIDLookup = make(map[string]*OSLFileSpec)
-	for _, fileSpec := range registry.FileSpecs {
-		registry.oslIDLookup[string(fileSpec.ID)] = fileSpec
-	}
-
-	return &registry, nil
-}
-
-// SLOKLookup is a callback to lookup SLOK keys by ID.
-type SLOKLookup func([]byte) []byte
-
-// GetSeededOSLIDs examines each OSL in the registry and returns a list for
-// which the client has sufficient SLOKs to reassemble the OSL key and
-// decrypt. This function simply does SLOK ID lookups and threshold counting
-// and does not derive keys for every OSL.
-// The client is responsible for using the resulting list of OSL IDs to fetch
-// the OSL files and process.
-//
-// The client's propagation channel ID is used implicitly: it determines the
-// base URL used to download the registry and OSL files. If the client has
-// seeded SLOKs from a propagation channel ID different than the one associated
-// with its present base URL, they will not appear in the registry and not
-// be used.
-//
-// SLOKLookup is called to determine which SLOKs are seeded with the client.
-// errorLogger is a callback to log errors; GetSeededOSLIDs will continue to
-// process each candidate OSL even in the case of an error processing a
-// particular one.
-func (registry *Registry) GetSeededOSLIDs(lookup SLOKLookup, errorLogger func(error)) [][]byte {
-
-	var OSLIDs [][]byte
-	for _, fileSpec := range registry.FileSpecs {
-		ok, _, err := fileSpec.KeyShares.reassembleKey(lookup, false)
-		if err != nil {
-			errorLogger(err)
-			continue
-		}
-		if ok {
-			OSLIDs = append(OSLIDs, fileSpec.ID)
-		}
-	}
-
-	return OSLIDs
-}
-
-// GetOSLMD5Sum returns the MD5 checksum for the specified OSL.
-func (registry *Registry) GetOSLMD5Sum(oslID []byte) ([]byte, error) {
-
-	fileSpec, ok := registry.oslIDLookup[string(oslID)]
-	if !ok {
-		return nil, common.ContextError(errors.New("unknown OSL ID"))
-	}
-
-	return fileSpec.MD5Sum, nil
 }
 
 // reassembleKey recursively traverses a KeyShares tree, determining
@@ -1247,43 +1200,247 @@ func (keyShares *KeyShares) reassembleKey(lookup SLOKLookup, unboxKey bool) (boo
 	return true, joinedKey, nil
 }
 
-// UnpackOSL reassembles the key for the OSL specified by oslID and uses
-// that key to decrypt oslFileContents, validate the authenticated package,
-// and extract the payload.
-// Clients will call UnpackOSL for OSLs indicated by GetSeededOSLIDs along
-// with their downloaded content.
-// SLOKLookup is called to determine which SLOKs are seeded with the client.
-func (registry *Registry) UnpackOSL(
-	lookup SLOKLookup,
-	oslID []byte,
-	oslFileContents []byte,
-	signingPublicKey string) (string, error) {
-
-	fileSpec, ok := registry.oslIDLookup[string(oslID)]
-	if !ok {
-		return "", common.ContextError(errors.New("unknown OSL ID"))
+// GetOSLRegistryURL returns the URL for an OSL registry. Clients
+// call this when fetching the registry from out-of-band
+// distribution sites.
+// Clients are responsible for tracking whether the remote file has
+// changed or not before downloading.
+func GetOSLRegistryURL(baseURL string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
 	}
+	u.Path = path.Join(u.Path, REGISTRY_FILENAME)
+	return u.String()
+}
+
+// GetOSLRegistryFilename returns an appropriate filename for
+// the resumable download destination for the OSL registry.
+func GetOSLRegistryFilename(baseDirectory string) string {
+	return filepath.Join(baseDirectory, REGISTRY_FILENAME)
+}
+
+// GetOSLFileURL returns the URL for an OSL file. Once the client
+// has determined, from GetSeededOSLIDs, which OSLs it has sufficiently
+// seeded, it calls this to fetch the OSLs for download and decryption.
+// Clients are responsible for tracking whether the remote file has
+// changed or not before downloading.
+func GetOSLFileURL(baseURL string, oslID []byte) string {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	u.Path = path.Join(
+		u.Path, fmt.Sprintf(OSL_FILENAME_FORMAT, hex.EncodeToString(oslID)))
+	return u.String()
+}
+
+// GetOSLFilename returns an appropriate filename for the resumable
+// download destination for the OSL file.
+func GetOSLFilename(baseDirectory string, oslID []byte) string {
+	return filepath.Join(
+		baseDirectory, fmt.Sprintf(OSL_FILENAME_FORMAT, hex.EncodeToString(oslID)))
+}
+
+// SLOKLookup is a callback to lookup SLOK keys by ID.
+type SLOKLookup func([]byte) []byte
+
+// RegistryStreamer authenticates and processes a JSON encoded OSL registry.
+// The streamer processes the registry without loading the entire file
+// into memory, parsing each OSL file spec in turn and returning those
+// OSL file specs for which the client has sufficient SLOKs to reassemble
+// the OSL key and decrypt.
+//
+// At this stage, SLOK reassembly simply does SLOK ID lookups and threshold
+// counting and does not derive keys for every OSL. This allows the client
+// to defer key derivation until NewOSLReader for cases where it has not
+// already imported the OSL.
+//
+// The client's propagation channel ID is used implicitly: it determines the
+// base URL used to download the registry and OSL files. If the client has
+// seeded SLOKs from a propagation channel ID different than the one associated
+// with its present base URL, they will not appear in the registry and not
+// be used.
+type RegistryStreamer struct {
+	jsonDecoder *json.Decoder
+	lookup      SLOKLookup
+}
+
+// NewRegistryStreamer creates a new RegistryStreamer.
+func NewRegistryStreamer(
+	registryFileContent io.ReadSeeker,
+	signingPublicKey string,
+	lookup SLOKLookup) (*RegistryStreamer, error) {
+
+	payloadReader, err := common.NewAuthenticatedDataPackageReader(
+		registryFileContent, signingPublicKey)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	base64Decoder := base64.NewDecoder(base64.StdEncoding, payloadReader)
+
+	// A json.Decoder is used to stream the JSON payload, which
+	// is expected to be of the following form, corresponding
+	// to the Registry struct type:
+	//
+	// {"FileSpecs" : [{...}, {...}, ..., {...}]}
+
+	jsonDecoder := json.NewDecoder(base64Decoder)
+
+	err = expectJSONDelimiter(jsonDecoder, "{")
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	token, err := jsonDecoder.Token()
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+	if name, ok := token.(string); !ok || name != "FileSpecs" {
+		return nil, common.ContextError(
+			fmt.Errorf("unexpected name: %s", name))
+	}
+
+	err = expectJSONDelimiter(jsonDecoder, "[")
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return &RegistryStreamer{
+		jsonDecoder: jsonDecoder,
+		lookup:      lookup,
+	}, nil
+}
+
+// Next returns the next OSL file spec that the client
+// has sufficient SLOKs to decrypt. The client calls
+// NewOSLReader with the file spec to process that OSL.
+// Next returns nil at EOF.
+func (s *RegistryStreamer) Next() (*OSLFileSpec, error) {
+
+	for {
+		if s.jsonDecoder.More() {
+
+			var fileSpec OSLFileSpec
+			err := s.jsonDecoder.Decode(&fileSpec)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+
+			ok, _, err := fileSpec.KeyShares.reassembleKey(s.lookup, false)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+
+			if ok {
+				return &fileSpec, nil
+			}
+
+		} else {
+
+			// Expect the end of the FileSpecs array.
+			err := expectJSONDelimiter(s.jsonDecoder, "]")
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+
+			// Expect the end of the Registry object.
+			err = expectJSONDelimiter(s.jsonDecoder, "}")
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+
+			// Expect the end of the registry content.
+			_, err = s.jsonDecoder.Token()
+			if err != io.EOF {
+				return nil, common.ContextError(err)
+			}
+
+			return nil, nil
+		}
+	}
+}
+
+func expectJSONDelimiter(jsonDecoder *json.Decoder, delimiter string) error {
+	token, err := jsonDecoder.Token()
+	if err != nil {
+		return common.ContextError(err)
+	}
+	if delim, ok := token.(json.Delim); !ok || delim.String() != delimiter {
+		return common.ContextError(
+			fmt.Errorf("unexpected delimiter: %s", delim.String()))
+	}
+	return nil
+}
+
+// NewOSLReader decrypts, authenticates and streams an OSL payload.
+func NewOSLReader(
+	oslFileContent io.ReadSeeker,
+	fileSpec *OSLFileSpec,
+	lookup SLOKLookup,
+	signingPublicKey string) (io.Reader, error) {
 
 	ok, fileKey, err := fileSpec.KeyShares.reassembleKey(lookup, true)
 	if err != nil {
-		return "", common.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	if !ok {
-		return "", common.ContextError(errors.New("unseeded OSL"))
+		return nil, common.ContextError(errors.New("unseeded OSL"))
 	}
 
-	dataPackage, err := unbox(fileKey, oslFileContents)
+	if len(fileKey) != KEY_LENGTH_BYTES {
+		return nil, common.ContextError(errors.New("invalid key length"))
+	}
+
+	var nonce [24]byte
+	var key [KEY_LENGTH_BYTES]byte
+	copy(key[:], fileKey)
+
+	unboxer, err := secretbox.NewOpenReadSeeker(oslFileContent, &nonce, &key)
 	if err != nil {
-		return "", common.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
-	oslPayload, err := common.ReadAuthenticatedDataPackage(
-		dataPackage, true, signingPublicKey)
+	return common.NewAuthenticatedDataPackageReader(
+		unboxer,
+		signingPublicKey)
+}
+
+// zeroReader reads an unlimited stream of zeroes.
+type zeroReader struct {
+}
+
+func (z *zeroReader) Read(p []byte) (int, error) {
+	for i := 0; i < len(p); i++ {
+		p[i] = 0
+	}
+	return len(p), nil
+}
+
+// newSeededKeyMaterialReader constructs a CSPRNG using AES-CTR.
+// The seed is the AES key and the IV is fixed and constant.
+// Using same seed will always produce the same output stream.
+// The data stream is intended to be used to deterministically
+// generate key material and is not intended as a general
+// purpose CSPRNG.
+func newSeededKeyMaterialReader(seed []byte) (io.Reader, error) {
+
+	if len(seed) != KEY_LENGTH_BYTES {
+		return nil, common.ContextError(errors.New("invalid key length"))
+	}
+
+	aesCipher, err := aes.NewCipher(seed)
 	if err != nil {
-		return "", common.ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
-	return oslPayload, nil
+	var iv [aes.BlockSize]byte
+
+	return &cipher.StreamReader{
+		S: cipher.NewCTR(aesCipher, iv[:]),
+		R: new(zeroReader),
+	}, nil
 }
 
 // deriveKeyHKDF implements HKDF-Expand as defined in https://tools.ietf.org/html/rfc5869
@@ -1306,7 +1463,11 @@ func isValidShamirSplit(total, threshold int) bool {
 }
 
 // shamirSplit is a helper wrapper for sss.Split
-func shamirSplit(secret []byte, total, threshold int) ([][]byte, error) {
+func shamirSplit(
+	secret []byte,
+	total, threshold int,
+	randReader io.Reader) ([][]byte, error) {
+
 	if !isValidShamirSplit(total, threshold) {
 		return nil, common.ContextError(errors.New("invalid parameters"))
 	}
@@ -1320,7 +1481,8 @@ func shamirSplit(secret []byte, total, threshold int) ([][]byte, error) {
 		return shares, nil
 	}
 
-	shareMap, err := sss.Split(byte(total), byte(threshold), secret)
+	shareMap, err := sss.SplitUsingReader(
+		byte(total), byte(threshold), secret, randReader)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -1355,14 +1517,14 @@ func shamirCombine(shares [][]byte) []byte {
 }
 
 // box is a helper wrapper for secretbox.Seal.
-// A constant  nonce is used, which is secure so long as
+// A constant nonce is used, which is secure so long as
 // each key is used to encrypt only one message.
 func box(key, plaintext []byte) ([]byte, error) {
-	if len(key) != 32 {
+	if len(key) != KEY_LENGTH_BYTES {
 		return nil, common.ContextError(errors.New("invalid key length"))
 	}
 	var nonce [24]byte
-	var secretboxKey [32]byte
+	var secretboxKey [KEY_LENGTH_BYTES]byte
 	copy(secretboxKey[:], key)
 	box := secretbox.Seal(nil, plaintext, &nonce, &secretboxKey)
 	return box, nil
@@ -1370,11 +1532,11 @@ func box(key, plaintext []byte) ([]byte, error) {
 
 // unbox is a helper wrapper for secretbox.Open
 func unbox(key, box []byte) ([]byte, error) {
-	if len(key) != 32 {
+	if len(key) != KEY_LENGTH_BYTES {
 		return nil, common.ContextError(errors.New("invalid key length"))
 	}
 	var nonce [24]byte
-	var secretboxKey [32]byte
+	var secretboxKey [KEY_LENGTH_BYTES]byte
 	copy(secretboxKey[:], key)
 	plaintext, ok := secretbox.Open(nil, box, &nonce, &secretboxKey)
 	if !ok {

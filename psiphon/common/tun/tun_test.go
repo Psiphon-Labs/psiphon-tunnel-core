@@ -587,7 +587,7 @@ func startTestTCPClient(
 	tunDeviceName, serverIPAddress string) (*testTCPClient, error) {
 
 	// This is a simplified version of the low-level TCP dial
-	// code in psiphon/TCPConn, which supports bindToDevice.
+	// code in psiphon/TCPConn, which supports BindToDevice.
 	// It does not resolve domain names and does not have an
 	// explicit timeout.
 
@@ -616,10 +616,10 @@ func startTestTCPClient(
 		return nil, fmt.Errorf("syscall.Socket failed: %s", err)
 	}
 
-	err = bindToDevice(socketFd, tunDeviceName)
+	err = BindToDevice(socketFd, tunDeviceName)
 	if err != nil {
 		syscall.Close(socketFd)
-		return nil, fmt.Errorf("bindToDevice failed: %s", err)
+		return nil, fmt.Errorf("BindToDevice failed: %s", err)
 	}
 
 	err = syscall.Connect(socketFd, sockAddr)
