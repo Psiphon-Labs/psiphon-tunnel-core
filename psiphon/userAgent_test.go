@@ -28,9 +28,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Psiphon-Inc/goproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
+	"github.com/elazarl/goproxy"
 )
 
 // TODO: test that server receives and records correct user_agent value

@@ -39,10 +39,10 @@ import (
 	"time"
 
 	"github.com/Psiphon-Inc/goarista/monotime"
-	"github.com/Psiphon-Inc/goproxy"
 	socks "github.com/Psiphon-Inc/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/elazarl/goproxy"
 )
 
 var testDataDirName string
