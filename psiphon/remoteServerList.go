@@ -134,6 +134,13 @@ func FetchObfuscatedServerLists(
 	downloadURL := osl.GetOSLRegistryURL(rootURL)
 	canonicalURL := osl.GetOSLRegistryURL(canonicalRootURL)
 
+	// If the cached registry is not present, we need to download or resume downloading
+	// the registry, so clear the ETag to ensure that always happens.
+	_, err := os.Stat(cachedFilename)
+	if os.IsNotExist(err) {
+		SetUrlETag(canonicalURL, "")
+	}
+
 	// failed is set if any operation fails and should trigger a retry. When the OSL registry
 	// fails to download, any cached registry is used instead; when any single OSL fails
 	// to download, the overall operation proceeds. So this flag records whether to report
