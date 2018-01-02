@@ -1347,12 +1347,18 @@ func (sshClient *sshClient) runTunnel(
 				return updaters
 			}
 
-			sshClient.sshServer.support.PacketTunnelServer.ClientConnected(
+			err = sshClient.sshServer.support.PacketTunnelServer.ClientConnected(
 				sshClient.sessionID,
 				packetTunnelChannel,
 				checkAllowedTCPPortFunc,
 				checkAllowedUDPPortFunc,
 				flowActivityUpdaterMaker)
+			if err == nil {
+				log.WithContextFields(LogFields{"error": err}).Warning("start packet tunnel client failed")
+				sshClient.setPacketTunnelChannel(nil)
+			}
+
+			continue
 		}
 
 		if newChannel.ChannelType() != "direct-tcpip" {
