@@ -31,10 +31,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Psiphon-Inc/panicwrap"
 	"github.com/Psiphon-Inc/rotate-safe-writer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
+	"github.com/mitchellh/panicwrap"
 )
 
 var loadedConfigJSON []byte

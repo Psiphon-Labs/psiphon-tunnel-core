@@ -376,6 +376,9 @@ func (server *Server) ClientConnected(
 	// progress, but that no such calls are in progress past the
 	// server.runContext.Done() check.
 
+	// TODO: will this violate https://golang.org/pkg/sync/#WaitGroup.Add:
+	// "calls with a positive delta that occur when the counter is zero must happen before a Wait"?
+
 	server.connectedInProgress.Add(1)
 	defer server.connectedInProgress.Done()
 
@@ -445,6 +448,11 @@ func (server *Server) ClientConnected(
 		}
 	}
 
+	// Note: it's possible that a client disconnects (or reconnects before a
+	// disconnect is detected) and interruptSession is called between
+	// allocateIndex and resumeSession calls here, so interruptSession and
+	// related code must not assume resumeSession has been called.
+
 	server.resumeSession(clientSession, NewChannel(transport, MTU))
 
 	return nil
@@ -510,17 +518,22 @@ func (server *Server) interruptSession(session *session) {
 
 	wasRunning := (session.channel != nil)
 
-	session.stopRunning()
+	if session.stopRunning != nil {
+		session.stopRunning()
+	}
+
 	if session.channel != nil {
 		// Interrupt blocked channel read/writes.
 		session.channel.Close()
 	}
+
 	session.workers.Wait()
+
 	if session.channel != nil {
 		// Don't hold a reference to channel, allowing both it and
 		// its conn to be garbage collected.
 		// Setting channel to nil must happen after workers.Wait()
-		// to ensure no goroutines remains which may access
+		// to ensure no goroutine remains which may access
 		// session.channel.
 		session.channel = nil
 	}
@@ -857,13 +870,16 @@ func (server *Server) allocateIndex(newSession *session) error {
 		}
 		if s, ok := server.indexToSession.LoadOrStore(index, newSession); ok {
 			// Index is already in use or acquired concurrently.
-			// If the existing session is expired, reap it and use index.
+			// If the existing session is expired, reap it and try again
+			// to acquire it.
 			existingSession := s.(*session)
 			if existingSession.expired(idleExpiry) {
 				server.removeSession(existingSession)
-			} else {
-				continue
+				// Try to acquire this index again. We can't fall through and
+				// use this index as removeSession has cleared indexToSession.
+				index--
 			}
+			continue
 		}
 
 		// Note: the To4() for assignedIPv4Address is essential since

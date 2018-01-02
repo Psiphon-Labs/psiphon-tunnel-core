@@ -26,9 +26,9 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "github.com/Psiphon-Inc/go-sqlite3"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 var legacyDb *sql.DB

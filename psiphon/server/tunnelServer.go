@@ -33,13 +33,13 @@ import (
 	"syscall"
 	"time"
 
-	cache "github.com/Psiphon-Inc/go-cache"
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
+	cache "github.com/patrickmn/go-cache"
 )
 
 const (
@@ -1347,12 +1347,18 @@ func (sshClient *sshClient) runTunnel(
 				return updaters
 			}
 
-			sshClient.sshServer.support.PacketTunnelServer.ClientConnected(
+			err = sshClient.sshServer.support.PacketTunnelServer.ClientConnected(
 				sshClient.sessionID,
 				packetTunnelChannel,
 				checkAllowedTCPPortFunc,
 				checkAllowedUDPPortFunc,
 				flowActivityUpdaterMaker)
+			if err == nil {
+				log.WithContextFields(LogFields{"error": err}).Warning("start packet tunnel client failed")
+				sshClient.setPacketTunnelChannel(nil)
+			}
+
+			continue
 		}
 
 		if newChannel.ChannelType() != "direct-tcpip" {
