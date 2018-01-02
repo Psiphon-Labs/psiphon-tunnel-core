@@ -445,6 +445,11 @@ func (server *Server) ClientConnected(
 		}
 	}
 
+	// Note: it's possible that a client disconnects (or reconnects before a
+	// disconnect is detected) and interruptSession is called between
+	// allocateIndex and resumeSession calls here, so interruptSession and
+	// related code must not assume resumeSession has been called.
+
 	server.resumeSession(clientSession, NewChannel(transport, MTU))
 
 	return nil
@@ -510,17 +515,22 @@ func (server *Server) interruptSession(session *session) {
 
 	wasRunning := (session.channel != nil)
 
-	session.stopRunning()
+	if session.stopRunning != nil {
+		session.stopRunning()
+	}
+
 	if session.channel != nil {
 		// Interrupt blocked channel read/writes.
 		session.channel.Close()
 	}
+
 	session.workers.Wait()
+
 	if session.channel != nil {
 		// Don't hold a reference to channel, allowing both it and
 		// its conn to be garbage collected.
 		// Setting channel to nil must happen after workers.Wait()
-		// to ensure no goroutines remains which may access
+		// to ensure no goroutine remains which may access
 		// session.channel.
 		session.channel = nil
 	}
