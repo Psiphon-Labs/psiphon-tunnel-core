@@ -376,6 +376,9 @@ func (server *Server) ClientConnected(
 	// progress, but that no such calls are in progress past the
 	// server.runContext.Done() check.
 
+	// TODO: will this violate https://golang.org/pkg/sync/#WaitGroup.Add:
+	// "calls with a positive delta that occur when the counter is zero must happen before a Wait"?
+
 	server.connectedInProgress.Add(1)
 	defer server.connectedInProgress.Done()
 
@@ -867,13 +870,16 @@ func (server *Server) allocateIndex(newSession *session) error {
 		}
 		if s, ok := server.indexToSession.LoadOrStore(index, newSession); ok {
 			// Index is already in use or acquired concurrently.
-			// If the existing session is expired, reap it and use index.
+			// If the existing session is expired, reap it and try again
+			// to acquire it.
 			existingSession := s.(*session)
 			if existingSession.expired(idleExpiry) {
 				server.removeSession(existingSession)
-			} else {
-				continue
+				// Try to acquire this index again. We can't fall through and
+				// use this index as removeSession has cleared indexToSession.
+				index--
 			}
+			continue
 		}
 
 		// Note: the To4() for assignedIPv4Address is essential since
