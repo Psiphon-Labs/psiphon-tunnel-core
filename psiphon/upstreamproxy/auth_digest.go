@@ -158,7 +158,7 @@ func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Res
 
 	algorithm := digestParams["algorithm"]
 
-	if _, ok := digestParams["stale"]; ok {
+	if stale, ok := digestParams["stale"]; ok && stale == "true" {
 		// Server indicated that the nonce is stale
 		// Reset auth cache and state
 		a.digestHeaders = nil

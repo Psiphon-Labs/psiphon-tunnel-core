@@ -28,8 +28,8 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"github.com/Psiphon-Inc/goselect"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/creack/goselect"
 )
 
 // NonblockingIO provides interruptible I/O for non-pollable

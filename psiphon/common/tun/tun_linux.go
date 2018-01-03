@@ -28,8 +28,8 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/Psiphon-Inc/gocapability/capability"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/syndtr/gocapability/capability"
 )
 
 const (

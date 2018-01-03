@@ -25,9 +25,9 @@ import (
 	"net"
 	"time"
 
-	cache "github.com/Psiphon-Inc/go-cache"
-	maxminddb "github.com/Psiphon-Inc/maxminddb-golang"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	maxminddb "github.com/oschwald/maxminddb-golang"
+	cache "github.com/patrickmn/go-cache"
 )
 
 const (

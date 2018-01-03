@@ -26,7 +26,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/Psiphon-Inc/ratelimit"
+	"github.com/juju/ratelimit"
 )
 
 // RateLimits specify the rate limits for a ThrottledConn.

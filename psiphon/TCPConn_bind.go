@@ -31,8 +31,8 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/Psiphon-Inc/goselect"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/creack/goselect"
 )
 
 // tcpDial is the platform-specific part of DialTCP
