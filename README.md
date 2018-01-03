@@ -123,6 +123,7 @@ Psiphon Tunnel Core uses:
 * [mitchellh/panicwrap](https://github.com/mitchellh/panicwrap)
 * [juju/ratelimit](https://github.com/juju/ratelimit)
 * [codahale/sss](https://github.com/codahale/sss)
+* [marusama/semaphore](https://github.com/marusama/semaphore)
 
 Licensing
 --------------------------------------------------------------------------------

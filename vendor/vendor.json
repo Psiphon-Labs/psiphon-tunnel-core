@@ -75,6 +75,12 @@
 			"revisionTime": "2017-05-10T13:15:34Z"
 		},
 		{
+			"checksumSHA1": "sY8sshVIEXnJgg3S6C5FcN33Vq4=",
+			"path": "github.com/marusama/semaphore",
+			"revision": "565ffd8e868a4e9a2b4e218e940cf4cb40ebd105",
+			"revisionTime": "2017-12-14T15:47:24Z"
+		},
+		{
 			"checksumSHA1": "WBdr9cf6JJbbCjHsYZnGVK5i4fY=",
 			"path": "github.com/mattn/go-sqlite3",
 			"revision": "d10e2c8f62100097910367dee90a9bd89d426a44",

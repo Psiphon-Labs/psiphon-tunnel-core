@@ -39,12 +39,14 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
+	"github.com/marusama/semaphore"
 	cache "github.com/patrickmn/go-cache"
 )
 
 const (
 	SSH_AUTH_LOG_PERIOD                   = 30 * time.Minute
 	SSH_HANDSHAKE_TIMEOUT                 = 30 * time.Second
+	SSH_BEGIN_HANDSHAKE_TIMEOUT           = 1 * time.Second
 	SSH_CONNECTION_READ_DEADLINE          = 5 * time.Minute
 	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE = 8192
 	SSH_TCP_PORT_FORWARD_QUEUE_SIZE       = 1024
@@ -249,18 +251,19 @@ type sshServer struct {
 	// Note: 64-bit ints used with atomic operations are placed
 	// at the start of struct to ensure 64-bit alignment.
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	lastAuthLog          int64
-	authFailedCount      int64
-	support              *SupportServices
-	establishTunnels     int32
-	shutdownBroadcast    <-chan struct{}
-	sshHostKey           ssh.Signer
-	clientsMutex         sync.Mutex
-	stoppingClients      bool
-	acceptedClientCounts map[string]map[string]int64
-	clients              map[string]*sshClient
-	oslSessionCacheMutex sync.Mutex
-	oslSessionCache      *cache.Cache
+	lastAuthLog             int64
+	authFailedCount         int64
+	support                 *SupportServices
+	establishTunnels        int32
+	concurrentSSHHandshakes semaphore.Semaphore
+	shutdownBroadcast       <-chan struct{}
+	sshHostKey              ssh.Signer
+	clientsMutex            sync.Mutex
+	stoppingClients         bool
+	acceptedClientCounts    map[string]map[string]int64
+	clients                 map[string]*sshClient
+	oslSessionCacheMutex    sync.Mutex
+	oslSessionCache         *cache.Cache
 }
 
 func newSSHServer(
@@ -278,6 +281,11 @@ func newSSHServer(
 		return nil, common.ContextError(err)
 	}
 
+	var concurrentSSHHandshakes semaphore.Semaphore
+	if support.Config.MaxConcurrentSSHHandshakes > 0 {
+		concurrentSSHHandshakes = semaphore.New(support.Config.MaxConcurrentSSHHandshakes)
+	}
+
 	// The OSL session cache temporarily retains OSL seed state
 	// progress for disconnected clients. This enables clients
 	// that disconnect and immediately reconnect to the same
@@ -292,13 +300,14 @@ func newSSHServer(
 	oslSessionCache := cache.New(OSL_SESSION_CACHE_TTL, 1*time.Minute)
 
 	return &sshServer{
-		support:              support,
-		establishTunnels:     1,
-		shutdownBroadcast:    shutdownBroadcast,
-		sshHostKey:           signer,
-		acceptedClientCounts: make(map[string]map[string]int64),
-		clients:              make(map[string]*sshClient),
-		oslSessionCache:      oslSessionCache,
+		support:                 support,
+		establishTunnels:        1,
+		concurrentSSHHandshakes: concurrentSSHHandshakes,
+		shutdownBroadcast:       shutdownBroadcast,
+		sshHostKey:              signer,
+		acceptedClientCounts:    make(map[string]map[string]int64),
+		clients:                 make(map[string]*sshClient),
+		oslSessionCache:         oslSessionCache,
 	}, nil
 }
 
@@ -709,9 +718,57 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	sshServer.registerAcceptedClient(tunnelProtocol, geoIPData.Country)
 	defer sshServer.unregisterAcceptedClient(tunnelProtocol, geoIPData.Country)
 
+	// When configured, enforce a cap on the number of concurrent SSH
+	// handshakes. This limits load spikes on busy servers when many clients
+	// attempt to connect at once. Wait a short time, SSH_BEGIN_HANDSHAKE_TIMEOUT,
+	// to acquire; waiting will avoid immediately creating more load on another
+	// server in the network when the client tries a new candidate. Disconnect the
+	// client when that wait time is exceeded.
+	//
+	// This mechanism limits memory allocations and CPU usage associated with the
+	// SSH handshake. At this point, new direct TCP connections or new meek
+	// connections, with associated resource usage, are already established. Those
+	// connections are expected to be rate or load limited using other mechanisms.
+	//
+	// TODO:
+	//
+	// - deduct time spent acquiring the semaphore from SSH_HANDSHAKE_TIMEOUT in
+	//   sshClient.run, since the client is also applying an SSH handshake timeout
+	//   and won't exclude time spent waiting.
+	// - each call to sshServer.handleClient (in sshServer.runListener) is invoked
+	//   in its own goroutine, but shutdown doesn't synchronously await these
+	//   goroutnes. Once this is synchronizes, the following context.WithTimeout
+	//   should use an sshServer parent context to ensure blocking acquires
+	//   interrupt immediately upon shutdown.
+
+	var onSSHHandshakeFinished func()
+	if sshServer.support.Config.MaxConcurrentSSHHandshakes > 0 {
+
+		ctx, cancelFunc := context.WithTimeout(
+			context.Background(), SSH_BEGIN_HANDSHAKE_TIMEOUT)
+		defer cancelFunc()
+
+		err := sshServer.concurrentSSHHandshakes.Acquire(ctx, 1)
+		if err != nil {
+			clientConn.Close()
+			// This is a debug log as the only possible error is context timeout.
+			log.WithContextFields(LogFields{"error": err}).Debug(
+				"acquire SSH handshake semaphore failed")
+			return
+		}
+
+		onSSHHandshakeFinished = func() {
+			sshServer.concurrentSSHHandshakes.Release(1)
+		}
+	}
+
 	sshClient := newSshClient(sshServer, tunnelProtocol, geoIPData)
 
-	sshClient.run(clientConn)
+	// sshClient.run _must_ call onSSHHandshakeFinished to release the semaphore:
+	// in any error case; or, as soon as the SSH handshake phase has successfully
+	// completed.
+
+	sshClient.run(clientConn, onSSHHandshakeFinished)
 }
 
 func (sshServer *sshServer) monitorPortForwardDialError(err error) {
@@ -817,7 +874,15 @@ func newSshClient(
 	return client
 }
 
-func (sshClient *sshClient) run(clientConn net.Conn) {
+func (sshClient *sshClient) run(
+	clientConn net.Conn, onSSHHandshakeFinished func()) {
+
+	// onSSHHandshakeFinished must be called even if the SSH handshake is aborted.
+	defer func() {
+		if onSSHHandshakeFinished != nil {
+			onSSHHandshakeFinished()
+		}
+	}()
 
 	// Some conns report additional metrics
 	metricsSource, isMetricsSource := clientConn.(MetricsSource)
@@ -927,6 +992,13 @@ func (sshClient *sshClient) run(clientConn net.Conn) {
 		log.WithContextFields(LogFields{"error": result.err}).Debug("handshake failed")
 		return
 	}
+
+	// The SSH handshake has finished successfully; notify now to allow other
+	// blocked SSH handshakes to proceed.
+	if onSSHHandshakeFinished != nil {
+		onSSHHandshakeFinished()
+	}
+	onSSHHandshakeFinished = nil
 
 	sshClient.Lock()
 	sshClient.sshConn = result.sshConn

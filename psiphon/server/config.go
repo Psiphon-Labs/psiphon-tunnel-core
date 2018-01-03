@@ -274,6 +274,16 @@ type Config struct {
 	// PacketTunnelSudoNetworkConfigCommands sets
 	// tun.ServerConfig.SudoNetworkConfigCommands.
 	PacketTunnelSudoNetworkConfigCommands bool
+
+	// MaxConcurrentSSHHandshakes specifies a limit on the number of concurrent
+	// SSH handshake negotiations. This is set to mitigate spikes in memory
+	// allocations and CPU usage associated with SSH handshakes when many clients
+	// attempt to connect concurrently. When a maximum limit is specified and
+	// reached, additional clients that establish TCP or meek connections will
+	// be disconnected after a short wait for the number of concurrent handshakes
+	// to drop below the limit.
+	// The default, 0 is no limit.
+	MaxConcurrentSSHHandshakes int
 }
 
 // RunWebServer indicates whether to run a web server component.

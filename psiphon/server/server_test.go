@@ -343,6 +343,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig["LogFilename"] = filepath.Join(testDataDirName, "psiphond.log")
 	serverConfig["LogLevel"] = "debug"
 
+	// Set this parameter so at least the semaphore functions are called.
+	// TODO: test that the concurrency limit is correctly enforced.
+	serverConfig["MaxConcurrentSSHHandshakes"] = 1
+
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
 	// run server
