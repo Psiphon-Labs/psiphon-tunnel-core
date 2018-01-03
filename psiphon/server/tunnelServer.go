@@ -1425,7 +1425,7 @@ func (sshClient *sshClient) runTunnel(
 				checkAllowedTCPPortFunc,
 				checkAllowedUDPPortFunc,
 				flowActivityUpdaterMaker)
-			if err == nil {
+			if err != nil {
 				log.WithContextFields(LogFields{"error": err}).Warning("start packet tunnel client failed")
 				sshClient.setPacketTunnelChannel(nil)
 			}
