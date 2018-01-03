@@ -489,7 +489,7 @@ func (server *Server) getSession(sessionID string) *session {
 func (server *Server) resumeSession(session *session, channel *Channel) {
 
 	session.mutex.Lock()
-	session.mutex.Unlock()
+	defer session.mutex.Unlock()
 
 	session.channel = channel
 
