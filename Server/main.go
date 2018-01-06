@@ -186,7 +186,15 @@ func main() {
 
 		loadedConfigJSON = configJSON
 
-		// Comments from: https://github.com/mitchellh/panicwrap#usage
+		// The initial call to panicwrap.Wrap will spawn a child process
+		// running the same program.
+		//
+		// The parent process waits for the child to terminate and
+		// panicHandler logs any panics from the child.
+		//
+		// The child will return immediately from Wrap without spawning
+		// and fall through to server.RunServices.
+
 		// Unhandled panic wrapper. Logs it, then re-executes the current executable
 		exitStatus, err := panicwrap.Wrap(&panicwrap.WrapConfig{
 			Handler:        panicHandler,
@@ -197,12 +205,17 @@ func main() {
 			os.Exit(1)
 		}
 
-		// If exitStatus >= 0, then we're the parent process and the panicwrap
-		// re-executed ourselves and completed. Just exit with the proper status.
-		if exitStatus >= 0 {
+		// Note: panicwrap.Wrap documentation states that exitStatus == -1
+		// should be used to determine whether the process is the child.
+		// However, we have found that this exitStatus is returned even when
+		// the process is the parent. Likely due to panicwrap returning
+		// syscall.WaitStatus.ExitStatus() as the exitStatus, which _can_ be
+		// -1. Checking panicwrap.Wrapped(nil) is more reliable.
+
+		if !panicwrap.Wrapped(nil) {
 			os.Exit(exitStatus)
 		}
-		// Otherwise, exitStatus < 0 means we're the child. Continue executing as normal
+		// Else, this is the child process.
 
 		err = server.RunServices(configJSON)
 		if err != nil {
