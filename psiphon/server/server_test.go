@@ -347,6 +347,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// TODO: test that the concurrency limit is correctly enforced.
 	serverConfig["MaxConcurrentSSHHandshakes"] = 1
 
+	// Exercise this option.
+	serverConfig["PeriodicGarbageCollectionSeconds"] = 1
+
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
 	// run server

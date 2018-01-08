@@ -129,6 +129,23 @@ func RunServices(configJSON []byte) error {
 		}()
 	}
 
+	if config.RunPeriodicGarbageCollection() {
+		waitGroup.Add(1)
+		go func() {
+			waitGroup.Done()
+			ticker := time.NewTicker(time.Duration(config.PeriodicGarbageCollectionSeconds) * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-shutdownBroadcast:
+					return
+				case <-ticker.C:
+					runtime.GC()
+				}
+			}
+		}()
+	}
+
 	if config.RunWebServer() {
 		waitGroup.Add(1)
 		go func() {
