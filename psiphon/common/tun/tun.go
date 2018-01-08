@@ -170,7 +170,7 @@ type ServerConfig struct {
 	// logged as warnings only. This option is intended to support
 	// test cases on hosts without IPv6 and is not for production use;
 	// the packet tunnel server will still accept IPv6 packets and
-	// replay them to the tun device.
+	// relay them to the tun device.
 	// AllowNoIPv6NetworkConfiguration may not be supported on all
 	// platforms.
 	AllowNoIPv6NetworkConfiguration bool
