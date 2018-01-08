@@ -488,6 +488,14 @@ func (server *MeekServer) getSession(
 		return existingSessionID, session, nil
 	}
 
+	// Don't create new sessions when not establishing. A subsequent SSH handshake
+	// will not succeed, so creating a meek session just wastes resources.
+
+	if server.support.TunnelServer != nil &&
+		!server.support.TunnelServer.GetEstablishTunnels() {
+		return "", nil, common.ContextError(errors.New("not establishing tunnels"))
+	}
+
 	// TODO: can multiple http client connections using same session cookie
 	// cause race conditions on session struct?
 
