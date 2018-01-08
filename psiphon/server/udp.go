@@ -107,7 +107,8 @@ func (mux *udpPortForwardMultiplexer) run() {
 		message, err := readUdpgwMessage(mux.sshChannel, buffer)
 		if err != nil {
 			if err != io.EOF {
-				log.WithContextFields(LogFields{"error": err}).Warning("readUdpgwMessage failed")
+				// Debug since I/O errors occur during normal operation
+				log.WithContextFields(LogFields{"error": err}).Debug("readUdpgwMessage failed")
 			}
 			break
 		}
@@ -389,7 +390,10 @@ func readUdpgwMessage(
 
 		_, err := io.ReadFull(reader, buffer[0:2])
 		if err != nil {
-			return nil, common.ContextError(err)
+			if err != io.EOF {
+				err = common.ContextError(err)
+			}
+			return nil, err
 		}
 
 		size := binary.LittleEndian.Uint16(buffer[0:2])
@@ -400,7 +404,10 @@ func readUdpgwMessage(
 
 		_, err = io.ReadFull(reader, buffer[2:2+size])
 		if err != nil {
-			return nil, common.ContextError(err)
+			if err != io.EOF {
+				err = common.ContextError(err)
+			}
+			return nil, err
 		}
 
 		flags := buffer[2]

@@ -265,7 +265,9 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 	sessionID, session, err := server.getSession(request, meekCookie)
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("session lookup failed")
+		// Debug since session cookie errors commonly occur during
+		// normal operation.
+		log.WithContextFields(LogFields{"error": err}).Debug("session lookup failed")
 		server.terminateConnection(responseWriter, request)
 		return
 	}

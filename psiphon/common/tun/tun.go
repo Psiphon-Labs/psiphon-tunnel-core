@@ -740,10 +740,14 @@ func (server *Server) runClientUpstream(session *session) {
 		}
 
 		if err != nil {
+
+			// Debug since channel I/O errors occur during normal operation.
 			server.config.Logger.WithContextFields(
-				common.LogFields{"error": err}).Warning("read channel packet failed")
+				common.LogFields{"error": err}).Debug("read channel packet failed")
+
 			// Tear down the session. Must be invoked asynchronously.
 			go server.interruptSession(session)
+
 			return
 		}
 
@@ -798,8 +802,9 @@ func (server *Server) runClientDownstream(session *session) {
 		err := session.channel.WriteFramedPackets(packetBuffer)
 		if err != nil {
 
+			// Debug since channel I/O errors occur during normal operation.
 			server.config.Logger.WithContextFields(
-				common.LogFields{"error": err}).Warning("write channel packets failed")
+				common.LogFields{"error": err}).Debug("write channel packets failed")
 
 			session.downstreamPackets.Replace(packetBuffer)
 
