@@ -339,7 +339,17 @@ func logServerLoad(server *TunnelServer) {
 	for protocol, stats := range protocolStats {
 		serverLoad[protocol] = stats
 	}
+
 	serverLoad["establish_tunnels"] = server.GetEstablishTunnels()
+
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+	serverLoad["heap_alloc"] = memStats.HeapAlloc
+	serverLoad["heap_sys"] = memStats.HeapSys
+	serverLoad["heap_idle"] = memStats.HeapIdle
+	serverLoad["heap_inuse"] = memStats.HeapInuse
+	serverLoad["heap_released"] = memStats.HeapReleased
+	serverLoad["heap_objects"] = memStats.HeapObjects
 
 	log.LogRawFieldsWithTimestamp(serverLoad)
 
