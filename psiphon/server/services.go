@@ -251,21 +251,35 @@ loop:
 	return err
 }
 
-func outputProcessProfiles(config *Config) {
+func getRuntimeMetrics() LogFields {
+
+	numGoroutine := runtime.NumGoroutine()
 
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
-	log.WithContextFields(
-		LogFields{
-			"num_goroutine":   runtime.NumGoroutine(),
-			"alloc":           memStats.Alloc,
-			"total_alloc":     memStats.TotalAlloc,
-			"sys":             memStats.Sys,
-			"pause_total_ns":  memStats.PauseTotalNs,
-			"pause_ns":        memStats.PauseNs,
-			"num_gc":          memStats.NumGC,
-			"gc_cpu_fraction": memStats.GCCPUFraction,
-		}).Info("runtime_stats")
+
+	lastGC := ""
+	if memStats.LastGC > 0 {
+		lastGC = time.Unix(0, int64(memStats.LastGC)).UTC().Format(time.RFC3339)
+	}
+
+	return LogFields{
+		"num_goroutine": numGoroutine,
+		"heap_alloc":    memStats.HeapAlloc,
+		"heap_sys":      memStats.HeapSys,
+		"heap_idle":     memStats.HeapIdle,
+		"heap_inuse":    memStats.HeapInuse,
+		"heap_released": memStats.HeapReleased,
+		"heap_objects":  memStats.HeapObjects,
+		"num_gc":        memStats.NumGC,
+		"num_forced_gc": memStats.NumForcedGC,
+		"last_gc":       lastGC,
+	}
+}
+
+func outputProcessProfiles(config *Config) {
+
+	log.WithContextFields(getRuntimeMetrics()).Info("runtime_metrics")
 
 	if config.ProcessProfileOutputDirectory != "" {
 
@@ -350,23 +364,15 @@ func logServerLoad(server *TunnelServer) {
 
 	protocolStats, regionStats := server.GetLoadStats()
 
-	serverLoad := LogFields{
-		"event_name": "server_load",
-	}
-	for protocol, stats := range protocolStats {
-		serverLoad[protocol] = stats
-	}
+	serverLoad := getRuntimeMetrics()
+
+	serverLoad["event_name"] = "server_load"
 
 	serverLoad["establish_tunnels"] = server.GetEstablishTunnels()
 
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-	serverLoad["heap_alloc"] = memStats.HeapAlloc
-	serverLoad["heap_sys"] = memStats.HeapSys
-	serverLoad["heap_idle"] = memStats.HeapIdle
-	serverLoad["heap_inuse"] = memStats.HeapInuse
-	serverLoad["heap_released"] = memStats.HeapReleased
-	serverLoad["heap_objects"] = memStats.HeapObjects
+	for protocol, stats := range protocolStats {
+		serverLoad[protocol] = stats
+	}
 
 	log.LogRawFieldsWithTimestamp(serverLoad)
 
