@@ -488,7 +488,7 @@ func (sshServer *sshServer) registerEstablishedClient(client *sshClient) bool {
 	// Call stop() outside the mutex to avoid deadlock.
 	if existingClient != nil {
 		existingClient.stop()
-		log.WithContext().Info(
+		log.WithContext().Debug(
 			"stopped existing client with duplicate session ID")
 	}
 

@@ -284,6 +284,11 @@ type Config struct {
 	// to drop below the limit.
 	// The default, 0 is no limit.
 	MaxConcurrentSSHHandshakes int
+
+	// PeriodicGarbageCollectionSeconds turns on periodic calls to runtime.GC,
+	// every specified number of seconds, to force garbage collection.
+	// The default, 0 is off.
+	PeriodicGarbageCollectionSeconds int
 }
 
 // RunWebServer indicates whether to run a web server component.
@@ -294,6 +299,11 @@ func (config *Config) RunWebServer() bool {
 // RunLoadMonitor indicates whether to monitor and log server load.
 func (config *Config) RunLoadMonitor() bool {
 	return config.LoadMonitorPeriodSeconds > 0
+}
+
+// RunPeriodicGarbageCollection indicates whether to run periodic garbage collection.
+func (config *Config) RunPeriodicGarbageCollection() bool {
+	return config.PeriodicGarbageCollectionSeconds > 0
 }
 
 // LoadConfig loads and validates a JSON encoded server config.
