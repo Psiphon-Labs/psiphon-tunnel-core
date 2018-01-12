@@ -83,6 +83,11 @@ type TrafficRulesFilter struct {
 	// a list of values, one of which must be specified to match this
 	// filter. Only scalar string API parameters may be filtered.
 	HandshakeParameters map[string][]string
+
+	// AuthorizedAccessTypes specifies a list of access types, at least
+	// one of which the client must have presented an active authorization
+	// for.
+	AuthorizedAccessTypes []string
 }
 
 // TrafficRules specify the limits placed on client traffic.
@@ -386,6 +391,16 @@ func (set *TrafficRulesSet) GetTrafficRules(
 				}
 			}
 			if mismatch {
+				continue
+			}
+		}
+
+		if len(filteredRules.Filter.AuthorizedAccessTypes) > 0 {
+			if !state.completed {
+				continue
+			}
+
+			if !common.ContainsAny(filteredRules.Filter.AuthorizedAccessTypes, state.authorizedAccessTypes) {
 				continue
 			}
 		}

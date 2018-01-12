@@ -48,14 +48,14 @@ type webServer struct {
 //
 // The HTTP request handlers are light wrappers around the base Psiphon
 // API request handlers from the SSH API transport. The SSH API transport
-// is preferred by new clients; however the web API transport is still
-// required for untunneled final status requests. The web API transport
-// may be retired once untunneled final status requests are made obsolete
-// (e.g., by server-side bytes transferred stats, by client-side local
-// storage of stats for retry, or some other future development).
+// is preferred by new clients. The web API transport provides support for
+// older clients.
 //
 // The API is compatible with all tunnel-core clients but not backwards
-// compatible with older clients.
+// compatible with all legacy clients.
+//
+// Note: new features, including authorizations, are not supported in the
+// web API transport.
 //
 func RunWebServer(
 	support *SupportServices,
@@ -237,6 +237,7 @@ func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Requ
 			webServer.support,
 			protocol.PSIPHON_WEB_API_PROTOCOL,
 			webServer.lookupGeoIPData(params),
+			nil,
 			protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME,
 			params)
 	}
@@ -267,6 +268,7 @@ func (webServer *webServer) connectedHandler(w http.ResponseWriter, r *http.Requ
 			webServer.support,
 			protocol.PSIPHON_WEB_API_PROTOCOL,
 			webServer.lookupGeoIPData(params),
+			nil, // authorizedAccessTypes not logged in web API transport
 			protocol.PSIPHON_API_CONNECTED_REQUEST_NAME,
 			params)
 	}
@@ -291,6 +293,7 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 			webServer.support,
 			protocol.PSIPHON_WEB_API_PROTOCOL,
 			webServer.lookupGeoIPData(params),
+			nil, // authorizedAccessTypes not logged in web API transport
 			protocol.PSIPHON_API_STATUS_REQUEST_NAME,
 			params)
 	}
@@ -315,6 +318,7 @@ func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *
 			webServer.support,
 			protocol.PSIPHON_WEB_API_PROTOCOL,
 			webServer.lookupGeoIPData(params),
+			nil, // authorizedAccessTypes not logged in web API transport
 			protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME,
 			params)
 	}

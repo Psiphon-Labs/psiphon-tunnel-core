@@ -20,6 +20,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -47,8 +48,6 @@ const (
 
 var CLIENT_VERIFICATION_REQUIRED = false
 
-type requestJSONObject map[string]interface{}
-
 // sshAPIRequestHandler routes Psiphon API requests transported as
 // JSON objects via the SSH request mechanism.
 //
@@ -56,21 +55,21 @@ type requestJSONObject map[string]interface{}
 // reused by webServer which offers the Psiphon API via web transport.
 //
 // The API request parameters and event log values follow the legacy
-// psi_web protocol and naming conventions. The API is compatible all
-// tunnel-core clients but are not backwards compatible with older
-// clients.
+// psi_web protocol and naming conventions. The API is compatible with
+// all tunnel-core clients but are not backwards compatible with all
+// legacy clients.
 //
 func sshAPIRequestHandler(
 	support *SupportServices,
 	geoIPData GeoIPData,
+	authorizedAccessTypes []string,
 	name string,
 	requestPayload []byte) ([]byte, error) {
 
 	// Note: for SSH requests, MAX_API_PARAMS_SIZE is implicitly enforced
-	// by max SSH reqest packet size.
+	// by max SSH request packet size.
 
-	var params requestJSONObject
-	err := json.Unmarshal(requestPayload, &params)
+	params, err := requestJSONUnmarshal(requestPayload)
 	if err != nil {
 		return nil, common.ContextError(
 			fmt.Errorf("invalid payload for request name: %s: %s", name, err))
@@ -80,6 +79,7 @@ func sshAPIRequestHandler(
 		support,
 		protocol.PSIPHON_SSH_API_PROTOCOL,
 		geoIPData,
+		authorizedAccessTypes,
 		name,
 		params)
 }
@@ -90,6 +90,7 @@ func dispatchAPIRequestHandler(
 	support *SupportServices,
 	apiProtocol string,
 	geoIPData GeoIPData,
+	authorizedAccessTypes []string,
 	name string,
 	params requestJSONObject) (response []byte, reterr error) {
 
@@ -155,11 +156,11 @@ func dispatchAPIRequestHandler(
 	case protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
 		return handshakeAPIRequestHandler(support, apiProtocol, geoIPData, params)
 	case protocol.PSIPHON_API_CONNECTED_REQUEST_NAME:
-		return connectedAPIRequestHandler(support, geoIPData, params)
+		return connectedAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
 	case protocol.PSIPHON_API_STATUS_REQUEST_NAME:
-		return statusAPIRequestHandler(support, geoIPData, params)
+		return statusAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
 	case protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME:
-		return clientVerificationAPIRequestHandler(support, geoIPData, params)
+		return clientVerificationAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
 	}
 
 	return nil, common.ContextError(fmt.Errorf("invalid request name: %s", name))
@@ -189,19 +190,32 @@ func handshakeAPIRequestHandler(
 	isMobile := isMobileClientPlatform(clientPlatform)
 	normalizedPlatform := normalizeClientPlatform(clientPlatform)
 
+	var authorizations [][]byte
+	if params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] != nil {
+		authorizationsRawJSON, err := getRawJSONArrayRequestParam(params, protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+		authorizations = make([][]byte, len(authorizationsRawJSON))
+		for i := 0; i < len(authorizationsRawJSON); i++ {
+			authorizations[i] = authorizationsRawJSON[i]
+		}
+	}
+
 	// Flag the SSH client as having completed its handshake. This
 	// may reselect traffic rules and starts allowing port forwards.
 
 	// TODO: in the case of SSH API requests, the actual sshClient could
 	// be passed in and used here. The session ID lookup is only strictly
 	// necessary to support web API requests.
-	err = support.TunnelServer.SetClientHandshakeState(
+	authorizedAccessTypes, err := support.TunnelServer.SetClientHandshakeState(
 		sessionID,
 		handshakeState{
 			completed:   true,
 			apiProtocol: apiProtocol,
 			apiParams:   copyBaseRequestParams(params),
-		})
+		},
+		authorizations)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -211,23 +225,24 @@ func handshakeAPIRequestHandler(
 
 	log.LogRawFieldsWithTimestamp(
 		getRequestLogFields(
-			support,
 			"handshake",
 			geoIPData,
+			authorizedAccessTypes,
 			params,
 			baseRequestParams))
 
 	// Note: no guarantee that PsinetDatabase won't reload between database calls
 	db := support.PsinetDatabase
 	handshakeResponse := protocol.HandshakeResponse{
-		SSHSessionID:         sessionID,
-		Homepages:            db.GetRandomizedHomepages(sponsorID, geoIPData.Country, isMobile),
-		UpgradeClientVersion: db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
-		PageViewRegexes:      make([]map[string]string, 0),
-		HttpsRequestRegexes:  db.GetHttpsRequestRegexes(sponsorID),
-		EncodedServerList:    db.DiscoverServers(geoIPData.DiscoveryValue),
-		ClientRegion:         geoIPData.Country,
-		ServerTimestamp:      common.GetCurrentTimestamp(),
+		SSHSessionID:          sessionID,
+		Homepages:             db.GetRandomizedHomepages(sponsorID, geoIPData.Country, isMobile),
+		UpgradeClientVersion:  db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
+		PageViewRegexes:       make([]map[string]string, 0),
+		HttpsRequestRegexes:   db.GetHttpsRequestRegexes(sponsorID),
+		EncodedServerList:     db.DiscoverServers(geoIPData.DiscoveryValue),
+		ClientRegion:          geoIPData.Country,
+		ServerTimestamp:       common.GetCurrentTimestamp(),
+		AuthorizedAccessTypes: authorizedAccessTypes,
 	}
 
 	responsePayload, err := json.Marshal(handshakeResponse)
@@ -252,6 +267,7 @@ var connectedRequestParams = append(
 func connectedAPIRequestHandler(
 	support *SupportServices,
 	geoIPData GeoIPData,
+	authorizedAccessTypes []string,
 	params requestJSONObject) ([]byte, error) {
 
 	err := validateRequestParams(support, params, connectedRequestParams)
@@ -261,9 +277,9 @@ func connectedAPIRequestHandler(
 
 	log.LogRawFieldsWithTimestamp(
 		getRequestLogFields(
-			support,
 			"connected",
 			geoIPData,
+			authorizedAccessTypes,
 			params,
 			connectedRequestParams))
 
@@ -294,6 +310,7 @@ var statusRequestParams = append(
 func statusAPIRequestHandler(
 	support *SupportServices,
 	geoIPData GeoIPData,
+	authorizedAccessTypes []string,
 	params requestJSONObject) ([]byte, error) {
 
 	err := validateRequestParams(support, params, statusRequestParams)
@@ -319,8 +336,14 @@ func statusAPIRequestHandler(
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
+
 	bytesTransferredFields := getRequestLogFields(
-		support, "bytes_transferred", geoIPData, params, statusRequestParams)
+		"bytes_transferred",
+		geoIPData,
+		authorizedAccessTypes,
+		params,
+		statusRequestParams)
+
 	bytesTransferredFields["bytes"] = bytesTransferred
 	logQueue = append(logQueue, bytesTransferredFields)
 
@@ -336,7 +359,11 @@ func statusAPIRequestHandler(
 		for domain, bytes := range hostBytes {
 
 			domainBytesFields := getRequestLogFields(
-				support, "domain_bytes", geoIPData, params, statusRequestParams)
+				"domain_bytes",
+				geoIPData,
+				authorizedAccessTypes,
+				params,
+				statusRequestParams)
 
 			domainBytesFields["domain"] = domain
 			domainBytesFields["bytes"] = bytes
@@ -357,7 +384,11 @@ func statusAPIRequestHandler(
 		for _, tunnelStat := range tunnelStats {
 
 			sessionFields := getRequestLogFields(
-				support, "session", geoIPData, params, statusRequestParams)
+				"session",
+				geoIPData,
+				authorizedAccessTypes,
+				params,
+				statusRequestParams)
 
 			sessionID, err := getStringRequestParam(tunnelStat, "session_id")
 			if err != nil {
@@ -437,7 +468,11 @@ func statusAPIRequestHandler(
 		for _, remoteServerListStat := range remoteServerListStats {
 
 			remoteServerListFields := getRequestLogFields(
-				support, "remote_server_list", geoIPData, params, statusRequestParams)
+				"remote_server_list",
+				geoIPData,
+				authorizedAccessTypes,
+				params,
+				statusRequestParams)
 
 			clientDownloadTimestamp, err := getStringRequestParam(remoteServerListStat, "client_download_timestamp")
 			if err != nil {
@@ -475,6 +510,7 @@ func statusAPIRequestHandler(
 func clientVerificationAPIRequestHandler(
 	support *SupportServices,
 	geoIPData GeoIPData,
+	authorizedAccessTypes []string,
 	params requestJSONObject) ([]byte, error) {
 
 	err := validateRequestParams(support, params, baseRequestParams)
@@ -510,9 +546,9 @@ func clientVerificationAPIRequestHandler(
 		}
 
 		logFields := getRequestLogFields(
-			support,
 			"client_verification",
 			geoIPData,
+			authorizedAccessTypes,
 			params,
 			baseRequestParams)
 
@@ -531,6 +567,91 @@ func clientVerificationAPIRequestHandler(
 		}
 		return make([]byte, 0), nil
 	}
+}
+
+type requestJSONObject map[string]interface{}
+
+// requestJSONUnmarshal is equivilent to:
+//
+//   var params requestJSONObject
+//   json.Unmarshal(jsonPayload, &params)
+//
+// ...with the one exception that when the field name is
+// protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS, the value is
+// not fully unmarshaled but instead treated as []json.RawMessage.
+// This leaves the authentications in PSIPHON_API_HANDSHAKE_AUTHORIZATIONS
+// as raw JSON to be unmarshaled in accesscontrol.VerifyAuthorization.
+func requestJSONUnmarshal(jsonPayload []byte) (requestJSONObject, error) {
+
+	expectJSONDelimiter := func(jsonDecoder *json.Decoder, delimiter string) error {
+
+		token, err := jsonDecoder.Token()
+		if err != nil {
+			return err
+		}
+
+		delim, ok := token.(json.Delim)
+		if !ok {
+			return fmt.Errorf("unexpected token type: %T", token)
+		}
+
+		if delim.String() != delimiter {
+			return fmt.Errorf("unexpected delimiter: %s", delim.String())
+		}
+
+		return nil
+	}
+
+	params := make(requestJSONObject)
+
+	jsonDecoder := json.NewDecoder(bytes.NewReader(jsonPayload))
+
+	err := expectJSONDelimiter(jsonDecoder, "{")
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	for jsonDecoder.More() {
+
+		token, err := jsonDecoder.Token()
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
+		name, ok := token.(string)
+		if !ok {
+			return nil, common.ContextError(
+				fmt.Errorf("unexpected token type: %T", token))
+		}
+
+		var value interface{}
+
+		if name == protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS {
+
+			var rawJSONArray []json.RawMessage
+			err = jsonDecoder.Decode(&rawJSONArray)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+			value = rawJSONArray
+
+		} else {
+
+			err = jsonDecoder.Decode(&value)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+		}
+
+		params[name] = value
+	}
+
+	err = expectJSONDelimiter(jsonDecoder, "}")
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return params, nil
 }
 
 type requestParamSpec struct {
@@ -663,9 +784,9 @@ func validateStringArrayRequestParam(
 // getRequestLogFields makes LogFields to log the API event following
 // the legacy psi_web and current ELK naming conventions.
 func getRequestLogFields(
-	support *SupportServices,
 	eventName string,
 	geoIPData GeoIPData,
+	authorizedAccessTypes []string,
 	params requestJSONObject,
 	expectedParams []requestParamSpec) LogFields {
 
@@ -679,6 +800,10 @@ func getRequestLogFields(
 	logFields["client_region"] = strings.Replace(geoIPData.Country, " ", "_", -1)
 	logFields["client_city"] = strings.Replace(geoIPData.City, " ", "_", -1)
 	logFields["client_isp"] = strings.Replace(geoIPData.ISP, " ", "_", -1)
+
+	if len(authorizedAccessTypes) > 0 {
+		logFields["authorized_access_types"] = authorizedAccessTypes
+	}
 
 	if params == nil {
 		return logFields
@@ -718,7 +843,7 @@ func getRequestLogFields(
 				logFields[expectedParam.name] = intValue
 			case "meek_dial_address":
 				host, _, _ := net.SplitHostPort(strValue)
-				if isIPAddress(support, host) {
+				if isIPAddress(nil, host) {
 					logFields["meek_dial_ip_address"] = host
 				} else {
 					logFields["meek_dial_domain"] = host
@@ -825,6 +950,17 @@ func getMapStringInt64RequestParam(params requestJSONObject, name string) (map[s
 	return result, nil
 }
 
+func getRawJSONArrayRequestParam(params requestJSONObject, name string) ([]json.RawMessage, error) {
+	if params[name] == nil {
+		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
+	}
+	value, ok := params[name].([]json.RawMessage)
+	if !ok {
+		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
+	}
+	return value, nil
+}
+
 // Normalize reported client platform. Android clients, for example, report
 // OS version, rooted status, and Google Play build status in the clientPlatform
 // string along with "Android".
@@ -904,16 +1040,16 @@ func isRegionCode(_ *SupportServices, value string) bool {
 	})
 }
 
-func isDialAddress(support *SupportServices, value string) bool {
+func isDialAddress(_ *SupportServices, value string) bool {
 	// "<host>:<port>", where <host> is a domain or IP address
 	parts := strings.Split(value, ":")
 	if len(parts) != 2 {
 		return false
 	}
-	if !isIPAddress(support, parts[0]) && !isDomain(support, parts[0]) {
+	if !isIPAddress(nil, parts[0]) && !isDomain(nil, parts[0]) {
 		return false
 	}
-	if !isDigits(support, parts[1]) {
+	if !isDigits(nil, parts[1]) {
 		return false
 	}
 	port, err := strconv.Atoi(parts[1])
@@ -956,12 +1092,12 @@ func isDomain(_ *SupportServices, value string) bool {
 	return true
 }
 
-func isHostHeader(support *SupportServices, value string) bool {
+func isHostHeader(_ *SupportServices, value string) bool {
 	// "<host>:<port>", where <host> is a domain or IP address and ":<port>" is optional
 	if strings.Contains(value, ":") {
-		return isDialAddress(support, value)
+		return isDialAddress(nil, value)
 	}
-	return isIPAddress(support, value) || isDomain(support, value)
+	return isIPAddress(nil, value) || isDomain(nil, value)
 }
 
 func isServerEntrySource(_ *SupportServices, value string) bool {
@@ -975,6 +1111,6 @@ func isISO8601Date(_ *SupportServices, value string) bool {
 	return isISO8601DateRegex.Match([]byte(value))
 }
 
-func isLastConnected(support *SupportServices, value string) bool {
-	return value == "None" || value == "Unknown" || isISO8601Date(support, value)
+func isLastConnected(_ *SupportServices, value string) bool {
+	return value == "None" || value == "Unknown" || isISO8601Date(nil, value)
 }

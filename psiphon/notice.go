@@ -704,11 +704,18 @@ func NoticeSLOKSeeded(slokID string, duplicate bool) {
 		"duplicate", duplicate)
 }
 
-// NoticeServerTimestamp reports server side timestamp as seen in the handshake
+// NoticeServerTimestamp reports server side timestamp as seen in the handshake.
 func NoticeServerTimestamp(timestamp string) {
 	singletonNoticeLogger.outputNotice(
 		"ServerTimestamp", 0,
 		"timestamp", timestamp)
+}
+
+// NoticeAuthorizedAccessTypes reports the authorized access types the server has accepted.
+func NoticeAuthorizedAccessTypes(authorizedAccessTypes []string) {
+	singletonNoticeLogger.outputNotice(
+		"AuthorizedAccessTypes", 0,
+		"accessTypes", authorizedAccessTypes)
 }
 
 type repetitiveNoticeState struct {

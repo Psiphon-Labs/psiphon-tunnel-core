@@ -56,6 +56,8 @@ const (
 	PSIPHON_WEB_API_PROTOCOL = "web"
 
 	PACKET_TUNNEL_CHANNEL_TYPE = "tun@psiphon.ca"
+
+	PSIPHON_API_HANDSHAKE_AUTHORIZATIONS = "authorizations"
 )
 
 var SupportedTunnelProtocols = []string{
@@ -125,14 +127,15 @@ func UseClientTunnelProtocol(
 }
 
 type HandshakeResponse struct {
-	SSHSessionID         string              `json:"ssh_session_id"`
-	Homepages            []string            `json:"homepages"`
-	UpgradeClientVersion string              `json:"upgrade_client_version"`
-	PageViewRegexes      []map[string]string `json:"page_view_regexes"`
-	HttpsRequestRegexes  []map[string]string `json:"https_request_regexes"`
-	EncodedServerList    []string            `json:"encoded_server_list"`
-	ClientRegion         string              `json:"client_region"`
-	ServerTimestamp      string              `json:"server_timestamp"`
+	SSHSessionID          string              `json:"ssh_session_id"`
+	Homepages             []string            `json:"homepages"`
+	UpgradeClientVersion  string              `json:"upgrade_client_version"`
+	PageViewRegexes       []map[string]string `json:"page_view_regexes"`
+	HttpsRequestRegexes   []map[string]string `json:"https_request_regexes"`
+	EncodedServerList     []string            `json:"encoded_server_list"`
+	ClientRegion          string              `json:"client_region"`
+	ServerTimestamp       string              `json:"server_timestamp"`
+	AuthorizedAccessTypes []string            `json:"authorized_access_types"`
 }
 
 type ConnectedResponse struct {
