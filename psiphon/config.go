@@ -108,11 +108,11 @@ type Config struct {
 	// typically embedded in the client binary.
 	PropagationChannelId string
 
-	// PropagationChannelId is a string identifier which indicates who
-	// is sponsoring this Psiphon client. One purpose of this value is to
-	// determine the home pages for display. This parameter is required.
-	// This value is supplied by and depends on the Psiphon Network, and is
-	// typically embedded in the client binary.
+	// SponsorId is a string identifier which indicates who is sponsoring this
+	// Psiphon client. One purpose of this value is to determine the home pages
+	// for display. This parameter is required. This value is supplied by and
+	// depends on the Psiphon Network, and is typically embedded in the client
+	// binary.
 	SponsorId string
 
 	// RemoteServerListUrl is a URL which specifies a location to fetch
