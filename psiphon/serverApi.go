@@ -229,7 +229,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	serverContext.serverHandshakeTimestamp = handshakeResponse.ServerTimestamp
 	NoticeServerTimestamp(serverContext.serverHandshakeTimestamp)
 
-	NoticeAuthorizedAccessTypes(handshakeResponse.AuthorizedAccessTypes)
+	NoticeActiveAuthorizationIDs(handshakeResponse.ActiveAuthorizationIDs)
 
 	return nil
 }

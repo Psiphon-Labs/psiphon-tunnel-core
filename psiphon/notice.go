@@ -711,11 +711,12 @@ func NoticeServerTimestamp(timestamp string) {
 		"timestamp", timestamp)
 }
 
-// NoticeAuthorizedAccessTypes reports the authorized access types the server has accepted.
-func NoticeAuthorizedAccessTypes(authorizedAccessTypes []string) {
+// NoticeActiveAuthorizationIDs reports the authorizations the server has accepted.
+// Each ID is a base64-encoded accesscontrol.Authorization.ID value.
+func NoticeActiveAuthorizationIDs(activeAuthorizationIDs []string) {
 	singletonNoticeLogger.outputNotice(
-		"AuthorizedAccessTypes", 0,
-		"accessTypes", authorizedAccessTypes)
+		"ActiveAuthorizationIDs", 0,
+		"IDs", activeAuthorizationIDs)
 }
 
 type repetitiveNoticeState struct {

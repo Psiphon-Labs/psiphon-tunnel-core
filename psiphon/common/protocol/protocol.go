@@ -127,15 +127,15 @@ func UseClientTunnelProtocol(
 }
 
 type HandshakeResponse struct {
-	SSHSessionID          string              `json:"ssh_session_id"`
-	Homepages             []string            `json:"homepages"`
-	UpgradeClientVersion  string              `json:"upgrade_client_version"`
-	PageViewRegexes       []map[string]string `json:"page_view_regexes"`
-	HttpsRequestRegexes   []map[string]string `json:"https_request_regexes"`
-	EncodedServerList     []string            `json:"encoded_server_list"`
-	ClientRegion          string              `json:"client_region"`
-	ServerTimestamp       string              `json:"server_timestamp"`
-	AuthorizedAccessTypes []string            `json:"authorized_access_types"`
+	SSHSessionID           string              `json:"ssh_session_id"`
+	Homepages              []string            `json:"homepages"`
+	UpgradeClientVersion   string              `json:"upgrade_client_version"`
+	PageViewRegexes        []map[string]string `json:"page_view_regexes"`
+	HttpsRequestRegexes    []map[string]string `json:"https_request_regexes"`
+	EncodedServerList      []string            `json:"encoded_server_list"`
+	ClientRegion           string              `json:"client_region"`
+	ServerTimestamp        string              `json:"server_timestamp"`
+	ActiveAuthorizationIDs []string            `json:"active_authorization_ids"`
 }
 
 type ConnectedResponse struct {

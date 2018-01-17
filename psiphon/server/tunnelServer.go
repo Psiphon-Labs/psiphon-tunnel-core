@@ -22,7 +22,7 @@ package server
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -228,11 +228,12 @@ func (server *TunnelServer) ResetAllClientOSLConfigs() {
 //
 // The authorizations received from the client handshake are verified and the
 // resulting list of authorized access types are applied to the client's tunnel
-// and traffic rules. A list of authorized access types is returned.
+// and traffic rules. A list of active authorization IDs and authorized access
+// types is returned for responding to the client and logging.
 func (server *TunnelServer) SetClientHandshakeState(
 	sessionID string,
 	state handshakeState,
-	authorizations [][]byte) ([]string, error) {
+	authorizations [][]byte) ([]string, []string, error) {
 
 	return server.sshServer.setClientHandshakeState(sessionID, state, authorizations)
 }
@@ -682,22 +683,23 @@ func (sshServer *sshServer) resetAllClientOSLConfigs() {
 func (sshServer *sshServer) setClientHandshakeState(
 	sessionID string,
 	state handshakeState,
-	authorizations [][]byte) ([]string, error) {
+	authorizations [][]byte) ([]string, []string, error) {
 
 	sshServer.clientsMutex.Lock()
 	client := sshServer.clients[sessionID]
 	sshServer.clientsMutex.Unlock()
 
 	if client == nil {
-		return nil, common.ContextError(errors.New("unknown session ID"))
+		return nil, nil, common.ContextError(errors.New("unknown session ID"))
 	}
 
-	authorizedAccessTypes, err := client.setHandshakeState(state, authorizations)
+	activeAuthorizationIDs, authorizedAccessTypes, err := client.setHandshakeState(
+		state, authorizations)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 
-	return authorizedAccessTypes, nil
+	return activeAuthorizationIDs, authorizedAccessTypes, nil
 }
 
 func (sshServer *sshServer) getClientHandshaked(
@@ -1726,7 +1728,7 @@ func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, reason s
 // sshClient.stop().
 func (sshClient *sshClient) setHandshakeState(
 	state handshakeState,
-	authorizations [][]byte) ([]string, error) {
+	authorizations [][]byte) ([]string, []string, error) {
 
 	sshClient.Lock()
 	completed := sshClient.handshakeState.completed
@@ -1737,7 +1739,7 @@ func (sshClient *sshClient) setHandshakeState(
 
 	// Client must only perform one handshake
 	if completed {
-		return nil, common.ContextError(errors.New("handshake already completed"))
+		return nil, nil, common.ContextError(errors.New("handshake already completed"))
 	}
 
 	// Verify the authorizations submitted by the client. Verified, active (non-expired)
@@ -1774,7 +1776,7 @@ func (sshClient *sshClient) setHandshakeState(
 			continue
 		}
 
-		authorizationID := hex.EncodeToString(verifiedAuthorization.ID)
+		authorizationID := base64.StdEncoding.EncodeToString(verifiedAuthorization.ID)
 
 		// A client may reconnect while the server still has an active sshClient for that
 		// client session. In this case, the previous sshClient is closed by the new
@@ -1834,7 +1836,7 @@ func (sshClient *sshClient) setHandshakeState(
 	sshClient.setTrafficRules()
 	sshClient.setOSLConfig()
 
-	return authorizedAccessTypes, nil
+	return authorizationIDs, authorizedAccessTypes, nil
 }
 
 // getHandshaked returns whether the client has completed a handshake API

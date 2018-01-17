@@ -208,7 +208,7 @@ func handshakeAPIRequestHandler(
 	// TODO: in the case of SSH API requests, the actual sshClient could
 	// be passed in and used here. The session ID lookup is only strictly
 	// necessary to support web API requests.
-	authorizedAccessTypes, err := support.TunnelServer.SetClientHandshakeState(
+	activeAuthorizationIDs, authorizedAccessTypes, err := support.TunnelServer.SetClientHandshakeState(
 		sessionID,
 		handshakeState{
 			completed:   true,
@@ -234,15 +234,15 @@ func handshakeAPIRequestHandler(
 	// Note: no guarantee that PsinetDatabase won't reload between database calls
 	db := support.PsinetDatabase
 	handshakeResponse := protocol.HandshakeResponse{
-		SSHSessionID:          sessionID,
-		Homepages:             db.GetRandomizedHomepages(sponsorID, geoIPData.Country, isMobile),
-		UpgradeClientVersion:  db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
-		PageViewRegexes:       make([]map[string]string, 0),
-		HttpsRequestRegexes:   db.GetHttpsRequestRegexes(sponsorID),
-		EncodedServerList:     db.DiscoverServers(geoIPData.DiscoveryValue),
-		ClientRegion:          geoIPData.Country,
-		ServerTimestamp:       common.GetCurrentTimestamp(),
-		AuthorizedAccessTypes: authorizedAccessTypes,
+		SSHSessionID:           sessionID,
+		Homepages:              db.GetRandomizedHomepages(sponsorID, geoIPData.Country, isMobile),
+		UpgradeClientVersion:   db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
+		PageViewRegexes:        make([]map[string]string, 0),
+		HttpsRequestRegexes:    db.GetHttpsRequestRegexes(sponsorID),
+		EncodedServerList:      db.DiscoverServers(geoIPData.DiscoveryValue),
+		ClientRegion:           geoIPData.Country,
+		ServerTimestamp:        common.GetCurrentTimestamp(),
+		ActiveAuthorizationIDs: activeAuthorizationIDs,
 	}
 
 	responsePayload, err := json.Marshal(handshakeResponse)
