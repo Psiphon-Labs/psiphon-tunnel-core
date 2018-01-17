@@ -1297,9 +1297,17 @@ func NewRegistryStreamer(
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
-	if name, ok := token.(string); !ok || name != "FileSpecs" {
+
+	name, ok := token.(string)
+
+	if !ok {
 		return nil, common.ContextError(
-			fmt.Errorf("unexpected name: %s", name))
+			fmt.Errorf("unexpected token type: %T", token))
+	}
+
+	if name != "FileSpecs" {
+		return nil, common.ContextError(
+			fmt.Errorf("unexpected field name: %s", name))
 	}
 
 	err = expectJSONDelimiter(jsonDecoder, "[")
@@ -1367,10 +1375,19 @@ func expectJSONDelimiter(jsonDecoder *json.Decoder, delimiter string) error {
 	if err != nil {
 		return common.ContextError(err)
 	}
-	if delim, ok := token.(json.Delim); !ok || delim.String() != delimiter {
+
+	delim, ok := token.(json.Delim)
+
+	if !ok {
+		return common.ContextError(
+			fmt.Errorf("unexpected token type: %T", token))
+	}
+
+	if delim.String() != delimiter {
 		return common.ContextError(
 			fmt.Errorf("unexpected delimiter: %s", delim.String()))
 	}
+
 	return nil
 }
 
@@ -1446,6 +1463,9 @@ func newSeededKeyMaterialReader(seed []byte) (io.Reader, error) {
 // deriveKeyHKDF implements HKDF-Expand as defined in https://tools.ietf.org/html/rfc5869
 // where masterKey = PRK, context = info, and L = 32; SHA-256 is used so HashLen = 32
 func deriveKeyHKDF(masterKey []byte, context ...[]byte) []byte {
+
+	// TODO: use golang.org/x/crypto/hkdf?
+
 	mac := hmac.New(sha256.New, masterKey)
 	for _, item := range context {
 		mac.Write([]byte(item))

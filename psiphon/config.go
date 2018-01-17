@@ -499,6 +499,10 @@ type Config struct {
 	// ID is automatically generated. Supply a session ID when a single client session
 	// will cross multiple Controller instances.
 	SessionID string
+
+	// Authorizations is a list of encoded, signed access control authorizations that
+	// the client has obtained and will present to the server.
+	Authorizations []json.RawMessage
 }
 
 // DownloadURL specifies a URL for downloading resources along with parameters

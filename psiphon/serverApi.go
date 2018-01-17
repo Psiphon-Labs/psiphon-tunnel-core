@@ -121,22 +121,10 @@ func (serverContext *ServerContext) doHandshakeRequest(
 
 	params := serverContext.getBaseParams()
 
-	// *TODO*: this is obsolete?
-	/*
-		serverEntryIpAddresses, err := GetServerEntryIpAddresses()
-		if err != nil {
-			return common.ContextError(err)
-		}
-
-		// Submit a list of known servers -- this will be used for
-		// discovery statistics.
-		for _, ipAddress := range serverEntryIpAddresses {
-			params = append(params, requestParam{"known_server", ipAddress})
-		}
-	*/
-
 	var response []byte
 	if serverContext.psiphonHttpsClient == nil {
+
+		params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] = serverContext.tunnel.config.Authorizations
 
 		request, err := makeSSHAPIRequestPayload(params)
 		if err != nil {
@@ -240,6 +228,8 @@ func (serverContext *ServerContext) doHandshakeRequest(
 
 	serverContext.serverHandshakeTimestamp = handshakeResponse.ServerTimestamp
 	NoticeServerTimestamp(serverContext.serverHandshakeTimestamp)
+
+	NoticeAuthorizedAccessTypes(handshakeResponse.AuthorizedAccessTypes)
 
 	return nil
 }

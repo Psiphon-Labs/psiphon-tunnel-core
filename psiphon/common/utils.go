@@ -48,6 +48,17 @@ func Contains(list []string, target string) bool {
 	return false
 }
 
+// ContainsAny returns true if any string in targets
+// is present ini he list.
+func ContainsAny(list, targets []string) bool {
+	for _, target := range targets {
+		if Contains(list, target) {
+			return true
+		}
+	}
+	return false
+}
+
 // ContainsInt returns true if the target int is
 // in the list.
 func ContainsInt(list []int, target int) bool {
