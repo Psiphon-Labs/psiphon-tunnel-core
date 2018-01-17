@@ -11,6 +11,7 @@ install:
 script:
 - cd psiphon
 - go test -race -v ./common
+- go test -race -v ./common/accesscontrol
 - go test -race -v ./common/osl
 - go test -race -v ./common/protocol
 - go test -race -v -run TestObfuscatedSessionTicket ./common/tls
@@ -22,6 +23,7 @@ script:
 - go test -race -v ./server/psinet
 - go test -race -v
 - go test -v -covermode=count -coverprofile=common.coverprofile ./common
+- go test -v -covermode=count -coverprofile=accesscontrol.coverprofile ./common/accesscontrol
 - go test -v -covermode=count -coverprofile=osl.coverprofile ./common/osl
 - go test -v -covermode=count -coverprofile=protocol.coverprofile ./common/protocol
 # TODO: fix and reenable test, which is failing in TravisCI environment:
