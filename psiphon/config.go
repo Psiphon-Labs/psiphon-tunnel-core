@@ -502,7 +502,7 @@ type Config struct {
 
 	// Authorizations is a list of encoded, signed access control authorizations that
 	// the client has obtained and will present to the server.
-	Authorizations []json.RawMessage
+	Authorizations []string
 }
 
 // DownloadURL specifies a URL for downloading resources along with parameters

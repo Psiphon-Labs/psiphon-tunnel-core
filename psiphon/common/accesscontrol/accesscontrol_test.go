@@ -20,7 +20,9 @@
 package accesscontrol
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -78,6 +80,8 @@ func TestAuthorization(t *testing.T) {
 		t.Fatalf("IssueAuthorization failed: %s", err)
 	}
 
+	fmt.Printf("encoded authorization length: %d\n", len(auth))
+
 	verifiedAuth, err := VerifyAuthorization(keyRing, auth)
 	if err != nil {
 		t.Fatalf("VerifyAuthorization failed: %s", err)
@@ -126,8 +130,13 @@ func TestAuthorization(t *testing.T) {
 		t.Fatalf("IssueAuthorization failed: %s", err)
 	}
 
+	decodedAuth, err := base64.StdEncoding.DecodeString(auth)
+	if err != nil {
+		t.Fatalf("DecodeString failed: %s", err)
+	}
+
 	var hackSignedAuth signedAuthorization
-	err = json.Unmarshal(auth, &hackSignedAuth)
+	err = json.Unmarshal(decodedAuth, &hackSignedAuth)
 	if err != nil {
 		t.Fatalf("Unmarshal failed: %s", err)
 	}
@@ -140,19 +149,21 @@ func TestAuthorization(t *testing.T) {
 
 	hackAuth.AccessType = correctAccess
 
-	auth, err = json.Marshal(hackAuth)
+	marshaledAuth, err := json.Marshal(hackAuth)
 	if err != nil {
 		t.Fatalf("Marshall failed: %s", err)
 	}
 
-	hackSignedAuth.Authorization = auth
+	hackSignedAuth.Authorization = marshaledAuth
 
-	signedAuth, err := json.Marshal(hackSignedAuth)
+	marshaledSignedAuth, err := json.Marshal(hackSignedAuth)
 	if err != nil {
 		t.Fatalf("Marshall failed: %s", err)
 	}
 
-	verifiedAuth, err = VerifyAuthorization(keyRing, signedAuth)
+	encodedSignedAuth := base64.StdEncoding.EncodeToString(marshaledSignedAuth)
+
+	verifiedAuth, err = VerifyAuthorization(keyRing, encodedSignedAuth)
 	// TODO: check error message?
 	if err == nil {
 		t.Fatalf("VerifyAuthorization unexpected success")

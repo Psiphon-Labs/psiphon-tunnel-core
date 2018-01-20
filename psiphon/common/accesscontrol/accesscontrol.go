@@ -30,7 +30,8 @@
 // entities which are distinct from service providers. Only verification
 // keys will be deployed to service providers.
 //
-// An authorization is encoded in JSON:
+// An authorization is represented in JSON, which is then base64-encoded
+// for transport:
 //
 // {
 //   "Authorization" : {
@@ -48,6 +49,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -151,25 +153,25 @@ type signedAuthorization struct {
 // from the seed without revealing the original value. The authorization
 // ID is to be used to mitigate malicious authorization reuse/sharing.
 //
-// The return value is a serialized JSON representation of the
-// signed authorization that can be passed to VerifyAuthorization.
+// The return value is a base64-encoded, serialized JSON representation
+// of the signed authorization that can be passed to VerifyAuthorization.
 func IssueAuthorization(
 	signingKey *SigningKey,
 	seedAuthorizationID []byte,
-	expires time.Time) ([]byte, error) {
+	expires time.Time) (string, error) {
 
 	if len(signingKey.ID) != keyIDLength ||
 		len(signingKey.AccessType) < 1 ||
 		len(signingKey.AuthorizationIDKey) != authorizationIDKeyLength ||
 		len(signingKey.PrivateKey) != ed25519.PrivateKeySize {
-		return nil, common.ContextError(errors.New("invalid signing key"))
+		return "", common.ContextError(errors.New("invalid signing key"))
 	}
 
 	hkdf := hkdf.New(sha256.New, signingKey.AuthorizationIDKey, nil, seedAuthorizationID)
 	ID := make([]byte, authorizationIDLength)
 	_, err := io.ReadFull(hkdf, ID)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return "", common.ContextError(err)
 	}
 
 	auth := Authorization{
@@ -180,7 +182,7 @@ func IssueAuthorization(
 
 	authJSON, err := json.Marshal(auth)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return "", common.ContextError(err)
 	}
 
 	signature := ed25519.Sign(signingKey.PrivateKey, authJSON)
@@ -193,10 +195,12 @@ func IssueAuthorization(
 
 	signedAuthJSON, err := json.Marshal(signedAuth)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return "", common.ContextError(err)
 	}
 
-	return signedAuthJSON, nil
+	encodedSignedAuth := base64.StdEncoding.EncodeToString(signedAuthJSON)
+
+	return encodedSignedAuth, nil
 }
 
 // VerificationKeyRing is a set of verification keys to be deployed
@@ -228,11 +232,16 @@ func ValidateKeyRing(keyRing *VerificationKeyRing) error {
 // Assumes that ValidateKeyRing has been called.
 func VerifyAuthorization(
 	keyRing *VerificationKeyRing,
-	signedAuthorizationJSON []byte) (*Authorization, error) {
+	encodedSignedAuthorization string) (*Authorization, error) {
+
+	signedAuthorizationJSON, err := base64.StdEncoding.DecodeString(
+		encodedSignedAuthorization)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
 
 	var signedAuth signedAuthorization
-
-	err := json.Unmarshal(signedAuthorizationJSON, &signedAuth)
+	err = json.Unmarshal(signedAuthorizationJSON, &signedAuth)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}

@@ -20,7 +20,6 @@
 package server
 
 import (
-	"bytes"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -48,6 +47,8 @@ const (
 
 var CLIENT_VERIFICATION_REQUIRED = false
 
+type requestJSONObject map[string]interface{}
+
 // sshAPIRequestHandler routes Psiphon API requests transported as
 // JSON objects via the SSH request mechanism.
 //
@@ -66,10 +67,20 @@ func sshAPIRequestHandler(
 	name string,
 	requestPayload []byte) ([]byte, error) {
 
-	// Note: for SSH requests, MAX_API_PARAMS_SIZE is implicitly enforced
-	// by max SSH request packet size.
+	// Notes:
+	//
+	// - For SSH requests, MAX_API_PARAMS_SIZE is implicitly enforced
+	//   by max SSH request packet size.
+	//
+	// - The param protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS is an
+	//   array of base64-encoded strings; the base64 representation should
+	//   not be decoded to []byte values. The default behavior of
+	//   https://golang.org/pkg/encoding/json/#Unmarshal for a target of
+	//   type map[string]interface{} will unmarshal a base64-encoded string
+	//   to a string, not a decoded []byte, as required.
 
-	params, err := requestJSONUnmarshal(requestPayload)
+	var params requestJSONObject
+	err := json.Unmarshal(requestPayload, &params)
 	if err != nil {
 		return nil, common.ContextError(
 			fmt.Errorf("invalid payload for request name: %s: %s", name, err))
@@ -190,15 +201,11 @@ func handshakeAPIRequestHandler(
 	isMobile := isMobileClientPlatform(clientPlatform)
 	normalizedPlatform := normalizeClientPlatform(clientPlatform)
 
-	var authorizations [][]byte
+	var authorizations []string
 	if params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] != nil {
-		authorizationsRawJSON, err := getRawJSONArrayRequestParam(params, protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS)
+		authorizations, err = getStringArrayRequestParam(params, protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS)
 		if err != nil {
 			return nil, common.ContextError(err)
-		}
-		authorizations = make([][]byte, len(authorizationsRawJSON))
-		for i := 0; i < len(authorizationsRawJSON); i++ {
-			authorizations[i] = authorizationsRawJSON[i]
 		}
 	}
 
@@ -569,91 +576,6 @@ func clientVerificationAPIRequestHandler(
 	}
 }
 
-type requestJSONObject map[string]interface{}
-
-// requestJSONUnmarshal is equivilent to:
-//
-//   var params requestJSONObject
-//   json.Unmarshal(jsonPayload, &params)
-//
-// ...with the one exception that when the field name is
-// protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS, the value is
-// not fully unmarshaled but instead treated as []json.RawMessage.
-// This leaves the authentications in PSIPHON_API_HANDSHAKE_AUTHORIZATIONS
-// as raw JSON to be unmarshaled in accesscontrol.VerifyAuthorization.
-func requestJSONUnmarshal(jsonPayload []byte) (requestJSONObject, error) {
-
-	expectJSONDelimiter := func(jsonDecoder *json.Decoder, delimiter string) error {
-
-		token, err := jsonDecoder.Token()
-		if err != nil {
-			return err
-		}
-
-		delim, ok := token.(json.Delim)
-		if !ok {
-			return fmt.Errorf("unexpected token type: %T", token)
-		}
-
-		if delim.String() != delimiter {
-			return fmt.Errorf("unexpected delimiter: %s", delim.String())
-		}
-
-		return nil
-	}
-
-	params := make(requestJSONObject)
-
-	jsonDecoder := json.NewDecoder(bytes.NewReader(jsonPayload))
-
-	err := expectJSONDelimiter(jsonDecoder, "{")
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-
-	for jsonDecoder.More() {
-
-		token, err := jsonDecoder.Token()
-		if err != nil {
-			return nil, common.ContextError(err)
-		}
-
-		name, ok := token.(string)
-		if !ok {
-			return nil, common.ContextError(
-				fmt.Errorf("unexpected token type: %T", token))
-		}
-
-		var value interface{}
-
-		if name == protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS {
-
-			var rawJSONArray []json.RawMessage
-			err = jsonDecoder.Decode(&rawJSONArray)
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			value = rawJSONArray
-
-		} else {
-
-			err = jsonDecoder.Decode(&value)
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-		}
-
-		params[name] = value
-	}
-
-	err = expectJSONDelimiter(jsonDecoder, "}")
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-
-	return params, nil
-}
-
 type requestParamSpec struct {
 	name      string
 	validator func(*SupportServices, string) bool
@@ -950,15 +872,25 @@ func getMapStringInt64RequestParam(params requestJSONObject, name string) (map[s
 	return result, nil
 }
 
-func getRawJSONArrayRequestParam(params requestJSONObject, name string) ([]json.RawMessage, error) {
+func getStringArrayRequestParam(params requestJSONObject, name string) ([]string, error) {
 	if params[name] == nil {
 		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
-	value, ok := params[name].([]json.RawMessage)
+	value, ok := params[name].([]interface{})
 	if !ok {
 		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
-	return value, nil
+
+	result := make([]string, len(value))
+	for i, v := range value {
+		strValue, ok := v.(string)
+		if !ok {
+			return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
+		}
+		result[i] = strValue
+	}
+
+	return result, nil
 }
 
 // Normalize reported client platform. Android clients, for example, report

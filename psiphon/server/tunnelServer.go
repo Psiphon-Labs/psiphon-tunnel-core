@@ -233,7 +233,7 @@ func (server *TunnelServer) ResetAllClientOSLConfigs() {
 func (server *TunnelServer) SetClientHandshakeState(
 	sessionID string,
 	state handshakeState,
-	authorizations [][]byte) ([]string, []string, error) {
+	authorizations []string) ([]string, []string, error) {
 
 	return server.sshServer.setClientHandshakeState(sessionID, state, authorizations)
 }
@@ -683,7 +683,7 @@ func (sshServer *sshServer) resetAllClientOSLConfigs() {
 func (sshServer *sshServer) setClientHandshakeState(
 	sessionID string,
 	state handshakeState,
-	authorizations [][]byte) ([]string, []string, error) {
+	authorizations []string) ([]string, []string, error) {
 
 	sshServer.clientsMutex.Lock()
 	client := sshServer.clients[sessionID]
@@ -1728,7 +1728,7 @@ func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, reason s
 // sshClient.stop().
 func (sshClient *sshClient) setHandshakeState(
 	state handshakeState,
-	authorizations [][]byte) ([]string, []string, error) {
+	authorizations []string) ([]string, []string, error) {
 
 	sshClient.Lock()
 	completed := sshClient.handshakeState.completed

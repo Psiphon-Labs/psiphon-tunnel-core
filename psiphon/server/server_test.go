@@ -552,7 +552,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.EmitSLOKs = true
 
 	if !runConfig.omitAuthorization {
-		clientConfig.Authorizations = []json.RawMessage{json.RawMessage(clientAuthorization)}
+		clientConfig.Authorizations = []string{clientAuthorization}
 	}
 
 	if runConfig.doClientVerification {
