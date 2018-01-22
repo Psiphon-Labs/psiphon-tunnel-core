@@ -10,7 +10,6 @@ All other values will be provided to you by Psiphon Inc.
     "SponsorId" : "...",
     "RemoteServerListURLs": "[...]",
     "RemoteServerListSignaturePublicKey" : "...",
-    "ObfuscatedServerListRootURLs": "[...]",
     "DataStoreDirectory" : "",
     "DataStoreTempDirectory" : "",
     "LogFilename" : "",
@@ -21,6 +20,5 @@ All other values will be provided to you by Psiphon Inc.
     "ConnectionWorkerPoolSize" : 10,
     "TunnelPoolSize" : 1,
     "PortForwardFailureThreshold" : 10,
-    "UpstreamProxyUrl" : "",
-    "EmitDiagnosticNotices": true /* Useful when testing */
+    "UpstreamProxyUrl" : ""
 }
