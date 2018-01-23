@@ -394,7 +394,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		}
 	}
 
-	err = accesscontrol.ValidateKeyRing(&config.AccessControlVerificationKeyRing)
+	err = accesscontrol.ValidateVerificationKeyRing(&config.AccessControlVerificationKeyRing)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"AccessControlVerificationKeyRing is invalid: %s", err)
