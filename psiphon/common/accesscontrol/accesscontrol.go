@@ -144,6 +144,17 @@ type signedAuthorization struct {
 	Signature     []byte
 }
 
+// ValidateSigningKey checks that a signing key is correctly configured.
+func ValidateSigningKey(signingKey *SigningKey) error {
+	if len(signingKey.ID) != keyIDLength ||
+		len(signingKey.AccessType) < 1 ||
+		len(signingKey.AuthorizationIDKey) != authorizationIDKeyLength ||
+		len(signingKey.PrivateKey) != ed25519.PrivateKeySize {
+		return common.ContextError(errors.New("invalid signing key"))
+	}
+	return nil
+}
+
 // IssueAuthorization issues an authorization signed with the
 // specified signing key.
 //
@@ -160,16 +171,14 @@ func IssueAuthorization(
 	seedAuthorizationID []byte,
 	expires time.Time) (string, error) {
 
-	if len(signingKey.ID) != keyIDLength ||
-		len(signingKey.AccessType) < 1 ||
-		len(signingKey.AuthorizationIDKey) != authorizationIDKeyLength ||
-		len(signingKey.PrivateKey) != ed25519.PrivateKeySize {
-		return "", common.ContextError(errors.New("invalid signing key"))
+	err := ValidateSigningKey(signingKey)
+	if err != nil {
+		return "", common.ContextError(err)
 	}
 
 	hkdf := hkdf.New(sha256.New, signingKey.AuthorizationIDKey, nil, seedAuthorizationID)
 	ID := make([]byte, authorizationIDLength)
-	_, err := io.ReadFull(hkdf, ID)
+	_, err = io.ReadFull(hkdf, ID)
 	if err != nil {
 		return "", common.ContextError(err)
 	}
@@ -209,9 +218,9 @@ type VerificationKeyRing struct {
 	Keys []*VerificationKey
 }
 
-// ValidateKeyRing checks that a verification key ring is correctly
-// configured.
-func ValidateKeyRing(keyRing *VerificationKeyRing) error {
+// ValidateVerificationKeyRing checks that a verification key ring is
+// correctly configured.
+func ValidateVerificationKeyRing(keyRing *VerificationKeyRing) error {
 	for _, key := range keyRing.Keys {
 		if len(key.ID) != keyIDLength ||
 			len(key.AccessType) < 1 ||
@@ -228,11 +237,14 @@ func ValidateKeyRing(keyRing *VerificationKeyRing) error {
 //
 // The key ID in the signed authorization is used to select the
 // appropriate verification key from the key ring.
-//
-// Assumes that ValidateKeyRing has been called.
 func VerifyAuthorization(
 	keyRing *VerificationKeyRing,
 	encodedSignedAuthorization string) (*Authorization, error) {
+
+	err := ValidateVerificationKeyRing(keyRing)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
 
 	signedAuthorizationJSON, err := base64.StdEncoding.DecodeString(
 		encodedSignedAuthorization)

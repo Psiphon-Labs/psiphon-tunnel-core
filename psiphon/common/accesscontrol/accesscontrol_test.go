@@ -51,11 +51,25 @@ func TestAuthorization(t *testing.T) {
 		Keys: []*VerificationKey{correctVerificationKey, otherVerificationKey},
 	}
 
+	// Test: valid key
+
+	err = ValidateSigningKey(correctSigningKey)
+	if err != nil {
+		t.Fatalf("ValidateSigningKey failed: %s", err)
+	}
+
+	// Test: invalid key
+
+	err = ValidateSigningKey(&SigningKey{})
+	if err == nil {
+		t.Fatalf("ValidateSigningKey unexpected success")
+	}
+
 	// Test: valid key ring
 
-	err = ValidateKeyRing(keyRing)
+	err = ValidateVerificationKeyRing(keyRing)
 	if err != nil {
-		t.Fatalf("ValidateKeyRing failed: %s", err)
+		t.Fatalf("ValidateVerificationKeyRing failed: %s", err)
 	}
 
 	// Test: invalid key ring
@@ -64,9 +78,9 @@ func TestAuthorization(t *testing.T) {
 		Keys: []*VerificationKey{&VerificationKey{}},
 	}
 
-	err = ValidateKeyRing(invalidKeyRing)
+	err = ValidateVerificationKeyRing(invalidKeyRing)
 	if err == nil {
-		t.Fatalf("ValidateKeyRing unexpected success")
+		t.Fatalf("ValidateVerificationKeyRing unexpected success")
 	}
 
 	// Test: valid authorization
