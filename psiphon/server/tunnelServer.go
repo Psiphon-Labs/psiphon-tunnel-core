@@ -1431,7 +1431,7 @@ func (sshClient *sshClient) runTunnel(
 
 			sshClient.setPacketTunnelChannel(packetTunnelChannel)
 
-			// PacketTunnelServer will run the client's packet tunnel. If neessary, ClientConnected
+			// PacketTunnelServer will run the client's packet tunnel. If necessary, ClientConnected
 			// will stop packet tunnel workers for any previous packet tunnel channel.
 
 			checkAllowedTCPPortFunc := func(upstreamIPAddress net.IP, port int) bool {
