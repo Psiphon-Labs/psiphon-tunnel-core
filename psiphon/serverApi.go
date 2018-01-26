@@ -317,6 +317,12 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 		return common.ContextError(err)
 	}
 
+	// Skip the request when there's no payload to send.
+
+	if len(statusPayload) == 0 {
+		return nil
+	}
+
 	if serverContext.psiphonHttpsClient == nil {
 
 		rawMessage := json.RawMessage(statusPayload)
@@ -401,6 +407,8 @@ func makeStatusRequestPayload(
 	serverId string) ([]byte, *statusRequestPayloadInfo, error) {
 
 	transferStats := transferstats.TakeOutStatsForServer(serverId)
+	hostBytes := transferStats.GetStatsForStatusRequest()
+
 	persistentStats, err := TakeOutUnreportedPersistentStats(
 		PSIPHON_API_PERSISTENT_STATS_MAX_COUNT)
 	if err != nil {
@@ -409,21 +417,25 @@ func makeStatusRequestPayload(
 		persistentStats = nil
 		// Proceed with transferStats only
 	}
+
+	if len(hostBytes) == 0 && len(persistentStats) == 0 {
+		// There is no payload to send.
+		return nil, nil, nil
+	}
+
 	payloadInfo := &statusRequestPayloadInfo{
 		serverId, transferStats, persistentStats}
 
 	payload := make(map[string]interface{})
 
-	hostBytes, bytesTransferred := transferStats.GetStatsForStatusRequest()
 	payload["host_bytes"] = hostBytes
-	payload["bytes_transferred"] = bytesTransferred
 
-	// We're not recording these fields, but the server requires them.
+	// We're not recording these fields, but legacy servers require them.
+	payload["bytes_transferred"] = 0
 	payload["page_views"] = make([]string, 0)
 	payload["https_requests"] = make([]string, 0)
 
 	persistentStatPayloadNames := make(map[string]string)
-	persistentStatPayloadNames[PERSISTENT_STAT_TYPE_TUNNEL] = "tunnel_stats"
 	persistentStatPayloadNames[PERSISTENT_STAT_TYPE_REMOTE_SERVER_LIST] = "remote_server_list_stats"
 
 	for statType, stats := range persistentStats {
@@ -469,26 +481,19 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 	}
 }
 
-// RecordTunnelStat records a tunnel duration and bytes
-// sent and received for subsequent reporting and quality
-// analysis.
+// RecordRemoteServerListStat records a completed common or OSL
+// remote server list resource download.
 //
-// Tunnel durations are precisely measured client-side
-// and reported in status requests. As the duration is
-// not determined until the tunnel is closed, tunnel
-// stats records are stored in the persistent datastore
-// and reported via subsequent status requests sent to any
-// Psiphon server.
+// The RSL download event could occur when the client is unable
+// to immediately send a status request to a server, so these
+// records are stored in the persistent datastore and reported
+// via subsequent status requests sent to any Psiphon server.
 //
-// Since the status request that reports a tunnel stats
-// record is not necessarily handled by the same server, the
-// tunnel stats records include the original server ID.
-//
-// Other fields that may change between tunnel stats recording
-// and reporting include client geo data, propagation channel,
-// sponsor ID, client version. These are not stored in the
-// datastore (client region, in particular, since that would
-// create an on-disk record of user location).
+// Note that common event field values may change between the
+// stat recording and reporting include client geo data,
+// propagation channel, sponsor ID, client version. These are not
+// stored in the datastore (client region, in particular, since
+// that would create an on-disk record of user location).
 // TODO: the server could encrypt, with a nonce and key unknown to
 // the client, a blob containing this data; return it in the
 // handshake response; and the client could store and later report
@@ -497,63 +502,13 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 // Multiple "status" requests may be in flight at once (due
 // to multi-tunnel, asynchronous final status retry, and
 // aggressive status requests for pre-registered tunnels),
-// To avoid duplicate reporting, tunnel stats records are
+// To avoid duplicate reporting, persistent stats records are
 // "taken-out" by a status request and then "put back" in
 // case the request fails.
 //
-// Note: since tunnel stats records have a globally unique
-// identifier (sessionId + tunnelNumber), we could tolerate
-// duplicate reporting and filter our duplicates on the
-// server-side. Permitting duplicate reporting could increase
-// the velocity of reporting (for example, both the asynchronous
-// untunneled final status requests and the post-connected
-// immediate status requests could try to report the same tunnel
-// stats).
 // Duplicate reporting may also occur when a server receives and
 // processes a status request but the client fails to receive
 // the response.
-func RecordTunnelStat(
-	sessionId string,
-	tunnelNumber int64,
-	tunnelServerIpAddress string,
-	establishmentDuration string,
-	serverHandshakeTimestamp string,
-	tunnelDuration string,
-	totalBytesSent int64,
-	totalBytesReceived int64) error {
-
-	tunnelStat := struct {
-		SessionId                string `json:"session_id"`
-		TunnelNumber             int64  `json:"tunnel_number"`
-		TunnelServerIpAddress    string `json:"tunnel_server_ip_address"`
-		EstablishmentDuration    string `json:"establishment_duration"`
-		ServerHandshakeTimestamp string `json:"server_handshake_timestamp"`
-		Duration                 string `json:"duration"`
-		TotalBytesSent           int64  `json:"total_bytes_sent"`
-		TotalBytesReceived       int64  `json:"total_bytes_received"`
-	}{
-		sessionId,
-		tunnelNumber,
-		tunnelServerIpAddress,
-		establishmentDuration,
-		serverHandshakeTimestamp,
-		tunnelDuration,
-		totalBytesSent,
-		totalBytesReceived,
-	}
-
-	tunnelStatJson, err := json.Marshal(tunnelStat)
-	if err != nil {
-		return common.ContextError(err)
-	}
-
-	return StorePersistentStat(
-		PERSISTENT_STAT_TYPE_TUNNEL, tunnelStatJson)
-}
-
-// RecordRemoteServerListStat records a completed common or OSL
-// remote server list resource download. These stats use the same
-// persist-until-reported mechanism described in RecordTunnelStats.
 func RecordRemoteServerListStat(
 	url, etag string) error {
 

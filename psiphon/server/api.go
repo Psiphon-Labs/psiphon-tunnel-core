@@ -341,25 +341,12 @@ func statusAPIRequestHandler(
 
 	logQueue := make([]LogFields, 0)
 
-	// Overall bytes transferred stats
-
-	bytesTransferred, err := getInt64RequestParam(statusData, "bytes_transferred")
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-
-	bytesTransferredFields := getRequestLogFields(
-		"bytes_transferred",
-		geoIPData,
-		authorizedAccessTypes,
-		params,
-		statusRequestParams)
-
-	bytesTransferredFields["bytes"] = bytesTransferred
-	logQueue = append(logQueue, bytesTransferredFields)
-
 	// Domain bytes transferred stats
 	// Older clients may not submit this data
+
+	// TODO: ignore these stats if regexes for client were empty; in this
+	// case, clients are expected to send no host_bytes, but older clients
+	// may still send.
 
 	if statusData["host_bytes"] != nil {
 
@@ -380,90 +367,6 @@ func statusAPIRequestHandler(
 			domainBytesFields["bytes"] = bytes
 
 			logQueue = append(logQueue, domainBytesFields)
-		}
-	}
-
-	// Tunnel duration and bytes transferred stats
-	// Older clients may not submit this data
-
-	if statusData["tunnel_stats"] != nil {
-
-		tunnelStats, err := getJSONObjectArrayRequestParam(statusData, "tunnel_stats")
-		if err != nil {
-			return nil, common.ContextError(err)
-		}
-		for _, tunnelStat := range tunnelStats {
-
-			sessionFields := getRequestLogFields(
-				"session",
-				geoIPData,
-				authorizedAccessTypes,
-				params,
-				statusRequestParams)
-
-			sessionID, err := getStringRequestParam(tunnelStat, "session_id")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["session_id"] = sessionID
-
-			tunnelNumber, err := getInt64RequestParam(tunnelStat, "tunnel_number")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["tunnel_number"] = tunnelNumber
-
-			tunnelServerIPAddress, err := getStringRequestParam(tunnelStat, "tunnel_server_ip_address")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["tunnel_server_ip_address"] = tunnelServerIPAddress
-
-			// Note: older clients won't send establishment_duration
-			if _, ok := tunnelStat["establishment_duration"]; ok {
-
-				strEstablishmentDuration, err := getStringRequestParam(tunnelStat, "establishment_duration")
-				if err != nil {
-					return nil, common.ContextError(err)
-				}
-				establishmentDuration, err := strconv.ParseInt(strEstablishmentDuration, 10, 64)
-				if err != nil {
-					return nil, common.ContextError(err)
-				}
-				// Client reports establishment_duration in nanoseconds; divide to get to milliseconds
-				sessionFields["establishment_duration"] = establishmentDuration / 1000000
-			}
-
-			serverHandshakeTimestamp, err := getStringRequestParam(tunnelStat, "server_handshake_timestamp")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["server_handshake_timestamp"] = serverHandshakeTimestamp
-
-			strDuration, err := getStringRequestParam(tunnelStat, "duration")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			duration, err := strconv.ParseInt(strDuration, 10, 64)
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			// Client reports duration in nanoseconds; divide to get to milliseconds
-			sessionFields["duration"] = duration / 1000000
-
-			totalBytesSent, err := getInt64RequestParam(tunnelStat, "total_bytes_sent")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["total_bytes_sent"] = totalBytesSent
-
-			totalBytesReceived, err := getInt64RequestParam(tunnelStat, "total_bytes_received")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["total_bytes_received"] = totalBytesReceived
-
-			logQueue = append(logQueue, sessionFields)
 		}
 	}
 
