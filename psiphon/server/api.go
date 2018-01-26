@@ -229,14 +229,17 @@ func handshakeAPIRequestHandler(
 
 	// The log comes _after_ SetClientHandshakeState, in case that call rejects
 	// the state change (for example, if a second handshake is performed)
+	//
+	// The handshake event is no longer shipped to log consumers, so this is
+	// simply a diagnostic log.
 
-	log.LogRawFieldsWithTimestamp(
+	log.WithContextFields(
 		getRequestLogFields(
-			"handshake",
+			"",
 			geoIPData,
 			authorizedAccessTypes,
 			params,
-			baseRequestParams))
+			baseRequestParams)).Info("handshake")
 
 	// Note: no guarantee that PsinetDatabase won't reload between database calls
 	db := support.PsinetDatabase
@@ -714,7 +717,9 @@ func getRequestLogFields(
 
 	logFields := make(LogFields)
 
-	logFields["event_name"] = eventName
+	if eventName != "" {
+		logFields["event_name"] = eventName
+	}
 
 	// In psi_web, the space replacement was done to accommodate space
 	// delimited logging, which is no longer required; we retain the
