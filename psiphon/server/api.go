@@ -266,7 +266,8 @@ func handshakeAPIRequestHandler(
 var connectedRequestParams = append(
 	[]requestParamSpec{
 		{"session_id", isHexDigits, 0},
-		{"last_connected", isLastConnected, 0}},
+		{"last_connected", isLastConnected, 0},
+		{"establishment_duration", isIntString, requestParamOptional}},
 	baseRequestParams...)
 
 // connectedAPIRequestHandler implements the "connected" API request.

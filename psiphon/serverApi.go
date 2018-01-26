@@ -254,6 +254,10 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 
 	params["last_connected"] = lastConnected
 
+	// serverContext.tunnel.establishDuration is nanoseconds; divide to get to milliseconds
+	params["establishment_duration"] =
+		fmt.Sprintf("%d", serverContext.tunnel.establishDuration/1000000)
+
 	var response []byte
 	if serverContext.psiphonHttpsClient == nil {
 
