@@ -1603,6 +1603,7 @@ func (sshClient *sshClient) logTunnel(additionalMetrics LogFields) {
 		sshClient.handshakeState.apiParams,
 		baseRequestParams)
 
+	logFields["session_id"] = sshClient.sessionID
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["start_time"] = sshClient.activityConn.GetStartTime()
 	logFields["duration"] = sshClient.activityConn.GetActiveDuration() / time.Millisecond
