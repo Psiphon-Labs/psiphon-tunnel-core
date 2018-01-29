@@ -209,6 +209,11 @@ func handshakeAPIRequestHandler(
 		}
 	}
 
+	// Note: no guarantee that PsinetDatabase won't reload between database calls
+	db := support.PsinetDatabase
+
+	httpsRequestRegexes := db.GetHttpsRequestRegexes(sponsorID)
+
 	// Flag the SSH client as having completed its handshake. This
 	// may reselect traffic rules and starts allowing port forwards.
 
@@ -218,9 +223,10 @@ func handshakeAPIRequestHandler(
 	activeAuthorizationIDs, authorizedAccessTypes, err := support.TunnelServer.SetClientHandshakeState(
 		sessionID,
 		handshakeState{
-			completed:   true,
-			apiProtocol: apiProtocol,
-			apiParams:   copyBaseRequestParams(params),
+			completed:         true,
+			apiProtocol:       apiProtocol,
+			apiParams:         copyBaseRequestParams(params),
+			expectDomainBytes: len(httpsRequestRegexes) > 0,
 		},
 		authorizations)
 	if err != nil {
@@ -241,14 +247,12 @@ func handshakeAPIRequestHandler(
 			params,
 			baseRequestParams)).Info("handshake")
 
-	// Note: no guarantee that PsinetDatabase won't reload between database calls
-	db := support.PsinetDatabase
 	handshakeResponse := protocol.HandshakeResponse{
 		SSHSessionID:           sessionID,
 		Homepages:              db.GetRandomizedHomepages(sponsorID, geoIPData.Country, isMobile),
 		UpgradeClientVersion:   db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
 		PageViewRegexes:        make([]map[string]string, 0),
-		HttpsRequestRegexes:    db.GetHttpsRequestRegexes(sponsorID),
+		HttpsRequestRegexes:    httpsRequestRegexes,
 		EncodedServerList:      db.DiscoverServers(geoIPData.DiscoveryValue),
 		ClientRegion:           geoIPData.Country,
 		ServerTimestamp:        common.GetCurrentTimestamp(),
@@ -329,6 +333,8 @@ func statusAPIRequestHandler(
 		return nil, common.ContextError(err)
 	}
 
+	sessionID, _ := getStringRequestParam(params, "client_session_id")
+
 	statusData, err := getJSONObjectRequestParam(params, "statusData")
 	if err != nil {
 		return nil, common.ContextError(err)
@@ -344,11 +350,15 @@ func statusAPIRequestHandler(
 	// Domain bytes transferred stats
 	// Older clients may not submit this data
 
-	// TODO: ignore these stats if regexes for client were empty; in this
-	// case, clients are expected to send no host_bytes, but older clients
-	// may still send.
+	// Clients are expected to send host_bytes/domain_bytes stats only when
+	// configured to do so in the handshake reponse. Legacy clients may still
+	// report "(OTHER)" host_bytes when no regexes are set. Drop those stats.
+	domainBytesExpected, err := support.TunnelServer.ExpectClientDomainBytes(sessionID)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
 
-	if statusData["host_bytes"] != nil {
+	if domainBytesExpected && statusData["host_bytes"] != nil {
 
 		hostBytes, err := getMapStringInt64RequestParam(statusData, "host_bytes")
 		if err != nil {

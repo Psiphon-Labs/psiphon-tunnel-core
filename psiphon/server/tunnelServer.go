@@ -246,6 +246,14 @@ func (server *TunnelServer) GetClientHandshaked(
 	return server.sshServer.getClientHandshaked(sessionID)
 }
 
+// ExpectClientDomainBytes indicates whether the client was configured to report
+// domain bytes in its handshake response.
+func (server *TunnelServer) ExpectClientDomainBytes(
+	sessionID string) (bool, error) {
+
+	return server.sshServer.expectClientDomainBytes(sessionID)
+}
+
 // SetEstablishTunnels sets whether new tunnels may be established or not.
 // When not establishing, incoming connections are immediately closed.
 func (server *TunnelServer) SetEstablishTunnels(establish bool) {
@@ -718,6 +726,20 @@ func (sshServer *sshServer) getClientHandshaked(
 	return completed, exhausted, nil
 }
 
+func (sshServer *sshServer) expectClientDomainBytes(
+	sessionID string) (bool, error) {
+
+	sshServer.clientsMutex.Lock()
+	client := sshServer.clients[sessionID]
+	sshServer.clientsMutex.Unlock()
+
+	if client == nil {
+		return false, common.ContextError(errors.New("unknown session ID"))
+	}
+
+	return client.expectDomainBytes(), nil
+}
+
 func (sshServer *sshServer) stopClients() {
 
 	sshServer.clientsMutex.Lock()
@@ -875,6 +897,7 @@ type handshakeState struct {
 	apiProtocol           string
 	apiParams             requestJSONObject
 	authorizedAccessTypes []string
+	expectDomainBytes     bool
 }
 
 func newSshClient(
@@ -1872,6 +1895,13 @@ func (sshClient *sshClient) getHandshaked() (bool, bool) {
 	}
 
 	return completed, exhausted
+}
+
+func (sshClient *sshClient) expectDomainBytes() bool {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	return sshClient.handshakeState.expectDomainBytes
 }
 
 // setTrafficRules resets the client's traffic rules based on the latest server config
