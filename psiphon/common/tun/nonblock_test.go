@@ -116,7 +116,7 @@ func TestNonblockingIO(t *testing.T) {
 				n, err = r.Read(data)
 			}
 			if n != 0 || err != io.EOF {
-				t.Fatalf("exected io.EOF failed")
+				t.Fatalf("expected io.EOF failed")
 			}
 		}
 
