@@ -679,7 +679,7 @@ func getRequestLogFields(
 			//   fields as one of two different values based on type;
 			//   we also omit port from host:port fields for now.
 			switch expectedParam.name {
-			case "client_version":
+			case "client_version", "establishment_duration":
 				intValue, _ := strconv.Atoi(strValue)
 				logFields[expectedParam.name] = intValue
 			case "meek_dial_address":
