@@ -2361,26 +2361,34 @@ func processPacket(
 
 		if protocol == internetProtocolTCP {
 
-			checkAllowedTCPPortFunc := session.getCheckAllowedTCPPortFunc()
+			invalidPort := (checkPort == 0)
 
-			if checkPort == 0 ||
-				(isServer &&
-					(checkAllowedTCPPortFunc == nil ||
-						!checkAllowedTCPPortFunc(net.IP(ID.upstreamIPAddress[:]), checkPort))) {
+			if !invalidPort && isServer {
+				checkAllowedTCPPortFunc := session.getCheckAllowedTCPPortFunc()
+				if checkAllowedTCPPortFunc == nil ||
+					!checkAllowedTCPPortFunc(net.IP(ID.upstreamIPAddress[:]), checkPort) {
+					invalidPort = true
+				}
+			}
 
+			if invalidPort {
 				metrics.rejectedPacket(direction, packetRejectTCPPort)
 				return false
 			}
 
 		} else if protocol == internetProtocolUDP {
 
-			checkAllowedUDPPortFunc := session.getCheckAllowedUDPPortFunc()
+			invalidPort := (checkPort == 0)
 
-			if checkPort == 0 ||
-				(isServer &&
-					(checkAllowedUDPPortFunc == nil ||
-						!checkAllowedUDPPortFunc(net.IP(ID.upstreamIPAddress[:]), checkPort))) {
+			if !invalidPort && isServer {
+				checkAllowedUDPPortFunc := session.getCheckAllowedUDPPortFunc()
+				if checkAllowedUDPPortFunc == nil ||
+					!checkAllowedUDPPortFunc(net.IP(ID.upstreamIPAddress[:]), checkPort) {
+					invalidPort = true
+				}
+			}
 
+			if invalidPort {
 				metrics.rejectedPacket(direction, packetRejectUDPPort)
 				return false
 			}
