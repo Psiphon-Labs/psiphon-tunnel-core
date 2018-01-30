@@ -535,13 +535,13 @@ func (server *Server) resumeSession(
 	// Set new access control, flow monitoring, and metrics
 	// callbacks; all associated with the new client connection.
 
-	session.setCheckAllowedTCPPortFunc(checkAllowedTCPPortFunc)
+	session.setCheckAllowedTCPPortFunc(&checkAllowedTCPPortFunc)
 
-	session.setCheckAllowedUDPPortFunc(checkAllowedUDPPortFunc)
+	session.setCheckAllowedUDPPortFunc(&checkAllowedUDPPortFunc)
 
-	session.setFlowActivityUpdaterMaker(flowActivityUpdaterMaker)
+	session.setFlowActivityUpdaterMaker(&flowActivityUpdaterMaker)
 
-	session.setMetricsUpdater(metricsUpdater)
+	session.setMetricsUpdater(&metricsUpdater)
 
 	session.channel = channel
 
@@ -1052,6 +1052,12 @@ type session struct {
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	lastActivity             int64
 	lastFlowReapIndex        int64
+	checkAllowedTCPPortFunc  unsafe.Pointer
+	checkAllowedUDPPortFunc  unsafe.Pointer
+	flowActivityUpdaterMaker unsafe.Pointer
+	metricsUpdater           unsafe.Pointer
+	downstreamPackets        unsafe.Pointer
+
 	metrics                  *packetMetrics
 	sessionID                string
 	index                    int32
@@ -1063,11 +1069,6 @@ type session struct {
 	assignedIPv6Address      net.IP
 	setOriginalIPv6Address   int32
 	originalIPv6Address      net.IP
-	checkAllowedTCPPortFunc  unsafe.Pointer
-	checkAllowedUDPPortFunc  unsafe.Pointer
-	flowActivityUpdaterMaker unsafe.Pointer
-	metricsUpdater           unsafe.Pointer
-	downstreamPackets        unsafe.Pointer
 	flows                    sync.Map
 	workers                  *sync.WaitGroup
 	mutex                    sync.Mutex
@@ -1116,56 +1117,52 @@ func (session *session) getOriginalIPv6Address() net.IP {
 	return session.originalIPv6Address
 }
 
-func (session *session) setCheckAllowedTCPPortFunc(f AllowedPortChecker) {
-	g := f
-	atomic.StorePointer(&session.checkAllowedTCPPortFunc, unsafe.Pointer(&g))
+func (session *session) setCheckAllowedTCPPortFunc(p *AllowedPortChecker) {
+	atomic.StorePointer(&session.checkAllowedTCPPortFunc, unsafe.Pointer(p))
 }
 
 func (session *session) getCheckAllowedTCPPortFunc() AllowedPortChecker {
-	f := (*AllowedPortChecker)(atomic.LoadPointer(&session.checkAllowedTCPPortFunc))
-	if f == nil {
+	p := (*AllowedPortChecker)(atomic.LoadPointer(&session.checkAllowedTCPPortFunc))
+	if p == nil {
 		return nil
 	}
-	return *f
+	return *p
 }
 
-func (session *session) setCheckAllowedUDPPortFunc(f AllowedPortChecker) {
-	g := f
-	atomic.StorePointer(&session.checkAllowedUDPPortFunc, unsafe.Pointer(&g))
+func (session *session) setCheckAllowedUDPPortFunc(p *AllowedPortChecker) {
+	atomic.StorePointer(&session.checkAllowedUDPPortFunc, unsafe.Pointer(p))
 }
 
 func (session *session) getCheckAllowedUDPPortFunc() AllowedPortChecker {
-	f := (*AllowedPortChecker)(atomic.LoadPointer(&session.checkAllowedUDPPortFunc))
-	if f == nil {
+	p := (*AllowedPortChecker)(atomic.LoadPointer(&session.checkAllowedUDPPortFunc))
+	if p == nil {
 		return nil
 	}
-	return *f
+	return *p
 }
 
-func (session *session) setFlowActivityUpdaterMaker(f FlowActivityUpdaterMaker) {
-	g := f
-	atomic.StorePointer(&session.flowActivityUpdaterMaker, unsafe.Pointer(&g))
+func (session *session) setFlowActivityUpdaterMaker(p *FlowActivityUpdaterMaker) {
+	atomic.StorePointer(&session.flowActivityUpdaterMaker, unsafe.Pointer(p))
 }
 
 func (session *session) getFlowActivityUpdaterMaker() FlowActivityUpdaterMaker {
-	f := (*FlowActivityUpdaterMaker)(atomic.LoadPointer(&session.flowActivityUpdaterMaker))
-	if f == nil {
+	p := (*FlowActivityUpdaterMaker)(atomic.LoadPointer(&session.flowActivityUpdaterMaker))
+	if p == nil {
 		return nil
 	}
-	return *f
+	return *p
 }
 
-func (session *session) setMetricsUpdater(f MetricsUpdater) {
-	g := f
-	atomic.StorePointer(&session.flowActivityUpdaterMaker, unsafe.Pointer(&g))
+func (session *session) setMetricsUpdater(p *MetricsUpdater) {
+	atomic.StorePointer(&session.metricsUpdater, unsafe.Pointer(p))
 }
 
 func (session *session) getMetricsUpdater() MetricsUpdater {
-	f := (*MetricsUpdater)(atomic.LoadPointer(&session.metricsUpdater))
-	if f == nil {
+	p := (*MetricsUpdater)(atomic.LoadPointer(&session.metricsUpdater))
+	if p == nil {
 		return nil
 	}
-	return *f
+	return *p
 }
 
 func (session *session) setDownstreamPackets(p *PacketQueue) {
