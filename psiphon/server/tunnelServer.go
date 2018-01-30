@@ -1476,12 +1476,25 @@ func (sshClient *sshClient) runTunnel(
 				return updaters
 			}
 
+			metricUpdater := func(
+				TCPApplicationBytesUp, TCPApplicationBytesDown,
+				UDPApplicationBytesUp, UDPApplicationBytesDown int64) {
+
+				sshClient.Lock()
+				sshClient.tcpTrafficState.bytesUp += TCPApplicationBytesUp
+				sshClient.tcpTrafficState.bytesDown += TCPApplicationBytesDown
+				sshClient.udpTrafficState.bytesUp += UDPApplicationBytesUp
+				sshClient.udpTrafficState.bytesDown += UDPApplicationBytesDown
+				sshClient.Unlock()
+			}
+
 			err = sshClient.sshServer.support.PacketTunnelServer.ClientConnected(
 				sshClient.sessionID,
 				packetTunnelChannel,
 				checkAllowedTCPPortFunc,
 				checkAllowedUDPPortFunc,
-				flowActivityUpdaterMaker)
+				flowActivityUpdaterMaker,
+				metricUpdater)
 			if err != nil {
 				log.WithContextFields(LogFields{"error": err}).Warning("start packet tunnel client failed")
 				sshClient.setPacketTunnelChannel(nil)
