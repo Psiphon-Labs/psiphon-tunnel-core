@@ -1794,8 +1794,8 @@ func (sshClient *sshClient) setHandshakeState(
 	// authorizationIDs and authorizedAccessTypes are returned to the client and logged,
 	// respectively; initialize to empty lists so the protocol/logs don't need to handle
 	// 'null' values.
-	authorizationIDs = make([]string, 0)
-	authorizedAccessTypes = make([]string, 0)
+	authorizationIDs := make([]string, 0)
+	authorizedAccessTypes := make([]string, 0)
 	var stopTime time.Time
 
 	for i, authorization := range authorizations {
