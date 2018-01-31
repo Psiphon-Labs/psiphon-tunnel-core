@@ -25,8 +25,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
 	"testing"
-	"time"
 
 	mapset "github.com/deckarep/golang-set"
 	"github.com/stretchr/testify/suite"
@@ -40,8 +40,9 @@ var nextServerID = 0
 
 type StatsTestSuite struct {
 	suite.Suite
-	serverID   string
-	httpClient *http.Client
+	serverID            string
+	httpClient          *http.Client
+	httpClientNoRegexes *http.Client
 }
 
 func TestStatsTestSuite(t *testing.T) {
@@ -49,12 +50,23 @@ func TestStatsTestSuite(t *testing.T) {
 }
 
 func (suite *StatsTestSuite) SetupTest() {
-	re := make(Regexps, 0)
+
+	// Set a regexp for the httpClient to ensure it at least records "(OTHER)" domain bytes
+	regexp, _ := regexp.Compile(`^[a-z0-9\.]*\.(example\.com)$`)
+	replace := "$1"
+	regexps := Regexps{regexpReplace{regexp: regexp, replace: replace}}
+
 	suite.serverID = fmt.Sprintf("%s-%d", _SERVER_ID, nextServerID)
 	nextServerID++
 	suite.httpClient = &http.Client{
 		Transport: &http.Transport{
-			Dial: makeStatsDialer(suite.serverID, &re),
+			Dial: makeStatsDialer(suite.serverID, &regexps),
+		},
+	}
+
+	suite.httpClientNoRegexes = &http.Client{
+		Transport: &http.Transport{
+			Dial: makeStatsDialer(suite.serverID, &Regexps{}),
 		},
 	}
 }
@@ -136,12 +148,25 @@ func (suite *StatsTestSuite) Test_PutBackStatsForServer() {
 	suite.Equal(payload, zeroPayload, "should be zero stats after getting them")
 
 	PutBackStatsForServer(suite.serverID, payloadToPutBack)
-	// PutBack is asynchronous, so we'll need to wait a moment for it to do its thing
-	<-time.After(100 * time.Millisecond)
 
 	payload = TakeOutStatsForServer(suite.serverID)
 	suite.NotEqual(payload, zeroPayload, "stats should be re-added after putting back")
 	suite.Equal(payload, payloadToPutBack, "stats should be the same as after the first retrieval")
+}
+
+func (suite *StatsTestSuite) Test_NoRegexes() {
+
+	// Ensure there are no stats before making the no-regex request
+	_ = TakeOutStatsForServer(suite.serverID)
+
+	resp, err := suite.httpClientNoRegexes.Get("http://example.com/index.html")
+	suite.Nil(err, "need successful http to proceed with tests")
+	resp.Body.Close()
+
+	zeroPayload := &AccumulatedStats{hostnameToStats: make(map[string]*hostStats)}
+
+	payload := TakeOutStatsForServer(suite.serverID)
+	suite.Equal(payload, zeroPayload, "should be zero stats after getting them")
 }
 
 func (suite *StatsTestSuite) Test_MakeRegexps() {
