@@ -49,18 +49,16 @@ type AccumulatedStats struct {
 
 // GetStatsForStatusRequest summarizes AccumulatedStats data as
 // required for the Psiphon Server API status request.
-func (stats AccumulatedStats) GetStatsForStatusRequest() (map[string]int64, int64) {
+func (stats AccumulatedStats) GetStatsForStatusRequest() map[string]int64 {
 
 	hostBytes := make(map[string]int64)
-	bytesTransferred := int64(0)
 
 	for hostname, hostStats := range stats.hostnameToStats {
 		totalBytes := hostStats.numBytesReceived + hostStats.numBytesSent
-		bytesTransferred += totalBytes
 		hostBytes[hostname] = totalBytes
 	}
 
-	return hostBytes, bytesTransferred
+	return hostBytes
 }
 
 // serverStats holds per-server stats.
@@ -92,13 +90,9 @@ type statsUpdate struct {
 // recordStats makes sure the given stats update is added to the global
 // collection. recentBytes are not adjusted when isPutBack is true,
 // as recentBytes aren't subject to TakeOut/PutBack.
-func recordStat(stat *statsUpdate, isPutBack bool) {
+func recordStat(stat *statsUpdate, isRecordingHostBytes, isPutBack bool) {
 	allStats.statsMutex.Lock()
 	defer allStats.statsMutex.Unlock()
-
-	if stat.hostname == "" {
-		stat.hostname = "(OTHER)"
-	}
 
 	storedServerStats := allStats.serverIDtoStats[stat.serverID]
 	if storedServerStats == nil {
@@ -108,14 +102,21 @@ func recordStat(stat *statsUpdate, isPutBack bool) {
 		allStats.serverIDtoStats[stat.serverID] = storedServerStats
 	}
 
-	storedHostStats := storedServerStats.accumulatedStats.hostnameToStats[stat.hostname]
-	if storedHostStats == nil {
-		storedHostStats = &hostStats{}
-		storedServerStats.accumulatedStats.hostnameToStats[stat.hostname] = storedHostStats
-	}
+	if isRecordingHostBytes {
 
-	storedHostStats.numBytesSent += stat.numBytesSent
-	storedHostStats.numBytesReceived += stat.numBytesReceived
+		if stat.hostname == "" {
+			stat.hostname = "(OTHER)"
+		}
+
+		storedHostStats := storedServerStats.accumulatedStats.hostnameToStats[stat.hostname]
+		if storedHostStats == nil {
+			storedHostStats = &hostStats{}
+			storedServerStats.accumulatedStats.hostnameToStats[stat.hostname] = storedHostStats
+		}
+
+		storedHostStats.numBytesSent += stat.numBytesSent
+		storedHostStats.numBytesReceived += stat.numBytesReceived
+	}
 
 	if !isPutBack {
 		storedServerStats.recentBytesSent += stat.numBytesSent
@@ -179,6 +180,10 @@ func PutBackStatsForServer(serverID string, accumulatedStats *AccumulatedStats) 
 				numBytesSent:     hoststats.numBytesSent,
 				numBytesReceived: hoststats.numBytesReceived,
 			},
+			// We can set isRecordingHostBytes to true, regardless of whether there
+			// are any regexes, since there will be no host bytes to put back if they
+			// are not being recorded.
+			true,
 			true)
 	}
 }

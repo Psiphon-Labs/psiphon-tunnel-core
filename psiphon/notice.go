@@ -714,6 +714,12 @@ func NoticeServerTimestamp(timestamp string) {
 // NoticeActiveAuthorizationIDs reports the authorizations the server has accepted.
 // Each ID is a base64-encoded accesscontrol.Authorization.ID value.
 func NoticeActiveAuthorizationIDs(activeAuthorizationIDs []string) {
+
+	// Never emit 'null' instead of empty list
+	if activeAuthorizationIDs == nil {
+		activeAuthorizationIDs = make([]string, 0)
+	}
+
 	singletonNoticeLogger.outputNotice(
 		"ActiveAuthorizationIDs", 0,
 		"IDs", activeAuthorizationIDs)

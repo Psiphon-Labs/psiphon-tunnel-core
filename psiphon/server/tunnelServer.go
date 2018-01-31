@@ -246,6 +246,14 @@ func (server *TunnelServer) GetClientHandshaked(
 	return server.sshServer.getClientHandshaked(sessionID)
 }
 
+// ExpectClientDomainBytes indicates whether the client was configured to report
+// domain bytes in its handshake response.
+func (server *TunnelServer) ExpectClientDomainBytes(
+	sessionID string) (bool, error) {
+
+	return server.sshServer.expectClientDomainBytes(sessionID)
+}
+
 // SetEstablishTunnels sets whether new tunnels may be established or not.
 // When not establishing, incoming connections are immediately closed.
 func (server *TunnelServer) SetEstablishTunnels(establish bool) {
@@ -718,6 +726,20 @@ func (sshServer *sshServer) getClientHandshaked(
 	return completed, exhausted, nil
 }
 
+func (sshServer *sshServer) expectClientDomainBytes(
+	sessionID string) (bool, error) {
+
+	sshServer.clientsMutex.Lock()
+	client := sshServer.clients[sessionID]
+	sshServer.clientsMutex.Unlock()
+
+	if client == nil {
+		return false, common.ContextError(errors.New("unknown session ID"))
+	}
+
+	return client.expectDomainBytes(), nil
+}
+
 func (sshServer *sshServer) stopClients() {
 
 	sshServer.clientsMutex.Lock()
@@ -875,6 +897,7 @@ type handshakeState struct {
 	apiProtocol           string
 	apiParams             requestJSONObject
 	authorizedAccessTypes []string
+	expectDomainBytes     bool
 }
 
 func newSshClient(
@@ -1453,12 +1476,25 @@ func (sshClient *sshClient) runTunnel(
 				return updaters
 			}
 
+			metricUpdater := func(
+				TCPApplicationBytesUp, TCPApplicationBytesDown,
+				UDPApplicationBytesUp, UDPApplicationBytesDown int64) {
+
+				sshClient.Lock()
+				sshClient.tcpTrafficState.bytesUp += TCPApplicationBytesUp
+				sshClient.tcpTrafficState.bytesDown += TCPApplicationBytesDown
+				sshClient.udpTrafficState.bytesUp += UDPApplicationBytesUp
+				sshClient.udpTrafficState.bytesDown += UDPApplicationBytesDown
+				sshClient.Unlock()
+			}
+
 			err = sshClient.sshServer.support.PacketTunnelServer.ClientConnected(
 				sshClient.sessionID,
 				packetTunnelChannel,
 				checkAllowedTCPPortFunc,
 				checkAllowedUDPPortFunc,
-				flowActivityUpdaterMaker)
+				flowActivityUpdaterMaker,
+				metricUpdater)
 			if err != nil {
 				log.WithContextFields(LogFields{"error": err}).Warning("start packet tunnel client failed")
 				sshClient.setPacketTunnelChannel(nil)
@@ -1603,6 +1639,7 @@ func (sshClient *sshClient) logTunnel(additionalMetrics LogFields) {
 		sshClient.handshakeState.apiParams,
 		baseRequestParams)
 
+	logFields["session_id"] = sshClient.sessionID
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["start_time"] = sshClient.activityConn.GetStartTime()
 	logFields["duration"] = sshClient.activityConn.GetActiveDuration() / time.Millisecond
@@ -1754,8 +1791,11 @@ func (sshClient *sshClient) setHandshakeState(
 	// and is used to detect and prevent multiple malicious clients from reusing a
 	// single authorization (within the scope of this server).
 
-	var authorizationIDs []string
-	var authorizedAccessTypes []string
+	// authorizationIDs and authorizedAccessTypes are returned to the client and logged,
+	// respectively; initialize to empty lists so the protocol/logs don't need to handle
+	// 'null' values.
+	authorizationIDs := make([]string, 0)
+	authorizedAccessTypes := make([]string, 0)
 	var stopTime time.Time
 
 	for i, authorization := range authorizations {
@@ -1871,6 +1911,13 @@ func (sshClient *sshClient) getHandshaked() (bool, bool) {
 	}
 
 	return completed, exhausted
+}
+
+func (sshClient *sshClient) expectDomainBytes() bool {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	return sshClient.handshakeState.expectDomainBytes
 }
 
 // setTrafficRules resets the client's traffic rules based on the latest server config

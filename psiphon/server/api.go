@@ -209,6 +209,11 @@ func handshakeAPIRequestHandler(
 		}
 	}
 
+	// Note: no guarantee that PsinetDatabase won't reload between database calls
+	db := support.PsinetDatabase
+
+	httpsRequestRegexes := db.GetHttpsRequestRegexes(sponsorID)
+
 	// Flag the SSH client as having completed its handshake. This
 	// may reselect traffic rules and starts allowing port forwards.
 
@@ -218,9 +223,10 @@ func handshakeAPIRequestHandler(
 	activeAuthorizationIDs, authorizedAccessTypes, err := support.TunnelServer.SetClientHandshakeState(
 		sessionID,
 		handshakeState{
-			completed:   true,
-			apiProtocol: apiProtocol,
-			apiParams:   copyBaseRequestParams(params),
+			completed:         true,
+			apiProtocol:       apiProtocol,
+			apiParams:         copyBaseRequestParams(params),
+			expectDomainBytes: len(httpsRequestRegexes) > 0,
 		},
 		authorizations)
 	if err != nil {
@@ -229,23 +235,24 @@ func handshakeAPIRequestHandler(
 
 	// The log comes _after_ SetClientHandshakeState, in case that call rejects
 	// the state change (for example, if a second handshake is performed)
+	//
+	// The handshake event is no longer shipped to log consumers, so this is
+	// simply a diagnostic log.
 
-	log.LogRawFieldsWithTimestamp(
+	log.WithContextFields(
 		getRequestLogFields(
-			"handshake",
+			"",
 			geoIPData,
 			authorizedAccessTypes,
 			params,
-			baseRequestParams))
+			baseRequestParams)).Info("handshake")
 
-	// Note: no guarantee that PsinetDatabase won't reload between database calls
-	db := support.PsinetDatabase
 	handshakeResponse := protocol.HandshakeResponse{
 		SSHSessionID:           sessionID,
 		Homepages:              db.GetRandomizedHomepages(sponsorID, geoIPData.Country, isMobile),
 		UpgradeClientVersion:   db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
 		PageViewRegexes:        make([]map[string]string, 0),
-		HttpsRequestRegexes:    db.GetHttpsRequestRegexes(sponsorID),
+		HttpsRequestRegexes:    httpsRequestRegexes,
 		EncodedServerList:      db.DiscoverServers(geoIPData.DiscoveryValue),
 		ClientRegion:           geoIPData.Country,
 		ServerTimestamp:        common.GetCurrentTimestamp(),
@@ -263,7 +270,8 @@ func handshakeAPIRequestHandler(
 var connectedRequestParams = append(
 	[]requestParamSpec{
 		{"session_id", isHexDigits, 0},
-		{"last_connected", isLastConnected, 0}},
+		{"last_connected", isLastConnected, 0},
+		{"establishment_duration", isIntString, requestParamOptional}},
 	baseRequestParams...)
 
 // connectedAPIRequestHandler implements the "connected" API request.
@@ -325,6 +333,8 @@ func statusAPIRequestHandler(
 		return nil, common.ContextError(err)
 	}
 
+	sessionID, _ := getStringRequestParam(params, "client_session_id")
+
 	statusData, err := getJSONObjectRequestParam(params, "statusData")
 	if err != nil {
 		return nil, common.ContextError(err)
@@ -337,27 +347,18 @@ func statusAPIRequestHandler(
 
 	logQueue := make([]LogFields, 0)
 
-	// Overall bytes transferred stats
+	// Domain bytes transferred stats
+	// Older clients may not submit this data
 
-	bytesTransferred, err := getInt64RequestParam(statusData, "bytes_transferred")
+	// Clients are expected to send host_bytes/domain_bytes stats only when
+	// configured to do so in the handshake reponse. Legacy clients may still
+	// report "(OTHER)" host_bytes when no regexes are set. Drop those stats.
+	domainBytesExpected, err := support.TunnelServer.ExpectClientDomainBytes(sessionID)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
-	bytesTransferredFields := getRequestLogFields(
-		"bytes_transferred",
-		geoIPData,
-		authorizedAccessTypes,
-		params,
-		statusRequestParams)
-
-	bytesTransferredFields["bytes"] = bytesTransferred
-	logQueue = append(logQueue, bytesTransferredFields)
-
-	// Domain bytes transferred stats
-	// Older clients may not submit this data
-
-	if statusData["host_bytes"] != nil {
+	if domainBytesExpected && statusData["host_bytes"] != nil {
 
 		hostBytes, err := getMapStringInt64RequestParam(statusData, "host_bytes")
 		if err != nil {
@@ -376,90 +377,6 @@ func statusAPIRequestHandler(
 			domainBytesFields["bytes"] = bytes
 
 			logQueue = append(logQueue, domainBytesFields)
-		}
-	}
-
-	// Tunnel duration and bytes transferred stats
-	// Older clients may not submit this data
-
-	if statusData["tunnel_stats"] != nil {
-
-		tunnelStats, err := getJSONObjectArrayRequestParam(statusData, "tunnel_stats")
-		if err != nil {
-			return nil, common.ContextError(err)
-		}
-		for _, tunnelStat := range tunnelStats {
-
-			sessionFields := getRequestLogFields(
-				"session",
-				geoIPData,
-				authorizedAccessTypes,
-				params,
-				statusRequestParams)
-
-			sessionID, err := getStringRequestParam(tunnelStat, "session_id")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["session_id"] = sessionID
-
-			tunnelNumber, err := getInt64RequestParam(tunnelStat, "tunnel_number")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["tunnel_number"] = tunnelNumber
-
-			tunnelServerIPAddress, err := getStringRequestParam(tunnelStat, "tunnel_server_ip_address")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["tunnel_server_ip_address"] = tunnelServerIPAddress
-
-			// Note: older clients won't send establishment_duration
-			if _, ok := tunnelStat["establishment_duration"]; ok {
-
-				strEstablishmentDuration, err := getStringRequestParam(tunnelStat, "establishment_duration")
-				if err != nil {
-					return nil, common.ContextError(err)
-				}
-				establishmentDuration, err := strconv.ParseInt(strEstablishmentDuration, 10, 64)
-				if err != nil {
-					return nil, common.ContextError(err)
-				}
-				// Client reports establishment_duration in nanoseconds; divide to get to milliseconds
-				sessionFields["establishment_duration"] = establishmentDuration / 1000000
-			}
-
-			serverHandshakeTimestamp, err := getStringRequestParam(tunnelStat, "server_handshake_timestamp")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["server_handshake_timestamp"] = serverHandshakeTimestamp
-
-			strDuration, err := getStringRequestParam(tunnelStat, "duration")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			duration, err := strconv.ParseInt(strDuration, 10, 64)
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			// Client reports duration in nanoseconds; divide to get to milliseconds
-			sessionFields["duration"] = duration / 1000000
-
-			totalBytesSent, err := getInt64RequestParam(tunnelStat, "total_bytes_sent")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["total_bytes_sent"] = totalBytesSent
-
-			totalBytesReceived, err := getInt64RequestParam(tunnelStat, "total_bytes_received")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["total_bytes_received"] = totalBytesReceived
-
-			logQueue = append(logQueue, sessionFields)
 		}
 	}
 
@@ -714,7 +631,9 @@ func getRequestLogFields(
 
 	logFields := make(LogFields)
 
-	logFields["event_name"] = eventName
+	if eventName != "" {
+		logFields["event_name"] = eventName
+	}
 
 	// In psi_web, the space replacement was done to accommodate space
 	// delimited logging, which is no longer required; we retain the
@@ -760,7 +679,7 @@ func getRequestLogFields(
 			//   fields as one of two different values based on type;
 			//   we also omit port from host:port fields for now.
 			switch expectedParam.name {
-			case "client_version":
+			case "client_version", "establishment_duration":
 				intValue, _ := strconv.Atoi(strValue)
 				logFields[expectedParam.name] = intValue
 			case "meek_dial_address":

@@ -108,12 +108,20 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 		t.Fatalf("startTestTCPServer failed: %s", err)
 	}
 
-	var counter bytesTransferredCounter
+	var flowCounter bytesTransferredCounter
+
 	flowActivityUpdaterMaker := func(_ string, _ net.IP) []FlowActivityUpdater {
-		return []FlowActivityUpdater{&counter}
+		return []FlowActivityUpdater{&flowCounter}
 	}
 
-	testServer, err := startTestServer(useIPv6, MTU, flowActivityUpdaterMaker)
+	var metricsCounter bytesTransferredCounter
+
+	metricsUpdater := func(TCPApplicationBytesUp, TCPApplicationBytesDown, _, _ int64) {
+		metricsCounter.UpdateProgress(
+			TCPApplicationBytesUp, TCPApplicationBytesDown, 0)
+	}
+
+	testServer, err := startTestServer(useIPv6, MTU, flowActivityUpdaterMaker, metricsUpdater)
 	if err != nil {
 		t.Fatalf("startTestServer failed: %s", err)
 	}
@@ -201,6 +209,8 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 				{"packets_down", TCP_RELAY_TOTAL_SIZE / int64(MTU)},
 				{"bytes_up", TCP_RELAY_TOTAL_SIZE},
 				{"bytes_down", TCP_RELAY_TOTAL_SIZE},
+				{"application_bytes_up", TCP_RELAY_TOTAL_SIZE},
+				{"application_bytes_down", TCP_RELAY_TOTAL_SIZE},
 			}
 
 			for _, expectedField := range expectedFields {
@@ -240,14 +250,25 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 	// Note: reported bytes transferred can exceed expected bytes
 	// transferred due to retransmission of packets.
 
-	upstreamBytesTransferred, downstreamBytesTransferred, _ := counter.Get()
 	expectedBytesTransferred := CONCURRENT_CLIENT_COUNT * TCP_RELAY_TOTAL_SIZE
+
+	upstreamBytesTransferred, downstreamBytesTransferred, _ := flowCounter.Get()
 	if upstreamBytesTransferred < expectedBytesTransferred {
-		t.Fatalf("unexpected upstreamBytesTransferred: %d; expected at least %d",
+		t.Fatalf("unexpected flow upstreamBytesTransferred: %d; expected at least %d",
 			upstreamBytesTransferred, expectedBytesTransferred)
 	}
 	if downstreamBytesTransferred < expectedBytesTransferred {
-		t.Fatalf("unexpected downstreamBytesTransferred: %d; expected at least %d",
+		t.Fatalf("unexpected flow downstreamBytesTransferred: %d; expected at least %d",
+			downstreamBytesTransferred, expectedBytesTransferred)
+	}
+
+	upstreamBytesTransferred, downstreamBytesTransferred, _ = metricsCounter.Get()
+	if upstreamBytesTransferred < expectedBytesTransferred {
+		t.Fatalf("unexpected metrics upstreamBytesTransferred: %d; expected at least %d",
+			upstreamBytesTransferred, expectedBytesTransferred)
+	}
+	if downstreamBytesTransferred < expectedBytesTransferred {
+		t.Fatalf("unexpected metrics downstreamBytesTransferred: %d; expected at least %d",
 			downstreamBytesTransferred, expectedBytesTransferred)
 	}
 
@@ -280,16 +301,20 @@ func (counter *bytesTransferredCounter) Get() (int64, int64, int64) {
 }
 
 type testServer struct {
-	logger       *testLogger
-	updaterMaker FlowActivityUpdaterMaker
-	tunServer    *Server
-	unixListener net.Listener
-	clientConns  *common.Conns
-	workers      *sync.WaitGroup
+	logger         *testLogger
+	updaterMaker   FlowActivityUpdaterMaker
+	metricsUpdater MetricsUpdater
+	tunServer      *Server
+	unixListener   net.Listener
+	clientConns    *common.Conns
+	workers        *sync.WaitGroup
 }
 
 func startTestServer(
-	useIPv6 bool, MTU int, updaterMaker FlowActivityUpdaterMaker) (*testServer, error) {
+	useIPv6 bool,
+	MTU int,
+	updaterMaker FlowActivityUpdaterMaker,
+	metricsUpdater MetricsUpdater) (*testServer, error) {
 
 	logger := newTestLogger(true)
 
@@ -319,12 +344,13 @@ func startTestServer(
 	}
 
 	server := &testServer{
-		logger:       logger,
-		updaterMaker: updaterMaker,
-		tunServer:    tunServer,
-		unixListener: unixListener,
-		clientConns:  new(common.Conns),
-		workers:      new(sync.WaitGroup),
+		logger:         logger,
+		updaterMaker:   updaterMaker,
+		metricsUpdater: metricsUpdater,
+		tunServer:      tunServer,
+		unixListener:   unixListener,
+		clientConns:    new(common.Conns),
+		workers:        new(sync.WaitGroup),
 	}
 
 	server.workers.Add(1)
@@ -367,7 +393,8 @@ func (server *testServer) run() {
 				signalConn,
 				checkAllowedPortFunc,
 				checkAllowedPortFunc,
-				server.updaterMaker)
+				server.updaterMaker,
+				server.metricsUpdater)
 
 			signalConn.Wait()
 
