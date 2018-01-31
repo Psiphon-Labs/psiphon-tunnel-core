@@ -1791,8 +1791,11 @@ func (sshClient *sshClient) setHandshakeState(
 	// and is used to detect and prevent multiple malicious clients from reusing a
 	// single authorization (within the scope of this server).
 
-	var authorizationIDs []string
-	var authorizedAccessTypes []string
+	// authorizationIDs and authorizedAccessTypes are returned to the client and logged,
+	// respectively; initialize to empty lists so the protocol/logs don't need to handle
+	// 'null' values.
+	authorizationIDs = make([]string, 0)
+	authorizedAccessTypes = make([]string, 0)
 	var stopTime time.Time
 
 	for i, authorization := range authorizations {
