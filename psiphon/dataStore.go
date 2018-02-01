@@ -66,7 +66,6 @@ const (
 const (
 	DATA_STORE_LAST_CONNECTED_KEY           = "lastConnected"
 	DATA_STORE_LAST_SERVER_ENTRY_FILTER_KEY = "lastServerEntryFilter"
-	PERSISTENT_STAT_TYPE_TUNNEL             = tunnelStatsBucket
 	PERSISTENT_STAT_TYPE_REMOTE_SERVER_LIST = remoteServerListStatsBucket
 )
 
@@ -144,6 +143,24 @@ func InitDataStore(config *Config) (err error) {
 				_, err := tx.CreateBucketIfNotExists([]byte(bucket))
 				if err != nil {
 					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			err = fmt.Errorf("initDataStore failed to create buckets: %s", err)
+			return
+		}
+
+		// Cleanup obsolete tunnel (session) stats bucket, if one still exists
+
+		err = db.Update(func(tx *bolt.Tx) error {
+			tunnelStatsBucket := []byte("tunnelStats")
+			if tx.Bucket(tunnelStatsBucket) != nil {
+				err := tx.DeleteBucket(tunnelStatsBucket)
+				if err != nil {
+					NoticeAlert("DeleteBucket %s error: %s", tunnelStatsBucket, err)
+					// Continue, since this is not fatal
 				}
 			}
 			return nil
@@ -985,7 +1002,6 @@ var persistentStatStateReporting = []byte("1")
 
 var persistentStatTypes = []string{
 	PERSISTENT_STAT_TYPE_REMOTE_SERVER_LIST,
-	PERSISTENT_STAT_TYPE_TUNNEL,
 }
 
 // StorePersistentStat adds a new persistent stat record, which
@@ -1065,8 +1081,6 @@ func TakeOutUnreportedPersistentStats(maxCount int) (map[string][][]byte, error)
 
 		for _, statType := range persistentStatTypes {
 
-			stats[statType] = make([][]byte, 0)
-
 			bucket := tx.Bucket([]byte(statType))
 			cursor := bucket.Cursor()
 			for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
@@ -1090,6 +1104,11 @@ func TakeOutUnreportedPersistentStats(maxCount int) (map[string][][]byte, error)
 					// Must make a copy as slice is only valid within transaction.
 					data := make([]byte, len(key))
 					copy(data, key)
+
+					if stats[statType] == nil {
+						stats[statType] = make([][]byte, 0)
+					}
+
 					stats[statType] = append(stats[statType], data)
 					count += 1
 				}

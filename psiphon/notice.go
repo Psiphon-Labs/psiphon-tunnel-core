@@ -704,11 +704,25 @@ func NoticeSLOKSeeded(slokID string, duplicate bool) {
 		"duplicate", duplicate)
 }
 
-// NoticeServerTimestamp reports server side timestamp as seen in the handshake
+// NoticeServerTimestamp reports server side timestamp as seen in the handshake.
 func NoticeServerTimestamp(timestamp string) {
 	singletonNoticeLogger.outputNotice(
 		"ServerTimestamp", 0,
 		"timestamp", timestamp)
+}
+
+// NoticeActiveAuthorizationIDs reports the authorizations the server has accepted.
+// Each ID is a base64-encoded accesscontrol.Authorization.ID value.
+func NoticeActiveAuthorizationIDs(activeAuthorizationIDs []string) {
+
+	// Never emit 'null' instead of empty list
+	if activeAuthorizationIDs == nil {
+		activeAuthorizationIDs = make([]string, 0)
+	}
+
+	singletonNoticeLogger.outputNotice(
+		"ActiveAuthorizationIDs", 0,
+		"IDs", activeAuthorizationIDs)
 }
 
 type repetitiveNoticeState struct {

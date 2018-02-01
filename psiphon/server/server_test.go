@@ -39,6 +39,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"golang.org/x/net/proxy"
 )
 
@@ -124,6 +125,8 @@ func TestSSH(t *testing.T) {
 			doHotReload:          false,
 			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
 			doClientVerification: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -138,6 +141,8 @@ func TestOSSH(t *testing.T) {
 			doHotReload:          false,
 			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
 			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -152,6 +157,8 @@ func TestUnfrontedMeek(t *testing.T) {
 			doHotReload:          false,
 			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
 			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -166,6 +173,8 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			doHotReload:          false,
 			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
 			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -180,6 +189,8 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			doHotReload:          false,
 			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
 			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -194,6 +205,8 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			doHotReload:          false,
 			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			requireAuthorization: false,
+			omitAuthorization:    true,
 			doClientVerification: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -208,6 +221,8 @@ func TestHotReload(t *testing.T) {
 			doHotReload:          true,
 			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
 			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -222,6 +237,8 @@ func TestDefaultSessionID(t *testing.T) {
 			doHotReload:          true,
 			doDefaultSessionID:   true,
 			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
 			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -236,6 +253,56 @@ func TestDenyTrafficRules(t *testing.T) {
 			doHotReload:          true,
 			doDefaultSessionID:   false,
 			denyTrafficRules:     true,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doClientVerification: false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
+func TestOmitAuthorization(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          true,
+			doDefaultSessionID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    true,
+			doClientVerification: false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
+func TestNoAuthorization(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          true,
+			doDefaultSessionID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: false,
+			omitAuthorization:    true,
+			doClientVerification: false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
+func TestUnusedAuthorization(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          true,
+			doDefaultSessionID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: false,
+			omitAuthorization:    false,
 			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -250,6 +317,8 @@ func TestTCPOnlySLOK(t *testing.T) {
 			doHotReload:          false,
 			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
 			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: false,
@@ -264,6 +333,8 @@ func TestUDPOnlySLOK(t *testing.T) {
 			doHotReload:          false,
 			doDefaultSessionID:   false,
 			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
 			doClientVerification: false,
 			doTunneledWebRequest: false,
 			doTunneledNTPRequest: true,
@@ -276,6 +347,8 @@ type runServerConfig struct {
 	doHotReload          bool
 	doDefaultSessionID   bool
 	denyTrafficRules     bool
+	requireAuthorization bool
+	omitAuthorization    bool
 	doClientVerification bool
 	doTunneledWebRequest bool
 	doTunneledNTPRequest bool
@@ -303,6 +376,29 @@ const dummyClientVerificationPayload = `
 }`
 
 func runServer(t *testing.T, runConfig *runServerConfig) {
+
+	// configure authorized access
+
+	accessType := "test-access-type"
+
+	accessControlSigningKey, accessControlVerificationKey, err := accesscontrol.NewKeyPair(accessType)
+	if err != nil {
+		t.Fatalf("error creating access control key pair: %s", err)
+	}
+
+	accessControlVerificationKeyRing := accesscontrol.VerificationKeyRing{
+		Keys: []*accesscontrol.VerificationKey{accessControlVerificationKey},
+	}
+
+	var authorizationID [32]byte
+
+	clientAuthorization, err := accesscontrol.IssueAuthorization(
+		accessControlSigningKey,
+		authorizationID[:],
+		time.Now().Add(1*time.Hour))
+	if err != nil {
+		t.Fatalf("error issuing authorization: %s", err)
+	}
 
 	// create a server
 
@@ -332,7 +428,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// must handshake with specified sponsor ID in order to allow ports for tunneled
 	// requests.
 	trafficRulesFilename := filepath.Join(testDataDirName, "traffic_rules.json")
-	paveTrafficRulesFile(t, trafficRulesFilename, propagationChannelID, runConfig.denyTrafficRules)
+	paveTrafficRulesFile(
+		t, trafficRulesFilename, propagationChannelID, accessType,
+		runConfig.requireAuthorization, runConfig.denyTrafficRules)
 
 	var serverConfig map[string]interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
@@ -342,6 +440,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig["OSLConfigFilename"] = oslConfigFilename
 	serverConfig["LogFilename"] = filepath.Join(testDataDirName, "psiphond.log")
 	serverConfig["LogLevel"] = "debug"
+
+	serverConfig["AccessControlVerificationKeyRing"] = accessControlVerificationKeyRing
 
 	// Set this parameter so at least the semaphore functions are called.
 	// TODO: test that the concurrency limit is correctly enforced.
@@ -400,7 +500,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		propagationChannelID = paveOSLConfigFile(t, oslConfigFilename)
 
 		paveTrafficRulesFile(
-			t, trafficRulesFilename, propagationChannelID, runConfig.denyTrafficRules)
+			t, trafficRulesFilename, propagationChannelID, accessType,
+			runConfig.requireAuthorization, runConfig.denyTrafficRules)
 
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(syscall.SIGUSR1)
@@ -449,6 +550,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.LocalSocksProxyPort = localSOCKSProxyPort
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
 	clientConfig.EmitSLOKs = true
+
+	if !runConfig.omitAuthorization {
+		clientConfig.Authorizations = []string{clientAuthorization}
+	}
 
 	if runConfig.doClientVerification {
 		clientConfig.ClientPlatform = "Android"
@@ -554,6 +659,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		waitOnNotification(t, verificationCompleted, timeoutSignal, "verification completed timeout exceeded")
 	}
 
+	expectTrafficFailure := runConfig.denyTrafficRules || (runConfig.omitAuthorization && runConfig.requireAuthorization)
+
 	if runConfig.doTunneledWebRequest {
 
 		// Test: tunneled web site fetch
@@ -562,11 +669,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			t, localHTTPProxyPort, mockWebServerURL, mockWebServerExpectedResponse)
 
 		if err == nil {
-			if runConfig.denyTrafficRules {
+			if expectTrafficFailure {
 				t.Fatalf("unexpected tunneled web request success")
 			}
 		} else {
-			if !runConfig.denyTrafficRules {
+			if !expectTrafficFailure {
 				t.Fatalf("tunneled web request failed: %s", err)
 			}
 		}
@@ -581,11 +688,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		err = makeTunneledNTPRequest(t, localSOCKSProxyPort, udpgwServerAddress)
 
 		if err == nil {
-			if runConfig.denyTrafficRules {
+			if expectTrafficFailure {
 				t.Fatalf("unexpected tunneled NTP request success")
 			}
 		} else {
-			if !runConfig.denyTrafficRules {
+			if !expectTrafficFailure {
 				t.Fatalf("tunneled NTP request failed: %s", err)
 			}
 		}
@@ -593,7 +700,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// Test: await SLOK payload
 
-	if !runConfig.denyTrafficRules {
+	if !expectTrafficFailure {
 
 		time.Sleep(1 * time.Second)
 		waitOnNotification(t, slokSeeded, timeoutSignal, "SLOK seeded timeout exceeded")
@@ -887,7 +994,8 @@ func pavePsinetDatabaseFile(
 }
 
 func paveTrafficRulesFile(
-	t *testing.T, trafficRulesFilename, propagationChannelID string, deny bool) {
+	t *testing.T, trafficRulesFilename, propagationChannelID, accessType string,
+	requireAuthorization, deny bool) {
 
 	allowTCPPorts := fmt.Sprintf("%d", mockWebServerPort)
 	allowUDPPorts := "53, 123"
@@ -895,6 +1003,15 @@ func paveTrafficRulesFile(
 	if deny {
 		allowTCPPorts = "0"
 		allowUDPPorts = "0"
+	}
+
+	authorizationFilterFormat := `,
+                    "AuthorizedAccessTypes" : ["%s"]
+	`
+
+	authorizationFilter := ""
+	if requireAuthorization {
+		authorizationFilter = fmt.Sprintf(authorizationFilterFormat, accessType)
 	}
 
 	trafficRulesJSONFormat := `
@@ -912,7 +1029,7 @@ func paveTrafficRulesFile(
                 "Filter" : {
                     "HandshakeParameters" : {
                         "propagation_channel_id" : ["%s"]
-                    }
+                    }%s
                 },
                 "Rules" : {
                     "RateLimits" : {
@@ -928,7 +1045,7 @@ func paveTrafficRulesFile(
     `
 
 	trafficRulesJSON := fmt.Sprintf(
-		trafficRulesJSONFormat, propagationChannelID, allowTCPPorts, allowUDPPorts)
+		trafficRulesJSONFormat, propagationChannelID, authorizationFilter, allowTCPPorts, allowUDPPorts)
 
 	err := ioutil.WriteFile(trafficRulesFilename, []byte(trafficRulesJSON), 0600)
 	if err != nil {

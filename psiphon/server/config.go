@@ -33,6 +33,7 @@ import (
 	"strings"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -289,6 +290,13 @@ type Config struct {
 	// every specified number of seconds, to force garbage collection.
 	// The default, 0 is off.
 	PeriodicGarbageCollectionSeconds int
+
+	// AccessControlVerificationKeyRing is the access control authorization
+	// verification key ring used to verify signed authorizations presented
+	// by clients. Verified, active (unexpired) access control types will be
+	// available for matching in the TrafficRulesFilter for the client via
+	// AuthorizedAccessTypes. All other authorizations are ignored.
+	AccessControlVerificationKeyRing accesscontrol.VerificationKeyRing
 }
 
 // RunWebServer indicates whether to run a web server component.
@@ -384,6 +392,12 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		if net.ParseIP(config.DNSResolverIPAddress) == nil {
 			return nil, fmt.Errorf("DNSResolverIPAddress is invalid")
 		}
+	}
+
+	err = accesscontrol.ValidateVerificationKeyRing(&config.AccessControlVerificationKeyRing)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"AccessControlVerificationKeyRing is invalid: %s", err)
 	}
 
 	return &config, nil

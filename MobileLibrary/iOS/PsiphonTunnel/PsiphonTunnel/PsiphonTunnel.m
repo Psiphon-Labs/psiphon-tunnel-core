@@ -846,6 +846,20 @@
             });
         }
     }
+    else if ([noticeType isEqualToString:@"ActiveAuthorizationIDs"]) {
+        id authorizations = [notice valueForKeyPath:@"data.IDs"];
+        if (![authorizations isKindOfClass:[NSArray class]]) {
+            [self logMessage:[NSString stringWithFormat: @"ActiveAuthorizationIDs notice missing data.IDs: %@", noticeJSON]];
+            return;
+        }
+
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onActiveAuthorizationIDs:)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onActiveAuthorizationIDs:authorizations];
+            });
+        }
+    }
+
     else if ([noticeType isEqualToString:@"InternalError"]) {
         internalError = TRUE;
     }

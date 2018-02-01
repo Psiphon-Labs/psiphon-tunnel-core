@@ -1312,62 +1312,6 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// Always emit a final NoticeTotalBytesTransferred
 	NoticeTotalBytesTransferred(tunnel.serverEntry.IpAddress, totalSent, totalReceived)
 
-	// Tunnel does not have a serverContext when DisableApi is set.
-	if tunnel.serverContext != nil && !tunnel.IsDiscarded() {
-
-		// The stats for this tunnel will be reported via the next successful
-		// status request.
-
-		// Since client clocks are unreliable, we report the server's timestamp from
-		// the handshake response as the absolute tunnel start time. This time
-		// will be slightly earlier than the actual tunnel activation time, as the
-		// client has to receive and parse the response and activate the tunnel.
-
-		tunnelStartTime := tunnel.serverContext.serverHandshakeTimestamp
-
-		// For the tunnel duration calculation, we use the local clock. The start time
-		// is tunnel.establishedTime as recorded when the tunnel was established. For the
-		// end time, we do not use the current time as we may now be long past the
-		// actual termination time of the tunnel. For example, the host or device may
-		// have resumed after a long sleep (it's not clear that the monotonic clock service
-		// used to measure elapsed time will or will not stop during device sleep). Instead,
-		// we use the last data received time as the estimated tunnel end time.
-		//
-		// One potential issue with using the last received time is receiving data
-		// after an extended sleep because the device sleep occurred with data still in
-		// the OS socket read buffer. This is not expected to happen on Android, as the
-		// OS will wake a process when it has TCP data available to read. (For this reason,
-		// the actual long sleep issue is only with an idle tunnel; in this case the client
-		// is responsible for sending SSH keep alives but a device sleep will delay the
-		// golang SSH keep alive timer.)
-		//
-		// Idle tunnels will only read data when a SSH keep alive is sent. As a result,
-		// the last-received-time scheme can undercount tunnel durations by up to
-		// TUNNEL_SSH_KEEP_ALIVE_PERIOD_MAX for idle tunnels.
-
-		tunnelDuration := tunnel.conn.GetLastActivityMonotime().Sub(tunnel.establishedTime)
-
-		// tunnelDuration can be < 0 when tunnel.establishedTime is recorded after the
-		// last tunnel.conn.Read() succeeds. In that case, the last read would be the
-		// handshake response, so the tunnel had, essentially, no duration.
-		if tunnelDuration < 0 {
-			tunnelDuration = 0
-		}
-
-		err := RecordTunnelStat(
-			tunnel.serverContext.sessionId,
-			tunnel.serverContext.tunnelNumber,
-			tunnel.serverEntry.IpAddress,
-			fmt.Sprintf("%d", tunnel.establishDuration),
-			tunnelStartTime,
-			fmt.Sprintf("%d", tunnelDuration),
-			totalSent,
-			totalReceived)
-		if err != nil {
-			NoticeAlert("RecordTunnelStats failed: %s", common.ContextError(err))
-		}
-	}
-
 	if err == nil {
 		NoticeInfo("shutdown operate tunnel")
 
