@@ -33,6 +33,7 @@ import (
 	"strings"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -274,6 +275,28 @@ type Config struct {
 	// PacketTunnelSudoNetworkConfigCommands sets
 	// tun.ServerConfig.SudoNetworkConfigCommands.
 	PacketTunnelSudoNetworkConfigCommands bool
+
+	// MaxConcurrentSSHHandshakes specifies a limit on the number of concurrent
+	// SSH handshake negotiations. This is set to mitigate spikes in memory
+	// allocations and CPU usage associated with SSH handshakes when many clients
+	// attempt to connect concurrently. When a maximum limit is specified and
+	// reached, additional clients that establish TCP or meek connections will
+	// be disconnected after a short wait for the number of concurrent handshakes
+	// to drop below the limit.
+	// The default, 0 is no limit.
+	MaxConcurrentSSHHandshakes int
+
+	// PeriodicGarbageCollectionSeconds turns on periodic calls to runtime.GC,
+	// every specified number of seconds, to force garbage collection.
+	// The default, 0 is off.
+	PeriodicGarbageCollectionSeconds int
+
+	// AccessControlVerificationKeyRing is the access control authorization
+	// verification key ring used to verify signed authorizations presented
+	// by clients. Verified, active (unexpired) access control types will be
+	// available for matching in the TrafficRulesFilter for the client via
+	// AuthorizedAccessTypes. All other authorizations are ignored.
+	AccessControlVerificationKeyRing accesscontrol.VerificationKeyRing
 }
 
 // RunWebServer indicates whether to run a web server component.
@@ -284,6 +307,11 @@ func (config *Config) RunWebServer() bool {
 // RunLoadMonitor indicates whether to monitor and log server load.
 func (config *Config) RunLoadMonitor() bool {
 	return config.LoadMonitorPeriodSeconds > 0
+}
+
+// RunPeriodicGarbageCollection indicates whether to run periodic garbage collection.
+func (config *Config) RunPeriodicGarbageCollection() bool {
+	return config.PeriodicGarbageCollectionSeconds > 0
 }
 
 // LoadConfig loads and validates a JSON encoded server config.
@@ -364,6 +392,12 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		if net.ParseIP(config.DNSResolverIPAddress) == nil {
 			return nil, fmt.Errorf("DNSResolverIPAddress is invalid")
 		}
+	}
+
+	err = accesscontrol.ValidateVerificationKeyRing(&config.AccessControlVerificationKeyRing)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"AccessControlVerificationKeyRing is invalid: %s", err)
 	}
 
 	return &config, nil

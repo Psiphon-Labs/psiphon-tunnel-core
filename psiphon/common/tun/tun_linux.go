@@ -28,8 +28,8 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/Psiphon-Inc/gocapability/capability"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/syndtr/gocapability/capability"
 )
 
 const (
@@ -190,6 +190,13 @@ func resetNATTables(
 		"--orig-src",
 		IPAddress.String())
 	if err != nil {
+
+		// conntrack exits with this error message when there are no flows
+		// to delete, which is not a failure condition.
+		if strings.Contains(err.Error(), "0 flow entries have been deleted") {
+			return nil
+		}
+
 		return common.ContextError(err)
 	}
 

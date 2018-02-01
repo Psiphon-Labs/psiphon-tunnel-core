@@ -22,6 +22,7 @@ package server
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,24 +34,28 @@ import (
 	"syscall"
 	"time"
 
-	cache "github.com/Psiphon-Inc/go-cache"
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
+	"github.com/marusama/semaphore"
+	cache "github.com/patrickmn/go-cache"
 )
 
 const (
 	SSH_AUTH_LOG_PERIOD                   = 30 * time.Minute
 	SSH_HANDSHAKE_TIMEOUT                 = 30 * time.Second
+	SSH_BEGIN_HANDSHAKE_TIMEOUT           = 1 * time.Second
 	SSH_CONNECTION_READ_DEADLINE          = 5 * time.Minute
 	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE = 8192
 	SSH_TCP_PORT_FORWARD_QUEUE_SIZE       = 1024
 	SSH_SEND_OSL_INITIAL_RETRY_DELAY      = 30 * time.Second
 	SSH_SEND_OSL_RETRY_FACTOR             = 2
 	OSL_SESSION_CACHE_TTL                 = 5 * time.Minute
+	MAX_AUTHORIZATIONS                    = 16
 )
 
 // TunnelServer is the main server that accepts Psiphon client
@@ -220,10 +225,17 @@ func (server *TunnelServer) ResetAllClientOSLConfigs() {
 // also triggers an immediate traffic rule re-selection, as the rules selected
 // upon tunnel establishment may no longer apply now that handshake values are
 // set.
+//
+// The authorizations received from the client handshake are verified and the
+// resulting list of authorized access types are applied to the client's tunnel
+// and traffic rules. A list of active authorization IDs and authorized access
+// types is returned for responding to the client and logging.
 func (server *TunnelServer) SetClientHandshakeState(
-	sessionID string, state handshakeState) error {
+	sessionID string,
+	state handshakeState,
+	authorizations []string) ([]string, []string, error) {
 
-	return server.sshServer.setClientHandshakeState(sessionID, state)
+	return server.sshServer.setClientHandshakeState(sessionID, state, authorizations)
 }
 
 // GetClientHandshaked indicates whether the client has completed a handshake
@@ -232,6 +244,14 @@ func (server *TunnelServer) GetClientHandshaked(
 	sessionID string) (bool, bool, error) {
 
 	return server.sshServer.getClientHandshaked(sessionID)
+}
+
+// ExpectClientDomainBytes indicates whether the client was configured to report
+// domain bytes in its handshake response.
+func (server *TunnelServer) ExpectClientDomainBytes(
+	sessionID string) (bool, error) {
+
+	return server.sshServer.expectClientDomainBytes(sessionID)
 }
 
 // SetEstablishTunnels sets whether new tunnels may be established or not.
@@ -249,18 +269,20 @@ type sshServer struct {
 	// Note: 64-bit ints used with atomic operations are placed
 	// at the start of struct to ensure 64-bit alignment.
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	lastAuthLog          int64
-	authFailedCount      int64
-	support              *SupportServices
-	establishTunnels     int32
-	shutdownBroadcast    <-chan struct{}
-	sshHostKey           ssh.Signer
-	clientsMutex         sync.Mutex
-	stoppingClients      bool
-	acceptedClientCounts map[string]map[string]int64
-	clients              map[string]*sshClient
-	oslSessionCacheMutex sync.Mutex
-	oslSessionCache      *cache.Cache
+	lastAuthLog             int64
+	authFailedCount         int64
+	support                 *SupportServices
+	establishTunnels        int32
+	concurrentSSHHandshakes semaphore.Semaphore
+	shutdownBroadcast       <-chan struct{}
+	sshHostKey              ssh.Signer
+	clientsMutex            sync.Mutex
+	stoppingClients         bool
+	acceptedClientCounts    map[string]map[string]int64
+	clients                 map[string]*sshClient
+	oslSessionCacheMutex    sync.Mutex
+	oslSessionCache         *cache.Cache
+	activeAuthorizationIDs  sync.Map
 }
 
 func newSSHServer(
@@ -278,6 +300,11 @@ func newSSHServer(
 		return nil, common.ContextError(err)
 	}
 
+	var concurrentSSHHandshakes semaphore.Semaphore
+	if support.Config.MaxConcurrentSSHHandshakes > 0 {
+		concurrentSSHHandshakes = semaphore.New(support.Config.MaxConcurrentSSHHandshakes)
+	}
+
 	// The OSL session cache temporarily retains OSL seed state
 	// progress for disconnected clients. This enables clients
 	// that disconnect and immediately reconnect to the same
@@ -292,13 +319,14 @@ func newSSHServer(
 	oslSessionCache := cache.New(OSL_SESSION_CACHE_TTL, 1*time.Minute)
 
 	return &sshServer{
-		support:              support,
-		establishTunnels:     1,
-		shutdownBroadcast:    shutdownBroadcast,
-		sshHostKey:           signer,
-		acceptedClientCounts: make(map[string]map[string]int64),
-		clients:              make(map[string]*sshClient),
-		oslSessionCache:      oslSessionCache,
+		support:                 support,
+		establishTunnels:        1,
+		concurrentSSHHandshakes: concurrentSSHHandshakes,
+		shutdownBroadcast:       shutdownBroadcast,
+		sshHostKey:              signer,
+		acceptedClientCounts:    make(map[string]map[string]int64),
+		clients:                 make(map[string]*sshClient),
+		oslSessionCache:         oslSessionCache,
 	}, nil
 }
 
@@ -479,7 +507,14 @@ func (sshServer *sshServer) registerEstablishedClient(client *sshClient) bool {
 	// Call stop() outside the mutex to avoid deadlock.
 	if existingClient != nil {
 		existingClient.stop()
-		log.WithContext().Info(
+
+		// Since existingClient.run() isn't guaranteed to have terminated at
+		// this point, synchronously release authorizations for the previous
+		// client here. This ensures that the authorization IDs are not in
+		// use when the reconnecting client submits its authorizations.
+		existingClient.cleanupAuthorizations()
+
+		log.WithContext().Debug(
 			"stopped existing client with duplicate session ID")
 	}
 
@@ -654,22 +689,25 @@ func (sshServer *sshServer) resetAllClientOSLConfigs() {
 }
 
 func (sshServer *sshServer) setClientHandshakeState(
-	sessionID string, state handshakeState) error {
+	sessionID string,
+	state handshakeState,
+	authorizations []string) ([]string, []string, error) {
 
 	sshServer.clientsMutex.Lock()
 	client := sshServer.clients[sessionID]
 	sshServer.clientsMutex.Unlock()
 
 	if client == nil {
-		return common.ContextError(errors.New("unknown session ID"))
+		return nil, nil, common.ContextError(errors.New("unknown session ID"))
 	}
 
-	err := client.setHandshakeState(state)
+	activeAuthorizationIDs, authorizedAccessTypes, err := client.setHandshakeState(
+		state, authorizations)
 	if err != nil {
-		return common.ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 
-	return nil
+	return activeAuthorizationIDs, authorizedAccessTypes, nil
 }
 
 func (sshServer *sshServer) getClientHandshaked(
@@ -686,6 +724,20 @@ func (sshServer *sshServer) getClientHandshaked(
 	completed, exhausted := client.getHandshaked()
 
 	return completed, exhausted, nil
+}
+
+func (sshServer *sshServer) expectClientDomainBytes(
+	sessionID string) (bool, error) {
+
+	sshServer.clientsMutex.Lock()
+	client := sshServer.clients[sessionID]
+	sshServer.clientsMutex.Unlock()
+
+	if client == nil {
+		return false, common.ContextError(errors.New("unknown session ID"))
+	}
+
+	return client.expectDomainBytes(), nil
 }
 
 func (sshServer *sshServer) stopClients() {
@@ -709,9 +761,57 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	sshServer.registerAcceptedClient(tunnelProtocol, geoIPData.Country)
 	defer sshServer.unregisterAcceptedClient(tunnelProtocol, geoIPData.Country)
 
+	// When configured, enforce a cap on the number of concurrent SSH
+	// handshakes. This limits load spikes on busy servers when many clients
+	// attempt to connect at once. Wait a short time, SSH_BEGIN_HANDSHAKE_TIMEOUT,
+	// to acquire; waiting will avoid immediately creating more load on another
+	// server in the network when the client tries a new candidate. Disconnect the
+	// client when that wait time is exceeded.
+	//
+	// This mechanism limits memory allocations and CPU usage associated with the
+	// SSH handshake. At this point, new direct TCP connections or new meek
+	// connections, with associated resource usage, are already established. Those
+	// connections are expected to be rate or load limited using other mechanisms.
+	//
+	// TODO:
+	//
+	// - deduct time spent acquiring the semaphore from SSH_HANDSHAKE_TIMEOUT in
+	//   sshClient.run, since the client is also applying an SSH handshake timeout
+	//   and won't exclude time spent waiting.
+	// - each call to sshServer.handleClient (in sshServer.runListener) is invoked
+	//   in its own goroutine, but shutdown doesn't synchronously await these
+	//   goroutnes. Once this is synchronizes, the following context.WithTimeout
+	//   should use an sshServer parent context to ensure blocking acquires
+	//   interrupt immediately upon shutdown.
+
+	var onSSHHandshakeFinished func()
+	if sshServer.support.Config.MaxConcurrentSSHHandshakes > 0 {
+
+		ctx, cancelFunc := context.WithTimeout(
+			context.Background(), SSH_BEGIN_HANDSHAKE_TIMEOUT)
+		defer cancelFunc()
+
+		err := sshServer.concurrentSSHHandshakes.Acquire(ctx, 1)
+		if err != nil {
+			clientConn.Close()
+			// This is a debug log as the only possible error is context timeout.
+			log.WithContextFields(LogFields{"error": err}).Debug(
+				"acquire SSH handshake semaphore failed")
+			return
+		}
+
+		onSSHHandshakeFinished = func() {
+			sshServer.concurrentSSHHandshakes.Release(1)
+		}
+	}
+
 	sshClient := newSshClient(sshServer, tunnelProtocol, geoIPData)
 
-	sshClient.run(clientConn)
+	// sshClient.run _must_ call onSSHHandshakeFinished to release the semaphore:
+	// in any error case; or, as soon as the SSH handshake phase has successfully
+	// completed.
+
+	sshClient.run(clientConn, onSSHHandshakeFinished)
 }
 
 func (sshServer *sshServer) monitorPortForwardDialError(err error) {
@@ -764,6 +864,8 @@ type sshClient struct {
 	runCtx                               context.Context
 	stopRunning                          context.CancelFunc
 	tcpPortForwardDialingAvailableSignal context.CancelFunc
+	releaseAuthorizations                func()
+	stopTimer                            *time.Timer
 }
 
 type trafficState struct {
@@ -791,9 +893,11 @@ type qualityMetrics struct {
 }
 
 type handshakeState struct {
-	completed   bool
-	apiProtocol string
-	apiParams   requestJSONObject
+	completed             bool
+	apiProtocol           string
+	apiParams             requestJSONObject
+	authorizedAccessTypes []string
+	expectDomainBytes     bool
 }
 
 func newSshClient(
@@ -817,7 +921,15 @@ func newSshClient(
 	return client
 }
 
-func (sshClient *sshClient) run(clientConn net.Conn) {
+func (sshClient *sshClient) run(
+	clientConn net.Conn, onSSHHandshakeFinished func()) {
+
+	// onSSHHandshakeFinished must be called even if the SSH handshake is aborted.
+	defer func() {
+		if onSSHHandshakeFinished != nil {
+			onSSHHandshakeFinished()
+		}
+	}()
 
 	// Some conns report additional metrics
 	metricsSource, isMetricsSource := clientConn.(MetricsSource)
@@ -927,6 +1039,13 @@ func (sshClient *sshClient) run(clientConn net.Conn) {
 		log.WithContextFields(LogFields{"error": result.err}).Debug("handshake failed")
 		return
 	}
+
+	// The SSH handshake has finished successfully; notify now to allow other
+	// blocked SSH handshakes to proceed.
+	if onSSHHandshakeFinished != nil {
+		onSSHHandshakeFinished()
+	}
+	onSSHHandshakeFinished = nil
 
 	sshClient.Lock()
 	sshClient.sshConn = result.sshConn
@@ -1115,10 +1234,20 @@ func (sshClient *sshClient) runTunnel(
 			if request.Type == "keepalive@openssh.com" {
 				// Keepalive requests have an empty response.
 			} else {
+
 				// All other requests are assumed to be API requests.
+
+				sshClient.Lock()
+				authorizedAccessTypes := sshClient.handshakeState.authorizedAccessTypes
+				sshClient.Unlock()
+
+				// Note: unlock before use is only safe as long as referenced sshClient data,
+				// such as slices in handshakeState, is read-only after initially set.
+
 				responsePayload, err = sshAPIRequestHandler(
 					sshClient.sshServer.support,
 					sshClient.geoIPData,
+					authorizedAccessTypes,
 					request.Type,
 					request.Payload)
 			}
@@ -1325,7 +1454,7 @@ func (sshClient *sshClient) runTunnel(
 
 			sshClient.setPacketTunnelChannel(packetTunnelChannel)
 
-			// PacketTunnelServer will run the client's packet tunnel. If neessary, ClientConnected
+			// PacketTunnelServer will run the client's packet tunnel. If necessary, ClientConnected
 			// will stop packet tunnel workers for any previous packet tunnel channel.
 
 			checkAllowedTCPPortFunc := func(upstreamIPAddress net.IP, port int) bool {
@@ -1347,12 +1476,31 @@ func (sshClient *sshClient) runTunnel(
 				return updaters
 			}
 
-			sshClient.sshServer.support.PacketTunnelServer.ClientConnected(
+			metricUpdater := func(
+				TCPApplicationBytesUp, TCPApplicationBytesDown,
+				UDPApplicationBytesUp, UDPApplicationBytesDown int64) {
+
+				sshClient.Lock()
+				sshClient.tcpTrafficState.bytesUp += TCPApplicationBytesUp
+				sshClient.tcpTrafficState.bytesDown += TCPApplicationBytesDown
+				sshClient.udpTrafficState.bytesUp += UDPApplicationBytesUp
+				sshClient.udpTrafficState.bytesDown += UDPApplicationBytesDown
+				sshClient.Unlock()
+			}
+
+			err = sshClient.sshServer.support.PacketTunnelServer.ClientConnected(
 				sshClient.sessionID,
 				packetTunnelChannel,
 				checkAllowedTCPPortFunc,
 				checkAllowedUDPPortFunc,
-				flowActivityUpdaterMaker)
+				flowActivityUpdaterMaker,
+				metricUpdater)
+			if err != nil {
+				log.WithContextFields(LogFields{"error": err}).Warning("start packet tunnel client failed")
+				sshClient.setPacketTunnelChannel(nil)
+			}
+
+			continue
 		}
 
 		if newChannel.ChannelType() != "direct-tcpip" {
@@ -1428,6 +1576,22 @@ func (sshClient *sshClient) runTunnel(
 	}
 
 	waitGroup.Wait()
+
+	sshClient.cleanupAuthorizations()
+}
+
+func (sshClient *sshClient) cleanupAuthorizations() {
+	sshClient.Lock()
+
+	if sshClient.releaseAuthorizations != nil {
+		sshClient.releaseAuthorizations()
+	}
+
+	if sshClient.stopTimer != nil {
+		sshClient.stopTimer.Stop()
+	}
+
+	sshClient.Unlock()
 }
 
 // setPacketTunnelChannel sets the single packet tunnel channel
@@ -1469,12 +1633,13 @@ func (sshClient *sshClient) logTunnel(additionalMetrics LogFields) {
 	sshClient.Lock()
 
 	logFields := getRequestLogFields(
-		sshClient.sshServer.support,
 		"server_tunnel",
 		sshClient.geoIPData,
+		sshClient.handshakeState.authorizedAccessTypes,
 		sshClient.handshakeState.apiParams,
 		baseRequestParams)
 
+	logFields["session_id"] = sshClient.sessionID
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["start_time"] = sshClient.activityConn.GetStartTime()
 	logFields["duration"] = sshClient.activityConn.GetActiveDuration() / time.Millisecond
@@ -1500,6 +1665,9 @@ func (sshClient *sshClient) logTunnel(additionalMetrics LogFields) {
 	}
 
 	sshClient.Unlock()
+
+	// Note: unlock before use is only safe as long as referenced sshClient data,
+	// such as slices in handshakeState, is read-only after initially set.
 
 	log.LogRawFieldsWithTimestamp(logFields)
 }
@@ -1595,7 +1763,9 @@ func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, reason s
 // selection. Port forwards are disallowed until a handshake is complete. The
 // handshake parameters are included in the session summary log recorded in
 // sshClient.stop().
-func (sshClient *sshClient) setHandshakeState(state handshakeState) error {
+func (sshClient *sshClient) setHandshakeState(
+	state handshakeState,
+	authorizations []string) ([]string, []string, error) {
 
 	sshClient.Lock()
 	completed := sshClient.handshakeState.completed
@@ -1606,13 +1776,107 @@ func (sshClient *sshClient) setHandshakeState(state handshakeState) error {
 
 	// Client must only perform one handshake
 	if completed {
-		return common.ContextError(errors.New("handshake already completed"))
+		return nil, nil, common.ContextError(errors.New("handshake already completed"))
+	}
+
+	// Verify the authorizations submitted by the client. Verified, active (non-expired)
+	// access types will be available for traffic rules filtering.
+	//
+	// When an authorization is active but expires while the client is connected, the
+	// client is disconnected to ensure the access is revoked. This is implemented by
+	// setting a timer to perform the disconnect at the expiry time of the soonest
+	// expiring authorization.
+	//
+	// sshServer.activeAuthorizationIDs tracks the unique IDs of active authorizations
+	// and is used to detect and prevent multiple malicious clients from reusing a
+	// single authorization (within the scope of this server).
+
+	// authorizationIDs and authorizedAccessTypes are returned to the client and logged,
+	// respectively; initialize to empty lists so the protocol/logs don't need to handle
+	// 'null' values.
+	authorizationIDs := make([]string, 0)
+	authorizedAccessTypes := make([]string, 0)
+	var stopTime time.Time
+
+	for i, authorization := range authorizations {
+
+		// This sanity check mitigates malicious clients causing excess CPU use.
+		if i >= MAX_AUTHORIZATIONS {
+			log.WithContext().Warning("too many authorizations")
+			break
+		}
+
+		verifiedAuthorization, err := accesscontrol.VerifyAuthorization(
+			&sshClient.sshServer.support.Config.AccessControlVerificationKeyRing,
+			authorization)
+
+		if err != nil {
+			log.WithContextFields(
+				LogFields{"error": err}).Warning("verify authorization failed")
+			continue
+		}
+
+		authorizationID := base64.StdEncoding.EncodeToString(verifiedAuthorization.ID)
+
+		// A client may reconnect while the server still has an active sshClient for that
+		// client session. In this case, the previous sshClient is closed by the new
+		// client's call to sshServer.registerEstablishedClient.
+		// This is assumed to call sshClient.releaseAuthorizations which will remove
+		// the client's authorization IDs before this check is reached.
+
+		if _, exists := sshClient.sshServer.activeAuthorizationIDs.LoadOrStore(authorizationID, true); exists {
+			log.WithContextFields(
+				LogFields{"ID": verifiedAuthorization.ID}).Warning("duplicate active authorization")
+			continue
+		}
+
+		if common.Contains(authorizedAccessTypes, verifiedAuthorization.AccessType) {
+			log.WithContextFields(
+				LogFields{"accessType": verifiedAuthorization.AccessType}).Warning("duplicate authorization access type")
+			continue
+		}
+
+		authorizationIDs = append(authorizationIDs, authorizationID)
+		authorizedAccessTypes = append(authorizedAccessTypes, verifiedAuthorization.AccessType)
+
+		if stopTime.IsZero() || stopTime.After(verifiedAuthorization.Expires) {
+			stopTime = verifiedAuthorization.Expires
+		}
+	}
+
+	if len(authorizationIDs) > 0 {
+
+		sshClient.Lock()
+
+		// Make the authorizedAccessTypes available for traffic rules filtering.
+
+		sshClient.handshakeState.authorizedAccessTypes = authorizedAccessTypes
+
+		// On exit, sshClient.runTunnel will call releaseAuthorizations, which
+		// will release the authorization IDs so the client can reconnect and
+		// present the same authorizations again. sshClient.runTunnel will
+		// also cancel the stopTimer in case it has not yet fired.
+		// Note: termination of the stopTimer goroutine is not synchronized.
+
+		sshClient.releaseAuthorizations = func() {
+			for _, ID := range authorizationIDs {
+				sshClient.sshServer.activeAuthorizationIDs.Delete(ID)
+			}
+		}
+
+		sshClient.stopTimer = time.AfterFunc(
+			stopTime.Sub(time.Now()),
+			func() {
+				sshClient.stop()
+			})
+
+		sshClient.Unlock()
 	}
 
 	sshClient.setTrafficRules()
 	sshClient.setOSLConfig()
 
-	return nil
+	return authorizationIDs, authorizedAccessTypes, nil
 }
 
 // getHandshaked returns whether the client has completed a handshake API
@@ -1647,6 +1911,13 @@ func (sshClient *sshClient) getHandshaked() (bool, bool) {
 	}
 
 	return completed, exhausted
+}
+
+func (sshClient *sshClient) expectDomainBytes() bool {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	return sshClient.handshakeState.expectDomainBytes
 }
 
 // setTrafficRules resets the client's traffic rules based on the latest server config

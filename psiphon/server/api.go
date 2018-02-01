@@ -56,18 +56,28 @@ type requestJSONObject map[string]interface{}
 // reused by webServer which offers the Psiphon API via web transport.
 //
 // The API request parameters and event log values follow the legacy
-// psi_web protocol and naming conventions. The API is compatible all
-// tunnel-core clients but are not backwards compatible with older
-// clients.
+// psi_web protocol and naming conventions. The API is compatible with
+// all tunnel-core clients but are not backwards compatible with all
+// legacy clients.
 //
 func sshAPIRequestHandler(
 	support *SupportServices,
 	geoIPData GeoIPData,
+	authorizedAccessTypes []string,
 	name string,
 	requestPayload []byte) ([]byte, error) {
 
-	// Note: for SSH requests, MAX_API_PARAMS_SIZE is implicitly enforced
-	// by max SSH reqest packet size.
+	// Notes:
+	//
+	// - For SSH requests, MAX_API_PARAMS_SIZE is implicitly enforced
+	//   by max SSH request packet size.
+	//
+	// - The param protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS is an
+	//   array of base64-encoded strings; the base64 representation should
+	//   not be decoded to []byte values. The default behavior of
+	//   https://golang.org/pkg/encoding/json/#Unmarshal for a target of
+	//   type map[string]interface{} will unmarshal a base64-encoded string
+	//   to a string, not a decoded []byte, as required.
 
 	var params requestJSONObject
 	err := json.Unmarshal(requestPayload, &params)
@@ -80,6 +90,7 @@ func sshAPIRequestHandler(
 		support,
 		protocol.PSIPHON_SSH_API_PROTOCOL,
 		geoIPData,
+		authorizedAccessTypes,
 		name,
 		params)
 }
@@ -90,6 +101,7 @@ func dispatchAPIRequestHandler(
 	support *SupportServices,
 	apiProtocol string,
 	geoIPData GeoIPData,
+	authorizedAccessTypes []string,
 	name string,
 	params requestJSONObject) (response []byte, reterr error) {
 
@@ -155,11 +167,11 @@ func dispatchAPIRequestHandler(
 	case protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
 		return handshakeAPIRequestHandler(support, apiProtocol, geoIPData, params)
 	case protocol.PSIPHON_API_CONNECTED_REQUEST_NAME:
-		return connectedAPIRequestHandler(support, geoIPData, params)
+		return connectedAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
 	case protocol.PSIPHON_API_STATUS_REQUEST_NAME:
-		return statusAPIRequestHandler(support, geoIPData, params)
+		return statusAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
 	case protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME:
-		return clientVerificationAPIRequestHandler(support, geoIPData, params)
+		return clientVerificationAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
 	}
 
 	return nil, common.ContextError(fmt.Errorf("invalid request name: %s", name))
@@ -189,45 +201,62 @@ func handshakeAPIRequestHandler(
 	isMobile := isMobileClientPlatform(clientPlatform)
 	normalizedPlatform := normalizeClientPlatform(clientPlatform)
 
+	var authorizations []string
+	if params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] != nil {
+		authorizations, err = getStringArrayRequestParam(params, protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+	}
+
+	// Note: no guarantee that PsinetDatabase won't reload between database calls
+	db := support.PsinetDatabase
+
+	httpsRequestRegexes := db.GetHttpsRequestRegexes(sponsorID)
+
 	// Flag the SSH client as having completed its handshake. This
 	// may reselect traffic rules and starts allowing port forwards.
 
 	// TODO: in the case of SSH API requests, the actual sshClient could
 	// be passed in and used here. The session ID lookup is only strictly
 	// necessary to support web API requests.
-	err = support.TunnelServer.SetClientHandshakeState(
+	activeAuthorizationIDs, authorizedAccessTypes, err := support.TunnelServer.SetClientHandshakeState(
 		sessionID,
 		handshakeState{
-			completed:   true,
-			apiProtocol: apiProtocol,
-			apiParams:   copyBaseRequestParams(params),
-		})
+			completed:         true,
+			apiProtocol:       apiProtocol,
+			apiParams:         copyBaseRequestParams(params),
+			expectDomainBytes: len(httpsRequestRegexes) > 0,
+		},
+		authorizations)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
 	// The log comes _after_ SetClientHandshakeState, in case that call rejects
 	// the state change (for example, if a second handshake is performed)
+	//
+	// The handshake event is no longer shipped to log consumers, so this is
+	// simply a diagnostic log.
 
-	log.LogRawFieldsWithTimestamp(
+	log.WithContextFields(
 		getRequestLogFields(
-			support,
-			"handshake",
+			"",
 			geoIPData,
+			authorizedAccessTypes,
 			params,
-			baseRequestParams))
+			baseRequestParams)).Info("handshake")
 
-	// Note: no guarantee that PsinetDatabase won't reload between database calls
-	db := support.PsinetDatabase
 	handshakeResponse := protocol.HandshakeResponse{
-		SSHSessionID:         sessionID,
-		Homepages:            db.GetRandomizedHomepages(sponsorID, geoIPData.Country, isMobile),
-		UpgradeClientVersion: db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
-		PageViewRegexes:      make([]map[string]string, 0),
-		HttpsRequestRegexes:  db.GetHttpsRequestRegexes(sponsorID),
-		EncodedServerList:    db.DiscoverServers(geoIPData.DiscoveryValue),
-		ClientRegion:         geoIPData.Country,
-		ServerTimestamp:      common.GetCurrentTimestamp(),
+		SSHSessionID:           sessionID,
+		Homepages:              db.GetRandomizedHomepages(sponsorID, geoIPData.Country, isMobile),
+		UpgradeClientVersion:   db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
+		PageViewRegexes:        make([]map[string]string, 0),
+		HttpsRequestRegexes:    httpsRequestRegexes,
+		EncodedServerList:      db.DiscoverServers(geoIPData.DiscoveryValue),
+		ClientRegion:           geoIPData.Country,
+		ServerTimestamp:        common.GetCurrentTimestamp(),
+		ActiveAuthorizationIDs: activeAuthorizationIDs,
 	}
 
 	responsePayload, err := json.Marshal(handshakeResponse)
@@ -241,7 +270,8 @@ func handshakeAPIRequestHandler(
 var connectedRequestParams = append(
 	[]requestParamSpec{
 		{"session_id", isHexDigits, 0},
-		{"last_connected", isLastConnected, 0}},
+		{"last_connected", isLastConnected, 0},
+		{"establishment_duration", isIntString, requestParamOptional}},
 	baseRequestParams...)
 
 // connectedAPIRequestHandler implements the "connected" API request.
@@ -252,6 +282,7 @@ var connectedRequestParams = append(
 func connectedAPIRequestHandler(
 	support *SupportServices,
 	geoIPData GeoIPData,
+	authorizedAccessTypes []string,
 	params requestJSONObject) ([]byte, error) {
 
 	err := validateRequestParams(support, params, connectedRequestParams)
@@ -261,9 +292,9 @@ func connectedAPIRequestHandler(
 
 	log.LogRawFieldsWithTimestamp(
 		getRequestLogFields(
-			support,
 			"connected",
 			geoIPData,
+			authorizedAccessTypes,
 			params,
 			connectedRequestParams))
 
@@ -294,12 +325,15 @@ var statusRequestParams = append(
 func statusAPIRequestHandler(
 	support *SupportServices,
 	geoIPData GeoIPData,
+	authorizedAccessTypes []string,
 	params requestJSONObject) ([]byte, error) {
 
 	err := validateRequestParams(support, params, statusRequestParams)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
+
+	sessionID, _ := getStringRequestParam(params, "client_session_id")
 
 	statusData, err := getJSONObjectRequestParam(params, "statusData")
 	if err != nil {
@@ -313,21 +347,18 @@ func statusAPIRequestHandler(
 
 	logQueue := make([]LogFields, 0)
 
-	// Overall bytes transferred stats
-
-	bytesTransferred, err := getInt64RequestParam(statusData, "bytes_transferred")
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-	bytesTransferredFields := getRequestLogFields(
-		support, "bytes_transferred", geoIPData, params, statusRequestParams)
-	bytesTransferredFields["bytes"] = bytesTransferred
-	logQueue = append(logQueue, bytesTransferredFields)
-
 	// Domain bytes transferred stats
 	// Older clients may not submit this data
 
-	if statusData["host_bytes"] != nil {
+	// Clients are expected to send host_bytes/domain_bytes stats only when
+	// configured to do so in the handshake reponse. Legacy clients may still
+	// report "(OTHER)" host_bytes when no regexes are set. Drop those stats.
+	domainBytesExpected, err := support.TunnelServer.ExpectClientDomainBytes(sessionID)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	if domainBytesExpected && statusData["host_bytes"] != nil {
 
 		hostBytes, err := getMapStringInt64RequestParam(statusData, "host_bytes")
 		if err != nil {
@@ -336,92 +367,16 @@ func statusAPIRequestHandler(
 		for domain, bytes := range hostBytes {
 
 			domainBytesFields := getRequestLogFields(
-				support, "domain_bytes", geoIPData, params, statusRequestParams)
+				"domain_bytes",
+				geoIPData,
+				authorizedAccessTypes,
+				params,
+				statusRequestParams)
 
 			domainBytesFields["domain"] = domain
 			domainBytesFields["bytes"] = bytes
 
 			logQueue = append(logQueue, domainBytesFields)
-		}
-	}
-
-	// Tunnel duration and bytes transferred stats
-	// Older clients may not submit this data
-
-	if statusData["tunnel_stats"] != nil {
-
-		tunnelStats, err := getJSONObjectArrayRequestParam(statusData, "tunnel_stats")
-		if err != nil {
-			return nil, common.ContextError(err)
-		}
-		for _, tunnelStat := range tunnelStats {
-
-			sessionFields := getRequestLogFields(
-				support, "session", geoIPData, params, statusRequestParams)
-
-			sessionID, err := getStringRequestParam(tunnelStat, "session_id")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["session_id"] = sessionID
-
-			tunnelNumber, err := getInt64RequestParam(tunnelStat, "tunnel_number")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["tunnel_number"] = tunnelNumber
-
-			tunnelServerIPAddress, err := getStringRequestParam(tunnelStat, "tunnel_server_ip_address")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["tunnel_server_ip_address"] = tunnelServerIPAddress
-
-			// Note: older clients won't send establishment_duration
-			if _, ok := tunnelStat["establishment_duration"]; ok {
-
-				strEstablishmentDuration, err := getStringRequestParam(tunnelStat, "establishment_duration")
-				if err != nil {
-					return nil, common.ContextError(err)
-				}
-				establishmentDuration, err := strconv.ParseInt(strEstablishmentDuration, 10, 64)
-				if err != nil {
-					return nil, common.ContextError(err)
-				}
-				// Client reports establishment_duration in nanoseconds; divide to get to milliseconds
-				sessionFields["establishment_duration"] = establishmentDuration / 1000000
-			}
-
-			serverHandshakeTimestamp, err := getStringRequestParam(tunnelStat, "server_handshake_timestamp")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["server_handshake_timestamp"] = serverHandshakeTimestamp
-
-			strDuration, err := getStringRequestParam(tunnelStat, "duration")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			duration, err := strconv.ParseInt(strDuration, 10, 64)
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			// Client reports duration in nanoseconds; divide to get to milliseconds
-			sessionFields["duration"] = duration / 1000000
-
-			totalBytesSent, err := getInt64RequestParam(tunnelStat, "total_bytes_sent")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["total_bytes_sent"] = totalBytesSent
-
-			totalBytesReceived, err := getInt64RequestParam(tunnelStat, "total_bytes_received")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			sessionFields["total_bytes_received"] = totalBytesReceived
-
-			logQueue = append(logQueue, sessionFields)
 		}
 	}
 
@@ -437,7 +392,11 @@ func statusAPIRequestHandler(
 		for _, remoteServerListStat := range remoteServerListStats {
 
 			remoteServerListFields := getRequestLogFields(
-				support, "remote_server_list", geoIPData, params, statusRequestParams)
+				"remote_server_list",
+				geoIPData,
+				authorizedAccessTypes,
+				params,
+				statusRequestParams)
 
 			clientDownloadTimestamp, err := getStringRequestParam(remoteServerListStat, "client_download_timestamp")
 			if err != nil {
@@ -475,6 +434,7 @@ func statusAPIRequestHandler(
 func clientVerificationAPIRequestHandler(
 	support *SupportServices,
 	geoIPData GeoIPData,
+	authorizedAccessTypes []string,
 	params requestJSONObject) ([]byte, error) {
 
 	err := validateRequestParams(support, params, baseRequestParams)
@@ -510,9 +470,9 @@ func clientVerificationAPIRequestHandler(
 		}
 
 		logFields := getRequestLogFields(
-			support,
 			"client_verification",
 			geoIPData,
+			authorizedAccessTypes,
 			params,
 			baseRequestParams)
 
@@ -663,15 +623,17 @@ func validateStringArrayRequestParam(
 // getRequestLogFields makes LogFields to log the API event following
 // the legacy psi_web and current ELK naming conventions.
 func getRequestLogFields(
-	support *SupportServices,
 	eventName string,
 	geoIPData GeoIPData,
+	authorizedAccessTypes []string,
 	params requestJSONObject,
 	expectedParams []requestParamSpec) LogFields {
 
 	logFields := make(LogFields)
 
-	logFields["event_name"] = eventName
+	if eventName != "" {
+		logFields["event_name"] = eventName
+	}
 
 	// In psi_web, the space replacement was done to accommodate space
 	// delimited logging, which is no longer required; we retain the
@@ -679,6 +641,10 @@ func getRequestLogFields(
 	logFields["client_region"] = strings.Replace(geoIPData.Country, " ", "_", -1)
 	logFields["client_city"] = strings.Replace(geoIPData.City, " ", "_", -1)
 	logFields["client_isp"] = strings.Replace(geoIPData.ISP, " ", "_", -1)
+
+	if len(authorizedAccessTypes) > 0 {
+		logFields["authorized_access_types"] = authorizedAccessTypes
+	}
 
 	if params == nil {
 		return logFields
@@ -713,12 +679,12 @@ func getRequestLogFields(
 			//   fields as one of two different values based on type;
 			//   we also omit port from host:port fields for now.
 			switch expectedParam.name {
-			case "client_version":
+			case "client_version", "establishment_duration":
 				intValue, _ := strconv.Atoi(strValue)
 				logFields[expectedParam.name] = intValue
 			case "meek_dial_address":
 				host, _, _ := net.SplitHostPort(strValue)
-				if isIPAddress(support, host) {
+				if isIPAddress(nil, host) {
 					logFields["meek_dial_ip_address"] = host
 				} else {
 					logFields["meek_dial_domain"] = host
@@ -825,6 +791,27 @@ func getMapStringInt64RequestParam(params requestJSONObject, name string) (map[s
 	return result, nil
 }
 
+func getStringArrayRequestParam(params requestJSONObject, name string) ([]string, error) {
+	if params[name] == nil {
+		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
+	}
+	value, ok := params[name].([]interface{})
+	if !ok {
+		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
+	}
+
+	result := make([]string, len(value))
+	for i, v := range value {
+		strValue, ok := v.(string)
+		if !ok {
+			return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
+		}
+		result[i] = strValue
+	}
+
+	return result, nil
+}
+
 // Normalize reported client platform. Android clients, for example, report
 // OS version, rooted status, and Google Play build status in the clientPlatform
 // string along with "Android".
@@ -904,16 +891,16 @@ func isRegionCode(_ *SupportServices, value string) bool {
 	})
 }
 
-func isDialAddress(support *SupportServices, value string) bool {
+func isDialAddress(_ *SupportServices, value string) bool {
 	// "<host>:<port>", where <host> is a domain or IP address
 	parts := strings.Split(value, ":")
 	if len(parts) != 2 {
 		return false
 	}
-	if !isIPAddress(support, parts[0]) && !isDomain(support, parts[0]) {
+	if !isIPAddress(nil, parts[0]) && !isDomain(nil, parts[0]) {
 		return false
 	}
-	if !isDigits(support, parts[1]) {
+	if !isDigits(nil, parts[1]) {
 		return false
 	}
 	port, err := strconv.Atoi(parts[1])
@@ -956,12 +943,12 @@ func isDomain(_ *SupportServices, value string) bool {
 	return true
 }
 
-func isHostHeader(support *SupportServices, value string) bool {
+func isHostHeader(_ *SupportServices, value string) bool {
 	// "<host>:<port>", where <host> is a domain or IP address and ":<port>" is optional
 	if strings.Contains(value, ":") {
-		return isDialAddress(support, value)
+		return isDialAddress(nil, value)
 	}
-	return isIPAddress(support, value) || isDomain(support, value)
+	return isIPAddress(nil, value) || isDomain(nil, value)
 }
 
 func isServerEntrySource(_ *SupportServices, value string) bool {
@@ -975,6 +962,6 @@ func isISO8601Date(_ *SupportServices, value string) bool {
 	return isISO8601DateRegex.Match([]byte(value))
 }
 
-func isLastConnected(support *SupportServices, value string) bool {
-	return value == "None" || value == "Unknown" || isISO8601Date(support, value)
+func isLastConnected(_ *SupportServices, value string) bool {
+	return value == "None" || value == "Unknown" || isISO8601Date(nil, value)
 }

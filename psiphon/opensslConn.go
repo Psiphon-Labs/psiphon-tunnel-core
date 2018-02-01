@@ -26,8 +26,8 @@ import (
 	"net"
 	"strings"
 
-	"github.com/Psiphon-Inc/openssl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/spacemonkeygo/openssl"
 )
 
 func openSSLSupported() bool {

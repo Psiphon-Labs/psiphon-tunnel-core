@@ -135,6 +135,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -170,7 +171,7 @@ type ServerConfig struct {
 	// logged as warnings only. This option is intended to support
 	// test cases on hosts without IPv6 and is not for production use;
 	// the packet tunnel server will still accept IPv6 packets and
-	// replay them to the tun device.
+	// relay them to the tun device.
 	// AllowNoIPv6NetworkConfiguration may not be supported on all
 	// platforms.
 	AllowNoIPv6NetworkConfiguration bool
@@ -341,6 +342,12 @@ type FlowActivityUpdater interface {
 type FlowActivityUpdaterMaker func(
 	upstreamHostname string, upstreamIPAddress net.IP) []FlowActivityUpdater
 
+// MetricsUpdater is a function which receives a checkpoint summary
+// of application bytes transferred through a packet tunnel.
+type MetricsUpdater func(
+	TCPApplicationBytesUp, TCPApplicationBytesDown,
+	UDPApplicationBytesUp, UDPApplicationBytesDown int64)
+
 // ClientConnected handles new client connections, creating or resuming
 // a session and returns with client packet handlers running.
 //
@@ -355,6 +362,13 @@ type FlowActivityUpdaterMaker func(
 // permitted. These callbacks must be efficient and safe for concurrent
 // calls.
 //
+// flowActivityUpdaterMaker is a callback invoked for each new packet
+// flow; it may create updaters to track flow activity.
+//
+// metricsUpdater is a callback invoked at metrics checkpoints (usually
+// when the client disconnects) with a summary of application bytes
+// transferred.
+//
 // It is safe to make concurrent calls to ClientConnected for distinct
 // session IDs. The caller is responsible for serializing calls with the
 // same session ID. Further, the caller must ensure, in the case of a client
@@ -367,7 +381,8 @@ func (server *Server) ClientConnected(
 	sessionID string,
 	transport io.ReadWriteCloser,
 	checkAllowedTCPPortFunc, checkAllowedUDPPortFunc AllowedPortChecker,
-	flowActivityUpdaterMaker FlowActivityUpdaterMaker) error {
+	flowActivityUpdaterMaker FlowActivityUpdaterMaker,
+	metricsUpdater MetricsUpdater) error {
 
 	// It's unusual to call both sync.WaitGroup.Add() _and_ Done() in the same
 	// goroutine. There's no other place to call Add() since ClientConnected is
@@ -375,6 +390,9 @@ func (server *Server) ClientConnected(
 	// connectedInProgress.Wait() is not that no ClientConnected calls are in
 	// progress, but that no such calls are in progress past the
 	// server.runContext.Done() check.
+
+	// TODO: will this violate https://golang.org/pkg/sync/#WaitGroup.Add:
+	// "calls with a positive delta that occur when the counter is zero must happen before a Wait"?
 
 	server.connectedInProgress.Add(1)
 	defer server.connectedInProgress.Done()
@@ -408,11 +426,6 @@ func (server *Server) ClientConnected(
 
 	} else {
 
-		downstreamPacketQueueSize := DEFAULT_DOWNSTREAM_PACKET_QUEUE_SIZE
-		if server.config.DownstreamPacketQueueSize > 0 {
-			downstreamPacketQueueSize = server.config.DownstreamPacketQueueSize
-		}
-
 		// Store IPv4 resolver addresses in 4-byte representation
 		// for use in rewritting.
 		resolvers := server.config.GetDNSResolverIPv4Addresses()
@@ -428,10 +441,6 @@ func (server *Server) ClientConnected(
 			metrics:                  new(packetMetrics),
 			DNSResolverIPv4Addresses: append([]net.IP(nil), DNSResolverIPv4Addresses...),
 			DNSResolverIPv6Addresses: append([]net.IP(nil), server.config.GetDNSResolverIPv6Addresses()...),
-			checkAllowedTCPPortFunc:  checkAllowedTCPPortFunc,
-			checkAllowedUDPPortFunc:  checkAllowedUDPPortFunc,
-			flowActivityUpdaterMaker: flowActivityUpdaterMaker,
-			downstreamPackets:        NewPacketQueue(downstreamPacketQueueSize),
 			workers:                  new(sync.WaitGroup),
 		}
 
@@ -445,7 +454,18 @@ func (server *Server) ClientConnected(
 		}
 	}
 
-	server.resumeSession(clientSession, NewChannel(transport, MTU))
+	// Note: it's possible that a client disconnects (or reconnects before a
+	// disconnect is detected) and interruptSession is called between
+	// allocateIndex and resumeSession calls here, so interruptSession and
+	// related code must not assume resumeSession has been called.
+
+	server.resumeSession(
+		clientSession,
+		NewChannel(transport, MTU),
+		checkAllowedTCPPortFunc,
+		checkAllowedUDPPortFunc,
+		flowActivityUpdaterMaker,
+		metricsUpdater)
 
 	return nil
 }
@@ -478,10 +498,50 @@ func (server *Server) getSession(sessionID string) *session {
 	return nil
 }
 
-func (server *Server) resumeSession(session *session, channel *Channel) {
+func (server *Server) resumeSession(
+	session *session,
+	channel *Channel,
+	checkAllowedTCPPortFunc, checkAllowedUDPPortFunc AllowedPortChecker,
+	flowActivityUpdaterMaker FlowActivityUpdaterMaker,
+	metricsUpdater MetricsUpdater) {
 
 	session.mutex.Lock()
-	session.mutex.Unlock()
+	defer session.mutex.Unlock()
+
+	// Performance/concurrency note: the downstream packet queue
+	// and various packet event callbacks may be accessed while
+	// the session is idle, via the runDeviceDownstream goroutine,
+	// which runs concurrent to resumeSession/interruptSession calls.
+	// Consequently, all accesses to these fields must be
+	// synchronized.
+	//
+	// Benchmarking indicates the atomic.LoadPointer mechanism
+	// outperforms a mutex; approx. 2 ns/op vs. 20 ns/op in the case
+	// of getCheckAllowedTCPPortFunc. Since these accesses occur
+	// multiple times per packet, atomic.LoadPointer is used and so
+	// each of these fields is an unsafe.Pointer in the session
+	// struct.
+
+	// Begin buffering downstream packets.
+
+	downstreamPacketQueueSize := DEFAULT_DOWNSTREAM_PACKET_QUEUE_SIZE
+	if server.config.DownstreamPacketQueueSize > 0 {
+		downstreamPacketQueueSize = server.config.DownstreamPacketQueueSize
+	}
+	downstreamPackets := NewPacketQueue(downstreamPacketQueueSize)
+
+	session.setDownstreamPackets(downstreamPackets)
+
+	// Set new access control, flow monitoring, and metrics
+	// callbacks; all associated with the new client connection.
+
+	session.setCheckAllowedTCPPortFunc(&checkAllowedTCPPortFunc)
+
+	session.setCheckAllowedUDPPortFunc(&checkAllowedUDPPortFunc)
+
+	session.setFlowActivityUpdaterMaker(&flowActivityUpdaterMaker)
+
+	session.setMetricsUpdater(&metricsUpdater)
 
 	session.channel = channel
 
@@ -510,29 +570,54 @@ func (server *Server) interruptSession(session *session) {
 
 	wasRunning := (session.channel != nil)
 
-	session.stopRunning()
+	if session.stopRunning != nil {
+		session.stopRunning()
+	}
+
 	if session.channel != nil {
 		// Interrupt blocked channel read/writes.
 		session.channel.Close()
 	}
+
 	session.workers.Wait()
+
 	if session.channel != nil {
 		// Don't hold a reference to channel, allowing both it and
 		// its conn to be garbage collected.
 		// Setting channel to nil must happen after workers.Wait()
-		// to ensure no goroutines remains which may access
+		// to ensure no goroutine remains which may access
 		// session.channel.
 		session.channel = nil
 	}
+
+	metricsUpdater := session.getMetricsUpdater()
 
 	// interruptSession may be called for idle sessions, to ensure
 	// the session is in an expected state: in ClientConnected,
 	// and in server.Stop(); don't log in those cases.
 	if wasRunning {
 		session.metrics.checkpoint(
-			server.config.Logger, "packet_metrics", packetMetricsAll)
+			server.config.Logger,
+			metricsUpdater,
+			"packet_metrics",
+			packetMetricsAll)
 	}
 
+	// Release the downstream packet buffer, so the associated
+	// memory is not consumed while no client is connected.
+	//
+	// Since runDeviceDownstream continues to run and will access
+	// session.downstreamPackets, an atomic pointer is used to
+	// synchronize access.
+	session.setDownstreamPackets(nil)
+
+	session.setCheckAllowedTCPPortFunc(nil)
+
+	session.setCheckAllowedUDPPortFunc(nil)
+
+	session.setFlowActivityUpdaterMaker(nil)
+
+	session.setMetricsUpdater(nil)
 }
 
 func (server *Server) runSessionReaper() {
@@ -607,7 +692,7 @@ func (server *Server) runOrphanMetricsCheckpointer() {
 
 		// TODO: skip log if all zeros?
 		server.orphanMetrics.checkpoint(
-			server.config.Logger, "orphan_packet_metrics", packetMetricsRejected)
+			server.config.Logger, nil, "orphan_packet_metrics", packetMetricsRejected)
 		if done {
 			return
 		}
@@ -671,6 +756,17 @@ func (server *Server) runDeviceDownstream() {
 
 		session := s.(*session)
 
+		downstreamPackets := session.getDownstreamPackets()
+
+		// No downstreamPackets buffer is maintained when no client is
+		// connected, so the packet is dropped.
+
+		if downstreamPackets == nil {
+			server.orphanMetrics.rejectedPacket(
+				packetDirectionServerDownstream, packetRejectNoClient)
+			continue
+		}
+
 		// Simply enqueue the packet for client handling, and move on to
 		// read the next packet. The packet tunnel server multiplexes all
 		// client packets through a single tun device, so we must not block
@@ -678,9 +774,6 @@ func (server *Server) runDeviceDownstream() {
 		//
 		// When the queue is full, the packet is dropped. This is standard
 		// behavior for routers, VPN servers, etc.
-		//
-		// We allow packets to enqueue in an idle session in case a client
-		// is in the process of reconnecting.
 		//
 		// TODO: processPacket is performed here, instead of runClientDownstream,
 		// since packets are packed contiguously into the packet queue and if
@@ -705,7 +798,7 @@ func (server *Server) runDeviceDownstream() {
 			continue
 		}
 
-		session.downstreamPackets.Enqueue(readPacket)
+		downstreamPackets.Enqueue(readPacket)
 	}
 }
 
@@ -727,10 +820,14 @@ func (server *Server) runClientUpstream(session *session) {
 		}
 
 		if err != nil {
+
+			// Debug since channel I/O errors occur during normal operation.
 			server.config.Logger.WithContextFields(
-				common.LogFields{"error": err}).Warning("read channel packet failed")
+				common.LogFields{"error": err}).Debug("read channel packet failed")
+
 			// Tear down the session. Must be invoked asynchronously.
 			go server.interruptSession(session)
+
 			return
 		}
 
@@ -776,7 +873,11 @@ func (server *Server) runClientDownstream(session *session) {
 
 	for {
 
-		packetBuffer, ok := session.downstreamPackets.DequeueFramedPackets(session.runContext)
+		downstreamPackets := session.getDownstreamPackets()
+		// Note: downstreamPackets will not be nil, since this goroutine only
+		// runs while the session has a connected client.
+
+		packetBuffer, ok := downstreamPackets.DequeueFramedPackets(session.runContext)
 		if !ok {
 			// Dequeue aborted due to session.runContext.Done()
 			return
@@ -785,10 +886,11 @@ func (server *Server) runClientDownstream(session *session) {
 		err := session.channel.WriteFramedPackets(packetBuffer)
 		if err != nil {
 
+			// Debug since channel I/O errors occur during normal operation.
 			server.config.Logger.WithContextFields(
-				common.LogFields{"error": err}).Warning("write channel packets failed")
+				common.LogFields{"error": err}).Debug("write channel packets failed")
 
-			session.downstreamPackets.Replace(packetBuffer)
+			downstreamPackets.Replace(packetBuffer)
 
 			// Tear down the session. Must be invoked asynchronously.
 			go server.interruptSession(session)
@@ -798,7 +900,7 @@ func (server *Server) runClientDownstream(session *session) {
 
 		session.touch()
 
-		session.downstreamPackets.Replace(packetBuffer)
+		downstreamPackets.Replace(packetBuffer)
 	}
 }
 
@@ -857,13 +959,16 @@ func (server *Server) allocateIndex(newSession *session) error {
 		}
 		if s, ok := server.indexToSession.LoadOrStore(index, newSession); ok {
 			// Index is already in use or acquired concurrently.
-			// If the existing session is expired, reap it and use index.
+			// If the existing session is expired, reap it and try again
+			// to acquire it.
 			existingSession := s.(*session)
 			if existingSession.expired(idleExpiry) {
 				server.removeSession(existingSession)
-			} else {
-				continue
+				// Try to acquire this index again. We can't fall through and
+				// use this index as removeSession has cleared indexToSession.
+				index--
 			}
+			continue
 		}
 
 		// Note: the To4() for assignedIPv4Address is essential since
@@ -947,6 +1052,12 @@ type session struct {
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	lastActivity             int64
 	lastFlowReapIndex        int64
+	checkAllowedTCPPortFunc  unsafe.Pointer
+	checkAllowedUDPPortFunc  unsafe.Pointer
+	flowActivityUpdaterMaker unsafe.Pointer
+	metricsUpdater           unsafe.Pointer
+	downstreamPackets        unsafe.Pointer
+
 	metrics                  *packetMetrics
 	sessionID                string
 	index                    int32
@@ -958,16 +1069,108 @@ type session struct {
 	assignedIPv6Address      net.IP
 	setOriginalIPv6Address   int32
 	originalIPv6Address      net.IP
-	checkAllowedTCPPortFunc  AllowedPortChecker
-	checkAllowedUDPPortFunc  AllowedPortChecker
-	flowActivityUpdaterMaker FlowActivityUpdaterMaker
-	downstreamPackets        *PacketQueue
 	flows                    sync.Map
 	workers                  *sync.WaitGroup
 	mutex                    sync.Mutex
 	channel                  *Channel
 	runContext               context.Context
 	stopRunning              context.CancelFunc
+}
+
+func (session *session) touch() {
+	atomic.StoreInt64(&session.lastActivity, int64(monotime.Now()))
+}
+
+func (session *session) expired(idleExpiry time.Duration) bool {
+	lastActivity := monotime.Time(atomic.LoadInt64(&session.lastActivity))
+	return monotime.Since(lastActivity) > idleExpiry
+}
+
+func (session *session) setOriginalIPv4AddressIfNotSet(IPAddress net.IP) {
+	if !atomic.CompareAndSwapInt32(&session.setOriginalIPv4Address, 0, 1) {
+		return
+	}
+	// Make a copy of IPAddress; don't reference a slice of a reusable
+	// packet buffer, which will be overwritten.
+	session.originalIPv4Address = net.IP(append([]byte(nil), []byte(IPAddress)...))
+}
+
+func (session *session) getOriginalIPv4Address() net.IP {
+	if atomic.LoadInt32(&session.setOriginalIPv4Address) == 0 {
+		return nil
+	}
+	return session.originalIPv4Address
+}
+
+func (session *session) setOriginalIPv6AddressIfNotSet(IPAddress net.IP) {
+	if !atomic.CompareAndSwapInt32(&session.setOriginalIPv6Address, 0, 1) {
+		return
+	}
+	// Make a copy of IPAddress.
+	session.originalIPv6Address = net.IP(append([]byte(nil), []byte(IPAddress)...))
+}
+
+func (session *session) getOriginalIPv6Address() net.IP {
+	if atomic.LoadInt32(&session.setOriginalIPv6Address) == 0 {
+		return nil
+	}
+	return session.originalIPv6Address
+}
+
+func (session *session) setCheckAllowedTCPPortFunc(p *AllowedPortChecker) {
+	atomic.StorePointer(&session.checkAllowedTCPPortFunc, unsafe.Pointer(p))
+}
+
+func (session *session) getCheckAllowedTCPPortFunc() AllowedPortChecker {
+	p := (*AllowedPortChecker)(atomic.LoadPointer(&session.checkAllowedTCPPortFunc))
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+func (session *session) setCheckAllowedUDPPortFunc(p *AllowedPortChecker) {
+	atomic.StorePointer(&session.checkAllowedUDPPortFunc, unsafe.Pointer(p))
+}
+
+func (session *session) getCheckAllowedUDPPortFunc() AllowedPortChecker {
+	p := (*AllowedPortChecker)(atomic.LoadPointer(&session.checkAllowedUDPPortFunc))
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+func (session *session) setFlowActivityUpdaterMaker(p *FlowActivityUpdaterMaker) {
+	atomic.StorePointer(&session.flowActivityUpdaterMaker, unsafe.Pointer(p))
+}
+
+func (session *session) getFlowActivityUpdaterMaker() FlowActivityUpdaterMaker {
+	p := (*FlowActivityUpdaterMaker)(atomic.LoadPointer(&session.flowActivityUpdaterMaker))
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+func (session *session) setMetricsUpdater(p *MetricsUpdater) {
+	atomic.StorePointer(&session.metricsUpdater, unsafe.Pointer(p))
+}
+
+func (session *session) getMetricsUpdater() MetricsUpdater {
+	p := (*MetricsUpdater)(atomic.LoadPointer(&session.metricsUpdater))
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+func (session *session) setDownstreamPackets(p *PacketQueue) {
+	atomic.StorePointer(&session.downstreamPackets, unsafe.Pointer(p))
+}
+
+func (session *session) getDownstreamPackets() *PacketQueue {
+	return (*PacketQueue)(atomic.LoadPointer(&session.downstreamPackets))
 }
 
 // flowID identifies an IP traffic flow using the conventional
@@ -1022,46 +1225,6 @@ func (flowState *flowState) expired(idleExpiry time.Duration) bool {
 	now := monotime.Now()
 	return (now.Sub(monotime.Time(atomic.LoadInt64(&flowState.lastUpstreamPacketTime))) > idleExpiry) ||
 		(now.Sub(monotime.Time(atomic.LoadInt64(&flowState.lastDownstreamPacketTime))) > idleExpiry)
-}
-
-func (session *session) touch() {
-	atomic.StoreInt64(&session.lastActivity, int64(monotime.Now()))
-}
-
-func (session *session) expired(idleExpiry time.Duration) bool {
-	lastActivity := monotime.Time(atomic.LoadInt64(&session.lastActivity))
-	return monotime.Since(lastActivity) > idleExpiry
-}
-
-func (session *session) setOriginalIPv4AddressIfNotSet(IPAddress net.IP) {
-	if !atomic.CompareAndSwapInt32(&session.setOriginalIPv4Address, 0, 1) {
-		return
-	}
-	// Make a copy of IPAddress; don't reference a slice of a reusable
-	// packet buffer, which will be overwritten.
-	session.originalIPv4Address = net.IP(append([]byte(nil), []byte(IPAddress)...))
-}
-
-func (session *session) getOriginalIPv4Address() net.IP {
-	if atomic.LoadInt32(&session.setOriginalIPv4Address) == 0 {
-		return nil
-	}
-	return session.originalIPv4Address
-}
-
-func (session *session) setOriginalIPv6AddressIfNotSet(IPAddress net.IP) {
-	if !atomic.CompareAndSwapInt32(&session.setOriginalIPv6Address, 0, 1) {
-		return
-	}
-	// Make a copy of IPAddress.
-	session.originalIPv6Address = net.IP(append([]byte(nil), []byte(IPAddress)...))
-}
-
-func (session *session) getOriginalIPv6Address() net.IP {
-	if atomic.LoadInt32(&session.setOriginalIPv6Address) == 0 {
-		return nil
-	}
-	return session.originalIPv6Address
 }
 
 // isTrackingFlow checks if a flow is being tracked.
@@ -1127,10 +1290,17 @@ func (session *session) startTrackingFlow(
 		// hostname = common.ExtractHostnameFromTCPFlow(applicationData)
 	}
 
-	flowState := &flowState{
-		activityUpdaters: session.flowActivityUpdaterMaker(
+	var activityUpdaters []FlowActivityUpdater
+
+	flowActivityUpdaterMaker := session.getFlowActivityUpdaterMaker()
+	if flowActivityUpdaterMaker != nil {
+		activityUpdaters = flowActivityUpdaterMaker(
 			hostname,
-			net.IP(ID.upstreamIPAddress[:])),
+			net.IP(ID.upstreamIPAddress[:]))
+	}
+
+	flowState := &flowState{
+		activityUpdaters: activityUpdaters,
 	}
 
 	if direction == packetDirectionServerUpstream {
@@ -1201,10 +1371,12 @@ type packetMetrics struct {
 }
 
 type relayedPacketMetrics struct {
-	packetsUp   int64
-	packetsDown int64
-	bytesUp     int64
-	bytesDown   int64
+	packetsUp            int64
+	packetsDown          int64
+	bytesUp              int64
+	bytesDown            int64
+	applicationBytesUp   int64
+	applicationBytesDown int64
 }
 
 func (metrics *packetMetrics) rejectedPacket(
@@ -1227,9 +1399,9 @@ func (metrics *packetMetrics) relayedPacket(
 	direction packetDirection,
 	version int,
 	protocol internetProtocol,
-	packetLength int) {
+	packetLength, applicationDataLength int) {
 
-	var packetsMetric, bytesMetric *int64
+	var packetsMetric, bytesMetric, applicationBytesMetric *int64
 
 	if direction == packetDirectionServerUpstream ||
 		direction == packetDirectionClientUpstream {
@@ -1239,9 +1411,11 @@ func (metrics *packetMetrics) relayedPacket(
 			if protocol == internetProtocolTCP {
 				packetsMetric = &metrics.TCPIPv4.packetsUp
 				bytesMetric = &metrics.TCPIPv4.bytesUp
+				applicationBytesMetric = &metrics.TCPIPv4.applicationBytesUp
 			} else { // UDP
 				packetsMetric = &metrics.UDPIPv4.packetsUp
 				bytesMetric = &metrics.UDPIPv4.bytesUp
+				applicationBytesMetric = &metrics.UDPIPv4.applicationBytesUp
 			}
 
 		} else { // IPv6
@@ -1249,9 +1423,11 @@ func (metrics *packetMetrics) relayedPacket(
 			if protocol == internetProtocolTCP {
 				packetsMetric = &metrics.TCPIPv6.packetsUp
 				bytesMetric = &metrics.TCPIPv6.bytesUp
+				applicationBytesMetric = &metrics.TCPIPv6.applicationBytesUp
 			} else { // UDP
 				packetsMetric = &metrics.UDPIPv6.packetsUp
 				bytesMetric = &metrics.UDPIPv6.bytesUp
+				applicationBytesMetric = &metrics.UDPIPv6.applicationBytesUp
 			}
 		}
 
@@ -1262,9 +1438,11 @@ func (metrics *packetMetrics) relayedPacket(
 			if protocol == internetProtocolTCP {
 				packetsMetric = &metrics.TCPIPv4.packetsDown
 				bytesMetric = &metrics.TCPIPv4.bytesDown
+				applicationBytesMetric = &metrics.TCPIPv4.applicationBytesDown
 			} else { // UDP
 				packetsMetric = &metrics.UDPIPv4.packetsDown
 				bytesMetric = &metrics.UDPIPv4.bytesDown
+				applicationBytesMetric = &metrics.UDPIPv4.applicationBytesDown
 			}
 
 		} else { // IPv6
@@ -1272,19 +1450,18 @@ func (metrics *packetMetrics) relayedPacket(
 			if protocol == internetProtocolTCP {
 				packetsMetric = &metrics.TCPIPv6.packetsDown
 				bytesMetric = &metrics.TCPIPv6.bytesDown
+				applicationBytesMetric = &metrics.TCPIPv6.applicationBytesDown
 			} else { // UDP
 				packetsMetric = &metrics.UDPIPv6.packetsDown
 				bytesMetric = &metrics.UDPIPv6.bytesDown
+				applicationBytesMetric = &metrics.UDPIPv6.applicationBytesDown
 			}
 		}
 	}
 
-	// Note: packet length, and so bytes transferred, includes IP and TCP/UDP
-	// headers, not just payload data, as is counted in port forwarding. It
-	// makes sense to include this packet overhead, since we have to tunnel it.
-
 	atomic.AddInt64(packetsMetric, 1)
 	atomic.AddInt64(bytesMetric, int64(packetLength))
+	atomic.AddInt64(applicationBytesMetric, int64(applicationDataLength))
 }
 
 const (
@@ -1294,7 +1471,7 @@ const (
 )
 
 func (metrics *packetMetrics) checkpoint(
-	logger common.Logger, logName string, whichMetrics int) {
+	logger common.Logger, updater MetricsUpdater, logName string, whichMetrics int) {
 
 	// Report all metric counters in a single log message. Each
 	// counter is reset to 0 when added to the log.
@@ -1313,21 +1490,41 @@ func (metrics *packetMetrics) checkpoint(
 
 	if whichMetrics&packetMetricsRelayed != 0 {
 
+		var TCPApplicationBytesUp, TCPApplicationBytesDown,
+			UDPApplicationBytesUp, UDPApplicationBytesDown int64
+
 		relayedMetrics := []struct {
-			prefix  string
-			metrics *relayedPacketMetrics
+			prefix           string
+			metrics          *relayedPacketMetrics
+			updaterBytesUp   *int64
+			updaterBytesDown *int64
 		}{
-			{"tcp_ipv4_", &metrics.TCPIPv4},
-			{"tcp_ipv6_", &metrics.TCPIPv6},
-			{"udp_ipv4_", &metrics.UDPIPv4},
-			{"udp_ipv6_", &metrics.UDPIPv6},
+			{"tcp_ipv4_", &metrics.TCPIPv4, &TCPApplicationBytesUp, &TCPApplicationBytesDown},
+			{"tcp_ipv6_", &metrics.TCPIPv6, &TCPApplicationBytesUp, &TCPApplicationBytesDown},
+			{"udp_ipv4_", &metrics.UDPIPv4, &UDPApplicationBytesUp, &UDPApplicationBytesDown},
+			{"udp_ipv6_", &metrics.UDPIPv6, &UDPApplicationBytesUp, &UDPApplicationBytesDown},
 		}
 
 		for _, r := range relayedMetrics {
+
+			applicationBytesUp := atomic.SwapInt64(&r.metrics.applicationBytesUp, 0)
+			applicationBytesDown := atomic.SwapInt64(&r.metrics.applicationBytesDown, 0)
+
+			*r.updaterBytesUp += applicationBytesUp
+			*r.updaterBytesDown += applicationBytesDown
+
 			logFields[r.prefix+"packets_up"] = atomic.SwapInt64(&r.metrics.packetsUp, 0)
 			logFields[r.prefix+"packets_down"] = atomic.SwapInt64(&r.metrics.packetsDown, 0)
 			logFields[r.prefix+"bytes_up"] = atomic.SwapInt64(&r.metrics.bytesUp, 0)
 			logFields[r.prefix+"bytes_down"] = atomic.SwapInt64(&r.metrics.bytesDown, 0)
+			logFields[r.prefix+"application_bytes_up"] = applicationBytesUp
+			logFields[r.prefix+"application_bytes_down"] = applicationBytesDown
+		}
+
+		if updater != nil {
+			updater(
+				TCPApplicationBytesUp, TCPApplicationBytesDown,
+				UDPApplicationBytesUp, UDPApplicationBytesDown)
 		}
 	}
 
@@ -1338,35 +1535,40 @@ func (metrics *packetMetrics) checkpoint(
 // Enqueued packets are packed into a contiguous buffer with channel
 // framing, allowing the entire queue to be written to a channel
 // in a single call.
-// Preallocating and reuse of the queue buffers avoids GC churn.
+// Reuse of the queue buffers avoids GC churn. To avoid memory use
+// spikes when many clients connect and may disconnect before relaying
+// packets, the packet queue buffers start small and grow when required,
+// up to the maximum size, and then remain static.
 type PacketQueue struct {
+	maxSize      int
 	emptyBuffers chan []byte
 	activeBuffer chan []byte
 }
 
 // NewPacketQueue creates a new PacketQueue.
-// The caller must ensire that queueSize exceeds the
+// The caller must ensure that maxSize exceeds the
 // packet MTU, or packets will will never enqueue.
-func NewPacketQueue(queueSize int) *PacketQueue {
+func NewPacketQueue(maxSize int) *PacketQueue {
 
-	// Two buffers of size queueSize are allocated, to
+	// Two buffers of size up to maxSize are allocated, to
 	// allow packets to continue to enqueue while one buffer
 	// is borrowed by the DequeueFramedPackets caller.
 	//
 	// TODO: is there a way to implement this without
-	// allocating 2x queueSize bytes? A circular queue
+	// allocating up to 2x maxSize bytes? A circular queue
 	// won't work because we want DequeueFramedPackets
 	// to return a contiguous buffer. Perhaps a Bip
 	// Buffer would work here:
 	// https://www.codeproject.com/Articles/3479/The-Bip-Buffer-The-Circular-Buffer-with-a-Twist
 
 	queue := &PacketQueue{
+		maxSize:      maxSize,
 		emptyBuffers: make(chan []byte, 2),
 		activeBuffer: make(chan []byte, 1),
 	}
 
-	queue.emptyBuffers <- make([]byte, 0, queueSize)
-	queue.emptyBuffers <- make([]byte, 0, queueSize)
+	queue.emptyBuffers <- make([]byte, 0)
+	queue.emptyBuffers <- make([]byte, 0)
 
 	return queue
 }
@@ -1386,14 +1588,18 @@ func (queue *PacketQueue) Enqueue(packet []byte) {
 
 	packetSize := len(packet)
 
-	if cap(buffer)-len(buffer) >= channelHeaderSize+packetSize {
-
+	if queue.maxSize-len(buffer) >= channelHeaderSize+packetSize {
 		// Assumes len(packet)/MTU <= 64K
+		var channelHeader [channelHeaderSize]byte
+		binary.BigEndian.PutUint16(channelHeader[:], uint16(packetSize))
 
-		offset := len(buffer)
-		buffer = buffer[0 : len(buffer)+channelHeaderSize+packetSize]
-		binary.BigEndian.PutUint16(buffer[offset:offset+channelHeaderSize], uint16(packetSize))
-		copy(buffer[offset+channelHeaderSize:], packet)
+		// Once the buffer has reached maxSize capacity
+		// and been replaced (buffer = buffer[0:0]), these
+		// appends should no longer allocate new memory and
+		// should just copy to preallocated memory.
+
+		buffer = append(buffer, channelHeader[:]...)
+		buffer = append(buffer, packet...)
 	}
 	// Else, queue is full, so drop packet.
 
@@ -1673,7 +1879,7 @@ func (client *Client) Stop() {
 	client.workers.Wait()
 
 	client.metrics.checkpoint(
-		client.config.Logger, "packet_metrics", packetMetricsAll)
+		client.config.Logger, nil, "packet_metrics", packetMetricsAll)
 
 	client.config.Logger.WithContext().Info("stopped")
 }
@@ -1787,8 +1993,9 @@ const (
 	packetRejectUDPPort            = 9
 	packetRejectNoOriginalAddress  = 10
 	packetRejectNoDNSResolvers     = 11
-	packetRejectReasonCount        = 12
-	packetOk                       = 12
+	packetRejectNoClient           = 12
+	packetRejectReasonCount        = 13
+	packetOk                       = 13
 )
 
 type packetDirection int
@@ -1825,6 +2032,8 @@ func packetRejectReasonDescription(reason packetRejectReason) string {
 		return "no_original_address"
 	case packetRejectNoDNSResolvers:
 		return "no_dns_resolvers"
+	case packetRejectNoClient:
+		return "no_client"
 	}
 
 	return "unknown_reason"
@@ -2149,20 +2358,34 @@ func processPacket(
 
 		if protocol == internetProtocolTCP {
 
-			if checkPort == 0 ||
-				(isServer &&
-					!session.checkAllowedTCPPortFunc(net.IP(ID.upstreamIPAddress[:]), checkPort)) {
+			invalidPort := (checkPort == 0)
 
+			if !invalidPort && isServer {
+				checkAllowedTCPPortFunc := session.getCheckAllowedTCPPortFunc()
+				if checkAllowedTCPPortFunc == nil ||
+					!checkAllowedTCPPortFunc(net.IP(ID.upstreamIPAddress[:]), checkPort) {
+					invalidPort = true
+				}
+			}
+
+			if invalidPort {
 				metrics.rejectedPacket(direction, packetRejectTCPPort)
 				return false
 			}
 
 		} else if protocol == internetProtocolUDP {
 
-			if checkPort == 0 ||
-				(isServer &&
-					!session.checkAllowedUDPPortFunc(net.IP(ID.upstreamIPAddress[:]), checkPort)) {
+			invalidPort := (checkPort == 0)
 
+			if !invalidPort && isServer {
+				checkAllowedUDPPortFunc := session.getCheckAllowedUDPPortFunc()
+				if checkAllowedUDPPortFunc == nil ||
+					!checkAllowedUDPPortFunc(net.IP(ID.upstreamIPAddress[:]), checkPort) {
+					invalidPort = true
+				}
+			}
+
+			if invalidPort {
 				metrics.rejectedPacket(direction, packetRejectUDPPort)
 				return false
 			}
@@ -2285,7 +2508,7 @@ func processPacket(
 		}
 	}
 
-	metrics.relayedPacket(direction, int(version), protocol, len(packet))
+	metrics.relayedPacket(direction, int(version), protocol, len(packet), len(applicationData))
 
 	return true
 }

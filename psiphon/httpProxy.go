@@ -35,8 +35,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Psiphon-Inc/m3u8"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/grafov/m3u8"
 )
 
 // HttpProxy is a HTTP server that relays HTTP requests through the Psiphon tunnel.

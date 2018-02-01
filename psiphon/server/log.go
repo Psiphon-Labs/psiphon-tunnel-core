@@ -28,9 +28,9 @@ import (
 	"os"
 	"sync"
 
-	"github.com/Psiphon-Inc/logrus"
 	"github.com/Psiphon-Inc/rotate-safe-writer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/sirupsen/logrus"
 )
 
 // MetricsSource is an object that provides metrics to be logged

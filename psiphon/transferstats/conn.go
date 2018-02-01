@@ -59,6 +59,16 @@ func NewConn(nextConn net.Conn, serverID string, regexps *Regexps) *Conn {
 	}
 }
 
+func (conn *Conn) isRecordingHostBytes() bool {
+
+	// When there are no regexes, no per-host bytes stats will be
+	// recorded, including no "(OTHER)" category. In this case, it's
+	// expected that there will be no data to send in any status
+	// request.
+
+	return conn.regexps != nil && len(*conn.regexps) > 0
+}
+
 // Write is called when requests are being written out through the tunnel to
 // the remote server.
 func (conn *Conn) Write(buffer []byte) (n int, err error) {
@@ -68,9 +78,12 @@ func (conn *Conn) Write(buffer []byte) (n int, err error) {
 	// Count stats before we check the error condition. It could happen that the
 	// buffer was partially written and then an error occurred.
 	if n > 0 {
+
 		// If this is the first request, try to determine the hostname to associate
-		// with this connection.
-		if atomic.CompareAndSwapInt32(&conn.firstWrite, 1, 0) {
+		// with this connection. Skip parsing when not recording per-host bytes, as
+		// the hostname isn't used in this case.
+
+		if conn.isRecordingHostBytes() && atomic.CompareAndSwapInt32(&conn.firstWrite, 1, 0) {
 
 			hostname, ok := getHostname(buffer)
 			if ok {
@@ -86,6 +99,7 @@ func (conn *Conn) Write(buffer []byte) (n int, err error) {
 			conn.hostname,
 			int64(n),
 			0},
+			conn.isRecordingHostBytes(),
 			false)
 	}
 
@@ -110,6 +124,7 @@ func (conn *Conn) Read(buffer []byte) (n int, err error) {
 		hostname,
 		0,
 		int64(n)},
+		conn.isRecordingHostBytes(),
 		false)
 
 	return
