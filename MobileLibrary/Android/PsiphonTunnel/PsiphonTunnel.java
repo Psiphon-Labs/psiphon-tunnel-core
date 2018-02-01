@@ -90,6 +90,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         public void onBytesTransferred(long sent, long received);
         public void onStartedWaitingForNetworkConnectivity();
         public void onClientVerificationRequired(String serverNonce, int ttlSeconds, boolean resetCache);
+        public void onActiveAuthorizationIDs(List<String> authorizations);
         public void onExiting();
     }
 
@@ -560,6 +561,13 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
                 diagnostic = false;
                 JSONObject data = notice.getJSONObject("data");
                 mHostService.onBytesTransferred(data.getLong("sent"), data.getLong("received"));
+            }  else if (noticeType.equals("ActiveAuthorizationIDs")) {
+                JSONArray activeAuthorizationIDs = notice.getJSONObject("data").getJSONArray("IDs");
+                ArrayList<String> authorizations = new ArrayList<String>();
+                for (int i=0; i<activeAuthorizationIDs.length(); i++) {
+                    authorizations.add(activeAuthorizationIDs.getString(i));
+                }
+                mHostService.onActiveAuthorizationIDs(authorizations);
             } else if (noticeType.equals("Exiting")) {
                 mHostService.onExiting();
             } else if(noticeType.equals("ClientVerificationRequired")) {
