@@ -288,6 +288,11 @@ public class MainActivity extends ActionBarActivity
     }
 
     @Override
+    public void onActiveAuthorizationIDs(List<String> authorizations) {
+
+    }
+
+    @Override
     public void onExiting() {
 
     }
