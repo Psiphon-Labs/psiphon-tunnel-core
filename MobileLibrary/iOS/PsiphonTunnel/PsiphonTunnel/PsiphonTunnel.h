@@ -299,6 +299,13 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
  */
 - (void)onServerTimestamp:(NSString * _Nonnull)timestamp;
 
+/*!
+ Called when tunnel-core receives an array of active authorization IDs in the handshake
+ @param authorizations  A string array containing active authorization IDs.
+ Swift: @code func onActiveAuthorizationIDs(_ authorizations: [Any]) @endcode
+ */
+- (void)onActiveAuthorizationIDs:(NSArray * _Nonnull)authorizations;
+
 @end
 
 /*!
