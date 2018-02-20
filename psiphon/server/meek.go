@@ -861,7 +861,7 @@ func makeMeekTLSConfig(
 }
 
 // getMeekCookiePayload extracts the payload from a meek cookie. The cookie
-// paylod is base64 encoded, obfuscated, and NaCl encrypted.
+// payload is base64 encoded, obfuscated, and NaCl encrypted.
 func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte, error) {
 	decodedValue, err := base64.StdEncoding.DecodeString(cookieValue)
 	if err != nil {
