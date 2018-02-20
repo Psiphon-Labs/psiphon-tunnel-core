@@ -166,7 +166,8 @@ echo " Gomobile version: ${GOMOBILEVERSION}"
 echo ""
 
 # We're using a generated-code prefix to workaround https://github.com/golang/go/issues/18693
-${GOPATH}/bin/gomobile bind -v -x -target ios -prefix Go -tags="${BUILD_TAGS}" -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+# CGO_CFLAGS_ALLOW is to workaround https://github.com/golang/go/issues/23742 in Go 1.9.4
+CGO_CFLAGS_ALLOW="-fmodules|-fblocks" ${GOPATH}/bin/gomobile bind -v -x -target ios -prefix Go -tags="${BUILD_TAGS}" -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 rc=$?; if [[ $rc != 0 ]]; then
   echo "FAILURE: ${GOPATH}/bin/gomobile bind -target ios -tags="${BUILD_TAGS}" -ldflags="${LDFLAGS}" -o "${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
   exit $rc
