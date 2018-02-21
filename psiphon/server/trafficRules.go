@@ -272,7 +272,7 @@ func (set *TrafficRulesSet) GetTrafficRules(
 	defer set.ReloadableFile.RUnlock()
 
 	// Start with a copy of the DefaultRules, and then select the first
-	// matches Rules from FilteredTrafficRules, taking only the explicitly
+	// matching Rules from FilteredTrafficRules, taking only the explicitly
 	// specified fields from that Rules.
 	//
 	// Notes:
