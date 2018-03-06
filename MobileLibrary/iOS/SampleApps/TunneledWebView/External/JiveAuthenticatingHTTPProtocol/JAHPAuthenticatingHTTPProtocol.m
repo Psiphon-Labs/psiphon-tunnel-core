@@ -279,7 +279,13 @@ static NSString * kJAHPRecursiveRequestFlagProperty = @"com.jivesoftware.JAHPAut
             [self authenticatingHTTPProtocol:nil logWithFormat:@"decline request %@ (no scheme)", url];
         }
     }
-    
+
+    // Do not try and handle requests to localhost
+
+    if (shouldAccept) {
+        shouldAccept = (![[url host] isEqualToString:@"127.0.0.1"]);
+    }
+
     // Look for "http" or "https".
     //
     // Flip either or both of the following to YESes to control which schemes go through this custom
