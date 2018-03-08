@@ -111,11 +111,13 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  See the tunnel-core config code for details about the fields.
  https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/psiphon/config.go
 
- @return  JSON string with config that should used to run the Psiphon tunnel, or NULL on error.
+ @return Either JSON NSString with config that should be used to run the Psiphon tunnel,
+         or return already parsed JSON as NSDictionary,
+         or nil on error.
 
- Swift: @code func getPsiphonConfig() -> String? @endcode
+ Swift: @code func getPsiphonConfig() -> Any? @endcode
  */
-- (NSString * _Nullable)getPsiphonConfig;
+- (id _Nullable)getPsiphonConfig;
 
 /*!
  Called when the tunnel is starting to get the initial server entries (typically embedded in the app) that will be used to bootstrap the Psiphon tunnel connection. This value is in a particular format and will be supplied by Psiphon Inc.
