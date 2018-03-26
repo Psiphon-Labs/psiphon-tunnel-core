@@ -213,7 +213,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 		t.Fatalf("error initializing client datastore: %s", err)
 	}
 
-	if CountServerEntries("", "") > 0 {
+	if CountServerEntries("", nil) > 0 {
 		t.Fatalf("unexpected server entries")
 	}
 

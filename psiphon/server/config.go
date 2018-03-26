@@ -297,6 +297,10 @@ type Config struct {
 	// available for matching in the TrafficRulesFilter for the client via
 	// AuthorizedAccessTypes. All other authorizations are ignored.
 	AccessControlVerificationKeyRing accesscontrol.VerificationKeyRing
+
+	// TacticsConfigFilename is the path of a file containing a JSON-encoded
+	// tactics server configuration.
+	TacticsConfigFilename string
 }
 
 // RunWebServer indicates whether to run a web server component.

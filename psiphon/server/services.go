@@ -36,6 +36,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 )
@@ -405,6 +406,7 @@ type SupportServices struct {
 	DNSResolver        *DNSResolver
 	TunnelServer       *TunnelServer
 	PacketTunnelServer *tun.Server
+	TacticsServer      *tactics.Server
 }
 
 // NewSupportServices initializes a new SupportServices.
@@ -436,6 +438,15 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 		return nil, common.ContextError(err)
 	}
 
+	tacticsServer, err := tactics.NewServer(
+		CommonLogger(log),
+		getTacticsAPIParameterLogFieldFormatter(),
+		getTacticsAPIParameterValidator(config),
+		config.TacticsConfigFilename)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
 	return &SupportServices{
 		Config:          config,
 		TrafficRulesSet: trafficRulesSet,
@@ -443,6 +454,7 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 		PsinetDatabase:  psinetDatabase,
 		GeoIPService:    geoIPService,
 		DNSResolver:     dnsResolver,
+		TacticsServer:   tacticsServer,
 	}, nil
 }
 
@@ -455,8 +467,13 @@ func (support *SupportServices) Reload() {
 		[]common.Reloader{
 			support.TrafficRulesSet,
 			support.OSLConfig,
-			support.PsinetDatabase},
+			support.PsinetDatabase,
+			support.TacticsServer},
 		support.GeoIPService.Reloaders()...)
+
+	// Note: established clients aren't notified when tactics change after a
+	// reload; new tactics will be obtained on the next client handshake or
+	// tactics request.
 
 	// Take these actions only after the corresponding Reloader has reloaded.
 	// In both the traffic rules and OSL cases, there is some impact from state

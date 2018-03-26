@@ -32,7 +32,7 @@ import (
 
 // TCPConn is a customized TCP connection that supports the Closer interface
 // and which may be created using options in DialConfig, including
-// UpstreamProxyUrl, DeviceBinder, IPv6Synthesizer, and ResolvedIPCallback.
+// UpstreamProxyURL, DeviceBinder, IPv6Synthesizer, and ResolvedIPCallback.
 // DeviceBinder is implemented using SO_BINDTODEVICE/IP_BOUND_IF, which
 // requires syscall-level socket code.
 type TCPConn struct {
@@ -42,7 +42,7 @@ type TCPConn struct {
 
 // NewTCPDialer creates a TCPDialer.
 //
-// Note: do not set an UpstreamProxyUrl in the config when using NewTCPDialer
+// Note: do not set an UpstreamProxyURL in the config when using NewTCPDialer
 // as a custom dialer for NewProxyAuthTransport (or http.Transport with a
 // ProxyUrl), as that would result in double proxy chaining.
 func NewTCPDialer(config *DialConfig) Dialer {
@@ -61,7 +61,7 @@ func DialTCP(
 	var conn net.Conn
 	var err error
 
-	if config.UpstreamProxyUrl != "" {
+	if config.UpstreamProxyURL != "" {
 		conn, err = proxiedTcpDial(ctx, addr, config)
 	} else {
 		conn, err = tcpDial(ctx, addr, config)
@@ -73,7 +73,7 @@ func DialTCP(
 
 	// Note: when an upstream proxy is used, we don't know what IP address
 	// was resolved, by the proxy, for that destination.
-	if config.ResolvedIPCallback != nil && config.UpstreamProxyUrl == "" {
+	if config.ResolvedIPCallback != nil && config.UpstreamProxyURL == "" {
 		ipAddress := common.IPAddressFromAddr(conn.RemoteAddr())
 		if ipAddress != "" {
 			config.ResolvedIPCallback(ipAddress)
@@ -111,7 +111,7 @@ func proxiedTcpDial(
 	upstreamDialer := upstreamproxy.NewProxyDialFunc(
 		&upstreamproxy.UpstreamProxyConfig{
 			ForwardDialFunc: dialer,
-			ProxyURIString:  config.UpstreamProxyUrl,
+			ProxyURIString:  config.UpstreamProxyURL,
 			CustomHeaders:   config.CustomHeaders,
 		})
 

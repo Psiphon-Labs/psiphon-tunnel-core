@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -40,6 +41,7 @@ import (
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
@@ -54,32 +56,16 @@ import (
 // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/default/go/meek-client/meek-client.go
 
 const (
-	MEEK_PROTOCOL_VERSION              = 3
-	MEEK_COOKIE_MAX_PADDING            = 32
-	MAX_SEND_PAYLOAD_LENGTH            = 65536
-	FULL_RECEIVE_BUFFER_LENGTH         = 4194304
-	READ_PAYLOAD_CHUNK_LENGTH          = 65536
-	LIMITED_FULL_RECEIVE_BUFFER_LENGTH = 131072
-	LIMITED_READ_PAYLOAD_CHUNK_LENGTH  = 4096
-	MIN_POLL_INTERVAL                  = 100 * time.Millisecond
-	MIN_POLL_INTERVAL_JITTER           = 0.3
-	MAX_POLL_INTERVAL                  = 5 * time.Second
-	MAX_POLL_INTERVAL_JITTER           = 0.1
-	POLL_INTERVAL_MULTIPLIER           = 1.5
-	POLL_INTERVAL_JITTER               = 0.1
-	MEEK_ROUND_TRIP_RETRY_DEADLINE     = 5 * time.Second
-	MEEK_ROUND_TRIP_RETRY_MIN_DELAY    = 50 * time.Millisecond
-	MEEK_ROUND_TRIP_RETRY_MAX_DELAY    = 1000 * time.Millisecond
-	MEEK_ROUND_TRIP_RETRY_MULTIPLIER   = 2
-	MEEK_ROUND_TRIP_TIMEOUT            = 20 * time.Second
+	MEEK_PROTOCOL_VERSION           = 3
+	MEEK_MAX_REQUEST_PAYLOAD_LENGTH = 65536
 )
 
 // MeekConfig specifies the behavior of a MeekConn
 type MeekConfig struct {
 
-	// LimitBufferSizes indicates whether to use smaller buffers to
-	// conserve memory.
-	LimitBufferSizes bool
+	// ClientParameters is the active set of client parameters to use
+	// for the meek dial.
+	ClientParameters *parameters.ClientParameters
 
 	// DialAddress is the actual network address to dial to establish a
 	// connection to the meek server. This may be either a fronted or
@@ -118,10 +104,16 @@ type MeekConfig struct {
 	// tunnel protocol.
 	ClientTunnelProtocol string
 
+	// RoundTripperOnly sets the MeekConn to operate in round tripper
+	// mode, which is used for untunneled tactics requests. In this
+	// mode, a connection is established to the meek server as usual,
+	// but instead of relaying tunnel traffic, the RoundTrip function
+	// may be used to make requests. In this mode, no relay resources
+	// incuding buffers are allocated.
+	RoundTripperOnly bool
+
 	// The following values are used to create the obfuscated meek cookie.
 
-	PsiphonServerAddress          string
-	SessionID                     string
 	MeekCookieEncryptionPublicKey string
 	MeekObfuscatedKey             string
 }
@@ -138,16 +130,25 @@ type MeekConfig struct {
 // MeekConn also operates in unfronted mode, in which plain HTTP connections are made without routing
 // through a CDN.
 type MeekConn struct {
-	url                     *url.URL
-	additionalHeaders       http.Header
-	cookie                  *http.Cookie
-	cachedTLSDialer         *cachedTLSDialer
-	transport               transporter
-	mutex                   sync.Mutex
-	isClosed                bool
-	runCtx                  context.Context
-	stopRunning             context.CancelFunc
-	relayWaitGroup          *sync.WaitGroup
+	clientParameters  *parameters.ClientParameters
+	url               *url.URL
+	additionalHeaders http.Header
+	cookie            *http.Cookie
+	cachedTLSDialer   *cachedTLSDialer
+	transport         transporter
+	mutex             sync.Mutex
+	isClosed          bool
+	runCtx            context.Context
+	stopRunning       context.CancelFunc
+	relayWaitGroup    *sync.WaitGroup
+
+	// For round tripper mode
+	roundTripperOnly              bool
+	meekCookieEncryptionPublicKey string
+	meekObfuscatedKey             string
+	clientTunnelProtocol          string
+
+	// For relay mode
 	fullReceiveBufferLength int
 	readPayloadChunkLength  int
 	emptyReceiveBuffer      chan *bytes.Buffer
@@ -237,6 +238,7 @@ func DialMeek(
 		scheme = "https"
 
 		tlsConfig := &CustomTLSConfig{
+			ClientParameters:              meekConfig.ClientParameters,
 			DialAddr:                      meekConfig.DialAddress,
 			Dial:                          NewTCPDialer(dialConfig),
 			SNIServerName:                 meekConfig.SNIServerName,
@@ -276,10 +278,10 @@ func DialMeek(
 		// purpose, a special preDialer is configured.
 		//
 		// Only one pre-dial attempt is made; there are no retries. This differs
-		// from roundTrip, which retries and may redial for each retry. Retries
-		// at the pre-dial phase are less useful since there's no active session
-		// to preserve, and establishment will simply try another server. Note
-		// that the underlying TCPDial may still try multiple IP addreses when
+		// from relayRoundTrip, which retries and may redial for each retry.
+		// Retries at the pre-dial phase are less useful since there's no active
+		// session to preserve, and establishment will simply try another server.
+		// Note that the underlying TCPDial may still try multiple IP addreses when
 		// the destination is a domain and ir resolves to multiple IP adresses.
 
 		// The pre-dial is made within the parent dial context, so that DialMeek
@@ -287,8 +289,8 @@ func DialMeek(
 		// request context. Since http.DialTLS doesn't take a context argument
 		// (yet; as of Go 1.9 this issue is still open: https://github.com/golang/go/issues/21526),
 		// cachedTLSDialer is used as a conduit to send the request context.
-		// meekConn.roundTrip sets its request context into cachedTLSDialer, and
-		// cachedTLSDialer.dial uses that context.
+		// meekConn.relayRoundTrip sets its request context into cachedTLSDialer,
+		// and cachedTLSDialer.dial uses that context.
 
 		// As DialAddr is set in the CustomTLSConfig, no address is required here.
 		preConn, err := tlsDialer(ctx, "tcp", "")
@@ -337,11 +339,11 @@ func DialMeek(
 		// http.Transport will put the the HTTP server address in the HTTP
 		// request line. In this one case, we can use an HTTP proxy that does
 		// not offer CONNECT support.
-		if strings.HasPrefix(dialConfig.UpstreamProxyUrl, "http://") &&
+		if strings.HasPrefix(dialConfig.UpstreamProxyURL, "http://") &&
 			(meekConfig.DialAddress == meekConfig.HostHeader ||
 				meekConfig.DialAddress == meekConfig.HostHeader+":80") {
 
-			url, err := url.Parse(dialConfig.UpstreamProxyUrl)
+			url, err := url.Parse(dialConfig.UpstreamProxyURL)
 			if err != nil {
 				return nil, common.ContextError(err)
 			}
@@ -351,7 +353,7 @@ func DialMeek(
 			// passes in (which will be proxy address).
 			copyDialConfig := new(DialConfig)
 			*copyDialConfig = *dialConfig
-			copyDialConfig.UpstreamProxyUrl = ""
+			copyDialConfig.UpstreamProxyURL = ""
 
 			dialer = NewTCPDialer(copyDialConfig)
 		}
@@ -392,11 +394,6 @@ func DialMeek(
 		}
 	}
 
-	cookie, err := makeMeekCookie(meekConfig)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-
 	// The main loop of a MeekConn is run in the relay() goroutine.
 	// A MeekConn implements net.Conn concurrency semantics:
 	// "Multiple goroutines may invoke methods on a Conn simultaneously."
@@ -414,39 +411,67 @@ func DialMeek(
 	// Write() calls and relay() are synchronized in a similar way, using a single
 	// sendBuffer.
 	meek = &MeekConn{
-		url:                     url,
-		additionalHeaders:       additionalHeaders,
-		cookie:                  cookie,
-		cachedTLSDialer:         cachedTLSDialer,
-		transport:               transport,
-		isClosed:                false,
-		runCtx:                  runCtx,
-		stopRunning:             stopRunning,
-		relayWaitGroup:          new(sync.WaitGroup),
-		fullReceiveBufferLength: FULL_RECEIVE_BUFFER_LENGTH,
-		readPayloadChunkLength:  READ_PAYLOAD_CHUNK_LENGTH,
-		emptyReceiveBuffer:      make(chan *bytes.Buffer, 1),
-		partialReceiveBuffer:    make(chan *bytes.Buffer, 1),
-		fullReceiveBuffer:       make(chan *bytes.Buffer, 1),
-		emptySendBuffer:         make(chan *bytes.Buffer, 1),
-		partialSendBuffer:       make(chan *bytes.Buffer, 1),
-		fullSendBuffer:          make(chan *bytes.Buffer, 1),
+		clientParameters:  meekConfig.ClientParameters,
+		url:               url,
+		additionalHeaders: additionalHeaders,
+		cachedTLSDialer:   cachedTLSDialer,
+		transport:         transport,
+		isClosed:          false,
+		runCtx:            runCtx,
+		stopRunning:       stopRunning,
+		relayWaitGroup:    new(sync.WaitGroup),
+		roundTripperOnly:  meekConfig.RoundTripperOnly,
 	}
 
 	// stopRunning and cachedTLSDialer will now be closed in meek.Close()
 	cleanupStopRunning = false
 	cleanupCachedTLSDialer = false
 
-	meek.emptyReceiveBuffer <- new(bytes.Buffer)
-	meek.emptySendBuffer <- new(bytes.Buffer)
-	meek.relayWaitGroup.Add(1)
+	// Allocate relay resources, including buffers and running the relay
+	// go routine, only when running in relay mode.
+	if !meek.roundTripperOnly {
 
-	if meekConfig.LimitBufferSizes {
-		meek.fullReceiveBufferLength = LIMITED_FULL_RECEIVE_BUFFER_LENGTH
-		meek.readPayloadChunkLength = LIMITED_READ_PAYLOAD_CHUNK_LENGTH
+		cookie, err := makeMeekCookie(
+			meek.clientParameters,
+			meekConfig.MeekCookieEncryptionPublicKey,
+			meekConfig.MeekObfuscatedKey,
+			meekConfig.ClientTunnelProtocol,
+			"")
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
+		meek.cookie = cookie
+
+		p := meekConfig.ClientParameters.Get()
+		if p.Bool(parameters.MeekLimitBufferSizes) {
+			meek.fullReceiveBufferLength = p.Int(parameters.MeekLimitedFullReceiveBufferLength)
+			meek.readPayloadChunkLength = p.Int(parameters.MeekLimitedReadPayloadChunkLength)
+		} else {
+			meek.fullReceiveBufferLength = p.Int(parameters.MeekFullReceiveBufferLength)
+			meek.readPayloadChunkLength = p.Int(parameters.MeekReadPayloadChunkLength)
+		}
+		p = nil
+
+		meek.emptyReceiveBuffer = make(chan *bytes.Buffer, 1)
+		meek.partialReceiveBuffer = make(chan *bytes.Buffer, 1)
+		meek.fullReceiveBuffer = make(chan *bytes.Buffer, 1)
+		meek.emptySendBuffer = make(chan *bytes.Buffer, 1)
+		meek.partialSendBuffer = make(chan *bytes.Buffer, 1)
+		meek.fullSendBuffer = make(chan *bytes.Buffer, 1)
+
+		meek.emptyReceiveBuffer <- new(bytes.Buffer)
+		meek.emptySendBuffer <- new(bytes.Buffer)
+
+		meek.relayWaitGroup.Add(1)
+		go meek.relay()
+
+	} else {
+
+		meek.meekCookieEncryptionPublicKey = meekConfig.MeekCookieEncryptionPublicKey
+		meek.meekObfuscatedKey = meekConfig.MeekObfuscatedKey
+		meek.clientTunnelProtocol = meekConfig.ClientTunnelProtocol
 	}
-
-	go meek.relay()
 
 	return meek, nil
 }
@@ -454,7 +479,7 @@ func DialMeek(
 type cachedTLSDialer struct {
 	usedCachedConn int32
 	cachedConn     net.Conn
-	requestContext atomic.Value
+	requestCtx     atomic.Value
 	dialer         Dialer
 }
 
@@ -465,8 +490,8 @@ func newCachedTLSDialer(cachedConn net.Conn, dialer Dialer) *cachedTLSDialer {
 	}
 }
 
-func (c *cachedTLSDialer) setRequestContext(requestContext context.Context) {
-	c.requestContext.Store(requestContext)
+func (c *cachedTLSDialer) setRequestContext(requestCtx context.Context) {
+	c.requestCtx.Store(requestCtx)
 }
 
 func (c *cachedTLSDialer) dial(network, addr string) (net.Conn, error) {
@@ -475,7 +500,7 @@ func (c *cachedTLSDialer) dial(network, addr string) (net.Conn, error) {
 		c.cachedConn = nil
 		return conn, nil
 	}
-	ctx := c.requestContext.Load().(context.Context)
+	ctx := c.requestCtx.Load().(context.Context)
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -489,8 +514,8 @@ func (c *cachedTLSDialer) close() {
 	}
 }
 
-// Close terminates the meek connection. Close waits for the relay processing goroutine
-// to stop and releases HTTP transport resources.
+// Close terminates the meek connection. Close waits for the relay goroutine
+// to stop (in relay mode) and releases HTTP transport resources.
 // A mutex is required to support net.Conn concurrency semantics.
 func (meek *MeekConn) Close() (err error) {
 
@@ -521,9 +546,78 @@ func (meek *MeekConn) IsClosed() bool {
 	return isClosed
 }
 
+// RoundTrip makes a request to the meek server and returns the response.
+// A new, obfuscated meek cookie is created for every request. The specified
+// end point is recorded in the cookie and is not exposed as plaintext in the
+// meek traffic. The caller is responsible for obfuscating the request body.
+//
+// RoundTrip is not safe for concurrent use, and Close must not be called
+// concurrently. The caller must ensure onlt one RoundTrip call is active
+// at once and that it completes before calling Close.
+//
+// RoundTrip is only available in round tripper mode.
+func (meek *MeekConn) RoundTrip(
+	ctx context.Context, endPoint string, requestBody []byte) ([]byte, error) {
+
+	if !meek.roundTripperOnly {
+		return nil, common.ContextError(errors.New("operation unsupported"))
+	}
+
+	cookie, err := makeMeekCookie(
+		meek.clientParameters,
+		meek.meekCookieEncryptionPublicKey,
+		meek.meekObfuscatedKey,
+		meek.clientTunnelProtocol,
+		endPoint)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	// Note:
+	//
+	// - multiple, concurrent RoundTrip calls are unsafe due to the
+	//   meek.cachedTLSDialer.setRequestContext call in newRequest
+	//
+	// - concurrent Close and RoundTrip calls are unsafe as Close
+	//   does not synchronize with RoundTrip before calling
+	//   meek.transport.CloseIdleConnections(), so resources could
+	//   be left open.
+	//
+	// At this time, RoundTrip is used for tactics in Controller and
+	// the concurrency constraints are satisfied.
+
+	request, cancelFunc, err := meek.newRequest(
+		ctx, cookie, bytes.NewReader(requestBody), 0)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+	defer cancelFunc()
+
+	response, err := meek.transport.RoundTrip(request)
+	if err == nil {
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
+		}
+	}
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	responseBody, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return responseBody, nil
+}
+
 // Read reads data from the connection.
 // net.Conn Deadlines are ignored. net.Conn concurrency semantics are supported.
 func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
+	if meek.roundTripperOnly {
+		return 0, common.ContextError(errors.New("operation unsupported"))
+	}
 	if meek.IsClosed() {
 		return 0, common.ContextError(errors.New("meek connection is closed"))
 	}
@@ -543,6 +637,9 @@ func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
 // Write writes data to the connection.
 // net.Conn Deadlines are ignored. net.Conn concurrency semantics are supported.
 func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
+	if meek.roundTripperOnly {
+		return 0, common.ContextError(errors.New("operation unsupported"))
+	}
 	if meek.IsClosed() {
 		return 0, common.ContextError(errors.New("meek connection is closed"))
 	}
@@ -557,7 +654,7 @@ func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
 		case <-meek.runCtx.Done():
 			return 0, common.ContextError(errors.New("meek connection has closed"))
 		}
-		writeLen := MAX_SEND_PAYLOAD_LENGTH - sendBuffer.Len()
+		writeLen := MEEK_MAX_REQUEST_PAYLOAD_LENGTH - sendBuffer.Len()
 		if writeLen > 0 {
 			if writeLen > len(buffer) {
 				writeLen = len(buffer)
@@ -610,7 +707,7 @@ func (meek *MeekConn) replaceSendBuffer(sendBuffer *bytes.Buffer) {
 	switch {
 	case sendBuffer.Len() == 0:
 		meek.emptySendBuffer <- sendBuffer
-	case sendBuffer.Len() >= MAX_SEND_PAYLOAD_LENGTH:
+	case sendBuffer.Len() >= MEEK_MAX_REQUEST_PAYLOAD_LENGTH:
 		meek.fullSendBuffer <- sendBuffer
 	default:
 		meek.partialSendBuffer <- sendBuffer
@@ -626,9 +723,11 @@ func (meek *MeekConn) relay() {
 	// (using goroutines) since Close() will wait on this WaitGroup.
 	defer meek.relayWaitGroup.Done()
 
+	p := meek.clientParameters.Get()
 	interval := common.JitterDuration(
-		MIN_POLL_INTERVAL,
-		MIN_POLL_INTERVAL_JITTER)
+		p.Duration(parameters.MeekMinPollInterval),
+		p.Float(parameters.MeekMinPollIntervalJitter))
+	p = nil
 
 	timeout := time.NewTimer(interval)
 	defer timeout.Stop()
@@ -659,21 +758,22 @@ func (meek *MeekConn) relay() {
 			sendPayloadSize = sendBuffer.Len()
 		}
 
-		// roundTrip will replace sendBuffer (by calling replaceSendBuffer). This is
-		// a compromise to conserve memory. Using a second buffer here, we could copy
-		// sendBuffer and immediately replace it, unblocking meekConn.Write() and
+		// relayRoundTrip will replace sendBuffer (by calling replaceSendBuffer). This
+		// is a compromise to conserve memory. Using a second buffer here, we could
+		// copy sendBuffer and immediately replace it, unblocking meekConn.Write() and
 		// allowing more upstream payload to immediately enqueue. Instead, the request
 		// payload is read directly from sendBuffer, including retries. Only once the
 		// server has acknowledged the request payload is sendBuffer replaced. This
 		// still allows meekConn.Write() to unblock before the round trip response is
 		// read.
 
-		receivedPayloadSize, err := meek.roundTrip(sendBuffer)
+		receivedPayloadSize, err := meek.relayRoundTrip(sendBuffer)
 
 		if err != nil {
 			select {
 			case <-meek.runCtx.Done():
-				// In this case, meek.roundTrip encountered Done(). Exit without logging error.
+				// In this case, meek.relayRoundTrip encountered Done(). Exit without
+				// logging error.
 				return
 			default:
 			}
@@ -688,6 +788,8 @@ func (meek *MeekConn) relay() {
 		// flips are used to avoid trivial, static traffic
 		// timing patterns.
 
+		p := meek.clientParameters.Get()
+
 		if receivedPayloadSize > 0 || sendPayloadSize > 0 {
 
 			interval = 0
@@ -695,27 +797,31 @@ func (meek *MeekConn) relay() {
 		} else if interval == 0 {
 
 			interval = common.JitterDuration(
-				MIN_POLL_INTERVAL,
-				MIN_POLL_INTERVAL_JITTER)
+				p.Duration(parameters.MeekMinPollInterval),
+				p.Float(parameters.MeekMinPollIntervalJitter))
 
 		} else {
 
-			if common.FlipCoin() {
-				interval = common.JitterDuration(
-					interval,
-					POLL_INTERVAL_JITTER)
-			} else {
-				interval = common.JitterDuration(
-					time.Duration(float64(interval)*POLL_INTERVAL_MULTIPLIER),
-					POLL_INTERVAL_JITTER)
+			if p.WeightedCoinFlip(parameters.MeekApplyPollIntervalMultiplierProbability) {
+
+				interval =
+					time.Duration(float64(interval) *
+						p.Float(parameters.MeekPollIntervalMultiplier))
 			}
 
-			if interval >= MAX_POLL_INTERVAL {
+			interval = common.JitterDuration(
+				interval,
+				p.Float(parameters.MeekPollIntervalJitter))
+
+			if interval >= p.Duration(parameters.MeekMaxPollInterval) {
+
 				interval = common.JitterDuration(
-					MAX_POLL_INTERVAL,
-					MAX_POLL_INTERVAL_JITTER)
+					p.Duration(parameters.MeekMaxPollInterval),
+					p.Float(parameters.MeekMaxPollIntervalJitter))
 			}
 		}
+
+		p = nil
 	}
 }
 
@@ -763,8 +869,64 @@ func (r *readCloseSignaller) AwaitClosed() bool {
 	return false
 }
 
-// roundTrip configures and makes the actual HTTP POST request
-func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
+// newRequest performs common request setup for both relay and round
+// tripper modes.
+//
+// newRequest is not safe for concurrent calls due to its use of
+// cachedTLSDialer.setRequestContext.
+//
+// The caller must call the returned cancelFunc.
+func (meek *MeekConn) newRequest(
+	ctx context.Context,
+	cookie *http.Cookie,
+	body io.Reader,
+	contentLength int) (*http.Request, context.CancelFunc, error) {
+
+	var requestCtx context.Context
+	var cancelFunc context.CancelFunc
+
+	if ctx != nil {
+		requestCtx, cancelFunc = context.WithCancel(ctx)
+	} else {
+		// - meek.stopRunning() will abort a round trip in flight
+		// - round trip will abort if it exceeds timeout
+		requestCtx, cancelFunc = context.WithTimeout(
+			meek.runCtx,
+			meek.clientParameters.Get().Duration(parameters.MeekRoundTripTimeout))
+	}
+
+	// Ensure TLS dials are made within the current request context.
+	if meek.cachedTLSDialer != nil {
+		meek.cachedTLSDialer.setRequestContext(requestCtx)
+	}
+
+	request, err := http.NewRequest("POST", meek.url.String(), body)
+	if err != nil {
+		return nil, cancelFunc, common.ContextError(err)
+	}
+
+	request = request.WithContext(requestCtx)
+
+	// Content-Length may not be be set automatically due to the
+	// underlying type of requestBody.
+	if contentLength > 0 {
+		request.ContentLength = int64(contentLength)
+	}
+
+	meek.addAdditionalHeaders(request)
+
+	request.Header.Set("Content-Type", "application/octet-stream")
+
+	if cookie == nil {
+		cookie = meek.cookie
+	}
+	request.AddCookie(cookie)
+
+	return request, cancelFunc, nil
+}
+
+// relayRoundTrip configures and makes the actual HTTP POST request
+func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 
 	// Retries are made when the round trip fails. This adds resiliency
 	// to connection interruption and intermittent failures.
@@ -808,9 +970,16 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 	}()
 
 	retries := uint(0)
-	retryDeadline := monotime.Now().Add(MEEK_ROUND_TRIP_RETRY_DEADLINE)
-	retryDelay := MEEK_ROUND_TRIP_RETRY_MIN_DELAY
+
+	p := meek.clientParameters.Get()
+	retryDeadline := monotime.Now().Add(p.Duration(parameters.MeekRoundTripRetryDeadline))
+	retryDelay := p.Duration(parameters.MeekRoundTripRetryMinDelay)
+	retryMaxDelay := p.Duration(parameters.MeekRoundTripRetryMaxDelay)
+	retryMultiplier := p.Float(parameters.MeekRoundTripRetryMultiplier)
+	p = nil
+
 	serverAcknowledgedRequestPayload := false
+
 	receivedPayloadSize := int64(0)
 
 	for try := 0; ; try++ {
@@ -834,37 +1003,15 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			contentLength = sendBuffer.Len()
 		}
 
-		var request *http.Request
-		request, err := http.NewRequest("POST", meek.url.String(), requestBody)
+		request, cancelFunc, err := meek.newRequest(
+			nil,
+			nil,
+			requestBody,
+			contentLength)
 		if err != nil {
 			// Don't retry when can't initialize a Request
 			return 0, common.ContextError(err)
 		}
-
-		// Content-Length won't be set automatically due to the underlying
-		// type of requestBody.
-		if contentLength > 0 {
-			request.ContentLength = int64(contentLength)
-		}
-
-		// - meek.stopRunning() will abort a round trip in flight
-		// - round trip will abort if it exceeds MEEK_ROUND_TRIP_TIMEOUT
-		requestContext, cancelFunc := context.WithTimeout(
-			meek.runCtx,
-			MEEK_ROUND_TRIP_TIMEOUT)
-		defer cancelFunc()
-
-		// Ensure TLS dials are made within the current request context.
-		if meek.cachedTLSDialer != nil {
-			meek.cachedTLSDialer.setRequestContext(requestContext)
-		}
-
-		request = request.WithContext(requestContext)
-
-		meek.addAdditionalHeaders(request)
-
-		request.Header.Set("Content-Type", "application/octet-stream")
-		request.AddCookie(meek.cookie)
 
 		expectedStatusCode := http.StatusOK
 
@@ -987,9 +1134,10 @@ func (meek *MeekConn) roundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		// Increase the next delay, to back off and avoid excessive
 		// activity in conditions such as no network connectivity.
 
-		retryDelay *= MEEK_ROUND_TRIP_RETRY_MULTIPLIER
-		if retryDelay >= MEEK_ROUND_TRIP_RETRY_MAX_DELAY {
-			retryDelay = MEEK_ROUND_TRIP_RETRY_MAX_DELAY
+		retryDelay = time.Duration(
+			float64(retryDelay) * retryMultiplier)
+		if retryDelay >= retryMaxDelay {
+			retryDelay = retryMaxDelay
 		}
 	}
 
@@ -1052,27 +1200,34 @@ func (meek *MeekConn) readPayload(
 	return totalSize, nil
 }
 
-// makeCookie creates the cookie to be sent with initial meek HTTP request.
-// The purpose of the cookie is to send the following to the server:
-//   ServerAddress -- the Psiphon Server address the meek server should relay to
-//   SessionID -- the Psiphon session ID (used by meek server to relay geolocation
-//     information obtained from the CDN through to the Psiphon Server)
-//   MeekProtocolVersion -- tells the meek server that this client understands
-//     the latest protocol.
-// The server will create a session using these values and send the session ID
-// back to the client via Set-Cookie header. Client must use that value with
-// all consequent HTTP requests
-// In unfronted meek mode, the cookie is visible over the adversary network, so the
+// makeCookie creates the cookie to be sent with initial meek HTTP request. The cookies
+// contains obfuscated metadata, including meek version and other protocol information.
+//
+// In round tripper mode, the cookie contains the destination endpoint for the round
+// trip request.
+//
+// In relay mode, the server will create a session using these values and send the session ID
+// back to the client via Set-Cookie header. The client must use that value with
+// all consequent HTTP requests.
+//
+// In plain HTTP meek protocols, the cookie is visible over the adversary network, so the
 // cookie is encrypted and obfuscated.
-func makeMeekCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
+//
+// Obsolete meek cookie fields used by the legacy server stack are no longer sent. These
+// include ServerAddress and SessionID.
+func makeMeekCookie(
+	clientParameters *parameters.ClientParameters,
+	meekCookieEncryptionPublicKey string,
+	meekObfuscatedKey string,
+	clientTunnelProtocol string,
+	endPoint string,
 
-	// Make the JSON data
-	serverAddress := meekConfig.PsiphonServerAddress
+) (cookie *http.Cookie, err error) {
+
 	cookieData := &protocol.MeekCookieData{
-		ServerAddress:        serverAddress,
-		SessionID:            meekConfig.SessionID,
 		MeekProtocolVersion:  MEEK_PROTOCOL_VERSION,
-		ClientTunnelProtocol: meekConfig.ClientTunnelProtocol,
+		ClientTunnelProtocol: clientTunnelProtocol,
+		EndPoint:             endPoint,
 	}
 	serializedCookie, err := json.Marshal(cookieData)
 	if err != nil {
@@ -1088,7 +1243,7 @@ func makeMeekCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
 	// different messages if the messages are sent to two different public keys."
 	var nonce [24]byte
 	var publicKey [32]byte
-	decodedPublicKey, err := base64.StdEncoding.DecodeString(meekConfig.MeekCookieEncryptionPublicKey)
+	decodedPublicKey, err := base64.StdEncoding.DecodeString(meekCookieEncryptionPublicKey)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -1104,7 +1259,9 @@ func makeMeekCookie(meekConfig *MeekConfig) (cookie *http.Cookie, err error) {
 
 	// Obfuscate the encrypted data
 	obfuscator, err := common.NewClientObfuscator(
-		&common.ObfuscatorConfig{Keyword: meekConfig.MeekObfuscatedKey, MaxPadding: MEEK_COOKIE_MAX_PADDING})
+		&common.ObfuscatorConfig{
+			Keyword:    meekObfuscatedKey,
+			MaxPadding: clientParameters.Get().Int(parameters.MeekCookieMaxPadding)})
 	if err != nil {
 		return nil, common.ContextError(err)
 	}

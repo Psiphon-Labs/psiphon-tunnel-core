@@ -372,12 +372,12 @@ func NoticeUserLog(message string) {
 		"message", message)
 }
 
-// NoticeCandidateServers is how many possible servers are available for the selected region and protocol
-func NoticeCandidateServers(region, protocol string, count int) {
+// NoticeCandidateServers is how many possible servers are available for the selected region and protocols
+func NoticeCandidateServers(region string, protocols []string, count int) {
 	singletonNoticeLogger.outputNotice(
 		"CandidateServers", noticeIsDiagnostic,
 		"region", region,
-		"protocol", protocol,
+		"protocols", protocols,
 		"count", count)
 }
 

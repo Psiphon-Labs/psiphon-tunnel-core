@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Inc/goarista/monotime"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
 func TestInterruptDials(t *testing.T) {
@@ -43,30 +44,36 @@ func TestInterruptDials(t *testing.T) {
 	makeDialers["SOCKS4-Proxied"] = func(mockServerAddr string) Dialer {
 		return NewTCPDialer(
 			&DialConfig{
-				UpstreamProxyUrl: "socks4a://" + mockServerAddr,
+				UpstreamProxyURL: "socks4a://" + mockServerAddr,
 			})
 	}
 
 	makeDialers["SOCKS5-Proxied"] = func(mockServerAddr string) Dialer {
 		return NewTCPDialer(
 			&DialConfig{
-				UpstreamProxyUrl: "socks5://" + mockServerAddr,
+				UpstreamProxyURL: "socks5://" + mockServerAddr,
 			})
 	}
 
 	makeDialers["HTTP-CONNECT-Proxied"] = func(mockServerAddr string) Dialer {
 		return NewTCPDialer(
 			&DialConfig{
-				UpstreamProxyUrl: "http://" + mockServerAddr,
+				UpstreamProxyURL: "http://" + mockServerAddr,
 			})
 	}
 
 	// TODO: test upstreamproxy.ProxyAuthTransport
 
+	clientParameters, err := parameters.NewClientParameters(nil)
+	if err != nil {
+		t.Fatalf("NewClientParameters failed: %s", err)
+	}
+
 	makeDialers["TLS"] = func(string) Dialer {
 		return NewCustomTLSDialer(
 			&CustomTLSConfig{
-				Dial: NewTCPDialer(&DialConfig{}),
+				ClientParameters: clientParameters,
+				Dial:             NewTCPDialer(&DialConfig{}),
 			})
 	}
 

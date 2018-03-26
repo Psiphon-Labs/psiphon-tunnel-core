@@ -33,6 +33,7 @@ import (
 
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
 // SplitTunnelClassifier determines whether a network destination
@@ -67,16 +68,14 @@ import (
 // data is cached in the data store so it need not be downloaded in full
 // when fresh data is in the cache.
 type SplitTunnelClassifier struct {
-	mutex                    sync.RWMutex
-	fetchRoutesUrlFormat     string
-	userAgent                string
-	routesSignaturePublicKey string
-	dnsServerAddress         string
-	dnsTunneler              Tunneler
-	fetchRoutesWaitGroup     *sync.WaitGroup
-	isRoutesSet              bool
-	cache                    map[string]*classification
-	routes                   common.SubnetLookup
+	mutex                sync.RWMutex
+	clientParameters     *parameters.ClientParameters
+	userAgent            string
+	dnsTunneler          Tunneler
+	fetchRoutesWaitGroup *sync.WaitGroup
+	isRoutesSet          bool
+	cache                map[string]*classification
+	routes               common.SubnetLookup
 }
 
 type classification struct {
@@ -86,14 +85,12 @@ type classification struct {
 
 func NewSplitTunnelClassifier(config *Config, tunneler Tunneler) *SplitTunnelClassifier {
 	return &SplitTunnelClassifier{
-		fetchRoutesUrlFormat:     config.SplitTunnelRoutesUrlFormat,
-		userAgent:                MakePsiphonUserAgent(config),
-		routesSignaturePublicKey: config.SplitTunnelRoutesSignaturePublicKey,
-		dnsServerAddress:         config.SplitTunnelDnsServer,
-		dnsTunneler:              tunneler,
-		fetchRoutesWaitGroup:     new(sync.WaitGroup),
-		isRoutesSet:              false,
-		cache:                    make(map[string]*classification),
+		clientParameters:     config.clientParameters,
+		userAgent:            MakePsiphonUserAgent(config),
+		dnsTunneler:          tunneler,
+		fetchRoutesWaitGroup: new(sync.WaitGroup),
+		isRoutesSet:          false,
+		cache:                make(map[string]*classification),
 	}
 }
 
@@ -108,9 +105,15 @@ func (classifier *SplitTunnelClassifier) Start(fetchRoutesTunnel *Tunnel) {
 
 	classifier.isRoutesSet = false
 
-	if classifier.dnsServerAddress == "" ||
-		classifier.routesSignaturePublicKey == "" ||
-		classifier.fetchRoutesUrlFormat == "" {
+	p := classifier.clientParameters.Get()
+	dnsServerAddress := p.String(parameters.SplitTunnelDNSServer)
+	routesSignaturePublicKey := p.String(parameters.SplitTunnelRoutesSignaturePublicKey)
+	fetchRoutesUrlFormat := p.String(parameters.SplitTunnelRoutesURLFormat)
+	p = nil
+
+	if dnsServerAddress == "" ||
+		routesSignaturePublicKey == "" ||
+		fetchRoutesUrlFormat == "" {
 		// Split tunnel capability is not configured
 		return
 	}
@@ -157,6 +160,13 @@ func (classifier *SplitTunnelClassifier) IsUntunneled(targetAddress string) bool
 		return false
 	}
 
+	dnsServerAddress := classifier.clientParameters.Get().String(
+		parameters.SplitTunnelDNSServer)
+	if dnsServerAddress == "" {
+		// Split tunnel has been disabled.
+		return false
+	}
+
 	classifier.mutex.RLock()
 	cachedClassification, ok := classifier.cache[targetAddress]
 	classifier.mutex.RUnlock()
@@ -165,7 +175,7 @@ func (classifier *SplitTunnelClassifier) IsUntunneled(targetAddress string) bool
 	}
 
 	ipAddr, ttl, err := tunneledLookupIP(
-		classifier.dnsServerAddress, classifier.dnsTunneler, targetAddress)
+		dnsServerAddress, classifier.dnsTunneler, targetAddress)
 	if err != nil {
 		NoticeAlert("failed to resolve address for split tunnel classification: %s", err)
 		return false
@@ -217,7 +227,13 @@ func (classifier *SplitTunnelClassifier) setRoutes(tunnel *Tunnel) {
 // fails and cached routes data is present, that cached data is returned.
 func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData []byte, err error) {
 
-	url := fmt.Sprintf(classifier.fetchRoutesUrlFormat, tunnel.serverContext.clientRegion)
+	p := classifier.clientParameters.Get()
+	routesSignaturePublicKey := p.String(parameters.SplitTunnelRoutesSignaturePublicKey)
+	fetchRoutesUrlFormat := p.String(parameters.SplitTunnelRoutesURLFormat)
+	fetchTimeout := p.Duration(parameters.FetchSplitTunnelRoutesTimeout)
+	p = nil
+
+	url := fmt.Sprintf(fetchRoutesUrlFormat, tunnel.serverContext.clientRegion)
 	request, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, common.ContextError(err)
@@ -238,11 +254,11 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	}
 	transport := &http.Transport{
 		Dial: tunneledDialer,
-		ResponseHeaderTimeout: time.Duration(*tunnel.config.FetchRoutesTimeoutSeconds) * time.Second,
+		ResponseHeaderTimeout: fetchTimeout,
 	}
 	httpClient := &http.Client{
 		Transport: transport,
-		Timeout:   time.Duration(*tunnel.config.FetchRoutesTimeoutSeconds) * time.Second,
+		Timeout:   fetchTimeout,
 	}
 
 	// At this time, the largest uncompressed routes data set is ~1MB. For now,
@@ -281,7 +297,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	var encodedRoutesData string
 	if !useCachedRoutes {
 		encodedRoutesData, err = common.ReadAuthenticatedDataPackage(
-			routesDataPackage, false, classifier.routesSignaturePublicKey)
+			routesDataPackage, false, routesSignaturePublicKey)
 		if err != nil {
 			NoticeAlert("failed to read split tunnel routes package: %s", common.ContextError(err))
 			useCachedRoutes = true

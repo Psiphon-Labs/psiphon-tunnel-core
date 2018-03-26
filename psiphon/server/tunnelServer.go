@@ -52,6 +52,8 @@ const (
 	SSH_CONNECTION_READ_DEADLINE          = 5 * time.Minute
 	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE = 8192
 	SSH_TCP_PORT_FORWARD_QUEUE_SIZE       = 1024
+	SSH_KEEP_ALIVE_PAYLOAD_MIN_BYTES      = 0
+	SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES      = 256
 	SSH_SEND_OSL_INITIAL_RETRY_DELAY      = 30 * time.Second
 	SSH_SEND_OSL_RETRY_FACTOR             = 2
 	OSL_SESSION_CACHE_TTL                 = 5 * time.Minute
@@ -895,7 +897,7 @@ type qualityMetrics struct {
 type handshakeState struct {
 	completed             bool
 	apiProtocol           string
-	apiParams             requestJSONObject
+	apiParams             common.APIParameters
 	authorizedAccessTypes []string
 	expectDomainBytes     bool
 }
@@ -1115,7 +1117,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 		}
 	}
 
-	if !isHexDigits(sshClient.sshServer.support, sshPasswordPayload.SessionId) ||
+	if !isHexDigits(sshClient.sshServer.support.Config, sshPasswordPayload.SessionId) ||
 		len(sshPasswordPayload.SessionId) != expectedSessionIDLength {
 		return nil, common.ContextError(fmt.Errorf("invalid session ID for %q", conn.User()))
 	}
@@ -1232,7 +1234,14 @@ func (sshClient *sshClient) runTunnel(
 			var err error
 
 			if request.Type == "keepalive@openssh.com" {
-				// Keepalive requests have an empty response.
+				// Random padding to frustrate fingerprinting.
+				responsePayload, err = common.MakeSecureRandomPadding(
+					SSH_KEEP_ALIVE_PAYLOAD_MIN_BYTES, SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES)
+				if err != nil {
+					// Proceed without random padding.
+					responsePayload = make([]byte, 0)
+					err = nil
+				}
 			} else {
 
 				// All other requests are assumed to be API requests.

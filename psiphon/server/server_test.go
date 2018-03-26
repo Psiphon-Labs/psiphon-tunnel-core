@@ -75,7 +75,7 @@ func TestMain(m *testing.M) {
 	}
 	defer os.RemoveAll(testDataDirName)
 
-	os.Remove(filepath.Join(testDataDirName, psiphon.DATA_STORE_FILENAME))
+	os.Remove(filepath.Join(testDataDirName, psiphon.DATA_STORE_FILE_NAME))
 
 	psiphon.SetEmitDiagnosticNotices(true)
 
