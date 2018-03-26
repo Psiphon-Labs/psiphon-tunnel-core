@@ -728,7 +728,7 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 			continue
 		}
 
-		err = json.Unmarshal(data, serverEntry)
+		err = json.Unmarshal(data, &serverEntry)
 		if err != nil {
 			// In case of data corruption or a bug causing this condition,
 			// do not stop iterating.

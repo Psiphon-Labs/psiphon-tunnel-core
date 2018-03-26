@@ -487,7 +487,9 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		config.CustomHeaders = upstreamProxyCustomHeaders
 	}
 
-	// The following config values must be applied through client parameters.
+	// The following config values must be applied through client parameters
+	// (setting the fields in Config directly will have no effect since the
+	// client parameters have been populated by LoadConfig).
 
 	applyParameters := make(map[string]interface{})
 
