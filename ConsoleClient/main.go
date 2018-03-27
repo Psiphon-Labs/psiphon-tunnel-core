@@ -242,8 +242,8 @@ func main() {
 			}
 		}()
 
-		limitTunnelProtocols := config.parameters.GetTunnelProtocols(parameters.LimitTunnelProtocols)
-		if psiphon.CountServerEntries(config.EgressRegion, limitTunnelProtocol) == 0 {
+		limitTunnelProtocols := config.GetClientParameters().TunnelProtocols(parameters.LimitTunnelProtocols)
+		if psiphon.CountServerEntries(config.EgressRegion, limitTunnelProtocols) == 0 {
 			embeddedServerListWaitGroup.Wait()
 		} else {
 			defer embeddedServerListWaitGroup.Wait()

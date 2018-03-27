@@ -618,6 +618,11 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	return &config, nil
 }
 
+// GetClientParameters returns a snapshot of the current client parameters.
+func (config *Config) GetClientParameters() *parameters.ClientParametersSnapshot {
+	return config.clientParameters.Get()
+}
+
 // SetClientParameters resets Config.clientParameters to the default values,
 // applies any config file values, and then applies the input parameters (from
 // tactics, etc.)
