@@ -373,7 +373,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
         "PropagationChannelId" : "0",
         "ConnectionPoolSize" : 1,
         "EstablishTunnelPausePeriodSeconds" : 1,
-        "FetchRemoteServerListRetryPeriodMilliseconds" : 100,
+        "FetchRemoteServerListRetryPeriodMilliseconds" : 250,
 		"RemoteServerListSignaturePublicKey" : "%s",
 		"RemoteServerListUrl" : "%s",
 		"RemoteServerListDownloadFilename" : "%s",

@@ -506,9 +506,9 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	// Override client retry throttle values to speed up automated
 	// tests and ensure tests complete within fixed deadlines.
-	applyParameters[parameters.FetchRemoteServerListRetryPeriod] = "100ms"
-	applyParameters[parameters.FetchUpgradeRetryPeriod] = "100ms"
-	applyParameters[parameters.EstablishTunnelPausePeriod] = "100ms"
+	applyParameters[parameters.FetchRemoteServerListRetryPeriod] = "250ms"
+	applyParameters[parameters.FetchUpgradeRetryPeriod] = "250ms"
+	applyParameters[parameters.EstablishTunnelPausePeriod] = "250ms"
 
 	applyParameters[parameters.LimitTunnelProtocols] = protocol.TunnelProtocols{runConfig.protocol}
 
