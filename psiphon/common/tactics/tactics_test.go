@@ -22,8 +22,6 @@ package tactics
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -36,7 +34,6 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
@@ -108,20 +105,10 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("unexpected lookupThreshold")
 	}
 
-	requestPublicKey, requestPrivateKey, err := box.GenerateKey(rand.Reader)
+	encodedRequestPublicKey, encodedRequestPrivateKey, encodedObfuscatedKey, err := GenerateKeys()
 	if err != nil {
-		t.Fatalf("GenerateKey failed: %s", err)
+		t.Fatalf("GenerateKeys failed: %s", err)
 	}
-
-	encodedRequestPublicKey := base64.StdEncoding.EncodeToString(requestPublicKey[:])
-	encodedRequestPrivateKey := base64.StdEncoding.EncodeToString(requestPrivateKey[:])
-
-	obfuscatedKey, err := common.MakeSecureRandomBytes(common.OBFUSCATE_KEY_LENGTH)
-	if err != nil {
-		t.Fatalf("MakeSecureRandomBytes failed: %s", err)
-	}
-
-	encodedObfuscatedKey := base64.StdEncoding.EncodeToString(obfuscatedKey[:])
 
 	tacticsProbability := 0.5
 	tacticsNetworkLatencyMultiplier := 2.0
@@ -600,19 +587,10 @@ func TestTactics(t *testing.T) {
 
 	// Fetch should fail when using incorrect keys
 
-	incorrectRequestPublicKey, _, err := box.GenerateKey(rand.Reader)
+	encodedIncorrectRequestPublicKey, _, encodedIncorrectObfuscatedKey, err := GenerateKeys()
 	if err != nil {
-		t.Fatalf("GenerateKey failed: %s", err)
+		t.Fatalf("GenerateKeys failed: %s", err)
 	}
-
-	encodedIncorrectRequestPublicKey := base64.StdEncoding.EncodeToString(incorrectRequestPublicKey[:])
-
-	incorrectObfuscatedKey, err := common.MakeSecureRandomBytes(common.OBFUSCATE_KEY_LENGTH)
-	if err != nil {
-		t.Fatalf("MakeSecureRandomBytes failed: %s", err)
-	}
-
-	encodedIncorrectObfuscatedKey := base64.StdEncoding.EncodeToString(incorrectObfuscatedKey[:])
 
 	_, err = FetchTactics(
 		context.Background(),

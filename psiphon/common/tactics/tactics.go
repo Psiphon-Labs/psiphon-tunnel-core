@@ -378,6 +378,25 @@ type SpeedTestSample struct {
 	BytesDown int `json:"dn"`
 }
 
+// GenerateKeys generates a tactics request key pair and obfuscation key.
+func GenerateKeys() (encodedRequestPublicKey, encodedRequestPrivateKey, encodedObfuscatedKey string, err error) {
+
+	requestPublicKey, requestPrivateKey, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		return "", "", "", common.ContextError(err)
+	}
+
+	obfuscatedKey, err := common.MakeSecureRandomBytes(common.OBFUSCATE_KEY_LENGTH)
+	if err != nil {
+		return "", "", "", common.ContextError(err)
+	}
+
+	return base64.StdEncoding.EncodeToString(requestPublicKey[:]),
+		base64.StdEncoding.EncodeToString(requestPrivateKey[:]),
+		base64.StdEncoding.EncodeToString(obfuscatedKey[:]),
+		nil
+}
+
 // NewServer creates Server using the specified tactics configuration file.
 //
 // The logger and logFieldFormatter callbacks are used to log errors and
@@ -931,13 +950,16 @@ func (server *Server) handleTacticsRequest(
 		return
 	}
 
-	err = server.apiParameterValidator(apiParams)
-	if err != nil {
-		server.logger.WithContextFields(
-			common.LogFields{"error": err}).Warning("invalid request parameters")
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
+	// *TODO* fix validator and formatter
+	/*
+		err = server.apiParameterValidator(apiParams)
+		if err != nil {
+			server.logger.WithContextFields(
+				common.LogFields{"error": err}).Warning("invalid request parameters")
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+	*/
 
 	tacticsPayload, err := server.GetTacticsPayload(geoIPData, apiParams)
 	if err != nil {
@@ -968,7 +990,11 @@ func (server *Server) handleTacticsRequest(
 
 	// Log a metric.
 
-	logFields := server.logFieldFormatter(geoIPData, apiParams)
+	// *TODO* fix validator and formatter
+	/*
+		logFields := server.logFieldFormatter(geoIPData, apiParams)
+	*/
+	logFields := make(common.LogFields)
 
 	logFields[NEW_TACTICS_TAG_LOG_FIELD_NAME] = tacticsPayload.Tag
 	logFields[IS_TACTICS_REQUEST_LOG_FIELD_NAME] = true
@@ -1081,7 +1107,7 @@ func UseStoredTactics(
 		return nil, common.ContextError(err)
 	}
 
-	if record != nil && record.Tag != "" && record.Expiry.After(time.Now()) {
+	if record.Tag != "" && record.Expiry.After(time.Now()) {
 		return record, nil
 	}
 
@@ -1117,10 +1143,6 @@ func FetchTactics(
 	record, err := getStoredTacticsRecord(storer, networkID)
 	if err != nil {
 		return nil, common.ContextError(err)
-	}
-
-	if record == nil {
-		record = &Record{}
 	}
 
 	speedTestSamples, err := getSpeedTestSamples(storer, networkID)
@@ -1307,7 +1329,7 @@ func getStoredTacticsRecord(
 	}
 
 	if marshaledRecord == nil {
-		return nil, nil
+		return &Record{}, nil
 	}
 
 	var record *Record

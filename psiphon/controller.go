@@ -1274,16 +1274,15 @@ func (controller *Controller) getTactics(done chan struct{}) {
 
 	if tacticsRecord == nil {
 
-		iterator, err := NewTacticsServerEntryIterator()
+		iterator, err := NewTacticsServerEntryIterator(
+			controller.config)
 		if err != nil {
 			NoticeAlert("tactics iterator failed: %s", err)
 			return
 		}
 		defer iterator.Close()
 
-		firstIteration := true
-
-		for {
+		for iteration := 0; ; iteration++ {
 
 			serverEntry, err := iterator.Next()
 			if err != nil {
@@ -1292,8 +1291,9 @@ func (controller *Controller) getTactics(done chan struct{}) {
 			}
 
 			if serverEntry == nil {
-				if firstIteration {
+				if iteration == 0 {
 					NoticeAlert("tactics request skipped: no capable servers")
+					return
 				}
 
 				iterator.Reset()
@@ -1376,6 +1376,8 @@ func (controller *Controller) doFetchTactics(
 		return nil, common.ContextError(err)
 	}
 
+	meekConfig.RoundTripperOnly = true
+
 	dialConfig, _, _ := initDialConfig(
 		controller.config, meekConfig)
 
@@ -1419,7 +1421,9 @@ func (controller *Controller) doFetchTactics(
 	}
 	defer meekConn.Close()
 
-	var apiParams common.APIParameters // *TODO* populate
+	var apiParams common.APIParameters
+	// *TODO* populate
+	apiParams = make(common.APIParameters)
 
 	tacticsRecord, err := tactics.FetchTactics(
 		ctx,

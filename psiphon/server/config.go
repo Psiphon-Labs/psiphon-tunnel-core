@@ -428,23 +428,29 @@ func validateNetworkAddress(address string, requireIPaddress bool) error {
 // GenerateConfigParams specifies customizations to be applied to
 // a generated server config.
 type GenerateConfigParams struct {
-	LogFilename            string
-	SkipPanickingLogWriter bool
-	LogLevel               string
-	ServerIPAddress        string
-	WebServerPort          int
-	EnableSSHAPIRequests   bool
-	TunnelProtocolPorts    map[string]int
-	TrafficRulesFilename   string
+	LogFilename                 string
+	SkipPanickingLogWriter      bool
+	LogLevel                    string
+	ServerIPAddress             string
+	WebServerPort               int
+	EnableSSHAPIRequests        bool
+	TunnelProtocolPorts         map[string]int
+	TrafficRulesFilename        string
+	TacticsRequestPublicKey     string
+	TacticsRequestObfuscatedKey string
 }
 
-// GenerateConfig creates a new Psiphon server config. It returns JSON
-// encoded configs and a client-compatible "server entry" for the server. It
-// generates all necessary secrets and key material, which are emitted in
-// the config file and server entry as necessary.
+// GenerateConfig creates a new Psiphon server config. It returns JSON encoded
+// configs and a client-compatible "server entry" for the server. It generates
+// all necessary secrets and key material, which are emitted in the config
+// file and server entry as necessary.
+//
 // GenerateConfig uses sample values for many fields. The intention is for
-// generated configs to be used for testing or as a template for production
+// generated configs to be used for testing or as examples for production
 // setup, not to generate production-ready configurations.
+//
+// When tactics key material is provided in GenerateConfigParams, tactics
+// capabilities are added for all meek protocols in TunnelProtocolPorts.
 func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error) {
 
 	// Input validation
@@ -653,6 +659,12 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	for tunnelProtocol := range params.TunnelProtocolPorts {
 		capabilities = append(capabilities, protocol.GetCapability(tunnelProtocol))
+
+		if params.TacticsRequestPublicKey != "" && params.TacticsRequestObfuscatedKey != "" &&
+			protocol.TunnelProtocolUsesMeek(tunnelProtocol) {
+
+			capabilities = append(capabilities, protocol.GetTacticsCapability(tunnelProtocol))
+		}
 	}
 
 	sshPort := params.TunnelProtocolPorts["SSH"]
@@ -703,6 +715,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		MeekFrontingHosts:             []string{params.ServerIPAddress},
 		MeekFrontingAddresses:         []string{params.ServerIPAddress},
 		MeekFrontingDisableSNI:        false,
+		TacticsRequestPublicKey:       params.TacticsRequestPublicKey,
+		TacticsRequestObfuscatedKey:   params.TacticsRequestObfuscatedKey,
 	}
 
 	encodedServerEntry, err := protocol.EncodeServerEntry(serverEntry)

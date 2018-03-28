@@ -487,6 +487,11 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		config.CustomHeaders = upstreamProxyCustomHeaders
 	}
 
+	// Enable tactics requests. This will passively exercise the code
+	// paths. server_test runs a more comprehensive test that checks
+	// that the tactics request succeeds.
+	config.NetworkIDGetter = &testNetworkGetter{}
+
 	// The following config values must be applied through client parameters
 	// (setting the fields in Config directly will have no effect since the
 	// client parameters have been populated by LoadConfig).
@@ -819,13 +824,6 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	}
 }
 
-type TestHostNameTransformer struct {
-}
-
-func (TestHostNameTransformer) TransformHostName(string) (string, bool) {
-	return "example.com", true
-}
-
 func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) error {
 
 	testUrl := "https://psiphon.ca"
@@ -1146,4 +1144,11 @@ func initUpstreamProxy() {
 	}()
 
 	// TODO: wait until listener is active?
+}
+
+type testNetworkGetter struct {
+}
+
+func (testNetworkGetter) GetNetworkID() string {
+	return "NETWORK1"
 }

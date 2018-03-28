@@ -487,14 +487,14 @@ func insertRankedServerEntry(tx *bolt.Tx, serverEntryId string, position int) er
 // ServerEntryIterator is used to iterate over
 // stored server entries in rank order.
 type ServerEntryIterator struct {
-	config                      *Config
-	supportsTactics             bool
-	shuffleHeadLength           int
-	serverEntryIds              []string
-	serverEntryIndex            int
-	isTargetServerEntryIterator bool
-	hasNextTargetServerEntry    bool
-	targetServerEntry           *protocol.ServerEntry
+	config                       *Config
+	shuffleHeadLength            int
+	serverEntryIds               []string
+	serverEntryIndex             int
+	isTacticsServerEntryIterator bool
+	isTargetServerEntryIterator  bool
+	hasNextTargetServerEntry     bool
+	targetServerEntry            *protocol.ServerEntry
 }
 
 // NewServerEntryIterator creates a new ServerEntryIterator.
@@ -513,7 +513,7 @@ func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) 
 
 	// When configured, this target server entry is the only candidate
 	if config.TargetServerEntry != "" {
-		return newTargetServerEntryIterator(config)
+		return newTargetServerEntryIterator(config, false)
 	}
 
 	checkInitDataStore()
@@ -526,9 +526,8 @@ func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) 
 	applyServerAffinity := !filterChanged
 
 	iterator := &ServerEntryIterator{
-		config:                      config,
-		shuffleHeadLength:           config.TunnelPoolSize,
-		isTargetServerEntryIterator: false,
+		config:            config,
+		shuffleHeadLength: config.TunnelPoolSize,
 	}
 
 	err = iterator.Reset()
@@ -539,13 +538,19 @@ func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) 
 	return applyServerAffinity, iterator, nil
 }
 
-func NewTacticsServerEntryIterator() (*ServerEntryIterator, error) {
+func NewTacticsServerEntryIterator(config *Config) (*ServerEntryIterator, error) {
+
+	// When configured, this target server entry is the only candidate
+	if config.TargetServerEntry != "" {
+		_, iterator, err := newTargetServerEntryIterator(config, true)
+		return iterator, err
+	}
 
 	checkInitDataStore()
 
 	iterator := &ServerEntryIterator{
-		supportsTactics:   true,
-		shuffleHeadLength: 0,
+		shuffleHeadLength:            0,
+		isTacticsServerEntryIterator: true,
 	}
 
 	err := iterator.Reset()
@@ -557,7 +562,7 @@ func NewTacticsServerEntryIterator() (*ServerEntryIterator, error) {
 }
 
 // newTargetServerEntryIterator is a helper for initializing the TargetServerEntry case
-func newTargetServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) {
+func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *ServerEntryIterator, error) {
 
 	serverEntry, err := protocol.DecodeServerEntry(
 		config.TargetServerEntry, common.GetCurrentTimestamp(), protocol.SERVER_ENTRY_SOURCE_TARGET)
@@ -565,24 +570,37 @@ func newTargetServerEntryIterator(config *Config) (bool, *ServerEntryIterator, e
 		return false, nil, common.ContextError(err)
 	}
 
-	if config.EgressRegion != "" && serverEntry.Region != config.EgressRegion {
-		return false, nil, common.ContextError(errors.New("TargetServerEntry does not support EgressRegion"))
-	}
+	if isTactics {
 
-	limitTunnelProtocols := config.clientParameters.Get().TunnelProtocols(parameters.LimitTunnelProtocols)
-	if len(limitTunnelProtocols) > 0 {
-		// At the ServerEntryIterator level, only limitTunnelProtocols is applied;
-		// impairedTunnelProtocols and excludeMeek are handled higher up.
-		if len(serverEntry.GetSupportedProtocols(limitTunnelProtocols, nil, false)) == 0 {
-			return false, nil, common.ContextError(errors.New("TargetServerEntry does not support LimitTunnelProtocols"))
+		if len(serverEntry.GetSupportedTacticsProtocols()) == 0 {
+			return false, nil, common.ContextError(errors.New("TargetServerEntry does not support tactics protocols"))
+		}
+
+	} else {
+
+		if config.EgressRegion != "" && serverEntry.Region != config.EgressRegion {
+			return false, nil, common.ContextError(errors.New("TargetServerEntry does not support EgressRegion"))
+		}
+
+		limitTunnelProtocols := config.clientParameters.Get().TunnelProtocols(parameters.LimitTunnelProtocols)
+		if len(limitTunnelProtocols) > 0 {
+			// At the ServerEntryIterator level, only limitTunnelProtocols is applied;
+			// impairedTunnelProtocols and excludeMeek are handled higher up.
+			if len(serverEntry.GetSupportedProtocols(limitTunnelProtocols, nil, false)) == 0 {
+				return false, nil, common.ContextError(errors.New("TargetServerEntry does not support LimitTunnelProtocols"))
+			}
 		}
 	}
+
 	iterator := &ServerEntryIterator{
-		isTargetServerEntryIterator: true,
-		hasNextTargetServerEntry:    true,
-		targetServerEntry:           serverEntry,
+		isTacticsServerEntryIterator: isTactics,
+		isTargetServerEntryIterator:  true,
+		hasNextTargetServerEntry:     true,
+		targetServerEntry:            serverEntry,
 	}
+
 	NoticeInfo("using TargetServerEntry: %s", serverEntry.IpAddress)
+
 	return false, iterator, nil
 }
 
@@ -602,11 +620,15 @@ func (iterator *ServerEntryIterator) Reset() error {
 	// as protocol filtering, including impaire protocol and exclude-meek
 	// logic, is all handled higher up.
 
-	limitTunnelProtocols := iterator.config.clientParameters.Get().TunnelProtocols(
-		parameters.LimitTunnelProtocols)
+	// TODO: for isTacticsServerEntryIterator, emit tactics candidate count.
 
-	count := CountServerEntries(iterator.config.EgressRegion, limitTunnelProtocols)
-	NoticeCandidateServers(iterator.config.EgressRegion, limitTunnelProtocols, count)
+	if !iterator.isTacticsServerEntryIterator {
+		limitTunnelProtocols := iterator.config.clientParameters.Get().TunnelProtocols(
+			parameters.LimitTunnelProtocols)
+
+		count := CountServerEntries(iterator.config.EgressRegion, limitTunnelProtocols)
+		NoticeCandidateServers(iterator.config.EgressRegion, limitTunnelProtocols, count)
+	}
 
 	// This query implements the Psiphon server candidate selection
 	// algorithm: the first TunnelPoolSize server candidates are in rank
@@ -737,10 +759,20 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 		}
 
 		// Check filter requirements
-		if (iterator.config.EgressRegion == "" || serverEntry.Region == iterator.config.EgressRegion) &&
-			(!iterator.supportsTactics || len(serverEntry.GetSupportedTacticsProtocols()) > 0) {
 
-			break
+		if iterator.isTacticsServerEntryIterator {
+
+			// Tactics doesn't filter by egress region.
+			if len(serverEntry.GetSupportedTacticsProtocols()) > 0 {
+				break
+			}
+
+		} else {
+
+			if iterator.config.EgressRegion == "" ||
+				serverEntry.Region == iterator.config.EgressRegion {
+				break
+			}
 		}
 	}
 
