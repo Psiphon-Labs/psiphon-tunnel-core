@@ -163,9 +163,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	psiphon.NoticeBuildInfo()
-
 	// Handle required config file parameter
+
+	// EmitDiagnosticNotices is set by LoadConfig; force to true
+	// an emit diagnostics when LoadConfig-related errors occur.
 
 	if configFilename == "" {
 		psiphon.SetEmitDiagnosticNotices(true)
@@ -184,6 +185,11 @@ func main() {
 		psiphon.NoticeError("error processing configuration file: %s", err)
 		os.Exit(1)
 	}
+
+	// BuildInfo is a diagnostic notice, so emit only after LoadConfig
+	// sets EmitDiagnosticNotices.
+
+	psiphon.NoticeBuildInfo()
 
 	// Handle optional profiling parameter
 
