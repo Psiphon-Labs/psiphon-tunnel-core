@@ -331,6 +331,19 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
  */
 - (BOOL)start:(BOOL)ifNeeded;
 
+
+/*!
+ Force stops the tunnel and reconnects with the current session ID.
+ Retuns with FALSE immediately if no session ID has already been generated.
+
+ @note On the first connection `start:` method should always be used to generate a
+ session ID.
+
+ @return TRUE if the connection start was successful, FALSE otherwise.
+ Swift: @code func startWithCurrentSessionID() @endcode
+ */
+- (BOOL)stopAndReconnectWithCurrentSessionID;
+
 /*!
  Stop the tunnel (regardless of its current connection state).
  Swift: @code func stop() @endcode
