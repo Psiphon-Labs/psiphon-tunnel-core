@@ -149,6 +149,17 @@
     return [self start];
 }
 
+// See comment in header
+- (BOOL)stopAndReconnectWithCurrentSessionID {
+
+    // Proceed only if a session ID has alreaby been generated.
+    if (self.sessionID == nil) {
+        return FALSE;
+    }
+
+    return [self start];
+}
+
 /*!
  Start the tunnel. If the tunnel is already started it will be stopped first.
  Assumes self.sessionID has been initialized -- i.e., assumes that
