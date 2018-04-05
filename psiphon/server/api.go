@@ -315,6 +315,7 @@ var connectedRequestParams = append(
 // established and at least once per day. The last_connected input value,
 // which should be a connected_timestamp output from a previous connected
 // response, is used to calculate unique user stats.
+// connected_timestamp is truncated as a privacy measure.
 func connectedAPIRequestHandler(
 	support *SupportServices,
 	geoIPData GeoIPData,

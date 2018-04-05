@@ -1262,12 +1262,13 @@ func FetchTactics(
 // enables the client performing the speed test to record the
 // sample time with an accurate server clock; the random padding
 // is to frustrate fingerprinting.
+// The speed test timestamp is truncated as a privacy measure.
 func MakeSpeedTestResponse(minPadding, maxPadding int) ([]byte, error) {
 
 	// MarshalBinary encoding (version 1) is 15 bytes:
 	// https://github.com/golang/go/blob/release-branch.go1.9/src/time/time.go#L1112
 
-	timestamp, err := time.Now().UTC().MarshalBinary()
+	timestamp, err := time.Now().UTC().Truncate(1 * time.Hour).MarshalBinary()
 	if err == nil && len(timestamp) > 255 {
 		err = fmt.Errorf("unexpected marshaled time size: %d", len(timestamp))
 	}
