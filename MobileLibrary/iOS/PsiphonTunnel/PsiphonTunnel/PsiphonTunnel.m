@@ -149,6 +149,17 @@
     return [self start];
 }
 
+// See comment in header
+- (BOOL)stopAndReconnectWithCurrentSessionID {
+
+    // Proceed only if a session ID has alreaby been generated.
+    if (self.sessionID == nil) {
+        return FALSE;
+    }
+
+    return [self start];
+}
+
 /*!
  Start the tunnel. If the tunnel is already started it will be stopped first.
  Assumes self.sessionID has been initialized -- i.e., assumes that
@@ -392,30 +403,42 @@
         return nil;
     }
 
-    __block NSString *configStr = nil;
+    __block id configObject = nil;
     dispatch_sync(self->callbackQueue, ^{
-        configStr = [self.tunneledAppDelegate getPsiphonConfig];
+        configObject = [self.tunneledAppDelegate getPsiphonConfig];
     });
-    if (configStr == nil) {
+    
+    if (configObject == nil) {
         [self logMessage:@"Error getting config from delegate"];
         return nil;
     }
     
     __block NSDictionary *initialConfig = nil;
-    id block = ^(id obj, BOOL *ignored) {
-        if (ignored == nil || *ignored == YES) {
-            return;
-        }
-        initialConfig = (NSDictionary *)obj;
-    };
     
-    id eh = ^(NSError *err) {
-        initialConfig = nil;
-        [self logMessage:[NSString stringWithFormat: @"Config JSON parse failed: %@", err.description]];
-    };
-    
-    id parser = [SBJson4Parser parserWithBlock:block allowMultiRoot:NO unwrapRootArray:NO errorHandler:eh];
-    [parser parse:[configStr dataUsingEncoding:NSUTF8StringEncoding]];
+    if ([configObject isKindOfClass:[NSString class]]) {
+        
+        id block = ^(id obj, BOOL *ignored) {
+            if (ignored == nil || *ignored == YES) {
+                return;
+            }
+            initialConfig = (NSDictionary *)obj;
+        };
+        
+        id eh = ^(NSError *err) {
+            initialConfig = nil;
+            [self logMessage:[NSString stringWithFormat: @"Config JSON parse failed: %@", err.description]];
+        };
+        
+        id parser = [SBJson4Parser parserWithBlock:block allowMultiRoot:NO unwrapRootArray:NO errorHandler:eh];
+        [parser parse:[(NSString *)configObject dataUsingEncoding:NSUTF8StringEncoding]];
+        
+    } else if ([configObject isKindOfClass:[NSDictionary class]]) {
+        
+        initialConfig = (NSDictionary *) configObject;
+        
+    } else {
+        [self logMessage:@"getPsiphonConfig should either return an NSDictionary object or an NSString object"];
+    }
     
     if (initialConfig == nil) {
         return nil;

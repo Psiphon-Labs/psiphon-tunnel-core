@@ -58,6 +58,8 @@ is found in the header of the response, we need to modify it to allow our inject
 CSP](https://github.com/Psiphon-Inc/endless/blob/b0c33b4bbd917467a849ad8c51a225c2d4dab260/External/JiveAuthenticatingHTTPProtocol/JAHPAuthenticatingHTTPProtocol.m#L1184-L1228) 
 to include a nonce generated for our injected javascript, which is [included in the script tag](https://github.com/Psiphon-Inc/endless/blob/b0c33b4bbd917467a849ad8c51a225c2d4dab260/External/JiveAuthenticatingHTTPProtocol/JAHPAuthenticatingHTTPProtocol.m#L1276).
 
+*Requests to localhost (`127.0.0.1`) should be [excluded from being proxied](https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/MobileLibrary/iOS/SampleApps/TunneledWebView/External/JiveAuthenticatingHTTPProtocol/JAHPAuthenticatingHTTPProtocol.m#L283-L287) so the system does not attempt to proxy loading the rewritten URLs. They will be correctly proxied through PsiphonTunnel's reverse proxy.*
+
 ## Configuring, Building, Running
 
 The sample app requires some extra files and configuration before building.
