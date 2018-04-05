@@ -1426,14 +1426,14 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 	go func() {
 		// Random padding to frustrate fingerprinting.
 		p := tunnel.config.clientParameters.Get()
-		randomPadding, err := common.MakeSecureRandomPadding(
+		request, err := common.MakeSecureRandomPadding(
 			p.Int(parameters.SSHKeepAlivePaddingMinBytes),
 			p.Int(parameters.SSHKeepAlivePaddingMaxBytes))
 		p = nil
 		if err != nil {
 			NoticeAlert("MakeSecureRandomPadding failed: %s", common.ContextError(err))
 			// Proceed without random padding.
-			randomPadding = make([]byte, 0)
+			request = make([]byte, 0)
 		}
 
 		startTime := monotime.Now()
@@ -1441,7 +1441,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 		// Note: reading a reply is important for last-received-time tunnel
 		// duration calculation.
 		requestOk, response, err := tunnel.sshClient.SendRequest(
-			"keepalive@openssh.com", true, randomPadding)
+			"keepalive@openssh.com", true, request)
 
 		elaspedTime := monotime.Since(startTime)
 
@@ -1459,21 +1459,15 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 				tunnel.config.clientParameters.Get().WeightedCoinFlip(
 					parameters.SSHKeepAliveSpeedTestSampleProbability)) {
 
-			// TODO: refactor code in common with FetchTactics?
-			sample := tactics.SpeedTestSample{
-				Timestamp:        time.Now(), // *TODO* use server time
-				EndPointRegion:   tunnel.serverEntry.Region,
-				EndPointProtocol: tunnel.protocol,
-				RTTMilliseconds:  int(elaspedTime / time.Millisecond),
-				BytesUp:          len(randomPadding),
-				BytesDown:        len(response),
-			}
-
 			err = tactics.AddSpeedTestSample(
 				tunnel.config.clientParameters,
 				GetTacticsStorer(),
 				tunnel.config.NetworkIDGetter.GetNetworkID(),
-				sample)
+				tunnel.serverEntry.Region,
+				tunnel.protocol,
+				elaspedTime,
+				request,
+				response)
 			if err != nil {
 				NoticeAlert("AddSpeedTestSample failed: %s", common.ContextError(err))
 			}

@@ -40,6 +40,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/marusama/semaphore"
 	cache "github.com/patrickmn/go-cache"
@@ -1234,14 +1235,11 @@ func (sshClient *sshClient) runTunnel(
 			var err error
 
 			if request.Type == "keepalive@openssh.com" {
-				// Random padding to frustrate fingerprinting.
-				responsePayload, err = common.MakeSecureRandomPadding(
+
+				// SSH keep alive round trips are used as speed test samples.
+				responsePayload, err = tactics.MakeSpeedTestResponse(
 					SSH_KEEP_ALIVE_PAYLOAD_MIN_BYTES, SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES)
-				if err != nil {
-					// Proceed without random padding.
-					responsePayload = make([]byte, 0)
-					err = nil
-				}
+
 			} else {
 
 				// All other requests are assumed to be API requests.

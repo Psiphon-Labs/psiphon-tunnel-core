@@ -905,16 +905,17 @@ func (server *Server) handleSpeedTestRequest(
 		return
 	}
 
-	randomPadding, err := common.MakeSecureRandomPadding(
+	response, err := MakeSpeedTestResponse(
 		SPEED_TEST_PADDING_MIN_SIZE, SPEED_TEST_PADDING_MAX_SIZE)
 	if err != nil {
 		server.logger.WithContextFields(
-			common.LogFields{"error": err}).Warning("failed to generate response")
-		randomPadding = make([]byte, 0)
+			common.LogFields{"error": err}).Warning("failed to make response")
+		w.WriteHeader(http.StatusNotFound)
+		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write(randomPadding)
+	w.Write(response)
 }
 
 func (server *Server) handleTacticsRequest(
@@ -1155,17 +1156,17 @@ func FetchTactics(
 	if len(speedTestSamples) == 0 {
 
 		p := clientParameters.Get()
-		randomPadding, err := common.MakeSecureRandomPadding(
+		request, err := common.MakeSecureRandomPadding(
 			p.Int(parameters.SpeedTestPaddingMinBytes),
 			p.Int(parameters.SpeedTestPaddingMaxBytes))
 		if err != nil {
 			// TODO: log MakeSecureRandomPadding failure?
-			randomPadding = make([]byte, 0)
+			request = make([]byte, 0)
 		}
 
 		startTime := monotime.Now()
 
-		response, err := roundTripper(ctx, SPEED_TEST_END_POINT, randomPadding)
+		response, err := roundTripper(ctx, SPEED_TEST_END_POINT, request)
 
 		elaspedTime := monotime.Since(startTime)
 
@@ -1173,16 +1174,15 @@ func FetchTactics(
 			return nil, common.ContextError(err)
 		}
 
-		sample := SpeedTestSample{
-			Timestamp:        time.Now(), // *TODO* use server time
-			EndPointRegion:   endPointRegion,
-			EndPointProtocol: endPointProtocol,
-			RTTMilliseconds:  int(elaspedTime / time.Millisecond),
-			BytesUp:          len(randomPadding),
-			BytesDown:        len(response),
-		}
-
-		err = AddSpeedTestSample(clientParameters, storer, networkID, sample)
+		err = AddSpeedTestSample(
+			clientParameters,
+			storer,
+			networkID,
+			endPointRegion,
+			endPointProtocol,
+			elaspedTime,
+			request,
+			response)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -1257,6 +1257,37 @@ func FetchTactics(
 	return record, nil
 }
 
+// MakeSpeedTestResponse creates a speed test response prefixed
+// with a timestamp and followed by random padding. The timestamp
+// enables the client performing the speed test to record the
+// sample time with an accurate server clock; the random padding
+// is to frustrate fingerprinting.
+func MakeSpeedTestResponse(minPadding, maxPadding int) ([]byte, error) {
+
+	// MarshalBinary encoding (version 1) is 15 bytes:
+	// https://github.com/golang/go/blob/release-branch.go1.9/src/time/time.go#L1112
+
+	timestamp, err := time.Now().UTC().MarshalBinary()
+	if err == nil && len(timestamp) > 255 {
+		err = fmt.Errorf("unexpected marshaled time size: %d", len(timestamp))
+	}
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	randomPadding, _ := common.MakeSecureRandomPadding(minPadding, maxPadding)
+	// On error, proceed without random padding.
+	// TODO: log error, even if proceeding?
+
+	response := make([]byte, 0, 1+len(timestamp)+len(randomPadding))
+
+	response = append(response, byte(len(timestamp)))
+	response = append(response, timestamp...)
+	response = append(response, randomPadding...)
+
+	return response, nil
+}
+
 // AddSpeedTestSample stores a new speed test sample. A maximum of
 // SpeedTestMaxSampleCount samples per network ID are stored, so once
 // that limit is reached, the oldest samples are removed to make room
@@ -1265,7 +1296,34 @@ func AddSpeedTestSample(
 	clientParameters *parameters.ClientParameters,
 	storer Storer,
 	networkID string,
-	sample SpeedTestSample) error {
+	endPointRegion string,
+	endPointProtocol string,
+	elaspedTime time.Duration,
+	request []byte,
+	response []byte) error {
+
+	if len(response) < 1 {
+		return common.ContextError(errors.New("unexpected empty response"))
+	}
+	timestampLength := int(response[0])
+	if len(response) < 1+timestampLength {
+		return common.ContextError(fmt.Errorf(
+			"unexpected response shorter than timestamp size %d", timestampLength))
+	}
+	var timestamp time.Time
+	err := timestamp.UnmarshalBinary(response[1 : 1+timestampLength])
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	sample := SpeedTestSample{
+		Timestamp:        timestamp,
+		EndPointRegion:   endPointRegion,
+		EndPointProtocol: endPointProtocol,
+		RTTMilliseconds:  int(elaspedTime / time.Millisecond),
+		BytesUp:          len(request),
+		BytesDown:        len(response),
+	}
 
 	maxCount := clientParameters.Get().Int(parameters.SpeedTestMaxSampleCount)
 	if maxCount == 0 {

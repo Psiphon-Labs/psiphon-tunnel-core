@@ -560,11 +560,20 @@ func TestTactics(t *testing.T) {
 
 	for i := 0; i < maxSamples*2; i++ {
 
-		sample := SpeedTestSample{
-			EndPointProtocol: differentEndPointProtocol,
+		response, err := MakeSpeedTestResponse(0, 0)
+		if err != nil {
+			t.Fatalf("MakeSpeedTestResponse failed: %s", err)
 		}
 
-		err = AddSpeedTestSample(clientParams, storer, networkID, sample)
+		err = AddSpeedTestSample(
+			clientParams,
+			storer,
+			networkID,
+			"",
+			differentEndPointProtocol,
+			100*time.Millisecond,
+			nil,
+			response)
 		if err != nil {
 			t.Fatalf("AddSpeedTestSample failed: %s", err)
 		}
