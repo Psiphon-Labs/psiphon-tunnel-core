@@ -86,8 +86,14 @@ type TrafficRulesFilter struct {
 
 	// AuthorizedAccessTypes specifies a list of access types, at least
 	// one of which the client must have presented an active authorization
-	// for.
+	// for and which must not be revoked.
+	// AuthorizedAccessTypes is ignored when AuthorizationsRevoked is true.
 	AuthorizedAccessTypes []string
+
+	// AuthorizationsRevoked indicates whether the client's authorizations
+	// must have been revoked. When true, authorizations must have been
+	// revoked. When omitted or false, this field is ignored.
+	AuthorizationsRevoked bool
 }
 
 // TrafficRules specify the limits placed on client traffic.
@@ -395,8 +401,21 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			}
 		}
 
-		if len(filteredRules.Filter.AuthorizedAccessTypes) > 0 {
+		if filteredRules.Filter.AuthorizationsRevoked {
 			if !state.completed {
+				continue
+			}
+
+			if !state.authorizationsRevoked {
+				continue
+			}
+
+		} else if len(filteredRules.Filter.AuthorizedAccessTypes) > 0 {
+			if !state.completed {
+				continue
+			}
+
+			if state.authorizationsRevoked {
 				continue
 			}
 
