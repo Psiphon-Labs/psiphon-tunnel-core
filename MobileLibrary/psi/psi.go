@@ -44,6 +44,7 @@ type PsiphonProvider interface {
 	IPv6Synthesize(IPv4Addr string) string
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
+	GetNetworkID() string
 }
 
 func SetNoticeFiles(
@@ -96,7 +97,10 @@ func Start(
 	if err != nil {
 		return fmt.Errorf("error loading configuration file: %s", err)
 	}
+
 	config.NetworkConnectivityChecker = provider
+
+	config.NetworkIDGetter = provider
 
 	if useDeviceBinder {
 		config.DeviceBinder = newLoggingDeviceBinder(provider)
@@ -291,6 +295,12 @@ func (p *mutexPsiphonProvider) GetSecondaryDnsServer() string {
 	p.Lock()
 	defer p.Unlock()
 	return p.p.GetSecondaryDnsServer()
+}
+
+func (p *mutexPsiphonProvider) GetNetworkID() string {
+	p.Lock()
+	defer p.Unlock()
+	return p.p.GetNetworkID()
 }
 
 type loggingDeviceBinder struct {

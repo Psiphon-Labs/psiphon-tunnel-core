@@ -22,6 +22,7 @@
 #import <stdatomic.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
+#import <SystemConfiguration/CaptiveNetwork.h>
 #import "LookupIPv6.h"
 #import "Psi-meta.h"
 #import "PsiphonTunnel.h"
@@ -1087,6 +1088,37 @@
         return IPv6Addr;
     }
     return @"";
+}
+
+- (NSString *)getNetworkID {
+
+    // The network ID contains potential PII. In tunnel-core, the network ID
+    // is used only locally in the client and not sent to the server.
+
+    NSMutableString *networkIdentifier = [NSMutableString stringWithString:@"UNKNOWN"];
+    NetworkStatus status = [[Reachability reachabilityForInternetConnection] currentReachabilityStatus];
+    if (status == NotReachable) {
+        [networkIdentifier setString:@"NONE"];
+    } else if (status == ReachableViaWiFi) {
+        [networkIdentifier setString:@"WIFI"];
+        NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();
+        for (NSString *networkInterfaceName in networkInterfaceNames) {
+            NSDictionary *networkInterfaceInfo = (__bridge_transfer id)CNCopyCurrentNetworkInfo((__bridge CFStringRef)networkInterfaceName);
+            if (networkInterfaceInfo[@"BSSID"]) {
+                [networkIdentifier appendFormat:@"-%@", networkInterfaceInfo[@"BSSID"]];
+            }
+        }
+    } else if (status == ReachableViaWWAN) {
+        [networkIdentifier setString:@"MOBILE"];
+        CTTelephonyNetworkInfo *telephonyNetworkinfo = [[CTTelephonyNetworkInfo alloc] init];
+        CTCarrier *cellularProvider = [telephonyNetworkinfo subscriberCellularProvider];
+        if (cellularProvider != nil) {
+            NSString *mcc = [cellularProvider mobileCountryCode];
+            NSString *mnc = [cellularProvider mobileNetworkCode];
+            [networkIdentifier appendFormat:@"-%@-%@", mcc, mnc];
+        }
+    }
+    return networkIdentifier;
 }
 
 - (void)notice:(NSString *)noticeJSON {
