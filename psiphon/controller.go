@@ -698,7 +698,7 @@ loop:
 				// Clear the reference to this discarded tunnel and immediately run
 				// a garbage collection to reclaim its memory.
 				connectedTunnel = nil
-				aggressiveGarbageCollection()
+				defaultGarbageCollection()
 
 				// Skip the rest of this case
 				break
@@ -1695,7 +1695,7 @@ loop:
 
 		// ConnectTunnel will allocate significant memory, so first attempt to
 		// reclaim as much as possible.
-		aggressiveGarbageCollection()
+		defaultGarbageCollection()
 
 		// Select the tunnel protocol. The selection will be made at random from
 		// protocols supported by the server entry, optionally limited by
@@ -1802,8 +1802,7 @@ loop:
 		if err != nil {
 			tunnel = nil
 		}
-
-		aggressiveGarbageCollection()
+		defaultGarbageCollection()
 
 		if err != nil {
 
@@ -1835,7 +1834,7 @@ loop:
 			// Clear the reference to this discarded tunnel and immediately run
 			// a garbage collection to reclaim its memory.
 			tunnel = nil
-			aggressiveGarbageCollection()
+			defaultGarbageCollection()
 		}
 
 		// Unblock other candidates only after delivering when
