@@ -1443,7 +1443,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 		requestOk, response, err := tunnel.sshClient.SendRequest(
 			"keepalive@openssh.com", true, request)
 
-		elaspedTime := monotime.Since(startTime)
+		elapsedTime := monotime.Since(startTime)
 
 		errChannel <- err
 
@@ -1465,7 +1465,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 				tunnel.config.NetworkIDGetter.GetNetworkID(),
 				tunnel.serverEntry.Region,
 				tunnel.protocol,
-				elaspedTime,
+				elapsedTime,
 				request,
 				response)
 			if err != nil {

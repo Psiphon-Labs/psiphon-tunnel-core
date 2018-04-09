@@ -253,7 +253,7 @@ type Filter struct {
 	// Regions specifies a list of GeoIP regions/countries the client
 	// must match.
 	Regions []string
-	// Regions specifies a list of GeoIP ISPs the client must match.
+	// ISPs specifies a list of GeoIP ISPs the client must match.
 	ISPs []string
 
 	// APIParameters specifies API, e.g. handshake, parameter names and
@@ -365,7 +365,7 @@ type SpeedTestSample struct {
 	// an application-level round trip on top of a previously established
 	// tactics or tunnel prococol connection. The RTT should not include
 	// TCP, TLS, or SSH handshakes.
-	// This value is truncated to the nearest milliscond as a privacy
+	// This value is truncated to the nearest millisecond as a privacy
 	// measure.
 	RTTMilliseconds int `json:"rtt"`
 
@@ -1168,7 +1168,7 @@ func FetchTactics(
 
 		response, err := roundTripper(ctx, SPEED_TEST_END_POINT, request)
 
-		elaspedTime := monotime.Since(startTime)
+		elapsedTime := monotime.Since(startTime)
 
 		if err != nil {
 			return nil, common.ContextError(err)
@@ -1180,7 +1180,7 @@ func FetchTactics(
 			networkID,
 			endPointRegion,
 			endPointProtocol,
-			elaspedTime,
+			elapsedTime,
 			request,
 			response)
 		if err != nil {
