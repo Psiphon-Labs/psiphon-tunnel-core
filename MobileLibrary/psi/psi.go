@@ -84,6 +84,13 @@ func Start(
 		return fmt.Errorf("already started")
 	}
 
+	// Clients may toggle Stop/Start immediately to apply new config settings
+	// such as EgressRegion or Authorizations. When this restart is within the
+	// same process and in a memory contrained environment, it is useful to
+	// force garbage collection here to reclaim memory used by the previous
+	// Controller.
+	psiphon.DoGarbageCollection()
+
 	// Wrap the provider in a layer that locks a mutex before calling a provider function.
 	// The the provider callbacks are Java/Obj-C via gomobile, they are cgo calls that
 	// can cause OS threads to be spawned. The mutex prevents many calling goroutines from
