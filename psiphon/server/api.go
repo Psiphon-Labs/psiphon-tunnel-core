@@ -177,9 +177,7 @@ func dispatchAPIRequestHandler(
 }
 
 var handshakeRequestParams = append(
-	[]requestParamSpec{
-		{tactics.STORED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
-		{tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME, nil, requestParamOptional | requestParamJSON}},
+	append([]requestParamSpec(nil), tacticsParams...),
 	baseRequestParams...)
 
 // handshakeAPIRequestHandler implements the "handshake" API request.
@@ -530,9 +528,18 @@ func clientVerificationAPIRequestHandler(
 	}
 }
 
+var tacticsParams = []requestParamSpec{
+	{tactics.STORED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
+	{tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME, nil, requestParamOptional | requestParamJSON},
+}
+
+var tacticsRequestParams = append(
+	append([]requestParamSpec(nil), tacticsParams...),
+	baseRequestParams...)
+
 func getTacticsAPIParameterValidator(config *Config) common.APIParameterValidator {
 	return func(params common.APIParameters) error {
-		return validateRequestParams(config, params, handshakeRequestParams)
+		return validateRequestParams(config, params, tacticsRequestParams)
 	}
 }
 
@@ -545,7 +552,7 @@ func getTacticsAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormat
 			GeoIPData(geoIPData),
 			nil, // authorizedAccessTypes are not known yet
 			params,
-			handshakeRequestParams)
+			tacticsRequestParams)
 
 		return common.LogFields(logFields)
 	}
@@ -765,17 +772,52 @@ func getRequestLogFields(
 			}
 
 		case []interface{}:
-			// Note: actually validated as an array of strings
-			logFields[expectedParam.name] = v
+			if expectedParam.name == tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME {
+				logFields[expectedParam.name] = makeSpeedTestSamplesLogField(v)
+			} else {
+				logFields[expectedParam.name] = v
+			}
 
 		default:
-			// This type assertion should be checked already in
-			// validateRequestParams, so failure is unexpected.
-			continue
+			logFields[expectedParam.name] = v
 		}
 	}
 
 	return logFields
+}
+
+// makeSpeedTestSamplesLogField renames the tactics.SpeedTestSample json tag
+// fields to more verbose names for metrics.
+func makeSpeedTestSamplesLogField(samples []interface{}) []interface{} {
+	// TODO: use reflection and add additional tags, e.g.,
+	// `json:"s" log:"timestamp"` to remove hard-coded
+	// tag value dependency?
+	logSamples := make([]interface{}, len(samples))
+	for i, sample := range samples {
+		logSample := make(map[string]interface{})
+		if m, ok := sample.(map[string]interface{}); ok {
+			for k, v := range m {
+				logK := k
+				switch k {
+				case "s":
+					logK = "timestamp"
+				case "r":
+					logK = "server_region"
+				case "p":
+					logK = "relay_protocol"
+				case "t":
+					logK = "round_trip_time_ms"
+				case "u":
+					logK = "bytes_up"
+				case "d":
+					logK = "bytes_down"
+				}
+				logSample[logK] = v
+			}
+		}
+		logSamples[i] = logSample
+	}
+	return logSamples
 }
 
 func getStringRequestParam(params common.APIParameters, name string) (string, error) {

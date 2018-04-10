@@ -1378,8 +1378,13 @@ func (controller *Controller) doFetchTactics(
 
 	meekConfig.RoundTripperOnly = true
 
-	dialConfig, _, _ := initDialConfig(
-		controller.config, meekConfig)
+	dialConfig, dialStats := initDialConfig(controller.config, meekConfig)
+
+	NoticeRequestingTactics(
+		serverEntry.IpAddress,
+		serverEntry.Region,
+		tacticsProtocol,
+		dialStats)
 
 	// TacticsTimeout should be a very long timeout, since it's not
 	// adjusted by tactics in a new network context, and so clients
@@ -1421,9 +1426,12 @@ func (controller *Controller) doFetchTactics(
 	}
 	defer meekConn.Close()
 
-	var apiParams common.APIParameters
-	// *TODO* populate
-	apiParams = make(common.APIParameters)
+	apiParams := getBaseAPIParameters(
+		controller.config,
+		controller.sessionId,
+		serverEntry,
+		tacticsProtocol,
+		dialStats)
 
 	tacticsRecord, err := tactics.FetchTactics(
 		ctx,
@@ -1439,6 +1447,12 @@ func (controller *Controller) doFetchTactics(
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
+
+	NoticeRequestedTactics(
+		serverEntry.IpAddress,
+		serverEntry.Region,
+		tacticsProtocol,
+		dialStats)
 
 	return tacticsRecord, nil
 }

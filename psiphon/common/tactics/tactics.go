@@ -344,13 +344,18 @@ type Tactics struct {
 	Parameters map[string]interface{}
 }
 
+// Note: the SpeedTestSample json tags are selected to minimize marshaled
+// size. In psiphond, for logging metrics, the field names are translated to
+// more verbose values. psiphon/server.makeSpeedTestSamplesLogField currently
+// hard-codes these same SpeedTestSample json tag values for that translation.
+
 // SpeedTestSample is speed test data for a single RTT event.
 type SpeedTestSample struct {
 
 	// Timestamp is the speed test event time, and may be used to discard
 	// stale samples. The server supplies the speed test timestamp. This
 	// value is truncated to the nearest hour as a privacy measure.
-	Timestamp time.Time `json:"t"`
+	Timestamp time.Time `json:"s"`
 
 	// EndPointRegion is the region of the endpoint, the Psiphon server,
 	// used for the speed test. This may be used to exclude outlier samples
@@ -367,15 +372,15 @@ type SpeedTestSample struct {
 	// TCP, TLS, or SSH handshakes.
 	// This value is truncated to the nearest millisecond as a privacy
 	// measure.
-	RTTMilliseconds int `json:"rtt"`
+	RTTMilliseconds int `json:"t"`
 
 	// BytesUp is the size of the upstream payload in the round trip.
 	// Currently, the payload is limited to anti-fingerprint padding.
-	BytesUp int `json:"up"`
+	BytesUp int `json:"u"`
 
 	// BytesDown is the size of the downstream payload in the round trip.
 	// Currently, the payload is limited to anti-fingerprint padding.
-	BytesDown int `json:"dn"`
+	BytesDown int `json:"d"`
 }
 
 // GenerateKeys generates a tactics request key pair and obfuscation key.
@@ -951,16 +956,13 @@ func (server *Server) handleTacticsRequest(
 		return
 	}
 
-	// *TODO* fix validator and formatter
-	/*
-		err = server.apiParameterValidator(apiParams)
-		if err != nil {
-			server.logger.WithContextFields(
-				common.LogFields{"error": err}).Warning("invalid request parameters")
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-	*/
+	err = server.apiParameterValidator(apiParams)
+	if err != nil {
+		server.logger.WithContextFields(
+			common.LogFields{"error": err}).Warning("invalid request parameters")
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 
 	tacticsPayload, err := server.GetTacticsPayload(geoIPData, apiParams)
 	if err != nil {
@@ -991,11 +993,7 @@ func (server *Server) handleTacticsRequest(
 
 	// Log a metric.
 
-	// *TODO* fix validator and formatter
-	/*
-		logFields := server.logFieldFormatter(geoIPData, apiParams)
-	*/
-	logFields := make(common.LogFields)
+	logFields := server.logFieldFormatter(geoIPData, apiParams)
 
 	logFields[NEW_TACTICS_TAG_LOG_FIELD_NAME] = tacticsPayload.Tag
 	logFields[IS_TACTICS_REQUEST_LOG_FIELD_NAME] = true

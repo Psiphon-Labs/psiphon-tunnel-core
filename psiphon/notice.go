@@ -392,7 +392,7 @@ func NoticeAvailableEgressRegions(regions []string) {
 		"AvailableEgressRegions", 0, "regions", sortedRegions)
 }
 
-func noticeServerDialStats(noticeType, ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
+func noticeWithDialStats(noticeType, ipAddress, region, protocol string, dialStats *DialStats) {
 
 	args := []interface{}{
 		"ipAddress", ipAddress,
@@ -400,45 +400,46 @@ func noticeServerDialStats(noticeType, ipAddress, region, protocol string, tunne
 		"protocol", protocol,
 	}
 
-	if tunnelDialStats.SelectedSSHClientVersion {
-		args = append(args, "SSHClientVersion", tunnelDialStats.SSHClientVersion)
+	if dialStats.SelectedSSHClientVersion {
+		args = append(args, "SSHClientVersion", dialStats.SSHClientVersion)
 	}
 
-	if tunnelDialStats.UpstreamProxyType != "" {
-		args = append(args, "upstreamProxyType", tunnelDialStats.UpstreamProxyType)
+	if dialStats.UpstreamProxyType != "" {
+		args = append(args, "upstreamProxyType", dialStats.UpstreamProxyType)
 	}
 
-	if tunnelDialStats.UpstreamProxyCustomHeaderNames != nil {
-		args = append(args, "upstreamProxyCustomHeaderNames", strings.Join(tunnelDialStats.UpstreamProxyCustomHeaderNames, ","))
+	if dialStats.UpstreamProxyCustomHeaderNames != nil {
+		args = append(args, "upstreamProxyCustomHeaderNames", strings.Join(dialStats.UpstreamProxyCustomHeaderNames, ","))
 	}
 
-	if tunnelDialStats.MeekDialAddress != "" {
-		args = append(args, "meekDialAddress", tunnelDialStats.MeekDialAddress)
+	if dialStats.MeekDialAddress != "" {
+		args = append(args, "meekDialAddress", dialStats.MeekDialAddress)
 	}
 
-	if tunnelDialStats.MeekResolvedIPAddress != "" {
-		args = append(args, "meekResolvedIPAddress", tunnelDialStats.MeekResolvedIPAddress)
+	meekResolvedIPAddress := dialStats.MeekResolvedIPAddress.Load().(string)
+	if meekResolvedIPAddress != "" {
+		args = append(args, "meekResolvedIPAddress", meekResolvedIPAddress)
 	}
 
-	if tunnelDialStats.MeekSNIServerName != "" {
-		args = append(args, "meekSNIServerName", tunnelDialStats.MeekSNIServerName)
+	if dialStats.MeekSNIServerName != "" {
+		args = append(args, "meekSNIServerName", dialStats.MeekSNIServerName)
 	}
 
-	if tunnelDialStats.MeekHostHeader != "" {
-		args = append(args, "meekHostHeader", tunnelDialStats.MeekHostHeader)
+	if dialStats.MeekHostHeader != "" {
+		args = append(args, "meekHostHeader", dialStats.MeekHostHeader)
 	}
 
 	// MeekTransformedHostName is meaningful when meek is used, which is when MeekDialAddress != ""
-	if tunnelDialStats.MeekDialAddress != "" {
-		args = append(args, "meekTransformedHostName", tunnelDialStats.MeekTransformedHostName)
+	if dialStats.MeekDialAddress != "" {
+		args = append(args, "meekTransformedHostName", dialStats.MeekTransformedHostName)
 	}
 
-	if tunnelDialStats.SelectedUserAgent {
-		args = append(args, "userAgent", tunnelDialStats.UserAgent)
+	if dialStats.SelectedUserAgent {
+		args = append(args, "userAgent", dialStats.UserAgent)
 	}
 
-	if tunnelDialStats.SelectedTLSProfile {
-		args = append(args, "TLSProfile", tunnelDialStats.TLSProfile)
+	if dialStats.SelectedTLSProfile {
+		args = append(args, "TLSProfile", dialStats.TLSProfile)
 	}
 
 	singletonNoticeLogger.outputNotice(
@@ -447,15 +448,27 @@ func noticeServerDialStats(noticeType, ipAddress, region, protocol string, tunne
 }
 
 // NoticeConnectingServer reports parameters and details for a single connection attempt
-func NoticeConnectingServer(ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
-	noticeServerDialStats(
-		"ConnectingServer", ipAddress, region, protocol, tunnelDialStats)
+func NoticeConnectingServer(ipAddress, region, protocol string, dialStats *DialStats) {
+	noticeWithDialStats(
+		"ConnectingServer", ipAddress, region, protocol, dialStats)
 }
 
 // NoticeConnectedServer reports parameters and details for a single successful connection
-func NoticeConnectedServer(ipAddress, region, protocol string, tunnelDialStats *TunnelDialStats) {
-	noticeServerDialStats(
-		"ConnectedServer", ipAddress, region, protocol, tunnelDialStats)
+func NoticeConnectedServer(ipAddress, region, protocol string, dialStats *DialStats) {
+	noticeWithDialStats(
+		"ConnectedServer", ipAddress, region, protocol, dialStats)
+}
+
+// NoticeRequestingTactics reports parameters and details for a tactics request attempt
+func NoticeRequestingTactics(ipAddress, region, protocol string, dialStats *DialStats) {
+	noticeWithDialStats(
+		"RequestingTactics", ipAddress, region, protocol, dialStats)
+}
+
+// NoticeRequestedTactics reports parameters and details for a successful tactics request
+func NoticeRequestedTactics(ipAddress, region, protocol string, dialStats *DialStats) {
+	noticeWithDialStats(
+		"RequestedTactics", ipAddress, region, protocol, dialStats)
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding

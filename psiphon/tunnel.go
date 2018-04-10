@@ -98,23 +98,29 @@ type Tunnel struct {
 	adjustedEstablishStartTime   monotime.Time
 	establishDuration            time.Duration
 	establishedTime              monotime.Time
-	dialStats                    *TunnelDialStats
+	dialStats                    *DialStats
 	newClientVerificationPayload chan string
 }
 
-// TunnelDialStats records additional dial config that is sent to the server for stats
-// recording. This data is used to analyze which configuration settings are successful
-// in various circumvention contexts, and includes meek dial params and upstream proxy
-// params.
-// For upstream proxy, only proxy type and custom header names are recorded; proxy
-// address and custom header values are considered PII.
-type TunnelDialStats struct {
+// DialStats records additional dial config that is sent to the server for
+// stats recording. This data is used to analyze which configuration settings
+// are successful in various circumvention contexts, and includes meek dial
+// params and upstream proxy params.
+//
+// For upstream proxy, only proxy type and custom header names are recorded;
+// proxy address and custom header values are considered PII.
+//
+// MeekResolvedIPAddress is set asynchronously, as it is not known until the
+// dial process has begun. The atomic.Value will contain a string, initialized
+// to "", and set to the resolved IP address once that part of the dial
+// process has completed.
+type DialStats struct {
 	SelectedSSHClientVersion       bool
 	SSHClientVersion               string
 	UpstreamProxyType              string
 	UpstreamProxyCustomHeaderNames []string
 	MeekDialAddress                string
-	MeekResolvedIPAddress          string
+	MeekResolvedIPAddress          atomic.Value
 	MeekSNIServerName              string
 	MeekHostHeader                 string
 	MeekTransformedHostName        bool
@@ -748,8 +754,7 @@ func initMeekConfig(
 
 // initDialConfig is a helper that creates a DialConfig for the tunnel.
 func initDialConfig(
-	config *Config,
-	meekConfig *MeekConfig) (*DialConfig, string, bool) {
+	config *Config, meekConfig *MeekConfig) (*DialConfig, *DialStats) {
 
 	var upstreamProxyType string
 
@@ -786,18 +791,62 @@ func initDialConfig(
 		selectedUserAgent = UserAgentIfUnset(config.clientParameters, dialCustomHeaders)
 	}
 
-	return &DialConfig{
-			UpstreamProxyURL:              config.UpstreamProxyURL,
-			CustomHeaders:                 dialCustomHeaders,
-			DeviceBinder:                  config.DeviceBinder,
-			DnsServerGetter:               config.DnsServerGetter,
-			IPv6Synthesizer:               config.IPv6Synthesizer,
-			UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
-			TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
-			DeviceRegion:                  config.DeviceRegion,
-		},
-		upstreamProxyType,
-		selectedUserAgent
+	dialConfig := &DialConfig{
+		UpstreamProxyURL:              config.UpstreamProxyURL,
+		CustomHeaders:                 dialCustomHeaders,
+		DeviceBinder:                  config.DeviceBinder,
+		DnsServerGetter:               config.DnsServerGetter,
+		IPv6Synthesizer:               config.IPv6Synthesizer,
+		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
+		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
+		DeviceRegion:                  config.DeviceRegion,
+	}
+
+	dialStats := &DialStats{}
+
+	if selectedUserAgent {
+		dialStats.SelectedUserAgent = true
+		dialStats.UserAgent = dialConfig.CustomHeaders.Get("User-Agent")
+	}
+
+	if upstreamProxyType != "" {
+		dialStats.UpstreamProxyType = upstreamProxyType
+	}
+
+	if len(dialConfig.CustomHeaders) > 0 {
+		dialStats.UpstreamProxyCustomHeaderNames = make([]string, 0)
+		for name := range dialConfig.CustomHeaders {
+			if selectedUserAgent && name == "User-Agent" {
+				continue
+			}
+			dialStats.UpstreamProxyCustomHeaderNames = append(dialStats.UpstreamProxyCustomHeaderNames, name)
+		}
+	}
+
+	// Unconditionally initialize MeekResolvedIPAddress, so a valid string can
+	// always be read.
+	dialStats.MeekResolvedIPAddress.Store("")
+
+	if meekConfig != nil {
+		dialStats.MeekDialAddress = meekConfig.DialAddress
+		dialStats.MeekSNIServerName = meekConfig.SNIServerName
+		dialStats.MeekHostHeader = meekConfig.HostHeader
+		dialStats.MeekTransformedHostName = meekConfig.TransformedHostName
+		dialStats.SelectedTLSProfile = true
+		dialStats.TLSProfile = meekConfig.TLSProfile
+
+		// Use an asynchronous callback to record the resolved IP address when
+		// dialing a domain name. Note that DialMeek doesn't immediately
+		// establish any HTTP connections, so the resolved IP address won't be
+		// reported in all cases until after SSH traffic is relayed or a
+		// endpoint request is made over the meek connection.
+		dialConfig.ResolvedIPCallback = func(IPAddress string) {
+			dialStats.MeekResolvedIPAddress.Store(IPAddress)
+		}
+
+	}
+
+	return dialConfig, dialStats
 }
 
 type dialResult struct {
@@ -805,7 +854,7 @@ type dialResult struct {
 	monitoredConn *common.ActivityMonitoredConn
 	sshClient     *ssh.Client
 	sshRequests   <-chan *ssh.Request
-	dialStats     *TunnelDialStats
+	dialStats     *DialStats
 }
 
 // dialSsh is a helper that builds the transport layers and establishes the SSH connection.
@@ -858,59 +907,17 @@ func dialSsh(
 		}
 	}
 
-	dialConfig, upstreamProxyType, selectedUserAgent := initDialConfig(config, meekConfig)
+	dialConfig, dialStats := initDialConfig(config, meekConfig)
 
-	// Use an asynchronous callback to record the resolved IP address when
-	// dialing a domain name. Note that DialMeek doesn't immediately
-	// establish any HTTPS connections, so the resolved IP address won't be
-	// reported until during/after ssh session establishment (the ssh traffic
-	// is meek payload). So don't Load() the IP address value until after that
-	// has completed to ensure a result.
-	var resolvedIPAddress atomic.Value
-	resolvedIPAddress.Store("")
-	dialConfig.ResolvedIPCallback = func(IPAddress string) {
-		resolvedIPAddress.Store(IPAddress)
-	}
-
-	// Gather dial parameters for diagnostic logging and stats reporting
-
-	dialStats := &TunnelDialStats{}
+	// Add dial stats specific to SSH dialing
 
 	if selectedSSHClientVersion {
 		dialStats.SelectedSSHClientVersion = true
 		dialStats.SSHClientVersion = SSHClientVersion
 	}
 
-	if selectedUserAgent {
-		dialStats.SelectedUserAgent = true
-		dialStats.UserAgent = dialConfig.CustomHeaders.Get("User-Agent")
-	}
-
-	if upstreamProxyType != "" {
-		dialStats.UpstreamProxyType = upstreamProxyType
-	}
-
-	if len(dialConfig.CustomHeaders) > 0 {
-		dialStats.UpstreamProxyCustomHeaderNames = make([]string, 0)
-		for name := range dialConfig.CustomHeaders {
-			if selectedUserAgent && name == "User-Agent" {
-				continue
-			}
-			dialStats.UpstreamProxyCustomHeaderNames = append(dialStats.UpstreamProxyCustomHeaderNames, name)
-		}
-	}
-
-	if meekConfig != nil {
-		// Note: dialStats.MeekResolvedIPAddress isn't set until the dial begins,
-		// so it will always be blank in NoticeConnectingServer.
-		dialStats.MeekDialAddress = meekConfig.DialAddress
-		dialStats.MeekResolvedIPAddress = ""
-		dialStats.MeekSNIServerName = meekConfig.SNIServerName
-		dialStats.MeekHostHeader = meekConfig.HostHeader
-		dialStats.MeekTransformedHostName = meekConfig.TransformedHostName
-		dialStats.SelectedTLSProfile = true
-		dialStats.TLSProfile = meekConfig.TLSProfile
-	}
+	// Note: dialStats.MeekResolvedIPAddress isn't set until the dial begins,
+	// so it will always be blank in NoticeConnectingServer.
 
 	NoticeConnectingServer(
 		serverEntry.IpAddress,
@@ -1061,12 +1068,6 @@ func dialSsh(
 
 	if result.err != nil {
 		return nil, common.ContextError(result.err)
-	}
-
-	// Update dial parameters determined during dial
-
-	if dialStats != nil && meekConfig != nil {
-		dialStats.MeekResolvedIPAddress = resolvedIPAddress.Load().(string)
 	}
 
 	NoticeConnectedServer(

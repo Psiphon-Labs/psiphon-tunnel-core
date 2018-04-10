@@ -123,7 +123,7 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 func (serverContext *ServerContext) doHandshakeRequest(
 	ignoreStatsRegexps bool) error {
 
-	params := serverContext.getBaseParams()
+	params := serverContext.getBaseAPIParameters()
 
 	doTactics := serverContext.tunnel.config.NetworkIDGetter != nil
 	networkID := ""
@@ -295,7 +295,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 // a unique user for a time period.
 func (serverContext *ServerContext) DoConnectedRequest() error {
 
-	params := serverContext.getBaseParams()
+	params := serverContext.getBaseAPIParameters()
 
 	lastConnected, err := GetKeyValue(DATA_STORE_LAST_CONNECTED_KEY)
 	if err != nil {
@@ -417,7 +417,7 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 func (serverContext *ServerContext) getStatusParams(
 	isTunneled bool) common.APIParameters {
 
-	params := serverContext.getBaseParams()
+	params := serverContext.getBaseAPIParameters()
 
 	// Add a random amount of padding to help prevent stats updates from being
 	// a predictable size (which often happens when the connection is quiet).
@@ -600,7 +600,7 @@ func RecordRemoteServerListStat(
 func (serverContext *ServerContext) DoClientVerificationRequest(
 	verificationPayload string, serverIP string) error {
 
-	params := serverContext.getBaseParams()
+	params := serverContext.getBaseAPIParameters()
 	var response []byte
 	var err error
 
@@ -721,97 +721,109 @@ func (serverContext *ServerContext) doPostRequest(
 	return responseBody, nil
 }
 
-// getBaseParams returns all the common API parameters that are included
-// with each Psiphon API request. These common parameters are used for
-// statistics.
-func (serverContext *ServerContext) getBaseParams() common.APIParameters {
+func (serverContext *ServerContext) getBaseAPIParameters() common.APIParameters {
+	return getBaseAPIParameters(
+		serverContext.tunnel.config,
+		serverContext.sessionId,
+		serverContext.tunnel.serverEntry,
+		serverContext.tunnel.protocol,
+		serverContext.tunnel.dialStats)
+}
+
+// getBaseAPIParameters returns all the common API parameters that are
+// included with each Psiphon API request. These common parameters are used
+// for metrics.
+func getBaseAPIParameters(
+	config *Config,
+	sessionID string,
+	serverEntry *protocol.ServerEntry,
+	protocol string,
+	dialStats *DialStats) common.APIParameters {
 
 	params := make(common.APIParameters)
 
-	tunnel := serverContext.tunnel
-
-	params["session_id"] = serverContext.sessionId
-	params["client_session_id"] = serverContext.sessionId
-	params["server_secret"] = tunnel.serverEntry.WebServerSecret
-	params["propagation_channel_id"] = tunnel.config.PropagationChannelId
-	params["sponsor_id"] = tunnel.config.SponsorId
-	params["client_version"] = tunnel.config.ClientVersion
-	// TODO: client_tunnel_core_version?
-	params["relay_protocol"] = tunnel.protocol
-	params["client_platform"] = tunnel.config.ClientPlatform
+	params["session_id"] = sessionID
+	params["client_session_id"] = sessionID
+	params["server_secret"] = serverEntry.WebServerSecret
+	params["propagation_channel_id"] = config.PropagationChannelId
+	params["sponsor_id"] = config.SponsorId
+	params["client_version"] = config.ClientVersion
+	params["relay_protocol"] = protocol
+	params["client_platform"] = config.ClientPlatform
 	params["client_build_rev"] = common.GetBuildInfo().BuildRev
-	params["tunnel_whole_device"] = strconv.Itoa(tunnel.config.TunnelWholeDevice)
+	params["tunnel_whole_device"] = strconv.Itoa(config.TunnelWholeDevice)
 
 	// The following parameters may be blank and must
 	// not be sent to the server if blank.
 
-	if tunnel.config.DeviceRegion != "" {
-		params["device_region"] = tunnel.config.DeviceRegion
+	if config.DeviceRegion != "" {
+		params["device_region"] = config.DeviceRegion
 	}
 
-	if tunnel.dialStats.SelectedSSHClientVersion {
-		params["ssh_client_version"] = tunnel.dialStats.SSHClientVersion
+	if dialStats.SelectedSSHClientVersion {
+		params["ssh_client_version"] = dialStats.SSHClientVersion
 	}
 
-	if tunnel.dialStats.UpstreamProxyType != "" {
-		params["upstream_proxy_type"] = tunnel.dialStats.UpstreamProxyType
+	if dialStats.UpstreamProxyType != "" {
+		params["upstream_proxy_type"] = dialStats.UpstreamProxyType
 	}
 
-	if tunnel.dialStats.UpstreamProxyCustomHeaderNames != nil {
-		params["upstream_proxy_custom_header_names"] = tunnel.dialStats.UpstreamProxyCustomHeaderNames
+	if dialStats.UpstreamProxyCustomHeaderNames != nil {
+		params["upstream_proxy_custom_header_names"] = dialStats.UpstreamProxyCustomHeaderNames
 	}
 
-	if tunnel.dialStats.MeekDialAddress != "" {
-		params["meek_dial_address"] = tunnel.dialStats.MeekDialAddress
+	if dialStats.MeekDialAddress != "" {
+		params["meek_dial_address"] = dialStats.MeekDialAddress
 	}
 
-	if tunnel.dialStats.MeekResolvedIPAddress != "" {
-		params["meek_resolved_ip_address"] = tunnel.dialStats.MeekResolvedIPAddress
+	meekResolvedIPAddress := dialStats.MeekResolvedIPAddress.Load().(string)
+	if meekResolvedIPAddress != "" {
+		params["meek_resolved_ip_address"] = meekResolvedIPAddress
 	}
 
-	if tunnel.dialStats.MeekSNIServerName != "" {
-		params["meek_sni_server_name"] = tunnel.dialStats.MeekSNIServerName
+	if dialStats.MeekSNIServerName != "" {
+		params["meek_sni_server_name"] = dialStats.MeekSNIServerName
 	}
 
-	if tunnel.dialStats.MeekHostHeader != "" {
-		params["meek_host_header"] = tunnel.dialStats.MeekHostHeader
+	if dialStats.MeekHostHeader != "" {
+		params["meek_host_header"] = dialStats.MeekHostHeader
 	}
 
 	// MeekTransformedHostName is meaningful when meek is used, which is when MeekDialAddress != ""
-	if tunnel.dialStats.MeekDialAddress != "" {
+	if dialStats.MeekDialAddress != "" {
 		transformedHostName := "0"
-		if tunnel.dialStats.MeekTransformedHostName {
+		if dialStats.MeekTransformedHostName {
 			transformedHostName = "1"
 		}
 		params["meek_transformed_host_name"] = transformedHostName
 	}
 
-	if tunnel.dialStats.SelectedUserAgent {
-		params["user_agent"] = tunnel.dialStats.UserAgent
+	if dialStats.SelectedUserAgent {
+		params["user_agent"] = dialStats.UserAgent
 	}
 
-	if tunnel.dialStats.SelectedTLSProfile {
-		params["tls_profile"] = tunnel.dialStats.TLSProfile
+	if dialStats.SelectedTLSProfile {
+		params["tls_profile"] = dialStats.TLSProfile
 	}
 
-	if tunnel.serverEntry.Region != "" {
-		params["server_entry_region"] = tunnel.serverEntry.Region
+	if serverEntry.Region != "" {
+		params["server_entry_region"] = serverEntry.Region
 	}
 
-	if tunnel.serverEntry.LocalSource != "" {
-		params["server_entry_source"] = tunnel.serverEntry.LocalSource
+	if serverEntry.LocalSource != "" {
+		params["server_entry_source"] = serverEntry.LocalSource
 	}
 
 	// As with last_connected, this timestamp stat, which may be
 	// a precise handshake request server timestamp, is truncated
 	// to hour granularity to avoid introducing a reconstructable
 	// cross-session user trace into server logs.
-	localServerEntryTimestamp := common.TruncateTimestampToHour(tunnel.serverEntry.LocalTimestamp)
+	localServerEntryTimestamp := common.TruncateTimestampToHour(serverEntry.LocalTimestamp)
 	if localServerEntryTimestamp != "" {
 		params["server_entry_timestamp"] = localServerEntryTimestamp
 	}
 
-	params[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME] = tunnel.config.clientParameters.Get().Tag()
+	params[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME] = config.clientParameters.Get().Tag()
 
 	return params
 }
