@@ -600,7 +600,7 @@ var baseRequestParams = []requestParamSpec{
 	{"server_entry_region", isRegionCode, requestParamOptional},
 	{"server_entry_source", isServerEntrySource, requestParamOptional},
 	{"server_entry_timestamp", isISO8601Date, requestParamOptional},
-	{"active_tactics_tag", isAnyString, requestParamOptional},
+	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
 }
 
 func validateRequestParams(
