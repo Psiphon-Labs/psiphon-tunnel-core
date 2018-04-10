@@ -29,6 +29,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
@@ -51,13 +52,20 @@ func FetchCommonRemoteServerList(
 
 	NoticeInfo("fetching common remote server list")
 
-	downloadURL, canonicalURL, skipVerify := selectDownloadURL(attempt, config.RemoteServerListURLs)
+	p := config.clientParameters.Get()
+	publicKey := p.String(parameters.RemoteServerListSignaturePublicKey)
+	urls := p.DownloadURLs(parameters.RemoteServerListURLs)
+	downloadTimeout := p.Duration(parameters.FetchRemoteServerListTimeout)
+	p = nil
+
+	downloadURL, canonicalURL, skipVerify := urls.Select(attempt)
 
 	newETag, err := downloadRemoteServerListFile(
 		ctx,
 		config,
 		tunnel,
 		untunneledDialConfig,
+		downloadTimeout,
 		downloadURL,
 		canonicalURL,
 		skipVerify,
@@ -80,8 +88,7 @@ func FetchCommonRemoteServerList(
 	defer file.Close()
 
 	serverListPayloadReader, err := common.NewAuthenticatedDataPackageReader(
-		file,
-		config.RemoteServerListSignaturePublicKey)
+		file, publicKey)
 	if err != nil {
 		return fmt.Errorf("failed to read remote server list: %s", common.ContextError(err))
 	}
@@ -127,12 +134,18 @@ func FetchObfuscatedServerLists(
 
 	NoticeInfo("fetching obfuscated remote server lists")
 
-	downloadFilename := osl.GetOSLRegistryFilename(config.ObfuscatedServerListDownloadDirectory)
-	cachedFilename := downloadFilename + ".cached"
+	p := config.clientParameters.Get()
+	publicKey := p.String(parameters.RemoteServerListSignaturePublicKey)
+	urls := p.DownloadURLs(parameters.ObfuscatedServerListRootURLs)
+	downloadTimeout := p.Duration(parameters.FetchRemoteServerListTimeout)
+	p = nil
 
-	rootURL, canonicalRootURL, skipVerify := selectDownloadURL(attempt, config.ObfuscatedServerListRootURLs)
+	rootURL, canonicalRootURL, skipVerify := urls.Select(attempt)
 	downloadURL := osl.GetOSLRegistryURL(rootURL)
 	canonicalURL := osl.GetOSLRegistryURL(canonicalRootURL)
+
+	downloadFilename := osl.GetOSLRegistryFilename(config.ObfuscatedServerListDownloadDirectory)
+	cachedFilename := downloadFilename + ".cached"
 
 	// If the cached registry is not present, we need to download or resume downloading
 	// the registry, so clear the ETag to ensure that always happens.
@@ -159,6 +172,7 @@ func FetchObfuscatedServerLists(
 		config,
 		tunnel,
 		untunneledDialConfig,
+		downloadTimeout,
 		downloadURL,
 		canonicalURL,
 		skipVerify,
@@ -190,7 +204,7 @@ func FetchObfuscatedServerLists(
 
 	registryStreamer, err := osl.NewRegistryStreamer(
 		registryFile,
-		config.RemoteServerListSignaturePublicKey,
+		publicKey,
 		lookupSLOKs)
 	if err != nil {
 		// TODO: delete file? redownload if corrupt?
@@ -235,6 +249,7 @@ func FetchObfuscatedServerLists(
 			config,
 			tunnel,
 			untunneledDialConfig,
+			downloadTimeout,
 			downloadURL,
 			canonicalURL,
 			skipVerify,
@@ -263,7 +278,7 @@ func FetchObfuscatedServerLists(
 			file,
 			oslFileSpec,
 			lookupSLOKs,
-			config.RemoteServerListSignaturePublicKey)
+			publicKey)
 		if err != nil {
 			file.Close()
 			failed = true
@@ -341,6 +356,7 @@ func downloadRemoteServerListFile(
 	config *Config,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
+	downloadTimeout time.Duration,
 	sourceURL string,
 	canonicalURL string,
 	skipVerify bool,
@@ -363,12 +379,9 @@ func downloadRemoteServerListFile(
 		return "", nil
 	}
 
-	if *config.FetchRemoteServerListTimeoutSeconds > 0 {
-		var cancelFunc context.CancelFunc
-		ctx, cancelFunc = context.WithTimeout(
-			ctx, time.Duration(*config.FetchRemoteServerListTimeoutSeconds)*time.Second)
-		defer cancelFunc()
-	}
+	var cancelFunc context.CancelFunc
+	ctx, cancelFunc = context.WithTimeout(ctx, downloadTimeout)
+	defer cancelFunc()
 
 	// MakeDownloadHttpClient will select either a tunneled
 	// or untunneled configuration.

@@ -13,7 +13,9 @@ script:
 - go test -race -v ./common
 - go test -race -v ./common/accesscontrol
 - go test -race -v ./common/osl
+- go test -race -v ./common/parameters
 - go test -race -v ./common/protocol
+- go test -race -v ./common/tactics
 - go test -race -v -run TestObfuscatedSessionTicket ./common/tls
 # TODO: enable once known race condition is addressed
 #       also, see comment below
@@ -25,7 +27,9 @@ script:
 - go test -v -covermode=count -coverprofile=common.coverprofile ./common
 - go test -v -covermode=count -coverprofile=accesscontrol.coverprofile ./common/accesscontrol
 - go test -v -covermode=count -coverprofile=osl.coverprofile ./common/osl
+- go test -v -covermode=count -coverprofile=parameters.coverprofile ./common/parameters
 - go test -v -covermode=count -coverprofile=protocol.coverprofile ./common/protocol
+- go test -v -covermode=count -coverprofile=tactics.coverprofile ./common/tactics
 # TODO: fix and reenable test, which is failing in TravisCI environment:
 # --- FAIL: TestTunneledTCPIPv4
 #    tun_test.go:226: startTestTCPClient failed: syscall.Connect failed: connection timed out

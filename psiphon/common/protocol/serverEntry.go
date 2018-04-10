@@ -59,6 +59,8 @@ type ServerEntry struct {
 	MeekFrontingAddresses         []string `json:"meekFrontingAddresses"`
 	MeekFrontingAddressesRegex    string   `json:"meekFrontingAddressesRegex"`
 	MeekFrontingDisableSNI        bool     `json:"meekFrontingDisableSNI"`
+	TacticsRequestPublicKey       string   `json:"tacticsRequestPublicKey"`
+	TacticsRequestObfuscatedKey   string   `json:"tacticsRequestObfuscatedKey"`
 
 	// These local fields are not expected to be present in downloaded server
 	// entries. They are added by the client to record and report stats about
@@ -68,9 +70,15 @@ type ServerEntry struct {
 }
 
 // GetCapability returns the server capability corresponding
-// to the protocol.
+// to the tunnel protocol.
 func GetCapability(protocol string) string {
 	return strings.TrimSuffix(protocol, "-OSSH")
+}
+
+// GetTacticsCapability returns the server tactics capability
+// corresponding to the tunnel protocol.
+func GetTacticsCapability(protocol string) string {
+	return GetCapability(protocol) + "-TACTICS"
 }
 
 // SupportsProtocol returns true if and only if the ServerEntry has
@@ -82,38 +90,59 @@ func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 
 // GetSupportedProtocols returns a list of tunnel protocols supported
 // by the ServerEntry's capabilities.
-func (serverEntry *ServerEntry) GetSupportedProtocols(excludeMeek bool) []string {
+func (serverEntry *ServerEntry) GetSupportedProtocols(
+	limitTunnelProtocols []string,
+	impairedTunnelProtocols []string,
+	excludeMeek bool) []string {
+
 	supportedProtocols := make([]string, 0)
+
 	for _, protocol := range SupportedTunnelProtocols {
+
+		if len(limitTunnelProtocols) > 0 &&
+			!common.Contains(limitTunnelProtocols, protocol) {
+			continue
+		}
+
+		if len(impairedTunnelProtocols) > 0 &&
+			!common.Contains(impairedTunnelProtocols, protocol) {
+			continue
+		}
+
 		if excludeMeek && TunnelProtocolUsesMeek(protocol) {
 			continue
 		}
+
 		if serverEntry.SupportsProtocol(protocol) {
 			supportedProtocols = append(supportedProtocols, protocol)
 		}
+
 	}
 	return supportedProtocols
 }
 
-// DisableImpairedProtocols modifies the ServerEntry to disable
-// the specified protocols.
-// Note: this assumes that protocol capabilities are 1-to-1.
-func (serverEntry *ServerEntry) DisableImpairedProtocols(impairedProtocols []string) {
-	capabilities := make([]string, 0)
-	for _, capability := range serverEntry.Capabilities {
-		omit := false
-		for _, protocol := range impairedProtocols {
-			requiredCapability := GetCapability(protocol)
-			if capability == requiredCapability {
-				omit = true
-				break
-			}
+// GetSupportedTacticsProtocols returns a list of tunnel protocols,
+// supported by the ServerEntry's capabilities, that may be used
+// for tactics requests.
+func (serverEntry *ServerEntry) GetSupportedTacticsProtocols() []string {
+
+	supportedProtocols := make([]string, 0)
+
+	for _, protocol := range SupportedTunnelProtocols {
+
+		if !TunnelProtocolUsesMeek(protocol) {
+			continue
 		}
-		if !omit {
-			capabilities = append(capabilities, capability)
+
+		requiredCapability := GetTacticsCapability(protocol)
+		if !common.Contains(serverEntry.Capabilities, requiredCapability) {
+			continue
 		}
+
+		supportedProtocols = append(supportedProtocols, protocol)
 	}
-	serverEntry.Capabilities = capabilities
+
+	return supportedProtocols
 }
 
 // SupportsSSHAPIRequests returns true when the server supports

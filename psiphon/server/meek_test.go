@@ -35,6 +35,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
 var KB = 1024
@@ -299,7 +300,13 @@ func TestMeekResiliency(t *testing.T) {
 		DeviceBinder:            new(fileDescriptorInterruptor),
 	}
 
+	clientParameters, err := parameters.NewClientParameters(nil)
+	if err != nil {
+		t.Fatalf("NewClientParameters failed: %s", err)
+	}
+
 	meekConfig := &psiphon.MeekConfig{
+		ClientParameters:              clientParameters,
 		DialAddress:                   serverAddress,
 		UseHTTPS:                      useTLS,
 		UseObfuscatedSessionTickets:   useObfuscatedSessionTickets,

@@ -40,6 +40,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/marusama/semaphore"
 	cache "github.com/patrickmn/go-cache"
@@ -52,6 +53,8 @@ const (
 	SSH_CONNECTION_READ_DEADLINE          = 5 * time.Minute
 	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE = 8192
 	SSH_TCP_PORT_FORWARD_QUEUE_SIZE       = 1024
+	SSH_KEEP_ALIVE_PAYLOAD_MIN_BYTES      = 0
+	SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES      = 256
 	SSH_SEND_OSL_INITIAL_RETRY_DELAY      = 30 * time.Second
 	SSH_SEND_OSL_RETRY_FACTOR             = 2
 	OSL_SESSION_CACHE_TTL                 = 5 * time.Minute
@@ -922,7 +925,7 @@ type qualityMetrics struct {
 type handshakeState struct {
 	completed             bool
 	apiProtocol           string
-	apiParams             requestJSONObject
+	apiParams             common.APIParameters
 	authorizedAccessTypes []string
 	authorizationsRevoked bool
 	expectDomainBytes     bool
@@ -1143,7 +1146,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 		}
 	}
 
-	if !isHexDigits(sshClient.sshServer.support, sshPasswordPayload.SessionId) ||
+	if !isHexDigits(sshClient.sshServer.support.Config, sshPasswordPayload.SessionId) ||
 		len(sshPasswordPayload.SessionId) != expectedSessionIDLength {
 		return nil, common.ContextError(fmt.Errorf("invalid session ID for %q", conn.User()))
 	}
@@ -1264,7 +1267,11 @@ func (sshClient *sshClient) runTunnel(
 			var err error
 
 			if request.Type == "keepalive@openssh.com" {
-				// Keepalive requests have an empty response.
+
+				// SSH keep alive round trips are used as speed test samples.
+				responsePayload, err = tactics.MakeSpeedTestResponse(
+					SSH_KEEP_ALIVE_PAYLOAD_MIN_BYTES, SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES)
+
 			} else {
 
 				// All other requests are assumed to be API requests.

@@ -36,7 +36,9 @@ import (
 	"sync/atomic"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 )
 
@@ -105,7 +107,9 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 		psiphonHttpsClient: psiphonHttpsClient,
 	}
 
-	err := serverContext.doHandshakeRequest(tunnel.config.IgnoreHandshakeStatsRegexps)
+	ignoreRegexps := tunnel.config.clientParameters.Get().Bool(parameters.IgnoreHandshakeStatsRegexps)
+
+	err := serverContext.doHandshakeRequest(ignoreRegexps)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -120,6 +124,25 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	ignoreStatsRegexps bool) error {
 
 	params := serverContext.getBaseParams()
+
+	doTactics := serverContext.tunnel.config.NetworkIDGetter != nil
+	networkID := ""
+	if doTactics {
+
+		// Limitation: it is assumed that the network ID obtained here is the
+		// one that is active when the tactics request is received by the
+		// server. However, it is remotely possible to switch networks
+		// immediately after invoking the GetNetworkID callback and initiating
+		// the handshake, if the tunnel protocol is meek.
+
+		networkID = serverContext.tunnel.config.NetworkIDGetter.GetNetworkID()
+
+		err := tactics.SetTacticsAPIParameters(
+			serverContext.tunnel.config.clientParameters, GetTacticsStorer(), networkID, params)
+		if err != nil {
+			return common.ContextError(err)
+		}
+	}
 
 	var response []byte
 	if serverContext.psiphonHttpsClient == nil {
@@ -190,7 +213,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		err = protocol.ValidateServerEntry(serverEntry)
 		if err != nil {
 			// Skip this entry and continue with the next one
-			NoticeAlert("invalid server entry: %s", err)
+			NoticeAlert("invalid handshake server entry: %s", err)
 			continue
 		}
 
@@ -230,6 +253,36 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	NoticeServerTimestamp(serverContext.serverHandshakeTimestamp)
 
 	NoticeActiveAuthorizationIDs(handshakeResponse.ActiveAuthorizationIDs)
+
+	if doTactics && handshakeResponse.TacticsPayload != nil {
+
+		var payload *tactics.Payload
+		err = json.Unmarshal(handshakeResponse.TacticsPayload, &payload)
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		tacticsRecord, err := tactics.HandleTacticsPayload(
+			GetTacticsStorer(),
+			networkID,
+			payload)
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		if tacticsRecord != nil &&
+			common.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
+
+			err := serverContext.tunnel.config.SetClientParameters(
+				tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
+			if err != nil {
+				NoticeInfo("apply handshake tactics failed: %s", err)
+			}
+			// The error will be due to invalid tactics values from
+			// the server. When ApplyClientParameters fails, all
+			// previous tactics values are left in place.
+		}
+	}
 
 	return nil
 }
@@ -312,6 +365,7 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 	// payload for future attempt, in all failure cases.
 
 	statusPayload, statusPayloadInfo, err := makeStatusRequestPayload(
+		serverContext.tunnel.config.clientParameters,
 		tunnel.serverEntry.IpAddress)
 	if err != nil {
 		return common.ContextError(err)
@@ -360,16 +414,21 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 	return nil
 }
 
-func (serverContext *ServerContext) getStatusParams(isTunneled bool) requestJSONObject {
+func (serverContext *ServerContext) getStatusParams(
+	isTunneled bool) common.APIParameters {
 
 	params := serverContext.getBaseParams()
 
 	// Add a random amount of padding to help prevent stats updates from being
 	// a predictable size (which often happens when the connection is quiet).
 	// TODO: base64 encoding of padding means the padding size is not exactly
-	// [0, PADDING_MAX_BYTES].
+	// [PADDING_MIN_BYTES, PADDING_MAX_BYTES].
 
-	randomPadding, err := common.MakeSecureRandomPadding(0, PSIPHON_API_STATUS_REQUEST_PADDING_MAX_BYTES)
+	p := serverContext.tunnel.config.clientParameters.Get()
+	randomPadding, err := common.MakeSecureRandomPadding(
+		p.Int(parameters.PsiphonAPIStatusRequestPaddingMinBytes),
+		p.Int(parameters.PsiphonAPIStatusRequestPaddingMaxBytes))
+	p = nil
 	if err != nil {
 		NoticeAlert("MakeSecureRandomPadding failed: %s", common.ContextError(err))
 		// Proceed without random padding
@@ -404,13 +463,15 @@ type statusRequestPayloadInfo struct {
 }
 
 func makeStatusRequestPayload(
+	clientParameters *parameters.ClientParameters,
 	serverId string) ([]byte, *statusRequestPayloadInfo, error) {
 
 	transferStats := transferstats.TakeOutStatsForServer(serverId)
 	hostBytes := transferStats.GetStatsForStatusRequest()
 
-	persistentStats, err := TakeOutUnreportedPersistentStats(
-		PSIPHON_API_PERSISTENT_STATS_MAX_COUNT)
+	maxCount := clientParameters.Get().Int(parameters.PsiphonAPIPersistentStatsMaxCount)
+
+	persistentStats, err := TakeOutUnreportedPersistentStats(maxCount)
 	if err != nil {
 		NoticeAlert(
 			"TakeOutUnreportedPersistentStats failed: %s", common.ContextError(err))
@@ -660,14 +721,12 @@ func (serverContext *ServerContext) doPostRequest(
 	return responseBody, nil
 }
 
-type requestJSONObject map[string]interface{}
-
 // getBaseParams returns all the common API parameters that are included
 // with each Psiphon API request. These common parameters are used for
 // statistics.
-func (serverContext *ServerContext) getBaseParams() requestJSONObject {
+func (serverContext *ServerContext) getBaseParams() common.APIParameters {
 
-	params := make(requestJSONObject)
+	params := make(common.APIParameters)
 
 	tunnel := serverContext.tunnel
 
@@ -752,11 +811,13 @@ func (serverContext *ServerContext) getBaseParams() requestJSONObject {
 		params["server_entry_timestamp"] = localServerEntryTimestamp
 	}
 
+	params[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME] = tunnel.config.clientParameters.Get().Tag()
+
 	return params
 }
 
 // makeSSHAPIRequestPayload makes a JSON payload for an SSH API request.
-func makeSSHAPIRequestPayload(params requestJSONObject) ([]byte, error) {
+func makeSSHAPIRequestPayload(params common.APIParameters) ([]byte, error) {
 	jsonPayload, err := json.Marshal(params)
 	if err != nil {
 		return nil, common.ContextError(err)
@@ -765,7 +826,7 @@ func makeSSHAPIRequestPayload(params requestJSONObject) ([]byte, error) {
 }
 
 // makeRequestUrl makes a URL for a web service API request.
-func makeRequestUrl(tunnel *Tunnel, port, path string, params requestJSONObject) string {
+func makeRequestUrl(tunnel *Tunnel, port, path string, params common.APIParameters) string {
 	var requestUrl bytes.Buffer
 
 	if port == "" {
@@ -784,6 +845,11 @@ func makeRequestUrl(tunnel *Tunnel, port, path string, params requestJSONObject)
 		queryParams := url.Values{}
 
 		for name, value := range params {
+
+			// Note: this logic skips the tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME
+			// parameter, which has a different type. This parameter is not recognized
+			// by legacy servers.
+
 			strValue := ""
 			switch v := value.(type) {
 			case string:
@@ -829,7 +895,8 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 
 	dialer := NewCustomTLSDialer(
 		&CustomTLSConfig{
-			Dial: tunneledDialer,
+			ClientParameters: tunnel.config.clientParameters,
+			Dial:             tunneledDialer,
 			VerifyLegacyCertificate: certificate,
 		})
 

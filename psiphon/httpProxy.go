@@ -33,9 +33,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/grafov/m3u8"
 )
 
@@ -111,12 +111,17 @@ func NewHttpProxy(
 		return tunneler.DirectDial(addr)
 	}
 
-	responseHeaderTimeout := time.Duration(*config.HttpProxyOriginServerTimeoutSeconds) * time.Second
+	responseHeaderTimeout := config.clientParameters.Get().Duration(
+		parameters.HTTPProxyOriginServerTimeout)
+
+	maxIdleConnsPerHost := config.clientParameters.Get().Int(
+		parameters.HTTPProxyMaxIdleConnectionsPerHost)
+
 	// TODO: could HTTP proxy share a tunneled transport with URL proxy?
 	// For now, keeping them distinct just to be conservative.
 	httpProxyTunneledRelay := &http.Transport{
 		Dial:                  tunneledDialer,
-		MaxIdleConnsPerHost:   HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
+		MaxIdleConnsPerHost:   maxIdleConnsPerHost,
 		ResponseHeaderTimeout: responseHeaderTimeout,
 	}
 
@@ -126,7 +131,7 @@ func NewHttpProxy(
 
 	urlProxyTunneledRelay := &http.Transport{
 		Dial:                  tunneledDialer,
-		MaxIdleConnsPerHost:   HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
+		MaxIdleConnsPerHost:   maxIdleConnsPerHost,
 		ResponseHeaderTimeout: responseHeaderTimeout,
 	}
 	urlProxyTunneledClient := &http.Client{
@@ -140,7 +145,7 @@ func NewHttpProxy(
 
 	urlProxyDirectRelay := &http.Transport{
 		Dial:                  directDialer,
-		MaxIdleConnsPerHost:   HTTP_PROXY_MAX_IDLE_CONNECTIONS_PER_HOST,
+		MaxIdleConnsPerHost:   maxIdleConnsPerHost,
 		ResponseHeaderTimeout: responseHeaderTimeout,
 	}
 	urlProxyDirectClient := &http.Client{

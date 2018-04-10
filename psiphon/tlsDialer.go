@@ -80,6 +80,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
 )
 
@@ -91,6 +92,10 @@ const (
 // CustomTLSConfig contains parameters to determine the behavior
 // of CustomTLSDial.
 type CustomTLSConfig struct {
+
+	// ClientParameters is the active set of client parameters to use
+	// for the TLS dial.
+	ClientParameters *parameters.ClientParameters
 
 	// Dial is the network connection dialer. TLS is layered on
 	// top of a new network connection created with dialer.
@@ -149,6 +154,7 @@ type CustomTLSConfig struct {
 }
 
 func SelectTLSProfile(
+	clientParameters *parameters.ClientParameters,
 	useIndistinguishableTLS, useObfuscatedSessionTickets,
 	skipVerify, haveTrustedCACertificates bool) string {
 
@@ -162,7 +168,9 @@ func SelectTLSProfile(
 			// TODO: (... || config.VerifyLegacyCertificate != nil)
 			(skipVerify || haveTrustedCACertificates)
 
-		if canUseOpenSSL && common.FlipCoin() {
+		if canUseOpenSSL &&
+			clientParameters.Get().WeightedCoinFlip(parameters.SelectAndroidTLSProbability) {
+
 			selectedTLSProfile = TLSProfileAndroid
 		} else {
 			selectedTLSProfile = TLSProfileChrome
@@ -221,6 +229,7 @@ func CustomTLSDial(
 
 		if selectedTLSProfile == "" {
 			selectedTLSProfile = SelectTLSProfile(
+				config.ClientParameters,
 				true,
 				config.ObfuscatedSessionTicketKey != "",
 				config.SkipVerify,

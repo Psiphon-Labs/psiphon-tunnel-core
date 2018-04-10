@@ -43,7 +43,7 @@ const DNS_PORT = 53
 // of a Psiphon dialer (TCPDial, MeekDial, etc.)
 type DialConfig struct {
 
-	// UpstreamProxyUrl specifies a proxy to connect through.
+	// UpstreamProxyURL specifies a proxy to connect through.
 	// E.g., "http://proxyhost:8080"
 	//       "socks5://user:password@proxyhost:1080"
 	//       "socks4a://proxyhost:1080"
@@ -52,11 +52,11 @@ type DialConfig struct {
 	// Certain tunnel protocols require HTTP CONNECT support
 	// when a HTTP proxy is specified. If CONNECT is not
 	// supported, those protocols will not connect.
-	UpstreamProxyUrl string
+	UpstreamProxyURL string
 
 	// CustomHeaders is a set of additional arbitrary HTTP headers that are
 	// added to all plaintext HTTP requests and requests made through an HTTP
-	// upstream proxy when specified by UpstreamProxyUrl.
+	// upstream proxy when specified by UpstreamProxyURL.
 	CustomHeaders http.Header
 
 	// BindToDevice parameters are used to exclude connections and
@@ -117,6 +117,11 @@ type DnsServerGetter interface {
 // IPv6Synthesizer defines the interface to the external IPv6Synthesize provider
 type IPv6Synthesizer interface {
 	IPv6Synthesize(IPv4Addr string) string
+}
+
+// NetworkIDGetter defines the interface to the external GetNetworkID provider
+type NetworkIDGetter interface {
+	GetNetworkID() string
 }
 
 // Dialer is a custom network dialer.
@@ -215,6 +220,7 @@ func ResolveIP(host string, conn net.Conn) (addrs []net.IP, ttls []time.Duration
 // for applying the context to requests made with the returned http.Client.
 func MakeUntunneledHTTPClient(
 	ctx context.Context,
+	config *Config,
 	untunneledDialConfig *DialConfig,
 	verifyLegacyCertificate *x509.Certificate,
 	skipVerify bool) (*http.Client, error) {
@@ -229,7 +235,8 @@ func MakeUntunneledHTTPClient(
 		// Note: when verifyLegacyCertificate is not nil, some
 		// of the other CustomTLSConfig is overridden.
 		&CustomTLSConfig{
-			Dial: dialer,
+			ClientParameters: config.clientParameters,
+			Dial:             dialer,
 			VerifyLegacyCertificate:       verifyLegacyCertificate,
 			UseDialAddrSNI:                true,
 			SNIServerName:                 "",
@@ -321,7 +328,7 @@ func MakeDownloadHTTPClient(
 	} else {
 
 		httpClient, err = MakeUntunneledHTTPClient(
-			ctx, untunneledDialConfig, nil, skipVerify)
+			ctx, config, untunneledDialConfig, nil, skipVerify)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}

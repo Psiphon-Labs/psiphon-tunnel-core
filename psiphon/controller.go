@@ -34,7 +34,9 @@ import (
 
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
@@ -80,6 +82,8 @@ type Controller struct {
 type candidateServerEntry struct {
 	serverEntry                *protocol.ServerEntry
 	isServerAffinityCandidate  bool
+	usePriorityProtocol        bool
+	impairedProtocols          []string
 	adjustedEstablishStartTime monotime.Time
 }
 
@@ -94,7 +98,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 	NoticeSessionId(config.SessionID)
 
 	untunneledDialConfig := &DialConfig{
-		UpstreamProxyUrl:              config.UpstreamProxyUrl,
+		UpstreamProxyURL:              config.UpstreamProxyURL,
 		CustomHeaders:                 config.CustomHeaders,
 		DeviceBinder:                  config.DeviceBinder,
 		DnsServerGetter:               config.DnsServerGetter,
@@ -210,17 +214,12 @@ func (controller *Controller) Run(ctx context.Context) {
 
 	if !controller.config.DisableRemoteServerListFetcher {
 
-		retryPeriod := time.Duration(
-			*controller.config.FetchRemoteServerListRetryPeriodSeconds) * time.Second
-
 		if controller.config.RemoteServerListURLs != nil {
 			controller.runWaitGroup.Add(1)
 			go controller.remoteServerListFetcher(
 				"common",
 				FetchCommonRemoteServerList,
-				controller.signalFetchCommonRemoteServerList,
-				retryPeriod,
-				FETCH_REMOTE_SERVER_LIST_STALE_PERIOD)
+				controller.signalFetchCommonRemoteServerList)
 		}
 
 		if controller.config.ObfuscatedServerListRootURLs != nil {
@@ -228,9 +227,7 @@ func (controller *Controller) Run(ctx context.Context) {
 			go controller.remoteServerListFetcher(
 				"obfuscated",
 				FetchObfuscatedServerLists,
-				controller.signalFetchObfuscatedServerLists,
-				retryPeriod,
-				FETCH_REMOTE_SERVER_LIST_STALE_PERIOD)
+				controller.signalFetchObfuscatedServerLists)
 		}
 	}
 
@@ -245,10 +242,8 @@ func (controller *Controller) Run(ctx context.Context) {
 	controller.runWaitGroup.Add(1)
 	go controller.runTunnels()
 
-	if *controller.config.EstablishTunnelTimeoutSeconds != 0 {
-		controller.runWaitGroup.Add(1)
-		go controller.establishTunnelWatcher()
-	}
+	controller.runWaitGroup.Add(1)
+	go controller.establishTunnelWatcher()
 
 	if controller.packetTunnelClient != nil {
 		controller.packetTunnelClient.Start()
@@ -313,8 +308,7 @@ func (controller *Controller) SetClientVerificationPayloadForActiveTunnels(clien
 func (controller *Controller) remoteServerListFetcher(
 	name string,
 	fetcher RemoteServerListFetcher,
-	signal <-chan struct{},
-	retryPeriod, stalePeriod time.Duration) {
+	signal <-chan struct{}) {
 
 	defer controller.runWaitGroup.Done()
 
@@ -331,6 +325,10 @@ fetcherLoop:
 
 		// Skip fetch entirely (i.e., send no request at all, even when ETag would save
 		// on response size) when a recent fetch was successful
+
+		stalePeriod := controller.config.clientParameters.Get().Duration(
+			parameters.FetchRemoteServerListStalePeriod)
+
 		if lastFetchTime != 0 &&
 			lastFetchTime.Add(stalePeriod).After(monotime.Now()) {
 			continue
@@ -364,6 +362,9 @@ fetcherLoop:
 
 			NoticeAlert("failed to fetch %s remote server list: %s", name, err)
 
+			retryPeriod := controller.config.clientParameters.Get().Duration(
+				parameters.FetchRemoteServerListRetryPeriod)
+
 			timer := time.NewTimer(retryPeriod)
 			select {
 			case <-timer.C:
@@ -385,17 +386,21 @@ fetcherLoop:
 func (controller *Controller) establishTunnelWatcher() {
 	defer controller.runWaitGroup.Done()
 
-	timer := time.NewTimer(
-		time.Duration(*controller.config.EstablishTunnelTimeoutSeconds) * time.Second)
-	defer timer.Stop()
+	timeout := controller.config.clientParameters.Get().Duration(
+		parameters.EstablishTunnelTimeout)
 
-	select {
-	case <-timer.C:
-		if !controller.hasEstablishedOnce() {
-			NoticeAlert("failed to establish tunnel before timeout")
-			controller.SignalComponentFailure()
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+
+		select {
+		case <-timer.C:
+			if !controller.hasEstablishedOnce() {
+				NoticeAlert("failed to establish tunnel before timeout")
+				controller.SignalComponentFailure()
+			}
+		case <-controller.runCtx.Done():
 		}
-	case <-controller.runCtx.Done():
 	}
 
 	NoticeInfo("exiting establish tunnel watcher")
@@ -428,11 +433,16 @@ loop:
 		}
 
 		// Schedule the next connected request and wait.
+		// Note: this duration is not a dynamic ClientParameter as
+		// the daily unique user stats logic specifically requires
+		// a "connected" request no more or less often than every
+		// 24 hours.
 		var duration time.Duration
 		if reported {
-			duration = PSIPHON_API_CONNECTED_REQUEST_PERIOD
+			duration = 24 * time.Hour
 		} else {
-			duration = PSIPHON_API_CONNECTED_REQUEST_RETRY_PERIOD
+			duration = controller.config.clientParameters.Get().Duration(
+				parameters.PsiphonAPIConnectedRequestRetryPeriod)
 		}
 		timer := time.NewTimer(duration)
 		doBreak := false
@@ -504,11 +514,14 @@ downloadLoop:
 			break downloadLoop
 		}
 
+		stalePeriod := controller.config.clientParameters.Get().Duration(
+			parameters.FetchUpgradeStalePeriod)
+
 		// Unless handshake is explicitly advertizing a new version, skip
 		// checking entirely when a recent download was successful.
 		if handshakeVersion == "" &&
 			lastDownloadTime != 0 &&
-			lastDownloadTime.Add(DOWNLOAD_UPGRADE_STALE_PERIOD).After(monotime.Now()) {
+			lastDownloadTime.Add(stalePeriod).After(monotime.Now()) {
 			continue
 		}
 
@@ -541,8 +554,10 @@ downloadLoop:
 
 			NoticeAlert("failed to download upgrade: %s", err)
 
-			timer := time.NewTimer(
-				time.Duration(*controller.config.DownloadUpgradeRetryPeriodSeconds) * time.Second)
+			timeout := controller.config.clientParameters.Get().Duration(
+				parameters.FetchUpgradeRetryPeriod)
+
+			timer := time.NewTimer(timeout)
 			select {
 			case <-timer.C:
 			case <-controller.runCtx.Done():
@@ -803,8 +818,11 @@ func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
 
 	// If the tunnel failed while activating, its establishedTime will be 0.
 
+	duration := controller.config.clientParameters.Get().Duration(
+		parameters.ImpairedProtocolClassificationDuration)
+
 	if failedTunnel.establishedTime == 0 ||
-		failedTunnel.establishedTime.Add(IMPAIRED_PROTOCOL_CLASSIFICATION_DURATION).After(monotime.Now()) {
+		failedTunnel.establishedTime.Add(duration).After(monotime.Now()) {
 		controller.impairedProtocolClassification[failedTunnel.protocol] += 1
 	} else {
 		controller.impairedProtocolClassification[failedTunnel.protocol] = 0
@@ -813,12 +831,11 @@ func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
 	// Reset classification once all known protocols are classified as impaired, as
 	// there is now no way to proceed with only unimpaired protocols. The network
 	// situation (or attack) resulting in classification may not be protocol-specific.
-	//
-	// Note: with controller.config.TunnelProtocol set, this will always reset once
-	// that protocol has reached IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD.
+
 	if CountNonImpairedProtocols(
 		controller.config.EgressRegion,
-		controller.config.TunnelProtocol,
+		controller.config.clientParameters.Get().TunnelProtocols(
+			parameters.LimitTunnelProtocols),
 		controller.getImpairedProtocols()) == 0 {
 
 		controller.impairedProtocolClassification = make(map[string]int)
@@ -830,10 +847,15 @@ func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
 //
 // Concurrency note: only the runTunnels() goroutine may call getImpairedProtocols
 func (controller *Controller) getImpairedProtocols() []string {
+
 	NoticeImpairedProtocolClassification(controller.impairedProtocolClassification)
+
+	threshold := controller.config.clientParameters.Get().Int(
+		parameters.ImpairedProtocolClassificationThreshold)
+
 	impairedProtocols := make([]string, 0)
 	for protocol, count := range controller.impairedProtocolClassification {
-		if count >= IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD {
+		if count >= threshold {
 			impairedProtocols = append(impairedProtocols, protocol)
 		}
 	}
@@ -844,8 +866,13 @@ func (controller *Controller) getImpairedProtocols() []string {
 //
 // Concurrency note: only the runTunnels() goroutine may call isImpairedProtocol
 func (controller *Controller) isImpairedProtocol(protocol string) bool {
+
+	threshold := controller.config.clientParameters.Get().Int(
+		parameters.ImpairedProtocolClassificationThreshold)
+
 	count, ok := controller.impairedProtocolClassification[protocol]
-	return ok && count >= IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD
+
+	return ok && count >= threshold
 }
 
 // SignalSeededNewSLOK implements the TunnelOwner interface. This function
@@ -1045,7 +1072,7 @@ func (controller *Controller) Dial(
 
 	// Perform split tunnel classification when feature is enabled, and if the remote
 	// address is classified as untunneled, dial directly.
-	if !alwaysTunnel && controller.config.SplitTunnelDnsServer != "" {
+	if !alwaysTunnel && controller.config.SplitTunnelDNSServer != "" {
 
 		host, _, err := net.SplitHostPort(remoteAddr)
 		if err != nil {
@@ -1123,14 +1150,68 @@ func (controller *Controller) startEstablishing() {
 	// Note: the establishTunnelWorker that receives the affinity
 	// candidate is solely resonsible for closing
 	// controller.serverAffinityDoneBroadcast.
-	//
-	// Note: if config.EgressRegion or config.TunnelProtocol has changed
-	// since the top server was promoted, the first server may not actually
-	// be the last connected server.
-	// TODO: should not favor the first server in this case
 	controller.serverAffinityDoneBroadcast = make(chan struct{})
 
-	for i := 0; i < controller.config.ConnectionWorkerPoolSize; i++ {
+	controller.establishWaitGroup.Add(1)
+	go controller.launchEstablishing()
+}
+
+func (controller *Controller) launchEstablishing() {
+
+	defer controller.establishWaitGroup.Done()
+
+	// Before starting the establish tunnel workers, get and apply
+	// tactics, launching a tactics request if required.
+	//
+	// Wait only TacticsWaitPeriod for the tactics request to complete (or
+	// fail) before proceeding with tunnel establishment, in case the tactics
+	// request is blocked or takes very long to complete.
+	//
+	// An in-flight tactics request uses meek in round tripper mode, which
+	// uses less resources than meek tunnel relay mode. For this reason, the
+	// tactics request is not counted in concurrentMeekEstablishTunnels.
+	//
+	// TODO: HTTP/2 uses significantly more memory, so perhaps
+	// concurrentMeekEstablishTunnels should be counted in that case.
+	//
+	// Any in-flight tactics request or pending retry will be
+	// canceled when establishment is stopped.
+
+	doTactics := (controller.config.NetworkIDGetter != nil)
+
+	if doTactics {
+
+		timeout := controller.config.clientParameters.Get().Duration(
+			parameters.TacticsWaitPeriod)
+
+		tacticsDone := make(chan struct{})
+		tacticsWaitPeriod := time.NewTimer(timeout)
+		defer tacticsWaitPeriod.Stop()
+
+		controller.establishWaitGroup.Add(1)
+		go controller.getTactics(tacticsDone)
+
+		select {
+		case <-tacticsDone:
+		case <-tacticsWaitPeriod.C:
+		}
+
+		tacticsWaitPeriod.Stop()
+
+		if controller.isStopEstablishing() {
+			// This check isn't strictly required by avoids the
+			// overhead of launching workers if establishment
+			// stopped while awaiting a tactics request.
+			return
+		}
+	}
+
+	// The ConnectionWorkerPoolSize may be set by tactics.
+
+	size := controller.config.clientParameters.Get().Int(
+		parameters.ConnectionWorkerPoolSize)
+
+	for i := 0; i < size; i++ {
 		controller.establishWaitGroup.Add(1)
 		go controller.establishTunnelWorker()
 	}
@@ -1175,6 +1256,193 @@ func (controller *Controller) stopEstablishing() {
 	standardGarbageCollection()
 }
 
+func (controller *Controller) getTactics(done chan struct{}) {
+	defer controller.establishWaitGroup.Done()
+	defer close(done)
+
+	tacticsRecord, err := tactics.UseStoredTactics(
+		GetTacticsStorer(),
+		controller.config.NetworkIDGetter.GetNetworkID())
+	if err != nil {
+		NoticeAlert("get stored tactics failed: %s", err)
+
+		// The error will be due to a local datastore problem.
+		// While we could proceed with the tactics request, this
+		// could result in constant tactics requests. So, abort.
+		return
+	}
+
+	if tacticsRecord == nil {
+
+		iterator, err := NewTacticsServerEntryIterator(
+			controller.config)
+		if err != nil {
+			NoticeAlert("tactics iterator failed: %s", err)
+			return
+		}
+		defer iterator.Close()
+
+		for iteration := 0; ; iteration++ {
+
+			serverEntry, err := iterator.Next()
+			if err != nil {
+				NoticeAlert("tactics iterator failed: %s", err)
+				return
+			}
+
+			if serverEntry == nil {
+				if iteration == 0 {
+					NoticeAlert("tactics request skipped: no capable servers")
+					return
+				}
+
+				iterator.Reset()
+				continue
+			}
+
+			tacticsRecord, err = controller.doFetchTactics(serverEntry)
+			if err == nil {
+				break
+			}
+
+			NoticeAlert("tactics request failed: %s", err)
+
+			// On error, proceed with a retry, as the error is likely
+			// due to a network failure.
+			//
+			// TODO: distinguish network and local errors and abort
+			// on local errors.
+
+			p := controller.config.clientParameters.Get()
+			timeout := common.JitterDuration(
+				p.Duration(parameters.TacticsRetryPeriod),
+				p.Float(parameters.TacticsRetryPeriodJitter))
+			p = nil
+
+			tacticsRetryDelay := time.NewTimer(timeout)
+
+			select {
+			case <-controller.establishCtx.Done():
+				return
+			case <-tacticsRetryDelay.C:
+			default:
+			}
+
+			tacticsRetryDelay.Stop()
+		}
+	}
+
+	if tacticsRecord != nil &&
+		common.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
+
+		err := controller.config.SetClientParameters(
+			tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
+		if err != nil {
+			NoticeAlert("apply tactics failed: %s", err)
+
+			// The error will be due to invalid tactics values from
+			// the server. When ApplyClientParameters fails, all
+			// previous tactics values are left in place. Abort
+			// without retry since the server is highly unlikely
+			// to return different values immediately.
+			return
+		}
+	}
+
+	// Reclaim memory from the completed tactics request as we're likely
+	// to be proceeding to the memory-intensive tunnel establishment phase.
+	aggressiveGarbageCollection()
+	emitMemoryMetrics()
+}
+
+func (controller *Controller) doFetchTactics(
+	serverEntry *protocol.ServerEntry) (*tactics.Record, error) {
+
+	tacticsProtocols := serverEntry.GetSupportedTacticsProtocols()
+
+	index, err := common.MakeSecureRandomInt(len(tacticsProtocols))
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	tacticsProtocol := tacticsProtocols[index]
+
+	meekConfig, err := initMeekConfig(
+		controller.config,
+		serverEntry,
+		tacticsProtocol,
+		"")
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	meekConfig.RoundTripperOnly = true
+
+	dialConfig, _, _ := initDialConfig(
+		controller.config, meekConfig)
+
+	// TacticsTimeout should be a very long timeout, since it's not
+	// adjusted by tactics in a new network context, and so clients
+	// with very slow connections must be accomodated. This long
+	// timeout will not entirely block the beginning of tunnel
+	// establishment, which beings after the shorter TacticsWaitPeriod.
+	//
+	// Using controller.establishCtx will cancel FetchTactics
+	// if tunnel establishment completes first.
+
+	timeout := controller.config.clientParameters.Get().Duration(
+		parameters.TacticsTimeout)
+
+	ctx, cancelFunc := context.WithTimeout(
+		controller.establishCtx,
+		timeout)
+	defer cancelFunc()
+
+	// Limitation: it is assumed that the network ID obtained here is the
+	// one that is active when the tactics request is received by the
+	// server. However, it is remotely possible to switch networks
+	// immediately after invoking the GetNetworkID callback and initiating
+	// the request.
+	//
+	// TODO: ensure that meek in round trip mode will fail the request when
+	// the pre-dial connection is broken.
+
+	networkID := controller.config.NetworkIDGetter.GetNetworkID()
+
+	// DialMeek completes the TCP/TLS handshakes for HTTPS
+	// meek protocols but _not_ for HTTP meek protocols.
+	//
+	// TODO: pre-dial HTTP protocols to conform with speed
+	// test RTT spec.
+
+	meekConn, err := DialMeek(ctx, meekConfig, dialConfig)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+	defer meekConn.Close()
+
+	var apiParams common.APIParameters
+	// *TODO* populate
+	apiParams = make(common.APIParameters)
+
+	tacticsRecord, err := tactics.FetchTactics(
+		ctx,
+		controller.config.clientParameters,
+		GetTacticsStorer(),
+		networkID,
+		apiParams,
+		serverEntry.Region,
+		tacticsProtocol,
+		serverEntry.TacticsRequestPublicKey,
+		serverEntry.TacticsRequestObfuscatedKey,
+		meekConn.RoundTrip)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return tacticsRecord, nil
+}
+
 // establishCandidateGenerator populates the candidate queue with server entries
 // from the data store. Server entries are iterated in rank order, so that promoted
 // servers with higher rank are priority candidates.
@@ -1210,6 +1478,8 @@ func (controller *Controller) establishCandidateGenerator(impairedProtocols []st
 		close(controller.serverAffinityDoneBroadcast)
 	}
 
+	candidateCount := 0
+
 loop:
 	// Repeat until stopped
 	for i := 0; ; i++ {
@@ -1243,31 +1513,38 @@ loop:
 				continue
 			}
 
+			// Use a prioritized tunnel protocol for the first
+			// PrioritizeTunnelProtocolsCandidateCount candidates.
+			// This facility can be used to favor otherwise slower
+			// protocols.
+
+			prioritizeCandidateCount := controller.config.clientParameters.Get().Int(
+				parameters.PrioritizeTunnelProtocolsCandidateCount)
+			usePriorityProtocol := candidateCount < prioritizeCandidateCount
+
 			// Disable impaired protocols. This is only done for the
-			// first iteration of the ESTABLISH_TUNNEL_WORK_TIME
+			// first iteration of the EstablishTunnelWorkTime
 			// loop since (a) one iteration should be sufficient to
 			// evade the attack; (b) there's a good chance of false
 			// positives (such as short tunnel durations due to network
 			// hopping on a mobile device).
-			// The edited serverEntry is temporary copy which is not
-			// stored or reused.
+
+			var candidateImpairedProtocols []string
 			if i == 0 {
-				serverEntry.DisableImpairedProtocols(impairedProtocols)
-				if len(serverEntry.GetSupportedProtocols(false)) == 0 {
-					// Skip this server entry, as it has no supported
-					// protocols after disabling the impaired ones
-					// TODO: modify ServerEntryIterator to skip these?
-					continue
-				}
+				candidateImpairedProtocols = impairedProtocols
 			}
 
 			// adjustedEstablishStartTime is establishStartTime shifted
 			// to exclude time spent waiting for network connectivity.
 
+			adjustedEstablishStartTime := establishStartTime.Add(networkWaitDuration)
+
 			candidate := &candidateServerEntry{
 				serverEntry:                serverEntry,
 				isServerAffinityCandidate:  isServerAffinityCandidate,
-				adjustedEstablishStartTime: establishStartTime.Add(networkWaitDuration),
+				usePriorityProtocol:        usePriorityProtocol,
+				impairedProtocols:          candidateImpairedProtocols,
+				adjustedEstablishStartTime: adjustedEstablishStartTime,
 			}
 
 			wasServerAffinityCandidate := isServerAffinityCandidate
@@ -1279,13 +1556,18 @@ loop:
 			// TODO: here we could generate multiple candidates from the
 			// server entry when there are many MeekFrontingAddresses.
 
+			candidateCount++
+
 			select {
 			case controller.candidateServerEntries <- candidate:
 			case <-controller.establishCtx.Done():
 				break loop
 			}
 
-			if startTime.Add(ESTABLISH_TUNNEL_WORK_TIME).Before(monotime.Now()) {
+			workTime := controller.config.clientParameters.Get().Duration(
+				parameters.EstablishTunnelWorkTime)
+
+			if startTime.Add(workTime).Before(monotime.Now()) {
 				// Start over, after a brief pause, with a new shuffle of the server
 				// entries, and potentially some newly fetched server entries.
 				break
@@ -1297,28 +1579,43 @@ loop:
 				// candidate has completed (success or failure) or is still working
 				// and the grace period has elapsed.
 
-				timer := time.NewTimer(ESTABLISH_TUNNEL_SERVER_AFFINITY_GRACE_PERIOD)
-				select {
-				case <-timer.C:
-				case <-controller.serverAffinityDoneBroadcast:
-				case <-controller.establishCtx.Done():
-					timer.Stop()
-					break loop
-				}
-				timer.Stop()
-			} else if controller.config.StaggerConnectionWorkersMilliseconds != 0 {
+				gracePeriod := controller.config.clientParameters.Get().Duration(
+					parameters.EstablishTunnelServerAffinityGracePeriod)
 
-				// Stagger concurrent connection workers.
-
-				timer := time.NewTimer(time.Millisecond * time.Duration(
-					controller.config.StaggerConnectionWorkersMilliseconds))
-				select {
-				case <-timer.C:
-				case <-controller.establishCtx.Done():
+				if gracePeriod > 0 {
+					timer := time.NewTimer(gracePeriod)
+					select {
+					case <-timer.C:
+					case <-controller.serverAffinityDoneBroadcast:
+					case <-controller.establishCtx.Done():
+						timer.Stop()
+						break loop
+					}
 					timer.Stop()
-					break loop
 				}
-				timer.Stop()
+
+			} else {
+
+				p := controller.config.clientParameters.Get()
+				staggerPeriod := p.Duration(parameters.StaggerConnectionWorkersPeriod)
+				staggerJitter := p.Float(parameters.StaggerConnectionWorkersJitter)
+				p = nil
+
+				if staggerPeriod != 0 {
+
+					// Stagger concurrent connection workers.
+
+					timeout := common.JitterDuration(staggerPeriod, staggerJitter)
+
+					timer := time.NewTimer(timeout)
+					select {
+					case <-timer.C:
+					case <-controller.establishCtx.Done():
+						timer.Stop()
+						break loop
+					}
+					timer.Stop()
+				}
 			}
 		}
 
@@ -1358,8 +1655,14 @@ loop:
 		// network conditions to change. Also allows for fetch remote to complete,
 		// in typical conditions (it isn't strictly necessary to wait for this, there will
 		// be more rounds if required).
-		timer := time.NewTimer(
-			time.Duration(*controller.config.EstablishTunnelPausePeriodSeconds) * time.Second)
+
+		p := controller.config.clientParameters.Get()
+		timeout := common.JitterDuration(
+			p.Duration(parameters.EstablishTunnelPausePeriod),
+			p.Float(parameters.EstablishTunnelPausePeriodJitter))
+		p = nil
+
+		timer := time.NewTimer(timeout)
 		select {
 		case <-timer.C:
 			// Retry iterating
@@ -1394,9 +1697,9 @@ loop:
 		// reclaim as much as possible.
 		defaultGarbageCollection()
 
-		// Select the tunnel protocol. Unless config.TunnelProtocol is set, the
-		// selection will be made at random from protocols supported by the
-		// server entry.
+		// Select the tunnel protocol. The selection will be made at random from
+		// protocols supported by the server entry, optionally limited by
+		// LimitTunnelProtocols.
 		//
 		// When limiting concurrent meek connection workers, and at the limit,
 		// do not select meek since otherwise the candidate must be skipped.
@@ -1406,39 +1709,54 @@ loop:
 		// it's probable that the next candidate is not meek. In this case, a
 		// StaggerConnectionWorkersMilliseconds delay may still be incurred.
 
+		limitMeekConnectionWorkers := controller.config.clientParameters.Get().Int(
+			parameters.LimitMeekConnectionWorkers)
+
 		excludeMeek := false
 		controller.concurrentEstablishTunnelsMutex.Lock()
-		if controller.config.LimitMeekConnectionWorkers > 0 &&
+		if limitMeekConnectionWorkers > 0 &&
 			controller.concurrentMeekEstablishTunnels >=
-				controller.config.LimitMeekConnectionWorkers {
+				limitMeekConnectionWorkers {
 			excludeMeek = true
 		}
 		controller.concurrentEstablishTunnelsMutex.Unlock()
 
 		selectedProtocol, err := selectProtocol(
-			controller.config, candidateServerEntry.serverEntry, excludeMeek)
+			controller.config,
+			candidateServerEntry.serverEntry,
+			candidateServerEntry.impairedProtocols,
+			excludeMeek,
+			candidateServerEntry.usePriorityProtocol)
 
-		if err == errProtocolNotSupported {
-			// selectProtocol returns errProtocolNotSupported when excludeMeek
-			// is set and the server entry only supports meek protocols.
+		if err == errNoProtocolSupported {
+			// selectProtocol returns errNoProtocolSupported when the server
+			// does not support any protocol that remains after applying the
+			// LimitTunnelProtocols parameter, the impaired protocol filter,
+			// and the excludeMeek flag.
 			// Skip this candidate.
+
+			// Unblock other candidates immediately when
+			// server affinity candidate is skipped.
+			if candidateServerEntry.isServerAffinityCandidate {
+				close(controller.serverAffinityDoneBroadcast)
+			}
+
 			continue
 		}
 
 		var tunnel *Tunnel
 		if err == nil {
 
-			isMeek := protocol.TunnelProtocolUsesMeek(selectedProtocol) ||
-				protocol.TunnelProtocolUsesMeek(selectedProtocol)
+			isMeek := protocol.TunnelProtocolUsesMeek(selectedProtocol)
 
 			controller.concurrentEstablishTunnelsMutex.Lock()
 			if isMeek {
 
 				// Recheck the limit now that we know we're selecting meek and
 				// adjusting concurrentMeekEstablishTunnels.
-				if controller.config.LimitMeekConnectionWorkers > 0 &&
+				if limitMeekConnectionWorkers > 0 &&
 					controller.concurrentMeekEstablishTunnels >=
-						controller.config.LimitMeekConnectionWorkers {
+						limitMeekConnectionWorkers {
 
 					// Skip this candidate.
 					controller.concurrentEstablishTunnelsMutex.Unlock()
