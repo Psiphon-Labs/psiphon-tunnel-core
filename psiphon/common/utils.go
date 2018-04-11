@@ -49,7 +49,7 @@ func Contains(list []string, target string) bool {
 }
 
 // ContainsAny returns true if any string in targets
-// is present ini he list.
+// is present in the list.
 func ContainsAny(list, targets []string) bool {
 	for _, target := range targets {
 		if Contains(list, target) {
@@ -71,12 +71,32 @@ func ContainsInt(list []int, target int) bool {
 }
 
 // FlipCoin is a helper function that randomly
-// returns true or false. If the underlying random
-// number generator fails, FlipCoin still returns
-// a result.
+// returns true or false.
+//
+// If the underlying random number generator fails,
+// FlipCoin still returns a result.
 func FlipCoin() bool {
 	randomInt, _ := MakeSecureRandomInt(2)
 	return randomInt == 1
+}
+
+// FlipWeightedCoin returns the result of a weighted
+// random coin flip. If the weight is 0.5, the outcome
+// is equally likely to be true or false. If the weight
+// is 1.0, the outcome is always true, and if the
+// weight is 0.0, the outcome is always false.
+//
+// Input weights > 1.0 are treated as 1.0.
+//
+// If the underlying random number generator fails,
+// FlipWeightedCoin still returns a result.
+func FlipWeightedCoin(weight float64) bool {
+	if weight > 1.0 {
+		weight = 1.0
+	}
+	n, _ := MakeSecureRandomInt64(math.MaxInt64)
+	f := float64(n) / float64(math.MaxInt64)
+	return f > 1.0-weight
 }
 
 // MakeSecureRandomInt is a helper function that wraps
@@ -89,6 +109,9 @@ func MakeSecureRandomInt(max int) (int, error) {
 // MakeSecureRandomInt64 is a helper function that wraps
 // crypto/rand.Int, which returns a uniform random value in [0, max).
 func MakeSecureRandomInt64(max int64) (int64, error) {
+	if max <= 0 {
+		return 0, nil
+	}
 	randomInt, err := rand.Int(rand.Reader, big.NewInt(max))
 	if err != nil {
 		return 0, ContextError(err)
@@ -112,8 +135,7 @@ func MakeSecureRandomBytes(length int) ([]byte, error) {
 
 // MakeSecureRandomPadding selects a random padding length in the indicated
 // range and returns a random byte array of the selected length.
-// In the unlikely case where an underlying MakeRandom functions fails,
-// the padding is length 0.
+// If maxLength <= minLength, the padding is minLength.
 func MakeSecureRandomPadding(minLength, maxLength int) ([]byte, error) {
 	var padding []byte
 	paddingSize, err := MakeSecureRandomInt(maxLength - minLength)
@@ -129,8 +151,7 @@ func MakeSecureRandomPadding(minLength, maxLength int) ([]byte, error) {
 }
 
 // MakeRandomPeriod returns a random duration, within a given range.
-// In the unlikely case where an underlying MakeRandom functions fails,
-// the period is the minimum.
+// If max <= min, the duration is min.
 func MakeRandomPeriod(min, max time.Duration) (time.Duration, error) {
 	period, err := MakeSecureRandomInt64(max.Nanoseconds() - min.Nanoseconds())
 	if err != nil {

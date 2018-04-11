@@ -110,7 +110,7 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 	}
 
 	untunneledDialConfig := &DialConfig{
-		UpstreamProxyUrl:              config.UpstreamProxyUrl,
+		UpstreamProxyURL:              config.UpstreamProxyURL,
 		CustomHeaders:                 config.CustomHeaders,
 		DeviceBinder:                  nil,
 		IPv6Synthesizer:               nil,
@@ -140,6 +140,7 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 
 	for i := 0; i < FEEDBACK_UPLOAD_MAX_RETRIES; i++ {
 		err = uploadFeedback(
+			config,
 			untunneledDialConfig,
 			secureFeedback,
 			url,
@@ -156,7 +157,8 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 }
 
 // Attempt to upload feedback data to server.
-func uploadFeedback(config *DialConfig, feedbackData []byte, url, userAgent string, headerPieces []string) error {
+func uploadFeedback(
+	config *Config, dialConfig *DialConfig, feedbackData []byte, url, userAgent string, headerPieces []string) error {
 
 	ctx, cancelFunc := context.WithTimeout(
 		context.Background(),
@@ -166,6 +168,7 @@ func uploadFeedback(config *DialConfig, feedbackData []byte, url, userAgent stri
 	client, err := MakeUntunneledHTTPClient(
 		ctx,
 		config,
+		dialConfig,
 		nil,
 		false)
 	if err != nil {

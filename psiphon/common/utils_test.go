@@ -134,3 +134,41 @@ func TestFormatByteCount(t *testing.T) {
 		})
 	}
 }
+
+func TestWeightedCoinFlip(t *testing.T) {
+
+	runs := 100000
+	tolerance := 1000
+
+	testCases := []struct {
+		weight        float64
+		expectedTrues int
+	}{
+		{0.333, runs / 3},
+		{0.5, runs / 2},
+		{1.0, runs},
+		{0.0, 0},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(fmt.Sprintf("%f", testCase.weight), func(t *testing.T) {
+			trues := 0
+			for i := 0; i < runs; i++ {
+				if FlipWeightedCoin(testCase.weight) {
+					trues++
+				}
+			}
+
+			min := testCase.expectedTrues - tolerance
+			if min < 0 {
+				min = 0
+			}
+			max := testCase.expectedTrues + tolerance
+
+			if trues < min || trues > max {
+				t.Errorf("unexpected coin flip outcome: %f %d (+/-%d) %d",
+					testCase.weight, testCase.expectedTrues, tolerance, trues)
+			}
+		})
+	}
+}

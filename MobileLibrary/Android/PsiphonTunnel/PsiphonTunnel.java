@@ -22,6 +22,8 @@ package ca.psiphon;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.net.ConnectivityManager;
+import android.net.wifi.WifiManager;
+import android.net.wifi.WifiInfo;
 import android.net.LinkProperties;
 import android.net.NetworkInfo;
 import android.net.VpnService;
@@ -365,6 +367,35 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
 
     @Override
     public String IPv6Synthesize(String IPv4Addr) { return IPv4Addr; }
+
+    @Override
+    public String GetNetworkID() {
+
+        // The network ID contains potential PII. In tunnel-core, the network ID
+        // is used only locally in the client and not sent to the server.
+
+        Context context = mHostService.getContext();
+        String networkIdentifier = "UNKNOWN";
+        ConnectivityManager connectivityManager = (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkInfo activeNetworkInfo = connectivityManager.getActiveNetworkInfo();
+        WifiManager wifiManager = (WifiManager)context.getSystemService(Context.WIFI_SERVICE);
+        WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+        TelephonyManager telephonyManager = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
+        if (activeNetworkInfo == null) {
+            networkIdentifier = "NONE";
+        } else if (activeNetworkInfo.getType() == ConnectivityManager.TYPE_WIFI) {
+            networkIdentifier = "WIFI";
+            if (wifiInfo != null) {
+                networkIdentifier += "-" + wifiInfo.getBSSID();
+            }
+        } else if (activeNetworkInfo.getType() == ConnectivityManager.TYPE_MOBILE) {
+            networkIdentifier = "MOBILE";
+            if (telephonyManager != null) {
+                networkIdentifier += "-" + telephonyManager.getNetworkOperator();
+            }
+        }
+        return networkIdentifier;
+    }
 
     //----------------------------------------------------------------------------------------------
     // Psiphon Tunnel Core

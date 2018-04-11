@@ -163,9 +163,9 @@ func RunWebServer(
 func convertHTTPRequestToAPIRequest(
 	w http.ResponseWriter,
 	r *http.Request,
-	requestBodyName string) (requestJSONObject, error) {
+	requestBodyName string) (common.APIParameters, error) {
 
-	params := make(requestJSONObject)
+	params := make(common.APIParameters)
 
 	for name, values := range r.URL.Query() {
 		for _, value := range values {
@@ -216,7 +216,7 @@ func convertHTTPRequestToAPIRequest(
 	return params, nil
 }
 
-func (webServer *webServer) lookupGeoIPData(params requestJSONObject) GeoIPData {
+func (webServer *webServer) lookupGeoIPData(params common.APIParameters) GeoIPData {
 
 	clientSessionID, err := getStringRequestParam(params, "client_session_id")
 	if err != nil {

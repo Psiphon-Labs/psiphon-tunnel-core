@@ -25,9 +25,9 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
 // DownloadUpgrade performs a resumable download of client upgrade files.
@@ -73,15 +73,19 @@ func DownloadUpgrade(
 		return nil
 	}
 
-	if *config.DownloadUpgradeTimeoutSeconds > 0 {
-		var cancelFunc context.CancelFunc
-		ctx, cancelFunc = context.WithTimeout(
-			ctx, time.Duration(*config.DownloadUpgradeTimeoutSeconds)*time.Second)
-		defer cancelFunc()
-	}
+	p := config.clientParameters.Get()
+	urls := p.DownloadURLs(parameters.UpgradeDownloadURLs)
+	clientVersionHeader := p.String(parameters.UpgradeDownloadClientVersionHeader)
+	downloadTimeout := p.Duration(parameters.FetchUpgradeTimeout)
+	p = nil
+
+	var cancelFunc context.CancelFunc
+	ctx, cancelFunc = context.WithTimeout(ctx, downloadTimeout)
+	defer cancelFunc()
+
 	// Select tunneled or untunneled configuration
 
-	downloadURL, _, skipVerify := selectDownloadURL(attempt, config.UpgradeDownloadURLs)
+	downloadURL, _, skipVerify := urls.Select(attempt)
 
 	httpClient, err := MakeDownloadHTTPClient(
 		ctx,
@@ -121,7 +125,7 @@ func DownloadUpgrade(
 
 		// Note: if the header is missing, Header.Get returns "" and then
 		// strconv.Atoi returns a parse error.
-		availableClientVersion = response.Header.Get(config.UpgradeDownloadClientVersionHeader)
+		availableClientVersion = response.Header.Get(clientVersionHeader)
 		checkAvailableClientVersion, err := strconv.Atoi(availableClientVersion)
 		if err != nil {
 			// If the header is missing or malformed, we can't determine the available
@@ -132,7 +136,7 @@ func DownloadUpgrade(
 			// download later in the session).
 			NoticeAlert(
 				"failed to download upgrade: invalid %s header value %s: %s",
-				config.UpgradeDownloadClientVersionHeader, availableClientVersion, err)
+				clientVersionHeader, availableClientVersion, err)
 			return nil
 		}
 
