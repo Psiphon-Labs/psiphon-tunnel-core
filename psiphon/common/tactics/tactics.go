@@ -1133,8 +1133,8 @@ func FetchTactics(
 	storer Storer,
 	networkID string,
 	apiParams common.APIParameters,
-	endPointProtocol string,
 	endPointRegion string,
+	endPointProtocol string,
 	encodedRequestPublicKey string,
 	encodedRequestObfuscatedKey string,
 	roundTripper RoundTripper) (*Record, error) {
