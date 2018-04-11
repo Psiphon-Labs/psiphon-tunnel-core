@@ -351,7 +351,8 @@ func TestTactics(t *testing.T) {
 	initialFetchTacticsRecord.Expiry = initialFetchTacticsRecord.Expiry.Round(0)
 
 	if !reflect.DeepEqual(initialFetchTacticsRecord, storedTacticsRecord) {
-		t.Fatalf("tactics records are not identical")
+		t.Fatalf("tactics records are not identical:\n\n%#v\n\n%#v\n\n",
+			initialFetchTacticsRecord, storedTacticsRecord)
 	}
 
 	checkParameters(storedTacticsRecord)
@@ -411,7 +412,8 @@ func TestTactics(t *testing.T) {
 	}
 
 	if !reflect.DeepEqual(initialFetchTacticsRecord.Tactics, fetchTacticsRecord.Tactics) {
-		t.Fatalf("tactics are not identical")
+		t.Fatalf("tactics are not identical:\n\n%#v\n\n%#v\n\n",
+			initialFetchTacticsRecord.Tactics, fetchTacticsRecord.Tactics)
 	}
 
 	checkParameters(fetchTacticsRecord)
@@ -517,7 +519,8 @@ func TestTactics(t *testing.T) {
 	}
 
 	if !reflect.DeepEqual(fetchTacticsRecord.Tactics, handshakeTacticsRecord.Tactics) {
-		t.Fatalf("tactics are not identical")
+		t.Fatalf("tactics are not identical:\n\n%#v\n\n%#v\n\n",
+			fetchTacticsRecord.Tactics, handshakeTacticsRecord.Tactics)
 	}
 
 	checkParameters(handshakeTacticsRecord)
@@ -536,7 +539,8 @@ func TestTactics(t *testing.T) {
 	handshakeTacticsRecord.Expiry = handshakeTacticsRecord.Expiry.Round(0)
 
 	if !reflect.DeepEqual(handshakeTacticsRecord, storedTacticsRecord) {
-		t.Fatalf("tactics records are not identical")
+		t.Fatalf("tactics records are not identical:\n\n%#v\n\n%#v\n\n",
+			handshakeTacticsRecord, storedTacticsRecord)
 	}
 
 	checkParameters(storedTacticsRecord)
