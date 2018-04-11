@@ -1106,7 +1106,7 @@ func UseStoredTactics(
 		return nil, common.ContextError(err)
 	}
 
-	if record.Tag != "" && record.Expiry.After(time.Now()) {
+	if record.Tag != "" && record.Expiry.After(time.Now().UTC()) {
 		return record, nil
 	}
 
@@ -1437,7 +1437,7 @@ func applyTacticsPayload(
 
 	// Set or extend the expiry.
 
-	record.Expiry = time.Now().Add(ttl)
+	record.Expiry = time.Now().UTC().Add(ttl)
 
 	return nil
 }
