@@ -374,27 +374,49 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         // The network ID contains potential PII. In tunnel-core, the network ID
         // is used only locally in the client and not sent to the server.
 
+        String networkID = "";
+
         Context context = mHostService.getContext();
-        String networkIdentifier = "UNKNOWN";
-        ConnectivityManager connectivityManager = (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
-        NetworkInfo activeNetworkInfo = connectivityManager.getActiveNetworkInfo();
-        WifiManager wifiManager = (WifiManager)context.getSystemService(Context.WIFI_SERVICE);
-        WifiInfo wifiInfo = wifiManager.getConnectionInfo();
-        TelephonyManager telephonyManager = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
-        if (activeNetworkInfo == null) {
-            networkIdentifier = "NONE";
-        } else if (activeNetworkInfo.getType() == ConnectivityManager.TYPE_WIFI) {
-            networkIdentifier = "WIFI";
-            if (wifiInfo != null) {
-                networkIdentifier += "-" + wifiInfo.getBSSID();
+        ConnectivityManager connectivityManager = (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);;
+        NetworkInfo activeNetworkInfo = null;
+        try {
+            activeNetworkInfo = connectivityManager.getActiveNetworkInfo();
+
+        } catch (java.lang.Exception e) {
+            // May get exceptions due to missing permissions like android.permission.ACCESS_NETWORK_STATE.
+        }
+
+        if (activeNetworkInfo != null && activeNetworkInfo.getType() == ConnectivityManager.TYPE_WIFI) {
+
+            networkID = "WIFI";
+
+            try {
+                WifiManager wifiManager = (WifiManager)context.getSystemService(Context.WIFI_SERVICE);
+                WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+                if (wifiInfo != null) {
+                    networkID += "-" + wifiInfo.getBSSID();
+                }
+            } catch (java.lang.Exception e) {
+                // May get exceptions due to missing permissions like android.permission.ACCESS_WIFI_STATE.
+                // Fall through and use just "WIFI"
             }
-        } else if (activeNetworkInfo.getType() == ConnectivityManager.TYPE_MOBILE) {
-            networkIdentifier = "MOBILE";
-            if (telephonyManager != null) {
-                networkIdentifier += "-" + telephonyManager.getNetworkOperator();
+
+        } else if (activeNetworkInfo != null && activeNetworkInfo.getType() == ConnectivityManager.TYPE_MOBILE) {
+
+            networkID = "MOBILE";
+
+            try {
+                TelephonyManager telephonyManager = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
+                if (telephonyManager != null) {
+                    networkID += "-" + telephonyManager.getNetworkOperator();
+                }
+            } catch (java.lang.Exception e) {
+                // May get exceptions due to missing permissions.
+                // Fall through and use just "MOBILE"
             }
         }
-        return networkIdentifier;
+
+        return networkID;
     }
 
     //----------------------------------------------------------------------------------------------
