@@ -241,6 +241,13 @@ type Server struct {
 		Tactics Tactics
 	}
 
+	// When no tactics configuration file is provided, there will be no
+	// request key material or default tactics, and the server will not
+	// support tactics. The loaded flag, set to true only when a configuration
+	// file has been successfully loaded, provides an explict check for this
+	// condition (vs., say, checking for a zero-value Server).
+	loaded bool
+
 	logger                common.Logger
 	logFieldFormatter     common.APIParameterLogFieldFormatter
 	apiParameterValidator common.APIParameterValidator
@@ -443,6 +450,8 @@ func NewServer(
 			server.DefaultTactics = newServer.DefaultTactics
 			server.FilteredTactics = newServer.FilteredTactics
 
+			server.loaded = true
+
 			return nil
 		})
 
@@ -574,26 +583,29 @@ func (server *Server) initLookups() {
 	}
 }
 
-// GetTacticsPayload assembles and returns a tactics payload
-// for a client with the specified GeoIP, API parameter, and
-// speed test attributes.
+// GetTacticsPayload assembles and returns a tactics payload for a client with
+// the specified GeoIP, API parameter, and speed test attributes.
 //
-// The speed test samples are expected to be in apiParams,
-// as is the stored tactics tag.
+// The speed test samples are expected to be in apiParams, as is the stored
+// tactics tag.
 //
-// GetTacticsPayload will always return a payload for any
-// client. When the client's stored tactics tag is identical
-// to the assembled tactics, the Payload.Tactics is nil.
+// Unless no tactics configuration was loaded, GetTacticsPayload will always
+// return a payload for any client. When the client's stored tactics tag is
+// identical to the assembled tactics, the Payload.Tactics is nil.
 //
-// Elements of the returned Payload, e.g., tactics parameters,
-// will point to data in DefaultTactics and FilteredTactics
-// and must not be modifed.
+// Elements of the returned Payload, e.g., tactics parameters, will point to
+// data in DefaultTactics and FilteredTactics and must not be modifed.
 func (server *Server) GetTacticsPayload(
 	geoIPData common.GeoIPData,
 	apiParams common.APIParameters) (*Payload, error) {
 
 	server.ReloadableFile.RLock()
 	defer server.ReloadableFile.RUnlock()
+
+	if !server.loaded {
+		// No tactics configuration was loaded.
+		return nil, nil
+	}
 
 	tactics := server.DefaultTactics.clone()
 
@@ -887,6 +899,15 @@ func (server *Server) HandleEndPoint(
 	w http.ResponseWriter,
 	r *http.Request) bool {
 
+	server.ReloadableFile.RLock()
+	loaded := server.loaded
+	server.ReloadableFile.RUnlock()
+
+	if !loaded {
+		// No tactics configuration was loaded.
+		return false
+	}
+
 	switch endPoint {
 	case SPEED_TEST_END_POINT:
 		server.handleSpeedTestRequest(geoIPData, w, r)
@@ -965,6 +986,9 @@ func (server *Server) handleTacticsRequest(
 	}
 
 	tacticsPayload, err := server.GetTacticsPayload(geoIPData, apiParams)
+	if err == nil && tacticsPayload == nil {
+		err = common.ContextError(errors.New("unexpected missing tactics payload"))
+	}
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("failed to get tactics")
