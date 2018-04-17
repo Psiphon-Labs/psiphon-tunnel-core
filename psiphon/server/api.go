@@ -242,28 +242,33 @@ func handshakeAPIRequestHandler(
 		return nil, common.ContextError(err)
 	}
 
-	marshaledTacticsPayload, err := json.Marshal(tacticsPayload)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
+	var marshaledTacticsPayload []byte
 
-	// Log a metric when new tactics are issued. Logging here indicates that
-	// the handshake tactics mechansim is active; but logging for every
-	// handshake creates unneccesary log data.
+	if tacticsPayload != nil {
 
-	if len(tacticsPayload.Tactics) > 0 {
+		marshaledTacticsPayload, err = json.Marshal(tacticsPayload)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
 
-		logFields := getRequestLogFields(
-			tactics.TACTICS_METRIC_EVENT_NAME,
-			geoIPData,
-			authorizedAccessTypes,
-			params,
-			handshakeRequestParams)
+		// Log a metric when new tactics are issued. Logging here indicates that
+		// the handshake tactics mechansim is active; but logging for every
+		// handshake creates unneccesary log data.
 
-		logFields[tactics.NEW_TACTICS_TAG_LOG_FIELD_NAME] = tacticsPayload.Tag
-		logFields[tactics.IS_TACTICS_REQUEST_LOG_FIELD_NAME] = false
+		if len(tacticsPayload.Tactics) > 0 {
 
-		log.LogRawFieldsWithTimestamp(logFields)
+			logFields := getRequestLogFields(
+				tactics.TACTICS_METRIC_EVENT_NAME,
+				geoIPData,
+				authorizedAccessTypes,
+				params,
+				handshakeRequestParams)
+
+			logFields[tactics.NEW_TACTICS_TAG_LOG_FIELD_NAME] = tacticsPayload.Tag
+			logFields[tactics.IS_TACTICS_REQUEST_LOG_FIELD_NAME] = false
+
+			log.LogRawFieldsWithTimestamp(logFields)
+		}
 	}
 
 	// The log comes _after_ SetClientHandshakeState, in case that call rejects

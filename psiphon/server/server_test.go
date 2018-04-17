@@ -384,7 +384,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// Enable tactics when the test protocol is meek. Both the client and the
 	// server will be configured to support tactics. The client config will be
-	// set with a nonfunctional config so thatthe tactics request must
+	// set with a nonfunctional config so that the tactics request must
 	// succeed, overriding the nonfunctional values, for the tunnel to
 	// establish.
 
@@ -435,11 +435,17 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t, trafficRulesFilename, propagationChannelID, accessType,
 		runConfig.requireAuthorization, runConfig.denyTrafficRules)
 
-	tacticsConfigFilename := filepath.Join(testDataDirName, "tactics_config.json")
-	paveTacticsConfigFile(
-		t, tacticsConfigFilename,
-		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
-		propagationChannelID)
+	var tacticsConfigFilename string
+
+	// Only pave the tactics config when tactics are required. This exercises the
+	// case where the tactics config is omitted.
+	if doTactics {
+		tacticsConfigFilename = filepath.Join(testDataDirName, "tactics_config.json")
+		paveTacticsConfigFile(
+			t, tacticsConfigFilename,
+			tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
+			propagationChannelID)
+	}
 
 	var serverConfig map[string]interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
