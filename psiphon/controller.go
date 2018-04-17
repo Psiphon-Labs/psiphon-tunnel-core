@@ -1284,6 +1284,12 @@ func (controller *Controller) getTactics(done chan struct{}) {
 
 		for iteration := 0; ; iteration++ {
 
+			if !WaitForNetworkConnectivity(
+				controller.runCtx,
+				controller.config.NetworkConnectivityChecker) {
+				return
+			}
+
 			serverEntry, err := iterator.Next()
 			if err != nil {
 				NoticeAlert("tactics iterator failed: %s", err)
@@ -1403,22 +1409,15 @@ func (controller *Controller) doFetchTactics(
 		timeout)
 	defer cancelFunc()
 
-	// Limitation: it is assumed that the network ID obtained here is the
-	// one that is active when the tactics request is received by the
-	// server. However, it is remotely possible to switch networks
-	// immediately after invoking the GetNetworkID callback and initiating
-	// the request.
-	//
-	// TODO: ensure that meek in round trip mode will fail the request when
-	// the pre-dial connection is broken.
-
-	networkID := controller.config.NetworkIDGetter.GetNetworkID()
-
 	// DialMeek completes the TCP/TLS handshakes for HTTPS
 	// meek protocols but _not_ for HTTP meek protocols.
 	//
 	// TODO: pre-dial HTTP protocols to conform with speed
 	// test RTT spec.
+	//
+	// TODO: ensure that meek in round trip mode will fail
+	// the request when the pre-dial connection is broken,
+	// to minimize the possibility of network ID mismatches.
 
 	meekConn, err := DialMeek(ctx, meekConfig, dialConfig)
 	if err != nil {
@@ -1437,7 +1436,7 @@ func (controller *Controller) doFetchTactics(
 		ctx,
 		controller.config.clientParameters,
 		GetTacticsStorer(),
-		networkID,
+		controller.config.NetworkIDGetter.GetNetworkID,
 		apiParams,
 		serverEntry.Region,
 		tacticsProtocol,

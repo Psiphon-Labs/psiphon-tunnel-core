@@ -219,6 +219,8 @@ func TestTactics(t *testing.T) {
 
 	networkID := "NETWORK1"
 
+	getNetworkID := func() string { return networkID }
+
 	apiParams := common.APIParameters{
 		"client_platform": "P1",
 		"client_version":  "V1"}
@@ -316,7 +318,7 @@ func TestTactics(t *testing.T) {
 		ctx,
 		clientParams,
 		storer,
-		networkID,
+		getNetworkID,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,
@@ -388,7 +390,7 @@ func TestTactics(t *testing.T) {
 		context.Background(),
 		clientParams,
 		storer,
-		networkID,
+		getNetworkID,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,
@@ -453,7 +455,7 @@ func TestTactics(t *testing.T) {
 		context.Background(),
 		clientParams,
 		storer,
-		networkID,
+		getNetworkID,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,
@@ -609,7 +611,7 @@ func TestTactics(t *testing.T) {
 		context.Background(),
 		clientParams,
 		storer,
-		networkID,
+		getNetworkID,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,
@@ -624,7 +626,7 @@ func TestTactics(t *testing.T) {
 		context.Background(),
 		clientParams,
 		storer,
-		networkID,
+		getNetworkID,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,

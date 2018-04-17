@@ -1095,7 +1095,7 @@
     // The network ID contains potential PII. In tunnel-core, the network ID
     // is used only locally in the client and not sent to the server.
 
-    NSMutableString *networkID = [NSMutableString stringWithString:@""];
+    NSMutableString *networkID = [NSMutableString stringWithString:@"UNKNOWN"];
     NetworkStatus status = [[Reachability reachabilityForInternetConnection] currentReachabilityStatus];
     if (status == ReachableViaWiFi) {
         [networkID setString:@"WIFI"];

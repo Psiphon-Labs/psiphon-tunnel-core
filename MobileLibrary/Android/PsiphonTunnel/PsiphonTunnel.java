@@ -374,16 +374,19 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         // The network ID contains potential PII. In tunnel-core, the network ID
         // is used only locally in the client and not sent to the server.
 
-        String networkID = "";
+        String networkID = "UNKNOWN";
 
         Context context = mHostService.getContext();
-        ConnectivityManager connectivityManager = (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);;
+        ConnectivityManager connectivityManager = (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
         NetworkInfo activeNetworkInfo = null;
         try {
             activeNetworkInfo = connectivityManager.getActiveNetworkInfo();
 
         } catch (java.lang.Exception e) {
             // May get exceptions due to missing permissions like android.permission.ACCESS_NETWORK_STATE.
+
+            // Apps using the Psiphon Library and lacking android.permission.ACCESS_NETWORK_STATE will
+            // proceed and use tactics, but with "UNKNOWN" as the sole network ID.
         }
 
         if (activeNetworkInfo != null && activeNetworkInfo.getType() == ConnectivityManager.TYPE_WIFI) {
