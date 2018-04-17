@@ -2118,7 +2118,6 @@ func (sshClient *sshClient) setTCPPortForwardDialingAvailableSignal(signal conte
 const (
 	portForwardTypeTCP = iota
 	portForwardTypeUDP
-	portForwardTypeTransparentDNS
 )
 
 func (sshClient *sshClient) isPortForwardPermitted(
@@ -2169,6 +2168,12 @@ func (sshClient *sshClient) isPortForwardPermitted(
 			return true
 		}
 	}
+
+	log.WithContextFields(
+		LogFields{
+			"type": portForwardType,
+			"port": port,
+		}).Debug("port forward denied by traffic rules")
 
 	return false
 }
