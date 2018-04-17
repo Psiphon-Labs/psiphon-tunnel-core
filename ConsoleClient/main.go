@@ -35,6 +35,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
@@ -162,9 +163,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	psiphon.NoticeBuildInfo()
-
 	// Handle required config file parameter
+
+	// EmitDiagnosticNotices is set by LoadConfig; force to true
+	// an emit diagnostics when LoadConfig-related errors occur.
 
 	if configFilename == "" {
 		psiphon.SetEmitDiagnosticNotices(true)
@@ -183,6 +185,11 @@ func main() {
 		psiphon.NoticeError("error processing configuration file: %s", err)
 		os.Exit(1)
 	}
+
+	// BuildInfo is a diagnostic notice, so emit only after LoadConfig
+	// sets EmitDiagnosticNotices.
+
+	psiphon.NoticeBuildInfo()
 
 	// Handle optional profiling parameter
 
@@ -241,7 +248,8 @@ func main() {
 			}
 		}()
 
-		if psiphon.CountServerEntries(config.EgressRegion, config.TunnelProtocol) == 0 {
+		limitTunnelProtocols := config.GetClientParameters().TunnelProtocols(parameters.LimitTunnelProtocols)
+		if psiphon.CountServerEntries(config.EgressRegion, limitTunnelProtocols) == 0 {
 			embeddedServerListWaitGroup.Wait()
 		} else {
 			defer embeddedServerListWaitGroup.Wait()

@@ -35,22 +35,26 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
-// memory_test is a memory stress test suite that repeatedly
-// reestablishes tunnels and restarts the Controller.
+// memory_test is a memory stress test suite that repeatedly reestablishes
+// tunnels and restarts the Controller.
 //
-// runtime.MemStats is used to monitor system memory usage
-// during the test.
+// runtime.MemStats is used to monitor system memory usage during the test.
 //
-// These tests are in its own package as its runtime.MemStats
-// checks must not be impacted by other test runs; this
-// test is also long-running and _may_ require setting the
-// test flag "-timeout" beyond the default of 10 minutes
-// (check the testDuration configured below).
+// These tests are in its own package as its runtime.MemStats checks must not
+// be impacted by other test runs. For the same reason, this test doesn't run
+// a mock server.
 //
-// For the most accurate memory reporting, run each test
-// individually; e.g.,
+// This test is also long-running and _may_ require setting the test flag
+// "-timeout" beyond the default of 10 minutes (check the testDuration
+// configured below). Update: testDuration is now reduced from 5 to 2 minutes
+// since too many iterations -- reconnections -- will impact the ability of
+// the client to access the network. Manually adjust testDuration to run a
+// tougher stress test.
+//
+// For the most accurate memory reporting, run each test individually; e.g.,
 // go test -run [TestReconnectTunnel|TestRestartController|etc.]
 
 const (
@@ -89,12 +93,25 @@ func runMemoryTest(t *testing.T, testMode int) {
 		t.Skipf("error loading configuration file: %s", err)
 	}
 
-	// These fields must be filled in before calling LoadConfig
+	// Most of these fields _must_ be filled in before calling LoadConfig,
+	// so that they are correctly set into client parameters.
 	var modifyConfig map[string]interface{}
 	json.Unmarshal(configJSON, &modifyConfig)
+	modifyConfig["ClientVersion"] = "999999999"
+	modifyConfig["TunnelPoolSize"] = 1
 	modifyConfig["DataStoreDirectory"] = testDataDirName
 	modifyConfig["RemoteServerListDownloadFilename"] = filepath.Join(testDataDirName, "server_list_compressed")
 	modifyConfig["UpgradeDownloadFilename"] = filepath.Join(testDataDirName, "upgrade")
+	modifyConfig["FetchRemoteServerListRetryPeriodMilliseconds"] = 250
+	modifyConfig["EstablishTunnelPausePeriodSeconds"] = 1
+	modifyConfig["ConnectionWorkerPoolSize"] = 10
+	modifyConfig["DisableLocalSocksProxy"] = true
+	modifyConfig["DisableLocalHTTPProxy"] = true
+	modifyConfig["LimitMeekConnectionWorkers"] = 5
+	modifyConfig["LimitMeekBufferSizes"] = true
+	modifyConfig["StaggerConnectionWorkersMilliseconds"] = 100
+	modifyConfig["IgnoreHandshakeStatsRegexps"] = true
+
 	configJSON, _ = json.Marshal(modifyConfig)
 
 	config, err := psiphon.LoadConfig(configJSON)
@@ -102,25 +119,14 @@ func runMemoryTest(t *testing.T, testMode int) {
 		t.Fatalf("error processing configuration file: %s", err)
 	}
 
-	postActiveTunnelTerminateDelay := 250 * time.Millisecond
-	testDuration := 5 * time.Minute
-	memInspectionFrequency := 10 * time.Second
-	maxSysMemory := uint64(11 * 1024 * 1024)
-
-	config.ClientVersion = "999999999"
-	config.TunnelPoolSize = 1
-	fetchRemoteServerListRetryPeriodSeconds := 0
-	config.FetchRemoteServerListRetryPeriodSeconds = &fetchRemoteServerListRetryPeriodSeconds
-	establishTunnelPausePeriodSeconds := 1
-	config.EstablishTunnelPausePeriodSeconds = &establishTunnelPausePeriodSeconds
-	config.TunnelProtocol = ""
-	config.DisableLocalSocksProxy = true
-	config.DisableLocalHTTPProxy = true
-	config.ConnectionWorkerPoolSize = 10
-	config.LimitMeekConnectionWorkers = 5
-	config.LimitMeekBufferSizes = true
-	config.StaggerConnectionWorkersMilliseconds = 100
-	config.IgnoreHandshakeStatsRegexps = true
+	// Don't wait for a tactics request.
+	applyParameters := map[string]interface{}{
+		parameters.TacticsWaitPeriod: "1ms",
+	}
+	err = config.SetClientParameters("", true, applyParameters)
+	if err != nil {
+		t.Fatalf("SetClientParameters failed: %s", err)
+	}
 
 	err = psiphon.InitDataStore(config)
 	if err != nil {
@@ -135,12 +141,18 @@ func runMemoryTest(t *testing.T, testMode int) {
 	reconnectTunnel := make(chan bool, 1)
 	tunnelsEstablished := int32(0)
 
+	postActiveTunnelTerminateDelay := 250 * time.Millisecond
+	testDuration := 2 * time.Minute
+	memInspectionFrequency := 10 * time.Second
+	maxSysMemory := uint64(11 * 1024 * 1024)
+
 	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 			noticeType, payload, err := psiphon.GetNotice(notice)
 			if err != nil {
 				return
 			}
+
 			switch noticeType {
 			case "Tunnels":
 				count := int(payload["count"].(float64))

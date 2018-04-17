@@ -23,7 +23,7 @@ import (
 	"net/http"
 	"sync/atomic"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
 var registeredUserAgentPicker atomic.Value
@@ -40,30 +40,20 @@ func pickUserAgent() string {
 	return ""
 }
 
-// UserAgentIfUnset returns an http.Header object and a boolean
-// representing whether or not its User-Agent header was modified.
-// Any modifications are made to a copy of the original header map
-func UserAgentIfUnset(h http.Header) (http.Header, bool) {
-	var dialHeaders http.Header
+// UserAgentIfUnset selects and sets a User-Agent header if one is not set.
+func UserAgentIfUnset(
+	clientParameters *parameters.ClientParameters, headers http.Header) bool {
 
-	if _, ok := h["User-Agent"]; !ok {
-		dialHeaders = make(map[string][]string)
+	if _, ok := headers["User-Agent"]; !ok {
 
-		if h != nil {
-			for k, v := range h {
-				dialHeaders[k] = make([]string, len(v))
-				copy(dialHeaders[k], v)
-			}
-		}
-
-		if common.FlipCoin() {
-			dialHeaders.Set("User-Agent", pickUserAgent())
+		if clientParameters.Get().WeightedCoinFlip(parameters.PickUserAgentProbability) {
+			headers.Set("User-Agent", pickUserAgent())
 		} else {
-			dialHeaders.Set("User-Agent", "")
+			headers.Set("User-Agent", "")
 		}
 
-		return dialHeaders, true
+		return true
 	}
 
-	return h, false
+	return false
 }

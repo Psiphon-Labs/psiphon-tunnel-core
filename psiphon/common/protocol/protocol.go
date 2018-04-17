@@ -20,6 +20,9 @@
 package protocol
 
 import (
+	"encoding/json"
+	"fmt"
+
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 )
@@ -60,7 +63,18 @@ const (
 	PSIPHON_API_HANDSHAKE_AUTHORIZATIONS = "authorizations"
 )
 
-var SupportedTunnelProtocols = []string{
+type TunnelProtocols []string
+
+func (t TunnelProtocols) Validate() error {
+	for _, p := range t {
+		if !common.Contains(SupportedTunnelProtocols, p) {
+			return common.ContextError(fmt.Errorf("invalid tunnel protocol: %s", p))
+		}
+	}
+	return nil
+}
+
+var SupportedTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_FRONTED_MEEK,
 	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK,
@@ -70,7 +84,7 @@ var SupportedTunnelProtocols = []string{
 	TUNNEL_PROTOCOL_SSH,
 }
 
-var SupportedServerEntrySources = []string{
+var SupportedServerEntrySources = TunnelProtocols{
 	SERVER_ENTRY_SOURCE_EMBEDDED,
 	SERVER_ENTRY_SOURCE_REMOTE,
 	SERVER_ENTRY_SOURCE_DISCOVERY,
@@ -108,7 +122,7 @@ func TunnelProtocolUsesObfuscatedSessionTickets(protocol string) bool {
 
 func UseClientTunnelProtocol(
 	clientProtocol string,
-	serverProtocols []string) bool {
+	serverProtocols TunnelProtocols) bool {
 
 	// When the server is running _both_ fronted HTTP and
 	// fronted HTTPS, use the client's reported tunnel
@@ -136,6 +150,7 @@ type HandshakeResponse struct {
 	ClientRegion           string              `json:"client_region"`
 	ServerTimestamp        string              `json:"server_timestamp"`
 	ActiveAuthorizationIDs []string            `json:"active_authorization_ids"`
+	TacticsPayload         json.RawMessage     `json:"tactics_payload"`
 }
 
 type ConnectedResponse struct {
@@ -154,8 +169,7 @@ type SSHPasswordPayload struct {
 }
 
 type MeekCookieData struct {
-	ServerAddress        string `json:"p"`
-	SessionID            string `json:"s"`
 	MeekProtocolVersion  int    `json:"v"`
 	ClientTunnelProtocol string `json:"t"`
+	EndPoint             string `json:"e"`
 }

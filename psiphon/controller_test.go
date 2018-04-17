@@ -41,6 +41,7 @@ import (
 	"github.com/Psiphon-Inc/goarista/monotime"
 	socks "github.com/Psiphon-Inc/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/elazarl/goproxy"
 )
@@ -458,6 +459,8 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		t.Fatalf("error processing configuration file: %s", err)
 	}
 
+	// The following config values are not client parameters can be set directly.
+
 	if runConfig.clientIsLatestVersion {
 		config.ClientVersion = "999999999"
 	}
@@ -474,37 +477,50 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	config.TunnelPoolSize = runConfig.tunnelPoolSize
 
-	if runConfig.disableUntunneledUpgrade {
-		// Disable untunneled upgrade downloader to ensure tunneled case is tested
-		config.UpgradeDownloadClientVersionHeader = ""
-	}
-
 	if runConfig.useUpstreamProxy && runConfig.disruptNetwork {
 		t.Fatalf("cannot use multiple upstream proxies")
 	}
 	if runConfig.disruptNetwork {
-		config.UpstreamProxyUrl = disruptorProxyURL
+		config.UpstreamProxyURL = disruptorProxyURL
 	} else if runConfig.useUpstreamProxy {
-		config.UpstreamProxyUrl = upstreamProxyURL
+		config.UpstreamProxyURL = upstreamProxyURL
 		config.CustomHeaders = upstreamProxyCustomHeaders
 	}
 
+	// Enable tactics requests. This will passively exercise the code
+	// paths. server_test runs a more comprehensive test that checks
+	// that the tactics request succeeds.
+	config.NetworkIDGetter = &testNetworkGetter{}
+
+	// The following config values must be applied through client parameters
+	// (setting the fields in Config directly will have no effect since the
+	// client parameters have been populated by LoadConfig).
+
+	applyParameters := make(map[string]interface{})
+
+	if runConfig.disableUntunneledUpgrade {
+		// Disable untunneled upgrade downloader to ensure tunneled case is tested
+		applyParameters[parameters.UpgradeDownloadClientVersionHeader] = ""
+	}
+
 	if runConfig.transformHostNames {
-		config.TransformHostNames = "always"
+		applyParameters[parameters.TransformHostNameProbability] = 1.0
 	} else {
-		config.TransformHostNames = "never"
+		applyParameters[parameters.TransformHostNameProbability] = 0.0
 	}
 
 	// Override client retry throttle values to speed up automated
 	// tests and ensure tests complete within fixed deadlines.
-	fetchRemoteServerListRetryPeriodSeconds := 0
-	config.FetchRemoteServerListRetryPeriodSeconds = &fetchRemoteServerListRetryPeriodSeconds
-	downloadUpgradeRetryPeriodSeconds := 1
-	config.DownloadUpgradeRetryPeriodSeconds = &downloadUpgradeRetryPeriodSeconds
-	establishTunnelPausePeriodSeconds := 1
-	config.EstablishTunnelPausePeriodSeconds = &establishTunnelPausePeriodSeconds
+	applyParameters[parameters.FetchRemoteServerListRetryPeriod] = "250ms"
+	applyParameters[parameters.FetchUpgradeRetryPeriod] = "250ms"
+	applyParameters[parameters.EstablishTunnelPausePeriod] = "250ms"
 
-	config.TunnelProtocol = runConfig.protocol
+	applyParameters[parameters.LimitTunnelProtocols] = protocol.TunnelProtocols{runConfig.protocol}
+
+	err = config.SetClientParameters("", true, applyParameters)
+	if err != nil {
+		t.Fatalf("SetClientParameters failed: %s", err)
+	}
 
 	os.Remove(config.UpgradeDownloadFilename)
 	os.Remove(config.RemoteServerListDownloadFilename)
@@ -514,7 +530,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		t.Fatalf("error initializing datastore: %s", err)
 	}
 
-	serverEntryCount := CountServerEntries("", "")
+	serverEntryCount := CountServerEntries("", nil)
 
 	if runConfig.expectNoServerEntries && serverEntryCount > 0 {
 		// TODO: replace expectNoServerEntries with resetServerEntries
@@ -630,7 +646,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 				impairedProtocolClassification.classification = make(map[string]int)
 				for k, v := range classification {
 					count := int(v.(float64))
-					if count >= IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD {
+					if count >= config.clientParameters.Get().Int(parameters.ImpairedProtocolClassificationThreshold) {
 						atomic.AddInt32(&impairedProtocolCount, 1)
 					}
 					impairedProtocolClassification.classification[k] = count
@@ -649,7 +665,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 				impairedProtocolClassification.RUnlock()
 
 				count, ok := classification[serverProtocol]
-				if ok && count >= IMPAIRED_PROTOCOL_CLASSIFICATION_THRESHOLD {
+				if ok && count >= config.clientParameters.Get().Int(parameters.ImpairedProtocolClassificationThreshold) {
 
 					// TODO: Fix this test case. Use of TunnelPoolSize breaks this
 					// case, as many tunnel establishments are occurring in parallel,
@@ -806,13 +822,6 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 			t.Fatalf("upgrade download timeout exceeded")
 		}
 	}
-}
-
-type TestHostNameTransformer struct {
-}
-
-func (TestHostNameTransformer) TransformHostName(string) (string, bool) {
-	return "example.com", true
 }
 
 func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) error {
@@ -1135,4 +1144,11 @@ func initUpstreamProxy() {
 	}()
 
 	// TODO: wait until listener is active?
+}
+
+type testNetworkGetter struct {
+}
+
+func (testNetworkGetter) GetNetworkID() string {
+	return "NETWORK1"
 }

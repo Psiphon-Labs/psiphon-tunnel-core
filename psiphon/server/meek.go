@@ -81,7 +81,7 @@ const (
 )
 
 // MeekServer implements the meek protocol, which tunnels TCP traffic (in the case of Psiphon,
-// Obfusated SSH traffic) over HTTP. Meek may be fronted (through a CDN) or direct and may be
+// Obfuscated SSH traffic) over HTTP. Meek may be fronted (through a CDN) or direct and may be
 // HTTP or HTTPS.
 //
 // Upstream traffic arrives in HTTP request bodies and downstream traffic is sent in response
@@ -261,9 +261,17 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		}
 	}
 
-	// Lookup or create a new session for given meek cookie/session ID.
+	// A valid meek cookie indicates which class of request this is:
+	//
+	// 1. A new meek session. Create a new session ID and proceed with
+	// relaying tunnel traffic.
+	//
+	// 2. An existing meek session. Resume relaying tunnel traffic.
+	//
+	// 3. A request to an endpoint. This meek connection is not for relaying
+	// tunnel traffic. Instead, the request is handed off to a custom handler.
 
-	sessionID, session, err := server.getSession(request, meekCookie)
+	sessionID, session, endPoint, clientIP, err := server.getSessionOrEndpoint(request, meekCookie)
 	if err != nil {
 		// Debug since session cookie errors commonly occur during
 		// normal operation.
@@ -271,6 +279,23 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		server.terminateConnection(responseWriter, request)
 		return
 	}
+
+	if endPoint != "" {
+
+		// Endpoint mode. Currently, this means it's handled by the tactics
+		// request handler.
+
+		geoIPData := server.support.GeoIPService.Lookup(clientIP)
+		handled := server.support.TacticsServer.HandleEndPoint(
+			endPoint, common.GeoIPData(geoIPData), responseWriter, request)
+		if !handled {
+			log.WithContextFields(LogFields{"endPoint": endPoint}).Info("unhandled endpoint")
+			server.terminateConnection(responseWriter, request)
+		}
+		return
+	}
+
+	// Tunnel relay mode.
 
 	// Ensure that there's only one concurrent request handler per client
 	// session. Depending on the nature of a network disruption, it can
@@ -470,12 +495,13 @@ func checkRangeHeader(request *http.Request) (int, bool) {
 	return position, true
 }
 
-// getSession returns the meek client session corresponding the
-// meek cookie/session ID. If no session is found, the cookie is
-// treated as a meek cookie for a new session and its payload is
-// extracted and used to establish a new session.
-func (server *MeekServer) getSession(
-	request *http.Request, meekCookie *http.Cookie) (string, *meekSession, error) {
+// getSessionOrEndpoint checks if the cookie corresponds to an existing tunnel
+// relay session ID. If no session is found, the cookie must be an obfuscated
+// meek cookie. A new session is created when the meek cookie indicates relay
+// mode; or the endpoint is returned when the meek cookie indicates endpoint
+// mode.
+func (server *MeekServer) getSessionOrEndpoint(
+	request *http.Request, meekCookie *http.Cookie) (string, *meekSession, string, string, error) {
 
 	// Check for an existing session
 
@@ -485,15 +511,7 @@ func (server *MeekServer) getSession(
 	server.sessionsLock.RUnlock()
 	if ok {
 		session.touch()
-		return existingSessionID, session, nil
-	}
-
-	// Don't create new sessions when not establishing. A subsequent SSH handshake
-	// will not succeed, so creating a meek session just wastes resources.
-
-	if server.support.TunnelServer != nil &&
-		!server.support.TunnelServer.GetEstablishTunnels() {
-		return "", nil, common.ContextError(errors.New("not establishing tunnels"))
+		return existingSessionID, session, "", "", nil
 	}
 
 	// TODO: can multiple http client connections using same session cookie
@@ -504,7 +522,7 @@ func (server *MeekServer) getSession(
 
 	payloadJSON, err := getMeekCookiePayload(server.support, meekCookie.Value)
 	if err != nil {
-		return "", nil, common.ContextError(err)
+		return "", nil, "", "", common.ContextError(err)
 	}
 
 	// Note: this meek server ignores legacy values PsiphonClientSessionId
@@ -513,7 +531,7 @@ func (server *MeekServer) getSession(
 
 	err = json.Unmarshal(payloadJSON, &clientSessionData)
 	if err != nil {
-		return "", nil, common.ContextError(err)
+		return "", nil, "", "", common.ContextError(err)
 	}
 
 	// Determine the client remote address, which is used for geolocation
@@ -539,6 +557,22 @@ func (server *MeekServer) getSession(
 				}
 			}
 		}
+	}
+
+	// Handle endpoints before enforcing the GetEstablishTunnels check.
+	// Currently, endpoints are tactics requests, and we allow these to be
+	// handled by servers which would otherwise reject new tunnels.
+
+	if clientSessionData.EndPoint != "" {
+		return "", nil, clientSessionData.EndPoint, clientIP, nil
+	}
+
+	// Don't create new sessions when not establishing. A subsequent SSH handshake
+	// will not succeed, so creating a meek session just wastes resources.
+
+	if server.support.TunnelServer != nil &&
+		!server.support.TunnelServer.GetEstablishTunnels() {
+		return "", nil, "", "", common.ContextError(errors.New("not establishing tunnels"))
 	}
 
 	// Create a new session
@@ -587,7 +621,7 @@ func (server *MeekServer) getSession(
 	if clientSessionData.MeekProtocolVersion >= MEEK_PROTOCOL_VERSION_2 {
 		sessionID, err = makeMeekSessionID()
 		if err != nil {
-			return "", nil, common.ContextError(err)
+			return "", nil, "", "", common.ContextError(err)
 		}
 	}
 
@@ -599,7 +633,7 @@ func (server *MeekServer) getSession(
 	// will close when session.delete calls Close() on the meekConn.
 	server.clientHandler(clientSessionData.ClientTunnelProtocol, session.clientConn)
 
-	return sessionID, session, nil
+	return sessionID, session, "", "", nil
 }
 
 func (server *MeekServer) deleteSession(sessionID string) {
