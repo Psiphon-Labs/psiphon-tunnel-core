@@ -97,29 +97,54 @@ type DialConfig struct {
 }
 
 // NetworkConnectivityChecker defines the interface to the external
-// HasNetworkConnectivity provider
+// HasNetworkConnectivity provider, which call into the host application to
+// check for network connectivity.
 type NetworkConnectivityChecker interface {
 	// TODO: change to bool return value once gobind supports that type
 	HasNetworkConnectivity() int
 }
 
 // DeviceBinder defines the interface to the external BindToDevice provider
+// which calls into the host application to bind sockets to specific devices.
+// This is used for VPN routing exclusion.
 type DeviceBinder interface {
 	BindToDevice(fileDescriptor int) error
 }
 
 // DnsServerGetter defines the interface to the external GetDnsServer provider
+// which calls into the host application to discover the native network DNS
+// server settings.
 type DnsServerGetter interface {
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
 }
 
-// IPv6Synthesizer defines the interface to the external IPv6Synthesize provider
+// IPv6Synthesizer defines the interface to the external IPv6Synthesize
+// provider which calls into the host application to synthesize IPv6 addresses
+// from IPv4 ones. This is used to correctly lookup IPs on DNS64/NAT64
+// networks.
 type IPv6Synthesizer interface {
 	IPv6Synthesize(IPv4Addr string) string
 }
 
-// NetworkIDGetter defines the interface to the external GetNetworkID provider
+// NetworkIDGetter defines the interface to the external GetNetworkID
+// provider, which returns an identifier for the host's current active
+// network.
+//
+// The identifier is a string that should indicate the network type and
+// identity; for example "WIFI-<BSSID>" or "MOBILE-<MCC/MNC>". As this network
+// ID is personally identifying, it is only used locally in the client to
+// determine network context and is not sent to the Psiphon server. The
+// identifer will be logged in diagnostics messages; in this case only the
+// substring before the first "-" is logged, so all PII must appear after the
+// first "-".
+//
+// NetworkIDGetter.GetNetworkID should always return an identifier value, as
+// logic that uses GetNetworkID, including tactics, is intended to proceed
+// regardless of whether an accurate network identifier can be obtained. By
+// convention, the provider should return "UNKNOWN" when an accurate network
+// identifier cannot be obtained. Best-effort is acceptable: e.g., return just
+// "WIFI" when only the type of the network but no details can be determined.
 type NetworkIDGetter interface {
 	GetNetworkID() string
 }
