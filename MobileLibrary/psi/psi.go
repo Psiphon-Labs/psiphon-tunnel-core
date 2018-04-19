@@ -345,6 +345,10 @@ func (d *loggingNetworkIDGetter) GetNetworkID() string {
 	if index != -1 {
 		logNetworkID = logNetworkID[:index]
 	}
+	if len(logNetworkID)+1 < len(networkID) {
+		// Indicate when additional network info was present after the first "-".
+		logNetworkID += "+<network info>"
+	}
 	psiphon.NoticeInfo("GetNetworkID: %s", logNetworkID)
 
 	return networkID
