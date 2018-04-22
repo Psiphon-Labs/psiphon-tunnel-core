@@ -637,6 +637,49 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("FetchTactics succeeded unexpectedly with incorrect obfuscated key")
 	}
 
+	// When no keys are supplied, untunneled tactics requests are not supported, but
+	// handshake tactics (GetTacticsPayload) should still work.
+
+	tacticsConfig = fmt.Sprintf(
+		tacticsConfigTemplate,
+		"",
+		"",
+		"",
+		tacticsProbability,
+		tacticsNetworkLatencyMultiplier,
+		tacticsConnectionWorkerPoolSize,
+		jsonTacticsLimitTunnelProtocols,
+		tacticsConnectionWorkerPoolSize+1)
+
+	err = ioutil.WriteFile(configFileName, []byte(tacticsConfig), 0600)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %s", err)
+	}
+
+	reloaded, err = server.Reload()
+	if err != nil {
+		t.Fatalf("Reload failed: %s", err)
+	}
+
+	if !reloaded {
+		t.Fatalf("Server config failed to reload")
+	}
+
+	_, err = server.GetTacticsPayload(clientGeoIPData, handshakeParams)
+	if err != nil {
+		t.Fatalf("GetTacticsPayload failed: %s", err)
+	}
+
+	handled := server.HandleEndPoint(TACTICS_END_POINT, clientGeoIPData, nil, nil)
+	if handled {
+		t.Fatalf("HandleEndPoint unexpectedly handled request")
+	}
+
+	handled = server.HandleEndPoint(SPEED_TEST_END_POINT, clientGeoIPData, nil, nil)
+	if handled {
+		t.Fatalf("HandleEndPoint unexpectedly handled request")
+	}
+
 	// TODO: test replay attack defence
 
 	// TODO: test Server.Validate with invalid tactics configurations

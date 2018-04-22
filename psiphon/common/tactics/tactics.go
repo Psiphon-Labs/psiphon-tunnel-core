@@ -466,10 +466,18 @@ func NewServer(
 // Validate checks for correct tactics configuration values.
 func (server *Server) Validate() error {
 
-	if len(server.RequestPublicKey) != 32 ||
-		len(server.RequestPrivateKey) != 32 ||
-		len(server.RequestObfuscatedKey) != common.OBFUSCATE_KEY_LENGTH {
-		return common.ContextError(errors.New("invalid request key"))
+	// Key material must either be entirely omitted, or fully populated.
+	if len(server.RequestPublicKey) == 0 {
+		if len(server.RequestPrivateKey) != 0 ||
+			len(server.RequestObfuscatedKey) != 0 {
+			return common.ContextError(errors.New("unexpected request key"))
+		}
+	} else {
+		if len(server.RequestPublicKey) != 32 ||
+			len(server.RequestPrivateKey) != 32 ||
+			len(server.RequestObfuscatedKey) != common.OBFUSCATE_KEY_LENGTH {
+			return common.ContextError(errors.New("invalid request key"))
+		}
 	}
 
 	validateTactics := func(tactics *Tactics, isDefault bool) error {
@@ -901,10 +909,12 @@ func (server *Server) HandleEndPoint(
 
 	server.ReloadableFile.RLock()
 	loaded := server.loaded
+	hasRequestKeys := len(server.RequestPublicKey) > 0
 	server.ReloadableFile.RUnlock()
 
-	if !loaded {
-		// No tactics configuration was loaded.
+	if !loaded || !hasRequestKeys {
+		// No tactics configuration was loaded, or the configuration contained
+		// no key material for tactics requests.
 		return false
 	}
 
