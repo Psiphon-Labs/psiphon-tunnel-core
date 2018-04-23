@@ -247,7 +247,7 @@ func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) e
 		}
 
 		exists := existingConfigurationVersion > -1
-		newer := exists && existingConfigurationVersion > serverEntry.ConfigurationVersion
+		newer := exists && existingConfigurationVersion < serverEntry.ConfigurationVersion
 		update := !exists || replaceIfExists || newer
 
 		if !update {
