@@ -263,30 +263,36 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		networkID == serverContext.tunnel.config.NetworkIDGetter.GetNetworkID() {
 
 		var payload *tactics.Payload
-		err = json.Unmarshal(handshakeResponse.TacticsPayload, &payload)
+		err := json.Unmarshal(handshakeResponse.TacticsPayload, &payload)
 		if err != nil {
 			return common.ContextError(err)
 		}
 
-		tacticsRecord, err := tactics.HandleTacticsPayload(
-			GetTacticsStorer(),
-			networkID,
-			payload)
-		if err != nil {
-			return common.ContextError(err)
-		}
+		// handshakeResponse.TacticsPayload may be "null", and payload
+		// will successfully unmarshal as nil. As a result, the previous
+		// handshakeResponse.TacticsPayload != nil test is insufficient.
+		if payload != nil {
 
-		if tacticsRecord != nil &&
-			common.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
-
-			err := serverContext.tunnel.config.SetClientParameters(
-				tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
+			tacticsRecord, err := tactics.HandleTacticsPayload(
+				GetTacticsStorer(),
+				networkID,
+				payload)
 			if err != nil {
-				NoticeInfo("apply handshake tactics failed: %s", err)
+				return common.ContextError(err)
 			}
-			// The error will be due to invalid tactics values from
-			// the server. When ApplyClientParameters fails, all
-			// previous tactics values are left in place.
+
+			if tacticsRecord != nil &&
+				common.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
+
+				err := serverContext.tunnel.config.SetClientParameters(
+					tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
+				if err != nil {
+					NoticeInfo("apply handshake tactics failed: %s", err)
+				}
+				// The error will be due to invalid tactics values from
+				// the server. When ApplyClientParameters fails, all
+				// previous tactics values are left in place.
+			}
 		}
 	}
 

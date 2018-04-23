@@ -1107,6 +1107,10 @@ func HandleTacticsPayload(
 	//   reload on the server
 	// - old and new tactics should both be valid
 
+	if payload == nil {
+		return nil, common.ContextError(errors.New("unexpected nil payload"))
+	}
+
 	record, err := getStoredTacticsRecord(storer, networkID)
 	if err != nil {
 		return nil, common.ContextError(err)
