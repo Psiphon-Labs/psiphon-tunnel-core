@@ -130,10 +130,15 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	if doTactics {
 
 		// Limitation: it is assumed that the network ID obtained here is the
-		// one that is active when the tactics request is received by the
+		// one that is active when the handshake request is received by the
 		// server. However, it is remotely possible to switch networks
 		// immediately after invoking the GetNetworkID callback and initiating
 		// the handshake, if the tunnel protocol is meek.
+		//
+		// The response handling code below calls GetNetworkID again and ignores
+		// any tactics payload if the network ID is not the same. While this
+		// doesn't detect all cases of changing networks, it reduces the already
+		// narrow window.
 
 		networkID = serverContext.tunnel.config.NetworkIDGetter.GetNetworkID()
 
@@ -254,7 +259,8 @@ func (serverContext *ServerContext) doHandshakeRequest(
 
 	NoticeActiveAuthorizationIDs(handshakeResponse.ActiveAuthorizationIDs)
 
-	if doTactics && handshakeResponse.TacticsPayload != nil {
+	if doTactics && handshakeResponse.TacticsPayload != nil &&
+		networkID == serverContext.tunnel.config.NetworkIDGetter.GetNetworkID() {
 
 		var payload *tactics.Payload
 		err = json.Unmarshal(handshakeResponse.TacticsPayload, &payload)

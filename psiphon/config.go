@@ -186,35 +186,38 @@ type Config struct {
 	UpstreamProxyCustomHeaders http.Header
 
 	// NetworkConnectivityChecker is an interface that enables tunnel-core to
-	// call into the host application to check for network connectivity. This
-	// parameter is only applicable to library deployments.
+	// call into the host application to check for network connectivity. See:
+	// NetworkConnectivityChecker doc.
+	//
+	// This parameter is only applicable to library deployments.
 	NetworkConnectivityChecker NetworkConnectivityChecker
 
 	// DeviceBinder is an interface that enables tunnel-core to call into the
-	// host application to bind sockets to specific devices. This is used for
-	// VPN routing exclusion. This parameter is only applicable to library
-	// deployments.
+	// host application to bind sockets to specific devices. See: DeviceBinder
+	// doc.
+	//
+	// This parameter is only applicable to library deployments.
 	DeviceBinder DeviceBinder
 
 	// IPv6Synthesizer is an interface that allows tunnel-core to call into
-	// the host application to synthesize IPv6 addresses from IPv4 ones. This
-	// is used to correctly lookup IPs on DNS64/NAT64 networks. This parameter
-	// is only applicable to library deployments.
+	// the host application to synthesize IPv6 addresses. See: IPv6Synthesizer
+	// doc.
+	//
+	// This parameter is only applicable to library deployments.
 	IPv6Synthesizer IPv6Synthesizer
 
 	// DnsServerGetter is an interface that enables tunnel-core to call into
 	// the host application to discover the native network DNS server
-	// settings. This parameter is only applicable to library deployments.
+	// settings. See: DnsServerGetter doc.
+	//
+	// This parameter is only applicable to library deployments.
 	DnsServerGetter DnsServerGetter
 
 	// NetworkIDGetter in an interface that enables tunnel-core to call into
 	// the host application to get an identifier for the host's current active
-	// network. The identifier is a free-form string that should indicate the
-	// network type and identify; for example "WIFI-<BSSID>" or
-	// "MOBILE-<MCC/MNC>". As this network ID is personally identifying, it is
-	// only used locally in the client to determine network context and is not
-	// sent to the Psiphon server. This parameter is only applicable to
-	// library deployments.
+	// network. See: NetworkIDGetter doc.
+	//
+	// This parameter is only applicable to library deployments.
 	NetworkIDGetter NetworkIDGetter
 
 	// TransformHostNames specifies whether to use hostname transformation

@@ -1094,8 +1094,11 @@
 
     // The network ID contains potential PII. In tunnel-core, the network ID
     // is used only locally in the client and not sent to the server.
+    //
+    // See network ID requirements here:
+    // https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter
 
-    NSMutableString *networkID = [NSMutableString stringWithString:@""];
+    NSMutableString *networkID = [NSMutableString stringWithString:@"UNKNOWN"];
     NetworkStatus status = [[Reachability reachabilityForInternetConnection] currentReachabilityStatus];
     if (status == ReachableViaWiFi) {
         [networkID setString:@"WIFI"];

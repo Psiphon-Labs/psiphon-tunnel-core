@@ -57,6 +57,8 @@ type Host struct {
 	MeekCookieEncryptionPublicKey string `json:"meek_cookie_encryption_public_key"`
 	MeekServerObfuscatedKey       string `json:"meek_server_obfuscated_key"`
 	MeekServerPort                int    `json:"meek_server_port"`
+	TacticsRequestPublicKey       string `json:"tactics_request_public_key"`
+	TacticsRequestObfuscatedKey   string `json:"tactics_request_obfuscated_key"`
 	Region                        string `json:"region"`
 }
 
@@ -453,6 +455,8 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 		MeekServerPort                int      `json:"meekServerPort"`
 		MeekCookieEncryptionPublicKey string   `json:"meekCookieEncryptionPublicKey"`
 		MeekObfuscatedKey             string   `json:"meekObfuscatedKey"`
+		TacticsRequestPublicKey       string   `json:"tacticsRequestPublicKey"`
+		TacticsRequestObfuscatedKey   string   `json:"tacticsRequestObfuscatedKey"`
 	}
 
 	// NOTE: also putting original values in extended config for easier parsing by new clients
@@ -493,6 +497,8 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	extendedConfig.MeekCookieEncryptionPublicKey = host.MeekCookieEncryptionPublicKey
 	extendedConfig.MeekServerPort = host.MeekServerPort
 	extendedConfig.MeekObfuscatedKey = host.MeekServerObfuscatedKey
+	extendedConfig.TacticsRequestPublicKey = host.TacticsRequestPublicKey
+	extendedConfig.TacticsRequestObfuscatedKey = host.TacticsRequestObfuscatedKey
 
 	serverCapabilities := make(map[string]bool, 0)
 	for capability, enabled := range server.Capabilities {
