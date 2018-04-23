@@ -1693,6 +1693,13 @@ func (sshClient *sshClient) logTunnel(additionalMetrics LogFields) {
 	logFields["peak_concurrent_port_forward_count_udp"] = sshClient.udpTrafficState.peakConcurrentPortForwardCount
 	logFields["total_port_forward_count_udp"] = sshClient.udpTrafficState.totalPortForwardCount
 
+	// Pre-calculate a total-tunneled-bytes field. This total is used
+	// extensively in analytics and is more performant when pre-calculated.
+	logFields["bytes"] = sshClient.tcpTrafficState.bytesUp +
+		sshClient.tcpTrafficState.bytesDown +
+		sshClient.udpTrafficState.bytesUp +
+		sshClient.udpTrafficState.bytesDown
+
 	// Merge in additional metrics from the optional metrics source
 	if additionalMetrics != nil {
 		for name, value := range additionalMetrics {
