@@ -61,6 +61,7 @@ type ServerEntry struct {
 	MeekFrontingDisableSNI        bool     `json:"meekFrontingDisableSNI"`
 	TacticsRequestPublicKey       string   `json:"tacticsRequestPublicKey"`
 	TacticsRequestObfuscatedKey   string   `json:"tacticsRequestObfuscatedKey"`
+	ConfigurationVersion          int      `json:"configurationVersion"`
 
 	// These local fields are not expected to be present in downloaded server
 	// entries. They are added by the client to record and report stats about
@@ -228,8 +229,8 @@ func DecodeServerEntry(
 func ValidateServerEntry(serverEntry *ServerEntry) error {
 	ipAddr := net.ParseIP(serverEntry.IpAddress)
 	if ipAddr == nil {
-		errMsg := fmt.Sprintf("server entry has invalid ipAddress: '%s'", serverEntry.IpAddress)
-		return common.ContextError(errors.New(errMsg))
+		return common.ContextError(
+			fmt.Errorf("server entry has invalid ipAddress: '%s'", serverEntry.IpAddress))
 	}
 	return nil
 }

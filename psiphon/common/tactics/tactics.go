@@ -466,10 +466,18 @@ func NewServer(
 // Validate checks for correct tactics configuration values.
 func (server *Server) Validate() error {
 
-	if len(server.RequestPublicKey) != 32 ||
-		len(server.RequestPrivateKey) != 32 ||
-		len(server.RequestObfuscatedKey) != common.OBFUSCATE_KEY_LENGTH {
-		return common.ContextError(errors.New("invalid request key"))
+	// Key material must either be entirely omitted, or fully populated.
+	if len(server.RequestPublicKey) == 0 {
+		if len(server.RequestPrivateKey) != 0 ||
+			len(server.RequestObfuscatedKey) != 0 {
+			return common.ContextError(errors.New("unexpected request key"))
+		}
+	} else {
+		if len(server.RequestPublicKey) != 32 ||
+			len(server.RequestPrivateKey) != 32 ||
+			len(server.RequestObfuscatedKey) != common.OBFUSCATE_KEY_LENGTH {
+			return common.ContextError(errors.New("invalid request key"))
+		}
 	}
 
 	validateTactics := func(tactics *Tactics, isDefault bool) error {
@@ -901,10 +909,12 @@ func (server *Server) HandleEndPoint(
 
 	server.ReloadableFile.RLock()
 	loaded := server.loaded
+	hasRequestKeys := len(server.RequestPublicKey) > 0
 	server.ReloadableFile.RUnlock()
 
-	if !loaded {
-		// No tactics configuration was loaded.
+	if !loaded || !hasRequestKeys {
+		// No tactics configuration was loaded, or the configuration contained
+		// no key material for tactics requests.
 		return false
 	}
 
@@ -1097,6 +1107,10 @@ func HandleTacticsPayload(
 	//   reload on the server
 	// - old and new tactics should both be valid
 
+	if payload == nil {
+		return nil, common.ContextError(errors.New("unexpected nil payload"))
+	}
+
 	record, err := getStoredTacticsRecord(storer, networkID)
 	if err != nil {
 		return nil, common.ContextError(err)
@@ -1150,18 +1164,27 @@ func UseStoredTactics(
 // when there is an unexpired stored tactics record available. The
 // caller is expected to set any overall timeout in the context input.
 //
+// Limitation: it is assumed that the network ID obtained from getNetworkID
+// is the one that is active when the tactics request is received by the
+// server. However, it is remotely possible to switch networks
+// immediately after invoking the GetNetworkID callback and initiating
+// the request. This is partially mitigated by rechecking the network ID
+// after the request and failing if it differs from the initial network ID.
+//
 // FetchTactics modifies the apiParams input.
 func FetchTactics(
 	ctx context.Context,
 	clientParameters *parameters.ClientParameters,
 	storer Storer,
-	networkID string,
+	getNetworkID func() string,
 	apiParams common.APIParameters,
 	endPointRegion string,
 	endPointProtocol string,
 	encodedRequestPublicKey string,
 	encodedRequestObfuscatedKey string,
 	roundTripper RoundTripper) (*Record, error) {
+
+	networkID := getNetworkID()
 
 	record, err := getStoredTacticsRecord(storer, networkID)
 	if err != nil {
@@ -1194,6 +1217,10 @@ func FetchTactics(
 
 		if err != nil {
 			return nil, common.ContextError(err)
+		}
+
+		if networkID != getNetworkID() {
+			return nil, common.ContextError(errors.New("network ID changed"))
 		}
 
 		err = AddSpeedTestSample(
@@ -1249,6 +1276,10 @@ func FetchTactics(
 	boxedResponse, err := roundTripper(ctx, TACTICS_END_POINT, boxedRequest)
 	if err != nil {
 		return nil, common.ContextError(err)
+	}
+
+	if networkID != getNetworkID() {
+		return nil, common.ContextError(errors.New("network ID changed"))
 	}
 
 	// Process and store the response payload.

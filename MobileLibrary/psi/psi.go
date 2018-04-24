@@ -28,6 +28,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
@@ -324,4 +325,31 @@ func (d *loggingDeviceBinder) BindToDevice(fileDescriptor int) error {
 		psiphon.NoticeInfo("BindToDevice: %s", deviceInfo)
 	}
 	return err
+}
+
+type loggingNetworkIDGetter struct {
+	p PsiphonProvider
+}
+
+func newLoggingNetworkIDGetter(p PsiphonProvider) *loggingNetworkIDGetter {
+	return &loggingNetworkIDGetter{p: p}
+}
+
+func (d *loggingNetworkIDGetter) GetNetworkID() string {
+	networkID := d.p.GetNetworkID()
+
+	// All PII must appear after the initial "-"
+	// See: https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter
+	logNetworkID := networkID
+	index := strings.Index(logNetworkID, "-")
+	if index != -1 {
+		logNetworkID = logNetworkID[:index]
+	}
+	if len(logNetworkID)+1 < len(networkID) {
+		// Indicate when additional network info was present after the first "-".
+		logNetworkID += "+<network info>"
+	}
+	psiphon.NoticeInfo("GetNetworkID: %s", logNetworkID)
+
+	return networkID
 }

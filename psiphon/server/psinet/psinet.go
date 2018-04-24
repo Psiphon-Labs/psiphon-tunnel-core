@@ -57,6 +57,8 @@ type Host struct {
 	MeekCookieEncryptionPublicKey string `json:"meek_cookie_encryption_public_key"`
 	MeekServerObfuscatedKey       string `json:"meek_server_obfuscated_key"`
 	MeekServerPort                int    `json:"meek_server_port"`
+	TacticsRequestPublicKey       string `json:"tactics_request_public_key"`
+	TacticsRequestObfuscatedKey   string `json:"tactics_request_obfuscated_key"`
 	Region                        string `json:"region"`
 }
 
@@ -81,6 +83,7 @@ type Server struct {
 	WebServerCertificate        string          `json:"web_server_certificate"`
 	WebServerPort               string          `json:"web_server_port"`
 	WebServerSecret             string          `json:"web_server_secret"`
+	ConfigurationVersion        int             `json:"configuration_version"`
 }
 
 type Sponsor struct {
@@ -453,6 +456,9 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 		MeekServerPort                int      `json:"meekServerPort"`
 		MeekCookieEncryptionPublicKey string   `json:"meekCookieEncryptionPublicKey"`
 		MeekObfuscatedKey             string   `json:"meekObfuscatedKey"`
+		TacticsRequestPublicKey       string   `json:"tacticsRequestPublicKey"`
+		TacticsRequestObfuscatedKey   string   `json:"tacticsRequestObfuscatedKey"`
+		ConfigurationVersion          int      `json:"configurationVersion"`
 	}
 
 	// NOTE: also putting original values in extended config for easier parsing by new clients
@@ -493,6 +499,8 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 	extendedConfig.MeekCookieEncryptionPublicKey = host.MeekCookieEncryptionPublicKey
 	extendedConfig.MeekServerPort = host.MeekServerPort
 	extendedConfig.MeekObfuscatedKey = host.MeekServerObfuscatedKey
+	extendedConfig.TacticsRequestPublicKey = host.TacticsRequestPublicKey
+	extendedConfig.TacticsRequestObfuscatedKey = host.TacticsRequestObfuscatedKey
 
 	serverCapabilities := make(map[string]bool, 0)
 	for capability, enabled := range server.Capabilities {
@@ -509,6 +517,8 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 			extendedConfig.Capabilities = append(extendedConfig.Capabilities, capability)
 		}
 	}
+
+	extendedConfig.ConfigurationVersion = server.ConfigurationVersion
 
 	jsonDump, err := json.Marshal(extendedConfig)
 	if err != nil {
