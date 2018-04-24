@@ -717,6 +717,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		MeekFrontingDisableSNI:        false,
 		TacticsRequestPublicKey:       params.TacticsRequestPublicKey,
 		TacticsRequestObfuscatedKey:   params.TacticsRequestObfuscatedKey,
+		ConfigurationVersion:          1,
 	}
 
 	encodedServerEntry, err := protocol.EncodeServerEntry(serverEntry)

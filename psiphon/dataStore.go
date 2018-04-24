@@ -204,8 +204,11 @@ func checkInitDataStore() {
 // rank for iteration order (the previous top ranked entry is promoted). The
 // purpose of inserting at next-to-top is to keep the last selected server
 // as the top ranked server.
-// When replaceIfExists is true, an existing server entry record is
-// overwritten; otherwise, the existing record is unchanged.
+//
+// When a server entry already exists for a given server, it will be
+// replaced only if replaceIfExists is set or if the the ConfigurationVersion
+// field of the new entry is strictly higher than the existing entry.
+//
 // If the server entry data is malformed, an alert notice is issued and
 // the entry is skipped; no error is returned.
 func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) error {
@@ -215,7 +218,8 @@ func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) e
 	// so instead of skipping we fail with an error.
 	err := protocol.ValidateServerEntry(serverEntry)
 	if err != nil {
-		return common.ContextError(errors.New("invalid server entry"))
+		return common.ContextError(
+			fmt.Errorf("invalid server entry: %s", err))
 	}
 
 	// BoltDB implementation note:
@@ -232,16 +236,21 @@ func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) e
 
 		// Check not only that the entry exists, but is valid. This
 		// will replace in the rare case where the data is corrupt.
-		existingServerEntryValid := false
+		existingConfigurationVersion := -1
 		existingData := serverEntries.Get([]byte(serverEntry.IpAddress))
 		if existingData != nil {
-			existingServerEntry := new(protocol.ServerEntry)
-			if json.Unmarshal(existingData, existingServerEntry) == nil {
-				existingServerEntryValid = true
+			var existingServerEntry *protocol.ServerEntry
+			err := json.Unmarshal(existingData, &existingServerEntry)
+			if err == nil {
+				existingConfigurationVersion = existingServerEntry.ConfigurationVersion
 			}
 		}
 
-		if existingServerEntryValid && !replaceIfExists {
+		exists := existingConfigurationVersion > -1
+		newer := exists && existingConfigurationVersion < serverEntry.ConfigurationVersion
+		update := !exists || replaceIfExists || newer
+
+		if !update {
 			// Disabling this notice, for now, as it generates too much noise
 			// in diagnostics with clients that always submit embedded servers
 			// to the core on each run.
