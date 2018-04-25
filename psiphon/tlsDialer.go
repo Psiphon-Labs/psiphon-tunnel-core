@@ -81,12 +81,8 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
-)
-
-const (
-	TLSProfileAndroid = "Android"
-	TLSProfileChrome  = "Chrome"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 // CustomTLSConfig contains parameters to determine the behavior
@@ -137,9 +133,8 @@ type CustomTLSConfig struct {
 	// is selected at random. Setting TLSProfile allows the caller to pin
 	// the selection so all TLS connections in a certain context (e.g. a
 	// single meek connection) use a consistent value.
-	// Valid values include "Android" and "Chrome". The value should be
-	// selected by calling SelectTLSProfile, which will pick a value at
-	// random, but subject to compatibility constraints.
+	// The value should be selected by calling SelectTLSProfile, which
+	// will pick a value at random, subject to compatibility constraints.
 	TLSProfile string
 
 	// TrustedCACertificatesFilename specifies a file containing trusted
@@ -153,31 +148,53 @@ type CustomTLSConfig struct {
 	ObfuscatedSessionTicketKey string
 }
 
-func SelectTLSProfile(
-	clientParameters *parameters.ClientParameters,
-	useIndistinguishableTLS, useObfuscatedSessionTickets,
-	skipVerify, haveTrustedCACertificates bool) string {
+const (
+	tlsProfileAndroid    = "Android-6.0"
+	tlsProfileChrome     = "Chrome-62"
+	tlsProfileFirefox    = "Firefox-56"
+	tlsProfileRandomized = "Randomized"
+)
 
-	selectedTLSProfile := ""
+func SelectTLSProfile(
+	useIndistinguishableTLS bool,
+	tunnelProtocol string,
+	clientParameters *parameters.ClientParameters) string {
 
 	if useIndistinguishableTLS {
 
-		// OpenSSL cannot be used in all cases
-		canUseOpenSSL := openSSLSupported() &&
-			!useObfuscatedSessionTickets &&
-			// TODO: (... || config.VerifyLegacyCertificate != nil)
-			(skipVerify || haveTrustedCACertificates)
-
-		if canUseOpenSSL &&
-			clientParameters.Get().WeightedCoinFlip(parameters.SelectAndroidTLSProbability) {
-
-			selectedTLSProfile = TLSProfileAndroid
-		} else {
-			selectedTLSProfile = TLSProfileChrome
+		tlsProfiles := []string{
+			tlsProfileAndroid,
+			tlsProfileChrome,
+			tlsProfileFirefox,
 		}
+
+		if tunnelProtocol != protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET {
+			// The following TLS profiles don't support session tickets
+			tlsProfiles = append(tlsProfiles, tlsProfileRandomized)
+		}
+
+		// TODO: weighted selection parameter
+		choice, _ := common.MakeSecureRandomInt(len(tlsProfiles))
+
+		return tlsProfiles[choice]
 	}
 
-	return selectedTLSProfile
+	return ""
+}
+
+func getClientHelloID(tlsProfile string) utls.ClientHelloID {
+	switch tlsProfile {
+	case tlsProfileAndroid:
+		return utls.HelloAndroid_6_0_Browser
+	case tlsProfileChrome:
+		return utls.HelloChrome_62
+	case tlsProfileFirefox:
+		return utls.HelloFirefox_56
+	case tlsProfileRandomized:
+		return utls.HelloRandomized
+	default:
+		return utls.HelloGolang
+	}
 }
 
 func NewCustomTLSDialer(config *CustomTLSConfig) Dialer {
@@ -186,14 +203,12 @@ func NewCustomTLSDialer(config *CustomTLSConfig) Dialer {
 	}
 }
 
-// handshakeConn is a net.Conn that can perform a TLS handshake
-type handshakeConn interface {
-	net.Conn
-	Handshake() error
-}
-
-// CustomTLSDialWithDialer is a customized replacement for tls.Dial.
+// CustomTLSDial is a customized replacement for tls.Dial.
 // Based on tlsdialer.DialWithDialer which is based on crypto/tls.DialWithDialer.
+//
+// To ensure optimal TLS profile selection when using CustomTLSDial for tunnel
+// protocols, call SelectTLSProfile first and set its result into
+// config.TLSProfile.
 //
 // tlsdialer comment:
 //   Note - if sendServerName is false, the VerifiedChains field on the
@@ -219,42 +234,15 @@ func CustomTLSDial(
 		return nil, common.ContextError(err)
 	}
 
-	tlsConfig := &tls.Config{}
+	selectedTLSProfile := config.TLSProfile
 
-	// Select indistinguishable TLS implementation
-	useOpenSSL := false
-	if config.UseIndistinguishableTLS {
+	if selectedTLSProfile == "" {
+		selectedTLSProfile = SelectTLSProfile(
+			config.UseIndistinguishableTLS, "", config.ClientParameters)
+	}
 
-		selectedTLSProfile := config.TLSProfile
-
-		if selectedTLSProfile == "" {
-			selectedTLSProfile = SelectTLSProfile(
-				config.ClientParameters,
-				true,
-				config.ObfuscatedSessionTicketKey != "",
-				config.SkipVerify,
-				config.TrustedCACertificatesFilename != "")
-		}
-
-		switch selectedTLSProfile {
-		case TLSProfileAndroid:
-
-			// Validate selection; if config.TLSProfile was preset, it should
-			// have been selected using SelectTLSProfile.
-			if !openSSLSupported() ||
-				config.ObfuscatedSessionTicketKey != "" ||
-				// TODO: (... || config.VerifyLegacyCertificate != nil)
-				!(config.SkipVerify || config.TrustedCACertificatesFilename != "") {
-				return nil, common.ContextError(errors.New("TLSProfileAndroid not supported"))
-			}
-
-			useOpenSSL = true
-
-		case TLSProfileChrome:
-
-			tlsConfig.EmulateChrome = true
-			tlsConfig.ClientSessionCache = tls.NewLRUClientSessionCache(0)
-		}
+	tlsConfig := &utls.Config{
+		ClientSessionCache: utls.NewLRUClientSessionCache(0),
 	}
 
 	if config.SkipVerify {
@@ -275,10 +263,11 @@ func CustomTLSDial(
 		tlsConfig.InsecureSkipVerify = true
 	}
 
+	tlsConn := utls.UClient(rawConn, tlsConfig, getClientHelloID(selectedTLSProfile))
+
 	if config.ObfuscatedSessionTicketKey != "" {
 
-		// See obfuscated session ticket overview
-		// in tls.NewObfuscatedClientSessionCache
+		// See obfuscated session ticket overview in NewObfuscatedClientSessionCache
 
 		var obfuscatedSessionTicketKey [32]byte
 		key, err := hex.DecodeString(config.ObfuscatedSessionTicketKey)
@@ -290,27 +279,19 @@ func CustomTLSDial(
 		}
 		copy(obfuscatedSessionTicketKey[:], key)
 
-		tlsConfig.ClientSessionCache = tls.NewObfuscatedClientSessionCache(
+		sessionState, err := utls.NewObfuscatedClientSessionState(
 			obfuscatedSessionTicketKey)
-	}
-
-	var conn handshakeConn
-
-	// When supported, use OpenSSL TLS as a more indistinguishable TLS.
-	if useOpenSSL {
-		conn, err = newOpenSSLConn(rawConn, hostname, config)
 		if err != nil {
-			rawConn.Close()
 			return nil, common.ContextError(err)
 		}
-	} else {
-		conn = tls.Client(rawConn, tlsConfig)
+
+		tlsConn.SetSessionState(sessionState)
 	}
 
 	resultChannel := make(chan error)
 
 	go func() {
-		resultChannel <- conn.Handshake()
+		resultChannel <- tlsConn.Handshake()
 	}()
 
 	select {
@@ -322,14 +303,7 @@ func CustomTLSDial(
 		<-resultChannel
 	}
 
-	// openSSLConns complete verification automatically. For Go TLS,
-	// we need to complete the process from crypto/tls.Dial.
-
-	// NOTE: for (config.SendServerName && !config.tlsConfig.InsecureSkipVerify),
-	// the tls.Conn.Handshake() does the complete verification, including host name.
-	tlsConn, isTlsConn := conn.(*tls.Conn)
-	if err == nil && isTlsConn &&
-		!config.SkipVerify && tlsConfig.InsecureSkipVerify {
+	if err == nil && !config.SkipVerify && tlsConfig.InsecureSkipVerify {
 
 		if config.VerifyLegacyCertificate != nil {
 			err = verifyLegacyCertificate(tlsConn, config.VerifyLegacyCertificate)
@@ -344,11 +318,11 @@ func CustomTLSDial(
 		return nil, common.ContextError(err)
 	}
 
-	return conn, nil
+	return tlsConn, nil
 }
 
-func verifyLegacyCertificate(conn *tls.Conn, expectedCertificate *x509.Certificate) error {
-	certs := conn.ConnectionState().PeerCertificates
+func verifyLegacyCertificate(tlsConn *utls.UConn, expectedCertificate *x509.Certificate) error {
+	certs := tlsConn.ConnectionState().PeerCertificates
 	if len(certs) < 1 {
 		return common.ContextError(errors.New("no certificate to verify"))
 	}
@@ -358,11 +332,11 @@ func verifyLegacyCertificate(conn *tls.Conn, expectedCertificate *x509.Certifica
 	return nil
 }
 
-func verifyServerCerts(conn *tls.Conn, hostname string, config *tls.Config) error {
-	certs := conn.ConnectionState().PeerCertificates
+func verifyServerCerts(tlsConn *utls.UConn, hostname string, tlsConfig *utls.Config) error {
+	certs := tlsConn.ConnectionState().PeerCertificates
 
 	opts := x509.VerifyOptions{
-		Roots:         config.RootCAs,
+		Roots:         tlsConfig.RootCAs,
 		CurrentTime:   time.Now(),
 		DNSName:       hostname,
 		Intermediates: x509.NewCertPool(),

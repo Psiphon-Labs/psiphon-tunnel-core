@@ -55,7 +55,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 // HTTPSServer is a wrapper around http.Server which adds the
@@ -73,12 +73,12 @@ type HTTPSServer struct {
 // and we avoid that here.
 //
 // Note that the http.Server.TLSConfig field is ignored and the
-// psiphon/common/tls.Config parameter is used intead.
+// utls.Config parameter is used intead.
 //
 // tcpKeepAliveListener is used in http.ListenAndServeTLS but not exported,
 // so we use a copy from https://golang.org/src/net/http/server.go.
-func (server *HTTPSServer) ServeTLS(listener net.Listener, config *tls.Config) error {
-	tlsListener := tls.NewListener(tcpKeepAliveListener{listener.(*net.TCPListener)}, config)
+func (server *HTTPSServer) ServeTLS(listener net.Listener, config *utls.Config) error {
+	tlsListener := utls.NewListener(tcpKeepAliveListener{listener.(*net.TCPListener)}, config)
 	return server.Serve(tlsListener)
 }
 

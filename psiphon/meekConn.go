@@ -23,7 +23,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	golangtls "crypto/tls"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -43,8 +43,8 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
+	utls "github.com/Psiphon-Labs/utls"
 	"golang.org/x/net/http2"
 )
 
@@ -299,7 +299,7 @@ func DialMeek(
 		}
 
 		isHTTP2 := false
-		if tlsConn, ok := preConn.(*tls.Conn); ok {
+		if tlsConn, ok := preConn.(*utls.UConn); ok {
 			state := tlsConn.ConnectionState()
 			if state.NegotiatedProtocolIsMutual &&
 				state.NegotiatedProtocol == "h2" {
@@ -312,7 +312,7 @@ func DialMeek(
 		if isHTTP2 {
 			NoticeInfo("negotiated HTTP/2 for %s", meekConfig.DialAddress)
 			transport = &http2.Transport{
-				DialTLS: func(network, addr string, _ *golangtls.Config) (net.Conn, error) {
+				DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {
 					return cachedTLSDialer.dial(network, addr)
 				},
 			}

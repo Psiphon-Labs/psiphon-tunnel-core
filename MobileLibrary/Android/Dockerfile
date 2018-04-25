@@ -43,43 +43,6 @@ RUN curl -L http://dl.google.com/android/android-sdk_r24.4.1-linux.tgz -o /tmp/a
   && rm /tmp/android-sdk.tgz \
   && (while true; do echo 'y'; sleep 2; done) | $ANDROID_HOME/tools/android update sdk --no-ui --filter platform,platform-tool,tool
 
-# Setup OpenSSL libray.
-ENV OPENSSL_VERSION=1.0.2h
-ENV PKG_CONFIG_PATH=/tmp/openssl/openssl-$OPENSSL_VERSION
-ENV CGO_CFLAGS="-I $PKG_CONFIG_PATH/include" CGO_LDFLAGS="-L $PKG_CONFIG_PATH -lssl -lcrypto"
-
-RUN mkdir -p /tmp/openssl \
-  && curl -L https://github.com/Psiphon-Labs/psiphon-tunnel-core/raw/master/openssl/openssl-$OPENSSL_VERSION.tar.gz -o /tmp/openssl.tar.gz \
-  && tar -C /tmp/openssl -xzf /tmp/openssl.tar.gz \
-  && rm /tmp/openssl.tar.gz \
-  && curl -L https://github.com/Psiphon-Labs/psiphon-tunnel-core/raw/master/openssl/setenv-android.sh -o /tmp/setenv-android.sh \
-  && /bin/bash -c "\
-    source /tmp/setenv-android.sh \
-    && cd /tmp/openssl/openssl-$OPENSSL_VERSION \
-    && perl -pi -e 's/install: all install_docs install_sw/install: install_docs install_sw/g' Makefile.org \
-    && ./config \
-      no-shared \
-      no-ssl2 \
-      no-ssl3 \
-      no-comp \
-      no-hw \
-      no-md2 \
-      no-md4 \
-      no-rc2 \
-      no-rc5 \
-      no-krb5 \
-      no-ripemd160 \
-      no-idea \
-      no-gost \
-      no-camellia \
-      no-seed \
-      no-3des \
-      no-heartbeats \
-      --openssldir=./ssl \
-    && perl -pi -e 's/-O3/-Os -mfloat-abi=softfp/g' Makefile \
-    && make depend \
-    && make all"
-
 # Install Pinned Gomobile
 #  - Ordered last to allow use of previously cached layers when changing revisions
 ENV GOMOBILE_PINNED_REV=320ec40f6328971c405979b804e20d5f3c86770c

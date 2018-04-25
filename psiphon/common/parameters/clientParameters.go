@@ -151,7 +151,6 @@ const (
 	MeekRoundTripRetryMaxDelay                     = "MeekRoundTripRetryMaxDelay"
 	MeekRoundTripRetryMultiplier                   = "MeekRoundTripRetryMultiplier"
 	MeekRoundTripTimeout                           = "MeekRoundTripTimeout"
-	SelectAndroidTLSProbability                    = "SelectAndroidTLSProbability"
 	TransformHostNameProbability                   = "TransformHostNameProbability"
 	PickUserAgentProbability                       = "PickUserAgentProbability"
 )
@@ -300,7 +299,6 @@ var defaultClientParameters = map[string]struct {
 	MeekRoundTripRetryMultiplier:               {value: 2.0, minimum: 0.0},
 	MeekRoundTripTimeout:                       {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 
-	SelectAndroidTLSProbability:  {value: 0.5},
 	TransformHostNameProbability: {value: 0.5},
 	PickUserAgentProbability:     {value: 0.5},
 }

@@ -16,9 +16,10 @@ script:
 - go test -race -v ./common/parameters
 - go test -race -v ./common/protocol
 - go test -race -v ./common/tactics
-- go test -race -v -run TestObfuscatedSessionTicket ./common/tls
-# TODO: enable once known race condition is addressed
-#       also, see comment below
+# TODO: fix and reenable test, which is failing in TravisCI environment:
+# --- FAIL: TestTunneledTCPIPv4
+#    tun_test.go:226: startTestTCPClient failed: syscall.Connect failed: connection timed out
+#
 #- sudo -E env "PATH=$PATH" go test -race -v ./common/tun
 - go test -race -v ./transferstats
 - go test -race -v ./server
@@ -30,10 +31,7 @@ script:
 - go test -v -covermode=count -coverprofile=parameters.coverprofile ./common/parameters
 - go test -v -covermode=count -coverprofile=protocol.coverprofile ./common/protocol
 - go test -v -covermode=count -coverprofile=tactics.coverprofile ./common/tactics
-# TODO: fix and reenable test, which is failing in TravisCI environment:
-# --- FAIL: TestTunneledTCPIPv4
-#    tun_test.go:226: startTestTCPClient failed: syscall.Connect failed: connection timed out
-#
+# TODO: see comment above
 #- sudo -E env "PATH=$PATH" go test -v -covermode=count -coverprofile=tun.coverprofile ./common/tun
 - go test -v -covermode=count -coverprofile=transferstats.coverprofile ./transferstats
 - go test -v -covermode=count -coverprofile=server.coverprofile ./server
