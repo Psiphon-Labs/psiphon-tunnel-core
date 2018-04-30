@@ -570,7 +570,7 @@ func getSshPacketPrefix(buffer []byte) (int, int, int, int, error) {
 
 	packetLength := int(binary.BigEndian.Uint32(buffer[0 : SSH_PACKET_PREFIX_LENGTH-1]))
 
-	if packetLength < 0 || packetLength > SSH_MAX_PACKET_LENGTH {
+	if packetLength < 1 || packetLength > SSH_MAX_PACKET_LENGTH {
 		return 0, 0, 0, 0, ContextError(errors.New("invalid ssh packet length"))
 	}
 
