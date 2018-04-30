@@ -56,8 +56,6 @@ import (
 // "http://127.0.0.1:<proxy-port>/tunneled/<origin media URL>"; and pass this to the player.
 // The <origin media URL> must be escaped in such a way that it can be used inside a URL query.
 //
-// The URL proxy offers /tunneled-icy/ which is compatible with ICY protocol resources.
-//
 // An example use case for direct, untunneled, relaying is to make use of Go's TLS
 // stack for HTTPS requests in cases where the native TLS stack is lacking (e.g.,
 // WinHTTP on Windows XP). The URL for direct relaying is:
@@ -69,7 +67,8 @@ import (
 // For example, in iOS 10 the UIWebView media player does not put requests through the
 // NSURLProtocol, so they are not tunneled. Instead, we rewrite those URLs to use the URL
 // proxy, and rewrite retrieved playlist files so they also contain proxied URLs.
-// Media resource links within playlists are rewritten to use the /tunneled-icy/ path.
+//
+// The URL proxy offers /tunneled-icy/ which is compatible with ICY protocol resources.
 //
 // Origin URLs must include the scheme prefix ("http://" or "https://") and must be
 // URL encoded.
@@ -292,17 +291,21 @@ func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, requ
 	case strings.HasPrefix(request.URL.RawPath, URL_PROXY_TUNNELED_REQUEST_PATH):
 		originURLString, err = url.QueryUnescape(request.URL.RawPath[len(URL_PROXY_TUNNELED_REQUEST_PATH):])
 		client = proxy.urlProxyTunneledClient
+
 	case strings.HasPrefix(request.URL.RawPath, URL_PROXY_TUNNELED_REWRITE_REQUEST_PATH):
 		originURLString, err = url.QueryUnescape(request.URL.RawPath[len(URL_PROXY_TUNNELED_REWRITE_REQUEST_PATH):])
 		client = proxy.urlProxyTunneledClient
 		rewrites = request.URL.Query()
+
 	case strings.HasPrefix(request.URL.RawPath, URL_PROXY_TUNNELED_ICY_REQUEST_PATH):
 		originURLString, err = url.QueryUnescape(request.URL.RawPath[len(URL_PROXY_TUNNELED_ICY_REQUEST_PATH):])
 		client, rewriteICYStatus = proxy.makeRewriteICYClient()
 		rewrites = request.URL.Query()
+
 	case strings.HasPrefix(request.URL.RawPath, URL_PROXY_DIRECT_REQUEST_PATH):
 		originURLString, err = url.QueryUnescape(request.URL.RawPath[len(URL_PROXY_DIRECT_REQUEST_PATH):])
 		client = proxy.urlProxyDirectClient
+
 	default:
 		err = errors.New("missing origin URL")
 	}
@@ -366,7 +369,7 @@ func (conn *rewriteICYConn) Read(b []byte) (int, error) {
 
 	if string(b[:3]) == "ICY" {
 		atomic.StoreInt32(conn.isICY, 1)
-		copy(b, []byte("HTTP/1.1"))
+		copy(b, []byte("HTTP/1.0"))
 		return 8, nil
 	}
 
@@ -694,15 +697,7 @@ func toAbsoluteURL(baseURL *url.URL, relativeURLString string) string {
 //
 // If rewriteParams is nil, then no rewriting will be done. Otherwise, it should contain
 // supported rewriting flags (like "m3u8").
-//
-// If useICY is specified, the ICY rewriting path is selected. useICY is ignored when
-// rewriteParams is set.
-func proxifyURL(
-	localHTTPProxyIP string,
-	localHTTPProxyPort int,
-	urlString string,
-	rewriteParams []string,
-	useICY bool) string {
+func proxifyURL(localHTTPProxyIP string, localHTTPProxyPort int, urlString string, rewriteParams []string) string {
 
 	// Note that we need to use the "opaque" form of URL so that it doesn't double-escape the path. See: https://github.com/golang/go/issues/10887
 
@@ -714,8 +709,6 @@ func proxifyURL(
 	proxyPath := URL_PROXY_TUNNELED_REQUEST_PATH
 	if rewriteParams != nil {
 		proxyPath = URL_PROXY_TUNNELED_REWRITE_REQUEST_PATH
-	} else if useICY {
-		proxyPath = URL_PROXY_TUNNELED_ICY_REQUEST_PATH
 	}
 	opaqueFormat := fmt.Sprintf("//%%s:%%d/%s/%%s", proxyPath)
 
@@ -784,8 +777,6 @@ func rewriteM3U8(localHTTPProxyIP string, localHTTPProxyPort int, response *http
 		return nil
 	}
 
-	useICY := true
-
 	var rewrittenBodyBytes []byte
 
 	switch listType {
@@ -797,15 +788,15 @@ func rewriteM3U8(localHTTPProxyIP string, localHTTPProxyPort int, response *http
 			}
 
 			if segment.URI != "" {
-				segment.URI = proxifyURL(localHTTPProxyIP, localHTTPProxyPort, toAbsoluteURL(response.Request.URL, segment.URI), nil, useICY)
+				segment.URI = proxifyURL(localHTTPProxyIP, localHTTPProxyPort, toAbsoluteURL(response.Request.URL, segment.URI), nil)
 			}
 
 			if segment.Key != nil && segment.Key.URI != "" {
-				segment.Key.URI = proxifyURL(localHTTPProxyIP, localHTTPProxyPort, toAbsoluteURL(response.Request.URL, segment.Key.URI), nil, useICY)
+				segment.Key.URI = proxifyURL(localHTTPProxyIP, localHTTPProxyPort, toAbsoluteURL(response.Request.URL, segment.Key.URI), nil)
 			}
 
 			if segment.Map != nil && segment.Map.URI != "" {
-				segment.Map.URI = proxifyURL(localHTTPProxyIP, localHTTPProxyPort, toAbsoluteURL(response.Request.URL, segment.Map.URI), nil, useICY)
+				segment.Map.URI = proxifyURL(localHTTPProxyIP, localHTTPProxyPort, toAbsoluteURL(response.Request.URL, segment.Map.URI), nil)
 			}
 		}
 		rewrittenBodyBytes = []byte(mediapl.String())
@@ -817,7 +808,7 @@ func rewriteM3U8(localHTTPProxyIP string, localHTTPProxyPort int, response *http
 			}
 
 			if variant.URI != "" {
-				variant.URI = proxifyURL(localHTTPProxyIP, localHTTPProxyPort, toAbsoluteURL(response.Request.URL, variant.URI), []string{"m3u8"}, useICY)
+				variant.URI = proxifyURL(localHTTPProxyIP, localHTTPProxyPort, toAbsoluteURL(response.Request.URL, variant.URI), []string{"m3u8"})
 			}
 
 			for _, alternative := range variant.Alternatives {
@@ -826,7 +817,7 @@ func rewriteM3U8(localHTTPProxyIP string, localHTTPProxyPort int, response *http
 				}
 
 				if alternative.URI != "" {
-					alternative.URI = proxifyURL(localHTTPProxyIP, localHTTPProxyPort, toAbsoluteURL(response.Request.URL, alternative.URI), []string{"m3u8"}, useICY)
+					alternative.URI = proxifyURL(localHTTPProxyIP, localHTTPProxyPort, toAbsoluteURL(response.Request.URL, alternative.URI), []string{"m3u8"})
 				}
 			}
 		}
