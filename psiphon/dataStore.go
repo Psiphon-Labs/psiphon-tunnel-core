@@ -27,12 +27,12 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/Psiphon-Inc/bolt"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
@@ -60,10 +60,15 @@ const (
 	tunnelStatsBucket           = "tunnelStats"
 	remoteServerListStatsBucket = "remoteServerListStats"
 	slokBucket                  = "SLOKs"
-	rankedServerEntryCount      = 100
+	tacticsBucket               = "tactics"
+	speedTestSamplesBucket      = "speedTestSamples"
+
+	rankedServerEntryCount = 100
 )
 
 const (
+	DATA_STORE_FILENAME                     = "psiphon.boltdb"
+	LEGACY_DATA_STORE_FILENAME              = "psiphon.db"
 	DATA_STORE_LAST_CONNECTED_KEY           = "lastConnected"
 	DATA_STORE_LAST_SERVER_ENTRY_FILTER_KEY = "lastServerEntryFilter"
 	PERSISTENT_STAT_TYPE_REMOTE_SERVER_LIST = remoteServerListStatsBucket
@@ -138,6 +143,8 @@ func InitDataStore(config *Config) (err error) {
 				tunnelStatsBucket,
 				remoteServerListStatsBucket,
 				slokBucket,
+				tacticsBucket,
+				speedTestSamplesBucket,
 			}
 			for _, bucket := range requiredBuckets {
 				_, err := tx.CreateBucketIfNotExists([]byte(bucket))
@@ -197,8 +204,11 @@ func checkInitDataStore() {
 // rank for iteration order (the previous top ranked entry is promoted). The
 // purpose of inserting at next-to-top is to keep the last selected server
 // as the top ranked server.
-// When replaceIfExists is true, an existing server entry record is
-// overwritten; otherwise, the existing record is unchanged.
+//
+// When a server entry already exists for a given server, it will be
+// replaced only if replaceIfExists is set or if the the ConfigurationVersion
+// field of the new entry is strictly higher than the existing entry.
+//
 // If the server entry data is malformed, an alert notice is issued and
 // the entry is skipped; no error is returned.
 func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) error {
@@ -208,7 +218,8 @@ func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) e
 	// so instead of skipping we fail with an error.
 	err := protocol.ValidateServerEntry(serverEntry)
 	if err != nil {
-		return common.ContextError(errors.New("invalid server entry"))
+		return common.ContextError(
+			fmt.Errorf("invalid server entry: %s", err))
 	}
 
 	// BoltDB implementation note:
@@ -225,16 +236,21 @@ func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) e
 
 		// Check not only that the entry exists, but is valid. This
 		// will replace in the rare case where the data is corrupt.
-		existingServerEntryValid := false
+		existingConfigurationVersion := -1
 		existingData := serverEntries.Get([]byte(serverEntry.IpAddress))
 		if existingData != nil {
-			existingServerEntry := new(protocol.ServerEntry)
-			if json.Unmarshal(existingData, existingServerEntry) == nil {
-				existingServerEntryValid = true
+			var existingServerEntry *protocol.ServerEntry
+			err := json.Unmarshal(existingData, &existingServerEntry)
+			if err == nil {
+				existingConfigurationVersion = existingServerEntry.ConfigurationVersion
 			}
 		}
 
-		if existingServerEntryValid && !replaceIfExists {
+		exists := existingConfigurationVersion > -1
+		newer := exists && existingConfigurationVersion < serverEntry.ConfigurationVersion
+		update := !exists || replaceIfExists || newer
+
+		if !update {
 			// Disabling this notice, for now, as it generates too much noise
 			// in diagnostics with clients that always submit embedded servers
 			// to the core on each run.
@@ -368,16 +384,11 @@ func PromoteServerEntry(config *Config, ipAddress string) error {
 
 func makeServerEntryFilterValue(config *Config) ([]byte, error) {
 
-	filter, err := json.Marshal(
-		struct {
-			Region   string
-			Protocol string
-		}{config.EgressRegion, config.TunnelProtocol})
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
+	// Currently, only a change of EgressRegion will "break" server affinity.
+	// If the tunnel protocol filter changes, any existing affinity server
+	// either passes the new filter, or it will be skipped anyway.
 
-	return filter, nil
+	return []byte(config.EgressRegion), nil
 }
 
 func hasServerEntryFilterChanged(config *Config) (bool, error) {
@@ -485,14 +496,14 @@ func insertRankedServerEntry(tx *bolt.Tx, serverEntryId string, position int) er
 // ServerEntryIterator is used to iterate over
 // stored server entries in rank order.
 type ServerEntryIterator struct {
-	region                      string
-	protocol                    string
-	shuffleHeadLength           int
-	serverEntryIds              []string
-	serverEntryIndex            int
-	isTargetServerEntryIterator bool
-	hasNextTargetServerEntry    bool
-	targetServerEntry           *protocol.ServerEntry
+	config                       *Config
+	shuffleHeadLength            int
+	serverEntryIds               []string
+	serverEntryIndex             int
+	isTacticsServerEntryIterator bool
+	isTargetServerEntryIterator  bool
+	hasNextTargetServerEntry     bool
+	targetServerEntry            *protocol.ServerEntry
 }
 
 // NewServerEntryIterator creates a new ServerEntryIterator.
@@ -511,7 +522,7 @@ func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) 
 
 	// When configured, this target server entry is the only candidate
 	if config.TargetServerEntry != "" {
-		return newTargetServerEntryIterator(config)
+		return newTargetServerEntryIterator(config, false)
 	}
 
 	checkInitDataStore()
@@ -524,10 +535,8 @@ func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) 
 	applyServerAffinity := !filterChanged
 
 	iterator := &ServerEntryIterator{
-		region:                      config.EgressRegion,
-		protocol:                    config.TunnelProtocol,
-		shuffleHeadLength:           config.TunnelPoolSize,
-		isTargetServerEntryIterator: false,
+		config:            config,
+		shuffleHeadLength: config.TunnelPoolSize,
 	}
 
 	err = iterator.Reset()
@@ -538,29 +547,69 @@ func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) 
 	return applyServerAffinity, iterator, nil
 }
 
+func NewTacticsServerEntryIterator(config *Config) (*ServerEntryIterator, error) {
+
+	// When configured, this target server entry is the only candidate
+	if config.TargetServerEntry != "" {
+		_, iterator, err := newTargetServerEntryIterator(config, true)
+		return iterator, err
+	}
+
+	checkInitDataStore()
+
+	iterator := &ServerEntryIterator{
+		shuffleHeadLength:            0,
+		isTacticsServerEntryIterator: true,
+	}
+
+	err := iterator.Reset()
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return iterator, nil
+}
+
 // newTargetServerEntryIterator is a helper for initializing the TargetServerEntry case
-func newTargetServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) {
+func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *ServerEntryIterator, error) {
+
 	serverEntry, err := protocol.DecodeServerEntry(
 		config.TargetServerEntry, common.GetCurrentTimestamp(), protocol.SERVER_ENTRY_SOURCE_TARGET)
 	if err != nil {
 		return false, nil, common.ContextError(err)
 	}
-	if config.EgressRegion != "" && serverEntry.Region != config.EgressRegion {
-		return false, nil, common.ContextError(errors.New("TargetServerEntry does not support EgressRegion"))
-	}
-	if config.TunnelProtocol != "" {
-		// Note: same capability/protocol mapping as in StoreServerEntry
-		requiredCapability := strings.TrimSuffix(config.TunnelProtocol, "-OSSH")
-		if !common.Contains(serverEntry.Capabilities, requiredCapability) {
-			return false, nil, common.ContextError(errors.New("TargetServerEntry does not support TunnelProtocol"))
+
+	if isTactics {
+
+		if len(serverEntry.GetSupportedTacticsProtocols()) == 0 {
+			return false, nil, common.ContextError(errors.New("TargetServerEntry does not support tactics protocols"))
+		}
+
+	} else {
+
+		if config.EgressRegion != "" && serverEntry.Region != config.EgressRegion {
+			return false, nil, common.ContextError(errors.New("TargetServerEntry does not support EgressRegion"))
+		}
+
+		limitTunnelProtocols := config.clientParameters.Get().TunnelProtocols(parameters.LimitTunnelProtocols)
+		if len(limitTunnelProtocols) > 0 {
+			// At the ServerEntryIterator level, only limitTunnelProtocols is applied;
+			// impairedTunnelProtocols and excludeMeek are handled higher up.
+			if len(serverEntry.GetSupportedProtocols(limitTunnelProtocols, nil, false)) == 0 {
+				return false, nil, common.ContextError(errors.New("TargetServerEntry does not support LimitTunnelProtocols"))
+			}
 		}
 	}
+
 	iterator := &ServerEntryIterator{
-		isTargetServerEntryIterator: true,
-		hasNextTargetServerEntry:    true,
-		targetServerEntry:           serverEntry,
+		isTacticsServerEntryIterator: isTactics,
+		isTargetServerEntryIterator:  true,
+		hasNextTargetServerEntry:     true,
+		targetServerEntry:            serverEntry,
 	}
+
 	NoticeInfo("using TargetServerEntry: %s", serverEntry.IpAddress)
+
 	return false, iterator, nil
 }
 
@@ -574,8 +623,21 @@ func (iterator *ServerEntryIterator) Reset() error {
 		return nil
 	}
 
-	count := CountServerEntries(iterator.region, iterator.protocol)
-	NoticeCandidateServers(iterator.region, iterator.protocol, count)
+	// For diagnostics, it's useful to count the number of known server
+	// entries that satisfy both the egress region and tunnel protocol
+	// requirements. The tunnel protocol filter is not applied by the iterator
+	// as protocol filtering, including impaire protocol and exclude-meek
+	// logic, is all handled higher up.
+
+	// TODO: for isTacticsServerEntryIterator, emit tactics candidate count.
+
+	if !iterator.isTacticsServerEntryIterator {
+		limitTunnelProtocols := iterator.config.clientParameters.Get().TunnelProtocols(
+			parameters.LimitTunnelProtocols)
+
+		count := CountServerEntries(iterator.config.EgressRegion, limitTunnelProtocols)
+		NoticeCandidateServers(iterator.config.EgressRegion, limitTunnelProtocols, count)
+	}
 
 	// This query implements the Psiphon server candidate selection
 	// algorithm: the first TunnelPoolSize server candidates are in rank
@@ -644,7 +706,11 @@ func (iterator *ServerEntryIterator) Close() {
 
 // Next returns the next server entry, by rank, for a ServerEntryIterator.
 // Returns nil with no error when there is no next item.
-func (iterator *ServerEntryIterator) Next() (serverEntry *protocol.ServerEntry, err error) {
+func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
+
+	var err error
+	var serverEntry *protocol.ServerEntry
+
 	defer func() {
 		if err != nil {
 			iterator.Close()
@@ -693,8 +759,7 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *protocol.ServerEntry, 
 			continue
 		}
 
-		serverEntry = new(protocol.ServerEntry)
-		err = json.Unmarshal(data, serverEntry)
+		err = json.Unmarshal(data, &serverEntry)
 		if err != nil {
 			// In case of data corruption or a bug causing this condition,
 			// do not stop iterating.
@@ -703,10 +768,20 @@ func (iterator *ServerEntryIterator) Next() (serverEntry *protocol.ServerEntry, 
 		}
 
 		// Check filter requirements
-		if (iterator.region == "" || serverEntry.Region == iterator.region) &&
-			(iterator.protocol == "" || serverEntry.SupportsProtocol(iterator.protocol)) {
 
-			break
+		if iterator.isTacticsServerEntryIterator {
+
+			// Tactics doesn't filter by egress region.
+			if len(serverEntry.GetSupportedTacticsProtocols()) > 0 {
+				break
+			}
+
+		} else {
+
+			if iterator.config.EgressRegion == "" ||
+				serverEntry.Region == iterator.config.EgressRegion {
+				break
+			}
 		}
 	}
 
@@ -754,14 +829,17 @@ func scanServerEntries(scanner func(*protocol.ServerEntry)) error {
 }
 
 // CountServerEntries returns a count of stored servers for the
-// specified region and protocol.
-func CountServerEntries(region, tunnelProtocol string) int {
+// specified region and tunnel protocols.
+func CountServerEntries(region string, tunnelProtocols []string) int {
 	checkInitDataStore()
 
 	count := 0
 	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 		if (region == "" || serverEntry.Region == region) &&
-			(tunnelProtocol == "" || serverEntry.SupportsProtocol(tunnelProtocol)) {
+			(len(tunnelProtocols) == 0 ||
+				// When CountServerEntries is called only limitTunnelProtocols is known;
+				// impairedTunnelProtocols and excludeMeek may not apply.
+				len(serverEntry.GetSupportedProtocols(tunnelProtocols, nil, false)) > 0) {
 			count += 1
 		}
 	})
@@ -778,8 +856,8 @@ func CountServerEntries(region, tunnelProtocol string) int {
 // protocols supported by stored server entries, excluding the
 // specified impaired protocols.
 func CountNonImpairedProtocols(
-	region, tunnelProtocol string,
-	impairedProtocols []string) int {
+	region string,
+	limitTunnelProtocols, impairedProtocols []string) int {
 
 	checkInitDataStore()
 
@@ -787,15 +865,10 @@ func CountNonImpairedProtocols(
 
 	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 		if region == "" || serverEntry.Region == region {
-			if tunnelProtocol != "" {
-				if serverEntry.SupportsProtocol(tunnelProtocol) {
-					distinctProtocols[tunnelProtocol] = true
-					// Exit early, since only one protocol is enabled
-					return
-				}
-			} else {
-				for _, protocol := range protocol.SupportedTunnelProtocols {
-					if serverEntry.SupportsProtocol(protocol) {
+			for _, protocol := range protocol.SupportedTunnelProtocols {
+				if serverEntry.SupportsProtocol(protocol) {
+					if len(limitTunnelProtocols) == 0 ||
+						common.Contains(limitTunnelProtocols, protocol) {
 						distinctProtocols[protocol] = true
 					}
 				}
@@ -816,7 +889,7 @@ func CountNonImpairedProtocols(
 }
 
 // ReportAvailableRegions prints a notice with the available egress regions.
-// Note that this report ignores config.TunnelProtocol.
+// Note that this report ignores LimitTunnelProtocols.
 func ReportAvailableRegions() {
 	checkInitDataStore()
 
@@ -1306,4 +1379,61 @@ func GetSLOK(id []byte) (key []byte, err error) {
 	}
 
 	return key, nil
+}
+
+// TacticsStorer implements tactics.Storer.
+type TacticsStorer struct {
+}
+
+func (t *TacticsStorer) SetTacticsRecord(networkID string, record []byte) error {
+	return setBucketValue([]byte(tacticsBucket), []byte(networkID), record)
+}
+
+func (t *TacticsStorer) GetTacticsRecord(networkID string) ([]byte, error) {
+	return getBucketValue([]byte(tacticsBucket), []byte(networkID))
+}
+
+func (t *TacticsStorer) SetSpeedTestSamplesRecord(networkID string, record []byte) error {
+	return setBucketValue([]byte(speedTestSamplesBucket), []byte(networkID), record)
+}
+
+func (t *TacticsStorer) GetSpeedTestSamplesRecord(networkID string) ([]byte, error) {
+	return getBucketValue([]byte(speedTestSamplesBucket), []byte(networkID))
+}
+
+// GetTacticsStorer creates a TacticsStorer.
+func GetTacticsStorer() *TacticsStorer {
+	return &TacticsStorer{}
+}
+
+func setBucketValue(bucket, key, value []byte) error {
+	checkInitDataStore()
+
+	err := singleton.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(bucket)
+		err := bucket.Put(key, value)
+		return err
+	})
+
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	return nil
+}
+
+func getBucketValue(bucket, key []byte) (value []byte, err error) {
+	checkInitDataStore()
+
+	err = singleton.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(bucket)
+		value = bucket.Get(key)
+		return nil
+	})
+
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return value, nil
 }

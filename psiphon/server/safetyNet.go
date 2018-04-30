@@ -60,7 +60,7 @@ type jwt struct {
 	payload string
 }
 
-func newJwt(token requestJSONObject) (jwt, error) {
+func newJwt(token common.APIParameters) (jwt, error) {
 	jwtObj := jwt{}
 
 	if token["status"] == nil {
@@ -199,7 +199,7 @@ func (body *jwtBody) verifyJWTBody() (validApkCert, validApkPackageName bool) {
 }
 
 // Form log fields for debugging
-func errorLogFields(err error, params requestJSONObject) LogFields {
+func errorLogFields(err error, params common.APIParameters) LogFields {
 	logFields := LogFields{
 		// Must sanitize string. JSON unmarshalling exceptions
 		// include the value of the field which failed to unmarshal.
@@ -267,7 +267,7 @@ func (l LogFields) addJwtField(field string, input interface{}) {
 }
 
 // Validate JWT produced by safetynet
-func verifySafetyNetPayload(params requestJSONObject) (bool, LogFields) {
+func verifySafetyNetPayload(params common.APIParameters) (bool, LogFields) {
 
 	jwt, err := newJwt(params)
 	if err != nil {

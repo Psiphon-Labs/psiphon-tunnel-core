@@ -22,6 +22,8 @@ package ca.psiphon;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.net.ConnectivityManager;
+import android.net.wifi.WifiManager;
+import android.net.wifi.WifiInfo;
 import android.net.LinkProperties;
 import android.net.NetworkInfo;
 import android.net.VpnService;
@@ -365,6 +367,63 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
 
     @Override
     public String IPv6Synthesize(String IPv4Addr) { return IPv4Addr; }
+
+    @Override
+    public String GetNetworkID() {
+
+        // The network ID contains potential PII. In tunnel-core, the network ID
+        // is used only locally in the client and not sent to the server.
+        //
+        // See network ID requirements here:
+        // https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter
+
+        String networkID = "UNKNOWN";
+
+        Context context = mHostService.getContext();
+        ConnectivityManager connectivityManager = (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkInfo activeNetworkInfo = null;
+        try {
+            activeNetworkInfo = connectivityManager.getActiveNetworkInfo();
+
+        } catch (java.lang.Exception e) {
+            // May get exceptions due to missing permissions like android.permission.ACCESS_NETWORK_STATE.
+
+            // Apps using the Psiphon Library and lacking android.permission.ACCESS_NETWORK_STATE will
+            // proceed and use tactics, but with "UNKNOWN" as the sole network ID.
+        }
+
+        if (activeNetworkInfo != null && activeNetworkInfo.getType() == ConnectivityManager.TYPE_WIFI) {
+
+            networkID = "WIFI";
+
+            try {
+                WifiManager wifiManager = (WifiManager)context.getSystemService(Context.WIFI_SERVICE);
+                WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+                if (wifiInfo != null) {
+                    networkID += "-" + wifiInfo.getBSSID();
+                }
+            } catch (java.lang.Exception e) {
+                // May get exceptions due to missing permissions like android.permission.ACCESS_WIFI_STATE.
+                // Fall through and use just "WIFI"
+            }
+
+        } else if (activeNetworkInfo != null && activeNetworkInfo.getType() == ConnectivityManager.TYPE_MOBILE) {
+
+            networkID = "MOBILE";
+
+            try {
+                TelephonyManager telephonyManager = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
+                if (telephonyManager != null) {
+                    networkID += "-" + telephonyManager.getNetworkOperator();
+                }
+            } catch (java.lang.Exception e) {
+                // May get exceptions due to missing permissions.
+                // Fall through and use just "MOBILE"
+            }
+        }
+
+        return networkID;
+    }
 
     //----------------------------------------------------------------------------------------------
     // Psiphon Tunnel Core

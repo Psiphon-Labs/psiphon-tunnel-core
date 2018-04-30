@@ -28,6 +28,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
@@ -44,6 +45,7 @@ type PsiphonProvider interface {
 	IPv6Synthesize(IPv4Addr string) string
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
+	GetNetworkID() string
 }
 
 func SetNoticeFiles(
@@ -84,6 +86,13 @@ func Start(
 		return fmt.Errorf("already started")
 	}
 
+	// Clients may toggle Stop/Start immediately to apply new config settings
+	// such as EgressRegion or Authorizations. When this restart is within the
+	// same process and in a memory contrained environment, it is useful to
+	// force garbage collection here to reclaim memory used by the previous
+	// Controller.
+	psiphon.DoGarbageCollection()
+
 	// Wrap the provider in a layer that locks a mutex before calling a provider function.
 	// The the provider callbacks are Java/Obj-C via gomobile, they are cgo calls that
 	// can cause OS threads to be spawned. The mutex prevents many calling goroutines from
@@ -96,7 +105,10 @@ func Start(
 	if err != nil {
 		return fmt.Errorf("error loading configuration file: %s", err)
 	}
+
 	config.NetworkConnectivityChecker = provider
+
+	config.NetworkIDGetter = provider
 
 	if useDeviceBinder {
 		config.DeviceBinder = newLoggingDeviceBinder(provider)
@@ -293,6 +305,12 @@ func (p *mutexPsiphonProvider) GetSecondaryDnsServer() string {
 	return p.p.GetSecondaryDnsServer()
 }
 
+func (p *mutexPsiphonProvider) GetNetworkID() string {
+	p.Lock()
+	defer p.Unlock()
+	return p.p.GetNetworkID()
+}
+
 type loggingDeviceBinder struct {
 	p PsiphonProvider
 }
@@ -307,4 +325,31 @@ func (d *loggingDeviceBinder) BindToDevice(fileDescriptor int) error {
 		psiphon.NoticeInfo("BindToDevice: %s", deviceInfo)
 	}
 	return err
+}
+
+type loggingNetworkIDGetter struct {
+	p PsiphonProvider
+}
+
+func newLoggingNetworkIDGetter(p PsiphonProvider) *loggingNetworkIDGetter {
+	return &loggingNetworkIDGetter{p: p}
+}
+
+func (d *loggingNetworkIDGetter) GetNetworkID() string {
+	networkID := d.p.GetNetworkID()
+
+	// All PII must appear after the initial "-"
+	// See: https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter
+	logNetworkID := networkID
+	index := strings.Index(logNetworkID, "-")
+	if index != -1 {
+		logNetworkID = logNetworkID[:index]
+	}
+	if len(logNetworkID)+1 < len(networkID) {
+		// Indicate when additional network info was present after the first "-".
+		logNetworkID += "+<network info>"
+	}
+	psiphon.NoticeInfo("GetNetworkID: %s", logNetworkID)
+
+	return networkID
 }

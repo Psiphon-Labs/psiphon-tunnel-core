@@ -33,6 +33,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 )
 
 const (
@@ -46,8 +47,6 @@ const (
 )
 
 var CLIENT_VERIFICATION_REQUIRED = false
-
-type requestJSONObject map[string]interface{}
 
 // sshAPIRequestHandler routes Psiphon API requests transported as
 // JSON objects via the SSH request mechanism.
@@ -79,7 +78,7 @@ func sshAPIRequestHandler(
 	//   type map[string]interface{} will unmarshal a base64-encoded string
 	//   to a string, not a decoded []byte, as required.
 
-	var params requestJSONObject
+	var params common.APIParameters
 	err := json.Unmarshal(requestPayload, &params)
 	if err != nil {
 		return nil, common.ContextError(
@@ -103,7 +102,7 @@ func dispatchAPIRequestHandler(
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
 	name string,
-	params requestJSONObject) (response []byte, reterr error) {
+	params common.APIParameters) (response []byte, reterr error) {
 
 	// Recover from and log any unexpected panics caused by user input
 	// handling bugs. User inputs should be properly validated; this
@@ -143,7 +142,7 @@ func dispatchAPIRequestHandler(
 		sessionID, err := getStringRequestParam(params, "client_session_id")
 		if err == nil {
 			// Note: follows/duplicates baseRequestParams validation
-			if !isHexDigits(support, sessionID) {
+			if !isHexDigits(support.Config, sessionID) {
 				err = errors.New("invalid param: client_session_id")
 			}
 		}
@@ -177,6 +176,10 @@ func dispatchAPIRequestHandler(
 	return nil, common.ContextError(fmt.Errorf("invalid request name: %s", name))
 }
 
+var handshakeRequestParams = append(
+	append([]requestParamSpec(nil), tacticsParams...),
+	baseRequestParams...)
+
 // handshakeAPIRequestHandler implements the "handshake" API request.
 // Clients make the handshake immediately after establishing a tunnel
 // connection; the response tells the client what homepage to open, what
@@ -185,11 +188,11 @@ func handshakeAPIRequestHandler(
 	support *SupportServices,
 	apiProtocol string,
 	geoIPData GeoIPData,
-	params requestJSONObject) ([]byte, error) {
+	params common.APIParameters) ([]byte, error) {
 
 	// Note: ignoring "known_servers" params
 
-	err := validateRequestParams(support, params, baseRequestParams)
+	err := validateRequestParams(support.Config, params, baseRequestParams)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -233,6 +236,41 @@ func handshakeAPIRequestHandler(
 		return nil, common.ContextError(err)
 	}
 
+	tacticsPayload, err := support.TacticsServer.GetTacticsPayload(
+		common.GeoIPData(geoIPData), params)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	var marshaledTacticsPayload []byte
+
+	if tacticsPayload != nil {
+
+		marshaledTacticsPayload, err = json.Marshal(tacticsPayload)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
+		// Log a metric when new tactics are issued. Logging here indicates that
+		// the handshake tactics mechansim is active; but logging for every
+		// handshake creates unneccesary log data.
+
+		if len(tacticsPayload.Tactics) > 0 {
+
+			logFields := getRequestLogFields(
+				tactics.TACTICS_METRIC_EVENT_NAME,
+				geoIPData,
+				authorizedAccessTypes,
+				params,
+				handshakeRequestParams)
+
+			logFields[tactics.NEW_TACTICS_TAG_LOG_FIELD_NAME] = tacticsPayload.Tag
+			logFields[tactics.IS_TACTICS_REQUEST_LOG_FIELD_NAME] = false
+
+			log.LogRawFieldsWithTimestamp(logFields)
+		}
+	}
+
 	// The log comes _after_ SetClientHandshakeState, in case that call rejects
 	// the state change (for example, if a second handshake is performed)
 	//
@@ -257,6 +295,7 @@ func handshakeAPIRequestHandler(
 		ClientRegion:           geoIPData.Country,
 		ServerTimestamp:        common.GetCurrentTimestamp(),
 		ActiveAuthorizationIDs: activeAuthorizationIDs,
+		TacticsPayload:         marshaledTacticsPayload,
 	}
 
 	responsePayload, err := json.Marshal(handshakeResponse)
@@ -279,13 +318,14 @@ var connectedRequestParams = append(
 // established and at least once per day. The last_connected input value,
 // which should be a connected_timestamp output from a previous connected
 // response, is used to calculate unique user stats.
+// connected_timestamp is truncated as a privacy measure.
 func connectedAPIRequestHandler(
 	support *SupportServices,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
-	params requestJSONObject) ([]byte, error) {
+	params common.APIParameters) ([]byte, error) {
 
-	err := validateRequestParams(support, params, connectedRequestParams)
+	err := validateRequestParams(support.Config, params, connectedRequestParams)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -326,9 +366,9 @@ func statusAPIRequestHandler(
 	support *SupportServices,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
-	params requestJSONObject) ([]byte, error) {
+	params common.APIParameters) ([]byte, error) {
 
-	err := validateRequestParams(support, params, statusRequestParams)
+	err := validateRequestParams(support.Config, params, statusRequestParams)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -435,9 +475,9 @@ func clientVerificationAPIRequestHandler(
 	support *SupportServices,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
-	params requestJSONObject) ([]byte, error) {
+	params common.APIParameters) ([]byte, error) {
 
-	err := validateRequestParams(support, params, baseRequestParams)
+	err := validateRequestParams(support.Config, params, baseRequestParams)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -493,9 +533,39 @@ func clientVerificationAPIRequestHandler(
 	}
 }
 
+var tacticsParams = []requestParamSpec{
+	{tactics.STORED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
+	{tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME, nil, requestParamOptional | requestParamJSON},
+}
+
+var tacticsRequestParams = append(
+	append([]requestParamSpec(nil), tacticsParams...),
+	baseRequestParams...)
+
+func getTacticsAPIParameterValidator(config *Config) common.APIParameterValidator {
+	return func(params common.APIParameters) error {
+		return validateRequestParams(config, params, tacticsRequestParams)
+	}
+}
+
+func getTacticsAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormatter {
+
+	return func(geoIPData common.GeoIPData, params common.APIParameters) common.LogFields {
+
+		logFields := getRequestLogFields(
+			tactics.TACTICS_METRIC_EVENT_NAME,
+			GeoIPData(geoIPData),
+			nil, // authorizedAccessTypes are not known yet
+			params,
+			tacticsRequestParams)
+
+		return common.LogFields(logFields)
+	}
+}
+
 type requestParamSpec struct {
 	name      string
-	validator func(*SupportServices, string) bool
+	validator func(*Config, string) bool
 	flags     uint32
 }
 
@@ -503,6 +573,7 @@ const (
 	requestParamOptional  = 1
 	requestParamNotLogged = 2
 	requestParamArray     = 4
+	requestParamJSON      = 8
 )
 
 // baseRequestParams is the list of required and optional
@@ -534,11 +605,12 @@ var baseRequestParams = []requestParamSpec{
 	{"server_entry_region", isRegionCode, requestParamOptional},
 	{"server_entry_source", isServerEntrySource, requestParamOptional},
 	{"server_entry_timestamp", isISO8601Date, requestParamOptional},
+	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
 }
 
 func validateRequestParams(
-	support *SupportServices,
-	params requestJSONObject,
+	config *Config,
+	params common.APIParameters,
 	expectedParams []requestParamSpec) error {
 
 	for _, expectedParam := range expectedParams {
@@ -551,10 +623,15 @@ func validateRequestParams(
 				fmt.Errorf("missing param: %s", expectedParam.name))
 		}
 		var err error
-		if expectedParam.flags&requestParamArray != 0 {
-			err = validateStringArrayRequestParam(support, expectedParam, value)
-		} else {
-			err = validateStringRequestParam(support, expectedParam, value)
+		switch {
+		case expectedParam.flags&requestParamArray != 0:
+			err = validateStringArrayRequestParam(config, expectedParam, value)
+		case expectedParam.flags&requestParamJSON != 0:
+			// No validation: the JSON already unmarshalled; the parameter
+			// user will validate that the JSON contains the expected
+			// objects/data.
+		default:
+			err = validateStringRequestParam(config, expectedParam, value)
 		}
 		if err != nil {
 			return common.ContextError(err)
@@ -566,12 +643,12 @@ func validateRequestParams(
 
 // copyBaseRequestParams makes a copy of the params which
 // includes only the baseRequestParams.
-func copyBaseRequestParams(params requestJSONObject) requestJSONObject {
+func copyBaseRequestParams(params common.APIParameters) common.APIParameters {
 
 	// Note: not a deep copy; assumes baseRequestParams values
 	// are all scalar types (int, string, etc.)
 
-	paramsCopy := make(requestJSONObject)
+	paramsCopy := make(common.APIParameters)
 	for _, baseParam := range baseRequestParams {
 		value := params[baseParam.name]
 		if value == nil {
@@ -585,7 +662,7 @@ func copyBaseRequestParams(params requestJSONObject) requestJSONObject {
 }
 
 func validateStringRequestParam(
-	support *SupportServices,
+	config *Config,
 	expectedParam requestParamSpec,
 	value interface{}) error {
 
@@ -594,7 +671,7 @@ func validateStringRequestParam(
 		return common.ContextError(
 			fmt.Errorf("unexpected string param type: %s", expectedParam.name))
 	}
-	if !expectedParam.validator(support, strValue) {
+	if !expectedParam.validator(config, strValue) {
 		return common.ContextError(
 			fmt.Errorf("invalid param: %s", expectedParam.name))
 	}
@@ -602,7 +679,7 @@ func validateStringRequestParam(
 }
 
 func validateStringArrayRequestParam(
-	support *SupportServices,
+	config *Config,
 	expectedParam requestParamSpec,
 	value interface{}) error {
 
@@ -612,7 +689,7 @@ func validateStringArrayRequestParam(
 			fmt.Errorf("unexpected string param type: %s", expectedParam.name))
 	}
 	for _, value := range arrayValue {
-		err := validateStringRequestParam(support, expectedParam, value)
+		err := validateStringRequestParam(config, expectedParam, value)
 		if err != nil {
 			return common.ContextError(err)
 		}
@@ -626,7 +703,7 @@ func getRequestLogFields(
 	eventName string,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
-	params requestJSONObject,
+	params common.APIParameters,
 	expectedParams []requestParamSpec) LogFields {
 
 	logFields := make(LogFields)
@@ -700,20 +777,55 @@ func getRequestLogFields(
 			}
 
 		case []interface{}:
-			// Note: actually validated as an array of strings
-			logFields[expectedParam.name] = v
+			if expectedParam.name == tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME {
+				logFields[expectedParam.name] = makeSpeedTestSamplesLogField(v)
+			} else {
+				logFields[expectedParam.name] = v
+			}
 
 		default:
-			// This type assertion should be checked already in
-			// validateRequestParams, so failure is unexpected.
-			continue
+			logFields[expectedParam.name] = v
 		}
 	}
 
 	return logFields
 }
 
-func getStringRequestParam(params requestJSONObject, name string) (string, error) {
+// makeSpeedTestSamplesLogField renames the tactics.SpeedTestSample json tag
+// fields to more verbose names for metrics.
+func makeSpeedTestSamplesLogField(samples []interface{}) []interface{} {
+	// TODO: use reflection and add additional tags, e.g.,
+	// `json:"s" log:"timestamp"` to remove hard-coded
+	// tag value dependency?
+	logSamples := make([]interface{}, len(samples))
+	for i, sample := range samples {
+		logSample := make(map[string]interface{})
+		if m, ok := sample.(map[string]interface{}); ok {
+			for k, v := range m {
+				logK := k
+				switch k {
+				case "s":
+					logK = "timestamp"
+				case "r":
+					logK = "server_region"
+				case "p":
+					logK = "relay_protocol"
+				case "t":
+					logK = "round_trip_time_ms"
+				case "u":
+					logK = "bytes_up"
+				case "d":
+					logK = "bytes_down"
+				}
+				logSample[logK] = v
+			}
+		}
+		logSamples[i] = logSample
+	}
+	return logSamples
+}
+
+func getStringRequestParam(params common.APIParameters, name string) (string, error) {
 	if params[name] == nil {
 		return "", common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
@@ -724,7 +836,7 @@ func getStringRequestParam(params requestJSONObject, name string) (string, error
 	return value, nil
 }
 
-func getInt64RequestParam(params requestJSONObject, name string) (int64, error) {
+func getInt64RequestParam(params common.APIParameters, name string) (int64, error) {
 	if params[name] == nil {
 		return 0, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
@@ -735,19 +847,19 @@ func getInt64RequestParam(params requestJSONObject, name string) (int64, error) 
 	return int64(value), nil
 }
 
-func getJSONObjectRequestParam(params requestJSONObject, name string) (requestJSONObject, error) {
+func getJSONObjectRequestParam(params common.APIParameters, name string) (common.APIParameters, error) {
 	if params[name] == nil {
 		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
-	// Note: generic unmarshal of JSON produces map[string]interface{}, not requestJSONObject
+	// Note: generic unmarshal of JSON produces map[string]interface{}, not common.APIParameters
 	value, ok := params[name].(map[string]interface{})
 	if !ok {
 		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
-	return requestJSONObject(value), nil
+	return common.APIParameters(value), nil
 }
 
-func getJSONObjectArrayRequestParam(params requestJSONObject, name string) ([]requestJSONObject, error) {
+func getJSONObjectArrayRequestParam(params common.APIParameters, name string) ([]common.APIParameters, error) {
 	if params[name] == nil {
 		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
@@ -756,24 +868,24 @@ func getJSONObjectArrayRequestParam(params requestJSONObject, name string) ([]re
 		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
 
-	result := make([]requestJSONObject, len(value))
+	result := make([]common.APIParameters, len(value))
 	for i, item := range value {
-		// Note: generic unmarshal of JSON produces map[string]interface{}, not requestJSONObject
+		// Note: generic unmarshal of JSON produces map[string]interface{}, not common.APIParameters
 		resultItem, ok := item.(map[string]interface{})
 		if !ok {
 			return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
 		}
-		result[i] = requestJSONObject(resultItem)
+		result[i] = common.APIParameters(resultItem)
 	}
 
 	return result, nil
 }
 
-func getMapStringInt64RequestParam(params requestJSONObject, name string) (map[string]int64, error) {
+func getMapStringInt64RequestParam(params common.APIParameters, name string) (map[string]int64, error) {
 	if params[name] == nil {
 		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
-	// TODO: can't use requestJSONObject type?
+	// TODO: can't use common.APIParameters type?
 	value, ok := params[name].(map[string]interface{})
 	if !ok {
 		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
@@ -791,7 +903,7 @@ func getMapStringInt64RequestParam(params requestJSONObject, name string) (map[s
 	return result, nil
 }
 
-func getStringArrayRequestParam(params requestJSONObject, name string) ([]string, error) {
+func getStringArrayRequestParam(params common.APIParameters, name string) ([]string, error) {
 	if params[name] == nil {
 		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
 	}
@@ -826,7 +938,7 @@ func normalizeClientPlatform(clientPlatform string) string {
 	return CLIENT_PLATFORM_WINDOWS
 }
 
-func isAnyString(support *SupportServices, value string) bool {
+func isAnyString(config *Config, value string) bool {
 	return true
 }
 
@@ -838,51 +950,51 @@ func isMobileClientPlatform(clientPlatform string) bool {
 
 // Input validators follow the legacy validations rules in psi_web.
 
-func isServerSecret(support *SupportServices, value string) bool {
+func isServerSecret(config *Config, value string) bool {
 	return subtle.ConstantTimeCompare(
 		[]byte(value),
-		[]byte(support.Config.WebServerSecret)) == 1
+		[]byte(config.WebServerSecret)) == 1
 }
 
-func isHexDigits(_ *SupportServices, value string) bool {
+func isHexDigits(_ *Config, value string) bool {
 	// Allows both uppercase in addition to lowercase, for legacy support.
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		return !unicode.Is(unicode.ASCII_Hex_Digit, c)
 	})
 }
 
-func isDigits(_ *SupportServices, value string) bool {
+func isDigits(_ *Config, value string) bool {
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		return c < '0' || c > '9'
 	})
 }
 
-func isIntString(_ *SupportServices, value string) bool {
+func isIntString(_ *Config, value string) bool {
 	_, err := strconv.Atoi(value)
 	return err == nil
 }
 
-func isClientPlatform(_ *SupportServices, value string) bool {
+func isClientPlatform(_ *Config, value string) bool {
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		// Note: stricter than psi_web's Python string.whitespace
 		return unicode.Is(unicode.White_Space, c)
 	})
 }
 
-func isRelayProtocol(_ *SupportServices, value string) bool {
+func isRelayProtocol(_ *Config, value string) bool {
 	return common.Contains(protocol.SupportedTunnelProtocols, value)
 }
 
-func isBooleanFlag(_ *SupportServices, value string) bool {
+func isBooleanFlag(_ *Config, value string) bool {
 	return value == "0" || value == "1"
 }
 
-func isUpstreamProxyType(_ *SupportServices, value string) bool {
+func isUpstreamProxyType(_ *Config, value string) bool {
 	value = strings.ToLower(value)
 	return value == "http" || value == "socks5" || value == "socks4a"
 }
 
-func isRegionCode(_ *SupportServices, value string) bool {
+func isRegionCode(_ *Config, value string) bool {
 	if len(value) != 2 {
 		return false
 	}
@@ -891,7 +1003,7 @@ func isRegionCode(_ *SupportServices, value string) bool {
 	})
 }
 
-func isDialAddress(_ *SupportServices, value string) bool {
+func isDialAddress(_ *Config, value string) bool {
 	// "<host>:<port>", where <host> is a domain or IP address
 	parts := strings.Split(value, ":")
 	if len(parts) != 2 {
@@ -910,13 +1022,13 @@ func isDialAddress(_ *SupportServices, value string) bool {
 	return port > 0 && port < 65536
 }
 
-func isIPAddress(_ *SupportServices, value string) bool {
+func isIPAddress(_ *Config, value string) bool {
 	return net.ParseIP(value) != nil
 }
 
 var isDomainRegex = regexp.MustCompile("[a-zA-Z\\d-]{1,63}$")
 
-func isDomain(_ *SupportServices, value string) bool {
+func isDomain(_ *Config, value string) bool {
 
 	// From: http://stackoverflow.com/questions/2532053/validate-a-hostname-string
 	//
@@ -943,7 +1055,7 @@ func isDomain(_ *SupportServices, value string) bool {
 	return true
 }
 
-func isHostHeader(_ *SupportServices, value string) bool {
+func isHostHeader(_ *Config, value string) bool {
 	// "<host>:<port>", where <host> is a domain or IP address and ":<port>" is optional
 	if strings.Contains(value, ":") {
 		return isDialAddress(nil, value)
@@ -951,17 +1063,17 @@ func isHostHeader(_ *SupportServices, value string) bool {
 	return isIPAddress(nil, value) || isDomain(nil, value)
 }
 
-func isServerEntrySource(_ *SupportServices, value string) bool {
+func isServerEntrySource(_ *Config, value string) bool {
 	return common.Contains(protocol.SupportedServerEntrySources, value)
 }
 
 var isISO8601DateRegex = regexp.MustCompile(
 	"(?P<year>[0-9]{4})-(?P<month>[0-9]{1,2})-(?P<day>[0-9]{1,2})T(?P<hour>[0-9]{2}):(?P<minute>[0-9]{2}):(?P<second>[0-9]{2})(\\.(?P<fraction>[0-9]+))?(?P<timezone>Z|(([-+])([0-9]{2}):([0-9]{2})))")
 
-func isISO8601Date(_ *SupportServices, value string) bool {
+func isISO8601Date(_ *Config, value string) bool {
 	return isISO8601DateRegex.Match([]byte(value))
 }
 
-func isLastConnected(_ *SupportServices, value string) bool {
+func isLastConnected(_ *Config, value string) bool {
 	return value == "None" || value == "Unknown" || isISO8601Date(nil, value)
 }

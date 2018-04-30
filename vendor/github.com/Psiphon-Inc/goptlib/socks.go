@@ -288,17 +288,33 @@ func socks5NegotiateAuth(rw *bufio.ReadWriter) (method byte, err error) {
 	// Pick the most "suitable" method.
 	method = socksAuthNoAcceptableMethods
 	for _, m := range methods {
+		// [Psiphon]
+		// Some SOCKS5 clients send both None and Username/Password when in fact they are only
+		// able to auth with None. Since we don't need pluggable transport parameters and prefer
+		// enabling clients to proxy, we prefer None, which allows those clients to connect.
+		/*
+			switch m {
+			case socksAuthNoneRequired:
+				// Pick Username/Password over None if the client happens to
+				// send both.
+				if method == socksAuthNoAcceptableMethods {
+					method = m
+				}
+
+			case socksAuthUsernamePassword:
+				method = m
+			}
+		*/
 		switch m {
 		case socksAuthNoneRequired:
-			// Pick Username/Password over None if the client happens to
-			// send both.
+			method = m
+
+		case socksAuthUsernamePassword:
 			if method == socksAuthNoAcceptableMethods {
 				method = m
 			}
-
-		case socksAuthUsernamePassword:
-			method = m
 		}
+		// [Psiphon]
 	}
 
 	// Send the negotiated method.
@@ -404,13 +420,19 @@ func socks5AuthRFC1929(rw *bufio.ReadWriter, req *SocksRequest) (err error) {
 		req.Password = string(passwd)
 	}
 
-	// Mash the username/password together and parse it as a pluggable
-	// transport argument string.
-	if req.Args, err = parseClientParameters(req.Username + req.Password); err != nil {
-		sendErrResp()
-		err = newTemporaryNetError("socks5AuthRFC1929: failed to parse client parameters: %s", err)
-		return
-	}
+	// [Psiphon]
+	// Since we don't need pluggable transport parameters and prefer enabling clients to proxy,
+	// don't parse or validate username/password as PT args.
+	/*
+		// Mash the username/password together and parse it as a pluggable
+		// transport argument string.
+		if req.Args, err = parseClientParameters(req.Username + req.Password); err != nil {
+			sendErrResp()
+			err = newTemporaryNetError("socks5AuthRFC1929: failed to parse client parameters: %s", err)
+			return
+		}
+	*/
+	// [Psiphon]
 
 	// Write success response
 	resp := []byte{socksAuthRFC1929Ver, socksAuthRFC1929Success}

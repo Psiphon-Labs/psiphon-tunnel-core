@@ -40,6 +40,9 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"golang.org/x/net/proxy"
 )
 
@@ -123,7 +126,7 @@ func TestSSH(t *testing.T) {
 			tunnelProtocol:       "SSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
-			doDefaultSessionID:   false,
+			doDefaultSponsorID:   false,
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
@@ -139,7 +142,7 @@ func TestOSSH(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
-			doDefaultSessionID:   false,
+			doDefaultSponsorID:   false,
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
@@ -155,7 +158,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
-			doDefaultSessionID:   false,
+			doDefaultSponsorID:   false,
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
@@ -171,7 +174,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
-			doDefaultSessionID:   false,
+			doDefaultSponsorID:   false,
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
@@ -187,7 +190,7 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
-			doDefaultSessionID:   false,
+			doDefaultSponsorID:   false,
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
@@ -203,7 +206,7 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: false,
 			doHotReload:          false,
-			doDefaultSessionID:   false,
+			doDefaultSponsorID:   false,
 			denyTrafficRules:     false,
 			requireAuthorization: false,
 			omitAuthorization:    true,
@@ -219,7 +222,7 @@ func TestHotReload(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
-			doDefaultSessionID:   false,
+			doDefaultSponsorID:   false,
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
@@ -235,7 +238,7 @@ func TestDefaultSessionID(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
-			doDefaultSessionID:   true,
+			doDefaultSponsorID:   true,
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
@@ -251,7 +254,7 @@ func TestDenyTrafficRules(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
-			doDefaultSessionID:   false,
+			doDefaultSponsorID:   false,
 			denyTrafficRules:     true,
 			requireAuthorization: true,
 			omitAuthorization:    false,
@@ -267,7 +270,7 @@ func TestOmitAuthorization(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
-			doDefaultSessionID:   false,
+			doDefaultSponsorID:   false,
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    true,
@@ -283,7 +286,7 @@ func TestNoAuthorization(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
-			doDefaultSessionID:   false,
+			doDefaultSponsorID:   false,
 			denyTrafficRules:     false,
 			requireAuthorization: false,
 			omitAuthorization:    true,
@@ -299,7 +302,7 @@ func TestUnusedAuthorization(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
-			doDefaultSessionID:   false,
+			doDefaultSponsorID:   false,
 			denyTrafficRules:     false,
 			requireAuthorization: false,
 			omitAuthorization:    false,
@@ -315,7 +318,7 @@ func TestTCPOnlySLOK(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
-			doDefaultSessionID:   false,
+			doDefaultSponsorID:   false,
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
@@ -331,7 +334,7 @@ func TestUDPOnlySLOK(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
-			doDefaultSessionID:   false,
+			doDefaultSponsorID:   false,
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
@@ -345,7 +348,7 @@ type runServerConfig struct {
 	tunnelProtocol       string
 	enableSSHAPIRequests bool
 	doHotReload          bool
-	doDefaultSessionID   bool
+	doDefaultSponsorID   bool
 	denyTrafficRules     bool
 	requireAuthorization bool
 	omitAuthorization    bool
@@ -353,27 +356,6 @@ type runServerConfig struct {
 	doTunneledWebRequest bool
 	doTunneledNTPRequest bool
 }
-
-func sendNotificationReceived(c chan<- struct{}) {
-	select {
-	case c <- *new(struct{}):
-	default:
-	}
-}
-
-func waitOnNotification(t *testing.T, c, timeoutSignal <-chan struct{}, timeoutMessage string) {
-	select {
-	case <-c:
-	case <-timeoutSignal:
-		t.Fatalf(timeoutMessage)
-	}
-}
-
-const dummyClientVerificationPayload = `
-{
-	"status": 0,
-	"payload": ""
-}`
 
 func runServer(t *testing.T, runConfig *runServerConfig) {
 
@@ -400,15 +382,36 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("error issuing authorization: %s", err)
 	}
 
+	// Enable tactics when the test protocol is meek. Both the client and the
+	// server will be configured to support tactics. The client config will be
+	// set with a nonfunctional config so that the tactics request must
+	// succeed, overriding the nonfunctional values, for the tunnel to
+	// establish.
+
+	doTactics := protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol)
+
+	// All servers require a tactics config with valid keys.
+	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err :=
+		tactics.GenerateKeys()
+	if err != nil {
+		t.Fatalf("error generating tactics keys: %s", err)
+	}
+
 	// create a server
 
-	serverConfigJSON, _, encodedServerEntry, err := GenerateConfig(
-		&GenerateConfigParams{
-			ServerIPAddress:      serverIPAddress,
-			EnableSSHAPIRequests: runConfig.enableSSHAPIRequests,
-			WebServerPort:        8000,
-			TunnelProtocolPorts:  map[string]int{runConfig.tunnelProtocol: 4000},
-		})
+	generateConfigParams := &GenerateConfigParams{
+		ServerIPAddress:      serverIPAddress,
+		EnableSSHAPIRequests: runConfig.enableSSHAPIRequests,
+		WebServerPort:        8000,
+		TunnelProtocolPorts:  map[string]int{runConfig.tunnelProtocol: 4000},
+	}
+
+	if doTactics {
+		generateConfigParams.TacticsRequestPublicKey = tacticsRequestPublicKey
+		generateConfigParams.TacticsRequestObfuscatedKey = tacticsRequestObfuscatedKey
+	}
+
+	serverConfigJSON, _, encodedServerEntry, err := GenerateConfig(generateConfigParams)
 	if err != nil {
 		t.Fatalf("error generating server config: %s", err)
 	}
@@ -418,7 +421,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Pave psinet with random values to test handshake homepages.
 	psinetFilename := filepath.Join(testDataDirName, "psinet.json")
 	sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(
-		t, runConfig.doDefaultSessionID, psinetFilename)
+		t, runConfig.doDefaultSponsorID, psinetFilename)
 
 	// Pave OSL config for SLOK testing
 	oslConfigFilename := filepath.Join(testDataDirName, "osl_config.json")
@@ -432,12 +435,25 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t, trafficRulesFilename, propagationChannelID, accessType,
 		runConfig.requireAuthorization, runConfig.denyTrafficRules)
 
+	var tacticsConfigFilename string
+
+	// Only pave the tactics config when tactics are required. This exercises the
+	// case where the tactics config is omitted.
+	if doTactics {
+		tacticsConfigFilename = filepath.Join(testDataDirName, "tactics_config.json")
+		paveTacticsConfigFile(
+			t, tacticsConfigFilename,
+			tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
+			propagationChannelID)
+	}
+
 	var serverConfig map[string]interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
 	serverConfig["GeoIPDatabaseFilename"] = ""
 	serverConfig["PsinetDatabaseFilename"] = psinetFilename
 	serverConfig["TrafficRulesFilename"] = trafficRulesFilename
 	serverConfig["OSLConfigFilename"] = oslConfigFilename
+	serverConfig["TacticsConfigFilename"] = tacticsConfigFilename
 	serverConfig["LogFilename"] = filepath.Join(testDataDirName, "psiphond.log")
 	serverConfig["LogLevel"] = "debug"
 
@@ -495,7 +511,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		// Pave new config files with different random values.
 		sponsorID, expectedHomepageURL = pavePsinetDatabaseFile(
-			t, runConfig.doDefaultSessionID, psinetFilename)
+			t, runConfig.doDefaultSponsorID, psinetFilename)
 
 		propagationChannelID = paveOSLConfigFile(t, oslConfigFilename)
 
@@ -524,9 +540,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	numTunnels := 1
 	localSOCKSProxyPort := 1081
 	localHTTPProxyPort := 8081
-	establishTunnelPausePeriodSeconds := 1
 
-	// Note: calling LoadConfig ensures all *int config fields are initialized
+	// Note: calling LoadConfig ensures the Config is fully initialized
 	clientConfigJSON := `
     {
         "ClientPlatform" : "Windows",
@@ -538,33 +553,57 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
     }`
 	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
 
-	if !runConfig.doDefaultSessionID {
-		clientConfig.SponsorId = sponsorID
-	}
-	clientConfig.PropagationChannelId = propagationChannelID
-	clientConfig.ConnectionWorkerPoolSize = numTunnels
-	clientConfig.TunnelPoolSize = numTunnels
-	clientConfig.EstablishTunnelPausePeriodSeconds = &establishTunnelPausePeriodSeconds
-	clientConfig.TargetServerEntry = string(encodedServerEntry)
-	clientConfig.TunnelProtocol = runConfig.tunnelProtocol
-	clientConfig.LocalSocksProxyPort = localSOCKSProxyPort
-	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
-	clientConfig.EmitSLOKs = true
-
-	if !runConfig.omitAuthorization {
-		clientConfig.Authorizations = []string{clientAuthorization}
-	}
-
-	if runConfig.doClientVerification {
-		clientConfig.ClientPlatform = "Android"
-	}
-
 	clientConfig.DataStoreDirectory = testDataDirName
 	err = psiphon.InitDataStore(clientConfig)
 	if err != nil {
 		t.Fatalf("error initializing client datastore: %s", err)
 	}
 	psiphon.DeleteSLOKs()
+
+	if !runConfig.doDefaultSponsorID {
+		clientConfig.SponsorId = sponsorID
+	}
+	clientConfig.PropagationChannelId = propagationChannelID
+	clientConfig.TunnelPoolSize = numTunnels
+	clientConfig.TargetServerEntry = string(encodedServerEntry)
+	clientConfig.LocalSocksProxyPort = localSOCKSProxyPort
+	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
+	clientConfig.EmitSLOKs = true
+
+	if runConfig.doClientVerification {
+		clientConfig.ClientPlatform = "Android"
+	}
+
+	if !runConfig.omitAuthorization {
+		clientConfig.Authorizations = []string{clientAuthorization}
+	}
+
+	if doTactics {
+		clientConfig.NetworkIDGetter = &testNetworkGetter{}
+	}
+
+	// The following config values must be applied through client parameters
+	// (setting the fields in Config directly will have no effect since the
+	// client parameters have been populated by LoadConfig).
+
+	applyParameters := make(map[string]interface{})
+
+	applyParameters[parameters.ConnectionWorkerPoolSize] = numTunnels
+
+	applyParameters[parameters.EstablishTunnelPausePeriod] = "250ms"
+
+	applyParameters[parameters.LimitTunnelProtocols] = protocol.TunnelProtocols{runConfig.tunnelProtocol}
+
+	if doTactics {
+		// Configure nonfunctional values that must be overridden by tactics.
+		applyParameters[parameters.TunnelConnectTimeout] = "1s"
+		applyParameters[parameters.TunnelRateLimits] = common.RateLimits{WriteBytesPerSecond: 1}
+	}
+
+	err = clientConfig.SetClientParameters("", true, applyParameters)
+	if err != nil {
+		t.Fatalf("SetClientParameters failed: %s", err)
+	}
 
 	controller, err := psiphon.NewController(clientConfig)
 	if err != nil {
@@ -1143,4 +1182,77 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
 	}
 
 	return propagationChannelID
+}
+
+func paveTacticsConfigFile(
+	t *testing.T, tacticsConfigFilename string,
+	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey string,
+	propagationChannelID string) {
+
+	tacticsConfigJSONFormat := `
+    {
+      "RequestPublicKey" : "%s",
+      "RequestPrivateKey" : "%s",
+      "RequestObfuscatedKey" : "%s",
+      "DefaultTactics" : {
+        "TTL" : "60s",
+        "Probability" : 1.0
+      },
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "APIParameters" : {"propagation_channel_id" : ["%s"]},
+            "SpeedTestRTTMilliseconds" : {
+              "Aggregation" : "Median",
+              "AtLeast" : 1
+            }
+          },
+          "Tactics" : {
+            "Parameters" : {
+              "TunnelConnectTimeout" : "20s",
+              "TunnelRateLimits" : {"WriteBytesPerSecond": 1000000}
+            }
+          }
+        }
+      ]
+    }
+    `
+
+	tacticsConfigJSON := fmt.Sprintf(
+		tacticsConfigJSONFormat,
+		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
+		propagationChannelID)
+
+	err := ioutil.WriteFile(tacticsConfigFilename, []byte(tacticsConfigJSON), 0600)
+	if err != nil {
+		t.Fatalf("error paving tactics config file: %s", err)
+	}
+}
+
+func sendNotificationReceived(c chan<- struct{}) {
+	select {
+	case c <- *new(struct{}):
+	default:
+	}
+}
+
+func waitOnNotification(t *testing.T, c, timeoutSignal <-chan struct{}, timeoutMessage string) {
+	select {
+	case <-c:
+	case <-timeoutSignal:
+		t.Fatalf(timeoutMessage)
+	}
+}
+
+const dummyClientVerificationPayload = `
+{
+	"status": 0,
+	"payload": ""
+}`
+
+type testNetworkGetter struct {
+}
+
+func (testNetworkGetter) GetNetworkID() string {
+	return "NETWORK1"
 }

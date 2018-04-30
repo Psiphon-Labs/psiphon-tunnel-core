@@ -116,7 +116,7 @@ import PsiphonTunnel
 // Note that we're excluding all the optional methods that we aren't using,
 // however your needs may be different.
 extension AppDelegate: TunneledAppDelegate {
-    func getPsiphonConfig() -> String? {
+    func getPsiphonConfig() -> Any? {
         // In this example, we're going to retrieve our Psiphon config from a file in the app bundle.
         // Alternatively, it could be a string literal in the code, or whatever makes sense.
 

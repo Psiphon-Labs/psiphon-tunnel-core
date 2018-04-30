@@ -213,7 +213,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 		t.Fatalf("error initializing client datastore: %s", err)
 	}
 
-	if CountServerEntries("", "") > 0 {
+	if CountServerEntries("", nil) > 0 {
 		t.Fatalf("unexpected server entries")
 	}
 
@@ -373,7 +373,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
         "PropagationChannelId" : "0",
         "ConnectionPoolSize" : 1,
         "EstablishTunnelPausePeriodSeconds" : 1,
-        "FetchRemoteServerListRetryPeriodSeconds" : 1,
+        "FetchRemoteServerListRetryPeriodMilliseconds" : 250,
 		"RemoteServerListSignaturePublicKey" : "%s",
 		"RemoteServerListUrl" : "%s",
 		"RemoteServerListDownloadFilename" : "%s",

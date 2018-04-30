@@ -43,7 +43,7 @@ const DNS_PORT = 53
 // of a Psiphon dialer (TCPDial, MeekDial, etc.)
 type DialConfig struct {
 
-	// UpstreamProxyUrl specifies a proxy to connect through.
+	// UpstreamProxyURL specifies a proxy to connect through.
 	// E.g., "http://proxyhost:8080"
 	//       "socks5://user:password@proxyhost:1080"
 	//       "socks4a://proxyhost:1080"
@@ -52,11 +52,11 @@ type DialConfig struct {
 	// Certain tunnel protocols require HTTP CONNECT support
 	// when a HTTP proxy is specified. If CONNECT is not
 	// supported, those protocols will not connect.
-	UpstreamProxyUrl string
+	UpstreamProxyURL string
 
 	// CustomHeaders is a set of additional arbitrary HTTP headers that are
 	// added to all plaintext HTTP requests and requests made through an HTTP
-	// upstream proxy when specified by UpstreamProxyUrl.
+	// upstream proxy when specified by UpstreamProxyURL.
 	CustomHeaders http.Header
 
 	// BindToDevice parameters are used to exclude connections and
@@ -97,26 +97,56 @@ type DialConfig struct {
 }
 
 // NetworkConnectivityChecker defines the interface to the external
-// HasNetworkConnectivity provider
+// HasNetworkConnectivity provider, which call into the host application to
+// check for network connectivity.
 type NetworkConnectivityChecker interface {
 	// TODO: change to bool return value once gobind supports that type
 	HasNetworkConnectivity() int
 }
 
 // DeviceBinder defines the interface to the external BindToDevice provider
+// which calls into the host application to bind sockets to specific devices.
+// This is used for VPN routing exclusion.
 type DeviceBinder interface {
 	BindToDevice(fileDescriptor int) error
 }
 
 // DnsServerGetter defines the interface to the external GetDnsServer provider
+// which calls into the host application to discover the native network DNS
+// server settings.
 type DnsServerGetter interface {
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
 }
 
-// IPv6Synthesizer defines the interface to the external IPv6Synthesize provider
+// IPv6Synthesizer defines the interface to the external IPv6Synthesize
+// provider which calls into the host application to synthesize IPv6 addresses
+// from IPv4 ones. This is used to correctly lookup IPs on DNS64/NAT64
+// networks.
 type IPv6Synthesizer interface {
 	IPv6Synthesize(IPv4Addr string) string
+}
+
+// NetworkIDGetter defines the interface to the external GetNetworkID
+// provider, which returns an identifier for the host's current active
+// network.
+//
+// The identifier is a string that should indicate the network type and
+// identity; for example "WIFI-<BSSID>" or "MOBILE-<MCC/MNC>". As this network
+// ID is personally identifying, it is only used locally in the client to
+// determine network context and is not sent to the Psiphon server. The
+// identifer will be logged in diagnostics messages; in this case only the
+// substring before the first "-" is logged, so all PII must appear after the
+// first "-".
+//
+// NetworkIDGetter.GetNetworkID should always return an identifier value, as
+// logic that uses GetNetworkID, including tactics, is intended to proceed
+// regardless of whether an accurate network identifier can be obtained. By
+// convention, the provider should return "UNKNOWN" when an accurate network
+// identifier cannot be obtained. Best-effort is acceptable: e.g., return just
+// "WIFI" when only the type of the network but no details can be determined.
+type NetworkIDGetter interface {
+	GetNetworkID() string
 }
 
 // Dialer is a custom network dialer.
@@ -215,6 +245,7 @@ func ResolveIP(host string, conn net.Conn) (addrs []net.IP, ttls []time.Duration
 // for applying the context to requests made with the returned http.Client.
 func MakeUntunneledHTTPClient(
 	ctx context.Context,
+	config *Config,
 	untunneledDialConfig *DialConfig,
 	verifyLegacyCertificate *x509.Certificate,
 	skipVerify bool) (*http.Client, error) {
@@ -229,7 +260,8 @@ func MakeUntunneledHTTPClient(
 		// Note: when verifyLegacyCertificate is not nil, some
 		// of the other CustomTLSConfig is overridden.
 		&CustomTLSConfig{
-			Dial: dialer,
+			ClientParameters: config.clientParameters,
+			Dial:             dialer,
 			VerifyLegacyCertificate:       verifyLegacyCertificate,
 			UseDialAddrSNI:                true,
 			SNIServerName:                 "",
@@ -321,7 +353,7 @@ func MakeDownloadHTTPClient(
 	} else {
 
 		httpClient, err = MakeUntunneledHTTPClient(
-			ctx, untunneledDialConfig, nil, skipVerify)
+			ctx, config, untunneledDialConfig, nil, skipVerify)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}

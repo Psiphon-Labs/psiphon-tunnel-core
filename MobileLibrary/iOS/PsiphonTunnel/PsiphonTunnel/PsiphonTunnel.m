@@ -22,6 +22,7 @@
 #import <stdatomic.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
+#import <SystemConfiguration/CaptiveNetwork.h>
 #import "LookupIPv6.h"
 #import "Psi-meta.h"
 #import "PsiphonTunnel.h"
@@ -1087,6 +1088,38 @@
         return IPv6Addr;
     }
     return @"";
+}
+
+- (NSString *)getNetworkID {
+
+    // The network ID contains potential PII. In tunnel-core, the network ID
+    // is used only locally in the client and not sent to the server.
+    //
+    // See network ID requirements here:
+    // https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter
+
+    NSMutableString *networkID = [NSMutableString stringWithString:@"UNKNOWN"];
+    NetworkStatus status = [[Reachability reachabilityForInternetConnection] currentReachabilityStatus];
+    if (status == ReachableViaWiFi) {
+        [networkID setString:@"WIFI"];
+        NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();
+        for (NSString *networkInterfaceName in networkInterfaceNames) {
+            NSDictionary *networkInterfaceInfo = (__bridge_transfer id)CNCopyCurrentNetworkInfo((__bridge CFStringRef)networkInterfaceName);
+            if (networkInterfaceInfo[@"BSSID"]) {
+                [networkID appendFormat:@"-%@", networkInterfaceInfo[@"BSSID"]];
+            }
+        }
+    } else if (status == ReachableViaWWAN) {
+        [networkID setString:@"MOBILE"];
+        CTTelephonyNetworkInfo *telephonyNetworkinfo = [[CTTelephonyNetworkInfo alloc] init];
+        CTCarrier *cellularProvider = [telephonyNetworkinfo subscriberCellularProvider];
+        if (cellularProvider != nil) {
+            NSString *mcc = [cellularProvider mobileCountryCode];
+            NSString *mnc = [cellularProvider mobileNetworkCode];
+            [networkID appendFormat:@"-%@-%@", mcc, mnc];
+        }
+    }
+    return networkID;
 }
 
 - (void)notice:(NSString *)noticeJSON {
