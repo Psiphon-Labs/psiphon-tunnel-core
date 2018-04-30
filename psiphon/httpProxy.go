@@ -712,7 +712,7 @@ func proxifyURL(localHTTPProxyIP string, localHTTPProxyPort int, urlString strin
 	if rewriteParams != nil {
 		proxyPath = URL_PROXY_TUNNELED_REWRITE_REQUEST_PATH
 	}
-	opaqueFormat := fmt.Sprintf("//%%s:%%d/%s/%%s", proxyPath)
+	opaqueFormat := fmt.Sprintf("//%%s:%%d%s%%s", proxyPath)
 
 	var proxifiedURL url.URL
 
