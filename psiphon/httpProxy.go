@@ -68,7 +68,8 @@ import (
 // NSURLProtocol, so they are not tunneled. Instead, we rewrite those URLs to use the URL
 // proxy, and rewrite retrieved playlist files so they also contain proxied URLs.
 //
-// The URL proxy offers /tunneled-icy/ which is compatible with ICY protocol resources.
+// The URL proxy offers /tunneled-icy/ which is compatible with both HTTP and ICY protocol
+// resources.
 //
 // Origin URLs must include the scheme prefix ("http://" or "https://") and must be
 // URL encoded.
@@ -337,7 +338,7 @@ func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, requ
 
 // rewriteICYConn rewrites an ICY procotol responses to that it may be
 // consumed by Go's http package. rewriteICYConn expects the ICY response to
-// be equivilent to HTTP/1.1 with the exception of the protocol name in the
+// be equivalent to HTTP/1.1 with the exception of the protocol name in the
 // status line, which is the one part that is rewritten. Responses that are
 // already HTTP are passed through unmodified.
 type rewriteICYConn struct {
@@ -367,10 +368,11 @@ func (conn *rewriteICYConn) Read(b []byte) (int, error) {
 		return n, err
 	}
 
-	if string(b[:3]) == "ICY" {
+	if bytes.Compare(b[:3], []byte("ICY")) == 0 {
 		atomic.StoreInt32(conn.isICY, 1)
-		copy(b, []byte("HTTP/1.0"))
-		return 8, nil
+		protocol := "HTTP/1.0"
+		copy(b, []byte(protocol))
+		return len(protocol), nil
 	}
 
 	return n, nil
@@ -388,7 +390,7 @@ func (status *rewriteICYStatus) isICY() bool {
 // use rewriteICYConn. Both HTTP and HTTPS are handled. The http.Client is
 // intended to be used for one single request. The client disables keep alives
 // as rewriteICYConn can only rewrite the first response in a connection. The
-// returned rewriteICYStatus indicates which the first response for the first
+// returned rewriteICYStatus indicates whether the first response for the first
 // request was ICY, allowing the downstream relayed response to replicate the
 // ICY protocol.
 func (proxy *HttpProxy) makeRewriteICYClient() (*http.Client, *rewriteICYStatus) {
@@ -543,7 +545,7 @@ func (proxy *HttpProxy) relayHTTPRequest(
 	if rewriteICYStatus != nil && rewriteICYStatus.isICY() {
 
 		// Custom ICY response, using "ICY" as the protocol name
-		// but otherwise equivilent to the HTTP response.
+		// but otherwise equivalent to the HTTP response.
 
 		// As the ICY http.Transport has disabled keep-alives,
 		// hijacking here does not disrupt an otherwise persistent
@@ -555,9 +557,9 @@ func (proxy *HttpProxy) relayHTTPRequest(
 			return
 		}
 
-		_, err := fmt.Fprint(
+		_, err := fmt.Fprintf(
 			conn,
-			"ICY %d %s",
+			"ICY %d %s\r\n",
 			response.StatusCode,
 			http.StatusText(response.StatusCode))
 		if err != nil {
