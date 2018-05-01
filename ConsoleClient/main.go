@@ -241,7 +241,7 @@ func main() {
 			}
 			// Since embedded server list entries may become stale, they will not
 			// overwrite existing stored entries for the same server.
-			err = psiphon.StoreServerEntries(serverEntries, false)
+			err = psiphon.StoreServerEntries(config, serverEntries, false)
 			if err != nil {
 				psiphon.NoticeError("error storing embedded server entry list data: %s", err)
 				return

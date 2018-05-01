@@ -94,6 +94,7 @@ func FetchCommonRemoteServerList(
 	}
 
 	err = StreamingStoreServerEntries(
+		config,
 		protocol.NewStreamingServerEntryDecoder(
 			serverListPayloadReader,
 			common.GetCurrentTimestamp(),
@@ -287,6 +288,7 @@ func FetchObfuscatedServerLists(
 		}
 
 		err = StreamingStoreServerEntries(
+			config,
 			protocol.NewStreamingServerEntryDecoder(
 				serverListPayloadReader,
 				common.GetCurrentTimestamp(),
