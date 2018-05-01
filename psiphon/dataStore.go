@@ -285,7 +285,11 @@ func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) e
 
 // StoreServerEntries stores a list of server entries.
 // There is an independent transaction for each entry insert/update.
-func StoreServerEntries(serverEntries []*protocol.ServerEntry, replaceIfExists bool) error {
+func StoreServerEntries(
+	config *Config,
+	serverEntries []*protocol.ServerEntry,
+	replaceIfExists bool) error {
+
 	checkInitDataStore()
 
 	for _, serverEntry := range serverEntries {
@@ -297,7 +301,7 @@ func StoreServerEntries(serverEntries []*protocol.ServerEntry, replaceIfExists b
 
 	// Since there has possibly been a significant change in the server entries,
 	// take this opportunity to update the available egress regions.
-	ReportAvailableRegions()
+	ReportAvailableRegions(config)
 
 	return nil
 }
@@ -305,7 +309,9 @@ func StoreServerEntries(serverEntries []*protocol.ServerEntry, replaceIfExists b
 // StreamingStoreServerEntries stores a list of server entries.
 // There is an independent transaction for each entry insert/update.
 func StreamingStoreServerEntries(
-	serverEntries *protocol.StreamingServerEntryDecoder, replaceIfExists bool) error {
+	config *Config,
+	serverEntries *protocol.StreamingServerEntryDecoder,
+	replaceIfExists bool) error {
 
 	checkInitDataStore()
 
@@ -333,7 +339,7 @@ func StreamingStoreServerEntries(
 
 	// Since there has possibly been a significant change in the server entries,
 	// take this opportunity to update the available egress regions.
-	ReportAvailableRegions()
+	ReportAvailableRegions(config)
 
 	return nil
 }
@@ -637,6 +643,13 @@ func (iterator *ServerEntryIterator) Reset() error {
 
 		count := CountServerEntries(iterator.config.EgressRegion, limitTunnelProtocols)
 		NoticeCandidateServers(iterator.config.EgressRegion, limitTunnelProtocols, count)
+
+		// LimitTunnelProtocols may have changed since the last ReportAvailableRegions,
+		// and now there may be no servers with the required capabilities in the
+		// selected region. ReportAvailableRegions will signal this to the client.
+		if count == 0 {
+			ReportAvailableRegions(iterator.config)
+		}
 	}
 
 	// This query implements the Psiphon server candidate selection
@@ -889,13 +902,21 @@ func CountNonImpairedProtocols(
 }
 
 // ReportAvailableRegions prints a notice with the available egress regions.
-// Note that this report ignores LimitTunnelProtocols.
-func ReportAvailableRegions() {
+func ReportAvailableRegions(config *Config) {
 	checkInitDataStore()
+
+	limitTunnelProtocols := config.clientParameters.Get().TunnelProtocols(
+		parameters.LimitTunnelProtocols)
 
 	regions := make(map[string]bool)
 	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
-		regions[serverEntry.Region] = true
+		if len(limitTunnelProtocols) == 0 ||
+			// When ReportAvailableRegions is called only limitTunnelProtocols is known;
+			// impairedTunnelProtocols and excludeMeek may not apply.
+			len(serverEntry.GetSupportedProtocols(limitTunnelProtocols, nil, false)) > 0 {
+
+			regions[serverEntry.Region] = true
+		}
 	})
 
 	if err != nil {
