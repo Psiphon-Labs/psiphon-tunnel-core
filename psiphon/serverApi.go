@@ -228,7 +228,10 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	// The reason we are storing the entire array of server entries at once rather
 	// than one at a time is that some desirable side-effects get triggered by
 	// StoreServerEntries that don't get triggered by StoreServerEntry.
-	err = StoreServerEntries(decodedServerEntries, true)
+	err = StoreServerEntries(
+		serverContext.tunnel.config,
+		decodedServerEntries,
+		true)
 	if err != nil {
 		return common.ContextError(err)
 	}

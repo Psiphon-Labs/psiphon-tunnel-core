@@ -166,7 +166,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 // component fails or the parent context is canceled.
 func (controller *Controller) Run(ctx context.Context) {
 
-	ReportAvailableRegions()
+	ReportAvailableRegions(controller.config)
 
 	runCtx, stopRunning := context.WithCancel(ctx)
 	defer stopRunning()
