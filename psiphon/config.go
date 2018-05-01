@@ -118,7 +118,7 @@ type Config struct {
 	DisableLocalHTTPProxy bool
 
 	// NetworkLatencyMultiplier is a multiplier that is to be applied to
-	// default network event timeouts. Set this to tune performence for
+	// default network event timeouts. Set this to tune performance for
 	// slow networks.
 	// When set, must be >= 1.0.
 	NetworkLatencyMultiplier float64
