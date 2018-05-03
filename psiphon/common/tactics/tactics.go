@@ -184,6 +184,7 @@ const (
 	SPEED_TEST_PADDING_MIN_SIZE        = 0
 	SPEED_TEST_PADDING_MAX_SIZE        = 256
 	TACTICS_PADDING_MAX_SIZE           = 256
+	TACTICS_OBFUSCATED_KEY_SIZE        = 32
 	SPEED_TEST_SAMPLES_PARAMETER_NAME  = "speed_test_samples"
 	APPLIED_TACTICS_TAG_PARAMETER_NAME = "applied_tactics_tag"
 	STORED_TACTICS_TAG_PARAMETER_NAME  = "stored_tactics_tag"
@@ -398,7 +399,7 @@ func GenerateKeys() (encodedRequestPublicKey, encodedRequestPrivateKey, encodedO
 		return "", "", "", common.ContextError(err)
 	}
 
-	obfuscatedKey, err := common.MakeSecureRandomBytes(common.OBFUSCATE_KEY_LENGTH)
+	obfuscatedKey, err := common.MakeSecureRandomBytes(TACTICS_OBFUSCATED_KEY_SIZE)
 	if err != nil {
 		return "", "", "", common.ContextError(err)
 	}
@@ -475,7 +476,7 @@ func (server *Server) Validate() error {
 	} else {
 		if len(server.RequestPublicKey) != 32 ||
 			len(server.RequestPrivateKey) != 32 ||
-			len(server.RequestObfuscatedKey) != common.OBFUSCATE_KEY_LENGTH {
+			len(server.RequestObfuscatedKey) != TACTICS_OBFUSCATED_KEY_SIZE {
 			return common.ContextError(errors.New("invalid request key"))
 		}
 	}
