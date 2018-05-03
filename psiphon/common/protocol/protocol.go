@@ -47,11 +47,10 @@ const (
 
 	CLIENT_CAPABILITY_SERVER_REQUESTS = "server-requests"
 
-	PSIPHON_API_HANDSHAKE_REQUEST_NAME           = "psiphon-handshake"
-	PSIPHON_API_CONNECTED_REQUEST_NAME           = "psiphon-connected"
-	PSIPHON_API_STATUS_REQUEST_NAME              = "psiphon-status"
-	PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME = "psiphon-client-verification"
-	PSIPHON_API_OSL_REQUEST_NAME                 = "psiphon-osl"
+	PSIPHON_API_HANDSHAKE_REQUEST_NAME = "psiphon-handshake"
+	PSIPHON_API_CONNECTED_REQUEST_NAME = "psiphon-connected"
+	PSIPHON_API_STATUS_REQUEST_NAME    = "psiphon-status"
+	PSIPHON_API_OSL_REQUEST_NAME       = "psiphon-osl"
 
 	PSIPHON_API_CLIENT_SESSION_ID_LENGTH = 16
 

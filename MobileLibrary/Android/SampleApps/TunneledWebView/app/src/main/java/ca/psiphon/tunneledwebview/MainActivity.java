@@ -283,11 +283,6 @@ public class MainActivity extends ActionBarActivity
     }
 
     @Override
-    public void onClientVerificationRequired(String s, int i, boolean b) {
-
-    }
-
-    @Override
     public void onActiveAuthorizationIDs(List<String> authorizations) {
 
     }

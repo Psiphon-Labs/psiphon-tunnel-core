@@ -82,8 +82,6 @@ func TestMain(m *testing.M) {
 
 	psiphon.SetEmitDiagnosticNotices(true)
 
-	CLIENT_VERIFICATION_REQUIRED = true
-
 	mockWebServerURL, mockWebServerExpectedResponse = runMockWebServer()
 
 	os.Exit(m.Run())
@@ -130,7 +128,6 @@ func TestSSH(t *testing.T) {
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
-			doClientVerification: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -146,7 +143,6 @@ func TestOSSH(t *testing.T) {
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
-			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -162,7 +158,6 @@ func TestUnfrontedMeek(t *testing.T) {
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
-			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -178,7 +173,6 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
-			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -194,7 +188,6 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
-			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -210,7 +203,6 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			denyTrafficRules:     false,
 			requireAuthorization: false,
 			omitAuthorization:    true,
-			doClientVerification: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -226,7 +218,6 @@ func TestHotReload(t *testing.T) {
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
-			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -242,7 +233,6 @@ func TestDefaultSessionID(t *testing.T) {
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
-			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -258,7 +248,6 @@ func TestDenyTrafficRules(t *testing.T) {
 			denyTrafficRules:     true,
 			requireAuthorization: true,
 			omitAuthorization:    false,
-			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -274,7 +263,6 @@ func TestOmitAuthorization(t *testing.T) {
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    true,
-			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -290,7 +278,6 @@ func TestNoAuthorization(t *testing.T) {
 			denyTrafficRules:     false,
 			requireAuthorization: false,
 			omitAuthorization:    true,
-			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -306,7 +293,6 @@ func TestUnusedAuthorization(t *testing.T) {
 			denyTrafficRules:     false,
 			requireAuthorization: false,
 			omitAuthorization:    false,
-			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 		})
@@ -322,7 +308,6 @@ func TestTCPOnlySLOK(t *testing.T) {
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
-			doClientVerification: false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: false,
 		})
@@ -338,7 +323,6 @@ func TestUDPOnlySLOK(t *testing.T) {
 			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    false,
-			doClientVerification: false,
 			doTunneledWebRequest: false,
 			doTunneledNTPRequest: true,
 		})
@@ -352,7 +336,6 @@ type runServerConfig struct {
 	denyTrafficRules     bool
 	requireAuthorization bool
 	omitAuthorization    bool
-	doClientVerification bool
 	doTunneledWebRequest bool
 	doTunneledNTPRequest bool
 }
@@ -570,10 +553,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
 	clientConfig.EmitSLOKs = true
 
-	if runConfig.doClientVerification {
-		clientConfig.ClientPlatform = "Android"
-	}
-
 	if !runConfig.omitAuthorization {
 		clientConfig.Authorizations = []string{clientAuthorization}
 	}
@@ -613,8 +592,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	tunnelsEstablished := make(chan struct{}, 1)
 	homepageReceived := make(chan struct{}, 1)
 	slokSeeded := make(chan struct{}, 1)
-	verificationRequired := make(chan struct{}, 1)
-	verificationCompleted := make(chan struct{}, 1)
 
 	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
@@ -628,9 +605,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 			switch noticeType {
 			case "Tunnels":
-				// Do not set verification payload until tunnel is
-				// established. Otherwise will silently take no action.
-				controller.SetClientVerificationPayloadForActiveTunnels("")
 				count := int(payload["count"].(float64))
 				if count >= numTunnels {
 					sendNotificationReceived(tunnelsEstablished)
@@ -644,11 +618,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				sendNotificationReceived(homepageReceived)
 			case "SLOKSeeded":
 				sendNotificationReceived(slokSeeded)
-			case "ClientVerificationRequired":
-				sendNotificationReceived(verificationRequired)
-				controller.SetClientVerificationPayloadForActiveTunnels(dummyClientVerificationPayload)
-			case "NoticeClientVerificationRequestCompleted":
-				sendNotificationReceived(verificationCompleted)
 			}
 		}))
 
@@ -692,11 +661,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel establish timeout exceeded")
 	waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
-
-	if runConfig.doClientVerification {
-		waitOnNotification(t, verificationRequired, timeoutSignal, "verification required timeout exceeded")
-		waitOnNotification(t, verificationCompleted, timeoutSignal, "verification completed timeout exceeded")
-	}
 
 	expectTrafficFailure := runConfig.denyTrafficRules || (runConfig.omitAuthorization && runConfig.requireAuthorization)
 
@@ -1243,12 +1207,6 @@ func waitOnNotification(t *testing.T, c, timeoutSignal <-chan struct{}, timeoutM
 		t.Fatalf(timeoutMessage)
 	}
 }
-
-const dummyClientVerificationPayload = `
-{
-	"status": 0,
-	"payload": ""
-}`
 
 type testNetworkGetter struct {
 }

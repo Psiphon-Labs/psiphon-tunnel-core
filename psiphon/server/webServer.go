@@ -69,7 +69,6 @@ func RunWebServer(
 	serveMux.HandleFunc("/handshake", webServer.handshakeHandler)
 	serveMux.HandleFunc("/connected", webServer.connectedHandler)
 	serveMux.HandleFunc("/status", webServer.statusHandler)
-	serveMux.HandleFunc("/client_verification", webServer.clientVerificationHandler)
 
 	certificate, err := tls.X509KeyPair(
 		[]byte(support.Config.WebServerCertificate),
@@ -295,31 +294,6 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 			webServer.lookupGeoIPData(params),
 			nil, // authorizedAccessTypes not logged in web API transport
 			protocol.PSIPHON_API_STATUS_REQUEST_NAME,
-			params)
-	}
-
-	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("failed")
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write(responsePayload)
-}
-
-func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *http.Request) {
-
-	params, err := convertHTTPRequestToAPIRequest(w, r, "verificationData")
-
-	var responsePayload []byte
-	if err == nil {
-		responsePayload, err = dispatchAPIRequestHandler(
-			webServer.support,
-			protocol.PSIPHON_WEB_API_PROTOCOL,
-			webServer.lookupGeoIPData(params),
-			nil, // authorizedAccessTypes not logged in web API transport
-			protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME,
 			params)
 	}
 
