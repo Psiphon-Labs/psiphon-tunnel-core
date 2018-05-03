@@ -137,6 +137,9 @@ fi
 # gomobile bind
 #
 
+# Ensure BUILD* variables reflect the tunnel-core repo
+cd ${TUNNEL_CORE_SRC_DIR}
+
 BUILDDATE=$(date +%Y-%m-%dT%H:%M:%S%z)
 BUILDREPO=$(git config --get remote.origin.url)
 BUILDREV=$(git rev-parse --short HEAD)

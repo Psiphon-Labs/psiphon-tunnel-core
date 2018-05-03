@@ -88,7 +88,7 @@ func prepareMigrationEntries(config *Config) []*protocol.ServerEntry {
 func migrateEntries(config *Config, serverEntries []*protocol.ServerEntry, legacyDataStoreFilename string) {
 	checkInitDataStore()
 
-	err := StoreServerEntries(serverEntries, false)
+	err := StoreServerEntries(config, serverEntries, false)
 	if err != nil {
 		NoticeAlert("migrateEntries: StoreServerEntries failed: %s", err)
 	} else {
