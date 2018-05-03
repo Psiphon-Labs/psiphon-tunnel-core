@@ -542,15 +542,18 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	localHTTPProxyPort := 8081
 
 	// Note: calling LoadConfig ensures the Config is fully initialized
-	clientConfigJSON := `
+	clientConfigJSON := fmt.Sprintf(`
     {
         "ClientPlatform" : "Windows",
         "ClientVersion" : "0",
         "SponsorId" : "0",
         "PropagationChannelId" : "0",
         "DisableRemoteServerListFetcher" : true,
-        "UseIndistinguishableTLS" : true
-    }`
+        "UseIndistinguishableTLS" : true,
+        "EstablishTunnelPausePeriodSeconds" : 1,
+        "ConnectionWorkerPoolSize" : %d,
+        "TunnelProtocols" : ["%s"]
+    }`, numTunnels, runConfig.tunnelProtocol)
 	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
 
 	clientConfig.DataStoreDirectory = testDataDirName
@@ -582,27 +585,18 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		clientConfig.NetworkIDGetter = &testNetworkGetter{}
 	}
 
-	// The following config values must be applied through client parameters
-	// (setting the fields in Config directly will have no effect since the
-	// client parameters have been populated by LoadConfig).
-
-	applyParameters := make(map[string]interface{})
-
-	applyParameters[parameters.ConnectionWorkerPoolSize] = numTunnels
-
-	applyParameters[parameters.EstablishTunnelPausePeriod] = "250ms"
-
-	applyParameters[parameters.LimitTunnelProtocols] = protocol.TunnelProtocols{runConfig.tunnelProtocol}
-
 	if doTactics {
 		// Configure nonfunctional values that must be overridden by tactics.
+
+		applyParameters := make(map[string]interface{})
+
 		applyParameters[parameters.TunnelConnectTimeout] = "1s"
 		applyParameters[parameters.TunnelRateLimits] = common.RateLimits{WriteBytesPerSecond: 1}
-	}
 
-	err = clientConfig.SetClientParameters("", true, applyParameters)
-	if err != nil {
-		t.Fatalf("SetClientParameters failed: %s", err)
+		err = clientConfig.SetClientParameters("", true, applyParameters)
+		if err != nil {
+			t.Fatalf("SetClientParameters failed: %s", err)
+		}
 	}
 
 	controller, err := psiphon.NewController(clientConfig)
