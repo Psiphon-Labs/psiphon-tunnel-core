@@ -101,6 +101,8 @@ type TrafficRules struct {
 
 	// RateLimits specifies data transfer rate limits for the
 	// client traffic.
+	// Any RateLimits.ReadUnthrottledBytes/WriteUnthrottledBytes
+	// apply only to the first tunnel in a session.
 	RateLimits RateLimits
 
 	// DialTCPPortForwardTimeoutMilliseconds is the timeout period
@@ -272,7 +274,10 @@ func (set *TrafficRulesSet) Validate() error {
 // For the return value TrafficRules, all pointer and slice fields are initialized,
 // so nil checks are not required. The caller must not modify the returned TrafficRules.
 func (set *TrafficRulesSet) GetTrafficRules(
-	tunnelProtocol string, geoIPData GeoIPData, state handshakeState) TrafficRules {
+	isFirstTunnelInSession bool,
+	tunnelProtocol string,
+	geoIPData GeoIPData,
+	state handshakeState) TrafficRules {
 
 	set.ReloadableFile.RLock()
 	defer set.ReloadableFile.RUnlock()
@@ -481,6 +486,11 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		}
 
 		break
+	}
+
+	if !isFirstTunnelInSession {
+		*trafficRules.RateLimits.ReadUnthrottledBytes = 0
+		*trafficRules.RateLimits.WriteUnthrottledBytes = 0
 	}
 
 	log.WithContextFields(LogFields{"trafficRules": trafficRules}).Debug("selected traffic rules")
