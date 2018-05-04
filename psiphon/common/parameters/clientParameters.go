@@ -418,7 +418,7 @@ func (p *ClientParameters) Set(
 
 			// A JSON remarshal resolves cases where applyParameters is a
 			// result of unmarshal-into-interface, in which case non-scalar
-			// values will not have the expecte types; see:
+			// values will not have the expected types; see:
 			// https://golang.org/pkg/encoding/json/#Unmarshal. This remarshal
 			// also results in a deep copy.
 

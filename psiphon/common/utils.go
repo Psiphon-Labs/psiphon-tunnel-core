@@ -70,6 +70,25 @@ func ContainsInt(list []int, target int) bool {
 	return false
 }
 
+// GetStringSlice converts an interface{} which is
+// of type []interace{}, and with the type of each
+// element a string, to []string.
+func GetStringSlice(value interface{}) ([]string, bool) {
+	slice, ok := value.([]interface{})
+	if !ok {
+		return nil, false
+	}
+	strSlice := make([]string, len(slice))
+	for index, element := range slice {
+		str, ok := element.(string)
+		if !ok {
+			return nil, false
+		}
+		strSlice[index] = str
+	}
+	return strSlice, true
+}
+
 // FlipCoin is a helper function that randomly
 // returns true or false.
 //
