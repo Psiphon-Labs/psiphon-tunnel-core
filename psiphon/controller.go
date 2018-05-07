@@ -1331,7 +1331,6 @@ func (controller *Controller) getTactics(done chan struct{}) {
 			case <-controller.establishCtx.Done():
 				return
 			case <-tacticsRetryDelay.C:
-			default:
 			}
 
 			tacticsRetryDelay.Stop()
