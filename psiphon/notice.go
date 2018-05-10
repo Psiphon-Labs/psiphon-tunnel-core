@@ -784,6 +784,15 @@ func outputRepetitiveNotice(
 	}
 }
 
+// ResetRepetitiveNotices resets the repetitive notice state, so
+// the next instance of any notice will not be supressed.
+func ResetRepetitiveNotices() {
+	repetitiveNoticeMutex.Lock()
+	defer repetitiveNoticeMutex.Unlock()
+
+	repetitiveNoticeStates = make(map[string]*repetitiveNoticeState)
+}
+
 type noticeObject struct {
 	NoticeType string          `json:"noticeType"`
 	Data       json.RawMessage `json:"data"`
