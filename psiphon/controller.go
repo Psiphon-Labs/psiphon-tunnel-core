@@ -166,6 +166,11 @@ func NewController(config *Config) (controller *Controller, err error) {
 // component fails or the parent context is canceled.
 func (controller *Controller) Run(ctx context.Context) {
 
+	// Ensure fresh repetitive notice state for each run, so the
+	// client will always get an AvailableEgressRegions notice,
+	// an initial instance of any repetitive error notice, etc.
+	ResetRepetitiveNotices()
+
 	ReportAvailableRegions(controller.config)
 
 	runCtx, stopRunning := context.WithCancel(ctx)
