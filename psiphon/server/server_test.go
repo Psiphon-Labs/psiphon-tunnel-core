@@ -1199,6 +1199,7 @@ func paveTacticsConfigFile(
       "RequestPublicKey" : "%s",
       "RequestPrivateKey" : "%s",
       "RequestObfuscatedKey" : "%s",
+      "EnforceServerSide" : true,
       "DefaultTactics" : {
         "TTL" : "60s",
         "Probability" : 1.0,

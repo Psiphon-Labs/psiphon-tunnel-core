@@ -231,6 +231,10 @@ type Server struct {
 	// RequestObfuscatedKey is the tactics request obfuscation key.
 	RequestObfuscatedKey []byte
 
+	// EnforceServerSide enables server-side enforcement of certain tactics
+	// parameters via Listeners.
+	EnforceServerSide bool
+
 	// DefaultTactics is the baseline tactics for all clients. It must include a
 	// TTL and Probability.
 	DefaultTactics Tactics
@@ -449,6 +453,7 @@ func NewServer(
 			server.RequestPublicKey = newServer.RequestPublicKey
 			server.RequestPrivateKey = newServer.RequestPrivateKey
 			server.RequestObfuscatedKey = newServer.RequestObfuscatedKey
+			server.EnforceServerSide = newServer.EnforceServerSide
 			server.DefaultTactics = newServer.DefaultTactics
 			server.FilteredTactics = newServer.FilteredTactics
 
@@ -1091,6 +1096,10 @@ func (listener *Listener) Accept() (net.Conn, error) {
 		if err != nil {
 			// Don't modify error from net.Listener
 			return nil, err
+		}
+
+		if !listener.server.EnforceServerSide {
+			return conn, nil
 		}
 
 		geoIPData := listener.geoIPLookup(common.IPAddressFromAddr(conn.RemoteAddr()))
