@@ -226,6 +226,10 @@ type Config struct {
 	// This parameter is only applicable to library deployments.
 	NetworkIDGetter NetworkIDGetter
 
+	// DisableTactics disables tactics operations including requests, payload
+	// handling, and application of parameters.
+	DisableTactics bool
+
 	// TransformHostNames specifies whether to use hostname transformation
 	// circumvention strategies. Set to "always" to always transform, "never"
 	// to never transform, and "", the default, for the default transformation
