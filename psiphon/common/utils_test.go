@@ -55,6 +55,22 @@ func TestGetStringSlice(t *testing.T) {
 	}
 }
 
+func TestMakeSecureRandomPerm(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		perm, err := MakeSecureRandomPerm(i)
+		if err != nil {
+			t.Errorf("MakeSecureRandomPerm failed: %s", err)
+		}
+		sum := 0
+		for j := 0; j < i; j++ {
+			sum += perm[j]
+		}
+		if sum != (i*(i+1))/2 {
+			t.Error("unexpected permutation")
+		}
+	}
+}
+
 func TestMakeRandomPeriod(t *testing.T) {
 	min := 1 * time.Nanosecond
 	max := 10000 * time.Nanosecond
