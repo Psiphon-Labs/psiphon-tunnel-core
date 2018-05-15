@@ -21,11 +21,39 @@ package common
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"testing"
 	"time"
 )
+
+func TestGetStringSlice(t *testing.T) {
+
+	originalSlice := []string{"a", "b", "c"}
+
+	j, err := json.Marshal(originalSlice)
+	if err != nil {
+		t.Errorf("json.Marshal failed: %s", err)
+	}
+
+	var value interface{}
+
+	err = json.Unmarshal(&value)
+	if err != nil {
+		t.Errorf("json.Unmarshal failed: %s", err)
+	}
+
+	newSlice, ok := GetStringSlice(value)
+	if !ok {
+		t.Errorf("GetStringSlice failed")
+	}
+
+	if !reflect.DeepEqual(originalSlice, newSlice) {
+		t.Errorf("unexpected GetStringSlice output")
+	}
+}
 
 func TestMakeRandomPeriod(t *testing.T) {
 	min := 1 * time.Nanosecond

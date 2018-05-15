@@ -143,6 +143,14 @@ func (server *TunnelServer) Run() error {
 			return common.ContextError(err)
 		}
 
+		tacticsListener := tactics.NewListener(
+			listener,
+			support.TacticsServer,
+			tunnelProtocol,
+			func(IPAddress string) common.GeoIPData {
+				return common.GeoIPData(support.GeoIPService.Lookup(IPAddress))
+			})
+
 		log.WithContextFields(
 			LogFields{
 				"localAddress":   localAddress,
@@ -152,7 +160,7 @@ func (server *TunnelServer) Run() error {
 		listeners = append(
 			listeners,
 			&sshListener{
-				Listener:       listener,
+				Listener:       tacticsListener,
 				localAddress:   localAddress,
 				tunnelProtocol: tunnelProtocol,
 			})

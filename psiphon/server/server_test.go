@@ -444,6 +444,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		paveTacticsConfigFile(
 			t, tacticsConfigFilename,
 			tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
+			runConfig.tunnelProtocol,
 			propagationChannelID)
 	}
 
@@ -453,7 +454,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig["PsinetDatabaseFilename"] = psinetFilename
 	serverConfig["TrafficRulesFilename"] = trafficRulesFilename
 	serverConfig["OSLConfigFilename"] = oslConfigFilename
-	serverConfig["TacticsConfigFilename"] = tacticsConfigFilename
+	if doTactics {
+		serverConfig["TacticsConfigFilename"] = tacticsConfigFilename
+	}
 	serverConfig["LogFilename"] = filepath.Join(testDataDirName, "psiphond.log")
 	serverConfig["LogLevel"] = "debug"
 
@@ -582,7 +585,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 
 	if doTactics {
-		clientConfig.NetworkIDGetter = &testNetworkGetter{}
+		// Use a distinct prefix for network ID for each test run to
+		// ensure tactics from different runs don't apply; this is
+		// a workaround for the singleton datastore.
+		prefix := time.Now().String()
+		clientConfig.NetworkIDGetter = &testNetworkGetter{prefix: prefix}
 	}
 
 	if doTactics {
@@ -1181,16 +1188,24 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
 func paveTacticsConfigFile(
 	t *testing.T, tacticsConfigFilename string,
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey string,
+	tunnelProtocol string,
 	propagationChannelID string) {
+
+	// Setting LimitTunnelProtocols passively exercises the
+	// server-side LimitTunnelProtocols enforcement.
 
 	tacticsConfigJSONFormat := `
     {
       "RequestPublicKey" : "%s",
       "RequestPrivateKey" : "%s",
       "RequestObfuscatedKey" : "%s",
+      "EnforceServerSide" : true,
       "DefaultTactics" : {
         "TTL" : "60s",
-        "Probability" : 1.0
+        "Probability" : 1.0,
+        "Parameters" : {
+          "LimitTunnelProtocols" : ["%s"]
+        }
       },
       "FilteredTactics" : [
         {
@@ -1215,6 +1230,7 @@ func paveTacticsConfigFile(
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
 		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
+		tunnelProtocol,
 		propagationChannelID)
 
 	err := ioutil.WriteFile(tacticsConfigFilename, []byte(tacticsConfigJSON), 0600)
@@ -1245,8 +1261,9 @@ const dummyClientVerificationPayload = `
 }`
 
 type testNetworkGetter struct {
+	prefix string
 }
 
-func (testNetworkGetter) GetNetworkID() string {
-	return "NETWORK1"
+func (t *testNetworkGetter) GetNetworkID() string {
+	return t.prefix + "NETWORK1"
 }
