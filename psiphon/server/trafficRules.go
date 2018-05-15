@@ -101,8 +101,6 @@ type TrafficRules struct {
 
 	// RateLimits specifies data transfer rate limits for the
 	// client traffic.
-	// Any RateLimits.ReadUnthrottledBytes/WriteUnthrottledBytes
-	// apply only to the first tunnel in a session.
 	RateLimits RateLimits
 
 	// DialTCPPortForwardTimeoutMilliseconds is the timeout period
@@ -181,6 +179,11 @@ type RateLimits struct {
 	WriteUnthrottledBytes *int64
 	WriteBytesPerSecond   *int64
 	CloseAfterExhausted   *bool
+
+	// UnthrottleFirstTunnelOnly specifies whether any
+	// ReadUnthrottledBytes/WriteUnthrottledBytes apply
+	// only to the first tunnel in a session.
+	UnthrottleFirstTunnelOnly *bool
 }
 
 // CommonRateLimits converts a RateLimits to a common.RateLimits.
@@ -320,6 +323,10 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		trafficRules.RateLimits.CloseAfterExhausted = new(bool)
 	}
 
+	if trafficRules.RateLimits.UnthrottleFirstTunnelOnly == nil {
+		trafficRules.RateLimits.UnthrottleFirstTunnelOnly = new(bool)
+	}
+
 	intPtr := func(i int) *int {
 		return &i
 	}
@@ -453,6 +460,10 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			trafficRules.RateLimits.CloseAfterExhausted = filteredRules.Rules.RateLimits.CloseAfterExhausted
 		}
 
+		if filteredRules.Rules.RateLimits.UnthrottleFirstTunnelOnly != nil {
+			trafficRules.RateLimits.UnthrottleFirstTunnelOnly = filteredRules.Rules.RateLimits.UnthrottleFirstTunnelOnly
+		}
+
 		if filteredRules.Rules.DialTCPPortForwardTimeoutMilliseconds != nil {
 			trafficRules.DialTCPPortForwardTimeoutMilliseconds = filteredRules.Rules.DialTCPPortForwardTimeoutMilliseconds
 		}
@@ -488,7 +499,7 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		break
 	}
 
-	if !isFirstTunnelInSession {
+	if *trafficRules.RateLimits.UnthrottleFirstTunnelOnly && !isFirstTunnelInSession {
 		*trafficRules.RateLimits.ReadUnthrottledBytes = 0
 		*trafficRules.RateLimits.WriteUnthrottledBytes = 0
 	}
