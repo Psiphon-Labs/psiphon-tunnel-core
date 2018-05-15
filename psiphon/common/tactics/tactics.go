@@ -170,6 +170,7 @@ import (
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
@@ -1657,8 +1658,8 @@ func boxPayload(
 		box = bundledBox
 	}
 
-	obfuscator, err := common.NewClientObfuscator(
-		&common.ObfuscatorConfig{
+	obfuscator, err := obfuscator.NewClientObfuscator(
+		&obfuscator.ObfuscatorConfig{
 			Keyword:    string(obfuscatedKey),
 			MaxPadding: TACTICS_PADDING_MAX_SIZE})
 	if err != nil {
@@ -1688,9 +1689,9 @@ func unboxPayload(
 
 	obfuscatedReader := bytes.NewReader(obfuscatedBoxedPayload[:])
 
-	obfuscator, err := common.NewServerObfuscator(
+	obfuscator, err := obfuscator.NewServerObfuscator(
 		obfuscatedReader,
-		&common.ObfuscatorConfig{Keyword: string(obfuscatedKey)})
+		&obfuscator.ObfuscatorConfig{Keyword: string(obfuscatedKey)})
 	if err != nil {
 		return nil, common.ContextError(err)
 	}

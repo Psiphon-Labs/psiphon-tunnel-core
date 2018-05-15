@@ -38,6 +38,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
@@ -1039,8 +1040,8 @@ func (sshClient *sshClient) run(
 		if protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
 			// Note: NewObfuscatedSshConn blocks on network I/O
 			// TODO: ensure this won't block shutdown
-			conn, result.err = common.NewObfuscatedSshConn(
-				common.OBFUSCATION_CONN_MODE_SERVER,
+			conn, result.err = obfuscator.NewObfuscatedSshConn(
+				obfuscator.OBFUSCATION_CONN_MODE_SERVER,
 				conn,
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey)
 			if result.err != nil {

@@ -40,7 +40,7 @@ func TestGetStringSlice(t *testing.T) {
 
 	var value interface{}
 
-	err = json.Unmarshal(&value)
+	err = json.Unmarshal(j, &value)
 	if err != nil {
 		t.Errorf("json.Unmarshal failed: %s", err)
 	}
@@ -56,16 +56,20 @@ func TestGetStringSlice(t *testing.T) {
 }
 
 func TestMakeSecureRandomPerm(t *testing.T) {
-	for i := 0; i < 1000; i++ {
-		perm, err := MakeSecureRandomPerm(i)
+	for n := 0; n < 1000; n++ {
+		perm, err := MakeSecureRandomPerm(n)
 		if err != nil {
 			t.Errorf("MakeSecureRandomPerm failed: %s", err)
 		}
-		sum := 0
-		for j := 0; j < i; j++ {
-			sum += perm[j]
+		if len(perm) != n {
+			t.Error("unexpected permutation size")
 		}
-		if sum != (i*(i+1))/2 {
+		sum := 0
+		for i := 0; i < n; i++ {
+			sum += perm[i]
+		}
+		expectedSum := (n * (n - 1)) / 2
+		if sum != expectedSum {
 			t.Error("unexpected permutation")
 		}
 	}
