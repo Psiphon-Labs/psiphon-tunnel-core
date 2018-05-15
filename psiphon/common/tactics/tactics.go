@@ -1520,6 +1520,13 @@ func boxPayload(
 	nonce, peerPublicKey, privateKey, obfuscatedKey, bundlePublicKey []byte,
 	payload interface{}) ([]byte, error) {
 
+	if len(nonce) > 24 ||
+		len(peerPublicKey) != 32 ||
+		len(privateKey) != 32 {
+		return nil, common.ContextError(
+			errors.New("unexpected box key length"))
+	}
+
 	marshaledPayload, err := json.Marshal(payload)
 	if err != nil {
 		return nil, common.ContextError(err)
@@ -1529,8 +1536,8 @@ func boxPayload(
 	copy(nonceArray[:], nonce)
 
 	var peerPublicKeyArray, privateKeyArray [32]byte
-	copy(peerPublicKeyArray[:], peerPublicKey[0:32])
-	copy(privateKeyArray[:], privateKey[0:32])
+	copy(peerPublicKeyArray[:], peerPublicKey)
+	copy(privateKeyArray[:], privateKey)
 
 	box := box.Seal(nil, marshaledPayload, &nonceArray, &peerPublicKeyArray, &privateKeyArray)
 
@@ -1563,6 +1570,13 @@ func unboxPayload(
 	nonce, peerPublicKey, privateKey, obfuscatedKey, obfuscatedBoxedPayload []byte,
 	payload interface{}) ([]byte, error) {
 
+	if len(nonce) > 24 ||
+		(peerPublicKey != nil && len(peerPublicKey) != 32) ||
+		len(privateKey) != 32 {
+		return nil, common.ContextError(
+			errors.New("unexpected box key length"))
+	}
+
 	obfuscatedReader := bytes.NewReader(obfuscatedBoxedPayload[:])
 
 	obfuscator, err := common.NewServerObfuscator(
@@ -1584,18 +1598,18 @@ func unboxPayload(
 	copy(nonceArray[:], nonce)
 
 	var peerPublicKeyArray, privateKeyArray [32]byte
-	copy(privateKeyArray[:], privateKey[0:32])
+	copy(privateKeyArray[:], privateKey)
 
 	var bundledPeerPublicKey []byte
 
 	if peerPublicKey != nil {
-		copy(peerPublicKeyArray[:], peerPublicKey[0:32])
+		copy(peerPublicKeyArray[:], peerPublicKey)
 	} else {
 		if len(boxedPayload) < 32 {
 			return nil, common.ContextError(errors.New("unexpected box size"))
 		}
 		bundledPeerPublicKey = boxedPayload[0:32]
-		copy(peerPublicKeyArray[0:32], bundledPeerPublicKey)
+		copy(peerPublicKeyArray[:], bundledPeerPublicKey)
 		boxedPayload = boxedPayload[32:]
 	}
 
