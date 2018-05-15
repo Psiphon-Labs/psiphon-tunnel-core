@@ -888,6 +888,7 @@ type sshClient struct {
 	throttledConn                        *common.ThrottledConn
 	geoIPData                            GeoIPData
 	sessionID                            string
+	isFirstTunnelInSession               bool
 	supportsServerRequests               bool
 	handshakeState                       handshakeState
 	udpChannel                           ssh.Channel
@@ -1171,17 +1172,26 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 
 	sessionID := sshPasswordPayload.SessionId
 
+	// The GeoIP session cache will be populated if there was a previous tunnel
+	// with this session ID. This will be true up to GEOIP_SESSION_CACHE_TTL, which
+	// is currently much longer than the OSL session cache, another option to use if
+	// the GeoIP session cache is retired (the GeoIP session cache currently only
+	// supports legacy use cases).
+	isFirstTunnelInSession := sshClient.sshServer.support.GeoIPService.InSessionCache(sessionID)
+
 	supportsServerRequests := common.Contains(
 		sshPasswordPayload.ClientCapabilities, protocol.CLIENT_CAPABILITY_SERVER_REQUESTS)
 
 	sshClient.Lock()
 
-	// After this point, sshClient.sessionID is read-only as it will be read
+	// After this point, these values are read-only as they are read
 	// without obtaining sshClient.Lock.
 	sshClient.sessionID = sessionID
-
+	sshClient.isFirstTunnelInSession = isFirstTunnelInSession
 	sshClient.supportsServerRequests = supportsServerRequests
+
 	geoIPData := sshClient.geoIPData
+
 	sshClient.Unlock()
 
 	// Store the GeoIP data associated with the session ID. This makes
@@ -2010,7 +2020,10 @@ func (sshClient *sshClient) setTrafficRules() {
 	defer sshClient.Unlock()
 
 	sshClient.trafficRules = sshClient.sshServer.support.TrafficRulesSet.GetTrafficRules(
-		sshClient.tunnelProtocol, sshClient.geoIPData, sshClient.handshakeState)
+		sshClient.isFirstTunnelInSession,
+		sshClient.tunnelProtocol,
+		sshClient.geoIPData,
+		sshClient.handshakeState)
 
 	if sshClient.throttledConn != nil {
 		// Any existing throttling state is reset.
