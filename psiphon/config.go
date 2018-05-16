@@ -392,10 +392,7 @@ type Config struct {
 	UseTrustedCACertificatesForStockTLS bool
 
 	// TrustedCACertificatesFilename specifies a file containing trusted CA
-	// certs. The file contents should be compatible with OpenSSL's
-	// SSL_CTX_load_verify_locations. When specified, this enables use of
-	// OpenSSL for HTTPS requests that require typical (system CA) server
-	// authentication.
+	// certs.
 	TrustedCACertificatesFilename string
 
 	// DisablePeriodicSshKeepAlive indicates whether to send an SSH keepalive

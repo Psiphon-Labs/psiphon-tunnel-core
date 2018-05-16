@@ -54,7 +54,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 // HTTPSServer is a wrapper around http.Server which adds the
@@ -71,9 +71,9 @@ type HTTPSServer struct {
 // shutdown. ListenAndServeTLS also requires the TLS cert and key to be in files
 // and we avoid that here.
 //
-// Note that the http.Server.TLSConfig field is ignored and the
-// psiphon/common/tls.Config parameter is used intead.
-func (server *HTTPSServer) ServeTLS(listener net.Listener, config *tls.Config) error {
-	tlsListener := tls.NewListener(listener, config)
+// Note that the http.Server.TLSConfig field is ignored and the utls.Config
+// parameter is used intead.
+func (server *HTTPSServer) ServeTLS(listener net.Listener, config *utls.Config) error {
+	tlsListener := utls.NewListener(listener, config)
 	return server.Serve(tlsListener)
 }

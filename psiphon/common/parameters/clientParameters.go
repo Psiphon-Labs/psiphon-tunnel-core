@@ -84,6 +84,7 @@ const (
 	PrioritizeTunnelProtocols                      = "PrioritizeTunnelProtocols"
 	PrioritizeTunnelProtocolsCandidateCount        = "PrioritizeTunnelProtocolsCandidateCount"
 	LimitTunnelProtocols                           = "LimitTunnelProtocols"
+	LimitTLSProfiles                               = "LimitTLSProfiles"
 	TunnelOperateShutdownTimeout                   = "TunnelOperateShutdownTimeout"
 	TunnelPortForwardDialTimeout                   = "TunnelPortForwardDialTimeout"
 	TunnelRateLimits                               = "TunnelRateLimits"
@@ -151,7 +152,6 @@ const (
 	MeekRoundTripRetryMaxDelay                     = "MeekRoundTripRetryMaxDelay"
 	MeekRoundTripRetryMultiplier                   = "MeekRoundTripRetryMultiplier"
 	MeekRoundTripTimeout                           = "MeekRoundTripTimeout"
-	SelectAndroidTLSProbability                    = "SelectAndroidTLSProbability"
 	TransformHostNameProbability                   = "TransformHostNameProbability"
 	PickUserAgentProbability                       = "PickUserAgentProbability"
 )
@@ -207,6 +207,8 @@ var defaultClientParameters = map[string]struct {
 	PrioritizeTunnelProtocols:               {value: protocol.TunnelProtocols{}},
 	PrioritizeTunnelProtocolsCandidateCount: {value: 10, minimum: 0},
 	LimitTunnelProtocols:                    {value: protocol.TunnelProtocols{}},
+
+	LimitTLSProfiles: {value: protocol.TLSProfiles{}},
 
 	AdditionalCustomHeaders: {value: make(http.Header)},
 
@@ -300,7 +302,6 @@ var defaultClientParameters = map[string]struct {
 	MeekRoundTripRetryMultiplier:               {value: 2.0, minimum: 0.0},
 	MeekRoundTripTimeout:                       {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 
-	SelectAndroidTLSProbability:  {value: 0.5},
 	TransformHostNameProbability: {value: 0.5},
 	PickUserAgentProbability:     {value: 0.5},
 }
@@ -454,6 +455,14 @@ func (p *ClientParameters) Set(
 					return nil, common.ContextError(err)
 				}
 			case protocol.TunnelProtocols:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, common.ContextError(err)
+				}
+			case protocol.TLSProfiles:
 				err := v.Validate()
 				if err != nil {
 					if skipOnError {
@@ -641,6 +650,13 @@ func (p *ClientParametersSnapshot) Duration(name string) time.Duration {
 // TunnelProtocols returns a protocol.TunnelProtocols parameter value.
 func (p *ClientParametersSnapshot) TunnelProtocols(name string) protocol.TunnelProtocols {
 	value := protocol.TunnelProtocols{}
+	p.getValue(name, &value)
+	return value
+}
+
+// TLSProfiles returns a protocol.TLSProfiles parameter value.
+func (p *ClientParametersSnapshot) TLSProfiles(name string) protocol.TLSProfiles {
+	value := protocol.TLSProfiles{}
 	p.getValue(name, &value)
 	return value
 }

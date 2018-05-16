@@ -22,7 +22,7 @@ package server
 import (
 	"bytes"
 	"crypto/rand"
-	golangtls "crypto/tls"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -42,7 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 // MeekServer is based on meek-server.go from Tor and Psiphon:
@@ -95,7 +95,7 @@ const (
 type MeekServer struct {
 	support       *SupportServices
 	listener      net.Listener
-	tlsConfig     *tls.Config
+	tlsConfig     *utls.Config
 	clientHandler func(clientTunnelProtocol string, clientConn net.Conn)
 	openConns     *common.Conns
 	stopBroadcast <-chan struct{}
@@ -193,7 +193,7 @@ func (server *MeekServer) Run() error {
 		ConnState:    server.httpConnStateCallback,
 
 		// Disable auto HTTP/2 (https://golang.org/doc/go1.6)
-		TLSNextProto: make(map[string]func(*http.Server, *golangtls.Conn, http.Handler)),
+		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
 	}
 
 	// Note: Serve() will be interrupted by listener.Close() call
@@ -816,23 +816,23 @@ func (session *meekSession) GetMetrics() LogFields {
 // assuming the peer is an uncensored CDN.
 func makeMeekTLSConfig(
 	support *SupportServices,
-	useObfuscatedSessionTickets bool) (*tls.Config, error) {
+	useObfuscatedSessionTickets bool) (*utls.Config, error) {
 
 	certificate, privateKey, err := GenerateWebServerCertificate(common.GenerateHostName())
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
-	tlsCertificate, err := tls.X509KeyPair(
+	tlsCertificate, err := utls.X509KeyPair(
 		[]byte(certificate), []byte(privateKey))
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
-	config := &tls.Config{
-		Certificates: []tls.Certificate{tlsCertificate},
+	config := &utls.Config{
+		Certificates: []utls.Certificate{tlsCertificate},
 		NextProtos:   []string{"http/1.1"},
-		MinVersion:   tls.VersionTLS10,
+		MinVersion:   utls.VersionTLS10,
 
 		// This is a reordering of the supported CipherSuites in golang 1.6. Non-ephemeral key
 		// CipherSuites greatly reduce server load, and we try to select these since the meek
@@ -841,23 +841,23 @@ func makeMeekTLSConfig(
 		// by ephemeral key CipherSuites.
 		// https://github.com/golang/go/blob/1cb3044c9fcd88e1557eca1bf35845a4108bc1db/src/crypto/tls/cipher_suites.go#L75
 		CipherSuites: []uint16{
-			tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_RSA_WITH_RC4_128_SHA,
-			tls.TLS_RSA_WITH_AES_128_CBC_SHA,
-			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
-			tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_RC4_128_SHA,
-			tls.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
-			tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
+			utls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+			utls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+			utls.TLS_RSA_WITH_RC4_128_SHA,
+			utls.TLS_RSA_WITH_AES_128_CBC_SHA,
+			utls.TLS_RSA_WITH_AES_256_CBC_SHA,
+			utls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+			utls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			utls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			utls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			utls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			utls.TLS_ECDHE_RSA_WITH_RC4_128_SHA,
+			utls.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA,
+			utls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+			utls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+			utls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			utls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+			utls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
 		},
 		PreferServerCipherSuites: true,
 	}
@@ -865,7 +865,7 @@ func makeMeekTLSConfig(
 	if useObfuscatedSessionTickets {
 
 		// See obfuscated session ticket overview
-		// in tls.NewObfuscatedClientSessionCache
+		// in utls.NewObfuscatedClientSessionCache
 
 		var obfuscatedSessionTicketKey [32]byte
 		key, err := hex.DecodeString(support.Config.MeekObfuscatedKey)
@@ -884,7 +884,7 @@ func makeMeekTLSConfig(
 		}
 
 		// Note: SessionTicketKey needs to be set, or else, it appears,
-		// tls.Config.serverInit() will clobber the value set by
+		// utls.Config.serverInit() will clobber the value set by
 		// SetSessionTicketKeys.
 		config.SessionTicketKey = obfuscatedSessionTicketKey
 		config.SetSessionTicketKeys([][32]byte{

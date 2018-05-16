@@ -33,6 +33,18 @@
 			"revisionTime": "2017-02-28T16:03:01Z"
 		},
 		{
+			"checksumSHA1": "vlwXc96qUPfAMxyDMrzCX4cDYHA=",
+			"path": "github.com/Psiphon-Labs/utls",
+			"revision": "6ee8d02ba07905b8b18e2d8e3446892be54f5393",
+			"revisionTime": "2018-05-16T17:21:43Z"
+		},
+		{
+			"checksumSHA1": "zaEXXT0xMkEADcxW9GvBK0iYe1A=",
+			"path": "github.com/Psiphon-Labs/utls/cipherhw",
+			"revision": "1f81de88145c342aad771f4f630012618faaffa7",
+			"revisionTime": "2018-04-25T19:07:11Z"
+		},
+		{
 			"checksumSHA1": "bFj0ceSRvaFFCfmS4el1PjWhcgw=",
 			"path": "github.com/creack/goselect",
 			"revision": "1bd5ca702c6154bccc56ecd598932ee8b295cab2",
@@ -117,24 +129,6 @@
 			"revisionTime": "2016-03-17T14:11:10Z"
 		},
 		{
-			"checksumSHA1": "jGs/19Yim2KH8IIAtNo5gkakTjk=",
-			"path": "github.com/spacemonkeygo/openssl",
-			"revision": "4ea35d79e3ae2758eac37f0348cdc58aa167e78a",
-			"revisionTime": "2017-12-07T20:32:26Z"
-		},
-		{
-			"checksumSHA1": "bSL99i42P6OVH88I94u3+hCoUPc=",
-			"path": "github.com/spacemonkeygo/openssl/utils",
-			"revision": "4ea35d79e3ae2758eac37f0348cdc58aa167e78a",
-			"revisionTime": "2017-12-07T20:32:26Z"
-		},
-		{
-			"checksumSHA1": "TzNKZUQhRUSvmT2IdzE08pxL9xU=",
-			"path": "github.com/spacemonkeygo/spacelog",
-			"revision": "081216856ee01315ad130cb9ccd5d2a40624c619",
-			"revisionTime": "2017-10-24T14:56:50Z"
-		},
-		{
 			"checksumSHA1": "K0crHygPTP42i1nLKWphSlvOQJw=",
 			"path": "github.com/stretchr/objx",
 			"revision": "1a9d0bb9f541897e62256577b352fdbc1fb4fd94",
@@ -187,6 +181,30 @@
 			"path": "github.com/zach-klippenstein/goregen",
 			"revision": "795b5e3961ea1912fde60af417ad85e86acc0d6a",
 			"revisionTime": "2016-03-03T16:20:51Z"
+		},
+		{
+			"checksumSHA1": "1zB843WyoSh8oMdbeDfgByEa2TE=",
+			"path": "golang.org/x/crypto/chacha20poly1305",
+			"revision": "b0697eccbea9adec5b7ba8008f4c33d98d733388",
+			"revisionTime": "2018-04-23T13:30:03Z"
+		},
+		{
+			"checksumSHA1": "IQkUIOnvlf0tYloFx9mLaXSvXWQ=",
+			"path": "golang.org/x/crypto/curve25519",
+			"revision": "b0697eccbea9adec5b7ba8008f4c33d98d733388",
+			"revisionTime": "2018-04-23T13:30:03Z"
+		},
+		{
+			"checksumSHA1": "hfABw6DX9B4Ma+88qDDGz9qY45s=",
+			"path": "golang.org/x/crypto/internal/chacha20",
+			"revision": "b0697eccbea9adec5b7ba8008f4c33d98d733388",
+			"revisionTime": "2018-04-23T13:30:03Z"
+		},
+		{
+			"checksumSHA1": "kVKE0OX1Xdw5mG7XKT86DLLKE2I=",
+			"path": "golang.org/x/crypto/poly1305",
+			"revision": "b0697eccbea9adec5b7ba8008f4c33d98d733388",
+			"revisionTime": "2018-04-23T13:30:03Z"
 		},
 		{
 			"checksumSHA1": "kKuxyoDujo5CopTxAvvZ1rrLdd0=",

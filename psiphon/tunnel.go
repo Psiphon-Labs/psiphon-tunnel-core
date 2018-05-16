@@ -734,11 +734,9 @@ func initMeekConfig(
 	selectedTLSProfile := ""
 	if protocol.TunnelProtocolUsesMeekHTTPS(selectedProtocol) {
 		selectedTLSProfile = SelectTLSProfile(
-			config.clientParameters,
 			config.UseIndistinguishableTLS,
-			useObfuscatedSessionTickets,
-			true,
-			config.TrustedCACertificatesFilename != "")
+			selectedProtocol,
+			config.clientParameters)
 	}
 
 	return &MeekConfig{
