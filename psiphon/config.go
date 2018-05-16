@@ -651,17 +651,22 @@ func (config *Config) GetClientParameters() *parameters.ClientParametersSnapshot
 // entirely unmodified.
 func (config *Config) SetClientParameters(tag string, skipOnError bool, applyParameters map[string]interface{}) error {
 
-	parameters := []map[string]interface{}{config.makeConfigParameters()}
+	setParameters := []map[string]interface{}{config.makeConfigParameters()}
 	if applyParameters != nil {
-		parameters = append(parameters, applyParameters)
+		setParameters = append(setParameters, applyParameters)
 	}
 
-	counts, err := config.clientParameters.Set(tag, skipOnError, parameters...)
+	counts, err := config.clientParameters.Set(tag, skipOnError, setParameters...)
 	if err != nil {
 		return common.ContextError(err)
 	}
 
 	NoticeInfo("applied %v parameters with tag '%s'", counts, tag)
+
+	// Emit certain individual parameter values for quick reference in diagnostics.
+	NoticeInfo(
+		"NetworkLatencyMultiplier: %f",
+		config.clientParameters.Get().Float(parameters.NetworkLatencyMultiplier))
 
 	return nil
 }
