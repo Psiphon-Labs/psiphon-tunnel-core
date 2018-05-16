@@ -179,6 +179,11 @@ type RateLimits struct {
 	WriteUnthrottledBytes *int64
 	WriteBytesPerSecond   *int64
 	CloseAfterExhausted   *bool
+
+	// UnthrottleFirstTunnelOnly specifies whether any
+	// ReadUnthrottledBytes/WriteUnthrottledBytes apply
+	// only to the first tunnel in a session.
+	UnthrottleFirstTunnelOnly *bool
 }
 
 // CommonRateLimits converts a RateLimits to a common.RateLimits.
@@ -272,7 +277,10 @@ func (set *TrafficRulesSet) Validate() error {
 // For the return value TrafficRules, all pointer and slice fields are initialized,
 // so nil checks are not required. The caller must not modify the returned TrafficRules.
 func (set *TrafficRulesSet) GetTrafficRules(
-	tunnelProtocol string, geoIPData GeoIPData, state handshakeState) TrafficRules {
+	isFirstTunnelInSession bool,
+	tunnelProtocol string,
+	geoIPData GeoIPData,
+	state handshakeState) TrafficRules {
 
 	set.ReloadableFile.RLock()
 	defer set.ReloadableFile.RUnlock()
@@ -313,6 +321,10 @@ func (set *TrafficRulesSet) GetTrafficRules(
 
 	if trafficRules.RateLimits.CloseAfterExhausted == nil {
 		trafficRules.RateLimits.CloseAfterExhausted = new(bool)
+	}
+
+	if trafficRules.RateLimits.UnthrottleFirstTunnelOnly == nil {
+		trafficRules.RateLimits.UnthrottleFirstTunnelOnly = new(bool)
 	}
 
 	intPtr := func(i int) *int {
@@ -448,6 +460,10 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			trafficRules.RateLimits.CloseAfterExhausted = filteredRules.Rules.RateLimits.CloseAfterExhausted
 		}
 
+		if filteredRules.Rules.RateLimits.UnthrottleFirstTunnelOnly != nil {
+			trafficRules.RateLimits.UnthrottleFirstTunnelOnly = filteredRules.Rules.RateLimits.UnthrottleFirstTunnelOnly
+		}
+
 		if filteredRules.Rules.DialTCPPortForwardTimeoutMilliseconds != nil {
 			trafficRules.DialTCPPortForwardTimeoutMilliseconds = filteredRules.Rules.DialTCPPortForwardTimeoutMilliseconds
 		}
@@ -481,6 +497,11 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		}
 
 		break
+	}
+
+	if *trafficRules.RateLimits.UnthrottleFirstTunnelOnly && !isFirstTunnelInSession {
+		*trafficRules.RateLimits.ReadUnthrottledBytes = 0
+		*trafficRules.RateLimits.WriteUnthrottledBytes = 0
 	}
 
 	log.WithContextFields(LogFields{"trafficRules": trafficRules}).Debug("selected traffic rules")

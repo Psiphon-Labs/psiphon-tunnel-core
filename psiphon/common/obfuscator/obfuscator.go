@@ -17,7 +17,7 @@
  *
  */
 
-package common
+package obfuscator
 
 import (
 	"bytes"
@@ -26,6 +26,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 const (
@@ -58,14 +60,14 @@ type ObfuscatorConfig struct {
 func NewClientObfuscator(
 	config *ObfuscatorConfig) (obfuscator *Obfuscator, err error) {
 
-	seed, err := MakeSecureRandomBytes(OBFUSCATE_SEED_LENGTH)
+	seed, err := common.MakeSecureRandomBytes(OBFUSCATE_SEED_LENGTH)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(seed, config)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	maxPadding := OBFUSCATE_MAX_PADDING
@@ -75,7 +77,7 @@ func NewClientObfuscator(
 
 	seedMessage, err := makeSeedMessage(maxPadding, seed, clientToServerCipher)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return &Obfuscator{
@@ -92,7 +94,7 @@ func NewServerObfuscator(
 	clientToServerCipher, serverToClientCipher, err := readSeedMessage(
 		clientReader, config)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 
 	return &Obfuscator{
@@ -123,22 +125,22 @@ func initObfuscatorCiphers(
 
 	clientToServerKey, err := deriveKey(seed, []byte(config.Keyword), []byte(OBFUSCATE_CLIENT_TO_SERVER_IV))
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 
 	serverToClientKey, err := deriveKey(seed, []byte(config.Keyword), []byte(OBFUSCATE_SERVER_TO_CLIENT_IV))
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 
 	clientToServerCipher, err := rc4.NewCipher(clientToServerKey)
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 
 	serverToClientCipher, err := rc4.NewCipher(serverToClientKey)
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 
 	return clientToServerCipher, serverToClientCipher, nil
@@ -156,37 +158,37 @@ func deriveKey(seed, keyword, iv []byte) ([]byte, error) {
 		digest = h.Sum(nil)
 	}
 	if len(digest) < OBFUSCATE_KEY_LENGTH {
-		return nil, ContextError(errors.New("insufficient bytes for obfuscation key"))
+		return nil, common.ContextError(errors.New("insufficient bytes for obfuscation key"))
 	}
 	return digest[0:OBFUSCATE_KEY_LENGTH], nil
 }
 
 func makeSeedMessage(maxPadding int, seed []byte, clientToServerCipher *rc4.Cipher) ([]byte, error) {
 	// paddingLength is integer in range [0, maxPadding]
-	paddingLength, err := MakeSecureRandomInt(maxPadding + 1)
+	paddingLength, err := common.MakeSecureRandomInt(maxPadding + 1)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
-	padding, err := MakeSecureRandomBytes(paddingLength)
+	padding, err := common.MakeSecureRandomBytes(paddingLength)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	buffer := new(bytes.Buffer)
 	err = binary.Write(buffer, binary.BigEndian, seed)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	err = binary.Write(buffer, binary.BigEndian, uint32(OBFUSCATE_MAGIC_VALUE))
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	err = binary.Write(buffer, binary.BigEndian, uint32(paddingLength))
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	err = binary.Write(buffer, binary.BigEndian, padding)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	seedMessage := buffer.Bytes()
 	clientToServerCipher.XORKeyStream(seedMessage[len(seed):], seedMessage[len(seed):])
@@ -199,18 +201,18 @@ func readSeedMessage(
 	seed := make([]byte, OBFUSCATE_SEED_LENGTH)
 	_, err := io.ReadFull(clientReader, seed)
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 
 	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(seed, config)
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 
 	fixedLengthFields := make([]byte, 8) // 4 bytes each for magic value and padding length
 	_, err = io.ReadFull(clientReader, fixedLengthFields)
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 
 	clientToServerCipher.XORKeyStream(fixedLengthFields, fixedLengthFields)
@@ -220,25 +222,25 @@ func readSeedMessage(
 	var magicValue, paddingLength int32
 	err = binary.Read(buffer, binary.BigEndian, &magicValue)
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 	err = binary.Read(buffer, binary.BigEndian, &paddingLength)
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 
 	if magicValue != OBFUSCATE_MAGIC_VALUE {
-		return nil, nil, ContextError(errors.New("invalid magic value"))
+		return nil, nil, common.ContextError(errors.New("invalid magic value"))
 	}
 
 	if paddingLength < 0 || paddingLength > OBFUSCATE_MAX_PADDING {
-		return nil, nil, ContextError(errors.New("invalid padding length"))
+		return nil, nil, common.ContextError(errors.New("invalid padding length"))
 	}
 
 	padding := make([]byte, paddingLength)
 	_, err = io.ReadFull(clientReader, padding)
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, common.ContextError(err)
 	}
 
 	clientToServerCipher.XORKeyStream(padding, padding)

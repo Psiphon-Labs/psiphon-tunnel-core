@@ -41,6 +41,7 @@ import (
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
@@ -1258,8 +1259,8 @@ func makeMeekCookie(
 	copy(encryptedCookie[32:], box)
 
 	// Obfuscate the encrypted data
-	obfuscator, err := common.NewClientObfuscator(
-		&common.ObfuscatorConfig{
+	obfuscator, err := obfuscator.NewClientObfuscator(
+		&obfuscator.ObfuscatorConfig{
 			Keyword:    meekObfuscatedKey,
 			MaxPadding: clientParameters.Get().Int(parameters.MeekCookieMaxPadding)})
 	if err != nil {

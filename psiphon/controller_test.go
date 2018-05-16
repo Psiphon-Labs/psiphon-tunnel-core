@@ -452,6 +452,22 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	modifyConfig["DataStoreDirectory"] = testDataDirName
 	modifyConfig["RemoteServerListDownloadFilename"] = filepath.Join(testDataDirName, "server_list_compressed")
 	modifyConfig["UpgradeDownloadFilename"] = filepath.Join(testDataDirName, "upgrade")
+
+	if runConfig.protocol != "" {
+		modifyConfig["TunnelProtocols"] = protocol.TunnelProtocols{runConfig.protocol}
+	}
+
+	// Override client retry throttle values to speed up automated
+	// tests and ensure tests complete within fixed deadlines.
+	modifyConfig["FetchRemoteServerListRetryPeriodMilliseconds"] = 250
+	modifyConfig["FetchUpgradeRetryPeriodMilliseconds"] = 250
+	modifyConfig["EstablishTunnelPausePeriodSeconds"] = 1
+
+	if runConfig.disableUntunneledUpgrade {
+		// Disable untunneled upgrade downloader to ensure tunneled case is tested
+		modifyConfig["UpgradeDownloadClientVersionHeader"] = "invalid-value"
+	}
+
 	configJSON, _ = json.Marshal(modifyConfig)
 
 	config, err := LoadConfig(configJSON)
@@ -492,30 +508,16 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	// that the tactics request succeeds.
 	config.NetworkIDGetter = &testNetworkGetter{}
 
-	// The following config values must be applied through client parameters
-	// (setting the fields in Config directly will have no effect since the
-	// client parameters have been populated by LoadConfig).
+	// The following values can only be applied through client parameters.
+	// TODO: a successful tactics request can reset these parameters.
 
 	applyParameters := make(map[string]interface{})
-
-	if runConfig.disableUntunneledUpgrade {
-		// Disable untunneled upgrade downloader to ensure tunneled case is tested
-		applyParameters[parameters.UpgradeDownloadClientVersionHeader] = ""
-	}
 
 	if runConfig.transformHostNames {
 		applyParameters[parameters.TransformHostNameProbability] = 1.0
 	} else {
 		applyParameters[parameters.TransformHostNameProbability] = 0.0
 	}
-
-	// Override client retry throttle values to speed up automated
-	// tests and ensure tests complete within fixed deadlines.
-	applyParameters[parameters.FetchRemoteServerListRetryPeriod] = "250ms"
-	applyParameters[parameters.FetchUpgradeRetryPeriod] = "250ms"
-	applyParameters[parameters.EstablishTunnelPausePeriod] = "250ms"
-
-	applyParameters[parameters.LimitTunnelProtocols] = protocol.TunnelProtocols{runConfig.protocol}
 
 	err = config.SetClientParameters("", true, applyParameters)
 	if err != nil {
@@ -580,6 +582,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 			case "ConnectingServer":
 
 				serverProtocol := payload["protocol"].(string)
+
 				if runConfig.protocol != "" && serverProtocol != runConfig.protocol {
 					// TODO: wrong goroutine for t.FatalNow()
 					t.Fatalf("wrong protocol selected: %s", serverProtocol)

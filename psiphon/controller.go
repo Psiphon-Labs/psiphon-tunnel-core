@@ -166,7 +166,12 @@ func NewController(config *Config) (controller *Controller, err error) {
 // component fails or the parent context is canceled.
 func (controller *Controller) Run(ctx context.Context) {
 
-	ReportAvailableRegions()
+	// Ensure fresh repetitive notice state for each run, so the
+	// client will always get an AvailableEgressRegions notice,
+	// an initial instance of any repetitive error notice, etc.
+	ResetRepetitiveNotices()
+
+	ReportAvailableRegions(controller.config)
 
 	runCtx, stopRunning := context.WithCancel(ctx)
 	defer stopRunning()
@@ -1177,7 +1182,8 @@ func (controller *Controller) launchEstablishing() {
 	// Any in-flight tactics request or pending retry will be
 	// canceled when establishment is stopped.
 
-	doTactics := (controller.config.NetworkIDGetter != nil)
+	doTactics := !controller.config.DisableTactics &&
+		controller.config.NetworkIDGetter != nil
 
 	if doTactics {
 
@@ -1331,7 +1337,6 @@ func (controller *Controller) getTactics(done chan struct{}) {
 			case <-controller.establishCtx.Done():
 				return
 			case <-tacticsRetryDelay.C:
-			default:
 			}
 
 			tacticsRetryDelay.Stop()

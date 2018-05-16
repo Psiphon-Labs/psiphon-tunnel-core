@@ -21,11 +21,59 @@ package common
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"testing"
 	"time"
 )
+
+func TestGetStringSlice(t *testing.T) {
+
+	originalSlice := []string{"a", "b", "c"}
+
+	j, err := json.Marshal(originalSlice)
+	if err != nil {
+		t.Errorf("json.Marshal failed: %s", err)
+	}
+
+	var value interface{}
+
+	err = json.Unmarshal(j, &value)
+	if err != nil {
+		t.Errorf("json.Unmarshal failed: %s", err)
+	}
+
+	newSlice, ok := GetStringSlice(value)
+	if !ok {
+		t.Errorf("GetStringSlice failed")
+	}
+
+	if !reflect.DeepEqual(originalSlice, newSlice) {
+		t.Errorf("unexpected GetStringSlice output")
+	}
+}
+
+func TestMakeSecureRandomPerm(t *testing.T) {
+	for n := 0; n < 1000; n++ {
+		perm, err := MakeSecureRandomPerm(n)
+		if err != nil {
+			t.Errorf("MakeSecureRandomPerm failed: %s", err)
+		}
+		if len(perm) != n {
+			t.Error("unexpected permutation size")
+		}
+		sum := 0
+		for i := 0; i < n; i++ {
+			sum += perm[i]
+		}
+		expectedSum := (n * (n - 1)) / 2
+		if sum != expectedSum {
+			t.Error("unexpected permutation")
+		}
+	}
+}
 
 func TestMakeRandomPeriod(t *testing.T) {
 	min := 1 * time.Nanosecond

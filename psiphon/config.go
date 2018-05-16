@@ -117,6 +117,12 @@ type Config struct {
 	// DisableLocalHTTPProxy disables running the local HTTP proxy.
 	DisableLocalHTTPProxy bool
 
+	// NetworkLatencyMultiplier is a multiplier that is to be applied to
+	// default network event timeouts. Set this to tune performance for
+	// slow networks.
+	// When set, must be >= 1.0.
+	NetworkLatencyMultiplier float64
+
 	// TunnelProtocol indicates which protocol to use. For the default, "",
 	// all protocols are used.
 	//
@@ -219,6 +225,10 @@ type Config struct {
 	//
 	// This parameter is only applicable to library deployments.
 	NetworkIDGetter NetworkIDGetter
+
+	// DisableTactics disables tactics operations including requests, payload
+	// handling, and application of parameters.
+	DisableTactics bool
 
 	// TransformHostNames specifies whether to use hostname transformation
 	// circumvention strategies. Set to "always" to always transform, "never"
@@ -663,6 +673,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 	// backwards compatibility.
 
 	applyParameters := make(map[string]interface{})
+
+	if config.NetworkLatencyMultiplier > 0.0 {
+		applyParameters[parameters.NetworkLatencyMultiplier] = config.NetworkLatencyMultiplier
+	}
 
 	if len(config.TunnelProtocols) > 0 {
 		applyParameters[parameters.LimitTunnelProtocols] = protocol.TunnelProtocols(config.TunnelProtocols)

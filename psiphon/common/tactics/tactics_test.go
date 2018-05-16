@@ -50,6 +50,7 @@ func TestTactics(t *testing.T) {
       "RequestPublicKey" : "%s",
       "RequestPrivateKey" : "%s",
       "RequestObfuscatedKey" : "%s",
+      "EnforceServerSide" : true,
       "DefaultTactics" : {
         "TTL" : "1s",
         "Probability" : %0.1f,
@@ -97,6 +98,16 @@ func TestTactics(t *testing.T) {
               "ConnectionWorkerPoolSize" : %d
             }
           }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R7"]
+          },
+          "Tactics" : {
+            "Parameters" : {
+              "LimitTunnelProtocols" : ["SSH"]
+            }
+          }
         }
       ]
     }
@@ -115,6 +126,10 @@ func TestTactics(t *testing.T) {
 	tacticsConnectionWorkerPoolSize := 5
 	tacticsLimitTunnelProtocols := protocol.TunnelProtocols{"OSSH", "SSH"}
 	jsonTacticsLimitTunnelProtocols, _ := json.Marshal(tacticsLimitTunnelProtocols)
+
+	listenerProtocol := "OSSH"
+	listenerProhibitedGeoIP := func(string) common.GeoIPData { return common.GeoIPData{Country: "R7"} }
+	listenerAllowedGeoIP := func(string) common.GeoIPData { return common.GeoIPData{Country: "R8"} }
 
 	tacticsConfig := fmt.Sprintf(
 		tacticsConfigTemplate,
@@ -680,8 +695,98 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("HandleEndPoint unexpectedly handled request")
 	}
 
-	// TODO: test replay attack defence
+	// Test Listener
 
+	tacticsProbability = 1.0
+
+	tacticsConfig = fmt.Sprintf(
+		tacticsConfigTemplate,
+		"",
+		"",
+		"",
+		tacticsProbability,
+		tacticsNetworkLatencyMultiplier,
+		tacticsConnectionWorkerPoolSize,
+		jsonTacticsLimitTunnelProtocols,
+		tacticsConnectionWorkerPoolSize+1)
+
+	err = ioutil.WriteFile(configFileName, []byte(tacticsConfig), 0600)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %s", err)
+	}
+
+	reloaded, err = server.Reload()
+	if err != nil {
+		t.Fatalf("Reload failed: %s", err)
+	}
+
+	listenerTestCases := []struct {
+		description      string
+		geoIPLookup      func(string) common.GeoIPData
+		expectConnection bool
+	}{
+		{
+			"connection prohibited",
+			listenerProhibitedGeoIP,
+			false,
+		},
+		{
+			"connection allowed",
+			listenerAllowedGeoIP,
+			true,
+		},
+	}
+
+	for _, testCase := range listenerTestCases {
+		t.Run(testCase.description, func(t *testing.T) {
+
+			tcpListener, err := net.Listen("tcp", ":0")
+			if err != nil {
+				t.Fatalf(" net.Listen failed: %s", err)
+			}
+
+			tacticsListener := NewListener(
+				tcpListener,
+				server,
+				listenerProtocol,
+				testCase.geoIPLookup)
+
+			clientConn, err := net.Dial("tcp", tacticsListener.Addr().String())
+			if err != nil {
+				t.Fatalf(" net.Dial failed: %s", err)
+				return
+			}
+
+			result := make(chan struct{}, 1)
+
+			go func() {
+				serverConn, err := tacticsListener.Accept()
+				if err == nil {
+					result <- *new(struct{})
+					serverConn.Close()
+				}
+			}()
+
+			timer := time.NewTimer(3 * time.Second)
+			defer timer.Stop()
+
+			select {
+			case <-result:
+				if !testCase.expectConnection {
+					t.Fatalf("unexpected accepted connection")
+				}
+			case <-timer.C:
+				if testCase.expectConnection {
+					t.Fatalf("timeout before expected accepted connection")
+				}
+			}
+
+			clientConn.Close()
+			tacticsListener.Close()
+		})
+	}
+
+	// TODO: test replay attack defence
 	// TODO: test Server.Validate with invalid tactics configurations
 }
 

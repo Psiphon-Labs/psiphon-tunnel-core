@@ -132,7 +132,10 @@ func Start(
 	}
 
 	// Stores list of server entries.
-	err = storeServerEntries(embeddedServerEntryListFilename, embeddedServerEntryList)
+	err = storeServerEntries(
+		config,
+		embeddedServerEntryListFilename,
+		embeddedServerEntryList)
 	if err != nil {
 		return err
 	}
@@ -222,7 +225,9 @@ func GetPacketTunnelDNSResolverIPv6Address() string {
 
 // Helper function to store a list of server entries.
 // if embeddedServerEntryListFilename is not empty, embeddedServerEntryList will be ignored.
-func storeServerEntries(embeddedServerEntryListFilename, embeddedServerEntryList string) error {
+func storeServerEntries(
+	config *psiphon.Config,
+	embeddedServerEntryListFilename, embeddedServerEntryList string) error {
 
 	if embeddedServerEntryListFilename != "" {
 
@@ -233,6 +238,7 @@ func storeServerEntries(embeddedServerEntryListFilename, embeddedServerEntryList
 		defer file.Close()
 
 		err = psiphon.StreamingStoreServerEntries(
+			config,
 			protocol.NewStreamingServerEntryDecoder(
 				file,
 				common.GetCurrentTimestamp(),
@@ -251,7 +257,7 @@ func storeServerEntries(embeddedServerEntryListFilename, embeddedServerEntryList
 		if err != nil {
 			return fmt.Errorf("error decoding embedded server list: %s", err)
 		}
-		err = psiphon.StoreServerEntries(serverEntries, false)
+		err = psiphon.StoreServerEntries(config, serverEntries, false)
 		if err != nil {
 			return fmt.Errorf("error storing embedded server list: %s", err)
 		}
