@@ -731,12 +731,15 @@ func initMeekConfig(
 	}
 
 	// Pin the TLS profile for the entire meek connection.
-	selectedTLSProfile := SelectTLSProfile(
-		config.clientParameters,
-		config.UseIndistinguishableTLS,
-		useObfuscatedSessionTickets,
-		true,
-		config.TrustedCACertificatesFilename != "")
+	selectedTLSProfile := ""
+	if protocol.TunnelProtocolUsesMeekHTTPS(selectedProtocol) {
+		selectedTLSProfile = SelectTLSProfile(
+			config.clientParameters,
+			config.UseIndistinguishableTLS,
+			useObfuscatedSessionTickets,
+			true,
+			config.TrustedCACertificatesFilename != "")
+	}
 
 	return &MeekConfig{
 		ClientParameters:              config.clientParameters,
