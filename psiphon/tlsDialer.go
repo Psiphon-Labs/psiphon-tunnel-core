@@ -169,7 +169,7 @@ func SelectTLSProfile(
 			tlsProfiles = append(tlsProfiles, tlsProfile)
 		}
 
-		if len(limitTLSProfiles) == 0 {
+		if len(tlsProfiles) == 0 {
 			return ""
 		}
 
