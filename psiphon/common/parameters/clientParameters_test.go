@@ -41,47 +41,52 @@ func TestGetDefaultParameters(t *testing.T) {
 		case string:
 			g := p.Get().String(name)
 			if v != g {
-				t.Fatalf("GetString returned %+v expected %+v", v, g)
+				t.Fatalf("String returned %+v expected %+v", v, g)
 			}
 		case int:
 			g := p.Get().Int(name)
 			if v != g {
-				t.Fatalf("GetInt returned %+v expected %+v", v, g)
+				t.Fatalf("Int returned %+v expected %+v", v, g)
 			}
 		case float64:
 			g := p.Get().Float(name)
 			if v != g {
-				t.Fatalf("GetFloat returned %+v expected %+v", v, g)
+				t.Fatalf("Float returned %+v expected %+v", v, g)
 			}
 		case bool:
 			g := p.Get().Bool(name)
 			if v != g {
-				t.Fatalf("GetBool returned %+v expected %+v", v, g)
+				t.Fatalf("Bool returned %+v expected %+v", v, g)
 			}
 		case time.Duration:
 			g := p.Get().Duration(name)
 			if v != g {
-				t.Fatalf("GetDuration returned %+v expected %+v", v, g)
+				t.Fatalf("Duration returned %+v expected %+v", v, g)
 			}
 		case protocol.TunnelProtocols:
 			g := p.Get().TunnelProtocols(name)
 			if !reflect.DeepEqual(v, g) {
-				t.Fatalf("GetTunnelProtocols returned %+v expected %+v", v, g)
+				t.Fatalf("TunnelProtocols returned %+v expected %+v", v, g)
+			}
+		case protocol.TLSProfiles:
+			g := p.Get().TLSProfiles(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("TLSProfiles returned %+v expected %+v", v, g)
 			}
 		case DownloadURLs:
 			g := p.Get().DownloadURLs(name)
 			if !reflect.DeepEqual(v, g) {
-				t.Fatalf("GetDownloadURLs returned %+v expected %+v", v, g)
+				t.Fatalf("DownloadURLs returned %+v expected %+v", v, g)
 			}
 		case common.RateLimits:
 			g := p.Get().RateLimits(name)
 			if !reflect.DeepEqual(v, g) {
-				t.Fatalf("GetRateLimits returned %+v expected %+v", v, g)
+				t.Fatalf("RateLimits returned %+v expected %+v", v, g)
 			}
 		case http.Header:
 			g := p.Get().HTTPHeaders(name)
 			if !reflect.DeepEqual(v, g) {
-				t.Fatalf("GetHTTPHeaders returned %+v expected %+v", v, g)
+				t.Fatalf("HTTPHeaders returned %+v expected %+v", v, g)
 			}
 		default:
 			t.Fatalf("Unhandled default type: %s", name)
