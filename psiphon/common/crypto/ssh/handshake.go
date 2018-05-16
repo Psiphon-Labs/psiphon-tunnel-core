@@ -12,6 +12,8 @@ import (
 	"log"
 	"net"
 	"sync"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // debugHandshake, if set, prints messages sent and received.  Key
@@ -457,6 +459,66 @@ func (t *handshakeTransport) sendKexInit() error {
 	} else {
 		msg.ServerHostKeyAlgos = t.hostKeyAlgorithms
 	}
+
+	// PSIPHON
+	// =======
+	//
+	// Randomize KEX. The offered algorithms are shuffled and
+	// truncated (longer lists are selected with higher
+	// probability).
+	//
+	// As the client and server have the same set of algorithms,
+	// almost any combination is expected to be workable.
+	//
+	// The compression algorithm is not actually supported, but
+	// the server will not negotiate it.
+	//
+	// common.MakeSecureRandomPerm and common.FlipCoin are
+	// unlikely to fail; if they do, proceed with the standard
+	// ordering, full lists, and standard compressions.
+	//
+	// The "t.remoteAddr != nil" condition should be true only
+	// for clients.
+	//
+	if t.remoteAddr != nil {
+
+		transform := func(list []string) []string {
+
+			newList := make([]string, len(list))
+			perm, err := common.MakeSecureRandomPerm(len(list))
+			if err == nil {
+				for i, j := range perm {
+					newList[j] = list[i]
+				}
+			}
+
+			cut := len(newList)
+			for ; cut > 1; cut-- {
+				if !common.FlipCoin() {
+					break
+				}
+			}
+
+			return newList[:cut]
+		}
+
+		msg.KexAlgos = transform(t.config.KeyExchanges)
+		ciphers := transform(t.config.Ciphers)
+		msg.CiphersClientServer = ciphers
+		msg.CiphersServerClient = ciphers
+		MACs := transform(t.config.MACs)
+		msg.MACsClientServer = MACs
+		msg.MACsServerClient = MACs
+
+		// Offer "zlib@openssh.com", which is offered by OpenSSH.
+		// Since server only supports "none", must always offer "none"
+		if common.FlipCoin() {
+			compressions := []string{"none", "zlib@openssh.com"}
+			msg.CompressionClientServer = compressions
+			msg.CompressionServerClient = compressions
+		}
+	}
+
 	packet := Marshal(msg)
 
 	// writePacket destroys the contents, so save a copy.

@@ -1182,7 +1182,8 @@ func (controller *Controller) launchEstablishing() {
 	// Any in-flight tactics request or pending retry will be
 	// canceled when establishment is stopped.
 
-	doTactics := (controller.config.NetworkIDGetter != nil)
+	doTactics := !controller.config.DisableTactics &&
+		controller.config.NetworkIDGetter != nil
 
 	if doTactics {
 

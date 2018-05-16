@@ -17,7 +17,7 @@
  *
  */
 
-package common
+package obfuscator
 
 import (
 	"bytes"
@@ -28,12 +28,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 )
 
 func TestObfuscator(t *testing.T) {
 
-	keyword, _ := MakeRandomStringHex(32)
+	keyword, _ := common.MakeRandomStringHex(32)
 
 	config := &ObfuscatorConfig{
 		Keyword:    keyword,
@@ -75,7 +76,7 @@ func TestObfuscator(t *testing.T) {
 
 func TestObfuscatedSSHConn(t *testing.T) {
 
-	keyword, _ := MakeRandomStringHex(32)
+	keyword, _ := common.MakeRandomStringHex(32)
 
 	serverAddress := "127.0.0.1:2222"
 

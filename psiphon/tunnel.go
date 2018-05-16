@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
@@ -730,12 +731,15 @@ func initMeekConfig(
 	}
 
 	// Pin the TLS profile for the entire meek connection.
-	selectedTLSProfile := SelectTLSProfile(
-		config.clientParameters,
-		config.UseIndistinguishableTLS,
-		useObfuscatedSessionTickets,
-		true,
-		config.TrustedCACertificatesFilename != "")
+	selectedTLSProfile := ""
+	if protocol.TunnelProtocolUsesMeekHTTPS(selectedProtocol) {
+		selectedTLSProfile = SelectTLSProfile(
+			config.clientParameters,
+			config.UseIndistinguishableTLS,
+			useObfuscatedSessionTickets,
+			true,
+			config.TrustedCACertificatesFilename != "")
+	}
 
 	return &MeekConfig{
 		ClientParameters:              config.clientParameters,
@@ -968,8 +972,8 @@ func dialSsh(
 	// Add obfuscated SSH layer
 	var sshConn net.Conn = throttledConn
 	if useObfuscatedSsh {
-		sshConn, err = common.NewObfuscatedSshConn(
-			common.OBFUSCATION_CONN_MODE_CLIENT, throttledConn, serverEntry.SshObfuscatedKey)
+		sshConn, err = obfuscator.NewObfuscatedSshConn(
+			obfuscator.OBFUSCATION_CONN_MODE_CLIENT, throttledConn, serverEntry.SshObfuscatedKey)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}

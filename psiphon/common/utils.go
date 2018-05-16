@@ -70,11 +70,30 @@ func ContainsInt(list []int, target int) bool {
 	return false
 }
 
+// GetStringSlice converts an interface{} which is
+// of type []interace{}, and with the type of each
+// element a string, to []string.
+func GetStringSlice(value interface{}) ([]string, bool) {
+	slice, ok := value.([]interface{})
+	if !ok {
+		return nil, false
+	}
+	strSlice := make([]string, len(slice))
+	for index, element := range slice {
+		str, ok := element.(string)
+		if !ok {
+			return nil, false
+		}
+		strSlice[index] = str
+	}
+	return strSlice, true
+}
+
 // FlipCoin is a helper function that randomly
 // returns true or false.
 //
 // If the underlying random number generator fails,
-// FlipCoin still returns a result.
+// FlipCoin still returns false.
 func FlipCoin() bool {
 	randomInt, _ := MakeSecureRandomInt(2)
 	return randomInt == 1
@@ -117,6 +136,22 @@ func MakeSecureRandomInt64(max int64) (int64, error) {
 		return 0, ContextError(err)
 	}
 	return randomInt.Int64(), nil
+}
+
+// MakeSecureRandomPerm returns a random permutation of [0,max).
+func MakeSecureRandomPerm(max int) ([]int, error) {
+	// Based on math/rand.Rand.Perm:
+	// https://github.com/golang/go/blob/release-branch.go1.9/src/math/rand/rand.go#L189
+	perm := make([]int, max)
+	for i := 1; i < max; i++ {
+		j, err := MakeSecureRandomInt(i + 1)
+		if err != nil {
+			return nil, ContextError(err)
+		}
+		perm[i] = perm[j]
+		perm[j] = i
+	}
+	return perm, nil
 }
 
 // MakeSecureRandomBytes is a helper function that wraps

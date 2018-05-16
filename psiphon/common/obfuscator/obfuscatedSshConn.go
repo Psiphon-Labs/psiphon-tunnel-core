@@ -17,7 +17,7 @@
  *
  */
 
-package common
+package obfuscator
 
 import (
 	"bytes"
@@ -25,6 +25,8 @@ import (
 	"errors"
 	"io"
 	"net"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 const (
@@ -116,7 +118,7 @@ func NewObfuscatedSshConn(
 	if mode == OBFUSCATION_CONN_MODE_CLIENT {
 		obfuscator, err = NewClientObfuscator(&ObfuscatorConfig{Keyword: obfuscationKeyword})
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		readDeobfuscate = obfuscator.ObfuscateServerToClient
 		writeObfuscate = obfuscator.ObfuscateClientToServer
@@ -127,7 +129,7 @@ func NewObfuscatedSshConn(
 			conn, &ObfuscatorConfig{Keyword: obfuscationKeyword})
 		if err != nil {
 			// TODO: readForver() equivalent
-			return nil, ContextError(err)
+			return nil, common.ContextError(err)
 		}
 		readDeobfuscate = obfuscator.ObfuscateClientToServer
 		writeObfuscate = obfuscator.ObfuscateServerToClient
@@ -156,7 +158,7 @@ func (conn *ObfuscatedSshConn) Read(buffer []byte) (int, error) {
 	}
 	n, err := conn.readAndTransform(buffer)
 	if err != nil {
-		err = ContextError(err)
+		err = common.ContextError(err)
 	}
 	return n, err
 }
@@ -169,7 +171,7 @@ func (conn *ObfuscatedSshConn) Write(buffer []byte) (int, error) {
 	}
 	err := conn.transformAndWrite(buffer)
 	if err != nil {
-		return 0, ContextError(err)
+		return 0, common.ContextError(err)
 	}
 	// Reports that we wrote all the bytes
 	// (although we may have buffered some or all)
@@ -227,7 +229,7 @@ func (conn *ObfuscatedSshConn) readAndTransform(buffer []byte) (int, error) {
 				err := readSshIdentificationLine(
 					conn.Conn, conn.readDeobfuscate, conn.readBuffer)
 				if err != nil {
-					return 0, ContextError(err)
+					return 0, common.ContextError(err)
 				}
 				if bytes.HasPrefix(conn.readBuffer.Bytes(), []byte("SSH-")) {
 					break
@@ -243,7 +245,7 @@ func (conn *ObfuscatedSshConn) readAndTransform(buffer []byte) (int, error) {
 			isMsgNewKeys, err := readSshPacket(
 				conn.Conn, conn.readDeobfuscate, conn.readBuffer)
 			if err != nil {
-				return 0, ContextError(err)
+				return 0, common.ContextError(err)
 			}
 			if isMsgNewKeys {
 				nextState = OBFUSCATION_READ_STATE_FLUSH
@@ -254,7 +256,7 @@ func (conn *ObfuscatedSshConn) readAndTransform(buffer []byte) (int, error) {
 		nextState = OBFUSCATION_READ_STATE_FINISHED
 
 	case OBFUSCATION_READ_STATE_FINISHED:
-		return 0, ContextError(errors.New("invalid read state"))
+		return 0, common.ContextError(errors.New("invalid read state"))
 	}
 
 	n, err := conn.readBuffer.Read(buffer)
@@ -262,7 +264,7 @@ func (conn *ObfuscatedSshConn) readAndTransform(buffer []byte) (int, error) {
 		err = nil
 	}
 	if err != nil {
-		return n, ContextError(err)
+		return n, common.ContextError(err)
 	}
 	if conn.readBuffer.Len() == 0 {
 		conn.readState = nextState
@@ -321,18 +323,18 @@ func (conn *ObfuscatedSshConn) transformAndWrite(buffer []byte) error {
 	if conn.writeState == OBFUSCATION_WRITE_STATE_CLIENT_SEND_SEED_MESSAGE {
 		_, err := conn.Conn.Write(conn.obfuscator.SendSeedMessage())
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 		conn.writeState = OBFUSCATION_WRITE_STATE_IDENTIFICATION_LINE
 	} else if conn.writeState == OBFUSCATION_WRITE_STATE_SERVER_SEND_IDENTIFICATION_LINE_PADDING {
 		padding, err := makeServerIdentificationLinePadding()
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 		conn.writeObfuscate(padding)
 		_, err = conn.Conn.Write(padding)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 		conn.writeState = OBFUSCATION_WRITE_STATE_IDENTIFICATION_LINE
 	}
@@ -357,14 +359,14 @@ func (conn *ObfuscatedSshConn) transformAndWrite(buffer []byte) error {
 		hasMsgNewKeys, err := extractSshPackets(
 			conn.writeBuffer, conn.transformBuffer)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 		if hasMsgNewKeys {
 			conn.writeState = OBFUSCATION_WRITE_STATE_FINISHED
 		}
 
 	case OBFUSCATION_WRITE_STATE_FINISHED:
-		return ContextError(errors.New("invalid write state"))
+		return common.ContextError(errors.New("invalid write state"))
 	}
 
 	if conn.transformBuffer.Len() > 0 {
@@ -372,7 +374,7 @@ func (conn *ObfuscatedSshConn) transformAndWrite(buffer []byte) error {
 		conn.writeObfuscate(sendData)
 		_, err := conn.Conn.Write(sendData)
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 	}
 
@@ -381,7 +383,7 @@ func (conn *ObfuscatedSshConn) transformAndWrite(buffer []byte) error {
 			// After SSH_MSG_NEWKEYS, any remaining bytes are un-obfuscated
 			_, err := conn.Conn.Write(conn.writeBuffer.Bytes())
 			if err != nil {
-				return ContextError(err)
+				return common.ContextError(err)
 			}
 		}
 		// The buffer memory is no longer used
@@ -403,7 +405,7 @@ func readSshIdentificationLine(
 	for i := 0; i < SSH_MAX_SERVER_LINE_LENGTH; i++ {
 		_, err := io.ReadFull(conn, oneByte[:])
 		if err != nil {
-			return ContextError(err)
+			return common.ContextError(err)
 		}
 		deobfuscate(oneByte[:])
 		readBuffer.WriteByte(oneByte[0])
@@ -413,7 +415,7 @@ func readSshIdentificationLine(
 		}
 	}
 	if !validLine {
-		return ContextError(errors.New("invalid identification line"))
+		return common.ContextError(errors.New("invalid identification line"))
 	}
 	return nil
 }
@@ -431,7 +433,7 @@ func readSshPacket(
 		err = errors.New("unxpected number of bytes read")
 	}
 	if err != nil {
-		return false, ContextError(err)
+		return false, common.ContextError(err)
 	}
 
 	prefix := readBuffer.Bytes()[prefixOffset : prefixOffset+SSH_PACKET_PREFIX_LENGTH]
@@ -439,7 +441,7 @@ func readSshPacket(
 
 	_, _, payloadLength, messageLength, err := getSshPacketPrefix(prefix)
 	if err != nil {
-		return false, ContextError(err)
+		return false, common.ContextError(err)
 	}
 
 	remainingReadLength := messageLength - SSH_PACKET_PREFIX_LENGTH
@@ -449,7 +451,7 @@ func readSshPacket(
 		err = errors.New("unxpected number of bytes read")
 	}
 	if err != nil {
-		return false, ContextError(err)
+		return false, common.ContextError(err)
 	}
 
 	remainingBytes := readBuffer.Bytes()[prefixOffset+SSH_PACKET_PREFIX_LENGTH:]
@@ -468,9 +470,9 @@ func readSshPacket(
 // From the original patch to sshd.c:
 // https://bitbucket.org/psiphon/psiphon-circumvention-system/commits/f40865ce624b680be840dc2432283c8137bd896d
 func makeServerIdentificationLinePadding() ([]byte, error) {
-	paddingLength, err := MakeSecureRandomInt(OBFUSCATE_MAX_PADDING - 2) // 2 = CRLF
+	paddingLength, err := common.MakeSecureRandomInt(OBFUSCATE_MAX_PADDING - 2) // 2 = CRLF
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, common.ContextError(err)
 	}
 	paddingLength += 2
 	padding := make([]byte, paddingLength)
@@ -518,7 +520,7 @@ func extractSshPackets(writeBuffer, transformBuffer *bytes.Buffer) (bool, error)
 		packetLength, paddingLength, payloadLength, messageLength, err := getSshPacketPrefix(
 			writeBuffer.Bytes()[:SSH_PACKET_PREFIX_LENGTH])
 		if err != nil {
-			return false, ContextError(err)
+			return false, common.ContextError(err)
 		}
 
 		if writeBuffer.Len() < messageLength {
@@ -545,14 +547,14 @@ func extractSshPackets(writeBuffer, transformBuffer *bytes.Buffer) (bool, error)
 		if possiblePaddings > 0 {
 
 			// selectedPadding is integer in range [0, possiblePaddings)
-			selectedPadding, err := MakeSecureRandomInt(possiblePaddings)
+			selectedPadding, err := common.MakeSecureRandomInt(possiblePaddings)
 			if err != nil {
-				return false, ContextError(err)
+				return false, common.ContextError(err)
 			}
 			extraPaddingLength := selectedPadding * SSH_PADDING_MULTIPLE
-			extraPadding, err := MakeSecureRandomBytes(extraPaddingLength)
+			extraPadding, err := common.MakeSecureRandomBytes(extraPaddingLength)
 			if err != nil {
-				return false, ContextError(err)
+				return false, common.ContextError(err)
 			}
 
 			setSshPacketPrefix(
@@ -571,7 +573,7 @@ func getSshPacketPrefix(buffer []byte) (int, int, int, int, error) {
 	packetLength := int(binary.BigEndian.Uint32(buffer[0 : SSH_PACKET_PREFIX_LENGTH-1]))
 
 	if packetLength < 1 || packetLength > SSH_MAX_PACKET_LENGTH {
-		return 0, 0, 0, 0, ContextError(errors.New("invalid ssh packet length"))
+		return 0, 0, 0, 0, common.ContextError(errors.New("invalid ssh packet length"))
 	}
 
 	paddingLength := int(buffer[SSH_PACKET_PREFIX_LENGTH-1])

@@ -1,7 +1,7 @@
 language: go
 sudo: required
 go:
-- 1.9.5
+- 1.9.6
 addons:
   apt_packages:
     - libx11-dev
@@ -12,6 +12,7 @@ script:
 - cd psiphon
 - go test -race -v ./common
 - go test -race -v ./common/accesscontrol
+- go test -race -v ./common/obfuscator
 - go test -race -v ./common/osl
 - go test -race -v ./common/parameters
 - go test -race -v ./common/protocol
@@ -26,6 +27,7 @@ script:
 - go test -race -v
 - go test -v -covermode=count -coverprofile=common.coverprofile ./common
 - go test -v -covermode=count -coverprofile=accesscontrol.coverprofile ./common/accesscontrol
+- go test -v -covermode=count -coverprofile=obfuscator.coverprofile ./common/obfuscator
 - go test -v -covermode=count -coverprofile=osl.coverprofile ./common/osl
 - go test -v -covermode=count -coverprofile=parameters.coverprofile ./common/parameters
 - go test -v -covermode=count -coverprofile=protocol.coverprofile ./common/protocol

@@ -40,6 +40,7 @@ import (
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
 )
@@ -909,9 +910,9 @@ func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte,
 
 	reader := bytes.NewReader(decodedValue[:])
 
-	obfuscator, err := common.NewServerObfuscator(
+	obfuscator, err := obfuscator.NewServerObfuscator(
 		reader,
-		&common.ObfuscatorConfig{Keyword: support.Config.MeekObfuscatedKey})
+		&obfuscator.ObfuscatorConfig{Keyword: support.Config.MeekObfuscatedKey})
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
