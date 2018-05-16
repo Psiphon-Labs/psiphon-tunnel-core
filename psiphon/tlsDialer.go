@@ -148,13 +148,6 @@ type CustomTLSConfig struct {
 	ObfuscatedSessionTicketKey string
 }
 
-const (
-	tlsProfileAndroid    = "Android-6.0"
-	tlsProfileChrome     = "Chrome-62"
-	tlsProfileFirefox    = "Firefox-56"
-	tlsProfileRandomized = "Randomized"
-)
-
 func SelectTLSProfile(
 	useIndistinguishableTLS bool,
 	tunnelProtocol string,
@@ -162,18 +155,30 @@ func SelectTLSProfile(
 
 	if useIndistinguishableTLS {
 
-		tlsProfiles := []string{
-			tlsProfileAndroid,
-			tlsProfileChrome,
-			tlsProfileFirefox,
+		limitTLSProfiles := clientParameters.Get().TLSProfiles(parameters.LimitTLSProfiles)
+
+		tlsProfiles := make([]string, 0)
+
+		for _, tlsProfile := range protocol.SupportedTLSProfiles {
+
+			if len(limitTLSProfiles) > 0 &&
+				!common.Contains(limitTLSProfiles, tlsProfile) {
+				continue
+			}
+
+			if tunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET &&
+				tlsProfile == protocol.TLS_PROFILE_RANDOMIZED {
+				// This TLS profile doesn't support session tickets
+				continue
+			}
+
+			tlsProfiles = append(tlsProfiles, tlsProfile)
 		}
 
-		if tunnelProtocol != protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET {
-			// The following TLS profiles don't support session tickets
-			tlsProfiles = append(tlsProfiles, tlsProfileRandomized)
+		if len(limitTLSProfiles) == 0 {
+			return ""
 		}
 
-		// TODO: weighted selection parameter
 		choice, _ := common.MakeSecureRandomInt(len(tlsProfiles))
 
 		return tlsProfiles[choice]
@@ -184,13 +189,19 @@ func SelectTLSProfile(
 
 func getClientHelloID(tlsProfile string) utls.ClientHelloID {
 	switch tlsProfile {
-	case tlsProfileAndroid:
+	case protocol.TLS_PROFILE_IOS_1131:
+		return utls.HelloiOSSafari_11_3_1
+	case protocol.TLS_PROFILE_ANDROID_60:
 		return utls.HelloAndroid_6_0_Browser
-	case tlsProfileChrome:
-		return utls.HelloChrome_62
-	case tlsProfileFirefox:
+	case protocol.TLS_PROFILE_ANDROID_51:
+		return utls.HelloAndroid_5_1_Browser
+	case protocol.TLS_PROFILE_CHROME_58:
+		return utls.HelloChrome_58
+	case protocol.TLS_PROFILE_CHROME_57:
+		return utls.HelloChrome_57
+	case protocol.TLS_PROFILE_FIREFOX_56:
 		return utls.HelloFirefox_56
-	case tlsProfileRandomized:
+	case protocol.TLS_PROFILE_RANDOMIZED:
 		return utls.HelloRandomized
 	default:
 		return utls.HelloGolang

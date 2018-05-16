@@ -31,7 +31,12 @@ func (uconn *UConn) generateClientHelloConfig(id ClientHelloID) error {
 	case HelloChrome_62:
 		fallthrough
 	case HelloChrome_58:
-		return uconn.parrotChrome_58()
+		return uconn.parrotChrome_5x(false)
+	case HelloChrome_57:
+		return uconn.parrotChrome_5x(true)
+
+	case HelloiOSSafari_11_3_1:
+		return uconn.parrotiOSSafari_11_3_1()
 
 	case HelloRandomizedALPN:
 		return uconn.parrotRandomizedALPN()
@@ -233,6 +238,7 @@ func (uconn *UConn) parrotAndroid_6_0() error {
 	}
 	return nil
 }
+
 func (uconn *UConn) parrotAndroid_5_1() error {
 	hello := uconn.HandshakeState.Hello
 	session := uconn.HandshakeState.Session
@@ -309,7 +315,7 @@ func (uconn *UConn) parrotAndroid_5_1() error {
 	return nil
 }
 
-func (uconn *UConn) parrotChrome_58() error {
+func (uconn *UConn) parrotChrome_5x(includeNonStandardChaChaCiphers bool) error {
 	hello := uconn.HandshakeState.Hello
 	session := uconn.HandshakeState.Session
 
@@ -318,21 +324,42 @@ func (uconn *UConn) parrotChrome_58() error {
 		return err
 	}
 
-	hello.CipherSuites = []uint16{
-		GetBoringGREASEValue(hello.Random, ssl_grease_cipher),
-		TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-		TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-		TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-		TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-		TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-		TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-		TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-		TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-		TLS_RSA_WITH_AES_128_GCM_SHA256,
-		TLS_RSA_WITH_AES_256_GCM_SHA384,
-		TLS_RSA_WITH_AES_128_CBC_SHA,
-		TLS_RSA_WITH_AES_256_CBC_SHA,
-		TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+	if includeNonStandardChaChaCiphers {
+		hello.CipherSuites = []uint16{
+			GetBoringGREASEValue(hello.Random, ssl_grease_cipher),
+			TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+			TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+			OLD_TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+			OLD_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+			TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+			TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			TLS_RSA_WITH_AES_128_GCM_SHA256,
+			TLS_RSA_WITH_AES_256_GCM_SHA384,
+			TLS_RSA_WITH_AES_128_CBC_SHA,
+			TLS_RSA_WITH_AES_256_CBC_SHA,
+			TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+		}
+	} else {
+		hello.CipherSuites = []uint16{
+			GetBoringGREASEValue(hello.Random, ssl_grease_cipher),
+			TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+			TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+			TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+			TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			TLS_RSA_WITH_AES_128_GCM_SHA256,
+			TLS_RSA_WITH_AES_256_GCM_SHA384,
+			TLS_RSA_WITH_AES_128_CBC_SHA,
+			TLS_RSA_WITH_AES_256_CBC_SHA,
+			TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+		}
 	}
 
 	grease_ext1 := GetBoringGREASEValue(hello.Random, ssl_grease_extension1)
@@ -389,6 +416,83 @@ func (uconn *UConn) parrotChrome_58() error {
 		&curves,
 		&grease2,
 		&padding,
+	}
+	return nil
+}
+
+func (uconn *UConn) parrotiOSSafari_11_3_1() error {
+	hello := uconn.HandshakeState.Hello
+	session := uconn.HandshakeState.Session
+
+	hello.CipherSuites = []uint16{
+		TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+		TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+		DISABLED_TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384,
+		TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
+		TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+		TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+		TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+		TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+		TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+		DISABLED_TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384,
+		TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
+		TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+		TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+		TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+		TLS_RSA_WITH_AES_256_GCM_SHA384,
+		TLS_RSA_WITH_AES_128_GCM_SHA256,
+		DISABLED_TLS_RSA_WITH_AES_256_CBC_SHA256,
+		TLS_RSA_WITH_AES_128_CBC_SHA256,
+		TLS_RSA_WITH_AES_256_CBC_SHA,
+		TLS_RSA_WITH_AES_128_CBC_SHA,
+	}
+	err := uconn.fillClientHelloHeader()
+	if err != nil {
+		return err
+	}
+
+	reneg := RenegotiationInfoExtension{renegotiation: RenegotiateOnceAsClient}
+	sni := SNIExtension{uconn.config.ServerName}
+	ems := utlsExtendedMasterSecretExtension{}
+	sessionTicket := SessionTicketExtension{Session: session}
+	if session != nil {
+		sessionTicket.Session = session
+		if len(session.SessionTicket()) > 0 {
+			sessionId := sha256.Sum256(session.SessionTicket())
+			hello.SessionId = sessionId[:]
+		}
+	}
+	sigAndHash := SignatureAlgorithmsExtension{SignatureAndHashes: []SignatureAndHash{
+		{hashSHA256, signatureECDSA},
+		fakeRsaPssSha256,
+		{hashSHA256, signatureRSA},
+		{hashSHA384, signatureECDSA},
+		fakeRsaPssSha384,
+		{hashSHA384, signatureRSA},
+		fakeRsaPssSha512,
+		{disabledHashSHA512, signatureRSA},
+		{hashSHA1, signatureRSA},
+	},
+	}
+	status := StatusRequestExtension{}
+	npn := NPNExtension{}
+	sct := SCTExtension{}
+	alpn := ALPNExtension{AlpnProtocols: []string{"h2", "h2-16", "h2-15", "h2-14", "spdy/3.1", "spdy/3", "http/1.1"}}
+	points := SupportedPointsExtension{SupportedPoints: []byte{pointFormatUncompressed}}
+	curves := SupportedCurvesExtension{[]CurveID{X25519, CurveP256, CurveP384, CurveP521}}
+
+	uconn.Extensions = []TLSExtension{
+		&reneg,
+		&sni,
+		&ems,
+		&sessionTicket,
+		&sigAndHash,
+		&status,
+		&npn,
+		&sct,
+		&alpn,
+		&points,
+		&curves,
 	}
 	return nil
 }

@@ -84,6 +84,7 @@ const (
 	PrioritizeTunnelProtocols                      = "PrioritizeTunnelProtocols"
 	PrioritizeTunnelProtocolsCandidateCount        = "PrioritizeTunnelProtocolsCandidateCount"
 	LimitTunnelProtocols                           = "LimitTunnelProtocols"
+	LimitTLSProfiles                               = "LimitTLSProfiles"
 	TunnelOperateShutdownTimeout                   = "TunnelOperateShutdownTimeout"
 	TunnelPortForwardDialTimeout                   = "TunnelPortForwardDialTimeout"
 	TunnelRateLimits                               = "TunnelRateLimits"
@@ -206,6 +207,8 @@ var defaultClientParameters = map[string]struct {
 	PrioritizeTunnelProtocols:               {value: protocol.TunnelProtocols{}},
 	PrioritizeTunnelProtocolsCandidateCount: {value: 10, minimum: 0},
 	LimitTunnelProtocols:                    {value: protocol.TunnelProtocols{}},
+
+	LimitTLSProfiles: {value: protocol.TLSProfiles{}},
 
 	AdditionalCustomHeaders: {value: make(http.Header)},
 
@@ -459,6 +462,14 @@ func (p *ClientParameters) Set(
 					}
 					return nil, common.ContextError(err)
 				}
+			case protocol.TLSProfiles:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, common.ContextError(err)
+				}
 			}
 
 			// Enforce any minimums. Assumes defaultClientParameters[name]
@@ -639,6 +650,13 @@ func (p *ClientParametersSnapshot) Duration(name string) time.Duration {
 // TunnelProtocols returns a protocol.TunnelProtocols parameter value.
 func (p *ClientParametersSnapshot) TunnelProtocols(name string) protocol.TunnelProtocols {
 	value := protocol.TunnelProtocols{}
+	p.getValue(name, &value)
+	return value
+}
+
+// TLSProfiles returns a protocol.TLSProfiles parameter value.
+func (p *ClientParametersSnapshot) TLSProfiles(name string) protocol.TLSProfiles {
+	value := protocol.TLSProfiles{}
 	p.getValue(name, &value)
 	return value
 }

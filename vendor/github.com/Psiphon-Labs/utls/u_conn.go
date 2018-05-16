@@ -26,6 +26,25 @@ type UConn struct {
 	HandshakeState ClientHandshakeState
 
 	HandshakeStateBuilt bool
+
+	// IncludeEmptySNI indicates to include an SNI extension when the
+	// ServerName is "". This is non-standard behavior. Common TLS
+	// implementations (Go, BoringSSL, etc.) omit the SNI extention in
+	// this case.
+	//
+	// One concrete instance is when the remote host name is an IP address;
+	// https://tools.ietf.org/html/rfc6066#section-3 prohibits an SNI with an
+	// IP address.
+	//
+	// Go's hostnameInSNI sets the ServerName to "":
+	// https://github.com/golang/go/blob/release-branch.go1.9/src/crypto/tls/handshake_client.go#L804
+	//
+	// And then omits the SNI extension:
+	// https://github.com/golang/go/blob/release-branch.go1.9/src/crypto/tls/handshake_messages.go#L150
+	//
+	// IncludeEmptySNI is set to true for test runs, as test data expects
+	// empty SNI extensions.
+	IncludeEmptySNI bool
 }
 
 // UClient returns a new uTLS client, with behavior depending on clientHelloID.
@@ -365,9 +384,19 @@ func (uconn *UConn) MarshalClientHello() error {
 		2 + len(hello.CipherSuites)*2 +
 		1 + len(hello.CompressionMethods)
 
+	extensions := make([]TLSExtension, 0, len(uconn.Extensions))
+	for _, ext := range uconn.Extensions {
+		if SNI, ok := ext.(*SNIExtension); !ok ||
+			len(SNI.ServerName) > 0 ||
+			uconn.IncludeEmptySNI {
+
+			extensions = append(extensions, ext)
+		}
+	}
+
 	extensionsLen := 0
 	var paddingExt *utlsPaddingExtension
-	for _, ext := range uconn.Extensions {
+	for _, ext := range extensions {
 		if pe, ok := ext.(*utlsPaddingExtension); !ok {
 			// If not padding - just add length of extension to total length
 			extensionsLen += ext.Len()
@@ -388,7 +417,7 @@ func (uconn *UConn) MarshalClientHello() error {
 	}
 
 	helloLen := headerLength
-	if len(uconn.Extensions) > 0 {
+	if len(extensions) > 0 {
 		helloLen += 2 + extensionsLen // 2 bytes for extensions' length
 	}
 
@@ -415,9 +444,9 @@ func (uconn *UConn) MarshalClientHello() error {
 	binary.Write(bufferedWriter, binary.BigEndian, uint8(len(hello.CompressionMethods)))
 	binary.Write(bufferedWriter, binary.BigEndian, hello.CompressionMethods)
 
-	if len(uconn.Extensions) > 0 {
+	if len(extensions) > 0 {
 		binary.Write(bufferedWriter, binary.BigEndian, uint16(extensionsLen))
-		for _, ext := range uconn.Extensions {
+		for _, ext := range extensions {
 			bufferedWriter.ReadFrom(ext)
 		}
 	}
