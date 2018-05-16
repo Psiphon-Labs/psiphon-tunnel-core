@@ -166,12 +166,6 @@ func SelectTLSProfile(
 				continue
 			}
 
-			if tunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET &&
-				tlsProfile == protocol.TLS_PROFILE_RANDOMIZED {
-				// This TLS profile doesn't support session tickets
-				continue
-			}
-
 			tlsProfiles = append(tlsProfiles, tlsProfile)
 		}
 
