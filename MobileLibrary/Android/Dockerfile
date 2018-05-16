@@ -19,7 +19,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Go.
-ENV GOVERSION=go1.9.5 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
+ENV GOVERSION=go1.9.6 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
 
 RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz -o /tmp/go.tar.gz \
   && tar -C /usr/local -xzf /tmp/go.tar.gz \
@@ -42,43 +42,6 @@ RUN curl -L http://dl.google.com/android/android-sdk_r24.4.1-linux.tgz -o /tmp/a
   && tar -C / -xzf /tmp/android-sdk.tgz \
   && rm /tmp/android-sdk.tgz \
   && (while true; do echo 'y'; sleep 2; done) | $ANDROID_HOME/tools/android update sdk --no-ui --filter platform,platform-tool,tool
-
-# Setup OpenSSL libray.
-ENV OPENSSL_VERSION=1.0.2h
-ENV PKG_CONFIG_PATH=/tmp/openssl/openssl-$OPENSSL_VERSION
-ENV CGO_CFLAGS="-I $PKG_CONFIG_PATH/include" CGO_LDFLAGS="-L $PKG_CONFIG_PATH -lssl -lcrypto"
-
-RUN mkdir -p /tmp/openssl \
-  && curl -L https://github.com/Psiphon-Labs/psiphon-tunnel-core/raw/master/openssl/openssl-$OPENSSL_VERSION.tar.gz -o /tmp/openssl.tar.gz \
-  && tar -C /tmp/openssl -xzf /tmp/openssl.tar.gz \
-  && rm /tmp/openssl.tar.gz \
-  && curl -L https://github.com/Psiphon-Labs/psiphon-tunnel-core/raw/master/openssl/setenv-android.sh -o /tmp/setenv-android.sh \
-  && /bin/bash -c "\
-    source /tmp/setenv-android.sh \
-    && cd /tmp/openssl/openssl-$OPENSSL_VERSION \
-    && perl -pi -e 's/install: all install_docs install_sw/install: install_docs install_sw/g' Makefile.org \
-    && ./config \
-      no-shared \
-      no-ssl2 \
-      no-ssl3 \
-      no-comp \
-      no-hw \
-      no-md2 \
-      no-md4 \
-      no-rc2 \
-      no-rc5 \
-      no-krb5 \
-      no-ripemd160 \
-      no-idea \
-      no-gost \
-      no-camellia \
-      no-seed \
-      no-3des \
-      no-heartbeats \
-      --openssldir=./ssl \
-    && perl -pi -e 's/-O3/-Os -mfloat-abi=softfp/g' Makefile \
-    && make depend \
-    && make all"
 
 # Install Pinned Gomobile
 #  - Ordered last to allow use of previously cached layers when changing revisions

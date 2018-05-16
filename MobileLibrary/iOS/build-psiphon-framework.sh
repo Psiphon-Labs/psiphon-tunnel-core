@@ -15,7 +15,7 @@ fi
 set -x -u -e
 
 # Modify this value as we use newer Go versions.
-GO_VERSION_REQUIRED="1.9.5"
+GO_VERSION_REQUIRED="1.9.6"
 
 # Reset the PATH to macOS default. This is mainly so we don't execute the wrong
 # gomobile executable.

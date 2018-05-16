@@ -226,6 +226,10 @@ type Config struct {
 	// This parameter is only applicable to library deployments.
 	NetworkIDGetter NetworkIDGetter
 
+	// DisableTactics disables tactics operations including requests, payload
+	// handling, and application of parameters.
+	DisableTactics bool
+
 	// TransformHostNames specifies whether to use hostname transformation
 	// circumvention strategies. Set to "always" to always transform, "never"
 	// to never transform, and "", the default, for the default transformation
@@ -388,10 +392,7 @@ type Config struct {
 	UseTrustedCACertificatesForStockTLS bool
 
 	// TrustedCACertificatesFilename specifies a file containing trusted CA
-	// certs. The file contents should be compatible with OpenSSL's
-	// SSL_CTX_load_verify_locations. When specified, this enables use of
-	// OpenSSL for HTTPS requests that require typical (system CA) server
-	// authentication.
+	// certs.
 	TrustedCACertificatesFilename string
 
 	// DisablePeriodicSshKeepAlive indicates whether to send an SSH keepalive
@@ -647,17 +648,22 @@ func (config *Config) GetClientParameters() *parameters.ClientParametersSnapshot
 // entirely unmodified.
 func (config *Config) SetClientParameters(tag string, skipOnError bool, applyParameters map[string]interface{}) error {
 
-	parameters := []map[string]interface{}{config.makeConfigParameters()}
+	setParameters := []map[string]interface{}{config.makeConfigParameters()}
 	if applyParameters != nil {
-		parameters = append(parameters, applyParameters)
+		setParameters = append(setParameters, applyParameters)
 	}
 
-	counts, err := config.clientParameters.Set(tag, skipOnError, parameters...)
+	counts, err := config.clientParameters.Set(tag, skipOnError, setParameters...)
 	if err != nil {
 		return common.ContextError(err)
 	}
 
 	NoticeInfo("applied %v parameters with tag '%s'", counts, tag)
+
+	// Emit certain individual parameter values for quick reference in diagnostics.
+	NoticeInfo(
+		"NetworkLatencyMultiplier: %f",
+		config.clientParameters.Get().Float(parameters.NetworkLatencyMultiplier))
 
 	return nil
 }

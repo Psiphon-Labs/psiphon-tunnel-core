@@ -125,7 +125,9 @@ func (serverContext *ServerContext) doHandshakeRequest(
 
 	params := serverContext.getBaseAPIParameters()
 
-	doTactics := serverContext.tunnel.config.NetworkIDGetter != nil
+	doTactics := !serverContext.tunnel.config.DisableTactics &&
+		serverContext.tunnel.config.NetworkIDGetter != nil
+
 	networkID := ""
 	if doTactics {
 

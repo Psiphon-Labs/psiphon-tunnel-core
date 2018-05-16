@@ -9,12 +9,11 @@ fi
 
 EXE_BASENAME="psiphon-tunnel-core"
 
-# The "OPENSSL" tag enables support of OpenSSL for use by IndistinguishableTLS.
-# This needs to be outside of prepare_build because it's used by go-get.
+# BUILD_TAGS needs to be outside of prepare_build because it determines what's fetched by go-get.
 
 PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"
 BUILD_TAGS="${PRIVATE_PLUGINS_TAG}"
-WINDOWS_BUILD_TAGS="OPENSSL ${BUILD_TAGS}"
+WINDOWS_BUILD_TAGS="${BUILD_TAGS}"
 LINUX_BUILD_TAGS="${BUILD_TAGS}"
 OSX_BUILD_TAGS="${BUILD_TAGS}"
 
@@ -73,7 +72,7 @@ build_for_windows () {
     echo "....PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
 
     CGO_CFLAGS="-I $PKG_CONFIG_PATH/include/" \
-    CGO_LDFLAGS="-L $PKG_CONFIG_PATH -L /usr/i686-w64-mingw32/lib/ -lssl -lcrypto -lwsock32 -lcrypt32 -lgdi32" \
+    CGO_LDFLAGS="-L $PKG_CONFIG_PATH -L /usr/i686-w64-mingw32/lib/ -lwsock32 -lcrypt32 -lgdi32" \
     CC=/usr/bin/i686-w64-mingw32-gcc \
     GOOS=windows GOARCH=386 go build -v -x -ldflags "$LDFLAGS" -tags "$WINDOWS_BUILD_TAGS" -o bin/windows/${EXE_BASENAME}-i686.exe
     RETVAL=$?
@@ -96,7 +95,7 @@ build_for_windows () {
     echo "....PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
 
     CGO_CFLAGS="-I $PKG_CONFIG_PATH/include/" \
-    CGO_LDFLAGS="-L $PKG_CONFIG_PATH -L /usr/x86_64-w64-mingw32/lib/ -lssl -lcrypto -lwsock32 -lcrypt32 -lgdi32" \
+    CGO_LDFLAGS="-L $PKG_CONFIG_PATH -L /usr/x86_64-w64-mingw32/lib/ -lwsock32 -lcrypt32 -lgdi32" \
     CC=/usr/bin/x86_64-w64-mingw32-gcc \
     GOOS=windows GOARCH=amd64 go build -v -x -ldflags "$LDFLAGS" -tags "$WINDOWS_BUILD_TAGS" -o bin/windows/${EXE_BASENAME}-x86_64.exe
     RETVAL=$?
