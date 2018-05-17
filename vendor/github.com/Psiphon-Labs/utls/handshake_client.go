@@ -124,7 +124,13 @@ func (c *Conn) clientHandshake() error {
 	// Session resumption is not allowed if renegotiating because
 	// renegotiation is primarily used to allow a client to send a client
 	// certificate, which would be skipped if session resumption occurred.
-	if sessionCache != nil && c.handshakes == 0 {
+	if sessionCache != nil && c.handshakes == 0 &&
+		// [Psiphon]
+		// Add nil guard as conn.RemoteAddr may be nil. When nil and
+		// when no ServerName for clientSessionCacheKey to use, skip
+		// caching entrely.
+		(c.conn.RemoteAddr() != nil || len(c.config.ServerName) > 0) {
+
 		// Try to resume a previously negotiated TLS session, if
 		// available.
 		cacheKey = clientSessionCacheKey(c.conn.RemoteAddr(), c.config)

@@ -33,10 +33,10 @@
 			"revisionTime": "2017-02-28T16:03:01Z"
 		},
 		{
-			"checksumSHA1": "vlwXc96qUPfAMxyDMrzCX4cDYHA=",
+			"checksumSHA1": "w45xnSldeRZ4vholDnWC2UXtCmo=",
 			"path": "github.com/Psiphon-Labs/utls",
-			"revision": "6ee8d02ba07905b8b18e2d8e3446892be54f5393",
-			"revisionTime": "2018-05-16T17:21:43Z"
+			"revision": "1a44c8e029c022209b20483686b370d27782f03f",
+			"revisionTime": "2018-05-17T16:36:24Z"
 		},
 		{
 			"checksumSHA1": "zaEXXT0xMkEADcxW9GvBK0iYe1A=",
