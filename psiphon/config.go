@@ -226,6 +226,13 @@ type Config struct {
 	// This parameter is only applicable to library deployments.
 	NetworkIDGetter NetworkIDGetter
 
+	// NetworkID, when specified, is used as the identifier for the host's
+	// current active network.
+	//
+	// This parameter is only applicable to non-library deployments which
+	// do not use NetworkIDGetter.
+	NetworkID string
+
 	// DisableTactics disables tactics operations including requests, payload
 	// handling, and application of parameters.
 	DisableTactics bool
