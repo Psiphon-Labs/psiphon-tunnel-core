@@ -124,12 +124,7 @@ func (c *Conn) clientHandshake() error {
 	// Session resumption is not allowed if renegotiating because
 	// renegotiation is primarily used to allow a client to send a client
 	// certificate, which would be skipped if session resumption occurred.
-	if sessionCache != nil && c.handshakes == 0 &&
-		// [Psiphon]
-		// Add nil guard as conn.RemoteAddr may be nil. When nil and
-		// when no ServerName for clientSessionCacheKey to use, skip
-		// caching entrely.
-		(c.conn.RemoteAddr() != nil || len(c.config.ServerName) > 0) {
+	if sessionCache != nil && c.handshakes == 0 {
 
 		// Try to resume a previously negotiated TLS session, if
 		// available.
@@ -831,6 +826,23 @@ func clientSessionCacheKey(serverAddr net.Addr, config *Config) string {
 	if len(config.ServerName) > 0 {
 		return config.ServerName
 	}
+
+	// [Psiphon]
+	//
+	// In certain error conditions, serverAddr may be nil. In this case, since
+	// ServerName is blank, there is no valid session cache key. Calling code
+	// assumes clientSessionCacheKey always succeeds. To minimize changes to
+	// this tls fork, we return "" and no error.
+	//
+	// We assume the cache key won't be used for setting the cache, as the
+	// existing error condition in the conn should result in handshake
+	// failure. In the unlikely case of success and caching a session, the
+	// outcome could include future failure to renegotiate, although in the
+	// case of Psiphon, each connection has its own cache.
+	if serverAddr == nil {
+		return ""
+	}
+
 	return serverAddr.String()
 }
 
