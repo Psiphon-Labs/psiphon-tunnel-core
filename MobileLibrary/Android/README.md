@@ -26,7 +26,7 @@ cd ../.. && \
   --rm \
   -v $(pwd):/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core \
   psiandroid \
-  /bin/bash -c 'source /tmp/setenv-android.sh && cd /go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/Android && ./make.bash' \
+  /bin/bash -c 'cd /go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/Android && ./make.bash' \
 ; cd -
 ```
 
@@ -37,12 +37,10 @@ When that command completes, the compiled `.aar` files (suitable for use in an A
 ##### Prerequisites:
 
  - The `build-essential` package (on Debian based systems - or its equivalent for your platform)
- - Go 1.5 or later
+ - Go 1.9 or later
  - Full JDK
  - Android NDK
  - Android SDK
- - OpenSSL (tested against the version [here](../../openssl))
-  - Follow its [README](../../openssl/README.md) to prepare the environment before you follow the steps below
 
 ##### Steps:
 
