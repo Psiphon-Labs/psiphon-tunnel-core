@@ -41,32 +41,22 @@ var loadedConfigJSON []byte
 
 func main() {
 
-	var generateTrafficRulesFilename string
-	var generateServerEntryFilename string
-	var generateLogFilename string
+	var configFilename string
 	var generateServerIPaddress string
 	var generateServerNetworkInterface string
-	var generateWebServerPort int
 	var generateProtocolPorts stringListFlag
-	var configFilename string
+	var generateWebServerPort int
+	var generateLogFilename string
+	var generateTrafficRulesConfigFilename string
+	var generateOSLConfigFilename string
+	var generateTacticsConfigFilename string
+	var generateServerEntryFilename string
 
 	flag.StringVar(
-		&generateTrafficRulesFilename,
-		"trafficRules",
-		server.SERVER_TRAFFIC_RULES_FILENAME,
-		"generate with this traffic rules `filename`")
-
-	flag.StringVar(
-		&generateServerEntryFilename,
-		"serverEntry",
-		server.SERVER_ENTRY_FILENAME,
-		"generate with this server entry `filename`")
-
-	flag.StringVar(
-		&generateLogFilename,
-		"logFilename",
-		"",
-		"set application log file name and path; blank for stderr")
+		&configFilename,
+		"config",
+		server.SERVER_CONFIG_FILENAME,
+		"run or generate with this config `filename`")
 
 	flag.StringVar(
 		&generateServerIPaddress,
@@ -80,22 +70,46 @@ func main() {
 		"",
 		"generate with server IP address from this `network-interface`")
 
+	flag.Var(
+		&generateProtocolPorts,
+		"protocol",
+		"generate with `protocol:port`; flag may be repeated to enable multiple protocols")
+
 	flag.IntVar(
 		&generateWebServerPort,
 		"web",
 		0,
 		"generate with web server `port`; 0 for no web server")
 
-	flag.Var(
-		&generateProtocolPorts,
-		"protocol",
-		"generate with `protocol:port`; flag may be repeated to enable multiple protocols")
+	flag.StringVar(
+		&generateLogFilename,
+		"logFilename",
+		"",
+		"set application log file name and path; blank for stderr")
 
 	flag.StringVar(
-		&configFilename,
-		"config",
-		server.SERVER_CONFIG_FILENAME,
-		"run or generate with this config `filename`")
+		&generateTrafficRulesConfigFilename,
+		"trafficRules",
+		server.SERVER_TRAFFIC_RULES_CONFIG_FILENAME,
+		"generate with this traffic rules config `filename`")
+
+	flag.StringVar(
+		&generateOSLConfigFilename,
+		"osl",
+		server.SERVER_OSL_CONFIG_FILENAME,
+		"generate with this OSL config `filename`")
+
+	flag.StringVar(
+		&generateTacticsConfigFilename,
+		"tactics",
+		server.SERVER_TACTICS_CONFIG_FILENAME,
+		"generate with this tactics config `filename`")
+
+	flag.StringVar(
+		&generateServerEntryFilename,
+		"serverEntry",
+		server.SERVER_ENTRY_FILENAME,
+		"generate with this server entry `filename`")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr,
@@ -143,15 +157,22 @@ func main() {
 			}
 		}
 
-		configJSON, trafficRulesJSON, encodedServerEntry, err :=
+		configJSON,
+			trafficRulesConfigJSON,
+			OSLConfigJSON,
+			tacticsConfigJSON,
+			encodedServerEntry,
+			err :=
 			server.GenerateConfig(
 				&server.GenerateConfigParams{
-					LogFilename:          generateLogFilename,
-					ServerIPAddress:      serverIPaddress,
-					EnableSSHAPIRequests: true,
-					WebServerPort:        generateWebServerPort,
-					TunnelProtocolPorts:  tunnelProtocolPorts,
-					TrafficRulesFilename: generateTrafficRulesFilename,
+					LogFilename:                generateLogFilename,
+					ServerIPAddress:            serverIPaddress,
+					EnableSSHAPIRequests:       true,
+					WebServerPort:              generateWebServerPort,
+					TunnelProtocolPorts:        tunnelProtocolPorts,
+					TrafficRulesConfigFilename: generateTrafficRulesConfigFilename,
+					OSLConfigFilename:          generateOSLConfigFilename,
+					TacticsConfigFilename:      generateTacticsConfigFilename,
 				})
 		if err != nil {
 			fmt.Printf("generate failed: %s\n", err)
@@ -164,9 +185,21 @@ func main() {
 			os.Exit(1)
 		}
 
-		err = ioutil.WriteFile(generateTrafficRulesFilename, trafficRulesJSON, 0600)
+		err = ioutil.WriteFile(generateTrafficRulesConfigFilename, trafficRulesConfigJSON, 0600)
 		if err != nil {
-			fmt.Printf("error writing traffic rule configuration file: %s\n", err)
+			fmt.Printf("error writing traffic rule config file: %s\n", err)
+			os.Exit(1)
+		}
+
+		err = ioutil.WriteFile(generateOSLConfigFilename, OSLConfigJSON, 0600)
+		if err != nil {
+			fmt.Printf("error writing OSL config file: %s\n", err)
+			os.Exit(1)
+		}
+
+		err = ioutil.WriteFile(generateTacticsConfigFilename, tacticsConfigJSON, 0600)
+		if err != nil {
+			fmt.Printf("error writing tactics config file: %s\n", err)
 			os.Exit(1)
 		}
 

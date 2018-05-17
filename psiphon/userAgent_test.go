@@ -174,7 +174,7 @@ func attemptConnectionsWithUserAgent(
 		t.Fatalf("error getting server IP address: %s", err)
 	}
 
-	_, _, encodedServerEntry, err := server.GenerateConfig(
+	_, _, _, _, encodedServerEntry, err := server.GenerateConfig(
 		&server.GenerateConfigParams{
 			ServerIPAddress:      serverIPaddress,
 			EnableSSHAPIRequests: true,

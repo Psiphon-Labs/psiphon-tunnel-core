@@ -42,32 +42,6 @@ Client Setup
     "
     ```
 
-#### Platform-specific instructions
-
-##### macOS
-
-Building without OpenSSL support (that is, without indistinguishable TLS support) requires no extra steps. 
-To compile with OpenSSL support, follow these steps:
-
-1. You must have [Homebrew](http://brew.sh/) installed.
-
-2. `brew install openssl pkg-config`
-
-3. Find out where Homebrew put the `pkgconfig` files for OpenSSL -- the location depends on your Homebrew installation. Run this command:
-
-   ```
-   $ brew info openssl
-   ```
-   
-   Make note of the "build variable" path for `PKG_CONFIG_PATH`.
-   
-4. Set `PKG_CONFIG_PATH=<path discovered above>` when building, and provide the `-tags OPENSSL` flag. 
-   This can be easily done on the build command line like so:
-
-   ```
-   $ PKG_CONFIG_PATH=<path discovered above> go build -tags OPENSSL
-   ```
-
 ### Configure
 
  * Configuration files are standard text files containing a valid JSON object. Example:
@@ -124,6 +98,7 @@ Psiphon Tunnel Core uses:
 * [juju/ratelimit](https://github.com/juju/ratelimit)
 * [codahale/sss](https://github.com/codahale/sss)
 * [marusama/semaphore](https://github.com/marusama/semaphore)
+* [utls](https://github.com/refraction-networking/utls)
 
 Licensing
 --------------------------------------------------------------------------------

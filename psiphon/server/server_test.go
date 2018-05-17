@@ -411,7 +411,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		generateConfigParams.TacticsRequestObfuscatedKey = tacticsRequestObfuscatedKey
 	}
 
-	serverConfigJSON, _, encodedServerEntry, err := GenerateConfig(generateConfigParams)
+	serverConfigJSON, _, _, _, encodedServerEntry, err := GenerateConfig(generateConfigParams)
 	if err != nil {
 		t.Fatalf("error generating server config: %s", err)
 	}

@@ -84,7 +84,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 		t.Fatalf("error getting server IP address: %s", err)
 	}
 
-	serverConfigJSON, _, encodedServerEntry, err := server.GenerateConfig(
+	serverConfigJSON, _, _, _, encodedServerEntry, err := server.GenerateConfig(
 		&server.GenerateConfigParams{
 			ServerIPAddress:      serverIPAddress,
 			EnableSSHAPIRequests: true,

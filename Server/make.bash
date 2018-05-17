@@ -69,6 +69,8 @@ build_for_linux () {
 
     chmod 666 psiphond.config
     chmod 666 psiphond-traffic-rules.config
+    chmod 666 psiphond-osl.config
+    chmod 666 psiphond-tactics.config
     chmod 666 server-entry.dat
   fi
 
