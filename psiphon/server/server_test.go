@@ -589,7 +589,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		// ensure tactics from different runs don't apply; this is
 		// a workaround for the singleton datastore.
 		prefix := time.Now().String()
-		clientConfig.NetworkIDGetter = &testNetworkGetter{prefix: prefix}
+		clientConfig.NetworkID = prefix+"NETWORK1"
 	}
 
 	if doTactics {
@@ -1259,11 +1259,3 @@ const dummyClientVerificationPayload = `
 	"status": 0,
 	"payload": ""
 }`
-
-type testNetworkGetter struct {
-	prefix string
-}
-
-func (t *testNetworkGetter) GetNetworkID() string {
-	return t.prefix + "NETWORK1"
-}

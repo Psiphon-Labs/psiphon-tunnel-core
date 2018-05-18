@@ -107,8 +107,9 @@ type NetworkConnectivityChecker interface {
 // DeviceBinder defines the interface to the external BindToDevice provider
 // which calls into the host application to bind sockets to specific devices.
 // This is used for VPN routing exclusion.
+// The string return value should report device information for diagnostics.
 type DeviceBinder interface {
-	BindToDevice(fileDescriptor int) error
+	BindToDevice(fileDescriptor int) (string, error)
 }
 
 // DnsServerGetter defines the interface to the external GetDnsServer provider

@@ -44,7 +44,7 @@ func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, e
 		return []net.IP{ip}, nil
 	}
 
-	if config.DeviceBinder != nil {
+	if config.deviceBinder != nil {
 
 		dnsServer := config.DnsServerGetter.GetPrimaryDnsServer()
 
@@ -124,7 +124,7 @@ func bindLookupIP(
 		return nil, common.ContextError(err)
 	}
 
-	err = config.DeviceBinder.BindToDevice(socketFd)
+	_, err = config.deviceBinder.BindToDevice(socketFd)
 	if err != nil {
 		syscall.Close(socketFd)
 		return nil, common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))

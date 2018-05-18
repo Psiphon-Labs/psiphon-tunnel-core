@@ -32,7 +32,7 @@ import (
 // tcpDial is the platform-specific part of DialTCP
 func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, error) {
 
-	if config.DeviceBinder != nil {
+	if config.deviceBinder != nil {
 		return nil, common.ContextError(errors.New("psiphon.interruptibleTCPDial with DeviceBinder not supported"))
 	}
 

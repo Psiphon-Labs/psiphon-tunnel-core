@@ -33,7 +33,7 @@ import (
 // simply uses net.LookupIP.
 func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, error) {
 
-	if config.DeviceBinder != nil {
+	if config.deviceBinder != nil {
 		return nil, common.ContextError(errors.New("LookupIP with DeviceBinder not supported on this platform"))
 	}
 

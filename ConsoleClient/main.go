@@ -272,16 +272,6 @@ func main() {
 		defer tunDeviceFile.Close()
 	}
 
-	// Enable tactics when a NetworkID is specified
-	//
-	// Limitation: unlike psi.NetworkIDGetter, which calls back to platform
-	// APIs, this method of network identification is not dynamic and will not
-	// reflect network changes that occur while running.
-
-	if config.NetworkID != "" {
-		config.NetworkIDGetter = &networkGetter{networkID: config.NetworkID}
-	}
-
 	// Run Psiphon
 
 	controller, err := psiphon.NewController(config)
@@ -348,8 +338,8 @@ type tunProvider struct {
 }
 
 // BindToDevice implements the psiphon.DeviceBinder interface.
-func (p *tunProvider) BindToDevice(fileDescriptor int) error {
-	return tun.BindToDevice(fileDescriptor, p.bindInterface)
+func (p *tunProvider) BindToDevice(fileDescriptor int) (string, error) {
+	return p.bindInterface, tun.BindToDevice(fileDescriptor, p.bindInterface)
 }
 
 // GetPrimaryDnsServer implements the psiphon.DnsServerGetter interface.
@@ -360,12 +350,4 @@ func (p *tunProvider) GetPrimaryDnsServer() string {
 // GetSecondaryDnsServer implements the psiphon.DnsServerGetter interface.
 func (p *tunProvider) GetSecondaryDnsServer() string {
 	return p.secondaryDNS
-}
-
-type networkGetter struct {
-	networkID string
-}
-
-func (n *networkGetter) GetNetworkID() string {
-	return n.networkID
 }

@@ -226,11 +226,9 @@ type Config struct {
 	// This parameter is only applicable to library deployments.
 	NetworkIDGetter NetworkIDGetter
 
-	// NetworkID, when specified, is used as the identifier for the host's
+	// NetworkID, when not blank, is used as the identifier for the host's
 	// current active network.
-	//
-	// This parameter is only applicable to non-library deployments which
-	// do not use NetworkIDGetter.
+	// NetworkID is ignored when NetworkIDGetter is set.
 	NetworkID string
 
 	// DisableTactics disables tactics operations including requests, payload
@@ -460,6 +458,9 @@ type Config struct {
 	// New tactics must be applied by calling Config.SetClientParameters;
 	// calling clientParameters.Set directly will fail to add config values.
 	clientParameters *parameters.ClientParameters
+
+	deviceBinder    DeviceBinder
+	networkIDGetter NetworkIDGetter
 }
 
 // LoadConfig parses and validates a JSON format Psiphon config JSON
@@ -632,6 +633,35 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		return nil, common.ContextError(err)
 	}
 
+	// Initialize config.deviceBinder and config.config.networkIDGetter. These
+	// wrap config.DeviceBinder and config.NetworkIDGetter/NetworkID with
+	// loggers.
+	//
+	// New variables are set to avoid mutating input config fields.
+	// Internally, code must use config.deviceBinder and
+	// config.networkIDGetter and not the input/exported fields.
+
+	if config.DeviceBinder != nil {
+		config.deviceBinder = &loggingDeviceBinder{config.DeviceBinder}
+	}
+
+	networkIDGetter := config.NetworkIDGetter
+
+	if networkIDGetter == nil && config.NetworkID != "" {
+
+		// Enable tactics when a NetworkID is specified
+		//
+		// Limitation: unlike NetworkIDGetter, which calls back to platform APIs
+		// this method of network identification is not dynamic and will not reflect
+		// network changes that occur while running.
+
+		networkIDGetter = newStaticNetworkGetter(config.NetworkID)
+	}
+
+	if networkIDGetter != nil {
+		config.networkIDGetter = &loggingNetworkIDGetter{networkIDGetter}
+	}
+
 	return &config, nil
 }
 
@@ -778,4 +808,59 @@ func promoteLegacyDownloadURL(URL string) parameters.DownloadURLs {
 		OnlyAfterAttempts: 0,
 	}
 	return downloadURLs
+}
+
+type loggingDeviceBinder struct {
+	d DeviceBinder
+}
+
+func newLoggingDeviceBinder(d DeviceBinder) *loggingDeviceBinder {
+	return &loggingDeviceBinder{d: d}
+}
+
+func (d *loggingDeviceBinder) BindToDevice(fileDescriptor int) (string, error) {
+	deviceInfo, err := d.d.BindToDevice(fileDescriptor)
+	if err == nil && deviceInfo != "" {
+		NoticeBindToDevice(deviceInfo)
+	}
+	return deviceInfo, err
+}
+
+type staticNetworkGetter struct {
+	networkID string
+}
+
+func newStaticNetworkGetter(networkID string) *staticNetworkGetter {
+	return &staticNetworkGetter{networkID: networkID}
+}
+
+func (n *staticNetworkGetter) GetNetworkID() string {
+	return n.networkID
+}
+
+type loggingNetworkIDGetter struct {
+	n NetworkIDGetter
+}
+
+func newLoggingNetworkIDGetter(n NetworkIDGetter) *loggingNetworkIDGetter {
+	return &loggingNetworkIDGetter{n: n}
+}
+
+func (n *loggingNetworkIDGetter) GetNetworkID() string {
+	networkID := n.n.GetNetworkID()
+
+	// All PII must appear after the initial "-"
+	// See: https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter
+	logNetworkID := networkID
+	index := strings.Index(logNetworkID, "-")
+	if index != -1 {
+		logNetworkID = logNetworkID[:index]
+	}
+	if len(logNetworkID)+1 < len(networkID) {
+		// Indicate when additional network info was present after the first "-".
+		logNetworkID += "+<network info>"
+	}
+	NoticeNetworkID(logNetworkID)
+
+	return networkID
 }

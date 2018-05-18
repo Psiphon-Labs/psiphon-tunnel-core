@@ -100,7 +100,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 	untunneledDialConfig := &DialConfig{
 		UpstreamProxyURL:              config.UpstreamProxyURL,
 		CustomHeaders:                 config.CustomHeaders,
-		DeviceBinder:                  config.DeviceBinder,
+		DeviceBinder:                  config.deviceBinder,
 		DnsServerGetter:               config.DnsServerGetter,
 		IPv6Synthesizer:               config.IPv6Synthesizer,
 		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
@@ -1181,7 +1181,7 @@ func (controller *Controller) launchEstablishing() {
 	// canceled when establishment is stopped.
 
 	doTactics := !controller.config.DisableTactics &&
-		controller.config.NetworkIDGetter != nil
+		controller.config.networkIDGetter != nil
 
 	if doTactics {
 
@@ -1280,7 +1280,7 @@ func (controller *Controller) getTactics(done chan struct{}) {
 
 	tacticsRecord, err := tactics.UseStoredTactics(
 		GetTacticsStorer(),
-		controller.config.NetworkIDGetter.GetNetworkID())
+		controller.config.networkIDGetter.GetNetworkID())
 	if err != nil {
 		NoticeAlert("get stored tactics failed: %s", err)
 
@@ -1453,7 +1453,7 @@ func (controller *Controller) doFetchTactics(
 		ctx,
 		controller.config.clientParameters,
 		GetTacticsStorer(),
-		controller.config.NetworkIDGetter.GetNetworkID,
+		controller.config.networkIDGetter.GetNetworkID,
 		apiParams,
 		serverEntry.Region,
 		tacticsProtocol,

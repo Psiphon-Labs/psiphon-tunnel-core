@@ -514,7 +514,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	// Enable tactics requests. This will passively exercise the code
 	// paths. server_test runs a more comprehensive test that checks
 	// that the tactics request succeeds.
-	config.NetworkIDGetter = &testNetworkGetter{}
+	config.NetworkID = "NETWORK1"
 
 	os.Remove(config.UpgradeDownloadFilename)
 	os.Remove(config.RemoteServerListDownloadFilename)
@@ -1141,9 +1141,3 @@ func initUpstreamProxy() {
 	// TODO: wait until listener is active?
 }
 
-type testNetworkGetter struct {
-}
-
-func (testNetworkGetter) GetNetworkID() string {
-	return "NETWORK1"
-}

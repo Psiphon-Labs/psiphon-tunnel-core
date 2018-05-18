@@ -111,7 +111,7 @@ func Start(
 	config.NetworkIDGetter = provider
 
 	if useDeviceBinder {
-		config.DeviceBinder = newLoggingDeviceBinder(provider)
+		config.DeviceBinder = provider
 		config.DnsServerGetter = provider
 	}
 
@@ -315,47 +315,4 @@ func (p *mutexPsiphonProvider) GetNetworkID() string {
 	p.Lock()
 	defer p.Unlock()
 	return p.p.GetNetworkID()
-}
-
-type loggingDeviceBinder struct {
-	p PsiphonProvider
-}
-
-func newLoggingDeviceBinder(p PsiphonProvider) *loggingDeviceBinder {
-	return &loggingDeviceBinder{p: p}
-}
-
-func (d *loggingDeviceBinder) BindToDevice(fileDescriptor int) error {
-	deviceInfo, err := d.p.BindToDevice(fileDescriptor)
-	if err == nil && deviceInfo != "" {
-		psiphon.NoticeInfo("BindToDevice: %s", deviceInfo)
-	}
-	return err
-}
-
-type loggingNetworkIDGetter struct {
-	p PsiphonProvider
-}
-
-func newLoggingNetworkIDGetter(p PsiphonProvider) *loggingNetworkIDGetter {
-	return &loggingNetworkIDGetter{p: p}
-}
-
-func (d *loggingNetworkIDGetter) GetNetworkID() string {
-	networkID := d.p.GetNetworkID()
-
-	// All PII must appear after the initial "-"
-	// See: https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter
-	logNetworkID := networkID
-	index := strings.Index(logNetworkID, "-")
-	if index != -1 {
-		logNetworkID = logNetworkID[:index]
-	}
-	if len(logNetworkID)+1 < len(networkID) {
-		// Indicate when additional network info was present after the first "-".
-		logNetworkID += "+<network info>"
-	}
-	psiphon.NoticeInfo("GetNetworkID: %s", logNetworkID)
-
-	return networkID
 }
