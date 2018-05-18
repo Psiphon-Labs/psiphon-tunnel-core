@@ -440,6 +440,10 @@ func TestTactics(t *testing.T) {
 
 	tacticsConnectionWorkerPoolSize = 6
 
+	tacticsLimitTunnelProtocols = protocol.TunnelProtocols{}
+	jsonTacticsLimitTunnelProtocols = ``
+	expectedApplyCount = 2
+
 	// Omitting LimitTunnelProtocols entirely tests this bug fix: When a new
 	// tactics payload is obtained, all previous parameters should be cleared.
 	//
@@ -447,11 +451,6 @@ func TestTactics(t *testing.T) {
 	// incorrectly retained. In this test case, LimitTunnelProtocols is
 	// omitted in the new tactics; if FetchTactics fails to clear the old
 	// LimitTunnelProtocols then the test will fail.
-
-	tacticsLimitTunnelProtocols = protocol.TunnelProtocols{}
-	jsonTacticsLimitTunnelProtocols = ``
-
-	expectedApplyCount = 2
 
 	tacticsConfig = fmt.Sprintf(
 		tacticsConfigTemplate,
