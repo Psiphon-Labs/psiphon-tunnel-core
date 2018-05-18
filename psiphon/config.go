@@ -668,9 +668,12 @@ func (config *Config) SetClientParameters(tag string, skipOnError bool, applyPar
 	NoticeInfo("applied %v parameters with tag '%s'", counts, tag)
 
 	// Emit certain individual parameter values for quick reference in diagnostics.
-	NoticeInfo(
-		"NetworkLatencyMultiplier: %f",
-		config.clientParameters.Get().Float(parameters.NetworkLatencyMultiplier))
+	networkLatencyMultiplier := config.clientParameters.Get().Float(parameters.NetworkLatencyMultiplier)
+	if networkLatencyMultiplier != 0.0 {
+		NoticeInfo(
+			"NetworkLatencyMultiplier: %f",
+			config.clientParameters.Get().Float(parameters.NetworkLatencyMultiplier))
+	}
 
 	return nil
 }
