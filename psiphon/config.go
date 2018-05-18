@@ -732,6 +732,13 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.FetchUpgradeRetryPeriod] = fmt.Sprintf("%dms", *config.FetchUpgradeRetryPeriodMilliseconds)
 	}
 
+	switch config.TransformHostNames {
+	case "always":
+		applyParameters[parameters.TransformHostNameProbability] = 1.0
+	case "never":
+		applyParameters[parameters.TransformHostNameProbability] = 0.0
+	}
+
 	if !config.DisableRemoteServerListFetcher {
 
 		if config.RemoteServerListURLs != nil {

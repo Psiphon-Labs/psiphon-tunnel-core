@@ -246,7 +246,7 @@ func attemptConnectionsWithUserAgent(
 
 	// repeat attempts for long enough to select each user agent
 
-	time.Sleep(20 * time.Second)
+	time.Sleep(30 * time.Second)
 
 	cancelFunc()
 

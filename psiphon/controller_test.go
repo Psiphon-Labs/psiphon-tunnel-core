@@ -446,6 +446,8 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		t.Skipf("error loading configuration file: %s", err)
 	}
 
+	// Note: a successful tactics request may modify config parameters.
+
 	// These fields must be filled in before calling LoadConfig
 	var modifyConfig map[string]interface{}
 	json.Unmarshal(configJSON, &modifyConfig)
@@ -466,6 +468,12 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	if runConfig.disableUntunneledUpgrade {
 		// Disable untunneled upgrade downloader to ensure tunneled case is tested
 		modifyConfig["UpgradeDownloadClientVersionHeader"] = "invalid-value"
+	}
+
+	if runConfig.transformHostNames {
+		modifyConfig["TransformHostNames"] = "always"
+	} else {
+		modifyConfig["TransformHostNames"] = "never"
 	}
 
 	configJSON, _ = json.Marshal(modifyConfig)
@@ -507,22 +515,6 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	// paths. server_test runs a more comprehensive test that checks
 	// that the tactics request succeeds.
 	config.NetworkIDGetter = &testNetworkGetter{}
-
-	// The following values can only be applied through client parameters.
-	// TODO: a successful tactics request can reset these parameters.
-
-	applyParameters := make(map[string]interface{})
-
-	if runConfig.transformHostNames {
-		applyParameters[parameters.TransformHostNameProbability] = 1.0
-	} else {
-		applyParameters[parameters.TransformHostNameProbability] = 0.0
-	}
-
-	err = config.SetClientParameters("", true, applyParameters)
-	if err != nil {
-		t.Fatalf("SetClientParameters failed: %s", err)
-	}
 
 	os.Remove(config.UpgradeDownloadFilename)
 	os.Remove(config.RemoteServerListDownloadFilename)
