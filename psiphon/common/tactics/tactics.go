@@ -1582,6 +1582,7 @@ func applyTacticsPayload(
 
 	if payload.Tag != record.Tag {
 		record.Tag = payload.Tag
+		record.Tactics = Tactics{}
 		err := json.Unmarshal(payload.Tactics, &record.Tactics)
 		if err != nil {
 			return common.ContextError(err)
