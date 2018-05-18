@@ -171,8 +171,6 @@ func (controller *Controller) Run(ctx context.Context) {
 	// an initial instance of any repetitive error notice, etc.
 	ResetRepetitiveNotices()
 
-	ReportAvailableRegions(controller.config)
-
 	runCtx, stopRunning := context.WithCancel(ctx)
 	defer stopRunning()
 
@@ -1211,6 +1209,20 @@ func (controller *Controller) launchEstablishing() {
 			return
 		}
 	}
+
+	// Unconditionally report available egress regions. After a fresh install,
+	// the outer client may not have a list of regions to display, so we
+	// always report here. Events that trigger ReportAvailableRegions,
+	// including storing new server entries and applying tactics, are not
+	// guaranteed to occur.
+	//
+	// This report is delayed until after tactics are likely to be applied, as
+	// tactics can impact the list of available regions; this avoids a
+	// ReportAvailableRegions reporting too many regions, followed shortly by
+	// a ReportAvailableRegions reporting fewer regions. That sequence could
+	// cause issues in the outer client UI.
+
+	ReportAvailableRegions(controller.config)
 
 	// The ConnectionWorkerPoolSize may be set by tactics.
 
