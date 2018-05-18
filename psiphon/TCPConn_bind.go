@@ -136,8 +136,8 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 
 		tcpDialSetAdditionalSocketOptions(socketFD)
 
-		if config.deviceBinder != nil {
-			_, err = config.deviceBinder.BindToDevice(socketFD)
+		if config.DeviceBinder != nil {
+			_, err = config.DeviceBinder.BindToDevice(socketFD)
 			if err != nil {
 				syscall.Close(socketFD)
 				lastErr = common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))
