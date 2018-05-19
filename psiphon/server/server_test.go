@@ -544,6 +544,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	localSOCKSProxyPort := 1081
 	localHTTPProxyPort := 8081
 
+	jsonNetworkID := ""
+	if doTactics {
+		// Use a distinct prefix for network ID for each test run to
+		// ensure tactics from different runs don't apply; this is
+		// a workaround for the singleton datastore.
+		prefix := time.Now().String()
+		jsonNetworkID = fmt.Sprintf(`,"NetworkID" : "%s-%s"`, prefix, "NETWORK1")
+	}
+
 	// Note: calling LoadConfig ensures the Config is fully initialized
 	clientConfigJSON := fmt.Sprintf(`
     {
@@ -556,7 +565,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "EstablishTunnelPausePeriodSeconds" : 1,
         "ConnectionWorkerPoolSize" : %d,
         "TunnelProtocols" : ["%s"]
-    }`, numTunnels, runConfig.tunnelProtocol)
+        %s
+    }`, numTunnels, runConfig.tunnelProtocol, jsonNetworkID)
 	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
 
 	clientConfig.DataStoreDirectory = testDataDirName
@@ -582,14 +592,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	if !runConfig.omitAuthorization {
 		clientConfig.Authorizations = []string{clientAuthorization}
-	}
-
-	if doTactics {
-		// Use a distinct prefix for network ID for each test run to
-		// ensure tactics from different runs don't apply; this is
-		// a workaround for the singleton datastore.
-		prefix := time.Now().String()
-		clientConfig.NetworkID = prefix+"NETWORK1"
 	}
 
 	if doTactics {
