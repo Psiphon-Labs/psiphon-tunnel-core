@@ -544,7 +544,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	localSOCKSProxyPort := 1081
 	localHTTPProxyPort := 8081
 
-	// Note: calling LoadConfig ensures the Config is fully initialized
+	jsonNetworkID := ""
+	if doTactics {
+		// Use a distinct prefix for network ID for each test run to
+		// ensure tactics from different runs don't apply; this is
+		// a workaround for the singleton datastore.
+		prefix := time.Now().String()
+		jsonNetworkID = fmt.Sprintf(`,"NetworkID" : "%s-%s"`, prefix, "NETWORK1")
+	}
+
 	clientConfigJSON := fmt.Sprintf(`
     {
         "ClientPlatform" : "Windows",
@@ -556,15 +564,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "EstablishTunnelPausePeriodSeconds" : 1,
         "ConnectionWorkerPoolSize" : %d,
         "TunnelProtocols" : ["%s"]
-    }`, numTunnels, runConfig.tunnelProtocol)
-	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
+        %s
+    }`, numTunnels, runConfig.tunnelProtocol, jsonNetworkID)
+
+	clientConfig, err := psiphon.LoadConfig([]byte(clientConfigJSON))
+	if err != nil {
+		t.Fatalf("error processing configuration file: %s", err)
+	}
 
 	clientConfig.DataStoreDirectory = testDataDirName
-	err = psiphon.InitDataStore(clientConfig)
-	if err != nil {
-		t.Fatalf("error initializing client datastore: %s", err)
-	}
-	psiphon.DeleteSLOKs()
 
 	if !runConfig.doDefaultSponsorID {
 		clientConfig.SponsorId = sponsorID
@@ -584,12 +592,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		clientConfig.Authorizations = []string{clientAuthorization}
 	}
 
-	if doTactics {
-		// Use a distinct prefix for network ID for each test run to
-		// ensure tactics from different runs don't apply; this is
-		// a workaround for the singleton datastore.
-		prefix := time.Now().String()
-		clientConfig.NetworkIDGetter = &testNetworkGetter{prefix: prefix}
+	err = clientConfig.Commit()
+	if err != nil {
+		t.Fatalf("error committing configuration file: %s", err)
 	}
 
 	if doTactics {
@@ -605,6 +610,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			t.Fatalf("SetClientParameters failed: %s", err)
 		}
 	}
+
+	err = psiphon.InitDataStore(clientConfig)
+	if err != nil {
+		t.Fatalf("error initializing client datastore: %s", err)
+	}
+	psiphon.DeleteSLOKs()
 
 	controller, err := psiphon.NewController(clientConfig)
 	if err != nil {
@@ -1259,11 +1270,3 @@ const dummyClientVerificationPayload = `
 	"status": 0,
 	"payload": ""
 }`
-
-type testNetworkGetter struct {
-	prefix string
-}
-
-func (t *testNetworkGetter) GetNetworkID() string {
-	return t.prefix + "NETWORK1"
-}

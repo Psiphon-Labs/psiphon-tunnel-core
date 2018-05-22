@@ -738,6 +738,18 @@ func NoticeActiveAuthorizationIDs(activeAuthorizationIDs []string) {
 		"IDs", activeAuthorizationIDs)
 }
 
+func NoticeBindToDevice(deviceInfo string) {
+	outputRepetitiveNotice(
+		"BindToDevice", deviceInfo, 0,
+		"BindToDevice", 0, "regions", deviceInfo)
+}
+
+func NoticeNetworkID(networkID string) {
+	outputRepetitiveNotice(
+		"NetworkID", networkID, 0,
+		"NetworkID", 0, "regions", networkID)
+}
+
 type repetitiveNoticeState struct {
 	message string
 	repeats int

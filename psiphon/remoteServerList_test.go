@@ -391,7 +391,14 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 		obfuscatedServerListDownloadDirectory,
 		disruptorProxyURL)
 
-	clientConfig, _ := LoadConfig([]byte(clientConfigJSON))
+	clientConfig, err := LoadConfig([]byte(clientConfigJSON))
+	if err != nil {
+		t.Fatalf("error processing configuration file: %s", err)
+	}
+	err = clientConfig.Commit()
+	if err != nil {
+		t.Fatalf("error committing configuration file: %s", err)
+	}
 
 	controller, err := NewController(clientConfig)
 	if err != nil {

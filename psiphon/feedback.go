@@ -108,6 +108,10 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 	if err != nil {
 		return common.ContextError(err)
 	}
+	err = config.Commit()
+	if err != nil {
+		return common.ContextError(err)
+	}
 
 	untunneledDialConfig := &DialConfig{
 		UpstreamProxyURL:              config.UpstreamProxyURL,

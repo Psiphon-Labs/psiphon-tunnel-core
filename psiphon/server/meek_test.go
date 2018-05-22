@@ -356,10 +356,10 @@ func TestMeekResiliency(t *testing.T) {
 type fileDescriptorInterruptor struct {
 }
 
-func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) error {
+func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) (string, error) {
 	fdDup, err := syscall.Dup(fileDescriptor)
 	if err != nil {
-		return err
+		return "", err
 	}
 	minAfter := 500 * time.Millisecond
 	maxAfter := 1 * time.Second
@@ -369,5 +369,5 @@ func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) e
 		syscall.Close(fdDup)
 		fmt.Printf("interrupted TCP connection\n")
 	})
-	return nil
+	return "", nil
 }
