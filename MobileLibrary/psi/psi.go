@@ -118,10 +118,18 @@ func Start(
 		config.IPv6Synthesizer = provider
 	}
 
+	err = config.Commit()
+	if err != nil {
+		return fmt.Errorf("error committing configuration file: %s", err)
+	}
+
 	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 			provider.Notice(string(notice))
 		}))
+
+	// BuildInfo is a diagnostic notice, so emit only after config.Commit
+	// sets EmitDiagnosticNotices.
 
 	psiphon.NoticeBuildInfo()
 

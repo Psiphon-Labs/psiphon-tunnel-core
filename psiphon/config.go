@@ -461,10 +461,18 @@ type Config struct {
 
 	deviceBinder    DeviceBinder
 	networkIDGetter NetworkIDGetter
+
+	committed bool
 }
 
-// LoadConfig parses and validates a JSON format Psiphon config JSON
-// string and returns a Config struct populated with config values.
+// LoadConfig parses a JSON format Psiphon config JSON string and returns a
+// Config struct populated with config values.
+//
+// The Config struct may then be programmatically populated with additional
+// values, including callbacks such as DeviceBinder.
+//
+// Before using the Config, Commit must be called, which will  perform further
+// validation and initialize internal data structures.
 func LoadConfig(configJson []byte) (*Config, error) {
 
 	var config Config
@@ -472,6 +480,20 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
+
+	return &config, nil
+}
+
+// IsCommitted checks if Commit was called.
+func (config *Config) IsCommitted() bool {
+	return config.committed
+}
+
+// Commit validates Config fields finalizes initialization.
+//
+// Config fields should not be set after calling Config, as any changes may
+// not be reflected in internal data structures.
+func (config *Config) Commit() error {
 
 	// Do SetEmitDiagnosticNotices first, to ensure config file errors are emitted.
 
@@ -501,10 +523,11 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	// Supply default values.
 
 	if config.DataStoreDirectory == "" {
-		config.DataStoreDirectory, err = os.Getwd()
+		wd, err := os.Getwd()
 		if err != nil {
-			return nil, common.ContextError(err)
+			return common.ContextError(err)
 		}
+		config.DataStoreDirectory = wd
 	}
 
 	if config.ClientVersion == "" {
@@ -518,32 +541,32 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	// Validate config fields.
 
 	if config.PropagationChannelId == "" {
-		return nil, common.ContextError(
+		return common.ContextError(
 			errors.New("propagation channel ID is missing from the configuration file"))
 	}
 	if config.SponsorId == "" {
-		return nil, common.ContextError(
+		return common.ContextError(
 			errors.New("sponsor ID is missing from the configuration file"))
 	}
 
-	_, err = strconv.Atoi(config.ClientVersion)
+	_, err := strconv.Atoi(config.ClientVersion)
 	if err != nil {
-		return nil, common.ContextError(
+		return common.ContextError(
 			fmt.Errorf("invalid client version: %s", err))
 	}
 
 	if config.NetworkConnectivityChecker != nil {
-		return nil, common.ContextError(
+		return common.ContextError(
 			errors.New("NetworkConnectivityChecker interface must be set at runtime"))
 	}
 
 	if config.DeviceBinder != nil {
-		return nil, common.ContextError(
+		return common.ContextError(
 			errors.New("DeviceBinder interface must be set at runtime"))
 	}
 
 	if config.DnsServerGetter != nil {
-		return nil, common.ContextError(
+		return common.ContextError(
 			errors.New("DnsServerGetter interface must be set at runtime"))
 	}
 
@@ -551,7 +574,7 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		[]string{"", protocol.PSIPHON_SSH_API_PROTOCOL, protocol.PSIPHON_WEB_API_PROTOCOL},
 		config.TargetApiProtocol) {
 
-		return nil, common.ContextError(
+		return common.ContextError(
 			errors.New("invalid TargetApiProtocol"))
 	}
 
@@ -559,19 +582,19 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 		if config.RemoteServerListURLs != nil {
 			if config.RemoteServerListSignaturePublicKey == "" {
-				return nil, common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
+				return common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
 			}
 			if config.RemoteServerListDownloadFilename == "" {
-				return nil, common.ContextError(errors.New("missing RemoteServerListDownloadFilename"))
+				return common.ContextError(errors.New("missing RemoteServerListDownloadFilename"))
 			}
 		}
 
 		if config.ObfuscatedServerListRootURLs != nil {
 			if config.RemoteServerListSignaturePublicKey == "" {
-				return nil, common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
+				return common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
 			}
 			if config.ObfuscatedServerListDownloadDirectory == "" {
-				return nil, common.ContextError(errors.New("missing ObfuscatedServerListDownloadDirectory"))
+				return common.ContextError(errors.New("missing ObfuscatedServerListDownloadDirectory"))
 			}
 		}
 
@@ -579,26 +602,26 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	if config.SplitTunnelRoutesURLFormat != "" {
 		if config.SplitTunnelRoutesSignaturePublicKey == "" {
-			return nil, common.ContextError(errors.New("missing SplitTunnelRoutesSignaturePublicKey"))
+			return common.ContextError(errors.New("missing SplitTunnelRoutesSignaturePublicKey"))
 		}
 		if config.SplitTunnelDNSServer == "" {
-			return nil, common.ContextError(errors.New("missing SplitTunnelDNSServer"))
+			return common.ContextError(errors.New("missing SplitTunnelDNSServer"))
 		}
 	}
 
 	if config.UpgradeDownloadURLs != nil {
 		if config.UpgradeDownloadClientVersionHeader == "" {
-			return nil, common.ContextError(errors.New("missing UpgradeDownloadClientVersionHeader"))
+			return common.ContextError(errors.New("missing UpgradeDownloadClientVersionHeader"))
 		}
 		if config.UpgradeDownloadFilename == "" {
-			return nil, common.ContextError(errors.New("missing UpgradeDownloadFilename"))
+			return common.ContextError(errors.New("missing UpgradeDownloadFilename"))
 		}
 	}
 
 	// This constraint is expected by logic in Controller.runTunnels().
 
 	if config.PacketTunnelTunFileDescriptor > 0 && config.TunnelPoolSize != 1 {
-		return nil, common.ContextError(errors.New("packet tunnel mode requires TunnelPoolSize to be 1"))
+		return common.ContextError(errors.New("packet tunnel mode requires TunnelPoolSize to be 1"))
 	}
 
 	// SessionID must be PSIPHON_API_CLIENT_SESSION_ID_LENGTH lowercase hex-encoded bytes.
@@ -606,7 +629,7 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	if config.SessionID == "" {
 		sessionID, err := MakeSessionId()
 		if err != nil {
-			return nil, common.ContextError(err)
+			return common.ContextError(err)
 		}
 		config.SessionID = sessionID
 	}
@@ -615,7 +638,7 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		-1 != strings.IndexFunc(config.SessionID, func(c rune) bool {
 			return !unicode.Is(unicode.ASCII_Hex_Digit, c) || unicode.IsUpper(c)
 		}) {
-		return nil, common.ContextError(errors.New("invalid SessionID"))
+		return common.ContextError(errors.New("invalid SessionID"))
 	}
 
 	config.clientParameters, err = parameters.NewClientParameters(
@@ -623,14 +646,14 @@ func LoadConfig(configJson []byte) (*Config, error) {
 			NoticeAlert("ClientParameters getValue failed: %s", err)
 		})
 	if err != nil {
-		return nil, common.ContextError(err)
+		return common.ContextError(err)
 	}
 
 	// clientParameters.Set will validate the config fields applied to parameters.
 
 	err = config.SetClientParameters("", false, nil)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return common.ContextError(err)
 	}
 
 	// Initialize config.deviceBinder and config.config.networkIDGetter. These
@@ -662,7 +685,9 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		config.networkIDGetter = &loggingNetworkIDGetter{networkIDGetter}
 	}
 
-	return &config, nil
+	config.committed = true
+
+	return nil
 }
 
 // GetClientParameters returns a snapshot of the current client parameters.

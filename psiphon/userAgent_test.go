@@ -204,11 +204,19 @@ func attemptConnectionsWithUserAgent(
         "TransformHostNames" : "never",
         "UpstreamProxyUrl" : "http://127.0.0.1:2163"
     }`
-	clientConfig, _ := LoadConfig([]byte(clientConfigJSON))
+	clientConfig, err := LoadConfig([]byte(clientConfigJSON))
+	if err != nil {
+		t.Fatalf("error processing configuration file: %s", err)
+	}
 
 	clientConfig.TargetServerEntry = string(encodedServerEntry)
 	clientConfig.TunnelProtocol = tunnelProtocol
 	clientConfig.DataStoreDirectory = testDataDirName
+
+	err = clientConfig.Commit()
+	if err != nil {
+		t.Fatalf("error committing configuration file: %s", err)
+	}
 
 	err = InitDataStore(clientConfig)
 	if err != nil {

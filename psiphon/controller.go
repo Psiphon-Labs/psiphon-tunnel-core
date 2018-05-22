@@ -90,6 +90,10 @@ type candidateServerEntry struct {
 // NewController initializes a new controller.
 func NewController(config *Config) (controller *Controller, err error) {
 
+	if !config.IsCommitted() {
+		return nil, common.ContextError(errors.New("uncommitted config"))
+	}
+
 	// Needed by regen, at least
 	rand.Seed(int64(time.Now().Nanosecond()))
 

@@ -511,6 +511,12 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		config.CustomHeaders = upstreamProxyCustomHeaders
 	}
 
+	// All config fields should be set before calling Commit.
+	err = config.Commit()
+	if err != nil {
+		t.Fatalf("error committing configuration file: %s", err)
+	}
+
 	// Enable tactics requests. This will passively exercise the code
 	// paths. server_test runs a more comprehensive test that checks
 	// that the tactics request succeeds.
@@ -1140,4 +1146,3 @@ func initUpstreamProxy() {
 
 	// TODO: wait until listener is active?
 }
-

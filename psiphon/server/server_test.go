@@ -553,7 +553,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		jsonNetworkID = fmt.Sprintf(`,"NetworkID" : "%s-%s"`, prefix, "NETWORK1")
 	}
 
-	// Note: calling LoadConfig ensures the Config is fully initialized
 	clientConfigJSON := fmt.Sprintf(`
     {
         "ClientPlatform" : "Windows",
@@ -567,14 +566,13 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "TunnelProtocols" : ["%s"]
         %s
     }`, numTunnels, runConfig.tunnelProtocol, jsonNetworkID)
-	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
+
+	clientConfig, err := psiphon.LoadConfig([]byte(clientConfigJSON))
+	if err != nil {
+		t.Fatalf("error processing configuration file: %s", err)
+	}
 
 	clientConfig.DataStoreDirectory = testDataDirName
-	err = psiphon.InitDataStore(clientConfig)
-	if err != nil {
-		t.Fatalf("error initializing client datastore: %s", err)
-	}
-	psiphon.DeleteSLOKs()
 
 	if !runConfig.doDefaultSponsorID {
 		clientConfig.SponsorId = sponsorID
@@ -594,6 +592,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		clientConfig.Authorizations = []string{clientAuthorization}
 	}
 
+	err = clientConfig.Commit()
+	if err != nil {
+		t.Fatalf("error committing configuration file: %s", err)
+	}
+
 	if doTactics {
 		// Configure nonfunctional values that must be overridden by tactics.
 
@@ -607,6 +610,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			t.Fatalf("SetClientParameters failed: %s", err)
 		}
 	}
+
+	err = psiphon.InitDataStore(clientConfig)
+	if err != nil {
+		t.Fatalf("error initializing client datastore: %s", err)
+	}
+	psiphon.DeleteSLOKs()
 
 	controller, err := psiphon.NewController(clientConfig)
 	if err != nil {
