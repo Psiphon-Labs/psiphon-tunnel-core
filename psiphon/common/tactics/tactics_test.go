@@ -22,7 +22,6 @@ package tactics
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -85,7 +84,7 @@ func TestTactics(t *testing.T) {
           },
           "Tactics" : {
             "Parameters" : {
-              "LimitTunnelProtocols" : %s
+              %s
             }
           }
         },
@@ -125,7 +124,9 @@ func TestTactics(t *testing.T) {
 	tacticsNetworkLatencyMultiplier := 2.0
 	tacticsConnectionWorkerPoolSize := 5
 	tacticsLimitTunnelProtocols := protocol.TunnelProtocols{"OSSH", "SSH"}
-	jsonTacticsLimitTunnelProtocols, _ := json.Marshal(tacticsLimitTunnelProtocols)
+	jsonTacticsLimitTunnelProtocols := `"LimitTunnelProtocols" : ["OSSH", "SSH"]`
+
+	expectedApplyCount := 3
 
 	listenerProtocol := "OSSH"
 	listenerProhibitedGeoIP := func(string) common.GeoIPData { return common.GeoIPData{Country: "R7"} }
@@ -304,7 +305,7 @@ func TestTactics(t *testing.T) {
 			t.Fatalf("Apply failed: %s", err)
 		}
 
-		if counts[0] != 3 {
+		if counts[0] != expectedApplyCount {
 			t.Fatalf("Unexpected apply count: %d", counts[0])
 		}
 
@@ -438,6 +439,18 @@ func TestTactics(t *testing.T) {
 	// Modify tactics configuration to change payload
 
 	tacticsConnectionWorkerPoolSize = 6
+
+	tacticsLimitTunnelProtocols = protocol.TunnelProtocols{}
+	jsonTacticsLimitTunnelProtocols = ``
+	expectedApplyCount = 2
+
+	// Omitting LimitTunnelProtocols entirely tests this bug fix: When a new
+	// tactics payload is obtained, all previous parameters should be cleared.
+	//
+	// In the bug, any previous parameters not in the new tactics were
+	// incorrectly retained. In this test case, LimitTunnelProtocols is
+	// omitted in the new tactics; if FetchTactics fails to clear the old
+	// LimitTunnelProtocols then the test will fail.
 
 	tacticsConfig = fmt.Sprintf(
 		tacticsConfigTemplate,

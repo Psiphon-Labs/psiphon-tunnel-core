@@ -90,6 +90,10 @@ type candidateServerEntry struct {
 // NewController initializes a new controller.
 func NewController(config *Config) (controller *Controller, err error) {
 
+	if !config.IsCommitted() {
+		return nil, common.ContextError(errors.New("uncommitted config"))
+	}
+
 	// Needed by regen, at least
 	rand.Seed(int64(time.Now().Nanosecond()))
 
@@ -100,7 +104,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 	untunneledDialConfig := &DialConfig{
 		UpstreamProxyURL:              config.UpstreamProxyURL,
 		CustomHeaders:                 config.CustomHeaders,
-		DeviceBinder:                  config.DeviceBinder,
+		DeviceBinder:                  config.deviceBinder,
 		DnsServerGetter:               config.DnsServerGetter,
 		IPv6Synthesizer:               config.IPv6Synthesizer,
 		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
@@ -170,8 +174,6 @@ func (controller *Controller) Run(ctx context.Context) {
 	// client will always get an AvailableEgressRegions notice,
 	// an initial instance of any repetitive error notice, etc.
 	ResetRepetitiveNotices()
-
-	ReportAvailableRegions(controller.config)
 
 	runCtx, stopRunning := context.WithCancel(ctx)
 	defer stopRunning()
@@ -1183,7 +1185,7 @@ func (controller *Controller) launchEstablishing() {
 	// canceled when establishment is stopped.
 
 	doTactics := !controller.config.DisableTactics &&
-		controller.config.NetworkIDGetter != nil
+		controller.config.networkIDGetter != nil
 
 	if doTactics {
 
@@ -1211,6 +1213,20 @@ func (controller *Controller) launchEstablishing() {
 			return
 		}
 	}
+
+	// Unconditionally report available egress regions. After a fresh install,
+	// the outer client may not have a list of regions to display, so we
+	// always report here. Events that trigger ReportAvailableRegions,
+	// including storing new server entries and applying tactics, are not
+	// guaranteed to occur.
+	//
+	// This report is delayed until after tactics are likely to be applied, as
+	// tactics can impact the list of available regions; this avoids a
+	// ReportAvailableRegions reporting too many regions, followed shortly by
+	// a ReportAvailableRegions reporting fewer regions. That sequence could
+	// cause issues in the outer client UI.
+
+	ReportAvailableRegions(controller.config)
 
 	// The ConnectionWorkerPoolSize may be set by tactics.
 
@@ -1268,7 +1284,7 @@ func (controller *Controller) getTactics(done chan struct{}) {
 
 	tacticsRecord, err := tactics.UseStoredTactics(
 		GetTacticsStorer(),
-		controller.config.NetworkIDGetter.GetNetworkID())
+		controller.config.networkIDGetter.GetNetworkID())
 	if err != nil {
 		NoticeAlert("get stored tactics failed: %s", err)
 
@@ -1441,7 +1457,7 @@ func (controller *Controller) doFetchTactics(
 		ctx,
 		controller.config.clientParameters,
 		GetTacticsStorer(),
-		controller.config.NetworkIDGetter.GetNetworkID,
+		controller.config.networkIDGetter.GetNetworkID,
 		apiParams,
 		serverEntry.Region,
 		tacticsProtocol,

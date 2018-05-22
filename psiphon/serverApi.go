@@ -126,7 +126,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	params := serverContext.getBaseAPIParameters()
 
 	doTactics := !serverContext.tunnel.config.DisableTactics &&
-		serverContext.tunnel.config.NetworkIDGetter != nil
+		serverContext.tunnel.config.networkIDGetter != nil
 
 	networkID := ""
 	if doTactics {
@@ -142,7 +142,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		// doesn't detect all cases of changing networks, it reduces the already
 		// narrow window.
 
-		networkID = serverContext.tunnel.config.NetworkIDGetter.GetNetworkID()
+		networkID = serverContext.tunnel.config.networkIDGetter.GetNetworkID()
 
 		err := tactics.SetTacticsAPIParameters(
 			serverContext.tunnel.config.clientParameters, GetTacticsStorer(), networkID, params)
@@ -265,7 +265,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	NoticeActiveAuthorizationIDs(handshakeResponse.ActiveAuthorizationIDs)
 
 	if doTactics && handshakeResponse.TacticsPayload != nil &&
-		networkID == serverContext.tunnel.config.NetworkIDGetter.GetNetworkID() {
+		networkID == serverContext.tunnel.config.networkIDGetter.GetNetworkID() {
 
 		var payload *tactics.Payload
 		err := json.Unmarshal(handshakeResponse.TacticsPayload, &payload)

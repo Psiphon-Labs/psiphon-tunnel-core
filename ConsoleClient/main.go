@@ -186,7 +186,33 @@ func main() {
 		os.Exit(1)
 	}
 
-	// BuildInfo is a diagnostic notice, so emit only after LoadConfig
+	if interfaceName != "" {
+		config.ListenInterface = interfaceName
+	}
+
+	// Configure packet tunnel, including updating the config.
+
+	if tun.IsSupported() && tunDevice != "" {
+		tunDeviceFile, err := configurePacketTunnel(
+			config, tunDevice, tunBindInterface, tunPrimaryDNS, tunSecondaryDNS)
+		if err != nil {
+			psiphon.SetEmitDiagnosticNotices(true)
+			psiphon.NoticeError("error configuring packet tunnel: %s", err)
+			os.Exit(1)
+		}
+		defer tunDeviceFile.Close()
+	}
+
+	// All config fields should be set before calling Commit.
+
+	err = config.Commit()
+	if err != nil {
+		psiphon.SetEmitDiagnosticNotices(true)
+		psiphon.NoticeError("error loading configuration file: %s", err)
+		os.Exit(1)
+	}
+
+	// BuildInfo is a diagnostic notice, so emit only after config.Commit
 	// sets EmitDiagnosticNotices.
 
 	psiphon.NoticeBuildInfo()
@@ -256,32 +282,6 @@ func main() {
 		}
 	}
 
-	if interfaceName != "" {
-		config.ListenInterface = interfaceName
-	}
-
-	// Configure packet tunnel
-
-	if tun.IsSupported() && tunDevice != "" {
-		tunDeviceFile, err := configurePacketTunnel(
-			config, tunDevice, tunBindInterface, tunPrimaryDNS, tunSecondaryDNS)
-		if err != nil {
-			psiphon.NoticeError("error configuring packet tunnel: %s", err)
-			os.Exit(1)
-		}
-		defer tunDeviceFile.Close()
-	}
-
-	// Enable tactics when a NetworkID is specified
-	//
-	// Limitation: unlike psi.NetworkIDGetter, which calls back to platform
-	// APIs, this method of network identification is not dynamic and will not
-	// reflect network changes that occur while running.
-
-	if config.NetworkID != "" {
-		config.NetworkIDGetter = &networkGetter{networkID: config.NetworkID}
-	}
-
 	// Run Psiphon
 
 	controller, err := psiphon.NewController(config)
@@ -348,8 +348,8 @@ type tunProvider struct {
 }
 
 // BindToDevice implements the psiphon.DeviceBinder interface.
-func (p *tunProvider) BindToDevice(fileDescriptor int) error {
-	return tun.BindToDevice(fileDescriptor, p.bindInterface)
+func (p *tunProvider) BindToDevice(fileDescriptor int) (string, error) {
+	return p.bindInterface, tun.BindToDevice(fileDescriptor, p.bindInterface)
 }
 
 // GetPrimaryDnsServer implements the psiphon.DnsServerGetter interface.
@@ -360,12 +360,4 @@ func (p *tunProvider) GetPrimaryDnsServer() string {
 // GetSecondaryDnsServer implements the psiphon.DnsServerGetter interface.
 func (p *tunProvider) GetSecondaryDnsServer() string {
 	return p.secondaryDNS
-}
-
-type networkGetter struct {
-	networkID string
-}
-
-func (n *networkGetter) GetNetworkID() string {
-	return n.networkID
 }

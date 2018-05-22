@@ -796,7 +796,7 @@ func initDialConfig(
 	dialConfig := &DialConfig{
 		UpstreamProxyURL:              config.UpstreamProxyURL,
 		CustomHeaders:                 dialCustomHeaders,
-		DeviceBinder:                  config.DeviceBinder,
+		DeviceBinder:                  config.deviceBinder,
 		DnsServerGetter:               config.DnsServerGetter,
 		IPv6Synthesizer:               config.IPv6Synthesizer,
 		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
@@ -1457,7 +1457,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 		// considering that only the last SpeedTestMaxSampleCount samples are
 		// retained, enables tuning the sampling frequency.
 
-		if err == nil && requestOk && tunnel.config.NetworkIDGetter != nil &&
+		if err == nil && requestOk && tunnel.config.networkIDGetter != nil &&
 			(isFirstKeepAlive ||
 				tunnel.config.clientParameters.Get().WeightedCoinFlip(
 					parameters.SSHKeepAliveSpeedTestSampleProbability)) {
@@ -1465,7 +1465,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 			err = tactics.AddSpeedTestSample(
 				tunnel.config.clientParameters,
 				GetTacticsStorer(),
-				tunnel.config.NetworkIDGetter.GetNetworkID(),
+				tunnel.config.networkIDGetter.GetNetworkID(),
 				tunnel.serverEntry.Region,
 				tunnel.protocol,
 				elapsedTime,
