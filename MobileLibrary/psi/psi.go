@@ -118,6 +118,8 @@ func Start(
 		config.IPv6Synthesizer = provider
 	}
 
+	// All config fields should be set before calling Commit.
+
 	err = config.Commit()
 	if err != nil {
 		return fmt.Errorf("error committing configuration file: %s", err)
