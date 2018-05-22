@@ -555,21 +555,6 @@ func (config *Config) Commit() error {
 			fmt.Errorf("invalid client version: %s", err))
 	}
 
-	if config.NetworkConnectivityChecker != nil {
-		return common.ContextError(
-			errors.New("NetworkConnectivityChecker interface must be set at runtime"))
-	}
-
-	if config.DeviceBinder != nil {
-		return common.ContextError(
-			errors.New("DeviceBinder interface must be set at runtime"))
-	}
-
-	if config.DnsServerGetter != nil {
-		return common.ContextError(
-			errors.New("DnsServerGetter interface must be set at runtime"))
-	}
-
 	if !common.Contains(
 		[]string{"", protocol.PSIPHON_SSH_API_PROTOCOL, protocol.PSIPHON_WEB_API_PROTOCOL},
 		config.TargetApiProtocol) {
