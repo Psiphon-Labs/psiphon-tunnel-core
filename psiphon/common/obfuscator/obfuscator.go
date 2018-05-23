@@ -51,12 +51,15 @@ type Obfuscator struct {
 
 type ObfuscatorConfig struct {
 	Keyword    string
-	MaxPadding int
+	MinPadding *int
+	MaxPadding *int
 }
 
 // NewClientObfuscator creates a new Obfuscator, staging a seed message to be
 // sent to the server (by the caller) and initializing stream ciphers to
 // obfuscate data.
+//
+//
 func NewClientObfuscator(
 	config *ObfuscatorConfig) (obfuscator *Obfuscator, err error) {
 
@@ -70,12 +73,22 @@ func NewClientObfuscator(
 		return nil, common.ContextError(err)
 	}
 
-	maxPadding := OBFUSCATE_MAX_PADDING
-	if config.MaxPadding > 0 {
-		maxPadding = config.MaxPadding
+	minPadding := 0
+	if config.MinPadding != nil &&
+		*config.MinPadding >= 0 &&
+		*config.MinPadding <= OBFUSCATE_MAX_PADDING {
+		minPadding = *config.MinPadding
 	}
 
-	seedMessage, err := makeSeedMessage(maxPadding, seed, clientToServerCipher)
+	maxPadding := OBFUSCATE_MAX_PADDING
+	if config.MaxPadding != nil &&
+		*config.MaxPadding >= 0 &&
+		*config.MaxPadding <= OBFUSCATE_MAX_PADDING &&
+		*config.MaxPadding >= minPadding {
+		maxPadding = *config.MaxPadding
+	}
+
+	seedMessage, err := makeSeedMessage(minPadding, maxPadding, seed, clientToServerCipher)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -163,13 +176,8 @@ func deriveKey(seed, keyword, iv []byte) ([]byte, error) {
 	return digest[0:OBFUSCATE_KEY_LENGTH], nil
 }
 
-func makeSeedMessage(maxPadding int, seed []byte, clientToServerCipher *rc4.Cipher) ([]byte, error) {
-	// paddingLength is integer in range [0, maxPadding]
-	paddingLength, err := common.MakeSecureRandomInt(maxPadding + 1)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-	padding, err := common.MakeSecureRandomBytes(paddingLength)
+func makeSeedMessage(minPadding, maxPadding int, seed []byte, clientToServerCipher *rc4.Cipher) ([]byte, error) {
+	padding, err := common.MakeSecureRandomPadding(minPadding, maxPadding)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -182,7 +190,7 @@ func makeSeedMessage(maxPadding int, seed []byte, clientToServerCipher *rc4.Ciph
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
-	err = binary.Write(buffer, binary.BigEndian, uint32(paddingLength))
+	err = binary.Write(buffer, binary.BigEndian, uint32(len(padding)))
 	if err != nil {
 		return nil, common.ContextError(err)
 	}

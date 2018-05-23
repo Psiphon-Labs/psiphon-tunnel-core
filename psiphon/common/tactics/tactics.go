@@ -1659,10 +1659,12 @@ func boxPayload(
 		box = bundledBox
 	}
 
+	maxPadding := TACTICS_PADDING_MAX_SIZE
+
 	obfuscator, err := obfuscator.NewClientObfuscator(
 		&obfuscator.ObfuscatorConfig{
 			Keyword:    string(obfuscatedKey),
-			MaxPadding: TACTICS_PADDING_MAX_SIZE})
+			MaxPadding: &maxPadding})
 	if err != nil {
 		return nil, common.ContextError(err)
 	}

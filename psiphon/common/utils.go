@@ -168,26 +168,38 @@ func MakeSecureRandomBytes(length int) ([]byte, error) {
 	return randomBytes, nil
 }
 
+// MakeSecureRandomRange selects a random int in [min, max].
+// If max < min, min is returned.
+func MakeSecureRandomRange(min, max int) (int, error) {
+	if max < min {
+		return min, nil
+	}
+	n, err := MakeSecureRandomInt(max - min + 1)
+	if err != nil {
+		return 0, ContextError(err)
+	}
+	n += min
+	return n, nil
+}
+
 // MakeSecureRandomPadding selects a random padding length in the indicated
 // range and returns a random byte array of the selected length.
 // If maxLength <= minLength, the padding is minLength.
 func MakeSecureRandomPadding(minLength, maxLength int) ([]byte, error) {
-	var padding []byte
-	paddingSize, err := MakeSecureRandomInt(maxLength - minLength)
+	paddingSize, err := MakeSecureRandomRange(minLength, maxLength)
 	if err != nil {
 		return nil, ContextError(err)
 	}
-	paddingSize += minLength
-	padding, err = MakeSecureRandomBytes(paddingSize)
+	padding, err := MakeSecureRandomBytes(paddingSize)
 	if err != nil {
 		return nil, ContextError(err)
 	}
 	return padding, nil
 }
 
-// MakeRandomPeriod returns a random duration, within a given range.
+// MakeSecureRandomPeriod returns a random duration, within a given range.
 // If max <= min, the duration is min.
-func MakeRandomPeriod(min, max time.Duration) (time.Duration, error) {
+func MakeSecureRandomPeriod(min, max time.Duration) (time.Duration, error) {
 	period, err := MakeSecureRandomInt64(max.Nanoseconds() - min.Nanoseconds())
 	if err != nil {
 		return 0, ContextError(err)
@@ -195,9 +207,9 @@ func MakeRandomPeriod(min, max time.Duration) (time.Duration, error) {
 	return min + time.Duration(period), nil
 }
 
-// MakeRandomStringHex returns a hex encoded random string.
+// MakeSecureRandomStringHex returns a hex encoded random string.
 // byteLength specifies the pre-encoded data length.
-func MakeRandomStringHex(byteLength int) (string, error) {
+func MakeSecureRandomStringHex(byteLength int) (string, error) {
 	bytes, err := MakeSecureRandomBytes(byteLength)
 	if err != nil {
 		return "", ContextError(err)
@@ -205,9 +217,9 @@ func MakeRandomStringHex(byteLength int) (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
-// MakeRandomStringBase64 returns a base64 encoded random string.
+// MakeSecureRandomStringBase64 returns a base64 encoded random string.
 // byteLength specifies the pre-encoded data length.
-func MakeRandomStringBase64(byteLength int) (string, error) {
+func MakeSecureRandomStringBase64(byteLength int) (string, error) {
 	bytes, err := MakeSecureRandomBytes(byteLength)
 	if err != nil {
 		return "", ContextError(err)

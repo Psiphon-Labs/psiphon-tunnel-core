@@ -508,7 +508,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	if params.WebServerPort != 0 {
 		var err error
-		webServerSecret, err = common.MakeRandomStringHex(WEB_SERVER_SECRET_BYTE_LENGTH)
+		webServerSecret, err = common.MakeSecureRandomStringHex(WEB_SERVER_SECRET_BYTE_LENGTH)
 		if err != nil {
 			return nil, nil, nil, nil, nil, common.ContextError(err)
 		}
@@ -543,14 +543,14 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	sshPublicKey := signer.PublicKey()
 
-	sshUserNameSuffix, err := common.MakeRandomStringHex(SSH_USERNAME_SUFFIX_BYTE_LENGTH)
+	sshUserNameSuffix, err := common.MakeSecureRandomStringHex(SSH_USERNAME_SUFFIX_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
 
 	sshUserName := "psiphon_" + sshUserNameSuffix
 
-	sshPassword, err := common.MakeRandomStringHex(SSH_PASSWORD_BYTE_LENGTH)
+	sshPassword, err := common.MakeSecureRandomStringHex(SSH_PASSWORD_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
@@ -559,7 +559,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	// Obfuscated SSH config
 
-	obfuscatedSSHKey, err := common.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+	obfuscatedSSHKey, err := common.MakeSecureRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
@@ -578,7 +578,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		meekCookieEncryptionPublicKey = base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPublicKey[:])
 		meekCookieEncryptionPrivateKey = base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPrivateKey[:])
 
-		meekObfuscatedKey, err = common.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+		meekObfuscatedKey, err = common.MakeSecureRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 		if err != nil {
 			return nil, nil, nil, nil, nil, common.ContextError(err)
 		}
@@ -586,7 +586,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	// Other config
 
-	discoveryValueHMACKey, err := common.MakeRandomStringBase64(DISCOVERY_VALUE_KEY_BYTE_LENGTH)
+	discoveryValueHMACKey, err := common.MakeSecureRandomStringBase64(DISCOVERY_VALUE_KEY_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
