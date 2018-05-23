@@ -106,6 +106,7 @@ func TestUntunneledUpgradeDownload(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -123,6 +124,7 @@ func TestUntunneledResumableUpgradeDownload(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           true,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -140,6 +142,7 @@ func TestUntunneledUpgradeClientIsLatestVersion(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -157,6 +160,7 @@ func TestUntunneledResumableFetchRemoteServerList(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           true,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -174,6 +178,7 @@ func TestTunneledUpgradeClientIsLatestVersion(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -199,6 +204,7 @@ func TestImpairedProtocols(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           true,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              1 * time.Minute,
 		})
 }
@@ -216,6 +222,7 @@ func TestSSH(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -233,6 +240,7 @@ func TestObfuscatedSSH(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -250,6 +258,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -267,6 +276,7 @@ func TestUnfrontedMeekWithTransformer(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			transformHostNames:       true,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -284,6 +294,7 @@ func TestFrontedMeek(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -301,6 +312,7 @@ func TestFrontedMeekWithTransformer(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			transformHostNames:       true,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -318,6 +330,7 @@ func TestFrontedMeekHTTP(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -335,6 +348,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -352,6 +366,7 @@ func TestUnfrontedMeekHTTPSWithTransformer(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			transformHostNames:       true,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -369,6 +384,7 @@ func TestDisabledApi(t *testing.T) {
 			useUpstreamProxy:         false,
 			disruptNetwork:           false,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -386,6 +402,7 @@ func TestObfuscatedSSHWithUpstreamProxy(t *testing.T) {
 			useUpstreamProxy:         true,
 			disruptNetwork:           false,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -403,6 +420,7 @@ func TestUnfrontedMeekWithUpstreamProxy(t *testing.T) {
 			useUpstreamProxy:         true,
 			disruptNetwork:           false,
 			transformHostNames:       false,
+			useFragmentor:            false,
 			runDuration:              0,
 		})
 }
@@ -420,6 +438,43 @@ func TestUnfrontedMeekHTTPSWithUpstreamProxy(t *testing.T) {
 			useUpstreamProxy:         true,
 			disruptNetwork:           false,
 			transformHostNames:       false,
+			useFragmentor:            false,
+			runDuration:              0,
+		})
+}
+
+func TestObfuscatedSSHFragmentor(t *testing.T) {
+	controllerRun(t,
+		&controllerRunConfig{
+			expectNoServerEntries:    false,
+			protocol:                 protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH,
+			clientIsLatestVersion:    false,
+			disableUntunneledUpgrade: true,
+			disableEstablishing:      false,
+			disableApi:               false,
+			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
+			disruptNetwork:           false,
+			transformHostNames:       false,
+			useFragmentor:            true,
+			runDuration:              0,
+		})
+}
+
+func TestFrontedMeekFragmentor(t *testing.T) {
+	controllerRun(t,
+		&controllerRunConfig{
+			expectNoServerEntries:    false,
+			protocol:                 protocol.TUNNEL_PROTOCOL_FRONTED_MEEK,
+			clientIsLatestVersion:    false,
+			disableUntunneledUpgrade: true,
+			disableEstablishing:      false,
+			disableApi:               false,
+			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
+			disruptNetwork:           false,
+			transformHostNames:       false,
+			useFragmentor:            true,
 			runDuration:              0,
 		})
 }
@@ -435,6 +490,7 @@ type controllerRunConfig struct {
 	useUpstreamProxy         bool
 	disruptNetwork           bool
 	transformHostNames       bool
+	useFragmentor            bool
 	runDuration              time.Duration
 }
 
@@ -474,6 +530,19 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		modifyConfig["TransformHostNames"] = "always"
 	} else {
 		modifyConfig["TransformHostNames"] = "never"
+	}
+
+	if runConfig.useFragmentor {
+		modifyConfig["UseFragmentor"] = "always"
+		modifyConfig["FragmentorLimitProtocols"] = protocol.TunnelProtocols{runConfig.protocol}
+		modifyConfig["FragmentorMinTotalBytes"] = 1000
+		modifyConfig["FragmentorMaxTotalBytes"] = 2000
+		modifyConfig["FragmentorMinWriteBytes"] = 1
+		modifyConfig["FragmentorMaxWriteBytes"] = 100
+		modifyConfig["FragmentorMinDelayMicroseconds"] = 1000
+		modifyConfig["FragmentorMaxDelayMicroseconds"] = 10000
+		modifyConfig["ObfuscatedSSHMinPadding"] = 4096
+		modifyConfig["ObfuscatedSSHMaxPadding"] = 8192
 	}
 
 	configJSON, _ = json.Marshal(modifyConfig)

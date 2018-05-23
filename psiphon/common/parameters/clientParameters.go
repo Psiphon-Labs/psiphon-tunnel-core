@@ -61,6 +61,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
@@ -85,6 +86,16 @@ const (
 	PrioritizeTunnelProtocolsCandidateCount        = "PrioritizeTunnelProtocolsCandidateCount"
 	LimitTunnelProtocols                           = "LimitTunnelProtocols"
 	LimitTLSProfiles                               = "LimitTLSProfiles"
+	FragmentorProbability                          = "FragmentorProbability"
+	FragmentorLimitProtocols                       = "FragmentorLimitProtocols"
+	FragmentorMinTotalBytes                        = "FragmentorMinTotalBytes"
+	FragmentorMaxTotalBytes                        = "FragmentorMaxTotalBytes"
+	FragmentorMinWriteBytes                        = "FragmentorMinWriteBytes"
+	FragmentorMaxWriteBytes                        = "FragmentorMaxWriteBytes"
+	FragmentorMinDelay                             = "FragmentorMinDelay"
+	FragmentorMaxDelay                             = "FragmentorMaxDelay"
+	ObfuscatedSSHMinPadding                        = "ObfuscatedSSHMinPadding"
+	ObfuscatedSSHMaxPadding                        = "ObfuscatedSSHMaxPadding"
 	TunnelOperateShutdownTimeout                   = "TunnelOperateShutdownTimeout"
 	TunnelPortForwardDialTimeout                   = "TunnelPortForwardDialTimeout"
 	TunnelRateLimits                               = "TunnelRateLimits"
@@ -210,6 +221,23 @@ var defaultClientParameters = map[string]struct {
 
 	LimitTLSProfiles: {value: protocol.TLSProfiles{}},
 
+	FragmentorProbability:    {value: 0.5, minimum: 0.0},
+	FragmentorLimitProtocols: {value: protocol.TunnelProtocols{}},
+	FragmentorMinTotalBytes:  {value: 0, minimum: 0},
+	FragmentorMaxTotalBytes:  {value: 0, minimum: 0},
+	FragmentorMinWriteBytes:  {value: 1, minimum: 1},
+	FragmentorMaxWriteBytes:  {value: 1500, minimum: 1},
+	FragmentorMinDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
+	FragmentorMaxDelay:       {value: 10 * time.Millisecond, minimum: time.Duration(0)},
+
+	// The Psiphon server will reject obfuscated SSH seed messages with
+	// padding greater than OBFUSCATE_MAX_PADDING.
+	// obfuscator.NewClientObfuscator will ignore invalid min/max padding
+	// configurations.
+
+	ObfuscatedSSHMinPadding: {value: 0, minimum: 0},
+	ObfuscatedSSHMaxPadding: {value: obfuscator.OBFUSCATE_MAX_PADDING, minimum: 0},
+
 	AdditionalCustomHeaders: {value: make(http.Header)},
 
 	// Speed test and SSH keep alive padding is intended to frustrate
@@ -302,8 +330,8 @@ var defaultClientParameters = map[string]struct {
 	MeekRoundTripRetryMultiplier:               {value: 2.0, minimum: 0.0},
 	MeekRoundTripTimeout:                       {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 
-	TransformHostNameProbability: {value: 0.5},
-	PickUserAgentProbability:     {value: 0.5},
+	TransformHostNameProbability: {value: 0.5, minimum: 0.0},
+	PickUserAgentProbability:     {value: 0.5, minimum: 0.0},
 }
 
 // ClientParameters is a set of client parameters. To use the parameters, call

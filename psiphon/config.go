@@ -452,6 +452,18 @@ type Config struct {
 	// server.
 	Authorizations []string
 
+	// UseFragmentor and associated Fragmentor fields are for testing
+	// purposes.
+	UseFragmentor                  string
+	FragmentorMinTotalBytes        *int
+	FragmentorMaxTotalBytes        *int
+	FragmentorMinWriteBytes        *int
+	FragmentorMaxWriteBytes        *int
+	FragmentorMinDelayMicroseconds *int
+	FragmentorMaxDelayMicroseconds *int
+	ObfuscatedSSHMinPadding        *int
+	ObfuscatedSSHMaxPadding        *int
+
 	// clientParameters is the active ClientParameters with defaults, config
 	// values, and, optionally, tactics applied.
 	//
@@ -806,6 +818,45 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 	}
 
 	applyParameters[parameters.TunnelRateLimits] = config.RateLimits
+
+	switch config.UseFragmentor {
+	case "always":
+		applyParameters[parameters.FragmentorProbability] = 1.0
+	case "never":
+		applyParameters[parameters.FragmentorProbability] = 0.0
+	}
+
+	if config.FragmentorMinTotalBytes != nil {
+		applyParameters[parameters.FragmentorMinTotalBytes] = *config.FragmentorMinTotalBytes
+	}
+
+	if config.FragmentorMaxTotalBytes != nil {
+		applyParameters[parameters.FragmentorMaxTotalBytes] = *config.FragmentorMaxTotalBytes
+	}
+
+	if config.FragmentorMinWriteBytes != nil {
+		applyParameters[parameters.FragmentorMinWriteBytes] = *config.FragmentorMinWriteBytes
+	}
+
+	if config.FragmentorMaxWriteBytes != nil {
+		applyParameters[parameters.FragmentorMaxWriteBytes] = *config.FragmentorMaxWriteBytes
+	}
+
+	if config.FragmentorMinDelayMicroseconds != nil {
+		applyParameters[parameters.FragmentorMinDelay] = fmt.Sprintf("%dus", *config.FragmentorMinDelayMicroseconds)
+	}
+
+	if config.FragmentorMaxDelayMicroseconds != nil {
+		applyParameters[parameters.FragmentorMaxDelay] = fmt.Sprintf("%dus", *config.FragmentorMaxDelayMicroseconds)
+	}
+
+	if config.ObfuscatedSSHMinPadding != nil {
+		applyParameters[parameters.ObfuscatedSSHMinPadding] = *config.ObfuscatedSSHMinPadding
+	}
+
+	if config.ObfuscatedSSHMaxPadding != nil {
+		applyParameters[parameters.ObfuscatedSSHMaxPadding] = *config.ObfuscatedSSHMaxPadding
+	}
 
 	return applyParameters
 }

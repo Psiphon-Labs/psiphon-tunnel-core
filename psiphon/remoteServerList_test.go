@@ -141,7 +141,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	epoch := now.Truncate(seedPeriod)
 	epochStr := epoch.Format(time.RFC3339Nano)
 
-	propagationChannelID, _ := common.MakeRandomStringHex(8)
+	propagationChannelID, _ := common.MakeSecureRandomStringHex(8)
 
 	oslConfigJSON := fmt.Sprintf(
 		oslConfigJSONTemplate,

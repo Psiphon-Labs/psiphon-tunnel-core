@@ -34,11 +34,13 @@ import (
 
 func TestObfuscator(t *testing.T) {
 
-	keyword, _ := common.MakeRandomStringHex(32)
+	keyword, _ := common.MakeSecureRandomStringHex(32)
+
+	maxPadding := 256
 
 	config := &ObfuscatorConfig{
 		Keyword:    keyword,
-		MaxPadding: 256,
+		MaxPadding: &maxPadding,
 	}
 
 	client, err := NewClientObfuscator(config)
@@ -76,7 +78,7 @@ func TestObfuscator(t *testing.T) {
 
 func TestObfuscatedSSHConn(t *testing.T) {
 
-	keyword, _ := common.MakeRandomStringHex(32)
+	keyword, _ := common.MakeSecureRandomStringHex(32)
 
 	serverAddress := "127.0.0.1:2222"
 
@@ -112,7 +114,7 @@ func TestObfuscatedSSHConn(t *testing.T) {
 
 		if err == nil {
 			conn, err = NewObfuscatedSshConn(
-				OBFUSCATION_CONN_MODE_SERVER, conn, keyword)
+				OBFUSCATION_CONN_MODE_SERVER, conn, keyword, nil, nil)
 		}
 
 		if err == nil {
@@ -138,7 +140,7 @@ func TestObfuscatedSSHConn(t *testing.T) {
 
 		if err == nil {
 			conn, err = NewObfuscatedSshConn(
-				OBFUSCATION_CONN_MODE_CLIENT, conn, keyword)
+				OBFUSCATION_CONN_MODE_CLIENT, conn, keyword, nil, nil)
 		}
 
 		if err == nil {

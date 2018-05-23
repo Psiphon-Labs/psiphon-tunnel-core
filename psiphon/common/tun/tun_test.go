@@ -380,9 +380,9 @@ func (server *testServer) run() {
 			defer server.workers.Done()
 			defer signalConn.Close()
 
-			sessionID, err := common.MakeRandomStringHex(SESSION_ID_LENGTH)
+			sessionID, err := common.MakeSecureRandomStringHex(SESSION_ID_LENGTH)
 			if err != nil {
-				fmt.Printf("testServer.run(): common.MakeRandomStringHex failed: %s\n", err)
+				fmt.Printf("testServer.run(): common.MakeSecureRandomStringHex failed: %s\n", err)
 				return
 			}
 
