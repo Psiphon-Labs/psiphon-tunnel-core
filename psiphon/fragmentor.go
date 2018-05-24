@@ -148,7 +148,7 @@ func (fragmentor *FragmentorConn) Write(buffer []byte) (int, error) {
 			err = fragmentor.ctx.Err()
 		case <-timer.C:
 		}
-		defer timer.Stop()
+		timer.Stop()
 
 		if err != nil {
 			return totalBytesWritten, err
