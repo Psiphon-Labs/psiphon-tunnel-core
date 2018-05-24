@@ -482,8 +482,7 @@ func (t *handshakeTransport) sendKexInit() error {
 	//
 	if t.remoteAddr != nil {
 
-		transform := func(list []string, doCut bool) []string {
-
+		permute := func(list []string) []string {
 			newList := make([]string, len(list))
 			perm, err := common.MakeSecureRandomPerm(len(list))
 			if err == nil {
@@ -491,29 +490,50 @@ func (t *handshakeTransport) sendKexInit() error {
 					newList[j] = list[i]
 				}
 			}
-
-			if doCut {
-				cut := len(newList)
-				for ; cut > 1; cut-- {
-					if !common.FlipCoin() {
-						break
-					}
-				}
-				newList = newList[:cut]
-			}
-
 			return newList
 		}
 
-		msg.KexAlgos = transform(t.config.KeyExchanges, true)
-		ciphers := transform(t.config.Ciphers, true)
+		truncate := func(list []string) []string {
+			cut := len(list)
+			for ; cut > 1; cut-- {
+				if !common.FlipCoin() {
+					break
+				}
+			}
+			return list[:cut]
+		}
+
+		msg.KexAlgos = truncate(permute(t.config.KeyExchanges))
+		ciphers := truncate(permute(t.config.Ciphers))
 		msg.CiphersClientServer = ciphers
 		msg.CiphersServerClient = ciphers
-		MACs := transform(t.config.MACs, true)
+		MACs := truncate(permute(t.config.MACs))
 		msg.MACsClientServer = MACs
 		msg.MACsServerClient = MACs
-		msg.ServerHostKeyAlgos = transform(
-			msg.ServerHostKeyAlgos, len(t.hostKeys) == 0)
+
+		if len(t.hostKeys) > 0 {
+			msg.ServerHostKeyAlgos = permute(msg.ServerHostKeyAlgos)
+		} else {
+			serverHostKeyAlgos := truncate(permute(msg.ServerHostKeyAlgos))
+
+			// Must offer KeyAlgoRSA to Psiphon server.
+			hasKeyAlgoRSA := false
+			for _, algo := range serverHostKeyAlgos {
+				if algo == KeyAlgoRSA {
+					hasKeyAlgoRSA = true
+					break
+				}
+			}
+			if !hasKeyAlgoRSA {
+				replace, err := common.MakeSecureRandomInt(len(serverHostKeyAlgos))
+				if err != nil {
+					replace = 0
+				}
+				serverHostKeyAlgos[replace] = KeyAlgoRSA
+			}
+
+			msg.ServerHostKeyAlgos = serverHostKeyAlgos
+		}
 
 		// Offer "zlib@openssh.com", which is offered by OpenSSH.
 		// Since server only supports "none", must always offer "none"
