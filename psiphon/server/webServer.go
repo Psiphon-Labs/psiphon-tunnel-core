@@ -20,7 +20,7 @@
 package server
 
 import (
-	golangtls "crypto/tls"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -32,7 +32,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 const WEB_SERVER_IO_TIMEOUT = 10 * time.Second
@@ -70,15 +70,15 @@ func RunWebServer(
 	serveMux.HandleFunc("/connected", webServer.connectedHandler)
 	serveMux.HandleFunc("/status", webServer.statusHandler)
 
-	certificate, err := tls.X509KeyPair(
+	certificate, err := utls.X509KeyPair(
 		[]byte(support.Config.WebServerCertificate),
 		[]byte(support.Config.WebServerPrivateKey))
 	if err != nil {
 		return common.ContextError(err)
 	}
 
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{certificate},
+	tlsConfig := &utls.Config{
+		Certificates: []utls.Certificate{certificate},
 	}
 
 	// TODO: inherits global log config?
@@ -97,7 +97,7 @@ func RunWebServer(
 			ErrorLog:       golanglog.New(logWriter, "", 0),
 
 			// Disable auto HTTP/2 (https://golang.org/doc/go1.6)
-			TLSNextProto: make(map[string]func(*http.Server, *golangtls.Conn, http.Handler)),
+			TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
 		},
 	}
 

@@ -23,7 +23,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	golangtls "crypto/tls"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -41,10 +41,11 @@ import (
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
+	utls "github.com/Psiphon-Labs/utls"
 	"golang.org/x/net/http2"
 )
 
@@ -237,10 +238,15 @@ func DialMeek(
 
 		scheme = "https"
 
+		tcpDialer := NewTCPFragmentorDialer(
+			dialConfig,
+			meekConfig.ClientTunnelProtocol,
+			meekConfig.ClientParameters)
+
 		tlsConfig := &CustomTLSConfig{
 			ClientParameters:              meekConfig.ClientParameters,
 			DialAddr:                      meekConfig.DialAddress,
-			Dial:                          NewTCPDialer(dialConfig),
+			Dial:                          tcpDialer,
 			SNIServerName:                 meekConfig.SNIServerName,
 			SkipVerify:                    true,
 			UseIndistinguishableTLS:       dialConfig.UseIndistinguishableTLS,
@@ -299,7 +305,7 @@ func DialMeek(
 		}
 
 		isHTTP2 := false
-		if tlsConn, ok := preConn.(*tls.Conn); ok {
+		if tlsConn, ok := preConn.(*utls.UConn); ok {
 			state := tlsConn.ConnectionState()
 			if state.NegotiatedProtocolIsMutual &&
 				state.NegotiatedProtocol == "h2" {
@@ -312,7 +318,7 @@ func DialMeek(
 		if isHTTP2 {
 			NoticeInfo("negotiated HTTP/2 for %s", meekConfig.DialAddress)
 			transport = &http2.Transport{
-				DialTLS: func(network, addr string, _ *golangtls.Config) (net.Conn, error) {
+				DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {
 					return cachedTLSDialer.dial(network, addr)
 				},
 			}
@@ -328,11 +334,7 @@ func DialMeek(
 
 		scheme = "http"
 
-		// The dialer ignores address that http.Transport will pass in (derived
-		// from the HTTP request URL) and always dials meekConfig.DialAddress.
-		dialer := func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return NewTCPDialer(dialConfig)(ctx, network, meekConfig.DialAddress)
-		}
+		var dialer Dialer
 
 		// For HTTP, and when the meekConfig.DialAddress matches the
 		// meekConfig.HostHeader, we let http.Transport handle proxying.
@@ -355,7 +357,23 @@ func DialMeek(
 			*copyDialConfig = *dialConfig
 			copyDialConfig.UpstreamProxyURL = ""
 
-			dialer = NewTCPDialer(copyDialConfig)
+			dialer = NewTCPFragmentorDialer(
+				copyDialConfig,
+				meekConfig.ClientTunnelProtocol,
+				meekConfig.ClientParameters)
+
+		} else {
+
+			baseDialer := NewTCPFragmentorDialer(
+				dialConfig,
+				meekConfig.ClientTunnelProtocol,
+				meekConfig.ClientParameters)
+
+			// The dialer ignores address that http.Transport will pass in (derived
+			// from the HTTP request URL) and always dials meekConfig.DialAddress.
+			dialer = func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return baseDialer(ctx, network, meekConfig.DialAddress)
+			}
 		}
 
 		httpTransport := &http.Transport{
@@ -1257,11 +1275,13 @@ func makeMeekCookie(
 	copy(encryptedCookie[0:32], ephemeralPublicKey[0:32])
 	copy(encryptedCookie[32:], box)
 
+	maxPadding := clientParameters.Get().Int(parameters.MeekCookieMaxPadding)
+
 	// Obfuscate the encrypted data
-	obfuscator, err := common.NewClientObfuscator(
-		&common.ObfuscatorConfig{
+	obfuscator, err := obfuscator.NewClientObfuscator(
+		&obfuscator.ObfuscatorConfig{
 			Keyword:    meekObfuscatedKey,
-			MaxPadding: clientParameters.Get().Int(parameters.MeekCookieMaxPadding)})
+			MaxPadding: &maxPadding})
 	if err != nil {
 		return nil, common.ContextError(err)
 	}

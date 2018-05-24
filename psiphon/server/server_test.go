@@ -89,7 +89,7 @@ func TestMain(m *testing.M) {
 
 func runMockWebServer() (string, string) {
 
-	responseBody, _ := common.MakeRandomStringHex(100000)
+	responseBody, _ := common.MakeSecureRandomStringHex(100000)
 
 	serveMux := http.NewServeMux()
 	serveMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -394,7 +394,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		generateConfigParams.TacticsRequestObfuscatedKey = tacticsRequestObfuscatedKey
 	}
 
-	serverConfigJSON, _, encodedServerEntry, err := GenerateConfig(generateConfigParams)
+	serverConfigJSON, _, _, _, encodedServerEntry, err := GenerateConfig(generateConfigParams)
 	if err != nil {
 		t.Fatalf("error generating server config: %s", err)
 	}
@@ -427,6 +427,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		paveTacticsConfigFile(
 			t, tacticsConfigFilename,
 			tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
+			runConfig.tunnelProtocol,
 			propagationChannelID)
 	}
 
@@ -436,7 +437,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig["PsinetDatabaseFilename"] = psinetFilename
 	serverConfig["TrafficRulesFilename"] = trafficRulesFilename
 	serverConfig["OSLConfigFilename"] = oslConfigFilename
-	serverConfig["TacticsConfigFilename"] = tacticsConfigFilename
+	if doTactics {
+		serverConfig["TacticsConfigFilename"] = tacticsConfigFilename
+	}
 	serverConfig["LogFilename"] = filepath.Join(testDataDirName, "psiphond.log")
 	serverConfig["LogLevel"] = "debug"
 
@@ -524,24 +527,35 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	localSOCKSProxyPort := 1081
 	localHTTPProxyPort := 8081
 
-	// Note: calling LoadConfig ensures the Config is fully initialized
-	clientConfigJSON := `
+	jsonNetworkID := ""
+	if doTactics {
+		// Use a distinct prefix for network ID for each test run to
+		// ensure tactics from different runs don't apply; this is
+		// a workaround for the singleton datastore.
+		prefix := time.Now().String()
+		jsonNetworkID = fmt.Sprintf(`,"NetworkID" : "%s-%s"`, prefix, "NETWORK1")
+	}
+
+	clientConfigJSON := fmt.Sprintf(`
     {
         "ClientPlatform" : "Windows",
         "ClientVersion" : "0",
         "SponsorId" : "0",
         "PropagationChannelId" : "0",
         "DisableRemoteServerListFetcher" : true,
-        "UseIndistinguishableTLS" : true
-    }`
-	clientConfig, _ := psiphon.LoadConfig([]byte(clientConfigJSON))
+        "UseIndistinguishableTLS" : true,
+        "EstablishTunnelPausePeriodSeconds" : 1,
+        "ConnectionWorkerPoolSize" : %d,
+        "TunnelProtocols" : ["%s"]
+        %s
+    }`, numTunnels, runConfig.tunnelProtocol, jsonNetworkID)
+
+	clientConfig, err := psiphon.LoadConfig([]byte(clientConfigJSON))
+	if err != nil {
+		t.Fatalf("error processing configuration file: %s", err)
+	}
 
 	clientConfig.DataStoreDirectory = testDataDirName
-	err = psiphon.InitDataStore(clientConfig)
-	if err != nil {
-		t.Fatalf("error initializing client datastore: %s", err)
-	}
-	psiphon.DeleteSLOKs()
 
 	if !runConfig.doDefaultSponsorID {
 		clientConfig.SponsorId = sponsorID
@@ -557,32 +571,30 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		clientConfig.Authorizations = []string{clientAuthorization}
 	}
 
-	if doTactics {
-		clientConfig.NetworkIDGetter = &testNetworkGetter{}
+	err = clientConfig.Commit()
+	if err != nil {
+		t.Fatalf("error committing configuration file: %s", err)
 	}
-
-	// The following config values must be applied through client parameters
-	// (setting the fields in Config directly will have no effect since the
-	// client parameters have been populated by LoadConfig).
-
-	applyParameters := make(map[string]interface{})
-
-	applyParameters[parameters.ConnectionWorkerPoolSize] = numTunnels
-
-	applyParameters[parameters.EstablishTunnelPausePeriod] = "250ms"
-
-	applyParameters[parameters.LimitTunnelProtocols] = protocol.TunnelProtocols{runConfig.tunnelProtocol}
 
 	if doTactics {
 		// Configure nonfunctional values that must be overridden by tactics.
+
+		applyParameters := make(map[string]interface{})
+
 		applyParameters[parameters.TunnelConnectTimeout] = "1s"
 		applyParameters[parameters.TunnelRateLimits] = common.RateLimits{WriteBytesPerSecond: 1}
+
+		err = clientConfig.SetClientParameters("", true, applyParameters)
+		if err != nil {
+			t.Fatalf("SetClientParameters failed: %s", err)
+		}
 	}
 
-	err = clientConfig.SetClientParameters("", true, applyParameters)
+	err = psiphon.InitDataStore(clientConfig)
 	if err != nil {
-		t.Fatalf("SetClientParameters failed: %s", err)
+		t.Fatalf("error initializing client datastore: %s", err)
 	}
+	psiphon.DeleteSLOKs()
 
 	controller, err := psiphon.NewController(clientConfig)
 	if err != nil {
@@ -956,10 +968,10 @@ func makeTunneledNTPRequestAttempt(
 func pavePsinetDatabaseFile(
 	t *testing.T, useDefaultSponsorID bool, psinetFilename string) (string, string) {
 
-	sponsorID, _ := common.MakeRandomStringHex(8)
+	sponsorID, _ := common.MakeSecureRandomStringHex(8)
 
-	fakeDomain, _ := common.MakeRandomStringHex(4)
-	fakePath, _ := common.MakeRandomStringHex(4)
+	fakeDomain, _ := common.MakeSecureRandomStringHex(4)
+	fakePath, _ := common.MakeSecureRandomStringHex(4)
 	expectedHomepageURL := fmt.Sprintf("https://%s.com/%s", fakeDomain, fakePath)
 
 	psinetJSONFormat := `
@@ -1129,7 +1141,7 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
     }
     `
 
-	propagationChannelID, _ := common.MakeRandomStringHex(8)
+	propagationChannelID, _ := common.MakeSecureRandomStringHex(8)
 
 	now := time.Now().UTC()
 	epoch := now.Truncate(720 * time.Hour)
@@ -1151,16 +1163,24 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
 func paveTacticsConfigFile(
 	t *testing.T, tacticsConfigFilename string,
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey string,
+	tunnelProtocol string,
 	propagationChannelID string) {
+
+	// Setting LimitTunnelProtocols passively exercises the
+	// server-side LimitTunnelProtocols enforcement.
 
 	tacticsConfigJSONFormat := `
     {
       "RequestPublicKey" : "%s",
       "RequestPrivateKey" : "%s",
       "RequestObfuscatedKey" : "%s",
+      "EnforceServerSide" : true,
       "DefaultTactics" : {
         "TTL" : "60s",
-        "Probability" : 1.0
+        "Probability" : 1.0,
+        "Parameters" : {
+          "LimitTunnelProtocols" : ["%s"]
+        }
       },
       "FilteredTactics" : [
         {
@@ -1185,6 +1205,7 @@ func paveTacticsConfigFile(
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
 		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
+		tunnelProtocol,
 		propagationChannelID)
 
 	err := ioutil.WriteFile(tacticsConfigFilename, []byte(tacticsConfigJSON), 0600)
@@ -1206,11 +1227,4 @@ func waitOnNotification(t *testing.T, c, timeoutSignal <-chan struct{}, timeoutM
 	case <-timeoutSignal:
 		t.Fatalf(timeoutMessage)
 	}
-}
-
-type testNetworkGetter struct {
-}
-
-func (testNetworkGetter) GetNetworkID() string {
-	return "NETWORK1"
 }

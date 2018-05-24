@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
@@ -715,12 +716,13 @@ func initMeekConfig(
 	}
 
 	// Pin the TLS profile for the entire meek connection.
-	selectedTLSProfile := SelectTLSProfile(
-		config.clientParameters,
-		config.UseIndistinguishableTLS,
-		useObfuscatedSessionTickets,
-		true,
-		config.TrustedCACertificatesFilename != "")
+	selectedTLSProfile := ""
+	if protocol.TunnelProtocolUsesMeekHTTPS(selectedProtocol) {
+		selectedTLSProfile = SelectTLSProfile(
+			config.UseIndistinguishableTLS,
+			selectedProtocol,
+			config.clientParameters)
+	}
 
 	return &MeekConfig{
 		ClientParameters:              config.clientParameters,
@@ -779,7 +781,7 @@ func initDialConfig(
 	dialConfig := &DialConfig{
 		UpstreamProxyURL:              config.UpstreamProxyURL,
 		CustomHeaders:                 dialCustomHeaders,
-		DeviceBinder:                  config.DeviceBinder,
+		DeviceBinder:                  config.deviceBinder,
 		DnsServerGetter:               config.DnsServerGetter,
 		IPv6Synthesizer:               config.IPv6Synthesizer,
 		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
@@ -856,7 +858,12 @@ func dialSsh(
 	selectedProtocol,
 	sessionId string) (*dialResult, error) {
 
-	timeout := config.clientParameters.Get().Duration(parameters.TunnelConnectTimeout)
+	p := config.clientParameters.Get()
+	timeout := p.Duration(parameters.TunnelConnectTimeout)
+	rateLimits := p.RateLimits(parameters.TunnelRateLimits)
+	obfuscatedSSHMinPadding := p.Int(parameters.ObfuscatedSSHMinPadding)
+	obfuscatedSSHMaxPadding := p.Int(parameters.ObfuscatedSSHMaxPadding)
+	p = nil
 
 	var cancelFunc context.CancelFunc
 	ctx, cancelFunc = context.WithTimeout(ctx, timeout)
@@ -914,12 +921,21 @@ func dialSsh(
 
 	var dialConn net.Conn
 	if meekConfig != nil {
-		dialConn, err = DialMeek(ctx, meekConfig, dialConfig)
+		dialConn, err = DialMeek(
+			ctx,
+			meekConfig,
+			dialConfig)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
 	} else {
-		dialConn, err = DialTCP(ctx, directTCPDialAddress, dialConfig)
+		dialConn, err = DialTCPFragmentor(
+			ctx,
+			directTCPDialAddress,
+			dialConfig,
+			selectedProtocol,
+			config.clientParameters,
+			nil)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -948,13 +964,17 @@ func dialSsh(
 	// Apply throttling (if configured)
 	throttledConn := common.NewThrottledConn(
 		monitoredConn,
-		config.clientParameters.Get().RateLimits(parameters.TunnelRateLimits))
+		rateLimits)
 
 	// Add obfuscated SSH layer
 	var sshConn net.Conn = throttledConn
 	if useObfuscatedSsh {
-		sshConn, err = common.NewObfuscatedSshConn(
-			common.OBFUSCATION_CONN_MODE_CLIENT, throttledConn, serverEntry.SshObfuscatedKey)
+		sshConn, err = obfuscator.NewObfuscatedSshConn(
+			obfuscator.OBFUSCATION_CONN_MODE_CLIENT,
+			throttledConn,
+			serverEntry.SshObfuscatedKey,
+			&obfuscatedSSHMinPadding,
+			&obfuscatedSSHMaxPadding)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -992,6 +1012,25 @@ func dialSsh(
 		},
 		HostKeyCallback: sshCertChecker.CheckHostKey,
 		ClientVersion:   SSHClientVersion,
+	}
+
+	if protocol.TunnelProtocolUsesObfuscatedSSH(selectedProtocol) {
+		if config.ObfuscatedSSHAlgorithms != nil {
+			sshClientConfig.KeyExchanges = []string{config.ObfuscatedSSHAlgorithms[0]}
+			sshClientConfig.Ciphers = []string{config.ObfuscatedSSHAlgorithms[1]}
+			sshClientConfig.MACs = []string{config.ObfuscatedSSHAlgorithms[2]}
+			sshClientConfig.HostKeyAlgorithms = []string{config.ObfuscatedSSHAlgorithms[3]}
+		} else {
+			// This is the list of supported non-Encrypt-then-MAC algorithms from
+			// https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3ef11effe6acd92c3aefd140ee09c42a1f15630b/psiphon/common/crypto/ssh/common.go#L60
+			//
+			// With Encrypt-then-MAC algorithms, packet length is transmitted in
+			// plaintext, which aids in traffic analysis.
+			//
+			// TUNNEL_PROTOCOL_SSH is excepted since its KEX appears in plaintext,
+			// and the protocol is intended to look like SSH on the wire.
+			sshClientConfig.MACs = []string{"hmac-sha2-256", "hmac-sha1", "hmac-sha1-96"}
+		}
 	}
 
 	// The ssh session establishment (via ssh.NewClientConn) is wrapped
@@ -1077,9 +1116,9 @@ func dialSsh(
 }
 
 func makeRandomPeriod(min, max time.Duration) time.Duration {
-	period, err := common.MakeRandomPeriod(min, max)
+	period, err := common.MakeSecureRandomPeriod(min, max)
 	if err != nil {
-		NoticeAlert("MakeRandomPeriod failed: %s", err)
+		NoticeAlert("MakeSecureRandomPeriod failed: %s", err)
 		// Proceed without random period
 		period = max
 	}
@@ -1387,7 +1426,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 		// considering that only the last SpeedTestMaxSampleCount samples are
 		// retained, enables tuning the sampling frequency.
 
-		if err == nil && requestOk && tunnel.config.NetworkIDGetter != nil &&
+		if err == nil && requestOk && tunnel.config.networkIDGetter != nil &&
 			(isFirstKeepAlive ||
 				tunnel.config.clientParameters.Get().WeightedCoinFlip(
 					parameters.SSHKeepAliveSpeedTestSampleProbability)) {
@@ -1395,7 +1434,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 			err = tactics.AddSpeedTestSample(
 				tunnel.config.clientParameters,
 				GetTacticsStorer(),
-				tunnel.config.NetworkIDGetter.GetNetworkID(),
+				tunnel.config.networkIDGetter.GetNetworkID(),
 				tunnel.serverEntry.Region,
 				tunnel.protocol,
 				elapsedTime,

@@ -36,20 +36,24 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 )
 
 const (
-	SERVER_CONFIG_FILENAME          = "psiphond.config"
-	SERVER_TRAFFIC_RULES_FILENAME   = "psiphond-traffic-rules.config"
-	SERVER_ENTRY_FILENAME           = "server-entry.dat"
-	DEFAULT_SERVER_IP_ADDRESS       = "127.0.0.1"
-	WEB_SERVER_SECRET_BYTE_LENGTH   = 32
-	DISCOVERY_VALUE_KEY_BYTE_LENGTH = 32
-	SSH_USERNAME_SUFFIX_BYTE_LENGTH = 8
-	SSH_PASSWORD_BYTE_LENGTH        = 32
-	SSH_RSA_HOST_KEY_BITS           = 2048
-	SSH_OBFUSCATED_KEY_BYTE_LENGTH  = 32
+	SERVER_CONFIG_FILENAME               = "psiphond.config"
+	SERVER_TRAFFIC_RULES_CONFIG_FILENAME = "psiphond-traffic-rules.config"
+	SERVER_OSL_CONFIG_FILENAME           = "psiphond-osl.config"
+	SERVER_TACTICS_CONFIG_FILENAME       = "psiphond-tactics.config"
+	SERVER_ENTRY_FILENAME                = "server-entry.dat"
+	DEFAULT_SERVER_IP_ADDRESS            = "127.0.0.1"
+	WEB_SERVER_SECRET_BYTE_LENGTH        = 32
+	DISCOVERY_VALUE_KEY_BYTE_LENGTH      = 32
+	SSH_USERNAME_SUFFIX_BYTE_LENGTH      = 8
+	SSH_PASSWORD_BYTE_LENGTH             = 32
+	SSH_RSA_HOST_KEY_BITS                = 2048
+	SSH_OBFUSCATED_KEY_BYTE_LENGTH       = 32
 )
 
 // Config specifies the configuration and behavior of a Psiphon
@@ -435,7 +439,9 @@ type GenerateConfigParams struct {
 	WebServerPort               int
 	EnableSSHAPIRequests        bool
 	TunnelProtocolPorts         map[string]int
-	TrafficRulesFilename        string
+	TrafficRulesConfigFilename  string
+	OSLConfigFilename           string
+	TacticsConfigFilename       string
 	TacticsRequestPublicKey     string
 	TacticsRequestObfuscatedKey string
 }
@@ -451,16 +457,16 @@ type GenerateConfigParams struct {
 //
 // When tactics key material is provided in GenerateConfigParams, tactics
 // capabilities are added for all meek protocols in TunnelProtocolPorts.
-func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error) {
+func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byte, []byte, error) {
 
 	// Input validation
 
 	if net.ParseIP(params.ServerIPAddress) == nil {
-		return nil, nil, nil, common.ContextError(errors.New("invalid IP address"))
+		return nil, nil, nil, nil, nil, common.ContextError(errors.New("invalid IP address"))
 	}
 
 	if len(params.TunnelProtocolPorts) == 0 {
-		return nil, nil, nil, common.ContextError(errors.New("no tunnel protocols"))
+		return nil, nil, nil, nil, nil, common.ContextError(errors.New("no tunnel protocols"))
 	}
 
 	usedPort := make(map[int]bool)
@@ -473,11 +479,11 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 	for tunnelProtocol, port := range params.TunnelProtocolPorts {
 
 		if !common.Contains(protocol.SupportedTunnelProtocols, tunnelProtocol) {
-			return nil, nil, nil, common.ContextError(errors.New("invalid tunnel protocol"))
+			return nil, nil, nil, nil, nil, common.ContextError(errors.New("invalid tunnel protocol"))
 		}
 
 		if usedPort[port] {
-			return nil, nil, nil, common.ContextError(errors.New("duplicate listening port"))
+			return nil, nil, nil, nil, nil, common.ContextError(errors.New("duplicate listening port"))
 		}
 		usedPort[port] = true
 
@@ -487,6 +493,14 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		}
 	}
 
+	// One test mode populates the tactics config file; this will generate
+	// keys. Another test mode passes in existing keys to be used in the
+	// server entry. Both the filename and existing keys cannot be passed in.
+	if (params.TacticsConfigFilename != "") &&
+		(params.TacticsRequestPublicKey != "" || params.TacticsRequestObfuscatedKey != "") {
+		return nil, nil, nil, nil, nil, common.ContextError(errors.New("invalid tactics parameters"))
+	}
+
 	// Web server config
 
 	var webServerSecret, webServerCertificate,
@@ -494,14 +508,14 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	if params.WebServerPort != 0 {
 		var err error
-		webServerSecret, err = common.MakeRandomStringHex(WEB_SERVER_SECRET_BYTE_LENGTH)
+		webServerSecret, err = common.MakeSecureRandomStringHex(WEB_SERVER_SECRET_BYTE_LENGTH)
 		if err != nil {
-			return nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, nil, common.ContextError(err)
 		}
 
 		webServerCertificate, webServerPrivateKey, err = GenerateWebServerCertificate("")
 		if err != nil {
-			return nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, nil, common.ContextError(err)
 		}
 
 		webServerPortForwardAddress = net.JoinHostPort(
@@ -512,7 +526,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	rsaKey, err := rsa.GenerateKey(rand.Reader, SSH_RSA_HOST_KEY_BITS)
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
 
 	sshPrivateKey := pem.EncodeToMemory(
@@ -524,30 +538,30 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	signer, err := ssh.NewSignerFromKey(rsaKey)
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
 
 	sshPublicKey := signer.PublicKey()
 
-	sshUserNameSuffix, err := common.MakeRandomStringHex(SSH_USERNAME_SUFFIX_BYTE_LENGTH)
+	sshUserNameSuffix, err := common.MakeSecureRandomStringHex(SSH_USERNAME_SUFFIX_BYTE_LENGTH)
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
 
 	sshUserName := "psiphon_" + sshUserNameSuffix
 
-	sshPassword, err := common.MakeRandomStringHex(SSH_PASSWORD_BYTE_LENGTH)
+	sshPassword, err := common.MakeSecureRandomStringHex(SSH_PASSWORD_BYTE_LENGTH)
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
 
 	sshServerVersion := "SSH-2.0-Psiphon"
 
 	// Obfuscated SSH config
 
-	obfuscatedSSHKey, err := common.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+	obfuscatedSSHKey, err := common.MakeSecureRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
 
 	// Meek config
@@ -558,23 +572,23 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		rawMeekCookieEncryptionPublicKey, rawMeekCookieEncryptionPrivateKey, err :=
 			box.GenerateKey(rand.Reader)
 		if err != nil {
-			return nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, nil, common.ContextError(err)
 		}
 
 		meekCookieEncryptionPublicKey = base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPublicKey[:])
 		meekCookieEncryptionPrivateKey = base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPrivateKey[:])
 
-		meekObfuscatedKey, err = common.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+		meekObfuscatedKey, err = common.MakeSecureRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 		if err != nil {
-			return nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, nil, common.ContextError(err)
 		}
 	}
 
 	// Other config
 
-	discoveryValueHMACKey, err := common.MakeRandomStringBase64(DISCOVERY_VALUE_KEY_BYTE_LENGTH)
+	discoveryValueHMACKey, err := common.MakeSecureRandomStringBase64(DISCOVERY_VALUE_KEY_BYTE_LENGTH)
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
 
 	// Assemble configs and server entry
@@ -613,12 +627,14 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		MeekProhibitedHeaders:          nil,
 		MeekProxyForwardedForHeaders:   []string{"X-Forwarded-For"},
 		LoadMonitorPeriodSeconds:       300,
-		TrafficRulesFilename:           params.TrafficRulesFilename,
+		TrafficRulesFilename:           params.TrafficRulesConfigFilename,
+		OSLConfigFilename:              params.OSLConfigFilename,
+		TacticsConfigFilename:          params.TacticsConfigFilename,
 	}
 
 	encodedConfig, err := json.MarshalIndent(config, "\n", "    ")
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
 
 	intPtr := func(i int) *int {
@@ -644,7 +660,56 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 
 	encodedTrafficRulesSet, err := json.MarshalIndent(trafficRulesSet, "\n", "    ")
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, common.ContextError(err)
+	}
+
+	encodedOSLConfig, err := json.MarshalIndent(&osl.Config{}, "\n", "    ")
+	if err != nil {
+		return nil, nil, nil, nil, nil, common.ContextError(err)
+	}
+
+	tacticsRequestPublicKey := params.TacticsRequestPublicKey
+	tacticsRequestObfuscatedKey := params.TacticsRequestObfuscatedKey
+	var tacticsRequestPrivateKey string
+	var encodedTacticsConfig []byte
+
+	if params.TacticsConfigFilename != "" {
+
+		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err =
+			tactics.GenerateKeys()
+		if err != nil {
+			return nil, nil, nil, nil, nil, common.ContextError(err)
+		}
+
+		decodedTacticsRequestPublicKey, err := base64.StdEncoding.DecodeString(tacticsRequestPublicKey)
+		if err != nil {
+			return nil, nil, nil, nil, nil, common.ContextError(err)
+		}
+
+		decodedTacticsRequestPrivateKey, err := base64.StdEncoding.DecodeString(tacticsRequestPrivateKey)
+		if err != nil {
+			return nil, nil, nil, nil, nil, common.ContextError(err)
+		}
+
+		decodedTacticsRequestObfuscatedKey, err := base64.StdEncoding.DecodeString(tacticsRequestObfuscatedKey)
+		if err != nil {
+			return nil, nil, nil, nil, nil, common.ContextError(err)
+		}
+
+		tacticsConfig := &tactics.Server{
+			RequestPublicKey:     decodedTacticsRequestPublicKey,
+			RequestPrivateKey:    decodedTacticsRequestPrivateKey,
+			RequestObfuscatedKey: decodedTacticsRequestObfuscatedKey,
+			DefaultTactics: tactics.Tactics{
+				TTL:         "1m",
+				Probability: 1.0,
+			},
+		}
+
+		encodedTacticsConfig, err = json.MarshalIndent(tacticsConfig, "\n", "    ")
+		if err != nil {
+			return nil, nil, nil, nil, nil, common.ContextError(err)
+		}
 	}
 
 	capabilities := []string{}
@@ -715,15 +780,15 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, error
 		MeekFrontingHosts:             []string{params.ServerIPAddress},
 		MeekFrontingAddresses:         []string{params.ServerIPAddress},
 		MeekFrontingDisableSNI:        false,
-		TacticsRequestPublicKey:       params.TacticsRequestPublicKey,
-		TacticsRequestObfuscatedKey:   params.TacticsRequestObfuscatedKey,
+		TacticsRequestPublicKey:       tacticsRequestPublicKey,
+		TacticsRequestObfuscatedKey:   tacticsRequestObfuscatedKey,
 		ConfigurationVersion:          1,
 	}
 
 	encodedServerEntry, err := protocol.EncodeServerEntry(serverEntry)
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
 
-	return encodedConfig, encodedTrafficRulesSet, []byte(encodedServerEntry), nil
+	return encodedConfig, encodedTrafficRulesSet, encodedOSLConfig, encodedTacticsConfig, []byte(encodedServerEntry), nil
 }

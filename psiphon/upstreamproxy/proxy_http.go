@@ -256,11 +256,14 @@ func (pc *proxyConn) Close() error {
 }
 
 func (pc *proxyConn) LocalAddr() net.Addr {
-	return nil
+	return pc.hijackedConn.LocalAddr()
 }
 
+// RemoteAddr returns the network address of the proxy that
+// the proxyConn is connected to.
 func (pc *proxyConn) RemoteAddr() net.Addr {
-	return nil
+	// Note: returning nil here can crash "tls".
+	return pc.hijackedConn.RemoteAddr()
 }
 
 func (pc *proxyConn) SetDeadline(t time.Time) error {

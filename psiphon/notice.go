@@ -718,6 +718,18 @@ func NoticeActiveAuthorizationIDs(activeAuthorizationIDs []string) {
 		"IDs", activeAuthorizationIDs)
 }
 
+func NoticeBindToDevice(deviceInfo string) {
+	outputRepetitiveNotice(
+		"BindToDevice", deviceInfo, 0,
+		"BindToDevice", 0, "regions", deviceInfo)
+}
+
+func NoticeNetworkID(networkID string) {
+	outputRepetitiveNotice(
+		"NetworkID", networkID, 0,
+		"NetworkID", 0, "regions", networkID)
+}
+
 type repetitiveNoticeState struct {
 	message string
 	repeats int
@@ -762,6 +774,15 @@ func outputRepetitiveNotice(
 			noticeType, noticeFlags,
 			args...)
 	}
+}
+
+// ResetRepetitiveNotices resets the repetitive notice state, so
+// the next instance of any notice will not be supressed.
+func ResetRepetitiveNotices() {
+	repetitiveNoticeMutex.Lock()
+	defer repetitiveNoticeMutex.Unlock()
+
+	repetitiveNoticeStates = make(map[string]*repetitiveNoticeState)
 }
 
 type noticeObject struct {

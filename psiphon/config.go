@@ -226,6 +226,15 @@ type Config struct {
 	// This parameter is only applicable to library deployments.
 	NetworkIDGetter NetworkIDGetter
 
+	// NetworkID, when not blank, is used as the identifier for the host's
+	// current active network.
+	// NetworkID is ignored when NetworkIDGetter is set.
+	NetworkID string
+
+	// DisableTactics disables tactics operations including requests, payload
+	// handling, and application of parameters.
+	DisableTactics bool
+
 	// TransformHostNames specifies whether to use hostname transformation
 	// circumvention strategies. Set to "always" to always transform, "never"
 	// to never transform, and "", the default, for the default transformation
@@ -388,10 +397,7 @@ type Config struct {
 	UseTrustedCACertificatesForStockTLS bool
 
 	// TrustedCACertificatesFilename specifies a file containing trusted CA
-	// certs. The file contents should be compatible with OpenSSL's
-	// SSL_CTX_load_verify_locations. When specified, this enables use of
-	// OpenSSL for HTTPS requests that require typical (system CA) server
-	// authentication.
+	// certs.
 	TrustedCACertificatesFilename string
 
 	// DisablePeriodicSshKeepAlive indicates whether to send an SSH keepalive
@@ -446,16 +452,45 @@ type Config struct {
 	// server.
 	Authorizations []string
 
+	// UseFragmentor and associated Fragmentor fields are for testing
+	// purposes.
+	UseFragmentor                  string
+	FragmentorMinTotalBytes        *int
+	FragmentorMaxTotalBytes        *int
+	FragmentorMinWriteBytes        *int
+	FragmentorMaxWriteBytes        *int
+	FragmentorMinDelayMicroseconds *int
+	FragmentorMaxDelayMicroseconds *int
+
+	// ObfuscatedSSHAlgorithms and associated ObfuscatedSSH fields are for
+	// testing purposes. If specified, ObfuscatedSSHAlgorithms must have 4 SSH
+	// KEX elements in order: the kex algorithm, cipher, MAC, and server host
+	// key algorithm.
+	ObfuscatedSSHAlgorithms []string
+	ObfuscatedSSHMinPadding *int
+	ObfuscatedSSHMaxPadding *int
+
 	// clientParameters is the active ClientParameters with defaults, config
 	// values, and, optionally, tactics applied.
 	//
 	// New tactics must be applied by calling Config.SetClientParameters;
 	// calling clientParameters.Set directly will fail to add config values.
 	clientParameters *parameters.ClientParameters
+
+	deviceBinder    DeviceBinder
+	networkIDGetter NetworkIDGetter
+
+	committed bool
 }
 
-// LoadConfig parses and validates a JSON format Psiphon config JSON
-// string and returns a Config struct populated with config values.
+// LoadConfig parses a JSON format Psiphon config JSON string and returns a
+// Config struct populated with config values.
+//
+// The Config struct may then be programmatically populated with additional
+// values, including callbacks such as DeviceBinder.
+//
+// Before using the Config, Commit must be called, which will  perform further
+// validation and initialize internal data structures.
 func LoadConfig(configJson []byte) (*Config, error) {
 
 	var config Config
@@ -463,6 +498,20 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
+
+	return &config, nil
+}
+
+// IsCommitted checks if Commit was called.
+func (config *Config) IsCommitted() bool {
+	return config.committed
+}
+
+// Commit validates Config fields finalizes initialization.
+//
+// Config fields should not be set after calling Config, as any changes may
+// not be reflected in internal data structures.
+func (config *Config) Commit() error {
 
 	// Do SetEmitDiagnosticNotices first, to ensure config file errors are emitted.
 
@@ -492,10 +541,11 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	// Supply default values.
 
 	if config.DataStoreDirectory == "" {
-		config.DataStoreDirectory, err = os.Getwd()
+		wd, err := os.Getwd()
 		if err != nil {
-			return nil, common.ContextError(err)
+			return common.ContextError(err)
 		}
+		config.DataStoreDirectory = wd
 	}
 
 	if config.ClientVersion == "" {
@@ -509,40 +559,25 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	// Validate config fields.
 
 	if config.PropagationChannelId == "" {
-		return nil, common.ContextError(
+		return common.ContextError(
 			errors.New("propagation channel ID is missing from the configuration file"))
 	}
 	if config.SponsorId == "" {
-		return nil, common.ContextError(
+		return common.ContextError(
 			errors.New("sponsor ID is missing from the configuration file"))
 	}
 
-	_, err = strconv.Atoi(config.ClientVersion)
+	_, err := strconv.Atoi(config.ClientVersion)
 	if err != nil {
-		return nil, common.ContextError(
+		return common.ContextError(
 			fmt.Errorf("invalid client version: %s", err))
-	}
-
-	if config.NetworkConnectivityChecker != nil {
-		return nil, common.ContextError(
-			errors.New("NetworkConnectivityChecker interface must be set at runtime"))
-	}
-
-	if config.DeviceBinder != nil {
-		return nil, common.ContextError(
-			errors.New("DeviceBinder interface must be set at runtime"))
-	}
-
-	if config.DnsServerGetter != nil {
-		return nil, common.ContextError(
-			errors.New("DnsServerGetter interface must be set at runtime"))
 	}
 
 	if !common.Contains(
 		[]string{"", protocol.PSIPHON_SSH_API_PROTOCOL, protocol.PSIPHON_WEB_API_PROTOCOL},
 		config.TargetApiProtocol) {
 
-		return nil, common.ContextError(
+		return common.ContextError(
 			errors.New("invalid TargetApiProtocol"))
 	}
 
@@ -550,19 +585,19 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 		if config.RemoteServerListURLs != nil {
 			if config.RemoteServerListSignaturePublicKey == "" {
-				return nil, common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
+				return common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
 			}
 			if config.RemoteServerListDownloadFilename == "" {
-				return nil, common.ContextError(errors.New("missing RemoteServerListDownloadFilename"))
+				return common.ContextError(errors.New("missing RemoteServerListDownloadFilename"))
 			}
 		}
 
 		if config.ObfuscatedServerListRootURLs != nil {
 			if config.RemoteServerListSignaturePublicKey == "" {
-				return nil, common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
+				return common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
 			}
 			if config.ObfuscatedServerListDownloadDirectory == "" {
-				return nil, common.ContextError(errors.New("missing ObfuscatedServerListDownloadDirectory"))
+				return common.ContextError(errors.New("missing ObfuscatedServerListDownloadDirectory"))
 			}
 		}
 
@@ -570,26 +605,26 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	if config.SplitTunnelRoutesURLFormat != "" {
 		if config.SplitTunnelRoutesSignaturePublicKey == "" {
-			return nil, common.ContextError(errors.New("missing SplitTunnelRoutesSignaturePublicKey"))
+			return common.ContextError(errors.New("missing SplitTunnelRoutesSignaturePublicKey"))
 		}
 		if config.SplitTunnelDNSServer == "" {
-			return nil, common.ContextError(errors.New("missing SplitTunnelDNSServer"))
+			return common.ContextError(errors.New("missing SplitTunnelDNSServer"))
 		}
 	}
 
 	if config.UpgradeDownloadURLs != nil {
 		if config.UpgradeDownloadClientVersionHeader == "" {
-			return nil, common.ContextError(errors.New("missing UpgradeDownloadClientVersionHeader"))
+			return common.ContextError(errors.New("missing UpgradeDownloadClientVersionHeader"))
 		}
 		if config.UpgradeDownloadFilename == "" {
-			return nil, common.ContextError(errors.New("missing UpgradeDownloadFilename"))
+			return common.ContextError(errors.New("missing UpgradeDownloadFilename"))
 		}
 	}
 
 	// This constraint is expected by logic in Controller.runTunnels().
 
 	if config.PacketTunnelTunFileDescriptor > 0 && config.TunnelPoolSize != 1 {
-		return nil, common.ContextError(errors.New("packet tunnel mode requires TunnelPoolSize to be 1"))
+		return common.ContextError(errors.New("packet tunnel mode requires TunnelPoolSize to be 1"))
 	}
 
 	// SessionID must be PSIPHON_API_CLIENT_SESSION_ID_LENGTH lowercase hex-encoded bytes.
@@ -597,7 +632,7 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	if config.SessionID == "" {
 		sessionID, err := MakeSessionId()
 		if err != nil {
-			return nil, common.ContextError(err)
+			return common.ContextError(err)
 		}
 		config.SessionID = sessionID
 	}
@@ -606,7 +641,7 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		-1 != strings.IndexFunc(config.SessionID, func(c rune) bool {
 			return !unicode.Is(unicode.ASCII_Hex_Digit, c) || unicode.IsUpper(c)
 		}) {
-		return nil, common.ContextError(errors.New("invalid SessionID"))
+		return common.ContextError(errors.New("invalid SessionID"))
 	}
 
 	config.clientParameters, err = parameters.NewClientParameters(
@@ -614,17 +649,54 @@ func LoadConfig(configJson []byte) (*Config, error) {
 			NoticeAlert("ClientParameters getValue failed: %s", err)
 		})
 	if err != nil {
-		return nil, common.ContextError(err)
+		return common.ContextError(err)
+	}
+
+	if config.ObfuscatedSSHAlgorithms != nil &&
+		len(config.ObfuscatedSSHAlgorithms) != 4 {
+		// TODO: validate each algorithm?
+		return common.ContextError(errors.New("invalid ObfuscatedSSHAlgorithms"))
 	}
 
 	// clientParameters.Set will validate the config fields applied to parameters.
 
 	err = config.SetClientParameters("", false, nil)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return common.ContextError(err)
 	}
 
-	return &config, nil
+	// Initialize config.deviceBinder and config.config.networkIDGetter. These
+	// wrap config.DeviceBinder and config.NetworkIDGetter/NetworkID with
+	// loggers.
+	//
+	// New variables are set to avoid mutating input config fields.
+	// Internally, code must use config.deviceBinder and
+	// config.networkIDGetter and not the input/exported fields.
+
+	if config.DeviceBinder != nil {
+		config.deviceBinder = &loggingDeviceBinder{config.DeviceBinder}
+	}
+
+	networkIDGetter := config.NetworkIDGetter
+
+	if networkIDGetter == nil && config.NetworkID != "" {
+
+		// Enable tactics when a NetworkID is specified
+		//
+		// Limitation: unlike NetworkIDGetter, which calls back to platform APIs
+		// this method of network identification is not dynamic and will not reflect
+		// network changes that occur while running.
+
+		networkIDGetter = newStaticNetworkGetter(config.NetworkID)
+	}
+
+	if networkIDGetter != nil {
+		config.networkIDGetter = &loggingNetworkIDGetter{networkIDGetter}
+	}
+
+	config.committed = true
+
+	return nil
 }
 
 // GetClientParameters returns a snapshot of the current client parameters.
@@ -647,17 +719,25 @@ func (config *Config) GetClientParameters() *parameters.ClientParametersSnapshot
 // entirely unmodified.
 func (config *Config) SetClientParameters(tag string, skipOnError bool, applyParameters map[string]interface{}) error {
 
-	parameters := []map[string]interface{}{config.makeConfigParameters()}
+	setParameters := []map[string]interface{}{config.makeConfigParameters()}
 	if applyParameters != nil {
-		parameters = append(parameters, applyParameters)
+		setParameters = append(setParameters, applyParameters)
 	}
 
-	counts, err := config.clientParameters.Set(tag, skipOnError, parameters...)
+	counts, err := config.clientParameters.Set(tag, skipOnError, setParameters...)
 	if err != nil {
 		return common.ContextError(err)
 	}
 
 	NoticeInfo("applied %v parameters with tag '%s'", counts, tag)
+
+	// Emit certain individual parameter values for quick reference in diagnostics.
+	networkLatencyMultiplier := config.clientParameters.Get().Float(parameters.NetworkLatencyMultiplier)
+	if networkLatencyMultiplier != 0.0 {
+		NoticeInfo(
+			"NetworkLatencyMultiplier: %f",
+			config.clientParameters.Get().Float(parameters.NetworkLatencyMultiplier))
+	}
 
 	return nil
 }
@@ -719,6 +799,13 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.FetchUpgradeRetryPeriod] = fmt.Sprintf("%dms", *config.FetchUpgradeRetryPeriodMilliseconds)
 	}
 
+	switch config.TransformHostNames {
+	case "always":
+		applyParameters[parameters.TransformHostNameProbability] = 1.0
+	case "never":
+		applyParameters[parameters.TransformHostNameProbability] = 0.0
+	}
+
 	if !config.DisableRemoteServerListFetcher {
 
 		if config.RemoteServerListURLs != nil {
@@ -744,6 +831,45 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	applyParameters[parameters.TunnelRateLimits] = config.RateLimits
 
+	switch config.UseFragmentor {
+	case "always":
+		applyParameters[parameters.FragmentorProbability] = 1.0
+	case "never":
+		applyParameters[parameters.FragmentorProbability] = 0.0
+	}
+
+	if config.FragmentorMinTotalBytes != nil {
+		applyParameters[parameters.FragmentorMinTotalBytes] = *config.FragmentorMinTotalBytes
+	}
+
+	if config.FragmentorMaxTotalBytes != nil {
+		applyParameters[parameters.FragmentorMaxTotalBytes] = *config.FragmentorMaxTotalBytes
+	}
+
+	if config.FragmentorMinWriteBytes != nil {
+		applyParameters[parameters.FragmentorMinWriteBytes] = *config.FragmentorMinWriteBytes
+	}
+
+	if config.FragmentorMaxWriteBytes != nil {
+		applyParameters[parameters.FragmentorMaxWriteBytes] = *config.FragmentorMaxWriteBytes
+	}
+
+	if config.FragmentorMinDelayMicroseconds != nil {
+		applyParameters[parameters.FragmentorMinDelay] = fmt.Sprintf("%dus", *config.FragmentorMinDelayMicroseconds)
+	}
+
+	if config.FragmentorMaxDelayMicroseconds != nil {
+		applyParameters[parameters.FragmentorMaxDelay] = fmt.Sprintf("%dus", *config.FragmentorMaxDelayMicroseconds)
+	}
+
+	if config.ObfuscatedSSHMinPadding != nil {
+		applyParameters[parameters.ObfuscatedSSHMinPadding] = *config.ObfuscatedSSHMinPadding
+	}
+
+	if config.ObfuscatedSSHMaxPadding != nil {
+		applyParameters[parameters.ObfuscatedSSHMaxPadding] = *config.ObfuscatedSSHMaxPadding
+	}
+
 	return applyParameters
 }
 
@@ -755,4 +881,59 @@ func promoteLegacyDownloadURL(URL string) parameters.DownloadURLs {
 		OnlyAfterAttempts: 0,
 	}
 	return downloadURLs
+}
+
+type loggingDeviceBinder struct {
+	d DeviceBinder
+}
+
+func newLoggingDeviceBinder(d DeviceBinder) *loggingDeviceBinder {
+	return &loggingDeviceBinder{d: d}
+}
+
+func (d *loggingDeviceBinder) BindToDevice(fileDescriptor int) (string, error) {
+	deviceInfo, err := d.d.BindToDevice(fileDescriptor)
+	if err == nil && deviceInfo != "" {
+		NoticeBindToDevice(deviceInfo)
+	}
+	return deviceInfo, err
+}
+
+type staticNetworkGetter struct {
+	networkID string
+}
+
+func newStaticNetworkGetter(networkID string) *staticNetworkGetter {
+	return &staticNetworkGetter{networkID: networkID}
+}
+
+func (n *staticNetworkGetter) GetNetworkID() string {
+	return n.networkID
+}
+
+type loggingNetworkIDGetter struct {
+	n NetworkIDGetter
+}
+
+func newLoggingNetworkIDGetter(n NetworkIDGetter) *loggingNetworkIDGetter {
+	return &loggingNetworkIDGetter{n: n}
+}
+
+func (n *loggingNetworkIDGetter) GetNetworkID() string {
+	networkID := n.n.GetNetworkID()
+
+	// All PII must appear after the initial "-"
+	// See: https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter
+	logNetworkID := networkID
+	index := strings.Index(logNetworkID, "-")
+	if index != -1 {
+		logNetworkID = logNetworkID[:index]
+	}
+	if len(logNetworkID)+1 < len(networkID) {
+		// Indicate when additional network info was present after the first "-".
+		logNetworkID += "+<network info>"
+	}
+	NoticeNetworkID(logNetworkID)
+
+	return networkID
 }

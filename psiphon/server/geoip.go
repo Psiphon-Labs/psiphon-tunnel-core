@@ -209,6 +209,13 @@ func (geoIP *GeoIPService) GetSessionCache(sessionID string) GeoIPData {
 	return geoIPData.(GeoIPData)
 }
 
+// InSessionCache returns whether the session ID is present
+// in the session cache.
+func (geoIP *GeoIPService) InSessionCache(sessionID string) bool {
+	_, found := geoIP.sessionCache.Get(sessionID)
+	return found
+}
+
 // calculateDiscoveryValue derives a value from the client IP address to be
 // used as input in the server discovery algorithm. Since we do not explicitly
 // store the client IP address, we must derive the value here and store it for

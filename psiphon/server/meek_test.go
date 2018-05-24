@@ -230,9 +230,9 @@ func TestMeekResiliency(t *testing.T) {
 	}
 	meekCookieEncryptionPublicKey := base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPublicKey[:])
 	meekCookieEncryptionPrivateKey := base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPrivateKey[:])
-	meekObfuscatedKey, err := common.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+	meekObfuscatedKey, err := common.MakeSecureRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 	if err != nil {
-		t.Fatalf("common.MakeRandomStringHex failed: %s", err)
+		t.Fatalf("common.MakeSecureRandomStringHex failed: %s", err)
 	}
 
 	mockSupport := &SupportServices{
@@ -356,10 +356,10 @@ func TestMeekResiliency(t *testing.T) {
 type fileDescriptorInterruptor struct {
 }
 
-func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) error {
+func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) (string, error) {
 	fdDup, err := syscall.Dup(fileDescriptor)
 	if err != nil {
-		return err
+		return "", err
 	}
 	minAfter := 500 * time.Millisecond
 	maxAfter := 1 * time.Second
@@ -369,5 +369,5 @@ func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) e
 		syscall.Close(fdDup)
 		fmt.Printf("interrupted TCP connection\n")
 	})
-	return nil
+	return "", nil
 }
