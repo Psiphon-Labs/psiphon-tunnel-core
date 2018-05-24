@@ -230,9 +230,9 @@ func TestMeekResiliency(t *testing.T) {
 	}
 	meekCookieEncryptionPublicKey := base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPublicKey[:])
 	meekCookieEncryptionPrivateKey := base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPrivateKey[:])
-	meekObfuscatedKey, err := common.MakeRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+	meekObfuscatedKey, err := common.MakeSecureRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 	if err != nil {
-		t.Fatalf("common.MakeRandomStringHex failed: %s", err)
+		t.Fatalf("common.MakeSecureRandomStringHex failed: %s", err)
 	}
 
 	mockSupport := &SupportServices{

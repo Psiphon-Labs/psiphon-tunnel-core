@@ -91,7 +91,7 @@ func TestMain(m *testing.M) {
 
 func runMockWebServer() (string, string) {
 
-	responseBody, _ := common.MakeRandomStringHex(100000)
+	responseBody, _ := common.MakeSecureRandomStringHex(100000)
 
 	serveMux := http.NewServeMux()
 	serveMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -1004,10 +1004,10 @@ func makeTunneledNTPRequestAttempt(
 func pavePsinetDatabaseFile(
 	t *testing.T, useDefaultSponsorID bool, psinetFilename string) (string, string) {
 
-	sponsorID, _ := common.MakeRandomStringHex(8)
+	sponsorID, _ := common.MakeSecureRandomStringHex(8)
 
-	fakeDomain, _ := common.MakeRandomStringHex(4)
-	fakePath, _ := common.MakeRandomStringHex(4)
+	fakeDomain, _ := common.MakeSecureRandomStringHex(4)
+	fakePath, _ := common.MakeSecureRandomStringHex(4)
 	expectedHomepageURL := fmt.Sprintf("https://%s.com/%s", fakeDomain, fakePath)
 
 	psinetJSONFormat := `
@@ -1177,7 +1177,7 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
     }
     `
 
-	propagationChannelID, _ := common.MakeRandomStringHex(8)
+	propagationChannelID, _ := common.MakeSecureRandomStringHex(8)
 
 	now := time.Now().UTC()
 	epoch := now.Truncate(720 * time.Hour)

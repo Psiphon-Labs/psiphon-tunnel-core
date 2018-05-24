@@ -35,7 +35,6 @@ const (
 	SSH_MAX_PACKET_LENGTH      = 256 * 1024 // OpenSSH max packet length
 	SSH_MSG_NEWKEYS            = 21
 	SSH_MAX_PADDING_LENGTH     = 255 // RFC 4253 sec. 6
-	SSH_PADDING_MULTIPLE       = 16  // Default cipher block size
 )
 
 // ObfuscatedSshConn wraps a Conn and applies the obfuscated SSH protocol
@@ -108,7 +107,8 @@ const (
 func NewObfuscatedSshConn(
 	mode ObfuscatedSshConnMode,
 	conn net.Conn,
-	obfuscationKeyword string) (*ObfuscatedSshConn, error) {
+	obfuscationKeyword string,
+	minPadding, maxPadding *int) (*ObfuscatedSshConn, error) {
 
 	var err error
 	var obfuscator *Obfuscator
@@ -116,7 +116,12 @@ func NewObfuscatedSshConn(
 	var writeState ObfuscatedSshWriteState
 
 	if mode == OBFUSCATION_CONN_MODE_CLIENT {
-		obfuscator, err = NewClientObfuscator(&ObfuscatorConfig{Keyword: obfuscationKeyword})
+		obfuscator, err = NewClientObfuscator(
+			&ObfuscatorConfig{
+				Keyword:    obfuscationKeyword,
+				MinPadding: minPadding,
+				MaxPadding: maxPadding,
+			})
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -542,16 +547,21 @@ func extractSshPackets(writeBuffer, transformBuffer *bytes.Buffer) (bool, error)
 		transformedPacket := transformBuffer.Bytes()[transformedPacketOffset:]
 
 		// Padding transformation
-		// See RFC 4253 sec. 6 for constraints
-		possiblePaddings := (SSH_MAX_PADDING_LENGTH - paddingLength) / SSH_PADDING_MULTIPLE
-		if possiblePaddings > 0 {
+		// This does not satisfy RFC 4253 sec. 6 constraints:
+		// - The goal is to vary packet sizes as much as possible.
+		// - We implement both the client and server sides and both sides accept
+		//   less constrained paddings (for plaintext packets).
+		possibleExtraPaddingLength := (SSH_MAX_PADDING_LENGTH - paddingLength)
+		if possibleExtraPaddingLength > 0 {
 
-			// selectedPadding is integer in range [0, possiblePaddings)
-			selectedPadding, err := common.MakeSecureRandomInt(possiblePaddings)
+			// TODO: proceed without padding if MakeSecureRandom* fails?
+
+			// selectedPadding is integer in range [0, possiblePadding + 1)
+			extraPaddingLength, err := common.MakeSecureRandomInt(
+				possibleExtraPaddingLength + 1)
 			if err != nil {
 				return false, common.ContextError(err)
 			}
-			extraPaddingLength := selectedPadding * SSH_PADDING_MULTIPLE
 			extraPadding, err := common.MakeSecureRandomBytes(extraPaddingLength)
 			if err != nil {
 				return false, common.ContextError(err)

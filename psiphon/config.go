@@ -452,6 +452,24 @@ type Config struct {
 	// server.
 	Authorizations []string
 
+	// UseFragmentor and associated Fragmentor fields are for testing
+	// purposes.
+	UseFragmentor                  string
+	FragmentorMinTotalBytes        *int
+	FragmentorMaxTotalBytes        *int
+	FragmentorMinWriteBytes        *int
+	FragmentorMaxWriteBytes        *int
+	FragmentorMinDelayMicroseconds *int
+	FragmentorMaxDelayMicroseconds *int
+
+	// ObfuscatedSSHAlgorithms and associated ObfuscatedSSH fields are for
+	// testing purposes. If specified, ObfuscatedSSHAlgorithms must have 4 SSH
+	// KEX elements in order: the kex algorithm, cipher, MAC, and server host
+	// key algorithm.
+	ObfuscatedSSHAlgorithms []string
+	ObfuscatedSSHMinPadding *int
+	ObfuscatedSSHMaxPadding *int
+
 	// clientParameters is the active ClientParameters with defaults, config
 	// values, and, optionally, tactics applied.
 	//
@@ -634,6 +652,12 @@ func (config *Config) Commit() error {
 		return common.ContextError(err)
 	}
 
+	if config.ObfuscatedSSHAlgorithms != nil &&
+		len(config.ObfuscatedSSHAlgorithms) != 4 {
+		// TODO: validate each algorithm?
+		return common.ContextError(errors.New("invalid ObfuscatedSSHAlgorithms"))
+	}
+
 	// clientParameters.Set will validate the config fields applied to parameters.
 
 	err = config.SetClientParameters("", false, nil)
@@ -806,6 +830,45 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 	}
 
 	applyParameters[parameters.TunnelRateLimits] = config.RateLimits
+
+	switch config.UseFragmentor {
+	case "always":
+		applyParameters[parameters.FragmentorProbability] = 1.0
+	case "never":
+		applyParameters[parameters.FragmentorProbability] = 0.0
+	}
+
+	if config.FragmentorMinTotalBytes != nil {
+		applyParameters[parameters.FragmentorMinTotalBytes] = *config.FragmentorMinTotalBytes
+	}
+
+	if config.FragmentorMaxTotalBytes != nil {
+		applyParameters[parameters.FragmentorMaxTotalBytes] = *config.FragmentorMaxTotalBytes
+	}
+
+	if config.FragmentorMinWriteBytes != nil {
+		applyParameters[parameters.FragmentorMinWriteBytes] = *config.FragmentorMinWriteBytes
+	}
+
+	if config.FragmentorMaxWriteBytes != nil {
+		applyParameters[parameters.FragmentorMaxWriteBytes] = *config.FragmentorMaxWriteBytes
+	}
+
+	if config.FragmentorMinDelayMicroseconds != nil {
+		applyParameters[parameters.FragmentorMinDelay] = fmt.Sprintf("%dus", *config.FragmentorMinDelayMicroseconds)
+	}
+
+	if config.FragmentorMaxDelayMicroseconds != nil {
+		applyParameters[parameters.FragmentorMaxDelay] = fmt.Sprintf("%dus", *config.FragmentorMaxDelayMicroseconds)
+	}
+
+	if config.ObfuscatedSSHMinPadding != nil {
+		applyParameters[parameters.ObfuscatedSSHMinPadding] = *config.ObfuscatedSSHMinPadding
+	}
+
+	if config.ObfuscatedSSHMaxPadding != nil {
+		applyParameters[parameters.ObfuscatedSSHMaxPadding] = *config.ObfuscatedSSHMaxPadding
+	}
 
 	return applyParameters
 }

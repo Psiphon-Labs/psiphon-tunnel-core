@@ -957,7 +957,7 @@ func makeMeekSessionID() (string, error) {
 		return "", common.ContextError(err)
 	}
 	size += n
-	sessionID, err := common.MakeRandomStringBase64(size)
+	sessionID, err := common.MakeSecureRandomStringBase64(size)
 	if err != nil {
 		return "", common.ContextError(err)
 	}
