@@ -89,9 +89,12 @@ func DialTCPFragmentor(
 		NoticeAlert("MakeSecureRandomRange failed: %s", common.ContextError(err))
 	}
 
+	runCtx, stopRunning := context.WithCancel(context.Background())
+
 	return &FragmentorConn{
 		Conn:            conn,
-		ctx:             ctx,
+		runCtx:          runCtx,
+		stopRunning:     stopRunning,
 		bytesToFragment: totalBytes,
 		minWriteBytes:   p.Int(parameters.FragmentorMinWriteBytes),
 		maxWriteBytes:   p.Int(parameters.FragmentorMaxWriteBytes),
@@ -110,7 +113,8 @@ func DialTCPFragmentor(
 // initial portion of a TCP flow.
 type FragmentorConn struct {
 	net.Conn
-	ctx             context.Context
+	runCtx          context.Context
+	stopRunning     context.CancelFunc
 	isClosed        int32
 	numNotices      int32
 	writeMutex      sync.Mutex
@@ -144,8 +148,8 @@ func (fragmentor *FragmentorConn) Write(buffer []byte) (int, error) {
 		timer := time.NewTimer(delay)
 		err = nil
 		select {
-		case <-fragmentor.ctx.Done():
-			err = fragmentor.ctx.Err()
+		case <-fragmentor.runCtx.Done():
+			err = fragmentor.runCtx.Err()
 		case <-timer.C:
 		}
 		timer.Stop()
@@ -203,6 +207,7 @@ func (fragmentor *FragmentorConn) Close() (err error) {
 	if !atomic.CompareAndSwapInt32(&fragmentor.isClosed, 0, 1) {
 		return nil
 	}
+	fragmentor.stopRunning()
 	return fragmentor.Conn.Close()
 }
 
