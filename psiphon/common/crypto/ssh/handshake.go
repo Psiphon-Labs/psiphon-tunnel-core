@@ -482,7 +482,7 @@ func (t *handshakeTransport) sendKexInit() error {
 	//
 	if t.remoteAddr != nil {
 
-		transform := func(list []string) []string {
+		transform := func(list []string, doCut bool) []string {
 
 			newList := make([]string, len(list))
 			perm, err := common.MakeSecureRandomPerm(len(list))
@@ -492,23 +492,28 @@ func (t *handshakeTransport) sendKexInit() error {
 				}
 			}
 
-			cut := len(newList)
-			for ; cut > 1; cut-- {
-				if !common.FlipCoin() {
-					break
+			if doCut {
+				cut := len(newList)
+				for ; cut > 1; cut-- {
+					if !common.FlipCoin() {
+						break
+					}
 				}
+				newList = newList[:cut]
 			}
 
-			return newList[:cut]
+			return newList
 		}
 
-		msg.KexAlgos = transform(t.config.KeyExchanges)
-		ciphers := transform(t.config.Ciphers)
+		msg.KexAlgos = transform(t.config.KeyExchanges, true)
+		ciphers := transform(t.config.Ciphers, true)
 		msg.CiphersClientServer = ciphers
 		msg.CiphersServerClient = ciphers
-		MACs := transform(t.config.MACs)
+		MACs := transform(t.config.MACs, true)
 		msg.MACsClientServer = MACs
 		msg.MACsServerClient = MACs
+		msg.ServerHostKeyAlgos = transform(
+			msg.ServerHostKeyAlgos, len(t.hostKeys) == 0)
 
 		// Offer "zlib@openssh.com", which is offered by OpenSSH.
 		// Since server only supports "none", must always offer "none"

@@ -1033,7 +1033,7 @@ func (sshClient *sshClient) run(
 		}
 		sshServerConfig.AddHostKey(sshClient.sshServer.sshHostKey)
 
-		if sshClient.tunnelProtocol != protocol.TUNNEL_PROTOCOL_SSH {
+		if protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
 			// This is the list of supported non-Encrypt-then-MAC algorithms from
 			// https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3ef11effe6acd92c3aefd140ee09c42a1f15630b/psiphon/common/crypto/ssh/common.go#L60
 			//

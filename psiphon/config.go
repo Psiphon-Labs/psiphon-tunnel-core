@@ -461,8 +461,14 @@ type Config struct {
 	FragmentorMaxWriteBytes        *int
 	FragmentorMinDelayMicroseconds *int
 	FragmentorMaxDelayMicroseconds *int
-	ObfuscatedSSHMinPadding        *int
-	ObfuscatedSSHMaxPadding        *int
+
+	// ObfuscatedSSHAlgorithms and associated ObfuscatedSSH fields are for
+	// testing purposes. If specified, ObfuscatedSSHAlgorithms must have 4 SSH
+	// KEX elements in order: the kex algorithm, cipher, MAC, and server host
+	// key algorithm.
+	ObfuscatedSSHAlgorithms []string
+	ObfuscatedSSHMinPadding *int
+	ObfuscatedSSHMaxPadding *int
 
 	// clientParameters is the active ClientParameters with defaults, config
 	// values, and, optionally, tactics applied.
@@ -644,6 +650,12 @@ func (config *Config) Commit() error {
 		})
 	if err != nil {
 		return common.ContextError(err)
+	}
+
+	if config.ObfuscatedSSHAlgorithms != nil &&
+		len(config.ObfuscatedSSHAlgorithms) != 4 {
+		// TODO: validate each algorithm?
+		return common.ContextError(errors.New("invalid ObfuscatedSSHAlgorithms"))
 	}
 
 	// clientParameters.Set will validate the config fields applied to parameters.
