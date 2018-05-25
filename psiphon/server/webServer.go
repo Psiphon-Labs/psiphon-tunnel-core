@@ -169,7 +169,11 @@ func convertHTTPRequestToAPIRequest(
 
 	for name, values := range r.URL.Query() {
 		for _, value := range values {
-			// Note: multiple values per name are ignored
+
+			// Limitations:
+			// - This is intended only to support params sent by legacy
+			//   clients; non-base array-type params are not converted.
+			// - Multiple values per name are ignored.
 
 			// TODO: faster lookup?
 			isArray := false
