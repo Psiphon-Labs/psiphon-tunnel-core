@@ -299,10 +299,6 @@ func StoreServerEntries(
 		}
 	}
 
-	// Since there has possibly been a significant change in the server entries,
-	// take this opportunity to update the available egress regions.
-	ReportAvailableRegions(config)
-
 	return nil
 }
 
@@ -336,10 +332,6 @@ func StreamingStoreServerEntries(
 			return common.ContextError(err)
 		}
 	}
-
-	// Since there has possibly been a significant change in the server entries,
-	// take this opportunity to update the available egress regions.
-	ReportAvailableRegions(config)
 
 	return nil
 }
