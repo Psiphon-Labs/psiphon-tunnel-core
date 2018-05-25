@@ -21,38 +21,115 @@ package common
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"testing"
 	"time"
 )
 
-func TestMakeRandomPeriod(t *testing.T) {
+func TestGetStringSlice(t *testing.T) {
+
+	originalSlice := []string{"a", "b", "c"}
+
+	j, err := json.Marshal(originalSlice)
+	if err != nil {
+		t.Errorf("json.Marshal failed: %s", err)
+	}
+
+	var value interface{}
+
+	err = json.Unmarshal(j, &value)
+	if err != nil {
+		t.Errorf("json.Unmarshal failed: %s", err)
+	}
+
+	newSlice, ok := GetStringSlice(value)
+	if !ok {
+		t.Errorf("GetStringSlice failed")
+	}
+
+	if !reflect.DeepEqual(originalSlice, newSlice) {
+		t.Errorf("unexpected GetStringSlice output")
+	}
+}
+
+func TestMakeSecureRandomPerm(t *testing.T) {
+	for n := 0; n < 1000; n++ {
+		perm, err := MakeSecureRandomPerm(n)
+		if err != nil {
+			t.Errorf("MakeSecureRandomPerm failed: %s", err)
+		}
+		if len(perm) != n {
+			t.Error("unexpected permutation size")
+		}
+		sum := 0
+		for i := 0; i < n; i++ {
+			sum += perm[i]
+		}
+		expectedSum := (n * (n - 1)) / 2
+		if sum != expectedSum {
+			t.Error("unexpected permutation")
+		}
+	}
+}
+
+func TestMakeSecureRandomRange(t *testing.T) {
+	min := 1
+	max := 19
+	var gotMin, gotMax bool
+	for n := 0; n < 1000; n++ {
+		i, err := MakeSecureRandomRange(min, max)
+		if err != nil {
+			t.Errorf("MakeSecureRandomRange failed: %s", err)
+		}
+		if i < min || i > max {
+			t.Error("out of range")
+		}
+		if i == min {
+			gotMin = true
+		}
+		if i == max {
+			gotMax = true
+		}
+	}
+	if !gotMin {
+		t.Error("missing min")
+	}
+	if !gotMax {
+		t.Error("missing max")
+	}
+}
+
+func TestMakeSecureRandomPeriod(t *testing.T) {
 	min := 1 * time.Nanosecond
 	max := 10000 * time.Nanosecond
 
-	res1, err := MakeRandomPeriod(min, max)
+	for n := 0; n < 1000; n++ {
+		res1, err := MakeSecureRandomPeriod(min, max)
 
-	if err != nil {
-		t.Errorf("MakeRandomPeriod failed: %s", err)
-	}
+		if err != nil {
+			t.Errorf("MakeSecureRandomPeriod failed: %s", err)
+		}
 
-	if res1 < min {
-		t.Error("duration should not be less than min")
-	}
+		if res1 < min {
+			t.Error("duration should not be less than min")
+		}
 
-	if res1 > max {
-		t.Error("duration should not be more than max")
-	}
+		if res1 > max {
+			t.Error("duration should not be more than max")
+		}
 
-	res2, err := MakeRandomPeriod(min, max)
+		res2, err := MakeSecureRandomPeriod(min, max)
 
-	if err != nil {
-		t.Errorf("MakeRandomPeriod failed: %s", err)
-	}
+		if err != nil {
+			t.Errorf("MakeSecureRandomPeriod failed: %s", err)
+		}
 
-	if res1 == res2 {
-		t.Error("duration should have randomness difference between calls")
+		if res1 == res2 {
+			t.Error("duration should have randomness difference between calls")
+		}
 	}
 }
 

@@ -162,6 +162,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"sort"
 	"time"
@@ -169,6 +170,7 @@ import (
 	"github.com/Psiphon-Inc/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
@@ -229,6 +231,10 @@ type Server struct {
 
 	// RequestObfuscatedKey is the tactics request obfuscation key.
 	RequestObfuscatedKey []byte
+
+	// EnforceServerSide enables server-side enforcement of certain tactics
+	// parameters via Listeners.
+	EnforceServerSide bool
 
 	// DefaultTactics is the baseline tactics for all clients. It must include a
 	// TTL and Probability.
@@ -448,6 +454,7 @@ func NewServer(
 			server.RequestPublicKey = newServer.RequestPublicKey
 			server.RequestPrivateKey = newServer.RequestPrivateKey
 			server.RequestObfuscatedKey = newServer.RequestObfuscatedKey
+			server.EnforceServerSide = newServer.EnforceServerSide
 			server.DefaultTactics = newServer.DefaultTactics
 			server.FilteredTactics = newServer.FilteredTactics
 
@@ -608,6 +615,60 @@ func (server *Server) GetTacticsPayload(
 	geoIPData common.GeoIPData,
 	apiParams common.APIParameters) (*Payload, error) {
 
+	tactics, err := server.getTactics(geoIPData, apiParams)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	if tactics == nil {
+		return nil, nil
+	}
+
+	marshaledTactics, err := json.Marshal(tactics)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	// MD5 hash is used solely as a data checksum and not for any security purpose.
+	digest := md5.Sum(marshaledTactics)
+	tag := hex.EncodeToString(digest[:])
+
+	payload := &Payload{
+		Tag: tag,
+	}
+
+	// New clients should always send STORED_TACTICS_TAG_PARAMETER_NAME. When they have no
+	// stored tactics, the stored tag will be "" and not match payload.Tag and payload.Tactics
+	// will be sent.
+	//
+	// When new clients send a stored tag that matches payload.Tag, the client already has
+	// the correct data and payload.Tactics is not sent.
+	//
+	// Old clients will not send STORED_TACTICS_TAG_PARAMETER_NAME. In this case, do not
+	// send payload.Tactics as the client will not use it, will not store it, will not send
+	// back the new tag and so the handshake response will always contain wasteful tactics
+	// data.
+
+	sendPayloadTactics := true
+
+	clientStoredTag, err := getStringRequestParam(apiParams, STORED_TACTICS_TAG_PARAMETER_NAME)
+
+	// Old client or new client with same tag.
+	if err != nil || payload.Tag == clientStoredTag {
+		sendPayloadTactics = false
+	}
+
+	if sendPayloadTactics {
+		payload.Tactics = marshaledTactics
+	}
+
+	return payload, nil
+}
+
+func (server *Server) getTactics(
+	geoIPData common.GeoIPData,
+	apiParams common.APIParameters) (*Tactics, error) {
+
 	server.ReloadableFile.RLock()
 	defer server.ReloadableFile.RUnlock()
 
@@ -703,45 +764,7 @@ func (server *Server) GetTacticsPayload(
 		// Continue to apply more matches. Last matching tactics has priority for any field.
 	}
 
-	marshaledTactics, err := json.Marshal(tactics)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-
-	// MD5 hash is used solely as a data checksum and not for any security purpose.
-	digest := md5.Sum(marshaledTactics)
-	tag := hex.EncodeToString(digest[:])
-
-	payload := &Payload{
-		Tag: tag,
-	}
-
-	// New clients should always send STORED_TACTICS_TAG_PARAMETER_NAME. When they have no
-	// stored tactics, the stored tag will be "" and not match payload.Tag and payload.Tactics
-	// will be sent.
-	//
-	// When new clients send a stored tag that matches payload.Tag, the client already has
-	// the correct data and payload.Tactics is not sent.
-	//
-	// Old clients will not send STORED_TACTICS_TAG_PARAMETER_NAME. In this case, do not
-	// send payload.Tactics as the client will not use it, will not store it, will not send
-	// back the new tag and so the handshake response will always contain wasteful tactics
-	// data.
-
-	sendPayloadTactics := true
-
-	clientStoredTag, err := getStringRequestParam(apiParams, STORED_TACTICS_TAG_PARAMETER_NAME)
-
-	// Old client or new client with same tag.
-	if err != nil || payload.Tag == clientStoredTag {
-		sendPayloadTactics = false
-	}
-
-	if sendPayloadTactics {
-		payload.Tactics = marshaledTactics
-	}
-
-	return payload, nil
+	return tactics, nil
 }
 
 // TODO: refactor this copy of psiphon/server.getStringRequestParam into common?
@@ -1034,6 +1057,93 @@ func (server *Server) handleTacticsRequest(
 	logFields[IS_TACTICS_REQUEST_LOG_FIELD_NAME] = true
 
 	server.logger.LogMetric(TACTICS_METRIC_EVENT_NAME, logFields)
+}
+
+// Listener wraps a net.Listener and applies server-side enforcement of
+// certain tactics parameters to accepted connections. Tactics filtering is
+// limited to GeoIP attributes as the client has not yet sent API paramaters.
+type Listener struct {
+	net.Listener
+	server         *Server
+	tunnelProtocol string
+	geoIPLookup    func(IPaddress string) common.GeoIPData
+}
+
+// NewListener creates a new Listener.
+func NewListener(
+	listener net.Listener,
+	server *Server,
+	tunnelProtocol string,
+	geoIPLookup func(IPaddress string) common.GeoIPData) *Listener {
+
+	return &Listener{
+		Listener:       listener,
+		server:         server,
+		tunnelProtocol: tunnelProtocol,
+		geoIPLookup:    geoIPLookup,
+	}
+}
+
+// Close calls the underlying listener's Accept, and then
+// checks if tactics for the connection set LimitTunnelProtocols.
+// If LimitTunnelProtocols is set and does not include the
+// tunnel protocol the listener is running, the accepted
+// connection is immediately closed and the underlying
+// Accept is called again.
+func (listener *Listener) Accept() (net.Conn, error) {
+	for {
+
+		conn, err := listener.Listener.Accept()
+		if err != nil {
+			// Don't modify error from net.Listener
+			return nil, err
+		}
+
+		if !listener.server.EnforceServerSide {
+			return conn, nil
+		}
+
+		geoIPData := listener.geoIPLookup(common.IPAddressFromAddr(conn.RemoteAddr()))
+
+		tactics, err := listener.server.getTactics(geoIPData, make(common.APIParameters))
+		if err != nil {
+			listener.server.logger.WithContextFields(
+				common.LogFields{"error": err}).Warning("failed to get tactics for connection")
+			// If tactics is somehow misconfigured, keep handling connections.
+			// Other error cases that follow below take the same approach.
+			return conn, nil
+		}
+
+		if tactics == nil {
+			// This server isn't configured with tactics.
+			return conn, nil
+		}
+
+		limitTunnelProtocolsParameter, ok := tactics.Parameters[parameters.LimitTunnelProtocols]
+		if !ok {
+			// The tactics for the connection don't set LimitTunnelProtocols.
+			return conn, nil
+		}
+
+		if !common.FlipWeightedCoin(tactics.Probability) {
+			// Skip tactics with the configured probability.
+			return conn, nil
+		}
+
+		limitTunnelProtocols, ok := common.GetStringSlice(limitTunnelProtocolsParameter)
+		if !ok ||
+			len(limitTunnelProtocols) == 0 ||
+			common.Contains(limitTunnelProtocols, listener.tunnelProtocol) {
+
+			// The parameter is invalid; or no limit is set; or the
+			// listener protocol is not prohibited.
+			return conn, nil
+		}
+
+		// Don't accept this connection as its tactics prohibits the
+		// listener's tunnel protocol.
+		conn.Close()
+	}
 }
 
 // RoundTripper performs a round trip to the specified endpoint, sending the
@@ -1472,6 +1582,7 @@ func applyTacticsPayload(
 
 	if payload.Tag != record.Tag {
 		record.Tag = payload.Tag
+		record.Tactics = Tactics{}
 		err := json.Unmarshal(payload.Tactics, &record.Tactics)
 		if err != nil {
 			return common.ContextError(err)
@@ -1520,6 +1631,13 @@ func boxPayload(
 	nonce, peerPublicKey, privateKey, obfuscatedKey, bundlePublicKey []byte,
 	payload interface{}) ([]byte, error) {
 
+	if len(nonce) > 24 ||
+		len(peerPublicKey) != 32 ||
+		len(privateKey) != 32 {
+		return nil, common.ContextError(
+			errors.New("unexpected box key length"))
+	}
+
 	marshaledPayload, err := json.Marshal(payload)
 	if err != nil {
 		return nil, common.ContextError(err)
@@ -1529,8 +1647,8 @@ func boxPayload(
 	copy(nonceArray[:], nonce)
 
 	var peerPublicKeyArray, privateKeyArray [32]byte
-	copy(peerPublicKeyArray[:], peerPublicKey[0:32])
-	copy(privateKeyArray[:], privateKey[0:32])
+	copy(peerPublicKeyArray[:], peerPublicKey)
+	copy(privateKeyArray[:], privateKey)
 
 	box := box.Seal(nil, marshaledPayload, &nonceArray, &peerPublicKeyArray, &privateKeyArray)
 
@@ -1541,10 +1659,12 @@ func boxPayload(
 		box = bundledBox
 	}
 
-	obfuscator, err := common.NewClientObfuscator(
-		&common.ObfuscatorConfig{
+	maxPadding := TACTICS_PADDING_MAX_SIZE
+
+	obfuscator, err := obfuscator.NewClientObfuscator(
+		&obfuscator.ObfuscatorConfig{
 			Keyword:    string(obfuscatedKey),
-			MaxPadding: TACTICS_PADDING_MAX_SIZE})
+			MaxPadding: &maxPadding})
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -1563,11 +1683,18 @@ func unboxPayload(
 	nonce, peerPublicKey, privateKey, obfuscatedKey, obfuscatedBoxedPayload []byte,
 	payload interface{}) ([]byte, error) {
 
+	if len(nonce) > 24 ||
+		(peerPublicKey != nil && len(peerPublicKey) != 32) ||
+		len(privateKey) != 32 {
+		return nil, common.ContextError(
+			errors.New("unexpected box key length"))
+	}
+
 	obfuscatedReader := bytes.NewReader(obfuscatedBoxedPayload[:])
 
-	obfuscator, err := common.NewServerObfuscator(
+	obfuscator, err := obfuscator.NewServerObfuscator(
 		obfuscatedReader,
-		&common.ObfuscatorConfig{Keyword: string(obfuscatedKey)})
+		&obfuscator.ObfuscatorConfig{Keyword: string(obfuscatedKey)})
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -1584,18 +1711,18 @@ func unboxPayload(
 	copy(nonceArray[:], nonce)
 
 	var peerPublicKeyArray, privateKeyArray [32]byte
-	copy(privateKeyArray[:], privateKey[0:32])
+	copy(privateKeyArray[:], privateKey)
 
 	var bundledPeerPublicKey []byte
 
 	if peerPublicKey != nil {
-		copy(peerPublicKeyArray[:], peerPublicKey[0:32])
+		copy(peerPublicKeyArray[:], peerPublicKey)
 	} else {
 		if len(boxedPayload) < 32 {
 			return nil, common.ContextError(errors.New("unexpected box size"))
 		}
 		bundledPeerPublicKey = boxedPayload[0:32]
-		copy(peerPublicKeyArray[0:32], bundledPeerPublicKey)
+		copy(peerPublicKeyArray[:], bundledPeerPublicKey)
 		boxedPayload = boxedPayload[32:]
 	}
 

@@ -118,6 +118,10 @@ func runMemoryTest(t *testing.T, testMode int) {
 	if err != nil {
 		t.Fatalf("error processing configuration file: %s", err)
 	}
+	err = config.Commit()
+	if err != nil {
+		t.Fatalf("error committing configuration file: %s", err)
+	}
 
 	// Don't wait for a tactics request.
 	applyParameters := map[string]interface{}{

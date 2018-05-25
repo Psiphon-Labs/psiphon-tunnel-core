@@ -67,7 +67,10 @@ func TestConfigTestSuite(t *testing.T) {
 
 // Tests good config
 func (suite *ConfigTestSuite) Test_LoadConfig_BasicGood() {
-	_, err := LoadConfig(suite.confStubBlob)
+	config, err := LoadConfig(suite.confStubBlob)
+	if err == nil {
+		err = config.Commit()
+	}
 	suite.Nil(err, "a basic config should succeed")
 }
 
@@ -83,7 +86,10 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 	var testObjJSON []byte
 
 	// JSON with none of our fields
-	_, err := LoadConfig([]byte(`{"f1": 11, "f2": "two"}`))
+	config, err := LoadConfig([]byte(`{"f1": 11, "f2": "two"}`))
+	if err == nil {
+		err = config.Commit()
+	}
 	suite.NotNil(err, "JSON with none of our fields should fail")
 
 	// Test all required fields
@@ -92,28 +98,40 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 		json.Unmarshal(suite.confStubBlob, &testObj)
 		delete(testObj, field)
 		testObjJSON, _ = json.Marshal(testObj)
-		_, err = LoadConfig(testObjJSON)
+		config, err = LoadConfig(testObjJSON)
+		if err == nil {
+			err = config.Commit()
+		}
 		suite.NotNil(err, "JSON with one of our required fields missing should fail: %s", field)
 
 		// Bad type for required field
 		json.Unmarshal(suite.confStubBlob, &testObj)
 		testObj[field] = false // basically guessing a wrong type
 		testObjJSON, _ = json.Marshal(testObj)
-		_, err = LoadConfig(testObjJSON)
+		config, err = LoadConfig(testObjJSON)
+		if err == nil {
+			err = config.Commit()
+		}
 		suite.NotNil(err, "JSON with one of our required fields with the wrong type should fail: %s", field)
 
 		// One of our required fields is null
 		json.Unmarshal(suite.confStubBlob, &testObj)
 		testObj[field] = nil
 		testObjJSON, _ = json.Marshal(testObj)
-		_, err = LoadConfig(testObjJSON)
+		config, err = LoadConfig(testObjJSON)
+		if err == nil {
+			err = config.Commit()
+		}
 		suite.NotNil(err, "JSON with one of our required fields set to null should fail: %s", field)
 
 		// One of our required fields is an empty string
 		json.Unmarshal(suite.confStubBlob, &testObj)
 		testObj[field] = ""
 		testObjJSON, _ = json.Marshal(testObj)
-		_, err = LoadConfig(testObjJSON)
+		config, err = LoadConfig(testObjJSON)
+		if err == nil {
+			err = config.Commit()
+		}
 		suite.NotNil(err, "JSON with one of our required fields set to an empty string should fail: %s", field)
 	}
 
@@ -123,7 +141,10 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 		json.Unmarshal(suite.confStubBlob, &testObj)
 		testObj[field] = false // basically guessing a wrong type
 		testObjJSON, _ = json.Marshal(testObj)
-		_, err = LoadConfig(testObjJSON)
+		config, err = LoadConfig(testObjJSON)
+		if err == nil {
+			err = config.Commit()
+		}
 		suite.NotNil(err, "JSON with one of our optional fields with the wrong type should fail: %s", field)
 	}
 }
@@ -141,11 +162,17 @@ func (suite *ConfigTestSuite) Test_LoadConfig_GoodJson() {
 		delete(testObj, suite.nonRequiredFields[i])
 	}
 	testObjJSON, _ = json.Marshal(testObj)
-	_, err := LoadConfig(testObjJSON)
+	config, err := LoadConfig(testObjJSON)
+	if err == nil {
+		err = config.Commit()
+	}
 	suite.Nil(err, "JSON with good values for our required fields but no optional fields should succeed")
 
 	// Has all of our required fields, and all optional fields
-	_, err = LoadConfig(suite.confStubBlob)
+	config, err = LoadConfig(suite.confStubBlob)
+	if err == nil {
+		err = config.Commit()
+	}
 	suite.Nil(err, "JSON with all good values for required and optional fields should succeed")
 
 	// Has null for optional fields
@@ -154,6 +181,9 @@ func (suite *ConfigTestSuite) Test_LoadConfig_GoodJson() {
 		testObj[suite.nonRequiredFields[i]] = nil
 	}
 	testObjJSON, _ = json.Marshal(testObj)
-	_, err = LoadConfig(testObjJSON)
+	config, err = LoadConfig(testObjJSON)
+	if err == nil {
+		err = config.Commit()
+	}
 	suite.Nil(err, "JSON with null for optional values should succeed")
 }

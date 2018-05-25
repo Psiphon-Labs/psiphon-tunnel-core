@@ -7,10 +7,8 @@ if [ ! -f make.bash ]; then
   exit 1
 fi
 
-# The "OPENSSL" tag enables support of OpenSSL for use by IndistinguishableTLS.
-
 PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"
-BUILD_TAGS="OPENSSL ${PRIVATE_PLUGINS_TAG}"
+BUILD_TAGS="${PRIVATE_PLUGINS_TAG}"
 
 # Don't use '-u' to force updates because the docker builds always pull
 # the latest versions. Outside of Docker, be aware that these dependencies

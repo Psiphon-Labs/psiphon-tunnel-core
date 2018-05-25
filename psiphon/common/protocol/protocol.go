@@ -140,6 +140,37 @@ func UseClientTunnelProtocol(
 	return false
 }
 
+const (
+	TLS_PROFILE_IOS_1131   = "iOS-Safari-11.3.1"
+	TLS_PROFILE_ANDROID_60 = "Android-6.0"
+	TLS_PROFILE_ANDROID_51 = "Android-5.1"
+	TLS_PROFILE_CHROME_58  = "Chrome-58"
+	TLS_PROFILE_CHROME_57  = "Chrome-57"
+	TLS_PROFILE_FIREFOX_56 = "Firefox-56"
+	TLS_PROFILE_RANDOMIZED = "Randomized"
+)
+
+var SupportedTLSProfiles = TLSProfiles{
+	TLS_PROFILE_IOS_1131,
+	TLS_PROFILE_ANDROID_60,
+	TLS_PROFILE_ANDROID_51,
+	TLS_PROFILE_CHROME_58,
+	TLS_PROFILE_CHROME_57,
+	TLS_PROFILE_FIREFOX_56,
+	TLS_PROFILE_RANDOMIZED,
+}
+
+type TLSProfiles []string
+
+func (profiles TLSProfiles) Validate() error {
+	for _, p := range profiles {
+		if !common.Contains(SupportedTLSProfiles, p) {
+			return common.ContextError(fmt.Errorf("invalid TLS profile: %s", p))
+		}
+	}
+	return nil
+}
+
 type HandshakeResponse struct {
 	SSHSessionID           string              `json:"ssh_session_id"`
 	Homepages              []string            `json:"homepages"`

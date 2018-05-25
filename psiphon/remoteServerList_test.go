@@ -84,7 +84,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 		t.Fatalf("error getting server IP address: %s", err)
 	}
 
-	serverConfigJSON, _, encodedServerEntry, err := server.GenerateConfig(
+	serverConfigJSON, _, _, _, encodedServerEntry, err := server.GenerateConfig(
 		&server.GenerateConfigParams{
 			ServerIPAddress:      serverIPAddress,
 			EnableSSHAPIRequests: true,
@@ -141,7 +141,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	epoch := now.Truncate(seedPeriod)
 	epochStr := epoch.Format(time.RFC3339Nano)
 
-	propagationChannelID, _ := common.MakeRandomStringHex(8)
+	propagationChannelID, _ := common.MakeSecureRandomStringHex(8)
 
 	oslConfigJSON := fmt.Sprintf(
 		oslConfigJSONTemplate,
@@ -391,7 +391,14 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 		obfuscatedServerListDownloadDirectory,
 		disruptorProxyURL)
 
-	clientConfig, _ := LoadConfig([]byte(clientConfigJSON))
+	clientConfig, err := LoadConfig([]byte(clientConfigJSON))
+	if err != nil {
+		t.Fatalf("error processing configuration file: %s", err)
+	}
+	err = clientConfig.Commit()
+	if err != nil {
+		t.Fatalf("error committing configuration file: %s", err)
+	}
 
 	controller, err := NewController(clientConfig)
 	if err != nil {

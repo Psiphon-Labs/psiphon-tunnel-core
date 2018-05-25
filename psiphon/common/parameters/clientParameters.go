@@ -61,6 +61,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
@@ -84,6 +85,17 @@ const (
 	PrioritizeTunnelProtocols                      = "PrioritizeTunnelProtocols"
 	PrioritizeTunnelProtocolsCandidateCount        = "PrioritizeTunnelProtocolsCandidateCount"
 	LimitTunnelProtocols                           = "LimitTunnelProtocols"
+	LimitTLSProfiles                               = "LimitTLSProfiles"
+	FragmentorProbability                          = "FragmentorProbability"
+	FragmentorLimitProtocols                       = "FragmentorLimitProtocols"
+	FragmentorMinTotalBytes                        = "FragmentorMinTotalBytes"
+	FragmentorMaxTotalBytes                        = "FragmentorMaxTotalBytes"
+	FragmentorMinWriteBytes                        = "FragmentorMinWriteBytes"
+	FragmentorMaxWriteBytes                        = "FragmentorMaxWriteBytes"
+	FragmentorMinDelay                             = "FragmentorMinDelay"
+	FragmentorMaxDelay                             = "FragmentorMaxDelay"
+	ObfuscatedSSHMinPadding                        = "ObfuscatedSSHMinPadding"
+	ObfuscatedSSHMaxPadding                        = "ObfuscatedSSHMaxPadding"
 	TunnelOperateShutdownTimeout                   = "TunnelOperateShutdownTimeout"
 	TunnelPortForwardDialTimeout                   = "TunnelPortForwardDialTimeout"
 	TunnelRateLimits                               = "TunnelRateLimits"
@@ -151,7 +163,6 @@ const (
 	MeekRoundTripRetryMaxDelay                     = "MeekRoundTripRetryMaxDelay"
 	MeekRoundTripRetryMultiplier                   = "MeekRoundTripRetryMultiplier"
 	MeekRoundTripTimeout                           = "MeekRoundTripTimeout"
-	SelectAndroidTLSProbability                    = "SelectAndroidTLSProbability"
 	TransformHostNameProbability                   = "TransformHostNameProbability"
 	PickUserAgentProbability                       = "PickUserAgentProbability"
 )
@@ -207,6 +218,25 @@ var defaultClientParameters = map[string]struct {
 	PrioritizeTunnelProtocols:               {value: protocol.TunnelProtocols{}},
 	PrioritizeTunnelProtocolsCandidateCount: {value: 10, minimum: 0},
 	LimitTunnelProtocols:                    {value: protocol.TunnelProtocols{}},
+
+	LimitTLSProfiles: {value: protocol.TLSProfiles{}},
+
+	FragmentorProbability:    {value: 0.5, minimum: 0.0},
+	FragmentorLimitProtocols: {value: protocol.TunnelProtocols{}},
+	FragmentorMinTotalBytes:  {value: 0, minimum: 0},
+	FragmentorMaxTotalBytes:  {value: 0, minimum: 0},
+	FragmentorMinWriteBytes:  {value: 1, minimum: 1},
+	FragmentorMaxWriteBytes:  {value: 1500, minimum: 1},
+	FragmentorMinDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
+	FragmentorMaxDelay:       {value: 10 * time.Millisecond, minimum: time.Duration(0)},
+
+	// The Psiphon server will reject obfuscated SSH seed messages with
+	// padding greater than OBFUSCATE_MAX_PADDING.
+	// obfuscator.NewClientObfuscator will ignore invalid min/max padding
+	// configurations.
+
+	ObfuscatedSSHMinPadding: {value: 0, minimum: 0},
+	ObfuscatedSSHMaxPadding: {value: obfuscator.OBFUSCATE_MAX_PADDING, minimum: 0},
 
 	AdditionalCustomHeaders: {value: make(http.Header)},
 
@@ -300,9 +330,8 @@ var defaultClientParameters = map[string]struct {
 	MeekRoundTripRetryMultiplier:               {value: 2.0, minimum: 0.0},
 	MeekRoundTripTimeout:                       {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 
-	SelectAndroidTLSProbability:  {value: 0.5},
-	TransformHostNameProbability: {value: 0.5},
-	PickUserAgentProbability:     {value: 0.5},
+	TransformHostNameProbability: {value: 0.5, minimum: 0.0},
+	PickUserAgentProbability:     {value: 0.5, minimum: 0.0},
 }
 
 // ClientParameters is a set of client parameters. To use the parameters, call
@@ -418,7 +447,7 @@ func (p *ClientParameters) Set(
 
 			// A JSON remarshal resolves cases where applyParameters is a
 			// result of unmarshal-into-interface, in which case non-scalar
-			// values will not have the expecte types; see:
+			// values will not have the expected types; see:
 			// https://golang.org/pkg/encoding/json/#Unmarshal. This remarshal
 			// also results in a deep copy.
 
@@ -454,6 +483,14 @@ func (p *ClientParameters) Set(
 					return nil, common.ContextError(err)
 				}
 			case protocol.TunnelProtocols:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, common.ContextError(err)
+				}
+			case protocol.TLSProfiles:
 				err := v.Validate()
 				if err != nil {
 					if skipOnError {
@@ -641,6 +678,13 @@ func (p *ClientParametersSnapshot) Duration(name string) time.Duration {
 // TunnelProtocols returns a protocol.TunnelProtocols parameter value.
 func (p *ClientParametersSnapshot) TunnelProtocols(name string) protocol.TunnelProtocols {
 	value := protocol.TunnelProtocols{}
+	p.getValue(name, &value)
+	return value
+}
+
+// TLSProfiles returns a protocol.TLSProfiles parameter value.
+func (p *ClientParametersSnapshot) TLSProfiles(name string) protocol.TLSProfiles {
+	value := protocol.TLSProfiles{}
 	p.getValue(name, &value)
 	return value
 }

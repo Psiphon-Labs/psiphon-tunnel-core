@@ -124,7 +124,7 @@ func bindLookupIP(
 		return nil, common.ContextError(err)
 	}
 
-	err = config.DeviceBinder.BindToDevice(socketFd)
+	_, err = config.DeviceBinder.BindToDevice(socketFd)
 	if err != nil {
 		syscall.Close(socketFd)
 		return nil, common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))

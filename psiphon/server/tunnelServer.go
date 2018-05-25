@@ -38,6 +38,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
@@ -143,6 +144,14 @@ func (server *TunnelServer) Run() error {
 			return common.ContextError(err)
 		}
 
+		tacticsListener := tactics.NewListener(
+			listener,
+			support.TacticsServer,
+			tunnelProtocol,
+			func(IPAddress string) common.GeoIPData {
+				return common.GeoIPData(support.GeoIPService.Lookup(IPAddress))
+			})
+
 		log.WithContextFields(
 			LogFields{
 				"localAddress":   localAddress,
@@ -152,7 +161,7 @@ func (server *TunnelServer) Run() error {
 		listeners = append(
 			listeners,
 			&sshListener{
-				Listener:       listener,
+				Listener:       tacticsListener,
 				localAddress:   localAddress,
 				tunnelProtocol: tunnelProtocol,
 			})
@@ -880,6 +889,7 @@ type sshClient struct {
 	throttledConn                        *common.ThrottledConn
 	geoIPData                            GeoIPData
 	sessionID                            string
+	isFirstTunnelInSession               bool
 	supportsServerRequests               bool
 	handshakeState                       handshakeState
 	udpChannel                           ssh.Channel
@@ -1023,6 +1033,20 @@ func (sshClient *sshClient) run(
 		}
 		sshServerConfig.AddHostKey(sshClient.sshServer.sshHostKey)
 
+		if protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
+			// This is the list of supported non-Encrypt-then-MAC algorithms from
+			// https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3ef11effe6acd92c3aefd140ee09c42a1f15630b/psiphon/common/crypto/ssh/common.go#L60
+			//
+			// With Encrypt-then-MAC algorithms, packet length is transmitted in
+			// plaintext, which aids in traffic analysis; clients may still send
+			// Encrypt-then-MAC algorithms in their KEX_INIT message, but do not
+			// select these algorithms.
+			//
+			// The exception is TUNNEL_PROTOCOL_SSH, which is intended to appear
+			// like SSH on the wire.
+			sshServerConfig.MACs = []string{"hmac-sha2-256", "hmac-sha1", "hmac-sha1-96"}
+		}
+
 		result := &sshNewServerConnResult{}
 
 		// Wrap the connection in an SSH deobfuscator when required.
@@ -1030,10 +1054,12 @@ func (sshClient *sshClient) run(
 		if protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
 			// Note: NewObfuscatedSshConn blocks on network I/O
 			// TODO: ensure this won't block shutdown
-			conn, result.err = common.NewObfuscatedSshConn(
-				common.OBFUSCATION_CONN_MODE_SERVER,
+			conn, result.err = obfuscator.NewObfuscatedSshConn(
+				obfuscator.OBFUSCATION_CONN_MODE_SERVER,
 				conn,
-				sshClient.sshServer.support.Config.ObfuscatedSSHKey)
+				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
+				nil,
+				nil)
 			if result.err != nil {
 				result.err = common.ContextError(result.err)
 			}
@@ -1163,17 +1189,26 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 
 	sessionID := sshPasswordPayload.SessionId
 
+	// The GeoIP session cache will be populated if there was a previous tunnel
+	// with this session ID. This will be true up to GEOIP_SESSION_CACHE_TTL, which
+	// is currently much longer than the OSL session cache, another option to use if
+	// the GeoIP session cache is retired (the GeoIP session cache currently only
+	// supports legacy use cases).
+	isFirstTunnelInSession := sshClient.sshServer.support.GeoIPService.InSessionCache(sessionID)
+
 	supportsServerRequests := common.Contains(
 		sshPasswordPayload.ClientCapabilities, protocol.CLIENT_CAPABILITY_SERVER_REQUESTS)
 
 	sshClient.Lock()
 
-	// After this point, sshClient.sessionID is read-only as it will be read
+	// After this point, these values are read-only as they are read
 	// without obtaining sshClient.Lock.
 	sshClient.sessionID = sessionID
-
+	sshClient.isFirstTunnelInSession = isFirstTunnelInSession
 	sshClient.supportsServerRequests = supportsServerRequests
+
 	geoIPData := sshClient.geoIPData
+
 	sshClient.Unlock()
 
 	// Store the GeoIP data associated with the session ID. This makes
@@ -2002,7 +2037,10 @@ func (sshClient *sshClient) setTrafficRules() {
 	defer sshClient.Unlock()
 
 	sshClient.trafficRules = sshClient.sshServer.support.TrafficRulesSet.GetTrafficRules(
-		sshClient.tunnelProtocol, sshClient.geoIPData, sshClient.handshakeState)
+		sshClient.isFirstTunnelInSession,
+		sshClient.tunnelProtocol,
+		sshClient.geoIPData,
+		sshClient.handshakeState)
 
 	if sshClient.throttledConn != nil {
 		// Any existing throttling state is reset.
