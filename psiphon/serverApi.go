@@ -879,20 +879,17 @@ func makeRequestUrl(tunnel *Tunnel, port, path string, params common.APIParamete
 			// parameter, which has a different type. This parameter is not recognized
 			// by legacy servers.
 
-			strValue := ""
 			switch v := value.(type) {
 			case string:
-				strValue = v
+				queryParams.Set(name, v)
 			case []string:
 				// String array param encoded as JSON
 				jsonValue, err := json.Marshal(v)
 				if err != nil {
 					break
 				}
-				strValue = string(jsonValue)
+				queryParams.Set(name, string(jsonValue))
 			}
-
-			queryParams.Set(name, strValue)
 		}
 
 		requestUrl.WriteString("?")

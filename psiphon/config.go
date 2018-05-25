@@ -254,8 +254,11 @@ type Config struct {
 	// TargetApiProtocol specifies whether to force use of "ssh" or "web" API
 	// protocol. When blank, the default, the optimal API protocol is used.
 	// Note that this capability check is not applied before the
-	// "CandidateServers" count is emitted. This parameter is intended for
-	// testing and debugging only.
+	// "CandidateServers" count is emitted.
+	//
+	// This parameter is intended for testing and debugging only. Not all
+	// parameters are supported in the legacy "web" API protocol, including
+	// speed test samples.
 	TargetApiProtocol string
 
 	// RemoteServerListUrl is a URL which specifies a location to fetch out-

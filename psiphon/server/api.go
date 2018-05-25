@@ -630,6 +630,11 @@ func validateRequestParams(
 			// No validation: the JSON already unmarshalled; the parameter
 			// user will validate that the JSON contains the expected
 			// objects/data.
+
+			// TODO: without validation, any valid JSON will be logged
+			// by getRequestLogFields, even if the parameter user validates
+			// and rejects the parameter.
+
 		default:
 			err = validateStringRequestParam(config, expectedParam, value)
 		}
@@ -772,6 +777,10 @@ func getRequestLogFields(
 			case "upstream_proxy_type":
 				// Submitted value could be e.g., "SOCKS5" or "socks5"; log lowercase
 				logFields[expectedParam.name] = strings.ToLower(strValue)
+			case tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME:
+				// Due to a client bug, clients may deliever an incorrect ""
+				// value for speed_test_samples via the web API protocol. Omit
+				// the field in this case.
 			default:
 				logFields[expectedParam.name] = strValue
 			}
