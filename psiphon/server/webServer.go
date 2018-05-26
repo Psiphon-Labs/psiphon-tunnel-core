@@ -306,3 +306,29 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 	w.Write(responsePayload)
 }
+
+// clientVerificationHandler is kept for compliance with older Android clients
+func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *http.Request) {
+
+	params, err := convertHTTPRequestToAPIRequest(w, r, "verificationData")
+
+	var responsePayload []byte
+	if err == nil {
+		responsePayload, err = dispatchAPIRequestHandler(
+			webServer.support,
+			protocol.PSIPHON_WEB_API_PROTOCOL,
+			webServer.lookupGeoIPData(params),
+			nil, // authorizedAccessTypes not logged in web API transport
+			protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME,
+			params)
+	}
+
+	if err != nil {
+		log.WithContextFields(LogFields{"error": err}).Warning("failed")
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(responsePayload)
+}

@@ -52,6 +52,9 @@ const (
 	PSIPHON_API_STATUS_REQUEST_NAME    = "psiphon-status"
 	PSIPHON_API_OSL_REQUEST_NAME       = "psiphon-osl"
 
+	// PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME may still be used by older Android clients
+	PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME = "psiphon-client-verification"
+
 	PSIPHON_API_CLIENT_SESSION_ID_LENGTH = 16
 
 	PSIPHON_SSH_API_PROTOCOL = "ssh"

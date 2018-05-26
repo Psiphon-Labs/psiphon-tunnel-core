@@ -165,6 +165,8 @@ func dispatchAPIRequestHandler(
 		return connectedAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
 	case protocol.PSIPHON_API_STATUS_REQUEST_NAME:
 		return statusAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
+	case protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME:
+		return clientVerificationAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
 	}
 
 	return nil, common.ContextError(fmt.Errorf("invalid request name: %s", name))
@@ -458,6 +460,16 @@ func statusAPIRequestHandler(
 		log.LogRawFieldsWithTimestamp(logItem)
 	}
 
+	return make([]byte, 0), nil
+}
+
+// clientVerificationAPIRequestHandler is just a compliance stub
+// for older Android clients that still send verification requests
+func clientVerificationAPIRequestHandler(
+	support *SupportServices,
+	geoIPData GeoIPData,
+	authorizedAccessTypes []string,
+	params common.APIParameters) ([]byte, error) {
 	return make([]byte, 0), nil
 }
 
