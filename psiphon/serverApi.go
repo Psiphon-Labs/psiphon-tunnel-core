@@ -154,7 +154,8 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	var response []byte
 	if serverContext.psiphonHttpsClient == nil {
 
-		params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] = serverContext.tunnel.config.Authorizations
+		params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] =
+			serverContext.tunnel.config.GetAuthorizations()
 
 		request, err := makeSSHAPIRequestPayload(params)
 		if err != nil {

@@ -28,9 +28,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
-
 	"os"
+	"strings"
+	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -182,13 +182,23 @@ func Stop() {
 	}
 }
 
-func ReconnectTunnel() {
+// ReconnectTunnel initiates a reconnect of the current tunnel, if one is
+// running.
+//
+// ReconnectTunnel takes an optional parameter which overrides the
+// Authorizations field set in the config passed to Start. When not "", the
+// input newAuthorizationsList is a space-delimited list of base64
+// Authoriztions. newAuthorizationsList is parsed and applied before the
+// current tunnel is reconnected.
+func ReconnectTunnel(newAuthorizationsList string) {
 
 	controllerMutex.Lock()
 	defer controllerMutex.Unlock()
 
 	if controller != nil {
-		// TODO: ensure TerminateNextActiveTunnel is safe for use (see godoc)
+		if newAuthorizationsList != "" {
+			controller.SetAuthorizations(strings.Split(newAuthorizationsList, " "))
+		}
 		controller.TerminateNextActiveTunnel()
 	}
 }

@@ -282,6 +282,23 @@ func (controller *Controller) SignalComponentFailure() {
 	controller.stopRunning()
 }
 
+// SetAuthorizations overrides the Authorizations field of the Controller
+// config with the input value. The new value will be used in the next tunnel
+// connection.
+func (controller *Controller) SetAuthorizations(authorizations []string) {
+	controller.config.SetAuthorizations(authorizations)
+}
+
+// TerminateNextActiveTunnel terminates the active tunnel, which will initiate
+// establishment of a new tunnel.
+func (controller *Controller) TerminateNextActiveTunnel() {
+	tunnel := controller.getNextActiveTunnel()
+	if tunnel != nil {
+		controller.SignalTunnelFailure(tunnel)
+		NoticeInfo("terminated tunnel: %s", tunnel.serverEntry.IpAddress)
+	}
+}
+
 // remoteServerListFetcher fetches an out-of-band list of server entries
 // for more tunnel candidates. It fetches when signalled, with retries
 // on failure.
@@ -763,18 +780,6 @@ loop:
 	}
 
 	NoticeInfo("exiting run tunnels")
-}
-
-// TerminateNextActiveTunnel is a support routine for
-// test code that must terminate the active tunnel and
-// restart establishing. This function is not guaranteed
-// to be safe for use in other cases.
-func (controller *Controller) TerminateNextActiveTunnel() {
-	tunnel := controller.getNextActiveTunnel()
-	if tunnel != nil {
-		controller.SignalTunnelFailure(tunnel)
-		NoticeInfo("terminated tunnel: %s", tunnel.serverEntry.IpAddress)
-	}
 }
 
 // classifyImpairedProtocol tracks "impaired" protocol classifications for failed

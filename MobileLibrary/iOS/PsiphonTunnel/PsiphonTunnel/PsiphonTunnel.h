@@ -333,6 +333,12 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
 
 
 /*!
+ Reconnect a previously started PsiphonTunnel with authorizations set to the specified list.
+ Has no effect if there is no running PsiphonTunnel. authorizations may be nil.
+ */
+- (void)reconnectWithAuthorizations:(NSArray<NSString *> *_Nullable)authorizations;
+
+/*!
  Force stops the tunnel and reconnects with the current session ID.
  Retuns with FALSE immediately if no session ID has already been generated.
 

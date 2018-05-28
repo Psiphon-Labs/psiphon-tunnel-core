@@ -151,6 +151,17 @@
 }
 
 // See comment in header
+- (void)reconnectWithAuthorizations:(NSArray<NSString *> *_Nullable)authorizations {
+
+    NSString *authorizationsList = @"";
+    if (authorizations != nil) {
+        authorizationsList = [authorizations componentsJoinedByString: @" "];
+    }
+
+    GoPsiReconnectTunnel(authorizationsList);
+}
+
+// See comment in header
 - (BOOL)stopAndReconnectWithCurrentSessionID {
 
     // Proceed only if a session ID has alreaby been generated.
@@ -1300,7 +1311,7 @@
     // Restart if the state has changed, unless the previous state was NotReachable, because
     // the tunnel should be waiting for connectivity in that case.
     if (networkStatus != previousNetworkStatus && previousNetworkStatus != NotReachable) {
-        GoPsiReconnectTunnel();
+        GoPsiReconnectTunnel(nil);
     }
 }
 

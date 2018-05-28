@@ -28,6 +28,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -480,6 +481,9 @@ type Config struct {
 	// calling clientParameters.Set directly will fail to add config values.
 	clientParameters *parameters.ClientParameters
 
+	authorizationsMutex sync.Mutex
+	authorizations      []string
+
 	deviceBinder    DeviceBinder
 	networkIDGetter NetworkIDGetter
 
@@ -668,6 +672,10 @@ func (config *Config) Commit() error {
 		return common.ContextError(err)
 	}
 
+	// client authorizations default to config.Authorizations
+
+	config.SetAuthorizations(config.Authorizations)
+
 	// Initialize config.deviceBinder and config.config.networkIDGetter. These
 	// wrap config.DeviceBinder and config.NetworkIDGetter/NetworkID with
 	// loggers.
@@ -743,6 +751,22 @@ func (config *Config) SetClientParameters(tag string, skipOnError bool, applyPar
 	}
 
 	return nil
+}
+
+// GetAuthorizations returns the current client authorizations.
+// The caller must not modify the returned slice.
+func (config *Config) GetAuthorizations() []string {
+	config.authorizationsMutex.Lock()
+	defer config.authorizationsMutex.Unlock()
+	return config.authorizations
+}
+
+// SetAuthorizations sets the current client authorizations.
+// The caller must not modify the input slice.
+func (config *Config) SetAuthorizations(authorizations []string) {
+	config.authorizationsMutex.Lock()
+	defer config.authorizationsMutex.Unlock()
+	config.authorizations = authorizations
 }
 
 func (config *Config) makeConfigParameters() map[string]interface{} {
