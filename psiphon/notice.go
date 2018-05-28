@@ -542,19 +542,6 @@ func NoticeHomepages(urls []string) {
 	}
 }
 
-// NoticeClientVerificationRequired indicates that client verification is required, as
-// indicated by the handshake. The client should submit a client verification payload.
-// Empty nonce is allowed, if ttlSeconds is 0 the client should not send verification
-// payload to the server. If resetCache is set the client must always perform a new
-// verification and update its cache
-func NoticeClientVerificationRequired(nonce string, ttlSeconds int, resetCache bool) {
-	singletonNoticeLogger.outputNotice(
-		"ClientVerificationRequired", 0,
-		"nonce", nonce,
-		"ttlSeconds", ttlSeconds,
-		"resetCache", resetCache)
-}
-
 // NoticeClientRegion is the client's region, as determined by the server and
 // reported to the client in the handshake.
 func NoticeClientRegion(region string) {
@@ -699,13 +686,6 @@ func NoticeRemoteServerListResourceDownloaded(url string) {
 	singletonNoticeLogger.outputNotice(
 		"RemoteServerListResourceDownloaded", noticeIsDiagnostic,
 		"url", url)
-}
-
-func NoticeClientVerificationRequestCompleted(ipAddress string) {
-	// TODO: remove "Notice" prefix
-	singletonNoticeLogger.outputNotice(
-		"NoticeClientVerificationRequestCompleted", noticeIsDiagnostic,
-		"ipAddress", ipAddress)
 }
 
 // NoticeSLOKSeeded indicates that the SLOK with the specified ID was received from

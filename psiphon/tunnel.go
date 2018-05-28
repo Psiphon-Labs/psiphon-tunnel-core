@@ -79,28 +79,27 @@ type TunnelOwner interface {
 // tunnel includes a network connection to the specified server
 // and an SSH session built on top of that transport.
 type Tunnel struct {
-	mutex                        *sync.Mutex
-	config                       *Config
-	isActivated                  bool
-	isDiscarded                  bool
-	isClosed                     bool
-	sessionId                    string
-	serverEntry                  *protocol.ServerEntry
-	serverContext                *ServerContext
-	protocol                     string
-	conn                         *common.ActivityMonitoredConn
-	sshClient                    *ssh.Client
-	sshServerRequests            <-chan *ssh.Request
-	operateWaitGroup             *sync.WaitGroup
-	operateCtx                   context.Context
-	stopOperate                  context.CancelFunc
-	signalPortForwardFailure     chan struct{}
-	totalPortForwardFailures     int
-	adjustedEstablishStartTime   monotime.Time
-	establishDuration            time.Duration
-	establishedTime              monotime.Time
-	dialStats                    *DialStats
-	newClientVerificationPayload chan string
+	mutex                      *sync.Mutex
+	config                     *Config
+	isActivated                bool
+	isDiscarded                bool
+	isClosed                   bool
+	sessionId                  string
+	serverEntry                *protocol.ServerEntry
+	serverContext              *ServerContext
+	protocol                   string
+	conn                       *common.ActivityMonitoredConn
+	sshClient                  *ssh.Client
+	sshServerRequests          <-chan *ssh.Request
+	operateWaitGroup           *sync.WaitGroup
+	operateCtx                 context.Context
+	stopOperate                context.CancelFunc
+	signalPortForwardFailure   chan struct{}
+	totalPortForwardFailures   int
+	adjustedEstablishStartTime monotime.Time
+	establishDuration          time.Duration
+	establishedTime            monotime.Time
+	dialStats                  *DialStats
 }
 
 // DialStats records additional dial config that is sent to the server for
@@ -186,9 +185,6 @@ func ConnectTunnel(
 		signalPortForwardFailure:   make(chan struct{}, 1),
 		adjustedEstablishStartTime: adjustedEstablishStartTime,
 		dialStats:                  dialResult.dialStats,
-		// Buffer allows SetClientVerificationPayload to submit one new payload
-		// without blocking or dropping it.
-		newClientVerificationPayload: make(chan string, 1),
 	}, nil
 }
 
@@ -483,17 +479,6 @@ func (tunnel *Tunnel) wrapWithTransferStats(conn net.Conn) net.Conn {
 func (tunnel *Tunnel) SignalComponentFailure() {
 	NoticeAlert("tunnel received component failure signal")
 	tunnel.Close(false)
-}
-
-// SetClientVerificationPayload triggers a client verification request, for this
-// tunnel, with the specified verifiction payload. If the tunnel is not yet established,
-// the payload/request is enqueued. If a payload/request is already eneueued, the
-// new payload is dropped.
-func (tunnel *Tunnel) SetClientVerificationPayload(clientVerificationPayload string) {
-	select {
-	case tunnel.newClientVerificationPayload <- clientVerificationPayload:
-	default:
-	}
 }
 
 // TunneledConn implements net.Conn and wraps a port forward connection.
@@ -1271,58 +1256,6 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		}
 	}()
 
-	requestsWaitGroup.Add(1)
-	signalStopClientVerificationRequests := make(chan struct{})
-	go func() {
-		defer requestsWaitGroup.Done()
-
-		clientVerificationRequestSuccess := true
-		clientVerificationPayload := ""
-		failCount := 0
-		for {
-			// TODO: use reflect.SelectCase?
-			if clientVerificationRequestSuccess == true {
-				failCount = 0
-				select {
-				case clientVerificationPayload = <-tunnel.newClientVerificationPayload:
-				case <-signalStopClientVerificationRequests:
-					return
-				}
-			} else {
-
-				maxRetries := clientParameters.Get().Int(
-					parameters.PsiphonAPIClientVerificationRequestMaxRetries)
-
-				// If sendClientVerification failed to send the payload we
-				// will retry after a delay. Will use a new payload instead
-				// if that arrives in the meantime.
-				failCount += 1
-				if failCount > maxRetries {
-					return
-				}
-
-				timeout := clientParameters.Get().Duration(
-					parameters.PsiphonAPIClientVerificationRequestRetryPeriod)
-
-				timer := time.NewTimer(timeout)
-
-				doReturn := false
-				select {
-				case <-timer.C:
-				case clientVerificationPayload = <-tunnel.newClientVerificationPayload:
-				case <-signalStopClientVerificationRequests:
-					doReturn = true
-				}
-				timer.Stop()
-				if doReturn {
-					return
-				}
-			}
-
-			clientVerificationRequestSuccess = sendClientVerification(tunnel, clientVerificationPayload)
-		}
-	}()
-
 	shutdown := false
 	var err error
 	for !shutdown && err == nil {
@@ -1416,7 +1349,6 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 	close(signalSshKeepAlive)
 	close(signalStatusRequest)
-	close(signalStopClientVerificationRequests)
 	requestsWaitGroup.Wait()
 
 	// Capture bytes transferred since the last noticeBytesTransferredTicker tick
@@ -1539,28 +1471,6 @@ func sendStats(tunnel *Tunnel) bool {
 	err := tunnel.serverContext.DoStatusRequest(tunnel)
 	if err != nil {
 		NoticeAlert("DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
-	}
-
-	return err == nil
-}
-
-// sendClientVerification is a helper for sending a client verification request
-// to the server.
-func sendClientVerification(tunnel *Tunnel, clientVerificationPayload string) bool {
-
-	// Tunnel does not have a serverContext when DisableApi is set
-	if tunnel.serverContext == nil {
-		return true
-	}
-
-	// Skip when tunnel is discarded
-	if tunnel.IsDiscarded() {
-		return true
-	}
-
-	err := tunnel.serverContext.DoClientVerificationRequest(clientVerificationPayload, tunnel.serverEntry.IpAddress)
-	if err != nil {
-		NoticeAlert("DoClientVerificationRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
 	}
 
 	return err == nil

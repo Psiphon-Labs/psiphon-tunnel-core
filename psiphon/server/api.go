@@ -39,14 +39,10 @@ import (
 const (
 	MAX_API_PARAMS_SIZE = 256 * 1024 // 256KB
 
-	CLIENT_VERIFICATION_TTL_SECONDS = 60 * 60 * 24 * 7 // 7 days
-
 	CLIENT_PLATFORM_ANDROID = "Android"
 	CLIENT_PLATFORM_WINDOWS = "Windows"
 	CLIENT_PLATFORM_IOS     = "iOS"
 )
-
-var CLIENT_VERIFICATION_REQUIRED = false
 
 // sshAPIRequestHandler routes Psiphon API requests transported as
 // JSON objects via the SSH request mechanism.
@@ -467,70 +463,14 @@ func statusAPIRequestHandler(
 	return make([]byte, 0), nil
 }
 
-// clientVerificationAPIRequestHandler implements the
-// "client verification" API request. Clients make the client
-// verification request once per tunnel connection. The payload
-// attests that client is a legitimate Psiphon client.
+// clientVerificationAPIRequestHandler is just a compliance stub
+// for older Android clients that still send verification requests
 func clientVerificationAPIRequestHandler(
 	support *SupportServices,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
 	params common.APIParameters) ([]byte, error) {
-
-	err := validateRequestParams(support.Config, params, baseRequestParams)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-
-	// Ignoring error as params are validated
-	clientPlatform, _ := getStringRequestParam(params, "client_platform")
-
-	// Client sends empty payload to receive TTL
-	// NOTE: these events are not currently logged
-	if params["verificationData"] == nil {
-		if CLIENT_VERIFICATION_REQUIRED {
-
-			var clientVerificationResponse struct {
-				ClientVerificationTTLSeconds int `json:"client_verification_ttl_seconds"`
-			}
-			clientVerificationResponse.ClientVerificationTTLSeconds = CLIENT_VERIFICATION_TTL_SECONDS
-
-			responsePayload, err := json.Marshal(clientVerificationResponse)
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-
-			return responsePayload, nil
-		}
-		return make([]byte, 0), nil
-	} else {
-		verificationData, err := getJSONObjectRequestParam(params, "verificationData")
-		if err != nil {
-			return nil, common.ContextError(err)
-		}
-
-		logFields := getRequestLogFields(
-			"client_verification",
-			geoIPData,
-			authorizedAccessTypes,
-			params,
-			baseRequestParams)
-
-		var verified bool
-		var safetyNetCheckLogs LogFields
-		switch normalizeClientPlatform(clientPlatform) {
-		case CLIENT_PLATFORM_ANDROID:
-			verified, safetyNetCheckLogs = verifySafetyNetPayload(verificationData)
-			logFields["safetynet_check"] = safetyNetCheckLogs
-		}
-
-		log.LogRawFieldsWithTimestamp(logFields)
-
-		if verified {
-			// TODO: change throttling treatment
-		}
-		return make([]byte, 0), nil
-	}
+	return make([]byte, 0), nil
 }
 
 var tacticsParams = []requestParamSpec{

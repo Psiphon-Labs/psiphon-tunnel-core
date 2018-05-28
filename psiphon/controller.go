@@ -74,7 +74,6 @@ type Controller struct {
 	impairedProtocolClassification     map[string]int
 	signalReportConnected              chan struct{}
 	serverAffinityDoneBroadcast        chan struct{}
-	newClientVerificationPayload       chan string
 	packetTunnelClient                 *tun.Client
 	packetTunnelTransport              *PacketTunnelTransport
 }
@@ -133,9 +132,6 @@ func NewController(config *Config) (controller *Controller, err error) {
 		signalFetchObfuscatedServerLists:  make(chan struct{}),
 		signalDownloadUpgrade:             make(chan string),
 		signalReportConnected:             make(chan struct{}),
-		// Buffer allows SetClientVerificationPayloadForActiveTunnels to submit one
-		// new payload without blocking or dropping it.
-		newClientVerificationPayload: make(chan string, 1),
 	}
 
 	controller.splitTunnelClassifier = NewSplitTunnelClassifier(config, controller)
@@ -284,29 +280,6 @@ func (controller *Controller) Run(ctx context.Context) {
 func (controller *Controller) SignalComponentFailure() {
 	NoticeAlert("controller shutdown due to component failure")
 	controller.stopRunning()
-}
-
-// SetClientVerificationPayloadForActiveTunnels sets the client verification
-// payload that is to be sent in client verification requests to all established
-// tunnels.
-//
-// Client verification is used to verify that the client is a
-// valid Psiphon client, which will determine how the server treats
-// the client traffic. The proof-of-validity is platform-specific
-// and the payload is opaque to this function but assumed to be JSON.
-//
-// Since, in some cases, verification payload cannot be determined until
-// after tunnel-core starts, the payload cannot be simply specified in
-// the Config.
-//
-// SetClientVerificationPayloadForActiveTunnels will not block enqueuing a new verification
-// payload. One new payload can be enqueued, after which additional payloads
-// will be dropped if a payload is still enqueued.
-func (controller *Controller) SetClientVerificationPayloadForActiveTunnels(clientVerificationPayload string) {
-	select {
-	case controller.newClientVerificationPayload <- clientVerificationPayload:
-	default:
-	}
 }
 
 // remoteServerListFetcher fetches an out-of-band list of server entries
@@ -594,8 +567,6 @@ downloadLoop:
 func (controller *Controller) runTunnels() {
 	defer controller.runWaitGroup.Done()
 
-	var clientVerificationPayload string
-
 	// Start running
 
 	controller.startEstablishing()
@@ -770,9 +741,6 @@ loop:
 			if controller.isFullyEstablished() {
 				controller.stopEstablishing()
 			}
-
-		case clientVerificationPayload = <-controller.newClientVerificationPayload:
-			controller.setClientVerificationPayloadForActiveTunnels(clientVerificationPayload)
 
 		case <-controller.runCtx.Done():
 			break loop
@@ -1051,19 +1019,6 @@ func (controller *Controller) isActiveTunnelServerEntry(
 		}
 	}
 	return false
-}
-
-// setClientVerificationPayloadForActiveTunnels triggers the client verification
-// request for all active tunnels.
-func (controller *Controller) setClientVerificationPayloadForActiveTunnels(
-	clientVerificationPayload string) {
-
-	controller.tunnelMutex.Lock()
-	defer controller.tunnelMutex.Unlock()
-
-	for _, activeTunnel := range controller.tunnels {
-		activeTunnel.SetClientVerificationPayload(clientVerificationPayload)
-	}
 }
 
 // Dial selects an active tunnel and establishes a port forward

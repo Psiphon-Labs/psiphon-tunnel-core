@@ -30,11 +30,12 @@ import (
 	"fmt"
 	"sync"
 
+	"os"
+
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
-	"os"
 )
 
 type PsiphonProvider interface {
@@ -189,20 +190,6 @@ func ReconnectTunnel() {
 	if controller != nil {
 		// TODO: ensure TerminateNextActiveTunnel is safe for use (see godoc)
 		controller.TerminateNextActiveTunnel()
-	}
-}
-
-// SetClientVerificationPayload is a passthrough to
-// Controller.SetClientVerificationPayloadForActiveTunnels.
-// Note: should only be called after Start() and before Stop(); otherwise,
-// will silently take no action.
-func SetClientVerificationPayload(clientVerificationPayload string) {
-
-	controllerMutex.Lock()
-	defer controllerMutex.Unlock()
-
-	if controller != nil {
-		controller.SetClientVerificationPayloadForActiveTunnels(clientVerificationPayload)
 	}
 }
 
