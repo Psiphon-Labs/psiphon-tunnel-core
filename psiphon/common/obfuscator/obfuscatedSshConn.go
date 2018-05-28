@@ -35,6 +35,7 @@ const (
 	SSH_MAX_PACKET_LENGTH      = 256 * 1024 // OpenSSH max packet length
 	SSH_MSG_NEWKEYS            = 21
 	SSH_MAX_PADDING_LENGTH     = 255 // RFC 4253 sec. 6
+	SSH_PADDING_MULTIPLE       = 16  // Default cipher block size
 )
 
 // ObfuscatedSshConn wraps a Conn and applies the obfuscated SSH protocol
@@ -64,6 +65,7 @@ type ObfuscatedSshConn struct {
 	readBuffer      *bytes.Buffer
 	writeBuffer     *bytes.Buffer
 	transformBuffer *bytes.Buffer
+	legacyPadding   bool
 }
 
 type ObfuscatedSshConnMode int
@@ -237,6 +239,9 @@ func (conn *ObfuscatedSshConn) readAndTransform(buffer []byte) (int, error) {
 					return 0, common.ContextError(err)
 				}
 				if bytes.HasPrefix(conn.readBuffer.Bytes(), []byte("SSH-")) {
+					if bytes.Contains(conn.readBuffer.Bytes(), []byte("Ganymed")) {
+						conn.legacyPadding = true
+					}
 					break
 				}
 				// Discard extra line
@@ -362,7 +367,7 @@ func (conn *ObfuscatedSshConn) transformAndWrite(buffer []byte) error {
 
 	case OBFUSCATION_WRITE_STATE_KEX_PACKETS:
 		hasMsgNewKeys, err := extractSshPackets(
-			conn.writeBuffer, conn.transformBuffer)
+			conn.legacyPadding, conn.writeBuffer, conn.transformBuffer)
 		if err != nil {
 			return common.ContextError(err)
 		}
@@ -518,7 +523,9 @@ func extractSshIdentificationLine(writeBuffer, transformBuffer *bytes.Buffer) bo
 	return false
 }
 
-func extractSshPackets(writeBuffer, transformBuffer *bytes.Buffer) (bool, error) {
+func extractSshPackets(
+	legacyPadding bool, writeBuffer, transformBuffer *bytes.Buffer) (bool, error) {
+
 	hasMsgNewKeys := false
 	for writeBuffer.Len() >= SSH_PACKET_PREFIX_LENGTH {
 
@@ -547,34 +554,53 @@ func extractSshPackets(writeBuffer, transformBuffer *bytes.Buffer) (bool, error)
 		transformedPacket := transformBuffer.Bytes()[transformedPacketOffset:]
 
 		// Padding transformation
-		// This does not satisfy RFC 4253 sec. 6 constraints:
-		// - The goal is to vary packet sizes as much as possible.
-		// - We implement both the client and server sides and both sides accept
-		//   less constrained paddings (for plaintext packets).
-		possibleExtraPaddingLength := (SSH_MAX_PADDING_LENGTH - paddingLength)
-		if possibleExtraPaddingLength > 0 {
 
-			// TODO: proceed without padding if MakeSecureRandom* fails?
+		extraPaddingLength := 0
 
-			// selectedPadding is integer in range [0, possiblePadding + 1)
-			extraPaddingLength, err := common.MakeSecureRandomInt(
-				possibleExtraPaddingLength + 1)
-			if err != nil {
-				return false, common.ContextError(err)
+		if !legacyPadding {
+			// This does not satisfy RFC 4253 sec. 6 constraints:
+			// - The goal is to vary packet sizes as much as possible.
+			// - We implement both the client and server sides and both sides accept
+			//   less constrained paddings (for plaintext packets).
+			possibleExtraPaddingLength := (SSH_MAX_PADDING_LENGTH - paddingLength)
+			if possibleExtraPaddingLength > 0 {
+
+				// TODO: proceed without padding if MakeSecureRandom* fails?
+
+				// extraPaddingLength is integer in range [0, possiblePadding + 1)
+				extraPaddingLength, err = common.MakeSecureRandomInt(
+					possibleExtraPaddingLength + 1)
+				if err != nil {
+					return false, common.ContextError(err)
+				}
 			}
-			extraPadding, err := common.MakeSecureRandomBytes(extraPaddingLength)
-			if err != nil {
-				return false, common.ContextError(err)
+		} else {
+			// See RFC 4253 sec. 6 for constraints
+			possiblePaddings := (SSH_MAX_PADDING_LENGTH - paddingLength) / SSH_PADDING_MULTIPLE
+			if possiblePaddings > 0 {
+
+				// selectedPadding is integer in range [0, possiblePaddings)
+				selectedPadding, err := common.MakeSecureRandomInt(possiblePaddings)
+				if err != nil {
+					return false, common.ContextError(err)
+				}
+				extraPaddingLength = selectedPadding * SSH_PADDING_MULTIPLE
 			}
-
-			setSshPacketPrefix(
-				transformedPacket,
-				packetLength+extraPaddingLength,
-				paddingLength+extraPaddingLength)
-
-			transformBuffer.Write(extraPadding)
 		}
+
+		extraPadding, err := common.MakeSecureRandomBytes(extraPaddingLength)
+		if err != nil {
+			return false, common.ContextError(err)
+		}
+
+		setSshPacketPrefix(
+			transformedPacket,
+			packetLength+extraPaddingLength,
+			paddingLength+extraPaddingLength)
+
+		transformBuffer.Write(extraPadding)
 	}
+
 	return hasMsgNewKeys, nil
 }
 

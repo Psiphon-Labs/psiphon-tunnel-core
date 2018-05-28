@@ -89,6 +89,10 @@ func DialTCPFragmentor(
 		NoticeAlert("MakeSecureRandomRange failed: %s", common.ContextError(err))
 	}
 
+	if totalBytes == 0 {
+		return conn, nil
+	}
+
 	runCtx, stopRunning := context.WithCancel(context.Background())
 
 	return &FragmentorConn{

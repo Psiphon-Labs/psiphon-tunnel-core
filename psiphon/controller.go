@@ -1216,9 +1216,8 @@ func (controller *Controller) launchEstablishing() {
 
 	// Unconditionally report available egress regions. After a fresh install,
 	// the outer client may not have a list of regions to display, so we
-	// always report here. Events that trigger ReportAvailableRegions,
-	// including storing new server entries and applying tactics, are not
-	// guaranteed to occur.
+	// always report here. Other events that trigger ReportAvailableRegions,
+	// are not guaranteed to occur.
 	//
 	// This report is delayed until after tactics are likely to be applied, as
 	// tactics can impact the list of available regions; this avoids a
