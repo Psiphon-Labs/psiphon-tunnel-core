@@ -692,7 +692,7 @@ func getBaseAPIParameters(
 	params["client_session_id"] = sessionID
 	params["server_secret"] = serverEntry.WebServerSecret
 	params["propagation_channel_id"] = config.PropagationChannelId
-	params["sponsor_id"] = config.SponsorId
+	params["sponsor_id"] = config.GetSponsorID()
 	params["client_version"] = config.ClientVersion
 	params["relay_protocol"] = protocol
 	params["client_platform"] = config.ClientPlatform

@@ -151,14 +151,20 @@
 }
 
 // See comment in header
-- (void)reconnectWithAuthorizations:(NSArray<NSString *> *_Nullable)authorizations {
+- (void)reconnectWithConfig:(NSString * _Nullable) newSponsorID :(NSArray<NSString *> *_Nullable)newAuthorizations {
 
-    NSString *authorizationsList = @"";
-    if (authorizations != nil) {
-        authorizationsList = [authorizations componentsJoinedByString: @" "];
+    NSString *sponsorID = @"";
+    if (newSponsorID != nil) {
+        sponsorID = newSponsorID;
     }
 
-    GoPsiReconnectTunnel(authorizationsList);
+    NSString *authorizationsList = @"";
+    if (newAuthorizations != nil) {
+        authorizationsList = [newAuthorizations componentsJoinedByString: @" "];
+    }
+
+    GoPsiSetDynamicConfig(sponsorID, authorizationsList);
+    GoPsiReconnectTunnel();
 }
 
 // See comment in header
@@ -1311,7 +1317,7 @@
     // Restart if the state has changed, unless the previous state was NotReachable, because
     // the tunnel should be waiting for connectivity in that case.
     if (networkStatus != previousNetworkStatus && previousNetworkStatus != NotReachable) {
-        GoPsiReconnectTunnel(nil);
+        GoPsiReconnectTunnel();
     }
 }
 

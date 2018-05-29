@@ -184,22 +184,31 @@ func Stop() {
 
 // ReconnectTunnel initiates a reconnect of the current tunnel, if one is
 // running.
-//
-// ReconnectTunnel takes an optional parameter which overrides the
-// Authorizations field set in the config passed to Start. When not "", the
-// input newAuthorizationsList is a space-delimited list of base64
-// Authoriztions. newAuthorizationsList is parsed and applied before the
-// current tunnel is reconnected.
-func ReconnectTunnel(newAuthorizationsList string) {
+func ReconnectTunnel() {
 
 	controllerMutex.Lock()
 	defer controllerMutex.Unlock()
 
 	if controller != nil {
-		if newAuthorizationsList != "" {
-			controller.SetAuthorizations(strings.Split(newAuthorizationsList, " "))
-		}
 		controller.TerminateNextActiveTunnel()
+	}
+}
+
+// SetDynamicConfig overrides the sponsor ID and authorizations fields set in
+// the config passed to Start. SetDynamicConfig has no effect if no Controller
+// is started.
+//
+// The input newAuthorizationsList is a space-delimited list of base64
+// authorizations. This is a workaround for gobind type limitations.
+func SetDynamicConfig(newSponsorID, newAuthorizationsList string) {
+
+	controllerMutex.Lock()
+	defer controllerMutex.Unlock()
+
+	if controller != nil {
+		controller.SetDynamicConfig(
+			newSponsorID,
+			strings.Split(newAuthorizationsList, " "))
 	}
 }
 

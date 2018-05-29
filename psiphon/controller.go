@@ -282,11 +282,11 @@ func (controller *Controller) SignalComponentFailure() {
 	controller.stopRunning()
 }
 
-// SetAuthorizations overrides the Authorizations field of the Controller
-// config with the input value. The new value will be used in the next tunnel
-// connection.
-func (controller *Controller) SetAuthorizations(authorizations []string) {
-	controller.config.SetAuthorizations(authorizations)
+// SetDynamicConfig overrides the sponsor ID and authorizations fields of the
+// Controller config with the input values. The new values will be used in the
+// next tunnel connection.
+func (controller *Controller) SetDynamicConfig(sponsorID string, authorizations []string) {
+	controller.config.SetDynamicConfig(sponsorID, authorizations)
 }
 
 // TerminateNextActiveTunnel terminates the active tunnel, which will initiate

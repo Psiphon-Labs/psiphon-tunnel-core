@@ -481,8 +481,9 @@ type Config struct {
 	// calling clientParameters.Set directly will fail to add config values.
 	clientParameters *parameters.ClientParameters
 
-	authorizationsMutex sync.Mutex
-	authorizations      []string
+	dynamicConfigMutex sync.Mutex
+	sponsorID          string
+	authorizations     []string
 
 	deviceBinder    DeviceBinder
 	networkIDGetter NetworkIDGetter
@@ -672,9 +673,9 @@ func (config *Config) Commit() error {
 		return common.ContextError(err)
 	}
 
-	// client authorizations default to config.Authorizations
+	// Set defaults for dynamic config fields.
 
-	config.SetAuthorizations(config.Authorizations)
+	config.SetDynamicConfig(config.SponsorId, config.Authorizations)
 
 	// Initialize config.deviceBinder and config.config.networkIDGetter. These
 	// wrap config.DeviceBinder and config.NetworkIDGetter/NetworkID with
@@ -753,20 +754,31 @@ func (config *Config) SetClientParameters(tag string, skipOnError bool, applyPar
 	return nil
 }
 
+// SetDynamicConfig sets the current client sponsor ID and authorizations.
+// Invalid values for sponsor ID are ignored. The caller must not modify the
+// input authorizations slice.
+func (config *Config) SetDynamicConfig(sponsorID string, authorizations []string) {
+	config.dynamicConfigMutex.Lock()
+	defer config.dynamicConfigMutex.Unlock()
+	if sponsorID != "" {
+		config.sponsorID = sponsorID
+	}
+	config.authorizations = authorizations
+}
+
+// GetSponsorID returns the current client sponsor ID.
+func (config *Config) GetSponsorID() string {
+	config.dynamicConfigMutex.Lock()
+	defer config.dynamicConfigMutex.Unlock()
+	return config.sponsorID
+}
+
 // GetAuthorizations returns the current client authorizations.
 // The caller must not modify the returned slice.
 func (config *Config) GetAuthorizations() []string {
-	config.authorizationsMutex.Lock()
-	defer config.authorizationsMutex.Unlock()
+	config.dynamicConfigMutex.Lock()
+	defer config.dynamicConfigMutex.Unlock()
 	return config.authorizations
-}
-
-// SetAuthorizations sets the current client authorizations.
-// The caller must not modify the input slice.
-func (config *Config) SetAuthorizations(authorizations []string) {
-	config.authorizationsMutex.Lock()
-	defer config.authorizationsMutex.Unlock()
-	config.authorizations = authorizations
 }
 
 func (config *Config) makeConfigParameters() map[string]interface{} {
