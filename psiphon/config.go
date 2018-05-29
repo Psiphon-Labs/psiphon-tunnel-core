@@ -28,6 +28,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -254,8 +255,11 @@ type Config struct {
 	// TargetApiProtocol specifies whether to force use of "ssh" or "web" API
 	// protocol. When blank, the default, the optimal API protocol is used.
 	// Note that this capability check is not applied before the
-	// "CandidateServers" count is emitted. This parameter is intended for
-	// testing and debugging only.
+	// "CandidateServers" count is emitted.
+	//
+	// This parameter is intended for testing and debugging only. Not all
+	// parameters are supported in the legacy "web" API protocol, including
+	// speed test samples.
 	TargetApiProtocol string
 
 	// RemoteServerListUrl is a URL which specifies a location to fetch out-
@@ -477,6 +481,10 @@ type Config struct {
 	// calling clientParameters.Set directly will fail to add config values.
 	clientParameters *parameters.ClientParameters
 
+	dynamicConfigMutex sync.Mutex
+	sponsorID          string
+	authorizations     []string
+
 	deviceBinder    DeviceBinder
 	networkIDGetter NetworkIDGetter
 
@@ -665,6 +673,10 @@ func (config *Config) Commit() error {
 		return common.ContextError(err)
 	}
 
+	// Set defaults for dynamic config fields.
+
+	config.SetDynamicConfig(config.SponsorId, config.Authorizations)
+
 	// Initialize config.deviceBinder and config.config.networkIDGetter. These
 	// wrap config.DeviceBinder and config.NetworkIDGetter/NetworkID with
 	// loggers.
@@ -740,6 +752,33 @@ func (config *Config) SetClientParameters(tag string, skipOnError bool, applyPar
 	}
 
 	return nil
+}
+
+// SetDynamicConfig sets the current client sponsor ID and authorizations.
+// Invalid values for sponsor ID are ignored. The caller must not modify the
+// input authorizations slice.
+func (config *Config) SetDynamicConfig(sponsorID string, authorizations []string) {
+	config.dynamicConfigMutex.Lock()
+	defer config.dynamicConfigMutex.Unlock()
+	if sponsorID != "" {
+		config.sponsorID = sponsorID
+	}
+	config.authorizations = authorizations
+}
+
+// GetSponsorID returns the current client sponsor ID.
+func (config *Config) GetSponsorID() string {
+	config.dynamicConfigMutex.Lock()
+	defer config.dynamicConfigMutex.Unlock()
+	return config.sponsorID
+}
+
+// GetAuthorizations returns the current client authorizations.
+// The caller must not modify the returned slice.
+func (config *Config) GetAuthorizations() []string {
+	config.dynamicConfigMutex.Lock()
+	defer config.dynamicConfigMutex.Unlock()
+	return config.authorizations
 }
 
 func (config *Config) makeConfigParameters() map[string]interface{} {

@@ -151,6 +151,23 @@
 }
 
 // See comment in header
+- (void)reconnectWithConfig:(NSString * _Nullable) newSponsorID :(NSArray<NSString *> *_Nullable)newAuthorizations {
+
+    NSString *sponsorID = @"";
+    if (newSponsorID != nil) {
+        sponsorID = newSponsorID;
+    }
+
+    NSString *authorizationsList = @"";
+    if (newAuthorizations != nil) {
+        authorizationsList = [newAuthorizations componentsJoinedByString: @" "];
+    }
+
+    GoPsiSetDynamicConfig(sponsorID, authorizationsList);
+    GoPsiReconnectTunnel();
+}
+
+// See comment in header
 - (BOOL)stopAndReconnectWithCurrentSessionID {
 
     // Proceed only if a session ID has alreaby been generated.

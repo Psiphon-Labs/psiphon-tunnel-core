@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -32,7 +33,8 @@ import (
 )
 
 const (
-	NUM_FRAGMENTOR_NOTICES = 3
+	MAX_FRAGMENTOR_NOTICES               = 3
+	MAX_FRAGMENTOR_ITERATIONS_PER_NOTICE = 5
 )
 
 // NewTCPFragmentorDialer creates a TCP dialer that wraps dialed conns in
@@ -89,6 +91,10 @@ func DialTCPFragmentor(
 		NoticeAlert("MakeSecureRandomRange failed: %s", common.ContextError(err))
 	}
 
+	if totalBytes == 0 {
+		return conn, nil
+	}
+
 	runCtx, stopRunning := context.WithCancel(context.Background())
 
 	return &FragmentorConn{
@@ -116,8 +122,8 @@ type FragmentorConn struct {
 	runCtx          context.Context
 	stopRunning     context.CancelFunc
 	isClosed        int32
-	numNotices      int32
 	writeMutex      sync.Mutex
+	numNotices      int
 	bytesToFragment int
 	bytesFragmented int
 	minWriteBytes   int
@@ -137,7 +143,23 @@ func (fragmentor *FragmentorConn) Write(buffer []byte) (int, error) {
 
 	totalBytesWritten := 0
 
-	for len(buffer) > 0 {
+	emitNotice := fragmentor.numNotices < MAX_FRAGMENTOR_NOTICES
+
+	// TODO: use strings.Builder in Go 1.10
+	var notice bytes.Buffer
+
+	if emitNotice {
+		remoteAddrStr := "(nil)"
+		remoteAddr := fragmentor.Conn.RemoteAddr()
+		if remoteAddr != nil {
+			remoteAddrStr = remoteAddr.String()
+		}
+		fmt.Fprintf(&notice,
+			"fragment %s %d bytes:",
+			remoteAddrStr, len(buffer))
+	}
+
+	for iterations := 0; len(buffer) > 0; iterations += 1 {
 
 		delay, err := common.MakeSecureRandomPeriod(
 			fragmentor.minDelay, fragmentor.maxDelay)
@@ -183,21 +205,20 @@ func (fragmentor *FragmentorConn) Write(buffer []byte) (int, error) {
 			return totalBytesWritten, err
 		}
 
-		numNotices := atomic.LoadInt32(&fragmentor.numNotices)
-		if numNotices < NUM_FRAGMENTOR_NOTICES &&
-			atomic.AddInt32(&fragmentor.numNotices, 1) <= NUM_FRAGMENTOR_NOTICES {
-
-			remoteAddrStr := "(nil)"
-			remoteAddr := fragmentor.Conn.RemoteAddr()
-			if remoteAddr != nil {
-				remoteAddrStr = remoteAddr.String()
+		if emitNotice {
+			if iterations < MAX_FRAGMENTOR_ITERATIONS_PER_NOTICE {
+				fmt.Fprintf(&notice, " [%s] %d", delay, bytesWritten)
+			} else if iterations == MAX_FRAGMENTOR_ITERATIONS_PER_NOTICE {
+				fmt.Fprintf(&notice, "...")
 			}
-
-			NoticeInfo("fragmentor %s: %s delay, %d bytes",
-				remoteAddrStr, delay, bytesWritten)
 		}
 
 		buffer = buffer[writeBytes:]
+	}
+
+	if emitNotice {
+		NoticeInfo(notice.String())
+		fragmentor.numNotices += 1
 	}
 
 	return totalBytesWritten, nil

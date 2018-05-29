@@ -28,13 +28,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
-	"os"
 )
 
 type PsiphonProvider interface {
@@ -181,28 +182,33 @@ func Stop() {
 	}
 }
 
+// ReconnectTunnel initiates a reconnect of the current tunnel, if one is
+// running.
 func ReconnectTunnel() {
 
 	controllerMutex.Lock()
 	defer controllerMutex.Unlock()
 
 	if controller != nil {
-		// TODO: ensure TerminateNextActiveTunnel is safe for use (see godoc)
 		controller.TerminateNextActiveTunnel()
 	}
 }
 
-// SetClientVerificationPayload is a passthrough to
-// Controller.SetClientVerificationPayloadForActiveTunnels.
-// Note: should only be called after Start() and before Stop(); otherwise,
-// will silently take no action.
-func SetClientVerificationPayload(clientVerificationPayload string) {
+// SetDynamicConfig overrides the sponsor ID and authorizations fields set in
+// the config passed to Start. SetDynamicConfig has no effect if no Controller
+// is started.
+//
+// The input newAuthorizationsList is a space-delimited list of base64
+// authorizations. This is a workaround for gobind type limitations.
+func SetDynamicConfig(newSponsorID, newAuthorizationsList string) {
 
 	controllerMutex.Lock()
 	defer controllerMutex.Unlock()
 
 	if controller != nil {
-		controller.SetClientVerificationPayloadForActiveTunnels(clientVerificationPayload)
+		controller.SetDynamicConfig(
+			newSponsorID,
+			strings.Split(newAuthorizationsList, " "))
 	}
 }
 

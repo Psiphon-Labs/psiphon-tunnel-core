@@ -74,7 +74,6 @@ type Controller struct {
 	impairedProtocolClassification     map[string]int
 	signalReportConnected              chan struct{}
 	serverAffinityDoneBroadcast        chan struct{}
-	newClientVerificationPayload       chan string
 	packetTunnelClient                 *tun.Client
 	packetTunnelTransport              *PacketTunnelTransport
 }
@@ -133,9 +132,6 @@ func NewController(config *Config) (controller *Controller, err error) {
 		signalFetchObfuscatedServerLists:  make(chan struct{}),
 		signalDownloadUpgrade:             make(chan string),
 		signalReportConnected:             make(chan struct{}),
-		// Buffer allows SetClientVerificationPayloadForActiveTunnels to submit one
-		// new payload without blocking or dropping it.
-		newClientVerificationPayload: make(chan string, 1),
 	}
 
 	controller.splitTunnelClassifier = NewSplitTunnelClassifier(config, controller)
@@ -286,26 +282,20 @@ func (controller *Controller) SignalComponentFailure() {
 	controller.stopRunning()
 }
 
-// SetClientVerificationPayloadForActiveTunnels sets the client verification
-// payload that is to be sent in client verification requests to all established
-// tunnels.
-//
-// Client verification is used to verify that the client is a
-// valid Psiphon client, which will determine how the server treats
-// the client traffic. The proof-of-validity is platform-specific
-// and the payload is opaque to this function but assumed to be JSON.
-//
-// Since, in some cases, verification payload cannot be determined until
-// after tunnel-core starts, the payload cannot be simply specified in
-// the Config.
-//
-// SetClientVerificationPayloadForActiveTunnels will not block enqueuing a new verification
-// payload. One new payload can be enqueued, after which additional payloads
-// will be dropped if a payload is still enqueued.
-func (controller *Controller) SetClientVerificationPayloadForActiveTunnels(clientVerificationPayload string) {
-	select {
-	case controller.newClientVerificationPayload <- clientVerificationPayload:
-	default:
+// SetDynamicConfig overrides the sponsor ID and authorizations fields of the
+// Controller config with the input values. The new values will be used in the
+// next tunnel connection.
+func (controller *Controller) SetDynamicConfig(sponsorID string, authorizations []string) {
+	controller.config.SetDynamicConfig(sponsorID, authorizations)
+}
+
+// TerminateNextActiveTunnel terminates the active tunnel, which will initiate
+// establishment of a new tunnel.
+func (controller *Controller) TerminateNextActiveTunnel() {
+	tunnel := controller.getNextActiveTunnel()
+	if tunnel != nil {
+		controller.SignalTunnelFailure(tunnel)
+		NoticeInfo("terminated tunnel: %s", tunnel.serverEntry.IpAddress)
 	}
 }
 
@@ -594,8 +584,6 @@ downloadLoop:
 func (controller *Controller) runTunnels() {
 	defer controller.runWaitGroup.Done()
 
-	var clientVerificationPayload string
-
 	// Start running
 
 	controller.startEstablishing()
@@ -771,9 +759,6 @@ loop:
 				controller.stopEstablishing()
 			}
 
-		case clientVerificationPayload = <-controller.newClientVerificationPayload:
-			controller.setClientVerificationPayloadForActiveTunnels(clientVerificationPayload)
-
 		case <-controller.runCtx.Done():
 			break loop
 		}
@@ -795,18 +780,6 @@ loop:
 	}
 
 	NoticeInfo("exiting run tunnels")
-}
-
-// TerminateNextActiveTunnel is a support routine for
-// test code that must terminate the active tunnel and
-// restart establishing. This function is not guaranteed
-// to be safe for use in other cases.
-func (controller *Controller) TerminateNextActiveTunnel() {
-	tunnel := controller.getNextActiveTunnel()
-	if tunnel != nil {
-		controller.SignalTunnelFailure(tunnel)
-		NoticeInfo("terminated tunnel: %s", tunnel.serverEntry.IpAddress)
-	}
 }
 
 // classifyImpairedProtocol tracks "impaired" protocol classifications for failed
@@ -1053,19 +1026,6 @@ func (controller *Controller) isActiveTunnelServerEntry(
 	return false
 }
 
-// setClientVerificationPayloadForActiveTunnels triggers the client verification
-// request for all active tunnels.
-func (controller *Controller) setClientVerificationPayloadForActiveTunnels(
-	clientVerificationPayload string) {
-
-	controller.tunnelMutex.Lock()
-	defer controller.tunnelMutex.Unlock()
-
-	for _, activeTunnel := range controller.tunnels {
-		activeTunnel.SetClientVerificationPayload(clientVerificationPayload)
-	}
-}
-
 // Dial selects an active tunnel and establishes a port forward
 // connection through the selected tunnel. Failure to connect is considered
 // a port forward failure, for the purpose of monitoring tunnel health.
@@ -1160,10 +1120,10 @@ func (controller *Controller) startEstablishing() {
 	controller.serverAffinityDoneBroadcast = make(chan struct{})
 
 	controller.establishWaitGroup.Add(1)
-	go controller.launchEstablishing()
+	go controller.launchEstablishing(controller.getImpairedProtocols())
 }
 
-func (controller *Controller) launchEstablishing() {
+func (controller *Controller) launchEstablishing(impairedProtocols []string) {
 
 	defer controller.establishWaitGroup.Done()
 
@@ -1216,9 +1176,8 @@ func (controller *Controller) launchEstablishing() {
 
 	// Unconditionally report available egress regions. After a fresh install,
 	// the outer client may not have a list of regions to display, so we
-	// always report here. Events that trigger ReportAvailableRegions,
-	// including storing new server entries and applying tactics, are not
-	// guaranteed to occur.
+	// always report here. Other events that trigger ReportAvailableRegions,
+	// are not guaranteed to occur.
 	//
 	// This report is delayed until after tactics are likely to be applied, as
 	// tactics can impact the list of available regions; this avoids a
@@ -1239,8 +1198,7 @@ func (controller *Controller) launchEstablishing() {
 	}
 
 	controller.establishWaitGroup.Add(1)
-	go controller.establishCandidateGenerator(
-		controller.getImpairedProtocols())
+	go controller.establishCandidateGenerator(impairedProtocols)
 }
 
 // stopEstablishing signals the establish goroutines to stop and waits

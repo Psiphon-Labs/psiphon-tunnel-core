@@ -154,7 +154,8 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	var response []byte
 	if serverContext.psiphonHttpsClient == nil {
 
-		params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] = serverContext.tunnel.config.Authorizations
+		params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] =
+			serverContext.tunnel.config.GetAuthorizations()
 
 		request, err := makeSSHAPIRequestPayload(params)
 		if err != nil {
@@ -609,78 +610,6 @@ func RecordRemoteServerListStat(
 		PERSISTENT_STAT_TYPE_REMOTE_SERVER_LIST, remoteServerListStatJson)
 }
 
-// DoClientVerificationRequest performs the "client_verification" API
-// request. This request is used to verify that the client is a valid
-// Psiphon client, which will determine how the server treats the client
-// traffic. The proof-of-validity is platform-specific and the payload
-// is opaque to this function but assumed to be JSON.
-func (serverContext *ServerContext) DoClientVerificationRequest(
-	verificationPayload string, serverIP string) error {
-
-	params := serverContext.getBaseAPIParameters()
-	var response []byte
-	var err error
-
-	if serverContext.psiphonHttpsClient == nil {
-
-		// Empty verification payload signals desire to
-		// query the server for current TTL. This is
-		// indicated to the server by the absence of the
-		// verificationData field.
-		if verificationPayload != "" {
-			rawMessage := json.RawMessage(verificationPayload)
-			params["verificationData"] = &rawMessage
-		}
-
-		request, err := makeSSHAPIRequestPayload(params)
-		if err != nil {
-			return common.ContextError(err)
-		}
-
-		response, err = serverContext.tunnel.SendAPIRequest(
-			protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME, request)
-		if err != nil {
-			return common.ContextError(err)
-		}
-
-	} else {
-
-		// Legacy web service API request
-		response, err = serverContext.doPostRequest(
-			makeRequestUrl(serverContext.tunnel, "", "client_verification", params),
-			"application/json",
-			bytes.NewReader([]byte(verificationPayload)))
-		if err != nil {
-			return common.ContextError(err)
-		}
-	}
-
-	// Server may request a new verification to be performed,
-	// for example, if the payload timestamp is too old, etc.
-
-	var clientVerificationResponse struct {
-		ClientVerificationServerNonce string `json:"client_verification_server_nonce"`
-		ClientVerificationTTLSeconds  int    `json:"client_verification_ttl_seconds"`
-		ClientVerificationResetCache  bool   `json:"client_verification_reset_cache"`
-	}
-
-	// In case of empty response body the json.Unmarshal will fail
-	// and clientVerificationResponse will be initialized with default values
-
-	_ = json.Unmarshal(response, &clientVerificationResponse)
-
-	if clientVerificationResponse.ClientVerificationTTLSeconds > 0 {
-		NoticeClientVerificationRequired(
-			clientVerificationResponse.ClientVerificationServerNonce,
-			clientVerificationResponse.ClientVerificationTTLSeconds,
-			clientVerificationResponse.ClientVerificationResetCache)
-	} else {
-		NoticeClientVerificationRequestCompleted(serverIP)
-	}
-
-	return nil
-}
-
 // doGetRequest makes a tunneled HTTPS request and returns the response body.
 func (serverContext *ServerContext) doGetRequest(
 	requestUrl string) (responseBody []byte, err error) {
@@ -763,7 +692,7 @@ func getBaseAPIParameters(
 	params["client_session_id"] = sessionID
 	params["server_secret"] = serverEntry.WebServerSecret
 	params["propagation_channel_id"] = config.PropagationChannelId
-	params["sponsor_id"] = config.SponsorId
+	params["sponsor_id"] = config.GetSponsorID()
 	params["client_version"] = config.ClientVersion
 	params["relay_protocol"] = protocol
 	params["client_platform"] = config.ClientPlatform
@@ -879,20 +808,17 @@ func makeRequestUrl(tunnel *Tunnel, port, path string, params common.APIParamete
 			// parameter, which has a different type. This parameter is not recognized
 			// by legacy servers.
 
-			strValue := ""
 			switch v := value.(type) {
 			case string:
-				strValue = v
+				queryParams.Set(name, v)
 			case []string:
 				// String array param encoded as JSON
 				jsonValue, err := json.Marshal(v)
 				if err != nil {
 					break
 				}
-				strValue = string(jsonValue)
+				queryParams.Set(name, string(jsonValue))
 			}
-
-			queryParams.Set(name, strValue)
 		}
 
 		requestUrl.WriteString("?")
