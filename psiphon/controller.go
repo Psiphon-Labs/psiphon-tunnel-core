@@ -1120,10 +1120,10 @@ func (controller *Controller) startEstablishing() {
 	controller.serverAffinityDoneBroadcast = make(chan struct{})
 
 	controller.establishWaitGroup.Add(1)
-	go controller.launchEstablishing()
+	go controller.launchEstablishing(controller.getImpairedProtocols())
 }
 
-func (controller *Controller) launchEstablishing() {
+func (controller *Controller) launchEstablishing(impairedProtocols []string) {
 
 	defer controller.establishWaitGroup.Done()
 
@@ -1198,8 +1198,7 @@ func (controller *Controller) launchEstablishing() {
 	}
 
 	controller.establishWaitGroup.Add(1)
-	go controller.establishCandidateGenerator(
-		controller.getImpairedProtocols())
+	go controller.establishCandidateGenerator(impairedProtocols)
 }
 
 // stopEstablishing signals the establish goroutines to stop and waits
