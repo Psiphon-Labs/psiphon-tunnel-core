@@ -711,9 +711,6 @@ func getRequestLogFields(
 				} else {
 					logFields["meek_dial_domain"] = host
 				}
-			case "meek_host_header":
-				host, _, _ := net.SplitHostPort(strValue)
-				logFields[expectedParam.name] = host
 			case "upstream_proxy_type":
 				// Submitted value could be e.g., "SOCKS5" or "socks5"; log lowercase
 				logFields[expectedParam.name] = strings.ToLower(strValue)
