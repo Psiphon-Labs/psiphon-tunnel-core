@@ -697,9 +697,9 @@ func getRequestLogFields(
 
 			// Special cases:
 			// - Number fields are encoded as integer types.
-			// - For ELK performance we record these domain-or-IP
+			// - For ELK performance we record certain domain-or-IP
 			//   fields as one of two different values based on type;
-			//   we also omit port from host:port fields for now.
+			//   we also omit port from these host:port fields for now.
 			switch expectedParam.name {
 			case "client_version", "establishment_duration":
 				intValue, _ := strconv.Atoi(strValue)
