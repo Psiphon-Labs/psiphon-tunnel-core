@@ -513,7 +513,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 			return nil, nil, nil, nil, nil, common.ContextError(err)
 		}
 
-		webServerCertificate, webServerPrivateKey, err = GenerateWebServerCertificate("")
+		webServerCertificate, webServerPrivateKey, err = common.GenerateWebServerCertificate("")
 		if err != nil {
 			return nil, nil, nil, nil, nil, common.ContextError(err)
 		}
