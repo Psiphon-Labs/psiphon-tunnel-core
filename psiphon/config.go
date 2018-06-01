@@ -781,6 +781,10 @@ func (config *Config) GetAuthorizations() []string {
 	return config.authorizations
 }
 
+func (config *Config) UseUpstreamProxy() bool {
+	return config.UpstreamProxyURL != ""
+}
+
 func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	// Build set of config values to apply to parameters.

@@ -193,6 +193,21 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 		})
 }
 
+func TestQUICOSSH(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "QUIC-OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
 func TestWebTransportAPIRequests(t *testing.T) {
 	runServer(t,
 		&runServerConfig{

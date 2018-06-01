@@ -21,7 +21,6 @@ package quic
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"sync/atomic"
@@ -40,20 +39,12 @@ func TestQUIC(t *testing.T) {
 	serverReceivedBytes := int64(0)
 	clientReceivedBytes := int64(0)
 
-	hostname := "www.example.com"
-	certificate, privateKey, err := common.GenerateWebServerCertificate(hostname)
-
-	listener, err := NewListener("127.0.0.1:0", certificate, privateKey)
+	listener, err := Listen("127.0.0.1:0")
 	if err != nil {
-		t.Errorf("NewListener failed: %s", err)
+		t.Errorf("Listen failed: %s", err)
 	}
 
-	serverAddr, err := net.ResolveUDPAddr("udp", listener.Addr().String())
-	if err != nil {
-		t.Errorf("ResolveUDPAddr failed: %s", err)
-	}
-
-	serverHost := fmt.Sprintf("%s:%d", hostname, serverAddr.Port)
+	serverAddress := listener.Addr().String()
 
 	testGroup, testCtx := errgroup.WithContext(context.Background())
 
@@ -107,7 +98,7 @@ func TestQUIC(t *testing.T) {
 				return common.ContextError(err)
 			}
 
-			conn, err := Dial(ctx, packetConn, serverAddr, serverHost)
+			conn, err := Dial(ctx, packetConn, serverAddress)
 			if err != nil {
 				return common.ContextError(err)
 			}

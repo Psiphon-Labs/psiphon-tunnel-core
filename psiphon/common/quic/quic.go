@@ -60,11 +60,14 @@ type Listener struct {
 	quic_go.Listener
 }
 
-// NewListener creates a new Listener. The inputs certificate/privateKey
-// specify the TLS key pair to be used by QUIC.
-func NewListener(
-	addr string,
-	certificate, privateKey string) (*Listener, error) {
+// Listen creates a new Listener.
+func Listen(addr string) (*Listener, error) {
+
+	certificate, privateKey, err := common.GenerateWebServerCertificate(
+		common.GenerateHostName())
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
 
 	tlsCertificate, err := tls.X509KeyPair(
 		[]byte(certificate), []byte(privateKey))
@@ -113,14 +116,13 @@ func (listener *Listener) Accept() (net.Conn, error) {
 }
 
 // Dial establishes a new QUIC session and stream to the server specified by
-// remoteAddr. packetConn is used as the underlying packet connection for
-// QUIC. hostname specifies the SNI value to use in TLS. The dial may be
-// cancelled by ctx; packetConn will be closed if the dial is cancelled.
+// address. packetConn is used as the underlying packet connection for QUIC.
+// The dial may be cancelled by ctx; packetConn will be closed if the dial is
+// cancelled.
 func Dial(
 	ctx context.Context,
 	packetConn net.PacketConn,
-	remoteAddr net.Addr,
-	hostname string) (net.Conn, error) {
+	address string) (net.Conn, error) {
 
 	type dialResult struct {
 		conn *Conn
@@ -140,10 +142,16 @@ func Dial(
 			quicConfig.HandshakeTimeout = deadline.Sub(time.Now())
 		}
 
+		udpAddr, err := net.ResolveUDPAddr("udp", address)
+		if err != nil {
+			resultChannel <- dialResult{err: err}
+			return
+		}
+
 		session, err := quic_go.Dial(
 			packetConn,
-			remoteAddr,
-			hostname,
+			udpAddr,
+			address,
 			&tls.Config{InsecureSkipVerify: true},
 			quicConfig)
 		if err != nil {

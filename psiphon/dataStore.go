@@ -593,7 +593,8 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 		if len(limitTunnelProtocols) > 0 {
 			// At the ServerEntryIterator level, only limitTunnelProtocols is applied;
 			// impairedTunnelProtocols and excludeMeek are handled higher up.
-			if len(serverEntry.GetSupportedProtocols(limitTunnelProtocols, nil, false)) == 0 {
+			if len(serverEntry.GetSupportedProtocols(
+				config.UseUpstreamProxy(), limitTunnelProtocols, nil, false)) == 0 {
 				return false, nil, common.ContextError(errors.New("TargetServerEntry does not support LimitTunnelProtocols"))
 			}
 		}
@@ -633,7 +634,8 @@ func (iterator *ServerEntryIterator) Reset() error {
 		limitTunnelProtocols := iterator.config.clientParameters.Get().TunnelProtocols(
 			parameters.LimitTunnelProtocols)
 
-		count := CountServerEntries(iterator.config.EgressRegion, limitTunnelProtocols)
+		count := CountServerEntries(
+			iterator.config.UseUpstreamProxy(), iterator.config.EgressRegion, limitTunnelProtocols)
 		NoticeCandidateServers(iterator.config.EgressRegion, limitTunnelProtocols, count)
 
 		// LimitTunnelProtocols may have changed since the last ReportAvailableRegions,
@@ -835,7 +837,7 @@ func scanServerEntries(scanner func(*protocol.ServerEntry)) error {
 
 // CountServerEntries returns a count of stored servers for the
 // specified region and tunnel protocols.
-func CountServerEntries(region string, tunnelProtocols []string) int {
+func CountServerEntries(useUpstreamProxy bool, region string, tunnelProtocols []string) int {
 	checkInitDataStore()
 
 	count := 0
@@ -844,7 +846,7 @@ func CountServerEntries(region string, tunnelProtocols []string) int {
 			(len(tunnelProtocols) == 0 ||
 				// When CountServerEntries is called only limitTunnelProtocols is known;
 				// impairedTunnelProtocols and excludeMeek may not apply.
-				len(serverEntry.GetSupportedProtocols(tunnelProtocols, nil, false)) > 0) {
+				len(serverEntry.GetSupportedProtocols(useUpstreamProxy, tunnelProtocols, nil, false)) > 0) {
 			count += 1
 		}
 	})
@@ -905,7 +907,8 @@ func ReportAvailableRegions(config *Config) {
 		if len(limitTunnelProtocols) == 0 ||
 			// When ReportAvailableRegions is called only limitTunnelProtocols is known;
 			// impairedTunnelProtocols and excludeMeek may not apply.
-			len(serverEntry.GetSupportedProtocols(limitTunnelProtocols, nil, false)) > 0 {
+			len(serverEntry.GetSupportedProtocols(
+				config.UseUpstreamProxy(), limitTunnelProtocols, nil, false)) > 0 {
 
 			regions[serverEntry.Region] = true
 		}
