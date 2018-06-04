@@ -122,7 +122,8 @@ func (listener *Listener) Accept() (net.Conn, error) {
 func Dial(
 	ctx context.Context,
 	packetConn net.PacketConn,
-	address string) (net.Conn, error) {
+	remoteAddr *net.UDPAddr,
+	quicSNIAddress string) (net.Conn, error) {
 
 	type dialResult struct {
 		conn *Conn
@@ -142,16 +143,10 @@ func Dial(
 			quicConfig.HandshakeTimeout = deadline.Sub(time.Now())
 		}
 
-		udpAddr, err := net.ResolveUDPAddr("udp", address)
-		if err != nil {
-			resultChannel <- dialResult{err: err}
-			return
-		}
-
 		session, err := quic_go.Dial(
 			packetConn,
-			udpAddr,
-			address,
+			remoteAddr,
+			quicSNIAddress,
 			&tls.Config{InsecureSkipVerify: true},
 			quicConfig)
 		if err != nil {
@@ -167,8 +162,9 @@ func Dial(
 
 		resultChannel <- dialResult{
 			conn: &Conn{
-				session: session,
-				stream:  stream,
+				packetConn: packetConn,
+				session:    session,
+				stream:     stream,
 			},
 		}
 	}()
@@ -195,7 +191,8 @@ func Dial(
 
 // Conn is a net.Conn and psiphon/common.Closer.
 type Conn struct {
-	session quic_go.Session
+	packetConn net.PacketConn
+	session    quic_go.Session
 
 	deferredAcceptStream bool
 
@@ -276,6 +273,12 @@ func (conn *Conn) Write(b []byte) (int, error) {
 
 func (conn *Conn) Close() error {
 	err := conn.session.Close(nil)
+	if conn.packetConn != nil {
+		err1 := conn.packetConn.Close()
+		if err == nil {
+			err = err1
+		}
+	}
 	atomic.StoreInt32(&conn.isClosed, 1)
 	return err
 }

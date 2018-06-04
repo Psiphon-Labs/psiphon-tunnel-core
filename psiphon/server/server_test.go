@@ -397,8 +397,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// create a server
 
+	psiphonServerIPAddress := serverIPAddress
+	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) {
+		// Workaround for macOS firewall.
+		psiphonServerIPAddress = "127.0.0.1"
+	}
+
 	generateConfigParams := &GenerateConfigParams{
-		ServerIPAddress:      serverIPAddress,
+		ServerIPAddress:      psiphonServerIPAddress,
 		EnableSSHAPIRequests: runConfig.enableSSHAPIRequests,
 		WebServerPort:        8000,
 		TunnelProtocolPorts:  map[string]int{runConfig.tunnelProtocol: 4000},

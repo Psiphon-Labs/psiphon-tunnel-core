@@ -788,7 +788,6 @@ func initDialConfig(
 		IPv6Synthesizer:               config.IPv6Synthesizer,
 		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
-		DeviceRegion:                  config.DeviceRegion,
 	}
 
 	dialStats := &DialStats{}
@@ -880,6 +879,7 @@ func dialSsh(
 	SSHClientVersion := ""
 	useObfuscatedSsh := false
 	var directDialAddress string
+	var quicDialSNIAddress string
 	var meekConfig *MeekConfig
 	var err error
 
@@ -891,6 +891,7 @@ func dialSsh(
 	case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
 		useObfuscatedSsh = true
 		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedQUICPort)
+		quicDialSNIAddress = fmt.Sprintf("%s:%d", common.GenerateHostName(), serverEntry.SshObfuscatedQUICPort)
 
 	case protocol.TUNNEL_PROTOCOL_SSH:
 		selectedSSHClientVersion = true
@@ -938,17 +939,19 @@ func dialSsh(
 
 	} else if protocol.TunnelProtocolUsesQUIC(selectedProtocol) {
 
-		// TODO:
-		// - use dialConfig?
-		// - SO_BINDTODEVICE etc.
-		packetConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: nil, Port: 0})
+		packetConn, remoteAddr, err := NewUDPConn(
+			ctx,
+			directDialAddress,
+			dialConfig)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
+
 		dialConn, err = quic.Dial(
 			ctx,
 			packetConn,
-			directDialAddress)
+			remoteAddr,
+			quicDialSNIAddress)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}

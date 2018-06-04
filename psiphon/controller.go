@@ -108,7 +108,6 @@ func NewController(config *Config) (controller *Controller, err error) {
 		IPv6Synthesizer:               config.IPv6Synthesizer,
 		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
-		DeviceRegion:                  config.DeviceRegion,
 	}
 
 	controller = &Controller{

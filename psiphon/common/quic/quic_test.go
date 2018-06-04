@@ -93,12 +93,17 @@ func TestQUIC(t *testing.T) {
 				context.Background(), 1*time.Second)
 			defer cancelFunc()
 
+			remoteAddr, err := net.ResolveUDPAddr("udp", serverAddress)
+			if err != nil {
+				return common.ContextError(err)
+			}
+
 			packetConn, err := net.ListenPacket("udp4", "127.0.0.1:0")
 			if err != nil {
 				return common.ContextError(err)
 			}
 
-			conn, err := Dial(ctx, packetConn, serverAddress)
+			conn, err := Dial(ctx, packetConn, remoteAddr, serverAddress)
 			if err != nil {
 				return common.ContextError(err)
 			}

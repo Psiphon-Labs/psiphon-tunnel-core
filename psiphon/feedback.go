@@ -121,7 +121,6 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 		DnsServerGetter:               nil,
 		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
-		DeviceRegion:                  config.DeviceRegion,
 	}
 
 	secureFeedback, err := encryptFeedback(diagnosticsJson, b64EncodedPublicKey)

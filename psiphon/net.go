@@ -40,7 +40,7 @@ import (
 const DNS_PORT = 53
 
 // DialConfig contains parameters to determine the behavior
-// of a Psiphon dialer (TCPDial, MeekDial, etc.)
+// of a Psiphon dialer (TCPDial, UDPDial, MeekDial, etc.)
 type DialConfig struct {
 
 	// UpstreamProxyURL specifies a proxy to connect through.
@@ -52,6 +52,8 @@ type DialConfig struct {
 	// Certain tunnel protocols require HTTP CONNECT support
 	// when a HTTP proxy is specified. If CONNECT is not
 	// supported, those protocols will not connect.
+	//
+	// UpstreamProxyURL is not used by UDPDial.
 	UpstreamProxyURL string
 
 	// CustomHeaders is a set of additional arbitrary HTTP headers that are
@@ -82,11 +84,6 @@ type DialConfig struct {
 	// SSL_CTX_load_verify_locations.
 	// Only applies to UseIndistinguishableTLS connections.
 	TrustedCACertificatesFilename string
-
-	// DeviceRegion is the reported region the host device is running in.
-	// When set, this value may be used, pre-connection, to select performance
-	// or circumvention optimization strategies for the given region.
-	DeviceRegion string
 
 	// ResolvedIPCallback, when set, is called with the IP address that was
 	// dialed. This is either the specified IP address in the dial address,

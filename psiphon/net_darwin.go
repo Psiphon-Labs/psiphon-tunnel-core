@@ -1,5 +1,3 @@
-// +build !darwin
-
 /*
  * Copyright (c) 2017, Psiphon Inc.
  * All rights reserved.
@@ -21,5 +19,10 @@
 
 package psiphon
 
-func tcpDialSetAdditionalSocketOptions(_ int) {
+import (
+	"syscall"
+)
+
+func setAdditionalSocketOptions(socketFd int) {
+	syscall.SetsockoptInt(socketFd, syscall.SOL_SOCKET, syscall.SO_NOSIGPIPE, 1)
 }
