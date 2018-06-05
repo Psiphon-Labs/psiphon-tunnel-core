@@ -116,9 +116,14 @@ func (listener *Listener) Accept() (net.Conn, error) {
 }
 
 // Dial establishes a new QUIC session and stream to the server specified by
-// address. packetConn is used as the underlying packet connection for QUIC.
-// The dial may be cancelled by ctx; packetConn will be closed if the dial is
+// address.
+//
+// packetConn is used as the underlying packet connection for QUIC. The dial
+// may be cancelled by ctx; packetConn will be closed if the dial is
 // cancelled.
+//
+// Keep alive and idle timeout functionality in QUIC is disabled as these
+// aspects are expected to be handled at a higher level.
 func Dial(
 	ctx context.Context,
 	packetConn net.PacketConn,
@@ -134,8 +139,12 @@ func Dial(
 
 	go func() {
 
+		maxDuration := time.Duration(1<<63 - 1)
+
 		quicConfig := &quic_go.Config{
-			KeepAlive: false,
+			HandshakeTimeout: maxDuration,
+			IdleTimeout:      maxDuration,
+			KeepAlive:        false,
 		}
 
 		deadline, ok := ctx.Deadline()
