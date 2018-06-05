@@ -106,6 +106,8 @@ func TestMakeSecureRandomPeriod(t *testing.T) {
 	min := 1 * time.Nanosecond
 	max := 10000 * time.Nanosecond
 
+	different := 0
+
 	for n := 0; n < 1000; n++ {
 		res1, err := MakeSecureRandomPeriod(min, max)
 
@@ -127,9 +129,15 @@ func TestMakeSecureRandomPeriod(t *testing.T) {
 			t.Errorf("MakeSecureRandomPeriod failed: %s", err)
 		}
 
-		if res1 == res2 {
-			t.Error("duration should have randomness difference between calls")
+		if res1 != res2 {
+			different += 1
 		}
+	}
+
+	// res1 and res2 should be different most of the time, but it's possible
+	// to get the same result twice in a row.
+	if different < 900 {
+		t.Error("duration insufficiently random")
 	}
 }
 
