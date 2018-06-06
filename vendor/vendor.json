@@ -3,34 +3,34 @@
 	"ignore": "test",
 	"package": [
 		{
-			"checksumSHA1": "loOFPs45BNTxtu4ByyOksu8rvsI=",
-			"path": "github.com/Psiphon-Inc/bolt",
-			"revision": "c6e046a80d4b4c6c87b9563b9dd92098f4f6f50a",
-			"revisionTime": "2017-08-14T17:37:24Z"
-		},
-		{
-			"checksumSHA1": "Z45l7BbR+v4J+cSYv2168Rr5L2Y=",
-			"path": "github.com/Psiphon-Inc/dns",
-			"revision": "d23cdaf67bbcca8cfb5d0ada3747b03a6cfd2da5",
-			"revisionTime": "2017-08-14T18:26:07Z"
-		},
-		{
-			"checksumSHA1": "a4yQQTzn02BBNWm4u7MqIWgxxAM=",
-			"path": "github.com/Psiphon-Inc/goarista/monotime",
-			"revision": "d002785f4c6725d9f62f0e3e7b1e2a20455ed027",
-			"revisionTime": "2016-08-25T06:51:56Z"
-		},
-		{
-			"checksumSHA1": "bBh2OEkNOoHZuXk/0/orkmFF3J0=",
-			"path": "github.com/Psiphon-Inc/goptlib",
-			"revision": "18963be5f9c52609b1dd6960d1370d34e63fc3fb",
-			"revisionTime": "2018-04-26T17:24:40Z"
-		},
-		{
 			"checksumSHA1": "aFs1ojFW1UmUNMtN6rdRJ2FEIRE=",
 			"path": "github.com/Psiphon-Inc/rotate-safe-writer",
 			"revision": "b276127301a99aa7102ebdc6f509fc8d890900d0",
 			"revisionTime": "2017-02-28T16:03:01Z"
+		},
+		{
+			"checksumSHA1": "3dYPdIMg6hc6whNAEXrMm09WFW0=",
+			"path": "github.com/Psiphon-Labs/bolt",
+			"revision": "c6e046a80d4b4c6c87b9563b9dd92098f4f6f50a",
+			"revisionTime": "2017-08-14T17:37:24Z"
+		},
+		{
+			"checksumSHA1": "d3DwsdacdFn1/KCG/2uPV1PwR3s=",
+			"path": "github.com/Psiphon-Labs/dns",
+			"revision": "d23cdaf67bbcca8cfb5d0ada3747b03a6cfd2da5",
+			"revisionTime": "2017-08-14T18:26:07Z"
+		},
+		{
+			"checksumSHA1": "F562fF3vKWomQjtjKezKjeK+YYA=",
+			"path": "github.com/Psiphon-Labs/goarista/monotime",
+			"revision": "d002785f4c6725d9f62f0e3e7b1e2a20455ed027",
+			"revisionTime": "2016-08-25T06:51:56Z"
+		},
+		{
+			"checksumSHA1": "Ve6jaI7ogHtTWq8QoTJxQpEaGuQ=",
+			"path": "github.com/Psiphon-Labs/goptlib",
+			"revision": "18963be5f9c52609b1dd6960d1370d34e63fc3fb",
+			"revisionTime": "2018-04-26T17:24:40Z"
 		},
 		{
 			"checksumSHA1": "caix7UTy0XJTu4FDWMrCQfWSYVY=",
@@ -129,32 +129,8 @@
 			"revisionTime": "2016-03-17T14:11:10Z"
 		},
 		{
-			"checksumSHA1": "K0crHygPTP42i1nLKWphSlvOQJw=",
-			"path": "github.com/stretchr/objx",
-			"revision": "1a9d0bb9f541897e62256577b352fdbc1fb4fd94",
-			"revisionTime": "2015-09-28T12:21:52Z"
-		},
-		{
-			"checksumSHA1": "/kKwYqD04AkkDZFQhGwklKw3RFA=",
-			"path": "github.com/stretchr/testify",
-			"revision": "2aa2c176b9dab406a6970f6a55f513e8a8c8b18f",
-			"revisionTime": "2017-08-14T20:04:35Z"
-		},
-		{
 			"checksumSHA1": "mGbTYZ8dHVTiPTTJu3ktp+84pPI=",
 			"path": "github.com/stretchr/testify/assert",
-			"revision": "2aa2c176b9dab406a6970f6a55f513e8a8c8b18f",
-			"revisionTime": "2017-08-14T20:04:35Z"
-		},
-		{
-			"checksumSHA1": "fg3TzS9/QK3wZbzei3Z6O8XPLHg=",
-			"path": "github.com/stretchr/testify/http",
-			"revision": "2aa2c176b9dab406a6970f6a55f513e8a8c8b18f",
-			"revisionTime": "2017-08-14T20:04:35Z"
-		},
-		{
-			"checksumSHA1": "hs0IfAV4wNExbAXc0aUU9V2SuFc=",
-			"path": "github.com/stretchr/testify/mock",
 			"revision": "2aa2c176b9dab406a6970f6a55f513e8a8c8b18f",
 			"revisionTime": "2017-08-14T20:04:35Z"
 		},

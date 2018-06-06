@@ -26,7 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Psiphon-Inc/goarista/monotime"
+	"github.com/Psiphon-Labs/goarista/monotime"
 )
 
 // Conns is a synchronized list of Conns that is used to coordinate

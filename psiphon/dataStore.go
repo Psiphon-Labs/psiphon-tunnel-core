@@ -30,7 +30,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Psiphon-Inc/bolt"
+	"github.com/Psiphon-Labs/bolt"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"

@@ -38,8 +38,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Psiphon-Inc/goarista/monotime"
-	socks "github.com/Psiphon-Inc/goptlib"
+	"github.com/Psiphon-Labs/goarista/monotime"
+	socks "github.com/Psiphon-Labs/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
