@@ -390,7 +390,15 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
                 WifiManager wifiManager = (WifiManager)context.getSystemService(Context.WIFI_SERVICE);
                 WifiInfo wifiInfo = wifiManager.getConnectionInfo();
                 if (wifiInfo != null) {
-                    networkID += "-" + wifiInfo.getBSSID();
+                    String wifiNetworkID = wifiInfo.getBSSID();
+                    if (wifiNetworkID.equals("02:00:00:00:00:00")) {
+                        // "02:00:00:00:00:00" is reported when the app does not have the ACCESS_COARSE_LOCATION permission:
+                        // https://developer.android.com/about/versions/marshmallow/android-6.0-changes#behavior-hardware-id
+                        // The Psiphon client should allow the user to opt-in to this permission. If they decline, fail over
+                        // to using the WiFi IP address.
+                        wifiNetworkID = String.valueOf(wifiInfo.getIpAddress());
+                    }
+                    networkID += "-" + wifiNetworkID;
                 }
             } catch (java.lang.Exception e) {
                 // May get exceptions due to missing permissions like android.permission.ACCESS_WIFI_STATE.
