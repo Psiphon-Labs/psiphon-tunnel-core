@@ -599,7 +599,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		t.Fatalf("error initializing datastore: %s", err)
 	}
 
-	serverEntryCount := CountServerEntries("", nil)
+	serverEntryCount := CountServerEntries(config.UseUpstreamProxy(), "", nil)
 
 	if runConfig.expectNoServerEntries && serverEntryCount > 0 {
 		// TODO: replace expectNoServerEntries with resetServerEntries
