@@ -618,7 +618,7 @@ func validateStringRequestParam(
 	}
 	if !expectedParam.validator(config, strValue) {
 		return common.ContextError(
-			fmt.Errorf("invalid param: %s", expectedParam.name))
+			fmt.Errorf("invalid param: %s: %s", expectedParam.name, strValue))
 	}
 	return nil
 }
