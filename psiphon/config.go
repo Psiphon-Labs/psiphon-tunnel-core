@@ -387,21 +387,13 @@ type Config struct {
 	// bytes sent and received.
 	EmitBytesTransferred bool
 
-	// UseIndistinguishableTLS enables use of alternative TLS profiles with a
-	// less distinct fingerprint (ClientHello content) than the stock Go TLS.
-	UseIndistinguishableTLS bool
-
-	// UseTrustedCACertificatesForStockTLS toggles use of the trusted CA
-	// certs, specified in TrustedCACertificatesFilename, for tunneled TLS
-	// connections that expect server certificates signed with public
-	// certificate authorities (currently, only upgrade downloads). This
-	// option is used with stock Go TLS in cases where Go may fail to obtain a
-	// list of root CAs from the operating system. Requires
-	// TrustedCACertificatesFilename to be set.
-	UseTrustedCACertificatesForStockTLS bool
-
 	// TrustedCACertificatesFilename specifies a file containing trusted CA
-	// certs.
+	// certs. When set, this toggles use of the trusted CA certs, specified in
+	// TrustedCACertificatesFilename, for tunneled TLS connections that expect
+	// server certificates signed with public certificate authorities
+	// (currently, only upgrade downloads). This option is used with stock Go
+	// TLS in cases where Go may fail to obtain a list of root CAs from the
+	// operating system.
 	TrustedCACertificatesFilename string
 
 	// DisablePeriodicSshKeepAlive indicates whether to send an SSH keepalive

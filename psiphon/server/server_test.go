@@ -564,7 +564,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "SponsorId" : "0",
         "PropagationChannelId" : "0",
         "DisableRemoteServerListFetcher" : true,
-        "UseIndistinguishableTLS" : true,
         "EstablishTunnelPausePeriodSeconds" : 1,
         "ConnectionWorkerPoolSize" : %d,
         "TunnelProtocols" : ["%s"]

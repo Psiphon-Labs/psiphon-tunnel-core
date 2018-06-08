@@ -721,7 +721,6 @@ func initMeekConfig(
 	selectedTLSProfile := ""
 	if protocol.TunnelProtocolUsesMeekHTTPS(selectedProtocol) {
 		selectedTLSProfile = SelectTLSProfile(
-			config.UseIndistinguishableTLS,
 			selectedProtocol,
 			config.clientParameters)
 	}
@@ -786,7 +785,6 @@ func initDialConfig(
 		DeviceBinder:                  config.deviceBinder,
 		DnsServerGetter:               config.DnsServerGetter,
 		IPv6Synthesizer:               config.IPv6Synthesizer,
-		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
 	}
 
