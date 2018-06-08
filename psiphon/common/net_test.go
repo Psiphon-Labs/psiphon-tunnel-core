@@ -26,7 +26,7 @@ import (
 	"testing/iotest"
 	"time"
 
-	"github.com/Psiphon-Inc/goarista/monotime"
+	"github.com/Psiphon-Labs/goarista/monotime"
 )
 
 type dummyConn struct {

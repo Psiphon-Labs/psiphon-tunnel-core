@@ -727,7 +727,7 @@ func NoticeBindToDevice(deviceInfo string) {
 func NoticeNetworkID(networkID string) {
 	outputRepetitiveNotice(
 		"NetworkID", networkID, 0,
-		"NetworkID", 0, "regions", networkID)
+		"NetworkID", 0, "ID", networkID)
 }
 
 type repetitiveNoticeState struct {
