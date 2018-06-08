@@ -244,7 +244,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	}
 	if meekCookie == nil || len(meekCookie.Value) == 0 {
 		log.WithContext().Warning("missing meek cookie")
-		server.terminateConnection(responseWriter, request)
+		common.TerminateHTTPConnection(responseWriter, request)
 		return
 	}
 
@@ -256,7 +256,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 					"header": header,
 					"value":  value,
 				}).Warning("prohibited meek header")
-				server.terminateConnection(responseWriter, request)
+				common.TerminateHTTPConnection(responseWriter, request)
 				return
 			}
 		}
@@ -277,7 +277,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		// Debug since session cookie errors commonly occur during
 		// normal operation.
 		log.WithContextFields(LogFields{"error": err}).Debug("session lookup failed")
-		server.terminateConnection(responseWriter, request)
+		common.TerminateHTTPConnection(responseWriter, request)
 		return
 	}
 
@@ -291,7 +291,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 			endPoint, common.GeoIPData(geoIPData), responseWriter, request)
 		if !handled {
 			log.WithContextFields(LogFields{"endPoint": endPoint}).Info("unhandled endpoint")
-			server.terminateConnection(responseWriter, request)
+			common.TerminateHTTPConnection(responseWriter, request)
 		}
 		return
 	}
@@ -330,7 +330,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	// to session.cachedResponse.Reset may have already occured, so any further
 	// session.cachedResponse access may deplete resources (fail to refill the pool).
 	if atomic.LoadInt64(&session.requestCount) > requestNumber || session.deleted {
-		server.terminateConnection(responseWriter, request)
+		common.TerminateHTTPConnection(responseWriter, request)
 		return
 	}
 
@@ -351,7 +351,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 			// also, golang network error messages may contain client IP.
 			log.WithContextFields(LogFields{"error": err}).Debug("read request failed")
 		}
-		server.terminateConnection(responseWriter, request)
+		common.TerminateHTTPConnection(responseWriter, request)
 
 		// Note: keep session open to allow client to retry
 
@@ -408,7 +408,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 		if !session.cachedResponse.HasPosition(position) {
 			greaterThanSwapInt64(&session.metricCachedResponseMissPosition, int64(position))
-			server.terminateConnection(responseWriter, request)
+			common.TerminateHTTPConnection(responseWriter, request)
 			session.delete(true)
 			return
 		}
@@ -462,7 +462,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 			// also, golang network error messages may contain client IP.
 			log.WithContextFields(LogFields{"error": responseError}).Debug("write response failed")
 		}
-		server.terminateConnection(responseWriter, request)
+		common.TerminateHTTPConnection(responseWriter, request)
 
 		// Note: keep session open to allow client to retry
 
@@ -708,25 +708,6 @@ func (server *MeekServer) httpConnStateCallback(conn net.Conn, connState http.Co
 	case http.StateHijacked, http.StateClosed:
 		server.openConns.Remove(conn)
 	}
-}
-
-// terminateConnection sends a 404 response to a client and also closes
-// the persistent connection.
-func (server *MeekServer) terminateConnection(
-	responseWriter http.ResponseWriter, request *http.Request) {
-
-	http.NotFound(responseWriter, request)
-
-	hijack, ok := responseWriter.(http.Hijacker)
-	if !ok {
-		return
-	}
-	conn, buffer, err := hijack.Hijack()
-	if err != nil {
-		return
-	}
-	buffer.Flush()
-	conn.Close()
 }
 
 type meekSession struct {
