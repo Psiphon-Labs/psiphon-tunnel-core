@@ -37,7 +37,7 @@ type RemoteServerListFetcher func(
 	ctx context.Context, config *Config, attempt int, tunnel *Tunnel, untunneledDialConfig *DialConfig) error
 
 // FetchCommonRemoteServerList downloads the common remote server list from
-// config.RemoteServerListUrl. It validates its digital signature using the
+// config.RemoteServerListURLs. It validates its digital signature using the
 // public key config.RemoteServerListSignaturePublicKey and parses the
 // data field into ServerEntry records.
 // config.RemoteServerListDownloadFilename is the location to store the
@@ -116,7 +116,7 @@ func FetchCommonRemoteServerList(
 }
 
 // FetchObfuscatedServerLists downloads the obfuscated remote server lists
-// from config.ObfuscatedServerListRootURL.
+// from config.ObfuscatedServerListRootURLs.
 // It first downloads the OSL registry, and then downloads each seeded OSL
 // advertised in the registry. All downloads are resumable, ETags are used
 // to skip both an unchanged registry or unchanged OSL files, and when an
