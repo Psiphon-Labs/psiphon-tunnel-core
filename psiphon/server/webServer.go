@@ -69,7 +69,6 @@ func RunWebServer(
 	serveMux.HandleFunc("/handshake", webServer.handshakeHandler)
 	serveMux.HandleFunc("/connected", webServer.connectedHandler)
 	serveMux.HandleFunc("/status", webServer.statusHandler)
-	serveMux.HandleFunc("/client_verification", webServer.clientVerificationHandler)
 
 	certificate, err := utls.X509KeyPair(
 		[]byte(support.Config.WebServerCertificate),
@@ -312,6 +311,7 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 	w.Write(responsePayload)
 }
 
+// clientVerificationHandler is kept for compliance with older Android clients
 func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *http.Request) {
 
 	params, err := convertHTTPRequestToAPIRequest(w, r, "verificationData")

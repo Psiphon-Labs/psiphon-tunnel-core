@@ -203,7 +203,7 @@ This may mean that it had connectivity and now doesn't, or went from Wi-Fi to
 WWAN or vice versa or VPN state changed
 Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachability) @endcode
 */
-- (void)onInternetReachabilityChanged:(Reachability*_Nonnull)currentReachability;
+- (void)onInternetReachabilityChanged:(Reachability * _Nonnull)currentReachability;
 
 /*!
  Called when tunnel-core determines which server egress regions are available
@@ -331,6 +331,12 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
  */
 - (BOOL)start:(BOOL)ifNeeded;
 
+
+/*!
+ Reconnect a previously started PsiphonTunnel with the specified config changes.
+ reconnectWithConfig has no effect if there is no running PsiphonTunnel.
+ */
+- (void)reconnectWithConfig:(NSString * _Nullable) newSponsorID :(NSArray<NSString *> *_Nullable)newAuthorizations;
 
 /*!
  Force stops the tunnel and reconnects with the current session ID.

@@ -91,7 +91,6 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         public void onUntunneledAddress(String address);
         public void onBytesTransferred(long sent, long received);
         public void onStartedWaitingForNetworkConnectivity();
-        public void onClientVerificationRequired(String serverNonce, int ttlSeconds, boolean resetCache);
         public void onActiveAuthorizationIDs(List<String> authorizations);
         public void onExiting();
     }
@@ -184,15 +183,6 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     public synchronized void restartPsiphon() throws Exception {
         stopPsiphon();
         startPsiphon("");
-    }
-
-    // Call through to tunnel-core Controller.SetClientVerificationPayload. See description in
-    // Controller.SetClientVerificationPayload.
-    // Note: same deadlock note as stop().
-    // Note: this function only has an effect after Psi.Start() and before Psi.Stop(),
-    // so call it after startTunneling() and before stop().
-    public synchronized void setClientVerificationPayload (String requestPayload) {
-        Psi.SetClientVerificationPayload(requestPayload);
     }
 
     //----------------------------------------------------------------------------------------------
@@ -400,7 +390,15 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
                 WifiManager wifiManager = (WifiManager)context.getSystemService(Context.WIFI_SERVICE);
                 WifiInfo wifiInfo = wifiManager.getConnectionInfo();
                 if (wifiInfo != null) {
-                    networkID += "-" + wifiInfo.getBSSID();
+                    String wifiNetworkID = wifiInfo.getBSSID();
+                    if (wifiNetworkID.equals("02:00:00:00:00:00")) {
+                        // "02:00:00:00:00:00" is reported when the app does not have the ACCESS_COARSE_LOCATION permission:
+                        // https://developer.android.com/about/versions/marshmallow/android-6.0-changes#behavior-hardware-id
+                        // The Psiphon client should allow the user to opt-in to this permission. If they decline, fail over
+                        // to using the WiFi IP address.
+                        wifiNetworkID = String.valueOf(wifiInfo.getIpAddress());
+                    }
+                    networkID += "-" + wifiNetworkID;
                 }
             } catch (java.lang.Exception e) {
                 // May get exceptions due to missing permissions like android.permission.ACCESS_WIFI_STATE.
@@ -629,9 +627,6 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
                 mHostService.onActiveAuthorizationIDs(authorizations);
             } else if (noticeType.equals("Exiting")) {
                 mHostService.onExiting();
-            } else if(noticeType.equals("ClientVerificationRequired")) {
-                JSONObject data = notice.getJSONObject("data");
-                mHostService.onClientVerificationRequired(data.getString("nonce"), data.getInt("ttlSeconds"), data.getBoolean("resetCache"));
             } else if (noticeType.equals("ActiveTunnel")) {
                 if (isVpnMode()) {
                     if (notice.getJSONObject("data").getBoolean("isTCS")) {

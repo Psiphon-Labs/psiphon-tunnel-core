@@ -29,7 +29,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Psiphon-Inc/goarista/monotime"
+	"github.com/Psiphon-Labs/goarista/monotime"
 )
 
 const (

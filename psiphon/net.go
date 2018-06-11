@@ -33,7 +33,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Psiphon-Inc/dns"
+	"github.com/Psiphon-Labs/dns"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
