@@ -961,7 +961,7 @@ func (server *Server) handleSpeedTestRequest(
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("failed to read request body")
-		w.WriteHeader(http.StatusNotFound)
+		common.TerminateHTTPConnection(w, r)
 		return
 	}
 
@@ -970,7 +970,7 @@ func (server *Server) handleSpeedTestRequest(
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("failed to make response")
-		w.WriteHeader(http.StatusNotFound)
+		common.TerminateHTTPConnection(w, r)
 		return
 	}
 
@@ -992,7 +992,7 @@ func (server *Server) handleTacticsRequest(
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("failed to read request body")
-		w.WriteHeader(http.StatusNotFound)
+		common.TerminateHTTPConnection(w, r)
 		return
 	}
 
@@ -1007,7 +1007,7 @@ func (server *Server) handleTacticsRequest(
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("failed to unbox request")
-		w.WriteHeader(http.StatusNotFound)
+		common.TerminateHTTPConnection(w, r)
 		return
 	}
 
@@ -1015,7 +1015,7 @@ func (server *Server) handleTacticsRequest(
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("invalid request parameters")
-		w.WriteHeader(http.StatusNotFound)
+		common.TerminateHTTPConnection(w, r)
 		return
 	}
 
@@ -1026,7 +1026,7 @@ func (server *Server) handleTacticsRequest(
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("failed to get tactics")
-		w.WriteHeader(http.StatusNotFound)
+		common.TerminateHTTPConnection(w, r)
 		return
 	}
 
@@ -1042,7 +1042,7 @@ func (server *Server) handleTacticsRequest(
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("failed to box response")
-		w.WriteHeader(http.StatusNotFound)
+		common.TerminateHTTPConnection(w, r)
 		return
 	}
 

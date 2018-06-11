@@ -22,6 +22,7 @@ package common
 import (
 	"container/list"
 	"net"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -74,6 +75,25 @@ func (conns *Conns) CloseAll() {
 		conn.Close()
 	}
 	conns.conns = make(map[net.Conn]bool)
+}
+
+// TerminateHTTPConnection sends a 404 response to a client and also closes
+// the persistent connection.
+func TerminateHTTPConnection(
+	responseWriter http.ResponseWriter, request *http.Request) {
+
+	http.NotFound(responseWriter, request)
+
+	hijack, ok := responseWriter.(http.Hijacker)
+	if !ok {
+		return
+	}
+	conn, buffer, err := hijack.Hijack()
+	if err != nil {
+		return
+	}
+	buffer.Flush()
+	conn.Close()
 }
 
 // IPAddressFromAddr is a helper which extracts an IP address

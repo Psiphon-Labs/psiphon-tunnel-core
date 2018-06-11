@@ -531,7 +531,7 @@ var baseRequestParams = []requestParamSpec{
 	{"client_build_rev", isHexDigits, requestParamOptional},
 	{"relay_protocol", isRelayProtocol, 0},
 	{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
-	{"device_region", isRegionCode, requestParamOptional},
+	{"device_region", isAnyString, requestParamOptional},
 	{"ssh_client_version", isAnyString, requestParamOptional},
 	{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
 	{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
@@ -618,7 +618,7 @@ func validateStringRequestParam(
 	}
 	if !expectedParam.validator(config, strValue) {
 		return common.ContextError(
-			fmt.Errorf("invalid param: %s", expectedParam.name))
+			fmt.Errorf("invalid param: %s: %s", expectedParam.name, strValue))
 	}
 	return nil
 }
