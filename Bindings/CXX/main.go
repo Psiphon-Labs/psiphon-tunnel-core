@@ -5,7 +5,10 @@ import "C"
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"io/ioutil"
+	"os"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
@@ -106,6 +109,20 @@ func Stop() bool {
 }
 
 func main() {
-	configJSON := ``
-	Start(configJSON, "")
+	var configFilename string
+	flag.StringVar(&configFilename, "config", "", "configuration input file")
+	flag.Parse()
+
+	if configFilename == "" {
+		fmt.Println("A config file is required")
+		os.Exit(1)
+	}
+
+	configFileContents, err := ioutil.ReadFile(configFilename)
+	if err != nil {
+		fmt.Printf("Invalid config file: %s\n", err.Error())
+		os.Exit(1)
+	}
+
+	Start(string(configFileContents), "")
 }
