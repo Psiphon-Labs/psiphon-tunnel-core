@@ -15,11 +15,12 @@ import (
 )
 
 type NoticeEvent struct {
-	Data       struct{} `json:"data"`
-	NoticeType string   `json:"noticeType"`
+	Data       map[string]interface{} `json:"data"`
+	NoticeType string                 `json:"noticeType"`
 }
 
 type PsiphonProvider struct {
+	connected chan bool
 }
 
 func (pp PsiphonProvider) Notice(noticeJSON string) {
@@ -29,11 +30,12 @@ func (pp PsiphonProvider) Notice(noticeJSON string) {
 		fmt.Printf("Failed to unmarshal: %v", err)
 	}
 	if event.NoticeType == "Tunnels" {
-		fmt.Printf("Connected!!")
+		count := event.Data["count"].(float64)
+		if count > 0 {
+			pp.connected <- true
+		}
 	}
-	fmt.Println("💣")
-	fmt.Printf("%s\n", event.NoticeType)
-	fmt.Printf("%s\n", noticeJSON)
+	fmt.Printf("notice: %s\n", noticeJSON)
 }
 
 func (pp PsiphonProvider) HasNetworkConnectivity() int {
@@ -73,6 +75,10 @@ type StartResult struct {
 func Start(configJSON,
 	embeddedServerEntryList string) string {
 
+	provider.connected = make(chan bool)
+
+	done := make(chan bool)
+
 	var result StartResult
 
 	startTime := time.Now().UTC()
@@ -81,25 +87,44 @@ func Start(configJSON,
 
 	fmt.Printf("Passing: %s\n", configJSON)
 
-	err := psi.Start(configJSON, embeddedServerEntryList, "", provider, true, false)
+	err := psi.Start(configJSON, embeddedServerEntryList, "", provider, false, false)
 	if err != nil {
 		fmt.Println(err)
 	}
-	select {
-	case <-connectedCtx.Done():
-		err := connectedCtx.Err()
-		if err != nil {
-			result.ErrorString = err.Error()
-			Stop()
+
+	go func() {
+		select {
+		case <-connectedCtx.Done():
+			err = connectedCtx.Err()
+			if err != nil {
+				result.ErrorString = err.Error()
+				Stop()
+			}
+			delta := time.Now().UTC().Sub(startTime)
+			result.BootstrapTime = delta.Seconds()
+			done <- true
 		}
-		delta := time.Now().UTC().Sub(startTime)
-		result.BootstrapTime = delta.Seconds()
-		b, err := json.Marshal(result)
-		if err != nil {
-			return "{\"error\":\"json_serializitation\"}"
+	}()
+
+	go func() {
+		select {
+		case <-provider.connected:
+			delta := time.Now().UTC().Sub(startTime)
+			result.BootstrapTime = delta.Seconds()
+			done <- true
 		}
-		return string(b)
+	}()
+
+	<-done
+
+	b, err := json.Marshal(result)
+	if err != nil {
+		fmt.Printf("Error in marshal: %s", err.Error())
+		return "error"
 	}
+	retStr := string(b)
+	fmt.Printf("retStr: %s\n", retStr)
+	return retStr
 }
 
 //export Stop
