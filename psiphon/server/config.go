@@ -214,33 +214,6 @@ type Config struct {
 	// is 0.
 	MeekCachedResponsePoolBufferCount int
 
-	// MeekRateLimiterHistorySize enables the late-stage meek rate limiter and
-	// sets its history size. The late-stage meek rate limiter acts on client
-	// IPs relayed in MeekProxyForwardedForHeaders, and so it must wait for
-	// the HTTP headers to be read. This rate limiter immediately terminates
-	// any client endpoint request or any request to create a new session, but
-	// not any meek request for an existing session, if the
-	// MeekRateLimiterHistorySize requests occur in MeekRateLimiterThresholdSeconds.
-	MeekRateLimiterHistorySize int
-
-	// MeekRateLimiterThresholdSeconds is part of the meek rate limiter
-	// specification and must be set when MeekRateLimiterHistorySize is set.
-	MeekRateLimiterThresholdSeconds int
-
-	// MeekRateLimiterGarbageCollectionTriggerCount specifies the number of
-	// rate limit events after which garbage collection is manually triggered
-	// in order to reclaim memory used by rate limited and other rejected
-	// requests.
-	// A default of 1000 is used when
-	// MeekRateLimiterGarbageCollectionTriggerCount is 0.
-	MeekRateLimiterGarbageCollectionTriggerCount int
-
-	// MeekRateLimiterReapHistoryFrequencySeconds specifies a schedule for
-	// reaping old records from the rate limit history.
-	// A default of 600 is used when
-	// MeekRateLimiterReapHistoryFrequencySeconds is 0.
-	MeekRateLimiterReapHistoryFrequencySeconds int
-
 	// UDPInterceptUdpgwServerAddress specifies the network address of
 	// a udpgw server which clients may be port forwarding to. When
 	// specified, these TCP port forwards are intercepted and handled
@@ -349,11 +322,6 @@ func (config *Config) RunPeriodicGarbageCollection() bool {
 	return config.PeriodicGarbageCollectionSeconds > 0
 }
 
-// ...
-func (config *Config) RunMeekRateLimiter() bool {
-	return config.MeekRateLimiterHistorySize > 0
-}
-
 // LoadConfig loads and validates a JSON encoded server config.
 func LoadConfig(configJSON []byte) (*Config, error) {
 
@@ -438,12 +406,6 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf(
 			"AccessControlVerificationKeyRing is invalid: %s", err)
-	}
-
-	if config.MeekRateLimiterHistorySize > 0 {
-		if config.MeekRateLimiterThresholdSeconds <= 0 {
-			return nil, errors.New("Meek rate limiter requires MeekRateLimiterThresholdSeconds")
-		}
 	}
 
 	return &config, nil

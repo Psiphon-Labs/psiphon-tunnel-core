@@ -240,6 +240,7 @@ func TestMeekResiliency(t *testing.T) {
 			MeekObfuscatedKey:              meekObfuscatedKey,
 			MeekCookieEncryptionPrivateKey: meekCookieEncryptionPrivateKey,
 		},
+		TrafficRulesSet: &TrafficRulesSet{},
 	}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

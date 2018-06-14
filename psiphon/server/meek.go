@@ -70,18 +70,16 @@ const (
 	// when retrying a request for a partially downloaded response payload.
 	MEEK_PROTOCOL_VERSION_3 = 3
 
-	MEEK_MAX_REQUEST_PAYLOAD_LENGTH                           = 65536
-	MEEK_TURN_AROUND_TIMEOUT                                  = 20 * time.Millisecond
-	MEEK_EXTENDED_TURN_AROUND_TIMEOUT                         = 100 * time.Millisecond
-	MEEK_MAX_SESSION_STALENESS                                = 45 * time.Second
-	MEEK_HTTP_CLIENT_IO_TIMEOUT                               = 45 * time.Second
-	MEEK_MIN_SESSION_ID_LENGTH                                = 8
-	MEEK_MAX_SESSION_ID_LENGTH                                = 20
-	MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH                       = 65536
-	MEEK_DEFAULT_POOL_BUFFER_LENGTH                           = 65536
-	MEEK_DEFAULT_POOL_BUFFER_COUNT                            = 2048
-	MEEK_DEFAULT_RATE_LIMITER_GARBAGE_COLLECTOR_TRIGGER_COUNT = 1000
-	MEEK_DEFAULT_RATE_LIMITER_REAP_HISTORY_FREQUENCY_SECONDS  = 600
+	MEEK_MAX_REQUEST_PAYLOAD_LENGTH     = 65536
+	MEEK_TURN_AROUND_TIMEOUT            = 20 * time.Millisecond
+	MEEK_EXTENDED_TURN_AROUND_TIMEOUT   = 100 * time.Millisecond
+	MEEK_MAX_SESSION_STALENESS          = 45 * time.Second
+	MEEK_HTTP_CLIENT_IO_TIMEOUT         = 45 * time.Second
+	MEEK_MIN_SESSION_ID_LENGTH          = 8
+	MEEK_MAX_SESSION_ID_LENGTH          = 20
+	MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH = 65536
+	MEEK_DEFAULT_POOL_BUFFER_LENGTH     = 65536
+	MEEK_DEFAULT_POOL_BUFFER_COUNT      = 2048
 )
 
 // MeekServer implements the meek protocol, which tunnels TCP traffic (in the case of Psiphon,
@@ -135,19 +133,16 @@ func NewMeekServer(
 	bufferPool := NewCachedResponseBufferPool(bufferLength, bufferCount)
 
 	meekServer := &MeekServer{
-		support:       support,
-		listener:      listener,
-		clientHandler: clientHandler,
-		openConns:     new(common.Conns),
-		stopBroadcast: stopBroadcast,
-		sessions:      make(map[string]*meekSession),
-		checksumTable: checksumTable,
-		bufferPool:    bufferPool,
-	}
-
-	if support.Config.RunMeekRateLimiter() {
-		meekServer.rateLimitHistory = make(map[string][]monotime.Time)
-		meekServer.rateLimitSignalGC = make(chan struct{}, 1)
+		support:           support,
+		listener:          listener,
+		clientHandler:     clientHandler,
+		openConns:         new(common.Conns),
+		stopBroadcast:     stopBroadcast,
+		sessions:          make(map[string]*meekSession),
+		checksumTable:     checksumTable,
+		bufferPool:        bufferPool,
+		rateLimitHistory:  make(map[string][]monotime.Time),
+		rateLimitSignalGC: make(chan struct{}, 1),
 	}
 
 	if useTLS {
@@ -187,13 +182,11 @@ func (server *MeekServer) Run() error {
 		}
 	}()
 
-	if server.support.Config.RunMeekRateLimiter() {
-		waitGroup.Add(1)
-		go func() {
-			defer waitGroup.Done()
-			server.rateLimitWorker()
-		}()
-	}
+	waitGroup.Add(1)
+	go func() {
+		defer waitGroup.Done()
+		server.rateLimitWorker()
+	}()
 
 	// Serve HTTP or HTTPS
 	//
@@ -660,22 +653,31 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 func (server *MeekServer) rateLimit(clientIP string) bool {
 
-	if !server.support.Config.RunMeekRateLimiter() {
+	historySize, thresholdSeconds, regions, GCTriggerCount, _ :=
+		server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
+
+	if historySize == 0 {
 		return false
+	}
+
+	if len(regions) > 0 {
+		// TODO: avoid redundant GeoIP lookups?
+		if !common.Contains(regions, server.support.GeoIPService.Lookup(clientIP).Country) {
+			return false
+		}
 	}
 
 	limit := true
 	triggerGC := false
 
 	now := monotime.Now()
-	threshold := now.Add(
-		-time.Duration(server.support.Config.MeekRateLimiterThresholdSeconds) * time.Second)
+	threshold := now.Add(-time.Duration(thresholdSeconds) * time.Second)
 
 	server.rateLimitLock.Lock()
 
 	history, ok := server.rateLimitHistory[clientIP]
-	if !ok {
-		history = make([]monotime.Time, server.support.Config.MeekRateLimiterHistorySize)
+	if !ok || len(history) != historySize {
+		history = make([]monotime.Time, historySize)
 		server.rateLimitHistory[clientIP] = history
 	}
 
@@ -694,11 +696,7 @@ func (server *MeekServer) rateLimit(clientIP string) bool {
 
 		server.rateLimitCount += 1
 
-		triggerCount := server.support.Config.MeekRateLimiterGarbageCollectionTriggerCount
-		if triggerCount <= 0 {
-			triggerCount = MEEK_DEFAULT_RATE_LIMITER_GARBAGE_COLLECTOR_TRIGGER_COUNT
-		}
-		if server.rateLimitCount >= triggerCount {
+		if server.rateLimitCount >= GCTriggerCount {
 			triggerGC = true
 			server.rateLimitCount = 0
 		}
@@ -718,22 +716,22 @@ func (server *MeekServer) rateLimit(clientIP string) bool {
 
 func (server *MeekServer) rateLimitWorker() {
 
-	frequencySeconds := server.support.Config.MeekRateLimiterReapHistoryFrequencySeconds
-	if frequencySeconds <= 0 {
-		frequencySeconds = MEEK_DEFAULT_RATE_LIMITER_REAP_HISTORY_FREQUENCY_SECONDS
-	}
+	_, _, _, _, reapFrequencySeconds :=
+		server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
 
-	ticker := time.NewTicker(time.Duration(frequencySeconds) * time.Second)
-	defer ticker.Stop()
+	timer := time.NewTimer(time.Duration(reapFrequencySeconds) * time.Second)
+	defer timer.Stop()
 
 	for {
 		select {
-		case <-ticker.C:
+		case <-timer.C:
+
+			_, thresholdSeconds, _, _, reapFrequencySeconds :=
+				server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
 
 			server.rateLimitLock.Lock()
 
-			threshold := monotime.Now().Add(
-				-time.Duration(server.support.Config.MeekRateLimiterThresholdSeconds) * time.Second)
+			threshold := monotime.Now().Add(-time.Duration(thresholdSeconds) * time.Second)
 
 			for key, history := range server.rateLimitHistory {
 				reap := true
@@ -753,6 +751,8 @@ func (server *MeekServer) rateLimitWorker() {
 			}
 
 			server.rateLimitLock.Unlock()
+
+			timer.Reset(time.Duration(reapFrequencySeconds) * time.Second)
 
 		case <-server.rateLimitSignalGC:
 			runtime.GC()
