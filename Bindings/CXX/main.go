@@ -1,5 +1,6 @@
 package main
 
+
 import "C"
 
 import (
@@ -73,11 +74,9 @@ type StartResult struct {
 
 //export Start
 func Start(configJSON,
-	embeddedServerEntryList string) string {
+	embeddedServerEntryList string) *C.char {
 
 	provider.connected = make(chan bool)
-
-	done := make(chan bool)
 
 	var result StartResult
 
@@ -92,39 +91,29 @@ func Start(configJSON,
 		fmt.Println(err)
 	}
 
-	go func() {
-		select {
-		case <-connectedCtx.Done():
-			err = connectedCtx.Err()
-			if err != nil {
-				result.ErrorString = err.Error()
-				Stop()
-			}
-			delta := time.Now().UTC().Sub(startTime)
-			result.BootstrapTime = delta.Seconds()
-			done <- true
+	select {
+	case <-connectedCtx.Done():
+		err = connectedCtx.Err()
+		if err != nil {
+			result.ErrorString = err.Error()
+			Stop()
 		}
-	}()
-
-	go func() {
-		select {
-		case <-provider.connected:
-			delta := time.Now().UTC().Sub(startTime)
-			result.BootstrapTime = delta.Seconds()
-			done <- true
-		}
-	}()
-
-	<-done
+		delta := time.Now().UTC().Sub(startTime)
+		result.BootstrapTime = delta.Seconds()
+	case <-provider.connected:
+		delta := time.Now().UTC().Sub(startTime)
+		result.BootstrapTime = delta.Seconds()
+		cancel()
+	}
 
 	b, err := json.Marshal(result)
 	if err != nil {
 		fmt.Printf("Error in marshal: %s", err.Error())
-		return "error"
+		return C.CString("error")
 	}
 	retStr := string(b)
 	fmt.Printf("retStr: %s\n", retStr)
-	return retStr
+	return C.CString(retStr)
 }
 
 //export Stop

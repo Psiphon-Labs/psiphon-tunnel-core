@@ -53,11 +53,9 @@ extern "C" {
 #endif
 
 
-extern GoUint8 Start(GoString p0);
+extern char* Start(GoString p0, GoString p1);
 
 extern GoUint8 Stop();
-
-extern GoUint8 RegisterCallback(GoString p0, void* p1);
 
 #ifdef __cplusplus
 }
