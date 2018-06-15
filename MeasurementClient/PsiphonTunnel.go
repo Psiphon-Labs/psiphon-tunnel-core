@@ -1,15 +1,11 @@
 package main
 
-
 import "C"
 
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
-	"io/ioutil"
-	"os"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
@@ -22,21 +18,32 @@ type NoticeEvent struct {
 
 type PsiphonProvider struct {
 	connected chan bool
+	err       chan error
+	stopped   chan bool
+	networkID string
 }
 
 func (pp PsiphonProvider) Notice(noticeJSON string) {
 	var event NoticeEvent
+
 	err := json.Unmarshal([]byte(noticeJSON), &event)
 	if err != nil {
-		fmt.Printf("Failed to unmarshal: %v", err)
+		select {
+		case pp.err <- err:
+		default:
+		}
+		return
 	}
+
 	if event.NoticeType == "Tunnels" {
 		count := event.Data["count"].(float64)
 		if count > 0 {
-			pp.connected <- true
+			select {
+			case pp.connected <- true:
+			default:
+			}
 		}
 	}
-	fmt.Printf("notice: %s\n", noticeJSON)
 }
 
 func (pp PsiphonProvider) HasNetworkConnectivity() int {
@@ -60,83 +67,83 @@ func (pp PsiphonProvider) GetSecondaryDnsServer() string {
 }
 
 func (pp PsiphonProvider) GetNetworkID() string {
-	return ""
+	return pp.networkID
 }
-
-const runtimeTimeout = 90 * time.Second
 
 var provider PsiphonProvider
 
 type StartResult struct {
 	BootstrapTime float64 `json:"bootstrap_time"`
-	ErrorString   string  `json:"error"`
+	ErrorString   string  `json:"error,omitempty"`
 }
 
 //export Start
 func Start(configJSON,
-	embeddedServerEntryList string) *C.char {
-
-	provider.connected = make(chan bool)
+	embeddedServerEntryList, networkID string, timeout int64) *C.char {
 
 	var result StartResult
 
+	provider.connected = make(chan bool)
+	provider.stopped = make(chan bool)
+	provider.err = make(chan error)
+
+	runtimeTimeout := time.Duration(timeout) * time.Second
 	startTime := time.Now().UTC()
+
 	connectedCtx, cancel := context.WithTimeout(context.Background(), runtimeTimeout)
 	defer cancel()
 
-	fmt.Printf("Passing: %s\n", configJSON)
-
 	err := psi.Start(configJSON, embeddedServerEntryList, "", provider, false, false)
 	if err != nil {
-		fmt.Println(err)
+		return errorJsonForC(err)
 	}
 
 	select {
 	case <-connectedCtx.Done():
+		result.BootstrapTime = bootstrapTime(startTime)
 		err = connectedCtx.Err()
 		if err != nil {
 			result.ErrorString = err.Error()
-			Stop()
 		}
-		delta := time.Now().UTC().Sub(startTime)
-		result.BootstrapTime = delta.Seconds()
 	case <-provider.connected:
-		delta := time.Now().UTC().Sub(startTime)
-		result.BootstrapTime = delta.Seconds()
+		result.BootstrapTime = bootstrapTime(startTime)
+		cancel()
+	case <-provider.stopped:
+		result.BootstrapTime = bootstrapTime(startTime)
+		result.ErrorString = "stop signalled before client connected"
+		cancel()
+	case err := <-provider.err:
+		result.BootstrapTime = bootstrapTime(startTime)
+		result.ErrorString = err.Error()
 		cancel()
 	}
 
-	b, err := json.Marshal(result)
+	resultJSON, err := json.Marshal(result)
 	if err != nil {
-		fmt.Printf("Error in marshal: %s", err.Error())
-		return C.CString("error")
+		return errorJsonForC(err)
 	}
-	retStr := string(b)
-	fmt.Printf("retStr: %s\n", retStr)
-	return C.CString(retStr)
+
+	return C.CString(string(resultJSON))
+}
+
+func bootstrapTime(startTime time.Time) float64 {
+	delta := time.Now().UTC().Sub(startTime)
+	return delta.Seconds()
+}
+
+func errorJsonForC(err error) *C.char {
+	return C.CString(fmt.Sprintf("{\"error\": \"%s\"}", err.Error()))
 }
 
 //export Stop
 func Stop() bool {
 	psi.Stop()
+	select {
+	case provider.stopped <- true:
+	default:
+	}
+
 	return true
 }
 
-func main() {
-	var configFilename string
-	flag.StringVar(&configFilename, "config", "", "configuration input file")
-	flag.Parse()
-
-	if configFilename == "" {
-		fmt.Println("A config file is required")
-		os.Exit(1)
-	}
-
-	configFileContents, err := ioutil.ReadFile(configFilename)
-	if err != nil {
-		fmt.Printf("Invalid config file: %s\n", err.Error())
-		os.Exit(1)
-	}
-
-	Start(string(configFileContents), "")
-}
+func main() {} // stub required by cgo

@@ -53,7 +53,7 @@ extern "C" {
 #endif
 
 
-extern char* Start(GoString p0, GoString p1);
+extern char* Start(GoString p0, GoString p1, GoString p2, GoInt64 p3);
 
 extern GoUint8 Stop();
 
