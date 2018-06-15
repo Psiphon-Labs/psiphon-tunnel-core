@@ -209,11 +209,23 @@ public class WebViewProxySettings
                 for (Object receiver : ((ArrayMap) receiverMap).keySet())
                 {
                     Class clazz = receiver.getClass();
-                    if (clazz.getName().contains("ProxyChangeListener"))
-                    {
-                        Method onReceiveMethod = clazz.getDeclaredMethod("onReceive", Context.class, Intent.class);
-                        Intent intent = new Intent(Proxy.PROXY_CHANGE_ACTION);
+                    // NOTE: as of Chrome 67 the ProxyChangeListener now has an obfuscated name,
+                    // so we are unable to identify the receiver by name. Instead we'll send the
+                    // PROXY_CHANGE intent to all receivers.
+                    Method onReceiveMethod = clazz.getDeclaredMethod("onReceive", Context.class, Intent.class);
+                    Intent intent = new Intent(Proxy.PROXY_CHANGE_ACTION);
+                    
+                    final String CLASS_NAME = "android.net.ProxyInfo";
+                    Class proxyInfoClass = Class.forName(CLASS_NAME);
+                    Constructor constructor = proxyInfoClass.getConstructor(String.class, Integer.TYPE, String.class);
+                    constructor.setAccessible(true);
+                    Object proxyInfo = constructor.newInstance(host, port, null);
+                    intent.putExtra("android.intent.extra.PROXY_INFO", (Parcelable) proxyInfo);
+                    
+                    try {
                         onReceiveMethod.invoke(receiver, appContext, intent);
+                    } catch (InvocationTargetException e) {
+                        // This receiver may throw on an unexpected intent, continue to the next one
                     }
                 }
             }
@@ -232,6 +244,9 @@ public class WebViewProxySettings
         {
         }
         catch (InvocationTargetException e)
+        {
+        }
+        catch (InstantiationException e)
         {
         }
         return false;
