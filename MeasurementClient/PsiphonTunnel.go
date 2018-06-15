@@ -83,6 +83,7 @@ func Start(configJSON,
 
 	var result StartResult
 
+	provider.networkID = networkID
 	provider.connected = make(chan bool)
 	provider.stopped = make(chan bool)
 	provider.err = make(chan error)
