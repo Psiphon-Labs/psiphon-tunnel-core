@@ -23,7 +23,7 @@ attributes, API parameters, and speed test data. The tactics implementation
 works in concert with the "parameters" package, allowing contextual
 optimization of Psiphon client parameters; for example, customizing
 NetworkLatencyMultiplier to adjust timeouts for clients on slow networks; or
-customizeing LimitTunnelProtocols and ConnectionWorkerPoolSize to circumvent
+customizing LimitTunnelProtocols and ConnectionWorkerPoolSize to circumvent
 specific blocking conditions.
 
 Clients obtain tactics from a Psiphon server. Tactics are configured with a hot-

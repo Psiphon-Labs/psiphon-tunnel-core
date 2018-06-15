@@ -1057,7 +1057,12 @@ func paveTrafficRulesFile(
                 "WriteBytesPerSecond": 16384
             },
             "AllowTCPPorts" : [0],
-            "AllowUDPPorts" : [0]
+            "AllowUDPPorts" : [0],
+            "MeekRateLimiterHistorySize" : 10,
+            "MeekRateLimiterThresholdSeconds" : 1,
+            "MeekRateLimiterGarbageCollectionTriggerCount" : 1,
+            "MeekRateLimiterReapHistoryFrequencySeconds" : 1,
+            "MeekRateLimiterRegions" : []
         },
         "FilteredRules" : [
             {
