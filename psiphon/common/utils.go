@@ -33,6 +33,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/wildcard"
 )
 
 const RFC3339Milli = "2006-01-02T15:04:05.000Z07:00"
@@ -42,6 +44,18 @@ const RFC3339Milli = "2006-01-02T15:04:05.000Z07:00"
 func Contains(list []string, target string) bool {
 	for _, listItem := range list {
 		if listItem == target {
+			return true
+		}
+	}
+	return false
+}
+
+// ContainsWildcard returns true if target matches
+// any of the patterns. Patterns may contain the
+// '*' wildcard.
+func ContainsWildcard(patterns []string, target string) bool {
+	for _, pattern := range patterns {
+		if wildcard.Match(pattern, target) {
 			return true
 		}
 	}

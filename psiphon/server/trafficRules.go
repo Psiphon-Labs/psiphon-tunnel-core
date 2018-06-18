@@ -123,6 +123,7 @@ type TrafficRulesFilter struct {
 	// HandshakeParameters specifies handshake API parameter names and
 	// a list of values, one of which must be specified to match this
 	// filter. Only scalar string API parameters may be filtered.
+	// Values may be patterns containing the '*' wildcard.
 	HandshakeParameters map[string][]string
 
 	// AuthorizedAccessTypes specifies a list of access types, at least
@@ -479,7 +480,7 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			mismatch := false
 			for name, values := range filteredRules.Filter.HandshakeParameters {
 				clientValue, err := getStringRequestParam(state.apiParams, name)
-				if err != nil || !common.Contains(values, clientValue) {
+				if err != nil || !common.ContainsWildcard(values, clientValue) {
 					mismatch = true
 					break
 				}
