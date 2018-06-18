@@ -23,6 +23,7 @@ script:
 #    tun_test.go:226: startTestTCPClient failed: syscall.Connect failed: connection timed out
 #
 #- sudo -E env "PATH=$PATH" go test -race -v ./common/tun
+- go test -race -v ./common/wildcard
 - go test -race -v ./transferstats
 - go test -race -v ./server
 - go test -race -v ./server/psinet
@@ -37,6 +38,7 @@ script:
 - go test -v -covermode=count -coverprofile=tactics.coverprofile ./common/tactics
 # TODO: see comment above
 #- sudo -E env "PATH=$PATH" go test -v -covermode=count -coverprofile=tun.coverprofile ./common/tun
+- go test -v -covermode=count -coverprofile=wildcard.coverprofile ./common/wildcard
 - go test -v -covermode=count -coverprofile=transferstats.coverprofile ./transferstats
 - go test -v -covermode=count -coverprofile=server.coverprofile ./server
 - go test -v -covermode=count -coverprofile=psinet.coverprofile ./server/psinet
