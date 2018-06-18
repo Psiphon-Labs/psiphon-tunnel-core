@@ -240,6 +240,7 @@ func TestMeekResiliency(t *testing.T) {
 			MeekObfuscatedKey:              meekObfuscatedKey,
 			MeekCookieEncryptionPrivateKey: meekCookieEncryptionPrivateKey,
 		},
+		TrafficRulesSet: &TrafficRulesSet{},
 	}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -370,4 +371,153 @@ func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) (
 		fmt.Printf("interrupted TCP connection\n")
 	})
 	return "", nil
+}
+
+func TestMeekRateLimiter(t *testing.T) {
+
+	allowedConnections := 5
+	testDurationSeconds := 10
+
+	// Run meek server
+
+	rawMeekCookieEncryptionPublicKey, rawMeekCookieEncryptionPrivateKey, err := box.GenerateKey(crypto_rand.Reader)
+	if err != nil {
+		t.Fatalf("box.GenerateKey failed: %s", err)
+	}
+	meekCookieEncryptionPublicKey := base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPublicKey[:])
+	meekCookieEncryptionPrivateKey := base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPrivateKey[:])
+	meekObfuscatedKey, err := common.MakeSecureRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+	if err != nil {
+		t.Fatalf("common.MakeSecureRandomStringHex failed: %s", err)
+	}
+
+	mockSupport := &SupportServices{
+		Config: &Config{
+			MeekObfuscatedKey:              meekObfuscatedKey,
+			MeekCookieEncryptionPrivateKey: meekCookieEncryptionPrivateKey,
+		},
+		TrafficRulesSet: &TrafficRulesSet{
+			MeekRateLimiterHistorySize:                   allowedConnections,
+			MeekRateLimiterThresholdSeconds:              testDurationSeconds,
+			MeekRateLimiterGarbageCollectionTriggerCount: 1,
+			MeekRateLimiterReapHistoryFrequencySeconds:   1,
+		},
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen failed: %s", err)
+	}
+	defer listener.Close()
+
+	serverAddress := listener.Addr().String()
+
+	stopBroadcast := make(chan struct{})
+
+	server, err := NewMeekServer(
+		mockSupport,
+		listener,
+		false,
+		false,
+		func(_ string, conn net.Conn) {
+			go func() {
+				for {
+					buffer := make([]byte, 1)
+					n, err := conn.Read(buffer)
+					if err == nil && n == 1 {
+						_, err = conn.Write(buffer)
+					}
+					if err != nil {
+						conn.Close()
+						break
+					}
+				}
+			}()
+		},
+		stopBroadcast)
+	if err != nil {
+		t.Fatalf("NewMeekServer failed: %s", err)
+	}
+
+	serverWaitGroup := new(sync.WaitGroup)
+
+	serverWaitGroup.Add(1)
+	go func() {
+		defer serverWaitGroup.Done()
+		err := server.Run()
+		if err != nil {
+			t.Fatalf("MeekServer.Run failed: %s", err)
+		}
+	}()
+
+	// Run meek clients:
+	// For 10 seconds, connect once per second vs. rate limit of 5-per-10 seconds,
+	// so about half of the connections should be rejected by the rate limiter.
+
+	stopTime := time.Now().Add(time.Duration(testDurationSeconds) * time.Second)
+
+	totalConnections := 0
+	totalFailures := 0
+
+	for {
+
+		dialConfig := &psiphon.DialConfig{}
+
+		clientParameters, err := parameters.NewClientParameters(nil)
+		if err != nil {
+			t.Fatalf("NewClientParameters failed: %s", err)
+		}
+
+		meekConfig := &psiphon.MeekConfig{
+			ClientParameters:              clientParameters,
+			DialAddress:                   serverAddress,
+			HostHeader:                    "example.com",
+			MeekCookieEncryptionPublicKey: meekCookieEncryptionPublicKey,
+			MeekObfuscatedKey:             meekObfuscatedKey,
+		}
+
+		ctx, cancelFunc := context.WithTimeout(
+			context.Background(), 500*time.Millisecond)
+		defer cancelFunc()
+
+		clientConn, err := psiphon.DialMeek(ctx, meekConfig, dialConfig)
+
+		if err == nil {
+			_, err = clientConn.Write([]byte{0})
+		}
+		if err == nil {
+			buffer := make([]byte, 1)
+			_, err = clientConn.Read(buffer)
+		}
+
+		if clientConn != nil {
+			clientConn.Close()
+		}
+
+		if err != nil {
+			totalFailures += 1
+		} else {
+			totalConnections += 1
+		}
+
+		if !time.Now().Before(stopTime) {
+			break
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+
+	if totalConnections != allowedConnections || totalFailures == 0 {
+		t.Fatalf(
+			"Unexpected results: %d connections, %d failures",
+			totalConnections, totalFailures)
+	}
+
+	// Graceful shutdown
+
+	listener.Close()
+	close(stopBroadcast)
+
+	// This wait will hang if shutdown is broken, and the test will ultimately panic
+	serverWaitGroup.Wait()
 }
