@@ -49,7 +49,7 @@ int main(int argc, char *argv[]) {
     GoString serverList = {};
 
     // set timout
-    long long timeout = 10;
+    long long timeout = 60;
 
     // set network ID
     char * const test_network_id = "TEST";

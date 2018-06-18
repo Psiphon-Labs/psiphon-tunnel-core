@@ -5,10 +5,14 @@ import "C"
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 type NoticeEvent struct {
@@ -16,135 +20,188 @@ type NoticeEvent struct {
 	NoticeType string                 `json:"noticeType"`
 }
 
-type PsiphonProvider struct {
-	connected chan bool
-	err       chan error
-	stopped   chan bool
-	networkID string
+type TestResult struct {
+	BootstrapTime  float64 `json:"bootstrap_time,omitempty"`
+	ErrorString    string  `json:"error,omitempty"`
+	HttpProxyPort  int     `json:"http_proxy_port,omitempty"`
+	SocksProxyPort int     `json:"socks_proxy_port,omitempty"`
 }
 
-func (pp PsiphonProvider) Notice(noticeJSON string) {
-	var event NoticeEvent
-
-	err := json.Unmarshal([]byte(noticeJSON), &event)
-	if err != nil {
-		select {
-		case pp.err <- err:
-		default:
-		}
-		return
-	}
-
-	if event.NoticeType == "Tunnels" {
-		count := event.Data["count"].(float64)
-		if count > 0 {
-			select {
-			case pp.connected <- true:
-			default:
-			}
-		}
-	}
+type MeasurementTest struct {
+	controllerWaitGroup sync.WaitGroup
+	controllerCtx       context.Context
+	stopController      context.CancelFunc
+	httpProxyPort       int
+	socksProxyPort      int
 }
 
-func (pp PsiphonProvider) HasNetworkConnectivity() int {
-	return 1
-}
-
-func (pp PsiphonProvider) BindToDevice(fileDescriptor int) (string, error) {
-	return "", nil
-}
-
-func (pp PsiphonProvider) IPv6Synthesize(IPv4Addr string) string {
-	return "::1"
-}
-
-func (pp PsiphonProvider) GetPrimaryDnsServer() string {
-	return "8.8.8.8"
-}
-
-func (pp PsiphonProvider) GetSecondaryDnsServer() string {
-	return "8.8.8.8"
-}
-
-func (pp PsiphonProvider) GetNetworkID() string {
-	return pp.networkID
-}
-
-var provider PsiphonProvider
-
-type StartResult struct {
-	BootstrapTime float64 `json:"bootstrap_time"`
-	ErrorString   string  `json:"error,omitempty"`
-}
+var measurementTest MeasurementTest
 
 //export Start
-func Start(configJSON,
-	embeddedServerEntryList, networkID string, timeout int64) *C.char {
+func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64) *C.char {
 
-	var result StartResult
+	// Load provided config
 
-	provider.networkID = networkID
-	provider.connected = make(chan bool)
-	provider.stopped = make(chan bool)
-	provider.err = make(chan error)
+	config, err := psiphon.LoadConfig([]byte(configJSON))
+	if err != nil {
+		return errorJSONForC(err)
+	}
+
+	// Set network ID
+
+	if networkID != "" {
+		config.NetworkID = networkID
+	}
+
+	// All config fields should be set before calling commit
+
+	err = config.Commit()
+	if err != nil {
+		return errorJSONForC(err)
+	}
+
+	// Setup signals
+
+	connected := make(chan bool)
+
+	testError := make(chan error)
+
+	// Set up notice handling
+
+	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+		func(notice []byte) {
+
+			var event NoticeEvent
+
+			err := json.Unmarshal(notice, &event)
+			if err != nil {
+				err = errors.New(fmt.Sprintf("Failed to unmarshal json: %s", err.Error()))
+				select {
+				case testError <- err:
+				default:
+				}
+			}
+
+			if event.NoticeType == "ListeningHttpProxyPort" {
+				port := event.Data["port"].(float64)
+				measurementTest.httpProxyPort = int(port)
+			} else if event.NoticeType == "ListeningSocksProxyPort" {
+				port := event.Data["port"].(float64)
+				measurementTest.socksProxyPort = int(port)
+			} else if event.NoticeType == "Tunnels" {
+				count := event.Data["count"].(float64)
+				if count > 0 {
+					select {
+					case connected <- true:
+					default:
+					}
+				}
+			}
+		}))
+
+	// Initialize data store
+
+	err = psiphon.InitDataStore(config)
+	if err != nil {
+		return errorJSONForC(err)
+	}
+
+	// Store embedded server entries
+
+	serverEntries, err := protocol.DecodeServerEntryList(
+		embeddedServerEntryList,
+		common.GetCurrentTimestamp(),
+		protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
+	if err != nil {
+		return errorJSONForC(err)
+	}
+
+	err = psiphon.StoreServerEntries(config, serverEntries, false)
+	if err != nil {
+		return errorJSONForC(err)
+	}
+
+	// Run Psiphon
+
+	controller, err := psiphon.NewController(config)
+	if err != nil {
+		return errorJSONForC(err)
+	}
+
+	measurementTest.controllerCtx, measurementTest.stopController = context.WithCancel(context.Background())
+
+	// Set start time
+
+	startTime := time.Now()
+
+	// Setup timeout signal
 
 	runtimeTimeout := time.Duration(timeout) * time.Second
-	startTime := time.Now().UTC()
 
-	connectedCtx, cancel := context.WithTimeout(context.Background(), runtimeTimeout)
-	defer cancel()
+	timeoutSignal, cancelTimeout := context.WithTimeout(context.Background(), runtimeTimeout)
+	defer cancelTimeout()
 
-	err := psi.Start(configJSON, embeddedServerEntryList, "", provider, false, false)
-	if err != nil {
-		return errorJsonForC(err)
-	}
+	// Run test
+
+	var result TestResult
+
+	measurementTest.controllerWaitGroup.Add(1)
+	go func() {
+		defer measurementTest.controllerWaitGroup.Done()
+		controller.Run(measurementTest.controllerCtx)
+
+		select {
+		case testError <- errors.New("controller.Run exited unexpectedly"):
+		default:
+		}
+
+		// This is a noop if stopController was already called
+		measurementTest.stopController()
+	}()
+
+	// Wait for a stop signal, then stop Psiphon and exit
 
 	select {
-	case <-connectedCtx.Done():
-		result.BootstrapTime = bootstrapTime(startTime)
-		err = connectedCtx.Err()
+	case <-connected:
+		result.BootstrapTime = secondsBeforeNow(startTime)
+		result.HttpProxyPort = measurementTest.httpProxyPort
+		result.SocksProxyPort = measurementTest.socksProxyPort
+	case <-timeoutSignal.Done():
+		err = timeoutSignal.Err()
 		if err != nil {
-			result.ErrorString = err.Error()
+			result.ErrorString = fmt.Sprintf("Timeout occured before Psiphon connected: %s", err.Error())
+		} else {
+			result.ErrorString = "Timeout cancelled before Psiphon connected"
 		}
-	case <-provider.connected:
-		result.BootstrapTime = bootstrapTime(startTime)
-		cancel()
-	case <-provider.stopped:
-		result.BootstrapTime = bootstrapTime(startTime)
-		result.ErrorString = "stop signalled before client connected"
-		cancel()
-	case err := <-provider.err:
-		result.BootstrapTime = bootstrapTime(startTime)
+	case err := <-testError:
 		result.ErrorString = err.Error()
-		cancel()
 	}
+
+	// Return result
 
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
-		return errorJsonForC(err)
+		return errorJSONForC(err)
 	}
 
 	return C.CString(string(resultJSON))
 }
 
-func bootstrapTime(startTime time.Time) float64 {
-	delta := time.Now().UTC().Sub(startTime)
+//export Stop
+func Stop() {
+	if measurementTest.stopController != nil {
+		measurementTest.stopController()
+	}
+	measurementTest.controllerWaitGroup.Wait()
+}
+
+func secondsBeforeNow(startTime time.Time) float64 {
+	delta := time.Now().Sub(startTime)
 	return delta.Seconds()
 }
 
-func errorJsonForC(err error) *C.char {
+func errorJSONForC(err error) *C.char {
 	return C.CString(fmt.Sprintf("{\"error\": \"%s\"}", err.Error()))
-}
-
-//export Stop
-func Stop() bool {
-	psi.Stop()
-	select {
-	case provider.stopped <- true:
-	default:
-	}
-
-	return true
 }
 
 func main() {} // stub required by cgo

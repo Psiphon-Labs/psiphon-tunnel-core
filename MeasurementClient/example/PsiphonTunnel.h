@@ -55,7 +55,7 @@ extern "C" {
 
 extern char* Start(GoString p0, GoString p1, GoString p2, GoInt64 p3);
 
-extern GoUint8 Stop();
+extern void Stop();
 
 #ifdef __cplusplus
 }

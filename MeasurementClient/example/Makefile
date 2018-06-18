@@ -1,4 +1,4 @@
-main: main.o PsiphonTunnel.dylib
+main: PsiphonTunnel.dylib main.o
 	gcc PsiphonTunnel.dylib -o main main.o
 
 main.o: main.c
