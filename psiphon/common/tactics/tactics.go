@@ -273,6 +273,7 @@ type Filter struct {
 	// APIParameters specifies API, e.g. handshake, parameter names and
 	// a list of values, one of which must be specified to match this
 	// filter. Only scalar string API parameters may be filtered.
+	// Values may be patterns containing the '*' wildcard.
 	APIParameters map[string][]string
 
 	// SpeedTestRTTMilliseconds specifies a Range filter field that the
@@ -711,7 +712,7 @@ func (server *Server) getTactics(
 			mismatch := false
 			for name, values := range filteredTactics.Filter.APIParameters {
 				clientValue, err := getStringRequestParam(apiParams, name)
-				if err != nil || !common.Contains(values, clientValue) {
+				if err != nil || !common.ContainsWildcard(values, clientValue) {
 					mismatch = true
 					break
 				}
