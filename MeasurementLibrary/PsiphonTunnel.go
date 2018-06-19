@@ -47,13 +47,40 @@ type MeasurementTest struct {
 var measurementTest MeasurementTest
 
 //export Start
+// Start starts the controller and returns once either of the following has occured: an active tunnel has been
+// established, the timeout has elapsed before an active tunnel could be established or an error has occured.
+//
+// Start returns a StartResult object serialized as a JSON string in the form of a null-terminated buffer of C chars.
+// Start will return,
+// On success:
+//   {
+//     "result_code": 0,
+//     "bootstrap_time": <time_to_establish_tunnel>,
+//     "http_proxy_port": <http_proxy_port_num>,
+//     "socks_proxy_port": <socks_proxy_port_num>
+//   }
+//
+// On timeout:
+//  {
+//    "result_code": 1,
+//    "error": <error message>
+//  }
+//
+// On other error:
+//   {
+//     "result_code": 2,
+//     "error": <error message>
+//   }
+//
+// networkID should be not be blank and should follow the format specified by
+// https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter.
 func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64) *C.char {
 
 	// Load provided config
 
 	config, err := psiphon.LoadConfig([]byte(configJSON))
 	if err != nil {
-		return errorJSONForC(err)
+		return startErrorJson(err)
 	}
 
 	// Set network ID
@@ -66,7 +93,7 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 
 	err = config.Commit()
 	if err != nil {
-		return errorJSONForC(err)
+		return startErrorJson(err)
 	}
 
 	// Setup signals
@@ -112,7 +139,7 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 
 	err = psiphon.InitDataStore(config)
 	if err != nil {
-		return errorJSONForC(err)
+		return startErrorJson(err)
 	}
 
 	// Store embedded server entries
@@ -122,19 +149,19 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 		common.GetCurrentTimestamp(),
 		protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
 	if err != nil {
-		return errorJSONForC(err)
+		return startErrorJson(err)
 	}
 
 	err = psiphon.StoreServerEntries(config, serverEntries, false)
 	if err != nil {
-		return errorJSONForC(err)
+		return startErrorJson(err)
 	}
 
 	// Run Psiphon
 
 	controller, err := psiphon.NewController(config)
 	if err != nil {
-		return errorJSONForC(err)
+		return startErrorJson(err)
 	}
 
 	measurementTest.controllerCtx, measurementTest.stopController = context.WithCancel(context.Background())
@@ -163,12 +190,9 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 		case testError <- errors.New("controller.Run exited unexpectedly"):
 		default:
 		}
-
-		// This is a noop if stopController was already called
-		measurementTest.stopController()
 	}()
 
-	// Wait for a stop signal, then stop Psiphon and exit
+	// Wait for an active tunnel, timeout or error
 
 	select {
 	case <-connected:
@@ -191,15 +215,14 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 
 	// Return result
 
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return errorJSONForC(err)
-	}
-
-	return C.CString(string(resultJSON))
+	return marshalStartResult(result)
 }
 
 //export Stop
+// Stop stops the controller if it is running and waits for it to clean up and exit.
+//
+// Stop should always be called after a successful call to Start to ensure the
+// controller is not left running.
 func Stop() {
 	if measurementTest.stopController != nil {
 		measurementTest.stopController()
@@ -207,13 +230,39 @@ func Stop() {
 	measurementTest.controllerWaitGroup.Wait()
 }
 
+// secondsBeforeNow returns the delta seconds of the current time subtract startTime.
 func secondsBeforeNow(startTime time.Time) float64 {
 	delta := time.Now().Sub(startTime)
 	return delta.Seconds()
 }
 
-func errorJSONForC(err error) *C.char {
-	return C.CString(fmt.Sprintf("{\"error\": \"%s\"}", err.Error()))
+// marshalStartResult serializes a StartResult object as a JSON string in the form
+// of a null-terminated buffer of C chars.
+func marshalStartResult(result StartResult) *C.char {
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return C.CString(fmt.Sprintf("{\"result_code\":%d, \"error\": \"%s\"}", StartResultCodeOtherError, err.Error()))
+	}
+
+	return C.CString(string(resultJSON))
 }
 
-func main() {} // stub required by cgo
+// startErrorJson returns a StartResult object serialized as a JSON string in the form
+// of a null-terminated buffer of C chars. The object's return result code will be set to
+// StartResultCodeOtherError (2) and its error string set to the error string of the provided error.
+//
+// The JSON will be in the form of:
+// {
+//   "result_code": 2,
+//   "error": <error message>
+// }
+func startErrorJson(err error) *C.char {
+	var result StartResult
+	result.Code = StartResultCodeOtherError
+	result.ErrorString = err.Error()
+
+	return marshalStartResult(result)
+}
+
+// main is a stub required by cgo.
+func main() {}
