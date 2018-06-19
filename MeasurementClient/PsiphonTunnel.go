@@ -15,16 +15,25 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
+type StartResultCode int
+
+const (
+	StartResultCodeSuccess StartResultCode = iota
+	StartResultCodeTimeout
+	StartResultCodeOtherError
+)
+
 type NoticeEvent struct {
 	Data       map[string]interface{} `json:"data"`
 	NoticeType string                 `json:"noticeType"`
 }
 
-type TestResult struct {
-	BootstrapTime  float64 `json:"bootstrap_time,omitempty"`
-	ErrorString    string  `json:"error,omitempty"`
-	HttpProxyPort  int     `json:"http_proxy_port,omitempty"`
-	SocksProxyPort int     `json:"socks_proxy_port,omitempty"`
+type StartResult struct {
+	Code           StartResultCode `json:"result_code"`
+	BootstrapTime  float64         `json:"bootstrap_time,omitempty"`
+	ErrorString    string          `json:"error,omitempty"`
+	HttpProxyPort  int             `json:"http_proxy_port,omitempty"`
+	SocksProxyPort int             `json:"socks_proxy_port,omitempty"`
 }
 
 type MeasurementTest struct {
@@ -143,7 +152,7 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 
 	// Run test
 
-	var result TestResult
+	var result StartResult
 
 	measurementTest.controllerWaitGroup.Add(1)
 	go func() {
@@ -163,18 +172,21 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 
 	select {
 	case <-connected:
+		result.Code = StartResultCodeSuccess
 		result.BootstrapTime = secondsBeforeNow(startTime)
 		result.HttpProxyPort = measurementTest.httpProxyPort
 		result.SocksProxyPort = measurementTest.socksProxyPort
 	case <-timeoutSignal.Done():
+		result.Code = StartResultCodeTimeout
 		err = timeoutSignal.Err()
 		if err != nil {
 			result.ErrorString = fmt.Sprintf("Timeout occured before Psiphon connected: %s", err.Error())
-		} else {
-			result.ErrorString = "Timeout cancelled before Psiphon connected"
 		}
+		measurementTest.stopController()
 	case err := <-testError:
+		result.Code = StartResultCodeOtherError
 		result.ErrorString = err.Error()
+		measurementTest.stopController()
 	}
 
 	// Return result
