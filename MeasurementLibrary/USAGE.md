@@ -13,4 +13,4 @@ In order to use the Psiphon Measurement Library for testing the Psiphon network,
 **First step:** Review the sample code, located under `example`.
 This code provides an example of how to correctly use the measurement library.
 
-**Second step:** Review the comments in [`PsiphonTunnel.h`](example/PsiphonTunnel.h). They describe the testing interface.
+**Second step:** Review the comments for `Start` and `Stop` in [`PsiphonTunnel.go`](PsiphonTunnel.go). These functions make up the testing interface.
