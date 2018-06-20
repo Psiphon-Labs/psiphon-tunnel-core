@@ -33,6 +33,10 @@ accepts a Context input which may be used to cancel the dial.
 
 Conns mask or translate qerr.PeerGoingAway to io.EOF as appropriate.
 
+QUIC idle timeouts and keep alives are tuned to mitigate aggressive UDP NAT
+timeouts on mobile data networks while accounting for the fact that mobile
+devices in standby/sleep may not be able to initiate the keep alive.
+
 */
 package quic
 
@@ -53,6 +57,7 @@ import (
 const (
 	SERVER_HANDSHAKE_TIMEOUT = 30 * time.Second
 	SERVER_IDLE_TIMEOUT      = 5 * time.Minute
+	CLIENT_IDLE_TIMEOUT      = 30 * time.Second
 )
 
 // Listener is a net.Listener.
@@ -84,7 +89,7 @@ func Listen(addr string) (*Listener, error) {
 		IdleTimeout:           SERVER_IDLE_TIMEOUT,
 		MaxIncomingStreams:    1,
 		MaxIncomingUniStreams: -1,
-		KeepAlive:             false,
+		KeepAlive:             true,
 	}
 
 	quicListener, err := quic_go.ListenAddr(
@@ -139,12 +144,10 @@ func Dial(
 
 	go func() {
 
-		maxDuration := time.Duration(1<<63 - 1)
-
 		quicConfig := &quic_go.Config{
-			HandshakeTimeout: maxDuration,
-			IdleTimeout:      maxDuration,
-			KeepAlive:        false,
+			HandshakeTimeout: time.Duration(1<<63 - 1),
+			IdleTimeout:      CLIENT_IDLE_TIMEOUT,
+			KeepAlive:        true,
 		}
 
 		deadline, ok := ctx.Deadline()
