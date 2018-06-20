@@ -700,6 +700,8 @@ func getRequestLogFields(
 			// - For ELK performance we record certain domain-or-IP
 			//   fields as one of two different values based on type;
 			//   we also omit port from these host:port fields for now.
+			// - Boolean fields that come into the api as "1"/"0"
+			//   must be logged as actual boolean values
 			switch expectedParam.name {
 			case "client_version", "establishment_duration":
 				intValue, _ := strconv.Atoi(strValue)
@@ -718,6 +720,16 @@ func getRequestLogFields(
 				// Due to a client bug, clients may deliever an incorrect ""
 				// value for speed_test_samples via the web API protocol. Omit
 				// the field in this case.
+			case "tunnel_whole_device", "meek_transformed_host_name", "connected":
+				// Submitted value could be "0" or "1"
+				// "0" and non "0"/"1" values should be transformed to false
+				// "1" should be transformed to true
+
+				if strValue == "1" {
+					logFields[expectedParam.name] = true
+				} else {
+					logFields[expectedParam.name] = false
+				}
 			default:
 				logFields[expectedParam.name] = strValue
 			}
