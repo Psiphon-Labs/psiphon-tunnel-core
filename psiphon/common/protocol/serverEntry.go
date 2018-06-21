@@ -106,9 +106,14 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 			continue
 		}
 
-		if len(limitTunnelProtocols) > 0 &&
-			!common.Contains(limitTunnelProtocols, protocol) {
-			continue
+		if len(limitTunnelProtocols) > 0 {
+			if !common.Contains(limitTunnelProtocols, protocol) {
+				continue
+			}
+		} else {
+			if common.Contains(DefaultDisabledTunnelProtocols, protocol) {
+				continue
+			}
 		}
 
 		if len(impairedTunnelProtocols) > 0 &&

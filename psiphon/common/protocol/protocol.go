@@ -88,6 +88,10 @@ var SupportedTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
 }
 
+var DefaultDisabledTunnelProtocols = TunnelProtocols{
+	TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
+}
+
 var SupportedServerEntrySources = TunnelProtocols{
 	SERVER_ENTRY_SOURCE_EMBEDDED,
 	SERVER_ENTRY_SOURCE_REMOTE,
