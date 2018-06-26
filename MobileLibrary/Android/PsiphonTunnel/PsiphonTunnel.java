@@ -103,6 +103,8 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     private AtomicBoolean mRoutingThroughTunnel;
     private Thread mTun2SocksThread;
     private AtomicBoolean mIsWaitingForNetworkConnectivity;
+    private AtomicReference<String> mClientPlatformPrefix;
+    private AtomicReference<String> mClientPlatformSuffix;
 
     // mUsePacketTunnel specifies whether to use the packet
     // tunnel instead of tun2socks; currently this is for
@@ -130,6 +132,8 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         mLocalSocksProxyPort = new AtomicInteger(0);
         mRoutingThroughTunnel = new AtomicBoolean(false);
         mIsWaitingForNetworkConnectivity = new AtomicBoolean(false);
+        mClientPlatformPrefix = new AtomicReference<String>("");
+        mClientPlatformSuffix = new AtomicReference<String>("");
     }
 
     public Object clone() throws CloneNotSupportedException {
@@ -183,6 +187,11 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     public synchronized void restartPsiphon() throws Exception {
         stopPsiphon();
         startPsiphon("");
+    }
+
+    public void setClientPlatformAffixes(String prefix, String suffix) {
+        mClientPlatformPrefix.set(prefix);
+        mClientPlatformSuffix.set(suffix);
     }
 
     //----------------------------------------------------------------------------------------------
@@ -552,6 +561,25 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             json.put("DisableLocalSocksProxy", true);
             json.put("DisableLocalHTTPProxy", true);
         }
+
+        StringBuilder clientPlatform = new StringBuilder();
+
+        String prefix = mClientPlatformPrefix.get();
+        if (prefix.length() > 0) {
+            clientPlatform.append(prefix);
+        }
+
+        clientPlatform.append("Android_");
+        clientPlatform.append(Build.VERSION.RELEASE);
+        clientPlatform.append("_");
+        clientPlatform.append(mHostService.getContext().getPackageName());
+
+        String suffix = mClientPlatformSuffix.get();
+        if (suffix.length() > 0) {
+            clientPlatform.append(suffix);
+        }
+
+        json.put("ClientPlatform", clientPlatform.toString().replaceAll("[^\\w\\-\\.]", "_"));
 
         return json.toString();
     }
