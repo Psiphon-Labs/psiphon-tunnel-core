@@ -16,6 +16,7 @@ AndroidLibrary/psi.aar
 *.o
 *.a
 *.so
+*.dylib
 
 # Folders
 _obj

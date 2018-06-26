@@ -24,7 +24,7 @@ import (
 	"net"
 	"sync"
 
-	socks "github.com/Psiphon-Inc/goptlib"
+	socks "github.com/Psiphon-Labs/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 

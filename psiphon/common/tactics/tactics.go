@@ -23,7 +23,7 @@ attributes, API parameters, and speed test data. The tactics implementation
 works in concert with the "parameters" package, allowing contextual
 optimization of Psiphon client parameters; for example, customizing
 NetworkLatencyMultiplier to adjust timeouts for clients on slow networks; or
-customizeing LimitTunnelProtocols and ConnectionWorkerPoolSize to circumvent
+customizing LimitTunnelProtocols and ConnectionWorkerPoolSize to circumvent
 specific blocking conditions.
 
 Clients obtain tactics from a Psiphon server. Tactics are configured with a hot-
@@ -167,7 +167,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Psiphon-Inc/goarista/monotime"
+	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
@@ -273,6 +273,7 @@ type Filter struct {
 	// APIParameters specifies API, e.g. handshake, parameter names and
 	// a list of values, one of which must be specified to match this
 	// filter. Only scalar string API parameters may be filtered.
+	// Values may be patterns containing the '*' wildcard.
 	APIParameters map[string][]string
 
 	// SpeedTestRTTMilliseconds specifies a Range filter field that the
@@ -711,7 +712,7 @@ func (server *Server) getTactics(
 			mismatch := false
 			for name, values := range filteredTactics.Filter.APIParameters {
 				clientValue, err := getStringRequestParam(apiParams, name)
-				if err != nil || !common.Contains(values, clientValue) {
+				if err != nil || !common.ContainsWildcard(values, clientValue) {
 					mismatch = true
 					break
 				}
@@ -961,7 +962,7 @@ func (server *Server) handleSpeedTestRequest(
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("failed to read request body")
-		w.WriteHeader(http.StatusNotFound)
+		common.TerminateHTTPConnection(w, r)
 		return
 	}
 
@@ -970,7 +971,7 @@ func (server *Server) handleSpeedTestRequest(
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("failed to make response")
-		w.WriteHeader(http.StatusNotFound)
+		common.TerminateHTTPConnection(w, r)
 		return
 	}
 
@@ -992,7 +993,7 @@ func (server *Server) handleTacticsRequest(
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("failed to read request body")
-		w.WriteHeader(http.StatusNotFound)
+		common.TerminateHTTPConnection(w, r)
 		return
 	}
 
@@ -1007,7 +1008,7 @@ func (server *Server) handleTacticsRequest(
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("failed to unbox request")
-		w.WriteHeader(http.StatusNotFound)
+		common.TerminateHTTPConnection(w, r)
 		return
 	}
 
@@ -1015,7 +1016,7 @@ func (server *Server) handleTacticsRequest(
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("invalid request parameters")
-		w.WriteHeader(http.StatusNotFound)
+		common.TerminateHTTPConnection(w, r)
 		return
 	}
 
@@ -1026,7 +1027,7 @@ func (server *Server) handleTacticsRequest(
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("failed to get tactics")
-		w.WriteHeader(http.StatusNotFound)
+		common.TerminateHTTPConnection(w, r)
 		return
 	}
 
@@ -1042,7 +1043,7 @@ func (server *Server) handleTacticsRequest(
 	if err != nil {
 		server.logger.WithContextFields(
 			common.LogFields{"error": err}).Warning("failed to box response")
-		w.WriteHeader(http.StatusNotFound)
+		common.TerminateHTTPConnection(w, r)
 		return
 	}
 

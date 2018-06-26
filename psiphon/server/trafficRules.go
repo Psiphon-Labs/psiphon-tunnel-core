@@ -21,6 +21,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 
@@ -28,12 +29,14 @@ import (
 )
 
 const (
-	DEFAULT_IDLE_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS = 30000
-	DEFAULT_IDLE_UDP_PORT_FORWARD_TIMEOUT_MILLISECONDS = 30000
-	DEFAULT_DIAL_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS = 10000
-	DEFAULT_MAX_TCP_DIALING_PORT_FORWARD_COUNT         = 64
-	DEFAULT_MAX_TCP_PORT_FORWARD_COUNT                 = 512
-	DEFAULT_MAX_UDP_PORT_FORWARD_COUNT                 = 32
+	DEFAULT_IDLE_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS        = 30000
+	DEFAULT_IDLE_UDP_PORT_FORWARD_TIMEOUT_MILLISECONDS        = 30000
+	DEFAULT_DIAL_TCP_PORT_FORWARD_TIMEOUT_MILLISECONDS        = 10000
+	DEFAULT_MAX_TCP_DIALING_PORT_FORWARD_COUNT                = 64
+	DEFAULT_MAX_TCP_PORT_FORWARD_COUNT                        = 512
+	DEFAULT_MAX_UDP_PORT_FORWARD_COUNT                        = 32
+	DEFAULT_MEEK_RATE_LIMITER_GARBAGE_COLLECTOR_TRIGGER_COUNT = 5000
+	DEFAULT_MEEK_RATE_LIMITER_REAP_HISTORY_FREQUENCY_SECONDS  = 600
 )
 
 // TrafficRulesSet represents the various traffic rules to
@@ -59,6 +62,44 @@ type TrafficRulesSet struct {
 		Filter TrafficRulesFilter
 		Rules  TrafficRules
 	}
+
+	// MeekRateLimiterHistorySize enables the late-stage meek rate limiter and
+	// sets its history size. The late-stage meek rate limiter acts on client
+	// IPs relayed in MeekProxyForwardedForHeaders, and so it must wait for
+	// the HTTP headers to be read. This rate limiter immediately terminates
+	// any client endpoint request or any request to create a new session, but
+	// not any meek request for an existing session, if the
+	// MeekRateLimiterHistorySize requests occur in
+	// MeekRateLimiterThresholdSeconds. The scope of rate limiting may be
+	// limited using LimitMeekRateLimiterRegions.
+	//
+	// Hot reloading a new history size will result in existing history being
+	// truncated.
+	MeekRateLimiterHistorySize int
+
+	// MeekRateLimiterThresholdSeconds is part of the meek rate limiter
+	// specification and must be set when MeekRateLimiterHistorySize is set.
+	MeekRateLimiterThresholdSeconds int
+
+	// MeekRateLimiterRegions, if set, limits application of the meek
+	// late-stage rate limiter to clients in the specified list of GeoIP
+	// countries. When omitted or empty, meek rate limiting, if configured,
+	// is applied to all clients.
+	MeekRateLimiterRegions []string
+
+	// MeekRateLimiterGarbageCollectionTriggerCount specifies the number of
+	// rate limit events after which garbage collection is manually triggered
+	// in order to reclaim memory used by rate limited and other rejected
+	// requests.
+	// A default of 5000 is used when
+	// MeekRateLimiterGarbageCollectionTriggerCount is 0.
+	MeekRateLimiterGarbageCollectionTriggerCount int
+
+	// MeekRateLimiterReapHistoryFrequencySeconds specifies a schedule for
+	// reaping old records from the rate limit history.
+	// A default of 600 is used when
+	// MeekRateLimiterReapHistoryFrequencySeconds is 0.
+	MeekRateLimiterReapHistoryFrequencySeconds int
 }
 
 // TrafficRulesFilter defines a filter to match against client attributes.
@@ -82,6 +123,7 @@ type TrafficRulesFilter struct {
 	// HandshakeParameters specifies handshake API parameter names and
 	// a list of values, one of which must be specified to match this
 	// filter. Only scalar string API parameters may be filtered.
+	// Values may be patterns containing the '*' wildcard.
 	HandshakeParameters map[string][]string
 
 	// AuthorizedAccessTypes specifies a list of access types, at least
@@ -232,7 +274,37 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 // Validate checks for correct input formats in a TrafficRulesSet.
 func (set *TrafficRulesSet) Validate() error {
 
+	if set.MeekRateLimiterHistorySize < 0 ||
+		set.MeekRateLimiterThresholdSeconds < 0 ||
+		set.MeekRateLimiterGarbageCollectionTriggerCount < 0 ||
+		set.MeekRateLimiterReapHistoryFrequencySeconds < 0 {
+		return common.ContextError(
+			errors.New("MeekRateLimiter values must be >= 0"))
+	}
+
+	if set.MeekRateLimiterHistorySize > 0 {
+		if set.MeekRateLimiterThresholdSeconds <= 0 {
+			return common.ContextError(
+				errors.New("MeekRateLimiterThresholdSeconds must be > 0"))
+		}
+	}
+
 	validateTrafficRules := func(rules *TrafficRules) error {
+
+		if (rules.RateLimits.ReadUnthrottledBytes != nil && *rules.RateLimits.ReadUnthrottledBytes < 0) ||
+			(rules.RateLimits.ReadBytesPerSecond != nil && *rules.RateLimits.ReadBytesPerSecond < 0) ||
+			(rules.RateLimits.WriteUnthrottledBytes != nil && *rules.RateLimits.WriteUnthrottledBytes < 0) ||
+			(rules.RateLimits.WriteBytesPerSecond != nil && *rules.RateLimits.WriteBytesPerSecond < 0) ||
+			(rules.DialTCPPortForwardTimeoutMilliseconds != nil && *rules.DialTCPPortForwardTimeoutMilliseconds < 0) ||
+			(rules.IdleTCPPortForwardTimeoutMilliseconds != nil && *rules.IdleTCPPortForwardTimeoutMilliseconds < 0) ||
+			(rules.IdleUDPPortForwardTimeoutMilliseconds != nil && *rules.IdleUDPPortForwardTimeoutMilliseconds < 0) ||
+			(rules.MaxTCPDialingPortForwardCount != nil && *rules.MaxTCPDialingPortForwardCount < 0) ||
+			(rules.MaxTCPPortForwardCount != nil && *rules.MaxTCPPortForwardCount < 0) ||
+			(rules.MaxUDPPortForwardCount != nil && *rules.MaxUDPPortForwardCount < 0) {
+			return common.ContextError(
+				errors.New("TrafficRules values must be >= 0"))
+		}
+
 		for _, subnet := range rules.AllowSubnets {
 			_, _, err := net.ParseCIDR(subnet)
 			if err != nil {
@@ -240,6 +312,7 @@ func (set *TrafficRulesSet) Validate() error {
 					fmt.Errorf("invalid subnet: %s %s", subnet, err))
 			}
 		}
+
 		return nil
 	}
 
@@ -369,6 +442,10 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		trafficRules.AllowUDPPorts = make([]int, 0)
 	}
 
+	if trafficRules.AllowSubnets == nil {
+		trafficRules.AllowSubnets = make([]string, 0)
+	}
+
 	// TODO: faster lookup?
 	for _, filteredRules := range set.FilteredRules {
 
@@ -403,7 +480,7 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			mismatch := false
 			for name, values := range filteredRules.Filter.HandshakeParameters {
 				clientValue, err := getStringRequestParam(state.apiParams, name)
-				if err != nil || !common.Contains(values, clientValue) {
+				if err != nil || !common.ContainsWildcard(values, clientValue) {
 					mismatch = true
 					break
 				}
@@ -496,6 +573,10 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			trafficRules.AllowUDPPorts = filteredRules.Rules.AllowUDPPorts
 		}
 
+		if filteredRules.Rules.AllowSubnets != nil {
+			trafficRules.AllowSubnets = filteredRules.Rules.AllowSubnets
+		}
+
 		break
 	}
 
@@ -507,4 +588,29 @@ func (set *TrafficRulesSet) GetTrafficRules(
 	log.WithContextFields(LogFields{"trafficRules": trafficRules}).Debug("selected traffic rules")
 
 	return trafficRules
+}
+
+// GetMeekRateLimiterConfig gets a snapshot of the meek rate limiter
+// configuration values.
+func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (int, int, []string, int, int) {
+
+	set.ReloadableFile.RLock()
+	defer set.ReloadableFile.RUnlock()
+
+	GCTriggerCount := set.MeekRateLimiterGarbageCollectionTriggerCount
+	if GCTriggerCount <= 0 {
+		GCTriggerCount = DEFAULT_MEEK_RATE_LIMITER_GARBAGE_COLLECTOR_TRIGGER_COUNT
+	}
+
+	reapFrequencySeconds := set.MeekRateLimiterReapHistoryFrequencySeconds
+	if reapFrequencySeconds <= 0 {
+		reapFrequencySeconds = DEFAULT_MEEK_RATE_LIMITER_REAP_HISTORY_FREQUENCY_SECONDS
+
+	}
+
+	return set.MeekRateLimiterHistorySize,
+		set.MeekRateLimiterThresholdSeconds,
+		set.MeekRateLimiterRegions,
+		GCTriggerCount,
+		reapFrequencySeconds
 }
