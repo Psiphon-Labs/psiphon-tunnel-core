@@ -125,7 +125,7 @@ func (listener *Listener) Accept() (net.Conn, error) {
 //
 // packetConn is used as the underlying packet connection for QUIC. The dial
 // may be cancelled by ctx; packetConn will be closed if the dial is
-// cancelled.
+// cancelled or fails.
 //
 // Keep alive and idle timeout functionality in QUIC is disabled as these
 // aspects are expected to be handled at a higher level.
@@ -134,6 +134,29 @@ func Dial(
 	packetConn net.PacketConn,
 	remoteAddr *net.UDPAddr,
 	quicSNIAddress string) (net.Conn, error) {
+
+	quicConfig := &quic_go.Config{
+		HandshakeTimeout: time.Duration(1<<63 - 1),
+		IdleTimeout:      CLIENT_IDLE_TIMEOUT,
+		KeepAlive:        true,
+	}
+
+	deadline, ok := ctx.Deadline()
+	if ok {
+		quicConfig.HandshakeTimeout = deadline.Sub(time.Now())
+	}
+
+	session, err := quic_go.DialContext(
+		ctx,
+		packetConn,
+		remoteAddr,
+		quicSNIAddress,
+		&tls.Config{InsecureSkipVerify: true},
+		quicConfig)
+	if err != nil {
+		packetConn.Close()
+		return nil, common.ContextError(err)
+	}
 
 	type dialResult struct {
 		conn *Conn
@@ -144,30 +167,9 @@ func Dial(
 
 	go func() {
 
-		quicConfig := &quic_go.Config{
-			HandshakeTimeout: time.Duration(1<<63 - 1),
-			IdleTimeout:      CLIENT_IDLE_TIMEOUT,
-			KeepAlive:        true,
-		}
-
-		deadline, ok := ctx.Deadline()
-		if ok {
-			quicConfig.HandshakeTimeout = deadline.Sub(time.Now())
-		}
-
-		session, err := quic_go.Dial(
-			packetConn,
-			remoteAddr,
-			quicSNIAddress,
-			&tls.Config{InsecureSkipVerify: true},
-			quicConfig)
-		if err != nil {
-			resultChannel <- dialResult{err: err}
-			return
-		}
-
 		stream, err := session.OpenStream()
 		if err != nil {
+			session.Close(nil)
 			resultChannel <- dialResult{err: err}
 			return
 		}
@@ -182,7 +184,6 @@ func Dial(
 	}()
 
 	var conn *Conn
-	var err error
 
 	select {
 	case result := <-resultChannel:
@@ -190,11 +191,12 @@ func Dial(
 	case <-ctx.Done():
 		err = ctx.Err()
 		// Interrupt the goroutine
-		packetConn.Close()
+		session.Close(nil)
 		<-resultChannel
 	}
 
 	if err != nil {
+		packetConn.Close()
 		return nil, common.ContextError(err)
 	}
 

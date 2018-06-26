@@ -42,6 +42,8 @@ type serverTLS struct {
 	params            *handshake.TransportParameters
 	newMintConn       func(*handshake.CryptoStreamConn, protocol.VersionNumber) (handshake.MintTLS, <-chan handshake.TransportParameters, error)
 
+	newSession func(connection, sessionRunner, protocol.ConnectionID, protocol.ConnectionID, protocol.PacketNumber, *Config, handshake.MintTLS, *handshake.CryptoStreamConn, crypto.AEAD, *handshake.TransportParameters, protocol.VersionNumber, utils.Logger) (quicSession, error)
+
 	sessionRunner sessionRunner
 	sessionChan   chan<- tlsSession
 
@@ -83,7 +85,8 @@ func newServerTLS(
 			MaxBidiStreams:              uint16(config.MaxIncomingStreams),
 			MaxUniStreams:               uint16(config.MaxIncomingUniStreams),
 		},
-		logger: logger,
+		newSession: newTLSServerSession,
+		logger:     logger,
 	}
 	s.newMintConn = s.newMintConnImpl
 	return s, sessionChan, nil
@@ -137,6 +140,9 @@ func (s *serverTLS) sendConnectionClose(remoteAddr net.Addr, clientHdr *wire.Hea
 }
 
 func (s *serverTLS) handleInitialImpl(remoteAddr net.Addr, hdr *wire.Header, data []byte) (packetHandler, protocol.ConnectionID, error) {
+	if hdr.DestConnectionID.Len() < protocol.MinConnectionIDLenInitial {
+		return nil, nil, errors.New("dropping Initial packet with too short connection ID")
+	}
 	if len(hdr.Raw)+len(data) < protocol.MinInitialPacketSize {
 		return nil, nil, errors.New("dropping too small Initial packet")
 	}
@@ -222,7 +228,7 @@ func (s *serverTLS) handleUnpackedInitial(remoteAddr net.Addr, hdr *wire.Header,
 		return nil, nil, err
 	}
 	s.logger.Debugf("Changing source connection ID to %s.", connID)
-	sess, err := newTLSServerSession(
+	sess, err := s.newSession(
 		&conn{pconn: s.conn, currentAddr: remoteAddr},
 		s.sessionRunner,
 		hdr.SrcConnectionID,
@@ -242,5 +248,6 @@ func (s *serverTLS) handleUnpackedInitial(remoteAddr net.Addr, hdr *wire.Header,
 	cs := sess.getCryptoStream()
 	cs.setReadOffset(frame.DataLen())
 	bc.SetStream(cs)
+	go sess.run()
 	return sess, connID, nil
 }
