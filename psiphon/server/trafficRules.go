@@ -257,9 +257,16 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 			if err != nil {
 				return common.ContextError(err)
 			}
+
 			// Modify actual traffic rules only after validation
+			set.MeekRateLimiterHistorySize = newSet.MeekRateLimiterHistorySize
+			set.MeekRateLimiterThresholdSeconds = newSet.MeekRateLimiterThresholdSeconds
+			set.MeekRateLimiterRegions = newSet.MeekRateLimiterRegions
+			set.MeekRateLimiterGarbageCollectionTriggerCount = newSet.MeekRateLimiterGarbageCollectionTriggerCount
+			set.MeekRateLimiterReapHistoryFrequencySeconds = newSet.MeekRateLimiterReapHistoryFrequencySeconds
 			set.DefaultRules = newSet.DefaultRules
 			set.FilteredRules = newSet.FilteredRules
+
 			return nil
 		})
 
