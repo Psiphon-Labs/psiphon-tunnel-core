@@ -197,6 +197,61 @@ func TestNetworkLatencyMultiplier(t *testing.T) {
 
 	if 2*timeout1 != timeout2 {
 		t.Fatalf("Unexpected timeouts: 2 * %s != %s", timeout1, timeout2)
+	}
+}
 
+func TestLimitTunnelProtocolProbability(t *testing.T) {
+	p, err := NewClientParameters(nil)
+	if err != nil {
+		t.Fatalf("NewClientParameters failed: %s", err)
+	}
+
+	// Default probability should be 1.0 and always return tunnelProtocols
+
+	tunnelProtocols := protocol.TunnelProtocols{"OSSH", "SSH"}
+
+	applyParameters := map[string]interface{}{
+		"LimitTunnelProtocols": tunnelProtocols,
+	}
+
+	_, err = p.Set("", false, applyParameters)
+	if err != nil {
+		t.Fatalf("Set failed: %s", err)
+	}
+
+	for i := 0; i < 1000; i++ {
+		l := p.Get().TunnelProtocols(LimitTunnelProtocols)
+		if !reflect.DeepEqual(l, tunnelProtocols) {
+			t.Fatalf("unexpected %+v != %+v", l, tunnelProtocols)
+		}
+	}
+
+	// With probability set to 0.5, should return tunnelProtocols ~50%
+
+	defaultLimitTunnelProtocols := protocol.TunnelProtocols{}
+
+	applyParameters = map[string]interface{}{
+		"LimitTunnelProtocolsProbability": 0.5,
+		"LimitTunnelProtocols":            tunnelProtocols,
+	}
+
+	_, err = p.Set("", false, applyParameters)
+	if err != nil {
+		t.Fatalf("Set failed: %s", err)
+	}
+
+	matchCount := 0
+
+	for i := 0; i < 1000; i++ {
+		l := p.Get().TunnelProtocols(LimitTunnelProtocols)
+		if reflect.DeepEqual(l, tunnelProtocols) {
+			matchCount += 1
+		} else if !reflect.DeepEqual(l, defaultLimitTunnelProtocols) {
+			t.Fatalf("unexpected %+v != %+v", l, defaultLimitTunnelProtocols)
+		}
+	}
+
+	if matchCount < 250 || matchCount > 750 {
+		t.Fatalf("Unexpected probability result: %d", matchCount)
 	}
 }
