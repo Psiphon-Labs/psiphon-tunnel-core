@@ -95,7 +95,7 @@ func NewUDPConn(
 	setAdditionalSocketOptions(socketFD)
 
 	if config.DeviceBinder != nil {
-		_, err = config.DeviceBinder.BindToDevice(socketFD)
+		err := bindToDeviceCallWrapper(config.DeviceBinder, socketFD)
 		if err != nil {
 			syscall.Close(socketFD)
 			return nil, nil, common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))

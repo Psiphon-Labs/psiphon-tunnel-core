@@ -1,7 +1,5 @@
-// +build !darwin
-
 /*
- * Copyright (c) 2017, Psiphon Inc.
+ * Copyright (c) 2018, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -21,5 +19,16 @@
 
 package psiphon
 
-func setAdditionalSocketOptions(_ int) {
+import (
+	"errors"
+	"syscall"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+)
+
+func setAdditionalSocketOptions(socketFd syscall.Handle) {
+}
+
+func bindToDeviceCallWrapper(deviceBinder DeviceBinder, socketFD syscall.Handle) error {
+	return common.ContextError(errors.New("DeviceBinder with syscall.Handle not supported"))
 }

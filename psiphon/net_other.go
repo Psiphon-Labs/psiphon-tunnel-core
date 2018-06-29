@@ -1,3 +1,5 @@
+// +build !darwin,!windows
+
 /*
  * Copyright (c) 2017, Psiphon Inc.
  * All rights reserved.
@@ -19,12 +21,7 @@
 
 package psiphon
 
-import (
-	"syscall"
-)
-
-func setAdditionalSocketOptions(socketFd int) {
-	syscall.SetsockoptInt(socketFd, syscall.SOL_SOCKET, syscall.SO_NOSIGPIPE, 1)
+func setAdditionalSocketOptions(_ int) {
 }
 
 func bindToDeviceCallWrapper(deviceBinder DeviceBinder, socketFD int) error {
