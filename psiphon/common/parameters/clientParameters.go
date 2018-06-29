@@ -689,16 +689,19 @@ func (p *ClientParametersSnapshot) Duration(name string) time.Duration {
 func (p *ClientParametersSnapshot) TunnelProtocols(name string) protocol.TunnelProtocols {
 
 	probabilityName := name + "Probability"
-	probabilityValue := float64(1.0)
-	p.getValue(probabilityName, &probabilityValue)
-	if !common.FlipWeightedCoin(probabilityValue) {
-		defaultParameter, ok := defaultClientParameters[name]
-		if ok {
-			defaultValue, ok := defaultParameter.value.(protocol.TunnelProtocols)
+	_, ok := p.parameters[probabilityName]
+	if ok {
+		probabilityValue := float64(1.0)
+		p.getValue(probabilityName, &probabilityValue)
+		if !common.FlipWeightedCoin(probabilityValue) {
+			defaultParameter, ok := defaultClientParameters[name]
 			if ok {
-				value := make(protocol.TunnelProtocols, len(defaultValue))
-				copy(value, defaultValue)
-				return value
+				defaultValue, ok := defaultParameter.value.(protocol.TunnelProtocols)
+				if ok {
+					value := make(protocol.TunnelProtocols, len(defaultValue))
+					copy(value, defaultValue)
+					return value
+				}
 			}
 		}
 	}
@@ -715,16 +718,19 @@ func (p *ClientParametersSnapshot) TunnelProtocols(name string) protocol.TunnelP
 func (p *ClientParametersSnapshot) TLSProfiles(name string) protocol.TLSProfiles {
 
 	probabilityName := name + "Probability"
-	probabilityValue := float64(1.0)
-	p.getValue(probabilityName, &probabilityValue)
-	if !common.FlipWeightedCoin(probabilityValue) {
-		defaultParameter, ok := defaultClientParameters[name]
-		if ok {
-			defaultValue, ok := defaultParameter.value.(protocol.TLSProfiles)
+	_, ok := p.parameters[probabilityName]
+	if ok {
+		probabilityValue := float64(1.0)
+		p.getValue(probabilityName, &probabilityValue)
+		if !common.FlipWeightedCoin(probabilityValue) {
+			defaultParameter, ok := defaultClientParameters[name]
 			if ok {
-				value := make(protocol.TLSProfiles, len(defaultValue))
-				copy(value, defaultValue)
-				return value
+				defaultValue, ok := defaultParameter.value.(protocol.TLSProfiles)
+				if ok {
+					value := make(protocol.TLSProfiles, len(defaultValue))
+					copy(value, defaultValue)
+					return value
+				}
 			}
 		}
 	}
