@@ -47,6 +47,7 @@ type ServerEntry struct {
 	SshPassword                   string   `json:"sshPassword"`
 	SshHostKey                    string   `json:"sshHostKey"`
 	SshObfuscatedPort             int      `json:"sshObfuscatedPort"`
+	SshObfuscatedQUICPort         int      `json:"sshObfuscatedQUICPort"`
 	SshObfuscatedKey              string   `json:"sshObfuscatedKey"`
 	Capabilities                  []string `json:"capabilities"`
 	Region                        string   `json:"region"`
@@ -92,17 +93,27 @@ func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 // GetSupportedProtocols returns a list of tunnel protocols supported
 // by the ServerEntry's capabilities.
 func (serverEntry *ServerEntry) GetSupportedProtocols(
+	useUpstreamProxy bool,
 	limitTunnelProtocols []string,
 	impairedTunnelProtocols []string,
-	excludeMeek bool) []string {
+	excludeIntensive bool) []string {
 
 	supportedProtocols := make([]string, 0)
 
 	for _, protocol := range SupportedTunnelProtocols {
 
-		if len(limitTunnelProtocols) > 0 &&
-			!common.Contains(limitTunnelProtocols, protocol) {
+		if useUpstreamProxy && TunnelProtocolUsesQUIC(protocol) {
 			continue
+		}
+
+		if len(limitTunnelProtocols) > 0 {
+			if !common.Contains(limitTunnelProtocols, protocol) {
+				continue
+			}
+		} else {
+			if common.Contains(DefaultDisabledTunnelProtocols, protocol) {
+				continue
+			}
 		}
 
 		if len(impairedTunnelProtocols) > 0 &&
@@ -110,7 +121,7 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 			continue
 		}
 
-		if excludeMeek && TunnelProtocolUsesMeek(protocol) {
+		if excludeIntensive && TunnelProtocolIsResourceIntensive(protocol) {
 			continue
 		}
 

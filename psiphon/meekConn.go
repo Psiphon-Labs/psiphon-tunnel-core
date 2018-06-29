@@ -80,8 +80,6 @@ type MeekConfig struct {
 	// TLSProfile specifies the TLS profile to use for all underlying
 	// TLS connections created by this meek connection. Valid values
 	// are the possible values for CustomTLSConfig.TLSProfile.
-	// TLSProfile will be used only when DialConfig.UseIndistinguishableTLS
-	// is set in the DialConfig passed in to DialMeek.
 	TLSProfile string
 
 	// UseObfuscatedSessionTickets indicates whether to use obfuscated
@@ -249,7 +247,6 @@ func DialMeek(
 			Dial:                          tcpDialer,
 			SNIServerName:                 meekConfig.SNIServerName,
 			SkipVerify:                    true,
-			UseIndistinguishableTLS:       dialConfig.UseIndistinguishableTLS,
 			TLSProfile:                    meekConfig.TLSProfile,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
 		}

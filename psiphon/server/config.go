@@ -513,7 +513,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 			return nil, nil, nil, nil, nil, common.ContextError(err)
 		}
 
-		webServerCertificate, webServerPrivateKey, err = GenerateWebServerCertificate("")
+		webServerCertificate, webServerPrivateKey, err = common.GenerateWebServerCertificate("")
 		if err != nil {
 			return nil, nil, nil, nil, nil, common.ContextError(err)
 		}
@@ -734,6 +734,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	sshPort := params.TunnelProtocolPorts["SSH"]
 	obfuscatedSSHPort := params.TunnelProtocolPorts["OSSH"]
+	obfuscatedSSHQUICPort := params.TunnelProtocolPorts["QUIC-OSSH"]
 
 	// Meek port limitations
 	// - fronted meek protocols are hard-wired in the client to be port 443 or 80.
@@ -771,6 +772,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		SshPassword:                   sshPassword,
 		SshHostKey:                    base64.RawStdEncoding.EncodeToString(sshPublicKey.Marshal()),
 		SshObfuscatedPort:             obfuscatedSSHPort,
+		SshObfuscatedQUICPort:         obfuscatedSSHQUICPort,
 		SshObfuscatedKey:              obfuscatedSSHKey,
 		Capabilities:                  capabilities,
 		Region:                        "US",

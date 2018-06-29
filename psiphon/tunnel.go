@@ -39,6 +39,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	regen "github.com/zach-klippenstein/goregen"
@@ -532,13 +533,14 @@ func selectProtocol(
 	config *Config,
 	serverEntry *protocol.ServerEntry,
 	impairedProtocols []string,
-	excludeMeek bool,
+	excludeIntensive bool,
 	usePriorityProtocol bool) (selectedProtocol string, err error) {
 
 	candidateProtocols := serverEntry.GetSupportedProtocols(
+		config.UseUpstreamProxy(),
 		config.clientParameters.Get().TunnelProtocols(parameters.LimitTunnelProtocols),
 		impairedProtocols,
-		excludeMeek)
+		excludeIntensive)
 	if len(candidateProtocols) == 0 {
 		return "", errNoProtocolSupported
 	}
@@ -719,7 +721,6 @@ func initMeekConfig(
 	selectedTLSProfile := ""
 	if protocol.TunnelProtocolUsesMeekHTTPS(selectedProtocol) {
 		selectedTLSProfile = SelectTLSProfile(
-			config.UseIndistinguishableTLS,
 			selectedProtocol,
 			config.clientParameters)
 	}
@@ -745,7 +746,7 @@ func initDialConfig(
 
 	var upstreamProxyType string
 
-	if config.UpstreamProxyURL != "" {
+	if config.UseUpstreamProxy() {
 		// Note: UpstreamProxyURL will be validated in the dial
 		proxyURL, err := url.Parse(config.UpstreamProxyURL)
 		if err == nil {
@@ -784,9 +785,7 @@ func initDialConfig(
 		DeviceBinder:                  config.deviceBinder,
 		DnsServerGetter:               config.DnsServerGetter,
 		IPv6Synthesizer:               config.IPv6Synthesizer,
-		UseIndistinguishableTLS:       config.UseIndistinguishableTLS,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
-		DeviceRegion:                  config.DeviceRegion,
 	}
 
 	dialStats := &DialStats{}
@@ -877,19 +876,25 @@ func dialSsh(
 	var selectedSSHClientVersion bool
 	SSHClientVersion := ""
 	useObfuscatedSsh := false
-	var directTCPDialAddress string
+	var directDialAddress string
+	var quicDialSNIAddress string
 	var meekConfig *MeekConfig
 	var err error
 
 	switch selectedProtocol {
 	case protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH:
 		useObfuscatedSsh = true
-		directTCPDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
+		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
+
+	case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
+		useObfuscatedSsh = true
+		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedQUICPort)
+		quicDialSNIAddress = fmt.Sprintf("%s:%d", common.GenerateHostName(), serverEntry.SshObfuscatedQUICPort)
 
 	case protocol.TUNNEL_PROTOCOL_SSH:
 		selectedSSHClientVersion = true
 		SSHClientVersion = pickSSHClientVersion()
-		directTCPDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshPort)
+		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshPort)
 
 	default:
 		useObfuscatedSsh = true
@@ -921,6 +926,7 @@ func dialSsh(
 
 	var dialConn net.Conn
 	if meekConfig != nil {
+
 		dialConn, err = DialMeek(
 			ctx,
 			meekConfig,
@@ -928,10 +934,31 @@ func dialSsh(
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
+
+	} else if protocol.TunnelProtocolUsesQUIC(selectedProtocol) {
+
+		packetConn, remoteAddr, err := NewUDPConn(
+			ctx,
+			directDialAddress,
+			dialConfig)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
+		dialConn, err = quic.Dial(
+			ctx,
+			packetConn,
+			remoteAddr,
+			quicDialSNIAddress)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
 	} else {
+
 		dialConn, err = DialTCPFragmentor(
 			ctx,
-			directTCPDialAddress,
+			directDialAddress,
 			dialConfig,
 			selectedProtocol,
 			config.clientParameters,

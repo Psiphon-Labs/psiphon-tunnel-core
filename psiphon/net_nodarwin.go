@@ -21,5 +21,5 @@
 
 package psiphon
 
-func tcpDialSetAdditionalSocketOptions(_ int) {
+func setAdditionalSocketOptions(_ int) {
 }

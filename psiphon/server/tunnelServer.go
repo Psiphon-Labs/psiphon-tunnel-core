@@ -41,6 +41,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/marusama/semaphore"
@@ -136,7 +137,15 @@ func (server *TunnelServer) Run() error {
 		localAddress := fmt.Sprintf(
 			"%s:%d", support.Config.ServerIPAddress, listenPort)
 
-		listener, err := net.Listen("tcp", localAddress)
+		var listener net.Listener
+		var err error
+		if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) {
+			listener, err = quic.Listen(localAddress)
+
+		} else {
+			listener, err = net.Listen("tcp", localAddress)
+		}
+
 		if err != nil {
 			for _, existingListener := range listeners {
 				existingListener.Listener.Close()
