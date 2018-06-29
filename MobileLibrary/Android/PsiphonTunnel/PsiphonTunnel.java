@@ -544,20 +544,14 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             json.put("LocalSocksProxyPort", mLocalSocksProxyPort);
         }
 
-        json.put("UseIndistinguishableTLS", true);
-
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
-            json.put("UseTrustedCACertificatesForStockTLS", true);
-        }
-
-        try {
-            // Also enable indistinguishable TLS for HTTPS requests that
-            // require system CAs.
-            json.put(
-                    "TrustedCACertificatesFilename",
-                    setupTrustedCertificates(mHostService.getContext()));
-        } catch (Exception e) {
-            mHostService.onDiagnosticMessage(e.getMessage());
+            try {
+                json.put(
+                        "TrustedCACertificatesFilename",
+                        setupTrustedCertificates(mHostService.getContext()));
+            } catch (Exception e) {
+                mHostService.onDiagnosticMessage(e.getMessage());
+            }
         }
 
         json.put("DeviceRegion", getDeviceRegion(mHostService.getContext()));

@@ -80,11 +80,14 @@ const (
 	EstablishTunnelServerAffinityGracePeriod   = "EstablishTunnelServerAffinityGracePeriod"
 	StaggerConnectionWorkersPeriod             = "StaggerConnectionWorkersPeriod"
 	StaggerConnectionWorkersJitter             = "StaggerConnectionWorkersJitter"
-	LimitMeekConnectionWorkers                 = "LimitMeekConnectionWorkers"
+	LimitIntensiveConnectionWorkers            = "LimitIntensiveConnectionWorkers"
 	IgnoreHandshakeStatsRegexps                = "IgnoreHandshakeStatsRegexps"
+	PrioritizeTunnelProtocolsProbability       = "PrioritizeTunnelProtocolsProbability"
 	PrioritizeTunnelProtocols                  = "PrioritizeTunnelProtocols"
 	PrioritizeTunnelProtocolsCandidateCount    = "PrioritizeTunnelProtocolsCandidateCount"
+	LimitTunnelProtocolsProbability            = "LimitTunnelProtocolsProbability"
 	LimitTunnelProtocols                       = "LimitTunnelProtocols"
+	LimitTLSProfilesProbability                = "LimitTLSProfilesProbability"
 	LimitTLSProfiles                           = "LimitTLSProfiles"
 	FragmentorProbability                      = "FragmentorProbability"
 	FragmentorLimitProtocols                   = "FragmentorLimitProtocols"
@@ -202,7 +205,7 @@ var defaultClientParameters = map[string]struct {
 	EstablishTunnelServerAffinityGracePeriod: {value: 1 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	StaggerConnectionWorkersPeriod:           {value: time.Duration(0), minimum: time.Duration(0)},
 	StaggerConnectionWorkersJitter:           {value: 0.1, minimum: 0.0},
-	LimitMeekConnectionWorkers:               {value: 0, minimum: 0},
+	LimitIntensiveConnectionWorkers:          {value: 0, minimum: 0},
 	IgnoreHandshakeStatsRegexps:              {value: false},
 	TunnelOperateShutdownTimeout:             {value: 1 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	TunnelPortForwardDialTimeout:             {value: 10 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
@@ -213,11 +216,14 @@ var defaultClientParameters = map[string]struct {
 	// the first establishment round. Even then, this will only happen if the
 	// client has sufficient candidates supporting the prioritized protocols.
 
+	PrioritizeTunnelProtocolsProbability:    {value: 1.0, minimum: 0.0},
 	PrioritizeTunnelProtocols:               {value: protocol.TunnelProtocols{}},
 	PrioritizeTunnelProtocolsCandidateCount: {value: 10, minimum: 0},
+	LimitTunnelProtocolsProbability:         {value: 1.0, minimum: 0.0},
 	LimitTunnelProtocols:                    {value: protocol.TunnelProtocols{}},
 
-	LimitTLSProfiles: {value: protocol.TLSProfiles{}},
+	LimitTLSProfilesProbability: {value: 1.0, minimum: 0.0},
+	LimitTLSProfiles:            {value: protocol.TLSProfiles{}},
 
 	FragmentorProbability:    {value: 0.5, minimum: 0.0},
 	FragmentorLimitProtocols: {value: protocol.TunnelProtocols{}},
@@ -400,6 +406,10 @@ func makeDefaultParameters() (map[string]interface{}, error) {
 // When skipOnError is true, unknown or invalid parameters in any
 // applyParameters are skipped instead of aborting with an error.
 //
+// For protocol.TunnelProtocols and protocol.TLSProfiles type values, when
+// skipOnError is true the values are filtered instead of validated, so
+// only known tunnel protocols and TLS profiles are retained.
+//
 // When an error is returned, the previous parameters remain completely
 // unmodified.
 //
@@ -478,20 +488,22 @@ func (p *ClientParameters) Set(
 					return nil, common.ContextError(err)
 				}
 			case protocol.TunnelProtocols:
-				err := v.Validate()
-				if err != nil {
-					if skipOnError {
-						continue
+				if skipOnError {
+					newValue = v.PruneInvalid()
+				} else {
+					err := v.Validate()
+					if err != nil {
+						return nil, common.ContextError(err)
 					}
-					return nil, common.ContextError(err)
 				}
 			case protocol.TLSProfiles:
-				err := v.Validate()
-				if err != nil {
-					if skipOnError {
-						continue
+				if skipOnError {
+					newValue = v.PruneInvalid()
+				} else {
+					err := v.Validate()
+					if err != nil {
+						return nil, common.ContextError(err)
 					}
-					return nil, common.ContextError(err)
 				}
 			}
 
@@ -671,14 +683,58 @@ func (p *ClientParametersSnapshot) Duration(name string) time.Duration {
 }
 
 // TunnelProtocols returns a protocol.TunnelProtocols parameter value.
+// If there is a corresponding Probability value, a weighted coin flip
+// will be performed and, depending on the result, the value or the
+// parameter default will be returned.
 func (p *ClientParametersSnapshot) TunnelProtocols(name string) protocol.TunnelProtocols {
+
+	probabilityName := name + "Probability"
+	_, ok := p.parameters[probabilityName]
+	if ok {
+		probabilityValue := float64(1.0)
+		p.getValue(probabilityName, &probabilityValue)
+		if !common.FlipWeightedCoin(probabilityValue) {
+			defaultParameter, ok := defaultClientParameters[name]
+			if ok {
+				defaultValue, ok := defaultParameter.value.(protocol.TunnelProtocols)
+				if ok {
+					value := make(protocol.TunnelProtocols, len(defaultValue))
+					copy(value, defaultValue)
+					return value
+				}
+			}
+		}
+	}
+
 	value := protocol.TunnelProtocols{}
 	p.getValue(name, &value)
 	return value
 }
 
 // TLSProfiles returns a protocol.TLSProfiles parameter value.
+// If there is a corresponding Probability value, a weighted coin flip
+// will be performed and, depending on the result, the value or the
+// parameter default will be returned.
 func (p *ClientParametersSnapshot) TLSProfiles(name string) protocol.TLSProfiles {
+
+	probabilityName := name + "Probability"
+	_, ok := p.parameters[probabilityName]
+	if ok {
+		probabilityValue := float64(1.0)
+		p.getValue(probabilityName, &probabilityValue)
+		if !common.FlipWeightedCoin(probabilityValue) {
+			defaultParameter, ok := defaultClientParameters[name]
+			if ok {
+				defaultValue, ok := defaultParameter.value.(protocol.TLSProfiles)
+				if ok {
+					value := make(protocol.TLSProfiles, len(defaultValue))
+					copy(value, defaultValue)
+					return value
+				}
+			}
+		}
+	}
+
 	value := protocol.TLSProfiles{}
 	p.getValue(name, &value)
 	return value

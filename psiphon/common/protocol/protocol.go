@@ -35,6 +35,7 @@ const (
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET = "UNFRONTED-MEEK-SESSION-TICKET-OSSH"
 	TUNNEL_PROTOCOL_FRONTED_MEEK                  = "FRONTED-MEEK-OSSH"
 	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP             = "FRONTED-MEEK-HTTP-OSSH"
+	TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH           = "QUIC-OSSH"
 
 	SERVER_ENTRY_SOURCE_EMBEDDED   = "EMBEDDED"
 	SERVER_ENTRY_SOURCE_REMOTE     = "REMOTE"
@@ -76,14 +77,29 @@ func (t TunnelProtocols) Validate() error {
 	return nil
 }
 
+func (t TunnelProtocols) PruneInvalid() TunnelProtocols {
+	u := make(TunnelProtocols, 0)
+	for _, p := range t {
+		if common.Contains(SupportedTunnelProtocols, p) {
+			u = append(u, p)
+		}
+	}
+	return u
+}
+
 var SupportedTunnelProtocols = TunnelProtocols{
-	TUNNEL_PROTOCOL_FRONTED_MEEK,
-	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP,
+	TUNNEL_PROTOCOL_SSH,
+	TUNNEL_PROTOCOL_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
-	TUNNEL_PROTOCOL_OBFUSCATED_SSH,
-	TUNNEL_PROTOCOL_SSH,
+	TUNNEL_PROTOCOL_FRONTED_MEEK,
+	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP,
+	TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
+}
+
+var DefaultDisabledTunnelProtocols = TunnelProtocols{
+	TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
 }
 
 var SupportedServerEntrySources = TunnelProtocols{
@@ -120,6 +136,14 @@ func TunnelProtocolUsesMeekHTTPS(protocol string) bool {
 
 func TunnelProtocolUsesObfuscatedSessionTickets(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
+}
+
+func TunnelProtocolUsesQUIC(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH
+}
+
+func TunnelProtocolIsResourceIntensive(protocol string) bool {
+	return TunnelProtocolUsesMeek(protocol) || TunnelProtocolUsesQUIC(protocol)
 }
 
 func UseClientTunnelProtocol(
@@ -171,6 +195,16 @@ func (profiles TLSProfiles) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (profiles TLSProfiles) PruneInvalid() TLSProfiles {
+	q := make(TLSProfiles, 0)
+	for _, p := range profiles {
+		if common.Contains(SupportedTLSProfiles, p) {
+			q = append(q, p)
+		}
+	}
+	return q
 }
 
 type HandshakeResponse struct {
