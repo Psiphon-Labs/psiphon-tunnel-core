@@ -44,38 +44,38 @@ import (
 // connect to; establishes and monitors tunnels; and runs local proxies which
 // route traffic through the tunnels.
 type Controller struct {
-	config                             *Config
-	sessionId                          string
-	runCtx                             context.Context
-	stopRunning                        context.CancelFunc
-	runWaitGroup                       *sync.WaitGroup
-	connectedTunnels                   chan *Tunnel
-	failedTunnels                      chan *Tunnel
-	tunnelMutex                        sync.Mutex
-	establishedOnce                    bool
-	tunnels                            []*Tunnel
-	nextTunnel                         int
-	startedConnectedReporter           bool
-	isEstablishing                     bool
-	concurrentEstablishTunnelsMutex    sync.Mutex
-	concurrentEstablishTunnels         int
-	concurrentMeekEstablishTunnels     int
-	peakConcurrentEstablishTunnels     int
-	peakConcurrentMeekEstablishTunnels int
-	establishCtx                       context.Context
-	stopEstablish                      context.CancelFunc
-	establishWaitGroup                 *sync.WaitGroup
-	candidateServerEntries             chan *candidateServerEntry
-	untunneledDialConfig               *DialConfig
-	splitTunnelClassifier              *SplitTunnelClassifier
-	signalFetchCommonRemoteServerList  chan struct{}
-	signalFetchObfuscatedServerLists   chan struct{}
-	signalDownloadUpgrade              chan string
-	impairedProtocolClassification     map[string]int
-	signalReportConnected              chan struct{}
-	serverAffinityDoneBroadcast        chan struct{}
-	packetTunnelClient                 *tun.Client
-	packetTunnelTransport              *PacketTunnelTransport
+	config                                  *Config
+	sessionId                               string
+	runCtx                                  context.Context
+	stopRunning                             context.CancelFunc
+	runWaitGroup                            *sync.WaitGroup
+	connectedTunnels                        chan *Tunnel
+	failedTunnels                           chan *Tunnel
+	tunnelMutex                             sync.Mutex
+	establishedOnce                         bool
+	tunnels                                 []*Tunnel
+	nextTunnel                              int
+	startedConnectedReporter                bool
+	isEstablishing                          bool
+	concurrentEstablishTunnelsMutex         sync.Mutex
+	concurrentEstablishTunnels              int
+	concurrentIntensiveEstablishTunnels     int
+	peakConcurrentEstablishTunnels          int
+	peakConcurrentIntensiveEstablishTunnels int
+	establishCtx                            context.Context
+	stopEstablish                           context.CancelFunc
+	establishWaitGroup                      *sync.WaitGroup
+	candidateServerEntries                  chan *candidateServerEntry
+	untunneledDialConfig                    *DialConfig
+	splitTunnelClassifier                   *SplitTunnelClassifier
+	signalFetchCommonRemoteServerList       chan struct{}
+	signalFetchObfuscatedServerLists        chan struct{}
+	signalDownloadUpgrade                   chan string
+	impairedProtocolClassification          map[string]int
+	signalReportConnected                   chan struct{}
+	serverAffinityDoneBroadcast             chan struct{}
+	packetTunnelClient                      *tun.Client
+	packetTunnelTransport                   *PacketTunnelTransport
 }
 
 type candidateServerEntry struct {
@@ -1079,9 +1079,9 @@ func (controller *Controller) startEstablishing() {
 
 	controller.concurrentEstablishTunnelsMutex.Lock()
 	controller.concurrentEstablishTunnels = 0
-	controller.concurrentMeekEstablishTunnels = 0
+	controller.concurrentIntensiveEstablishTunnels = 0
 	controller.peakConcurrentEstablishTunnels = 0
-	controller.peakConcurrentMeekEstablishTunnels = 0
+	controller.peakConcurrentIntensiveEstablishTunnels = 0
 	controller.concurrentEstablishTunnelsMutex.Unlock()
 
 	aggressiveGarbageCollection()
@@ -1134,10 +1134,10 @@ func (controller *Controller) launchEstablishing(impairedProtocols []string) {
 	//
 	// An in-flight tactics request uses meek in round tripper mode, which
 	// uses less resources than meek tunnel relay mode. For this reason, the
-	// tactics request is not counted in concurrentMeekEstablishTunnels.
+	// tactics request is not counted in concurrentIntensiveEstablishTunnels.
 	//
 	// TODO: HTTP/2 uses significantly more memory, so perhaps
-	// concurrentMeekEstablishTunnels should be counted in that case.
+	// concurrentIntensiveEstablishTunnels should be counted in that case.
 	//
 	// Any in-flight tactics request or pending retry will be
 	// canceled when establishment is stopped.
@@ -1221,14 +1221,14 @@ func (controller *Controller) stopEstablishing() {
 
 	controller.concurrentEstablishTunnelsMutex.Lock()
 	peakConcurrent := controller.peakConcurrentEstablishTunnels
-	peakConcurrentMeek := controller.peakConcurrentMeekEstablishTunnels
+	peakConcurrentIntensive := controller.peakConcurrentIntensiveEstablishTunnels
 	controller.concurrentEstablishTunnels = 0
-	controller.concurrentMeekEstablishTunnels = 0
+	controller.concurrentIntensiveEstablishTunnels = 0
 	controller.peakConcurrentEstablishTunnels = 0
-	controller.peakConcurrentMeekEstablishTunnels = 0
+	controller.peakConcurrentIntensiveEstablishTunnels = 0
 	controller.concurrentEstablishTunnelsMutex.Unlock()
 	NoticeInfo("peak concurrent establish tunnels: %d", peakConcurrent)
-	NoticeInfo("peak concurrent meek establish tunnels: %d", peakConcurrentMeek)
+	NoticeInfo("peak concurrent resource intensive establish tunnels: %d", peakConcurrentIntensive)
 
 	emitMemoryMetrics()
 	standardGarbageCollection()
@@ -1691,23 +1691,24 @@ loop:
 		// protocols supported by the server entry, optionally limited by
 		// LimitTunnelProtocols.
 		//
-		// When limiting concurrent meek connection workers, and at the limit,
-		// do not select meek since otherwise the candidate must be skipped.
+		// When limiting concurrent resource intensive protocol connection
+		// workers, and at the limit, do not select resource intensive
+		// protocols since otherwise the candidate must be skipped.
 		//
 		// If at the limit and unabled to select a non-meek protocol, skip the
 		// candidate entirely and move on to the next. Since candidates are shuffled
 		// it's probable that the next candidate is not meek. In this case, a
 		// StaggerConnectionWorkersMilliseconds delay may still be incurred.
 
-		limitMeekConnectionWorkers := controller.config.clientParameters.Get().Int(
-			parameters.LimitMeekConnectionWorkers)
+		limitIntensiveConnectionWorkers := controller.config.clientParameters.Get().Int(
+			parameters.LimitIntensiveConnectionWorkers)
 
-		excludeMeek := false
+		excludeIntensive := false
 		controller.concurrentEstablishTunnelsMutex.Lock()
-		if limitMeekConnectionWorkers > 0 &&
-			controller.concurrentMeekEstablishTunnels >=
-				limitMeekConnectionWorkers {
-			excludeMeek = true
+		if limitIntensiveConnectionWorkers > 0 &&
+			controller.concurrentIntensiveEstablishTunnels >=
+				limitIntensiveConnectionWorkers {
+			excludeIntensive = true
 		}
 		controller.concurrentEstablishTunnelsMutex.Unlock()
 
@@ -1715,7 +1716,7 @@ loop:
 			controller.config,
 			candidateServerEntry.serverEntry,
 			candidateServerEntry.impairedProtocols,
-			excludeMeek,
+			excludeIntensive,
 			candidateServerEntry.usePriorityProtocol)
 
 		if err == errNoProtocolSupported {
@@ -1737,24 +1738,24 @@ loop:
 		var tunnel *Tunnel
 		if err == nil {
 
-			isMeek := protocol.TunnelProtocolUsesMeek(selectedProtocol)
+			isIntensive := protocol.TunnelProtocolIsResourceIntensive(selectedProtocol)
 
 			controller.concurrentEstablishTunnelsMutex.Lock()
-			if isMeek {
+			if isIntensive {
 
-				// Recheck the limit now that we know we're selecting meek and
-				// adjusting concurrentMeekEstablishTunnels.
-				if limitMeekConnectionWorkers > 0 &&
-					controller.concurrentMeekEstablishTunnels >=
-						limitMeekConnectionWorkers {
+				// Recheck the limit now that we know we're selecting the resource
+				// intensive protocol and adjusting concurrentIntensiveEstablishTunnels.
+				if limitIntensiveConnectionWorkers > 0 &&
+					controller.concurrentIntensiveEstablishTunnels >=
+						limitIntensiveConnectionWorkers {
 
 					// Skip this candidate.
 					controller.concurrentEstablishTunnelsMutex.Unlock()
 					continue
 				}
-				controller.concurrentMeekEstablishTunnels += 1
-				if controller.concurrentMeekEstablishTunnels > controller.peakConcurrentMeekEstablishTunnels {
-					controller.peakConcurrentMeekEstablishTunnels = controller.concurrentMeekEstablishTunnels
+				controller.concurrentIntensiveEstablishTunnels += 1
+				if controller.concurrentIntensiveEstablishTunnels > controller.peakConcurrentIntensiveEstablishTunnels {
+					controller.peakConcurrentIntensiveEstablishTunnels = controller.concurrentIntensiveEstablishTunnels
 				}
 			}
 			controller.concurrentEstablishTunnels += 1
@@ -1772,8 +1773,8 @@ loop:
 				candidateServerEntry.adjustedEstablishStartTime)
 
 			controller.concurrentEstablishTunnelsMutex.Lock()
-			if isMeek {
-				controller.concurrentMeekEstablishTunnels -= 1
+			if isIntensive {
+				controller.concurrentIntensiveEstablishTunnels -= 1
 			}
 			controller.concurrentEstablishTunnels -= 1
 			controller.concurrentEstablishTunnelsMutex.Unlock()

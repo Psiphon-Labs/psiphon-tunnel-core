@@ -132,6 +132,10 @@ func TunnelProtocolUsesQUIC(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH
 }
 
+func TunnelProtocolIsResourceIntensive(protocol string) bool {
+	return TunnelProtocolUsesMeek(protocol) || TunnelProtocolUsesQUIC(protocol)
+}
+
 func UseClientTunnelProtocol(
 	clientProtocol string,
 	serverProtocols TunnelProtocols) bool {

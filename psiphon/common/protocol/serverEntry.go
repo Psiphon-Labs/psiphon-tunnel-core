@@ -96,7 +96,7 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 	useUpstreamProxy bool,
 	limitTunnelProtocols []string,
 	impairedTunnelProtocols []string,
-	excludeMeek bool) []string {
+	excludeIntensive bool) []string {
 
 	supportedProtocols := make([]string, 0)
 
@@ -121,7 +121,7 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 			continue
 		}
 
-		if excludeMeek && TunnelProtocolUsesMeek(protocol) {
+		if excludeIntensive && TunnelProtocolIsResourceIntensive(protocol) {
 			continue
 		}
 

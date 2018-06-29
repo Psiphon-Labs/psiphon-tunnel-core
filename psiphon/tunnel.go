@@ -533,14 +533,14 @@ func selectProtocol(
 	config *Config,
 	serverEntry *protocol.ServerEntry,
 	impairedProtocols []string,
-	excludeMeek bool,
+	excludeIntensive bool,
 	usePriorityProtocol bool) (selectedProtocol string, err error) {
 
 	candidateProtocols := serverEntry.GetSupportedProtocols(
 		config.UseUpstreamProxy(),
 		config.clientParameters.Get().TunnelProtocols(parameters.LimitTunnelProtocols),
 		impairedProtocols,
-		excludeMeek)
+		excludeIntensive)
 	if len(candidateProtocols) == 0 {
 		return "", errNoProtocolSupported
 	}

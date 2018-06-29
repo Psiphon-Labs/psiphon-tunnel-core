@@ -80,7 +80,7 @@ const (
 	EstablishTunnelServerAffinityGracePeriod   = "EstablishTunnelServerAffinityGracePeriod"
 	StaggerConnectionWorkersPeriod             = "StaggerConnectionWorkersPeriod"
 	StaggerConnectionWorkersJitter             = "StaggerConnectionWorkersJitter"
-	LimitMeekConnectionWorkers                 = "LimitMeekConnectionWorkers"
+	LimitIntensiveConnectionWorkers            = "LimitIntensiveConnectionWorkers"
 	IgnoreHandshakeStatsRegexps                = "IgnoreHandshakeStatsRegexps"
 	PrioritizeTunnelProtocols                  = "PrioritizeTunnelProtocols"
 	PrioritizeTunnelProtocolsCandidateCount    = "PrioritizeTunnelProtocolsCandidateCount"
@@ -202,7 +202,7 @@ var defaultClientParameters = map[string]struct {
 	EstablishTunnelServerAffinityGracePeriod: {value: 1 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	StaggerConnectionWorkersPeriod:           {value: time.Duration(0), minimum: time.Duration(0)},
 	StaggerConnectionWorkersJitter:           {value: 0.1, minimum: 0.0},
-	LimitMeekConnectionWorkers:               {value: 0, minimum: 0},
+	LimitIntensiveConnectionWorkers:          {value: 0, minimum: 0},
 	IgnoreHandshakeStatsRegexps:              {value: false},
 	TunnelOperateShutdownTimeout:             {value: 1 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	TunnelPortForwardDialTimeout:             {value: 10 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
