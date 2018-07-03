@@ -16,7 +16,7 @@ script:
 - go test -race -v ./common/osl
 - go test -race -v ./common/parameters
 - go test -race -v ./common/protocol
-# - go test -race -v ./common/quic
+- go test -race -v ./common/quic
 - go test -race -v ./common/tactics
 # TODO: fix and reenable test, which is failing in TravisCI environment:
 # --- FAIL: TestTunneledTCPIPv4
@@ -34,7 +34,7 @@ script:
 - go test -v -covermode=count -coverprofile=osl.coverprofile ./common/osl
 - go test -v -covermode=count -coverprofile=parameters.coverprofile ./common/parameters
 - go test -v -covermode=count -coverprofile=protocol.coverprofile ./common/protocol
-#- go test -v -covermode=count -coverprofile=quic.coverprofile ./common/quic
+- go test -v -covermode=count -coverprofile=quic.coverprofile ./common/quic
 - go test -v -covermode=count -coverprofile=tactics.coverprofile ./common/tactics
 # TODO: see comment above
 #- sudo -E env "PATH=$PATH" go test -v -covermode=count -coverprofile=tun.coverprofile ./common/tun
