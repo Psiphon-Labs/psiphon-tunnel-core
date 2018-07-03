@@ -15,28 +15,28 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
-type StartResultCode int
+type startResultCode int
 
 const (
-	StartResultCodeSuccess StartResultCode = iota
-	StartResultCodeTimeout
-	StartResultCodeOtherError
+	startResultCodeSuccess startResultCode = iota
+	startResultCodeTimeout
+	startResultCodeOtherError
 )
 
-type NoticeEvent struct {
+type noticeEvent struct {
 	Data       map[string]interface{} `json:"data"`
 	NoticeType string                 `json:"noticeType"`
 }
 
-type StartResult struct {
-	Code           StartResultCode `json:"result_code"`
+type startResult struct {
+	Code           startResultCode `json:"result_code"`
 	BootstrapTime  float64         `json:"bootstrap_time,omitempty"`
 	ErrorString    string          `json:"error,omitempty"`
 	HttpProxyPort  int             `json:"http_proxy_port,omitempty"`
 	SocksProxyPort int             `json:"socks_proxy_port,omitempty"`
 }
 
-type PsiphonTunnel struct {
+type psiphonTunnel struct {
 	controllerWaitGroup sync.WaitGroup
 	controllerCtx       context.Context
 	stopController      context.CancelFunc
@@ -44,13 +44,13 @@ type PsiphonTunnel struct {
 	socksProxyPort      int
 }
 
-var psiphonTunnel PsiphonTunnel
+var tunnel psiphonTunnel
 
 //export Start
 // Start starts the controller and returns once either of the following has occured: an active tunnel has been
 // established, the timeout has elapsed before an active tunnel could be established or an error has occured.
 //
-// Start returns a StartResult object serialized as a JSON string in the form of a null-terminated buffer of C chars.
+// Start returns a startResult object serialized as a JSON string in the form of a null-terminated buffer of C chars.
 // Start will return,
 // On success:
 //   {
@@ -107,7 +107,7 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 
-			var event NoticeEvent
+			var event noticeEvent
 
 			err := json.Unmarshal(notice, &event)
 			if err != nil {
@@ -120,10 +120,10 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 
 			if event.NoticeType == "ListeningHttpProxyPort" {
 				port := event.Data["port"].(float64)
-				psiphonTunnel.httpProxyPort = int(port)
+				tunnel.httpProxyPort = int(port)
 			} else if event.NoticeType == "ListeningSocksProxyPort" {
 				port := event.Data["port"].(float64)
-				psiphonTunnel.socksProxyPort = int(port)
+				tunnel.socksProxyPort = int(port)
 			} else if event.NoticeType == "Tunnels" {
 				count := event.Data["count"].(float64)
 				if count > 0 {
@@ -164,7 +164,7 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 		return startErrorJson(err)
 	}
 
-	psiphonTunnel.controllerCtx, psiphonTunnel.stopController = context.WithCancel(context.Background())
+	tunnel.controllerCtx, tunnel.stopController = context.WithCancel(context.Background())
 
 	// Set start time
 
@@ -179,12 +179,12 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 
 	// Run test
 
-	var result StartResult
+	var result startResult
 
-	psiphonTunnel.controllerWaitGroup.Add(1)
+	tunnel.controllerWaitGroup.Add(1)
 	go func() {
-		defer psiphonTunnel.controllerWaitGroup.Done()
-		controller.Run(psiphonTunnel.controllerCtx)
+		defer tunnel.controllerWaitGroup.Done()
+		controller.Run(tunnel.controllerCtx)
 
 		select {
 		case testError <- errors.New("controller.Run exited unexpectedly"):
@@ -196,26 +196,26 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 
 	select {
 	case <-connected:
-		result.Code = StartResultCodeSuccess
+		result.Code = startResultCodeSuccess
 		result.BootstrapTime = secondsBeforeNow(startTime)
-		result.HttpProxyPort = psiphonTunnel.httpProxyPort
-		result.SocksProxyPort = psiphonTunnel.socksProxyPort
+		result.HttpProxyPort = tunnel.httpProxyPort
+		result.SocksProxyPort = tunnel.socksProxyPort
 	case <-timeoutSignal.Done():
-		result.Code = StartResultCodeTimeout
+		result.Code = startResultCodeTimeout
 		err = timeoutSignal.Err()
 		if err != nil {
 			result.ErrorString = fmt.Sprintf("Timeout occured before Psiphon connected: %s", err.Error())
 		}
-		psiphonTunnel.stopController()
+		tunnel.stopController()
 	case err := <-testError:
-		result.Code = StartResultCodeOtherError
+		result.Code = startResultCodeOtherError
 		result.ErrorString = err.Error()
-		psiphonTunnel.stopController()
+		tunnel.stopController()
 	}
 
 	// Return result
 
-	return marshalStartResult(result)
+	return marshalstartResult(result)
 }
 
 //export Stop
@@ -224,10 +224,10 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 // Stop should always be called after a successful call to Start to ensure the
 // controller is not left running.
 func Stop() {
-	if psiphonTunnel.stopController != nil {
-		psiphonTunnel.stopController()
+	if tunnel.stopController != nil {
+		tunnel.stopController()
 	}
-	psiphonTunnel.controllerWaitGroup.Wait()
+	tunnel.controllerWaitGroup.Wait()
 }
 
 // secondsBeforeNow returns the delta seconds of the current time subtract startTime.
@@ -236,20 +236,20 @@ func secondsBeforeNow(startTime time.Time) float64 {
 	return delta.Seconds()
 }
 
-// marshalStartResult serializes a StartResult object as a JSON string in the form
+// marshalstartResult serializes a startResult object as a JSON string in the form
 // of a null-terminated buffer of C chars.
-func marshalStartResult(result StartResult) *C.char {
+func marshalstartResult(result startResult) *C.char {
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
-		return C.CString(fmt.Sprintf("{\"result_code\":%d, \"error\": \"%s\"}", StartResultCodeOtherError, err.Error()))
+		return C.CString(fmt.Sprintf("{\"result_code\":%d, \"error\": \"%s\"}", startResultCodeOtherError, err.Error()))
 	}
 
 	return C.CString(string(resultJSON))
 }
 
-// startErrorJson returns a StartResult object serialized as a JSON string in the form
+// startErrorJson returns a startResult object serialized as a JSON string in the form
 // of a null-terminated buffer of C chars. The object's return result code will be set to
-// StartResultCodeOtherError (2) and its error string set to the error string of the provided error.
+// startResultCodeOtherError (2) and its error string set to the error string of the provided error.
 //
 // The JSON will be in the form of:
 // {
@@ -257,11 +257,11 @@ func marshalStartResult(result StartResult) *C.char {
 //   "error": <error message>
 // }
 func startErrorJson(err error) *C.char {
-	var result StartResult
-	result.Code = StartResultCodeOtherError
+	var result startResult
+	result.Code = startResultCodeOtherError
 	result.ErrorString = err.Error()
 
-	return marshalStartResult(result)
+	return marshalstartResult(result)
 }
 
 // main is a stub required by cgo.
