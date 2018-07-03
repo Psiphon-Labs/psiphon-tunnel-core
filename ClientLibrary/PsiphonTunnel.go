@@ -36,7 +36,7 @@ type StartResult struct {
 	SocksProxyPort int             `json:"socks_proxy_port,omitempty"`
 }
 
-type MeasurementTest struct {
+type PsiphonTunnel struct {
 	controllerWaitGroup sync.WaitGroup
 	controllerCtx       context.Context
 	stopController      context.CancelFunc
@@ -44,7 +44,7 @@ type MeasurementTest struct {
 	socksProxyPort      int
 }
 
-var measurementTest MeasurementTest
+var psiphonTunnel PsiphonTunnel
 
 //export Start
 // Start starts the controller and returns once either of the following has occured: an active tunnel has been
@@ -120,10 +120,10 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 
 			if event.NoticeType == "ListeningHttpProxyPort" {
 				port := event.Data["port"].(float64)
-				measurementTest.httpProxyPort = int(port)
+				psiphonTunnel.httpProxyPort = int(port)
 			} else if event.NoticeType == "ListeningSocksProxyPort" {
 				port := event.Data["port"].(float64)
-				measurementTest.socksProxyPort = int(port)
+				psiphonTunnel.socksProxyPort = int(port)
 			} else if event.NoticeType == "Tunnels" {
 				count := event.Data["count"].(float64)
 				if count > 0 {
@@ -164,7 +164,7 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 		return startErrorJson(err)
 	}
 
-	measurementTest.controllerCtx, measurementTest.stopController = context.WithCancel(context.Background())
+	psiphonTunnel.controllerCtx, psiphonTunnel.stopController = context.WithCancel(context.Background())
 
 	// Set start time
 
@@ -181,10 +181,10 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 
 	var result StartResult
 
-	measurementTest.controllerWaitGroup.Add(1)
+	psiphonTunnel.controllerWaitGroup.Add(1)
 	go func() {
-		defer measurementTest.controllerWaitGroup.Done()
-		controller.Run(measurementTest.controllerCtx)
+		defer psiphonTunnel.controllerWaitGroup.Done()
+		controller.Run(psiphonTunnel.controllerCtx)
 
 		select {
 		case testError <- errors.New("controller.Run exited unexpectedly"):
@@ -198,19 +198,19 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 	case <-connected:
 		result.Code = StartResultCodeSuccess
 		result.BootstrapTime = secondsBeforeNow(startTime)
-		result.HttpProxyPort = measurementTest.httpProxyPort
-		result.SocksProxyPort = measurementTest.socksProxyPort
+		result.HttpProxyPort = psiphonTunnel.httpProxyPort
+		result.SocksProxyPort = psiphonTunnel.socksProxyPort
 	case <-timeoutSignal.Done():
 		result.Code = StartResultCodeTimeout
 		err = timeoutSignal.Err()
 		if err != nil {
 			result.ErrorString = fmt.Sprintf("Timeout occured before Psiphon connected: %s", err.Error())
 		}
-		measurementTest.stopController()
+		psiphonTunnel.stopController()
 	case err := <-testError:
 		result.Code = StartResultCodeOtherError
 		result.ErrorString = err.Error()
-		measurementTest.stopController()
+		psiphonTunnel.stopController()
 	}
 
 	// Return result
@@ -224,10 +224,10 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 // Stop should always be called after a successful call to Start to ensure the
 // controller is not left running.
 func Stop() {
-	if measurementTest.stopController != nil {
-		measurementTest.stopController()
+	if psiphonTunnel.stopController != nil {
+		psiphonTunnel.stopController()
 	}
-	measurementTest.controllerWaitGroup.Wait()
+	psiphonTunnel.controllerWaitGroup.Wait()
 }
 
 // secondsBeforeNow returns the delta seconds of the current time subtract startTime.
