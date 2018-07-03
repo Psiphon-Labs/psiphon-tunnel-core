@@ -633,11 +633,6 @@
         
     config[@"DeviceRegion"] = [PsiphonTunnel getDeviceRegion];
     
-    config[@"UseIndistinguishableTLS"] = [NSNumber numberWithBool:TRUE];
-
-    // We don't use OpenSSL, so we don't use a CA certs file
-    config[@"TrustedCACertificatesFilename"] = nil;
-
     // This library expects a pool size of 1
     config[@"TunnelPoolSize"] = [NSNumber numberWithInt:1];
 

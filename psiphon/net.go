@@ -40,7 +40,7 @@ import (
 const DNS_PORT = 53
 
 // DialConfig contains parameters to determine the behavior
-// of a Psiphon dialer (TCPDial, MeekDial, etc.)
+// of a Psiphon dialer (TCPDial, UDPDial, MeekDial, etc.)
 type DialConfig struct {
 
 	// UpstreamProxyURL specifies a proxy to connect through.
@@ -52,6 +52,8 @@ type DialConfig struct {
 	// Certain tunnel protocols require HTTP CONNECT support
 	// when a HTTP proxy is specified. If CONNECT is not
 	// supported, those protocols will not connect.
+	//
+	// UpstreamProxyURL is not used by UDPDial.
 	UpstreamProxyURL string
 
 	// CustomHeaders is a set of additional arbitrary HTTP headers that are
@@ -71,22 +73,9 @@ type DialConfig struct {
 	DnsServerGetter DnsServerGetter
 	IPv6Synthesizer IPv6Synthesizer
 
-	// UseIndistinguishableTLS specifies whether to try to use an
-	// alternative stack for TLS. From a circumvention perspective,
-	// Go's TLS has a distinct fingerprint that may be used for blocking.
-	// Only applies to TLS connections.
-	UseIndistinguishableTLS bool
-
 	// TrustedCACertificatesFilename specifies a file containing trusted
-	// CA certs. The file contents should be compatible with OpenSSL's
-	// SSL_CTX_load_verify_locations.
-	// Only applies to UseIndistinguishableTLS connections.
+	// CA certs. See Config.TrustedCACertificatesFilename.
 	TrustedCACertificatesFilename string
-
-	// DeviceRegion is the reported region the host device is running in.
-	// When set, this value may be used, pre-connection, to select performance
-	// or circumvention optimization strategies for the given region.
-	DeviceRegion string
 
 	// ResolvedIPCallback, when set, is called with the IP address that was
 	// dialed. This is either the specified IP address in the dial address,
@@ -238,10 +227,9 @@ func ResolveIP(host string, conn net.Conn) (addrs []net.IP, ttls []time.Duration
 	return addrs, ttls, nil
 }
 
-// MakeUntunneledHTTPClient returns a net/http.Client which is
-// configured to use custom dialing features -- including BindToDevice,
-// UseIndistinguishableTLS, etc. If verifyLegacyCertificate is not nil,
-// it's used for certificate verification.
+// MakeUntunneledHTTPClient returns a net/http.Client which is configured to
+// use custom dialing features -- including BindToDevice, etc. If
+// verifyLegacyCertificate is not nil, it's used for certificate verification.
 // The context is applied to underlying TCP dials. The caller is responsible
 // for applying the context to requests made with the returned http.Client.
 func MakeUntunneledHTTPClient(
@@ -250,10 +238,6 @@ func MakeUntunneledHTTPClient(
 	untunneledDialConfig *DialConfig,
 	verifyLegacyCertificate *x509.Certificate,
 	skipVerify bool) (*http.Client, error) {
-
-	// Note: IndistinguishableTLS mode doesn't support VerifyLegacyCertificate
-	useIndistinguishableTLS := untunneledDialConfig.UseIndistinguishableTLS &&
-		verifyLegacyCertificate == nil
 
 	dialer := NewTCPDialer(untunneledDialConfig)
 
@@ -267,7 +251,6 @@ func MakeUntunneledHTTPClient(
 			UseDialAddrSNI:                true,
 			SNIServerName:                 "",
 			SkipVerify:                    skipVerify,
-			UseIndistinguishableTLS:       useIndistinguishableTLS,
 			TrustedCACertificatesFilename: untunneledDialConfig.TrustedCACertificatesFilename,
 		})
 
@@ -311,12 +294,8 @@ func MakeTunneledHTTPClient(
 
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
-	} else if config.UseTrustedCACertificatesForStockTLS {
+	} else if config.TrustedCACertificatesFilename != "" {
 
-		if config.TrustedCACertificatesFilename == "" {
-			return nil, common.ContextError(errors.New(
-				"UseTrustedCACertificatesForStockTLS requires TrustedCACertificatesFilename"))
-		}
 		rootCAs := x509.NewCertPool()
 		certData, err := ioutil.ReadFile(config.TrustedCACertificatesFilename)
 		if err != nil {

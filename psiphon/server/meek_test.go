@@ -297,8 +297,7 @@ func TestMeekResiliency(t *testing.T) {
 	// Run meek client
 
 	dialConfig := &psiphon.DialConfig{
-		UseIndistinguishableTLS: true,
-		DeviceBinder:            new(fileDescriptorInterruptor),
+		DeviceBinder: new(fileDescriptorInterruptor),
 	}
 
 	clientParameters, err := parameters.NewClientParameters(nil)

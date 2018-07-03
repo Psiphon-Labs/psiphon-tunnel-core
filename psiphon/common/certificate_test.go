@@ -1,7 +1,5 @@
-// +build !darwin
-
 /*
- * Copyright (c) 2017, Psiphon Inc.
+ * Copyright (c) 2018, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,7 +17,22 @@
  *
  */
 
-package psiphon
+package common
 
-func tcpDialSetAdditionalSocketOptions(_ int) {
+import (
+	"crypto/tls"
+	"testing"
+)
+
+func TestGenerateWebServerCertificate(t *testing.T) {
+
+	certificate, privateKey, err := GenerateWebServerCertificate("www.example.com")
+	if err != nil {
+		t.Errorf("GenerateWebServerCertificate failed: %s", err)
+	}
+
+	_, err = tls.X509KeyPair([]byte(certificate), []byte(privateKey))
+	if err != nil {
+		t.Errorf("tls.X509KeyPair failed: %s", err)
+	}
 }

@@ -121,26 +121,17 @@ type CustomTLSConfig struct {
 	// specified certificate. SNI is disbled when this is set.
 	VerifyLegacyCertificate *x509.Certificate
 
-	// UseIndistinguishableTLS specifies whether to try to use an
-	// alternative profile for TLS dials. From a circumvention perspective,
-	// Go's TLS has a distinct fingerprint that may be used for blocking.
-	UseIndistinguishableTLS bool
-
-	// TLSProfile specifies a particular indistinguishable TLS profile
-	// to use for the TLS dial. UseIndistinguishableTLS must be set for
-	// TLSProfile to take effect.
-	// When TLSProfile is "" and UseIndistinguishableTLS is set, a profile
-	// is selected at random. Setting TLSProfile allows the caller to pin
-	// the selection so all TLS connections in a certain context (e.g. a
-	// single meek connection) use a consistent value.
-	// The value should be selected by calling SelectTLSProfile, which
-	// will pick a value at random, subject to compatibility constraints.
+	// TLSProfile specifies a particular indistinguishable TLS profile to use
+	// for the TLS dial. When TLSProfile is "", a profile is selected at
+	// random. Setting TLSProfile allows the caller to pin the selection so
+	// all TLS connections in a certain context (e.g. a single meek
+	// connection) use a consistent value. The value should be selected by
+	// calling SelectTLSProfile, which will pick a value at random, subject to
+	// compatibility constraints.
 	TLSProfile string
 
 	// TrustedCACertificatesFilename specifies a file containing trusted
-	// CA certs. Directory contents should be compatible with OpenSSL's
-	// SSL_CTX_load_verify_locations
-	// Only applies to UseIndistinguishableTLS connections.
+	// CA certs. See Config.TrustedCACertificatesFilename.
 	TrustedCACertificatesFilename string
 
 	// ObfuscatedSessionTicketKey enables obfuscated session tickets
@@ -149,36 +140,30 @@ type CustomTLSConfig struct {
 }
 
 func SelectTLSProfile(
-	useIndistinguishableTLS bool,
 	tunnelProtocol string,
 	clientParameters *parameters.ClientParameters) string {
 
-	if useIndistinguishableTLS {
+	limitTLSProfiles := clientParameters.Get().TLSProfiles(parameters.LimitTLSProfiles)
 
-		limitTLSProfiles := clientParameters.Get().TLSProfiles(parameters.LimitTLSProfiles)
+	tlsProfiles := make([]string, 0)
 
-		tlsProfiles := make([]string, 0)
+	for _, tlsProfile := range protocol.SupportedTLSProfiles {
 
-		for _, tlsProfile := range protocol.SupportedTLSProfiles {
-
-			if len(limitTLSProfiles) > 0 &&
-				!common.Contains(limitTLSProfiles, tlsProfile) {
-				continue
-			}
-
-			tlsProfiles = append(tlsProfiles, tlsProfile)
+		if len(limitTLSProfiles) > 0 &&
+			!common.Contains(limitTLSProfiles, tlsProfile) {
+			continue
 		}
 
-		if len(tlsProfiles) == 0 {
-			return ""
-		}
-
-		choice, _ := common.MakeSecureRandomInt(len(tlsProfiles))
-
-		return tlsProfiles[choice]
+		tlsProfiles = append(tlsProfiles, tlsProfile)
 	}
 
-	return ""
+	if len(tlsProfiles) == 0 {
+		return ""
+	}
+
+	choice, _ := common.MakeSecureRandomInt(len(tlsProfiles))
+
+	return tlsProfiles[choice]
 }
 
 func getClientHelloID(tlsProfile string) utls.ClientHelloID {
@@ -223,6 +208,13 @@ func CustomTLSDial(
 	network, addr string,
 	config *CustomTLSConfig) (net.Conn, error) {
 
+	if !config.SkipVerify &&
+		config.VerifyLegacyCertificate == nil &&
+		config.TrustedCACertificatesFilename != "" {
+		return nil, common.ContextError(
+			errors.New("TrustedCACertificatesFilename not supported"))
+	}
+
 	dialAddr := addr
 	if config.DialAddr != "" {
 		dialAddr = config.DialAddr
@@ -242,8 +234,7 @@ func CustomTLSDial(
 	selectedTLSProfile := config.TLSProfile
 
 	if selectedTLSProfile == "" {
-		selectedTLSProfile = SelectTLSProfile(
-			config.UseIndistinguishableTLS, "", config.ClientParameters)
+		selectedTLSProfile = SelectTLSProfile("", config.ClientParameters)
 	}
 
 	tlsConfig := &utls.Config{
