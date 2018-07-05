@@ -955,14 +955,19 @@ func newSshClient(
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
 
+	// isFirstTunnelInSession is defaulted to true so that the pre-handshake
+	// traffic rules won't apply UnthrottleFirstTunnelOnly and negate any
+	// unthrottled bytes during the initial protocol negotiation.
+
 	client := &sshClient{
-		sshServer:         sshServer,
-		tunnelProtocol:    tunnelProtocol,
-		geoIPData:         geoIPData,
-		tcpPortForwardLRU: common.NewLRUConns(),
-		signalIssueSLOKs:  make(chan struct{}, 1),
-		runCtx:            runCtx,
-		stopRunning:       stopRunning,
+		sshServer:              sshServer,
+		tunnelProtocol:         tunnelProtocol,
+		geoIPData:              geoIPData,
+		isFirstTunnelInSession: true,
+		tcpPortForwardLRU:      common.NewLRUConns(),
+		signalIssueSLOKs:       make(chan struct{}, 1),
+		runCtx:                 runCtx,
+		stopRunning:            stopRunning,
 	}
 
 	client.tcpTrafficState.availablePortForwardCond = sync.NewCond(new(sync.Mutex))
