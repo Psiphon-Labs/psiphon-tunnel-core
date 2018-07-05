@@ -1111,7 +1111,7 @@
     // https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter
 
     NSMutableString *networkID = [NSMutableString stringWithString:@"UNKNOWN"];
-    NetworkStatus status = [[Reachability reachabilityForInternetConnection] currentReachabilityStatus];
+    NetworkStatus status = [self->reachability currentReachabilityStatus];
     if (status == ReachableViaWiFi) {
         [networkID setString:@"WIFI"];
         NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();

@@ -60,8 +60,8 @@ func TestQUIC(t *testing.T) {
 			}
 
 			serverGroup.Go(func() error {
+				b := make([]byte, 1024)
 				for {
-					b := make([]byte, 1024)
 					n, err := conn.Read(b)
 					atomic.AddInt64(&serverReceivedBytes, int64(n))
 					if err == io.EOF {
@@ -69,7 +69,7 @@ func TestQUIC(t *testing.T) {
 					} else if err != nil {
 						return common.ContextError(err)
 					}
-					_, err = conn.Write(b)
+					_, err = conn.Write(b[:n])
 					if err != nil {
 						return common.ContextError(err)
 					}
@@ -115,9 +115,9 @@ func TestQUIC(t *testing.T) {
 
 			clientGroup.Go(func() error {
 				defer conn.Close()
+				b := make([]byte, 1024)
 				bytesRead := 0
 				for bytesRead < bytesToSend {
-					b := make([]byte, 1024)
 					n, err := conn.Read(b)
 					bytesRead += n
 					atomic.AddInt64(&clientReceivedBytes, int64(n))
