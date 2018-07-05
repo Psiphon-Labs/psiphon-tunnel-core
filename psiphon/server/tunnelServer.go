@@ -1203,7 +1203,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 	// is currently much longer than the OSL session cache, another option to use if
 	// the GeoIP session cache is retired (the GeoIP session cache currently only
 	// supports legacy use cases).
-	isFirstTunnelInSession := sshClient.sshServer.support.GeoIPService.InSessionCache(sessionID)
+	isFirstTunnelInSession := !sshClient.sshServer.support.GeoIPService.InSessionCache(sessionID)
 
 	supportsServerRequests := common.Contains(
 		sshPasswordPayload.ClientCapabilities, protocol.CLIENT_CAPABILITY_SERVER_REQUESTS)
