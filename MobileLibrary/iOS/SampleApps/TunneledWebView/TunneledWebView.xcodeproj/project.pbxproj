@@ -19,8 +19,6 @@
 		662658F81DCB8CF300872F6C /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 662658F61DCB8CF300872F6C /* LaunchScreen.storyboard */; };
 		662659031DCB8CF400872F6C /* TunneledWebViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662659021DCB8CF400872F6C /* TunneledWebViewTests.swift */; };
 		6626590E1DCB8CF400872F6C /* TunneledWebViewUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6626590D1DCB8CF400872F6C /* TunneledWebViewUITests.swift */; };
-		662659211DCBC7C300872F6C /* PsiphonTunnel.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 662659201DCBC7C300872F6C /* PsiphonTunnel.framework */; };
-		662659231DCBC8D800872F6C /* PsiphonTunnel.framework in CopyFiles */ = {isa = PBXBuildFile; fileRef = 662659201DCBC7C300872F6C /* PsiphonTunnel.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		6682D90E1EB1334000329958 /* psiphon-embedded-server-entries.txt in Resources */ = {isa = PBXBuildFile; fileRef = 6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */; };
 		6688DBB61DCD684B00721A9E /* psiphon-config.json in Resources */ = {isa = PBXBuildFile; fileRef = 6688DBB51DCD684B00721A9E /* psiphon-config.json */; };
 /* End PBXBuildFile section */
@@ -49,7 +47,6 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				662659231DCBC8D800872F6C /* PsiphonTunnel.framework in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -79,7 +76,6 @@
 		662659091DCB8CF400872F6C /* TunneledWebViewUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TunneledWebViewUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6626590D1DCB8CF400872F6C /* TunneledWebViewUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunneledWebViewUITests.swift; sourceTree = "<group>"; };
 		6626590F1DCB8CF400872F6C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		662659201DCBC7C300872F6C /* PsiphonTunnel.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = PsiphonTunnel.framework; sourceTree = "<group>"; };
 		6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "psiphon-embedded-server-entries.txt"; sourceTree = "<group>"; };
 		6688DBB51DCD684B00721A9E /* psiphon-config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = "psiphon-config.json"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -89,7 +85,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				662659211DCBC7C300872F6C /* PsiphonTunnel.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -160,7 +155,6 @@
 				6688DBB51DCD684B00721A9E /* psiphon-config.json */,
 				6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */,
 				4E0CA95F1FDE554B00B48BCA /* JiveAuthenticatingHTTPProtocol */,
-				662659201DCBC7C300872F6C /* PsiphonTunnel.framework */,
 			);
 			path = TunneledWebView;
 			sourceTree = "<group>";
@@ -194,7 +188,6 @@
 				662658E71DCB8CF300872F6C /* Frameworks */,
 				662658E81DCB8CF300872F6C /* Resources */,
 				662659221DCBC8CB00872F6C /* CopyFiles */,
-				6685BDD71E300A7800F0E414 /* ShellScript */,
 			);
 			buildRules = (
 			);
@@ -319,22 +312,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		6685BDD71E300A7800F0E414 /* ShellScript */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "bash \"${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}/PsiphonTunnel.framework/strip-frameworks.sh\"";
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		662658E61DCB8CF300872F6C /* Sources */ = {
