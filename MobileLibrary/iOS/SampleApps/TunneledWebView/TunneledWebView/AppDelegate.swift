@@ -157,7 +157,7 @@ extension AppDelegate: TunneledAppDelegate {
         NSLog("onConnected")
 
         DispatchQueue.main.sync {
-            let urlString = "https://psip.me/"
+            let urlString = "https://freegeoip.app/"
             let url = URL.init(string: urlString)!
             let mainView = self.window?.rootViewController as! ViewController
             mainView.loadUrl(url)
