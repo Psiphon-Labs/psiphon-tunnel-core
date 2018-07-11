@@ -7,7 +7,8 @@ package ca.psiphon.tunneledwebview;
 
 import android.content.Context;
 import android.os.Bundle;
-import android.support.v7.app.ActionBarActivity;
+import android.support.v7.app.AppCompatActivity;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
@@ -57,7 +58,7 @@ import ca.psiphon.PsiphonTunnel;
 //
 //----------------------------------------------------------------------------------------------
 
-public class MainActivity extends ActionBarActivity
+public class MainActivity extends AppCompatActivity
         implements PsiphonTunnel.HostService {
 
     private ListView mListView;
@@ -75,6 +76,8 @@ public class MainActivity extends ActionBarActivity
 
         mListView = (ListView)findViewById(R.id.listView);
         mWebView = (WebView)findViewById(R.id.webView);
+        WebSettings webSettings = mWebView.getSettings();
+        webSettings.setJavaScriptEnabled(true);
 
         mLogMessages = new ArrayAdapter<String>(
                 this, R.layout.log_message, R.id.logMessageTextView);
@@ -139,7 +142,7 @@ public class MainActivity extends ActionBarActivity
             public void run() {
                 WebViewProxySettings.setLocalProxy(
                         MainActivity.this, mLocalHttpProxyPort.get());
-                mWebView.loadUrl("https://ipinfo.io/");
+                mWebView.loadUrl("https://freegeoip.app/");
             }
         });
     }
