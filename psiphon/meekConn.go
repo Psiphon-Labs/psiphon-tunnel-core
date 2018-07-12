@@ -249,6 +249,7 @@ func DialMeek(
 			SkipVerify:                    true,
 			TLSProfile:                    meekConfig.TLSProfile,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
+			ClientSessionCache:            utls.NewLRUClientSessionCache(0),
 		}
 
 		if meekConfig.UseObfuscatedSessionTickets {
