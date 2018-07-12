@@ -21,7 +21,6 @@ package tls
 
 import (
 	"crypto/rand"
-	"math/big"
 )
 
 // NewObfuscatedClientSessionCache produces obfuscated session tickets.
@@ -97,19 +96,11 @@ func (cache *obfuscatedClientSessionCache) Get(key string) (*ClientSessionState,
 
 func NewObfuscatedClientSessionState(sharedSecret [32]byte) (*ClientSessionState, error) {
 
-	// Pad golang TLS session ticket to a more typical size.
-	paddingSize := 72
-	randomInt, err := rand.Int(rand.Reader, big.NewInt(18))
-	if err != nil {
-		return nil, err
-	}
-	paddingSize += int(randomInt.Int64()) * 2
-
 	// Create a session ticket that wasn't actually issued by the server.
 	vers := uint16(VersionTLS12)
 	cipherSuite := TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
 	masterSecret := make([]byte, masterSecretLength)
-	_, err = rand.Read(masterSecret)
+	_, err := rand.Read(masterSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +109,6 @@ func NewObfuscatedClientSessionState(sharedSecret [32]byte) (*ClientSessionState
 		cipherSuite:  cipherSuite,
 		masterSecret: masterSecret,
 		certificates: nil,
-		paddingSize:  paddingSize,
 	}
 	c := &Conn{
 		config: &Config{
