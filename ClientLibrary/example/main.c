@@ -62,7 +62,7 @@ int main(int argc, char *argv[]) {
     // print results
     printf("Result: %s\n", result);
 
-    // cleanup
-    free(result);
+    // The underlying memory of `result` is managed by PsiphonTunnel and will
+    // have been freed in Stop.
 }
 
