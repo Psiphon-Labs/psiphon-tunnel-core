@@ -1,5 +1,6 @@
 package main
 
+// #include <stdlib.h>
 import "C"
 
 import (
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -46,7 +48,17 @@ type psiphonTunnel struct {
 
 var tunnel psiphonTunnel
 
+// Memory managed by PsiphonTunnel which is allocated in Start and freed in Stop
+var managedStartResult *C.char
+
 //export Start
+//
+// ******************************* WARNING ********************************
+// The underlying memory referenced by the return value of Start is managed
+// by PsiphonTunnel and attempting to free it explicitly will cause the
+// program to crash. This memory is freed once Stop is called.
+// ************************************************************************
+//
 // Start starts the controller and returns once either of the following has occured: an active tunnel has been
 // established, the timeout has elapsed before an active tunnel could be established or an error has occured.
 //
@@ -213,9 +225,13 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 		tunnel.stopController()
 	}
 
-	// Return result
+	// Free previous result
+	freeManagedStartResult()
 
-	return marshalstartResult(result)
+	// Return result
+	managedStartResult = marshalStartResult(result)
+
+	return managedStartResult
 }
 
 //export Stop
@@ -224,9 +240,12 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 // Stop should always be called after a successful call to Start to ensure the
 // controller is not left running.
 func Stop() {
+	freeManagedStartResult()
+
 	if tunnel.stopController != nil {
 		tunnel.stopController()
 	}
+
 	tunnel.controllerWaitGroup.Wait()
 }
 
@@ -236,9 +255,9 @@ func secondsBeforeNow(startTime time.Time) float64 {
 	return delta.Seconds()
 }
 
-// marshalstartResult serializes a startResult object as a JSON string in the form
+// marshalStartResult serializes a startResult object as a JSON string in the form
 // of a null-terminated buffer of C chars.
-func marshalstartResult(result startResult) *C.char {
+func marshalStartResult(result startResult) *C.char {
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
 		return C.CString(fmt.Sprintf("{\"result_code\":%d, \"error\": \"%s\"}", startResultCodeOtherError, err.Error()))
@@ -261,7 +280,17 @@ func startErrorJson(err error) *C.char {
 	result.Code = startResultCodeOtherError
 	result.ErrorString = err.Error()
 
-	return marshalstartResult(result)
+	return marshalStartResult(result)
+}
+
+// freeManagedStartResult frees the memory on the heap pointed to by managedStartResult.
+func freeManagedStartResult() {
+	if managedStartResult != nil {
+		managedMemory := unsafe.Pointer(managedStartResult)
+		if managedMemory != nil {
+			C.free(managedMemory)
+		}
+	}
 }
 
 // main is a stub required by cgo.
