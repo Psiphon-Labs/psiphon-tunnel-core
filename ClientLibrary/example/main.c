@@ -66,12 +66,11 @@ int main(int argc, char *argv[]) {
 
     // start will return once Psiphon connects or does not connect for timeout seconds
     char *result = Start(psiphon_config, serverList, client_platform, network_id, timeout);
-    Stop();
 
     // print results
     printf("Result: %s\n", result);
 
-    // The underlying memory of `result` is managed by PsiphonTunnel and will
-    // have been freed in Stop.
+    // The underlying memory of `result` is managed by PsiphonTunnel and is freed in Stop
+    Stop();
 }
 
