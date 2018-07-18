@@ -71,6 +71,50 @@ type ServerEntry struct {
 	LocalTimestamp string `json:"localTimestamp"`
 }
 
+// ServerEntryFields is an alternate representation of ServerEntry which
+// enables future compatibility when unmarshaling and persisting new server
+// entries which may contain new, unrecognized fields not in the ServerEntry
+// type for a particular client version.
+//
+// When new JSON server entries with new fields are unmarshaled to ServerEntry
+// types, unrecognized fields are discarded. When unmarshaled to
+// ServerEntryFields, unrecognized fields are retained and may be persisted
+// and available when the client is upgraded and unmarshals to an updated
+// ServerEntry type.
+type ServerEntryFields map[string]interface{}
+
+func (fields ServerEntryFields) GetIPAddress() string {
+	ipAddress, ok := fields["ipAddress"]
+	if !ok {
+		return ""
+	}
+	ipAddressStr, ok := ipAddress.(string)
+	if !ok {
+		return ""
+	}
+	return ipAddressStr
+}
+
+func (fields ServerEntryFields) GetConfigurationVersion() int {
+	configurationVersion, ok := fields["configurationVersion"]
+	if !ok {
+		return 0
+	}
+	configurationVersionInt, ok := configurationVersion.(int)
+	if !ok {
+		return 0
+	}
+	return configurationVersionInt
+}
+
+func (fields ServerEntryFields) SetLocalSource(source string) {
+	fields["localSource"] = source
+}
+
+func (fields ServerEntryFields) SetLocalTimestamp(timestamp string) {
+	fields["localTimestamp"] = timestamp
+}
+
 // GetCapability returns the server capability corresponding
 // to the tunnel protocol.
 func GetCapability(protocol string) string {
@@ -194,7 +238,7 @@ func EncodeServerEntry(serverEntry *ServerEntry) (string, error) {
 		serverEntryContents))), nil
 }
 
-// DecodeServerEntry extracts server entries from the encoding
+// DecodeServerEntry extracts a server entry from the encoding
 // used by remote server lists and Psiphon server handshake requests.
 //
 // The resulting ServerEntry.LocalSource is populated with serverEntrySource,
@@ -206,22 +250,10 @@ func EncodeServerEntry(serverEntry *ServerEntry) (string, error) {
 // server entry and reported to the server as stats (a coarse granularity timestamp
 // is reported).
 func DecodeServerEntry(
-	encodedServerEntry, timestamp,
-	serverEntrySource string) (serverEntry *ServerEntry, err error) {
+	encodedServerEntry, timestamp, serverEntrySource string) (*ServerEntry, error) {
 
-	hexDecodedServerEntry, err := hex.DecodeString(encodedServerEntry)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-
-	// Skip past legacy format (4 space delimited fields) and just parse the JSON config
-	fields := bytes.SplitN(hexDecodedServerEntry, []byte(" "), 5)
-	if len(fields) != 5 {
-		return nil, common.ContextError(errors.New("invalid encoded server entry"))
-	}
-
-	serverEntry = new(ServerEntry)
-	err = json.Unmarshal(fields[4], &serverEntry)
+	serverEntry := new(ServerEntry)
+	err := decodeServerEntry(encodedServerEntry, timestamp, serverEntrySource, serverEntry)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -233,15 +265,57 @@ func DecodeServerEntry(
 	return serverEntry, nil
 }
 
-// ValidateServerEntry checks for malformed server entries.
+// DecodeServerEntryFields extracts an encoded server entry into a
+// ServerEntryFields type, much like DecodeServerEntry. Unrecognized fields
+// not in ServerEntry are retained in the ServerEntryFields.
+func DecodeServerEntryFields(
+	encodedServerEntry, timestamp, serverEntrySource string) (ServerEntryFields, error) {
+
+	serverEntryFields := make(ServerEntryFields)
+	err := decodeServerEntry(encodedServerEntry, timestamp, serverEntrySource, &serverEntryFields)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	// NOTE: if the source JSON happens to have values in these fields, they get clobbered.
+	serverEntryFields.SetLocalSource(serverEntrySource)
+	serverEntryFields.SetLocalTimestamp(timestamp)
+
+	return serverEntryFields, nil
+}
+
+func decodeServerEntry(
+	encodedServerEntry, timestamp, serverEntrySource string,
+	target interface{}) error {
+
+	hexDecodedServerEntry, err := hex.DecodeString(encodedServerEntry)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	// Skip past legacy format (4 space delimited fields) and just parse the JSON config
+	fields := bytes.SplitN(hexDecodedServerEntry, []byte(" "), 5)
+	if len(fields) != 5 {
+		return common.ContextError(errors.New("invalid encoded server entry"))
+	}
+
+	err = json.Unmarshal(fields[4], target)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	return nil
+}
+
+// ValidateServerEntryFields checks for malformed server entries.
 // Currently, it checks for a valid ipAddress. This is important since
 // the IP address is the key used to store/lookup the server entry.
 // TODO: validate more fields?
-func ValidateServerEntry(serverEntry *ServerEntry) error {
-	ipAddr := net.ParseIP(serverEntry.IpAddress)
-	if ipAddr == nil {
+func ValidateServerEntryFields(serverEntryFields ServerEntryFields) error {
+	ipAddress := serverEntryFields.GetIPAddress()
+	if net.ParseIP(ipAddress) == nil {
 		return common.ContextError(
-			fmt.Errorf("server entry has invalid ipAddress: '%s'", serverEntry.IpAddress))
+			fmt.Errorf("server entry has invalid ipAddress: %s", ipAddress))
 	}
 	return nil
 }
@@ -252,27 +326,27 @@ func ValidateServerEntry(serverEntry *ServerEntry) error {
 // See DecodeServerEntry for note on serverEntrySource/timestamp.
 func DecodeServerEntryList(
 	encodedServerEntryList, timestamp,
-	serverEntrySource string) (serverEntries []*ServerEntry, err error) {
+	serverEntrySource string) ([]ServerEntryFields, error) {
 
-	serverEntries = make([]*ServerEntry, 0)
+	serverEntries := make([]ServerEntryFields, 0)
 	for _, encodedServerEntry := range strings.Split(encodedServerEntryList, "\n") {
 		if len(encodedServerEntry) == 0 {
 			continue
 		}
 
 		// TODO: skip this entry and continue if can't decode?
-		serverEntry, err := DecodeServerEntry(encodedServerEntry, timestamp, serverEntrySource)
+		serverEntryFields, err := DecodeServerEntryFields(encodedServerEntry, timestamp, serverEntrySource)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
 
-		if ValidateServerEntry(serverEntry) != nil {
+		if ValidateServerEntryFields(serverEntryFields) != nil {
 			// Skip this entry and continue with the next one
 			// TODO: invoke a logging callback
 			continue
 		}
 
-		serverEntries = append(serverEntries, serverEntry)
+		serverEntries = append(serverEntries, serverEntryFields)
 	}
 	return serverEntries, nil
 }
@@ -309,7 +383,7 @@ func NewStreamingServerEntryDecoder(
 //   will allocate additional memory; garbage collection is necessary to
 //   reclaim that memory for reuse for the next server entry.
 //
-func (decoder *StreamingServerEntryDecoder) Next() (*ServerEntry, error) {
+func (decoder *StreamingServerEntryDecoder) Next() (ServerEntryFields, error) {
 
 	for {
 		if !decoder.scanner.Scan() {
@@ -319,18 +393,18 @@ func (decoder *StreamingServerEntryDecoder) Next() (*ServerEntry, error) {
 		// TODO: use scanner.Bytes which doesn't allocate, instead of scanner.Text
 
 		// TODO: skip this entry and continue if can't decode?
-		serverEntry, err := DecodeServerEntry(
+		serverEntryFields, err := DecodeServerEntryFields(
 			decoder.scanner.Text(), decoder.timestamp, decoder.serverEntrySource)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
 
-		if ValidateServerEntry(serverEntry) != nil {
+		if ValidateServerEntryFields(serverEntryFields) != nil {
 			// Skip this entry and continue with the next one
 			// TODO: invoke a logging callback
 			continue
 		}
 
-		return serverEntry, nil
+		return serverEntryFields, nil
 	}
 }

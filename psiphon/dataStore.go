@@ -211,12 +211,12 @@ func checkInitDataStore() {
 //
 // If the server entry data is malformed, an alert notice is issued and
 // the entry is skipped; no error is returned.
-func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) error {
+func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExists bool) error {
 	checkInitDataStore()
 
 	// Server entries should already be validated before this point,
 	// so instead of skipping we fail with an error.
-	err := protocol.ValidateServerEntry(serverEntry)
+	err := protocol.ValidateServerEntryFields(serverEntryFields)
 	if err != nil {
 		return common.ContextError(
 			fmt.Errorf("invalid server entry: %s", err))
@@ -234,10 +234,12 @@ func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) e
 
 		serverEntries := tx.Bucket([]byte(serverEntriesBucket))
 
+		ipAddress := serverEntryFields.GetIPAddress()
+
 		// Check not only that the entry exists, but is valid. This
 		// will replace in the rare case where the data is corrupt.
 		existingConfigurationVersion := -1
-		existingData := serverEntries.Get([]byte(serverEntry.IpAddress))
+		existingData := serverEntries.Get([]byte(ipAddress))
 		if existingData != nil {
 			var existingServerEntry *protocol.ServerEntry
 			err := json.Unmarshal(existingData, &existingServerEntry)
@@ -247,7 +249,7 @@ func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) e
 		}
 
 		exists := existingConfigurationVersion > -1
-		newer := exists && existingConfigurationVersion < serverEntry.ConfigurationVersion
+		newer := exists && existingConfigurationVersion < serverEntryFields.GetConfigurationVersion()
 		update := !exists || replaceIfExists || newer
 
 		if !update {
@@ -258,21 +260,21 @@ func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) e
 			return nil
 		}
 
-		data, err := json.Marshal(serverEntry)
+		data, err := json.Marshal(serverEntryFields)
 		if err != nil {
 			return common.ContextError(err)
 		}
-		err = serverEntries.Put([]byte(serverEntry.IpAddress), data)
-		if err != nil {
-			return common.ContextError(err)
-		}
-
-		err = insertRankedServerEntry(tx, serverEntry.IpAddress, 1)
+		err = serverEntries.Put([]byte(ipAddress), data)
 		if err != nil {
 			return common.ContextError(err)
 		}
 
-		NoticeInfo("updated server %s", serverEntry.IpAddress)
+		err = insertRankedServerEntry(tx, ipAddress, 1)
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		NoticeInfo("updated server %s", ipAddress)
 
 		return nil
 	})
@@ -287,13 +289,13 @@ func StoreServerEntry(serverEntry *protocol.ServerEntry, replaceIfExists bool) e
 // There is an independent transaction for each entry insert/update.
 func StoreServerEntries(
 	config *Config,
-	serverEntries []*protocol.ServerEntry,
+	serverEntries []protocol.ServerEntryFields,
 	replaceIfExists bool) error {
 
 	checkInitDataStore()
 
-	for _, serverEntry := range serverEntries {
-		err := StoreServerEntry(serverEntry, replaceIfExists)
+	for _, serverEntryFields := range serverEntries {
+		err := StoreServerEntry(serverEntryFields, replaceIfExists)
 		if err != nil {
 			return common.ContextError(err)
 		}
