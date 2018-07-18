@@ -84,9 +84,26 @@ var managedStartResult *C.char
 //     "error": <error message>
 //   }
 //
+// clientPlatform should be of the form OS_OSVersion_BundleIdentifier where both the OSVersion and BundleIdentifier 
+// fields are optional.
+//
+// Provided below are links to platform specific code which can be used to find some of the above fields:
+//   Android:
+//     - OSVersion: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L573
+//     - BundleIdentifier: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L575
+//   iOS:
+//     - OSVersion: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L612
+//     - BundleIdentifier: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L622
+//
+// Some examples of valid client platform strings are:
+//
+//   "Android_4.2.2_com.example.exampleApp"
+//   "iOS_11.4_com.example.exampleApp"
+//   "Windows"
+//
 // networkID should be not be blank and should follow the format specified by
 // https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter.
-func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64) *C.char {
+func Start(configJSON, embeddedServerEntryList, clientPlatform, networkID string, timeout int64) *C.char {
 
 	// Load provided config
 
@@ -101,8 +118,11 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 		config.NetworkID = networkID
 	}
 
-	// All config fields should be set before calling commit
+	// Set client platform
 
+	config.ClientPlatform = clientPlatform;
+
+	// All config fields should be set before calling commit
 	err = config.Commit()
 	if err != nil {
 		return startErrorJson(err)
