@@ -48,21 +48,29 @@ int main(int argc, char *argv[]) {
     // set server list
     GoString serverList = {};
 
-    // set timout
-    long long timeout = 60;
+    // set client platform
+    char * const os = "OSName"; // "Android", "iOS", "Windows", etc.
+    char * const os_version = "OSVersion"; // "4.0.4", "10.3", "10.0.10240", etc.
+    char * const bundle_identifier = "com.example.exampleClientLibraryApp";
+    char * test_client_platform = (char *)malloc(sizeof(char) * (strlen(os) + strlen(os_version) + strlen(bundle_identifier) + 4)); // 4 for 3 underscores and null terminating character
+
+    int n = sprintf(test_client_platform, "%s_%s_%s", os, os_version, bundle_identifier);
+    GoString client_platform = {test_client_platform, n};
 
     // set network ID
     char * const test_network_id = "TEST";
     GoString network_id = {test_network_id, strlen(test_network_id)};
 
+    // set timout
+    long long timeout = 60;
+
     // start will return once Psiphon connects or does not connect for timeout seconds
-    char *result = Start(psiphon_config, serverList, network_id, timeout);
-    Stop();
+    char *result = Start(psiphon_config, serverList, client_platform, network_id, timeout);
 
     // print results
     printf("Result: %s\n", result);
 
-    // The underlying memory of `result` is managed by PsiphonTunnel and will
-    // have been freed in Stop.
+    // The underlying memory of `result` is managed by PsiphonTunnel and is freed in Stop
+    Stop();
 }
 
