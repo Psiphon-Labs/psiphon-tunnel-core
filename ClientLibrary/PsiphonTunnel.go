@@ -85,7 +85,8 @@ var managedStartResult *C.char
 //   }
 //
 // clientPlatform should be of the form OS_OSVersion_BundleIdentifier where both the OSVersion and BundleIdentifier 
-// fields are optional.
+// fields are optional. If clientPlatform is set to an empty string the "ClientPlatform" field in the provided json
+// config will be used instead.
 //
 // Provided below are links to platform specific code which can be used to find some of the above fields:
 //   Android:
@@ -120,7 +121,9 @@ func Start(configJSON, embeddedServerEntryList, clientPlatform, networkID string
 
 	// Set client platform
 
-	config.ClientPlatform = clientPlatform;
+	if clientPlatform != "" {
+		 config.ClientPlatform = clientPlatform;
+	}
 
 	// All config fields should be set before calling commit
 	err = config.Commit()
