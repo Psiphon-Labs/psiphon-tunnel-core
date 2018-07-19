@@ -102,8 +102,14 @@ var managedStartResult *C.char
 //   "iOS_11.4_com.example.exampleApp"
 //   "Windows"
 //
-// networkID should be not be blank and should follow the format specified by
+// networkID must be a non-empty string and follow the format specified by
 // https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter.
+//
+// Provided below are links to platform specific code which can be used to generate valid network identifier strings:
+//   Android:
+//     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L371
+//   iOS:
+//     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L1105
 func Start(configJSON, embeddedServerEntryList, clientPlatform, networkID string, timeout int64) *C.char {
 
 	// Load provided config
