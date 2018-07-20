@@ -2525,7 +2525,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	if err != nil {
 
 		// Record a port forward failure
-		sshClient.updateQualityMetricsWithDialResult(true, resolveElapsedTime)
+		sshClient.updateQualityMetricsWithDialResult(false, resolveElapsedTime)
 
 		sshClient.rejectNewChannel(newChannel, fmt.Sprintf("LookupIP failed: %s", err))
 		return
