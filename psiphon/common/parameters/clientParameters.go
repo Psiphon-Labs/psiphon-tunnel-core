@@ -265,7 +265,7 @@ var defaultClientParameters = map[string]struct {
 	SSHKeepAlivePeriodMax:                  {value: 2 * time.Minute, minimum: 1 * time.Second},
 	SSHKeepAlivePeriodicTimeout:            {value: 30 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	SSHKeepAlivePeriodicInactivePeriod:     {value: 10 * time.Second, minimum: 1 * time.Second},
-	SSHKeepAliveProbeTimeout:               {value: 30 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
+	SSHKeepAliveProbeTimeout:               {value: 5 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	SSHKeepAliveProbeInactivePeriod:        {value: 10 * time.Second, minimum: 1 * time.Second},
 
 	HTTPProxyOriginServerTimeout:       {value: 15 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
