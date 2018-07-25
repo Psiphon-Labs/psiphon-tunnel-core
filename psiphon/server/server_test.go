@@ -610,10 +610,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
-	err = psiphon.InitDataStore(clientConfig)
+	err = psiphon.OpenDataStore(clientConfig)
 	if err != nil {
 		t.Fatalf("error initializing client datastore: %s", err)
 	}
+	defer psiphon.CloseDataStore()
+
 	psiphon.DeleteSLOKs()
 
 	controller, err := psiphon.NewController(clientConfig)

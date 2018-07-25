@@ -231,11 +231,12 @@ func main() {
 
 	// Initialize data store
 
-	err = psiphon.InitDataStore(config)
+	err = psiphon.OpenDataStore(config)
 	if err != nil {
 		psiphon.NoticeError("error initializing datastore: %s", err)
 		os.Exit(1)
 	}
+	defer psiphon.CloseDataStore()
 
 	// Handle optional embedded server list file parameter
 	// If specified, the embedded server list is loaded and stored. When there

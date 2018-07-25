@@ -132,10 +132,11 @@ func runMemoryTest(t *testing.T, testMode int) {
 		t.Fatalf("SetClientParameters failed: %s", err)
 	}
 
-	err = psiphon.InitDataStore(config)
+	err = psiphon.OpenDataStore(config)
 	if err != nil {
 		t.Fatalf("error initializing datastore: %s", err)
 	}
+	defer psiphon.CloseDataStore()
 
 	var controller *psiphon.Controller
 	var controllerCtx context.Context

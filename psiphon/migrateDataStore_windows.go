@@ -86,7 +86,6 @@ func prepareMigrationEntries(config *Config) []*protocol.ServerEntry {
 // and store an array of server entries (StoreServerEntries)
 // Failing to migrate entries, or delete the legacy file is never fatal
 func migrateEntries(config *Config, serverEntries []*protocol.ServerEntry, legacyDataStoreFilename string) {
-	checkInitDataStore()
 
 	err := StoreServerEntries(config, serverEntries, false)
 	if err != nil {

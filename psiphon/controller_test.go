@@ -594,10 +594,11 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	os.Remove(config.UpgradeDownloadFilename)
 	os.Remove(config.RemoteServerListDownloadFilename)
 
-	err = InitDataStore(config)
+	err = OpenDataStore(config)
 	if err != nil {
 		t.Fatalf("error initializing datastore: %s", err)
 	}
+	defer CloseDataStore()
 
 	serverEntryCount := CountServerEntries(config.UseUpstreamProxy(), "", nil)
 
