@@ -55,7 +55,6 @@ const (
 
 const (
 	DATA_STORE_FILENAME                     = "psiphon.boltdb"
-	LEGACY_DATA_STORE_FILENAME              = "psiphon.db"
 	DATA_STORE_LAST_CONNECTED_KEY           = "lastConnected"
 	DATA_STORE_LAST_SERVER_ENTRY_FILTER_KEY = "lastServerEntryFilter"
 	PERSISTENT_STAT_TYPE_REMOTE_SERVER_LIST = remoteServerListStatsBucket
@@ -80,11 +79,6 @@ func OpenDataStore(config *Config) error {
 	if existingDB != nil {
 		return common.ContextError(errors.New("db already open"))
 	}
-
-	// Need to gather the list of migratable server entries before
-	// initializing the boltdb store (as prepareMigrationEntries
-	// checks for the existence of the bolt db file)
-	migratableServerEntries := prepareMigrationEntries(config)
 
 	filename := filepath.Join(config.DataStoreDirectory, DATA_STORE_FILENAME)
 
@@ -173,14 +167,6 @@ func OpenDataStore(config *Config) error {
 	datastoreReferenceMutex.Lock()
 	datastoreDB = newDB
 	datastoreReferenceMutex.Unlock()
-
-	// The migrateServerEntries function requires the data store is
-	// initialized prior to execution so that migrated entries can be stored
-
-	if len(migratableServerEntries) > 0 {
-		migrateEntries(
-			config, migratableServerEntries, filepath.Join(config.DataStoreDirectory, LEGACY_DATA_STORE_FILENAME))
-	}
 
 	_ = resetAllPersistentStatsToUnreported()
 
