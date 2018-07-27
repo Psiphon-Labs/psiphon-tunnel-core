@@ -38,10 +38,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
 	socks "github.com/Psiphon-Labs/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/elazarl/goproxy"
 )
@@ -107,7 +105,6 @@ func TestUntunneledUpgradeDownload(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -125,7 +122,6 @@ func TestUntunneledResumableUpgradeDownload(t *testing.T) {
 			disruptNetwork:           true,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -143,7 +139,6 @@ func TestUntunneledUpgradeClientIsLatestVersion(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -161,7 +156,6 @@ func TestUntunneledResumableFetchRemoteServerList(t *testing.T) {
 			disruptNetwork:           true,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -179,33 +173,6 @@ func TestTunneledUpgradeClientIsLatestVersion(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
-		})
-}
-
-func TestImpairedProtocols(t *testing.T) {
-
-	// This test sets a tunnelPoolSize of 40 and runs
-	// the session for 1 minute with network disruption
-	// on. All 40 tunnels being disrupted every 10
-	// seconds (followed by ssh keep alive probe timeout)
-	// should be sufficient to trigger at least one
-	// impaired protocol classification.
-
-	controllerRun(t,
-		&controllerRunConfig{
-			expectNoServerEntries:    false,
-			protocol:                 "",
-			clientIsLatestVersion:    true,
-			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           40,
-			useUpstreamProxy:         false,
-			disruptNetwork:           true,
-			transformHostNames:       false,
-			useFragmentor:            false,
-			runDuration:              1 * time.Minute,
 		})
 }
 
@@ -223,7 +190,6 @@ func TestSSH(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -241,7 +207,6 @@ func TestObfuscatedSSH(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -259,7 +224,6 @@ func TestUnfrontedMeek(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -277,7 +241,6 @@ func TestUnfrontedMeekWithTransformer(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       true,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -295,7 +258,6 @@ func TestFrontedMeek(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -313,7 +275,6 @@ func TestFrontedMeekWithTransformer(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       true,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -331,7 +292,6 @@ func TestFrontedMeekHTTP(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -349,7 +309,6 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -367,7 +326,6 @@ func TestUnfrontedMeekHTTPSWithTransformer(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       true,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -385,7 +343,6 @@ func TestDisabledApi(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -403,7 +360,6 @@ func TestObfuscatedSSHWithUpstreamProxy(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -421,7 +377,6 @@ func TestUnfrontedMeekWithUpstreamProxy(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -439,7 +394,6 @@ func TestUnfrontedMeekHTTPSWithUpstreamProxy(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            false,
-			runDuration:              0,
 		})
 }
 
@@ -457,7 +411,6 @@ func TestObfuscatedSSHFragmentor(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            true,
-			runDuration:              0,
 		})
 }
 
@@ -475,7 +428,6 @@ func TestFrontedMeekFragmentor(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            true,
-			runDuration:              0,
 		})
 }
 
@@ -491,7 +443,6 @@ type controllerRunConfig struct {
 	disruptNetwork           bool
 	transformHostNames       bool
 	useFragmentor            bool
-	runDuration              time.Duration
 }
 
 func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
@@ -627,11 +578,6 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	var clientUpgradeDownloadedBytesCount int32
 	var remoteServerListDownloadedBytesCount int32
-	var impairedProtocolCount int32
-	var impairedProtocolClassification = struct {
-		sync.RWMutex
-		classification map[string]int
-	}{classification: make(map[string]int)}
 
 	SetNoticeWriter(NewNoticeReceiver(
 		func(notice []byte) {
@@ -708,47 +654,6 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 					default:
 					}
 				}
-
-			case "ImpairedProtocolClassification":
-
-				classification := payload["classification"].(map[string]interface{})
-
-				impairedProtocolClassification.Lock()
-				impairedProtocolClassification.classification = make(map[string]int)
-				for k, v := range classification {
-					count := int(v.(float64))
-					if count >= config.clientParameters.Get().Int(parameters.ImpairedProtocolClassificationThreshold) {
-						atomic.AddInt32(&impairedProtocolCount, 1)
-					}
-					impairedProtocolClassification.classification[k] = count
-				}
-				impairedProtocolClassification.Unlock()
-
-			case "ActiveTunnel":
-
-				serverProtocol := payload["protocol"].(string)
-
-				classification := make(map[string]int)
-				impairedProtocolClassification.RLock()
-				for k, v := range impairedProtocolClassification.classification {
-					classification[k] = v
-				}
-				impairedProtocolClassification.RUnlock()
-
-				count, ok := classification[serverProtocol]
-				if ok && count >= config.clientParameters.Get().Int(parameters.ImpairedProtocolClassificationThreshold) {
-
-					// TODO: Fix this test case. Use of TunnelPoolSize breaks this
-					// case, as many tunnel establishments are occurring in parallel,
-					// and it can happen that a protocol is classified as impaired
-					// while a tunnel with that protocol is established and set
-					// active.
-
-					// *not* t.Fatalf
-					t.Logf("unexpected tunnel using impaired protocol: %s, %+v",
-						serverProtocol, classification)
-				}
-
 			}
 		}))
 
@@ -827,36 +732,6 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 			if !runConfig.disruptNetwork {
 				fetchAndVerifyWebsite(t, httpProxyPort)
-			}
-
-			// Test: run for duration, periodically using the tunnel to
-			// ensure failed tunnel detection, and ultimately hitting
-			// impaired protocol checks.
-
-			startTime := monotime.Now()
-
-			for {
-
-				time.Sleep(1 * time.Second)
-				useTunnel(t, httpProxyPort)
-
-				if startTime.Add(runConfig.runDuration).Before(monotime.Now()) {
-					break
-				}
-			}
-
-			// Test: with disruptNetwork, impaired protocols should be exercised
-
-			if runConfig.runDuration > 0 && runConfig.disruptNetwork {
-				count := atomic.LoadInt32(&impairedProtocolCount)
-				if count <= 0 {
-					t.Fatalf("unexpected impaired protocol count: %d", count)
-				} else {
-					impairedProtocolClassification.RLock()
-					t.Logf("impaired protocol classification: %+v",
-						impairedProtocolClassification.classification)
-					impairedProtocolClassification.RUnlock()
-				}
 			}
 		}
 	}
@@ -1065,29 +940,6 @@ func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) error {
 	}
 
 	return nil
-}
-
-func useTunnel(t *testing.T, httpProxyPort int) {
-
-	// No action on errors as the tunnel is expected to fail sometimes
-
-	testUrl := "https://psiphon3.com"
-	roundTripTimeout := 1 * time.Second
-	proxyUrl, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", httpProxyPort))
-	if err != nil {
-		return
-	}
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyUrl),
-		},
-		Timeout: roundTripTimeout,
-	}
-	response, err := httpClient.Get(testUrl)
-	if err != nil {
-		return
-	}
-	response.Body.Close()
 }
 
 // Note: Valid values for disruptorMaxConnectionBytes depend on the production

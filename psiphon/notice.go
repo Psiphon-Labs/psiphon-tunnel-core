@@ -566,12 +566,6 @@ func NoticeSessionId(sessionId string) {
 		"sessionId", sessionId)
 }
 
-func NoticeImpairedProtocolClassification(impairedProtocolClassification map[string]int) {
-	singletonNoticeLogger.outputNotice(
-		"ImpairedProtocolClassification", noticeIsDiagnostic,
-		"classification", impairedProtocolClassification)
-}
-
 // NoticeUntunneled indicates than an address has been classified as untunneled and is being
 // accessed directly.
 //

@@ -142,8 +142,6 @@ const (
 	FetchUpgradeStalePeriod                    = "FetchUpgradeStalePeriod"
 	UpgradeDownloadURLs                        = "UpgradeDownloadURLs"
 	UpgradeDownloadClientVersionHeader         = "UpgradeDownloadClientVersionHeader"
-	ImpairedProtocolClassificationDuration     = "ImpairedProtocolClassificationDuration"
-	ImpairedProtocolClassificationThreshold    = "ImpairedProtocolClassificationThreshold"
 	TotalBytesTransferredNoticePeriod          = "TotalBytesTransferredNoticePeriod"
 	MeekDialDomainsOnly                        = "MeekDialDomainsOnly"
 	MeekLimitBufferSizes                       = "MeekLimitBufferSizes"
@@ -300,9 +298,6 @@ var defaultClientParameters = map[string]struct {
 	FetchUpgradeStalePeriod:            {value: 6 * time.Hour, minimum: 1 * time.Hour},
 	UpgradeDownloadURLs:                {value: DownloadURLs{}},
 	UpgradeDownloadClientVersionHeader: {value: ""},
-
-	ImpairedProtocolClassificationDuration:  {value: 2 * time.Minute, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
-	ImpairedProtocolClassificationThreshold: {value: 3, minimum: 1},
 
 	TotalBytesTransferredNoticePeriod: {value: 5 * time.Minute, minimum: 1 * time.Second},
 

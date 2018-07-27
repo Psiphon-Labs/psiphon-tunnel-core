@@ -532,14 +532,12 @@ var errNoProtocolSupported = errors.New("server does not support any required pr
 func selectProtocol(
 	config *Config,
 	serverEntry *protocol.ServerEntry,
-	impairedProtocols []string,
 	excludeIntensive bool,
 	usePriorityProtocol bool) (selectedProtocol string, err error) {
 
 	candidateProtocols := serverEntry.GetSupportedProtocols(
 		config.UseUpstreamProxy(),
 		config.clientParameters.Get().TunnelProtocols(parameters.LimitTunnelProtocols),
-		impairedProtocols,
 		excludeIntensive)
 	if len(candidateProtocols) == 0 {
 		return "", errNoProtocolSupported

@@ -139,7 +139,6 @@ func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 func (serverEntry *ServerEntry) GetSupportedProtocols(
 	useUpstreamProxy bool,
 	limitTunnelProtocols []string,
-	impairedTunnelProtocols []string,
 	excludeIntensive bool) []string {
 
 	supportedProtocols := make([]string, 0)
@@ -158,11 +157,6 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 			if common.Contains(DefaultDisabledTunnelProtocols, protocol) {
 				continue
 			}
-		}
-
-		if len(impairedTunnelProtocols) > 0 &&
-			common.Contains(impairedTunnelProtocols, protocol) {
-			continue
 		}
 
 		if excludeIntensive && TunnelProtocolIsResourceIntensive(protocol) {

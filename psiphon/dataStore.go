@@ -604,9 +604,9 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 		limitTunnelProtocols := config.clientParameters.Get().TunnelProtocols(parameters.LimitTunnelProtocols)
 		if len(limitTunnelProtocols) > 0 {
 			// At the ServerEntryIterator level, only limitTunnelProtocols is applied;
-			// impairedTunnelProtocols and excludeMeek are handled higher up.
+			// excludeIntensive is handled higher up.
 			if len(serverEntry.GetSupportedProtocols(
-				config.UseUpstreamProxy(), limitTunnelProtocols, nil, false)) == 0 {
+				config.UseUpstreamProxy(), limitTunnelProtocols, false)) == 0 {
 				return false, nil, common.ContextError(errors.New("TargetServerEntry does not support LimitTunnelProtocols"))
 			}
 		}
@@ -636,9 +636,7 @@ func (iterator *ServerEntryIterator) Reset() error {
 
 	// For diagnostics, it's useful to count the number of known server
 	// entries that satisfy both the egress region and tunnel protocol
-	// requirements. The tunnel protocol filter is not applied by the iterator
-	// as protocol filtering, including impaire protocol and exclude-meek
-	// logic, is all handled higher up.
+	// requirements (excluding excludeIntensive logic).
 
 	// TODO: for isTacticsServerEntryIterator, emit tactics candidate count.
 
@@ -850,14 +848,14 @@ func scanServerEntries(scanner func(*protocol.ServerEntry)) error {
 
 // CountServerEntries returns a count of stored servers for the
 // specified region and tunnel protocols.
-func CountServerEntries(useUpstreamProxy bool, region string, tunnelProtocols []string) int {
+func CountServerEntries(useUpstreamProxy bool, region string, limitTunnelProtocols []string) int {
 	count := 0
 	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 		if (region == "" || serverEntry.Region == region) &&
-			(len(tunnelProtocols) == 0 ||
-				// When CountServerEntries is called only limitTunnelProtocols is known;
-				// impairedTunnelProtocols and excludeMeek may not apply.
-				len(serverEntry.GetSupportedProtocols(useUpstreamProxy, tunnelProtocols, nil, false)) > 0) {
+			(len(limitTunnelProtocols) == 0 ||
+				// When CountServerEntries is called only limitTunnelProtocols
+				// is known; excludeIntensive may not apply.
+				len(serverEntry.GetSupportedProtocols(useUpstreamProxy, limitTunnelProtocols, false)) > 0) {
 			count += 1
 		}
 	})
@@ -870,40 +868,6 @@ func CountServerEntries(useUpstreamProxy bool, region string, tunnelProtocols []
 	return count
 }
 
-// CountNonImpairedProtocols returns the number of distinct tunnel
-// protocols supported by stored server entries, excluding the
-// specified impaired protocols.
-func CountNonImpairedProtocols(
-	region string,
-	limitTunnelProtocols, impairedProtocols []string) int {
-
-	distinctProtocols := make(map[string]bool)
-
-	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
-		if region == "" || serverEntry.Region == region {
-			for _, protocol := range protocol.SupportedTunnelProtocols {
-				if serverEntry.SupportsProtocol(protocol) {
-					if len(limitTunnelProtocols) == 0 ||
-						common.Contains(limitTunnelProtocols, protocol) {
-						distinctProtocols[protocol] = true
-					}
-				}
-			}
-		}
-	})
-
-	for _, protocol := range impairedProtocols {
-		delete(distinctProtocols, protocol)
-	}
-
-	if err != nil {
-		NoticeAlert("CountNonImpairedProtocols failed: %s", err)
-		return 0
-	}
-
-	return len(distinctProtocols)
-}
-
 // ReportAvailableRegions prints a notice with the available egress regions.
 func ReportAvailableRegions(config *Config) {
 
@@ -913,10 +877,10 @@ func ReportAvailableRegions(config *Config) {
 	regions := make(map[string]bool)
 	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 		if len(limitTunnelProtocols) == 0 ||
-			// When ReportAvailableRegions is called only limitTunnelProtocols is known;
-			// impairedTunnelProtocols and excludeMeek may not apply.
+			// When ReportAvailableRegions is called only limitTunnelProtocols
+			// is known; excludeIntensive may not apply.
 			len(serverEntry.GetSupportedProtocols(
-				config.UseUpstreamProxy(), limitTunnelProtocols, nil, false)) > 0 {
+				config.UseUpstreamProxy(), limitTunnelProtocols, false)) > 0 {
 
 			regions[serverEntry.Region] = true
 		}
