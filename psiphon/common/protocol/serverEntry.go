@@ -161,7 +161,7 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 		}
 
 		if len(impairedTunnelProtocols) > 0 &&
-			!common.Contains(impairedTunnelProtocols, protocol) {
+			common.Contains(impairedTunnelProtocols, protocol) {
 			continue
 		}
 
