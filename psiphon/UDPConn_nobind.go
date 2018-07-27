@@ -1,7 +1,7 @@
-// +build !android,!linux,!darwin
+// +build windows
 
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2018, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -22,29 +22,24 @@
 package psiphon
 
 import (
-	"context"
 	"errors"
 	"net"
+	"syscall"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
-// LookupIP resolves a hostname.
-func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, error) {
+func newUDPConn(domain int, config *DialConfig) (net.PacketConn, error) {
 
 	if config.DeviceBinder != nil {
-		return nil, common.ContextError(errors.New("LookupIP with DeviceBinder not supported on this platform"))
+		return nil, common.ContextError(errors.New("newUDPConn with DeviceBinder not supported on this platform"))
 	}
 
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return nil, common.ContextError(err)
+	network := "udp4"
+
+	if domain == syscall.AF_INET6 {
+		network = "udp6"
 	}
 
-	ips := make([]net.IP, len(addrs))
-	for i, addr := range addrs {
-		ips[i] = addr.IP
-	}
-
-	return ips, nil
+	return net.ListenUDP(network, nil)
 }

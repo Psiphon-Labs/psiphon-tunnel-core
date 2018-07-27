@@ -1,7 +1,7 @@
-// +build !android,!linux,!darwin
+// +build !windows
 
 /*
- * Copyright (c) 2014, Psiphon Inc.
+ * Copyright (c) 2018, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -22,29 +22,43 @@
 package psiphon
 
 import (
-	"context"
-	"errors"
+	"fmt"
 	"net"
+	"os"
+	"syscall"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
-// LookupIP resolves a hostname.
-func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, error) {
+func newUDPConn(domain int, config *DialConfig) (net.PacketConn, error) {
 
-	if config.DeviceBinder != nil {
-		return nil, common.ContextError(errors.New("LookupIP with DeviceBinder not supported on this platform"))
-	}
-
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	socketFD, err := syscall.Socket(domain, syscall.SOCK_DGRAM, 0)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
-	ips := make([]net.IP, len(addrs))
-	for i, addr := range addrs {
-		ips[i] = addr.IP
+	syscall.CloseOnExec(socketFD)
+
+	setAdditionalSocketOptions(socketFD)
+
+	if config.DeviceBinder != nil {
+		err := bindToDeviceCallWrapper(config.DeviceBinder, socketFD)
+		if err != nil {
+			syscall.Close(socketFD)
+			return nil, common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))
+		}
 	}
 
-	return ips, nil
+	// Convert the socket fd to a net.PacketConn
+	// This code block is from:
+	// https://github.com/golang/go/issues/6966
+
+	file := os.NewFile(uintptr(socketFD), "")
+	conn, err := net.FilePacketConn(file) // net.FilePackateConn() dups socketFD
+	file.Close()                          // file.Close() closes socketFD
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return conn, nil
 }
