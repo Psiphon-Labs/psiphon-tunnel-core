@@ -373,11 +373,19 @@ func NoticeUserLog(message string) {
 }
 
 // NoticeCandidateServers is how many possible servers are available for the selected region and protocols
-func NoticeCandidateServers(region string, protocols []string, count int) {
+func NoticeCandidateServers(
+	region string,
+	limitState *limitTunnelProtocolsState,
+	initialCount int,
+	count int) {
+
 	singletonNoticeLogger.outputNotice(
 		"CandidateServers", noticeIsDiagnostic,
 		"region", region,
-		"protocols", protocols,
+		"initialLimitTunnelProtocols", limitState.initialProtocols,
+		"initialLimitTunnelProtocolsCandidateCount", limitState.initialCandidateCount,
+		"limitTunnelProtocols", limitState.protocols,
+		"initialCount", initialCount,
 		"count", count)
 }
 

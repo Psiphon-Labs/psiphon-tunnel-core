@@ -213,7 +213,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	}
 	defer CloseDataStore()
 
-	if CountServerEntries(false, "", nil) > 0 {
+	if CountServerEntries() > 0 {
 		t.Fatalf("unexpected server entries")
 	}
 

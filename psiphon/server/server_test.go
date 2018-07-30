@@ -566,7 +566,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "DisableRemoteServerListFetcher" : true,
         "EstablishTunnelPausePeriodSeconds" : 1,
         "ConnectionWorkerPoolSize" : %d,
-        "TunnelProtocols" : ["%s"]
+        "LimitTunnelProtocols" : ["%s"]
         %s
     }`, numTunnels, runConfig.tunnelProtocol, jsonNetworkID)
 

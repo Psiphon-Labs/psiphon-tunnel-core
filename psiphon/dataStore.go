@@ -634,28 +634,6 @@ func (iterator *ServerEntryIterator) Reset() error {
 		return nil
 	}
 
-	// For diagnostics, it's useful to count the number of known server
-	// entries that satisfy both the egress region and tunnel protocol
-	// requirements (excluding excludeIntensive logic).
-
-	// TODO: for isTacticsServerEntryIterator, emit tactics candidate count.
-
-	if !iterator.isTacticsServerEntryIterator {
-		limitTunnelProtocols := iterator.config.clientParameters.Get().TunnelProtocols(
-			parameters.LimitTunnelProtocols)
-
-		count := CountServerEntries(
-			iterator.config.UseUpstreamProxy(), iterator.config.EgressRegion, limitTunnelProtocols)
-		NoticeCandidateServers(iterator.config.EgressRegion, limitTunnelProtocols, count)
-
-		// LimitTunnelProtocols may have changed since the last ReportAvailableRegions,
-		// and now there may be no servers with the required capabilities in the
-		// selected region. ReportAvailableRegions will signal this to the client.
-		if count == 0 {
-			ReportAvailableRegions(iterator.config)
-		}
-	}
-
 	// This query implements the Psiphon server candidate selection
 	// algorithm: the first TunnelPoolSize server candidates are in rank
 	// (priority) order, to favor previously successful servers; then the
@@ -846,18 +824,11 @@ func scanServerEntries(scanner func(*protocol.ServerEntry)) error {
 	return nil
 }
 
-// CountServerEntries returns a count of stored servers for the
-// specified region and tunnel protocols.
-func CountServerEntries(useUpstreamProxy bool, region string, limitTunnelProtocols []string) int {
+// CountServerEntries returns a count of stored server entries.
+func CountServerEntries() int {
 	count := 0
-	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
-		if (region == "" || serverEntry.Region == region) &&
-			(len(limitTunnelProtocols) == 0 ||
-				// When CountServerEntries is called only limitTunnelProtocols
-				// is known; excludeIntensive may not apply.
-				len(serverEntry.GetSupportedProtocols(useUpstreamProxy, limitTunnelProtocols, false)) > 0) {
-			count += 1
-		}
+	err := scanServerEntries(func(_ *protocol.ServerEntry) {
+		count += 1
 	})
 
 	if err != nil {
@@ -868,19 +839,51 @@ func CountServerEntries(useUpstreamProxy bool, region string, limitTunnelProtoco
 	return count
 }
 
-// ReportAvailableRegions prints a notice with the available egress regions.
-func ReportAvailableRegions(config *Config) {
+// CountServerEntriesWithLimits returns a count of stored server entries for
+// the specified region and tunnel protocol limits.
+func CountServerEntriesWithLimits(
+	useUpstreamProxy bool, region string, limitState *limitTunnelProtocolsState) (int, int) {
 
-	limitTunnelProtocols := config.clientParameters.Get().TunnelProtocols(
-		parameters.LimitTunnelProtocols)
+	// When CountServerEntriesWithLimits is called only
+	// limitTunnelProtocolState is fixed; excludeIntensive is transitory.
+	excludeIntensive := false
+
+	initialCount := 0
+	count := 0
+	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
+		if region == "" || serverEntry.Region == region {
+
+			if limitState.isInitialCandidate(excludeIntensive, serverEntry) {
+				initialCount += 1
+			}
+
+			if limitState.isCandidate(excludeIntensive, serverEntry) {
+				count += 1
+			}
+
+		}
+	})
+
+	if err != nil {
+		NoticeAlert("CountServerEntriesWithLimits failed: %s", err)
+		return 0, 0
+	}
+
+	return initialCount, count
+}
+
+// ReportAvailableRegions prints a notice with the available egress regions.
+func ReportAvailableRegions(config *Config, limitState *limitTunnelProtocolsState) {
+
+	// When ReportAvailableRegions is called only
+	// limitTunnelProtocolState is fixed; excludeIntensive is transitory.
+	excludeIntensive := false
 
 	regions := make(map[string]bool)
 	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
-		if len(limitTunnelProtocols) == 0 ||
-			// When ReportAvailableRegions is called only limitTunnelProtocols
-			// is known; excludeIntensive may not apply.
-			len(serverEntry.GetSupportedProtocols(
-				config.UseUpstreamProxy(), limitTunnelProtocols, false)) > 0 {
+
+		if limitState.isInitialCandidate(excludeIntensive, serverEntry) ||
+			limitState.isCandidate(excludeIntensive, serverEntry) {
 
 			regions[serverEntry.Region] = true
 		}

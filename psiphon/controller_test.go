@@ -463,7 +463,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	modifyConfig["UpgradeDownloadFilename"] = filepath.Join(testDataDirName, "upgrade")
 
 	if runConfig.protocol != "" {
-		modifyConfig["TunnelProtocols"] = protocol.TunnelProtocols{runConfig.protocol}
+		modifyConfig["LimitTunnelProtocols"] = protocol.TunnelProtocols{runConfig.protocol}
 	}
 
 	// Override client retry throttle values to speed up automated
@@ -551,7 +551,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	}
 	defer CloseDataStore()
 
-	serverEntryCount := CountServerEntries(config.UseUpstreamProxy(), "", nil)
+	serverEntryCount := CountServerEntries()
 
 	if runConfig.expectNoServerEntries && serverEntryCount > 0 {
 		// TODO: replace expectNoServerEntries with resetServerEntries

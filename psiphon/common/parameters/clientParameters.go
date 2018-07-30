@@ -85,6 +85,9 @@ const (
 	PrioritizeTunnelProtocolsProbability       = "PrioritizeTunnelProtocolsProbability"
 	PrioritizeTunnelProtocols                  = "PrioritizeTunnelProtocols"
 	PrioritizeTunnelProtocolsCandidateCount    = "PrioritizeTunnelProtocolsCandidateCount"
+	InitialLimitTunnelProtocolsProbability     = "InitialLimitTunnelProtocolsProbability"
+	InitialLimitTunnelProtocols                = "InitialLimitTunnelProtocols"
+	InitialLimitTunnelProtocolsCandidateCount  = "InitialLimitTunnelProtocolsCandidateCount"
 	LimitTunnelProtocolsProbability            = "LimitTunnelProtocolsProbability"
 	LimitTunnelProtocols                       = "LimitTunnelProtocols"
 	LimitTLSProfilesProbability                = "LimitTLSProfilesProbability"
@@ -209,16 +212,18 @@ var defaultClientParameters = map[string]struct {
 	TunnelPortForwardDialTimeout:             {value: 10 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	TunnelRateLimits:                         {value: common.RateLimits{}},
 
-	// PrioritizeTunnelProtocolsCandidateCount should be set to at least
-	// ConnectionWorkerPoolSize in order to use only priotitized protocols in
-	// the first establishment round. Even then, this will only happen if the
-	// client has sufficient candidates supporting the prioritized protocols.
-
+	// PrioritizeTunnelProtocols parameters are obsoleted by InitialLimitTunnelProtocols.
+	// TODO: remove once no longer required for older clients.
 	PrioritizeTunnelProtocolsProbability:    {value: 1.0, minimum: 0.0},
 	PrioritizeTunnelProtocols:               {value: protocol.TunnelProtocols{}},
 	PrioritizeTunnelProtocolsCandidateCount: {value: 10, minimum: 0},
-	LimitTunnelProtocolsProbability:         {value: 1.0, minimum: 0.0},
-	LimitTunnelProtocols:                    {value: protocol.TunnelProtocols{}},
+
+	InitialLimitTunnelProtocolsProbability:    {value: 1.0, minimum: 0.0},
+	InitialLimitTunnelProtocols:               {value: protocol.TunnelProtocols{}},
+	InitialLimitTunnelProtocolsCandidateCount: {value: 0, minimum: 0},
+
+	LimitTunnelProtocolsProbability: {value: 1.0, minimum: 0.0},
+	LimitTunnelProtocols:            {value: protocol.TunnelProtocols{}},
 
 	LimitTLSProfilesProbability: {value: 1.0, minimum: 0.0},
 	LimitTLSProfiles:            {value: protocol.TLSProfiles{}},
