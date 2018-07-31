@@ -950,13 +950,13 @@ func (context *commonLogContext) Debug(args ...interface{}) {
 }
 
 func (context *commonLogContext) Info(args ...interface{}) {
-	context.outputNotice("Info", args)
+	context.outputNotice("Info", args...)
 }
 
 func (context *commonLogContext) Warning(args ...interface{}) {
-	context.outputNotice("Alert", args)
+	context.outputNotice("Alert", args...)
 }
 
 func (context *commonLogContext) Error(args ...interface{}) {
-	context.outputNotice("Error", args)
+	context.outputNotice("Error", args...)
 }

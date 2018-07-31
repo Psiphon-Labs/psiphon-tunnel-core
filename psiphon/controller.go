@@ -643,7 +643,7 @@ loop:
 					// calls registerTunnel -- and after checking numTunnels; so failure is not
 					// expected.
 					if !controller.registerTunnel(connectedTunnel) {
-						NoticeAlert("failed to register %s: %s", connectedTunnel.serverEntry.IpAddress)
+						NoticeAlert("failed to register %s: %s", connectedTunnel.serverEntry.IpAddress, err)
 						discardTunnel = true
 					}
 				}
