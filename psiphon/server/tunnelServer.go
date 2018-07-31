@@ -1456,7 +1456,7 @@ func (sshClient *sshClient) runTunnel(
 			if remainingDialTimeout <= 0 {
 				sshClient.updateQualityMetricsWithRejectedDialingLimit()
 				sshClient.rejectNewChannel(
-					newPortForward.newChannel, ssh.Prohibited, "TCP port forward timed out in queue")
+					newPortForward.newChannel, "TCP port forward timed out in queue")
 				continue
 			}
 
@@ -1488,7 +1488,7 @@ func (sshClient *sshClient) runTunnel(
 
 				sshClient.updateQualityMetricsWithRejectedDialingLimit()
 				sshClient.rejectNewChannel(
-					newPortForward.newChannel, ssh.Prohibited, "TCP port forward timed out before dialing")
+					newPortForward.newChannel, "TCP port forward timed out before dialing")
 				continue
 			}
 
@@ -1525,8 +1525,7 @@ func (sshClient *sshClient) runTunnel(
 		if newChannel.ChannelType() == protocol.PACKET_TUNNEL_CHANNEL_TYPE {
 
 			if !sshClient.sshServer.support.Config.RunPacketTunnel {
-				sshClient.rejectNewChannel(
-					newChannel, ssh.Prohibited, "unsupported packet tunnel channel type")
+				sshClient.rejectNewChannel(newChannel, "unsupported packet tunnel channel type")
 				continue
 			}
 
@@ -1592,7 +1591,7 @@ func (sshClient *sshClient) runTunnel(
 		}
 
 		if newChannel.ChannelType() != "direct-tcpip" {
-			sshClient.rejectNewChannel(newChannel, ssh.Prohibited, "unknown or unsupported channel type")
+			sshClient.rejectNewChannel(newChannel, "unknown or unsupported channel type")
 			continue
 		}
 
@@ -1606,7 +1605,7 @@ func (sshClient *sshClient) runTunnel(
 
 		err := ssh.Unmarshal(newChannel.ExtraData(), &directTcpipExtraData)
 		if err != nil {
-			sshClient.rejectNewChannel(newChannel, ssh.Prohibited, "invalid extra data")
+			sshClient.rejectNewChannel(newChannel, "invalid extra data")
 			continue
 		}
 
@@ -1643,7 +1642,7 @@ func (sshClient *sshClient) runTunnel(
 			case newTCPPortForwards <- tcpPortForward:
 			default:
 				sshClient.updateQualityMetricsWithRejectedDialingLimit()
-				sshClient.rejectNewChannel(newChannel, ssh.Prohibited, "TCP port forward dial queue full")
+				sshClient.rejectNewChannel(newChannel, "TCP port forward dial queue full")
 			}
 		}
 	}
@@ -1839,7 +1838,14 @@ func (sshClient *sshClient) sendOSLRequest() error {
 	return nil
 }
 
-func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, reason ssh.RejectionReason, logMessage string) {
+func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessage string) {
+
+	// We always return the reject reason "Prohibited":
+	// - Traffic rules and connection limits may prohibit the connection.
+	// - External firewall rules may prohibit the connection, and this is not currently
+	//   distinguishable from other failure modes.
+	// - We limit the failure information revealed to the client.
+	reason := ssh.Prohibited
 
 	// Note: Debug level, as logMessage may contain user traffic destination address information
 	log.WithContextFields(
@@ -1849,7 +1855,7 @@ func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, reason s
 			"rejectReason": reason.String(),
 		}).Debug("reject new channel")
 
-	// Note: logMessage is internal, for logging only; just the RejectionReason is sent to the client
+	// Note: logMessage is internal, for logging only; just the reject reason is sent to the client.
 	newChannel.Reject(reason, reason.String())
 }
 
@@ -2519,18 +2525,16 @@ func (sshClient *sshClient) handleTCPChannel(
 	if err != nil {
 
 		// Record a port forward failure
-		sshClient.updateQualityMetricsWithDialResult(true, resolveElapsedTime)
+		sshClient.updateQualityMetricsWithDialResult(false, resolveElapsedTime)
 
-		sshClient.rejectNewChannel(
-			newChannel, ssh.ConnectionFailed, fmt.Sprintf("LookupIP failed: %s", err))
+		sshClient.rejectNewChannel(newChannel, fmt.Sprintf("LookupIP failed: %s", err))
 		return
 	}
 
 	remainingDialTimeout -= resolveElapsedTime
 
 	if remainingDialTimeout <= 0 {
-		sshClient.rejectNewChannel(
-			newChannel, ssh.Prohibited, "TCP port forward timed out resolving")
+		sshClient.rejectNewChannel(newChannel, "TCP port forward timed out resolving")
 		return
 	}
 
@@ -2545,8 +2549,7 @@ func (sshClient *sshClient) handleTCPChannel(
 
 		// Note: not recording a port forward failure in this case
 
-		sshClient.rejectNewChannel(
-			newChannel, ssh.Prohibited, "port forward not permitted")
+		sshClient.rejectNewChannel(newChannel, "port forward not permitted")
 		return
 	}
 
@@ -2568,8 +2571,7 @@ func (sshClient *sshClient) handleTCPChannel(
 		// Monitor for low resource error conditions
 		sshClient.sshServer.monitorPortForwardDialError(err)
 
-		sshClient.rejectNewChannel(
-			newChannel, ssh.ConnectionFailed, fmt.Sprintf("DialTimeout failed: %s", err))
+		sshClient.rejectNewChannel(newChannel, fmt.Sprintf("DialTimeout failed: %s", err))
 		return
 	}
 

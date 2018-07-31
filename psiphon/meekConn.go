@@ -232,7 +232,7 @@ func DialMeek(
 		// classify Psiphon traffic on some CDNs but not others) may throttle non-MiM CDNs so that our server
 		// selection always chooses tunnels to the MiM CDN (without any server cert verification, we won't
 		// exclusively connect to non-MiM CDNs); then the adversary kills the underlying TCP connection after
-		// some short period. This is mitigated by the "impaired" protocol classification mechanism.
+		// some short period. This is partially mitigated by tactics mechanisms.
 
 		scheme = "https"
 
@@ -249,6 +249,7 @@ func DialMeek(
 			SkipVerify:                    true,
 			TLSProfile:                    meekConfig.TLSProfile,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
+			ClientSessionCache:            utls.NewLRUClientSessionCache(0),
 		}
 
 		if meekConfig.UseObfuscatedSessionTickets {

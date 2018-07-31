@@ -218,10 +218,11 @@ func attemptConnectionsWithUserAgent(
 		t.Fatalf("error committing configuration file: %s", err)
 	}
 
-	err = InitDataStore(clientConfig)
+	err = OpenDataStore(clientConfig)
 	if err != nil {
 		t.Fatalf("error initializing client datastore: %s", err)
 	}
+	defer CloseDataStore()
 
 	SetNoticeWriter(NewNoticeReceiver(
 		func(notice []byte) {

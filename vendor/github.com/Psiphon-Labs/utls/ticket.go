@@ -13,7 +13,15 @@ import (
 	"crypto/subtle"
 	"errors"
 	"io"
+
+	// [Psiphon]
+	"crypto/rand"
+	"math/big"
+	math_rand "math/rand"
 )
+
+// [Psiphon]
+var obfuscateSessionTickets = true
 
 // sessionState contains the information that is serialized into a session
 // ticket in order to later resume a connection.
@@ -25,10 +33,6 @@ type sessionState struct {
 	// usedOldKey is true if the ticket from which this session came from
 	// was encrypted with an older key and thus should be refreshed.
 	usedOldKey bool
-
-	// [Psiphon]
-	// Padding for obfuscated session tickets
-	paddingSize int
 }
 
 func (s *sessionState) equal(i interface{}) bool {
@@ -63,8 +67,20 @@ func (s *sessionState) marshal() []byte {
 	}
 
 	// [Psiphon]
-	// Add padding for obfuscated session tickets
-	length += s.paddingSize
+	// Pad golang TLS session ticket to a more typical size.
+	if obfuscateSessionTickets {
+		paddedSizes := []int{160, 176, 192, 208, 218, 224, 240, 255}
+		initialSize := 120
+		randomInt, err := rand.Int(rand.Reader, big.NewInt(int64(len(paddedSizes))))
+		index := 0
+		if err == nil {
+			index = int(randomInt.Int64())
+		} else {
+			index = math_rand.Intn(len(paddedSizes))
+		}
+		paddingSize := paddedSizes[index] - initialSize
+		length += paddingSize
+	}
 
 	ret := make([]byte, length)
 	x := ret

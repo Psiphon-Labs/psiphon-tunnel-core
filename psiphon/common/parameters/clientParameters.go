@@ -85,6 +85,9 @@ const (
 	PrioritizeTunnelProtocolsProbability       = "PrioritizeTunnelProtocolsProbability"
 	PrioritizeTunnelProtocols                  = "PrioritizeTunnelProtocols"
 	PrioritizeTunnelProtocolsCandidateCount    = "PrioritizeTunnelProtocolsCandidateCount"
+	InitialLimitTunnelProtocolsProbability     = "InitialLimitTunnelProtocolsProbability"
+	InitialLimitTunnelProtocols                = "InitialLimitTunnelProtocols"
+	InitialLimitTunnelProtocolsCandidateCount  = "InitialLimitTunnelProtocolsCandidateCount"
 	LimitTunnelProtocolsProbability            = "LimitTunnelProtocolsProbability"
 	LimitTunnelProtocols                       = "LimitTunnelProtocols"
 	LimitTLSProfilesProbability                = "LimitTLSProfilesProbability"
@@ -142,8 +145,6 @@ const (
 	FetchUpgradeStalePeriod                    = "FetchUpgradeStalePeriod"
 	UpgradeDownloadURLs                        = "UpgradeDownloadURLs"
 	UpgradeDownloadClientVersionHeader         = "UpgradeDownloadClientVersionHeader"
-	ImpairedProtocolClassificationDuration     = "ImpairedProtocolClassificationDuration"
-	ImpairedProtocolClassificationThreshold    = "ImpairedProtocolClassificationThreshold"
 	TotalBytesTransferredNoticePeriod          = "TotalBytesTransferredNoticePeriod"
 	MeekDialDomainsOnly                        = "MeekDialDomainsOnly"
 	MeekLimitBufferSizes                       = "MeekLimitBufferSizes"
@@ -211,16 +212,18 @@ var defaultClientParameters = map[string]struct {
 	TunnelPortForwardDialTimeout:             {value: 10 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	TunnelRateLimits:                         {value: common.RateLimits{}},
 
-	// PrioritizeTunnelProtocolsCandidateCount should be set to at least
-	// ConnectionWorkerPoolSize in order to use only priotitized protocols in
-	// the first establishment round. Even then, this will only happen if the
-	// client has sufficient candidates supporting the prioritized protocols.
-
+	// PrioritizeTunnelProtocols parameters are obsoleted by InitialLimitTunnelProtocols.
+	// TODO: remove once no longer required for older clients.
 	PrioritizeTunnelProtocolsProbability:    {value: 1.0, minimum: 0.0},
 	PrioritizeTunnelProtocols:               {value: protocol.TunnelProtocols{}},
 	PrioritizeTunnelProtocolsCandidateCount: {value: 10, minimum: 0},
-	LimitTunnelProtocolsProbability:         {value: 1.0, minimum: 0.0},
-	LimitTunnelProtocols:                    {value: protocol.TunnelProtocols{}},
+
+	InitialLimitTunnelProtocolsProbability:    {value: 1.0, minimum: 0.0},
+	InitialLimitTunnelProtocols:               {value: protocol.TunnelProtocols{}},
+	InitialLimitTunnelProtocolsCandidateCount: {value: 0, minimum: 0},
+
+	LimitTunnelProtocolsProbability: {value: 1.0, minimum: 0.0},
+	LimitTunnelProtocols:            {value: protocol.TunnelProtocols{}},
 
 	LimitTLSProfilesProbability: {value: 1.0, minimum: 0.0},
 	LimitTLSProfiles:            {value: protocol.TLSProfiles{}},
@@ -265,7 +268,7 @@ var defaultClientParameters = map[string]struct {
 	SSHKeepAlivePeriodMax:                  {value: 2 * time.Minute, minimum: 1 * time.Second},
 	SSHKeepAlivePeriodicTimeout:            {value: 30 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	SSHKeepAlivePeriodicInactivePeriod:     {value: 10 * time.Second, minimum: 1 * time.Second},
-	SSHKeepAliveProbeTimeout:               {value: 30 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
+	SSHKeepAliveProbeTimeout:               {value: 5 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	SSHKeepAliveProbeInactivePeriod:        {value: 10 * time.Second, minimum: 1 * time.Second},
 
 	HTTPProxyOriginServerTimeout:       {value: 15 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
@@ -300,9 +303,6 @@ var defaultClientParameters = map[string]struct {
 	FetchUpgradeStalePeriod:            {value: 6 * time.Hour, minimum: 1 * time.Hour},
 	UpgradeDownloadURLs:                {value: DownloadURLs{}},
 	UpgradeDownloadClientVersionHeader: {value: ""},
-
-	ImpairedProtocolClassificationDuration:  {value: 2 * time.Minute, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
-	ImpairedProtocolClassificationThreshold: {value: 3, minimum: 1},
 
 	TotalBytesTransferredNoticePeriod: {value: 5 * time.Minute, minimum: 1 * time.Second},
 

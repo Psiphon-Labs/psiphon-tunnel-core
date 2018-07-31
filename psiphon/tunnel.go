@@ -526,59 +526,6 @@ func (conn *TunneledConn) Close() error {
 	return conn.Conn.Close()
 }
 
-var errNoProtocolSupported = errors.New("server does not support any required protocol(s)")
-
-// selectProtocol is a helper that picks the tunnel protocol
-func selectProtocol(
-	config *Config,
-	serverEntry *protocol.ServerEntry,
-	impairedProtocols []string,
-	excludeIntensive bool,
-	usePriorityProtocol bool) (selectedProtocol string, err error) {
-
-	candidateProtocols := serverEntry.GetSupportedProtocols(
-		config.UseUpstreamProxy(),
-		config.clientParameters.Get().TunnelProtocols(parameters.LimitTunnelProtocols),
-		impairedProtocols,
-		excludeIntensive)
-	if len(candidateProtocols) == 0 {
-		return "", errNoProtocolSupported
-	}
-
-	// Select a prioritized protocols when indicated. If no prioritized
-	// protocol is available, proceed with selecting any other protocol.
-
-	if usePriorityProtocol {
-		prioritizeProtocols := config.clientParameters.Get().TunnelProtocols(
-			parameters.PrioritizeTunnelProtocols)
-		if len(prioritizeProtocols) > 0 {
-			protocols := make([]string, 0)
-			for _, protocol := range candidateProtocols {
-				if common.Contains(prioritizeProtocols, protocol) {
-					protocols = append(protocols, protocol)
-				}
-			}
-			if len(protocols) > 0 {
-				candidateProtocols = protocols
-			}
-		}
-	}
-
-	// Pick at random from the supported protocols. This ensures that we'll
-	// eventually try all possible protocols. Depending on network
-	// configuration, it may be the case that some protocol is only available
-	// through multi-capability servers, and a simpler ranked preference of
-	// protocols could lead to that protocol never being selected.
-
-	index, err := common.MakeSecureRandomInt(len(candidateProtocols))
-	if err != nil {
-		return "", common.ContextError(err)
-	}
-	selectedProtocol = candidateProtocols[index]
-
-	return selectedProtocol, nil
-}
-
 // selectFrontingParameters is a helper which selects/generates meek fronting
 // parameters where the server entry provides multiple options or patterns.
 func selectFrontingParameters(

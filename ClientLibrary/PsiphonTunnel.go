@@ -84,7 +84,7 @@ var managedStartResult *C.char
 //     "error": <error message>
 //   }
 //
-// clientPlatform should be of the form OS_OSVersion_BundleIdentifier where both the OSVersion and BundleIdentifier 
+// clientPlatform should be of the form OS_OSVersion_BundleIdentifier where both the OSVersion and BundleIdentifier
 // fields are optional. If clientPlatform is set to an empty string the "ClientPlatform" field in the provided json
 // config will be used instead.
 //
@@ -128,7 +128,7 @@ func Start(configJSON, embeddedServerEntryList, clientPlatform, networkID string
 	// Set client platform
 
 	if clientPlatform != "" {
-		 config.ClientPlatform = clientPlatform;
+		config.ClientPlatform = clientPlatform
 	}
 
 	// All config fields should be set before calling commit
@@ -178,7 +178,7 @@ func Start(configJSON, embeddedServerEntryList, clientPlatform, networkID string
 
 	// Initialize data store
 
-	err = psiphon.InitDataStore(config)
+	err = psiphon.OpenDataStore(config)
 	if err != nil {
 		return startErrorJson(err)
 	}
@@ -276,6 +276,8 @@ func Stop() {
 	}
 
 	tunnel.controllerWaitGroup.Wait()
+
+	psiphon.CloseDataStore()
 }
 
 // secondsBeforeNow returns the delta seconds of the current time subtract startTime.
