@@ -35,7 +35,6 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
@@ -275,7 +274,7 @@ func main() {
 			}
 		}()
 
-		if psiphon.CountServerEntries(config.UseUpstreamProxy(), config.EgressRegion, nil) == 0 {
+		if psiphon.CountServerEntries() == 0 {
 			embeddedServerListWaitGroup.Wait()
 		} else {
 			defer embeddedServerListWaitGroup.Wait()
