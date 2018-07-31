@@ -59,6 +59,7 @@ type Controller struct {
 	isEstablishing                          bool
 	establishLimitTunnelProtocolsState      *limitTunnelProtocolsState
 	concurrentEstablishTunnelsMutex         sync.Mutex
+	establishConnectTunnelCount             int
 	concurrentEstablishTunnels              int
 	concurrentIntensiveEstablishTunnels     int
 	peakConcurrentEstablishTunnels          int
@@ -985,14 +986,14 @@ func (l *limitTunnelProtocolsState) isCandidate(
 		len(serverEntry.GetSupportedProtocols(l.useUpstreamProxy, l.protocols, excludeIntensive)) > 0
 }
 
-var errNoProtocolSupported = errors.New("server does not support any required protocol(s)")
+var errNoProtocolSupported = errors.New("server does not support any required protocol")
 
 func (l *limitTunnelProtocolsState) selectProtocol(
-	candidateIndex int, excludeIntensive bool, serverEntry *protocol.ServerEntry) (string, error) {
+	connectTunnelCount int, excludeIntensive bool, serverEntry *protocol.ServerEntry) (string, error) {
 
 	limitProtocols := l.protocols
 
-	if len(l.initialProtocols) > 0 && l.initialCandidateCount > candidateIndex {
+	if len(l.initialProtocols) > 0 && l.initialCandidateCount > connectTunnelCount {
 		limitProtocols = l.initialProtocols
 	}
 
@@ -1024,7 +1025,6 @@ func (l *limitTunnelProtocolsState) selectProtocol(
 type candidateServerEntry struct {
 	serverEntry                *protocol.ServerEntry
 	isServerAffinityCandidate  bool
-	candidateIndex             int
 	adjustedEstablishStartTime monotime.Time
 }
 
@@ -1038,6 +1038,7 @@ func (controller *Controller) startEstablishing() {
 	NoticeInfo("start establishing")
 
 	controller.concurrentEstablishTunnelsMutex.Lock()
+	controller.establishConnectTunnelCount = 0
 	controller.concurrentEstablishTunnels = 0
 	controller.concurrentIntensiveEstablishTunnels = 0
 	controller.peakConcurrentEstablishTunnels = 0
@@ -1200,6 +1201,7 @@ func (controller *Controller) stopEstablishing() {
 	controller.concurrentEstablishTunnelsMutex.Lock()
 	peakConcurrent := controller.peakConcurrentEstablishTunnels
 	peakConcurrentIntensive := controller.peakConcurrentIntensiveEstablishTunnels
+	controller.establishConnectTunnelCount = 0
 	controller.concurrentEstablishTunnels = 0
 	controller.concurrentIntensiveEstablishTunnels = 0
 	controller.peakConcurrentEstablishTunnels = 0
@@ -1446,8 +1448,6 @@ func (controller *Controller) establishCandidateGenerator() {
 		close(controller.serverAffinityDoneBroadcast)
 	}
 
-	candidateIndex := 0
-
 loop:
 	// Repeat until stopped
 	for {
@@ -1505,7 +1505,6 @@ loop:
 			candidate := &candidateServerEntry{
 				serverEntry:                serverEntry,
 				isServerAffinityCandidate:  isServerAffinityCandidate,
-				candidateIndex:             candidateIndex,
 				adjustedEstablishStartTime: adjustedEstablishStartTime,
 			}
 
@@ -1517,8 +1516,6 @@ loop:
 
 			// TODO: here we could generate multiple candidates from the
 			// server entry when there are many MeekFrontingAddresses.
-
-			candidateIndex++
 
 			select {
 			case controller.candidateServerEntries <- candidate:
@@ -1655,10 +1652,6 @@ loop:
 			continue
 		}
 
-		// ConnectTunnel will allocate significant memory, so first attempt to
-		// reclaim as much as possible.
-		defaultGarbageCollection()
-
 		// Select the tunnel protocol. The selection will be made at random from
 		// protocols supported by the server entry, optionally limited by
 		// LimitTunnelProtocols.
@@ -1667,36 +1660,41 @@ loop:
 		// workers, and at the limit, do not select resource intensive
 		// protocols since otherwise the candidate must be skipped.
 		//
-		// If at the limit and unabled to select a non-meek protocol, skip the
+		// If at the limit and unabled to select a non-intensive protocol, skip the
 		// candidate entirely and move on to the next. Since candidates are shuffled
-		// it's probable that the next candidate is not meek. In this case, a
+		// it's likely that the next candidate is not intensive. In this case, a
 		// StaggerConnectionWorkersMilliseconds delay may still be incurred.
 
 		limitIntensiveConnectionWorkers := controller.config.clientParameters.Get().Int(
 			parameters.LimitIntensiveConnectionWorkers)
 
-		excludeIntensive := false
 		controller.concurrentEstablishTunnelsMutex.Lock()
+
+		excludeIntensive := false
 		if limitIntensiveConnectionWorkers > 0 &&
-			controller.concurrentIntensiveEstablishTunnels >=
-				limitIntensiveConnectionWorkers {
+			controller.concurrentIntensiveEstablishTunnels >= limitIntensiveConnectionWorkers {
 			excludeIntensive = true
 		}
-		controller.concurrentEstablishTunnelsMutex.Unlock()
 
 		selectedProtocol, err := controller.establishLimitTunnelProtocolsState.selectProtocol(
-			candidateServerEntry.candidateIndex,
+			controller.establishConnectTunnelCount,
 			excludeIntensive,
 			candidateServerEntry.serverEntry)
+		if err != nil {
 
-		if err == errNoProtocolSupported {
+			controller.concurrentEstablishTunnelsMutex.Unlock()
+
 			// selectProtocol returns errNoProtocolSupported when the server
 			// does not support any protocol that remains after applying the
-			// LimitTunnelProtocols parameter and the excludeMeek flag.
-			// Skip this candidate.
+			// LimitTunnelProtocols parameter and the excludeIntensive flag.
+			// Silently skip the candidate in this case.
+			if err != errNoProtocolSupported {
+				NoticeInfo("failed to select protocol for %s: %s",
+					candidateServerEntry.serverEntry.IpAddress, err)
+			}
 
-			// Unblock other candidates immediately when
-			// server affinity candidate is skipped.
+			// Unblock other candidates immediately when server affinity
+			// candidate is skipped.
 			if candidateServerEntry.isServerAffinityCandidate {
 				close(controller.serverAffinityDoneBroadcast)
 			}
@@ -1704,50 +1702,44 @@ loop:
 			continue
 		}
 
-		var tunnel *Tunnel
-		if err == nil {
+		// Increment establishConnectTunnelCount only after selectProtocol has
+		// succeeded to ensure InitialLimitTunnelProtocolsCandidateCount
+		// candidates use InitialLimitTunnelProtocols.
+		controller.establishConnectTunnelCount += 1
 
-			isIntensive := protocol.TunnelProtocolIsResourceIntensive(selectedProtocol)
+		isIntensive := protocol.TunnelProtocolIsResourceIntensive(selectedProtocol)
 
-			controller.concurrentEstablishTunnelsMutex.Lock()
-			if isIntensive {
-
-				// Recheck the limit now that we know we're selecting the resource
-				// intensive protocol and adjusting concurrentIntensiveEstablishTunnels.
-				if limitIntensiveConnectionWorkers > 0 &&
-					controller.concurrentIntensiveEstablishTunnels >=
-						limitIntensiveConnectionWorkers {
-
-					// Skip this candidate.
-					controller.concurrentEstablishTunnelsMutex.Unlock()
-					continue
-				}
-				controller.concurrentIntensiveEstablishTunnels += 1
-				if controller.concurrentIntensiveEstablishTunnels > controller.peakConcurrentIntensiveEstablishTunnels {
-					controller.peakConcurrentIntensiveEstablishTunnels = controller.concurrentIntensiveEstablishTunnels
-				}
+		if isIntensive {
+			controller.concurrentIntensiveEstablishTunnels += 1
+			if controller.concurrentIntensiveEstablishTunnels > controller.peakConcurrentIntensiveEstablishTunnels {
+				controller.peakConcurrentIntensiveEstablishTunnels = controller.concurrentIntensiveEstablishTunnels
 			}
-			controller.concurrentEstablishTunnels += 1
-			if controller.concurrentEstablishTunnels > controller.peakConcurrentEstablishTunnels {
-				controller.peakConcurrentEstablishTunnels = controller.concurrentEstablishTunnels
-			}
-			controller.concurrentEstablishTunnelsMutex.Unlock()
-
-			tunnel, err = ConnectTunnel(
-				controller.establishCtx,
-				controller.config,
-				controller.sessionId,
-				candidateServerEntry.serverEntry,
-				selectedProtocol,
-				candidateServerEntry.adjustedEstablishStartTime)
-
-			controller.concurrentEstablishTunnelsMutex.Lock()
-			if isIntensive {
-				controller.concurrentIntensiveEstablishTunnels -= 1
-			}
-			controller.concurrentEstablishTunnels -= 1
-			controller.concurrentEstablishTunnelsMutex.Unlock()
 		}
+		controller.concurrentEstablishTunnels += 1
+		if controller.concurrentEstablishTunnels > controller.peakConcurrentEstablishTunnels {
+			controller.peakConcurrentEstablishTunnels = controller.concurrentEstablishTunnels
+		}
+
+		controller.concurrentEstablishTunnelsMutex.Unlock()
+
+		// ConnectTunnel will allocate significant memory, so first attempt to
+		// reclaim as much as possible.
+		defaultGarbageCollection()
+
+		tunnel, err := ConnectTunnel(
+			controller.establishCtx,
+			controller.config,
+			controller.sessionId,
+			candidateServerEntry.serverEntry,
+			selectedProtocol,
+			candidateServerEntry.adjustedEstablishStartTime)
+
+		controller.concurrentEstablishTunnelsMutex.Lock()
+		if isIntensive {
+			controller.concurrentIntensiveEstablishTunnels -= 1
+		}
+		controller.concurrentEstablishTunnels -= 1
+		controller.concurrentEstablishTunnelsMutex.Unlock()
 
 		// Periodically emit memory metrics during the establishment cycle.
 		if !controller.isStopEstablishing() {
@@ -1766,8 +1758,8 @@ loop:
 
 		if err != nil {
 
-			// Unblock other candidates immediately when
-			// server affinity candidate fails.
+			// Unblock other candidates immediately when server affinity
+			// candidate fails.
 			if candidateServerEntry.isServerAffinityCandidate {
 				close(controller.serverAffinityDoneBroadcast)
 			}
@@ -1778,7 +1770,9 @@ loop:
 				break loop
 			}
 
-			NoticeInfo("failed to connect to %s: %s", candidateServerEntry.serverEntry.IpAddress, err)
+			NoticeInfo("failed to connect to %s: %s",
+				candidateServerEntry.serverEntry.IpAddress, err)
+
 			continue
 		}
 
