@@ -289,6 +289,11 @@ func TestMeekResiliency(t *testing.T) {
 	go func() {
 		defer serverWaitGroup.Done()
 		err := server.Run()
+		select {
+		case <-stopBroadcast:
+			return
+		default:
+		}
 		if err != nil {
 			t.Fatalf("MeekServer.Run failed: %s", err)
 		}
@@ -444,6 +449,11 @@ func TestMeekRateLimiter(t *testing.T) {
 	go func() {
 		defer serverWaitGroup.Done()
 		err := server.Run()
+		select {
+		case <-stopBroadcast:
+			return
+		default:
+		}
 		if err != nil {
 			t.Fatalf("MeekServer.Run failed: %s", err)
 		}

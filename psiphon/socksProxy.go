@@ -22,6 +22,7 @@ package psiphon
 import (
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 
 	socks "github.com/Psiphon-Labs/goptlib"
@@ -83,20 +84,36 @@ func (proxy *SocksProxy) Close() {
 func (proxy *SocksProxy) socksConnectionHandler(localConn *socks.SocksConn) (err error) {
 	defer localConn.Close()
 	defer proxy.openConns.Remove(localConn)
+
 	proxy.openConns.Add(localConn)
+
 	// Using downstreamConn so localConn.Close() will be called when remoteConn.Close() is called.
 	// This ensures that the downstream client (e.g., web browser) doesn't keep waiting on the
 	// open connection for data which will never arrive.
 	remoteConn, err := proxy.tunneler.Dial(localConn.Req.Target, false, localConn)
+
 	if err != nil {
+		reason := byte(socks.SocksRepGeneralFailure)
+
+		// "ssh: rejected" is the prefix of ssh.OpenChannelError
+		// TODO: retain error type and check for ssh.OpenChannelError
+		if strings.Contains(err.Error(), "ssh: rejected") {
+			reason = byte(socks.SocksRepConnectionRefused)
+		}
+
+		_ = localConn.RejectReason(reason)
 		return common.ContextError(err)
 	}
+
 	defer remoteConn.Close()
+
 	err = localConn.Grant(&net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0})
 	if err != nil {
 		return common.ContextError(err)
 	}
+
 	LocalProxyRelay(_SOCKS_PROXY_TYPE, localConn, remoteConn)
+
 	return nil
 }
 

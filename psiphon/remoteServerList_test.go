@@ -205,15 +205,15 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	// mock seeding SLOKs
 	//
 
-	singleton = dataStore{}
 	os.Remove(filepath.Join(testDataDirName, DATA_STORE_FILENAME))
 
-	err = InitDataStore(&Config{DataStoreDirectory: testDataDirName})
+	err = OpenDataStore(&Config{DataStoreDirectory: testDataDirName})
 	if err != nil {
 		t.Fatalf("error initializing client datastore: %s", err)
 	}
+	defer CloseDataStore()
 
-	if CountServerEntries(false, "", nil) > 0 {
+	if CountServerEntries() > 0 {
 		t.Fatalf("unexpected server entries")
 	}
 

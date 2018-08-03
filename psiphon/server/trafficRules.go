@@ -588,8 +588,8 @@ func (set *TrafficRulesSet) GetTrafficRules(
 	}
 
 	if *trafficRules.RateLimits.UnthrottleFirstTunnelOnly && !isFirstTunnelInSession {
-		*trafficRules.RateLimits.ReadUnthrottledBytes = 0
-		*trafficRules.RateLimits.WriteUnthrottledBytes = 0
+		trafficRules.RateLimits.ReadUnthrottledBytes = new(int64)
+		trafficRules.RateLimits.WriteUnthrottledBytes = new(int64)
 	}
 
 	log.WithContextFields(LogFields{"trafficRules": trafficRules}).Debug("selected traffic rules")

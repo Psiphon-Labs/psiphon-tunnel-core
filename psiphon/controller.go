@@ -57,7 +57,9 @@ type Controller struct {
 	nextTunnel                              int
 	startedConnectedReporter                bool
 	isEstablishing                          bool
+	establishLimitTunnelProtocolsState      *limitTunnelProtocolsState
 	concurrentEstablishTunnelsMutex         sync.Mutex
+	establishConnectTunnelCount             int
 	concurrentEstablishTunnels              int
 	concurrentIntensiveEstablishTunnels     int
 	peakConcurrentEstablishTunnels          int
@@ -71,19 +73,10 @@ type Controller struct {
 	signalFetchCommonRemoteServerList       chan struct{}
 	signalFetchObfuscatedServerLists        chan struct{}
 	signalDownloadUpgrade                   chan string
-	impairedProtocolClassification          map[string]int
 	signalReportConnected                   chan struct{}
 	serverAffinityDoneBroadcast             chan struct{}
 	packetTunnelClient                      *tun.Client
 	packetTunnelTransport                   *PacketTunnelTransport
-}
-
-type candidateServerEntry struct {
-	serverEntry                *protocol.ServerEntry
-	isServerAffinityCandidate  bool
-	usePriorityProtocol        bool
-	impairedProtocols          []string
-	adjustedEstablishStartTime monotime.Time
 }
 
 // NewController initializes a new controller.
@@ -115,14 +108,13 @@ func NewController(config *Config) (controller *Controller, err error) {
 		runWaitGroup: new(sync.WaitGroup),
 		// connectedTunnels and failedTunnels buffer sizes are large enough to
 		// receive full pools of tunnels without blocking. Senders should not block.
-		connectedTunnels:               make(chan *Tunnel, config.TunnelPoolSize),
-		failedTunnels:                  make(chan *Tunnel, config.TunnelPoolSize),
-		tunnels:                        make([]*Tunnel, 0),
-		establishedOnce:                false,
-		startedConnectedReporter:       false,
-		isEstablishing:                 false,
-		untunneledDialConfig:           untunneledDialConfig,
-		impairedProtocolClassification: make(map[string]int),
+		connectedTunnels:         make(chan *Tunnel, config.TunnelPoolSize),
+		failedTunnels:            make(chan *Tunnel, config.TunnelPoolSize),
+		tunnels:                  make([]*Tunnel, 0),
+		establishedOnce:          false,
+		startedConnectedReporter: false,
+		isEstablishing:           false,
+		untunneledDialConfig:     untunneledDialConfig,
 		// TODO: Add a buffer of 1 so we don't miss a signal while receiver is
 		// starting? Trade-off is potential back-to-back fetch remotes. As-is,
 		// establish will eventually signal another fetch remote.
@@ -592,8 +584,6 @@ loop:
 			NoticeAlert("tunnel failed: %s", failedTunnel.serverEntry.IpAddress)
 			controller.terminateTunnel(failedTunnel)
 
-			controller.classifyImpairedProtocol(failedTunnel)
-
 			// Clear the reference to this tunnel before calling startEstablishing,
 			// which will invoke a garbage collection.
 			failedTunnel = nil
@@ -603,19 +593,6 @@ loop:
 			controller.startEstablishing()
 
 		case connectedTunnel := <-controller.connectedTunnels:
-
-			if controller.isImpairedProtocol(connectedTunnel.protocol) {
-
-				// Protocol was classified as impaired while this tunnel established.
-				// This is most likely to occur with TunnelPoolSize > 0. We log the
-				// event but take no action. Discarding the tunnel would break the
-				// impaired logic unless we did that (a) only if there are other
-				// unimpaired protocols; (b) only during the first iteration of the
-				// ESTABLISH_TUNNEL_WORK_TIME loop. By not discarding here, a true
-				// impaired protocol may require an extra reconnect.
-
-				NoticeAlert("connected tunnel with impaired protocol: %s", connectedTunnel.protocol)
-			}
 
 			// Tunnel establishment has two phases: connection and activation.
 			//
@@ -659,13 +636,6 @@ loop:
 				err := connectedTunnel.Activate(controller.runCtx, controller)
 
 				if err != nil {
-
-					// Assume the Activate failed due to a broken tunnel connection,
-					// currently the most likely case, and classify as impaired, as in
-					// the failed tunnel case above.
-					// TODO: distinguish between network and other errors
-					controller.classifyImpairedProtocol(connectedTunnel)
-
 					NoticeAlert("failed to activate %s: %s", connectedTunnel.serverEntry.IpAddress, err)
 					discardTunnel = true
 				} else {
@@ -673,7 +643,7 @@ loop:
 					// calls registerTunnel -- and after checking numTunnels; so failure is not
 					// expected.
 					if !controller.registerTunnel(connectedTunnel) {
-						NoticeAlert("failed to register %s: %s", connectedTunnel.serverEntry.IpAddress)
+						NoticeAlert("failed to register %s: %s", connectedTunnel.serverEntry.IpAddress, err)
 						discardTunnel = true
 					}
 				}
@@ -778,79 +748,6 @@ loop:
 	}
 
 	NoticeInfo("exiting run tunnels")
-}
-
-// classifyImpairedProtocol tracks "impaired" protocol classifications for failed
-// tunnels. A protocol is classified as impaired if a tunnel using that protocol
-// fails, repeatedly, shortly after the start of the connection. During tunnel
-// establishment, impaired protocols are briefly skipped.
-//
-// One purpose of this measure is to defend against an attack where the adversary,
-// for example, tags an OSSH TCP connection as an "unidentified" protocol; allows
-// it to connect; but then kills the underlying TCP connection after a short time.
-// Since OSSH has less latency than other protocols that may bypass an "unidentified"
-// filter, these other protocols might never be selected for use.
-//
-// Concurrency note: only the runTunnels() goroutine may call classifyImpairedProtocol
-func (controller *Controller) classifyImpairedProtocol(failedTunnel *Tunnel) {
-
-	// If the tunnel failed while activating, its establishedTime will be 0.
-
-	duration := controller.config.clientParameters.Get().Duration(
-		parameters.ImpairedProtocolClassificationDuration)
-
-	if failedTunnel.establishedTime == 0 ||
-		failedTunnel.establishedTime.Add(duration).After(monotime.Now()) {
-		controller.impairedProtocolClassification[failedTunnel.protocol] += 1
-	} else {
-		controller.impairedProtocolClassification[failedTunnel.protocol] = 0
-	}
-
-	// Reset classification once all known protocols are classified as impaired, as
-	// there is now no way to proceed with only unimpaired protocols. The network
-	// situation (or attack) resulting in classification may not be protocol-specific.
-
-	if CountNonImpairedProtocols(
-		controller.config.EgressRegion,
-		controller.config.clientParameters.Get().TunnelProtocols(
-			parameters.LimitTunnelProtocols),
-		controller.getImpairedProtocols()) == 0 {
-
-		controller.impairedProtocolClassification = make(map[string]int)
-	}
-}
-
-// getImpairedProtocols returns a list of protocols that have sufficient
-// classifications to be considered impaired protocols.
-//
-// Concurrency note: only the runTunnels() goroutine may call getImpairedProtocols
-func (controller *Controller) getImpairedProtocols() []string {
-
-	NoticeImpairedProtocolClassification(controller.impairedProtocolClassification)
-
-	threshold := controller.config.clientParameters.Get().Int(
-		parameters.ImpairedProtocolClassificationThreshold)
-
-	impairedProtocols := make([]string, 0)
-	for protocol, count := range controller.impairedProtocolClassification {
-		if count >= threshold {
-			impairedProtocols = append(impairedProtocols, protocol)
-		}
-	}
-	return impairedProtocols
-}
-
-// isImpairedProtocol checks if the specified protocol is classified as impaired.
-//
-// Concurrency note: only the runTunnels() goroutine may call isImpairedProtocol
-func (controller *Controller) isImpairedProtocol(protocol string) bool {
-
-	threshold := controller.config.clientParameters.Get().Int(
-		parameters.ImpairedProtocolClassificationThreshold)
-
-	count, ok := controller.impairedProtocolClassification[protocol]
-
-	return ok && count >= threshold
 }
 
 // SignalSeededNewSLOK implements the TunnelOwner interface. This function
@@ -1068,6 +965,69 @@ func (controller *Controller) DirectDial(remoteAddr string) (conn net.Conn, err 
 	return DialTCP(controller.runCtx, remoteAddr, controller.untunneledDialConfig)
 }
 
+type limitTunnelProtocolsState struct {
+	useUpstreamProxy      bool
+	initialProtocols      protocol.TunnelProtocols
+	initialCandidateCount int
+	protocols             protocol.TunnelProtocols
+}
+
+func (l *limitTunnelProtocolsState) isInitialCandidate(
+	excludeIntensive bool, serverEntry *protocol.ServerEntry) bool {
+
+	return len(l.initialProtocols) > 0 && l.initialCandidateCount > 0 &&
+		len(serverEntry.GetSupportedProtocols(l.useUpstreamProxy, l.initialProtocols, excludeIntensive)) > 0
+}
+
+func (l *limitTunnelProtocolsState) isCandidate(
+	excludeIntensive bool, serverEntry *protocol.ServerEntry) bool {
+
+	return len(l.protocols) == 0 ||
+		len(serverEntry.GetSupportedProtocols(l.useUpstreamProxy, l.protocols, excludeIntensive)) > 0
+}
+
+var errNoProtocolSupported = errors.New("server does not support any required protocol")
+
+func (l *limitTunnelProtocolsState) selectProtocol(
+	connectTunnelCount int, excludeIntensive bool, serverEntry *protocol.ServerEntry) (string, error) {
+
+	limitProtocols := l.protocols
+
+	if len(l.initialProtocols) > 0 && l.initialCandidateCount > connectTunnelCount {
+		limitProtocols = l.initialProtocols
+	}
+
+	candidateProtocols := serverEntry.GetSupportedProtocols(
+		l.useUpstreamProxy,
+		limitProtocols,
+		excludeIntensive)
+
+	if len(candidateProtocols) == 0 {
+		return "", errNoProtocolSupported
+	}
+
+	// Pick at random from the supported protocols. This ensures that we'll
+	// eventually try all possible protocols. Depending on network
+	// configuration, it may be the case that some protocol is only available
+	// through multi-capability servers, and a simpler ranked preference of
+	// protocols could lead to that protocol never being selected.
+
+	index, err := common.MakeSecureRandomInt(len(candidateProtocols))
+	if err != nil {
+		return "", common.ContextError(err)
+	}
+	selectedProtocol := candidateProtocols[index]
+
+	return selectedProtocol, nil
+
+}
+
+type candidateServerEntry struct {
+	serverEntry                *protocol.ServerEntry
+	isServerAffinityCandidate  bool
+	adjustedEstablishStartTime monotime.Time
+}
+
 // startEstablishing creates a pool of worker goroutines which will
 // attempt to establish tunnels to candidate servers. The candidates
 // are generated by another goroutine.
@@ -1078,6 +1038,7 @@ func (controller *Controller) startEstablishing() {
 	NoticeInfo("start establishing")
 
 	controller.concurrentEstablishTunnelsMutex.Lock()
+	controller.establishConnectTunnelCount = 0
 	controller.concurrentEstablishTunnels = 0
 	controller.concurrentIntensiveEstablishTunnels = 0
 	controller.peakConcurrentEstablishTunnels = 0
@@ -1118,10 +1079,10 @@ func (controller *Controller) startEstablishing() {
 	controller.serverAffinityDoneBroadcast = make(chan struct{})
 
 	controller.establishWaitGroup.Add(1)
-	go controller.launchEstablishing(controller.getImpairedProtocols())
+	go controller.launchEstablishing()
 }
 
-func (controller *Controller) launchEstablishing(impairedProtocols []string) {
+func (controller *Controller) launchEstablishing() {
 
 	defer controller.establishWaitGroup.Done()
 
@@ -1172,31 +1133,49 @@ func (controller *Controller) launchEstablishing(impairedProtocols []string) {
 		}
 	}
 
-	// Unconditionally report available egress regions. After a fresh install,
-	// the outer client may not have a list of regions to display, so we
-	// always report here. Other events that trigger ReportAvailableRegions,
-	// are not guaranteed to occur.
-	//
-	// This report is delayed until after tactics are likely to be applied, as
-	// tactics can impact the list of available regions; this avoids a
-	// ReportAvailableRegions reporting too many regions, followed shortly by
-	// a ReportAvailableRegions reporting fewer regions. That sequence could
-	// cause issues in the outer client UI.
+	// LimitTunnelProtocols and ConnectionWorkerPoolSize may be set by
+	// tactics.
 
-	ReportAvailableRegions(controller.config)
+	// Initial- and LimitTunnelProtocols are set once per establishment, for
+	// consistent application of related probabilities (applied by
+	// ClientParametersSnapshot.TunnelProtocols). The
+	// establishLimitTunnelProtocolsState field must be read-only after this
+	// point, allowing concurrent reads by establishment workers.
 
-	// The ConnectionWorkerPoolSize may be set by tactics.
+	p := controller.config.clientParameters.Get()
 
-	size := controller.config.clientParameters.Get().Int(
+	controller.establishLimitTunnelProtocolsState = &limitTunnelProtocolsState{
+		useUpstreamProxy:      controller.config.UseUpstreamProxy(),
+		initialProtocols:      p.TunnelProtocols(parameters.InitialLimitTunnelProtocols),
+		initialCandidateCount: p.Int(parameters.InitialLimitTunnelProtocolsCandidateCount),
+		protocols:             p.TunnelProtocols(parameters.LimitTunnelProtocols),
+	}
+
+	workerPoolSize := controller.config.clientParameters.Get().Int(
 		parameters.ConnectionWorkerPoolSize)
 
-	for i := 0; i < size; i++ {
+	p = nil
+
+	// Report available egress regions. After a fresh install, the outer
+	// client may not have a list of regions to display; and
+	// LimitTunnelProtocols may reduce the number of available regions.
+	//
+	// This report is delayed until after tactics are likely to be applied;
+	// this avoids a ReportAvailableRegions reporting too many regions,
+	// followed shortly by a ReportAvailableRegions reporting fewer regions.
+	// That sequence could cause issues in the outer client UI.
+
+	ReportAvailableRegions(
+		controller.config,
+		controller.establishLimitTunnelProtocolsState)
+
+	for i := 0; i < workerPoolSize; i++ {
 		controller.establishWaitGroup.Add(1)
 		go controller.establishTunnelWorker()
 	}
 
 	controller.establishWaitGroup.Add(1)
-	go controller.establishCandidateGenerator(impairedProtocols)
+	go controller.establishCandidateGenerator()
 }
 
 // stopEstablishing signals the establish goroutines to stop and waits
@@ -1222,6 +1201,7 @@ func (controller *Controller) stopEstablishing() {
 	controller.concurrentEstablishTunnelsMutex.Lock()
 	peakConcurrent := controller.peakConcurrentEstablishTunnels
 	peakConcurrentIntensive := controller.peakConcurrentIntensiveEstablishTunnels
+	controller.establishConnectTunnelCount = 0
 	controller.concurrentEstablishTunnels = 0
 	controller.concurrentIntensiveEstablishTunnels = 0
 	controller.peakConcurrentEstablishTunnels = 0
@@ -1436,7 +1416,7 @@ func (controller *Controller) doFetchTactics(
 // establishCandidateGenerator populates the candidate queue with server entries
 // from the data store. Server entries are iterated in rank order, so that promoted
 // servers with higher rank are priority candidates.
-func (controller *Controller) establishCandidateGenerator(impairedProtocols []string) {
+func (controller *Controller) establishCandidateGenerator() {
 	defer controller.establishWaitGroup.Done()
 	defer close(controller.candidateServerEntries)
 
@@ -1468,11 +1448,9 @@ func (controller *Controller) establishCandidateGenerator(impairedProtocols []st
 		close(controller.serverAffinityDoneBroadcast)
 	}
 
-	candidateCount := 0
-
 loop:
 	// Repeat until stopped
-	for i := 0; ; i++ {
+	for {
 
 		networkWaitStartTime := monotime.Now()
 
@@ -1483,6 +1461,22 @@ loop:
 		}
 
 		networkWaitDuration += monotime.Since(networkWaitStartTime)
+
+		// For diagnostics, emits counts of the number of known server
+		// entries that satisfy both the egress region and tunnel protocol
+		// requirements (excluding excludeIntensive logic).
+		// Counts may change during establishment due to remote server
+		// list fetches, etc.
+
+		initialCount, count := CountServerEntriesWithLimits(
+			controller.config.UseUpstreamProxy(),
+			controller.config.EgressRegion,
+			controller.establishLimitTunnelProtocolsState)
+		NoticeCandidateServers(
+			controller.config.EgressRegion,
+			controller.establishLimitTunnelProtocolsState,
+			initialCount,
+			count)
 
 		// Send each iterator server entry to the establish workers
 		startTime := monotime.Now()
@@ -1503,27 +1497,6 @@ loop:
 				continue
 			}
 
-			// Use a prioritized tunnel protocol for the first
-			// PrioritizeTunnelProtocolsCandidateCount candidates.
-			// This facility can be used to favor otherwise slower
-			// protocols.
-
-			prioritizeCandidateCount := controller.config.clientParameters.Get().Int(
-				parameters.PrioritizeTunnelProtocolsCandidateCount)
-			usePriorityProtocol := candidateCount < prioritizeCandidateCount
-
-			// Disable impaired protocols. This is only done for the
-			// first iteration of the EstablishTunnelWorkTime
-			// loop since (a) one iteration should be sufficient to
-			// evade the attack; (b) there's a good chance of false
-			// positives (such as short tunnel durations due to network
-			// hopping on a mobile device).
-
-			var candidateImpairedProtocols []string
-			if i == 0 {
-				candidateImpairedProtocols = impairedProtocols
-			}
-
 			// adjustedEstablishStartTime is establishStartTime shifted
 			// to exclude time spent waiting for network connectivity.
 
@@ -1532,8 +1505,6 @@ loop:
 			candidate := &candidateServerEntry{
 				serverEntry:                serverEntry,
 				isServerAffinityCandidate:  isServerAffinityCandidate,
-				usePriorityProtocol:        usePriorityProtocol,
-				impairedProtocols:          candidateImpairedProtocols,
 				adjustedEstablishStartTime: adjustedEstablishStartTime,
 			}
 
@@ -1545,8 +1516,6 @@ loop:
 
 			// TODO: here we could generate multiple candidates from the
 			// server entry when there are many MeekFrontingAddresses.
-
-			candidateCount++
 
 			select {
 			case controller.candidateServerEntries <- candidate:
@@ -1683,10 +1652,6 @@ loop:
 			continue
 		}
 
-		// ConnectTunnel will allocate significant memory, so first attempt to
-		// reclaim as much as possible.
-		defaultGarbageCollection()
-
 		// Select the tunnel protocol. The selection will be made at random from
 		// protocols supported by the server entry, optionally limited by
 		// LimitTunnelProtocols.
@@ -1695,39 +1660,41 @@ loop:
 		// workers, and at the limit, do not select resource intensive
 		// protocols since otherwise the candidate must be skipped.
 		//
-		// If at the limit and unabled to select a non-meek protocol, skip the
+		// If at the limit and unabled to select a non-intensive protocol, skip the
 		// candidate entirely and move on to the next. Since candidates are shuffled
-		// it's probable that the next candidate is not meek. In this case, a
+		// it's likely that the next candidate is not intensive. In this case, a
 		// StaggerConnectionWorkersMilliseconds delay may still be incurred.
 
 		limitIntensiveConnectionWorkers := controller.config.clientParameters.Get().Int(
 			parameters.LimitIntensiveConnectionWorkers)
 
-		excludeIntensive := false
 		controller.concurrentEstablishTunnelsMutex.Lock()
+
+		excludeIntensive := false
 		if limitIntensiveConnectionWorkers > 0 &&
-			controller.concurrentIntensiveEstablishTunnels >=
-				limitIntensiveConnectionWorkers {
+			controller.concurrentIntensiveEstablishTunnels >= limitIntensiveConnectionWorkers {
 			excludeIntensive = true
 		}
-		controller.concurrentEstablishTunnelsMutex.Unlock()
 
-		selectedProtocol, err := selectProtocol(
-			controller.config,
-			candidateServerEntry.serverEntry,
-			candidateServerEntry.impairedProtocols,
+		selectedProtocol, err := controller.establishLimitTunnelProtocolsState.selectProtocol(
+			controller.establishConnectTunnelCount,
 			excludeIntensive,
-			candidateServerEntry.usePriorityProtocol)
+			candidateServerEntry.serverEntry)
+		if err != nil {
 
-		if err == errNoProtocolSupported {
+			controller.concurrentEstablishTunnelsMutex.Unlock()
+
 			// selectProtocol returns errNoProtocolSupported when the server
 			// does not support any protocol that remains after applying the
-			// LimitTunnelProtocols parameter, the impaired protocol filter,
-			// and the excludeMeek flag.
-			// Skip this candidate.
+			// LimitTunnelProtocols parameter and the excludeIntensive flag.
+			// Silently skip the candidate in this case.
+			if err != errNoProtocolSupported {
+				NoticeInfo("failed to select protocol for %s: %s",
+					candidateServerEntry.serverEntry.IpAddress, err)
+			}
 
-			// Unblock other candidates immediately when
-			// server affinity candidate is skipped.
+			// Unblock other candidates immediately when server affinity
+			// candidate is skipped.
 			if candidateServerEntry.isServerAffinityCandidate {
 				close(controller.serverAffinityDoneBroadcast)
 			}
@@ -1735,50 +1702,44 @@ loop:
 			continue
 		}
 
-		var tunnel *Tunnel
-		if err == nil {
+		// Increment establishConnectTunnelCount only after selectProtocol has
+		// succeeded to ensure InitialLimitTunnelProtocolsCandidateCount
+		// candidates use InitialLimitTunnelProtocols.
+		controller.establishConnectTunnelCount += 1
 
-			isIntensive := protocol.TunnelProtocolIsResourceIntensive(selectedProtocol)
+		isIntensive := protocol.TunnelProtocolIsResourceIntensive(selectedProtocol)
 
-			controller.concurrentEstablishTunnelsMutex.Lock()
-			if isIntensive {
-
-				// Recheck the limit now that we know we're selecting the resource
-				// intensive protocol and adjusting concurrentIntensiveEstablishTunnels.
-				if limitIntensiveConnectionWorkers > 0 &&
-					controller.concurrentIntensiveEstablishTunnels >=
-						limitIntensiveConnectionWorkers {
-
-					// Skip this candidate.
-					controller.concurrentEstablishTunnelsMutex.Unlock()
-					continue
-				}
-				controller.concurrentIntensiveEstablishTunnels += 1
-				if controller.concurrentIntensiveEstablishTunnels > controller.peakConcurrentIntensiveEstablishTunnels {
-					controller.peakConcurrentIntensiveEstablishTunnels = controller.concurrentIntensiveEstablishTunnels
-				}
+		if isIntensive {
+			controller.concurrentIntensiveEstablishTunnels += 1
+			if controller.concurrentIntensiveEstablishTunnels > controller.peakConcurrentIntensiveEstablishTunnels {
+				controller.peakConcurrentIntensiveEstablishTunnels = controller.concurrentIntensiveEstablishTunnels
 			}
-			controller.concurrentEstablishTunnels += 1
-			if controller.concurrentEstablishTunnels > controller.peakConcurrentEstablishTunnels {
-				controller.peakConcurrentEstablishTunnels = controller.concurrentEstablishTunnels
-			}
-			controller.concurrentEstablishTunnelsMutex.Unlock()
-
-			tunnel, err = ConnectTunnel(
-				controller.establishCtx,
-				controller.config,
-				controller.sessionId,
-				candidateServerEntry.serverEntry,
-				selectedProtocol,
-				candidateServerEntry.adjustedEstablishStartTime)
-
-			controller.concurrentEstablishTunnelsMutex.Lock()
-			if isIntensive {
-				controller.concurrentIntensiveEstablishTunnels -= 1
-			}
-			controller.concurrentEstablishTunnels -= 1
-			controller.concurrentEstablishTunnelsMutex.Unlock()
 		}
+		controller.concurrentEstablishTunnels += 1
+		if controller.concurrentEstablishTunnels > controller.peakConcurrentEstablishTunnels {
+			controller.peakConcurrentEstablishTunnels = controller.concurrentEstablishTunnels
+		}
+
+		controller.concurrentEstablishTunnelsMutex.Unlock()
+
+		// ConnectTunnel will allocate significant memory, so first attempt to
+		// reclaim as much as possible.
+		defaultGarbageCollection()
+
+		tunnel, err := ConnectTunnel(
+			controller.establishCtx,
+			controller.config,
+			controller.sessionId,
+			candidateServerEntry.serverEntry,
+			selectedProtocol,
+			candidateServerEntry.adjustedEstablishStartTime)
+
+		controller.concurrentEstablishTunnelsMutex.Lock()
+		if isIntensive {
+			controller.concurrentIntensiveEstablishTunnels -= 1
+		}
+		controller.concurrentEstablishTunnels -= 1
+		controller.concurrentEstablishTunnelsMutex.Unlock()
 
 		// Periodically emit memory metrics during the establishment cycle.
 		if !controller.isStopEstablishing() {
@@ -1797,8 +1758,8 @@ loop:
 
 		if err != nil {
 
-			// Unblock other candidates immediately when
-			// server affinity candidate fails.
+			// Unblock other candidates immediately when server affinity
+			// candidate fails.
 			if candidateServerEntry.isServerAffinityCandidate {
 				close(controller.serverAffinityDoneBroadcast)
 			}
@@ -1809,7 +1770,9 @@ loop:
 				break loop
 			}
 
-			NoticeInfo("failed to connect to %s: %s", candidateServerEntry.serverEntry.IpAddress, err)
+			NoticeInfo("failed to connect to %s: %s",
+				candidateServerEntry.serverEntry.IpAddress, err)
+
 			continue
 		}
 

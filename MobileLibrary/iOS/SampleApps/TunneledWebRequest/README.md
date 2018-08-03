@@ -6,9 +6,7 @@ The sample app requires some extra files and configuration before building.
 
 ### Get the framework.
 
-1. Get the latest iOS release from the project's [Releases](https://github.com/Psiphon-Labs/psiphon-tunnel-core/releases) page.
-2. Extract the archive. 
-2. Copy `PsiphonTunnel.framework` into the `TunneledWebRequest` directory.
+1. Run `pod install` 
 
 ### Get the configuration.
 

@@ -250,7 +250,7 @@ extension AppDelegate: TunneledAppDelegate {
 
 		DispatchQueue.global(qos: .default).async {
 			// First we'll make a "what is my IP" request via makeRequestViaUrlSessionProxy().
-			let url = "https://freegeoip.net/json/"
+			let url = "https://freegeoip.app/json/"
 			self.makeRequestViaUrlSessionProxy(url) {
 				(_ result: String?) in
 

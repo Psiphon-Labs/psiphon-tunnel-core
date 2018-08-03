@@ -136,7 +136,7 @@ func Start(
 
 	psiphon.NoticeBuildInfo()
 
-	err = psiphon.InitDataStore(config)
+	err = psiphon.OpenDataStore(config)
 	if err != nil {
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
@@ -175,6 +175,7 @@ func Stop() {
 	if controller != nil {
 		stopController()
 		controllerWaitGroup.Wait()
+		psiphon.CloseDataStore()
 		controller = nil
 		controllerCtx = nil
 		stopController = nil

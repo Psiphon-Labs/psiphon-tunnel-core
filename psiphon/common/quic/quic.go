@@ -260,7 +260,8 @@ func (conn *Conn) Read(b []byte) (int, error) {
 	defer conn.readMutex.Unlock()
 
 	n, err := conn.stream.Read(b)
-	if isPeerGoingAway(err) {
+	if isErrorIndicatingClosed(err) {
+		_ = conn.Close()
 		err = io.EOF
 	}
 	return n, err
@@ -279,8 +280,11 @@ func (conn *Conn) Write(b []byte) (int, error) {
 	defer conn.writeMutex.Unlock()
 
 	n, err := conn.stream.Write(b)
-	if isPeerGoingAway(err) && n == len(b) {
-		err = nil
+	if isErrorIndicatingClosed(err) {
+		_ = conn.Close()
+		if n == len(b) {
+			err = nil
+		}
 	}
 	return n, err
 }
@@ -345,10 +349,13 @@ func (conn *Conn) SetWriteDeadline(t time.Time) error {
 	return conn.stream.SetWriteDeadline(t)
 }
 
-func isPeerGoingAway(err error) bool {
+func isErrorIndicatingClosed(err error) bool {
 	if err != nil {
-		if quicErr, ok := err.(*qerr.QuicError); ok && quicErr.ErrorCode == qerr.PeerGoingAway {
-			return true
+		if quicErr, ok := err.(*qerr.QuicError); ok {
+			switch quicErr.ErrorCode {
+			case qerr.PeerGoingAway, qerr.NetworkIdleTimeout:
+				return true
+			}
 		}
 	}
 	return false

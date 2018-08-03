@@ -203,14 +203,14 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	serverContext.clientRegion = handshakeResponse.ClientRegion
 	NoticeClientRegion(serverContext.clientRegion)
 
-	var decodedServerEntries []*protocol.ServerEntry
+	var serverEntries []protocol.ServerEntryFields
 
 	// Store discovered server entries
 	// We use the server's time, as it's available here, for the server entry
 	// timestamp since this is more reliable than the client time.
 	for _, encodedServerEntry := range handshakeResponse.EncodedServerList {
 
-		serverEntry, err := protocol.DecodeServerEntry(
+		serverEntryFields, err := protocol.DecodeServerEntryFields(
 			encodedServerEntry,
 			common.TruncateTimestampToHour(handshakeResponse.ServerTimestamp),
 			protocol.SERVER_ENTRY_SOURCE_DISCOVERY)
@@ -218,14 +218,14 @@ func (serverContext *ServerContext) doHandshakeRequest(
 			return common.ContextError(err)
 		}
 
-		err = protocol.ValidateServerEntry(serverEntry)
+		err = protocol.ValidateServerEntryFields(serverEntryFields)
 		if err != nil {
 			// Skip this entry and continue with the next one
 			NoticeAlert("invalid handshake server entry: %s", err)
 			continue
 		}
 
-		decodedServerEntries = append(decodedServerEntries, serverEntry)
+		serverEntries = append(serverEntries, serverEntryFields)
 	}
 
 	// The reason we are storing the entire array of server entries at once rather
@@ -233,7 +233,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	// StoreServerEntries that don't get triggered by StoreServerEntry.
 	err = StoreServerEntries(
 		serverContext.tunnel.config,
-		decodedServerEntries,
+		serverEntries,
 		true)
 	if err != nil {
 		return common.ContextError(err)
