@@ -69,10 +69,10 @@ then add PsiphonTunnel dependency like following
 ```
 dependencies {
     ...
-    implementation 'ca.psiphon:psiphontunnel:1.0.6'
+    implementation 'ca.psiphon:psiphontunnel:1.0.7'
 }
 ```
-Latest available release version can be found at https://github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library
+Where 1.0.7 is the target version. Latest available release version can be found at https://github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library
 
 See example usage in [TunneledWebView sample app](./SampleApps/TunneledWebView/README.md)
 
