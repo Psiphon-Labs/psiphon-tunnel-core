@@ -321,6 +321,7 @@ func freeManagedStartResult() {
 		if managedMemory != nil {
 			C.free(managedMemory)
 		}
+		managedStartResult = nil
 	}
 }
 
