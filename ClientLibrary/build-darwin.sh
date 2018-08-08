@@ -133,13 +133,13 @@ build_for_ios () {
   CXX=${TEMP_DIR}/clangwrap.sh \
   CGO_LDFLAGS="-arch armv7 -isysroot $(xcrun --sdk iphoneos --show-sdk-path)" \
   CGO_CFLAGS=-isysroot$(xcrun --sdk iphoneos --show-sdk-path) \
-  CGO_ENABLED=1 GOOS=darwin GOARCH=arm GOARM=7 go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${IOS_BUILD_TAGS}" -o ${IOS_BUILD_DIR}/PsiphonTunnel-ios-arm.dylib PsiphonTunnel.go
+  CGO_ENABLED=1 GOOS=darwin GOARCH=arm GOARM=7 go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${IOS_BUILD_TAGS}" -o ${IOS_BUILD_DIR}/arm7/PsiphonTunnel.a PsiphonTunnel.go
 
   CC=${TEMP_DIR}/clangwrap.sh \
   CXX=${TEMP_DIR}/clangwrap.sh \
   CGO_LDFLAGS="-arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path)" \
   CGO_CFLAGS=-isysroot$(xcrun --sdk iphoneos --show-sdk-path) \
-  CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${IOS_BUILD_TAGS}" -o ${IOS_BUILD_DIR}/PsiphonTunnel-ios-arm64.dylib PsiphonTunnel.go
+  CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${IOS_BUILD_TAGS}" -o ${IOS_BUILD_DIR}/arm64/PsiphonTunnel.a PsiphonTunnel.go
 
 }
 
@@ -159,10 +159,10 @@ build_for_macos () {
   fi
 
   TARGET_ARCH=386
-  CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${MACOS_BUILD_TAGS}" -o "${MACOS_BUILD_DIR}/PsiphonTunnel-macos-${TARGET_ARCH}.dylib" PsiphonTunnel.go
+  CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${MACOS_BUILD_TAGS}" -o "${MACOS_BUILD_DIR}/${TARGET_ARCH}/PsiphonTunnel.a" PsiphonTunnel.go
 
   TARGET_ARCH=amd64
-  CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${MACOS_BUILD_TAGS}" -o "${MACOS_BUILD_DIR}/PsiphonTunnel-macos-${TARGET_ARCH}.dylib" PsiphonTunnel.go
+  CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${MACOS_BUILD_TAGS}" -o "${MACOS_BUILD_DIR}/${TARGET_ARCH}/PsiphonTunnel.a" PsiphonTunnel.go
 
 }
 
