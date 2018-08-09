@@ -111,8 +111,8 @@ var managedStartResult *C.char
 //   iOS:
 //     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L1105
 func Start(configJSON, embeddedServerEntryList, clientPlatform, networkID string, timeout int64) *C.char {
-	// NOTE: all parameters which may be used after Start returns should be copied onto the Go heap
-	//       to ensure that they don't disappear and cause Go to crash.
+	// NOTE: all arguments which are still referenced once Start returns should be copied onto the Go heap
+	//       to ensure that they don't disappear later on and cause Go to crash.
 
 	// Load provided config
 
