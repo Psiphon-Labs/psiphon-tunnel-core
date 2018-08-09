@@ -111,6 +111,8 @@ var managedStartResult *C.char
 //   iOS:
 //     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L1105
 func Start(configJSON, embeddedServerEntryList, clientPlatform, networkID string, timeout int64) *C.char {
+	// NOTE: all parameters which may be used after Start returns should be copied onto the Go heap
+	//       to ensure that they don't disappear and cause Go to crash.
 
 	// Load provided config
 
@@ -122,13 +124,15 @@ func Start(configJSON, embeddedServerEntryList, clientPlatform, networkID string
 	// Set network ID
 
 	if networkID != "" {
-		config.NetworkID = string([]byte(networkID))
+		// Ensure config.NetworkID is on the Go heap
+		config.NetworkID = deepCopy(networkID)
 	}
 
 	// Set client platform
 
 	if clientPlatform != "" {
-		config.ClientPlatform = clientPlatform
+		// Ensure config.ClientPlatform is on the Go heap
+		config.ClientPlatform = deepCopy(clientPlatform)
 	}
 
 	// All config fields should be set before calling commit
@@ -312,6 +316,11 @@ func startErrorJson(err error) *C.char {
 	result.ErrorString = err.Error()
 
 	return marshalStartResult(result)
+}
+
+// deepCopy copies a string's underlying buffer and returns a new string which references the new buffer.
+func deepCopy(s string) string {
+	return string([]byte(s))
 }
 
 // freeManagedStartResult frees the memory on the heap pointed to by managedStartResult.
