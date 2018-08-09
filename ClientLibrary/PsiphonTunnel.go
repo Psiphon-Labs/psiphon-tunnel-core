@@ -122,7 +122,7 @@ func Start(configJSON, embeddedServerEntryList, clientPlatform, networkID string
 	// Set network ID
 
 	if networkID != "" {
-		config.NetworkID = networkID
+		config.NetworkID = string([]byte(networkID))
 	}
 
 	// Set client platform
