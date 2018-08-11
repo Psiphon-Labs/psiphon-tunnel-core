@@ -159,10 +159,10 @@ build_for_macos () {
   fi
 
   TARGET_ARCH=386
-  CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "${MACOS_BUILD_TAGS}" -o "${MACOS_BUILD_DIR}/${TARGET_ARCH}/libpsiphontunnel.dylib" PsiphonTunnel.go
+  CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -buildmode=c-shared -ldflags "-s ${LDFLAGS}" -tags "${MACOS_BUILD_TAGS}" -o "${MACOS_BUILD_DIR}/${TARGET_ARCH}/libpsiphontunnel.dylib" PsiphonTunnel.go
 
   TARGET_ARCH=amd64
-  CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "${MACOS_BUILD_TAGS}" -o "${MACOS_BUILD_DIR}/${TARGET_ARCH}/libpsiphontunnel.dylib" PsiphonTunnel.go
+  CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -buildmode=c-shared -ldflags "-s ${LDFLAGS}" -tags "${MACOS_BUILD_TAGS}" -o "${MACOS_BUILD_DIR}/${TARGET_ARCH}/libpsiphontunnel.dylib" PsiphonTunnel.go
 
 }
 
