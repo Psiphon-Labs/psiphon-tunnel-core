@@ -1,4 +1,4 @@
-#include "PsiphonTunnel.h"
+#include "libpsiphontunnel.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,13 +64,16 @@ int main(int argc, char *argv[]) {
     // set timout
     long long timeout = 60;
 
-    // start will return once Psiphon connects or does not connect for timeout seconds
-    char *result = Start(psiphon_config, serverList, client_platform, network_id, timeout);
+    // connect 5 times
+    for (int i = 0; i < 5; i++) {
+        // start will return once Psiphon connects or does not connect for timeout seconds
+        char *result = Start(psiphon_config, serverList, client_platform, network_id, timeout);
 
-    // print results
-    printf("Result: %s\n", result);
+        // print results
+        printf("Result: %s\n", result);
 
-    // The underlying memory of `result` is managed by PsiphonTunnel and is freed in Stop
-    Stop();
+        // The underlying memory of `result` is managed by PsiphonTunnel and is freed in Stop
+        Stop();
+    }
 }
 
