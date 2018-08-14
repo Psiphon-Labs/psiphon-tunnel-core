@@ -97,7 +97,7 @@ build_for_android () {
   CC="${NDK_TOOLCHAIN_DIR}/${TARGET_ARCH}/bin/arm-linux-androideabi-clang" \
   CXX="${NDK_TOOLCHAIN_DIR}/${TARGET_ARCH}/bin/arm-linux-androideabi-clang++" \
   GOARM=${ARMV} \
-  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$ANDROID_BUILD_TAGS" -o "${OUTPUT_DIR}/PsiphonTunnel-${TARGET_OS}-${TARGET_ARCH}${ARMV}.so" PsiphonTunnel.go
+  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$ANDROID_BUILD_TAGS" -o "${OUTPUT_DIR}/${TARGET_ARCH}${ARMV}/libpsiphontunnel.so" PsiphonTunnel.go
 
 
   TARGET_ARCH=arm64
@@ -105,7 +105,7 @@ build_for_android () {
 
   CC="${NDK_TOOLCHAIN_DIR}/${TARGET_ARCH}/bin/aarch64-linux-android-clang" \
   CXX="${NDK_TOOLCHAIN_DIR}/${TARGET_ARCH}/bin/aarch64-linux-android-clang++" \
-  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$ANDROID_BUILD_TAGS" -o "${OUTPUT_DIR}/PsiphonTunnel-${TARGET_OS}-${TARGET_ARCH}.so" PsiphonTunnel.go
+  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$ANDROID_BUILD_TAGS" -o "${OUTPUT_DIR}/${TARGET_ARCH}/libpsiphontunnel.so" PsiphonTunnel.go
 
 }
 
@@ -126,11 +126,11 @@ build_for_linux () {
   TARGET_ARCH=386
   # TODO: is "CFLAGS=-m32" required?
   CFLAGS=-m32 \
-  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$LINUX_BUILD_TAGS" -o "${OUTPUT_DIR}/PsiphonTunnel-${TARGET_OS}-${TARGET_ARCH}.so" PsiphonTunnel.go
+  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$LINUX_BUILD_TAGS" -o "${OUTPUT_DIR}/${TARGET_ARCH}/libpsiphontunnel.so" PsiphonTunnel.go
 
 
   TARGET_ARCH=amd64
-  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$LINUX_BUILD_TAGS" -o "${OUTPUT_DIR}/PsiphonTunnel-${TARGET_OS}-${TARGET_ARCH}.so" PsiphonTunnel.go
+  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$LINUX_BUILD_TAGS" -o "${OUTPUT_DIR}/${TARGET_ARCH}/libpsiphontunnel.so" PsiphonTunnel.go
 
 }
 
@@ -153,7 +153,7 @@ build_for_windows () {
   CGO_ENABLED=1 \
   CGO_LDFLAGS="-static-libgcc -L /usr/i686-w64-mingw32/lib/ -lwsock32 -lcrypt32 -lgdi32" \
   CC=/usr/bin/i686-w64-mingw32-gcc \
-  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$WINDOWS_BUILD_TAGS" -o "${OUTPUT_DIR}/PsiphonTunnel-${TARGET_OS}-${TARGET_ARCH}.dll" PsiphonTunnel.go
+  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$WINDOWS_BUILD_TAGS" -o "${OUTPUT_DIR}/${TARGET_ARCH}/psiphontunnel.dll" PsiphonTunnel.go
 
 
   TARGET_ARCH=amd64
@@ -161,7 +161,7 @@ build_for_windows () {
   CGO_ENABLED=1 \
   CGO_LDFLAGS="-static-libgcc -L /usr/x86_64-w64-mingw32/lib/ -lwsock32 -lcrypt32 -lgdi32" \
   CC=/usr/bin/x86_64-w64-mingw32-gcc \
-  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$WINDOWS_BUILD_TAGS" -o "${OUTPUT_DIR}/PsiphonTunnel-${TARGET_OS}-${TARGET_ARCH}.dll" PsiphonTunnel.go
+  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$WINDOWS_BUILD_TAGS" -o "${OUTPUT_DIR}/${TARGET_ARCH}/psiphontunnel.dll" PsiphonTunnel.go
 
 }
 
