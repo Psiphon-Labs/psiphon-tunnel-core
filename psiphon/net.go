@@ -35,6 +35,7 @@ import (
 
 	"github.com/Psiphon-Labs/dns"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 const DNS_PORT = 53
@@ -252,6 +253,7 @@ func MakeUntunneledHTTPClient(
 			SNIServerName:                 "",
 			SkipVerify:                    skipVerify,
 			TrustedCACertificatesFilename: untunneledDialConfig.TrustedCACertificatesFilename,
+			ClientSessionCache:            utls.NewLRUClientSessionCache(0),
 		})
 
 	transport := &http.Transport{

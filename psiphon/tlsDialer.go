@@ -137,6 +137,11 @@ type CustomTLSConfig struct {
 	// ObfuscatedSessionTicketKey enables obfuscated session tickets
 	// using the specified key.
 	ObfuscatedSessionTicketKey string
+
+	// ClientSessionCache specifies a cache to use to persist session
+	// tickets, enabling TLS session resumability across multiple
+	// CustomTLSDial calls or dialers using the same CustomTLSConfig.
+	ClientSessionCache utls.ClientSessionCache
 }
 
 func SelectTLSProfile(
@@ -237,8 +242,13 @@ func CustomTLSDial(
 		selectedTLSProfile = SelectTLSProfile("", config.ClientParameters)
 	}
 
+	clientSessionCache := config.ClientSessionCache
+	if clientSessionCache == nil {
+		clientSessionCache = utls.NewLRUClientSessionCache(0)
+	}
+
 	tlsConfig := &utls.Config{
-		ClientSessionCache: utls.NewLRUClientSessionCache(0),
+		ClientSessionCache: clientSessionCache,
 	}
 
 	if config.SkipVerify {

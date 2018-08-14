@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
-	"os"
 	"strconv"
 	"syscall"
 
@@ -43,8 +42,6 @@ import (
 // with another higher-level conn that provides that interface.
 func NewUDPConn(
 	ctx context.Context, addr string, config *DialConfig) (net.PacketConn, *net.UDPAddr, error) {
-
-	// TODO: refactor code in common with tcpDial.
 
 	host, strPort, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -64,6 +61,7 @@ func NewUDPConn(
 	}
 
 	ipAddr := ipAddrs[rand.Intn(len(ipAddrs))]
+
 	if config.IPv6Synthesizer != nil {
 		if ipAddr.To4() != nil {
 			synthesizedIPAddress := config.IPv6Synthesizer.IPv6Synthesize(ipAddr.String())
@@ -85,30 +83,7 @@ func NewUDPConn(
 		return nil, nil, common.ContextError(fmt.Errorf("invalid IP address: %s", ipAddr.String()))
 	}
 
-	socketFD, err := syscall.Socket(domain, syscall.SOCK_DGRAM, 0)
-	if err != nil {
-		return nil, nil, common.ContextError(err)
-	}
-
-	syscall.CloseOnExec(socketFD)
-
-	setAdditionalSocketOptions(socketFD)
-
-	if config.DeviceBinder != nil {
-		err := bindToDeviceCallWrapper(config.DeviceBinder, socketFD)
-		if err != nil {
-			syscall.Close(socketFD)
-			return nil, nil, common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))
-		}
-	}
-
-	// Convert the socket fd to a net.PacketConn
-	// This code block is from:
-	// https://github.com/golang/go/issues/6966
-
-	file := os.NewFile(uintptr(socketFD), "")
-	conn, err := net.FilePacketConn(file) // net.FilePackateConn() dups socketFD
-	file.Close()                          // file.Close() closes socketFD
+	conn, err := newUDPConn(domain, config)
 	if err != nil {
 		return nil, nil, common.ContextError(err)
 	}

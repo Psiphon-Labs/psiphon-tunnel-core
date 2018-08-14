@@ -127,17 +127,31 @@ type Config struct {
 	// TunnelProtocol indicates which protocol to use. For the default, "",
 	// all protocols are used.
 	//
-	// Deprecated: Use TunnelProtocols. When TunnelProtocols is not nil, this
-	// parameter is ignored.
+	// Deprecated: Use LimitTunnelProtocols. When LimitTunnelProtocols is not
+	// nil, this parameter is ignored.
 	TunnelProtocol string
 
-	// TunnelProtocols indicates which protocols to use. Valid values include:
-	// "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
-	// "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH", "FRONTED-
-	// MEEK-HTTP-OSSH".
+	// LimitTunnelProtocols indicates which protocols to use. Valid values
+	// include: "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-
+	// OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH",
+	// "FRONTED- MEEK-HTTP-OSSH", "QUIC-OSSH".
 	//
 	// For the default, an empty list, all protocols are used.
-	TunnelProtocols []string
+	LimitTunnelProtocols []string
+
+	// InitialLimitTunnelProtocols is an optional initial phase of limited
+	// protocols for the first InitialLimitTunnelProtocolsCandidateCount
+	// candidates; after these candidates, LimitTunnelProtocols applies.
+	//
+	// For the default, an empty list, InitialLimitTunnelProtocols is off.
+	InitialLimitTunnelProtocols []string
+
+	// InitialLimitTunnelProtocolsCandidateCount is the number of candidates
+	// to which InitialLimitTunnelProtocols is applied instead of
+	// LimitTunnelProtocols.
+	//
+	// For the default, 0, InitialLimitTunnelProtocols is off.
+	InitialLimitTunnelProtocolsCandidateCount int
 
 	// EstablishTunnelTimeoutSeconds specifies a time limit after which to
 	// halt the core tunnel controller if no tunnel has been established. The
@@ -793,10 +807,15 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.NetworkLatencyMultiplier] = config.NetworkLatencyMultiplier
 	}
 
-	if len(config.TunnelProtocols) > 0 {
-		applyParameters[parameters.LimitTunnelProtocols] = protocol.TunnelProtocols(config.TunnelProtocols)
+	if len(config.LimitTunnelProtocols) > 0 {
+		applyParameters[parameters.LimitTunnelProtocols] = protocol.TunnelProtocols(config.LimitTunnelProtocols)
 	} else if config.TunnelProtocol != "" {
 		applyParameters[parameters.LimitTunnelProtocols] = protocol.TunnelProtocols{config.TunnelProtocol}
+	}
+
+	if len(config.InitialLimitTunnelProtocols) > 0 && config.InitialLimitTunnelProtocolsCandidateCount > 0 {
+		applyParameters[parameters.InitialLimitTunnelProtocols] = protocol.TunnelProtocols(config.InitialLimitTunnelProtocols)
+		applyParameters[parameters.InitialLimitTunnelProtocolsCandidateCount] = config.InitialLimitTunnelProtocolsCandidateCount
 	}
 
 	if config.EstablishTunnelTimeoutSeconds != nil {

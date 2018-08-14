@@ -173,7 +173,10 @@ func dispatchAPIRequestHandler(
 }
 
 var handshakeRequestParams = append(
-	append([]requestParamSpec(nil), tacticsParams...),
+	append(
+		// Note: legacy clients may not send "session_id" in handshake
+		[]requestParamSpec{{"session_id", isHexDigits, requestParamOptional}},
+		tacticsParams...),
 	baseRequestParams...)
 
 // handshakeAPIRequestHandler implements the "handshake" API request.
@@ -479,7 +482,9 @@ var tacticsParams = []requestParamSpec{
 }
 
 var tacticsRequestParams = append(
-	append([]requestParamSpec(nil), tacticsParams...),
+	append(
+		[]requestParamSpec{{"session_id", isHexDigits, 0}},
+		tacticsParams...),
 	baseRequestParams...)
 
 func getTacticsAPIParameterValidator(config *Config) common.APIParameterValidator {

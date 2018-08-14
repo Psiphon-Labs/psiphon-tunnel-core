@@ -566,7 +566,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "DisableRemoteServerListFetcher" : true,
         "EstablishTunnelPausePeriodSeconds" : 1,
         "ConnectionWorkerPoolSize" : %d,
-        "TunnelProtocols" : ["%s"]
+        "LimitTunnelProtocols" : ["%s"]
         %s
     }`, numTunnels, runConfig.tunnelProtocol, jsonNetworkID)
 
@@ -610,10 +610,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
-	err = psiphon.InitDataStore(clientConfig)
+	err = psiphon.OpenDataStore(clientConfig)
 	if err != nil {
 		t.Fatalf("error initializing client datastore: %s", err)
 	}
+	defer psiphon.CloseDataStore()
+
 	psiphon.DeleteSLOKs()
 
 	controller, err := psiphon.NewController(clientConfig)

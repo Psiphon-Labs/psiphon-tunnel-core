@@ -373,11 +373,19 @@ func NoticeUserLog(message string) {
 }
 
 // NoticeCandidateServers is how many possible servers are available for the selected region and protocols
-func NoticeCandidateServers(region string, protocols []string, count int) {
+func NoticeCandidateServers(
+	region string,
+	limitState *limitTunnelProtocolsState,
+	initialCount int,
+	count int) {
+
 	singletonNoticeLogger.outputNotice(
 		"CandidateServers", noticeIsDiagnostic,
 		"region", region,
-		"protocols", protocols,
+		"initialLimitTunnelProtocols", limitState.initialProtocols,
+		"initialLimitTunnelProtocolsCandidateCount", limitState.initialCandidateCount,
+		"limitTunnelProtocols", limitState.protocols,
+		"initialCount", initialCount,
 		"count", count)
 }
 
@@ -564,12 +572,6 @@ func NoticeSessionId(sessionId string) {
 	singletonNoticeLogger.outputNotice(
 		"SessionId", noticeIsDiagnostic,
 		"sessionId", sessionId)
-}
-
-func NoticeImpairedProtocolClassification(impairedProtocolClassification map[string]int) {
-	singletonNoticeLogger.outputNotice(
-		"ImpairedProtocolClassification", noticeIsDiagnostic,
-		"classification", impairedProtocolClassification)
 }
 
 // NoticeUntunneled indicates than an address has been classified as untunneled and is being
@@ -948,13 +950,13 @@ func (context *commonLogContext) Debug(args ...interface{}) {
 }
 
 func (context *commonLogContext) Info(args ...interface{}) {
-	context.outputNotice("Info", args)
+	context.outputNotice("Info", args...)
 }
 
 func (context *commonLogContext) Warning(args ...interface{}) {
-	context.outputNotice("Alert", args)
+	context.outputNotice("Alert", args...)
 }
 
 func (context *commonLogContext) Error(args ...interface{}) {
-	context.outputNotice("Error", args)
+	context.outputNotice("Error", args...)
 }

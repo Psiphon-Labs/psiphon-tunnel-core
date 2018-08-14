@@ -125,10 +125,10 @@ func TestOverrides(t *testing.T) {
 	applyParameters[ConnectionWorkerPoolSize] = newConnectionWorkerPoolSize
 
 	// Above minimum, should apply
-	defaultPrioritizeTunnelProtocolsCandidateCount := defaultClientParameters[PrioritizeTunnelProtocolsCandidateCount].value.(int)
-	minimumPrioritizeTunnelProtocolsCandidateCount := defaultClientParameters[PrioritizeTunnelProtocolsCandidateCount].minimum.(int)
-	newPrioritizeTunnelProtocolsCandidateCount := minimumPrioritizeTunnelProtocolsCandidateCount + 1
-	applyParameters[PrioritizeTunnelProtocolsCandidateCount] = newPrioritizeTunnelProtocolsCandidateCount
+	defaultInitialLimitTunnelProtocolsCandidateCount := defaultClientParameters[InitialLimitTunnelProtocolsCandidateCount].value.(int)
+	minimumInitialLimitTunnelProtocolsCandidateCount := defaultClientParameters[InitialLimitTunnelProtocolsCandidateCount].minimum.(int)
+	newInitialLimitTunnelProtocolsCandidateCount := minimumInitialLimitTunnelProtocolsCandidateCount + 1
+	applyParameters[InitialLimitTunnelProtocolsCandidateCount] = newInitialLimitTunnelProtocolsCandidateCount
 
 	p, err := NewClientParameters(nil)
 	if err != nil {
@@ -151,12 +151,12 @@ func TestOverrides(t *testing.T) {
 		t.Fatalf("GetInt returned unexpected ConnectionWorkerPoolSize: %d", v)
 	}
 
-	v = p.Get().Int(PrioritizeTunnelProtocolsCandidateCount)
-	if v != defaultPrioritizeTunnelProtocolsCandidateCount {
-		t.Fatalf("GetInt returned unexpected PrioritizeTunnelProtocolsCandidateCount: %d", v)
+	v = p.Get().Int(InitialLimitTunnelProtocolsCandidateCount)
+	if v != defaultInitialLimitTunnelProtocolsCandidateCount {
+		t.Fatalf("GetInt returned unexpected InitialLimitTunnelProtocolsCandidateCount: %d", v)
 	}
 
-	// Skip on error; should skip ConnectionWorkerPoolSize and apply PrioritizeTunnelProtocolsCandidateCount
+	// Skip on error; should skip ConnectionWorkerPoolSize and apply InitialLimitTunnelProtocolsCandidateCount
 
 	counts, err := p.Set(tag, true, applyParameters)
 	if err != nil {
@@ -172,9 +172,9 @@ func TestOverrides(t *testing.T) {
 		t.Fatalf("GetInt returned unexpected ConnectionWorkerPoolSize: %d", v)
 	}
 
-	v = p.Get().Int(PrioritizeTunnelProtocolsCandidateCount)
-	if v != newPrioritizeTunnelProtocolsCandidateCount {
-		t.Fatalf("GetInt returned unexpected PrioritizeTunnelProtocolsCandidateCount: %d", v)
+	v = p.Get().Int(InitialLimitTunnelProtocolsCandidateCount)
+	if v != newInitialLimitTunnelProtocolsCandidateCount {
+		t.Fatalf("GetInt returned unexpected InitialLimitTunnelProtocolsCandidateCount: %d", v)
 	}
 }
 

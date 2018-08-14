@@ -1,5 +1,6 @@
 package main
 
+// #include <stdlib.h>
 import "C"
 
 import (
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -46,7 +48,17 @@ type psiphonTunnel struct {
 
 var tunnel psiphonTunnel
 
+// Memory managed by PsiphonTunnel which is allocated in Start and freed in Stop
+var managedStartResult *C.char
+
 //export Start
+//
+// ******************************* WARNING ********************************
+// The underlying memory referenced by the return value of Start is managed
+// by PsiphonTunnel and attempting to free it explicitly will cause the
+// program to crash. This memory is freed once Stop is called.
+// ************************************************************************
+//
 // Start starts the controller and returns once either of the following has occured: an active tunnel has been
 // established, the timeout has elapsed before an active tunnel could be established or an error has occured.
 //
@@ -72,9 +84,35 @@ var tunnel psiphonTunnel
 //     "error": <error message>
 //   }
 //
-// networkID should be not be blank and should follow the format specified by
+// clientPlatform should be of the form OS_OSVersion_BundleIdentifier where both the OSVersion and BundleIdentifier
+// fields are optional. If clientPlatform is set to an empty string the "ClientPlatform" field in the provided json
+// config will be used instead.
+//
+// Provided below are links to platform specific code which can be used to find some of the above fields:
+//   Android:
+//     - OSVersion: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L573
+//     - BundleIdentifier: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L575
+//   iOS:
+//     - OSVersion: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L612
+//     - BundleIdentifier: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L622
+//
+// Some examples of valid client platform strings are:
+//
+//   "Android_4.2.2_com.example.exampleApp"
+//   "iOS_11.4_com.example.exampleApp"
+//   "Windows"
+//
+// networkID must be a non-empty string and follow the format specified by
 // https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter.
-func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64) *C.char {
+//
+// Provided below are links to platform specific code which can be used to generate valid network identifier strings:
+//   Android:
+//     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L371
+//   iOS:
+//     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L1105
+func Start(configJSON, embeddedServerEntryList, clientPlatform, networkID string, timeout int64) *C.char {
+	// NOTE: all arguments which are still referenced once Start returns should be copied onto the Go heap
+	//       to ensure that they don't disappear later on and cause Go to crash.
 
 	// Load provided config
 
@@ -86,11 +124,18 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 	// Set network ID
 
 	if networkID != "" {
-		config.NetworkID = networkID
+		// Ensure config.NetworkID is on the Go heap
+		config.NetworkID = deepCopy(networkID)
+	}
+
+	// Set client platform
+
+	if clientPlatform != "" {
+		// Ensure config.ClientPlatform is on the Go heap
+		config.ClientPlatform = deepCopy(clientPlatform)
 	}
 
 	// All config fields should be set before calling commit
-
 	err = config.Commit()
 	if err != nil {
 		return startErrorJson(err)
@@ -137,7 +182,7 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 
 	// Initialize data store
 
-	err = psiphon.InitDataStore(config)
+	err = psiphon.OpenDataStore(config)
 	if err != nil {
 		return startErrorJson(err)
 	}
@@ -213,9 +258,13 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 		tunnel.stopController()
 	}
 
-	// Return result
+	// Free previous result
+	freeManagedStartResult()
 
-	return marshalstartResult(result)
+	// Return result
+	managedStartResult = marshalStartResult(result)
+
+	return managedStartResult
 }
 
 //export Stop
@@ -224,10 +273,15 @@ func Start(configJSON, embeddedServerEntryList, networkID string, timeout int64)
 // Stop should always be called after a successful call to Start to ensure the
 // controller is not left running.
 func Stop() {
+	freeManagedStartResult()
+
 	if tunnel.stopController != nil {
 		tunnel.stopController()
 	}
+
 	tunnel.controllerWaitGroup.Wait()
+
+	psiphon.CloseDataStore()
 }
 
 // secondsBeforeNow returns the delta seconds of the current time subtract startTime.
@@ -236,9 +290,9 @@ func secondsBeforeNow(startTime time.Time) float64 {
 	return delta.Seconds()
 }
 
-// marshalstartResult serializes a startResult object as a JSON string in the form
+// marshalStartResult serializes a startResult object as a JSON string in the form
 // of a null-terminated buffer of C chars.
-func marshalstartResult(result startResult) *C.char {
+func marshalStartResult(result startResult) *C.char {
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
 		return C.CString(fmt.Sprintf("{\"result_code\":%d, \"error\": \"%s\"}", startResultCodeOtherError, err.Error()))
@@ -261,7 +315,23 @@ func startErrorJson(err error) *C.char {
 	result.Code = startResultCodeOtherError
 	result.ErrorString = err.Error()
 
-	return marshalstartResult(result)
+	return marshalStartResult(result)
+}
+
+// deepCopy copies a string's underlying buffer and returns a new string which references the new buffer.
+func deepCopy(s string) string {
+	return string([]byte(s))
+}
+
+// freeManagedStartResult frees the memory on the heap pointed to by managedStartResult.
+func freeManagedStartResult() {
+	if managedStartResult != nil {
+		managedMemory := unsafe.Pointer(managedStartResult)
+		if managedMemory != nil {
+			C.free(managedMemory)
+		}
+		managedStartResult = nil
+	}
 }
 
 // main is a stub required by cgo.

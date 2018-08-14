@@ -49,9 +49,32 @@ When that command completes, the compiled `.aar` files (suitable for use in an A
 
 ### Using the Library
 
- 1. Build `ca.psiphon.aar` from via the docker container, from source, or use the [binary release](https://github.com/Psiphon-Labs/psiphon-tunnel-core/releases)
+#### If building from source
+
+ 1. Build `ca.psiphon.aar` from via the docker container.
  2. Add `ca.psiphon.aar` to your Android Studio project as described in the [gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile)
- 3. Example usage in [TunneledWebView sample app](./SampleApps/TunneledWebView/README.md)
+
+#### If using Maven based binary distribution
+
+1. Add maven repo to your app build.gradle
+```
+repositories {
+    ...
+    maven {
+        url "https://raw.github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/master/releases"
+    }
+}
+```
+then add PsiphonTunnel dependency like following
+```
+dependencies {
+    ...
+    implementation 'ca.psiphon:psiphontunnel:1.0.7'
+}
+```
+Where 1.0.7 is the target version. Latest available release version can be found at https://github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library
+
+See example usage in [TunneledWebView sample app](./SampleApps/TunneledWebView/README.md)
 
 ##### Limitations
 

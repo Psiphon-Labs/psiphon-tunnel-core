@@ -1,12 +1,12 @@
-main: PsiphonTunnel.dylib main.o
-	gcc PsiphonTunnel.dylib -o main main.o
+main: libpsiphontunnel.so main.o
+	gcc -I. -o main main.o -L. -lpsiphontunnel
 
 main.o: main.c
 	gcc -I.. -c main.c
 
-PsiphonTunnel.dylib: ../PsiphonTunnel.go
-	go build -buildmode=c-shared -o PsiphonTunnel.dylib ../PsiphonTunnel.go
+libpsiphontunnel.so: ../PsiphonTunnel.go
+	go build -buildmode=c-shared -o libpsiphontunnel.so ../PsiphonTunnel.go
 
 clean:
-	rm PsiphonTunnel.dylib PsiphonTunnel.h main main.o
+	rm libpsiphontunnel.so PsiphonTunnel.h main main.o
 

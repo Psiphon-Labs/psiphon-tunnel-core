@@ -29,8 +29,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
-// LookupIP resolves a hostname. When BindToDevice is not required, it
-// simply uses net.LookupIP.
+// LookupIP resolves a hostname.
 func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, error) {
 
 	if config.DeviceBinder != nil {
