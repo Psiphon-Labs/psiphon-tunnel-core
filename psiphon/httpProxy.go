@@ -172,7 +172,7 @@ func NewHttpProxy(
 		urlProxyDirectRelay:    urlProxyDirectRelay,
 		urlProxyDirectClient:   urlProxyDirectClient,
 		responseHeaderTimeout:  responseHeaderTimeout,
-		openConns:              new(common.Conns),
+		openConns:              common.NewConns(),
 		stopListeningBroadcast: make(chan struct{}),
 		listenIP:               proxyIP,
 		listenPort:             proxyPort,

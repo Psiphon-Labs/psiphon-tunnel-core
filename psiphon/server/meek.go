@@ -136,7 +136,7 @@ func NewMeekServer(
 		support:           support,
 		listener:          listener,
 		clientHandler:     clientHandler,
-		openConns:         new(common.Conns),
+		openConns:         common.NewConns(),
 		stopBroadcast:     stopBroadcast,
 		sessions:          make(map[string]*meekSession),
 		checksumTable:     checksumTable,

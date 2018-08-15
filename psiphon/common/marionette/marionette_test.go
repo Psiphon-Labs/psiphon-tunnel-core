@@ -17,12 +17,15 @@
  *
  */
 
-package quic
+package marionette
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -31,20 +34,28 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func TestQUIC(t *testing.T) {
+func TestMarionette(t *testing.T) {
 
-	clients := 10
-	bytesToSend := 1 << 20
+	go func() {
+		fmt.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+
+	// Create a number of concurrent Marionette clients, each of which sends
+	// data to the server. The server echoes back the data.
+
+	clients := 5
+	bytesToSend := 1 << 15
 
 	serverReceivedBytes := int64(0)
 	clientReceivedBytes := int64(0)
 
-	listener, err := Listen("127.0.0.1:0")
+	serverAddress := "127.0.0.1"
+	format := "http_simple_nonblocking"
+
+	listener, err := Listen(serverAddress, format)
 	if err != nil {
 		t.Fatalf("Listen failed: %s", err)
 	}
-
-	serverAddress := listener.Addr().String()
 
 	testGroup, testCtx := errgroup.WithContext(context.Background())
 
@@ -60,20 +71,29 @@ func TestQUIC(t *testing.T) {
 			}
 
 			serverGroup.Go(func() error {
+				defer func() {
+					fmt.Printf("Start server conn.Close\n")
+					start := time.Now()
+					conn.Close()
+					fmt.Printf("Done server conn.Close: %s\n", time.Now().Sub(start))
+				}()
+				bytesFromClient := 0
 				b := make([]byte, 1024)
-				for {
+				for bytesFromClient < bytesToSend {
 					n, err := conn.Read(b)
+					bytesFromClient += n
 					atomic.AddInt64(&serverReceivedBytes, int64(n))
-					if err == io.EOF {
-						return nil
-					} else if err != nil {
+					if err != nil {
+						fmt.Printf("Server read error: %s\n", err)
 						return common.ContextError(err)
 					}
 					_, err = conn.Write(b[:n])
 					if err != nil {
+						fmt.Printf("Server write error: %s\n", err)
 						return common.ContextError(err)
 					}
 				}
+				return nil
 			})
 		}
 
@@ -93,28 +113,20 @@ func TestQUIC(t *testing.T) {
 				context.Background(), 1*time.Second)
 			defer cancelFunc()
 
-			remoteAddr, err := net.ResolveUDPAddr("udp", serverAddress)
+			conn, err := Dial(ctx, &net.Dialer{}, format, serverAddress)
 			if err != nil {
 				return common.ContextError(err)
 			}
-
-			packetConn, err := net.ListenPacket("udp4", "127.0.0.1:0")
-			if err != nil {
-				return common.ContextError(err)
-			}
-
-			conn, err := Dial(ctx, packetConn, remoteAddr, serverAddress)
-			if err != nil {
-				return common.ContextError(err)
-			}
-
-			// Cancel should interrupt dialing only
-			cancelFunc()
 
 			var clientGroup errgroup.Group
 
 			clientGroup.Go(func() error {
-				defer conn.Close()
+				defer func() {
+					fmt.Printf("Start client conn.Close\n")
+					start := time.Now()
+					conn.Close()
+					fmt.Printf("Done client conn.Close: %s\n", time.Now().Sub(start))
+				}()
 				b := make([]byte, 1024)
 				bytesRead := 0
 				for bytesRead < bytesToSend {
@@ -124,6 +136,7 @@ func TestQUIC(t *testing.T) {
 					if err == io.EOF {
 						break
 					} else if err != nil {
+						fmt.Printf("Client read error: %s\n", err)
 						return common.ContextError(err)
 					}
 				}
@@ -134,6 +147,7 @@ func TestQUIC(t *testing.T) {
 				b := make([]byte, bytesToSend)
 				_, err := conn.Write(b)
 				if err != nil {
+					fmt.Printf("Client write error: %s\n", err)
 					return common.ContextError(err)
 				}
 				return nil
@@ -149,7 +163,11 @@ func TestQUIC(t *testing.T) {
 	}()
 
 	<-testCtx.Done()
+
+	fmt.Printf("Start listener.Close\n")
+	start := time.Now()
 	listener.Close()
+	fmt.Printf("Done listener.Close: %s\n", time.Now().Sub(start))
 
 	err = testGroup.Wait()
 	if err != nil {
@@ -165,10 +183,5 @@ func TestQUIC(t *testing.T) {
 	bytes = atomic.LoadInt64(&clientReceivedBytes)
 	if bytes != expectedBytes {
 		t.Errorf("unexpected clientReceivedBytes: %d vs. %d", bytes, expectedBytes)
-	}
-
-	_, err = listener.Accept()
-	if err == nil {
-		t.Error("unexpected Accept after Close")
 	}
 }
