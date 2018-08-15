@@ -2,12 +2,7 @@ package tapdance
 
 import (
 	"fmt"
-
-	// Note: temporary vendor-only workaround for:
-	// https://github.com/sirupsen/logrus/issues/570
-	//"github.com/Sirupsen/logrus"
 	"github.com/sirupsen/logrus"
-
 	"sync"
 )
 
