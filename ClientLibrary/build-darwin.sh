@@ -1,18 +1,9 @@
 #!/usr/bin/env bash
 
-# -x echos commands. 
-# -e exits if a command returns an error.
-set -x -e
+set -e -u -x
 
-# This script takes an optional second argument: 'private', if private plugins should
-# be used. It should be omitted if private plugins are not desired.
-if [[ $2 == "private" ]]; then
-  FORCE_PRIVATE_PLUGINS=true
-  echo "TRUE"
-else
-  FORCE_PRIVATE_PLUGINS=false
-  echo "FALSE"
-fi
+# $2, if specified, is go build tags
+if [ -z ${2+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$2"; fi
 
 # Modify this value as we use newer Go versions.
 GO_VERSION_REQUIRED="1.9.6"
@@ -39,9 +30,6 @@ if [[ $? != 0 ]]; then
   echo "Go is not installed in the path, aborting"
   exit 1
 fi
-
-PRIVATE_PLUGINS_TAG=""
-if [[ ${FORCE_PRIVATE_PLUGINS} == true ]]; then PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"; fi
 
 # Exporting these seems necessary for subcommands to pick them up.
 export GOPATH=${TEMP_DIR}/go-darwin-build
@@ -90,7 +78,7 @@ prepare_build () {
 
   # see DEPENDENCIES comment in MobileLibrary/Android/make.bash
   cd ${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ClientLibrary
-  DEPENDENCIES=$(echo -n "{" && go list -tags "$1" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
+  DEPENDENCIES=$(echo -n "{" && GOOS=$1 go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | GOOS=$1 xargs go list -tags "${BUILD_TAGS}" -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
 
   LDFLAGS="\
   -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildDate=$BUILDDATE \
@@ -113,18 +101,17 @@ prepare_build () {
 
 build_for_ios () {
 
-  IOS_BUILD_TAGS="IOS ${PRIVATE_PLUGINS_TAG}"
   IOS_BUILD_DIR="${BUILD_DIR}/ios"
   rm -rf "${IOS_BUILD_DIR}"
 
   echo "...Getting project dependencies (via go get) for iOS."
   cd ${BASE_DIR}
-  GOOS=darwin go get -d -v -tags "$IOS_BUILD_TAGS" ./...
-  prepare_build "$IOS_BUILD_TAGS"
+  GOOS=darwin go get -d -v -tags "${BUILD_TAGS}" ./...
   if [ $? != 0 ]; then
     echo "....'go get' failed, exiting"
     exit $?
   fi
+  prepare_build darwin
 
   curl https://raw.githubusercontent.com/golang/go/master/misc/ios/clangwrap.sh -o ${TEMP_DIR}/clangwrap.sh
   chmod 555 ${TEMP_DIR}/clangwrap.sh
@@ -133,36 +120,35 @@ build_for_ios () {
   CXX=${TEMP_DIR}/clangwrap.sh \
   CGO_LDFLAGS="-arch armv7 -isysroot $(xcrun --sdk iphoneos --show-sdk-path)" \
   CGO_CFLAGS=-isysroot$(xcrun --sdk iphoneos --show-sdk-path) \
-  CGO_ENABLED=1 GOOS=darwin GOARCH=arm GOARM=7 go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${IOS_BUILD_TAGS}" -o ${IOS_BUILD_DIR}/arm7/libpsiphontunnel.a PsiphonTunnel.go
+  CGO_ENABLED=1 GOOS=darwin GOARCH=arm GOARM=7 go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o ${IOS_BUILD_DIR}/arm7/libpsiphontunnel.a PsiphonTunnel.go
 
   CC=${TEMP_DIR}/clangwrap.sh \
   CXX=${TEMP_DIR}/clangwrap.sh \
   CGO_LDFLAGS="-arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path)" \
   CGO_CFLAGS=-isysroot$(xcrun --sdk iphoneos --show-sdk-path) \
-  CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${IOS_BUILD_TAGS}" -o ${IOS_BUILD_DIR}/arm64/libpsiphontunnel.a PsiphonTunnel.go
+  CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o ${IOS_BUILD_DIR}/arm64/libpsiphontunnel.a PsiphonTunnel.go
 
 }
 
 build_for_macos () {
 
-  MACOS_BUILD_TAGS="${PRIVATE_PLUGINS_TAG}"
   MACOS_BUILD_DIR="${BUILD_DIR}/macos"
   rm -rf "${MACOS_BUILD_DIR}"
 
   echo "...Getting project dependencies (via go get) for MacOS"
   cd ${BASE_DIR}
-  GOOS=darwin go get -d -v -tags "$MACOS_BUILD_TAGS" ./...
-  prepare_build "$MACOS_BUILD_TAGS"
+  GOOS=darwin go get -d -v -tags "${BUILD_TAGS}" ./...
   if [ $? != 0 ]; then
     echo "....'go get' failed, exiting"
     exit $?
   fi
+  prepare_build darwin
 
   TARGET_ARCH=386
-  CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -buildmode=c-shared -ldflags "-s ${LDFLAGS}" -tags "${MACOS_BUILD_TAGS}" -o "${MACOS_BUILD_DIR}/${TARGET_ARCH}/libpsiphontunnel.dylib" PsiphonTunnel.go
+  CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -buildmode=c-shared -ldflags "-s ${LDFLAGS}" -tags "${BUILD_TAGS}" -o "${MACOS_BUILD_DIR}/${TARGET_ARCH}/libpsiphontunnel.dylib" PsiphonTunnel.go
 
   TARGET_ARCH=amd64
-  CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -buildmode=c-shared -ldflags "-s ${LDFLAGS}" -tags "${MACOS_BUILD_TAGS}" -o "${MACOS_BUILD_DIR}/${TARGET_ARCH}/libpsiphontunnel.dylib" PsiphonTunnel.go
+  CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -buildmode=c-shared -ldflags "-s ${LDFLAGS}" -tags "${BUILD_TAGS}" -o "${MACOS_BUILD_DIR}/${TARGET_ARCH}/libpsiphontunnel.dylib" PsiphonTunnel.go
 
 }
 
@@ -204,16 +190,8 @@ case $TARGET in
 
     ;;
   *)
-    echo "..No selection made, building all"
-    build_for_ios
-    if [ $? != 0 ]; then
-      exit $?
-    fi
-
-    build_for_macos
-    if [ $? != 0 ]; then
-      exit $?
-    fi
+    echo "..invalid target"
+    exit 1
 
     ;;
 
