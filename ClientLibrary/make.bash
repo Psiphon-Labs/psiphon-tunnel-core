@@ -65,28 +65,19 @@ build_for_android () {
   fi
   prepare_build android
 
-  TARGET_NDK=android-ndk-r17b
-  curl https://dl.google.com/android/repository/${TARGET_NDK}-linux-x86_64.zip -o ~/android-ndk.zip
-  unzip ~/android-ndk.zip -d ~/
-
-  NDK_TOOLCHAIN_DIR=~/android-ndk-toolchain
-  mkdir -p ${NDK_TOOLCHAIN_DIR}
-
   TARGET_ARCH=arm
   ARMV=7
-  ~/${TARGET_NDK}/build/tools/make_standalone_toolchain.py --arch "${TARGET_ARCH}" --install-dir "${NDK_TOOLCHAIN_DIR}/${TARGET_ARCH}"
 
-  CC="${NDK_TOOLCHAIN_DIR}/${TARGET_ARCH}/bin/arm-linux-androideabi-clang" \
-  CXX="${NDK_TOOLCHAIN_DIR}/${TARGET_ARCH}/bin/arm-linux-androideabi-clang++" \
+  CC="${ANDROID_NDK_TOOLCHAIN_ROOT}/${TARGET_ARCH}/bin/arm-linux-androideabi-clang" \
+  CXX="${ANDROID_NDK_TOOLCHAIN_ROOT}/${TARGET_ARCH}/bin/arm-linux-androideabi-clang++" \
   GOARM=${ARMV} \
   GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o "${OUTPUT_DIR}/${TARGET_ARCH}${ARMV}/libpsiphontunnel.so" PsiphonTunnel.go
 
 
   TARGET_ARCH=arm64
-  ~/${TARGET_NDK}/build/tools/make_standalone_toolchain.py --arch "${TARGET_ARCH}" --install-dir "${NDK_TOOLCHAIN_DIR}/${TARGET_ARCH}"
 
-  CC="${NDK_TOOLCHAIN_DIR}/${TARGET_ARCH}/bin/aarch64-linux-android-clang" \
-  CXX="${NDK_TOOLCHAIN_DIR}/${TARGET_ARCH}/bin/aarch64-linux-android-clang++" \
+  CC="${ANDROID_NDK_TOOLCHAIN_ROOT}/${TARGET_ARCH}/bin/aarch64-linux-android-clang" \
+  CXX="${ANDROID_NDK_TOOLCHAIN_ROOT}/${TARGET_ARCH}/bin/aarch64-linux-android-clang++" \
   GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o "${OUTPUT_DIR}/${TARGET_ARCH}/libpsiphontunnel.so" PsiphonTunnel.go
 
 }
