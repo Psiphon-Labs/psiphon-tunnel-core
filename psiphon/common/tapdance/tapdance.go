@@ -255,20 +255,49 @@ func Dial(
 
 	manager := newDialManager(netDialer.DialContext, ctx)
 
-	tapdanceDialer := &refraction_networking_tapdance.Dialer{
-		TcpDialer: manager.dial,
+	type tapdanceDialResult struct {
+		conn net.Conn
+		err  error
 	}
 
-	conn, err := tapdanceDialer.Dial("tcp", address)
-	if err != nil {
+	resultChannel := make(chan tapdanceDialResult)
+
+	go func() {
+		tapdanceDialer := &refraction_networking_tapdance.Dialer{
+			TcpDialer: manager.dial,
+		}
+
+		conn, err := tapdanceDialer.Dial("tcp", address)
+		if err != nil {
+			err = common.ContextError(err)
+		}
+
+		resultChannel <- tapdanceDialResult{
+			conn: conn,
+			err:  err,
+		}
+	}()
+
+	var result tapdanceDialResult
+
+	select {
+	case result = <-resultChannel:
+	case <-ctx.Done():
+		result.err = ctx.Err()
+		// Interrupt the goroutine
 		manager.close()
-		return nil, common.ContextError(err)
+		<-resultChannel
+	}
+
+	if result.err != nil {
+		manager.close()
+		return nil, common.ContextError(result.err)
 	}
 
 	manager.startUsingRunCtx()
 
 	return &tapdanceConn{
-		Conn:    conn,
+		Conn:    result.conn,
 		manager: manager,
 	}, nil
 }
