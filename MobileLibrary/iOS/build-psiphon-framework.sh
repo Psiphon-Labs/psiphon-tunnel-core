@@ -134,7 +134,7 @@ GOMOBILEVERSION=$(${GOPATH}/bin/gomobile version | perl -ne '/gomobile version (
 
 # see DEPENDENCIES comment in MobileLibrary/Android/make.bash
 cd ${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
-DEPENDENCIES=$(echo -n "{" && GOOS=darwin go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | GOOS=darwin xargs go list -tags "${BUILD_TAGS}" -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
+DEPENDENCIES=$(echo -n "{" && GOOS=darwin go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | GOOS=darwin xargs go list -tags "${BUILD_TAGS}" -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'PKG=pkg && cd $GOPATH/src/$PKG && echo -n "\"$PKG\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
 
 LDFLAGS="\
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildDate=${BUILDDATE} \
