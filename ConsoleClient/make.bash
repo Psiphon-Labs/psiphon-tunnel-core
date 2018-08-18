@@ -11,7 +11,7 @@ EXE_BASENAME="psiphon-tunnel-core"
 
 # BUILD_TAGS needs to be outside of prepare_build because it determines what's fetched by go-get.
 
-PRIVATE_PLUGINS_TAG=""
+PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"
 BUILD_TAGS="${PRIVATE_PLUGINS_TAG}"
 WINDOWS_BUILD_TAGS="${BUILD_TAGS}"
 LINUX_BUILD_TAGS="${BUILD_TAGS}"
