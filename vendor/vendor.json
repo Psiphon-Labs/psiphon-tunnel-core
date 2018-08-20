@@ -321,76 +321,76 @@
 			"revisionTime": "2016-01-10T10:55:54Z"
 		},
 		{
-			"checksumSHA1": "D7BDYZLm/3QveVPYrSAbjGqPaFs=",
+			"checksumSHA1": "ZTKDOsru9qSNGg4GJiZvjRoCen4=",
 			"path": "github.com/redjack/marionette",
-			"revision": "12be546b5d166033e7ca3b2a6a3379122b71b8ce",
-			"revisionTime": "2018-07-31T21:31:38Z"
+			"revision": "360dd8f58226f85f483c7cbf582cb1447f9c802f",
+			"revisionTime": "2018-08-18T17:28:07Z"
 		},
 		{
 			"checksumSHA1": "Pl6hb/q9cfWWaDpYpYobcSXEekU=",
 			"path": "github.com/redjack/marionette/ecb",
-			"revision": "12be546b5d166033e7ca3b2a6a3379122b71b8ce",
-			"revisionTime": "2018-07-31T21:31:38Z"
+			"revision": "360dd8f58226f85f483c7cbf582cb1447f9c802f",
+			"revisionTime": "2018-08-18T17:28:07Z"
 		},
 		{
-			"checksumSHA1": "lHTSYordV+o2PyN+YOKi88uHwLA=",
+			"checksumSHA1": "dA8Ey/jEkeYk+63dE6feATe7IW4=",
 			"path": "github.com/redjack/marionette/fte",
-			"revision": "12be546b5d166033e7ca3b2a6a3379122b71b8ce",
-			"revisionTime": "2018-07-31T21:31:38Z"
+			"revision": "360dd8f58226f85f483c7cbf582cb1447f9c802f",
+			"revisionTime": "2018-08-18T17:28:07Z"
 		},
 		{
 			"checksumSHA1": "SaZjD7CIUgc7wQpVDFgHcLjjokI=",
 			"path": "github.com/redjack/marionette/mar",
-			"revision": "12be546b5d166033e7ca3b2a6a3379122b71b8ce",
-			"revisionTime": "2018-07-31T21:31:38Z"
+			"revision": "360dd8f58226f85f483c7cbf582cb1447f9c802f",
+			"revisionTime": "2018-08-18T17:28:07Z"
 		},
 		{
 			"checksumSHA1": "w71OqyYa6rIFUdOWafSztlM5n1I=",
 			"path": "github.com/redjack/marionette/plugins",
-			"revision": "12be546b5d166033e7ca3b2a6a3379122b71b8ce",
-			"revisionTime": "2018-07-31T21:31:38Z"
+			"revision": "360dd8f58226f85f483c7cbf582cb1447f9c802f",
+			"revisionTime": "2018-08-18T17:28:07Z"
 		},
 		{
 			"checksumSHA1": "mmmpoWtP8OofLHW51gcunsmJ31E=",
 			"path": "github.com/redjack/marionette/plugins/channel",
-			"revision": "12be546b5d166033e7ca3b2a6a3379122b71b8ce",
-			"revisionTime": "2018-07-31T21:31:38Z"
+			"revision": "360dd8f58226f85f483c7cbf582cb1447f9c802f",
+			"revisionTime": "2018-08-18T17:28:07Z"
 		},
 		{
 			"checksumSHA1": "+SkyWSZPDV9zdCJjOEH6XnegXJY=",
 			"path": "github.com/redjack/marionette/plugins/fte",
-			"revision": "12be546b5d166033e7ca3b2a6a3379122b71b8ce",
-			"revisionTime": "2018-07-31T21:31:38Z"
+			"revision": "360dd8f58226f85f483c7cbf582cb1447f9c802f",
+			"revisionTime": "2018-08-18T17:28:07Z"
 		},
 		{
 			"checksumSHA1": "JZXZE5h7jkv7eyD5EnjFYzdPVD8=",
 			"path": "github.com/redjack/marionette/plugins/io",
-			"revision": "12be546b5d166033e7ca3b2a6a3379122b71b8ce",
-			"revisionTime": "2018-07-31T21:31:38Z"
+			"revision": "360dd8f58226f85f483c7cbf582cb1447f9c802f",
+			"revisionTime": "2018-08-18T17:28:07Z"
 		},
 		{
 			"checksumSHA1": "dywFGW0gMUi++YRtIzKtdhxxWAc=",
 			"path": "github.com/redjack/marionette/plugins/model",
-			"revision": "12be546b5d166033e7ca3b2a6a3379122b71b8ce",
-			"revisionTime": "2018-07-31T21:31:38Z"
+			"revision": "360dd8f58226f85f483c7cbf582cb1447f9c802f",
+			"revisionTime": "2018-08-18T17:28:07Z"
 		},
 		{
 			"checksumSHA1": "jQduJg5I7te3Jk21W1OgPfVvqB0=",
 			"path": "github.com/redjack/marionette/plugins/tg",
-			"revision": "12be546b5d166033e7ca3b2a6a3379122b71b8ce",
-			"revisionTime": "2018-07-31T21:31:38Z"
+			"revision": "360dd8f58226f85f483c7cbf582cb1447f9c802f",
+			"revisionTime": "2018-08-18T17:28:07Z"
 		},
 		{
-			"checksumSHA1": "+pHDcrszNlyR/ZRPDKEp0wkQdso=",
+			"checksumSHA1": "07JG4eBhhOsGv4dTBKcEWN4qIwI=",
 			"path": "github.com/redjack/marionette/regex2dfa",
-			"revision": "12be546b5d166033e7ca3b2a6a3379122b71b8ce",
-			"revisionTime": "2018-07-31T21:31:38Z"
+			"revision": "360dd8f58226f85f483c7cbf582cb1447f9c802f",
+			"revisionTime": "2018-08-18T17:28:07Z"
 		},
 		{
 			"checksumSHA1": "Nms95Z1BggDZ02bMzbdNT27FxgQ=",
 			"path": "github.com/redjack/marionette/third_party",
-			"revision": "12be546b5d166033e7ca3b2a6a3379122b71b8ce",
-			"revisionTime": "2018-07-31T21:31:38Z",
+			"revision": "360dd8f58226f85f483c7cbf582cb1447f9c802f",
+			"revisionTime": "2018-08-18T17:28:07Z",
 			"tree": true
 		},
 		{
@@ -518,10 +518,6 @@
 			"path": "golang.org/x/crypto/chacha20poly1305",
 			"revision": "b0697eccbea9adec5b7ba8008f4c33d98d733388",
 			"revisionTime": "2018-04-23T13:30:03Z"
-		},
-		{
-			"path": "golang.org/x/crypto/chacha20poly1305/internal/chacha20",
-			"revision": ""
 		},
 		{
 			"checksumSHA1": "IQkUIOnvlf0tYloFx9mLaXSvXWQ=",
