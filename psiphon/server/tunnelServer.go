@@ -38,11 +38,13 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tapdance"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/marusama/semaphore"
 	cache "github.com/patrickmn/go-cache"
@@ -139,10 +141,23 @@ func (server *TunnelServer) Run() error {
 
 		var listener net.Listener
 		var err error
+
 		if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) {
+
 			listener, err = quic.Listen(localAddress)
 
+		} else if protocol.TunnelProtocolUsesMarionette(tunnelProtocol) {
+
+			listener, err = marionette.Listen(
+				support.Config.ServerIPAddress,
+				support.Config.MarionetteFormat)
+
+		} else if protocol.TunnelProtocolUsesTapdance(tunnelProtocol) {
+
+			listener, err = tapdance.Listen(localAddress)
+
 		} else {
+
 			listener, err = net.Listen("tcp", localAddress)
 		}
 
@@ -803,6 +818,9 @@ func (sshServer *sshServer) stopClients() {
 
 func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.Conn) {
 
+	// Calling clientConn.RemoteAddr at this point, before any Read calls,
+	// satisfies the constraint documented in tapdance.Listen.
+
 	geoIPData := sshServer.support.GeoIPService.Lookup(
 		common.IPAddressFromAddr(clientConn.RemoteAddr()))
 
@@ -1289,7 +1307,6 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 // the connection has terminated but sshClient.run() may still be
 // running and in the process of exiting.
 func (sshClient *sshClient) stop() {
-
 	sshClient.sshConn.Close()
 	sshClient.sshConn.Wait()
 }

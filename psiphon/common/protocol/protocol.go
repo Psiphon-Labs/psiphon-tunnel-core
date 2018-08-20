@@ -36,6 +36,8 @@ const (
 	TUNNEL_PROTOCOL_FRONTED_MEEK                  = "FRONTED-MEEK-OSSH"
 	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP             = "FRONTED-MEEK-HTTP-OSSH"
 	TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH           = "QUIC-OSSH"
+	TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH     = "MARIONETTE-OSSH"
+	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH       = "TAPDANCE-OSSH"
 
 	SERVER_ENTRY_SOURCE_EMBEDDED   = "EMBEDDED"
 	SERVER_ENTRY_SOURCE_REMOTE     = "REMOTE"
@@ -96,10 +98,14 @@ var SupportedTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_FRONTED_MEEK,
 	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP,
 	TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
+	TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH,
+	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 }
 
 var DefaultDisabledTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
+	TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH,
+	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 }
 
 var SupportedServerEntrySources = TunnelProtocols{
@@ -142,8 +148,19 @@ func TunnelProtocolUsesQUIC(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH
 }
 
+func TunnelProtocolUsesMarionette(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH
+}
+
+func TunnelProtocolUsesTapdance(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH
+}
+
 func TunnelProtocolIsResourceIntensive(protocol string) bool {
-	return TunnelProtocolUsesMeek(protocol) || TunnelProtocolUsesQUIC(protocol)
+	return TunnelProtocolUsesMeek(protocol) ||
+		TunnelProtocolUsesQUIC(protocol) ||
+		TunnelProtocolUsesMarionette(protocol) ||
+		TunnelProtocolUsesTapdance(protocol)
 }
 
 func UseClientTunnelProtocol(

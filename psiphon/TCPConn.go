@@ -40,7 +40,7 @@ type TCPConn struct {
 	isClosed int32
 }
 
-// NewTCPDialer creates a TCPDialer.
+// NewTCPDialer creates a TCP Dialer.
 //
 // Note: do not set an UpstreamProxyURL in the config when using NewTCPDialer
 // as a custom dialer for NewProxyAuthTransport (or http.Transport with a
@@ -86,7 +86,7 @@ func DialTCP(
 func proxiedTcpDial(
 	ctx context.Context, addr string, config *DialConfig) (net.Conn, error) {
 
-	var interruptConns common.Conns
+	interruptConns := common.NewConns()
 
 	// Note: using interruptConns to interrupt a proxy dial assumes
 	// that the underlying proxy code will immediately exit with an

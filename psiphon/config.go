@@ -132,10 +132,11 @@ type Config struct {
 	TunnelProtocol string
 
 	// LimitTunnelProtocols indicates which protocols to use. Valid values
-	// include: "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-
-	// OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH",
-	// "FRONTED- MEEK-HTTP-OSSH", "QUIC-OSSH".
-	//
+	// include:
+	// "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
+	// "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH",
+	// "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH", "MARIONETTE-OSSH", and
+	// "TAPDANCE-OSSH".
 	// For the default, an empty list, all protocols are used.
 	LimitTunnelProtocols []string
 

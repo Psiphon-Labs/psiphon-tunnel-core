@@ -63,7 +63,7 @@ func NewSocksProxy(
 		tunneler:               tunneler,
 		listener:               listener,
 		serveWaitGroup:         new(sync.WaitGroup),
-		openConns:              new(common.Conns),
+		openConns:              common.NewConns(),
 		stopListeningBroadcast: make(chan struct{}),
 	}
 	proxy.serveWaitGroup.Add(1)

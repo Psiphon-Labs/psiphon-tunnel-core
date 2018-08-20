@@ -40,6 +40,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
@@ -67,7 +68,7 @@ func TestMain(m *testing.M) {
 		}
 	}
 	if err != nil {
-		fmt.Printf("error getting server IP address: %s", err)
+		fmt.Printf("error getting server IP address: %s\n", err)
 		os.Exit(1)
 	}
 
@@ -197,6 +198,24 @@ func TestQUICOSSH(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "QUIC-OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
+func TestMarionetteOSSH(t *testing.T) {
+	if !marionette.Enabled() {
+		t.Skip("Marionette is not enabled")
+	}
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "MARIONETTE-OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			doDefaultSponsorID:   false,
@@ -398,7 +417,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// create a server
 
 	psiphonServerIPAddress := serverIPAddress
-	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) ||
+		protocol.TunnelProtocolUsesMarionette(runConfig.tunnelProtocol) {
 		// Workaround for macOS firewall.
 		psiphonServerIPAddress = "127.0.0.1"
 	}
@@ -408,6 +428,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		EnableSSHAPIRequests: runConfig.enableSSHAPIRequests,
 		WebServerPort:        8000,
 		TunnelProtocolPorts:  map[string]int{runConfig.tunnelProtocol: 4000},
+	}
+
+	if protocol.TunnelProtocolUsesMarionette(runConfig.tunnelProtocol) {
+		generateConfigParams.TunnelProtocolPorts[runConfig.tunnelProtocol] = 0
+		generateConfigParams.MarionetteFormat = "http_simple_nonblocking"
 	}
 
 	if doTactics {

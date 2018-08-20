@@ -349,7 +349,7 @@ func startTestServer(
 		metricsUpdater: metricsUpdater,
 		tunServer:      tunServer,
 		unixListener:   unixListener,
-		clientConns:    new(common.Conns),
+		clientConns:    common.NewConns(),
 		workers:        new(sync.WaitGroup),
 	}
 
@@ -549,7 +549,7 @@ func startTestTCPServer(useIPv6 bool) (*testTCPServer, error) {
 	server := &testTCPServer{
 		listenerIPAddress: hostIPaddress,
 		tcpListener:       tcpListener,
-		clientConns:       new(common.Conns),
+		clientConns:       common.NewConns(),
 		workers:           new(sync.WaitGroup),
 	}
 

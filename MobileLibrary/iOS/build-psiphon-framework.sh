@@ -1,18 +1,8 @@
 #!/usr/bin/env bash
 
-# This script takes one optional argument: 'private', if private plugins should
-# be used. It should be omitted if private plugins are not desired.
-if [[ $1 == "private" ]]; then
-  FORCE_PRIVATE_PLUGINS=true
-  echo "TRUE"
-else
-  FORCE_PRIVATE_PLUGINS=false
-  echo "FALSE"
-fi
+set -e -u -x
 
-# -x echos commands. -u exits if an unintialized variable is used.
-# -e exits if a command returns an error.
-set -x -u -e
+if [ -z ${1+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$1"; fi
 
 # Modify this value as we use newer Go versions.
 GO_VERSION_REQUIRED="1.9.6"
@@ -40,10 +30,6 @@ FRAMEWORK="Psi"
 INTERMEDIATE_OUPUT_DIR="${BASE_DIR}/PsiphonTunnel/PsiphonTunnel"
 INTERMEDIATE_OUPUT_FILE="${FRAMEWORK}.framework"
 FRAMEWORK_BINARY="${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}/Versions/A/${FRAMEWORK}"
-
-PRIVATE_PLUGINS_TAG=""
-if [[ ${FORCE_PRIVATE_PLUGINS} == true ]]; then PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"; fi
-BUILD_TAGS="IOS ${PRIVATE_PLUGINS_TAG}"
 
 UMBRELLA_FRAMEWORK_XCODE_PROJECT=${BASE_DIR}/PsiphonTunnel/PsiphonTunnel.xcodeproj/
 
@@ -148,7 +134,7 @@ GOMOBILEVERSION=$(${GOPATH}/bin/gomobile version | perl -ne '/gomobile version (
 
 # see DEPENDENCIES comment in MobileLibrary/Android/make.bash
 cd ${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
-DEPENDENCIES=$(echo -n "{" && go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
+DEPENDENCIES=$(echo -n "{" && GOOS=darwin go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | GOOS=darwin xargs go list -tags "${BUILD_TAGS}" -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'PKG=pkg && cd $GOPATH/src/$PKG && echo -n "\"$PKG\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
 
 LDFLAGS="\
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildDate=${BUILDDATE} \

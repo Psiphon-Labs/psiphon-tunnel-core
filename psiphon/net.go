@@ -143,6 +143,32 @@ type NetworkIDGetter interface {
 // Dialer is a custom network dialer.
 type Dialer func(context.Context, string, string) (net.Conn, error)
 
+// NetDialer implements an interface that matches net.Dialer.
+// Limitation: only "tcp" Dials are supported.
+type NetDialer struct {
+	dialTCP Dialer
+}
+
+// NewNetDialer creates a new NetDialer.
+func NewNetDialer(config *DialConfig) *NetDialer {
+	return &NetDialer{
+		dialTCP: NewTCPDialer(config),
+	}
+}
+
+func (d *NetDialer) Dial(network, address string) (net.Conn, error) {
+	return d.DialContext(context.Background(), network, address)
+}
+
+func (d *NetDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	switch network {
+	case "tcp":
+		return d.dialTCP(context.Background(), "tcp", address)
+	default:
+		return nil, common.ContextError(fmt.Errorf("unsupported network: %s", network))
+	}
+}
+
 // LocalProxyRelay sends to remoteConn bytes received from localConn,
 // and sends to localConn bytes received from remoteConn.
 func LocalProxyRelay(proxyType string, localConn, remoteConn net.Conn) {
