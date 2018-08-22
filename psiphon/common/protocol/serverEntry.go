@@ -62,6 +62,7 @@ type ServerEntry struct {
 	MeekFrontingDisableSNI        bool     `json:"meekFrontingDisableSNI"`
 	TacticsRequestPublicKey       string   `json:"tacticsRequestPublicKey"`
 	TacticsRequestObfuscatedKey   string   `json:"tacticsRequestObfuscatedKey"`
+	MarionetteFormat              string   `json:"marionetteFormat"`
 	ConfigurationVersion          int      `json:"configurationVersion"`
 
 	// These local fields are not expected to be present in downloaded server
@@ -145,6 +146,8 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 
 	for _, protocol := range SupportedTunnelProtocols {
 
+		// TODO: Marionette UDP formats are incompatible with
+		// useUpstreamProxy, but not currently supported
 		if useUpstreamProxy && TunnelProtocolUsesQUIC(protocol) {
 			continue
 		}

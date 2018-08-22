@@ -1,32 +1,14 @@
 #!/usr/bin/env bash
 
-# -x echos commands.
-# -e exits if a command returns an error.
-set -x -e
+set -e -u -x
 
 if [ ! -f make.bash ]; then
   echo "make.bash must be run from $GOPATH/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ClientLibrary"
   exit 1
 fi
 
-# This script takes an optional second argument: 'private', if private plugins should
-# be used. It should be omitted if private plugins are not desired.
-if [[ $2 == "private" ]]; then
-  FORCE_PRIVATE_PLUGINS=true
-  echo "TRUE"
-else
-  FORCE_PRIVATE_PLUGINS=false
-  echo "FALSE"
-fi
-
-# BUILD_TAGS needs to be outside of prepare_build because it determines what's fetched by go-get.
-
-PRIVATE_PLUGINS_TAG=""
-if [[ ${FORCE_PRIVATE_PLUGINS} == true ]]; then PRIVATE_PLUGINS_TAG="PRIVATE_PLUGINS"; fi
-BUILD_TAGS="${PRIVATE_PLUGINS_TAG}"
-WINDOWS_BUILD_TAGS="${BUILD_TAGS}"
-LINUX_BUILD_TAGS="${BUILD_TAGS}"
-ANDROID_BUILD_TAGS="${BUILD_TAGS}"
+# $2, if specified, is go build tags
+if [ -z ${2+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$2"; fi
 
 BUILD_DIR=build
 
@@ -49,7 +31,7 @@ prepare_build () {
   # - pipes to `xargs` again, specifiying `pkg` as the placeholder name for each item being operated on (which is the list of non standard library import paths from the previous step)
   #  - `xargs` runs a bash script (via `-c`) which changes to each import path in sequence, then echoes out `"<import path>":"<subshell output of getting the short git revision>",`
   # - this leaves a trailing `,` at the end, and no close to the JSON object, so simply `sed` replace the comma before the end of the line with `}` and you now have valid JSON
-  DEPENDENCIES=$(echo -n "{" && go list -tags "$1" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
+  DEPENDENCIES=$(echo -n "{" && GOOS=$1 go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | GOOS=$1 xargs go list -tags "${BUILD_TAGS}" -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
 
   LDFLAGS="\
   -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildDate=$BUILDDATE \
@@ -76,12 +58,12 @@ build_for_android () {
   OUTPUT_DIR="${BUILD_DIR}/${TARGET_OS}"
 
   echo "...Getting project dependencies (via go get) for Android."
-  GOOS=windows go get -d -v -tags "$ANDROID_BUILD_TAGS" ./...
-  prepare_build "$ANDROID_BUILD_TAGS"
+  GOOS=android go get -d -v -tags "${BUILD_TAGS}" ./...
   if [ $? != 0 ]; then
     echo "....'go get' failed, exiting"
     exit $?
   fi
+  prepare_build android
 
   TARGET_NDK=android-ndk-r17b
   curl https://dl.google.com/android/repository/${TARGET_NDK}-linux-x86_64.zip -o ~/android-ndk.zip
@@ -97,7 +79,7 @@ build_for_android () {
   CC="${NDK_TOOLCHAIN_DIR}/${TARGET_ARCH}/bin/arm-linux-androideabi-clang" \
   CXX="${NDK_TOOLCHAIN_DIR}/${TARGET_ARCH}/bin/arm-linux-androideabi-clang++" \
   GOARM=${ARMV} \
-  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$ANDROID_BUILD_TAGS" -o "${OUTPUT_DIR}/${TARGET_ARCH}${ARMV}/libpsiphontunnel.so" PsiphonTunnel.go
+  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o "${OUTPUT_DIR}/${TARGET_ARCH}${ARMV}/libpsiphontunnel.so" PsiphonTunnel.go
 
 
   TARGET_ARCH=arm64
@@ -105,7 +87,7 @@ build_for_android () {
 
   CC="${NDK_TOOLCHAIN_DIR}/${TARGET_ARCH}/bin/aarch64-linux-android-clang" \
   CXX="${NDK_TOOLCHAIN_DIR}/${TARGET_ARCH}/bin/aarch64-linux-android-clang++" \
-  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$ANDROID_BUILD_TAGS" -o "${OUTPUT_DIR}/${TARGET_ARCH}/libpsiphontunnel.so" PsiphonTunnel.go
+  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o "${OUTPUT_DIR}/${TARGET_ARCH}/libpsiphontunnel.so" PsiphonTunnel.go
 
 }
 
@@ -116,21 +98,21 @@ build_for_linux () {
   OUTPUT_DIR="${BUILD_DIR}/${TARGET_OS}"
 
   echo "...Getting project dependencies (via go get) for Linux."
-  GOOS=linux go get -d -v -tags "$LINUX_BUILD_TAGS" ./...
-  prepare_build "$LINUX_BUILD_TAGS"
+  GOOS=linux go get -d -v -tags "${BUILD_TAGS}" ./...
   if [ $? != 0 ]; then
     echo "....'go get' failed, exiting"
     exit $?
   fi
+  prepare_build linux
 
   TARGET_ARCH=386
   # TODO: is "CFLAGS=-m32" required?
   CFLAGS=-m32 \
-  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$LINUX_BUILD_TAGS" -o "${OUTPUT_DIR}/${TARGET_ARCH}/libpsiphontunnel.so" PsiphonTunnel.go
+  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o "${OUTPUT_DIR}/${TARGET_ARCH}/libpsiphontunnel.so" PsiphonTunnel.go
 
 
   TARGET_ARCH=amd64
-  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$LINUX_BUILD_TAGS" -o "${OUTPUT_DIR}/${TARGET_ARCH}/libpsiphontunnel.so" PsiphonTunnel.go
+  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o "${OUTPUT_DIR}/${TARGET_ARCH}/libpsiphontunnel.so" PsiphonTunnel.go
 
 }
 
@@ -141,19 +123,19 @@ build_for_windows () {
   OUTPUT_DIR="${BUILD_DIR}/${TARGET_OS}"
 
   echo "...Getting project dependencies (via go get) for Windows."
-  GOOS=windows go get -d -v -tags "$WINDOWS_BUILD_TAGS" ./...
-  prepare_build "$WINDOWS_BUILD_TAGS"
+  GOOS=windows go get -d -v -tags "${BUILD_TAGS}" ./...
   if [ $? != 0 ]; then
     echo "....'go get' failed, exiting"
     exit $?
   fi
+  prepare_build windows
 
   TARGET_ARCH=386
 
   CGO_ENABLED=1 \
   CGO_LDFLAGS="-static-libgcc -L /usr/i686-w64-mingw32/lib/ -lwsock32 -lcrypt32 -lgdi32" \
   CC=/usr/bin/i686-w64-mingw32-gcc \
-  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$WINDOWS_BUILD_TAGS" -o "${OUTPUT_DIR}/${TARGET_ARCH}/psiphontunnel.dll" PsiphonTunnel.go
+  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o "${OUTPUT_DIR}/${TARGET_ARCH}/psiphontunnel.dll" PsiphonTunnel.go
 
 
   TARGET_ARCH=amd64
@@ -161,7 +143,7 @@ build_for_windows () {
   CGO_ENABLED=1 \
   CGO_LDFLAGS="-static-libgcc -L /usr/x86_64-w64-mingw32/lib/ -lwsock32 -lcrypt32 -lgdi32" \
   CC=/usr/bin/x86_64-w64-mingw32-gcc \
-  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "$WINDOWS_BUILD_TAGS" -o "${OUTPUT_DIR}/${TARGET_ARCH}/psiphontunnel.dll" PsiphonTunnel.go
+  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o "${OUTPUT_DIR}/${TARGET_ARCH}/psiphontunnel.dll" PsiphonTunnel.go
 
 }
 
@@ -184,13 +166,13 @@ TARGET=$1
 case $TARGET in
   windows)
     echo "..Building for Windows"
-    build_for_windows $2
+    build_for_windows
     exit $?
 
     ;;
   linux)
     echo "..Building for Linux"
-    build_for_linux $2
+    build_for_linux
     exit $?
 
     ;;
@@ -214,12 +196,12 @@ case $TARGET in
     ;;
   all)
     echo "..Building all"
-    build_for_windows $2
+    build_for_windows
     if [ $? != 0 ]; then
       exit $?
     fi
 
-    build_for_linux $2
+    build_for_linux
     if [ $? != 0 ]; then
       exit $?
     fi
@@ -241,31 +223,9 @@ case $TARGET in
 
     ;;
   *)
-    echo "..No selection made, building all"
-    build_for_windows $2
-    if [ $? != 0 ]; then
-      exit $?
-    fi
+    echo "..invalid target"
+    exit 1
 
-    build_for_linux $2
-    if [ $? != 0 ]; then
-      exit $?
-    fi
-
-    build_for_macos
-    if [ $? != 0 ]; then
-      exit $?
-    fi
-
-    build_for_android
-    if [ $? != 0 ]; then
-      exit $?
-    fi
-
-    build_for_ios
-    if [ $? != 0 ]; then
-      exit $?
-    fi
 
     ;;
 

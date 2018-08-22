@@ -41,7 +41,7 @@ func TestQUIC(t *testing.T) {
 
 	listener, err := Listen("127.0.0.1:0")
 	if err != nil {
-		t.Errorf("Listen failed: %s", err)
+		t.Fatalf("Listen failed: %s", err)
 	}
 
 	serverAddress := listener.Addr().String()
