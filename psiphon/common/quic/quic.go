@@ -169,7 +169,7 @@ func Dial(
 
 		stream, err := session.OpenStream()
 		if err != nil {
-			session.Close(nil)
+			session.Close()
 			resultChannel <- dialResult{err: err}
 			return
 		}
@@ -191,7 +191,7 @@ func Dial(
 	case <-ctx.Done():
 		err = ctx.Err()
 		// Interrupt the goroutine
-		session.Close(nil)
+		session.Close()
 		<-resultChannel
 	}
 
@@ -234,7 +234,7 @@ func (conn *Conn) doDeferredAcceptStream() error {
 
 	stream, err := conn.session.AcceptStream()
 	if err != nil {
-		conn.session.Close(nil)
+		conn.session.Close()
 		conn.acceptErr = common.ContextError(err)
 		return conn.acceptErr
 	}
@@ -290,7 +290,7 @@ func (conn *Conn) Write(b []byte) (int, error) {
 }
 
 func (conn *Conn) Close() error {
-	err := conn.session.Close(nil)
+	err := conn.session.Close()
 	if conn.packetConn != nil {
 		err1 := conn.packetConn.Close()
 		if err == nil {
