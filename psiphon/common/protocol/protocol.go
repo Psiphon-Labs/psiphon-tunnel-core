@@ -103,7 +103,6 @@ var SupportedTunnelProtocols = TunnelProtocols{
 }
 
 var DefaultDisabledTunnelProtocols = TunnelProtocols{
-	TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 }
