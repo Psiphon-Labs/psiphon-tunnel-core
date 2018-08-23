@@ -83,7 +83,6 @@ func runMemoryTest(t *testing.T, testMode int) {
 		os.Exit(1)
 	}
 	defer os.RemoveAll(testDataDirName)
-	os.Remove(filepath.Join(testDataDirName, psiphon.DATA_STORE_FILENAME))
 
 	psiphon.SetEmitDiagnosticNotices(true)
 
