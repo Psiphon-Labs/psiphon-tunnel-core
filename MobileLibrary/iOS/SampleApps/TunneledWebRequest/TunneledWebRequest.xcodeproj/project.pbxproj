@@ -16,6 +16,7 @@
 		6626590E1DCB8CF400872F6C /* TunneledWebRequestUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6626590D1DCB8CF400872F6C /* TunneledWebRequestUITests.swift */; };
 		6682D90E1EB1334000329958 /* psiphon-embedded-server-entries.txt in Resources */ = {isa = PBXBuildFile; fileRef = 6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */; };
 		6688DBB61DCD684B00721A9E /* psiphon-config.json in Resources */ = {isa = PBXBuildFile; fileRef = 6688DBB51DCD684B00721A9E /* psiphon-config.json */; };
+		DEB1E38A2E15C48277D2E61E /* libPods-TunneledWebRequest.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 37F726750F0082A9B17447DC /* libPods-TunneledWebRequest.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -48,6 +49,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		37F726750F0082A9B17447DC /* libPods-TunneledWebRequest.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-TunneledWebRequest.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		662658EA1DCB8CF300872F6C /* TunneledWebRequest.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TunneledWebRequest.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		662658ED1DCB8CF300872F6C /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		662658EF1DCB8CF300872F6C /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
@@ -63,6 +65,8 @@
 		6626590F1DCB8CF400872F6C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "psiphon-embedded-server-entries.txt"; sourceTree = "<group>"; };
 		6688DBB51DCD684B00721A9E /* psiphon-config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = "psiphon-config.json"; sourceTree = "<group>"; };
+		6BA09789075034B337A791DA /* Pods-TunneledWebRequest.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TunneledWebRequest.debug.xcconfig"; path = "Pods/Target Support Files/Pods-TunneledWebRequest/Pods-TunneledWebRequest.debug.xcconfig"; sourceTree = "<group>"; };
+		FC00C7E45B17A3FDBDC1BF85 /* Pods-TunneledWebRequest.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TunneledWebRequest.release.xcconfig"; path = "Pods/Target Support Files/Pods-TunneledWebRequest/Pods-TunneledWebRequest.release.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -70,6 +74,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DEB1E38A2E15C48277D2E61E /* libPods-TunneledWebRequest.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -90,6 +95,15 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		0045CE62DA042FBB9EEC82C6 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				6BA09789075034B337A791DA /* Pods-TunneledWebRequest.debug.xcconfig */,
+				FC00C7E45B17A3FDBDC1BF85 /* Pods-TunneledWebRequest.release.xcconfig */,
+			);
+			name = Pods;
+			sourceTree = "<group>";
+		};
 		662658E11DCB8CF300872F6C = {
 			isa = PBXGroup;
 			children = (
@@ -97,6 +111,8 @@
 				662659011DCB8CF400872F6C /* TunneledWebRequestTests */,
 				6626590C1DCB8CF400872F6C /* TunneledWebRequestUITests */,
 				662658EB1DCB8CF300872F6C /* Products */,
+				0045CE62DA042FBB9EEC82C6 /* Pods */,
+				B9517667525E004ABCEB784D /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -143,6 +159,14 @@
 			path = TunneledWebRequestUITests;
 			sourceTree = "<group>";
 		};
+		B9517667525E004ABCEB784D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				37F726750F0082A9B17447DC /* libPods-TunneledWebRequest.a */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -150,10 +174,13 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 662659121DCB8CF400872F6C /* Build configuration list for PBXNativeTarget "TunneledWebRequest" */;
 			buildPhases = (
+				5555F15E8B8D35FD6F809B0B /* [CP] Check Pods Manifest.lock */,
 				662658E61DCB8CF300872F6C /* Sources */,
 				662658E71DCB8CF300872F6C /* Frameworks */,
 				662658E81DCB8CF300872F6C /* Resources */,
 				662659221DCBC8CB00872F6C /* CopyFiles */,
+				161BCAA9D00D77704E622F78 /* [CP] Embed Pods Frameworks */,
+				A679CFEFFDF17884E46F6A14 /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -277,6 +304,60 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		161BCAA9D00D77704E622F78 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${SRCROOT}/Pods/Target Support Files/Pods-TunneledWebRequest/Pods-TunneledWebRequest-frameworks.sh",
+				"${PODS_ROOT}/PsiphonTunnel/Frameworks/PsiphonTunnel.framework",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputPaths = (
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/PsiphonTunnel.framework",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/Pods/Target Support Files/Pods-TunneledWebRequest/Pods-TunneledWebRequest-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		5555F15E8B8D35FD6F809B0B /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-TunneledWebRequest-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		A679CFEFFDF17884E46F6A14 /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "[CP] Copy Pods Resources";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/Pods/Target Support Files/Pods-TunneledWebRequest/Pods-TunneledWebRequest-resources.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		662658E61DCB8CF300872F6C /* Sources */ = {
@@ -450,6 +531,7 @@
 		};
 		662659131DCB8CF400872F6C /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 6BA09789075034B337A791DA /* Pods-TunneledWebRequest.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				DEVELOPMENT_TEAM = Q6HLNEX92A;
@@ -469,6 +551,7 @@
 		};
 		662659141DCB8CF400872F6C /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = FC00C7E45B17A3FDBDC1BF85 /* Pods-TunneledWebRequest.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				DEVELOPMENT_TEAM = Q6HLNEX92A;

@@ -239,9 +239,9 @@ extension AppDelegate: TunneledAppDelegate {
         }
     }
 
-	func onDiagnosticMessage(_ message: String) {
-		NSLog("onDiagnosticMessage: %@", message)
-	}
+    func onDiagnosticMessage(_ message: String, withTimestamp timestamp: String) {
+        NSLog("onDiagnosticMessage(%@): %@", timestamp, message)
+    }
 
 	func onConnected() {
 		NSLog("onConnected")
