@@ -99,6 +99,8 @@ Psiphon Tunnel Core uses:
 * [codahale/sss](https://github.com/codahale/sss)
 * [marusama/semaphore](https://github.com/marusama/semaphore)
 * [utls](https://github.com/refraction-networking/utls)
+* [quic-go](https://github.com/lucas-clemente/quic-go)
+* [tls-tris](https://github.com/cloudflare/tls-tris)
 
 Licensing
 --------------------------------------------------------------------------------

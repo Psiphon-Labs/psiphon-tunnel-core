@@ -45,7 +45,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
-	utls "github.com/Psiphon-Labs/utls"
 	"golang.org/x/net/http2"
 )
 
@@ -249,8 +248,8 @@ func DialMeek(
 			SkipVerify:                    true,
 			TLSProfile:                    meekConfig.TLSProfile,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
-			ClientSessionCache:            utls.NewLRUClientSessionCache(0),
 		}
+		tlsConfig.EnableClientSessionCache(meekConfig.ClientParameters)
 
 		if meekConfig.UseObfuscatedSessionTickets {
 			tlsConfig.ObfuscatedSessionTicketKey = meekConfig.MeekObfuscatedKey
@@ -302,18 +301,9 @@ func DialMeek(
 			return nil, common.ContextError(err)
 		}
 
-		isHTTP2 := false
-		if tlsConn, ok := preConn.(*utls.UConn); ok {
-			state := tlsConn.ConnectionState()
-			if state.NegotiatedProtocolIsMutual &&
-				state.NegotiatedProtocol == "h2" {
-				isHTTP2 = true
-			}
-		}
-
 		cachedTLSDialer = newCachedTLSDialer(preConn, tlsDialer)
 
-		if isHTTP2 {
+		if IsTLSConnUsingHTTP2(preConn) {
 			NoticeInfo("negotiated HTTP/2 for %s", meekConfig.DialAddress)
 			transport = &http2.Transport{
 				DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {

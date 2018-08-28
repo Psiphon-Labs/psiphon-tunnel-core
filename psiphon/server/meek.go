@@ -43,7 +43,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	utls "github.com/Psiphon-Labs/utls"
+	tris "github.com/Psiphon-Labs/tls-tris"
 )
 
 // MeekServer is based on meek-server.go from Tor and Psiphon:
@@ -96,7 +96,7 @@ const (
 type MeekServer struct {
 	support           *SupportServices
 	listener          net.Listener
-	tlsConfig         *utls.Config
+	tlsConfig         *tris.Config
 	clientHandler     func(clientTunnelProtocol string, clientConn net.Conn)
 	openConns         *common.Conns
 	stopBroadcast     <-chan struct{}
@@ -923,23 +923,23 @@ func (session *meekSession) GetMetrics() LogFields {
 // assuming the peer is an uncensored CDN.
 func makeMeekTLSConfig(
 	support *SupportServices,
-	useObfuscatedSessionTickets bool) (*utls.Config, error) {
+	useObfuscatedSessionTickets bool) (*tris.Config, error) {
 
 	certificate, privateKey, err := common.GenerateWebServerCertificate(common.GenerateHostName())
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
-	tlsCertificate, err := utls.X509KeyPair(
+	tlsCertificate, err := tris.X509KeyPair(
 		[]byte(certificate), []byte(privateKey))
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
-	config := &utls.Config{
-		Certificates: []utls.Certificate{tlsCertificate},
+	config := &tris.Config{
+		Certificates: []tris.Certificate{tlsCertificate},
 		NextProtos:   []string{"http/1.1"},
-		MinVersion:   utls.VersionTLS10,
+		MinVersion:   tris.VersionTLS10,
 
 		// This is a reordering of the supported CipherSuites in golang 1.6. Non-ephemeral key
 		// CipherSuites greatly reduce server load, and we try to select these since the meek
@@ -948,23 +948,23 @@ func makeMeekTLSConfig(
 		// by ephemeral key CipherSuites.
 		// https://github.com/golang/go/blob/1cb3044c9fcd88e1557eca1bf35845a4108bc1db/src/crypto/tls/cipher_suites.go#L75
 		CipherSuites: []uint16{
-			utls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-			utls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			utls.TLS_RSA_WITH_RC4_128_SHA,
-			utls.TLS_RSA_WITH_AES_128_CBC_SHA,
-			utls.TLS_RSA_WITH_AES_256_CBC_SHA,
-			utls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
-			utls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			utls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			utls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			utls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			utls.TLS_ECDHE_RSA_WITH_RC4_128_SHA,
-			utls.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA,
-			utls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-			utls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
-			utls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-			utls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
-			utls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
+			tris.TLS_RSA_WITH_AES_128_GCM_SHA256,
+			tris.TLS_RSA_WITH_AES_256_GCM_SHA384,
+			tris.TLS_RSA_WITH_RC4_128_SHA,
+			tris.TLS_RSA_WITH_AES_128_CBC_SHA,
+			tris.TLS_RSA_WITH_AES_256_CBC_SHA,
+			tris.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+			tris.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tris.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tris.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tris.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tris.TLS_ECDHE_RSA_WITH_RC4_128_SHA,
+			tris.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA,
+			tris.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+			tris.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+			tris.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			tris.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+			tris.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
 		},
 		PreferServerCipherSuites: true,
 	}
@@ -972,7 +972,7 @@ func makeMeekTLSConfig(
 	if useObfuscatedSessionTickets {
 
 		// See obfuscated session ticket overview
-		// in utls.NewObfuscatedClientSessionCache
+		// in NewObfuscatedClientSessionCache.
 
 		var obfuscatedSessionTicketKey [32]byte
 		key, err := hex.DecodeString(support.Config.MeekObfuscatedKey)
@@ -991,7 +991,7 @@ func makeMeekTLSConfig(
 		}
 
 		// Note: SessionTicketKey needs to be set, or else, it appears,
-		// utls.Config.serverInit() will clobber the value set by
+		// tris.Config.serverInit() will clobber the value set by
 		// SetSessionTicketKeys.
 		config.SessionTicketKey = obfuscatedSessionTicketKey
 		config.SetSessionTicketKeys([][32]byte{

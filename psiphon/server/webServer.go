@@ -32,7 +32,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	utls "github.com/Psiphon-Labs/utls"
+	tris "github.com/Psiphon-Labs/tls-tris"
 )
 
 const WEB_SERVER_IO_TIMEOUT = 10 * time.Second
@@ -70,15 +70,15 @@ func RunWebServer(
 	serveMux.HandleFunc("/connected", webServer.connectedHandler)
 	serveMux.HandleFunc("/status", webServer.statusHandler)
 
-	certificate, err := utls.X509KeyPair(
+	certificate, err := tris.X509KeyPair(
 		[]byte(support.Config.WebServerCertificate),
 		[]byte(support.Config.WebServerPrivateKey))
 	if err != nil {
 		return common.ContextError(err)
 	}
 
-	tlsConfig := &utls.Config{
-		Certificates: []utls.Certificate{certificate},
+	tlsConfig := &tris.Config{
+		Certificates: []tris.Certificate{certificate},
 	}
 
 	// TODO: inherits global log config?

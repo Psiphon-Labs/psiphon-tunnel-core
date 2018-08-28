@@ -154,6 +154,12 @@ type Config struct {
 	// For the default, 0, InitialLimitTunnelProtocols is off.
 	InitialLimitTunnelProtocolsCandidateCount int
 
+	// LimitTLSProfiles indicates which TLS profiles to select from. Valid
+	// values are listed in protocols.SupportedTLSProfiles.
+	// For the default, an empty list, all profiles are candidates for
+	// selection.
+	LimitTLSProfiles []string
+
 	// EstablishTunnelTimeoutSeconds specifies a time limit after which to
 	// halt the core tunnel controller if no tunnel has been established. The
 	// default is parameters.EstablishTunnelTimeoutSeconds.
@@ -817,6 +823,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 	if len(config.InitialLimitTunnelProtocols) > 0 && config.InitialLimitTunnelProtocolsCandidateCount > 0 {
 		applyParameters[parameters.InitialLimitTunnelProtocols] = protocol.TunnelProtocols(config.InitialLimitTunnelProtocols)
 		applyParameters[parameters.InitialLimitTunnelProtocolsCandidateCount] = config.InitialLimitTunnelProtocolsCandidateCount
+	}
+
+	if len(config.LimitTLSProfiles) > 0 {
+		applyParameters[parameters.LimitTLSProfiles] = protocol.TunnelProtocols(config.LimitTLSProfiles)
 	}
 
 	if config.EstablishTunnelTimeoutSeconds != nil {

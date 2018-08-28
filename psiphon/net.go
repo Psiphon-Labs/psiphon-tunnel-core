@@ -35,7 +35,6 @@ import (
 
 	"github.com/Psiphon-Labs/dns"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	utls "github.com/Psiphon-Labs/utls"
 )
 
 const DNS_PORT = 53
@@ -268,19 +267,20 @@ func MakeUntunneledHTTPClient(
 
 	dialer := NewTCPDialer(untunneledDialConfig)
 
-	tlsDialer := NewCustomTLSDialer(
-		// Note: when verifyLegacyCertificate is not nil, some
-		// of the other CustomTLSConfig is overridden.
-		&CustomTLSConfig{
-			ClientParameters: config.clientParameters,
-			Dial:             dialer,
-			VerifyLegacyCertificate:       verifyLegacyCertificate,
-			UseDialAddrSNI:                true,
-			SNIServerName:                 "",
-			SkipVerify:                    skipVerify,
-			TrustedCACertificatesFilename: untunneledDialConfig.TrustedCACertificatesFilename,
-			ClientSessionCache:            utls.NewLRUClientSessionCache(0),
-		})
+	// Note: when verifyLegacyCertificate is not nil, some
+	// of the other CustomTLSConfig is overridden.
+	tlsConfig := &CustomTLSConfig{
+		ClientParameters: config.clientParameters,
+		Dial:             dialer,
+		VerifyLegacyCertificate:       verifyLegacyCertificate,
+		UseDialAddrSNI:                true,
+		SNIServerName:                 "",
+		SkipVerify:                    skipVerify,
+		TrustedCACertificatesFilename: untunneledDialConfig.TrustedCACertificatesFilename,
+	}
+	tlsConfig.EnableClientSessionCache(config.clientParameters)
+
+	tlsDialer := NewCustomTLSDialer(tlsConfig)
 
 	transport := &http.Transport{
 		Dial: func(network, addr string) (net.Conn, error) {
