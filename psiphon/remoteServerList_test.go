@@ -205,8 +205,6 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	// mock seeding SLOKs
 	//
 
-	os.Remove(filepath.Join(testDataDirName, DATA_STORE_FILENAME))
-
 	err = OpenDataStore(&Config{DataStoreDirectory: testDataDirName})
 	if err != nil {
 		t.Fatalf("error initializing client datastore: %s", err)

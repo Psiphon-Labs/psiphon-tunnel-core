@@ -315,7 +315,7 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 
 	params := serverContext.getBaseAPIParameters()
 
-	lastConnected, err := GetKeyValue(DATA_STORE_LAST_CONNECTED_KEY)
+	lastConnected, err := GetKeyValue(datastoreLastConnectedKey)
 	if err != nil {
 		return common.ContextError(err)
 	}
@@ -361,7 +361,7 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 	}
 
 	err = SetKeyValue(
-		DATA_STORE_LAST_CONNECTED_KEY, connectedResponse.ConnectedTimestamp)
+		datastoreLastConnectedKey, connectedResponse.ConnectedTimestamp)
 	if err != nil {
 		return common.ContextError(err)
 	}
@@ -515,7 +515,7 @@ func makeStatusRequestPayload(
 	payload["https_requests"] = make([]string, 0)
 
 	persistentStatPayloadNames := make(map[string]string)
-	persistentStatPayloadNames[PERSISTENT_STAT_TYPE_REMOTE_SERVER_LIST] = "remote_server_list_stats"
+	persistentStatPayloadNames[datastorePersistentStatTypeRemoteServerList] = "remote_server_list_stats"
 
 	for statType, stats := range persistentStats {
 
@@ -607,7 +607,7 @@ func RecordRemoteServerListStat(
 	}
 
 	return StorePersistentStat(
-		PERSISTENT_STAT_TYPE_REMOTE_SERVER_LIST, remoteServerListStatJson)
+		datastorePersistentStatTypeRemoteServerList, remoteServerListStatJson)
 }
 
 // doGetRequest makes a tunneled HTTPS request and returns the response body.
