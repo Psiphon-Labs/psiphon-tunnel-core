@@ -155,6 +155,10 @@ func TunnelProtocolUsesTapdance(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH
 }
 
+func TunnelProtocolIsFronted(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK
+}
+
 func TunnelProtocolIsResourceIntensive(protocol string) bool {
 	return TunnelProtocolUsesMeek(protocol) ||
 		TunnelProtocolUsesQUIC(protocol) ||

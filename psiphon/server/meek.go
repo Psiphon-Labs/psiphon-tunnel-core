@@ -114,7 +114,7 @@ type MeekServer struct {
 func NewMeekServer(
 	support *SupportServices,
 	listener net.Listener,
-	useTLS, useObfuscatedSessionTickets bool,
+	useTLS, isFronted, useObfuscatedSessionTickets bool,
 	clientHandler func(clientTunnelProtocol string, clientConn net.Conn),
 	stopBroadcast <-chan struct{}) (*MeekServer, error) {
 
@@ -147,7 +147,7 @@ func NewMeekServer(
 
 	if useTLS {
 		tlsConfig, err := makeMeekTLSConfig(
-			support, useObfuscatedSessionTickets)
+			support, isFronted, useObfuscatedSessionTickets)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -923,7 +923,7 @@ func (session *meekSession) GetMetrics() LogFields {
 // assuming the peer is an uncensored CDN.
 func makeMeekTLSConfig(
 	support *SupportServices,
-	useObfuscatedSessionTickets bool) (*tris.Config, error) {
+	isFronted, useObfuscatedSessionTickets bool) (*tris.Config, error) {
 
 	certificate, privateKey, err := common.GenerateWebServerCertificate(common.GenerateHostName())
 	if err != nil {
@@ -940,14 +940,19 @@ func makeMeekTLSConfig(
 		Certificates: []tris.Certificate{tlsCertificate},
 		NextProtos:   []string{"http/1.1"},
 		MinVersion:   tris.VersionTLS10,
+	}
 
+	if isFronted {
 		// This is a reordering of the supported CipherSuites in golang 1.6. Non-ephemeral key
 		// CipherSuites greatly reduce server load, and we try to select these since the meek
 		// protocol is providing obfuscation, not privacy/integrity (this is provided by the
 		// tunneled SSH), so we don't benefit from the perfect forward secrecy property provided
 		// by ephemeral key CipherSuites.
 		// https://github.com/golang/go/blob/1cb3044c9fcd88e1557eca1bf35845a4108bc1db/src/crypto/tls/cipher_suites.go#L75
-		CipherSuites: []uint16{
+		//
+		// This optimization is applied only when there's a CDN in front of the meek server; in
+		// unfronted cases we prefer a more natural TLS handshake.
+		config.CipherSuites = []uint16{
 			tris.TLS_RSA_WITH_AES_128_GCM_SHA256,
 			tris.TLS_RSA_WITH_AES_256_GCM_SHA384,
 			tris.TLS_RSA_WITH_RC4_128_SHA,
@@ -965,8 +970,8 @@ func makeMeekTLSConfig(
 			tris.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
 			tris.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
 			tris.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
-		},
-		PreferServerCipherSuites: true,
+		}
+		config.PreferServerCipherSuites = true
 	}
 
 	if useObfuscatedSessionTickets {
