@@ -19,10 +19,10 @@ type VersionNumber = protocol.VersionNumber
 const (
 	// VersionGQUIC39 is gQUIC version 39.
 	VersionGQUIC39 = protocol.Version39
-	// VersionGQUIC42 is gQUIC version 42.
-	VersionGQUIC42 = protocol.Version42
 	// VersionGQUIC43 is gQUIC version 43.
 	VersionGQUIC43 = protocol.Version43
+	// VersionGQUIC44 is gQUIC version 44.
+	VersionGQUIC44 = protocol.Version44
 )
 
 // A Cookie can be used to verify the ownership of the client address.
