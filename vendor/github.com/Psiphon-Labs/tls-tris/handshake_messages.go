@@ -459,6 +459,9 @@ func (m *clientHelloMsg) marshal() []byte {
 // are shuffled, certain extensions may be omitted, and some additional
 // extensions may be added in.
 //
+// Assumes the Config is using default values for ClientHello algorithm
+// configuration.
+//
 // Inspired by parrotRandomized in utls:
 // https://github.com/refraction-networking/utls/blob/db1b65d2300d3a59616a43d2df4ea556b4a7d277/u_parrots.go#L300
 func (m *clientHelloMsg) randomizedMarshal() []byte {
@@ -518,11 +521,9 @@ func (m *clientHelloMsg) randomizedMarshal() []byte {
 			func(i int) { m.cipherSuites = m.cipherSuites[:numTLS13CipherSuites+i] })
 	}
 
-	permute(
-		len(m.supportedCurves),
-		func(i, j int) {
-			m.supportedCurves[i], m.supportedCurves[j] = m.supportedCurves[j], m.supportedCurves[i]
-		})
+	// Following utls, the supported curves extension order is preserved. Note
+	// that, in TLS 1.3, the key share extention will include an entry
+	// corresponding to the first, default curve.
 	truncate(
 		len(m.supportedCurves),
 		func(i int) { m.supportedCurves = m.supportedCurves[:i] })
