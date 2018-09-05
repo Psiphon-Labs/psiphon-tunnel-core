@@ -229,6 +229,39 @@ func (profiles TLSProfiles) PruneInvalid() TLSProfiles {
 	return q
 }
 
+const (
+	QUIC_VERSION_GQUIC39 = "gQUICv39"
+	QUIC_VERSION_GQUIC43 = "gQUICv43"
+	QUIC_VERSION_GQUIC44 = "gQUICv44"
+)
+
+var SupportedQUICVersions = QUICVersions{
+	QUIC_VERSION_GQUIC39,
+	QUIC_VERSION_GQUIC43,
+	QUIC_VERSION_GQUIC44,
+}
+
+type QUICVersions []string
+
+func (versions QUICVersions) Validate() error {
+	for _, v := range versions {
+		if !common.Contains(SupportedQUICVersions, v) {
+			return common.ContextError(fmt.Errorf("invalid QUIC version: %s", v))
+		}
+	}
+	return nil
+}
+
+func (versions QUICVersions) PruneInvalid() QUICVersions {
+	u := make(QUICVersions, 0)
+	for _, v := range versions {
+		if common.Contains(SupportedQUICVersions, v) {
+			u = append(u, v)
+		}
+	}
+	return u
+}
+
 type HandshakeResponse struct {
 	SSHSessionID           string              `json:"ssh_session_id"`
 	Homepages              []string            `json:"homepages"`

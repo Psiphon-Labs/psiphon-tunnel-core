@@ -21,6 +21,7 @@
 		6626590E1DCB8CF400872F6C /* TunneledWebViewUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6626590D1DCB8CF400872F6C /* TunneledWebViewUITests.swift */; };
 		6682D90E1EB1334000329958 /* psiphon-embedded-server-entries.txt in Resources */ = {isa = PBXBuildFile; fileRef = 6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */; };
 		6688DBB61DCD684B00721A9E /* psiphon-config.json in Resources */ = {isa = PBXBuildFile; fileRef = 6688DBB51DCD684B00721A9E /* psiphon-config.json */; };
+		DDFD23795085E5852A8F4DD5 /* libPods-TunneledWebView.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E472F80E34E361EB72B2FD0C /* libPods-TunneledWebView.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -78,6 +79,9 @@
 		6626590F1DCB8CF400872F6C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "psiphon-embedded-server-entries.txt"; sourceTree = "<group>"; };
 		6688DBB51DCD684B00721A9E /* psiphon-config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = "psiphon-config.json"; sourceTree = "<group>"; };
+		76C8CF5D2CF9F4228B9CD56E /* Pods-TunneledWebView.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TunneledWebView.release.xcconfig"; path = "Pods/Target Support Files/Pods-TunneledWebView/Pods-TunneledWebView.release.xcconfig"; sourceTree = "<group>"; };
+		85795C6590EED64B7A6684AA /* Pods-TunneledWebView.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TunneledWebView.debug.xcconfig"; path = "Pods/Target Support Files/Pods-TunneledWebView/Pods-TunneledWebView.debug.xcconfig"; sourceTree = "<group>"; };
+		E472F80E34E361EB72B2FD0C /* libPods-TunneledWebView.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-TunneledWebView.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -85,6 +89,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DDFD23795085E5852A8F4DD5 /* libPods-TunneledWebView.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -128,6 +133,8 @@
 				662659011DCB8CF400872F6C /* TunneledWebViewTests */,
 				6626590C1DCB8CF400872F6C /* TunneledWebViewUITests */,
 				662658EB1DCB8CF300872F6C /* Products */,
+				A5804F65F614B094CCA05E13 /* Pods */,
+				8B6FB31735B11066EC18E1CB /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -177,6 +184,23 @@
 			path = TunneledWebViewUITests;
 			sourceTree = "<group>";
 		};
+		8B6FB31735B11066EC18E1CB /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				E472F80E34E361EB72B2FD0C /* libPods-TunneledWebView.a */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		A5804F65F614B094CCA05E13 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				85795C6590EED64B7A6684AA /* Pods-TunneledWebView.debug.xcconfig */,
+				76C8CF5D2CF9F4228B9CD56E /* Pods-TunneledWebView.release.xcconfig */,
+			);
+			name = Pods;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -184,10 +208,13 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 662659121DCB8CF400872F6C /* Build configuration list for PBXNativeTarget "TunneledWebView" */;
 			buildPhases = (
+				5D5B0B0744787E007145BB7C /* [CP] Check Pods Manifest.lock */,
 				662658E61DCB8CF300872F6C /* Sources */,
 				662658E71DCB8CF300872F6C /* Frameworks */,
 				662658E81DCB8CF300872F6C /* Resources */,
 				662659221DCBC8CB00872F6C /* CopyFiles */,
+				055465DE48CF8066AB340776 /* [CP] Embed Pods Frameworks */,
+				8A8D8BC5E8DAB19D43A5010A /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -312,6 +339,60 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		055465DE48CF8066AB340776 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${SRCROOT}/Pods/Target Support Files/Pods-TunneledWebView/Pods-TunneledWebView-frameworks.sh",
+				"${PODS_ROOT}/PsiphonTunnel/Frameworks/PsiphonTunnel.framework",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputPaths = (
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/PsiphonTunnel.framework",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/Pods/Target Support Files/Pods-TunneledWebView/Pods-TunneledWebView-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		5D5B0B0744787E007145BB7C /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-TunneledWebView-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		8A8D8BC5E8DAB19D43A5010A /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "[CP] Copy Pods Resources";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/Pods/Target Support Files/Pods-TunneledWebView/Pods-TunneledWebView-resources.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		662658E61DCB8CF300872F6C /* Sources */ = {
@@ -489,6 +570,7 @@
 		};
 		662659131DCB8CF400872F6C /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 85795C6590EED64B7A6684AA /* Pods-TunneledWebView.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				DEFINES_MODULE = YES;
@@ -510,6 +592,7 @@
 		};
 		662659141DCB8CF400872F6C /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 76C8CF5D2CF9F4228B9CD56E /* Pods-TunneledWebView.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				DEFINES_MODULE = YES;

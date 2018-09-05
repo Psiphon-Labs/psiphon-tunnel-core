@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/lucas-clemente/quic-go/internal/crypto"
@@ -62,6 +63,8 @@ var _ sessionRunner = &runner{}
 
 // A Listener of QUIC
 type server struct {
+	mutex sync.Mutex
+
 	tlsConf *tls.Config
 	config  *Config
 
@@ -79,13 +82,14 @@ type server struct {
 	sessionHandler packetHandlerManager
 
 	serverError error
+	errorChan   chan struct{}
+	closed      bool
 
 	sessionQueue chan Session
-	errorChan    chan struct{}
 
 	sessionRunner sessionRunner
 	// set as a member, so they can be set in the tests
-	newSession func(connection, sessionRunner, protocol.VersionNumber, protocol.ConnectionID, *handshake.ServerConfig, *tls.Config, *Config, utils.Logger) (quicSession, error)
+	newSession func(connection, sessionRunner, protocol.VersionNumber, protocol.ConnectionID, protocol.ConnectionID, *handshake.ServerConfig, *tls.Config, *Config, utils.Logger) (quicSession, error)
 
 	logger utils.Logger
 }
@@ -265,6 +269,11 @@ func populateServerConfig(config *Config) *Config {
 	if connIDLen == 0 {
 		connIDLen = protocol.DefaultConnectionIDLength
 	}
+	for _, v := range versions {
+		if v == protocol.Version44 {
+			connIDLen = protocol.ConnectionIDLenGQUIC
+		}
+	}
 
 	return &Config{
 		Versions:                              versions,
@@ -293,6 +302,15 @@ func (s *server) Accept() (Session, error) {
 
 // Close the server
 func (s *server) Close() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if s.closed {
+		return nil
+	}
+	return s.closeWithMutex()
+}
+
+func (s *server) closeWithMutex() error {
 	s.sessionHandler.CloseServer()
 	if s.serverError == nil {
 		s.serverError = errors.New("server closed")
@@ -303,18 +321,24 @@ func (s *server) Close() error {
 	if s.createdPacketConn {
 		err = s.conn.Close()
 	}
+	s.closed = true
 	close(s.errorChan)
 	return err
+}
+
+func (s *server) closeWithError(e error) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.serverError = e
+	return s.closeWithMutex()
 }
 
 // Addr returns the server's network address
 func (s *server) Addr() net.Addr {
 	return s.conn.LocalAddr()
-}
-
-func (s *server) closeWithError(e error) error {
-	s.serverError = e
-	return s.Close()
 }
 
 func (s *server) handlePacket(p *receivedPacket) {
@@ -332,13 +356,13 @@ func (s *server) handlePacketImpl(p *receivedPacket) error {
 			return s.sendVersionNegotiationPacket(p)
 		}
 	}
-	if hdr.Type == protocol.PacketTypeInitial {
+	if hdr.Type == protocol.PacketTypeInitial && hdr.Version.UsesTLS() {
 		go s.serverTLS.HandleInitial(p)
 		return nil
 	}
 
 	// TODO(#943): send Stateless Reset, if this an IETF QUIC packet
-	if !hdr.VersionFlag {
+	if !hdr.VersionFlag && !hdr.Version.UsesIETFHeaderFormat() {
 		_, err := s.conn.WriteTo(wire.WritePublicReset(hdr.DestConnectionID, 0, 0), p.remoteAddr)
 		return err
 	}
@@ -349,12 +373,20 @@ func (s *server) handlePacketImpl(p *receivedPacket) error {
 		return errors.New("dropping small packet for unknown connection")
 	}
 
+	var destConnID, srcConnID protocol.ConnectionID
+	if hdr.Version.UsesIETFHeaderFormat() {
+		srcConnID = hdr.DestConnectionID
+	} else {
+		destConnID = hdr.DestConnectionID
+		srcConnID = hdr.DestConnectionID
+	}
 	s.logger.Infof("Serving new connection: %s, version %s from %v", hdr.DestConnectionID, hdr.Version, p.remoteAddr)
 	sess, err := s.newSession(
 		&conn{pconn: s.conn, currentAddr: p.remoteAddr},
 		s.sessionRunner,
 		hdr.Version,
-		hdr.DestConnectionID,
+		destConnID,
+		srcConnID,
 		s.scfg,
 		s.tlsConf,
 		s.config,
@@ -374,14 +406,14 @@ func (s *server) sendVersionNegotiationPacket(p *receivedPacket) error {
 	s.logger.Debugf("Client offered version %s, sending VersionNegotiationPacket", hdr.Version)
 
 	var data []byte
-	if hdr.Version.UsesIETFFrameFormat() {
+	if hdr.IsPublicHeader {
+		data = wire.ComposeGQUICVersionNegotiation(hdr.DestConnectionID, s.config.Versions)
+	} else {
 		var err error
 		data, err = wire.ComposeVersionNegotiation(hdr.SrcConnectionID, hdr.DestConnectionID, s.config.Versions)
 		if err != nil {
 			return err
 		}
-	} else {
-		data = wire.ComposeGQUICVersionNegotiation(hdr.DestConnectionID, s.config.Versions)
 	}
 	_, err := s.conn.WriteTo(data, p.remoteAddr)
 	return err
