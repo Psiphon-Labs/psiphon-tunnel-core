@@ -163,7 +163,7 @@ func (d *NetDialer) Dial(network, address string) (net.Conn, error) {
 func (d *NetDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	switch network {
 	case "tcp":
-		return d.dialTCP(context.Background(), "tcp", address)
+		return d.dialTCP(ctx, "tcp", address)
 	default:
 		return nil, common.ContextError(fmt.Errorf("unsupported network: %s", network))
 	}

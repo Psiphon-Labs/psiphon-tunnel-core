@@ -7,6 +7,7 @@ package bsbuffer
 import (
 	"bytes"
 	"io"
+	"io/ioutil"
 	"sync"
 )
 
@@ -15,15 +16,17 @@ import (
 // S - Safe - Supports arbitrary amount of readers and writers.
 // Could be unblocked and turned into SBuffer.
 type BSBuffer struct {
-	sync.Mutex
-	bufIn  bytes.Buffer
-	bufOut bytes.Buffer
-	r      *io.PipeReader
-	w      *io.PipeWriter
+	mu sync.Mutex
 
-	hasData    chan struct{}
-	engineExit chan struct{}
-	unblocked  bool
+	bufBlocked   bytes.Buffer // used before Unblock() is called
+	bufUnblocked bytes.Buffer // used after Unblock() is called
+
+	r *io.PipeReader
+	w *io.PipeWriter
+
+	unblocked  chan struct{} // closed on unblocking
+	engineExit chan struct{} // after unblocking, engine will wrap up, close this and exit
+	hasData    chan struct{} // never closed
 
 	unblockOnce sync.Once
 }
@@ -35,25 +38,51 @@ func NewBSBuffer() *BSBuffer {
 	bsb.r, bsb.w = io.Pipe()
 
 	bsb.hasData = make(chan struct{}, 1)
+	bsb.unblocked = make(chan struct{})
 	bsb.engineExit = make(chan struct{})
 	go bsb.engine()
 	return bsb
 }
 
+// # How this is supposed to work #
+// (all operations, except piped ones, are locked)
+//
+// before Unblock:
+//    Write stores data to bufBlocked
+//    engine copies data from bufBlocked, writes to pipe
+//    Read reads from pipe
+// after Unblock:
+//    Write still writes data to bufBlocked
+//    engine will copy data from bufBlocked to bufUnblocked and close `engineExit`
+//    Read reads from pipe
+// after engineExit is closed:
+//    Write writes to bufUnblocked
+//    Read reads from bufUnblocked
+
 func (b *BSBuffer) engine() {
 	for {
 		select {
 		case _ = <-b.hasData:
-			b.Lock()
-			b.bufOut.ReadFrom(&b.bufIn)
-			_, err := b.bufOut.WriteTo(b.w)
-			if b.unblocked || err != nil {
-				b.r.Close()
+			b.mu.Lock()
+			buf, _ := ioutil.ReadAll(&b.bufBlocked)
+			b.mu.Unlock()
+			n, _ := b.w.Write(buf) // blocking, unless Unblock was called
+			select {
+			case _ = <-b.unblocked:
+				b.mu.Lock()
+				// copy from buf whatever wasn't written to the pipe
+				b.bufUnblocked.Write(buf[n:])
+
+				// copy everything from bufBlocked to bufUnblocked
+				// bufBlocked shouldn't be touched after engineExit is closed
+				// and we have the Lock.
+				b.bufUnblocked.Write(b.bufBlocked.Bytes())
+
 				close(b.engineExit)
-				b.Unlock()
+				b.mu.Unlock()
 				return
+			default:
 			}
-			b.Unlock()
 		}
 	}
 }
@@ -62,7 +91,7 @@ func (b *BSBuffer) engine() {
 // If the write end is closed with an error, that error is returned as err; otherwise err is EOF.
 // Supports multiple concurrent goroutines and p is valid forever.
 func (b *BSBuffer) Read(p []byte) (n int, err error) {
-	n, err = b.r.Read(p)
+	n, err = b.r.Read(p) // blocking, unless Unblock was called
 	if err != nil {
 		if n != 0 {
 			// There might be remaining data in underlying buffer, and we want user to
@@ -71,9 +100,9 @@ func (b *BSBuffer) Read(p []byte) (n int, err error) {
 		} else {
 			// Unblocked and no data in engine.
 			// Operate as SafeBuffer
-			b.Lock()
-			n, err = b.bufOut.Read(p)
-			b.Unlock()
+			b.mu.Lock()
+			n, err = b.bufUnblocked.Read(p)
+			b.mu.Unlock()
 		}
 	}
 	return
@@ -87,20 +116,22 @@ func (b *BSBuffer) Write(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	b.Lock()
-	if b.unblocked {
-		// Wait for engine to exit and operate as Safe Buffer.
-		_ = <-b.engineExit
-		n, err = b.bufOut.Write(p)
-	} else {
+
+	b.mu.Lock()
+	select {
+	case _ = <-b.engineExit:
+		n, err = b.bufUnblocked.Write(p)
+		b.mu.Unlock()
+	default:
 		// Push data to engine and wake it up, if needed.
-		n, err = b.bufIn.Write(p)
+		n, err = b.bufBlocked.Write(p)
 		select {
 		case b.hasData <- struct{}{}:
 		default:
 		}
+		b.mu.Unlock()
 	}
-	b.Unlock()
+
 	return
 }
 
@@ -108,10 +139,16 @@ func (b *BSBuffer) Write(p []byte) (n int, err error) {
 // Unblock() is safe to call multiple times.
 func (b *BSBuffer) Unblock() {
 	b.unblockOnce.Do(func() {
-		b.Lock()
-		b.unblocked = true
+		// closing the pipes will make engine and reads non-blocking
 		b.w.Close()
-		close(b.hasData)
-		b.Unlock()
+		b.r.Close()
+
+		b.mu.Lock()
+		close(b.unblocked)
+		select {
+		case b.hasData <- struct{}{}:
+		default:
+		}
+		b.mu.Unlock()
 	})
 }

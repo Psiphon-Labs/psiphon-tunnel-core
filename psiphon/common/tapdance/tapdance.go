@@ -46,8 +46,6 @@ import (
 
 const (
 	READ_PROXY_PROTOCOL_HEADER_TIMEOUT = 5 * time.Second
-	REDIAL_TCP_TIMEOUT_MIN             = 10 * time.Second
-	REDIAL_TCP_TIMEOUT_MAX             = 15 * time.Second
 )
 
 func init() {
@@ -96,7 +94,8 @@ func Listen(address string) (*Listener, error) {
 // all pending dials and established conns immediately. This ensures that
 // blocking calls within refraction_networking_tapdance, such as tls.Handhake,
 // are interrupted:
-// E.g., https://github.com/sergeyfrolov/gotapdance/blob/4581c3f01ac46b90ed4b58cce9c0438f732bf915/tapdance/conn_raw.go#L274
+// E.g., https://github.com/sergeyfrolov/gotapdance/blob/2ce6ef6667d52f7391a92fd8ec9dffb97ec4e2e8/tapdance/conn_raw.go#L260
+// (...preceeding SetDeadline is insufficient for immediate cancellation.)
 type dialManager struct {
 	tcpDialer func(ctx context.Context, network, address string) (net.Conn, error)
 
@@ -110,58 +109,49 @@ type dialManager struct {
 }
 
 func newDialManager(
-	tcpDialer func(ctx context.Context, network, address string) (net.Conn, error),
-	initialDialCtx context.Context) *dialManager {
+	tcpDialer func(ctx context.Context, network, address string) (net.Conn, error)) *dialManager {
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
 
 	return &dialManager{
-		tcpDialer:      tcpDialer,
-		initialDialCtx: initialDialCtx,
-		runCtx:         runCtx,
-		stopRunning:    stopRunning,
-		conns:          common.NewConns(),
+		tcpDialer:   tcpDialer,
+		runCtx:      runCtx,
+		stopRunning: stopRunning,
+		conns:       common.NewConns(),
 	}
 }
 
-func (manager *dialManager) dial(network, address string) (net.Conn, error) {
+func (manager *dialManager) dial(ctx context.Context, network, address string) (net.Conn, error) {
 
 	if network != "tcp" {
 		return nil, common.ContextError(fmt.Errorf("unsupported network: %s", network))
 	}
 
 	// The context for this dial is either:
-	// - manager.initialDialCtx during the initial tapdance.Dial, in which case
-	//   this is Psiphon tunnel establishment, which has an externally specified
-	//   timeout.
+	// - ctx, during the initial tapdance.DialContext, when this is Psiphon tunnel
+	//   establishment.
 	// - manager.runCtx after the initial tapdance.Dial completes, in which case
 	//   this is a Tapdance protocol reconnection that occurs periodically for
-	//   already established tunnels; this uses an internal timeout.
+	//   already established tunnels.
 
 	manager.ctxMutex.Lock()
-	var ctx context.Context
-	var cancelFunc context.CancelFunc
 	if manager.useRunCtx {
-		// Random timeout replicates tapdance client behavior with stock dialer:
-		// https://github.com/sergeyfrolov/gotapdance/blob/4581c3f01ac46b90ed4b58cce9c0438f732bf915/tapdance/conn_raw.go#L246
-		timeout, err := common.MakeSecureRandomPeriod(REDIAL_TCP_TIMEOUT_MIN, REDIAL_TCP_TIMEOUT_MAX)
-		if err != nil {
-			manager.ctxMutex.Unlock()
-			return nil, common.ContextError(err)
+
+		// Preserve the random timeout configured by the tapdance client:
+		// https://github.com/sergeyfrolov/gotapdance/blob/2ce6ef6667d52f7391a92fd8ec9dffb97ec4e2e8/tapdance/conn_raw.go#L219
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			return nil, common.ContextError(fmt.Errorf("unexpected nil deadline"))
 		}
-		ctx, cancelFunc = context.WithTimeout(manager.runCtx, timeout)
-	} else {
-		ctx = manager.initialDialCtx
+		var cancelFunc context.CancelFunc
+		ctx, cancelFunc = context.WithDeadline(manager.runCtx, deadline)
+		defer cancelFunc()
 	}
 	manager.ctxMutex.Unlock()
 
 	conn, err := manager.tcpDialer(ctx, network, address)
 	if err != nil {
 		return nil, common.ContextError(err)
-	}
-
-	if cancelFunc != nil {
-		cancelFunc()
 	}
 
 	conn = &managedConn{
@@ -253,51 +243,22 @@ func Dial(
 		return nil, common.ContextError(errors.New("dial context has no timeout"))
 	}
 
-	manager := newDialManager(netDialer.DialContext, ctx)
+	manager := newDialManager(netDialer.DialContext)
 
-	type tapdanceDialResult struct {
-		conn net.Conn
-		err  error
+	tapdanceDialer := &refraction_networking_tapdance.Dialer{
+		TcpDialer: manager.dial,
 	}
 
-	resultChannel := make(chan tapdanceDialResult)
-
-	go func() {
-		tapdanceDialer := &refraction_networking_tapdance.Dialer{
-			TcpDialer: manager.dial,
-		}
-
-		conn, err := tapdanceDialer.Dial("tcp", address)
-		if err != nil {
-			err = common.ContextError(err)
-		}
-
-		resultChannel <- tapdanceDialResult{
-			conn: conn,
-			err:  err,
-		}
-	}()
-
-	var result tapdanceDialResult
-
-	select {
-	case result = <-resultChannel:
-	case <-ctx.Done():
-		result.err = ctx.Err()
-		// Interrupt the goroutine
+	conn, err := tapdanceDialer.DialContext(ctx, "tcp", address)
+	if err != nil {
 		manager.close()
-		<-resultChannel
-	}
-
-	if result.err != nil {
-		manager.close()
-		return nil, common.ContextError(result.err)
+		return nil, common.ContextError(err)
 	}
 
 	manager.startUsingRunCtx()
 
 	return &tapdanceConn{
-		Conn:    result.conn,
+		Conn:    conn,
 		manager: manager,
 	}, nil
 }

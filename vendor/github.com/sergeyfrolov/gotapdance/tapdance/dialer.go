@@ -2,6 +2,7 @@ package tapdance
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -10,12 +11,10 @@ import (
 
 var sessionsTotal CounterUint64
 
-// Dialer contains options for establishing TapDance connection.
+// Dialer contains options and implements advanced functions for establishing TapDance connection.
 type Dialer struct {
-	// TODO?: add Context support(not as a field, it has to "flow through program like river")
-	// https://medium.com/@cep21/how-to-correctly-use-context-context-in-go-1-7-8f2c0fafdf39
 	SplitFlows bool
-	TcpDialer  func(string, string) (net.Conn, error)
+	TcpDialer  func(context.Context, string, string) (net.Conn, error)
 }
 
 // Dial connects to the address on the named network.
@@ -33,6 +32,12 @@ func Dial(network, address string) (net.Conn, error) {
 }
 
 // Dial connects to the address on the named network.
+func (d *Dialer) Dial(network, address string) (net.Conn, error) {
+	return d.DialContext(context.Background(), network, address)
+}
+
+// DialContext connects to the address on the named network using the provided context.
+// Long deadline is strongly advised, since tapdance will try multiple decoys.
 //
 // The only supported network at this time: "tcp".
 // The address has the form "host:port".
@@ -41,7 +46,7 @@ func Dial(network, address string) (net.Conn, error) {
 // To avoid abuse, only certain whitelisted ports are allowed.
 //
 // Example: Dial("tcp", "golang.org:80")
-func (d *Dialer) Dial(network, address string) (net.Conn, error) {
+func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	if network != "tcp" {
 		return nil, &net.OpError{Op: "dial", Net: network, Err: net.UnknownNetworkError(network)}
 	}
@@ -50,7 +55,7 @@ func (d *Dialer) Dial(network, address string) (net.Conn, error) {
 		return nil, err
 	}
 
-	flow, err := d.DialProxy()
+	flow, err := d.DialProxyContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -74,21 +79,20 @@ func (d *Dialer) Dial(network, address string) (net.Conn, error) {
 
 // DialProxy establishes direct connection to TapDance station proxy.
 // Users are expected to send HTTP CONNECT request next.
-func DialProxy() (net.Conn, error) {
-	var d Dialer
-	return d.DialProxy()
+func (d *Dialer) DialProxy() (net.Conn, error) {
+	return d.DialProxyContext(context.Background())
 }
 
-// DialProxy establishes direct connection to TapDance station proxy.
+// DialProxy establishes direct connection to TapDance station proxy using the provided context.
 // Users are expected to send HTTP CONNECT request next.
-func (d *Dialer) DialProxy() (net.Conn, error) {
+func (d *Dialer) DialProxyContext(ctx context.Context) (net.Conn, error) {
 	if !d.SplitFlows {
 		flow, err := makeTdFlow(flowBidirectional, nil)
 		if err != nil {
 			return nil, err
 		}
-		flow.tdRaw.customDialer = d.TcpDialer
-		return flow, flow.Dial()
+		flow.tdRaw.TcpDialer = d.TcpDialer
+		return flow, flow.DialContext(ctx)
 	}
-	return dialSplitFlow(d.TcpDialer)
+	return dialSplitFlow(ctx, d.TcpDialer)
 }

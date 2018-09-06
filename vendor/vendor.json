@@ -460,22 +460,22 @@
 			"revisionTime": "2017-01-28T01:21:29Z"
 		},
 		{
-			"checksumSHA1": "KY4600ldPI8LeOagY1P7QAvsJgU=",
+			"checksumSHA1": "Hj4pJ8jepJQ64sTPVJKlBXGC53Y=",
 			"path": "github.com/sergeyfrolov/bsbuffer",
-			"revision": "1049e53e3f9ee6f3ea4d6b2714729563ee493193",
-			"revisionTime": "2017-07-10T02:15:16Z"
+			"revision": "94e85abb850729a5f54f383e8175e62931d04748",
+			"revisionTime": "2018-09-03T21:38:11Z"
 		},
 		{
 			"checksumSHA1": "dOVMxadkUJFjdc8Ed9vbfYwvZzE=",
 			"path": "github.com/sergeyfrolov/gotapdance/protobuf",
-			"revision": "4581c3f01ac46b90ed4b58cce9c0438f732bf915",
-			"revisionTime": "2018-07-17T02:09:26Z"
+			"revision": "2ceeda9fef5bf3609cd3d1b04d4785ffac83d87c",
+			"revisionTime": "2018-09-05T22:38:24Z"
 		},
 		{
-			"checksumSHA1": "Ai6CK0f71QwLKjr2IJ5JUz1RXfg=",
+			"checksumSHA1": "6PTbPuGiX2bJxURtlm4LCLzwZwk=",
 			"path": "github.com/sergeyfrolov/gotapdance/tapdance",
-			"revision": "5b5c507e165050668a074c51fbd5f45544e6c475",
-			"revisionTime": "2018-08-15T19:09:24Z"
+			"revision": "2ceeda9fef5bf3609cd3d1b04d4785ffac83d87c",
+			"revisionTime": "2018-09-05T22:38:24Z"
 		},
 		{
 			"checksumSHA1": "Egp3n8yTaAuVtrA14LJrTWDgkO4=",
