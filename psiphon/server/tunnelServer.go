@@ -445,6 +445,7 @@ func (sshServer *sshServer) runListener(
 			sshServer.support,
 			listener,
 			protocol.TunnelProtocolUsesMeekHTTPS(listenerTunnelProtocol),
+			protocol.TunnelProtocolIsFronted(listenerTunnelProtocol),
 			protocol.TunnelProtocolUsesObfuscatedSessionTickets(listenerTunnelProtocol),
 			handleClient,
 			sshServer.shutdownBroadcast)

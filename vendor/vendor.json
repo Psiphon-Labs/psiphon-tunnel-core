@@ -57,6 +57,12 @@
 			"revisionTime": "2018-04-26T17:24:40Z"
 		},
 		{
+			"checksumSHA1": "4D0uWGD7eh1gaAaB1zTlgBze3TA=",
+			"path": "github.com/Psiphon-Labs/tls-tris",
+			"revision": "e86122f81b5bc600a8eb71df8c669822c91a180b",
+			"revisionTime": "2018-09-05T17:24:49Z"
+		},
+		{
 			"checksumSHA1": "OBN3dfn0yx9L3I2RPo58o27my2k=",
 			"path": "github.com/Psiphon-Labs/utls",
 			"revision": "690e3cce41f16569c0b4297bb36df8d7a04c98c2",
@@ -586,6 +592,12 @@
 			"revisionTime": "2018-04-23T13:30:03Z"
 		},
 		{
+			"checksumSHA1": "/U7f2gaH6DnEmLguVLDbipU6kXU=",
+			"path": "golang.org/x/crypto/internal/subtle",
+			"revision": "614d502a4dac94afa3a6ce146bd1736da82514c6",
+			"revisionTime": "2018-07-28T08:01:47Z"
+		},
+		{
 			"checksumSHA1": "kVKE0OX1Xdw5mG7XKT86DLLKE2I=",
 			"path": "golang.org/x/crypto/poly1305",
 			"revision": "b0697eccbea9adec5b7ba8008f4c33d98d733388",
@@ -660,6 +672,12 @@
 			"path": "golang.org/x/sync/errgroup",
 			"revision": "1d60e4601c6fd243af51cc01ddf169918a5407ca",
 			"revisionTime": "2018-03-14T17:21:19Z"
+		},
+		{
+			"checksumSHA1": "REkmyB368pIiip76LiqMLspgCRk=",
+			"path": "golang.org/x/sys/cpu",
+			"revision": "49385e6e15226593f68b26af201feec29d5bba22",
+			"revisionTime": "2018-08-30T14:08:21Z"
 		},
 		{
 			"checksumSHA1": "uggjqMBFNJd11oNco2kbkAT641w=",

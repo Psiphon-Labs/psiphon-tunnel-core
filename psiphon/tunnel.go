@@ -671,9 +671,7 @@ func initMeekConfig(
 	// Pin the TLS profile for the entire meek connection.
 	selectedTLSProfile := ""
 	if protocol.TunnelProtocolUsesMeekHTTPS(selectedProtocol) {
-		selectedTLSProfile = SelectTLSProfile(
-			selectedProtocol,
-			config.clientParameters)
+		selectedTLSProfile = SelectTLSProfile(config.clientParameters)
 	}
 
 	return &MeekConfig{
