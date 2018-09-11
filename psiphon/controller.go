@@ -1429,7 +1429,7 @@ func (controller *Controller) establishCandidateGenerator() {
 	// for network connectivity. This duration will be excluded
 	// from reported tunnel establishment duration.
 	establishStartTime := monotime.Now()
-	var networkWaitDuration time.Duration
+	var totalNetworkWaitDuration time.Duration
 
 	applyServerAffinity, iterator, err := NewServerEntryIterator(controller.config)
 	if err != nil {
@@ -1454,16 +1454,6 @@ loop:
 	// Repeat until stopped
 	for {
 
-		networkWaitStartTime := monotime.Now()
-
-		if !WaitForNetworkConnectivity(
-			controller.establishCtx,
-			controller.config.NetworkConnectivityChecker) {
-			break loop
-		}
-
-		networkWaitDuration += monotime.Since(networkWaitStartTime)
-
 		// For diagnostics, emits counts of the number of known server
 		// entries that satisfy both the egress region and tunnel protocol
 		// requirements (excluding excludeIntensive logic).
@@ -1480,9 +1470,31 @@ loop:
 			initialCount,
 			count)
 
+		// A "round" consists of a new shuffle of the server entries
+		// and attempted connections up to the end of the server entry
+		// list, or parameters.EstablishTunnelWorkTime elapsed. Time
+		// spent waiting for network connectivity is excluded from
+		// round elapsed time.
+		//
+		// If the first round ends with no connection, remote server
+		// list and upgrade checks are launched.
+
+		roundStartTime := monotime.Now()
+		var roundNetworkWaitDuration time.Duration
+
 		// Send each iterator server entry to the establish workers
-		startTime := monotime.Now()
 		for {
+
+			networkWaitStartTime := monotime.Now()
+			if !WaitForNetworkConnectivity(
+				controller.establishCtx,
+				controller.config.NetworkConnectivityChecker) {
+				break loop
+			}
+			networkWaitDuration := monotime.Since(networkWaitStartTime)
+			roundNetworkWaitDuration += networkWaitDuration
+			totalNetworkWaitDuration += networkWaitDuration
+
 			serverEntry, err := iterator.Next()
 			if err != nil {
 				NoticeAlert("failed to get next candidate: %s", err)
@@ -1501,8 +1513,7 @@ loop:
 
 			// adjustedEstablishStartTime is establishStartTime shifted
 			// to exclude time spent waiting for network connectivity.
-
-			adjustedEstablishStartTime := establishStartTime.Add(networkWaitDuration)
+			adjustedEstablishStartTime := establishStartTime.Add(totalNetworkWaitDuration)
 
 			candidate := &candidateServerEntry{
 				serverEntry:                serverEntry,
@@ -1528,7 +1539,7 @@ loop:
 			workTime := controller.config.clientParameters.Get().Duration(
 				parameters.EstablishTunnelWorkTime)
 
-			if startTime.Add(workTime).Before(monotime.Now()) {
+			if roundStartTime.Add(-roundNetworkWaitDuration).Add(workTime).Before(monotime.Now()) {
 				// Start over, after a brief pause, with a new shuffle of the server
 				// entries, and potentially some newly fetched server entries.
 				break
