@@ -357,6 +357,12 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
 - (void)stop;
 
 /*!
+ Indicate if the device is sleeping. This logs a diagnostic message and forces hasNetworkConnectivity to false when sleeping.
+ Swift: @code func setSleeping(_ isSleeping: Bool) @endcode
+ */
+- (void)setSleeping:(BOOL)isSleeping;
+
+/*!
  Returns the current tunnel connection state.
  @return  The current connection state.
  Swift: @code func getConnectionState() -> PsiphonConnectionState @endcode
