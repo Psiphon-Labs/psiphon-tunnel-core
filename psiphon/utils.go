@@ -214,20 +214,7 @@ func emitMemoryMetrics() {
 		common.FormatByteCount(memStats.NextGC))
 }
 
-func aggressiveGarbageCollection() {
+func DoGarbageCollection() {
 	debug.SetGCPercent(5)
 	debug.FreeOSMemory()
-}
-
-func standardGarbageCollection() {
-	debug.SetGCPercent(100)
-	debug.FreeOSMemory()
-}
-
-func defaultGarbageCollection() {
-	debug.FreeOSMemory()
-}
-
-func DoGarbageCollection() {
-	defaultGarbageCollection()
 }

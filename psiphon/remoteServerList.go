@@ -317,7 +317,7 @@ func FetchObfuscatedServerLists(
 		// a garbage collection to reclaim its memory before processing the
 		// next file.
 		serverListPayloadReader = nil
-		defaultGarbageCollection()
+		DoGarbageCollection()
 	}
 
 	// Now that a new registry is downloaded, validated, and parsed, store

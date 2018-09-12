@@ -663,7 +663,7 @@ loop:
 				// Clear the reference to this discarded tunnel and immediately run
 				// a garbage collection to reclaim its memory.
 				connectedTunnel = nil
-				defaultGarbageCollection()
+				DoGarbageCollection()
 
 				// Skip the rest of this case
 				break
@@ -1047,7 +1047,7 @@ func (controller *Controller) startEstablishing() {
 	controller.peakConcurrentIntensiveEstablishTunnels = 0
 	controller.concurrentEstablishTunnelsMutex.Unlock()
 
-	aggressiveGarbageCollection()
+	DoGarbageCollection()
 	emitMemoryMetrics()
 
 	// Note: the establish context cancelFunc, controller.stopEstablish,
@@ -1213,7 +1213,7 @@ func (controller *Controller) stopEstablishing() {
 	NoticeInfo("peak concurrent resource intensive establish tunnels: %d", peakConcurrentIntensive)
 
 	emitMemoryMetrics()
-	standardGarbageCollection()
+	DoGarbageCollection()
 }
 
 func (controller *Controller) getTactics(done chan struct{}) {
@@ -1316,7 +1316,7 @@ func (controller *Controller) getTactics(done chan struct{}) {
 
 	// Reclaim memory from the completed tactics request as we're likely
 	// to be proceeding to the memory-intensive tunnel establishment phase.
-	aggressiveGarbageCollection()
+	DoGarbageCollection()
 	emitMemoryMetrics()
 }
 
@@ -1737,7 +1737,7 @@ loop:
 
 		// ConnectTunnel will allocate significant memory, so first attempt to
 		// reclaim as much as possible.
-		defaultGarbageCollection()
+		DoGarbageCollection()
 
 		tunnel, err := ConnectTunnel(
 			controller.establishCtx,
@@ -1767,7 +1767,7 @@ loop:
 		if err != nil {
 			tunnel = nil
 		}
-		defaultGarbageCollection()
+		DoGarbageCollection()
 
 		if err != nil {
 
@@ -1801,7 +1801,7 @@ loop:
 			// Clear the reference to this discarded tunnel and immediately run
 			// a garbage collection to reclaim its memory.
 			tunnel = nil
-			defaultGarbageCollection()
+			DoGarbageCollection()
 		}
 
 		// Unblock other candidates only after delivering when
