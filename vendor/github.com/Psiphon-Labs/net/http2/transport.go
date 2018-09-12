@@ -335,7 +335,9 @@ func (noCachedConnError) Error() string             { return "http2: no cached c
 // or its equivalent renamed type in net/http2's h2_bundle.go. Both types
 // may coexist in the same running program.
 func isNoCachedConnError(err error) bool {
-	_, ok := err.(interface{ IsHTTP2NoCachedConnError() })
+	_, ok := err.(interface {
+		IsHTTP2NoCachedConnError()
+	})
 	return ok
 }
 
@@ -790,7 +792,11 @@ func (cc *ClientConn) Close() error {
 	return cc.tconn.Close()
 }
 
-const maxAllocFrameSize = 512 << 10
+// [Psiphon]
+// Request body sizes are typically under 64K; allocating 512K is problematic
+// in low-memory environments.
+//const maxAllocFrameSize = 512 << 10
+const maxAllocFrameSize = 64 << 10
 
 // frameBuffer returns a scratch buffer suitable for writing DATA frames.
 // They're capped at the min of the peer's max frame size or 512KB

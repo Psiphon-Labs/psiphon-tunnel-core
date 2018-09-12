@@ -39,13 +39,13 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/goarista/monotime"
+	"github.com/Psiphon-Labs/net/http2"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
-	"golang.org/x/net/http2"
 )
 
 // MeekConn is based on meek-client.go from Tor and Psiphon:

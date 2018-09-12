@@ -57,6 +57,12 @@
 			"revisionTime": "2018-04-26T17:24:40Z"
 		},
 		{
+			"checksumSHA1": "cxmVWOV+0g1ZqB9BvGksJuD4lU0=",
+			"path": "github.com/Psiphon-Labs/net/http2",
+			"revision": "03e6572170e3643a5cf49ef0a0ce746e53b63cf3",
+			"revisionTime": "2018-09-12T16:47:43Z"
+		},
+		{
 			"checksumSHA1": "4D0uWGD7eh1gaAaB1zTlgBze3TA=",
 			"path": "github.com/Psiphon-Labs/tls-tris",
 			"revision": "e86122f81b5bc600a8eb71df8c669822c91a180b",
@@ -620,13 +626,6 @@
 			"path": "golang.org/x/net/http/httpguts",
 			"revision": "8a410e7b638dca158bf9e766925842f6651ff828",
 			"revisionTime": "2018-08-25T16:15:26Z"
-		},
-		{
-			"checksumSHA1": "3p4xISa2iLZULxYfVsIUlHJ+PUk=",
-			"path": "golang.org/x/net/http2",
-			"revision": "8a410e7b638dca158bf9e766925842f6651ff828",
-			"revisionTime": "2018-08-25T16:15:26Z",
-			"versionExact": "release-branch.go1.9"
 		},
 		{
 			"checksumSHA1": "KZniwnfpWkaTPhUQDUTvgex/7y0=",
