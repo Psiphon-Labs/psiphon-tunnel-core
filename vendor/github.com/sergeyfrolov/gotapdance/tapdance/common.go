@@ -127,33 +127,6 @@ var tapDanceSupportedCiphers = []uint16{
 	tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
 }
 
-func forceSupportedCiphersFirst(suites []uint16) []uint16 {
-	swapSuites := func(i, j int) {
-		if i == j {
-			return
-		}
-		tmp := suites[j]
-		suites[j] = suites[i]
-		suites[i] = tmp
-	}
-	lastSupportedCipherIdx := 0
-	for i := range suites {
-		for _, supportedS := range tapDanceSupportedCiphers {
-			if suites[i] == supportedS {
-				swapSuites(i, lastSupportedCipherIdx)
-				lastSupportedCipherIdx += 1
-			}
-		}
-	}
-	alwaysSuggestedSuite := tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-	for i := range suites {
-		if suites[i] == alwaysSuggestedSuite {
-			return suites
-		}
-	}
-	return append([]uint16{alwaysSuggestedSuite}, suites[lastSupportedCipherIdx:]...)
-}
-
 // How much time to sleep on trying to connect to decoys to prevent overwhelming them
 func sleepBeforeConnect(attempt int) (waitTime <-chan time.Time) {
 	if attempt >= 2 { // return nil for first 2 attempts

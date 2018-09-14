@@ -43,6 +43,7 @@ package quic
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -50,6 +51,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	quic_go "github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/qerr"
 )
@@ -120,6 +122,12 @@ func (listener *Listener) Accept() (net.Conn, error) {
 	}, nil
 }
 
+var supportedVersionNumbers = map[string]quic_go.VersionNumber{
+	protocol.QUIC_VERSION_GQUIC39: quic_go.VersionGQUIC39,
+	protocol.QUIC_VERSION_GQUIC43: quic_go.VersionGQUIC43,
+	protocol.QUIC_VERSION_GQUIC44: quic_go.VersionGQUIC44,
+}
+
 // Dial establishes a new QUIC session and stream to the server specified by
 // address.
 //
@@ -133,12 +141,24 @@ func Dial(
 	ctx context.Context,
 	packetConn net.PacketConn,
 	remoteAddr *net.UDPAddr,
-	quicSNIAddress string) (net.Conn, error) {
+	quicSNIAddress string,
+	negotiateQUICVersion string) (net.Conn, error) {
+
+	var versions []quic_go.VersionNumber
+
+	if negotiateQUICVersion != "" {
+		versionNumber, ok := supportedVersionNumbers[negotiateQUICVersion]
+		if !ok {
+			return nil, common.ContextError(fmt.Errorf("unsupported version: %s", negotiateQUICVersion))
+		}
+		versions = []quic_go.VersionNumber{versionNumber}
+	}
 
 	quicConfig := &quic_go.Config{
 		HandshakeTimeout: time.Duration(1<<63 - 1),
 		IdleTimeout:      CLIENT_IDLE_TIMEOUT,
 		KeepAlive:        true,
+		Versions:         versions,
 	}
 
 	deadline, ok := ctx.Deadline()

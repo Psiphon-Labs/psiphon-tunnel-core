@@ -53,6 +53,8 @@
     _Atomic NSInteger localSocksProxyPort;
     _Atomic NSInteger localHttpProxyPort;
 
+    _Atomic BOOL isSleeping;
+
     Reachability* reachability;
     _Atomic NetworkStatus currentNetworkStatus;
 
@@ -81,6 +83,7 @@
     atomic_init(&self->connectionState, PsiphonConnectionStateDisconnected);
     atomic_init(&self->localSocksProxyPort, 0);
     atomic_init(&self->localHttpProxyPort, 0);
+    atomic_init(&self->isSleeping, FALSE);
     self->reachability = [Reachability reachabilityForInternetConnection];
     atomic_init(&self->currentNetworkStatus, NotReachable);
     self->tunnelWholeDevice = FALSE;
@@ -176,6 +179,12 @@
     }
 
     return [self start];
+}
+
+// See comment in header
+- (void)setSleeping:(BOOL)isSleeping {
+    [self logMessage: isSleeping ? @"Sleeping" : @"Waking"];
+    atomic_store(&self->isSleeping, isSleeping);
 }
 
 /*!
@@ -1080,6 +1089,11 @@
 }
 
 - (long)hasNetworkConnectivity {
+
+    if (atomic_load(&self->isSleeping)) {
+        return FALSE;
+    }
+
     BOOL hasConnectivity = [self->reachability currentReachabilityStatus] != NotReachable;
 
     if (!hasConnectivity) {

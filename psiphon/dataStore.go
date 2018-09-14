@@ -260,7 +260,7 @@ func StreamingStoreServerEntries(
 
 		n += 1
 		if n == datastoreServerEntryFetchGCThreshold {
-			defaultGarbageCollection()
+			DoGarbageCollection()
 			n = 0
 		}
 	}
@@ -605,7 +605,7 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 		}
 
 		if iterator.serverEntryIndex%datastoreServerEntryFetchGCThreshold == 0 {
-			defaultGarbageCollection()
+			DoGarbageCollection()
 		}
 
 		// Check filter requirements
@@ -660,7 +660,7 @@ func scanServerEntries(scanner func(*protocol.ServerEntry)) error {
 
 			n += 1
 			if n == datastoreServerEntryFetchGCThreshold {
-				defaultGarbageCollection()
+				DoGarbageCollection()
 				n = 0
 			}
 		}

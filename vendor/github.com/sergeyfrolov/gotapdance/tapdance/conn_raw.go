@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"context"
 	"github.com/golang/protobuf/proto"
 	"github.com/refraction-networking/utls"
 )
@@ -28,7 +29,7 @@ type tdRawConn struct {
 	sessionId   uint64
 	strIdSuffix string
 
-	customDialer func(string, string) (net.Conn, error)
+	TcpDialer func(context.Context, string, string) (net.Conn, error)
 
 	decoySpec     pb.TLSDecoySpec
 	establishedAt time.Time
@@ -58,16 +59,16 @@ func makeTdRaw(handshakeType tdTagType,
 	return tdRaw
 }
 
-func (tdRaw *tdRawConn) Redial() error {
+func (tdRaw *tdRawConn) DialContext(ctx context.Context) error {
+	return tdRaw.dial(ctx, false)
+}
+
+func (tdRaw *tdRawConn) RedialContext(ctx context.Context) error {
 	tdRaw.flowId += 1
-	return tdRaw.dial(true)
+	return tdRaw.dial(ctx, true)
 }
 
-func (tdRaw *tdRawConn) Dial() error {
-	return tdRaw.dial(false)
-}
-
-func (tdRaw *tdRawConn) dial(reconnect bool) error {
+func (tdRaw *tdRawConn) dial(ctx context.Context, reconnect bool) error {
 	var maxConnectionAttempts int
 	var err error
 
@@ -95,6 +96,8 @@ func (tdRaw *tdRawConn) dial(reconnect bool) error {
 		if waitTime := sleepBeforeConnect(i); waitTime != nil {
 			select {
 			case <-waitTime:
+			case <-ctx.Done():
+				return context.Canceled
 			case <-tdRaw.closed:
 				return errors.New("Closed")
 			}
@@ -112,7 +115,7 @@ func (tdRaw *tdRawConn) dial(reconnect bool) error {
 			}
 		}
 
-		err = tdRaw.tryDialOnce(expectedTransition)
+		err = tdRaw.tryDialOnce(ctx, expectedTransition)
 		if err == nil {
 			return err
 		}
@@ -122,10 +125,10 @@ func (tdRaw *tdRawConn) dial(reconnect bool) error {
 	return err
 }
 
-func (tdRaw *tdRawConn) tryDialOnce(expectedTransition pb.S2C_Transition) (err error) {
+func (tdRaw *tdRawConn) tryDialOnce(ctx context.Context, expectedTransition pb.S2C_Transition) (err error) {
 	Logger().Infoln(tdRaw.idStr() + " Attempting to connect to decoy " +
 		tdRaw.decoySpec.GetHostname() + " (" + tdRaw.decoySpec.GetIpv4AddrStr() + ")")
-	err = tdRaw.establishTLStoDecoy()
+	err = tdRaw.establishTLStoDecoy(ctx)
 	if err != nil {
 		Logger().Errorf(tdRaw.idStr() + " establishTLStoDecoy(" +
 			tdRaw.decoySpec.GetHostname() + "," + tdRaw.decoySpec.GetIpv4AddrStr() +
@@ -234,16 +237,23 @@ func (tdRaw *tdRawConn) tryDialOnce(expectedTransition pb.S2C_Transition) (err e
 	return nil
 }
 
-func (tdRaw *tdRawConn) establishTLStoDecoy() (err error) {
+func (tdRaw *tdRawConn) establishTLStoDecoy(ctx context.Context) (err error) {
 	var dialConn net.Conn
-	if tdRaw.customDialer != nil {
-		dialConn, err = tdRaw.customDialer("tcp", tdRaw.decoySpec.GetIpv4AddrStr())
+	deadline, deadlineAlreadySet := ctx.Deadline()
+	if !deadlineAlreadySet {
+		deadline = time.Now().Add(getRandomDuration(deadlineTCPtoDecoyMin, deadlineTCPtoDecoyMax))
+	}
+	childCtx, childCancelFunc := context.WithDeadline(ctx, deadline)
+	defer childCancelFunc()
+
+	if tdRaw.TcpDialer != nil {
+		dialConn, err = tdRaw.TcpDialer(childCtx, "tcp", tdRaw.decoySpec.GetIpv4AddrStr())
 		if err != nil {
 			return err
 		}
 	} else {
-		dialConn, err = net.DialTimeout("tcp", tdRaw.decoySpec.GetIpv4AddrStr(),
-			getRandomDuration(deadlineTCPtoDecoyMin, deadlineTCPtoDecoyMax))
+		d := net.Dialer{}
+		dialConn, err = d.DialContext(childCtx, "tcp", tdRaw.decoySpec.GetIpv4AddrStr())
 		if err != nil {
 			return err
 		}
@@ -271,6 +281,7 @@ func (tdRaw *tdRawConn) establishTLStoDecoy() (err error) {
 		dialConn.Close()
 		return
 	}
+	tdRaw.tlsConn.SetDeadline(deadline)
 	err = tdRaw.tlsConn.Handshake()
 	if err != nil {
 		dialConn.Close()

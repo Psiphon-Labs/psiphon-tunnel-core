@@ -92,6 +92,8 @@ const (
 	LimitTunnelProtocols                       = "LimitTunnelProtocols"
 	LimitTLSProfilesProbability                = "LimitTLSProfilesProbability"
 	LimitTLSProfiles                           = "LimitTLSProfiles"
+	LimitQUICVersionsProbability               = "LimitQUICVersionsProbability"
+	LimitQUICVersions                          = "LimitQUICVersions"
 	FragmentorProbability                      = "FragmentorProbability"
 	FragmentorLimitProtocols                   = "FragmentorLimitProtocols"
 	FragmentorMinTotalBytes                    = "FragmentorMinTotalBytes"
@@ -227,6 +229,9 @@ var defaultClientParameters = map[string]struct {
 
 	LimitTLSProfilesProbability: {value: 1.0, minimum: 0.0},
 	LimitTLSProfiles:            {value: protocol.TLSProfiles{}},
+
+	LimitQUICVersionsProbability: {value: 1.0, minimum: 0.0},
+	LimitQUICVersions:            {value: protocol.QUICVersions{protocol.QUIC_VERSION_GQUIC43}},
 
 	FragmentorProbability:    {value: 0.5, minimum: 0.0},
 	FragmentorLimitProtocols: {value: protocol.TunnelProtocols{}},
@@ -505,6 +510,15 @@ func (p *ClientParameters) Set(
 						return nil, common.ContextError(err)
 					}
 				}
+			case protocol.QUICVersions:
+				if skipOnError {
+					newValue = v.PruneInvalid()
+				} else {
+					err := v.Validate()
+					if err != nil {
+						return nil, common.ContextError(err)
+					}
+				}
 			}
 
 			// Enforce any minimums. Assumes defaultClientParameters[name]
@@ -736,6 +750,35 @@ func (p *ClientParametersSnapshot) TLSProfiles(name string) protocol.TLSProfiles
 	}
 
 	value := protocol.TLSProfiles{}
+	p.getValue(name, &value)
+	return value
+}
+
+// QUICVersions returns a protocol.QUICVersions parameter value.
+// If there is a corresponding Probability value, a weighted coin flip
+// will be performed and, depending on the result, the value or the
+// parameter default will be returned.
+func (p *ClientParametersSnapshot) QUICVersions(name string) protocol.QUICVersions {
+
+	probabilityName := name + "Probability"
+	_, ok := p.parameters[probabilityName]
+	if ok {
+		probabilityValue := float64(1.0)
+		p.getValue(probabilityName, &probabilityValue)
+		if !common.FlipWeightedCoin(probabilityValue) {
+			defaultParameter, ok := defaultClientParameters[name]
+			if ok {
+				defaultValue, ok := defaultParameter.value.(protocol.QUICVersions)
+				if ok {
+					value := make(protocol.QUICVersions, len(defaultValue))
+					copy(value, defaultValue)
+					return value
+				}
+			}
+		}
+	}
+
+	value := protocol.QUICVersions{}
 	p.getValue(name, &value)
 	return value
 }

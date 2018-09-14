@@ -166,6 +166,23 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
+			tlsProfile:           protocol.TLS_PROFILE_RANDOMIZED,
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
+func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
+			tlsProfile:           protocol.TLS_PROFILE_TLS13_RANDOMIZED,
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			doDefaultSponsorID:   false,
@@ -181,6 +198,23 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+			tlsProfile:           protocol.TLS_PROFILE_RANDOMIZED,
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
+func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+			tlsProfile:           protocol.TLS_PROFILE_TLS13_RANDOMIZED,
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			doDefaultSponsorID:   false,
@@ -362,6 +396,7 @@ func TestUDPOnlySLOK(t *testing.T) {
 
 type runServerConfig struct {
 	tunnelProtocol       string
+	tlsProfile           string
 	enableSSHAPIRequests bool
 	doHotReload          bool
 	doDefaultSponsorID   bool
@@ -580,6 +615,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		jsonNetworkID = fmt.Sprintf(`,"NetworkID" : "%s-%s"`, prefix, "NETWORK1")
 	}
 
+	jsonLimitTLSProfiles := ""
+	if runConfig.tlsProfile != "" {
+		jsonLimitTLSProfiles = fmt.Sprintf(`,"LimitTLSProfiles" : ["%s"]`, runConfig.tlsProfile)
+	}
+
 	clientConfigJSON := fmt.Sprintf(`
     {
         "ClientPlatform" : "Windows",
@@ -591,7 +631,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "ConnectionWorkerPoolSize" : %d,
         "LimitTunnelProtocols" : ["%s"]
         %s
-    }`, numTunnels, runConfig.tunnelProtocol, jsonNetworkID)
+        %s
+    }`, numTunnels, runConfig.tunnelProtocol, jsonLimitTLSProfiles, jsonNetworkID)
 
 	clientConfig, err := psiphon.LoadConfig([]byte(clientConfigJSON))
 	if err != nil {

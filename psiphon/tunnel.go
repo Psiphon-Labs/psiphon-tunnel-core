@@ -671,9 +671,7 @@ func initMeekConfig(
 	// Pin the TLS profile for the entire meek connection.
 	selectedTLSProfile := ""
 	if protocol.TunnelProtocolUsesMeekHTTPS(selectedProtocol) {
-		selectedTLSProfile = SelectTLSProfile(
-			selectedProtocol,
-			config.clientParameters)
+		selectedTLSProfile = SelectTLSProfile(config.clientParameters)
 	}
 
 	return &MeekConfig{
@@ -904,7 +902,8 @@ func dialSsh(
 			ctx,
 			packetConn,
 			remoteAddr,
-			quicDialSNIAddress)
+			quicDialSNIAddress,
+			selectQUICVersion(config.clientParameters))
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -1117,6 +1116,32 @@ func dialSsh(
 			sshRequests:   result.sshRequests,
 			dialStats:     dialStats},
 		nil
+}
+
+func selectQUICVersion(
+	clientParameters *parameters.ClientParameters) string {
+
+	limitQUICVersions := clientParameters.Get().QUICVersions(parameters.LimitQUICVersions)
+
+	quicVersions := make([]string, 0)
+
+	for _, quicVersion := range protocol.SupportedQUICVersions {
+
+		if len(limitQUICVersions) > 0 &&
+			!common.Contains(limitQUICVersions, quicVersion) {
+			continue
+		}
+
+		quicVersions = append(quicVersions, quicVersion)
+	}
+
+	if len(quicVersions) == 0 {
+		return ""
+	}
+
+	choice, _ := common.MakeSecureRandomInt(len(quicVersions))
+
+	return quicVersions[choice]
 }
 
 func makeRandomPeriod(min, max time.Duration) time.Duration {

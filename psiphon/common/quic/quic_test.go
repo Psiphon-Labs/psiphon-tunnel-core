@@ -32,6 +32,14 @@ import (
 )
 
 func TestQUIC(t *testing.T) {
+	for negotiateQUICVersion, _ := range supportedVersionNumbers {
+		t.Run(negotiateQUICVersion, func(t *testing.T) {
+			runQUIC(t, negotiateQUICVersion)
+		})
+	}
+}
+
+func runQUIC(t *testing.T, negotiateQUICVersion string) {
 
 	clients := 10
 	bytesToSend := 1 << 20
@@ -103,7 +111,12 @@ func TestQUIC(t *testing.T) {
 				return common.ContextError(err)
 			}
 
-			conn, err := Dial(ctx, packetConn, remoteAddr, serverAddress)
+			conn, err := Dial(
+				ctx,
+				packetConn,
+				remoteAddr,
+				serverAddress,
+				negotiateQUICVersion)
 			if err != nil {
 				return common.ContextError(err)
 			}

@@ -73,6 +73,11 @@ func TestGetDefaultParameters(t *testing.T) {
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("TLSProfiles returned %+v expected %+v", v, g)
 			}
+		case protocol.QUICVersions:
+			g := p.Get().QUICVersions(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("QUICVersions returned %+v expected %+v", v, g)
+			}
 		case DownloadURLs:
 			g := p.Get().DownloadURLs(name)
 			if !reflect.DeepEqual(v, g) {
