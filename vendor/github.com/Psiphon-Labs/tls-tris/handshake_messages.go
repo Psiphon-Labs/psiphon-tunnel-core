@@ -493,6 +493,8 @@ func (m *clientHelloMsg) randomizedMarshal() []byte {
 		}
 	}
 
+	m.cipherSuites = append([]uint16(nil), m.cipherSuites...)
+
 	// Keep TLS 1.3 cipher suites ordered first, as required.
 	numTLS13CipherSuites := 0
 	for ; numTLS13CipherSuites < len(m.cipherSuites); numTLS13CipherSuites++ {
@@ -521,6 +523,8 @@ func (m *clientHelloMsg) randomizedMarshal() []byte {
 			func(i int) { m.cipherSuites = m.cipherSuites[:numTLS13CipherSuites+i] })
 	}
 
+	m.supportedCurves = append([]CurveID(nil), m.supportedCurves...)
+
 	// Following utls, the supported curves extension order is preserved. Note
 	// that, in TLS 1.3, the key share extention will include an entry
 	// corresponding to the first, default curve.
@@ -528,6 +532,7 @@ func (m *clientHelloMsg) randomizedMarshal() []byte {
 		len(m.supportedCurves),
 		func(i int) { m.supportedCurves = m.supportedCurves[:i] })
 
+	m.supportedPoints = append([]uint8(nil), m.supportedPoints...)
 	permute(
 		len(m.supportedPoints),
 		func(i, j int) {
@@ -537,6 +542,7 @@ func (m *clientHelloMsg) randomizedMarshal() []byte {
 		len(m.supportedPoints),
 		func(i int) { m.supportedPoints = m.supportedPoints[:i] })
 
+	m.supportedSignatureAlgorithms = append([]SignatureScheme(nil), m.supportedSignatureAlgorithms...)
 	permute(
 		len(m.supportedSignatureAlgorithms),
 		func(i, j int) {
@@ -546,6 +552,7 @@ func (m *clientHelloMsg) randomizedMarshal() []byte {
 		len(m.supportedSignatureAlgorithms),
 		func(i int) { m.supportedSignatureAlgorithms = m.supportedSignatureAlgorithms[:i] })
 
+	m.supportedSignatureAlgorithmsCert = append([]SignatureScheme(nil), m.supportedSignatureAlgorithmsCert...)
 	permute(
 		len(m.supportedSignatureAlgorithmsCert),
 		func(i, j int) {
