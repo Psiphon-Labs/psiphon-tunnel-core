@@ -62,6 +62,9 @@ const (
 	CLIENT_IDLE_TIMEOUT      = 30 * time.Second
 )
 
+// quic_test overrides the server idle timeout.
+var serverIdleTimeout = SERVER_IDLE_TIMEOUT
+
 // Listener is a net.Listener.
 type Listener struct {
 	quic_go.Listener
@@ -88,7 +91,7 @@ func Listen(addr string) (*Listener, error) {
 
 	quicConfig := &quic_go.Config{
 		HandshakeTimeout:      SERVER_HANDSHAKE_TIMEOUT,
-		IdleTimeout:           SERVER_IDLE_TIMEOUT,
+		IdleTimeout:           serverIdleTimeout,
 		MaxIncomingStreams:    1,
 		MaxIncomingUniStreams: -1,
 		KeepAlive:             true,

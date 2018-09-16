@@ -47,6 +47,16 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 	serverReceivedBytes := int64(0)
 	clientReceivedBytes := int64(0)
 
+	// Intermittently, on some platforms, the client connection termination
+	// packet is not received even when sent/received locally; set a brief
+	// idle timeout to ensure the server-side client handler doesn't block too
+	// long on Read, causing the test to fail.
+	//
+	// In realistic network conditions, and especially under adversarial
+	// network conditions, we should not expect to regularly receive client
+	// connection termination packets.
+	serverIdleTimeout = 1 * time.Second
+
 	listener, err := Listen("127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("Listen failed: %s", err)
