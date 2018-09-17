@@ -47,26 +47,8 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-// Fork of https://github.com/getlantern/tlsdialer (http://gopkg.in/getlantern/tlsdialer.v1)
+// Based on https://github.com/getlantern/tlsdialer (http://gopkg.in/getlantern/tlsdialer.v1)
 // which itself is a "Fork of crypto/tls.Dial and DialWithDialer"
-
-// Adds two capabilities to tlsdialer:
-//
-// 1. HTTP proxy support, so the dialer may be used with http.Transport.
-//
-// 2. Support for self-signed Psiphon server certificates, which Go's certificate
-//    verification rejects due to two short comings:
-//    - lack of IP address SANs.
-//      see: "...because it doesn't contain any IP SANs" case in crypto/x509/verify.go
-//    - non-compliant constraint configuration (RFC 5280, 4.2.1.9).
-//      see: CheckSignatureFrom() in crypto/x509/x509.go
-//    Since the client has to be able to handle existing Psiphon server certificates,
-//    we need to be able to perform some form of verification in these cases.
-
-// tlsdialer:
-// package tlsdialer contains a customized version of crypto/tls.Dial that
-// allows control over whether or not to send the ServerName extension in the
-// client handshake.
 
 package psiphon
 
@@ -82,6 +64,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	tris "github.com/Psiphon-Labs/tls-tris"
 	utls "github.com/Psiphon-Labs/utls"
 )
 
@@ -138,14 +121,31 @@ type CustomTLSConfig struct {
 	// using the specified key.
 	ObfuscatedSessionTicketKey string
 
-	// ClientSessionCache specifies a cache to use to persist session
-	// tickets, enabling TLS session resumability across multiple
-	// CustomTLSDial calls or dialers using the same CustomTLSConfig.
-	ClientSessionCache utls.ClientSessionCache
+	utlsClientSessionCache utls.ClientSessionCache
+	trisClientSessionCache tris.ClientSessionCache
 }
 
+// EnableClientSessionCache initializes a cache to use to persist session
+// tickets, enabling TLS session resumability across multiple
+// CustomTLSDial calls or dialers using the same CustomTLSConfig.
+//
+// TLSProfile must be set or will be auto-set via SelectTLSProfile.
+func (config *CustomTLSConfig) EnableClientSessionCache(
+	clientParameters *parameters.ClientParameters) {
+
+	if config.TLSProfile == "" {
+		config.TLSProfile = SelectTLSProfile(config.ClientParameters)
+	}
+
+	if useUTLS(config.TLSProfile) {
+		config.utlsClientSessionCache = utls.NewLRUClientSessionCache(0)
+	} else {
+		config.trisClientSessionCache = tris.NewLRUClientSessionCache(0)
+	}
+}
+
+// SelectTLSProfile picks a random TLS profile from the available candidates.
 func SelectTLSProfile(
-	tunnelProtocol string,
 	clientParameters *parameters.ClientParameters) string {
 
 	limitTLSProfiles := clientParameters.Get().TLSProfiles(parameters.LimitTLSProfiles)
@@ -171,7 +171,11 @@ func SelectTLSProfile(
 	return tlsProfiles[choice]
 }
 
-func getClientHelloID(tlsProfile string) utls.ClientHelloID {
+func useUTLS(tlsProfile string) bool {
+	return tlsProfile != protocol.TLS_PROFILE_TLS13_RANDOMIZED
+}
+
+func getUTLSClientHelloID(tlsProfile string) utls.ClientHelloID {
 	switch tlsProfile {
 	case protocol.TLS_PROFILE_IOS_1131:
 		return utls.HelloiOSSafari_11_3_1
@@ -192,6 +196,52 @@ func getClientHelloID(tlsProfile string) utls.ClientHelloID {
 	}
 }
 
+// tlsConn provides a common interface for calling utls and tris methods. Both
+// utls and tris are derived from crypto/tls and have identical functions but
+// different types for return values etc.
+type tlsConn interface {
+	net.Conn
+	Handshake() error
+	GetPeerCertificates() []*x509.Certificate
+	IsHTTP2() bool
+}
+
+type utlsConn struct {
+	*utls.UConn
+}
+
+func (conn *utlsConn) GetPeerCertificates() []*x509.Certificate {
+	return conn.UConn.ConnectionState().PeerCertificates
+}
+
+func (conn *utlsConn) IsHTTP2() bool {
+	state := conn.UConn.ConnectionState()
+	return state.NegotiatedProtocolIsMutual &&
+		state.NegotiatedProtocol == "h2"
+}
+
+type trisConn struct {
+	*tris.Conn
+}
+
+func (conn *trisConn) GetPeerCertificates() []*x509.Certificate {
+	return conn.Conn.ConnectionState().PeerCertificates
+}
+
+func (conn *trisConn) IsHTTP2() bool {
+	state := conn.Conn.ConnectionState()
+	return state.NegotiatedProtocolIsMutual &&
+		state.NegotiatedProtocol == "h2"
+}
+
+func IsTLSConnUsingHTTP2(conn net.Conn) bool {
+	if c, ok := conn.(tlsConn); ok {
+		return c.IsHTTP2()
+	}
+	return false
+}
+
+// NewCustomTLSDialer creates a new dialer based on CustomTLSDial.
 func NewCustomTLSDialer(config *CustomTLSConfig) Dialer {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return CustomTLSDial(ctx, network, addr, config)
@@ -239,43 +289,37 @@ func CustomTLSDial(
 	selectedTLSProfile := config.TLSProfile
 
 	if selectedTLSProfile == "" {
-		selectedTLSProfile = SelectTLSProfile("", config.ClientParameters)
+		selectedTLSProfile = SelectTLSProfile(config.ClientParameters)
 	}
 
-	clientSessionCache := config.ClientSessionCache
-	if clientSessionCache == nil {
-		clientSessionCache = utls.NewLRUClientSessionCache(0)
-	}
-
-	tlsConfig := &utls.Config{
-		ClientSessionCache: clientSessionCache,
-	}
+	tlsConfigInsecureSkipVerify := false
+	tlsConfigServerName := ""
 
 	if config.SkipVerify {
-		tlsConfig.InsecureSkipVerify = true
+		tlsConfigInsecureSkipVerify = true
 	}
 
 	if config.UseDialAddrSNI {
-		tlsConfig.ServerName = hostname
+		tlsConfigServerName = hostname
 	} else if config.SNIServerName != "" && config.VerifyLegacyCertificate == nil {
 		// Set the ServerName and rely on the usual logic in
 		// tls.Conn.Handshake() to do its verification.
 		// Note: Go TLS will automatically omit this ServerName when it's an IP address
-		tlsConfig.ServerName = config.SNIServerName
+		tlsConfigServerName = config.SNIServerName
 	} else {
 		// No SNI.
 		// Disable verification in tls.Conn.Handshake().  We'll verify manually
 		// after handshaking
-		tlsConfig.InsecureSkipVerify = true
+		tlsConfigInsecureSkipVerify = true
 	}
 
-	tlsConn := utls.UClient(rawConn, tlsConfig, getClientHelloID(selectedTLSProfile))
+	var obfuscatedSessionTicketKey [32]byte
 
 	if config.ObfuscatedSessionTicketKey != "" {
 
-		// See obfuscated session ticket overview in NewObfuscatedClientSessionCache
+		// See obfuscated session ticket overview in
+		// NewObfuscatedClientSessionCache.
 
-		var obfuscatedSessionTicketKey [32]byte
 		key, err := hex.DecodeString(config.ObfuscatedSessionTicketKey)
 		if err == nil && len(key) != 32 {
 			err = errors.New("invalid obfuscated session key length")
@@ -284,20 +328,70 @@ func CustomTLSDial(
 			return nil, common.ContextError(err)
 		}
 		copy(obfuscatedSessionTicketKey[:], key)
+	}
 
-		sessionState, err := utls.NewObfuscatedClientSessionState(
-			obfuscatedSessionTicketKey)
-		if err != nil {
-			return nil, common.ContextError(err)
+	// Depending on the selected TLS profile, the TLS provider will be tris
+	// (TLS 1.3) or utls (all other profiles).
+
+	var conn tlsConn
+
+	if useUTLS(selectedTLSProfile) {
+
+		clientSessionCache := config.utlsClientSessionCache
+		if clientSessionCache == nil {
+			clientSessionCache = utls.NewLRUClientSessionCache(0)
 		}
 
-		tlsConn.SetSessionState(sessionState)
+		tlsConfig := &utls.Config{
+			InsecureSkipVerify: tlsConfigInsecureSkipVerify,
+			ServerName:         tlsConfigServerName,
+			ClientSessionCache: clientSessionCache,
+		}
+
+		uconn := utls.UClient(rawConn, tlsConfig, getUTLSClientHelloID(selectedTLSProfile))
+
+		if config.ObfuscatedSessionTicketKey != "" {
+			sessionState, err := utls.NewObfuscatedClientSessionState(
+				obfuscatedSessionTicketKey)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+			uconn.SetSessionState(sessionState)
+		}
+
+		conn = &utlsConn{
+			UConn: uconn,
+		}
+
+	} else {
+
+		var clientSessionCache tris.ClientSessionCache
+		if config.ObfuscatedSessionTicketKey != "" {
+			clientSessionCache = tris.NewObfuscatedClientSessionCache(
+				obfuscatedSessionTicketKey)
+		} else {
+			clientSessionCache = config.trisClientSessionCache
+			if clientSessionCache == nil {
+				clientSessionCache = tris.NewLRUClientSessionCache(0)
+			}
+		}
+
+		tlsConfig := &tris.Config{
+			InsecureSkipVerify: tlsConfigInsecureSkipVerify,
+			ServerName:         tlsConfigServerName,
+			ClientSessionCache: clientSessionCache,
+		}
+
+		conn = &trisConn{
+			Conn: tris.Client(rawConn, tlsConfig),
+		}
+
 	}
 
 	resultChannel := make(chan error)
 
 	go func() {
-		resultChannel <- tlsConn.Handshake()
+		resultChannel <- conn.Handshake()
 	}()
 
 	select {
@@ -309,13 +403,13 @@ func CustomTLSDial(
 		<-resultChannel
 	}
 
-	if err == nil && !config.SkipVerify && tlsConfig.InsecureSkipVerify {
+	if err == nil && !config.SkipVerify && tlsConfigInsecureSkipVerify {
 
 		if config.VerifyLegacyCertificate != nil {
-			err = verifyLegacyCertificate(tlsConn, config.VerifyLegacyCertificate)
+			err = verifyLegacyCertificate(conn, config.VerifyLegacyCertificate)
 		} else {
 			// Manually verify certificates
-			err = verifyServerCerts(tlsConn, hostname, tlsConfig)
+			err = verifyServerCerts(conn, hostname)
 		}
 	}
 
@@ -324,11 +418,11 @@ func CustomTLSDial(
 		return nil, common.ContextError(err)
 	}
 
-	return tlsConn, nil
+	return conn, nil
 }
 
-func verifyLegacyCertificate(tlsConn *utls.UConn, expectedCertificate *x509.Certificate) error {
-	certs := tlsConn.ConnectionState().PeerCertificates
+func verifyLegacyCertificate(conn tlsConn, expectedCertificate *x509.Certificate) error {
+	certs := conn.GetPeerCertificates()
 	if len(certs) < 1 {
 		return common.ContextError(errors.New("no certificate to verify"))
 	}
@@ -338,11 +432,11 @@ func verifyLegacyCertificate(tlsConn *utls.UConn, expectedCertificate *x509.Cert
 	return nil
 }
 
-func verifyServerCerts(tlsConn *utls.UConn, hostname string, tlsConfig *utls.Config) error {
-	certs := tlsConn.ConnectionState().PeerCertificates
+func verifyServerCerts(conn tlsConn, hostname string) error {
+	certs := conn.GetPeerCertificates()
 
 	opts := x509.VerifyOptions{
-		Roots:         tlsConfig.RootCAs,
+		Roots:         nil, // Use host's root CAs
 		CurrentTime:   time.Now(),
 		DNSName:       hostname,
 		Intermediates: x509.NewCertPool(),

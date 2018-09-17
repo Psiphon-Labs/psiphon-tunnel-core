@@ -35,7 +35,6 @@ import (
 
 	"github.com/Psiphon-Labs/dns"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	utls "github.com/Psiphon-Labs/utls"
 )
 
 const DNS_PORT = 53
@@ -143,6 +142,32 @@ type NetworkIDGetter interface {
 // Dialer is a custom network dialer.
 type Dialer func(context.Context, string, string) (net.Conn, error)
 
+// NetDialer implements an interface that matches net.Dialer.
+// Limitation: only "tcp" Dials are supported.
+type NetDialer struct {
+	dialTCP Dialer
+}
+
+// NewNetDialer creates a new NetDialer.
+func NewNetDialer(config *DialConfig) *NetDialer {
+	return &NetDialer{
+		dialTCP: NewTCPDialer(config),
+	}
+}
+
+func (d *NetDialer) Dial(network, address string) (net.Conn, error) {
+	return d.DialContext(context.Background(), network, address)
+}
+
+func (d *NetDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	switch network {
+	case "tcp":
+		return d.dialTCP(ctx, "tcp", address)
+	default:
+		return nil, common.ContextError(fmt.Errorf("unsupported network: %s", network))
+	}
+}
+
 // LocalProxyRelay sends to remoteConn bytes received from localConn,
 // and sends to localConn bytes received from remoteConn.
 func LocalProxyRelay(proxyType string, localConn, remoteConn net.Conn) {
@@ -242,19 +267,20 @@ func MakeUntunneledHTTPClient(
 
 	dialer := NewTCPDialer(untunneledDialConfig)
 
-	tlsDialer := NewCustomTLSDialer(
-		// Note: when verifyLegacyCertificate is not nil, some
-		// of the other CustomTLSConfig is overridden.
-		&CustomTLSConfig{
-			ClientParameters: config.clientParameters,
-			Dial:             dialer,
-			VerifyLegacyCertificate:       verifyLegacyCertificate,
-			UseDialAddrSNI:                true,
-			SNIServerName:                 "",
-			SkipVerify:                    skipVerify,
-			TrustedCACertificatesFilename: untunneledDialConfig.TrustedCACertificatesFilename,
-			ClientSessionCache:            utls.NewLRUClientSessionCache(0),
-		})
+	// Note: when verifyLegacyCertificate is not nil, some
+	// of the other CustomTLSConfig is overridden.
+	tlsConfig := &CustomTLSConfig{
+		ClientParameters: config.clientParameters,
+		Dial:             dialer,
+		VerifyLegacyCertificate:       verifyLegacyCertificate,
+		UseDialAddrSNI:                true,
+		SNIServerName:                 "",
+		SkipVerify:                    skipVerify,
+		TrustedCACertificatesFilename: untunneledDialConfig.TrustedCACertificatesFilename,
+	}
+	tlsConfig.EnableClientSessionCache(config.clientParameters)
+
+	tlsDialer := NewCustomTLSDialer(tlsConfig)
 
 	transport := &http.Transport{
 		Dial: func(network, addr string) (net.Conn, error) {

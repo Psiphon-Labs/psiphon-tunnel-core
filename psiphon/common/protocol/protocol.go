@@ -36,6 +36,8 @@ const (
 	TUNNEL_PROTOCOL_FRONTED_MEEK                  = "FRONTED-MEEK-OSSH"
 	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP             = "FRONTED-MEEK-HTTP-OSSH"
 	TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH           = "QUIC-OSSH"
+	TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH     = "MARIONETTE-OSSH"
+	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH       = "TAPDANCE-OSSH"
 
 	SERVER_ENTRY_SOURCE_EMBEDDED   = "EMBEDDED"
 	SERVER_ENTRY_SOURCE_REMOTE     = "REMOTE"
@@ -96,10 +98,13 @@ var SupportedTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_FRONTED_MEEK,
 	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP,
 	TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
+	TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH,
+	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 }
 
 var DefaultDisabledTunnelProtocols = TunnelProtocols{
-	TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
+	TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH,
+	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 }
 
 var SupportedServerEntrySources = TunnelProtocols{
@@ -142,8 +147,23 @@ func TunnelProtocolUsesQUIC(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH
 }
 
+func TunnelProtocolUsesMarionette(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH
+}
+
+func TunnelProtocolUsesTapdance(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH
+}
+
+func TunnelProtocolIsFronted(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK
+}
+
 func TunnelProtocolIsResourceIntensive(protocol string) bool {
-	return TunnelProtocolUsesMeek(protocol) || TunnelProtocolUsesQUIC(protocol)
+	return TunnelProtocolUsesMeek(protocol) ||
+		TunnelProtocolUsesQUIC(protocol) ||
+		TunnelProtocolUsesMarionette(protocol) ||
+		TunnelProtocolUsesTapdance(protocol)
 }
 
 func UseClientTunnelProtocol(
@@ -167,13 +187,14 @@ func UseClientTunnelProtocol(
 }
 
 const (
-	TLS_PROFILE_IOS_1131   = "iOS-Safari-11.3.1"
-	TLS_PROFILE_ANDROID_60 = "Android-6.0"
-	TLS_PROFILE_ANDROID_51 = "Android-5.1"
-	TLS_PROFILE_CHROME_58  = "Chrome-58"
-	TLS_PROFILE_CHROME_57  = "Chrome-57"
-	TLS_PROFILE_FIREFOX_56 = "Firefox-56"
-	TLS_PROFILE_RANDOMIZED = "Randomized"
+	TLS_PROFILE_IOS_1131         = "iOS-Safari-11.3.1"
+	TLS_PROFILE_ANDROID_60       = "Android-6.0"
+	TLS_PROFILE_ANDROID_51       = "Android-5.1"
+	TLS_PROFILE_CHROME_58        = "Chrome-58"
+	TLS_PROFILE_CHROME_57        = "Chrome-57"
+	TLS_PROFILE_FIREFOX_56       = "Firefox-56"
+	TLS_PROFILE_RANDOMIZED       = "Randomized"
+	TLS_PROFILE_TLS13_RANDOMIZED = "TLS-1.3-Randomized"
 )
 
 var SupportedTLSProfiles = TLSProfiles{
@@ -184,6 +205,7 @@ var SupportedTLSProfiles = TLSProfiles{
 	TLS_PROFILE_CHROME_57,
 	TLS_PROFILE_FIREFOX_56,
 	TLS_PROFILE_RANDOMIZED,
+	TLS_PROFILE_TLS13_RANDOMIZED,
 }
 
 type TLSProfiles []string
@@ -205,6 +227,39 @@ func (profiles TLSProfiles) PruneInvalid() TLSProfiles {
 		}
 	}
 	return q
+}
+
+const (
+	QUIC_VERSION_GQUIC39 = "gQUICv39"
+	QUIC_VERSION_GQUIC43 = "gQUICv43"
+	QUIC_VERSION_GQUIC44 = "gQUICv44"
+)
+
+var SupportedQUICVersions = QUICVersions{
+	QUIC_VERSION_GQUIC39,
+	QUIC_VERSION_GQUIC43,
+	QUIC_VERSION_GQUIC44,
+}
+
+type QUICVersions []string
+
+func (versions QUICVersions) Validate() error {
+	for _, v := range versions {
+		if !common.Contains(SupportedQUICVersions, v) {
+			return common.ContextError(fmt.Errorf("invalid QUIC version: %s", v))
+		}
+	}
+	return nil
+}
+
+func (versions QUICVersions) PruneInvalid() QUICVersions {
+	u := make(QUICVersions, 0)
+	for _, v := range versions {
+		if common.Contains(SupportedQUICVersions, v) {
+			u = append(u, v)
+		}
+	}
+	return u
 }
 
 type HandshakeResponse struct {

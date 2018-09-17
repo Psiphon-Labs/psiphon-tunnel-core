@@ -21,6 +21,7 @@ package common
 
 import (
 	"container/list"
+	"context"
 	"net"
 	"net/http"
 	"sync"
@@ -29,6 +30,50 @@ import (
 
 	"github.com/Psiphon-Labs/goarista/monotime"
 )
+
+// NetDialer mimicks the net.Dialer interface.
+type NetDialer interface {
+	Dial(network, address string) (net.Conn, error)
+	DialContext(ctx context.Context, network, address string) (net.Conn, error)
+}
+
+// Closer defines the interface to a type, typically
+// a net.Conn, that can be closed.
+type Closer interface {
+	IsClosed() bool
+}
+
+// TerminateHTTPConnection sends a 404 response to a client and also closes
+// the persistent connection.
+func TerminateHTTPConnection(
+	responseWriter http.ResponseWriter, request *http.Request) {
+
+	http.NotFound(responseWriter, request)
+
+	hijack, ok := responseWriter.(http.Hijacker)
+	if !ok {
+		return
+	}
+	conn, buffer, err := hijack.Hijack()
+	if err != nil {
+		return
+	}
+	buffer.Flush()
+	conn.Close()
+}
+
+// IPAddressFromAddr is a helper which extracts an IP address
+// from a net.Addr or returns "" if there is no IP address.
+func IPAddressFromAddr(addr net.Addr) string {
+	ipAddress := ""
+	if addr != nil {
+		host, _, err := net.SplitHostPort(addr.String())
+		if err == nil {
+			ipAddress = host
+		}
+	}
+	return ipAddress
+}
 
 // Conns is a synchronized list of Conns that is used to coordinate
 // interrupting a set of goroutines establishing connections, or
@@ -39,6 +84,11 @@ type Conns struct {
 	mutex    sync.Mutex
 	isClosed bool
 	conns    map[net.Conn]bool
+}
+
+// NewConns initializes a new Conns.
+func NewConns() *Conns {
+	return &Conns{}
 }
 
 func (conns *Conns) Reset() {
@@ -75,38 +125,6 @@ func (conns *Conns) CloseAll() {
 		conn.Close()
 	}
 	conns.conns = make(map[net.Conn]bool)
-}
-
-// TerminateHTTPConnection sends a 404 response to a client and also closes
-// the persistent connection.
-func TerminateHTTPConnection(
-	responseWriter http.ResponseWriter, request *http.Request) {
-
-	http.NotFound(responseWriter, request)
-
-	hijack, ok := responseWriter.(http.Hijacker)
-	if !ok {
-		return
-	}
-	conn, buffer, err := hijack.Hijack()
-	if err != nil {
-		return
-	}
-	buffer.Flush()
-	conn.Close()
-}
-
-// IPAddressFromAddr is a helper which extracts an IP address
-// from a net.Addr or returns "" if there is no IP address.
-func IPAddressFromAddr(addr net.Addr) string {
-	ipAddress := ""
-	if addr != nil {
-		host, _, err := net.SplitHostPort(addr.String())
-		if err == nil {
-			ipAddress = host
-		}
-	}
-	return ipAddress
 }
 
 // LRUConns is a concurrency-safe list of net.Conns ordered
@@ -192,12 +210,6 @@ func (entry *LRUConnsEntry) Touch() {
 	entry.lruConns.mutex.Lock()
 	defer entry.lruConns.mutex.Unlock()
 	entry.lruConns.list.MoveToFront(entry.element)
-}
-
-// Closer defines the interface to a type, typically
-// a net.Conn, that can be closed.
-type Closer interface {
-	IsClosed() bool
 }
 
 // ActivityMonitoredConn wraps a net.Conn, adding logic to deal with

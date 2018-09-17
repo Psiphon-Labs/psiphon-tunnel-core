@@ -40,6 +40,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
@@ -67,7 +68,7 @@ func TestMain(m *testing.M) {
 		}
 	}
 	if err != nil {
-		fmt.Printf("error getting server IP address: %s", err)
+		fmt.Printf("error getting server IP address: %s\n", err)
 		os.Exit(1)
 	}
 
@@ -77,8 +78,6 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	defer os.RemoveAll(testDataDirName)
-
-	os.Remove(filepath.Join(testDataDirName, psiphon.DATA_STORE_FILENAME))
 
 	psiphon.SetEmitDiagnosticNotices(true)
 
@@ -167,6 +166,23 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
+			tlsProfile:           protocol.TLS_PROFILE_RANDOMIZED,
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
+func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
+			tlsProfile:           protocol.TLS_PROFILE_TLS13_RANDOMIZED,
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			doDefaultSponsorID:   false,
@@ -182,6 +198,23 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+			tlsProfile:           protocol.TLS_PROFILE_RANDOMIZED,
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
+func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+			tlsProfile:           protocol.TLS_PROFILE_TLS13_RANDOMIZED,
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			doDefaultSponsorID:   false,
@@ -197,6 +230,24 @@ func TestQUICOSSH(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "QUIC-OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+		})
+}
+
+func TestMarionetteOSSH(t *testing.T) {
+	if !marionette.Enabled() {
+		t.Skip("Marionette is not enabled")
+	}
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "MARIONETTE-OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			doDefaultSponsorID:   false,
@@ -345,6 +396,7 @@ func TestUDPOnlySLOK(t *testing.T) {
 
 type runServerConfig struct {
 	tunnelProtocol       string
+	tlsProfile           string
 	enableSSHAPIRequests bool
 	doHotReload          bool
 	doDefaultSponsorID   bool
@@ -398,7 +450,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// create a server
 
 	psiphonServerIPAddress := serverIPAddress
-	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) ||
+		protocol.TunnelProtocolUsesMarionette(runConfig.tunnelProtocol) {
 		// Workaround for macOS firewall.
 		psiphonServerIPAddress = "127.0.0.1"
 	}
@@ -408,6 +461,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		EnableSSHAPIRequests: runConfig.enableSSHAPIRequests,
 		WebServerPort:        8000,
 		TunnelProtocolPorts:  map[string]int{runConfig.tunnelProtocol: 4000},
+	}
+
+	if protocol.TunnelProtocolUsesMarionette(runConfig.tunnelProtocol) {
+		generateConfigParams.TunnelProtocolPorts[runConfig.tunnelProtocol] = 0
+		generateConfigParams.MarionetteFormat = "http_simple_nonblocking"
 	}
 
 	if doTactics {
@@ -557,6 +615,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		jsonNetworkID = fmt.Sprintf(`,"NetworkID" : "%s-%s"`, prefix, "NETWORK1")
 	}
 
+	jsonLimitTLSProfiles := ""
+	if runConfig.tlsProfile != "" {
+		jsonLimitTLSProfiles = fmt.Sprintf(`,"LimitTLSProfiles" : ["%s"]`, runConfig.tlsProfile)
+	}
+
 	clientConfigJSON := fmt.Sprintf(`
     {
         "ClientPlatform" : "Windows",
@@ -568,7 +631,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "ConnectionWorkerPoolSize" : %d,
         "LimitTunnelProtocols" : ["%s"]
         %s
-    }`, numTunnels, runConfig.tunnelProtocol, jsonNetworkID)
+        %s
+    }`, numTunnels, runConfig.tunnelProtocol, jsonLimitTLSProfiles, jsonNetworkID)
 
 	clientConfig, err := psiphon.LoadConfig([]byte(clientConfigJSON))
 	if err != nil {

@@ -57,8 +57,6 @@ func TestMain(m *testing.M) {
 	}
 	defer os.RemoveAll(testDataDirName)
 
-	os.Remove(filepath.Join(testDataDirName, DATA_STORE_FILENAME))
-
 	SetEmitDiagnosticNotices(true)
 
 	initDisruptor()
@@ -428,6 +426,23 @@ func TestFrontedMeekFragmentor(t *testing.T) {
 			disruptNetwork:           false,
 			transformHostNames:       false,
 			useFragmentor:            true,
+		})
+}
+
+func TestQUIC(t *testing.T) {
+	controllerRun(t,
+		&controllerRunConfig{
+			expectNoServerEntries:    false,
+			protocol:                 protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
+			clientIsLatestVersion:    false,
+			disableUntunneledUpgrade: true,
+			disableEstablishing:      false,
+			disableApi:               false,
+			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
+			disruptNetwork:           false,
+			transformHostNames:       false,
+			useFragmentor:            false,
 		})
 }
 

@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -94,8 +93,6 @@ func TestLimitTunnelProtocols(t *testing.T) {
 		t.Fatalf("TempDir failed: %s", err)
 	}
 	defer os.RemoveAll(testDataDirName)
-
-	os.Remove(filepath.Join(testDataDirName, DATA_STORE_FILENAME))
 
 	clientConfigJSON := `
     {

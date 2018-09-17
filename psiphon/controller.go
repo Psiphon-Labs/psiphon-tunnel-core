@@ -156,6 +156,8 @@ func NewController(config *Config) (controller *Controller, err error) {
 // component fails or the parent context is canceled.
 func (controller *Controller) Run(ctx context.Context) {
 
+	pprofRun()
+
 	// Ensure fresh repetitive notice state for each run, so the
 	// client will always get an AvailableEgressRegions notice,
 	// an initial instance of any repetitive error notice, etc.
@@ -661,7 +663,7 @@ loop:
 				// Clear the reference to this discarded tunnel and immediately run
 				// a garbage collection to reclaim its memory.
 				connectedTunnel = nil
-				defaultGarbageCollection()
+				DoGarbageCollection()
 
 				// Skip the rest of this case
 				break
@@ -1045,7 +1047,7 @@ func (controller *Controller) startEstablishing() {
 	controller.peakConcurrentIntensiveEstablishTunnels = 0
 	controller.concurrentEstablishTunnelsMutex.Unlock()
 
-	aggressiveGarbageCollection()
+	DoGarbageCollection()
 	emitMemoryMetrics()
 
 	// Note: the establish context cancelFunc, controller.stopEstablish,
@@ -1211,7 +1213,7 @@ func (controller *Controller) stopEstablishing() {
 	NoticeInfo("peak concurrent resource intensive establish tunnels: %d", peakConcurrentIntensive)
 
 	emitMemoryMetrics()
-	standardGarbageCollection()
+	DoGarbageCollection()
 }
 
 func (controller *Controller) getTactics(done chan struct{}) {
@@ -1314,7 +1316,7 @@ func (controller *Controller) getTactics(done chan struct{}) {
 
 	// Reclaim memory from the completed tactics request as we're likely
 	// to be proceeding to the memory-intensive tunnel establishment phase.
-	aggressiveGarbageCollection()
+	DoGarbageCollection()
 	emitMemoryMetrics()
 }
 
@@ -1427,7 +1429,7 @@ func (controller *Controller) establishCandidateGenerator() {
 	// for network connectivity. This duration will be excluded
 	// from reported tunnel establishment duration.
 	establishStartTime := monotime.Now()
-	var networkWaitDuration time.Duration
+	var totalNetworkWaitDuration time.Duration
 
 	applyServerAffinity, iterator, err := NewServerEntryIterator(controller.config)
 	if err != nil {
@@ -1452,16 +1454,6 @@ loop:
 	// Repeat until stopped
 	for {
 
-		networkWaitStartTime := monotime.Now()
-
-		if !WaitForNetworkConnectivity(
-			controller.establishCtx,
-			controller.config.NetworkConnectivityChecker) {
-			break loop
-		}
-
-		networkWaitDuration += monotime.Since(networkWaitStartTime)
-
 		// For diagnostics, emits counts of the number of known server
 		// entries that satisfy both the egress region and tunnel protocol
 		// requirements (excluding excludeIntensive logic).
@@ -1478,9 +1470,31 @@ loop:
 			initialCount,
 			count)
 
+		// A "round" consists of a new shuffle of the server entries
+		// and attempted connections up to the end of the server entry
+		// list, or parameters.EstablishTunnelWorkTime elapsed. Time
+		// spent waiting for network connectivity is excluded from
+		// round elapsed time.
+		//
+		// If the first round ends with no connection, remote server
+		// list and upgrade checks are launched.
+
+		roundStartTime := monotime.Now()
+		var roundNetworkWaitDuration time.Duration
+
 		// Send each iterator server entry to the establish workers
-		startTime := monotime.Now()
 		for {
+
+			networkWaitStartTime := monotime.Now()
+			if !WaitForNetworkConnectivity(
+				controller.establishCtx,
+				controller.config.NetworkConnectivityChecker) {
+				break loop
+			}
+			networkWaitDuration := monotime.Since(networkWaitStartTime)
+			roundNetworkWaitDuration += networkWaitDuration
+			totalNetworkWaitDuration += networkWaitDuration
+
 			serverEntry, err := iterator.Next()
 			if err != nil {
 				NoticeAlert("failed to get next candidate: %s", err)
@@ -1499,8 +1513,7 @@ loop:
 
 			// adjustedEstablishStartTime is establishStartTime shifted
 			// to exclude time spent waiting for network connectivity.
-
-			adjustedEstablishStartTime := establishStartTime.Add(networkWaitDuration)
+			adjustedEstablishStartTime := establishStartTime.Add(totalNetworkWaitDuration)
 
 			candidate := &candidateServerEntry{
 				serverEntry:                serverEntry,
@@ -1526,7 +1539,7 @@ loop:
 			workTime := controller.config.clientParameters.Get().Duration(
 				parameters.EstablishTunnelWorkTime)
 
-			if startTime.Add(workTime).Before(monotime.Now()) {
+			if roundStartTime.Add(-roundNetworkWaitDuration).Add(workTime).Before(monotime.Now()) {
 				// Start over, after a brief pause, with a new shuffle of the server
 				// entries, and potentially some newly fetched server entries.
 				break
@@ -1724,7 +1737,7 @@ loop:
 
 		// ConnectTunnel will allocate significant memory, so first attempt to
 		// reclaim as much as possible.
-		defaultGarbageCollection()
+		DoGarbageCollection()
 
 		tunnel, err := ConnectTunnel(
 			controller.establishCtx,
@@ -1754,7 +1767,7 @@ loop:
 		if err != nil {
 			tunnel = nil
 		}
-		defaultGarbageCollection()
+		DoGarbageCollection()
 
 		if err != nil {
 
@@ -1788,7 +1801,7 @@ loop:
 			// Clear the reference to this discarded tunnel and immediately run
 			// a garbage collection to reclaim its memory.
 			tunnel = nil
-			defaultGarbageCollection()
+			DoGarbageCollection()
 		}
 
 		// Unblock other candidates only after delivering when
