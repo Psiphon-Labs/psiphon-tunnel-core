@@ -29,7 +29,6 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
-	"runtime/pprof"
 	"sort"
 	"sync"
 
@@ -51,9 +50,6 @@ func main() {
 
 	var formatNotices bool
 	flag.BoolVar(&formatNotices, "formatNotices", false, "emit notices in human-readable format")
-
-	var profileFilename string
-	flag.StringVar(&profileFilename, "profile", "", "CPU profile output file")
 
 	var interfaceName string
 	flag.StringVar(&interfaceName, "listenInterface", "", "bind local proxies to specified interface")
@@ -215,18 +211,6 @@ func main() {
 	// sets EmitDiagnosticNotices.
 
 	psiphon.NoticeBuildInfo()
-
-	// Handle optional profiling parameter
-
-	if profileFilename != "" {
-		profileFile, err := os.Create(profileFilename)
-		if err != nil {
-			psiphon.NoticeError("error opening profile file: %s", err)
-			os.Exit(1)
-		}
-		pprof.StartCPUProfile(profileFile)
-		defer pprof.StopCPUProfile()
-	}
 
 	// Initialize data store
 

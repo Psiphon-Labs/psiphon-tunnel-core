@@ -1,6 +1,7 @@
 package ackhandler
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -373,41 +374,50 @@ func (h *sentPacketHandler) detectLostPackets(now time.Time, priorInFlight proto
 }
 
 func (h *sentPacketHandler) OnAlarm() error {
-	now := time.Now()
+	// When all outstanding are acknowledged, the alarm is canceled in
+	// updateLossDetectionAlarm. This doesn't reset the timer in the session though.
+	// When OnAlarm is called, we therefore need to make sure that there are
+	// actually packets outstanding.
+	if h.packetHistory.HasOutstandingPackets() {
+		if err := h.onVerifiedAlarm(); err != nil {
+			return err
+		}
+	}
+	h.updateLossDetectionAlarm()
+	return nil
+}
 
+func (h *sentPacketHandler) onVerifiedAlarm() error {
 	var err error
-	if !h.handshakeComplete {
+	if h.packetHistory.HasOutstandingHandshakePackets() {
 		if h.logger.Debug() {
-			h.logger.Debugf("Loss detection alarm fired in handshake mode")
+			h.logger.Debugf("Loss detection alarm fired in handshake mode. Handshake count: %d", h.handshakeCount)
 		}
 		h.handshakeCount++
 		err = h.queueHandshakePacketsForRetransmission()
 	} else if !h.lossTime.IsZero() {
 		if h.logger.Debug() {
-			h.logger.Debugf("Loss detection alarm fired in loss timer mode")
+			h.logger.Debugf("Loss detection alarm fired in loss timer mode. Loss time: %s", h.lossTime)
 		}
 		// Early retransmit or time loss detection
-		err = h.detectLostPackets(now, h.bytesInFlight)
-	} else if h.tlpCount < maxTLPs {
+		err = h.detectLostPackets(time.Now(), h.bytesInFlight)
+	} else if h.tlpCount < maxTLPs { // TLP
 		if h.logger.Debug() {
-			h.logger.Debugf("Loss detection alarm fired in TLP mode")
+			h.logger.Debugf("Loss detection alarm fired in TLP mode. TLP count: %d", h.tlpCount)
 		}
 		h.allowTLP = true
 		h.tlpCount++
-	} else {
+	} else { // RTO
 		if h.logger.Debug() {
-			h.logger.Debugf("Loss detection alarm fired in RTO mode")
+			h.logger.Debugf("Loss detection alarm fired in RTO mode. RTO count: %d", h.rtoCount)
 		}
-		// RTO
+		if h.rtoCount == 0 {
+			h.largestSentBeforeRTO = h.lastSentPacketNumber
+		}
 		h.rtoCount++
 		h.numRTOs += 2
-		err = h.queueRTOs()
 	}
-	if err != nil {
-		return err
-	}
-	h.updateLossDetectionAlarm()
-	return nil
+	return err
 }
 
 func (h *sentPacketHandler) GetAlarmTimeout() time.Time {
@@ -496,6 +506,19 @@ func (h *sentPacketHandler) DequeuePacketForRetransmission() *Packet {
 	return packet
 }
 
+func (h *sentPacketHandler) DequeueProbePacket() (*Packet, error) {
+	if len(h.retransmissionQueue) == 0 {
+		p := h.packetHistory.FirstOutstanding()
+		if p == nil {
+			return nil, errors.New("cannot dequeue a probe packet. No outstanding packets")
+		}
+		if err := h.queuePacketForRetransmission(p); err != nil {
+			return nil, err
+		}
+	}
+	return h.DequeuePacketForRetransmission(), nil
+}
+
 func (h *sentPacketHandler) GetPacketNumberLen(p protocol.PacketNumber) protocol.PacketNumberLen {
 	return protocol.GetPacketNumberLengthForHeader(p, h.lowestUnacked(), h.version)
 }
@@ -557,23 +580,6 @@ func (h *sentPacketHandler) ShouldSendNumPackets() int {
 		return 1
 	}
 	return int(math.Ceil(float64(protocol.MinPacingDelay) / float64(delay)))
-}
-
-// retransmit the oldest two packets
-func (h *sentPacketHandler) queueRTOs() error {
-	h.largestSentBeforeRTO = h.lastSentPacketNumber
-	// Queue the first two outstanding packets for retransmission.
-	// This does NOT declare this packets as lost:
-	// They are still tracked in the packet history and count towards the bytes in flight.
-	for i := 0; i < 2; i++ {
-		if p := h.packetHistory.FirstOutstanding(); p != nil {
-			h.logger.Debugf("Queueing packet %#x for retransmission (RTO)", p.PacketNumber)
-			if err := h.queuePacketForRetransmission(p); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func (h *sentPacketHandler) queueHandshakePacketsForRetransmission() error {

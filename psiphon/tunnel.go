@@ -36,11 +36,13 @@ import (
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tapdance"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	regen "github.com/zach-klippenstein/goregen"
 )
@@ -160,7 +162,8 @@ func ConnectTunnel(
 	adjustedEstablishStartTime monotime.Time) (*Tunnel, error) {
 
 	if !serverEntry.SupportsProtocol(selectedProtocol) {
-		return nil, common.ContextError(fmt.Errorf("server does not support selected protocol"))
+		return nil, common.ContextError(
+			fmt.Errorf("server does not support tunnel protocol: %s", selectedProtocol))
 	}
 
 	// Build transport layers and establish SSH connection. Note that
@@ -648,7 +651,8 @@ func initMeekConfig(
 		}
 
 	default:
-		return nil, common.ContextError(errors.New("unexpected selectedProtocol"))
+		return nil, common.ContextError(
+			fmt.Errorf("unknown tunnel protocol: %s", selectedProtocol))
 	}
 
 	if config.clientParameters.Get().Bool(parameters.MeekDialDomainsOnly) {
@@ -667,9 +671,7 @@ func initMeekConfig(
 	// Pin the TLS profile for the entire meek connection.
 	selectedTLSProfile := ""
 	if protocol.TunnelProtocolUsesMeekHTTPS(selectedProtocol) {
-		selectedTLSProfile = SelectTLSProfile(
-			selectedProtocol,
-			config.clientParameters)
+		selectedTLSProfile = SelectTLSProfile(config.clientParameters)
 	}
 
 	return &MeekConfig{
@@ -829,7 +831,7 @@ func dialSsh(
 	var err error
 
 	switch selectedProtocol {
-	case protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH:
+	case protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH, protocol.TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH:
 		useObfuscatedSsh = true
 		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
 
@@ -837,6 +839,10 @@ func dialSsh(
 		useObfuscatedSsh = true
 		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedQUICPort)
 		quicDialSNIAddress = fmt.Sprintf("%s:%d", common.GenerateHostName(), serverEntry.SshObfuscatedQUICPort)
+
+	case protocol.TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH:
+		useObfuscatedSsh = true
+		directDialAddress = serverEntry.IpAddress
 
 	case protocol.TUNNEL_PROTOCOL_SSH:
 		selectedSSHClientVersion = true
@@ -896,7 +902,30 @@ func dialSsh(
 			ctx,
 			packetConn,
 			remoteAddr,
-			quicDialSNIAddress)
+			quicDialSNIAddress,
+			selectQUICVersion(config.clientParameters))
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
+	} else if protocol.TunnelProtocolUsesMarionette(selectedProtocol) {
+
+		dialConn, err = marionette.Dial(
+			ctx,
+			NewNetDialer(dialConfig),
+			serverEntry.MarionetteFormat,
+			directDialAddress)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
+	} else if protocol.TunnelProtocolUsesTapdance(selectedProtocol) {
+
+		dialConn, err = tapdance.Dial(
+			ctx,
+			config.DataStoreDirectory,
+			NewNetDialer(dialConfig),
+			directDialAddress)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -1087,6 +1116,32 @@ func dialSsh(
 			sshRequests:   result.sshRequests,
 			dialStats:     dialStats},
 		nil
+}
+
+func selectQUICVersion(
+	clientParameters *parameters.ClientParameters) string {
+
+	limitQUICVersions := clientParameters.Get().QUICVersions(parameters.LimitQUICVersions)
+
+	quicVersions := make([]string, 0)
+
+	for _, quicVersion := range protocol.SupportedQUICVersions {
+
+		if len(limitQUICVersions) > 0 &&
+			!common.Contains(limitQUICVersions, quicVersion) {
+			continue
+		}
+
+		quicVersions = append(quicVersions, quicVersion)
+	}
+
+	if len(quicVersions) == 0 {
+		return ""
+	}
+
+	choice, _ := common.MakeSecureRandomInt(len(quicVersions))
+
+	return quicVersions[choice]
 }
 
 func makeRandomPeriod(min, max time.Duration) time.Duration {

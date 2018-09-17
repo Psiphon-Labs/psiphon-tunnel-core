@@ -28,4 +28,4 @@ ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH
 RUN mkdir -p "$GOPATH/src" "$GOPATH/bin" && chmod -R 777 "$GOPATH"
 WORKDIR $GOPATH
 
-CMD ["/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/Server/make.bash"]
+ENTRYPOINT ["/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/Server/make.bash"]

@@ -270,12 +270,14 @@ func TestMeekResiliency(t *testing.T) {
 	stopBroadcast := make(chan struct{})
 
 	useTLS := false
+	isFronted := false
 	useObfuscatedSessionTickets := false
 
 	server, err := NewMeekServer(
 		mockSupport,
 		listener,
 		useTLS,
+		isFronted,
 		useObfuscatedSessionTickets,
 		clientHandler,
 		stopBroadcast)
@@ -418,11 +420,16 @@ func TestMeekRateLimiter(t *testing.T) {
 
 	stopBroadcast := make(chan struct{})
 
+	useTLS := false
+	isFronted := false
+	useObfuscatedSessionTickets := false
+
 	server, err := NewMeekServer(
 		mockSupport,
 		listener,
-		false,
-		false,
+		useTLS,
+		isFronted,
+		useObfuscatedSessionTickets,
 		func(_ string, conn net.Conn) {
 			go func() {
 				for {

@@ -43,6 +43,7 @@ package quic
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -50,6 +51,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	quic_go "github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/qerr"
 )
@@ -59,6 +61,9 @@ const (
 	SERVER_IDLE_TIMEOUT      = 5 * time.Minute
 	CLIENT_IDLE_TIMEOUT      = 30 * time.Second
 )
+
+// quic_test overrides the server idle timeout.
+var serverIdleTimeout = SERVER_IDLE_TIMEOUT
 
 // Listener is a net.Listener.
 type Listener struct {
@@ -86,7 +91,7 @@ func Listen(addr string) (*Listener, error) {
 
 	quicConfig := &quic_go.Config{
 		HandshakeTimeout:      SERVER_HANDSHAKE_TIMEOUT,
-		IdleTimeout:           SERVER_IDLE_TIMEOUT,
+		IdleTimeout:           serverIdleTimeout,
 		MaxIncomingStreams:    1,
 		MaxIncomingUniStreams: -1,
 		KeepAlive:             true,
@@ -120,6 +125,12 @@ func (listener *Listener) Accept() (net.Conn, error) {
 	}, nil
 }
 
+var supportedVersionNumbers = map[string]quic_go.VersionNumber{
+	protocol.QUIC_VERSION_GQUIC39: quic_go.VersionGQUIC39,
+	protocol.QUIC_VERSION_GQUIC43: quic_go.VersionGQUIC43,
+	protocol.QUIC_VERSION_GQUIC44: quic_go.VersionGQUIC44,
+}
+
 // Dial establishes a new QUIC session and stream to the server specified by
 // address.
 //
@@ -133,12 +144,24 @@ func Dial(
 	ctx context.Context,
 	packetConn net.PacketConn,
 	remoteAddr *net.UDPAddr,
-	quicSNIAddress string) (net.Conn, error) {
+	quicSNIAddress string,
+	negotiateQUICVersion string) (net.Conn, error) {
+
+	var versions []quic_go.VersionNumber
+
+	if negotiateQUICVersion != "" {
+		versionNumber, ok := supportedVersionNumbers[negotiateQUICVersion]
+		if !ok {
+			return nil, common.ContextError(fmt.Errorf("unsupported version: %s", negotiateQUICVersion))
+		}
+		versions = []quic_go.VersionNumber{versionNumber}
+	}
 
 	quicConfig := &quic_go.Config{
 		HandshakeTimeout: time.Duration(1<<63 - 1),
 		IdleTimeout:      CLIENT_IDLE_TIMEOUT,
 		KeepAlive:        true,
+		Versions:         versions,
 	}
 
 	deadline, ok := ctx.Deadline()
@@ -169,7 +192,7 @@ func Dial(
 
 		stream, err := session.OpenStream()
 		if err != nil {
-			session.Close(nil)
+			session.Close()
 			resultChannel <- dialResult{err: err}
 			return
 		}
@@ -191,7 +214,7 @@ func Dial(
 	case <-ctx.Done():
 		err = ctx.Err()
 		// Interrupt the goroutine
-		session.Close(nil)
+		session.Close()
 		<-resultChannel
 	}
 
@@ -234,7 +257,7 @@ func (conn *Conn) doDeferredAcceptStream() error {
 
 	stream, err := conn.session.AcceptStream()
 	if err != nil {
-		conn.session.Close(nil)
+		conn.session.Close()
 		conn.acceptErr = common.ContextError(err)
 		return conn.acceptErr
 	}
@@ -290,7 +313,7 @@ func (conn *Conn) Write(b []byte) (int, error) {
 }
 
 func (conn *Conn) Close() error {
-	err := conn.session.Close(nil)
+	err := conn.session.Close()
 	if conn.packetConn != nil {
 		err1 := conn.packetConn.Close()
 		if err == nil {

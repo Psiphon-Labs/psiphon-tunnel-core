@@ -27,6 +27,7 @@ import (
 	go_log "log"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/Psiphon-Inc/rotate-safe-writer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -183,7 +184,7 @@ func (f *CustomJSONFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 		data["fields.timestamp"] = t
 	}
 
-	data["timestamp"] = entry.Time.Format(logrus.DefaultTimestampFormat)
+	data["timestamp"] = entry.Time.Format(time.RFC3339)
 
 	if entry.Message != customJSONFormatterLogRawFieldsWithTimestamp {
 

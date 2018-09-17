@@ -28,4 +28,16 @@ RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz 
    && rm /tmp/go.tar.gz \
    && echo $GOVERSION > $GOROOT/VERSION
 
+# Setup Android Environment.
+ENV ANDROID_NDK_VERSION=r17b
+ENV ANDROID_NDK_TOOLCHAIN_ROOT=/android-ndk-toolchain
+
+# Setup Android NDK
+RUN cd /tmp \
+  && curl https://dl.google.com/android/repository/android-ndk-${ANDROID_NDK_VERSION}-linux-x86_64.zip -o /tmp/android-ndk.zip \
+  && unzip /tmp/android-ndk.zip -d / \
+  && mkdir -p /android-ndk-toolchain \
+  && /android-ndk-${ANDROID_NDK_VERSION}/build/tools/make_standalone_toolchain.py --arch arm --install-dir /android-ndk-toolchain/arm \
+  && /android-ndk-${ANDROID_NDK_VERSION}/build/tools/make_standalone_toolchain.py --arch arm64 --install-dir /android-ndk-toolchain/arm64
+
 WORKDIR $GOPATH/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ClientLibrary
