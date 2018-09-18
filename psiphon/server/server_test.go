@@ -1270,7 +1270,15 @@ func paveTacticsConfigFile(
         "TTL" : "60s",
         "Probability" : 1.0,
         "Parameters" : {
-          "LimitTunnelProtocols" : ["%s"]
+          "LimitTunnelProtocols" : ["%s"],
+          "FragmentorLimitProtocols" : ["%s"],
+          "FragmentorProbability" : 1.0,
+          "FragmentorMinTotalBytes" : 1000,
+          "FragmentorMaxTotalBytes" : 2000,
+          "FragmentorMinWriteBytes" : 1,
+          "FragmentorMaxWriteBytes" : 100,
+          "FragmentorMinDelay" : "1ms",
+          "FragmentorMaxDelay" : "10ms"
         }
       },
       "FilteredTactics" : [
@@ -1296,6 +1304,7 @@ func paveTacticsConfigFile(
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
 		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
+		tunnelProtocol,
 		tunnelProtocol,
 		propagationChannelID)
 
