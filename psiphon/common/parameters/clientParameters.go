@@ -102,6 +102,14 @@ const (
 	FragmentorMaxWriteBytes                    = "FragmentorMaxWriteBytes"
 	FragmentorMinDelay                         = "FragmentorMinDelay"
 	FragmentorMaxDelay                         = "FragmentorMaxDelay"
+	FragmentorDownstreamProbability            = "FragmentorDownstreamProbability"
+	FragmentorDownstreamLimitProtocols         = "FragmentorDownstreamLimitProtocols"
+	FragmentorDownstreamMinTotalBytes          = "FragmentorDownstreamMinTotalBytes"
+	FragmentorDownstreamMaxTotalBytes          = "FragmentorDownstreamMaxTotalBytes"
+	FragmentorDownstreamMinWriteBytes          = "FragmentorDownstreamMinWriteBytes"
+	FragmentorDownstreamMaxWriteBytes          = "FragmentorDownstreamMaxWriteBytes"
+	FragmentorDownstreamMinDelay               = "FragmentorDownstreamMinDelay"
+	FragmentorDownstreamMaxDelay               = "FragmentorDownstreamMaxDelay"
 	ObfuscatedSSHMinPadding                    = "ObfuscatedSSHMinPadding"
 	ObfuscatedSSHMaxPadding                    = "ObfuscatedSSHMaxPadding"
 	TunnelOperateShutdownTimeout               = "TunnelOperateShutdownTimeout"
@@ -233,14 +241,22 @@ var defaultClientParameters = map[string]struct {
 	LimitQUICVersionsProbability: {value: 1.0, minimum: 0.0},
 	LimitQUICVersions:            {value: protocol.QUICVersions{protocol.QUIC_VERSION_GQUIC43}},
 
-	FragmentorProbability:    {value: 0.5, minimum: 0.0},
-	FragmentorLimitProtocols: {value: protocol.TunnelProtocols{}},
-	FragmentorMinTotalBytes:  {value: 0, minimum: 0},
-	FragmentorMaxTotalBytes:  {value: 0, minimum: 0},
-	FragmentorMinWriteBytes:  {value: 1, minimum: 1},
-	FragmentorMaxWriteBytes:  {value: 1500, minimum: 1},
-	FragmentorMinDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
-	FragmentorMaxDelay:       {value: 10 * time.Millisecond, minimum: time.Duration(0)},
+	FragmentorProbability:              {value: 0.5, minimum: 0.0},
+	FragmentorLimitProtocols:           {value: protocol.TunnelProtocols{}},
+	FragmentorMinTotalBytes:            {value: 0, minimum: 0},
+	FragmentorMaxTotalBytes:            {value: 0, minimum: 0},
+	FragmentorMinWriteBytes:            {value: 1, minimum: 1},
+	FragmentorMaxWriteBytes:            {value: 1500, minimum: 1},
+	FragmentorMinDelay:                 {value: time.Duration(0), minimum: time.Duration(0)},
+	FragmentorMaxDelay:                 {value: 10 * time.Millisecond, minimum: time.Duration(0)},
+	FragmentorDownstreamProbability:    {value: 0.5, minimum: 0.0},
+	FragmentorDownstreamLimitProtocols: {value: protocol.TunnelProtocols{}},
+	FragmentorDownstreamMinTotalBytes:  {value: 0, minimum: 0},
+	FragmentorDownstreamMaxTotalBytes:  {value: 0, minimum: 0},
+	FragmentorDownstreamMinWriteBytes:  {value: 1, minimum: 1},
+	FragmentorDownstreamMaxWriteBytes:  {value: 1500, minimum: 1},
+	FragmentorDownstreamMinDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
+	FragmentorDownstreamMaxDelay:       {value: 10 * time.Millisecond, minimum: time.Duration(0)},
 
 	// The Psiphon server will reject obfuscated SSH seed messages with
 	// padding greater than OBFUSCATE_MAX_PADDING.

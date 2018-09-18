@@ -1278,7 +1278,15 @@ func paveTacticsConfigFile(
           "FragmentorMinWriteBytes" : 1,
           "FragmentorMaxWriteBytes" : 100,
           "FragmentorMinDelay" : "1ms",
-          "FragmentorMaxDelay" : "10ms"
+          "FragmentorMaxDelay" : "10ms",
+          "FragmentorDownstreamLimitProtocols" : ["%s"],
+          "FragmentorDownstreamProbability" : 1.0,
+          "FragmentorDownstreamMinTotalBytes" : 1000,
+          "FragmentorDownstreamMaxTotalBytes" : 2000,
+          "FragmentorDownstreamMinWriteBytes" : 1,
+          "FragmentorDownstreamMaxWriteBytes" : 100,
+          "FragmentorDownstreamMinDelay" : "1ms",
+          "FragmentorDownstreamMaxDelay" : "10ms"
         }
       },
       "FilteredTactics" : [
@@ -1304,6 +1312,7 @@ func paveTacticsConfigFile(
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
 		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
+		tunnelProtocol,
 		tunnelProtocol,
 		tunnelProtocol,
 		propagationChannelID)

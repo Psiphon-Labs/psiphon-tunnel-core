@@ -1155,14 +1155,14 @@ func (listener *Listener) Accept() (net.Conn, error) {
 		// or not fragment all TCP connections for a one meek session, the server
 		// will make a coin flip per connection.
 
-		tunnelProtocols := p.TunnelProtocols(parameters.FragmentorLimitProtocols)
+		tunnelProtocols := p.TunnelProtocols(parameters.FragmentorDownstreamLimitProtocols)
 		if (len(tunnelProtocols) == 0 ||
 			common.Contains(tunnelProtocols, listener.tunnelProtocol)) &&
-			p.WeightedCoinFlip(parameters.FragmentorProbability) {
+			p.WeightedCoinFlip(parameters.FragmentorDownstreamProbability) {
 
 			totalBytes, err := common.MakeSecureRandomRange(
-				p.Int(parameters.FragmentorMinTotalBytes),
-				p.Int(parameters.FragmentorMaxTotalBytes))
+				p.Int(parameters.FragmentorDownstreamMinTotalBytes),
+				p.Int(parameters.FragmentorDownstreamMaxTotalBytes))
 			if err != nil {
 				listener.server.logger.WithContextFields(
 					common.LogFields{"error": err}).Warning("MakeSecureRandomRange failed")
@@ -1172,12 +1172,15 @@ func (listener *Listener) Accept() (net.Conn, error) {
 			if totalBytes > 0 {
 				conn = fragmentor.NewConn(
 					conn,
-					nil,
+					func(message string) {
+						listener.server.logger.WithContextFields(
+							common.LogFields{"message": message}).Debug("Fragmentor")
+					},
 					totalBytes,
-					p.Int(parameters.FragmentorMinWriteBytes),
-					p.Int(parameters.FragmentorMaxWriteBytes),
-					p.Duration(parameters.FragmentorMinDelay),
-					p.Duration(parameters.FragmentorMaxDelay))
+					p.Int(parameters.FragmentorDownstreamMinWriteBytes),
+					p.Int(parameters.FragmentorDownstreamMaxWriteBytes),
+					p.Duration(parameters.FragmentorDownstreamMinDelay),
+					p.Duration(parameters.FragmentorDownstreamMaxDelay))
 			}
 		}
 
