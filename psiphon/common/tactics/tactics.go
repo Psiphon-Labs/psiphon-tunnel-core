@@ -170,6 +170,7 @@ import (
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
@@ -232,9 +233,9 @@ type Server struct {
 	// RequestObfuscatedKey is the tactics request obfuscation key.
 	RequestObfuscatedKey []byte
 
-	// EnforceServerSide enables server-side enforcement of certain tactics
-	// parameters via Listeners.
-	EnforceServerSide bool
+	// EnforceLimitsServerSide enables server-side enforcement of certain limit
+	// tactics parameters via Listeners.
+	EnforceLimitsServerSide bool
 
 	// DefaultTactics is the baseline tactics for all clients. It must include a
 	// TTL and Probability.
@@ -455,7 +456,7 @@ func NewServer(
 			server.RequestPublicKey = newServer.RequestPublicKey
 			server.RequestPrivateKey = newServer.RequestPrivateKey
 			server.RequestObfuscatedKey = newServer.RequestObfuscatedKey
-			server.EnforceServerSide = newServer.EnforceServerSide
+			server.EnforceLimitsServerSide = newServer.EnforceLimitsServerSide
 			server.DefaultTactics = newServer.DefaultTactics
 			server.FilteredTactics = newServer.FilteredTactics
 
@@ -1060,7 +1061,7 @@ func (server *Server) handleTacticsRequest(
 	server.logger.LogMetric(TACTICS_METRIC_EVENT_NAME, logFields)
 }
 
-// Listener wraps a net.Listener and applies server-side enforcement of
+// Listener wraps a net.Listener and applies server-side implementation of
 // certain tactics parameters to accepted connections. Tactics filtering is
 // limited to GeoIP attributes as the client has not yet sent API paramaters.
 type Listener struct {
@@ -1085,12 +1086,15 @@ func NewListener(
 	}
 }
 
-// Close calls the underlying listener's Accept, and then
-// checks if tactics for the connection set LimitTunnelProtocols.
-// If LimitTunnelProtocols is set and does not include the
-// tunnel protocol the listener is running, the accepted
-// connection is immediately closed and the underlying
-// Accept is called again.
+// Accept calls the underlying listener's Accept, and then checks if tactics
+// for the connection set LimitTunnelProtocols.
+//
+// If LimitTunnelProtocols is set and does not include the tunnel protocol the
+// listener is running, the accepted connection is immediately closed and the
+// underlying Accept is called again.
+//
+// For retained connections, fragmentation is applied when specified by
+// tactics.
 func (listener *Listener) Accept() (net.Conn, error) {
 	for {
 
@@ -1098,10 +1102,6 @@ func (listener *Listener) Accept() (net.Conn, error) {
 		if err != nil {
 			// Don't modify error from net.Listener
 			return nil, err
-		}
-
-		if !listener.server.EnforceServerSide {
-			return conn, nil
 		}
 
 		geoIPData := listener.geoIPLookup(common.IPAddressFromAddr(conn.RemoteAddr()))
@@ -1120,30 +1120,68 @@ func (listener *Listener) Accept() (net.Conn, error) {
 			return conn, nil
 		}
 
-		limitTunnelProtocolsParameter, ok := tactics.Parameters[parameters.LimitTunnelProtocols]
-		if !ok {
-			// The tactics for the connection don't set LimitTunnelProtocols.
-			return conn, nil
-		}
-
 		if !common.FlipWeightedCoin(tactics.Probability) {
 			// Skip tactics with the configured probability.
 			return conn, nil
 		}
 
-		limitTunnelProtocols, ok := common.GetStringSlice(limitTunnelProtocolsParameter)
-		if !ok ||
-			len(limitTunnelProtocols) == 0 ||
-			common.Contains(limitTunnelProtocols, listener.tunnelProtocol) {
-
-			// The parameter is invalid; or no limit is set; or the
-			// listener protocol is not prohibited.
+		clientParameters, err := parameters.NewClientParameters(nil)
+		if err != nil {
 			return conn, nil
 		}
 
-		// Don't accept this connection as its tactics prohibits the
-		// listener's tunnel protocol.
-		conn.Close()
+		_, err = clientParameters.Set("", false, tactics.Parameters)
+		if err != nil {
+			return conn, nil
+		}
+
+		p := clientParameters.Get()
+
+		if listener.server.EnforceLimitsServerSide {
+			tunnelProtocols := p.TunnelProtocols(parameters.LimitTunnelProtocols)
+			if len(tunnelProtocols) > 0 &&
+				!common.Contains(tunnelProtocols, listener.tunnelProtocol) {
+				// Don't accept this connection as its tactics prohibits the
+				// listener's tunnel protocol.
+				conn.Close()
+				continue
+			}
+		}
+
+		// Wrap the conn in a fragmentor.Conn, subject to tactics parameters.
+		//
+		// Limitation: this server-side fragmentation is not synchronized with
+		// client-side; where client-side will make a single coin flip to fragment
+		// or not fragment all TCP connections for a one meek session, the server
+		// will make a coin flip per connection.
+
+		tunnelProtocols := p.TunnelProtocols(parameters.FragmentorLimitProtocols)
+		if (len(tunnelProtocols) == 0 ||
+			common.Contains(tunnelProtocols, listener.tunnelProtocol)) &&
+			p.WeightedCoinFlip(parameters.FragmentorProbability) {
+
+			totalBytes, err := common.MakeSecureRandomRange(
+				p.Int(parameters.FragmentorMinTotalBytes),
+				p.Int(parameters.FragmentorMaxTotalBytes))
+			if err != nil {
+				listener.server.logger.WithContextFields(
+					common.LogFields{"error": err}).Warning("MakeSecureRandomRange failed")
+				totalBytes = 0
+			}
+
+			if totalBytes > 0 {
+				conn = fragmentor.NewConn(
+					conn,
+					nil,
+					totalBytes,
+					p.Int(parameters.FragmentorMinWriteBytes),
+					p.Int(parameters.FragmentorMaxWriteBytes),
+					p.Duration(parameters.FragmentorMinDelay),
+					p.Duration(parameters.FragmentorMaxDelay))
+			}
+		}
+
+		return conn, nil
 	}
 }
 
