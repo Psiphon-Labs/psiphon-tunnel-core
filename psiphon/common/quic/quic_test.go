@@ -57,7 +57,12 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 	// connection termination packets.
 	serverIdleTimeout = 1 * time.Second
 
-	listener, err := Listen("127.0.0.1:0")
+	obfuscationKey, err := common.MakeSecureRandomStringHex(32)
+	if err != nil {
+		t.Fatalf("MakeSecureRandomStringHex failed: %s", err)
+	}
+
+	listener, err := Listen("127.0.0.1:0", obfuscationKey)
 	if err != nil {
 		t.Fatalf("Listen failed: %s", err)
 	}
@@ -126,7 +131,8 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 				packetConn,
 				remoteAddr,
 				serverAddress,
-				negotiateQUICVersion)
+				negotiateQUICVersion,
+				obfuscationKey)
 			if err != nil {
 				return common.ContextError(err)
 			}

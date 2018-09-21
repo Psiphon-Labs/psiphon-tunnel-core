@@ -903,7 +903,8 @@ func dialSsh(
 			packetConn,
 			remoteAddr,
 			quicDialSNIAddress,
-			selectQUICVersion(config.clientParameters))
+			selectQUICVersion(config.clientParameters),
+			serverEntry.SshObfuscatedKey)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}

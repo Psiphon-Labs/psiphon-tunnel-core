@@ -71,7 +71,9 @@ type Listener struct {
 }
 
 // Listen creates a new Listener.
-func Listen(addr string) (*Listener, error) {
+func Listen(
+	address string,
+	obfuscationKey string) (*Listener, error) {
 
 	certificate, privateKey, err := common.GenerateWebServerCertificate(
 		common.GenerateHostName())
@@ -97,8 +99,24 @@ func Listen(addr string) (*Listener, error) {
 		KeepAlive:             true,
 	}
 
-	quicListener, err := quic_go.ListenAddr(
-		addr, tlsConfig, quicConfig)
+	addr, err := net.ResolveUDPAddr("udp", address)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	udpConn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	packetConn, err := NewObfuscatedPacketConnPacketConn(
+		udpConn, true, obfuscationKey)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	quicListener, err := quic_go.Listen(
+		packetConn, tlsConfig, quicConfig)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -126,9 +144,10 @@ func (listener *Listener) Accept() (net.Conn, error) {
 }
 
 var supportedVersionNumbers = map[string]quic_go.VersionNumber{
-	protocol.QUIC_VERSION_GQUIC39: quic_go.VersionGQUIC39,
-	protocol.QUIC_VERSION_GQUIC43: quic_go.VersionGQUIC43,
-	protocol.QUIC_VERSION_GQUIC44: quic_go.VersionGQUIC44,
+	protocol.QUIC_VERSION_GQUIC39:    quic_go.VersionGQUIC39,
+	protocol.QUIC_VERSION_GQUIC43:    quic_go.VersionGQUIC43,
+	protocol.QUIC_VERSION_GQUIC44:    quic_go.VersionGQUIC44,
+	protocol.QUIC_VERSION_OBFUSCATED: quic_go.VersionGQUIC43,
 }
 
 // Dial establishes a new QUIC session and stream to the server specified by
@@ -145,7 +164,8 @@ func Dial(
 	packetConn net.PacketConn,
 	remoteAddr *net.UDPAddr,
 	quicSNIAddress string,
-	negotiateQUICVersion string) (net.Conn, error) {
+	negotiateQUICVersion string,
+	obfuscationKey string) (net.Conn, error) {
 
 	var versions []quic_go.VersionNumber
 
@@ -167,6 +187,15 @@ func Dial(
 	deadline, ok := ctx.Deadline()
 	if ok {
 		quicConfig.HandshakeTimeout = deadline.Sub(time.Now())
+	}
+
+	if negotiateQUICVersion == protocol.QUIC_VERSION_OBFUSCATED {
+		var err error
+		packetConn, err = NewObfuscatedPacketConnPacketConn(
+			packetConn, false, obfuscationKey)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
 	}
 
 	session, err := quic_go.DialContext(
