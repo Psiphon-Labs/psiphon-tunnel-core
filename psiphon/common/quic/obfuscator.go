@@ -20,7 +20,6 @@
 package quic
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
@@ -310,27 +309,40 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 	return n, err
 }
 
-var fingerprints = [][]byte{
-	[]byte("CHLO"),
-	[]byte("SNI"),
-}
-
 func isQUIC(buffer []byte) bool {
 
-	// Note: we tested and rejected QUIC nDPI's detection:
-	// https://github.com/ntop/nDPI/blob/01bf295a19c19dc4f521ee40f0c478c794e1b5e4/src/lib/protocols/quic.c#L63
-	// nDPI assumes that, in the first client packet, the version is always present and starts with "Q"; and
-	// that certain Public Flags are set/unset. However v44 appears to send an initial packet with no version.
+	// As this function is called for every packet, it needs to be fast.
 	//
-	// In all currently supported versions, the first client packet contains the "CHLO" and "SNI" tags.
+	// In all currently supported versions, the first client packet contains
+	// the "CHLO" tag at one of the following offsets. The offset can vary for
+	// a single version.
 	//
-	// TODO: compute and look for tags in exact offsets
+	// Note that v44 does not include the "QUIC version" header field in its
+	// first client packet.
+	//
+	// As QUIC header parsing is complex, with many cases, we are not
+	// presently doing that, although this might improve accuracy as we should
+	// be able to identify the precise offset of "CHLO" based on header
+	// values.
 
-	for _, fingerprint := range fingerprints {
-		if -1 == bytes.Index(buffer, fingerprint) {
-			return false
-		}
+	if (len(buffer) >= 33 &&
+		buffer[29] == 'C' &&
+		buffer[30] == 'H' &&
+		buffer[31] == 'L' &&
+		buffer[32] == 'O') ||
+		(len(buffer) >= 35 &&
+			buffer[31] == 'C' &&
+			buffer[32] == 'H' &&
+			buffer[33] == 'L' &&
+			buffer[34] == 'O') ||
+		(len(buffer) >= 38 &&
+			buffer[34] == 'C' &&
+			buffer[35] == 'H' &&
+			buffer[36] == 'L' &&
+			buffer[37] == 'O') {
+
+		return true
 	}
 
-	return true
+	return false
 }
