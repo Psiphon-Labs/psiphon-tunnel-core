@@ -33,7 +33,7 @@ import (
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/hkdf"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/salsa20"
+	"github.com/Yawning/chacha20"
 )
 
 const (
@@ -189,7 +189,11 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 					fmt.Errorf("unexpected obfuscated QUIC packet length: %d", n))
 			}
 
-			salsa20.XORKeyStream(p[8:], p[8:], p[0:8], &conn.obfuscationKey)
+			cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], p[0:8])
+			if err != nil {
+				return n, addr, common.ContextError(err)
+			}
+			cipher.XORKeyStream(p[8:], p[8:])
 
 			paddingLen := int(p[8])
 			if paddingLen > MAX_PADDING_SIZE || paddingLen > n-9 {
@@ -292,8 +296,11 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 		copy(buffer[9+paddingLen:], p)
 		dataLen := 9 + paddingLen + n
 
-		salsa20.XORKeyStream(
-			buffer[8:dataLen], buffer[8:dataLen], buffer[0:8], &conn.obfuscationKey)
+		cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], buffer[0:8])
+		if err != nil {
+			return 0, common.ContextError(err)
+		}
+		cipher.XORKeyStream(buffer[8:dataLen], buffer[8:dataLen])
 
 		p = buffer[:dataLen]
 	}

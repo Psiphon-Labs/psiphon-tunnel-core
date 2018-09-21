@@ -81,6 +81,12 @@
 			"revisionTime": "2018-04-25T19:07:11Z"
 		},
 		{
+			"checksumSHA1": "iZ3cpzMPHGeYQWcSLweeYdPqPiw=",
+			"path": "github.com/Yawning/chacha20",
+			"revision": "e3b1f968fc6397b51d963fee8ec8711a47bc0ce8",
+			"revisionTime": "2017-09-04T08:51:04Z"
+		},
+		{
 			"checksumSHA1": "30PBqj9BW03KCVqASvLg3bR+xYc=",
 			"path": "github.com/agl/ed25519/edwards25519",
 			"revision": "5312a61534124124185d41f09206b9fef1d88403",
