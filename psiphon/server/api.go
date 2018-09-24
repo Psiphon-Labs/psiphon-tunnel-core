@@ -551,6 +551,9 @@ var baseRequestParams = []requestParamSpec{
 	{"server_entry_source", isServerEntrySource, requestParamOptional},
 	{"server_entry_timestamp", isISO8601Date, requestParamOptional},
 	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
+	{"dial_port_number", isIntString, requestParamOptional},
+	{"quic_version", isAnyString, requestParamOptional},
+	{"quic_dial_sni_address", isAnyString, requestParamOptional},
 }
 
 func validateRequestParams(

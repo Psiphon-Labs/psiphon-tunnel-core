@@ -771,6 +771,18 @@ func getBaseAPIParameters(
 
 	params[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME] = config.clientParameters.Get().Tag()
 
+	if dialStats.DialPortNumber != "" {
+		params["dial_port_number"] = dialStats.DialPortNumber
+	}
+
+	if dialStats.QUICVersion != "" {
+		params["quic_version"] = dialStats.QUICVersion
+	}
+
+	if dialStats.QUICDialSNIAddress != "" {
+		params["quic_dial_sni_address"] = dialStats.QUICDialSNIAddress
+	}
+
 	return params
 }
 

@@ -450,6 +450,18 @@ func noticeWithDialStats(noticeType, ipAddress, region, protocol string, dialSta
 		args = append(args, "TLSProfile", dialStats.TLSProfile)
 	}
 
+	if dialStats.DialPortNumber != "" {
+		args = append(args, "DialPortNumber", dialStats.DialPortNumber)
+	}
+
+	if dialStats.QUICVersion != "" {
+		args = append(args, "QUICVersion", dialStats.QUICVersion)
+	}
+
+	if dialStats.QUICDialSNIAddress != "" {
+		args = append(args, "QUICDialSNIAddress", dialStats.QUICDialSNIAddress)
+	}
+
 	singletonNoticeLogger.outputNotice(
 		noticeType, noticeIsDiagnostic,
 		args...)

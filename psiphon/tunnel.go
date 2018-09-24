@@ -131,6 +131,9 @@ type DialStats struct {
 	UserAgent                      string
 	SelectedTLSProfile             bool
 	TLSProfile                     string
+	DialPortNumber                 string
+	QUICVersion                    string
+	QUICDialSNIAddress             string
 }
 
 // ConnectTunnel first makes a network transport connection to the
@@ -822,11 +825,11 @@ func dialSsh(
 
 	// Note: when SSHClientVersion is "", a default is supplied by the ssh package:
 	// https://godoc.org/golang.org/x/crypto/ssh#ClientConfig
-	var selectedSSHClientVersion bool
-	SSHClientVersion := ""
 	useObfuscatedSsh := false
 	var directDialAddress string
-	var quicDialSNIAddress string
+	var QUICVersion string
+	var QUICDialSNIAddress string
+	var SSHClientVersion string
 	var meekConfig *MeekConfig
 	var err error
 
@@ -838,14 +841,14 @@ func dialSsh(
 	case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
 		useObfuscatedSsh = true
 		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedQUICPort)
-		quicDialSNIAddress = fmt.Sprintf("%s:%d", common.GenerateHostName(), serverEntry.SshObfuscatedQUICPort)
+		QUICVersion = selectQUICVersion(config.clientParameters)
+		QUICDialSNIAddress = fmt.Sprintf("%s:%d", common.GenerateHostName(), serverEntry.SshObfuscatedQUICPort)
 
 	case protocol.TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH:
 		useObfuscatedSsh = true
 		directDialAddress = serverEntry.IpAddress
 
 	case protocol.TUNNEL_PROTOCOL_SSH:
-		selectedSSHClientVersion = true
 		SSHClientVersion = pickSSHClientVersion()
 		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshPort)
 
@@ -859,9 +862,18 @@ func dialSsh(
 
 	dialConfig, dialStats := initDialConfig(config, meekConfig)
 
-	// Add dial stats specific to SSH dialing
+	if meekConfig != nil {
+		_, dialStats.DialPortNumber, _ = net.SplitHostPort(meekConfig.DialAddress)
+	} else {
+		_, dialStats.DialPortNumber, _ = net.SplitHostPort(directDialAddress)
+	}
 
-	if selectedSSHClientVersion {
+	switch selectedProtocol {
+	case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
+		dialStats.QUICVersion = QUICVersion
+		dialStats.QUICDialSNIAddress = QUICDialSNIAddress
+
+	case protocol.TUNNEL_PROTOCOL_SSH:
 		dialStats.SelectedSSHClientVersion = true
 		dialStats.SSHClientVersion = SSHClientVersion
 	}
@@ -902,8 +914,8 @@ func dialSsh(
 			ctx,
 			packetConn,
 			remoteAddr,
-			quicDialSNIAddress,
-			selectQUICVersion(config.clientParameters),
+			QUICDialSNIAddress,
+			QUICVersion,
 			serverEntry.SshObfuscatedKey)
 		if err != nil {
 			return nil, common.ContextError(err)
