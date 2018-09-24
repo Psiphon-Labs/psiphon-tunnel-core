@@ -41,8 +41,23 @@ const (
 	MAX_OBFUSCATED_QUIC_IPV4_PACKET_SIZE = 1372
 	MAX_OBFUSCATED_QUIC_IPV6_PACKET_SIZE = 1352
 	MAX_PADDING_SIZE                     = 64
+	NONCE_SIZE                           = 12
 )
 
+// ObfuscatedPacketConn wraps a QUIC net.PacketConn with an obfuscation layer
+// that obscures QUIC packets, adding random padding and producing uniformly
+// random payload.
+//
+// The crypto performed by ObfuscatedPacketConn is purely for obfuscation to
+// frusctrate wire-speed DPI and does not add privacy/security. The small
+// nonce space and single key per server is not cryptographically secure.
+//
+// A server-side ObfuscatedPacketConn performs simple QUIC DPI to distinguish
+// between obfuscated and non-obfsucated peer flows and responds accordingly.
+//
+// The header and padding added by ObfuscatedPacketConn on top of the QUIC
+// payload will increase UDP packets beyond the QUIC max of 1280 bytes,
+// introducing some risk of fragmentation and/or dropped packets.
 type ObfuscatedPacketConn struct {
 	net.PacketConn
 	isServer       bool
@@ -63,6 +78,7 @@ func (p *peerMode) isStale() bool {
 	return monotime.Since(p.lastPacketTime) >= SERVER_IDLE_TIMEOUT
 }
 
+// NewObfuscatedPacketConnPacketConn creates a new ObfuscatedPacketConn.
 func NewObfuscatedPacketConnPacketConn(
 	conn net.PacketConn,
 	isServer bool,
@@ -183,25 +199,25 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			// We can use p as a scratch buffer for deobfuscation, and this
 			// avoids allocting a buffer.
 
-			if n < 9 {
+			if n < (NONCE_SIZE + 1) {
 				return n, addr, common.ContextError(
 					fmt.Errorf("unexpected obfuscated QUIC packet length: %d", n))
 			}
 
-			cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], p[0:8])
+			cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], p[0:NONCE_SIZE])
 			if err != nil {
 				return n, addr, common.ContextError(err)
 			}
-			cipher.XORKeyStream(p[8:], p[8:])
+			cipher.XORKeyStream(p[NONCE_SIZE:], p[NONCE_SIZE:])
 
-			paddingLen := int(p[8])
-			if paddingLen > MAX_PADDING_SIZE || paddingLen > n-9 {
+			paddingLen := int(p[NONCE_SIZE])
+			if paddingLen > MAX_PADDING_SIZE || paddingLen > n-(NONCE_SIZE+1) {
 				return n, addr, common.ContextError(
 					fmt.Errorf("unexpected padding length: %d, %d", paddingLen, n))
 			}
 
-			n -= 9 + paddingLen
-			copy(p[0:n], p[9+paddingLen:n+9+paddingLen])
+			n -= (NONCE_SIZE + 1) + paddingLen
+			copy(p[0:n], p[(NONCE_SIZE+1)+paddingLen:n+(NONCE_SIZE+1)+paddingLen])
 		}
 	}
 
@@ -258,7 +274,7 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 		defer obfuscatorBufferPool.Put(b)
 
 		for {
-			_, err := rand.Read(buffer[0:8])
+			_, err := rand.Read(buffer[0:NONCE_SIZE])
 			if err != nil {
 				return 0, common.ContextError(err)
 			}
@@ -273,7 +289,7 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 		// Obfuscated QUIC padding results in packets that exceed the
 		// QUIC max packet size of 1280.
 
-		maxPaddingSize := maxObfuscatedPacketSize - (n + 9)
+		maxPaddingSize := maxObfuscatedPacketSize - (n + (NONCE_SIZE + 1))
 		if maxPaddingSize < 0 {
 			maxPaddingSize = 0
 		}
@@ -286,20 +302,20 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 			return 0, common.ContextError(err)
 		}
 
-		buffer[8] = uint8(paddingLen)
-		_, err = rand.Read(buffer[9 : 9+paddingLen])
+		buffer[NONCE_SIZE] = uint8(paddingLen)
+		_, err = rand.Read(buffer[(NONCE_SIZE + 1) : (NONCE_SIZE+1)+paddingLen])
 		if err != nil {
 			return 0, common.ContextError(err)
 		}
 
-		copy(buffer[9+paddingLen:], p)
-		dataLen := 9 + paddingLen + n
+		copy(buffer[(NONCE_SIZE+1)+paddingLen:], p)
+		dataLen := (NONCE_SIZE + 1) + paddingLen + n
 
-		cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], buffer[0:8])
+		cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], buffer[0:NONCE_SIZE])
 		if err != nil {
 			return 0, common.ContextError(err)
 		}
-		cipher.XORKeyStream(buffer[8:dataLen], buffer[8:dataLen])
+		cipher.XORKeyStream(buffer[NONCE_SIZE:dataLen], buffer[NONCE_SIZE:dataLen])
 
 		p = buffer[:dataLen]
 	}
