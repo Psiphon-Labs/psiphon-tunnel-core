@@ -235,15 +235,10 @@ func DialMeek(
 
 		scheme = "https"
 
-		tcpDialer := NewTCPFragmentorDialer(
-			dialConfig,
-			meekConfig.ClientTunnelProtocol,
-			meekConfig.ClientParameters)
-
 		tlsConfig := &CustomTLSConfig{
 			ClientParameters:              meekConfig.ClientParameters,
 			DialAddr:                      meekConfig.DialAddress,
-			Dial:                          tcpDialer,
+			Dial:                          NewTCPDialer(dialConfig),
 			SNIServerName:                 meekConfig.SNIServerName,
 			SkipVerify:                    true,
 			TLSProfile:                    meekConfig.TLSProfile,
@@ -345,20 +340,15 @@ func DialMeek(
 			*copyDialConfig = *dialConfig
 			copyDialConfig.UpstreamProxyURL = ""
 
-			dialer = NewTCPFragmentorDialer(
-				copyDialConfig,
-				meekConfig.ClientTunnelProtocol,
-				meekConfig.ClientParameters)
+			dialer = NewTCPDialer(copyDialConfig)
 
 		} else {
 
-			baseDialer := NewTCPFragmentorDialer(
-				dialConfig,
-				meekConfig.ClientTunnelProtocol,
-				meekConfig.ClientParameters)
+			baseDialer := NewTCPDialer(dialConfig)
 
-			// The dialer ignores address that http.Transport will pass in (derived
-			// from the HTTP request URL) and always dials meekConfig.DialAddress.
+			// The dialer ignores any address that http.Transport will pass in
+			// (derived from the HTTP request URL) and always dials
+			// meekConfig.DialAddress.
 			dialer = func(ctx context.Context, network, _ string) (net.Conn, error) {
 				return baseDialer(ctx, network, meekConfig.DialAddress)
 			}

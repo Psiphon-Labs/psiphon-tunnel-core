@@ -783,6 +783,13 @@ func getBaseAPIParameters(
 		params["quic_dial_sni_address"] = dialStats.QUICDialSNIAddress
 	}
 
+	if dialStats.FragmentorConfig.IsFragmenting() {
+		metrics := dialStats.FragmentorConfig.GetMetrics()
+		for name, value := range metrics {
+			params[name] = fmt.Sprintf("%s", value)
+		}
+	}
+
 	return params
 }
 

@@ -554,6 +554,11 @@ var baseRequestParams = []requestParamSpec{
 	{"dial_port_number", isIntString, requestParamOptional},
 	{"quic_version", isAnyString, requestParamOptional},
 	{"quic_dial_sni_address", isAnyString, requestParamOptional},
+	{"upstream_bytes_to_fragment", isIntString, requestParamOptional},
+	{"upstream_min_write_bytes", isIntString, requestParamOptional},
+	{"upstream_max_write_bytes", isIntString, requestParamOptional},
+	{"upstream_min_delay", isIntString, requestParamOptional},
+	{"upstream_max_delay", isIntString, requestParamOptional},
 }
 
 func validateRequestParams(

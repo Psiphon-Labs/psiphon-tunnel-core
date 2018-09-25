@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
@@ -134,6 +135,7 @@ type DialStats struct {
 	DialPortNumber                 string
 	QUICVersion                    string
 	QUICDialSNIAddress             string
+	FragmentorConfig               *fragmentor.Config
 }
 
 // ConnectTunnel first makes a network transport connection to the
@@ -694,10 +696,13 @@ func initMeekConfig(
 
 // initDialConfig is a helper that creates a DialConfig for the tunnel.
 func initDialConfig(
-	config *Config, meekConfig *MeekConfig) (*DialConfig, *DialStats) {
+	config *Config,
+	meekConfig *MeekConfig,
+	tunnelProtocol string) (*DialConfig, *DialStats) {
+
+	p := config.clientParameters.Get()
 
 	var upstreamProxyType string
-
 	if config.UseUpstreamProxy() {
 		// Note: UpstreamProxyURL will be validated in the dial
 		proxyURL, err := url.Parse(config.UpstreamProxyURL)
@@ -714,9 +719,7 @@ func initDialConfig(
 		}
 	}
 
-	additionalCustomHeaders :=
-		config.clientParameters.Get().HTTPHeaders(parameters.AdditionalCustomHeaders)
-
+	additionalCustomHeaders := p.HTTPHeaders(parameters.AdditionalCustomHeaders)
 	if additionalCustomHeaders != nil {
 		for k, v := range additionalCustomHeaders {
 			dialCustomHeaders[k] = make([]string, len(v))
@@ -725,11 +728,12 @@ func initDialConfig(
 	}
 
 	// Set User-Agent when using meek or an upstream HTTP proxy
-
 	var selectedUserAgent bool
 	if meekConfig != nil || upstreamProxyType == "http" {
 		selectedUserAgent = UserAgentIfUnset(config.clientParameters, dialCustomHeaders)
 	}
+
+	fragmentorConfig := fragmentor.NewUpstreamConfig(p, tunnelProtocol)
 
 	dialConfig := &DialConfig{
 		UpstreamProxyURL:              config.UpstreamProxyURL,
@@ -738,9 +742,12 @@ func initDialConfig(
 		DnsServerGetter:               config.DnsServerGetter,
 		IPv6Synthesizer:               config.IPv6Synthesizer,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
+		FragmentorConfig:              fragmentorConfig,
 	}
 
-	dialStats := &DialStats{}
+	dialStats := &DialStats{
+		FragmentorConfig: fragmentorConfig,
+	}
 
 	if selectedUserAgent {
 		dialStats.SelectedUserAgent = true
@@ -860,7 +867,7 @@ func dialSsh(
 		}
 	}
 
-	dialConfig, dialStats := initDialConfig(config, meekConfig)
+	dialConfig, dialStats := initDialConfig(config, meekConfig, selectedProtocol)
 
 	if meekConfig != nil {
 		_, dialStats.DialPortNumber, _ = net.SplitHostPort(meekConfig.DialAddress)
@@ -945,13 +952,10 @@ func dialSsh(
 
 	} else {
 
-		dialConn, err = DialTCPFragmentor(
+		dialConn, err = DialTCP(
 			ctx,
 			directDialAddress,
-			dialConfig,
-			selectedProtocol,
-			config.clientParameters,
-			nil)
+			dialConfig)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}

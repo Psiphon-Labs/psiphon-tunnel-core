@@ -1007,8 +1007,12 @@ func (sshClient *sshClient) run(
 		}
 	}()
 
-	// Some conns report additional metrics
-	metricsSource, isMetricsSource := clientConn.(MetricsSource)
+	// Some conns report additional metrics. Meek conns report resiliency
+	// metrics and fragmentor.Conns report fragmentor configs.
+	//
+	// Limitation: for meek, GetMetrics from underlying fragmentor.Conns
+	// should be called in order to log fragmentor metrics for meek sessions.
+	metricsSource, isMetricsSource := clientConn.(common.MetricsSource)
 
 	// Set initial traffic rules, pre-handshake, based on currently known info.
 	sshClient.setTrafficRules()
@@ -1160,7 +1164,7 @@ func (sshClient *sshClient) run(
 
 	var additionalMetrics LogFields
 	if isMetricsSource {
-		additionalMetrics = metricsSource.GetMetrics()
+		additionalMetrics = LogFields(metricsSource.GetMetrics())
 	}
 	sshClient.logTunnel(additionalMetrics)
 

@@ -462,6 +462,13 @@ func noticeWithDialStats(noticeType, ipAddress, region, protocol string, dialSta
 		args = append(args, "QUICDialSNIAddress", dialStats.QUICDialSNIAddress)
 	}
 
+	if dialStats.FragmentorConfig.IsFragmenting() {
+		metrics := dialStats.FragmentorConfig.GetMetrics()
+		for name, value := range metrics {
+			args = append(args, name, value)
+		}
+	}
+
 	singletonNoticeLogger.outputNotice(
 		noticeType, noticeIsDiagnostic,
 		args...)

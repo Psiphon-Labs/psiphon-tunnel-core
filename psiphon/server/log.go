@@ -34,14 +34,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// MetricsSource is an object that provides metrics to be logged
-type MetricsSource interface {
-
-	// GetMetrics returns a LogFields populated with
-	// metrics from the MetricsSource
-	GetMetrics() LogFields
-}
-
 // ContextLogger adds context logging functionality to the
 // underlying logging packages.
 type ContextLogger struct {

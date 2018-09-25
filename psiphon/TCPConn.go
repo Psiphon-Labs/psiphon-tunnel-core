@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 )
 
@@ -79,6 +80,14 @@ func DialTCP(
 			config.ResolvedIPCallback(ipAddress)
 		}
 	}
+
+	if config.FragmentorConfig.IsFragmenting() {
+		fragmentor.NewConn(
+			config.FragmentorConfig,
+			func(message string) { NoticeInfo(message) },
+			conn)
+	}
+
 	return conn, nil
 }
 
