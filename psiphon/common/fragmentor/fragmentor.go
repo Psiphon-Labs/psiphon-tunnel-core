@@ -119,26 +119,6 @@ func (config *Config) IsFragmenting() bool {
 	return config != nil && config.bytesToFragment > 0
 }
 
-// GetMetrics returns the fragmentor configuration as log fields; config may
-// be nil.
-func (config *Config) GetMetrics() common.LogFields {
-	logFields := make(common.LogFields)
-	if config != nil {
-		var prefix string
-		if config.isUpstream {
-			prefix = "upstream_"
-		} else {
-			prefix = "downstream_"
-		}
-		logFields[prefix+"bytes_to_fragment"] = config.bytesToFragment
-		logFields[prefix+"min_write_bytes"] = config.minWriteBytes
-		logFields[prefix+"max_write_bytes"] = config.maxWriteBytes
-		logFields[prefix+"min_delay"] = int(config.minDelay / time.Microsecond)
-		logFields[prefix+"max_delay"] = int(config.maxDelay / time.Microsecond)
-	}
-	return logFields
-}
-
 // Conn implements simple fragmentation of application-level messages/packets
 // into multiple TCP packets by splitting writes into smaller sizes and adding
 // delays between writes.
@@ -157,6 +137,10 @@ type Conn struct {
 	writeMutex      sync.Mutex
 	numNotices      int
 	bytesFragmented int
+	maxBytesWritten int
+	minBytesWritten int
+	minDelayed      time.Duration
+	maxDelayed      time.Duration
 }
 
 // NewConn creates a new Conn.
@@ -177,7 +161,29 @@ func NewConn(
 
 // GetMetrics implements the common.MetricsSource interface.
 func (c *Conn) GetMetrics() common.LogFields {
-	return c.config.GetMetrics()
+	c.writeMutex.Lock()
+	defer c.writeMutex.Unlock()
+
+	logFields := make(common.LogFields)
+
+	if c.bytesFragmented == 0 {
+		return logFields
+	}
+
+	var prefix string
+	if c.config.isUpstream {
+		prefix = "upstream_"
+	} else {
+		prefix = "downstream_"
+	}
+
+	logFields[prefix+"bytes_fragmented"] = c.bytesFragmented
+	logFields[prefix+"min_bytes_written"] = c.minBytesWritten
+	logFields[prefix+"max_bytes_written"] = c.maxBytesWritten
+	logFields[prefix+"min_delayed"] = int(c.minDelayed / time.Microsecond)
+	logFields[prefix+"max_delayed"] = int(c.maxDelayed / time.Microsecond)
+
+	return logFields
 }
 
 func (c *Conn) Write(buffer []byte) (int, error) {
@@ -252,6 +258,20 @@ func (c *Conn) Write(buffer []byte) (int, error) {
 
 		if err != nil {
 			return totalBytesWritten, err
+		}
+
+		if c.minBytesWritten == 0 || c.minBytesWritten > bytesWritten {
+			c.minBytesWritten = bytesWritten
+		}
+		if c.maxBytesWritten < bytesWritten {
+			c.maxBytesWritten = bytesWritten
+		}
+
+		if c.minDelayed == 0 || c.minDelayed > delay {
+			c.minDelayed = delay
+		}
+		if c.maxDelayed < delay {
+			c.maxDelayed = delay
 		}
 
 		if emitNotice {

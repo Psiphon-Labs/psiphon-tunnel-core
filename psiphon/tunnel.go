@@ -135,7 +135,7 @@ type DialStats struct {
 	DialPortNumber                 string
 	QUICVersion                    string
 	QUICDialSNIAddress             string
-	FragmentorConfig               *fragmentor.Config
+	DialConnMetrics                common.MetricsSource
 }
 
 // ConnectTunnel first makes a network transport connection to the
@@ -745,9 +745,7 @@ func initDialConfig(
 		FragmentorConfig:              fragmentorConfig,
 	}
 
-	dialStats := &DialStats{
-		FragmentorConfig: fragmentorConfig,
-	}
+	dialStats := &DialStats{}
 
 	if selectedUserAgent {
 		dialStats.SelectedUserAgent = true
@@ -961,9 +959,12 @@ func dialSsh(
 		}
 	}
 
+	if metricsSource, ok := dialConn.(common.MetricsSource); ok {
+		dialStats.DialConnMetrics = metricsSource
+	}
+
 	// If dialConn is not a Closer, tunnel failure detection may be slower
-	_, ok := dialConn.(common.Closer)
-	if !ok {
+	if _, ok := dialConn.(common.Closer); !ok {
 		NoticeAlert("tunnel.dialSsh: dialConn is not a Closer")
 	}
 

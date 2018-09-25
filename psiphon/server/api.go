@@ -134,7 +134,6 @@ func dispatchAPIRequestHandler(
 
 		// TODO: same session-ID-lookup TODO in handshakeAPIRequestHandler
 		// applies here.
-
 		sessionID, err := getStringRequestParam(params, "client_session_id")
 		if err == nil {
 			// Note: follows/duplicates baseRequestParams validation
@@ -325,6 +324,19 @@ func connectedAPIRequestHandler(
 	params common.APIParameters) ([]byte, error) {
 
 	err := validateRequestParams(support.Config, params, connectedRequestParams)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	// Update upstream fragmentor metrics, as the client may have performed
+	// more upstream fragmentation since the previous metrics reported by the
+	// handshake request.
+
+	// TODO: same session-ID-lookup TODO in handshakeAPIRequestHandler
+	// applies here.
+	sessionID, _ := getStringRequestParam(params, "client_session_id")
+	err = support.TunnelServer.UpdateClientAPIParameters(
+		sessionID, copyUpstreamFragmentorParams(params))
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -521,45 +533,50 @@ const (
 	requestParamJSON      = 8
 )
 
+var upstreamFragmentorParams = []requestParamSpec{
+	{"upstream_bytes_fragmented", isIntString, requestParamOptional},
+	{"upstream_min_bytes_written", isIntString, requestParamOptional},
+	{"upstream_max_bytes_written", isIntString, requestParamOptional},
+	{"upstream_min_delayed", isIntString, requestParamOptional},
+	{"upstream_max_delayed", isIntString, requestParamOptional},
+}
+
 // baseRequestParams is the list of required and optional
 // request parameters; derived from COMMON_INPUTS and
 // OPTIONAL_COMMON_INPUTS in psi_web.
 // Each param is expected to be a string, unless requestParamArray
 // is specified, in which case an array of string is expected.
-var baseRequestParams = []requestParamSpec{
-	{"server_secret", isServerSecret, requestParamNotLogged},
-	{"client_session_id", isHexDigits, requestParamNotLogged},
-	{"propagation_channel_id", isHexDigits, 0},
-	{"sponsor_id", isHexDigits, 0},
-	{"client_version", isIntString, 0},
-	{"client_platform", isClientPlatform, 0},
-	{"client_build_rev", isHexDigits, requestParamOptional},
-	{"relay_protocol", isRelayProtocol, 0},
-	{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
-	{"device_region", isAnyString, requestParamOptional},
-	{"ssh_client_version", isAnyString, requestParamOptional},
-	{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
-	{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
-	{"meek_dial_address", isDialAddress, requestParamOptional},
-	{"meek_resolved_ip_address", isIPAddress, requestParamOptional},
-	{"meek_sni_server_name", isDomain, requestParamOptional},
-	{"meek_host_header", isHostHeader, requestParamOptional},
-	{"meek_transformed_host_name", isBooleanFlag, requestParamOptional},
-	{"user_agent", isAnyString, requestParamOptional},
-	{"tls_profile", isAnyString, requestParamOptional},
-	{"server_entry_region", isRegionCode, requestParamOptional},
-	{"server_entry_source", isServerEntrySource, requestParamOptional},
-	{"server_entry_timestamp", isISO8601Date, requestParamOptional},
-	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
-	{"dial_port_number", isIntString, requestParamOptional},
-	{"quic_version", isAnyString, requestParamOptional},
-	{"quic_dial_sni_address", isAnyString, requestParamOptional},
-	{"upstream_bytes_to_fragment", isIntString, requestParamOptional},
-	{"upstream_min_write_bytes", isIntString, requestParamOptional},
-	{"upstream_max_write_bytes", isIntString, requestParamOptional},
-	{"upstream_min_delay", isIntString, requestParamOptional},
-	{"upstream_max_delay", isIntString, requestParamOptional},
-}
+var baseRequestParams = append(
+	[]requestParamSpec{
+		{"server_secret", isServerSecret, requestParamNotLogged},
+		{"client_session_id", isHexDigits, requestParamNotLogged},
+		{"propagation_channel_id", isHexDigits, 0},
+		{"sponsor_id", isHexDigits, 0},
+		{"client_version", isIntString, 0},
+		{"client_platform", isClientPlatform, 0},
+		{"client_build_rev", isHexDigits, requestParamOptional},
+		{"relay_protocol", isRelayProtocol, 0},
+		{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
+		{"device_region", isAnyString, requestParamOptional},
+		{"ssh_client_version", isAnyString, requestParamOptional},
+		{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
+		{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
+		{"meek_dial_address", isDialAddress, requestParamOptional},
+		{"meek_resolved_ip_address", isIPAddress, requestParamOptional},
+		{"meek_sni_server_name", isDomain, requestParamOptional},
+		{"meek_host_header", isHostHeader, requestParamOptional},
+		{"meek_transformed_host_name", isBooleanFlag, requestParamOptional},
+		{"user_agent", isAnyString, requestParamOptional},
+		{"tls_profile", isAnyString, requestParamOptional},
+		{"server_entry_region", isRegionCode, requestParamOptional},
+		{"server_entry_source", isServerEntrySource, requestParamOptional},
+		{"server_entry_timestamp", isISO8601Date, requestParamOptional},
+		{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
+		{"dial_port_number", isIntString, requestParamOptional},
+		{"quic_version", isAnyString, requestParamOptional},
+		{"quic_dial_sni_address", isAnyString, requestParamOptional},
+	},
+	upstreamFragmentorParams...)
 
 func validateRequestParams(
 	config *Config,
@@ -605,17 +622,28 @@ func copyBaseRequestParams(params common.APIParameters) common.APIParameters {
 
 	// Note: not a deep copy; assumes baseRequestParams values
 	// are all scalar types (int, string, etc.)
-
 	paramsCopy := make(common.APIParameters)
 	for _, baseParam := range baseRequestParams {
 		value := params[baseParam.name]
 		if value == nil {
 			continue
 		}
-
 		paramsCopy[baseParam.name] = value
 	}
+	return paramsCopy
+}
 
+func copyUpstreamFragmentorParams(params common.APIParameters) common.APIParameters {
+
+	// Note: not a deep copy
+	paramsCopy := make(common.APIParameters)
+	for _, baseParam := range upstreamFragmentorParams {
+		value := params[baseParam.name]
+		if value == nil {
+			continue
+		}
+		paramsCopy[baseParam.name] = value
+	}
 	return paramsCopy
 }
 

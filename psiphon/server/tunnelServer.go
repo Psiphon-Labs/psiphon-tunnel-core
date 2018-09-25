@@ -284,6 +284,15 @@ func (server *TunnelServer) GetClientHandshaked(
 	return server.sshServer.getClientHandshaked(sessionID)
 }
 
+// UpdateClientAPIParameters updates the recorded handhake API parameters for
+// the client corresponding to sessionID.
+func (server *TunnelServer) UpdateClientAPIParameters(
+	sessionID string,
+	apiParams common.APIParameters) error {
+
+	return server.sshServer.updateClientAPIParameters(sessionID, apiParams)
+}
+
 // ExpectClientDomainBytes indicates whether the client was configured to report
 // domain bytes in its handshake response.
 func (server *TunnelServer) ExpectClientDomainBytes(
@@ -765,6 +774,23 @@ func (sshServer *sshServer) getClientHandshaked(
 	completed, exhausted := client.getHandshaked()
 
 	return completed, exhausted, nil
+}
+
+func (sshServer *sshServer) updateClientAPIParameters(
+	sessionID string,
+	apiParams common.APIParameters) error {
+
+	sshServer.clientsMutex.Lock()
+	client := sshServer.clients[sessionID]
+	sshServer.clientsMutex.Unlock()
+
+	if client == nil {
+		return common.ContextError(errors.New("unknown session ID"))
+	}
+
+	client.updateAPIParameters(apiParams)
+
+	return nil
 }
 
 func (sshServer *sshServer) revokeClientAuthorizations(sessionID string) {
@@ -2064,6 +2090,22 @@ func (sshClient *sshClient) getHandshaked() (bool, bool) {
 	}
 
 	return completed, exhausted
+}
+
+func (sshClient *sshClient) updateAPIParameters(
+	apiParams common.APIParameters) {
+
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	// Only update after handshake has initialized API params.
+	if !sshClient.handshakeState.completed {
+		return
+	}
+
+	for name, value := range apiParams {
+		sshClient.handshakeState.apiParams[name] = value
+	}
 }
 
 func (sshClient *sshClient) expectDomainBytes() bool {

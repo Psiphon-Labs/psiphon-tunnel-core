@@ -106,17 +106,16 @@ func TestFragmentor(t *testing.T) {
 		if err != nil {
 			return common.ContextError(err)
 		}
-		config := NewUpstreamConfig(clientParameters.Get(), "")
-		t.Logf("%+v", config.GetMetrics())
-		conn = NewConn(
-			config,
+		fragConn := NewConn(
+			NewUpstreamConfig(clientParameters.Get(), ""),
 			func(message string) { t.Logf(message) },
 			conn)
-		defer conn.Close()
-		_, err = conn.Write(data)
+		defer fragConn.Close()
+		_, err = fragConn.Write(data)
 		if err != nil {
 			return common.ContextError(err)
 		}
+		t.Logf("%+v", fragConn.GetMetrics())
 		return nil
 	})
 
