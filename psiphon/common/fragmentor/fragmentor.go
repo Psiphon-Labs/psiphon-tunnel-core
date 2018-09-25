@@ -66,16 +66,35 @@ func newConfig(
 	isUpstream bool,
 	tunnelProtocol string) *Config {
 
-	coinFlip := p.WeightedCoinFlip(parameters.FragmentorDownstreamProbability)
-	tunnelProtocols := p.TunnelProtocols(parameters.FragmentorDownstreamLimitProtocols)
+	probability := parameters.FragmentorProbability
+	limitProtocols := parameters.FragmentorLimitProtocols
+	minTotalBytes := parameters.FragmentorMinTotalBytes
+	maxTotalBytes := parameters.FragmentorMaxTotalBytes
+	minWriteBytes := parameters.FragmentorMinWriteBytes
+	maxWriteBytes := parameters.FragmentorMaxWriteBytes
+	minDelay := parameters.FragmentorMinDelay
+	maxDelay := parameters.FragmentorMaxDelay
+
+	if !isUpstream {
+		probability = parameters.FragmentorDownstreamProbability
+		limitProtocols = parameters.FragmentorDownstreamLimitProtocols
+		minTotalBytes = parameters.FragmentorDownstreamMinTotalBytes
+		maxTotalBytes = parameters.FragmentorDownstreamMaxTotalBytes
+		minWriteBytes = parameters.FragmentorDownstreamMinWriteBytes
+		maxWriteBytes = parameters.FragmentorDownstreamMaxWriteBytes
+		minDelay = parameters.FragmentorDownstreamMinDelay
+		maxDelay = parameters.FragmentorDownstreamMaxDelay
+	}
+
+	coinFlip := p.WeightedCoinFlip(probability)
+	tunnelProtocols := p.TunnelProtocols(limitProtocols)
 
 	if !coinFlip || (len(tunnelProtocols) > 0 && common.Contains(tunnelProtocols, tunnelProtocol)) {
 		return nil
 	}
 
 	bytesToFragment, err := common.MakeSecureRandomRange(
-		p.Int(parameters.FragmentorDownstreamMinTotalBytes),
-		p.Int(parameters.FragmentorDownstreamMaxTotalBytes))
+		p.Int(minTotalBytes), p.Int(maxTotalBytes))
 	if err != nil {
 		bytesToFragment = 0
 	}
@@ -87,10 +106,10 @@ func newConfig(
 	return &Config{
 		isUpstream:      isUpstream,
 		bytesToFragment: bytesToFragment,
-		minWriteBytes:   p.Int(parameters.FragmentorDownstreamMinWriteBytes),
-		maxWriteBytes:   p.Int(parameters.FragmentorDownstreamMaxWriteBytes),
-		minDelay:        p.Duration(parameters.FragmentorDownstreamMinDelay),
-		maxDelay:        p.Duration(parameters.FragmentorDownstreamMaxDelay),
+		minWriteBytes:   p.Int(minWriteBytes),
+		maxWriteBytes:   p.Int(maxWriteBytes),
+		minDelay:        p.Duration(minDelay),
+		maxDelay:        p.Duration(maxDelay),
 	}
 }
 

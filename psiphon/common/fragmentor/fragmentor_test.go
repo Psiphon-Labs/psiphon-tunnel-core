@@ -29,6 +29,8 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -54,6 +56,24 @@ func TestFragmentor(t *testing.T) {
 	maxWriteBytes := 512
 	minDelay := 2 * time.Millisecond
 	maxDelay := 2 * time.Millisecond
+
+	clientParameters, err := parameters.NewClientParameters(nil)
+	if err != nil {
+		t.Fatalf("parameters.NewClientParameters failed: %s", err)
+	}
+	_, err = clientParameters.Set("", false, map[string]interface{}{
+		"FragmentorProbability":    1.0,
+		"FragmentorLimitProtocols": protocol.TunnelProtocols{},
+		"FragmentorMinTotalBytes":  bytesFragmented,
+		"FragmentorMaxTotalBytes":  bytesFragmented,
+		"FragmentorMinWriteBytes":  minWriteBytes,
+		"FragmentorMaxWriteBytes":  maxWriteBytes,
+		"FragmentorMinDelay":       minDelay,
+		"FragmentorMaxDelay":       maxDelay,
+	})
+	if err != nil {
+		t.Fatalf("ClientParameters.Set failed: %s", err)
+	}
 
 	testGroup, testCtx := errgroup.WithContext(context.Background())
 
@@ -86,14 +106,12 @@ func TestFragmentor(t *testing.T) {
 		if err != nil {
 			return common.ContextError(err)
 		}
+		config := NewUpstreamConfig(clientParameters.Get(), "")
+		t.Logf("%+v", config.GetMetrics())
 		conn = NewConn(
-			conn,
+			config,
 			func(message string) { t.Logf(message) },
-			bytesFragmented,
-			minWriteBytes,
-			maxWriteBytes,
-			minDelay,
-			maxDelay)
+			conn)
 		defer conn.Close()
 		_, err = conn.Write(data)
 		if err != nil {
