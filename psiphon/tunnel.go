@@ -136,6 +136,7 @@ type DialStats struct {
 	QUICVersion                    string
 	QUICDialSNIAddress             string
 	DialConnMetrics                common.MetricsSource
+	ObfuscatedSSHConnMetrics       common.MetricsSource
 }
 
 // ConnectTunnel first makes a network transport connection to the
@@ -830,7 +831,6 @@ func dialSsh(
 
 	// Note: when SSHClientVersion is "", a default is supplied by the ssh package:
 	// https://godoc.org/golang.org/x/crypto/ssh#ClientConfig
-	useObfuscatedSsh := false
 	var directDialAddress string
 	var QUICVersion string
 	var QUICDialSNIAddress string
@@ -840,17 +840,14 @@ func dialSsh(
 
 	switch selectedProtocol {
 	case protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH, protocol.TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH:
-		useObfuscatedSsh = true
 		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
 
 	case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
-		useObfuscatedSsh = true
 		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedQUICPort)
 		QUICVersion = selectQUICVersion(config.clientParameters)
 		QUICDialSNIAddress = fmt.Sprintf("%s:%d", common.GenerateHostName(), serverEntry.SshObfuscatedQUICPort)
 
 	case protocol.TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH:
-		useObfuscatedSsh = true
 		directDialAddress = serverEntry.IpAddress
 
 	case protocol.TUNNEL_PROTOCOL_SSH:
@@ -858,7 +855,6 @@ func dialSsh(
 		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshPort)
 
 	default:
-		useObfuscatedSsh = true
 		meekConfig, err = initMeekConfig(config, serverEntry, selectedProtocol, sessionId)
 		if err != nil {
 			return nil, common.ContextError(err)
@@ -989,8 +985,8 @@ func dialSsh(
 
 	// Add obfuscated SSH layer
 	var sshConn net.Conn = throttledConn
-	if useObfuscatedSsh {
-		sshConn, err = obfuscator.NewObfuscatedSshConn(
+	if protocol.TunnelProtocolUsesObfuscatedSSH(selectedProtocol) {
+		obfuscatedSSHConn, err := obfuscator.NewObfuscatedSSHConn(
 			obfuscator.OBFUSCATION_CONN_MODE_CLIENT,
 			throttledConn,
 			serverEntry.SshObfuscatedKey,
@@ -999,6 +995,8 @@ func dialSsh(
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
+		sshConn = obfuscatedSSHConn
+		dialStats.ObfuscatedSSHConnMetrics = obfuscatedSSHConn
 	}
 
 	// Now establish the SSH session over the conn transport

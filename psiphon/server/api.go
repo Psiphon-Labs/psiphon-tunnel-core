@@ -308,7 +308,7 @@ var connectedRequestParams = append(
 	[]requestParamSpec{
 		{"session_id", isHexDigits, 0},
 		{"last_connected", isLastConnected, 0},
-		{"establishment_duration", isIntString, requestParamOptional}},
+		{"establishment_duration", isIntString, requestParamOptional | requestParamLogStringAsInt}},
 	baseRequestParams...)
 
 // connectedAPIRequestHandler implements the "connected" API request.
@@ -527,18 +527,19 @@ type requestParamSpec struct {
 }
 
 const (
-	requestParamOptional  = 1
-	requestParamNotLogged = 2
-	requestParamArray     = 4
-	requestParamJSON      = 8
+	requestParamOptional       = 1
+	requestParamNotLogged      = 2
+	requestParamArray          = 4
+	requestParamJSON           = 8
+	requestParamLogStringAsInt = 16
 )
 
 var upstreamFragmentorParams = []requestParamSpec{
-	{"upstream_bytes_fragmented", isIntString, requestParamOptional},
-	{"upstream_min_bytes_written", isIntString, requestParamOptional},
-	{"upstream_max_bytes_written", isIntString, requestParamOptional},
-	{"upstream_min_delayed", isIntString, requestParamOptional},
-	{"upstream_max_delayed", isIntString, requestParamOptional},
+	{"upstream_bytes_fragmented", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"upstream_min_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"upstream_max_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"upstream_min_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"upstream_max_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
 }
 
 // baseRequestParams is the list of required and optional
@@ -552,7 +553,7 @@ var baseRequestParams = append(
 		{"client_session_id", isHexDigits, requestParamNotLogged},
 		{"propagation_channel_id", isHexDigits, 0},
 		{"sponsor_id", isHexDigits, 0},
-		{"client_version", isIntString, 0},
+		{"client_version", isIntString, requestParamLogStringAsInt},
 		{"client_platform", isClientPlatform, 0},
 		{"client_build_rev", isHexDigits, requestParamOptional},
 		{"relay_protocol", isRelayProtocol, 0},
@@ -572,9 +573,10 @@ var baseRequestParams = append(
 		{"server_entry_source", isServerEntrySource, requestParamOptional},
 		{"server_entry_timestamp", isISO8601Date, requestParamOptional},
 		{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
-		{"dial_port_number", isIntString, requestParamOptional},
+		{"dial_port_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"quic_version", isAnyString, requestParamOptional},
 		{"quic_dial_sni_address", isAnyString, requestParamOptional},
+		{"upstream_ossh_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	},
 	upstreamFragmentorParams...)
 
@@ -744,9 +746,6 @@ func getRequestLogFields(
 			// - Boolean fields that come into the api as "1"/"0"
 			//   must be logged as actual boolean values
 			switch expectedParam.name {
-			case "client_version", "establishment_duration":
-				intValue, _ := strconv.Atoi(strValue)
-				logFields[expectedParam.name] = intValue
 			case "meek_dial_address":
 				host, _, _ := net.SplitHostPort(strValue)
 				if isIPAddress(nil, host) {
@@ -772,7 +771,12 @@ func getRequestLogFields(
 					logFields[expectedParam.name] = false
 				}
 			default:
-				logFields[expectedParam.name] = strValue
+				if expectedParam.flags&requestParamLogStringAsInt != 0 {
+					intValue, _ := strconv.Atoi(strValue)
+					logFields[expectedParam.name] = intValue
+				} else {
+					logFields[expectedParam.name] = strValue
+				}
 			}
 
 		case []interface{}:

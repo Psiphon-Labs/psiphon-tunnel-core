@@ -469,6 +469,13 @@ func noticeWithDialStats(noticeType, ipAddress, region, protocol string, dialSta
 		}
 	}
 
+	if dialStats.ObfuscatedSSHConnMetrics != nil {
+		metrics := dialStats.ObfuscatedSSHConnMetrics.GetMetrics()
+		for name, value := range metrics {
+			args = append(args, name, value)
+		}
+	}
+
 	singletonNoticeLogger.outputNotice(
 		noticeType, noticeIsDiagnostic,
 		args...)

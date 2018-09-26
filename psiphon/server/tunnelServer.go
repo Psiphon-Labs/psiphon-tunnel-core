@@ -1033,13 +1033,6 @@ func (sshClient *sshClient) run(
 		}
 	}()
 
-	// Some conns report additional metrics. Meek conns report resiliency
-	// metrics and fragmentor.Conns report fragmentor configs.
-	//
-	// Limitation: for meek, GetMetrics from underlying fragmentor.Conns
-	// should be called in order to log fragmentor metrics for meek sessions.
-	metricsSource, isMetricsSource := clientConn.(common.MetricsSource)
-
 	// Set initial traffic rules, pre-handshake, based on currently known info.
 	sshClient.setTrafficRules()
 
@@ -1117,14 +1110,13 @@ func (sshClient *sshClient) run(
 		// Wrap the connection in an SSH deobfuscator when required.
 
 		if protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
-			// Note: NewObfuscatedSshConn blocks on network I/O
+			// Note: NewObfuscatedSSHConn blocks on network I/O
 			// TODO: ensure this won't block shutdown
-			conn, result.err = obfuscator.NewObfuscatedSshConn(
+			conn, result.err = obfuscator.NewObfuscatedSSHConn(
 				obfuscator.OBFUSCATION_CONN_MODE_SERVER,
 				conn,
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
-				nil,
-				nil)
+				nil, nil)
 			if result.err != nil {
 				result.err = common.ContextError(result.err)
 			}
@@ -1188,10 +1180,20 @@ func (sshClient *sshClient) run(
 
 	sshClient.sshServer.unregisterEstablishedClient(sshClient)
 
-	var additionalMetrics LogFields
-	if isMetricsSource {
-		additionalMetrics = LogFields(metricsSource.GetMetrics())
+	// Some conns report additional metrics. Meek conns report resiliency
+	// metrics and fragmentor.Conns report fragmentor configs.
+	//
+	// Limitation: for meek, GetMetrics from underlying fragmentor.Conns
+	// should be called in order to log fragmentor metrics for meek sessions.
+
+	var additionalMetrics []LogFields
+	if metricsSource, ok := clientConn.(common.MetricsSource); ok {
+		additionalMetrics = append(additionalMetrics, LogFields(metricsSource.GetMetrics()))
 	}
+	if metricsSource, ok := sshClient.sshConn.(common.MetricsSource); ok {
+		additionalMetrics = append(additionalMetrics, LogFields(metricsSource.GetMetrics()))
+	}
+
 	sshClient.logTunnel(additionalMetrics)
 
 	// Transfer OSL seed state -- the OSL progress -- from the closing
@@ -1756,7 +1758,7 @@ func (sshClient *sshClient) setUDPChannel(channel ssh.Channel) {
 	sshClient.Unlock()
 }
 
-func (sshClient *sshClient) logTunnel(additionalMetrics LogFields) {
+func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 	// Note: reporting duration based on last confirmed data transfer, which
 	// is reads for sshClient.activityConn.GetActiveDuration(), and not
@@ -1799,8 +1801,8 @@ func (sshClient *sshClient) logTunnel(additionalMetrics LogFields) {
 		sshClient.udpTrafficState.bytesDown
 
 	// Merge in additional metrics from the optional metrics source
-	if additionalMetrics != nil {
-		for name, value := range additionalMetrics {
+	for _, metrics := range additionalMetrics {
+		for name, value := range metrics {
 			// Don't overwrite any basic fields
 			if logFields[name] == nil {
 				logFields[name] = value
