@@ -617,7 +617,10 @@ func (server *Server) GetTacticsPayload(
 	geoIPData common.GeoIPData,
 	apiParams common.APIParameters) (*Payload, error) {
 
-	tactics, err := server.getTactics(geoIPData, apiParams)
+	// includeServerSideOnly is false: server-side only parameters are not
+	// used by the client, so including them wastes space and unnecessarily
+	// exposes the values.
+	tactics, err := server.getTactics(false, geoIPData, apiParams)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -668,6 +671,7 @@ func (server *Server) GetTacticsPayload(
 }
 
 func (server *Server) getTactics(
+	includeServerSideOnly bool,
 	geoIPData common.GeoIPData,
 	apiParams common.APIParameters) (*Tactics, error) {
 
@@ -679,7 +683,7 @@ func (server *Server) getTactics(
 		return nil, nil
 	}
 
-	tactics := server.DefaultTactics.clone()
+	tactics := server.DefaultTactics.clone(includeServerSideOnly)
 
 	var aggregatedValues map[string]int
 
@@ -761,7 +765,7 @@ func (server *Server) getTactics(
 			}
 		}
 
-		tactics.merge(&filteredTactics.Tactics)
+		tactics.merge(includeServerSideOnly, &filteredTactics.Tactics)
 
 		// Continue to apply more matches. Last matching tactics has priority for any field.
 	}
@@ -882,7 +886,7 @@ func medianSampleRTTMilliseconds(samples []SpeedTestSample) int {
 	return (samples[mid-1].RTTMilliseconds + samples[mid].RTTMilliseconds) / 2
 }
 
-func (t *Tactics) clone() *Tactics {
+func (t *Tactics) clone(includeServerSideOnly bool) *Tactics {
 
 	u := &Tactics{
 		TTL:         t.TTL,
@@ -895,14 +899,16 @@ func (t *Tactics) clone() *Tactics {
 	if t.Parameters != nil {
 		u.Parameters = make(map[string]interface{})
 		for k, v := range t.Parameters {
-			u.Parameters[k] = v
+			if !parameters.IsServerSideOnly(k) {
+				u.Parameters[k] = v
+			}
 		}
 	}
 
 	return u
 }
 
-func (t *Tactics) merge(u *Tactics) {
+func (t *Tactics) merge(includeServerSideOnly bool, u *Tactics) {
 
 	if u.TTL != "" {
 		t.TTL = u.TTL
@@ -920,7 +926,9 @@ func (t *Tactics) merge(u *Tactics) {
 			t.Parameters = make(map[string]interface{})
 		}
 		for k, v := range u.Parameters {
-			t.Parameters[k] = v
+			if !parameters.IsServerSideOnly(k) {
+				t.Parameters[k] = v
+			}
 		}
 	}
 }
@@ -1106,7 +1114,7 @@ func (listener *Listener) Accept() (net.Conn, error) {
 
 		geoIPData := listener.geoIPLookup(common.IPAddressFromAddr(conn.RemoteAddr()))
 
-		tactics, err := listener.server.getTactics(geoIPData, make(common.APIParameters))
+		tactics, err := listener.server.getTactics(true, geoIPData, make(common.APIParameters))
 		if err != nil {
 			listener.server.logger.WithContextFields(
 				common.LogFields{"error": err}).Warning("failed to get tactics for connection")
