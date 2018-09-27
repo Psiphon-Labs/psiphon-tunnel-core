@@ -82,7 +82,7 @@ func DialTCP(
 	}
 
 	if config.FragmentorConfig.IsFragmenting() {
-		fragmentor.NewConn(
+		conn = fragmentor.NewConn(
 			config.FragmentorConfig,
 			func(message string) { NoticeInfo(message) },
 			conn)

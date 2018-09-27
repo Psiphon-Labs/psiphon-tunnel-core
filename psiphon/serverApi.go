@@ -786,14 +786,14 @@ func getBaseAPIParameters(
 	if dialStats.DialConnMetrics != nil {
 		metrics := dialStats.DialConnMetrics.GetMetrics()
 		for name, value := range metrics {
-			params[name] = fmt.Sprintf("%s", value)
+			params[name] = fmt.Sprintf("%v", value)
 		}
 	}
 
 	if dialStats.ObfuscatedSSHConnMetrics != nil {
 		metrics := dialStats.ObfuscatedSSHConnMetrics.GetMetrics()
 		for name, value := range metrics {
-			params[name] = fmt.Sprintf("%s", value)
+			params[name] = fmt.Sprintf("%v", value)
 		}
 	}
 

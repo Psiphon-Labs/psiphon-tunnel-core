@@ -89,7 +89,7 @@ func newConfig(
 	coinFlip := p.WeightedCoinFlip(probability)
 	tunnelProtocols := p.TunnelProtocols(limitProtocols)
 
-	if !coinFlip || (len(tunnelProtocols) > 0 && common.Contains(tunnelProtocols, tunnelProtocol)) {
+	if !coinFlip || (len(tunnelProtocols) > 0 && !common.Contains(tunnelProtocols, tunnelProtocol)) {
 		return nil
 	}
 

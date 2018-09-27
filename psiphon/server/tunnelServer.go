@@ -1024,7 +1024,7 @@ func newSshClient(
 }
 
 func (sshClient *sshClient) run(
-	clientConn net.Conn, onSSHHandshakeFinished func()) {
+	baseConn net.Conn, onSSHHandshakeFinished func()) {
 
 	// onSSHHandshakeFinished must be called even if the SSH handshake is aborted.
 	defer func() {
@@ -1036,6 +1036,8 @@ func (sshClient *sshClient) run(
 	// Set initial traffic rules, pre-handshake, based on currently known info.
 	sshClient.setTrafficRules()
 
+	conn := baseConn
+
 	// Wrap the base client connection with an ActivityMonitoredConn which will
 	// terminate the connection if no data is received before the deadline. This
 	// timeout is in effect for the entire duration of the SSH connection. Clients
@@ -1044,22 +1046,22 @@ func (sshClient *sshClient) run(
 	// due to buffering.
 
 	activityConn, err := common.NewActivityMonitoredConn(
-		clientConn,
+		conn,
 		SSH_CONNECTION_READ_DEADLINE,
 		false,
 		nil,
 		nil)
 	if err != nil {
-		clientConn.Close()
+		conn.Close()
 		log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
 		return
 	}
-	clientConn = activityConn
+	conn = activityConn
 
 	// Further wrap the connection in a rate limiting ThrottledConn.
 
-	throttledConn := common.NewThrottledConn(clientConn, sshClient.rateLimits())
-	clientConn = throttledConn
+	throttledConn := common.NewThrottledConn(conn, sshClient.rateLimits())
+	conn = throttledConn
 
 	// Run the initial [obfuscated] SSH handshake in a goroutine so we can both
 	// respect shutdownBroadcast and implement a specific handshake timeout.
@@ -1067,11 +1069,11 @@ func (sshClient *sshClient) run(
 	// too long.
 
 	type sshNewServerConnResult struct {
-		conn     net.Conn
-		sshConn  *ssh.ServerConn
-		channels <-chan ssh.NewChannel
-		requests <-chan *ssh.Request
-		err      error
+		obfuscatedSSHConn *obfuscator.ObfuscatedSSHConn
+		sshConn           *ssh.ServerConn
+		channels          <-chan ssh.NewChannel
+		requests          <-chan *ssh.Request
+		err               error
 	}
 
 	resultChannel := make(chan *sshNewServerConnResult, 2)
@@ -1112,7 +1114,7 @@ func (sshClient *sshClient) run(
 		if protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
 			// Note: NewObfuscatedSSHConn blocks on network I/O
 			// TODO: ensure this won't block shutdown
-			conn, result.err = obfuscator.NewObfuscatedSSHConn(
+			result.obfuscatedSSHConn, result.err = obfuscator.NewObfuscatedSSHConn(
 				obfuscator.OBFUSCATION_CONN_MODE_SERVER,
 				conn,
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
@@ -1120,6 +1122,7 @@ func (sshClient *sshClient) run(
 			if result.err != nil {
 				result.err = common.ContextError(result.err)
 			}
+			conn = result.obfuscatedSSHConn
 		}
 
 		if result.err == nil {
@@ -1129,7 +1132,7 @@ func (sshClient *sshClient) run(
 
 		resultChannel <- result
 
-	}(clientConn)
+	}(conn)
 
 	var result *sshNewServerConnResult
 	select {
@@ -1137,7 +1140,7 @@ func (sshClient *sshClient) run(
 	case <-sshClient.sshServer.shutdownBroadcast:
 		// Close() will interrupt an ongoing handshake
 		// TODO: wait for SSH handshake goroutines to exit before returning?
-		clientConn.Close()
+		conn.Close()
 		return
 	}
 
@@ -1146,7 +1149,7 @@ func (sshClient *sshClient) run(
 	}
 
 	if result.err != nil {
-		clientConn.Close()
+		conn.Close()
 		// This is a Debug log due to noise. The handshake often fails due to I/O
 		// errors as clients frequently interrupt connections in progress when
 		// client-side load balancing completes a connection to a different server.
@@ -1168,7 +1171,7 @@ func (sshClient *sshClient) run(
 	sshClient.Unlock()
 
 	if !sshClient.sshServer.registerEstablishedClient(sshClient) {
-		clientConn.Close()
+		conn.Close()
 		log.WithContext().Warning("register failed")
 		return
 	}
@@ -1183,15 +1186,17 @@ func (sshClient *sshClient) run(
 	// Some conns report additional metrics. Meek conns report resiliency
 	// metrics and fragmentor.Conns report fragmentor configs.
 	//
-	// Limitation: for meek, GetMetrics from underlying fragmentor.Conns
+	// Limitation: for meek, GetMetrics from underlying fragmentor.Conn(s)
 	// should be called in order to log fragmentor metrics for meek sessions.
 
 	var additionalMetrics []LogFields
-	if metricsSource, ok := clientConn.(common.MetricsSource); ok {
-		additionalMetrics = append(additionalMetrics, LogFields(metricsSource.GetMetrics()))
+	if metricsSource, ok := baseConn.(common.MetricsSource); ok {
+		additionalMetrics = append(
+			additionalMetrics, LogFields(metricsSource.GetMetrics()))
 	}
-	if metricsSource, ok := sshClient.sshConn.(common.MetricsSource); ok {
-		additionalMetrics = append(additionalMetrics, LogFields(metricsSource.GetMetrics()))
+	if result.obfuscatedSSHConn != nil {
+		additionalMetrics = append(
+			additionalMetrics, LogFields(result.obfuscatedSSHConn.GetMetrics()))
 	}
 
 	sshClient.logTunnel(additionalMetrics)

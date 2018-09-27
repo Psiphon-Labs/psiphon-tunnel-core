@@ -955,6 +955,11 @@ func dialSsh(
 		}
 	}
 
+	// Some conns report additional metrics. fragmentor.Conns report
+	// fragmentor configs.
+	//
+	// Limitation: for meek, GetMetrics from underlying fragmentor.Conn(s)
+	// should be called in order to log fragmentor metrics for meek sessions.
 	if metricsSource, ok := dialConn.(common.MetricsSource); ok {
 		dialStats.DialConnMetrics = metricsSource
 	}
