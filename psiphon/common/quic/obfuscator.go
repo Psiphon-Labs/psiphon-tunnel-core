@@ -146,6 +146,26 @@ func (conn *ObfuscatedPacketConn) Close() error {
 	return conn.PacketConn.Close()
 }
 
+type temporaryNetError struct {
+	err error
+}
+
+func newTemporaryNetError(err error) *temporaryNetError {
+	return &temporaryNetError{err: err}
+}
+
+func (e *temporaryNetError) Timeout() bool {
+	return false
+}
+
+func (e *temporaryNetError) Temporary() bool {
+	return true
+}
+
+func (e *temporaryNetError) Error() string {
+	return e.err.Error()
+}
+
 func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 
 	n, addr, err := conn.PacketConn.ReadFrom(p)
@@ -200,8 +220,8 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			// avoids allocting a buffer.
 
 			if n < (NONCE_SIZE + 1) {
-				return n, addr, common.ContextError(
-					fmt.Errorf("unexpected obfuscated QUIC packet length: %d", n))
+				return n, addr, newTemporaryNetError(common.ContextError(
+					fmt.Errorf("unexpected obfuscated QUIC packet length: %d", n)))
 			}
 
 			cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], p[0:NONCE_SIZE])
@@ -212,8 +232,8 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 
 			paddingLen := int(p[NONCE_SIZE])
 			if paddingLen > MAX_PADDING_SIZE || paddingLen > n-(NONCE_SIZE+1) {
-				return n, addr, common.ContextError(
-					fmt.Errorf("unexpected padding length: %d, %d", paddingLen, n))
+				return n, addr, newTemporaryNetError(common.ContextError(
+					fmt.Errorf("unexpected padding length: %d, %d", paddingLen, n)))
 			}
 
 			n -= (NONCE_SIZE + 1) + paddingLen
@@ -262,8 +282,8 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 		maxQUICPacketSize, maxObfuscatedPacketSize := getMaxPacketSizes(addr)
 
 		if n > maxQUICPacketSize {
-			return 0, common.ContextError(
-				fmt.Errorf("unexpected QUIC packet length: %d", n))
+			return 0, newTemporaryNetError(common.ContextError(
+				fmt.Errorf("unexpected QUIC packet length: %d", n)))
 		}
 
 		// Note: escape analysis showed a local array escaping to the heap,

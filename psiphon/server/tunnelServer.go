@@ -145,6 +145,7 @@ func (server *TunnelServer) Run() error {
 		if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) {
 
 			listener, err = quic.Listen(
+				CommonLogger(log),
 				localAddress,
 				support.Config.ObfuscatedSSHKey)
 

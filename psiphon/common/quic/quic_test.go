@@ -62,7 +62,7 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 		t.Fatalf("MakeSecureRandomStringHex failed: %s", err)
 	}
 
-	listener, err := Listen("127.0.0.1:0", obfuscationKey)
+	listener, err := Listen(nil, "127.0.0.1:0", obfuscationKey)
 	if err != nil {
 		t.Fatalf("Listen failed: %s", err)
 	}
