@@ -937,9 +937,10 @@ func makeMeekTLSConfig(
 	}
 
 	config := &tris.Config{
-		Certificates: []tris.Certificate{tlsCertificate},
-		NextProtos:   []string{"http/1.1"},
-		MinVersion:   tris.VersionTLS10,
+		Certificates:            []tris.Certificate{tlsCertificate},
+		NextProtos:              []string{"http/1.1"},
+		MinVersion:              tris.VersionTLS10,
+		UseExtendedMasterSecret: true,
 	}
 
 	if isFronted {

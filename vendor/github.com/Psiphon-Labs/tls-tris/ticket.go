@@ -45,6 +45,7 @@ type SessionTicketSealer interface {
 type sessionState struct {
 	vers         uint16
 	cipherSuite  uint16
+	usedEMS      bool
 	masterSecret []byte
 	certificates [][]byte
 	// usedOldKey is true if the ticket from which this session came from
@@ -59,6 +60,7 @@ func (s *sessionState) equal(i interface{}) bool {
 	}
 
 	if s.vers != s1.vers ||
+		s.usedEMS != s1.usedEMS ||
 		s.cipherSuite != s1.cipherSuite ||
 		!bytes.Equal(s.masterSecret, s1.masterSecret) {
 		return false
@@ -101,7 +103,12 @@ func (s *sessionState) marshal() []byte {
 
 	ret := make([]byte, length)
 	x := ret
-	x[0] = byte(s.vers >> 8)
+	was_used := byte(0)
+	if s.usedEMS {
+		was_used = byte(0x80)
+	}
+
+	x[0] = byte(s.vers>>8) | byte(was_used)
 	x[1] = byte(s.vers)
 	x[2] = byte(s.cipherSuite >> 8)
 	x[3] = byte(s.cipherSuite)
@@ -132,8 +139,9 @@ func (s *sessionState) unmarshal(data []byte) alert {
 		return alertDecodeError
 	}
 
-	s.vers = uint16(data[0])<<8 | uint16(data[1])
+	s.vers = (uint16(data[0])<<8 | uint16(data[1])) & 0x7fff
 	s.cipherSuite = uint16(data[2])<<8 | uint16(data[3])
+	s.usedEMS = (data[0] & 0x80) == 0x80
 	masterSecretLen := int(data[4])<<8 | int(data[5])
 	data = data[6:]
 	if len(data) < masterSecretLen {

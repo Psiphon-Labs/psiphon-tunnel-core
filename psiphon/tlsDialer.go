@@ -386,10 +386,11 @@ func CustomTLSDial(
 		}
 
 		tlsConfig := &tris.Config{
-			RootCAs:            tlsRootCAs,
-			InsecureSkipVerify: tlsConfigInsecureSkipVerify,
-			ServerName:         tlsConfigServerName,
-			ClientSessionCache: clientSessionCache,
+			RootCAs:                 tlsRootCAs,
+			InsecureSkipVerify:      tlsConfigInsecureSkipVerify,
+			ServerName:              tlsConfigServerName,
+			ClientSessionCache:      clientSessionCache,
+			UseExtendedMasterSecret: true,
 		}
 
 		conn = &trisConn{
