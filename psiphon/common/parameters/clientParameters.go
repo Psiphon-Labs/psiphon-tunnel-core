@@ -181,6 +181,7 @@ const (
 
 const (
 	useNetworkLatencyMultiplier = 1
+	serverSideOnly              = 2
 )
 
 // defaultClientParameters specifies the type, default value, and minimum
@@ -249,14 +250,14 @@ var defaultClientParameters = map[string]struct {
 	FragmentorMaxWriteBytes:            {value: 1500, minimum: 1},
 	FragmentorMinDelay:                 {value: time.Duration(0), minimum: time.Duration(0)},
 	FragmentorMaxDelay:                 {value: 10 * time.Millisecond, minimum: time.Duration(0)},
-	FragmentorDownstreamProbability:    {value: 0.5, minimum: 0.0},
-	FragmentorDownstreamLimitProtocols: {value: protocol.TunnelProtocols{}},
-	FragmentorDownstreamMinTotalBytes:  {value: 0, minimum: 0},
-	FragmentorDownstreamMaxTotalBytes:  {value: 0, minimum: 0},
-	FragmentorDownstreamMinWriteBytes:  {value: 1, minimum: 1},
-	FragmentorDownstreamMaxWriteBytes:  {value: 1500, minimum: 1},
-	FragmentorDownstreamMinDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
-	FragmentorDownstreamMaxDelay:       {value: 10 * time.Millisecond, minimum: time.Duration(0)},
+	FragmentorDownstreamProbability:    {value: 0.5, minimum: 0.0, flags: serverSideOnly},
+	FragmentorDownstreamLimitProtocols: {value: protocol.TunnelProtocols{}, flags: serverSideOnly},
+	FragmentorDownstreamMinTotalBytes:  {value: 0, minimum: 0, flags: serverSideOnly},
+	FragmentorDownstreamMaxTotalBytes:  {value: 0, minimum: 0, flags: serverSideOnly},
+	FragmentorDownstreamMinWriteBytes:  {value: 1, minimum: 1, flags: serverSideOnly},
+	FragmentorDownstreamMaxWriteBytes:  {value: 1500, minimum: 1, flags: serverSideOnly},
+	FragmentorDownstreamMinDelay:       {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},
+	FragmentorDownstreamMaxDelay:       {value: 10 * time.Millisecond, minimum: time.Duration(0), flags: serverSideOnly},
 
 	// The Psiphon server will reject obfuscated SSH seed messages with
 	// padding greater than OBFUSCATE_MAX_PADDING.
@@ -354,6 +355,13 @@ var defaultClientParameters = map[string]struct {
 
 	TransformHostNameProbability: {value: 0.5, minimum: 0.0},
 	PickUserAgentProbability:     {value: 0.5, minimum: 0.0},
+}
+
+// IsServerSideOnly indicates if the parameter specified by name is used
+// server-side only.
+func IsServerSideOnly(name string) bool {
+	defaultParameter, ok := defaultClientParameters[name]
+	return ok && (defaultParameter.flags&serverSideOnly) != 0
 }
 
 // ClientParameters is a set of client parameters. To use the parameters, call

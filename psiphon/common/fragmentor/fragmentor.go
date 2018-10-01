@@ -29,12 +29,95 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
 const (
 	MAX_FRAGMENTOR_NOTICES               = 3
 	MAX_FRAGMENTOR_ITERATIONS_PER_NOTICE = 5
 )
+
+// Config specifies a fragmentor configuration. NewUpstreamConfig and
+// NewDownstreamConfig will generate configurations based on the given
+// client parameters.
+type Config struct {
+	isUpstream      bool
+	bytesToFragment int
+	minWriteBytes   int
+	maxWriteBytes   int
+	minDelay        time.Duration
+	maxDelay        time.Duration
+}
+
+// NewUpstreamConfig creates a new Config; may return nil.
+func NewUpstreamConfig(
+	p *parameters.ClientParametersSnapshot, tunnelProtocol string) *Config {
+	return newConfig(p, true, tunnelProtocol)
+}
+
+// NewDownstreamConfig creates a new Config; may return nil.
+func NewDownstreamConfig(
+	p *parameters.ClientParametersSnapshot, tunnelProtocol string) *Config {
+	return newConfig(p, false, tunnelProtocol)
+}
+
+func newConfig(
+	p *parameters.ClientParametersSnapshot,
+	isUpstream bool,
+	tunnelProtocol string) *Config {
+
+	probability := parameters.FragmentorProbability
+	limitProtocols := parameters.FragmentorLimitProtocols
+	minTotalBytes := parameters.FragmentorMinTotalBytes
+	maxTotalBytes := parameters.FragmentorMaxTotalBytes
+	minWriteBytes := parameters.FragmentorMinWriteBytes
+	maxWriteBytes := parameters.FragmentorMaxWriteBytes
+	minDelay := parameters.FragmentorMinDelay
+	maxDelay := parameters.FragmentorMaxDelay
+
+	if !isUpstream {
+		probability = parameters.FragmentorDownstreamProbability
+		limitProtocols = parameters.FragmentorDownstreamLimitProtocols
+		minTotalBytes = parameters.FragmentorDownstreamMinTotalBytes
+		maxTotalBytes = parameters.FragmentorDownstreamMaxTotalBytes
+		minWriteBytes = parameters.FragmentorDownstreamMinWriteBytes
+		maxWriteBytes = parameters.FragmentorDownstreamMaxWriteBytes
+		minDelay = parameters.FragmentorDownstreamMinDelay
+		maxDelay = parameters.FragmentorDownstreamMaxDelay
+	}
+
+	coinFlip := p.WeightedCoinFlip(probability)
+	tunnelProtocols := p.TunnelProtocols(limitProtocols)
+
+	if !coinFlip || (len(tunnelProtocols) > 0 && !common.Contains(tunnelProtocols, tunnelProtocol)) {
+		return nil
+	}
+
+	bytesToFragment, err := common.MakeSecureRandomRange(
+		p.Int(minTotalBytes), p.Int(maxTotalBytes))
+	if err != nil {
+		bytesToFragment = 0
+	}
+
+	if bytesToFragment == 0 {
+		return nil
+	}
+
+	return &Config{
+		isUpstream:      isUpstream,
+		bytesToFragment: bytesToFragment,
+		minWriteBytes:   p.Int(minWriteBytes),
+		maxWriteBytes:   p.Int(maxWriteBytes),
+		minDelay:        p.Duration(minDelay),
+		maxDelay:        p.Duration(maxDelay),
+	}
+}
+
+// IsFragmenting indicates whether the fragmentor configuration results in any
+// fragmentation; config may be nil.
+func (config *Config) IsFragmenting() bool {
+	return config != nil && config.bytesToFragment > 0
+}
 
 // Conn implements simple fragmentation of application-level messages/packets
 // into multiple TCP packets by splitting writes into smaller sizes and adding
@@ -46,39 +129,61 @@ const (
 // portion of a TCP flow.
 type Conn struct {
 	net.Conn
+	config          *Config
 	noticeEmitter   func(string)
 	runCtx          context.Context
 	stopRunning     context.CancelFunc
 	isClosed        int32
 	writeMutex      sync.Mutex
 	numNotices      int
-	bytesToFragment int
 	bytesFragmented int
-	minWriteBytes   int
-	maxWriteBytes   int
-	minDelay        time.Duration
-	maxDelay        time.Duration
+	maxBytesWritten int
+	minBytesWritten int
+	minDelayed      time.Duration
+	maxDelayed      time.Duration
 }
 
 // NewConn creates a new Conn.
 func NewConn(
-	conn net.Conn,
+	config *Config,
 	noticeEmitter func(string),
-	bytesToFragment, minWriteBytes, maxWriteBytes int,
-	minDelay, maxDelay time.Duration) *Conn {
+	conn net.Conn) *Conn {
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
 	return &Conn{
-		Conn:            conn,
-		noticeEmitter:   noticeEmitter,
-		runCtx:          runCtx,
-		stopRunning:     stopRunning,
-		bytesToFragment: bytesToFragment,
-		minWriteBytes:   minWriteBytes,
-		maxWriteBytes:   maxWriteBytes,
-		minDelay:        minDelay,
-		maxDelay:        maxDelay,
+		Conn:          conn,
+		config:        config,
+		noticeEmitter: noticeEmitter,
+		runCtx:        runCtx,
+		stopRunning:   stopRunning,
 	}
+}
+
+// GetMetrics implements the common.MetricsSource interface.
+func (c *Conn) GetMetrics() common.LogFields {
+	c.writeMutex.Lock()
+	defer c.writeMutex.Unlock()
+
+	logFields := make(common.LogFields)
+
+	if c.bytesFragmented == 0 {
+		return logFields
+	}
+
+	var prefix string
+	if c.config.isUpstream {
+		prefix = "upstream_"
+	} else {
+		prefix = "downstream_"
+	}
+
+	logFields[prefix+"bytes_fragmented"] = c.bytesFragmented
+	logFields[prefix+"min_bytes_written"] = c.minBytesWritten
+	logFields[prefix+"max_bytes_written"] = c.maxBytesWritten
+	logFields[prefix+"min_delayed"] = int(c.minDelayed / time.Microsecond)
+	logFields[prefix+"max_delayed"] = int(c.maxDelayed / time.Microsecond)
+
+	return logFields
 }
 
 func (c *Conn) Write(buffer []byte) (int, error) {
@@ -86,7 +191,7 @@ func (c *Conn) Write(buffer []byte) (int, error) {
 	c.writeMutex.Lock()
 	defer c.writeMutex.Unlock()
 
-	if c.bytesFragmented >= c.bytesToFragment {
+	if c.bytesFragmented >= c.config.bytesToFragment {
 		return c.Conn.Write(buffer)
 	}
 
@@ -112,9 +217,9 @@ func (c *Conn) Write(buffer []byte) (int, error) {
 	for iterations := 0; len(buffer) > 0; iterations += 1 {
 
 		delay, err := common.MakeSecureRandomPeriod(
-			c.minDelay, c.maxDelay)
+			c.config.minDelay, c.config.maxDelay)
 		if err != nil {
-			delay = c.minDelay
+			delay = c.config.minDelay
 		}
 
 		timer := time.NewTimer(delay)
@@ -130,12 +235,12 @@ func (c *Conn) Write(buffer []byte) (int, error) {
 			return totalBytesWritten, err
 		}
 
-		minWriteBytes := c.minWriteBytes
+		minWriteBytes := c.config.minWriteBytes
 		if minWriteBytes > len(buffer) {
 			minWriteBytes = len(buffer)
 		}
 
-		maxWriteBytes := c.maxWriteBytes
+		maxWriteBytes := c.config.maxWriteBytes
 		if maxWriteBytes > len(buffer) {
 			maxWriteBytes = len(buffer)
 		}
@@ -153,6 +258,20 @@ func (c *Conn) Write(buffer []byte) (int, error) {
 
 		if err != nil {
 			return totalBytesWritten, err
+		}
+
+		if c.minBytesWritten == 0 || c.minBytesWritten > bytesWritten {
+			c.minBytesWritten = bytesWritten
+		}
+		if c.maxBytesWritten < bytesWritten {
+			c.maxBytesWritten = bytesWritten
+		}
+
+		if c.minDelayed == 0 || c.minDelayed > delay {
+			c.minDelayed = delay
+		}
+		if c.maxDelayed < delay {
+			c.maxDelayed = delay
 		}
 
 		if emitNotice {

@@ -66,6 +66,8 @@ type Conn struct {
 	// renegotiation extension. (This is meaningless as a server because
 	// renegotiation is not supported in that case.)
 	secureRenegotiation bool
+	// indicates wether extended MasterSecret extension is used (see RFC7627)
+	useEMS bool
 
 	// clientFinishedIsFirst is true if the client sent the first Finished
 	// message during the most recent handshake. This is recorded because
@@ -472,23 +474,30 @@ func (hc *halfConn) encrypt(b *block, explicitIVLen int) (bool, alert) {
 		case aead:
 			// explicitIVLen is always 0 for TLS1.3
 			payloadLen := len(b.data) - recordHeaderLen - explicitIVLen
+			payloadOffset := recordHeaderLen + explicitIVLen
 			nonce := b.data[recordHeaderLen : recordHeaderLen+explicitIVLen]
 			if len(nonce) == 0 {
 				nonce = hc.seq[:]
 			}
-			payload = b.data[recordHeaderLen+explicitIVLen:]
-			payload = payload[:payloadLen]
 
 			var additionalData []byte
 			if hc.version < VersionTLS13 {
+				// make room in a buffer for payload + MAC
+				b.resize(len(b.data) + c.Overhead())
+
+				payload = b.data[payloadOffset : payloadOffset+payloadLen]
 				copy(hc.additionalData[:], hc.seq[:])
 				copy(hc.additionalData[8:], b.data[:3])
 				binary.BigEndian.PutUint16(hc.additionalData[11:], uint16(payloadLen))
 				additionalData = hc.additionalData[:]
-				b.resize(len(b.data) + c.Overhead())
 			} else {
+				// make room in a buffer for TLSCiphertext.encrypted_record:
+				// payload + MAC + extra data if needed
+				b.resize(len(b.data) + c.Overhead() + 1)
+
+				payload = b.data[payloadOffset : payloadOffset+payloadLen+1]
 				// 1 byte of content type is appended to payload and encrypted
-				payload = append(payload, b.data[0])
+				payload[len(payload)-1] = b.data[0]
 
 				// opaque_type
 				b.data[0] = byte(recordTypeApplicationData)
@@ -498,9 +507,6 @@ func (hc *halfConn) encrypt(b *block, explicitIVLen int) (bool, alert) {
 				additionalData[0] = b.data[0]
 				binary.BigEndian.PutUint16(additionalData[1:], VersionTLS12)
 				binary.BigEndian.PutUint16(additionalData[3:], uint16(len(payload)+c.Overhead()))
-
-				// make room for TLSCiphertext.encrypted_record
-				b.resize(len(payload) + recordHeaderLen + c.Overhead())
 			}
 			c.Seal(payload[:0], nonce, payload, additionalData)
 		case cbcMode:

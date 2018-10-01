@@ -32,6 +32,8 @@ import (
 
 func newUDPConn(domain int, config *DialConfig) (net.PacketConn, error) {
 
+	// TODO: use https://golang.org/pkg/net/#Dialer.Control, introduced in Go 1.11?
+
 	socketFD, err := syscall.Socket(domain, syscall.SOCK_DGRAM, 0)
 	if err != nil {
 		return nil, common.ContextError(err)

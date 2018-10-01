@@ -906,9 +906,9 @@ func (session *meekSession) delete(haveLock bool) {
 	}
 }
 
-// GetMetrics implements the MetricsSource interface.
-func (session *meekSession) GetMetrics() LogFields {
-	logFields := make(LogFields)
+// GetMetrics implements the common.MetricsSource interface.
+func (session *meekSession) GetMetrics() common.LogFields {
+	logFields := make(common.LogFields)
 	logFields["meek_client_retries"] = atomic.LoadInt64(&session.metricClientRetries)
 	logFields["meek_peak_response_size"] = atomic.LoadInt64(&session.metricPeakResponseSize)
 	logFields["meek_peak_cached_response_size"] = atomic.LoadInt64(&session.metricPeakCachedResponseSize)
@@ -937,9 +937,10 @@ func makeMeekTLSConfig(
 	}
 
 	config := &tris.Config{
-		Certificates: []tris.Certificate{tlsCertificate},
-		NextProtos:   []string{"http/1.1"},
-		MinVersion:   tris.VersionTLS10,
+		Certificates:            []tris.Certificate{tlsCertificate},
+		NextProtos:              []string{"http/1.1"},
+		MinVersion:              tris.VersionTLS10,
+		UseExtendedMasterSecret: true,
 	}
 
 	if isFronted {
@@ -1375,9 +1376,10 @@ func (conn *meekConn) SetWriteDeadline(t time.Time) error {
 	return common.ContextError(errors.New("not supported"))
 }
 
-// GetMetrics implements the MetricsSource interface. The metrics are maintained
-// in the meek session type; but logTunnel, which calls MetricsSource.GetMetrics,
-// has a pointer only to this conn, so it calls through to the session.
-func (conn *meekConn) GetMetrics() LogFields {
+// GetMetrics implements the common.MetricsSource interface. The metrics are
+// maintained in the meek session type; but logTunnel, which calls
+// MetricsSource.GetMetrics, has a pointer only to this conn, so it calls
+// through to the session.
+func (conn *meekConn) GetMetrics() common.LogFields {
 	return conn.meekSession.GetMetrics()
 }

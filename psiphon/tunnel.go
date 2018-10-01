@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
@@ -131,6 +132,11 @@ type DialStats struct {
 	UserAgent                      string
 	SelectedTLSProfile             bool
 	TLSProfile                     string
+	DialPortNumber                 string
+	QUICVersion                    string
+	QUICDialSNIAddress             string
+	DialConnMetrics                common.MetricsSource
+	ObfuscatedSSHConnMetrics       common.MetricsSource
 }
 
 // ConnectTunnel first makes a network transport connection to the
@@ -691,10 +697,13 @@ func initMeekConfig(
 
 // initDialConfig is a helper that creates a DialConfig for the tunnel.
 func initDialConfig(
-	config *Config, meekConfig *MeekConfig) (*DialConfig, *DialStats) {
+	config *Config,
+	meekConfig *MeekConfig,
+	tunnelProtocol string) (*DialConfig, *DialStats) {
+
+	p := config.clientParameters.Get()
 
 	var upstreamProxyType string
-
 	if config.UseUpstreamProxy() {
 		// Note: UpstreamProxyURL will be validated in the dial
 		proxyURL, err := url.Parse(config.UpstreamProxyURL)
@@ -711,9 +720,7 @@ func initDialConfig(
 		}
 	}
 
-	additionalCustomHeaders :=
-		config.clientParameters.Get().HTTPHeaders(parameters.AdditionalCustomHeaders)
-
+	additionalCustomHeaders := p.HTTPHeaders(parameters.AdditionalCustomHeaders)
 	if additionalCustomHeaders != nil {
 		for k, v := range additionalCustomHeaders {
 			dialCustomHeaders[k] = make([]string, len(v))
@@ -722,11 +729,12 @@ func initDialConfig(
 	}
 
 	// Set User-Agent when using meek or an upstream HTTP proxy
-
 	var selectedUserAgent bool
 	if meekConfig != nil || upstreamProxyType == "http" {
 		selectedUserAgent = UserAgentIfUnset(config.clientParameters, dialCustomHeaders)
 	}
+
+	fragmentorConfig := fragmentor.NewUpstreamConfig(p, tunnelProtocol)
 
 	dialConfig := &DialConfig{
 		UpstreamProxyURL:              config.UpstreamProxyURL,
@@ -735,6 +743,7 @@ func initDialConfig(
 		DnsServerGetter:               config.DnsServerGetter,
 		IPv6Synthesizer:               config.IPv6Synthesizer,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
+		FragmentorConfig:              fragmentorConfig,
 	}
 
 	dialStats := &DialStats{}
@@ -822,46 +831,50 @@ func dialSsh(
 
 	// Note: when SSHClientVersion is "", a default is supplied by the ssh package:
 	// https://godoc.org/golang.org/x/crypto/ssh#ClientConfig
-	var selectedSSHClientVersion bool
-	SSHClientVersion := ""
-	useObfuscatedSsh := false
 	var directDialAddress string
-	var quicDialSNIAddress string
+	var QUICVersion string
+	var QUICDialSNIAddress string
+	var SSHClientVersion string
 	var meekConfig *MeekConfig
 	var err error
 
 	switch selectedProtocol {
 	case protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH, protocol.TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH:
-		useObfuscatedSsh = true
 		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
 
 	case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
-		useObfuscatedSsh = true
 		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedQUICPort)
-		quicDialSNIAddress = fmt.Sprintf("%s:%d", common.GenerateHostName(), serverEntry.SshObfuscatedQUICPort)
+		QUICVersion = selectQUICVersion(config.clientParameters)
+		QUICDialSNIAddress = fmt.Sprintf("%s:%d", common.GenerateHostName(), serverEntry.SshObfuscatedQUICPort)
 
 	case protocol.TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH:
-		useObfuscatedSsh = true
 		directDialAddress = serverEntry.IpAddress
 
 	case protocol.TUNNEL_PROTOCOL_SSH:
-		selectedSSHClientVersion = true
 		SSHClientVersion = pickSSHClientVersion()
 		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshPort)
 
 	default:
-		useObfuscatedSsh = true
 		meekConfig, err = initMeekConfig(config, serverEntry, selectedProtocol, sessionId)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
 	}
 
-	dialConfig, dialStats := initDialConfig(config, meekConfig)
+	dialConfig, dialStats := initDialConfig(config, meekConfig, selectedProtocol)
 
-	// Add dial stats specific to SSH dialing
+	if meekConfig != nil {
+		_, dialStats.DialPortNumber, _ = net.SplitHostPort(meekConfig.DialAddress)
+	} else {
+		_, dialStats.DialPortNumber, _ = net.SplitHostPort(directDialAddress)
+	}
 
-	if selectedSSHClientVersion {
+	switch selectedProtocol {
+	case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
+		dialStats.QUICVersion = QUICVersion
+		dialStats.QUICDialSNIAddress = QUICDialSNIAddress
+
+	case protocol.TUNNEL_PROTOCOL_SSH:
 		dialStats.SelectedSSHClientVersion = true
 		dialStats.SSHClientVersion = SSHClientVersion
 	}
@@ -902,8 +915,9 @@ func dialSsh(
 			ctx,
 			packetConn,
 			remoteAddr,
-			quicDialSNIAddress,
-			selectQUICVersion(config.clientParameters))
+			QUICDialSNIAddress,
+			QUICVersion,
+			serverEntry.SshObfuscatedKey)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -932,21 +946,26 @@ func dialSsh(
 
 	} else {
 
-		dialConn, err = DialTCPFragmentor(
+		dialConn, err = DialTCP(
 			ctx,
 			directDialAddress,
-			dialConfig,
-			selectedProtocol,
-			config.clientParameters,
-			nil)
+			dialConfig)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
 	}
 
+	// Some conns report additional metrics. fragmentor.Conns report
+	// fragmentor configs.
+	//
+	// Limitation: for meek, GetMetrics from underlying fragmentor.Conn(s)
+	// should be called in order to log fragmentor metrics for meek sessions.
+	if metricsSource, ok := dialConn.(common.MetricsSource); ok {
+		dialStats.DialConnMetrics = metricsSource
+	}
+
 	// If dialConn is not a Closer, tunnel failure detection may be slower
-	_, ok := dialConn.(common.Closer)
-	if !ok {
+	if _, ok := dialConn.(common.Closer); !ok {
 		NoticeAlert("tunnel.dialSsh: dialConn is not a Closer")
 	}
 
@@ -971,8 +990,8 @@ func dialSsh(
 
 	// Add obfuscated SSH layer
 	var sshConn net.Conn = throttledConn
-	if useObfuscatedSsh {
-		sshConn, err = obfuscator.NewObfuscatedSshConn(
+	if protocol.TunnelProtocolUsesObfuscatedSSH(selectedProtocol) {
+		obfuscatedSSHConn, err := obfuscator.NewObfuscatedSSHConn(
 			obfuscator.OBFUSCATION_CONN_MODE_CLIENT,
 			throttledConn,
 			serverEntry.SshObfuscatedKey,
@@ -981,6 +1000,8 @@ func dialSsh(
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
+		sshConn = obfuscatedSSHConn
+		dialStats.ObfuscatedSSHConnMetrics = obfuscatedSSHConn
 	}
 
 	// Now establish the SSH session over the conn transport
