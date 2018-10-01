@@ -16,10 +16,6 @@ import (
 	"sync/atomic"
 )
 
-type Committer interface {
-	Commit() error
-}
-
 // serverHandshakeState contains details of a server handshake in progress.
 // It's discarded once the handshake has completed.
 type serverHandshakeState struct {
@@ -281,10 +277,10 @@ Curves:
 
 	if len(hs.clientHello.alpnProtocols) > 0 {
 		if selectedProto, fallback := mutualProtocol(hs.clientHello.alpnProtocols, c.config.NextProtos); !fallback {
-			if hs.hello != nil {
-				hs.hello.alpnProtocol = selectedProto
-			} else {
+			if hs.hello13Enc != nil {
 				hs.hello13Enc.alpnProtocol = selectedProto
+			} else {
+				hs.hello.alpnProtocol = selectedProto
 			}
 			c.clientProtocol = selectedProto
 		}
@@ -413,6 +409,11 @@ func (hs *serverHandshakeState) checkForResumption() bool {
 		return false
 	}
 
+	// Do not resume connections where client support for EMS has changed
+	if (hs.clientHello.extendedMSSupported && c.config.UseExtendedMasterSecret) != hs.sessionState.usedEMS {
+		return false
+	}
+
 	cipherSuiteOk := false
 	// Check that the client is still offering the ciphersuite in the session.
 	for _, id := range hs.clientHello.cipherSuites {
@@ -450,6 +451,7 @@ func (hs *serverHandshakeState) doResumeHandshake() error {
 	// that we're doing a resumption.
 	hs.hello.sessionId = hs.clientHello.sessionId
 	hs.hello.ticketSupported = hs.sessionState.usedOldKey
+	hs.hello.extendedMSSupported = hs.clientHello.extendedMSSupported && c.config.UseExtendedMasterSecret
 	hs.finishedHash = newFinishedHash(c.vers, hs.suite)
 	hs.finishedHash.discardHandshakeBuffer()
 	hs.finishedHash.Write(hs.clientHello.marshal())
@@ -465,6 +467,7 @@ func (hs *serverHandshakeState) doResumeHandshake() error {
 	}
 
 	hs.masterSecret = hs.sessionState.masterSecret
+	c.useEMS = hs.sessionState.usedEMS
 
 	return nil
 }
@@ -478,6 +481,7 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 
 	hs.hello.ticketSupported = hs.clientHello.ticketSupported && !c.config.SessionTicketsDisabled
 	hs.hello.cipherSuite = hs.suite.id
+	hs.hello.extendedMSSupported = hs.clientHello.extendedMSSupported && c.config.UseExtendedMasterSecret
 
 	hs.finishedHash = newFinishedHash(hs.c.vers, hs.suite)
 	if c.config.ClientAuth == NoClientCert {
@@ -611,7 +615,8 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 		}
 		return err
 	}
-	hs.masterSecret = masterFromPreMasterSecret(c.vers, hs.suite, preMasterSecret, hs.clientHello.random, hs.hello.random)
+	c.useEMS = hs.hello.extendedMSSupported
+	hs.masterSecret = masterFromPreMasterSecret(c.vers, hs.suite, preMasterSecret, hs.clientHello.random, hs.hello.random, hs.finishedHash, c.useEMS)
 	if err := c.config.writeKeyLog("CLIENT_RANDOM", hs.clientHello.random, hs.masterSecret); err != nil {
 		c.sendAlert(alertInternalError)
 		return err
@@ -741,6 +746,7 @@ func (hs *serverHandshakeState) sendSessionTicket() error {
 		cipherSuite:  hs.suite.id,
 		masterSecret: hs.masterSecret,
 		certificates: hs.certsFromClient,
+		usedEMS:      c.useEMS,
 	}
 	m.ticket, err = c.encryptTicket(state.marshal())
 	if err != nil {

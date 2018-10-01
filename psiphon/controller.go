@@ -1343,7 +1343,8 @@ func (controller *Controller) doFetchTactics(
 
 	meekConfig.RoundTripperOnly = true
 
-	dialConfig, dialStats := initDialConfig(controller.config, meekConfig)
+	dialConfig, dialStats := initDialConfig(
+		controller.config, meekConfig, tacticsProtocol)
 
 	NoticeRequestingTactics(
 		serverEntry.IpAddress,

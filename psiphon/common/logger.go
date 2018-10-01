@@ -42,3 +42,11 @@ type LogContext interface {
 // LogFields is type-compatible with psiphon/server.LogFields
 // and logrus.LogFields.
 type LogFields map[string]interface{}
+
+// MetricsSource is an object that provides metrics to be logged
+type MetricsSource interface {
+
+	// GetMetrics returns a LogFields populated with
+	// metrics from the MetricsSource
+	GetMetrics() LogFields
+}

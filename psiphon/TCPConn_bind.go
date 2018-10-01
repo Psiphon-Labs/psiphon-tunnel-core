@@ -41,6 +41,8 @@ import (
 // The sequence of syscalls in this implementation are taken from:
 // https://github.com/golang/go/issues/6966
 // (originally: https://code.google.com/p/go/issues/detail?id=6966)
+//
+// TODO: use https://golang.org/pkg/net/#Dialer.Control, introduced in Go 1.11?
 func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, error) {
 
 	// Get the remote IP and port, resolving a domain name if necessary

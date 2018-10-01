@@ -68,10 +68,14 @@ var serverIdleTimeout = SERVER_IDLE_TIMEOUT
 // Listener is a net.Listener.
 type Listener struct {
 	quic_go.Listener
+	logger common.Logger
 }
 
 // Listen creates a new Listener.
-func Listen(addr string) (*Listener, error) {
+func Listen(
+	logger common.Logger,
+	address string,
+	obfuscationKey string) (*Listener, error) {
 
 	certificate, privateKey, err := common.GenerateWebServerCertificate(
 		common.GenerateHostName())
@@ -97,8 +101,29 @@ func Listen(addr string) (*Listener, error) {
 		KeepAlive:             true,
 	}
 
-	quicListener, err := quic_go.ListenAddr(
-		addr, tlsConfig, quicConfig)
+	addr, err := net.ResolveUDPAddr("udp", address)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	udpConn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	var packetConn net.PacketConn
+	packetConn, err = NewObfuscatedPacketConnPacketConn(
+		udpConn, true, obfuscationKey)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	// This wrapping must be outermost to ensure that all
+	// ReadFrom errors are intercepted and logged.
+	packetConn = newLoggingPacketConn(logger, packetConn)
+
+	quicListener, err := quic_go.Listen(
+		packetConn, tlsConfig, quicConfig)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -126,9 +151,10 @@ func (listener *Listener) Accept() (net.Conn, error) {
 }
 
 var supportedVersionNumbers = map[string]quic_go.VersionNumber{
-	protocol.QUIC_VERSION_GQUIC39: quic_go.VersionGQUIC39,
-	protocol.QUIC_VERSION_GQUIC43: quic_go.VersionGQUIC43,
-	protocol.QUIC_VERSION_GQUIC44: quic_go.VersionGQUIC44,
+	protocol.QUIC_VERSION_GQUIC39:    quic_go.VersionGQUIC39,
+	protocol.QUIC_VERSION_GQUIC43:    quic_go.VersionGQUIC43,
+	protocol.QUIC_VERSION_GQUIC44:    quic_go.VersionGQUIC44,
+	protocol.QUIC_VERSION_OBFUSCATED: quic_go.VersionGQUIC43,
 }
 
 // Dial establishes a new QUIC session and stream to the server specified by
@@ -145,7 +171,8 @@ func Dial(
 	packetConn net.PacketConn,
 	remoteAddr *net.UDPAddr,
 	quicSNIAddress string,
-	negotiateQUICVersion string) (net.Conn, error) {
+	negotiateQUICVersion string,
+	obfuscationKey string) (net.Conn, error) {
 
 	var versions []quic_go.VersionNumber
 
@@ -167,6 +194,15 @@ func Dial(
 	deadline, ok := ctx.Deadline()
 	if ok {
 		quicConfig.HandshakeTimeout = deadline.Sub(time.Now())
+	}
+
+	if negotiateQUICVersion == protocol.QUIC_VERSION_OBFUSCATED {
+		var err error
+		packetConn, err = NewObfuscatedPacketConnPacketConn(
+			packetConn, false, obfuscationKey)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
 	}
 
 	session, err := quic_go.DialContext(
@@ -382,4 +418,73 @@ func isErrorIndicatingClosed(err error) bool {
 		}
 	}
 	return false
+}
+
+// loggingPacketConn is a workaround for issues in the quic-go server (as of
+// revision ffdfa1).
+//
+// 1. quic-go will shutdown the QUIC server on any error returned from
+//    ReadFrom, even net.Error.Temporary() errors.
+//
+// 2. The server shutdown hangs due to a mutex deadlock:
+//
+//    sync.(*RWMutex).Lock+0x2c                                          /usr/local/go/src/sync/rwmutex.go:93
+//    [...]/lucas-clemente/quic-go.(*packetHandlerMap).CloseServer+0x41  [...]/lucas-clemente/quic-go/packet_handler_map.go:77
+//    [...]/lucas-clemente/quic-go.(*server).closeWithMutex+0x37         [...]/lucas-clemente/quic-go/server.go:314
+//    [...]/lucas-clemente/quic-go.(*server).closeWithError+0xa2         [...]/lucas-clemente/quic-go/server.go:336
+//    [...]/lucas-clemente/quic-go.(*packetHandlerMap).close+0x1da       [...]/lucas-clemente/quic-go/packet_handler_map.go:115
+//    [...]/lucas-clemente/quic-go.(*packetHandlerMap).listen+0x230      [...]/lucas-clemente/quic-go/packet_handler_map.go:130
+//
+//    packetHandlerMap.CloseServer is attempting to lock the same mutex that
+//    is already locked in packetHandlerMap.close, which deadlocks. As
+//    packetHandlerMap and its mutex are used by all client sessions, this
+//    effectively hangs the entire server.
+//
+// loggingPacketConn PacketConn ReadFrom errors and returns any usable values
+// or loops and calls ReadFrom again. In practise, due to the nature of UDP
+// sockets, ReadFrom errors are exceptional as they will mosyt likely not
+// occur due to network transmission failures. ObfuscatedPacketConn returns
+// errors that could be due to network transmission failures that corrupt
+// packets; these are marked as net.Error.Temporary() and loggingPacketConn
+// logs these at debug level.
+//
+// loggingPacketConn assumes quic-go revision ffdfa1 behavior and will break
+// other behavior, such as setting deadlines and expecting net.Error.Timeout()
+// errors from ReadFrom.
+type loggingPacketConn struct {
+	net.PacketConn
+	logger common.Logger
+}
+
+func newLoggingPacketConn(
+	logger common.Logger,
+	packetConn net.PacketConn) *loggingPacketConn {
+
+	return &loggingPacketConn{
+		PacketConn: packetConn,
+		logger:     logger,
+	}
+}
+
+func (conn *loggingPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
+
+	for {
+		n, addr, err := conn.PacketConn.ReadFrom(p)
+
+		if err != nil && conn.logger != nil {
+			message := "ReadFrom failed"
+			if e, ok := err.(net.Error); ok && e.Temporary() {
+				conn.logger.WithContextFields(
+					common.LogFields{"error": err}).Debug(message)
+			} else {
+				conn.logger.WithContextFields(
+					common.LogFields{"error": err}).Warning(message)
+			}
+		}
+		err = nil
+
+		if n > 0 || addr != nil {
+			return n, addr, nil
+		}
+	}
 }

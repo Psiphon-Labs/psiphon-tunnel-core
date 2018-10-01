@@ -63,10 +63,10 @@
 			"revisionTime": "2018-09-12T16:47:43Z"
 		},
 		{
-			"checksumSHA1": "yibR+itWrPd8QJO4soBScqrbxzg=",
+			"checksumSHA1": "tPhzygqO+Lk+oY/Gp4jMq7YGbhU=",
 			"path": "github.com/Psiphon-Labs/tls-tris",
-			"revision": "5165552b556552cfd96b918a8121934a7d8d0a66",
-			"revisionTime": "2018-09-15T13:40:56Z"
+			"revision": "a7c2751b906303d32dff10bb728a1d0f124e56f4",
+			"revisionTime": "2018-09-29T21:11:36Z"
 		},
 		{
 			"checksumSHA1": "OBN3dfn0yx9L3I2RPo58o27my2k=",
@@ -79,6 +79,12 @@
 			"path": "github.com/Psiphon-Labs/utls/cipherhw",
 			"revision": "1f81de88145c342aad771f4f630012618faaffa7",
 			"revisionTime": "2018-04-25T19:07:11Z"
+		},
+		{
+			"checksumSHA1": "iZ3cpzMPHGeYQWcSLweeYdPqPiw=",
+			"path": "github.com/Yawning/chacha20",
+			"revision": "e3b1f968fc6397b51d963fee8ec8711a47bc0ce8",
+			"revisionTime": "2017-09-04T08:51:04Z"
 		},
 		{
 			"checksumSHA1": "30PBqj9BW03KCVqASvLg3bR+xYc=",

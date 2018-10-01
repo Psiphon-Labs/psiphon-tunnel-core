@@ -101,6 +101,7 @@ Psiphon Tunnel Core uses:
 * [utls](https://github.com/refraction-networking/utls)
 * [quic-go](https://github.com/lucas-clemente/quic-go)
 * [tls-tris](https://github.com/cloudflare/tls-tris)
+* [chacha20](https://github.com/Yawning/chacha20)
 
 Licensing
 --------------------------------------------------------------------------------

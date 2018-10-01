@@ -35,6 +35,7 @@ import (
 
 	"github.com/Psiphon-Labs/dns"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 )
 
 const DNS_PORT = 53
@@ -83,6 +84,10 @@ type DialConfig struct {
 	// domain name.
 	// The callback may be invoked by a concurrent goroutine.
 	ResolvedIPCallback func(string)
+
+	// FragmentorConfig specifies whether to layer a fragmentor.Conn on top
+	// of dialed TCP conns, and the fragmentation configuration to use.
+	FragmentorConfig *fragmentor.Config
 }
 
 // NetworkConnectivityChecker defines the interface to the external
