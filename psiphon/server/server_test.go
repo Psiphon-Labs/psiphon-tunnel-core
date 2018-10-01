@@ -129,6 +129,7 @@ func TestSSH(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -144,6 +145,23 @@ func TestOSSH(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
+		})
+}
+
+func TestFragmentedOSSH(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			forceFragmenting:     true,
 		})
 }
 
@@ -159,6 +177,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -175,6 +194,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -191,6 +211,7 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -207,6 +228,7 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -223,6 +245,7 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -238,6 +261,7 @@ func TestQUICOSSH(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -256,6 +280,7 @@ func TestMarionetteOSSH(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -271,6 +296,7 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			omitAuthorization:    true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -286,6 +312,7 @@ func TestHotReload(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -301,6 +328,7 @@ func TestDefaultSessionID(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -316,6 +344,7 @@ func TestDenyTrafficRules(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -331,6 +360,7 @@ func TestOmitAuthorization(t *testing.T) {
 			omitAuthorization:    true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -346,6 +376,7 @@ func TestNoAuthorization(t *testing.T) {
 			omitAuthorization:    true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -361,6 +392,7 @@ func TestUnusedAuthorization(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -376,6 +408,7 @@ func TestTCPOnlySLOK(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: false,
+			forceFragmenting:     false,
 		})
 }
 
@@ -391,6 +424,7 @@ func TestUDPOnlySLOK(t *testing.T) {
 			omitAuthorization:    false,
 			doTunneledWebRequest: false,
 			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
 		})
 }
 
@@ -405,6 +439,7 @@ type runServerConfig struct {
 	omitAuthorization    bool
 	doTunneledWebRequest bool
 	doTunneledNTPRequest bool
+	forceFragmenting     bool
 }
 
 func runServer(t *testing.T, runConfig *runServerConfig) {
@@ -438,7 +473,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// succeed, overriding the nonfunctional values, for the tunnel to
 	// establish.
 
-	doTactics := protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol)
+	doClientTactics := protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol)
+	doServerTactics := doClientTactics || runConfig.forceFragmenting
 
 	// All servers require a tactics config with valid keys.
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err :=
@@ -468,7 +504,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		generateConfigParams.MarionetteFormat = "http_simple_nonblocking"
 	}
 
-	if doTactics {
+	if doServerTactics {
 		generateConfigParams.TacticsRequestPublicKey = tacticsRequestPublicKey
 		generateConfigParams.TacticsRequestObfuscatedKey = tacticsRequestObfuscatedKey
 	}
@@ -501,7 +537,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// Only pave the tactics config when tactics are required. This exercises the
 	// case where the tactics config is omitted.
-	if doTactics {
+	if doServerTactics {
 		tacticsConfigFilename = filepath.Join(testDataDirName, "tactics_config.json")
 		paveTacticsConfigFile(
 			t, tacticsConfigFilename,
@@ -516,7 +552,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig["PsinetDatabaseFilename"] = psinetFilename
 	serverConfig["TrafficRulesFilename"] = trafficRulesFilename
 	serverConfig["OSLConfigFilename"] = oslConfigFilename
-	if doTactics {
+	if doServerTactics {
 		serverConfig["TacticsConfigFilename"] = tacticsConfigFilename
 	}
 	serverConfig["LogFilename"] = filepath.Join(testDataDirName, "psiphond.log")
@@ -567,7 +603,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}()
 
-	// TODO: monitor logs for more robust wait-until-loaded
+	// TODO: monitor logs for more robust wait-until-loaded. For example,
+	// especially with the race detector on, QUIC-OSSH tests can fail as the
+	// client sends its initial pacjet before the server is ready.
 	time.Sleep(1 * time.Second)
 
 	// Test: hot reload (of psinet and traffic rules)
@@ -607,7 +645,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	localHTTPProxyPort := 8081
 
 	jsonNetworkID := ""
-	if doTactics {
+	if doClientTactics {
 		// Use a distinct prefix for network ID for each test run to
 		// ensure tactics from different runs don't apply; this is
 		// a workaround for the singleton datastore.
@@ -660,13 +698,32 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("error committing configuration file: %s", err)
 	}
 
-	if doTactics {
+	if doClientTactics {
 		// Configure nonfunctional values that must be overridden by tactics.
 
 		applyParameters := make(map[string]interface{})
 
 		applyParameters[parameters.TunnelConnectTimeout] = "1s"
 		applyParameters[parameters.TunnelRateLimits] = common.RateLimits{WriteBytesPerSecond: 1}
+
+		err = clientConfig.SetClientParameters("", true, applyParameters)
+		if err != nil {
+			t.Fatalf("SetClientParameters failed: %s", err)
+		}
+
+	} else if runConfig.forceFragmenting {
+		// Directly apply same parameters that would've come from tactics.
+
+		applyParameters := make(map[string]interface{})
+
+		applyParameters[parameters.FragmentorLimitProtocols] = protocol.TunnelProtocols{runConfig.tunnelProtocol}
+		applyParameters[parameters.FragmentorProbability] = 1.0
+		applyParameters[parameters.FragmentorMinTotalBytes] = 1000
+		applyParameters[parameters.FragmentorMaxTotalBytes] = 2000
+		applyParameters[parameters.FragmentorMinWriteBytes] = 1
+		applyParameters[parameters.FragmentorMaxWriteBytes] = 100
+		applyParameters[parameters.FragmentorMinDelay] = 1 * time.Millisecond
+		applyParameters[parameters.FragmentorMaxDelay] = 10 * time.Millisecond
 
 		err = clientConfig.SetClientParameters("", true, applyParameters)
 		if err != nil {
@@ -1270,7 +1327,23 @@ func paveTacticsConfigFile(
         "TTL" : "60s",
         "Probability" : 1.0,
         "Parameters" : {
-          "LimitTunnelProtocols" : ["%s"]
+          "LimitTunnelProtocols" : ["%s"],
+          "FragmentorLimitProtocols" : ["%s"],
+          "FragmentorProbability" : 1.0,
+          "FragmentorMinTotalBytes" : 1000,
+          "FragmentorMaxTotalBytes" : 2000,
+          "FragmentorMinWriteBytes" : 1,
+          "FragmentorMaxWriteBytes" : 100,
+          "FragmentorMinDelay" : "1ms",
+          "FragmentorMaxDelay" : "10ms",
+          "FragmentorDownstreamLimitProtocols" : ["%s"],
+          "FragmentorDownstreamProbability" : 1.0,
+          "FragmentorDownstreamMinTotalBytes" : 1000,
+          "FragmentorDownstreamMaxTotalBytes" : 2000,
+          "FragmentorDownstreamMinWriteBytes" : 1,
+          "FragmentorDownstreamMaxWriteBytes" : 100,
+          "FragmentorDownstreamMinDelay" : "1ms",
+          "FragmentorDownstreamMaxDelay" : "10ms"
         }
       },
       "FilteredTactics" : [
@@ -1296,6 +1369,8 @@ func paveTacticsConfigFile(
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
 		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
+		tunnelProtocol,
+		tunnelProtocol,
 		tunnelProtocol,
 		propagationChannelID)
 

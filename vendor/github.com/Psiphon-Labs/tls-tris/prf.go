@@ -117,6 +117,7 @@ var masterSecretLabel = []byte("master secret")
 var keyExpansionLabel = []byte("key expansion")
 var clientFinishedLabel = []byte("client finished")
 var serverFinishedLabel = []byte("server finished")
+var extendedMasterSecretLabel = []byte("extended master secret")
 
 func prfAndHashForVersion(version uint16, suite *cipherSuite) (func(result, secret, label, seed []byte), crypto.Hash) {
 	switch version {
@@ -141,14 +142,21 @@ func prfForVersion(version uint16, suite *cipherSuite) func(result, secret, labe
 
 // masterFromPreMasterSecret generates the master secret from the pre-master
 // secret. See http://tools.ietf.org/html/rfc5246#section-8.1
-func masterFromPreMasterSecret(version uint16, suite *cipherSuite, preMasterSecret, clientRandom, serverRandom []byte) []byte {
-	seed := make([]byte, 0, len(clientRandom)+len(serverRandom))
-	seed = append(seed, clientRandom...)
-	seed = append(seed, serverRandom...)
+func masterFromPreMasterSecret(version uint16, suite *cipherSuite, preMasterSecret, clientRandom, serverRandom []byte, fin finishedHash, ems bool) []byte {
+	if ems {
+		session_hash := fin.Sum()
+		masterSecret := make([]byte, masterSecretLength)
+		prfForVersion(version, suite)(masterSecret, preMasterSecret, extendedMasterSecretLabel, session_hash)
+		return masterSecret
+	} else {
+		seed := make([]byte, 0, len(clientRandom)+len(serverRandom))
+		seed = append(seed, clientRandom...)
+		seed = append(seed, serverRandom...)
 
-	masterSecret := make([]byte, masterSecretLength)
-	prfForVersion(version, suite)(masterSecret, preMasterSecret, masterSecretLabel, seed)
-	return masterSecret
+		masterSecret := make([]byte, masterSecretLength)
+		prfForVersion(version, suite)(masterSecret, preMasterSecret, masterSecretLabel, seed)
+		return masterSecret
+	}
 }
 
 // keysFromMasterSecret generates the connection keys from the master

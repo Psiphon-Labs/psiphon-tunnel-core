@@ -38,11 +38,11 @@ const (
 	SSH_PADDING_MULTIPLE       = 16  // Default cipher block size
 )
 
-// ObfuscatedSshConn wraps a Conn and applies the obfuscated SSH protocol
+// ObfuscatedSSHConn wraps a Conn and applies the obfuscated SSH protocol
 // to the traffic on the connection:
 // https://github.com/brl/obfuscated-openssh/blob/master/README.obfuscation
 //
-// ObfuscatedSshConn is used to add obfuscation to golang's stock ssh
+// ObfuscatedSSHConn is used to add obfuscation to golang's stock "ssh"
 // client and server without modification to that standard library code.
 // The underlying connection must be used for SSH traffic. This code
 // injects the obfuscated seed message, applies obfuscated stream cipher
@@ -54,28 +54,29 @@ const (
 // no synchronization of access to the read/writeBuffers, so concurrent
 // calls to one of Read or Write will result in undefined behavior.
 //
-type ObfuscatedSshConn struct {
+type ObfuscatedSSHConn struct {
 	net.Conn
-	mode            ObfuscatedSshConnMode
+	mode            ObfuscatedSSHConnMode
 	obfuscator      *Obfuscator
 	readDeobfuscate func([]byte)
 	writeObfuscate  func([]byte)
-	readState       ObfuscatedSshReadState
-	writeState      ObfuscatedSshWriteState
+	readState       ObfuscatedSSHReadState
+	writeState      ObfuscatedSSHWriteState
 	readBuffer      *bytes.Buffer
 	writeBuffer     *bytes.Buffer
 	transformBuffer *bytes.Buffer
 	legacyPadding   bool
+	paddingLength   int
 }
 
-type ObfuscatedSshConnMode int
+type ObfuscatedSSHConnMode int
 
 const (
 	OBFUSCATION_CONN_MODE_CLIENT = iota
 	OBFUSCATION_CONN_MODE_SERVER
 )
 
-type ObfuscatedSshReadState int
+type ObfuscatedSSHReadState int
 
 const (
 	OBFUSCATION_READ_STATE_IDENTIFICATION_LINES = iota
@@ -84,7 +85,7 @@ const (
 	OBFUSCATION_READ_STATE_FINISHED
 )
 
-type ObfuscatedSshWriteState int
+type ObfuscatedSSHWriteState int
 
 const (
 	OBFUSCATION_WRITE_STATE_CLIENT_SEND_SEED_MESSAGE = iota
@@ -94,28 +95,27 @@ const (
 	OBFUSCATION_WRITE_STATE_FINISHED
 )
 
-// NewObfuscatedSshConn creates a new ObfuscatedSshConn.
+// NewObfuscatedSSHConn creates a new ObfuscatedSSHConn.
 // The underlying conn must be used for SSH traffic and must have
 // transferred no traffic.
 //
-// In client mode, NewObfuscatedSshConn does not block or initiate network
+// In client mode, NewObfuscatedSSHConn does not block or initiate network
 // I/O. The obfuscation seed message is sent when Write() is first called.
 //
-// In server mode, NewObfuscatedSshConn cannot completely initialize itself
+// In server mode, NewObfuscatedSSHConn cannot completely initialize itself
 // without the seed message from the client to derive obfuscation keys. So
-// NewObfuscatedSshConn blocks on reading the client seed message from the
+// NewObfuscatedSSHConn blocks on reading the client seed message from the
 // underlying conn.
-//
-func NewObfuscatedSshConn(
-	mode ObfuscatedSshConnMode,
+func NewObfuscatedSSHConn(
+	mode ObfuscatedSSHConnMode,
 	conn net.Conn,
 	obfuscationKeyword string,
-	minPadding, maxPadding *int) (*ObfuscatedSshConn, error) {
+	minPadding, maxPadding *int) (*ObfuscatedSSHConn, error) {
 
 	var err error
 	var obfuscator *Obfuscator
 	var readDeobfuscate, writeObfuscate func([]byte)
-	var writeState ObfuscatedSshWriteState
+	var writeState ObfuscatedSSHWriteState
 
 	if mode == OBFUSCATION_CONN_MODE_CLIENT {
 		obfuscator, err = NewClientObfuscator(
@@ -143,7 +143,7 @@ func NewObfuscatedSshConn(
 		writeState = OBFUSCATION_WRITE_STATE_SERVER_SEND_IDENTIFICATION_LINE_PADDING
 	}
 
-	return &ObfuscatedSshConn{
+	return &ObfuscatedSSHConn{
 		Conn:            conn,
 		mode:            mode,
 		obfuscator:      obfuscator,
@@ -154,12 +154,29 @@ func NewObfuscatedSshConn(
 		readBuffer:      new(bytes.Buffer),
 		writeBuffer:     new(bytes.Buffer),
 		transformBuffer: new(bytes.Buffer),
+		paddingLength:   -1,
 	}, nil
+}
+
+// GetMetrics implements the common.MetricsSource interface.
+func (conn *ObfuscatedSSHConn) GetMetrics() common.LogFields {
+	logFields := make(common.LogFields)
+	if conn.mode == OBFUSCATION_CONN_MODE_CLIENT {
+		paddingLength := conn.obfuscator.GetPaddingLength()
+		if paddingLength != -1 {
+			logFields["upstream_ossh_padding"] = paddingLength
+		}
+	} else {
+		if conn.paddingLength != -1 {
+			logFields["downstream_ossh_padding"] = conn.paddingLength
+		}
+	}
+	return logFields
 }
 
 // Read wraps standard Read, transparently applying the obfuscation
 // transformations.
-func (conn *ObfuscatedSshConn) Read(buffer []byte) (int, error) {
+func (conn *ObfuscatedSSHConn) Read(buffer []byte) (int, error) {
 	if conn.readState == OBFUSCATION_READ_STATE_FINISHED {
 		return conn.Conn.Read(buffer)
 	}
@@ -172,7 +189,7 @@ func (conn *ObfuscatedSshConn) Read(buffer []byte) (int, error) {
 
 // Write wraps standard Write, transparently applying the obfuscation
 // transformations.
-func (conn *ObfuscatedSshConn) Write(buffer []byte) (int, error) {
+func (conn *ObfuscatedSSHConn) Write(buffer []byte) (int, error) {
 	if conn.writeState == OBFUSCATION_WRITE_STATE_FINISHED {
 		return conn.Conn.Write(buffer)
 	}
@@ -224,7 +241,7 @@ func (conn *ObfuscatedSshConn) Write(buffer []byte) (int, error) {
 // State OBFUSCATION_READ_STATE_FLUSH: after SSH_MSG_NEWKEYS, no more
 // packets are read by this function, but bytes from the SSH_MSG_NEWKEYS
 // packet may need to be buffered due to partial reading.
-func (conn *ObfuscatedSshConn) readAndTransform(buffer []byte) (int, error) {
+func (conn *ObfuscatedSSHConn) readAndTransform(buffer []byte) (int, error) {
 
 	nextState := conn.readState
 
@@ -233,7 +250,7 @@ func (conn *ObfuscatedSshConn) readAndTransform(buffer []byte) (int, error) {
 		// TODO: only client should accept multiple lines?
 		if conn.readBuffer.Len() == 0 {
 			for {
-				err := readSshIdentificationLine(
+				err := readSSHIdentificationLine(
 					conn.Conn, conn.readDeobfuscate, conn.readBuffer)
 				if err != nil {
 					return 0, common.ContextError(err)
@@ -252,7 +269,7 @@ func (conn *ObfuscatedSshConn) readAndTransform(buffer []byte) (int, error) {
 
 	case OBFUSCATION_READ_STATE_KEX_PACKETS:
 		if conn.readBuffer.Len() == 0 {
-			isMsgNewKeys, err := readSshPacket(
+			isMsgNewKeys, err := readSSHPacket(
 				conn.Conn, conn.readDeobfuscate, conn.readBuffer)
 			if err != nil {
 				return 0, common.ContextError(err)
@@ -306,7 +323,7 @@ func (conn *ObfuscatedSshConn) readAndTransform(buffer []byte) (int, error) {
 // will ignore (http://tools.ietf.org/html/rfc4253#section-4.2).
 //
 // State OBFUSCATION_WRITE_STATE_IDENTIFICATION_LINE: before
-// packets are sent, the ssh peer sends an identification line terminated by CRLF:
+// packets are sent, the SSH peer sends an identification line terminated by CRLF:
 // http://www.ietf.org/rfc/rfc4253.txt sec 4.2.
 // In this state, the CRLF terminator is used to parse message boundaries.
 //
@@ -326,7 +343,7 @@ func (conn *ObfuscatedSshConn) readAndTransform(buffer []byte) (int, error) {
 // padding during the KEX phase as a partial defense against traffic analysis.
 // (The transformer can do this since only the payload and not the padding of
 // these packets is authenticated in the "exchange hash").
-func (conn *ObfuscatedSshConn) transformAndWrite(buffer []byte) error {
+func (conn *ObfuscatedSSHConn) transformAndWrite(buffer []byte) error {
 
 	// The seed message (client) and identification line padding (server)
 	// are injected before any standard SSH traffic.
@@ -341,6 +358,7 @@ func (conn *ObfuscatedSshConn) transformAndWrite(buffer []byte) error {
 		if err != nil {
 			return common.ContextError(err)
 		}
+		conn.paddingLength = len(padding)
 		conn.writeObfuscate(padding)
 		_, err = conn.Conn.Write(padding)
 		if err != nil {
@@ -359,14 +377,14 @@ func (conn *ObfuscatedSshConn) transformAndWrite(buffer []byte) error {
 
 	switch conn.writeState {
 	case OBFUSCATION_WRITE_STATE_IDENTIFICATION_LINE:
-		hasIdentificationLine := extractSshIdentificationLine(
+		hasIdentificationLine := extractSSHIdentificationLine(
 			conn.writeBuffer, conn.transformBuffer)
 		if hasIdentificationLine {
 			conn.writeState = OBFUSCATION_WRITE_STATE_KEX_PACKETS
 		}
 
 	case OBFUSCATION_WRITE_STATE_KEX_PACKETS:
-		hasMsgNewKeys, err := extractSshPackets(
+		hasMsgNewKeys, err := extractSSHPackets(
 			conn.legacyPadding, conn.writeBuffer, conn.transformBuffer)
 		if err != nil {
 			return common.ContextError(err)
@@ -403,7 +421,7 @@ func (conn *ObfuscatedSshConn) transformAndWrite(buffer []byte) error {
 	return nil
 }
 
-func readSshIdentificationLine(
+func readSSHIdentificationLine(
 	conn net.Conn,
 	deobfuscate func([]byte),
 	readBuffer *bytes.Buffer) error {
@@ -430,7 +448,7 @@ func readSshIdentificationLine(
 	return nil
 }
 
-func readSshPacket(
+func readSSHPacket(
 	conn net.Conn,
 	deobfuscate func([]byte),
 	readBuffer *bytes.Buffer) (bool, error) {
@@ -449,7 +467,7 @@ func readSshPacket(
 	prefix := readBuffer.Bytes()[prefixOffset : prefixOffset+SSH_PACKET_PREFIX_LENGTH]
 	deobfuscate(prefix)
 
-	_, _, payloadLength, messageLength, err := getSshPacketPrefix(prefix)
+	_, _, payloadLength, messageLength, err := getSSHPacketPrefix(prefix)
 	if err != nil {
 		return false, common.ContextError(err)
 	}
@@ -480,11 +498,13 @@ func readSshPacket(
 // From the original patch to sshd.c:
 // https://bitbucket.org/psiphon/psiphon-circumvention-system/commits/f40865ce624b680be840dc2432283c8137bd896d
 func makeServerIdentificationLinePadding() ([]byte, error) {
+
 	paddingLength, err := common.MakeSecureRandomInt(OBFUSCATE_MAX_PADDING - 2) // 2 = CRLF
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 	paddingLength += 2
+
 	padding := make([]byte, paddingLength)
 
 	// For backwards compatibility with some clients, send no more than 512 characters
@@ -513,7 +533,7 @@ func makeServerIdentificationLinePadding() ([]byte, error) {
 	return padding, nil
 }
 
-func extractSshIdentificationLine(writeBuffer, transformBuffer *bytes.Buffer) bool {
+func extractSSHIdentificationLine(writeBuffer, transformBuffer *bytes.Buffer) bool {
 	index := bytes.Index(writeBuffer.Bytes(), []byte("\r\n"))
 	if index != -1 {
 		lineLength := index + 2 // + 2 for \r\n
@@ -523,13 +543,13 @@ func extractSshIdentificationLine(writeBuffer, transformBuffer *bytes.Buffer) bo
 	return false
 }
 
-func extractSshPackets(
+func extractSSHPackets(
 	legacyPadding bool, writeBuffer, transformBuffer *bytes.Buffer) (bool, error) {
 
 	hasMsgNewKeys := false
 	for writeBuffer.Len() >= SSH_PACKET_PREFIX_LENGTH {
 
-		packetLength, paddingLength, payloadLength, messageLength, err := getSshPacketPrefix(
+		packetLength, paddingLength, payloadLength, messageLength, err := getSSHPacketPrefix(
 			writeBuffer.Bytes()[:SSH_PACKET_PREFIX_LENGTH])
 		if err != nil {
 			return false, common.ContextError(err)
@@ -593,7 +613,7 @@ func extractSshPackets(
 			return false, common.ContextError(err)
 		}
 
-		setSshPacketPrefix(
+		setSSHPacketPrefix(
 			transformedPacket,
 			packetLength+extraPaddingLength,
 			paddingLength+extraPaddingLength)
@@ -604,12 +624,12 @@ func extractSshPackets(
 	return hasMsgNewKeys, nil
 }
 
-func getSshPacketPrefix(buffer []byte) (int, int, int, int, error) {
+func getSSHPacketPrefix(buffer []byte) (int, int, int, int, error) {
 
 	packetLength := int(binary.BigEndian.Uint32(buffer[0 : SSH_PACKET_PREFIX_LENGTH-1]))
 
 	if packetLength < 1 || packetLength > SSH_MAX_PACKET_LENGTH {
-		return 0, 0, 0, 0, common.ContextError(errors.New("invalid ssh packet length"))
+		return 0, 0, 0, 0, common.ContextError(errors.New("invalid SSH packet length"))
 	}
 
 	paddingLength := int(buffer[SSH_PACKET_PREFIX_LENGTH-1])
@@ -619,7 +639,7 @@ func getSshPacketPrefix(buffer []byte) (int, int, int, int, error) {
 	return packetLength, paddingLength, payloadLength, messageLength, nil
 }
 
-func setSshPacketPrefix(buffer []byte, packetLength, paddingLength int) {
+func setSSHPacketPrefix(buffer []byte, packetLength, paddingLength int) {
 	binary.BigEndian.PutUint32(buffer, uint32(packetLength))
 	buffer[SSH_PACKET_PREFIX_LENGTH-1] = byte(paddingLength)
 }

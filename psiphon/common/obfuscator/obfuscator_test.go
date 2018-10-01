@@ -113,7 +113,7 @@ func TestObfuscatedSSHConn(t *testing.T) {
 		conn, err := listener.Accept()
 
 		if err == nil {
-			conn, err = NewObfuscatedSshConn(
+			conn, err = NewObfuscatedSSHConn(
 				OBFUSCATION_CONN_MODE_SERVER, conn, keyword, nil, nil)
 		}
 
@@ -139,7 +139,7 @@ func TestObfuscatedSSHConn(t *testing.T) {
 		conn, err := net.DialTimeout("tcp", serverAddress, 5*time.Second)
 
 		if err == nil {
-			conn, err = NewObfuscatedSshConn(
+			conn, err = NewObfuscatedSSHConn(
 				OBFUSCATION_CONN_MODE_CLIENT, conn, keyword, nil, nil)
 		}
 

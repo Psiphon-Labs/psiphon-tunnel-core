@@ -58,6 +58,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"errors"
+	"io/ioutil"
 	"net"
 	"time"
 
@@ -263,13 +264,6 @@ func CustomTLSDial(
 	network, addr string,
 	config *CustomTLSConfig) (net.Conn, error) {
 
-	if !config.SkipVerify &&
-		config.VerifyLegacyCertificate == nil &&
-		config.TrustedCACertificatesFilename != "" {
-		return nil, common.ContextError(
-			errors.New("TrustedCACertificatesFilename not supported"))
-	}
-
 	dialAddr := addr
 	if config.DialAddr != "" {
 		dialAddr = config.DialAddr
@@ -330,6 +324,20 @@ func CustomTLSDial(
 		copy(obfuscatedSessionTicketKey[:], key)
 	}
 
+	var tlsRootCAs *x509.CertPool
+
+	if !config.SkipVerify &&
+		config.VerifyLegacyCertificate == nil &&
+		config.TrustedCACertificatesFilename != "" {
+
+		tlsRootCAs = x509.NewCertPool()
+		certData, err := ioutil.ReadFile(config.TrustedCACertificatesFilename)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+		tlsRootCAs.AppendCertsFromPEM(certData)
+	}
+
 	// Depending on the selected TLS profile, the TLS provider will be tris
 	// (TLS 1.3) or utls (all other profiles).
 
@@ -343,6 +351,7 @@ func CustomTLSDial(
 		}
 
 		tlsConfig := &utls.Config{
+			RootCAs:            tlsRootCAs,
 			InsecureSkipVerify: tlsConfigInsecureSkipVerify,
 			ServerName:         tlsConfigServerName,
 			ClientSessionCache: clientSessionCache,
@@ -377,9 +386,11 @@ func CustomTLSDial(
 		}
 
 		tlsConfig := &tris.Config{
-			InsecureSkipVerify: tlsConfigInsecureSkipVerify,
-			ServerName:         tlsConfigServerName,
-			ClientSessionCache: clientSessionCache,
+			RootCAs:                 tlsRootCAs,
+			InsecureSkipVerify:      tlsConfigInsecureSkipVerify,
+			ServerName:              tlsConfigServerName,
+			ClientSessionCache:      clientSessionCache,
+			UseExtendedMasterSecret: true,
 		}
 
 		conn = &trisConn{

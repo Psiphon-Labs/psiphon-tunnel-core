@@ -170,6 +170,7 @@ import (
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
@@ -232,9 +233,9 @@ type Server struct {
 	// RequestObfuscatedKey is the tactics request obfuscation key.
 	RequestObfuscatedKey []byte
 
-	// EnforceServerSide enables server-side enforcement of certain tactics
-	// parameters via Listeners.
-	EnforceServerSide bool
+	// EnforceLimitsServerSide enables server-side enforcement of certain limit
+	// tactics parameters via Listeners.
+	EnforceLimitsServerSide bool
 
 	// DefaultTactics is the baseline tactics for all clients. It must include a
 	// TTL and Probability.
@@ -455,7 +456,7 @@ func NewServer(
 			server.RequestPublicKey = newServer.RequestPublicKey
 			server.RequestPrivateKey = newServer.RequestPrivateKey
 			server.RequestObfuscatedKey = newServer.RequestObfuscatedKey
-			server.EnforceServerSide = newServer.EnforceServerSide
+			server.EnforceLimitsServerSide = newServer.EnforceLimitsServerSide
 			server.DefaultTactics = newServer.DefaultTactics
 			server.FilteredTactics = newServer.FilteredTactics
 
@@ -616,7 +617,10 @@ func (server *Server) GetTacticsPayload(
 	geoIPData common.GeoIPData,
 	apiParams common.APIParameters) (*Payload, error) {
 
-	tactics, err := server.getTactics(geoIPData, apiParams)
+	// includeServerSideOnly is false: server-side only parameters are not
+	// used by the client, so including them wastes space and unnecessarily
+	// exposes the values.
+	tactics, err := server.getTactics(false, geoIPData, apiParams)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -667,6 +671,7 @@ func (server *Server) GetTacticsPayload(
 }
 
 func (server *Server) getTactics(
+	includeServerSideOnly bool,
 	geoIPData common.GeoIPData,
 	apiParams common.APIParameters) (*Tactics, error) {
 
@@ -678,7 +683,7 @@ func (server *Server) getTactics(
 		return nil, nil
 	}
 
-	tactics := server.DefaultTactics.clone()
+	tactics := server.DefaultTactics.clone(includeServerSideOnly)
 
 	var aggregatedValues map[string]int
 
@@ -760,7 +765,7 @@ func (server *Server) getTactics(
 			}
 		}
 
-		tactics.merge(&filteredTactics.Tactics)
+		tactics.merge(includeServerSideOnly, &filteredTactics.Tactics)
 
 		// Continue to apply more matches. Last matching tactics has priority for any field.
 	}
@@ -881,7 +886,7 @@ func medianSampleRTTMilliseconds(samples []SpeedTestSample) int {
 	return (samples[mid-1].RTTMilliseconds + samples[mid].RTTMilliseconds) / 2
 }
 
-func (t *Tactics) clone() *Tactics {
+func (t *Tactics) clone(includeServerSideOnly bool) *Tactics {
 
 	u := &Tactics{
 		TTL:         t.TTL,
@@ -894,14 +899,16 @@ func (t *Tactics) clone() *Tactics {
 	if t.Parameters != nil {
 		u.Parameters = make(map[string]interface{})
 		for k, v := range t.Parameters {
-			u.Parameters[k] = v
+			if !parameters.IsServerSideOnly(k) {
+				u.Parameters[k] = v
+			}
 		}
 	}
 
 	return u
 }
 
-func (t *Tactics) merge(u *Tactics) {
+func (t *Tactics) merge(includeServerSideOnly bool, u *Tactics) {
 
 	if u.TTL != "" {
 		t.TTL = u.TTL
@@ -919,7 +926,9 @@ func (t *Tactics) merge(u *Tactics) {
 			t.Parameters = make(map[string]interface{})
 		}
 		for k, v := range u.Parameters {
-			t.Parameters[k] = v
+			if !parameters.IsServerSideOnly(k) {
+				t.Parameters[k] = v
+			}
 		}
 	}
 }
@@ -1060,7 +1069,7 @@ func (server *Server) handleTacticsRequest(
 	server.logger.LogMetric(TACTICS_METRIC_EVENT_NAME, logFields)
 }
 
-// Listener wraps a net.Listener and applies server-side enforcement of
+// Listener wraps a net.Listener and applies server-side implementation of
 // certain tactics parameters to accepted connections. Tactics filtering is
 // limited to GeoIP attributes as the client has not yet sent API paramaters.
 type Listener struct {
@@ -1085,12 +1094,15 @@ func NewListener(
 	}
 }
 
-// Close calls the underlying listener's Accept, and then
-// checks if tactics for the connection set LimitTunnelProtocols.
-// If LimitTunnelProtocols is set and does not include the
-// tunnel protocol the listener is running, the accepted
-// connection is immediately closed and the underlying
-// Accept is called again.
+// Accept calls the underlying listener's Accept, and then checks if tactics
+// for the connection set LimitTunnelProtocols.
+//
+// If LimitTunnelProtocols is set and does not include the tunnel protocol the
+// listener is running, the accepted connection is immediately closed and the
+// underlying Accept is called again.
+//
+// For retained connections, fragmentation is applied when specified by
+// tactics.
 func (listener *Listener) Accept() (net.Conn, error) {
 	for {
 
@@ -1100,13 +1112,9 @@ func (listener *Listener) Accept() (net.Conn, error) {
 			return nil, err
 		}
 
-		if !listener.server.EnforceServerSide {
-			return conn, nil
-		}
-
 		geoIPData := listener.geoIPLookup(common.IPAddressFromAddr(conn.RemoteAddr()))
 
-		tactics, err := listener.server.getTactics(geoIPData, make(common.APIParameters))
+		tactics, err := listener.server.getTactics(true, geoIPData, make(common.APIParameters))
 		if err != nil {
 			listener.server.logger.WithContextFields(
 				common.LogFields{"error": err}).Warning("failed to get tactics for connection")
@@ -1120,30 +1128,55 @@ func (listener *Listener) Accept() (net.Conn, error) {
 			return conn, nil
 		}
 
-		limitTunnelProtocolsParameter, ok := tactics.Parameters[parameters.LimitTunnelProtocols]
-		if !ok {
-			// The tactics for the connection don't set LimitTunnelProtocols.
-			return conn, nil
-		}
-
 		if !common.FlipWeightedCoin(tactics.Probability) {
 			// Skip tactics with the configured probability.
 			return conn, nil
 		}
 
-		limitTunnelProtocols, ok := common.GetStringSlice(limitTunnelProtocolsParameter)
-		if !ok ||
-			len(limitTunnelProtocols) == 0 ||
-			common.Contains(limitTunnelProtocols, listener.tunnelProtocol) {
-
-			// The parameter is invalid; or no limit is set; or the
-			// listener protocol is not prohibited.
+		clientParameters, err := parameters.NewClientParameters(nil)
+		if err != nil {
 			return conn, nil
 		}
 
-		// Don't accept this connection as its tactics prohibits the
-		// listener's tunnel protocol.
-		conn.Close()
+		_, err = clientParameters.Set("", false, tactics.Parameters)
+		if err != nil {
+			return conn, nil
+		}
+
+		p := clientParameters.Get()
+
+		if listener.server.EnforceLimitsServerSide {
+			tunnelProtocols := p.TunnelProtocols(parameters.LimitTunnelProtocols)
+			if len(tunnelProtocols) > 0 &&
+				!common.Contains(tunnelProtocols, listener.tunnelProtocol) {
+				// Don't accept this connection as its tactics prohibits the
+				// listener's tunnel protocol.
+				conn.Close()
+				continue
+			}
+		}
+
+		// Wrap the conn in a fragmentor.Conn, subject to tactics parameters.
+		//
+		// Limitation: this server-side fragmentation is not synchronized with
+		// client-side; where client-side will make a single coin flip to fragment
+		// or not fragment all TCP connections for a one meek session, the server
+		// will make a coin flip per connection.
+
+		fragmentorConfig := fragmentor.NewDownstreamConfig(
+			p, listener.tunnelProtocol)
+
+		if fragmentorConfig.IsFragmenting() {
+			conn = fragmentor.NewConn(
+				fragmentorConfig,
+				func(message string) {
+					listener.server.logger.WithContextFields(
+						common.LogFields{"message": message}).Debug("Fragmentor")
+				},
+				conn)
+		}
+
+		return conn, nil
 	}
 }
 

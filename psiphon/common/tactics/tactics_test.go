@@ -49,7 +49,7 @@ func TestTactics(t *testing.T) {
       "RequestPublicKey" : "%s",
       "RequestPrivateKey" : "%s",
       "RequestObfuscatedKey" : "%s",
-      "EnforceServerSide" : true,
+      "EnforceLimitsServerSide" : true,
       "DefaultTactics" : {
         "TTL" : "1s",
         "Probability" : %0.1f,
