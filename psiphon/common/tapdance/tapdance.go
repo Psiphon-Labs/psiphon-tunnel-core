@@ -272,7 +272,7 @@ func initAssets(dataDirectory string) error {
 
 		assetsDir := filepath.Join(dataDirectory, "tapdance")
 
-		err := os.MkdirAll(assetsDir, 0600)
+		err := os.MkdirAll(assetsDir, 0700)
 		if err != nil {
 			initErr = common.ContextError(err)
 			return
