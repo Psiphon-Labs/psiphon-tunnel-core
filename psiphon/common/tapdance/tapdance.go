@@ -279,7 +279,8 @@ func initAssets(dataDirectory string) error {
 		}
 
 		clientConfFileName := filepath.Join(assetsDir, "ClientConf")
-		if _, err = os.Stat(clientConfFileName); os.IsNotExist(err) {
+		_, err = os.Stat(clientConfFileName)
+		if err != nil && os.IsNotExist(err) {
 
 			// Default ClientConf from:
 			// https://github.com/sergeyfrolov/gotapdance/blob/089794326cf0b8a5d0e1f3cbb703ff3ee289f0ed/assets/ClientConf
@@ -291,10 +292,10 @@ func initAssets(dataDirectory string) error {
 				159, 222, 85, 61, 234, 76, 205, 179, 105, 171, 24, 153, 231, 12, 16, 90}
 
 			err = ioutil.WriteFile(clientConfFileName, clientConf, 0644)
-			if err != nil {
-				initErr = common.ContextError(err)
-				return
-			}
+		}
+		if err != nil {
+			initErr = common.ContextError(err)
+			return
 		}
 
 		refraction_networking_tapdance.AssetsSetDir(assetsDir)
