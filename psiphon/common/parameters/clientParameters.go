@@ -240,7 +240,7 @@ var defaultClientParameters = map[string]struct {
 	LimitTLSProfiles:            {value: protocol.TLSProfiles{}},
 
 	LimitQUICVersionsProbability: {value: 1.0, minimum: 0.0},
-	LimitQUICVersions:            {value: protocol.QUICVersions{protocol.QUIC_VERSION_GQUIC43}},
+	LimitQUICVersions:            {value: protocol.QUICVersions{}},
 
 	FragmentorProbability:              {value: 0.5, minimum: 0.0},
 	FragmentorLimitProtocols:           {value: protocol.TunnelProtocols{}},
