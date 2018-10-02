@@ -49,7 +49,7 @@ const (
 )
 
 func init() {
-	refraction_networking_tapdance.Logger().Out = ioutil.Discard
+	//refraction_networking_tapdance.Logger().Out = ioutil.Discard
 	refraction_networking_tapdance.EnableProxyProtocol()
 }
 
@@ -281,17 +281,7 @@ func initAssets(dataDirectory string) error {
 		clientConfFileName := filepath.Join(assetsDir, "ClientConf")
 		_, err = os.Stat(clientConfFileName)
 		if err != nil && os.IsNotExist(err) {
-
-			// Default ClientConf from:
-			// https://github.com/sergeyfrolov/gotapdance/blob/089794326cf0b8a5d0e1f3cbb703ff3ee289f0ed/assets/ClientConf
-			clientConf := []byte{
-				10, 33, 10, 31, 10, 24, 116, 97, 112, 100, 97, 110, 99, 101, 49, 46,
-				102, 114, 101, 101, 97, 101, 115, 107, 101, 121, 46, 120, 121, 122,
-				21, 104, 190, 122, 192, 16, 148, 145, 6, 26, 36, 10, 32, 81, 88, 104,
-				190, 127, 69, 171, 111, 49, 10, 254, 212, 178, 41, 183, 164, 121, 252,
-				159, 222, 85, 61, 234, 76, 205, 179, 105, 171, 24, 153, 231, 12, 16, 90}
-
-			err = ioutil.WriteFile(clientConfFileName, clientConf, 0644)
+			err = ioutil.WriteFile(clientConfFileName, getEmbeddedClientConf(), 0644)
 		}
 		if err != nil {
 			initErr = common.ContextError(err)
