@@ -899,7 +899,7 @@ func (t *Tactics) clone(includeServerSideOnly bool) *Tactics {
 	if t.Parameters != nil {
 		u.Parameters = make(map[string]interface{})
 		for k, v := range t.Parameters {
-			if !parameters.IsServerSideOnly(k) {
+			if includeServerSideOnly || !parameters.IsServerSideOnly(k) {
 				u.Parameters[k] = v
 			}
 		}
@@ -926,7 +926,7 @@ func (t *Tactics) merge(includeServerSideOnly bool, u *Tactics) {
 			t.Parameters = make(map[string]interface{})
 		}
 		for k, v := range u.Parameters {
-			if !parameters.IsServerSideOnly(k) {
+			if includeServerSideOnly || !parameters.IsServerSideOnly(k) {
 				t.Parameters[k] = v
 			}
 		}
