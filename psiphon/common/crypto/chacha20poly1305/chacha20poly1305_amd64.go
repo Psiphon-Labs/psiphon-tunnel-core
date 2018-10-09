@@ -9,7 +9,7 @@ package chacha20poly1305
 import (
 	"encoding/binary"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/subtle"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/internal/subtle"
 	"golang.org/x/sys/cpu"
 )
 

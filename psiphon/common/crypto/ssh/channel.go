@@ -482,8 +482,8 @@ func (ch *channel) handlePacket(packet []byte) error {
 		// - Use a smaller initial/max channel window size.
 		// - See comments above channelWindowSize definition.
 
-		//c.remoteWin.add(msg.MyWindow)
-		c.remoteWin.add(min(msg.MyWindow, getChannelWindowSize(c.chanType)))
+		//ch.remoteWin.add(msg.MyWindow)
+		ch.remoteWin.add(min(msg.MyWindow, getChannelWindowSize(ch.chanType)))
 
 		ch.msg <- msg
 	case *windowAdjustMsg:
