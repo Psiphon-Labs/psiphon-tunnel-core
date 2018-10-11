@@ -38,7 +38,7 @@ func TestFragmentor(t *testing.T) {
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("net.Listen failed: %s")
+		t.Fatalf("net.Listen failed: %s", err)
 	}
 
 	address := listener.Addr().String()
