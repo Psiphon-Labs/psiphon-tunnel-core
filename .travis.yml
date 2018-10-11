@@ -1,7 +1,7 @@
 language: go
 sudo: required
 go:
-- 1.9.6
+- 1.11.1
 addons:
   apt_packages:
     - libx11-dev

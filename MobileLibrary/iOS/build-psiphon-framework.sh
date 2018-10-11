@@ -5,7 +5,7 @@ set -e -u -x
 if [ -z ${1+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$1"; fi
 
 # Modify this value as we use newer Go versions.
-GO_VERSION_REQUIRED="1.9.6"
+GO_VERSION_REQUIRED="1.11.1"
 
 # Reset the PATH to macOS default. This is mainly so we don't execute the wrong
 # gomobile executable.
@@ -40,7 +40,7 @@ export PATH=${GOPATH}/bin:${PATH}
 # The GOPATH we're using is temporary, so make sure there isn't one from a previous run.
 rm -rf ${GOPATH}
 
-GOMOBILE_PINNED_REV=eb9032959f05f108b05721914dfe09cfa0c5131d
+GOMOBILE_PINNED_REV=92f3b9caf7ba8f4f9c10074225afcba0cba47a62
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
 TUNNEL_CORE_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core
