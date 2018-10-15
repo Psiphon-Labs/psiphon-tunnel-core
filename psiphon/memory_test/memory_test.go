@@ -148,7 +148,7 @@ func runMemoryTest(t *testing.T, testMode int) {
 	postActiveTunnelTerminateDelay := 250 * time.Millisecond
 	testDuration := 2 * time.Minute
 	memInspectionFrequency := 10 * time.Second
-	maxSysMemory := uint64(11 * 1024 * 1024)
+	maxInuseBytes := uint64(10 * 1024 * 1024)
 
 	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
@@ -229,12 +229,13 @@ test_loop:
 		case <-memInspectionTicker.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			if m.Sys > maxSysMemory {
-				t.Fatalf("sys memory exceeds limit: %d", m.Sys)
+			inuseBytes := m.HeapInuse + m.StackInuse + m.MSpanInuse + m.MCacheInuse
+			if inuseBytes > maxInuseBytes {
+				t.Fatalf("MemStats.*Inuse bytes exceeds limit: %d", inuseBytes)
 			} else {
 				n := atomic.LoadInt32(&tunnelsEstablished)
-				fmt.Printf("Tunnels established: %d, MemStats.Sys (peak system memory used): %s, MemStats.TotalAlloc (cumulative allocations): %s\n",
-					n, common.FormatByteCount(m.Sys), common.FormatByteCount(m.TotalAlloc))
+				fmt.Printf("Tunnels established: %d, MemStats.*InUse (peak memory in use): %s, MemStats.TotalAlloc (cumulative allocations): %s\n",
+					n, common.FormatByteCount(inuseBytes), common.FormatByteCount(m.TotalAlloc))
 				if lastTunnelsEstablished-n >= 0 {
 					t.Fatalf("expected established tunnels")
 				}
