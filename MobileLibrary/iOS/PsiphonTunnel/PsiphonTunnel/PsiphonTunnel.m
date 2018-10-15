@@ -324,13 +324,25 @@
  */
 - (BOOL)startIfNeeded {
     PsiphonConnectionState connState = [self getConnectionState];
-    BOOL localProxyAlive = [self isLocalProxyAlive];
 
     // We have found that on iOS, the local proxies will get killed before the
     // tunnel gets disconnected (or before it realizes it's dead). So we need to
     // start if we either in a disconnected state or if our local proxies are dead.
+    BOOL needRestart = NO;
+
+    // Check SOCKS proxy first
+    // Note that check is skipped if proxy is not running, i.e. proxy port == 0
+    NSInteger socksProxyPort = [self getLocalSocksProxyPort];
+    needRestart = (socksProxyPort != 0 && ![self isLocalProxyAliveAtPort:socksProxyPort]);
+
+    // If SOCKS proxy is alive or not running then perform the same check for HTTP proxy
+    if(!needRestart) {
+        NSInteger httpProxyPort = [self getLocalHttpProxyPort];
+        needRestart = (httpProxyPort != 0 && ![self isLocalProxyAliveAtPort:httpProxyPort]);
+    }
+
     if ((connState == PsiphonConnectionStateDisconnected) ||
-        (connState == PsiphonConnectionStateConnected && !localProxyAlive)) {
+        (connState == PsiphonConnectionStateConnected && needRestart)) {
         return [self start];
     }
 
@@ -1249,12 +1261,12 @@
 }
 
 /*!
- Checks if the local SOCKS proxy is responding. 
- NOTE: This must only be called when there's a valid SOCKS proxy port (i.e., when
+ Checks if the local proxy at a given port is responding.
+ NOTE: This must only be called when there's a valid SOCKS or HTTP proxy port (i.e., when
  we're in a connected state.)
  @return  TRUE if the local proxy is responding, FALSE otherwise.
  */
-- (BOOL)isLocalProxyAlive {
+- (BOOL)isLocalProxyAliveAtPort:(NSInteger)port {
     CFSocketRef sockfd;
     sockfd = CFSocketCreate(NULL, AF_INET, SOCK_STREAM, IPPROTO_TCP, 0, NULL, NULL);
     if (sockfd == NULL) {
@@ -1267,7 +1279,7 @@
     memset(&servaddr, 0, sizeof(servaddr));
     servaddr.sin_len = sizeof(servaddr);
     servaddr.sin_family = AF_INET;
-    servaddr.sin_port = htons([self getLocalSocksProxyPort]);
+    servaddr.sin_port = htons(port);
     inet_pton(AF_INET, [@"127.0.0.1" cStringUsingEncoding:NSUTF8StringEncoding], &servaddr.sin_addr);
 
     CFDataRef connectAddr = CFDataCreate(NULL, (unsigned char *)&servaddr, sizeof(servaddr));
