@@ -94,7 +94,7 @@ func Start(
 	psiphon.DoGarbageCollection()
 
 	// Wrap the provider in a layer that locks a mutex before calling a provider function.
-	// The the provider callbacks are Java/Obj-C via gomobile, they are cgo calls that
+	// As the provider callbacks are Java/Obj-C via gomobile, they are cgo calls that
 	// can cause OS threads to be spawned. The mutex prevents many calling goroutines from
 	// causing unbounded numbers of OS threads to be spawned.
 	// TODO: replace the mutex with a semaphore, to allow a larger but still bounded concurrent
