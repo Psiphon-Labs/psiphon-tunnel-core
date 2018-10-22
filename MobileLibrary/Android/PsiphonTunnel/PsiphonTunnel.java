@@ -194,6 +194,13 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         mClientPlatformSuffix.set(suffix);
     }
 
+    // Writes Go runtime profile information to a set of files in the specifiec output directory.
+    // cpuSampleDurationSeconds and blockSampleDurationSeconds determines how to long to wait and
+    // sample profiles that require active sampling. When set to 0, these profiles are skipped.
+    public void writeRuntimeProfiles(String outputDirectory, int cpuSampleDurationSeconnds, int blockSampleDurationSeconds) {
+        Psi.WriteRuntimeProfiles(outputDirectory, cpuSampleDurationSeconnds, blockSampleDurationSeconds);
+    }
+
     //----------------------------------------------------------------------------------------------
     // VPN Routing
     //----------------------------------------------------------------------------------------------
