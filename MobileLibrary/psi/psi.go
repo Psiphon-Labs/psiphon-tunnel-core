@@ -239,6 +239,19 @@ func GetPacketTunnelDNSResolverIPv6Address() string {
 	return tun.GetTransparentDNSResolverIPv6Address().String()
 }
 
+// WriteRuntimeProfiles writes Go runtime profile information to a set of
+// files in the specified output directory. See common.WriteRuntimeProfiles
+// for more details.
+//
+// If called before Start, log notices will emit to stderr.
+func WriteRuntimeProfiles(outputDirectory string, cpuSampleDurationSeconds, blockSampleDurationSeconds int) {
+	common.WriteRuntimeProfiles(
+		psiphon.NoticeCommonLogger(),
+		outputDirectory,
+		cpuSampleDurationSeconds,
+		blockSampleDurationSeconds)
+}
+
 // Helper function to store a list of server entries.
 // if embeddedServerEntryListFilename is not empty, embeddedServerEntryList will be ignored.
 func storeServerEntries(
