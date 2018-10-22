@@ -425,4 +425,14 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
  */
 + (NSString * _Nonnull)getBuildInfo;
 
+#pragma mark - Profiling utitlities
+
+/*!
+ Writes Go runtime profile information to a set of files in the specifiec output directory.
+ @param cpuSampleDurationSeconds determines how to long to wait and sample profiles that require active sampling. When set to 0, these profiles are skipped.
+ @param blockSampleDurationSeconds determines how to long to wait and sample profiles that require active sampling. When set to 0, these profiles are skipped.
+ Swift: @code func writeRuntimeProfilesTo(_ outputDirectory: String, withCPUSampleDurationSeconds cpuSampleDurationSecond: Int, withBlockSampleDurationSeconds blockSampleDurationSeconds: Int) @endcode
+ */
+- (void)writeRuntimeProfilesTo:(NSString * _Nonnull)outputDirectory withCPUSampleDurationSeconds:(int)cpuSampleDurationSeconds withBlockSampleDurationSeconds:(int)blockSampleDurationSeconds;
+
  @end
