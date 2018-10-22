@@ -31,6 +31,7 @@ import (
 	"os/signal"
 	"sort"
 	"sync"
+	"syscall"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -290,15 +291,30 @@ func main() {
 	systemStopSignal := make(chan os.Signal, 1)
 	signal.Notify(systemStopSignal, os.Interrupt, os.Kill)
 
+	writeProfilesSignal := make(chan os.Signal, 1)
+	signal.Notify(writeProfilesSignal, syscall.SIGUSR2)
+
 	// Wait for an OS signal or a Run stop signal, then stop Psiphon and exit
 
-	select {
-	case <-systemStopSignal:
-		psiphon.NoticeInfo("shutdown by system")
-		stopController()
-		controllerWaitGroup.Wait()
-	case <-controllerCtx.Done():
-		psiphon.NoticeInfo("shutdown by controller")
+	for exit := false; !exit; {
+		select {
+		case <-writeProfilesSignal:
+			psiphon.NoticeInfo("write profiles")
+			profileSampleDurationSeconds := 5
+			common.WriteRuntimeProfiles(
+				psiphon.NoticeCommonLogger(),
+				config.DataStoreDirectory,
+				profileSampleDurationSeconds,
+				profileSampleDurationSeconds)
+		case <-systemStopSignal:
+			psiphon.NoticeInfo("shutdown by system")
+			stopController()
+			controllerWaitGroup.Wait()
+			exit = true
+		case <-controllerCtx.Done():
+			psiphon.NoticeInfo("shutdown by controller")
+			exit = true
+		}
 	}
 }
 

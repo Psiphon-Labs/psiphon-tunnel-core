@@ -94,7 +94,7 @@ func Start(
 	psiphon.DoGarbageCollection()
 
 	// Wrap the provider in a layer that locks a mutex before calling a provider function.
-	// The the provider callbacks are Java/Obj-C via gomobile, they are cgo calls that
+	// As the provider callbacks are Java/Obj-C via gomobile, they are cgo calls that
 	// can cause OS threads to be spawned. The mutex prevents many calling goroutines from
 	// causing unbounded numbers of OS threads to be spawned.
 	// TODO: replace the mutex with a semaphore, to allow a larger but still bounded concurrent
@@ -237,6 +237,19 @@ func GetPacketTunnelDNSResolverIPv4Address() string {
 
 func GetPacketTunnelDNSResolverIPv6Address() string {
 	return tun.GetTransparentDNSResolverIPv6Address().String()
+}
+
+// WriteRuntimeProfiles writes Go runtime profile information to a set of
+// files in the specified output directory. See common.WriteRuntimeProfiles
+// for more details.
+//
+// If called before Start, log notices will emit to stderr.
+func WriteRuntimeProfiles(outputDirectory string, cpuSampleDurationSeconds, blockSampleDurationSeconds int) {
+	common.WriteRuntimeProfiles(
+		psiphon.NoticeCommonLogger(),
+		outputDirectory,
+		cpuSampleDurationSeconds,
+		blockSampleDurationSeconds)
 }
 
 // Helper function to store a list of server entries.
