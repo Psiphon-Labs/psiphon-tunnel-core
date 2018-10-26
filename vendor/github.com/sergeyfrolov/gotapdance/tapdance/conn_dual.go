@@ -2,7 +2,6 @@ package tapdance
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"net"
 	"strconv"
@@ -20,16 +19,12 @@ type DualConn struct {
 }
 
 // returns TapDance connection that utilizes 2 flows underneath: reader and writer
-func dialSplitFlow(ctx context.Context, customDialer func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
+func dialSplitFlow(ctx context.Context, customDialer func(context.Context, string, string) (net.Conn, error),
+	covert string) (net.Conn, error) {
 	dualConn := DualConn{sessionId: sessionsTotal.GetAndInc()}
 	stationPubkey := Assets().GetPubkey()
 
-	remoteConnId := make([]byte, 16)
-	rand.Read(remoteConnId[:])
-
-	rawRConn := makeTdRaw(tagHttpGetIncomplete,
-		stationPubkey[:],
-		remoteConnId[:])
+	rawRConn := makeTdRaw(tagHttpGetIncomplete, stationPubkey[:])
 	if customDialer != nil {
 		rawRConn.TcpDialer = customDialer
 	}
@@ -37,7 +32,7 @@ func dialSplitFlow(ctx context.Context, customDialer func(context.Context, strin
 	rawRConn.strIdSuffix = "R"
 
 	var err error
-	dualConn.readerConn, err = makeTdFlow(flowReadOnly, rawRConn)
+	dualConn.readerConn, err = makeTdFlow(flowReadOnly, rawRConn, covert)
 	if err != nil {
 		return nil, err
 	}
@@ -58,8 +53,7 @@ func dialSplitFlow(ctx context.Context, customDialer func(context.Context, strin
 	}
 
 	rawWConn := makeTdRaw(tagHttpPostIncomplete,
-		stationPubkey[:],
-		remoteConnId[:])
+		stationPubkey[:])
 	if customDialer != nil {
 		rawRConn.TcpDialer = customDialer
 	}
@@ -68,7 +62,7 @@ func dialSplitFlow(ctx context.Context, customDialer func(context.Context, strin
 	rawWConn.decoySpec = rawRConn.decoySpec
 	rawWConn.pinDecoySpec = true
 
-	dualConn.writerConn, err = makeTdFlow(flowUpload, rawWConn)
+	dualConn.writerConn, err = makeTdFlow(flowUpload, rawWConn, covert)
 	if err != nil {
 		dualConn.readerConn.closeWithErrorOnce(err)
 		return nil, err
