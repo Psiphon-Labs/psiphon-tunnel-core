@@ -191,27 +191,15 @@ func (conn *channelConn) SetWriteDeadline(_ time.Time) error {
 func emitMemoryMetrics() {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
-	NoticeInfo("Memory metrics at %s: goroutines %d | total alloc %s | sys %s | heap alloc/sys/idle/inuse/released/objects %s/%s/%s/%s/%s/%d | stack inuse/sys %s/%s | mspan inuse/sys %s/%s | mcached inuse/sys %s/%s | buckhash/gc/other sys %s/%s/%s | nextgc %s",
+	NoticeInfo("Memory metrics at %s: goroutines %d | objects %d | alloc %s | inuse %s | sys %s | cumulative %d %s",
 		common.GetParentContext(),
 		runtime.NumGoroutine(),
-		common.FormatByteCount(memStats.TotalAlloc),
-		common.FormatByteCount(memStats.Sys),
-		common.FormatByteCount(memStats.HeapAlloc),
-		common.FormatByteCount(memStats.HeapSys),
-		common.FormatByteCount(memStats.HeapIdle),
-		common.FormatByteCount(memStats.HeapInuse),
-		common.FormatByteCount(memStats.HeapReleased),
 		memStats.HeapObjects,
-		common.FormatByteCount(memStats.StackInuse),
-		common.FormatByteCount(memStats.StackSys),
-		common.FormatByteCount(memStats.MSpanInuse),
-		common.FormatByteCount(memStats.MSpanSys),
-		common.FormatByteCount(memStats.MCacheInuse),
-		common.FormatByteCount(memStats.MCacheSys),
-		common.FormatByteCount(memStats.BuckHashSys),
-		common.FormatByteCount(memStats.GCSys),
-		common.FormatByteCount(memStats.OtherSys),
-		common.FormatByteCount(memStats.NextGC))
+		common.FormatByteCount(memStats.HeapAlloc),
+		common.FormatByteCount(memStats.HeapInuse+memStats.StackInuse+memStats.MSpanInuse+memStats.MCacheInuse),
+		common.FormatByteCount(memStats.Sys),
+		memStats.Mallocs,
+		common.FormatByteCount(memStats.TotalAlloc))
 }
 
 func DoGarbageCollection() {
