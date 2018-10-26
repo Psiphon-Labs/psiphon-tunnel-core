@@ -974,10 +974,14 @@ type limitTunnelProtocolsState struct {
 	protocols             protocol.TunnelProtocols
 }
 
+func (l *limitTunnelProtocolsState) hasInitialProtocols() bool {
+	return len(l.initialProtocols) > 0 && l.initialCandidateCount > 0
+}
+
 func (l *limitTunnelProtocolsState) isInitialCandidate(
 	excludeIntensive bool, serverEntry *protocol.ServerEntry) bool {
 
-	return len(l.initialProtocols) > 0 && l.initialCandidateCount > 0 &&
+	return l.hasInitialProtocols() &&
 		len(serverEntry.GetSupportedProtocols(l.useUpstreamProxy, l.initialProtocols, excludeIntensive)) > 0
 }
 
@@ -1166,6 +1170,13 @@ func (controller *Controller) launchEstablishing() {
 	// this avoids a ReportAvailableRegions reporting too many regions,
 	// followed shortly by a ReportAvailableRegions reporting fewer regions.
 	// That sequence could cause issues in the outer client UI.
+	//
+	// The reported regions are limited by establishLimitTunnelProtocolsState;
+	// in the case where an initial limit is in place, only regions available
+	// for the initial limit are reported. The initial phase will not complete
+	// if EgressRegion is set such that there are no server entries with the
+	// necessary protocol capabilities (either locally or from a remote server
+	// list fetch).
 
 	ReportAvailableRegions(
 		controller.config,

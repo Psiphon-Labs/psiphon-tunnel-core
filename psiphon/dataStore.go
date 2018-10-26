@@ -717,18 +717,26 @@ func CountServerEntriesWithLimits(
 }
 
 // ReportAvailableRegions prints a notice with the available egress regions.
+// When limitState has initial protocols, the available regions are limited
+// to those available for the initial protocols; or if limitState has general
+// limited protocols, the available regions are similarly limited.
 func ReportAvailableRegions(config *Config, limitState *limitTunnelProtocolsState) {
 
-	// When ReportAvailableRegions is called only
-	// limitTunnelProtocolState is fixed; excludeIntensive is transitory.
+	// When ReportAvailableRegions is called only limitTunnelProtocolState is
+	// fixed; excludeIntensive is transitory.
 	excludeIntensive := false
 
 	regions := make(map[string]bool)
 	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 
-		if limitState.isInitialCandidate(excludeIntensive, serverEntry) ||
-			limitState.isCandidate(excludeIntensive, serverEntry) {
+		isCandidate := false
+		if limitState.hasInitialProtocols() {
+			isCandidate = limitState.isInitialCandidate(excludeIntensive, serverEntry)
+		} else {
+			isCandidate = limitState.isCandidate(excludeIntensive, serverEntry)
+		}
 
+		if isCandidate {
 			regions[serverEntry.Region] = true
 		}
 	})
