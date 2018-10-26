@@ -49,7 +49,7 @@ const (
 )
 
 func init() {
-	//refraction_networking_tapdance.Logger().Out = ioutil.Discard
+	refraction_networking_tapdance.Logger().Out = ioutil.Discard
 	refraction_networking_tapdance.EnableProxyProtocol()
 }
 
