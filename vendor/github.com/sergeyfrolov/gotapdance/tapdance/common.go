@@ -1,9 +1,11 @@
 package tapdance
 
 import (
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"github.com/refraction-networking/utls"
-	"math"
+	"os"
 	"strconv"
 	"time"
 )
@@ -116,6 +118,37 @@ func EnableProxyProtocol() {
 	default_flags |= tdFlagProxyHeader
 }
 
+var tlsSecretLog string
+
+func SetTlsLogFilename(filename string) error {
+	tlsSecretLog = filename
+	// Truncate file
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+func WriteTlsLog(clientRandom, masterSecret []byte) error {
+	if tlsSecretLog != "" {
+		f, err := os.OpenFile(tlsSecretLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return err
+		}
+
+		_, err = fmt.Fprintf(f, "CLIENT_RANDOM %s %s\n",
+			hex.EncodeToString(clientRandom),
+			hex.EncodeToString(masterSecret))
+		if err != nil {
+			return err
+		}
+
+		return f.Close()
+	}
+	return nil
+}
+
 // List of actually supported ciphers(not a list of offered ciphers!)
 // Essentially all working AES_GCM_128 ciphers
 var tapDanceSupportedCiphers = []uint16{
@@ -129,9 +162,8 @@ var tapDanceSupportedCiphers = []uint16{
 
 // How much time to sleep on trying to connect to decoys to prevent overwhelming them
 func sleepBeforeConnect(attempt int) (waitTime <-chan time.Time) {
-	if attempt >= 2 { // return nil for first 2 attempts
-		waitTime = time.After(time.Second *
-			time.Duration(math.Pow(3, float64(attempt-1))))
+	if attempt >= 6 { // return nil for first 6 attempts
+		waitTime = time.After(time.Second * 1)
 	}
 	return
 }

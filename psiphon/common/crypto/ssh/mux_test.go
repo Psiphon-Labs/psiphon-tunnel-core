@@ -11,6 +11,11 @@ import (
 	"testing"
 )
 
+// PSIPHON
+// =======
+// See comment in channel.go
+var testChannelWindowSize = getChannelWindowSize("")
+
 func muxPair() (*mux, *mux) {
 	a, b := memPipe()
 
@@ -108,10 +113,6 @@ func TestMuxReadWrite(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Write: %v", err)
 		}
-		err = s.Close()
-		if err != nil {
-			t.Fatalf("Close: %v", err)
-		}
 	}()
 
 	var buf [1024]byte
@@ -143,7 +144,7 @@ func TestMuxChannelOverflow(t *testing.T) {
 
 	wDone := make(chan int, 1)
 	go func() {
-		if _, err := writer.Write(make([]byte, channelWindowSize)); err != nil {
+		if _, err := writer.Write(make([]byte, testChannelWindowSize)); err != nil {
 			t.Errorf("could not fill window: %v", err)
 		}
 		writer.Write(make([]byte, 1))
@@ -175,7 +176,7 @@ func TestMuxChannelCloseWriteUnblock(t *testing.T) {
 
 	wDone := make(chan int, 1)
 	go func() {
-		if _, err := writer.Write(make([]byte, channelWindowSize)); err != nil {
+		if _, err := writer.Write(make([]byte, testChannelWindowSize)); err != nil {
 			t.Errorf("could not fill window: %v", err)
 		}
 		if _, err := writer.Write(make([]byte, 1)); err != io.EOF {
@@ -197,7 +198,7 @@ func TestMuxConnectionCloseWriteUnblock(t *testing.T) {
 
 	wDone := make(chan int, 1)
 	go func() {
-		if _, err := writer.Write(make([]byte, channelWindowSize)); err != nil {
+		if _, err := writer.Write(make([]byte, testChannelWindowSize)); err != nil {
 			t.Errorf("could not fill window: %v", err)
 		}
 		if _, err := writer.Write(make([]byte, 1)); err != io.EOF {

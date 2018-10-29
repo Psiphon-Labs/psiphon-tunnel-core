@@ -1,21 +1,21 @@
 package tapdance
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
-	"github.com/agl/ed25519/extra25519"
-	"golang.org/x/crypto/curve25519"
-	mrand "math/rand"
-
-	"bytes"
 	"encoding/binary"
 	"errors"
+	mrand "math/rand"
 	"net"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/agl/ed25519/extra25519"
+	"golang.org/x/crypto/curve25519"
 )
 
 // The key argument should be the AES key, either 16 or 32 bytes
@@ -85,18 +85,29 @@ func getRandString(length int) string {
 	return string(randString)
 }
 
-func obfuscateTag(stegoPayload []byte, stationPubkey []byte) (tag []byte, err error) {
+// obfuscateTagAndProtobuf() generates key-pair and combines it /w stationPubkey to generate
+// sharedSecret. Client will use Eligator to find and send uniformly random representative for its
+// public key (and avoid sending it directly over the wire, as points on ellyptic curve are
+// distinguishable)
+// Then the sharedSecret will be used to encrypt stegoPayload and protobuf slices:
+//  - stegoPayload is encrypted with AES-GCM KEY=sharedSecret[0:16], IV=sharedSecret[16:28]
+//  - protobuf is encrypted with AES-GCM KEY=sharedSecret[0:16], IV={new random IV}, that will be
+//    prepended to encryptedProtobuf and eventually sent out together
+// Returns
+//  - tag(concatenated representative and encrypted stegoPayload),
+//  - encryptedProtobuf(concatenated 12 byte IV + encrypted protobuf)
+//  - error
+func obfuscateTagAndProtobuf(stegoPayload []byte, protobuf []byte, stationPubkey []byte) ([]byte, []byte, error) {
 	if len(stationPubkey) != 32 {
-		err = errors.New("Unexpected station pubkey length. Expected: 32." +
+		return nil, nil, errors.New("Unexpected station pubkey length. Expected: 32." +
 			" Received: " + strconv.Itoa(len(stationPubkey)) + ".")
-		return
 	}
 	var sharedSecret, clientPrivate, clientPublic, representative [32]byte
 	for ok := false; ok != true; {
 		var sliceKeyPrivate []byte = clientPrivate[:]
-		_, err = rand.Read(sliceKeyPrivate)
+		_, err := rand.Read(sliceKeyPrivate)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		ok = extra25519.ScalarBaseMult(&clientPublic, &representative, &clientPrivate)
@@ -109,9 +120,9 @@ func obfuscateTag(stegoPayload []byte, stationPubkey []byte) (tag []byte, err er
 	// Other implementations of elligator may have up to 2 non-random bits.
 	// Here we randomize the bit, expecting it to be flipped back to 0 on station
 	randByte := make([]byte, 1)
-	_, err = rand.Read(randByte)
+	_, err := rand.Read(randByte)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	representative[31] |= (0x80 & randByte[0])
 
@@ -120,17 +131,29 @@ func obfuscateTag(stegoPayload []byte, stationPubkey []byte) (tag []byte, err er
 
 	stationPubkeyHash := sha256.Sum256(sharedSecret[:])
 	aesKey := stationPubkeyHash[:16]
-	aesIv := stationPubkeyHash[16:28]
+	aesIvTag := stationPubkeyHash[16:28] // 12 bytes for stegoPayload nonce
 
-	encryptedData, err := aesGcmEncrypt(stegoPayload, aesKey, aesIv)
+	encryptedStegoPayload, err := aesGcmEncrypt(stegoPayload, aesKey, aesIvTag)
 	if err != nil {
-		return
+		return nil, nil, err
 	}
 
-	tagBuf.Write(encryptedData)
-	tag = tagBuf.Bytes()
-	Logger().Debugf("len(tag)", tagBuf.Len())
-	return
+	tagBuf.Write(encryptedStegoPayload)
+	tag := tagBuf.Bytes()
+
+	if len(protobuf) == 0 {
+		return tag, nil, err
+	}
+
+	// probably could have used all zeros as IV here, but better to err on safe side
+	aesIvProtobuf := make([]byte, 12)
+	_, err = rand.Read(aesIvProtobuf)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	encryptedProtobuf, err := aesGcmEncrypt(protobuf, aesKey, aesIvProtobuf)
+	return tag, append(aesIvProtobuf, encryptedProtobuf...), err
 }
 
 func getMsgWithHeader(msgType msgType, msgBytes []byte) []byte {
@@ -226,6 +249,21 @@ func minInt(a, b int) int {
 		return b
 	}
 	return a
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// Converts provided duration to raw milliseconds.
+// Returns a pointer to u32, because protobuf wants pointers.
+// Max valid input duration (that fits into uint32): 49.71 days.
+func durationToU32ptrMs(d time.Duration) *uint32 {
+	i := uint32(d.Nanoseconds() / int64(time.Millisecond))
+	return &i
 }
 
 func readAndClose(c net.Conn, readDeadline time.Duration) {

@@ -1,12 +1,8 @@
 package tapdance
 
 import (
-	"bufio"
 	"context"
-	"errors"
-	"fmt"
 	"net"
-	"net/http"
 )
 
 var sessionsTotal CounterUint64
@@ -50,31 +46,22 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.
 	if network != "tcp" {
 		return nil, &net.OpError{Op: "dial", Net: network, Err: net.UnknownNetworkError(network)}
 	}
-	_, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return nil, err
+	if len(address) > 0 {
+		_, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	flow, err := d.DialProxyContext(ctx)
-	if err != nil {
-		return nil, err
+	if !d.SplitFlows {
+		flow, err := makeTdFlow(flowBidirectional, nil, address)
+		if err != nil {
+			return nil, err
+		}
+		flow.tdRaw.TcpDialer = d.TcpDialer
+		return flow, flow.DialContext(ctx)
 	}
-
-	_, err = fmt.Fprintf(flow, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nX-Padding:%s\r\n\r\n",
-		address, address, getRandPadding(450, 780, 5))
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := http.ReadResponse(bufio.NewReader(flow), nil)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("TapDance station responded with " + resp.Status)
-	}
-
-	return flow, nil
+	return dialSplitFlow(ctx, d.TcpDialer, address)
 }
 
 // DialProxy establishes direct connection to TapDance station proxy.
@@ -86,13 +73,5 @@ func (d *Dialer) DialProxy() (net.Conn, error) {
 // DialProxy establishes direct connection to TapDance station proxy using the provided context.
 // Users are expected to send HTTP CONNECT request next.
 func (d *Dialer) DialProxyContext(ctx context.Context) (net.Conn, error) {
-	if !d.SplitFlows {
-		flow, err := makeTdFlow(flowBidirectional, nil)
-		if err != nil {
-			return nil, err
-		}
-		flow.tdRaw.TcpDialer = d.TcpDialer
-		return flow, flow.DialContext(ctx)
-	}
-	return dialSplitFlow(ctx, d.TcpDialer)
+	return d.DialContext(ctx, "tcp", "")
 }

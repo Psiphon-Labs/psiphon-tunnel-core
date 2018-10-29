@@ -48,33 +48,31 @@ var (
 	datastorePersistentStatTypeRemoteServerList = string(datastoreRemoteServerListStatsBucket)
 	datastoreServerEntryFetchGCThreshold        = 20
 
-	datastoreInitalizeMutex sync.Mutex
-	datastoreReferenceMutex sync.Mutex
-	activeDatastoreDB       *datastoreDB
+	datastoreMutex    sync.RWMutex
+	activeDatastoreDB *datastoreDB
 )
 
 // OpenDataStore opens and initializes the singleton data store instance.
 func OpenDataStore(config *Config) error {
 
-	datastoreInitalizeMutex.Lock()
-	defer datastoreInitalizeMutex.Unlock()
+	datastoreMutex.Lock()
 
-	datastoreReferenceMutex.Lock()
 	existingDB := activeDatastoreDB
-	datastoreReferenceMutex.Unlock()
 
 	if existingDB != nil {
+		datastoreMutex.Unlock()
 		return common.ContextError(errors.New("db already open"))
 	}
 
 	newDB, err := datastoreOpenDB(config.DataStoreDirectory)
 	if err != nil {
+		datastoreMutex.Unlock()
 		return common.ContextError(err)
 	}
 
-	datastoreReferenceMutex.Lock()
 	activeDatastoreDB = newDB
-	datastoreReferenceMutex.Unlock()
+
+	datastoreMutex.Unlock()
 
 	_ = resetAllPersistentStatsToUnreported()
 
@@ -84,11 +82,8 @@ func OpenDataStore(config *Config) error {
 // CloseDataStore closes the singleton data store instance, if open.
 func CloseDataStore() {
 
-	datastoreInitalizeMutex.Lock()
-	defer datastoreInitalizeMutex.Unlock()
-
-	datastoreReferenceMutex.Lock()
-	defer datastoreReferenceMutex.Unlock()
+	datastoreMutex.Lock()
+	defer datastoreMutex.Unlock()
 
 	if activeDatastoreDB == nil {
 		return
@@ -104,15 +99,14 @@ func CloseDataStore() {
 
 func datastoreView(fn func(tx *datastoreTx) error) error {
 
-	datastoreReferenceMutex.Lock()
-	db := activeDatastoreDB
-	datastoreReferenceMutex.Unlock()
+	datastoreMutex.RLock()
+	defer datastoreMutex.RUnlock()
 
-	if db == nil {
+	if activeDatastoreDB == nil {
 		return common.ContextError(errors.New("database not open"))
 	}
 
-	err := db.view(fn)
+	err := activeDatastoreDB.view(fn)
 	if err != nil {
 		err = common.ContextError(err)
 	}
@@ -121,15 +115,14 @@ func datastoreView(fn func(tx *datastoreTx) error) error {
 
 func datastoreUpdate(fn func(tx *datastoreTx) error) error {
 
-	datastoreReferenceMutex.Lock()
-	db := activeDatastoreDB
-	datastoreReferenceMutex.Unlock()
+	datastoreMutex.RLock()
+	defer datastoreMutex.RUnlock()
 
-	if db == nil {
+	if activeDatastoreDB == nil {
 		return common.ContextError(errors.New("database not open"))
 	}
 
-	err := db.update(fn)
+	err := activeDatastoreDB.update(fn)
 	if err != nil {
 		err = common.ContextError(err)
 	}
@@ -724,18 +717,26 @@ func CountServerEntriesWithLimits(
 }
 
 // ReportAvailableRegions prints a notice with the available egress regions.
+// When limitState has initial protocols, the available regions are limited
+// to those available for the initial protocols; or if limitState has general
+// limited protocols, the available regions are similarly limited.
 func ReportAvailableRegions(config *Config, limitState *limitTunnelProtocolsState) {
 
-	// When ReportAvailableRegions is called only
-	// limitTunnelProtocolState is fixed; excludeIntensive is transitory.
+	// When ReportAvailableRegions is called only limitTunnelProtocolState is
+	// fixed; excludeIntensive is transitory.
 	excludeIntensive := false
 
 	regions := make(map[string]bool)
 	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 
-		if limitState.isInitialCandidate(excludeIntensive, serverEntry) ||
-			limitState.isCandidate(excludeIntensive, serverEntry) {
+		isCandidate := false
+		if limitState.hasInitialProtocols() {
+			isCandidate = limitState.isInitialCandidate(excludeIntensive, serverEntry)
+		} else {
+			isCandidate = limitState.isCandidate(excludeIntensive, serverEntry)
+		}
 
+		if isCandidate {
 			regions[serverEntry.Region] = true
 		}
 	})

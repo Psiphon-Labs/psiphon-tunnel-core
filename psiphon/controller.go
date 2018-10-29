@@ -967,6 +967,42 @@ func (controller *Controller) DirectDial(remoteAddr string) (conn net.Conn, err 
 	return DialTCP(controller.runCtx, remoteAddr, controller.untunneledDialConfig)
 }
 
+// triggerFetches signals RSL, OSL, and upgrade download fetchers to begin, if
+// not already running. triggerFetches is called when tunnel establishment
+// fails to complete within a deadline and in other cases where local
+// circumvention capabilities are lacking and we may require new server
+// entries or client versions with new capabilities.
+func (controller *Controller) triggerFetches() {
+
+	// Trigger a common remote server list fetch, since we may have failed
+	// to connect with all known servers. Don't block sending signal, since
+	// this signal may have already been sent.
+	// Don't wait for fetch remote to succeed, since it may fail and
+	// enter a retry loop and we're better off trying more known servers.
+	// TODO: synchronize the fetch response, so it can be incorporated
+	// into the server entry iterator as soon as available.
+	select {
+	case controller.signalFetchCommonRemoteServerList <- *new(struct{}):
+	default:
+	}
+
+	// Trigger an OSL fetch in parallel. Both fetches are run in parallel
+	// so that if one out of the common RLS and OSL set is large, it doesn't
+	// doesn't entirely block fetching the other.
+	select {
+	case controller.signalFetchObfuscatedServerLists <- *new(struct{}):
+	default:
+	}
+
+	// Trigger an out-of-band upgrade availability check and download.
+	// Since we may have failed to connect, we may benefit from upgrading
+	// to a new client version with new circumvention capabilities.
+	select {
+	case controller.signalDownloadUpgrade <- "":
+	default:
+	}
+}
+
 type limitTunnelProtocolsState struct {
 	useUpstreamProxy      bool
 	initialProtocols      protocol.TunnelProtocols
@@ -974,10 +1010,14 @@ type limitTunnelProtocolsState struct {
 	protocols             protocol.TunnelProtocols
 }
 
+func (l *limitTunnelProtocolsState) hasInitialProtocols() bool {
+	return len(l.initialProtocols) > 0 && l.initialCandidateCount > 0
+}
+
 func (l *limitTunnelProtocolsState) isInitialCandidate(
 	excludeIntensive bool, serverEntry *protocol.ServerEntry) bool {
 
-	return len(l.initialProtocols) > 0 && l.initialCandidateCount > 0 &&
+	return l.hasInitialProtocols() &&
 		len(serverEntry.GetSupportedProtocols(l.useUpstreamProxy, l.initialProtocols, excludeIntensive)) > 0
 }
 
@@ -1158,14 +1198,76 @@ func (controller *Controller) launchEstablishing() {
 
 	p = nil
 
+	// If InitialLimitTunnelProtocols is configured but cannot be satisfied,
+	// skip the initial phase in this establishment. This avoids spinning,
+	// unable to connect, in this case. InitialLimitTunnelProtocols is
+	// intended to prioritize certain protocols, but not strictly select them.
+	//
+	// The candidate count check is made with egress region selection unset.
+	// When an egress region is selected, it's the responsibility of the outer
+	// client to react to the following ReportAvailableRegions output and
+	// clear the user's selected region to prevent spinning, unable to
+	// connect. The initial phase is skipped only when
+	// InitialLimitTunnelProtocols cannot be satisfied _regardless_ of region
+	// selection.
+	//
+	// We presume that, in practise, most clients will have embedded server
+	// entries with capabilities for most protocols; and that clients will
+	// often perform RSL checks. So clients should most often have the
+	// necessary capabilities to satisfy InitialLimitTunnelProtocols. When
+	// this check fails, RSL/OSL/upgrade checks are triggered in order to gain
+	// new capabilities.
+	//
+	// LimitTunnelProtocols remains a hard limit, as using prohibited
+	// protocols may have some bad effect, such as a firewall blocking all
+	// traffic from a host.
+
+	if controller.establishLimitTunnelProtocolsState.initialCandidateCount > 0 {
+
+		egressRegion := "" // no egress region
+
+		initialCount, count := CountServerEntriesWithLimits(
+			controller.config.UseUpstreamProxy(),
+			egressRegion,
+			controller.establishLimitTunnelProtocolsState)
+
+		if initialCount == 0 {
+			NoticeCandidateServers(
+				egressRegion,
+				controller.establishLimitTunnelProtocolsState,
+				initialCount,
+				count)
+			NoticeAlert("skipping initial limit tunnel protocols")
+			controller.establishLimitTunnelProtocolsState.initialCandidateCount = 0
+
+			// Since we were unable to satisfy the InitialLimitTunnelProtocols
+			// tactic, trigger RSL, OSL, and upgrade fetches to potentially
+			// gain new capabilities.
+			controller.triggerFetches()
+		}
+	}
+
 	// Report available egress regions. After a fresh install, the outer
 	// client may not have a list of regions to display; and
 	// LimitTunnelProtocols may reduce the number of available regions.
+	//
+	// When the outer client receives NoticeAvailableEgressRegions and the
+	// configured EgressRegion is not included in the region list, the outer
+	// client _should_ stop tunnel-core and prompt the user to change the
+	// region selection, as there are insufficient servers/capabilities to
+	// establish a tunnel in the selected region.
 	//
 	// This report is delayed until after tactics are likely to be applied;
 	// this avoids a ReportAvailableRegions reporting too many regions,
 	// followed shortly by a ReportAvailableRegions reporting fewer regions.
 	// That sequence could cause issues in the outer client UI.
+	//
+	// The reported regions are limited by establishLimitTunnelProtocolsState;
+	// in the case where an initial limit is in place, only regions available
+	// for the initial limit are reported. The initial phase will not complete
+	// if EgressRegion is set such that there are no server entries with the
+	// necessary protocol capabilities (either locally or from a remote server
+	// list fetch).
 
 	ReportAvailableRegions(
 		controller.config,
@@ -1595,33 +1697,9 @@ loop:
 		// Free up resources now, but don't reset until after the pause.
 		iterator.Close()
 
-		// Trigger a common remote server list fetch, since we may have failed
-		// to connect with all known servers. Don't block sending signal, since
-		// this signal may have already been sent.
-		// Don't wait for fetch remote to succeed, since it may fail and
-		// enter a retry loop and we're better off trying more known servers.
-		// TODO: synchronize the fetch response, so it can be incorporated
-		// into the server entry iterator as soon as available.
-		select {
-		case controller.signalFetchCommonRemoteServerList <- *new(struct{}):
-		default:
-		}
-
-		// Trigger an OSL fetch in parallel. Both fetches are run in parallel
-		// so that if one out of the common RLS and OSL set is large, it doesn't
-		// doesn't entirely block fetching the other.
-		select {
-		case controller.signalFetchObfuscatedServerLists <- *new(struct{}):
-		default:
-		}
-
-		// Trigger an out-of-band upgrade availability check and download.
-		// Since we may have failed to connect, we may benefit from upgrading
-		// to a new client version with new circumvention capabilities.
-		select {
-		case controller.signalDownloadUpgrade <- "":
-		default:
-		}
+		// Trigger RSL, OSL, and upgrade checks after failing to establish a
+		// tunnel in the first round.
+		controller.triggerFetches()
 
 		// After a complete iteration of candidate servers, pause before iterating again.
 		// This helps avoid some busy wait loop conditions, and also allows some time for

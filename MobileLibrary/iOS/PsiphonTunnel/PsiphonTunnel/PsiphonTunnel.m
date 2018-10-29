@@ -429,6 +429,12 @@
     return GoPsiGetBuildInfo();
 }
 
+#pragma mark - Profiling utilities
+
+- (void)writeRuntimeProfilesTo:(NSString * _Nonnull)outputDirectory withCPUSampleDurationSeconds:(int)cpuSampleDurationSeconds withBlockSampleDurationSeconds:(int)blockSampleDurationSeconds {
+    GoPsiWriteRuntimeProfiles(outputDirectory, cpuSampleDurationSeconds, blockSampleDurationSeconds);
+}
+
 #pragma mark - PsiphonTunnel logic implementation methods (private)
 
 /*!

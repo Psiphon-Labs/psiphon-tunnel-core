@@ -128,6 +128,14 @@ func (nio *NonblockingIO) Read(p []byte) (int, error) {
 		if err != nil && err != io.EOF {
 			return n, common.ContextError(err)
 		}
+
+		if n == 0 && err == nil {
+			// https://godoc.org/io#Reader:
+			// "Implementations of Read are discouraged from
+			// returning a zero byte count with a nil error".
+			continue
+		}
+
 		return n, err
 	}
 }

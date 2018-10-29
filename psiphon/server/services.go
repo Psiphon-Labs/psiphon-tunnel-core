@@ -27,9 +27,7 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
-	"runtime/pprof"
 	"sync"
 	"syscall"
 	"time"
@@ -83,7 +81,7 @@ func RunServices(configJSON []byte) error {
 	if config.RunPacketTunnel {
 
 		packetTunnelServer, err := tun.NewServer(&tun.ServerConfig{
-			Logger: CommonLogger(log),
+			Logger:                      CommonLogger(log),
 			SudoNetworkConfigCommands:   config.PacketTunnelSudoNetworkConfigCommands,
 			GetDNSResolverIPv4Addresses: supportServices.DNSResolver.GetAllIPv4,
 			GetDNSResolverIPv6Addresses: supportServices.DNSResolver.GetAllIPv6,
@@ -283,81 +281,11 @@ func outputProcessProfiles(config *Config) {
 	log.WithContextFields(getRuntimeMetrics()).Info("runtime_metrics")
 
 	if config.ProcessProfileOutputDirectory != "" {
-
-		openProfileFile := func(profileName string) *os.File {
-			fileName := filepath.Join(
-				config.ProcessProfileOutputDirectory, profileName+".profile")
-			file, err := os.OpenFile(
-				fileName, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
-			if err != nil {
-				log.WithContextFields(
-					LogFields{
-						"error":    err,
-						"fileName": fileName}).Error("open profile file failed")
-				return nil
-			}
-			return file
-		}
-
-		writeProfile := func(profileName string) {
-
-			file := openProfileFile(profileName)
-			if file == nil {
-				return
-			}
-			err := pprof.Lookup(profileName).WriteTo(file, 1)
-			file.Close()
-			if err != nil {
-				log.WithContextFields(
-					LogFields{
-						"error":       err,
-						"profileName": profileName}).Error("write profile failed")
-			}
-		}
-
-		// TODO: capture https://golang.org/pkg/runtime/debug/#WriteHeapDump?
-		// May not be useful in its current state, as per:
-		// https://groups.google.com/forum/#!topic/golang-dev/cYAkuU45Qyw
-
-		// Write goroutine, heap, and threadcreate profiles
-		// https://golang.org/pkg/runtime/pprof/#Profile
-		writeProfile("goroutine")
-		writeProfile("heap")
-		writeProfile("threadcreate")
-
-		// Write block profile (after sampling)
-		// https://golang.org/pkg/runtime/pprof/#Profile
-
-		if config.ProcessBlockProfileDurationSeconds > 0 {
-			log.WithContext().Info("start block profiling")
-			runtime.SetBlockProfileRate(1)
-			time.Sleep(
-				time.Duration(config.ProcessBlockProfileDurationSeconds) * time.Second)
-			runtime.SetBlockProfileRate(0)
-			log.WithContext().Info("end block profiling")
-			writeProfile("block")
-		}
-
-		// Write CPU profile (after sampling)
-		// https://golang.org/pkg/runtime/pprof/#StartCPUProfile
-
-		if config.ProcessCPUProfileDurationSeconds > 0 {
-			file := openProfileFile("cpu")
-			if file != nil {
-				log.WithContext().Info("start cpu profiling")
-				err := pprof.StartCPUProfile(file)
-				if err != nil {
-					log.WithContextFields(
-						LogFields{"error": err}).Error("StartCPUProfile failed")
-				} else {
-					time.Sleep(time.Duration(
-						config.ProcessCPUProfileDurationSeconds) * time.Second)
-					pprof.StopCPUProfile()
-					log.WithContext().Info("end cpu profiling")
-				}
-				file.Close()
-			}
-		}
+		common.WriteRuntimeProfiles(
+			CommonLogger(log),
+			config.ProcessProfileOutputDirectory,
+			config.ProcessBlockProfileDurationSeconds,
+			config.ProcessCPUProfileDurationSeconds)
 	}
 }
 
