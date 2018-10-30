@@ -370,6 +370,14 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
 - (PsiphonConnectionState)getConnectionState;
 
 /*!
+ Returns the current network reachability status, if Psiphon tunnel is not in a
+ disconnected state.
+ @return The current reachability status.
+ Swift: @code func getNetworkReachabilityStatus(_ status: UnsafeMutablePointer<NetworkStatus>!) -> Bool  @endcode
+ */
+- (BOOL)getNetworkReachabilityStatus:(NetworkStatus * _Nonnull)status;
+
+/*!
  Provides the port number of the local SOCKS proxy. Only valid when currently connected (will return 0 otherwise).
  @return  The current local SOCKS proxy port number.
  Swift: @code func getLocalSocksProxyPort() -> Int @endcode
