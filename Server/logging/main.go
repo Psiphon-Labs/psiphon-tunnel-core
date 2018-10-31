@@ -99,7 +99,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	logFileStats := analysis.NewLogStatsFromFiles(logFileList)
+	logFileStats, err := analysis.NewLogStatsFromFiles(logFileList)
+	if err != nil {
+		fmt.Printf("Error while parsing log files: %s\n", err)
+		os.Exit(1)
+	}
+
 	logFileStats.Print(printMessages, printMetrics, printUnknowns, printStructure, printExample)
 
 	fmt.Printf("Found %d messages, %d metrics and %d unknown logs with a total of %d distinct types of logs\n",

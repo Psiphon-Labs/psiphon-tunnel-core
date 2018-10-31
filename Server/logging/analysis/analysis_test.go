@@ -25,52 +25,11 @@ import (
 )
 
 func TestLogLinesWithExpectations(t *testing.T) {
-	l := NewLogStats()
+	var l *LogStats
 
-	t.Run("test log model parsing", func(t *testing.T) {
-		for _, expectation := range logLinesWithExpectations() {
-			snapshot := *l
+	t.Run("test log model parsing and sorting", func(t *testing.T) {
+		l = parseLogsAndTestExpectations(logLinesWithExpectations(), t)
 
-			err := l.ParseLogLine(expectation.log)
-
-			// Check that the expectation is valid
-			if !(expectation.expects.error || expectation.expects.message ||
-				expectation.expects.metrics || expectation.expects.unknown) {
-				t.Errorf("Malformed expectation expects nothing")
-				t.FailNow()
-			}
-
-			// Check error expectation
-			if err != nil {
-				if expectation.expects.error != true {
-					t.Errorf("Unexpected error from: %s\n", expectation.log)
-				}
-			}
-
-			// Check message expectation
-			if expectation.expects.message {
-				if l.MessageLogModels.Count != snapshot.MessageLogModels.Count+1 {
-					t.Errorf("Expected message log from: %s\n", expectation.log)
-				}
-			}
-
-			// Check metric expectation
-			if expectation.expects.metrics {
-				if l.MetricsLogModels.Count != snapshot.MetricsLogModels.Count+1 {
-					t.Errorf("Expected metric log model from: %s\n", expectation.log)
-				}
-			}
-
-			// Check unknown expectation
-			if expectation.expects.unknown {
-				if l.UnknownLogModels.Count != snapshot.UnknownLogModels.Count+1 {
-					t.Errorf("Expected unknown log model from: %s\n", expectation.log)
-				}
-			}
-		}
-	})
-
-	t.Run("test log model sorting", func(t *testing.T) {
 		logs, _ := l.SortLogModels(true, true, true)
 		var prevLogCount uint
 
@@ -96,6 +55,36 @@ func TestLogLinesWithExpectations(t *testing.T) {
 	})
 }
 
+func TestMessageLogsWithErrorAndContext(t *testing.T) {
+	logs := []LogLineWithExpectation{
+		// The following messages should parse into 4 distinct log models
+		messageLogExpectation(`{"msg":"a", "level":"info"}`),
+		messageLogExpectation(`{"msg":"a", "level":"info"}`),
+		messageLogExpectation(`{"msg":"a", "level":"info", "error": "b"}`),
+		messageLogExpectation(`{"msg":"a", "level":"info", "error": "b"}`),
+		messageLogExpectation(`{"msg":"a", "level":"info", "context": "c"}`),
+		messageLogExpectation(`{"msg":"a", "level":"info", "context": "c"}`),
+		messageLogExpectation(`{"msg":"a", "level":"info", "error": "b", "context": "c"}`),
+		messageLogExpectation(`{"msg":"a", "level":"info", "error": "b", "context": "c"}`),
+
+		// The following messages should parse into 2 distinct log models
+		messageLogExpectation(`{"msg":"b", "level":"info", "error": "b"}`),
+		messageLogExpectation(`{"msg":"b", "level":"info", "context": "b"}`),
+
+		// The following messages should parse into 2 distinct log models
+		messageLogExpectation(`{"msg":"c", "level":"info"}`),
+		messageLogExpectation(`{"msg":"c", "level":"warning"}`),
+	}
+
+	l := parseLogsAndTestExpectations(logs, t)
+
+	numLogModels := len(l.MessageLogModels.modelStats)
+	expectedUniqueModels := 8
+	if numLogModels != expectedUniqueModels {
+		t.Errorf("Expected %d message log models but found %d\n", expectedUniqueModels, numLogModels)
+	}
+}
+
 // Helpers
 
 type LogLineWithExpectation struct {
@@ -108,6 +97,53 @@ type parseLineExpectation struct {
 	message bool
 	metrics bool
 	unknown bool
+}
+
+func parseLogsAndTestExpectations(expectations []LogLineWithExpectation, t *testing.T) (l *LogStats) {
+	l = NewLogStats()
+
+	for _, expectation := range expectations {
+		snapshot := *l
+
+		err := l.ParseLogLine(expectation.log)
+
+		// Check that the expectation is valid
+		if !(expectation.expects.error || expectation.expects.message ||
+			expectation.expects.metrics || expectation.expects.unknown) {
+			t.Errorf("Malformed expectation expects nothing")
+			t.FailNow()
+		}
+
+		// Check error expectation
+		if err != nil {
+			if expectation.expects.error != true {
+				t.Errorf("Unexpected error: < %s >, from log line: \"%s\"\n", err, expectation.log)
+			}
+		}
+
+		// Check message expectation
+		if expectation.expects.message {
+			if l.MessageLogModels.Count != snapshot.MessageLogModels.Count+1 {
+				t.Errorf("Expected message log from: \"%s\"\n", expectation.log)
+			}
+		}
+
+		// Check metric expectation
+		if expectation.expects.metrics {
+			if l.MetricsLogModels.Count != snapshot.MetricsLogModels.Count+1 {
+				t.Errorf("Expected metric log model from: \"%s\"\n", expectation.log)
+			}
+		}
+
+		// Check unknown expectation
+		if expectation.expects.unknown {
+			if l.UnknownLogModels.Count != snapshot.UnknownLogModels.Count+1 {
+				t.Errorf("Expected unknown log model from: \"%s\"\n", expectation.log)
+			}
+		}
+	}
+
+	return l
 }
 
 func logLinesWithExpectations() (l []LogLineWithExpectation) {

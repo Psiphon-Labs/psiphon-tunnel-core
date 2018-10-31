@@ -65,8 +65,11 @@ func (l LogLevel) String() string {
 	}
 }
 
-type EventName string
-type MessageName string
+type MetricsLogEventName string
+type MessageLogKey string
+type MessageLogName string
+type MessageLogContext string
+type MessageLogError string
 type LogFields logrus.Fields
 type node map[string]interface{}
 
@@ -84,13 +87,15 @@ type BaseLogModel struct {
 
 type MessageLogModel struct {
 	BaseLogModel
-	Msg   MessageName
-	Level LogLevel
+	Msg               MessageLogName
+	Level             LogLevel
+	MessageLogContext *MessageLogContext
+	MessageLogError   *MessageLogError
 }
 
 type MetricsLogModel struct {
 	BaseLogModel
-	Event EventName
+	Event MetricsLogEventName
 }
 
 type UnknownLogModel struct {
@@ -101,8 +106,46 @@ func (a *BaseLogModel) equal(b BaseLogModel) bool {
 	return a.Node.equal(b.Node)
 }
 
+func (a *MessageLogModel) key() MessageLogKey {
+	var errorString string
+	var context string
+
+	if a.MessageLogError != nil {
+		errorString = string(*a.MessageLogError)
+	}
+	if a.MessageLogContext != nil {
+		context = string(*a.MessageLogContext)
+	}
+
+	return MessageLogKey(fmt.Sprintf("(%s,%s, %s,%s)", MessageLogKey(a.Msg), MessageLogKey(a.Level), errorString, context))
+}
+
+func (a *MessageLogContext) equal(b *MessageLogContext) bool {
+	if a != nil && b != nil {
+		return *a == *b
+	} else if a == nil && b == nil {
+		return true
+	}
+	return false
+}
+
+func (a *MessageLogError) equal(b *MessageLogError) bool {
+	if a != nil && b != nil {
+		return *a == *b
+	} else if a == nil && b == nil {
+		return true
+	}
+	return false
+}
+
 func (a *MessageLogModel) equal(b MessageLogModel) bool {
-	return (a.Msg == b.Msg) && (a.Level == b.Level)
+	if a.Msg != b.Msg {
+		return false
+	} else if a.Level != b.Level {
+		return false
+	}
+
+	return a.MessageLogContext.equal(b.MessageLogContext) && a.MessageLogError.equal(b.MessageLogError)
 }
 
 func (a *MetricsLogModel) equal(b MetricsLogModel) bool {
@@ -165,7 +208,15 @@ func (a *BaseLogModel) Print(printStructure, printExample bool) {
 
 func (a *MessageLogModel) Print(printStructure, printExample bool) {
 	fmt.Printf("MessageLog\n")
-	fmt.Printf("MessageName: %s\n", a.Msg)
+	fmt.Printf("MessageLogName: %s\n", a.Msg)
+
+	if a.MessageLogError != nil {
+		fmt.Printf("MessageLogError: %s\n", *a.MessageLogError)
+	}
+	if a.MessageLogContext != nil {
+		fmt.Printf("MessageLogContext: %s\n", *a.MessageLogContext)
+	}
+
 	if printStructure {
 		fmt.Printf("Structure: %s\n", a.JsonString())
 	}
@@ -176,7 +227,7 @@ func (a *MessageLogModel) Print(printStructure, printExample bool) {
 
 func (a *MetricsLogModel) Print(printStructure, printExample bool) {
 	fmt.Printf("MetricsLog\n")
-	fmt.Printf("EventName: %s\n", a.Event)
+	fmt.Printf("MetricsLogEventName: %s\n", a.Event)
 	if printStructure {
 		fmt.Printf("Structure: %s\n", a.JsonString())
 	}
@@ -279,12 +330,12 @@ type LogTypeStats struct {
 
 type MessageLogStats struct {
 	LogTypeStats
-	modelStats map[MessageName]*MessageLogModelStats
+	modelStats map[MessageLogKey]*MessageLogModelStats
 }
 
 type MetricsLogStats struct {
 	LogTypeStats
-	modelStats map[EventName]*MetricsLogModelStats
+	modelStats map[MetricsLogEventName]*MetricsLogModelStats
 }
 
 type UnknownLogStats struct {
@@ -363,10 +414,10 @@ type LogStats struct {
 func NewLogStats() (l *LogStats) {
 	l = &LogStats{
 		MessageLogModels: MessageLogStats{
-			modelStats: make(map[MessageName]*MessageLogModelStats),
+			modelStats: make(map[MessageLogKey]*MessageLogModelStats),
 		},
 		MetricsLogModels: MetricsLogStats{
-			modelStats: make(map[EventName]*MetricsLogModelStats),
+			modelStats: make(map[MetricsLogEventName]*MetricsLogModelStats),
 		},
 		UnknownLogModels: UnknownLogStats{
 			modelStats: nil,
@@ -376,14 +427,17 @@ func NewLogStats() (l *LogStats) {
 	return l
 }
 
-func NewLogStatsFromFiles(files []string) (l *LogStats) {
+func NewLogStatsFromFiles(files []string) (l *LogStats, err error) {
 	l = NewLogStats()
 
 	for _, file := range files {
-		l.ParseFile(file)
+		err = l.ParseFile(file)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return l
+	return l, nil
 }
 
 // ParseFile takes a psiphond log file as input, parses the log lines into log
@@ -424,10 +478,11 @@ func (l *LogStats) ParseLogLine(log string) error {
 	switch v := logModel.(type) {
 	case *MessageLogModel:
 		MessageLogModels.Count += 1
-		if m, ok := MessageLogModels.modelStats[v.Msg]; ok {
+
+		if m, ok := MessageLogModels.modelStats[v.key()]; ok {
 			m.Count += 1
 		} else {
-			MessageLogModels.modelStats[v.Msg] = &MessageLogModelStats{LogModelStats{1}, *v}
+			MessageLogModels.modelStats[v.key()] = &MessageLogModelStats{LogModelStats{1}, *v}
 		}
 	case *MetricsLogModel:
 		l.MetricsLogModels.Count += 1
@@ -473,7 +528,7 @@ func parseLogModel(s string) (LogModel, error) {
 	if m["event_name"] != nil {
 		l = &MetricsLogModel{
 			BaseLogModel: b,
-			Event:        EventName(m["event_name"].(string)),
+			Event:        MetricsLogEventName(m["event_name"].(string)),
 		}
 	} else if m["msg"] != nil && m["level"] != nil {
 		var level LogLevel
@@ -490,10 +545,25 @@ func parseLogModel(s string) (LogModel, error) {
 			return nil, fmt.Errorf("Unexpected log level: %s\n", m["level"].(string))
 		}
 
+		var context *MessageLogContext
+		var err *MessageLogError
+
+		if val, ok := m["context"]; ok {
+			c := MessageLogContext(val.(string))
+			context = &c
+		}
+
+		if val, ok := m["error"]; ok {
+			e := MessageLogError(val.(string))
+			err = &e
+		}
+
 		l = &MessageLogModel{
-			BaseLogModel: b,
-			Msg:          MessageName(m["msg"].(string)),
-			Level:        level,
+			BaseLogModel:      b,
+			Msg:               MessageLogName(m["msg"].(string)),
+			Level:             level,
+			MessageLogContext: context,
+			MessageLogError:   err,
 		}
 	} else {
 		l = &UnknownLogModel{
