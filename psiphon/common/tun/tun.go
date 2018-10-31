@@ -404,7 +404,7 @@ func (server *Server) ClientConnected(
 	}
 
 	server.config.Logger.WithContextFields(
-		common.LogFields{"sessionID": sessionID}).Info("client connected")
+		common.LogFields{"sessionID": sessionID}).Debug("client connected")
 
 	MTU := getMTU(server.config.MTU)
 
@@ -480,7 +480,7 @@ func (server *Server) ClientDisconnected(sessionID string) {
 	if session != nil {
 
 		server.config.Logger.WithContextFields(
-			common.LogFields{"sessionID": sessionID}).Info("client disconnected")
+			common.LogFields{"sessionID": sessionID}).Debug("client disconnected")
 
 		server.interruptSession(session)
 	}
