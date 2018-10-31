@@ -376,6 +376,15 @@
     return atomic_load(&self->connectionState);
 }
 
+- (BOOL)getNetworkReachabilityStatus:(NetworkStatus * _Nonnull)status {
+    PsiphonConnectionState connState = [self getConnectionState];
+    if (connState == PsiphonConnectionStateDisconnected) {
+        return FALSE;
+    }
+    (*status) = atomic_load(&self->currentNetworkStatus);
+    return TRUE;
+}
+
 // See comment in header.
 - (NSInteger)getLocalSocksProxyPort {
     return atomic_load(&self->localSocksProxyPort);
