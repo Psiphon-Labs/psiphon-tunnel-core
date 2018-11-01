@@ -273,7 +273,9 @@ func handshakeAPIRequestHandler(
 	// the state change (for example, if a second handshake is performed)
 	//
 	// The handshake event is no longer shipped to log consumers, so this is
-	// simply a diagnostic log.
+	// simply a diagnostic log. Since the "server_tunnel" event includes all
+	// common API parameters and "handshake_completed" flag, this handshake
+	// log is mostly redundant and set to debug level.
 
 	log.WithContextFields(
 		getRequestLogFields(
@@ -281,7 +283,7 @@ func handshakeAPIRequestHandler(
 			geoIPData,
 			authorizedAccessTypes,
 			params,
-			baseRequestParams)).Info("handshake")
+			baseRequestParams)).Debug("handshake")
 
 	handshakeResponse := protocol.HandshakeResponse{
 		SSHSessionID:           sessionID,
