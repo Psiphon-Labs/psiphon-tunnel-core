@@ -33,6 +33,7 @@ import (
 	"log"
 	"os"
 	"reflect"
+	"regexp"
 	"sort"
 
 	"github.com/sirupsen/logrus"
@@ -511,6 +512,11 @@ func (l *LogStats) ParseLogLine(log string) error {
 	return nil
 }
 
+func redactIpAddressesAndPorts(a string) string {
+	ipAddressWithOptionalPort := regexp.MustCompile(`(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}(:(6553[0-5]|655[0-2][0-9]\d|65[0-4](\d){2}|6[0-4](\d){3}|[1-5](\d){4}|[1-9](\d){0,3}))?`)
+	return ipAddressWithOptionalPort.ReplaceAllString(a, "<redacted>")
+}
+
 // parseLogModel attempts to parse a string into a log model. It is expected
 // that the provided string is valid JSON.
 func parseLogModel(s string) (LogModel, error) {
@@ -554,7 +560,8 @@ func parseLogModel(s string) (LogModel, error) {
 		}
 
 		if val, ok := m["error"]; ok {
-			e := MessageLogError(val.(string))
+			errorWithIpsRedacted := redactIpAddressesAndPorts(val.(string))
+			e := MessageLogError(errorWithIpsRedacted)
 			err = &e
 		}
 

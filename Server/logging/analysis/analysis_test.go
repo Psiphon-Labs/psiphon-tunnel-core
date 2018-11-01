@@ -24,35 +24,31 @@ import (
 	"testing"
 )
 
-func TestLogLinesWithExpectations(t *testing.T) {
-	var l *LogStats
+func TestAllLogModelsAndSorting(t *testing.T) {
+	l := parseLogsAndTestExpectations(logLinesWithExpectations(), t)
 
-	t.Run("test log model parsing and sorting", func(t *testing.T) {
-		l = parseLogsAndTestExpectations(logLinesWithExpectations(), t)
+	logs, _ := l.SortLogModels(true, true, true)
+	var prevLogCount uint
 
-		logs, _ := l.SortLogModels(true, true, true)
-		var prevLogCount uint
+	for _, x := range logs {
+		var count uint
 
-		for _, x := range logs {
-			var count uint
-
-			switch v := x.(type) {
-			case MessageLogModelStats:
-				count = v.Count
-			case MetricsLogModelStats:
-				count = v.Count
-			case UnknownLogModelStats:
-				count = v.Count
-			default:
-				t.Errorf("Encountered unexpected struct of type %v\n", reflect.TypeOf(v))
-			}
-
-			if prevLogCount != 0 && prevLogCount > count {
-				t.Errorf("Expected list to be sorted in ascending order")
-			}
-			prevLogCount = count
+		switch v := x.(type) {
+		case MessageLogModelStats:
+			count = v.Count
+		case MetricsLogModelStats:
+			count = v.Count
+		case UnknownLogModelStats:
+			count = v.Count
+		default:
+			t.Errorf("Encountered unexpected struct of type %v\n", reflect.TypeOf(v))
 		}
-	})
+
+		if prevLogCount != 0 && prevLogCount > count {
+			t.Errorf("Expected list to be sorted in ascending order")
+		}
+		prevLogCount = count
+	}
 }
 
 func TestMessageLogsWithErrorAndContext(t *testing.T) {
@@ -80,6 +76,24 @@ func TestMessageLogsWithErrorAndContext(t *testing.T) {
 
 	numLogModels := len(l.MessageLogModels.modelStats)
 	expectedUniqueModels := 8
+	if numLogModels != expectedUniqueModels {
+		t.Errorf("Expected %d message log models but found %d\n", expectedUniqueModels, numLogModels)
+	}
+}
+
+func TestMessageLogsWithRedactedIpAddresses(t *testing.T) {
+	logs := []LogLineWithExpectation{
+		// The following messages should parse into 1 distinct log model
+		messageLogExpectation(`{"msg":"a", "level":"info", "error": "1.1.1.1->2.2.2.2"}`),
+		messageLogExpectation(`{"msg":"a", "level":"info", "error": "3.3.3.3->4.4.4.4"}`),
+		messageLogExpectation(`{"msg":"a", "level":"info", "error": "1.1.1.1->2.2.2.2:1"}`),
+		messageLogExpectation(`{"msg":"a", "level":"info", "error": "1.1.1.1->2.2.2.2:65535"}`),
+	}
+
+	l := parseLogsAndTestExpectations(logs, t)
+
+	numLogModels := len(l.MessageLogModels.modelStats)
+	expectedUniqueModels := 1
 	if numLogModels != expectedUniqueModels {
 		t.Errorf("Expected %d message log models but found %d\n", expectedUniqueModels, numLogModels)
 	}
