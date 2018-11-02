@@ -118,7 +118,9 @@ func (nio *NonblockingIO) Read(p []byte) (int, error) {
 			max = nio.controlFDs[0]
 		}
 		err := goselect.Select(max+1, nio.readFDSet, nil, nil, -1)
-		if err != nil {
+		if err == syscall.EINTR {
+			continue
+		} else if err != nil {
 			return 0, common.ContextError(err)
 		}
 		if nio.readFDSet.IsSet(uintptr(nio.controlFDs[0])) {
@@ -161,7 +163,9 @@ func (nio *NonblockingIO) Write(p []byte) (int, error) {
 			max = nio.controlFDs[0]
 		}
 		err := goselect.Select(max+1, nio.writeFDSets[0], nio.writeFDSets[1], nil, -1)
-		if err != nil {
+		if err == syscall.EINTR {
+			continue
+		} else if err != nil {
 			return 0, common.ContextError(err)
 		}
 		if nio.writeFDSets[0].IsSet(uintptr(nio.controlFDs[0])) {
