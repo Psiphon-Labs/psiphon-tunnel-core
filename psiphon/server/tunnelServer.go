@@ -1405,7 +1405,9 @@ func (sshClient *sshClient) runTunnel(
 				err = request.Reply(false, nil)
 			}
 			if err != nil {
-				log.WithContextFields(LogFields{"error": err}).Warning("response failed")
+				if !isExpectedTunnelIOError(err) {
+					log.WithContextFields(LogFields{"error": err}).Warning("response failed")
+				}
 			}
 
 		}
@@ -1592,7 +1594,9 @@ func (sshClient *sshClient) runTunnel(
 
 			packetTunnelChannel, requests, err := newChannel.Accept()
 			if err != nil {
-				log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
+				if !isExpectedTunnelIOError(err) {
+					log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
+				}
 				continue
 			}
 			go ssh.DiscardRequests(requests)
@@ -1841,7 +1845,9 @@ func (sshClient *sshClient) runOSLSender() {
 			if err == nil {
 				break
 			}
-			log.WithContextFields(LogFields{"error": err}).Warning("sendOSLRequest failed")
+			if !isExpectedTunnelIOError(err) {
+				log.WithContextFields(LogFields{"error": err}).Warning("sendOSLRequest failed")
+			}
 
 			// If the request failed, retry after a delay (with exponential backoff)
 			// or when signaled that there are additional SLOKs to send
@@ -2656,7 +2662,9 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	fwdChannel, requests, err := newChannel.Accept()
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
+		if !isExpectedTunnelIOError(err) {
+			log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
+		}
 		return
 	}
 	go ssh.DiscardRequests(requests)
