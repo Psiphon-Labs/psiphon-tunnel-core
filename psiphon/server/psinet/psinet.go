@@ -77,6 +77,8 @@ type Server struct {
 	SshHostKey                  string          `json:"ssh_host_key"`
 	SshObfuscatedKey            string          `json:"ssh_obfuscated_key"`
 	SshObfuscatedPort           int             `json:"ssh_obfuscated_port"`
+	SshObfuscatedQUICPort       int             `json:"ssh_obfuscated_quic_port"`
+	SshObfuscatedTapdancePort   int             `json:"ssh_obfuscated_tapdance_port"`
 	SshPassword                 string          `json:"ssh_password"`
 	SshPort                     string          `json:"ssh_port"`
 	SshUsername                 string          `json:"ssh_username"`
@@ -450,6 +452,8 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 		SshPassword                   string   `json:"sshPassword"`
 		SshHostKey                    string   `json:"sshHostKey"`
 		SshObfuscatedPort             int      `json:"sshObfuscatedPort"`
+		SshObfuscatedQUICPort         int      `json:"sshObfuscatedQUICPort"`
+		SshObfuscatedTapdancePort     int      `json:"sshObfuscatedTapdancePort"`
 		SshObfuscatedKey              string   `json:"sshObfuscatedKey"`
 		Capabilities                  []string `json:"capabilities"`
 		Region                        string   `json:"region"`
@@ -493,6 +497,9 @@ func (db *Database) getEncodedServerEntry(server Server) string {
 			extendedConfig.SshObfuscatedPort = port
 		}
 	}
+
+	extendedConfig.SshObfuscatedQUICPort = server.SshObfuscatedQUICPort
+	extendedConfig.SshObfuscatedTapdancePort = server.SshObfuscatedTapdancePort
 
 	extendedConfig.SshObfuscatedKey = server.SshObfuscatedKey
 	extendedConfig.Region = host.Region
