@@ -26,7 +26,10 @@ func Logger() *logrus.Logger {
 		logrusLogger.Formatter = new(formatter)
 		logrusLogger.Level = logrus.InfoLevel
 		//logrusLogger.Level = logrus.DebugLevel
-		logrusLogger.Infof("Running gotapdance build %s", build)
+
+		// [Psiphon]
+		// This log is emitted before we can set the logger output stream, so disable it.
+		//logrusLogger.Infof("Running gotapdance build %s", build)
 	})
 	return logrusLogger
 }
