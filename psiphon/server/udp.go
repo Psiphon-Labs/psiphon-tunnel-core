@@ -49,7 +49,9 @@ func (sshClient *sshClient) handleUDPChannel(newChannel ssh.NewChannel) {
 
 	sshChannel, requests, err := newChannel.Accept()
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
+		if !isExpectedTunnelIOError(err) {
+			log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
+		}
 		return
 	}
 	go ssh.DiscardRequests(requests)

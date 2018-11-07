@@ -486,20 +486,20 @@
 		{
 			"checksumSHA1": "bwonlVmjpR4hyzaTtBBYD+m+Sdo=",
 			"path": "github.com/sergeyfrolov/gotapdance",
-			"revision": "b09bd1ad4d881814cc5b8c70865a8303911893c1",
-			"revisionTime": "2018-10-25T16:48:02Z"
+			"revision": "55566e09c166cb4d886c6a6090ca0c9d2ddc030d",
+			"revisionTime": "2018-11-02T17:06:22Z"
 		},
 		{
 			"checksumSHA1": "Ltd4VPMeRiXP4bpEqPKVkBZLMDM=",
 			"path": "github.com/sergeyfrolov/gotapdance/protobuf",
-			"revision": "b09bd1ad4d881814cc5b8c70865a8303911893c1",
-			"revisionTime": "2018-10-25T16:48:02Z"
+			"revision": "55566e09c166cb4d886c6a6090ca0c9d2ddc030d",
+			"revisionTime": "2018-11-02T17:06:22Z"
 		},
 		{
-			"checksumSHA1": "IZpRxPuwF/m9ZKW61R6pi3PIKC8=",
+			"checksumSHA1": "HLNi+BOPYwiVggBFGClrl+rPOr8=",
 			"path": "github.com/sergeyfrolov/gotapdance/tapdance",
-			"revision": "b09bd1ad4d881814cc5b8c70865a8303911893c1",
-			"revisionTime": "2018-10-25T16:48:02Z"
+			"revision": "55566e09c166cb4d886c6a6090ca0c9d2ddc030d",
+			"revisionTime": "2018-11-02T17:06:22Z"
 		},
 		{
 			"checksumSHA1": "Egp3n8yTaAuVtrA14LJrTWDgkO4=",

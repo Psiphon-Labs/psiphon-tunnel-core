@@ -22,6 +22,7 @@ package server
 import (
 	"fmt"
 	"io"
+	"strings"
 	"sync/atomic"
 )
 
@@ -82,6 +83,38 @@ func greaterThanSwapInt64(addr *int64, new int64) bool {
 	old := atomic.LoadInt64(addr)
 	if new > old {
 		return atomic.CompareAndSwapInt64(addr, old, new)
+	}
+	return false
+}
+
+var expectedTunnelIOErrorSubstrings = []string{
+	"EOF",
+	"use of closed network connection",
+	"connection reset by peer",
+	"connection has closed",
+	"broken pipe",
+	"i/o timeout",
+	"deadline exceeded",
+	"NetworkIdleTimeout",
+	"PeerGoingAway",
+}
+
+// isExpectedTunnelIOError checks if the error indicates failure due to tunnel
+// I/O timing out, use of a closed tunnel, etc. This is used to avoid logging
+// noise in cases where sending messages through the tunnel fail due regular,
+// expected tunnel failure conditions.
+//
+// Limitations introduced by error type wrapping and lack of common error
+// types across all network protcol layers means this function uses
+// heuristical error text substring matching and may fall out of sync with new
+// protocols/error messages. As such, this function should only be used for
+// the intended log noise purpose.
+func isExpectedTunnelIOError(err error) bool {
+	errString := err.Error()
+	for _, substring := range expectedTunnelIOErrorSubstrings {
+		if strings.Contains(errString, substring) {
+			return true
+		}
 	}
 	return false
 }
