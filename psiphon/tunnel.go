@@ -22,11 +22,13 @@ package psiphon
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/url"
 	"sync"
@@ -820,6 +822,10 @@ func dialSsh(
 	rateLimits := p.RateLimits(parameters.TunnelRateLimits)
 	obfuscatedSSHMinPadding := p.Int(parameters.ObfuscatedSSHMinPadding)
 	obfuscatedSSHMaxPadding := p.Int(parameters.ObfuscatedSSHMaxPadding)
+	livenessTestMinUpstreamBytes := p.Int(parameters.LivenessTestMinUpstreamBytes)
+	livenessTestMaxUpstreamBytes := p.Int(parameters.LivenessTestMaxUpstreamBytes)
+	livenessTestMinDownstreamBytes := p.Int(parameters.LivenessTestMinDownstreamBytes)
+	livenessTestMaxDownstreamBytes := p.Int(parameters.LivenessTestMaxDownstreamBytes)
 	p = nil
 
 	var cancelFunc context.CancelFunc
@@ -1102,7 +1108,29 @@ func dialSsh(
 			close(noRequests)
 
 			sshClient = ssh.NewClient(sshClientConn, sshChannels, noRequests)
+
+			if livenessTestMinUpstreamBytes > 0 || livenessTestMinDownstreamBytes > 0 {
+
+				// When configured, perform a liveness test which sends and
+				// receives bytes through the tunnel to ensure the tunnel had
+				// not been blocked upon or shortly after connecting. This
+				// test is performed concurrently for each establishment
+				// candidate before selecting a successful tunnel.
+				//
+				// Note that the liveness test is subject to the
+				// TunnelConnectTimeout, which should be adjusted
+				// accordinging.
+
+				var metrics livenessTestMetrics
+				metrics, err = performLivenessTest(
+					sshClient,
+					livenessTestMinUpstreamBytes, livenessTestMaxUpstreamBytes,
+					livenessTestMinDownstreamBytes, livenessTestMaxDownstreamBytes)
+
+				NoticeLivenessTest(serverEntry.IpAddress, metrics, err == nil)
+			}
 		}
+
 		resultChannel <- sshNewClientResult{sshClient, sshRequests, err}
 	}()
 
@@ -1140,6 +1168,75 @@ func dialSsh(
 			sshRequests:   result.sshRequests,
 			dialStats:     dialStats},
 		nil
+}
+
+type livenessTestMetrics struct {
+	duration                time.Duration
+	upstreamBytes           int
+	sentUpstreamBytes       int
+	downstreamBytes         int
+	receivedDownstreamBytes int
+}
+
+func performLivenessTest(
+	sshClient *ssh.Client,
+	minUpstreamBytes, maxUpstreamBytes int,
+	minDownstreamBytes, maxDownstreamBytes int) (livenessTestMetrics, error) {
+
+	var err error
+	var metrics livenessTestMetrics
+	defer func(startTime monotime.Time) {
+		metrics.duration = monotime.Since(startTime)
+	}(monotime.Now())
+
+	metrics.upstreamBytes, err = common.MakeSecureRandomRange(
+		minUpstreamBytes, maxUpstreamBytes)
+	if err != nil {
+		return metrics, common.ContextError(err)
+	}
+
+	metrics.downstreamBytes, err = common.MakeSecureRandomRange(
+		minDownstreamBytes, maxDownstreamBytes)
+	if err != nil {
+		return metrics, common.ContextError(err)
+	}
+
+	request := &protocol.RandomStreamRequest{
+		UpstreamBytes:   metrics.upstreamBytes,
+		DownstreamBytes: metrics.downstreamBytes,
+	}
+
+	extraData, err := json.Marshal(request)
+	if err != nil {
+		return metrics, common.ContextError(err)
+	}
+
+	channel, requests, err := sshClient.OpenChannel(
+		protocol.RANDOM_STREAM_CHANNEL_TYPE, extraData)
+	if err != nil {
+		return metrics, common.ContextError(err)
+	}
+	defer channel.Close()
+
+	go ssh.DiscardRequests(requests)
+
+	if metrics.upstreamBytes > 0 {
+		n, err := io.CopyN(channel, rand.Reader, int64(metrics.upstreamBytes))
+		metrics.sentUpstreamBytes = int(n)
+		if err != nil {
+			return metrics, common.ContextError(err)
+		}
+	}
+
+	if metrics.downstreamBytes > 0 {
+		n, err := io.CopyN(ioutil.Discard, channel, int64(metrics.downstreamBytes))
+		metrics.receivedDownstreamBytes = int(n)
+		if err != nil {
+			return metrics, common.ContextError(err)
+		}
+	}
+
+	return metrics, nil
 }
 
 func selectQUICVersion(
