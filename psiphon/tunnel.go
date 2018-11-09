@@ -1197,7 +1197,7 @@ func performLivenessTest(
 		return metrics, common.ContextError(err)
 	}
 
-	metrics.UpstreamBytes, err = common.MakeSecureRandomRange(
+	metrics.DownstreamBytes, err = common.MakeSecureRandomRange(
 		minDownstreamBytes, maxDownstreamBytes)
 	if err != nil {
 		return metrics, common.ContextError(err)
