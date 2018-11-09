@@ -494,6 +494,13 @@ type Config struct {
 	ObfuscatedSSHMinPadding *int
 	ObfuscatedSSHMaxPadding *int
 
+	// LivenessTestMinUpstreamBytes and other LivenessTest fields are for
+	// testing purposes.
+	LivenessTestMinUpstreamBytes   *int
+	LivenessTestMaxUpstreamBytes   *int
+	LivenessTestMinDownstreamBytes *int
+	LivenessTestMaxDownstreamBytes *int
+
 	// clientParameters is the active ClientParameters with defaults, config
 	// values, and, optionally, tactics applied.
 	//
@@ -944,6 +951,22 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ObfuscatedSSHMaxPadding != nil {
 		applyParameters[parameters.ObfuscatedSSHMaxPadding] = *config.ObfuscatedSSHMaxPadding
+	}
+
+	if config.LivenessTestMinUpstreamBytes != nil {
+		applyParameters[parameters.LivenessTestMinUpstreamBytes] = *config.LivenessTestMinUpstreamBytes
+	}
+
+	if config.LivenessTestMaxUpstreamBytes != nil {
+		applyParameters[parameters.LivenessTestMaxUpstreamBytes] = *config.LivenessTestMaxUpstreamBytes
+	}
+
+	if config.LivenessTestMinDownstreamBytes != nil {
+		applyParameters[parameters.LivenessTestMinDownstreamBytes] = *config.LivenessTestMinDownstreamBytes
+	}
+
+	if config.LivenessTestMaxDownstreamBytes != nil {
+		applyParameters[parameters.LivenessTestMaxDownstreamBytes] = *config.LivenessTestMaxDownstreamBytes
 	}
 
 	return applyParameters

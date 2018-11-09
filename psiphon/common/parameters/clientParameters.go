@@ -177,6 +177,10 @@ const (
 	MeekRoundTripTimeout                       = "MeekRoundTripTimeout"
 	TransformHostNameProbability               = "TransformHostNameProbability"
 	PickUserAgentProbability                   = "PickUserAgentProbability"
+	LivenessTestMinUpstreamBytes               = "LivenessTestMinUpstreamBytes"
+	LivenessTestMaxUpstreamBytes               = "LivenessTestMaxUpstreamBytes"
+	LivenessTestMinDownstreamBytes             = "LivenessTestMinDownstreamBytes"
+	LivenessTestMaxDownstreamBytes             = "LivenessTestMaxDownstreamBytes"
 )
 
 const (
@@ -355,6 +359,11 @@ var defaultClientParameters = map[string]struct {
 
 	TransformHostNameProbability: {value: 0.5, minimum: 0.0},
 	PickUserAgentProbability:     {value: 0.5, minimum: 0.0},
+
+	LivenessTestMinUpstreamBytes:   {value: 0, minimum: 0},
+	LivenessTestMaxUpstreamBytes:   {value: 0, minimum: 0},
+	LivenessTestMinDownstreamBytes: {value: 0, minimum: 0},
+	LivenessTestMaxDownstreamBytes: {value: 0, minimum: 0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

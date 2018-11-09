@@ -758,6 +758,14 @@ func NoticeNetworkID(networkID string) {
 		"NetworkID", 0, "ID", networkID)
 }
 
+func NoticeLivenessTest(ipAddress string, metrics *livenessTestMetrics, success bool) {
+	singletonNoticeLogger.outputNotice(
+		"LivenessTest", noticeIsDiagnostic,
+		"ipAddress", ipAddress,
+		"metrics", metrics,
+		"success", success)
+}
+
 type repetitiveNoticeState struct {
 	message string
 	repeats int

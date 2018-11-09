@@ -130,6 +130,7 @@ func TestSSH(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -146,6 +147,7 @@ func TestOSSH(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -162,6 +164,7 @@ func TestFragmentedOSSH(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     true,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -178,6 +181,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -195,6 +199,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -212,6 +217,7 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -229,6 +235,7 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -246,6 +253,7 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -262,6 +270,7 @@ func TestQUICOSSH(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -281,6 +290,7 @@ func TestMarionetteOSSH(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -297,6 +307,7 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -313,6 +324,7 @@ func TestHotReload(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -329,6 +341,7 @@ func TestDefaultSessionID(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -345,6 +358,7 @@ func TestDenyTrafficRules(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -361,6 +375,7 @@ func TestOmitAuthorization(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -377,6 +392,7 @@ func TestNoAuthorization(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -393,6 +409,7 @@ func TestUnusedAuthorization(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -409,6 +426,7 @@ func TestTCPOnlySLOK(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: false,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
 		})
 }
 
@@ -425,6 +443,24 @@ func TestUDPOnlySLOK(t *testing.T) {
 			doTunneledWebRequest: false,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
+		})
+}
+
+func TestLivenessTest(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
+			forceLivenessTest:    true,
 		})
 }
 
@@ -440,6 +476,7 @@ type runServerConfig struct {
 	doTunneledWebRequest bool
 	doTunneledNTPRequest bool
 	forceFragmenting     bool
+	forceLivenessTest    bool
 }
 
 func runServer(t *testing.T, runConfig *runServerConfig) {
@@ -481,6 +518,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		tactics.GenerateKeys()
 	if err != nil {
 		t.Fatalf("error generating tactics keys: %s", err)
+	}
+
+	livenessTestSize := 0
+	if doClientTactics || runConfig.forceLivenessTest {
+		livenessTestSize = 1048576
 	}
 
 	// create a server
@@ -531,7 +573,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	trafficRulesFilename := filepath.Join(testDataDirName, "traffic_rules.json")
 	paveTrafficRulesFile(
 		t, trafficRulesFilename, propagationChannelID, accessType,
-		runConfig.requireAuthorization, runConfig.denyTrafficRules)
+		runConfig.requireAuthorization, runConfig.denyTrafficRules, livenessTestSize)
 
 	var tacticsConfigFilename string
 
@@ -543,7 +585,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			t, tacticsConfigFilename,
 			tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
 			runConfig.tunnelProtocol,
-			propagationChannelID)
+			propagationChannelID,
+			livenessTestSize)
 	}
 
 	var serverConfig map[string]interface{}
@@ -620,7 +663,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		paveTrafficRulesFile(
 			t, trafficRulesFilename, propagationChannelID, accessType,
-			runConfig.requireAuthorization, runConfig.denyTrafficRules)
+			runConfig.requireAuthorization, runConfig.denyTrafficRules,
+			livenessTestSize)
 
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(syscall.SIGUSR1)
@@ -711,19 +755,29 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			t.Fatalf("SetClientParameters failed: %s", err)
 		}
 
-	} else if runConfig.forceFragmenting {
+	} else {
+
 		// Directly apply same parameters that would've come from tactics.
 
 		applyParameters := make(map[string]interface{})
 
-		applyParameters[parameters.FragmentorLimitProtocols] = protocol.TunnelProtocols{runConfig.tunnelProtocol}
-		applyParameters[parameters.FragmentorProbability] = 1.0
-		applyParameters[parameters.FragmentorMinTotalBytes] = 1000
-		applyParameters[parameters.FragmentorMaxTotalBytes] = 2000
-		applyParameters[parameters.FragmentorMinWriteBytes] = 1
-		applyParameters[parameters.FragmentorMaxWriteBytes] = 100
-		applyParameters[parameters.FragmentorMinDelay] = 1 * time.Millisecond
-		applyParameters[parameters.FragmentorMaxDelay] = 10 * time.Millisecond
+		if runConfig.forceFragmenting {
+			applyParameters[parameters.FragmentorLimitProtocols] = protocol.TunnelProtocols{runConfig.tunnelProtocol}
+			applyParameters[parameters.FragmentorProbability] = 1.0
+			applyParameters[parameters.FragmentorMinTotalBytes] = 1000
+			applyParameters[parameters.FragmentorMaxTotalBytes] = 2000
+			applyParameters[parameters.FragmentorMinWriteBytes] = 1
+			applyParameters[parameters.FragmentorMaxWriteBytes] = 100
+			applyParameters[parameters.FragmentorMinDelay] = 1 * time.Millisecond
+			applyParameters[parameters.FragmentorMaxDelay] = 10 * time.Millisecond
+		}
+
+		if runConfig.forceLivenessTest {
+			applyParameters[parameters.LivenessTestMinUpstreamBytes] = livenessTestSize
+			applyParameters[parameters.LivenessTestMaxUpstreamBytes] = livenessTestSize
+			applyParameters[parameters.LivenessTestMinDownstreamBytes] = livenessTestSize
+			applyParameters[parameters.LivenessTestMaxDownstreamBytes] = livenessTestSize
+		}
 
 		err = clientConfig.SetClientParameters("", true, applyParameters)
 		if err != nil {
@@ -1153,7 +1207,8 @@ func pavePsinetDatabaseFile(
 
 func paveTrafficRulesFile(
 	t *testing.T, trafficRulesFilename, propagationChannelID, accessType string,
-	requireAuthorization, deny bool) {
+	requireAuthorization, deny bool,
+	livenessTestSize int) {
 
 	allowTCPPorts := fmt.Sprintf("%d", mockWebServerPort)
 	allowUDPPorts := "53, 123"
@@ -1177,7 +1232,9 @@ func paveTrafficRulesFile(
         "DefaultRules" :  {
             "RateLimits" : {
                 "ReadBytesPerSecond": 16384,
-                "WriteBytesPerSecond": 16384
+                "WriteBytesPerSecond": 16384,
+                "ReadUnthrottledBytes": %d,
+                "WriteUnthrottledBytes": %d
             },
             "AllowTCPPorts" : [0],
             "AllowUDPPorts" : [0],
@@ -1196,8 +1253,8 @@ func paveTrafficRulesFile(
                 },
                 "Rules" : {
                     "RateLimits" : {
-                        "ReadUnthrottledBytes": 132352,
-                        "WriteUnthrottledBytes": 132352
+                        "ReadBytesPerSecond": 2097152,
+                        "WriteBytesPerSecond": 2097152
                     },
                     "AllowTCPPorts" : [%s],
                     "AllowUDPPorts" : [%s]
@@ -1208,7 +1265,9 @@ func paveTrafficRulesFile(
     `
 
 	trafficRulesJSON := fmt.Sprintf(
-		trafficRulesJSONFormat, propagationChannelID, authorizationFilter, allowTCPPorts, allowUDPPorts)
+		trafficRulesJSONFormat,
+		livenessTestSize, livenessTestSize,
+		propagationChannelID, authorizationFilter, allowTCPPorts, allowUDPPorts)
 
 	err := ioutil.WriteFile(trafficRulesFilename, []byte(trafficRulesJSON), 0600)
 	if err != nil {
@@ -1312,7 +1371,8 @@ func paveTacticsConfigFile(
 	t *testing.T, tacticsConfigFilename string,
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey string,
 	tunnelProtocol string,
-	propagationChannelID string) {
+	propagationChannelID string,
+	livenessTestSize int) {
 
 	// Setting LimitTunnelProtocols passively exercises the
 	// server-side LimitTunnelProtocols enforcement.
@@ -1343,7 +1403,11 @@ func paveTacticsConfigFile(
           "FragmentorDownstreamMinWriteBytes" : 1,
           "FragmentorDownstreamMaxWriteBytes" : 100,
           "FragmentorDownstreamMinDelay" : "1ms",
-          "FragmentorDownstreamMaxDelay" : "10ms"
+          "FragmentorDownstreamMaxDelay" : "10ms",
+          "LivenessTestMinUpstreamBytes" : %d,
+          "LivenessTestMaxUpstreamBytes" : %d,
+          "LivenessTestMinDownstreamBytes" : %d,
+          "LivenessTestMaxDownstreamBytes" : %d
         }
       },
       "FilteredTactics" : [
@@ -1372,6 +1436,7 @@ func paveTacticsConfigFile(
 		tunnelProtocol,
 		tunnelProtocol,
 		tunnelProtocol,
+		livenessTestSize, livenessTestSize, livenessTestSize, livenessTestSize,
 		propagationChannelID)
 
 	err := ioutil.WriteFile(tacticsConfigFilename, []byte(tacticsConfigJSON), 0600)
