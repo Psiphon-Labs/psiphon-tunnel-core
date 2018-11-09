@@ -1109,7 +1109,7 @@ func dialSsh(
 
 			sshClient = ssh.NewClient(sshClientConn, sshChannels, noRequests)
 
-			if livenessTestMinUpstreamBytes > 0 || livenessTestMinDownstreamBytes > 0 {
+			if livenessTestMaxUpstreamBytes > 0 || livenessTestMaxDownstreamBytes > 0 {
 
 				// When configured, perform a liveness test which sends and
 				// receives bytes through the tunnel to ensure the tunnel had
@@ -1121,7 +1121,7 @@ func dialSsh(
 				// TunnelConnectTimeout, which should be adjusted
 				// accordinging.
 
-				var metrics livenessTestMetrics
+				var metrics *livenessTestMetrics
 				metrics, err = performLivenessTest(
 					sshClient,
 					livenessTestMinUpstreamBytes, livenessTestMaxUpstreamBytes,
@@ -1170,40 +1170,42 @@ func dialSsh(
 		nil
 }
 
+// Fields are exported for JSON encoding in NoticeLivenessTest.
 type livenessTestMetrics struct {
-	duration                time.Duration
-	upstreamBytes           int
-	sentUpstreamBytes       int
-	downstreamBytes         int
-	receivedDownstreamBytes int
+	Duration                string
+	UpstreamBytes           int
+	SentUpstreamBytes       int
+	DownstreamBytes         int
+	ReceivedDownstreamBytes int
 }
 
 func performLivenessTest(
 	sshClient *ssh.Client,
 	minUpstreamBytes, maxUpstreamBytes int,
-	minDownstreamBytes, maxDownstreamBytes int) (livenessTestMetrics, error) {
+	minDownstreamBytes, maxDownstreamBytes int) (*livenessTestMetrics, error) {
 
-	var err error
-	var metrics livenessTestMetrics
+	metrics := new(livenessTestMetrics)
+
 	defer func(startTime monotime.Time) {
-		metrics.duration = monotime.Since(startTime)
+		metrics.Duration = fmt.Sprintf("%s", monotime.Since(startTime))
 	}(monotime.Now())
 
-	metrics.upstreamBytes, err = common.MakeSecureRandomRange(
+	var err error
+	metrics.UpstreamBytes, err = common.MakeSecureRandomRange(
 		minUpstreamBytes, maxUpstreamBytes)
 	if err != nil {
 		return metrics, common.ContextError(err)
 	}
 
-	metrics.downstreamBytes, err = common.MakeSecureRandomRange(
+	metrics.UpstreamBytes, err = common.MakeSecureRandomRange(
 		minDownstreamBytes, maxDownstreamBytes)
 	if err != nil {
 		return metrics, common.ContextError(err)
 	}
 
 	request := &protocol.RandomStreamRequest{
-		UpstreamBytes:   metrics.upstreamBytes,
-		DownstreamBytes: metrics.downstreamBytes,
+		UpstreamBytes:   metrics.UpstreamBytes,
+		DownstreamBytes: metrics.DownstreamBytes,
 	}
 
 	extraData, err := json.Marshal(request)
@@ -1220,17 +1222,17 @@ func performLivenessTest(
 
 	go ssh.DiscardRequests(requests)
 
-	if metrics.upstreamBytes > 0 {
-		n, err := io.CopyN(channel, rand.Reader, int64(metrics.upstreamBytes))
-		metrics.sentUpstreamBytes = int(n)
+	if metrics.UpstreamBytes > 0 {
+		n, err := io.CopyN(channel, rand.Reader, int64(metrics.UpstreamBytes))
+		metrics.SentUpstreamBytes = int(n)
 		if err != nil {
 			return metrics, common.ContextError(err)
 		}
 	}
 
-	if metrics.downstreamBytes > 0 {
-		n, err := io.CopyN(ioutil.Discard, channel, int64(metrics.downstreamBytes))
-		metrics.receivedDownstreamBytes = int(n)
+	if metrics.DownstreamBytes > 0 {
+		n, err := io.CopyN(ioutil.Discard, channel, int64(metrics.DownstreamBytes))
+		metrics.ReceivedDownstreamBytes = int(n)
 		if err != nil {
 			return metrics, common.ContextError(err)
 		}

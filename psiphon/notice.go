@@ -758,11 +758,11 @@ func NoticeNetworkID(networkID string) {
 		"NetworkID", 0, "ID", networkID)
 }
 
-func NoticeLivenessTest(ipAddress string, livenessTestMetrics livenessTestMetrics, success bool) {
+func NoticeLivenessTest(ipAddress string, metrics *livenessTestMetrics, success bool) {
 	singletonNoticeLogger.outputNotice(
 		"LivenessTest", noticeIsDiagnostic,
 		"ipAddress", ipAddress,
-		"metrics", livenessTestMetrics,
+		"metrics", metrics,
 		"success", success)
 }
 
