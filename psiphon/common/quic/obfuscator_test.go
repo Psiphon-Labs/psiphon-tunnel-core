@@ -30,10 +30,10 @@ func TestPaddingLen(t *testing.T) {
 		t.Fatalf("NewObfuscatedPacketConnPacketConn failed: %s", err)
 	}
 
-	for max := 0; max <= MAX_PADDING; max++ {
+	for max := 0; max <= 255; max++ {
 
 		counts := make(map[int]int)
-		repeats := 100000
+		repeats := 200000
 
 		for r := 0; r < repeats; r++ {
 			padding := c.getPaddingLen(max)
@@ -46,7 +46,7 @@ func TestPaddingLen(t *testing.T) {
 		expected := repeats / (max + 1)
 
 		for i := 0; i <= max; i++ {
-			if counts[i] < (expected/10)*9 {
+			if counts[i] < (expected/10)*8 {
 				t.Logf("max = %d, counts = %+v", max, counts)
 				t.Fatalf("unexpected low count: max = %d, i = %d, count = %d", max, i, counts[i])
 			}

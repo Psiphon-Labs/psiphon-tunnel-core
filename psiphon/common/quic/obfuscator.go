@@ -350,7 +350,7 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 			maxPaddingLen = MAX_PADDING
 		}
 
-		paddingLen := 0 //maxPaddingLen //conn.getPaddingLen(maxPaddingLen)
+		paddingLen := conn.getPaddingLen(maxPaddingLen)
 
 		buffer[NONCE_SIZE] = uint8(paddingLen)
 		padding := buffer[(NONCE_SIZE + 1) : (NONCE_SIZE+1)+paddingLen]
@@ -376,10 +376,12 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 
 func (conn *ObfuscatedPacketConn) getPaddingLen(maxPadding int) int {
 
-	// Selects uniformly from [0, n], using the ObfuscatedPacketConn's
+	// Selects uniformly from [0, maxPadding], using the ObfuscatedPacketConn's
 	// random stream.
 
-	if maxPadding < 0 || maxPadding > 255 {
+	maxRand := 255
+
+	if maxPadding < 0 || maxPadding > maxRand {
 		panic(fmt.Sprintf("unexpected max padding: %d", maxPadding))
 	}
 
@@ -387,8 +389,10 @@ func (conn *ObfuscatedPacketConn) getPaddingLen(maxPadding int) int {
 		return 0
 	}
 
-	maxRand := 255
-	upperBound := maxRand - (maxRand % (maxPadding + 1))
+	upperBound := maxPadding
+	if maxPadding < 255 {
+		upperBound = maxRand - (maxRand % (maxPadding + 1))
+	}
 
 	for {
 		var value [1]byte
