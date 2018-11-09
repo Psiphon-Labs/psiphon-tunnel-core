@@ -64,6 +64,7 @@ const (
 	PSIPHON_WEB_API_PROTOCOL = "web"
 
 	PACKET_TUNNEL_CHANNEL_TYPE = "tun@psiphon.ca"
+	RANDOM_STREAM_CHANNEL_TYPE = "random@psiphon.ca"
 
 	PSIPHON_API_HANDSHAKE_AUTHORIZATIONS = "authorizations"
 )
@@ -296,4 +297,9 @@ type MeekCookieData struct {
 	MeekProtocolVersion  int    `json:"v"`
 	ClientTunnelProtocol string `json:"t"`
 	EndPoint             string `json:"e"`
+}
+
+type RandomStreamRequest struct {
+	UpstreamBytes   int `json:"u"`
+	DownstreamBytes int `json:"d"`
 }

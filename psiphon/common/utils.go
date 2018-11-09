@@ -183,8 +183,11 @@ func MakeSecureRandomBytes(length int) ([]byte, error) {
 }
 
 // MakeSecureRandomRange selects a random int in [min, max].
-// If max < min, min is returned.
+// If min < 0, min is set to 0. If max < min, min is returned.
 func MakeSecureRandomRange(min, max int) (int, error) {
+	if min < 0 {
+		min = 0
+	}
 	if max < min {
 		return min, nil
 	}
