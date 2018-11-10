@@ -21,6 +21,8 @@ package quic
 
 import (
 	"testing"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 func TestPaddingLen(t *testing.T) {
@@ -52,4 +54,24 @@ func TestPaddingLen(t *testing.T) {
 			}
 		}
 	}
+}
+
+func BenchmarkPaddingLen(b *testing.B) {
+
+	c, err := NewObfuscatedPacketConnPacketConn(nil, false, "key")
+	if err != nil {
+		b.Fatalf("NewObfuscatedPacketConnPacketConn failed: %s", err)
+	}
+
+	b.Run("getPaddingLen", func(b *testing.B) {
+		for n := 0; n < b.N; n++ {
+			_ = c.getPaddingLen(n % MAX_PADDING)
+		}
+	})
+
+	b.Run("SecureRandomRange", func(b *testing.B) {
+		for n := 0; n < b.N; n++ {
+			_, _ = common.MakeSecureRandomRange(0, n%MAX_PADDING)
+		}
+	})
 }
