@@ -21,7 +21,6 @@ package quic
 
 import (
 	"crypto/rand"
-	"crypto/rc4"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -66,9 +65,11 @@ type ObfuscatedPacketConn struct {
 	runWaitGroup   *sync.WaitGroup
 	stopBroadcast  chan struct{}
 	obfuscationKey [32]byte
-	randomStream   *rc4.Cipher
 	peerModesMutex sync.Mutex
 	peerModes      map[string]*peerMode
+
+	randomStreamMutex sync.Mutex
+	randomStream      *chacha20.Cipher
 }
 
 type peerMode struct {
@@ -106,21 +107,16 @@ func NewObfuscatedPacketConnPacketConn(
 	// clients, we observed very long syscall durations, perhaps due to lock
 	// contention. Using a userspace random stream avoids frequent syscall
 	// context switches as well as spinlock overhead.
-	//
-	// Note: use of RC4 is temporary. While RC4 isn't cryptographically
-	// secure, it is sufficient for obfuscation. At this time we aren't using
-	// github.com/Yawning/chacha20 for the random stream due to apparant
-	// "index out of range" bugs that occur after repeated XORKeyStream calls.
-	// RC4 performance will not be optimal as it no longer ships with
-	// optimized assembler implementations,
-	// https://github.com/golang/go/commit/30eda6715c6578de2086f03df36c4a8def838ec2.
 
 	var randomStreamKey [32]byte
 	_, err = rand.Read(randomStreamKey[:])
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
-	packetConn.randomStream, err = rc4.NewCipher(randomStreamKey[:])
+	var randomKeyNonce [NONCE_SIZE]byte
+	packetConn.randomStream, err = chacha20.NewCipher(
+		randomStreamKey[:],
+		randomKeyNonce[:])
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -320,17 +316,11 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 		buffer := b.buffer[:]
 		defer obfuscatorBufferPool.Put(b)
 
-		// Zero the buffer to ensure that randomStream.XORKeyStream calls set
-		// bytes to the key stream values. This loop should be compiler
-		// optimized:
-		// https://github.com/golang/go/commit/f03c9202c43e0abb130669852082117ca50aa9b1
-		for i := range buffer {
-			buffer[i] = 0
-		}
-
 		nonce := buffer[0:NONCE_SIZE]
 		for {
-			conn.randomStream.XORKeyStream(nonce, nonce)
+			conn.randomStreamMutex.Lock()
+			conn.randomStream.KeyStream(nonce)
+			conn.randomStreamMutex.Unlock()
 
 			// Don't use a random nonce that looks like QUIC, or the
 			// peer will not treat this packet as obfuscated.
@@ -353,8 +343,11 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 		paddingLen := conn.getPaddingLen(maxPaddingLen)
 
 		buffer[NONCE_SIZE] = uint8(paddingLen)
+
 		padding := buffer[(NONCE_SIZE + 1) : (NONCE_SIZE+1)+paddingLen]
-		conn.randomStream.XORKeyStream(padding, padding)
+		conn.randomStreamMutex.Lock()
+		conn.randomStream.KeyStream(padding)
+		conn.randomStreamMutex.Unlock()
 
 		copy(buffer[(NONCE_SIZE+1)+paddingLen:], p)
 		dataLen := (NONCE_SIZE + 1) + paddingLen + n
@@ -396,7 +389,9 @@ func (conn *ObfuscatedPacketConn) getPaddingLen(maxPadding int) int {
 
 	for {
 		var value [1]byte
-		conn.randomStream.XORKeyStream(value[:], value[:])
+		conn.randomStreamMutex.Lock()
+		conn.randomStream.KeyStream(value[:])
+		conn.randomStreamMutex.Unlock()
 
 		padding := int(value[0])
 		if padding <= upperBound {
