@@ -510,7 +510,7 @@ func (conn *workaroundPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 		conn.currentMS = currentMS
 		conn.callsPerMS = 0
 	} else {
-		if conn.callsPerMS >= 100 {
+		if conn.callsPerMS >= 1000 {
 			conn.mutex.Unlock()
 			return 0, common.ContextError(errors.New("rate limit exceeded"))
 		}
