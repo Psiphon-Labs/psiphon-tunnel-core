@@ -27,6 +27,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math"
 	"math/big"
@@ -339,4 +340,17 @@ func FormatByteCount(bytes uint64) string {
 	exp := int(math.Log(float64(bytes)) / math.Log(float64(base)))
 	return fmt.Sprintf(
 		"%.1f%c", float64(bytes)/math.Pow(float64(base), float64(exp)), "KMGTPEZ"[exp-1])
+}
+
+func CopyNBuffer(dst io.Writer, src io.Reader, n int64, buf []byte) (written int64, err error) {
+	// Based on io.CopyN:
+	// https://github.com/golang/go/blob/release-branch.go1.11/src/io/io.go#L339
+	written, err = io.CopyBuffer(dst, io.LimitReader(src, n), buf)
+	if written == n {
+		return n, nil
+	}
+	if written < n && err == nil {
+		err = io.EOF
+	}
+	return
 }
