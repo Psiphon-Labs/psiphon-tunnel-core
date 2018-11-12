@@ -3,9 +3,7 @@ package tapdance
 import (
 	"crypto/x509"
 	"encoding/binary"
-	"github.com/golang/protobuf/proto"
-	"github.com/pkg/errors"
-	pb "github.com/sergeyfrolov/gotapdance/protobuf"
+	"errors"
 	"io/ioutil"
 	"net"
 	"os"
@@ -13,6 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/golang/protobuf/proto"
+	pb "github.com/sergeyfrolov/gotapdance/protobuf"
 )
 
 type assets struct {
@@ -169,7 +170,7 @@ func (a *assets) GetDecoyAddress() (sni string, addr string) {
 	a.RLock()
 	defer a.RUnlock()
 
-	decoys := a.config.DecoyList.TlsDecoys
+	decoys := a.config.GetDecoyList().GetTlsDecoys()
 	if len(decoys) == 0 {
 		return "", ""
 	}
@@ -187,7 +188,7 @@ func (a *assets) GetDecoy() pb.TLSDecoySpec {
 	a.RLock()
 	defer a.RUnlock()
 
-	decoys := a.config.DecoyList.TlsDecoys
+	decoys := a.config.GetDecoyList().GetTlsDecoys()
 	chosenDecoy := pb.TLSDecoySpec{}
 	if len(decoys) == 0 {
 		return chosenDecoy
@@ -220,7 +221,7 @@ func (a *assets) GetPubkey() *[32]byte {
 	defer a.RUnlock()
 
 	var pKey [32]byte
-	copy(pKey[:], a.config.DefaultPubkey.Key[:])
+	copy(pKey[:], a.config.GetDefaultPubkey().GetKey()[:])
 	return &pKey
 }
 
@@ -273,6 +274,9 @@ func (a *assets) SetDecoys(decoys []*pb.TLSDecoySpec) (err error) {
 	a.Lock()
 	defer a.Unlock()
 
+	if a.config.DecoyList == nil {
+		a.config.DecoyList = &pb.DecoyList{}
+	}
 	a.config.DecoyList.TlsDecoys = decoys
 	err = a.saveClientConf()
 	return
