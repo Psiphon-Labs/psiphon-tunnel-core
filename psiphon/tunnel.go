@@ -1222,8 +1222,14 @@ func performLivenessTest(
 
 	go ssh.DiscardRequests(requests)
 
+	// In consideration of memory-constrained environments, use a modest-sized
+	// copy buffer since many tunnel establishment workers may run the
+	// liveness test concurrently.
+
+	var buffer [8192]byte
+
 	if metrics.UpstreamBytes > 0 {
-		n, err := io.CopyN(channel, rand.Reader, int64(metrics.UpstreamBytes))
+		n, err := common.CopyNBuffer(channel, rand.Reader, int64(metrics.UpstreamBytes), buffer[:])
 		metrics.SentUpstreamBytes = int(n)
 		if err != nil {
 			return metrics, common.ContextError(err)
@@ -1231,7 +1237,7 @@ func performLivenessTest(
 	}
 
 	if metrics.DownstreamBytes > 0 {
-		n, err := io.CopyN(ioutil.Discard, channel, int64(metrics.DownstreamBytes))
+		n, err := common.CopyNBuffer(ioutil.Discard, channel, int64(metrics.DownstreamBytes), buffer[:])
 		metrics.ReceivedDownstreamBytes = int(n)
 		if err != nil {
 			return metrics, common.ContextError(err)
