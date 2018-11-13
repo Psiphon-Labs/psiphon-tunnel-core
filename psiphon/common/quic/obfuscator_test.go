@@ -68,19 +68,36 @@ func Disabled_TestPaddingLenLimit(t *testing.T) {
 		t.Fatalf("NewObfuscatedPacketConn failed: %s", err)
 	}
 
+	// Use large blocks to get close to the key stream limit.
+
 	var b [2 * 1024 * 1024 * 1024]byte
 	n := int64(0)
 
-	for {
+	for i := 0; i < 127; i++ {
 		err := c.getRandomBytes(b[:])
 		if err != nil {
 			t.Fatalf("getRandomBytes failed: %s", err)
 		}
 		n += int64(len(b))
-		if n > (1<<38)+1 {
-			// We're past the chacha20 key stream limit.
-			break
+	}
+
+	// Stop using large blocks 64 bytes short of the limit, 2^38-64.
+
+	err = c.getRandomBytes(b[0 : len(b)-128])
+	if err != nil {
+		t.Fatalf("getRandomBytes failed: %s", err)
+	}
+	n += int64(len(b) - 128)
+
+	// Invoke byte at a time across the limit boundary to ensure we
+	// don't jump over the limit case.
+
+	for i := 0; i < 192; i++ {
+		err := c.getRandomBytes(b[0:1])
+		if err != nil {
+			t.Fatalf("getRandomBytes failed: %s", err)
 		}
+		n += int64(1)
 	}
 }
 

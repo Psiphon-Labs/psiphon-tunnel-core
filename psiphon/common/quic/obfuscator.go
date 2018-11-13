@@ -42,7 +42,7 @@ const (
 	MAX_OBFUSCATED_QUIC_IPV6_PACKET_SIZE = 1352
 	MAX_PADDING                          = 64
 	NONCE_SIZE                           = 12
-	RANDOM_STREAM_LIMIT                  = 1 << 38
+	RANDOM_STREAM_LIMIT                  = 1<<38 - 64
 )
 
 // ObfuscatedPacketConn wraps a QUIC net.PacketConn with an obfuscation layer
@@ -83,7 +83,7 @@ func (p *peerMode) isStale() bool {
 	return monotime.Since(p.lastPacketTime) >= SERVER_IDLE_TIMEOUT
 }
 
-// NewObfuscatedPacketConnPacketConn creates a new ObfuscatedPacketConn.
+// NewObfuscatedPacketConn creates a new ObfuscatedPacketConn.
 func NewObfuscatedPacketConn(
 	conn net.PacketConn,
 	isServer bool,
@@ -368,7 +368,7 @@ func (conn *ObfuscatedPacketConn) getRandomBytes(b []byte) error {
 
 	if conn.randomStreamCount+int64(len(b)) >= RANDOM_STREAM_LIMIT {
 
-		// Re-key before reaching the 2^38 chacha20 key stream limit.
+		// Re-key before reaching the 2^38-64 chacha20 key stream limit.
 
 		var randomStreamKey [32]byte
 		_, err := rand.Read(randomStreamKey[:])
