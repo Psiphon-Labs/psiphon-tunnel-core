@@ -83,7 +83,7 @@ func (p *peerMode) isStale() bool {
 	return monotime.Since(p.lastPacketTime) >= SERVER_IDLE_TIMEOUT
 }
 
-// NewObfuscatedPacketConnPacketConn creates a new ObfuscatedPacketConn.
+// NewObfuscatedPacketConn creates a new ObfuscatedPacketConn.
 func NewObfuscatedPacketConn(
 	conn net.PacketConn,
 	isServer bool,
