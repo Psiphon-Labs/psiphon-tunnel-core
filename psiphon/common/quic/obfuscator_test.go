@@ -27,9 +27,9 @@ import (
 
 func TestPaddingLen(t *testing.T) {
 
-	c, err := NewObfuscatedPacketConnPacketConn(nil, false, "key")
+	c, err := NewObfuscatedPacketConn(nil, false, "key")
 	if err != nil {
-		t.Fatalf("NewObfuscatedPacketConnPacketConn failed: %s", err)
+		t.Fatalf("NewObfuscatedPacketConn failed: %s", err)
 	}
 
 	for max := 0; max <= 255; max++ {
@@ -38,7 +38,10 @@ func TestPaddingLen(t *testing.T) {
 		repeats := 200000
 
 		for r := 0; r < repeats; r++ {
-			padding := c.getPaddingLen(max)
+			padding, err := c.getRandomPaddingLen(max)
+			if err != nil {
+				t.Fatalf("getRandomPaddingLen failed: %s", err)
+			}
 			if padding < 0 || padding > max {
 				t.Fatalf("unexpected padding: max = %d, padding = %d", max, padding)
 			}
@@ -56,16 +59,41 @@ func TestPaddingLen(t *testing.T) {
 	}
 }
 
+func Disabled_TestPaddingLenLimit(t *testing.T) {
+
+	// This test takes up to ~2 minute to complete, so it's disabled by default.
+
+	c, err := NewObfuscatedPacketConn(nil, false, "key")
+	if err != nil {
+		t.Fatalf("NewObfuscatedPacketConn failed: %s", err)
+	}
+
+	var b [2 * 1024 * 1024 * 1024]byte
+	n := int64(0)
+
+	for {
+		err := c.getRandomBytes(b[:])
+		if err != nil {
+			t.Fatalf("getRandomBytes failed: %s", err)
+		}
+		n += int64(len(b))
+		if n > (1<<38)+1 {
+			// We're past the chacha20 key stream limit.
+			break
+		}
+	}
+}
+
 func BenchmarkPaddingLen(b *testing.B) {
 
-	c, err := NewObfuscatedPacketConnPacketConn(nil, false, "key")
+	c, err := NewObfuscatedPacketConn(nil, false, "key")
 	if err != nil {
-		b.Fatalf("NewObfuscatedPacketConnPacketConn failed: %s", err)
+		b.Fatalf("NewObfuscatedPacketConn failed: %s", err)
 	}
 
 	b.Run("getPaddingLen", func(b *testing.B) {
 		for n := 0; n < b.N; n++ {
-			_ = c.getPaddingLen(n % MAX_PADDING)
+			_, _ = c.getRandomPaddingLen(n % MAX_PADDING)
 		}
 	})
 

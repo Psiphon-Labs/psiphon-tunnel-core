@@ -43,7 +43,6 @@ package quic
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -113,15 +112,15 @@ func Listen(
 	}
 
 	var packetConn net.PacketConn
-	packetConn, err = NewObfuscatedPacketConnPacketConn(
+	packetConn, err = NewObfuscatedPacketConn(
 		udpConn, true, obfuscationKey)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
 	// This wrapping must be outermost to ensure that all
-	// ReadFrom/WriteTo calls are intercepted.
-	packetConn = newWorkaroundPacketConn(logger, packetConn)
+	// ReadFrom errors are intercepted and logged.
+	packetConn = newLoggingPacketConn(logger, packetConn)
 
 	quicListener, err := quic_go.Listen(
 		packetConn, tlsConfig, quicConfig)
@@ -199,7 +198,7 @@ func Dial(
 
 	if negotiateQUICVersion == protocol.QUIC_VERSION_OBFUSCATED {
 		var err error
-		packetConn, err = NewObfuscatedPacketConnPacketConn(
+		packetConn, err = NewObfuscatedPacketConn(
 			packetConn, false, obfuscationKey)
 		if err != nil {
 			return nil, common.ContextError(err)
@@ -421,7 +420,7 @@ func isErrorIndicatingClosed(err error) bool {
 	return false
 }
 
-// workaroundPacketConn is a workaround for issues in the quic-go server (as of
+// loggingPacketConn is a workaround for issues in the quic-go server (as of
 // revision ffdfa1).
 //
 // 1. quic-go will shutdown the QUIC server on any error returned from
@@ -441,45 +440,33 @@ func isErrorIndicatingClosed(err error) bool {
 //    packetHandlerMap and its mutex are used by all client sessions, this
 //    effectively hangs the entire server.
 //
-// 3. In certain cases, quic-go appears to get into a state where it
-//    calls WriteTo in an unconstrained loop, far exceeding the expected
-//    rate for normal outbound traffic. This state pegs the psiphond
-//    CPU and, in the case of obfuscated QUIC, exhausts the 2^38 byte
-//    random padding key stream. To mitigate this, we rate limit
-//    workaroundPacketConn when an excessive WriteTo call rate is
-//    detected.
-//
-// workaroundPacketConn checks PacketConn ReadFrom errors and returns any usable
-// values or loops and calls ReadFrom again. In practise, due to the nature of
-// UDP sockets, ReadFrom errors are exceptional as they will most likely not
+// loggingPacketConn PacketConn ReadFrom errors and returns any usable values
+// or loops and calls ReadFrom again. In practise, due to the nature of UDP
+// sockets, ReadFrom errors are exceptional as they will mosyt likely not
 // occur due to network transmission failures. ObfuscatedPacketConn returns
 // errors that could be due to network transmission failures that corrupt
-// packets; these are marked as net.Error.Temporary() and workaroundPacketConn
+// packets; these are marked as net.Error.Temporary() and loggingPacketConn
 // logs these at debug level.
 //
-// workaroundPacketConn assumes specific quic-go behavior and will break other
-// use cases, such as setting deadlines and expecting net.Error.Timeout()
+// loggingPacketConn assumes quic-go revision ffdfa1 behavior and will break
+// other behavior, such as setting deadlines and expecting net.Error.Timeout()
 // errors from ReadFrom.
-type workaroundPacketConn struct {
+type loggingPacketConn struct {
 	net.PacketConn
 	logger common.Logger
-
-	mutex      sync.Mutex
-	currentMS  time.Time
-	callsPerMS int
 }
 
-func newWorkaroundPacketConn(
+func newLoggingPacketConn(
 	logger common.Logger,
-	packetConn net.PacketConn) *workaroundPacketConn {
+	packetConn net.PacketConn) *loggingPacketConn {
 
-	return &workaroundPacketConn{
+	return &loggingPacketConn{
 		PacketConn: packetConn,
 		logger:     logger,
 	}
 }
 
-func (conn *workaroundPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
+func (conn *loggingPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 
 	for {
 		n, addr, err := conn.PacketConn.ReadFrom(p)
@@ -500,23 +487,4 @@ func (conn *workaroundPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			return n, addr, nil
 		}
 	}
-}
-
-func (conn *workaroundPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
-
-	conn.mutex.Lock()
-	currentMS := time.Now().Round(time.Millisecond)
-	if currentMS != conn.currentMS {
-		conn.currentMS = currentMS
-		conn.callsPerMS = 0
-	} else {
-		if conn.callsPerMS >= 1000 {
-			conn.mutex.Unlock()
-			return 0, common.ContextError(errors.New("rate limit exceeded"))
-		}
-		conn.callsPerMS += 1
-	}
-	conn.mutex.Unlock()
-
-	return conn.PacketConn.WriteTo(p, addr)
 }
