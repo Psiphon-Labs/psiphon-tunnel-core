@@ -15,6 +15,7 @@ import (
 type sendStreamI interface {
 	SendStream
 	handleStopSendingFrame(*wire.StopSendingFrame)
+	hasData() bool
 	popStreamFrame(maxBytes protocol.ByteCount) (*wire.StreamFrame, bool)
 	closeForShutdown(error)
 	handleMaxStreamDataFrame(*wire.MaxStreamDataFrame)
@@ -181,12 +182,18 @@ func (s *sendStream) popStreamFrameImpl(maxBytes protocol.ByteCount) (bool /* co
 	return frame.FinBit, frame, s.dataForWriting != nil
 }
 
+func (s *sendStream) hasData() bool {
+	s.mutex.Lock()
+	hasData := len(s.dataForWriting) > 0
+	s.mutex.Unlock()
+	return hasData
+}
+
 func (s *sendStream) getDataForWriting(maxBytes protocol.ByteCount) ([]byte, bool /* should send FIN */) {
 	if s.dataForWriting == nil {
 		return nil, s.finishedWriting && !s.finSent
 	}
 
-	// TODO(#657): Flow control for the crypto stream
 	if s.streamID != s.version.CryptoStreamID() {
 		maxBytes = utils.MinByteCount(maxBytes, s.flowController.SendWindowSize())
 	}
