@@ -42,7 +42,7 @@ const (
 	MAX_OBFUSCATED_QUIC_IPV6_PACKET_SIZE = 1352
 	MAX_PADDING                          = 64
 	NONCE_SIZE                           = 12
-	RANDOM_STREAM_LIMIT                  = 1 << 38
+	RANDOM_STREAM_LIMIT                  = 1<<38 - 64
 )
 
 // ObfuscatedPacketConn wraps a QUIC net.PacketConn with an obfuscation layer
