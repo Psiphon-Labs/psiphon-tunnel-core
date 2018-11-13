@@ -368,7 +368,7 @@ func (conn *ObfuscatedPacketConn) getRandomBytes(b []byte) error {
 
 	if conn.randomStreamCount+int64(len(b)) >= RANDOM_STREAM_LIMIT {
 
-		// Re-key before reaching the 2^38 chacha20 key stream limit.
+		// Re-key before reaching the 2^38-64 chacha20 key stream limit.
 
 		var randomStreamKey [32]byte
 		_, err := rand.Read(randomStreamKey[:])
