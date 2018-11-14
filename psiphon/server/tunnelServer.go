@@ -1068,7 +1068,9 @@ func (sshClient *sshClient) run(
 		nil)
 	if err != nil {
 		conn.Close()
-		log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
+		if !isExpectedTunnelIOError(err) {
+			log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
+		}
 		return
 	}
 	conn = activityConn
