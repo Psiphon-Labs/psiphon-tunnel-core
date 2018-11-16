@@ -5,4 +5,7 @@ shared:
 static:
 	go build -buildmode=c-archive -o libpsiphontunnel.a PsiphonTunnel.go
 
+clean:
+	rm libpsiphontunnel.so libpsiphontunnel.h
+
 .PHONY: static
