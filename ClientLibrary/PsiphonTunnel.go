@@ -110,9 +110,14 @@ var managedStartResult *C.char
 //     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L371
 //   iOS:
 //     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L1105
-func psiphon_tunnel_start(configJSON, embeddedServerEntryList, clientPlatform, networkID string, timeout int64) *C.char {
+func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform, cNetworkID *C.char, timeout int64) *C.char {
 	// NOTE: all arguments which are still referenced once Start returns should be copied onto the Go heap
 	//       to ensure that they don't disappear later on and cause Go to crash.
+
+	configJSON := C.GoString(cConfigJSON)
+	embeddedServerEntryList := C.GoString(cEmbeddedServerEntryList)
+	clientPlatform := C.GoString(cClientPlatform)
+	networkID := C.GoString(cNetworkID)
 
 	// Load provided config
 

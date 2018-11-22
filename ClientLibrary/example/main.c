@@ -37,29 +37,25 @@ int main(int argc, char *argv[]) {
         printf("Using default config file: %s\n", default_config);
     }
 
-    char *file_contents = read_file(config);
-    if (!file_contents) {
+    char *psiphon_config = read_file(config);
+    if (!psiphon_config) {
         printf("Could not find config file: %s\n", config);
         return 1;
     }
 
-    GoString psiphon_config = {file_contents, strlen(file_contents)};
-
     // set server list
-    GoString serverList = {};
+    char *serverList = "";
 
     // set client platform
     char * const os = "OSName"; // "Android", "iOS", "Windows", etc.
     char * const os_version = "OSVersion"; // "4.0.4", "10.3", "10.0.10240", etc.
     char * const bundle_identifier = "com.example.exampleClientLibraryApp";
-    char * test_client_platform = (char *)malloc(sizeof(char) * (strlen(os) + strlen(os_version) + strlen(bundle_identifier) + 4)); // 4 for 3 underscores and null terminating character
+    char * client_platform = (char *)malloc(sizeof(char) * (strlen(os) + strlen(os_version) + strlen(bundle_identifier) + 4)); // 4 for 3 underscores and null terminating character
 
-    int n = sprintf(test_client_platform, "%s_%s_%s", os, os_version, bundle_identifier);
-    GoString client_platform = {test_client_platform, n};
+    int n = sprintf(client_platform, "%s_%s_%s", os, os_version, bundle_identifier);
 
     // set network ID
-    char * const test_network_id = "TEST";
-    GoString network_id = {test_network_id, strlen(test_network_id)};
+    char * const network_id = "TEST";
 
     // set timout
     long long timeout = 60;
