@@ -299,55 +299,62 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 		buffer := b.buffer[:]
 		defer obfuscatorBufferPool.Put(b)
 
-		nonce := buffer[0:NONCE_SIZE]
 		for {
+
+			// Note: this zero-memory pattern is compiler optimized:
+			// https://golang.org/cl/137880043
+			for i := range buffer {
+				buffer[i] = 0
+			}
+
+			nonce := buffer[0:NONCE_SIZE]
 			err := conn.getRandomBytes(nonce)
 			if err != nil {
 				return 0, common.ContextError(err)
 			}
 
-			// Don't use a random nonce that looks like QUIC, or the
+			// Obfuscated QUIC padding results in packets that exceed the
+			// QUIC max packet size of 1280.
+
+			maxPaddingLen := maxObfuscatedPacketSize - (n + (NONCE_SIZE + 1))
+			if maxPaddingLen < 0 {
+				maxPaddingLen = 0
+			}
+			if maxPaddingLen > MAX_PADDING {
+				maxPaddingLen = MAX_PADDING
+			}
+
+			paddingLen, err := conn.getRandomPaddingLen(maxPaddingLen)
+			if err != nil {
+				return 0, common.ContextError(err)
+			}
+
+			buffer[NONCE_SIZE] = uint8(paddingLen)
+
+			padding := buffer[(NONCE_SIZE + 1) : (NONCE_SIZE+1)+paddingLen]
+			err = conn.getRandomBytes(padding)
+			if err != nil {
+				return 0, common.ContextError(err)
+			}
+
+			copy(buffer[(NONCE_SIZE+1)+paddingLen:], p)
+			dataLen := (NONCE_SIZE + 1) + paddingLen + n
+
+			cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], nonce)
+			if err != nil {
+				return 0, common.ContextError(err)
+			}
+			packet := buffer[NONCE_SIZE:dataLen]
+			cipher.XORKeyStream(packet, packet)
+
+			p = buffer[:dataLen]
+
+			// Don't use obfuscation that looks like QUIC, or the
 			// peer will not treat this packet as obfuscated.
-			if !isQUIC(buffer[:]) {
+			if !isQUIC(p) {
 				break
 			}
 		}
-
-		// Obfuscated QUIC padding results in packets that exceed the
-		// QUIC max packet size of 1280.
-
-		maxPaddingLen := maxObfuscatedPacketSize - (n + (NONCE_SIZE + 1))
-		if maxPaddingLen < 0 {
-			maxPaddingLen = 0
-		}
-		if maxPaddingLen > MAX_PADDING {
-			maxPaddingLen = MAX_PADDING
-		}
-
-		paddingLen, err := conn.getRandomPaddingLen(maxPaddingLen)
-		if err != nil {
-			return 0, common.ContextError(err)
-		}
-
-		buffer[NONCE_SIZE] = uint8(paddingLen)
-
-		padding := buffer[(NONCE_SIZE + 1) : (NONCE_SIZE+1)+paddingLen]
-		err = conn.getRandomBytes(padding)
-		if err != nil {
-			return 0, common.ContextError(err)
-		}
-
-		copy(buffer[(NONCE_SIZE+1)+paddingLen:], p)
-		dataLen := (NONCE_SIZE + 1) + paddingLen + n
-
-		cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], nonce)
-		if err != nil {
-			return 0, common.ContextError(err)
-		}
-		packet := buffer[NONCE_SIZE:dataLen]
-		cipher.XORKeyStream(packet, packet)
-
-		p = buffer[:dataLen]
 	}
 
 	_, err := conn.PacketConn.WriteTo(p, addr)

@@ -8,5 +8,5 @@ libpsiphontunnel.so: ../PsiphonTunnel.go
 	go build -buildmode=c-shared -o libpsiphontunnel.so ../PsiphonTunnel.go
 
 clean:
-	rm libpsiphontunnel.so PsiphonTunnel.h main main.o
+	rm libpsiphontunnel.so libpsiphontunnel.h main main.o
 
