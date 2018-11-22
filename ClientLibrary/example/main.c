@@ -67,13 +67,13 @@ int main(int argc, char *argv[]) {
     // connect 5 times
     for (int i = 0; i < 5; i++) {
         // start will return once Psiphon connects or does not connect for timeout seconds
-        char *result = Start(psiphon_config, serverList, client_platform, network_id, timeout);
+        char *result = psiphon_tunnel_start(psiphon_config, serverList, client_platform, network_id, timeout);
 
         // print results
         printf("Result: %s\n", result);
 
         // The underlying memory of `result` is managed by PsiphonTunnel and is freed in Stop
-        Stop();
+        psiphon_tunnel_stop();
     }
 }
 

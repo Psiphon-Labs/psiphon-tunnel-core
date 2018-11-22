@@ -51,7 +51,7 @@ var tunnel psiphonTunnel
 // Memory managed by PsiphonTunnel which is allocated in Start and freed in Stop
 var managedStartResult *C.char
 
-//export Start
+//export psiphon_tunnel_start
 //
 // ******************************* WARNING ********************************
 // The underlying memory referenced by the return value of Start is managed
@@ -110,7 +110,7 @@ var managedStartResult *C.char
 //     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L371
 //   iOS:
 //     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L1105
-func Start(configJSON, embeddedServerEntryList, clientPlatform, networkID string, timeout int64) *C.char {
+func psiphon_tunnel_start(configJSON, embeddedServerEntryList, clientPlatform, networkID string, timeout int64) *C.char {
 	// NOTE: all arguments which are still referenced once Start returns should be copied onto the Go heap
 	//       to ensure that they don't disappear later on and cause Go to crash.
 
@@ -267,12 +267,13 @@ func Start(configJSON, embeddedServerEntryList, clientPlatform, networkID string
 	return managedStartResult
 }
 
-//export Stop
+//export psiphon_tunnel_stop
+//
 // Stop stops the controller if it is running and waits for it to clean up and exit.
 //
 // Stop should always be called after a successful call to Start to ensure the
 // controller is not left running.
-func Stop() {
+func psiphon_tunnel_stop() {
 	freeManagedStartResult()
 
 	if tunnel.stopController != nil {
