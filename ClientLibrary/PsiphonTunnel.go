@@ -110,7 +110,12 @@ var managedStartResult *C.char
 //     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L371
 //   iOS:
 //     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L1105
-func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform, cNetworkID *C.char, timeout int64) *C.char {
+//
+// timeout specifies a time limit after which to stop attempting to connect and return an error if an active tunnel
+// has not been established. A timeout of 0 will result in no timeout condition and the controller will attempt to
+// establish an active tunnel indefinitely (or until psiphon_tunnel_stop is called). Timeout values >= 0 override
+// the optional `EstablishTunnelTimeoutSeconds` config field.
+func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform, cNetworkID *C.char, timeout *uint64) *C.char {
 
 	configJSON := C.GoString(cConfigJSON)
 	embeddedServerEntryList := C.GoString(cEmbeddedServerEntryList)
@@ -131,6 +136,13 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 	// Set client platform
 
 	config.ClientPlatform = clientPlatform
+
+	// Set timeout
+
+	if timeout != nil {
+		// timeout overrides optional timeout field in config
+		config.EstablishTunnelTimeoutSeconds = nil
+	}
 
 	// All config fields should be set before calling commit
 	err = config.Commit()
@@ -212,12 +224,22 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 
 	startTime := time.Now()
 
-	// Setup timeout signal
+	optionalTimeout := make(chan error)
 
-	runtimeTimeout := time.Duration(timeout) * time.Second
+	if timeout != nil && *timeout != 0 {
+		// Setup timeout signal
 
-	timeoutSignal, cancelTimeout := context.WithTimeout(context.Background(), runtimeTimeout)
-	defer cancelTimeout()
+		runtimeTimeout := time.Duration(*timeout) * time.Second
+
+		timeoutSignal, cancelTimeout := context.WithTimeout(context.Background(), runtimeTimeout)
+
+		defer cancelTimeout()
+
+		go func() {
+			<-timeoutSignal.Done()
+			optionalTimeout <- timeoutSignal.Err()
+		}()
+	}
 
 	// Run test
 
@@ -242,9 +264,8 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 		result.BootstrapTime = secondsBeforeNow(startTime)
 		result.HttpProxyPort = tunnel.httpProxyPort
 		result.SocksProxyPort = tunnel.socksProxyPort
-	case <-timeoutSignal.Done():
+	case err := <-optionalTimeout:
 		result.Code = startResultCodeTimeout
-		err = timeoutSignal.Err()
 		if err != nil {
 			result.ErrorString = fmt.Sprintf("Timeout occured before Psiphon connected: %s", err.Error())
 		}

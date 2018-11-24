@@ -58,7 +58,8 @@ int main(int argc, char *argv[]) {
     char * const network_id = "TEST";
 
     // set timout
-    long long timeout = 60;
+    unsigned long long *timeout = (unsigned long long*)malloc(sizeof(unsigned long long));
+    *timeout = (unsigned long long)60;
 
     // connect 5 times
     for (int i = 0; i < 5; i++) {
