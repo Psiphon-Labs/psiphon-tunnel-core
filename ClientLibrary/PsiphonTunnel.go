@@ -115,13 +115,20 @@ var managedStartResult *C.char
 // has not been established. A timeout of 0 will result in no timeout condition and the controller will attempt to
 // establish an active tunnel indefinitely (or until psiphon_tunnel_stop is called). Timeout values >= 0 override
 // the optional `EstablishTunnelTimeoutSeconds` config field.
-func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform, cNetworkID *C.char, timeout *uint64) *C.char {
+func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform, cNetworkID *C.char, timeout *int64) *C.char {
 
 	// Stop any active tunnels
 	psiphon_tunnel_stop()
 
+	// Validate timeout value
+
+	if timeout != nil && *timeout < 0 {
+		return startErrorJson(errors.New("Timeout value must be non-negative"))
+	}
+
 	// NOTE: all arguments which are still referenced once Start returns should be copied onto the Go heap
 	//       to ensure that they don't disappear later on and cause Go to crash.
+
 	configJSON := C.GoString(cConfigJSON)
 	embeddedServerEntryList := C.GoString(cEmbeddedServerEntryList)
 	clientPlatform := C.GoString(cClientPlatform)
