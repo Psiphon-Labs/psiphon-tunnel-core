@@ -117,6 +117,11 @@ var managedStartResult *C.char
 // the optional `EstablishTunnelTimeoutSeconds` config field.
 func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform, cNetworkID *C.char, timeout *uint64) *C.char {
 
+	// Stop any active tunnels
+	psiphon_tunnel_stop()
+
+	// NOTE: all arguments which are still referenced once Start returns should be copied onto the Go heap
+	//       to ensure that they don't disappear later on and cause Go to crash.
 	configJSON := C.GoString(cConfigJSON)
 	embeddedServerEntryList := C.GoString(cEmbeddedServerEntryList)
 	clientPlatform := C.GoString(cClientPlatform)
@@ -275,9 +280,6 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 		result.ErrorString = err.Error()
 		tunnel.stopController()
 	}
-
-	// Free previous result
-	freeManagedStartResult()
 
 	// Return result
 	managedStartResult = marshalStartResult(result)
