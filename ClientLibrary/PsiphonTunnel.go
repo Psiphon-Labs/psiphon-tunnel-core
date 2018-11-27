@@ -110,7 +110,24 @@ var managedStartResult *C.char
 //     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L371
 //   iOS:
 //     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L1105
-func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform, cNetworkID *C.char, timeout int64) *C.char {
+//
+// timeout specifies a time limit after which to stop attempting to connect and return an error if an active tunnel
+// has not been established. A timeout of 0 will result in no timeout condition and the controller will attempt to
+// establish an active tunnel indefinitely (or until psiphon_tunnel_stop is called). Timeout values >= 0 override
+// the optional `EstablishTunnelTimeoutSeconds` config field.
+func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform, cNetworkID *C.char, timeout *int64) *C.char {
+
+	// Stop any active tunnels
+
+	psiphon_tunnel_stop()
+
+	// Validate timeout value
+
+	if timeout != nil && *timeout < 0 {
+		managedStartResult = startErrorJson(errors.New("Timeout value must be non-negative"))
+		return managedStartResult
+	}
+
 	// NOTE: all arguments which are still referenced once Start returns should be copied onto the Go heap
 	//       to ensure that they don't disappear later on and cause Go to crash.
 
@@ -123,27 +140,30 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 
 	config, err := psiphon.LoadConfig([]byte(configJSON))
 	if err != nil {
-		return startErrorJson(err)
+		managedStartResult = startErrorJson(err)
+		return managedStartResult
 	}
 
 	// Set network ID
 
-	if networkID != "" {
-		// Ensure config.NetworkID is on the Go heap
-		config.NetworkID = deepCopy(networkID)
-	}
+	config.NetworkID = networkID
 
 	// Set client platform
 
-	if clientPlatform != "" {
-		// Ensure config.ClientPlatform is on the Go heap
-		config.ClientPlatform = deepCopy(clientPlatform)
+	config.ClientPlatform = clientPlatform
+
+	// Set timeout
+
+	if timeout != nil {
+		// timeout overrides optional timeout field in config
+		config.EstablishTunnelTimeoutSeconds = 0
 	}
 
 	// All config fields should be set before calling commit
 	err = config.Commit()
 	if err != nil {
-		return startErrorJson(err)
+		managedStartResult = startErrorJson(err)
+		return managedStartResult
 	}
 
 	// Setup signals
@@ -189,7 +209,8 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 
 	err = psiphon.OpenDataStore(config)
 	if err != nil {
-		return startErrorJson(err)
+		managedStartResult = startErrorJson(err)
+		return managedStartResult
 	}
 
 	// Store embedded server entries
@@ -199,19 +220,22 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 		common.GetCurrentTimestamp(),
 		protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
 	if err != nil {
-		return startErrorJson(err)
+		managedStartResult = startErrorJson(err)
+		return managedStartResult
 	}
 
 	err = psiphon.StoreServerEntries(config, serverEntries, false)
 	if err != nil {
-		return startErrorJson(err)
+		managedStartResult = startErrorJson(err)
+		return managedStartResult
 	}
 
 	// Run Psiphon
 
 	controller, err := psiphon.NewController(config)
 	if err != nil {
-		return startErrorJson(err)
+		managedStartResult = startErrorJson(err)
+		return managedStartResult
 	}
 
 	tunnel.controllerCtx, tunnel.stopController = context.WithCancel(context.Background())
@@ -220,12 +244,22 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 
 	startTime := time.Now()
 
-	// Setup timeout signal
+	optionalTimeout := make(chan error)
 
-	runtimeTimeout := time.Duration(timeout) * time.Second
+	if timeout != nil && *timeout != 0 {
+		// Setup timeout signal
 
-	timeoutSignal, cancelTimeout := context.WithTimeout(context.Background(), runtimeTimeout)
-	defer cancelTimeout()
+		runtimeTimeout := time.Duration(*timeout) * time.Second
+
+		timeoutSignal, cancelTimeout := context.WithTimeout(context.Background(), runtimeTimeout)
+
+		defer cancelTimeout()
+
+		go func() {
+			<-timeoutSignal.Done()
+			optionalTimeout <- timeoutSignal.Err()
+		}()
+	}
 
 	// Run test
 
@@ -250,9 +284,8 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 		result.BootstrapTime = secondsBeforeNow(startTime)
 		result.HttpProxyPort = tunnel.httpProxyPort
 		result.SocksProxyPort = tunnel.socksProxyPort
-	case <-timeoutSignal.Done():
+	case err := <-optionalTimeout:
 		result.Code = startResultCodeTimeout
-		err = timeoutSignal.Err()
 		if err != nil {
 			result.ErrorString = fmt.Sprintf("Timeout occured before Psiphon connected: %s", err.Error())
 		}
@@ -262,9 +295,6 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 		result.ErrorString = err.Error()
 		tunnel.stopController()
 	}
-
-	// Free previous result
-	freeManagedStartResult()
 
 	// Return result
 	managedStartResult = marshalStartResult(result)
@@ -322,11 +352,6 @@ func startErrorJson(err error) *C.char {
 	result.ErrorString = err.Error()
 
 	return marshalStartResult(result)
-}
-
-// deepCopy copies a string's underlying buffer and returns a new string which references the new buffer.
-func deepCopy(s string) string {
-	return string([]byte(s))
 }
 
 // freeManagedStartResult frees the memory on the heap pointed to by managedStartResult.

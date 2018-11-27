@@ -168,7 +168,7 @@ type Config struct {
 
 	// EstablishTunnelTimeoutSeconds specifies a time limit after which to
 	// halt the core tunnel controller if no tunnel has been established. The
-	// default is parameters.EstablishTunnelTimeoutSeconds.
+	// default is parameters.EstablishTunnelTimeout.
 	EstablishTunnelTimeoutSeconds *int
 
 	// EstablishTunnelPausePeriodSeconds specifies the delay between attempts
