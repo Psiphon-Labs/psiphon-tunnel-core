@@ -71,7 +71,7 @@ type TrafficRulesSet struct {
 	// not any meek request for an existing session, if the
 	// MeekRateLimiterHistorySize requests occur in
 	// MeekRateLimiterThresholdSeconds. The scope of rate limiting may be
-	// limited using LimitMeekRateLimiterRegions.
+	// limited using LimitMeekRateLimiterRegions and LimitMeekRateLimiterISPs.
 	//
 	// Hot reloading a new history size will result in existing history being
 	// truncated.
@@ -84,8 +84,14 @@ type TrafficRulesSet struct {
 	// MeekRateLimiterRegions, if set, limits application of the meek
 	// late-stage rate limiter to clients in the specified list of GeoIP
 	// countries. When omitted or empty, meek rate limiting, if configured,
-	// is applied to all clients.
+	// is applied to all client countries.
 	MeekRateLimiterRegions []string
+
+	// MeekRateLimiterISPs, if set, limits application of the meek
+	// late-stage rate limiter to clients in the specified list of GeoIP
+	// ISPs. When omitted or empty, meek rate limiting, if configured,
+	// is applied to all client ISPs.
+	MeekRateLimiterISPs []string
 
 	// MeekRateLimiterGarbageCollectionTriggerCount specifies the number of
 	// rate limit events after which garbage collection is manually triggered
@@ -110,10 +116,14 @@ type TrafficRulesFilter struct {
 	// matches.
 	TunnelProtocols []string
 
-	// Regions is a list of client GeoIP countries that the client must
-	// reolve to to match this filter. When omitted or empty, any client
-	// region matches.
+	// Regions is a list of countries that the client must geolocate to in
+	// order to match this filter. When omitted or empty, any client country
+	// matches.
 	Regions []string
+
+	// ISPs is a list of ISPs that the client must geolocate to in order to
+	// match this filter. When omitted or empty, any client ISP matches.
+	ISPs []string
 
 	// APIProtocol specifies whether the client must use the SSH
 	// API protocol (when "ssh") or the web API protocol (when "web").
@@ -262,6 +272,7 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 			set.MeekRateLimiterHistorySize = newSet.MeekRateLimiterHistorySize
 			set.MeekRateLimiterThresholdSeconds = newSet.MeekRateLimiterThresholdSeconds
 			set.MeekRateLimiterRegions = newSet.MeekRateLimiterRegions
+			set.MeekRateLimiterISPs = newSet.MeekRateLimiterISPs
 			set.MeekRateLimiterGarbageCollectionTriggerCount = newSet.MeekRateLimiterGarbageCollectionTriggerCount
 			set.MeekRateLimiterReapHistoryFrequencySeconds = newSet.MeekRateLimiterReapHistoryFrequencySeconds
 			set.DefaultRules = newSet.DefaultRules
@@ -470,6 +481,12 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			}
 		}
 
+		if len(filteredRules.Filter.ISPs) > 0 {
+			if !common.Contains(filteredRules.Filter.ISPs, geoIPData.ISP) {
+				continue
+			}
+		}
+
 		if filteredRules.Filter.APIProtocol != "" {
 			if !state.completed {
 				continue
@@ -599,7 +616,7 @@ func (set *TrafficRulesSet) GetTrafficRules(
 
 // GetMeekRateLimiterConfig gets a snapshot of the meek rate limiter
 // configuration values.
-func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (int, int, []string, int, int) {
+func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (int, int, []string, []string, int, int) {
 
 	set.ReloadableFile.RLock()
 	defer set.ReloadableFile.RUnlock()
@@ -618,6 +635,7 @@ func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (int, int, []string, int,
 	return set.MeekRateLimiterHistorySize,
 		set.MeekRateLimiterThresholdSeconds,
 		set.MeekRateLimiterRegions,
+		set.MeekRateLimiterISPs,
 		GCTriggerCount,
 		reapFrequencySeconds
 }
