@@ -156,7 +156,7 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 
 	if timeout != nil {
 		// timeout overrides optional timeout field in config
-		config.EstablishTunnelTimeoutSeconds = 0
+		*config.EstablishTunnelTimeoutSeconds = 0
 	}
 
 	// All config fields should be set before calling commit
