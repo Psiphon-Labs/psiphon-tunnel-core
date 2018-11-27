@@ -104,6 +104,7 @@ func TestTactics(t *testing.T) {
           },
           "Tactics" : {
             "Parameters" : {
+              "FragmentorDownstreamProbability" : 1.0,
               "FragmentorDownstreamMinTotalBytes" : 1,
               "FragmentorDownstreamMaxTotalBytes" : 1,
               "FragmentorDownstreamMinWriteBytes" : 1,
