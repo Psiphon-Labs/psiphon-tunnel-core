@@ -233,10 +233,6 @@ type Server struct {
 	// RequestObfuscatedKey is the tactics request obfuscation key.
 	RequestObfuscatedKey []byte
 
-	// EnforceLimitsServerSide enables server-side enforcement of certain limit
-	// tactics parameters via Listeners.
-	EnforceLimitsServerSide bool
-
 	// DefaultTactics is the baseline tactics for all clients. It must include a
 	// TTL and Probability.
 	DefaultTactics Tactics
@@ -268,6 +264,7 @@ type Filter struct {
 	// Regions specifies a list of GeoIP regions/countries the client
 	// must match.
 	Regions []string
+
 	// ISPs specifies a list of GeoIP ISPs the client must match.
 	ISPs []string
 
@@ -456,7 +453,6 @@ func NewServer(
 			server.RequestPublicKey = newServer.RequestPublicKey
 			server.RequestPrivateKey = newServer.RequestPrivateKey
 			server.RequestObfuscatedKey = newServer.RequestObfuscatedKey
-			server.EnforceLimitsServerSide = newServer.EnforceLimitsServerSide
 			server.DefaultTactics = newServer.DefaultTactics
 			server.FilteredTactics = newServer.FilteredTactics
 
@@ -1144,17 +1140,6 @@ func (listener *Listener) Accept() (net.Conn, error) {
 		}
 
 		p := clientParameters.Get()
-
-		if listener.server.EnforceLimitsServerSide {
-			tunnelProtocols := p.TunnelProtocols(parameters.LimitTunnelProtocols)
-			if len(tunnelProtocols) > 0 &&
-				!common.Contains(tunnelProtocols, listener.tunnelProtocol) {
-				// Don't accept this connection as its tactics prohibits the
-				// listener's tunnel protocol.
-				conn.Close()
-				continue
-			}
-		}
 
 		// Wrap the conn in a fragmentor.Conn, subject to tactics parameters.
 		//

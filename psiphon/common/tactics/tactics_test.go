@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
@@ -49,7 +50,6 @@ func TestTactics(t *testing.T) {
       "RequestPublicKey" : "%s",
       "RequestPrivateKey" : "%s",
       "RequestObfuscatedKey" : "%s",
-      "EnforceLimitsServerSide" : true,
       "DefaultTactics" : {
         "TTL" : "1s",
         "Probability" : %0.1f,
@@ -104,7 +104,11 @@ func TestTactics(t *testing.T) {
           },
           "Tactics" : {
             "Parameters" : {
-              "LimitTunnelProtocols" : ["SSH"]
+              "FragmentorDownstreamMinTotalBytes" : 1,
+              "FragmentorDownstreamMaxTotalBytes" : 1,
+              "FragmentorDownstreamMinWriteBytes" : 1,
+              "FragmentorDownstreamMaxWriteBytes" : 1,
+              "FragmentorDownstreamLimitProtocols" : ["OSSH"]
             }
           }
         }
@@ -129,8 +133,8 @@ func TestTactics(t *testing.T) {
 	expectedApplyCount := 3
 
 	listenerProtocol := "OSSH"
-	listenerProhibitedGeoIP := func(string) common.GeoIPData { return common.GeoIPData{Country: "R7"} }
-	listenerAllowedGeoIP := func(string) common.GeoIPData { return common.GeoIPData{Country: "R8"} }
+	listenerFragmentedGeoIP := func(string) common.GeoIPData { return common.GeoIPData{Country: "R7"} }
+	listenerUnfragmentedGeoIP := func(string) common.GeoIPData { return common.GeoIPData{Country: "R8"} }
 
 	tacticsConfig := fmt.Sprintf(
 		tacticsConfigTemplate,
@@ -736,17 +740,17 @@ func TestTactics(t *testing.T) {
 	listenerTestCases := []struct {
 		description      string
 		geoIPLookup      func(string) common.GeoIPData
-		expectConnection bool
+		expectFragmentor bool
 	}{
 		{
-			"connection prohibited",
-			listenerProhibitedGeoIP,
-			false,
+			"fragmented",
+			listenerFragmentedGeoIP,
+			true,
 		},
 		{
-			"connection allowed",
-			listenerAllowedGeoIP,
-			true,
+			"unfragmented",
+			listenerUnfragmentedGeoIP,
+			false,
 		},
 	}
 
@@ -770,13 +774,12 @@ func TestTactics(t *testing.T) {
 				return
 			}
 
-			result := make(chan struct{}, 1)
+			result := make(chan net.Conn, 1)
 
 			go func() {
 				serverConn, err := tacticsListener.Accept()
 				if err == nil {
-					result <- *new(struct{})
-					serverConn.Close()
+					result <- serverConn
 				}
 			}()
 
@@ -784,14 +787,16 @@ func TestTactics(t *testing.T) {
 			defer timer.Stop()
 
 			select {
-			case <-result:
-				if !testCase.expectConnection {
-					t.Fatalf("unexpected accepted connection")
+			case serverConn := <-result:
+				_, isFragmentor := serverConn.(*fragmentor.Conn)
+				if testCase.expectFragmentor && !isFragmentor {
+					t.Fatalf("unexpected non-fragmentor: %T", serverConn)
+				} else if !testCase.expectFragmentor && isFragmentor {
+					t.Fatalf("unexpected fragmentor:  %T", serverConn)
 				}
+				serverConn.Close()
 			case <-timer.C:
-				if testCase.expectConnection {
-					t.Fatalf("timeout before expected accepted connection")
-				}
+				t.Fatalf("timeout before expected accepted connection")
 			}
 
 			clientConn.Close()
