@@ -118,12 +118,14 @@ var managedStartResult *C.char
 func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform, cNetworkID *C.char, timeout *int64) *C.char {
 
 	// Stop any active tunnels
+
 	psiphon_tunnel_stop()
 
 	// Validate timeout value
 
 	if timeout != nil && *timeout < 0 {
-		return startErrorJson(errors.New("Timeout value must be non-negative"))
+		managedStartResult = startErrorJson(errors.New("Timeout value must be non-negative"))
+		return managedStartResult
 	}
 
 	// NOTE: all arguments which are still referenced once Start returns should be copied onto the Go heap
@@ -138,7 +140,8 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 
 	config, err := psiphon.LoadConfig([]byte(configJSON))
 	if err != nil {
-		return startErrorJson(err)
+		managedStartResult = startErrorJson(err)
+		return managedStartResult
 	}
 
 	// Set network ID
@@ -159,7 +162,8 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 	// All config fields should be set before calling commit
 	err = config.Commit()
 	if err != nil {
-		return startErrorJson(err)
+		managedStartResult = startErrorJson(err)
+		return managedStartResult
 	}
 
 	// Setup signals
@@ -205,7 +209,8 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 
 	err = psiphon.OpenDataStore(config)
 	if err != nil {
-		return startErrorJson(err)
+		managedStartResult = startErrorJson(err)
+		return managedStartResult
 	}
 
 	// Store embedded server entries
@@ -215,19 +220,22 @@ func psiphon_tunnel_start(cConfigJSON, cEmbeddedServerEntryList, cClientPlatform
 		common.GetCurrentTimestamp(),
 		protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
 	if err != nil {
-		return startErrorJson(err)
+		managedStartResult = startErrorJson(err)
+		return managedStartResult
 	}
 
 	err = psiphon.StoreServerEntries(config, serverEntries, false)
 	if err != nil {
-		return startErrorJson(err)
+		managedStartResult = startErrorJson(err)
+		return managedStartResult
 	}
 
 	// Run Psiphon
 
 	controller, err := psiphon.NewController(config)
 	if err != nil {
-		return startErrorJson(err)
+		managedStartResult = startErrorJson(err)
+		return managedStartResult
 	}
 
 	tunnel.controllerCtx, tunnel.stopController = context.WithCancel(context.Background())
