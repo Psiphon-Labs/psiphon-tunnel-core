@@ -385,7 +385,7 @@ func (controller *Controller) establishTunnelWatcher() {
 		select {
 		case <-timer.C:
 			if !controller.hasEstablishedOnce() {
-				NoticeAlert("failed to establish tunnel before timeout")
+				NoticeEstablishTunnelTimeout(timeout)
 				controller.SignalComponentFailure()
 			}
 		case <-controller.runCtx.Done():
