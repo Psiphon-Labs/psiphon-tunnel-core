@@ -766,6 +766,14 @@ func NoticeLivenessTest(ipAddress string, metrics *livenessTestMetrics, success 
 		"success", success)
 }
 
+// NoticeEstablishTunnelTimeout reports that the configured EstablishTunnelTimeout
+// duration was exceeded.
+func NoticeEstablishTunnelTimeout(timeout time.Duration) {
+	singletonNoticeLogger.outputNotice(
+		"EstablishTunnelTimeout", noticeShowUser,
+		"timeout", timeout)
+}
+
 type repetitiveNoticeState struct {
 	message string
 	repeats int

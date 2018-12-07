@@ -306,6 +306,16 @@ func ContextError(err error) error {
 	return fmt.Errorf("%s#%d: %s", getFunctionName(pc), line, err)
 }
 
+// ContextErrorMsg works like ContextError, but adds a message string to
+// the error message.
+func ContextErrorMsg(err error, message string) error {
+	if err == nil {
+		return nil
+	}
+	pc, _, line, _ := runtime.Caller(1)
+	return fmt.Errorf("%s#%d: %s: %s", getFunctionName(pc), line, message, err)
+}
+
 // Compress returns zlib compressed data
 func Compress(data []byte) []byte {
 	var compressedData bytes.Buffer
