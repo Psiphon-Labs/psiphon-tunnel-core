@@ -10,11 +10,7 @@ import (
 	"strings"
 
 	// [Psiphon]
-	"crypto/rand"
-	"math/big"
-	math_rand "math/rand"
-
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 // [Psiphon]
@@ -61,6 +57,9 @@ type clientHelloMsg struct {
 	earlyData                        bool
 	delegatedCredential              bool
 	extendedMSSupported              bool // RFC7627
+
+	// [Psiphon]
+	clientHelloPRNGSeed *prng.Seed
 }
 
 // Function used for signature_algorithms and signature_algorithrms_cert
@@ -477,22 +476,22 @@ func (m *clientHelloMsg) randomizedMarshal() []byte {
 		return m.raw
 	}
 
+	PRNG := prng.NewPRNGWithSeed(m.clientHelloPRNGSeed)
+
 	permute := func(n int, swap func(i, j int)) {
 		if n < 2 {
 			return
 		}
-		perm, err := common.MakeSecureRandomPerm(n)
-		if err == nil {
-			for i, j := range perm {
-				swap(i, j)
-			}
+		perm := PRNG.Perm(n)
+		for i, j := range perm {
+			swap(i, j)
 		}
 	}
 
 	truncate := func(n int, cut func(i int)) {
 		i := n
 		for ; i > 1; i-- {
-			if !common.FlipCoin() {
+			if !PRNG.FlipCoin() {
 				break
 			}
 		}
@@ -572,7 +571,7 @@ func (m *clientHelloMsg) randomizedMarshal() []byte {
 
 	m.alpnProtocols = []string{"h2", "http/1.1"}
 
-	if common.FlipCoin() {
+	if PRNG.FlipCoin() {
 		m.supportedVersions = []uint16{VersionTLS13, VersionTLS12, VersionTLS11, VersionTLS10}
 	}
 
@@ -592,7 +591,7 @@ func (m *clientHelloMsg) randomizedMarshal() []byte {
 				z = z[4:]
 			})
 	}
-	if m.ocspStapling && common.FlipCoin() { // May be omitted
+	if m.ocspStapling && PRNG.FlipCoin() { // May be omitted
 		extensionsLength += 1 + 2 + 2
 		numExtensions++
 		extensionMarshalers = append(extensionMarshalers,
@@ -722,7 +721,7 @@ func (m *clientHelloMsg) randomizedMarshal() []byte {
 				z = marshalExtensionSignatureAlgorithms(extensionSignatureAlgorithmsCert, z, m.getSignatureAlgorithmsCert())
 			})
 	}
-	if m.secureRenegotiationSupported && common.FlipCoin() { // May be omitted
+	if m.secureRenegotiationSupported && PRNG.FlipCoin() { // May be omitted
 		extensionsLength += 1 + len(m.secureRenegotiation)
 		numExtensions++
 		extensionMarshalers = append(extensionMarshalers,
@@ -770,7 +769,7 @@ func (m *clientHelloMsg) randomizedMarshal() []byte {
 				lengths[1] = byte(stringsLength)
 			})
 	}
-	if m.scts && common.FlipCoin() { // May be omitted
+	if m.scts && PRNG.FlipCoin() { // May be omitted
 		numExtensions++
 		extensionMarshalers = append(extensionMarshalers,
 			func() {
@@ -850,7 +849,7 @@ func (m *clientHelloMsg) randomizedMarshal() []byte {
 				z = z[4:]
 			})
 	}
-	if m.extendedMSSupported && common.FlipCoin() { // May be omitted
+	if m.extendedMSSupported && PRNG.FlipCoin() { // May be omitted
 		numExtensions++
 		extensionMarshalers = append(extensionMarshalers,
 			func() {
@@ -863,7 +862,7 @@ func (m *clientHelloMsg) randomizedMarshal() []byte {
 
 	// TODO: GREASE, Extended Master Secret (https://github.com/cloudflare/tls-tris/pull/30)
 
-	if common.FlipCoin() {
+	if PRNG.FlipCoin() {
 		numExtensions++
 		extensionMarshalers = append(extensionMarshalers,
 			func() {
@@ -876,7 +875,7 @@ func (m *clientHelloMsg) randomizedMarshal() []byte {
 
 	preExtensionLength := 2 + 32 + 1 + len(m.sessionId) + 2 + len(m.cipherSuites)*2 + 1 + len(m.compressionMethods)
 
-	if common.FlipCoin() {
+	if PRNG.FlipCoin() {
 
 		// Padding must be last, since it depends on extensionsLength
 
@@ -2951,13 +2950,7 @@ func (m *newSessionTicketMsg) marshal() (x []byte) {
 	// Set lifetime hint to a more typical value.
 	if obfuscateSessionTickets {
 		hints := []int{300, 1200, 7200, 10800, 64800, 100800, 129600}
-		randomInt, err := rand.Int(rand.Reader, big.NewInt(int64(len(hints))))
-		index := 0
-		if err == nil {
-			index = int(randomInt.Int64())
-		} else {
-			index = math_rand.Intn(len(hints))
-		}
+		index := prng.Intn(len(hints))
 		hint := hints[index]
 		x[4] = uint8(hint >> 24)
 		x[5] = uint8(hint >> 16)

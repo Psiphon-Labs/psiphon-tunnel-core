@@ -30,24 +30,21 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
-	"net/url"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tapdance"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
-	regen "github.com/zach-klippenstein/goregen"
 )
 
 // Tunneler specifies the interface required by components that use a tunnel.
@@ -91,9 +88,8 @@ type Tunnel struct {
 	isDiscarded                bool
 	isClosed                   bool
 	sessionId                  string
-	serverEntry                *protocol.ServerEntry
+	dialParams                 *DialParameters
 	serverContext              *ServerContext
-	protocol                   string
 	conn                       *common.ActivityMonitoredConn
 	sshClient                  *ssh.Client
 	sshServerRequests          <-chan *ssh.Request
@@ -105,40 +101,6 @@ type Tunnel struct {
 	adjustedEstablishStartTime monotime.Time
 	establishDuration          time.Duration
 	establishedTime            monotime.Time
-	dialStats                  *DialStats
-}
-
-// DialStats records additional dial config that is sent to the server for
-// stats recording. This data is used to analyze which configuration settings
-// are successful in various circumvention contexts, and includes meek dial
-// params and upstream proxy params.
-//
-// For upstream proxy, only proxy type and custom header names are recorded;
-// proxy address and custom header values are considered PII.
-//
-// MeekResolvedIPAddress is set asynchronously, as it is not known until the
-// dial process has begun. The atomic.Value will contain a string, initialized
-// to "", and set to the resolved IP address once that part of the dial
-// process has completed.
-type DialStats struct {
-	SelectedSSHClientVersion       bool
-	SSHClientVersion               string
-	UpstreamProxyType              string
-	UpstreamProxyCustomHeaderNames []string
-	MeekDialAddress                string
-	MeekResolvedIPAddress          atomic.Value
-	MeekSNIServerName              string
-	MeekHostHeader                 string
-	MeekTransformedHostName        bool
-	SelectedUserAgent              bool
-	UserAgent                      string
-	SelectedTLSProfile             bool
-	TLSProfile                     string
-	DialPortNumber                 string
-	QUICVersion                    string
-	QUICDialSNIAddress             string
-	DialConnMetrics                common.MetricsSource
-	ObfuscatedSSHConnMetrics       common.MetricsSource
 }
 
 // ConnectTunnel first makes a network transport connection to the
@@ -165,19 +127,13 @@ func ConnectTunnel(
 	ctx context.Context,
 	config *Config,
 	sessionId string,
-	serverEntry *protocol.ServerEntry,
-	selectedProtocol string,
-	adjustedEstablishStartTime monotime.Time) (*Tunnel, error) {
-
-	if !serverEntry.SupportsProtocol(selectedProtocol) {
-		return nil, common.ContextError(
-			fmt.Errorf("server does not support tunnel protocol: %s", selectedProtocol))
-	}
+	adjustedEstablishStartTime monotime.Time,
+	dialParams *DialParameters) (*Tunnel, error) {
 
 	// Build transport layers and establish SSH connection. Note that
 	// dialConn and monitoredConn are the same network connection.
-	dialResult, err := dialSsh(
-		ctx, config, serverEntry, selectedProtocol, sessionId)
+	dialResult, err := dialTunnel(
+		ctx, config, sessionId, dialParams)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -187,8 +143,7 @@ func ConnectTunnel(
 		mutex:             new(sync.Mutex),
 		config:            config,
 		sessionId:         sessionId,
-		serverEntry:       serverEntry,
-		protocol:          selectedProtocol,
+		dialParams:        dialParams,
 		conn:              dialResult.monitoredConn,
 		sshClient:         dialResult.sshClient,
 		sshServerRequests: dialResult.sshRequests,
@@ -196,7 +151,6 @@ func ConnectTunnel(
 		// not listening. Senders should not block.
 		signalPortForwardFailure:   make(chan struct{}, 1),
 		adjustedEstablishStartTime: adjustedEstablishStartTime,
-		dialStats:                  dialResult.dialStats,
 	}, nil
 }
 
@@ -207,12 +161,24 @@ func (tunnel *Tunnel) Activate(
 	ctx context.Context,
 	tunnelOwner TunnelOwner) error {
 
+	// Ensure that, unless the context is cancelled, any replayed dial
+	// parameters are cleared, no longer to be retried, if the tunnel fails to
+	// activate.
+	activationSucceeded := false
+	defer func() {
+		if !activationSucceeded && ctx.Err() == nil {
+			tunnel.dialParams.Failed()
+		}
+	}()
+
 	// Create a new Psiphon API server context for this tunnel. This includes
 	// performing a handshake request. If the handshake fails, this activation
 	// fails.
 	var serverContext *ServerContext
 	if !tunnel.config.DisableApi {
-		NoticeInfo("starting server context for %s", tunnel.serverEntry.IpAddress)
+		NoticeInfo(
+			"starting server context for %s",
+			tunnel.dialParams.ServerEntry.IpAddress)
 
 		// Call NewServerContext in a goroutine, as it blocks on a network operation,
 		// the handshake request, and would block shutdown. If the shutdown signal is
@@ -262,11 +228,14 @@ func (tunnel *Tunnel) Activate(
 		if result.err != nil {
 			return common.ContextError(
 				fmt.Errorf("error starting server context for %s: %s",
-					tunnel.serverEntry.IpAddress, result.err))
+					tunnel.dialParams.ServerEntry.IpAddress, result.err))
 		}
 
 		serverContext = result.serverContext
 	}
+
+	// The activation succeeded.
+	activationSucceeded = true
 
 	tunnel.mutex.Lock()
 
@@ -483,7 +452,8 @@ func (tunnel *Tunnel) wrapWithTransferStats(conn net.Conn) net.Conn {
 		regexps = tunnel.serverContext.StatsRegexps()
 	}
 
-	return transferstats.NewConn(conn, tunnel.serverEntry.IpAddress, regexps)
+	return transferstats.NewConn(
+		conn, tunnel.dialParams.ServerEntry.IpAddress, regexps)
 }
 
 // SignalComponentFailure notifies the tunnel that an associated component has failed.
@@ -537,285 +507,26 @@ func (conn *TunneledConn) Close() error {
 	return conn.Conn.Close()
 }
 
-// selectFrontingParameters is a helper which selects/generates meek fronting
-// parameters where the server entry provides multiple options or patterns.
-func selectFrontingParameters(
-	serverEntry *protocol.ServerEntry) (frontingAddress, frontingHost string, err error) {
-
-	if len(serverEntry.MeekFrontingAddressesRegex) > 0 {
-
-		// Generate a front address based on the regex.
-
-		frontingAddress, err = regen.Generate(serverEntry.MeekFrontingAddressesRegex)
-		if err != nil {
-			return "", "", common.ContextError(err)
-		}
-	} else {
-
-		// Randomly select, for this connection attempt, one front address for
-		// fronting-capable servers.
-
-		if len(serverEntry.MeekFrontingAddresses) == 0 {
-			return "", "", common.ContextError(errors.New("MeekFrontingAddresses is empty"))
-		}
-		index, err := common.MakeSecureRandomInt(len(serverEntry.MeekFrontingAddresses))
-		if err != nil {
-			return "", "", common.ContextError(err)
-		}
-		frontingAddress = serverEntry.MeekFrontingAddresses[index]
-	}
-
-	if len(serverEntry.MeekFrontingHosts) > 0 {
-		index, err := common.MakeSecureRandomInt(len(serverEntry.MeekFrontingHosts))
-		if err != nil {
-			return "", "", common.ContextError(err)
-		}
-		frontingHost = serverEntry.MeekFrontingHosts[index]
-	} else {
-		// Backwards compatibility case
-		frontingHost = serverEntry.MeekFrontingHost
-	}
-
-	return
-}
-
-// initMeekConfig is a helper that creates a MeekConfig suitable for the
-// selected meek tunnel protocol.
-func initMeekConfig(
-	config *Config,
-	serverEntry *protocol.ServerEntry,
-	selectedProtocol,
-	sessionId string) (*MeekConfig, error) {
-
-	doMeekTransformHostName := func() bool {
-		return config.clientParameters.Get().WeightedCoinFlip(
-			parameters.TransformHostNameProbability)
-	}
-
-	var dialAddress string
-	useHTTPS := false
-	useObfuscatedSessionTickets := false
-	var SNIServerName, hostHeader string
-	transformedHostName := false
-
-	switch selectedProtocol {
-	case protocol.TUNNEL_PROTOCOL_FRONTED_MEEK:
-
-		frontingAddress, frontingHost, err := selectFrontingParameters(serverEntry)
-		if err != nil {
-			return nil, common.ContextError(err)
-		}
-		dialAddress = fmt.Sprintf("%s:443", frontingAddress)
-		useHTTPS = true
-		if !serverEntry.MeekFrontingDisableSNI {
-			SNIServerName = frontingAddress
-			if doMeekTransformHostName() {
-				SNIServerName = common.GenerateHostName()
-				transformedHostName = true
-			}
-		}
-		hostHeader = frontingHost
-
-	case protocol.TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
-
-		frontingAddress, frontingHost, err := selectFrontingParameters(serverEntry)
-		if err != nil {
-			return nil, common.ContextError(err)
-		}
-		dialAddress = fmt.Sprintf("%s:80", frontingAddress)
-		hostHeader = frontingHost
-
-	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
-
-		dialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
-		hostname := serverEntry.IpAddress
-		if doMeekTransformHostName() {
-			hostname = common.GenerateHostName()
-			transformedHostName = true
-		}
-		if serverEntry.MeekServerPort == 80 {
-			hostHeader = hostname
-		} else {
-			hostHeader = fmt.Sprintf("%s:%d", hostname, serverEntry.MeekServerPort)
-		}
-
-	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
-		protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET:
-
-		dialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
-		useHTTPS = true
-		if selectedProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET {
-			useObfuscatedSessionTickets = true
-		}
-		SNIServerName = serverEntry.IpAddress
-		if doMeekTransformHostName() {
-			SNIServerName = common.GenerateHostName()
-			transformedHostName = true
-		}
-		if serverEntry.MeekServerPort == 443 {
-			hostHeader = serverEntry.IpAddress
-		} else {
-			hostHeader = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
-		}
-
-	default:
-		return nil, common.ContextError(
-			fmt.Errorf("unknown tunnel protocol: %s", selectedProtocol))
-	}
-
-	if config.clientParameters.Get().Bool(parameters.MeekDialDomainsOnly) {
-		host, _, _ := net.SplitHostPort(dialAddress)
-		if net.ParseIP(host) != nil {
-			return nil, common.ContextError(errors.New("dial address is not domain"))
-		}
-	}
-
-	// The underlying TLS will automatically disable SNI for IP address server name
-	// values; we have this explicit check here so we record the correct value for stats.
-	if net.ParseIP(SNIServerName) != nil {
-		SNIServerName = ""
-	}
-
-	// Pin the TLS profile for the entire meek connection.
-	selectedTLSProfile := ""
-	if protocol.TunnelProtocolUsesMeekHTTPS(selectedProtocol) {
-		selectedTLSProfile = SelectTLSProfile(config.clientParameters)
-	}
-
-	return &MeekConfig{
-		ClientParameters:              config.clientParameters,
-		DialAddress:                   dialAddress,
-		UseHTTPS:                      useHTTPS,
-		TLSProfile:                    selectedTLSProfile,
-		UseObfuscatedSessionTickets:   useObfuscatedSessionTickets,
-		SNIServerName:                 SNIServerName,
-		HostHeader:                    hostHeader,
-		TransformedHostName:           transformedHostName,
-		ClientTunnelProtocol:          selectedProtocol,
-		MeekCookieEncryptionPublicKey: serverEntry.MeekCookieEncryptionPublicKey,
-		MeekObfuscatedKey:             serverEntry.MeekObfuscatedKey,
-	}, nil
-}
-
-// initDialConfig is a helper that creates a DialConfig for the tunnel.
-func initDialConfig(
-	config *Config,
-	meekConfig *MeekConfig,
-	tunnelProtocol string) (*DialConfig, *DialStats) {
-
-	p := config.clientParameters.Get()
-
-	var upstreamProxyType string
-	if config.UseUpstreamProxy() {
-		// Note: UpstreamProxyURL will be validated in the dial
-		proxyURL, err := url.Parse(config.UpstreamProxyURL)
-		if err == nil {
-			upstreamProxyType = proxyURL.Scheme
-		}
-	}
-
-	dialCustomHeaders := make(map[string][]string)
-	if config.CustomHeaders != nil {
-		for k, v := range config.CustomHeaders {
-			dialCustomHeaders[k] = make([]string, len(v))
-			copy(dialCustomHeaders[k], v)
-		}
-	}
-
-	additionalCustomHeaders := p.HTTPHeaders(parameters.AdditionalCustomHeaders)
-	if additionalCustomHeaders != nil {
-		for k, v := range additionalCustomHeaders {
-			dialCustomHeaders[k] = make([]string, len(v))
-			copy(dialCustomHeaders[k], v)
-		}
-	}
-
-	// Set User-Agent when using meek or an upstream HTTP proxy
-	var selectedUserAgent bool
-	if meekConfig != nil || upstreamProxyType == "http" {
-		selectedUserAgent = UserAgentIfUnset(config.clientParameters, dialCustomHeaders)
-	}
-
-	fragmentorConfig := fragmentor.NewUpstreamConfig(p, tunnelProtocol)
-
-	dialConfig := &DialConfig{
-		UpstreamProxyURL:              config.UpstreamProxyURL,
-		CustomHeaders:                 dialCustomHeaders,
-		DeviceBinder:                  config.deviceBinder,
-		DnsServerGetter:               config.DnsServerGetter,
-		IPv6Synthesizer:               config.IPv6Synthesizer,
-		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
-		FragmentorConfig:              fragmentorConfig,
-	}
-
-	dialStats := &DialStats{}
-
-	if selectedUserAgent {
-		dialStats.SelectedUserAgent = true
-		dialStats.UserAgent = dialConfig.CustomHeaders.Get("User-Agent")
-	}
-
-	if upstreamProxyType != "" {
-		dialStats.UpstreamProxyType = upstreamProxyType
-	}
-
-	if len(dialConfig.CustomHeaders) > 0 {
-		dialStats.UpstreamProxyCustomHeaderNames = make([]string, 0)
-		for name := range dialConfig.CustomHeaders {
-			if selectedUserAgent && name == "User-Agent" {
-				continue
-			}
-			dialStats.UpstreamProxyCustomHeaderNames = append(dialStats.UpstreamProxyCustomHeaderNames, name)
-		}
-	}
-
-	// Unconditionally initialize MeekResolvedIPAddress, so a valid string can
-	// always be read.
-	dialStats.MeekResolvedIPAddress.Store("")
-
-	if meekConfig != nil {
-		dialStats.MeekDialAddress = meekConfig.DialAddress
-		dialStats.MeekSNIServerName = meekConfig.SNIServerName
-		dialStats.MeekHostHeader = meekConfig.HostHeader
-		dialStats.MeekTransformedHostName = meekConfig.TransformedHostName
-		dialStats.SelectedTLSProfile = true
-		dialStats.TLSProfile = meekConfig.TLSProfile
-
-		// Use an asynchronous callback to record the resolved IP address when
-		// dialing a domain name. Note that DialMeek doesn't immediately
-		// establish any HTTP connections, so the resolved IP address won't be
-		// reported in all cases until after SSH traffic is relayed or a
-		// endpoint request is made over the meek connection.
-		dialConfig.ResolvedIPCallback = func(IPAddress string) {
-			dialStats.MeekResolvedIPAddress.Store(IPAddress)
-		}
-
-	}
-
-	return dialConfig, dialStats
-}
-
 type dialResult struct {
 	dialConn      net.Conn
 	monitoredConn *common.ActivityMonitoredConn
 	sshClient     *ssh.Client
 	sshRequests   <-chan *ssh.Request
-	dialStats     *DialStats
 }
 
-// dialSsh is a helper that builds the transport layers and establishes the SSH connection.
-// When additional dial configuration is used, DialStats are recorded and returned.
+// dialTunnel is a helper that builds the transport layers and establishes the
+// SSH connection. When additional dial configuration is used, dial metrics
+// are recorded and returned.
 //
-// The net.Conn return value is the value to be removed from pendingConns; additional
-// layering (ThrottledConn, ActivityMonitoredConn) is applied, but this return value is the
-// base dial conn. The *ActivityMonitoredConn return value is the layered conn passed into
-// the ssh.Client.
-func dialSsh(
+// The net.Conn return value is the value to be removed from pendingConns;
+// additional layering (ThrottledConn, ActivityMonitoredConn) is applied, but
+// this return value is the base dial conn. The *ActivityMonitoredConn return
+// value is the layered conn passed into the ssh.Client.
+func dialTunnel(
 	ctx context.Context,
 	config *Config,
-	serverEntry *protocol.ServerEntry,
-	selectedProtocol,
-	sessionId string) (*dialResult, error) {
+	sessionId string,
+	dialParams *DialParameters) (*dialResult, error) {
 
 	p := config.clientParameters.Get()
 	timeout := p.Duration(parameters.TunnelConnectTimeout)
@@ -828,94 +539,47 @@ func dialSsh(
 	livenessTestMaxDownstreamBytes := p.Int(parameters.LivenessTestMaxDownstreamBytes)
 	p = nil
 
+	// Ensure that, unless the base context is cancelled, any replayed dial
+	// parameters are cleared, no longer to be retried, if the tunnel fails to
+	// connect.
+	dialSucceeded := false
+	baseCtx := ctx
+	defer func() {
+		if !dialSucceeded && baseCtx.Err() == nil {
+			dialParams.Failed()
+		}
+	}()
+
 	var cancelFunc context.CancelFunc
 	ctx, cancelFunc = context.WithTimeout(ctx, timeout)
 	defer cancelFunc()
 
-	// The meek protocols tunnel obfuscated SSH. Obfuscated SSH is layered on top of SSH.
-	// So depending on which protocol is used, multiple layers are initialized.
-
-	// Note: when SSHClientVersion is "", a default is supplied by the ssh package:
-	// https://godoc.org/golang.org/x/crypto/ssh#ClientConfig
-	var directDialAddress string
-	var QUICVersion string
-	var QUICDialSNIAddress string
-	var SSHClientVersion string
-	var meekConfig *MeekConfig
-	var err error
-
-	switch selectedProtocol {
-	case protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH:
-		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
-
-	case protocol.TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH:
-		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedTapdancePort)
-
-	case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
-		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedQUICPort)
-		QUICVersion = selectQUICVersion(config.clientParameters)
-		QUICDialSNIAddress = fmt.Sprintf("%s:%d", common.GenerateHostName(), serverEntry.SshObfuscatedQUICPort)
-
-	case protocol.TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH:
-		directDialAddress = serverEntry.IpAddress
-
-	case protocol.TUNNEL_PROTOCOL_SSH:
-		SSHClientVersion = pickSSHClientVersion()
-		directDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshPort)
-
-	default:
-		meekConfig, err = initMeekConfig(config, serverEntry, selectedProtocol, sessionId)
-		if err != nil {
-			return nil, common.ContextError(err)
-		}
-	}
-
-	dialConfig, dialStats := initDialConfig(config, meekConfig, selectedProtocol)
-
-	if meekConfig != nil {
-		_, dialStats.DialPortNumber, _ = net.SplitHostPort(meekConfig.DialAddress)
-	} else {
-		_, dialStats.DialPortNumber, _ = net.SplitHostPort(directDialAddress)
-	}
-
-	switch selectedProtocol {
-	case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
-		dialStats.QUICVersion = QUICVersion
-		dialStats.QUICDialSNIAddress = QUICDialSNIAddress
-
-	case protocol.TUNNEL_PROTOCOL_SSH:
-		dialStats.SelectedSSHClientVersion = true
-		dialStats.SSHClientVersion = SSHClientVersion
-	}
-
-	// Note: dialStats.MeekResolvedIPAddress isn't set until the dial begins,
+	// Note: dialParams.MeekResolvedIPAddress isn't set until the dial begins,
 	// so it will always be blank in NoticeConnectingServer.
 
-	NoticeConnectingServer(
-		serverEntry.IpAddress,
-		serverEntry.Region,
-		selectedProtocol,
-		dialStats)
+	NoticeConnectingServer(dialParams)
 
 	// Create the base transport: meek or direct connection
 
 	var dialConn net.Conn
-	if meekConfig != nil {
+	var err error
+
+	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
 
 		dialConn, err = DialMeek(
 			ctx,
-			meekConfig,
-			dialConfig)
+			dialParams.GetMeekConfig(),
+			dialParams.GetDialConfig())
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
 
-	} else if protocol.TunnelProtocolUsesQUIC(selectedProtocol) {
+	} else if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
 
 		packetConn, remoteAddr, err := NewUDPConn(
 			ctx,
-			directDialAddress,
-			dialConfig)
+			dialParams.DirectDialAddress,
+			dialParams.GetDialConfig())
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -924,31 +588,32 @@ func dialSsh(
 			ctx,
 			packetConn,
 			remoteAddr,
-			QUICDialSNIAddress,
-			QUICVersion,
-			serverEntry.SshObfuscatedKey)
+			dialParams.QUICDialSNIAddress,
+			dialParams.QUICVersion,
+			dialParams.ServerEntry.SshObfuscatedKey,
+			dialParams.ObfuscatedQUICPaddingSeed)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
 
-	} else if protocol.TunnelProtocolUsesMarionette(selectedProtocol) {
+	} else if protocol.TunnelProtocolUsesMarionette(dialParams.TunnelProtocol) {
 
 		dialConn, err = marionette.Dial(
 			ctx,
-			NewNetDialer(dialConfig),
-			serverEntry.MarionetteFormat,
-			directDialAddress)
+			NewNetDialer(dialParams.GetDialConfig()),
+			dialParams.ServerEntry.MarionetteFormat,
+			dialParams.DirectDialAddress)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
 
-	} else if protocol.TunnelProtocolUsesTapdance(selectedProtocol) {
+	} else if protocol.TunnelProtocolUsesTapdance(dialParams.TunnelProtocol) {
 
 		dialConn, err = tapdance.Dial(
 			ctx,
 			config.DataStoreDirectory,
-			NewNetDialer(dialConfig),
-			directDialAddress)
+			NewNetDialer(dialParams.GetDialConfig()),
+			dialParams.DirectDialAddress)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -957,8 +622,8 @@ func dialSsh(
 
 		dialConn, err = DialTCP(
 			ctx,
-			directDialAddress,
-			dialConfig)
+			dialParams.DirectDialAddress,
+			dialParams.GetDialConfig())
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -970,12 +635,12 @@ func dialSsh(
 	// Limitation: for meek, GetMetrics from underlying fragmentor.Conn(s)
 	// should be called in order to log fragmentor metrics for meek sessions.
 	if metricsSource, ok := dialConn.(common.MetricsSource); ok {
-		dialStats.DialConnMetrics = metricsSource
+		dialParams.DialConnMetrics = metricsSource
 	}
 
 	// If dialConn is not a Closer, tunnel failure detection may be slower
 	if _, ok := dialConn.(common.Closer); !ok {
-		NoticeAlert("tunnel.dialSsh: dialConn is not a Closer")
+		NoticeAlert("tunnel.dialTunnel: dialConn is not a Closer")
 	}
 
 	cleanupConn := dialConn
@@ -999,22 +664,24 @@ func dialSsh(
 
 	// Add obfuscated SSH layer
 	var sshConn net.Conn = throttledConn
-	if protocol.TunnelProtocolUsesObfuscatedSSH(selectedProtocol) {
+	if protocol.TunnelProtocolUsesObfuscatedSSH(dialParams.TunnelProtocol) {
 		obfuscatedSSHConn, err := obfuscator.NewObfuscatedSSHConn(
 			obfuscator.OBFUSCATION_CONN_MODE_CLIENT,
 			throttledConn,
-			serverEntry.SshObfuscatedKey,
+			dialParams.ServerEntry.SshObfuscatedKey,
+			dialParams.ObfuscatorPaddingSeed,
 			&obfuscatedSSHMinPadding,
 			&obfuscatedSSHMaxPadding)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
 		sshConn = obfuscatedSSHConn
-		dialStats.ObfuscatedSSHConnMetrics = obfuscatedSSHConn
+		dialParams.ObfuscatedSSHConnMetrics = obfuscatedSSHConn
 	}
 
 	// Now establish the SSH session over the conn transport
-	expectedPublicKey, err := base64.StdEncoding.DecodeString(serverEntry.SshHostKey)
+	expectedPublicKey, err := base64.StdEncoding.DecodeString(
+		dialParams.ServerEntry.SshHostKey)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -1029,7 +696,7 @@ func dialSsh(
 
 	sshPasswordPayload := &protocol.SSHPasswordPayload{
 		SessionId:          sessionId,
-		SshPassword:        serverEntry.SshPassword,
+		SshPassword:        dialParams.ServerEntry.SshPassword,
 		ClientCapabilities: []string{protocol.CLIENT_CAPABILITY_SERVER_REQUESTS},
 	}
 
@@ -1039,15 +706,17 @@ func dialSsh(
 	}
 
 	sshClientConfig := &ssh.ClientConfig{
-		User: serverEntry.SshUsername,
+		User: dialParams.ServerEntry.SshUsername,
 		Auth: []ssh.AuthMethod{
 			ssh.Password(string(payload)),
 		},
 		HostKeyCallback: sshCertChecker.CheckHostKey,
-		ClientVersion:   SSHClientVersion,
+		ClientVersion:   dialParams.SSHClientVersion,
 	}
 
-	if protocol.TunnelProtocolUsesObfuscatedSSH(selectedProtocol) {
+	sshClientConfig.KEXPRNGSeed = dialParams.SSHKEXSeed
+
+	if protocol.TunnelProtocolUsesObfuscatedSSH(dialParams.TunnelProtocol) {
 		if config.ObfuscatedSSHAlgorithms != nil {
 			sshClientConfig.KeyExchanges = []string{config.ObfuscatedSSHAlgorithms[0]}
 			sshClientConfig.Ciphers = []string{config.ObfuscatedSSHAlgorithms[1]}
@@ -1125,9 +794,11 @@ func dialSsh(
 				metrics, err = performLivenessTest(
 					sshClient,
 					livenessTestMinUpstreamBytes, livenessTestMaxUpstreamBytes,
-					livenessTestMinDownstreamBytes, livenessTestMaxDownstreamBytes)
+					livenessTestMinDownstreamBytes, livenessTestMaxDownstreamBytes,
+					dialParams.LivenessTestSeed)
 
-				NoticeLivenessTest(serverEntry.IpAddress, metrics, err == nil)
+				NoticeLivenessTest(
+					dialParams.ServerEntry.IpAddress, metrics, err == nil)
 			}
 		}
 
@@ -1149,11 +820,9 @@ func dialSsh(
 		return nil, common.ContextError(result.err)
 	}
 
-	NoticeConnectedServer(
-		serverEntry.IpAddress,
-		serverEntry.Region,
-		selectedProtocol,
-		dialStats)
+	dialSucceeded = true
+
+	NoticeConnectedServer(dialParams)
 
 	cleanupConn = nil
 
@@ -1165,8 +834,7 @@ func dialSsh(
 			dialConn:      dialConn,
 			monitoredConn: monitoredConn,
 			sshClient:     result.sshClient,
-			sshRequests:   result.sshRequests,
-			dialStats:     dialStats},
+			sshRequests:   result.sshRequests},
 		nil
 }
 
@@ -1182,7 +850,8 @@ type livenessTestMetrics struct {
 func performLivenessTest(
 	sshClient *ssh.Client,
 	minUpstreamBytes, maxUpstreamBytes int,
-	minDownstreamBytes, maxDownstreamBytes int) (*livenessTestMetrics, error) {
+	minDownstreamBytes, maxDownstreamBytes int,
+	livenessTestPRNGSeed *prng.Seed) (*livenessTestMetrics, error) {
 
 	metrics := new(livenessTestMetrics)
 
@@ -1190,18 +859,10 @@ func performLivenessTest(
 		metrics.Duration = fmt.Sprintf("%s", monotime.Since(startTime))
 	}(monotime.Now())
 
-	var err error
-	metrics.UpstreamBytes, err = common.MakeSecureRandomRange(
-		minUpstreamBytes, maxUpstreamBytes)
-	if err != nil {
-		return metrics, common.ContextError(err)
-	}
+	PRNG := prng.NewPRNGWithSeed(livenessTestPRNGSeed)
 
-	metrics.DownstreamBytes, err = common.MakeSecureRandomRange(
-		minDownstreamBytes, maxDownstreamBytes)
-	if err != nil {
-		return metrics, common.ContextError(err)
-	}
+	metrics.UpstreamBytes = PRNG.Range(minUpstreamBytes, maxUpstreamBytes)
+	metrics.DownstreamBytes = PRNG.Range(minDownstreamBytes, maxDownstreamBytes)
 
 	request := &protocol.RandomStreamRequest{
 		UpstreamBytes:   metrics.UpstreamBytes,
@@ -1245,42 +906,6 @@ func performLivenessTest(
 	}
 
 	return metrics, nil
-}
-
-func selectQUICVersion(
-	clientParameters *parameters.ClientParameters) string {
-
-	limitQUICVersions := clientParameters.Get().QUICVersions(parameters.LimitQUICVersions)
-
-	quicVersions := make([]string, 0)
-
-	for _, quicVersion := range protocol.SupportedQUICVersions {
-
-		if len(limitQUICVersions) > 0 &&
-			!common.Contains(limitQUICVersions, quicVersion) {
-			continue
-		}
-
-		quicVersions = append(quicVersions, quicVersion)
-	}
-
-	if len(quicVersions) == 0 {
-		return ""
-	}
-
-	choice, _ := common.MakeSecureRandomInt(len(quicVersions))
-
-	return quicVersions[choice]
-}
-
-func makeRandomPeriod(min, max time.Duration) time.Duration {
-	period, err := common.MakeSecureRandomPeriod(min, max)
-	if err != nil {
-		NoticeAlert("MakeSecureRandomPeriod failed: %s", err)
-		// Proceed without random period
-		period = max
-	}
-	return period
 }
 
 // operateTunnel monitors the health of the tunnel and performs
@@ -1339,6 +964,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	lastTotalBytesTransferedTime := monotime.Now()
 	totalSent := int64(0)
 	totalReceived := int64(0)
+	replaySucceeded := false
 
 	noticeBytesTransferredTicker := time.NewTicker(1 * time.Second)
 	defer noticeBytesTransferredTicker.Stop()
@@ -1348,7 +974,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// Note: not using Tickers since these are not fixed time periods.
 	nextStatusRequestPeriod := func() time.Duration {
 		p := clientParameters.Get()
-		return makeRandomPeriod(
+		return prng.Period(
 			p.Duration(parameters.PsiphonAPIStatusRequestPeriodMin),
 			p.Duration(parameters.PsiphonAPIStatusRequestPeriodMax))
 	}
@@ -1363,14 +989,14 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		NoticeInfo("Unreported persistent stats: %d", unreported)
 		p := clientParameters.Get()
 		statsTimer.Reset(
-			makeRandomPeriod(
+			prng.Period(
 				p.Duration(parameters.PsiphonAPIStatusRequestShortPeriodMin),
 				p.Duration(parameters.PsiphonAPIStatusRequestShortPeriodMax)))
 	}
 
 	nextSshKeepAlivePeriod := func() time.Duration {
 		p := clientParameters.Get()
-		return makeRandomPeriod(
+		return prng.Period(
 			p.Duration(parameters.SSHKeepAlivePeriodMin),
 			p.Duration(parameters.SSHKeepAlivePeriodMax))
 	}
@@ -1420,7 +1046,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		select {
 		case <-noticeBytesTransferredTicker.C:
 			sent, received := transferstats.ReportRecentBytesTransferredForServer(
-				tunnel.serverEntry.IpAddress)
+				tunnel.dialParams.ServerEntry.IpAddress)
 
 			if received > 0 {
 				lastBytesReceivedTime = monotime.Now()
@@ -1429,16 +1055,32 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			totalSent += sent
 			totalReceived += received
 
-			noticePeriod := clientParameters.Get().Duration(parameters.TotalBytesTransferredNoticePeriod)
+			p := clientParameters.Get()
+			noticePeriod := p.Duration(parameters.TotalBytesTransferredNoticePeriod)
+			replayTargetUpstreamBytes := p.Int(parameters.ReplayTargetUpstreamBytes)
+			replayTargetDownstreamBytes := p.Int(parameters.ReplayTargetDownstreamBytes)
 
 			if lastTotalBytesTransferedTime.Add(noticePeriod).Before(monotime.Now()) {
-				NoticeTotalBytesTransferred(tunnel.serverEntry.IpAddress, totalSent, totalReceived)
+				NoticeTotalBytesTransferred(
+					tunnel.dialParams.ServerEntry.IpAddress, totalSent, totalReceived)
 				lastTotalBytesTransferedTime = monotime.Now()
 			}
 
 			// Only emit the frequent BytesTransferred notice when tunnel is not idle.
 			if tunnel.config.EmitBytesTransferred && (sent > 0 || received > 0) {
-				NoticeBytesTransferred(tunnel.serverEntry.IpAddress, sent, received)
+				NoticeBytesTransferred(
+					tunnel.dialParams.ServerEntry.IpAddress, sent, received)
+			}
+
+			// Once the tunnel has connected, activated, and successfully
+			// transmitted the targetted number of bytes, store its dial
+			// parameters for subsequent replay.
+			if totalSent >= int64(replayTargetUpstreamBytes) &&
+				totalReceived >= int64(replayTargetDownstreamBytes) &&
+				!replaySucceeded {
+
+				tunnel.dialParams.Succeeded()
+				replaySucceeded = true
 			}
 
 		case <-statsTimer.C:
@@ -1463,7 +1105,8 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			// Note: no mutex on portForwardFailureTotal; only referenced here
 			tunnel.totalPortForwardFailures++
 			NoticeInfo("port forward failures for %s: %d",
-				tunnel.serverEntry.IpAddress, tunnel.totalPortForwardFailures)
+				tunnel.dialParams.ServerEntry.IpAddress,
+				tunnel.totalPortForwardFailures)
 
 			// If the underlying Conn has closed (meek and other plugin protocols may close
 			// themselves in certain error conditions), the tunnel has certainly failed.
@@ -1510,12 +1153,14 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	requestsWaitGroup.Wait()
 
 	// Capture bytes transferred since the last noticeBytesTransferredTicker tick
-	sent, received := transferstats.ReportRecentBytesTransferredForServer(tunnel.serverEntry.IpAddress)
+	sent, received := transferstats.ReportRecentBytesTransferredForServer(
+		tunnel.dialParams.ServerEntry.IpAddress)
 	totalSent += sent
 	totalReceived += received
 
 	// Always emit a final NoticeTotalBytesTransferred
-	NoticeTotalBytesTransferred(tunnel.serverEntry.IpAddress, totalSent, totalReceived)
+	NoticeTotalBytesTransferred(
+		tunnel.dialParams.ServerEntry.IpAddress, totalSent, totalReceived)
 
 	if err == nil {
 		NoticeInfo("shutdown operate tunnel")
@@ -1528,7 +1173,8 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		sendStats(tunnel)
 
 	} else {
-		NoticeAlert("operate tunnel error for %s: %s", tunnel.serverEntry.IpAddress, err)
+		NoticeAlert("operate tunnel error for %s: %s",
+			tunnel.dialParams.ServerEntry.IpAddress, err)
 		tunnelOwner.SignalTunnelFailure(tunnel)
 	}
 }
@@ -1556,15 +1202,10 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 	go func() {
 		// Random padding to frustrate fingerprinting.
 		p := tunnel.config.clientParameters.Get()
-		request, err := common.MakeSecureRandomPadding(
+		request := prng.Padding(
 			p.Int(parameters.SSHKeepAlivePaddingMinBytes),
 			p.Int(parameters.SSHKeepAlivePaddingMaxBytes))
 		p = nil
-		if err != nil {
-			NoticeAlert("MakeSecureRandomPadding failed: %s", common.ContextError(err))
-			// Proceed without random padding.
-			request = make([]byte, 0)
-		}
 
 		startTime := monotime.Now()
 
@@ -1584,7 +1225,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 		// considering that only the last SpeedTestMaxSampleCount samples are
 		// retained, enables tuning the sampling frequency.
 
-		if err == nil && requestOk && tunnel.config.networkIDGetter != nil &&
+		if err == nil && requestOk &&
 			(isFirstKeepAlive ||
 				tunnel.config.clientParameters.Get().WeightedCoinFlip(
 					parameters.SSHKeepAliveSpeedTestSampleProbability)) {
@@ -1592,9 +1233,9 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 			err = tactics.AddSpeedTestSample(
 				tunnel.config.clientParameters,
 				GetTacticsStorer(),
-				tunnel.config.networkIDGetter.GetNetworkID(),
-				tunnel.serverEntry.Region,
-				tunnel.protocol,
+				tunnel.config.GetNetworkID(),
+				tunnel.dialParams.ServerEntry.Region,
+				tunnel.dialParams.TunnelProtocol,
 				elapsedTime,
 				request,
 				response)
@@ -1628,7 +1269,8 @@ func sendStats(tunnel *Tunnel) bool {
 
 	err := tunnel.serverContext.DoStatusRequest(tunnel)
 	if err != nil {
-		NoticeAlert("DoStatusRequest failed for %s: %s", tunnel.serverEntry.IpAddress, err)
+		NoticeAlert("DoStatusRequest failed for %s: %s",
+			tunnel.dialParams.ServerEntry.IpAddress, err)
 	}
 
 	return err == nil

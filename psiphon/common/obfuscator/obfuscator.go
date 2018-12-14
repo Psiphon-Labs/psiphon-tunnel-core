@@ -28,6 +28,7 @@ import (
 	"io"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 const (
@@ -48,48 +49,67 @@ type Obfuscator struct {
 	paddingLength        int
 	clientToServerCipher *rc4.Cipher
 	serverToClientCipher *rc4.Cipher
+	paddingPRNGSeed      *prng.Seed
+	paddingPRNG          *prng.PRNG
 }
 
 type ObfuscatorConfig struct {
-	Keyword    string
-	MinPadding *int
-	MaxPadding *int
+	Keyword         string
+	PaddingPRNGSeed *prng.Seed
+	MinPadding      *int
+	MaxPadding      *int
 }
 
 // NewClientObfuscator creates a new Obfuscator, staging a seed message to be
 // sent to the server (by the caller) and initializing stream ciphers to
 // obfuscate data.
 //
-//
+// ObfuscatorConfig.PaddingPRNGSeed allows for optional replay of the
+// obfuscator padding and must not be nil.
 func NewClientObfuscator(
 	config *ObfuscatorConfig) (obfuscator *Obfuscator, err error) {
 
-	seed, err := common.MakeSecureRandomBytes(OBFUSCATE_SEED_LENGTH)
+	if config.PaddingPRNGSeed == nil {
+		return nil, common.ContextError(
+			errors.New("missing padding seed"))
+	}
+
+	paddingPRNG := prng.NewPRNGWithSeed(config.PaddingPRNGSeed)
+
+	obfuscatorSeed, err := common.MakeSecureRandomBytes(OBFUSCATE_SEED_LENGTH)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
-	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(seed, config)
+	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(obfuscatorSeed, config)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
-	minPadding := 0
+	// The first prng.SEED_LENGTH bytes of the initial obfuscator message
+	// padding field is used by the server as a seed for its obfuscator
+	// padding and other protocol attributes (directly and via
+	// GetDerivedPRNG). This allows for optional downstream replay of these
+	// protocol attributes. Accordingly, the minimum padding is set to at
+	// least prng.SEED_LENGTH.
+
+	minPadding := prng.SEED_LENGTH
 	if config.MinPadding != nil &&
-		*config.MinPadding >= 0 &&
+		*config.MinPadding >= prng.SEED_LENGTH &&
 		*config.MinPadding <= OBFUSCATE_MAX_PADDING {
 		minPadding = *config.MinPadding
 	}
 
 	maxPadding := OBFUSCATE_MAX_PADDING
 	if config.MaxPadding != nil &&
-		*config.MaxPadding >= 0 &&
+		*config.MaxPadding >= prng.SEED_LENGTH &&
 		*config.MaxPadding <= OBFUSCATE_MAX_PADDING &&
 		*config.MaxPadding >= minPadding {
 		maxPadding = *config.MaxPadding
 	}
 
-	seedMessage, paddingLength, err := makeSeedMessage(minPadding, maxPadding, seed, clientToServerCipher)
+	seedMessage, paddingLength, err := makeSeedMessage(
+		paddingPRNG, minPadding, maxPadding, obfuscatorSeed, clientToServerCipher)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -98,15 +118,21 @@ func NewClientObfuscator(
 		seedMessage:          seedMessage,
 		paddingLength:        paddingLength,
 		clientToServerCipher: clientToServerCipher,
-		serverToClientCipher: serverToClientCipher}, nil
+		serverToClientCipher: serverToClientCipher,
+		paddingPRNGSeed:      config.PaddingPRNGSeed,
+		paddingPRNG:          paddingPRNG}, nil
 }
 
 // NewServerObfuscator creates a new Obfuscator, reading a seed message directly
 // from the clientReader and initializing stream ciphers to obfuscate data.
+//
+// ObfuscatorConfig.PaddingPRNGSeed is not used, as the server obtains a PRNG
+// seed from the client's initial obfuscator message; this scheme allows for
+// optional replay of the downstream obfuscator padding.
 func NewServerObfuscator(
 	clientReader io.Reader, config *ObfuscatorConfig) (obfuscator *Obfuscator, err error) {
 
-	clientToServerCipher, serverToClientCipher, err := readSeedMessage(
+	clientToServerCipher, serverToClientCipher, paddingPRNGSeed, err := readSeedMessage(
 		clientReader, config)
 	if err != nil {
 		return nil, common.ContextError(err)
@@ -115,7 +141,21 @@ func NewServerObfuscator(
 	return &Obfuscator{
 		paddingLength:        -1,
 		clientToServerCipher: clientToServerCipher,
-		serverToClientCipher: serverToClientCipher}, nil
+		serverToClientCipher: serverToClientCipher,
+		paddingPRNGSeed:      paddingPRNGSeed,
+		paddingPRNG:          prng.NewPRNGWithSeed(paddingPRNGSeed),
+	}, nil
+}
+
+// GetDerivedPRNG creates a new PRNG with a seed derived from the obfuscator
+// padding seed and distinguished by the salt, which should be a unique
+// identifier for each usage context.
+//
+// For NewServerObfuscator, the obfuscator padding seed is obtained from the
+// client, so derived PRNGs may be used to replay sequences post-initial
+// obfuscator message.
+func (obfuscator *Obfuscator) GetDerivedPRNG(salt string) (*prng.PRNG, error) {
+	return prng.NewPRNGWithSaltedSeed(obfuscator.paddingPRNGSeed, salt)
 }
 
 // GetPaddingLength returns the client seed message padding length. Only valid
@@ -143,14 +183,14 @@ func (obfuscator *Obfuscator) ObfuscateServerToClient(buffer []byte) {
 }
 
 func initObfuscatorCiphers(
-	seed []byte, config *ObfuscatorConfig) (*rc4.Cipher, *rc4.Cipher, error) {
+	obfuscatorSeed []byte, config *ObfuscatorConfig) (*rc4.Cipher, *rc4.Cipher, error) {
 
-	clientToServerKey, err := deriveKey(seed, []byte(config.Keyword), []byte(OBFUSCATE_CLIENT_TO_SERVER_IV))
+	clientToServerKey, err := deriveKey(obfuscatorSeed, []byte(config.Keyword), []byte(OBFUSCATE_CLIENT_TO_SERVER_IV))
 	if err != nil {
 		return nil, nil, common.ContextError(err)
 	}
 
-	serverToClientKey, err := deriveKey(seed, []byte(config.Keyword), []byte(OBFUSCATE_SERVER_TO_CLIENT_IV))
+	serverToClientKey, err := deriveKey(obfuscatorSeed, []byte(config.Keyword), []byte(OBFUSCATE_SERVER_TO_CLIENT_IV))
 	if err != nil {
 		return nil, nil, common.ContextError(err)
 	}
@@ -168,9 +208,9 @@ func initObfuscatorCiphers(
 	return clientToServerCipher, serverToClientCipher, nil
 }
 
-func deriveKey(seed, keyword, iv []byte) ([]byte, error) {
+func deriveKey(obfuscatorSeed, keyword, iv []byte) ([]byte, error) {
 	h := sha1.New()
-	h.Write(seed)
+	h.Write(obfuscatorSeed)
 	h.Write(keyword)
 	h.Write(iv)
 	digest := h.Sum(nil)
@@ -185,13 +225,15 @@ func deriveKey(seed, keyword, iv []byte) ([]byte, error) {
 	return digest[0:OBFUSCATE_KEY_LENGTH], nil
 }
 
-func makeSeedMessage(minPadding, maxPadding int, seed []byte, clientToServerCipher *rc4.Cipher) ([]byte, int, error) {
-	padding, err := common.MakeSecureRandomPadding(minPadding, maxPadding)
-	if err != nil {
-		return nil, 0, common.ContextError(err)
-	}
+func makeSeedMessage(
+	paddingPRNG *prng.PRNG,
+	minPadding, maxPadding int,
+	obfuscatorSeed []byte,
+	clientToServerCipher *rc4.Cipher) ([]byte, int, error) {
+
+	padding := paddingPRNG.Padding(minPadding, maxPadding)
 	buffer := new(bytes.Buffer)
-	err = binary.Write(buffer, binary.BigEndian, seed)
+	err := binary.Write(buffer, binary.BigEndian, obfuscatorSeed)
 	if err != nil {
 		return nil, 0, common.ContextError(err)
 	}
@@ -208,28 +250,28 @@ func makeSeedMessage(minPadding, maxPadding int, seed []byte, clientToServerCiph
 		return nil, 0, common.ContextError(err)
 	}
 	seedMessage := buffer.Bytes()
-	clientToServerCipher.XORKeyStream(seedMessage[len(seed):], seedMessage[len(seed):])
+	clientToServerCipher.XORKeyStream(seedMessage[len(obfuscatorSeed):], seedMessage[len(obfuscatorSeed):])
 	return seedMessage, len(padding), nil
 }
 
 func readSeedMessage(
-	clientReader io.Reader, config *ObfuscatorConfig) (*rc4.Cipher, *rc4.Cipher, error) {
+	clientReader io.Reader, config *ObfuscatorConfig) (*rc4.Cipher, *rc4.Cipher, *prng.Seed, error) {
 
 	seed := make([]byte, OBFUSCATE_SEED_LENGTH)
 	_, err := io.ReadFull(clientReader, seed)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 
 	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(seed, config)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 
 	fixedLengthFields := make([]byte, 8) // 4 bytes each for magic value and padding length
 	_, err = io.ReadFull(clientReader, fixedLengthFields)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 
 	clientToServerCipher.XORKeyStream(fixedLengthFields, fixedLengthFields)
@@ -239,28 +281,47 @@ func readSeedMessage(
 	var magicValue, paddingLength int32
 	err = binary.Read(buffer, binary.BigEndian, &magicValue)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 	err = binary.Read(buffer, binary.BigEndian, &paddingLength)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 
 	if magicValue != OBFUSCATE_MAGIC_VALUE {
-		return nil, nil, common.ContextError(errors.New("invalid magic value"))
+		return nil, nil, nil, common.ContextError(errors.New("invalid magic value"))
 	}
 
 	if paddingLength < 0 || paddingLength > OBFUSCATE_MAX_PADDING {
-		return nil, nil, common.ContextError(errors.New("invalid padding length"))
+		return nil, nil, nil, common.ContextError(errors.New("invalid padding length"))
 	}
 
 	padding := make([]byte, paddingLength)
 	_, err = io.ReadFull(clientReader, padding)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, nil, common.ContextError(err)
 	}
 
 	clientToServerCipher.XORKeyStream(padding, padding)
 
-	return clientToServerCipher, serverToClientCipher, nil
+	// Use the first prng.SEED_LENGTH bytes of padding as a PRNG seed for
+	// subsequent operations. This allows the client to direct server-side
+	// replay of certain protocol attributes.
+	//
+	// Since legacy clients may send < prng.SEED_LENGTH bytes of padding,
+	// generate a new seed in that case.
+
+	var paddingPRNGSeed *prng.Seed
+
+	if len(padding) >= prng.SEED_LENGTH {
+		paddingPRNGSeed = new(prng.Seed)
+		copy(paddingPRNGSeed[:], padding[0:prng.SEED_LENGTH])
+	} else {
+		paddingPRNGSeed, err = prng.NewSeed()
+		if err != nil {
+			return nil, nil, nil, common.ContextError(err)
+		}
+	}
+
+	return clientToServerCipher, serverToClientCipher, paddingPRNGSeed, nil
 }

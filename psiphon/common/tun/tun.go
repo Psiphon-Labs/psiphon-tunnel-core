@@ -139,6 +139,7 @@ import (
 
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 const (
@@ -927,10 +928,7 @@ func (server *Server) allocateIndex(newSession *session) error {
 
 	max := 0x00FFFFFF
 
-	randomInt, err := common.MakeSecureRandomInt(max + 1)
-	if err != nil {
-		return common.ContextError(err)
-	}
+	randomInt := prng.Intn(max + 1)
 
 	index := int32(randomInt)
 	index &= int32(max)

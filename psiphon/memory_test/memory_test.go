@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 // memory_test is a memory stress test suite that repeatedly reestablishes
@@ -167,7 +168,7 @@ func runMemoryTest(t *testing.T, testMode int) {
 
 					doRestartController := (testMode == testModeRestartController)
 					if testMode == testModeReconnectAndRestart {
-						doRestartController = common.FlipCoin()
+						doRestartController = prng.FlipCoin()
 					}
 					if doRestartController {
 						select {

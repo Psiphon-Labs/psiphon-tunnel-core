@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
 	"github.com/elazarl/goproxy"
 )
@@ -53,7 +54,7 @@ var userAgentCounts map[string]int
 var initUserAgentCounter sync.Once
 
 func pickMockUserAgent() string {
-	index, _ := common.MakeSecureRandomInt(len(mockUserAgents))
+	index := prng.Intn(len(mockUserAgents))
 	return mockUserAgents[index]
 }
 

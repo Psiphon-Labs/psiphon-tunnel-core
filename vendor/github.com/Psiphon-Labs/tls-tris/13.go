@@ -22,6 +22,9 @@ import (
 	"time"
 
 	"golang.org/x/crypto/curve25519"
+
+	// [Psiphon]
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 // numSessionTickets is the number of different session tickets the
@@ -782,8 +785,19 @@ func (hs *serverHandshakeState) sendSessionTicket13() error {
 		if ticket == nil {
 			continue
 		}
+
+		// [Psiphon]
+		// Set lifetime hint to a more typical value.
+		lifetime := uint32(24 * 3600) // TODO(filippo)
+		if obfuscateSessionTickets {
+			hints := []uint32{300, 1200, 7200, 10800, 64800, 100800, 129600}
+			index := prng.Intn(len(hints))
+			lifetime = hints[index]
+		}
+
 		ticketMsg := &newSessionTicketMsg13{
-			lifetime:           24 * 3600, // TODO(filippo)
+			//lifetime:           24 * 3600, // TODO(filippo)
+			lifetime:           lifetime,
 			maxEarlyDataLength: c.config.Max0RTTDataSize,
 			withEarlyDataInfo:  c.config.Max0RTTDataSize > 0,
 			ageAdd:             sessionState.ageAdd,

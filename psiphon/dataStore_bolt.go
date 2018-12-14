@@ -100,6 +100,7 @@ func datastoreOpenDB(rootDataDirectory string) (*datastoreDB, error) {
 			datastoreSLOKsBucket,
 			datastoreTacticsBucket,
 			datastoreSpeedTestSamplesBucket,
+			datastoreDialParametersBucket,
 		}
 		for _, bucket := range requiredBuckets {
 			_, err := tx.CreateBucketIfNotExists(bucket)

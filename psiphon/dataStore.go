@@ -24,11 +24,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
@@ -42,6 +42,7 @@ var (
 	datastoreSLOKsBucket                        = []byte("SLOKs")
 	datastoreTacticsBucket                      = []byte("tactics")
 	datastoreSpeedTestSamplesBucket             = []byte("speedTestSamples")
+	datastoreDialParametersBucket               = []byte("dialParameters")
 	datastoreLastConnectedKey                   = "lastConnected"
 	datastoreLastServerEntryFilterKey           = []byte("lastServerEntryFilter")
 	datastoreAffinityServerEntryIDKey           = []byte("affinityServerEntryID")
@@ -384,7 +385,7 @@ func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) 
 		applyServerAffinity: applyServerAffinity,
 	}
 
-	err = iterator.Reset()
+	err = iterator.reset(true)
 	if err != nil {
 		return false, nil, common.ContextError(err)
 	}
@@ -401,10 +402,11 @@ func NewTacticsServerEntryIterator(config *Config) (*ServerEntryIterator, error)
 	}
 
 	iterator := &ServerEntryIterator{
+		config:                       config,
 		isTacticsServerEntryIterator: true,
 	}
 
-	err := iterator.Reset()
+	err := iterator.reset(true)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -433,7 +435,7 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 			return false, nil, common.ContextError(errors.New("TargetServerEntry does not support EgressRegion"))
 		}
 
-		limitTunnelProtocols := config.clientParameters.Get().TunnelProtocols(parameters.LimitTunnelProtocols)
+		limitTunnelProtocols := config.GetClientParameters().TunnelProtocols(parameters.LimitTunnelProtocols)
 		if len(limitTunnelProtocols) > 0 {
 			// At the ServerEntryIterator level, only limitTunnelProtocols is applied;
 			// excludeIntensive is handled higher up.
@@ -459,6 +461,10 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 // Reset a NewServerEntryIterator to the start of its cycle. The next
 // call to Next will return the first server entry.
 func (iterator *ServerEntryIterator) Reset() error {
+	return iterator.reset(false)
+}
+
+func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 	iterator.Close()
 
 	if iterator.isTargetServerEntryIterator {
@@ -490,7 +496,13 @@ func (iterator *ServerEntryIterator) Reset() error {
 		shuffleHead := 0
 
 		var affinityServerEntryID []byte
-		if iterator.applyServerAffinity {
+
+		// In the first round only, move any server affinity candiate to the
+		// very first position.
+
+		if isInitialRound &&
+			iterator.applyServerAffinity {
+
 			affinityServerEntryID = bucket.get(datastoreAffinityServerEntryIDKey)
 			if affinityServerEntryID != nil {
 				serverEntryIDs = append(serverEntryIDs, append([]byte(nil), affinityServerEntryID...))
@@ -510,9 +522,53 @@ func (iterator *ServerEntryIterator) Reset() error {
 		}
 		cursor.close()
 
+		// Randomly shuffle the entire list of server IDs, excluding the
+		// server affinity candidate.
+
 		for i := len(serverEntryIDs) - 1; i > shuffleHead-1; i-- {
-			j := rand.Intn(i+1-shuffleHead) + shuffleHead
+			j := prng.Intn(i+1-shuffleHead) + shuffleHead
 			serverEntryIDs[i], serverEntryIDs[j] = serverEntryIDs[j], serverEntryIDs[i]
+		}
+
+		// In the first round only, move _potential_ replay candidates to the
+		// front of the list (excepting the server affinity slot, if any).
+		// This move is post-shuffle so the order is still randomized. To save
+		// the memory overhead of unmarshalling all dial parameters, this
+		// operation just moves any server with a dial parameter record to the
+		// front. Whether the dial parameter remains valid for replay -- TTL,
+		// tactics/config unchanged, etc. --- is checked later.
+		//
+		// TODO: move only up to parameters.ReplayCandidateCount to front?
+
+		if isInitialRound &&
+			iterator.config.GetClientParameters().Int(parameters.ReplayCandidateCount) > 0 {
+
+			networkID := []byte(iterator.config.GetNetworkID())
+
+			dialParamsBucket := tx.bucket(datastoreDialParametersBucket)
+			i := shuffleHead
+			j := len(serverEntryIDs) - 1
+			for {
+				for ; i < j; i++ {
+					key := makeDialParametersKey(serverEntryIDs[i], networkID)
+					if dialParamsBucket.get(key) == nil {
+						break
+					}
+				}
+				for ; i < j; j-- {
+					key := makeDialParametersKey(serverEntryIDs[i], networkID)
+					if dialParamsBucket.get(key) != nil {
+						break
+					}
+				}
+				if i < j {
+					serverEntryIDs[i], serverEntryIDs[j] = serverEntryIDs[j], serverEntryIDs[i]
+					i++
+					j--
+				} else {
+					break
+				}
+			}
 		}
 
 		return nil
@@ -683,12 +739,14 @@ func CountServerEntries() int {
 	return count
 }
 
-// CountServerEntriesWithLimits returns a count of stored server entries for
+// CountServerEntriesWithConstraints returns a count of stored server entries for
 // the specified region and tunnel protocol limits.
-func CountServerEntriesWithLimits(
-	useUpstreamProxy bool, region string, limitState *limitTunnelProtocolsState) (int, int) {
+func CountServerEntriesWithConstraints(
+	useUpstreamProxy bool,
+	region string,
+	constraints *protocolSelectionConstraints) (int, int) {
 
-	// When CountServerEntriesWithLimits is called only
+	// When CountServerEntriesWithConstraints is called only
 	// limitTunnelProtocolState is fixed; excludeIntensive is transitory.
 	excludeIntensive := false
 
@@ -697,11 +755,11 @@ func CountServerEntriesWithLimits(
 	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 		if region == "" || serverEntry.Region == region {
 
-			if limitState.isInitialCandidate(excludeIntensive, serverEntry) {
+			if constraints.isInitialCandidate(excludeIntensive, serverEntry) {
 				initialCount += 1
 			}
 
-			if limitState.isCandidate(excludeIntensive, serverEntry) {
+			if constraints.isCandidate(excludeIntensive, serverEntry) {
 				count += 1
 			}
 
@@ -709,7 +767,7 @@ func CountServerEntriesWithLimits(
 	})
 
 	if err != nil {
-		NoticeAlert("CountServerEntriesWithLimits failed: %s", err)
+		NoticeAlert("CountServerEntriesWithConstraints failed: %s", err)
 		return 0, 0
 	}
 
@@ -720,7 +778,7 @@ func CountServerEntriesWithLimits(
 // When limitState has initial protocols, the available regions are limited
 // to those available for the initial protocols; or if limitState has general
 // limited protocols, the available regions are similarly limited.
-func ReportAvailableRegions(config *Config, limitState *limitTunnelProtocolsState) {
+func ReportAvailableRegions(config *Config, constraints *protocolSelectionConstraints) {
 
 	// When ReportAvailableRegions is called only limitTunnelProtocolState is
 	// fixed; excludeIntensive is transitory.
@@ -730,10 +788,10 @@ func ReportAvailableRegions(config *Config, limitState *limitTunnelProtocolsStat
 	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
 
 		isCandidate := false
-		if limitState.hasInitialProtocols() {
-			isCandidate = limitState.isInitialCandidate(excludeIntensive, serverEntry)
+		if constraints.hasInitialProtocols() {
+			isCandidate = constraints.isInitialCandidate(excludeIntensive, serverEntry)
 		} else {
-			isCandidate = limitState.isCandidate(excludeIntensive, serverEntry)
+			isCandidate = constraints.isCandidate(excludeIntensive, serverEntry)
 		}
 
 		if isCandidate {
@@ -1200,6 +1258,58 @@ func GetSLOK(id []byte) ([]byte, error) {
 	return key, nil
 }
 
+func makeDialParametersKey(serverIPAddress, networkID []byte) []byte {
+	// TODO: structured key?
+	return append(append([]byte(nil), serverIPAddress...), networkID...)
+}
+
+// SetDialParameters stores dial parameters associated with the specified
+// server/network ID.
+func SetDialParameters(serverIPAddress, networkID string, dialParams *DialParameters) error {
+
+	key := makeDialParametersKey([]byte(serverIPAddress), []byte(networkID))
+
+	data, err := json.Marshal(dialParams)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	return setBucketValue(datastoreDialParametersBucket, key, data)
+}
+
+// GetDialParameters fetches any dial parameters associated with the specified
+// server/network ID. Returns nil, nil when no record is found.
+func GetDialParameters(serverIPAddress, networkID string) (*DialParameters, error) {
+
+	key := makeDialParametersKey([]byte(serverIPAddress), []byte(networkID))
+
+	data, err := getBucketValue(datastoreDialParametersBucket, key)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	if data == nil {
+		return nil, nil
+	}
+
+	var dialParams *DialParameters
+	err = json.Unmarshal(data, &dialParams)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return dialParams, nil
+}
+
+// DeleteDialParameters clears any dial parameters associated with the
+// specified server/network ID.
+func DeleteDialParameters(serverIPAddress, networkID string) error {
+
+	key := makeDialParametersKey([]byte(serverIPAddress), []byte(networkID))
+
+	return deleteBucketValue(datastoreDialParametersBucket, key)
+}
+
 // TacticsStorer implements tactics.Storer.
 type TacticsStorer struct {
 }
@@ -1229,8 +1339,7 @@ func setBucketValue(bucket, key, value []byte) error {
 
 	err := datastoreUpdate(func(tx *datastoreTx) error {
 		bucket := tx.bucket(bucket)
-		err := bucket.put(key, value)
-		return err
+		return bucket.put(key, value)
 	})
 
 	if err != nil {
@@ -1255,4 +1364,18 @@ func getBucketValue(bucket, key []byte) ([]byte, error) {
 	}
 
 	return value, nil
+}
+
+func deleteBucketValue(bucket, key []byte) error {
+
+	err := datastoreUpdate(func(tx *datastoreTx) error {
+		bucket := tx.bucket(bucket)
+		return bucket.delete(key)
+	})
+
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	return nil
 }

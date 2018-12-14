@@ -68,6 +68,9 @@ func makeClientHello(config *Config) (*clientHelloMsg, error) {
 		delegatedCredential:          config.AcceptDelegatedCredential,
 		alpnProtocols:                config.NextProtos,
 		extendedMSSupported:          config.UseExtendedMasterSecret,
+
+		// [Psiphon]
+		clientHelloPRNGSeed: config.ClientHelloPRNGSeed,
 	}
 	possibleCipherSuites := config.cipherSuites()
 	hello.cipherSuites = make([]uint16, 0, len(possibleCipherSuites))
