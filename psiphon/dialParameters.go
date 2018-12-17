@@ -175,7 +175,9 @@ func MakeDialParameters(
 		// In this case, existing dial parameters are invalid and cleared.
 
 		err = DeleteDialParameters(serverEntry.IpAddress, networkID)
-		NoticeAlert("DeleteDialParameters failed: %s", err)
+		if err != nil {
+			NoticeAlert("DeleteDialParameters failed: %s", err)
+		}
 		dialParams = nil
 	}
 
@@ -215,7 +217,7 @@ func MakeDialParameters(
 
 	if !isReplay {
 
-		// TODO: should there be a pre-check  of selectProtocol before incurring
+		// TODO: should there be a pre-check of selectProtocol before incurring
 		// overhead of unmarshaling dial parameters? In may be that a server entry
 		// is fully incapable of satisfying the current protocol selection
 		// constraints.
@@ -304,11 +306,11 @@ func MakeDialParameters(
 			if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
 				hostname = common.GenerateHostName()
 				dialParams.MeekTransformedHostName = true
-				if serverEntry.MeekServerPort == 80 {
-					dialParams.MeekHostHeader = hostname
-				} else {
-					dialParams.MeekHostHeader = fmt.Sprintf("%s:%d", hostname, serverEntry.MeekServerPort)
-				}
+			}
+			if serverEntry.MeekServerPort == 80 {
+				dialParams.MeekHostHeader = hostname
+			} else {
+				dialParams.MeekHostHeader = fmt.Sprintf("%s:%d", hostname, serverEntry.MeekServerPort)
 			}
 		}
 	}
@@ -344,92 +346,92 @@ func MakeDialParameters(
 		}
 	}
 
-	if !isReplay || !replayFronting || !replayHostname {
+	// Set dial address fields. This portion of configuration is
+	// deterministic, given the parameters established or replayed so far.
 
-		switch dialParams.TunnelProtocol {
+	switch dialParams.TunnelProtocol {
 
-		case protocol.TUNNEL_PROTOCOL_SSH:
-			dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshPort)
+	case protocol.TUNNEL_PROTOCOL_SSH:
+		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshPort)
 
-		case protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH:
-			dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
+	case protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH:
+		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
 
-		case protocol.TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH:
-			dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedTapdancePort)
+	case protocol.TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH:
+		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedTapdancePort)
 
-		case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
-			dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedQUICPort)
+	case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
+		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedQUICPort)
 
-		case protocol.TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH:
-			// Note: port comes from marionnete "format"
-			dialParams.DirectDialAddress = serverEntry.IpAddress
+	case protocol.TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH:
+		// Note: port comes from marionnete "format"
+		dialParams.DirectDialAddress = serverEntry.IpAddress
 
-		case protocol.TUNNEL_PROTOCOL_FRONTED_MEEK:
-			dialParams.MeekDialAddress = fmt.Sprintf("%s:443", dialParams.MeekFrontingDialAddress)
-			dialParams.MeekHostHeader = dialParams.MeekFrontingHost
-			if serverEntry.MeekFrontingDisableSNI {
-				dialParams.MeekSNIServerName = ""
-			} else if !dialParams.MeekTransformedHostName {
-				dialParams.MeekSNIServerName = dialParams.MeekFrontingDialAddress
-			}
+	case protocol.TUNNEL_PROTOCOL_FRONTED_MEEK:
+		dialParams.MeekDialAddress = fmt.Sprintf("%s:443", dialParams.MeekFrontingDialAddress)
+		dialParams.MeekHostHeader = dialParams.MeekFrontingHost
+		if serverEntry.MeekFrontingDisableSNI {
+			dialParams.MeekSNIServerName = ""
+		} else if !dialParams.MeekTransformedHostName {
+			dialParams.MeekSNIServerName = dialParams.MeekFrontingDialAddress
+		}
 
-		case protocol.TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
-			dialParams.MeekDialAddress = fmt.Sprintf("%s:80", dialParams.MeekFrontingDialAddress)
-			dialParams.MeekHostHeader = dialParams.MeekFrontingHost
+	case protocol.TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
+		dialParams.MeekDialAddress = fmt.Sprintf("%s:80", dialParams.MeekFrontingDialAddress)
+		dialParams.MeekHostHeader = dialParams.MeekFrontingHost
 
-		case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
-			dialParams.MeekDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
-			if !dialParams.MeekTransformedHostName {
-				if serverEntry.MeekServerPort == 80 {
-					dialParams.MeekHostHeader = serverEntry.IpAddress
-				} else {
-					dialParams.MeekHostHeader = dialParams.MeekDialAddress
-				}
-			}
-
-		case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
-			protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET:
-
-			dialParams.MeekDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
-			if !dialParams.MeekTransformedHostName {
-				// Note: IP address in SNI field will be omitted.
-				dialParams.MeekSNIServerName = serverEntry.IpAddress
-			}
-			if serverEntry.MeekServerPort == 443 {
+	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
+		dialParams.MeekDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
+		if !dialParams.MeekTransformedHostName {
+			if serverEntry.MeekServerPort == 80 {
 				dialParams.MeekHostHeader = serverEntry.IpAddress
 			} else {
 				dialParams.MeekHostHeader = dialParams.MeekDialAddress
 			}
-
-		default:
-			return nil, common.ContextError(
-				fmt.Errorf("unknown tunnel protocol: %s", dialParams.TunnelProtocol))
-
 		}
 
-		if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
+	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
+		protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET:
 
-			host, port, _ := net.SplitHostPort(dialParams.MeekDialAddress)
-
-			if p.Bool(parameters.MeekDialDomainsOnly) {
-				if net.ParseIP(host) != nil {
-					// No error, as this is a "not supported" case.
-					return nil, nil
-				}
-			}
-
-			dialParams.DialPortNumber = port
-
-			// The underlying TLS will automatically disable SNI for IP address server name
-			// values; we have this explicit check here so we record the correct value for stats.
-			if net.ParseIP(dialParams.MeekSNIServerName) != nil {
-				dialParams.MeekSNIServerName = ""
-			}
-
+		dialParams.MeekDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)
+		if !dialParams.MeekTransformedHostName {
+			// Note: IP address in SNI field will be omitted.
+			dialParams.MeekSNIServerName = serverEntry.IpAddress
+		}
+		if serverEntry.MeekServerPort == 443 {
+			dialParams.MeekHostHeader = serverEntry.IpAddress
 		} else {
-
-			_, dialParams.DialPortNumber, _ = net.SplitHostPort(dialParams.DirectDialAddress)
+			dialParams.MeekHostHeader = dialParams.MeekDialAddress
 		}
+
+	default:
+		return nil, common.ContextError(
+			fmt.Errorf("unknown tunnel protocol: %s", dialParams.TunnelProtocol))
+
+	}
+
+	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
+
+		host, port, _ := net.SplitHostPort(dialParams.MeekDialAddress)
+
+		if p.Bool(parameters.MeekDialDomainsOnly) {
+			if net.ParseIP(host) != nil {
+				// No error, as this is a "not supported" case.
+				return nil, nil
+			}
+		}
+
+		dialParams.DialPortNumber = port
+
+		// The underlying TLS will automatically disable SNI for IP address server name
+		// values; we have this explicit check here so we record the correct value for stats.
+		if net.ParseIP(dialParams.MeekSNIServerName) != nil {
+			dialParams.MeekSNIServerName = ""
+		}
+
+	} else {
+
+		_, dialParams.DialPortNumber, _ = net.SplitHostPort(dialParams.DirectDialAddress)
 	}
 
 	// Initialize/replay User-Agent header for HTTP upstream proxy and meek protocols.
@@ -519,7 +521,7 @@ func (dialParams *DialParameters) GetMeekConfig() *MeekConfig {
 }
 
 func (dialParams *DialParameters) Succeeded() {
-	NoticeAlert("Set dial parameters for %s", dialParams.ServerEntry.IpAddress)
+	NoticeInfo("Set dial parameters for %s", dialParams.ServerEntry.IpAddress)
 	err := SetDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID, dialParams)
 	if err != nil {
 		NoticeAlert("SetDialParameters failed: %s", err)
@@ -537,7 +539,7 @@ func (dialParams *DialParameters) Failed() {
 	// exercised and may still be efective.
 
 	if dialParams.IsReplay {
-		NoticeAlert("Delete dial parameters for %s", dialParams.ServerEntry.IpAddress)
+		NoticeInfo("Delete dial parameters for %s", dialParams.ServerEntry.IpAddress)
 		err := DeleteDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID)
 		if err != nil {
 			NoticeAlert("DeleteDialParameters failed: %s", err)

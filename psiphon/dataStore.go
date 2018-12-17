@@ -324,12 +324,13 @@ func hasServerEntryFilterChanged(config *Config) (bool, error) {
 	changed := false
 	err = datastoreView(func(tx *datastoreTx) error {
 
-		// previousFilter will be nil not found (not previously
-		// set) which will never match any current filter.
-
 		bucket := tx.bucket(datastoreKeyValueBucket)
 		previousFilter := bucket.get(datastoreLastServerEntryFilterKey)
-		if bytes.Compare(previousFilter, currentFilter) != 0 {
+
+		// When not found, previousFilter will be nil; ensure this
+		// results in "changed", even if currentFilter is len(0).
+		if previousFilter == nil ||
+			bytes.Compare(previousFilter, currentFilter) != 0 {
 			changed = true
 		}
 		return nil
@@ -556,7 +557,7 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 					}
 				}
 				for ; i < j; j-- {
-					key := makeDialParametersKey(serverEntryIDs[i], networkID)
+					key := makeDialParametersKey(serverEntryIDs[j], networkID)
 					if dialParamsBucket.get(key) != nil {
 						break
 					}

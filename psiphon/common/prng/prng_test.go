@@ -20,6 +20,7 @@
 package prng
 
 import (
+	"bytes"
 	crypto_rand "crypto/rand"
 	"fmt"
 	"math"
@@ -27,6 +28,67 @@ import (
 	"testing"
 	"time"
 )
+
+func TestSeed(t *testing.T) {
+
+	seed, err := NewSeed()
+	if err != nil {
+		t.Fatalf("NewSeed failed: %s", err)
+	}
+
+	prng1 := NewPRNGWithSeed(seed)
+	prng2 := NewPRNGWithSeed(seed)
+
+	for i := 1; i < 10000; i++ {
+
+		bytes1 := make([]byte, i)
+		prng1.Read(bytes1)
+
+		bytes2 := make([]byte, i)
+		prng2.Read(bytes2)
+
+		zeroes := make([]byte, i)
+		if 0 == bytes.Compare(zeroes, bytes1) {
+			t.Fatalf("unexpected zero bytes")
+		}
+
+		if 0 != bytes.Compare(bytes1, bytes2) {
+			t.Fatalf("unexpected different bytes")
+		}
+	}
+
+	prng1 = NewPRNGWithSeed(seed)
+
+	prng3, err := NewPRNGWithSaltedSeed(seed, "3")
+	if err != nil {
+		t.Fatalf("NewPRNGWithSaltedSeed failed: %s", err)
+	}
+
+	prng4, err := NewPRNGWithSaltedSeed(seed, "4")
+	if err != nil {
+		t.Fatalf("NewPRNGWithSaltedSeed failed: %s", err)
+	}
+
+	for i := 1; i < 10000; i++ {
+
+		bytes1 := make([]byte, i)
+		prng1.Read(bytes1)
+
+		bytes3 := make([]byte, i)
+		prng3.Read(bytes3)
+
+		bytes4 := make([]byte, i)
+		prng4.Read(bytes4)
+
+		if 0 == bytes.Compare(bytes1, bytes3) {
+			t.Fatalf("unexpected identical bytes")
+		}
+
+		if 0 == bytes.Compare(bytes3, bytes4) {
+			t.Fatalf("unexpected identical bytes")
+		}
+	}
+}
 
 func TestFlipWeightedCoin(t *testing.T) {
 
