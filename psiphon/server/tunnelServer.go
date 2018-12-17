@@ -1976,6 +1976,12 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		sshClient.handshakeState.apiParams,
 		baseRequestParams)
 
+	// "relay_protocol" is sent with handshake API parameters. In pre-
+	// handshake logTunnel cases, this value is not yet known. As
+	// sshClient.tunnelProtocol is authoritative, set this value
+	// unconditionally, overwriting any value from handshake.
+	logFields["relay_protocol"] = sshClient.tunnelProtocol
+
 	logFields["session_id"] = sshClient.sessionID
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["start_time"] = sshClient.activityConn.GetStartTime()
