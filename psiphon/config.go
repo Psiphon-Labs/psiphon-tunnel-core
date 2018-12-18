@@ -501,6 +501,11 @@ type Config struct {
 	LivenessTestMinDownstreamBytes *int
 	LivenessTestMaxDownstreamBytes *int
 
+	// ReplayCandidateCount and other Replay fields are for
+	// testing purposes.
+	ReplayCandidateCount           *int
+	ReplayDialParametersTTLSeconds *int
+
 	// clientParameters is the active ClientParameters with defaults, config
 	// values, and, optionally, tactics applied.
 	//
@@ -974,6 +979,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.LivenessTestMaxDownstreamBytes != nil {
 		applyParameters[parameters.LivenessTestMaxDownstreamBytes] = *config.LivenessTestMaxDownstreamBytes
+	}
+
+	if config.ReplayCandidateCount != nil {
+		applyParameters[parameters.ReplayCandidateCount] = *config.ReplayCandidateCount
+	}
+
+	if config.ReplayDialParametersTTLSeconds != nil {
+		applyParameters[parameters.ReplayDialParametersTTL] = fmt.Sprintf("%ds", *config.ReplayDialParametersTTLSeconds)
 	}
 
 	return applyParameters
