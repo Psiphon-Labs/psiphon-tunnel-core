@@ -159,20 +159,34 @@ func MakeDialParameters(
 	}
 
 	// Check if replay is permitted:
-	// - Previous dial parameters must not have expired (TTL).
-	// - Config/tactics/server entry values must be unchanged from
-	//   when previous dial parameters were established.
-	// - The protocol selection constraints must permit replay,
-	//   as indicated by canReplay.
+	// - TTL must be > 0 and existing dial parameters must not have expired
+	//   as indicated by LastUsedTimestamp + TTL.
+	// - Config/tactics/server entry values must be unchanged from when
+	//   previous dial parameters were established.
+	// - The protocol selection constraints must permit replay, as indicated
+	//   by canReplay.
+	//
+	// When existing dial parameters don't meet these conditions, dialParams
+	// is reset to nil and new dial parameters will be generated.
 
-	now := time.Now()
-	configStateHash := getConfigStateHash(config, p, serverEntry)
+	var currentTimestamp time.Time
+	var configStateHash []byte
+
+	// When TTL is 0, replay is disabled; the timestamp remains 0 and the
+	// output DialParameters will not be stored by Success.
+
+	if ttl > 0 {
+		currentTimestamp = time.Now()
+		configStateHash = getConfigStateHash(config, p, serverEntry)
+	}
 
 	if dialParams != nil &&
-		(dialParams.LastUsedTimestamp.Before(now.Add(-ttl)) ||
+		(ttl <= 0 ||
+			dialParams.LastUsedTimestamp.Before(currentTimestamp.Add(-ttl)) ||
 			bytes.Compare(dialParams.LastUsedConfigStateHash, configStateHash) != 0) {
 
-		// In this case, existing dial parameters are invalid and cleared.
+		// In these cases, existing dial parameters are expired or no longer
+		// match the config state and so are cleared to avoid rechecking them.
 
 		err = DeleteDialParameters(serverEntry.IpAddress, networkID)
 		if err != nil {
@@ -206,7 +220,7 @@ func MakeDialParameters(
 	// replayed dial parameters which will be updated in the datastore upon
 	// success.
 
-	dialParams.LastUsedTimestamp = now
+	dialParams.LastUsedTimestamp = currentTimestamp
 	dialParams.LastUsedConfigStateHash = configStateHash
 
 	// Initialize dial parameters.
@@ -521,6 +535,12 @@ func (dialParams *DialParameters) GetMeekConfig() *MeekConfig {
 }
 
 func (dialParams *DialParameters) Succeeded() {
+
+	// When TTL is 0, don't store dial parameters.
+	if dialParams.LastUsedTimestamp.IsZero() {
+		return
+	}
+
 	NoticeInfo("Set dial parameters for %s", dialParams.ServerEntry.IpAddress)
 	err := SetDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID, dialParams)
 	if err != nil {
