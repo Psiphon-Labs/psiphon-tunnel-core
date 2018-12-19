@@ -964,7 +964,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	lastTotalBytesTransferedTime := monotime.Now()
 	totalSent := int64(0)
 	totalReceived := int64(0)
-	replaySucceeded := false
+	dialParamsSucceeded := false
 
 	noticeBytesTransferredTicker := time.NewTicker(1 * time.Second)
 	defer noticeBytesTransferredTicker.Stop()
@@ -1077,10 +1077,10 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			// parameters for subsequent replay.
 			if totalSent >= int64(replayTargetUpstreamBytes) &&
 				totalReceived >= int64(replayTargetDownstreamBytes) &&
-				!replaySucceeded {
+				!dialParamsSucceeded {
 
 				tunnel.dialParams.Succeeded()
-				replaySucceeded = true
+				dialParamsSucceeded = true
 			}
 
 		case <-statsTimer.C:
