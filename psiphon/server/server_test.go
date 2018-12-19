@@ -689,14 +689,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	localSOCKSProxyPort := 1081
 	localHTTPProxyPort := 8081
 
-	jsonNetworkID := ""
-	if doClientTactics {
-		// Use a distinct prefix for network ID for each test run to
-		// ensure tactics from different runs don't apply; this is
-		// a workaround for the singleton datastore.
-		prefix := time.Now().String()
-		jsonNetworkID = fmt.Sprintf(`,"NetworkID" : "%s-%s"`, prefix, "NETWORK1")
-	}
+	// Use a distinct prefix for network ID for each test run to
+	// ensure tactics from different runs don't apply; this is
+	// a workaround for the singleton datastore.
+	jsonNetworkID := fmt.Sprintf(`,"NetworkID" : "%s-%s"`, time.Now().String(), "NETWORK1")
 
 	jsonLimitTLSProfiles := ""
 	if runConfig.tlsProfile != "" {
