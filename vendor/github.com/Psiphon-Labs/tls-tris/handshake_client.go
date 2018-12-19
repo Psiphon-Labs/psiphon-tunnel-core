@@ -54,6 +54,10 @@ func makeClientHello(config *Config) (*clientHelloMsg, error) {
 		return nil, errors.New("tls: NextProtos values too large")
 	}
 
+	if config.ClientHelloPRNGSeed == nil {
+		return nil, errors.New("tls: missing Config.ClientHelloPRNGSeed")
+	}
+
 	hello := &clientHelloMsg{
 		vers:                         config.maxVersion(),
 		compressionMethods:           []uint8{compressionNone},

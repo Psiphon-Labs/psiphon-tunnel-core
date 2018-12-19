@@ -511,6 +511,9 @@ func (uconn *UConn) parrotRandomizedALPN() error {
 func (uconn *UConn) parrotRandomizedNoALPN() error {
 
 	// [Psiphon]
+	if uconn.clientHelloPRNGSeed == nil {
+		return errors.New("missing UConn.clientHelloPRNGSeed")
+	}
 	PRNG := prng.NewPRNGWithSeed(uconn.clientHelloPRNGSeed)
 
 	hello := uconn.HandshakeState.Hello
