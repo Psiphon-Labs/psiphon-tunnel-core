@@ -1075,6 +1075,9 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			// Once the tunnel has connected, activated, and successfully
 			// transmitted the targetted number of bytes, store its dial
 			// parameters for subsequent replay.
+			//
+			// Even when target bytes are both 0, tunnel must remain up for at
+			// least 1 second due to use of noticeBytesTransferredTicker.
 			if totalSent >= int64(replayTargetUpstreamBytes) &&
 				totalReceived >= int64(replayTargetDownstreamBytes) &&
 				!dialParamsSucceeded {
