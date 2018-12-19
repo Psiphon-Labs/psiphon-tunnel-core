@@ -178,6 +178,11 @@ type Config struct {
 	// typical overridden for testing.
 	EstablishTunnelPausePeriodSeconds *int
 
+	// EstablishTunnelPausePeriodSeconds specifies the grace period, or head
+	// start, provided to the affinity server candidate when establishing. The
+	// affinity server is the server used for the last established tunnel.
+	EstablishTunnelServerAffinityGracePeriodMilliseconds *int
+
 	// ConnectionWorkerPoolSize specifies how many connection attempts to
 	// attempt in parallel. If omitted of when 0, a default is used; this is
 	// recommended.
@@ -860,6 +865,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.EstablishTunnelTimeoutSeconds != nil {
 		applyParameters[parameters.EstablishTunnelTimeout] = fmt.Sprintf("%ds", *config.EstablishTunnelTimeoutSeconds)
+	}
+
+	if config.EstablishTunnelServerAffinityGracePeriodMilliseconds != nil {
+		applyParameters[parameters.EstablishTunnelServerAffinityGracePeriod] = fmt.Sprintf("%dms", *config.EstablishTunnelServerAffinityGracePeriodMilliseconds)
 	}
 
 	if config.EstablishTunnelPausePeriodSeconds != nil {

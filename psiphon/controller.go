@@ -1450,8 +1450,6 @@ func (controller *Controller) getTactics(done chan struct{}) {
 func (controller *Controller) doFetchTactics(
 	serverEntry *protocol.ServerEntry) (*tactics.Record, error) {
 
-	// *TODO: ...
-
 	canReplay := func(serverEntry *protocol.ServerEntry, replayProtocol string) bool {
 		return common.Contains(
 			serverEntry.GetSupportedTacticsProtocols(), replayProtocol)
