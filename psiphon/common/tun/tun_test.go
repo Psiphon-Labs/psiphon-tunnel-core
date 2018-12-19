@@ -709,7 +709,7 @@ func (logger *testLogger) LogMetric(metric string, fields common.LogFields) {
 
 	fmt.Printf("METRIC: %s: %+v\n", metric, fields)
 
-	if metric == "packet_metrics" && logger.packetMetrics != nil {
+	if metric == "server_packet_metrics" && logger.packetMetrics != nil {
 		select {
 		case logger.packetMetrics <- fields:
 		default:

@@ -286,7 +286,7 @@ func panicHandler(output string) {
 		logEvent["host_id"] = config.HostID
 		logEvent["build_rev"] = common.GetBuildInfo().BuildRev
 		logEvent["timestamp"] = time.Now().Format(time.RFC3339)
-		logEvent["event_name"] = "panic"
+		logEvent["event_name"] = "server_panic"
 		logEvent["panic"] = output
 
 		// Logs are written to the configured file name. If no name is specified, logs are written to stderr

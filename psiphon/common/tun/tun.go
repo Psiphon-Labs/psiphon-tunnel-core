@@ -600,7 +600,7 @@ func (server *Server) interruptSession(session *session) {
 		session.metrics.checkpoint(
 			server.config.Logger,
 			metricsUpdater,
-			"packet_metrics",
+			"server_packet_metrics",
 			packetMetricsAll)
 	}
 
@@ -693,7 +693,10 @@ func (server *Server) runOrphanMetricsCheckpointer() {
 
 		// TODO: skip log if all zeros?
 		server.orphanMetrics.checkpoint(
-			server.config.Logger, nil, "orphan_packet_metrics", packetMetricsRejected)
+			server.config.Logger,
+			nil,
+			"server_orphan_packet_metrics",
+			packetMetricsRejected)
 		if done {
 			return
 		}
