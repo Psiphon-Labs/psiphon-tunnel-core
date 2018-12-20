@@ -182,6 +182,10 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 
 	n, addr, err := conn.PacketConn.ReadFrom(p)
 
+	// Data is processed even when err != nil, as ReadFrom may return both
+	// a packet and an error, such as io.EOF.
+	// See: https://golang.org/pkg/net/#PacketConn.
+
 	if n > 0 {
 
 		isObfuscated := true
@@ -208,6 +212,12 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			// than relying on reaper.
 
 			isQUIC := isQUIC(p[:n])
+
+			// Without addr, the mode cannot be determined.
+			if addr == nil {
+				return n, addr, newTemporaryNetError(common.ContextError(
+					fmt.Errorf("missing addr")))
+			}
 
 			conn.peerModesMutex.Lock()
 			address := addr.String()
@@ -253,6 +263,7 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 		}
 	}
 
+	// Do not wrap any err returned by conn.PacketConn.ReadFrom.
 	return n, addr, err
 }
 
@@ -355,6 +366,7 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 
 	_, err := conn.PacketConn.WriteTo(p, addr)
 
+	// Do not wrap any err returned by conn.PacketConn.WriteTo.
 	return n, err
 }
 

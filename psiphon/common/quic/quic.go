@@ -447,13 +447,13 @@ func isErrorIndicatingClosed(err error) bool {
 //    packetHandlerMap and its mutex are used by all client sessions, this
 //    effectively hangs the entire server.
 //
-// loggingPacketConn PacketConn ReadFrom errors and returns any usable values
-// or loops and calls ReadFrom again. In practise, due to the nature of UDP
-// sockets, ReadFrom errors are exceptional as they will mosyt likely not
-// occur due to network transmission failures. ObfuscatedPacketConn returns
-// errors that could be due to network transmission failures that corrupt
-// packets; these are marked as net.Error.Temporary() and loggingPacketConn
-// logs these at debug level.
+// loggingPacketConn log ReadFrom errors and returns any usable values or
+// loops and calls ReadFrom again. In practise, due to the nature of UDP
+// sockets, ReadFrom errors are exceptional as they will most likely not occur
+// due to network transmission failures. ObfuscatedPacketConn returns errors
+// that could be due to network transmission failures that corrupt packets;
+// these are marked as net.Error.Temporary() and loggingPacketConn logs these
+// at debug level.
 //
 // loggingPacketConn assumes quic-go revision ffdfa1 behavior and will break
 // other behavior, such as setting deadlines and expecting net.Error.Timeout()

@@ -542,6 +542,10 @@ func dialTunnel(
 	// Ensure that, unless the base context is cancelled, any replayed dial
 	// parameters are cleared, no longer to be retried, if the tunnel fails to
 	// connect.
+	//
+	// Limitation: dials that fail to connect due to the server being in a
+	// load-limiting state are not distinguished and excepted from this
+	// logic.
 	dialSucceeded := false
 	baseCtx := ctx
 	defer func() {
