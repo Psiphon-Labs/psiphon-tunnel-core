@@ -590,6 +590,7 @@ var baseRequestParams = append(
 		{"quic_dial_sni_address", isAnyString, requestParamOptional},
 		{"padding", isAnyString, requestParamOptional | requestParamLogStringLengthAsInt},
 		{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"is_replay", isBooleanFlag, requestParamOptional},
 	},
 	upstreamFragmentorParams...)
 

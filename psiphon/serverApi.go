@@ -799,7 +799,11 @@ func getBaseAPIParameters(
 		params["quic_dial_sni_address"] = dialParams.QUICDialSNIAddress
 	}
 
-	params["is_replay"] = dialParams.IsReplay
+	isReplay := "0"
+	if dialParams.IsReplay {
+		isReplay = "1"
+	}
+	params["is_replay"] = isReplay
 
 	if dialParams.DialConnMetrics != nil {
 		metrics := dialParams.DialConnMetrics.GetMetrics()
