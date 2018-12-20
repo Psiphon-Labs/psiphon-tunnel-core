@@ -83,7 +83,7 @@ func TestNonblockingIO(t *testing.T) {
 		reader := func(r io.Reader, isClosed func() bool, seed int) {
 			defer readers.Done()
 
-			prng := rand.New(rand.NewSource(int64(seed)))
+			PRNG := rand.New(rand.NewSource(int64(seed)))
 
 			expectedData := make([]byte, maxIO)
 			data := make([]byte, maxIO)
@@ -95,8 +95,8 @@ func TestNonblockingIO(t *testing.T) {
 				if i == messages/2 {
 					readersMidpoint.Done()
 				}
-				n := int(1 + prng.Int31n(int32(maxIO)))
-				prng.Read(expectedData[:n])
+				n := int(1 + PRNG.Int31n(int32(maxIO)))
+				PRNG.Read(expectedData[:n])
 				_, err := io.ReadFull(r, data[:n])
 				if err != nil {
 					if isClosed() {
@@ -123,13 +123,13 @@ func TestNonblockingIO(t *testing.T) {
 		writer := func(w io.Writer, isClosed func() bool, seed int) {
 			defer writers.Done()
 
-			prng := rand.New(rand.NewSource(int64(seed)))
+			PRNG := rand.New(rand.NewSource(int64(seed)))
 
 			data := make([]byte, maxIO)
 
 			for i := 0; i < messages; i++ {
-				n := int(1 + prng.Int31n(int32(maxIO)))
-				prng.Read(data[:n])
+				n := int(1 + PRNG.Int31n(int32(maxIO)))
+				PRNG.Read(data[:n])
 				m, err := w.Write(data[:n])
 				if err != nil {
 					if isClosed() {

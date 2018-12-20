@@ -24,6 +24,7 @@ import (
 	"fmt"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 // DownloadURL specifies a URL for downloading resources along with parameters
@@ -112,10 +113,7 @@ func (d DownloadURLs) Select(attempt int) (string, string, bool) {
 		return "", "", true
 	}
 
-	selection, err := common.MakeSecureRandomInt(len(candidates))
-	if err != nil {
-		selection = 0
-	}
+	selection := prng.Intn(len(candidates))
 	downloadURL := d[candidates[selection]]
 
 	return downloadURL.URL, canonicalURL, downloadURL.SkipVerify

@@ -20,7 +20,6 @@
 package quic
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -32,6 +31,7 @@ import (
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/hkdf"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Yawning/chacha20"
 )
 
@@ -68,10 +68,8 @@ type ObfuscatedPacketConn struct {
 	obfuscationKey [32]byte
 	peerModesMutex sync.Mutex
 	peerModes      map[string]*peerMode
-
-	randomStreamMutex sync.Mutex
-	randomStream      *chacha20.Cipher
-	randomStreamCount int64
+	noncePRNG      *prng.PRNG
+	paddingPRNG    *prng.PRNG
 }
 
 type peerMode struct {
@@ -87,18 +85,26 @@ func (p *peerMode) isStale() bool {
 func NewObfuscatedPacketConn(
 	conn net.PacketConn,
 	isServer bool,
-	obfuscationKey string) (*ObfuscatedPacketConn, error) {
+	obfuscationKey string,
+	paddingSeed *prng.Seed) (*ObfuscatedPacketConn, error) {
+
+	// There is no replay of obfuscation "encryption", just padding.
+	nonceSeed, err := prng.NewSeed()
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
 
 	packetConn := &ObfuscatedPacketConn{
-		PacketConn:        conn,
-		isServer:          isServer,
-		peerModes:         make(map[string]*peerMode),
-		randomStreamCount: RANDOM_STREAM_LIMIT,
+		PacketConn:  conn,
+		isServer:    isServer,
+		peerModes:   make(map[string]*peerMode),
+		noncePRNG:   prng.NewPRNGWithSeed(nonceSeed),
+		paddingPRNG: prng.NewPRNGWithSeed(paddingSeed),
 	}
 
 	secret := []byte(obfuscationKey)
 	salt := []byte("quic-obfuscation-key")
-	_, err := io.ReadFull(
+	_, err = io.ReadFull(
 		hkdf.New(sha256.New, secret, salt, nil), packetConn.obfuscationKey[:])
 	if err != nil {
 		return nil, common.ContextError(err)
@@ -176,6 +182,10 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 
 	n, addr, err := conn.PacketConn.ReadFrom(p)
 
+	// Data is processed even when err != nil, as ReadFrom may return both
+	// a packet and an error, such as io.EOF.
+	// See: https://golang.org/pkg/net/#PacketConn.
+
 	if n > 0 {
 
 		isObfuscated := true
@@ -202,6 +212,12 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			// than relying on reaper.
 
 			isQUIC := isQUIC(p[:n])
+
+			// Without addr, the mode cannot be determined.
+			if addr == nil {
+				return n, addr, newTemporaryNetError(common.ContextError(
+					fmt.Errorf("missing addr")))
+			}
 
 			conn.peerModesMutex.Lock()
 			address := addr.String()
@@ -247,6 +263,7 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 		}
 	}
 
+	// Do not wrap any err returned by conn.PacketConn.ReadFrom.
 	return n, addr, err
 }
 
@@ -299,133 +316,58 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 		buffer := b.buffer[:]
 		defer obfuscatorBufferPool.Put(b)
 
-		nonce := buffer[0:NONCE_SIZE]
 		for {
-			err := conn.getRandomBytes(nonce)
+
+			// Note: this zero-memory pattern is compiler optimized:
+			// https://golang.org/cl/137880043
+			for i := range buffer {
+				buffer[i] = 0
+			}
+
+			nonce := buffer[0:NONCE_SIZE]
+			conn.noncePRNG.Read(nonce)
+
+			// Obfuscated QUIC padding results in packets that exceed the
+			// QUIC max packet size of 1280.
+
+			maxPaddingLen := maxObfuscatedPacketSize - (n + (NONCE_SIZE + 1))
+			if maxPaddingLen < 0 {
+				maxPaddingLen = 0
+			}
+			if maxPaddingLen > MAX_PADDING {
+				maxPaddingLen = MAX_PADDING
+			}
+
+			paddingLen := conn.paddingPRNG.Intn(maxPaddingLen + 1)
+			buffer[NONCE_SIZE] = uint8(paddingLen)
+
+			padding := buffer[(NONCE_SIZE + 1) : (NONCE_SIZE+1)+paddingLen]
+			conn.paddingPRNG.Read(padding)
+
+			copy(buffer[(NONCE_SIZE+1)+paddingLen:], p)
+			dataLen := (NONCE_SIZE + 1) + paddingLen + n
+
+			cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], nonce)
 			if err != nil {
 				return 0, common.ContextError(err)
 			}
+			packet := buffer[NONCE_SIZE:dataLen]
+			cipher.XORKeyStream(packet, packet)
 
-			// Don't use a random nonce that looks like QUIC, or the
+			p = buffer[:dataLen]
+
+			// Don't use obfuscation that looks like QUIC, or the
 			// peer will not treat this packet as obfuscated.
-			if !isQUIC(buffer[:]) {
+			if !isQUIC(p) {
 				break
 			}
 		}
-
-		// Obfuscated QUIC padding results in packets that exceed the
-		// QUIC max packet size of 1280.
-
-		maxPaddingLen := maxObfuscatedPacketSize - (n + (NONCE_SIZE + 1))
-		if maxPaddingLen < 0 {
-			maxPaddingLen = 0
-		}
-		if maxPaddingLen > MAX_PADDING {
-			maxPaddingLen = MAX_PADDING
-		}
-
-		paddingLen, err := conn.getRandomPaddingLen(maxPaddingLen)
-		if err != nil {
-			return 0, common.ContextError(err)
-		}
-
-		buffer[NONCE_SIZE] = uint8(paddingLen)
-
-		padding := buffer[(NONCE_SIZE + 1) : (NONCE_SIZE+1)+paddingLen]
-		err = conn.getRandomBytes(padding)
-		if err != nil {
-			return 0, common.ContextError(err)
-		}
-
-		copy(buffer[(NONCE_SIZE+1)+paddingLen:], p)
-		dataLen := (NONCE_SIZE + 1) + paddingLen + n
-
-		cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], nonce)
-		if err != nil {
-			return 0, common.ContextError(err)
-		}
-		packet := buffer[NONCE_SIZE:dataLen]
-		cipher.XORKeyStream(packet, packet)
-
-		p = buffer[:dataLen]
 	}
 
 	_, err := conn.PacketConn.WriteTo(p, addr)
 
+	// Do not wrap any err returned by conn.PacketConn.WriteTo.
 	return n, err
-}
-
-func (conn *ObfuscatedPacketConn) getRandomBytes(b []byte) error {
-	conn.randomStreamMutex.Lock()
-	defer conn.randomStreamMutex.Unlock()
-
-	// Use a stream cipher to generate randomness for padding. This mitigates
-	// issues using a high volume (multiple per packet) of crypto/rand.Read
-	// calls, which use getrandom via a syscall; under high load with many
-	// clients, we observed very long syscall durations, perhaps due to lock
-	// contention. Using a userspace random stream avoids frequent syscall
-	// context switches as well as spinlock overhead.
-
-	if conn.randomStreamCount+int64(len(b)) >= RANDOM_STREAM_LIMIT {
-
-		// Re-key before reaching the 2^38-64 chacha20 key stream limit.
-
-		var randomStreamKey [32]byte
-		_, err := rand.Read(randomStreamKey[:])
-		if err != nil {
-			return common.ContextError(err)
-		}
-		var randomKeyNonce [NONCE_SIZE]byte
-
-		conn.randomStream, err = chacha20.NewCipher(
-			randomStreamKey[:],
-			randomKeyNonce[:])
-		if err != nil {
-			return common.ContextError(err)
-		}
-
-		conn.randomStreamCount = 0
-	}
-
-	conn.randomStream.KeyStream(b)
-
-	conn.randomStreamCount += int64(len(b))
-
-	return nil
-}
-
-func (conn *ObfuscatedPacketConn) getRandomPaddingLen(maxPadding int) (int, error) {
-
-	// Selects uniformly from [0, maxPadding], using the ObfuscatedPacketConn's
-	// random stream.
-
-	maxRand := 255
-
-	if maxPadding < 0 || maxPadding > maxRand {
-		return 0, common.ContextError(fmt.Errorf("unexpected max padding: %d", maxPadding))
-	}
-
-	if maxPadding == 0 {
-		return 0, nil
-	}
-
-	upperBound := maxPadding
-	if maxPadding < 255 {
-		upperBound = maxRand - (maxRand % (maxPadding + 1))
-	}
-
-	for {
-		var value [1]byte
-		err := conn.getRandomBytes(value[:])
-		if err != nil {
-			return 0, common.ContextError(err)
-		}
-
-		padding := int(value[0])
-		if padding <= upperBound {
-			return padding % (maxPadding + 1), nil
-		}
-	}
 }
 
 func isQUIC(buffer []byte) bool {

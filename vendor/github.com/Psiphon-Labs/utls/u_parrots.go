@@ -5,14 +5,14 @@
 package tls
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"errors"
 	"io"
-	"math/big"
 	"sort"
 	"strconv"
-	"time"
+
+	// [Psiphon]
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 func (uconn *UConn) generateClientHelloConfig(id ClientHelloID) error {
@@ -48,7 +48,7 @@ func (uconn *UConn) generateClientHelloConfig(id ClientHelloID) error {
 
 	// following ClientHello's are aliases, so we call generateClientHelloConfig() again to set the correct id
 	case HelloRandomized:
-		if tossBiasedCoin(0.5) {
+		if prng.FlipCoin() {
 			return uconn.generateClientHelloConfig(HelloRandomizedALPN)
 		} else {
 			return uconn.generateClientHelloConfig(HelloRandomizedNoALPN)
@@ -509,16 +509,23 @@ func (uconn *UConn) parrotRandomizedALPN() error {
 }
 
 func (uconn *UConn) parrotRandomizedNoALPN() error {
+
+	// [Psiphon]
+	if uconn.clientHelloPRNGSeed == nil {
+		return errors.New("missing UConn.clientHelloPRNGSeed")
+	}
+	PRNG := prng.NewPRNGWithSeed(uconn.clientHelloPRNGSeed)
+
 	hello := uconn.HandshakeState.Hello
 	session := uconn.HandshakeState.Session
 
 	hello.CipherSuites = make([]uint16, len(defaultCipherSuites()))
 	copy(hello.CipherSuites, defaultCipherSuites())
-	shuffledSuites, err := shuffledCiphers()
+	shuffledSuites, err := shuffledCiphers(PRNG)
 	if err != nil {
 		return err
 	}
-	hello.CipherSuites = removeRandomCiphers(shuffledSuites, 0.4)
+	hello.CipherSuites = removeRandomCiphers(PRNG, shuffledSuites, 0.4)
 	err = uconn.fillClientHelloHeader()
 	if err != nil {
 		return err
@@ -540,16 +547,16 @@ func (uconn *UConn) parrotRandomizedNoALPN() error {
 		{hashSHA384, signatureRSA},
 		{hashSHA1, signatureRSA},
 	}
-	if tossBiasedCoin(0.5) {
+	if tossBiasedCoin(PRNG, 0.5) {
 		sigAndHashAlgos = append(sigAndHashAlgos, SignatureAndHash{disabledHashSHA512, signatureECDSA})
 	}
-	if tossBiasedCoin(0.5) {
+	if tossBiasedCoin(PRNG, 0.5) {
 		sigAndHashAlgos = append(sigAndHashAlgos, SignatureAndHash{disabledHashSHA512, signatureRSA})
 	}
-	if tossBiasedCoin(0.5) {
+	if tossBiasedCoin(PRNG, 0.5) {
 		sigAndHashAlgos = append(sigAndHashAlgos, SignatureAndHash{hashSHA1, signatureECDSA})
 	}
-	err = shuffleSignatures(sigAndHashAlgos)
+	err = shuffleSignatures(PRNG, sigAndHashAlgos)
 	if err != nil {
 		return err
 	}
@@ -560,11 +567,11 @@ func (uconn *UConn) parrotRandomizedNoALPN() error {
 	points := SupportedPointsExtension{SupportedPoints: []byte{pointFormatUncompressed}}
 
 	curveIDs := []CurveID{}
-	if tossBiasedCoin(0.7) {
+	if tossBiasedCoin(PRNG, 0.7) {
 		curveIDs = append(curveIDs, X25519)
 	}
 	curveIDs = append(curveIDs, CurveP256, CurveP384)
-	if tossBiasedCoin(0.3) {
+	if tossBiasedCoin(PRNG, 0.3) {
 		curveIDs = append(curveIDs, CurveP521)
 	}
 	curves := SupportedCurvesExtension{curveIDs}
@@ -580,19 +587,19 @@ func (uconn *UConn) parrotRandomizedNoALPN() error {
 		&curves,
 	}
 
-	if tossBiasedCoin(0.66) {
+	if tossBiasedCoin(PRNG, 0.66) {
 		uconn.Extensions = append(uconn.Extensions, &padding)
 	}
-	if tossBiasedCoin(0.66) {
+	if tossBiasedCoin(PRNG, 0.66) {
 		uconn.Extensions = append(uconn.Extensions, &status)
 	}
-	if tossBiasedCoin(0.55) {
+	if tossBiasedCoin(PRNG, 0.55) {
 		uconn.Extensions = append(uconn.Extensions, &sct)
 	}
-	if tossBiasedCoin(0.44) {
+	if tossBiasedCoin(PRNG, 0.44) {
 		uconn.Extensions = append(uconn.Extensions, &reneg)
 	}
-	err = shuffleTLSExtensions(uconn.Extensions)
+	err = shuffleTLSExtensions(PRNG, uconn.Extensions)
 	if err != nil {
 		return err
 	}
@@ -603,17 +610,12 @@ func (uconn *UConn) parrotCustom() error {
 	return uconn.fillClientHelloHeader()
 }
 
-func tossBiasedCoin(probability float32) bool {
+func tossBiasedCoin(PRNG *prng.PRNG, probability float32) bool {
 	// probability is expected to be in [0,1]
 	// this function never returns errors for ease of use
 	const precision = 0xffff
 	threshold := float32(precision) * probability
-	value, err := getRandInt(precision)
-	if err != nil {
-		// I doubt that this code will ever actually be used, as other functions are expected to complain
-		// about used source of entropy. Nonetheless, this is more than enough for given purpose
-		return ((time.Now().Unix() & 1) == 0)
-	}
+	value := PRNG.Intn(precision)
 
 	if float32(value) <= threshold {
 		return true
@@ -622,7 +624,7 @@ func tossBiasedCoin(probability float32) bool {
 	}
 }
 
-func removeRandomCiphers(s []uint16, maxRemovalProbability float32) []uint16 {
+func removeRandomCiphers(PRNG *prng.PRNG, s []uint16, maxRemovalProbability float32) []uint16 {
 	// removes elements in place
 	// probability to remove increases for further elements
 	// never remove first cipher
@@ -634,7 +636,7 @@ func removeRandomCiphers(s []uint16, maxRemovalProbability float32) []uint16 {
 	floatLen := float32(len(s))
 	sliceLen := len(s)
 	for i := 1; i < sliceLen; i++ {
-		if tossBiasedCoin(maxRemovalProbability * float32(i) / floatLen) {
+		if tossBiasedCoin(PRNG, maxRemovalProbability*float32(i)/floatLen) {
 			s = append(s[:i], s[i+1:]...)
 			sliceLen--
 			i--
@@ -643,30 +645,9 @@ func removeRandomCiphers(s []uint16, maxRemovalProbability float32) []uint16 {
 	return s
 }
 
-func getRandInt(max int) (int, error) {
-	bigInt, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
-	return int(bigInt.Int64()), err
-}
-
-func getRandPerm(n int) ([]int, error) {
-	permArray := make([]int, n)
-	for i := 1; i < n; i++ {
-		j, err := getRandInt(i + 1)
-		if err != nil {
-			return permArray, err
-		}
-		permArray[i] = permArray[j]
-		permArray[j] = i
-	}
-	return permArray, nil
-}
-
-func shuffledCiphers() ([]uint16, error) {
+func shuffledCiphers(PRNG *prng.PRNG) ([]uint16, error) {
 	ciphers := make(sortableCiphers, len(cipherSuites))
-	perm, err := getRandPerm(len(cipherSuites))
-	if err != nil {
-		return nil, err
-	}
+	perm := PRNG.Perm(len(cipherSuites))
 	for i, suite := range cipherSuites {
 		ciphers[i] = sortableCipher{suite: suite.id,
 			isObsolete: ((suite.flags & suiteTLS12) == 0),
@@ -711,12 +692,9 @@ func (ciphers sortableCiphers) GetCiphers() []uint16 {
 }
 
 // so much for generics
-func shuffleTLSExtensions(s []TLSExtension) error {
+func shuffleTLSExtensions(PRNG *prng.PRNG, s []TLSExtension) error {
 	// shuffles array in place
-	perm, err := getRandPerm(len(s))
-	if err != nil {
-		return err
-	}
+	perm := PRNG.Perm(len(s))
 	for i := range s {
 		s[i], s[perm[i]] = s[perm[i]], s[i]
 	}
@@ -724,12 +702,9 @@ func shuffleTLSExtensions(s []TLSExtension) error {
 }
 
 // so much for generics
-func shuffleSignatures(s []SignatureAndHash) error {
+func shuffleSignatures(PRNG *prng.PRNG, s []SignatureAndHash) error {
 	// shuffles array in place
-	perm, err := getRandPerm(len(s))
-	if err != nil {
-		return err
-	}
+	perm := PRNG.Perm(len(s))
 	for i := range s {
 		s[i], s[perm[i]] = s[perm[i]], s[i]
 	}

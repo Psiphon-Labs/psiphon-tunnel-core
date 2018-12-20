@@ -31,6 +31,7 @@ import (
 
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 func TestInterruptDials(t *testing.T) {
@@ -69,11 +70,17 @@ func TestInterruptDials(t *testing.T) {
 		t.Fatalf("NewClientParameters failed: %s", err)
 	}
 
+	seed, err := prng.NewSeed()
+	if err != nil {
+		t.Fatalf("NewSeed failed: %s", err)
+	}
+
 	makeDialers["TLS"] = func(string) Dialer {
 		return NewCustomTLSDialer(
 			&CustomTLSConfig{
-				ClientParameters: clientParameters,
-				Dial:             NewTCPDialer(&DialConfig{}),
+				ClientParameters:         clientParameters,
+				Dial:                     NewTCPDialer(&DialConfig{}),
+				RandomizedTLSProfileSeed: seed,
 			})
 	}
 

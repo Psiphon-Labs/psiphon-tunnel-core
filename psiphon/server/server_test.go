@@ -42,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"golang.org/x/net/proxy"
@@ -88,7 +89,7 @@ func TestMain(m *testing.M) {
 
 func runMockWebServer() (string, string) {
 
-	responseBody, _ := common.MakeSecureRandomStringHex(100000)
+	responseBody := prng.HexString(100000)
 
 	serveMux := http.NewServeMux()
 	serveMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -688,14 +689,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	localSOCKSProxyPort := 1081
 	localHTTPProxyPort := 8081
 
-	jsonNetworkID := ""
-	if doClientTactics {
-		// Use a distinct prefix for network ID for each test run to
-		// ensure tactics from different runs don't apply; this is
-		// a workaround for the singleton datastore.
-		prefix := time.Now().String()
-		jsonNetworkID = fmt.Sprintf(`,"NetworkID" : "%s-%s"`, prefix, "NETWORK1")
-	}
+	// Use a distinct prefix for network ID for each test run to
+	// ensure tactics from different runs don't apply; this is
+	// a workaround for the singleton datastore.
+	jsonNetworkID := fmt.Sprintf(`,"NetworkID" : "%s-%s"`, time.Now().String(), "NETWORK1")
 
 	jsonLimitTLSProfiles := ""
 	if runConfig.tlsProfile != "" {
@@ -1165,10 +1162,10 @@ func makeTunneledNTPRequestAttempt(
 func pavePsinetDatabaseFile(
 	t *testing.T, useDefaultSponsorID bool, psinetFilename string) (string, string) {
 
-	sponsorID, _ := common.MakeSecureRandomStringHex(8)
+	sponsorID := prng.HexString(8)
 
-	fakeDomain, _ := common.MakeSecureRandomStringHex(4)
-	fakePath, _ := common.MakeSecureRandomStringHex(4)
+	fakeDomain := prng.HexString(4)
+	fakePath := prng.HexString(4)
 	expectedHomepageURL := fmt.Sprintf("https://%s.com/%s", fakeDomain, fakePath)
 
 	psinetJSONFormat := `
@@ -1348,7 +1345,7 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
     }
     `
 
-	propagationChannelID, _ := common.MakeSecureRandomStringHex(8)
+	propagationChannelID := prng.HexString(8)
 
 	now := time.Now().UTC()
 	epoch := now.Truncate(720 * time.Hour)

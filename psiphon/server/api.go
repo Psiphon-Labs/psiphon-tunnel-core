@@ -38,6 +38,7 @@ import (
 
 const (
 	MAX_API_PARAMS_SIZE = 256 * 1024 // 256KB
+	PADDING_MAX_BYTES   = 16 * 1024
 
 	CLIENT_PLATFORM_ANDROID = "Android"
 	CLIENT_PLATFORM_WINDOWS = "Windows"
@@ -285,6 +286,8 @@ func handshakeAPIRequestHandler(
 			params,
 			baseRequestParams)).Debug("handshake")
 
+	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
+
 	handshakeResponse := protocol.HandshakeResponse{
 		SSHSessionID:           sessionID,
 		Homepages:              db.GetRandomizedHomepages(sponsorID, geoIPData.Country, isMobile),
@@ -296,6 +299,7 @@ func handshakeAPIRequestHandler(
 		ServerTimestamp:        common.GetCurrentTimestamp(),
 		ActiveAuthorizationIDs: activeAuthorizationIDs,
 		TacticsPayload:         marshaledTacticsPayload,
+		Padding:                strings.Repeat(" ", pad_response),
 	}
 
 	responsePayload, err := json.Marshal(handshakeResponse)
@@ -351,8 +355,11 @@ func connectedAPIRequestHandler(
 			params,
 			connectedRequestParams))
 
+	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
+
 	connectedResponse := protocol.ConnectedResponse{
 		ConnectedTimestamp: common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
+		Padding:            strings.Repeat(" ", pad_response),
 	}
 
 	responsePayload, err := json.Marshal(connectedResponse)
@@ -477,7 +484,9 @@ func statusAPIRequestHandler(
 		log.LogRawFieldsWithTimestamp(logItem)
 	}
 
-	return make([]byte, 0), nil
+	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
+
+	return make([]byte, pad_response), nil
 }
 
 // clientVerificationAPIRequestHandler is just a compliance stub
@@ -529,11 +538,12 @@ type requestParamSpec struct {
 }
 
 const (
-	requestParamOptional       = 1
-	requestParamNotLogged      = 2
-	requestParamArray          = 4
-	requestParamJSON           = 8
-	requestParamLogStringAsInt = 16
+	requestParamOptional             = 1
+	requestParamNotLogged            = 2
+	requestParamArray                = 4
+	requestParamJSON                 = 8
+	requestParamLogStringAsInt       = 16
+	requestParamLogStringLengthAsInt = 32
 )
 
 var upstreamFragmentorParams = []requestParamSpec{
@@ -578,7 +588,9 @@ var baseRequestParams = append(
 		{"dial_port_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"quic_version", isAnyString, requestParamOptional},
 		{"quic_dial_sni_address", isAnyString, requestParamOptional},
-		{"upstream_ossh_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"padding", isAnyString, requestParamOptional | requestParamLogStringLengthAsInt},
+		{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"is_replay", isBooleanFlag, requestParamOptional},
 	},
 	upstreamFragmentorParams...)
 
@@ -776,6 +788,8 @@ func getRequestLogFields(
 				if expectedParam.flags&requestParamLogStringAsInt != 0 {
 					intValue, _ := strconv.Atoi(strValue)
 					logFields[expectedParam.name] = intValue
+				} else if expectedParam.flags&requestParamLogStringLengthAsInt != 0 {
+					logFields[expectedParam.name] = len(strValue)
 				} else {
 					logFields[expectedParam.name] = strValue
 				}
@@ -850,6 +864,20 @@ func getInt64RequestParam(params common.APIParameters, name string) (int64, erro
 		return 0, common.ContextError(fmt.Errorf("invalid param: %s", name))
 	}
 	return int64(value), nil
+}
+
+func getPaddingSizeRequestParam(params common.APIParameters, name string) (int, error) {
+	value, err := getInt64RequestParam(params, name)
+	if err != nil {
+		return 0, common.ContextError(err)
+	}
+	if value < 0 {
+		value = 0
+	}
+	if value > PADDING_MAX_BYTES {
+		value = PADDING_MAX_BYTES
+	}
+	return int(value), nil
 }
 
 func getJSONObjectRequestParam(params common.APIParameters, name string) (common.APIParameters, error) {

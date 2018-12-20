@@ -23,14 +23,11 @@ import (
 	"bytes"
 	"compress/zlib"
 	"crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"math"
-	"math/big"
 	"runtime"
 	"strings"
 	"time"
@@ -104,71 +101,6 @@ func GetStringSlice(value interface{}) ([]string, bool) {
 	return strSlice, true
 }
 
-// FlipCoin is a helper function that randomly
-// returns true or false.
-//
-// If the underlying random number generator fails,
-// FlipCoin still returns false.
-func FlipCoin() bool {
-	randomInt, _ := MakeSecureRandomInt(2)
-	return randomInt == 1
-}
-
-// FlipWeightedCoin returns the result of a weighted
-// random coin flip. If the weight is 0.5, the outcome
-// is equally likely to be true or false. If the weight
-// is 1.0, the outcome is always true, and if the
-// weight is 0.0, the outcome is always false.
-//
-// Input weights > 1.0 are treated as 1.0.
-//
-// If the underlying random number generator fails,
-// FlipWeightedCoin still returns a result.
-func FlipWeightedCoin(weight float64) bool {
-	if weight > 1.0 {
-		weight = 1.0
-	}
-	n, _ := MakeSecureRandomInt64(math.MaxInt64)
-	f := float64(n) / float64(math.MaxInt64)
-	return f > 1.0-weight
-}
-
-// MakeSecureRandomInt is a helper function that wraps
-// MakeSecureRandomInt64.
-func MakeSecureRandomInt(max int) (int, error) {
-	randomInt, err := MakeSecureRandomInt64(int64(max))
-	return int(randomInt), err
-}
-
-// MakeSecureRandomInt64 is a helper function that wraps
-// crypto/rand.Int, which returns a uniform random value in [0, max).
-func MakeSecureRandomInt64(max int64) (int64, error) {
-	if max <= 0 {
-		return 0, nil
-	}
-	randomInt, err := rand.Int(rand.Reader, big.NewInt(max))
-	if err != nil {
-		return 0, ContextError(err)
-	}
-	return randomInt.Int64(), nil
-}
-
-// MakeSecureRandomPerm returns a random permutation of [0,max).
-func MakeSecureRandomPerm(max int) ([]int, error) {
-	// Based on math/rand.Rand.Perm:
-	// https://github.com/golang/go/blob/release-branch.go1.9/src/math/rand/rand.go#L189
-	perm := make([]int, max)
-	for i := 1; i < max; i++ {
-		j, err := MakeSecureRandomInt(i + 1)
-		if err != nil {
-			return nil, ContextError(err)
-		}
-		perm[i] = perm[j]
-		perm[j] = i
-	}
-	return perm, nil
-}
-
 // MakeSecureRandomBytes is a helper function that wraps
 // crypto/rand.Read.
 func MakeSecureRandomBytes(length int) ([]byte, error) {
@@ -181,83 +113,6 @@ func MakeSecureRandomBytes(length int) ([]byte, error) {
 		return nil, ContextError(errors.New("insufficient random bytes"))
 	}
 	return randomBytes, nil
-}
-
-// MakeSecureRandomRange selects a random int in [min, max].
-// If min < 0, min is set to 0. If max < min, min is returned.
-func MakeSecureRandomRange(min, max int) (int, error) {
-	if min < 0 {
-		min = 0
-	}
-	if max < min {
-		return min, nil
-	}
-	n, err := MakeSecureRandomInt(max - min + 1)
-	if err != nil {
-		return 0, ContextError(err)
-	}
-	n += min
-	return n, nil
-}
-
-// MakeSecureRandomPadding selects a random padding length in the indicated
-// range and returns a random byte array of the selected length.
-// If maxLength <= minLength, the padding is minLength.
-func MakeSecureRandomPadding(minLength, maxLength int) ([]byte, error) {
-	paddingSize, err := MakeSecureRandomRange(minLength, maxLength)
-	if err != nil {
-		return nil, ContextError(err)
-	}
-	padding, err := MakeSecureRandomBytes(paddingSize)
-	if err != nil {
-		return nil, ContextError(err)
-	}
-	return padding, nil
-}
-
-// MakeSecureRandomPeriod returns a random duration, within a given range.
-// If max <= min, the duration is min.
-func MakeSecureRandomPeriod(min, max time.Duration) (time.Duration, error) {
-	period, err := MakeSecureRandomInt64(max.Nanoseconds() - min.Nanoseconds())
-	if err != nil {
-		return 0, ContextError(err)
-	}
-	return min + time.Duration(period), nil
-}
-
-// MakeSecureRandomStringHex returns a hex encoded random string.
-// byteLength specifies the pre-encoded data length.
-func MakeSecureRandomStringHex(byteLength int) (string, error) {
-	bytes, err := MakeSecureRandomBytes(byteLength)
-	if err != nil {
-		return "", ContextError(err)
-	}
-	return hex.EncodeToString(bytes), nil
-}
-
-// MakeSecureRandomStringBase64 returns a base64 encoded random string.
-// byteLength specifies the pre-encoded data length.
-func MakeSecureRandomStringBase64(byteLength int) (string, error) {
-	bytes, err := MakeSecureRandomBytes(byteLength)
-	if err != nil {
-		return "", ContextError(err)
-	}
-	return base64.RawURLEncoding.EncodeToString(bytes), nil
-}
-
-// Jitter returns n +/- the given factor.
-// For example, for n = 100 and factor = 0.1, the
-// return value will be in the range [90, 110].
-func Jitter(n int64, factor float64) int64 {
-	a := int64(math.Ceil(float64(n) * factor))
-	r, _ := MakeSecureRandomInt64(2*a + 1)
-	return n + r - a
-}
-
-// JitterDuration is a helper function that wraps Jitter.
-func JitterDuration(
-	d time.Duration, factor float64) time.Duration {
-	return time.Duration(Jitter(int64(d), factor))
 }
 
 // GetCurrentTimestamp returns the current time in UTC as
@@ -304,6 +159,16 @@ func ContextError(err error) error {
 	}
 	pc, _, line, _ := runtime.Caller(1)
 	return fmt.Errorf("%s#%d: %s", getFunctionName(pc), line, err)
+}
+
+// ContextErrorMsg works like ContextError, but adds a message string to
+// the error message.
+func ContextErrorMsg(err error, message string) error {
+	if err == nil {
+		return nil
+	}
+	pc, _, line, _ := runtime.Caller(1)
+	return fmt.Errorf("%s#%d: %s: %s", getFunctionName(pc), line, message, err)
 }
 
 // Compress returns zlib compressed data

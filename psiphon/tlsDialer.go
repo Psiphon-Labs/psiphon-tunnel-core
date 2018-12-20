@@ -64,6 +64,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	tris "github.com/Psiphon-Labs/tls-tris"
 	utls "github.com/Psiphon-Labs/utls"
@@ -114,6 +115,12 @@ type CustomTLSConfig struct {
 	// compatibility constraints.
 	TLSProfile string
 
+	// RandomizedTLSProfileSeed specifies the PRNG seed to use when generating
+	// a randomized TLS ClientHello, which applies to TLS profiles where
+	// protocol.TLSProfileIsRandomized is true. The PRNG seed allows for
+	// optional replay of a particular randomized Client Hello.
+	RandomizedTLSProfileSeed *prng.Seed
+
 	// TrustedCACertificatesFilename specifies a file containing trusted
 	// CA certs. See Config.TrustedCACertificatesFilename.
 	TrustedCACertificatesFilename string
@@ -135,7 +142,7 @@ func (config *CustomTLSConfig) EnableClientSessionCache(
 	clientParameters *parameters.ClientParameters) {
 
 	if config.TLSProfile == "" {
-		config.TLSProfile = SelectTLSProfile(config.ClientParameters)
+		config.TLSProfile = SelectTLSProfile(config.ClientParameters.Get())
 	}
 
 	if useUTLS(config.TLSProfile) {
@@ -147,9 +154,9 @@ func (config *CustomTLSConfig) EnableClientSessionCache(
 
 // SelectTLSProfile picks a random TLS profile from the available candidates.
 func SelectTLSProfile(
-	clientParameters *parameters.ClientParameters) string {
+	p *parameters.ClientParametersSnapshot) string {
 
-	limitTLSProfiles := clientParameters.Get().TLSProfiles(parameters.LimitTLSProfiles)
+	limitTLSProfiles := p.TLSProfiles(parameters.LimitTLSProfiles)
 
 	tlsProfiles := make([]string, 0)
 
@@ -167,7 +174,7 @@ func SelectTLSProfile(
 		return ""
 	}
 
-	choice, _ := common.MakeSecureRandomInt(len(tlsProfiles))
+	choice := prng.Intn(len(tlsProfiles))
 
 	return tlsProfiles[choice]
 }
@@ -283,7 +290,7 @@ func CustomTLSDial(
 	selectedTLSProfile := config.TLSProfile
 
 	if selectedTLSProfile == "" {
-		selectedTLSProfile = SelectTLSProfile(config.ClientParameters)
+		selectedTLSProfile = SelectTLSProfile(config.ClientParameters.Get())
 	}
 
 	tlsConfigInsecureSkipVerify := false
@@ -338,6 +345,11 @@ func CustomTLSDial(
 		tlsRootCAs.AppendCertsFromPEM(certData)
 	}
 
+	if protocol.TLSProfileIsRandomized(selectedTLSProfile) &&
+		config.RandomizedTLSProfileSeed == nil {
+		return nil, common.ContextError(errors.New("missing RandomizedTLSProfileSeed"))
+	}
+
 	// Depending on the selected TLS profile, the TLS provider will be tris
 	// (TLS 1.3) or utls (all other profiles).
 
@@ -357,7 +369,11 @@ func CustomTLSDial(
 			ClientSessionCache: clientSessionCache,
 		}
 
-		uconn := utls.UClient(rawConn, tlsConfig, getUTLSClientHelloID(selectedTLSProfile))
+		uconn := utls.UClient(
+			rawConn,
+			tlsConfig,
+			getUTLSClientHelloID(selectedTLSProfile),
+			config.RandomizedTLSProfileSeed)
 
 		if config.ObfuscatedSessionTicketKey != "" {
 			sessionState, err := utls.NewObfuscatedClientSessionState(
@@ -391,6 +407,7 @@ func CustomTLSDial(
 			ServerName:              tlsConfigServerName,
 			ClientSessionCache:      clientSessionCache,
 			UseExtendedMasterSecret: true,
+			ClientHelloPRNGSeed:     config.RandomizedTLSProfileSeed,
 		}
 
 		conn = &trisConn{

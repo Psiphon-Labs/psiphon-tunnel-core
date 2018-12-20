@@ -27,6 +27,7 @@ import (
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 const (
@@ -67,6 +68,7 @@ type ObfuscatedSSHConn struct {
 	transformBuffer *bytes.Buffer
 	legacyPadding   bool
 	paddingLength   int
+	paddingPRNG     *prng.PRNG
 }
 
 type ObfuscatedSSHConnMode int
@@ -106,10 +108,18 @@ const (
 // without the seed message from the client to derive obfuscation keys. So
 // NewObfuscatedSSHConn blocks on reading the client seed message from the
 // underlying conn.
+//
+// obfuscationPaddingPRNGSeed is required and used only in
+// OBFUSCATION_CONN_MODE_CLIENT mode and allows for optional replay of the
+// same padding: both in the initial obfuscator message and in the SSH KEX
+// sequence. In OBFUSCATION_CONN_MODE_SERVER mode, the server obtains its PRNG
+// seed from the client's initial obfuscator message, resulting in the server
+// replaying its padding as well.
 func NewObfuscatedSSHConn(
 	mode ObfuscatedSSHConnMode,
 	conn net.Conn,
 	obfuscationKeyword string,
+	obfuscationPaddingPRNGSeed *prng.Seed,
 	minPadding, maxPadding *int) (*ObfuscatedSSHConn, error) {
 
 	var err error
@@ -120,9 +130,10 @@ func NewObfuscatedSSHConn(
 	if mode == OBFUSCATION_CONN_MODE_CLIENT {
 		obfuscator, err = NewClientObfuscator(
 			&ObfuscatorConfig{
-				Keyword:    obfuscationKeyword,
-				MinPadding: minPadding,
-				MaxPadding: maxPadding,
+				Keyword:         obfuscationKeyword,
+				PaddingPRNGSeed: obfuscationPaddingPRNGSeed,
+				MinPadding:      minPadding,
+				MaxPadding:      maxPadding,
 			})
 		if err != nil {
 			return nil, common.ContextError(err)
@@ -133,7 +144,9 @@ func NewObfuscatedSSHConn(
 	} else {
 		// NewServerObfuscator reads a seed message from conn
 		obfuscator, err = NewServerObfuscator(
-			conn, &ObfuscatorConfig{Keyword: obfuscationKeyword})
+			conn, &ObfuscatorConfig{
+				Keyword: obfuscationKeyword,
+			})
 		if err != nil {
 			// TODO: readForver() equivalent
 			return nil, common.ContextError(err)
@@ -141,6 +154,11 @@ func NewObfuscatedSSHConn(
 		readDeobfuscate = obfuscator.ObfuscateClientToServer
 		writeObfuscate = obfuscator.ObfuscateServerToClient
 		writeState = OBFUSCATION_WRITE_STATE_SERVER_SEND_IDENTIFICATION_LINE_PADDING
+	}
+
+	paddingPRNG, err := obfuscator.GetDerivedPRNG("obfuscated-ssh-padding")
+	if err != nil {
+		return nil, common.ContextError(err)
 	}
 
 	return &ObfuscatedSSHConn{
@@ -155,7 +173,19 @@ func NewObfuscatedSSHConn(
 		writeBuffer:     new(bytes.Buffer),
 		transformBuffer: new(bytes.Buffer),
 		paddingLength:   -1,
+		paddingPRNG:     paddingPRNG,
 	}, nil
+}
+
+// GetDerivedPRNG creates a new PRNG with a seed derived from the
+// ObfuscatedSSHConn padding seed and distinguished by the salt, which should
+// be a unique identifier for each usage context.
+//
+// In OBFUSCATION_CONN_MODE_SERVER mode, the ObfuscatedSSHConn padding seed is
+// obtained from the client, so derived PRNGs may be used to replay sequences
+// post-initial obfuscator message.
+func (conn *ObfuscatedSSHConn) GetDerivedPRNG(salt string) (*prng.PRNG, error) {
+	return conn.obfuscator.GetDerivedPRNG(salt)
 }
 
 // GetMetrics implements the common.MetricsSource interface.
@@ -354,13 +384,10 @@ func (conn *ObfuscatedSSHConn) transformAndWrite(buffer []byte) error {
 		}
 		conn.writeState = OBFUSCATION_WRITE_STATE_IDENTIFICATION_LINE
 	} else if conn.writeState == OBFUSCATION_WRITE_STATE_SERVER_SEND_IDENTIFICATION_LINE_PADDING {
-		padding, err := makeServerIdentificationLinePadding()
-		if err != nil {
-			return common.ContextError(err)
-		}
+		padding := makeServerIdentificationLinePadding(conn.paddingPRNG)
 		conn.paddingLength = len(padding)
 		conn.writeObfuscate(padding)
-		_, err = conn.Conn.Write(padding)
+		_, err := conn.Conn.Write(padding)
 		if err != nil {
 			return common.ContextError(err)
 		}
@@ -385,7 +412,10 @@ func (conn *ObfuscatedSSHConn) transformAndWrite(buffer []byte) error {
 
 	case OBFUSCATION_WRITE_STATE_KEX_PACKETS:
 		hasMsgNewKeys, err := extractSSHPackets(
-			conn.legacyPadding, conn.writeBuffer, conn.transformBuffer)
+			conn.paddingPRNG,
+			conn.legacyPadding,
+			conn.writeBuffer,
+			conn.transformBuffer)
 		if err != nil {
 			return common.ContextError(err)
 		}
@@ -497,12 +527,9 @@ func readSSHPacket(
 
 // From the original patch to sshd.c:
 // https://bitbucket.org/psiphon/psiphon-circumvention-system/commits/f40865ce624b680be840dc2432283c8137bd896d
-func makeServerIdentificationLinePadding() ([]byte, error) {
+func makeServerIdentificationLinePadding(prng *prng.PRNG) []byte {
 
-	paddingLength, err := common.MakeSecureRandomInt(OBFUSCATE_MAX_PADDING - 2) // 2 = CRLF
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
+	paddingLength := prng.Intn(OBFUSCATE_MAX_PADDING - 2 + 1) // 2 = CRLF
 	paddingLength += 2
 
 	padding := make([]byte, paddingLength)
@@ -530,7 +557,7 @@ func makeServerIdentificationLinePadding() ([]byte, error) {
 		paddingLength -= lineLength
 	}
 
-	return padding, nil
+	return padding
 }
 
 func extractSSHIdentificationLine(writeBuffer, transformBuffer *bytes.Buffer) bool {
@@ -544,7 +571,9 @@ func extractSSHIdentificationLine(writeBuffer, transformBuffer *bytes.Buffer) bo
 }
 
 func extractSSHPackets(
-	legacyPadding bool, writeBuffer, transformBuffer *bytes.Buffer) (bool, error) {
+	prng *prng.PRNG,
+	legacyPadding bool,
+	writeBuffer, transformBuffer *bytes.Buffer) (bool, error) {
 
 	hasMsgNewKeys := false
 	for writeBuffer.Len() >= SSH_PACKET_PREFIX_LENGTH {
@@ -585,14 +614,8 @@ func extractSSHPackets(
 			possibleExtraPaddingLength := (SSH_MAX_PADDING_LENGTH - paddingLength)
 			if possibleExtraPaddingLength > 0 {
 
-				// TODO: proceed without padding if MakeSecureRandom* fails?
-
 				// extraPaddingLength is integer in range [0, possiblePadding + 1)
-				extraPaddingLength, err = common.MakeSecureRandomInt(
-					possibleExtraPaddingLength + 1)
-				if err != nil {
-					return false, common.ContextError(err)
-				}
+				extraPaddingLength = prng.Intn(possibleExtraPaddingLength + 1)
 			}
 		} else {
 			// See RFC 4253 sec. 6 for constraints
@@ -600,18 +623,12 @@ func extractSSHPackets(
 			if possiblePaddings > 0 {
 
 				// selectedPadding is integer in range [0, possiblePaddings)
-				selectedPadding, err := common.MakeSecureRandomInt(possiblePaddings)
-				if err != nil {
-					return false, common.ContextError(err)
-				}
+				selectedPadding := prng.Intn(possiblePaddings)
 				extraPaddingLength = selectedPadding * SSH_PADDING_MULTIPLE
 			}
 		}
 
-		extraPadding, err := common.MakeSecureRandomBytes(extraPaddingLength)
-		if err != nil {
-			return false, common.ContextError(err)
-		}
+		extraPadding := prng.Bytes(extraPaddingLength)
 
 		setSSHPacketPrefix(
 			transformedPacket,

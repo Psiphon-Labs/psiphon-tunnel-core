@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -57,10 +58,7 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 	// connection termination packets.
 	serverIdleTimeout = 1 * time.Second
 
-	obfuscationKey, err := common.MakeSecureRandomStringHex(32)
-	if err != nil {
-		t.Fatalf("MakeSecureRandomStringHex failed: %s", err)
-	}
+	obfuscationKey := prng.HexString(32)
 
 	listener, err := Listen(nil, "127.0.0.1:0", obfuscationKey)
 	if err != nil {
@@ -126,13 +124,19 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 				return common.ContextError(err)
 			}
 
+			obfuscationPaddingSeed, err := prng.NewSeed()
+			if err != nil {
+				return common.ContextError(err)
+			}
+
 			conn, err := Dial(
 				ctx,
 				packetConn,
 				remoteAddr,
 				serverAddress,
 				negotiateQUICVersion,
-				obfuscationKey)
+				obfuscationKey,
+				obfuscationPaddingSeed)
 			if err != nil {
 				return common.ContextError(err)
 			}

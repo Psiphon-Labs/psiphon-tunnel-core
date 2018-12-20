@@ -33,9 +33,9 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 var KB = 1024
@@ -230,10 +230,7 @@ func TestMeekResiliency(t *testing.T) {
 	}
 	meekCookieEncryptionPublicKey := base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPublicKey[:])
 	meekCookieEncryptionPrivateKey := base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPrivateKey[:])
-	meekObfuscatedKey, err := common.MakeSecureRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
-	if err != nil {
-		t.Fatalf("common.MakeSecureRandomStringHex failed: %s", err)
-	}
+	meekObfuscatedKey := prng.HexString(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 
 	mockSupport := &SupportServices{
 		Config: &Config{
@@ -312,6 +309,11 @@ func TestMeekResiliency(t *testing.T) {
 		t.Fatalf("NewClientParameters failed: %s", err)
 	}
 
+	meekObfuscatorPaddingSeed, err := prng.NewSeed()
+	if err != nil {
+		t.Fatalf("prng.NewSeed failed: %s", err)
+	}
+
 	meekConfig := &psiphon.MeekConfig{
 		ClientParameters:              clientParameters,
 		DialAddress:                   serverAddress,
@@ -320,6 +322,7 @@ func TestMeekResiliency(t *testing.T) {
 		HostHeader:                    "example.com",
 		MeekCookieEncryptionPublicKey: meekCookieEncryptionPublicKey,
 		MeekObfuscatedKey:             meekObfuscatedKey,
+		MeekObfuscatorPaddingSeed:     meekObfuscatorPaddingSeed,
 	}
 
 	ctx, cancelFunc := context.WithTimeout(
@@ -392,10 +395,7 @@ func TestMeekRateLimiter(t *testing.T) {
 	}
 	meekCookieEncryptionPublicKey := base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPublicKey[:])
 	meekCookieEncryptionPrivateKey := base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPrivateKey[:])
-	meekObfuscatedKey, err := common.MakeSecureRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
-	if err != nil {
-		t.Fatalf("common.MakeSecureRandomStringHex failed: %s", err)
-	}
+	meekObfuscatedKey := prng.HexString(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 
 	mockSupport := &SupportServices{
 		Config: &Config{
@@ -484,12 +484,18 @@ func TestMeekRateLimiter(t *testing.T) {
 			t.Fatalf("NewClientParameters failed: %s", err)
 		}
 
+		meekObfuscatorPaddingSeed, err := prng.NewSeed()
+		if err != nil {
+			t.Fatalf("prng.NewSeed failed: %s", err)
+		}
+
 		meekConfig := &psiphon.MeekConfig{
 			ClientParameters:              clientParameters,
 			DialAddress:                   serverAddress,
 			HostHeader:                    "example.com",
 			MeekCookieEncryptionPublicKey: meekCookieEncryptionPublicKey,
 			MeekObfuscatedKey:             meekObfuscatedKey,
+			MeekObfuscatorPaddingSeed:     meekObfuscatorPaddingSeed,
 		}
 
 		ctx, cancelFunc := context.WithTimeout(

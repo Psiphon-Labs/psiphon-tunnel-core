@@ -28,19 +28,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 func TestObfuscator(t *testing.T) {
 
-	keyword, _ := common.MakeSecureRandomStringHex(32)
+	keyword := prng.HexString(32)
 
 	maxPadding := 256
 
+	paddingPRNGSeed, err := prng.NewSeed()
+	if err != nil {
+		t.Fatalf("prng.NewSeed failed: %s", err)
+	}
+
 	config := &ObfuscatorConfig{
-		Keyword:    keyword,
-		MaxPadding: &maxPadding,
+		Keyword:         keyword,
+		MaxPadding:      &maxPadding,
+		PaddingPRNGSeed: paddingPRNGSeed,
 	}
 
 	client, err := NewClientObfuscator(config)
@@ -78,7 +84,7 @@ func TestObfuscator(t *testing.T) {
 
 func TestObfuscatedSSHConn(t *testing.T) {
 
-	keyword, _ := common.MakeSecureRandomStringHex(32)
+	keyword := prng.HexString(32)
 
 	serverAddress := "127.0.0.1:2222"
 
@@ -114,7 +120,7 @@ func TestObfuscatedSSHConn(t *testing.T) {
 
 		if err == nil {
 			conn, err = NewObfuscatedSSHConn(
-				OBFUSCATION_CONN_MODE_SERVER, conn, keyword, nil, nil)
+				OBFUSCATION_CONN_MODE_SERVER, conn, keyword, nil, nil, nil)
 		}
 
 		if err == nil {
@@ -138,15 +144,26 @@ func TestObfuscatedSSHConn(t *testing.T) {
 
 		conn, err := net.DialTimeout("tcp", serverAddress, 5*time.Second)
 
+		var paddingPRNGSeed *prng.Seed
+		if err == nil {
+			paddingPRNGSeed, err = prng.NewSeed()
+		}
+
 		if err == nil {
 			conn, err = NewObfuscatedSSHConn(
-				OBFUSCATION_CONN_MODE_CLIENT, conn, keyword, nil, nil)
+				OBFUSCATION_CONN_MODE_CLIENT, conn, keyword, paddingPRNGSeed, nil, nil)
+		}
+
+		var KEXPRNGSeed *prng.Seed
+		if err == nil {
+			KEXPRNGSeed, err = prng.NewSeed()
 		}
 
 		if err == nil {
 			config := &ssh.ClientConfig{
 				HostKeyCallback: sshCertChecker.CheckHostKey,
 			}
+			config.KEXPRNGSeed = KEXPRNGSeed
 			_, _, _, err = ssh.NewClientConn(conn, "", config)
 		}
 

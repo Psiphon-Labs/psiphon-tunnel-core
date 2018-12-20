@@ -44,6 +44,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 )
@@ -76,10 +77,14 @@ type MeekConfig struct {
 	// UseHTTPS indicates whether to use HTTPS (true) or HTTP (false).
 	UseHTTPS bool
 
-	// TLSProfile specifies the TLS profile to use for all underlying
-	// TLS connections created by this meek connection. Valid values
-	// are the possible values for CustomTLSConfig.TLSProfile.
+	// TLSProfile specifies the value for CustomTLSConfig.TLSProfile for all
+	// underlying TLS connections created by this meek connection.
 	TLSProfile string
+
+	// RandomizedTLSProfileSeed specifies the value for
+	// CustomTLSConfig.RandomizedTLSProfileSeed for all underlying TLS
+	// connections created by this meek connection.
+	RandomizedTLSProfileSeed *prng.Seed
 
 	// UseObfuscatedSessionTickets indicates whether to use obfuscated
 	// session tickets. Assumes UseHTTPS is true.
@@ -114,6 +119,7 @@ type MeekConfig struct {
 
 	MeekCookieEncryptionPublicKey string
 	MeekObfuscatedKey             string
+	MeekObfuscatorPaddingSeed     *prng.Seed
 }
 
 // MeekConn is a network connection that tunnels TCP over HTTP and supports "fronting". Meek sends
@@ -144,6 +150,7 @@ type MeekConn struct {
 	roundTripperOnly              bool
 	meekCookieEncryptionPublicKey string
 	meekObfuscatedKey             string
+	meekObfuscatorPaddingSeed     *prng.Seed
 	clientTunnelProtocol          string
 
 	// For relay mode
@@ -242,6 +249,7 @@ func DialMeek(
 			SNIServerName:                 meekConfig.SNIServerName,
 			SkipVerify:                    true,
 			TLSProfile:                    meekConfig.TLSProfile,
+			RandomizedTLSProfileSeed:      meekConfig.RandomizedTLSProfileSeed,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
 		}
 		tlsConfig.EnableClientSessionCache(meekConfig.ClientParameters)
@@ -431,6 +439,7 @@ func DialMeek(
 			meek.clientParameters,
 			meekConfig.MeekCookieEncryptionPublicKey,
 			meekConfig.MeekObfuscatedKey,
+			meekConfig.MeekObfuscatorPaddingSeed,
 			meekConfig.ClientTunnelProtocol,
 			"")
 		if err != nil {
@@ -466,6 +475,7 @@ func DialMeek(
 
 		meek.meekCookieEncryptionPublicKey = meekConfig.MeekCookieEncryptionPublicKey
 		meek.meekObfuscatedKey = meekConfig.MeekObfuscatedKey
+		meek.meekObfuscatorPaddingSeed = meekConfig.MeekObfuscatorPaddingSeed
 		meek.clientTunnelProtocol = meekConfig.ClientTunnelProtocol
 	}
 
@@ -563,6 +573,7 @@ func (meek *MeekConn) RoundTrip(
 		meek.clientParameters,
 		meek.meekCookieEncryptionPublicKey,
 		meek.meekObfuscatedKey,
+		meek.meekObfuscatorPaddingSeed,
 		meek.clientTunnelProtocol,
 		endPoint)
 	if err != nil {
@@ -720,7 +731,7 @@ func (meek *MeekConn) relay() {
 	defer meek.relayWaitGroup.Done()
 
 	p := meek.clientParameters.Get()
-	interval := common.JitterDuration(
+	interval := prng.JitterDuration(
 		p.Duration(parameters.MeekMinPollInterval),
 		p.Float(parameters.MeekMinPollIntervalJitter))
 	p = nil
@@ -792,7 +803,7 @@ func (meek *MeekConn) relay() {
 
 		} else if interval == 0 {
 
-			interval = common.JitterDuration(
+			interval = prng.JitterDuration(
 				p.Duration(parameters.MeekMinPollInterval),
 				p.Float(parameters.MeekMinPollIntervalJitter))
 
@@ -805,13 +816,13 @@ func (meek *MeekConn) relay() {
 						p.Float(parameters.MeekPollIntervalMultiplier))
 			}
 
-			interval = common.JitterDuration(
+			interval = prng.JitterDuration(
 				interval,
 				p.Float(parameters.MeekPollIntervalJitter))
 
 			if interval >= p.Duration(parameters.MeekMaxPollInterval) {
 
-				interval = common.JitterDuration(
+				interval = prng.JitterDuration(
 					p.Duration(parameters.MeekMaxPollInterval),
 					p.Float(parameters.MeekMaxPollIntervalJitter))
 			}
@@ -1215,6 +1226,7 @@ func makeMeekCookie(
 	clientParameters *parameters.ClientParameters,
 	meekCookieEncryptionPublicKey string,
 	meekObfuscatedKey string,
+	meekObfuscatorPaddingPRNGSeed *prng.Seed,
 	clientTunnelProtocol string,
 	endPoint string,
 
@@ -1258,8 +1270,9 @@ func makeMeekCookie(
 	// Obfuscate the encrypted data
 	obfuscator, err := obfuscator.NewClientObfuscator(
 		&obfuscator.ObfuscatorConfig{
-			Keyword:    meekObfuscatedKey,
-			MaxPadding: &maxPadding})
+			Keyword:         meekObfuscatedKey,
+			PaddingPRNGSeed: meekObfuscatorPaddingPRNGSeed,
+			MaxPadding:      &maxPadding})
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -1268,15 +1281,17 @@ func makeMeekCookie(
 	obfuscatedCookie = append(obfuscatedCookie, encryptedCookie...)
 	obfuscator.ObfuscateClientToServer(obfuscatedCookie[seedLen:])
 
+	cookieNamePRNG, err := obfuscator.GetDerivedPRNG("meek-cookie-name")
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
 	// Format the HTTP cookie
 	// The format is <random letter 'A'-'Z'>=<base64 data>, which is intended to match common cookie formats.
 	A := int('A')
 	Z := int('Z')
 	// letterIndex is integer in range [int('A'), int('Z')]
-	letterIndex, err := common.MakeSecureRandomInt(Z - A + 1)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
+	letterIndex := cookieNamePRNG.Intn(Z - A + 1)
 	return &http.Cookie{
 			Name:  string(byte(A + letterIndex)),
 			Value: base64.StdEncoding.EncodeToString(obfuscatedCookie)},

@@ -63,16 +63,16 @@
 			"revisionTime": "2018-09-12T16:47:43Z"
 		},
 		{
-			"checksumSHA1": "tPhzygqO+Lk+oY/Gp4jMq7YGbhU=",
+			"checksumSHA1": "jfV4PEzL1mcC3i/V903S4gVDYFU=",
 			"path": "github.com/Psiphon-Labs/tls-tris",
-			"revision": "a7c2751b906303d32dff10bb728a1d0f124e56f4",
-			"revisionTime": "2018-09-29T21:11:36Z"
+			"revision": "a28158310549bd66234df1b4010a6565c33173cb",
+			"revisionTime": "2018-12-19T02:25:17Z"
 		},
 		{
-			"checksumSHA1": "OBN3dfn0yx9L3I2RPo58o27my2k=",
+			"checksumSHA1": "pXgGBe9O8n4KGzAlakVVVwwJqxo=",
 			"path": "github.com/Psiphon-Labs/utls",
-			"revision": "690e3cce41f16569c0b4297bb36df8d7a04c98c2",
-			"revisionTime": "2018-07-12T18:20:28Z"
+			"revision": "11a4cc03332235a55c37ed7d686f4ac008749ddb",
+			"revisionTime": "2018-12-19T02:27:42Z"
 		},
 		{
 			"checksumSHA1": "zaEXXT0xMkEADcxW9GvBK0iYe1A=",

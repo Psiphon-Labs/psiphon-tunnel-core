@@ -51,6 +51,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	quic_go "github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/qerr"
@@ -111,9 +112,14 @@ func Listen(
 		return nil, common.ContextError(err)
 	}
 
+	seed, err := prng.NewSeed()
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
 	var packetConn net.PacketConn
 	packetConn, err = NewObfuscatedPacketConn(
-		udpConn, true, obfuscationKey)
+		udpConn, true, obfuscationKey, seed)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -172,7 +178,8 @@ func Dial(
 	remoteAddr *net.UDPAddr,
 	quicSNIAddress string,
 	negotiateQUICVersion string,
-	obfuscationKey string) (net.Conn, error) {
+	obfuscationKey string,
+	obfuscationPaddingSeed *prng.Seed) (net.Conn, error) {
 
 	var versions []quic_go.VersionNumber
 
@@ -199,7 +206,7 @@ func Dial(
 	if negotiateQUICVersion == protocol.QUIC_VERSION_OBFUSCATED {
 		var err error
 		packetConn, err = NewObfuscatedPacketConn(
-			packetConn, false, obfuscationKey)
+			packetConn, false, obfuscationKey, obfuscationPaddingSeed)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -440,13 +447,13 @@ func isErrorIndicatingClosed(err error) bool {
 //    packetHandlerMap and its mutex are used by all client sessions, this
 //    effectively hangs the entire server.
 //
-// loggingPacketConn PacketConn ReadFrom errors and returns any usable values
-// or loops and calls ReadFrom again. In practise, due to the nature of UDP
-// sockets, ReadFrom errors are exceptional as they will mosyt likely not
-// occur due to network transmission failures. ObfuscatedPacketConn returns
-// errors that could be due to network transmission failures that corrupt
-// packets; these are marked as net.Error.Temporary() and loggingPacketConn
-// logs these at debug level.
+// loggingPacketConn log ReadFrom errors and returns any usable values or
+// loops and calls ReadFrom again. In practise, due to the nature of UDP
+// sockets, ReadFrom errors are exceptional as they will most likely not occur
+// due to network transmission failures. ObfuscatedPacketConn returns errors
+// that could be due to network transmission failures that corrupt packets;
+// these are marked as net.Error.Temporary() and loggingPacketConn logs these
+// at debug level.
 //
 // loggingPacketConn assumes quic-go revision ffdfa1 behavior and will break
 // other behavior, such as setting deadlines and expecting net.Error.Timeout()

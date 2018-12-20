@@ -42,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	tris "github.com/Psiphon-Labs/tls-tris"
 )
@@ -653,17 +654,28 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 func (server *MeekServer) rateLimit(clientIP string) bool {
 
-	historySize, thresholdSeconds, regions, GCTriggerCount, _ :=
+	historySize, thresholdSeconds, regions, ISPs, GCTriggerCount, _ :=
 		server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
 
 	if historySize == 0 {
 		return false
 	}
 
-	if len(regions) > 0 {
+	if len(regions) > 0 || len(ISPs) > 0 {
+
 		// TODO: avoid redundant GeoIP lookups?
-		if !common.Contains(regions, server.support.GeoIPService.Lookup(clientIP).Country) {
-			return false
+		geoIPData := server.support.GeoIPService.Lookup(clientIP)
+
+		if len(regions) > 0 {
+			if !common.Contains(regions, geoIPData.Country) {
+				return false
+			}
+		}
+
+		if len(ISPs) > 0 {
+			if !common.Contains(ISPs, geoIPData.ISP) {
+				return false
+			}
 		}
 	}
 
@@ -716,7 +728,7 @@ func (server *MeekServer) rateLimit(clientIP string) bool {
 
 func (server *MeekServer) rateLimitWorker() {
 
-	_, _, _, _, reapFrequencySeconds :=
+	_, _, _, _, _, reapFrequencySeconds :=
 		server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
 
 	timer := time.NewTimer(time.Duration(reapFrequencySeconds) * time.Second)
@@ -726,7 +738,7 @@ func (server *MeekServer) rateLimitWorker() {
 		select {
 		case <-timer.C:
 
-			_, thresholdSeconds, _, _, reapFrequencySeconds :=
+			_, thresholdSeconds, _, _, _, reapFrequencySeconds :=
 				server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
 
 			server.rateLimitLock.Lock()
@@ -1064,17 +1076,16 @@ func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte,
 // makeMeekSessionID creates a new session ID. The variable size is intended to
 // frustrate traffic analysis of both plaintext and TLS meek traffic.
 func makeMeekSessionID() (string, error) {
-	size := MEEK_MIN_SESSION_ID_LENGTH
-	n, err := common.MakeSecureRandomInt(MEEK_MAX_SESSION_ID_LENGTH - MEEK_MIN_SESSION_ID_LENGTH)
+
+	size := MEEK_MIN_SESSION_ID_LENGTH +
+		prng.Intn(MEEK_MAX_SESSION_ID_LENGTH-MEEK_MIN_SESSION_ID_LENGTH)
+
+	sessionID, err := common.MakeSecureRandomBytes(size)
 	if err != nil {
 		return "", common.ContextError(err)
 	}
-	size += n
-	sessionID, err := common.MakeSecureRandomStringBase64(size)
-	if err != nil {
-		return "", common.ContextError(err)
-	}
-	return sessionID, nil
+
+	return base64.RawURLEncoding.EncodeToString(sessionID), nil
 }
 
 // meekConn implements the net.Conn interface and is to be used as a client

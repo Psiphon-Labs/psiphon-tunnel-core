@@ -57,11 +57,8 @@ func GenerateWebServerCertificate(commonName string) (string, string, error) {
 	// Validity period is ~10 years, starting some number of ~months
 	// back in the last year.
 
-	age, err := MakeSecureRandomInt(12)
-	if err != nil {
-		return "", "", ContextError(err)
-	}
-	age += 1
+	ageLimit := new(big.Int).Lsh(big.NewInt(1), 12)
+	age := int(ageLimit.Int64()) + 1
 	validityPeriod := 10 * 365 * 24 * time.Hour
 	notBefore := time.Now().Add(time.Duration(-age) * 30 * 24 * time.Hour).UTC()
 	notAfter := notBefore.Add(validityPeriod).UTC()
@@ -92,10 +89,10 @@ func GenerateWebServerCertificate(commonName string) (string, string, error) {
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		IsCA:         true,
-		SubjectKeyId: subjectKeyID[:],
-		MaxPathLen:   1,
-		Version:      2,
+		IsCA:                  true,
+		SubjectKeyId:          subjectKeyID[:],
+		MaxPathLen:            1,
+		Version:               2,
 	}
 
 	derCert, err := x509.CreateCertificate(

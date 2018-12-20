@@ -30,6 +30,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"golang.org/x/sync/errgroup"
 )
@@ -62,14 +63,22 @@ func TestFragmentor(t *testing.T) {
 		t.Fatalf("parameters.NewClientParameters failed: %s", err)
 	}
 	_, err = clientParameters.Set("", false, map[string]interface{}{
-		"FragmentorProbability":    1.0,
-		"FragmentorLimitProtocols": protocol.TunnelProtocols{},
-		"FragmentorMinTotalBytes":  bytesFragmented,
-		"FragmentorMaxTotalBytes":  bytesFragmented,
-		"FragmentorMinWriteBytes":  minWriteBytes,
-		"FragmentorMaxWriteBytes":  maxWriteBytes,
-		"FragmentorMinDelay":       minDelay,
-		"FragmentorMaxDelay":       maxDelay,
+		"FragmentorProbability":              1.0,
+		"FragmentorLimitProtocols":           protocol.TunnelProtocols{},
+		"FragmentorMinTotalBytes":            bytesFragmented,
+		"FragmentorMaxTotalBytes":            bytesFragmented,
+		"FragmentorMinWriteBytes":            minWriteBytes,
+		"FragmentorMaxWriteBytes":            maxWriteBytes,
+		"FragmentorMinDelay":                 minDelay,
+		"FragmentorMaxDelay":                 maxDelay,
+		"FragmentorDownstreamProbability":    1.0,
+		"FragmentorDownstreamLimitProtocols": protocol.TunnelProtocols{},
+		"FragmentorDownstreamMinTotalBytes":  bytesFragmented,
+		"FragmentorDownstreamMaxTotalBytes":  bytesFragmented,
+		"FragmentorDownstreamMinWriteBytes":  minWriteBytes,
+		"FragmentorDownstreamMaxWriteBytes":  maxWriteBytes,
+		"FragmentorDownstreamMinDelay":       minDelay,
+		"FragmentorDownstreamMaxDelay":       maxDelay,
 	})
 	if err != nil {
 		t.Fatalf("ClientParameters.Set failed: %s", err)
@@ -78,15 +87,21 @@ func TestFragmentor(t *testing.T) {
 	testGroup, testCtx := errgroup.WithContext(context.Background())
 
 	testGroup.Go(func() error {
+
 		conn, err := listener.Accept()
 		if err != nil {
 			return common.ContextError(err)
 		}
-		defer conn.Close()
+		fragConn := NewConn(
+			NewDownstreamConfig(clientParameters.Get(), "", nil),
+			func(message string) { t.Logf(message) },
+			conn)
+		defer fragConn.Close()
+
 		readData := make([]byte, len(data))
 		n := 0
 		for n < len(data) {
-			m, err := conn.Read(readData[n:])
+			m, err := fragConn.Read(readData[n:])
 			if err != nil {
 				return common.ContextError(err)
 			}
@@ -98,24 +113,56 @@ func TestFragmentor(t *testing.T) {
 		if !bytes.Equal(data, readData) {
 			return common.ContextError(fmt.Errorf("data mismatch"))
 		}
+
+		PRNG, err := prng.NewPRNG()
+		if err != nil {
+			return common.ContextError(err)
+		}
+		fragConn.SetPRNG(PRNG)
+		_, err = fragConn.Write(data)
+		if err != nil {
+			return common.ContextError(err)
+		}
 		return nil
 	})
 
 	testGroup.Go(func() error {
+
 		conn, err := net.Dial("tcp", address)
 		if err != nil {
 			return common.ContextError(err)
 		}
+		seed, err := prng.NewSeed()
+		if err != nil {
+			return common.ContextError(err)
+		}
 		fragConn := NewConn(
-			NewUpstreamConfig(clientParameters.Get(), ""),
+			NewUpstreamConfig(clientParameters.Get(), "", seed),
 			func(message string) { t.Logf(message) },
 			conn)
 		defer fragConn.Close()
+
 		_, err = fragConn.Write(data)
 		if err != nil {
 			return common.ContextError(err)
 		}
 		t.Logf("%+v", fragConn.GetMetrics())
+
+		readData := make([]byte, len(data))
+		n := 0
+		for n < len(data) {
+			m, err := fragConn.Read(readData[n:])
+			if err != nil {
+				return common.ContextError(err)
+			}
+			if m > maxWriteBytes && n < bytesFragmented {
+				return common.ContextError(fmt.Errorf("unexpected write size: %d, %d", m, n))
+			}
+			n += m
+		}
+		if !bytes.Equal(data, readData) {
+			return common.ContextError(fmt.Errorf("data mismatch"))
+		}
 		return nil
 	})
 
