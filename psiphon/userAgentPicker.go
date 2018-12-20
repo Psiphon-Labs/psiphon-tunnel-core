@@ -40,20 +40,19 @@ func pickUserAgent() string {
 	return ""
 }
 
-// UserAgentIfUnset selects and sets a User-Agent header if one is not set.
-func UserAgentIfUnset(
-	clientParameters *parameters.ClientParameters, headers http.Header) bool {
+// PickUserAgentIfUnset selects a User-Agent header if one is not set.
+func PickUserAgentIfUnset(
+	p *parameters.ClientParametersSnapshot, headers http.Header) (bool, string) {
 
 	if _, ok := headers["User-Agent"]; !ok {
 
-		if clientParameters.Get().WeightedCoinFlip(parameters.PickUserAgentProbability) {
-			headers.Set("User-Agent", pickUserAgent())
-		} else {
-			headers.Set("User-Agent", "")
+		userAgent := ""
+		if p.WeightedCoinFlip(parameters.PickUserAgentProbability) {
+			userAgent = pickUserAgent()
 		}
 
-		return true
+		return true, userAgent
 	}
 
-	return false
+	return false, ""
 }

@@ -178,6 +178,11 @@ type Config struct {
 	// typical overridden for testing.
 	EstablishTunnelPausePeriodSeconds *int
 
+	// EstablishTunnelPausePeriodSeconds specifies the grace period, or head
+	// start, provided to the affinity server candidate when establishing. The
+	// affinity server is the server used for the last established tunnel.
+	EstablishTunnelServerAffinityGracePeriodMilliseconds *int
+
 	// ConnectionWorkerPoolSize specifies how many connection attempts to
 	// attempt in parallel. If omitted of when 0, a default is used; this is
 	// recommended.
@@ -501,6 +506,11 @@ type Config struct {
 	LivenessTestMinDownstreamBytes *int
 	LivenessTestMaxDownstreamBytes *int
 
+	// ReplayCandidateCount and other Replay fields are for
+	// testing purposes.
+	ReplayCandidateCount           *int
+	ReplayDialParametersTTLSeconds *int
+
 	// clientParameters is the active ClientParameters with defaults, config
 	// values, and, optionally, tactics applied.
 	//
@@ -524,7 +534,7 @@ type Config struct {
 // The Config struct may then be programmatically populated with additional
 // values, including callbacks such as DeviceBinder.
 //
-// Before using the Config, Commit must be called, which will  perform further
+// Before using the Config, Commit must be called, which will perform further
 // validation and initialize internal data structures.
 func LoadConfig(configJson []byte) (*Config, error) {
 
@@ -718,20 +728,18 @@ func (config *Config) Commit() error {
 
 	networkIDGetter := config.NetworkIDGetter
 
-	if networkIDGetter == nil && config.NetworkID != "" {
-
-		// Enable tactics when a NetworkID is specified
-		//
+	if networkIDGetter == nil {
 		// Limitation: unlike NetworkIDGetter, which calls back to platform APIs
 		// this method of network identification is not dynamic and will not reflect
 		// network changes that occur while running.
-
-		networkIDGetter = newStaticNetworkGetter(config.NetworkID)
+		if config.NetworkID != "" {
+			networkIDGetter = newStaticNetworkGetter(config.NetworkID)
+		} else {
+			networkIDGetter = newStaticNetworkGetter("UNKNOWN")
+		}
 	}
 
-	if networkIDGetter != nil {
-		config.networkIDGetter = &loggingNetworkIDGetter{networkIDGetter}
-	}
+	config.networkIDGetter = &loggingNetworkIDGetter{networkIDGetter}
 
 	config.committed = true
 
@@ -808,8 +816,17 @@ func (config *Config) GetAuthorizations() []string {
 	return config.authorizations
 }
 
+// UseUpstreamProxy indicates if an upstream proxy has been
+// configured.
 func (config *Config) UseUpstreamProxy() bool {
 	return config.UpstreamProxyURL != ""
+}
+
+// GetNetworkID returns the current network ID. When NetworkIDGetter
+// is set, this calls into the host application; otherwise, a default
+// value is returned.
+func (config *Config) GetNetworkID() string {
+	return config.networkIDGetter.GetNetworkID()
 }
 
 func (config *Config) makeConfigParameters() map[string]interface{} {
@@ -848,6 +865,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.EstablishTunnelTimeoutSeconds != nil {
 		applyParameters[parameters.EstablishTunnelTimeout] = fmt.Sprintf("%ds", *config.EstablishTunnelTimeoutSeconds)
+	}
+
+	if config.EstablishTunnelServerAffinityGracePeriodMilliseconds != nil {
+		applyParameters[parameters.EstablishTunnelServerAffinityGracePeriod] = fmt.Sprintf("%dms", *config.EstablishTunnelServerAffinityGracePeriodMilliseconds)
 	}
 
 	if config.EstablishTunnelPausePeriodSeconds != nil {
@@ -967,6 +988,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.LivenessTestMaxDownstreamBytes != nil {
 		applyParameters[parameters.LivenessTestMaxDownstreamBytes] = *config.LivenessTestMaxDownstreamBytes
+	}
+
+	if config.ReplayCandidateCount != nil {
+		applyParameters[parameters.ReplayCandidateCount] = *config.ReplayCandidateCount
+	}
+
+	if config.ReplayDialParametersTTLSeconds != nil {
+		applyParameters[parameters.ReplayDialParametersTTL] = fmt.Sprintf("%ds", *config.ReplayDialParametersTTLSeconds)
 	}
 
 	return applyParameters

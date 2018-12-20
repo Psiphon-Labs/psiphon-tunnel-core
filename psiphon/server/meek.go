@@ -42,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	tris "github.com/Psiphon-Labs/tls-tris"
 )
@@ -1075,17 +1076,16 @@ func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte,
 // makeMeekSessionID creates a new session ID. The variable size is intended to
 // frustrate traffic analysis of both plaintext and TLS meek traffic.
 func makeMeekSessionID() (string, error) {
-	size := MEEK_MIN_SESSION_ID_LENGTH
-	n, err := common.MakeSecureRandomInt(MEEK_MAX_SESSION_ID_LENGTH - MEEK_MIN_SESSION_ID_LENGTH)
+
+	size := MEEK_MIN_SESSION_ID_LENGTH +
+		prng.Intn(MEEK_MAX_SESSION_ID_LENGTH-MEEK_MIN_SESSION_ID_LENGTH)
+
+	sessionID, err := common.MakeSecureRandomBytes(size)
 	if err != nil {
 		return "", common.ContextError(err)
 	}
-	size += n
-	sessionID, err := common.MakeSecureRandomStringBase64(size)
-	if err != nil {
-		return "", common.ContextError(err)
-	}
-	return sessionID, nil
+
+	return base64.RawURLEncoding.EncodeToString(sessionID), nil
 }
 
 // meekConn implements the net.Conn interface and is to be used as a client

@@ -35,6 +35,7 @@ import (
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
@@ -57,7 +58,7 @@ type Controller struct {
 	nextTunnel                              int
 	startedConnectedReporter                bool
 	isEstablishing                          bool
-	establishLimitTunnelProtocolsState      *limitTunnelProtocolsState
+	protocolSelectionConstraints            *protocolSelectionConstraints
 	concurrentEstablishTunnelsMutex         sync.Mutex
 	establishConnectTunnelCount             int
 	concurrentEstablishTunnels              int
@@ -287,7 +288,7 @@ func (controller *Controller) TerminateNextActiveTunnel() {
 	tunnel := controller.getNextActiveTunnel()
 	if tunnel != nil {
 		controller.SignalTunnelFailure(tunnel)
-		NoticeInfo("terminated tunnel: %s", tunnel.serverEntry.IpAddress)
+		NoticeInfo("terminated tunnel: %s", tunnel.dialParams.ServerEntry.IpAddress)
 	}
 }
 
@@ -385,7 +386,7 @@ func (controller *Controller) establishTunnelWatcher() {
 		select {
 		case <-timer.C:
 			if !controller.hasEstablishedOnce() {
-				NoticeAlert("failed to establish tunnel before timeout")
+				NoticeEstablishTunnelTimeout(timeout)
 				controller.SignalComponentFailure()
 			}
 		case <-controller.runCtx.Done():
@@ -583,7 +584,7 @@ loop:
 	for {
 		select {
 		case failedTunnel := <-controller.failedTunnels:
-			NoticeAlert("tunnel failed: %s", failedTunnel.serverEntry.IpAddress)
+			NoticeAlert("tunnel failed: %s", failedTunnel.dialParams.ServerEntry.IpAddress)
 			controller.terminateTunnel(failedTunnel)
 
 			// Clear the reference to this tunnel before calling startEstablishing,
@@ -638,14 +639,16 @@ loop:
 				err := connectedTunnel.Activate(controller.runCtx, controller)
 
 				if err != nil {
-					NoticeAlert("failed to activate %s: %s", connectedTunnel.serverEntry.IpAddress, err)
+					NoticeAlert("failed to activate %s: %s",
+						connectedTunnel.dialParams.ServerEntry.IpAddress, err)
 					discardTunnel = true
 				} else {
 					// It's unlikely that registerTunnel will fail, since only this goroutine
 					// calls registerTunnel -- and after checking numTunnels; so failure is not
 					// expected.
 					if !controller.registerTunnel(connectedTunnel) {
-						NoticeAlert("failed to register %s: %s", connectedTunnel.serverEntry.IpAddress, err)
+						NoticeAlert("failed to register %s: %s",
+							connectedTunnel.dialParams.ServerEntry.IpAddress, err)
 						discardTunnel = true
 					}
 				}
@@ -670,9 +673,9 @@ loop:
 			}
 
 			NoticeActiveTunnel(
-				connectedTunnel.serverEntry.IpAddress,
-				connectedTunnel.protocol,
-				connectedTunnel.serverEntry.SupportsSSHAPIRequests())
+				connectedTunnel.dialParams.ServerEntry.IpAddress,
+				connectedTunnel.dialParams.TunnelProtocol,
+				connectedTunnel.dialParams.ServerEntry.SupportsSSHAPIRequests())
 
 			if isFirstTunnel {
 
@@ -781,7 +784,7 @@ func (controller *Controller) SignalTunnelFailure(tunnel *Tunnel) {
 
 // discardTunnel disposes of a successful connection that is no longer required.
 func (controller *Controller) discardTunnel(tunnel *Tunnel) {
-	NoticeInfo("discard tunnel: %s", tunnel.serverEntry.IpAddress)
+	NoticeInfo("discard tunnel: %s", tunnel.dialParams.ServerEntry.IpAddress)
 	// TODO: not calling PromoteServerEntry, since that would rank the
 	// discarded tunnel before fully active tunnels. Can a discarded tunnel
 	// be promoted (since it connects), but with lower rank than all active
@@ -801,8 +804,10 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 	// Perform a final check just in case we've established
 	// a duplicate connection.
 	for _, activeTunnel := range controller.tunnels {
-		if activeTunnel.serverEntry.IpAddress == tunnel.serverEntry.IpAddress {
-			NoticeAlert("duplicate tunnel: %s", tunnel.serverEntry.IpAddress)
+		if activeTunnel.dialParams.ServerEntry.IpAddress ==
+			tunnel.dialParams.ServerEntry.IpAddress {
+
+			NoticeAlert("duplicate tunnel: %s", tunnel.dialParams.ServerEntry.IpAddress)
 			return false
 		}
 	}
@@ -815,7 +820,7 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 	// Connecting to a TargetServerEntry does not change the
 	// ranking.
 	if controller.config.TargetServerEntry == "" {
-		PromoteServerEntry(controller.config, tunnel.serverEntry.IpAddress)
+		PromoteServerEntry(controller.config, tunnel.dialParams.ServerEntry.IpAddress)
 	}
 
 	return true
@@ -916,7 +921,7 @@ func (controller *Controller) isActiveTunnelServerEntry(
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
 	for _, activeTunnel := range controller.tunnels {
-		if activeTunnel.serverEntry.IpAddress == serverEntry.IpAddress {
+		if activeTunnel.dialParams.ServerEntry.IpAddress == serverEntry.IpAddress {
 			return true
 		}
 	}
@@ -1003,49 +1008,75 @@ func (controller *Controller) triggerFetches() {
 	}
 }
 
-type limitTunnelProtocolsState struct {
-	useUpstreamProxy      bool
-	initialProtocols      protocol.TunnelProtocols
-	initialCandidateCount int
-	protocols             protocol.TunnelProtocols
+type protocolSelectionConstraints struct {
+	useUpstreamProxy                    bool
+	initialLimitProtocols               protocol.TunnelProtocols
+	initialLimitProtocolsCandidateCount int
+	limitProtocols                      protocol.TunnelProtocols
+	replayCandidateCount                int
 }
 
-func (l *limitTunnelProtocolsState) hasInitialProtocols() bool {
-	return len(l.initialProtocols) > 0 && l.initialCandidateCount > 0
+func (p *protocolSelectionConstraints) hasInitialProtocols() bool {
+	return len(p.initialLimitProtocols) > 0 && p.initialLimitProtocolsCandidateCount > 0
 }
 
-func (l *limitTunnelProtocolsState) isInitialCandidate(
-	excludeIntensive bool, serverEntry *protocol.ServerEntry) bool {
+func (p *protocolSelectionConstraints) isInitialCandidate(
+	excludeIntensive bool,
+	serverEntry *protocol.ServerEntry) bool {
 
-	return l.hasInitialProtocols() &&
-		len(serverEntry.GetSupportedProtocols(l.useUpstreamProxy, l.initialProtocols, excludeIntensive)) > 0
+	return p.hasInitialProtocols() &&
+		len(serverEntry.GetSupportedProtocols(p.useUpstreamProxy, p.initialLimitProtocols, excludeIntensive)) > 0
 }
 
-func (l *limitTunnelProtocolsState) isCandidate(
-	excludeIntensive bool, serverEntry *protocol.ServerEntry) bool {
+func (p *protocolSelectionConstraints) isCandidate(
+	excludeIntensive bool,
+	serverEntry *protocol.ServerEntry) bool {
 
-	return len(l.protocols) == 0 ||
-		len(serverEntry.GetSupportedProtocols(l.useUpstreamProxy, l.protocols, excludeIntensive)) > 0
+	return len(p.limitProtocols) == 0 ||
+		len(serverEntry.GetSupportedProtocols(p.useUpstreamProxy, p.limitProtocols, excludeIntensive)) > 0
 }
 
-var errNoProtocolSupported = errors.New("server does not support any required protocol")
+func (p *protocolSelectionConstraints) canReplay(
+	connectTunnelCount int,
+	excludeIntensive bool,
+	serverEntry *protocol.ServerEntry,
+	replayProtocol string) bool {
 
-func (l *limitTunnelProtocolsState) selectProtocol(
-	connectTunnelCount int, excludeIntensive bool, serverEntry *protocol.ServerEntry) (string, error) {
-
-	limitProtocols := l.protocols
-
-	if len(l.initialProtocols) > 0 && l.initialCandidateCount > connectTunnelCount {
-		limitProtocols = l.initialProtocols
+	if connectTunnelCount > p.replayCandidateCount {
+		return false
 	}
 
-	candidateProtocols := serverEntry.GetSupportedProtocols(
-		l.useUpstreamProxy,
+	return common.Contains(
+		p.supportedProtocols(connectTunnelCount, excludeIntensive, serverEntry),
+		replayProtocol)
+}
+
+func (p *protocolSelectionConstraints) supportedProtocols(
+	connectTunnelCount int,
+	excludeIntensive bool,
+	serverEntry *protocol.ServerEntry) []string {
+
+	limitProtocols := p.limitProtocols
+
+	if len(p.initialLimitProtocols) > 0 && p.initialLimitProtocolsCandidateCount > connectTunnelCount {
+		limitProtocols = p.initialLimitProtocols
+	}
+
+	return serverEntry.GetSupportedProtocols(
+		p.useUpstreamProxy,
 		limitProtocols,
 		excludeIntensive)
+}
+
+func (p *protocolSelectionConstraints) selectProtocol(
+	connectTunnelCount int,
+	excludeIntensive bool,
+	serverEntry *protocol.ServerEntry) (string, bool) {
+
+	candidateProtocols := p.supportedProtocols(connectTunnelCount, excludeIntensive, serverEntry)
 
 	if len(candidateProtocols) == 0 {
-		return "", errNoProtocolSupported
+		return "", false
 	}
 
 	// Pick at random from the supported protocols. This ensures that we'll
@@ -1054,13 +1085,9 @@ func (l *limitTunnelProtocolsState) selectProtocol(
 	// through multi-capability servers, and a simpler ranked preference of
 	// protocols could lead to that protocol never being selected.
 
-	index, err := common.MakeSecureRandomInt(len(candidateProtocols))
-	if err != nil {
-		return "", common.ContextError(err)
-	}
-	selectedProtocol := candidateProtocols[index]
+	index := prng.Intn(len(candidateProtocols))
 
-	return selectedProtocol, nil
+	return candidateProtocols[index], true
 
 }
 
@@ -1145,10 +1172,7 @@ func (controller *Controller) launchEstablishing() {
 	// Any in-flight tactics request or pending retry will be
 	// canceled when establishment is stopped.
 
-	doTactics := !controller.config.DisableTactics &&
-		controller.config.networkIDGetter != nil
-
-	if doTactics {
+	if !controller.config.DisableTactics {
 
 		timeout := controller.config.clientParameters.Get().Duration(
 			parameters.TacticsWaitPeriod)
@@ -1186,11 +1210,12 @@ func (controller *Controller) launchEstablishing() {
 
 	p := controller.config.clientParameters.Get()
 
-	controller.establishLimitTunnelProtocolsState = &limitTunnelProtocolsState{
-		useUpstreamProxy:      controller.config.UseUpstreamProxy(),
-		initialProtocols:      p.TunnelProtocols(parameters.InitialLimitTunnelProtocols),
-		initialCandidateCount: p.Int(parameters.InitialLimitTunnelProtocolsCandidateCount),
-		protocols:             p.TunnelProtocols(parameters.LimitTunnelProtocols),
+	controller.protocolSelectionConstraints = &protocolSelectionConstraints{
+		useUpstreamProxy:                    controller.config.UseUpstreamProxy(),
+		initialLimitProtocols:               p.TunnelProtocols(parameters.InitialLimitTunnelProtocols),
+		initialLimitProtocolsCandidateCount: p.Int(parameters.InitialLimitTunnelProtocolsCandidateCount),
+		limitProtocols:                      p.TunnelProtocols(parameters.LimitTunnelProtocols),
+		replayCandidateCount:                p.Int(parameters.ReplayCandidateCount),
 	}
 
 	workerPoolSize := controller.config.clientParameters.Get().Int(
@@ -1222,23 +1247,23 @@ func (controller *Controller) launchEstablishing() {
 	// protocols may have some bad effect, such as a firewall blocking all
 	// traffic from a host.
 
-	if controller.establishLimitTunnelProtocolsState.initialCandidateCount > 0 {
+	if controller.protocolSelectionConstraints.initialLimitProtocolsCandidateCount > 0 {
 
 		egressRegion := "" // no egress region
 
-		initialCount, count := CountServerEntriesWithLimits(
+		initialCount, count := CountServerEntriesWithConstraints(
 			controller.config.UseUpstreamProxy(),
 			egressRegion,
-			controller.establishLimitTunnelProtocolsState)
+			controller.protocolSelectionConstraints)
 
 		if initialCount == 0 {
 			NoticeCandidateServers(
 				egressRegion,
-				controller.establishLimitTunnelProtocolsState,
+				controller.protocolSelectionConstraints,
 				initialCount,
 				count)
 			NoticeAlert("skipping initial limit tunnel protocols")
-			controller.establishLimitTunnelProtocolsState.initialCandidateCount = 0
+			controller.protocolSelectionConstraints.initialLimitProtocolsCandidateCount = 0
 
 			// Since we were unable to satisfy the InitialLimitTunnelProtocols
 			// tactic, trigger RSL, OSL, and upgrade fetches to potentially
@@ -1262,7 +1287,7 @@ func (controller *Controller) launchEstablishing() {
 	// followed shortly by a ReportAvailableRegions reporting fewer regions.
 	// That sequence could cause issues in the outer client UI.
 	//
-	// The reported regions are limited by establishLimitTunnelProtocolsState;
+	// The reported regions are limited by protocolSelectionConstraints;
 	// in the case where an initial limit is in place, only regions available
 	// for the initial limit are reported. The initial phase will not complete
 	// if EgressRegion is set such that there are no server entries with the
@@ -1271,7 +1296,7 @@ func (controller *Controller) launchEstablishing() {
 
 	ReportAvailableRegions(
 		controller.config,
-		controller.establishLimitTunnelProtocolsState)
+		controller.protocolSelectionConstraints)
 
 	for i := 0; i < workerPoolSize; i++ {
 		controller.establishWaitGroup.Add(1)
@@ -1324,7 +1349,7 @@ func (controller *Controller) getTactics(done chan struct{}) {
 
 	tacticsRecord, err := tactics.UseStoredTactics(
 		GetTacticsStorer(),
-		controller.config.networkIDGetter.GetNetworkID())
+		controller.config.GetNetworkID())
 	if err != nil {
 		NoticeAlert("get stored tactics failed: %s", err)
 
@@ -1382,7 +1407,7 @@ func (controller *Controller) getTactics(done chan struct{}) {
 			// on local errors.
 
 			p := controller.config.clientParameters.Get()
-			timeout := common.JitterDuration(
+			timeout := prng.JitterDuration(
 				p.Duration(parameters.TacticsRetryPeriod),
 				p.Float(parameters.TacticsRetryPeriodJitter))
 			p = nil
@@ -1400,7 +1425,7 @@ func (controller *Controller) getTactics(done chan struct{}) {
 	}
 
 	if tacticsRecord != nil &&
-		common.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
+		prng.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
 
 		err := controller.config.SetClientParameters(
 			tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
@@ -1425,34 +1450,39 @@ func (controller *Controller) getTactics(done chan struct{}) {
 func (controller *Controller) doFetchTactics(
 	serverEntry *protocol.ServerEntry) (*tactics.Record, error) {
 
-	tacticsProtocols := serverEntry.GetSupportedTacticsProtocols()
-
-	index, err := common.MakeSecureRandomInt(len(tacticsProtocols))
-	if err != nil {
-		return nil, common.ContextError(err)
+	canReplay := func(serverEntry *protocol.ServerEntry, replayProtocol string) bool {
+		return common.Contains(
+			serverEntry.GetSupportedTacticsProtocols(), replayProtocol)
 	}
 
-	tacticsProtocol := tacticsProtocols[index]
+	selectProtocol := func(serverEntry *protocol.ServerEntry) (string, bool) {
+		tacticsProtocols := serverEntry.GetSupportedTacticsProtocols()
+		if len(tacticsProtocols) == 0 {
+			return "", false
+		}
+		index := prng.Intn(len(tacticsProtocols))
+		return tacticsProtocols[index], true
+	}
 
-	meekConfig, err := initMeekConfig(
+	dialParams, err := MakeDialParameters(
 		controller.config,
+		canReplay,
+		selectProtocol,
 		serverEntry,
-		tacticsProtocol,
-		"")
+		true)
+	if dialParams == nil {
+		// MakeDialParameters may return nil, nil when the server entry can't
+		// satisfy protocol selection criteria. This case in not expected
+		// since NewTacticsServerEntryIterator should only return tactics-
+		// capable server entries and selectProtocol will select any tactics
+		// protocol.
+		err = errors.New("failed to make dial parameters")
+	}
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
-	meekConfig.RoundTripperOnly = true
-
-	dialConfig, dialStats := initDialConfig(
-		controller.config, meekConfig, tacticsProtocol)
-
-	NoticeRequestingTactics(
-		serverEntry.IpAddress,
-		serverEntry.Region,
-		tacticsProtocol,
-		dialStats)
+	NoticeRequestingTactics(dialParams)
 
 	// TacticsTimeout should be a very long timeout, since it's not
 	// adjusted by tactics in a new network context, and so clients
@@ -1481,7 +1511,8 @@ func (controller *Controller) doFetchTactics(
 	// the request when the pre-dial connection is broken,
 	// to minimize the possibility of network ID mismatches.
 
-	meekConn, err := DialMeek(ctx, meekConfig, dialConfig)
+	meekConn, err := DialMeek(
+		ctx, dialParams.GetMeekConfig(), dialParams.GetDialConfig())
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -1490,18 +1521,16 @@ func (controller *Controller) doFetchTactics(
 	apiParams := getBaseAPIParameters(
 		controller.config,
 		controller.sessionId,
-		serverEntry,
-		tacticsProtocol,
-		dialStats)
+		dialParams)
 
 	tacticsRecord, err := tactics.FetchTactics(
 		ctx,
 		controller.config.clientParameters,
 		GetTacticsStorer(),
-		controller.config.networkIDGetter.GetNetworkID,
+		controller.config.GetNetworkID,
 		apiParams,
 		serverEntry.Region,
-		tacticsProtocol,
+		dialParams.TunnelProtocol,
 		serverEntry.TacticsRequestPublicKey,
 		serverEntry.TacticsRequestObfuscatedKey,
 		meekConn.RoundTrip)
@@ -1509,11 +1538,7 @@ func (controller *Controller) doFetchTactics(
 		return nil, common.ContextError(err)
 	}
 
-	NoticeRequestedTactics(
-		serverEntry.IpAddress,
-		serverEntry.Region,
-		tacticsProtocol,
-		dialStats)
+	NoticeRequestedTactics(dialParams)
 
 	return tacticsRecord, nil
 }
@@ -1563,13 +1588,14 @@ loop:
 		// Counts may change during establishment due to remote server
 		// list fetches, etc.
 
-		initialCount, count := CountServerEntriesWithLimits(
+		initialCount, count := CountServerEntriesWithConstraints(
 			controller.config.UseUpstreamProxy(),
 			controller.config.EgressRegion,
-			controller.establishLimitTunnelProtocolsState)
+			controller.protocolSelectionConstraints)
+
 		NoticeCandidateServers(
 			controller.config.EgressRegion,
-			controller.establishLimitTunnelProtocolsState,
+			controller.protocolSelectionConstraints,
 			initialCount,
 			count)
 
@@ -1671,6 +1697,9 @@ loop:
 
 			} else {
 
+				// TODO: if candidates are to be skipped, this should be done
+				// _before_ the stagger.
+
 				p := controller.config.clientParameters.Get()
 				staggerPeriod := p.Duration(parameters.StaggerConnectionWorkersPeriod)
 				staggerJitter := p.Float(parameters.StaggerConnectionWorkersJitter)
@@ -1680,7 +1709,7 @@ loop:
 
 					// Stagger concurrent connection workers.
 
-					timeout := common.JitterDuration(staggerPeriod, staggerJitter)
+					timeout := prng.JitterDuration(staggerPeriod, staggerJitter)
 
 					timer := time.NewTimer(timeout)
 					select {
@@ -1708,7 +1737,7 @@ loop:
 		// be more rounds if required).
 
 		p := controller.config.clientParameters.Get()
-		timeout := common.JitterDuration(
+		timeout := prng.JitterDuration(
 			p.Duration(parameters.EstablishTunnelPausePeriod),
 			p.Float(parameters.EstablishTunnelPausePeriodJitter))
 		p = nil
@@ -1744,18 +1773,19 @@ loop:
 			continue
 		}
 
-		// Select the tunnel protocol. The selection will be made at random from
-		// protocols supported by the server entry, optionally limited by
+		// Select the tunnel protocol. The selection will be made at random
+		// from protocols supported by the server entry, optionally limited by
 		// LimitTunnelProtocols.
 		//
 		// When limiting concurrent resource intensive protocol connection
 		// workers, and at the limit, do not select resource intensive
 		// protocols since otherwise the candidate must be skipped.
 		//
-		// If at the limit and unabled to select a non-intensive protocol, skip the
-		// candidate entirely and move on to the next. Since candidates are shuffled
-		// it's likely that the next candidate is not intensive. In this case, a
-		// StaggerConnectionWorkersMilliseconds delay may still be incurred.
+		// If at the limit and unabled to select a non-intensive protocol,
+		// skip the candidate entirely and move on to the next. Since
+		// candidates are shuffled it's likely that the next candidate is not
+		// intensive. In this case, a StaggerConnectionWorkersMilliseconds
+		// delay may still be incurred.
 
 		limitIntensiveConnectionWorkers := controller.config.clientParameters.Get().Int(
 			parameters.LimitIntensiveConnectionWorkers)
@@ -1768,19 +1798,56 @@ loop:
 			excludeIntensive = true
 		}
 
-		selectedProtocol, err := controller.establishLimitTunnelProtocolsState.selectProtocol(
-			controller.establishConnectTunnelCount,
-			excludeIntensive,
-			candidateServerEntry.serverEntry)
-		if err != nil {
+		canReplay := func(serverEntry *protocol.ServerEntry, replayProtocol string) bool {
+			return controller.protocolSelectionConstraints.canReplay(
+				controller.establishConnectTunnelCount,
+				excludeIntensive,
+				serverEntry,
+				replayProtocol)
+		}
+
+		selectProtocol := func(serverEntry *protocol.ServerEntry) (string, bool) {
+			return controller.protocolSelectionConstraints.selectProtocol(
+				controller.establishConnectTunnelCount,
+				excludeIntensive,
+				serverEntry)
+		}
+
+		// MakeDialParameters may return a replay instance, if the server
+		// entry has a previous, recent successful connection and
+		// tactics/config has not changed.
+		//
+		// In the first round of establishing, ServerEntryIterator will move
+		// potential replay candidates to the front of the iterator after the
+		// random shuffle, which greatly prioritizes previously successful
+		// servers for that round.
+		//
+		// As ServerEntryIterator does not unmarshal and validate replay
+		// candidate dial parameters, some potential replay candidates may
+		// have expired or otherwise ineligible dial parameters; in this case
+		// the candidate proceeds without replay.
+		//
+		// The ReplayCandidateCount tactic determines how many candidates may
+		// use replay. After ReplayCandidateCount candidates on any type,
+		// replay or no, replay is skipped. If ReplayCandidateCount exceed the
+		// intial round, replay may still be performed but the iterator no
+		// longer moves potential replay server entries to the front.
+
+		dialParams, err := MakeDialParameters(
+			controller.config,
+			canReplay,
+			selectProtocol,
+			candidateServerEntry.serverEntry,
+			false)
+		if dialParams == nil || err != nil {
 
 			controller.concurrentEstablishTunnelsMutex.Unlock()
 
-			// selectProtocol returns errNoProtocolSupported when the server
-			// does not support any protocol that remains after applying the
-			// LimitTunnelProtocols parameter and the excludeIntensive flag.
-			// Silently skip the candidate in this case.
-			if err != errNoProtocolSupported {
+			// dialParams is nil when the server does not support any protocol
+			// that remains after applying the LimitTunnelProtocols parameter
+			// and the excludeIntensive flag.
+			// Silently skip the candidate in this case. Otherwise, emit error.
+			if err != nil {
 				NoticeInfo("failed to select protocol for %s: %s",
 					candidateServerEntry.serverEntry.IpAddress, err)
 			}
@@ -1799,7 +1866,7 @@ loop:
 		// candidates use InitialLimitTunnelProtocols.
 		controller.establishConnectTunnelCount += 1
 
-		isIntensive := protocol.TunnelProtocolIsResourceIntensive(selectedProtocol)
+		isIntensive := protocol.TunnelProtocolIsResourceIntensive(dialParams.TunnelProtocol)
 
 		if isIntensive {
 			controller.concurrentIntensiveEstablishTunnels += 1
@@ -1822,9 +1889,8 @@ loop:
 			controller.establishCtx,
 			controller.config,
 			controller.sessionId,
-			candidateServerEntry.serverEntry,
-			selectedProtocol,
-			candidateServerEntry.adjustedEstablishStartTime)
+			candidateServerEntry.adjustedEstablishStartTime,
+			dialParams)
 
 		controller.concurrentEstablishTunnelsMutex.Lock()
 		if isIntensive {

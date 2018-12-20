@@ -22,6 +22,7 @@ package fragmentor
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 const (
@@ -41,30 +43,36 @@ const (
 // NewDownstreamConfig will generate configurations based on the given
 // client parameters.
 type Config struct {
-	isUpstream      bool
-	bytesToFragment int
-	minWriteBytes   int
-	maxWriteBytes   int
-	minDelay        time.Duration
-	maxDelay        time.Duration
+	isUpstream    bool
+	probability   float64
+	minTotalBytes int
+	maxTotalBytes int
+	minWriteBytes int
+	maxWriteBytes int
+	minDelay      time.Duration
+	maxDelay      time.Duration
+	fragmentPRNG  *prng.PRNG
 }
 
-// NewUpstreamConfig creates a new Config; may return nil.
+// NewUpstreamConfig creates a new Config; may return nil. Specifying the PRNG
+// seed allows for optional replay of a fragmentor sequence.
 func NewUpstreamConfig(
-	p *parameters.ClientParametersSnapshot, tunnelProtocol string) *Config {
-	return newConfig(p, true, tunnelProtocol)
+	p *parameters.ClientParametersSnapshot, tunnelProtocol string, seed *prng.Seed) *Config {
+	return newConfig(p, true, tunnelProtocol, seed)
 }
 
-// NewDownstreamConfig creates a new Config; may return nil.
+// NewDownstreamConfig creates a new Config; may return nil. Specifying the
+// PRNG seed allows for optional replay of a fragmentor sequence.
 func NewDownstreamConfig(
-	p *parameters.ClientParametersSnapshot, tunnelProtocol string) *Config {
-	return newConfig(p, false, tunnelProtocol)
+	p *parameters.ClientParametersSnapshot, tunnelProtocol string, seed *prng.Seed) *Config {
+	return newConfig(p, false, tunnelProtocol, seed)
 }
 
 func newConfig(
 	p *parameters.ClientParametersSnapshot,
 	isUpstream bool,
-	tunnelProtocol string) *Config {
+	tunnelProtocol string,
+	seed *prng.Seed) *Config {
 
 	probability := parameters.FragmentorProbability
 	limitProtocols := parameters.FragmentorLimitProtocols
@@ -86,37 +94,47 @@ func newConfig(
 		maxDelay = parameters.FragmentorDownstreamMaxDelay
 	}
 
-	coinFlip := p.WeightedCoinFlip(probability)
 	tunnelProtocols := p.TunnelProtocols(limitProtocols)
 
-	if !coinFlip || (len(tunnelProtocols) > 0 && !common.Contains(tunnelProtocols, tunnelProtocol)) {
+	// When maxTotalBytes is 0 or the protocol is not a candidate for
+	// fragmentation, it's a certainty that no fragmentation will be
+	// performed.
+	//
+	// It's also possible that the weighted coin flip or random selection of
+	// bytesToFragment will result in no fragmentation. However, as "seed" may
+	// be nil, PRNG calls are deferred and these values are not yet known.
+	//
+	// TODO: when "seed" is not nil, the coin flip/range could be done here.
+
+	if p.Int(maxTotalBytes) == 0 ||
+		(len(tunnelProtocols) > 0 && !common.Contains(tunnelProtocols, tunnelProtocol)) {
+
 		return nil
 	}
 
-	bytesToFragment, err := common.MakeSecureRandomRange(
-		p.Int(minTotalBytes), p.Int(maxTotalBytes))
-	if err != nil {
-		bytesToFragment = 0
-	}
-
-	if bytesToFragment == 0 {
-		return nil
+	var fragmentPRNG *prng.PRNG
+	if seed != nil {
+		fragmentPRNG = prng.NewPRNGWithSeed(seed)
 	}
 
 	return &Config{
-		isUpstream:      isUpstream,
-		bytesToFragment: bytesToFragment,
-		minWriteBytes:   p.Int(minWriteBytes),
-		maxWriteBytes:   p.Int(maxWriteBytes),
-		minDelay:        p.Duration(minDelay),
-		maxDelay:        p.Duration(maxDelay),
+		isUpstream:    isUpstream,
+		probability:   p.Float(probability),
+		minTotalBytes: p.Int(minTotalBytes),
+		maxTotalBytes: p.Int(maxTotalBytes),
+		minWriteBytes: p.Int(minWriteBytes),
+		maxWriteBytes: p.Int(maxWriteBytes),
+		minDelay:      p.Duration(minDelay),
+		maxDelay:      p.Duration(maxDelay),
+		fragmentPRNG:  fragmentPRNG,
 	}
 }
 
-// IsFragmenting indicates whether the fragmentor configuration results in any
-// fragmentation; config may be nil.
-func (config *Config) IsFragmenting() bool {
-	return config != nil && config.bytesToFragment > 0
+// MayFragment indicates whether the fragmentor configuration may result in
+// any fragmentation; config can be nil. When MayFragment is false, the caller
+// should skip wrapping the associated conn with a fragmentor.Conn.
+func (config *Config) MayFragment() bool {
+	return config != nil
 }
 
 // Conn implements simple fragmentation of application-level messages/packets
@@ -136,6 +154,8 @@ type Conn struct {
 	isClosed        int32
 	writeMutex      sync.Mutex
 	numNotices      int
+	fragmentPRNG    *prng.PRNG
+	bytesToFragment int
 	bytesFragmented int
 	maxBytesWritten int
 	minBytesWritten int
@@ -143,7 +163,8 @@ type Conn struct {
 	maxDelayed      time.Duration
 }
 
-// NewConn creates a new Conn.
+// NewConn creates a new Conn. When no seed was provided in the Config,
+// SetPRNG must be called before the first Write.
 func NewConn(
 	config *Config,
 	noticeEmitter func(string),
@@ -151,11 +172,13 @@ func NewConn(
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
 	return &Conn{
-		Conn:          conn,
-		config:        config,
-		noticeEmitter: noticeEmitter,
-		runCtx:        runCtx,
-		stopRunning:   stopRunning,
+		Conn:            conn,
+		config:          config,
+		noticeEmitter:   noticeEmitter,
+		runCtx:          runCtx,
+		stopRunning:     stopRunning,
+		fragmentPRNG:    config.fragmentPRNG,
+		bytesToFragment: -1,
 	}
 }
 
@@ -186,12 +209,44 @@ func (c *Conn) GetMetrics() common.LogFields {
 	return logFields
 }
 
+// SetPRNG sets the PRNG to be used by the fragmentor. Specifying a PRNG
+// allows for optional replay of a fragmentor sequence. SetPRNG is intended to
+// be used with obfuscator.GetDerivedPRNG and allows for setting the PRNG
+// after a conn has already been wrapped with a fragmentor.Conn (but before
+// the first Write).
+//
+// If no seed is specified in NewUp/DownstreamConfig and SetPRNG is not called
+// before the first Write, the Write will fail. If a seed was specified, or
+// SetPRNG was already called, SetPRNG has no effect.
+func (c *Conn) SetPRNG(PRNG *prng.PRNG) {
+
+	c.writeMutex.Lock()
+	defer c.writeMutex.Unlock()
+
+	if c.fragmentPRNG == nil {
+		c.fragmentPRNG = PRNG
+	}
+}
+
 func (c *Conn) Write(buffer []byte) (int, error) {
 
 	c.writeMutex.Lock()
 	defer c.writeMutex.Unlock()
 
-	if c.bytesFragmented >= c.config.bytesToFragment {
+	if c.fragmentPRNG == nil {
+		return 0, common.ContextError(errors.New("missing fragmentPRNG"))
+	}
+
+	if c.bytesToFragment == -1 {
+		if !c.fragmentPRNG.FlipWeightedCoin(c.config.probability) {
+			c.bytesToFragment = 0
+		} else {
+			c.bytesToFragment = c.fragmentPRNG.Range(
+				c.config.minTotalBytes, c.config.maxTotalBytes)
+		}
+	}
+
+	if c.bytesFragmented >= c.bytesToFragment {
 		return c.Conn.Write(buffer)
 	}
 
@@ -216,14 +271,11 @@ func (c *Conn) Write(buffer []byte) (int, error) {
 
 	for iterations := 0; len(buffer) > 0; iterations += 1 {
 
-		delay, err := common.MakeSecureRandomPeriod(
-			c.config.minDelay, c.config.maxDelay)
-		if err != nil {
-			delay = c.config.minDelay
-		}
+		delay := c.fragmentPRNG.Period(c.config.minDelay, c.config.maxDelay)
 
 		timer := time.NewTimer(delay)
-		err = nil
+
+		var err error
 		select {
 		case <-c.runCtx.Done():
 			err = c.runCtx.Err()
@@ -245,11 +297,7 @@ func (c *Conn) Write(buffer []byte) (int, error) {
 			maxWriteBytes = len(buffer)
 		}
 
-		writeBytes, err := common.MakeSecureRandomRange(
-			minWriteBytes, maxWriteBytes)
-		if err != nil {
-			writeBytes = maxWriteBytes
-		}
+		writeBytes := c.fragmentPRNG.Range(minWriteBytes, maxWriteBytes)
 
 		bytesWritten, err := c.Conn.Write(buffer[:writeBytes])
 

@@ -13,7 +13,8 @@ import (
 	"net"
 	"sync"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	// [Psiphon]
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 // debugHandshake, if set, prints messages sent and received.  Key
@@ -466,8 +467,7 @@ func (t *handshakeTransport) sendKexInit() error {
 		msg.ServerHostKeyAlgos = t.hostKeyAlgorithms
 	}
 
-	// PSIPHON
-	// =======
+	// [Psiphon]
 	//
 	// Randomize KEX. The offered algorithms are shuffled and
 	// truncated (longer lists are selected with higher
@@ -479,22 +479,18 @@ func (t *handshakeTransport) sendKexInit() error {
 	// The compression algorithm is not actually supported, but
 	// the server will not negotiate it.
 	//
-	// common.MakeSecureRandomPerm and common.FlipCoin are
-	// unlikely to fail; if they do, proceed with the standard
-	// ordering, full lists, and standard compressions.
-	//
 	// The "t.remoteAddr != nil" condition should be true only
 	// for clients.
 	//
 	if t.remoteAddr != nil {
 
+		PRNG := prng.NewPRNGWithSeed(t.config.KEXPRNGSeed)
+
 		permute := func(list []string) []string {
 			newList := make([]string, len(list))
-			perm, err := common.MakeSecureRandomPerm(len(list))
-			if err == nil {
-				for i, j := range perm {
-					newList[j] = list[i]
-				}
+			perm := PRNG.Perm(len(list))
+			for i, j := range perm {
+				newList[j] = list[i]
 			}
 			return newList
 		}
@@ -502,7 +498,7 @@ func (t *handshakeTransport) sendKexInit() error {
 		truncate := func(list []string) []string {
 			cut := len(list)
 			for ; cut > 1; cut-- {
-				if !common.FlipCoin() {
+				if !PRNG.FlipCoin() {
 					break
 				}
 			}
@@ -531,10 +527,7 @@ func (t *handshakeTransport) sendKexInit() error {
 				}
 			}
 			if !hasKeyAlgoRSA {
-				replace, err := common.MakeSecureRandomInt(len(serverHostKeyAlgos))
-				if err != nil {
-					replace = 0
-				}
+				replace := PRNG.Intn(len(serverHostKeyAlgos))
 				serverHostKeyAlgos[replace] = KeyAlgoRSA
 			}
 
@@ -543,7 +536,7 @@ func (t *handshakeTransport) sendKexInit() error {
 
 		// Offer "zlib@openssh.com", which is offered by OpenSSH.
 		// Since server only supports "none", must always offer "none"
-		if common.FlipCoin() {
+		if PRNG.FlipCoin() {
 			compressions := []string{"none", "zlib@openssh.com"}
 			msg.CompressionClientServer = compressions
 			msg.CompressionServerClient = compressions

@@ -29,6 +29,7 @@ script:
 - go test -race -v ./server
 - go test -race -v ./server/psinet
 - go test -race -v ../Server/logging/analysis
+- go test -race -v ../ClientLibrary/clientlib
 - go test -race -v
 - go test -v -covermode=count -coverprofile=common.coverprofile ./common
 - go test -v -covermode=count -coverprofile=accesscontrol.coverprofile ./common/accesscontrol
@@ -46,6 +47,7 @@ script:
 - go test -v -covermode=count -coverprofile=server.coverprofile ./server
 - go test -v -covermode=count -coverprofile=psinet.coverprofile ./server/psinet
 - go test -v -covermode=count -coverprofile=analysis.coverprofile ../Server/logging/analysis
+- go test -v -covermode=count -coverprofile=clientlib.coverprofile ../ClientLibrary/clientlib
 - go test -v -covermode=count -coverprofile=psiphon.coverprofile
 - go test -v ./memory_test -run TestReconnectTunnel
 - go test -v ./memory_test -run TestRestartController

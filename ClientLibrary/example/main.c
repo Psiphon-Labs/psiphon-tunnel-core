@@ -14,7 +14,7 @@ char *read_file(char *filename) {
     }
 
     fseek(fp, 0, SEEK_END);
-    size = ftell(fp); 
+    size = ftell(fp);
 
     rewind(fp);
     buffer = malloc((size + 1) * sizeof(*buffer));
@@ -26,7 +26,7 @@ char *read_file(char *filename) {
 }
 
 int main(int argc, char *argv[]) {
-    
+
     // load config
     char * const default_config = "psiphon_config";
 
@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
     }
 
     // set server list
-    char *serverList = "";
+    char *server_list = "";
 
     // set client platform
     char * const os = "OSName"; // "Android", "iOS", "Windows", etc.
@@ -57,20 +57,31 @@ int main(int argc, char *argv[]) {
     // set network ID
     char * const network_id = "TEST";
 
-    // set timout
-    long long *timeout = (long long*)malloc(sizeof(long long));
-    *timeout = (long long)60;
+    // set timeout
+    int32_t timeout = 60;
+
+    struct Parameters params;
+    params.sizeofStruct = sizeof(struct Parameters);
+    params.dataRootDirectory = ".";
+    params.clientPlatform = client_platform;
+    params.networkID = network_id;
+    params.establishTunnelTimeoutSeconds = &timeout;
 
     // connect 5 times
     for (int i = 0; i < 5; i++) {
         // start will return once Psiphon connects or does not connect for timeout seconds
-        char *result = psiphon_tunnel_start(psiphon_config, serverList, client_platform, network_id, timeout);
+        char *result = PsiphonTunnelStart(psiphon_config, server_list, &params);
 
         // print results
         printf("Result: %s\n", result);
 
         // The underlying memory of `result` is managed by PsiphonTunnel and is freed in Stop
-        psiphon_tunnel_stop();
+        PsiphonTunnelStop();
     }
+
+    free(client_platform);
+    client_platform = NULL;
+    free(psiphon_config);
+    psiphon_config = NULL;
 }
 

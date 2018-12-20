@@ -33,10 +33,12 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
@@ -59,6 +61,7 @@ type ServerContext struct {
 	clientRegion             string
 	clientUpgradeVersion     string
 	serverHandshakeTimestamp string
+	paddingPRNG              *prng.PRNG
 }
 
 // nextTunnelNumber is a monotonically increasing number assigned to each
@@ -74,7 +77,7 @@ var nextTunnelNumber int64
 // In server-side stats, we now consider a "session" to be the lifetime of the
 // Controller (e.g., the user's commanded start and stop) and we measure this
 // duration as well as the duration of each tunnel within the session.
-func MakeSessionId() (sessionId string, err error) {
+func MakeSessionId() (string, error) {
 	randomId, err := common.MakeSecureRandomBytes(protocol.PSIPHON_API_CLIENT_SESSION_ID_LENGTH)
 	if err != nil {
 		return "", common.ContextError(err)
@@ -90,7 +93,7 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 	// For legacy servers, set up psiphonHttpsClient for
 	// accessing the Psiphon API via the web service.
 	var psiphonHttpsClient *http.Client
-	if !tunnel.serverEntry.SupportsSSHAPIRequests() ||
+	if !tunnel.dialParams.ServerEntry.SupportsSSHAPIRequests() ||
 		tunnel.config.TargetApiProtocol == protocol.PSIPHON_WEB_API_PROTOCOL {
 
 		var err error
@@ -105,6 +108,7 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 		tunnelNumber:       atomic.AddInt64(&nextTunnelNumber, 1),
 		tunnel:             tunnel,
 		psiphonHttpsClient: psiphonHttpsClient,
+		paddingPRNG:        prng.NewPRNGWithSeed(tunnel.dialParams.APIRequestPaddingSeed),
 	}
 
 	ignoreRegexps := tunnel.config.clientParameters.Get().Bool(parameters.IgnoreHandshakeStatsRegexps)
@@ -125,8 +129,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 
 	params := serverContext.getBaseAPIParameters()
 
-	doTactics := !serverContext.tunnel.config.DisableTactics &&
-		serverContext.tunnel.config.networkIDGetter != nil
+	doTactics := !serverContext.tunnel.config.DisableTactics
 
 	networkID := ""
 	if doTactics {
@@ -142,7 +145,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		// doesn't detect all cases of changing networks, it reduces the already
 		// narrow window.
 
-		networkID = serverContext.tunnel.config.networkIDGetter.GetNetworkID()
+		networkID = serverContext.tunnel.config.GetNetworkID()
 
 		err := tactics.SetTacticsAPIParameters(
 			serverContext.tunnel.config.clientParameters, GetTacticsStorer(), networkID, params)
@@ -157,7 +160,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] =
 			serverContext.tunnel.config.GetAuthorizations()
 
-		request, err := makeSSHAPIRequestPayload(params)
+		request, err := serverContext.makeSSHAPIRequestPayload(params)
 		if err != nil {
 			return common.ContextError(err)
 		}
@@ -266,7 +269,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	NoticeActiveAuthorizationIDs(handshakeResponse.ActiveAuthorizationIDs)
 
 	if doTactics && handshakeResponse.TacticsPayload != nil &&
-		networkID == serverContext.tunnel.config.networkIDGetter.GetNetworkID() {
+		networkID == serverContext.tunnel.config.GetNetworkID() {
 
 		var payload *tactics.Payload
 		err := json.Unmarshal(handshakeResponse.TacticsPayload, &payload)
@@ -288,7 +291,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 			}
 
 			if tacticsRecord != nil &&
-				common.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
+				prng.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
 
 				err := serverContext.tunnel.config.SetClientParameters(
 					tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
@@ -332,7 +335,7 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 	var response []byte
 	if serverContext.psiphonHttpsClient == nil {
 
-		request, err := makeSSHAPIRequestPayload(params)
+		request, err := serverContext.makeSSHAPIRequestPayload(params)
 		if err != nil {
 			return common.ContextError(err)
 		}
@@ -384,7 +387,7 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 
 	statusPayload, statusPayloadInfo, err := makeStatusRequestPayload(
 		serverContext.tunnel.config.clientParameters,
-		tunnel.serverEntry.IpAddress)
+		tunnel.dialParams.ServerEntry.IpAddress)
 	if err != nil {
 		return common.ContextError(err)
 	}
@@ -401,7 +404,7 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 		params["statusData"] = &rawMessage
 
 		var request []byte
-		request, err = makeSSHAPIRequestPayload(params)
+		request, err = serverContext.makeSSHAPIRequestPayload(params)
 
 		if err == nil {
 			_, err = serverContext.tunnel.SendAPIRequest(
@@ -436,23 +439,6 @@ func (serverContext *ServerContext) getStatusParams(
 	isTunneled bool) common.APIParameters {
 
 	params := serverContext.getBaseAPIParameters()
-
-	// Add a random amount of padding to help prevent stats updates from being
-	// a predictable size (which often happens when the connection is quiet).
-	// TODO: base64 encoding of padding means the padding size is not exactly
-	// [PADDING_MIN_BYTES, PADDING_MAX_BYTES].
-
-	p := serverContext.tunnel.config.clientParameters.Get()
-	randomPadding, err := common.MakeSecureRandomPadding(
-		p.Int(parameters.PsiphonAPIStatusRequestPaddingMinBytes),
-		p.Int(parameters.PsiphonAPIStatusRequestPaddingMaxBytes))
-	p = nil
-	if err != nil {
-		NoticeAlert("MakeSecureRandomPadding failed: %s", common.ContextError(err))
-		// Proceed without random padding
-		randomPadding = make([]byte, 0)
-	}
-	params["padding"] = base64.StdEncoding.EncodeToString(randomPadding)
 
 	// Legacy clients set "connected" to "0" when disconnecting, and this value
 	// is used to calculate session duration estimates. This is now superseded
@@ -667,13 +653,44 @@ func (serverContext *ServerContext) doPostRequest(
 	return responseBody, nil
 }
 
+// makeSSHAPIRequestPayload makes a JSON payload for an SSH API request.
+func (serverContext *ServerContext) makeSSHAPIRequestPayload(
+	params common.APIParameters) ([]byte, error) {
+	jsonPayload, err := json.Marshal(params)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+	return jsonPayload, nil
+}
+
 func (serverContext *ServerContext) getBaseAPIParameters() common.APIParameters {
-	return getBaseAPIParameters(
+
+	params := getBaseAPIParameters(
 		serverContext.tunnel.config,
 		serverContext.sessionId,
-		serverContext.tunnel.serverEntry,
-		serverContext.tunnel.protocol,
-		serverContext.tunnel.dialStats)
+		serverContext.tunnel.dialParams)
+
+	// Add a random amount of padding to defend against API call traffic size
+	// fingerprints. The "pad_response" field instructs the server to pad its
+	// response accordingly.
+
+	p := serverContext.tunnel.config.GetClientParameters()
+	minUpstreamPadding := p.Int(parameters.APIRequestUpstreamPaddingMinBytes)
+	maxUpstreamPadding := p.Int(parameters.APIRequestUpstreamPaddingMaxBytes)
+	minDownstreamPadding := p.Int(parameters.APIRequestDownstreamPaddingMinBytes)
+	maxDownstreamPadding := p.Int(parameters.APIRequestDownstreamPaddingMaxBytes)
+
+	if maxUpstreamPadding > 0 {
+		size := serverContext.paddingPRNG.Range(minUpstreamPadding, maxUpstreamPadding)
+		params["padding"] = strings.Repeat(" ", size)
+	}
+
+	if maxDownstreamPadding > 0 {
+		size := serverContext.paddingPRNG.Range(minDownstreamPadding, maxDownstreamPadding)
+		params["pad_response"] = strconv.Itoa(size)
+	}
+
+	return params
 }
 
 // getBaseAPIParameters returns all the common API parameters that are
@@ -682,19 +699,17 @@ func (serverContext *ServerContext) getBaseAPIParameters() common.APIParameters 
 func getBaseAPIParameters(
 	config *Config,
 	sessionID string,
-	serverEntry *protocol.ServerEntry,
-	protocol string,
-	dialStats *DialStats) common.APIParameters {
+	dialParams *DialParameters) common.APIParameters {
 
 	params := make(common.APIParameters)
 
 	params["session_id"] = sessionID
 	params["client_session_id"] = sessionID
-	params["server_secret"] = serverEntry.WebServerSecret
+	params["server_secret"] = dialParams.ServerEntry.WebServerSecret
 	params["propagation_channel_id"] = config.PropagationChannelId
 	params["sponsor_id"] = config.GetSponsorID()
 	params["client_version"] = config.ClientVersion
-	params["relay_protocol"] = protocol
+	params["relay_protocol"] = dialParams.TunnelProtocol
 	params["client_platform"] = config.ClientPlatform
 	params["client_build_rev"] = common.GetBuildInfo().BuildRev
 	params["tunnel_whole_device"] = strconv.Itoa(config.TunnelWholeDevice)
@@ -706,92 +721,99 @@ func getBaseAPIParameters(
 		params["device_region"] = config.DeviceRegion
 	}
 
-	if dialStats.SelectedSSHClientVersion {
-		params["ssh_client_version"] = dialStats.SSHClientVersion
+	if dialParams.SelectedSSHClientVersion {
+		params["ssh_client_version"] = dialParams.SSHClientVersion
 	}
 
-	if dialStats.UpstreamProxyType != "" {
-		params["upstream_proxy_type"] = dialStats.UpstreamProxyType
+	if dialParams.UpstreamProxyType != "" {
+		params["upstream_proxy_type"] = dialParams.UpstreamProxyType
 	}
 
-	if dialStats.UpstreamProxyCustomHeaderNames != nil {
-		params["upstream_proxy_custom_header_names"] = dialStats.UpstreamProxyCustomHeaderNames
+	if dialParams.UpstreamProxyCustomHeaderNames != nil {
+		params["upstream_proxy_custom_header_names"] = dialParams.UpstreamProxyCustomHeaderNames
 	}
 
-	if dialStats.MeekDialAddress != "" {
-		params["meek_dial_address"] = dialStats.MeekDialAddress
+	if dialParams.MeekDialAddress != "" {
+		params["meek_dial_address"] = dialParams.MeekDialAddress
 	}
 
-	meekResolvedIPAddress := dialStats.MeekResolvedIPAddress.Load().(string)
+	meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
 	if meekResolvedIPAddress != "" {
 		params["meek_resolved_ip_address"] = meekResolvedIPAddress
 	}
 
-	if dialStats.MeekSNIServerName != "" {
-		params["meek_sni_server_name"] = dialStats.MeekSNIServerName
+	if dialParams.MeekSNIServerName != "" {
+		params["meek_sni_server_name"] = dialParams.MeekSNIServerName
 	}
 
-	if dialStats.MeekHostHeader != "" {
-		params["meek_host_header"] = dialStats.MeekHostHeader
+	if dialParams.MeekHostHeader != "" {
+		params["meek_host_header"] = dialParams.MeekHostHeader
 	}
 
 	// MeekTransformedHostName is meaningful when meek is used, which is when MeekDialAddress != ""
-	if dialStats.MeekDialAddress != "" {
+	if dialParams.MeekDialAddress != "" {
 		transformedHostName := "0"
-		if dialStats.MeekTransformedHostName {
+		if dialParams.MeekTransformedHostName {
 			transformedHostName = "1"
 		}
 		params["meek_transformed_host_name"] = transformedHostName
 	}
 
-	if dialStats.SelectedUserAgent {
-		params["user_agent"] = dialStats.UserAgent
+	if dialParams.SelectedUserAgent {
+		params["user_agent"] = dialParams.UserAgent
 	}
 
-	if dialStats.SelectedTLSProfile {
-		params["tls_profile"] = dialStats.TLSProfile
+	if dialParams.SelectedTLSProfile {
+		params["tls_profile"] = dialParams.TLSProfile
 	}
 
-	if serverEntry.Region != "" {
-		params["server_entry_region"] = serverEntry.Region
+	if dialParams.ServerEntry.Region != "" {
+		params["server_entry_region"] = dialParams.ServerEntry.Region
 	}
 
-	if serverEntry.LocalSource != "" {
-		params["server_entry_source"] = serverEntry.LocalSource
+	if dialParams.ServerEntry.LocalSource != "" {
+		params["server_entry_source"] = dialParams.ServerEntry.LocalSource
 	}
 
 	// As with last_connected, this timestamp stat, which may be
 	// a precise handshake request server timestamp, is truncated
 	// to hour granularity to avoid introducing a reconstructable
 	// cross-session user trace into server logs.
-	localServerEntryTimestamp := common.TruncateTimestampToHour(serverEntry.LocalTimestamp)
+	localServerEntryTimestamp := common.TruncateTimestampToHour(
+		dialParams.ServerEntry.LocalTimestamp)
 	if localServerEntryTimestamp != "" {
 		params["server_entry_timestamp"] = localServerEntryTimestamp
 	}
 
 	params[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME] = config.clientParameters.Get().Tag()
 
-	if dialStats.DialPortNumber != "" {
-		params["dial_port_number"] = dialStats.DialPortNumber
+	if dialParams.DialPortNumber != "" {
+		params["dial_port_number"] = dialParams.DialPortNumber
 	}
 
-	if dialStats.QUICVersion != "" {
-		params["quic_version"] = dialStats.QUICVersion
+	if dialParams.QUICVersion != "" {
+		params["quic_version"] = dialParams.QUICVersion
 	}
 
-	if dialStats.QUICDialSNIAddress != "" {
-		params["quic_dial_sni_address"] = dialStats.QUICDialSNIAddress
+	if dialParams.QUICDialSNIAddress != "" {
+		params["quic_dial_sni_address"] = dialParams.QUICDialSNIAddress
 	}
 
-	if dialStats.DialConnMetrics != nil {
-		metrics := dialStats.DialConnMetrics.GetMetrics()
+	isReplay := "0"
+	if dialParams.IsReplay {
+		isReplay = "1"
+	}
+	params["is_replay"] = isReplay
+
+	if dialParams.DialConnMetrics != nil {
+		metrics := dialParams.DialConnMetrics.GetMetrics()
 		for name, value := range metrics {
 			params[name] = fmt.Sprintf("%v", value)
 		}
 	}
 
-	if dialStats.ObfuscatedSSHConnMetrics != nil {
-		metrics := dialStats.ObfuscatedSSHConnMetrics.GetMetrics()
+	if dialParams.ObfuscatedSSHConnMetrics != nil {
+		metrics := dialParams.ObfuscatedSSHConnMetrics.GetMetrics()
 		for name, value := range metrics {
 			params[name] = fmt.Sprintf("%v", value)
 		}
@@ -800,25 +822,16 @@ func getBaseAPIParameters(
 	return params
 }
 
-// makeSSHAPIRequestPayload makes a JSON payload for an SSH API request.
-func makeSSHAPIRequestPayload(params common.APIParameters) ([]byte, error) {
-	jsonPayload, err := json.Marshal(params)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
-	return jsonPayload, nil
-}
-
 // makeRequestUrl makes a URL for a web service API request.
 func makeRequestUrl(tunnel *Tunnel, port, path string, params common.APIParameters) string {
 	var requestUrl bytes.Buffer
 
 	if port == "" {
-		port = tunnel.serverEntry.WebServerPort
+		port = tunnel.dialParams.ServerEntry.WebServerPort
 	}
 
 	requestUrl.WriteString("https://")
-	requestUrl.WriteString(tunnel.serverEntry.IpAddress)
+	requestUrl.WriteString(tunnel.dialParams.ServerEntry.IpAddress)
 	requestUrl.WriteString(":")
 	requestUrl.WriteString(port)
 	requestUrl.WriteString("/")
@@ -859,7 +872,8 @@ func makeRequestUrl(tunnel *Tunnel, port, path string, params common.APIParamete
 // certificate.
 func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error) {
 
-	certificate, err := DecodeCertificate(tunnel.serverEntry.WebServerCertificate)
+	certificate, err := DecodeCertificate(
+		tunnel.dialParams.ServerEntry.WebServerCertificate)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -876,8 +890,8 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 
 	dialer := NewCustomTLSDialer(
 		&CustomTLSConfig{
-			ClientParameters: tunnel.config.clientParameters,
-			Dial:             tunneledDialer,
+			ClientParameters:        tunnel.config.clientParameters,
+			Dial:                    tunneledDialer,
 			VerifyLegacyCertificate: certificate,
 		})
 
