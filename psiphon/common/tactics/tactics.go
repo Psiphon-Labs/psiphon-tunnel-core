@@ -173,6 +173,8 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 // TACTICS_PADDING_MAX_SIZE is used by the client as well as the server. This
@@ -1124,7 +1126,7 @@ func (listener *Listener) Accept() (net.Conn, error) {
 			return conn, nil
 		}
 
-		if !common.FlipWeightedCoin(tactics.Probability) {
+		if !prng.FlipWeightedCoin(tactics.Probability) {
 			// Skip tactics with the configured probability.
 			return conn, nil
 		}
@@ -1147,11 +1149,28 @@ func (listener *Listener) Accept() (net.Conn, error) {
 		// client-side; where client-side will make a single coin flip to fragment
 		// or not fragment all TCP connections for a one meek session, the server
 		// will make a coin flip per connection.
+		//
+		// Delay seeding the fragmentor PRNG when we can derive a seed from the
+		// client's initial obfuscation message. This enables server-side replay
+		// of fragmentation when initiated by the client. Currently this is only
+		// supported for OSSH: SSH lacks the initial obfuscation message, and
+		// meek and other protocols transmit downstream data before the initial
+		// obfuscation message arrives.
+
+		var seed *prng.Seed
+		if listener.tunnelProtocol != protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
+			seed, err = prng.NewSeed()
+			if err != nil {
+				listener.server.logger.WithContextFields(
+					common.LogFields{"error": err}).Warning("failed to seed fragmentor PRNG")
+				return conn, nil
+			}
+		}
 
 		fragmentorConfig := fragmentor.NewDownstreamConfig(
-			p, listener.tunnelProtocol)
+			p, listener.tunnelProtocol, seed)
 
-		if fragmentorConfig.IsFragmenting() {
+		if fragmentorConfig.MayFragment() {
 			conn = fragmentor.NewConn(
 				fragmentorConfig,
 				func(message string) {
@@ -1331,13 +1350,9 @@ func FetchTactics(
 	if len(speedTestSamples) == 0 {
 
 		p := clientParameters.Get()
-		request, err := common.MakeSecureRandomPadding(
+		request := prng.Padding(
 			p.Int(parameters.SpeedTestPaddingMinBytes),
 			p.Int(parameters.SpeedTestPaddingMaxBytes))
-		if err != nil {
-			// TODO: log MakeSecureRandomPadding failure?
-			request = make([]byte, 0)
-		}
 
 		startTime := monotime.Now()
 
@@ -1459,7 +1474,7 @@ func MakeSpeedTestResponse(minPadding, maxPadding int) ([]byte, error) {
 		return nil, common.ContextError(err)
 	}
 
-	randomPadding, _ := common.MakeSecureRandomPadding(minPadding, maxPadding)
+	randomPadding := prng.Padding(minPadding, maxPadding)
 	// On error, proceed without random padding.
 	// TODO: log error, even if proceeding?
 
@@ -1678,12 +1693,19 @@ func boxPayload(
 		box = bundledBox
 	}
 
+	// TODO: replay tactics request padding?
+	paddingPRNGSeed, err := prng.NewSeed()
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
 	maxPadding := TACTICS_PADDING_MAX_SIZE
 
 	obfuscator, err := obfuscator.NewClientObfuscator(
 		&obfuscator.ObfuscatorConfig{
-			Keyword:    string(obfuscatedKey),
-			MaxPadding: &maxPadding})
+			Keyword:         string(obfuscatedKey),
+			PaddingPRNGSeed: paddingPRNGSeed,
+			MaxPadding:      &maxPadding})
 	if err != nil {
 		return nil, common.ContextError(err)
 	}

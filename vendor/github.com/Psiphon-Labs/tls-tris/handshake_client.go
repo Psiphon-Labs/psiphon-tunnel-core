@@ -54,6 +54,10 @@ func makeClientHello(config *Config) (*clientHelloMsg, error) {
 		return nil, errors.New("tls: NextProtos values too large")
 	}
 
+	if config.ClientHelloPRNGSeed == nil {
+		return nil, errors.New("tls: missing Config.ClientHelloPRNGSeed")
+	}
+
 	hello := &clientHelloMsg{
 		vers:                         config.maxVersion(),
 		compressionMethods:           []uint8{compressionNone},
@@ -68,6 +72,9 @@ func makeClientHello(config *Config) (*clientHelloMsg, error) {
 		delegatedCredential:          config.AcceptDelegatedCredential,
 		alpnProtocols:                config.NextProtos,
 		extendedMSSupported:          config.UseExtendedMasterSecret,
+
+		// [Psiphon]
+		clientHelloPRNGSeed: config.ClientHelloPRNGSeed,
 	}
 	possibleCipherSuites := config.cipherSuites()
 	hello.cipherSuites = make([]uint16, 0, len(possibleCipherSuites))

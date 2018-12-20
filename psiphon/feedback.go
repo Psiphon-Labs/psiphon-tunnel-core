@@ -31,7 +31,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -40,6 +39,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 const (
@@ -127,11 +127,7 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 		return err
 	}
 
-	randBytes, err := common.MakeSecureRandomBytes(8)
-	if err != nil {
-		return err
-	}
-	uploadId := hex.EncodeToString(randBytes)
+	uploadId := prng.HexString(8)
 
 	url := "https://" + uploadServer + uploadPath + uploadId
 	headerPieces := strings.Split(uploadServerHeaders, ": ")

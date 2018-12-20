@@ -40,6 +40,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
@@ -152,6 +153,16 @@ func (server *TunnelServer) Run() error {
 				CommonLogger(log),
 				localAddress,
 				support.Config.ObfuscatedSSHKey)
+
+		} else if protocol.TunnelProtocolUsesMarionette(tunnelProtocol) {
+
+			listener, err = marionette.Listen(
+				support.Config.ServerIPAddress,
+				support.Config.MarionetteFormat)
+
+		} else if protocol.TunnelProtocolUsesTapdance(tunnelProtocol) {
+
+			listener, err = tapdance.Listen(localAddress)
 
 		} else if protocol.TunnelProtocolUsesMarionette(tunnelProtocol) {
 
@@ -461,7 +472,7 @@ func (sshServer *sshServer) runListener(
 			sshServer.support,
 			listener,
 			protocol.TunnelProtocolUsesMeekHTTPS(listenerTunnelProtocol),
-			protocol.TunnelProtocolIsFronted(listenerTunnelProtocol),
+			protocol.TunnelProtocolUsesFrontedMeek(listenerTunnelProtocol),
 			protocol.TunnelProtocolUsesObfuscatedSessionTickets(listenerTunnelProtocol),
 			handleClient,
 			sshServer.shutdownBroadcast)
@@ -1102,7 +1113,7 @@ func (sshClient *sshClient) run(
 		})
 	}
 
-	go func(conn net.Conn) {
+	go func(baseConn, conn net.Conn) {
 		sshServerConfig := &ssh.ServerConfig{
 			PasswordCallback: sshClient.passwordCallback,
 			AuthLogCallback:  sshClient.authLogCallback,
@@ -1128,28 +1139,50 @@ func (sshClient *sshClient) run(
 
 		// Wrap the connection in an SSH deobfuscator when required.
 
+		var err error
+
 		if protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
 			// Note: NewObfuscatedSSHConn blocks on network I/O
 			// TODO: ensure this won't block shutdown
-			result.obfuscatedSSHConn, result.err = obfuscator.NewObfuscatedSSHConn(
+			result.obfuscatedSSHConn, err = obfuscator.NewObfuscatedSSHConn(
 				obfuscator.OBFUSCATION_CONN_MODE_SERVER,
 				conn,
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
-				nil, nil)
-			if result.err != nil {
-				result.err = common.ContextError(result.err)
+				nil, nil, nil)
+			if err != nil {
+				err = common.ContextError(err)
 			}
 			conn = result.obfuscatedSSHConn
+
+			// Now seed fragmentor, when present, with seed derived from
+			// initial obfuscator message. See tactics.Listener.Accept.
+			// This must preceed ssh.NewServerConn to ensure fragmentor
+			// is seeded before downstream bytes are written.
+			if err == nil && sshClient.tunnelProtocol == protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
+				if fragmentorConn, ok := baseConn.(*fragmentor.Conn); ok {
+					fragmentorPRNG, err := result.obfuscatedSSHConn.GetDerivedPRNG("server-side-fragmentor")
+					if err != nil {
+						err = common.ContextError(err)
+					} else {
+						fragmentorConn.SetPRNG(fragmentorPRNG)
+					}
+				}
+			}
 		}
 
-		if result.err == nil {
-			result.sshConn, result.channels, result.requests, result.err =
+		if err == nil {
+			result.sshConn, result.channels, result.requests, err =
 				ssh.NewServerConn(conn, sshServerConfig)
+			if err != nil {
+				err = common.ContextError(err)
+			}
 		}
+
+		result.err = err
 
 		resultChannel <- result
 
-	}(conn)
+	}(baseConn, conn)
 
 	var result *sshNewServerConnResult
 	select {
@@ -1942,6 +1975,12 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		sshClient.handshakeState.authorizedAccessTypes,
 		sshClient.handshakeState.apiParams,
 		baseRequestParams)
+
+	// "relay_protocol" is sent with handshake API parameters. In pre-
+	// handshake logTunnel cases, this value is not yet known. As
+	// sshClient.tunnelProtocol is authoritative, set this value
+	// unconditionally, overwriting any value from handshake.
+	logFields["relay_protocol"] = sshClient.tunnelProtocol
 
 	logFields["session_id"] = sshClient.sessionID
 	logFields["handshake_completed"] = sshClient.handshakeState.completed

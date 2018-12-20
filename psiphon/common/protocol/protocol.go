@@ -129,6 +129,11 @@ func TunnelProtocolUsesMeek(protocol string) bool {
 		TunnelProtocolUsesMeekHTTPS(protocol)
 }
 
+func TunnelProtocolUsesFrontedMeek(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK ||
+		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP
+}
+
 func TunnelProtocolUsesMeekHTTP(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP
@@ -154,10 +159,6 @@ func TunnelProtocolUsesMarionette(protocol string) bool {
 
 func TunnelProtocolUsesTapdance(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH
-}
-
-func TunnelProtocolIsFronted(protocol string) bool {
-	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK
 }
 
 func TunnelProtocolIsResourceIntensive(protocol string) bool {
@@ -209,6 +210,11 @@ var SupportedTLSProfiles = TLSProfiles{
 	TLS_PROFILE_TLS13_RANDOMIZED,
 }
 
+func TLSProfileIsRandomized(tlsProfile string) bool {
+	return tlsProfile == TLS_PROFILE_RANDOMIZED ||
+		tlsProfile == TLS_PROFILE_TLS13_RANDOMIZED
+}
+
 type TLSProfiles []string
 
 func (profiles TLSProfiles) Validate() error {
@@ -244,6 +250,10 @@ var SupportedQUICVersions = QUICVersions{
 	QUIC_VERSION_OBFUSCATED,
 }
 
+func QUICVersionIsObfuscated(version string) bool {
+	return version == QUIC_VERSION_OBFUSCATED
+}
+
 type QUICVersions []string
 
 func (versions QUICVersions) Validate() error {
@@ -276,10 +286,12 @@ type HandshakeResponse struct {
 	ServerTimestamp        string              `json:"server_timestamp"`
 	ActiveAuthorizationIDs []string            `json:"active_authorization_ids"`
 	TacticsPayload         json.RawMessage     `json:"tactics_payload"`
+	Padding                string              `json:"padding"`
 }
 
 type ConnectedResponse struct {
 	ConnectedTimestamp string `json:"connected_timestamp"`
+	Padding            string `json:"padding"`
 }
 
 type OSLRequest struct {

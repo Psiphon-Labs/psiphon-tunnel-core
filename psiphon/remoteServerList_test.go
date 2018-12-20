@@ -42,6 +42,7 @@ import (
 	socks "github.com/Psiphon-Labs/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
 )
 
@@ -141,7 +142,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	epoch := now.Truncate(seedPeriod)
 	epochStr := epoch.Format(time.RFC3339Nano)
 
-	propagationChannelID, _ := common.MakeSecureRandomStringHex(8)
+	propagationChannelID := prng.HexString(8)
 
 	oslConfigJSON := fmt.Sprintf(
 		oslConfigJSONTemplate,

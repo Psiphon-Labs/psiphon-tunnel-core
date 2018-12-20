@@ -375,16 +375,17 @@ func NoticeUserLog(message string) {
 // NoticeCandidateServers is how many possible servers are available for the selected region and protocols
 func NoticeCandidateServers(
 	region string,
-	limitState *limitTunnelProtocolsState,
+	constraints *protocolSelectionConstraints,
 	initialCount int,
 	count int) {
 
 	singletonNoticeLogger.outputNotice(
 		"CandidateServers", noticeIsDiagnostic,
 		"region", region,
-		"initialLimitTunnelProtocols", limitState.initialProtocols,
-		"initialLimitTunnelProtocolsCandidateCount", limitState.initialCandidateCount,
-		"limitTunnelProtocols", limitState.protocols,
+		"initialLimitTunnelProtocols", constraints.initialLimitProtocols,
+		"initialLimitTunnelProtocolsCandidateCount", constraints.initialLimitProtocolsCandidateCount,
+		"limitTunnelProtocols", constraints.limitProtocols,
+		"replayCandidateCount", constraints.replayCandidateCount,
 		"initialCount", initialCount,
 		"count", count)
 }
@@ -400,77 +401,78 @@ func NoticeAvailableEgressRegions(regions []string) {
 		"AvailableEgressRegions", 0, "regions", sortedRegions)
 }
 
-func noticeWithDialStats(noticeType, ipAddress, region, protocol string, dialStats *DialStats) {
+func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 
 	args := []interface{}{
-		"ipAddress", ipAddress,
-		"region", region,
-		"protocol", protocol,
+		"ipAddress", dialParams.ServerEntry.IpAddress,
+		"region", dialParams.ServerEntry.Region,
+		"protocol", dialParams.TunnelProtocol,
+		"isReplay", dialParams.IsReplay,
 	}
 
-	if dialStats.SelectedSSHClientVersion {
-		args = append(args, "SSHClientVersion", dialStats.SSHClientVersion)
+	if dialParams.SelectedSSHClientVersion {
+		args = append(args, "SSHClientVersion", dialParams.SSHClientVersion)
 	}
 
-	if dialStats.UpstreamProxyType != "" {
-		args = append(args, "upstreamProxyType", dialStats.UpstreamProxyType)
+	if dialParams.UpstreamProxyType != "" {
+		args = append(args, "upstreamProxyType", dialParams.UpstreamProxyType)
 	}
 
-	if dialStats.UpstreamProxyCustomHeaderNames != nil {
-		args = append(args, "upstreamProxyCustomHeaderNames", strings.Join(dialStats.UpstreamProxyCustomHeaderNames, ","))
+	if dialParams.UpstreamProxyCustomHeaderNames != nil {
+		args = append(args, "upstreamProxyCustomHeaderNames", strings.Join(dialParams.UpstreamProxyCustomHeaderNames, ","))
 	}
 
-	if dialStats.MeekDialAddress != "" {
-		args = append(args, "meekDialAddress", dialStats.MeekDialAddress)
+	if dialParams.MeekDialAddress != "" {
+		args = append(args, "meekDialAddress", dialParams.MeekDialAddress)
 	}
 
-	meekResolvedIPAddress := dialStats.MeekResolvedIPAddress.Load().(string)
+	meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
 	if meekResolvedIPAddress != "" {
 		args = append(args, "meekResolvedIPAddress", meekResolvedIPAddress)
 	}
 
-	if dialStats.MeekSNIServerName != "" {
-		args = append(args, "meekSNIServerName", dialStats.MeekSNIServerName)
+	if dialParams.MeekSNIServerName != "" {
+		args = append(args, "meekSNIServerName", dialParams.MeekSNIServerName)
 	}
 
-	if dialStats.MeekHostHeader != "" {
-		args = append(args, "meekHostHeader", dialStats.MeekHostHeader)
+	if dialParams.MeekHostHeader != "" {
+		args = append(args, "meekHostHeader", dialParams.MeekHostHeader)
 	}
 
 	// MeekTransformedHostName is meaningful when meek is used, which is when MeekDialAddress != ""
-	if dialStats.MeekDialAddress != "" {
-		args = append(args, "meekTransformedHostName", dialStats.MeekTransformedHostName)
+	if dialParams.MeekDialAddress != "" {
+		args = append(args, "meekTransformedHostName", dialParams.MeekTransformedHostName)
 	}
 
-	if dialStats.SelectedUserAgent {
-		args = append(args, "userAgent", dialStats.UserAgent)
+	if dialParams.SelectedUserAgent {
+		args = append(args, "userAgent", dialParams.UserAgent)
 	}
 
-	if dialStats.SelectedTLSProfile {
-		args = append(args, "TLSProfile", dialStats.TLSProfile)
+	if dialParams.SelectedTLSProfile {
+		args = append(args, "TLSProfile", dialParams.TLSProfile)
 	}
 
-	if dialStats.DialPortNumber != "" {
-		args = append(args, "DialPortNumber", dialStats.DialPortNumber)
+	if dialParams.DialPortNumber != "" {
+		args = append(args, "dialPortNumber", dialParams.DialPortNumber)
 	}
 
-	if dialStats.QUICVersion != "" {
-		args = append(args, "QUICVersion", dialStats.QUICVersion)
+	if dialParams.QUICVersion != "" {
+		args = append(args, "QUICVersion", dialParams.QUICVersion)
 	}
 
-	if dialStats.QUICDialSNIAddress != "" {
-		args = append(args, "QUICDialSNIAddress", dialStats.QUICDialSNIAddress)
+	if dialParams.QUICDialSNIAddress != "" {
+		args = append(args, "QUICDialSNIAddress", dialParams.QUICDialSNIAddress)
 	}
 
-	if dialStats.DialConnMetrics != nil {
-		metrics := dialStats.DialConnMetrics.GetMetrics()
+	if dialParams.DialConnMetrics != nil {
+		metrics := dialParams.DialConnMetrics.GetMetrics()
 		for name, value := range metrics {
 			args = append(args, name, value)
 		}
 	}
 
-	if dialStats.ObfuscatedSSHConnMetrics != nil {
-		metrics := dialStats.ObfuscatedSSHConnMetrics.GetMetrics()
+	if dialParams.ObfuscatedSSHConnMetrics != nil {
+		metrics := dialParams.ObfuscatedSSHConnMetrics.GetMetrics()
 		for name, value := range metrics {
 			args = append(args, name, value)
 		}
@@ -482,27 +484,23 @@ func noticeWithDialStats(noticeType, ipAddress, region, protocol string, dialSta
 }
 
 // NoticeConnectingServer reports parameters and details for a single connection attempt
-func NoticeConnectingServer(ipAddress, region, protocol string, dialStats *DialStats) {
-	noticeWithDialStats(
-		"ConnectingServer", ipAddress, region, protocol, dialStats)
+func NoticeConnectingServer(dialParams *DialParameters) {
+	noticeWithDialParameters("ConnectingServer", dialParams)
 }
 
 // NoticeConnectedServer reports parameters and details for a single successful connection
-func NoticeConnectedServer(ipAddress, region, protocol string, dialStats *DialStats) {
-	noticeWithDialStats(
-		"ConnectedServer", ipAddress, region, protocol, dialStats)
+func NoticeConnectedServer(dialParams *DialParameters) {
+	noticeWithDialParameters("ConnectedServer", dialParams)
 }
 
 // NoticeRequestingTactics reports parameters and details for a tactics request attempt
-func NoticeRequestingTactics(ipAddress, region, protocol string, dialStats *DialStats) {
-	noticeWithDialStats(
-		"RequestingTactics", ipAddress, region, protocol, dialStats)
+func NoticeRequestingTactics(dialParams *DialParameters) {
+	noticeWithDialParameters("RequestingTactics", dialParams)
 }
 
 // NoticeRequestedTactics reports parameters and details for a successful tactics request
-func NoticeRequestedTactics(ipAddress, region, protocol string, dialStats *DialStats) {
-	noticeWithDialStats(
-		"RequestedTactics", ipAddress, region, protocol, dialStats)
+func NoticeRequestedTactics(dialParams *DialParameters) {
+	noticeWithDialParameters("RequestedTactics", dialParams)
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding

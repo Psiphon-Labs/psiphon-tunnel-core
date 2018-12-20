@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/utls/cipherhw"
 )
 
@@ -647,6 +648,10 @@ type Config struct {
 	// UseExtendedMasterSecret indicates whether or not the connection
 	// should use the extended master secret computation if available
 	UseExtendedMasterSecret bool
+
+	// [Psiphon]
+	// Seeded PRNG allows for optional replay of same randomized Client Hello.
+	ClientHelloPRNGSeed *prng.Seed
 }
 
 // ticketKeyNameLen is the number of bytes of identifier that is prepended to

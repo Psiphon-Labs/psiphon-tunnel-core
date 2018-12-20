@@ -24,6 +24,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -525,11 +526,11 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		webServerPrivateKey, webServerPortForwardAddress string
 
 	if params.WebServerPort != 0 {
-		var err error
-		webServerSecret, err = common.MakeSecureRandomStringHex(WEB_SERVER_SECRET_BYTE_LENGTH)
+		webServerSecretBytes, err := common.MakeSecureRandomBytes(WEB_SERVER_SECRET_BYTE_LENGTH)
 		if err != nil {
 			return nil, nil, nil, nil, nil, common.ContextError(err)
 		}
+		webServerSecret = hex.EncodeToString(webServerSecretBytes)
 
 		webServerCertificate, webServerPrivateKey, err = common.GenerateWebServerCertificate("")
 		if err != nil {
@@ -561,26 +562,29 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	sshPublicKey := signer.PublicKey()
 
-	sshUserNameSuffix, err := common.MakeSecureRandomStringHex(SSH_USERNAME_SUFFIX_BYTE_LENGTH)
+	sshUserNameSuffixBytes, err := common.MakeSecureRandomBytes(SSH_USERNAME_SUFFIX_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
+	sshUserNameSuffix := hex.EncodeToString(sshUserNameSuffixBytes)
 
 	sshUserName := "psiphon_" + sshUserNameSuffix
 
-	sshPassword, err := common.MakeSecureRandomStringHex(SSH_PASSWORD_BYTE_LENGTH)
+	sshPasswordBytes, err := common.MakeSecureRandomBytes(SSH_PASSWORD_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
+	sshPassword := hex.EncodeToString(sshPasswordBytes)
 
 	sshServerVersion := "SSH-2.0-Psiphon"
 
 	// Obfuscated SSH config
 
-	obfuscatedSSHKey, err := common.MakeSecureRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+	obfuscatedSSHKeyBytes, err := common.MakeSecureRandomBytes(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
+	obfuscatedSSHKey := hex.EncodeToString(obfuscatedSSHKeyBytes)
 
 	// Meek config
 
@@ -596,18 +600,20 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		meekCookieEncryptionPublicKey = base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPublicKey[:])
 		meekCookieEncryptionPrivateKey = base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPrivateKey[:])
 
-		meekObfuscatedKey, err = common.MakeSecureRandomStringHex(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
+		meekObfuscatedKeyBytes, err := common.MakeSecureRandomBytes(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 		if err != nil {
 			return nil, nil, nil, nil, nil, common.ContextError(err)
 		}
+		meekObfuscatedKey = hex.EncodeToString(meekObfuscatedKeyBytes)
 	}
 
 	// Other config
 
-	discoveryValueHMACKey, err := common.MakeSecureRandomStringBase64(DISCOVERY_VALUE_KEY_BYTE_LENGTH)
+	discoveryValueHMACKeyBytes, err := common.MakeSecureRandomBytes(DISCOVERY_VALUE_KEY_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
+	discoveryValueHMACKey := base64.RawURLEncoding.EncodeToString(discoveryValueHMACKeyBytes)
 
 	// Assemble configs and server entry
 

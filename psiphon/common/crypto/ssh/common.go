@@ -15,6 +15,9 @@ import (
 	_ "crypto/sha1"
 	_ "crypto/sha256"
 	_ "crypto/sha512"
+
+	// [Psiphon]
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 // These are string constants in the SSH protocol.
@@ -211,6 +214,10 @@ type Config struct {
 	// The allowed MAC algorithms. If unspecified then a sensible default
 	// is used.
 	MACs []string
+
+	// [Psiphon]
+	// KEXPRNGSeed is used for KEX randomization and replay.
+	KEXPRNGSeed *prng.Seed
 }
 
 // SetDefaults sets sensible values for unset fields in config. This is

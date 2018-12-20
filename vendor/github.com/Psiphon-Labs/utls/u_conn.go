@@ -15,6 +15,9 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+
+	// [Psiphon]
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 type UConn struct {
@@ -45,17 +48,21 @@ type UConn struct {
 	// IncludeEmptySNI is set to true for test runs, as test data expects
 	// empty SNI extensions.
 	IncludeEmptySNI bool
+
+	// [Psiphon]
+	// Seeded PRNG allows for optional replay of same randomized Client Hello.
+	clientHelloPRNGSeed *prng.Seed
 }
 
 // UClient returns a new uTLS client, with behavior depending on clientHelloID.
 // Config CAN be nil, but make sure to eventually specify ServerName.
-func UClient(conn net.Conn, config *Config, clientHelloID ClientHelloID) *UConn {
+func UClient(conn net.Conn, config *Config, clientHelloID ClientHelloID, clientHelloPRNGSeed *prng.Seed) *UConn {
 	if config == nil {
 		config = &Config{}
 	}
 	tlsConn := Conn{conn: conn, config: config, isClient: true}
 	handshakeState := ClientHandshakeState{C: &tlsConn, Hello: &ClientHelloMsg{}}
-	uconn := UConn{Conn: &tlsConn, clientHelloID: clientHelloID, HandshakeState: handshakeState}
+	uconn := UConn{Conn: &tlsConn, clientHelloID: clientHelloID, HandshakeState: handshakeState, clientHelloPRNGSeed: clientHelloPRNGSeed}
 	return &uconn
 }
 

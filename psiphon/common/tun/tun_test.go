@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 const (
@@ -321,12 +322,12 @@ func startTestServer(
 	noDNSResolvers := func() []net.IP { return make([]net.IP, 0) }
 
 	config := &ServerConfig{
-		Logger: logger,
+		Logger:                          logger,
 		SudoNetworkConfigCommands:       os.Getenv("TUN_TEST_SUDO") != "",
 		AllowNoIPv6NetworkConfiguration: !useIPv6,
 		GetDNSResolverIPv4Addresses:     noDNSResolvers,
 		GetDNSResolverIPv6Addresses:     noDNSResolvers,
-		MTU: MTU,
+		MTU:                             MTU,
 	}
 
 	tunServer, err := NewServer(config)
@@ -380,11 +381,7 @@ func (server *testServer) run() {
 			defer server.workers.Done()
 			defer signalConn.Close()
 
-			sessionID, err := common.MakeSecureRandomStringHex(SESSION_ID_LENGTH)
-			if err != nil {
-				fmt.Printf("testServer.run(): common.MakeSecureRandomStringHex failed: %s\n", err)
-				return
-			}
+			sessionID := prng.HexString(SESSION_ID_LENGTH)
 
 			checkAllowedPortFunc := func(net.IP, int) bool { return true }
 
@@ -472,7 +469,7 @@ func startTestClient(
 	// Assumes IP addresses are available on test host
 
 	config := &ClientConfig{
-		Logger: logger,
+		Logger:                          logger,
 		SudoNetworkConfigCommands:       os.Getenv("TUN_TEST_SUDO") != "",
 		AllowNoIPv6NetworkConfiguration: !useIPv6,
 		IPv4AddressCIDR:                 "172.16.0.1/24",
@@ -712,7 +709,7 @@ func (logger *testLogger) LogMetric(metric string, fields common.LogFields) {
 
 	fmt.Printf("METRIC: %s: %+v\n", metric, fields)
 
-	if metric == "packet_metrics" && logger.packetMetrics != nil {
+	if metric == "server_packet_metrics" && logger.packetMetrics != nil {
 		select {
 		case logger.packetMetrics <- fields:
 		default:

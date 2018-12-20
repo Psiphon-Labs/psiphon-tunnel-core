@@ -62,6 +62,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
@@ -181,6 +182,26 @@ const (
 	LivenessTestMaxUpstreamBytes               = "LivenessTestMaxUpstreamBytes"
 	LivenessTestMinDownstreamBytes             = "LivenessTestMinDownstreamBytes"
 	LivenessTestMaxDownstreamBytes             = "LivenessTestMaxDownstreamBytes"
+	ReplayCandidateCount                       = "ReplayCandidateCount"
+	ReplayDialParametersTTL                    = "ReplayDialParametersTTL"
+	ReplayTargetUpstreamBytes                  = "ReplayTargetUpstreamBytes"
+	ReplayTargetDownstreamBytes                = "ReplayTargetDownstreamBytes"
+	ReplaySSH                                  = "ReplaySSH"
+	ReplayObfuscatorPadding                    = "ReplayObfuscatorPadding"
+	ReplayFragmentor                           = "ReplayFragmentor"
+	ReplayTLSProfile                           = "ReplayTLSProfile"
+	ReplayRandomizedTLSProfile                 = "ReplayRandomizedTLSProfile"
+	ReplayFronting                             = "ReplayFronting"
+	ReplayHostname                             = "ReplayHostname"
+	ReplayQUICVersion                          = "ReplayQUICVersion"
+	ReplayObfuscatedQUIC                       = "ReplayObfuscatedQUIC"
+	ReplayLivenessTest                         = "ReplayLivenessTest"
+	ReplayUserAgent                            = "ReplayUserAgent"
+	ReplayAPIRequestPadding                    = "ReplayAPIRequestPadding"
+	APIRequestUpstreamPaddingMinBytes          = "APIRequestUpstreamPaddingMinBytes"
+	APIRequestUpstreamPaddingMaxBytes          = "APIRequestUpstreamPaddingMaxBytes"
+	APIRequestDownstreamPaddingMinBytes        = "APIRequestDownstreamPaddingMinBytes"
+	APIRequestDownstreamPaddingMaxBytes        = "APIRequestDownstreamPaddingMaxBytes"
 )
 
 const (
@@ -309,13 +330,15 @@ var defaultClientParameters = map[string]struct {
 
 	PsiphonAPIRequestTimeout: {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 
-	PsiphonAPIStatusRequestPeriodMin:       {value: 5 * time.Minute, minimum: 1 * time.Second},
-	PsiphonAPIStatusRequestPeriodMax:       {value: 10 * time.Minute, minimum: 1 * time.Second},
-	PsiphonAPIStatusRequestShortPeriodMin:  {value: 5 * time.Second, minimum: 1 * time.Second},
-	PsiphonAPIStatusRequestShortPeriodMax:  {value: 10 * time.Second, minimum: 1 * time.Second},
+	PsiphonAPIStatusRequestPeriodMin:      {value: 5 * time.Minute, minimum: 1 * time.Second},
+	PsiphonAPIStatusRequestPeriodMax:      {value: 10 * time.Minute, minimum: 1 * time.Second},
+	PsiphonAPIStatusRequestShortPeriodMin: {value: 5 * time.Second, minimum: 1 * time.Second},
+	PsiphonAPIStatusRequestShortPeriodMax: {value: 10 * time.Second, minimum: 1 * time.Second},
+	PsiphonAPIPersistentStatsMaxCount:     {value: 100, minimum: 1},
+	// PsiphonAPIStatusRequestPadding parameters are obsoleted by APIRequestUp/DownstreamPadding.
+	// TODO: remove once no longer required for older clients.
 	PsiphonAPIStatusRequestPaddingMinBytes: {value: 0, minimum: 0},
 	PsiphonAPIStatusRequestPaddingMaxBytes: {value: 256, minimum: 0},
-	PsiphonAPIPersistentStatsMaxCount:      {value: 100, minimum: 1},
 
 	PsiphonAPIConnectedRequestRetryPeriod: {value: 5 * time.Second, minimum: 1 * time.Millisecond},
 
@@ -364,6 +387,28 @@ var defaultClientParameters = map[string]struct {
 	LivenessTestMaxUpstreamBytes:   {value: 0, minimum: 0},
 	LivenessTestMinDownstreamBytes: {value: 0, minimum: 0},
 	LivenessTestMaxDownstreamBytes: {value: 0, minimum: 0},
+
+	ReplayCandidateCount:        {value: 10, minimum: 0},
+	ReplayDialParametersTTL:     {value: 24 * time.Hour, minimum: time.Duration(0)},
+	ReplayTargetUpstreamBytes:   {value: 0, minimum: 0},
+	ReplayTargetDownstreamBytes: {value: 0, minimum: 0},
+	ReplaySSH:                   {value: true},
+	ReplayObfuscatorPadding:     {value: true},
+	ReplayFragmentor:            {value: true},
+	ReplayTLSProfile:            {value: true},
+	ReplayRandomizedTLSProfile:  {value: true},
+	ReplayFronting:              {value: true},
+	ReplayHostname:              {value: true},
+	ReplayQUICVersion:           {value: true},
+	ReplayObfuscatedQUIC:        {value: true},
+	ReplayLivenessTest:          {value: true},
+	ReplayUserAgent:             {value: true},
+	ReplayAPIRequestPadding:     {value: true},
+
+	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
+	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
+	APIRequestDownstreamPaddingMinBytes: {value: 0, minimum: 0},
+	APIRequestDownstreamPaddingMaxBytes: {value: 1024, minimum: 0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -700,12 +745,12 @@ func (p *ClientParametersSnapshot) Float(name string) float64 {
 	return value
 }
 
-// WeightedCoinFlip returns the result of common.FlipWeightedCoin using the
+// WeightedCoinFlip returns the result of prng.FlipWeightedCoin using the
 // specified float parameter as the probability input.
 func (p *ClientParametersSnapshot) WeightedCoinFlip(name string) bool {
 	var value float64
 	p.getValue(name, &value)
-	return common.FlipWeightedCoin(value)
+	return prng.FlipWeightedCoin(value)
 }
 
 // Duration returns a time.Duration parameter value. When the duration
@@ -740,7 +785,7 @@ func (p *ClientParametersSnapshot) TunnelProtocols(name string) protocol.TunnelP
 	if ok {
 		probabilityValue := float64(1.0)
 		p.getValue(probabilityName, &probabilityValue)
-		if !common.FlipWeightedCoin(probabilityValue) {
+		if !prng.FlipWeightedCoin(probabilityValue) {
 			defaultParameter, ok := defaultClientParameters[name]
 			if ok {
 				defaultValue, ok := defaultParameter.value.(protocol.TunnelProtocols)
@@ -769,7 +814,7 @@ func (p *ClientParametersSnapshot) TLSProfiles(name string) protocol.TLSProfiles
 	if ok {
 		probabilityValue := float64(1.0)
 		p.getValue(probabilityName, &probabilityValue)
-		if !common.FlipWeightedCoin(probabilityValue) {
+		if !prng.FlipWeightedCoin(probabilityValue) {
 			defaultParameter, ok := defaultClientParameters[name]
 			if ok {
 				defaultValue, ok := defaultParameter.value.(protocol.TLSProfiles)
@@ -798,7 +843,7 @@ func (p *ClientParametersSnapshot) QUICVersions(name string) protocol.QUICVersio
 	if ok {
 		probabilityValue := float64(1.0)
 		p.getValue(probabilityName, &probabilityValue)
-		if !common.FlipWeightedCoin(probabilityValue) {
+		if !prng.FlipWeightedCoin(probabilityValue) {
 			defaultParameter, ok := defaultClientParameters[name]
 			if ok {
 				defaultValue, ok := defaultParameter.value.(protocol.QUICVersions)

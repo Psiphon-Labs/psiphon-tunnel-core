@@ -470,7 +470,6 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	// Note: a successful tactics request may modify config parameters.
 
-	// These fields must be filled in before calling LoadConfig
 	var modifyConfig map[string]interface{}
 	json.Unmarshal(configJSON, &modifyConfig)
 	modifyConfig["DataStoreDirectory"] = testDataDirName
@@ -517,8 +516,6 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	if err != nil {
 		t.Fatalf("error processing configuration file: %s", err)
 	}
-
-	// The following config values are not client parameters can be set directly.
 
 	if runConfig.clientIsLatestVersion {
 		config.ClientVersion = "999999999"
@@ -597,7 +594,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	SetNoticeWriter(NewNoticeReceiver(
 		func(notice []byte) {
 			// TODO: log notices without logging server IPs:
-			// fmt.Fprintf(os.Stderr, "%s\n", string(notice))
+			//fmt.Fprintf(os.Stderr, "%s\n", string(notice))
 			noticeType, payload, err := GetNotice(notice)
 			if err != nil {
 				return
