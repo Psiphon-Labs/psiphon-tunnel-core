@@ -373,7 +373,7 @@ func connectedAPIRequestHandler(
 var statusRequestParams = append(
 	[]requestParamSpec{
 		{"session_id", isHexDigits, 0},
-		{"connected", isBooleanFlag, 0}},
+		{"connected", isBooleanFlag, requestParamLogFlagAsBool}},
 	baseRequestParams...)
 
 // statusAPIRequestHandler implements the "status" API request.
@@ -544,6 +544,7 @@ const (
 	requestParamJSON                 = 8
 	requestParamLogStringAsInt       = 16
 	requestParamLogStringLengthAsInt = 32
+	requestParamLogFlagAsBool        = 64
 )
 
 var upstreamFragmentorParams = []requestParamSpec{
@@ -569,7 +570,7 @@ var baseRequestParams = append(
 		{"client_platform", isClientPlatform, 0},
 		{"client_build_rev", isHexDigits, requestParamOptional},
 		{"relay_protocol", isRelayProtocol, 0},
-		{"tunnel_whole_device", isBooleanFlag, requestParamOptional},
+		{"tunnel_whole_device", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 		{"device_region", isAnyString, requestParamOptional},
 		{"ssh_client_version", isAnyString, requestParamOptional},
 		{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
@@ -578,7 +579,7 @@ var baseRequestParams = append(
 		{"meek_resolved_ip_address", isIPAddress, requestParamOptional},
 		{"meek_sni_server_name", isDomain, requestParamOptional},
 		{"meek_host_header", isHostHeader, requestParamOptional},
-		{"meek_transformed_host_name", isBooleanFlag, requestParamOptional},
+		{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 		{"user_agent", isAnyString, requestParamOptional},
 		{"tls_profile", isAnyString, requestParamOptional},
 		{"server_entry_region", isRegionCode, requestParamOptional},
@@ -590,7 +591,7 @@ var baseRequestParams = append(
 		{"quic_dial_sni_address", isAnyString, requestParamOptional},
 		{"padding", isAnyString, requestParamOptional | requestParamLogStringLengthAsInt},
 		{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"is_replay", isBooleanFlag, requestParamOptional},
+		{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	},
 	upstreamFragmentorParams...)
 
@@ -760,6 +761,7 @@ func getRequestLogFields(
 			// - Boolean fields that come into the api as "1"/"0"
 			//   must be logged as actual boolean values
 			switch expectedParam.name {
+
 			case "meek_dial_address":
 				host, _, _ := net.SplitHostPort(strValue)
 				if isIPAddress(nil, host) {
@@ -767,29 +769,34 @@ func getRequestLogFields(
 				} else {
 					logFields["meek_dial_domain"] = host
 				}
+
 			case "upstream_proxy_type":
 				// Submitted value could be e.g., "SOCKS5" or "socks5"; log lowercase
 				logFields[expectedParam.name] = strings.ToLower(strValue)
+
 			case tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME:
 				// Due to a client bug, clients may deliever an incorrect ""
 				// value for speed_test_samples via the web API protocol. Omit
 				// the field in this case.
-			case "tunnel_whole_device", "meek_transformed_host_name", "connected":
-				// Submitted value could be "0" or "1"
-				// "0" and non "0"/"1" values should be transformed to false
-				// "1" should be transformed to true
 
-				if strValue == "1" {
-					logFields[expectedParam.name] = true
-				} else {
-					logFields[expectedParam.name] = false
-				}
 			default:
 				if expectedParam.flags&requestParamLogStringAsInt != 0 {
 					intValue, _ := strconv.Atoi(strValue)
 					logFields[expectedParam.name] = intValue
+
 				} else if expectedParam.flags&requestParamLogStringLengthAsInt != 0 {
 					logFields[expectedParam.name] = len(strValue)
+
+				} else if expectedParam.flags&requestParamLogFlagAsBool != 0 {
+					// Submitted value could be "0" or "1"
+					// "0" and non "0"/"1" values should be transformed to false
+					// "1" should be transformed to true
+					if strValue == "1" {
+						logFields[expectedParam.name] = true
+					} else {
+						logFields[expectedParam.name] = false
+					}
+
 				} else {
 					logFields[expectedParam.name] = strValue
 				}

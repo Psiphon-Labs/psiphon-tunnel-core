@@ -250,6 +250,9 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 
 	obfuscatedServerListRootURLsJSONConfig := "["
 	obfuscatedServerListRootURLs := make([]string, len(remoteServerListHostAddresses))
+
+	httpServers := make(chan *http.Server, len(remoteServerListHostAddresses))
+
 	for i := 0; i < len(remoteServerListHostAddresses); i++ {
 
 		obfuscatedServerListRootURLs[i] = fmt.Sprintf("http://%s/", remoteServerListHostAddresses[i])
@@ -278,9 +281,17 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 				Addr:    remoteServerListHostAddress,
 				Handler: serveMux,
 			}
+			httpServers <- httpServer
 			httpServer.Serve(listener)
 		}(remoteServerListListeners[i], remoteServerListHostAddresses[i])
 	}
+
+	defer func() {
+		for i := 0; i < len(remoteServerListHostAddresses); i++ {
+			httpServer := <-httpServers
+			httpServer.Close()
+		}
+	}()
 
 	obfuscatedServerListDownloadDirectory := testDataDirName
 
@@ -366,6 +377,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	// Note: calling LoadConfig ensures all *int config fields are initialized
 	clientConfigJSONTemplate := `
     {
+        "DataStoreDirectory" : "%s",
         "ClientPlatform" : "",
         "ClientVersion" : "0",
         "SponsorId" : "0",
@@ -383,6 +395,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 
 	clientConfigJSON := fmt.Sprintf(
 		clientConfigJSONTemplate,
+		testDataDirName,
 		signingPublicKey,
 		remoteServerListURL,
 		remoteServerListDownloadFilename,

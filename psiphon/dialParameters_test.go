@@ -55,13 +55,13 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 	t.Logf("Test %s...", tunnelProtocol)
 
-	SetNoticeWriter(ioutil.Discard)
-
 	testDataDirName, err := ioutil.TempDir("", "psiphon-dial-parameters-test")
 	if err != nil {
 		t.Fatalf("TempDir failed: %s", err)
 	}
 	defer os.RemoveAll(testDataDirName)
+
+	SetNoticeWriter(ioutil.Discard)
 
 	clientConfig := &Config{
 		PropagationChannelId: "0",
@@ -100,7 +100,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	}
 
 	RegisterSSHClientVersionPicker(func() string {
-		versions := []string{"v1", "v2", "v3"}
+		versions := []string{"SSH-2.0-A", "SSH-2.0-B", "SSH-2.0-C"}
 		return versions[prng.Intn(len(versions))]
 	})
 

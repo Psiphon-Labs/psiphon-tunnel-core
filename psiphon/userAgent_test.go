@@ -22,8 +22,10 @@ package psiphon
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -151,13 +153,18 @@ func initUserAgentCounterUpstreamProxy() {
 func attemptConnectionsWithUserAgent(
 	t *testing.T, tunnelProtocol string, isCONNECT bool) {
 
+	testDataDirName, err := ioutil.TempDir("", "psiphon-user-agent-test")
+	if err != nil {
+		t.Fatalf("TempDir failed: %s\n", err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
 	initMockUserAgentPicker()
 	initUserAgentCounterUpstreamProxy()
 	resetUserAgentCounts()
 
 	// create a server entry
 
-	var err error
 	serverIPaddress := ""
 	for _, interfaceName := range []string{"eth0", "en0"} {
 		var serverIPv4Address, serverIPv6Address net.IP
