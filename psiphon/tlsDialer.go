@@ -345,9 +345,15 @@ func CustomTLSDial(
 		tlsRootCAs.AppendCertsFromPEM(certData)
 	}
 
+	randomizedTLSProfileSeed := config.RandomizedTLSProfileSeed
+
 	if protocol.TLSProfileIsRandomized(selectedTLSProfile) &&
-		config.RandomizedTLSProfileSeed == nil {
-		return nil, common.ContextError(errors.New("missing RandomizedTLSProfileSeed"))
+		randomizedTLSProfileSeed == nil {
+
+		randomizedTLSProfileSeed, err = prng.NewSeed()
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
 	}
 
 	// Depending on the selected TLS profile, the TLS provider will be tris
@@ -373,7 +379,7 @@ func CustomTLSDial(
 			rawConn,
 			tlsConfig,
 			getUTLSClientHelloID(selectedTLSProfile),
-			config.RandomizedTLSProfileSeed)
+			randomizedTLSProfileSeed)
 
 		if config.ObfuscatedSessionTicketKey != "" {
 			sessionState, err := utls.NewObfuscatedClientSessionState(
@@ -407,7 +413,7 @@ func CustomTLSDial(
 			ServerName:              tlsConfigServerName,
 			ClientSessionCache:      clientSessionCache,
 			UseExtendedMasterSecret: true,
-			ClientHelloPRNGSeed:     config.RandomizedTLSProfileSeed,
+			ClientHelloPRNGSeed:     randomizedTLSProfileSeed,
 		}
 
 		conn = &trisConn{
