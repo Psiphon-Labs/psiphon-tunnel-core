@@ -36,6 +36,12 @@ import (
 
 func TestLimitTunnelProtocols(t *testing.T) {
 
+	testDataDirName, err := ioutil.TempDir("", "psiphon-limit-tunnel-protocols-test")
+	if err != nil {
+		t.Fatalf("TempDir failed: %s", err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
 	initialLimitTunnelProtocols := protocol.TunnelProtocols{"OSSH", "UNFRONTED-MEEK-HTTPS-OSSH"}
 	initialLimitTunnelProtocolsCandidateCount := 100
 	limitTunnelProtocols := protocol.TunnelProtocols{"SSH", "UNFRONTED-MEEK-OSSH"}
@@ -87,12 +93,6 @@ func TestLimitTunnelProtocols(t *testing.T) {
 				}
 			}
 		}))
-
-	testDataDirName, err := ioutil.TempDir("", "psiphon-limit-tunnel-protocols-test")
-	if err != nil {
-		t.Fatalf("TempDir failed: %s", err)
-	}
-	defer os.RemoveAll(testDataDirName)
 
 	clientConfigJSON := `
     {

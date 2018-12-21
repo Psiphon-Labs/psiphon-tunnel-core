@@ -44,18 +44,8 @@ import (
 	"github.com/elazarl/goproxy"
 )
 
-var testDataDirName string
-
 func TestMain(m *testing.M) {
 	flag.Parse()
-
-	var err error
-	testDataDirName, err = ioutil.TempDir("", "psiphon-controller-test")
-	if err != nil {
-		fmt.Printf("TempDir failed: %s\n", err)
-		os.Exit(1)
-	}
-	defer os.RemoveAll(testDataDirName)
 
 	SetEmitDiagnosticNotices(true)
 
@@ -462,6 +452,12 @@ type controllerRunConfig struct {
 
 func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
+	testDataDirName, err := ioutil.TempDir("", "psiphon-controller-test")
+	if err != nil {
+		t.Fatalf("TempDir failed: %s\n", err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
 	configJSON, err := ioutil.ReadFile("controller_test.config")
 	if err != nil {
 		// Skip, don't fail, if config file is not present
@@ -553,9 +549,6 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	// paths. server_test runs a more comprehensive test that checks
 	// that the tactics request succeeds.
 	config.NetworkID = "NETWORK1"
-
-	os.Remove(config.UpgradeDownloadFilename)
-	os.Remove(config.RemoteServerListDownloadFilename)
 
 	err = OpenDataStore(config)
 	if err != nil {
