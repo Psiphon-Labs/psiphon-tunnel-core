@@ -801,8 +801,11 @@ func dialTunnel(
 					livenessTestMinDownstreamBytes, livenessTestMaxDownstreamBytes,
 					dialParams.LivenessTestSeed)
 
-				NoticeLivenessTest(
-					dialParams.ServerEntry.IpAddress, metrics, err == nil)
+				// Skip notice when cancelling.
+				if baseCtx.Err() == nil {
+					NoticeLivenessTest(
+						dialParams.ServerEntry.IpAddress, metrics, err == nil)
+				}
 			}
 		}
 
