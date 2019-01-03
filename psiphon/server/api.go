@@ -251,7 +251,7 @@ func handshakeAPIRequestHandler(
 		}
 
 		// Log a metric when new tactics are issued. Logging here indicates that
-		// the handshake tactics mechansim is active; but logging for every
+		// the handshake tactics mechanism is active; but logging for every
 		// handshake creates unneccesary log data.
 
 		if len(tacticsPayload.Tactics) > 0 {
