@@ -528,6 +528,13 @@ func dialTunnel(
 	sessionId string,
 	dialParams *DialParameters) (*dialResult, error) {
 
+	// Return immediately when overall context is canceled or timed-out. This
+	// avoids notice noise.
+	err := ctx.Err()
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
 	p := config.clientParameters.Get()
 	timeout := p.Duration(parameters.TunnelConnectTimeout)
 	rateLimits := p.RateLimits(parameters.TunnelRateLimits)
@@ -566,7 +573,6 @@ func dialTunnel(
 	// Create the base transport: meek or direct connection
 
 	var dialConn net.Conn
-	var err error
 
 	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
 
