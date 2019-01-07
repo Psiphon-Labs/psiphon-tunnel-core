@@ -565,6 +565,19 @@ func dialTunnel(
 	ctx, cancelFunc = context.WithTimeout(ctx, timeout)
 	defer cancelFunc()
 
+	// DialDuration is the elapsed time for both successful and failed tunnel
+	// dials. For successful tunnels, it includes any the network protocol
+	// handshake(s), obfuscation protocol handshake(s), SSH handshake, and
+	// liveness test, when performed.
+	//
+	// Note: ensure DialDuration is set before calling any function which logs
+	// dial_duration.
+
+	startDialTime := monotime.Now()
+	defer func() {
+		dialParams.DialDuration = monotime.Since(startDialTime)
+	}()
+
 	// Note: dialParams.MeekResolvedIPAddress isn't set until the dial begins,
 	// so it will always be blank in NoticeConnectingServer.
 

@@ -103,6 +103,8 @@ type DialParameters struct {
 	DialConnMetrics          common.MetricsSource `json:"-"`
 	ObfuscatedSSHConnMetrics common.MetricsSource `json:"-"`
 
+	DialDuration time.Duration `json:"-"`
+
 	dialConfig *DialConfig `json:"-"`
 	meekConfig *MeekConfig `json:"-"`
 }

@@ -593,6 +593,7 @@ var baseRequestParams = append(
 		{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 		{"egress_region", isRegionCode, requestParamOptional},
+		{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	},
 	upstreamFragmentorParams...)
 
