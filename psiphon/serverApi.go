@@ -805,6 +805,10 @@ func getBaseAPIParameters(
 	}
 	params["is_replay"] = isReplay
 
+	if config.EgressRegion != "" {
+		params["egress_region"] = config.EgressRegion
+	}
+
 	if dialParams.DialConnMetrics != nil {
 		metrics := dialParams.DialConnMetrics.GetMetrics()
 		for name, value := range metrics {
