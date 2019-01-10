@@ -376,6 +376,25 @@ var statusRequestParams = append(
 		{"connected", isBooleanFlag, requestParamLogFlagAsBool}},
 	baseRequestParams...)
 
+var remoteServerListStatParams = []requestParamSpec{
+	{"session_id", isHexDigits, requestParamOptional},
+	{"propagation_channel_id", isHexDigits, requestParamOptional},
+	{"sponsor_id", isHexDigits, requestParamOptional},
+	{"client_version", isAnyString, requestParamOptional},
+	{"client_platform", isAnyString, requestParamOptional},
+	{"client_build_rev", isAnyString, requestParamOptional},
+	{"client_download_timestamp", isISO8601Date, 0},
+	{"url", isAnyString, 0},
+	{"etag", isAnyString, 0},
+}
+
+var failedTunnelStatParams = append(
+	[]requestParamSpec{
+		{"session_id", isHexDigits, 0},
+		{"client_failed_timestamp", isISO8601Date, 0},
+		{"tunnel_error", isAnyString, 0}},
+	baseRequestParams...)
+
 // statusAPIRequestHandler implements the "status" API request.
 // Clients make periodic status requests which deliver client-side
 // recorded data transfer and tunnel duration stats.
@@ -440,8 +459,8 @@ func statusAPIRequestHandler(
 		}
 	}
 
-	// Remote server list download stats
-	// Older clients may not submit this data
+	// Remote server list download stats. Older clients may not submit this data.
+	// Limitation: for "persistent" stats, geolocation is time-of-sending not time-of-recording.
 
 	if statusData["remote_server_list_stats"] != nil {
 
@@ -451,6 +470,12 @@ func statusAPIRequestHandler(
 		}
 		for _, remoteServerListStat := range remoteServerListStats {
 
+			err := validateRequestParams(support.Config, remoteServerListStat, remoteServerListStatParams)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+
+			// remote_server_list defaults to using the common params from the outer statusRequestParams
 			remoteServerListFields := getRequestLogFields(
 				"remote_server_list",
 				geoIPData,
@@ -458,25 +483,38 @@ func statusAPIRequestHandler(
 				params,
 				statusRequestParams)
 
-			clientDownloadTimestamp, err := getStringRequestParam(remoteServerListStat, "client_download_timestamp")
-			if err != nil {
-				return nil, common.ContextError(err)
+			for name, value := range remoteServerListStat {
+				remoteServerListFields[name] = value
 			}
-			remoteServerListFields["client_download_timestamp"] = clientDownloadTimestamp
-
-			url, err := getStringRequestParam(remoteServerListStat, "url")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			remoteServerListFields["url"] = url
-
-			etag, err := getStringRequestParam(remoteServerListStat, "etag")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			remoteServerListFields["etag"] = etag
 
 			logQueue = append(logQueue, remoteServerListFields)
+		}
+	}
+
+	// Failed tunnel stats. Older clients may not submit this data.
+	// Limitation: for "persistent" stats, geolocation is time-of-sending not time-of-recording.
+
+	if statusData["failed_tunnel_stats"] != nil {
+
+		failedTunnelStats, err := getJSONObjectArrayRequestParam(statusData, "failed_tunnel_stats")
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+		for _, failedTunnelStat := range failedTunnelStats {
+
+			err := validateRequestParams(support.Config, failedTunnelStat, failedTunnelStatParams)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+
+			failedTunnelFields := getRequestLogFields(
+				"failed_tunnel",
+				geoIPData,
+				authorizedAccessTypes,
+				failedTunnelStat,
+				failedTunnelStatParams)
+
+			logQueue = append(logQueue, failedTunnelFields)
 		}
 	}
 

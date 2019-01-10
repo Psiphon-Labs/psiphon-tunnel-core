@@ -202,6 +202,10 @@ const (
 	APIRequestUpstreamPaddingMaxBytes          = "APIRequestUpstreamPaddingMaxBytes"
 	APIRequestDownstreamPaddingMinBytes        = "APIRequestDownstreamPaddingMinBytes"
 	APIRequestDownstreamPaddingMaxBytes        = "APIRequestDownstreamPaddingMaxBytes"
+	PersistentStatsMaxStoreRecords             = "PersistentStatsMaxStoreRecords"
+	PersistentStatsMaxSendBytes                = "PersistentStatsMaxSendBytes"
+	RecordRemoteServerListPersistentStats      = "RecordRemoteServerListPersistentStats"
+	RecordFailedTunnelPersistentStats          = "RecordFailedTunnelPersistentStats"
 )
 
 const (
@@ -334,7 +338,9 @@ var defaultClientParameters = map[string]struct {
 	PsiphonAPIStatusRequestPeriodMax:      {value: 10 * time.Minute, minimum: 1 * time.Second},
 	PsiphonAPIStatusRequestShortPeriodMin: {value: 5 * time.Second, minimum: 1 * time.Second},
 	PsiphonAPIStatusRequestShortPeriodMax: {value: 10 * time.Second, minimum: 1 * time.Second},
-	PsiphonAPIPersistentStatsMaxCount:     {value: 100, minimum: 1},
+	// PsiphonAPIPersistentStatsMaxCount parameter is obsoleted by PersistentStatsMaxSendBytes.
+	// TODO: remove once no longer required for older clients.
+	PsiphonAPIPersistentStatsMaxCount: {value: 100, minimum: 1},
 	// PsiphonAPIStatusRequestPadding parameters are obsoleted by APIRequestUp/DownstreamPadding.
 	// TODO: remove once no longer required for older clients.
 	PsiphonAPIStatusRequestPaddingMinBytes: {value: 0, minimum: 0},
@@ -409,6 +415,11 @@ var defaultClientParameters = map[string]struct {
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
 	APIRequestDownstreamPaddingMinBytes: {value: 0, minimum: 0},
 	APIRequestDownstreamPaddingMaxBytes: {value: 1024, minimum: 0},
+
+	PersistentStatsMaxStoreRecords:        {value: 200, minimum: 1},
+	PersistentStatsMaxSendBytes:           {value: 65536, minimum: 1},
+	RecordRemoteServerListPersistentStats: {value: true},
+	RecordFailedTunnelPersistentStats:     {value: true},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

@@ -46,7 +46,6 @@ import (
 // route traffic through the tunnels.
 type Controller struct {
 	config                                  *Config
-	sessionId                               string
 	runCtx                                  context.Context
 	stopRunning                             context.CancelFunc
 	runWaitGroup                            *sync.WaitGroup
@@ -106,7 +105,6 @@ func NewController(config *Config) (controller *Controller, err error) {
 
 	controller = &Controller{
 		config:       config,
-		sessionId:    config.SessionID,
 		runWaitGroup: new(sync.WaitGroup),
 		// connectedTunnels and failedTunnels buffer sizes are large enough to
 		// receive full pools of tunnels without blocking. Senders should not block.
@@ -1519,10 +1517,7 @@ func (controller *Controller) doFetchTactics(
 	}
 	defer meekConn.Close()
 
-	apiParams := getBaseAPIParameters(
-		controller.config,
-		controller.sessionId,
-		dialParams)
+	apiParams := getBaseAPIParameters(controller.config, dialParams)
 
 	tacticsRecord, err := tactics.FetchTactics(
 		ctx,
@@ -1891,7 +1886,6 @@ loop:
 		tunnel, err := ConnectTunnel(
 			controller.establishCtx,
 			controller.config,
-			controller.sessionId,
 			candidateServerEntry.adjustedEstablishStartTime,
 			dialParams)
 
