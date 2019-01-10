@@ -632,16 +632,17 @@ var baseRequestParams = []requestParamSpec{
 	{"dial_port_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"quic_version", isAnyString, requestParamOptional},
 	{"quic_dial_sni_address", isAnyString, requestParamOptional},
-	{"padding", isAnyString, requestParamOptional | requestParamLogStringLengthAsInt},
-	{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
-	{"egress_region", isRegionCode, requestParamOptional},
-	{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"upstream_bytes_fragmented", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"upstream_min_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"upstream_max_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"upstream_min_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"upstream_max_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"padding", isAnyString, requestParamOptional | requestParamLogStringLengthAsInt},
+	{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"egress_region", isRegionCode, requestParamOptional},
+	{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
 }
 
 func validateRequestParams(

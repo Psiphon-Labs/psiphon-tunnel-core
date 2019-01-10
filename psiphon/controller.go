@@ -1468,7 +1468,8 @@ func (controller *Controller) doFetchTactics(
 		canReplay,
 		selectProtocol,
 		serverEntry,
-		true)
+		true,
+		0)
 	if dialParams == nil {
 		// MakeDialParameters may return nil, nil when the server entry can't
 		// satisfy protocol selection criteria. This case in not expected
@@ -1808,7 +1809,8 @@ loop:
 			canReplay,
 			selectProtocol,
 			candidateServerEntry.serverEntry,
-			false)
+			false,
+			controller.establishConnectTunnelCount)
 		if dialParams == nil || err != nil {
 
 			controller.concurrentEstablishTunnelsMutex.Unlock()

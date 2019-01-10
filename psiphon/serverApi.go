@@ -821,6 +821,8 @@ func getBaseAPIParameters(
 	// dialParams.DialDuration is nanoseconds; divide to get to milliseconds
 	params["dial_duration"] = fmt.Sprintf("%d", dialParams.DialDuration/1000000)
 
+	params["candidate_number"] = strconv.Itoa(dialParams.CandidateNumber)
+
 	if dialParams.DialConnMetrics != nil {
 		metrics := dialParams.DialConnMetrics.GetMetrics()
 		for name, value := range metrics {
