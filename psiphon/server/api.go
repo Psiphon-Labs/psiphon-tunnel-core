@@ -473,8 +473,11 @@ func statusAPIRequestHandler(
 		}
 	}
 
-	// Remote server list download stats. Older clients may not submit this data.
-	// Limitation: for "persistent" stats, geolocation is time-of-sending not time-of-recording.
+	// Limitation: for "persistent" stats, host_id and geolocation is time-of-sending
+	// not time-of-recording.
+
+	// Remote server list download persistent stats.
+	// Older clients may not submit this data.
 
 	if statusData["remote_server_list_stats"] != nil {
 
@@ -505,8 +508,8 @@ func statusAPIRequestHandler(
 		}
 	}
 
-	// Failed tunnel stats. Older clients may not submit this data.
-	// Limitation: for "persistent" stats, geolocation is time-of-sending not time-of-recording.
+	// Failed tunnel persistent stats.
+	// Older clients may not submit this data.
 
 	if statusData["failed_tunnel_stats"] != nil {
 

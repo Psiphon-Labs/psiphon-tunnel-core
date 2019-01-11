@@ -539,7 +539,8 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 // via subsequent status requests sent to any Psiphon server.
 //
 // Note that some common event field values may change between the
-// stat recording and reporting, including client geolocation.
+// stat recording and reporting, including client geolocation and
+// host_id.
 //
 // Multiple "status" requests may be in flight at once (due
 // to multi-tunnel, asynchronous final status retry, and
