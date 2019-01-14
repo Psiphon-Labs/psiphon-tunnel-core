@@ -492,7 +492,8 @@ func statusAPIRequestHandler(
 				return nil, common.ContextError(err)
 			}
 
-			// remote_server_list defaults to using the common params from the outer statusRequestParams
+			// remote_server_list defaults to using the common params from the
+			// outer statusRequestParams
 			remoteServerListFields := getRequestLogFields(
 				"remote_server_list",
 				geoIPData,
@@ -518,6 +519,11 @@ func statusAPIRequestHandler(
 			return nil, common.ContextError(err)
 		}
 		for _, failedTunnelStat := range failedTunnelStats {
+
+			// failed_tunnel supplies a full set of common params, but the
+			// server secret must use the corect value from the outer
+			// statusRequestParams
+			failedTunnelStat["server_secret"] = params["server_secret"]
 
 			err := validateRequestParams(support.Config, failedTunnelStat, failedTunnelStatParams)
 			if err != nil {

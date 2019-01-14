@@ -485,7 +485,7 @@ func makeStatusRequestPayload(
 
 	persistentStatPayloadNames := make(map[string]string)
 	persistentStatPayloadNames[datastorePersistentStatTypeRemoteServerList] = "remote_server_list_stats"
-	persistentStatPayloadNames[datastorePersistentStatTypeFailedTunnel] = "failed_tunnels"
+	persistentStatPayloadNames[datastorePersistentStatTypeFailedTunnel] = "failed_tunnel_stats"
 
 	for statType, stats := range persistentStats {
 

@@ -1029,7 +1029,6 @@ func CountUnreportedPersistentStats() int {
 			for key, value := cursor.first(); key != nil; key, value = cursor.next() {
 				if 0 == bytes.Compare(value, persistentStatStateUnreported) {
 					unreported++
-					break
 				}
 			}
 			cursor.close()
