@@ -116,18 +116,11 @@ func StartTunnel(ctx context.Context,
 		config.DataStoreDirectory = *params.DataRootDirectory
 		config.ObfuscatedServerListDownloadDirectory = *params.DataRootDirectory
 
-		if *params.DataRootDirectory == "" {
-			config.RemoteServerListDownloadFilename = ""
-		} else {
-			config.RemoteServerListDownloadFilename = filepath.Join(*params.DataRootDirectory, "server_list_compressed")
-		}
+		config.RemoteServerListDownloadFilename = filepath.Join(*params.DataRootDirectory, "server_list_compressed")
 	}
 
 	if params.NetworkID != nil {
 		config.NetworkID = *params.NetworkID
-	}
-	if config.NetworkID == "" {
-		return nil, common.ContextError(fmt.Errorf("networkID must be non-empty"))
 	}
 
 	if params.ClientPlatform != nil {
