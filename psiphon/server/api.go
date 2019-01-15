@@ -321,6 +321,7 @@ var connectedRequestParams = append(
 // copied to update data logged with server_tunnel: these fields either only
 // ship with or ship newer data with connected requests.
 var updateOnConnectedParamNames = []string{
+	"last_connected",
 	"establishment_duration",
 	"upstream_bytes_fragmented",
 	"upstream_min_bytes_written",
@@ -348,9 +349,9 @@ func connectedAPIRequestHandler(
 
 	// Update, for server_tunnel logging, upstream fragmentor metrics, as the
 	// client may have performed more upstream fragmentation since the
-	// previous metrics reported by the handshake request. Also,
-	// establishment_duration, reported only in the connected request, is
-	// added to server_tunnel here.
+	// previous metrics reported by the handshake request. Also, additional
+	// fields reported only in the connected request, are added to
+	// server_tunnel here.
 
 	// TODO: same session-ID-lookup TODO in handshakeAPIRequestHandler
 	// applies here.
