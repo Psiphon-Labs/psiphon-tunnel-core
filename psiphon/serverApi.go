@@ -303,12 +303,9 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 
 	params := serverContext.getBaseAPIParameters()
 
-	lastConnected, err := GetKeyValue(datastoreLastConnectedKey)
+	lastConnected, err := getLastConnected()
 	if err != nil {
 		return common.ContextError(err)
-	}
-	if lastConnected == "" {
-		lastConnected = "None"
 	}
 
 	params["last_connected"] = lastConnected
@@ -355,6 +352,17 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 	}
 
 	return nil
+}
+
+func getLastConnected() (string, error) {
+	lastConnected, err := GetKeyValue(datastoreLastConnectedKey)
+	if err != nil {
+		return "", common.ContextError(err)
+	}
+	if lastConnected == "" {
+		lastConnected = "None"
+	}
+	return lastConnected, nil
 }
 
 // StatsRegexps gets the Regexps used for the statistics for this tunnel.
@@ -595,7 +603,13 @@ func RecordFailedTunnelStat(
 		return nil
 	}
 
+	lastConnected, err := getLastConnected()
+	if err != nil {
+		return common.ContextError(err)
+	}
+
 	params := getBaseAPIParameters(config, dialParams)
+	params["last_connected"] = lastConnected
 	params["client_failed_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
 	params["tunnel_error"] = tunnelErr.Error()
 
