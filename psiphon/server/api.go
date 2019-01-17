@@ -602,14 +602,15 @@ type requestParamSpec struct {
 }
 
 const (
-	requestParamOptional              = 1
-	requestParamNotLogged             = 2
-	requestParamArray                 = 4
-	requestParamJSON                  = 8
-	requestParamLogStringAsInt        = 16
-	requestParamLogStringLengthAsInt  = 32
-	requestParamLogFlagAsBool         = 64
-	requestParamLogOnlyForFrontedMeek = 128
+	requestParamOptional                                      = 1
+	requestParamNotLogged                                     = 1 << 1
+	requestParamArray                                         = 1 << 2
+	requestParamJSON                                          = 1 << 3
+	requestParamLogStringAsInt                                = 1 << 4
+	requestParamLogStringLengthAsInt                          = 1 << 5
+	requestParamLogFlagAsBool                                 = 1 << 6
+	requestParamLogOnlyForFrontedMeek                         = 1 << 7
+	requestParamNotLoggedForUnfrontedMeekNonTransformedHeader = 1 << 8
 )
 
 // baseRequestParams is the list of required and optional
@@ -634,7 +635,7 @@ var baseRequestParams = []requestParamSpec{
 	{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
 	{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
 	{"meek_sni_server_name", isDomain, requestParamOptional},
-	{"meek_host_header", isHostHeader, requestParamOptional},
+	{"meek_host_header", isHostHeader, requestParamOptional | requestParamNotLoggedForUnfrontedMeekNonTransformedHeader},
 	{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"user_agent", isAnyString, requestParamOptional},
 	{"tls_profile", isAnyString, requestParamOptional},
@@ -799,10 +800,32 @@ func getRequestLogFields(
 			continue
 		}
 
-		// Note: relay_protocol lookup and type assertion is safe due to validation.
+		var tunnelProtocol string
+		if value, ok := params["relay_protocol"]; ok {
+			tunnelProtocol, _ = value.(string)
+		}
+
 		if expectedParam.flags&requestParamLogOnlyForFrontedMeek != 0 &&
-			!protocol.TunnelProtocolUsesFrontedMeek(params["relay_protocol"].(string)) {
+			!protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
 			continue
+		}
+
+		if expectedParam.flags&requestParamNotLoggedForUnfrontedMeekNonTransformedHeader != 0 &&
+			protocol.TunnelProtocolUsesMeek(tunnelProtocol) &&
+			!protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+
+			// Non-HTTP unfronted meek protocols never tranform the host header.
+			if !protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+				continue
+			}
+
+			var transformedHostName string
+			if value, ok := params["meek_transformed_host_name"]; ok {
+				transformedHostName, _ = value.(string)
+			}
+			if transformedHostName != "1" {
+				continue
+			}
 		}
 
 		value := params[expectedParam.name]
