@@ -601,13 +601,14 @@ type requestParamSpec struct {
 }
 
 const (
-	requestParamOptional             = 1
-	requestParamNotLogged            = 2
-	requestParamArray                = 4
-	requestParamJSON                 = 8
-	requestParamLogStringAsInt       = 16
-	requestParamLogStringLengthAsInt = 32
-	requestParamLogFlagAsBool        = 64
+	requestParamOptional              = 1
+	requestParamNotLogged             = 2
+	requestParamArray                 = 4
+	requestParamJSON                  = 8
+	requestParamLogStringAsInt        = 16
+	requestParamLogStringLengthAsInt  = 32
+	requestParamLogFlagAsBool         = 64
+	requestParamLogOnlyForFrontedMeek = 128
 )
 
 // baseRequestParams is the list of required and optional
@@ -629,8 +630,8 @@ var baseRequestParams = []requestParamSpec{
 	{"ssh_client_version", isAnyString, requestParamOptional},
 	{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
 	{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
-	{"meek_dial_address", isDialAddress, requestParamOptional},
-	{"meek_resolved_ip_address", isIPAddress, requestParamOptional},
+	{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
+	{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
 	{"meek_sni_server_name", isDomain, requestParamOptional},
 	{"meek_host_header", isHostHeader, requestParamOptional},
 	{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
@@ -794,6 +795,12 @@ func getRequestLogFields(
 	for _, expectedParam := range expectedParams {
 
 		if expectedParam.flags&requestParamNotLogged != 0 {
+			continue
+		}
+
+		// Note: relay_protocol lookup and type assertion is safe due to validation.
+		if expectedParam.flags&requestParamLogOnlyForFrontedMeek != 0 &&
+			!protocol.TunnelProtocolUsesFrontedMeek(params["relay_protocol"].(string)) {
 			continue
 		}
 
