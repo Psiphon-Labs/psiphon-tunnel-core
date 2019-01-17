@@ -609,6 +609,7 @@ func RecordFailedTunnelStat(
 	}
 
 	params := getBaseAPIParameters(config, dialParams)
+	params["server_entry_ip_address"] = dialParams.ServerEntry.IpAddress
 	params["last_connected"] = lastConnected
 	params["client_failed_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
 	params["tunnel_error"] = tunnelErr.Error()

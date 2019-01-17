@@ -405,6 +405,7 @@ var remoteServerListStatParams = []requestParamSpec{
 
 var failedTunnelStatParams = append(
 	[]requestParamSpec{
+		{"server_entry_ip_address", isIPAddress, requestParamNotLogged},
 		{"session_id", isHexDigits, 0},
 		{"last_connected", isLastConnected, 0},
 		{"client_failed_timestamp", isISO8601Date, 0},
