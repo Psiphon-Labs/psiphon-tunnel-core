@@ -34,7 +34,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync/atomic"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
@@ -50,11 +49,6 @@ import (
 // offer the Psiphon API through a web service; newer servers offer the Psiphon
 // API through SSH requests made directly through the tunnel's SSH client.
 type ServerContext struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	tunnelNumber             int64
-	sessionId                string
 	tunnel                   *Tunnel
 	psiphonHttpsClient       *http.Client
 	statsRegexps             *transferstats.Regexps
@@ -63,13 +57,6 @@ type ServerContext struct {
 	serverHandshakeTimestamp string
 	paddingPRNG              *prng.PRNG
 }
-
-// nextTunnelNumber is a monotonically increasing number assigned to each
-// successive tunnel connection. The sessionId and tunnelNumber together
-// form a globally unique identifier for tunnels, which is used for
-// stats. Note that the number is increasing but not necessarily
-// consecutive for each active tunnel in session.
-var nextTunnelNumber int64
 
 // MakeSessionId creates a new session ID. The same session ID is used across
 // multi-tunnel controller runs, where each tunnel has its own ServerContext
@@ -104,8 +91,6 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 	}
 
 	serverContext := &ServerContext{
-		sessionId:          tunnel.sessionId,
-		tunnelNumber:       atomic.AddInt64(&nextTunnelNumber, 1),
 		tunnel:             tunnel,
 		psiphonHttpsClient: psiphonHttpsClient,
 		paddingPRNG:        prng.NewPRNGWithSeed(tunnel.dialParams.APIRequestPaddingSeed),
@@ -318,12 +303,9 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 
 	params := serverContext.getBaseAPIParameters()
 
-	lastConnected, err := GetKeyValue(datastoreLastConnectedKey)
+	lastConnected, err := getLastConnected()
 	if err != nil {
 		return common.ContextError(err)
-	}
-	if lastConnected == "" {
-		lastConnected = "None"
 	}
 
 	params["last_connected"] = lastConnected
@@ -372,6 +354,17 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 	return nil
 }
 
+func getLastConnected() (string, error) {
+	lastConnected, err := GetKeyValue(datastoreLastConnectedKey)
+	if err != nil {
+		return "", common.ContextError(err)
+	}
+	if lastConnected == "" {
+		lastConnected = "None"
+	}
+	return lastConnected, nil
+}
+
 // StatsRegexps gets the Regexps used for the statistics for this tunnel.
 func (serverContext *ServerContext) StatsRegexps() *transferstats.Regexps {
 	return serverContext.statsRegexps
@@ -386,7 +379,7 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 	// payload for future attempt, in all failure cases.
 
 	statusPayload, statusPayloadInfo, err := makeStatusRequestPayload(
-		serverContext.tunnel.config.clientParameters,
+		serverContext.tunnel.config,
 		tunnel.dialParams.ServerEntry.IpAddress)
 	if err != nil {
 		return common.ContextError(err)
@@ -467,15 +460,13 @@ type statusRequestPayloadInfo struct {
 }
 
 func makeStatusRequestPayload(
-	clientParameters *parameters.ClientParameters,
+	config *Config,
 	serverId string) ([]byte, *statusRequestPayloadInfo, error) {
 
 	transferStats := transferstats.TakeOutStatsForServer(serverId)
 	hostBytes := transferStats.GetStatsForStatusRequest()
 
-	maxCount := clientParameters.Get().Int(parameters.PsiphonAPIPersistentStatsMaxCount)
-
-	persistentStats, err := TakeOutUnreportedPersistentStats(maxCount)
+	persistentStats, err := TakeOutUnreportedPersistentStats(config)
 	if err != nil {
 		NoticeAlert(
 			"TakeOutUnreportedPersistentStats failed: %s", common.ContextError(err))
@@ -502,6 +493,7 @@ func makeStatusRequestPayload(
 
 	persistentStatPayloadNames := make(map[string]string)
 	persistentStatPayloadNames[datastorePersistentStatTypeRemoteServerList] = "remote_server_list_stats"
+	persistentStatPayloadNames[datastorePersistentStatTypeFailedTunnel] = "failed_tunnel_stats"
 
 	for statType, stats := range persistentStats {
 
@@ -554,15 +546,9 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 // records are stored in the persistent datastore and reported
 // via subsequent status requests sent to any Psiphon server.
 //
-// Note that common event field values may change between the
-// stat recording and reporting include client geo data,
-// propagation channel, sponsor ID, client version. These are not
-// stored in the datastore (client region, in particular, since
-// that would create an on-disk record of user location).
-// TODO: the server could encrypt, with a nonce and key unknown to
-// the client, a blob containing this data; return it in the
-// handshake response; and the client could store and later report
-// this blob with its tunnel stats records.
+// Note that some common event field values may change between the
+// stat recording and reporting, including client geolocation and
+// host_id.
 //
 // Multiple "status" requests may be in flight at once (due
 // to multi-tunnel, asynchronous final status retry, and
@@ -575,25 +561,66 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 // processes a status request but the client fails to receive
 // the response.
 func RecordRemoteServerListStat(
-	url, etag string) error {
+	config *Config, url, etag string) error {
 
-	remoteServerListStat := struct {
-		ClientDownloadTimestamp string `json:"client_download_timestamp"`
-		URL                     string `json:"url"`
-		ETag                    string `json:"etag"`
-	}{
-		common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
-		url,
-		etag,
+	if !config.GetClientParameters().Bool(
+		parameters.RecordRemoteServerListPersistentStats) {
+		return nil
 	}
 
-	remoteServerListStatJson, err := json.Marshal(remoteServerListStat)
+	params := make(common.APIParameters)
+
+	params["session_id"] = config.SessionID
+	params["propagation_channel_id"] = config.PropagationChannelId
+	params["sponsor_id"] = config.GetSponsorID()
+	params["client_version"] = config.ClientVersion
+	params["client_platform"] = config.ClientPlatform
+	params["client_build_rev"] = common.GetBuildInfo().BuildRev
+
+	params["client_download_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
+	params["url"] = url
+	params["etag"] = etag
+
+	remoteServerListStatJson, err := json.Marshal(params)
 	if err != nil {
 		return common.ContextError(err)
 	}
 
 	return StorePersistentStat(
-		datastorePersistentStatTypeRemoteServerList, remoteServerListStatJson)
+		config, datastorePersistentStatTypeRemoteServerList, remoteServerListStatJson)
+}
+
+// RecordFailedTunnelStat records metrics for a failed tunnel dial, including
+// dial parameters and error condition (tunnelErr).
+//
+// This uses the same reporting facility, with the same caveats, as
+// RecordRemoteServerListStat.
+func RecordFailedTunnelStat(
+	config *Config, dialParams *DialParameters, tunnelErr error) error {
+
+	if !config.GetClientParameters().Bool(
+		parameters.RecordFailedTunnelPersistentStats) {
+		return nil
+	}
+
+	lastConnected, err := getLastConnected()
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	params := getBaseAPIParameters(config, dialParams)
+	params["server_entry_ip_address"] = dialParams.ServerEntry.IpAddress
+	params["last_connected"] = lastConnected
+	params["client_failed_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
+	params["tunnel_error"] = tunnelErr.Error()
+
+	failedTunnelStatJson, err := json.Marshal(params)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	return StorePersistentStat(
+		config, datastorePersistentStatTypeFailedTunnel, failedTunnelStatJson)
 }
 
 // doGetRequest makes a tunneled HTTPS request and returns the response body.
@@ -667,7 +694,6 @@ func (serverContext *ServerContext) getBaseAPIParameters() common.APIParameters 
 
 	params := getBaseAPIParameters(
 		serverContext.tunnel.config,
-		serverContext.sessionId,
 		serverContext.tunnel.dialParams)
 
 	// Add a random amount of padding to defend against API call traffic size
@@ -698,13 +724,12 @@ func (serverContext *ServerContext) getBaseAPIParameters() common.APIParameters 
 // for metrics.
 func getBaseAPIParameters(
 	config *Config,
-	sessionID string,
 	dialParams *DialParameters) common.APIParameters {
 
 	params := make(common.APIParameters)
 
-	params["session_id"] = sessionID
-	params["client_session_id"] = sessionID
+	params["session_id"] = config.SessionID
+	params["client_session_id"] = config.SessionID
 	params["server_secret"] = dialParams.ServerEntry.WebServerSecret
 	params["propagation_channel_id"] = config.PropagationChannelId
 	params["sponsor_id"] = config.GetSponsorID()
@@ -804,6 +829,15 @@ func getBaseAPIParameters(
 		isReplay = "1"
 	}
 	params["is_replay"] = isReplay
+
+	if config.EgressRegion != "" {
+		params["egress_region"] = config.EgressRegion
+	}
+
+	// dialParams.DialDuration is nanoseconds; divide to get to milliseconds
+	params["dial_duration"] = fmt.Sprintf("%d", dialParams.DialDuration/1000000)
+
+	params["candidate_number"] = strconv.Itoa(dialParams.CandidateNumber)
 
 	if dialParams.DialConnMetrics != nil {
 		metrics := dialParams.DialConnMetrics.GetMetrics()

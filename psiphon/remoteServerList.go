@@ -418,7 +418,7 @@ func downloadRemoteServerListFile(
 
 	NoticeRemoteServerListResourceDownloaded(sourceURL)
 
-	RecordRemoteServerListStat(sourceURL, responseETag)
+	_ = RecordRemoteServerListStat(config, sourceURL, responseETag)
 
 	return responseETag, nil
 }

@@ -39,6 +39,7 @@ var (
 	datastoreUrlETagsBucket                     = []byte("urlETags")
 	datastoreKeyValueBucket                     = []byte("keyValues")
 	datastoreRemoteServerListStatsBucket        = []byte("remoteServerListStats")
+	datastoreFailedTunnelStatsBucket            = []byte("failedTunnelStats")
 	datastoreSLOKsBucket                        = []byte("SLOKs")
 	datastoreTacticsBucket                      = []byte("tactics")
 	datastoreSpeedTestSamplesBucket             = []byte("speedTestSamples")
@@ -47,6 +48,7 @@ var (
 	datastoreLastServerEntryFilterKey           = []byte("lastServerEntryFilter")
 	datastoreAffinityServerEntryIDKey           = []byte("affinityServerEntryID")
 	datastorePersistentStatTypeRemoteServerList = string(datastoreRemoteServerListStatsBucket)
+	datastorePersistentStatTypeFailedTunnel     = string(datastoreFailedTunnelStatsBucket)
 	datastoreServerEntryFetchGCThreshold        = 20
 
 	datastoreMutex    sync.RWMutex
@@ -961,6 +963,7 @@ var persistentStatStateReporting = []byte("1")
 
 var persistentStatTypes = []string{
 	datastorePersistentStatTypeRemoteServerList,
+	datastorePersistentStatTypeFailedTunnel,
 }
 
 // StorePersistentStat adds a new persistent stat record, which
@@ -970,17 +973,36 @@ var persistentStatTypes = []string{
 // The stat is a JSON byte array containing fields as
 // required by the Psiphon server API. It's assumed that the
 // JSON value contains enough unique information for the value to
-// function as a key in the key/value datastore. This assumption
-// is currently satisfied by the fields sessionId + tunnelNumber
-// for tunnel stats, and URL + ETag for remote server list stats.
-func StorePersistentStat(statType string, stat []byte) error {
+// function as a key in the key/value datastore.
+//
+// Only up to PersistentStatsMaxStoreRecords are stored. Once this
+// limit is reached, new records are discarded.
+func StorePersistentStat(config *Config, statType string, stat []byte) error {
 
 	if !common.Contains(persistentStatTypes, statType) {
 		return common.ContextError(fmt.Errorf("invalid persistent stat type: %s", statType))
 	}
 
+	maxStoreRecords := config.GetClientParameters().Int(parameters.PersistentStatsMaxStoreRecords)
+
 	err := datastoreUpdate(func(tx *datastoreTx) error {
 		bucket := tx.bucket([]byte(statType))
+
+		count := 0
+		cursor := bucket.cursor()
+		for key, _ := cursor.first(); key != nil; key, _ = cursor.next() {
+			count++
+		}
+		cursor.close()
+
+		// TODO: assuming newer metrics are more useful, replace oldest record
+		// instead of discarding?
+
+		if count >= maxStoreRecords {
+			// Silently discard.
+			return nil
+		}
+
 		err := bucket.put(stat, persistentStatStateUnreported)
 		return err
 	})
@@ -1007,7 +1029,6 @@ func CountUnreportedPersistentStats() int {
 			for key, value := cursor.first(); key != nil; key, value = cursor.next() {
 				if 0 == bytes.Compare(value, persistentStatStateUnreported) {
 					unreported++
-					break
 				}
 			}
 			cursor.close()
@@ -1023,18 +1044,21 @@ func CountUnreportedPersistentStats() int {
 	return unreported
 }
 
-// TakeOutUnreportedPersistentStats returns up to maxCount persistent
-// stats records that are in StateUnreported. The records are set to
-// StateReporting. If the records are successfully reported, clear them
+// TakeOutUnreportedPersistentStats returns persistent stats records that are
+// in StateUnreported. At least one record, if present, will be returned and
+// then additional records up to PersistentStatsMaxSendBytes. The records are
+// set to StateReporting. If the records are successfully reported, clear them
 // with ClearReportedPersistentStats. If the records are not successfully
 // reported, restore them with PutBackUnreportedPersistentStats.
-func TakeOutUnreportedPersistentStats(maxCount int) (map[string][][]byte, error) {
+func TakeOutUnreportedPersistentStats(config *Config) (map[string][][]byte, error) {
 
 	stats := make(map[string][][]byte)
 
+	maxSendBytes := config.GetClientParameters().Int(parameters.PersistentStatsMaxSendBytes)
+
 	err := datastoreUpdate(func(tx *datastoreTx) error {
 
-		count := 0
+		sendBytes := 0
 
 		for _, statType := range persistentStatTypes {
 
@@ -1042,18 +1066,15 @@ func TakeOutUnreportedPersistentStats(maxCount int) (map[string][][]byte, error)
 			cursor := bucket.cursor()
 			for key, value := cursor.first(); key != nil; key, value = cursor.next() {
 
-				if count >= maxCount {
-					break
-				}
-
 				// Perform a test JSON unmarshaling. In case of data corruption or a bug,
-				// skip the record.
+				// delete and skip the record.
 				var jsonData interface{}
 				err := json.Unmarshal(key, &jsonData)
 				if err != nil {
 					NoticeAlert(
 						"Invalid key in TakeOutUnreportedPersistentStats: %s: %s",
 						string(key), err)
+					bucket.delete(key)
 					continue
 				}
 
@@ -1067,8 +1088,13 @@ func TakeOutUnreportedPersistentStats(maxCount int) (map[string][][]byte, error)
 					}
 
 					stats[statType] = append(stats[statType], data)
-					count += 1
+
+					sendBytes += len(data)
+					if sendBytes >= maxSendBytes {
+						break
+					}
 				}
+
 			}
 			cursor.close()
 

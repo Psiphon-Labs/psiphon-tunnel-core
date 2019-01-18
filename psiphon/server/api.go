@@ -251,7 +251,7 @@ func handshakeAPIRequestHandler(
 		}
 
 		// Log a metric when new tactics are issued. Logging here indicates that
-		// the handshake tactics mechansim is active; but logging for every
+		// the handshake tactics mechanism is active; but logging for every
 		// handshake creates unneccesary log data.
 
 		if len(tacticsPayload.Tactics) > 0 {
@@ -317,6 +317,19 @@ var connectedRequestParams = append(
 		{"establishment_duration", isIntString, requestParamOptional | requestParamLogStringAsInt}},
 	baseRequestParams...)
 
+// updateOnConnectedParamNames are connected request parameters which are
+// copied to update data logged with server_tunnel: these fields either only
+// ship with or ship newer data with connected requests.
+var updateOnConnectedParamNames = []string{
+	"last_connected",
+	"establishment_duration",
+	"upstream_bytes_fragmented",
+	"upstream_min_bytes_written",
+	"upstream_max_bytes_written",
+	"upstream_min_delayed",
+	"upstream_max_delayed",
+}
+
 // connectedAPIRequestHandler implements the "connected" API request.
 // Clients make the connected request once a tunnel connection has been
 // established and at least once per day. The last_connected input value,
@@ -334,15 +347,17 @@ func connectedAPIRequestHandler(
 		return nil, common.ContextError(err)
 	}
 
-	// Update upstream fragmentor metrics, as the client may have performed
-	// more upstream fragmentation since the previous metrics reported by the
-	// handshake request.
+	// Update, for server_tunnel logging, upstream fragmentor metrics, as the
+	// client may have performed more upstream fragmentation since the
+	// previous metrics reported by the handshake request. Also, additional
+	// fields reported only in the connected request, are added to
+	// server_tunnel here.
 
 	// TODO: same session-ID-lookup TODO in handshakeAPIRequestHandler
 	// applies here.
 	sessionID, _ := getStringRequestParam(params, "client_session_id")
 	err = support.TunnelServer.UpdateClientAPIParameters(
-		sessionID, copyUpstreamFragmentorParams(params))
+		sessionID, copyUpdateOnConnectedParams(params))
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -374,6 +389,27 @@ var statusRequestParams = append(
 	[]requestParamSpec{
 		{"session_id", isHexDigits, 0},
 		{"connected", isBooleanFlag, requestParamLogFlagAsBool}},
+	baseRequestParams...)
+
+var remoteServerListStatParams = []requestParamSpec{
+	{"session_id", isHexDigits, requestParamOptional},
+	{"propagation_channel_id", isHexDigits, requestParamOptional},
+	{"sponsor_id", isHexDigits, requestParamOptional},
+	{"client_version", isAnyString, requestParamOptional},
+	{"client_platform", isAnyString, requestParamOptional},
+	{"client_build_rev", isAnyString, requestParamOptional},
+	{"client_download_timestamp", isISO8601Date, 0},
+	{"url", isAnyString, 0},
+	{"etag", isAnyString, 0},
+}
+
+var failedTunnelStatParams = append(
+	[]requestParamSpec{
+		{"server_entry_ip_address", isIPAddress, requestParamNotLogged},
+		{"session_id", isHexDigits, 0},
+		{"last_connected", isLastConnected, 0},
+		{"client_failed_timestamp", isISO8601Date, 0},
+		{"tunnel_error", isAnyString, 0}},
 	baseRequestParams...)
 
 // statusAPIRequestHandler implements the "status" API request.
@@ -440,8 +476,11 @@ func statusAPIRequestHandler(
 		}
 	}
 
-	// Remote server list download stats
-	// Older clients may not submit this data
+	// Limitation: for "persistent" stats, host_id and geolocation is time-of-sending
+	// not time-of-recording.
+
+	// Remote server list download persistent stats.
+	// Older clients may not submit this data.
 
 	if statusData["remote_server_list_stats"] != nil {
 
@@ -451,6 +490,13 @@ func statusAPIRequestHandler(
 		}
 		for _, remoteServerListStat := range remoteServerListStats {
 
+			err := validateRequestParams(support.Config, remoteServerListStat, remoteServerListStatParams)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+
+			// remote_server_list defaults to using the common params from the
+			// outer statusRequestParams
 			remoteServerListFields := getRequestLogFields(
 				"remote_server_list",
 				geoIPData,
@@ -458,25 +504,43 @@ func statusAPIRequestHandler(
 				params,
 				statusRequestParams)
 
-			clientDownloadTimestamp, err := getStringRequestParam(remoteServerListStat, "client_download_timestamp")
-			if err != nil {
-				return nil, common.ContextError(err)
+			for name, value := range remoteServerListStat {
+				remoteServerListFields[name] = value
 			}
-			remoteServerListFields["client_download_timestamp"] = clientDownloadTimestamp
-
-			url, err := getStringRequestParam(remoteServerListStat, "url")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			remoteServerListFields["url"] = url
-
-			etag, err := getStringRequestParam(remoteServerListStat, "etag")
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			remoteServerListFields["etag"] = etag
 
 			logQueue = append(logQueue, remoteServerListFields)
+		}
+	}
+
+	// Failed tunnel persistent stats.
+	// Older clients may not submit this data.
+
+	if statusData["failed_tunnel_stats"] != nil {
+
+		failedTunnelStats, err := getJSONObjectArrayRequestParam(statusData, "failed_tunnel_stats")
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+		for _, failedTunnelStat := range failedTunnelStats {
+
+			// failed_tunnel supplies a full set of common params, but the
+			// server secret must use the corect value from the outer
+			// statusRequestParams
+			failedTunnelStat["server_secret"] = params["server_secret"]
+
+			err := validateRequestParams(support.Config, failedTunnelStat, failedTunnelStatParams)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+
+			failedTunnelFields := getRequestLogFields(
+				"failed_tunnel",
+				geoIPData,
+				authorizedAccessTypes,
+				failedTunnelStat,
+				failedTunnelStatParams)
+
+			logQueue = append(logQueue, failedTunnelFields)
 		}
 	}
 
@@ -538,62 +602,62 @@ type requestParamSpec struct {
 }
 
 const (
-	requestParamOptional             = 1
-	requestParamNotLogged            = 2
-	requestParamArray                = 4
-	requestParamJSON                 = 8
-	requestParamLogStringAsInt       = 16
-	requestParamLogStringLengthAsInt = 32
-	requestParamLogFlagAsBool        = 64
+	requestParamOptional                                      = 1
+	requestParamNotLogged                                     = 1 << 1
+	requestParamArray                                         = 1 << 2
+	requestParamJSON                                          = 1 << 3
+	requestParamLogStringAsInt                                = 1 << 4
+	requestParamLogStringLengthAsInt                          = 1 << 5
+	requestParamLogFlagAsBool                                 = 1 << 6
+	requestParamLogOnlyForFrontedMeek                         = 1 << 7
+	requestParamNotLoggedForUnfrontedMeekNonTransformedHeader = 1 << 8
 )
-
-var upstreamFragmentorParams = []requestParamSpec{
-	{"upstream_bytes_fragmented", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"upstream_min_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"upstream_max_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"upstream_min_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"upstream_max_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
-}
 
 // baseRequestParams is the list of required and optional
 // request parameters; derived from COMMON_INPUTS and
 // OPTIONAL_COMMON_INPUTS in psi_web.
 // Each param is expected to be a string, unless requestParamArray
 // is specified, in which case an array of string is expected.
-var baseRequestParams = append(
-	[]requestParamSpec{
-		{"server_secret", isServerSecret, requestParamNotLogged},
-		{"client_session_id", isHexDigits, requestParamNotLogged},
-		{"propagation_channel_id", isHexDigits, 0},
-		{"sponsor_id", isHexDigits, 0},
-		{"client_version", isIntString, requestParamLogStringAsInt},
-		{"client_platform", isClientPlatform, 0},
-		{"client_build_rev", isHexDigits, requestParamOptional},
-		{"relay_protocol", isRelayProtocol, 0},
-		{"tunnel_whole_device", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
-		{"device_region", isAnyString, requestParamOptional},
-		{"ssh_client_version", isAnyString, requestParamOptional},
-		{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
-		{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
-		{"meek_dial_address", isDialAddress, requestParamOptional},
-		{"meek_resolved_ip_address", isIPAddress, requestParamOptional},
-		{"meek_sni_server_name", isDomain, requestParamOptional},
-		{"meek_host_header", isHostHeader, requestParamOptional},
-		{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
-		{"user_agent", isAnyString, requestParamOptional},
-		{"tls_profile", isAnyString, requestParamOptional},
-		{"server_entry_region", isRegionCode, requestParamOptional},
-		{"server_entry_source", isServerEntrySource, requestParamOptional},
-		{"server_entry_timestamp", isISO8601Date, requestParamOptional},
-		{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
-		{"dial_port_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"quic_version", isAnyString, requestParamOptional},
-		{"quic_dial_sni_address", isAnyString, requestParamOptional},
-		{"padding", isAnyString, requestParamOptional | requestParamLogStringLengthAsInt},
-		{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
-	},
-	upstreamFragmentorParams...)
+var baseRequestParams = []requestParamSpec{
+	{"server_secret", isServerSecret, requestParamNotLogged},
+	{"client_session_id", isHexDigits, requestParamNotLogged},
+	{"propagation_channel_id", isHexDigits, 0},
+	{"sponsor_id", isHexDigits, 0},
+	{"client_version", isIntString, requestParamLogStringAsInt},
+	{"client_platform", isClientPlatform, 0},
+	{"client_build_rev", isHexDigits, requestParamOptional},
+	{"relay_protocol", isRelayProtocol, 0},
+	{"tunnel_whole_device", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"device_region", isAnyString, requestParamOptional},
+	{"ssh_client_version", isAnyString, requestParamOptional},
+	{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
+	{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
+	{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
+	{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
+	{"meek_sni_server_name", isDomain, requestParamOptional},
+	{"meek_host_header", isHostHeader, requestParamOptional | requestParamNotLoggedForUnfrontedMeekNonTransformedHeader},
+	{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"user_agent", isAnyString, requestParamOptional},
+	{"tls_profile", isAnyString, requestParamOptional},
+	{"server_entry_region", isRegionCode, requestParamOptional},
+	{"server_entry_source", isServerEntrySource, requestParamOptional},
+	{"server_entry_timestamp", isISO8601Date, requestParamOptional},
+	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
+	{"dial_port_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"quic_version", isAnyString, requestParamOptional},
+	{"quic_dial_sni_address", isAnyString, requestParamOptional},
+	{"upstream_bytes_fragmented", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"upstream_min_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"upstream_max_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"upstream_min_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"upstream_max_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"padding", isAnyString, requestParamOptional | requestParamLogStringLengthAsInt},
+	{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"egress_region", isRegionCode, requestParamOptional},
+	{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
+}
 
 func validateRequestParams(
 	config *Config,
@@ -650,16 +714,16 @@ func copyBaseRequestParams(params common.APIParameters) common.APIParameters {
 	return paramsCopy
 }
 
-func copyUpstreamFragmentorParams(params common.APIParameters) common.APIParameters {
+func copyUpdateOnConnectedParams(params common.APIParameters) common.APIParameters {
 
 	// Note: not a deep copy
 	paramsCopy := make(common.APIParameters)
-	for _, baseParam := range upstreamFragmentorParams {
-		value := params[baseParam.name]
+	for _, name := range updateOnConnectedParamNames {
+		value := params[name]
 		if value == nil {
 			continue
 		}
-		paramsCopy[baseParam.name] = value
+		paramsCopy[name] = value
 	}
 	return paramsCopy
 }
@@ -734,6 +798,34 @@ func getRequestLogFields(
 
 		if expectedParam.flags&requestParamNotLogged != 0 {
 			continue
+		}
+
+		var tunnelProtocol string
+		if value, ok := params["relay_protocol"]; ok {
+			tunnelProtocol, _ = value.(string)
+		}
+
+		if expectedParam.flags&requestParamLogOnlyForFrontedMeek != 0 &&
+			!protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+			continue
+		}
+
+		if expectedParam.flags&requestParamNotLoggedForUnfrontedMeekNonTransformedHeader != 0 &&
+			protocol.TunnelProtocolUsesMeek(tunnelProtocol) &&
+			!protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+
+			// Non-HTTP unfronted meek protocols never tranform the host header.
+			if !protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+				continue
+			}
+
+			var transformedHostName string
+			if value, ok := params["meek_transformed_host_name"]; ok {
+				transformedHostName, _ = value.(string)
+			}
+			if transformedHostName != "1" {
+				continue
+			}
 		}
 
 		value := params[expectedParam.name]
