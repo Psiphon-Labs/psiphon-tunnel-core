@@ -54,9 +54,10 @@ import (
 //
 // DialParameters is not safe for concurrent use.
 type DialParameters struct {
-	ServerEntry *protocol.ServerEntry `json:"-"`
-	NetworkID   string                `json:"-"`
-	IsReplay    bool                  `json:"-"`
+	ServerEntry     *protocol.ServerEntry `json:"-"`
+	NetworkID       string                `json:"-"`
+	IsReplay        bool                  `json:"-"`
+	CandidateNumber int                   `json:"-"`
 
 	LastUsedTimestamp       time.Time
 	LastUsedConfigStateHash []byte
@@ -103,6 +104,8 @@ type DialParameters struct {
 	DialConnMetrics          common.MetricsSource `json:"-"`
 	ObfuscatedSSHConnMetrics common.MetricsSource `json:"-"`
 
+	DialDuration time.Duration `json:"-"`
+
 	dialConfig *DialConfig `json:"-"`
 	meekConfig *MeekConfig `json:"-"`
 }
@@ -129,7 +132,8 @@ func MakeDialParameters(
 	canReplay func(serverEntry *protocol.ServerEntry, replayProtocol string) bool,
 	selectProtocol func(serverEntry *protocol.ServerEntry) (string, bool),
 	serverEntry *protocol.ServerEntry,
-	isTactics bool) (*DialParameters, error) {
+	isTactics bool,
+	candidateNumber int) (*DialParameters, error) {
 
 	networkID := config.GetNetworkID()
 
@@ -215,6 +219,7 @@ func MakeDialParameters(
 	dialParams.ServerEntry = serverEntry
 	dialParams.NetworkID = networkID
 	dialParams.IsReplay = isReplay
+	dialParams.CandidateNumber = candidateNumber
 
 	// Even when replaying, LastUsedTimestamp is updated to extend the TTL of
 	// replayed dial parameters which will be updated in the datastore upon

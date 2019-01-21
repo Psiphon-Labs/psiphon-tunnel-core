@@ -345,9 +345,15 @@ func CustomTLSDial(
 		tlsRootCAs.AppendCertsFromPEM(certData)
 	}
 
+	randomizedTLSProfileSeed := config.RandomizedTLSProfileSeed
+
 	if protocol.TLSProfileIsRandomized(selectedTLSProfile) &&
-		config.RandomizedTLSProfileSeed == nil {
-		return nil, common.ContextError(errors.New("missing RandomizedTLSProfileSeed"))
+		randomizedTLSProfileSeed == nil {
+
+		randomizedTLSProfileSeed, err = prng.NewSeed()
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
 	}
 
 	// Depending on the selected TLS profile, the TLS provider will be tris
@@ -373,7 +379,7 @@ func CustomTLSDial(
 			rawConn,
 			tlsConfig,
 			getUTLSClientHelloID(selectedTLSProfile),
-			config.RandomizedTLSProfileSeed)
+			randomizedTLSProfileSeed)
 
 		if config.ObfuscatedSessionTicketKey != "" {
 			sessionState, err := utls.NewObfuscatedClientSessionState(
@@ -390,15 +396,22 @@ func CustomTLSDial(
 
 	} else {
 
-		var clientSessionCache tris.ClientSessionCache
-		if config.ObfuscatedSessionTicketKey != "" {
-			clientSessionCache = tris.NewObfuscatedClientSessionCache(
-				obfuscatedSessionTicketKey)
-		} else {
-			clientSessionCache = config.trisClientSessionCache
-			if clientSessionCache == nil {
-				clientSessionCache = tris.NewLRUClientSessionCache(0)
-			}
+		clientSessionCache := config.trisClientSessionCache
+		if clientSessionCache == nil {
+			clientSessionCache = tris.NewLRUClientSessionCache(0)
+		}
+
+		// The tris TLS provider should be used only for TLS 1.3.
+		//
+		// Obfuscated session tickets are not currently supported in TLS 1.3,
+		// but we allow UNFRONTED-MEEK-SESSION-TICKET-OSSH to use TLS 1.3
+		// profiles for additional diversity/capacity; TLS 1.3 encrypts the
+		// server certificate, so the desired obfuscated session tickets
+		// property of obfuscating server certificates is satisfied.
+		//
+		// An additional sanity check:
+		if !protocol.TLSProfileIsTLS13(selectedTLSProfile) {
+			return nil, common.ContextError(errors.New("TLS profile is not TLS 1.3"))
 		}
 
 		tlsConfig := &tris.Config{
@@ -407,7 +420,7 @@ func CustomTLSDial(
 			ServerName:              tlsConfigServerName,
 			ClientSessionCache:      clientSessionCache,
 			UseExtendedMasterSecret: true,
-			ClientHelloPRNGSeed:     config.RandomizedTLSProfileSeed,
+			ClientHelloPRNGSeed:     randomizedTLSProfileSeed,
 		}
 
 		conn = &trisConn{

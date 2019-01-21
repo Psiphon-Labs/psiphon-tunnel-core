@@ -215,6 +215,10 @@ func TLSProfileIsRandomized(tlsProfile string) bool {
 		tlsProfile == TLS_PROFILE_TLS13_RANDOMIZED
 }
 
+func TLSProfileIsTLS13(tlsProfile string) bool {
+	return tlsProfile == TLS_PROFILE_TLS13_RANDOMIZED
+}
+
 type TLSProfiles []string
 
 func (profiles TLSProfiles) Validate() error {

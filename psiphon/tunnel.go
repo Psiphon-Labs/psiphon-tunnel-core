@@ -87,7 +87,6 @@ type Tunnel struct {
 	isActivated                bool
 	isDiscarded                bool
 	isClosed                   bool
-	sessionId                  string
 	dialParams                 *DialParameters
 	serverContext              *ServerContext
 	conn                       *common.ActivityMonitoredConn
@@ -126,14 +125,12 @@ type Tunnel struct {
 func ConnectTunnel(
 	ctx context.Context,
 	config *Config,
-	sessionId string,
 	adjustedEstablishStartTime monotime.Time,
 	dialParams *DialParameters) (*Tunnel, error) {
 
 	// Build transport layers and establish SSH connection. Note that
 	// dialConn and monitoredConn are the same network connection.
-	dialResult, err := dialTunnel(
-		ctx, config, sessionId, dialParams)
+	dialResult, err := dialTunnel(ctx, config, dialParams)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -142,7 +139,6 @@ func ConnectTunnel(
 	return &Tunnel{
 		mutex:             new(sync.Mutex),
 		config:            config,
-		sessionId:         sessionId,
 		dialParams:        dialParams,
 		conn:              dialResult.monitoredConn,
 		sshClient:         dialResult.sshClient,
@@ -158,8 +154,7 @@ func ConnectTunnel(
 // request and starting operateTunnel, the worker that monitors the tunnel
 // and handles periodic management.
 func (tunnel *Tunnel) Activate(
-	ctx context.Context,
-	tunnelOwner TunnelOwner) error {
+	ctx context.Context, tunnelOwner TunnelOwner) (retErr error) {
 
 	// Ensure that, unless the context is cancelled, any replayed dial
 	// parameters are cleared, no longer to be retried, if the tunnel fails to
@@ -168,6 +163,7 @@ func (tunnel *Tunnel) Activate(
 	defer func() {
 		if !activationSucceeded && ctx.Err() == nil {
 			tunnel.dialParams.Failed()
+			_ = RecordFailedTunnelStat(tunnel.config, tunnel.dialParams, retErr)
 		}
 	}()
 
@@ -525,8 +521,14 @@ type dialResult struct {
 func dialTunnel(
 	ctx context.Context,
 	config *Config,
-	sessionId string,
-	dialParams *DialParameters) (*dialResult, error) {
+	dialParams *DialParameters) (_ *dialResult, retErr error) {
+
+	// Return immediately when overall context is canceled or timed-out. This
+	// avoids notice noise.
+	err := ctx.Err()
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
 
 	p := config.clientParameters.Get()
 	timeout := p.Duration(parameters.TunnelConnectTimeout)
@@ -551,12 +553,26 @@ func dialTunnel(
 	defer func() {
 		if !dialSucceeded && baseCtx.Err() == nil {
 			dialParams.Failed()
+			_ = RecordFailedTunnelStat(config, dialParams, retErr)
 		}
 	}()
 
 	var cancelFunc context.CancelFunc
 	ctx, cancelFunc = context.WithTimeout(ctx, timeout)
 	defer cancelFunc()
+
+	// DialDuration is the elapsed time for both successful and failed tunnel
+	// dials. For successful tunnels, it includes any the network protocol
+	// handshake(s), obfuscation protocol handshake(s), SSH handshake, and
+	// liveness test, when performed.
+	//
+	// Note: ensure DialDuration is set before calling any function which logs
+	// dial_duration.
+
+	startDialTime := monotime.Now()
+	defer func() {
+		dialParams.DialDuration = monotime.Since(startDialTime)
+	}()
 
 	// Note: dialParams.MeekResolvedIPAddress isn't set until the dial begins,
 	// so it will always be blank in NoticeConnectingServer.
@@ -566,7 +582,6 @@ func dialTunnel(
 	// Create the base transport: meek or direct connection
 
 	var dialConn net.Conn
-	var err error
 
 	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
 
@@ -699,7 +714,7 @@ func dialTunnel(
 	}
 
 	sshPasswordPayload := &protocol.SSHPasswordPayload{
-		SessionId:          sessionId,
+		SessionId:          config.SessionID,
 		SshPassword:        dialParams.ServerEntry.SshPassword,
 		ClientCapabilities: []string{protocol.CLIENT_CAPABILITY_SERVER_REQUESTS},
 	}
@@ -801,8 +816,11 @@ func dialTunnel(
 					livenessTestMinDownstreamBytes, livenessTestMaxDownstreamBytes,
 					dialParams.LivenessTestSeed)
 
-				NoticeLivenessTest(
-					dialParams.ServerEntry.IpAddress, metrics, err == nil)
+				// Skip notice when cancelling.
+				if baseCtx.Err() == nil {
+					NoticeLivenessTest(
+						dialParams.ServerEntry.IpAddress, metrics, err == nil)
+				}
 			}
 		}
 
