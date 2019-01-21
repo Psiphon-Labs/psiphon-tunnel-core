@@ -92,13 +92,19 @@ var ErrTimeout = errors.New("clientlib: tunnel connection timeout")
 // StartTunnel makes a Psiphon tunnel connection. It returns an error if the connection
 // was not successful. If the returned error is nil, the returned tunnel can be used
 // to find out the proxy ports and subsequently stop the tunnel.
+//
 // ctx may be cancelable, if the caller wants to be able to interrupt the connection
 // attempt, or context.Background().
+//
 // configJSON will be passed to psiphon.LoadConfig to configure the tunnel. Required.
+//
 // embeddedServerEntryList is the encoded embedded server entry list. It is optional.
+//
 // params are config values that typically need to be overridden at runtime.
+//
 // paramsDelta contains changes that will be applied to the ClientParameters.
 // NOTE: Ordinary users of this library should never need this and should pass nil.
+//
 // noticeReceiver, if non-nil, will be called for each notice emitted by tunnel core.
 // NOTE: Ordinary users of this library should never need this and should pass nil.
 func StartTunnel(ctx context.Context,
@@ -116,18 +122,11 @@ func StartTunnel(ctx context.Context,
 		config.DataStoreDirectory = *params.DataRootDirectory
 		config.ObfuscatedServerListDownloadDirectory = *params.DataRootDirectory
 
-		if *params.DataRootDirectory == "" {
-			config.RemoteServerListDownloadFilename = ""
-		} else {
-			config.RemoteServerListDownloadFilename = filepath.Join(*params.DataRootDirectory, "server_list_compressed")
-		}
+		config.RemoteServerListDownloadFilename = filepath.Join(*params.DataRootDirectory, "server_list_compressed")
 	}
 
 	if params.NetworkID != nil {
 		config.NetworkID = *params.NetworkID
-	}
-	if config.NetworkID == "" {
-		return nil, common.ContextError(fmt.Errorf("networkID must be non-empty"))
 	}
 
 	if params.ClientPlatform != nil {

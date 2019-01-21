@@ -46,7 +46,6 @@ import (
 // route traffic through the tunnels.
 type Controller struct {
 	config                                  *Config
-	sessionId                               string
 	runCtx                                  context.Context
 	stopRunning                             context.CancelFunc
 	runWaitGroup                            *sync.WaitGroup
@@ -78,6 +77,7 @@ type Controller struct {
 	serverAffinityDoneBroadcast             chan struct{}
 	packetTunnelClient                      *tun.Client
 	packetTunnelTransport                   *PacketTunnelTransport
+	staggerMutex                            sync.Mutex
 }
 
 // NewController initializes a new controller.
@@ -105,7 +105,6 @@ func NewController(config *Config) (controller *Controller, err error) {
 
 	controller = &Controller{
 		config:       config,
-		sessionId:    config.SessionID,
 		runWaitGroup: new(sync.WaitGroup),
 		// connectedTunnels and failedTunnels buffer sizes are large enough to
 		// receive full pools of tunnels without blocking. Senders should not block.
@@ -1469,7 +1468,8 @@ func (controller *Controller) doFetchTactics(
 		canReplay,
 		selectProtocol,
 		serverEntry,
-		true)
+		true,
+		0)
 	if dialParams == nil {
 		// MakeDialParameters may return nil, nil when the server entry can't
 		// satisfy protocol selection criteria. This case in not expected
@@ -1518,10 +1518,7 @@ func (controller *Controller) doFetchTactics(
 	}
 	defer meekConn.Close()
 
-	apiParams := getBaseAPIParameters(
-		controller.config,
-		controller.sessionId,
-		dialParams)
+	apiParams := getBaseAPIParameters(controller.config, dialParams)
 
 	tacticsRecord, err := tactics.FetchTactics(
 		ctx,
@@ -1694,32 +1691,6 @@ loop:
 					}
 					timer.Stop()
 				}
-
-			} else {
-
-				// TODO: if candidates are to be skipped, this should be done
-				// _before_ the stagger.
-
-				p := controller.config.clientParameters.Get()
-				staggerPeriod := p.Duration(parameters.StaggerConnectionWorkersPeriod)
-				staggerJitter := p.Float(parameters.StaggerConnectionWorkersJitter)
-				p = nil
-
-				if staggerPeriod != 0 {
-
-					// Stagger concurrent connection workers.
-
-					timeout := prng.JitterDuration(staggerPeriod, staggerJitter)
-
-					timer := time.NewTimer(timeout)
-					select {
-					case <-timer.C:
-					case <-controller.establishCtx.Done():
-						timer.Stop()
-						break loop
-					}
-					timer.Stop()
-				}
 			}
 		}
 
@@ -1838,7 +1809,8 @@ loop:
 			canReplay,
 			selectProtocol,
 			candidateServerEntry.serverEntry,
-			false)
+			false,
+			controller.establishConnectTunnelCount)
 		if dialParams == nil || err != nil {
 
 			controller.concurrentEstablishTunnelsMutex.Unlock()
@@ -1864,6 +1836,7 @@ loop:
 		// Increment establishConnectTunnelCount only after selectProtocol has
 		// succeeded to ensure InitialLimitTunnelProtocolsCandidateCount
 		// candidates use InitialLimitTunnelProtocols.
+		establishConnectTunnelCount := controller.establishConnectTunnelCount
 		controller.establishConnectTunnelCount += 1
 
 		isIntensive := protocol.TunnelProtocolIsResourceIntensive(dialParams.TunnelProtocol)
@@ -1881,6 +1854,33 @@ loop:
 
 		controller.concurrentEstablishTunnelsMutex.Unlock()
 
+		// Apply stagger only now that we're past MakeDialParameters and
+		// protocol selection logic which may have caused the candidate to be
+		// skipped. The stagger logic delays dialing, and we don't want to
+		// incur that delay that when skipping.
+		//
+		// Locking staggerMutex serializes staggers, so that multiple workers
+		// don't simply sleep in parallel.
+		//
+		// The stagger is applied when establishConnectTunnelCount > 0 -- that
+		// is, for all but the first dial.
+
+		p := controller.config.clientParameters.Get()
+		staggerPeriod := p.Duration(parameters.StaggerConnectionWorkersPeriod)
+		staggerJitter := p.Float(parameters.StaggerConnectionWorkersJitter)
+		p = nil
+
+		if establishConnectTunnelCount > 0 && staggerPeriod != 0 {
+			controller.staggerMutex.Lock()
+			timer := time.NewTimer(prng.JitterDuration(staggerPeriod, staggerJitter))
+			select {
+			case <-timer.C:
+			case <-controller.establishCtx.Done():
+			}
+			timer.Stop()
+			controller.staggerMutex.Unlock()
+		}
+
 		// ConnectTunnel will allocate significant memory, so first attempt to
 		// reclaim as much as possible.
 		DoGarbageCollection()
@@ -1888,7 +1888,6 @@ loop:
 		tunnel, err := ConnectTunnel(
 			controller.establishCtx,
 			controller.config,
-			controller.sessionId,
 			candidateServerEntry.adjustedEstablishStartTime,
 			dialParams)
 

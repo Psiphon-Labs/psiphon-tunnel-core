@@ -62,6 +62,11 @@ import (
 //     negotiated with the server, such as the cipher suite. It's implicitly assumed that
 //     the server can support the selected parameters.
 //
+// tls-tris notes:
+//   - Obfuscated session tickets are not supported for TLS 1.3 _clients_, which use a
+//     distinct session ticket format. Obfuscated session ticket support in this package
+//     is intended to support TLS 1.2 clients.
+//
 func NewObfuscatedClientSessionCache(sharedSecret [32]byte) ClientSessionCache {
 	return &obfuscatedClientSessionCache{
 		sharedSecret: sharedSecret,

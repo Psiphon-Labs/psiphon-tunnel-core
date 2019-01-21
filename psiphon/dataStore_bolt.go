@@ -97,6 +97,7 @@ func datastoreOpenDB(rootDataDirectory string) (*datastoreDB, error) {
 			datastoreUrlETagsBucket,
 			datastoreKeyValueBucket,
 			datastoreRemoteServerListStatsBucket,
+			datastoreFailedTunnelStatsBucket,
 			datastoreSLOKsBucket,
 			datastoreTacticsBucket,
 			datastoreSpeedTestSamplesBucket,
