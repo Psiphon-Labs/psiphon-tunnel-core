@@ -564,8 +564,8 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 func RecordRemoteServerListStat(
 	config *Config, url, etag string) error {
 
-	if !config.GetClientParameters().Bool(
-		parameters.RecordRemoteServerListPersistentStats) {
+	if !config.GetClientParameters().WeightedCoinFlip(
+		parameters.RecordRemoteServerListPersistentStatsProbability) {
 		return nil
 	}
 
@@ -604,8 +604,8 @@ var failedTunnelErrStripIPAddressRegex = regexp.MustCompile(
 func RecordFailedTunnelStat(
 	config *Config, dialParams *DialParameters, tunnelErr error) error {
 
-	if !config.GetClientParameters().Bool(
-		parameters.RecordFailedTunnelPersistentStats) {
+	if !config.GetClientParameters().WeightedCoinFlip(
+		parameters.RecordFailedTunnelPersistentStatsProbability) {
 		return nil
 	}
 
