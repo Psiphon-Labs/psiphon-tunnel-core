@@ -832,10 +832,17 @@ func dialTunnel(
 	select {
 	case result = <-resultChannel:
 	case <-ctx.Done():
-		result.err = ctx.Err()
-		// Interrupt the goroutine
+
+		// Interrupt the goroutine and capture its error context to
+		// distinguish point of failure.
+		err := ctx.Err()
 		sshConn.Close()
-		<-resultChannel
+		result = <-resultChannel
+		if result.err != nil {
+			result.err = fmt.Errorf("%s: %s", err, result.err)
+		} else {
+			result.err = err
+		}
 	}
 
 	if result.err != nil {
