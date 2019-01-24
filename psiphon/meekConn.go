@@ -288,7 +288,7 @@ func DialMeek(
 		// Retries at the pre-dial phase are less useful since there's no active
 		// session to preserve, and establishment will simply try another server.
 		// Note that the underlying TCPDial may still try multiple IP addreses when
-		// the destination is a domain and ir resolves to multiple IP adresses.
+		// the destination is a domain and it resolves to multiple IP adresses.
 
 		// The pre-dial is made within the parent dial context, so that DialMeek
 		// may be interrupted. Subsequent dials are made within the meek round trip
