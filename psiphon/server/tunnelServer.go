@@ -1956,6 +1956,12 @@ func (sshClient *sshClient) setUDPChannel(channel ssh.Channel) {
 	sshClient.Unlock()
 }
 
+var serverTunnelStatParams = append(
+	[]requestParamSpec{
+		{"last_connected", isLastConnected, requestParamOptional},
+		{"establishment_duration", isIntString, requestParamOptional}},
+	baseRequestParams...)
+
 func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 	// Note: reporting duration based on last confirmed data transfer, which
@@ -1974,7 +1980,7 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		sshClient.geoIPData,
 		sshClient.handshakeState.authorizedAccessTypes,
 		sshClient.handshakeState.apiParams,
-		baseRequestParams)
+		serverTunnelStatParams)
 
 	// "relay_protocol" is sent with handshake API parameters. In pre-
 	// handshake logTunnel cases, this value is not yet known. As

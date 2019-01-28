@@ -502,6 +502,10 @@ func MakeDialParameters(
 		FragmentorConfig:              fragmentor.NewUpstreamConfig(p, dialParams.TunnelProtocol, dialParams.FragmentorSeed),
 	}
 
+	// Unconditionally initialize MeekResolvedIPAddress, so a valid string can
+	// always be read.
+	dialParams.MeekResolvedIPAddress.Store("")
+
 	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
 
 		dialParams.meekConfig = &MeekConfig{
@@ -520,13 +524,19 @@ func MakeDialParameters(
 			MeekObfuscatorPaddingSeed:     dialParams.MeekObfuscatorPaddingSeed,
 		}
 
+		// Use an asynchronous callback to record the resolved IP address when
+		// dialing a domain name. Note that DialMeek doesn't immediately
+		// establish any HTTP connections, so the resolved IP address won't be
+		// reported in all cases until after SSH traffic is relayed or a
+		// endpoint request is made over the meek connection.
+		dialParams.dialConfig.ResolvedIPCallback = func(IPAddress string) {
+			dialParams.MeekResolvedIPAddress.Store(IPAddress)
+		}
+
 		if isTactics {
 			dialParams.meekConfig.RoundTripperOnly = true
 		}
 	}
-
-	// Initialize MeekResolvedIPAddress, so a valid string can always be read.
-	dialParams.MeekResolvedIPAddress.Store("")
 
 	return dialParams, nil
 }
