@@ -1811,11 +1811,11 @@ func (sshClient *sshClient) handleNewPacketTunnelChannel(
 	// will stop packet tunnel workers for any previous packet tunnel channel.
 
 	checkAllowedTCPPortFunc := func(upstreamIPAddress net.IP, port int) bool {
-		return sshClient.isPortForwardPermitted(portForwardTypeTCP, false, upstreamIPAddress, port)
+		return sshClient.isPortForwardPermitted(portForwardTypeTCP, upstreamIPAddress, port)
 	}
 
 	checkAllowedUDPPortFunc := func(upstreamIPAddress net.IP, port int) bool {
-		return sshClient.isPortForwardPermitted(portForwardTypeUDP, false, upstreamIPAddress, port)
+		return sshClient.isPortForwardPermitted(portForwardTypeUDP, upstreamIPAddress, port)
 	}
 
 	flowActivityUpdaterMaker := func(
@@ -2037,6 +2037,30 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	// such as slices in handshakeState, is read-only after initially set.
 
 	log.LogRawFieldsWithTimestamp(logFields)
+}
+
+func (sshClient *sshClient) logBlocklistHits(remoteIP net.IP, tags []BlocklistTag) {
+
+	sshClient.Lock()
+
+	logFields := getRequestLogFields(
+		"blocklist_hit",
+		sshClient.geoIPData,
+		sshClient.handshakeState.authorizedAccessTypes,
+		sshClient.handshakeState.apiParams,
+		baseRequestParams)
+
+	// Note: see comment in logTunnel regarding unlock and concurrent access.
+
+	sshClient.Unlock()
+
+	for _, tag := range tags {
+		logFields["ip_address"] = remoteIP.String()
+		logFields["blocklist_source"] = tag.Source
+		logFields["blocklist_subject"] = tag.Subject
+
+		log.LogRawFieldsWithTimestamp(logFields)
+	}
 }
 
 func (sshClient *sshClient) runOSLSender() {
@@ -2478,7 +2502,6 @@ const (
 
 func (sshClient *sshClient) isPortForwardPermitted(
 	portForwardType int,
-	isTransparentDNSForwarding bool,
 	remoteIP net.IP,
 	port int) bool {
 
@@ -2491,11 +2514,26 @@ func (sshClient *sshClient) isPortForwardPermitted(
 
 	// Disallow connection to loopback. This is a failsafe. The server
 	// should be run on a host with correctly configured firewall rules.
-	// An exception is made in the case of transparent DNS forwarding,
-	// where the remoteIP has been rewritten.
-	if !isTransparentDNSForwarding && remoteIP.IsLoopback() {
+	if remoteIP.IsLoopback() {
 		return false
 	}
+
+	// Blocklist check.
+	//
+	// Limitation: isPortForwardPermitted is not called in transparent DNS
+	// forwarding cases. As the destination IP address is rewritten in these
+	// cases, a blocklist entry won't be dialed in any case. However, no logs
+	// will be recorded.
+
+	tags := sshClient.sshServer.support.Blocklist.Lookup(remoteIP)
+	if len(tags) > 0 {
+		sshClient.logBlocklistHits(remoteIP, tags)
+		if sshClient.sshServer.support.Config.BlocklistActive {
+			return false
+		}
+	}
+
+	// Traffic rules checks.
 
 	var allowPorts []int
 	if portForwardType == portForwardTypeTCP {
@@ -2834,7 +2872,6 @@ func (sshClient *sshClient) handleTCPChannel(
 	if !isWebServerPortForward &&
 		!sshClient.isPortForwardPermitted(
 			portForwardTypeTCP,
-			false,
 			IP,
 			portToConnect) {
 

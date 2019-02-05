@@ -436,6 +436,7 @@ func NewServer(
 
 	server.ReloadableFile = common.NewReloadableFile(
 		configFilename,
+		true,
 		func(fileContent []byte) error {
 
 			var newServer Server

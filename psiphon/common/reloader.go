@@ -21,7 +21,9 @@ package common
 
 import (
 	"hash/crc64"
+	"io"
 	"io/ioutil"
+	"os"
 	"sync"
 )
 
@@ -60,26 +62,34 @@ type Reloader interface {
 //
 type ReloadableFile struct {
 	sync.RWMutex
-	fileName     string
-	checksum     uint64
-	reloadAction func([]byte) error
+	filename        string
+	loadFileContent bool
+	checksum        uint64
+	reloadAction    func([]byte) error
 }
 
-// NewReloadableFile initializes a new ReloadableFile
+// NewReloadableFile initializes a new ReloadableFile.
+//
+// When loadFileContent is true, the file content is loaded and passed to
+// reloadAction; otherwise, reloadAction receives a nil argument and is
+// responsible for loading the file. The latter option allows for cases where
+// the file contents must be streamed, memory mapped, etc.
 func NewReloadableFile(
-	fileName string,
+	filename string,
+	loadFileContent bool,
 	reloadAction func([]byte) error) ReloadableFile {
 
 	return ReloadableFile{
-		fileName:     fileName,
-		reloadAction: reloadAction,
+		filename:        filename,
+		loadFileContent: loadFileContent,
+		reloadAction:    reloadAction,
 	}
 }
 
 // WillReload indicates whether the ReloadableFile is capable
 // of reloading.
 func (reloadable *ReloadableFile) WillReload() bool {
-	return reloadable.fileName != ""
+	return reloadable.filename != ""
 }
 
 var crc64table = crc64.MakeTable(crc64.ISO)
@@ -108,22 +118,49 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 	// Check whether the file has changed _before_ blocking readers
 
 	reloadable.RLock()
-	fileName := reloadable.fileName
+	filename := reloadable.filename
 	previousChecksum := reloadable.checksum
 	reloadable.RUnlock()
 
-	content, err := ioutil.ReadFile(fileName)
+	file, err := os.Open(filename)
+	if err != nil {
+		return false, ContextError(err)
+	}
+	defer file.Close()
+
+	hash := crc64.New(crc64table)
+
+	_, err = io.Copy(hash, file)
 	if err != nil {
 		return false, ContextError(err)
 	}
 
-	checksum := crc64.Checksum(content, crc64table)
+	checksum := hash.Sum64()
 
 	if checksum == previousChecksum {
 		return false, nil
 	}
 
-	// ...now block readers
+	// It's possible for the file content to revert to its previous value
+	// between the checksum operation and subsequent content load. We accept
+	// the false positive in this unlikely case.
+
+	var content []byte
+	if reloadable.loadFileContent {
+		_, err = file.Seek(0, 0)
+		if err != nil {
+			return false, ContextError(err)
+		}
+		content, err = ioutil.ReadAll(file)
+		if err != nil {
+			return false, ContextError(err)
+		}
+	}
+
+	// Don't keep file open during reloadAction call.
+	file.Close()
+
+	// ...now block readers and reload
 
 	reloadable.Lock()
 	defer reloadable.Unlock()
@@ -139,5 +176,5 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 }
 
 func (reloadable *ReloadableFile) LogDescription() string {
-	return reloadable.fileName
+	return reloadable.filename
 }

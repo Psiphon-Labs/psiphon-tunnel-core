@@ -335,6 +335,7 @@ type SupportServices struct {
 	TunnelServer       *TunnelServer
 	PacketTunnelServer *tun.Server
 	TacticsServer      *tactics.Server
+	Blocklist          *Blocklist
 }
 
 // NewSupportServices initializes a new SupportServices.
@@ -366,6 +367,8 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 		return nil, common.ContextError(err)
 	}
 
+	blocklist, err := NewBlocklist(config.BlocklistFilename)
+
 	tacticsServer, err := tactics.NewServer(
 		CommonLogger(log),
 		getTacticsAPIParameterLogFieldFormatter(),
@@ -383,6 +386,7 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 		GeoIPService:    geoIPService,
 		DNSResolver:     dnsResolver,
 		TacticsServer:   tacticsServer,
+		Blocklist:       blocklist,
 	}, nil
 }
 

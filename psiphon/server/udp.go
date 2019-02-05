@@ -146,14 +146,14 @@ func (mux *udpPortForwardMultiplexer) run() {
 			dialIP := net.IP(message.remoteIP)
 			dialPort := int(message.remotePort)
 
-			// Transparent DNS forwarding
 			if message.forwardDNS {
+				// Transparent DNS forwarding. In this case, traffic rules
+				// checks are bypassed, since DNS is essential.
 				dialIP = mux.sshClient.sshServer.support.DNSResolver.Get()
 				dialPort = DNS_RESOLVER_PORT
-			}
 
-			if !mux.sshClient.isPortForwardPermitted(
-				portForwardTypeUDP, message.forwardDNS, dialIP, int(message.remotePort)) {
+			} else if !mux.sshClient.isPortForwardPermitted(
+				portForwardTypeUDP, dialIP, int(message.remotePort)) {
 				// The udpgw protocol has no error response, so
 				// we just discard the message and read another.
 				continue

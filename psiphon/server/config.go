@@ -316,6 +316,15 @@ type Config struct {
 	// MARIONETTE-OSSH tunnel protocol. The format specifies the network
 	// protocol port to listen on.
 	MarionetteFormat string
+
+	// BlocklistFilename is the path of a file containing a CSV-encoded
+	// blocklist configuration. See NewBlocklist for more file format
+	// documentation.
+	BlocklistFilename string
+
+	// BlocklistActive indicates whether to actively prevent blocklist hits in
+	// addition to logging events.
+	BlocklistActive bool
 }
 
 // RunWebServer indicates whether to run a web server component.
