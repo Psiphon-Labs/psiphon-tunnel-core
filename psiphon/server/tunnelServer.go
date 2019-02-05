@@ -2505,13 +2505,6 @@ func (sshClient *sshClient) isPortForwardPermitted(
 	remoteIP net.IP,
 	port int) bool {
 
-	sshClient.Lock()
-	defer sshClient.Unlock()
-
-	if !sshClient.handshakeState.completed {
-		return false
-	}
-
 	// Disallow connection to loopback. This is a failsafe. The server
 	// should be run on a host with correctly configured firewall rules.
 	if remoteIP.IsLoopback() {
@@ -2531,6 +2524,15 @@ func (sshClient *sshClient) isPortForwardPermitted(
 		if sshClient.sshServer.support.Config.BlocklistActive {
 			return false
 		}
+	}
+
+	// Don't lock before calling logBlocklistHits.
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	// Client must complete handshake before port forwards are permitted.
+	if !sshClient.handshakeState.completed {
+		return false
 	}
 
 	// Traffic rules checks.
