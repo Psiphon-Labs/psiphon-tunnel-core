@@ -2044,7 +2044,7 @@ func (sshClient *sshClient) logBlocklistHits(remoteIP net.IP, tags []BlocklistTa
 	sshClient.Lock()
 
 	logFields := getRequestLogFields(
-		"blocklist_hit",
+		"server_blocklist_hit",
 		sshClient.geoIPData,
 		sshClient.handshakeState.authorizedAccessTypes,
 		sshClient.handshakeState.apiParams,
