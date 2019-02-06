@@ -35,7 +35,7 @@ func TestReloader(t *testing.T) {
 	}
 	defer os.RemoveAll(dirname)
 
-	fileName := filepath.Join(dirname, "reloader_test.dat")
+	filename := filepath.Join(dirname, "reloader_test.dat")
 
 	initialContents := []byte("contents1\n")
 	modifiedContents := []byte("contents2\n")
@@ -46,7 +46,8 @@ func TestReloader(t *testing.T) {
 	}
 
 	file.ReloadableFile = NewReloadableFile(
-		fileName,
+		filename,
+		true,
 		func(fileContent []byte) error {
 			file.contents = fileContent
 			return nil
@@ -54,7 +55,7 @@ func TestReloader(t *testing.T) {
 
 	// Test: initial load
 
-	err = ioutil.WriteFile(fileName, initialContents, 0600)
+	err = ioutil.WriteFile(filename, initialContents, 0600)
 	if err != nil {
 		t.Fatalf("WriteFile failed: %s", err)
 	}
@@ -89,7 +90,7 @@ func TestReloader(t *testing.T) {
 
 	// Test: reload changed file
 
-	err = ioutil.WriteFile(fileName, modifiedContents, 0600)
+	err = ioutil.WriteFile(filename, modifiedContents, 0600)
 	if err != nil {
 		t.Fatalf("WriteFile failed: %s", err)
 	}

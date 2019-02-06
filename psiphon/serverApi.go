@@ -591,10 +591,12 @@ func RecordRemoteServerListStat(
 		config, datastorePersistentStatTypeRemoteServerList, remoteServerListStatJson)
 }
 
-// failedTunnelErrStripIPAddressRegex strips IPv4 address strings from
-// "net" package I/O error messages. This is to avoid inadvertently recording direct server IPs via error message logs.
-var failedTunnelErrStripIPAddressRegex = regexp.MustCompile(
-	"(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)")
+// failedTunnelErrStripAddressRegex strips IPv4 address [and optional port]
+// strings from "net" package I/O error messages. This is to avoid
+// inadvertently recording direct server IPs via error message logs, and to
+// reduce the error space due to superfluous source port data.
+var failedTunnelErrStripAddressRegex = regexp.MustCompile(
+	"(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\\:[0-9]{1,5})?")
 
 // RecordFailedTunnelStat records metrics for a failed tunnel dial, including
 // dial parameters and error condition (tunnelErr).
@@ -618,7 +620,7 @@ func RecordFailedTunnelStat(
 	params["server_entry_ip_address"] = dialParams.ServerEntry.IpAddress
 	params["last_connected"] = lastConnected
 	params["client_failed_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
-	params["tunnel_error"] = failedTunnelErrStripIPAddressRegex.ReplaceAllString(tunnelErr.Error(), "<ip-address>")
+	params["tunnel_error"] = failedTunnelErrStripAddressRegex.ReplaceAllString(tunnelErr.Error(), "<address>")
 
 	failedTunnelStatJson, err := json.Marshal(params)
 	if err != nil {
