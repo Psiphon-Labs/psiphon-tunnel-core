@@ -2055,9 +2055,9 @@ func (sshClient *sshClient) logBlocklistHits(remoteIP net.IP, tags []BlocklistTa
 	sshClient.Unlock()
 
 	for _, tag := range tags {
-		logFields["ip_address"] = remoteIP.String()
-		logFields["source"] = tag.Source
-		logFields["subject"] = tag.Subject
+		logFields["blocklist_ip_address"] = remoteIP.String()
+		logFields["blocklist_source"] = tag.Source
+		logFields["blocklist_subject"] = tag.Subject
 
 		log.LogRawFieldsWithTimestamp(logFields)
 	}
