@@ -132,6 +132,7 @@ func NewDatabase(filename string) (*Database, error) {
 
 	database.ReloadableFile = common.NewReloadableFile(
 		filename,
+		true,
 		func(fileContent []byte) error {
 			var newDatabase Database
 			err := json.Unmarshal(fileContent, &newDatabase)

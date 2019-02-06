@@ -257,6 +257,7 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 
 	set.ReloadableFile = common.NewReloadableFile(
 		filename,
+		true,
 		func(fileContent []byte) error {
 			var newSet TrafficRulesSet
 			err := json.Unmarshal(fileContent, &newSet)

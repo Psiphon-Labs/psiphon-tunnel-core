@@ -329,7 +329,7 @@ func TestHotReload(t *testing.T) {
 		})
 }
 
-func TestDefaultSessionID(t *testing.T) {
+func TestDefaultSponsorID(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
@@ -590,6 +590,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			livenessTestSize)
 	}
 
+	blocklistFilename := filepath.Join(testDataDirName, "blocklist.csv")
+	paveBlocklistFile(t, blocklistFilename)
+
 	var serverConfig map[string]interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
 	serverConfig["GeoIPDatabaseFilename"] = ""
@@ -599,6 +602,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if doServerTactics {
 		serverConfig["TacticsConfigFilename"] = tacticsConfigFilename
 	}
+	serverConfig["BlocklistFilename"] = blocklistFilename
+
 	serverConfig["LogFilename"] = filepath.Join(testDataDirName, "psiphond.log")
 	serverConfig["LogLevel"] = "debug"
 
@@ -1439,6 +1444,16 @@ func paveTacticsConfigFile(
 	err := ioutil.WriteFile(tacticsConfigFilename, []byte(tacticsConfigJSON), 0600)
 	if err != nil {
 		t.Fatalf("error paving tactics config file: %s", err)
+	}
+}
+
+func paveBlocklistFile(t *testing.T, blocklistFilename string) {
+
+	blocklistContent := "255.255.255.255,test-source,test-subject\n"
+
+	err := ioutil.WriteFile(blocklistFilename, []byte(blocklistContent), 0600)
+	if err != nil {
+		t.Fatalf("error paving blocklist file: %s", err)
 	}
 }
 
