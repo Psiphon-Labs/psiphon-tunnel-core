@@ -259,6 +259,7 @@ func NewConfig(filename string) (*Config, error) {
 
 	config.ReloadableFile = common.NewReloadableFile(
 		filename,
+		true,
 		func(fileContent []byte) error {
 			newConfig, err := LoadConfig(fileContent)
 			if err != nil {
