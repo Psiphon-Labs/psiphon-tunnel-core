@@ -2039,6 +2039,19 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	log.LogRawFieldsWithTimestamp(logFields)
 }
 
+var blocklistHitsStatParams = []requestParamSpec{
+	{"propagation_channel_id", isHexDigits, 0},
+	{"sponsor_id", isHexDigits, 0},
+	{"client_version", isIntString, requestParamLogStringAsInt},
+	{"client_platform", isClientPlatform, 0},
+	{"client_build_rev", isHexDigits, requestParamOptional},
+	{"tunnel_whole_device", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"device_region", isAnyString, requestParamOptional},
+	{"egress_region", isRegionCode, requestParamOptional},
+	{"session_id", isHexDigits, 0},
+	{"last_connected", isLastConnected, requestParamOptional},
+}
+
 func (sshClient *sshClient) logBlocklistHits(remoteIP net.IP, tags []BlocklistTag) {
 
 	sshClient.Lock()
@@ -2048,7 +2061,9 @@ func (sshClient *sshClient) logBlocklistHits(remoteIP net.IP, tags []BlocklistTa
 		sshClient.geoIPData,
 		sshClient.handshakeState.authorizedAccessTypes,
 		sshClient.handshakeState.apiParams,
-		baseRequestParams)
+		blocklistHitsStatParams)
+
+	logFields["session_id"] = sshClient.sessionID
 
 	// Note: see comment in logTunnel regarding unlock and concurrent access.
 
