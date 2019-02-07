@@ -596,7 +596,7 @@ func RecordRemoteServerListStat(
 // inadvertently recording direct server IPs via error message logs, and to
 // reduce the error space due to superfluous source port data.
 var failedTunnelErrStripAddressRegex = regexp.MustCompile(
-	"(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\\:[0-9]{1,5})?")
+	`(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}(:(6553[0-5]|655[0-2][0-9]\d|65[0-4](\d){2}|6[0-4](\d){3}|[1-5](\d){4}|[1-9](\d){0,3}))?`)
 
 // RecordFailedTunnelStat records metrics for a failed tunnel dial, including
 // dial parameters and error condition (tunnelErr).

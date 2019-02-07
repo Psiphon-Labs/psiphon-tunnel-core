@@ -368,6 +368,9 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 	}
 
 	blocklist, err := NewBlocklist(config.BlocklistFilename)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
 
 	tacticsServer, err := tactics.NewServer(
 		CommonLogger(log),
