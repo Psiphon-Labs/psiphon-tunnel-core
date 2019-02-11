@@ -482,7 +482,7 @@ func (t *handshakeTransport) sendKexInit() error {
 	// The "t.remoteAddr != nil" condition should be true only
 	// for clients.
 	//
-	if t.remoteAddr != nil {
+	if t.remoteAddr != nil && t.config.KEXPRNGSeed != nil {
 
 		PRNG := prng.NewPRNGWithSeed(t.config.KEXPRNGSeed)
 
