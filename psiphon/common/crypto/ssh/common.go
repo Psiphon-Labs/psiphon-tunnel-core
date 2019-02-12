@@ -219,8 +219,17 @@ type Config struct {
 	MACs []string
 
 	// [Psiphon]
+
+	// NoEncryptThenMACHash is used to disable Encrypt-then-MAC hash
+	// algorithms.
+	NoEncryptThenMACHash bool
+
 	// KEXPRNGSeed is used for KEX randomization and replay.
 	KEXPRNGSeed *prng.Seed
+
+	// PeerKEXPRNGSeed is used to predict KEX randomization and make
+	// adjustments to ensure negotiation succeeds.
+	PeerKEXPRNGSeed *prng.Seed
 }
 
 // SetDefaults sets sensible values for unset fields in config. This is

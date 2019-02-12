@@ -1121,27 +1121,34 @@ func (sshClient *sshClient) run(
 		}
 		sshServerConfig.AddHostKey(sshClient.sshServer.sshHostKey)
 
+		var err error
+
 		if protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
-			// This is the list of supported non-Encrypt-then-MAC algorithms from
-			// https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3ef11effe6acd92c3aefd140ee09c42a1f15630b/psiphon/common/crypto/ssh/common.go#L60
-			//
-			// With Encrypt-then-MAC algorithms, packet length is transmitted in
-			// plaintext, which aids in traffic analysis; clients may still send
-			// Encrypt-then-MAC algorithms in their KEX_INIT message, but do not
-			// select these algorithms.
+			// With Encrypt-then-MAC hash algorithms, packet length is
+			// transmitted in plaintext, which aids in traffic analysis;
+			// clients may still send Encrypt-then-MAC algorithms in their
+			// KEX_INIT message, but do not select these algorithms.
 			//
 			// The exception is TUNNEL_PROTOCOL_SSH, which is intended to appear
 			// like SSH on the wire.
-			sshServerConfig.MACs = []string{"hmac-sha2-256", "hmac-sha1", "hmac-sha1-96"}
+			sshServerConfig.NoEncryptThenMACHash = true
+
+		} else {
+			// For TUNNEL_PROTOCOL_SSH only, randomize KEX.
+			if sshClient.sshServer.support.Config.ObfuscatedSSHKey != "" {
+				sshServerConfig.KEXPRNGSeed, err = protocol.DeriveServerKEXPRNGSeed(
+					sshClient.sshServer.support.Config.ObfuscatedSSHKey)
+				if err != nil {
+					err = common.ContextError(err)
+				}
+			}
 		}
 
 		result := &sshNewServerConnResult{}
 
 		// Wrap the connection in an SSH deobfuscator when required.
 
-		var err error
-
-		if protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
+		if err == nil && protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
 			// Note: NewObfuscatedSSHConn blocks on network I/O
 			// TODO: ensure this won't block shutdown
 			result.obfuscatedSSHConn, err = obfuscator.NewObfuscatedSSHConn(

@@ -469,24 +469,59 @@ func (t *handshakeTransport) sendKexInit() error {
 
 	// [Psiphon]
 	//
-	// Randomize KEX. The offered algorithms are shuffled and
-	// truncated (longer lists are selected with higher
-	// probability).
+	// When KEXPRNGSeed is specified, randomize the KEX. The offered
+	// algorithms are shuffled and truncated. Longer lists are selected with
+	// higher probability.
 	//
-	// As the client and server have the same set of algorithms,
-	// almost any combination is expected to be workable.
+	// When PeerKEXPRNGSeed is specified, the peer is expected to randomize
+	// its KEX using the specified seed; deterministically adjust own
+	// randomized KEX to ensure negotiation succeeds.
 	//
-	// The compression algorithm is not actually supported, but
-	// the server will not negotiate it.
+	// When NoEncryptThenMACHash is specified, do not use Encrypt-then-MAC has
+	// algorithms.
+
+	equal := func(list1, list2 []string) bool {
+		if len(list1) != len(list2) {
+			return false
+		}
+		for i, entry := range list1 {
+			if list2[i] != entry {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Psiphon transforms assume that default algorithms are configured.
+	if (t.config.NoEncryptThenMACHash || t.config.KEXPRNGSeed != nil) &&
+		(!equal(t.config.KeyExchanges, supportedKexAlgos) ||
+			!equal(t.config.Ciphers, preferredCiphers) ||
+			!equal(t.config.MACs, supportedMACs)) {
+
+		return errors.New("ssh: custom algorithm preferences not supported")
+	}
+
+	// This is the list of supported non-Encrypt-then-MAC algorithms from
+	// https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3ef11effe6acd9
+	// 2c3aefd140ee09c42a1f15630b/psiphon/common/crypto/ssh/common.go#L60
 	//
-	// The "t.remoteAddr != nil" condition should be true only
-	// for clients.
+	// With Encrypt-then-MAC hash algorithms, packet length is transmitted in
+	// plaintext, which aids in traffic analysis.
 	//
-	if t.remoteAddr != nil && t.config.KEXPRNGSeed != nil {
+	// When using obfuscated SSH, where only the initial, unencrypted
+	// packets are obfuscated, NoEncryptThenMACHash should be set.
+	noEncryptThenMACs := []string{"hmac-sha2-256", "hmac-sha1", "hmac-sha1-96"}
+
+	if t.config.NoEncryptThenMACHash {
+		msg.MACsClientServer = noEncryptThenMACs
+		msg.MACsServerClient = noEncryptThenMACs
+	}
+
+	if t.config.KEXPRNGSeed != nil {
 
 		PRNG := prng.NewPRNGWithSeed(t.config.KEXPRNGSeed)
 
-		permute := func(list []string) []string {
+		permute := func(PRNG *prng.PRNG, list []string) []string {
 			newList := make([]string, len(list))
 			perm := PRNG.Perm(len(list))
 			for i, j := range perm {
@@ -495,7 +530,7 @@ func (t *handshakeTransport) sendKexInit() error {
 			return newList
 		}
 
-		truncate := func(list []string) []string {
+		truncate := func(PRNG *prng.PRNG, list []string) []string {
 			cut := len(list)
 			for ; cut > 1; cut-- {
 				if !PRNG.FlipCoin() {
@@ -505,39 +540,81 @@ func (t *handshakeTransport) sendKexInit() error {
 			return list[:cut]
 		}
 
-		msg.KexAlgos = truncate(permute(t.config.KeyExchanges))
-		ciphers := truncate(permute(t.config.Ciphers))
+		retain := func(PRNG *prng.PRNG, list []string, item string) []string {
+			for _, entry := range list {
+				if entry == item {
+					return list
+				}
+			}
+			replace := PRNG.Intn(len(list))
+			list[replace] = item
+			return list
+		}
+
+		msg.KexAlgos = truncate(PRNG, permute(PRNG, msg.KexAlgos))
+		ciphers := truncate(PRNG, permute(PRNG, msg.CiphersClientServer))
 		msg.CiphersClientServer = ciphers
 		msg.CiphersServerClient = ciphers
-		MACs := truncate(permute(t.config.MACs))
+		MACs := truncate(PRNG, permute(PRNG, msg.MACsClientServer))
 		msg.MACsClientServer = MACs
 		msg.MACsServerClient = MACs
 
 		if len(t.hostKeys) > 0 {
-			msg.ServerHostKeyAlgos = permute(msg.ServerHostKeyAlgos)
+			msg.ServerHostKeyAlgos = permute(PRNG, msg.ServerHostKeyAlgos)
 		} else {
-			serverHostKeyAlgos := truncate(permute(msg.ServerHostKeyAlgos))
-
 			// Must offer KeyAlgoRSA to Psiphon server.
-			hasKeyAlgoRSA := false
-			for _, algo := range serverHostKeyAlgos {
-				if algo == KeyAlgoRSA {
-					hasKeyAlgoRSA = true
-					break
-				}
-			}
-			if !hasKeyAlgoRSA {
-				replace := PRNG.Intn(len(serverHostKeyAlgos))
-				serverHostKeyAlgos[replace] = KeyAlgoRSA
-			}
-
-			msg.ServerHostKeyAlgos = serverHostKeyAlgos
+			msg.ServerHostKeyAlgos = retain(
+				PRNG,
+				truncate(PRNG, permute(PRNG, msg.ServerHostKeyAlgos)),
+				KeyAlgoRSA)
 		}
 
-		// Offer "zlib@openssh.com", which is offered by OpenSSH.
-		// Since server only supports "none", must always offer "none"
+		if t.config.PeerKEXPRNGSeed != nil {
+
+			// Generate the peer KEX and make adjustments if negotiation would
+			// fail. This assumes that PeerKEXPRNGSeed remains static (in
+			// Psiphon, the peer is the server and PeerKEXPRNGSeed is derived
+			// from the server entry); and that the PRNG is invoked in the
+			// exact same order on the peer (i.e., the code block immediately
+			// above is what the peer runs); and that the peer sets
+			// NoEncryptThenMACHash in the same cases.
+
+			PeerPRNG := prng.NewPRNGWithSeed(t.config.PeerKEXPRNGSeed)
+
+			peerKexAlgos := truncate(PeerPRNG, permute(PeerPRNG, supportedKexAlgos))
+			if _, err := findCommon("", msg.KexAlgos, peerKexAlgos); err != nil {
+				msg.KexAlgos = retain(PRNG, msg.KexAlgos, peerKexAlgos[0])
+			}
+
+			peerCiphers := truncate(PeerPRNG, permute(PeerPRNG, preferredCiphers))
+			if _, err := findCommon("", ciphers, peerCiphers); err != nil {
+				ciphers = retain(PRNG, ciphers, peerCiphers[0])
+				msg.CiphersClientServer = ciphers
+				msg.CiphersServerClient = ciphers
+			}
+
+			peerMACs := supportedMACs
+			if t.config.NoEncryptThenMACHash {
+				peerMACs = noEncryptThenMACs
+			}
+
+			peerMACs = truncate(PeerPRNG, permute(PeerPRNG, peerMACs))
+			if _, err := findCommon("", MACs, peerMACs); err != nil {
+				MACs = retain(PRNG, MACs, peerMACs[0])
+				msg.MACsClientServer = MACs
+				msg.MACsServerClient = MACs
+			}
+		}
+
+		// Offer "zlib@openssh.com", which is offered by OpenSSH. Compression
+		// is not actually implemented, but since "zlib@openssh.com"
+		// compression is delayed until after authentication
+		// (https://www.openssh.com/txt/draft-miller-secsh-compression-
+		// delayed-00.txt), an unauthenticated probe of the SSH server will
+		// not detect this. "none" is always included to ensure negotiation
+		// succeeds.
 		if PRNG.FlipCoin() {
-			compressions := []string{"none", "zlib@openssh.com"}
+			compressions := permute(PRNG, []string{"none", "zlib@openssh.com"})
 			msg.CompressionClientServer = compressions
 			msg.CompressionServerClient = compressions
 		}
