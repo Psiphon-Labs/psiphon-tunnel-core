@@ -1346,6 +1346,16 @@ func (controller *Controller) getTactics(done chan struct{}) {
 	defer controller.establishWaitGroup.Done()
 	defer close(done)
 
+	// Limitation: GetNetworkID may not account for device VPN status, so
+	// Psiphon-over-Psiphon or Psiphon-over-other-VPN scenarios can encounter
+	// this issue:
+	//
+	// 1. Tactics are established when tunneling through a VPN and egressing
+	//    through a remote region/ISP.
+	// 2. Psiphon is next run when _not_ tunneling through the VPN. Yet the
+	//    network ID remains the same. Initial applied tactics will be for the
+	//    remote egress region/ISP, not the local region/ISP.
+
 	tacticsRecord, err := tactics.UseStoredTactics(
 		GetTacticsStorer(),
 		controller.config.GetNetworkID())

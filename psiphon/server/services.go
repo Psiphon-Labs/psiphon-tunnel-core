@@ -403,7 +403,8 @@ func (support *SupportServices) Reload() {
 			support.TrafficRulesSet,
 			support.OSLConfig,
 			support.PsinetDatabase,
-			support.TacticsServer},
+			support.TacticsServer,
+			support.Blocklist},
 		support.GeoIPService.Reloaders()...)
 
 	// Note: established clients aren't notified when tactics change after a

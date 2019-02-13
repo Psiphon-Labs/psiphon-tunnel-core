@@ -44,6 +44,12 @@ const (
 // Obfuscator implements the seed message, key derivation, and
 // stream ciphers for:
 // https://github.com/brl/obfuscated-openssh/blob/master/README.obfuscation
+//
+// Limitation: the RC4 cipher is vulnerable to ciphertext malleability and
+// the "magic" value provides only weak authentication due to its small
+// size. Increasing the size of the magic field will break compatibility
+// with legacy clients. New protocols and schemes should not use this
+// obfuscator.
 type Obfuscator struct {
 	seedMessage          []byte
 	paddingLength        int
@@ -277,6 +283,11 @@ func readSeedMessage(
 	clientToServerCipher.XORKeyStream(fixedLengthFields, fixedLengthFields)
 
 	buffer := bytes.NewReader(fixedLengthFields)
+
+	// The magic value must be validated before acting on paddingLength as
+	// paddingLength validation is vulnerable to a chosen ciphertext probing
+	// attack: only a fixed number of any possible byte value for each
+	// paddingLength is valid.
 
 	var magicValue, paddingLength int32
 	err = binary.Read(buffer, binary.BigEndian, &magicValue)
