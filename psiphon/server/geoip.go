@@ -22,7 +22,10 @@ package server
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"fmt"
+	"io"
 	"net"
+	"os"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -70,7 +73,9 @@ type GeoIPService struct {
 
 type geoIPDatabase struct {
 	common.ReloadableFile
-	maxMindReader *maxminddb.Reader
+	filename       string
+	tempFileSuffix int64
+	maxMindReader  *maxminddb.Reader
 }
 
 // NewGeoIPService initializes a new GeoIPService.
@@ -86,20 +91,65 @@ func NewGeoIPService(
 
 	for i, filename := range databaseFilenames {
 
-		database := &geoIPDatabase{}
+		database := &geoIPDatabase{
+			filename: filename,
+		}
+
 		database.ReloadableFile = common.NewReloadableFile(
 			filename,
 			false,
 			func(_ []byte) error {
-				maxMindReader, err := maxminddb.Open(filename)
+
+				// In order to safely mmap the database file, a temporary copy
+				// is made and that copy is mmapped. The original file may be
+				// repaved without affecting the mmap; upon hot reload, a new
+				// temporary copy is made and once it is successful, the old
+				// mmap is closed and previous temporary file deleted.
+				//
+				// On any reload error, database state remains the same.
+
+				src, err := os.Open(database.filename)
 				if err != nil {
-					// On error, database state remains the same
 					return common.ContextError(err)
 				}
-				if database.maxMindReader != nil {
-					database.maxMindReader.Close()
+
+				tempFileSuffix := database.tempFileSuffix + 1
+
+				newTempFilename := fmt.Sprintf(
+					"%s.%d", database.filename, tempFileSuffix)
+
+				dst, err := os.Create(newTempFilename)
+				if err != nil {
+					src.Close()
+					return common.ContextError(err)
 				}
+
+				_, err = io.Copy(dst, src)
+				src.Close()
+				dst.Close()
+				if err != nil {
+					_ = os.Remove(newTempFilename)
+					return common.ContextError(err)
+				}
+
+				maxMindReader, err := maxminddb.Open(newTempFilename)
+				if err != nil {
+					_ = os.Remove(newTempFilename)
+					return common.ContextError(err)
+				}
+
+				if database.maxMindReader != nil {
+
+					database.maxMindReader.Close()
+
+					oldTempFilename := fmt.Sprintf(
+						"%s.%d", database.filename, database.tempFileSuffix)
+					_ = os.Remove(oldTempFilename)
+				}
+
 				database.maxMindReader = maxMindReader
+				database.tempFileSuffix = tempFileSuffix
+
 				return nil
 			})
 
