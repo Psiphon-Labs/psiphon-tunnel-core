@@ -344,6 +344,16 @@ func (n *V2ClientSession) ProcessChallengeMessage(cm *ChallengeMessage) (err err
 		return err
 	}
 
+	// [Psiphon]
+	// Copied almost verbatim from ProcessAuthenticateMessage. We received a
+	// panic report due to a nil cm.Version.
+	if cm.Version == nil {
+		//UGH not entirely sure how this could possibly happen, going to put this in for now
+		//TODO investigate if this ever is really happening
+		cm.Version = &VersionStruct{ProductMajorVersion: uint8(5), ProductMinorVersion: uint8(1), ProductBuild: uint16(2600), NTLMRevisionCurrent: uint8(15)}
+
+	}
+
 	err = n.calculateKeys(cm.Version.NTLMRevisionCurrent)
 	if err != nil {
 		return err

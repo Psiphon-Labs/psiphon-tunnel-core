@@ -45,7 +45,7 @@ RUN curl -L http://dl.google.com/android/android-sdk_r24.4.1-linux.tgz -o /tmp/a
 
 # Install Pinned Gomobile
 #  - Ordered last to allow use of previously cached layers when changing revisions
-ENV GOMOBILE_PINNED_REV=320ec40f6328971c405979b804e20d5f3c86770c
+ENV GOMOBILE_PINNED_REV=74ee969d3ffc95befa9a96a6590c36d71b6afd52
 RUN mkdir -p $GOPATH/pkg/gomobile/dl \
   && cd $GOPATH/pkg/gomobile/dl \
   && curl -O https://dl.google.com/go/mobile/gomobile-ndk-r10e-linux-x86_64.tar.gz \
