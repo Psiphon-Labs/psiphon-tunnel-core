@@ -26,6 +26,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -74,6 +75,7 @@ type GeoIPService struct {
 type geoIPDatabase struct {
 	common.ReloadableFile
 	filename       string
+	tempFilename   string
 	tempFileSuffix int64
 	maxMindReader  *maxminddb.Reader
 }
@@ -115,10 +117,12 @@ func NewGeoIPService(
 
 				tempFileSuffix := database.tempFileSuffix + 1
 
-				newTempFilename := fmt.Sprintf(
-					"%s.%d", database.filename, tempFileSuffix)
+				tempFilename := fmt.Sprintf(
+					"%s.%d",
+					filepath.Join(os.TempDir(), filepath.Base(database.filename)),
+					tempFileSuffix)
 
-				dst, err := os.Create(newTempFilename)
+				dst, err := os.Create(tempFilename)
 				if err != nil {
 					src.Close()
 					return common.ContextError(err)
@@ -128,26 +132,23 @@ func NewGeoIPService(
 				src.Close()
 				dst.Close()
 				if err != nil {
-					_ = os.Remove(newTempFilename)
+					_ = os.Remove(tempFilename)
 					return common.ContextError(err)
 				}
 
-				maxMindReader, err := maxminddb.Open(newTempFilename)
+				maxMindReader, err := maxminddb.Open(tempFilename)
 				if err != nil {
-					_ = os.Remove(newTempFilename)
+					_ = os.Remove(tempFilename)
 					return common.ContextError(err)
 				}
 
 				if database.maxMindReader != nil {
-
 					database.maxMindReader.Close()
-
-					oldTempFilename := fmt.Sprintf(
-						"%s.%d", database.filename, database.tempFileSuffix)
-					_ = os.Remove(oldTempFilename)
+					_ = os.Remove(database.tempFilename)
 				}
 
 				database.maxMindReader = maxMindReader
+				database.tempFilename = tempFilename
 				database.tempFileSuffix = tempFileSuffix
 
 				return nil
