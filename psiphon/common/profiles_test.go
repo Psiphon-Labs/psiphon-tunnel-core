@@ -35,7 +35,7 @@ func TestWriteRuntimeProfiles(t *testing.T) {
 	}
 	defer os.RemoveAll(testDirName)
 
-	WriteRuntimeProfiles(&testLogger{}, testDirName, 1, 1)
+	WriteRuntimeProfiles(&testLogger{}, testDirName, "suffix", 1, 1)
 }
 
 type testLogger struct {
