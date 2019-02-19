@@ -1288,7 +1288,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 		// but that's no longer supported.
 		if len(password) == expectedSessionIDLength+expectedSSHPasswordLength {
 			sshPasswordPayload.SessionId = string(password[0:expectedSessionIDLength])
-			sshPasswordPayload.SshPassword = string(password[expectedSSHPasswordLength:])
+			sshPasswordPayload.SshPassword = string(password[expectedSessionIDLength:])
 		} else {
 			return nil, common.ContextError(fmt.Errorf("invalid password payload for %q", conn.User()))
 		}
