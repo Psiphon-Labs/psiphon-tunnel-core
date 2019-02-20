@@ -12,6 +12,7 @@ script:
 - cd psiphon
 - go test -race -v ./common
 - go test -race -v ./common/accesscontrol
+- go test -race -v ./common/crypto/ssh
 - go test -race -v ./common/fragmentor
 - go test -race -v ./common/obfuscator
 - go test -race -v ./common/osl
@@ -33,6 +34,7 @@ script:
 - go test -race -v
 - go test -v -covermode=count -coverprofile=common.coverprofile ./common
 - go test -v -covermode=count -coverprofile=accesscontrol.coverprofile ./common/accesscontrol
+- go test -v -covermode=count -coverprofile=ssh.coverprofile ./common/crypto/ssh
 - go test -v -covermode=count -coverprofile=fragmentor.coverprofile ./common/fragmentor
 - go test -v -covermode=count -coverprofile=obfuscator.coverprofile ./common/obfuscator
 - go test -v -covermode=count -coverprofile=osl.coverprofile ./common/osl
