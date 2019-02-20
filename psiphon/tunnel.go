@@ -741,16 +741,25 @@ func dialTunnel(
 			sshClientConfig.Ciphers = []string{config.ObfuscatedSSHAlgorithms[1]}
 			sshClientConfig.MACs = []string{config.ObfuscatedSSHAlgorithms[2]}
 			sshClientConfig.HostKeyAlgorithms = []string{config.ObfuscatedSSHAlgorithms[3]}
+
 		} else {
-			// This is the list of supported non-Encrypt-then-MAC algorithms from
-			// https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3ef11effe6acd92c3aefd140ee09c42a1f15630b/psiphon/common/crypto/ssh/common.go#L60
-			//
-			// With Encrypt-then-MAC algorithms, packet length is transmitted in
-			// plaintext, which aids in traffic analysis.
+			// With Encrypt-then-MAC hash algorithms, packet length is
+			// transmitted in plaintext, which aids in traffic analysis.
 			//
 			// TUNNEL_PROTOCOL_SSH is excepted since its KEX appears in plaintext,
 			// and the protocol is intended to look like SSH on the wire.
-			sshClientConfig.MACs = []string{"hmac-sha2-256", "hmac-sha1", "hmac-sha1-96"}
+			sshClientConfig.NoEncryptThenMACHash = true
+		}
+	} else {
+		// For TUNNEL_PROTOCOL_SSH only, the server is expected to randomize
+		// its KEX; setting PeerKEXPRNGSeed will ensure successful negotiation
+		// betweem two randomized KEXes.
+		if dialParams.ServerEntry.SshObfuscatedKey != "" {
+			sshClientConfig.PeerKEXPRNGSeed, err = protocol.DeriveSSHServerKEXPRNGSeed(
+				dialParams.ServerEntry.SshObfuscatedKey)
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
 		}
 	}
 
