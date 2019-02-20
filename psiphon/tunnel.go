@@ -755,7 +755,7 @@ func dialTunnel(
 		// its KEX; setting PeerKEXPRNGSeed will ensure successful negotiation
 		// betweem two randomized KEXes.
 		if dialParams.ServerEntry.SshObfuscatedKey != "" {
-			sshClientConfig.PeerKEXPRNGSeed, err = protocol.DeriveServerKEXPRNGSeed(
+			sshClientConfig.PeerKEXPRNGSeed, err = protocol.DeriveSSHServerKEXPRNGSeed(
 				dialParams.ServerEntry.SshObfuscatedKey)
 			if err != nil {
 				return nil, common.ContextError(err)

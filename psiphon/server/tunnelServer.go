@@ -1136,7 +1136,7 @@ func (sshClient *sshClient) run(
 		} else {
 			// For TUNNEL_PROTOCOL_SSH only, randomize KEX.
 			if sshClient.sshServer.support.Config.ObfuscatedSSHKey != "" {
-				sshServerConfig.KEXPRNGSeed, err = protocol.DeriveServerKEXPRNGSeed(
+				sshServerConfig.KEXPRNGSeed, err = protocol.DeriveSSHServerKEXPRNGSeed(
 					sshClient.sshServer.support.Config.ObfuscatedSSHKey)
 				if err != nil {
 					err = common.ContextError(err)
@@ -1158,8 +1158,9 @@ func (sshClient *sshClient) run(
 				nil, nil, nil)
 			if err != nil {
 				err = common.ContextError(err)
+			} else {
+				conn = result.obfuscatedSSHConn
 			}
-			conn = result.obfuscatedSSHConn
 
 			// Now seed fragmentor, when present, with seed derived from
 			// initial obfuscator message. See tactics.Listener.Accept.

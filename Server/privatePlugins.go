@@ -23,4 +23,5 @@ package main
 
 import (
 	_ "github.com/Psiphon-Inc/psiphon-tunnel-core-private-plugins/common_plugins"
+	_ "github.com/Psiphon-Inc/psiphon-tunnel-core-private-plugins/server_plugins"
 )
