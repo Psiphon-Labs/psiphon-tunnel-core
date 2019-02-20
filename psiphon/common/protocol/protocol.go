@@ -325,7 +325,7 @@ type RandomStreamRequest struct {
 func DeriveSSHServerKEXPRNGSeed(obfuscatedKey string) (*prng.Seed, error) {
 	// By convention, the obfuscatedKey will often be a hex-encoded 32 byte value,
 	// but this isn't strictly required or validated, so we use SHA256 to map the
-	// obfuscatedKey to tne necessary 32-byte seed value.
+	// obfuscatedKey to the necessary 32-byte seed value.
 	seed := prng.Seed(sha256.Sum256([]byte(obfuscatedKey)))
 	return prng.NewSaltedSeed(&seed, "ssh-server-kex")
 }
