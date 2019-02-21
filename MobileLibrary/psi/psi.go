@@ -248,6 +248,7 @@ func WriteRuntimeProfiles(outputDirectory string, cpuSampleDurationSeconds, bloc
 	common.WriteRuntimeProfiles(
 		psiphon.NoticeCommonLogger(),
 		outputDirectory,
+		"",
 		cpuSampleDurationSeconds,
 		blockSampleDurationSeconds)
 }

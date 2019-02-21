@@ -51,7 +51,10 @@ var supportedKexAlgos = []string{
 	// P384 and P521 are not constant-time yet, but since we don't
 	// reuse ephemeral keys, using them for ECDH should be OK.
 	kexAlgoECDH256, kexAlgoECDH384, kexAlgoECDH521,
-	kexAlgoDH14SHA1, kexAlgoDH1SHA1,
+
+	// [Psiphon]
+	// Remove kexAlgoDH1SHA1 and add kexAlgoDH14SHA256
+	kexAlgoDH14SHA256, kexAlgoDH14SHA1,
 }
 
 // supportedHostKeyAlgos specifies the supported host-key algorithms (i.e. methods
@@ -216,8 +219,17 @@ type Config struct {
 	MACs []string
 
 	// [Psiphon]
+
+	// NoEncryptThenMACHash is used to disable Encrypt-then-MAC hash
+	// algorithms.
+	NoEncryptThenMACHash bool
+
 	// KEXPRNGSeed is used for KEX randomization and replay.
 	KEXPRNGSeed *prng.Seed
+
+	// PeerKEXPRNGSeed is used to predict KEX randomization and make
+	// adjustments to ensure negotiation succeeds.
+	PeerKEXPRNGSeed *prng.Seed
 }
 
 // SetDefaults sets sensible values for unset fields in config. This is

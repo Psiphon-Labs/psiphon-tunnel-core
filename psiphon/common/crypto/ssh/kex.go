@@ -20,6 +20,7 @@ import (
 const (
 	kexAlgoDH1SHA1          = "diffie-hellman-group1-sha1"
 	kexAlgoDH14SHA1         = "diffie-hellman-group14-sha1"
+	kexAlgoDH14SHA256       = "diffie-hellman-group14-sha256"
 	kexAlgoECDH256          = "ecdh-sha2-nistp256"
 	kexAlgoECDH384          = "ecdh-sha2-nistp384"
 	kexAlgoECDH521          = "ecdh-sha2-nistp521"
@@ -78,6 +79,9 @@ type kexAlgorithm interface {
 // dhGroup is a multiplicative group suitable for implementing Diffie-Hellman key agreement.
 type dhGroup struct {
 	g, p, pMinus1 *big.Int
+
+	// [Psiphon]
+	hashFunc crypto.Hash
 }
 
 func (group *dhGroup) diffieHellman(theirPublic, myPrivate *big.Int) (*big.Int, error) {
@@ -88,7 +92,9 @@ func (group *dhGroup) diffieHellman(theirPublic, myPrivate *big.Int) (*big.Int, 
 }
 
 func (group *dhGroup) Client(c packetConn, randSource io.Reader, magics *handshakeMagics) (*kexResult, error) {
-	hashFunc := crypto.SHA1
+
+	// [Psiphon]
+	hashFunc := group.hashFunc
 
 	var x *big.Int
 	for {
@@ -138,12 +144,15 @@ func (group *dhGroup) Client(c packetConn, randSource io.Reader, magics *handsha
 		K:         K,
 		HostKey:   kexDHReply.HostKey,
 		Signature: kexDHReply.Signature,
-		Hash:      crypto.SHA1,
+		Hash:      hashFunc,
 	}, nil
 }
 
 func (group *dhGroup) Server(c packetConn, randSource io.Reader, magics *handshakeMagics, priv Signer) (result *kexResult, err error) {
-	hashFunc := crypto.SHA1
+
+	// [Psiphon]
+	hashFunc := group.hashFunc
+
 	packet, err := c.readPacket()
 	if err != nil {
 		return
@@ -203,7 +212,7 @@ func (group *dhGroup) Server(c packetConn, randSource io.Reader, magics *handsha
 		K:         K,
 		HostKey:   hostKeyBytes,
 		Signature: sig,
-		Hash:      crypto.SHA1,
+		Hash:      hashFunc,
 	}, nil
 }
 
@@ -386,6 +395,8 @@ func init() {
 		g:       new(big.Int).SetInt64(2),
 		p:       p,
 		pMinus1: new(big.Int).Sub(p, bigOne),
+
+		hashFunc: crypto.SHA1,
 	}
 
 	// This is the group called diffie-hellman-group14-sha1 in RFC
@@ -396,6 +407,22 @@ func init() {
 		g:       new(big.Int).SetInt64(2),
 		p:       p,
 		pMinus1: new(big.Int).Sub(p, bigOne),
+
+		hashFunc: crypto.SHA1,
+	}
+
+	// [Psiphon]
+	// RFC 8268:
+	// > The method of key exchange used for the name "diffie-hellman-
+	// > group14-sha256" is the same as that for "diffie-hellman-group14-sha1"
+	// > except that the SHA256 hash algorithm is used.
+
+	kexAlgoMap[kexAlgoDH14SHA256] = &dhGroup{
+		g:       new(big.Int).SetInt64(2),
+		p:       p,
+		pMinus1: new(big.Int).Sub(p, bigOne),
+
+		hashFunc: crypto.SHA256,
 	}
 
 	kexAlgoMap[kexAlgoECDH521] = &ecdh{elliptic.P521()}

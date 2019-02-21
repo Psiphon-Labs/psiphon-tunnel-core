@@ -38,18 +38,22 @@ import (
 func WriteRuntimeProfiles(
 	logger Logger,
 	outputDirectory string,
+	filenameSuffix string,
 	blockSampleDurationSeconds int,
 	cpuSampleDurationSeconds int) {
 
 	openProfileFile := func(profileName string) *os.File {
-		fileName := filepath.Join(outputDirectory, profileName+".profile")
+		filename := filepath.Join(outputDirectory, profileName+".profile")
+		if filenameSuffix != "" {
+			filename += "." + filenameSuffix
+		}
 		file, err := os.OpenFile(
-			fileName, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
+			filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
 		if err != nil {
 			logger.WithContextFields(
 				LogFields{
 					"error":    err,
-					"fileName": fileName}).Error("open profile file failed")
+					"fileName": filename}).Error("open profile file failed")
 			return nil
 		}
 		return file

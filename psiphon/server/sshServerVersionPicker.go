@@ -1,7 +1,5 @@
-// +build PRIVATE_PLUGINS
-
 /*
- * Copyright (c) 2015, Psiphon Inc.
+ * Copyright (c) 2019, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,9 +17,24 @@
  *
  */
 
-package main
+package server
 
 import (
-	_ "github.com/Psiphon-Inc/psiphon-tunnel-core-private-plugins/common_plugins"
-	_ "github.com/Psiphon-Inc/psiphon-tunnel-core-private-plugins/server_plugins"
+	"sync/atomic"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
+
+var registeredSSHServerVersionPicker atomic.Value
+
+func RegisterSSHServerVersionPicker(picker func(*prng.Seed) string) {
+	registeredSSHServerVersionPicker.Store(picker)
+}
+
+func pickSSHServerVersion(seed *prng.Seed) string {
+	picker := registeredSSHServerVersionPicker.Load()
+	if picker != nil {
+		return picker.(func(*prng.Seed) string)(seed)
+	}
+	return ""
+}

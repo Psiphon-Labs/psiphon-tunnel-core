@@ -24,6 +24,7 @@
 package server
 
 import (
+	"fmt"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -177,7 +178,7 @@ func RunServices(configJSON []byte) error {
 		for {
 			select {
 			case <-signalProcessProfiles:
-				outputProcessProfiles(supportServices.Config)
+				outputProcessProfiles(supportServices.Config, "")
 			case <-shutdownBroadcast:
 				return
 			}
@@ -244,8 +245,28 @@ loop:
 		}
 	}
 
+	// During any delayed or hung shutdown, periodically dump profiles to help
+	// diagnose the cause.
+	signalProfileDumperStop := make(chan struct{}, 1)
+	go func() {
+		tickSeconds := 10
+		ticker := time.NewTicker(time.Duration(tickSeconds) * time.Second)
+		defer ticker.Stop()
+		for i := tickSeconds; i <= 60; i += tickSeconds {
+			select {
+			case <-signalProfileDumperStop:
+				return
+			case <-ticker.C:
+				filenameSuffix := fmt.Sprintf("delayed_shutdown_%ds", i)
+				outputProcessProfiles(supportServices.Config, filenameSuffix)
+			}
+		}
+	}()
+
 	close(shutdownBroadcast)
 	waitGroup.Wait()
+
+	close(signalProfileDumperStop)
 
 	return err
 }
@@ -276,7 +297,7 @@ func getRuntimeMetrics() LogFields {
 	}
 }
 
-func outputProcessProfiles(config *Config) {
+func outputProcessProfiles(config *Config, filenameSuffix string) {
 
 	log.WithContextFields(getRuntimeMetrics()).Info("runtime_metrics")
 
@@ -284,6 +305,7 @@ func outputProcessProfiles(config *Config) {
 		common.WriteRuntimeProfiles(
 			CommonLogger(log),
 			config.ProcessProfileOutputDirectory,
+			filenameSuffix,
 			config.ProcessBlockProfileDurationSeconds,
 			config.ProcessCPUProfileDurationSeconds)
 	}
@@ -368,6 +390,9 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 	}
 
 	blocklist, err := NewBlocklist(config.BlocklistFilename)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
 
 	tacticsServer, err := tactics.NewServer(
 		CommonLogger(log),
@@ -400,7 +425,8 @@ func (support *SupportServices) Reload() {
 			support.TrafficRulesSet,
 			support.OSLConfig,
 			support.PsinetDatabase,
-			support.TacticsServer},
+			support.TacticsServer,
+			support.Blocklist},
 		support.GeoIPService.Reloaders()...)
 
 	// Note: established clients aren't notified when tactics change after a
