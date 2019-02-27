@@ -164,16 +164,6 @@ func (server *TunnelServer) Run() error {
 
 			listener, err = tapdance.Listen(localAddress)
 
-		} else if protocol.TunnelProtocolUsesMarionette(tunnelProtocol) {
-
-			listener, err = marionette.Listen(
-				support.Config.ServerIPAddress,
-				support.Config.MarionetteFormat)
-
-		} else if protocol.TunnelProtocolUsesTapdance(tunnelProtocol) {
-
-			listener, err = tapdance.Listen(localAddress)
-
 		} else {
 
 			listener, err = net.Listen("tcp", localAddress)
