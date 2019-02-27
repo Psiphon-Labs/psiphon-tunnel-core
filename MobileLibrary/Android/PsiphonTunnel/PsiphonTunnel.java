@@ -64,9 +64,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import go.psi.Psi;
+import psi.Psi;
+import psi.PsiphonProvider;
 
-public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
+public class PsiphonTunnel implements PsiphonProvider {
 
     public interface HostService {
         public String getAppName();
@@ -112,7 +113,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     private boolean mUsePacketTunnel = false;
 
     // Only one PsiphonVpn instance may exist at a time, as the underlying
-    // go.psi.Psi and tun2socks implementations each contain global state.
+    // psi.Psi and tun2socks implementations each contain global state.
     private static PsiphonTunnel mPsiphonTunnel;
 
     public static synchronized PsiphonTunnel newPsiphonTunnel(HostService hostService) {
@@ -173,7 +174,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     // Note: to avoid deadlock, do not call directly from a HostService callback;
     // instead post to a Handler if necessary to trigger from a HostService callback.
     // For example, deadlock can occur when a Notice callback invokes stop() since stop() calls
-    // Psi.Stop() which will block waiting for tunnel-core Controller to shutdown which in turn
+    // Psi.stop() which will block waiting for tunnel-core Controller to shutdown which in turn
     // waits for Notice callback invoker to stop, meanwhile the callback thread has blocked waiting
     // for stop().
     public synchronized void stop() {
@@ -198,7 +199,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     // cpuSampleDurationSeconds and blockSampleDurationSeconds determines how to long to wait and
     // sample profiles that require active sampling. When set to 0, these profiles are skipped.
     public void writeRuntimeProfiles(String outputDirectory, int cpuSampleDurationSeconnds, int blockSampleDurationSeconds) {
-        Psi.WriteRuntimeProfiles(outputDirectory, cpuSampleDurationSeconnds, blockSampleDurationSeconds);
+        Psi.writeRuntimeProfiles(outputDirectory, cpuSampleDurationSeconnds, blockSampleDurationSeconds);
     }
 
     //----------------------------------------------------------------------------------------------
@@ -233,8 +234,8 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
             String dnsResolver = mPrivateAddress.mRouter;
 
             if (mUsePacketTunnel) {
-                mtu = (int)Psi.GetPacketTunnelMTU();
-                dnsResolver = Psi.GetPacketTunnelDNSResolverIPv4Address();
+                mtu = (int)Psi.getPacketTunnelMTU();
+                dnsResolver = Psi.getPacketTunnelDNSResolverIPv4Address();
             }
 
             ParcelFileDescriptor tunFd =
@@ -327,13 +328,13 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     //----------------------------------------------------------------------------------------------
 
     @Override
-    public void Notice(String noticeJSON) {
+    public void notice(String noticeJSON) {
         handlePsiphonNotice(noticeJSON);
     }
 
     @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
     @Override
-    public String BindToDevice(long fileDescriptor) throws Exception {
+    public String bindToDevice(long fileDescriptor) throws Exception {
         if (!((VpnService)mHostService.getVpnService()).protect((int)fileDescriptor)) {
             throw new Exception("protect socket failed");
         }
@@ -341,7 +342,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     }
 
     @Override
-    public long HasNetworkConnectivity() {
+    public long hasNetworkConnectivity() {
         boolean hasConnectivity = hasNetworkConnectivity(mHostService.getContext());
         boolean wasWaitingForNetworkConnectivity = mIsWaitingForNetworkConnectivity.getAndSet(!hasConnectivity);
         if (!hasConnectivity && !wasWaitingForNetworkConnectivity) {
@@ -355,7 +356,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     }
 
     @Override
-    public String GetPrimaryDnsServer() {
+    public String getPrimaryDnsServer() {
         String dnsResolver = null;
         try {
             dnsResolver = getFirstActiveNetworkDnsResolver(mHostService.getContext());
@@ -367,15 +368,15 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
     }
 
     @Override
-    public String GetSecondaryDnsServer() {
+    public String getSecondaryDnsServer() {
         return DEFAULT_SECONDARY_DNS_SERVER;
     }
 
     @Override
-    public String IPv6Synthesize(String IPv4Addr) { return IPv4Addr; }
+    public String iPv6Synthesize(String IPv4Addr) { return IPv4Addr; }
 
     @Override
-    public String GetNetworkID() {
+    public String getNetworkID() {
 
         // The network ID contains potential PII. In tunnel-core, the network ID
         // is used only locally in the client and not sent to the server.
@@ -447,7 +448,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         stopPsiphon();
         mHostService.onDiagnosticMessage("starting Psiphon library");
 
-        // In packet tunnel mode, Psi.Start will dup the tun file descriptor
+        // In packet tunnel mode, Psi.start will dup the tun file descriptor
         // passed in via the config. So here we "check out" mTunFd, to ensure
         // it can't be closed before it's duplicated. (This would only happen
         // if stop() is called concurrently with startTunneling(), which should
@@ -473,7 +474,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
         }
 
         try {
-            Psi.Start(
+            Psi.start(
                     loadPsiphonConfig(mHostService.getContext(), fd),
                     embeddedServerEntries,
                     "",
@@ -496,7 +497,7 @@ public class PsiphonTunnel extends Psi.PsiphonProvider.Stub {
 
     private void stopPsiphon() {
         mHostService.onDiagnosticMessage("stopping Psiphon library");
-        Psi.Stop();
+        Psi.stop();
         mHostService.onDiagnosticMessage("Psiphon library stopped");
     }
 
