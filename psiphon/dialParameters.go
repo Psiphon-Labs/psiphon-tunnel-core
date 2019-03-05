@@ -281,6 +281,7 @@ func MakeDialParameters(
 	if (!isReplay || !replayTLSProfile) &&
 		protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) {
 
+		dialParams.SelectedTLSProfile = true
 		dialParams.TLSProfile = SelectTLSProfile(p)
 	}
 
