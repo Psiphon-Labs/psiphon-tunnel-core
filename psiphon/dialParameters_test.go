@@ -141,7 +141,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("missing port number fields")
 	}
 
-	if dialParams.SSHClientVersion == "" || dialParams.SSHKEXSeed == nil {
+	if !dialParams.SelectedSSHClientVersion || dialParams.SSHClientVersion == "" || dialParams.SSHKEXSeed == nil {
 		t.Fatalf("missing SSH fields")
 	}
 
@@ -174,6 +174,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 	if protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) &&
 		(dialParams.MeekSNIServerName == "" ||
+			!dialParams.SelectedTLSProfile ||
 			dialParams.TLSProfile == "") {
 		t.Fatalf("missing meek HTTPS fields")
 	}
