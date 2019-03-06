@@ -19,7 +19,7 @@
 
 /*
 
-Package prng implemented a seeded, unbiased PRNG that is suitable for use
+Package prng implements a seeded, unbiased PRNG that is suitable for use
 cases including obfuscation, network jitter, load balancing.
 
 Seeding is based on crypto/rand.Read and the PRNG stream is provided by
