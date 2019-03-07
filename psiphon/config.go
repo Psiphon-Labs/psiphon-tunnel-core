@@ -277,7 +277,8 @@ type Config struct {
 
 	// TargetServerEntry is an encoded server entry. When specified, this
 	// server entry is used exclusively and all other known servers are
-	// ignored.
+	// ignored; also, when set, ConnectionWorkerPoolSize is ignored and
+	// the pool size is 1.
 	TargetServerEntry string
 
 	// DisableApi disables Psiphon server API calls including handshake,

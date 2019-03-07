@@ -1220,6 +1220,15 @@ func (controller *Controller) launchEstablishing() {
 	workerPoolSize := controller.config.clientParameters.Get().Int(
 		parameters.ConnectionWorkerPoolSize)
 
+	// When TargetServerEntry is used, override any worker pool size config or
+	// tactic parameter and use a pool size of 1. The typical use case for
+	// TargetServerEntry is to test a specific server with a single connection
+	// attempt. Furthermore, too many concurrent attempts to connect to the
+	// same server will trigger rate limiting.
+	if controller.config.TargetServerEntry != "" {
+		workerPoolSize = 1
+	}
+
 	p = nil
 
 	// If InitialLimitTunnelProtocols is configured but cannot be satisfied,
