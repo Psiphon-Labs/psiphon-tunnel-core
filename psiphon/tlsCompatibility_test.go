@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"strings"
@@ -152,6 +153,11 @@ func testTLSCompatibility(t *testing.T, address string) {
 			time.Sleep(100 * time.Millisecond)
 		}
 
-		t.Logf("%s: %d/%d successful\n", tlsProfile, success, repeats)
+		result := fmt.Sprintf("%s: %d/%d successful\n", tlsProfile, success, repeats)
+		if success == repeats {
+			t.Logf(result)
+		} else {
+			t.Errorf(result)
+		}
 	}
 }
