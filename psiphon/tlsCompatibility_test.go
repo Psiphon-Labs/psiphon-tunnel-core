@@ -133,6 +133,7 @@ func testTLSCompatibility(t *testing.T, address string) {
 			tlsConfig := &CustomTLSConfig{
 				ClientParameters: clientParameters,
 				Dial:             dialer,
+				UseDialAddrSNI:   true,
 				SkipVerify:       true,
 				TLSProfile:       tlsProfile,
 			}
