@@ -27,6 +27,7 @@ import (
 	go_log "log"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Inc/rotate-safe-writer"
@@ -149,6 +150,22 @@ func NewLogWriter() *io.PipeWriter {
 type CustomJSONFormatter struct {
 }
 
+var (
+	useLogCallback int32
+	logCallback    atomic.Value
+)
+
+// setLogCallback sets a callback that is invoked with each JSON log message.
+// This facility is intended for use in testing only.
+func setLogCallback(callback func([]byte)) {
+	if callback == nil {
+		atomic.StoreInt32(&useLogCallback, 0)
+		return
+	}
+	atomic.StoreInt32(&useLogCallback, 1)
+	logCallback.Store(callback)
+}
+
 const customJSONFormatterLogRawFieldsWithTimestamp = "CustomJSONFormatter.LogRawFieldsWithTimestamp"
 
 // Format implements logrus.Formatter. This is a customized version
@@ -195,6 +212,10 @@ func (f *CustomJSONFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	serialized, err := json.Marshal(data)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to marshal fields to JSON, %v", err)
+	}
+
+	if atomic.LoadInt32(&useLogCallback) == 1 {
+		logCallback.Load().(func([]byte))(serialized)
 	}
 
 	return append(serialized, '\n'), nil

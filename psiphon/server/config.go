@@ -417,6 +417,19 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		}
 	}
 
+	if config.ObfuscatedSSHKey != "" {
+		seed, err := protocol.DeriveSSHServerVersionPRNGSeed(config.ObfuscatedSSHKey)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"DeriveSSHServerVersionPRNGSeed failed: %s", err)
+		}
+
+		serverVersion := pickSSHServerVersion(seed)
+		if serverVersion != "" {
+			config.SSHServerVersion = serverVersion
+		}
+	}
+
 	if config.UDPInterceptUdpgwServerAddress != "" {
 		if err := validateNetworkAddress(config.UDPInterceptUdpgwServerAddress, true); err != nil {
 			return nil, fmt.Errorf("UDPInterceptUdpgwServerAddress is invalid: %s", err)

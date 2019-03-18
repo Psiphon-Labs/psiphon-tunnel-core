@@ -43,6 +43,12 @@ type Closer interface {
 	IsClosed() bool
 }
 
+// CloseWriter defines the interface to a type, typically
+// a net.TCPConn, that implements CloseWrite.
+type CloseWriter interface {
+	CloseWrite() error
+}
+
 // TerminateHTTPConnection sends a 404 response to a client and also closes
 // the persistent connection.
 func TerminateHTTPConnection(

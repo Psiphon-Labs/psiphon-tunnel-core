@@ -815,7 +815,7 @@ func getRequestLogFields(
 			!protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
 
 			// Non-HTTP unfronted meek protocols never tranform the host header.
-			if !protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+			if protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
 				continue
 			}
 

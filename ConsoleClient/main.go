@@ -303,6 +303,7 @@ func main() {
 			common.WriteRuntimeProfiles(
 				psiphon.NoticeCommonLogger(),
 				config.DataStoreDirectory,
+				"",
 				profileSampleDurationSeconds,
 				profileSampleDurationSeconds)
 		case <-systemStopSignal:

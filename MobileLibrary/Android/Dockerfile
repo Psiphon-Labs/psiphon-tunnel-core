@@ -19,7 +19,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Go.
-ENV GOVERSION=go1.9.6 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
+ENV GOVERSION=go1.11.5 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
 
 RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz -o /tmp/go.tar.gz \
   && tar -C /usr/local -xzf /tmp/go.tar.gz \
@@ -45,7 +45,7 @@ RUN curl -L http://dl.google.com/android/android-sdk_r24.4.1-linux.tgz -o /tmp/a
 
 # Install Pinned Gomobile
 #  - Ordered last to allow use of previously cached layers when changing revisions
-ENV GOMOBILE_PINNED_REV=74ee969d3ffc95befa9a96a6590c36d71b6afd52
+ENV GOMOBILE_PINNED_REV=c4d780faeb85123ee32b88e84fd022739ed8c124
 RUN mkdir -p $GOPATH/pkg/gomobile/dl \
   && cd $GOPATH/pkg/gomobile/dl \
   && curl -O https://dl.google.com/go/mobile/gomobile-ndk-r10e-linux-x86_64.tar.gz \

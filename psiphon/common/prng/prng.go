@@ -19,7 +19,7 @@
 
 /*
 
-Package prng implemented a seeded, unbiased PRNG that is suitable for use
+Package prng implements a seeded, unbiased PRNG that is suitable for use
 cases including obfuscation, network jitter, load balancing.
 
 Seeding is based on crypto/rand.Read and the PRNG stream is provided by
@@ -80,6 +80,21 @@ func NewSeed() (*Seed, error) {
 	return seed, nil
 }
 
+// NewSaltedSeed creates a new seed derived from an existing seed and a salt.
+// A HKDF is applied to the seed and salt.
+//
+// NewSaltedSeed is intended for use cases where a single seed needs to be
+// used in distinct contexts to produce independent random streams.
+func NewSaltedSeed(seed *Seed, salt string) (*Seed, error) {
+	saltedSeed := new(Seed)
+	_, err := io.ReadFull(
+		hkdf.New(sha256.New, seed[:], []byte(salt), nil), saltedSeed[:])
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+	return saltedSeed, nil
+}
+
 // PRNG is a seeded, unbiased PRNG based on chacha20.
 type PRNG struct {
 	rand                   *rand.Rand
@@ -110,14 +125,9 @@ func NewPRNGWithSeed(seed *Seed) *PRNG {
 }
 
 // NewPRNGWithSaltedSeed initializes a new PRNG using a seed derived from an
-// existing seed and a salt. A HKDF is applied to the seed and salt.
-//
-// NewPRNGWithSaltedSeed is intended for use cases where a single seed needs
-// to be used in distinct contexts to produce independent random streams.
+// existing seed and a salt with NewSaltedSeed.
 func NewPRNGWithSaltedSeed(seed *Seed, salt string) (*PRNG, error) {
-	saltedSeed := new(Seed)
-	_, err := io.ReadFull(
-		hkdf.New(sha256.New, seed[:], []byte(salt), nil), saltedSeed[:])
+	saltedSeed, err := NewSaltedSeed(seed, salt)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
