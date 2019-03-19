@@ -394,7 +394,7 @@ func (flowConn *TapdanceFlowConn) actOnReadError(err error) error {
 			return errors.New("reconnect scheduling: timed out waiting for FIN back")
 		}
 		if flowConn.flowType != flowReadOnly {
-			// notify writer, if needed
+			// notify writer, if there is a writer
 			select {
 			case <-flowConn.closed:
 				return errors.New("reconnect scheduling: closed while notifiyng writer")
@@ -431,7 +431,14 @@ func (flowConn *TapdanceFlowConn) actOnReadError(err error) error {
 	}
 
 	if willReconnect {
-		Logger().Infoln(flowConn.tdRaw.idStr() + " reconnecting")
+		if flowConn.flowType != flowReadOnly {
+			// notify writer, if there is a writer
+			select {
+			case <-flowConn.closed:
+				return errors.New("reconnect scheduling: closed while notifiyng writer")
+			case flowConn.reconnectStarted <- struct{}{}:
+			}
+		}
 		if (flowConn.flowType != flowUpload && !flowConn.finSent) ||
 			err == io.ErrUnexpectedEOF {
 			Logger().Infoln(flowConn.tdRaw.idStr() + " reconnect: FIN is unexpected")
