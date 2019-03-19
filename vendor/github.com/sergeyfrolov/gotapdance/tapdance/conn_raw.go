@@ -51,16 +51,15 @@ type tdRawConn struct {
 	failedDecoys []string
 
 	// purely for logging and stats reporting purposes:
-	flowId      uint64 // id of the flow within the session (=how many times reconnected)
-	sessionId   uint64 // id of the local session
-	strIdSuffix string // suffix for every log string (e.g. to mark upload-only flows)
+	flowId      CounterUint64 // id of the flow within the session (=how many times reconnected)
+	sessionId   uint64        // id of the local session
+	strIdSuffix string        // suffix for every log string (e.g. to mark upload-only flows)
 }
 
 func makeTdRaw(handshakeType tdTagType, stationPubkey []byte) *tdRawConn {
 	tdRaw := &tdRawConn{tagType: handshakeType,
 		stationPubkey: stationPubkey,
 	}
-	tdRaw.flowId = 0
 	tdRaw.closed = make(chan struct{})
 	return tdRaw
 }
@@ -70,7 +69,7 @@ func (tdRaw *tdRawConn) DialContext(ctx context.Context) error {
 }
 
 func (tdRaw *tdRawConn) RedialContext(ctx context.Context) error {
-	tdRaw.flowId += 1
+	tdRaw.flowId.Inc()
 	return tdRaw.dial(ctx, true)
 }
 
@@ -113,7 +112,7 @@ func (tdRaw *tdRawConn) dial(ctx context.Context, reconnect bool) error {
 		} else {
 			if !reconnect {
 				tdRaw.decoySpec = Assets().GetDecoy()
-				if tdRaw.decoySpec.GetIpv4AddrStr() == "" {
+				if tdRaw.decoySpec.GetIpAddrStr() == "" {
 					return errors.New("tdConn.decoyAddr is empty!")
 				}
 			}
@@ -132,7 +131,7 @@ func (tdRaw *tdRawConn) dial(ctx context.Context, reconnect bool) error {
 			return nil
 		}
 		tdRaw.failedDecoys = append(tdRaw.failedDecoys,
-			tdRaw.decoySpec.GetHostname()+" "+tdRaw.decoySpec.GetIpv4AddrStr())
+			tdRaw.decoySpec.GetHostname()+" "+tdRaw.decoySpec.GetIpAddrStr())
 		if tdRaw.sessionStats.FailedDecoysAmount == nil {
 			tdRaw.sessionStats.FailedDecoysAmount = new(uint32)
 		}
@@ -143,20 +142,20 @@ func (tdRaw *tdRawConn) dial(ctx context.Context, reconnect bool) error {
 
 func (tdRaw *tdRawConn) tryDialOnce(ctx context.Context, expectedTransition pb.S2C_Transition) (err error) {
 	Logger().Infoln(tdRaw.idStr() + " Attempting to connect to decoy " +
-		tdRaw.decoySpec.GetHostname() + " (" + tdRaw.decoySpec.GetIpv4AddrStr() + ")")
+		tdRaw.decoySpec.GetHostname() + " (" + tdRaw.decoySpec.GetIpAddrStr() + ")")
 
 	tlsToDecoyStartTs := time.Now()
 	err = tdRaw.establishTLStoDecoy(ctx)
 	tlsToDecoyTotalTs := time.Since(tlsToDecoyStartTs)
 	if err != nil {
 		Logger().Errorf(tdRaw.idStr() + " establishTLStoDecoy(" +
-			tdRaw.decoySpec.GetHostname() + "," + tdRaw.decoySpec.GetIpv4AddrStr() +
+			tdRaw.decoySpec.GetHostname() + "," + tdRaw.decoySpec.GetIpAddrStr() +
 			") failed with " + err.Error())
 		return err
 	}
 	tdRaw.sessionStats.TlsToDecoy = durationToU32ptrMs(tlsToDecoyTotalTs)
 	Logger().Infof("%s Connected to decoy %s(%s) in %s", tdRaw.idStr(), tdRaw.decoySpec.GetHostname(),
-		tdRaw.decoySpec.GetIpv4AddrStr(), tlsToDecoyTotalTs.String())
+		tdRaw.decoySpec.GetIpAddrStr(), tlsToDecoyTotalTs.String())
 
 	if tdRaw.IsClosed() {
 		// if connection was closed externally while in establishTLStoDecoy()
@@ -274,7 +273,7 @@ func (tdRaw *tdRawConn) establishTLStoDecoy(ctx context.Context) error {
 	}
 
 	tcpToDecoyStartTs := time.Now()
-	dialConn, err := tcpDialer(childCtx, "tcp", tdRaw.decoySpec.GetIpv4AddrStr())
+	dialConn, err := tcpDialer(childCtx, "tcp", tdRaw.decoySpec.GetIpAddrStr())
 	tcpToDecoyTotalTs := time.Since(tcpToDecoyStartTs)
 	if err != nil {
 		return err
@@ -284,7 +283,7 @@ func (tdRaw *tdRawConn) establishTLStoDecoy(ctx context.Context) error {
 	config := tls.Config{ServerName: tdRaw.decoySpec.GetHostname()}
 	if config.ServerName == "" {
 		// if SNI is unset -- try IP
-		config.ServerName, _, err = net.SplitHostPort(tdRaw.decoySpec.GetIpv4AddrStr())
+		config.ServerName, _, err = net.SplitHostPort(tdRaw.decoySpec.GetIpAddrStr())
 		if err != nil {
 			dialConn.Close()
 			return err
@@ -353,7 +352,10 @@ func (tdRaw *tdRawConn) prepareTDRequest(handshakeType tdTagType) (string, error
 		return "", err
 	}
 	buf.Write([]byte{0}) // Unassigned byte
-	negotiatedCipher := tdRaw.tlsConn.HandshakeState.Suite.Id
+	negotiatedCipher := tdRaw.tlsConn.HandshakeState.State12.Suite.Id
+	if tdRaw.tlsConn.HandshakeState.ServerHello.Vers == tls.VersionTLS13 {
+		negotiatedCipher = tdRaw.tlsConn.HandshakeState.State13.Suite.Id
+	}
 	buf.Write([]byte{byte(negotiatedCipher >> 8),
 		byte(negotiatedCipher & 0xff)})
 	buf.Write(masterKey[:])
@@ -445,7 +447,7 @@ Content-Disposition: form-data; name=\"td.zip\"
 
 func (tdRaw *tdRawConn) idStr() string {
 	return "[Session " + strconv.FormatUint(tdRaw.sessionId, 10) + ", " +
-		"Flow " + strconv.FormatUint(tdRaw.flowId, 10) + tdRaw.strIdSuffix + "]"
+		"Flow " + strconv.FormatUint(tdRaw.flowId.Get(), 10) + tdRaw.strIdSuffix + "]"
 }
 
 // Simply reads and returns protobuf
@@ -513,7 +515,7 @@ func (tdRaw *tdRawConn) writeTransition(transition pb.C2S_Transition) (n int, er
 		DecoyListGeneration: &currGen,
 		StateTransition:     &transition,
 		UploadSync:          new(uint64)} // TODO: remove
-	if tdRaw.flowId == 0 {
+	if tdRaw.flowId.Get() == 0 {
 		// we have stats for each reconnect, but only send stats for the initial connection
 		msg.Stats = &tdRaw.sessionStats
 	}

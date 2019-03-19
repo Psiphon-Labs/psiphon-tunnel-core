@@ -21,6 +21,9 @@ const (
 
 	// extensions with 'fake' prefix break connection, if server echoes them back
 	fakeExtensionChannelID uint16 = 30032 // not IANA assigned
+
+	fakeCertCompressionAlgs uint16 = 0x001b
+	fakeRecordSizeLimit     uint16 = 0x001c
 )
 
 const (
@@ -49,30 +52,46 @@ var (
 	// fakeEd448 = SignatureAndHash{0x08, 0x08}
 )
 
+// fake curves(groups)
+var (
+	FakeFFDHE2048 = uint16(0x0100)
+	FakeFFDHE3072 = uint16(0x0101)
+)
+
 type ClientHelloID struct {
-	Browser string
-	Version uint16
-	// TODO: consider adding OS?
+	Client  string
+
+	// Version specifies version of a mimicked clients (e.g. browsers).
+	// Not used in randomized, custom handshake, and default Go.
+	Version string
+
+	// Seed is only used for randomized fingerprints to seed PRNG.
+	// Must not be modified once set.
+	Seed *PRNGSeed
 }
 
 func (p *ClientHelloID) Str() string {
-	return fmt.Sprintf("%s-%d", p.Browser, p.Version)
+	return fmt.Sprintf("%s-%s", p.Client, p.Version)
+}
+
+func (p *ClientHelloID) IsSet() bool {
+	return (p.Client == "") && (p.Version == "")
 }
 
 const (
-	helloGolang     = "Golang"
-	helloRandomized = "Randomized"
-	helloCustom     = "Custom"
-	helloFirefox    = "Firefox"
-	helloChrome     = "Chrome"
-	helloIOS        = "iOS"
-	helloAndroid    = "Android"
-)
+	// clients
+	helloGolang           = "Golang"
+	helloRandomized       = "Randomized"
+	helloRandomizedALPN   = "Randomized-ALPN"
+	helloRandomizedNoALPN = "Randomized-NoALPN"
+	helloCustom           = "Custom"
+	helloFirefox          = "Firefox"
+	helloChrome           = "Chrome"
+	helloIOS              = "iOS"
+	helloAndroid          = "Android"
 
-const (
-	helloAutoVers = iota
-	helloRandomizedALPN
-	helloRandomizedNoALPN
+	// versions
+	helloAutoVers = "0"
 )
 
 type ClientHelloSpec struct {
@@ -80,8 +99,10 @@ type ClientHelloSpec struct {
 	CompressionMethods []uint8        // nil => no compression
 	Extensions         []TLSExtension // nil => no extensions
 
-	// GreaseStyle: currently only random
+	TLSVersMin uint16 // [1.0-1.3]
+	TLSVersMax uint16 // [1.2-1.3]
 
+	// GreaseStyle: currently only random
 	// sessionID may or may not depend on ticket; nil => random
 	GetSessionID func(ticket []byte) [32]byte
 
@@ -93,36 +114,40 @@ var (
 	// overwrite your changes to Hello(Config, Session are fine).
 	// You might want to call BuildHandshakeState() before applying any changes.
 	// UConn.Extensions will be completely ignored.
-	HelloGolang = ClientHelloID{helloGolang, helloAutoVers}
+	HelloGolang = ClientHelloID{helloGolang, helloAutoVers, nil}
 
 	// HelloCustom will prepare ClientHello with empty uconn.Extensions so you can fill it with
 	// TLSExtensions manually or use ApplyPreset function
-	HelloCustom = ClientHelloID{helloCustom, helloAutoVers}
+	HelloCustom = ClientHelloID{helloCustom, helloAutoVers, nil}
 
 	// HelloRandomized* randomly adds/reorders extensions, ciphersuites, etc.
-	HelloRandomized       = ClientHelloID{helloRandomized, helloAutoVers}
-	HelloRandomizedALPN   = ClientHelloID{helloRandomized, helloRandomizedALPN}
-	HelloRandomizedNoALPN = ClientHelloID{helloRandomized, helloRandomizedNoALPN}
+	HelloRandomized       = ClientHelloID{helloRandomized, helloAutoVers, nil}
+	HelloRandomizedALPN   = ClientHelloID{helloRandomizedALPN, helloAutoVers, nil}
+	HelloRandomizedNoALPN = ClientHelloID{helloRandomizedNoALPN, helloAutoVers, nil}
 
 	// The rest will will parrot given browser.
-	HelloFirefox_Auto = HelloFirefox_56
-	HelloFirefox_55   = ClientHelloID{helloFirefox, 55}
-	HelloFirefox_56   = ClientHelloID{helloFirefox, 56}
+	HelloFirefox_Auto = HelloFirefox_63
+	HelloFirefox_55   = ClientHelloID{helloFirefox, "55", nil}
+	HelloFirefox_56   = ClientHelloID{helloFirefox, "56", nil}
+	HelloFirefox_63   = ClientHelloID{helloFirefox, "63", nil}
 
-	HelloChrome_Auto = HelloChrome_62
-	HelloChrome_58   = ClientHelloID{helloChrome, 58}
-	HelloChrome_62   = ClientHelloID{helloChrome, 62}
+	HelloChrome_Auto = HelloChrome_70
+	HelloChrome_58   = ClientHelloID{helloChrome, "58", nil}
+	HelloChrome_62   = ClientHelloID{helloChrome, "62", nil}
+	HelloChrome_70   = ClientHelloID{helloChrome, "70", nil}
 
 	HelloIOS_Auto = HelloIOS_11_1
-	HelloIOS_11_1 = ClientHelloID{helloIOS, 111}
+	HelloIOS_11_1 = ClientHelloID{helloIOS, "111", nil}
 )
 
 // based on spec's GreaseStyle, GREASE_PLACEHOLDER may be replaced by another GREASE value
+// https://tools.ietf.org/html/draft-ietf-tls-grease-01
 const GREASE_PLACEHOLDER = 0x0a0a
 
-// utlsMacSHA384 returns a SHA-384.
+// utlsMacSHA384 returns a SHA-384 based MAC. These are only supported in TLS 1.2
+// so the given version is ignored.
 func utlsMacSHA384(version uint16, key []byte) macFunction {
-	return tls10MAC{hmac.New(sha512.New384, key)}
+	return tls10MAC{h: hmac.New(sha512.New384, key)}
 }
 
 var utlsSupportedCipherSuites []*cipherSuite
