@@ -154,6 +154,15 @@ func (manager *dialManager) dial(ctx context.Context, network, address string) (
 		return nil, common.ContextError(err)
 	}
 
+	// Fail immediately if CloseWrite isn't available in the underlying dialed
+	// conn. The equivalent check in managedConn.CloseWrite isn't fatal and
+	// tapdance will run in a degraded state.
+	// Limitation: if the underlying conn _also_ passes through CloseWrite, this
+	// check may be insufficient.
+	if _, ok := conn.(common.CloseWriter); !ok {
+		return nil, common.ContextError(errors.New("underlying conn is not a CloseWriter"))
+	}
+
 	conn = &managedConn{
 		Conn:    conn,
 		manager: manager,
@@ -184,17 +193,13 @@ type managedConn struct {
 	manager *dialManager
 }
 
-type closeWriter interface {
-	CloseWrite() error
-}
-
 // CloseWrite exposes the net.TCPConn.CloseWrite() functionality
 // required by tapdance.
 func (conn *managedConn) CloseWrite() error {
-	if closeWriter, ok := conn.Conn.(closeWriter); ok {
+	if closeWriter, ok := conn.Conn.(common.CloseWriter); ok {
 		return closeWriter.CloseWrite()
 	}
-	return common.ContextError(errors.New("dialedConn is not a closeWriter"))
+	return common.ContextError(errors.New("underlying conn is not a CloseWriter"))
 }
 
 func (conn *managedConn) Close() error {
@@ -227,7 +232,7 @@ func (conn *tapdanceConn) IsClosed() bool {
 //
 // The Tapdance station config assets are read from dataDirectory/"tapdance".
 // When no config is found, default assets are paved. ctx is expected to have
-// a timeout for the  dial.
+// a timeout for the dial.
 func Dial(
 	ctx context.Context,
 	dataDirectory string,
@@ -249,7 +254,27 @@ func Dial(
 		TcpDialer: manager.dial,
 	}
 
+	// If the dial context is cancelled, use dialManager to interrupt
+	// tapdanceDialer.DialContext. See dialManager comment explaining why
+	// tapdanceDialer.DialContext may block even when the input context is
+	// cancelled.
+	dialComplete := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-dialComplete:
+		}
+		select {
+		// Prioritize the dialComplete case.
+		case <-dialComplete:
+			return
+		default:
+		}
+		manager.close()
+	}()
+
 	conn, err := tapdanceDialer.DialContext(ctx, "tcp", address)
+	close(dialComplete)
 	if err != nil {
 		manager.close()
 		return nil, common.ContextError(err)

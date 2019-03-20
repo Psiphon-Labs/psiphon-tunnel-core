@@ -341,6 +341,13 @@ func (c *Conn) Write(buffer []byte) (int, error) {
 	return totalBytesWritten, nil
 }
 
+func (c *Conn) CloseWrite() error {
+	if closeWriter, ok := c.Conn.(common.CloseWriter); ok {
+		return closeWriter.CloseWrite()
+	}
+	return common.ContextError(errors.New("underlying conn is not a CloseWriter"))
+}
+
 func (c *Conn) Close() (err error) {
 	if !atomic.CompareAndSwapInt32(&c.isClosed, 0, 1) {
 		return nil
