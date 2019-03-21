@@ -198,6 +198,14 @@ func getClientHelloVersion(utlsClientHelloID utls.ClientHelloID) (string, error)
 	// Assumes utlsClientHelloID.Seed has been set; otherwise the result is
 	// ephemeral.
 
+	// As utls.HelloRandomized may be either TLS 1.2 or TLS 1.3, we cannot
+	// perform a simple ClientHello ID check. BuildHandshakeState is run, which
+	// constructs the entire ClientHello.
+	//
+	// BenchmarkRandomizedGetClientHelloVersion indicates that this operation
+	// takes on the order of 0.05ms and allocates ~8KB for randomized client
+	// hellos.
+
 	conn := utls.UClient(
 		nil,
 		&utls.Config{InsecureSkipVerify: true},

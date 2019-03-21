@@ -32,6 +32,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	tris "github.com/Psiphon-Labs/tls-tris"
+	utls "github.com/refraction-networking/utls"
 )
 
 func TestTLSCompatibility(t *testing.T) {
@@ -160,5 +161,13 @@ func testTLSCompatibility(t *testing.T, address string) {
 		} else {
 			t.Errorf(result)
 		}
+	}
+}
+
+func BenchmarkRandomizedGetClientHelloVersion(b *testing.B) {
+	for n := 0; n < b.N; n++ {
+		utlsClientHelloID := utls.HelloRandomized
+		utlsClientHelloID.Seed, _ = utls.NewPRNGSeed()
+		getClientHelloVersion(utlsClientHelloID)
 	}
 }
