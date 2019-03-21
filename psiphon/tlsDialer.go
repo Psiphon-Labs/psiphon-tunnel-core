@@ -67,7 +67,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	tris "github.com/Psiphon-Labs/tls-tris"
-	utls "github.com/Psiphon-Labs/utls"
+	utls "github.com/refraction-networking/utls"
 )
 
 // CustomTLSConfig contains parameters to determine the behavior
@@ -129,26 +129,17 @@ type CustomTLSConfig struct {
 	// using the specified key.
 	ObfuscatedSessionTicketKey string
 
-	utlsClientSessionCache utls.ClientSessionCache
-	trisClientSessionCache tris.ClientSessionCache
+	clientSessionCache utls.ClientSessionCache
 }
 
 // EnableClientSessionCache initializes a cache to use to persist session
 // tickets, enabling TLS session resumability across multiple
 // CustomTLSDial calls or dialers using the same CustomTLSConfig.
-//
-// TLSProfile must be set or will be auto-set via SelectTLSProfile.
 func (config *CustomTLSConfig) EnableClientSessionCache(
 	clientParameters *parameters.ClientParameters) {
 
-	if config.TLSProfile == "" {
-		config.TLSProfile = SelectTLSProfile(config.ClientParameters.Get())
-	}
-
-	if useUTLS(config.TLSProfile) {
-		config.utlsClientSessionCache = utls.NewLRUClientSessionCache(0)
-	} else {
-		config.trisClientSessionCache = tris.NewLRUClientSessionCache(0)
+	if config.clientSessionCache == nil {
+		config.clientSessionCache = utls.NewLRUClientSessionCache(0)
 	}
 }
 
@@ -179,24 +170,22 @@ func SelectTLSProfile(
 	return tlsProfiles[choice]
 }
 
-func useUTLS(tlsProfile string) bool {
-	return tlsProfile != protocol.TLS_PROFILE_TLS13_RANDOMIZED
-}
-
 func getUTLSClientHelloID(tlsProfile string) utls.ClientHelloID {
 	switch tlsProfile {
-	case protocol.TLS_PROFILE_IOS_1131:
-		return utls.HelloiOSSafari_11_3_1
-	case protocol.TLS_PROFILE_ANDROID_60:
-		return utls.HelloAndroid_6_0_Browser
-	case protocol.TLS_PROFILE_ANDROID_51:
-		return utls.HelloAndroid_5_1_Browser
+	case protocol.TLS_PROFILE_IOS_111:
+		return utls.HelloIOS_11_1
 	case protocol.TLS_PROFILE_CHROME_58:
 		return utls.HelloChrome_58
-	case protocol.TLS_PROFILE_CHROME_57:
-		return utls.HelloChrome_57
+	case protocol.TLS_PROFILE_CHROME_62:
+		return utls.HelloChrome_62
+	case protocol.TLS_PROFILE_CHROME_70:
+		return utls.HelloChrome_70
+	case protocol.TLS_PROFILE_FIREFOX_55:
+		return utls.HelloFirefox_55
 	case protocol.TLS_PROFILE_FIREFOX_56:
 		return utls.HelloFirefox_56
+	case protocol.TLS_PROFILE_FIREFOX_63:
+		return utls.HelloFirefox_63
 	case protocol.TLS_PROFILE_RANDOMIZED:
 		return utls.HelloRandomized
 	default:
@@ -204,47 +193,35 @@ func getUTLSClientHelloID(tlsProfile string) utls.ClientHelloID {
 	}
 }
 
-// tlsConn provides a common interface for calling utls and tris methods. Both
-// utls and tris are derived from crypto/tls and have identical functions but
-// different types for return values etc.
-type tlsConn interface {
-	net.Conn
-	Handshake() error
-	GetPeerCertificates() []*x509.Certificate
-	IsHTTP2() bool
-}
+func getClientHelloVersion(utlsClientHelloID utls.ClientHelloID) (string, error) {
 
-type utlsConn struct {
-	*utls.UConn
-}
+	// Assumes utlsClientHelloID.Seed has been set; otherwise the result is
+	// ephemeral.
 
-func (conn *utlsConn) GetPeerCertificates() []*x509.Certificate {
-	return conn.UConn.ConnectionState().PeerCertificates
-}
+	conn := utls.UClient(
+		nil,
+		&utls.Config{InsecureSkipVerify: true},
+		utlsClientHelloID)
 
-func (conn *utlsConn) IsHTTP2() bool {
-	state := conn.UConn.ConnectionState()
-	return state.NegotiatedProtocolIsMutual &&
-		state.NegotiatedProtocol == "h2"
-}
+	err := conn.BuildHandshakeState()
+	if err != nil {
+		return "", common.ContextError(err)
+	}
 
-type trisConn struct {
-	*tris.Conn
-}
+	for _, v := range conn.HandshakeState.Hello.SupportedVersions {
+		if v == utls.VersionTLS13 {
+			return protocol.TLS_VERSION_13, nil
+		}
+	}
 
-func (conn *trisConn) GetPeerCertificates() []*x509.Certificate {
-	return conn.Conn.ConnectionState().PeerCertificates
-}
-
-func (conn *trisConn) IsHTTP2() bool {
-	state := conn.Conn.ConnectionState()
-	return state.NegotiatedProtocolIsMutual &&
-		state.NegotiatedProtocol == "h2"
+	return protocol.TLS_VERSION_12, nil
 }
 
 func IsTLSConnUsingHTTP2(conn net.Conn) bool {
-	if c, ok := conn.(tlsConn); ok {
-		return c.IsHTTP2()
+	if c, ok := conn.(*utls.UConn); ok {
+		state := c.ConnectionState()
+		return state.NegotiatedProtocolIsMutual &&
+			state.NegotiatedProtocol == "h2"
 	}
 	return false
 }
@@ -314,23 +291,6 @@ func CustomTLSDial(
 		tlsConfigInsecureSkipVerify = true
 	}
 
-	var obfuscatedSessionTicketKey [32]byte
-
-	if config.ObfuscatedSessionTicketKey != "" {
-
-		// See obfuscated session ticket overview in
-		// NewObfuscatedClientSessionCache.
-
-		key, err := hex.DecodeString(config.ObfuscatedSessionTicketKey)
-		if err == nil && len(key) != 32 {
-			err = errors.New("invalid obfuscated session key length")
-		}
-		if err != nil {
-			return nil, common.ContextError(err)
-		}
-		copy(obfuscatedSessionTicketKey[:], key)
-	}
-
 	var tlsRootCAs *x509.CertPool
 
 	if !config.SkipVerify &&
@@ -345,88 +305,102 @@ func CustomTLSDial(
 		tlsRootCAs.AppendCertsFromPEM(certData)
 	}
 
-	randomizedTLSProfileSeed := config.RandomizedTLSProfileSeed
+	tlsConfig := &utls.Config{
+		RootCAs:            tlsRootCAs,
+		InsecureSkipVerify: tlsConfigInsecureSkipVerify,
+		ServerName:         tlsConfigServerName,
+	}
 
-	if protocol.TLSProfileIsRandomized(selectedTLSProfile) &&
-		randomizedTLSProfileSeed == nil {
+	utlsClientHelloID := getUTLSClientHelloID(selectedTLSProfile)
 
-		randomizedTLSProfileSeed, err = prng.NewSeed()
+	if protocol.TLSProfileIsRandomized(selectedTLSProfile) {
+
+		randomizedTLSProfileSeed := config.RandomizedTLSProfileSeed
+
+		if randomizedTLSProfileSeed == nil {
+
+			randomizedTLSProfileSeed, err = prng.NewSeed()
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+		}
+
+		utlsClientHelloID.Seed = new(utls.PRNGSeed)
+		*utlsClientHelloID.Seed = [32]byte(*randomizedTLSProfileSeed)
+	}
+
+	conn := utls.UClient(rawConn, tlsConfig, utlsClientHelloID)
+
+	clientSessionCache := config.clientSessionCache
+	if clientSessionCache == nil {
+		clientSessionCache = utls.NewLRUClientSessionCache(0)
+	}
+
+	conn.SetSessionCache(clientSessionCache)
+
+	// Obfuscated session tickets are not currently supported in TLS 1.3, but we
+	// allow UNFRONTED-MEEK-SESSION-TICKET-OSSH to use TLS 1.3 profiles for
+	// additional diversity/capacity; TLS 1.3 encrypts the server certificate,
+	// so the desired obfuscated session tickets property of obfuscating server
+	// certificates is satisfied. We know that when the ClientHello offers TLS
+	// 1.3, the Psiphon server, in these direct protocol cases, will negoritate
+	// it.
+	if config.ObfuscatedSessionTicketKey != "" {
+
+		tlsVersion, err := getClientHelloVersion(utlsClientHelloID)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
-	}
 
-	// Depending on the selected TLS profile, the TLS provider will be tris
-	// (TLS 1.3) or utls (all other profiles).
+		if tlsVersion == protocol.TLS_VERSION_12 {
 
-	var conn tlsConn
+			var obfuscatedSessionTicketKey [32]byte
 
-	if useUTLS(selectedTLSProfile) {
+			key, err := hex.DecodeString(config.ObfuscatedSessionTicketKey)
+			if err == nil && len(key) != 32 {
+				err = errors.New("invalid obfuscated session key length")
+			}
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+			copy(obfuscatedSessionTicketKey[:], key)
 
-		clientSessionCache := config.utlsClientSessionCache
-		if clientSessionCache == nil {
-			clientSessionCache = utls.NewLRUClientSessionCache(0)
-		}
-
-		tlsConfig := &utls.Config{
-			RootCAs:            tlsRootCAs,
-			InsecureSkipVerify: tlsConfigInsecureSkipVerify,
-			ServerName:         tlsConfigServerName,
-			ClientSessionCache: clientSessionCache,
-		}
-
-		uconn := utls.UClient(
-			rawConn,
-			tlsConfig,
-			getUTLSClientHelloID(selectedTLSProfile),
-			randomizedTLSProfileSeed)
-
-		if config.ObfuscatedSessionTicketKey != "" {
-			sessionState, err := utls.NewObfuscatedClientSessionState(
+			obfuscatedSessionState, err := tris.NewObfuscatedClientSessionState(
 				obfuscatedSessionTicketKey)
 			if err != nil {
 				return nil, common.ContextError(err)
 			}
-			uconn.SetSessionState(sessionState)
+
+			conn.SetSessionState(
+				utls.MakeClientSessionState(
+					obfuscatedSessionState.SessionTicket,
+					obfuscatedSessionState.Vers,
+					obfuscatedSessionState.CipherSuite,
+					obfuscatedSessionState.MasterSecret,
+					nil,
+					nil))
+
+			// Ensure that TLS ClientHello has required session ticket extension and
+			// obfuscated session ticket cipher suite; the latter is required by
+			// utls/tls.Conn.loadSession. If these requirements are not met the
+			// obfuscation session ticket would be ignored, so fail.
+
+			err = conn.BuildHandshakeState()
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+
+			if !tris.ContainsObfuscatedSessionTicketCipherSuite(
+				conn.HandshakeState.Hello.CipherSuites) {
+				return nil, common.ContextError(
+					errors.New("missing obfuscated session ticket cipher suite"))
+			}
+
+			if len(conn.HandshakeState.Hello.SessionTicket) == 0 {
+				return nil, common.ContextError(
+					errors.New("missing session ticket extension"))
+			}
 		}
-
-		conn = &utlsConn{
-			UConn: uconn,
-		}
-
-	} else {
-
-		clientSessionCache := config.trisClientSessionCache
-		if clientSessionCache == nil {
-			clientSessionCache = tris.NewLRUClientSessionCache(0)
-		}
-
-		// The tris TLS provider should be used only for TLS 1.3.
-		//
-		// Obfuscated session tickets are not currently supported in TLS 1.3,
-		// but we allow UNFRONTED-MEEK-SESSION-TICKET-OSSH to use TLS 1.3
-		// profiles for additional diversity/capacity; TLS 1.3 encrypts the
-		// server certificate, so the desired obfuscated session tickets
-		// property of obfuscating server certificates is satisfied.
-		//
-		// An additional sanity check:
-		if !protocol.TLSProfileIsTLS13(selectedTLSProfile) {
-			return nil, common.ContextError(errors.New("TLS profile is not TLS 1.3"))
-		}
-
-		tlsConfig := &tris.Config{
-			RootCAs:                 tlsRootCAs,
-			InsecureSkipVerify:      tlsConfigInsecureSkipVerify,
-			ServerName:              tlsConfigServerName,
-			ClientSessionCache:      clientSessionCache,
-			UseExtendedMasterSecret: true,
-			ClientHelloPRNGSeed:     randomizedTLSProfileSeed,
-		}
-
-		conn = &trisConn{
-			Conn: tris.Client(rawConn, tlsConfig),
-		}
-
 	}
 
 	resultChannel := make(chan error)
@@ -462,8 +436,8 @@ func CustomTLSDial(
 	return conn, nil
 }
 
-func verifyLegacyCertificate(conn tlsConn, expectedCertificate *x509.Certificate) error {
-	certs := conn.GetPeerCertificates()
+func verifyLegacyCertificate(conn *utls.UConn, expectedCertificate *x509.Certificate) error {
+	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) < 1 {
 		return common.ContextError(errors.New("no certificate to verify"))
 	}
@@ -473,8 +447,8 @@ func verifyLegacyCertificate(conn tlsConn, expectedCertificate *x509.Certificate
 	return nil
 }
 
-func verifyServerCerts(conn tlsConn, hostname string) error {
-	certs := conn.GetPeerCertificates()
+func verifyServerCerts(conn *utls.UConn, hostname string) error {
+	certs := conn.ConnectionState().PeerCertificates
 
 	opts := x509.VerifyOptions{
 		Roots:         nil, // Use host's root CAs

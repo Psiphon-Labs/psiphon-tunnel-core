@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	"github.com/Psiphon-Labs/utls/cipherhw"
+	"github.com/Psiphon-Labs/tls-tris/cipherhw"
 )
 
 const (

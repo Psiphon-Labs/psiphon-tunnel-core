@@ -208,7 +208,7 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
-			tlsProfile:           protocol.TLS_PROFILE_TLS13_RANDOMIZED,
+			tlsProfile:           protocol.TLS_PROFILE_CHROME_70,
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			doDefaultSponsorID:   false,
@@ -226,7 +226,7 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
-			tlsProfile:           protocol.TLS_PROFILE_RANDOMIZED,
+			tlsProfile:           protocol.TLS_PROFILE_CHROME_58,
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			doDefaultSponsorID:   false,
@@ -244,7 +244,7 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
-			tlsProfile:           protocol.TLS_PROFILE_TLS13_RANDOMIZED,
+			tlsProfile:           protocol.TLS_PROFILE_CHROME_70,
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			doDefaultSponsorID:   false,
@@ -1131,6 +1131,7 @@ func checkExpectedLogFields(runConfig *runServerConfig, fields map[string]interf
 
 		for _, name := range []string{
 			"tls_profile",
+			"tls_version",
 			"meek_sni_server_name",
 		} {
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
@@ -1152,6 +1153,11 @@ func checkExpectedLogFields(runConfig *runServerConfig, fields map[string]interf
 			return fmt.Errorf("unexpected tls_profile '%s'", fields["tls_profile"])
 		}
 
+		if !common.Contains(
+			[]string{protocol.TLS_VERSION_12, protocol.TLS_VERSION_13},
+			fields["tls_version"].(string)) {
+			return fmt.Errorf("unexpected tls_version '%s'", fields["tls_version"])
+		}
 	}
 
 	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) {

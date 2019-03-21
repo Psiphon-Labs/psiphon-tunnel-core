@@ -63,16 +63,10 @@
 			"revisionTime": "2018-09-12T16:47:43Z"
 		},
 		{
-			"checksumSHA1": "jgnMy8LzzP2+YM0UxU/Bz0Gq1Xc=",
+			"checksumSHA1": "y8tFswpWyQI0zXMMT39+dVP1x6c=",
 			"path": "github.com/Psiphon-Labs/tls-tris",
-			"revision": "b1bee89a578d564109bdfa48f9ba1b9434d776f9",
-			"revisionTime": "2019-01-08T19:41:13Z"
-		},
-		{
-			"checksumSHA1": "pXgGBe9O8n4KGzAlakVVVwwJqxo=",
-			"path": "github.com/Psiphon-Labs/utls",
-			"revision": "11a4cc03332235a55c37ed7d686f4ac008749ddb",
-			"revisionTime": "2018-12-19T02:27:42Z"
+			"revision": "777566a29deb385059e6690673e87fb2b0b61e92",
+			"revisionTime": "2019-03-13T14:52:28Z"
 		},
 		{
 			"checksumSHA1": "zaEXXT0xMkEADcxW9GvBK0iYe1A=",
@@ -462,7 +456,7 @@
 		{
 			"checksumSHA1": "DOD/+i5lGLwR8HueE7E4H48Z8OA=",
 			"path": "github.com/refraction-networking/utls",
-			"revision": "f8425e69f7d4eff4e1988c6c4ca1ca9a6e17a42f",
+			"revision": "05163f8a36354aa43b8c49b8b53feddd9b6fd26b",
 			"revisionTime": "2019-03-17T21:38:08Z"
 		},
 		{

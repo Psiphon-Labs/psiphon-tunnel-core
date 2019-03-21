@@ -191,41 +191,49 @@ func UseClientTunnelProtocol(
 }
 
 const (
-	TLS_PROFILE_IOS_1131         = "iOS-Safari-11.3.1"
-	TLS_PROFILE_ANDROID_60       = "Android-6.0"
-	TLS_PROFILE_ANDROID_51       = "Android-5.1"
-	TLS_PROFILE_CHROME_58        = "Chrome-58"
-	TLS_PROFILE_CHROME_57        = "Chrome-57"
-	TLS_PROFILE_FIREFOX_56       = "Firefox-56"
-	TLS_PROFILE_RANDOMIZED       = "Randomized"
-	TLS_PROFILE_TLS13_RANDOMIZED = "TLS-1.3-Randomized"
+	TLS_VERSION_12 = "TLSv1.2"
+	TLS_VERSION_13 = "TLSv1.3"
+
+	TLS_PROFILE_IOS_111    = "iOS-11.1"
+	TLS_PROFILE_CHROME_58  = "Chrome-58"
+	TLS_PROFILE_CHROME_62  = "Chrome-62"
+	TLS_PROFILE_CHROME_70  = "Chrome-70"
+	TLS_PROFILE_FIREFOX_55 = "Firefox-55"
+	TLS_PROFILE_FIREFOX_56 = "Firefox-56"
+	TLS_PROFILE_FIREFOX_63 = "Firefox-63"
+	TLS_PROFILE_RANDOMIZED = "Randomized-v2"
 )
 
 var SupportedTLSProfiles = TLSProfiles{
-	TLS_PROFILE_IOS_1131,
-	TLS_PROFILE_ANDROID_60,
-	TLS_PROFILE_ANDROID_51,
+	TLS_PROFILE_IOS_111,
 	TLS_PROFILE_CHROME_58,
-	TLS_PROFILE_CHROME_57,
+	TLS_PROFILE_CHROME_62,
+	TLS_PROFILE_CHROME_70,
+	TLS_PROFILE_FIREFOX_55,
 	TLS_PROFILE_FIREFOX_56,
+	TLS_PROFILE_FIREFOX_63,
 	TLS_PROFILE_RANDOMIZED,
-	TLS_PROFILE_TLS13_RANDOMIZED,
 }
 
 func TLSProfileIsRandomized(tlsProfile string) bool {
-	return tlsProfile == TLS_PROFILE_RANDOMIZED ||
-		tlsProfile == TLS_PROFILE_TLS13_RANDOMIZED
-}
-
-func TLSProfileIsTLS13(tlsProfile string) bool {
-	return tlsProfile == TLS_PROFILE_TLS13_RANDOMIZED
+	return tlsProfile == TLS_PROFILE_RANDOMIZED
 }
 
 type TLSProfiles []string
 
 func (profiles TLSProfiles) Validate() error {
+
+	legacyTLSProfiles := TLSProfiles{
+		"iOS-Safari-11.3.1",
+		"Android-6.0",
+		"Android-5.1",
+		"Chrome-57",
+		"Randomized",
+		"TLS-1.3-Randomized",
+	}
+
 	for _, p := range profiles {
-		if !common.Contains(SupportedTLSProfiles, p) {
+		if !common.Contains(SupportedTLSProfiles, p) && !common.Contains(legacyTLSProfiles, p) {
 			return common.ContextError(fmt.Errorf("invalid TLS profile: %s", p))
 		}
 	}
