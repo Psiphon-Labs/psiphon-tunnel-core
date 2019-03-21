@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	utls "github.com/refraction-networking/utls"
 	regen "github.com/zach-klippenstein/goregen"
 )
 
@@ -311,6 +312,7 @@ func MakeDialParameters(
 		utlsClientHelloID := getUTLSClientHelloID(dialParams.TLSProfile)
 
 		if protocol.TLSProfileIsRandomized(dialParams.TLSProfile) {
+			utlsClientHelloID.Seed = new(utls.PRNGSeed)
 			*utlsClientHelloID.Seed = [32]byte(*dialParams.RandomizedTLSProfileSeed)
 		}
 
