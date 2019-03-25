@@ -174,18 +174,22 @@ func getUTLSClientHelloID(tlsProfile string) utls.ClientHelloID {
 	switch tlsProfile {
 	case protocol.TLS_PROFILE_IOS_111:
 		return utls.HelloIOS_11_1
+	case protocol.TLS_PROFILE_IOS_121:
+		return utls.HelloIOS_12_1
 	case protocol.TLS_PROFILE_CHROME_58:
 		return utls.HelloChrome_58
 	case protocol.TLS_PROFILE_CHROME_62:
 		return utls.HelloChrome_62
 	case protocol.TLS_PROFILE_CHROME_70:
 		return utls.HelloChrome_70
+	case protocol.TLS_PROFILE_CHROME_72:
+		return utls.HelloChrome_72
 	case protocol.TLS_PROFILE_FIREFOX_55:
 		return utls.HelloFirefox_55
 	case protocol.TLS_PROFILE_FIREFOX_56:
 		return utls.HelloFirefox_56
-	case protocol.TLS_PROFILE_FIREFOX_63:
-		return utls.HelloFirefox_63
+	case protocol.TLS_PROFILE_FIREFOX_65:
+		return utls.HelloFirefox_65
 	case protocol.TLS_PROFILE_RANDOMIZED:
 		return utls.HelloRandomized
 	default:
