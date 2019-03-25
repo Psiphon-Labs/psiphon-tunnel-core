@@ -325,9 +325,13 @@ func CustomTLSDial(
 
 	utlsClientHelloID := getUTLSClientHelloID(selectedTLSProfile)
 
-	if protocol.TLSProfileIsRandomized(selectedTLSProfile) {
+	isRandomized := protocol.TLSProfileIsRandomized(selectedTLSProfile)
 
-		randomizedTLSProfileSeed := config.RandomizedTLSProfileSeed
+	var randomizedTLSProfileSeed *prng.Seed
+
+	if isRandomized {
+
+		randomizedTLSProfileSeed = config.RandomizedTLSProfileSeed
 
 		if randomizedTLSProfileSeed == nil {
 
@@ -339,6 +343,21 @@ func CustomTLSDial(
 
 		utlsClientHelloID.Seed = new(utls.PRNGSeed)
 		*utlsClientHelloID.Seed = [32]byte(*randomizedTLSProfileSeed)
+	}
+
+	// As noted here,
+	// https://gitlab.com/yawning/obfs4/commit/ca6765e3e3995144df2b1ca9f0e9d823a7f8a47c,
+	// the dynamic record sizing optimization in crypto/tls is not commonly
+	// implemented in browsers. Disable it for all non-Golang utls parrots and
+	// select it randomly when using the randomized client hello.
+	if isRandomized {
+		PRNG, err := prng.NewPRNGWithSaltedSeed(randomizedTLSProfileSeed, "tls-dynamic-record-sizing")
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+		tlsConfig.DynamicRecordSizingDisabled = PRNG.FlipCoin()
+	} else {
+		tlsConfig.DynamicRecordSizingDisabled = (utlsClientHelloID != utls.HelloGolang)
 	}
 
 	conn := utls.UClient(rawConn, tlsConfig, utlsClientHelloID)
