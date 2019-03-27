@@ -20,7 +20,9 @@
 package psiphon
 
 import (
+	"crypto/md5"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -519,6 +521,8 @@ type Config struct {
 	// calling clientParameters.Set directly will fail to add config values.
 	clientParameters *parameters.ClientParameters
 
+	dialParametersHash []byte
+
 	dynamicConfigMutex sync.Mutex
 	sponsorID          string
 	authorizations     []string
@@ -582,6 +586,10 @@ func (config *Config) Commit() error {
 
 	if config.UpgradeDownloadUrl != "" && config.UpgradeDownloadURLs == nil {
 		config.UpgradeDownloadURLs = promoteLegacyDownloadURL(config.UpgradeDownloadUrl)
+	}
+
+	if config.TunnelProtocol != "" && len(config.LimitTunnelProtocols) == 0 {
+		config.LimitTunnelProtocols = []string{config.TunnelProtocol}
 	}
 
 	// Supply default values.
@@ -710,6 +718,11 @@ func (config *Config) Commit() error {
 	if err != nil {
 		return common.ContextError(err)
 	}
+
+	// Calculate and set the dial parameters hash. After this point, related
+	// config fields must not change.
+
+	config.setDialParametersHash()
 
 	// Set defaults for dynamic config fields.
 
@@ -847,8 +860,6 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if len(config.LimitTunnelProtocols) > 0 {
 		applyParameters[parameters.LimitTunnelProtocols] = protocol.TunnelProtocols(config.LimitTunnelProtocols)
-	} else if config.TunnelProtocol != "" {
-		applyParameters[parameters.LimitTunnelProtocols] = protocol.TunnelProtocols{config.TunnelProtocol}
 	}
 
 	if len(config.InitialLimitTunnelProtocols) > 0 && config.InitialLimitTunnelProtocolsCandidateCount > 0 {
@@ -1000,6 +1011,111 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 	}
 
 	return applyParameters
+}
+
+func (config *Config) setDialParametersHash() {
+
+	// Calculate and store a hash of the config values that may impact
+	// dial parameters. This hash is used as part of the dial parameters
+	// replay mechanism to detect when persisted dial parameters must
+	// be discarded due to conflicting config changes.
+	//
+	// MD5 hash is used solely as a data checksum and not for any security
+	// purpose.
+
+	hash := md5.New()
+
+	if len(config.LimitTunnelProtocols) > 0 {
+		for _, protocol := range config.LimitTunnelProtocols {
+			hash.Write([]byte(protocol))
+		}
+	}
+
+	if len(config.InitialLimitTunnelProtocols) > 0 && config.InitialLimitTunnelProtocolsCandidateCount > 0 {
+		for _, protocol := range config.InitialLimitTunnelProtocols {
+			hash.Write([]byte(protocol))
+		}
+		binary.Write(hash, binary.LittleEndian, config.InitialLimitTunnelProtocolsCandidateCount)
+	}
+
+	if len(config.LimitTLSProfiles) > 0 {
+		for _, profile := range config.LimitTLSProfiles {
+			hash.Write([]byte(profile))
+		}
+	}
+
+	if len(config.LimitQUICVersions) > 0 {
+		for _, version := range config.LimitQUICVersions {
+			hash.Write([]byte(version))
+		}
+	}
+
+	// *TODO*
+	if _, ok := config.CustomHeaders["User-Agent"]; ok {
+		hash.Write([]byte{1})
+	}
+
+	if config.UpstreamProxyURL != "" {
+		hash.Write([]byte(config.UpstreamProxyURL))
+	}
+
+	if config.TransformHostNames != "" {
+		hash.Write([]byte(config.TransformHostNames))
+	}
+
+	if config.UseFragmentor != "" {
+		hash.Write([]byte(config.UseFragmentor))
+	}
+
+	if config.FragmentorMinTotalBytes != nil {
+		binary.Write(hash, binary.LittleEndian, *config.FragmentorMinTotalBytes)
+	}
+
+	if config.FragmentorMaxTotalBytes != nil {
+		binary.Write(hash, binary.LittleEndian, *config.FragmentorMaxTotalBytes)
+	}
+
+	if config.FragmentorMinWriteBytes != nil {
+		binary.Write(hash, binary.LittleEndian, *config.FragmentorMinWriteBytes)
+	}
+
+	if config.FragmentorMaxWriteBytes != nil {
+		binary.Write(hash, binary.LittleEndian, *config.FragmentorMaxWriteBytes)
+	}
+
+	if config.FragmentorMinDelayMicroseconds != nil {
+		binary.Write(hash, binary.LittleEndian, *config.FragmentorMinDelayMicroseconds)
+	}
+
+	if config.FragmentorMaxDelayMicroseconds != nil {
+		binary.Write(hash, binary.LittleEndian, *config.FragmentorMaxDelayMicroseconds)
+	}
+
+	if config.ObfuscatedSSHMinPadding != nil {
+		binary.Write(hash, binary.LittleEndian, *config.ObfuscatedSSHMinPadding)
+	}
+
+	if config.ObfuscatedSSHMaxPadding != nil {
+		binary.Write(hash, binary.LittleEndian, *config.ObfuscatedSSHMaxPadding)
+	}
+
+	if config.LivenessTestMinUpstreamBytes != nil {
+		binary.Write(hash, binary.LittleEndian, *config.LivenessTestMinUpstreamBytes)
+	}
+
+	if config.LivenessTestMaxUpstreamBytes != nil {
+		binary.Write(hash, binary.LittleEndian, *config.LivenessTestMaxUpstreamBytes)
+	}
+
+	if config.LivenessTestMinDownstreamBytes != nil {
+		binary.Write(hash, binary.LittleEndian, *config.LivenessTestMinDownstreamBytes)
+	}
+
+	if config.LivenessTestMaxDownstreamBytes != nil {
+		binary.Write(hash, binary.LittleEndian, *config.LivenessTestMaxDownstreamBytes)
+	}
+
+	config.dialParametersHash = hash.Sum(nil)
 }
 
 func promoteLegacyDownloadURL(URL string) parameters.DownloadURLs {

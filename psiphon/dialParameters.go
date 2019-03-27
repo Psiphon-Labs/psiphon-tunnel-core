@@ -620,23 +620,28 @@ func getConfigStateHash(
 	// of these input values change in a way that invalidates any stored dial
 	// parameters.
 
-	// MD5 hash is used solely as a data checksum and not for any security purpose.
+	// MD5 hash is used solely as a data checksum and not for any security
+	// purpose.
 	hash := md5.New()
 
+	// Add a hash of relevant config fields.
+	// Limitation: the config hash may change even when tactics will override the
+	// changed config field.
+	hash.Write(config.dialParametersHash)
+
+	// Add the active tactics tag.
 	hash.Write([]byte(p.Tag()))
 
+	// Add the server entry version and local timestamp, both of which should
+	// change when the server entry contents change and/or a new local copy is
+	// imported.
 	// TODO: marshal entire server entry?
-
 	var serverEntryConfigurationVersion [8]byte
 	binary.BigEndian.PutUint64(
 		serverEntryConfigurationVersion[:],
 		uint64(serverEntry.ConfigurationVersion))
 	hash.Write(serverEntryConfigurationVersion[:])
 	hash.Write([]byte(serverEntry.LocalTimestamp))
-
-	// TODO: add config.CustomHeaders, which could impact User-Agent header?
-
-	hash.Write([]byte(config.UpstreamProxyURL))
 
 	return hash.Sum(nil)
 }
