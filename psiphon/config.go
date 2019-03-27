@@ -271,6 +271,10 @@ type Config struct {
 	// handling, and application of parameters.
 	DisableTactics bool
 
+	// DisableReplay causes any persisted dial parameters to be ignored when
+	// they would otherwise be used for replay.
+	DisableReplay bool
+
 	// TransformHostNames specifies whether to use hostname transformation
 	// circumvention strategies. Set to "always" to always transform, "never"
 	// to never transform, and "", the default, for the default transformation

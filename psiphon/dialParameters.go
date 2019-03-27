@@ -205,11 +205,11 @@ func MakeDialParameters(
 	}
 
 	if dialParams != nil {
-		if !canReplay(serverEntry, dialParams.TunnelProtocol) {
+		if config.DisableReplay ||
+			!canReplay(serverEntry, dialParams.TunnelProtocol) {
 
-			// In this ephemeral case, existing dial parameters may still be
-			// valid and used in future establishment phases, and so are
-			// retained.
+			// In these ephemeral cases, existing dial parameters may still be valid
+			// and used in future establishment phases, and so are retained.
 
 			dialParams = nil
 		}
