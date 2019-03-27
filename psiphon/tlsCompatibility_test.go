@@ -40,13 +40,11 @@ func TestTLSCompatibility(t *testing.T) {
 	// Config should be newline delimited list of domain/IP:port TLS host
 	// addresses to connect to.
 
+	var configAddresses []string
 	config, err := ioutil.ReadFile("tlsCompatibility_test.config")
-	if err != nil {
-		// Skip, don't fail, if config file is not present
-		t.Skipf("error loading configuration file: %s", err)
+	if err == nil {
+		configAddresses = strings.Split(string(config), "\n")
 	}
-
-	addresses := strings.Split(string(config), "\n")
 
 	runner := func(address string) func(t *testing.T) {
 		return func(t *testing.T) {
@@ -54,7 +52,7 @@ func TestTLSCompatibility(t *testing.T) {
 		}
 	}
 
-	for _, address := range addresses {
+	for _, address := range configAddresses {
 		if len(address) > 0 {
 			t.Run(address, runner(address))
 		}
