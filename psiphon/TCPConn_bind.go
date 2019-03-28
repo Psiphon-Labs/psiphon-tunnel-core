@@ -261,6 +261,17 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 			continue
 		}
 
+		// Handle the case where net.FileConn produces a Conn where RemoteAddr
+		// unexpectedly returns nil: https://github.com/golang/go/issues/23022.
+		//
+		// The net.Conn interface indicates that RemoteAddr returns a usable value,
+		// and code such as crypto/tls, in loadSession/clientSessionCacheKey, uses
+		// the RemoteAddr return value without a nil check, resulting in an panic.
+		if conn.RemoteAddr() == nil {
+			conn.Close()
+			return nil, common.ContextError(errors.New("RemoteAddr returns nil"))
+		}
+
 		return &TCPConn{Conn: conn}, nil
 	}
 
