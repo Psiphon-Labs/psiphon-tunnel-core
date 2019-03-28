@@ -143,13 +143,18 @@ func (config *CustomTLSConfig) EnableClientSessionCache(
 	}
 }
 
-// SelectTLSProfile picks a random TLS profile from the available candidates.
+// SelectTLSProfile picks a TLS profile at random from the available candidates.
 func SelectTLSProfile(
 	p *parameters.ClientParametersSnapshot) string {
 
+	// Two TLS profile lists are constructed, subject to limit constraints: fixed
+	// parrots and randomized. If one list is empty, the non-empty list is used.
+	// Otherwise SelectRandomizedTLSProfileProbability determines which list is used.
+
 	limitTLSProfiles := p.TLSProfiles(parameters.LimitTLSProfiles)
 
-	tlsProfiles := make([]string, 0)
+	randomizedTLSProfiles := make([]string, 0)
+	parrotTLSProfiles := make([]string, 0)
 
 	for _, tlsProfile := range protocol.SupportedTLSProfiles {
 
@@ -158,16 +163,25 @@ func SelectTLSProfile(
 			continue
 		}
 
-		tlsProfiles = append(tlsProfiles, tlsProfile)
+		if protocol.TLSProfileIsRandomized(tlsProfile) {
+			randomizedTLSProfiles = append(randomizedTLSProfiles, tlsProfile)
+		} else {
+			parrotTLSProfiles = append(parrotTLSProfiles, tlsProfile)
+		}
 	}
 
-	if len(tlsProfiles) == 0 {
+	if len(randomizedTLSProfiles) > 0 &&
+		(len(parrotTLSProfiles) == 0 ||
+			p.WeightedCoinFlip(parameters.SelectRandomizedTLSProfileProbability)) {
+
+		return randomizedTLSProfiles[prng.Intn(len(randomizedTLSProfiles))]
+	}
+
+	if len(parrotTLSProfiles) == 0 {
 		return ""
 	}
 
-	choice := prng.Intn(len(tlsProfiles))
-
-	return tlsProfiles[choice]
+	return parrotTLSProfiles[prng.Intn(len(parrotTLSProfiles))]
 }
 
 func getUTLSClientHelloID(tlsProfile string) utls.ClientHelloID {
