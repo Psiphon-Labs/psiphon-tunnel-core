@@ -454,10 +454,10 @@
 			"tree": true
 		},
 		{
-			"checksumSHA1": "DOD/+i5lGLwR8HueE7E4H48Z8OA=",
+			"checksumSHA1": "Uuafl1PrU6CwsKq6X5ckHNMAA6w=",
 			"path": "github.com/refraction-networking/utls",
-			"revision": "05163f8a36354aa43b8c49b8b53feddd9b6fd26b",
-			"revisionTime": "2019-03-17T21:38:08Z"
+			"revision": "b7c656eec2d2aa957b1e844446e867a567e17d1f",
+			"revisionTime": "2019-03-27T16:53:10Z"
 		},
 		{
 			"checksumSHA1": "Fn9JW8u40ABN9Uc9wuvquuyOB+8=",
