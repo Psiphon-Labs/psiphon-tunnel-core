@@ -267,6 +267,11 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 		// The net.Conn interface indicates that RemoteAddr returns a usable value,
 		// and code such as crypto/tls, in loadSession/clientSessionCacheKey, uses
 		// the RemoteAddr return value without a nil check, resulting in an panic.
+		//
+		// As the most likely explanation for this net.FileConn condition is
+		// getpeername returning ENOTCONN due to the socket connection closing
+		// during the net.FileConn execution, we choose to abort this dial rather
+		// than try to mask the RemoteAddr issue.
 		if conn.RemoteAddr() == nil {
 			conn.Close()
 			return nil, common.ContextError(errors.New("RemoteAddr returns nil"))
