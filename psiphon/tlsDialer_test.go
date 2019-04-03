@@ -32,28 +32,32 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	tris "github.com/Psiphon-Labs/tls-tris"
+	utls "github.com/refraction-networking/utls"
 )
 
-func TestTLSCompatibility(t *testing.T) {
+func TestTLSDialerCompatibility(t *testing.T) {
 
-	// Config should be newline delimited list of domain/IP:port TLS host
-	// addresses to connect to.
+	// This test checks that each TLS profile can successfully complete a TLS
+	// handshake with various servers. By default, only the "psiphon" case is
+	// run, which runs the same TLS listener used by a Psiphon server.
+	//
+	// An optional config file, when supplied, enables testing against remote
+	// servers. Config should be newline delimited list of domain/IP:port TLS
+	// host addresses to connect to.
 
-	config, err := ioutil.ReadFile("tlsCompatibility_test.config")
-	if err != nil {
-		// Skip, don't fail, if config file is not present
-		t.Skipf("error loading configuration file: %s", err)
+	var configAddresses []string
+	config, err := ioutil.ReadFile("tlsDialerCompatibility_test.config")
+	if err == nil {
+		configAddresses = strings.Split(string(config), "\n")
 	}
-
-	addresses := strings.Split(string(config), "\n")
 
 	runner := func(address string) func(t *testing.T) {
 		return func(t *testing.T) {
-			testTLSCompatibility(t, address)
+			testTLSDialerCompatibility(t, address)
 		}
 	}
 
-	for _, address := range addresses {
+	for _, address := range configAddresses {
 		if len(address) > 0 {
 			t.Run(address, runner(address))
 		}
@@ -62,7 +66,7 @@ func TestTLSCompatibility(t *testing.T) {
 	t.Run("psiphon", runner(""))
 }
 
-func testTLSCompatibility(t *testing.T, address string) {
+func testTLSDialerCompatibility(t *testing.T, address string) {
 
 	if address == "" {
 
@@ -160,5 +164,67 @@ func testTLSCompatibility(t *testing.T, address string) {
 		} else {
 			t.Errorf(result)
 		}
+	}
+}
+
+func TestSelectTLSProfile(t *testing.T) {
+
+	clientParameters, err := parameters.NewClientParameters(nil)
+	if err != nil {
+		t.Fatalf("%s\n", err)
+	}
+
+	selected := make(map[string]int)
+
+	numSelections := 10000
+
+	for i := 0; i < numSelections; i++ {
+		profile := SelectTLSProfile(clientParameters.Get())
+		selected[profile] += 1
+	}
+
+	// All TLS profiles should be selected at least once.
+
+	for _, profile := range protocol.SupportedTLSProfiles {
+		if selected[profile] < 1 {
+			t.Errorf("TLS profile %s not selected", profile)
+		}
+	}
+
+	// Randomized TLS profiles should be selected with expected probability.
+
+	numRandomized := 0
+	for profile, n := range selected {
+		if protocol.TLSProfileIsRandomized(profile) {
+			numRandomized += n
+		}
+	}
+
+	t.Logf("ratio of randomized selected: %d/%d",
+		numRandomized, numSelections)
+
+	randomizedProbability := clientParameters.Get().Float(
+		parameters.SelectRandomizedTLSProfileProbability)
+
+	if numRandomized < int(0.9*float64(numSelections)*randomizedProbability) ||
+		numRandomized > int(1.1*float64(numSelections)*randomizedProbability) {
+
+		t.Error("Unexpected ratio")
+	}
+
+	// getUTLSClientHelloID should map each TLS profile to a utls ClientHelloID.
+
+	for _, profile := range protocol.SupportedTLSProfiles {
+		if getUTLSClientHelloID(profile) == utls.HelloGolang {
+			t.Errorf("TLS profile %s has no utls ClientHelloID", profile)
+		}
+	}
+}
+
+func BenchmarkRandomizedGetClientHelloVersion(b *testing.B) {
+	for n := 0; n < b.N; n++ {
+		utlsClientHelloID := utls.HelloRandomized
+		utlsClientHelloID.Seed, _ = utls.NewPRNGSeed()
+		getClientHelloVersion(utlsClientHelloID)
 	}
 }

@@ -93,6 +93,7 @@ const (
 	LimitTunnelProtocols                             = "LimitTunnelProtocols"
 	LimitTLSProfilesProbability                      = "LimitTLSProfilesProbability"
 	LimitTLSProfiles                                 = "LimitTLSProfiles"
+	SelectRandomizedTLSProfileProbability            = "SelectRandomizedTLSProfileProbability"
 	LimitQUICVersionsProbability                     = "LimitQUICVersionsProbability"
 	LimitQUICVersions                                = "LimitQUICVersions"
 	FragmentorProbability                            = "FragmentorProbability"
@@ -265,8 +266,9 @@ var defaultClientParameters = map[string]struct {
 	LimitTunnelProtocolsProbability: {value: 1.0, minimum: 0.0},
 	LimitTunnelProtocols:            {value: protocol.TunnelProtocols{}},
 
-	LimitTLSProfilesProbability: {value: 1.0, minimum: 0.0},
-	LimitTLSProfiles:            {value: protocol.TLSProfiles{}},
+	LimitTLSProfilesProbability:           {value: 1.0, minimum: 0.0},
+	LimitTLSProfiles:                      {value: protocol.TLSProfiles{}},
+	SelectRandomizedTLSProfileProbability: {value: 0.25, minimum: 0.0},
 
 	LimitQUICVersionsProbability: {value: 1.0, minimum: 0.0},
 	LimitQUICVersions:            {value: protocol.QUICVersions{}},
