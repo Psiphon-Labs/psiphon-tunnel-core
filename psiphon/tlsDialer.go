@@ -388,7 +388,7 @@ func CustomTLSDial(
 	// additional diversity/capacity; TLS 1.3 encrypts the server certificate,
 	// so the desired obfuscated session tickets property of obfuscating server
 	// certificates is satisfied. We know that when the ClientHello offers TLS
-	// 1.3, the Psiphon server, in these direct protocol cases, will negoritate
+	// 1.3, the Psiphon server, in these direct protocol cases, will negotiate
 	// it.
 	if config.ObfuscatedSessionTicketKey != "" {
 

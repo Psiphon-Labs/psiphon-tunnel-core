@@ -1054,7 +1054,9 @@ func (config *Config) setDialParametersHash() {
 		}
 	}
 
-	// *TODO*
+	// Whether a custom User-Agent is specified is a binary flag: when not set,
+	// the replay dial parameters value applies. When set, external
+	// considerations apply.
 	if _, ok := config.CustomHeaders["User-Agent"]; ok {
 		hash.Write([]byte{1})
 	}
