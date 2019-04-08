@@ -312,6 +312,11 @@ type ConnectedResponse struct {
 	Padding            string `json:"padding"`
 }
 
+type StatusResponse struct {
+	InvalidServerEntryTags []string `json:"invalid_server_entry_tags"`
+	Padding                string   `json:"padding"`
+}
+
 type OSLRequest struct {
 	ClearLocalSLOKs bool             `json:"clear_local_sloks"`
 	SeedPayload     *osl.SeedPayload `json:"seed_payload"`

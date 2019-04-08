@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
@@ -34,6 +35,8 @@ import (
 
 var (
 	datastoreServerEntriesBucket                = []byte("serverEntries")
+	datastoreServerEntryTagsBucket              = []byte("serverEntryTags")
+	datastoreServerEntryTombstoneTagsBucket     = []byte("serverEntryTombstoneTags")
 	datastoreSplitTunnelRouteETagsBucket        = []byte("splitTunnelRouteETags")
 	datastoreSplitTunnelRouteDataBucket         = []byte("splitTunnelRouteData")
 	datastoreUrlETagsBucket                     = []byte("urlETags")
@@ -161,13 +164,15 @@ func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExi
 	err = datastoreUpdate(func(tx *datastoreTx) error {
 
 		serverEntries := tx.bucket(datastoreServerEntriesBucket)
+		serverEntryTags := tx.bucket(datastoreServerEntryTagsBucket)
+		serverEntryTombstoneTags := tx.bucket(datastoreServerEntryTombstoneTagsBucket)
 
-		ipAddress := serverEntryFields.GetIPAddress()
+		serverEntryID := []byte(serverEntryFields.GetIPAddress())
 
 		// Check not only that the entry exists, but is valid. This
 		// will replace in the rare case where the data is corrupt.
 		existingConfigurationVersion := -1
-		existingData := serverEntries.get([]byte(ipAddress))
+		existingData := serverEntries.get(serverEntryID)
 		if existingData != nil {
 			var existingServerEntry *protocol.ServerEntry
 			err := json.Unmarshal(existingData, &existingServerEntry)
@@ -188,16 +193,41 @@ func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExi
 			return nil
 		}
 
+		serverEntryTag := serverEntryFields.GetTag()
+
+		// Generate a derived tag when the server entry has no tag.
+		if serverEntryTag == "" {
+
+			serverEntryTag = protocol.GenerateServerEntryTag(
+				serverEntryFields.GetIPAddress(),
+				serverEntryFields.GetWebServerSecret())
+
+			serverEntryFields.SetTag(serverEntryTag)
+		}
+
+		serverEntryTagBytes := []byte(serverEntryTag)
+
+		// Ignore the server entry if it was previously pruned.
+		if serverEntryTombstoneTags.get(serverEntryTagBytes) != nil {
+			return nil
+		}
+
 		data, err := json.Marshal(serverEntryFields)
 		if err != nil {
 			return common.ContextError(err)
 		}
-		err = serverEntries.put([]byte(ipAddress), data)
+
+		err = serverEntries.put(serverEntryID, data)
 		if err != nil {
 			return common.ContextError(err)
 		}
 
-		NoticeInfo("updated server %s", ipAddress)
+		err = serverEntryTags.put(serverEntryTagBytes, serverEntryID)
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		NoticeInfo("updated server %s", serverEntryFields.GetIPAddress())
 
 		return nil
 	})
@@ -285,7 +315,7 @@ func PromoteServerEntry(config *Config, ipAddress string) error {
 		bucket = tx.bucket(datastoreKeyValueBucket)
 		err := bucket.put(datastoreAffinityServerEntryIDKey, serverEntryID)
 		if err != nil {
-			return err
+			return common.ContextError(err)
 		}
 
 		// Store the current server entry filter (e.g, region, etc.) that
@@ -295,7 +325,7 @@ func PromoteServerEntry(config *Config, ipAddress string) error {
 
 		currentFilter, err := makeServerEntryFilterValue(config)
 		if err != nil {
-			return err
+			return common.ContextError(err)
 		}
 
 		return bucket.put(datastoreLastServerEntryFilterKey, currentFilter)
@@ -625,39 +655,83 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 		serverEntryID := iterator.serverEntryIDs[iterator.serverEntryIndex]
 		iterator.serverEntryIndex += 1
 
-		var data []byte
+		serverEntry = nil
 
 		err = datastoreView(func(tx *datastoreTx) error {
-			bucket := tx.bucket(datastoreServerEntriesBucket)
-			value := bucket.get(serverEntryID)
-			if value != nil {
-				// Must make a copy as slice is only valid within transaction.
-				data = make([]byte, len(value))
-				copy(data, value)
+			serverEntries := tx.bucket(datastoreServerEntriesBucket)
+			value := serverEntries.get(serverEntryID)
+			if value == nil {
+				return nil
 			}
+
+			// Must unmarshal here as slice is only valid within transaction.
+			err = json.Unmarshal(value, &serverEntry)
+
+			if err != nil {
+				// In case of data corruption or a bug causing this condition,
+				// do not stop iterating.
+				serverEntry = nil
+				NoticeAlert(
+					"ServerEntryIterator.Next: json.Unmarshal failed: %s",
+					common.ContextError(err))
+			}
+
 			return nil
 		})
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
 
-		if data == nil {
+		if serverEntry == nil {
 			// In case of data corruption or a bug causing this condition,
 			// do not stop iterating.
-			NoticeAlert("ServerEntryIterator.Next: unexpected missing server entry: %s", string(serverEntryID))
-			continue
-		}
-
-		err = json.Unmarshal(data, &serverEntry)
-		if err != nil {
-			// In case of data corruption or a bug causing this condition,
-			// do not stop iterating.
-			NoticeAlert("ServerEntryIterator.Next: %s", common.ContextError(err))
+			NoticeAlert(
+				"ServerEntryIterator.Next: unexpected missing server entry: %s",
+				string(serverEntryID))
 			continue
 		}
 
 		if iterator.serverEntryIndex%datastoreServerEntryFetchGCThreshold == 0 {
 			DoGarbageCollection()
+		}
+
+		// Generate a derived server entry tag for server entries with no tag. Store
+		// back the updated server entry so that (a) the tag doesn't need to be
+		// regenerated; (b) the server entry can be looked up by tag (currently used
+		// in the status request prune case).
+		if serverEntry.Tag == "" {
+
+			serverEntry.Tag = protocol.GenerateServerEntryTag(
+				serverEntry.IpAddress, serverEntry.WebServerSecret)
+
+			jsonServerEntry, err := json.Marshal(serverEntry)
+
+			if err == nil {
+				err = datastoreUpdate(func(tx *datastoreTx) error {
+
+					serverEntries := tx.bucket(datastoreServerEntriesBucket)
+					serverEntryTags := tx.bucket(datastoreServerEntryTagsBucket)
+
+					serverEntries.put(serverEntryID, jsonServerEntry)
+					if err != nil {
+						return common.ContextError(err)
+					}
+
+					serverEntryTags.put([]byte(serverEntry.Tag), serverEntryID)
+					if err != nil {
+						return common.ContextError(err)
+					}
+
+					return nil
+				})
+			}
+
+			if err != nil {
+				// Do not stop.
+				NoticeAlert(
+					"ServerEntryIterator.Next: update server entry failed: %s",
+					common.ContextError(err))
+			}
 		}
 
 		// Check filter requirements
@@ -692,6 +766,94 @@ func MakeCompatibleServerEntry(serverEntry *protocol.ServerEntry) *protocol.Serv
 	}
 
 	return serverEntry
+}
+
+// PruneServerEntry deletes the server entry, along with associated data,
+// corresponding to the specified server entry tag. Pruning is subject to an
+// age check. In the case of an error, a notice is emitted.
+func PruneServerEntry(config *Config, serverEntryTag string) {
+	err := pruneServerEntry(config, serverEntryTag)
+	if err != nil {
+		NoticeAlert(
+			"PruneServerEntry failed: %s: %s",
+			serverEntryTag, common.ContextError(err))
+		return
+	}
+	NoticePruneServerEntry(serverEntryTag)
+}
+
+func pruneServerEntry(config *Config, serverEntryTag string) error {
+
+	minimumAgeForPruning := config.GetClientParameters().Duration(
+		parameters.ServerEntryMinimumAgeForPruning)
+
+	return datastoreUpdate(func(tx *datastoreTx) error {
+
+		serverEntries := tx.bucket(datastoreServerEntriesBucket)
+		serverEntryTags := tx.bucket(datastoreServerEntryTagsBucket)
+		serverEntryTombstoneTags := tx.bucket(datastoreServerEntryTombstoneTagsBucket)
+		keyValues := tx.bucket(datastoreKeyValueBucket)
+
+		serverEntryTagBytes := []byte(serverEntryTag)
+
+		serverEntryID := serverEntryTags.get(serverEntryTagBytes)
+		if serverEntryID == nil {
+			return common.ContextError(errors.New("server entry tag not found"))
+		}
+
+		serverEntryJson := serverEntries.get(serverEntryID)
+		if serverEntryJson == nil {
+			return common.ContextError(errors.New("server entry not found"))
+		}
+
+		var serverEntry *protocol.ServerEntry
+		err := json.Unmarshal(serverEntryJson, &serverEntry)
+		if err != nil {
+			common.ContextError(err)
+		}
+
+		// Only prune sufficiently old server entries. This mitigates the case where
+		// stale data in psiphond will incorrectly identify brand new servers as
+		// being invalid/deleted.
+		serverEntryLocalTimestamp, err := time.Parse(time.RFC3339, serverEntry.LocalTimestamp)
+		if err != nil {
+			common.ContextError(err)
+		}
+		if serverEntryLocalTimestamp.Add(minimumAgeForPruning).After(time.Now()) {
+			return nil
+		}
+
+		err = serverEntries.delete(serverEntryID)
+		if err != nil {
+			common.ContextError(err)
+		}
+
+		err = serverEntryTags.delete(serverEntryTagBytes)
+		if err != nil {
+			common.ContextError(err)
+		}
+
+		affinityServerEntryID := keyValues.get(datastoreAffinityServerEntryIDKey)
+		if 0 == bytes.Compare(affinityServerEntryID, serverEntryID) {
+			err = keyValues.delete(datastoreAffinityServerEntryIDKey)
+			if err != nil {
+				return common.ContextError(err)
+			}
+		}
+
+		// TODO: also prune dial parameters?
+
+		// Tombstones prevent reimporting pruned server entries. Tombstone
+		// identifiers are tags, which are derived from the web server secret in
+		// addition to the server IP, so tombstones will not clobber recycled server
+		// IPs as long as new web server secrets are generated in the recycle case.
+		err = serverEntryTombstoneTags.put(serverEntryID, serverEntryTagBytes)
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		return nil
+	})
 }
 
 func scanServerEntries(scanner func(*protocol.ServerEntry)) error {
@@ -827,10 +989,17 @@ func SetSplitTunnelRoutes(region, etag string, data []byte) error {
 	err := datastoreUpdate(func(tx *datastoreTx) error {
 		bucket := tx.bucket(datastoreSplitTunnelRouteETagsBucket)
 		err := bucket.put([]byte(region), []byte(etag))
+		if err != nil {
+			return common.ContextError(err)
+		}
 
 		bucket = tx.bucket(datastoreSplitTunnelRouteDataBucket)
 		err = bucket.put([]byte(region), data)
-		return err
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		return nil
 	})
 
 	if err != nil {
@@ -888,7 +1057,10 @@ func SetUrlETag(url, etag string) error {
 	err := datastoreUpdate(func(tx *datastoreTx) error {
 		bucket := tx.bucket(datastoreUrlETagsBucket)
 		err := bucket.put([]byte(url), []byte(etag))
-		return err
+		if err != nil {
+			return common.ContextError(err)
+		}
+		return nil
 	})
 
 	if err != nil {
@@ -921,7 +1093,10 @@ func SetKeyValue(key, value string) error {
 	err := datastoreUpdate(func(tx *datastoreTx) error {
 		bucket := tx.bucket(datastoreKeyValueBucket)
 		err := bucket.put([]byte(key), []byte(value))
-		return err
+		if err != nil {
+			return common.ContextError(err)
+		}
+		return nil
 	})
 
 	if err != nil {
@@ -1004,7 +1179,11 @@ func StorePersistentStat(config *Config, statType string, stat []byte) error {
 		}
 
 		err := bucket.put(stat, persistentStatStateUnreported)
-		return err
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		return nil
 	})
 
 	if err != nil {
@@ -1101,7 +1280,7 @@ func TakeOutUnreportedPersistentStats(config *Config) (map[string][][]byte, erro
 			for _, key := range stats[statType] {
 				err := bucket.put(key, persistentStatStateReporting)
 				if err != nil {
-					return err
+					return common.ContextError(err)
 				}
 			}
 
@@ -1128,7 +1307,7 @@ func PutBackUnreportedPersistentStats(stats map[string][][]byte) error {
 			for _, key := range stats[statType] {
 				err := bucket.put(key, persistentStatStateUnreported)
 				if err != nil {
-					return err
+					return common.ContextError(err)
 				}
 			}
 		}
@@ -1194,7 +1373,7 @@ func resetAllPersistentStatsToUnreported() error {
 			for _, key := range resetKeys {
 				err := bucket.put(key, persistentStatStateUnreported)
 				if err != nil {
-					return err
+					return common.ContextError(err)
 				}
 			}
 		}
@@ -1256,7 +1435,10 @@ func SetSLOK(id, key []byte) (bool, error) {
 		bucket := tx.bucket(datastoreSLOKsBucket)
 		duplicate = bucket.get(id) != nil
 		err := bucket.put([]byte(id), []byte(key))
-		return err
+		if err != nil {
+			return common.ContextError(err)
+		}
+		return nil
 	})
 
 	if err != nil {
@@ -1366,7 +1548,11 @@ func setBucketValue(bucket, key, value []byte) error {
 
 	err := datastoreUpdate(func(tx *datastoreTx) error {
 		bucket := tx.bucket(bucket)
-		return bucket.put(key, value)
+		err := bucket.put(key, value)
+		if err != nil {
+			return common.ContextError(err)
+		}
+		return nil
 	})
 
 	if err != nil {

@@ -392,6 +392,8 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 		return nil
 	}
 
+	var response []byte
+
 	if serverContext.psiphonHttpsClient == nil {
 
 		rawMessage := json.RawMessage(statusPayload)
@@ -401,14 +403,14 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 		request, err = serverContext.makeSSHAPIRequestPayload(params)
 
 		if err == nil {
-			_, err = serverContext.tunnel.SendAPIRequest(
+			response, err = serverContext.tunnel.SendAPIRequest(
 				protocol.PSIPHON_API_STATUS_REQUEST_NAME, request)
 		}
 
 	} else {
 
 		// Legacy web service API request
-		_, err = serverContext.doPostRequest(
+		response, err = serverContext.doPostRequest(
 			makeRequestUrl(serverContext.tunnel, "", "status", params),
 			"application/json",
 			bytes.NewReader(statusPayload))
@@ -425,6 +427,16 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 	}
 
 	confirmStatusRequestPayload(statusPayloadInfo)
+
+	var statusResponse protocol.StatusResponse
+	err = json.Unmarshal(response, &statusResponse)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	for _, serverEntryTag := range statusResponse.InvalidServerEntryTags {
+		PruneServerEntry(serverContext.tunnel.config, serverEntryTag)
+	}
 
 	return nil
 }
@@ -617,7 +629,9 @@ func RecordFailedTunnelStat(
 	}
 
 	params := getBaseAPIParameters(config, dialParams)
-	params["server_entry_ip_address"] = dialParams.ServerEntry.IpAddress
+
+	delete(params, "server_secret")
+	params["server_entry_tag"] = dialParams.ServerEntry.Tag
 	params["last_connected"] = lastConnected
 	params["client_failed_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
 	params["tunnel_error"] = failedTunnelErrStripAddressRegex.ReplaceAllString(tunnelErr.Error(), "<address>")

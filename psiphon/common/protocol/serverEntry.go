@@ -22,6 +22,9 @@ package protocol
 import (
 	"bufio"
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -38,6 +41,7 @@ import (
 // several protocols. Server entries are JSON records downloaded from
 // various sources.
 type ServerEntry struct {
+	Tag                           string   `json:"tag"`
 	IpAddress                     string   `json:"ipAddress"`
 	WebServerPort                 string   `json:"webServerPort"` // not an int
 	WebServerSecret               string   `json:"webServerSecret"`
@@ -85,6 +89,22 @@ type ServerEntry struct {
 // ServerEntry type.
 type ServerEntryFields map[string]interface{}
 
+func (fields ServerEntryFields) GetTag() string {
+	tag, ok := fields["tag"]
+	if !ok {
+		return ""
+	}
+	tagStr, ok := tag.(string)
+	if !ok {
+		return ""
+	}
+	return tagStr
+}
+
+func (fields ServerEntryFields) SetTag(tag string) {
+	fields["tag"] = tag
+}
+
 func (fields ServerEntryFields) GetIPAddress() string {
 	ipAddress, ok := fields["ipAddress"]
 	if !ok {
@@ -95,6 +115,18 @@ func (fields ServerEntryFields) GetIPAddress() string {
 		return ""
 	}
 	return ipAddressStr
+}
+
+func (fields ServerEntryFields) GetWebServerSecret() string {
+	webServerSecret, ok := fields["webServerSecret"]
+	if !ok {
+		return ""
+	}
+	webServerSecretStr, ok := webServerSecret.(string)
+	if !ok {
+		return ""
+	}
+	return webServerSecretStr
 }
 
 func (fields ServerEntryFields) GetConfigurationVersion() int {
@@ -217,6 +249,20 @@ func (serverEntry *ServerEntry) GetUntunneledWebRequestPorts() []string {
 		ports = append(ports, serverEntry.WebServerPort)
 	}
 	return ports
+}
+
+// GenerateServerEntryTag creates a server entry tag value that is
+// cryptographically derived from the IP address and web server secret in a
+// way that is difficult to reverse the IP address value from the tag or
+// compute the tag without having the web server secret, a 256-bit random
+// value which is unique per server, in addition to the IP address. A database
+// consisting only of server entry tags should be resistent to an attack that
+// attempts to reverse all the server IPs, even given a small IP space (IPv4),
+// or some subset of the web server secrets.
+func GenerateServerEntryTag(ipAddress, webServerSecret string) string {
+	h := hmac.New(sha256.New, []byte(webServerSecret))
+	h.Write([]byte(ipAddress))
+	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
 // EncodeServerEntry returns a string containing the encoding of

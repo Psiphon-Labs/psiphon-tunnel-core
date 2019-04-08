@@ -207,6 +207,7 @@ const (
 	PersistentStatsMaxSendBytes                      = "PersistentStatsMaxSendBytes"
 	RecordRemoteServerListPersistentStatsProbability = "RecordRemoteServerListPersistentStatsProbability"
 	RecordFailedTunnelPersistentStatsProbability     = "RecordFailedTunnelPersistentStatsProbability"
+	ServerEntryMinimumAgeForPruning                  = "ServerEntryMinimumAgeForPruning"
 )
 
 const (
@@ -422,6 +423,8 @@ var defaultClientParameters = map[string]struct {
 	PersistentStatsMaxSendBytes:                      {value: 65536, minimum: 1},
 	RecordRemoteServerListPersistentStatsProbability: {value: 1.0, minimum: 0.0},
 	RecordFailedTunnelPersistentStatsProbability:     {value: 0.0, minimum: 0.0},
+
+	ServerEntryMinimumAgeForPruning: {value: 7 * 24 * time.Hour, minimum: 24 * time.Hour},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

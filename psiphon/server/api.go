@@ -405,7 +405,7 @@ var remoteServerListStatParams = []requestParamSpec{
 
 var failedTunnelStatParams = append(
 	[]requestParamSpec{
-		{"server_entry_ip_address", isIPAddress, requestParamNotLogged},
+		{"server_entry_tag", isAnyString, requestParamOptional},
 		{"session_id", isHexDigits, 0},
 		{"last_connected", isLastConnected, 0},
 		{"client_failed_timestamp", isISO8601Date, 0},
@@ -515,7 +515,14 @@ func statusAPIRequestHandler(
 	// Failed tunnel persistent stats.
 	// Older clients may not submit this data.
 
+	var invalidServerEntryTags map[string]bool
+
 	if statusData["failed_tunnel_stats"] != nil {
+
+		// Note: no guarantee that PsinetDatabase won't reload between database calls
+		db := support.PsinetDatabase
+
+		invalidServerEntryTags = make(map[string]bool)
 
 		failedTunnelStats, err := getJSONObjectArrayRequestParam(statusData, "failed_tunnel_stats")
 		if err != nil {
@@ -524,7 +531,7 @@ func statusAPIRequestHandler(
 		for _, failedTunnelStat := range failedTunnelStats {
 
 			// failed_tunnel supplies a full set of common params, but the
-			// server secret must use the corect value from the outer
+			// server secret must use the correct value from the outer
 			// statusRequestParams
 			failedTunnelStat["server_secret"] = params["server_secret"]
 
@@ -540,6 +547,40 @@ func statusAPIRequestHandler(
 				failedTunnelStat,
 				failedTunnelStatParams)
 
+			// Return a list of servers, identified by server entry tag, that are
+			// invalid and presumed to be deleted. This information is used by clients
+			// to prune deleted servers from their local datastores and stop attempting
+			// connections to servers that no longer exist.
+			//
+			// This mechanism uses tags instead of server IPs: (a) to prevent an
+			// enumeration attack, where a malicious client can query the entire IPv4
+			// range and build a map of the Psiphon network; (b) to deal with recyling
+			// cases where a server deleted and its IP is reused for a new server with
+			// a distinct server entry.
+			//
+			// IsValidServerEntryTag ensures that the local copy of psinet is not stale
+			// before returning a negative result, to mitigate accidental pruning.
+
+			var serverEntryTagStr string
+
+			serverEntryTag, ok := failedTunnelStat["server_entry_tag"]
+			if ok {
+				serverEntryTagStr, ok = serverEntryTag.(string)
+			}
+
+			if ok {
+				serverEntryValid := db.IsValidServerEntryTag(serverEntryTagStr)
+				if !serverEntryValid {
+					invalidServerEntryTags[serverEntryTagStr] = true
+				}
+
+				// Add a field to the failed_tunnel log indicating if the server entry is
+				// valid.
+				failedTunnelFields["server_entry_valid"] = serverEntryValid
+			}
+
+			// Log failed_tunnel.
+
 			logQueue = append(logQueue, failedTunnelFields)
 		}
 	}
@@ -550,7 +591,25 @@ func statusAPIRequestHandler(
 
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
 
-	return make([]byte, pad_response), nil
+	statusResponse := protocol.StatusResponse{
+		Padding: strings.Repeat(" ", pad_response),
+	}
+
+	if len(invalidServerEntryTags) > 0 {
+		statusResponse.InvalidServerEntryTags = make([]string, len(invalidServerEntryTags))
+		i := 0
+		for tag, _ := range invalidServerEntryTags {
+			statusResponse.InvalidServerEntryTags[i] = tag
+			i++
+		}
+	}
+
+	responsePayload, err := json.Marshal(statusResponse)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return responsePayload, nil
 }
 
 // clientVerificationAPIRequestHandler is just a compliance stub

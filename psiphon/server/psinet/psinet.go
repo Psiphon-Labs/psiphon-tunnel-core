@@ -36,17 +36,23 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
+const (
+	MAX_DATABASE_AGE_FOR_SERVER_ENTRY_VALIDITY = 48 * time.Hour
+)
+
 // Database serves Psiphon API data requests. It's safe for
 // concurrent usage. The Reload function supports hot reloading
 // of Psiphon network data while the server is running.
 type Database struct {
 	common.ReloadableFile
 
-	Hosts            map[string]Host            `json:"hosts"`
-	Servers          []Server                   `json:"servers"`
-	Sponsors         map[string]Sponsor         `json:"sponsors"`
-	Versions         map[string][]ClientVersion `json:"client_versions"`
-	DefaultSponsorID string                     `json:"default_sponsor_id"`
+	Timestamp            time.Time                  `json:"timestamp"`
+	Hosts                map[string]Host            `json:"hosts"`
+	Servers              []Server                   `json:"servers"`
+	Sponsors             map[string]Sponsor         `json:"sponsors"`
+	Versions             map[string][]ClientVersion `json:"client_versions"`
+	DefaultSponsorID     string                     `json:"default_sponsor_id"`
+	ValidServerEntryTags map[string]bool            `json:"valid_server_entry_tags"`
 }
 
 type Host struct {
@@ -141,11 +147,13 @@ func NewDatabase(filename string) (*Database, error) {
 			}
 			// Note: an unmarshal directly into &database would fail
 			// to reset to zero value fields not present in the JSON.
+			database.Timestamp = newDatabase.Timestamp
 			database.Hosts = newDatabase.Hosts
 			database.Servers = newDatabase.Servers
 			database.Sponsors = newDatabase.Sponsors
 			database.Versions = newDatabase.Versions
 			database.DefaultSponsorID = newDatabase.DefaultSponsorID
+			database.ValidServerEntryTags = newDatabase.ValidServerEntryTags
 
 			return nil
 		})
@@ -547,4 +555,22 @@ func parseSshKeyString(sshKeyString string) (keyType string, key string) {
 	}
 
 	return sshKeyArr[0], sshKeyArr[1]
+}
+
+// IsValidServerEntryTag checks if the specified server entry tag is valid.
+func (db *Database) IsValidServerEntryTag(serverEntryTag string) bool {
+	db.ReloadableFile.RLock()
+	defer db.ReloadableFile.RUnlock()
+
+	// Default to "valid" if the valid list is unexpectedly empty or stale. This
+	// helps prevent premature client-side server-entry pruning when there is an
+	// issue with updating the database.
+
+	if len(db.ValidServerEntryTags) == 0 ||
+		db.Timestamp.Add(MAX_DATABASE_AGE_FOR_SERVER_ENTRY_VALIDITY).Before(time.Now()) {
+		return true
+	}
+
+	// The tag must be in the map and have the value "true".
+	return db.ValidServerEntryTags[serverEntryTag]
 }
