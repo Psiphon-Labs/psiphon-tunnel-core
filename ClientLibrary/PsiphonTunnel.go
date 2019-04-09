@@ -77,11 +77,6 @@ const (
 	startResultCodeOtherError                 = 2
 )
 
-type noticeEvent struct {
-	Data       map[string]interface{}
-	NoticeType string
-}
-
 type startResult struct {
 	Code           startResultCode
 	ConnectTimeMS  int64  `json:",omitempty"`

@@ -287,6 +287,14 @@ func panicHandler(output string) {
 		logEvent["build_rev"] = common.GetBuildInfo().BuildRev
 		logEvent["timestamp"] = time.Now().Format(time.RFC3339)
 		logEvent["event_name"] = "server_panic"
+
+		// ELK has a maximum field length of 32766 UTF8 bytes. Over that length, the
+		// log won't be delivered. Truncate the panic field, as it may be much longer.
+		maxLen := 32766
+		if len(output) > maxLen {
+			output = output[:maxLen]
+		}
+
 		logEvent["panic"] = output
 
 		// Logs are written to the configured file name. If no name is specified, logs are written to stderr

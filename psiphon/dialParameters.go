@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	utls "github.com/refraction-networking/utls"
 	regen "github.com/zach-klippenstein/goregen"
 )
 
@@ -91,6 +92,7 @@ type DialParameters struct {
 
 	SelectedTLSProfile       bool
 	TLSProfile               string
+	TLSVersion               string
 	RandomizedTLSProfileSeed *prng.Seed
 
 	QUICVersion               string
@@ -169,6 +171,7 @@ func MakeDialParameters(
 	//   previous dial parameters were established.
 	// - The protocol selection constraints must permit replay, as indicated
 	//   by canReplay.
+	// - Must not be using an obsolete TLS profile that is no longer supported.
 	//
 	// When existing dial parameters don't meet these conditions, dialParams
 	// is reset to nil and new dial parameters will be generated.
@@ -187,7 +190,9 @@ func MakeDialParameters(
 	if dialParams != nil &&
 		(ttl <= 0 ||
 			dialParams.LastUsedTimestamp.Before(currentTimestamp.Add(-ttl)) ||
-			bytes.Compare(dialParams.LastUsedConfigStateHash, configStateHash) != 0) {
+			bytes.Compare(dialParams.LastUsedConfigStateHash, configStateHash) != 0 ||
+			(dialParams.TLSProfile != "" &&
+				!common.Contains(protocol.SupportedTLSProfiles, dialParams.TLSProfile))) {
 
 		// In these cases, existing dial parameters are expired or no longer
 		// match the config state and so are cleared to avoid rechecking them.
@@ -200,11 +205,11 @@ func MakeDialParameters(
 	}
 
 	if dialParams != nil {
-		if !canReplay(serverEntry, dialParams.TunnelProtocol) {
+		if config.DisableReplay ||
+			!canReplay(serverEntry, dialParams.TunnelProtocol) {
 
-			// In this ephemeral case, existing dial parameters may still be
-			// valid and used in future establishment phases, and so are
-			// retained.
+			// In these ephemeral cases, existing dial parameters may still be valid
+			// and used in future establishment phases, and so are retained.
 
 			dialParams = nil
 		}
@@ -290,6 +295,28 @@ func MakeDialParameters(
 		protocol.TLSProfileIsRandomized(dialParams.TLSProfile) {
 
 		dialParams.RandomizedTLSProfileSeed, err = prng.NewSeed()
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+	}
+
+	if (!isReplay || !replayTLSProfile) &&
+		protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) {
+
+		// Since "Randomized-v2" may be TLS 1.2 or TLS 1.3, construct the
+		// ClientHello to determine if it's TLS 1.3. This test also covers
+		// non-randomized TLS 1.3 profiles. This check must come after
+		// dialParams.TLSProfile and dialParams.RandomizedTLSProfileSeed are set.
+		// No actual dial is made here.
+
+		utlsClientHelloID := getUTLSClientHelloID(dialParams.TLSProfile)
+
+		if protocol.TLSProfileIsRandomized(dialParams.TLSProfile) {
+			utlsClientHelloID.Seed = new(utls.PRNGSeed)
+			*utlsClientHelloID.Seed = [32]byte(*dialParams.RandomizedTLSProfileSeed)
+		}
+
+		dialParams.TLSVersion, err = getClientHelloVersion(utlsClientHelloID)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -593,23 +620,28 @@ func getConfigStateHash(
 	// of these input values change in a way that invalidates any stored dial
 	// parameters.
 
-	// MD5 hash is used solely as a data checksum and not for any security purpose.
+	// MD5 hash is used solely as a data checksum and not for any security
+	// purpose.
 	hash := md5.New()
 
+	// Add a hash of relevant config fields.
+	// Limitation: the config hash may change even when tactics will override the
+	// changed config field.
+	hash.Write(config.dialParametersHash)
+
+	// Add the active tactics tag.
 	hash.Write([]byte(p.Tag()))
 
+	// Add the server entry version and local timestamp, both of which should
+	// change when the server entry contents change and/or a new local copy is
+	// imported.
 	// TODO: marshal entire server entry?
-
 	var serverEntryConfigurationVersion [8]byte
 	binary.BigEndian.PutUint64(
 		serverEntryConfigurationVersion[:],
 		uint64(serverEntry.ConfigurationVersion))
 	hash.Write(serverEntryConfigurationVersion[:])
 	hash.Write([]byte(serverEntry.LocalTimestamp))
-
-	// TODO: add config.CustomHeaders, which could impact User-Agent header?
-
-	hash.Write([]byte(config.UpstreamProxyURL))
 
 	return hash.Sum(nil)
 }

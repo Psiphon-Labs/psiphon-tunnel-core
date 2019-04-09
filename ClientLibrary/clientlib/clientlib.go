@@ -82,8 +82,9 @@ type ClientParametersDelta map[string]interface{}
 // noticeReceiver, if supplied.
 // NOTE: Ordinary users of this library should never need this.
 type NoticeEvent struct {
-	Data map[string]interface{} `json:"data"`
-	Type string                 `json:"noticeType"`
+	Data      map[string]interface{} `json:"data"`
+	Type      string                 `json:"noticeType"`
+	Timestamp string                 `json:"timestamp"`
 }
 
 // ErrTimeout is returned when the tunnel connection attempt fails due to timeout

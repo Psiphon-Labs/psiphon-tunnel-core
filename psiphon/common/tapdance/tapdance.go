@@ -254,7 +254,27 @@ func Dial(
 		TcpDialer: manager.dial,
 	}
 
+	// If the dial context is cancelled, use dialManager to interrupt
+	// tapdanceDialer.DialContext. See dialManager comment explaining why
+	// tapdanceDialer.DialContext may block even when the input context is
+	// cancelled.
+	dialComplete := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-dialComplete:
+		}
+		select {
+		// Prioritize the dialComplete case.
+		case <-dialComplete:
+			return
+		default:
+		}
+		manager.close()
+	}()
+
 	conn, err := tapdanceDialer.DialContext(ctx, "tcp", address)
+	close(dialComplete)
 	if err != nil {
 		manager.close()
 		return nil, common.ContextError(err)

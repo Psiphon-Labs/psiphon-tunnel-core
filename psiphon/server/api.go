@@ -639,6 +639,7 @@ var baseRequestParams = []requestParamSpec{
 	{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"user_agent", isAnyString, requestParamOptional},
 	{"tls_profile", isAnyString, requestParamOptional},
+	{"tls_version", isAnyString, requestParamOptional},
 	{"server_entry_region", isRegionCode, requestParamOptional},
 	{"server_entry_source", isServerEntrySource, requestParamOptional},
 	{"server_entry_timestamp", isISO8601Date, requestParamOptional},

@@ -32,6 +32,9 @@ message TLSDecoySpec {
     // if local DNS is untrusted, or the service may be multihomed.
     optional fixed32 ipv4addr = 2;
 
+    // The 128-bit ipv6 address, in network byte order
+    optional bytes ipv6addr = 6;
+
     // The Tapdance station public key to use when contacting this
     // decoy
     //
