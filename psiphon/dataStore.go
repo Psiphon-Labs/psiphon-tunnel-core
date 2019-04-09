@@ -207,9 +207,12 @@ func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExi
 
 		serverEntryTagBytes := []byte(serverEntryTag)
 
-		// Ignore the server entry if it was previously pruned.
-		if serverEntryTombstoneTags.get(serverEntryTagBytes) != nil {
-			return nil
+		// Ignore the server entry if it was previously pruned and a tombstone
+		// is set.
+		if serverEntryFields.GetLocalSource() == protocol.SERVER_ENTRY_SOURCE_EMBEDDED {
+			if serverEntryTombstoneTags.get(serverEntryTagBytes) != nil {
+				return nil
+			}
 		}
 
 		data, err := json.Marshal(serverEntryFields)
@@ -847,9 +850,16 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 		// identifiers are tags, which are derived from the web server secret in
 		// addition to the server IP, so tombstones will not clobber recycled server
 		// IPs as long as new web server secrets are generated in the recycle case.
-		err = serverEntryTombstoneTags.put(serverEntryID, serverEntryTagBytes)
-		if err != nil {
-			return common.ContextError(err)
+		//
+		// Tombstones are set only for embedded server entries, as all other sources
+		// are expected to provide valid server entries; this also provides a fail-
+		// safe mechanism to restore pruned server entries through all non-embedded
+		// sources.
+		if serverEntry.LocalSource == protocol.SERVER_ENTRY_SOURCE_EMBEDDED {
+			err = serverEntryTombstoneTags.put(serverEntryTagBytes, []byte{1})
+			if err != nil {
+				return common.ContextError(err)
+			}
 		}
 
 		return nil

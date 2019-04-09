@@ -141,6 +141,18 @@ func (fields ServerEntryFields) GetConfigurationVersion() int {
 	return configurationVersionInt
 }
 
+func (fields ServerEntryFields) GetLocalSource() string {
+	localSource, ok := fields["localSource"]
+	if !ok {
+		return ""
+	}
+	localSourceStr, ok := localSource.(string)
+	if !ok {
+		return ""
+	}
+	return localSourceStr
+}
+
 func (fields ServerEntryFields) SetLocalSource(source string) {
 	fields["localSource"] = source
 }
