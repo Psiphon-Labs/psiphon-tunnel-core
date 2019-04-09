@@ -694,10 +694,6 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 			continue
 		}
 
-		if iterator.serverEntryIndex%datastoreServerEntryFetchGCThreshold == 0 {
-			DoGarbageCollection()
-		}
-
 		// Generate a derived server entry tag for server entries with no tag. Store
 		// back the updated server entry so that (a) the tag doesn't need to be
 		// regenerated; (b) the server entry can be looked up by tag (currently used
@@ -707,27 +703,58 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 			serverEntry.Tag = protocol.GenerateServerEntryTag(
 				serverEntry.IpAddress, serverEntry.WebServerSecret)
 
-			jsonServerEntry, err := json.Marshal(serverEntry)
+			err = datastoreUpdate(func(tx *datastoreTx) error {
 
-			if err == nil {
-				err = datastoreUpdate(func(tx *datastoreTx) error {
+				serverEntries := tx.bucket(datastoreServerEntriesBucket)
+				serverEntryTags := tx.bucket(datastoreServerEntryTagsBucket)
 
-					serverEntries := tx.bucket(datastoreServerEntriesBucket)
-					serverEntryTags := tx.bucket(datastoreServerEntryTagsBucket)
+				// We must reload and store back the server entry _fields_ to preserve any
+				// currently unrecognized fields, for future compatibility.
 
-					serverEntries.put(serverEntryID, jsonServerEntry)
-					if err != nil {
-						return common.ContextError(err)
-					}
-
-					serverEntryTags.put([]byte(serverEntry.Tag), serverEntryID)
-					if err != nil {
-						return common.ContextError(err)
-					}
-
+				value := serverEntries.get(serverEntryID)
+				if value == nil {
 					return nil
-				})
-			}
+				}
+
+				var serverEntryFields protocol.ServerEntryFields
+				err := json.Unmarshal(value, &serverEntryFields)
+				if err != nil {
+					return common.ContextError(err)
+				}
+
+				// As there is minor race condition between loading/checking serverEntry
+				// and reloading/modifying serverEntryFields, this transaction references
+				// only the freshly loaded fields when checking and setting the tag.
+
+				serverEntryTag := serverEntryFields.GetTag()
+
+				if serverEntryTag != "" {
+					return nil
+				}
+
+				serverEntryTag = protocol.GenerateServerEntryTag(
+					serverEntryFields.GetIPAddress(),
+					serverEntryFields.GetWebServerSecret())
+
+				serverEntryFields.SetTag(serverEntryTag)
+
+				jsonServerEntryFields, err := json.Marshal(serverEntryFields)
+				if err != nil {
+					return common.ContextError(err)
+				}
+
+				serverEntries.put(serverEntryID, jsonServerEntryFields)
+				if err != nil {
+					return common.ContextError(err)
+				}
+
+				serverEntryTags.put([]byte(serverEntryTag), serverEntryID)
+				if err != nil {
+					return common.ContextError(err)
+				}
+
+				return nil
+			})
 
 			if err != nil {
 				// Do not stop.
@@ -735,6 +762,10 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 					"ServerEntryIterator.Next: update server entry failed: %s",
 					common.ContextError(err))
 			}
+		}
+
+		if iterator.serverEntryIndex%datastoreServerEntryFetchGCThreshold == 0 {
+			DoGarbageCollection()
 		}
 
 		// Check filter requirements
@@ -796,6 +827,7 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 		serverEntryTags := tx.bucket(datastoreServerEntryTagsBucket)
 		serverEntryTombstoneTags := tx.bucket(datastoreServerEntryTombstoneTagsBucket)
 		keyValues := tx.bucket(datastoreKeyValueBucket)
+		dialParameters := tx.bucket(datastoreDialParametersBucket)
 
 		serverEntryTagBytes := []byte(serverEntryTag)
 
@@ -844,7 +876,22 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 			}
 		}
 
-		// TODO: also prune dial parameters?
+		// TODO: expose boltdb Seek functionality to skip to first matching record.
+		cursor := dialParameters.cursor()
+		defer cursor.close()
+		foundFirstMatch := false
+		for key, _ := cursor.first(); key != nil; key, _ = cursor.next() {
+			// Dial parameters key has serverID as a prefix; see makeDialParametersKey.
+			if bytes.HasPrefix(key, serverEntryID) {
+				foundFirstMatch = true
+				err := dialParameters.delete(key)
+				if err != nil {
+					return common.ContextError(err)
+				}
+			} else if foundFirstMatch {
+				break
+			}
+		}
 
 		// Tombstones prevent reimporting pruned server entries. Tombstone
 		// identifiers are tags, which are derived from the web server secret in
