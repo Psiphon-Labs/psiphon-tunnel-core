@@ -46,13 +46,14 @@ const (
 type Database struct {
 	common.ReloadableFile
 
-	Timestamp            time.Time                  `json:"timestamp"`
 	Hosts                map[string]Host            `json:"hosts"`
 	Servers              []Server                   `json:"servers"`
 	Sponsors             map[string]Sponsor         `json:"sponsors"`
 	Versions             map[string][]ClientVersion `json:"client_versions"`
 	DefaultSponsorID     string                     `json:"default_sponsor_id"`
 	ValidServerEntryTags map[string]bool            `json:"valid_server_entry_tags"`
+
+	fileModTime time.Time
 }
 
 type Host struct {
@@ -139,7 +140,7 @@ func NewDatabase(filename string) (*Database, error) {
 	database.ReloadableFile = common.NewReloadableFile(
 		filename,
 		true,
-		func(fileContent []byte) error {
+		func(fileContent []byte, fileModTime time.Time) error {
 			var newDatabase Database
 			err := json.Unmarshal(fileContent, &newDatabase)
 			if err != nil {
@@ -147,13 +148,13 @@ func NewDatabase(filename string) (*Database, error) {
 			}
 			// Note: an unmarshal directly into &database would fail
 			// to reset to zero value fields not present in the JSON.
-			database.Timestamp = newDatabase.Timestamp
 			database.Hosts = newDatabase.Hosts
 			database.Servers = newDatabase.Servers
 			database.Sponsors = newDatabase.Sponsors
 			database.Versions = newDatabase.Versions
 			database.DefaultSponsorID = newDatabase.DefaultSponsorID
 			database.ValidServerEntryTags = newDatabase.ValidServerEntryTags
+			database.fileModTime = fileModTime
 
 			return nil
 		})
@@ -567,7 +568,7 @@ func (db *Database) IsValidServerEntryTag(serverEntryTag string) bool {
 	// issue with updating the database.
 
 	if len(db.ValidServerEntryTags) == 0 ||
-		db.Timestamp.Add(MAX_DATABASE_AGE_FOR_SERVER_ENTRY_VALIDITY).Before(time.Now()) {
+		db.fileModTime.Add(MAX_DATABASE_AGE_FOR_SERVER_ENTRY_VALIDITY).Before(time.Now()) {
 		return true
 	}
 

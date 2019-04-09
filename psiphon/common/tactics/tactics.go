@@ -437,7 +437,7 @@ func NewServer(
 	server.ReloadableFile = common.NewReloadableFile(
 		configFilename,
 		true,
-		func(fileContent []byte) error {
+		func(fileContent []byte, _ time.Time) error {
 
 			var newServer Server
 			err := json.Unmarshal(fileContent, &newServer)

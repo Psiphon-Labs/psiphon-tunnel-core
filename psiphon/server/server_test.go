@@ -1528,7 +1528,6 @@ func pavePsinetDatabaseFile(
 
 	psinetJSONFormat := `
     {
-        "timestamp" : "%s",
         "default_sponsor_id" : "%s",
         "sponsors": {
             "%s": {
@@ -1558,7 +1557,6 @@ func pavePsinetDatabaseFile(
 
 	psinetJSON := fmt.Sprintf(
 		psinetJSONFormat,
-		common.GetCurrentTimestamp(),
 		defaultSponsorID,
 		sponsorID,
 		expectedHomepageURL,

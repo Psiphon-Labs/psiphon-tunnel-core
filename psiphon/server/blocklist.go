@@ -26,6 +26,7 @@ import (
 	"net"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
@@ -72,7 +73,7 @@ func NewBlocklist(filename string) (*Blocklist, error) {
 	blocklist.ReloadableFile = common.NewReloadableFile(
 		filename,
 		false,
-		func(_ []byte) error {
+		func(_ []byte, _ time.Time) error {
 
 			newData, err := loadBlocklistFromFile(filename)
 			if err != nil {
