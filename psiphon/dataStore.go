@@ -698,6 +698,10 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 		// back the updated server entry so that (a) the tag doesn't need to be
 		// regenerated; (b) the server entry can be looked up by tag (currently used
 		// in the status request prune case).
+		//
+		// This is a distinct transaction so as to avoid the overhead of regular
+		// write transactions in the iterator; once tags have been stored back, most
+		// iterator transactions will remain read-only.
 		if serverEntry.Tag == "" {
 
 			serverEntry.Tag = protocol.GenerateServerEntryTag(
@@ -858,38 +862,47 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 			return nil
 		}
 
-		err = serverEntries.delete(serverEntryID)
-		if err != nil {
-			common.ContextError(err)
-		}
+		// Handle the server IP recycle case where multiple serverEntryTags records
+		// refer to the same server IP. Only delete the server entry record when its
+		// tag matches the pruned tag. Otherwise, the server entry record is
+		// associated with another tag. The pruned tag is still deleted.
+		deleteServerEntry := (serverEntry.Tag == serverEntryTag)
 
 		err = serverEntryTags.delete(serverEntryTagBytes)
 		if err != nil {
 			common.ContextError(err)
 		}
 
-		affinityServerEntryID := keyValues.get(datastoreAffinityServerEntryIDKey)
-		if 0 == bytes.Compare(affinityServerEntryID, serverEntryID) {
-			err = keyValues.delete(datastoreAffinityServerEntryIDKey)
-			if err != nil {
-				return common.ContextError(err)
-			}
-		}
+		if deleteServerEntry {
 
-		// TODO: expose boltdb Seek functionality to skip to first matching record.
-		cursor := dialParameters.cursor()
-		defer cursor.close()
-		foundFirstMatch := false
-		for key, _ := cursor.first(); key != nil; key, _ = cursor.next() {
-			// Dial parameters key has serverID as a prefix; see makeDialParametersKey.
-			if bytes.HasPrefix(key, serverEntryID) {
-				foundFirstMatch = true
-				err := dialParameters.delete(key)
+			err = serverEntries.delete(serverEntryID)
+			if err != nil {
+				common.ContextError(err)
+			}
+
+			affinityServerEntryID := keyValues.get(datastoreAffinityServerEntryIDKey)
+			if 0 == bytes.Compare(affinityServerEntryID, serverEntryID) {
+				err = keyValues.delete(datastoreAffinityServerEntryIDKey)
 				if err != nil {
 					return common.ContextError(err)
 				}
-			} else if foundFirstMatch {
-				break
+			}
+
+			// TODO: expose boltdb Seek functionality to skip to first matching record.
+			cursor := dialParameters.cursor()
+			defer cursor.close()
+			foundFirstMatch := false
+			for key, _ := cursor.first(); key != nil; key, _ = cursor.next() {
+				// Dial parameters key has serverID as a prefix; see makeDialParametersKey.
+				if bytes.HasPrefix(key, serverEntryID) {
+					foundFirstMatch = true
+					err := dialParameters.delete(key)
+					if err != nil {
+						return common.ContextError(err)
+					}
+				} else if foundFirstMatch {
+					break
+				}
 			}
 		}
 
