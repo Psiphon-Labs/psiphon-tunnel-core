@@ -82,6 +82,7 @@ fi
 
 cd -
 cd build-tmp/psi
+echo -e "-keep class psi.** { *; }\n"  >> proguard.txt
 zip -r ../../ca.psiphon.aar ./
 cd -
 rm -rf build-tmp
