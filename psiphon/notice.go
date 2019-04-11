@@ -748,7 +748,7 @@ func NoticeActiveAuthorizationIDs(activeAuthorizationIDs []string) {
 func NoticeBindToDevice(deviceInfo string) {
 	outputRepetitiveNotice(
 		"BindToDevice", deviceInfo, 0,
-		"BindToDevice", 0, "regions", deviceInfo)
+		"BindToDevice", 0, "deviceInfo", deviceInfo)
 }
 
 func NoticeNetworkID(networkID string) {
