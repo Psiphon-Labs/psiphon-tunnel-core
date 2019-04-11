@@ -161,10 +161,13 @@ const (
 	MeekDialDomainsOnly                              = "MeekDialDomainsOnly"
 	MeekLimitBufferSizes                             = "MeekLimitBufferSizes"
 	MeekCookieMaxPadding                             = "MeekCookieMaxPadding"
+	MeekMinLimitRequestPayloadLength                 = "MeekMinLimitRequestPayloadLength"
+	MeekMaxLimitRequestPayloadLength                 = "MeekMaxLimitRequestPayloadLength"
 	MeekFullReceiveBufferLength                      = "MeekFullReceiveBufferLength"
 	MeekReadPayloadChunkLength                       = "MeekReadPayloadChunkLength"
 	MeekLimitedFullReceiveBufferLength               = "MeekLimitedFullReceiveBufferLength"
 	MeekLimitedReadPayloadChunkLength                = "MeekLimitedReadPayloadChunkLength"
+	MeekRedialTLSProbability                         = "MeekRedialTLSProbability"
 	MeekMinPollInterval                              = "MeekMinPollInterval"
 	MeekMinPollIntervalJitter                        = "MeekMinPollIntervalJitter"
 	MeekMaxPollInterval                              = "MeekMaxPollInterval"
@@ -365,16 +368,23 @@ var defaultClientParameters = map[string]struct {
 
 	// The meek server times out inactive sessions after 45 seconds, so this
 	// is a soft max for MeekMaxPollInterval,  MeekRoundTripTimeout, and
-	// MeekRoundTripRetryDeadline. MeekCookieMaxPadding cannot exceed
-	// common.OBFUSCATE_SEED_LENGTH.
+	// MeekRoundTripRetryDeadline.
+	//
+	// MeekCookieMaxPadding cannot exceed common.OBFUSCATE_SEED_LENGTH.
+	//
+	// MeekMinLimitRequestPayloadLength/MeekMaxLimitRequestPayloadLength
+	// cannot exceed server.MEEK_MAX_REQUEST_PAYLOAD_LENGTH.
 
 	MeekDialDomainsOnly:                        {value: false},
 	MeekLimitBufferSizes:                       {value: false},
 	MeekCookieMaxPadding:                       {value: 256, minimum: 0},
+	MeekMinLimitRequestPayloadLength:           {value: 65536, minimum: 1},
+	MeekMaxLimitRequestPayloadLength:           {value: 65536, minimum: 1},
 	MeekFullReceiveBufferLength:                {value: 4194304, minimum: 1024},
 	MeekReadPayloadChunkLength:                 {value: 65536, minimum: 1024},
 	MeekLimitedFullReceiveBufferLength:         {value: 131072, minimum: 1024},
 	MeekLimitedReadPayloadChunkLength:          {value: 4096, minimum: 1024},
+	MeekRedialTLSProbability:                   {value: 0.0, minimum: 0.0},
 	MeekMinPollInterval:                        {value: 100 * time.Millisecond, minimum: 1 * time.Millisecond},
 	MeekMinPollIntervalJitter:                  {value: 0.3, minimum: 0.0},
 	MeekMaxPollInterval:                        {value: 5 * time.Second, minimum: 1 * time.Millisecond},
