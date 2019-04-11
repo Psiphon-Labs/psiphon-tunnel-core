@@ -658,6 +658,9 @@ var baseRequestParams = []requestParamSpec{
 	{"egress_region", isRegionCode, requestParamOptional},
 	{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"upstream_ossh_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"meek_cookie_size", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"meek_limit_request", isIntString, requestParamOptional | requestParamLogStringAsInt},
 }
 
 func validateRequestParams(

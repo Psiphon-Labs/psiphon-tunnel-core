@@ -134,17 +134,20 @@ type MeekConfig struct {
 // MeekConn also operates in unfronted mode, in which plain HTTP connections are made without routing
 // through a CDN.
 type MeekConn struct {
-	clientParameters  *parameters.ClientParameters
-	url               *url.URL
-	additionalHeaders http.Header
-	cookie            *http.Cookie
-	cachedTLSDialer   *cachedTLSDialer
-	transport         transporter
-	mutex             sync.Mutex
-	isClosed          bool
-	runCtx            context.Context
-	stopRunning       context.CancelFunc
-	relayWaitGroup    *sync.WaitGroup
+	clientParameters          *parameters.ClientParameters
+	url                       *url.URL
+	additionalHeaders         http.Header
+	cookie                    *http.Cookie
+	cookieSize                int
+	limitRequestPayloadLength int
+	redialTLSProbability      float64
+	cachedTLSDialer           *cachedTLSDialer
+	transport                 transporter
+	mutex                     sync.Mutex
+	isClosed                  bool
+	runCtx                    context.Context
+	stopRunning               context.CancelFunc
+	relayWaitGroup            *sync.WaitGroup
 
 	// For round tripper mode
 	roundTripperOnly              bool
@@ -435,18 +438,22 @@ func DialMeek(
 	// go routine, only when running in relay mode.
 	if !meek.roundTripperOnly {
 
-		cookie, err := makeMeekCookie(
-			meek.clientParameters,
-			meekConfig.MeekCookieEncryptionPublicKey,
-			meekConfig.MeekObfuscatedKey,
-			meekConfig.MeekObfuscatorPaddingSeed,
-			meekConfig.ClientTunnelProtocol,
-			"")
+		cookie, limitRequestPayloadLength, redialTLSProbability, err :=
+			makeMeekObfuscationValues(
+				meek.clientParameters,
+				meekConfig.MeekCookieEncryptionPublicKey,
+				meekConfig.MeekObfuscatedKey,
+				meekConfig.MeekObfuscatorPaddingSeed,
+				meekConfig.ClientTunnelProtocol,
+				"")
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
 
 		meek.cookie = cookie
+		meek.cookieSize = len(cookie.Name) + len(cookie.Value)
+		meek.limitRequestPayloadLength = limitRequestPayloadLength
+		meek.redialTLSProbability = redialTLSProbability
 
 		p := meekConfig.ClientParameters.Get()
 		if p.Bool(parameters.MeekLimitBufferSizes) {
@@ -541,7 +548,7 @@ func (meek *MeekConn) Close() (err error) {
 	return nil
 }
 
-// IsClosed implements the Closer iterface. The return value
+// IsClosed implements the Closer interface. The return value
 // indicates whether the MeekConn has been closed.
 func (meek *MeekConn) IsClosed() bool {
 
@@ -550,6 +557,14 @@ func (meek *MeekConn) IsClosed() bool {
 	meek.mutex.Unlock()
 
 	return isClosed
+}
+
+// GetMetrics implements the common.MetricsSource interface.
+func (meek *MeekConn) GetMetrics() common.LogFields {
+	logFields := make(common.LogFields)
+	logFields["meek_cookie_size"] = meek.cookieSize
+	logFields["meek_limit_request"] = meek.limitRequestPayloadLength
+	return logFields
 }
 
 // RoundTrip makes a request to the meek server and returns the response.
@@ -569,7 +584,7 @@ func (meek *MeekConn) RoundTrip(
 		return nil, common.ContextError(errors.New("operation unsupported"))
 	}
 
-	cookie, err := makeMeekCookie(
+	cookie, _, _, err := makeMeekObfuscationValues(
 		meek.clientParameters,
 		meek.meekCookieEncryptionPublicKey,
 		meek.meekObfuscatedKey,
@@ -661,7 +676,7 @@ func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
 		case <-meek.runCtx.Done():
 			return 0, common.ContextError(errors.New("meek connection has closed"))
 		}
-		writeLen := MEEK_MAX_REQUEST_PAYLOAD_LENGTH - sendBuffer.Len()
+		writeLen := meek.limitRequestPayloadLength - sendBuffer.Len()
 		if writeLen > 0 {
 			if writeLen > len(buffer) {
 				writeLen = len(buffer)
@@ -714,7 +729,7 @@ func (meek *MeekConn) replaceSendBuffer(sendBuffer *bytes.Buffer) {
 	switch {
 	case sendBuffer.Len() == 0:
 		meek.emptySendBuffer <- sendBuffer
-	case sendBuffer.Len() >= MEEK_MAX_REQUEST_PAYLOAD_LENGTH:
+	case sendBuffer.Len() >= meek.limitRequestPayloadLength:
 		meek.fullSendBuffer <- sendBuffer
 	default:
 		meek.partialSendBuffer <- sendBuffer
@@ -787,6 +802,12 @@ func (meek *MeekConn) relay() {
 			NoticeAlert("%s", common.ContextError(err))
 			go meek.Close()
 			return
+		}
+
+		// Periodically re-dial the underlying TLS connection.
+
+		if prng.FlipWeightedCoin(meek.redialTLSProbability) {
+			meek.transport.CloseIdleConnections()
 		}
 
 		// Calculate polling interval. When data is received,
@@ -1207,22 +1228,26 @@ func (meek *MeekConn) readPayload(
 	return totalSize, nil
 }
 
-// makeCookie creates the cookie to be sent with initial meek HTTP request. The cookies
-// contains obfuscated metadata, including meek version and other protocol information.
+// makeMeekObfuscationValues creates the meek cookie, to be sent with initial
+// meek HTTP request, and other meek obfuscation values. The cookies contains
+// obfuscated metadata, including meek version and other protocol information.
 //
-// In round tripper mode, the cookie contains the destination endpoint for the round
-// trip request.
+// In round tripper mode, the cookie contains the destination endpoint for the
+// round trip request.
 //
-// In relay mode, the server will create a session using these values and send the session ID
-// back to the client via Set-Cookie header. The client must use that value with
-// all consequent HTTP requests.
+// In relay mode, the server will create a session using the cookie values and
+// send the session ID back to the client via Set-Cookie header. The client
+// must use that value with all consequent HTTP requests.
 //
-// In plain HTTP meek protocols, the cookie is visible over the adversary network, so the
-// cookie is encrypted and obfuscated.
+// In plain HTTP meek protocols, the cookie is visible over the adversary
+// network, so the cookie is encrypted and obfuscated.
 //
-// Obsolete meek cookie fields used by the legacy server stack are no longer sent. These
-// include ServerAddress and SessionID.
-func makeMeekCookie(
+// Obsolete meek cookie fields used by the legacy server stack are no longer
+// sent. These include ServerAddress and SessionID.
+//
+// The request paylod limit and TLS redial probability apply only to relay
+// mode and are selected once and used for the duration of a meek connction.
+func makeMeekObfuscationValues(
 	clientParameters *parameters.ClientParameters,
 	meekCookieEncryptionPublicKey string,
 	meekObfuscatedKey string,
@@ -1230,7 +1255,10 @@ func makeMeekCookie(
 	clientTunnelProtocol string,
 	endPoint string,
 
-) (cookie *http.Cookie, err error) {
+) (cookie *http.Cookie,
+	limitRequestPayloadLength int,
+	redialTLSProbability float64,
+	err error) {
 
 	cookieData := &protocol.MeekCookieData{
 		MeekProtocolVersion:  MEEK_PROTOCOL_VERSION,
@@ -1239,7 +1267,7 @@ func makeMeekCookie(
 	}
 	serializedCookie, err := json.Marshal(cookieData)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, 0, 0, common.ContextError(err)
 	}
 
 	// Encrypt the JSON data
@@ -1253,19 +1281,21 @@ func makeMeekCookie(
 	var publicKey [32]byte
 	decodedPublicKey, err := base64.StdEncoding.DecodeString(meekCookieEncryptionPublicKey)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, 0, 0, common.ContextError(err)
 	}
 	copy(publicKey[:], decodedPublicKey)
 	ephemeralPublicKey, ephemeralPrivateKey, err := box.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, 0, 0, common.ContextError(err)
 	}
 	box := box.Seal(nil, serializedCookie, &nonce, &publicKey, ephemeralPrivateKey)
 	encryptedCookie := make([]byte, 32+len(box))
 	copy(encryptedCookie[0:32], ephemeralPublicKey[0:32])
 	copy(encryptedCookie[32:], box)
 
-	maxPadding := clientParameters.Get().Int(parameters.MeekCookieMaxPadding)
+	p := clientParameters.Get()
+
+	maxPadding := p.Int(parameters.MeekCookieMaxPadding)
 
 	// Obfuscate the encrypted data
 	obfuscator, err := obfuscator.NewClientObfuscator(
@@ -1274,7 +1304,7 @@ func makeMeekCookie(
 			PaddingPRNGSeed: meekObfuscatorPaddingPRNGSeed,
 			MaxPadding:      &maxPadding})
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, 0, 0, common.ContextError(err)
 	}
 	obfuscatedCookie := obfuscator.SendSeedMessage()
 	seedLen := len(obfuscatedCookie)
@@ -1283,7 +1313,7 @@ func makeMeekCookie(
 
 	cookieNamePRNG, err := obfuscator.GetDerivedPRNG("meek-cookie-name")
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, 0, 0, common.ContextError(err)
 	}
 
 	// Format the HTTP cookie
@@ -1292,8 +1322,30 @@ func makeMeekCookie(
 	Z := int('Z')
 	// letterIndex is integer in range [int('A'), int('Z')]
 	letterIndex := cookieNamePRNG.Intn(Z - A + 1)
-	return &http.Cookie{
-			Name:  string(byte(A + letterIndex)),
-			Value: base64.StdEncoding.EncodeToString(obfuscatedCookie)},
-		nil
+
+	cookie = &http.Cookie{
+		Name:  string(byte(A + letterIndex)),
+		Value: base64.StdEncoding.EncodeToString(obfuscatedCookie)}
+
+	limitRequestPayloadLengthPRNG, err := obfuscator.GetDerivedPRNG(
+		"meek-limit-request-payload-length")
+	if err != nil {
+		return nil, 0, 0, common.ContextError(err)
+	}
+
+	minLength := p.Int(parameters.MeekMinLimitRequestPayloadLength)
+	if minLength > MEEK_MAX_REQUEST_PAYLOAD_LENGTH {
+		minLength = MEEK_MAX_REQUEST_PAYLOAD_LENGTH
+	}
+	maxLength := p.Int(parameters.MeekMaxLimitRequestPayloadLength)
+	if maxLength > MEEK_MAX_REQUEST_PAYLOAD_LENGTH {
+		maxLength = MEEK_MAX_REQUEST_PAYLOAD_LENGTH
+	}
+
+	limitRequestPayloadLength = limitRequestPayloadLengthPRNG.Range(
+		minLength, maxLength)
+
+	redialTLSProbability = p.Float(parameters.MeekRedialTLSProbability)
+
+	return cookie, limitRequestPayloadLength, redialTLSProbability, nil
 }

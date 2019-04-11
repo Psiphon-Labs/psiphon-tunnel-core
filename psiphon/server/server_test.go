@@ -1095,6 +1095,8 @@ func checkExpectedLogFields(runConfig *runServerConfig, fields map[string]interf
 		for _, name := range []string{
 			"user_agent",
 			"meek_transformed_host_name",
+			"meek_cookie_size",
+			"meek_limit_request",
 			tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME,
 		} {
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
