@@ -439,7 +439,7 @@ func DialMeek(
 	if !meek.roundTripperOnly {
 
 		cookie, limitRequestPayloadLength, redialTLSProbability, err :=
-			makeMeekObfucationValues(
+			makeMeekObfuscationValues(
 				meek.clientParameters,
 				meekConfig.MeekCookieEncryptionPublicKey,
 				meekConfig.MeekObfuscatedKey,
@@ -584,7 +584,7 @@ func (meek *MeekConn) RoundTrip(
 		return nil, common.ContextError(errors.New("operation unsupported"))
 	}
 
-	cookie, _, _, err := makeMeekObfucationValues(
+	cookie, _, _, err := makeMeekObfuscationValues(
 		meek.clientParameters,
 		meek.meekCookieEncryptionPublicKey,
 		meek.meekObfuscatedKey,
@@ -1228,7 +1228,7 @@ func (meek *MeekConn) readPayload(
 	return totalSize, nil
 }
 
-// makeMeekObfucationValues creates the meek cookie, to be sent with initial
+// makeMeekObfuscationValues creates the meek cookie, to be sent with initial
 // meek HTTP request, and other meek obfuscation values. The cookies contains
 // obfuscated metadata, including meek version and other protocol information.
 //
@@ -1247,7 +1247,7 @@ func (meek *MeekConn) readPayload(
 //
 // The request paylod limit and TLS redial probability apply only to relay
 // mode and are selected once and used for the duration of a meek connction.
-func makeMeekObfucationValues(
+func makeMeekObfuscationValues(
 	clientParameters *parameters.ClientParameters,
 	meekCookieEncryptionPublicKey string,
 	meekObfuscatedKey string,
