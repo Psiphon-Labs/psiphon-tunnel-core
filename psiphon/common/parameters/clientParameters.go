@@ -161,13 +161,10 @@ const (
 	MeekDialDomainsOnly                              = "MeekDialDomainsOnly"
 	MeekLimitBufferSizes                             = "MeekLimitBufferSizes"
 	MeekCookieMaxPadding                             = "MeekCookieMaxPadding"
-	MeekMinLimitRequestPayloadLength                 = "MeekMinLimitRequestPayloadLength"
-	MeekMaxLimitRequestPayloadLength                 = "MeekMaxLimitRequestPayloadLength"
 	MeekFullReceiveBufferLength                      = "MeekFullReceiveBufferLength"
 	MeekReadPayloadChunkLength                       = "MeekReadPayloadChunkLength"
 	MeekLimitedFullReceiveBufferLength               = "MeekLimitedFullReceiveBufferLength"
 	MeekLimitedReadPayloadChunkLength                = "MeekLimitedReadPayloadChunkLength"
-	MeekRedialTLSProbability                         = "MeekRedialTLSProbability"
 	MeekMinPollInterval                              = "MeekMinPollInterval"
 	MeekMinPollIntervalJitter                        = "MeekMinPollIntervalJitter"
 	MeekMaxPollInterval                              = "MeekMaxPollInterval"
@@ -180,6 +177,11 @@ const (
 	MeekRoundTripRetryMaxDelay                       = "MeekRoundTripRetryMaxDelay"
 	MeekRoundTripRetryMultiplier                     = "MeekRoundTripRetryMultiplier"
 	MeekRoundTripTimeout                             = "MeekRoundTripTimeout"
+	MeekTrafficShapingProbability                    = "MeekTrafficShapingProbability"
+	MeekTrafficShapingLimitProtocols                 = "MeekTrafficShapingLimitProtocols"
+	MeekMinLimitRequestPayloadLength                 = "MeekMinLimitRequestPayloadLength"
+	MeekMaxLimitRequestPayloadLength                 = "MeekMaxLimitRequestPayloadLength"
+	MeekRedialTLSProbability                         = "MeekRedialTLSProbability"
 	TransformHostNameProbability                     = "TransformHostNameProbability"
 	PickUserAgentProbability                         = "PickUserAgentProbability"
 	LivenessTestMinUpstreamBytes                     = "LivenessTestMinUpstreamBytes"
@@ -378,13 +380,10 @@ var defaultClientParameters = map[string]struct {
 	MeekDialDomainsOnly:                        {value: false},
 	MeekLimitBufferSizes:                       {value: false},
 	MeekCookieMaxPadding:                       {value: 256, minimum: 0},
-	MeekMinLimitRequestPayloadLength:           {value: 65536, minimum: 1},
-	MeekMaxLimitRequestPayloadLength:           {value: 65536, minimum: 1},
 	MeekFullReceiveBufferLength:                {value: 4194304, minimum: 1024},
 	MeekReadPayloadChunkLength:                 {value: 65536, minimum: 1024},
 	MeekLimitedFullReceiveBufferLength:         {value: 131072, minimum: 1024},
 	MeekLimitedReadPayloadChunkLength:          {value: 4096, minimum: 1024},
-	MeekRedialTLSProbability:                   {value: 0.0, minimum: 0.0},
 	MeekMinPollInterval:                        {value: 100 * time.Millisecond, minimum: 1 * time.Millisecond},
 	MeekMinPollIntervalJitter:                  {value: 0.3, minimum: 0.0},
 	MeekMaxPollInterval:                        {value: 5 * time.Second, minimum: 1 * time.Millisecond},
@@ -397,6 +396,12 @@ var defaultClientParameters = map[string]struct {
 	MeekRoundTripRetryMaxDelay:                 {value: 1 * time.Second, minimum: time.Duration(0)},
 	MeekRoundTripRetryMultiplier:               {value: 2.0, minimum: 0.0},
 	MeekRoundTripTimeout:                       {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
+
+	MeekTrafficShapingProbability:    {value: 1.0, minimum: 0.0},
+	MeekTrafficShapingLimitProtocols: {value: protocol.TunnelProtocols{}},
+	MeekMinLimitRequestPayloadLength: {value: 65536, minimum: 1},
+	MeekMaxLimitRequestPayloadLength: {value: 65536, minimum: 1},
+	MeekRedialTLSProbability:         {value: 0.0, minimum: 0.0},
 
 	TransformHostNameProbability: {value: 0.5, minimum: 0.0},
 	PickUserAgentProbability:     {value: 0.5, minimum: 0.0},
