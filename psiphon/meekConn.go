@@ -105,6 +105,8 @@ type MeekConfig struct {
 	// included in the meek cookie for optional use by the server, in
 	// cases where the server cannot unambiguously determine the
 	// tunnel protocol.
+	// ClientTunnelProtocol is used when selecting tactics targeted at
+	// specific protocols.
 	ClientTunnelProtocol string
 
 	// RoundTripperOnly sets the MeekConn to operate in round tripper
@@ -1327,25 +1329,34 @@ func makeMeekObfuscationValues(
 		Name:  string(byte(A + letterIndex)),
 		Value: base64.StdEncoding.EncodeToString(obfuscatedCookie)}
 
-	limitRequestPayloadLengthPRNG, err := obfuscator.GetDerivedPRNG(
-		"meek-limit-request-payload-length")
-	if err != nil {
-		return nil, 0, 0, common.ContextError(err)
-	}
+	limitRequestPayloadLength = MEEK_MAX_REQUEST_PAYLOAD_LENGTH
+	redialTLSProbability = 0.0
 
-	minLength := p.Int(parameters.MeekMinLimitRequestPayloadLength)
-	if minLength > MEEK_MAX_REQUEST_PAYLOAD_LENGTH {
-		minLength = MEEK_MAX_REQUEST_PAYLOAD_LENGTH
-	}
-	maxLength := p.Int(parameters.MeekMaxLimitRequestPayloadLength)
-	if maxLength > MEEK_MAX_REQUEST_PAYLOAD_LENGTH {
-		maxLength = MEEK_MAX_REQUEST_PAYLOAD_LENGTH
-	}
+	tunnelProtocols := p.TunnelProtocols(parameters.MeekTrafficShapingLimitProtocols)
+	if (len(tunnelProtocols) == 0 ||
+		common.Contains(tunnelProtocols, clientTunnelProtocol)) &&
+		p.WeightedCoinFlip(parameters.MeekTrafficShapingProbability) {
 
-	limitRequestPayloadLength = limitRequestPayloadLengthPRNG.Range(
-		minLength, maxLength)
+		limitRequestPayloadLengthPRNG, err := obfuscator.GetDerivedPRNG(
+			"meek-limit-request-payload-length")
+		if err != nil {
+			return nil, 0, 0, common.ContextError(err)
+		}
 
-	redialTLSProbability = p.Float(parameters.MeekRedialTLSProbability)
+		minLength := p.Int(parameters.MeekMinLimitRequestPayloadLength)
+		if minLength > MEEK_MAX_REQUEST_PAYLOAD_LENGTH {
+			minLength = MEEK_MAX_REQUEST_PAYLOAD_LENGTH
+		}
+		maxLength := p.Int(parameters.MeekMaxLimitRequestPayloadLength)
+		if maxLength > MEEK_MAX_REQUEST_PAYLOAD_LENGTH {
+			maxLength = MEEK_MAX_REQUEST_PAYLOAD_LENGTH
+		}
+
+		limitRequestPayloadLength = limitRequestPayloadLengthPRNG.Range(
+			minLength, maxLength)
+
+		redialTLSProbability = p.Float(parameters.MeekRedialTLSProbability)
+	}
 
 	return cookie, limitRequestPayloadLength, redialTLSProbability, nil
 }
