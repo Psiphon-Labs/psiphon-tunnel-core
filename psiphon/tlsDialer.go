@@ -515,3 +515,10 @@ func verifyServerCerts(conn *utls.UConn, hostname string) error {
 	}
 	return nil
 }
+
+func init() {
+	// Favor compatibility over security. CustomTLSDial is used as an obfuscation
+	// layer; users of CustomTLSDial, including meek and remote server list
+	// downloads, don't depend on this TLS for its security properties.
+	utls.EnableWeakCiphers()
+}
