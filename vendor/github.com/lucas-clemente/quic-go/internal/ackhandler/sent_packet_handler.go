@@ -148,6 +148,7 @@ func (h *sentPacketHandler) SentPacketsAsRetransmission(packets []*Packet, retra
 
 func (h *sentPacketHandler) sentPacketImpl(packet *Packet) bool /* isRetransmittable */ {
 	for p := h.lastSentPacketNumber + 1; p < packet.PacketNumber; p++ {
+		h.logger.Debugf("Skipping packet number %#x", p)
 		h.skippedPackets = append(h.skippedPackets, p)
 		if len(h.skippedPackets) > protocol.MaxTrackedSkippedPackets {
 			h.skippedPackets = h.skippedPackets[1:]
@@ -464,6 +465,8 @@ func (h *sentPacketHandler) onPacketAcked(p *Packet, rcvTime time.Time) error {
 	}
 	h.rtoCount = 0
 	h.tlpCount = 0
+	h.numRTOs = 0
+	h.allowTLP = false
 	h.handshakeCount = 0
 	return h.packetHistory.Remove(p.PacketNumber)
 }
