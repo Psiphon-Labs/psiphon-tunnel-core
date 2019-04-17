@@ -46,8 +46,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Psiphon-Labs/net/http2/hpack"
 	"golang.org/x/net/http/httpguts"
-	"golang.org/x/net/http2/hpack"
 )
 
 const (

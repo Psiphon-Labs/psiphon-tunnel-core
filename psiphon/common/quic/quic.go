@@ -54,6 +54,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	quic_go "github.com/lucas-clemente/quic-go"
+	"github.com/lucas-clemente/quic-go/h2quic"
 	"github.com/lucas-clemente/quic-go/qerr"
 )
 
@@ -493,5 +494,74 @@ func (conn *loggingPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 		if n > 0 || addr != nil {
 			return n, addr, nil
 		}
+	}
+}
+
+// QUICTransporter implements the psiphon.transporter interface, used in
+// psiphon.MeekConn for HTTP requests, which requires a RoundTripper and
+// CloseIdleConnections.
+type QUICTransporter struct {
+	*h2quic.RoundTripper
+}
+
+// CloseIdleConnections wraps h2quic.RoundTripper.Close, which provides the
+// necessary functionality for psiphon.transporter as used by
+// psiphon.MeekConn. Note that, unlike http.Transport.CloseIdleConnections,
+// the connections are closed regardless of idle status.
+func (t *QUICTransporter) CloseIdleConnections() {
+	t.RoundTripper.Close()
+}
+
+// NewQUICTransporter creates a new QUICTransporter.
+func NewQUICTransporter(
+	ctx context.Context,
+	udpDialer func() (net.PacketConn, *net.UDPAddr, error),
+	quicSNIAddress string,
+	negotiateQUICVersion string) *QUICTransporter {
+
+	dialFunc := func(_, _ string, _ *tls.Config, _ *quic_go.Config) (quic_go.Session, error) {
+
+		var versions []quic_go.VersionNumber
+
+		if negotiateQUICVersion != "" {
+			versionNumber, ok := supportedVersionNumbers[negotiateQUICVersion]
+			if !ok {
+				return nil, common.ContextError(fmt.Errorf("unsupported version: %s", negotiateQUICVersion))
+			}
+			versions = []quic_go.VersionNumber{versionNumber}
+		}
+
+		quicConfig := &quic_go.Config{
+			HandshakeTimeout: time.Duration(1<<63 - 1),
+			IdleTimeout:      CLIENT_IDLE_TIMEOUT,
+			KeepAlive:        true,
+			Versions:         versions,
+		}
+
+		packetConn, remoteAddr, err := udpDialer()
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+
+		session, err := quic_go.DialContext(
+			ctx,
+			packetConn,
+			remoteAddr,
+			quicSNIAddress,
+			&tls.Config{InsecureSkipVerify: true},
+			quicConfig)
+		if err != nil {
+			packetConn.Close()
+			return nil, common.ContextError(err)
+		}
+
+		return session, nil
+
+	}
+
+	return &QUICTransporter{
+		RoundTripper: &h2quic.RoundTripper{
+			Dial: dialFunc,
+		},
 	}
 }
