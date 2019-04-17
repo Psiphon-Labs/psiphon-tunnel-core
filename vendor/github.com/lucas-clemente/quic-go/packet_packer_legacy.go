@@ -417,6 +417,19 @@ func (p *packetPackerLegacy) writeAndSealPacket(
 	}
 	payloadStartIndex := buffer.Len()
 
+	// [Psiphon]
+	// In our tests, gQUICv44 works only when we restore this block of code that was refactored out in:
+	// https://github.com/lucas-clemente/quic-go/commit/5df98dc3891df7349ee6ff41714fbe6bb4d72440.
+
+	// the Initial packet needs to be padded, so the last STREAM frame must have the data length present
+	if header.Type == protocol.PacketTypeInitial {
+		lastFrame := frames[len(frames)-1]
+		if sf, ok := lastFrame.(*wire.StreamFrame); ok {
+			sf.DataLenPresent = true
+		}
+	}
+	// [Psiphon]
+
 	for _, frame := range frames {
 		if err := frame.Write(buffer, p.version); err != nil {
 			return nil, err

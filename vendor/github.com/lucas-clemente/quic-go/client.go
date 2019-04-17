@@ -140,6 +140,7 @@ func dialContext(
 			}
 		}
 	*/
+	// [Psiphon]
 
 	packetHandlers, err := getMultiplexer().AddConn(pconn, config.ConnectionIDLength)
 	if err != nil {
