@@ -46,6 +46,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 )
 
@@ -74,7 +75,14 @@ type MeekConfig struct {
 	// where host may be a domain name or IP address.
 	DialAddress string
 
+	// UseQUIC indicates whether to use HTTP/2 over QUIC.
+	UseQUIC bool
+
+	// QUICVersion indicates which QUIC version to use.
+	QUICVersion string
+
 	// UseHTTPS indicates whether to use HTTPS (true) or HTTP (false).
+	// Ignored when UseQUIC is true.
 	UseHTTPS bool
 
 	// TLSProfile specifies the value for CustomTLSConfig.TLSProfile for all
@@ -90,8 +98,8 @@ type MeekConfig struct {
 	// session tickets. Assumes UseHTTPS is true.
 	UseObfuscatedSessionTickets bool
 
-	// SNIServerName is the value to place in the TLS SNI server_name
-	// field when HTTPS is used.
+	// SNIServerName is the value to place in the TLS/QUIC SNI server_name
+	// field when HTTPS or QUIC is used.
 	SNIServerName string
 
 	// HostHeader is the value to place in the HTTP request Host header.
@@ -203,14 +211,38 @@ func DialMeek(
 		}
 	}()
 
-	// Configure transport: HTTP or HTTPS
+	// Configure transport: QUIC or HTTPS or HTTP
 
 	var scheme string
 	var transport transporter
 	var additionalHeaders http.Header
 	var proxyUrl func(*http.Request) (*url.URL, error)
 
-	if meekConfig.UseHTTPS {
+	if meekConfig.UseQUIC {
+
+		scheme = "https"
+
+		udpDialer := func() (net.PacketConn, *net.UDPAddr, error) {
+			packetConn, remoteAddr, err := NewUDPConn(
+				runCtx,
+				meekConfig.DialAddress,
+				dialConfig)
+			if err != nil {
+				return nil, nil, common.ContextError(err)
+			}
+			return packetConn, remoteAddr, nil
+		}
+
+		_, port, _ := net.SplitHostPort(meekConfig.DialAddress)
+		quicDialSNIAddress := fmt.Sprintf("%s:%s", meekConfig.SNIServerName, port)
+
+		transport = quic.NewQUICTransporter(
+			runCtx,
+			udpDialer,
+			quicDialSNIAddress,
+			meekConfig.QUICVersion)
+
+	} else if meekConfig.UseHTTPS {
 
 		// Custom TLS dialer:
 		//

@@ -206,13 +206,11 @@ func newSession(
 	s.unpacker = newPacketUnpackerGQUIC(cs, s.version)
 	s.streamsMap = newStreamsMapLegacy(s.newStream, s.config.MaxIncomingStreams, s.perspective)
 	s.framer = newFramer(s.cryptoStream, s.streamsMap, s.version)
-	s.packer = newPacketPacker(
+	s.packer = newPacketPackerLegacy(
 		destConnID,
 		srcConnID,
-		1,
 		s.sentPacketHandler.GetPacketNumberLen,
 		s.RemoteAddr(),
-		nil, // no token
 		divNonce,
 		s.cryptoStream,
 		cs,
@@ -279,13 +277,11 @@ var newClientSession = func(
 	s.unpacker = newPacketUnpackerGQUIC(cs, s.version)
 	s.streamsMap = newStreamsMapLegacy(s.newStream, s.config.MaxIncomingStreams, s.perspective)
 	s.framer = newFramer(s.cryptoStream, s.streamsMap, s.version)
-	s.packer = newPacketPacker(
+	s.packer = newPacketPackerLegacy(
 		destConnID,
 		srcConnID,
-		1,
 		s.sentPacketHandler.GetPacketNumberLen,
 		s.RemoteAddr(),
-		nil, // no token
 		nil, // no diversification nonce
 		s.cryptoStream,
 		cs,
@@ -306,7 +302,7 @@ func newTLSServerSession(
 	initialPacketNumber protocol.PacketNumber,
 	config *Config,
 	mintConf *mint.Config,
-	peerParams *handshake.TransportParameters,
+	paramsChan <-chan handshake.TransportParameters,
 	logger utils.Logger,
 	v protocol.VersionNumber,
 ) (quicSession, error) {
@@ -320,6 +316,7 @@ func newTLSServerSession(
 		perspective:    protocol.PerspectiveServer,
 		version:        v,
 		handshakeEvent: handshakeEvent,
+		paramsChan:     paramsChan,
 		logger:         logger,
 	}
 	s.preSetup()
@@ -343,7 +340,6 @@ func newTLSServerSession(
 		s.sentPacketHandler.GetPacketNumberLen,
 		s.RemoteAddr(),
 		nil, // no token
-		nil, // no diversification nonce
 		s.cryptoStream,
 		cs,
 		s.framer,
@@ -354,8 +350,6 @@ func newTLSServerSession(
 	if err := s.postSetup(); err != nil {
 		return nil, err
 	}
-	s.peerParams = peerParams
-	s.processTransportParameters(peerParams)
 	s.unpacker = newPacketUnpacker(cs, s.version)
 	return s, nil
 }
@@ -409,7 +403,6 @@ var newTLSClientSession = func(
 		s.sentPacketHandler.GetPacketNumberLen,
 		s.RemoteAddr(),
 		token,
-		nil, // no diversification nonce
 		s.cryptoStream,
 		cs,
 		s.framer,

@@ -70,14 +70,6 @@ type frameSource interface {
 	AppendControlFrames([]wire.Frame, protocol.ByteCount) ([]wire.Frame, protocol.ByteCount)
 }
 
-// sentAndReceivedPacketManager is only needed until STOP_WAITING is removed
-type sentAndReceivedPacketManager struct {
-	ackhandler.SentPacketHandler
-	ackhandler.ReceivedPacketHandler
-}
-
-var _ ackFrameSource = &sentAndReceivedPacketManager{}
-
 type ackFrameSource interface {
 	GetAckFrame() *wire.AckFrame
 	GetStopWaitingFrame(bool) *wire.StopWaitingFrame
@@ -91,8 +83,7 @@ type packetPacker struct {
 	version     protocol.VersionNumber
 	cryptoSetup sealingManager
 
-	token    []byte
-	divNonce []byte
+	token []byte
 
 	packetNumberGenerator *packetNumberGenerator
 	getPacketNumberLen    func(protocol.PacketNumber) protocol.PacketNumberLen
@@ -100,7 +91,6 @@ type packetPacker struct {
 	framer                frameSource
 	acks                  ackFrameSource
 
-	omitConnectionID          bool
 	maxPacketSize             protocol.ByteCount
 	hasSentPacket             bool // has the packetPacker already sent a packet
 	numNonRetransmittableAcks int
@@ -115,7 +105,6 @@ func newPacketPacker(
 	getPacketNumberLen func(protocol.PacketNumber) protocol.PacketNumberLen,
 	remoteAddr net.Addr, // only used for determining the max packet size
 	token []byte,
-	divNonce []byte,
 	cryptoStream cryptoStream,
 	cryptoSetup sealingManager,
 	framer frameSource,
@@ -126,7 +115,6 @@ func newPacketPacker(
 	return &packetPacker{
 		cryptoStream:          cryptoStream,
 		cryptoSetup:           cryptoSetup,
-		divNonce:              divNonce,
 		token:                 token,
 		destConnID:            destConnID,
 		srcConnID:             srcConnID,
@@ -162,14 +150,6 @@ func (p *packetPacker) MaybePackAckPacket() (*packedPacket, error) {
 	encLevel, sealer := p.cryptoSetup.GetSealer()
 	header := p.getHeader(encLevel)
 	frames := []wire.Frame{ack}
-	// add a STOP_WAITING frame, when using gQUIC
-	if p.version.UsesStopWaitingFrames() {
-		if swf := p.acks.GetStopWaitingFrame(false); swf != nil {
-			swf.PacketNumber = header.PacketNumber
-			swf.PacketNumberLen = header.PacketNumberLen
-			frames = append(frames, swf)
-		}
-	}
 	raw, err := p.writeAndSealPacket(header, frames, sealer)
 	return &packedPacket{
 		header:          header,
@@ -201,11 +181,6 @@ func (p *packetPacker) PackRetransmission(packet *ackhandler.Packet) ([]*packedP
 
 	var packets []*packedPacket
 	encLevel, sealer := p.cryptoSetup.GetSealer()
-	var swf *wire.StopWaitingFrame
-	// for gQUIC: add a STOP_WAITING for *every* retransmission
-	if p.version.UsesStopWaitingFrames() {
-		swf = p.acks.GetStopWaitingFrame(true)
-	}
 	for len(controlFrames) > 0 || len(streamFrames) > 0 {
 		var frames []wire.Frame
 		var length protocol.ByteCount
@@ -216,17 +191,6 @@ func (p *packetPacker) PackRetransmission(packet *ackhandler.Packet) ([]*packedP
 			return nil, err
 		}
 		maxSize := p.maxPacketSize - protocol.ByteCount(sealer.Overhead()) - headerLength
-
-		if p.version.UsesStopWaitingFrames() {
-			// create a new STOP_WAIITNG Frame, since we might need to send more than one packet as a retransmission
-			stopWaitingFrame := &wire.StopWaitingFrame{
-				LeastUnacked:    swf.LeastUnacked,
-				PacketNumber:    header.PacketNumber,
-				PacketNumberLen: header.PacketNumberLen,
-			}
-			length += stopWaitingFrame.Length(p.version)
-			frames = append(frames, stopWaitingFrame)
-		}
 
 		for len(controlFrames) > 0 {
 			frame := controlFrames[0]
@@ -286,20 +250,11 @@ func (p *packetPacker) packHandshakeRetransmission(packet *ackhandler.Packet) (*
 	}
 	header := p.getHeader(packet.EncryptionLevel)
 	header.Type = packet.PacketType
-	var frames []wire.Frame
-	if p.version.UsesStopWaitingFrames() { // for gQUIC: pack a STOP_WAITING first
-		swf := p.acks.GetStopWaitingFrame(true)
-		swf.PacketNumber = header.PacketNumber
-		swf.PacketNumberLen = header.PacketNumberLen
-		frames = append([]wire.Frame{swf}, packet.Frames...)
-	} else {
-		frames = packet.Frames
-	}
-	raw, err := p.writeAndSealPacket(header, frames, sealer)
+	raw, err := p.writeAndSealPacket(header, packet.Frames, sealer)
 	return &packedPacket{
 		header:          header,
 		raw:             raw,
-		frames:          frames,
+		frames:          packet.Frames,
 		encryptionLevel: packet.EncryptionLevel,
 	}, err
 }
@@ -328,7 +283,7 @@ func (p *packetPacker) PackPacket() (*packedPacket, error) {
 	}
 
 	maxSize := p.maxPacketSize - protocol.ByteCount(sealer.Overhead()) - headerLength
-	frames, err := p.composeNextPacket(header, maxSize, p.canSendData(encLevel))
+	frames, err := p.composeNextPacket(maxSize, p.canSendData(encLevel))
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +292,7 @@ func (p *packetPacker) PackPacket() (*packedPacket, error) {
 	if len(frames) == 0 {
 		return nil, nil
 	}
-	// check if this packet only contains an ACK (and maybe a STOP_WAITING)
+	// check if this packet only contains an ACK
 	if !ackhandler.HasRetransmittableFrames(frames) {
 		if p.numNonRetransmittableAcks >= protocol.MaxNonRetransmittableAcks {
 			frames = append(frames, &wire.PingFrame{})
@@ -388,27 +343,16 @@ func (p *packetPacker) maybePackCryptoPacket() (*packedPacket, error) {
 }
 
 func (p *packetPacker) composeNextPacket(
-	header *wire.Header, // only needed to fill in the STOP_WAITING frame
 	maxFrameSize protocol.ByteCount,
 	canSendStreamFrames bool,
 ) ([]wire.Frame, error) {
 	var length protocol.ByteCount
 	var frames []wire.Frame
 
-	// STOP_WAITING and ACK will always fit
 	// ACKs need to go first, so that the sentPacketHandler will recognize them
 	if ack := p.acks.GetAckFrame(); ack != nil {
 		frames = append(frames, ack)
 		length += ack.Length(p.version)
-		// add a STOP_WAITING, for gQUIC
-		if p.version.UsesStopWaitingFrames() {
-			if swf := p.acks.GetStopWaitingFrame(false); swf != nil {
-				swf.PacketNumber = header.PacketNumber
-				swf.PacketNumberLen = header.PacketNumberLen
-				frames = append(frames, swf)
-				length += swf.Length(p.version)
-			}
-		}
 	}
 
 	var lengthAdded protocol.ByteCount
@@ -420,15 +364,10 @@ func (p *packetPacker) composeNextPacket(
 	}
 
 	// temporarily increase the maxFrameSize by the (minimum) length of the DataLen field
-	// this leads to a properly sized packet in all cases, since we do all the packet length calculations with StreamFrames that have the DataLen set
+	// this leads to a properly sized packet in all cases, since we do all the packet length calculations with STREAM frames that have the DataLen set
 	// however, for the last STREAM frame in the packet, we can omit the DataLen, thus yielding a packet of exactly the correct size
-	// for gQUIC STREAM frames, DataLen is always 2 bytes
-	// for IETF draft style STREAM frames, the length is encoded to either 1 or 2 bytes
-	if p.version.UsesIETFFrameFormat() {
-		maxFrameSize++
-	} else {
-		maxFrameSize += 2
-	}
+	// the length is encoded to either 1 or 2 bytes
+	maxFrameSize++
 
 	frames = p.framer.AppendStreamFrames(frames, maxFrameSize-length)
 	if len(frames) > 0 {
@@ -445,17 +384,15 @@ func (p *packetPacker) getHeader(encLevel protocol.EncryptionLevel) *wire.Header
 	packetNumberLen := p.getPacketNumberLen(pnum)
 
 	header := &wire.Header{
-		PacketNumber:    pnum,
-		PacketNumberLen: packetNumberLen,
-		Version:         p.version,
+		PacketNumber:     pnum,
+		PacketNumberLen:  packetNumberLen,
+		Version:          p.version,
+		DestConnectionID: p.destConnID,
 	}
 
-	if p.version.UsesIETFHeaderFormat() && encLevel != protocol.EncryptionForwardSecure {
+	if encLevel != protocol.EncryptionForwardSecure {
 		header.IsLongHeader = true
 		header.SrcConnectionID = p.srcConnID
-		if !p.version.UsesVarintPacketNumbers() {
-			header.PacketNumberLen = protocol.PacketNumberLen4
-		}
 		// Set the payload len to maximum size.
 		// Since it is encoded as a varint, this guarantees us that the header will end up at most as big as GetLength() returns.
 		header.PayloadLen = p.maxPacketSize
@@ -467,18 +404,6 @@ func (p *packetPacker) getHeader(encLevel protocol.EncryptionLevel) *wire.Header
 		}
 	}
 
-	if !p.omitConnectionID || encLevel != protocol.EncryptionForwardSecure {
-		header.DestConnectionID = p.destConnID
-	}
-	if !p.version.UsesTLS() {
-		if p.perspective == protocol.PerspectiveServer && encLevel == protocol.EncryptionSecure {
-			header.Type = protocol.PacketType0RTT
-			header.DiversificationNonce = p.divNonce
-		}
-		if p.perspective == protocol.PerspectiveClient && encLevel != protocol.EncryptionForwardSecure {
-			header.VersionFlag = true
-		}
-	}
 	return header
 }
 
@@ -521,8 +446,7 @@ func (p *packetPacker) writeAndSealPacket(
 			return nil, err
 		}
 	}
-	// if this is an IETF QUIC Initial packet, we need to pad it to fulfill the minimum size requirement
-	// in gQUIC, padding is handled in the CHLO
+	// if this is an Initial packet, we need to pad it to fulfill the minimum size requirement
 	if header.Type == protocol.PacketTypeInitial {
 		paddingLen := protocol.MinInitialPacketSize - sealer.Overhead() - buffer.Len()
 		if paddingLen > 0 {
@@ -558,7 +482,6 @@ func (p *packetPacker) ChangeDestConnectionID(connID protocol.ConnectionID) {
 }
 
 func (p *packetPacker) HandleTransportParameters(params *handshake.TransportParameters) {
-	p.omitConnectionID = params.OmitConnectionID
 	if params.MaxPacketSize != 0 {
 		p.maxPacketSize = utils.MinByteCount(p.maxPacketSize, params.MaxPacketSize)
 	}

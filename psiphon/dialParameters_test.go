@@ -179,10 +179,21 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("missing meek HTTPS fields")
 	}
 
-	if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) &&
-		(dialParams.QUICVersion == "" ||
-			dialParams.QUICDialSNIAddress == "") {
-		t.Fatalf("missing meek HTTPS fields")
+	if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) {
+		if dialParams.QUICVersion == "" {
+			t.Fatalf("missing QUIC version field")
+		}
+		if protocol.TunnelProtocolUsesFrontedQUIC(tunnelProtocol) {
+			if dialParams.MeekFrontingDialAddress == "" ||
+				dialParams.MeekFrontingHost == "" ||
+				dialParams.MeekSNIServerName == "" {
+				t.Fatalf("missing fronted QUIC fields")
+			}
+		} else {
+			if dialParams.QUICDialSNIAddress == "" {
+				t.Fatalf("missing QUIC SNI field")
+			}
+		}
 	}
 
 	if dialParams.LivenessTestSeed == nil {

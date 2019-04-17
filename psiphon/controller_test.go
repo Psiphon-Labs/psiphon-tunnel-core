@@ -436,6 +436,26 @@ func TestQUIC(t *testing.T) {
 		})
 }
 
+func TestFrontedQUIC(t *testing.T) {
+
+	t.Skipf("temporarily disabled")
+
+	controllerRun(t,
+		&controllerRunConfig{
+			expectNoServerEntries:    false,
+			protocol:                 protocol.TUNNEL_PROTOCOL_FRONTED_QUIC_OBFUSCATED_SSH,
+			clientIsLatestVersion:    false,
+			disableUntunneledUpgrade: true,
+			disableEstablishing:      false,
+			disableApi:               false,
+			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
+			disruptNetwork:           false,
+			transformHostNames:       false,
+			useFragmentor:            false,
+		})
+}
+
 type controllerRunConfig struct {
 	expectNoServerEntries    bool
 	protocol                 string

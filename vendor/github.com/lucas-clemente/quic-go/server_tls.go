@@ -25,7 +25,7 @@ type serverTLS struct {
 	params          *handshake.TransportParameters
 	cookieGenerator *handshake.CookieGenerator
 
-	newSession func(connection, sessionRunner, protocol.ConnectionID, protocol.ConnectionID, protocol.ConnectionID, protocol.PacketNumber, *Config, *mint.Config, *handshake.TransportParameters, utils.Logger, protocol.VersionNumber) (quicSession, error)
+	newSession func(connection, sessionRunner, protocol.ConnectionID, protocol.ConnectionID, protocol.ConnectionID, protocol.PacketNumber, *Config, *mint.Config, <-chan handshake.TransportParameters, utils.Logger, protocol.VersionNumber) (quicSession, error)
 
 	sessionRunner sessionRunner
 	sessionChan   chan<- tlsSession
@@ -118,9 +118,6 @@ func (s *serverTLS) handleInitialImpl(p *receivedPacket) (quicSession, protocol.
 	mconf := s.mintConf.Clone()
 	mconf.ExtensionHandler = extHandler
 
-	// A server is allowed to perform multiple Retries.
-	// It doesn't make much sense, but it's something that our API allows.
-	// In that case it must use a source connection ID of at least 8 bytes.
 	connID, err := protocol.GenerateConnectionID(s.config.ConnectionIDLength)
 	if err != nil {
 		return nil, nil, err
@@ -135,7 +132,7 @@ func (s *serverTLS) handleInitialImpl(p *receivedPacket) (quicSession, protocol.
 		1,
 		s.config,
 		mconf,
-		s.params,
+		extHandler.GetPeerParams(),
 		s.logger,
 		hdr.Version,
 	)
@@ -152,7 +149,7 @@ func (s *serverTLS) sendRetry(remoteAddr net.Addr, hdr *wire.Header) error {
 	if err != nil {
 		return err
 	}
-	connID, err := protocol.GenerateConnectionIDForInitial()
+	connID, err := protocol.GenerateConnectionID(s.config.ConnectionIDLength)
 	if err != nil {
 		return err
 	}
