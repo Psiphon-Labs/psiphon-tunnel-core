@@ -299,6 +299,14 @@
 			"revisionTime": "2016-08-23T09:51:56Z"
 		},
 		{
+			"checksumSHA1": "Acu5qrWFrDGVbyhjUI0PsVe9cHY=",
+			"path": "github.com/lucas-clemente/quic-go/h2quic",
+			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
+			"revisionTime": "2019-04-16T05:23:26Z",
+			"version": "=gquic",
+			"versionExact": "gquic"
+		},
+		{
 			"checksumSHA1": "3ln/ewUovXrNnPySlGTJ/tqaAcU=",
 			"path": "github.com/lucas-clemente/quic-go/internal/ackhandler",
 			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
@@ -670,6 +678,18 @@
 			"path": "golang.org/x/net/http/httpguts",
 			"revision": "8a410e7b638dca158bf9e766925842f6651ff828",
 			"revisionTime": "2018-08-25T16:15:26Z"
+		},
+		{
+			"checksumSHA1": "AmeYQUH7nq7nsV5lhvMH93E2eVY=",
+			"path": "golang.org/x/net/http2",
+			"revision": "1da14a5a36f220ea3f03470682b737b1dfd5de22",
+			"revisionTime": "2019-02-11T22:33:38Z"
+		},
+		{
+			"checksumSHA1": "VJwSx33rjMC7O6K2O50Jw6o1vw4=",
+			"path": "golang.org/x/net/http2/hpack",
+			"revision": "1da14a5a36f220ea3f03470682b737b1dfd5de22",
+			"revisionTime": "2019-02-11T22:33:38Z"
 		},
 		{
 			"checksumSHA1": "1osdKBIU5mNqyQqiGmnutoTzdJA=",
