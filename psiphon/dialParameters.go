@@ -547,6 +547,7 @@ func MakeDialParameters(
 		dialParams.meekConfig = &MeekConfig{
 			ClientParameters:              config.clientParameters,
 			DialAddress:                   dialParams.MeekDialAddress,
+			UseQUIC:                       protocol.TunnelProtocolUsesFrontedQUIC(dialParams.TunnelProtocol),
 			QUICVersion:                   dialParams.QUICVersion,
 			UseHTTPS:                      protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol),
 			TLSProfile:                    dialParams.TLSProfile,

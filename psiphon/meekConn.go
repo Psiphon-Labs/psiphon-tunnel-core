@@ -75,12 +75,14 @@ type MeekConfig struct {
 	// where host may be a domain name or IP address.
 	DialAddress string
 
-	// QUICVersion indicates whether to use QUIC and which QUIC version
-	// to use. QUIC is not used when "".
+	// UseQUIC indicates whether to use HTTP/2 over QUIC.
+	UseQUIC bool
+
+	// QUICVersion indicates which QUIC version to use.
 	QUICVersion string
 
 	// UseHTTPS indicates whether to use HTTPS (true) or HTTP (false).
-	// Ignored when QUICVersion is configured.
+	// Ignored when UseQUIC is true.
 	UseHTTPS bool
 
 	// TLSProfile specifies the value for CustomTLSConfig.TLSProfile for all
@@ -216,7 +218,7 @@ func DialMeek(
 	var additionalHeaders http.Header
 	var proxyUrl func(*http.Request) (*url.URL, error)
 
-	if meekConfig.QUICVersion != "" {
+	if meekConfig.UseQUIC {
 
 		scheme = "https"
 
