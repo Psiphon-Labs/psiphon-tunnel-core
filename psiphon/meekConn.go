@@ -576,6 +576,23 @@ func (meek *MeekConn) Close() (err error) {
 		if meek.cachedTLSDialer != nil {
 			meek.cachedTLSDialer.close()
 		}
+
+		// stopRunning interrupts HTTP requests in progress by closing the context
+		// associated with the request. In the case of h2quic.RoundTripper, testing
+		// indicates that quic-go.receiveStream.readImpl in _not_ interrupted in
+		// this case, and so an in-flight FRONTED-QUIC round trip may hang shutdown
+		// in relayRoundTrip->readPayload->...->quic-go.receiveStream.readImpl.
+		//
+		// To workaround this, we call CloseIdleConnections _before_ Wait, as, in
+		// the case of QUICTransporter, this closes the underlying UDP sockets which
+		// interrupts any blocking I/O calls.
+		//
+		// The standard CloseIdleConnections call _after_ wait is for the net/http
+		// case: it only closes idle connections, so the call should be after wait.
+		// This call is intended to clean up all network resources deterministically
+		// before Close returns.
+
+		meek.transport.CloseIdleConnections()
 		meek.relayWaitGroup.Wait()
 		meek.transport.CloseIdleConnections()
 	}
