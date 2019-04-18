@@ -502,14 +502,11 @@ func (conn *loggingPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 // CloseIdleConnections.
 type QUICTransporter struct {
 	*h2quic.RoundTripper
-}
-
-// CloseIdleConnections wraps h2quic.RoundTripper.Close, which provides the
-// necessary functionality for psiphon.transporter as used by
-// psiphon.MeekConn. Note that, unlike http.Transport.CloseIdleConnections,
-// the connections are closed regardless of idle status.
-func (t *QUICTransporter) CloseIdleConnections() {
-	t.RoundTripper.Close()
+	ctx                  context.Context
+	udpDialer            func() (net.PacketConn, *net.UDPAddr, error)
+	quicSNIAddress       string
+	negotiateQUICVersion string
+	packetConn           atomic.Value
 }
 
 // NewQUICTransporter creates a new QUICTransporter.
@@ -519,49 +516,87 @@ func NewQUICTransporter(
 	quicSNIAddress string,
 	negotiateQUICVersion string) *QUICTransporter {
 
-	dialFunc := func(_, _ string, _ *tls.Config, _ *quic_go.Config) (quic_go.Session, error) {
-
-		var versions []quic_go.VersionNumber
-
-		if negotiateQUICVersion != "" {
-			versionNumber, ok := supportedVersionNumbers[negotiateQUICVersion]
-			if !ok {
-				return nil, common.ContextError(fmt.Errorf("unsupported version: %s", negotiateQUICVersion))
-			}
-			versions = []quic_go.VersionNumber{versionNumber}
-		}
-
-		quicConfig := &quic_go.Config{
-			HandshakeTimeout: time.Duration(1<<63 - 1),
-			IdleTimeout:      CLIENT_IDLE_TIMEOUT,
-			KeepAlive:        true,
-			Versions:         versions,
-		}
-
-		packetConn, remoteAddr, err := udpDialer()
-		if err != nil {
-			return nil, common.ContextError(err)
-		}
-
-		session, err := quic_go.DialContext(
-			ctx,
-			packetConn,
-			remoteAddr,
-			quicSNIAddress,
-			&tls.Config{InsecureSkipVerify: true},
-			quicConfig)
-		if err != nil {
-			packetConn.Close()
-			return nil, common.ContextError(err)
-		}
-
-		return session, nil
-
+	t := &QUICTransporter{
+		ctx:                  ctx,
+		udpDialer:            udpDialer,
+		quicSNIAddress:       quicSNIAddress,
+		negotiateQUICVersion: negotiateQUICVersion,
 	}
 
-	return &QUICTransporter{
-		RoundTripper: &h2quic.RoundTripper{
-			Dial: dialFunc,
-		},
+	t.RoundTripper = &h2quic.RoundTripper{Dial: t.dialQUIC}
+
+	return t
+}
+
+// CloseIdleConnections wraps h2quic.RoundTripper.Close, which provides the
+// necessary functionality for psiphon.transporter as used by
+// psiphon.MeekConn. Note that, unlike http.Transport.CloseIdleConnections,
+// the connections are closed regardless of idle status.
+func (t *QUICTransporter) CloseIdleConnections() {
+	t.closePacketConn()
+	t.RoundTripper.Close()
+}
+
+func (t *QUICTransporter) closePacketConn() {
+	packetConn := t.packetConn.Load()
+	if p, ok := packetConn.(net.PacketConn); ok {
+		p.Close()
 	}
+}
+
+func (t *QUICTransporter) dialQUIC(
+	_, _ string, _ *tls.Config, _ *quic_go.Config) (quic_go.Session, error) {
+
+	var versions []quic_go.VersionNumber
+
+	if t.negotiateQUICVersion != "" {
+		versionNumber, ok := supportedVersionNumbers[t.negotiateQUICVersion]
+		if !ok {
+			return nil, common.ContextError(fmt.Errorf("unsupported version: %s", t.negotiateQUICVersion))
+		}
+		versions = []quic_go.VersionNumber{versionNumber}
+	}
+
+	quicConfig := &quic_go.Config{
+		HandshakeTimeout: time.Duration(1<<63 - 1),
+		IdleTimeout:      CLIENT_IDLE_TIMEOUT,
+		KeepAlive:        true,
+		Versions:         versions,
+	}
+
+	packetConn, remoteAddr, err := t.udpDialer()
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	session, err := quic_go.DialContext(
+		t.ctx,
+		packetConn,
+		remoteAddr,
+		t.quicSNIAddress,
+		&tls.Config{InsecureSkipVerify: true},
+		quicConfig)
+	if err != nil {
+		packetConn.Close()
+		return nil, common.ContextError(err)
+	}
+
+	// We use quic_go.DialContext as we must create our own UDP sockets to set
+	// properties such as BIND_TO_DEVICE. However, when DialContext is used,
+	// quic_go does not take responsibiity for closing the underlying packetConn
+	// when the QUIC session is closed.
+	//
+	// We track the most recent packetConn in QUICTransporter and close it:
+	// - when CloseIdleConnections is called, as it is by psiphon.MeekConn when
+	//   it is closing;
+	// - here in dialFunc, with the assumption that only one concurrent QUIC
+	//   session is used per h2quic.RoundTripper.
+	//
+	// This code also assume no concurrent calls to dialFunc, as otherwise a race
+	// condition exists between closePacketConn and Store.
+
+	t.closePacketConn()
+	t.packetConn.Store(packetConn)
+
+	return session, nil
 }
