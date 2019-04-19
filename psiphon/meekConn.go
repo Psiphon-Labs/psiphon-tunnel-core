@@ -145,6 +145,7 @@ type MeekConfig struct {
 // through a CDN.
 type MeekConn struct {
 	clientParameters          *parameters.ClientParameters
+	isQUIC                    bool
 	url                       *url.URL
 	additionalHeaders         http.Header
 	cookie                    *http.Cookie
@@ -213,12 +214,15 @@ func DialMeek(
 
 	// Configure transport: QUIC or HTTPS or HTTP
 
+	var isQUIC bool
 	var scheme string
 	var transport transporter
 	var additionalHeaders http.Header
 	var proxyUrl func(*http.Request) (*url.URL, error)
 
 	if meekConfig.UseQUIC {
+
+		isQUIC = true
 
 		scheme = "https"
 
@@ -453,6 +457,7 @@ func DialMeek(
 	// sendBuffer.
 	meek = &MeekConn{
 		clientParameters:  meekConfig.ClientParameters,
+		isQUIC:            isQUIC,
 		url:               url,
 		additionalHeaders: additionalHeaders,
 		cachedTLSDialer:   cachedTLSDialer,
@@ -591,8 +596,10 @@ func (meek *MeekConn) Close() (err error) {
 		// case: it only closes idle connections, so the call should be after wait.
 		// This call is intended to clean up all network resources deterministically
 		// before Close returns.
+		if meek.isQUIC {
+			meek.transport.CloseIdleConnections()
+		}
 
-		meek.transport.CloseIdleConnections()
 		meek.relayWaitGroup.Wait()
 		meek.transport.CloseIdleConnections()
 	}
@@ -665,6 +672,15 @@ func (meek *MeekConn) RoundTrip(
 		return nil, common.ContextError(err)
 	}
 	defer cancelFunc()
+
+	// Workaround for h2quic.RoundTripper context issue. See comment in
+	// MeekConn.Close.
+	if meek.isQUIC {
+		go func() {
+			<-request.Context().Done()
+			meek.transport.CloseIdleConnections()
+		}()
+	}
 
 	response, err := meek.transport.RoundTrip(request)
 	if err == nil {
@@ -981,7 +997,8 @@ func (meek *MeekConn) newRequest(
 
 	request, err := http.NewRequest("POST", meek.url.String(), body)
 	if err != nil {
-		return nil, cancelFunc, common.ContextError(err)
+		cancelFunc()
+		return nil, nil, common.ContextError(err)
 	}
 
 	request = request.WithContext(requestCtx)
