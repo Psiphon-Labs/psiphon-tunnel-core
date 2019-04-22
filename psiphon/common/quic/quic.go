@@ -502,30 +502,39 @@ func (conn *loggingPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 // CloseIdleConnections.
 type QUICTransporter struct {
 	*h2quic.RoundTripper
-	ctx                  context.Context
-	udpDialer            func() (net.PacketConn, *net.UDPAddr, error)
+	udpDialer            func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error)
 	quicSNIAddress       string
 	negotiateQUICVersion string
 	packetConn           atomic.Value
+
+	mutex sync.Mutex
+	ctx   context.Context
 }
 
 // NewQUICTransporter creates a new QUICTransporter.
 func NewQUICTransporter(
 	ctx context.Context,
-	udpDialer func() (net.PacketConn, *net.UDPAddr, error),
+	udpDialer func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error),
 	quicSNIAddress string,
 	negotiateQUICVersion string) *QUICTransporter {
 
 	t := &QUICTransporter{
-		ctx:                  ctx,
 		udpDialer:            udpDialer,
 		quicSNIAddress:       quicSNIAddress,
 		negotiateQUICVersion: negotiateQUICVersion,
+		ctx:                  ctx,
 	}
 
 	t.RoundTripper = &h2quic.RoundTripper{Dial: t.dialQUIC}
 
 	return t
+}
+
+func (t *QUICTransporter) SetRequestContext(ctx context.Context) {
+	// Note: can't use sync.Value since underlying type of ctx changes.
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.ctx = ctx
 }
 
 // CloseIdleConnections wraps h2quic.RoundTripper.Close, which provides the
@@ -564,13 +573,20 @@ func (t *QUICTransporter) dialQUIC(
 		Versions:         versions,
 	}
 
-	packetConn, remoteAddr, err := t.udpDialer()
+	t.mutex.Lock()
+	ctx := t.ctx
+	t.mutex.Unlock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	packetConn, remoteAddr, err := t.udpDialer(ctx)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
 
 	session, err := quic_go.DialContext(
-		t.ctx,
+		ctx,
 		packetConn,
 		remoteAddr,
 		t.quicSNIAddress,
