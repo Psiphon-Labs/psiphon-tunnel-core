@@ -502,6 +502,7 @@ type Config struct {
 	MeekTrafficShapingLimitProtocols []string
 	MeekMinLimitRequestPayloadLength *int
 	MeekMaxLimitRequestPayloadLength *int
+	MeekRedialTLSProbability         *float64
 
 	// ObfuscatedSSHAlgorithms and associated ObfuscatedSSH fields are for
 	// testing purposes. If specified, ObfuscatedSSHAlgorithms must have 4 SSH
@@ -1001,6 +1002,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.MeekMaxLimitRequestPayloadLength] = *config.MeekMaxLimitRequestPayloadLength
 	}
 
+	if config.MeekRedialTLSProbability != nil {
+		applyParameters[parameters.MeekRedialTLSProbability] = *config.MeekRedialTLSProbability
+	}
+
 	if config.ObfuscatedSSHMinPadding != nil {
 		applyParameters[parameters.ObfuscatedSSHMinPadding] = *config.ObfuscatedSSHMinPadding
 	}
@@ -1138,6 +1143,10 @@ func (config *Config) setDialParametersHash() {
 
 	if config.MeekMaxLimitRequestPayloadLength != nil {
 		binary.Write(hash, binary.LittleEndian, *config.MeekMaxLimitRequestPayloadLength)
+	}
+
+	if config.MeekRedialTLSProbability != nil {
+		binary.Write(hash, binary.LittleEndian, *config.MeekRedialTLSProbability)
 	}
 
 	if config.ObfuscatedSSHMinPadding != nil {
