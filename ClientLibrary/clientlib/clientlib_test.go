@@ -61,7 +61,7 @@ func TestStartTunnel(t *testing.T) {
 	configJSON := getConfigJSON(t)
 	clientPlatform := "clientlib_test.go"
 	networkID := "UNKNOWN"
-	timeout := 10
+	timeout := 20
 
 	// Cancels the context after a duration. Pass 0 for no cancel.
 	// (Note that cancelling causes an error, not a timeout.)
