@@ -207,8 +207,14 @@ func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExi
 
 		serverEntryTagBytes := []byte(serverEntryTag)
 
-		// Ignore the server entry if it was previously pruned and a tombstone
-		// is set.
+		// Ignore the server entry if it was previously pruned and a tombstone is
+		// set.
+		//
+		// This logic is enforced only for embedded server entries, as all other
+		// sources are considered to be definitive and non-stale. These exceptions
+		// intentionally allow the scenario where a server is temporarily deleted
+		// and then restored; in this case, it's desired for pruned server entries
+		// to be restored.
 		if serverEntryFields.GetLocalSource() == protocol.SERVER_ENTRY_SOURCE_EMBEDDED {
 			if serverEntryTombstoneTags.get(serverEntryTagBytes) != nil {
 				return nil
