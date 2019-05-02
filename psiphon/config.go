@@ -275,12 +275,6 @@ type Config struct {
 	// they would otherwise be used for replay.
 	DisableReplay bool
 
-	// TransformHostNames specifies whether to use hostname transformation
-	// circumvention strategies. Set to "always" to always transform, "never"
-	// to never transform, and "", the default, for the default transformation
-	// strategy.
-	TransformHostNames string
-
 	// TargetServerEntry is an encoded server entry. When specified, this
 	// server entry is used exclusively and all other known servers are
 	// ignored; also, when set, ConnectionWorkerPoolSize is ignored and
@@ -488,15 +482,27 @@ type Config struct {
 	// server.
 	Authorizations []string
 
-	// UseFragmentor and associated Fragmentor fields are for testing
+	// TransformHostNameProbability is for testing purposes.
+	TransformHostNameProbability *float64
+
+	// FragmentorProbability and associated Fragmentor fields are for testing
 	// purposes.
-	UseFragmentor                  string
+	FragmentorProbability          *float64
+	FragmentorLimitProtocols       []string
 	FragmentorMinTotalBytes        *int
 	FragmentorMaxTotalBytes        *int
 	FragmentorMinWriteBytes        *int
 	FragmentorMaxWriteBytes        *int
 	FragmentorMinDelayMicroseconds *int
 	FragmentorMaxDelayMicroseconds *int
+
+	// MeekTrafficShapingProbability and associated fields are for testing
+	// purposes.
+	MeekTrafficShapingProbability    *float64
+	MeekTrafficShapingLimitProtocols []string
+	MeekMinLimitRequestPayloadLength *int
+	MeekMaxLimitRequestPayloadLength *int
+	MeekRedialTLSProbability         *float64
 
 	// ObfuscatedSSHAlgorithms and associated ObfuscatedSSH fields are for
 	// testing purposes. If specified, ObfuscatedSSHAlgorithms must have 4 SSH
@@ -919,13 +925,6 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.FetchUpgradeRetryPeriod] = fmt.Sprintf("%dms", *config.FetchUpgradeRetryPeriodMilliseconds)
 	}
 
-	switch config.TransformHostNames {
-	case "always":
-		applyParameters[parameters.TransformHostNameProbability] = 1.0
-	case "never":
-		applyParameters[parameters.TransformHostNameProbability] = 0.0
-	}
-
 	if !config.DisableRemoteServerListFetcher {
 
 		if config.RemoteServerListURLs != nil {
@@ -951,11 +950,16 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	applyParameters[parameters.TunnelRateLimits] = config.RateLimits
 
-	switch config.UseFragmentor {
-	case "always":
-		applyParameters[parameters.FragmentorProbability] = 1.0
-	case "never":
-		applyParameters[parameters.FragmentorProbability] = 0.0
+	if config.TransformHostNameProbability != nil {
+		applyParameters[parameters.TransformHostNameProbability] = *config.TransformHostNameProbability
+	}
+
+	if config.FragmentorProbability != nil {
+		applyParameters[parameters.FragmentorProbability] = *config.FragmentorProbability
+	}
+
+	if len(config.FragmentorLimitProtocols) > 0 {
+		applyParameters[parameters.FragmentorLimitProtocols] = protocol.TunnelProtocols(config.FragmentorLimitProtocols)
 	}
 
 	if config.FragmentorMinTotalBytes != nil {
@@ -980,6 +984,26 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.FragmentorMaxDelayMicroseconds != nil {
 		applyParameters[parameters.FragmentorMaxDelay] = fmt.Sprintf("%dus", *config.FragmentorMaxDelayMicroseconds)
+	}
+
+	if config.MeekTrafficShapingProbability != nil {
+		applyParameters[parameters.MeekTrafficShapingProbability] = *config.MeekTrafficShapingProbability
+	}
+
+	if len(config.MeekTrafficShapingLimitProtocols) > 0 {
+		applyParameters[parameters.MeekTrafficShapingLimitProtocols] = protocol.TunnelProtocols(config.MeekTrafficShapingLimitProtocols)
+	}
+
+	if config.MeekMinLimitRequestPayloadLength != nil {
+		applyParameters[parameters.MeekMinLimitRequestPayloadLength] = *config.MeekMinLimitRequestPayloadLength
+	}
+
+	if config.MeekMaxLimitRequestPayloadLength != nil {
+		applyParameters[parameters.MeekMaxLimitRequestPayloadLength] = *config.MeekMaxLimitRequestPayloadLength
+	}
+
+	if config.MeekRedialTLSProbability != nil {
+		applyParameters[parameters.MeekRedialTLSProbability] = *config.MeekRedialTLSProbability
 	}
 
 	if config.ObfuscatedSSHMinPadding != nil {
@@ -1065,12 +1089,18 @@ func (config *Config) setDialParametersHash() {
 		hash.Write([]byte(config.UpstreamProxyURL))
 	}
 
-	if config.TransformHostNames != "" {
-		hash.Write([]byte(config.TransformHostNames))
+	if config.TransformHostNameProbability != nil {
+		binary.Write(hash, binary.LittleEndian, *config.TransformHostNameProbability)
 	}
 
-	if config.UseFragmentor != "" {
-		hash.Write([]byte(config.UseFragmentor))
+	if config.FragmentorProbability != nil {
+		binary.Write(hash, binary.LittleEndian, *config.FragmentorProbability)
+	}
+
+	if len(config.FragmentorLimitProtocols) > 0 {
+		for _, protocol := range config.FragmentorLimitProtocols {
+			hash.Write([]byte(protocol))
+		}
 	}
 
 	if config.FragmentorMinTotalBytes != nil {
@@ -1095,6 +1125,28 @@ func (config *Config) setDialParametersHash() {
 
 	if config.FragmentorMaxDelayMicroseconds != nil {
 		binary.Write(hash, binary.LittleEndian, *config.FragmentorMaxDelayMicroseconds)
+	}
+
+	if config.MeekTrafficShapingProbability != nil {
+		binary.Write(hash, binary.LittleEndian, *config.MeekTrafficShapingProbability)
+	}
+
+	if len(config.MeekTrafficShapingLimitProtocols) > 0 {
+		for _, protocol := range config.MeekTrafficShapingLimitProtocols {
+			hash.Write([]byte(protocol))
+		}
+	}
+
+	if config.MeekMinLimitRequestPayloadLength != nil {
+		binary.Write(hash, binary.LittleEndian, *config.MeekMinLimitRequestPayloadLength)
+	}
+
+	if config.MeekMaxLimitRequestPayloadLength != nil {
+		binary.Write(hash, binary.LittleEndian, *config.MeekMaxLimitRequestPayloadLength)
+	}
+
+	if config.MeekRedialTLSProbability != nil {
+		binary.Write(hash, binary.LittleEndian, *config.MeekRedialTLSProbability)
 	}
 
 	if config.ObfuscatedSSHMinPadding != nil {

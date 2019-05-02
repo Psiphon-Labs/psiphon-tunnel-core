@@ -209,7 +209,7 @@ func attemptConnectionsWithUserAgent(
         "ConnectionPoolSize" : 1,
         "EstablishTunnelPausePeriodSeconds" : 1,
         "DisableRemoteServerListFetcher" : true,
-        "TransformHostNames" : "never",
+        "TransformHostNameProbability" : 0.0,
         "UpstreamProxyUrl" : "http://127.0.0.1:2163"
     }`
 	clientConfig, err := LoadConfig([]byte(clientConfigJSON))

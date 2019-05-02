@@ -100,7 +100,7 @@ func NewGeoIPService(
 		database.ReloadableFile = common.NewReloadableFile(
 			filename,
 			false,
-			func(_ []byte) error {
+			func(_ []byte, _ time.Time) error {
 
 				// In order to safely mmap the database file, a temporary copy
 				// is made and that copy is mmapped. The original file may be

@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
@@ -258,7 +259,7 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 	set.ReloadableFile = common.NewReloadableFile(
 		filename,
 		true,
-		func(fileContent []byte) error {
+		func(fileContent []byte, _ time.Time) error {
 			var newSet TrafficRulesSet
 			err := json.Unmarshal(fileContent, &newSet)
 			if err != nil {

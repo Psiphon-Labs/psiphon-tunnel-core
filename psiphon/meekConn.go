@@ -145,6 +145,7 @@ type MeekConfig struct {
 // through a CDN.
 type MeekConn struct {
 	clientParameters          *parameters.ClientParameters
+	isQUIC                    bool
 	url                       *url.URL
 	additionalHeaders         http.Header
 	cookie                    *http.Cookie
@@ -213,6 +214,7 @@ func DialMeek(
 
 	// Configure transport: QUIC or HTTPS or HTTP
 
+	var isQUIC bool
 	var scheme string
 	var transport transporter
 	var additionalHeaders http.Header
@@ -220,11 +222,13 @@ func DialMeek(
 
 	if meekConfig.UseQUIC {
 
+		isQUIC = true
+
 		scheme = "https"
 
-		udpDialer := func() (net.PacketConn, *net.UDPAddr, error) {
+		udpDialer := func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error) {
 			packetConn, remoteAddr, err := NewUDPConn(
-				runCtx,
+				ctx,
 				meekConfig.DialAddress,
 				dialConfig)
 			if err != nil {
@@ -237,7 +241,7 @@ func DialMeek(
 		quicDialSNIAddress := fmt.Sprintf("%s:%s", meekConfig.SNIServerName, port)
 
 		transport = quic.NewQUICTransporter(
-			runCtx,
+			ctx,
 			udpDialer,
 			quicDialSNIAddress,
 			meekConfig.QUICVersion)
@@ -453,6 +457,7 @@ func DialMeek(
 	// sendBuffer.
 	meek = &MeekConn{
 		clientParameters:  meekConfig.ClientParameters,
+		isQUIC:            isQUIC,
 		url:               url,
 		additionalHeaders: additionalHeaders,
 		cachedTLSDialer:   cachedTLSDialer,
@@ -526,8 +531,10 @@ func DialMeek(
 type cachedTLSDialer struct {
 	usedCachedConn int32
 	cachedConn     net.Conn
-	requestCtx     atomic.Value
 	dialer         Dialer
+
+	mutex      sync.Mutex
+	requestCtx context.Context
 }
 
 func newCachedTLSDialer(cachedConn net.Conn, dialer Dialer) *cachedTLSDialer {
@@ -538,7 +545,10 @@ func newCachedTLSDialer(cachedConn net.Conn, dialer Dialer) *cachedTLSDialer {
 }
 
 func (c *cachedTLSDialer) setRequestContext(requestCtx context.Context) {
-	c.requestCtx.Store(requestCtx)
+	// Note: not using sync.Value since underlying type of requestCtx may change.
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.requestCtx = requestCtx
 }
 
 func (c *cachedTLSDialer) dial(network, addr string) (net.Conn, error) {
@@ -547,10 +557,14 @@ func (c *cachedTLSDialer) dial(network, addr string) (net.Conn, error) {
 		c.cachedConn = nil
 		return conn, nil
 	}
-	ctx := c.requestCtx.Load().(context.Context)
+
+	c.mutex.Lock()
+	ctx := c.requestCtx
+	c.mutex.Unlock()
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
 	return c.dialer(ctx, network, addr)
 }
 
@@ -576,6 +590,25 @@ func (meek *MeekConn) Close() (err error) {
 		if meek.cachedTLSDialer != nil {
 			meek.cachedTLSDialer.close()
 		}
+
+		// stopRunning interrupts HTTP requests in progress by closing the context
+		// associated with the request. In the case of h2quic.RoundTripper, testing
+		// indicates that quic-go.receiveStream.readImpl in _not_ interrupted in
+		// this case, and so an in-flight FRONTED-QUIC round trip may hang shutdown
+		// in relayRoundTrip->readPayload->...->quic-go.receiveStream.readImpl.
+		//
+		// To workaround this, we call CloseIdleConnections _before_ Wait, as, in
+		// the case of QUICTransporter, this closes the underlying UDP sockets which
+		// interrupts any blocking I/O calls.
+		//
+		// The standard CloseIdleConnections call _after_ wait is for the net/http
+		// case: it only closes idle connections, so the call should be after wait.
+		// This call is intended to clean up all network resources deterministically
+		// before Close returns.
+		if meek.isQUIC {
+			meek.transport.CloseIdleConnections()
+		}
+
 		meek.relayWaitGroup.Wait()
 		meek.transport.CloseIdleConnections()
 	}
@@ -632,7 +665,7 @@ func (meek *MeekConn) RoundTrip(
 	// Note:
 	//
 	// - multiple, concurrent RoundTrip calls are unsafe due to the
-	//   meek.cachedTLSDialer.setRequestContext call in newRequest
+	//   setRequestContext calls in newRequest.
 	//
 	// - concurrent Close and RoundTrip calls are unsafe as Close
 	//   does not synchronize with RoundTrip before calling
@@ -648,6 +681,15 @@ func (meek *MeekConn) RoundTrip(
 		return nil, common.ContextError(err)
 	}
 	defer cancelFunc()
+
+	// Workaround for h2quic.RoundTripper context issue. See comment in
+	// MeekConn.Close.
+	if meek.isQUIC {
+		go func() {
+			<-request.Context().Done()
+			meek.transport.CloseIdleConnections()
+		}()
+	}
 
 	response, err := meek.transport.RoundTrip(request)
 	if err == nil {
@@ -935,7 +977,7 @@ func (r *readCloseSignaller) AwaitClosed() bool {
 // tripper modes.
 //
 // newRequest is not safe for concurrent calls due to its use of
-// cachedTLSDialer.setRequestContext.
+// setRequestContext.
 //
 // The caller must call the returned cancelFunc.
 func (meek *MeekConn) newRequest(
@@ -957,14 +999,17 @@ func (meek *MeekConn) newRequest(
 			meek.clientParameters.Get().Duration(parameters.MeekRoundTripTimeout))
 	}
 
-	// Ensure TLS dials are made within the current request context.
-	if meek.cachedTLSDialer != nil {
+	// Ensure dials are made within the current request context.
+	if meek.isQUIC {
+		meek.transport.(*quic.QUICTransporter).SetRequestContext(requestCtx)
+	} else if meek.cachedTLSDialer != nil {
 		meek.cachedTLSDialer.setRequestContext(requestCtx)
 	}
 
 	request, err := http.NewRequest("POST", meek.url.String(), body)
 	if err != nil {
-		return nil, cancelFunc, common.ContextError(err)
+		cancelFunc()
+		return nil, nil, common.ContextError(err)
 	}
 
 	request = request.WithContext(requestCtx)

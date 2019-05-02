@@ -765,6 +765,12 @@ func NoticeLivenessTest(ipAddress string, metrics *livenessTestMetrics, success 
 		"success", success)
 }
 
+func NoticePruneServerEntry(serverEntryTag string) {
+	singletonNoticeLogger.outputNotice(
+		"PruneServerEntry", noticeIsDiagnostic,
+		"serverEntryTag", serverEntryTag)
+}
+
 // NoticeEstablishTunnelTimeout reports that the configured EstablishTunnelTimeout
 // duration was exceeded.
 func NoticeEstablishTunnelTimeout(timeout time.Duration) {

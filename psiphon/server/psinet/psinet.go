@@ -36,17 +36,24 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
+const (
+	MAX_DATABASE_AGE_FOR_SERVER_ENTRY_VALIDITY = 48 * time.Hour
+)
+
 // Database serves Psiphon API data requests. It's safe for
 // concurrent usage. The Reload function supports hot reloading
 // of Psiphon network data while the server is running.
 type Database struct {
 	common.ReloadableFile
 
-	Hosts            map[string]Host            `json:"hosts"`
-	Servers          []Server                   `json:"servers"`
-	Sponsors         map[string]Sponsor         `json:"sponsors"`
-	Versions         map[string][]ClientVersion `json:"client_versions"`
-	DefaultSponsorID string                     `json:"default_sponsor_id"`
+	Hosts                map[string]Host            `json:"hosts"`
+	Servers              []Server                   `json:"servers"`
+	Sponsors             map[string]Sponsor         `json:"sponsors"`
+	Versions             map[string][]ClientVersion `json:"client_versions"`
+	DefaultSponsorID     string                     `json:"default_sponsor_id"`
+	ValidServerEntryTags map[string]bool            `json:"valid_server_entry_tags"`
+
+	fileModTime time.Time
 }
 
 type Host struct {
@@ -133,7 +140,7 @@ func NewDatabase(filename string) (*Database, error) {
 	database.ReloadableFile = common.NewReloadableFile(
 		filename,
 		true,
-		func(fileContent []byte) error {
+		func(fileContent []byte, fileModTime time.Time) error {
 			var newDatabase Database
 			err := json.Unmarshal(fileContent, &newDatabase)
 			if err != nil {
@@ -146,6 +153,8 @@ func NewDatabase(filename string) (*Database, error) {
 			database.Sponsors = newDatabase.Sponsors
 			database.Versions = newDatabase.Versions
 			database.DefaultSponsorID = newDatabase.DefaultSponsorID
+			database.ValidServerEntryTags = newDatabase.ValidServerEntryTags
+			database.fileModTime = fileModTime
 
 			return nil
 		})
@@ -547,4 +556,22 @@ func parseSshKeyString(sshKeyString string) (keyType string, key string) {
 	}
 
 	return sshKeyArr[0], sshKeyArr[1]
+}
+
+// IsValidServerEntryTag checks if the specified server entry tag is valid.
+func (db *Database) IsValidServerEntryTag(serverEntryTag string) bool {
+	db.ReloadableFile.RLock()
+	defer db.ReloadableFile.RUnlock()
+
+	// Default to "valid" if the valid list is unexpectedly empty or stale. This
+	// helps prevent premature client-side server-entry pruning when there is an
+	// issue with updating the database.
+
+	if len(db.ValidServerEntryTags) == 0 ||
+		db.fileModTime.Add(MAX_DATABASE_AGE_FOR_SERVER_ENTRY_VALIDITY).Before(time.Now()) {
+		return true
+	}
+
+	// The tag must be in the map and have the value "true".
+	return db.ValidServerEntryTags[serverEntryTag]
 }

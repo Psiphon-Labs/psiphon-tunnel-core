@@ -92,6 +92,8 @@ func datastoreOpenDB(rootDataDirectory string) (*datastoreDB, error) {
 	err = newDB.Update(func(tx *bolt.Tx) error {
 		requiredBuckets := [][]byte{
 			datastoreServerEntriesBucket,
+			datastoreServerEntryTagsBucket,
+			datastoreServerEntryTombstoneTagsBucket,
 			datastoreSplitTunnelRouteETagsBucket,
 			datastoreSplitTunnelRouteDataBucket,
 			datastoreUrlETagsBucket,
