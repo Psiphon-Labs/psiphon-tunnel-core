@@ -437,7 +437,7 @@ func (sshServer *sshServer) runListener(
 		// throttling, etc. When the tunnel protocol can be determined
 		// unambiguously from the listening port, use that protocol and
 		// don't use any client-declared value. Only use the client's
-		// value, if present, in special cases where the listenting port
+		// value, if present, in special cases where the listening port
 		// cannot distinguish the protocol.
 		tunnelProtocol := listenerTunnelProtocol
 		if clientTunnelProtocol != "" &&

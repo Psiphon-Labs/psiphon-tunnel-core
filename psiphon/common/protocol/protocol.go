@@ -183,17 +183,23 @@ func UseClientTunnelProtocol(
 	clientProtocol string,
 	serverProtocols TunnelProtocols) bool {
 
-	// When the server is running _both_ fronted HTTP and
-	// fronted HTTPS, use the client's reported tunnel
-	// protocol since some CDNs forward both to the same
-	// server port; in this case the server port is not
-	// sufficient to distinguish these protocols.
-	if (clientProtocol == TUNNEL_PROTOCOL_FRONTED_MEEK ||
-		clientProtocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP) &&
-		common.Contains(serverProtocols, TUNNEL_PROTOCOL_FRONTED_MEEK) &&
-		common.Contains(serverProtocols, TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP) {
+	// When the server is running multiple fronted protocols, and the client
+	// reports a fronted protocol, use the client's reported tunnel protocol
+	// since some CDNs forward several protocols to the same server port; in this
+	// case the server port is not sufficient to distinguish these protocols.
 
-		return true
+	if !TunnelProtocolUsesFrontedMeek(clientProtocol) {
+		return false
+	}
+
+	frontedProtocolCount := 0
+	for _, protocol := range serverProtocols {
+		if TunnelProtocolUsesFrontedMeek(protocol) {
+			frontedProtocolCount += 1
+			if frontedProtocolCount > 1 {
+				return true
+			}
+		}
 	}
 
 	return false
