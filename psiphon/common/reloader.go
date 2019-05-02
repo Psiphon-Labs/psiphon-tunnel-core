@@ -25,6 +25,7 @@ import (
 	"io/ioutil"
 	"os"
 	"sync"
+	"time"
 )
 
 // Reloader represents a read-only, in-memory reloadable data object. For example,
@@ -53,9 +54,9 @@ type Reloader interface {
 // ReloadableFile has a multi-reader mutex for synchronization. Its Reload() function
 // will obtain a write lock before reloading the data structures. The actual reloading
 // action is to be provided via the reloadAction callback, which receives the content
-// of reloaded files and must process the new data (for example, unmarshall the contents
-// into data structures). All read access to the data structures should be guarded by
-// RLocks on the ReloadableFile mutex.
+// of reloaded files, along with file modification time, and must process the new data
+// (for example, unmarshall the contents into data structures). All read access to the
+// data structures should be guarded by RLocks on the ReloadableFile mutex.
 //
 // reloadAction must ensure that data structures revert to their previous state when
 // a reload fails.
@@ -65,7 +66,7 @@ type ReloadableFile struct {
 	filename        string
 	loadFileContent bool
 	checksum        uint64
-	reloadAction    func([]byte) error
+	reloadAction    func([]byte, time.Time) error
 }
 
 // NewReloadableFile initializes a new ReloadableFile.
@@ -77,7 +78,7 @@ type ReloadableFile struct {
 func NewReloadableFile(
 	filename string,
 	loadFileContent bool,
-	reloadAction func([]byte) error) ReloadableFile {
+	reloadAction func([]byte, time.Time) error) ReloadableFile {
 
 	return ReloadableFile{
 		filename:        filename,
@@ -122,6 +123,14 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 	previousChecksum := reloadable.checksum
 	reloadable.RUnlock()
 
+	// Record the file modification time _before_ loading, as reload actions will
+	// assume that the content is at least as fresh as the modification time.
+	fileInfo, err := os.Stat(filename)
+	if err != nil {
+		return false, ContextError(err)
+	}
+	fileModTime := fileInfo.ModTime()
+
 	file, err := os.Open(filename)
 	if err != nil {
 		return false, ContextError(err)
@@ -165,7 +174,7 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 	reloadable.Lock()
 	defer reloadable.Unlock()
 
-	err = reloadable.reloadAction(content)
+	err = reloadable.reloadAction(content, fileModTime)
 	if err != nil {
 		return false, ContextError(err)
 	}

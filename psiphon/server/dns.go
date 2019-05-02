@@ -79,7 +79,7 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 	dns.ReloadableFile = common.NewReloadableFile(
 		DNS_SYSTEM_CONFIG_FILENAME,
 		true,
-		func(fileContent []byte) error {
+		func(fileContent []byte, _ time.Time) error {
 
 			resolvers, err := parseResolveConf(fileContent)
 			if err != nil {

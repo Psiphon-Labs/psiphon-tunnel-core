@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestReloader(t *testing.T) {
@@ -48,7 +49,7 @@ func TestReloader(t *testing.T) {
 	file.ReloadableFile = NewReloadableFile(
 		filename,
 		true,
-		func(fileContent []byte) error {
+		func(fileContent []byte, _ time.Time) error {
 			file.contents = fileContent
 			return nil
 		})
