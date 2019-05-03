@@ -34,6 +34,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
@@ -220,7 +221,7 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 
 // Get build info from tunnel-core
 func GetBuildInfo() string {
-	buildInfo, err := json.Marshal(common.GetBuildInfo())
+	buildInfo, err := json.Marshal(buildinfo.GetBuildInfo())
 	if err != nil {
 		return ""
 	}

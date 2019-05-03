@@ -44,6 +44,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	tris "github.com/Psiphon-Labs/tls-tris"
 )
 
@@ -937,7 +938,7 @@ func makeMeekTLSConfig(
 	support *SupportServices,
 	isFronted, useObfuscatedSessionTickets bool) (*tris.Config, error) {
 
-	certificate, privateKey, err := common.GenerateWebServerCertificate(common.GenerateHostName())
+	certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
 	if err != nil {
 		return nil, common.ContextError(err)
 	}

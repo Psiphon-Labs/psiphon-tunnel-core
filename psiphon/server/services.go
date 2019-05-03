@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
@@ -65,7 +66,7 @@ func RunServices(configJSON []byte) error {
 		return common.ContextError(err)
 	}
 
-	log.WithContextFields(*common.GetBuildInfo().ToMap()).Info("startup")
+	log.WithContextFields(*buildinfo.GetBuildInfo().ToMap()).Info("startup")
 
 	waitGroup := new(sync.WaitGroup)
 	shutdownBroadcast := make(chan struct{})

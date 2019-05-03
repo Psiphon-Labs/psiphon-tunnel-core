@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 )
 
 type noticeLogger struct {
@@ -690,7 +691,7 @@ func NoticeLocalProxyError(proxyType string, err error) {
 func NoticeBuildInfo() {
 	singletonNoticeLogger.outputNotice(
 		"BuildInfo", noticeIsDiagnostic,
-		"buildInfo", common.GetBuildInfo())
+		"buildInfo", buildinfo.GetBuildInfo())
 }
 
 // NoticeExiting indicates that tunnel-core is exiting imminently.

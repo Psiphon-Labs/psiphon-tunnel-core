@@ -31,7 +31,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
 	"github.com/elazarl/goproxy"
 )
@@ -55,13 +55,8 @@ var userAgentCountsMutex sync.Mutex
 var userAgentCounts map[string]int
 var initUserAgentCounter sync.Once
 
-func pickMockUserAgent() string {
-	index := prng.Intn(len(mockUserAgents))
-	return mockUserAgents[index]
-}
-
-func initMockUserAgentPicker() {
-	RegisterUserAgentPicker(pickMockUserAgent)
+func initMockUserAgents() {
+	values.SetUserAgentsSpec(values.NewPickOneSpec(mockUserAgents))
 }
 
 func resetUserAgentCounts() {
@@ -159,7 +154,7 @@ func attemptConnectionsWithUserAgent(
 	}
 	defer os.RemoveAll(testDataDirName)
 
-	initMockUserAgentPicker()
+	initMockUserAgents()
 	initUserAgentCounterUpstreamProxy()
 	resetUserAgentCounts()
 
