@@ -115,8 +115,8 @@ func runMockWebServer() (string, string) {
 	return fmt.Sprintf("http://%s/", webServerAddress), responseBody
 }
 
-// Note: not testing fronting meek protocols, which client is
-// hard-wired to except running on privileged ports 80 and 443.
+// Note: not testing fronted meek protocols, which client is
+// hard-wired to expect running on privileged ports 80 and 443.
 
 func TestSSH(t *testing.T) {
 	runServer(t,
@@ -132,6 +132,7 @@ func TestSSH(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -149,6 +150,7 @@ func TestOSSH(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -166,6 +168,7 @@ func TestFragmentedOSSH(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     true,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -183,6 +186,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -201,6 +205,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -219,6 +224,7 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -237,6 +243,7 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -255,6 +262,7 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -272,6 +280,7 @@ func TestQUICOSSH(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -292,6 +301,7 @@ func TestMarionetteOSSH(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -309,6 +319,7 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -326,6 +337,7 @@ func TestHotReload(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -343,6 +355,7 @@ func TestDefaultSponsorID(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -360,6 +373,7 @@ func TestDenyTrafficRules(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -377,6 +391,7 @@ func TestOmitAuthorization(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -394,6 +409,7 @@ func TestNoAuthorization(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -411,6 +427,7 @@ func TestUnusedAuthorization(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -428,6 +445,7 @@ func TestTCPOnlySLOK(t *testing.T) {
 			doTunneledNTPRequest: false,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -445,6 +463,7 @@ func TestUDPOnlySLOK(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
+			doPruneServerEntries: false,
 		})
 }
 
@@ -462,6 +481,25 @@ func TestLivenessTest(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
 			forceLivenessTest:    true,
+			doPruneServerEntries: false,
+		})
+}
+
+func TestPruneServerEntries(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
+			forceLivenessTest:    true,
+			doPruneServerEntries: true,
 		})
 }
 
@@ -478,6 +516,7 @@ type runServerConfig struct {
 	doTunneledNTPRequest bool
 	forceFragmenting     bool
 	forceLivenessTest    bool
+	doPruneServerEntries bool
 }
 
 var (
@@ -564,10 +603,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// customize server config
 
+	// Initialize prune server entry test cases and associated data to pave into psinet.
+	pruneServerEntryTestCases, psinetValidServerEntryTags, expectedNumPruneNotices :=
+		initializePruneServerEntriesTest(t, runConfig)
+
 	// Pave psinet with random values to test handshake homepages.
 	psinetFilename := filepath.Join(testDataDirName, "psinet.json")
 	sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(
-		t, runConfig.doDefaultSponsorID, psinetFilename)
+		t, runConfig.doDefaultSponsorID, psinetFilename, psinetValidServerEntryTags)
 
 	// Pave OSL config for SLOK testing
 	oslConfigFilename := filepath.Join(testDataDirName, "osl_config.json")
@@ -706,7 +749,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		// Pave new config files with different random values.
 		sponsorID, expectedHomepageURL = pavePsinetDatabaseFile(
-			t, runConfig.doDefaultSponsorID, psinetFilename)
+			t, runConfig.doDefaultSponsorID, psinetFilename, psinetValidServerEntryTags)
 
 		propagationChannelID = paveOSLConfigFile(t, oslConfigFilename)
 
@@ -834,6 +877,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			applyParameters[parameters.LivenessTestMaxDownstreamBytes] = livenessTestSize
 		}
 
+		if runConfig.doPruneServerEntries {
+			applyParameters[parameters.PsiphonAPIStatusRequestShortPeriodMin] = 1 * time.Millisecond
+			applyParameters[parameters.PsiphonAPIStatusRequestShortPeriodMax] = 1 * time.Millisecond
+		}
+
 		err = clientConfig.SetClientParameters("", true, applyParameters)
 		if err != nil {
 			t.Fatalf("SetClientParameters failed: %s", err)
@@ -848,7 +896,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 	defer psiphon.CloseDataStore()
 
+	// Clear SLOKs from previous test runs.
 	psiphon.DeleteSLOKs()
+
+	// Store prune server entry test server entries and failed tunnel records.
+	storePruneServerEntriesTest(t, runConfig, pruneServerEntryTestCases)
 
 	controller, err := psiphon.NewController(clientConfig)
 	if err != nil {
@@ -859,6 +911,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	homepageReceived := make(chan struct{}, 1)
 	slokSeeded := make(chan struct{}, 1)
 	clientConnectedNotice := make(chan map[string]interface{}, 1)
+
+	numPruneNotices := 0
+	pruneServerEntriesNoticesEmitted := make(chan struct{}, 1)
 
 	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
@@ -888,6 +943,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 			case "SLOKSeeded":
 				sendNotificationReceived(slokSeeded)
+
+			case "PruneServerEntry":
+				numPruneNotices += 1
+				if numPruneNotices == expectedNumPruneNotices {
+					sendNotificationReceived(pruneServerEntriesNoticesEmitted)
+				}
 
 			case "ConnectedServer":
 				select {
@@ -997,6 +1058,19 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
+	// Test: await expected prune server entry notices
+	//
+	// Note: will take up to PsiphonAPIStatusRequestShortPeriodMax to emit.
+
+	if expectedNumPruneNotices > 0 {
+
+		waitOnNotification(
+			t,
+			pruneServerEntriesNoticesEmitted,
+			timeoutSignal,
+			"prune server entries timeout exceeded")
+	}
+
 	// Shutdown to ensure logs/notices are flushed
 
 	stopClient()
@@ -1036,6 +1110,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	default:
 		t.Fatalf("missing server tunnel log")
 	}
+
+	// Check that datastore had retained/pruned server entries as expected.
+	checkPruneServerEntriesTest(t, runConfig, pruneServerEntryTestCases)
 }
 
 func checkExpectedLogFields(runConfig *runServerConfig, fields map[string]interface{}) error {
@@ -1435,9 +1512,17 @@ func makeTunneledNTPRequestAttempt(
 }
 
 func pavePsinetDatabaseFile(
-	t *testing.T, useDefaultSponsorID bool, psinetFilename string) (string, string) {
+	t *testing.T,
+	useDefaultSponsorID bool,
+	psinetFilename string,
+	validServerEntryTags []string) (string, string) {
 
 	sponsorID := prng.HexString(8)
+
+	defaultSponsorID := ""
+	if useDefaultSponsorID {
+		defaultSponsorID = sponsorID
+	}
 
 	fakeDomain := prng.HexString(4)
 	fakePath := prng.HexString(4)
@@ -1457,17 +1542,27 @@ func pavePsinetDatabaseFile(
                     ]
                 }
             }
+        },
+        "valid_server_entry_tags" : {
+            %s
         }
     }
 	`
 
-	defaultSponsorID := ""
-	if useDefaultSponsorID {
-		defaultSponsorID = sponsorID
+	validServerEntryTagsJSON := ""
+	for _, serverEntryTag := range validServerEntryTags {
+		if len(validServerEntryTagsJSON) > 0 {
+			validServerEntryTagsJSON += ", "
+		}
+		validServerEntryTagsJSON += fmt.Sprintf("\"%s\" : true", serverEntryTag)
 	}
 
 	psinetJSON := fmt.Sprintf(
-		psinetJSONFormat, defaultSponsorID, sponsorID, expectedHomepageURL)
+		psinetJSONFormat,
+		defaultSponsorID,
+		sponsorID,
+		expectedHomepageURL,
+		validServerEntryTagsJSON)
 
 	err := ioutil.WriteFile(psinetFilename, []byte(psinetJSON), 0600)
 	if err != nil {
@@ -1741,5 +1836,332 @@ func waitOnNotification(t *testing.T, c, timeoutSignal <-chan struct{}, timeoutM
 	case <-c:
 	case <-timeoutSignal:
 		t.Fatalf(timeoutMessage)
+	}
+}
+
+type pruneServerEntryTestCase struct {
+	IPAddress         string
+	ExplicitTag       bool
+	ExpectedTag       string
+	LocalTimestamp    string
+	PsinetValid       bool
+	ExpectPrune       bool
+	IsEmbedded        bool
+	ServerEntryFields protocol.ServerEntryFields
+}
+
+func initializePruneServerEntriesTest(
+	t *testing.T,
+	runConfig *runServerConfig) ([]*pruneServerEntryTestCase, []string, int) {
+
+	if !runConfig.doPruneServerEntries {
+		return nil, nil, 0
+	}
+
+	newTimeStamp := time.Now().UTC().Format(time.RFC3339)
+	oldTimeStamp := time.Now().Add(-30 * 24 * time.Hour).UTC().Format(time.RFC3339)
+
+	// Test Cases:
+	// - ExplicitTag: server entry includes a tag; vs. generate a derive tag
+	// - LocalTimestamp: server entry is sufficiently old to be pruned; vs. not
+	// - PsinetValid: server entry is reported valid by psinet; vs. deleted
+	// - ExpectPrune: prune outcome based on flags above
+	// - IsEmbedded: pruned embedded server entries leave a tombstone and cannot
+	//   be reimported
+
+	pruneServerEntryTestCases := []*pruneServerEntryTestCase{
+		&pruneServerEntryTestCase{IPAddress: "192.0.2.1", ExplicitTag: true, LocalTimestamp: newTimeStamp, PsinetValid: true, ExpectPrune: false},
+		&pruneServerEntryTestCase{IPAddress: "192.0.2.2", ExplicitTag: false, LocalTimestamp: newTimeStamp, PsinetValid: true, ExpectPrune: false},
+		&pruneServerEntryTestCase{IPAddress: "192.0.2.3", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: false},
+		&pruneServerEntryTestCase{IPAddress: "192.0.2.4", ExplicitTag: false, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: false},
+		&pruneServerEntryTestCase{IPAddress: "192.0.2.5", ExplicitTag: true, LocalTimestamp: newTimeStamp, PsinetValid: false, ExpectPrune: false},
+		&pruneServerEntryTestCase{IPAddress: "192.0.2.6", ExplicitTag: false, LocalTimestamp: newTimeStamp, PsinetValid: false, ExpectPrune: false},
+		&pruneServerEntryTestCase{IPAddress: "192.0.2.7", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: false},
+		&pruneServerEntryTestCase{IPAddress: "192.0.2.8", ExplicitTag: false, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: false},
+		&pruneServerEntryTestCase{IPAddress: "192.0.2.9", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: true},
+		&pruneServerEntryTestCase{IPAddress: "192.0.2.10", ExplicitTag: false, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: true},
+	}
+
+	for _, testCase := range pruneServerEntryTestCases {
+
+		_, _, _, _, encodedServerEntry, err := GenerateConfig(
+			&GenerateConfigParams{
+				ServerIPAddress:     testCase.IPAddress,
+				WebServerPort:       8000,
+				TunnelProtocolPorts: map[string]int{runConfig.tunnelProtocol: 4000},
+			})
+		if err != nil {
+			t.Fatalf("GenerateConfig failed: %s", err)
+		}
+
+		serverEntrySource := protocol.SERVER_ENTRY_SOURCE_REMOTE
+		if testCase.IsEmbedded {
+			serverEntrySource = protocol.SERVER_ENTRY_SOURCE_EMBEDDED
+		}
+
+		serverEntryFields, err := protocol.DecodeServerEntryFields(
+			string(encodedServerEntry),
+			testCase.LocalTimestamp,
+			serverEntrySource)
+		if err != nil {
+			t.Fatalf("DecodeServerEntryFields failed: %s", err)
+		}
+
+		if testCase.ExplicitTag {
+			testCase.ExpectedTag = prng.Base64String(32)
+			serverEntryFields.SetTag(testCase.ExpectedTag)
+		} else {
+			testCase.ExpectedTag = protocol.GenerateServerEntryTag(
+				serverEntryFields.GetIPAddress(),
+				serverEntryFields.GetWebServerSecret())
+		}
+
+		testCase.ServerEntryFields = serverEntryFields
+	}
+
+	psinetValidServerEntryTags := make([]string, 0)
+	expectedNumPruneNotices := 0
+
+	for _, testCase := range pruneServerEntryTestCases {
+
+		if testCase.PsinetValid {
+			psinetValidServerEntryTags = append(
+				psinetValidServerEntryTags, testCase.ExpectedTag)
+		}
+
+		if testCase.ExpectPrune {
+			expectedNumPruneNotices += 1
+		}
+	}
+
+	return pruneServerEntryTestCases,
+		psinetValidServerEntryTags,
+		expectedNumPruneNotices
+}
+
+func storePruneServerEntriesTest(
+	t *testing.T,
+	runConfig *runServerConfig,
+	pruneServerEntryTestCases []*pruneServerEntryTestCase) {
+
+	if !runConfig.doPruneServerEntries {
+		return
+	}
+
+	for _, testCase := range pruneServerEntryTestCases {
+
+		err := psiphon.StoreServerEntry(testCase.ServerEntryFields, true)
+		if err != nil {
+			t.Fatalf("StoreServerEntry failed: %s", err)
+		}
+	}
+
+	clientConfig := &psiphon.Config{SponsorId: "0", PropagationChannelId: "0"}
+	err := clientConfig.Commit()
+	if err != nil {
+		t.Fatalf("Commit failed: %s", err)
+	}
+
+	applyParameters := make(map[string]interface{})
+	applyParameters[parameters.RecordFailedTunnelPersistentStatsProbability] = 1.0
+
+	err = clientConfig.SetClientParameters("", true, applyParameters)
+	if err != nil {
+		t.Fatalf("SetClientParameters failed: %s", err)
+	}
+
+	verifyTestCasesStored := make(verifyTestCasesStoredLookup)
+	for _, testCase := range pruneServerEntryTestCases {
+		verifyTestCasesStored.mustBeStored(testCase.IPAddress)
+	}
+
+	scanServerEntries(t, clientConfig, pruneServerEntryTestCases, func(
+		t *testing.T,
+		testCase *pruneServerEntryTestCase,
+		serverEntry *protocol.ServerEntry) {
+
+		verifyTestCasesStored.isStored(testCase.IPAddress)
+
+		// Check that random tag was retained or derived tag was calculated as
+		// expected
+
+		if serverEntry.Tag != testCase.ExpectedTag {
+			t.Fatalf("unexpected tag for %s got %s expected %s",
+				testCase.IPAddress, serverEntry.Tag, testCase.ExpectedTag)
+		}
+
+		// Create failed tunnel event records to exercise pruning
+
+		dialParams, err := psiphon.MakeDialParameters(
+			clientConfig,
+			func(_ *protocol.ServerEntry, _ string) bool { return true },
+			func(serverEntry *protocol.ServerEntry) (string, bool) {
+				return runConfig.tunnelProtocol, true
+			},
+			serverEntry,
+			false,
+			0)
+		if err != nil {
+			t.Fatalf("MakeDialParameters failed: %s", err)
+		}
+
+		err = psiphon.RecordFailedTunnelStat(
+			clientConfig, dialParams, errors.New("test error"))
+		if err != nil {
+			t.Fatalf("RecordFailedTunnelStat failed: %s", err)
+		}
+	})
+
+	verifyTestCasesStored.checkStored(
+		t, "missing prune test case server entries")
+}
+
+func checkPruneServerEntriesTest(
+	t *testing.T,
+	runConfig *runServerConfig,
+	pruneServerEntryTestCases []*pruneServerEntryTestCase) {
+
+	if !runConfig.doPruneServerEntries {
+		return
+	}
+
+	clientConfig := &psiphon.Config{SponsorId: "0", PropagationChannelId: "0"}
+	err := clientConfig.Commit()
+	if err != nil {
+		t.Fatalf("Commit failed: %s", err)
+	}
+
+	// Check that server entries remain or are pruned as expected
+
+	verifyTestCasesStored := make(verifyTestCasesStoredLookup)
+	for _, testCase := range pruneServerEntryTestCases {
+		if !testCase.ExpectPrune {
+			verifyTestCasesStored.mustBeStored(testCase.IPAddress)
+		}
+	}
+
+	scanServerEntries(t, clientConfig, pruneServerEntryTestCases, func(
+		t *testing.T,
+		testCase *pruneServerEntryTestCase,
+		serverEntry *protocol.ServerEntry) {
+
+		if testCase.ExpectPrune {
+			t.Fatalf("expected prune for %s", testCase.IPAddress)
+		} else {
+			verifyTestCasesStored.isStored(testCase.IPAddress)
+		}
+	})
+
+	verifyTestCasesStored.checkStored(
+		t, "missing prune test case server entries")
+
+	// Check that pruned server entries reimport or not, as expected
+
+	for _, testCase := range pruneServerEntryTestCases {
+
+		err := psiphon.StoreServerEntry(testCase.ServerEntryFields, true)
+		if err != nil {
+			t.Fatalf("StoreServerEntry failed: %s", err)
+		}
+	}
+
+	verifyTestCasesStored = make(verifyTestCasesStoredLookup)
+	for _, testCase := range pruneServerEntryTestCases {
+		if !testCase.ExpectPrune || !testCase.IsEmbedded {
+			verifyTestCasesStored.mustBeStored(testCase.IPAddress)
+		}
+	}
+
+	scanServerEntries(t, clientConfig, pruneServerEntryTestCases, func(
+		t *testing.T,
+		testCase *pruneServerEntryTestCase,
+		serverEntry *protocol.ServerEntry) {
+
+		if testCase.ExpectPrune && testCase.IsEmbedded {
+			t.Fatalf("expected tombstone for %s", testCase.IPAddress)
+		} else {
+			verifyTestCasesStored.isStored(testCase.IPAddress)
+		}
+	})
+
+	verifyTestCasesStored.checkStored(
+		t, "missing reimported prune test case server entries")
+
+	// Non-embedded server entries with tombstones _can_ be reimported
+
+	for _, testCase := range pruneServerEntryTestCases {
+
+		testCase.ServerEntryFields.SetLocalSource(protocol.SERVER_ENTRY_SOURCE_REMOTE)
+
+		err := psiphon.StoreServerEntry(testCase.ServerEntryFields, true)
+		if err != nil {
+			t.Fatalf("StoreServerEntry failed: %s", err)
+		}
+	}
+
+	verifyTestCasesStored = make(verifyTestCasesStoredLookup)
+	for _, testCase := range pruneServerEntryTestCases {
+		verifyTestCasesStored.mustBeStored(testCase.IPAddress)
+	}
+
+	scanServerEntries(t, clientConfig, pruneServerEntryTestCases, func(
+		t *testing.T,
+		testCase *pruneServerEntryTestCase,
+		serverEntry *protocol.ServerEntry) {
+
+		verifyTestCasesStored.isStored(testCase.IPAddress)
+	})
+
+	verifyTestCasesStored.checkStored(
+		t, "missing non-embedded reimported prune test case server entries")
+}
+
+func scanServerEntries(
+	t *testing.T,
+	clientConfig *psiphon.Config,
+	pruneServerEntryTestCases []*pruneServerEntryTestCase,
+	scanner func(
+		t *testing.T,
+		testCase *pruneServerEntryTestCase,
+		serverEntry *protocol.ServerEntry)) {
+
+	_, iterator, err := psiphon.NewServerEntryIterator(clientConfig)
+	if err != nil {
+		t.Fatalf("NewServerEntryIterator failed: %s", err)
+	}
+	defer iterator.Close()
+
+	for {
+
+		serverEntry, err := iterator.Next()
+		if err != nil {
+			t.Fatalf("ServerIterator.Next failed: %s", err)
+		}
+		if serverEntry == nil {
+			break
+		}
+
+		for _, testCase := range pruneServerEntryTestCases {
+			if testCase.IPAddress == serverEntry.IpAddress {
+				scanner(t, testCase, serverEntry)
+				break
+			}
+		}
+	}
+}
+
+type verifyTestCasesStoredLookup map[string]bool
+
+func (v verifyTestCasesStoredLookup) mustBeStored(s string) {
+	v[s] = true
+}
+
+func (v verifyTestCasesStoredLookup) isStored(s string) {
+	delete(v, s)
+}
+
+func (v verifyTestCasesStoredLookup) checkStored(t *testing.T, errMessage string) {
+	if len(v) != 0 {
+		t.Fatalf("%s: %+v", errMessage, v)
 	}
 }

@@ -260,7 +260,7 @@ func NewConfig(filename string) (*Config, error) {
 	config.ReloadableFile = common.NewReloadableFile(
 		filename,
 		true,
-		func(fileContent []byte) error {
+		func(fileContent []byte, _ time.Time) error {
 			newConfig, err := LoadConfig(fileContent)
 			if err != nil {
 				return common.ContextError(err)
