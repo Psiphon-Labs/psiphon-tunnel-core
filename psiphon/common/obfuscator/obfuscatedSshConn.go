@@ -24,6 +24,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"io/ioutil"
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -148,7 +149,14 @@ func NewObfuscatedSSHConn(
 				Keyword: obfuscationKeyword,
 			})
 		if err != nil {
-			// TODO: readForver() equivalent
+
+			// Obfuscated SSH protocol spec:
+			// "If these checks fail the server will continue reading and discarding all data
+			// until the client closes the connection without sending anything in response."
+			//
+			// This may be terminated by a server-side connection establishment timeout.
+			io.Copy(ioutil.Discard, conn)
+
 			return nil, common.ContextError(err)
 		}
 		readDeobfuscate = obfuscator.ObfuscateClientToServer
