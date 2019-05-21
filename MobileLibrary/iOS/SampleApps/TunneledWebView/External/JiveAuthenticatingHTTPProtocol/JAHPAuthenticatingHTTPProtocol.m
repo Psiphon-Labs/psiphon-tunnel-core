@@ -51,7 +51,10 @@
 #import "JAHPCacheStoragePolicy.h"
 #import "JAHPQNSURLSessionDemux.h"
 
+#import "AuthURLSessionTaskDelegate.h"
+#import "OCSP.h"
 #import "TunneledWebView-Swift.h"
+#import "URLEncode.h"
 
 // I use the following typedef to keep myself sane in the face of the wacky
 // Objective-C block syntax.
@@ -171,6 +174,7 @@ static JAHPQNSURLSessionDemux *sharedDemuxInstance = nil;
 
             // Set proxy
             NSString* proxyHost = @"localhost";
+
             NSNumber* socksProxyPort = [NSNumber numberWithInt: (int)[AppDelegate sharedDelegate].socksProxyPort];
             NSNumber* httpProxyPort = [NSNumber numberWithInt: (int)[AppDelegate sharedDelegate].httpProxyPort];
 
@@ -303,7 +307,7 @@ static NSString * kJAHPRecursiveRequestFlagProperty = @"com.jivesoftware.JAHPAut
             [self authenticatingHTTPProtocol:nil logWithFormat:@"accept request %@", url];
         }
     }
-    
+
     return shouldAccept;
 }
 
@@ -628,11 +632,11 @@ static NSString * kJAHPRecursiveRequestFlagProperty = @"com.jivesoftware.JAHPAut
             //
             // [[self class] authenticatingHTTPProtocol:self logWithFormat:@"challenge not cancelled; no challenge pending"];
         } else {
-            id<JAHPAuthenticatingHTTPProtocolDelegate>  strongeDelegate;
+            id<JAHPAuthenticatingHTTPProtocolDelegate>  strongDelegate;
             NSURLAuthenticationChallenge *  challenge;
             JAHPDidCancelAuthenticationChallengeHandler  didCancelAuthenticationChallengeHandler;
             
-            strongeDelegate = [[self class] delegate];
+            strongDelegate = [[self class] delegate];
             
             challenge = self.pendingChallenge;
             didCancelAuthenticationChallengeHandler = self.pendingDidCancelAuthenticationChallengeHandler;
@@ -640,12 +644,12 @@ static NSString * kJAHPRecursiveRequestFlagProperty = @"com.jivesoftware.JAHPAut
             self.pendingChallengeCompletionHandler = nil;
             self.pendingDidCancelAuthenticationChallengeHandler = nil;
             
-            if ([strongeDelegate respondsToSelector:@selector(authenticatingHTTPProtocol:didCancelAuthenticationChallenge:)]) {
+            if ([strongDelegate respondsToSelector:@selector(authenticatingHTTPProtocol:didCancelAuthenticationChallenge:)]) {
                 [[self class] authenticatingHTTPProtocol:self logWithFormat:@"challenge %@ cancellation passed to delegate", [[challenge protectionSpace] authenticationMethod]];
                 if (didCancelAuthenticationChallengeHandler) {
                     didCancelAuthenticationChallengeHandler(self, challenge);
                 }
-                [strongeDelegate authenticatingHTTPProtocol:self didCancelAuthenticationChallenge:challenge];
+                [strongDelegate authenticatingHTTPProtocol:self didCancelAuthenticationChallenge:challenge];
             } else if (didCancelAuthenticationChallengeHandler) {
                 didCancelAuthenticationChallengeHandler(self, challenge);
             } else {
@@ -766,7 +770,10 @@ static NSString * kJAHPRecursiveRequestFlagProperty = @"com.jivesoftware.JAHPAut
     [[self client] URLProtocol:self didFailWithError:[NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil]];
 }
 
-- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition, NSURLCredential *))completionHandler
+- (void)URLSession:(NSURLSession *)session
+              task:(NSURLSessionTask *)task
+didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
+ completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition, NSURLCredential *))completionHandler
 {
     // rdar://21484589
     // this is called from JAHPQNSURLSessionDemuxTaskInfo,
@@ -775,37 +782,50 @@ static NSString * kJAHPRecursiveRequestFlagProperty = @"com.jivesoftware.JAHPAut
     // It is possible that -stopLoading was called on self.clientThread
     // just before this method if so, ignore this callback
     if (!self.task) { return; }
-    
+
     BOOL        result;
-    id<JAHPAuthenticatingHTTPProtocolDelegate> strongeDelegate;
-    
+    id<JAHPAuthenticatingHTTPProtocolDelegate> strongDelegate;
+
 #pragma unused(session)
 #pragma unused(task)
     assert(task == self.task);
     assert(challenge != nil);
     assert(completionHandler != nil);
     assert([NSThread currentThread] == self.clientThread);
-    
+
+    // Resolve NSURLAuthenticationMethodServerTrust ourselves
+    if ([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]) {
+        // Delegate for handling certificate validation.
+        // Makes OCSP requests through local HTTP proxy.
+        AuthURLSessionTaskDelegate *authHandler = [[AppDelegate sharedDelegate] authURLSessionTaskDelegate];
+        
+        [authHandler URLSession:session
+                                task:task
+                 didReceiveChallenge:challenge
+                   completionHandler:completionHandler];
+        return;
+    }
+
     // Ask our delegate whether it wants this challenge.  We do this from this thread, not the main thread,
     // to avoid the overload of bouncing to the main thread for challenges that aren't going to be customised
     // anyway.
-    
-    strongeDelegate = [[self class] delegate];
-    
+
+    strongDelegate = [[self class] delegate];
+
     result = NO;
-    if ([strongeDelegate respondsToSelector:@selector(authenticatingHTTPProtocol:canAuthenticateAgainstProtectionSpace:)]) {
-        result = [strongeDelegate authenticatingHTTPProtocol:self canAuthenticateAgainstProtectionSpace:[challenge protectionSpace]];
+    if ([strongDelegate respondsToSelector:@selector(authenticatingHTTPProtocol:canAuthenticateAgainstProtectionSpace:)]) {
+        result = [strongDelegate authenticatingHTTPProtocol:self canAuthenticateAgainstProtectionSpace:[challenge protectionSpace]];
     }
-    
+
     // If the client wants the challenge, kick off that process.  If not, resolve it by doing the default thing.
-    
+
     if (result) {
         [[self class] authenticatingHTTPProtocol:self logWithFormat:@"can authenticate %@", [[challenge protectionSpace] authenticationMethod]];
-        
+
         [self didReceiveAuthenticationChallenge:challenge completionHandler:completionHandler];
     } else {
         [[self class] authenticatingHTTPProtocol:self logWithFormat:@"cannot authenticate %@", [[challenge protectionSpace] authenticationMethod]];
-        
+
         completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
     }
 }

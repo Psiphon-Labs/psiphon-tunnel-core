@@ -26,8 +26,6 @@
 	<dict>
 		<key>NSExceptionDomains</key>
 		<dict>
-			<key>ifconfig.co</key>
-			<string>YES</string>
 			<key>ip-api.com</key>
 			<string>YES</string>
 			<key>ipinfo.io</key>

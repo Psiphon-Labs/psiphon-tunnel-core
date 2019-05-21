@@ -21,6 +21,9 @@
 		6626590E1DCB8CF400872F6C /* TunneledWebViewUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6626590D1DCB8CF400872F6C /* TunneledWebViewUITests.swift */; };
 		6682D90E1EB1334000329958 /* psiphon-embedded-server-entries.txt in Resources */ = {isa = PBXBuildFile; fileRef = 6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */; };
 		6688DBB61DCD684B00721A9E /* psiphon-config.json in Resources */ = {isa = PBXBuildFile; fileRef = 6688DBB51DCD684B00721A9E /* psiphon-config.json */; };
+		CEFA7ECB2294BB080078E41E /* OCSP.m in Sources */ = {isa = PBXBuildFile; fileRef = CEFA7ECA2294BB080078E41E /* OCSP.m */; };
+		CEFA7ED42294BB8F0078E41E /* URLEncode.m in Sources */ = {isa = PBXBuildFile; fileRef = CEFA7ED22294BB8F0078E41E /* URLEncode.m */; };
+		CEFA7ED72294BC0C0078E41E /* AuthURLSessionTaskDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = CEFA7ED62294BC0C0078E41E /* AuthURLSessionTaskDelegate.m */; };
 		DDFD23795085E5852A8F4DD5 /* libPods-TunneledWebView.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E472F80E34E361EB72B2FD0C /* libPods-TunneledWebView.a */; };
 /* End PBXBuildFile section */
 
@@ -81,6 +84,12 @@
 		6688DBB51DCD684B00721A9E /* psiphon-config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = "psiphon-config.json"; sourceTree = "<group>"; };
 		76C8CF5D2CF9F4228B9CD56E /* Pods-TunneledWebView.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TunneledWebView.release.xcconfig"; path = "Pods/Target Support Files/Pods-TunneledWebView/Pods-TunneledWebView.release.xcconfig"; sourceTree = "<group>"; };
 		85795C6590EED64B7A6684AA /* Pods-TunneledWebView.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TunneledWebView.debug.xcconfig"; path = "Pods/Target Support Files/Pods-TunneledWebView/Pods-TunneledWebView.debug.xcconfig"; sourceTree = "<group>"; };
+		CEFA7EC92294BB080078E41E /* OCSP.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = OCSP.h; path = ../../../Common/OCSP.h; sourceTree = "<group>"; };
+		CEFA7ECA2294BB080078E41E /* OCSP.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = OCSP.m; path = ../../../Common/OCSP.m; sourceTree = "<group>"; };
+		CEFA7ED22294BB8F0078E41E /* URLEncode.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = URLEncode.m; path = ../../../Common/URLEncode.m; sourceTree = "<group>"; };
+		CEFA7ED32294BB8F0078E41E /* URLEncode.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = URLEncode.h; path = ../../../Common/URLEncode.h; sourceTree = "<group>"; };
+		CEFA7ED52294BC0C0078E41E /* AuthURLSessionTaskDelegate.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = AuthURLSessionTaskDelegate.h; path = ../../../Common/AuthURLSessionTaskDelegate.h; sourceTree = "<group>"; };
+		CEFA7ED62294BC0C0078E41E /* AuthURLSessionTaskDelegate.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = AuthURLSessionTaskDelegate.m; path = ../../../Common/AuthURLSessionTaskDelegate.m; sourceTree = "<group>"; };
 		E472F80E34E361EB72B2FD0C /* libPods-TunneledWebView.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-TunneledWebView.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -113,6 +122,8 @@
 		4E0CA95F1FDE554B00B48BCA /* JiveAuthenticatingHTTPProtocol */ = {
 			isa = PBXGroup;
 			children = (
+				CEFA7ED52294BC0C0078E41E /* AuthURLSessionTaskDelegate.h */,
+				CEFA7ED62294BC0C0078E41E /* AuthURLSessionTaskDelegate.m */,
 				4E0CA9601FDE554B00B48BCA /* JAHPAuthenticatingHTTPProtocol.h */,
 				4E0CA9611FDE554B00B48BCA /* JAHPAuthenticatingHTTPProtocol.m */,
 				4E0CA9621FDE554B00B48BCA /* JAHPCacheStoragePolicy.h */,
@@ -121,6 +132,10 @@
 				4E0CA9651FDE554B00B48BCA /* JAHPCanonicalRequest.m */,
 				4E0CA9661FDE554B00B48BCA /* JAHPQNSURLSessionDemux.h */,
 				4E0CA9671FDE554B00B48BCA /* JAHPQNSURLSessionDemux.m */,
+				CEFA7EC92294BB080078E41E /* OCSP.h */,
+				CEFA7ECA2294BB080078E41E /* OCSP.m */,
+				CEFA7ED32294BB8F0078E41E /* URLEncode.h */,
+				CEFA7ED22294BB8F0078E41E /* URLEncode.m */,
 			);
 			name = JiveAuthenticatingHTTPProtocol;
 			path = External/JiveAuthenticatingHTTPProtocol;
@@ -295,6 +310,7 @@
 			developmentRegion = English;
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				English,
 				en,
 				Base,
 			);
@@ -404,7 +420,10 @@
 				4E0CA96B1FDE554B00B48BCA /* JAHPQNSURLSessionDemux.m in Sources */,
 				662658EE1DCB8CF300872F6C /* AppDelegate.swift in Sources */,
 				4E0CA9681FDE554B00B48BCA /* JAHPAuthenticatingHTTPProtocol.m in Sources */,
+				CEFA7ED72294BC0C0078E41E /* AuthURLSessionTaskDelegate.m in Sources */,
 				4E0CA9691FDE554B00B48BCA /* JAHPCacheStoragePolicy.m in Sources */,
+				CEFA7ECB2294BB080078E41E /* OCSP.m in Sources */,
+				CEFA7ED42294BB8F0078E41E /* URLEncode.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -586,7 +605,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRIP_BITCODE_FROM_COPIED_FILES = NO;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/TunneledWebView/TunneledWebView-Bridging-Header.h";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
 		};
@@ -608,7 +627,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRIP_BITCODE_FROM_COPIED_FILES = NO;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/TunneledWebView/TunneledWebView-Bridging-Header.h";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};
@@ -622,7 +641,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebViewTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TunneledWebView.app/TunneledWebView";
 			};
 			name = Debug;
@@ -637,7 +656,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebViewTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TunneledWebView.app/TunneledWebView";
 			};
 			name = Release;
@@ -651,7 +670,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebViewUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 				TEST_TARGET_NAME = TunneledWebView;
 			};
 			name = Debug;
@@ -665,7 +684,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebViewUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 				TEST_TARGET_NAME = TunneledWebView;
 			};
 			name = Release;

@@ -48,9 +48,24 @@ The following architecture targets are compiled into the Library's framework bin
 
 When run in a simulator, there may be errors shown in the device log. This does not seem to affect the execution of the app (or Library).
 
+
+## Online Certificate Status Protocol (OCSP) Leaks
+
+### Background
+
+On iOS, requests which use HTTPS can trigger remote certificate revocation checks. Currently, the OS does this automatically by making plaintext HTTP [OCSP requests](https://en.wikipedia.org/wiki/Online_Certificate_Status_Protocol).
+
+Unfortunately, these OCSP requests do not respect [connection proxy dictionary settings](https://developer.apple.com/documentation/foundation/nsurlsessionconfiguration/1411499-connectionproxydictionary?language=objc) or [NSURLProtocol](https://developer.apple.com/documentation/foundation/nsurlprotocol) subclasses; they are likely performed out of process. The payload in the plaintext OCSP requests leaks the identity of the certificate that is being validated. The risk is that an observer can [map the certificate's serial number back to the certificate](https://github.com/OnionBrowser/OnionBrowser/issues/178#issue-437802301) to find more information about the website or server being accessed.
+
+### Fix
+
+A fix has been implemented in both sample apps: [TunneledWebRequest](SampleApps/TunneledWebRequest) and [TunneledWebView](SampleApps/TunneledWebView). This is done by implementing [URLSession:task:didReceiveChallenge:completionHandler:](https://developer.apple.com/documentation/foundation/nsurlsessiontaskdelegate/1411595-urlsession?language=objc) of the [NSURLSessionTaskDelegate](https://developer.apple.com/documentation/foundation/nsurlsessiontaskdelegate) protocol. This allows us to perform OCSP requests manually and ensure that they are tunneled. See the comments in [SampleApps/Common/AuthURLSessionTaskDelegate.h](SampleApps/Common/AuthURLSessionTaskDelegate.h) and both sample apps for a reference implementation.
+
 ## Proxying a web view
 
 `WKWebView` _cannot_ be proxied. `UIWebView` _can_ be. Some [googling](https://www.google.ca/search?q=uiwebview+nsurlprotocol+proxy) should provide many example of how to do this. Here is some extensive information for [Objective-C](https://www.raywenderlich.com/59982/nsurlprotocol-tutorial) and [Swift](https://www.raywenderlich.com/76735/using-nsurlprotocol-swift).
+
+We have provided a reference implementation for proxying `UIWebView` in [TunneledWebView](SampleApps/TunneledWebView). The shortcomings of this implementation are discussed in [SampleApps/TunneledWebView/README.md](SampleApps/TunneledWebView/README.md#-caveats-).
 
 ## Other notes
 

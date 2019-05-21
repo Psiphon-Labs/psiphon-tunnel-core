@@ -13,16 +13,21 @@ import PsiphonTunnel
 
 
 @UIApplicationMain
-@objc class AppDelegate: UIResponder, UIApplicationDelegate, JAHPAuthenticatingHTTPProtocolDelegate {
+@objc class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
-    var socksProxyPort: Int = 0
-    var httpProxyPort: Int = 0
+    @objc public var socksProxyPort: Int = 0
+    @objc public var httpProxyPort: Int = 0
 
     // The instance of PsiphonTunnel we'll use for connecting.
     var psiphonTunnel: PsiphonTunnel?
 
-    class func sharedDelegate() -> AppDelegate {
+    // Delegate for handling certificate validation.
+    @objc public var authURLSessionTaskDelegate: AuthURLSessionTaskDelegate =
+        AuthURLSessionTaskDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]: ", $0)},
+                                         andLocalHTTPProxyPort: 0)
+    
+    @objc public class func sharedDelegate() -> AppDelegate {
         var delegate: AppDelegate?
         if (Thread.isMainThread) {
             delegate = UIApplication.shared.delegate as? AppDelegate
@@ -34,7 +39,7 @@ import PsiphonTunnel
         return delegate!
     }
 
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplicationLaunchOptionsKey: Any]?) -> Bool {
+    internal func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
 
         // Set the class delegate and register NSURL subclass
@@ -110,6 +115,11 @@ import PsiphonTunnel
     }
 }
 
+extension AppDelegate: JAHPAuthenticatingHTTPProtocolDelegate {
+    func authenticatingHTTPProtocol(_ authenticatingHTTPProtocol: JAHPAuthenticatingHTTPProtocol?, logMessage message: String) {
+        NSLog("[JAHPAuthenticatingHTTPProtocol] %@", message)
+    }
+}
 
 // MARK: TunneledAppDelegate implementation
 // See the protocol definition for details about the methods.
@@ -173,6 +183,7 @@ extension AppDelegate: TunneledAppDelegate {
 
     func onListeningHttpProxyPort(_ port: Int) {
         DispatchQueue.main.async {
+            self.authURLSessionTaskDelegate.localHTTPProxyPort = port
             JAHPAuthenticatingHTTPProtocol.resetSharedDemux()
             self.httpProxyPort = port
         }

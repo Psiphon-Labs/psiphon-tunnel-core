@@ -9,6 +9,7 @@
 #ifndef TunneledWebView_Bridging_Header_h
 #define TunneledWebView_Bridging_Header_h
 
+#import "AuthURLSessionTaskDelegate.h"
 #import "JAHPAuthenticatingHTTPProtocol.h"
 
 #endif /* TunneledWebView_Bridging_Header_h */
