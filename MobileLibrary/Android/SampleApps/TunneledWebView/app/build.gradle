@@ -1,15 +1,14 @@
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion 26
-    buildToolsVersion '26.0.3'
+    compileSdkVersion 28
     useLibrary 'org.apache.http.legacy'
 
 
     defaultConfig {
         applicationId "ca.psiphon.tunneledwebview"
         minSdkVersion 15
-        targetSdkVersion 26
+        targetSdkVersion 28
         versionCode 1
         versionName "1.0"
     }
@@ -19,6 +18,10 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+    compileOptions {
+        sourceCompatibility = '1.8'
+        targetCompatibility = '1.8'
+    }
 }
 
 repositories {
@@ -26,7 +29,7 @@ repositories {
         dirs 'libs'
     }
     maven {
-        url "https://raw.github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/master/releases"
+        url "https://raw.github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/master"
     }
 }
 
@@ -34,5 +37,6 @@ dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
     testImplementation 'junit:junit:4.12'
     implementation 'com.android.support:appcompat-v7:26.1.0'
-    implementation 'ca.psiphon:psiphontunnel:2.0.2'
+    // always specify exact library version in your real project to avoid non-deterministic builds
+    implementation 'ca.psiphon:psiphontunnel:2.+'
 }
