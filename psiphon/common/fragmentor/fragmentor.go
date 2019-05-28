@@ -331,6 +331,14 @@ func (c *Conn) Write(buffer []byte) (int, error) {
 		}
 
 		buffer = buffer[writeBytes:]
+
+		// As soon as bytesToFragment has been satisfied, don't fragment the
+		// remainder of this write buffer.
+		if c.bytesFragmented >= c.bytesToFragment {
+			bytesWritten, err := c.Conn.Write(buffer)
+			totalBytesWritten += bytesWritten
+			return totalBytesWritten, err
+		}
 	}
 
 	if emitNotice {
