@@ -337,7 +337,11 @@ func (c *Conn) Write(buffer []byte) (int, error) {
 		if c.bytesFragmented >= c.bytesToFragment {
 			bytesWritten, err := c.Conn.Write(buffer)
 			totalBytesWritten += bytesWritten
-			return totalBytesWritten, err
+			if err != nil {
+				return totalBytesWritten, err
+			} else {
+				buffer = nil
+			}
 		}
 	}
 
