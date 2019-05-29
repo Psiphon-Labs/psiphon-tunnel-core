@@ -521,8 +521,10 @@ type Config struct {
 
 	// ReplayCandidateCount and other Replay fields are for
 	// testing purposes.
-	ReplayCandidateCount           *int
-	ReplayDialParametersTTLSeconds *int
+	ReplayCandidateCount                   *int
+	ReplayDialParametersTTLSeconds         *int
+	ReplayLaterRoundMoveToFrontProbability *float64
+	ReplayRetainFailedProbability          *float64
 
 	// clientParameters is the active ClientParameters with defaults, config
 	// values, and, optionally, tactics applied.
@@ -1036,6 +1038,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ReplayDialParametersTTLSeconds != nil {
 		applyParameters[parameters.ReplayDialParametersTTL] = fmt.Sprintf("%ds", *config.ReplayDialParametersTTLSeconds)
+	}
+
+	if config.ReplayLaterRoundMoveToFrontProbability != nil {
+		applyParameters[parameters.ReplayLaterRoundMoveToFrontProbability] = *config.ReplayLaterRoundMoveToFrontProbability
+	}
+
+	if config.ReplayRetainFailedProbability != nil {
+		applyParameters[parameters.ReplayRetainFailedProbability] = *config.ReplayRetainFailedProbability
 	}
 
 	return applyParameters

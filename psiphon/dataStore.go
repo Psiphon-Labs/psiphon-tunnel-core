@@ -572,18 +572,22 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 			serverEntryIDs[i], serverEntryIDs[j] = serverEntryIDs[j], serverEntryIDs[i]
 		}
 
-		// In the first round only, move _potential_ replay candidates to the
-		// front of the list (excepting the server affinity slot, if any).
-		// This move is post-shuffle so the order is still randomized. To save
-		// the memory overhead of unmarshalling all dial parameters, this
+		// In the first round, or with some probability, move _potential_ replay
+		// candidates to the front of the list (excepting the server affinity slot,
+		// if any). This move is post-shuffle so the order is still randomized. To
+		// save the memory overhead of unmarshalling all dial parameters, this
 		// operation just moves any server with a dial parameter record to the
 		// front. Whether the dial parameter remains valid for replay -- TTL,
 		// tactics/config unchanged, etc. --- is checked later.
 		//
 		// TODO: move only up to parameters.ReplayCandidateCount to front?
 
-		if isInitialRound &&
-			iterator.config.GetClientParameters().Int(parameters.ReplayCandidateCount) > 0 {
+		if (isInitialRound ||
+			iterator.config.GetClientParameters().WeightedCoinFlip(
+				parameters.ReplayLaterRoundMoveToFrontProbability)) &&
+
+			iterator.config.GetClientParameters().Int(
+				parameters.ReplayCandidateCount) != 0 {
 
 			networkID := []byte(iterator.config.GetNetworkID())
 

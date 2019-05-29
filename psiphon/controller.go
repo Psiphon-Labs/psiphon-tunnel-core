@@ -1041,7 +1041,7 @@ func (p *protocolSelectionConstraints) canReplay(
 	serverEntry *protocol.ServerEntry,
 	replayProtocol string) bool {
 
-	if connectTunnelCount > p.replayCandidateCount {
+	if p.replayCandidateCount != -1 && connectTunnelCount > p.replayCandidateCount {
 		return false
 	}
 
@@ -1807,21 +1807,22 @@ loop:
 		// entry has a previous, recent successful connection and
 		// tactics/config has not changed.
 		//
-		// In the first round of establishing, ServerEntryIterator will move
-		// potential replay candidates to the front of the iterator after the
-		// random shuffle, which greatly prioritizes previously successful
-		// servers for that round.
+		// In the first round -- and later rounds, with some probability -- of
+		// establishing, ServerEntryIterator will move potential replay candidates
+		// to the front of the iterator after the random shuffle, which greatly
+		// prioritizes previously successful servers for that round.
 		//
 		// As ServerEntryIterator does not unmarshal and validate replay
 		// candidate dial parameters, some potential replay candidates may
 		// have expired or otherwise ineligible dial parameters; in this case
 		// the candidate proceeds without replay.
 		//
-		// The ReplayCandidateCount tactic determines how many candidates may
-		// use replay. After ReplayCandidateCount candidates on any type,
-		// replay or no, replay is skipped. If ReplayCandidateCount exceed the
-		// intial round, replay may still be performed but the iterator no
-		// longer moves potential replay server entries to the front.
+		// The ReplayCandidateCount tactic determines how many candidates may use
+		// replay. After ReplayCandidateCount candidates of any type, replay or no,
+		// replay is skipped. If ReplayCandidateCount exceeds the intial round,
+		// replay may still be performed but the iterator may no longer move
+		// potential replay server entries to the front. When ReplayCandidateCount
+		// is set to -1, unlimited candidates may use replay.
 
 		dialParams, err := MakeDialParameters(
 			controller.config,

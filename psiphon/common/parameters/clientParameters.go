@@ -204,6 +204,8 @@ const (
 	ReplayLivenessTest                               = "ReplayLivenessTest"
 	ReplayUserAgent                                  = "ReplayUserAgent"
 	ReplayAPIRequestPadding                          = "ReplayAPIRequestPadding"
+	ReplayLaterRoundMoveToFrontProbability           = "ReplayLaterRoundMoveToFrontProbability"
+	ReplayRetainFailedProbability                    = "ReplayRetainFailedProbability"
 	APIRequestUpstreamPaddingMinBytes                = "APIRequestUpstreamPaddingMinBytes"
 	APIRequestUpstreamPaddingMaxBytes                = "APIRequestUpstreamPaddingMaxBytes"
 	APIRequestDownstreamPaddingMinBytes              = "APIRequestDownstreamPaddingMinBytes"
@@ -412,22 +414,24 @@ var defaultClientParameters = map[string]struct {
 	LivenessTestMinDownstreamBytes: {value: 0, minimum: 0},
 	LivenessTestMaxDownstreamBytes: {value: 0, minimum: 0},
 
-	ReplayCandidateCount:        {value: 10, minimum: 0},
-	ReplayDialParametersTTL:     {value: 24 * time.Hour, minimum: time.Duration(0)},
-	ReplayTargetUpstreamBytes:   {value: 0, minimum: 0},
-	ReplayTargetDownstreamBytes: {value: 0, minimum: 0},
-	ReplaySSH:                   {value: true},
-	ReplayObfuscatorPadding:     {value: true},
-	ReplayFragmentor:            {value: true},
-	ReplayTLSProfile:            {value: true},
-	ReplayRandomizedTLSProfile:  {value: true},
-	ReplayFronting:              {value: true},
-	ReplayHostname:              {value: true},
-	ReplayQUICVersion:           {value: true},
-	ReplayObfuscatedQUIC:        {value: true},
-	ReplayLivenessTest:          {value: true},
-	ReplayUserAgent:             {value: true},
-	ReplayAPIRequestPadding:     {value: true},
+	ReplayCandidateCount:                   {value: 10, minimum: -1},
+	ReplayDialParametersTTL:                {value: 24 * time.Hour, minimum: time.Duration(0)},
+	ReplayTargetUpstreamBytes:              {value: 0, minimum: 0},
+	ReplayTargetDownstreamBytes:            {value: 0, minimum: 0},
+	ReplaySSH:                              {value: true},
+	ReplayObfuscatorPadding:                {value: true},
+	ReplayFragmentor:                       {value: true},
+	ReplayTLSProfile:                       {value: true},
+	ReplayRandomizedTLSProfile:             {value: true},
+	ReplayFronting:                         {value: true},
+	ReplayHostname:                         {value: true},
+	ReplayQUICVersion:                      {value: true},
+	ReplayObfuscatedQUIC:                   {value: true},
+	ReplayLivenessTest:                     {value: true},
+	ReplayUserAgent:                        {value: true},
+	ReplayAPIRequestPadding:                {value: true},
+	ReplayLaterRoundMoveToFrontProbability: {value: 0.0, minimum: 0.0},
+	ReplayRetainFailedProbability:          {value: 0.5, minimum: 0.0},
 
 	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
