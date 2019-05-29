@@ -61,7 +61,7 @@ When that command completes, the compiled `.aar` files (suitable for use in an A
 repositories {
     ...
     maven {
-        url "https://raw.github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/master/releases"
+        url "https://raw.github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/master"
     }
 }
 ```
@@ -69,12 +69,20 @@ then add PsiphonTunnel dependency like following
 ```
 dependencies {
     ...
-    implementation 'ca.psiphon:psiphontunnel:1.0.7'
+    implementation 'ca.psiphon:psiphontunnel:2.0.2'
 }
 ```
-Where 1.0.7 is the target version. Latest available release version can be found at https://github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library
+Where 2.0.2 is the target version. Latest available release version can be found at https://github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library
 
 See example usage in [TunneledWebView sample app](./SampleApps/TunneledWebView/README.md)
+
+---
+
+**NOTE**
+
+The maven repo at `https://raw.github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/master/releases` which contains releases up to v2.0.2 is deprecated and will not be updated. All new releases starting with v2.0.2 will be deployed to maven repo at  `https://raw.github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/master`
+
+---
 
 ##### Limitations
 
