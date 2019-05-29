@@ -139,7 +139,7 @@ func MakeDialParameters(
 
 	networkID := config.GetNetworkID()
 
-	p := config.clientParameters.Get()
+	p := config.GetClientParameters()
 
 	ttl := p.Duration(parameters.ReplayDialParametersTTL)
 	replaySSH := p.Bool(parameters.ReplaySSH)
@@ -601,17 +601,24 @@ func (dialParams *DialParameters) Succeeded() {
 	}
 }
 
-func (dialParams *DialParameters) Failed() {
+func (dialParams *DialParameters) Failed(config *Config) {
 
 	// When a tunnel fails, and the dial is a replay, clear the stored dial
 	// parameters which are now presumed to be blocked, impaired or otherwise
 	// no longer effective.
 	//
-	// It may be the case that a dial is not using stored dial parameters, and
-	// in this case we retain those dial parameters since they were not
-	// exercised and may still be efective.
+	// It may be the case that a dial is not using stored dial parameters
+	// (!IsReplay), and in this case we retain those dial parameters since they
+	// were not exercised and may still be effective.
+	//
+	// Failed tunnel dial parameters may be retained with a configurable
+	// probability; this is intended to help mitigate false positive failures due
+	// to, e.g., temporary network disruptions or server load limiting.
 
-	if dialParams.IsReplay {
+	if dialParams.IsReplay &&
+		!config.GetClientParameters().WeightedCoinFlip(
+			parameters.ReplayRetainFailedProbability) {
+
 		NoticeInfo("Delete dial parameters for %s", dialParams.ServerEntry.IpAddress)
 		err := DeleteDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID)
 		if err != nil {

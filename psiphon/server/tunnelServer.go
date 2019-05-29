@@ -889,7 +889,8 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 	if sshServer.support.Config.MaxConcurrentSSHHandshakes > 0 {
 
 		ctx, cancelFunc := context.WithTimeout(
-			context.Background(), SSH_BEGIN_HANDSHAKE_TIMEOUT)
+			context.Background(),
+			sshServer.support.Config.sshBeginHandshakeTimeout)
 		defer cancelFunc()
 
 		err := sshServer.concurrentSSHHandshakes.Acquire(ctx, 1)
@@ -1097,8 +1098,8 @@ func (sshClient *sshClient) run(
 	resultChannel := make(chan *sshNewServerConnResult, 2)
 
 	var afterFunc *time.Timer
-	if SSH_HANDSHAKE_TIMEOUT > 0 {
-		afterFunc = time.AfterFunc(time.Duration(SSH_HANDSHAKE_TIMEOUT), func() {
+	if sshClient.sshServer.support.Config.sshHandshakeTimeout > 0 {
+		afterFunc = time.AfterFunc(sshClient.sshServer.support.Config.sshHandshakeTimeout, func() {
 			resultChannel <- &sshNewServerConnResult{err: errors.New("ssh handshake timeout")}
 		})
 	}

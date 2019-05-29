@@ -162,7 +162,7 @@ func (tunnel *Tunnel) Activate(
 	activationSucceeded := false
 	defer func() {
 		if !activationSucceeded && ctx.Err() == nil {
-			tunnel.dialParams.Failed()
+			tunnel.dialParams.Failed(tunnel.config)
 			_ = RecordFailedTunnelStat(tunnel.config, tunnel.dialParams, retErr)
 		}
 	}()
@@ -552,7 +552,7 @@ func dialTunnel(
 	baseCtx := ctx
 	defer func() {
 		if !dialSucceeded && baseCtx.Err() == nil {
-			dialParams.Failed()
+			dialParams.Failed(config)
 			_ = RecordFailedTunnelStat(config, dialParams, retErr)
 		}
 	}()

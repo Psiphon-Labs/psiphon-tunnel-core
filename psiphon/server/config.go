@@ -32,6 +32,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
@@ -156,6 +157,16 @@ type Config struct {
 	// the tunnel-core client. The same value is used for all
 	// protocols, run by this server instance, which use SSH.
 	SSHPassword string
+
+	// SSHBeginHandshakeTimeoutMilliseconds specifies the timeout
+	// for clients queueing to begin an SSH handshake. The default
+	// is SSH_BEGIN_HANDSHAKE_TIMEOUT.
+	SSHBeginHandshakeTimeoutMilliseconds *int
+
+	// SSHHandshakeTimeoutMilliseconds specifies the timeout
+	// before which a client must complete its handshake. The default
+	// is SSH_HANDSHAKE_TIMEOUT.
+	SSHHandshakeTimeoutMilliseconds *int
 
 	// ObfuscatedSSHKey is the secret key for use in the Obfuscated
 	// SSH protocol. The same secret key is used for all protocols,
@@ -325,6 +336,9 @@ type Config struct {
 	// BlocklistActive indicates whether to actively prevent blocklist hits in
 	// addition to logging events.
 	BlocklistActive bool
+
+	sshBeginHandshakeTimeout time.Duration
+	sshHandshakeTimeout      time.Duration
 }
 
 // RunWebServer indicates whether to run a web server component.
@@ -415,6 +429,16 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 					tunnelProtocol)
 			}
 		}
+	}
+
+	config.sshBeginHandshakeTimeout = SSH_BEGIN_HANDSHAKE_TIMEOUT
+	if config.SSHBeginHandshakeTimeoutMilliseconds != nil {
+		config.sshBeginHandshakeTimeout = time.Duration(*config.SSHBeginHandshakeTimeoutMilliseconds) * time.Millisecond
+	}
+
+	config.sshHandshakeTimeout = SSH_HANDSHAKE_TIMEOUT
+	if config.SSHHandshakeTimeoutMilliseconds != nil {
+		config.sshHandshakeTimeout = time.Duration(*config.SSHHandshakeTimeoutMilliseconds) * time.Millisecond
 	}
 
 	if config.ObfuscatedSSHKey != "" {
