@@ -206,7 +206,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 	// Test: no replay after dial reported to fail
 
-	dialParams.Failed()
+	dialParams.Failed(clientConfig)
 
 	dialParams, err = MakeDialParameters(clientConfig, canReplay, selectProtocol, serverEntries[0], false, 0)
 	if err != nil {
