@@ -315,7 +315,7 @@ fetcherLoop:
 		// Skip fetch entirely (i.e., send no request at all, even when ETag would save
 		// on response size) when a recent fetch was successful
 
-		stalePeriod := controller.config.clientParameters.Get().Duration(
+		stalePeriod := controller.config.GetClientParametersSnapshot().Duration(
 			parameters.FetchRemoteServerListStalePeriod)
 
 		if lastFetchTime != 0 &&
@@ -351,7 +351,7 @@ fetcherLoop:
 
 			NoticeAlert("failed to fetch %s remote server list: %s", name, err)
 
-			retryPeriod := controller.config.clientParameters.Get().Duration(
+			retryPeriod := controller.config.GetClientParametersSnapshot().Duration(
 				parameters.FetchRemoteServerListRetryPeriod)
 
 			timer := time.NewTimer(retryPeriod)
@@ -375,7 +375,7 @@ fetcherLoop:
 func (controller *Controller) establishTunnelWatcher() {
 	defer controller.runWaitGroup.Done()
 
-	timeout := controller.config.clientParameters.Get().Duration(
+	timeout := controller.config.GetClientParametersSnapshot().Duration(
 		parameters.EstablishTunnelTimeout)
 
 	if timeout > 0 {
@@ -430,7 +430,7 @@ loop:
 		if reported {
 			duration = 24 * time.Hour
 		} else {
-			duration = controller.config.clientParameters.Get().Duration(
+			duration = controller.config.GetClientParametersSnapshot().Duration(
 				parameters.PsiphonAPIConnectedRequestRetryPeriod)
 		}
 		timer := time.NewTimer(duration)
@@ -503,7 +503,7 @@ downloadLoop:
 			break downloadLoop
 		}
 
-		stalePeriod := controller.config.clientParameters.Get().Duration(
+		stalePeriod := controller.config.GetClientParametersSnapshot().Duration(
 			parameters.FetchUpgradeStalePeriod)
 
 		// Unless handshake is explicitly advertizing a new version, skip
@@ -543,7 +543,7 @@ downloadLoop:
 
 			NoticeAlert("failed to download upgrade: %s", err)
 
-			timeout := controller.config.clientParameters.Get().Duration(
+			timeout := controller.config.GetClientParametersSnapshot().Duration(
 				parameters.FetchUpgradeRetryPeriod)
 
 			timer := time.NewTimer(timeout)
@@ -1173,7 +1173,7 @@ func (controller *Controller) launchEstablishing() {
 
 	if !controller.config.DisableTactics {
 
-		timeout := controller.config.clientParameters.Get().Duration(
+		timeout := controller.config.GetClientParametersSnapshot().Duration(
 			parameters.TacticsWaitPeriod)
 
 		tacticsDone := make(chan struct{})
@@ -1207,7 +1207,7 @@ func (controller *Controller) launchEstablishing() {
 	// establishLimitTunnelProtocolsState field must be read-only after this
 	// point, allowing concurrent reads by establishment workers.
 
-	p := controller.config.clientParameters.Get()
+	p := controller.config.GetClientParametersSnapshot()
 
 	controller.protocolSelectionConstraints = &protocolSelectionConstraints{
 		useUpstreamProxy:                    controller.config.UseUpstreamProxy(),
@@ -1217,7 +1217,7 @@ func (controller *Controller) launchEstablishing() {
 		replayCandidateCount:                p.Int(parameters.ReplayCandidateCount),
 	}
 
-	workerPoolSize := controller.config.clientParameters.Get().Int(
+	workerPoolSize := controller.config.GetClientParametersSnapshot().Int(
 		parameters.ConnectionWorkerPoolSize)
 
 	// When TargetServerEntry is used, override any worker pool size config or
@@ -1424,7 +1424,7 @@ func (controller *Controller) getTactics(done chan struct{}) {
 			// TODO: distinguish network and local errors and abort
 			// on local errors.
 
-			p := controller.config.clientParameters.Get()
+			p := controller.config.GetClientParametersSnapshot()
 			timeout := prng.JitterDuration(
 				p.Duration(parameters.TacticsRetryPeriod),
 				p.Float(parameters.TacticsRetryPeriodJitter))
@@ -1512,7 +1512,7 @@ func (controller *Controller) doFetchTactics(
 	// Using controller.establishCtx will cancel FetchTactics
 	// if tunnel establishment completes first.
 
-	timeout := controller.config.clientParameters.Get().Duration(
+	timeout := controller.config.GetClientParametersSnapshot().Duration(
 		parameters.TacticsTimeout)
 
 	ctx, cancelFunc := context.WithTimeout(
@@ -1681,7 +1681,7 @@ loop:
 				break loop
 			}
 
-			workTime := controller.config.clientParameters.Get().Duration(
+			workTime := controller.config.GetClientParametersSnapshot().Duration(
 				parameters.EstablishTunnelWorkTime)
 
 			if roundStartTime.Add(-roundNetworkWaitDuration).Add(workTime).Before(monotime.Now()) {
@@ -1696,7 +1696,7 @@ loop:
 				// candidate has completed (success or failure) or is still working
 				// and the grace period has elapsed.
 
-				gracePeriod := controller.config.clientParameters.Get().Duration(
+				gracePeriod := controller.config.GetClientParametersSnapshot().Duration(
 					parameters.EstablishTunnelServerAffinityGracePeriod)
 
 				if gracePeriod > 0 {
@@ -1726,7 +1726,7 @@ loop:
 		// in typical conditions (it isn't strictly necessary to wait for this, there will
 		// be more rounds if required).
 
-		p := controller.config.clientParameters.Get()
+		p := controller.config.GetClientParametersSnapshot()
 		timeout := prng.JitterDuration(
 			p.Duration(parameters.EstablishTunnelPausePeriod),
 			p.Float(parameters.EstablishTunnelPausePeriodJitter))
@@ -1777,7 +1777,7 @@ loop:
 		// intensive. In this case, a StaggerConnectionWorkersMilliseconds
 		// delay may still be incurred.
 
-		limitIntensiveConnectionWorkers := controller.config.clientParameters.Get().Int(
+		limitIntensiveConnectionWorkers := controller.config.GetClientParametersSnapshot().Int(
 			parameters.LimitIntensiveConnectionWorkers)
 
 		controller.concurrentEstablishTunnelsMutex.Lock()
@@ -1885,7 +1885,7 @@ loop:
 		// The stagger is applied when establishConnectTunnelCount > 0 -- that
 		// is, for all but the first dial.
 
-		p := controller.config.clientParameters.Get()
+		p := controller.config.GetClientParametersSnapshot()
 		staggerPeriod := p.Duration(parameters.StaggerConnectionWorkersPeriod)
 		staggerJitter := p.Float(parameters.StaggerConnectionWorkersJitter)
 		p = nil

@@ -482,7 +482,7 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 			return false, nil, common.ContextError(errors.New("TargetServerEntry does not support EgressRegion"))
 		}
 
-		limitTunnelProtocols := config.GetClientParameters().TunnelProtocols(parameters.LimitTunnelProtocols)
+		limitTunnelProtocols := config.GetClientParametersSnapshot().TunnelProtocols(parameters.LimitTunnelProtocols)
 		if len(limitTunnelProtocols) > 0 {
 			// At the ServerEntryIterator level, only limitTunnelProtocols is applied;
 			// excludeIntensive is handled higher up.
@@ -588,10 +588,10 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 		// TODO: move only up to parameters.ReplayCandidateCount to front?
 
 		if (isInitialRound ||
-			iterator.config.GetClientParameters().WeightedCoinFlip(
+			iterator.config.GetClientParametersSnapshot().WeightedCoinFlip(
 				parameters.ReplayLaterRoundMoveToFrontProbability)) &&
 
-			iterator.config.GetClientParameters().Int(
+			iterator.config.GetClientParametersSnapshot().Int(
 				parameters.ReplayCandidateCount) != 0 {
 
 			networkID := []byte(iterator.config.GetNetworkID())
@@ -837,7 +837,7 @@ func PruneServerEntry(config *Config, serverEntryTag string) {
 
 func pruneServerEntry(config *Config, serverEntryTag string) error {
 
-	minimumAgeForPruning := config.GetClientParameters().Duration(
+	minimumAgeForPruning := config.GetClientParametersSnapshot().Duration(
 		parameters.ServerEntryMinimumAgeForPruning)
 
 	return datastoreUpdate(func(tx *datastoreTx) error {
@@ -1243,7 +1243,8 @@ func StorePersistentStat(config *Config, statType string, stat []byte) error {
 		return common.ContextError(fmt.Errorf("invalid persistent stat type: %s", statType))
 	}
 
-	maxStoreRecords := config.GetClientParameters().Int(parameters.PersistentStatsMaxStoreRecords)
+	maxStoreRecords := config.GetClientParametersSnapshot().Int(
+		parameters.PersistentStatsMaxStoreRecords)
 
 	err := datastoreUpdate(func(tx *datastoreTx) error {
 		bucket := tx.bucket([]byte(statType))
@@ -1318,7 +1319,8 @@ func TakeOutUnreportedPersistentStats(config *Config) (map[string][][]byte, erro
 
 	stats := make(map[string][][]byte)
 
-	maxSendBytes := config.GetClientParameters().Int(parameters.PersistentStatsMaxSendBytes)
+	maxSendBytes := config.GetClientParametersSnapshot().Int(
+		parameters.PersistentStatsMaxSendBytes)
 
 	err := datastoreUpdate(func(tx *datastoreTx) error {
 

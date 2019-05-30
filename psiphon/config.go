@@ -778,7 +778,7 @@ func (config *Config) Commit() error {
 }
 
 // GetClientParameters returns a snapshot of the current client parameters.
-func (config *Config) GetClientParameters() *parameters.ClientParametersSnapshot {
+func (config *Config) GetClientParametersSnapshot() *parameters.ClientParametersSnapshot {
 	return config.clientParameters.Get()
 }
 

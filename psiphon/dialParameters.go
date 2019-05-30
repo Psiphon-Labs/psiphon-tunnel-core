@@ -139,7 +139,7 @@ func MakeDialParameters(
 
 	networkID := config.GetNetworkID()
 
-	p := config.GetClientParameters()
+	p := config.GetClientParametersSnapshot()
 
 	ttl := p.Duration(parameters.ReplayDialParametersTTL)
 	replaySSH := p.Bool(parameters.ReplaySSH)
@@ -618,7 +618,7 @@ func (dialParams *DialParameters) Failed(config *Config) {
 	// to, e.g., temporary network disruptions or server load limiting.
 
 	if dialParams.IsReplay &&
-		!config.GetClientParameters().WeightedCoinFlip(
+		!config.GetClientParametersSnapshot().WeightedCoinFlip(
 			parameters.ReplayRetainFailedProbability) {
 
 		NoticeInfo("Delete dial parameters for %s", dialParams.ServerEntry.IpAddress)
