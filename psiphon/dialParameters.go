@@ -192,7 +192,9 @@ func MakeDialParameters(
 			dialParams.LastUsedTimestamp.Before(currentTimestamp.Add(-ttl)) ||
 			bytes.Compare(dialParams.LastUsedConfigStateHash, configStateHash) != 0 ||
 			(dialParams.TLSProfile != "" &&
-				!common.Contains(protocol.SupportedTLSProfiles, dialParams.TLSProfile))) {
+				!common.Contains(protocol.SupportedTLSProfiles, dialParams.TLSProfile)) ||
+			(dialParams.QUICVersion != "" &&
+				!common.Contains(protocol.SupportedQUICVersions, dialParams.QUICVersion))) {
 
 		// In these cases, existing dial parameters are expired or no longer
 		// match the config state and so are cleared to avoid rechecking them.
