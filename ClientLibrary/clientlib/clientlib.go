@@ -168,7 +168,7 @@ func StartTunnel(ctx context.Context,
 	// Store embedded server entries
 	serverEntries, err := protocol.DecodeServerEntryList(
 		embeddedServerEntryList,
-		common.GetCurrentTimestamp(),
+		common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
 		protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
 	if err != nil {
 		return nil, common.ContextErrorMsg(err, "failed to decode server entry list")

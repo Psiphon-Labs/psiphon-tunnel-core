@@ -460,9 +460,14 @@ func NewTacticsServerEntryIterator(config *Config) (*ServerEntryIterator, error)
 func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *ServerEntryIterator, error) {
 
 	serverEntry, err := protocol.DecodeServerEntry(
-		config.TargetServerEntry, common.GetCurrentTimestamp(), protocol.SERVER_ENTRY_SOURCE_TARGET)
+		config.TargetServerEntry, config.loadTimestamp, protocol.SERVER_ENTRY_SOURCE_TARGET)
 	if err != nil {
 		return false, nil, common.ContextError(err)
+	}
+
+	if serverEntry.Tag == "" {
+		serverEntry.Tag = protocol.GenerateServerEntryTag(
+			serverEntry.IpAddress, serverEntry.WebServerSecret)
 	}
 
 	if isTactics {
