@@ -948,15 +948,20 @@ func makeMeekTLSConfig(
 		return nil, common.ContextError(err)
 	}
 
+	// Vary the minimum version to frustrate scanning/fingerprinting of unfronted servers.
+	// Limitation: like the certificate, this value changes on restart.
+	minVersionCandidates := []uint16{tris.VersionTLS10, tris.VersionTLS11, tris.VersionTLS12}
+	minVersion := minVersionCandidates[prng.Intn(len(minVersionCandidates))]
+
 	config := &tris.Config{
 		Certificates:            []tris.Certificate{tlsCertificate},
 		NextProtos:              []string{"http/1.1"},
-		MinVersion:              tris.VersionTLS10,
+		MinVersion:              minVersion,
 		UseExtendedMasterSecret: true,
 	}
 
 	if isFronted {
-		// This is a reordering of the supported CipherSuites in golang 1.6. Non-ephemeral key
+		// This is a reordering of the supported CipherSuites in golang 1.6[*]. Non-ephemeral key
 		// CipherSuites greatly reduce server load, and we try to select these since the meek
 		// protocol is providing obfuscation, not privacy/integrity (this is provided by the
 		// tunneled SSH), so we don't benefit from the perfect forward secrecy property provided
@@ -965,24 +970,21 @@ func makeMeekTLSConfig(
 		//
 		// This optimization is applied only when there's a CDN in front of the meek server; in
 		// unfronted cases we prefer a more natural TLS handshake.
+		//
+		// [*] the list has since been updated, removing CipherSuites using RC4 and 3DES.
 		config.CipherSuites = []uint16{
 			tris.TLS_RSA_WITH_AES_128_GCM_SHA256,
 			tris.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			tris.TLS_RSA_WITH_RC4_128_SHA,
 			tris.TLS_RSA_WITH_AES_128_CBC_SHA,
 			tris.TLS_RSA_WITH_AES_256_CBC_SHA,
-			tris.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
 			tris.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 			tris.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 			tris.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
 			tris.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tris.TLS_ECDHE_RSA_WITH_RC4_128_SHA,
-			tris.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA,
 			tris.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
 			tris.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
 			tris.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
 			tris.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
-			tris.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
 		}
 		config.PreferServerCipherSuites = true
 	}
