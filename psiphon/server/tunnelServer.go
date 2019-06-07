@@ -1829,14 +1829,14 @@ func (sshClient *sshClient) handleNewPacketTunnelChannel(
 	}
 
 	metricUpdater := func(
-		TCPApplicationBytesUp, TCPApplicationBytesDown,
-		UDPApplicationBytesUp, UDPApplicationBytesDown int64) {
+		TCPApplicationBytesDown, TCPApplicationBytesUp,
+		UDPApplicationBytesDown, UDPApplicationBytesUp int64) {
 
 		sshClient.Lock()
-		sshClient.tcpTrafficState.bytesUp += TCPApplicationBytesUp
 		sshClient.tcpTrafficState.bytesDown += TCPApplicationBytesDown
-		sshClient.udpTrafficState.bytesUp += UDPApplicationBytesUp
+		sshClient.tcpTrafficState.bytesUp += TCPApplicationBytesUp
 		sshClient.udpTrafficState.bytesDown += UDPApplicationBytesDown
+		sshClient.udpTrafficState.bytesUp += UDPApplicationBytesUp
 		sshClient.Unlock()
 	}
 

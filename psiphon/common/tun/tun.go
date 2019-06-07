@@ -334,7 +334,7 @@ type AllowedPortChecker func(upstreamIPAddress net.IP, port int) bool
 // flow activity. Values passed to UpdateProgress are bytes transferred
 // and flow duration since the previous UpdateProgress.
 type FlowActivityUpdater interface {
-	UpdateProgress(upstreamBytes, downstreamBytes int64, durationNanoseconds int64)
+	UpdateProgress(downstreamBytes, upstreamBytes int64, durationNanoseconds int64)
 }
 
 // FlowActivityUpdaterMaker is a function which returns a list of
@@ -346,8 +346,8 @@ type FlowActivityUpdaterMaker func(
 // MetricsUpdater is a function which receives a checkpoint summary
 // of application bytes transferred through a packet tunnel.
 type MetricsUpdater func(
-	TCPApplicationBytesUp, TCPApplicationBytesDown,
-	UDPApplicationBytesUp, UDPApplicationBytesDown int64)
+	TCPApplicationBytesDown, TCPApplicationBytesUp,
+	UDPApplicationBytesDown, UDPApplicationBytesUp int64)
 
 // ClientConnected handles new client connections, creating or resuming
 // a session and returns with client packet handlers running.
@@ -1347,7 +1347,7 @@ func (session *session) updateFlow(
 	}
 
 	for _, updater := range flowState.activityUpdaters {
-		updater.UpdateProgress(upstreamBytes, downstreamBytes, durationNanoseconds)
+		updater.UpdateProgress(downstreamBytes, upstreamBytes, durationNanoseconds)
 	}
 }
 
@@ -2327,11 +2327,11 @@ func processPacket(
 
 		if direction == packetDirectionServerUpstream {
 			ID.set(
-				destinationIPAddress, destinationPort, sourceIPAddress, sourcePort, protocol)
+				sourceIPAddress, sourcePort, destinationIPAddress, destinationPort, protocol)
 
 		} else if direction == packetDirectionServerDownstream {
 			ID.set(
-				sourceIPAddress, sourcePort, destinationIPAddress, destinationPort, protocol)
+				destinationIPAddress, destinationPort, sourceIPAddress, sourcePort, protocol)
 		}
 
 		isTrackingFlow = session.isTrackingFlow(ID)
