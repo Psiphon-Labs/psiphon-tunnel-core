@@ -73,7 +73,7 @@ func DownloadUpgrade(
 		return nil
 	}
 
-	p := config.clientParameters.Get()
+	p := config.GetClientParametersSnapshot()
 	urls := p.DownloadURLs(parameters.UpgradeDownloadURLs)
 	clientVersionHeader := p.String(parameters.UpgradeDownloadClientVersionHeader)
 	downloadTimeout := p.Duration(parameters.FetchUpgradeTimeout)

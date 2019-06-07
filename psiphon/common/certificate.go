@@ -54,14 +54,21 @@ func GenerateWebServerCertificate(commonName string) (string, string, error) {
 		return "", "", ContextError(err)
 	}
 
-	// Validity period is ~10 years, starting some number of ~months
-	// back in the last year.
-
-	ageLimit := new(big.Int).Lsh(big.NewInt(1), 12)
-	age := int(ageLimit.Int64()) + 1
-	validityPeriod := 10 * 365 * 24 * time.Hour
-	notBefore := time.Now().Add(time.Duration(-age) * 30 * 24 * time.Hour).UTC()
-	notAfter := notBefore.Add(validityPeriod).UTC()
+	// Validity period is 1 or 2 years, starting 1 to 6 months ago.
+	validityPeriodYears := 1
+	delta, err := rand.Int(rand.Reader, big.NewInt(2))
+	if err != nil {
+		return "", "", ContextError(err)
+	}
+	validityPeriodYears += int(delta.Int64())
+	retroactiveMonths := 1
+	delta, err = rand.Int(rand.Reader, big.NewInt(6))
+	if err != nil {
+		return "", "", ContextError(err)
+	}
+	retroactiveMonths += int(delta.Int64())
+	notBefore := time.Now().Truncate(time.Hour).UTC().AddDate(0, -retroactiveMonths, 0)
+	notAfter := notBefore.AddDate(validityPeriodYears, 0, 0)
 
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)

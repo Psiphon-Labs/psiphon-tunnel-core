@@ -543,6 +543,8 @@ type Config struct {
 	networkIDGetter NetworkIDGetter
 
 	committed bool
+
+	loadTimestamp string
 }
 
 // LoadConfig parses a JSON format Psiphon config JSON string and returns a
@@ -560,6 +562,9 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
+
+	config.loadTimestamp = common.TruncateTimestampToHour(
+		common.GetCurrentTimestamp())
 
 	return &config, nil
 }
@@ -773,7 +778,7 @@ func (config *Config) Commit() error {
 }
 
 // GetClientParameters returns a snapshot of the current client parameters.
-func (config *Config) GetClientParameters() *parameters.ClientParametersSnapshot {
+func (config *Config) GetClientParametersSnapshot() *parameters.ClientParametersSnapshot {
 	return config.clientParameters.Get()
 }
 

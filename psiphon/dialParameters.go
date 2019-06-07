@@ -139,7 +139,7 @@ func MakeDialParameters(
 
 	networkID := config.GetNetworkID()
 
-	p := config.GetClientParameters()
+	p := config.GetClientParametersSnapshot()
 
 	ttl := p.Duration(parameters.ReplayDialParametersTTL)
 	replaySSH := p.Bool(parameters.ReplaySSH)
@@ -192,7 +192,9 @@ func MakeDialParameters(
 			dialParams.LastUsedTimestamp.Before(currentTimestamp.Add(-ttl)) ||
 			bytes.Compare(dialParams.LastUsedConfigStateHash, configStateHash) != 0 ||
 			(dialParams.TLSProfile != "" &&
-				!common.Contains(protocol.SupportedTLSProfiles, dialParams.TLSProfile))) {
+				!common.Contains(protocol.SupportedTLSProfiles, dialParams.TLSProfile)) ||
+			(dialParams.QUICVersion != "" &&
+				!common.Contains(protocol.SupportedQUICVersions, dialParams.QUICVersion))) {
 
 		// In these cases, existing dial parameters are expired or no longer
 		// match the config state and so are cleared to avoid rechecking them.
@@ -616,7 +618,7 @@ func (dialParams *DialParameters) Failed(config *Config) {
 	// to, e.g., temporary network disruptions or server load limiting.
 
 	if dialParams.IsReplay &&
-		!config.GetClientParameters().WeightedCoinFlip(
+		!config.GetClientParametersSnapshot().WeightedCoinFlip(
 			parameters.ReplayRetainFailedProbability) {
 
 		NoticeInfo("Delete dial parameters for %s", dialParams.ServerEntry.IpAddress)
