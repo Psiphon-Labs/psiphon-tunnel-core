@@ -440,10 +440,21 @@ func (sshServer *sshServer) runListener(
 		// value, if present, in special cases where the listening port
 		// cannot distinguish the protocol.
 		tunnelProtocol := listenerTunnelProtocol
-		if clientTunnelProtocol != "" &&
-			protocol.UseClientTunnelProtocol(
+		if clientTunnelProtocol != "" {
+
+			if !common.Contains(runningProtocols, clientTunnelProtocol) {
+				log.WithContextFields(
+					LogFields{
+						"clientTunnelProtocol": clientTunnelProtocol}).
+					Warning("invalid client tunnel protocol")
+				clientConn.Close()
+				return
+			}
+
+			if protocol.UseClientTunnelProtocol(
 				clientTunnelProtocol, runningProtocols) {
-			tunnelProtocol = clientTunnelProtocol
+				tunnelProtocol = clientTunnelProtocol
+			}
 		}
 
 		// process each client connection concurrently
