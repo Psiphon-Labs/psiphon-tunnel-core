@@ -55,7 +55,7 @@ echo " Gomobile version: ${GOMOBILEVERSION}"
 echo " Dependencies: ${DEPENDENCIES}"
 echo ""
 
-gomobile bind -v -x -target=android/arm -tags="${BUILD_TAGS}" -ldflags="$LDFLAGS" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+gomobile bind -v -x -target=android/arm,android/arm64 -tags="${BUILD_TAGS}" -ldflags="$LDFLAGS" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 if [ $? != 0 ]; then
   echo "..'gomobile bind' failed, exiting"
   exit $?
@@ -64,7 +64,8 @@ fi
 mkdir -p build-tmp/psi
 unzip -o psi.aar -d build-tmp/psi
 yes | cp -f PsiphonTunnel/AndroidManifest.xml build-tmp/psi/AndroidManifest.xml
-yes | cp -f PsiphonTunnel/libs/libtun2socks.so build-tmp/psi/jni/armeabi-v7a/libtun2socks.so
+yes | cp -f PsiphonTunnel/libs/armeabi-v7a/libtun2socks.so build-tmp/psi/jni/armeabi-v7a/libtun2socks.so
+yes | cp -f PsiphonTunnel/libs/arm64-v8a/libtun2socks.so build-tmp/psi/jni/arm64-v8a/libtun2socks.so
 
 javac -d build-tmp -bootclasspath $ANDROID_HOME/platforms/android-23/android.jar -source 1.7 -target 1.7 -classpath build-tmp/psi/classes.jar:$ANDROID_HOME/platforms/android-23/optional/org.apache.http.legacy.jar PsiphonTunnel/PsiphonTunnel.java
 if [ $? != 0 ]; then
