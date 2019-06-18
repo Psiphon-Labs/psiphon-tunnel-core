@@ -111,15 +111,20 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 
 	var flowCounter bytesTransferredCounter
 
-	flowActivityUpdaterMaker := func(_ string, _ net.IP) []FlowActivityUpdater {
+	flowActivityUpdaterMaker := func(_ string, IPAddress net.IP) []FlowActivityUpdater {
+
+		if IPAddress.String() != testTCPServer.getListenerIPAddress() {
+			t.Fatalf("unexpected flow IP address")
+		}
+
 		return []FlowActivityUpdater{&flowCounter}
 	}
 
 	var metricsCounter bytesTransferredCounter
 
-	metricsUpdater := func(TCPApplicationBytesUp, TCPApplicationBytesDown, _, _ int64) {
+	metricsUpdater := func(TCPApplicationBytesDown, TCPApplicationBytesUp, _, _ int64) {
 		metricsCounter.UpdateProgress(
-			TCPApplicationBytesUp, TCPApplicationBytesDown, 0)
+			TCPApplicationBytesDown, TCPApplicationBytesUp, 0)
 	}
 
 	testServer, err := startTestServer(useIPv6, MTU, flowActivityUpdaterMaker, metricsUpdater)
@@ -253,24 +258,24 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 
 	expectedBytesTransferred := CONCURRENT_CLIENT_COUNT * TCP_RELAY_TOTAL_SIZE
 
-	upstreamBytesTransferred, downstreamBytesTransferred, _ := flowCounter.Get()
-	if upstreamBytesTransferred < expectedBytesTransferred {
-		t.Fatalf("unexpected flow upstreamBytesTransferred: %d; expected at least %d",
-			upstreamBytesTransferred, expectedBytesTransferred)
-	}
+	downstreamBytesTransferred, upstreamBytesTransferred, _ := flowCounter.Get()
 	if downstreamBytesTransferred < expectedBytesTransferred {
 		t.Fatalf("unexpected flow downstreamBytesTransferred: %d; expected at least %d",
 			downstreamBytesTransferred, expectedBytesTransferred)
 	}
-
-	upstreamBytesTransferred, downstreamBytesTransferred, _ = metricsCounter.Get()
 	if upstreamBytesTransferred < expectedBytesTransferred {
-		t.Fatalf("unexpected metrics upstreamBytesTransferred: %d; expected at least %d",
+		t.Fatalf("unexpected flow upstreamBytesTransferred: %d; expected at least %d",
 			upstreamBytesTransferred, expectedBytesTransferred)
 	}
+
+	downstreamBytesTransferred, upstreamBytesTransferred, _ = metricsCounter.Get()
 	if downstreamBytesTransferred < expectedBytesTransferred {
 		t.Fatalf("unexpected metrics downstreamBytesTransferred: %d; expected at least %d",
 			downstreamBytesTransferred, expectedBytesTransferred)
+	}
+	if upstreamBytesTransferred < expectedBytesTransferred {
+		t.Fatalf("unexpected metrics upstreamBytesTransferred: %d; expected at least %d",
+			upstreamBytesTransferred, expectedBytesTransferred)
 	}
 
 	testServer.stop()
@@ -282,22 +287,22 @@ type bytesTransferredCounter struct {
 	// Note: 64-bit ints used with atomic operations are placed
 	// at the start of struct to ensure 64-bit alignment.
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	upstreamBytes       int64
 	downstreamBytes     int64
+	upstreamBytes       int64
 	durationNanoseconds int64
 }
 
 func (counter *bytesTransferredCounter) UpdateProgress(
-	upstreamBytes, downstreamBytes int64, durationNanoseconds int64) {
+	downstreamBytes, upstreamBytes int64, durationNanoseconds int64) {
 
-	atomic.AddInt64(&counter.upstreamBytes, upstreamBytes)
 	atomic.AddInt64(&counter.downstreamBytes, downstreamBytes)
+	atomic.AddInt64(&counter.upstreamBytes, upstreamBytes)
 	atomic.AddInt64(&counter.durationNanoseconds, durationNanoseconds)
 }
 
 func (counter *bytesTransferredCounter) Get() (int64, int64, int64) {
-	return atomic.LoadInt64(&counter.upstreamBytes),
-		atomic.LoadInt64(&counter.downstreamBytes),
+	return atomic.LoadInt64(&counter.downstreamBytes),
+		atomic.LoadInt64(&counter.upstreamBytes),
 		atomic.LoadInt64(&counter.durationNanoseconds)
 }
 

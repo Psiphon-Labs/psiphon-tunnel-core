@@ -271,7 +271,7 @@ func storeServerEntries(
 			config,
 			protocol.NewStreamingServerEntryDecoder(
 				file,
-				common.GetCurrentTimestamp(),
+				common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
 				protocol.SERVER_ENTRY_SOURCE_EMBEDDED),
 			false)
 		if err != nil {
@@ -282,7 +282,7 @@ func storeServerEntries(
 
 		serverEntries, err := protocol.DecodeServerEntryList(
 			embeddedServerEntryList,
-			common.GetCurrentTimestamp(),
+			common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
 			protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
 		if err != nil {
 			return fmt.Errorf("error decoding embedded server list: %s", err)

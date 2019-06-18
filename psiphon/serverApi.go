@@ -97,7 +97,8 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 		paddingPRNG:        prng.NewPRNGWithSeed(tunnel.dialParams.APIRequestPaddingSeed),
 	}
 
-	ignoreRegexps := tunnel.config.clientParameters.Get().Bool(parameters.IgnoreHandshakeStatsRegexps)
+	ignoreRegexps := tunnel.config.GetClientParametersSnapshot().Bool(
+		parameters.IgnoreHandshakeStatsRegexps)
 
 	err := serverContext.doHandshakeRequest(ignoreRegexps)
 	if err != nil {
@@ -576,7 +577,7 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 func RecordRemoteServerListStat(
 	config *Config, url, etag string) error {
 
-	if !config.GetClientParameters().WeightedCoinFlip(
+	if !config.GetClientParametersSnapshot().WeightedCoinFlip(
 		parameters.RecordRemoteServerListPersistentStatsProbability) {
 		return nil
 	}
@@ -618,7 +619,7 @@ var failedTunnelErrStripAddressRegex = regexp.MustCompile(
 func RecordFailedTunnelStat(
 	config *Config, dialParams *DialParameters, tunnelErr error) error {
 
-	if !config.GetClientParameters().WeightedCoinFlip(
+	if !config.GetClientParametersSnapshot().WeightedCoinFlip(
 		parameters.RecordFailedTunnelPersistentStatsProbability) {
 		return nil
 	}
@@ -722,7 +723,7 @@ func (serverContext *ServerContext) getBaseAPIParameters() common.APIParameters 
 	// fingerprints. The "pad_response" field instructs the server to pad its
 	// response accordingly.
 
-	p := serverContext.tunnel.config.GetClientParameters()
+	p := serverContext.tunnel.config.GetClientParametersSnapshot()
 	minUpstreamPadding := p.Int(parameters.APIRequestUpstreamPaddingMinBytes)
 	maxUpstreamPadding := p.Int(parameters.APIRequestUpstreamPaddingMaxBytes)
 	minDownstreamPadding := p.Int(parameters.APIRequestDownstreamPaddingMinBytes)
@@ -833,7 +834,8 @@ func getBaseAPIParameters(
 		params["server_entry_timestamp"] = localServerEntryTimestamp
 	}
 
-	params[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME] = config.clientParameters.Get().Tag()
+	params[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME] =
+		config.GetClientParametersSnapshot().Tag()
 
 	if dialParams.DialPortNumber != "" {
 		params["dial_port_number"] = dialParams.DialPortNumber

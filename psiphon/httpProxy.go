@@ -117,11 +117,10 @@ func NewHttpProxy(
 		return tunneler.DirectDial(addr)
 	}
 
-	responseHeaderTimeout := config.clientParameters.Get().Duration(
-		parameters.HTTPProxyOriginServerTimeout)
-
-	maxIdleConnsPerHost := config.clientParameters.Get().Int(
-		parameters.HTTPProxyMaxIdleConnectionsPerHost)
+	p := config.GetClientParametersSnapshot()
+	responseHeaderTimeout := p.Duration(parameters.HTTPProxyOriginServerTimeout)
+	maxIdleConnsPerHost := p.Int(parameters.HTTPProxyMaxIdleConnectionsPerHost)
+	p = nil
 
 	// TODO: could HTTP proxy share a tunneled transport with URL proxy?
 	// For now, keeping them distinct just to be conservative.

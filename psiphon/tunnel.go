@@ -186,7 +186,7 @@ func (tunnel *Tunnel) Activate(
 		// request. At this point, there is no operateTunnel monitor that will detect
 		// this condition with SSH keep alives.
 
-		timeout := tunnel.config.clientParameters.Get().Duration(
+		timeout := tunnel.config.GetClientParametersSnapshot().Duration(
 			parameters.PsiphonAPIRequestTimeout)
 
 		if timeout > 0 {
@@ -293,7 +293,7 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 		// tunnel is closed, which will interrupt any slow final status request.
 
 		if isActivated {
-			timeout := tunnel.config.clientParameters.Get().Duration(
+			timeout := tunnel.config.GetClientParametersSnapshot().Duration(
 				parameters.TunnelOperateShutdownTimeout)
 			afterFunc := time.AfterFunc(
 				timeout,
@@ -372,7 +372,7 @@ func (tunnel *Tunnel) Dial(
 
 	resultChannel := make(chan *tunnelDialResult, 1)
 
-	timeout := tunnel.config.clientParameters.Get().Duration(
+	timeout := tunnel.config.GetClientParametersSnapshot().Duration(
 		parameters.TunnelPortForwardDialTimeout)
 
 	afterFunc := time.AfterFunc(
@@ -530,7 +530,7 @@ func dialTunnel(
 		return nil, common.ContextError(err)
 	}
 
-	p := config.clientParameters.Get()
+	p := config.GetClientParametersSnapshot()
 	timeout := p.Duration(parameters.TunnelConnectTimeout)
 	rateLimits := p.RateLimits(parameters.TunnelRateLimits)
 	obfuscatedSSHMinPadding := p.Int(parameters.ObfuscatedSSHMinPadding)
@@ -1242,7 +1242,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 
 	go func() {
 		// Random padding to frustrate fingerprinting.
-		p := tunnel.config.clientParameters.Get()
+		p := tunnel.config.GetClientParametersSnapshot()
 		request := prng.Padding(
 			p.Int(parameters.SSHKeepAlivePaddingMinBytes),
 			p.Int(parameters.SSHKeepAlivePaddingMaxBytes))
@@ -1268,7 +1268,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 
 		if err == nil && requestOk &&
 			(isFirstKeepAlive ||
-				tunnel.config.clientParameters.Get().WeightedCoinFlip(
+				tunnel.config.GetClientParametersSnapshot().WeightedCoinFlip(
 					parameters.SSHKeepAliveSpeedTestSampleProbability)) {
 
 			err = tactics.AddSpeedTestSample(
