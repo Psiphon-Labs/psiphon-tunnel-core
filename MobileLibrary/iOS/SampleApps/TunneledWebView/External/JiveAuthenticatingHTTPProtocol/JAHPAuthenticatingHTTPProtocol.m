@@ -52,9 +52,7 @@
 #import "JAHPQNSURLSessionDemux.h"
 
 #import "AuthURLSessionTaskDelegate.h"
-#import "OCSP.h"
 #import "TunneledWebView-Swift.h"
-#import "URLEncode.h"
 
 // I use the following typedef to keep myself sane in the face of the wacky
 // Objective-C block syntax.
@@ -798,7 +796,7 @@ didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
         // Delegate for handling certificate validation.
         // Makes OCSP requests through local HTTP proxy.
         AuthURLSessionTaskDelegate *authHandler = [[AppDelegate sharedDelegate] authURLSessionTaskDelegate];
-        
+
         [authHandler URLSession:session
                                 task:task
                  didReceiveChallenge:challenge

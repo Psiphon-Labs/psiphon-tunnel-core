@@ -25,9 +25,11 @@
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
-		<false/>
+		<true/>
 		<key>NSExceptionDomains</key>
 		<dict>
+			<key>freegeoip.app</key>
+			<string></string>
 			<key>ifconfig.co</key>
 			<string>YES</string>
 			<key>ip-api.com</key>

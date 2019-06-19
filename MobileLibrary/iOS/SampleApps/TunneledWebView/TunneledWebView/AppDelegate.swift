@@ -24,7 +24,7 @@ import PsiphonTunnel
 
     // Delegate for handling certificate validation.
     @objc public var authURLSessionTaskDelegate: AuthURLSessionTaskDelegate =
-        AuthURLSessionTaskDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]: ", $0)},
+        AuthURLSessionTaskDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]:", $0)},
                                          andLocalHTTPProxyPort: 0)
     
     @objc public class func sharedDelegate() -> AppDelegate {
@@ -188,5 +188,4 @@ extension AppDelegate: TunneledAppDelegate {
             self.httpProxyPort = port
         }
     }
-
 }

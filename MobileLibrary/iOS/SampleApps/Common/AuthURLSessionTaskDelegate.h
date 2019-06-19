@@ -11,10 +11,11 @@
 // NOTE: this file is shared by TunneledWebRequest and TunneledWebView
 
 #import <Foundation/Foundation.h>
+#import "OCSPCache.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
-/*
+/*!
  * AuthURLSessionTaskDelegate implements URLSession:task:didReceiveChallenge:completionHandler:
  * of the NSURLSessionTaskDelegate protocol.
  *
@@ -31,18 +32,20 @@ NS_ASSUME_NONNULL_BEGIN
  * (1.3.6.1.5.5.7.48.1) Authority Information Access Method, which contains the locations (URLs) of
  * the OCSP servers; then OCSP requests are then made to these servers through the local HTTP proxy.
  *
+ * Note: AuthURLSessionTaskDelegate only checks revocation status with OCSP.
+ *
  * Note: The OCSP Authority Information Access Method is found in the Certificate Authority
  *       Information Access (1.3.6.1.5.5.7.1.1) X.509v3 extension --
  *       https://tools.ietf.org/html/rfc2459#section-4.2.2.1.
  */
 @interface AuthURLSessionTaskDelegate : NSObject <NSURLSessionDelegate>
 
-/*
+/*!
  * Logger for errors.
  */
 @property (nonatomic, strong) void (^logger)(NSString*);
 
-/*
+/*!
  * Local HTTP proxy port.
  *
  * OCSP request URL is constructed as:
@@ -50,7 +53,8 @@ NS_ASSUME_NONNULL_BEGIN
  */
 @property (atomic, assign) NSInteger localHTTPProxyPort;
 
-- (id)initWithLogger:(void (^)(NSString*))logger andLocalHTTPProxyPort:(NSInteger)port;
+-  (id)initWithLogger:(void (^)(NSString*))logger
+andLocalHTTPProxyPort:(NSInteger)port;
 
 - (void)URLSession:(NSURLSession *)session
               task:(NSURLSessionTask *)task

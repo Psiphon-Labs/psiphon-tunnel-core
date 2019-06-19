@@ -12,17 +12,23 @@
 
 #import "AuthURLSessionTaskDelegate.h"
 
-#import "OCSP.h"
-#import "URLEncode.h"
+#import "OCSPCache.h"
+#import "OCSPURLEncode.h"
 
-@implementation AuthURLSessionTaskDelegate
+@implementation AuthURLSessionTaskDelegate {
+    OCSPCache *ocspCache;
+}
 
-- (id)initWithLogger:(void (^)(NSString*))logger andLocalHTTPProxyPort:(NSInteger)port{
+-  (id)initWithLogger:(void (^)(NSString*))logger
+andLocalHTTPProxyPort:(NSInteger)port {
     self = [super init];
 
     if (self) {
         self.logger = logger;
         self.localHTTPProxyPort = port;
+        self->ocspCache = [[OCSPCache alloc] initWithLogger:^(NSString * _Nonnull logLine) {
+            [self logWithFormat:@"[OCSPCache] %@", logLine];
+        }];
     }
 
     return self;
@@ -56,91 +62,99 @@ didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
          challenge.protectionSpace.host,
          [task.currentRequest mainDocumentURL],
          [task.currentRequest URL]];
-        
+
         SecTrustRef trust = challenge.protectionSpace.serverTrust;
         if (trust == nil) {
             assert(NO);
         }
-        
+
         SecPolicyRef policy = SecPolicyCreateRevocation(kSecRevocationOCSPMethod |
                                                         kSecRevocationRequirePositiveResponse |
                                                         kSecRevocationNetworkAccessDisabled);
         SecTrustSetPolicies(trust, policy);
         CFRelease(policy);
-        
-        NSError *e;
-        
-        NSArray <NSURL*>* ocspURLs = [OCSP ocspURLs:trust error:&e];
-        if (e != nil) {
-            [self logWithFormat:@"Error constructing OCSP URLs: %@", e.localizedDescription];
-            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
+
+        // Check if there is a pinned or cached OCSP response
+
+        SecTrustResultType trustResultType;
+        SecTrustEvaluate(trust, &trustResultType);
+
+        if (   trustResultType == kSecTrustResultProceed
+            || trustResultType == kSecTrustResultUnspecified) {
+            [self logWithFormat:@"Pinned or cached OCSP response found by the system"];
+            NSURLCredential *credential = [NSURLCredential credentialForTrust:trust];
+            assert(credential != nil);
+            completionHandler(NSURLSessionAuthChallengeUseCredential, credential);
             return;
         }
-        
-        if ([ocspURLs count] == 0) {
-            [self logWithFormat:
-             @"Error no OCSP URLs in the Certificate Authority Information Access "
-             "(1.3.6.1.5.5.7.1.1) extension."];
-            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
-            return;
-        }
-        
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-            for (NSURL *ocspURL in ocspURLs) {
-                
-                // The target URL must be encoded, so as to be valid within a query parameter.
-                NSString *encodedTargetUrl = [URLEncode encode:ocspURL.absoluteString];
-                
-                NSNumber *httpProxyPort = [NSNumber numberWithInt:
-                                           (int)self.localHTTPProxyPort];
-                
-                NSString *proxiedURLString = [NSString stringWithFormat:@"http://127.0.0.1:%@"
-                                              "/tunneled/%@",
-                                              httpProxyPort,
-                                              encodedTargetUrl];
-                NSURL *proxiedURL = [NSURL URLWithString:proxiedURLString];
-                if (proxiedURL == nil) {
-                    [self logWithFormat:@"Constructed invalid URL for OCSP request: %@",
-                                        proxiedURLString];
-                    completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
-                    return;
-                }
-                
-                NSURLRequest *ocspReq = [NSURLRequest requestWithURL:proxiedURL];
 
-                NSURLResponse *resp = nil;
-                NSError *e = nil;
-                NSData *data = [NSURLConnection sendSynchronousRequest:ocspReq
-                                                     returningResponse:&resp
-                                                                 error:&e];
-                if (e != nil) {
-                    [self logWithFormat:@"Error with OCSP request: %@", e.localizedDescription];
-                    continue;
-                }
-                
-                CFDataRef d = (__bridge CFDataRef)data;
-                SecTrustSetOCSPResponse(trust, d);
-                
-                SecTrustResultType trustResultType;
-                SecTrustEvaluate(trust, &trustResultType);
+        // No pinned OCSP response, try fetching one
 
-                if (trustResultType == kSecTrustResultProceed || trustResultType == kSecTrustResultUnspecified) {
-                    NSURLCredential *credential = [NSURLCredential credentialForTrust:
-                                                   challenge.protectionSpace.serverTrust];
-                    assert(credential != nil);
-                    completionHandler(NSURLSessionAuthChallengeUseCredential, credential);
-                    return;
-                }
+        [self logWithFormat:@"Fetching OCSP response through OCSPCache"];
 
-                completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
-                return;
-            }
-        });
+        NSURL* (^modifyOCSPURL)(NSURL *url) = ^NSURL*(NSURL *url) {
+            return [self modifyOCSPURL:url];
+        };
+
+        [ocspCache lookup:trust
+               andTimeout:0
+            modifyOCSPURL:modifyOCSPURL
+               completion:
+         ^(OCSPCacheLookupResult * _Nonnull result) {
+
+             assert(result.response != nil);
+             assert(result.err == nil);
+
+             if (result.cached) {
+                 [self logWithFormat:@"Got cached OCSP response from OCSPCache"];
+             } else {
+                 [self logWithFormat:@"Fetched OCSP response from remote"];
+             }
+
+             CFDataRef d = (__bridge CFDataRef)result.response.data;
+
+             SecTrustSetOCSPResponse(trust, d);
+
+             SecTrustResultType trustResultType;
+             SecTrustEvaluate(trust, &trustResultType);
+
+             if (   trustResultType == kSecTrustResultProceed
+                 || trustResultType == kSecTrustResultUnspecified) {
+                 NSURLCredential *credential = [NSURLCredential credentialForTrust:trust];
+                 assert(credential != nil);
+                 completionHandler(NSURLSessionAuthChallengeUseCredential, credential);
+                 return;
+             }
+
+             // Reject the protection space.
+             // Do not use NSURLSessionAuthChallengePerformDefaultHandling because it can trigger
+             // plaintext OCSP requests.
+             completionHandler(NSURLSessionAuthChallengeRejectProtectionSpace, nil);
+             return;
+        }];
 
         return;
     }
 
     completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
+}
+
+// Modify the OCSP URLs so they use the local HTTP proxy
+- (nonnull NSURL *)modifyOCSPURL:(nonnull NSURL *)url {
+
+    // The target URL must be encoded, so as to be valid within a query parameter.
+    NSString *encodedTargetUrl = [URLEncode encode:url.absoluteString];
+
+    NSNumber *httpProxyPort = [NSNumber numberWithInt:(int)self.localHTTPProxyPort];
+
+    NSString *proxiedURLString = [NSString stringWithFormat:@"http://127.0.0.1:%@/tunneled/%@",
+                                                            httpProxyPort,
+                                                            encodedTargetUrl];
+    NSURL *proxiedURL = [NSURL URLWithString:proxiedURLString];
+
+    [self logWithFormat:@"[OCSPCache] updated OCSP URL %@ to %@", url, proxiedURL];
+
+    return proxiedURL;
 }
 
 @end

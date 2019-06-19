@@ -24,7 +24,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     // Delegate for handling certificate validation.
     var authURLSessionTaskDelegate: AuthURLSessionTaskDelegate =
-        AuthURLSessionTaskDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]: ", $0)},
+        AuthURLSessionTaskDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]:", $0)},
                                         andLocalHTTPProxyPort: 0)
 
     @objc public class func sharedDelegate() -> AppDelegate {
@@ -95,7 +95,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     ///   - completion: A callback function that will received the string obtained
     ///     from the request, or nil if there's an error.
     /// * returns: The string obtained from the request, or nil if there's an error.
-    func makeRequestViaUrlSessionProxy(_ url: String, completion: @escaping (_ result: String?) -> ()) {
+    func makeRequestViaUrlSessionProxy(_ url: String, completion: @escaping (_ result: String?, _ error: String?) -> ()) {
         let socksProxyPort = self.socksProxyPort
         assert(socksProxyPort > 0)
 
@@ -104,6 +104,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let config = URLSessionConfiguration.ephemeral
         config.requestCachePolicy = URLRequest.CachePolicy.reloadIgnoringLocalCacheData
         config.connectionProxyDictionary = [AnyHashable: Any]()
+        config.timeoutIntervalForRequest = 60 * 5
 
         // Enable and set the SOCKS proxy values.
         config.connectionProxyDictionary?[kCFStreamPropertySOCKSProxy as String] = 1
@@ -124,24 +125,27 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let task = session.dataTask(with: request) {
             (data: Data?, response: URLResponse?, error: Error?) in
             if error != nil {
-                NSLog("Client-side error in request to \(url): \(String(describing: error))")
+                let errorString = "Client-side error in request to \(url): \(String(describing: error))"
+                NSLog(errorString)
                 // Invoke the callback indicating error.
-                completion(nil)
+                completion(nil, errorString)
                 return
             }
 
             if data == nil {
-                NSLog("Data from request to \(url) is nil")
+                let errorString = "Data from request to \(url) is nil"
+                NSLog(errorString)
                 // Invoke the callback indicating error.
-                completion(nil)
+                completion(nil, errorString)
                 return
             }
 
             let httpResponse = response as? HTTPURLResponse
             if httpResponse?.statusCode != 200 {
-                NSLog("Server-side error in request to \(url): \(String(describing: httpResponse))")
+                let errorString = "Server-side error in request to \(url): \(String(describing: httpResponse))"
+                NSLog(errorString)
                 // Invoke the callback indicating error.
-                completion(nil)
+                completion(nil, errorString)
                 return
             }
 
@@ -154,7 +158,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             session.invalidateAndCancel()
 
             // Invoke the callback with the result.
-            completion(stringData)
+            completion(stringData, nil)
         }
 
         // Start the request task.
@@ -169,7 +173,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     ///   - completion: A callback function that will received the string obtained
     ///     from the request, or nil if there's an error.
     /// * returns: The string obtained from the request, or nil if there's an error.
-    func makeRequestViaUrlProxy(_ url: String, completion: @escaping (_ result: String?) -> ()) {
+    func makeRequestViaUrlProxy(_ url: String, completion: @escaping (_ result: String?, _ error: String?) -> ()) {
         let httpProxyPort = self.httpProxyPort
         assert(httpProxyPort > 0)
 
@@ -181,24 +185,27 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let task = URLSession.shared.dataTask(with: URL(string: proxiedURL)!) {
             (data: Data?, response: URLResponse?, error: Error?) in
             if error != nil {
-                NSLog("Client-side error in request to \(url): \(String(describing: error))")
+                let errorString = "Client-side error in request to \(url): \(String(describing: error))"
+                NSLog(errorString)
                 // Invoke the callback indicating error.
-                completion(nil)
+                completion(nil, errorString)
                 return
             }
 
             if data == nil {
-                NSLog("Data from request to \(url) is nil")
+                let errorString = "Data from request to \(url) is nil"
+                NSLog(errorString)
                 // Invoke the callback indicating error.
-                completion(nil)
+                completion(nil, errorString)
                 return
             }
 
             let httpResponse = response as? HTTPURLResponse
             if httpResponse?.statusCode != 200 {
-                NSLog("Server-side error in request to \(url): \(String(describing: httpResponse))")
+                let errorString = "Server-side error in request to \(url): \(String(describing: httpResponse))"
+                NSLog(errorString)
                 // Invoke the callback indicating error.
-                completion(nil)
+                completion(nil, errorString)
                 return
             }
 
@@ -208,7 +215,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             let stringData = String(data: data!, encoding: String.Encoding(rawValue: UInt(encoding)))
 
             // Invoke the callback with the result.
-            completion(stringData)
+            completion(stringData, nil)
         }
 
         // Start the request task.
@@ -267,44 +274,78 @@ extension AppDelegate: TunneledAppDelegate {
             // First we'll make a "what is my IP" request via makeRequestViaUrlSessionProxy().
             let url = "https://freegeoip.app/json/"
             self.makeRequestViaUrlSessionProxy(url) {
-                (_ result: String?) in
+                (_ result: String?, _ error: String?) in
 
-                if result == nil {
-                    NSLog("Failed to get \(url)")
-                    return
-                }
+                if let errorString = error?.replacingOccurrences(of: ",", with: ",\n  ")
+                                           .replacingOccurrences(of: "{", with: "{\n  ")
+                                           .replacingOccurrences(of: "}", with: "\n}")
+                {
+                    DispatchQueue.main.sync {
+                        // Load the result into the view.
+                        let mainView = self.window?.rootViewController as! ViewController
+                        mainView.appendToView("""
+                        Error from \(url):\n\n
+                        \(errorString)\n\n
+                        Using makeRequestViaUrlSessionProxy.\n\n
+                        Check logs for error.
+                        """)
+                    }
+                } else {
+                    if result == nil {
+                        NSLog("Failed to get \(url)")
+                        return
+                    }
 
-                // Do a little pretty-printing.
-                let prettyResult = result?.replacingOccurrences(of: ",", with: ",\n  ")
-                    .replacingOccurrences(of: "{", with: "{\n  ")
-                    .replacingOccurrences(of: "}", with: "\n}")
+                    // Do a little pretty-printing.
+                    let prettyResult = result?.replacingOccurrences(of: ",", with: ",\n  ")
+                                              .replacingOccurrences(of: "{", with: "{\n  ")
+                                              .replacingOccurrences(of: "}", with: "\n}")
 
-                DispatchQueue.main.sync {
-                    // Load the result into the view.
-                    let mainView = self.window?.rootViewController as! ViewController
-                    mainView.appendToView("Result from \(url):\n\(prettyResult!)")
+                    DispatchQueue.main.sync {
+                        // Load the result into the view.
+                        let mainView = self.window?.rootViewController as! ViewController
+                        mainView.appendToView("Result from \(url):\n\(prettyResult!)")
+                    }
                 }
 
                 // Then we'll make a different "what is my IP" request via makeRequestViaUrlProxy().
                 DispatchQueue.global(qos: .default).async {
                     let url = "https://ifconfig.co/json"
                     self.makeRequestViaUrlProxy(url) {
-                        (_ result: String?) in
+                        (_ result: String?, _ error: String?) in
 
-                        if result == nil {
-                            NSLog("Failed to get \(url)")
-                            return
-                        }
-
-                        // Do a little pretty-printing.
-                        let prettyResult = result?.replacingOccurrences(of: ",", with: ",\n  ")
+                        if let errorString = error?.replacingOccurrences(of: ",", with: ",\n  ")
                             .replacingOccurrences(of: "{", with: "{\n  ")
                             .replacingOccurrences(of: "}", with: "\n}")
+                        {
+                            DispatchQueue.main.sync {
+                                // Load the result into the view.
+                                let mainView = self.window?.rootViewController as! ViewController
+                                mainView.appendToView("""
+                                    Error from \(url):\n\n
+                                    \(errorString)\n\n
+                                    Using makeRequestViaUrlProxy.\n\n
+                                    Check logs for error.
+                                    """)
+                            }
+                            return
+                        } else {
 
-                        DispatchQueue.main.sync {
-                            // Load the result into the view.
-                            let mainView = self.window?.rootViewController as! ViewController
-                            mainView.appendToView("Result from \(url):\n\(prettyResult!)")
+                            if result == nil {
+                                NSLog("Failed to get \(url)")
+                                return
+                            }
+
+                            // Do a little pretty-printing.
+                            let prettyResult = result?.replacingOccurrences(of: ",", with: ",\n  ")
+                                .replacingOccurrences(of: "{", with: "{\n  ")
+                                .replacingOccurrences(of: "}", with: "\n}")
+
+                            DispatchQueue.main.sync {
+                                // Load the result into the view.
+                                let mainView = self.window?.rootViewController as! ViewController
+                                mainView.appendToView("Result from \(url):\n\(prettyResult!)")
+                            }
                         }
 
                         // We'll leave the tunnel open for when we want to make
