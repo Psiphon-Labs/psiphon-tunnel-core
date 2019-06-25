@@ -60,6 +60,8 @@ type DialParameters struct {
 	IsReplay        bool                  `json:"-"`
 	CandidateNumber int                   `json:"-"`
 
+	IsExchanged bool
+
 	LastUsedTimestamp       time.Time
 	LastUsedConfigStateHash []byte
 
@@ -217,12 +219,37 @@ func MakeDialParameters(
 		}
 	}
 
+	// IsExchanged:
+	//
+	// Dial parameters received via client-to-client exchange are partially
+	// initialized. Only the exchange fields are retained, and all other dial
+	// parameters fields must be initialized. This is not considered or logged as
+	// a replay. The exchange case is identified by the IsExchanged flag.
+	//
+	// When previously stored, IsExchanged dial parameters will have set the same
+	// timestamp and state hash used for regular dial parameters and the same
+	// logic above should invalidate expired or invalid exchanged dial
+	// parameters.
+	//
+	// Limitation: metrics will indicate when an exchanged server entry is used
+	// (source "EXCHANGED") but will not indicate when exchanged dial parameters
+	// are used vs. a redial after discarding dial parameters.
+
 	isReplay := (dialParams != nil)
+	isExchanged := isReplay && dialParams.IsExchanged
 
 	if !isReplay {
 		dialParams = &DialParameters{}
 	}
 
+	if isExchanged {
+		// Set isReplay to false to cause all non-exchanged values to be
+		// initialized; this also causes the exchange case to not log as replay.
+		isReplay = false
+	}
+
+	// Set IsExchanged so that full dial parameters are stored and replayed upon success.
+	dialParams.IsExchanged = false
 	dialParams.ServerEntry = serverEntry
 	dialParams.NetworkID = networkID
 	dialParams.IsReplay = isReplay
@@ -241,7 +268,7 @@ func MakeDialParameters(
 	// replaying, existing parameters are retaing, subject to the replay-X
 	// tactics flags.
 
-	if !isReplay {
+	if !isReplay && !isExchanged {
 
 		// TODO: should there be a pre-check of selectProtocol before incurring
 		// overhead of unmarshaling dial parameters? In may be that a server entry
@@ -626,6 +653,87 @@ func (dialParams *DialParameters) Failed(config *Config) {
 		if err != nil {
 			NoticeAlert("DeleteDialParameters failed: %s", err)
 		}
+	}
+}
+
+// ExchangedDialParameters represents the subset of DialParameters that is
+// shared in a client-to-client exchange of server connection info.
+//
+// The purpose of client-to-client exchange if for one user that can connect
+// to help another user that cannot connect by sharing their connected
+// configuration, including the server entry and dial parameters.
+//
+// There are two concerns regarding which dial parameter fields are safe to
+// exchange:
+//
+// - Unlike signed server entries, there's no independent trust anchor
+//   that can certify that the exchange data is valid.
+//
+// - While users should only perform the exchange with trusted peers,
+//   the user's trust in their peer may be misplaced.
+//
+// This presents the possibility of attack such as the peer sending dial
+// parameters that could be used to trace/monitor/flag the importer; or
+// sending dial parameters, including dial address and SNI, to cause the peer
+// to appear to connect to a banned service.
+//
+// To mitigate these risks, only a subset of dial parameters are exchanged.
+// When exchanged dial parameters and imported and used, all unexchanged
+// parameters are generated locally. At this time, only the tunnel protocol is
+// exchanged. We consider tunnel protocol selection one of the key connection
+// success factors.
+//
+// In addition, the exchange peers may not be on the same network with the
+// same blocking and circumvention characteristics, which is another reason
+// to limit exchanged dial parameter values to broadly applicable fields.
+//
+// Unlike the exchanged (and otherwise acquired) server entry,
+// ExchangedDialParameters does not use the ServerEntry_Fields_ representation
+// which allows older clients to receive and store new, unknown fields. Such a
+// facility is less useful in this case, since exchanged dial parameters and
+// used immediately and have a short lifespan.
+//
+// TODO: exchange more dial parameters, such as TLS profile, QUIC version, etc.
+type ExchangedDialParameters struct {
+	TunnelProtocol string
+}
+
+// NewExchangedDialParameters creates a new ExchangedDialParameters from a
+// DialParameters, including only the exchanged values.
+// NewExchangedDialParameters assumes the input DialParameters has been
+// initialized and populated by MakeDialParameters.
+func NewExchangedDialParameters(dialParams *DialParameters) *ExchangedDialParameters {
+	return &ExchangedDialParameters{
+		TunnelProtocol: dialParams.TunnelProtocol,
+	}
+}
+
+// Validate checks that the ExchangedDialParameters contains only valid values
+// and is compatible with the specified server entry.
+func (dialParams *ExchangedDialParameters) Validate(serverEntry *protocol.ServerEntry) error {
+	if !common.Contains(protocol.SupportedTunnelProtocols, dialParams.TunnelProtocol) {
+		return common.ContextError(fmt.Errorf("unknown tunnel protocol: %s", dialParams.TunnelProtocol))
+	}
+	if !serverEntry.SupportsProtocol(dialParams.TunnelProtocol) {
+		return common.ContextError(fmt.Errorf("unsupported tunnel protocol: %s", dialParams.TunnelProtocol))
+	}
+	return nil
+}
+
+// MakeDialParameters creates a new, partially intitialized DialParameters
+// from the values in ExchangedDialParameters. The returned DialParameters
+// must not be used directly for dialing. It is intended to be stored, and
+// then later fully initialized by MakeDialParameters.
+func (dialParams *ExchangedDialParameters) MakeDialParameters(
+	config *Config,
+	p *parameters.ClientParametersSnapshot,
+	serverEntry *protocol.ServerEntry) *DialParameters {
+
+	return &DialParameters{
+		IsExchanged:             true,
+		LastUsedTimestamp:       time.Now(),
+		LastUsedConfigStateHash: getConfigStateHash(config, p, serverEntry),
+		TunnelProtocol:          dialParams.TunnelProtocol,
 	}
 }
 

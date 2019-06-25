@@ -518,6 +518,8 @@ func makeMockServerEntries(tunnelProtocol string, count int) []*protocol.ServerE
 			MeekServerPort:             5,
 			MeekFrontingHosts:          []string{"www1.example.org", "www2.example.org", "www3.example.org"},
 			MeekFrontingAddressesRegex: "[a-z0-9]{1,64}.example.org",
+			LocalSource:                protocol.SERVER_ENTRY_SOURCE_EMBEDDED,
+			LocalTimestamp:             common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
 		}
 	}
 

@@ -175,7 +175,9 @@ func dispatchAPIRequestHandler(
 var handshakeRequestParams = append(
 	append(
 		// Note: legacy clients may not send "session_id" in handshake
-		[]requestParamSpec{{"session_id", isHexDigits, requestParamOptional}},
+		[]requestParamSpec{
+			{"session_id", isHexDigits, requestParamOptional},
+			{"missing_server_entry_signature", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool}},
 		tacticsParams...),
 	baseRequestParams...)
 
@@ -288,13 +290,25 @@ func handshakeAPIRequestHandler(
 
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
 
+	encodedServerList := db.DiscoverServers(geoIPData.DiscoveryValue)
+
+	// When the client indicates that it used an unsigned server entry for this
+	// connection, return a signed copy of the server entry for the client to
+	// upgrade to. See also: comment in psiphon.doHandshakeRequest.
+	if getOptionalBooleanFlagRequestParam(params, "missing_server_entry_signature") {
+		ownServerEntry, ok := db.OwnServerEntry()
+		if ok {
+			encodedServerList = append(encodedServerList, ownServerEntry)
+		}
+	}
+
 	handshakeResponse := protocol.HandshakeResponse{
 		SSHSessionID:           sessionID,
 		Homepages:              db.GetRandomizedHomepages(sponsorID, geoIPData.Country, isMobile),
 		UpgradeClientVersion:   db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
 		PageViewRegexes:        make([]map[string]string, 0),
 		HttpsRequestRegexes:    httpsRequestRegexes,
-		EncodedServerList:      db.DiscoverServers(geoIPData.DiscoveryValue),
+		EncodedServerList:      encodedServerList,
 		ClientRegion:           geoIPData.Country,
 		ServerTimestamp:        common.GetCurrentTimestamp(),
 		ActiveAuthorizationIDs: activeAuthorizationIDs,
@@ -1004,6 +1018,19 @@ func makeSpeedTestSamplesLogField(samples []interface{}) []interface{} {
 		logSamples[i] = logSample
 	}
 	return logSamples
+}
+
+// getOptionalBooleanFlagRequestParam returns true only if the field exists,
+// and is a true flag value, "1". Otherwise, it returns false.
+func getOptionalBooleanFlagRequestParam(params common.APIParameters, name string) bool {
+	if params[name] == nil {
+		return false
+	}
+	value, ok := params[name].(string)
+	if !ok {
+		return false
+	}
+	return value == "1"
 }
 
 func getStringRequestParam(params common.APIParameters, name string) (string, error) {

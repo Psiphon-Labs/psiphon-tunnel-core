@@ -195,6 +195,14 @@ public class PsiphonTunnel implements PsiphonProvider {
         mClientPlatformSuffix.set(suffix);
     }
 
+    public String exportExchangePayload() {
+        return mPsiphonTunnel.exportExchangePayload();
+    }
+
+    public boolean importExchangePayload(String payload) {
+        return mPsiphonTunnel.importExchangePayload(payload);
+    }
+
     // Writes Go runtime profile information to a set of files in the specifiec output directory.
     // cpuSampleDurationSeconds and blockSampleDurationSeconds determines how to long to wait and
     // sample profiles that require active sampling. When set to 0, these profiles are skipped.
