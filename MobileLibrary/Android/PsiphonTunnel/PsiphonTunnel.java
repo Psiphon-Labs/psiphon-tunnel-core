@@ -196,11 +196,11 @@ public class PsiphonTunnel implements PsiphonProvider {
     }
 
     public String exportExchangePayload() {
-        return mPsiphonTunnel.exportExchangePayload();
+        return Psi.exportExchangePayload();
     }
 
     public boolean importExchangePayload(String payload) {
-        return mPsiphonTunnel.importExchangePayload(payload);
+        return Psi.importExchangePayload(payload);
     }
 
     // Writes Go runtime profile information to a set of files in the specifiec output directory.
