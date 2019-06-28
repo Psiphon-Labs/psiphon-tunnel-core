@@ -594,7 +594,7 @@ func (meek *MeekConn) Close() (err error) {
 		// stopRunning interrupts HTTP requests in progress by closing the context
 		// associated with the request. In the case of h2quic.RoundTripper, testing
 		// indicates that quic-go.receiveStream.readImpl in _not_ interrupted in
-		// this case, and so an in-flight FRONTED-QUIC round trip may hang shutdown
+		// this case, and so an in-flight FRONTED-MEEK-QUIC round trip may hang shutdown
 		// in relayRoundTrip->readPayload->...->quic-go.receiveStream.readImpl.
 		//
 		// To workaround this, we call CloseIdleConnections _before_ Wait, as, in
