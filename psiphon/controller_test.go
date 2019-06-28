@@ -443,7 +443,7 @@ func TestFrontedQUIC(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
-			protocol:                 protocol.TUNNEL_PROTOCOL_FRONTED_QUIC_OBFUSCATED_SSH,
+			protocol:                 protocol.TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH,
 			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
 			disableEstablishing:      false,
