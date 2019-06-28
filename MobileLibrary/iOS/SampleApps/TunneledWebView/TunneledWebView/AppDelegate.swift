@@ -22,10 +22,24 @@ import PsiphonTunnel
     // The instance of PsiphonTunnel we'll use for connecting.
     var psiphonTunnel: PsiphonTunnel?
 
+    // OCSP cache for making OCSP requests in certificate revocation checking
+    var ocspCache: OCSPCache = OCSPCache.init(logger: {print("[OCSPCache]:", $0)})
+
     // Delegate for handling certificate validation.
-    @objc public var authURLSessionTaskDelegate: AuthURLSessionTaskDelegate =
-        AuthURLSessionTaskDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]:", $0)},
-                                         andLocalHTTPProxyPort: 0)
+    @objc public lazy var authURLSessionDelegate: OCSPAuthURLSessionDelegate =
+        OCSPAuthURLSessionDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]:", $0)},
+                                        ocspCache: self.ocspCache,
+                                        modifyOCSPURL:{
+                                            assert(self.httpProxyPort > 0)
+
+                                            let encodedTargetURL = URLEncode.encode($0.absoluteString)
+                                            let proxiedURLString = "http://127.0.0.1:\(self.httpProxyPort)/tunneled/\(encodedTargetURL!)"
+                                            let proxiedURL = URL.init(string: proxiedURLString)
+
+                                            print("[OCSP] Updated OCSP URL \($0) to \(proxiedURL!)")
+
+                                            return proxiedURL!},
+                                        sessionConfig:nil)
     
     @objc public class func sharedDelegate() -> AppDelegate {
         var delegate: AppDelegate?
@@ -183,7 +197,6 @@ extension AppDelegate: TunneledAppDelegate {
 
     func onListeningHttpProxyPort(_ port: Int) {
         DispatchQueue.main.async {
-            self.authURLSessionTaskDelegate.localHTTPProxyPort = port
             JAHPAuthenticatingHTTPProtocol.resetSharedDemux()
             self.httpProxyPort = port
         }

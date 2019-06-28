@@ -7,20 +7,20 @@ PODS:
   - ReactiveObjC (3.1.1)
 
 DEPENDENCIES:
-  - OCSPCache (from `https://github.com/Psiphon-Labs/OCSPCache.git`, commit `647c7b0`)
+  - OCSPCache (from `https://github.com/Psiphon-Labs/OCSPCache.git`, commit `9d7820e`)
   - OpenSSL-Universal (= 1.0.2.17)
   - PsiphonTunnel (from `https://github.com/Psiphon-Labs/psiphon-tunnel-core-iOS-library.git`)
 
 EXTERNAL SOURCES:
   OCSPCache:
-    :commit: 647c7b0
+    :commit: 9d7820e
     :git: https://github.com/Psiphon-Labs/OCSPCache.git
   PsiphonTunnel:
     :git: https://github.com/Psiphon-Labs/psiphon-tunnel-core-iOS-library.git
 
 CHECKOUT OPTIONS:
   OCSPCache:
-    :commit: 647c7b0
+    :commit: 9d7820e
     :git: https://github.com/Psiphon-Labs/OCSPCache.git
   PsiphonTunnel:
     :commit: c9af3bab93637163e117de9d1e77435baa7646c0
@@ -32,6 +32,6 @@ SPEC CHECKSUMS:
   PsiphonTunnel: 0c3f8677e4b26316beba57df78ed9c75634ce091
   ReactiveObjC: 011caa393aa0383245f2dcf9bf02e86b80b36040
 
-PODFILE CHECKSUM: 8a870dda0fa972bb0b856484a40170d5bb9da4c7
+PODFILE CHECKSUM: 4abc8555e10ac6f8a1ae5ad3eacff557c0c5b0fa
 
 COCOAPODS: 1.4.0

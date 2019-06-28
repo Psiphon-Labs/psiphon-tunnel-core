@@ -16,7 +16,6 @@
 		6626590E1DCB8CF400872F6C /* TunneledWebRequestUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6626590D1DCB8CF400872F6C /* TunneledWebRequestUITests.swift */; };
 		6682D90E1EB1334000329958 /* psiphon-embedded-server-entries.txt in Resources */ = {isa = PBXBuildFile; fileRef = 6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */; };
 		6688DBB61DCD684B00721A9E /* psiphon-config.json in Resources */ = {isa = PBXBuildFile; fileRef = 6688DBB51DCD684B00721A9E /* psiphon-config.json */; };
-		CEFA7EDD2295A5530078E41E /* AuthURLSessionTaskDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = CEFA7EDB2295A5530078E41E /* AuthURLSessionTaskDelegate.m */; };
 		DEB1E38A2E15C48277D2E61E /* libPods-TunneledWebRequest.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 37F726750F0082A9B17447DC /* libPods-TunneledWebRequest.a */; };
 /* End PBXBuildFile section */
 
@@ -68,8 +67,6 @@
 		6688DBB51DCD684B00721A9E /* psiphon-config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = "psiphon-config.json"; sourceTree = "<group>"; };
 		6BA09789075034B337A791DA /* Pods-TunneledWebRequest.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TunneledWebRequest.debug.xcconfig"; path = "Pods/Target Support Files/Pods-TunneledWebRequest/Pods-TunneledWebRequest.debug.xcconfig"; sourceTree = "<group>"; };
 		CEFA7EB82294A9BB0078E41E /* TunneledWebRequest-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "TunneledWebRequest-Bridging-Header.h"; sourceTree = "<group>"; };
-		CEFA7EDB2295A5530078E41E /* AuthURLSessionTaskDelegate.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = AuthURLSessionTaskDelegate.m; path = ../../../Common/AuthURLSessionTaskDelegate.m; sourceTree = "<group>"; };
-		CEFA7EDC2295A5530078E41E /* AuthURLSessionTaskDelegate.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = AuthURLSessionTaskDelegate.h; path = ../../../Common/AuthURLSessionTaskDelegate.h; sourceTree = "<group>"; };
 		FC00C7E45B17A3FDBDC1BF85 /* Pods-TunneledWebRequest.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TunneledWebRequest.release.xcconfig"; path = "Pods/Target Support Files/Pods-TunneledWebRequest/Pods-TunneledWebRequest.release.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -135,7 +132,6 @@
 			children = (
 				662658ED1DCB8CF300872F6C /* AppDelegate.swift */,
 				662658EF1DCB8CF300872F6C /* ViewController.swift */,
-				CEFA7EC22294B2D20078E41E /* URLSessionDelegate */,
 				662658F11DCB8CF300872F6C /* Main.storyboard */,
 				662658F41DCB8CF300872F6C /* Assets.xcassets */,
 				662658F61DCB8CF300872F6C /* LaunchScreen.storyboard */,
@@ -171,15 +167,6 @@
 				37F726750F0082A9B17447DC /* libPods-TunneledWebRequest.a */,
 			);
 			name = Frameworks;
-			sourceTree = "<group>";
-		};
-		CEFA7EC22294B2D20078E41E /* URLSessionDelegate */ = {
-			isa = PBXGroup;
-			children = (
-				CEFA7EDC2295A5530078E41E /* AuthURLSessionTaskDelegate.h */,
-				CEFA7EDB2295A5530078E41E /* AuthURLSessionTaskDelegate.m */,
-			);
-			path = URLSessionDelegate;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -382,7 +369,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				662658F01DCB8CF300872F6C /* ViewController.swift in Sources */,
-				CEFA7EDD2295A5530078E41E /* AuthURLSessionTaskDelegate.m in Sources */,
 				662658EE1DCB8CF300872F6C /* AppDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

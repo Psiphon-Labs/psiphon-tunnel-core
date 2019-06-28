@@ -51,7 +51,7 @@
 #import "JAHPCacheStoragePolicy.h"
 #import "JAHPQNSURLSessionDemux.h"
 
-#import "AuthURLSessionTaskDelegate.h"
+#import "OCSPAuthURLSessionDelegate.h"
 #import "TunneledWebView-Swift.h"
 
 // I use the following typedef to keep myself sane in the face of the wacky
@@ -795,7 +795,7 @@ didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
     if ([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]) {
         // Delegate for handling certificate validation.
         // Makes OCSP requests through local HTTP proxy.
-        AuthURLSessionTaskDelegate *authHandler = [[AppDelegate sharedDelegate] authURLSessionTaskDelegate];
+        OCSPAuthURLSessionDelegate *authHandler = [[AppDelegate sharedDelegate] authURLSessionDelegate];
 
         [authHandler URLSession:session
                                 task:task

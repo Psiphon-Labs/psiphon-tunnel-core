@@ -22,10 +22,25 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     // The instance of PsiphonTunnel we'll use for connecting.
     var psiphonTunnel: PsiphonTunnel?
 
+    // OCSP cache for making OCSP requests in certificate revocation checking
+    var ocspCache: OCSPCache = OCSPCache.init(logger: {print("[OCSPCache]:", $0)})
+
     // Delegate for handling certificate validation.
-    var authURLSessionTaskDelegate: AuthURLSessionTaskDelegate =
-        AuthURLSessionTaskDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]:", $0)},
-                                        andLocalHTTPProxyPort: 0)
+    lazy var authURLSessionDelegate: OCSPAuthURLSessionDelegate =
+        OCSPAuthURLSessionDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]:", $0)},
+                                        ocspCache: self.ocspCache,
+                                        modifyOCSPURL:{
+                                            assert(self.httpProxyPort > 0)
+
+                                            let encodedTargetURL = URLEncode.encode($0.absoluteString)
+                                            let proxiedURLString = "http://127.0.0.1:\(self.httpProxyPort)/tunneled/\(encodedTargetURL!)"
+                                            let proxiedURL = URL.init(string: proxiedURLString)
+
+                                            print("[OCSP] Updated OCSP URL \($0) to \(proxiedURL!)")
+
+                                            return proxiedURL!
+                                        },
+                                        sessionConfig:nil)
 
     @objc public class func sharedDelegate() -> AppDelegate {
         var delegate: AppDelegate?
@@ -119,7 +134,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // config.connectionProxyDictionary?[kCFStreamPropertyHTTPSProxyHost as String] = "127.0.0.1"
         // config.connectionProxyDictionary?[kCFStreamPropertyHTTPSProxyPort as String] = self.httpProxyPort
 
-        let session = URLSession.init(configuration: config, delegate: authURLSessionTaskDelegate, delegateQueue: OperationQueue.current)
+        let session = URLSession.init(configuration: config, delegate: authURLSessionDelegate, delegateQueue: OperationQueue.current)
 
         // Create the URLSession task that will make the request via the tunnel proxy.
         let task = session.dataTask(with: request) {
@@ -364,7 +379,6 @@ extension AppDelegate: TunneledAppDelegate {
 
     func onListeningHttpProxyPort(_ port: Int) {
         DispatchQueue.main.async {
-            self.authURLSessionTaskDelegate.localHTTPProxyPort = port
             self.httpProxyPort = port
         }
     }
