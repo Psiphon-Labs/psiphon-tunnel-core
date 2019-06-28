@@ -143,7 +143,7 @@ func (fields ServerEntryFields) SetTag(tag string) {
 				return
 			}
 			isLocalDerivedTagBool, ok := isLocalDerivedTag.(bool)
-			if ok && isLocalDerivedTagBool {
+			if ok && !isLocalDerivedTagBool {
 				return
 			}
 		}
