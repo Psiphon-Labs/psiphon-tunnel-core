@@ -134,11 +134,11 @@ func (fields ServerEntryFields) GetConfigurationVersion() int {
 	if !ok {
 		return 0
 	}
-	configurationVersionInt, ok := configurationVersion.(int)
+	configurationVersionFloat, ok := configurationVersion.(float64)
 	if !ok {
 		return 0
 	}
-	return configurationVersionInt
+	return int(configurationVersionFloat)
 }
 
 func (fields ServerEntryFields) GetLocalSource() string {
