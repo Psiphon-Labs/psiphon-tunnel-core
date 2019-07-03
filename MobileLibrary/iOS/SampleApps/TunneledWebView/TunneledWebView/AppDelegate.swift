@@ -39,7 +39,7 @@ import PsiphonTunnel
                                             print("[OCSP] Updated OCSP URL \($0) to \(proxiedURL!)")
 
                                             return proxiedURL!},
-                                        sessionConfig:nil)
+                                        session:nil)
     
     @objc public class func sharedDelegate() -> AppDelegate {
         var delegate: AppDelegate?

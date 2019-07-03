@@ -797,10 +797,19 @@ didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
         // Makes OCSP requests through local HTTP proxy.
         OCSPAuthURLSessionDelegate *authHandler = [[AppDelegate sharedDelegate] authURLSessionDelegate];
 
-        [authHandler URLSession:session
-                                task:task
-                 didReceiveChallenge:challenge
-                   completionHandler:completionHandler];
+        assert(challenge.protectionSpace.serverTrust != nil);
+
+        BOOL evaluateSuccess =
+        [authHandler evaluateTrust:challenge.protectionSpace.serverTrust
+             modifyOCSPURLOverride:nil
+                   sessionOverride:sharedDemuxInstance.session
+                 completionHandler:completionHandler];
+
+        [[self class] authenticatingHTTPProtocol:self
+                                   logWithFormat:@"Evaluate trust for %@ %@",
+                                                 challenge.protectionSpace.host,
+                                                 evaluateSuccess ? @"succeeded": @"failed"];
+
         return;
     }
 

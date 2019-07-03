@@ -3,7 +3,7 @@ platform :ios, '10.0'
 target 'TunneledWebRequest' do
     pod 'OpenSSL-Universal', '1.0.2.17'
     pod 'PsiphonTunnel', :git => 'https://github.com/Psiphon-Labs/psiphon-tunnel-core-iOS-library.git'
-    pod 'OCSPCache', :git => "https://github.com/Psiphon-Labs/OCSPCache.git", :commit => '9d7820e'
+    pod 'OCSPCache', :git => "https://github.com/Psiphon-Labs/OCSPCache.git", :commit => 'c11ab4a'
     #pod 'OCSPCache', :path => "../../../../../OCSPCache/"
 end
 
