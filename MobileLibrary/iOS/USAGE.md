@@ -61,11 +61,11 @@ The risk is that an observer can [map the certificate's serial number back to th
 
 ### Fix
 
-A fix has been implemented in both sample apps: [TunneledWebRequest](SampleApps/TunneledWebRequest) and [TunneledWebView](SampleApps/TunneledWebView). This is done by implementing [URLSession:task:didReceiveChallenge:completionHandler:](https://developer.apple.com/documentation/foundation/nsurlsessiontaskdelegate/1411595-urlsession?language=objc) of the [NSURLSessionTaskDelegate](https://developer.apple.com/documentation/foundation/nsurlsessiontaskdelegate) protocol; this allows us to control how revocation checkings is performed.
+A fix has been implemented in both sample apps: [TunneledWebRequest](SampleApps/TunneledWebRequest) and [TunneledWebView](SampleApps/TunneledWebView). This is done by implementing [URLSession:task:didReceiveChallenge:completionHandler:](https://developer.apple.com/documentation/foundation/nsurlsessiontaskdelegate/1411595-urlsession?language=objc) of the [NSURLSessionTaskDelegate](https://developer.apple.com/documentation/foundation/nsurlsessiontaskdelegate) protocol; this allows us to control how revocation checking is performed.
 
-This allows us to perform OCSP requests manually and ensure that they are tunneled. See the comments in [SampleApps/Common/AuthURLSessionTaskDelegate.h](SampleApps/Common/AuthURLSessionTaskDelegate.h) and both sample apps for a reference implementation.
+This allows us to perform OCSP requests manually and ensure that they are tunneled. See the comments in [OCSPAuthURLSessionDelegate.h](https://github.com/Psiphon-Labs/OCSPCache/blob/b945a5784cd88ed5693a62a931617bd371f3c9a8/OCSPCache/Classes/OCSPAuthURLSessionDelegate.h) and both sample apps for a reference implementation.
 
-AuthURLSessionTaskDelegate relies on [OCSPCache](https://github.com/Psiphon-Labs/OCSPCache) for constructing OCSP requests and caching OCSP responses.
+OCSPAuthURLSessionDelegate is part of [OCSPCache](https://github.com/Psiphon-Labs/OCSPCache), which is a CocoaPod developed for constructing OCSP requests and caching OCSP responses.
 
 
 ## Proxying a web view
