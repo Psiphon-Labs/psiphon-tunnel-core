@@ -13,16 +13,35 @@ import PsiphonTunnel
 
 
 @UIApplicationMain
-@objc class AppDelegate: UIResponder, UIApplicationDelegate, JAHPAuthenticatingHTTPProtocolDelegate {
+@objc class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
-    var socksProxyPort: Int = 0
-    var httpProxyPort: Int = 0
+    @objc public var socksProxyPort: Int = 0
+    @objc public var httpProxyPort: Int = 0
 
     // The instance of PsiphonTunnel we'll use for connecting.
     var psiphonTunnel: PsiphonTunnel?
 
-    class func sharedDelegate() -> AppDelegate {
+    // OCSP cache for making OCSP requests in certificate revocation checking
+    var ocspCache: OCSPCache = OCSPCache.init(logger: {print("[OCSPCache]:", $0)})
+
+    // Delegate for handling certificate validation.
+    @objc public lazy var authURLSessionDelegate: OCSPAuthURLSessionDelegate =
+        OCSPAuthURLSessionDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]:", $0)},
+                                        ocspCache: self.ocspCache,
+                                        modifyOCSPURL:{
+                                            assert(self.httpProxyPort > 0)
+
+                                            let encodedTargetURL = URLEncode.encode($0.absoluteString)
+                                            let proxiedURLString = "http://127.0.0.1:\(self.httpProxyPort)/tunneled/\(encodedTargetURL!)"
+                                            let proxiedURL = URL.init(string: proxiedURLString)
+
+                                            print("[OCSP] Updated OCSP URL \($0) to \(proxiedURL!)")
+
+                                            return proxiedURL!},
+                                        session:nil)
+    
+    @objc public class func sharedDelegate() -> AppDelegate {
         var delegate: AppDelegate?
         if (Thread.isMainThread) {
             delegate = UIApplication.shared.delegate as? AppDelegate
@@ -34,7 +53,7 @@ import PsiphonTunnel
         return delegate!
     }
 
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplicationLaunchOptionsKey: Any]?) -> Bool {
+    internal func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
 
         // Set the class delegate and register NSURL subclass
@@ -110,6 +129,11 @@ import PsiphonTunnel
     }
 }
 
+extension AppDelegate: JAHPAuthenticatingHTTPProtocolDelegate {
+    func authenticatingHTTPProtocol(_ authenticatingHTTPProtocol: JAHPAuthenticatingHTTPProtocol?, logMessage message: String) {
+        NSLog("[JAHPAuthenticatingHTTPProtocol] %@", message)
+    }
+}
 
 // MARK: TunneledAppDelegate implementation
 // See the protocol definition for details about the methods.
@@ -177,5 +201,4 @@ extension AppDelegate: TunneledAppDelegate {
             self.httpProxyPort = port
         }
     }
-
 }

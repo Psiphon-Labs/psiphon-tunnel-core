@@ -24,10 +24,12 @@
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
 		<key>NSExceptionDomains</key>
 		<dict>
-			<key>ifconfig.co</key>
-			<string>YES</string>
+			<key>freegeoip.app</key>
+			<string></string>
 			<key>ip-api.com</key>
 			<string>YES</string>
 			<key>ipinfo.io</key>
