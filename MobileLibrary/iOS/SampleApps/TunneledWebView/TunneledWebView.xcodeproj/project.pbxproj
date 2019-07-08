@@ -295,6 +295,7 @@
 			developmentRegion = English;
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				English,
 				en,
 				Base,
 			);
@@ -586,7 +587,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRIP_BITCODE_FROM_COPIED_FILES = NO;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/TunneledWebView/TunneledWebView-Bridging-Header.h";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
 		};
@@ -608,7 +609,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRIP_BITCODE_FROM_COPIED_FILES = NO;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/TunneledWebView/TunneledWebView-Bridging-Header.h";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};
@@ -622,7 +623,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebViewTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TunneledWebView.app/TunneledWebView";
 			};
 			name = Debug;
@@ -637,7 +638,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebViewTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TunneledWebView.app/TunneledWebView";
 			};
 			name = Release;
@@ -651,7 +652,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebViewUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 				TEST_TARGET_NAME = TunneledWebView;
 			};
 			name = Debug;
@@ -665,7 +666,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebViewUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 				TEST_TARGET_NAME = TunneledWebView;
 			};
 			name = Release;

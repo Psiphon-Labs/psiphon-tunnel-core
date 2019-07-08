@@ -48,11 +48,6 @@ const (
 	READ_PROXY_PROTOCOL_HEADER_TIMEOUT = 5 * time.Second
 )
 
-func init() {
-	refraction_networking_tapdance.Logger().Out = ioutil.Discard
-	refraction_networking_tapdance.EnableProxyProtocol()
-}
-
 // Enabled indicates if Tapdance functionality is enabled.
 func Enabled() bool {
 	return true
@@ -233,13 +228,17 @@ func (conn *tapdanceConn) IsClosed() bool {
 // The Tapdance station config assets are read from dataDirectory/"tapdance".
 // When no config is found, default assets are paved. ctx is expected to have
 // a timeout for the dial.
+//
+// Limitation: the parameters emitLogs and dataDirectory are used for one-time
+// initialization and are ignored after the first Dial call.
 func Dial(
 	ctx context.Context,
+	emitLogs bool,
 	dataDirectory string,
 	netDialer common.NetDialer,
 	address string) (net.Conn, error) {
 
-	err := initAssets(dataDirectory)
+	err := initTapdance(emitLogs, dataDirectory)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -288,12 +287,18 @@ func Dial(
 	}, nil
 }
 
-var setAssetsOnce sync.Once
+var initTapdanceOnce sync.Once
 
-func initAssets(dataDirectory string) error {
+func initTapdance(emitLogs bool, dataDirectory string) error {
 
 	var initErr error
-	setAssetsOnce.Do(func() {
+	initTapdanceOnce.Do(func() {
+
+		if !emitLogs {
+			refraction_networking_tapdance.Logger().Out = ioutil.Discard
+		}
+
+		refraction_networking_tapdance.EnableProxyProtocol()
 
 		assetsDir := filepath.Join(dataDirectory, "tapdance")
 

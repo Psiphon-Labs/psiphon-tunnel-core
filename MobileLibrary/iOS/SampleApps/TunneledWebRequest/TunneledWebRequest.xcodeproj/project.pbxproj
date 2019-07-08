@@ -51,8 +51,8 @@
 /* Begin PBXFileReference section */
 		37F726750F0082A9B17447DC /* libPods-TunneledWebRequest.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-TunneledWebRequest.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		662658EA1DCB8CF300872F6C /* TunneledWebRequest.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TunneledWebRequest.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		662658ED1DCB8CF300872F6C /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-		662658EF1DCB8CF300872F6C /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
+		662658ED1DCB8CF300872F6C /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; usesTabs = 0; };
+		662658EF1DCB8CF300872F6C /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; usesTabs = 0; };
 		662658F21DCB8CF300872F6C /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
 		662658F41DCB8CF300872F6C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		662658F71DCB8CF300872F6C /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
@@ -66,6 +66,7 @@
 		6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "psiphon-embedded-server-entries.txt"; sourceTree = "<group>"; };
 		6688DBB51DCD684B00721A9E /* psiphon-config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = "psiphon-config.json"; sourceTree = "<group>"; };
 		6BA09789075034B337A791DA /* Pods-TunneledWebRequest.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TunneledWebRequest.debug.xcconfig"; path = "Pods/Target Support Files/Pods-TunneledWebRequest/Pods-TunneledWebRequest.debug.xcconfig"; sourceTree = "<group>"; };
+		CEFA7EB82294A9BB0078E41E /* TunneledWebRequest-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "TunneledWebRequest-Bridging-Header.h"; sourceTree = "<group>"; };
 		FC00C7E45B17A3FDBDC1BF85 /* Pods-TunneledWebRequest.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TunneledWebRequest.release.xcconfig"; path = "Pods/Target Support Files/Pods-TunneledWebRequest/Pods-TunneledWebRequest.release.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -137,6 +138,7 @@
 				662658F91DCB8CF300872F6C /* Info.plist */,
 				6688DBB51DCD684B00721A9E /* psiphon-config.json */,
 				6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */,
+				CEFA7EB82294A9BB0078E41E /* TunneledWebRequest-Bridging-Header.h */,
 			);
 			path = TunneledWebRequest;
 			sourceTree = "<group>";
@@ -240,6 +242,7 @@
 					662658E91DCB8CF300872F6C = {
 						CreatedOnToolsVersion = 8.0;
 						DevelopmentTeam = Q6HLNEX92A;
+						LastSwiftMigration = 1020;
 						ProvisioningStyle = Automatic;
 					};
 					662658FD1DCB8CF400872F6C = {
@@ -261,6 +264,7 @@
 			developmentRegion = English;
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				English,
 				en,
 				Base,
 			);
@@ -474,6 +478,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -524,6 +529,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
 				SWIFT_OPTIMIZATION_LEVEL = "-Owholemodule";
+				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALIDATE_PRODUCT = YES;
 			};
@@ -534,6 +540,7 @@
 			baseConfigurationReference = 6BA09789075034B337A791DA /* Pods-TunneledWebRequest.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
 				DEVELOPMENT_TEAM = Q6HLNEX92A;
 				ENABLE_BITCODE = NO;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -545,7 +552,9 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebRequest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRIP_BITCODE_FROM_COPIED_FILES = NO;
-				SWIFT_VERSION = 3.0;
+				SWIFT_OBJC_BRIDGING_HEADER = "TunneledWebRequest/TunneledWebRequest-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
 		};
@@ -554,6 +563,7 @@
 			baseConfigurationReference = FC00C7E45B17A3FDBDC1BF85 /* Pods-TunneledWebRequest.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
 				DEVELOPMENT_TEAM = Q6HLNEX92A;
 				ENABLE_BITCODE = NO;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -565,7 +575,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebRequest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRIP_BITCODE_FROM_COPIED_FILES = NO;
-				SWIFT_VERSION = 3.0;
+				SWIFT_OBJC_BRIDGING_HEADER = "TunneledWebRequest/TunneledWebRequest-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};
@@ -575,11 +586,12 @@
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				DEVELOPMENT_TEAM = Q6HLNEX92A;
+				ENABLE_BITCODE = YES;
 				INFOPLIST_FILE = TunneledWebRequestTests/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebRequestTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TunneledWebRequest.app/TunneledWebRequest";
 			};
 			name = Debug;
@@ -590,11 +602,12 @@
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				DEVELOPMENT_TEAM = Q6HLNEX92A;
+				ENABLE_BITCODE = YES;
 				INFOPLIST_FILE = TunneledWebRequestTests/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebRequestTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TunneledWebRequest.app/TunneledWebRequest";
 			};
 			name = Release;
@@ -604,11 +617,12 @@
 			buildSettings = {
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				DEVELOPMENT_TEAM = Q6HLNEX92A;
+				ENABLE_BITCODE = YES;
 				INFOPLIST_FILE = TunneledWebRequestUITests/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebRequestUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 				TEST_TARGET_NAME = TunneledWebRequest;
 			};
 			name = Debug;
@@ -618,11 +632,12 @@
 			buildSettings = {
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				DEVELOPMENT_TEAM = Q6HLNEX92A;
+				ENABLE_BITCODE = YES;
 				INFOPLIST_FILE = TunneledWebRequestUITests/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebRequestUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 3.0;
+				SWIFT_VERSION = 5.0;
 				TEST_TARGET_NAME = TunneledWebRequest;
 			};
 			name = Release;
