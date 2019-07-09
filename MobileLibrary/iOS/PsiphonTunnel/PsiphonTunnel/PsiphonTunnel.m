@@ -325,6 +325,10 @@
 - (BOOL)startIfNeeded {
     PsiphonConnectionState connState = [self getConnectionState];
 
+    if (connState == PsiphonConnectionStateDisconnected) {
+        return [self start];
+    }
+
     // We have found that on iOS, the local proxies will get killed before the
     // tunnel gets disconnected (or before it realizes it's dead). So we need to
     // start if we either in a disconnected state or if our local proxies are dead.
@@ -341,8 +345,7 @@
         needRestart = (httpProxyPort != 0 && ![self isLocalProxyAliveAtPort:httpProxyPort]);
     }
 
-    if ((connState == PsiphonConnectionStateDisconnected) ||
-        (connState == PsiphonConnectionStateConnected && needRestart)) {
+    if (needRestart) {
         return [self start];
     }
 
