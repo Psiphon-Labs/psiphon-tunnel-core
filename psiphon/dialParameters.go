@@ -364,7 +364,7 @@ func MakeDialParameters(
 	if !isReplay || !replayHostname {
 
 		if protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) ||
-			protocol.TunnelProtocolUsesFrontedQUIC(dialParams.TunnelProtocol) {
+			protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol) {
 
 			dialParams.MeekSNIServerName = ""
 			if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
@@ -395,7 +395,7 @@ func MakeDialParameters(
 	if (!isReplay || !replayQUICVersion) &&
 		protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
 
-		allowObfuscatedQUIC := !protocol.TunnelProtocolUsesFrontedQUIC(dialParams.TunnelProtocol)
+		allowObfuscatedQUIC := !protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol)
 		dialParams.QUICVersion = selectQUICVersion(allowObfuscatedQUIC, p)
 	}
 
@@ -441,7 +441,7 @@ func MakeDialParameters(
 	case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
 		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedQUICPort)
 
-	case protocol.TUNNEL_PROTOCOL_FRONTED_QUIC_OBFUSCATED_SSH:
+	case protocol.TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH:
 		dialParams.MeekDialAddress = fmt.Sprintf("%s:443", dialParams.MeekFrontingDialAddress)
 		dialParams.MeekHostHeader = dialParams.MeekFrontingHost
 		if !dialParams.MeekTransformedHostName {
@@ -576,7 +576,7 @@ func MakeDialParameters(
 		dialParams.meekConfig = &MeekConfig{
 			ClientParameters:              config.clientParameters,
 			DialAddress:                   dialParams.MeekDialAddress,
-			UseQUIC:                       protocol.TunnelProtocolUsesFrontedQUIC(dialParams.TunnelProtocol),
+			UseQUIC:                       protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol),
 			QUICVersion:                   dialParams.QUICVersion,
 			UseHTTPS:                      protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol),
 			TLSProfile:                    dialParams.TLSProfile,

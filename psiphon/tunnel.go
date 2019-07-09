@@ -630,6 +630,7 @@ func dialTunnel(
 
 		dialConn, err = tapdance.Dial(
 			ctx,
+			config.EmitTapdanceLogs,
 			config.DataStoreDirectory,
 			NewNetDialer(dialParams.GetDialConfig()),
 			dialParams.DirectDialAddress)

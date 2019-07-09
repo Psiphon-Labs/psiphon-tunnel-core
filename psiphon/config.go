@@ -493,6 +493,11 @@ type Config struct {
 	// Required for the exchange functionality.
 	ExchangeObfuscationKey string
 
+	// EmitTapdanceLogs indicates whether to emit gotapdance log messages
+	// to stdout. Note that gotapdance log messages do not conform to the
+	// Notice format standard. Default is off.
+	EmitTapdanceLogs bool
+
 	// TransformHostNameProbability is for testing purposes.
 	TransformHostNameProbability *float64
 
