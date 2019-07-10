@@ -167,6 +167,18 @@ func (fields ServerEntryFields) GetIPAddress() string {
 	return ipAddressStr
 }
 
+func (fields ServerEntryFields) GetWebServerPort() string {
+	webServerPort, ok := fields["webServerPort"]
+	if !ok {
+		return ""
+	}
+	webServerPortStr, ok := webServerPort.(string)
+	if !ok {
+		return ""
+	}
+	return webServerPortStr
+}
+
 func (fields ServerEntryFields) GetWebServerSecret() string {
 	webServerSecret, ok := fields["webServerSecret"]
 	if !ok {
@@ -177,6 +189,18 @@ func (fields ServerEntryFields) GetWebServerSecret() string {
 		return ""
 	}
 	return webServerSecretStr
+}
+
+func (fields ServerEntryFields) GetWebServerCertificate() string {
+	webServerCertificate, ok := fields["webServerCertificate"]
+	if !ok {
+		return ""
+	}
+	webServerCertificateStr, ok := webServerCertificate.(string)
+	if !ok {
+		return ""
+	}
+	return webServerCertificateStr
 }
 
 func (fields ServerEntryFields) GetConfigurationVersion() int {
@@ -500,18 +524,42 @@ func GenerateServerEntryTag(ipAddress, webServerSecret string) string {
 // EncodeServerEntry returns a string containing the encoding of
 // a ServerEntry following Psiphon conventions.
 func EncodeServerEntry(serverEntry *ServerEntry) (string, error) {
-	serverEntryContents, err := json.Marshal(serverEntry)
-	if err != nil {
-		return "", common.ContextError(err)
-	}
-
-	return hex.EncodeToString([]byte(fmt.Sprintf(
-		"%s %s %s %s %s",
+	return encodeServerEntry(
 		serverEntry.IpAddress,
 		serverEntry.WebServerPort,
 		serverEntry.WebServerSecret,
 		serverEntry.WebServerCertificate,
-		serverEntryContents))), nil
+		serverEntry)
+}
+
+// EncodeServerEntryFields returns a string containing the encoding of
+// ServerEntryFields following Psiphon conventions.
+func EncodeServerEntryFields(serverEntryFields ServerEntryFields) (string, error) {
+	return encodeServerEntry(
+		serverEntryFields.GetIPAddress(),
+		serverEntryFields.GetWebServerPort(),
+		serverEntryFields.GetWebServerSecret(),
+		serverEntryFields.GetWebServerCertificate(),
+		serverEntryFields)
+}
+
+func encodeServerEntry(
+	IPAddress, webServerPort, webServerSecret, webServerCertificate string,
+	serverEntry interface{}) (string, error) {
+
+	serverEntryJSON, err := json.Marshal(serverEntry)
+	if err != nil {
+		return "", common.ContextError(err)
+	}
+
+	// Legacy clients expect the space-delimited fields.
+	return hex.EncodeToString([]byte(fmt.Sprintf(
+		"%s %s %s %s %s",
+		IPAddress,
+		webServerPort,
+		webServerSecret,
+		webServerCertificate,
+		serverEntryJSON))), nil
 }
 
 // DecodeServerEntry extracts a server entry from the encoding
@@ -544,6 +592,9 @@ func DecodeServerEntry(
 // DecodeServerEntryFields extracts an encoded server entry into a
 // ServerEntryFields type, much like DecodeServerEntry. Unrecognized fields
 // not in ServerEntry are retained in the ServerEntryFields.
+//
+// LocalSource/LocalTimestamp map entries are set only when the corresponding
+// inputs are non-blank.
 func DecodeServerEntryFields(
 	encodedServerEntry, timestamp, serverEntrySource string) (ServerEntryFields, error) {
 
@@ -554,8 +605,12 @@ func DecodeServerEntryFields(
 	}
 
 	// NOTE: if the source JSON happens to have values in these fields, they get clobbered.
-	serverEntryFields.SetLocalSource(serverEntrySource)
-	serverEntryFields.SetLocalTimestamp(timestamp)
+	if serverEntrySource != "" {
+		serverEntryFields.SetLocalSource(serverEntrySource)
+	}
+	if timestamp != "" {
+		serverEntryFields.SetLocalTimestamp(timestamp)
+	}
 
 	return serverEntryFields, nil
 }
