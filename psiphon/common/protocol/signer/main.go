@@ -61,6 +61,10 @@ func main() {
 	case "generate":
 		err = generate()
 	case "sign":
+		if publicKey == "" || privateKey == "" || encodedServerEntry == "" {
+			flag.Usage()
+			os.Exit(1)
+		}
 		err = sign(publicKey, privateKey, encodedServerEntry)
 	default:
 		flag.Usage()
