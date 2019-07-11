@@ -56,6 +56,21 @@ func main() {
 		command = args[0]
 	}
 
+	envPublicKey := os.Getenv("SIGNER_PUBLIC_KEY")
+	if envPublicKey != "" {
+		publicKey = envPublicKey
+	}
+
+	envPrivateKey := os.Getenv("SIGNER_PRIVATE_KEY")
+	if envPrivateKey != "" {
+		privateKey = envPrivateKey
+	}
+
+	envEncodedServerEntry := os.Getenv("SIGNER_SERVER_ENTRY")
+	if envEncodedServerEntry != "" {
+		encodedServerEntry = envEncodedServerEntry
+	}
+
 	var err error
 	switch command {
 	case "generate":
