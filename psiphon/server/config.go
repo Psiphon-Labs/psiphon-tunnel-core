@@ -86,8 +86,8 @@ type Config struct {
 	// ISP data in a separate file.
 	GeoIPDatabaseFilenames []string
 
-	// PsinetDatabaseFilename is the path of the Psiphon automation
-	// jsonpickle format Psiphon API data file.
+	// PsinetDatabaseFilename is the path of the file containing
+	// psinet.Database data.
 	PsinetDatabaseFilename string
 
 	// HostID is the ID of the server host; this is used for API
@@ -337,6 +337,17 @@ type Config struct {
 	// addition to logging events.
 	BlocklistActive bool
 
+	// OwnEncodedServerEntries is a list of the server's own encoded server
+	// entries, idenfified by server entry tag. These values are used in the
+	// handshake API to update clients that don't yet have a signed copy of these
+	// server entries.
+	//
+	// For purposes of compartmentalization, each server receives only its own
+	// server entries here; and, besides the discovery server entries, in
+	// psinet.Database, necessary for the discovery feature, no other server
+	// entries are stored on a Psiphon server.
+	OwnEncodedServerEntries map[string]string
+
 	sshBeginHandshakeTimeout time.Duration
 	sshHandshakeTimeout      time.Duration
 }
@@ -354,6 +365,13 @@ func (config *Config) RunLoadMonitor() bool {
 // RunPeriodicGarbageCollection indicates whether to run periodic garbage collection.
 func (config *Config) RunPeriodicGarbageCollection() bool {
 	return config.PeriodicGarbageCollectionSeconds > 0
+}
+
+// GetOwnEncodedServerEntry returns one of the server's own server entries, as
+// identified by the server entry tag.
+func (config *Config) GetOwnEncodedServerEntry(serverEntryTag string) (string, bool) {
+	serverEntry, ok := config.OwnEncodedServerEntries[serverEntryTag]
+	return serverEntry, ok
 }
 
 // LoadConfig loads and validates a JSON encoded server config.

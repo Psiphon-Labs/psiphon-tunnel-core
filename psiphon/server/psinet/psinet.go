@@ -44,12 +44,11 @@ const (
 type Database struct {
 	common.ReloadableFile
 
-	Sponsors                map[string]*Sponsor        `json:"sponsors"`
-	Versions                map[string][]ClientVersion `json:"client_versions"`
-	DefaultSponsorID        string                     `json:"default_sponsor_id"`
-	ValidServerEntryTags    map[string]bool            `json:"valid_server_entry_tags"`
-	OwnEncodedServerEntries map[string]string          `json:"own_encoded_server_entries"`
-	DiscoveryServers        []*DiscoveryServer         `json:"discovery_servers`
+	Sponsors             map[string]*Sponsor        `json:"sponsors"`
+	Versions             map[string][]ClientVersion `json:"client_versions"`
+	DefaultSponsorID     string                     `json:"default_sponsor_id"`
+	ValidServerEntryTags map[string]bool            `json:"valid_server_entry_tags"`
+	DiscoveryServers     []*DiscoveryServer         `json:"discovery_servers`
 
 	fileModTime time.Time
 }
@@ -116,7 +115,6 @@ func NewDatabase(filename string) (*Database, error) {
 			database.Versions = newDatabase.Versions
 			database.DefaultSponsorID = newDatabase.DefaultSponsorID
 			database.ValidServerEntryTags = newDatabase.ValidServerEntryTags
-			database.OwnEncodedServerEntries = newDatabase.OwnEncodedServerEntries
 			database.DiscoveryServers = newDatabase.DiscoveryServers
 			database.fileModTime = fileModTime
 
@@ -256,27 +254,9 @@ func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string
 	return regexes
 }
 
-// OwnServerEntry returns one of the server's own server entries, as
-// identified by the server entry tag. This is returned, in the handshake, to
-// clients that don't yet have a signed copy of this server entry.
-//
-// For purposed of compartmentalization, each server stores only its own
-// server entries, along with the discovery server entries necessary for the
-// discovery feature.
-func (db *Database) OwnServerEntry(serverEntryTag string) (string, bool) {
-	db.ReloadableFile.RLock()
-	defer db.ReloadableFile.RUnlock()
-
-	serverEntry, ok := db.OwnEncodedServerEntries[serverEntryTag]
-	return serverEntry, ok
-}
-
 // DiscoverServers selects new encoded server entries to be "discovered" by
 // the client, using the discoveryValue -- a function of the client's IP
 // address -- as the input into the discovery algorithm.
-// The server list (db.Servers) loaded from JSON is stored as an array instead of
-// a map to ensure servers are discovered deterministically. Each iteration over a
-// map in go is seeded with a random value which causes non-deterministic ordering.
 func (db *Database) DiscoverServers(discoveryValue int) []string {
 	db.ReloadableFile.RLock()
 	defer db.ReloadableFile.RUnlock()

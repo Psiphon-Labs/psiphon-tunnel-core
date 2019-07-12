@@ -304,7 +304,7 @@ func handshakeAPIRequestHandler(
 	serverEntryTag, ok := getOptionalStringRequestParam(
 		params, "missing_server_entry_signature")
 	if ok {
-		ownServerEntry, ok := db.OwnServerEntry(serverEntryTag)
+		ownServerEntry, ok := support.Config.GetOwnEncodedServerEntry(serverEntryTag)
 		if ok {
 			encodedServerList = append(encodedServerList, ownServerEntry)
 		}
