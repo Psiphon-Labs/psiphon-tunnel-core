@@ -295,8 +295,16 @@ func handshakeAPIRequestHandler(
 	// When the client indicates that it used an unsigned server entry for this
 	// connection, return a signed copy of the server entry for the client to
 	// upgrade to. See also: comment in psiphon.doHandshakeRequest.
-	if getOptionalBooleanFlagRequestParam(params, "missing_server_entry_signature") {
-		ownServerEntry, ok := db.OwnServerEntry()
+	//
+	// The missing_server_entry_signature parameter value is a server entry tag,
+	// which is used to select the correct server entry for servers with multiple
+	// entries. Identifying the server entries tags instead of server IPs prevents
+	// an enumeration attack, where a malicious client can abuse this facilty to
+	// check if an arbitrary IP address is a Psiphon server.
+	serverEntryTag, ok := getOptionalStringRequestParam(
+		params, "missing_server_entry_signature")
+	if ok {
+		ownServerEntry, ok := db.OwnServerEntry(serverEntryTag)
 		if ok {
 			encodedServerList = append(encodedServerList, ownServerEntry)
 		}
@@ -1020,17 +1028,15 @@ func makeSpeedTestSamplesLogField(samples []interface{}) []interface{} {
 	return logSamples
 }
 
-// getOptionalBooleanFlagRequestParam returns true only if the field exists,
-// and is a true flag value, "1". Otherwise, it returns false.
-func getOptionalBooleanFlagRequestParam(params common.APIParameters, name string) bool {
+func getOptionalStringRequestParam(params common.APIParameters, name string) (string, bool) {
 	if params[name] == nil {
-		return false
+		return "", false
 	}
 	value, ok := params[name].(string)
 	if !ok {
-		return false
+		return "", false
 	}
-	return value == "1"
+	return value, true
 }
 
 func getStringRequestParam(params common.APIParameters, name string) (string, error) {

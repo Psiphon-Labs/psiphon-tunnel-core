@@ -44,12 +44,12 @@ const (
 type Database struct {
 	common.ReloadableFile
 
-	Sponsors              map[string]*Sponsor        `json:"sponsors"`
-	Versions              map[string][]ClientVersion `json:"client_versions"`
-	DefaultSponsorID      string                     `json:"default_sponsor_id"`
-	ValidServerEntryTags  map[string]bool            `json:"valid_server_entry_tags"`
-	OwnEncodedServerEntry string                     `json:"own_encoded_server_entry"`
-	DiscoveryServers      []*DiscoveryServer         `json:"discovery_servers`
+	Sponsors                map[string]*Sponsor        `json:"sponsors"`
+	Versions                map[string][]ClientVersion `json:"client_versions"`
+	DefaultSponsorID        string                     `json:"default_sponsor_id"`
+	ValidServerEntryTags    map[string]bool            `json:"valid_server_entry_tags"`
+	OwnEncodedServerEntries map[string]string          `json:"own_encoded_server_entries"`
+	DiscoveryServers        []*DiscoveryServer         `json:"discovery_servers`
 
 	fileModTime time.Time
 }
@@ -116,7 +116,7 @@ func NewDatabase(filename string) (*Database, error) {
 			database.Versions = newDatabase.Versions
 			database.DefaultSponsorID = newDatabase.DefaultSponsorID
 			database.ValidServerEntryTags = newDatabase.ValidServerEntryTags
-			database.OwnEncodedServerEntry = newDatabase.OwnEncodedServerEntry
+			database.OwnEncodedServerEntries = newDatabase.OwnEncodedServerEntries
 			database.DiscoveryServers = newDatabase.DiscoveryServers
 			database.fileModTime = fileModTime
 
@@ -256,22 +256,19 @@ func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string
 	return regexes
 }
 
-// OwnServerEntry returns the server's own server entry. This is returned, in
-// the handshake, to clients that don't yet have a signed copy of this server
-// entry.
+// OwnServerEntry returns one of the server's own server entries, as
+// identified by the server entry tag. This is returned, in the handshake, to
+// clients that don't yet have a signed copy of this server entry.
 //
 // For purposed of compartmentalization, each server stores only its own
-// server entry, along with the discovery server entries necessary for the
+// server entries, along with the discovery server entries necessary for the
 // discovery feature.
-func (db *Database) OwnServerEntry() (string, bool) {
+func (db *Database) OwnServerEntry(serverEntryTag string) (string, bool) {
 	db.ReloadableFile.RLock()
 	defer db.ReloadableFile.RUnlock()
 
-	if db.OwnEncodedServerEntry != "" {
-		return db.OwnEncodedServerEntry, true
-	}
-
-	return "", false
+	serverEntry, ok := db.OwnEncodedServerEntries[serverEntryTag]
+	return serverEntry, ok
 }
 
 // DiscoverServers selects new encoded server entries to be "discovered" by

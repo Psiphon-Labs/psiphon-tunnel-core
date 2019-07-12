@@ -117,7 +117,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	params := serverContext.getBaseAPIParameters()
 
 	// The server will return a signed copy of its own server entry when the
-	// client specifies this 'missing_server_entry_signature' flag.
+	// client specifies this 'missing_server_entry_signature' parameter.
 	//
 	// The purpose of this mechanism is to rapidly upgrade client local storage
 	// from unsigned to signed server entries, and to ensure that the client has
@@ -127,7 +127,8 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	// The server entry will be included in handshakeResponse.EncodedServerList,
 	// along side discovery servers.
 	if !serverContext.tunnel.dialParams.ServerEntry.HasSignature() {
-		params["missing_server_entry_signature"] = "1"
+		params["missing_server_entry_signature"] =
+			serverContext.tunnel.dialParams.ServerEntry.Tag
 	}
 
 	doTactics := !serverContext.tunnel.config.DisableTactics
