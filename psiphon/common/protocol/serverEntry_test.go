@@ -22,9 +22,12 @@ package protocol
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
+	"strconv"
 	"testing"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 const (
@@ -150,5 +153,145 @@ func TestDecodeServerEntryStruct(t *testing.T) {
 	}
 	if serverEntry.IpAddress != _EXPECTED_IP_ADDRESS {
 		t.Errorf("unexpected IP address in decoded server entry: %s", serverEntry.IpAddress)
+	}
+}
+
+func TestServerEntryListSignatures(t *testing.T) {
+	testServerEntryListSignatures(t, true)
+	testServerEntryListSignatures(t, false)
+}
+
+func testServerEntryListSignatures(t *testing.T, setExplicitTag bool) {
+
+	publicKey, privateKey, err := NewServerEntrySignatureKeyPair()
+	if err != nil {
+		t.Fatalf("NewServerEntrySignatureKeyPair failed: %s", err)
+	}
+
+	n := 16
+	serverEntry := &ServerEntry{
+		IpAddress:                     prng.HexString(n),
+		WebServerPort:                 strconv.Itoa(prng.Intn(n)),
+		WebServerSecret:               prng.HexString(n),
+		WebServerCertificate:          prng.HexString(n),
+		SshPort:                       prng.Intn(n),
+		SshUsername:                   prng.HexString(n),
+		SshPassword:                   prng.HexString(n),
+		SshHostKey:                    prng.HexString(n),
+		SshObfuscatedPort:             prng.Intn(n),
+		SshObfuscatedQUICPort:         prng.Intn(n),
+		SshObfuscatedTapdancePort:     prng.Intn(n),
+		SshObfuscatedKey:              prng.HexString(n),
+		Capabilities:                  []string{prng.HexString(n)},
+		Region:                        prng.HexString(n),
+		MeekServerPort:                prng.Intn(n),
+		MeekCookieEncryptionPublicKey: prng.HexString(n),
+		MeekObfuscatedKey:             prng.HexString(n),
+		MeekFrontingHost:              prng.HexString(n),
+		MeekFrontingHosts:             []string{prng.HexString(n)},
+		MeekFrontingDomain:            prng.HexString(n),
+		MeekFrontingAddresses:         []string{prng.HexString(n)},
+		MeekFrontingAddressesRegex:    prng.HexString(n),
+		MeekFrontingDisableSNI:        false,
+		TacticsRequestPublicKey:       prng.HexString(n),
+		TacticsRequestObfuscatedKey:   prng.HexString(n),
+		MarionetteFormat:              prng.HexString(n),
+		ConfigurationVersion:          1,
+	}
+
+	if setExplicitTag {
+		serverEntry.Tag = prng.HexString(n)
+	}
+
+	// Convert ServerEntry to ServerEntryFields
+
+	marshaledServerEntry, err := json.Marshal(serverEntry)
+	if err != nil {
+		t.Fatalf("Marshal failed: %s", err)
+	}
+
+	var serverEntryFields ServerEntryFields
+
+	err = json.Unmarshal(marshaledServerEntry, &serverEntryFields)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %s", err)
+	}
+
+	// Check that local fields are ignored in the signature
+
+	if !setExplicitTag {
+		serverEntryFields.SetTag(prng.HexString(n))
+	}
+	serverEntryFields.SetLocalSource(prng.HexString(n))
+	serverEntryFields.SetLocalTimestamp(prng.HexString(n))
+
+	// Set dummy signature to check that its overwritten
+
+	serverEntryFields["signature"] = prng.HexString(n)
+
+	err = serverEntryFields.AddSignature(publicKey, privateKey)
+	if err != nil {
+		t.Fatalf("AddSignature failed: %s", err)
+	}
+
+	err = serverEntryFields.VerifySignature(publicKey)
+	if err != nil {
+		t.Fatalf("VerifySignature failed: %s", err)
+	}
+
+	// A 2nd VerifySignature call checks that the first VerifySignature
+	// call leaves the server entry fields intact
+
+	err = serverEntryFields.VerifySignature(publicKey)
+	if err != nil {
+		t.Fatalf("VerifySignature failed: %s", err)
+	}
+
+	// Modify local local fields and check that signature remains valid
+
+	if !setExplicitTag {
+		serverEntryFields.SetTag(prng.HexString(n))
+	}
+	serverEntryFields.SetLocalSource(prng.HexString(n))
+	serverEntryFields.SetLocalTimestamp(prng.HexString(n))
+
+	err = serverEntryFields.VerifySignature(publicKey)
+	if err != nil {
+		t.Fatalf("VerifySignature failed: %s", err)
+	}
+
+	// Check that verification fails when using the wrong public key
+
+	incorrectPublicKey, _, err := NewServerEntrySignatureKeyPair()
+	if err != nil {
+		t.Fatalf("NewServerEntrySignatureKeyPair failed: %s", err)
+	}
+
+	err = serverEntryFields.VerifySignature(incorrectPublicKey)
+	if err == nil {
+		t.Fatalf("VerifySignature unexpectedly succeeded")
+	}
+
+	// Check that an expected, non-local field causes verification to fail
+
+	serverEntryFields[prng.HexString(n)] = prng.HexString(n)
+
+	err = serverEntryFields.VerifySignature(publicKey)
+	if err == nil {
+		t.Fatalf("AddSignature unexpectedly succeeded")
+	}
+
+	// Check that modifying a signed field causes verification to fail
+
+	fieldName := "sshObfuscatedKey"
+	if setExplicitTag {
+		fieldName = "tag"
+	}
+
+	serverEntryFields[fieldName] = prng.HexString(n)
+
+	err = serverEntryFields.VerifySignature(publicKey)
+	if err == nil {
+		t.Fatalf("AddSignature unexpectedly succeeded")
 	}
 }
