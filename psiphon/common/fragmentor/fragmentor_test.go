@@ -52,7 +52,7 @@ func TestFragmentor(t *testing.T) {
 	// before additional data is written, even when running tests with the
 	// race detector.
 
-	bytesFragmented := 1 << 15
+	bytesToFragment := 1 << 15
 	minWriteBytes := 1
 	maxWriteBytes := 512
 	minDelay := 2 * time.Millisecond
@@ -65,16 +65,16 @@ func TestFragmentor(t *testing.T) {
 	_, err = clientParameters.Set("", false, map[string]interface{}{
 		"FragmentorProbability":              1.0,
 		"FragmentorLimitProtocols":           protocol.TunnelProtocols{},
-		"FragmentorMinTotalBytes":            bytesFragmented,
-		"FragmentorMaxTotalBytes":            bytesFragmented,
+		"FragmentorMinTotalBytes":            bytesToFragment,
+		"FragmentorMaxTotalBytes":            bytesToFragment,
 		"FragmentorMinWriteBytes":            minWriteBytes,
 		"FragmentorMaxWriteBytes":            maxWriteBytes,
 		"FragmentorMinDelay":                 minDelay,
 		"FragmentorMaxDelay":                 maxDelay,
 		"FragmentorDownstreamProbability":    1.0,
 		"FragmentorDownstreamLimitProtocols": protocol.TunnelProtocols{},
-		"FragmentorDownstreamMinTotalBytes":  bytesFragmented,
-		"FragmentorDownstreamMaxTotalBytes":  bytesFragmented,
+		"FragmentorDownstreamMinTotalBytes":  bytesToFragment,
+		"FragmentorDownstreamMaxTotalBytes":  bytesToFragment,
 		"FragmentorDownstreamMinWriteBytes":  minWriteBytes,
 		"FragmentorDownstreamMaxWriteBytes":  maxWriteBytes,
 		"FragmentorDownstreamMinDelay":       minDelay,
@@ -105,7 +105,7 @@ func TestFragmentor(t *testing.T) {
 			if err != nil {
 				return common.ContextError(err)
 			}
-			if m > maxWriteBytes && n < bytesFragmented {
+			if m > maxWriteBytes && n+maxWriteBytes <= bytesToFragment {
 				return common.ContextError(fmt.Errorf("unexpected write size: %d, %d", m, n))
 			}
 			n += m
@@ -155,7 +155,7 @@ func TestFragmentor(t *testing.T) {
 			if err != nil {
 				return common.ContextError(err)
 			}
-			if m > maxWriteBytes && n < bytesFragmented {
+			if m > maxWriteBytes && n+maxWriteBytes <= bytesToFragment {
 				return common.ContextError(fmt.Errorf("unexpected write size: %d, %d", m, n))
 			}
 			n += m
