@@ -190,6 +190,25 @@ public class PsiphonTunnel implements PsiphonProvider {
         startPsiphon("");
     }
 
+    // Creates a temporary dummy VPN interface in order to prevent traffic leaking while performing
+    // complete VPN and tunnel restart, for example, caused by host app settings change.
+    // Note: same deadlock note as stop().
+    public synchronized void seamlessVpnRestart(VpnService.Builder vpnServiceBuilder) throws Exception {
+        ParcelFileDescriptor dummyVpnFd = startDummyVpn(vpnServiceBuilder);
+        try {
+            stopVpn();
+            startVpn();
+        } finally {
+            if (dummyVpnFd != null) {
+                try {
+                    dummyVpnFd.close();
+                } catch (IOException e) {
+                }
+            }
+        }
+        restartPsiphon();
+    }
+
     public void setClientPlatformAffixes(String prefix, String suffix) {
         mClientPlatformPrefix.set(prefix);
         mClientPlatformSuffix.set(suffix);
@@ -277,6 +296,37 @@ public class PsiphonTunnel implements PsiphonProvider {
         }
 
         return true;
+    }
+
+    @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
+    private ParcelFileDescriptor startDummyVpn(VpnService.Builder vpnServiceBuilder) throws Exception {
+        PrivateAddress privateAddress = selectPrivateAddress();
+
+        Locale previousLocale = Locale.getDefault();
+
+        final String errorMessage = "startDummyVpn failed";
+        final ParcelFileDescriptor tunFd;
+        try {
+            // Workaround for https://code.google.com/p/android/issues/detail?id=61096
+            Locale.setDefault(new Locale("en"));
+            tunFd = vpnServiceBuilder
+                            .setSession(mHostService.getAppName())
+                            .addAddress(mPrivateAddress.mIpAddress, mPrivateAddress.mPrefixLength)
+                            .addRoute("0.0.0.0", 0)
+                            .addRoute(mPrivateAddress.mSubnet, mPrivateAddress.mPrefixLength)
+                            .establish();
+        } catch(IllegalArgumentException e) {
+            throw new Exception(errorMessage, e);
+        } catch(IllegalStateException e) {
+            throw new Exception(errorMessage, e);
+        } catch(SecurityException e) {
+            throw new Exception(errorMessage, e);
+        } finally {
+            // Restore the original locale.
+            Locale.setDefault(previousLocale);
+        }
+
+        return tunFd;
     }
 
     private boolean isVpnMode() {
