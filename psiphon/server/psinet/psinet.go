@@ -161,6 +161,10 @@ func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatfor
 		}
 	}
 
+	if sponsor == nil {
+		return sponsorHomePages
+	}
+
 	homePages := sponsor.HomePages
 
 	if isMobilePlatform {
@@ -240,6 +244,10 @@ func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string
 	sponsor, ok := db.Sponsors[sponsorID]
 	if !ok {
 		sponsor, _ = db.Sponsors[db.DefaultSponsorID]
+	}
+
+	if sponsor == nil {
+		return regexes
 	}
 
 	// If neither sponsorID or DefaultSponsorID were found, sponsor will be the
