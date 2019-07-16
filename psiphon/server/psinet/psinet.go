@@ -48,7 +48,7 @@ type Database struct {
 	Versions             map[string][]ClientVersion `json:"client_versions"`
 	DefaultSponsorID     string                     `json:"default_sponsor_id"`
 	ValidServerEntryTags map[string]bool            `json:"valid_server_entry_tags"`
-	DiscoveryServers     []*DiscoveryServer         `json:"discovery_servers`
+	DiscoveryServers     []*DiscoveryServer         `json:"discovery_servers"`
 
 	fileModTime time.Time
 }
@@ -104,7 +104,7 @@ func NewDatabase(filename string) (*Database, error) {
 		filename,
 		true,
 		func(fileContent []byte, fileModTime time.Time) error {
-			var newDatabase Database
+			var newDatabase *Database
 			err := json.Unmarshal(fileContent, &newDatabase)
 			if err != nil {
 				return common.ContextError(err)
