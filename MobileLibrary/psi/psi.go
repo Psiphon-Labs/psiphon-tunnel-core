@@ -220,7 +220,7 @@ func SetDynamicConfig(newSponsorID, newAuthorizationsList string) {
 // Start and Stop.
 //
 // The return value is a payload that may be exchanged with another client;
-// when "", the export failed and a diagnotice has been logged.
+// when "", the export failed and a diagnostic has been logged.
 func ExportExchangePayload() string {
 
 	controllerMutex.Lock()
