@@ -20,33 +20,33 @@
 package psinet
 
 import (
-	"fmt"
+	"strconv"
 	"testing"
 	"time"
 )
 
 func TestDiscoveryBuckets(t *testing.T) {
 
-	checkBuckets := func(buckets [][]Server, expectedIDs [][]int) {
-		if len(buckets) != len(expectedIDs) {
+	checkBuckets := func(buckets [][]*DiscoveryServer, expectedServerEntries [][]int) {
+		if len(buckets) != len(expectedServerEntries) {
 			t.Errorf(
 				"unexpected bucket count: got %d expected %d",
-				len(buckets), len(expectedIDs))
+				len(buckets), len(expectedServerEntries))
 			return
 		}
 		for i := 0; i < len(buckets); i++ {
-			if len(buckets[i]) != len(expectedIDs[i]) {
+			if len(buckets[i]) != len(expectedServerEntries[i]) {
 				t.Errorf(
 					"unexpected bucket %d size: got %d expected %d",
-					i, len(buckets[i]), len(expectedIDs[i]))
+					i, len(buckets[i]), len(expectedServerEntries[i]))
 				return
 			}
 			for j := 0; j < len(buckets[i]); j++ {
-				expectedID := fmt.Sprintf("%d", expectedIDs[i][j])
-				if buckets[i][j].Id != expectedID {
+				expectedServerEntry := strconv.Itoa(expectedServerEntries[i][j])
+				if buckets[i][j].EncodedServerEntry != expectedServerEntry {
 					t.Errorf(
 						"unexpected bucket %d item %d: got %s expected %s",
-						i, j, buckets[i][j].Id, expectedID)
+						i, j, buckets[i][j].EncodedServerEntry, expectedServerEntry)
 					return
 				}
 			}
@@ -56,9 +56,9 @@ func TestDiscoveryBuckets(t *testing.T) {
 	// Partition test cases from:
 	// http://stackoverflow.com/questions/2659900/python-slicing-a-list-into-n-nearly-equal-length-partitions
 
-	servers := make([]Server, 0)
+	servers := make([]*DiscoveryServer, 0)
 	for i := 0; i < 105; i++ {
-		servers = append(servers, Server{Id: fmt.Sprintf("%d", i)})
+		servers = append(servers, &DiscoveryServer{EncodedServerEntry: strconv.Itoa(i)})
 	}
 
 	t.Run("5 servers, 5 buckets", func(t *testing.T) {
@@ -109,7 +109,7 @@ func TestDiscoveryBuckets(t *testing.T) {
 
 		for i := 0; i < 1000; i++ {
 			for _, server := range selectServers(servers, i*int(time.Hour/time.Second), discoveryValue) {
-				discoveredServers[server.Id] = true
+				discoveredServers[server.EncodedServerEntry] = true
 			}
 		}
 
@@ -125,8 +125,8 @@ func TestDiscoveryBuckets(t *testing.T) {
 		}
 
 		for _, bucketServer := range buckets[0] {
-			if _, ok := discoveredServers[bucketServer.Id]; !ok {
-				t.Errorf("unexpected missing discovery server: %s", bucketServer.Id)
+			if _, ok := discoveredServers[bucketServer.EncodedServerEntry]; !ok {
+				t.Errorf("unexpected missing discovery server: %s", bucketServer.EncodedServerEntry)
 				return
 			}
 		}

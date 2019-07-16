@@ -482,6 +482,22 @@ type Config struct {
 	// server.
 	Authorizations []string
 
+	// ServerEntrySignaturePublicKey is a base64-encoded, ed25519 public
+	// key value used to verify individual server entry signatures. This value
+	// is supplied by and depends on the Psiphon Network, and is typically
+	// embedded in the client binary.
+	ServerEntrySignaturePublicKey string
+
+	// ExchangeObfuscationKey is a base64-encoded, NaCl secretbox key used to
+	// obfuscate server info exchanges between clients.
+	// Required for the exchange functionality.
+	ExchangeObfuscationKey string
+
+	// EmitTapdanceLogs indicates whether to emit gotapdance log messages
+	// to stdout. Note that gotapdance log messages do not conform to the
+	// Notice format standard. Default is off.
+	EmitTapdanceLogs bool
+
 	// TransformHostNameProbability is for testing purposes.
 	TransformHostNameProbability *float64
 

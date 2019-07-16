@@ -47,6 +47,6 @@ func Listen(_ string) (*Listener, error) {
 }
 
 // Dial establishes a new Tapdance session to a Tapdance station.
-func Dial(_ context.Context, _ string, _ common.NetDialer, _ string) (net.Conn, error) {
+func Dial(_ context.Context, _ bool, _ string, _ common.NetDialer, _ string) (net.Conn, error) {
 	return nil, common.ContextError(disabledError)
 }

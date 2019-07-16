@@ -23,6 +23,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -32,8 +33,10 @@ import (
 	"io"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ed25519"
 )
 
 // ServerEntry represents a Psiphon server. It contains information
@@ -69,12 +72,15 @@ type ServerEntry struct {
 	TacticsRequestObfuscatedKey   string   `json:"tacticsRequestObfuscatedKey"`
 	MarionetteFormat              string   `json:"marionetteFormat"`
 	ConfigurationVersion          int      `json:"configurationVersion"`
+	Signature                     string   `json:"signature"`
 
 	// These local fields are not expected to be present in downloaded server
 	// entries. They are added by the client to record and report stats about
 	// how and when server entries are obtained.
-	LocalSource    string `json:"localSource"`
-	LocalTimestamp string `json:"localTimestamp"`
+	// All local fields should be included the list of fields in RemoveUnsignedFields.
+	LocalSource       string `json:"localSource,omitempty"`
+	LocalTimestamp    string `json:"localTimestamp,omitempty"`
+	IsLocalDerivedTag bool   `json:"isLocalDerivedTag,omitempty"`
 }
 
 // ServerEntryFields is an alternate representation of ServerEntry which
@@ -89,6 +95,23 @@ type ServerEntry struct {
 // ServerEntry type.
 type ServerEntryFields map[string]interface{}
 
+// GetServerEntry converts a ServerEntryFields into a ServerEntry.
+func (fields ServerEntryFields) GetServerEntry() (*ServerEntry, error) {
+
+	marshaledServerEntry, err := json.Marshal(fields)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	var serverEntry *ServerEntry
+	err = json.Unmarshal(marshaledServerEntry, &serverEntry)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	return serverEntry, nil
+}
+
 func (fields ServerEntryFields) GetTag() string {
 	tag, ok := fields["tag"]
 	if !ok {
@@ -101,8 +124,35 @@ func (fields ServerEntryFields) GetTag() string {
 	return tagStr
 }
 
+// SetTag sets a local, derived server entry tag. A tag is an identifier used
+// in server entry pruning and potentially other use cases. An explict tag,
+// set by the Psiphon Network, may be present in a server entry that is
+// imported; otherwise, the client will set a derived tag. The tag should be
+// generated using GenerateServerEntryTag. When SetTag finds a explicit tag,
+// the new, derived tag is ignored. The isLocalTag local field is set to
+// distinguish explict and derived tags and is used in signature verification
+// to determine if the tag field is part of the signature.
 func (fields ServerEntryFields) SetTag(tag string) {
+
+	// Don't replace explicit tag
+	if tag, ok := fields["tag"]; ok {
+		tagStr, ok := tag.(string)
+		if ok && tagStr != "" {
+			isLocalDerivedTag, ok := fields["isLocalDerivedTag"]
+			if !ok {
+				return
+			}
+			isLocalDerivedTagBool, ok := isLocalDerivedTag.(bool)
+			if ok && !isLocalDerivedTagBool {
+				return
+			}
+		}
+	}
+
 	fields["tag"] = tag
+
+	// Mark this tag as local
+	fields["isLocalDerivedTag"] = true
 }
 
 func (fields ServerEntryFields) GetIPAddress() string {
@@ -117,6 +167,18 @@ func (fields ServerEntryFields) GetIPAddress() string {
 	return ipAddressStr
 }
 
+func (fields ServerEntryFields) GetWebServerPort() string {
+	webServerPort, ok := fields["webServerPort"]
+	if !ok {
+		return ""
+	}
+	webServerPortStr, ok := webServerPort.(string)
+	if !ok {
+		return ""
+	}
+	return webServerPortStr
+}
+
 func (fields ServerEntryFields) GetWebServerSecret() string {
 	webServerSecret, ok := fields["webServerSecret"]
 	if !ok {
@@ -129,16 +191,28 @@ func (fields ServerEntryFields) GetWebServerSecret() string {
 	return webServerSecretStr
 }
 
+func (fields ServerEntryFields) GetWebServerCertificate() string {
+	webServerCertificate, ok := fields["webServerCertificate"]
+	if !ok {
+		return ""
+	}
+	webServerCertificateStr, ok := webServerCertificate.(string)
+	if !ok {
+		return ""
+	}
+	return webServerCertificateStr
+}
+
 func (fields ServerEntryFields) GetConfigurationVersion() int {
 	configurationVersion, ok := fields["configurationVersion"]
 	if !ok {
 		return 0
 	}
-	configurationVersionInt, ok := configurationVersion.(int)
+	configurationVersionFloat, ok := configurationVersion.(float64)
 	if !ok {
 		return 0
 	}
-	return configurationVersionInt
+	return int(configurationVersionFloat)
 }
 
 func (fields ServerEntryFields) GetLocalSource() string {
@@ -157,8 +231,174 @@ func (fields ServerEntryFields) SetLocalSource(source string) {
 	fields["localSource"] = source
 }
 
+func (fields ServerEntryFields) GetLocalTimestamp() string {
+	localTimestamp, ok := fields["localTimestamp"]
+	if !ok {
+		return ""
+	}
+	localTimestampStr, ok := localTimestamp.(string)
+	if !ok {
+		return ""
+	}
+	return localTimestampStr
+}
+
 func (fields ServerEntryFields) SetLocalTimestamp(timestamp string) {
 	fields["localTimestamp"] = timestamp
+}
+
+func (fields ServerEntryFields) HasSignature() bool {
+	signature, ok := fields["signature"]
+	if !ok {
+		return false
+	}
+	signatureStr, ok := signature.(string)
+	if !ok {
+		return false
+	}
+	return signatureStr != ""
+}
+
+const signaturePublicKeyDigestSize = 8
+
+// AddSignature signs a server entry and attaches a new field containing the
+// signature. Any existing "signature" field will be replaced.
+//
+// The signature incudes a public key ID that is derived from a digest of the
+// public key value. This ID is intended for future use when multiple signing
+// keys may be deployed.
+func (fields ServerEntryFields) AddSignature(publicKey, privateKey string) error {
+
+	// Make a copy so that removing unsigned fields will have no side effects
+	copyFields := make(ServerEntryFields)
+	for k, v := range fields {
+		copyFields[k] = v
+	}
+
+	copyFields.RemoveUnsignedFields()
+
+	delete(copyFields, "signature")
+
+	marshaledFields, err := json.Marshal(copyFields)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	decodedPublicKey, err := base64.StdEncoding.DecodeString(publicKey)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	publicKeyDigest := sha256.Sum256(decodedPublicKey)
+	publicKeyID := publicKeyDigest[:signaturePublicKeyDigestSize]
+
+	decodedPrivateKey, err := base64.StdEncoding.DecodeString(privateKey)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	signature := ed25519.Sign(decodedPrivateKey, marshaledFields)
+
+	fields["signature"] = base64.StdEncoding.EncodeToString(
+		append(publicKeyID, signature...))
+
+	return nil
+}
+
+// VerifySignature verifies the signature set by AddSignature.
+//
+// VerifySignature must be called before using any server entry that is
+// imported from an untrusted source, such as client-to-client exchange.
+func (fields ServerEntryFields) VerifySignature(publicKey string) error {
+
+	// Make a copy so that removing unsigned fields will have no side effects
+	copyFields := make(ServerEntryFields)
+	for k, v := range fields {
+		copyFields[k] = v
+	}
+
+	signatureField, ok := copyFields["signature"]
+	if !ok {
+		return common.ContextError(errors.New("missing signature field"))
+	}
+
+	signatureFieldStr, ok := signatureField.(string)
+	if !ok {
+		return common.ContextError(errors.New("invalid signature field"))
+	}
+
+	decodedSignatureField, err := base64.StdEncoding.DecodeString(signatureFieldStr)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	if len(decodedSignatureField) < signaturePublicKeyDigestSize {
+		return common.ContextError(errors.New("invalid signature field length"))
+	}
+
+	publicKeyID := decodedSignatureField[:signaturePublicKeyDigestSize]
+	signature := decodedSignatureField[signaturePublicKeyDigestSize:]
+
+	if len(signature) != ed25519.SignatureSize {
+		return common.ContextError(errors.New("invalid signature length"))
+	}
+
+	decodedPublicKey, err := base64.StdEncoding.DecodeString(publicKey)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	publicKeyDigest := sha256.Sum256(decodedPublicKey)
+	expectedPublicKeyID := publicKeyDigest[:signaturePublicKeyDigestSize]
+
+	if bytes.Compare(expectedPublicKeyID, publicKeyID) != 0 {
+		return common.ContextError(errors.New("unexpected public key ID"))
+	}
+
+	copyFields.RemoveUnsignedFields()
+
+	delete(copyFields, "signature")
+
+	marshaledFields, err := json.Marshal(copyFields)
+	if err != nil {
+		return common.ContextError(err)
+	}
+
+	if !ed25519.Verify(decodedPublicKey, marshaledFields, signature) {
+		return common.ContextError(errors.New("invalid signature"))
+	}
+
+	return nil
+}
+
+// RemoveUnsignedFields prepares a server entry for signing or signature
+// verification by removing unsigned fields. The JSON marshalling of the
+// remaining fields is the data that is signed.
+func (fields ServerEntryFields) RemoveUnsignedFields() {
+	delete(fields, "localSource")
+	delete(fields, "localTimestamp")
+
+	// Only non-local, explicit tags are part of the signature
+	isLocalDerivedTag, _ := fields["isLocalDerivedTag"]
+	isLocalDerivedTagBool, ok := isLocalDerivedTag.(bool)
+	if ok && isLocalDerivedTagBool {
+		delete(fields, "tag")
+	}
+	delete(fields, "isLocalDerivedTag")
+}
+
+// NewServerEntrySignatureKeyPair creates an ed25519 key pair for use in
+// server entry signing and verification.
+func NewServerEntrySignatureKeyPair() (string, string, error) {
+
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return "", "", common.ContextError(err)
+	}
+
+	return base64.StdEncoding.EncodeToString(publicKey),
+		base64.StdEncoding.EncodeToString(privateKey),
+		nil
 }
 
 // GetCapability returns the server capability corresponding
@@ -263,6 +503,10 @@ func (serverEntry *ServerEntry) GetUntunneledWebRequestPorts() []string {
 	return ports
 }
 
+func (serverEntry *ServerEntry) HasSignature() bool {
+	return serverEntry.Signature != ""
+}
+
 // GenerateServerEntryTag creates a server entry tag value that is
 // cryptographically derived from the IP address and web server secret in a
 // way that is difficult to reverse the IP address value from the tag or
@@ -280,18 +524,42 @@ func GenerateServerEntryTag(ipAddress, webServerSecret string) string {
 // EncodeServerEntry returns a string containing the encoding of
 // a ServerEntry following Psiphon conventions.
 func EncodeServerEntry(serverEntry *ServerEntry) (string, error) {
-	serverEntryContents, err := json.Marshal(serverEntry)
-	if err != nil {
-		return "", common.ContextError(err)
-	}
-
-	return hex.EncodeToString([]byte(fmt.Sprintf(
-		"%s %s %s %s %s",
+	return encodeServerEntry(
 		serverEntry.IpAddress,
 		serverEntry.WebServerPort,
 		serverEntry.WebServerSecret,
 		serverEntry.WebServerCertificate,
-		serverEntryContents))), nil
+		serverEntry)
+}
+
+// EncodeServerEntryFields returns a string containing the encoding of
+// ServerEntryFields following Psiphon conventions.
+func EncodeServerEntryFields(serverEntryFields ServerEntryFields) (string, error) {
+	return encodeServerEntry(
+		serverEntryFields.GetIPAddress(),
+		serverEntryFields.GetWebServerPort(),
+		serverEntryFields.GetWebServerSecret(),
+		serverEntryFields.GetWebServerCertificate(),
+		serverEntryFields)
+}
+
+func encodeServerEntry(
+	IPAddress, webServerPort, webServerSecret, webServerCertificate string,
+	serverEntry interface{}) (string, error) {
+
+	serverEntryJSON, err := json.Marshal(serverEntry)
+	if err != nil {
+		return "", common.ContextError(err)
+	}
+
+	// Legacy clients expect the space-delimited fields.
+	return hex.EncodeToString([]byte(fmt.Sprintf(
+		"%s %s %s %s %s",
+		IPAddress,
+		webServerPort,
+		webServerSecret,
+		webServerCertificate,
+		serverEntryJSON))), nil
 }
 
 // DecodeServerEntry extracts a server entry from the encoding
@@ -324,6 +592,9 @@ func DecodeServerEntry(
 // DecodeServerEntryFields extracts an encoded server entry into a
 // ServerEntryFields type, much like DecodeServerEntry. Unrecognized fields
 // not in ServerEntry are retained in the ServerEntryFields.
+//
+// LocalSource/LocalTimestamp map entries are set only when the corresponding
+// inputs are non-blank.
 func DecodeServerEntryFields(
 	encodedServerEntry, timestamp, serverEntrySource string) (ServerEntryFields, error) {
 
@@ -334,8 +605,12 @@ func DecodeServerEntryFields(
 	}
 
 	// NOTE: if the source JSON happens to have values in these fields, they get clobbered.
-	serverEntryFields.SetLocalSource(serverEntrySource)
-	serverEntryFields.SetLocalTimestamp(timestamp)
+	if serverEntrySource != "" {
+		serverEntryFields.SetLocalSource(serverEntrySource)
+	}
+	if timestamp != "" {
+		serverEntryFields.SetLocalTimestamp(timestamp)
+	}
 
 	return serverEntryFields, nil
 }
@@ -364,15 +639,35 @@ func decodeServerEntry(
 }
 
 // ValidateServerEntryFields checks for malformed server entries.
-// Currently, it checks for a valid ipAddress. This is important since
-// the IP address is the key used to store/lookup the server entry.
-// TODO: validate more fields?
 func ValidateServerEntryFields(serverEntryFields ServerEntryFields) error {
+
+	// Checks for a valid ipAddress. This is important since the IP
+	// address is the key used to store/lookup the server entry.
+
 	ipAddress := serverEntryFields.GetIPAddress()
 	if net.ParseIP(ipAddress) == nil {
 		return common.ContextError(
 			fmt.Errorf("server entry has invalid ipAddress: %s", ipAddress))
 	}
+
+	// TODO: validate more fields?
+
+	// Ensure locally initialized fields have been set.
+
+	source := serverEntryFields.GetLocalSource()
+	if !common.Contains(
+		SupportedServerEntrySources, source) {
+		return common.ContextError(
+			fmt.Errorf("server entry has invalid source: %s", source))
+	}
+
+	timestamp := serverEntryFields.GetLocalTimestamp()
+	_, err := time.Parse(time.RFC3339, timestamp)
+	if err != nil {
+		return common.ContextError(
+			fmt.Errorf("server entry has invalid timestamp: %s", err))
+	}
+
 	return nil
 }
 
