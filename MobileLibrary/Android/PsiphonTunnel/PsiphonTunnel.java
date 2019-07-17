@@ -193,6 +193,7 @@ public class PsiphonTunnel implements PsiphonProvider {
     // Creates a temporary dummy VPN interface in order to prevent traffic leaking while performing
     // complete VPN and tunnel restart, for example, caused by host app settings change.
     // Note: same deadlock note as stop().
+    @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
     public synchronized void seamlessVpnRestart(VpnService.Builder vpnServiceBuilder) throws Exception {
         // Perform seamless VPN interface swap Psiphon VPN -> dummy VPN
         //
