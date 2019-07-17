@@ -194,11 +194,21 @@ public class PsiphonTunnel implements PsiphonProvider {
     // complete VPN and tunnel restart, for example, caused by host app settings change.
     // Note: same deadlock note as stop().
     public synchronized void seamlessVpnRestart(VpnService.Builder vpnServiceBuilder) throws Exception {
+        // Perform seamless VPN interface swap Psiphon VPN -> dummy VPN
+        //
+        // From https://developer.android.com/reference/android/net/VpnService.Builder.html#establish()
+        // "However, it is rare but not impossible to have two interfaces while performing a seamless handover.
+        // In this case, the old interface will be deactivated when the new one is created successfully. Both
+        // file descriptors are valid but now outgoing packets will be routed to the new interface. Therefore,
+        // after draining the old file descriptor, the application MUST close it and start using the new file
+        // descriptor."
         ParcelFileDescriptor dummyVpnFd = startDummyVpn(vpnServiceBuilder);
         try {
+            // Clean up and restart Psiphon VPN interface, which will also do the swap dummy VPN -> Psiphon VPN
             stopVpn();
             startVpn();
         } finally {
+            // Close dummy VPN file descriptor as per documentation.
             if (dummyVpnFd != null) {
                 try {
                     dummyVpnFd.close();
@@ -206,6 +216,7 @@ public class PsiphonTunnel implements PsiphonProvider {
                 }
             }
         }
+        // Restart the tunnel.
         restartPsiphon();
     }
 
