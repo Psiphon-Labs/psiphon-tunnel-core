@@ -1862,7 +1862,7 @@ func initializePruneServerEntriesTest(
 	oldTimeStamp := time.Now().Add(-30 * 24 * time.Hour).UTC().Format(time.RFC3339)
 
 	// Test Cases:
-	// - ExplicitTag: server entry includes a tag; vs. generate a derive tag
+	// - ExplicitTag: server entry includes a tag; vs. generate a derived tag
 	// - LocalTimestamp: server entry is sufficiently old to be pruned; vs. not
 	// - PsinetValid: server entry is reported valid by psinet; vs. deleted
 	// - ExpectPrune: prune outcome based on flags above

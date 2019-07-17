@@ -145,6 +145,12 @@ func datastoreUpdate(fn func(tx *datastoreTx) error) error {
 // the entry is skipped; no error is returned.
 func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExists bool) error {
 
+	// TODO: call serverEntryFields.VerifySignature. At this time, we do not do
+	// this as not all server entries have an individual signature field. All
+	// StoreServerEntry callers either call VerifySignature or obtain server
+	// entries from a trusted source (embedded in a signed client, or in a signed
+	// authenticated package).
+
 	// Server entries should already be validated before this point,
 	// so instead of skipping we fail with an error.
 	err := protocol.ValidateServerEntryFields(serverEntryFields)
@@ -368,7 +374,7 @@ func hasServerEntryFilterChanged(config *Config) (bool, error) {
 		bucket := tx.bucket(datastoreKeyValueBucket)
 		previousFilter := bucket.get(datastoreLastServerEntryFilterKey)
 
-		// When not found, previousFilter will be nil; ensure this
+		// When not found, previousFilter will be nil; ensures this
 		// results in "changed", even if currentFilter is len(0).
 		if previousFilter == nil ||
 			bytes.Compare(previousFilter, currentFilter) != 0 {
@@ -1629,6 +1635,61 @@ func (t *TacticsStorer) GetSpeedTestSamplesRecord(networkID string) ([]byte, err
 // GetTacticsStorer creates a TacticsStorer.
 func GetTacticsStorer() *TacticsStorer {
 	return &TacticsStorer{}
+}
+
+// GetAffinityServerEntryAndDialParameters fetches the current affinity server
+// entry value and any corresponding dial parameters for the specified network
+// ID. An error is returned when no affinity server is available. The
+// DialParameter output may be nil when a server entry is found but has no
+// dial parameters.
+func GetAffinityServerEntryAndDialParameters(
+	networkID string) (protocol.ServerEntryFields, *DialParameters, error) {
+
+	var serverEntryFields protocol.ServerEntryFields
+	var dialParams *DialParameters
+
+	err := datastoreView(func(tx *datastoreTx) error {
+
+		keyValues := tx.bucket(datastoreKeyValueBucket)
+		serverEntries := tx.bucket(datastoreServerEntriesBucket)
+		dialParameters := tx.bucket(datastoreDialParametersBucket)
+
+		affinityServerEntryID := keyValues.get(datastoreAffinityServerEntryIDKey)
+		if affinityServerEntryID == nil {
+			return common.ContextError(errors.New("no affinity server available"))
+		}
+
+		serverEntryRecord := serverEntries.get(affinityServerEntryID)
+		if serverEntryRecord == nil {
+			return common.ContextError(errors.New("affinity server entry not found"))
+		}
+
+		err := json.Unmarshal(
+			serverEntryRecord,
+			&serverEntryFields)
+		if err != nil {
+			return common.ContextError(err)
+		}
+
+		dialParamsKey := makeDialParametersKey(
+			[]byte(serverEntryFields.GetIPAddress()),
+			[]byte(networkID))
+
+		dialParamsRecord := dialParameters.get(dialParamsKey)
+		if dialParamsRecord != nil {
+			err := json.Unmarshal(dialParamsRecord, &dialParams)
+			if err != nil {
+				return common.ContextError(err)
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, nil, common.ContextError(err)
+	}
+
+	return serverEntryFields, dialParams, nil
 }
 
 func setBucketValue(bucket, key, value []byte) error {

@@ -21,32 +21,199 @@ package psinet
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
 
+func TestDatabase(t *testing.T) {
+
+	testDataDirName, err := ioutil.TempDir("", "psinet-test")
+	if err != nil {
+		t.Fatalf("TempDir failed: %s\n", err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
+	databaseJSON := `
+    {
+        "sponsors" : {
+            "SPONSOR-ID" : {
+                "id" : "SPONSOR-ID",
+                "home_pages" : {
+                    "CLIENT-REGION" : [{
+                        "region" : "CLIENT-REGION",
+                        "url" : "HOME-PAGE-URL?client_region=XX"
+                     }],
+                    "None" : [{
+                        "region" : "None",
+                        "url" : "DEFAULT-HOME-PAGE-URL?client_region=XX"
+                     }]
+                },
+                "mobile_home_pages": {
+                    "CLIENT-REGION" : [{
+                        "region" : "CLIENT-REGION",
+                        "url" : "MOBILE-HOME-PAGE-URL?client_region=XX"
+                     }],
+                    "None" : [{
+                        "region" : "None",
+                        "url" : "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=XX"
+                     }]
+                },
+                "https_request_regexes" : [{
+                    "regex" : "REGEX-VALUE",
+                    "replace" : "REPLACE-VALUE"
+                }]
+            }
+        },
+
+        "client_versions" : {
+            "CLIENT-PLATFORM" : [
+                {"version" : "1"},
+                {"version" : "2"}
+            ]
+        },
+
+        "default_sponsor_id" : "SPONSOR-ID",
+
+        "valid_server_entry_tags" : {
+            "SERVER-ENTRY-TAG" : true
+        },
+
+        "discovery_servers" : [
+            {"discovery_date_range" : ["1900-01-01T00:00:00Z", "2000-01-01T00:00:00Z"], "encoded_server_entry" : "0"},
+            {"discovery_date_range" : ["1900-01-01T00:00:00Z", "2000-01-01T00:00:00Z"], "encoded_server_entry" : "0"},
+            {"discovery_date_range" : ["1900-01-01T00:00:00Z", "2000-01-01T00:00:00Z"], "encoded_server_entry" : "0"},
+            {"discovery_date_range" : ["1900-01-01T00:00:00Z", "2000-01-01T00:00:00Z"], "encoded_server_entry" : "0"},
+            {"discovery_date_range" : ["2000-01-01T00:00:00Z", "2100-01-01T00:00:00Z"], "encoded_server_entry" : "1"},
+            {"discovery_date_range" : ["2000-01-01T00:00:00Z", "2100-01-01T00:00:00Z"], "encoded_server_entry" : "1"},
+            {"discovery_date_range" : ["2000-01-01T00:00:00Z", "2100-01-01T00:00:00Z"], "encoded_server_entry" : "1"},
+            {"discovery_date_range" : ["2000-01-01T00:00:00Z", "2100-01-01T00:00:00Z"], "encoded_server_entry" : "1"}
+        ]
+    }`
+
+	filename := filepath.Join(testDataDirName, "psinet.json")
+
+	err = ioutil.WriteFile(filename, []byte(databaseJSON), 0600)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %s", err)
+	}
+
+	db, err := NewDatabase(filename)
+	if err != nil {
+		t.Fatalf("NewDatabase failed: %s", err)
+	}
+
+	homePageTestCases := []struct {
+		sponsorID    string
+		clientRegion string
+		isMobile     bool
+		expectedURL  string
+	}{
+		{"SPONSOR-ID", "CLIENT-REGION", false, "HOME-PAGE-URL?client_region=CLIENT-REGION"},
+		{"SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", false, "DEFAULT-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION"},
+		{"SPONSOR-ID", "CLIENT-REGION", true, "MOBILE-HOME-PAGE-URL?client_region=CLIENT-REGION"},
+		{"SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", true, "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION"},
+		{"UNCONFIGURED-SPONSOR-ID", "CLIENT-REGION", false, "HOME-PAGE-URL?client_region=CLIENT-REGION"},
+		{"UNCONFIGURED-SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", false, "DEFAULT-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION"},
+		{"UNCONFIGURED-SPONSOR-ID", "CLIENT-REGION", true, "MOBILE-HOME-PAGE-URL?client_region=CLIENT-REGION"},
+		{"UNCONFIGURED-SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", true, "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION"},
+	}
+
+	for _, testCase := range homePageTestCases {
+		t.Run(fmt.Sprintf("%+v", testCase), func(t *testing.T) {
+			homepages := db.GetHomepages(testCase.sponsorID, testCase.clientRegion, testCase.isMobile)
+			if len(homepages) != 1 || homepages[0] != testCase.expectedURL {
+				t.Fatalf("unexpected home page: %+v", homepages)
+			}
+		})
+	}
+
+	versionTestCases := []struct {
+		currentClientVersion         string
+		clientPlatform               string
+		expectedUpgradeClientVersion string
+	}{
+		{"0", "CLIENT-PLATFORM", "2"},
+		{"1", "CLIENT-PLATFORM", "2"},
+		{"2", "CLIENT-PLATFORM", ""},
+		{"3", "CLIENT-PLATFORM", ""},
+		{"2", "UNCONFIGURED-CLIENT-PLATFORM", ""},
+	}
+
+	for _, testCase := range versionTestCases {
+		t.Run(fmt.Sprintf("%+v", testCase), func(t *testing.T) {
+			upgradeVersion := db.GetUpgradeClientVersion(testCase.currentClientVersion, testCase.clientPlatform)
+			if upgradeVersion != testCase.expectedUpgradeClientVersion {
+				t.Fatalf("unexpected upgrade version: %s", upgradeVersion)
+			}
+		})
+	}
+
+	httpsRegexTestCases := []struct {
+		sponsorID            string
+		expectedRegexValue   string
+		expectedReplaceValue string
+	}{
+		{"SPONSOR-ID", "REGEX-VALUE", "REPLACE-VALUE"},
+		{"UNCONFIGURED-SPONSOR-ID", "REGEX-VALUE", "REPLACE-VALUE"},
+	}
+
+	for _, testCase := range httpsRegexTestCases {
+		t.Run(fmt.Sprintf("%+v", testCase), func(t *testing.T) {
+			regexes := db.GetHttpsRequestRegexes(testCase.sponsorID)
+			var regexValue, replaceValue string
+			ok := false
+			if len(regexes) == 1 && len(regexes[0]) == 2 {
+				regexValue, ok = regexes[0]["regex"]
+				replaceValue, ok = regexes[0]["replace"]
+			}
+			if !ok || regexValue != testCase.expectedRegexValue || replaceValue != testCase.expectedReplaceValue {
+				t.Fatalf("unexpected regexes: %+v", regexes)
+			}
+		})
+	}
+
+	for i := 0; i < 1000; i++ {
+		encodedServerEntries := db.DiscoverServers(i)
+		if len(encodedServerEntries) != 1 || encodedServerEntries[0] != "1" {
+			t.Fatalf("unexpected discovery server list: %+v", encodedServerEntries)
+		}
+	}
+
+	if !db.IsValidServerEntryTag("SERVER-ENTRY-TAG") {
+		t.Fatalf("unexpected invalid server entry tag")
+	}
+
+	if db.IsValidServerEntryTag("INVALID-SERVER-ENTRY-TAG") {
+		t.Fatalf("unexpected valid server entry tag")
+	}
+}
+
 func TestDiscoveryBuckets(t *testing.T) {
 
-	checkBuckets := func(buckets [][]Server, expectedIDs [][]int) {
-		if len(buckets) != len(expectedIDs) {
+	checkBuckets := func(buckets [][]*DiscoveryServer, expectedServerEntries [][]int) {
+		if len(buckets) != len(expectedServerEntries) {
 			t.Errorf(
 				"unexpected bucket count: got %d expected %d",
-				len(buckets), len(expectedIDs))
+				len(buckets), len(expectedServerEntries))
 			return
 		}
 		for i := 0; i < len(buckets); i++ {
-			if len(buckets[i]) != len(expectedIDs[i]) {
+			if len(buckets[i]) != len(expectedServerEntries[i]) {
 				t.Errorf(
 					"unexpected bucket %d size: got %d expected %d",
-					i, len(buckets[i]), len(expectedIDs[i]))
+					i, len(buckets[i]), len(expectedServerEntries[i]))
 				return
 			}
 			for j := 0; j < len(buckets[i]); j++ {
-				expectedID := fmt.Sprintf("%d", expectedIDs[i][j])
-				if buckets[i][j].Id != expectedID {
+				expectedServerEntry := strconv.Itoa(expectedServerEntries[i][j])
+				if buckets[i][j].EncodedServerEntry != expectedServerEntry {
 					t.Errorf(
 						"unexpected bucket %d item %d: got %s expected %s",
-						i, j, buckets[i][j].Id, expectedID)
+						i, j, buckets[i][j].EncodedServerEntry, expectedServerEntry)
 					return
 				}
 			}
@@ -56,9 +223,9 @@ func TestDiscoveryBuckets(t *testing.T) {
 	// Partition test cases from:
 	// http://stackoverflow.com/questions/2659900/python-slicing-a-list-into-n-nearly-equal-length-partitions
 
-	servers := make([]Server, 0)
+	servers := make([]*DiscoveryServer, 0)
 	for i := 0; i < 105; i++ {
-		servers = append(servers, Server{Id: fmt.Sprintf("%d", i)})
+		servers = append(servers, &DiscoveryServer{EncodedServerEntry: strconv.Itoa(i)})
 	}
 
 	t.Run("5 servers, 5 buckets", func(t *testing.T) {
@@ -109,7 +276,7 @@ func TestDiscoveryBuckets(t *testing.T) {
 
 		for i := 0; i < 1000; i++ {
 			for _, server := range selectServers(servers, i*int(time.Hour/time.Second), discoveryValue) {
-				discoveredServers[server.Id] = true
+				discoveredServers[server.EncodedServerEntry] = true
 			}
 		}
 
@@ -125,8 +292,8 @@ func TestDiscoveryBuckets(t *testing.T) {
 		}
 
 		for _, bucketServer := range buckets[0] {
-			if _, ok := discoveredServers[bucketServer.Id]; !ok {
-				t.Errorf("unexpected missing discovery server: %s", bucketServer.Id)
+			if _, ok := discoveredServers[bucketServer.EncodedServerEntry]; !ok {
+				t.Errorf("unexpected missing discovery server: %s", bucketServer.EncodedServerEntry)
 				return
 			}
 		}
