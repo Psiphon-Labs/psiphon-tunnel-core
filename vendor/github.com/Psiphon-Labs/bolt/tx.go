@@ -250,6 +250,15 @@ func (tx *Tx) rollback() {
 	if tx.db == nil {
 		return
 	}
+
+	// [Psiphon]
+	// https://github.com/etcd-io/bbolt/commit/b3e98dcb3752e0a8d5db6503b80fe19e462fdb73
+	// If the transaction failed due to mmap, rollback is futile.
+	if tx.db.mmapErr != nil {
+		tx.close()
+		return
+	}
+
 	if tx.writable {
 		tx.db.freelist.rollback(tx.meta.txid)
 		tx.db.freelist.reload(tx.db.page(tx.db.meta().freelist))

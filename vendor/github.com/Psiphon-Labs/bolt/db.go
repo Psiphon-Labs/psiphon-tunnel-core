@@ -110,6 +110,10 @@ type DB struct {
 	freelist *freelist
 	stats    Stats
 
+	// [Psiphon]
+	// https://github.com/etcd-io/bbolt/commit/b3e98dcb3752e0a8d5db6503b80fe19e462fdb73
+	mmapErr error // set on mmap failure; subsequently returned by all methods
+
 	pagePool sync.Pool
 
 	batchMu sync.Mutex
@@ -275,7 +279,13 @@ func (db *DB) mmap(minsz int) error {
 
 	// Memory-map the data file as a byte slice.
 	if err := mmap(db, size); err != nil {
-		return err
+
+		// [Psiphon]
+		// https://github.com/etcd-io/bbolt/commit/b3e98dcb3752e0a8d5db6503b80fe19e462fdb73
+		// If mmap fails, we cannot safely continue. Mark the db as unusable,
+		// causing all future calls to return the mmap error.
+		db.mmapErr = MmapError(err.Error())
+		return db.mmapErr
 	}
 
 	// Save references to the meta pages.
@@ -395,8 +405,11 @@ func (db *DB) Close() error {
 	db.metalock.Lock()
 	defer db.metalock.Unlock()
 
-	db.mmaplock.RLock()
-	defer db.mmaplock.RUnlock()
+	// [Psiphon]
+	// https://github.com/etcd-io/bbolt/commit/e06ec0a754bc30c2e17ad871962e71635bf94d45
+	// "Fix Close() to wait for view transactions by getting a full lock on mmaplock"
+	db.mmaplock.Lock()
+	defer db.mmaplock.Unlock()
 
 	return db.close()
 }
@@ -481,6 +494,15 @@ func (db *DB) beginTx() (*Tx, error) {
 		return nil, ErrDatabaseNotOpen
 	}
 
+	// [Psiphon]
+	// https://github.com/etcd-io/bbolt/commit/b3e98dcb3752e0a8d5db6503b80fe19e462fdb73
+	// Return mmap error if a previous mmap failed.
+	if db.mmapErr != nil {
+		db.mmaplock.RUnlock()
+		db.metalock.Unlock()
+		return nil, db.mmapErr
+	}
+
 	// Create a transaction associated with the database.
 	t := &Tx{}
 	t.init(db)
@@ -520,6 +542,14 @@ func (db *DB) beginRWTx() (*Tx, error) {
 	if !db.opened {
 		db.rwlock.Unlock()
 		return nil, ErrDatabaseNotOpen
+	}
+
+	// [Psiphon]
+	// https://github.com/etcd-io/bbolt/commit/b3e98dcb3752e0a8d5db6503b80fe19e462fdb73
+	// Return mmap error if a previous mmap failed.
+	if db.mmapErr != nil {
+		db.rwlock.Unlock()
+		return nil, db.mmapErr
 	}
 
 	// Create a transaction associated with the database.
