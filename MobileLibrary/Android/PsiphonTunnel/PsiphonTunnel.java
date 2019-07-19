@@ -22,17 +22,16 @@ package ca.psiphon;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.net.ConnectivityManager;
-import android.net.wifi.WifiManager;
-import android.net.wifi.WifiInfo;
 import android.net.LinkProperties;
 import android.net.NetworkInfo;
 import android.net.VpnService;
+import android.net.wifi.WifiInfo;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.telephony.TelephonyManager;
 import android.util.Base64;
 
-import org.apache.http.conn.util.InetAddressUtils;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -44,6 +43,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
@@ -964,8 +964,8 @@ public class PsiphonTunnel implements PsiphonProvider {
 
         for (NetworkInterface netInterface : netInterfaces) {
             for (InetAddress inetAddress : Collections.list(netInterface.getInetAddresses())) {
-                String ipAddress = inetAddress.getHostAddress();
-                if (InetAddressUtils.isIPv4Address(ipAddress)) {
+                if (inetAddress instanceof Inet4Address) {
+                    String ipAddress = inetAddress.getHostAddress();
                     if (ipAddress.startsWith("10.")) {
                         candidates.remove("10");
                     }
