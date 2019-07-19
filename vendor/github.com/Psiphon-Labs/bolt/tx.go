@@ -388,18 +388,12 @@ func (tx *Tx) Check() <-chan error {
 }
 
 // [Psiphon]
-// SynchronousCheck performs the Check function in the current goroutine and recovers
-// from any panics, such as the panic in Cursor.search().
-func (tx *Tx) SynchronousCheck() (reterr error) {
-	defer func() {
-		if e := recover(); e != nil {
-			reterr = fmt.Errorf("SynchronousCheck panic: %s", e)
-		}
-	}()
+// SynchronousCheck performs the Check function in the current goroutine,
+// allowing the caller to recover from any panics or faults.
+func (tx *Tx) SynchronousCheck() error {
 	ch := make(chan error)
 	tx.check(ch)
-	reterr = <-ch
-	return
+	return <-ch
 }
 
 func (tx *Tx) check(ch chan error) {
