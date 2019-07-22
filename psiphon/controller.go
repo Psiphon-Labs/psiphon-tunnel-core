@@ -292,7 +292,7 @@ func (controller *Controller) TerminateNextActiveTunnel() {
 	tunnel := controller.getNextActiveTunnel()
 	if tunnel != nil {
 		controller.SignalTunnelFailure(tunnel)
-		NoticeInfo("terminated tunnel: %s", tunnel.dialParams.ServerEntry.IpAddress)
+		NoticeInfo("terminated tunnel: %s", tunnel.dialParams.ServerEntry.GetDiagnosticID())
 	}
 }
 
@@ -643,7 +643,7 @@ loop:
 			}
 
 		case failedTunnel := <-controller.failedTunnels:
-			NoticeAlert("tunnel failed: %s", failedTunnel.dialParams.ServerEntry.IpAddress)
+			NoticeAlert("tunnel failed: %s", failedTunnel.dialParams.ServerEntry.GetDiagnosticID())
 			controller.terminateTunnel(failedTunnel)
 
 			// Clear the reference to this tunnel before calling startEstablishing,
@@ -699,7 +699,7 @@ loop:
 
 				if err != nil {
 					NoticeAlert("failed to activate %s: %s",
-						connectedTunnel.dialParams.ServerEntry.IpAddress, err)
+						connectedTunnel.dialParams.ServerEntry.GetDiagnosticID(), err)
 					discardTunnel = true
 				} else {
 					// It's unlikely that registerTunnel will fail, since only this goroutine
@@ -707,7 +707,7 @@ loop:
 					// expected.
 					if !controller.registerTunnel(connectedTunnel) {
 						NoticeAlert("failed to register %s: %s",
-							connectedTunnel.dialParams.ServerEntry.IpAddress, err)
+							connectedTunnel.dialParams.ServerEntry.GetDiagnosticID(), err)
 						discardTunnel = true
 					}
 				}
@@ -732,7 +732,7 @@ loop:
 			}
 
 			NoticeActiveTunnel(
-				connectedTunnel.dialParams.ServerEntry.IpAddress,
+				connectedTunnel.dialParams.ServerEntry.GetDiagnosticID(),
 				connectedTunnel.dialParams.TunnelProtocol,
 				connectedTunnel.dialParams.ServerEntry.SupportsSSHAPIRequests())
 
@@ -843,7 +843,7 @@ func (controller *Controller) SignalTunnelFailure(tunnel *Tunnel) {
 
 // discardTunnel disposes of a successful connection that is no longer required.
 func (controller *Controller) discardTunnel(tunnel *Tunnel) {
-	NoticeInfo("discard tunnel: %s", tunnel.dialParams.ServerEntry.IpAddress)
+	NoticeInfo("discard tunnel: %s", tunnel.dialParams.ServerEntry.GetDiagnosticID())
 	// TODO: not calling PromoteServerEntry, since that would rank the
 	// discarded tunnel before fully active tunnels. Can a discarded tunnel
 	// be promoted (since it connects), but with lower rank than all active
@@ -866,7 +866,7 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 		if activeTunnel.dialParams.ServerEntry.IpAddress ==
 			tunnel.dialParams.ServerEntry.IpAddress {
 
-			NoticeAlert("duplicate tunnel: %s", tunnel.dialParams.ServerEntry.IpAddress)
+			NoticeAlert("duplicate tunnel: %s", tunnel.dialParams.ServerEntry.GetDiagnosticID())
 			return false
 		}
 	}
@@ -1901,7 +1901,7 @@ loop:
 			// Silently skip the candidate in this case. Otherwise, emit error.
 			if err != nil {
 				NoticeInfo("failed to select protocol for %s: %s",
-					candidateServerEntry.serverEntry.IpAddress, err)
+					candidateServerEntry.serverEntry.GetDiagnosticID(), err)
 			}
 
 			// Unblock other candidates immediately when server affinity
@@ -2008,7 +2008,7 @@ loop:
 			}
 
 			NoticeInfo("failed to connect to %s: %s",
-				candidateServerEntry.serverEntry.IpAddress, err)
+				candidateServerEntry.serverEntry.GetDiagnosticID(), err)
 
 			continue
 		}

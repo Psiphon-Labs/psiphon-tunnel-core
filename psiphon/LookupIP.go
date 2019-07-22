@@ -62,7 +62,9 @@ func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, e
 			return ips, err
 		}
 
-		NoticeAlert("retry resolve host %s: %s", host, err)
+		if GetEmitNetworkParameters() {
+			NoticeAlert("retry resolve host %s: %s", host, err)
+		}
 
 		return bindLookupIP(ctx, host, dnsServer, config)
 	}
@@ -70,6 +72,11 @@ func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, e
 	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return nil, common.ContextError(err)
+	}
+
+	// Remove domain names from "net" error messages.
+	if !GetEmitNetworkParameters() {
+		err = RedactNetError(err)
 	}
 
 	ips := make([]net.IP, len(addrs))
@@ -116,7 +123,7 @@ func bindLookupIP(
 		copy(ipv6[:], ipAddr.To16())
 		domain = syscall.AF_INET6
 	} else {
-		return nil, common.ContextError(fmt.Errorf("invalid IP address for dns server: %s", ipAddr.String()))
+		return nil, common.ContextError(errors.New("invalid IP address for DNS server"))
 	}
 
 	socketFd, err := syscall.Socket(domain, syscall.SOCK_DGRAM, 0)
@@ -127,7 +134,7 @@ func bindLookupIP(
 	_, err = config.DeviceBinder.BindToDevice(socketFd)
 	if err != nil {
 		syscall.Close(socketFd)
-		return nil, common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))
+		return nil, common.ContextError(fmt.Errorf("BindToDevice failed with %s", err))
 	}
 
 	// Connect socket to the server's IP address

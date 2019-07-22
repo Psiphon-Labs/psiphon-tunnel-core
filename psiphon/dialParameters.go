@@ -558,6 +558,7 @@ func MakeDialParameters(
 	// Initialize Dial/MeekConfigs to be passed to the corresponding dialers.
 
 	dialParams.dialConfig = &DialConfig{
+		DiagnosticID:                  serverEntry.GetDiagnosticID(),
 		UpstreamProxyURL:              config.UpstreamProxyURL,
 		CustomHeaders:                 dialCustomHeaders,
 		DeviceBinder:                  config.deviceBinder,
@@ -574,6 +575,7 @@ func MakeDialParameters(
 	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
 
 		dialParams.meekConfig = &MeekConfig{
+			DiagnosticID:                  serverEntry.GetDiagnosticID(),
 			ClientParameters:              config.clientParameters,
 			DialAddress:                   dialParams.MeekDialAddress,
 			UseQUIC:                       protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol),
@@ -623,7 +625,7 @@ func (dialParams *DialParameters) Succeeded() {
 		return
 	}
 
-	NoticeInfo("Set dial parameters for %s", dialParams.ServerEntry.IpAddress)
+	NoticeInfo("Set dial parameters for %s", dialParams.ServerEntry.GetDiagnosticID())
 	err := SetDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID, dialParams)
 	if err != nil {
 		NoticeAlert("SetDialParameters failed: %s", err)
@@ -648,7 +650,7 @@ func (dialParams *DialParameters) Failed(config *Config) {
 		!config.GetClientParametersSnapshot().WeightedCoinFlip(
 			parameters.ReplayRetainFailedProbability) {
 
-		NoticeInfo("Delete dial parameters for %s", dialParams.ServerEntry.IpAddress)
+		NoticeInfo("Delete dial parameters for %s", dialParams.ServerEntry.GetDiagnosticID())
 		err := DeleteDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID)
 		if err != nil {
 			NoticeAlert("DeleteDialParameters failed: %s", err)

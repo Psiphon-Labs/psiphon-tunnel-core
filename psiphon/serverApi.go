@@ -32,7 +32,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -616,13 +615,6 @@ func RecordRemoteServerListStat(
 		config, datastorePersistentStatTypeRemoteServerList, remoteServerListStatJson)
 }
 
-// failedTunnelErrStripAddressRegex strips IPv4 address [and optional port]
-// strings from "net" package I/O error messages. This is to avoid
-// inadvertently recording direct server IPs via error message logs, and to
-// reduce the error space due to superfluous source port data.
-var failedTunnelErrStripAddressRegex = regexp.MustCompile(
-	`(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}(:(6553[0-5]|655[0-2][0-9]\d|65[0-4](\d){2}|6[0-4](\d){3}|[1-5](\d){4}|[1-9](\d){0,3}))?`)
-
 // RecordFailedTunnelStat records metrics for a failed tunnel dial, including
 // dial parameters and error condition (tunnelErr).
 //
@@ -647,7 +639,13 @@ func RecordFailedTunnelStat(
 	params["server_entry_tag"] = dialParams.ServerEntry.Tag
 	params["last_connected"] = lastConnected
 	params["client_failed_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
-	params["tunnel_error"] = failedTunnelErrStripAddressRegex.ReplaceAllString(tunnelErr.Error(), "<address>")
+
+	// Ensure direct server IPs are not exposed in logs. The "net" package, and
+	// possibly other 3rd party packages, will include destination addresses in
+	// I/O error messages.
+	tunnelError := StripIPAddressesString(tunnelErr.Error())
+
+	params["tunnel_error"] = tunnelError
 
 	failedTunnelStatJson, err := json.Marshal(params)
 	if err != nil {

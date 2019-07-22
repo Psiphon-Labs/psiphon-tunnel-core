@@ -80,7 +80,7 @@ func TestMain(m *testing.M) {
 	}
 	defer os.RemoveAll(testDataDirName)
 
-	psiphon.SetEmitDiagnosticNotices(true)
+	psiphon.SetEmitDiagnosticNotices(true, true)
 
 	mockWebServerURL, mockWebServerExpectedResponse = runMockWebServer()
 

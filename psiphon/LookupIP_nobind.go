@@ -41,6 +41,11 @@ func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, e
 		return nil, common.ContextError(err)
 	}
 
+	// Remove domain names from "net" error messages.
+	if !GetEmitNetworkParameters() {
+		err = RedactNetError(err)
+	}
+
 	ips := make([]net.IP, len(addrs))
 	for i, addr := range addrs {
 		ips[i] = addr.IP

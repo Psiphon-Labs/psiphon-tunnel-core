@@ -192,10 +192,6 @@ func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExi
 		update := !exists || replaceIfExists || newer
 
 		if !update {
-			// Disabling this notice, for now, as it generates too much noise
-			// in diagnostics with clients that always submit embedded servers
-			// to the core on each run.
-			// NoticeInfo("ignored update for server %s", serverEntry.IpAddress)
 			return nil
 		}
 
@@ -242,7 +238,7 @@ func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExi
 			return common.ContextError(err)
 		}
 
-		NoticeInfo("updated server %s", serverEntryFields.GetIPAddress())
+		NoticeInfo("updated server %s", serverEntryFields.GetDiagnosticID())
 
 		return nil
 	})
@@ -506,7 +502,7 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 		targetServerEntry:            serverEntry,
 	}
 
-	NoticeInfo("using TargetServerEntry: %s", serverEntry.IpAddress)
+	NoticeInfo("using TargetServerEntry: %s", serverEntry.GetDiagnosticID())
 
 	return false, iterator, nil
 }

@@ -174,7 +174,7 @@ func (tunnel *Tunnel) Activate(
 	if !tunnel.config.DisableApi {
 		NoticeInfo(
 			"starting server context for %s",
-			tunnel.dialParams.ServerEntry.IpAddress)
+			tunnel.dialParams.ServerEntry.GetDiagnosticID())
 
 		// Call NewServerContext in a goroutine, as it blocks on a network operation,
 		// the handshake request, and would block shutdown. If the shutdown signal is
@@ -224,7 +224,7 @@ func (tunnel *Tunnel) Activate(
 		if result.err != nil {
 			return common.ContextError(
 				fmt.Errorf("error starting server context for %s: %s",
-					tunnel.dialParams.ServerEntry.IpAddress, result.err))
+					tunnel.dialParams.ServerEntry.GetDiagnosticID(), result.err))
 		}
 
 		serverContext = result.serverContext
@@ -829,7 +829,7 @@ func dialTunnel(
 				// Skip notice when cancelling.
 				if baseCtx.Err() == nil {
 					NoticeLivenessTest(
-						dialParams.ServerEntry.IpAddress, metrics, err == nil)
+						dialParams.ServerEntry.GetDiagnosticID(), metrics, err == nil)
 				}
 			}
 		}
@@ -1101,14 +1101,14 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 			if lastTotalBytesTransferedTime.Add(noticePeriod).Before(monotime.Now()) {
 				NoticeTotalBytesTransferred(
-					tunnel.dialParams.ServerEntry.IpAddress, totalSent, totalReceived)
+					tunnel.dialParams.ServerEntry.GetDiagnosticID(), totalSent, totalReceived)
 				lastTotalBytesTransferedTime = monotime.Now()
 			}
 
 			// Only emit the frequent BytesTransferred notice when tunnel is not idle.
 			if tunnel.config.EmitBytesTransferred && (sent > 0 || received > 0) {
 				NoticeBytesTransferred(
-					tunnel.dialParams.ServerEntry.IpAddress, sent, received)
+					tunnel.dialParams.ServerEntry.GetDiagnosticID(), sent, received)
 			}
 
 			// Once the tunnel has connected, activated, and successfully
@@ -1147,7 +1147,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			// Note: no mutex on portForwardFailureTotal; only referenced here
 			tunnel.totalPortForwardFailures++
 			NoticeInfo("port forward failures for %s: %d",
-				tunnel.dialParams.ServerEntry.IpAddress,
+				tunnel.dialParams.ServerEntry.GetDiagnosticID(),
 				tunnel.totalPortForwardFailures)
 
 			// If the underlying Conn has closed (meek and other plugin protocols may close
@@ -1202,7 +1202,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 	// Always emit a final NoticeTotalBytesTransferred
 	NoticeTotalBytesTransferred(
-		tunnel.dialParams.ServerEntry.IpAddress, totalSent, totalReceived)
+		tunnel.dialParams.ServerEntry.GetDiagnosticID(), totalSent, totalReceived)
 
 	if err == nil {
 		NoticeInfo("shutdown operate tunnel")
@@ -1216,7 +1216,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 	} else {
 		NoticeAlert("operate tunnel error for %s: %s",
-			tunnel.dialParams.ServerEntry.IpAddress, err)
+			tunnel.dialParams.ServerEntry.GetDiagnosticID(), err)
 		tunnelOwner.SignalTunnelFailure(tunnel)
 	}
 }
@@ -1312,7 +1312,7 @@ func sendStats(tunnel *Tunnel) bool {
 	err := tunnel.serverContext.DoStatusRequest(tunnel)
 	if err != nil {
 		NoticeAlert("DoStatusRequest failed for %s: %s",
-			tunnel.dialParams.ServerEntry.IpAddress, err)
+			tunnel.dialParams.ServerEntry.GetDiagnosticID(), err)
 	}
 
 	return err == nil

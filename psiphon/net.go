@@ -45,6 +45,9 @@ const DNS_PORT = 53
 // of a Psiphon dialer (TCPDial, UDPDial, MeekDial, etc.)
 type DialConfig struct {
 
+	// DiagnosticID is the server ID to record in any diagnostics notices.
+	DiagnosticID string
+
 	// UpstreamProxyURL specifies a proxy to connect through.
 	// E.g., "http://proxyhost:8080"
 	//       "socks5://user:password@proxyhost:1080"
