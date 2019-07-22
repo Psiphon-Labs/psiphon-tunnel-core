@@ -427,7 +427,7 @@ func NoticeAvailableEgressRegions(regions []string) {
 func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 
 	args := []interface{}{
-		"serverID", dialParams.ServerEntry.GetDiagnosticID(),
+		"diagnosticID", dialParams.ServerEntry.GetDiagnosticID(),
 		"region", dialParams.ServerEntry.Region,
 		"protocol", dialParams.TunnelProtocol,
 		"isReplay", dialParams.IsReplay,
@@ -531,10 +531,10 @@ func NoticeRequestedTactics(dialParams *DialParameters) {
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
-func NoticeActiveTunnel(serverID, protocol string, isTCS bool) {
+func NoticeActiveTunnel(diagnosticID, protocol string, isTCS bool) {
 	singletonNoticeLogger.outputNotice(
 		"ActiveTunnel", noticeIsDiagnostic,
-		"serverID", serverID,
+		"diagnosticID", diagnosticID,
 		"protocol", protocol,
 		"isTCS", isTCS)
 }
@@ -672,20 +672,20 @@ func NoticeClientUpgradeDownloaded(filename string) {
 // notice: the user app has requested this notice with EmitBytesTransferred
 // for functionality such as traffic display; and this frequent notice is not
 // intended to be included with feedback.
-func NoticeBytesTransferred(serverID string, sent, received int64) {
+func NoticeBytesTransferred(diagnosticID string, sent, received int64) {
 	singletonNoticeLogger.outputNotice(
 		"BytesTransferred", 0,
-		"serverID", serverID,
+		"diagnosticID", diagnosticID,
 		"sent", sent,
 		"received", received)
 }
 
 // NoticeTotalBytesTransferred reports how many tunneled bytes have been
 // transferred in total up to this point. This is a diagnostic notice.
-func NoticeTotalBytesTransferred(serverID string, sent, received int64) {
+func NoticeTotalBytesTransferred(diagnosticID string, sent, received int64) {
 	singletonNoticeLogger.outputNotice(
 		"TotalBytesTransferred", noticeIsDiagnostic,
-		"serverID", serverID,
+		"diagnosticID", diagnosticID,
 		"sent", sent,
 		"received", received)
 }
@@ -788,10 +788,10 @@ func NoticeNetworkID(networkID string) {
 		"NetworkID", 0, "ID", networkID)
 }
 
-func NoticeLivenessTest(serverID string, metrics *livenessTestMetrics, success bool) {
+func NoticeLivenessTest(diagnosticID string, metrics *livenessTestMetrics, success bool) {
 	singletonNoticeLogger.outputNotice(
 		"LivenessTest", noticeIsDiagnostic,
-		"serverID", serverID,
+		"diagnosticID", diagnosticID,
 		"metrics", metrics,
 		"success", success)
 }
@@ -810,10 +810,10 @@ func NoticeEstablishTunnelTimeout(timeout time.Duration) {
 		"timeout", timeout)
 }
 
-func NoticeFragmentor(serverID string, message string) {
+func NoticeFragmentor(diagnosticID string, message string) {
 	singletonNoticeLogger.outputNotice(
 		"Fragmentor", noticeIsDiagnostic,
-		"serverID", serverID,
+		"diagnosticID", diagnosticID,
 		"message", message)
 }
 
