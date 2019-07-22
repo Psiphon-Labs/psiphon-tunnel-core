@@ -297,7 +297,7 @@ func (server *TunnelServer) GetClientHandshaked(
 	return server.sshServer.getClientHandshaked(sessionID)
 }
 
-// UpdateClientAPIParameters updates the recorded handhake API parameters for
+// UpdateClientAPIParameters updates the recorded handshake API parameters for
 // the client corresponding to sessionID.
 func (server *TunnelServer) UpdateClientAPIParameters(
 	sessionID string,
@@ -431,7 +431,7 @@ func (sshServer *sshServer) runListener(
 	handleClient := func(clientTunnelProtocol string, clientConn net.Conn) {
 
 		// Note: establish tunnel limiter cannot simply stop TCP
-		// listeners in all cases (e.g., meek) since SSH tunnel can
+		// listeners in all cases (e.g., meek) since SSH tunnels can
 		// span multiple TCP connections.
 
 		if !sshServer.getEstablishTunnels() {
