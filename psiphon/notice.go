@@ -727,7 +727,7 @@ func NoticeExiting() {
 // NoticeRemoteServerListResourceDownloadedBytes reports remote server list download progress.
 func NoticeRemoteServerListResourceDownloadedBytes(url string, bytes int64) {
 	if !GetEmitNetworkParameters() {
-		url = "<url>"
+		url = "[redacted]"
 	}
 	singletonNoticeLogger.outputNotice(
 		"RemoteServerListResourceDownloadedBytes", noticeIsDiagnostic,
@@ -739,7 +739,7 @@ func NoticeRemoteServerListResourceDownloadedBytes(url string, bytes int64) {
 // completed successfully.
 func NoticeRemoteServerListResourceDownloaded(url string) {
 	if !GetEmitNetworkParameters() {
-		url = "<url>"
+		url = "[redacted]"
 	}
 	singletonNoticeLogger.outputNotice(
 		"RemoteServerListResourceDownloaded", noticeIsDiagnostic,

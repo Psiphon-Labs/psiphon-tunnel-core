@@ -70,13 +70,14 @@ func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, e
 	}
 
 	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return nil, common.ContextError(err)
-	}
 
 	// Remove domain names from "net" error messages.
-	if !GetEmitNetworkParameters() {
+	if err != nil && !GetEmitNetworkParameters() {
 		err = RedactNetError(err)
+	}
+
+	if err != nil {
+		return nil, common.ContextError(err)
 	}
 
 	ips := make([]net.IP, len(addrs))

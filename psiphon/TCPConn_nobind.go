@@ -41,7 +41,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 
 	// Remove domain names from "net" error messages.
-	if !GetEmitNetworkParameters() {
+	if err != nil && !GetEmitNetworkParameters() {
 		err = RedactNetError(err)
 	}
 

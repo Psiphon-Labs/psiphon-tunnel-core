@@ -1272,7 +1272,7 @@ func (n *loggingNetworkIDGetter) GetNetworkID() string {
 	}
 	if len(logNetworkID)+1 < len(networkID) {
 		// Indicate when additional network info was present after the first "-".
-		logNetworkID += "+<network info>"
+		logNetworkID += "+[redacted]"
 	}
 	NoticeNetworkID(logNetworkID)
 

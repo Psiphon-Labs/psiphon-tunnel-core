@@ -117,7 +117,7 @@ var stripIPv4AddressRegex = regexp.MustCompile(
 	`(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}(:(6553[0-5]|655[0-2][0-9]\d|65[0-4](\d){2}|6[0-4](\d){3}|[1-5](\d){4}|[1-9](\d){0,3}))?`)
 
 // StripIPAddresses returns a copy of the input with all IP addresses [and
-// optional ports] replaced  by "<address>". This is intended to be used to
+// optional ports] replaced  by "[address]". This is intended to be used to
 // strip addresses from "net" package I/O error messages and otherwise avoid
 // inadvertently recording direct server IPs via error message logs; and, in
 // metrics, to reduce the error space due to superfluous source port data.
@@ -125,13 +125,13 @@ var stripIPv4AddressRegex = regexp.MustCompile(
 // Limitation: only strips IPv4 addresses.
 func StripIPAddresses(b []byte) []byte {
 	// TODO: IPv6 support
-	return stripIPv4AddressRegex.ReplaceAll(b, []byte("<address>"))
+	return stripIPv4AddressRegex.ReplaceAll(b, []byte("[redacted]"))
 }
 
 // StripIPAddressesString is StripIPAddresses for strings.
 func StripIPAddressesString(s string) string {
 	// TODO: IPv6 support
-	return stripIPv4AddressRegex.ReplaceAllString(s, "<address>")
+	return stripIPv4AddressRegex.ReplaceAllString(s, "[redacted]")
 }
 
 // RedactNetError removes network address information from a "net" package
@@ -155,12 +155,12 @@ func RedactNetError(err error) error {
 	}
 
 	errstr := err.Error()
-	index := strings.Index(errstr, ":")
+	index := strings.Index(errstr, ": ")
 	if index == -1 {
 		return err
 	}
 
-	return errors.New(errstr[index:])
+	return errors.New("[redacted]" + errstr[index:])
 }
 
 // SyncFileWriter wraps a file and exposes an io.Writer. At predefined

@@ -30,6 +30,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -530,6 +531,13 @@ func ResumeDownload(
 		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
 	}
 	if err != nil {
+
+		// Redact URL from "net/http" error message.
+		if !GetEmitNetworkParameters() {
+			errStr := err.Error()
+			err = errors.New(strings.ReplaceAll(errStr, downloadURL, "[redacted]"))
+		}
+
 		return 0, "", common.ContextError(err)
 	}
 	defer response.Body.Close()
