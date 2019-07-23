@@ -78,9 +78,9 @@ func SetEmitDiagnosticNotices(
 	}
 }
 
-// GetEmitDiagnoticNotices returns the current state
+// GetEmitDiagnosticNotices returns the current state
 // of emitting diagnostic notices.
-func GetEmitDiagnoticNotices() bool {
+func GetEmitDiagnosticNotices() bool {
 	return atomic.LoadInt32(&singletonNoticeLogger.emitDiagnostics) == 1
 }
 
@@ -206,7 +206,7 @@ const (
 // outputNotice encodes a notice in JSON and writes it to the output writer.
 func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args ...interface{}) {
 
-	if (noticeFlags&noticeIsDiagnostic != 0) && !GetEmitDiagnoticNotices() {
+	if (noticeFlags&noticeIsDiagnostic != 0) && !GetEmitDiagnosticNotices() {
 		return
 	}
 
