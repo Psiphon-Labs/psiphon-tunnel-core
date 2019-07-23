@@ -85,7 +85,7 @@ func runMemoryTest(t *testing.T, testMode int) {
 	}
 	defer os.RemoveAll(testDataDirName)
 
-	psiphon.SetEmitDiagnosticNotices(true)
+	psiphon.SetEmitDiagnosticNotices(true, true)
 
 	configJSON, err := ioutil.ReadFile("../controller_test.config")
 	if err != nil {

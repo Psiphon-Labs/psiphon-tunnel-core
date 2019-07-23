@@ -155,6 +155,18 @@ func (fields ServerEntryFields) SetTag(tag string) {
 	fields["isLocalDerivedTag"] = true
 }
 
+func (fields ServerEntryFields) GetDiagnosticID() string {
+	tag, ok := fields["tag"]
+	if !ok {
+		return ""
+	}
+	tagStr, ok := tag.(string)
+	if !ok {
+		return ""
+	}
+	return TagToDiagnosticID(tagStr)
+}
+
 func (fields ServerEntryFields) GetIPAddress() string {
 	ipAddress, ok := fields["ipAddress"]
 	if !ok {
@@ -507,6 +519,10 @@ func (serverEntry *ServerEntry) HasSignature() bool {
 	return serverEntry.Signature != ""
 }
 
+func (serverEntry *ServerEntry) GetDiagnosticID() string {
+	return TagToDiagnosticID(serverEntry.Tag)
+}
+
 // GenerateServerEntryTag creates a server entry tag value that is
 // cryptographically derived from the IP address and web server secret in a
 // way that is difficult to reverse the IP address value from the tag or
@@ -519,6 +535,18 @@ func GenerateServerEntryTag(ipAddress, webServerSecret string) string {
 	h := hmac.New(sha256.New, []byte(webServerSecret))
 	h.Write([]byte(ipAddress))
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
+}
+
+// TagToDiagnosticID returns a prefix of the server entry tag that should be
+// sufficient to uniquely identify servers in diagnostics, while also being
+// more human readable than emitting the full tag. The tag is used as the base
+// of the diagnostic ID as it doesn't leak the server IP address in diagnostic
+// output.
+func TagToDiagnosticID(tag string) string {
+	if len(tag) < 8 {
+		return "<unknown>"
+	}
+	return tag[:8]
 }
 
 // EncodeServerEntry returns a string containing the encoding of

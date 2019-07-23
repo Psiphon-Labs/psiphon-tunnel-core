@@ -37,6 +37,12 @@ func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, e
 	}
 
 	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+
+	// Remove domain names from "net" error messages.
+	if err != nil && !GetEmitNetworkParameters() {
+		err = RedactNetError(err)
+	}
+
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
