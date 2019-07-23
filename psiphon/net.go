@@ -535,7 +535,7 @@ func ResumeDownload(
 		// Redact URL from "net/http" error message.
 		if !GetEmitNetworkParameters() {
 			errStr := err.Error()
-			err = errors.New(strings.ReplaceAll(errStr, downloadURL, "[redacted]"))
+			err = errors.New(strings.Replace(errStr, downloadURL, "[redacted]", -1))
 		}
 
 		return 0, "", common.ContextError(err)
