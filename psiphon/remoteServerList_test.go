@@ -372,7 +372,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	// connect to Psiphon server with Psiphon client
 	//
 
-	SetEmitDiagnosticNotices(true)
+	SetEmitDiagnosticNotices(true, true)
 
 	// Note: calling LoadConfig ensures all *int config fields are initialized
 	clientConfigJSONTemplate := `

@@ -47,7 +47,7 @@ import (
 func TestMain(m *testing.M) {
 	flag.Parse()
 
-	SetEmitDiagnosticNotices(true)
+	SetEmitDiagnosticNotices(true, true)
 
 	initDisruptor()
 	initUpstreamProxy()
