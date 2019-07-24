@@ -22,17 +22,16 @@ package ca.psiphon;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.net.ConnectivityManager;
-import android.net.wifi.WifiManager;
-import android.net.wifi.WifiInfo;
 import android.net.LinkProperties;
 import android.net.NetworkInfo;
 import android.net.VpnService;
+import android.net.wifi.WifiInfo;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.telephony.TelephonyManager;
 import android.util.Base64;
 
-import org.apache.http.conn.util.InetAddressUtils;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -44,6 +43,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
@@ -190,6 +190,37 @@ public class PsiphonTunnel implements PsiphonProvider {
         startPsiphon("");
     }
 
+    // Creates a temporary dummy VPN interface in order to prevent traffic leaking while performing
+    // complete VPN and tunnel restart, for example, caused by host app settings change.
+    // Note: same deadlock note as stop().
+    @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
+    public synchronized void seamlessVpnRestart(VpnService.Builder vpnServiceBuilder) throws Exception {
+        // Perform seamless VPN interface swap Psiphon VPN -> dummy VPN
+        //
+        // From https://developer.android.com/reference/android/net/VpnService.Builder.html#establish()
+        // "However, it is rare but not impossible to have two interfaces while performing a seamless handover.
+        // In this case, the old interface will be deactivated when the new one is created successfully. Both
+        // file descriptors are valid but now outgoing packets will be routed to the new interface. Therefore,
+        // after draining the old file descriptor, the application MUST close it and start using the new file
+        // descriptor."
+        ParcelFileDescriptor dummyVpnFd = startDummyVpn(vpnServiceBuilder);
+        try {
+            // Clean up and restart Psiphon VPN interface, which will also do the swap dummy VPN -> Psiphon VPN
+            stopVpn();
+            startVpn();
+        } finally {
+            // Close dummy VPN file descriptor as per documentation.
+            if (dummyVpnFd != null) {
+                try {
+                    dummyVpnFd.close();
+                } catch (IOException e) {
+                }
+            }
+        }
+        // Restart the tunnel.
+        restartPsiphon();
+    }
+
     public void setClientPlatformAffixes(String prefix, String suffix) {
         mClientPlatformPrefix.set(prefix);
         mClientPlatformSuffix.set(suffix);
@@ -277,6 +308,37 @@ public class PsiphonTunnel implements PsiphonProvider {
         }
 
         return true;
+    }
+
+    @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
+    private ParcelFileDescriptor startDummyVpn(VpnService.Builder vpnServiceBuilder) throws Exception {
+        PrivateAddress privateAddress = selectPrivateAddress();
+
+        Locale previousLocale = Locale.getDefault();
+
+        final String errorMessage = "startDummyVpn failed";
+        final ParcelFileDescriptor tunFd;
+        try {
+            // Workaround for https://code.google.com/p/android/issues/detail?id=61096
+            Locale.setDefault(new Locale("en"));
+            tunFd = vpnServiceBuilder
+                            .setSession(mHostService.getAppName())
+                            .addAddress(mPrivateAddress.mIpAddress, mPrivateAddress.mPrefixLength)
+                            .addRoute("0.0.0.0", 0)
+                            .addRoute(mPrivateAddress.mSubnet, mPrivateAddress.mPrefixLength)
+                            .establish();
+        } catch(IllegalArgumentException e) {
+            throw new Exception(errorMessage, e);
+        } catch(IllegalStateException e) {
+            throw new Exception(errorMessage, e);
+        } catch(SecurityException e) {
+            throw new Exception(errorMessage, e);
+        } finally {
+            // Restore the original locale.
+            Locale.setDefault(previousLocale);
+        }
+
+        return tunFd;
     }
 
     private boolean isVpnMode() {
@@ -902,8 +964,8 @@ public class PsiphonTunnel implements PsiphonProvider {
 
         for (NetworkInterface netInterface : netInterfaces) {
             for (InetAddress inetAddress : Collections.list(netInterface.getInetAddresses())) {
-                String ipAddress = inetAddress.getHostAddress();
-                if (InetAddressUtils.isIPv4Address(ipAddress)) {
+                if (inetAddress instanceof Inet4Address) {
+                    String ipAddress = inetAddress.getHostAddress();
                     if (ipAddress.startsWith("10.")) {
                         candidates.remove("10");
                     }
