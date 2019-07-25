@@ -291,6 +291,15 @@ func (fields ServerEntryFields) AddSignature(publicKey, privateKey string) error
 
 	delete(copyFields, "signature")
 
+	// Limitation: since the verifyier must remarshal its server entry before
+	// verifying, the JSON produced there must be a byte-for-byte match to the
+	// JSON signed here. The precise output of the JSON encoder that is used,
+	// "encoding/json", with default formatting, as of Go 1.11.5, is therefore
+	// part of the signature protocol.
+	//
+	// TODO: use a stadard, canonical encoding, such as JCS:
+	// https://tools.ietf.org/id/draft-rundgren-json-canonicalization-scheme-05.html
+
 	marshaledFields, err := json.Marshal(copyFields)
 	if err != nil {
 		return common.ContextError(err)
