@@ -391,9 +391,26 @@ func (tx *Tx) Check() <-chan error {
 // SynchronousCheck performs the Check function in the current goroutine,
 // allowing the caller to recover from any panics or faults.
 func (tx *Tx) SynchronousCheck() error {
-	ch := make(chan error)
-	tx.check(ch)
-	return <-ch
+	checkErrChannel := make(chan error)
+
+	// tx.check may send multiple errors to the channel, and we must consume them
+	// all to ensure tx.check terminates. Only the first error is returned from
+	// SynchronousCheck.
+	firstErrChannel := make(chan error)
+	go func() {
+		var err error
+		for nextErr := range checkErrChannel {
+			if err != nil {
+				err = nextErr
+			}
+		}
+		firstErrChannel <- err
+	}()
+
+	// Invoke bolt code that may panic/segfault in the current goroutine.
+	tx.check(checkErrChannel)
+
+	return <-firstErrChannel
 }
 
 func (tx *Tx) check(ch chan error) {
