@@ -437,9 +437,6 @@ func TestQUIC(t *testing.T) {
 }
 
 func TestFrontedQUIC(t *testing.T) {
-
-	t.Skipf("temporarily disabled")
-
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
