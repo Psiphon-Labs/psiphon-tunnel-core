@@ -705,9 +705,7 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 		if serverEntry == nil {
 			// In case of data corruption or a bug causing this condition,
 			// do not stop iterating.
-			NoticeAlert(
-				"ServerEntryIterator.Next: unexpected missing server entry: %s",
-				string(serverEntryID))
+			NoticeAlert("ServerEntryIterator.Next: unexpected missing server entry")
 			continue
 		}
 
