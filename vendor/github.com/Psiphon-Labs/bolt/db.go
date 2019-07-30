@@ -154,6 +154,15 @@ func (db *DB) String() string {
 func Open(path string, mode os.FileMode, options *Options) (*DB, error) {
 	var db = &DB{opened: true}
 
+	// [Psiphon]
+	// Ensure cleanup on panic so recovery can reset a locked file.
+	defer func() {
+		if r := recover(); r != nil {
+			_ = db.close()
+			panic(r)
+		}
+	}()
+
 	// Set default options if no options are provided.
 	if options == nil {
 		options = DefaultOptions
