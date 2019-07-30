@@ -161,22 +161,22 @@ func main() {
 	// Handle required config file parameter
 
 	// EmitDiagnosticNotices is set by LoadConfig; force to true
-	// an emit diagnostics when LoadConfig-related errors occur.
+	// and emit diagnostics when LoadConfig-related errors occur.
 
 	if configFilename == "" {
-		psiphon.SetEmitDiagnosticNotices(true)
+		psiphon.SetEmitDiagnosticNotices(true, false)
 		psiphon.NoticeError("configuration file is required")
 		os.Exit(1)
 	}
 	configFileContents, err := ioutil.ReadFile(configFilename)
 	if err != nil {
-		psiphon.SetEmitDiagnosticNotices(true)
+		psiphon.SetEmitDiagnosticNotices(true, false)
 		psiphon.NoticeError("error loading configuration file: %s", err)
 		os.Exit(1)
 	}
 	config, err := psiphon.LoadConfig(configFileContents)
 	if err != nil {
-		psiphon.SetEmitDiagnosticNotices(true)
+		psiphon.SetEmitDiagnosticNotices(true, false)
 		psiphon.NoticeError("error processing configuration file: %s", err)
 		os.Exit(1)
 	}
@@ -191,7 +191,7 @@ func main() {
 		tunDeviceFile, err := configurePacketTunnel(
 			config, tunDevice, tunBindInterface, tunPrimaryDNS, tunSecondaryDNS)
 		if err != nil {
-			psiphon.SetEmitDiagnosticNotices(true)
+			psiphon.SetEmitDiagnosticNotices(true, false)
 			psiphon.NoticeError("error configuring packet tunnel: %s", err)
 			os.Exit(1)
 		}
@@ -202,7 +202,7 @@ func main() {
 
 	err = config.Commit()
 	if err != nil {
-		psiphon.SetEmitDiagnosticNotices(true)
+		psiphon.SetEmitDiagnosticNotices(true, false)
 		psiphon.NoticeError("error loading configuration file: %s", err)
 		os.Exit(1)
 	}

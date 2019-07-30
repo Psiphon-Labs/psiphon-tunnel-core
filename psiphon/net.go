@@ -30,6 +30,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,6 +45,9 @@ const DNS_PORT = 53
 // DialConfig contains parameters to determine the behavior
 // of a Psiphon dialer (TCPDial, UDPDial, MeekDial, etc.)
 type DialConfig struct {
+
+	// DiagnosticID is the server ID to record in any diagnostics notices.
+	DiagnosticID string
 
 	// UpstreamProxyURL specifies a proxy to connect through.
 	// E.g., "http://proxyhost:8080"
@@ -527,6 +531,13 @@ func ResumeDownload(
 		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
 	}
 	if err != nil {
+
+		// Redact URL from "net/http" error message.
+		if !GetEmitNetworkParameters() {
+			errStr := err.Error()
+			err = errors.New(strings.Replace(errStr, downloadURL, "[redacted]", -1))
+		}
+
 		return 0, "", common.ContextError(err)
 	}
 	defer response.Body.Close()

@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -188,10 +189,14 @@ func FetchObfuscatedServerLists(
 		registryFilename = downloadFilename
 	}
 
+	// Prevent excessive notice noise in cases such as a general database
+	// failure, as GetSLOK may be called thousands of times per fetch.
+	emittedGetSLOKAlert := int32(0)
+
 	lookupSLOKs := func(slokID []byte) []byte {
 		// Lookup SLOKs in local datastore
 		key, err := GetSLOK(slokID)
-		if err != nil {
+		if err != nil && atomic.CompareAndSwapInt32(&emittedGetSLOKAlert, 0, 1) {
 			NoticeAlert("GetSLOK failed: %s", err)
 		}
 		return key
