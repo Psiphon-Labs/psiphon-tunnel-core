@@ -740,7 +740,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// TODO: monitor logs for more robust wait-until-loaded. For example,
 	// especially with the race detector on, QUIC-OSSH tests can fail as the
-	// client sends its initial pacjet before the server is ready.
+	// client sends its initial packet before the server is ready.
 	time.Sleep(1 * time.Second)
 
 	// Test: hot reload (of psinet and traffic rules)
