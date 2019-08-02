@@ -2632,30 +2632,13 @@ func (sshClient *sshClient) isPortForwardPermitted(
 
 	// Traffic rules checks.
 
-	var allowPorts []int
-	if portForwardType == portForwardTypeTCP {
-		allowPorts = sshClient.trafficRules.AllowTCPPorts
-	} else {
-		allowPorts = sshClient.trafficRules.AllowUDPPorts
-	}
-
-	if len(allowPorts) == 0 {
-		return true
-	}
-
-	// TODO: faster lookup?
-	if len(allowPorts) > 0 {
-		for _, allowPort := range allowPorts {
-			if port == allowPort {
-				return true
-			}
+	switch portForwardType {
+	case portForwardTypeTCP:
+		if sshClient.trafficRules.AllowTCPPort(remoteIP, port) {
+			return true
 		}
-	}
-
-	for _, subnet := range sshClient.trafficRules.AllowSubnets {
-		// Note: ignoring error as config has been validated
-		_, network, _ := net.ParseCIDR(subnet)
-		if network.Contains(remoteIP) {
+	case portForwardTypeUDP:
+		if sshClient.trafficRules.AllowUDPPort(remoteIP, port) {
 			return true
 		}
 	}
