@@ -154,6 +154,17 @@ func StartTunnel(ctx context.Context,
 		}
 	}
 
+	// As Client Library doesn't currently implement callbacks, diagnostic
+	// notices aren't relayed to the client application. So, when
+	// EmitDiagnosticNotices is set, initialize the rotating diagnostic log file
+	// facility.
+	if config.EmitDiagnosticNotices {
+		err := psiphon.SetNoticeFiles("", filepath.Join(config.DataStoreDirectory, "diagnostics.log"), 0, 0)
+		if err != nil {
+			return nil, common.ContextErrorMsg(err, "failed to initialize diagnostic logging")
+		}
+	}
+
 	err = psiphon.OpenDataStore(config)
 	if err != nil {
 		return nil, common.ContextErrorMsg(err, "failed to open data store")

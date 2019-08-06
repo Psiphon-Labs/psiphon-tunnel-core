@@ -383,7 +383,16 @@ func (tx *Tx) CopyFile(path string, mode os.FileMode) error {
 // the same time.
 func (tx *Tx) Check() <-chan error {
 	ch := make(chan error)
-	go tx.check(ch)
+	// [Psiphon]
+	// This code is modified to use the single-error check function while
+	// preserving the existing bolt Check API.
+	go func() {
+		err := tx.check()
+		if err != nil {
+			ch <- err
+		}
+		close(ch)
+	}()
 	return ch
 }
 
@@ -391,36 +400,23 @@ func (tx *Tx) Check() <-chan error {
 // SynchronousCheck performs the Check function in the current goroutine,
 // allowing the caller to recover from any panics or faults.
 func (tx *Tx) SynchronousCheck() error {
-	checkErrChannel := make(chan error)
-
-	// tx.check may send multiple errors to the channel, and we must consume them
-	// all to ensure tx.check terminates. Only the first error is returned from
-	// SynchronousCheck.
-	firstErrChannel := make(chan error)
-	go func() {
-		var err error
-		for nextErr := range checkErrChannel {
-			if err != nil {
-				err = nextErr
-			}
-		}
-		firstErrChannel <- err
-	}()
-
-	// Invoke bolt code that may panic/segfault in the current goroutine.
-	tx.check(checkErrChannel)
-
-	return <-firstErrChannel
+	return tx.check()
 }
 
-func (tx *Tx) check(ch chan error) {
+// [Psiphon]
+// check is modified to stop and return on the first error. This prevents some
+// long running loops, perhaps due to looping based on corrupt data, that we
+// have observed when testing check against corrupted database files. Since
+// Psiphon will recover by resetting (deleting) the datastore on any error,
+// more than one error is not useful information in our case.
+func (tx *Tx) check() error {
 	// Check if any pages are double freed.
 	freed := make(map[pgid]bool)
 	all := make([]pgid, tx.db.freelist.count())
 	tx.db.freelist.copyall(all)
 	for _, id := range all {
 		if freed[id] {
-			ch <- fmt.Errorf("page %d: already freed", id)
+			return fmt.Errorf("page %d: already freed", id)
 		}
 		freed[id] = true
 	}
@@ -434,53 +430,70 @@ func (tx *Tx) check(ch chan error) {
 	}
 
 	// Recursively check buckets.
-	tx.checkBucket(&tx.root, reachable, freed, ch)
+	err := tx.checkBucket(&tx.root, reachable, freed)
+	if err != nil {
+		return err
+	}
 
 	// Ensure all pages below high water mark are either reachable or freed.
 	for i := pgid(0); i < tx.meta.pgid; i++ {
 		_, isReachable := reachable[i]
 		if !isReachable && !freed[i] {
-			ch <- fmt.Errorf("page %d: unreachable unfreed", int(i))
+			return fmt.Errorf("page %d: unreachable unfreed", int(i))
 		}
 	}
 
-	// Close the channel to signal completion.
-	close(ch)
+	return nil
 }
 
-func (tx *Tx) checkBucket(b *Bucket, reachable map[pgid]*page, freed map[pgid]bool, ch chan error) {
+// [Psiphon]
+// checkBucket is modified to stop and return on the first error.
+func (tx *Tx) checkBucket(b *Bucket, reachable map[pgid]*page, freed map[pgid]bool) error {
 	// Ignore inline buckets.
 	if b.root == 0 {
-		return
+		return nil
 	}
+
+	var err error
 
 	// Check every page used by this bucket.
 	b.tx.forEachPage(b.root, 0, func(p *page, _ int) {
 		if p.id > tx.meta.pgid {
-			ch <- fmt.Errorf("page %d: out of bounds: %d", int(p.id), int(b.tx.meta.pgid))
+			err = fmt.Errorf("page %d: out of bounds: %d", int(p.id), int(b.tx.meta.pgid))
+			return
 		}
 
 		// Ensure each page is only referenced once.
 		for i := pgid(0); i <= pgid(p.overflow); i++ {
 			var id = p.id + i
 			if _, ok := reachable[id]; ok {
-				ch <- fmt.Errorf("page %d: multiple references", int(id))
+				err = fmt.Errorf("page %d: multiple references", int(id))
+				return
 			}
 			reachable[id] = p
 		}
 
 		// We should only encounter un-freed leaf and branch pages.
 		if freed[p.id] {
-			ch <- fmt.Errorf("page %d: reachable freed", int(p.id))
+			err = fmt.Errorf("page %d: reachable freed", int(p.id))
+			return
 		} else if (p.flags&branchPageFlag) == 0 && (p.flags&leafPageFlag) == 0 {
-			ch <- fmt.Errorf("page %d: invalid type: %s", int(p.id), p.typ())
+			err = fmt.Errorf("page %d: invalid type: %s", int(p.id), p.typ())
+			return
 		}
 	})
 
+	if err != nil {
+		return err
+	}
+
 	// Check each bucket within this bucket.
-	_ = b.ForEach(func(k, v []byte) error {
+	return b.ForEach(func(k, v []byte) error {
 		if child := b.Bucket(k); child != nil {
-			tx.checkBucket(child, reachable, freed, ch)
+			err := tx.checkBucket(child, reachable, freed)
+			if err != nil {
+				return err
+			}
 		}
 		return nil
 	})
