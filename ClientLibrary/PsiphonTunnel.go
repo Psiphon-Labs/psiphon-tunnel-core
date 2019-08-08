@@ -205,6 +205,12 @@ func PsiphonTunnelStart(cConfigJSON, cEmbeddedServerEntryList *C.char, cParams *
 		params.EstablishTunnelTimeoutSeconds = &v
 	}
 
+	// As Client Library doesn't currently implement callbacks, diagnostic
+	// notices aren't relayed to the client application. Set
+	// EmitDiagnosticNoticesToFiles to ensure the rotating diagnostic log file
+	// facility is used when EmitDiagnosticNotices is specified in the config.
+	params.EmitDiagnosticNoticesToFiles = true
+
 	startTime := time.Now()
 
 	// Start the tunnel connection
