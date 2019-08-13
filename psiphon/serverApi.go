@@ -125,7 +125,9 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	//
 	// The server entry will be included in handshakeResponse.EncodedServerList,
 	// along side discovery servers.
+	requestedMissingSignature := false
 	if !serverContext.tunnel.dialParams.ServerEntry.HasSignature() {
+		requestedMissingSignature = true
 		params["missing_server_entry_signature"] =
 			serverContext.tunnel.dialParams.ServerEntry.Tag
 	}
@@ -220,6 +222,19 @@ func (serverContext *ServerContext) doHandshakeRequest(
 			protocol.SERVER_ENTRY_SOURCE_DISCOVERY)
 		if err != nil {
 			return common.ContextError(err)
+		}
+
+		// Retain the original timestamp and source in the requestedMissingSignature
+		// case, as this server entry was not discovered here.
+		//
+		// Limitation: there is a transient edge case where
+		// requestedMissingSignature will be set for a discovery server entry that
+		// _is_ also discovered here.
+		if requestedMissingSignature &&
+			serverEntryFields.GetIPAddress() == serverContext.tunnel.dialParams.ServerEntry.IpAddress {
+
+			serverEntryFields.SetLocalTimestamp(serverContext.tunnel.dialParams.ServerEntry.LocalTimestamp)
+			serverEntryFields.SetLocalSource(serverContext.tunnel.dialParams.ServerEntry.LocalSource)
 		}
 
 		err = protocol.ValidateServerEntryFields(serverEntryFields)
