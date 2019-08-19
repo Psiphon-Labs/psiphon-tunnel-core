@@ -59,15 +59,10 @@ type DiscoveryServer struct {
 }
 
 type Sponsor struct {
-	Banner              string
+	ID                  string                `json:"id"`
 	HomePages           map[string][]HomePage `json:"home_pages"`
-	HttpsRequestRegexes []HttpsRequestRegex   `json:"https_request_regexes"`
-	Id                  string                `json:"id"`
 	MobileHomePages     map[string][]HomePage `json:"mobile_home_pages"`
-	Name                string                `json:"name"`
-	PageViewRegexes     []PageViewRegex       `json:"page_view_regexes"`
-	WebsiteBanner       string                `json:"website_banner"`
-	WebsiteBannerLink   string                `json:"website_banner_link"`
+	HttpsRequestRegexes []HttpsRequestRegex   `json:"https_request_regexes"`
 }
 
 type ClientVersion struct {
@@ -76,20 +71,10 @@ type ClientVersion struct {
 
 type HomePage struct {
 	Region string `json:"region"`
-	Url    string `json:"url"`
+	URL    string `json:"url"`
 }
 
 type HttpsRequestRegex struct {
-	Regex   string `json:"regex"`
-	Replace string `json:"replace"`
-}
-
-type MobileHomePage struct {
-	Region string `json:"region"`
-	Url    string `json:"url"`
-}
-
-type PageViewRegex struct {
 	Regex   string `json:"regex"`
 	Replace string `json:"replace"`
 }
@@ -177,7 +162,7 @@ func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatfor
 	homePagesByRegion, ok := homePages[clientRegion]
 	if ok {
 		for _, homePage := range homePagesByRegion {
-			sponsorHomePages = append(sponsorHomePages, strings.Replace(homePage.Url, "client_region=XX", "client_region="+clientRegion, 1))
+			sponsorHomePages = append(sponsorHomePages, strings.Replace(homePage.URL, "client_region=XX", "client_region="+clientRegion, 1))
 		}
 	}
 
@@ -187,7 +172,7 @@ func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatfor
 		if ok {
 			for _, homePage := range defaultHomePages {
 				// client_region query parameter substitution
-				sponsorHomePages = append(sponsorHomePages, strings.Replace(homePage.Url, "client_region=XX", "client_region="+clientRegion, 1))
+				sponsorHomePages = append(sponsorHomePages, strings.Replace(homePage.URL, "client_region=XX", "client_region="+clientRegion, 1))
 			}
 		}
 	}

@@ -27,8 +27,10 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
@@ -109,6 +111,56 @@ func IsAddressInUseError(err error) bool {
 		}
 	}
 	return false
+}
+
+var stripIPv4AddressRegex = regexp.MustCompile(
+	`(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}(:(6553[0-5]|655[0-2][0-9]\d|65[0-4](\d){2}|6[0-4](\d){3}|[1-5](\d){4}|[1-9](\d){0,3}))?`)
+
+// StripIPAddresses returns a copy of the input with all IP addresses [and
+// optional ports] replaced  by "[address]". This is intended to be used to
+// strip addresses from "net" package I/O error messages and otherwise avoid
+// inadvertently recording direct server IPs via error message logs; and, in
+// metrics, to reduce the error space due to superfluous source port data.
+//
+// Limitation: only strips IPv4 addresses.
+func StripIPAddresses(b []byte) []byte {
+	// TODO: IPv6 support
+	return stripIPv4AddressRegex.ReplaceAll(b, []byte("[redacted]"))
+}
+
+// StripIPAddressesString is StripIPAddresses for strings.
+func StripIPAddressesString(s string) string {
+	// TODO: IPv6 support
+	return stripIPv4AddressRegex.ReplaceAllString(s, "[redacted]")
+}
+
+// RedactNetError removes network address information from a "net" package
+// error message. Addresses may be domains or IP addresses.
+//
+// Limitations: some non-address error context can be lost; this function
+// makes assumptions about how the Go "net" package error messages are
+// formatted and will fail to redact network addresses if this assumptions
+// become untrue.
+func RedactNetError(err error) error {
+
+	// Example "net" package error messages:
+	//
+	// - lookup <domain>: no such host
+	// - lookup <domain>: No address associated with hostname
+	// - dial tcp <address>: connectex: No connection could be made because the target machine actively refused it
+	// - write tcp <address>-><address>: write: connection refused
+
+	if err == nil {
+		return err
+	}
+
+	errstr := err.Error()
+	index := strings.Index(errstr, ": ")
+	if index == -1 {
+		return err
+	}
+
+	return errors.New("[redacted]" + errstr[index:])
 }
 
 // SyncFileWriter wraps a file and exposes an io.Writer. At predefined

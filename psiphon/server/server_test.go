@@ -80,7 +80,7 @@ func TestMain(m *testing.M) {
 	}
 	defer os.RemoveAll(testDataDirName)
 
-	psiphon.SetEmitDiagnosticNotices(true)
+	psiphon.SetEmitDiagnosticNotices(true, true)
 
 	mockWebServerURL, mockWebServerExpectedResponse = runMockWebServer()
 
@@ -740,7 +740,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// TODO: monitor logs for more robust wait-until-loaded. For example,
 	// especially with the race detector on, QUIC-OSSH tests can fail as the
-	// client sends its initial pacjet before the server is ready.
+	// client sends its initial packet before the server is ready.
 	time.Sleep(1 * time.Second)
 
 	// Test: hot reload (of psinet and traffic rules)
@@ -1577,8 +1577,13 @@ func paveTrafficRulesFile(
 	requireAuthorization, deny bool,
 	livenessTestSize int) {
 
+	// Test both default and fast lookups
+	if intLookupThreshold != 10 {
+		t.Fatalf("unexpected intLookupThreshold")
+	}
+
 	allowTCPPorts := fmt.Sprintf("%d", mockWebServerPort)
-	allowUDPPorts := "53, 123"
+	allowUDPPorts := "53, 123, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010"
 
 	if deny {
 		allowTCPPorts = "0"

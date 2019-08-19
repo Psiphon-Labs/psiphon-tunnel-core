@@ -116,8 +116,8 @@ func TestTactics(t *testing.T) {
       ]
     }
     `
-	if lookupThreshold != 5 {
-		t.Fatalf("unexpected lookupThreshold")
+	if stringLookupThreshold != 5 {
+		t.Fatalf("unexpected stringLookupThreshold")
 	}
 
 	encodedRequestPublicKey, encodedRequestPrivateKey, encodedObfuscatedKey, err := GenerateKeys()

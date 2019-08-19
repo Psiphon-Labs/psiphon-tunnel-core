@@ -60,6 +60,12 @@ type Parameters struct {
 	// Zero means there will be no timeout.
 	// Optional.
 	EstablishTunnelTimeoutSeconds *int
+
+	// EmitDiagnosticNoticesToFile indicates whether to use the rotating log file
+	// facility to record diagnostic notices instead of sending diagnostic
+	// notices to noticeReceiver. Has no effect unless the tunnel
+	// config.EmitDiagnosticNotices flag is set.
+	EmitDiagnosticNoticesToFiles bool
 }
 
 // PsiphonTunnel is the tunnel object. It can be used for stopping the tunnel and
@@ -151,6 +157,13 @@ func StartTunnel(ctx context.Context,
 		if err != nil {
 			return nil, common.ContextErrorMsg(
 				err, fmt.Sprintf("SetClientParameters failed for delta: %v", paramsDelta))
+		}
+	}
+
+	if config.EmitDiagnosticNotices && params.EmitDiagnosticNoticesToFiles {
+		err := psiphon.SetNoticeFiles("", filepath.Join(config.DataStoreDirectory, "diagnostics.log"), 0, 0)
+		if err != nil {
+			return nil, common.ContextErrorMsg(err, "failed to initialize diagnostic logging")
 		}
 	}
 

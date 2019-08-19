@@ -22,8 +22,12 @@
 package psiphon
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
+	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Labs/bolt"
@@ -31,60 +35,86 @@ import (
 )
 
 type datastoreDB struct {
-	boltDB *bolt.DB
+	boltDB   *bolt.DB
+	isFailed int32
 }
 
 type datastoreTx struct {
+	db     *datastoreDB
 	boltTx *bolt.Tx
 }
 
 type datastoreBucket struct {
+	db         *datastoreDB
 	boltBucket *bolt.Bucket
 }
 
 type datastoreCursor struct {
+	db         *datastoreDB
 	boltCursor *bolt.Cursor
 }
 
 func datastoreOpenDB(rootDataDirectory string) (*datastoreDB, error) {
 
-	filename := filepath.Join(rootDataDirectory, "psiphon.boltdb")
-
-	var newDB *bolt.DB
+	var db *datastoreDB
 	var err error
 
 	for retry := 0; retry < 3; retry++ {
 
-		if retry > 0 {
-			NoticeAlert("datastoreOpenDB retry: %d", retry)
+		db, err = tryDatastoreOpenDB(rootDataDirectory, retry > 0)
+		if err == nil {
+			break
 		}
 
-		newDB, err = bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
+		NoticeAlert("tryDatastoreOpenDB failed: %s", err)
 
-		// The datastore file may be corrupt, so attempt to delete and try again
-		if err != nil {
-			NoticeAlert("bolt.Open error: %s", err)
-			os.Remove(filename)
-			continue
-		}
-
-		// Run consistency checks on datastore and emit errors for diagnostics purposes
-		// We assume this will complete quickly for typical size Psiphon datastores.
-		err = newDB.View(func(tx *bolt.Tx) error {
-			return tx.SynchronousCheck()
-		})
-
-		// The datastore file may be corrupt, so attempt to delete and try again
-		if err != nil {
-			NoticeAlert("bolt.SynchronousCheck error: %s", err)
-			newDB.Close()
-			os.Remove(filename)
-			continue
-		}
-
-		break
+		// The datastore file may be corrupt, so, in subsequent iterations, set the
+		// "reset" flag and attempt to delete the file and try again.
 	}
 
+	return db, err
+}
+
+func tryDatastoreOpenDB(rootDataDirectory string, reset bool) (retdb *datastoreDB, reterr error) {
+
+	// Testing indicates that the bolt Check function can raise SIGSEGV due to
+	// invalid mmap buffer accesses in cases such as opening a valid but
+	// truncated datastore file.
+	//
+	// To handle this, we temporarily set SetPanicOnFault in order to treat the
+	// fault as a panic, recover any panic, and return an error which will result
+	// in a retry with reset.
+
+	// Begin recovery preamble
+	panicOnFault := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(panicOnFault)
+
+	defer func() {
+		if r := recover(); r != nil {
+			retdb = nil
+			reterr = common.ContextError(fmt.Errorf("panic: %v", r))
+		}
+	}()
+	// End recovery preamble
+
+	filename := filepath.Join(rootDataDirectory, "psiphon.boltdb")
+
+	if reset {
+		NoticeAlert("tryDatastoreOpenDB: reset")
+		os.Remove(filename)
+	}
+
+	newDB, err := bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	// Run consistency checks on datastore and emit errors for diagnostics
+	// purposes. We assume this will complete quickly for typical size Psiphon
+	// datastores and wait for the check to complete before proceeding.
+	err = newDB.View(func(tx *bolt.Tx) error {
+		return tx.SynchronousCheck()
+	})
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -142,14 +172,58 @@ func datastoreOpenDB(rootDataDirectory string) (*datastoreDB, error) {
 	return &datastoreDB{boltDB: newDB}, nil
 }
 
+var errDatastoreFailed = errors.New("datastore has failed")
+
+func (db *datastoreDB) isDatastoreFailed() bool {
+	return atomic.LoadInt32(&db.isFailed) == 1
+}
+
+func (db *datastoreDB) setDatastoreFailed(r interface{}) {
+	atomic.StoreInt32(&db.isFailed, 1)
+	NoticeAlert("Datastore failed: %s",
+		common.ContextError(fmt.Errorf("panic: %v", r)))
+}
+
 func (db *datastoreDB) close() error {
+
+	// Limitation: there is no panic recover in this case. We assume boltDB.Close
+	// does not make  mmap accesses and prefer to not continue with the datastore
+	// file in a locked or open state. We also assume that any locks aquired by
+	// boltDB.Close, held by transactions, will be released even if the
+	// transaction panics and the database is in the failed state.
+
 	return db.boltDB.Close()
 }
 
-func (db *datastoreDB) view(fn func(tx *datastoreTx) error) error {
+func (db *datastoreDB) view(fn func(tx *datastoreTx) error) (reterr error) {
+
+	// Any bolt function that performs mmap buffer accesses can raise SIGBUS  due
+	// to underlying storage changes, such as a truncation of the datastore file
+	// or removal or network attached storage, etc.
+	//
+	// To handle this, we temporarily set SetPanicOnFault in order to treat the
+	// fault as a panic, recover any panic to avoid crashing the process, and
+	// putting this datastoreDB instance into a failed state. All subsequent
+	// calls to this datastoreDBinstance or its related datastoreTx and
+	// datastoreBucket instances will fail.
+
+	// Begin recovery preamble
+	if db.isDatastoreFailed() {
+		return errDatastoreFailed
+	}
+	panicOnFault := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(panicOnFault)
+	defer func() {
+		if r := recover(); r != nil {
+			db.setDatastoreFailed(r)
+			reterr = errDatastoreFailed
+		}
+	}()
+	// End recovery preamble
+
 	return db.boltDB.View(
 		func(tx *bolt.Tx) error {
-			err := fn(&datastoreTx{boltTx: tx})
+			err := fn(&datastoreTx{db: db, boltTx: tx})
 			if err != nil {
 				return common.ContextError(err)
 			}
@@ -157,10 +231,25 @@ func (db *datastoreDB) view(fn func(tx *datastoreTx) error) error {
 		})
 }
 
-func (db *datastoreDB) update(fn func(tx *datastoreTx) error) error {
+func (db *datastoreDB) update(fn func(tx *datastoreTx) error) (reterr error) {
+
+	// Begin recovery preamble
+	if db.isDatastoreFailed() {
+		return errDatastoreFailed
+	}
+	panicOnFault := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(panicOnFault)
+	defer func() {
+		if r := recover(); r != nil {
+			db.setDatastoreFailed(r)
+			reterr = errDatastoreFailed
+		}
+	}()
+	// End recovery preamble
+
 	return db.boltDB.Update(
 		func(tx *bolt.Tx) error {
-			err := fn(&datastoreTx{boltTx: tx})
+			err := fn(&datastoreTx{db: db, boltTx: tx})
 			if err != nil {
 				return common.ContextError(err)
 			}
@@ -168,11 +257,41 @@ func (db *datastoreDB) update(fn func(tx *datastoreTx) error) error {
 		})
 }
 
-func (tx *datastoreTx) bucket(name []byte) *datastoreBucket {
-	return &datastoreBucket{boltBucket: tx.boltTx.Bucket(name)}
+func (tx *datastoreTx) bucket(name []byte) (retbucket *datastoreBucket) {
+
+	// Begin recovery preamble
+	if tx.db.isDatastoreFailed() {
+		return &datastoreBucket{db: tx.db, boltBucket: nil}
+	}
+	panicOnFault := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(panicOnFault)
+	defer func() {
+		if r := recover(); r != nil {
+			tx.db.setDatastoreFailed(r)
+			retbucket = &datastoreBucket{db: tx.db, boltBucket: nil}
+		}
+	}()
+	// End recovery preamble
+
+	return &datastoreBucket{db: tx.db, boltBucket: tx.boltTx.Bucket(name)}
 }
 
-func (tx *datastoreTx) clearBucket(name []byte) error {
+func (tx *datastoreTx) clearBucket(name []byte) (reterr error) {
+
+	// Begin recovery preamble
+	if tx.db.isDatastoreFailed() {
+		return errDatastoreFailed
+	}
+	panicOnFault := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(panicOnFault)
+	defer func() {
+		if r := recover(); r != nil {
+			tx.db.setDatastoreFailed(r)
+			reterr = errDatastoreFailed
+		}
+	}()
+	// End recovery preamble
+
 	err := tx.boltTx.DeleteBucket(name)
 	if err != nil {
 		return common.ContextError(err)
@@ -184,11 +303,41 @@ func (tx *datastoreTx) clearBucket(name []byte) error {
 	return nil
 }
 
-func (b *datastoreBucket) get(key []byte) []byte {
+func (b *datastoreBucket) get(key []byte) (retvalue []byte) {
+
+	// Begin recovery preamble
+	if b.db.isDatastoreFailed() {
+		return nil
+	}
+	panicOnFault := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(panicOnFault)
+	defer func() {
+		if r := recover(); r != nil {
+			b.db.setDatastoreFailed(r)
+			retvalue = nil
+		}
+	}()
+	// End recovery preamble
+
 	return b.boltBucket.Get(key)
 }
 
-func (b *datastoreBucket) put(key, value []byte) error {
+func (b *datastoreBucket) put(key, value []byte) (reterr error) {
+
+	// Begin recovery preamble
+	if b.db.isDatastoreFailed() {
+		return errDatastoreFailed
+	}
+	panicOnFault := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(panicOnFault)
+	defer func() {
+		if r := recover(); r != nil {
+			b.db.setDatastoreFailed(r)
+			reterr = errDatastoreFailed
+		}
+	}()
+	// End recovery preamble
+
 	err := b.boltBucket.Put(key, value)
 	if err != nil {
 		return common.ContextError(err)
@@ -196,7 +345,22 @@ func (b *datastoreBucket) put(key, value []byte) error {
 	return nil
 }
 
-func (b *datastoreBucket) delete(key []byte) error {
+func (b *datastoreBucket) delete(key []byte) (reterr error) {
+
+	// Begin recovery preamble
+	if b.db.isDatastoreFailed() {
+		return errDatastoreFailed
+	}
+	panicOnFault := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(panicOnFault)
+	defer func() {
+		if r := recover(); r != nil {
+			b.db.setDatastoreFailed(r)
+			reterr = errDatastoreFailed
+		}
+	}()
+	// End recovery preamble
+
 	err := b.boltBucket.Delete(key)
 	if err != nil {
 		return common.ContextError(err)
@@ -204,25 +368,102 @@ func (b *datastoreBucket) delete(key []byte) error {
 	return nil
 }
 
-func (b *datastoreBucket) cursor() datastoreCursor {
-	return datastoreCursor{boltCursor: b.boltBucket.Cursor()}
+func (b *datastoreBucket) cursor() (retcursor datastoreCursor) {
+
+	// Begin recovery preamble
+	if b.db.isDatastoreFailed() {
+		return datastoreCursor{db: b.db, boltCursor: nil}
+	}
+	panicOnFault := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(panicOnFault)
+	defer func() {
+		if r := recover(); r != nil {
+			b.db.setDatastoreFailed(r)
+			retcursor = datastoreCursor{db: b.db, boltCursor: nil}
+		}
+	}()
+	// End recovery preamble
+
+	return datastoreCursor{db: b.db, boltCursor: b.boltBucket.Cursor()}
 }
 
-func (c *datastoreCursor) firstKey() []byte {
+func (c *datastoreCursor) firstKey() (retkey []byte) {
+
+	// Begin recovery preamble
+	if c.db.isDatastoreFailed() {
+		return nil
+	}
+	panicOnFault := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(panicOnFault)
+	defer func() {
+		if r := recover(); r != nil {
+			c.db.setDatastoreFailed(r)
+			retkey = nil
+		}
+	}()
+	// End recovery preamble
+
 	key, _ := c.boltCursor.First()
 	return key
 }
 
-func (c *datastoreCursor) nextKey() []byte {
+func (c *datastoreCursor) nextKey() (retkey []byte) {
+
+	// Begin recovery preamble
+	if c.db.isDatastoreFailed() {
+		return nil
+	}
+	panicOnFault := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(panicOnFault)
+	defer func() {
+		if r := recover(); r != nil {
+			c.db.setDatastoreFailed(r)
+			retkey = nil
+		}
+	}()
+	// End recovery preamble
+
 	key, _ := c.boltCursor.Next()
 	return key
 }
 
-func (c *datastoreCursor) first() ([]byte, []byte) {
+func (c *datastoreCursor) first() (retkey, retvalue []byte) {
+
+	// Begin recovery preamble
+	if c.db.isDatastoreFailed() {
+		return nil, nil
+	}
+	panicOnFault := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(panicOnFault)
+	defer func() {
+		if r := recover(); r != nil {
+			c.db.setDatastoreFailed(r)
+			retkey = nil
+			retvalue = nil
+		}
+	}()
+	// End recovery preamble
+
 	return c.boltCursor.First()
 }
 
-func (c *datastoreCursor) next() ([]byte, []byte) {
+func (c *datastoreCursor) next() (retkey, retvalue []byte) {
+
+	// Begin recovery preamble
+	if c.db.isDatastoreFailed() {
+		return nil, nil
+	}
+	panicOnFault := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(panicOnFault)
+	defer func() {
+		if r := recover(); r != nil {
+			c.db.setDatastoreFailed(r)
+			retkey = nil
+			retvalue = nil
+		}
+	}()
+	// End recovery preamble
+
 	return c.boltCursor.Next()
 }
 

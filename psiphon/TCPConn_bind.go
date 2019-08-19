@@ -117,7 +117,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 			copy(ipv6[:], ipAddr.To16())
 			domain = syscall.AF_INET6
 		} else {
-			lastErr = common.ContextError(fmt.Errorf("invalid IP address: %s", ipAddr.String()))
+			lastErr = common.ContextError(errors.New("invalid IP address"))
 			continue
 		}
 		if domain == syscall.AF_INET {
@@ -142,7 +142,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 			_, err = config.DeviceBinder.BindToDevice(socketFD)
 			if err != nil {
 				syscall.Close(socketFD)
-				lastErr = common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))
+				lastErr = common.ContextError(fmt.Errorf("BindToDevice failed with %s", err))
 				continue
 			}
 		}

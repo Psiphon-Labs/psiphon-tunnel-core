@@ -447,9 +447,15 @@ type Config struct {
 
 	// EmitDiagnosticNotices indicates whether to output notices containing
 	// detailed information about the Psiphon session. As these notices may
-	// contain sensitive network information, they should not be insecurely
-	// distributed or displayed to users. Default is off.
+	// contain sensitive information, they should not be insecurely distributed
+	// or displayed to users. Default is off.
 	EmitDiagnosticNotices bool
+
+	// EmitDiagnosticNetworkParameters indicates whether to include network
+	// parameters in diagnostic notices. As these parameters are sensitive
+	// circumvention network information, they should not be insecurely
+	// distributed or displayed to users. Default is off.
+	EmitDiagnosticNetworkParameters bool
 
 	// RateLimits specify throttling configuration for the tunnel.
 	RateLimits common.RateLimits
@@ -596,10 +602,11 @@ func (config *Config) IsCommitted() bool {
 // not be reflected in internal data structures.
 func (config *Config) Commit() error {
 
-	// Do SetEmitDiagnosticNotices first, to ensure config file errors are emitted.
-
+	// Do SetEmitDiagnosticNotices first, to ensure config file errors are
+	// emitted.
 	if config.EmitDiagnosticNotices {
-		SetEmitDiagnosticNotices(true)
+		SetEmitDiagnosticNotices(
+			true, config.EmitDiagnosticNetworkParameters)
 	}
 
 	// Promote legacy fields.
@@ -1265,7 +1272,7 @@ func (n *loggingNetworkIDGetter) GetNetworkID() string {
 	}
 	if len(logNetworkID)+1 < len(networkID) {
 		// Indicate when additional network info was present after the first "-".
-		logNetworkID += "+<network info>"
+		logNetworkID += "+[redacted]"
 	}
 	NoticeNetworkID(logNetworkID)
 

@@ -147,6 +147,9 @@ type TrafficRulesFilter struct {
 	// must have been revoked. When true, authorizations must have been
 	// revoked. When omitted or false, this field is ignored.
 	AuthorizationsRevoked bool
+
+	regionLookup map[string]bool
+	ispLookup    map[string]bool
 }
 
 // TrafficRules specify the limits placed on client traffic.
@@ -218,8 +221,11 @@ type TrafficRules struct {
 	// in CIDR notation.
 	// Limitation: currently, AllowSubnets only matches port
 	// forwards where the client sends an IP address. Domain
-	// names aren not resolved before checking AllowSubnets.
+	// names are not resolved before checking AllowSubnets.
 	AllowSubnets []string
+
+	allowTCPPortsLookup map[int]bool
+	allowUDPPortsLookup map[int]bool
 }
 
 // RateLimits is a clone of common.RateLimits with pointers
@@ -279,6 +285,8 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 			set.MeekRateLimiterReapHistoryFrequencySeconds = newSet.MeekRateLimiterReapHistoryFrequencySeconds
 			set.DefaultRules = newSet.DefaultRules
 			set.FilteredRules = newSet.FilteredRules
+
+			set.initLookups()
 
 			return nil
 		})
@@ -364,6 +372,58 @@ func (set *TrafficRulesSet) Validate() error {
 	}
 
 	return nil
+}
+
+const stringLookupThreshold = 5
+const intLookupThreshold = 10
+
+// initLookups creates map lookups for filters where the number of string/int
+// values to compare against exceeds a threshold where benchmarks show maps
+// are faster than looping through a string/int slice.
+func (set *TrafficRulesSet) initLookups() {
+
+	initTrafficRulesLookups := func(rules *TrafficRules) {
+
+		if len(rules.AllowTCPPorts) >= intLookupThreshold {
+			rules.allowTCPPortsLookup = make(map[int]bool)
+			for _, port := range rules.AllowTCPPorts {
+				rules.allowTCPPortsLookup[port] = true
+			}
+		}
+
+		if len(rules.AllowUDPPorts) >= intLookupThreshold {
+			rules.allowUDPPortsLookup = make(map[int]bool)
+			for _, port := range rules.AllowUDPPorts {
+				rules.allowUDPPortsLookup[port] = true
+			}
+		}
+	}
+
+	initTrafficRulesFilterLookups := func(filter *TrafficRulesFilter) {
+
+		if len(filter.Regions) >= stringLookupThreshold {
+			filter.regionLookup = make(map[string]bool)
+			for _, region := range filter.Regions {
+				filter.regionLookup[region] = true
+			}
+		}
+
+		if len(filter.ISPs) >= stringLookupThreshold {
+			filter.ispLookup = make(map[string]bool)
+			for _, ISP := range filter.ISPs {
+				filter.ispLookup[ISP] = true
+			}
+		}
+	}
+
+	initTrafficRulesLookups(&set.DefaultRules)
+
+	for i, _ := range set.FilteredRules {
+		initTrafficRulesFilterLookups(&set.FilteredRules[i].Filter)
+		initTrafficRulesLookups(&set.FilteredRules[i].Rules)
+	}
+
+	// TODO: add lookups for MeekRateLimiter?
 }
 
 // GetTrafficRules determines the traffic rules for a client based on its attributes.
@@ -478,14 +538,26 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		}
 
 		if len(filteredRules.Filter.Regions) > 0 {
-			if !common.Contains(filteredRules.Filter.Regions, geoIPData.Country) {
-				continue
+			if filteredRules.Filter.regionLookup != nil {
+				if !filteredRules.Filter.regionLookup[geoIPData.Country] {
+					continue
+				}
+			} else {
+				if !common.Contains(filteredRules.Filter.Regions, geoIPData.Country) {
+					continue
+				}
 			}
 		}
 
 		if len(filteredRules.Filter.ISPs) > 0 {
-			if !common.Contains(filteredRules.Filter.ISPs, geoIPData.ISP) {
-				continue
+			if filteredRules.Filter.ispLookup != nil {
+				if !filteredRules.Filter.ispLookup[geoIPData.ISP] {
+					continue
+				}
+			} else {
+				if !common.Contains(filteredRules.Filter.ISPs, geoIPData.ISP) {
+					continue
+				}
 			}
 		}
 
@@ -593,10 +665,12 @@ func (set *TrafficRulesSet) GetTrafficRules(
 
 		if filteredRules.Rules.AllowTCPPorts != nil {
 			trafficRules.AllowTCPPorts = filteredRules.Rules.AllowTCPPorts
+			trafficRules.allowTCPPortsLookup = filteredRules.Rules.allowTCPPortsLookup
 		}
 
 		if filteredRules.Rules.AllowUDPPorts != nil {
 			trafficRules.AllowUDPPorts = filteredRules.Rules.AllowUDPPorts
+			trafficRules.allowUDPPortsLookup = filteredRules.Rules.allowUDPPortsLookup
 		}
 
 		if filteredRules.Rules.AllowSubnets != nil {
@@ -614,6 +688,61 @@ func (set *TrafficRulesSet) GetTrafficRules(
 	log.WithContextFields(LogFields{"trafficRules": trafficRules}).Debug("selected traffic rules")
 
 	return trafficRules
+}
+
+func (rules *TrafficRules) AllowTCPPort(remoteIP net.IP, port int) bool {
+
+	if len(rules.AllowTCPPorts) == 0 {
+		return true
+	}
+
+	if rules.allowTCPPortsLookup != nil {
+		if rules.allowTCPPortsLookup[port] == true {
+			return true
+		}
+	} else {
+		for _, allowPort := range rules.AllowTCPPorts {
+			if port == allowPort {
+				return true
+			}
+		}
+	}
+
+	return rules.allowSubnet(remoteIP)
+}
+
+func (rules *TrafficRules) AllowUDPPort(remoteIP net.IP, port int) bool {
+
+	if len(rules.AllowUDPPorts) == 0 {
+		return true
+	}
+
+	if rules.allowUDPPortsLookup != nil {
+		if rules.allowUDPPortsLookup[port] == true {
+			return true
+		}
+	} else {
+		for _, allowPort := range rules.AllowUDPPorts {
+			if port == allowPort {
+				return true
+			}
+		}
+	}
+
+	return rules.allowSubnet(remoteIP)
+}
+
+func (rules *TrafficRules) allowSubnet(remoteIP net.IP) bool {
+
+	for _, subnet := range rules.AllowSubnets {
+		// Note: ignoring error as config has been validated
+		_, network, _ := net.ParseCIDR(subnet)
+		if network.Contains(remoteIP) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // GetMeekRateLimiterConfig gets a snapshot of the meek rate limiter

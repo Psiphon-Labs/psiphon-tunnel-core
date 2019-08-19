@@ -65,6 +65,9 @@ const (
 // MeekConfig specifies the behavior of a MeekConn
 type MeekConfig struct {
 
+	// DiagnosticID is the server ID to record in any diagnostics notices.
+	DiagnosticID string
+
 	// ClientParameters is the active set of client parameters to use
 	// for the meek dial.
 	ClientParameters *parameters.ClientParameters
@@ -348,7 +351,7 @@ func DialMeek(
 		cachedTLSDialer = newCachedTLSDialer(preConn, tlsDialer)
 
 		if IsTLSConnUsingHTTP2(preConn) {
-			NoticeInfo("negotiated HTTP/2 for %s", meekConfig.DialAddress)
+			NoticeInfo("negotiated HTTP/2 for %s", meekConfig.DiagnosticID)
 			transport = &http2.Transport{
 				DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {
 					return cachedTLSDialer.dial(network, addr)

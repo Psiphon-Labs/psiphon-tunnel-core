@@ -32,7 +32,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -126,7 +125,9 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	//
 	// The server entry will be included in handshakeResponse.EncodedServerList,
 	// along side discovery servers.
+	requestedMissingSignature := false
 	if !serverContext.tunnel.dialParams.ServerEntry.HasSignature() {
+		requestedMissingSignature = true
 		params["missing_server_entry_signature"] =
 			serverContext.tunnel.dialParams.ServerEntry.Tag
 	}
@@ -221,6 +222,19 @@ func (serverContext *ServerContext) doHandshakeRequest(
 			protocol.SERVER_ENTRY_SOURCE_DISCOVERY)
 		if err != nil {
 			return common.ContextError(err)
+		}
+
+		// Retain the original timestamp and source in the requestedMissingSignature
+		// case, as this server entry was not discovered here.
+		//
+		// Limitation: there is a transient edge case where
+		// requestedMissingSignature will be set for a discovery server entry that
+		// _is_ also discovered here.
+		if requestedMissingSignature &&
+			serverEntryFields.GetIPAddress() == serverContext.tunnel.dialParams.ServerEntry.IpAddress {
+
+			serverEntryFields.SetLocalTimestamp(serverContext.tunnel.dialParams.ServerEntry.LocalTimestamp)
+			serverEntryFields.SetLocalSource(serverContext.tunnel.dialParams.ServerEntry.LocalSource)
 		}
 
 		err = protocol.ValidateServerEntryFields(serverEntryFields)
@@ -616,13 +630,6 @@ func RecordRemoteServerListStat(
 		config, datastorePersistentStatTypeRemoteServerList, remoteServerListStatJson)
 }
 
-// failedTunnelErrStripAddressRegex strips IPv4 address [and optional port]
-// strings from "net" package I/O error messages. This is to avoid
-// inadvertently recording direct server IPs via error message logs, and to
-// reduce the error space due to superfluous source port data.
-var failedTunnelErrStripAddressRegex = regexp.MustCompile(
-	`(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}(:(6553[0-5]|655[0-2][0-9]\d|65[0-4](\d){2}|6[0-4](\d){3}|[1-5](\d){4}|[1-9](\d){0,3}))?`)
-
 // RecordFailedTunnelStat records metrics for a failed tunnel dial, including
 // dial parameters and error condition (tunnelErr).
 //
@@ -647,7 +654,13 @@ func RecordFailedTunnelStat(
 	params["server_entry_tag"] = dialParams.ServerEntry.Tag
 	params["last_connected"] = lastConnected
 	params["client_failed_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
-	params["tunnel_error"] = failedTunnelErrStripAddressRegex.ReplaceAllString(tunnelErr.Error(), "<address>")
+
+	// Ensure direct server IPs are not exposed in logs. The "net" package, and
+	// possibly other 3rd party packages, will include destination addresses in
+	// I/O error messages.
+	tunnelError := StripIPAddressesString(tunnelErr.Error())
+
+	params["tunnel_error"] = tunnelError
 
 	failedTunnelStatJson, err := json.Marshal(params)
 	if err != nil {

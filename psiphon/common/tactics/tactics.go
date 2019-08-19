@@ -450,14 +450,14 @@ func NewServer(
 				return common.ContextError(err)
 			}
 
-			newServer.initLookups()
-
 			// Modify actual traffic rules only after validation
 			server.RequestPublicKey = newServer.RequestPublicKey
 			server.RequestPrivateKey = newServer.RequestPrivateKey
 			server.RequestObfuscatedKey = newServer.RequestObfuscatedKey
 			server.DefaultTactics = newServer.DefaultTactics
 			server.FilteredTactics = newServer.FilteredTactics
+
+			server.initLookups()
 
 			server.loaded = true
 
@@ -571,7 +571,7 @@ func (server *Server) Validate() error {
 	return nil
 }
 
-const lookupThreshold = 5
+const stringLookupThreshold = 5
 
 // initLookups creates map lookups for filters where the number
 // of string values to compare against exceeds a threshold where
@@ -581,17 +581,17 @@ func (server *Server) initLookups() {
 
 	for _, filteredTactics := range server.FilteredTactics {
 
-		if len(filteredTactics.Filter.Regions) >= lookupThreshold {
+		if len(filteredTactics.Filter.Regions) >= stringLookupThreshold {
 			filteredTactics.Filter.regionLookup = make(map[string]bool)
 			for _, region := range filteredTactics.Filter.Regions {
 				filteredTactics.Filter.regionLookup[region] = true
 			}
 		}
 
-		if len(filteredTactics.Filter.ISPs) >= lookupThreshold {
-			filteredTactics.Filter.regionLookup = make(map[string]bool)
+		if len(filteredTactics.Filter.ISPs) >= stringLookupThreshold {
+			filteredTactics.Filter.ispLookup = make(map[string]bool)
 			for _, ISP := range filteredTactics.Filter.ISPs {
-				filteredTactics.Filter.regionLookup[ISP] = true
+				filteredTactics.Filter.ispLookup[ISP] = true
 			}
 		}
 

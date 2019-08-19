@@ -95,13 +95,13 @@ func TestServerEntryExchange(t *testing.T) {
 
 	// Generate server entries to test different cases
 	//
-	// Note: invalid signagture cases are exercised in
+	// Note: invalid signature cases are exercised in
 	// protocol.TestServerEntryListSignatures
 
-	makeServerEntryFields := func(IPaddress string) protocol.ServerEntryFields {
+	makeServerEntryFields := func(IPAddress string) protocol.ServerEntryFields {
 		n := 16
 		fields := make(protocol.ServerEntryFields)
-		fields["ipAddress"] = IPaddress
+		fields["ipAddress"] = IPAddress
 		fields["sshPort"] = 22
 		fields["sshUsername"] = prng.HexString(n)
 		fields["sshPassword"] = prng.HexString(n)

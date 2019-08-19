@@ -259,14 +259,7 @@ func (c *Conn) Write(buffer []byte) (int, error) {
 	var notice bytes.Buffer
 
 	if emitNotice {
-		remoteAddrStr := "(nil)"
-		remoteAddr := c.Conn.RemoteAddr()
-		if remoteAddr != nil {
-			remoteAddrStr = remoteAddr.String()
-		}
-		fmt.Fprintf(&notice,
-			"fragment %s %d bytes:",
-			remoteAddrStr, len(buffer))
+		fmt.Fprintf(&notice, "fragment %d bytes:", len(buffer))
 	}
 
 	for iterations := 0; len(buffer) > 0; iterations += 1 {

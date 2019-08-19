@@ -35,7 +35,8 @@ import (
 )
 
 type noticeLogger struct {
-	logDiagnostics             int32
+	emitDiagnostics            int32
+	emitNetworkParameters      int32
 	mutex                      sync.Mutex
 	writer                     io.Writer
 	homepageFilename           string
@@ -53,23 +54,40 @@ var singletonNoticeLogger = noticeLogger{
 	writer: os.Stderr,
 }
 
-// SetEmitDiagnosticNotices toggles whether diagnostic notices
-// are emitted. Diagnostic notices contain potentially sensitive
-// circumvention network information; only enable this in environments
-// where notices are handled securely (for example, don't include these
-// notices in log files which users could post to public forums).
-func SetEmitDiagnosticNotices(enable bool) {
-	if enable {
-		atomic.StoreInt32(&singletonNoticeLogger.logDiagnostics, 1)
+// SetEmitDiagnosticNotices toggles whether diagnostic notices are emitted;
+// and whether to include circumvention network parameters in diagnostics.
+//
+// Diagnostic notices contain potentially sensitive user information; and
+// sensitive circumvention network parameters, when enabled. Only enable this
+// in environments where notices are handled securely (for example, don't
+// include these notices in log files which users could post to public
+// forums).
+func SetEmitDiagnosticNotices(
+	emitDiagnostics bool, emitNetworkParameters bool) {
+
+	if emitDiagnostics {
+		atomic.StoreInt32(&singletonNoticeLogger.emitDiagnostics, 1)
 	} else {
-		atomic.StoreInt32(&singletonNoticeLogger.logDiagnostics, 0)
+		atomic.StoreInt32(&singletonNoticeLogger.emitDiagnostics, 0)
+	}
+
+	if emitNetworkParameters {
+		atomic.StoreInt32(&singletonNoticeLogger.emitNetworkParameters, 1)
+	} else {
+		atomic.StoreInt32(&singletonNoticeLogger.emitNetworkParameters, 0)
 	}
 }
 
-// GetEmitDiagnoticNotices returns the current state
+// GetEmitDiagnosticNotices returns the current state
 // of emitting diagnostic notices.
-func GetEmitDiagnoticNotices() bool {
-	return atomic.LoadInt32(&singletonNoticeLogger.logDiagnostics) == 1
+func GetEmitDiagnosticNotices() bool {
+	return atomic.LoadInt32(&singletonNoticeLogger.emitDiagnostics) == 1
+}
+
+// GetEmitNetworkParameters returns the current state
+// of emitting network parameters.
+func GetEmitNetworkParameters() bool {
+	return atomic.LoadInt32(&singletonNoticeLogger.emitNetworkParameters) == 1
 }
 
 // SetNoticeWriter sets a target writer to receive notices. By default,
@@ -188,7 +206,7 @@ const (
 // outputNotice encodes a notice in JSON and writes it to the output writer.
 func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args ...interface{}) {
 
-	if (noticeFlags&noticeIsDiagnostic != 0) && atomic.LoadInt32(&nl.logDiagnostics) != 1 {
+	if (noticeFlags&noticeIsDiagnostic != 0) && !GetEmitDiagnosticNotices() {
 		return
 	}
 
@@ -217,6 +235,11 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 		output = makeNoticeInternalError(
 			fmt.Sprintf("marshal notice failed: %s", common.ContextError(err)))
 	}
+
+	// Ensure direct server IPs are not exposed in notices. The "net" package,
+	// and possibly other 3rd party packages, will include destination addresses
+	// in I/O error messages.
+	output = StripIPAddresses(output)
 
 	nl.mutex.Lock()
 	defer nl.mutex.Unlock()
@@ -404,78 +427,81 @@ func NoticeAvailableEgressRegions(regions []string) {
 func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 
 	args := []interface{}{
-		"ipAddress", dialParams.ServerEntry.IpAddress,
+		"diagnosticID", dialParams.ServerEntry.GetDiagnosticID(),
 		"region", dialParams.ServerEntry.Region,
 		"protocol", dialParams.TunnelProtocol,
 		"isReplay", dialParams.IsReplay,
 	}
 
-	if dialParams.SelectedSSHClientVersion {
-		args = append(args, "SSHClientVersion", dialParams.SSHClientVersion)
-	}
+	if GetEmitNetworkParameters() {
 
-	if dialParams.UpstreamProxyType != "" {
-		args = append(args, "upstreamProxyType", dialParams.UpstreamProxyType)
-	}
-
-	if dialParams.UpstreamProxyCustomHeaderNames != nil {
-		args = append(args, "upstreamProxyCustomHeaderNames", strings.Join(dialParams.UpstreamProxyCustomHeaderNames, ","))
-	}
-
-	if dialParams.MeekDialAddress != "" {
-		args = append(args, "meekDialAddress", dialParams.MeekDialAddress)
-	}
-
-	meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
-	if meekResolvedIPAddress != "" {
-		args = append(args, "meekResolvedIPAddress", meekResolvedIPAddress)
-	}
-
-	if dialParams.MeekSNIServerName != "" {
-		args = append(args, "meekSNIServerName", dialParams.MeekSNIServerName)
-	}
-
-	if dialParams.MeekHostHeader != "" {
-		args = append(args, "meekHostHeader", dialParams.MeekHostHeader)
-	}
-
-	// MeekTransformedHostName is meaningful when meek is used, which is when MeekDialAddress != ""
-	if dialParams.MeekDialAddress != "" {
-		args = append(args, "meekTransformedHostName", dialParams.MeekTransformedHostName)
-	}
-
-	if dialParams.SelectedUserAgent {
-		args = append(args, "userAgent", dialParams.UserAgent)
-	}
-
-	if dialParams.SelectedTLSProfile {
-		args = append(args, "TLSProfile", dialParams.TLSProfile)
-		args = append(args, "TLSVersion", dialParams.TLSVersion)
-	}
-
-	if dialParams.DialPortNumber != "" {
-		args = append(args, "dialPortNumber", dialParams.DialPortNumber)
-	}
-
-	if dialParams.QUICVersion != "" {
-		args = append(args, "QUICVersion", dialParams.QUICVersion)
-	}
-
-	if dialParams.QUICDialSNIAddress != "" {
-		args = append(args, "QUICDialSNIAddress", dialParams.QUICDialSNIAddress)
-	}
-
-	if dialParams.DialConnMetrics != nil {
-		metrics := dialParams.DialConnMetrics.GetMetrics()
-		for name, value := range metrics {
-			args = append(args, name, value)
+		if dialParams.SelectedSSHClientVersion {
+			args = append(args, "SSHClientVersion", dialParams.SSHClientVersion)
 		}
-	}
 
-	if dialParams.ObfuscatedSSHConnMetrics != nil {
-		metrics := dialParams.ObfuscatedSSHConnMetrics.GetMetrics()
-		for name, value := range metrics {
-			args = append(args, name, value)
+		if dialParams.UpstreamProxyType != "" {
+			args = append(args, "upstreamProxyType", dialParams.UpstreamProxyType)
+		}
+
+		if dialParams.UpstreamProxyCustomHeaderNames != nil {
+			args = append(args, "upstreamProxyCustomHeaderNames", strings.Join(dialParams.UpstreamProxyCustomHeaderNames, ","))
+		}
+
+		if dialParams.MeekDialAddress != "" {
+			args = append(args, "meekDialAddress", dialParams.MeekDialAddress)
+		}
+
+		meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
+		if meekResolvedIPAddress != "" {
+			args = append(args, "meekResolvedIPAddress", meekResolvedIPAddress)
+		}
+
+		if dialParams.MeekSNIServerName != "" {
+			args = append(args, "meekSNIServerName", dialParams.MeekSNIServerName)
+		}
+
+		if dialParams.MeekHostHeader != "" {
+			args = append(args, "meekHostHeader", dialParams.MeekHostHeader)
+		}
+
+		// MeekTransformedHostName is meaningful when meek is used, which is when MeekDialAddress != ""
+		if dialParams.MeekDialAddress != "" {
+			args = append(args, "meekTransformedHostName", dialParams.MeekTransformedHostName)
+		}
+
+		if dialParams.SelectedUserAgent {
+			args = append(args, "userAgent", dialParams.UserAgent)
+		}
+
+		if dialParams.SelectedTLSProfile {
+			args = append(args, "TLSProfile", dialParams.TLSProfile)
+			args = append(args, "TLSVersion", dialParams.TLSVersion)
+		}
+
+		if dialParams.DialPortNumber != "" {
+			args = append(args, "dialPortNumber", dialParams.DialPortNumber)
+		}
+
+		if dialParams.QUICVersion != "" {
+			args = append(args, "QUICVersion", dialParams.QUICVersion)
+		}
+
+		if dialParams.QUICDialSNIAddress != "" {
+			args = append(args, "QUICDialSNIAddress", dialParams.QUICDialSNIAddress)
+		}
+
+		if dialParams.DialConnMetrics != nil {
+			metrics := dialParams.DialConnMetrics.GetMetrics()
+			for name, value := range metrics {
+				args = append(args, name, value)
+			}
+		}
+
+		if dialParams.ObfuscatedSSHConnMetrics != nil {
+			metrics := dialParams.ObfuscatedSSHConnMetrics.GetMetrics()
+			for name, value := range metrics {
+				args = append(args, name, value)
+			}
 		}
 	}
 
@@ -505,10 +531,10 @@ func NoticeRequestedTactics(dialParams *DialParameters) {
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
-func NoticeActiveTunnel(ipAddress, protocol string, isTCS bool) {
+func NoticeActiveTunnel(diagnosticID, protocol string, isTCS bool) {
 	singletonNoticeLogger.outputNotice(
 		"ActiveTunnel", noticeIsDiagnostic,
-		"ipAddress", ipAddress,
+		"diagnosticID", diagnosticID,
 		"protocol", protocol,
 		"isTCS", isTCS)
 }
@@ -642,25 +668,24 @@ func NoticeClientUpgradeDownloaded(filename string) {
 }
 
 // NoticeBytesTransferred reports how many tunneled bytes have been
-// transferred since the last NoticeBytesTransferred, for the tunnel
-// to the server at ipAddress. This is not a diagnostic notice: the
-// user app has requested this notice with EmitBytesTransferred for
-// functionality such as traffic display; and this frequent notice
-// is not intended to be included with feedback.
-func NoticeBytesTransferred(ipAddress string, sent, received int64) {
+// transferred since the last NoticeBytesTransferred. This is not a diagnostic
+// notice: the user app has requested this notice with EmitBytesTransferred
+// for functionality such as traffic display; and this frequent notice is not
+// intended to be included with feedback.
+func NoticeBytesTransferred(diagnosticID string, sent, received int64) {
 	singletonNoticeLogger.outputNotice(
 		"BytesTransferred", 0,
+		"diagnosticID", diagnosticID,
 		"sent", sent,
 		"received", received)
 }
 
 // NoticeTotalBytesTransferred reports how many tunneled bytes have been
-// transferred in total up to this point, for the tunnel to the server
-// at ipAddress. This is a diagnostic notice.
-func NoticeTotalBytesTransferred(ipAddress string, sent, received int64) {
+// transferred in total up to this point. This is a diagnostic notice.
+func NoticeTotalBytesTransferred(diagnosticID string, sent, received int64) {
 	singletonNoticeLogger.outputNotice(
 		"TotalBytesTransferred", noticeIsDiagnostic,
-		"ipAddress", ipAddress,
+		"diagnosticID", diagnosticID,
 		"sent", sent,
 		"received", received)
 }
@@ -701,6 +726,9 @@ func NoticeExiting() {
 
 // NoticeRemoteServerListResourceDownloadedBytes reports remote server list download progress.
 func NoticeRemoteServerListResourceDownloadedBytes(url string, bytes int64) {
+	if !GetEmitNetworkParameters() {
+		url = "[redacted]"
+	}
 	singletonNoticeLogger.outputNotice(
 		"RemoteServerListResourceDownloadedBytes", noticeIsDiagnostic,
 		"url", url,
@@ -710,6 +738,9 @@ func NoticeRemoteServerListResourceDownloadedBytes(url string, bytes int64) {
 // NoticeRemoteServerListResourceDownloaded indicates that a remote server list download
 // completed successfully.
 func NoticeRemoteServerListResourceDownloaded(url string) {
+	if !GetEmitNetworkParameters() {
+		url = "[redacted]"
+	}
 	singletonNoticeLogger.outputNotice(
 		"RemoteServerListResourceDownloaded", noticeIsDiagnostic,
 		"url", url)
@@ -757,10 +788,10 @@ func NoticeNetworkID(networkID string) {
 		"NetworkID", 0, "ID", networkID)
 }
 
-func NoticeLivenessTest(ipAddress string, metrics *livenessTestMetrics, success bool) {
+func NoticeLivenessTest(diagnosticID string, metrics *livenessTestMetrics, success bool) {
 	singletonNoticeLogger.outputNotice(
 		"LivenessTest", noticeIsDiagnostic,
-		"ipAddress", ipAddress,
+		"diagnosticID", diagnosticID,
 		"metrics", metrics,
 		"success", success)
 }
@@ -777,6 +808,13 @@ func NoticeEstablishTunnelTimeout(timeout time.Duration) {
 	singletonNoticeLogger.outputNotice(
 		"EstablishTunnelTimeout", noticeShowUser,
 		"timeout", timeout)
+}
+
+func NoticeFragmentor(diagnosticID string, message string) {
+	singletonNoticeLogger.outputNotice(
+		"Fragmentor", noticeIsDiagnostic,
+		"diagnosticID", diagnosticID,
+		"message", message)
 }
 
 type repetitiveNoticeState struct {
