@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -119,12 +120,12 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 		return d.DialContext(ctx, network, address)
 	}
 
-	clientParameters, err := parameters.NewClientParameters(nil)
-	if err != nil {
-		t.Fatalf("%s\n", err)
-	}
+	clientParameters := makeCustomTLSProfilesClientParameters(t)
 
-	for _, tlsProfile := range protocol.SupportedTLSProfiles {
+	profiles := append([]string(nil), protocol.SupportedTLSProfiles...)
+	profiles = append(profiles, clientParameters.Get().CustomTLSProfileNames()...)
+
+	for _, tlsProfile := range profiles {
 
 		repeats := 1
 		if protocol.TLSProfileIsRandomized(tlsProfile) {
@@ -169,10 +170,10 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 
 func TestSelectTLSProfile(t *testing.T) {
 
-	clientParameters, err := parameters.NewClientParameters(nil)
-	if err != nil {
-		t.Fatalf("%s\n", err)
-	}
+	clientParameters := makeCustomTLSProfilesClientParameters(t)
+
+	profiles := append([]string(nil), protocol.SupportedTLSProfiles...)
+	profiles = append(profiles, clientParameters.Get().CustomTLSProfileNames()...)
 
 	selected := make(map[string]int)
 
@@ -185,7 +186,7 @@ func TestSelectTLSProfile(t *testing.T) {
 
 	// All TLS profiles should be selected at least once.
 
-	for _, profile := range protocol.SupportedTLSProfiles {
+	for _, profile := range profiles {
 		if selected[profile] < 1 {
 			t.Errorf("TLS profile %s not selected", profile)
 		}
@@ -214,9 +215,35 @@ func TestSelectTLSProfile(t *testing.T) {
 
 	// getUTLSClientHelloID should map each TLS profile to a utls ClientHelloID.
 
-	for _, profile := range protocol.SupportedTLSProfiles {
-		if getUTLSClientHelloID(profile) == utls.HelloGolang {
-			t.Errorf("TLS profile %s has no utls ClientHelloID", profile)
+	for i, profile := range profiles {
+		utlsClientHelloID, utlsClientHelloSpec, err :=
+			getUTLSClientHelloID(clientParameters.Get(), profile)
+		if err != nil {
+			t.Fatalf("getUTLSClientHelloID failed: %s\n", err)
+		}
+
+		var unexpectedClientHelloID, unexpectedClientHelloSpec bool
+		if i < len(protocol.SupportedTLSProfiles) {
+			if utlsClientHelloID == utls.HelloCustom {
+				unexpectedClientHelloID = true
+			}
+			if utlsClientHelloSpec != nil {
+				unexpectedClientHelloSpec = true
+			}
+		} else {
+			if utlsClientHelloID != utls.HelloCustom {
+				unexpectedClientHelloID = true
+			}
+			if utlsClientHelloSpec == nil {
+				unexpectedClientHelloSpec = true
+			}
+		}
+
+		if unexpectedClientHelloID {
+			t.Errorf("Unexpected ClientHelloID for TLS profile %s", profile)
+		}
+		if unexpectedClientHelloSpec {
+			t.Errorf("Unexpected ClientHelloSpec for TLS profile %s", profile)
 		}
 	}
 }
@@ -225,6 +252,67 @@ func BenchmarkRandomizedGetClientHelloVersion(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		utlsClientHelloID := utls.HelloRandomized
 		utlsClientHelloID.Seed, _ = utls.NewPRNGSeed()
-		getClientHelloVersion(utlsClientHelloID)
+		getClientHelloVersion(utlsClientHelloID, nil)
 	}
+}
+
+func makeCustomTLSProfilesClientParameters(
+	t *testing.T) *parameters.ClientParameters {
+
+	clientParameters, err := parameters.NewClientParameters(nil)
+	if err != nil {
+		t.Fatalf("NewClientParameters failed: %s\n", err)
+	}
+
+	// Equivilent to utls.HelloChrome_62
+	customTLSProfilesJSON := []byte(`
+    [
+      {
+        "Name": "CustomProfile",
+        "UTLSSpec": {
+          "TLSVersMax": 771,
+          "TLSVersMin": 769,
+          "CipherSuites": [2570, 49195, 49199, 49196, 49200, 52393, 52392, 49171, 49172, 156, 157, 47, 53, 10],
+          "CompressionMethods": [0],
+          "Extensions" : [
+            {"Name": "GREASE"},
+            {"Name": "SNI"},
+            {"Name": "ExtendedMasterSecret"},
+            {"Name": "SessionTicket"},
+            {"Name": "SignatureAlgorithms", "Data": {"SupportedSignatureAlgorithms": [1027, 2052, 1025, 1283, 2053, 1281, 2054, 1537, 513]}},
+            {"Name": "StatusRequest"},
+            {"Name": "SCT"},
+            {"Name": "ALPN", "Data": {"AlpnProtocols": ["h2", "http/1.1"]}},
+            {"Name": "ChannelID"},
+            {"Name": "SupportedPoints", "Data": {"SupportedPoints": [0]}},
+            {"Name": "SupportedCurves", "Data": {"Curves": [2570, 29, 23, 24]}},
+            {"Name": "BoringPadding"},
+            {"Name": "GREASE"}],
+          "GetSessionID" : "SHA-256"
+        }
+      }
+    ]`)
+
+	var customTLSProfiles protocol.CustomTLSProfiles
+
+	err = json.Unmarshal(customTLSProfilesJSON, &customTLSProfiles)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %s", err)
+	}
+
+	applyParameters := make(map[string]interface{})
+
+	applyParameters[parameters.CustomTLSProfiles] = customTLSProfiles
+
+	_, err = clientParameters.Set("", false, applyParameters)
+	if err != nil {
+		t.Fatalf("Set failed: %s", err)
+	}
+
+	customTLSProfileNames := clientParameters.Get().CustomTLSProfileNames()
+	if len(customTLSProfileNames) != 1 {
+		t.Fatalf("Unexpected CustomTLSProfileNames count")
+	}
+
+	return clientParameters
 }

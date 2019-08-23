@@ -838,7 +838,7 @@ func getBaseAPIParameters(
 
 	if dialParams.SelectedTLSProfile {
 		params["tls_profile"] = dialParams.TLSProfile
-		params["tls_version"] = dialParams.TLSVersion
+		params["tls_version"] = dialParams.GetTLSVersionForMetrics()
 	}
 
 	if dialParams.ServerEntry.Region != "" {

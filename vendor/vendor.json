@@ -488,10 +488,10 @@
 			"tree": true
 		},
 		{
-			"checksumSHA1": "wfvFeuJFOZ358JKzBIU5h899M/c=",
+			"checksumSHA1": "S5FV5qBbMksx0vxajWD94J2KeHw=",
 			"path": "github.com/refraction-networking/utls",
-			"revision": "4da67951864128358459681399dd208c49d5d001",
-			"revisionTime": "2019-08-12T21:06:06Z"
+			"revision": "1552a980cef9b4c9b088a1c8fe33c774c031c295",
+			"revisionTime": "2019-08-22T22:33:47Z"
 		},
 		{
 			"checksumSHA1": "Fn9JW8u40ABN9Uc9wuvquuyOB+8=",

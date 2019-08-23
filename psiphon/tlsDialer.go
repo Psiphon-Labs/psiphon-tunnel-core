@@ -58,6 +58,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"time"
@@ -115,6 +116,11 @@ type CustomTLSConfig struct {
 	// compatibility constraints.
 	TLSProfile string
 
+	// NoDefaultTLSSessionID specifies whether to set a TLS session ID by
+	// default, for a new TLS connection that is not resuming a session.
+	// When nil, the parameter is set randomly.
+	NoDefaultTLSSessionID *bool
+
 	// RandomizedTLSProfileSeed specifies the PRNG seed to use when generating
 	// a randomized TLS ClientHello, which applies to TLS profiles where
 	// protocol.TLSProfileIsRandomized is true. The PRNG seed allows for
@@ -147,14 +153,20 @@ func (config *CustomTLSConfig) EnableClientSessionCache(
 func SelectTLSProfile(
 	p *parameters.ClientParametersSnapshot) string {
 
-	// Two TLS profile lists are constructed, subject to limit constraints: fixed
-	// parrots and randomized. If one list is empty, the non-empty list is used.
-	// Otherwise SelectRandomizedTLSProfileProbability determines which list is used.
+	// Two TLS profile lists are constructed, subject to limit constraints:
+	// stock, fixed parrots (non-randomized SupportedTLSProfiles) and custom
+	// parrots (CustomTLSProfileNames); and randomized. If one list is empty, the
+	// non-empty list is used. Otherwise SelectRandomizedTLSProfileProbability
+	// determines which list is used.
+	//
+	// Note that LimitTLSProfiles is not applied to CustomTLSProfiles; the
+	// presence of a candidate in CustomTLSProfiles is treated as explicit
+	// enabling.
 
 	limitTLSProfiles := p.TLSProfiles(parameters.LimitTLSProfiles)
 
 	randomizedTLSProfiles := make([]string, 0)
-	parrotTLSProfiles := make([]string, 0)
+	parrotTLSProfiles := p.CustomTLSProfileNames()
 
 	for _, tlsProfile := range protocol.SupportedTLSProfiles {
 
@@ -184,41 +196,78 @@ func SelectTLSProfile(
 	return parrotTLSProfiles[prng.Intn(len(parrotTLSProfiles))]
 }
 
-func getUTLSClientHelloID(tlsProfile string) utls.ClientHelloID {
+func getUTLSClientHelloID(
+	p *parameters.ClientParametersSnapshot,
+	tlsProfile string) (utls.ClientHelloID, *utls.ClientHelloSpec, error) {
+
 	switch tlsProfile {
 	case protocol.TLS_PROFILE_IOS_111:
-		return utls.HelloIOS_11_1
+		return utls.HelloIOS_11_1, nil, nil
 	case protocol.TLS_PROFILE_IOS_121:
-		return utls.HelloIOS_12_1
+		return utls.HelloIOS_12_1, nil, nil
 	case protocol.TLS_PROFILE_CHROME_58:
-		return utls.HelloChrome_58
+		return utls.HelloChrome_58, nil, nil
 	case protocol.TLS_PROFILE_CHROME_62:
-		return utls.HelloChrome_62
+		return utls.HelloChrome_62, nil, nil
 	case protocol.TLS_PROFILE_CHROME_70:
-		return utls.HelloChrome_70
+		return utls.HelloChrome_70, nil, nil
 	case protocol.TLS_PROFILE_CHROME_72:
-		return utls.HelloChrome_72
+		return utls.HelloChrome_72, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_55:
-		return utls.HelloFirefox_55
+		return utls.HelloFirefox_55, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_56:
-		return utls.HelloFirefox_56
+		return utls.HelloFirefox_56, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_65:
-		return utls.HelloFirefox_65
+		return utls.HelloFirefox_65, nil, nil
 	case protocol.TLS_PROFILE_RANDOMIZED:
-		return utls.HelloRandomized
-	default:
-		return utls.HelloGolang
+		return utls.HelloRandomized, nil, nil
 	}
+
+	// utls.HelloCustom with a utls.ClientHelloSpec is used for
+	// CustomTLSProfiles.
+
+	customTLSProfile := p.CustomTLSProfile(tlsProfile)
+	if customTLSProfile == nil {
+		return utls.HelloCustom,
+			nil,
+			common.ContextError(fmt.Errorf("unknown TLS profile: %s", tlsProfile))
+	}
+
+	utlsClientHelloSpec, err := customTLSProfile.GetClientHelloSpec()
+	if err != nil {
+		return utls.ClientHelloID{}, nil, common.ContextError(err)
+	}
+
+	return utls.HelloCustom, utlsClientHelloSpec, nil
 }
 
-func getClientHelloVersion(utlsClientHelloID utls.ClientHelloID) (string, error) {
+func getClientHelloVersion(
+	utlsClientHelloID utls.ClientHelloID,
+	utlsClientHelloSpec *utls.ClientHelloSpec) (string, error) {
 
-	// Assumes utlsClientHelloID.Seed has been set; otherwise the result is
-	// ephemeral.
+	switch utlsClientHelloID {
+
+	case utls.HelloIOS_11_1, utls.HelloIOS_12_1, utls.HelloChrome_58,
+		utls.HelloChrome_62, utls.HelloFirefox_55, utls.HelloFirefox_56:
+		return protocol.TLS_VERSION_12, nil
+
+	case utls.HelloChrome_70, utls.HelloChrome_72, utls.HelloFirefox_65,
+		utls.HelloGolang:
+		return protocol.TLS_VERSION_13, nil
+
+	case utls.HelloCustom:
+		if utlsClientHelloSpec.TLSVersMax == utls.VersionTLS12 {
+			return protocol.TLS_VERSION_12, nil
+		}
+		return protocol.TLS_VERSION_13, nil
+	}
 
 	// As utls.HelloRandomized may be either TLS 1.2 or TLS 1.3, we cannot
 	// perform a simple ClientHello ID check. BuildHandshakeState is run, which
 	// constructs the entire ClientHello.
+	//
+	// Assumes utlsClientHelloID.Seed has been set; otherwise the result is
+	// ephemeral.
 	//
 	// BenchmarkRandomizedGetClientHelloVersion indicates that this operation
 	// takes on the order of 0.05ms and allocates ~8KB for randomized client
@@ -241,6 +290,21 @@ func getClientHelloVersion(utlsClientHelloID utls.ClientHelloID) (string, error)
 	}
 
 	return protocol.TLS_VERSION_12, nil
+}
+
+func isNoDefaultSessionIDCandidate(utlsClientHelloID utls.ClientHelloID) bool {
+
+	// Either TLS 1.2 parrots or any randomized ClientHello is a candidate. This
+	// check doesn't incur the overhead of invoking BuildHandshakeState.
+
+	switch utlsClientHelloID {
+
+	case utls.HelloIOS_11_1, utls.HelloIOS_12_1, utls.HelloChrome_58,
+		utls.HelloChrome_62, utls.HelloFirefox_55, utls.HelloFirefox_56:
+		return true
+	}
+
+	return utlsClientHelloID.Client == "Randomized"
 }
 
 func IsTLSConnUsingHTTP2(conn net.Conn) bool {
@@ -274,6 +338,8 @@ func CustomTLSDial(
 	network, addr string,
 	config *CustomTLSConfig) (net.Conn, error) {
 
+	p := config.ClientParameters.Get()
+
 	dialAddr := addr
 	if config.DialAddr != "" {
 		dialAddr = config.DialAddr
@@ -293,7 +359,7 @@ func CustomTLSDial(
 	selectedTLSProfile := config.TLSProfile
 
 	if selectedTLSProfile == "" {
-		selectedTLSProfile = SelectTLSProfile(config.ClientParameters.Get())
+		selectedTLSProfile = SelectTLSProfile(p)
 	}
 
 	tlsConfigInsecureSkipVerify := false
@@ -337,12 +403,14 @@ func CustomTLSDial(
 		ServerName:         tlsConfigServerName,
 	}
 
-	utlsClientHelloID := getUTLSClientHelloID(selectedTLSProfile)
-
-	isRandomized := protocol.TLSProfileIsRandomized(selectedTLSProfile)
+	utlsClientHelloID, utlsClientHelloSpec, err := getUTLSClientHelloID(
+		p, selectedTLSProfile)
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
 
 	var randomizedTLSProfileSeed *prng.Seed
-
+	isRandomized := protocol.TLSProfileIsRandomized(selectedTLSProfile)
 	if isRandomized {
 
 		randomizedTLSProfileSeed = config.RandomizedTLSProfileSeed
@@ -362,8 +430,8 @@ func CustomTLSDial(
 	// As noted here,
 	// https://gitlab.com/yawning/obfs4/commit/ca6765e3e3995144df2b1ca9f0e9d823a7f8a47c,
 	// the dynamic record sizing optimization in crypto/tls is not commonly
-	// implemented in browsers. Disable it for all non-Golang utls parrots and
-	// select it randomly when using the randomized client hello.
+	// implemented in browsers. Disable it for all utls parrots and select it
+	// randomly when using the randomized client hello.
 	if isRandomized {
 		PRNG, err := prng.NewPRNGWithSaltedSeed(randomizedTLSProfileSeed, "tls-dynamic-record-sizing")
 		if err != nil {
@@ -371,10 +439,17 @@ func CustomTLSDial(
 		}
 		tlsConfig.DynamicRecordSizingDisabled = PRNG.FlipCoin()
 	} else {
-		tlsConfig.DynamicRecordSizingDisabled = (utlsClientHelloID != utls.HelloGolang)
+		tlsConfig.DynamicRecordSizingDisabled = true
 	}
 
 	conn := utls.UClient(rawConn, tlsConfig, utlsClientHelloID)
+
+	if utlsClientHelloSpec != nil {
+		err = conn.ApplyPreset(utlsClientHelloSpec)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+	}
 
 	clientSessionCache := config.clientSessionCache
 	if clientSessionCache == nil {
@@ -383,19 +458,24 @@ func CustomTLSDial(
 
 	conn.SetSessionCache(clientSessionCache)
 
-	// Obfuscated session tickets are not currently supported in TLS 1.3, but we
-	// allow UNFRONTED-MEEK-SESSION-TICKET-OSSH to use TLS 1.3 profiles for
-	// additional diversity/capacity; TLS 1.3 encrypts the server certificate,
-	// so the desired obfuscated session tickets property of obfuscating server
-	// certificates is satisfied. We know that when the ClientHello offers TLS
-	// 1.3, the Psiphon server, in these direct protocol cases, will negotiate
-	// it.
 	if config.ObfuscatedSessionTicketKey != "" {
 
-		tlsVersion, err := getClientHelloVersion(utlsClientHelloID)
+		// Since getClientHelloVersion may incur some overhead, only invoke it when
+		// necessary.
+		tlsVersion, err := getClientHelloVersion(utlsClientHelloID, utlsClientHelloSpec)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
+
+		// Add the obfuscated session ticket only when using TLS 1.2.
+		//
+		// Obfuscated session tickets are not currently supported in TLS 1.3, but we
+		// allow UNFRONTED-MEEK-SESSION-TICKET-OSSH to use TLS 1.3 profiles for
+		// additional diversity/capacity; TLS 1.3 encrypts the server certificate,
+		// so the desired obfuscated session tickets property of obfuscating server
+		// certificates is satisfied. We know that when the ClientHello offers TLS
+		// 1.3, the Psiphon server, in these direct protocol cases, will negotiate
+		// it.
 
 		if tlsVersion == protocol.TLS_VERSION_12 {
 
@@ -447,6 +527,39 @@ func CustomTLSDial(
 			}
 		}
 	}
+
+	// Build the ClientHello and inspect to apply NoDefaultSessionID logic.
+
+	if len(conn.HandshakeState.Hello.SessionTicket) == 0 &&
+		isNoDefaultSessionIDCandidate(utlsClientHelloID) {
+
+		if !conn.ClientHelloBuilt {
+			err = conn.BuildHandshakeState()
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+		}
+
+		var noDefaultSessionID bool
+		if config.NoDefaultTLSSessionID != nil {
+			noDefaultSessionID = *config.NoDefaultTLSSessionID
+		} else {
+			noDefaultSessionID = config.ClientParameters.Get().WeightedCoinFlip(
+				parameters.NoDefaultTLSSessionIDProbability)
+		}
+
+		if noDefaultSessionID {
+
+			conn.HandshakeState.Hello.SessionId = nil
+
+			err = conn.MarshalClientHello()
+			if err != nil {
+				return nil, common.ContextError(err)
+			}
+		}
+	}
+
+	// Perform the TLS Handshake.
 
 	resultChannel := make(chan error)
 

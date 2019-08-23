@@ -92,6 +92,11 @@ type MeekConfig struct {
 	// underlying TLS connections created by this meek connection.
 	TLSProfile string
 
+	// NoDefaultTLSSessionID specifies the value for
+	// CustomTLSConfig.NoDefaultTLSSessionID for all underlying TLS connections
+	// created by this meek connection.
+	NoDefaultTLSSessionID bool
+
 	// RandomizedTLSProfileSeed specifies the value for
 	// CustomTLSConfig.RandomizedTLSProfileSeed for all underlying TLS
 	// connections created by this meek connection.
@@ -293,6 +298,7 @@ func DialMeek(
 			SNIServerName:                 meekConfig.SNIServerName,
 			SkipVerify:                    true,
 			TLSProfile:                    meekConfig.TLSProfile,
+			NoDefaultTLSSessionID:         &meekConfig.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed:      meekConfig.RandomizedTLSProfileSeed,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
 		}
