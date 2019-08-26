@@ -277,8 +277,8 @@ func TestCustomTLSProfiles(t *testing.T) {
 	}
 
 	customTLSProfiles := protocol.CustomTLSProfiles{
-		&protocol.CustomTLSProfile{Name: "Profile1"},
-		&protocol.CustomTLSProfile{Name: "Profile2"},
+		&protocol.CustomTLSProfile{Name: "Profile1", UTLSSpec: &protocol.UTLSSpec{}},
+		&protocol.CustomTLSProfile{Name: "Profile2", UTLSSpec: &protocol.UTLSSpec{}},
 	}
 
 	applyParameters := map[string]interface{}{

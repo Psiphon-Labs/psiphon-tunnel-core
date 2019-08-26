@@ -132,7 +132,7 @@ func TestCustomTLSProfiles(t *testing.T) {
             {"Name": "CertCompressionAlgs", "Data": {"Methods": [2]}},
             {"Name": "ChannelID"},
             {"Name": "RecordSizeLimit", "Data": {"Limit": 9999}}],
-          "GetSessionID" : "SHA-256"
+          "GetSessionID": "SHA-256"
         }
       }
     ]`)

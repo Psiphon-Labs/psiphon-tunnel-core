@@ -37,15 +37,23 @@ type CustomTLSProfile struct {
 
 type CustomTLSProfiles []*CustomTLSProfile
 
-// Validate checks that the profiles in CustomTLSProfiles have no name conflicts.
+// Validate checks that the profiles in CustomTLSProfiles are initialized and
+// have no name conflicts.
 func (profiles CustomTLSProfiles) Validate() error {
 	names := make(map[string]bool)
 	for _, p := range profiles {
-		if p.Name == "" || common.Contains(SupportedTLSProfiles, p.Name) {
-			return common.ContextError(fmt.Errorf("invalid custom TLS profile: %s", p.Name))
+		if p.Name == "" {
+			return common.ContextError(fmt.Errorf("custom TLS profile missing name: %s", p.Name))
+		}
+		if p.UTLSSpec == nil {
+			return common.ContextError(fmt.Errorf("custom TLS profile missing utls spec: %s", p.Name))
+		}
+		if common.Contains(SupportedTLSProfiles, p.Name) ||
+			common.Contains(legacyTLSProfiles, p.Name) {
+			return common.ContextError(fmt.Errorf("invalid custom TLS profile name: %s", p.Name))
 		}
 		if _, ok := names[p.Name]; ok {
-			return common.ContextError(fmt.Errorf("duplicate custom TLS profile: %s", p.Name))
+			return common.ContextError(fmt.Errorf("duplicate custom TLS profile name: %s", p.Name))
 		}
 		names[p.Name] = true
 	}

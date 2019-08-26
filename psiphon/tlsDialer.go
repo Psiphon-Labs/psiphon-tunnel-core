@@ -162,23 +162,34 @@ func SelectTLSProfile(
 	// Note that LimitTLSProfiles is not applied to CustomTLSProfiles; the
 	// presence of a candidate in CustomTLSProfiles is treated as explicit
 	// enabling.
+	//
+	// UseOnlyCustomTLSProfiles may be used to disable all stock TLS profiles and
+	// use only CustomTLSProfiles; UseOnlyCustomTLSProfiles is ignored if
+	// CustomTLSProfiles is empty.
 
 	limitTLSProfiles := p.TLSProfiles(parameters.LimitTLSProfiles)
 
 	randomizedTLSProfiles := make([]string, 0)
 	parrotTLSProfiles := p.CustomTLSProfileNames()
 
-	for _, tlsProfile := range protocol.SupportedTLSProfiles {
+	useOnlyCustomTLSProfiles := p.Bool(parameters.UseOnlyCustomTLSProfiles)
+	if useOnlyCustomTLSProfiles && len(parrotTLSProfiles) == 0 {
+		useOnlyCustomTLSProfiles = false
+	}
 
-		if len(limitTLSProfiles) > 0 &&
-			!common.Contains(limitTLSProfiles, tlsProfile) {
-			continue
-		}
+	if !useOnlyCustomTLSProfiles {
+		for _, tlsProfile := range protocol.SupportedTLSProfiles {
 
-		if protocol.TLSProfileIsRandomized(tlsProfile) {
-			randomizedTLSProfiles = append(randomizedTLSProfiles, tlsProfile)
-		} else {
-			parrotTLSProfiles = append(parrotTLSProfiles, tlsProfile)
+			if len(limitTLSProfiles) > 0 &&
+				!common.Contains(limitTLSProfiles, tlsProfile) {
+				continue
+			}
+
+			if protocol.TLSProfileIsRandomized(tlsProfile) {
+				randomizedTLSProfiles = append(randomizedTLSProfiles, tlsProfile)
+			} else {
+				parrotTLSProfiles = append(parrotTLSProfiles, tlsProfile)
+			}
 		}
 	}
 

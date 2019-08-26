@@ -120,7 +120,7 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 		return d.DialContext(ctx, network, address)
 	}
 
-	clientParameters := makeCustomTLSProfilesClientParameters(t)
+	clientParameters := makeCustomTLSProfilesClientParameters(t, false)
 
 	profiles := append([]string(nil), protocol.SupportedTLSProfiles...)
 	profiles = append(profiles, clientParameters.Get().CustomTLSProfileNames()...)
@@ -170,7 +170,7 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 
 func TestSelectTLSProfile(t *testing.T) {
 
-	clientParameters := makeCustomTLSProfilesClientParameters(t)
+	clientParameters := makeCustomTLSProfilesClientParameters(t, false)
 
 	profiles := append([]string(nil), protocol.SupportedTLSProfiles...)
 	profiles = append(profiles, clientParameters.Get().CustomTLSProfileNames()...)
@@ -190,6 +190,12 @@ func TestSelectTLSProfile(t *testing.T) {
 		if selected[profile] < 1 {
 			t.Errorf("TLS profile %s not selected", profile)
 		}
+	}
+
+	// Only expected profiles should be selected
+
+	if len(selected) != len(profiles) {
+		t.Errorf("unexpected TLS profile selected")
 	}
 
 	// Randomized TLS profiles should be selected with expected probability.
@@ -246,6 +252,18 @@ func TestSelectTLSProfile(t *testing.T) {
 			t.Errorf("Unexpected ClientHelloSpec for TLS profile %s", profile)
 		}
 	}
+
+	// Only custom TLS profiles should be selected
+
+	clientParameters = makeCustomTLSProfilesClientParameters(t, true)
+	customTLSProfileNames := clientParameters.Get().CustomTLSProfileNames()
+
+	for i := 0; i < numSelections; i++ {
+		profile := SelectTLSProfile(clientParameters.Get())
+		if !common.Contains(customTLSProfileNames, profile) {
+			t.Errorf("unexpected non-custom TLS profile selected")
+		}
+	}
 }
 
 func BenchmarkRandomizedGetClientHelloVersion(b *testing.B) {
@@ -257,7 +275,7 @@ func BenchmarkRandomizedGetClientHelloVersion(b *testing.B) {
 }
 
 func makeCustomTLSProfilesClientParameters(
-	t *testing.T) *parameters.ClientParameters {
+	t *testing.T, useOnlyCustomTLSProfiles bool) *parameters.ClientParameters {
 
 	clientParameters, err := parameters.NewClientParameters(nil)
 	if err != nil {
@@ -288,7 +306,7 @@ func makeCustomTLSProfilesClientParameters(
             {"Name": "SupportedCurves", "Data": {"Curves": [2570, 29, 23, 24]}},
             {"Name": "BoringPadding"},
             {"Name": "GREASE"}],
-          "GetSessionID" : "SHA-256"
+          "GetSessionID": "SHA-256"
         }
       }
     ]`)
@@ -302,6 +320,7 @@ func makeCustomTLSProfilesClientParameters(
 
 	applyParameters := make(map[string]interface{})
 
+	applyParameters[parameters.UseOnlyCustomTLSProfiles] = useOnlyCustomTLSProfiles
 	applyParameters[parameters.CustomTLSProfiles] = customTLSProfiles
 
 	_, err = clientParameters.Set("", false, applyParameters)
