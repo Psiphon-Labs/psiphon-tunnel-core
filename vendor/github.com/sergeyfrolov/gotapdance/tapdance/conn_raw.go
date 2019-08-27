@@ -388,8 +388,18 @@ func (tdRaw *tdRawConn) prepareTDRequest(handshakeType tdTagType) (string, error
 	}
 	Logger().Debugln(tdRaw.idStr()+" Initial protobuf", initProto)
 
+	// [Psiphon]
+	// Use decoy spec public key if available; otherwise, default public key.
+	var pubkey []byte
+	if tdRaw.decoySpec.Pubkey != nil {
+		pubkey = tdRaw.decoySpec.Pubkey.GetKey()
+	}
+	if len(pubkey) == 0 {
+		pubkey = tdRaw.stationPubkey
+	}
+
 	// Obfuscate/encrypt tag and protobuf
-	tag, encryptedProtoMsg, err := obfuscateTagAndProtobuf(buf.Bytes(), initProtoBytes, tdRaw.stationPubkey)
+	tag, encryptedProtoMsg, err := obfuscateTagAndProtobuf(buf.Bytes(), initProtoBytes, pubkey)
 	if err != nil {
 		return "", err
 	}
