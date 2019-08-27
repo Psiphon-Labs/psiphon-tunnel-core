@@ -32,6 +32,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -1232,9 +1233,9 @@ func checkExpectedLogFields(runConfig *runServerConfig, fields map[string]interf
 			return fmt.Errorf("unexpected tls_profile '%s'", fields["tls_profile"])
 		}
 
-		if !common.Contains(
-			[]string{protocol.TLS_VERSION_12, protocol.TLS_VERSION_13},
-			fields["tls_version"].(string)) {
+		tlsVersion := fields["tls_version"].(string)
+		if !strings.HasPrefix(tlsVersion, protocol.TLS_VERSION_12) &&
+			!strings.HasPrefix(tlsVersion, protocol.TLS_VERSION_13) {
 			return fmt.Errorf("unexpected tls_version '%s'", fields["tls_version"])
 		}
 	}
