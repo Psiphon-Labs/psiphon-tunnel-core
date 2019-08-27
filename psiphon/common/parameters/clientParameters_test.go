@@ -41,57 +41,66 @@ func TestGetDefaultParameters(t *testing.T) {
 		case string:
 			g := p.Get().String(name)
 			if v != g {
-				t.Fatalf("String returned %+v expected %+v", v, g)
+				t.Fatalf("String returned %+v expected %+v", g, v)
 			}
 		case int:
 			g := p.Get().Int(name)
 			if v != g {
-				t.Fatalf("Int returned %+v expected %+v", v, g)
+				t.Fatalf("Int returned %+v expected %+v", g, v)
 			}
 		case float64:
 			g := p.Get().Float(name)
 			if v != g {
-				t.Fatalf("Float returned %+v expected %+v", v, g)
+				t.Fatalf("Float returned %+v expected %+v", g, v)
 			}
 		case bool:
 			g := p.Get().Bool(name)
 			if v != g {
-				t.Fatalf("Bool returned %+v expected %+v", v, g)
+				t.Fatalf("Bool returned %+v expected %+v", g, v)
 			}
 		case time.Duration:
 			g := p.Get().Duration(name)
 			if v != g {
-				t.Fatalf("Duration returned %+v expected %+v", v, g)
+				t.Fatalf("Duration returned %+v expected %+v", g, v)
 			}
 		case protocol.TunnelProtocols:
 			g := p.Get().TunnelProtocols(name)
 			if !reflect.DeepEqual(v, g) {
-				t.Fatalf("TunnelProtocols returned %+v expected %+v", v, g)
+				t.Fatalf("TunnelProtocols returned %+v expected %+v", g, v)
 			}
 		case protocol.TLSProfiles:
 			g := p.Get().TLSProfiles(name)
 			if !reflect.DeepEqual(v, g) {
-				t.Fatalf("TLSProfiles returned %+v expected %+v", v, g)
+				t.Fatalf("TLSProfiles returned %+v expected %+v", g, v)
 			}
 		case protocol.QUICVersions:
 			g := p.Get().QUICVersions(name)
 			if !reflect.DeepEqual(v, g) {
-				t.Fatalf("QUICVersions returned %+v expected %+v", v, g)
+				t.Fatalf("QUICVersions returned %+v expected %+v", g, v)
 			}
 		case DownloadURLs:
 			g := p.Get().DownloadURLs(name)
 			if !reflect.DeepEqual(v, g) {
-				t.Fatalf("DownloadURLs returned %+v expected %+v", v, g)
+				t.Fatalf("DownloadURLs returned %+v expected %+v", g, v)
 			}
 		case common.RateLimits:
 			g := p.Get().RateLimits(name)
 			if !reflect.DeepEqual(v, g) {
-				t.Fatalf("RateLimits returned %+v expected %+v", v, g)
+				t.Fatalf("RateLimits returned %+v expected %+v", g, v)
 			}
 		case http.Header:
 			g := p.Get().HTTPHeaders(name)
 			if !reflect.DeepEqual(v, g) {
-				t.Fatalf("HTTPHeaders returned %+v expected %+v", v, g)
+				t.Fatalf("HTTPHeaders returned %+v expected %+v", g, v)
+			}
+		case protocol.CustomTLSProfiles:
+			g := p.Get().CustomTLSProfileNames()
+			names := make([]string, len(v))
+			for i, profile := range v {
+				names[i] = profile.Name
+			}
+			if !reflect.DeepEqual(names, g) {
+				t.Fatalf("CustomTLSProfileNames returned %+v expected %+v", g, names)
 			}
 		default:
 			t.Fatalf("Unhandled default type: %s", name)
@@ -258,5 +267,46 @@ func TestLimitTunnelProtocolProbability(t *testing.T) {
 
 	if matchCount < 250 || matchCount > 750 {
 		t.Fatalf("Unexpected probability result: %d", matchCount)
+	}
+}
+
+func TestCustomTLSProfiles(t *testing.T) {
+	p, err := NewClientParameters(nil)
+	if err != nil {
+		t.Fatalf("NewClientParameters failed: %s", err)
+	}
+
+	customTLSProfiles := protocol.CustomTLSProfiles{
+		&protocol.CustomTLSProfile{Name: "Profile1", UTLSSpec: &protocol.UTLSSpec{}},
+		&protocol.CustomTLSProfile{Name: "Profile2", UTLSSpec: &protocol.UTLSSpec{}},
+	}
+
+	applyParameters := map[string]interface{}{
+		"CustomTLSProfiles": customTLSProfiles}
+
+	_, err = p.Set("", false, applyParameters)
+	if err != nil {
+		t.Fatalf("Set failed: %s", err)
+	}
+
+	names := p.Get().CustomTLSProfileNames()
+
+	if len(names) != 2 || names[0] != "Profile1" || names[1] != "Profile2" {
+		t.Fatalf("Unexpected CustomTLSProfileNames: %+v", names)
+	}
+
+	profile := p.Get().CustomTLSProfile("Profile1")
+	if profile == nil || profile.Name != "Profile1" {
+		t.Fatalf("Unexpected profile")
+	}
+
+	profile = p.Get().CustomTLSProfile("Profile2")
+	if profile == nil || profile.Name != "Profile2" {
+		t.Fatalf("Unexpected profile")
+	}
+
+	profile = p.Get().CustomTLSProfile("Profile3")
+	if profile != nil {
+		t.Fatalf("Unexpected profile")
 	}
 }

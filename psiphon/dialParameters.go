@@ -94,6 +94,7 @@ type DialParameters struct {
 
 	SelectedTLSProfile       bool
 	TLSProfile               string
+	NoDefaultTLSSessionID    bool
 	TLSVersion               string
 	RandomizedTLSProfileSeed *prng.Seed
 
@@ -317,6 +318,8 @@ func MakeDialParameters(
 
 		dialParams.SelectedTLSProfile = true
 		dialParams.TLSProfile = SelectTLSProfile(p)
+		dialParams.NoDefaultTLSSessionID = p.WeightedCoinFlip(
+			parameters.NoDefaultTLSSessionIDProbability)
 	}
 
 	if (!isReplay || !replayRandomizedTLSProfile) &&
@@ -332,20 +335,25 @@ func MakeDialParameters(
 	if (!isReplay || !replayTLSProfile) &&
 		protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) {
 
-		// Since "Randomized-v2" may be TLS 1.2 or TLS 1.3, construct the
-		// ClientHello to determine if it's TLS 1.3. This test also covers
-		// non-randomized TLS 1.3 profiles. This check must come after
-		// dialParams.TLSProfile and dialParams.RandomizedTLSProfileSeed are set.
-		// No actual dial is made here.
+		// Since "Randomized-v2"/CustomTLSProfiles may be TLS 1.2 or TLS 1.3,
+		// construct the ClientHello to determine if it's TLS 1.3. This test also
+		// covers non-randomized TLS 1.3 profiles. This check must come after
+		// dialParams.TLSProfile and dialParams.RandomizedTLSProfileSeed are set. No
+		// actual dial is made here.
 
-		utlsClientHelloID := getUTLSClientHelloID(dialParams.TLSProfile)
+		utlsClientHelloID, utlsClientHelloSpec, err := getUTLSClientHelloID(
+			p, dialParams.TLSProfile)
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
 
 		if protocol.TLSProfileIsRandomized(dialParams.TLSProfile) {
 			utlsClientHelloID.Seed = new(utls.PRNGSeed)
 			*utlsClientHelloID.Seed = [32]byte(*dialParams.RandomizedTLSProfileSeed)
 		}
 
-		dialParams.TLSVersion, err = getClientHelloVersion(utlsClientHelloID)
+		dialParams.TLSVersion, err = getClientHelloVersion(
+			utlsClientHelloID, utlsClientHelloSpec)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -582,6 +590,7 @@ func MakeDialParameters(
 			QUICVersion:                   dialParams.QUICVersion,
 			UseHTTPS:                      protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol),
 			TLSProfile:                    dialParams.TLSProfile,
+			NoDefaultTLSSessionID:         dialParams.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed:      dialParams.RandomizedTLSProfileSeed,
 			UseObfuscatedSessionTickets:   dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 			SNIServerName:                 dialParams.MeekSNIServerName,
@@ -656,6 +665,14 @@ func (dialParams *DialParameters) Failed(config *Config) {
 			NoticeAlert("DeleteDialParameters failed: %s", err)
 		}
 	}
+}
+
+func (dialParams *DialParameters) GetTLSVersionForMetrics() string {
+	tlsVersion := dialParams.TLSVersion
+	if dialParams.NoDefaultTLSSessionID {
+		tlsVersion += "-no_def_id"
+	}
+	return tlsVersion
 }
 
 // ExchangedDialParameters represents the subset of DialParameters that is
