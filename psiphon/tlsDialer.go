@@ -265,15 +265,9 @@ func getClientHelloVersion(
 	case utls.HelloChrome_70, utls.HelloChrome_72, utls.HelloFirefox_65,
 		utls.HelloGolang:
 		return protocol.TLS_VERSION_13, nil
-
-	case utls.HelloCustom:
-		if utlsClientHelloSpec.TLSVersMax == utls.VersionTLS12 {
-			return protocol.TLS_VERSION_12, nil
-		}
-		return protocol.TLS_VERSION_13, nil
 	}
 
-	// As utls.HelloRandomized may be either TLS 1.2 or TLS 1.3, we cannot
+	// As utls.HelloRandomized/Custom may be either TLS 1.2 or TLS 1.3, we cannot
 	// perform a simple ClientHello ID check. BuildHandshakeState is run, which
 	// constructs the entire ClientHello.
 	//
@@ -289,6 +283,13 @@ func getClientHelloVersion(
 		&utls.Config{InsecureSkipVerify: true},
 		utlsClientHelloID)
 
+	if utlsClientHelloSpec != nil {
+		err := conn.ApplyPreset(utlsClientHelloSpec)
+		if err != nil {
+			return "", common.ContextError(err)
+		}
+	}
+
 	err := conn.BuildHandshakeState()
 	if err != nil {
 		return "", common.ContextError(err)
@@ -301,21 +302,6 @@ func getClientHelloVersion(
 	}
 
 	return protocol.TLS_VERSION_12, nil
-}
-
-func isNoDefaultSessionIDCandidate(utlsClientHelloID utls.ClientHelloID) bool {
-
-	// Either TLS 1.2 parrots or any randomized ClientHello is a candidate. This
-	// check doesn't incur the overhead of invoking BuildHandshakeState.
-
-	switch utlsClientHelloID {
-
-	case utls.HelloIOS_11_1, utls.HelloIOS_12_1, utls.HelloChrome_58,
-		utls.HelloChrome_62, utls.HelloFirefox_55, utls.HelloFirefox_56:
-		return true
-	}
-
-	return utlsClientHelloID.Client == "Randomized"
 }
 
 func IsTLSConnUsingHTTP2(conn net.Conn) bool {
@@ -456,7 +442,7 @@ func CustomTLSDial(
 	conn := utls.UClient(rawConn, tlsConfig, utlsClientHelloID)
 
 	if utlsClientHelloSpec != nil {
-		err = conn.ApplyPreset(utlsClientHelloSpec)
+		err := conn.ApplyPreset(utlsClientHelloSpec)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
@@ -469,87 +455,89 @@ func CustomTLSDial(
 
 	conn.SetSessionCache(clientSessionCache)
 
-	if config.ObfuscatedSessionTicketKey != "" {
+	// Build handshake state in advance to obtain the TLS version, which is used
+	// to determine whether the following customizations may be applied. Don't use
+	// getClientHelloVersion, since that may incur additional overhead.
 
-		// Since getClientHelloVersion may incur some overhead, only invoke it when
-		// necessary.
-		tlsVersion, err := getClientHelloVersion(utlsClientHelloID, utlsClientHelloSpec)
+	err = conn.BuildHandshakeState()
+	if err != nil {
+		return nil, common.ContextError(err)
+	}
+
+	isTLS13 := false
+	for _, vers := range conn.HandshakeState.Hello.SupportedVersions {
+		if vers == utls.VersionTLS13 {
+			isTLS13 = true
+			break
+		}
+	}
+
+	// Add the obfuscated session ticket only when using TLS 1.2.
+	//
+	// Obfuscated session tickets are not currently supported in TLS 1.3, but we
+	// allow UNFRONTED-MEEK-SESSION-TICKET-OSSH to use TLS 1.3 profiles for
+	// additional diversity/capacity; TLS 1.3 encrypts the server certificate,
+	// so the desired obfuscated session tickets property of obfuscating server
+	// certificates is satisfied. We know that when the ClientHello offers TLS
+	// 1.3, the Psiphon server, in these direct protocol cases, will negotiate
+	// it.
+
+	if config.ObfuscatedSessionTicketKey != "" && !isTLS13 {
+
+		var obfuscatedSessionTicketKey [32]byte
+
+		key, err := hex.DecodeString(config.ObfuscatedSessionTicketKey)
+		if err == nil && len(key) != 32 {
+			err = errors.New("invalid obfuscated session key length")
+		}
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
+		copy(obfuscatedSessionTicketKey[:], key)
+
+		obfuscatedSessionState, err := tris.NewObfuscatedClientSessionState(
+			obfuscatedSessionTicketKey)
 		if err != nil {
 			return nil, common.ContextError(err)
 		}
 
-		// Add the obfuscated session ticket only when using TLS 1.2.
-		//
-		// Obfuscated session tickets are not currently supported in TLS 1.3, but we
-		// allow UNFRONTED-MEEK-SESSION-TICKET-OSSH to use TLS 1.3 profiles for
-		// additional diversity/capacity; TLS 1.3 encrypts the server certificate,
-		// so the desired obfuscated session tickets property of obfuscating server
-		// certificates is satisfied. We know that when the ClientHello offers TLS
-		// 1.3, the Psiphon server, in these direct protocol cases, will negotiate
-		// it.
+		conn.SetSessionState(
+			utls.MakeClientSessionState(
+				obfuscatedSessionState.SessionTicket,
+				obfuscatedSessionState.Vers,
+				obfuscatedSessionState.CipherSuite,
+				obfuscatedSessionState.MasterSecret,
+				nil,
+				nil))
 
-		if tlsVersion == protocol.TLS_VERSION_12 {
+		// Apply changes to utls
+		err = conn.BuildHandshakeState()
+		if err != nil {
+			return nil, common.ContextError(err)
+		}
 
-			var obfuscatedSessionTicketKey [32]byte
+		// Ensure that TLS ClientHello has required session ticket extension and
+		// obfuscated session ticket cipher suite; the latter is required by
+		// utls/tls.Conn.loadSession. If these requirements are not met the
+		// obfuscation session ticket would be ignored, so fail.
 
-			key, err := hex.DecodeString(config.ObfuscatedSessionTicketKey)
-			if err == nil && len(key) != 32 {
-				err = errors.New("invalid obfuscated session key length")
-			}
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-			copy(obfuscatedSessionTicketKey[:], key)
+		if !tris.ContainsObfuscatedSessionTicketCipherSuite(
+			conn.HandshakeState.Hello.CipherSuites) {
+			return nil, common.ContextError(
+				errors.New("missing obfuscated session ticket cipher suite"))
+		}
 
-			obfuscatedSessionState, err := tris.NewObfuscatedClientSessionState(
-				obfuscatedSessionTicketKey)
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-
-			conn.SetSessionState(
-				utls.MakeClientSessionState(
-					obfuscatedSessionState.SessionTicket,
-					obfuscatedSessionState.Vers,
-					obfuscatedSessionState.CipherSuite,
-					obfuscatedSessionState.MasterSecret,
-					nil,
-					nil))
-
-			// Ensure that TLS ClientHello has required session ticket extension and
-			// obfuscated session ticket cipher suite; the latter is required by
-			// utls/tls.Conn.loadSession. If these requirements are not met the
-			// obfuscation session ticket would be ignored, so fail.
-
-			err = conn.BuildHandshakeState()
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-
-			if !tris.ContainsObfuscatedSessionTicketCipherSuite(
-				conn.HandshakeState.Hello.CipherSuites) {
-				return nil, common.ContextError(
-					errors.New("missing obfuscated session ticket cipher suite"))
-			}
-
-			if len(conn.HandshakeState.Hello.SessionTicket) == 0 {
-				return nil, common.ContextError(
-					errors.New("missing session ticket extension"))
-			}
+		if len(conn.HandshakeState.Hello.SessionTicket) == 0 {
+			return nil, common.ContextError(
+				errors.New("missing session ticket extension"))
 		}
 	}
 
-	// Build the ClientHello and inspect to apply NoDefaultSessionID logic.
+	// Either pre-TLS 1.3 ClientHellos or any randomized ClientHello is a
+	// candidate for NoDefaultSessionID logic.
 
 	if len(conn.HandshakeState.Hello.SessionTicket) == 0 &&
-		isNoDefaultSessionIDCandidate(utlsClientHelloID) {
-
-		if !conn.ClientHelloBuilt {
-			err = conn.BuildHandshakeState()
-			if err != nil {
-				return nil, common.ContextError(err)
-			}
-		}
+		(!isTLS13 || utlsClientHelloID.Client == "Randomized") {
 
 		var noDefaultSessionID bool
 		if config.NoDefaultTLSSessionID != nil {
@@ -563,6 +551,7 @@ func CustomTLSDial(
 
 			conn.HandshakeState.Hello.SessionId = nil
 
+			// Apply changes to utls
 			err = conn.MarshalClientHello()
 			if err != nil {
 				return nil, common.ContextError(err)
