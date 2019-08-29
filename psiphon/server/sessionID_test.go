@@ -69,7 +69,7 @@ func TestDuplicateSessionID(t *testing.T) {
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
-	numConcurrentClients := 100
+	numConcurrentClients := 50
 
 	stoppingEvent := "stopping existing client with duplicate session ID"
 	abortingEvent := "aborting new client with duplicate session ID"
@@ -243,7 +243,7 @@ func TestDuplicateSessionID(t *testing.T) {
 	t1.Close(true)
 	t2.Close(true)
 
-	// Test: 100 concurrent clients, all with the same session ID.
+	// Test: 50 concurrent clients, all with the same session ID.
 	//
 	// This should be enough concurrent clients to trigger both the "stopping"
 	// and "aborting" duplicate session ID cases.
@@ -261,6 +261,9 @@ func TestDuplicateSessionID(t *testing.T) {
 	waitGroup.Wait()
 
 	for _, t := range tunnels {
+		if t == nil {
+			continue
+		}
 		t.Close(true)
 	}
 
