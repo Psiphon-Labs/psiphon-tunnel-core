@@ -548,6 +548,13 @@ type Config struct {
 	ReplayLaterRoundMoveToFrontProbability *float64
 	ReplayRetainFailedProbability          *float64
 
+	// UseOnlyCustomTLSProfiles and other TLS configuration fields are for
+	// testing purposes.
+	UseOnlyCustomTLSProfiles              *bool
+	CustomTLSProfiles                     protocol.CustomTLSProfiles
+	SelectRandomizedTLSProfileProbability *float64
+	NoDefaultTLSSessionIDProbability      *float64
+
 	// clientParameters is the active ClientParameters with defaults, config
 	// values, and, optionally, tactics applied.
 	//
@@ -1074,6 +1081,22 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ReplayRetainFailedProbability != nil {
 		applyParameters[parameters.ReplayRetainFailedProbability] = *config.ReplayRetainFailedProbability
+	}
+
+	if config.UseOnlyCustomTLSProfiles != nil {
+		applyParameters[parameters.UseOnlyCustomTLSProfiles] = *config.UseOnlyCustomTLSProfiles
+	}
+
+	if config.CustomTLSProfiles != nil {
+		applyParameters[parameters.CustomTLSProfiles] = config.CustomTLSProfiles
+	}
+
+	if config.SelectRandomizedTLSProfileProbability != nil {
+		applyParameters[parameters.SelectRandomizedTLSProfileProbability] = *config.SelectRandomizedTLSProfileProbability
+	}
+
+	if config.NoDefaultTLSSessionIDProbability != nil {
+		applyParameters[parameters.NoDefaultTLSSessionIDProbability] = *config.NoDefaultTLSSessionIDProbability
 	}
 
 	return applyParameters

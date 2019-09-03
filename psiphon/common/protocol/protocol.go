@@ -237,6 +237,15 @@ var SupportedTLSProfiles = TLSProfiles{
 	TLS_PROFILE_RANDOMIZED,
 }
 
+var legacyTLSProfiles = TLSProfiles{
+	"iOS-Safari-11.3.1",
+	"Android-6.0",
+	"Android-5.1",
+	"Chrome-57",
+	"Randomized",
+	"TLS-1.3-Randomized",
+}
+
 func TLSProfileIsRandomized(tlsProfile string) bool {
 	return tlsProfile == TLS_PROFILE_RANDOMIZED
 }
@@ -244,15 +253,6 @@ func TLSProfileIsRandomized(tlsProfile string) bool {
 type TLSProfiles []string
 
 func (profiles TLSProfiles) Validate() error {
-
-	legacyTLSProfiles := TLSProfiles{
-		"iOS-Safari-11.3.1",
-		"Android-6.0",
-		"Android-5.1",
-		"Chrome-57",
-		"Randomized",
-		"TLS-1.3-Randomized",
-	}
 
 	for _, p := range profiles {
 		if !common.Contains(SupportedTLSProfiles, p) && !common.Contains(legacyTLSProfiles, p) {

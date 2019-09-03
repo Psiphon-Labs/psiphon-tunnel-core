@@ -33,6 +33,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	tris "github.com/Psiphon-Labs/tls-tris"
 	utls "github.com/refraction-networking/utls"
@@ -54,6 +55,11 @@ func TestObfuscatedSessionTicket(t *testing.T) {
 }
 
 func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
+
+	clientParameters, err := parameters.NewClientParameters(nil)
+	if err != nil {
+		t.Fatalf("NewClientParameters failed: %s\n", err)
+	}
 
 	var standardSessionTicketKey [32]byte
 	rand.Read(standardSessionTicketKey[:])
@@ -142,7 +148,12 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 			}
 			defer tcpConn.Close()
 
-			utlsClientHelloID := getUTLSClientHelloID(tlsProfile)
+			utlsClientHelloID, _, err := getUTLSClientHelloID(
+				clientParameters.Get(), tlsProfile)
+			if err != nil {
+				report(err)
+				return
+			}
 
 			tlsConn := utls.UClient(tcpConn, clientConfig, utlsClientHelloID)
 

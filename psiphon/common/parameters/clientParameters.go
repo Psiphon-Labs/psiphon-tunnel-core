@@ -93,7 +93,10 @@ const (
 	LimitTunnelProtocols                             = "LimitTunnelProtocols"
 	LimitTLSProfilesProbability                      = "LimitTLSProfilesProbability"
 	LimitTLSProfiles                                 = "LimitTLSProfiles"
+	UseOnlyCustomTLSProfiles                         = "UseOnlyCustomTLSProfiles"
+	CustomTLSProfiles                                = "CustomTLSProfiles"
 	SelectRandomizedTLSProfileProbability            = "SelectRandomizedTLSProfileProbability"
+	NoDefaultTLSSessionIDProbability                 = "NoDefaultTLSSessionIDProbability"
 	LimitQUICVersionsProbability                     = "LimitQUICVersionsProbability"
 	LimitQUICVersions                                = "LimitQUICVersions"
 	FragmentorProbability                            = "FragmentorProbability"
@@ -276,7 +279,10 @@ var defaultClientParameters = map[string]struct {
 
 	LimitTLSProfilesProbability:           {value: 1.0, minimum: 0.0},
 	LimitTLSProfiles:                      {value: protocol.TLSProfiles{}},
+	UseOnlyCustomTLSProfiles:              {value: false},
+	CustomTLSProfiles:                     {value: protocol.CustomTLSProfiles{}},
 	SelectRandomizedTLSProfileProbability: {value: 0.25, minimum: 0.0},
+	NoDefaultTLSSessionIDProbability:      {value: 0.5, minimum: 0.0},
 
 	LimitQUICVersionsProbability: {value: 1.0, minimum: 0.0},
 	LimitQUICVersions:            {value: protocol.QUICVersions{}},
@@ -632,6 +638,14 @@ func (p *ClientParameters) Set(
 						return nil, common.ContextError(err)
 					}
 				}
+			case protocol.CustomTLSProfiles:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, common.ContextError(err)
+				}
 			}
 
 			// Enforce any minimums. Assumes defaultClientParameters[name]
@@ -915,4 +929,33 @@ func (p *ClientParametersSnapshot) HTTPHeaders(name string) http.Header {
 	value := make(http.Header)
 	p.getValue(name, &value)
 	return value
+}
+
+// CustomTLSProfileNames returns the CustomTLSProfile.Name fields for
+// each profile in the CustomTLSProfiles parameter value.
+func (p *ClientParametersSnapshot) CustomTLSProfileNames() []string {
+	value := protocol.CustomTLSProfiles{}
+	p.getValue(CustomTLSProfiles, &value)
+	names := make([]string, len(value))
+	for i := 0; i < len(value); i++ {
+		names[i] = value[i].Name
+	}
+	return names
+}
+
+// CustomTLSProfile returns the CustomTLSProfile fields with the specified
+// Name field if it exists in the CustomTLSProfiles parameter value.
+// Returns nil if not found.
+func (p *ClientParametersSnapshot) CustomTLSProfile(name string) *protocol.CustomTLSProfile {
+	value := protocol.CustomTLSProfiles{}
+	p.getValue(CustomTLSProfiles, &value)
+
+	// Note: linear lookup -- assumes a short list
+
+	for i := 0; i < len(value); i++ {
+		if value[i].Name == name {
+			return value[i]
+		}
+	}
+	return nil
 }

@@ -475,7 +475,7 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 
 		if dialParams.SelectedTLSProfile {
 			args = append(args, "TLSProfile", dialParams.TLSProfile)
-			args = append(args, "TLSVersion", dialParams.TLSVersion)
+			args = append(args, "TLSVersion", dialParams.GetTLSVersionForMetrics())
 		}
 
 		if dialParams.DialPortNumber != "" {

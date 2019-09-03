@@ -32,6 +32,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -1232,9 +1233,9 @@ func checkExpectedLogFields(runConfig *runServerConfig, fields map[string]interf
 			return fmt.Errorf("unexpected tls_profile '%s'", fields["tls_profile"])
 		}
 
-		if !common.Contains(
-			[]string{protocol.TLS_VERSION_12, protocol.TLS_VERSION_13},
-			fields["tls_version"].(string)) {
+		tlsVersion := fields["tls_version"].(string)
+		if !strings.HasPrefix(tlsVersion, protocol.TLS_VERSION_12) &&
+			!strings.HasPrefix(tlsVersion, protocol.TLS_VERSION_13) {
 			return fmt.Errorf("unexpected tls_version '%s'", fields["tls_version"])
 		}
 	}
@@ -1582,12 +1583,19 @@ func paveTrafficRulesFile(
 		t.Fatalf("unexpected intLookupThreshold")
 	}
 
-	allowTCPPorts := fmt.Sprintf("%d", mockWebServerPort)
-	allowUDPPorts := "53, 123, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010"
+	TCPPorts := fmt.Sprintf("%d", mockWebServerPort)
+	UDPPorts := "53, 123, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010"
+
+	allowTCPPorts := TCPPorts
+	allowUDPPorts := UDPPorts
+	disallowTCPPorts := "0"
+	disallowUDPPorts := "0"
 
 	if deny {
 		allowTCPPorts = "0"
 		allowUDPPorts = "0"
+		disallowTCPPorts = TCPPorts
+		disallowUDPPorts = UDPPorts
 	}
 
 	authorizationFilterFormat := `,
@@ -1598,6 +1606,11 @@ func paveTrafficRulesFile(
 	if requireAuthorization {
 		authorizationFilter = fmt.Sprintf(authorizationFilterFormat, accessType)
 	}
+
+	// Supports two traffic rule test cases:
+	//
+	// 1. no ports are allowed until after the filtered rule is applied
+	// 2. no required ports are allowed (deny = true)
 
 	trafficRulesJSONFormat := `
     {
@@ -1629,7 +1642,9 @@ func paveTrafficRulesFile(
                         "WriteBytesPerSecond": 2097152
                     },
                     "AllowTCPPorts" : [%s],
-                    "AllowUDPPorts" : [%s]
+                    "AllowUDPPorts" : [%s],
+                    "DisallowTCPPorts" : [%s],
+                    "DisallowUDPPorts" : [%s]
                 }
             }
         ]
@@ -1639,7 +1654,8 @@ func paveTrafficRulesFile(
 	trafficRulesJSON := fmt.Sprintf(
 		trafficRulesJSONFormat,
 		livenessTestSize, livenessTestSize,
-		propagationChannelID, authorizationFilter, allowTCPPorts, allowUDPPorts)
+		propagationChannelID, authorizationFilter,
+		allowTCPPorts, allowUDPPorts, disallowTCPPorts, disallowUDPPorts)
 
 	err := ioutil.WriteFile(trafficRulesFilename, []byte(trafficRulesJSON), 0600)
 	if err != nil {
