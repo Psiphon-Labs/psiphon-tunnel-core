@@ -204,28 +204,38 @@ type TrafficRules struct {
 	// DefaultRules, DEFAULT_MAX_UDP_PORT_FORWARD_COUNT is used.
 	MaxUDPPortForwardCount *int
 
-	// AllowTCPPorts specifies a whitelist of TCP ports that
-	// are permitted for port forwarding. When set, only ports
-	// in the list are accessible to clients.
+	// AllowTCPPorts specifies a list of TCP ports that are permitted for port
+	// forwarding. When set, only ports in the list are accessible to clients.
 	AllowTCPPorts []int
 
-	// AllowUDPPorts specifies a whitelist of UDP ports that
-	// are permitted for port forwarding. When set, only ports
-	// in the list are accessible to clients.
+	// AllowUDPPorts specifies a list of UDP ports that are permitted for port
+	// forwarding. When set, only ports in the list are accessible to clients.
 	AllowUDPPorts []int
 
-	// AllowSubnets specifies a list of IP address subnets for
-	// which all TCP and UDP ports are allowed. This list is
-	// consulted if a port is disallowed by the AllowTCPPorts
-	// or AllowUDPPorts configuration. Each entry is a IP subnet
-	// in CIDR notation.
-	// Limitation: currently, AllowSubnets only matches port
-	// forwards where the client sends an IP address. Domain
-	// names are not resolved before checking AllowSubnets.
+	// DisallowTCPPorts specifies a list of TCP ports that are not permitted for
+	// port forwarding. DisallowTCPPorts takes priority over AllowTCPPorts and
+	// AllowSubnets.
+	DisallowTCPPorts []int
+
+	// DisallowUDPPorts specifies a list of UDP ports that are not permitted for
+	// port forwarding. DisallowUDPPorts takes priority over AllowUDPPorts and
+	// AllowSubnets.
+	DisallowUDPPorts []int
+
+	// AllowSubnets specifies a list of IP address subnets for which all TCP and
+	// UDP ports are allowed. This list is consulted if a port is disallowed by
+	// the AllowTCPPorts or AllowUDPPorts configuration. Each entry is a IP
+	// subnet in CIDR notation.
+	//
+	// Limitation: currently, AllowSubnets only matches port forwards where the
+	// client sends an IP address. Domain names are not resolved before checking
+	// AllowSubnets.
 	AllowSubnets []string
 
-	allowTCPPortsLookup map[int]bool
-	allowUDPPortsLookup map[int]bool
+	allowTCPPortsLookup    map[int]bool
+	allowUDPPortsLookup    map[int]bool
+	disallowTCPPortsLookup map[int]bool
+	disallowUDPPortsLookup map[int]bool
 }
 
 // RateLimits is a clone of common.RateLimits with pointers
@@ -395,6 +405,20 @@ func (set *TrafficRulesSet) initLookups() {
 			rules.allowUDPPortsLookup = make(map[int]bool)
 			for _, port := range rules.AllowUDPPorts {
 				rules.allowUDPPortsLookup[port] = true
+			}
+		}
+
+		if len(rules.DisallowTCPPorts) >= intLookupThreshold {
+			rules.disallowTCPPortsLookup = make(map[int]bool)
+			for _, port := range rules.DisallowTCPPorts {
+				rules.disallowTCPPortsLookup[port] = true
+			}
+		}
+
+		if len(rules.DisallowUDPPorts) >= intLookupThreshold {
+			rules.disallowUDPPortsLookup = make(map[int]bool)
+			for _, port := range rules.DisallowUDPPorts {
+				rules.disallowUDPPortsLookup[port] = true
 			}
 		}
 	}
@@ -673,6 +697,16 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			trafficRules.allowUDPPortsLookup = filteredRules.Rules.allowUDPPortsLookup
 		}
 
+		if filteredRules.Rules.DisallowTCPPorts != nil {
+			trafficRules.DisallowTCPPorts = filteredRules.Rules.DisallowTCPPorts
+			trafficRules.disallowTCPPortsLookup = filteredRules.Rules.disallowTCPPortsLookup
+		}
+
+		if filteredRules.Rules.DisallowUDPPorts != nil {
+			trafficRules.DisallowUDPPorts = filteredRules.Rules.DisallowUDPPorts
+			trafficRules.disallowUDPPortsLookup = filteredRules.Rules.disallowUDPPortsLookup
+		}
+
 		if filteredRules.Rules.AllowSubnets != nil {
 			trafficRules.AllowSubnets = filteredRules.Rules.AllowSubnets
 		}
@@ -691,6 +725,20 @@ func (set *TrafficRulesSet) GetTrafficRules(
 }
 
 func (rules *TrafficRules) AllowTCPPort(remoteIP net.IP, port int) bool {
+
+	if len(rules.DisallowTCPPorts) > 0 {
+		if rules.disallowTCPPortsLookup != nil {
+			if rules.disallowTCPPortsLookup[port] == true {
+				return false
+			}
+		} else {
+			for _, disallowPort := range rules.DisallowTCPPorts {
+				if port == disallowPort {
+					return false
+				}
+			}
+		}
+	}
 
 	if len(rules.AllowTCPPorts) == 0 {
 		return true
@@ -712,6 +760,20 @@ func (rules *TrafficRules) AllowTCPPort(remoteIP net.IP, port int) bool {
 }
 
 func (rules *TrafficRules) AllowUDPPort(remoteIP net.IP, port int) bool {
+
+	if len(rules.DisallowUDPPorts) > 0 {
+		if rules.disallowUDPPortsLookup != nil {
+			if rules.disallowUDPPortsLookup[port] == true {
+				return false
+			}
+		} else {
+			for _, disallowPort := range rules.DisallowUDPPorts {
+				if port == disallowPort {
+					return false
+				}
+			}
+		}
+	}
 
 	if len(rules.AllowUDPPorts) == 0 {
 		return true
