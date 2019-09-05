@@ -41,6 +41,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 )
 
 const (
@@ -466,7 +467,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 				"DeriveSSHServerVersionPRNGSeed failed: %s", err)
 		}
 
-		serverVersion := pickSSHServerVersion(seed)
+		serverVersion := values.GetSSHServerVersion(seed)
 		if serverVersion != "" {
 			config.SSHServerVersion = serverVersion
 		}

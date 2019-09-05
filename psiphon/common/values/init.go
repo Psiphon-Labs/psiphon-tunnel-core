@@ -1,7 +1,7 @@
-// +build PRIVATE_PLUGINS
+// +build INIT_PSIPHON_COMMON_VALUES
 
 /*
- * Copyright (c) 2015, Psiphon Inc.
+ * Copyright (c) 2019, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,9 +19,9 @@
  *
  */
 
-package psi
+package values
 
-import (
-	_ "github.com/Psiphon-Inc/psiphon-tunnel-core-private-plugins/client_plugins"
-	_ "github.com/Psiphon-Inc/psiphon-tunnel-core-private-plugins/common_plugins"
-)
+// This file is a guard against building with INIT_PSIPHON_COMMON_VALUES
+// without replacing init.go.
+
+var buildGuard = intentionally_undefined

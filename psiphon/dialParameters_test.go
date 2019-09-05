@@ -32,6 +32,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 )
 
 func TestDialParametersAndReplay(t *testing.T) {
@@ -99,15 +100,11 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		return tunnelProtocol, true
 	}
 
-	RegisterSSHClientVersionPicker(func() string {
-		versions := []string{"SSH-2.0-A", "SSH-2.0-B", "SSH-2.0-C"}
-		return versions[prng.Intn(len(versions))]
-	})
+	values.SetSSHClientVersionsSpec(
+		values.NewPickOneSpec([]string{"SSH-2.0-A", "SSH-2.0-B", "SSH-2.0-C"}))
 
-	RegisterUserAgentPicker(func() string {
-		versions := []string{"ua1", "ua2", "ua3"}
-		return versions[prng.Intn(len(versions))]
-	})
+	values.SetUserAgentsSpec(
+		values.NewPickOneSpec([]string{"ua1", "ua2", "ua3"}))
 
 	// Test: expected dial parameter fields set
 

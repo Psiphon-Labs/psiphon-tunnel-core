@@ -17,11 +17,13 @@
  *
  */
 
-package common
+package buildinfo
 
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 )
 
 /*
@@ -32,22 +34,22 @@ Without those build flags, the build info in the notice will simply be empty str
 Suggestions for how to fill in the values will be given for each variable.
 Note that any passed value must contain no whitespace.
 */
-// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildDate=`date --iso-8601=seconds`
+// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildDate=`date --iso-8601=seconds`
 var buildDate string
 
-// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildRepo=`git config --get remote.origin.url`
+// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildRepo=`git config --get remote.origin.url`
 var buildRepo string
 
-// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.buildRev=`git rev-parse --short HEAD`
+// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildRev=`git rev-parse --short HEAD`
 var buildRev string
 
-// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.goVersion=`go version | perl -ne '/go version (.*?) / && print $1'`
+// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.goVersion=`go version | perl -ne '/go version (.*?) / && print $1'`
 var goVersion string
 
-// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common.gomobileVersion=`gomobile version | perl -ne '/gomobile version (.*?) / && print $1'`
+// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.gomobileVersion=`gomobile version | perl -ne '/gomobile version (.*?) / && print $1'`
 var gomobileVersion string
 
-// -X github.com/Psiphon-Labs/psiphon-tunnel-core/common.dependencies=`echo -n "{" && go list -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/'`
+// -X github.com/Psiphon-Labs/psiphon-tunnel-core/common/buildinfo.dependencies=`echo -n "{" && go list -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/'`
 // Dependencies should be listed as a JSON object like the following (no spaces) {"github.com/Psiphon-Labs/psiphon-tunnel-core":"abcdef","...":"..."}
 var dependencies string
 
@@ -59,6 +61,7 @@ type BuildInfo struct {
 	GoVersion       string          `json:"goVersion"`
 	GomobileVersion string          `json:"gomobileVersion,omitempty"`
 	Dependencies    json.RawMessage `json:"dependencies"`
+	ValuesRev       string          `json:"valuesRev"`
 }
 
 // ToMap converts 'BuildInfo' struct to 'map[string]interface{}'
@@ -73,6 +76,7 @@ func (bi *BuildInfo) ToMap() *map[string]interface{} {
 		"buildRev":     bi.BuildRev,
 		"goVersion":    bi.GoVersion,
 		"dependencies": dependenciesMap,
+		"valuesRev":    bi.ValuesRev,
 	}
 
 	return &buildInfoMap
@@ -91,6 +95,7 @@ func GetBuildInfo() *BuildInfo {
 		GoVersion:       strings.TrimSpace(goVersion),
 		GomobileVersion: strings.TrimSpace(gomobileVersion),
 		Dependencies:    json.RawMessage(strings.TrimSpace(dependencies)),
+		ValuesRev:       values.GetRevision(),
 	}
 
 	return &buildInfo

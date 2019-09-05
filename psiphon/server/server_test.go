@@ -46,6 +46,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	"golang.org/x/net/proxy"
 )
 
@@ -776,13 +777,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// configure client
 
-	psiphon.RegisterSSHClientVersionPicker(func() string {
-		return testSSHClientVersions[prng.Intn(len(testSSHClientVersions))]
-	})
+	values.SetSSHClientVersionsSpec(values.NewPickOneSpec(testSSHClientVersions))
 
-	psiphon.RegisterUserAgentPicker(func() string {
-		return testUserAgents[prng.Intn(len(testUserAgents))]
-	})
+	values.SetUserAgentsSpec(values.NewPickOneSpec(testUserAgents))
 
 	// TODO: currently, TargetServerEntry only works with one tunnel
 	numTunnels := 1
@@ -1583,12 +1580,19 @@ func paveTrafficRulesFile(
 		t.Fatalf("unexpected intLookupThreshold")
 	}
 
-	allowTCPPorts := fmt.Sprintf("%d", mockWebServerPort)
-	allowUDPPorts := "53, 123, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010"
+	TCPPorts := fmt.Sprintf("%d", mockWebServerPort)
+	UDPPorts := "53, 123, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010"
+
+	allowTCPPorts := TCPPorts
+	allowUDPPorts := UDPPorts
+	disallowTCPPorts := "0"
+	disallowUDPPorts := "0"
 
 	if deny {
 		allowTCPPorts = "0"
 		allowUDPPorts = "0"
+		disallowTCPPorts = TCPPorts
+		disallowUDPPorts = UDPPorts
 	}
 
 	authorizationFilterFormat := `,
@@ -1599,6 +1603,11 @@ func paveTrafficRulesFile(
 	if requireAuthorization {
 		authorizationFilter = fmt.Sprintf(authorizationFilterFormat, accessType)
 	}
+
+	// Supports two traffic rule test cases:
+	//
+	// 1. no ports are allowed until after the filtered rule is applied
+	// 2. no required ports are allowed (deny = true)
 
 	trafficRulesJSONFormat := `
     {
@@ -1630,7 +1639,9 @@ func paveTrafficRulesFile(
                         "WriteBytesPerSecond": 2097152
                     },
                     "AllowTCPPorts" : [%s],
-                    "AllowUDPPorts" : [%s]
+                    "AllowUDPPorts" : [%s],
+                    "DisallowTCPPorts" : [%s],
+                    "DisallowUDPPorts" : [%s]
                 }
             }
         ]
@@ -1640,7 +1651,8 @@ func paveTrafficRulesFile(
 	trafficRulesJSON := fmt.Sprintf(
 		trafficRulesJSONFormat,
 		livenessTestSize, livenessTestSize,
-		propagationChannelID, authorizationFilter, allowTCPPorts, allowUDPPorts)
+		propagationChannelID, authorizationFilter,
+		allowTCPPorts, allowUDPPorts, disallowTCPPorts, disallowUDPPorts)
 
 	err := ioutil.WriteFile(trafficRulesFilename, []byte(trafficRulesJSON), 0600)
 	if err != nil {
