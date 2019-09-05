@@ -46,6 +46,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	"golang.org/x/net/proxy"
 )
 
@@ -776,13 +777,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// configure client
 
-	psiphon.RegisterSSHClientVersionPicker(func() string {
-		return testSSHClientVersions[prng.Intn(len(testSSHClientVersions))]
-	})
+	values.SetSSHClientVersionsSpec(values.NewPickOneSpec(testSSHClientVersions))
 
-	psiphon.RegisterUserAgentPicker(func() string {
-		return testUserAgents[prng.Intn(len(testUserAgents))]
-	})
+	values.SetUserAgentsSpec(values.NewPickOneSpec(testUserAgents))
 
 	// TODO: currently, TargetServerEntry only works with one tunnel
 	numTunnels := 1

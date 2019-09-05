@@ -36,6 +36,7 @@ import (
 	"strings"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -615,7 +616,7 @@ func RecordRemoteServerListStat(
 	params["sponsor_id"] = config.GetSponsorID()
 	params["client_version"] = config.ClientVersion
 	params["client_platform"] = config.ClientPlatform
-	params["client_build_rev"] = common.GetBuildInfo().BuildRev
+	params["client_build_rev"] = buildinfo.GetBuildInfo().BuildRev
 
 	params["client_download_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
 	params["url"] = url
@@ -784,7 +785,7 @@ func getBaseAPIParameters(
 	params["client_version"] = config.ClientVersion
 	params["relay_protocol"] = dialParams.TunnelProtocol
 	params["client_platform"] = config.ClientPlatform
-	params["client_build_rev"] = common.GetBuildInfo().BuildRev
+	params["client_build_rev"] = buildinfo.GetBuildInfo().BuildRev
 	params["tunnel_whole_device"] = strconv.Itoa(config.TunnelWholeDevice)
 
 	// The following parameters may be blank and must

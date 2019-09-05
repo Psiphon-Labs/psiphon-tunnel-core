@@ -32,6 +32,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	tris "github.com/Psiphon-Labs/tls-tris"
 	utls "github.com/refraction-networking/utls"
 )
@@ -73,7 +74,7 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 
 		// Same tls-tris config as psiphon/server/meek.go
 
-		certificate, privateKey, err := common.GenerateWebServerCertificate(common.GenerateHostName())
+		certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
 		if err != nil {
 			t.Fatalf("%s\n", err)
 		}

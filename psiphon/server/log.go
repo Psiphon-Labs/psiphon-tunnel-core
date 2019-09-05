@@ -32,6 +32,7 @@ import (
 
 	"github.com/Psiphon-Inc/rotate-safe-writer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/sirupsen/logrus"
 )
 
@@ -237,7 +238,7 @@ func InitLogging(config *Config) (retErr error) {
 	initLogging.Do(func() {
 
 		logHostID = config.HostID
-		logBuildRev = common.GetBuildInfo().BuildRev
+		logBuildRev = buildinfo.GetBuildInfo().BuildRev
 
 		level, err := logrus.ParseLevel(config.LogLevel)
 		if err != nil {
