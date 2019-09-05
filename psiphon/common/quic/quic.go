@@ -53,6 +53,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	quic_go "github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/h2quic"
 	"github.com/lucas-clemente/quic-go/qerr"
@@ -80,7 +81,7 @@ func Listen(
 	obfuscationKey string) (*Listener, error) {
 
 	certificate, privateKey, err := common.GenerateWebServerCertificate(
-		common.GenerateHostName())
+		values.GetHostName())
 	if err != nil {
 		return nil, common.ContextError(err)
 	}

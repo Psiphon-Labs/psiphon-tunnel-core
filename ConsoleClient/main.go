@@ -34,6 +34,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
@@ -99,7 +100,7 @@ func main() {
 	flag.Parse()
 
 	if versionDetails {
-		b := common.GetBuildInfo()
+		b := buildinfo.GetBuildInfo()
 
 		var printableDependencies bytes.Buffer
 		var dependencyMap map[string]string

@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	utls "github.com/refraction-networking/utls"
 	regen "github.com/zach-klippenstein/goregen"
 )
@@ -286,7 +287,7 @@ func MakeDialParameters(
 
 	if !isReplay || !replaySSH {
 		dialParams.SelectedSSHClientVersion = true
-		dialParams.SSHClientVersion = pickSSHClientVersion()
+		dialParams.SSHClientVersion = values.GetSSHClientVersion()
 		dialParams.SSHKEXSeed, err = prng.NewSeed()
 		if err != nil {
 			return nil, common.ContextError(err)
@@ -376,7 +377,7 @@ func MakeDialParameters(
 
 			dialParams.MeekSNIServerName = ""
 			if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
-				dialParams.MeekSNIServerName = common.GenerateHostName()
+				dialParams.MeekSNIServerName = values.GetHostName()
 				dialParams.MeekTransformedHostName = true
 			}
 
@@ -385,7 +386,7 @@ func MakeDialParameters(
 			dialParams.MeekHostHeader = ""
 			hostname := serverEntry.IpAddress
 			if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
-				hostname = common.GenerateHostName()
+				hostname = values.GetHostName()
 				dialParams.MeekTransformedHostName = true
 			}
 			if serverEntry.MeekServerPort == 80 {
@@ -396,7 +397,7 @@ func MakeDialParameters(
 		} else if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
 
 			dialParams.QUICDialSNIAddress = fmt.Sprintf(
-				"%s:%d", common.GenerateHostName(), serverEntry.SshObfuscatedQUICPort)
+				"%s:%d", values.GetHostName(), serverEntry.SshObfuscatedQUICPort)
 		}
 	}
 
@@ -541,7 +542,7 @@ func MakeDialParameters(
 	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) || dialParams.UpstreamProxyType == "http" {
 
 		if !isReplay || !replayUserAgent {
-			dialParams.SelectedUserAgent, dialParams.UserAgent = PickUserAgentIfUnset(p, dialCustomHeaders)
+			dialParams.SelectedUserAgent, dialParams.UserAgent = selectUserAgentIfUnset(p, dialCustomHeaders)
 		}
 
 		if dialParams.SelectedUserAgent {
@@ -862,6 +863,23 @@ func selectQUICVersion(allowObfuscatedQUIC bool, p *parameters.ClientParametersS
 	choice := prng.Intn(len(quicVersions))
 
 	return quicVersions[choice]
+}
+
+// selectUserAgentIfUnset selects a User-Agent header if one is not set.
+func selectUserAgentIfUnset(
+	p *parameters.ClientParametersSnapshot, headers http.Header) (bool, string) {
+
+	if _, ok := headers["User-Agent"]; !ok {
+
+		userAgent := ""
+		if p.WeightedCoinFlip(parameters.PickUserAgentProbability) {
+			userAgent = values.GetUserAgent()
+		}
+
+		return true, userAgent
+	}
+
+	return false, ""
 }
 
 func makeDialCustomHeaders(
