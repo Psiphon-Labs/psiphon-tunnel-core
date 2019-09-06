@@ -21,7 +21,7 @@
 
 /*
 
-Package tapdance wraps github.com/sergeyfrolov/gotapdance with net.Listener
+Package tapdance wraps github.com/refraction-networking/gotapdance with net.Listener
 and net.Conn types that provide drop-in integration with Psiphon.
 
 */
@@ -89,7 +89,7 @@ func Listen(address string) (*Listener, error) {
 // all pending dials and established conns immediately. This ensures that
 // blocking calls within refraction_networking_tapdance, such as tls.Handhake,
 // are interrupted:
-// E.g., https://github.com/sergeyfrolov/gotapdance/blob/2ce6ef6667d52f7391a92fd8ec9dffb97ec4e2e8/tapdance/conn_raw.go#L260
+// E.g., https://github.com/refraction-networking/gotapdance/blob/4d84655dad2e242b0af0459c31f687b12085dcca/tapdance/conn_raw.go#L307
 // (...preceeding SetDeadline is insufficient for immediate cancellation.)
 type dialManager struct {
 	tcpDialer func(ctx context.Context, network, address string) (net.Conn, error)
@@ -133,7 +133,7 @@ func (manager *dialManager) dial(ctx context.Context, network, address string) (
 	if manager.useRunCtx {
 
 		// Preserve the random timeout configured by the tapdance client:
-		// https://github.com/sergeyfrolov/gotapdance/blob/2ce6ef6667d52f7391a92fd8ec9dffb97ec4e2e8/tapdance/conn_raw.go#L219
+		// https://github.com/refraction-networking/gotapdance/blob/4d84655dad2e242b0af0459c31f687b12085dcca/tapdance/conn_raw.go#L263
 		deadline, ok := ctx.Deadline()
 		if !ok {
 			return nil, common.ContextError(fmt.Errorf("unexpected nil deadline"))
