@@ -41,7 +41,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/armon/go-proxyproto"
-	refraction_networking_tapdance "github.com/sergeyfrolov/gotapdance/tapdance"
+	refraction_networking_tapdance "github.com/refraction-networking/gotapdance/tapdance"
 )
 
 const (

@@ -32,11 +32,11 @@ type tdRawConn struct {
 
 	TcpDialer func(context.Context, string, string) (net.Conn, error)
 
-	decoySpec     pb.TLSDecoySpec
-	pinDecoySpec  bool // don't ever change decoy (still changeable from outside)
-	initialMsg    pb.StationToClient
-	stationPubkey []byte
-	tagType       tdTagType
+	decoySpec            pb.TLSDecoySpec
+	pinDecoySpec         bool // don't ever change decoy (still changeable from outside)
+	initialMsg           pb.StationToClient
+	defaultStationPubkey []byte // this pubkey is used if the per-decoy key (tdRaw.decoySpec.Pubkey.Key) is not set
+	tagType              tdTagType
 
 	remoteConnId []byte // 32 byte ID of the connection to station, used for reconnection
 
@@ -58,7 +58,7 @@ type tdRawConn struct {
 
 func makeTdRaw(handshakeType tdTagType, stationPubkey []byte) *tdRawConn {
 	tdRaw := &tdRawConn{tagType: handshakeType,
-		stationPubkey: stationPubkey,
+		defaultStationPubkey: stationPubkey,
 	}
 	tdRaw.closed = make(chan struct{})
 	return tdRaw
@@ -388,14 +388,10 @@ func (tdRaw *tdRawConn) prepareTDRequest(handshakeType tdTagType) (string, error
 	}
 	Logger().Debugln(tdRaw.idStr()+" Initial protobuf", initProto)
 
-	// [Psiphon]
-	// Use decoy spec public key if available; otherwise, default public key.
-	var pubkey []byte
-	if tdRaw.decoySpec.Pubkey != nil {
-		pubkey = tdRaw.decoySpec.Pubkey.GetKey()
-	}
-	if len(pubkey) == 0 {
-		pubkey = tdRaw.stationPubkey
+	// Choose the station pubkey
+	pubkey := tdRaw.defaultStationPubkey
+	if perDecoyKey := tdRaw.decoySpec.GetPubkey().GetKey(); perDecoyKey != nil {
+		pubkey = perDecoyKey // per-decoy key takes preference over default global pubkey
 	}
 
 	// Obfuscate/encrypt tag and protobuf

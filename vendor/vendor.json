@@ -488,6 +488,24 @@
 			"tree": true
 		},
 		{
+			"checksumSHA1": "ZZTPdAqg8gqXyRc0MHQsZAI/S1o=",
+			"path": "github.com/refraction-networking/gotapdance",
+			"revision": "4d84655dad2e242b0af0459c31f687b12085dcca",
+			"revisionTime": "2019-09-06T18:47:05Z"
+		},
+		{
+			"checksumSHA1": "Owt8RxloT1XD/WUE2Ih1JX5+KTc=",
+			"path": "github.com/refraction-networking/gotapdance/protobuf",
+			"revision": "4d84655dad2e242b0af0459c31f687b12085dcca",
+			"revisionTime": "2019-09-06T18:47:05Z"
+		},
+		{
+			"checksumSHA1": "fCJyFbCVKmJ4PlNUrfFcDGcSs2I=",
+			"path": "github.com/refraction-networking/gotapdance/tapdance",
+			"revision": "4d84655dad2e242b0af0459c31f687b12085dcca",
+			"revisionTime": "2019-09-06T18:47:05Z"
+		},
+		{
 			"checksumSHA1": "S5FV5qBbMksx0vxajWD94J2KeHw=",
 			"path": "github.com/refraction-networking/utls",
 			"revision": "1552a980cef9b4c9b088a1c8fe33c774c031c295",
@@ -510,24 +528,6 @@
 			"path": "github.com/sergeyfrolov/bsbuffer",
 			"revision": "94e85abb850729a5f54f383e8175e62931d04748",
 			"revisionTime": "2018-09-03T21:38:11Z"
-		},
-		{
-			"checksumSHA1": "bwonlVmjpR4hyzaTtBBYD+m+Sdo=",
-			"path": "github.com/sergeyfrolov/gotapdance",
-			"revision": "f30ba05c9bd842d4221ccb73645fe2a0e1a0e1f6",
-			"revisionTime": "2019-03-18T20:34:37Z"
-		},
-		{
-			"checksumSHA1": "sna/Yemp1kUaSkmSYPpOjPuPGOU=",
-			"path": "github.com/sergeyfrolov/gotapdance/protobuf",
-			"revision": "f30ba05c9bd842d4221ccb73645fe2a0e1a0e1f6",
-			"revisionTime": "2019-03-18T20:34:37Z"
-		},
-		{
-			"checksumSHA1": "yfje0scynTtzRYlG+pGGh3bi9rc=",
-			"path": "github.com/sergeyfrolov/gotapdance/tapdance",
-			"revision": "a67708a49212a7fdf7dda54c0a1a488198dc8a0d",
-			"revisionTime": "2019-03-19T17:16:21Z"
 		},
 		{
 			"checksumSHA1": "Egp3n8yTaAuVtrA14LJrTWDgkO4=",
