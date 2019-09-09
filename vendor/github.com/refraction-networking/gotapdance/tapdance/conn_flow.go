@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	pb "github.com/refraction-networking/gotapdance/protobuf"
 	"github.com/sergeyfrolov/bsbuffer"
+	pb "github.com/refraction-networking/gotapdance/protobuf"
 )
 
 // TapdanceFlowConn represents single TapDance flow.
@@ -105,11 +105,11 @@ func (flowConn *TapdanceFlowConn) DialContext(ctx context.Context) error {
 	case flowUpload:
 		fallthrough
 	case flowBidirectional:
-		go flowConn.spawnReaderEngine()
 		flowConn.reconnectSuccess = make(chan bool, 1)
 		flowConn.reconnectStarted = make(chan struct{})
 		flowConn.writeSliceChan = make(chan []byte)
 		flowConn.writeResultChan = make(chan ioOpResult)
+		go flowConn.spawnReaderEngine()
 		go flowConn.spawnWriterEngine()
 		return nil
 	case flowReadOnly:

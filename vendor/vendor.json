@@ -482,22 +482,22 @@
 			"tree": true
 		},
 		{
-			"checksumSHA1": "ZZTPdAqg8gqXyRc0MHQsZAI/S1o=",
+			"checksumSHA1": "5rmH4D67rsb/VWRvD4bjmRO40uA=",
 			"path": "github.com/refraction-networking/gotapdance",
-			"revision": "4d84655dad2e242b0af0459c31f687b12085dcca",
-			"revisionTime": "2019-09-06T18:47:05Z"
+			"revision": "3a6e1938ad70af3e91081cd036e3ed05995d67e7",
+			"revisionTime": "2019-09-09T20:29:46Z"
 		},
 		{
-			"checksumSHA1": "Owt8RxloT1XD/WUE2Ih1JX5+KTc=",
+			"checksumSHA1": "kt4nwBTlAIn0dET5SqLdWXLLuso=",
 			"path": "github.com/refraction-networking/gotapdance/protobuf",
-			"revision": "4d84655dad2e242b0af0459c31f687b12085dcca",
-			"revisionTime": "2019-09-06T18:47:05Z"
+			"revision": "3a6e1938ad70af3e91081cd036e3ed05995d67e7",
+			"revisionTime": "2019-09-09T20:29:46Z"
 		},
 		{
-			"checksumSHA1": "fCJyFbCVKmJ4PlNUrfFcDGcSs2I=",
+			"checksumSHA1": "vcO0kZzwAtxZ0Jk2nhrPdE16myI=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance",
-			"revision": "4d84655dad2e242b0af0459c31f687b12085dcca",
-			"revisionTime": "2019-09-06T18:47:05Z"
+			"revision": "3a6e1938ad70af3e91081cd036e3ed05995d67e7",
+			"revisionTime": "2019-09-09T20:29:46Z"
 		},
 		{
 			"checksumSHA1": "S5FV5qBbMksx0vxajWD94J2KeHw=",

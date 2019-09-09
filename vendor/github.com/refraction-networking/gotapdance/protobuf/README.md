@@ -1,5 +1,5 @@
 # Protobuf messages for TapDance
-[![godoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/github.com/sergeyfrolov/gotapdance/protobuf)
+[![godoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/github.com/refraction-networking/gotapdance/protobuf)
 ---
 
 ### Rebuild
