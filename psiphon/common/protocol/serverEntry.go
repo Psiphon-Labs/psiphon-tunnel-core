@@ -332,6 +332,10 @@ func (fields ServerEntryFields) AddSignature(publicKey, privateKey string) error
 // imported from an untrusted source, such as client-to-client exchange.
 func (fields ServerEntryFields) VerifySignature(publicKey string) error {
 
+	if publicKey == "" {
+		return common.ContextError(errors.New("missing public key"))
+	}
+
 	// Make a copy so that removing unsigned fields will have no side effects
 	copyFields := make(ServerEntryFields)
 	for k, v := range fields {
