@@ -67,7 +67,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import psi.Psi;
 import psi.PsiphonProvider;
 
-public class PsiphonTunnel implements PsiphonProvider {
+public class PsiphonTunnel {
 
     public interface HostService {
         public String getAppName();
@@ -397,22 +397,67 @@ public class PsiphonTunnel implements PsiphonProvider {
     // PsiphonProvider (Core support) interface implementation
     //----------------------------------------------------------------------------------------------
 
-    @Override
-    public void notice(String noticeJSON) {
+    // The PsiphonProvider functions are called from Go, and must be public to be accessible
+    // via the gobind mechanim. To avoid making internal implementation functions public,
+    // PsiphonProviderShim is used as a wrapper.
+
+    private class PsiphonProviderShim implements PsiphonProvider {
+
+        private PsiphonTunnel mPsiphonTunnel;
+
+        public PsiphonProviderShim(PsiphonTunnel psiphonTunnel) {
+            mPsiphonTunnel = psiphonTunnel;
+        }
+
+        @Override
+        public void notice(String noticeJSON) {
+            mPsiphonTunnel.notice(noticeJSON);
+        }
+
+        @Override
+        public String bindToDevice(long fileDescriptor) throws Exception {
+            return mPsiphonTunnel.bindToDevice(fileDescriptor);
+        }
+
+        @Override
+        public long hasNetworkConnectivity() {
+            return mPsiphonTunnel.hasNetworkConnectivity();
+        }
+
+        @Override
+        public String getPrimaryDnsServer() {
+            return mPsiphonTunnel.getPrimaryDnsServer();
+        }
+
+        @Override
+        public String getSecondaryDnsServer() {
+            return mPsiphonTunnel.getSecondaryDnsServer();
+        }
+
+        @Override
+        public String iPv6Synthesize(String IPv4Addr) {
+            return mPsiphonTunnel.iPv6Synthesize(IPv4Addr);
+        }
+
+        @Override
+        public String getNetworkID() {
+            return mPsiphonTunnel.getNetworkID();
+        }
+    }
+
+    private void notice(String noticeJSON) {
         handlePsiphonNotice(noticeJSON);
     }
 
     @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
-    @Override
-    public String bindToDevice(long fileDescriptor) throws Exception {
+    private String bindToDevice(long fileDescriptor) throws Exception {
         if (!((VpnService)mHostService.getVpnService()).protect((int)fileDescriptor)) {
             throw new Exception("protect socket failed");
         }
         return "";
     }
 
-    @Override
-    public long hasNetworkConnectivity() {
+    private long hasNetworkConnectivity() {
         boolean hasConnectivity = hasNetworkConnectivity(mHostService.getContext());
         boolean wasWaitingForNetworkConnectivity = mIsWaitingForNetworkConnectivity.getAndSet(!hasConnectivity);
         if (!hasConnectivity && !wasWaitingForNetworkConnectivity) {
@@ -425,8 +470,7 @@ public class PsiphonTunnel implements PsiphonProvider {
         return hasConnectivity ? 1 : 0;
     }
 
-    @Override
-    public String getPrimaryDnsServer() {
+    private String getPrimaryDnsServer() {
         String dnsResolver = null;
         try {
             dnsResolver = getFirstActiveNetworkDnsResolver(mHostService.getContext());
@@ -437,16 +481,15 @@ public class PsiphonTunnel implements PsiphonProvider {
         return dnsResolver;
     }
 
-    @Override
-    public String getSecondaryDnsServer() {
+    private String getSecondaryDnsServer() {
         return DEFAULT_SECONDARY_DNS_SERVER;
     }
 
-    @Override
-    public String iPv6Synthesize(String IPv4Addr) { return IPv4Addr; }
+    private String iPv6Synthesize(String IPv4Addr) {
+        return IPv4Addr;
+    }
 
-    @Override
-    public String getNetworkID() {
+    private String getNetworkID() {
 
         // The network ID contains potential PII. In tunnel-core, the network ID
         // is used only locally in the client and not sent to the server.
@@ -548,7 +591,7 @@ public class PsiphonTunnel implements PsiphonProvider {
                     loadPsiphonConfig(mHostService.getContext(), fd),
                     embeddedServerEntries,
                     "",
-                    this,
+                    new PsiphonProviderShim(this),
                     isVpnMode(),
                     false        // Do not use IPv6 synthesizer for android
                     );
