@@ -286,6 +286,11 @@ public class MainActivity extends AppCompatActivity
     }
 
     @Override
+    public void onStoppedWaitingForNetworkConnectivity() {
+        logMessage("finished waiting for network connectivity...");
+    }
+
+    @Override
     public void onActiveAuthorizationIDs(List<String> authorizations) {
 
     }

@@ -92,6 +92,7 @@ public class PsiphonTunnel {
         public void onUntunneledAddress(String address);
         public void onBytesTransferred(long sent, long received);
         public void onStartedWaitingForNetworkConnectivity();
+        public void onStoppedWaitingForNetworkConnectivity();
         public void onActiveAuthorizationIDs(List<String> authorizations);
         public void onExiting();
     }
@@ -460,11 +461,13 @@ public class PsiphonTunnel {
     private long hasNetworkConnectivity() {
         boolean hasConnectivity = hasNetworkConnectivity(mHostService.getContext());
         boolean wasWaitingForNetworkConnectivity = mIsWaitingForNetworkConnectivity.getAndSet(!hasConnectivity);
+        // HasNetworkConnectivity may be called many times, but only invoke
+        // callbacks once per loss or resumption of connectivity, so, e.g.,
+        // the HostService may log a single message.
         if (!hasConnectivity && !wasWaitingForNetworkConnectivity) {
-            // HasNetworkConnectivity may be called many times, but only call
-            // onStartedWaitingForNetworkConnectivity once per loss of connectivity,
-            // so the HostService may log a single message.
             mHostService.onStartedWaitingForNetworkConnectivity();
+        } else if (hasConnectivity && wasWaitingForNetworkConnectivity) {
+            mHostService.onStoppedWaitingForNetworkConnectivity();
         }
         // TODO: change to bool return value once gobind supports that type
         return hasConnectivity ? 1 : 0;
