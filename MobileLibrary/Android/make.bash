@@ -20,6 +20,7 @@ if [ $? != 0 ]; then
   exit $?
 fi
 
+BUILDINFOFILE="psiphon-tunnel-core_buildinfo.txt"
 BUILDDATE=$(date --iso-8601=seconds)
 BUILDREPO=$(git config --get remote.origin.url)
 BUILDREV=$(git rev-parse --short HEAD)
@@ -45,6 +46,8 @@ LDFLAGS="\
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.gomobileVersion=$GOMOBILEVERSION \
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.dependencies=$DEPENDENCIES \
 "
+
+echo -e "${BUILDDATE}\n${BUILDREPO}\n${BUILDREV}\n" > $BUILDINFOFILE
 
 echo "Variables for ldflags:"
 echo " Build date: ${BUILDDATE}"

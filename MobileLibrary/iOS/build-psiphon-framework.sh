@@ -126,6 +126,7 @@ fi
 # Ensure BUILD* variables reflect the tunnel-core repo
 cd ${TUNNEL_CORE_SRC_DIR}
 
+BUILDINFOFILE="${BASE_DIR}/psiphon-tunnel-core_buildinfo.txt"
 BUILDDATE=$(date +%Y-%m-%dT%H:%M:%S%z)
 BUILDREPO=$(git config --get remote.origin.url)
 BUILDREV=$(git rev-parse --short HEAD)
@@ -146,6 +147,8 @@ LDFLAGS="\
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.gomobileVersion=${GOMOBILEVERSION} \
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.dependencies=${DEPENDENCIES} \
 "
+
+echo -e "${BUILDDATE}\n${BUILDREPO}\n${BUILDREV}\n" > $BUILDINFOFILE
 
 echo ""
 echo "Variables for ldflags:"
