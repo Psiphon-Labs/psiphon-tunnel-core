@@ -68,7 +68,7 @@ type Listener struct {
 // SetReadDeadline and performs a Read.
 func Listen(address string) (*Listener, error) {
 
-	listener, err := net.Listen("tcp", address)
+	tcpListener, err := net.Listen("tcp", address)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -77,11 +77,70 @@ func Listen(address string) (*Listener, error) {
 	// header completes or times out and RemoteAddr will not block. See:
 	// https://godoc.org/github.com/armon/go-proxyproto#Conn.RemoteAddr
 
-	listener = &proxyproto.Listener{
-		Listener:           listener,
+	proxyListener := &proxyproto.Listener{
+		Listener:           tcpListener,
 		ProxyHeaderTimeout: READ_PROXY_PROTOCOL_HEADER_TIMEOUT}
 
-	return &Listener{Listener: listener}, nil
+	stationListener := &stationListener{
+		proxyListener: proxyListener,
+	}
+
+	return &Listener{Listener: stationListener}, nil
+}
+
+// stationListener uses the proxyproto.Listener SourceCheck callback to
+// capture and record the direct remote address, the Tapdance station address,
+// and wraps accepted conns to provide station address metrics via GetMetrics.
+// These metrics enable identifying which station fronted a connection, which
+// is useful for network operations and troubleshooting.
+//
+// go-proxyproto.Conn.RemoteAddr reports the originating client IP address,
+// which is geolocated and recorded for metrics. The underlying conn's remote
+// address, the Tapdance station address, is not accessible via the
+// go-proxyproto API.
+//
+// stationListener is not safe for concurrent access.
+type stationListener struct {
+	proxyListener *proxyproto.Listener
+}
+
+func (l *stationListener) Accept() (net.Conn, error) {
+	var stationRemoteAddr net.Addr
+	l.proxyListener.SourceCheck = func(addr net.Addr) (bool, error) {
+		stationRemoteAddr = addr
+		return true, nil
+	}
+	conn, err := l.proxyListener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	if stationRemoteAddr == nil {
+		return nil, common.ContextError(errors.New("missing station address"))
+	}
+	return &stationConn{
+		Conn:              conn,
+		stationRemoteAddr: stationRemoteAddr,
+	}, nil
+}
+
+func (l *stationListener) Close() error {
+	return l.proxyListener.Close()
+}
+
+func (l *stationListener) Addr() net.Addr {
+	return l.proxyListener.Addr()
+}
+
+type stationConn struct {
+	net.Conn
+	stationRemoteAddr net.Addr
+}
+
+// GetMetrics implements the common.MetricsSource interface.
+func (c *stationConn) GetMetrics() common.LogFields {
+	logFields := make(common.LogFields)
+	logFields["station_ip_address"] = common.IPAddressFromAddr(c.stationRemoteAddr)
+	return logFields
 }
 
 // dialManager tracks all dials performed by and dialed conns used by a
