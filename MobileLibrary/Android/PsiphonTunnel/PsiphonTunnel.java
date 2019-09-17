@@ -70,31 +70,33 @@ import psi.PsiphonProvider;
 public class PsiphonTunnel {
 
     public interface HostService {
+
         public String getAppName();
         public Context getContext();
-        public Object getVpnService(); // Object must be a VpnService (Android < 4 cannot reference this class name)
-        public Object newVpnServiceBuilder(); // Object must be a VpnService.Builder (Android < 4 cannot reference this class name)
         public String getPsiphonConfig();
-        public void onDiagnosticMessage(String message);
-        public void onAvailableEgressRegions(List<String> regions);
-        public void onSocksProxyPortInUse(int port);
-        public void onHttpProxyPortInUse(int port);
-        public void onListeningSocksProxyPort(int port);
-        public void onListeningHttpProxyPort(int port);
-        public void onUpstreamProxyError(String message);
-        public void onConnecting();
-        public void onConnected();
-        public void onHomepage(String url);
-        public void onClientRegion(String region);
-        public void onClientUpgradeDownloaded(String filename);
-        public void onClientIsLatestVersion();
-        public void onSplitTunnelRegion(String region);
-        public void onUntunneledAddress(String address);
-        public void onBytesTransferred(long sent, long received);
-        public void onStartedWaitingForNetworkConnectivity();
-        public void onStoppedWaitingForNetworkConnectivity();
-        public void onActiveAuthorizationIDs(List<String> authorizations);
-        public void onExiting();
+
+        default public Object getVpnService() {return null;} // Object must be a VpnService (Android < 4 cannot reference this class name)
+        default public Object newVpnServiceBuilder() {return null;} // Object must be a VpnService.Builder (Android < 4 cannot reference this class name)
+        default public void onDiagnosticMessage(String message) {}
+        default public void onAvailableEgressRegions(List<String> regions) {}
+        default public void onSocksProxyPortInUse(int port) {}
+        default public void onHttpProxyPortInUse(int port) {}
+        default public void onListeningSocksProxyPort(int port) {}
+        default public void onListeningHttpProxyPort(int port) {}
+        default public void onUpstreamProxyError(String message) {}
+        default public void onConnecting() {}
+        default public void onConnected() {}
+        default public void onHomepage(String url) {}
+        default public void onClientRegion(String region) {}
+        default public void onClientUpgradeDownloaded(String filename) {}
+        default public void onClientIsLatestVersion() {}
+        default public void onSplitTunnelRegion(String region) {}
+        default public void onUntunneledAddress(String address) {}
+        default public void onBytesTransferred(long sent, long received) {}
+        default public void onStartedWaitingForNetworkConnectivity() {}
+        default public void onStoppedWaitingForNetworkConnectivity() {}
+        default public void onActiveAuthorizationIDs(List<String> authorizations) {}
+        default public void onExiting() {}
     }
 
     private final HostService mHostService;
