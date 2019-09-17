@@ -67,33 +67,36 @@ import java.util.concurrent.atomic.AtomicReference;
 import psi.Psi;
 import psi.PsiphonProvider;
 
-public class PsiphonTunnel implements PsiphonProvider {
+public class PsiphonTunnel {
 
     public interface HostService {
+
         public String getAppName();
         public Context getContext();
-        public Object getVpnService(); // Object must be a VpnService (Android < 4 cannot reference this class name)
-        public Object newVpnServiceBuilder(); // Object must be a VpnService.Builder (Android < 4 cannot reference this class name)
         public String getPsiphonConfig();
-        public void onDiagnosticMessage(String message);
-        public void onAvailableEgressRegions(List<String> regions);
-        public void onSocksProxyPortInUse(int port);
-        public void onHttpProxyPortInUse(int port);
-        public void onListeningSocksProxyPort(int port);
-        public void onListeningHttpProxyPort(int port);
-        public void onUpstreamProxyError(String message);
-        public void onConnecting();
-        public void onConnected();
-        public void onHomepage(String url);
-        public void onClientRegion(String region);
-        public void onClientUpgradeDownloaded(String filename);
-        public void onClientIsLatestVersion();
-        public void onSplitTunnelRegion(String region);
-        public void onUntunneledAddress(String address);
-        public void onBytesTransferred(long sent, long received);
-        public void onStartedWaitingForNetworkConnectivity();
-        public void onActiveAuthorizationIDs(List<String> authorizations);
-        public void onExiting();
+
+        default public Object getVpnService() {return null;} // Object must be a VpnService (Android < 4 cannot reference this class name)
+        default public Object newVpnServiceBuilder() {return null;} // Object must be a VpnService.Builder (Android < 4 cannot reference this class name)
+        default public void onDiagnosticMessage(String message) {}
+        default public void onAvailableEgressRegions(List<String> regions) {}
+        default public void onSocksProxyPortInUse(int port) {}
+        default public void onHttpProxyPortInUse(int port) {}
+        default public void onListeningSocksProxyPort(int port) {}
+        default public void onListeningHttpProxyPort(int port) {}
+        default public void onUpstreamProxyError(String message) {}
+        default public void onConnecting() {}
+        default public void onConnected() {}
+        default public void onHomepage(String url) {}
+        default public void onClientRegion(String region) {}
+        default public void onClientUpgradeDownloaded(String filename) {}
+        default public void onClientIsLatestVersion() {}
+        default public void onSplitTunnelRegion(String region) {}
+        default public void onUntunneledAddress(String address) {}
+        default public void onBytesTransferred(long sent, long received) {}
+        default public void onStartedWaitingForNetworkConnectivity() {}
+        default public void onStoppedWaitingForNetworkConnectivity() {}
+        default public void onActiveAuthorizationIDs(List<String> authorizations) {}
+        default public void onExiting() {}
     }
 
     private final HostService mHostService;
@@ -397,36 +400,82 @@ public class PsiphonTunnel implements PsiphonProvider {
     // PsiphonProvider (Core support) interface implementation
     //----------------------------------------------------------------------------------------------
 
-    @Override
-    public void notice(String noticeJSON) {
+    // The PsiphonProvider functions are called from Go, and must be public to be accessible
+    // via the gobind mechanim. To avoid making internal implementation functions public,
+    // PsiphonProviderShim is used as a wrapper.
+
+    private class PsiphonProviderShim implements PsiphonProvider {
+
+        private PsiphonTunnel mPsiphonTunnel;
+
+        public PsiphonProviderShim(PsiphonTunnel psiphonTunnel) {
+            mPsiphonTunnel = psiphonTunnel;
+        }
+
+        @Override
+        public void notice(String noticeJSON) {
+            mPsiphonTunnel.notice(noticeJSON);
+        }
+
+        @Override
+        public String bindToDevice(long fileDescriptor) throws Exception {
+            return mPsiphonTunnel.bindToDevice(fileDescriptor);
+        }
+
+        @Override
+        public long hasNetworkConnectivity() {
+            return mPsiphonTunnel.hasNetworkConnectivity();
+        }
+
+        @Override
+        public String getPrimaryDnsServer() {
+            return mPsiphonTunnel.getPrimaryDnsServer();
+        }
+
+        @Override
+        public String getSecondaryDnsServer() {
+            return mPsiphonTunnel.getSecondaryDnsServer();
+        }
+
+        @Override
+        public String iPv6Synthesize(String IPv4Addr) {
+            return mPsiphonTunnel.iPv6Synthesize(IPv4Addr);
+        }
+
+        @Override
+        public String getNetworkID() {
+            return mPsiphonTunnel.getNetworkID();
+        }
+    }
+
+    private void notice(String noticeJSON) {
         handlePsiphonNotice(noticeJSON);
     }
 
     @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
-    @Override
-    public String bindToDevice(long fileDescriptor) throws Exception {
+    private String bindToDevice(long fileDescriptor) throws Exception {
         if (!((VpnService)mHostService.getVpnService()).protect((int)fileDescriptor)) {
             throw new Exception("protect socket failed");
         }
         return "";
     }
 
-    @Override
-    public long hasNetworkConnectivity() {
+    private long hasNetworkConnectivity() {
         boolean hasConnectivity = hasNetworkConnectivity(mHostService.getContext());
         boolean wasWaitingForNetworkConnectivity = mIsWaitingForNetworkConnectivity.getAndSet(!hasConnectivity);
+        // HasNetworkConnectivity may be called many times, but only invoke
+        // callbacks once per loss or resumption of connectivity, so, e.g.,
+        // the HostService may log a single message.
         if (!hasConnectivity && !wasWaitingForNetworkConnectivity) {
-            // HasNetworkConnectivity may be called many times, but only call
-            // onStartedWaitingForNetworkConnectivity once per loss of connectivity,
-            // so the HostService may log a single message.
             mHostService.onStartedWaitingForNetworkConnectivity();
+        } else if (hasConnectivity && wasWaitingForNetworkConnectivity) {
+            mHostService.onStoppedWaitingForNetworkConnectivity();
         }
         // TODO: change to bool return value once gobind supports that type
         return hasConnectivity ? 1 : 0;
     }
 
-    @Override
-    public String getPrimaryDnsServer() {
+    private String getPrimaryDnsServer() {
         String dnsResolver = null;
         try {
             dnsResolver = getFirstActiveNetworkDnsResolver(mHostService.getContext());
@@ -437,16 +486,15 @@ public class PsiphonTunnel implements PsiphonProvider {
         return dnsResolver;
     }
 
-    @Override
-    public String getSecondaryDnsServer() {
+    private String getSecondaryDnsServer() {
         return DEFAULT_SECONDARY_DNS_SERVER;
     }
 
-    @Override
-    public String iPv6Synthesize(String IPv4Addr) { return IPv4Addr; }
+    private String iPv6Synthesize(String IPv4Addr) {
+        return IPv4Addr;
+    }
 
-    @Override
-    public String getNetworkID() {
+    private String getNetworkID() {
 
         // The network ID contains potential PII. In tunnel-core, the network ID
         // is used only locally in the client and not sent to the server.
@@ -548,7 +596,7 @@ public class PsiphonTunnel implements PsiphonProvider {
                     loadPsiphonConfig(mHostService.getContext(), fd),
                     embeddedServerEntries,
                     "",
-                    this,
+                    new PsiphonProviderShim(this),
                     isVpnMode(),
                     false        // Do not use IPv6 synthesizer for android
                     );
