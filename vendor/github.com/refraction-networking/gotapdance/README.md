@@ -4,9 +4,9 @@
 
 <p align="center">TapDance is a free-to-use anti-censorship technology, protected from enumeration attacks.</p>
 <p align="center">
-<a href="https://travis-ci.org/sergeyfrolov/gotapdance"><img src="https://travis-ci.org/sergeyfrolov/gotapdance.svg?branch=master"></a>
-<a href="https://godoc.org/github.com/sergeyfrolov/gotapdance/tapdance"><img src="https://img.shields.io/badge/godoc-reference-blue.svg"></a>
-	<a href="https://goreportcard.com/report/github.com/sergeyfrolov/gotapdance"><img src="https://goreportcard.com/badge/github.com/sergeyfrolov/gotapdance"></a>
+<a href="https://travis-ci.org/refraction-networking/gotapdance"><img src="https://travis-ci.org/refraction-networking/gotapdance.svg?branch=master"></a>
+<a href="https://godoc.org/github.com/refraction-networking/gotapdance/tapdance"><img src="https://img.shields.io/badge/godoc-reference-blue.svg"></a>
+	<a href="https://goreportcard.com/report/github.com/refraction-networking/gotapdance"><img src="https://goreportcard.com/badge/github.com/refraction-networking/gotapdance"></a>
 </p>
 
 # Build
@@ -16,7 +16,7 @@
 1. Get source code for Go TapDance and all dependencies:
 
  ```bash
-go get -d -u -t github.com/sergeyfrolov/gotapdance/...
+go get -d -u -t github.com/refraction-networking/gotapdance/...
 ```
 Ignore the "no buildable Go source files" warning.
 
@@ -36,7 +36,7 @@ If you have outdated versions of libraries used, you might want to do `go get -u
 package main
 
 import (
-	"github.com/sergeyfrolov/gotapdance/tapdance"
+	"github.com/refraction-networking/gotapdance/tapdance"
 	"fmt"
 )
 

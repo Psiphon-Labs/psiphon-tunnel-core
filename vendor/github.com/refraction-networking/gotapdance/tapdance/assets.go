@@ -13,7 +13,7 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
-	pb "github.com/sergeyfrolov/gotapdance/protobuf"
+	pb "github.com/refraction-networking/gotapdance/protobuf"
 )
 
 type assets struct {

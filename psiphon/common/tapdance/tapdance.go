@@ -21,7 +21,7 @@
 
 /*
 
-Package tapdance wraps github.com/sergeyfrolov/gotapdance with net.Listener
+Package tapdance wraps github.com/refraction-networking/gotapdance with net.Listener
 and net.Conn types that provide drop-in integration with Psiphon.
 
 */
@@ -41,7 +41,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/armon/go-proxyproto"
-	refraction_networking_tapdance "github.com/sergeyfrolov/gotapdance/tapdance"
+	refraction_networking_tapdance "github.com/refraction-networking/gotapdance/tapdance"
 )
 
 const (
@@ -68,7 +68,7 @@ type Listener struct {
 // SetReadDeadline and performs a Read.
 func Listen(address string) (*Listener, error) {
 
-	listener, err := net.Listen("tcp", address)
+	tcpListener, err := net.Listen("tcp", address)
 	if err != nil {
 		return nil, common.ContextError(err)
 	}
@@ -77,11 +77,70 @@ func Listen(address string) (*Listener, error) {
 	// header completes or times out and RemoteAddr will not block. See:
 	// https://godoc.org/github.com/armon/go-proxyproto#Conn.RemoteAddr
 
-	listener = &proxyproto.Listener{
-		Listener:           listener,
+	proxyListener := &proxyproto.Listener{
+		Listener:           tcpListener,
 		ProxyHeaderTimeout: READ_PROXY_PROTOCOL_HEADER_TIMEOUT}
 
-	return &Listener{Listener: listener}, nil
+	stationListener := &stationListener{
+		proxyListener: proxyListener,
+	}
+
+	return &Listener{Listener: stationListener}, nil
+}
+
+// stationListener uses the proxyproto.Listener SourceCheck callback to
+// capture and record the direct remote address, the Tapdance station address,
+// and wraps accepted conns to provide station address metrics via GetMetrics.
+// These metrics enable identifying which station fronted a connection, which
+// is useful for network operations and troubleshooting.
+//
+// go-proxyproto.Conn.RemoteAddr reports the originating client IP address,
+// which is geolocated and recorded for metrics. The underlying conn's remote
+// address, the Tapdance station address, is not accessible via the
+// go-proxyproto API.
+//
+// stationListener is not safe for concurrent access.
+type stationListener struct {
+	proxyListener *proxyproto.Listener
+}
+
+func (l *stationListener) Accept() (net.Conn, error) {
+	var stationRemoteAddr net.Addr
+	l.proxyListener.SourceCheck = func(addr net.Addr) (bool, error) {
+		stationRemoteAddr = addr
+		return true, nil
+	}
+	conn, err := l.proxyListener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	if stationRemoteAddr == nil {
+		return nil, common.ContextError(errors.New("missing station address"))
+	}
+	return &stationConn{
+		Conn:              conn,
+		stationRemoteAddr: stationRemoteAddr,
+	}, nil
+}
+
+func (l *stationListener) Close() error {
+	return l.proxyListener.Close()
+}
+
+func (l *stationListener) Addr() net.Addr {
+	return l.proxyListener.Addr()
+}
+
+type stationConn struct {
+	net.Conn
+	stationRemoteAddr net.Addr
+}
+
+// GetMetrics implements the common.MetricsSource interface.
+func (c *stationConn) GetMetrics() common.LogFields {
+	logFields := make(common.LogFields)
+	logFields["station_ip_address"] = common.IPAddressFromAddr(c.stationRemoteAddr)
+	return logFields
 }
 
 // dialManager tracks all dials performed by and dialed conns used by a
@@ -89,7 +148,7 @@ func Listen(address string) (*Listener, error) {
 // all pending dials and established conns immediately. This ensures that
 // blocking calls within refraction_networking_tapdance, such as tls.Handhake,
 // are interrupted:
-// E.g., https://github.com/sergeyfrolov/gotapdance/blob/2ce6ef6667d52f7391a92fd8ec9dffb97ec4e2e8/tapdance/conn_raw.go#L260
+// E.g., https://github.com/refraction-networking/gotapdance/blob/4d84655dad2e242b0af0459c31f687b12085dcca/tapdance/conn_raw.go#L307
 // (...preceeding SetDeadline is insufficient for immediate cancellation.)
 type dialManager struct {
 	tcpDialer func(ctx context.Context, network, address string) (net.Conn, error)
@@ -133,7 +192,7 @@ func (manager *dialManager) dial(ctx context.Context, network, address string) (
 	if manager.useRunCtx {
 
 		// Preserve the random timeout configured by the tapdance client:
-		// https://github.com/sergeyfrolov/gotapdance/blob/2ce6ef6667d52f7391a92fd8ec9dffb97ec4e2e8/tapdance/conn_raw.go#L219
+		// https://github.com/refraction-networking/gotapdance/blob/4d84655dad2e242b0af0459c31f687b12085dcca/tapdance/conn_raw.go#L263
 		deadline, ok := ctx.Deadline()
 		if !ok {
 			return nil, common.ContextError(fmt.Errorf("unexpected nil deadline"))

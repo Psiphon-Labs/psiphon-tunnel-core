@@ -81,12 +81,6 @@
 			"revisionTime": "2018-04-25T19:07:11Z"
 		},
 		{
-			"checksumSHA1": "iZ3cpzMPHGeYQWcSLweeYdPqPiw=",
-			"path": "github.com/Yawning/chacha20",
-			"revision": "e3b1f968fc6397b51d963fee8ec8711a47bc0ce8",
-			"revisionTime": "2017-09-04T08:51:04Z"
-		},
-		{
 			"checksumSHA1": "30PBqj9BW03KCVqASvLg3bR+xYc=",
 			"path": "github.com/agl/ed25519/edwards25519",
 			"revision": "5312a61534124124185d41f09206b9fef1d88403",
@@ -488,10 +482,28 @@
 			"tree": true
 		},
 		{
-			"checksumSHA1": "S5FV5qBbMksx0vxajWD94J2KeHw=",
+			"checksumSHA1": "5rmH4D67rsb/VWRvD4bjmRO40uA=",
+			"path": "github.com/refraction-networking/gotapdance",
+			"revision": "3a6e1938ad70af3e91081cd036e3ed05995d67e7",
+			"revisionTime": "2019-09-09T20:29:46Z"
+		},
+		{
+			"checksumSHA1": "kt4nwBTlAIn0dET5SqLdWXLLuso=",
+			"path": "github.com/refraction-networking/gotapdance/protobuf",
+			"revision": "3a6e1938ad70af3e91081cd036e3ed05995d67e7",
+			"revisionTime": "2019-09-09T20:29:46Z"
+		},
+		{
+			"checksumSHA1": "vcO0kZzwAtxZ0Jk2nhrPdE16myI=",
+			"path": "github.com/refraction-networking/gotapdance/tapdance",
+			"revision": "3a6e1938ad70af3e91081cd036e3ed05995d67e7",
+			"revisionTime": "2019-09-09T20:29:46Z"
+		},
+		{
+			"checksumSHA1": "lovHeRrkvnia8JnLwyeIBYLa1Zk=",
 			"path": "github.com/refraction-networking/utls",
-			"revision": "1552a980cef9b4c9b088a1c8fe33c774c031c295",
-			"revisionTime": "2019-08-22T22:33:47Z"
+			"revision": "43c36d3c1f57546d5cbb05c066df7b5a78686c51",
+			"revisionTime": "2019-09-09T20:06:33Z"
 		},
 		{
 			"checksumSHA1": "Fn9JW8u40ABN9Uc9wuvquuyOB+8=",
@@ -510,24 +522,6 @@
 			"path": "github.com/sergeyfrolov/bsbuffer",
 			"revision": "94e85abb850729a5f54f383e8175e62931d04748",
 			"revisionTime": "2018-09-03T21:38:11Z"
-		},
-		{
-			"checksumSHA1": "bwonlVmjpR4hyzaTtBBYD+m+Sdo=",
-			"path": "github.com/sergeyfrolov/gotapdance",
-			"revision": "f30ba05c9bd842d4221ccb73645fe2a0e1a0e1f6",
-			"revisionTime": "2019-03-18T20:34:37Z"
-		},
-		{
-			"checksumSHA1": "sna/Yemp1kUaSkmSYPpOjPuPGOU=",
-			"path": "github.com/sergeyfrolov/gotapdance/protobuf",
-			"revision": "f30ba05c9bd842d4221ccb73645fe2a0e1a0e1f6",
-			"revisionTime": "2019-03-18T20:34:37Z"
-		},
-		{
-			"checksumSHA1": "yfje0scynTtzRYlG+pGGh3bi9rc=",
-			"path": "github.com/sergeyfrolov/gotapdance/tapdance",
-			"revision": "a67708a49212a7fdf7dda54c0a1a488198dc8a0d",
-			"revisionTime": "2019-03-19T17:16:21Z"
 		},
 		{
 			"checksumSHA1": "Egp3n8yTaAuVtrA14LJrTWDgkO4=",
@@ -660,6 +654,12 @@
 			"path": "golang.org/x/crypto/poly1305",
 			"revision": "a1f597ede03a7bef967a422b5b3a5bd08805a01e",
 			"revisionTime": "2019-02-05T21:23:42Z"
+		},
+		{
+			"checksumSHA1": "ErY5gBdoI6rIwCTYUjSZGGlCF7s=",
+			"path": "golang.org/x/crypto/sha3",
+			"revision": "094676da4a83be5288d281081bba63a173ce6772",
+			"revisionTime": "2018-07-12T15:07:55Z"
 		},
 		{
 			"checksumSHA1": "QU00lGkD/G00hoTs2qG7q4xsLVc=",

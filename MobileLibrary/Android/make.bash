@@ -20,6 +20,7 @@ if [ $? != 0 ]; then
   exit $?
 fi
 
+BUILDINFOFILE="psiphon-tunnel-core_buildinfo.txt"
 BUILDDATE=$(date --iso-8601=seconds)
 BUILDREPO=$(git config --get remote.origin.url)
 BUILDREV=$(git rev-parse --short HEAD)
@@ -46,6 +47,8 @@ LDFLAGS="\
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.dependencies=$DEPENDENCIES \
 "
 
+echo -e "${BUILDDATE}\n${BUILDREPO}\n${BUILDREV}\n" > $BUILDINFOFILE
+
 echo "Variables for ldflags:"
 echo " Build date: ${BUILDDATE}"
 echo " Build repo: ${BUILDREPO}"
@@ -70,7 +73,7 @@ yes | cp -f PsiphonTunnel/libs/arm64-v8a/libtun2socks.so build-tmp/psi/jni/arm64
 yes | cp -f PsiphonTunnel/libs/x86/libtun2socks.so build-tmp/psi/jni/x86/libtun2socks.so
 yes | cp -f PsiphonTunnel/libs/x86_64/libtun2socks.so build-tmp/psi/jni/x86_64/libtun2socks.so
 
-javac -d build-tmp -bootclasspath $ANDROID_HOME/platforms/android-23/android.jar -source 1.7 -target 1.7 -classpath build-tmp/psi/classes.jar:$ANDROID_HOME/platforms/android-23/optional/org.apache.http.legacy.jar PsiphonTunnel/PsiphonTunnel.java
+javac -d build-tmp -bootclasspath $ANDROID_HOME/platforms/android-23/android.jar -source 1.8 -target 1.8 -classpath build-tmp/psi/classes.jar PsiphonTunnel/PsiphonTunnel.java
 if [ $? != 0 ]; then
   echo "..'javac' compiling PsiphonTunnel failed, exiting"
   exit $?

@@ -291,7 +291,7 @@ func VerifyAuthorization(
 	}
 
 	if len(auth.ID) == 0 {
-		return nil, common.ContextError(errors.New("invalid authentication ID"))
+		return nil, common.ContextError(errors.New("invalid authorization ID"))
 	}
 
 	if auth.AccessType != verificationKey.AccessType {
@@ -303,7 +303,7 @@ func VerifyAuthorization(
 	}
 
 	if auth.Expires.Before(time.Now().UTC()) {
-		return nil, common.ContextError(errors.New("expired authentication"))
+		return nil, common.ContextError(errors.New("expired authorization"))
 	}
 
 	return &auth, nil
