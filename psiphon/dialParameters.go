@@ -66,6 +66,8 @@ type DialParameters struct {
 	LastUsedTimestamp       time.Time
 	LastUsedConfigStateHash []byte
 
+	CustomNetworkLatencyMultiplier float64
+
 	TunnelProtocol string
 
 	DirectDialAddress              string
@@ -143,7 +145,7 @@ func MakeDialParameters(
 
 	networkID := config.GetNetworkID()
 
-	p := config.GetClientParametersSnapshot()
+	p := config.GetClientParameters().Get()
 
 	ttl := p.Duration(parameters.ReplayDialParametersTTL)
 	replaySSH := p.Bool(parameters.ReplaySSH)
@@ -269,6 +271,24 @@ func MakeDialParameters(
 	// When not replaying, all required parameters are initialized. When
 	// replaying, existing parameters are retaing, subject to the replay-X
 	// tactics flags.
+
+	// Select a random, custom network latency multiplier. This allows clients to
+	// explore and discover timeout values appropriate for the current network.
+	// The selection applies per tunnel, to avoid delaying all establishment
+	// candidates due to excessive timeouts. The random selection is bounded by a
+	// min/max set in tactics and an exponential distribution is used so as to
+	// heavily favor values closed to the min, which should be set to the
+	// traditional NetworkLatencyMultiplier value.
+	//
+	// Not all existing, persisted DialParameters will have a
+	// CustomNetworkLatencyMultiplier value. Its zero value will cause the
+	// standard NetworkLatencyMultiplier to be used instead.
+	if !isReplay {
+		dialParams.CustomNetworkLatencyMultiplier = prng.ExpFloat64Range(
+			p.Float(parameters.CustomNetworkLatencyMultiplierMin),
+			p.Float(parameters.CustomNetworkLatencyMultiplierMax),
+			p.Float(parameters.CustomNetworkLatencyMultiplierLambda))
+	}
 
 	if !isReplay && !isExchanged {
 
@@ -584,23 +604,24 @@ func MakeDialParameters(
 	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
 
 		dialParams.meekConfig = &MeekConfig{
-			DiagnosticID:                  serverEntry.GetDiagnosticID(),
-			ClientParameters:              config.clientParameters,
-			DialAddress:                   dialParams.MeekDialAddress,
-			UseQUIC:                       protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol),
-			QUICVersion:                   dialParams.QUICVersion,
-			UseHTTPS:                      protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol),
-			TLSProfile:                    dialParams.TLSProfile,
-			NoDefaultTLSSessionID:         dialParams.NoDefaultTLSSessionID,
-			RandomizedTLSProfileSeed:      dialParams.RandomizedTLSProfileSeed,
-			UseObfuscatedSessionTickets:   dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
-			SNIServerName:                 dialParams.MeekSNIServerName,
-			HostHeader:                    dialParams.MeekHostHeader,
-			TransformedHostName:           dialParams.MeekTransformedHostName,
-			ClientTunnelProtocol:          dialParams.TunnelProtocol,
-			MeekCookieEncryptionPublicKey: serverEntry.MeekCookieEncryptionPublicKey,
-			MeekObfuscatedKey:             serverEntry.MeekObfuscatedKey,
-			MeekObfuscatorPaddingSeed:     dialParams.MeekObfuscatorPaddingSeed,
+			DiagnosticID:                   serverEntry.GetDiagnosticID(),
+			ClientParameters:               config.clientParameters,
+			DialAddress:                    dialParams.MeekDialAddress,
+			UseQUIC:                        protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol),
+			QUICVersion:                    dialParams.QUICVersion,
+			UseHTTPS:                       protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol),
+			TLSProfile:                     dialParams.TLSProfile,
+			NoDefaultTLSSessionID:          dialParams.NoDefaultTLSSessionID,
+			RandomizedTLSProfileSeed:       dialParams.RandomizedTLSProfileSeed,
+			UseObfuscatedSessionTickets:    dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
+			SNIServerName:                  dialParams.MeekSNIServerName,
+			HostHeader:                     dialParams.MeekHostHeader,
+			TransformedHostName:            dialParams.MeekTransformedHostName,
+			ClientTunnelProtocol:           dialParams.TunnelProtocol,
+			MeekCookieEncryptionPublicKey:  serverEntry.MeekCookieEncryptionPublicKey,
+			MeekObfuscatedKey:              serverEntry.MeekObfuscatedKey,
+			MeekObfuscatorPaddingSeed:      dialParams.MeekObfuscatorPaddingSeed,
+			CustomNetworkLatencyMultiplier: dialParams.CustomNetworkLatencyMultiplier,
 		}
 
 		// Use an asynchronous callback to record the resolved IP address when
@@ -657,7 +678,7 @@ func (dialParams *DialParameters) Failed(config *Config) {
 	// to, e.g., temporary network disruptions or server load limiting.
 
 	if dialParams.IsReplay &&
-		!config.GetClientParametersSnapshot().WeightedCoinFlip(
+		!config.GetClientParameters().Get().WeightedCoinFlip(
 			parameters.ReplayRetainFailedProbability) {
 
 		NoticeInfo("Delete dial parameters for %s", dialParams.ServerEntry.GetDiagnosticID())
@@ -746,7 +767,7 @@ func (dialParams *ExchangedDialParameters) Validate(serverEntry *protocol.Server
 // then later fully initialized by MakeDialParameters.
 func (dialParams *ExchangedDialParameters) MakeDialParameters(
 	config *Config,
-	p *parameters.ClientParametersSnapshot,
+	p parameters.ClientParametersAccessor,
 	serverEntry *protocol.ServerEntry) *DialParameters {
 
 	return &DialParameters{
@@ -759,7 +780,7 @@ func (dialParams *ExchangedDialParameters) MakeDialParameters(
 
 func getConfigStateHash(
 	config *Config,
-	p *parameters.ClientParametersSnapshot,
+	p parameters.ClientParametersAccessor,
 	serverEntry *protocol.ServerEntry) []byte {
 
 	// The config state hash should reflect config, tactics, and server entry
@@ -835,7 +856,7 @@ func selectFrontingParameters(serverEntry *protocol.ServerEntry) (string, string
 	return frontingDialHost, frontingHost, nil
 }
 
-func selectQUICVersion(allowObfuscatedQUIC bool, p *parameters.ClientParametersSnapshot) string {
+func selectQUICVersion(allowObfuscatedQUIC bool, p parameters.ClientParametersAccessor) string {
 
 	limitQUICVersions := p.QUICVersions(parameters.LimitQUICVersions)
 
@@ -867,7 +888,7 @@ func selectQUICVersion(allowObfuscatedQUIC bool, p *parameters.ClientParametersS
 
 // selectUserAgentIfUnset selects a User-Agent header if one is not set.
 func selectUserAgentIfUnset(
-	p *parameters.ClientParametersSnapshot, headers http.Header) (bool, string) {
+	p parameters.ClientParametersAccessor, headers http.Header) (bool, string) {
 
 	if _, ok := headers["User-Agent"]; !ok {
 
@@ -884,7 +905,7 @@ func selectUserAgentIfUnset(
 
 func makeDialCustomHeaders(
 	config *Config,
-	p *parameters.ClientParametersSnapshot) http.Header {
+	p parameters.ClientParametersAccessor) http.Header {
 
 	dialCustomHeaders := make(http.Header)
 	if config.CustomHeaders != nil {

@@ -102,6 +102,19 @@ type Tunnel struct {
 	establishedTime            monotime.Time
 }
 
+// getCustomClientParameters helpers wrap the verbose function call chain
+// required to get a current snapshot of the ClientParameters customized with
+// the dial parameters associated with a tunnel.
+
+func (tunnel *Tunnel) getCustomClientParameters() parameters.ClientParametersAccessor {
+	return getCustomClientParameters(tunnel.config, tunnel.dialParams)
+}
+
+func getCustomClientParameters(
+	config *Config, dialParams *DialParameters) parameters.ClientParametersAccessor {
+	return config.GetClientParameters().GetCustom(dialParams.CustomNetworkLatencyMultiplier)
+}
+
 // ConnectTunnel first makes a network transport connection to the
 // Psiphon server and then establishes an SSH client session on top of
 // that transport. The SSH server is authenticated using the public
@@ -186,7 +199,7 @@ func (tunnel *Tunnel) Activate(
 		// request. At this point, there is no operateTunnel monitor that will detect
 		// this condition with SSH keep alives.
 
-		timeout := tunnel.config.GetClientParametersSnapshot().Duration(
+		timeout := tunnel.getCustomClientParameters().Duration(
 			parameters.PsiphonAPIRequestTimeout)
 
 		if timeout > 0 {
@@ -293,7 +306,7 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 		// tunnel is closed, which will interrupt any slow final status request.
 
 		if isActivated {
-			timeout := tunnel.config.GetClientParametersSnapshot().Duration(
+			timeout := tunnel.getCustomClientParameters().Duration(
 				parameters.TunnelOperateShutdownTimeout)
 			afterFunc := time.AfterFunc(
 				timeout,
@@ -372,7 +385,7 @@ func (tunnel *Tunnel) Dial(
 
 	resultChannel := make(chan *tunnelDialResult, 1)
 
-	timeout := tunnel.config.GetClientParametersSnapshot().Duration(
+	timeout := tunnel.getCustomClientParameters().Duration(
 		parameters.TunnelPortForwardDialTimeout)
 
 	afterFunc := time.AfterFunc(
@@ -530,7 +543,7 @@ func dialTunnel(
 		return nil, common.ContextError(err)
 	}
 
-	p := config.GetClientParametersSnapshot()
+	p := getCustomClientParameters(config, dialParams)
 	timeout := p.Duration(parameters.TunnelConnectTimeout)
 	rateLimits := p.RateLimits(parameters.TunnelRateLimits)
 	obfuscatedSSHMinPadding := p.Int(parameters.ObfuscatedSSHMinPadding)
@@ -996,8 +1009,6 @@ func performLivenessTest(
 func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	defer tunnel.operateWaitGroup.Done()
 
-	clientParameters := tunnel.config.clientParameters
-
 	lastBytesReceivedTime := monotime.Now()
 
 	lastTotalBytesTransferedTime := monotime.Now()
@@ -1012,7 +1023,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// from a range, to make the resulting traffic less fingerprintable,
 	// Note: not using Tickers since these are not fixed time periods.
 	nextStatusRequestPeriod := func() time.Duration {
-		p := clientParameters.Get()
+		p := tunnel.getCustomClientParameters()
 		return prng.Period(
 			p.Duration(parameters.PsiphonAPIStatusRequestPeriodMin),
 			p.Duration(parameters.PsiphonAPIStatusRequestPeriodMax))
@@ -1026,7 +1037,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	unreported := CountUnreportedPersistentStats()
 	if unreported > 0 {
 		NoticeInfo("Unreported persistent stats: %d", unreported)
-		p := clientParameters.Get()
+		p := tunnel.getCustomClientParameters()
 		statsTimer.Reset(
 			prng.Period(
 				p.Duration(parameters.PsiphonAPIStatusRequestShortPeriodMin),
@@ -1034,7 +1045,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	}
 
 	nextSshKeepAlivePeriod := func() time.Duration {
-		p := clientParameters.Get()
+		p := tunnel.getCustomClientParameters()
 		return prng.Period(
 			p.Duration(parameters.SSHKeepAlivePeriodMin),
 			p.Duration(parameters.SSHKeepAlivePeriodMax))
@@ -1094,7 +1105,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			totalSent += sent
 			totalReceived += received
 
-			p := clientParameters.Get()
+			p := tunnel.getCustomClientParameters()
 			noticePeriod := p.Duration(parameters.TotalBytesTransferredNoticePeriod)
 			replayTargetUpstreamBytes := p.Int(parameters.ReplayTargetUpstreamBytes)
 			replayTargetDownstreamBytes := p.Int(parameters.ReplayTargetDownstreamBytes)
@@ -1133,9 +1144,10 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			statsTimer.Reset(nextStatusRequestPeriod())
 
 		case <-sshKeepAliveTimer.C:
-			inactivePeriod := clientParameters.Get().Duration(parameters.SSHKeepAlivePeriodicInactivePeriod)
+			p := tunnel.getCustomClientParameters()
+			inactivePeriod := p.Duration(parameters.SSHKeepAlivePeriodicInactivePeriod)
 			if lastBytesReceivedTime.Add(inactivePeriod).Before(monotime.Now()) {
-				timeout := clientParameters.Get().Duration(parameters.SSHKeepAlivePeriodicTimeout)
+				timeout := p.Duration(parameters.SSHKeepAlivePeriodicTimeout)
 				select {
 				case signalSshKeepAlive <- timeout:
 				default:
@@ -1157,9 +1169,10 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			if tunnel.conn.IsClosed() {
 				err = errors.New("underlying conn is closed")
 			} else {
-				inactivePeriod := clientParameters.Get().Duration(parameters.SSHKeepAliveProbeInactivePeriod)
+				p := tunnel.getCustomClientParameters()
+				inactivePeriod := p.Duration(parameters.SSHKeepAliveProbeInactivePeriod)
 				if lastBytesReceivedTime.Add(inactivePeriod).Before(monotime.Now()) {
-					timeout := clientParameters.Get().Duration(parameters.SSHKeepAliveProbeTimeout)
+					timeout := p.Duration(parameters.SSHKeepAliveProbeTimeout)
 					select {
 					case signalSshKeepAlive <- timeout:
 					default:
@@ -1243,7 +1256,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 
 	go func() {
 		// Random padding to frustrate fingerprinting.
-		p := tunnel.config.GetClientParametersSnapshot()
+		p := tunnel.getCustomClientParameters()
 		request := prng.Padding(
 			p.Int(parameters.SSHKeepAlivePaddingMinBytes),
 			p.Int(parameters.SSHKeepAlivePaddingMaxBytes))
@@ -1269,11 +1282,11 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 
 		if err == nil && requestOk &&
 			(isFirstKeepAlive ||
-				tunnel.config.GetClientParametersSnapshot().WeightedCoinFlip(
+				tunnel.getCustomClientParameters().WeightedCoinFlip(
 					parameters.SSHKeepAliveSpeedTestSampleProbability)) {
 
 			err = tactics.AddSpeedTestSample(
-				tunnel.config.clientParameters,
+				tunnel.config.GetClientParameters(),
 				GetTacticsStorer(),
 				tunnel.config.GetNetworkID(),
 				tunnel.dialParams.ServerEntry.Region,

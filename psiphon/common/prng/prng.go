@@ -206,7 +206,6 @@ func (p *PRNG) FlipCoin() bool {
 	return p.rand.Int31n(2) == 1
 }
 
-// FlipWeightedCoin returns the result of a weighted
 // random coin flip. If the weight is 0.5, the outcome
 // is equally likely to be true or false. If the weight
 // is 1.0, the outcome is always true, and if the
@@ -237,6 +236,25 @@ func (p *PRNG) Int63n(n int64) int64 {
 		return 0
 	}
 	return p.rand.Int63n(n)
+}
+
+// ExpFloat64Range returns a pseudo-exponentially distributed float64 in the
+// range [min, max] with the specified lambda. Numbers are selected using
+// math/rand.ExpFloat64 and discarding values that exceed max.
+//
+// If max < min or lambda is 0, min is returned.
+func (p *PRNG) ExpFloat64Range(min, max, lambda float64) float64 {
+	if max <= min || lambda == 0.0 {
+		return min
+	}
+	var value float64
+	for {
+		value = min + (rand.ExpFloat64()/lambda)*(max-min)
+		if value <= max {
+			break
+		}
+	}
+	return value
 }
 
 // Intn is equivilent to math/read.Perm.
@@ -329,6 +347,10 @@ func Intn(n int) int {
 
 func Int63n(n int64) int64 {
 	return p.Int63n(n)
+}
+
+func ExpFloat64Range(min, max, lambda float64) float64 {
+	return p.ExpFloat64Range(min, max, lambda)
 }
 
 func Perm(n int) []int {

@@ -141,9 +141,7 @@ type CustomTLSConfig struct {
 // EnableClientSessionCache initializes a cache to use to persist session
 // tickets, enabling TLS session resumability across multiple
 // CustomTLSDial calls or dialers using the same CustomTLSConfig.
-func (config *CustomTLSConfig) EnableClientSessionCache(
-	clientParameters *parameters.ClientParameters) {
-
+func (config *CustomTLSConfig) EnableClientSessionCache() {
 	if config.clientSessionCache == nil {
 		config.clientSessionCache = utls.NewLRUClientSessionCache(0)
 	}
@@ -151,7 +149,7 @@ func (config *CustomTLSConfig) EnableClientSessionCache(
 
 // SelectTLSProfile picks a TLS profile at random from the available candidates.
 func SelectTLSProfile(
-	p *parameters.ClientParametersSnapshot) string {
+	p parameters.ClientParametersAccessor) string {
 
 	// Two TLS profile lists are constructed, subject to limit constraints:
 	// stock, fixed parrots (non-randomized SupportedTLSProfiles) and custom
@@ -208,7 +206,7 @@ func SelectTLSProfile(
 }
 
 func getUTLSClientHelloID(
-	p *parameters.ClientParametersSnapshot,
+	p parameters.ClientParametersAccessor,
 	tlsProfile string) (utls.ClientHelloID, *utls.ClientHelloSpec, error) {
 
 	switch tlsProfile {

@@ -117,7 +117,7 @@ func NewHttpProxy(
 		return tunneler.DirectDial(addr)
 	}
 
-	p := config.GetClientParametersSnapshot()
+	p := config.GetClientParameters().Get()
 	responseHeaderTimeout := p.Duration(parameters.HTTPProxyOriginServerTimeout)
 	maxIdleConnsPerHost := p.Int(parameters.HTTPProxyMaxIdleConnectionsPerHost)
 	p = nil

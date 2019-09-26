@@ -807,9 +807,9 @@ func (config *Config) Commit() error {
 	return nil
 }
 
-// GetClientParameters returns a snapshot of the current client parameters.
-func (config *Config) GetClientParametersSnapshot() *parameters.ClientParametersSnapshot {
-	return config.clientParameters.Get()
+// GetClientParameters returns a the current client parameters.
+func (config *Config) GetClientParameters() *parameters.ClientParameters {
+	return config.clientParameters
 }
 
 // SetClientParameters resets Config.clientParameters to the default values,
