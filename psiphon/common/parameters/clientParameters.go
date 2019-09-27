@@ -472,74 +472,6 @@ type ClientParameters struct {
 	snapshot       atomic.Value
 }
 
-// ClientParametersAccessor defines the interface for accessing client
-// parameter values.
-type ClientParametersAccessor interface {
-
-	// Tag returns the tag associated with these parameters.
-	Tag() string
-
-	// String returns a string parameter value.
-	String(name string) string
-
-	// Strings returns a []string parameter value.
-	Strings(name string) []string
-
-	// Int returns an int parameter value.
-	Int(name string) int
-
-	// Bool returns a bool parameter value.
-	Bool(name string) bool
-
-	// Float returns a float64 parameter value.
-	Float(name string) float64
-
-	// WeightedCoinFlip returns the result of prng.FlipWeightedCoin using the
-	// specified float parameter as the probability input.
-	WeightedCoinFlip(name string) bool
-
-	// Duration returns a time.Duration parameter value. When the duration
-	// parameter has the useNetworkLatencyMultiplier flag, the
-	// NetworkLatencyMultiplier is applied to the returned value.
-	Duration(name string) time.Duration
-
-	// TunnelProtocols returns a protocol.TunnelProtocols parameter value.
-	// If there is a corresponding Probability value, a weighted coin flip
-	// will be performed and, depending on the result, the value or the
-	// parameter default will be returned.
-	TunnelProtocols(name string) protocol.TunnelProtocols
-
-	// TLSProfiles returns a protocol.TLSProfiles parameter value.
-	// If there is a corresponding Probability value, a weighted coin flip
-	// will be performed and, depending on the result, the value or the
-	// parameter default will be returned.
-	TLSProfiles(name string) protocol.TLSProfiles
-
-	// QUICVersions returns a protocol.QUICVersions parameter value.
-	// If there is a corresponding Probability value, a weighted coin flip
-	// will be performed and, depending on the result, the value or the
-	// parameter default will be returned.
-	QUICVersions(name string) protocol.QUICVersions
-
-	// DownloadURLs returns a DownloadURLs parameter value.
-	DownloadURLs(name string) DownloadURLs
-
-	// RateLimits returns a common.RateLimits parameter value.
-	RateLimits(name string) common.RateLimits
-
-	// HTTPHeaders returns an http.Header parameter value.
-	HTTPHeaders(name string) http.Header
-
-	// CustomTLSProfileNames returns the CustomTLSProfile.Name fields for
-	// each profile in the CustomTLSProfiles parameter value.
-	CustomTLSProfileNames() []string
-
-	// CustomTLSProfile returns the CustomTLSProfile fields with the specified
-	// Name field if it exists in the CustomTLSProfiles parameter value.
-	// Returns nil if not found.
-	CustomTLSProfile(name string) *protocol.CustomTLSProfile
-}
-
 // NewClientParameters initializes a new ClientParameters with the default
 // parameter values.
 //
@@ -765,18 +697,27 @@ func (p *ClientParameters) Set(
 	return counts, nil
 }
 
-// Get returns the current parameters. Values read from the current parameters
-// are not deep copies and must be treated read-only.
+// Get returns the current parameters.
+//
+// Values read from the current parameters are not deep copies and must be
+// treated read-only.
 //
 // The returned ClientParametersAccessor may be used to read multiple related
 // values atomically and consistently while the current set of values in
 // ClientParameters may change concurrently.
+//
+// Get does not perform any heap allocations and is intended for repeated,
+// direct, low-overhead invocations.
 func (p *ClientParameters) Get() ClientParametersAccessor {
-	return p.snapshot.Load().(*clientParametersSnapshot)
+	return ClientParametersAccessor{
+		snapshot: p.snapshot.Load().(*clientParametersSnapshot)}
 }
 
 // GetCustom returns the current parameters while also setting customizations
 // for this instance.
+//
+// The properties of Get also apply to GetCustom: must be read-only; atomic
+// and consisent view; no heap allocations.
 //
 // Customizations include:
 //
@@ -786,8 +727,8 @@ func (p *ClientParameters) Get() ClientParametersAccessor {
 func (p *ClientParameters) GetCustom(
 	customNetworkLatencyMultiplier float64) ClientParametersAccessor {
 
-	return &customClientParametersSnapshot{
-		ClientParametersAccessor:       p.Get(),
+	return ClientParametersAccessor{
+		snapshot:                       p.snapshot.Load().(*clientParametersSnapshot),
 		customNetworkLatencyMultiplier: customNetworkLatencyMultiplier,
 	}
 }
@@ -800,10 +741,6 @@ type clientParametersSnapshot struct {
 	getValueLogger func(error)
 	tag            string
 	parameters     map[string]interface{}
-}
-
-func (p *clientParametersSnapshot) Tag() string {
-	return p.tag
 }
 
 // getValue sets target to the value of the named parameter.
@@ -853,58 +790,86 @@ func (p *clientParametersSnapshot) getValue(name string, target interface{}) {
 	targetValue.Elem().Set(reflect.ValueOf(value))
 }
 
-func (p *clientParametersSnapshot) String(name string) string {
+// ClientParametersAccessor provides consistent, atomic access to client
+// parameter values. Any customizations are applied transparently.
+type ClientParametersAccessor struct {
+	snapshot                       *clientParametersSnapshot
+	customNetworkLatencyMultiplier float64
+}
+
+// Close clears internal references to large memory objects, allowing them to
+// be garbage collected. Call Close when done using a
+// ClientParametersAccessor, where memory footprint is a concern, and where
+// the ClientParametersAccessor is not immediately going out of scope. After
+// Close is called, all other ClientParametersAccessor functions will panic if
+// called.
+func (p ClientParametersAccessor) Close() {
+	p.snapshot = nil
+}
+
+// Tag returns the tag associated with these parameters.
+func (p ClientParametersAccessor) Tag() string {
+	return p.snapshot.tag
+}
+
+// String returns a string parameter value.
+func (p ClientParametersAccessor) String(name string) string {
 	value := ""
-	p.getValue(name, &value)
+	p.snapshot.getValue(name, &value)
 	return value
 }
 
-func (p *clientParametersSnapshot) Strings(name string) []string {
+func (p ClientParametersAccessor) Strings(name string) []string {
 	value := []string{}
-	p.getValue(name, &value)
+	p.snapshot.getValue(name, &value)
 	return value
 }
 
 // Int returns an int parameter value.
-func (p *clientParametersSnapshot) Int(name string) int {
+func (p ClientParametersAccessor) Int(name string) int {
 	value := int(0)
-	p.getValue(name, &value)
+	p.snapshot.getValue(name, &value)
 	return value
 }
 
 // Bool returns a bool parameter value.
-func (p *clientParametersSnapshot) Bool(name string) bool {
+func (p ClientParametersAccessor) Bool(name string) bool {
 	value := false
-	p.getValue(name, &value)
+	p.snapshot.getValue(name, &value)
 	return value
 }
 
-func (p *clientParametersSnapshot) Float(name string) float64 {
+// Float returns a float64 parameter value.
+func (p ClientParametersAccessor) Float(name string) float64 {
 	value := float64(0.0)
-	p.getValue(name, &value)
+	p.snapshot.getValue(name, &value)
 	return value
 }
 
-func (p *clientParametersSnapshot) WeightedCoinFlip(name string) bool {
+// WeightedCoinFlip returns the result of prng.FlipWeightedCoin using the
+// specified float parameter as the probability input.
+func (p ClientParametersAccessor) WeightedCoinFlip(name string) bool {
 	var value float64
-	p.getValue(name, &value)
+	p.snapshot.getValue(name, &value)
 	return prng.FlipWeightedCoin(value)
 }
 
-func (p *clientParametersSnapshot) duration(name string, customNetworkLatencyMultiplier float64) time.Duration {
-
+// Duration returns a time.Duration parameter value. When the duration
+// parameter has the useNetworkLatencyMultiplier flag, the
+// NetworkLatencyMultiplier is applied to the returned value.
+func (p ClientParametersAccessor) Duration(name string) time.Duration {
 	value := time.Duration(0)
-	p.getValue(name, &value)
+	p.snapshot.getValue(name, &value)
 
 	defaultParameter, ok := defaultClientParameters[name]
 	if value > 0 && ok && defaultParameter.flags&useNetworkLatencyMultiplier != 0 {
 
 		multiplier := float64(0.0)
 
-		if customNetworkLatencyMultiplier != 0.0 {
-			multiplier = customNetworkLatencyMultiplier
+		if p.customNetworkLatencyMultiplier != 0.0 {
+			multiplier = p.customNetworkLatencyMultiplier
 		} else {
-			p.getValue(NetworkLatencyMultiplier, &multiplier)
+			p.snapshot.getValue(NetworkLatencyMultiplier, &multiplier)
 		}
 
 		if multiplier > 0.0 {
@@ -916,17 +881,17 @@ func (p *clientParametersSnapshot) duration(name string, customNetworkLatencyMul
 	return value
 }
 
-func (p *clientParametersSnapshot) Duration(name string) time.Duration {
-	return p.duration(name, 0.0)
-}
-
-func (p *clientParametersSnapshot) TunnelProtocols(name string) protocol.TunnelProtocols {
+// TunnelProtocols returns a protocol.TunnelProtocols parameter value.
+// If there is a corresponding Probability value, a weighted coin flip
+// will be performed and, depending on the result, the value or the
+// parameter default will be returned.
+func (p ClientParametersAccessor) TunnelProtocols(name string) protocol.TunnelProtocols {
 
 	probabilityName := name + "Probability"
-	_, ok := p.parameters[probabilityName]
+	_, ok := p.snapshot.parameters[probabilityName]
 	if ok {
 		probabilityValue := float64(1.0)
-		p.getValue(probabilityName, &probabilityValue)
+		p.snapshot.getValue(probabilityName, &probabilityValue)
 		if !prng.FlipWeightedCoin(probabilityValue) {
 			defaultParameter, ok := defaultClientParameters[name]
 			if ok {
@@ -941,17 +906,21 @@ func (p *clientParametersSnapshot) TunnelProtocols(name string) protocol.TunnelP
 	}
 
 	value := protocol.TunnelProtocols{}
-	p.getValue(name, &value)
+	p.snapshot.getValue(name, &value)
 	return value
 }
 
-func (p *clientParametersSnapshot) TLSProfiles(name string) protocol.TLSProfiles {
+// TLSProfiles returns a protocol.TLSProfiles parameter value.
+// If there is a corresponding Probability value, a weighted coin flip
+// will be performed and, depending on the result, the value or the
+// parameter default will be returned.
+func (p ClientParametersAccessor) TLSProfiles(name string) protocol.TLSProfiles {
 
 	probabilityName := name + "Probability"
-	_, ok := p.parameters[probabilityName]
+	_, ok := p.snapshot.parameters[probabilityName]
 	if ok {
 		probabilityValue := float64(1.0)
-		p.getValue(probabilityName, &probabilityValue)
+		p.snapshot.getValue(probabilityName, &probabilityValue)
 		if !prng.FlipWeightedCoin(probabilityValue) {
 			defaultParameter, ok := defaultClientParameters[name]
 			if ok {
@@ -966,17 +935,21 @@ func (p *clientParametersSnapshot) TLSProfiles(name string) protocol.TLSProfiles
 	}
 
 	value := protocol.TLSProfiles{}
-	p.getValue(name, &value)
+	p.snapshot.getValue(name, &value)
 	return value
 }
 
-func (p *clientParametersSnapshot) QUICVersions(name string) protocol.QUICVersions {
+// QUICVersions returns a protocol.QUICVersions parameter value.
+// If there is a corresponding Probability value, a weighted coin flip
+// will be performed and, depending on the result, the value or the
+// parameter default will be returned.
+func (p ClientParametersAccessor) QUICVersions(name string) protocol.QUICVersions {
 
 	probabilityName := name + "Probability"
-	_, ok := p.parameters[probabilityName]
+	_, ok := p.snapshot.parameters[probabilityName]
 	if ok {
 		probabilityValue := float64(1.0)
-		p.getValue(probabilityName, &probabilityValue)
+		p.snapshot.getValue(probabilityName, &probabilityValue)
 		if !prng.FlipWeightedCoin(probabilityValue) {
 			defaultParameter, ok := defaultClientParameters[name]
 			if ok {
@@ -991,31 +964,36 @@ func (p *clientParametersSnapshot) QUICVersions(name string) protocol.QUICVersio
 	}
 
 	value := protocol.QUICVersions{}
-	p.getValue(name, &value)
+	p.snapshot.getValue(name, &value)
 	return value
 }
 
-func (p *clientParametersSnapshot) DownloadURLs(name string) DownloadURLs {
+// DownloadURLs returns a DownloadURLs parameter value.
+func (p ClientParametersAccessor) DownloadURLs(name string) DownloadURLs {
 	value := DownloadURLs{}
-	p.getValue(name, &value)
+	p.snapshot.getValue(name, &value)
 	return value
 }
 
-func (p *clientParametersSnapshot) RateLimits(name string) common.RateLimits {
+// RateLimits returns a common.RateLimits parameter value.
+func (p ClientParametersAccessor) RateLimits(name string) common.RateLimits {
 	value := common.RateLimits{}
-	p.getValue(name, &value)
+	p.snapshot.getValue(name, &value)
 	return value
 }
 
-func (p *clientParametersSnapshot) HTTPHeaders(name string) http.Header {
+// HTTPHeaders returns an http.Header parameter value.
+func (p ClientParametersAccessor) HTTPHeaders(name string) http.Header {
 	value := make(http.Header)
-	p.getValue(name, &value)
+	p.snapshot.getValue(name, &value)
 	return value
 }
 
-func (p *clientParametersSnapshot) CustomTLSProfileNames() []string {
+// CustomTLSProfileNames returns the CustomTLSProfile.Name fields for
+// each profile in the CustomTLSProfiles parameter value.
+func (p ClientParametersAccessor) CustomTLSProfileNames() []string {
 	value := protocol.CustomTLSProfiles{}
-	p.getValue(CustomTLSProfiles, &value)
+	p.snapshot.getValue(CustomTLSProfiles, &value)
 	names := make([]string, len(value))
 	for i := 0; i < len(value); i++ {
 		names[i] = value[i].Name
@@ -1023,9 +1001,12 @@ func (p *clientParametersSnapshot) CustomTLSProfileNames() []string {
 	return names
 }
 
-func (p *clientParametersSnapshot) CustomTLSProfile(name string) *protocol.CustomTLSProfile {
+// CustomTLSProfile returns the CustomTLSProfile fields with the specified
+// Name field if it exists in the CustomTLSProfiles parameter value.
+// Returns nil if not found.
+func (p ClientParametersAccessor) CustomTLSProfile(name string) *protocol.CustomTLSProfile {
 	value := protocol.CustomTLSProfiles{}
-	p.getValue(CustomTLSProfiles, &value)
+	p.snapshot.getValue(CustomTLSProfiles, &value)
 
 	// Note: linear lookup -- assumes a short list
 
@@ -1035,16 +1016,4 @@ func (p *clientParametersSnapshot) CustomTLSProfile(name string) *protocol.Custo
 		}
 	}
 	return nil
-}
-
-// customClientParametersSnapshot override the behavior of
-// clientParametersSnapshot to apply customNetworkLatencyMultiplier to
-// Duration parameters.
-type customClientParametersSnapshot struct {
-	ClientParametersAccessor
-	customNetworkLatencyMultiplier float64
-}
-
-func (p *customClientParametersSnapshot) Duration(name string) time.Duration {
-	return p.ClientParametersAccessor.(*clientParametersSnapshot).duration(name, p.customNetworkLatencyMultiplier)
 }

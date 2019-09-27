@@ -521,7 +521,6 @@ func DialMeek(
 			meek.fullReceiveBufferLength = p.Int(parameters.MeekFullReceiveBufferLength)
 			meek.readPayloadChunkLength = p.Int(parameters.MeekReadPayloadChunkLength)
 		}
-		p = nil
 
 		meek.emptyReceiveBuffer = make(chan *bytes.Buffer, 1)
 		meek.partialReceiveBuffer = make(chan *bytes.Buffer, 1)
@@ -844,7 +843,7 @@ func (meek *MeekConn) relay() {
 	interval := prng.JitterDuration(
 		p.Duration(parameters.MeekMinPollInterval),
 		p.Float(parameters.MeekMinPollIntervalJitter))
-	p = nil
+	p.Close()
 
 	timeout := time.NewTimer(interval)
 	defer timeout.Stop()
@@ -944,7 +943,7 @@ func (meek *MeekConn) relay() {
 			}
 		}
 
-		p = nil
+		p.Close()
 	}
 }
 
@@ -1102,7 +1101,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 	retryDelay := p.Duration(parameters.MeekRoundTripRetryMinDelay)
 	retryMaxDelay := p.Duration(parameters.MeekRoundTripRetryMaxDelay)
 	retryMultiplier := p.Float(parameters.MeekRoundTripRetryMultiplier)
-	p = nil
+	p.Close()
 
 	serverAcknowledgedRequestPayload := false
 

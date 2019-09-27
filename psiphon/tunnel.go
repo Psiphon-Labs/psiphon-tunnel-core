@@ -552,7 +552,7 @@ func dialTunnel(
 	livenessTestMaxUpstreamBytes := p.Int(parameters.LivenessTestMaxUpstreamBytes)
 	livenessTestMinDownstreamBytes := p.Int(parameters.LivenessTestMinDownstreamBytes)
 	livenessTestMaxDownstreamBytes := p.Int(parameters.LivenessTestMaxDownstreamBytes)
-	p = nil
+	p.Close()
 
 	// Ensure that, unless the base context is cancelled, any replayed dial
 	// parameters are cleared, no longer to be retried, if the tunnel fails to
@@ -1260,7 +1260,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 		request := prng.Padding(
 			p.Int(parameters.SSHKeepAlivePaddingMinBytes),
 			p.Int(parameters.SSHKeepAlivePaddingMaxBytes))
-		p = nil
+		p.Close()
 
 		startTime := monotime.Now()
 

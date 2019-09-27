@@ -1277,8 +1277,9 @@ func (controller *Controller) launchEstablishing() {
 		replayCandidateCount:                p.Int(parameters.ReplayCandidateCount),
 	}
 
-	workerPoolSize := controller.config.GetClientParameters().Get().Int(
-		parameters.ConnectionWorkerPoolSize)
+	workerPoolSize := p.Int(parameters.ConnectionWorkerPoolSize)
+
+	p.Close()
 
 	// When TargetServerEntry is used, override any worker pool size config or
 	// tactic parameter and use a pool size of 1. The typical use case for
@@ -1288,8 +1289,6 @@ func (controller *Controller) launchEstablishing() {
 	if controller.config.TargetServerEntry != "" {
 		workerPoolSize = 1
 	}
-
-	p = nil
 
 	// If InitialLimitTunnelProtocols is configured but cannot be satisfied,
 	// skip the initial phase in this establishment. This avoids spinning,
@@ -1488,7 +1487,7 @@ func (controller *Controller) getTactics(done chan struct{}) {
 			timeout := prng.JitterDuration(
 				p.Duration(parameters.TacticsRetryPeriod),
 				p.Float(parameters.TacticsRetryPeriodJitter))
-			p = nil
+			p.Close()
 
 			tacticsRetryDelay := time.NewTimer(timeout)
 
@@ -1790,7 +1789,7 @@ loop:
 		timeout := prng.JitterDuration(
 			p.Duration(parameters.EstablishTunnelPausePeriod),
 			p.Float(parameters.EstablishTunnelPausePeriodJitter))
-		p = nil
+		p.Close()
 
 		timer := time.NewTimer(timeout)
 		select {
@@ -1948,7 +1947,7 @@ loop:
 		p := controller.config.GetClientParameters().Get()
 		staggerPeriod := p.Duration(parameters.StaggerConnectionWorkersPeriod)
 		staggerJitter := p.Float(parameters.StaggerConnectionWorkersJitter)
-		p = nil
+		p.Close()
 
 		if establishConnectTunnelCount > 0 && staggerPeriod != 0 {
 			controller.staggerMutex.Lock()

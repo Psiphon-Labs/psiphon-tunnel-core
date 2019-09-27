@@ -77,7 +77,7 @@ func DownloadUpgrade(
 	urls := p.DownloadURLs(parameters.UpgradeDownloadURLs)
 	clientVersionHeader := p.String(parameters.UpgradeDownloadClientVersionHeader)
 	downloadTimeout := p.Duration(parameters.FetchUpgradeTimeout)
-	p = nil
+	p.Close()
 
 	var cancelFunc context.CancelFunc
 	ctx, cancelFunc = context.WithTimeout(ctx, downloadTimeout)

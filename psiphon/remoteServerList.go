@@ -57,7 +57,7 @@ func FetchCommonRemoteServerList(
 	publicKey := p.String(parameters.RemoteServerListSignaturePublicKey)
 	urls := p.DownloadURLs(parameters.RemoteServerListURLs)
 	downloadTimeout := p.Duration(parameters.FetchRemoteServerListTimeout)
-	p = nil
+	p.Close()
 
 	downloadURL, canonicalURL, skipVerify := urls.Select(attempt)
 
@@ -140,7 +140,7 @@ func FetchObfuscatedServerLists(
 	publicKey := p.String(parameters.RemoteServerListSignaturePublicKey)
 	urls := p.DownloadURLs(parameters.ObfuscatedServerListRootURLs)
 	downloadTimeout := p.Duration(parameters.FetchRemoteServerListTimeout)
-	p = nil
+	p.Close()
 
 	rootURL, canonicalRootURL, skipVerify := urls.Select(attempt)
 	downloadURL := osl.GetOSLRegistryURL(rootURL)
