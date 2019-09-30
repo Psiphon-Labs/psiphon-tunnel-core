@@ -320,7 +320,7 @@ func (p *PRNG) HexString(byteLength int) string {
 // Base64String returns a base64 encoded random string.
 // byteLength specifies the pre-encoded data length.
 func (p *PRNG) Base64String(byteLength int) string {
-	return base64.RawURLEncoding.EncodeToString(p.Bytes(byteLength))
+	return base64.StdEncoding.EncodeToString(p.Bytes(byteLength))
 }
 
 var p *PRNG
