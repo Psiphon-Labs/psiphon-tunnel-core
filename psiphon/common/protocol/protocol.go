@@ -190,6 +190,16 @@ func TunnelProtocolIsResourceIntensive(protocol string) bool {
 		TunnelProtocolUsesTapdance(protocol)
 }
 
+func TunnelProtocolIsCompatibleWithFragmentor(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_SSH ||
+		protocol == TUNNEL_PROTOCOL_OBFUSCATED_SSH ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET ||
+		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK ||
+		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP
+}
+
 func UseClientTunnelProtocol(
 	clientProtocol string,
 	serverProtocols TunnelProtocols) bool {

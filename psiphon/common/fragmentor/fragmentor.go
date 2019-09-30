@@ -32,6 +32,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 const (
@@ -73,6 +74,10 @@ func newConfig(
 	isUpstream bool,
 	tunnelProtocol string,
 	seed *prng.Seed) *Config {
+
+	if !protocol.TunnelProtocolIsCompatibleWithFragmentor(tunnelProtocol) {
+		return nil
+	}
 
 	probability := parameters.FragmentorProbability
 	limitProtocols := parameters.FragmentorLimitProtocols
