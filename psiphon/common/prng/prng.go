@@ -206,6 +206,7 @@ func (p *PRNG) FlipCoin() bool {
 	return p.rand.Int31n(2) == 1
 }
 
+// FlipWeightedCoin returns the result of a weighted
 // random coin flip. If the weight is 0.5, the outcome
 // is equally likely to be true or false. If the weight
 // is 1.0, the outcome is always true, and if the
