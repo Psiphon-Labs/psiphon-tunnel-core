@@ -545,6 +545,9 @@ type Config struct {
 	// testing purposes.
 	ReplayCandidateCount                   *int
 	ReplayDialParametersTTLSeconds         *int
+	ReplayTargetUpstreamBytes              *int
+	ReplayTargetDownstreamBytes            *int
+	ReplayTargetTunnelDurationSeconds      *int
 	ReplayLaterRoundMoveToFrontProbability *float64
 	ReplayRetainFailedProbability          *float64
 
@@ -1073,6 +1076,18 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ReplayDialParametersTTLSeconds != nil {
 		applyParameters[parameters.ReplayDialParametersTTL] = fmt.Sprintf("%ds", *config.ReplayDialParametersTTLSeconds)
+	}
+
+	if config.ReplayTargetUpstreamBytes != nil {
+		applyParameters[parameters.ReplayTargetUpstreamBytes] = *config.ReplayTargetUpstreamBytes
+	}
+
+	if config.ReplayTargetDownstreamBytes != nil {
+		applyParameters[parameters.ReplayTargetDownstreamBytes] = *config.ReplayTargetDownstreamBytes
+	}
+
+	if config.ReplayTargetTunnelDurationSeconds != nil {
+		applyParameters[parameters.ReplayTargetTunnelDuration] = fmt.Sprintf("%ds", *config.ReplayTargetTunnelDurationSeconds)
 	}
 
 	if config.ReplayLaterRoundMoveToFrontProbability != nil {

@@ -1009,12 +1009,12 @@ func performLivenessTest(
 func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	defer tunnel.operateWaitGroup.Done()
 
-	lastBytesReceivedTime := monotime.Now()
-
-	lastTotalBytesTransferedTime := monotime.Now()
+	now := monotime.Now()
+	lastBytesReceivedTime := now
+	lastTotalBytesTransferedTime := now
 	totalSent := int64(0)
 	totalReceived := int64(0)
-	dialParamsSucceeded := false
+	setDialParamsSucceeded := false
 
 	noticeBytesTransferredTicker := time.NewTicker(1 * time.Second)
 	defer noticeBytesTransferredTicker.Stop()
@@ -1109,6 +1109,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			noticePeriod := p.Duration(parameters.TotalBytesTransferredNoticePeriod)
 			replayTargetUpstreamBytes := p.Int(parameters.ReplayTargetUpstreamBytes)
 			replayTargetDownstreamBytes := p.Int(parameters.ReplayTargetDownstreamBytes)
+			replayTargetTunnelDuration := p.Duration(parameters.ReplayTargetTunnelDuration)
 
 			if lastTotalBytesTransferedTime.Add(noticePeriod).Before(monotime.Now()) {
 				NoticeTotalBytesTransferred(
@@ -1122,18 +1123,22 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 					tunnel.dialParams.ServerEntry.GetDiagnosticID(), sent, received)
 			}
 
-			// Once the tunnel has connected, activated, and successfully
-			// transmitted the targetted number of bytes, store its dial
-			// parameters for subsequent replay.
+			// Once the tunnel has connected, activated, successfully transmitted the
+			// targeted number of bytes, and been up for the targeted duration
+			// (measured from the end of establishment), store its dial parameters for
+			// subsequent replay.
 			//
-			// Even when target bytes are both 0, tunnel must remain up for at
-			// least 1 second due to use of noticeBytesTransferredTicker.
-			if totalSent >= int64(replayTargetUpstreamBytes) &&
+			// Even when target bytes and duration are all 0, the tunnel must remain up
+			// for at least 1 second due to use of noticeBytesTransferredTicker; for
+			// the same reason the granularity of ReplayTargetTunnelDuration is
+			// seconds.
+			if !setDialParamsSucceeded &&
+				totalSent >= int64(replayTargetUpstreamBytes) &&
 				totalReceived >= int64(replayTargetDownstreamBytes) &&
-				!dialParamsSucceeded {
+				monotime.Since(tunnel.establishedTime) >= replayTargetTunnelDuration {
 
 				tunnel.dialParams.Succeeded()
-				dialParamsSucceeded = true
+				setDialParamsSucceeded = true
 			}
 
 		case <-statsTimer.C:

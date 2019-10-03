@@ -198,6 +198,7 @@ const (
 	ReplayDialParametersTTL                          = "ReplayDialParametersTTL"
 	ReplayTargetUpstreamBytes                        = "ReplayTargetUpstreamBytes"
 	ReplayTargetDownstreamBytes                      = "ReplayTargetDownstreamBytes"
+	ReplayTargetTunnelDuration                       = "ReplayTargetTunnelDuration"
 	ReplaySSH                                        = "ReplaySSH"
 	ReplayObfuscatorPadding                          = "ReplayObfuscatorPadding"
 	ReplayFragmentor                                 = "ReplayFragmentor"
@@ -430,6 +431,7 @@ var defaultClientParameters = map[string]struct {
 	ReplayDialParametersTTL:                {value: 24 * time.Hour, minimum: time.Duration(0)},
 	ReplayTargetUpstreamBytes:              {value: 0, minimum: 0},
 	ReplayTargetDownstreamBytes:            {value: 0, minimum: 0},
+	ReplayTargetTunnelDuration:             {value: 1 * time.Second, minimum: time.Duration(0)},
 	ReplaySSH:                              {value: true},
 	ReplayObfuscatorPadding:                {value: true},
 	ReplayFragmentor:                       {value: true},
