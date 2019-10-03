@@ -890,9 +890,9 @@ func getBaseAPIParameters(
 
 	params["candidate_number"] = strconv.Itoa(dialParams.CandidateNumber)
 
-	if dialParams.CustomNetworkLatencyMultiplier != 0.0 {
+	if dialParams.NetworkLatencyMultiplier != 0.0 {
 		params["network_latency_multiplier"] =
-			fmt.Sprintf("%f", dialParams.CustomNetworkLatencyMultiplier)
+			fmt.Sprintf("%f", dialParams.NetworkLatencyMultiplier)
 	}
 
 	if dialParams.DialConnMetrics != nil {

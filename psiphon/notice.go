@@ -496,8 +496,8 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 			args = append(args, "dialDuration", dialParams.DialDuration)
 		}
 
-		if dialParams.CustomNetworkLatencyMultiplier != 0.0 {
-			args = append(args, "networkLatencyMultiplier", dialParams.CustomNetworkLatencyMultiplier)
+		if dialParams.NetworkLatencyMultiplier != 0.0 {
+			args = append(args, "networkLatencyMultiplier", dialParams.NetworkLatencyMultiplier)
 		}
 
 		if dialParams.DialConnMetrics != nil {

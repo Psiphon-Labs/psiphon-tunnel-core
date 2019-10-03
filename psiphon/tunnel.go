@@ -112,7 +112,7 @@ func (tunnel *Tunnel) getCustomClientParameters() parameters.ClientParametersAcc
 
 func getCustomClientParameters(
 	config *Config, dialParams *DialParameters) parameters.ClientParametersAccessor {
-	return config.GetClientParameters().GetCustom(dialParams.CustomNetworkLatencyMultiplier)
+	return config.GetClientParameters().GetCustom(dialParams.NetworkLatencyMultiplier)
 }
 
 // ConnectTunnel first makes a network transport connection to the

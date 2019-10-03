@@ -68,9 +68,9 @@ import (
 
 const (
 	NetworkLatencyMultiplier                         = "NetworkLatencyMultiplier"
-	CustomNetworkLatencyMultiplierMin                = "CustomNetworkLatencyMultiplierMin"
-	CustomNetworkLatencyMultiplierMax                = "CustomNetworkLatencyMultiplierMax"
-	CustomNetworkLatencyMultiplierLambda             = "CustomNetworkLatencyMultiplierLambda"
+	NetworkLatencyMultiplierMin                      = "NetworkLatencyMultiplierMin"
+	NetworkLatencyMultiplierMax                      = "NetworkLatencyMultiplierMax"
+	NetworkLatencyMultiplierLambda                   = "NetworkLatencyMultiplierLambda"
 	TacticsWaitPeriod                                = "TacticsWaitPeriod"
 	TacticsRetryPeriod                               = "TacticsRetryPeriod"
 	TacticsRetryPeriodJitter                         = "TacticsRetryPeriodJitter"
@@ -246,10 +246,10 @@ var defaultClientParameters = map[string]struct {
 	// NetworkLatencyMultiplier defaults to 0, meaning off. But when set, it
 	// must be a multiplier >= 1.
 
-	NetworkLatencyMultiplier:             {value: 0.0, minimum: 1.0},
-	CustomNetworkLatencyMultiplierMin:    {value: 1.0, minimum: 1.0},
-	CustomNetworkLatencyMultiplierMax:    {value: 3.0, minimum: 1.0},
-	CustomNetworkLatencyMultiplierLambda: {value: 2.0, minimum: 1.0},
+	NetworkLatencyMultiplier:       {value: 0.0, minimum: 1.0},
+	NetworkLatencyMultiplierMin:    {value: 1.0, minimum: 1.0},
+	NetworkLatencyMultiplierMax:    {value: 3.0, minimum: 1.0},
+	NetworkLatencyMultiplierLambda: {value: 2.0, minimum: 1.0},
 
 	TacticsWaitPeriod:        {value: 10 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
 	TacticsRetryPeriod:       {value: 5 * time.Second, minimum: 1 * time.Millisecond},

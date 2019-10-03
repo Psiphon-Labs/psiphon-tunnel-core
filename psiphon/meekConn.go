@@ -133,9 +133,9 @@ type MeekConfig struct {
 	// incuding buffers are allocated.
 	RoundTripperOnly bool
 
-	// CustomNetworkLatencyMultiplier specifies a custom network latency
-	// multiplier to apply to client parameters used by this meek connection.
-	CustomNetworkLatencyMultiplier float64
+	// NetworkLatencyMultiplier specifies a custom network latency multiplier to
+	// apply to client parameters used by this meek connection.
+	NetworkLatencyMultiplier float64
 
 	// The following values are used to create the obfuscated meek cookie.
 
@@ -156,22 +156,22 @@ type MeekConfig struct {
 // MeekConn also operates in unfronted mode, in which plain HTTP connections are made without routing
 // through a CDN.
 type MeekConn struct {
-	clientParameters               *parameters.ClientParameters
-	customNetworkLatencyMultiplier float64
-	isQUIC                         bool
-	url                            *url.URL
-	additionalHeaders              http.Header
-	cookie                         *http.Cookie
-	cookieSize                     int
-	limitRequestPayloadLength      int
-	redialTLSProbability           float64
-	cachedTLSDialer                *cachedTLSDialer
-	transport                      transporter
-	mutex                          sync.Mutex
-	isClosed                       bool
-	runCtx                         context.Context
-	stopRunning                    context.CancelFunc
-	relayWaitGroup                 *sync.WaitGroup
+	clientParameters          *parameters.ClientParameters
+	networkLatencyMultiplier  float64
+	isQUIC                    bool
+	url                       *url.URL
+	additionalHeaders         http.Header
+	cookie                    *http.Cookie
+	cookieSize                int
+	limitRequestPayloadLength int
+	redialTLSProbability      float64
+	cachedTLSDialer           *cachedTLSDialer
+	transport                 transporter
+	mutex                     sync.Mutex
+	isClosed                  bool
+	runCtx                    context.Context
+	stopRunning               context.CancelFunc
+	relayWaitGroup            *sync.WaitGroup
 
 	// For round tripper mode
 	roundTripperOnly              bool
@@ -192,7 +192,7 @@ type MeekConn struct {
 }
 
 func (conn *MeekConn) getCustomClientParameters() parameters.ClientParametersAccessor {
-	return conn.clientParameters.GetCustom(conn.customNetworkLatencyMultiplier)
+	return conn.clientParameters.GetCustom(conn.networkLatencyMultiplier)
 }
 
 // transporter is implemented by both http.Transport and upstreamproxy.ProxyAuthTransport.
@@ -474,18 +474,18 @@ func DialMeek(
 	// Write() calls and relay() are synchronized in a similar way, using a single
 	// sendBuffer.
 	meek = &MeekConn{
-		clientParameters:               meekConfig.ClientParameters,
-		customNetworkLatencyMultiplier: meekConfig.CustomNetworkLatencyMultiplier,
-		isQUIC:                         isQUIC,
-		url:                            url,
-		additionalHeaders:              additionalHeaders,
-		cachedTLSDialer:                cachedTLSDialer,
-		transport:                      transport,
-		isClosed:                       false,
-		runCtx:                         runCtx,
-		stopRunning:                    stopRunning,
-		relayWaitGroup:                 new(sync.WaitGroup),
-		roundTripperOnly:               meekConfig.RoundTripperOnly,
+		clientParameters:         meekConfig.ClientParameters,
+		networkLatencyMultiplier: meekConfig.NetworkLatencyMultiplier,
+		isQUIC:                   isQUIC,
+		url:                      url,
+		additionalHeaders:        additionalHeaders,
+		cachedTLSDialer:          cachedTLSDialer,
+		transport:                transport,
+		isClosed:                 false,
+		runCtx:                   runCtx,
+		stopRunning:              stopRunning,
+		relayWaitGroup:           new(sync.WaitGroup),
+		roundTripperOnly:         meekConfig.RoundTripperOnly,
 	}
 
 	// stopRunning and cachedTLSDialer will now be closed in meek.Close()

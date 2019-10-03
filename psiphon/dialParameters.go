@@ -66,7 +66,7 @@ type DialParameters struct {
 	LastUsedTimestamp       time.Time
 	LastUsedConfigStateHash []byte
 
-	CustomNetworkLatencyMultiplier float64
+	NetworkLatencyMultiplier float64
 
 	TunnelProtocol string
 
@@ -272,22 +272,34 @@ func MakeDialParameters(
 	// replaying, existing parameters are retaing, subject to the replay-X
 	// tactics flags.
 
-	// Select a random, custom network latency multiplier. This allows clients to
+	// Select a network latency multiplier for this dial. This allows clients to
 	// explore and discover timeout values appropriate for the current network.
 	// The selection applies per tunnel, to avoid delaying all establishment
 	// candidates due to excessive timeouts. The random selection is bounded by a
 	// min/max set in tactics and an exponential distribution is used so as to
 	// heavily favor values closed to the min, which should be set to the
-	// traditional NetworkLatencyMultiplier value.
+	// singleton NetworkLatencyMultiplier tactics value.
 	//
-	// Not all existing, persisted DialParameters will have a
-	// CustomNetworkLatencyMultiplier value. Its zero value will cause the
-	// standard NetworkLatencyMultiplier to be used instead.
-	if !isReplay {
-		dialParams.CustomNetworkLatencyMultiplier = prng.ExpFloat64Range(
-			p.Float(parameters.CustomNetworkLatencyMultiplierMin),
-			p.Float(parameters.CustomNetworkLatencyMultiplierMax),
-			p.Float(parameters.CustomNetworkLatencyMultiplierLambda))
+	// Not all existing, persisted DialParameters will have a custom
+	// NetworkLatencyMultiplier value. Its zero value will cause the singleton
+	// NetworkLatencyMultiplier tactics value to be used instead, which is
+	// consistent with the pre-custom multiplier behavior in the older client
+	// version which persisted that DialParameters.
+
+	networkLatencyMultiplierMin := p.Float(parameters.NetworkLatencyMultiplierMin)
+	networkLatencyMultiplierMax := p.Float(parameters.NetworkLatencyMultiplierMax)
+
+	if !isReplay ||
+		// Was selected...
+		(dialParams.NetworkLatencyMultiplier != 0.0 &&
+			//  But is now outside tactics range...
+			(dialParams.NetworkLatencyMultiplier < networkLatencyMultiplierMin ||
+				dialParams.NetworkLatencyMultiplier > networkLatencyMultiplierMax)) {
+
+		dialParams.NetworkLatencyMultiplier = prng.ExpFloat64Range(
+			networkLatencyMultiplierMin,
+			networkLatencyMultiplierMax,
+			p.Float(parameters.NetworkLatencyMultiplierLambda))
 	}
 
 	if !isReplay && !isExchanged {
@@ -604,24 +616,24 @@ func MakeDialParameters(
 	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
 
 		dialParams.meekConfig = &MeekConfig{
-			DiagnosticID:                   serverEntry.GetDiagnosticID(),
-			ClientParameters:               config.clientParameters,
-			DialAddress:                    dialParams.MeekDialAddress,
-			UseQUIC:                        protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol),
-			QUICVersion:                    dialParams.QUICVersion,
-			UseHTTPS:                       protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol),
-			TLSProfile:                     dialParams.TLSProfile,
-			NoDefaultTLSSessionID:          dialParams.NoDefaultTLSSessionID,
-			RandomizedTLSProfileSeed:       dialParams.RandomizedTLSProfileSeed,
-			UseObfuscatedSessionTickets:    dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
-			SNIServerName:                  dialParams.MeekSNIServerName,
-			HostHeader:                     dialParams.MeekHostHeader,
-			TransformedHostName:            dialParams.MeekTransformedHostName,
-			ClientTunnelProtocol:           dialParams.TunnelProtocol,
-			MeekCookieEncryptionPublicKey:  serverEntry.MeekCookieEncryptionPublicKey,
-			MeekObfuscatedKey:              serverEntry.MeekObfuscatedKey,
-			MeekObfuscatorPaddingSeed:      dialParams.MeekObfuscatorPaddingSeed,
-			CustomNetworkLatencyMultiplier: dialParams.CustomNetworkLatencyMultiplier,
+			DiagnosticID:                  serverEntry.GetDiagnosticID(),
+			ClientParameters:              config.clientParameters,
+			DialAddress:                   dialParams.MeekDialAddress,
+			UseQUIC:                       protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol),
+			QUICVersion:                   dialParams.QUICVersion,
+			UseHTTPS:                      protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol),
+			TLSProfile:                    dialParams.TLSProfile,
+			NoDefaultTLSSessionID:         dialParams.NoDefaultTLSSessionID,
+			RandomizedTLSProfileSeed:      dialParams.RandomizedTLSProfileSeed,
+			UseObfuscatedSessionTickets:   dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
+			SNIServerName:                 dialParams.MeekSNIServerName,
+			HostHeader:                    dialParams.MeekHostHeader,
+			TransformedHostName:           dialParams.MeekTransformedHostName,
+			ClientTunnelProtocol:          dialParams.TunnelProtocol,
+			MeekCookieEncryptionPublicKey: serverEntry.MeekCookieEncryptionPublicKey,
+			MeekObfuscatedKey:             serverEntry.MeekObfuscatedKey,
+			MeekObfuscatorPaddingSeed:     dialParams.MeekObfuscatorPaddingSeed,
+			NetworkLatencyMultiplier:      dialParams.NetworkLatencyMultiplier,
 		}
 
 		// Use an asynchronous callback to record the resolved IP address when
