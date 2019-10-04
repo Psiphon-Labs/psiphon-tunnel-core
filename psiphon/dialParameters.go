@@ -277,7 +277,7 @@ func MakeDialParameters(
 	// The selection applies per tunnel, to avoid delaying all establishment
 	// candidates due to excessive timeouts. The random selection is bounded by a
 	// min/max set in tactics and an exponential distribution is used so as to
-	// heavily favor values closed to the min, which should be set to the
+	// heavily favor values close to the min, which should be set to the
 	// singleton NetworkLatencyMultiplier tactics value.
 	//
 	// Not all existing, persisted DialParameters will have a custom
