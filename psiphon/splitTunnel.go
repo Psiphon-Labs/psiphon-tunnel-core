@@ -109,7 +109,6 @@ func (classifier *SplitTunnelClassifier) Start(fetchRoutesTunnel *Tunnel) {
 	dnsServerAddress := p.String(parameters.SplitTunnelDNSServer)
 	routesSignaturePublicKey := p.String(parameters.SplitTunnelRoutesSignaturePublicKey)
 	fetchRoutesUrlFormat := p.String(parameters.SplitTunnelRoutesURLFormat)
-	p = nil
 
 	if dnsServerAddress == "" ||
 		routesSignaturePublicKey == "" ||
@@ -231,7 +230,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	routesSignaturePublicKey := p.String(parameters.SplitTunnelRoutesSignaturePublicKey)
 	fetchRoutesUrlFormat := p.String(parameters.SplitTunnelRoutesURLFormat)
 	fetchTimeout := p.Duration(parameters.FetchSplitTunnelRoutesTimeout)
-	p = nil
+	p.Close()
 
 	url := fmt.Sprintf(fetchRoutesUrlFormat, tunnel.serverContext.clientRegion)
 	request, err := http.NewRequest("GET", url, nil)
@@ -253,7 +252,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 		return tunnel.sshClient.Dial("tcp", addr)
 	}
 	transport := &http.Transport{
-		Dial: tunneledDialer,
+		Dial:                  tunneledDialer,
 		ResponseHeaderTimeout: fetchTimeout,
 	}
 	httpClient := &http.Client{

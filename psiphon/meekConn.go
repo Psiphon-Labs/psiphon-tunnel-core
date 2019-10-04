@@ -133,6 +133,10 @@ type MeekConfig struct {
 	// incuding buffers are allocated.
 	RoundTripperOnly bool
 
+	// NetworkLatencyMultiplier specifies a custom network latency multiplier to
+	// apply to client parameters used by this meek connection.
+	NetworkLatencyMultiplier float64
+
 	// The following values are used to create the obfuscated meek cookie.
 
 	MeekCookieEncryptionPublicKey string
@@ -153,6 +157,7 @@ type MeekConfig struct {
 // through a CDN.
 type MeekConn struct {
 	clientParameters          *parameters.ClientParameters
+	networkLatencyMultiplier  float64
 	isQUIC                    bool
 	url                       *url.URL
 	additionalHeaders         http.Header
@@ -184,6 +189,10 @@ type MeekConn struct {
 	emptySendBuffer         chan *bytes.Buffer
 	partialSendBuffer       chan *bytes.Buffer
 	fullSendBuffer          chan *bytes.Buffer
+}
+
+func (conn *MeekConn) getCustomClientParameters() parameters.ClientParametersAccessor {
+	return conn.clientParameters.GetCustom(conn.networkLatencyMultiplier)
 }
 
 // transporter is implemented by both http.Transport and upstreamproxy.ProxyAuthTransport.
@@ -302,7 +311,7 @@ func DialMeek(
 			RandomizedTLSProfileSeed:      meekConfig.RandomizedTLSProfileSeed,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
 		}
-		tlsConfig.EnableClientSessionCache(meekConfig.ClientParameters)
+		tlsConfig.EnableClientSessionCache()
 
 		if meekConfig.UseObfuscatedSessionTickets {
 			tlsConfig.ObfuscatedSessionTicketKey = meekConfig.MeekObfuscatedKey
@@ -465,17 +474,18 @@ func DialMeek(
 	// Write() calls and relay() are synchronized in a similar way, using a single
 	// sendBuffer.
 	meek = &MeekConn{
-		clientParameters:  meekConfig.ClientParameters,
-		isQUIC:            isQUIC,
-		url:               url,
-		additionalHeaders: additionalHeaders,
-		cachedTLSDialer:   cachedTLSDialer,
-		transport:         transport,
-		isClosed:          false,
-		runCtx:            runCtx,
-		stopRunning:       stopRunning,
-		relayWaitGroup:    new(sync.WaitGroup),
-		roundTripperOnly:  meekConfig.RoundTripperOnly,
+		clientParameters:         meekConfig.ClientParameters,
+		networkLatencyMultiplier: meekConfig.NetworkLatencyMultiplier,
+		isQUIC:                   isQUIC,
+		url:                      url,
+		additionalHeaders:        additionalHeaders,
+		cachedTLSDialer:          cachedTLSDialer,
+		transport:                transport,
+		isClosed:                 false,
+		runCtx:                   runCtx,
+		stopRunning:              stopRunning,
+		relayWaitGroup:           new(sync.WaitGroup),
+		roundTripperOnly:         meekConfig.RoundTripperOnly,
 	}
 
 	// stopRunning and cachedTLSDialer will now be closed in meek.Close()
@@ -488,7 +498,7 @@ func DialMeek(
 
 		cookie, limitRequestPayloadLength, redialTLSProbability, err :=
 			makeMeekObfuscationValues(
-				meek.clientParameters,
+				meek.getCustomClientParameters(),
 				meekConfig.MeekCookieEncryptionPublicKey,
 				meekConfig.MeekObfuscatedKey,
 				meekConfig.MeekObfuscatorPaddingSeed,
@@ -503,7 +513,7 @@ func DialMeek(
 		meek.limitRequestPayloadLength = limitRequestPayloadLength
 		meek.redialTLSProbability = redialTLSProbability
 
-		p := meekConfig.ClientParameters.Get()
+		p := meek.getCustomClientParameters()
 		if p.Bool(parameters.MeekLimitBufferSizes) {
 			meek.fullReceiveBufferLength = p.Int(parameters.MeekLimitedFullReceiveBufferLength)
 			meek.readPayloadChunkLength = p.Int(parameters.MeekLimitedReadPayloadChunkLength)
@@ -511,7 +521,6 @@ func DialMeek(
 			meek.fullReceiveBufferLength = p.Int(parameters.MeekFullReceiveBufferLength)
 			meek.readPayloadChunkLength = p.Int(parameters.MeekReadPayloadChunkLength)
 		}
-		p = nil
 
 		meek.emptyReceiveBuffer = make(chan *bytes.Buffer, 1)
 		meek.partialReceiveBuffer = make(chan *bytes.Buffer, 1)
@@ -661,7 +670,7 @@ func (meek *MeekConn) RoundTrip(
 	}
 
 	cookie, _, _, err := makeMeekObfuscationValues(
-		meek.clientParameters,
+		meek.getCustomClientParameters(),
 		meek.meekCookieEncryptionPublicKey,
 		meek.meekObfuscatedKey,
 		meek.meekObfuscatorPaddingSeed,
@@ -830,11 +839,11 @@ func (meek *MeekConn) relay() {
 	// (using goroutines) since Close() will wait on this WaitGroup.
 	defer meek.relayWaitGroup.Done()
 
-	p := meek.clientParameters.Get()
+	p := meek.getCustomClientParameters()
 	interval := prng.JitterDuration(
 		p.Duration(parameters.MeekMinPollInterval),
 		p.Float(parameters.MeekMinPollIntervalJitter))
-	p = nil
+	p.Close()
 
 	timeout := time.NewTimer(interval)
 	defer timeout.Stop()
@@ -901,7 +910,7 @@ func (meek *MeekConn) relay() {
 		// flips are used to avoid trivial, static traffic
 		// timing patterns.
 
-		p := meek.clientParameters.Get()
+		p := meek.getCustomClientParameters()
 
 		if receivedPayloadSize > 0 || sendPayloadSize > 0 {
 
@@ -934,7 +943,7 @@ func (meek *MeekConn) relay() {
 			}
 		}
 
-		p = nil
+		p.Close()
 	}
 }
 
@@ -1005,7 +1014,7 @@ func (meek *MeekConn) newRequest(
 		// - round trip will abort if it exceeds timeout
 		requestCtx, cancelFunc = context.WithTimeout(
 			meek.runCtx,
-			meek.clientParameters.Get().Duration(parameters.MeekRoundTripTimeout))
+			meek.getCustomClientParameters().Duration(parameters.MeekRoundTripTimeout))
 	}
 
 	// Ensure dials are made within the current request context.
@@ -1087,12 +1096,12 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 
 	retries := uint(0)
 
-	p := meek.clientParameters.Get()
+	p := meek.getCustomClientParameters()
 	retryDeadline := monotime.Now().Add(p.Duration(parameters.MeekRoundTripRetryDeadline))
 	retryDelay := p.Duration(parameters.MeekRoundTripRetryMinDelay)
 	retryMaxDelay := p.Duration(parameters.MeekRoundTripRetryMaxDelay)
 	retryMultiplier := p.Float(parameters.MeekRoundTripRetryMultiplier)
-	p = nil
+	p.Close()
 
 	serverAcknowledgedRequestPayload := false
 
@@ -1333,10 +1342,10 @@ func (meek *MeekConn) readPayload(
 // Obsolete meek cookie fields used by the legacy server stack are no longer
 // sent. These include ServerAddress and SessionID.
 //
-// The request paylod limit and TLS redial probability apply only to relay
+// The request payload limit and TLS redial probability apply only to relay
 // mode and are selected once and used for the duration of a meek connction.
 func makeMeekObfuscationValues(
-	clientParameters *parameters.ClientParameters,
+	p parameters.ClientParametersAccessor,
 	meekCookieEncryptionPublicKey string,
 	meekObfuscatedKey string,
 	meekObfuscatorPaddingPRNGSeed *prng.Seed,
@@ -1380,8 +1389,6 @@ func makeMeekObfuscationValues(
 	encryptedCookie := make([]byte, 32+len(box))
 	copy(encryptedCookie[0:32], ephemeralPublicKey[0:32])
 	copy(encryptedCookie[32:], box)
-
-	p := clientParameters.Get()
 
 	maxPadding := p.Int(parameters.MeekCookieMaxPadding)
 

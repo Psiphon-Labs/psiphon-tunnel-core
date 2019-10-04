@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -245,7 +247,7 @@ func TestJitter(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		t.Run(fmt.Sprintf("jitter case: %+v", testCase), func(t *testing.T) {
+		t.Run(fmt.Sprintf("Jitter case: %+v", testCase), func(t *testing.T) {
 
 			p, err := NewPRNG()
 			if err != nil {
@@ -305,6 +307,69 @@ func TestIntn(t *testing.T) {
 				t.Fatalf("unexpected low count: max = %d, i = %d, count = %d", max, i, counts[i])
 			}
 		}
+	}
+}
+
+func TestExpFloat64Range(t *testing.T) {
+
+	testCases := []struct {
+		min, max, lambda float64
+		factor           int
+	}{
+		{1.0, 3.0, 2.0, 5},
+		{0.0, 1.0, 2.0, 5},
+		{-2.0, -1.0, 2.0, 5},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(fmt.Sprintf("ExpFloat64Range case: %+v", testCase), func(t *testing.T) {
+
+			p, err := NewPRNG()
+			if err != nil {
+				t.Fatalf("NewPRNG failed: %s", err)
+			}
+
+			buckets := make(map[float64]int)
+
+			for i := 0; i < 100000; i++ {
+
+				value := p.ExpFloat64Range(testCase.min, testCase.max, testCase.lambda)
+
+				if value < testCase.min || value > testCase.max {
+					t.Fatalf(
+						"unexpected value: %f [%f, %f]", value, testCase.min, testCase.max)
+				}
+
+				buckets[float64(int(10.0*(value)))/10.0] += 1
+			}
+
+			keys := make([]float64, 0)
+			for k := range buckets {
+				keys = append(keys, k)
+			}
+
+			sort.Float64s(keys)
+
+			strs := make([]string, 0)
+			for _, k := range keys {
+				strs = append(strs, fmt.Sprintf("%0.2f: %d", k, buckets[k]))
+			}
+
+			t.Logf(strings.Join(strs, ","))
+
+			for i := 0; i < len(keys)-1; i++ {
+				if buckets[keys[i]] <= buckets[keys[i+1]] {
+					t.Fatalf("unexpected distribution")
+				}
+			}
+
+			// First bucket should have at least "factor" times more items than last
+			// bucket.
+			if buckets[keys[0]]/buckets[keys[len(keys)-1]] < testCase.factor {
+				t.Fatalf("unexpected distribution")
+			}
+
+		})
 	}
 }
 

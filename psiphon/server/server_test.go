@@ -1139,6 +1139,7 @@ func checkExpectedLogFields(runConfig *runServerConfig, fields map[string]interf
 		"is_replay",
 		"dial_duration",
 		"candidate_number",
+		"network_latency_multiplier",
 	} {
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)

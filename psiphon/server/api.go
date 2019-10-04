@@ -688,10 +688,11 @@ const (
 	requestParamArray                                         = 1 << 2
 	requestParamJSON                                          = 1 << 3
 	requestParamLogStringAsInt                                = 1 << 4
-	requestParamLogStringLengthAsInt                          = 1 << 5
-	requestParamLogFlagAsBool                                 = 1 << 6
-	requestParamLogOnlyForFrontedMeek                         = 1 << 7
-	requestParamNotLoggedForUnfrontedMeekNonTransformedHeader = 1 << 8
+	requestParamLogStringAsFloat                              = 1 << 5
+	requestParamLogStringLengthAsInt                          = 1 << 6
+	requestParamLogFlagAsBool                                 = 1 << 7
+	requestParamLogOnlyForFrontedMeek                         = 1 << 8
+	requestParamNotLoggedForUnfrontedMeekNonTransformedHeader = 1 << 9
 )
 
 // baseRequestParams is the list of required and optional
@@ -742,6 +743,7 @@ var baseRequestParams = []requestParamSpec{
 	{"upstream_ossh_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_cookie_size", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_limit_request", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
 }
 
 func validateRequestParams(
@@ -960,6 +962,10 @@ func getRequestLogFields(
 				if expectedParam.flags&requestParamLogStringAsInt != 0 {
 					intValue, _ := strconv.Atoi(strValue)
 					logFields[expectedParam.name] = intValue
+
+				} else if expectedParam.flags&requestParamLogStringAsFloat != 0 {
+					floatValue, _ := strconv.ParseFloat(strValue, 64)
+					logFields[expectedParam.name] = floatValue
 
 				} else if expectedParam.flags&requestParamLogStringLengthAsInt != 0 {
 					logFields[expectedParam.name] = len(strValue)
@@ -1199,6 +1205,11 @@ func isDigits(_ *Config, value string) bool {
 
 func isIntString(_ *Config, value string) bool {
 	_, err := strconv.Atoi(value)
+	return err == nil
+}
+
+func isFloatString(_ *Config, value string) bool {
+	_, err := strconv.ParseFloat(value, 64)
 	return err == nil
 }
 

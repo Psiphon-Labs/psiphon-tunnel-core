@@ -214,6 +214,28 @@ func TestNetworkLatencyMultiplier(t *testing.T) {
 	}
 }
 
+func TestCustomNetworkLatencyMultiplier(t *testing.T) {
+	p, err := NewClientParameters(nil)
+	if err != nil {
+		t.Fatalf("NewClientParameters failed: %s", err)
+	}
+
+	timeout1 := p.Get().Duration(TunnelConnectTimeout)
+
+	applyParameters := map[string]interface{}{"NetworkLatencyMultiplier": 2.0}
+
+	_, err = p.Set("", false, applyParameters)
+	if err != nil {
+		t.Fatalf("Set failed: %s", err)
+	}
+
+	timeout2 := p.GetCustom(4.0).Duration(TunnelConnectTimeout)
+
+	if 4*timeout1 != timeout2 {
+		t.Fatalf("Unexpected timeouts: 4 * %s != %s", timeout1, timeout2)
+	}
+}
+
 func TestLimitTunnelProtocolProbability(t *testing.T) {
 	p, err := NewClientParameters(nil)
 	if err != nil {

@@ -97,7 +97,7 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 		paddingPRNG:        prng.NewPRNGWithSeed(tunnel.dialParams.APIRequestPaddingSeed),
 	}
 
-	ignoreRegexps := tunnel.config.GetClientParametersSnapshot().Bool(
+	ignoreRegexps := tunnel.config.GetClientParameters().Get().Bool(
 		parameters.IgnoreHandshakeStatsRegexps)
 
 	err := serverContext.doHandshakeRequest(ignoreRegexps)
@@ -604,7 +604,7 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 func RecordRemoteServerListStat(
 	config *Config, url, etag string) error {
 
-	if !config.GetClientParametersSnapshot().WeightedCoinFlip(
+	if !config.GetClientParameters().Get().WeightedCoinFlip(
 		parameters.RecordRemoteServerListPersistentStatsProbability) {
 		return nil
 	}
@@ -639,7 +639,7 @@ func RecordRemoteServerListStat(
 func RecordFailedTunnelStat(
 	config *Config, dialParams *DialParameters, tunnelErr error) error {
 
-	if !config.GetClientParametersSnapshot().WeightedCoinFlip(
+	if !config.GetClientParameters().Get().WeightedCoinFlip(
 		parameters.RecordFailedTunnelPersistentStatsProbability) {
 		return nil
 	}
@@ -749,7 +749,7 @@ func (serverContext *ServerContext) getBaseAPIParameters() common.APIParameters 
 	// fingerprints. The "pad_response" field instructs the server to pad its
 	// response accordingly.
 
-	p := serverContext.tunnel.config.GetClientParametersSnapshot()
+	p := serverContext.tunnel.config.GetClientParameters().Get()
 	minUpstreamPadding := p.Int(parameters.APIRequestUpstreamPaddingMinBytes)
 	maxUpstreamPadding := p.Int(parameters.APIRequestUpstreamPaddingMaxBytes)
 	minDownstreamPadding := p.Int(parameters.APIRequestDownstreamPaddingMinBytes)
@@ -861,7 +861,7 @@ func getBaseAPIParameters(
 	}
 
 	params[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME] =
-		config.GetClientParametersSnapshot().Tag()
+		config.GetClientParameters().Get().Tag()
 
 	if dialParams.DialPortNumber != "" {
 		params["dial_port_number"] = dialParams.DialPortNumber
@@ -889,6 +889,11 @@ func getBaseAPIParameters(
 	params["dial_duration"] = fmt.Sprintf("%d", dialParams.DialDuration/1000000)
 
 	params["candidate_number"] = strconv.Itoa(dialParams.CandidateNumber)
+
+	if dialParams.NetworkLatencyMultiplier != 0.0 {
+		params["network_latency_multiplier"] =
+			fmt.Sprintf("%f", dialParams.NetworkLatencyMultiplier)
+	}
 
 	if dialParams.DialConnMetrics != nil {
 		metrics := dialParams.DialConnMetrics.GetMetrics()
