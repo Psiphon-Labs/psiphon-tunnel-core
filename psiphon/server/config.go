@@ -678,7 +678,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	if err != nil {
 		return nil, nil, nil, nil, nil, common.ContextError(err)
 	}
-	discoveryValueHMACKey := base64.RawURLEncoding.EncodeToString(discoveryValueHMACKeyBytes)
+	discoveryValueHMACKey := base64.StdEncoding.EncodeToString(discoveryValueHMACKeyBytes)
 
 	// Assemble configs and server entry
 

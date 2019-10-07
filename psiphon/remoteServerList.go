@@ -53,11 +53,11 @@ func FetchCommonRemoteServerList(
 
 	NoticeInfo("fetching common remote server list")
 
-	p := config.GetClientParametersSnapshot()
+	p := config.GetClientParameters().Get()
 	publicKey := p.String(parameters.RemoteServerListSignaturePublicKey)
 	urls := p.DownloadURLs(parameters.RemoteServerListURLs)
 	downloadTimeout := p.Duration(parameters.FetchRemoteServerListTimeout)
-	p = nil
+	p.Close()
 
 	downloadURL, canonicalURL, skipVerify := urls.Select(attempt)
 
@@ -136,11 +136,11 @@ func FetchObfuscatedServerLists(
 
 	NoticeInfo("fetching obfuscated remote server lists")
 
-	p := config.GetClientParametersSnapshot()
+	p := config.GetClientParameters().Get()
 	publicKey := p.String(parameters.RemoteServerListSignaturePublicKey)
 	urls := p.DownloadURLs(parameters.ObfuscatedServerListRootURLs)
 	downloadTimeout := p.Duration(parameters.FetchRemoteServerListTimeout)
-	p = nil
+	p.Close()
 
 	rootURL, canonicalRootURL, skipVerify := urls.Select(attempt)
 	downloadURL := osl.GetOSLRegistryURL(rootURL)

@@ -541,12 +541,19 @@ type Config struct {
 	LivenessTestMinDownstreamBytes *int
 	LivenessTestMaxDownstreamBytes *int
 
-	// ReplayCandidateCount and other Replay fields are for
-	// testing purposes.
+	// ReplayCandidateCount and other Replay fields are for testing purposes.
 	ReplayCandidateCount                   *int
 	ReplayDialParametersTTLSeconds         *int
+	ReplayTargetUpstreamBytes              *int
+	ReplayTargetDownstreamBytes            *int
+	ReplayTargetTunnelDurationSeconds      *int
 	ReplayLaterRoundMoveToFrontProbability *float64
 	ReplayRetainFailedProbability          *float64
+
+	// NetworkLatencyMultiplierMin and NetworkLatencyMultiplierMax are for
+	// testing purposes.
+	NetworkLatencyMultiplierMin float64
+	NetworkLatencyMultiplierMax float64
 
 	// UseOnlyCustomTLSProfiles and other TLS configuration fields are for
 	// testing purposes.
@@ -807,9 +814,9 @@ func (config *Config) Commit() error {
 	return nil
 }
 
-// GetClientParameters returns a snapshot of the current client parameters.
-func (config *Config) GetClientParametersSnapshot() *parameters.ClientParametersSnapshot {
-	return config.clientParameters.Get()
+// GetClientParameters returns a the current client parameters.
+func (config *Config) GetClientParameters() *parameters.ClientParameters {
+	return config.clientParameters
 }
 
 // SetClientParameters resets Config.clientParameters to the default values,
@@ -840,12 +847,11 @@ func (config *Config) SetClientParameters(tag string, skipOnError bool, applyPar
 	NoticeInfo("applied %v parameters with tag '%s'", counts, tag)
 
 	// Emit certain individual parameter values for quick reference in diagnostics.
-	networkLatencyMultiplier := config.clientParameters.Get().Float(parameters.NetworkLatencyMultiplier)
-	if networkLatencyMultiplier != 0.0 {
-		NoticeInfo(
-			"NetworkLatencyMultiplier: %f",
-			config.clientParameters.Get().Float(parameters.NetworkLatencyMultiplier))
-	}
+	p := config.clientParameters.Get()
+	NoticeInfo(
+		"NetworkLatencyMultiplier Min/Max: %f/%f",
+		p.Float(parameters.NetworkLatencyMultiplierMin),
+		p.Float(parameters.NetworkLatencyMultiplierMax))
 
 	return nil
 }
@@ -901,8 +907,23 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	applyParameters := make(map[string]interface{})
 
+	// To support platform clients that configure NetworkLatencyMultiplier, set
+	// the NetworkLatencyMultiplierMin/NetworkLatencyMultiplierMax range to the
+	// specified value. Also set the older NetworkLatencyMultiplier tactic, since
+	// that will be used in the case of replaying with dial parameters persisted
+	// by an older client version.
 	if config.NetworkLatencyMultiplier > 0.0 {
 		applyParameters[parameters.NetworkLatencyMultiplier] = config.NetworkLatencyMultiplier
+		applyParameters[parameters.NetworkLatencyMultiplierMin] = config.NetworkLatencyMultiplier
+		applyParameters[parameters.NetworkLatencyMultiplierMax] = config.NetworkLatencyMultiplier
+	}
+
+	if config.NetworkLatencyMultiplierMin > 0.0 {
+		applyParameters[parameters.NetworkLatencyMultiplierMin] = config.NetworkLatencyMultiplierMin
+	}
+
+	if config.NetworkLatencyMultiplierMax > 0.0 {
+		applyParameters[parameters.NetworkLatencyMultiplierMax] = config.NetworkLatencyMultiplierMax
 	}
 
 	if len(config.LimitTunnelProtocols) > 0 {
@@ -1073,6 +1094,18 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ReplayDialParametersTTLSeconds != nil {
 		applyParameters[parameters.ReplayDialParametersTTL] = fmt.Sprintf("%ds", *config.ReplayDialParametersTTLSeconds)
+	}
+
+	if config.ReplayTargetUpstreamBytes != nil {
+		applyParameters[parameters.ReplayTargetUpstreamBytes] = *config.ReplayTargetUpstreamBytes
+	}
+
+	if config.ReplayTargetDownstreamBytes != nil {
+		applyParameters[parameters.ReplayTargetDownstreamBytes] = *config.ReplayTargetDownstreamBytes
+	}
+
+	if config.ReplayTargetTunnelDurationSeconds != nil {
+		applyParameters[parameters.ReplayTargetTunnelDuration] = fmt.Sprintf("%ds", *config.ReplayTargetTunnelDurationSeconds)
 	}
 
 	if config.ReplayLaterRoundMoveToFrontProbability != nil {

@@ -432,6 +432,7 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 		"region", dialParams.ServerEntry.Region,
 		"protocol", dialParams.TunnelProtocol,
 		"isReplay", dialParams.IsReplay,
+		"candidateNumber", dialParams.CandidateNumber,
 	}
 
 	if GetEmitNetworkParameters() {
@@ -489,6 +490,14 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 
 		if dialParams.QUICDialSNIAddress != "" {
 			args = append(args, "QUICDialSNIAddress", dialParams.QUICDialSNIAddress)
+		}
+
+		if dialParams.DialDuration > 0 {
+			args = append(args, "dialDuration", dialParams.DialDuration)
+		}
+
+		if dialParams.NetworkLatencyMultiplier != 0.0 {
+			args = append(args, "networkLatencyMultiplier", dialParams.NetworkLatencyMultiplier)
 		}
 
 		if dialParams.DialConnMetrics != nil {

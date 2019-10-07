@@ -66,6 +66,8 @@ type DialParameters struct {
 	LastUsedTimestamp       time.Time
 	LastUsedConfigStateHash []byte
 
+	NetworkLatencyMultiplier float64
+
 	TunnelProtocol string
 
 	DirectDialAddress              string
@@ -143,7 +145,7 @@ func MakeDialParameters(
 
 	networkID := config.GetNetworkID()
 
-	p := config.GetClientParametersSnapshot()
+	p := config.GetClientParameters().Get()
 
 	ttl := p.Duration(parameters.ReplayDialParametersTTL)
 	replaySSH := p.Bool(parameters.ReplaySSH)
@@ -269,6 +271,36 @@ func MakeDialParameters(
 	// When not replaying, all required parameters are initialized. When
 	// replaying, existing parameters are retaing, subject to the replay-X
 	// tactics flags.
+
+	// Select a network latency multiplier for this dial. This allows clients to
+	// explore and discover timeout values appropriate for the current network.
+	// The selection applies per tunnel, to avoid delaying all establishment
+	// candidates due to excessive timeouts. The random selection is bounded by a
+	// min/max set in tactics and an exponential distribution is used so as to
+	// heavily favor values close to the min, which should be set to the
+	// singleton NetworkLatencyMultiplier tactics value.
+	//
+	// Not all existing, persisted DialParameters will have a custom
+	// NetworkLatencyMultiplier value. Its zero value will cause the singleton
+	// NetworkLatencyMultiplier tactics value to be used instead, which is
+	// consistent with the pre-custom multiplier behavior in the older client
+	// version which persisted that DialParameters.
+
+	networkLatencyMultiplierMin := p.Float(parameters.NetworkLatencyMultiplierMin)
+	networkLatencyMultiplierMax := p.Float(parameters.NetworkLatencyMultiplierMax)
+
+	if !isReplay ||
+		// Was selected...
+		(dialParams.NetworkLatencyMultiplier != 0.0 &&
+			//  But is now outside tactics range...
+			(dialParams.NetworkLatencyMultiplier < networkLatencyMultiplierMin ||
+				dialParams.NetworkLatencyMultiplier > networkLatencyMultiplierMax)) {
+
+		dialParams.NetworkLatencyMultiplier = prng.ExpFloat64Range(
+			networkLatencyMultiplierMin,
+			networkLatencyMultiplierMax,
+			p.Float(parameters.NetworkLatencyMultiplierLambda))
+	}
 
 	if !isReplay && !isExchanged {
 
@@ -601,6 +633,7 @@ func MakeDialParameters(
 			MeekCookieEncryptionPublicKey: serverEntry.MeekCookieEncryptionPublicKey,
 			MeekObfuscatedKey:             serverEntry.MeekObfuscatedKey,
 			MeekObfuscatorPaddingSeed:     dialParams.MeekObfuscatorPaddingSeed,
+			NetworkLatencyMultiplier:      dialParams.NetworkLatencyMultiplier,
 		}
 
 		// Use an asynchronous callback to record the resolved IP address when
@@ -657,7 +690,7 @@ func (dialParams *DialParameters) Failed(config *Config) {
 	// to, e.g., temporary network disruptions or server load limiting.
 
 	if dialParams.IsReplay &&
-		!config.GetClientParametersSnapshot().WeightedCoinFlip(
+		!config.GetClientParameters().Get().WeightedCoinFlip(
 			parameters.ReplayRetainFailedProbability) {
 
 		NoticeInfo("Delete dial parameters for %s", dialParams.ServerEntry.GetDiagnosticID())
@@ -746,7 +779,7 @@ func (dialParams *ExchangedDialParameters) Validate(serverEntry *protocol.Server
 // then later fully initialized by MakeDialParameters.
 func (dialParams *ExchangedDialParameters) MakeDialParameters(
 	config *Config,
-	p *parameters.ClientParametersSnapshot,
+	p parameters.ClientParametersAccessor,
 	serverEntry *protocol.ServerEntry) *DialParameters {
 
 	return &DialParameters{
@@ -759,7 +792,7 @@ func (dialParams *ExchangedDialParameters) MakeDialParameters(
 
 func getConfigStateHash(
 	config *Config,
-	p *parameters.ClientParametersSnapshot,
+	p parameters.ClientParametersAccessor,
 	serverEntry *protocol.ServerEntry) []byte {
 
 	// The config state hash should reflect config, tactics, and server entry
@@ -835,7 +868,7 @@ func selectFrontingParameters(serverEntry *protocol.ServerEntry) (string, string
 	return frontingDialHost, frontingHost, nil
 }
 
-func selectQUICVersion(allowObfuscatedQUIC bool, p *parameters.ClientParametersSnapshot) string {
+func selectQUICVersion(allowObfuscatedQUIC bool, p parameters.ClientParametersAccessor) string {
 
 	limitQUICVersions := p.QUICVersions(parameters.LimitQUICVersions)
 
@@ -867,7 +900,7 @@ func selectQUICVersion(allowObfuscatedQUIC bool, p *parameters.ClientParametersS
 
 // selectUserAgentIfUnset selects a User-Agent header if one is not set.
 func selectUserAgentIfUnset(
-	p *parameters.ClientParametersSnapshot, headers http.Header) (bool, string) {
+	p parameters.ClientParametersAccessor, headers http.Header) (bool, string) {
 
 	if _, ok := headers["User-Agent"]; !ok {
 
@@ -884,7 +917,7 @@ func selectUserAgentIfUnset(
 
 func makeDialCustomHeaders(
 	config *Config,
-	p *parameters.ClientParametersSnapshot) http.Header {
+	p parameters.ClientParametersAccessor) http.Header {
 
 	dialCustomHeaders := make(http.Header)
 	if config.CustomHeaders != nil {

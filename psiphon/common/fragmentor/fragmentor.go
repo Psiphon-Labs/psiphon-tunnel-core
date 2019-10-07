@@ -32,6 +32,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 const (
@@ -57,22 +58,26 @@ type Config struct {
 // NewUpstreamConfig creates a new Config; may return nil. Specifying the PRNG
 // seed allows for optional replay of a fragmentor sequence.
 func NewUpstreamConfig(
-	p *parameters.ClientParametersSnapshot, tunnelProtocol string, seed *prng.Seed) *Config {
+	p parameters.ClientParametersAccessor, tunnelProtocol string, seed *prng.Seed) *Config {
 	return newConfig(p, true, tunnelProtocol, seed)
 }
 
 // NewDownstreamConfig creates a new Config; may return nil. Specifying the
 // PRNG seed allows for optional replay of a fragmentor sequence.
 func NewDownstreamConfig(
-	p *parameters.ClientParametersSnapshot, tunnelProtocol string, seed *prng.Seed) *Config {
+	p parameters.ClientParametersAccessor, tunnelProtocol string, seed *prng.Seed) *Config {
 	return newConfig(p, false, tunnelProtocol, seed)
 }
 
 func newConfig(
-	p *parameters.ClientParametersSnapshot,
+	p parameters.ClientParametersAccessor,
 	isUpstream bool,
 	tunnelProtocol string,
 	seed *prng.Seed) *Config {
+
+	if !protocol.TunnelProtocolIsCompatibleWithFragmentor(tunnelProtocol) {
+		return nil
+	}
 
 	probability := parameters.FragmentorProbability
 	limitProtocols := parameters.FragmentorLimitProtocols

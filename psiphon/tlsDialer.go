@@ -141,9 +141,7 @@ type CustomTLSConfig struct {
 // EnableClientSessionCache initializes a cache to use to persist session
 // tickets, enabling TLS session resumability across multiple
 // CustomTLSDial calls or dialers using the same CustomTLSConfig.
-func (config *CustomTLSConfig) EnableClientSessionCache(
-	clientParameters *parameters.ClientParameters) {
-
+func (config *CustomTLSConfig) EnableClientSessionCache() {
 	if config.clientSessionCache == nil {
 		config.clientSessionCache = utls.NewLRUClientSessionCache(0)
 	}
@@ -151,7 +149,7 @@ func (config *CustomTLSConfig) EnableClientSessionCache(
 
 // SelectTLSProfile picks a TLS profile at random from the available candidates.
 func SelectTLSProfile(
-	p *parameters.ClientParametersSnapshot) string {
+	p parameters.ClientParametersAccessor) string {
 
 	// Two TLS profile lists are constructed, subject to limit constraints:
 	// stock, fixed parrots (non-randomized SupportedTLSProfiles) and custom
@@ -208,7 +206,7 @@ func SelectTLSProfile(
 }
 
 func getUTLSClientHelloID(
-	p *parameters.ClientParametersSnapshot,
+	p parameters.ClientParametersAccessor,
 	tlsProfile string) (utls.ClientHelloID, *utls.ClientHelloSpec, error) {
 
 	switch tlsProfile {
@@ -533,9 +531,12 @@ func CustomTLSDial(
 		}
 	}
 
+	// Perform at most one remarshal for the following ClientHello
+	// modifications.
+	needRemarshal := false
+
 	// Either pre-TLS 1.3 ClientHellos or any randomized ClientHello is a
 	// candidate for NoDefaultSessionID logic.
-
 	if len(conn.HandshakeState.Hello.SessionTicket) == 0 &&
 		(!isTLS13 || utlsClientHelloID.Client == "Randomized") {
 
@@ -548,14 +549,38 @@ func CustomTLSDial(
 		}
 
 		if noDefaultSessionID {
-
 			conn.HandshakeState.Hello.SessionId = nil
+			needRemarshal = true
+		}
+	}
 
-			// Apply changes to utls
-			err = conn.MarshalClientHello()
-			if err != nil {
-				return nil, common.ContextError(err)
+	// utls doesn't omit the server_name extension when the SNI value is empty
+	// (including both the case where we set the SNI value to "" and the case
+	// where the SNI address is an IP address, which is internally changed to
+	// ""). To avoid a fingerprintable invalid/unusual server_name extension,
+	// remove it in these cases.
+	if tlsConfigServerName == "" || net.ParseIP(tlsConfigServerName) != nil {
+
+		// Assumes only one SNIExtension.
+		deleteIndex := -1
+		for index, extension := range conn.Extensions {
+			if _, ok := extension.(*utls.SNIExtension); ok {
+				deleteIndex = index
+				break
 			}
+		}
+		if deleteIndex != -1 {
+			conn.Extensions = append(
+				conn.Extensions[:deleteIndex], conn.Extensions[deleteIndex+1:]...)
+		}
+		needRemarshal = true
+	}
+
+	if needRemarshal {
+		// Apply changes to utls
+		err = conn.MarshalClientHello()
+		if err != nil {
+			return nil, common.ContextError(err)
 		}
 	}
 

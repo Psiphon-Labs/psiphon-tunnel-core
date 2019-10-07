@@ -1088,7 +1088,10 @@ func makeMeekSessionID() (string, error) {
 		return "", common.ContextError(err)
 	}
 
-	return base64.RawURLEncoding.EncodeToString(sessionID), nil
+	// Omit padding to maximize variable size space. To the client, the session
+	// ID is an opaque string cookie value.
+
+	return base64.RawStdEncoding.EncodeToString(sessionID), nil
 }
 
 // meekConn implements the net.Conn interface and is to be used as a client
