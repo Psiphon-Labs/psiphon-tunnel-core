@@ -315,7 +315,7 @@ func MakeUntunneledHTTPClient(
 		SkipVerify:                    skipVerify,
 		TrustedCACertificatesFilename: untunneledDialConfig.TrustedCACertificatesFilename,
 	}
-	tlsConfig.EnableClientSessionCache(config.clientParameters)
+	tlsConfig.EnableClientSessionCache()
 
 	tlsDialer := NewCustomTLSDialer(tlsConfig)
 

@@ -239,6 +239,25 @@ func (p *PRNG) Int63n(n int64) int64 {
 	return p.rand.Int63n(n)
 }
 
+// ExpFloat64Range returns a pseudo-exponentially distributed float64 in the
+// range [min, max] with the specified lambda. Numbers are selected using
+// math/rand.ExpFloat64 and discarding values that exceed max.
+//
+// If max < min or lambda is 0, min is returned.
+func (p *PRNG) ExpFloat64Range(min, max, lambda float64) float64 {
+	if max <= min || lambda == 0.0 {
+		return min
+	}
+	var value float64
+	for {
+		value = min + (rand.ExpFloat64()/lambda)*(max-min)
+		if value <= max {
+			break
+		}
+	}
+	return value
+}
+
 // Intn is equivilent to math/read.Perm.
 func (p *PRNG) Perm(n int) []int {
 	return p.rand.Perm(n)
@@ -302,7 +321,7 @@ func (p *PRNG) HexString(byteLength int) string {
 // Base64String returns a base64 encoded random string.
 // byteLength specifies the pre-encoded data length.
 func (p *PRNG) Base64String(byteLength int) string {
-	return base64.RawURLEncoding.EncodeToString(p.Bytes(byteLength))
+	return base64.StdEncoding.EncodeToString(p.Bytes(byteLength))
 }
 
 var p *PRNG
@@ -329,6 +348,10 @@ func Intn(n int) int {
 
 func Int63n(n int64) int64 {
 	return p.Int63n(n)
+}
+
+func ExpFloat64Range(min, max, lambda float64) float64 {
+	return p.ExpFloat64Range(min, max, lambda)
 }
 
 func Perm(n int) []int {

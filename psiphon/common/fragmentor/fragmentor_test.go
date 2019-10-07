@@ -52,6 +52,7 @@ func TestFragmentor(t *testing.T) {
 	// before additional data is written, even when running tests with the
 	// race detector.
 
+	tunnelProtocol := protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH
 	bytesToFragment := 1 << 15
 	minWriteBytes := 1
 	maxWriteBytes := 512
@@ -64,7 +65,7 @@ func TestFragmentor(t *testing.T) {
 	}
 	_, err = clientParameters.Set("", false, map[string]interface{}{
 		"FragmentorProbability":              1.0,
-		"FragmentorLimitProtocols":           protocol.TunnelProtocols{},
+		"FragmentorLimitProtocols":           protocol.TunnelProtocols{tunnelProtocol},
 		"FragmentorMinTotalBytes":            bytesToFragment,
 		"FragmentorMaxTotalBytes":            bytesToFragment,
 		"FragmentorMinWriteBytes":            minWriteBytes,
@@ -72,7 +73,7 @@ func TestFragmentor(t *testing.T) {
 		"FragmentorMinDelay":                 minDelay,
 		"FragmentorMaxDelay":                 maxDelay,
 		"FragmentorDownstreamProbability":    1.0,
-		"FragmentorDownstreamLimitProtocols": protocol.TunnelProtocols{},
+		"FragmentorDownstreamLimitProtocols": protocol.TunnelProtocols{tunnelProtocol},
 		"FragmentorDownstreamMinTotalBytes":  bytesToFragment,
 		"FragmentorDownstreamMaxTotalBytes":  bytesToFragment,
 		"FragmentorDownstreamMinWriteBytes":  minWriteBytes,
@@ -93,7 +94,7 @@ func TestFragmentor(t *testing.T) {
 			return common.ContextError(err)
 		}
 		fragConn := NewConn(
-			NewDownstreamConfig(clientParameters.Get(), "", nil),
+			NewDownstreamConfig(clientParameters.Get(), tunnelProtocol, nil),
 			func(message string) { t.Logf(message) },
 			conn)
 		defer fragConn.Close()
@@ -137,7 +138,7 @@ func TestFragmentor(t *testing.T) {
 			return common.ContextError(err)
 		}
 		fragConn := NewConn(
-			NewUpstreamConfig(clientParameters.Get(), "", seed),
+			NewUpstreamConfig(clientParameters.Get(), tunnelProtocol, seed),
 			func(message string) { t.Logf(message) },
 			conn)
 		defer fragConn.Close()
