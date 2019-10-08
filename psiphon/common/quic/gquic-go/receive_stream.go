@@ -270,7 +270,15 @@ func (s *receiveStream) CloseRemote(offset protocol.ByteCount) {
 }
 
 func (s *receiveStream) onClose(offset protocol.ByteCount) {
-	if s.canceledRead && !s.version.UsesIETFFrameFormat() {
+
+	// [Psiphon]
+	// Fix race condition.
+	s.mutex.Lock()
+	canceledRead := s.canceledRead
+	s.mutex.Unlock()
+	// [Psiphon]
+
+	if canceledRead && !s.version.UsesIETFFrameFormat() {
 		s.sender.queueControlFrame(&wire.RstStreamFrame{
 			StreamID:   s.streamID,
 			ByteOffset: offset,

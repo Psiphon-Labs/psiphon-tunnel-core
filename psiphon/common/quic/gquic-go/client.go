@@ -124,14 +124,23 @@ func dialContext(
 	config *Config,
 	createdPacketConn bool,
 ) (Session, error) {
-	config = populateClientConfig(config, createdPacketConn)
-	if !createdPacketConn {
-		for _, v := range config.Versions {
-			if v == protocol.Version44 {
-				return nil, errors.New("Cannot multiplex connections using gQUIC 44, see https://groups.google.com/a/chromium.org/forum/#!topic/proto-quic/pE9NlLLjizE. Please disable gQUIC 44 in the quic.Config, or use DialAddr")
+	// [Psiphon]
+	// We call DialContext as we need to create a custom net.PacketConn.
+	// There is one custom net.PacketConn per QUIC connection, which
+	// satisfies the gQUIC 44 constraint.
+	config = populateClientConfig(config, true)
+	/*
+			config = populateClientConfig(config, createdPacketConn)
+			if !createdPacketConn {
+				for _, v := range config.Versions {
+					if v == protocol.Version44 {
+						return nil, errors.New("Cannot multiplex connections using gQUIC 44, see https://groups.google.com/a/chromium.org/forum/#!topic/proto-quic/pE9NlLLjizE. Please disable gQUIC 44 in the quic.Config, or use DialAddr")
+					}
+				}
 			}
 		}
-	}
+	*/
+	// [Psiphon]
 	packetHandlers, err := getMultiplexer().AddConn(pconn, config.ConnectionIDLength)
 	if err != nil {
 		return nil, err
@@ -407,6 +416,17 @@ func (c *client) handlePacketImpl(p *receivedPacket) error {
 			c.handleRetryPacket(p.header)
 			return nil
 		case protocol.PacketTypeHandshake, protocol.PacketType0RTT:
+
+		// [Psiphon]
+		// The fix in https://github.com/lucas-clemente/quic-go/commit/386b77f422028fe86aae7ae9c017ca2c692c8184 must
+		// also be applied here.
+		case protocol.PacketTypeInitial:
+			if p.header.Version == protocol.Version44 {
+				break
+			}
+			fallthrough
+		// [Psiphon]
+
 		default:
 			return fmt.Errorf("Received unsupported packet type: %s", p.header.Type)
 		}

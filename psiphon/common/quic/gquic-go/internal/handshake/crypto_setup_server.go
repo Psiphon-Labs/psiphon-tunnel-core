@@ -203,6 +203,14 @@ func (h *cryptoSetupServer) Open(dst, src []byte, packetNumber protocol.PacketNu
 	defer h.mutex.RUnlock()
 
 	if h.forwardSecureAEAD != nil {
+
+		// [Psiphon]
+		// Apply pending upstream fix: https://github.com/lucas-clemente/quic-go/commit/ffd84b0caad3d0214d0f407646c41dd140c22e8a.
+		if !h.receivedForwardSecurePacket {
+			dst = []byte{}
+		}
+		// [Psiphon]
+
 		res, err := h.forwardSecureAEAD.Open(dst, src, packetNumber, associatedData)
 		if err == nil {
 			if !h.receivedForwardSecurePacket { // this is the first forward secure packet we receive from the client
@@ -219,6 +227,13 @@ func (h *cryptoSetupServer) Open(dst, src []byte, packetNumber protocol.PacketNu
 		}
 	}
 	if h.secureAEAD != nil {
+
+		// [Psiphon]
+		if !h.receivedSecurePacket {
+			dst = []byte{}
+		}
+		// [Psiphon]
+
 		res, err := h.secureAEAD.Open(dst, src, packetNumber, associatedData)
 		if err == nil {
 			h.logger.Debugf("Received first secure packet. Stopping to accept unencrypted packets.")
