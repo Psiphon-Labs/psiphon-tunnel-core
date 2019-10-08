@@ -53,10 +53,10 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/h2quic"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/qerr"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
-	quic_go "github.com/lucas-clemente/quic-go"
-	"github.com/lucas-clemente/quic-go/h2quic"
-	"github.com/lucas-clemente/quic-go/qerr"
 )
 
 const (
@@ -70,7 +70,7 @@ var serverIdleTimeout = SERVER_IDLE_TIMEOUT
 
 // Listener is a net.Listener.
 type Listener struct {
-	quic_go.Listener
+	gquic.Listener
 	logger common.Logger
 }
 
@@ -96,7 +96,7 @@ func Listen(
 		Certificates: []tls.Certificate{tlsCertificate},
 	}
 
-	quicConfig := &quic_go.Config{
+	quicConfig := &gquic.Config{
 		HandshakeTimeout:      SERVER_HANDSHAKE_TIMEOUT,
 		IdleTimeout:           serverIdleTimeout,
 		MaxIncomingStreams:    1,
@@ -130,7 +130,7 @@ func Listen(
 	// ReadFrom errors are intercepted and logged.
 	packetConn = newLoggingPacketConn(logger, packetConn)
 
-	quicListener, err := quic_go.Listen(
+	quicListener, err := gquic.Listen(
 		packetConn, tlsConfig, quicConfig)
 	if err != nil {
 		return nil, common.ContextError(err)
@@ -158,11 +158,11 @@ func (listener *Listener) Accept() (net.Conn, error) {
 	}, nil
 }
 
-var supportedVersionNumbers = map[string]quic_go.VersionNumber{
-	protocol.QUIC_VERSION_GQUIC39:    quic_go.VersionGQUIC39,
-	protocol.QUIC_VERSION_GQUIC43:    quic_go.VersionGQUIC43,
-	protocol.QUIC_VERSION_GQUIC44:    quic_go.VersionGQUIC44,
-	protocol.QUIC_VERSION_OBFUSCATED: quic_go.VersionGQUIC43,
+var supportedVersionNumbers = map[string]gquic.VersionNumber{
+	protocol.QUIC_VERSION_GQUIC39:    gquic.VersionGQUIC39,
+	protocol.QUIC_VERSION_GQUIC43:    gquic.VersionGQUIC43,
+	protocol.QUIC_VERSION_GQUIC44:    gquic.VersionGQUIC44,
+	protocol.QUIC_VERSION_OBFUSCATED: gquic.VersionGQUIC43,
 }
 
 // Dial establishes a new QUIC session and stream to the server specified by
@@ -183,17 +183,17 @@ func Dial(
 	obfuscationKey string,
 	obfuscationPaddingSeed *prng.Seed) (net.Conn, error) {
 
-	var versions []quic_go.VersionNumber
+	var versions []gquic.VersionNumber
 
 	if negotiateQUICVersion != "" {
 		versionNumber, ok := supportedVersionNumbers[negotiateQUICVersion]
 		if !ok {
 			return nil, common.ContextError(fmt.Errorf("unsupported version: %s", negotiateQUICVersion))
 		}
-		versions = []quic_go.VersionNumber{versionNumber}
+		versions = []gquic.VersionNumber{versionNumber}
 	}
 
-	quicConfig := &quic_go.Config{
+	quicConfig := &gquic.Config{
 		HandshakeTimeout: time.Duration(1<<63 - 1),
 		IdleTimeout:      CLIENT_IDLE_TIMEOUT,
 		KeepAlive:        true,
@@ -214,7 +214,7 @@ func Dial(
 		}
 	}
 
-	session, err := quic_go.DialContext(
+	session, err := gquic.DialContext(
 		ctx,
 		packetConn,
 		remoteAddr,
@@ -274,13 +274,13 @@ func Dial(
 // Conn is a net.Conn and psiphon/common.Closer.
 type Conn struct {
 	packetConn net.PacketConn
-	session    quic_go.Session
+	session    gquic.Session
 
 	deferredAcceptStream bool
 
 	acceptMutex sync.Mutex
 	acceptErr   error
-	stream      quic_go.Stream
+	stream      gquic.Stream
 
 	readMutex  sync.Mutex
 	writeMutex sync.Mutex
@@ -555,19 +555,19 @@ func (t *QUICTransporter) closePacketConn() {
 }
 
 func (t *QUICTransporter) dialQUIC(
-	_, _ string, _ *tls.Config, _ *quic_go.Config) (quic_go.Session, error) {
+	_, _ string, _ *tls.Config, _ *gquic.Config) (gquic.Session, error) {
 
-	var versions []quic_go.VersionNumber
+	var versions []gquic.VersionNumber
 
 	if t.negotiateQUICVersion != "" {
 		versionNumber, ok := supportedVersionNumbers[t.negotiateQUICVersion]
 		if !ok {
 			return nil, common.ContextError(fmt.Errorf("unsupported version: %s", t.negotiateQUICVersion))
 		}
-		versions = []quic_go.VersionNumber{versionNumber}
+		versions = []gquic.VersionNumber{versionNumber}
 	}
 
-	quicConfig := &quic_go.Config{
+	quicConfig := &gquic.Config{
 		HandshakeTimeout: time.Duration(1<<63 - 1),
 		IdleTimeout:      CLIENT_IDLE_TIMEOUT,
 		KeepAlive:        true,
@@ -586,7 +586,7 @@ func (t *QUICTransporter) dialQUIC(
 		return nil, common.ContextError(err)
 	}
 
-	session, err := quic_go.DialContext(
+	session, err := gquic.DialContext(
 		ctx,
 		packetConn,
 		remoteAddr,
@@ -598,9 +598,9 @@ func (t *QUICTransporter) dialQUIC(
 		return nil, common.ContextError(err)
 	}
 
-	// We use quic_go.DialContext as we must create our own UDP sockets to set
+	// We use gquic.DialContext as we must create our own UDP sockets to set
 	// properties such as BIND_TO_DEVICE. However, when DialContext is used,
-	// quic_go does not take responsibiity for closing the underlying packetConn
+	// gquic does not take responsibiity for closing the underlying packetConn
 	// when the QUIC session is closed.
 	//
 	// We track the most recent packetConn in QUICTransporter and close it:
