@@ -503,6 +503,7 @@ func (conn *loggingPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 // CloseIdleConnections.
 type QUICTransporter struct {
 	*h2quic.RoundTripper
+	noticeEmitter        func(string)
 	udpDialer            func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error)
 	quicSNIAddress       string
 	negotiateQUICVersion string
@@ -515,11 +516,13 @@ type QUICTransporter struct {
 // NewQUICTransporter creates a new QUICTransporter.
 func NewQUICTransporter(
 	ctx context.Context,
+	noticeEmitter func(string),
 	udpDialer func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error),
 	quicSNIAddress string,
 	negotiateQUICVersion string) *QUICTransporter {
 
 	t := &QUICTransporter{
+		noticeEmitter:        noticeEmitter,
 		udpDialer:            udpDialer,
 		quicSNIAddress:       quicSNIAddress,
 		negotiateQUICVersion: negotiateQUICVersion,
@@ -555,7 +558,13 @@ func (t *QUICTransporter) closePacketConn() {
 }
 
 func (t *QUICTransporter) dialQUIC(
-	_, _ string, _ *tls.Config, _ *gquic.Config) (gquic.Session, error) {
+	_, _ string, _ *tls.Config, _ *gquic.Config) (retSession gquic.Session, retErr error) {
+
+	defer func() {
+		if retErr != nil && t.noticeEmitter != nil {
+			t.noticeEmitter(fmt.Sprintf("dialQUIC failed: %s", retErr))
+		}
+	}()
 
 	var versions []gquic.VersionNumber
 
