@@ -124,24 +124,14 @@ func dialContext(
 	config *Config,
 	createdPacketConn bool,
 ) (Session, error) {
-
-	// [Psiphon]
-	// We call DialContext as we need to create a custom net.PacketConn.
-	// There is one custom net.PacketConn per QUIC connection, which
-	// satisfies the gQUIC 44 constraint.
-	config = populateClientConfig(config, true)
-	/*
-		config = populateClientConfig(config, createdPacketConn)
-		if !createdPacketConn {
-			for _, v := range config.Versions {
-				if v == protocol.Version44 {
-					return nil, errors.New("Cannot multiplex connections using gQUIC 44, see https://groups.google.com/a/chromium.org/forum/#!topic/proto-quic/pE9NlLLjizE. Please disable gQUIC 44 in the quic.Config, or use DialAddr")
-				}
+	config = populateClientConfig(config, createdPacketConn)
+	if !createdPacketConn {
+		for _, v := range config.Versions {
+			if v == protocol.Version44 {
+				return nil, errors.New("Cannot multiplex connections using gQUIC 44, see https://groups.google.com/a/chromium.org/forum/#!topic/proto-quic/pE9NlLLjizE. Please disable gQUIC 44 in the quic.Config, or use DialAddr")
 			}
 		}
-	*/
-	// [Psiphon]
-
+	}
 	packetHandlers, err := getMultiplexer().AddConn(pconn, config.ConnectionIDLength)
 	if err != nil {
 		return nil, err

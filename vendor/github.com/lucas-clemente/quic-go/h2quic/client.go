@@ -39,14 +39,7 @@ type client struct {
 	dialOnce     sync.Once
 	dialer       func(network, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.Session, error)
 
-	// [Psiphon]
-	// Fix Close-while-dialing race condition by synchronizing access to
-	// client.session and adding a closed flag to indicate if the client was
-	// closed while a dial was in progress.
-	sessionMutex sync.Mutex
-	closed       bool
-	session      quic.Session
-
+	session       quic.Session
 	headerStream  quic.Stream
 	headerErr     *qerr.QuicError
 	headerErrored chan struct{} // this channel is closed if an error occurs on the header stream
@@ -91,31 +84,14 @@ func newClient(
 // dial dials the connection
 func (c *client) dial() error {
 	var err error
-	var session quic.Session
 	if c.dialer != nil {
-		session, err = c.dialer("udp", c.hostname, c.tlsConf, c.config)
+		c.session, err = c.dialer("udp", c.hostname, c.tlsConf, c.config)
 	} else {
-		session, err = dialAddr(c.hostname, c.tlsConf, c.config)
+		c.session, err = dialAddr(c.hostname, c.tlsConf, c.config)
 	}
 	if err != nil {
 		return err
 	}
-
-	// [Psiphon]
-	// Only this write and the Close reads of c.session require synchronization.
-	// After this point, it's safe to concurrently read c.session as it is not
-	// rewritten.
-	c.sessionMutex.Lock()
-	closed := c.closed
-	if !closed {
-		c.session = session
-	}
-	c.sessionMutex.Unlock()
-	if closed {
-		session.Close()
-		return errors.New("closed while dialing")
-	}
-	// [Psiphon]
 
 	// once the version has been negotiated, open the header stream
 	c.headerStream, err = c.session.OpenStream()
@@ -300,34 +276,18 @@ func (c *client) writeRequestBody(dataStream quic.Stream, body io.ReadCloser) (e
 }
 
 func (c *client) closeWithError(e error) error {
-
-	// [Psiphon]
-	c.sessionMutex.Lock()
-	session := c.session
-	c.closed = true
-	c.sessionMutex.Unlock()
-	// [Psiphon]
-
-	if session == nil {
+	if c.session == nil {
 		return nil
 	}
-	return session.CloseWithError(quic.ErrorCode(qerr.InternalError), e)
+	return c.session.CloseWithError(quic.ErrorCode(qerr.InternalError), e)
 }
 
 // Close closes the client
 func (c *client) Close() error {
-
-	// [Psiphon]
-	c.sessionMutex.Lock()
-	session := c.session
-	c.closed = true
-	c.sessionMutex.Unlock()
-	// [Psiphon]
-
-	if session == nil {
+	if c.session == nil {
 		return nil
 	}
-	return session.Close()
+	return c.session.Close()
 }
 
 // copied from net/transport.go

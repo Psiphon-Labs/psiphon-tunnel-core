@@ -273,16 +273,10 @@
 			"revisionTime": "2017-05-10T13:15:34Z"
 		},
 		{
-			"checksumSHA1": "2RFzGcdTeQrFkkhT70WhQcMWF6c=",
-			"path": "github.com/lucas-clemente/aes12",
-			"revision": "cd47fb39b79f867c6e4e5cd39cf7abd799f71670",
-			"revisionTime": "2017-10-27T16:34:21Z"
-		},
-		{
-			"checksumSHA1": "PbxxDGeoep1NC9ueE44z2Z4YDdQ=",
+			"checksumSHA1": "ZigwMDKvngolCTDwp6ZZnGAd0sg=",
 			"path": "github.com/lucas-clemente/quic-go",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
+			"revision": "0810051757ce5dc85df677aa14b0efd12b99729a",
+			"revisionTime": "2019-05-19T13:56:38Z",
 			"version": "=gquic",
 			"versionExact": "gquic"
 		},
@@ -293,82 +287,82 @@
 			"revisionTime": "2016-08-23T09:51:56Z"
 		},
 		{
-			"checksumSHA1": "Acu5qrWFrDGVbyhjUI0PsVe9cHY=",
+			"checksumSHA1": "zFVxc8oDnyVxJWSUGs/L75IWtGQ=",
 			"path": "github.com/lucas-clemente/quic-go/h2quic",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
+			"revision": "0810051757ce5dc85df677aa14b0efd12b99729a",
+			"revisionTime": "2019-05-19T13:56:38Z",
 			"version": "=gquic",
 			"versionExact": "gquic"
 		},
 		{
 			"checksumSHA1": "3ln/ewUovXrNnPySlGTJ/tqaAcU=",
 			"path": "github.com/lucas-clemente/quic-go/internal/ackhandler",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
+			"revision": "0810051757ce5dc85df677aa14b0efd12b99729a",
+			"revisionTime": "2019-05-19T13:56:38Z",
 			"version": "=gquic",
 			"versionExact": "gquic"
 		},
 		{
 			"checksumSHA1": "S88pE/UIJ2FI6DQ9qKe9hMBddlE=",
 			"path": "github.com/lucas-clemente/quic-go/internal/congestion",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
+			"revision": "0810051757ce5dc85df677aa14b0efd12b99729a",
+			"revisionTime": "2019-05-19T13:56:38Z",
 			"version": "=gquic",
 			"versionExact": "gquic"
 		},
 		{
-			"checksumSHA1": "55QOkMYhfNrMVHNSG2PiDoAznnM=",
+			"checksumSHA1": "yXvEoPLCsme0AP6lglpfg78zu6Y=",
 			"path": "github.com/lucas-clemente/quic-go/internal/crypto",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
+			"revision": "0810051757ce5dc85df677aa14b0efd12b99729a",
+			"revisionTime": "2019-05-19T13:56:38Z",
 			"version": "=gquic",
 			"versionExact": "gquic"
 		},
 		{
 			"checksumSHA1": "hLazAfY6qHoV3USMxA7pSPnTqy8=",
 			"path": "github.com/lucas-clemente/quic-go/internal/flowcontrol",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
+			"revision": "0810051757ce5dc85df677aa14b0efd12b99729a",
+			"revisionTime": "2019-05-19T13:56:38Z",
 			"version": "=gquic",
 			"versionExact": "gquic"
 		},
 		{
 			"checksumSHA1": "xZvDRCL3QmKLqPc8DL7N8Y7nFSY=",
 			"path": "github.com/lucas-clemente/quic-go/internal/handshake",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
+			"revision": "0810051757ce5dc85df677aa14b0efd12b99729a",
+			"revisionTime": "2019-05-19T13:56:38Z",
 			"version": "=gquic",
 			"versionExact": "gquic"
 		},
 		{
 			"checksumSHA1": "l/5aZg9t6+W1uThZk20Fn4/NUCo=",
 			"path": "github.com/lucas-clemente/quic-go/internal/protocol",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
+			"revision": "0810051757ce5dc85df677aa14b0efd12b99729a",
+			"revisionTime": "2019-05-19T13:56:38Z",
 			"version": "=gquic",
 			"versionExact": "gquic"
 		},
 		{
 			"checksumSHA1": "EYJC4eRzEgVdumThw5ApaAVx7/M=",
 			"path": "github.com/lucas-clemente/quic-go/internal/utils",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
+			"revision": "0810051757ce5dc85df677aa14b0efd12b99729a",
+			"revisionTime": "2019-05-19T13:56:38Z",
 			"version": "=gquic",
 			"versionExact": "gquic"
 		},
 		{
 			"checksumSHA1": "XgecNbm4PtsEfUDX2unzmKE/nGA=",
 			"path": "github.com/lucas-clemente/quic-go/internal/wire",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
+			"revision": "0810051757ce5dc85df677aa14b0efd12b99729a",
+			"revisionTime": "2019-05-19T13:56:38Z",
 			"version": "=gquic",
 			"versionExact": "gquic"
 		},
 		{
 			"checksumSHA1": "bFSC4TOZGOZGBJEFmLAT3V4ieoo=",
 			"path": "github.com/lucas-clemente/quic-go/qerr",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
+			"revision": "0810051757ce5dc85df677aa14b0efd12b99729a",
+			"revisionTime": "2019-05-19T13:56:38Z",
 			"version": "=gquic",
 			"versionExact": "gquic"
 		},
