@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"golang.org/x/net/http2"
+	"github.com/Psiphon-Labs/net/http2"
 )
 
 // copied from net/http2/transport.go

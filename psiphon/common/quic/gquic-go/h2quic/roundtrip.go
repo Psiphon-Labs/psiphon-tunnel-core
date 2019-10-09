@@ -11,7 +11,7 @@ import (
 
 	quic "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go"
 
-	"golang.org/x/net/http/httpguts"
+	"github.com/Psiphon-Labs/net/http/httpguts"
 )
 
 type roundTripCloser interface {

@@ -39,6 +39,12 @@
 			"revisionTime": "2018-04-26T17:24:40Z"
 		},
 		{
+			"checksumSHA1": "DCYF1I3oJnexUiZbrOuLwNkEMwY=",
+			"path": "github.com/Psiphon-Labs/net/http/httpguts",
+			"revision": "03e6572170e3643a5cf49ef0a0ce746e53b63cf3",
+			"revisionTime": "2018-09-12T16:47:43Z"
+		},
+		{
 			"checksumSHA1": "cxmVWOV+0g1ZqB9BvGksJuD4lU0=",
 			"path": "github.com/Psiphon-Labs/net/http2",
 			"revision": "03e6572170e3643a5cf49ef0a0ce746e53b63cf3",
@@ -47,6 +53,12 @@
 		{
 			"checksumSHA1": "DyTNDdPyzkdNw1Ao0HiRbI3hQI8=",
 			"path": "github.com/Psiphon-Labs/net/http2/hpack",
+			"revision": "03e6572170e3643a5cf49ef0a0ce746e53b63cf3",
+			"revisionTime": "2018-09-12T16:47:43Z"
+		},
+		{
+			"checksumSHA1": "uEsaxWnqx9/5P9Obpz+UowvJS2o=",
+			"path": "github.com/Psiphon-Labs/net/idna",
 			"revision": "03e6572170e3643a5cf49ef0a0ce746e53b63cf3",
 			"revisionTime": "2018-09-12T16:47:43Z"
 		},
@@ -550,18 +562,6 @@
 			"revisionTime": "2018-08-25T16:15:26Z"
 		},
 		{
-			"checksumSHA1": "AmeYQUH7nq7nsV5lhvMH93E2eVY=",
-			"path": "golang.org/x/net/http2",
-			"revision": "1da14a5a36f220ea3f03470682b737b1dfd5de22",
-			"revisionTime": "2019-02-11T22:33:38Z"
-		},
-		{
-			"checksumSHA1": "VJwSx33rjMC7O6K2O50Jw6o1vw4=",
-			"path": "golang.org/x/net/http2/hpack",
-			"revision": "1da14a5a36f220ea3f03470682b737b1dfd5de22",
-			"revisionTime": "2019-02-11T22:33:38Z"
-		},
-		{
 			"checksumSHA1": "1osdKBIU5mNqyQqiGmnutoTzdJA=",
 			"path": "golang.org/x/net/idna",
 			"revision": "a04bdaca5b32abe1c069418fb7088ae607de5bd0",
@@ -572,12 +572,6 @@
 			"path": "golang.org/x/net/internal/timeseries",
 			"revision": "922f4815f713f213882e8ef45e0d315b164d705c",
 			"revisionTime": "2018-08-02T22:19:15Z"
-		},
-		{
-			"checksumSHA1": "3xyuaSNmClqG4YWC7g0isQIbUTc=",
-			"path": "golang.org/x/net/lex/httplex",
-			"revision": "a04bdaca5b32abe1c069418fb7088ae607de5bd0",
-			"revisionTime": "2017-10-03T05:09:24Z"
 		},
 		{
 			"checksumSHA1": "QEm/dePZ0lOnyOs+m22KjXfJ/IU=",
