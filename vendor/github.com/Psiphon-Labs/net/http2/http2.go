@@ -29,7 +29,7 @@ import (
 	"strings"
 	"sync"
 
-	"golang.org/x/net/http/httpguts"
+	"github.com/Psiphon-Labs/net/http/httpguts"
 )
 
 var (

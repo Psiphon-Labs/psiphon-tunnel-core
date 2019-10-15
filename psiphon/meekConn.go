@@ -259,6 +259,9 @@ func DialMeek(
 
 		transport = quic.NewQUICTransporter(
 			ctx,
+			func(message string) {
+				NoticeInfo(message)
+			},
 			udpDialer,
 			quicDialSNIAddress,
 			meekConfig.QUICVersion)
