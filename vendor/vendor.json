@@ -9,24 +9,6 @@
 			"revisionTime": "2017-07-02T08:40:17Z"
 		},
 		{
-			"checksumSHA1": "dhdN5+99VJbYKpf9le2lTxx7I90=",
-			"path": "github.com/Psiphon-Inc/crypto/nacl/secretbox",
-			"revision": "22f3a6adaef5e4012911310a5fd489bd57cb7183",
-			"revisionTime": "2016-10-03T18:50:34Z"
-		},
-		{
-			"checksumSHA1": "Y7gZjE+tECd3IeuzZfuF/F8kc3I=",
-			"path": "github.com/Psiphon-Inc/crypto/poly1305",
-			"revision": "22f3a6adaef5e4012911310a5fd489bd57cb7183",
-			"revisionTime": "2016-10-03T18:50:34Z"
-		},
-		{
-			"checksumSHA1": "sJGkfgXi6PEdpvpr1QckqlyJBH0=",
-			"path": "github.com/Psiphon-Inc/crypto/salsa20/salsa",
-			"revision": "22f3a6adaef5e4012911310a5fd489bd57cb7183",
-			"revisionTime": "2016-10-03T18:50:34Z"
-		},
-		{
 			"checksumSHA1": "aFs1ojFW1UmUNMtN6rdRJ2FEIRE=",
 			"path": "github.com/Psiphon-Inc/rotate-safe-writer",
 			"revision": "b276127301a99aa7102ebdc6f509fc8d890900d0",
@@ -57,28 +39,34 @@
 			"revisionTime": "2018-04-26T17:24:40Z"
 		},
 		{
-			"checksumSHA1": "cxmVWOV+0g1ZqB9BvGksJuD4lU0=",
-			"path": "github.com/Psiphon-Labs/net/http2",
-			"revision": "03e6572170e3643a5cf49ef0a0ce746e53b63cf3",
-			"revisionTime": "2018-09-12T16:47:43Z"
+			"checksumSHA1": "fkgr70NoN6wYgBTWNjFWZscOnl0=",
+			"path": "github.com/Psiphon-Labs/net/http/httpguts",
+			"revision": "e0f44e7d5292e7852a15cd4d72e93b72fe6adbcd",
+			"revisionTime": "2019-10-09T14:42:56Z"
 		},
 		{
-			"checksumSHA1": "DyTNDdPyzkdNw1Ao0HiRbI3hQI8=",
+			"checksumSHA1": "uxFfTWdPthZx2w30RDBcecVb+90=",
+			"path": "github.com/Psiphon-Labs/net/http2",
+			"revision": "e0f44e7d5292e7852a15cd4d72e93b72fe6adbcd",
+			"revisionTime": "2019-10-09T14:42:56Z"
+		},
+		{
+			"checksumSHA1": "goMbDSC+4RsA2gXuPW94lwemdKw=",
 			"path": "github.com/Psiphon-Labs/net/http2/hpack",
-			"revision": "03e6572170e3643a5cf49ef0a0ce746e53b63cf3",
-			"revisionTime": "2018-09-12T16:47:43Z"
+			"revision": "e0f44e7d5292e7852a15cd4d72e93b72fe6adbcd",
+			"revisionTime": "2019-10-09T14:42:56Z"
+		},
+		{
+			"checksumSHA1": "cE6ltQ1NTTI757Rpbp+uI6MnnC0=",
+			"path": "github.com/Psiphon-Labs/net/idna",
+			"revision": "e0f44e7d5292e7852a15cd4d72e93b72fe6adbcd",
+			"revisionTime": "2019-10-09T14:42:56Z"
 		},
 		{
 			"checksumSHA1": "DmQc8vfP44VMUTIZJGM4WslOyk0=",
 			"path": "github.com/Psiphon-Labs/tls-tris",
 			"revision": "b5083341bf6cb581f3319c6dfbb39dd6ae3a97ea",
 			"revisionTime": "2019-03-21T17:45:24Z"
-		},
-		{
-			"checksumSHA1": "zaEXXT0xMkEADcxW9GvBK0iYe1A=",
-			"path": "github.com/Psiphon-Labs/utls/cipherhw",
-			"revision": "1f81de88145c342aad771f4f630012618faaffa7",
-			"revisionTime": "2018-04-25T19:07:11Z"
 		},
 		{
 			"checksumSHA1": "30PBqj9BW03KCVqASvLg3bR+xYc=",
@@ -273,106 +261,6 @@
 			"revisionTime": "2017-05-10T13:15:34Z"
 		},
 		{
-			"checksumSHA1": "2RFzGcdTeQrFkkhT70WhQcMWF6c=",
-			"path": "github.com/lucas-clemente/aes12",
-			"revision": "cd47fb39b79f867c6e4e5cd39cf7abd799f71670",
-			"revisionTime": "2017-10-27T16:34:21Z"
-		},
-		{
-			"checksumSHA1": "PbxxDGeoep1NC9ueE44z2Z4YDdQ=",
-			"path": "github.com/lucas-clemente/quic-go",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
-			"version": "=gquic",
-			"versionExact": "gquic"
-		},
-		{
-			"checksumSHA1": "OA9E+y7g05x/mWJJHmA7oPxWKQo=",
-			"path": "github.com/lucas-clemente/quic-go-certificates",
-			"revision": "d2f86524cced5186554df90d92529757d22c1cb6",
-			"revisionTime": "2016-08-23T09:51:56Z"
-		},
-		{
-			"checksumSHA1": "Acu5qrWFrDGVbyhjUI0PsVe9cHY=",
-			"path": "github.com/lucas-clemente/quic-go/h2quic",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
-			"version": "=gquic",
-			"versionExact": "gquic"
-		},
-		{
-			"checksumSHA1": "3ln/ewUovXrNnPySlGTJ/tqaAcU=",
-			"path": "github.com/lucas-clemente/quic-go/internal/ackhandler",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
-			"version": "=gquic",
-			"versionExact": "gquic"
-		},
-		{
-			"checksumSHA1": "S88pE/UIJ2FI6DQ9qKe9hMBddlE=",
-			"path": "github.com/lucas-clemente/quic-go/internal/congestion",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
-			"version": "=gquic",
-			"versionExact": "gquic"
-		},
-		{
-			"checksumSHA1": "55QOkMYhfNrMVHNSG2PiDoAznnM=",
-			"path": "github.com/lucas-clemente/quic-go/internal/crypto",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
-			"version": "=gquic",
-			"versionExact": "gquic"
-		},
-		{
-			"checksumSHA1": "hLazAfY6qHoV3USMxA7pSPnTqy8=",
-			"path": "github.com/lucas-clemente/quic-go/internal/flowcontrol",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
-			"version": "=gquic",
-			"versionExact": "gquic"
-		},
-		{
-			"checksumSHA1": "xZvDRCL3QmKLqPc8DL7N8Y7nFSY=",
-			"path": "github.com/lucas-clemente/quic-go/internal/handshake",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
-			"version": "=gquic",
-			"versionExact": "gquic"
-		},
-		{
-			"checksumSHA1": "l/5aZg9t6+W1uThZk20Fn4/NUCo=",
-			"path": "github.com/lucas-clemente/quic-go/internal/protocol",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
-			"version": "=gquic",
-			"versionExact": "gquic"
-		},
-		{
-			"checksumSHA1": "EYJC4eRzEgVdumThw5ApaAVx7/M=",
-			"path": "github.com/lucas-clemente/quic-go/internal/utils",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
-			"version": "=gquic",
-			"versionExact": "gquic"
-		},
-		{
-			"checksumSHA1": "XgecNbm4PtsEfUDX2unzmKE/nGA=",
-			"path": "github.com/lucas-clemente/quic-go/internal/wire",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
-			"version": "=gquic",
-			"versionExact": "gquic"
-		},
-		{
-			"checksumSHA1": "bFSC4TOZGOZGBJEFmLAT3V4ieoo=",
-			"path": "github.com/lucas-clemente/quic-go/qerr",
-			"revision": "24fed6dc9757399d276689fb4008b09e51f69308",
-			"revisionTime": "2019-04-16T05:23:26Z",
-			"version": "=gquic",
-			"versionExact": "gquic"
-		},
-		{
 			"checksumSHA1": "sY8sshVIEXnJgg3S6C5FcN33Vq4=",
 			"path": "github.com/marusama/semaphore",
 			"revision": "565ffd8e868a4e9a2b4e218e940cf4cb40ebd105",
@@ -480,12 +368,6 @@
 			"revision": "360dd8f58226f85f483c7cbf582cb1447f9c802f",
 			"revisionTime": "2018-08-18T17:28:07Z",
 			"tree": true
-		},
-		{
-			"checksumSHA1": "5rmH4D67rsb/VWRvD4bjmRO40uA=",
-			"path": "github.com/refraction-networking/gotapdance",
-			"revision": "3a6e1938ad70af3e91081cd036e3ed05995d67e7",
-			"revisionTime": "2019-09-09T20:29:46Z"
 		},
 		{
 			"checksumSHA1": "kt4nwBTlAIn0dET5SqLdWXLLuso=",
@@ -680,18 +562,6 @@
 			"revisionTime": "2018-08-25T16:15:26Z"
 		},
 		{
-			"checksumSHA1": "AmeYQUH7nq7nsV5lhvMH93E2eVY=",
-			"path": "golang.org/x/net/http2",
-			"revision": "1da14a5a36f220ea3f03470682b737b1dfd5de22",
-			"revisionTime": "2019-02-11T22:33:38Z"
-		},
-		{
-			"checksumSHA1": "VJwSx33rjMC7O6K2O50Jw6o1vw4=",
-			"path": "golang.org/x/net/http2/hpack",
-			"revision": "1da14a5a36f220ea3f03470682b737b1dfd5de22",
-			"revisionTime": "2019-02-11T22:33:38Z"
-		},
-		{
 			"checksumSHA1": "1osdKBIU5mNqyQqiGmnutoTzdJA=",
 			"path": "golang.org/x/net/idna",
 			"revision": "a04bdaca5b32abe1c069418fb7088ae607de5bd0",
@@ -702,12 +572,6 @@
 			"path": "golang.org/x/net/internal/timeseries",
 			"revision": "922f4815f713f213882e8ef45e0d315b164d705c",
 			"revisionTime": "2018-08-02T22:19:15Z"
-		},
-		{
-			"checksumSHA1": "3xyuaSNmClqG4YWC7g0isQIbUTc=",
-			"path": "golang.org/x/net/lex/httplex",
-			"revision": "a04bdaca5b32abe1c069418fb7088ae607de5bd0",
-			"revisionTime": "2017-10-03T05:09:24Z"
 		},
 		{
 			"checksumSHA1": "QEm/dePZ0lOnyOs+m22KjXfJ/IU=",

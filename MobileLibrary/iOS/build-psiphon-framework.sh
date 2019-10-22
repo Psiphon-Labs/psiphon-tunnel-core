@@ -7,6 +7,9 @@ if [ -z ${1+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$1"; fi
 # Modify this value as we use newer Go versions.
 GO_VERSION_REQUIRED="1.11.13"
 
+# At this time, gomobile doesn't support modules
+export GO111MODULE=off
+
 # Reset the PATH to macOS default. This is mainly so we don't execute the wrong
 # gomobile executable.
 PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/go/bin

@@ -243,9 +243,9 @@ func (p *PRNG) Int63n(n int64) int64 {
 // range [min, max] with the specified lambda. Numbers are selected using
 // math/rand.ExpFloat64 and discarding values that exceed max.
 //
-// If max < min or lambda is 0, min is returned.
+// If max < min or lambda is <= 0, min is returned.
 func (p *PRNG) ExpFloat64Range(min, max, lambda float64) float64 {
-	if max <= min || lambda == 0.0 {
+	if max <= min || lambda <= 0.0 {
 		return min
 	}
 	var value float64
