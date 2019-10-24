@@ -326,9 +326,9 @@ public class PsiphonTunnel {
             Locale.setDefault(new Locale("en"));
             tunFd = vpnServiceBuilder
                             .setSession(mHostService.getAppName())
-                            .addAddress(mPrivateAddress.mIpAddress, mPrivateAddress.mPrefixLength)
+                            .addAddress(privateAddress.mIpAddress, privateAddress.mPrefixLength)
                             .addRoute("0.0.0.0", 0)
-                            .addRoute(mPrivateAddress.mSubnet, mPrivateAddress.mPrefixLength)
+                            .addRoute(privateAddress.mSubnet, privateAddress.mPrefixLength)
                             .establish();
         } catch(IllegalArgumentException e) {
             throw new Exception(errorMessage, e);
