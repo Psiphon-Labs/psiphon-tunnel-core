@@ -222,6 +222,8 @@ const (
 	RecordRemoteServerListPersistentStatsProbability = "RecordRemoteServerListPersistentStatsProbability"
 	RecordFailedTunnelPersistentStatsProbability     = "RecordFailedTunnelPersistentStatsProbability"
 	ServerEntryMinimumAgeForPruning                  = "ServerEntryMinimumAgeForPruning"
+	ApplicationParametersProbability                 = "ApplicationParametersProbability"
+	ApplicationParameters                            = "ApplicationParameters"
 )
 
 const (
@@ -458,6 +460,9 @@ var defaultClientParameters = map[string]struct {
 	RecordFailedTunnelPersistentStatsProbability:     {value: 0.0, minimum: 0.0},
 
 	ServerEntryMinimumAgeForPruning: {value: 7 * 24 * time.Hour, minimum: 24 * time.Hour},
+
+	ApplicationParametersProbability: {value: 1.0, minimum: 0.0},
+	ApplicationParameters:            {value: KeyValues{}},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -637,6 +642,14 @@ func (p *ClientParameters) Set(
 					}
 				}
 			case protocol.CustomTLSProfiles:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, common.ContextError(err)
+				}
+			case KeyValues:
 				err := v.Validate()
 				if err != nil {
 					if skipOnError {
@@ -1018,4 +1031,11 @@ func (p ClientParametersAccessor) CustomTLSProfile(name string) *protocol.Custom
 		}
 	}
 	return nil
+}
+
+// KeyValues returns a KeyValues parameter value.
+func (p ClientParametersAccessor) KeyValues(name string) KeyValues {
+	value := KeyValues{}
+	p.snapshot.getValue(name, &value)
+	return value
 }

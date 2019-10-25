@@ -562,6 +562,9 @@ type Config struct {
 	SelectRandomizedTLSProfileProbability *float64
 	NoDefaultTLSSessionIDProbability      *float64
 
+	// ApplicationParameters is for testing purposes.
+	ApplicationParameters parameters.KeyValues
+
 	// clientParameters is the active ClientParameters with defaults, config
 	// values, and, optionally, tactics applied.
 	//
@@ -853,6 +856,13 @@ func (config *Config) SetClientParameters(tag string, skipOnError bool, applyPar
 		p.Float(parameters.NetworkLatencyMultiplierMin),
 		p.Float(parameters.NetworkLatencyMultiplierMax))
 
+	// Application Parameters are feature flags/config info, delivered as Client
+	// Parameters via tactics/etc., to be communicated to the outer application.
+	// Emit these now, as notices.
+	if p.WeightedCoinFlip(parameters.ApplicationParametersProbability) {
+		NoticeApplicationParameters(p.KeyValues(parameters.ApplicationParameters))
+	}
+
 	return nil
 }
 
@@ -1130,6 +1140,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.NoDefaultTLSSessionIDProbability != nil {
 		applyParameters[parameters.NoDefaultTLSSessionIDProbability] = *config.NoDefaultTLSSessionIDProbability
+	}
+
+	if config.ApplicationParameters != nil {
+		applyParameters[parameters.ApplicationParameters] = config.ApplicationParameters
 	}
 
 	return applyParameters
