@@ -29,17 +29,9 @@ import PsiphonTunnel
     @objc public lazy var authURLSessionDelegate: OCSPAuthURLSessionDelegate =
         OCSPAuthURLSessionDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]:", $0)},
                                         ocspCache: self.ocspCache,
-                                        modifyOCSPURL:{
-                                            assert(self.httpProxyPort > 0)
-
-                                            let encodedTargetURL = URLEncode.encode($0.absoluteString)
-                                            let proxiedURLString = "http://127.0.0.1:\(self.httpProxyPort)/tunneled/\(encodedTargetURL!)"
-                                            let proxiedURL = URL.init(string: proxiedURLString)
-
-                                            print("[OCSP] Updated OCSP URL \($0) to \(proxiedURL!)")
-
-                                            return proxiedURL!},
-                                        session:nil)
+                                        modifyOCSPURL:nil,
+                                        session:nil,
+                                        timeout:10)
     
     @objc public class func sharedDelegate() -> AppDelegate {
         var delegate: AppDelegate?

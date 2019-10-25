@@ -40,7 +40,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
                                             return proxiedURL!
                                         },
-                                        session:URLSession.shared)
+                                        session:URLSession.shared,
+                                        timeout:10)
 
     @objc public class func sharedDelegate() -> AppDelegate {
         var delegate: AppDelegate?
