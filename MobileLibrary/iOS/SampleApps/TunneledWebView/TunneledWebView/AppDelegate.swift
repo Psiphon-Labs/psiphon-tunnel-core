@@ -29,6 +29,16 @@ import PsiphonTunnel
     @objc public lazy var authURLSessionDelegate: OCSPAuthURLSessionDelegate =
         OCSPAuthURLSessionDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]:", $0)},
                                         ocspCache: self.ocspCache,
+                                        // Unlike TunneledWebRequest we do not need to manually
+                                        // update the OCSP request to be proxied through the local
+                                        // HTTP proxy. Since JAHPAuthenticatingHTTPProtocol
+                                        // subclasses and registers itself with NSURLProtocol, all
+                                        // URL requests made manually (using the foundation
+                                        // framework) will be proxied automatically.
+                                        //
+                                        // Since the OCSPCache library makes requests using
+                                        // NSURLSessionDataTask, the OCSP requests will be proxied
+                                        // automatically.
                                         modifyOCSPURL:nil,
                                         session:nil,
                                         timeout:10)
