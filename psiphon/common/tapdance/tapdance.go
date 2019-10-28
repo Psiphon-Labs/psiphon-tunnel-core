@@ -29,8 +29,6 @@ package tapdance
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
