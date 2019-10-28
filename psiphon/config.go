@@ -852,9 +852,10 @@ func (config *Config) SetClientParameters(tag string, skipOnError bool, applyPar
 	// Emit certain individual parameter values for quick reference in diagnostics.
 	p := config.clientParameters.Get()
 	NoticeInfo(
-		"NetworkLatencyMultiplier Min/Max: %f/%f",
+		"NetworkLatencyMultiplier Min/Max/Lambda: %f/%f/%f",
 		p.Float(parameters.NetworkLatencyMultiplierMin),
-		p.Float(parameters.NetworkLatencyMultiplierMax))
+		p.Float(parameters.NetworkLatencyMultiplierMax),
+		p.Float(parameters.NetworkLatencyMultiplierLambda))
 
 	// Application Parameters are feature flags/config info, delivered as Client
 	// Parameters via tactics/etc., to be communicated to the outer application.
