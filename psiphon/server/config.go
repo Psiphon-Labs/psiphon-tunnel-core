@@ -27,7 +27,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -38,6 +37,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
@@ -381,54 +381,54 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	var config Config
 	err := json.Unmarshal(configJSON, &config)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if config.ServerIPAddress == "" {
-		return nil, errors.New("ServerIPAddress is required")
+		return nil, errors.TraceNew("ServerIPAddress is required")
 	}
 
 	if config.WebServerPort > 0 && (config.WebServerSecret == "" || config.WebServerCertificate == "" ||
 		config.WebServerPrivateKey == "") {
 
-		return nil, errors.New(
+		return nil, errors.TraceNew(
 			"Web server requires WebServerSecret, WebServerCertificate, WebServerPrivateKey")
 	}
 
 	if config.WebServerPortForwardAddress != "" {
 		if err := validateNetworkAddress(config.WebServerPortForwardAddress, false); err != nil {
-			return nil, errors.New("WebServerPortForwardAddress is invalid")
+			return nil, errors.TraceNew("WebServerPortForwardAddress is invalid")
 		}
 	}
 
 	if config.WebServerPortForwardRedirectAddress != "" {
 
 		if config.WebServerPortForwardAddress == "" {
-			return nil, errors.New(
+			return nil, errors.TraceNew(
 				"WebServerPortForwardRedirectAddress requires WebServerPortForwardAddress")
 		}
 
 		if err := validateNetworkAddress(config.WebServerPortForwardRedirectAddress, false); err != nil {
-			return nil, errors.New("WebServerPortForwardRedirectAddress is invalid")
+			return nil, errors.TraceNew("WebServerPortForwardRedirectAddress is invalid")
 		}
 	}
 
 	for tunnelProtocol, port := range config.TunnelProtocolPorts {
 		if !common.Contains(protocol.SupportedTunnelProtocols, tunnelProtocol) {
-			return nil, fmt.Errorf("Unsupported tunnel protocol: %s", tunnelProtocol)
+			return nil, errors.Tracef("Unsupported tunnel protocol: %s", tunnelProtocol)
 		}
 		if protocol.TunnelProtocolUsesSSH(tunnelProtocol) ||
 			protocol.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
 			if config.SSHPrivateKey == "" || config.SSHServerVersion == "" ||
 				config.SSHUserName == "" || config.SSHPassword == "" {
-				return nil, fmt.Errorf(
+				return nil, errors.Tracef(
 					"Tunnel protocol %s requires SSHPrivateKey, SSHServerVersion, SSHUserName, SSHPassword",
 					tunnelProtocol)
 			}
 		}
 		if protocol.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
 			if config.ObfuscatedSSHKey == "" {
-				return nil, fmt.Errorf(
+				return nil, errors.Tracef(
 					"Tunnel protocol %s requires ObfuscatedSSHKey",
 					tunnelProtocol)
 			}
@@ -436,14 +436,14 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		if protocol.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
 			protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
 			if config.MeekCookieEncryptionPrivateKey == "" || config.MeekObfuscatedKey == "" {
-				return nil, fmt.Errorf(
+				return nil, errors.Tracef(
 					"Tunnel protocol %s requires MeekCookieEncryptionPrivateKey, MeekObfuscatedKey",
 					tunnelProtocol)
 			}
 		}
 		if protocol.TunnelProtocolUsesMarionette(tunnelProtocol) {
 			if port != 0 {
-				return nil, fmt.Errorf(
+				return nil, errors.Tracef(
 					"Tunnel protocol %s port is specified in format, not TunnelProtocolPorts",
 					tunnelProtocol)
 			}
@@ -463,7 +463,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	if config.ObfuscatedSSHKey != "" {
 		seed, err := protocol.DeriveSSHServerVersionPRNGSeed(config.ObfuscatedSSHKey)
 		if err != nil {
-			return nil, fmt.Errorf(
+			return nil, errors.Tracef(
 				"DeriveSSHServerVersionPRNGSeed failed: %s", err)
 		}
 
@@ -475,19 +475,19 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 
 	if config.UDPInterceptUdpgwServerAddress != "" {
 		if err := validateNetworkAddress(config.UDPInterceptUdpgwServerAddress, true); err != nil {
-			return nil, fmt.Errorf("UDPInterceptUdpgwServerAddress is invalid: %s", err)
+			return nil, errors.Tracef("UDPInterceptUdpgwServerAddress is invalid: %s", err)
 		}
 	}
 
 	if config.DNSResolverIPAddress != "" {
 		if net.ParseIP(config.DNSResolverIPAddress) == nil {
-			return nil, fmt.Errorf("DNSResolverIPAddress is invalid")
+			return nil, errors.Tracef("DNSResolverIPAddress is invalid")
 		}
 	}
 
 	err = accesscontrol.ValidateVerificationKeyRing(&config.AccessControlVerificationKeyRing)
 	if err != nil {
-		return nil, fmt.Errorf(
+		return nil, errors.Tracef(
 			"AccessControlVerificationKeyRing is invalid: %s", err)
 	}
 
@@ -500,14 +500,14 @@ func validateNetworkAddress(address string, requireIPaddress bool) error {
 		return err
 	}
 	if requireIPaddress && net.ParseIP(host) == nil {
-		return errors.New("host must be an IP address")
+		return errors.TraceNew("host must be an IP address")
 	}
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
 		return err
 	}
 	if port < 0 || port > 65535 {
-		return errors.New("invalid port")
+		return errors.TraceNew("invalid port")
 	}
 	return nil
 }
@@ -546,11 +546,11 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	// Input validation
 
 	if net.ParseIP(params.ServerIPAddress) == nil {
-		return nil, nil, nil, nil, nil, common.ContextError(errors.New("invalid IP address"))
+		return nil, nil, nil, nil, nil, errors.TraceNew("invalid IP address")
 	}
 
 	if len(params.TunnelProtocolPorts) == 0 {
-		return nil, nil, nil, nil, nil, common.ContextError(errors.New("no tunnel protocols"))
+		return nil, nil, nil, nil, nil, errors.TraceNew("no tunnel protocols")
 	}
 
 	usedPort := make(map[int]bool)
@@ -563,11 +563,11 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	for tunnelProtocol, port := range params.TunnelProtocolPorts {
 
 		if !common.Contains(protocol.SupportedTunnelProtocols, tunnelProtocol) {
-			return nil, nil, nil, nil, nil, common.ContextError(errors.New("invalid tunnel protocol"))
+			return nil, nil, nil, nil, nil, errors.TraceNew("invalid tunnel protocol")
 		}
 
 		if usedPort[port] {
-			return nil, nil, nil, nil, nil, common.ContextError(errors.New("duplicate listening port"))
+			return nil, nil, nil, nil, nil, errors.TraceNew("duplicate listening port")
 		}
 		usedPort[port] = true
 
@@ -582,7 +582,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	// server entry. Both the filename and existing keys cannot be passed in.
 	if (params.TacticsConfigFilename != "") &&
 		(params.TacticsRequestPublicKey != "" || params.TacticsRequestObfuscatedKey != "") {
-		return nil, nil, nil, nil, nil, common.ContextError(errors.New("invalid tactics parameters"))
+		return nil, nil, nil, nil, nil, errors.TraceNew("invalid tactics parameters")
 	}
 
 	// Web server config
@@ -593,13 +593,13 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	if params.WebServerPort != 0 {
 		webServerSecretBytes, err := common.MakeSecureRandomBytes(WEB_SERVER_SECRET_BYTE_LENGTH)
 		if err != nil {
-			return nil, nil, nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, nil, errors.Trace(err)
 		}
 		webServerSecret = hex.EncodeToString(webServerSecretBytes)
 
 		webServerCertificate, webServerPrivateKey, err = common.GenerateWebServerCertificate("")
 		if err != nil {
-			return nil, nil, nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, nil, errors.Trace(err)
 		}
 
 		webServerPortForwardAddress = net.JoinHostPort(
@@ -610,7 +610,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	rsaKey, err := rsa.GenerateKey(rand.Reader, SSH_RSA_HOST_KEY_BITS)
 	if err != nil {
-		return nil, nil, nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, errors.Trace(err)
 	}
 
 	sshPrivateKey := pem.EncodeToMemory(
@@ -622,14 +622,14 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	signer, err := ssh.NewSignerFromKey(rsaKey)
 	if err != nil {
-		return nil, nil, nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, errors.Trace(err)
 	}
 
 	sshPublicKey := signer.PublicKey()
 
 	sshUserNameSuffixBytes, err := common.MakeSecureRandomBytes(SSH_USERNAME_SUFFIX_BYTE_LENGTH)
 	if err != nil {
-		return nil, nil, nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, errors.Trace(err)
 	}
 	sshUserNameSuffix := hex.EncodeToString(sshUserNameSuffixBytes)
 
@@ -637,7 +637,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	sshPasswordBytes, err := common.MakeSecureRandomBytes(SSH_PASSWORD_BYTE_LENGTH)
 	if err != nil {
-		return nil, nil, nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, errors.Trace(err)
 	}
 	sshPassword := hex.EncodeToString(sshPasswordBytes)
 
@@ -647,7 +647,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	obfuscatedSSHKeyBytes, err := common.MakeSecureRandomBytes(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 	if err != nil {
-		return nil, nil, nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, errors.Trace(err)
 	}
 	obfuscatedSSHKey := hex.EncodeToString(obfuscatedSSHKeyBytes)
 
@@ -659,7 +659,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		rawMeekCookieEncryptionPublicKey, rawMeekCookieEncryptionPrivateKey, err :=
 			box.GenerateKey(rand.Reader)
 		if err != nil {
-			return nil, nil, nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, nil, errors.Trace(err)
 		}
 
 		meekCookieEncryptionPublicKey = base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPublicKey[:])
@@ -667,7 +667,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 		meekObfuscatedKeyBytes, err := common.MakeSecureRandomBytes(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 		if err != nil {
-			return nil, nil, nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, nil, errors.Trace(err)
 		}
 		meekObfuscatedKey = hex.EncodeToString(meekObfuscatedKeyBytes)
 	}
@@ -676,7 +676,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	discoveryValueHMACKeyBytes, err := common.MakeSecureRandomBytes(DISCOVERY_VALUE_KEY_BYTE_LENGTH)
 	if err != nil {
-		return nil, nil, nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, errors.Trace(err)
 	}
 	discoveryValueHMACKey := base64.StdEncoding.EncodeToString(discoveryValueHMACKeyBytes)
 
@@ -724,7 +724,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	encodedConfig, err := json.MarshalIndent(config, "\n", "    ")
 	if err != nil {
-		return nil, nil, nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, errors.Trace(err)
 	}
 
 	intPtr := func(i int) *int {
@@ -750,12 +750,12 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	encodedTrafficRulesSet, err := json.MarshalIndent(trafficRulesSet, "\n", "    ")
 	if err != nil {
-		return nil, nil, nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, errors.Trace(err)
 	}
 
 	encodedOSLConfig, err := json.MarshalIndent(&osl.Config{}, "\n", "    ")
 	if err != nil {
-		return nil, nil, nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, errors.Trace(err)
 	}
 
 	tacticsRequestPublicKey := params.TacticsRequestPublicKey
@@ -768,22 +768,22 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err =
 			tactics.GenerateKeys()
 		if err != nil {
-			return nil, nil, nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, nil, errors.Trace(err)
 		}
 
 		decodedTacticsRequestPublicKey, err := base64.StdEncoding.DecodeString(tacticsRequestPublicKey)
 		if err != nil {
-			return nil, nil, nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, nil, errors.Trace(err)
 		}
 
 		decodedTacticsRequestPrivateKey, err := base64.StdEncoding.DecodeString(tacticsRequestPrivateKey)
 		if err != nil {
-			return nil, nil, nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, nil, errors.Trace(err)
 		}
 
 		decodedTacticsRequestObfuscatedKey, err := base64.StdEncoding.DecodeString(tacticsRequestObfuscatedKey)
 		if err != nil {
-			return nil, nil, nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, nil, errors.Trace(err)
 		}
 
 		tacticsConfig := &tactics.Server{
@@ -798,7 +798,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 		encodedTacticsConfig, err = json.MarshalIndent(tacticsConfig, "\n", "    ")
 		if err != nil {
-			return nil, nil, nil, nil, nil, common.ContextError(err)
+			return nil, nil, nil, nil, nil, errors.Trace(err)
 		}
 	}
 
@@ -880,7 +880,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	encodedServerEntry, err := protocol.EncodeServerEntry(serverEntry)
 	if err != nil {
-		return nil, nil, nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, nil, nil, errors.Trace(err)
 	}
 
 	return encodedConfig, encodedTrafficRulesSet, encodedOSLConfig, encodedTacticsConfig, []byte(encodedServerEntry), nil

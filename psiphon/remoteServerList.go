@@ -22,13 +22,13 @@ package psiphon
 import (
 	"context"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
 	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -73,7 +73,7 @@ func FetchCommonRemoteServerList(
 		"",
 		config.RemoteServerListDownloadFilename)
 	if err != nil {
-		return fmt.Errorf("failed to download common remote server list: %s", common.ContextError(err))
+		return errors.Tracef("failed to download common remote server list: %s", errors.Trace(err))
 	}
 
 	// When the resource is unchanged, skip.
@@ -83,7 +83,7 @@ func FetchCommonRemoteServerList(
 
 	file, err := os.Open(config.RemoteServerListDownloadFilename)
 	if err != nil {
-		return fmt.Errorf("failed to open common remote server list: %s", common.ContextError(err))
+		return errors.Tracef("failed to open common remote server list: %s", errors.Trace(err))
 
 	}
 	defer file.Close()
@@ -91,7 +91,7 @@ func FetchCommonRemoteServerList(
 	serverListPayloadReader, err := common.NewAuthenticatedDataPackageReader(
 		file, publicKey)
 	if err != nil {
-		return fmt.Errorf("failed to read remote server list: %s", common.ContextError(err))
+		return errors.Tracef("failed to read remote server list: %s", errors.Trace(err))
 	}
 
 	err = StreamingStoreServerEntries(
@@ -102,14 +102,14 @@ func FetchCommonRemoteServerList(
 			protocol.SERVER_ENTRY_SOURCE_REMOTE),
 		true)
 	if err != nil {
-		return fmt.Errorf("failed to store common remote server list: %s", common.ContextError(err))
+		return errors.Tracef("failed to store common remote server list: %s", errors.Trace(err))
 	}
 
 	// Now that the server entries are successfully imported, store the response
 	// ETag so we won't re-download this same data again.
 	err = SetUrlETag(canonicalURL, newETag)
 	if err != nil {
-		NoticeAlert("failed to set ETag for common remote server list: %s", common.ContextError(err))
+		NoticeAlert("failed to set ETag for common remote server list: %s", errors.Trace(err))
 		// This fetch is still reported as a success, even if we can't store the etag
 	}
 
@@ -182,7 +182,7 @@ func FetchObfuscatedServerLists(
 		downloadFilename)
 	if err != nil {
 		failed = true
-		NoticeAlert("failed to download obfuscated server list registry: %s", common.ContextError(err))
+		NoticeAlert("failed to download obfuscated server list registry: %s", errors.Trace(err))
 		// Proceed with any existing cached OSL registry.
 	} else if newETag != "" {
 		updateCache = true
@@ -204,7 +204,7 @@ func FetchObfuscatedServerLists(
 
 	registryFile, err := os.Open(registryFilename)
 	if err != nil {
-		return fmt.Errorf("failed to read obfuscated server list registry: %s", common.ContextError(err))
+		return errors.Tracef("failed to read obfuscated server list registry: %s", errors.Trace(err))
 	}
 	defer registryFile.Close()
 
@@ -214,7 +214,7 @@ func FetchObfuscatedServerLists(
 		lookupSLOKs)
 	if err != nil {
 		// TODO: delete file? redownload if corrupt?
-		return fmt.Errorf("failed to read obfuscated server list registry: %s", common.ContextError(err))
+		return errors.Tracef("failed to read obfuscated server list registry: %s", errors.Trace(err))
 	}
 
 	// NewRegistryStreamer authenticates the downloaded registry, so now it would be
@@ -230,7 +230,7 @@ func FetchObfuscatedServerLists(
 		oslFileSpec, err := registryStreamer.Next()
 		if err != nil {
 			failed = true
-			NoticeAlert("failed to stream obfuscated server list registry: %s", common.ContextError(err))
+			NoticeAlert("failed to stream obfuscated server list registry: %s", errors.Trace(err))
 			break
 		}
 
@@ -263,7 +263,7 @@ func FetchObfuscatedServerLists(
 			downloadFilename)
 		if err != nil {
 			failed = true
-			NoticeAlert("failed to download obfuscated server list file (%s): %s", hexID, common.ContextError(err))
+			NoticeAlert("failed to download obfuscated server list file (%s): %s", hexID, errors.Trace(err))
 			continue
 		}
 
@@ -275,7 +275,7 @@ func FetchObfuscatedServerLists(
 		file, err := os.Open(downloadFilename)
 		if err != nil {
 			failed = true
-			NoticeAlert("failed to open obfuscated server list file (%s): %s", hexID, common.ContextError(err))
+			NoticeAlert("failed to open obfuscated server list file (%s): %s", hexID, errors.Trace(err))
 			continue
 		}
 		// Note: don't defer file.Close() since we're in a loop
@@ -288,7 +288,7 @@ func FetchObfuscatedServerLists(
 		if err != nil {
 			file.Close()
 			failed = true
-			NoticeAlert("failed to read obfuscated server list file (%s): %s", hexID, common.ContextError(err))
+			NoticeAlert("failed to read obfuscated server list file (%s): %s", hexID, errors.Trace(err))
 			continue
 		}
 
@@ -302,7 +302,7 @@ func FetchObfuscatedServerLists(
 		if err != nil {
 			file.Close()
 			failed = true
-			NoticeAlert("failed to store obfuscated server list file (%s): %s", hexID, common.ContextError(err))
+			NoticeAlert("failed to store obfuscated server list file (%s): %s", hexID, errors.Trace(err))
 			continue
 		}
 
@@ -311,7 +311,7 @@ func FetchObfuscatedServerLists(
 		err = SetUrlETag(canonicalURL, newETag)
 		if err != nil {
 			file.Close()
-			NoticeAlert("failed to set ETag for obfuscated server list file (%s): %s", hexID, common.ContextError(err))
+			NoticeAlert("failed to set ETag for obfuscated server list file (%s): %s", hexID, errors.Trace(err))
 			continue
 			// This fetch is still reported as a success, even if we can't store the ETag
 		}
@@ -334,19 +334,19 @@ func FetchObfuscatedServerLists(
 
 		err := os.Rename(downloadFilename, cachedFilename)
 		if err != nil {
-			NoticeAlert("failed to set cached obfuscated server list registry: %s", common.ContextError(err))
+			NoticeAlert("failed to set cached obfuscated server list registry: %s", errors.Trace(err))
 			// This fetch is still reported as a success, even if we can't update the cache
 		}
 
 		err = SetUrlETag(canonicalURL, newETag)
 		if err != nil {
-			NoticeAlert("failed to set ETag for obfuscated server list registry: %s", common.ContextError(err))
+			NoticeAlert("failed to set ETag for obfuscated server list registry: %s", errors.Trace(err))
 			// This fetch is still reported as a success, even if we can't store the ETag
 		}
 	}
 
 	if failed {
-		return errors.New("one or more operations failed")
+		return errors.TraceNew("one or more operations failed")
 	}
 
 	return nil
@@ -374,7 +374,7 @@ func downloadRemoteServerListFile(
 	// must have the same entity and ETag.
 	lastETag, err := GetUrlETag(canonicalURL)
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	// sourceETag, when specified, is prior knowledge of the
@@ -400,7 +400,7 @@ func downloadRemoteServerListFile(
 		untunneledDialConfig,
 		skipVerify)
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	n, responseETag, err := ResumeDownload(
@@ -414,7 +414,7 @@ func downloadRemoteServerListFile(
 	NoticeRemoteServerListResourceDownloadedBytes(sourceURL, n)
 
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	if responseETag == lastETag {

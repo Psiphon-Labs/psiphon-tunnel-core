@@ -23,17 +23,17 @@ package psiphon
 
 import (
 	"context"
-	"errors"
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // tcpDial is the platform-specific part of DialTCP
 func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, error) {
 
 	if config.DeviceBinder != nil {
-		return nil, common.ContextError(errors.New("psiphon.interruptibleTCPDial with DeviceBinder not supported"))
+		return nil, errors.TraceNew("psiphon.interruptibleTCPDial with DeviceBinder not supported")
 	}
 
 	dialer := net.Dialer{}
@@ -46,7 +46,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 	}
 
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return &TCPConn{Conn: conn}, nil

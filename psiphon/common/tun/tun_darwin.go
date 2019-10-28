@@ -51,7 +51,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package tun
 
 import (
-	"errors"
+	std_errors "errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -61,6 +61,7 @@ import (
 	"unsafe"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 const (
@@ -94,10 +95,10 @@ func OpenTunDevice(name string) (*os.File, string, error) {
 	if name != "" {
 		n, err := fmt.Sscanf(name, "utun%d", &unit)
 		if err == nil && n != 1 {
-			err = errors.New("failed to scan device name")
+			err = std_errors.New("failed to scan device name")
 		}
 		if err != nil {
-			return nil, "", common.ContextError(err)
+			return nil, "", errors.Trace(err)
 		}
 	}
 
@@ -121,7 +122,7 @@ func OpenTunDevice(name string) (*os.File, string, error) {
 		syscall.SOCK_DGRAM,
 		SYSPROTO_CONTROL)
 	if err != nil {
-		return nil, "", common.ContextError(err)
+		return nil, "", errors.Trace(err)
 	}
 
 	// Set CLOEXEC so file descriptor not leaked to network config command subprocesses
@@ -144,7 +145,7 @@ func OpenTunDevice(name string) (*os.File, string, error) {
 		uintptr(CTLIOCGINFO),
 		uintptr(unsafe.Pointer(&ctlInfo)))
 	if errno != 0 {
-		return nil, "", common.ContextError(errno)
+		return nil, "", errors.Trace(errno)
 	}
 
 	sockaddrCtlSize := 32
@@ -170,7 +171,7 @@ func OpenTunDevice(name string) (*os.File, string, error) {
 		uintptr(unsafe.Pointer(&sockaddrCtl)),
 		uintptr(sockaddrCtlSize))
 	if errno != 0 {
-		return nil, "", common.ContextError(errno)
+		return nil, "", errors.Trace(errno)
 	}
 
 	ifNameSize := uintptr(16)
@@ -187,7 +188,7 @@ func OpenTunDevice(name string) (*os.File, string, error) {
 		uintptr(unsafe.Pointer(&ifNameSize)),
 		0)
 	if errno != 0 {
-		return nil, "", common.ContextError(errno)
+		return nil, "", errors.Trace(errno)
 	}
 
 	deviceName := string(ifName.name[:ifNameSize-1])
@@ -204,11 +205,11 @@ func (device *Device) readTunPacket() (int, int, error) {
 
 	n, err := device.deviceIO.Read(device.inboundBuffer)
 	if err != nil {
-		return 0, 0, common.ContextError(err)
+		return 0, 0, errors.Trace(err)
 	}
 
 	if n < 4 {
-		return 0, 0, common.ContextError(errors.New("missing packet prefix"))
+		return 0, 0, errors.TraceNew("missing packet prefix")
 	}
 
 	return 4, n - 4, nil
@@ -240,7 +241,7 @@ func (device *Device) writeTunPacket(packet []byte) error {
 
 	_, err := device.deviceIO.Write(device.outboundBuffer[:size])
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -262,13 +263,13 @@ func configureServerInterface(
 	tunDeviceName string) error {
 
 	// TODO: fix or remove the following broken code
-	return common.ContextError(unsupportedError)
+	return errors.Trace(unsupportedError)
 
 	// Set tun device network addresses and MTU
 
 	IPv4Address, IPv4Netmask, err := splitIPMask(serverIPv4AddressCIDR)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = runNetworkConfigCommand(
@@ -280,12 +281,12 @@ func configureServerInterface(
 		"mtu", strconv.Itoa(getMTU(config.MTU)),
 		"up")
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	IPv6Address, IPv6Prefixlen, err := splitIPPrefixLen(serverIPv6AddressCIDR)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = runNetworkConfigCommand(
@@ -295,7 +296,7 @@ func configureServerInterface(
 		tunDeviceName,
 		"inet6", IPv6Address, "prefixlen", IPv6Prefixlen)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	// NAT tun device to external interface
@@ -314,7 +315,7 @@ func configureServerInterface(
 		"sysctl",
 		"net.inet.ip.forwarding=1")
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = runNetworkConfigCommand(
@@ -323,7 +324,7 @@ func configureServerInterface(
 		"sysctl",
 		"net.inet6.ip6.forwarding=1")
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	// TODO:
@@ -342,13 +343,13 @@ func configureServerInterface(
 
 	tempFile, err := ioutil.TempFile("", "tun_pf_conf")
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	defer os.Remove(tempFile.Name())
 
 	_, err = tempFile.Write([]byte(pfConf))
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	tempFile.Close()
@@ -373,7 +374,7 @@ func configureServerInterface(
 		"-e",
 		"-f", tempFile.Name())
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -384,13 +385,13 @@ func configureClientInterface(
 	tunDeviceName string) error {
 
 	// TODO: fix or remove the following broken code
-	return common.ContextError(unsupportedError)
+	return errors.Trace(unsupportedError)
 
 	// Set tun device network addresses and MTU
 
 	IPv4Address, IPv4Netmask, err := splitIPMask(config.IPv4AddressCIDR)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = runNetworkConfigCommand(
@@ -403,12 +404,12 @@ func configureClientInterface(
 		"mtu", strconv.Itoa(getMTU(config.MTU)),
 		"up")
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	IPv6Address, IPv6Prefixlen, err := splitIPPrefixLen(serverIPv6AddressCIDR)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = runNetworkConfigCommand(
@@ -418,7 +419,7 @@ func configureClientInterface(
 		tunDeviceName,
 		"inet6", IPv6Address, "prefixlen", IPv6Prefixlen)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	// Set routing. Routes set here should automatically
@@ -437,7 +438,7 @@ func configureClientInterface(
 			destination,
 			IPv4Address)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -449,7 +450,7 @@ func BindToDevice(fd int, deviceName string) error {
 
 	netInterface, err := net.InterfaceByName(deviceName)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	// IP_BOUND_IF definition from <netinet/in.h>
@@ -458,7 +459,7 @@ func BindToDevice(fd int, deviceName string) error {
 
 	err = syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, IP_BOUND_IF, netInterface.Index)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil

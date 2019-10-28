@@ -35,6 +35,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
@@ -325,7 +326,7 @@ func configurePacketTunnel(
 
 	file, _, err := tun.OpenTunDevice(tunDevice)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	provider := &tunProvider{

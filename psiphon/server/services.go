@@ -35,6 +35,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
@@ -51,31 +52,31 @@ func RunServices(configJSON []byte) error {
 	config, err := LoadConfig(configJSON)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("load config failed")
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = InitLogging(config)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("init logging failed")
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	supportServices, err := NewSupportServices(config)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("init support services failed")
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	log.WithContextFields(*buildinfo.GetBuildInfo().ToMap()).Info("startup")
 
 	waitGroup := new(sync.WaitGroup)
 	shutdownBroadcast := make(chan struct{})
-	errors := make(chan error)
+	errorChannel := make(chan error)
 
 	tunnelServer, err := NewTunnelServer(supportServices, shutdownBroadcast)
 	if err != nil {
 		log.WithContextFields(LogFields{"error": err}).Error("init tunnel server failed")
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	supportServices.TunnelServer = tunnelServer
@@ -93,13 +94,13 @@ func RunServices(configJSON []byte) error {
 		})
 		if err != nil {
 			log.WithContextFields(LogFields{"error": err}).Error("init packet tunnel failed")
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		supportServices.PacketTunnelServer = packetTunnelServer
 	}
 
-	// After this point, errors should be delivered to the "errors" channel and
+	// After this point, errors should be delivered to the errors channel and
 	// orderly shutdown should flow through to the end of the function to ensure
 	// all workers are synchronously stopped.
 
@@ -153,7 +154,7 @@ func RunServices(configJSON []byte) error {
 			defer waitGroup.Done()
 			err := RunWebServer(supportServices, shutdownBroadcast)
 			select {
-			case errors <- err:
+			case errorChannel <- err:
 			default:
 			}
 		}()
@@ -166,7 +167,7 @@ func RunServices(configJSON []byte) error {
 		defer waitGroup.Done()
 		err := tunnelServer.Run()
 		select {
-		case errors <- err:
+		case errorChannel <- err:
 		default:
 		}
 	}()
@@ -240,7 +241,7 @@ loop:
 			log.WithContext().Info("shutdown by system")
 			break loop
 
-		case err = <-errors:
+		case err = <-errorChannel:
 			log.WithContextFields(LogFields{"error": err}).Error("service failed")
 			break loop
 		}
@@ -366,33 +367,33 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 
 	trafficRulesSet, err := NewTrafficRulesSet(config.TrafficRulesFilename)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	oslConfig, err := osl.NewConfig(config.OSLConfigFilename)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	psinetDatabase, err := psinet.NewDatabase(config.PsinetDatabaseFilename)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	geoIPService, err := NewGeoIPService(
 		config.GeoIPDatabaseFilenames, config.DiscoveryValueHMACKey)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	dnsResolver, err := NewDNSResolver(config.DNSResolverIPAddress)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	blocklist, err := NewBlocklist(config.BlocklistFilename)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	tacticsServer, err := tactics.NewServer(
@@ -401,7 +402,7 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 		getTacticsAPIParameterValidator(config),
 		config.TacticsConfigFilename)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return &SupportServices{

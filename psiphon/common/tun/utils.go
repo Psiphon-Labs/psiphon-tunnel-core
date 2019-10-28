@@ -20,16 +20,17 @@
 package tun
 
 import (
-	"errors"
+	std_errors "errors"
 	"fmt"
 	"net"
 	"os/exec"
 	"strconv"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
-var unsupportedError = errors.New("operation unsupported on this platform")
+var unsupportedError = std_errors.New("operation unsupported on this platform")
 
 // runNetworkConfigCommand execs a network config command, such as "ifconfig"
 // or "iptables". On platforms that support capabilities, the network config
@@ -47,7 +48,7 @@ func runNetworkConfigCommand(
 
 	err := configureNetworkConfigSubprocessCapabilities()
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	// TODO: use CommandContext to interrupt on server shutdown?
@@ -71,7 +72,7 @@ func runNetworkConfigCommand(
 	if err != nil {
 		err := fmt.Errorf(
 			"command %s %+v failed with %s", commandName, commandArgs, string(output))
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
@@ -80,7 +81,7 @@ func splitIPMask(IPAddressCIDR string) (string, string, error) {
 
 	IP, IPNet, err := net.ParseCIDR(IPAddressCIDR)
 	if err != nil {
-		return "", "", common.ContextError(err)
+		return "", "", errors.Trace(err)
 	}
 
 	var netmask string
@@ -99,7 +100,7 @@ func splitIPPrefixLen(IPAddressCIDR string) (string, string, error) {
 
 	IP, IPNet, err := net.ParseCIDR(IPAddressCIDR)
 	if err != nil {
-		return "", "", common.ContextError(err)
+		return "", "", errors.Trace(err)
 	}
 
 	prefixLen, _ := IPNet.Mask.Size()

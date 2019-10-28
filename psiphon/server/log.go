@@ -33,6 +33,8 @@ import (
 	"github.com/Psiphon-Inc/rotate-safe-writer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
 	"github.com/sirupsen/logrus"
 )
 
@@ -53,7 +55,7 @@ type LogFields logrus.Fields
 func (logger *ContextLogger) WithContext() *logrus.Entry {
 	return logger.WithFields(
 		logrus.Fields{
-			"context":   common.GetParentContext(),
+			"context":   stacktrace.GetParentFunctionName(),
 			"host_id":   logHostID,
 			"build_rev": logBuildRev,
 		})
@@ -79,7 +81,7 @@ func renameLogFields(fields LogFields) {
 // be renamed to "field.<name>".
 func (logger *ContextLogger) WithContextFields(fields LogFields) *logrus.Entry {
 	renameLogFields(fields)
-	fields["context"] = common.GetParentContext()
+	fields["context"] = stacktrace.GetParentFunctionName()
 	fields["host_id"] = logHostID
 	fields["build_rev"] = logBuildRev
 	return logger.WithFields(logrus.Fields(fields))
@@ -119,12 +121,14 @@ type commonLogger struct {
 
 func (logger *commonLogger) WithContext() common.LogContext {
 	// Patch context to be correct parent
-	return logger.contextLogger.WithContext().WithField("context", common.GetParentContext())
+	return logger.contextLogger.WithContext().WithField(
+		"context", stacktrace.GetParentFunctionName())
 }
 
 func (logger *commonLogger) WithContextFields(fields common.LogFields) common.LogContext {
 	// Patch context to be correct parent
-	return logger.contextLogger.WithContextFields(LogFields(fields)).WithField("context", common.GetParentContext())
+	return logger.contextLogger.WithContextFields(LogFields(fields)).WithField(
+		"context", stacktrace.GetParentFunctionName())
 }
 
 func (logger *commonLogger) LogMetric(metric string, fields common.LogFields) {
@@ -242,7 +246,7 @@ func InitLogging(config *Config) (retErr error) {
 
 		level, err := logrus.ParseLevel(config.LogLevel)
 		if err != nil {
-			retErr = common.ContextError(err)
+			retErr = errors.Trace(err)
 			return
 		}
 
@@ -251,7 +255,7 @@ func InitLogging(config *Config) (retErr error) {
 		if config.LogFilename != "" {
 			logWriter, err = rotate.NewRotatableFileWriter(config.LogFilename, 0666)
 			if err != nil {
-				retErr = common.ContextError(err)
+				retErr = errors.Trace(err)
 				return
 			}
 

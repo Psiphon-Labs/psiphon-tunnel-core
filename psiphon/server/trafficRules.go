@@ -21,12 +21,11 @@ package server
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 const (
@@ -279,11 +278,11 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 			var newSet TrafficRulesSet
 			err := json.Unmarshal(fileContent, &newSet)
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 			err = newSet.Validate()
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 
 			// Modify actual traffic rules only after validation
@@ -303,7 +302,7 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 
 	_, err := set.Reload()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return set, nil
@@ -316,14 +315,12 @@ func (set *TrafficRulesSet) Validate() error {
 		set.MeekRateLimiterThresholdSeconds < 0 ||
 		set.MeekRateLimiterGarbageCollectionTriggerCount < 0 ||
 		set.MeekRateLimiterReapHistoryFrequencySeconds < 0 {
-		return common.ContextError(
-			errors.New("MeekRateLimiter values must be >= 0"))
+		return errors.TraceNew("MeekRateLimiter values must be >= 0")
 	}
 
 	if set.MeekRateLimiterHistorySize > 0 {
 		if set.MeekRateLimiterThresholdSeconds <= 0 {
-			return common.ContextError(
-				errors.New("MeekRateLimiterThresholdSeconds must be > 0"))
+			return errors.TraceNew("MeekRateLimiterThresholdSeconds must be > 0")
 		}
 	}
 
@@ -339,15 +336,13 @@ func (set *TrafficRulesSet) Validate() error {
 			(rules.MaxTCPDialingPortForwardCount != nil && *rules.MaxTCPDialingPortForwardCount < 0) ||
 			(rules.MaxTCPPortForwardCount != nil && *rules.MaxTCPPortForwardCount < 0) ||
 			(rules.MaxUDPPortForwardCount != nil && *rules.MaxUDPPortForwardCount < 0) {
-			return common.ContextError(
-				errors.New("TrafficRules values must be >= 0"))
+			return errors.TraceNew("TrafficRules values must be >= 0")
 		}
 
 		for _, subnet := range rules.AllowSubnets {
 			_, _, err := net.ParseCIDR(subnet)
 			if err != nil {
-				return common.ContextError(
-					fmt.Errorf("invalid subnet: %s %s", subnet, err))
+				return errors.Tracef("invalid subnet: %s %s", subnet, err)
 			}
 		}
 
@@ -356,7 +351,7 @@ func (set *TrafficRulesSet) Validate() error {
 
 	err := validateTrafficRules(&set.DefaultRules)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	for _, filteredRule := range set.FilteredRules {
@@ -370,14 +365,13 @@ func (set *TrafficRulesSet) Validate() error {
 				}
 			}
 			if !validParamName {
-				return common.ContextError(
-					fmt.Errorf("invalid parameter name: %s", paramName))
+				return errors.Tracef("invalid parameter name: %s", paramName)
 			}
 		}
 
 		err := validateTrafficRules(&filteredRule.Rules)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 

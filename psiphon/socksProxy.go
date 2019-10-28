@@ -27,6 +27,7 @@ import (
 
 	socks "github.com/Psiphon-Labs/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // SocksProxy is a SOCKS server that accepts local host connections
@@ -57,7 +58,7 @@ func NewSocksProxy(
 		if IsAddressInUseError(err) {
 			NoticeSocksProxyPortInUse(config.LocalSocksProxyPort)
 		}
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	proxy = &SocksProxy{
 		tunneler:               tunneler,
@@ -102,14 +103,14 @@ func (proxy *SocksProxy) socksConnectionHandler(localConn *socks.SocksConn) (err
 		}
 
 		_ = localConn.RejectReason(reason)
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	defer remoteConn.Close()
 
 	err = localConn.Grant(&net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0})
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	LocalProxyRelay(_SOCKS_PROXY_TYPE, localConn, remoteConn)
@@ -145,7 +146,7 @@ loop:
 		go func() {
 			err := proxy.socksConnectionHandler(socksConnection)
 			if err != nil {
-				NoticeLocalProxyError(_SOCKS_PROXY_TYPE, common.ContextError(err))
+				NoticeLocalProxyError(_SOCKS_PROXY_TYPE, errors.Trace(err))
 			}
 		}()
 	}

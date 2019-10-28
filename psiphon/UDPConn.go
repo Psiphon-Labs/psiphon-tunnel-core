@@ -21,14 +21,12 @@ package psiphon
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"math/rand"
 	"net"
 	"strconv"
 	"syscall"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // NewUDPConn resolves addr and configures a new UDP conn. The UDP socket is
@@ -45,19 +43,19 @@ func NewUDPConn(
 
 	host, strPort, err := net.SplitHostPort(addr)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 	port, err := strconv.Atoi(strPort)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	ipAddrs, err := LookupIP(ctx, host, config)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 	if len(ipAddrs) < 1 {
-		return nil, nil, common.ContextError(errors.New("no IP address"))
+		return nil, nil, errors.TraceNew("no IP address")
 	}
 
 	ipAddr := ipAddrs[rand.Intn(len(ipAddrs))]
@@ -80,12 +78,12 @@ func NewUDPConn(
 	} else if ipAddr != nil && ipAddr.To16() != nil {
 		domain = syscall.AF_INET6
 	} else {
-		return nil, nil, common.ContextError(fmt.Errorf("invalid IP address: %s", ipAddr.String()))
+		return nil, nil, errors.Tracef("invalid IP address: %s", ipAddr.String())
 	}
 
 	conn, err := newUDPConn(domain, config)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	if config.ResolvedIPCallback != nil {

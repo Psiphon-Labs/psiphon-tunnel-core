@@ -57,13 +57,13 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/hex"
-	"errors"
-	"fmt"
+	std_errors "errors"
 	"io/ioutil"
 	"net"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -239,12 +239,12 @@ func getUTLSClientHelloID(
 	if customTLSProfile == nil {
 		return utls.HelloCustom,
 			nil,
-			common.ContextError(fmt.Errorf("unknown TLS profile: %s", tlsProfile))
+			errors.Tracef("unknown TLS profile: %s", tlsProfile)
 	}
 
 	utlsClientHelloSpec, err := customTLSProfile.GetClientHelloSpec()
 	if err != nil {
-		return utls.ClientHelloID{}, nil, common.ContextError(err)
+		return utls.ClientHelloID{}, nil, errors.Trace(err)
 	}
 
 	return utls.HelloCustom, utlsClientHelloSpec, nil
@@ -284,13 +284,13 @@ func getClientHelloVersion(
 	if utlsClientHelloSpec != nil {
 		err := conn.ApplyPreset(utlsClientHelloSpec)
 		if err != nil {
-			return "", common.ContextError(err)
+			return "", errors.Trace(err)
 		}
 	}
 
 	err := conn.BuildHandshakeState()
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	for _, v := range conn.HandshakeState.Hello.SupportedVersions {
@@ -342,13 +342,13 @@ func CustomTLSDial(
 
 	rawConn, err := config.Dial(ctx, network, dialAddr)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	hostname, _, err := net.SplitHostPort(dialAddr)
 	if err != nil {
 		rawConn.Close()
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	selectedTLSProfile := config.TLSProfile
@@ -387,7 +387,7 @@ func CustomTLSDial(
 		tlsRootCAs = x509.NewCertPool()
 		certData, err := ioutil.ReadFile(config.TrustedCACertificatesFilename)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		tlsRootCAs.AppendCertsFromPEM(certData)
 	}
@@ -401,7 +401,7 @@ func CustomTLSDial(
 	utlsClientHelloID, utlsClientHelloSpec, err := getUTLSClientHelloID(
 		p, selectedTLSProfile)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	var randomizedTLSProfileSeed *prng.Seed
@@ -414,7 +414,7 @@ func CustomTLSDial(
 
 			randomizedTLSProfileSeed, err = prng.NewSeed()
 			if err != nil {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 		}
 
@@ -430,7 +430,7 @@ func CustomTLSDial(
 	if isRandomized {
 		PRNG, err := prng.NewPRNGWithSaltedSeed(randomizedTLSProfileSeed, "tls-dynamic-record-sizing")
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		tlsConfig.DynamicRecordSizingDisabled = PRNG.FlipCoin()
 	} else {
@@ -442,7 +442,7 @@ func CustomTLSDial(
 	if utlsClientHelloSpec != nil {
 		err := conn.ApplyPreset(utlsClientHelloSpec)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -459,7 +459,7 @@ func CustomTLSDial(
 
 	err = conn.BuildHandshakeState()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	isTLS13 := false
@@ -486,17 +486,17 @@ func CustomTLSDial(
 
 		key, err := hex.DecodeString(config.ObfuscatedSessionTicketKey)
 		if err == nil && len(key) != 32 {
-			err = errors.New("invalid obfuscated session key length")
+			err = std_errors.New("invalid obfuscated session key length")
 		}
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		copy(obfuscatedSessionTicketKey[:], key)
 
 		obfuscatedSessionState, err := tris.NewObfuscatedClientSessionState(
 			obfuscatedSessionTicketKey)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		conn.SetSessionState(
@@ -511,7 +511,7 @@ func CustomTLSDial(
 		// Apply changes to utls
 		err = conn.BuildHandshakeState()
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		// Ensure that TLS ClientHello has required session ticket extension and
@@ -521,13 +521,12 @@ func CustomTLSDial(
 
 		if !tris.ContainsObfuscatedSessionTicketCipherSuite(
 			conn.HandshakeState.Hello.CipherSuites) {
-			return nil, common.ContextError(
-				errors.New("missing obfuscated session ticket cipher suite"))
+			return nil, errors.TraceNew(
+				"missing obfuscated session ticket cipher suite")
 		}
 
 		if len(conn.HandshakeState.Hello.SessionTicket) == 0 {
-			return nil, common.ContextError(
-				errors.New("missing session ticket extension"))
+			return nil, errors.TraceNew("missing session ticket extension")
 		}
 	}
 
@@ -580,7 +579,7 @@ func CustomTLSDial(
 		// Apply changes to utls
 		err = conn.MarshalClientHello()
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -613,7 +612,7 @@ func CustomTLSDial(
 
 	if err != nil {
 		rawConn.Close()
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return conn, nil
@@ -622,10 +621,10 @@ func CustomTLSDial(
 func verifyLegacyCertificate(conn *utls.UConn, expectedCertificate *x509.Certificate) error {
 	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) < 1 {
-		return common.ContextError(errors.New("no certificate to verify"))
+		return errors.TraceNew("no certificate to verify")
 	}
 	if !bytes.Equal(certs[0].Raw, expectedCertificate.Raw) {
-		return common.ContextError(errors.New("unexpected certificate"))
+		return errors.TraceNew("unexpected certificate")
 	}
 	return nil
 }
@@ -649,7 +648,7 @@ func verifyServerCerts(conn *utls.UConn, hostname string) error {
 
 	_, err := certs[0].Verify(opts)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }

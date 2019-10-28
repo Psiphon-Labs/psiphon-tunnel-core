@@ -51,13 +51,13 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"io"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ed25519"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/hkdf"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 const (
@@ -96,17 +96,17 @@ func NewKeyPair(
 
 	ID, err := common.MakeSecureRandomBytes(keyIDLength)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	authorizationIDKey, err := common.MakeSecureRandomBytes(authorizationIDKeyLength)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	signingKey := &SigningKey{
@@ -150,7 +150,7 @@ func ValidateSigningKey(signingKey *SigningKey) error {
 		len(signingKey.AccessType) < 1 ||
 		len(signingKey.AuthorizationIDKey) != authorizationIDKeyLength ||
 		len(signingKey.PrivateKey) != ed25519.PrivateKeySize {
-		return common.ContextError(errors.New("invalid signing key"))
+		return errors.TraceNew("invalid signing key")
 	}
 	return nil
 }
@@ -173,14 +173,14 @@ func IssueAuthorization(
 
 	err := ValidateSigningKey(signingKey)
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	hkdf := hkdf.New(sha256.New, signingKey.AuthorizationIDKey, nil, seedAuthorizationID)
 	ID := make([]byte, authorizationIDLength)
 	_, err = io.ReadFull(hkdf, ID)
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	auth := Authorization{
@@ -191,7 +191,7 @@ func IssueAuthorization(
 
 	authJSON, err := json.Marshal(auth)
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	signature := ed25519.Sign(signingKey.PrivateKey, authJSON)
@@ -204,7 +204,7 @@ func IssueAuthorization(
 
 	signedAuthJSON, err := json.Marshal(signedAuth)
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	encodedSignedAuth := base64.StdEncoding.EncodeToString(signedAuthJSON)
@@ -225,7 +225,7 @@ func ValidateVerificationKeyRing(keyRing *VerificationKeyRing) error {
 		if len(key.ID) != keyIDLength ||
 			len(key.AccessType) < 1 ||
 			len(key.PublicKey) != ed25519.PublicKeySize {
-			return common.ContextError(errors.New("invalid verification key"))
+			return errors.TraceNew("invalid verification key")
 		}
 	}
 	return nil
@@ -243,27 +243,27 @@ func VerifyAuthorization(
 
 	err := ValidateVerificationKeyRing(keyRing)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	signedAuthorizationJSON, err := base64.StdEncoding.DecodeString(
 		encodedSignedAuthorization)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	var signedAuth signedAuthorization
 	err = json.Unmarshal(signedAuthorizationJSON, &signedAuth)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if len(signedAuth.SigningKeyID) != keyIDLength {
-		return nil, common.ContextError(errors.New("invalid key ID length"))
+		return nil, errors.TraceNew("invalid key ID length")
 	}
 
 	if len(signedAuth.Signature) != ed25519.SignatureSize {
-		return nil, common.ContextError(errors.New("invalid signature length"))
+		return nil, errors.TraceNew("invalid signature length")
 	}
 
 	var verificationKey *VerificationKey
@@ -275,35 +275,35 @@ func VerifyAuthorization(
 	}
 
 	if verificationKey == nil {
-		return nil, common.ContextError(errors.New("invalid key ID"))
+		return nil, errors.TraceNew("invalid key ID")
 	}
 
 	if !ed25519.Verify(
 		verificationKey.PublicKey, signedAuth.Authorization, signedAuth.Signature) {
-		return nil, common.ContextError(errors.New("invalid signature"))
+		return nil, errors.TraceNew("invalid signature")
 	}
 
 	var auth Authorization
 
 	err = json.Unmarshal(signedAuth.Authorization, &auth)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if len(auth.ID) == 0 {
-		return nil, common.ContextError(errors.New("invalid authorization ID"))
+		return nil, errors.TraceNew("invalid authorization ID")
 	}
 
 	if auth.AccessType != verificationKey.AccessType {
-		return nil, common.ContextError(errors.New("invalid access type"))
+		return nil, errors.TraceNew("invalid access type")
 	}
 
 	if auth.Expires.IsZero() {
-		return nil, common.ContextError(errors.New("invalid expiry"))
+		return nil, errors.TraceNew("invalid expiry")
 	}
 
 	if auth.Expires.Before(time.Now().UTC()) {
-		return nil, common.ContextError(errors.New("expired authorization"))
+		return nil, errors.TraceNew("expired authorization")
 	}
 
 	return &auth, nil

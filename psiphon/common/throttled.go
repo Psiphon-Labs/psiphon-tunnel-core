@@ -20,12 +20,12 @@
 package common
 
 import (
-	"errors"
 	"io"
 	"net"
 	"sync"
 	"sync/atomic"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/juju/ratelimit"
 )
 
@@ -143,7 +143,7 @@ func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
 
 	if atomic.LoadInt32(&conn.closeAfterExhausted) == 1 {
 		conn.Conn.Close()
-		return 0, errors.New("throttled conn exhausted")
+		return 0, errors.TraceNew("throttled conn exhausted")
 	}
 
 	rate := atomic.SwapInt64(&conn.readBytesPerSecond, -1)
@@ -164,7 +164,8 @@ func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
 		}
 	}
 
-	return conn.throttledReader.Read(buffer)
+	n, err := conn.throttledReader.Read(buffer)
+	return n, errors.Trace(err)
 }
 
 func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
@@ -182,7 +183,7 @@ func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
 
 	if atomic.LoadInt32(&conn.closeAfterExhausted) == 1 {
 		conn.Conn.Close()
-		return 0, errors.New("throttled conn exhausted")
+		return 0, errors.TraceNew("throttled conn exhausted")
 	}
 
 	rate := atomic.SwapInt64(&conn.writeBytesPerSecond, -1)
@@ -197,5 +198,6 @@ func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
 		}
 	}
 
-	return conn.throttledWriter.Write(buffer)
+	n, err := conn.throttledWriter.Write(buffer)
+	return n, errors.Trace(err)
 }

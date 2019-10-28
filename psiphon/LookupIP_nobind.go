@@ -27,13 +27,14 @@ import (
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // LookupIP resolves a hostname.
 func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, error) {
 
 	if config.DeviceBinder != nil {
-		return nil, common.ContextError(errors.New("LookupIP with DeviceBinder not supported on this platform"))
+		return nil, errors.TraceNew("LookupIP with DeviceBinder not supported on this platform")
 	}
 
 	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
@@ -44,7 +45,7 @@ func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, e
 	}
 
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	ips := make([]net.IP, len(addrs))

@@ -26,7 +26,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"errors"
+	std_errors "errors"
 	"io"
 	"math/big"
 	"net"
@@ -120,7 +120,7 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 			recv := make([]byte, len(testMessage))
 			_, err = io.ReadFull(conn, recv)
 			if err == nil && string(recv) != testMessage {
-				err = errors.New("unexpected payload")
+				err = std_errors.New("unexpected payload")
 			}
 			conn.Close()
 			if err != nil {
@@ -216,7 +216,7 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 			}
 
 			if len(tlsConn.ConnectionState().PeerCertificates) > 0 {
-				report(errors.New("unexpected certificate in handshake"))
+				report(std_errors.New("unexpected certificate in handshake"))
 				return
 			}
 

@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	maxminddb "github.com/oschwald/maxminddb-golang"
 	cache "github.com/patrickmn/go-cache"
 )
@@ -112,7 +113,7 @@ func NewGeoIPService(
 
 				src, err := os.Open(database.filename)
 				if err != nil {
-					return common.ContextError(err)
+					return errors.Trace(err)
 				}
 
 				tempFileSuffix := database.tempFileSuffix + 1
@@ -125,7 +126,7 @@ func NewGeoIPService(
 				dst, err := os.Create(tempFilename)
 				if err != nil {
 					src.Close()
-					return common.ContextError(err)
+					return errors.Trace(err)
 				}
 
 				_, err = io.Copy(dst, src)
@@ -133,13 +134,13 @@ func NewGeoIPService(
 				dst.Close()
 				if err != nil {
 					_ = os.Remove(tempFilename)
-					return common.ContextError(err)
+					return errors.Trace(err)
 				}
 
 				maxMindReader, err := maxminddb.Open(tempFilename)
 				if err != nil {
 					_ = os.Remove(tempFilename)
-					return common.ContextError(err)
+					return errors.Trace(err)
 				}
 
 				if database.maxMindReader != nil {
@@ -156,7 +157,7 @@ func NewGeoIPService(
 
 		_, err := database.Reload()
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		geoIP.databases[i] = database

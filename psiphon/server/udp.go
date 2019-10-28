@@ -22,7 +22,6 @@ package server
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -32,6 +31,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // handleUDPChannel implements UDP port forwarding. A single UDP
@@ -95,9 +95,8 @@ func (mux *udpPortForwardMultiplexer) run() {
 	// Note: this covers the run() goroutine only and not relayDownstream() goroutines.
 	defer func() {
 		if e := recover(); e != nil {
-			err := common.ContextError(
-				fmt.Errorf(
-					"udpPortForwardMultiplexer panic: %s: %s", e, debug.Stack()))
+			err := errors.Tracef(
+				"udpPortForwardMultiplexer panic: %s: %s", e, debug.Stack())
 			log.WithContextFields(LogFields{"error": err}).Warning("run failed")
 		}
 	}()
@@ -393,7 +392,7 @@ func readUdpgwMessage(
 		_, err := io.ReadFull(reader, buffer[0:2])
 		if err != nil {
 			if err != io.EOF {
-				err = common.ContextError(err)
+				err = errors.Trace(err)
 			}
 			return nil, err
 		}
@@ -401,13 +400,13 @@ func readUdpgwMessage(
 		size := binary.LittleEndian.Uint16(buffer[0:2])
 
 		if size < 3 || int(size) > len(buffer)-2 {
-			return nil, common.ContextError(errors.New("invalid udpgw message size"))
+			return nil, errors.TraceNew("invalid udpgw message size")
 		}
 
 		_, err = io.ReadFull(reader, buffer[2:2+size])
 		if err != nil {
 			if err != io.EOF {
-				err = common.ContextError(err)
+				err = errors.Trace(err)
 			}
 			return nil, err
 		}
@@ -431,7 +430,7 @@ func readUdpgwMessage(
 		if flags&udpgwProtocolFlagIPv6 == udpgwProtocolFlagIPv6 {
 
 			if size < 21 {
-				return nil, common.ContextError(errors.New("invalid udpgw message size"))
+				return nil, errors.TraceNew("invalid udpgw message size")
 			}
 
 			remoteIP = make([]byte, 16)
@@ -443,7 +442,7 @@ func readUdpgwMessage(
 		} else {
 
 			if size < 9 {
-				return nil, common.ContextError(errors.New("invalid udpgw message size"))
+				return nil, errors.TraceNew("invalid udpgw message size")
 			}
 
 			remoteIP = make([]byte, 4)
@@ -480,7 +479,7 @@ func writeUdpgwPreamble(
 	buffer []byte) error {
 
 	if preambleSize != 7+len(remoteIP) {
-		return common.ContextError(errors.New("invalid udpgw preamble size"))
+		return errors.TraceNew("invalid udpgw preamble size")
 	}
 
 	size := uint16(preambleSize-2) + packetSize

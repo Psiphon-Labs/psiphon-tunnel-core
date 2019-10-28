@@ -22,12 +22,11 @@ package psiphon
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"sync"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -67,13 +66,13 @@ func OpenDataStore(config *Config) error {
 
 	if existingDB != nil {
 		datastoreMutex.Unlock()
-		return common.ContextError(errors.New("db already open"))
+		return errors.TraceNew("db already open")
 	}
 
 	newDB, err := datastoreOpenDB(config.DataStoreDirectory)
 	if err != nil {
 		datastoreMutex.Unlock()
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	activeDatastoreDB = newDB
@@ -97,7 +96,7 @@ func CloseDataStore() {
 
 	err := activeDatastoreDB.close()
 	if err != nil {
-		NoticeAlert("failed to close database: %s", common.ContextError(err))
+		NoticeAlert("failed to close database: %s", errors.Trace(err))
 	}
 
 	activeDatastoreDB = nil
@@ -109,12 +108,12 @@ func datastoreView(fn func(tx *datastoreTx) error) error {
 	defer datastoreMutex.RUnlock()
 
 	if activeDatastoreDB == nil {
-		return common.ContextError(errors.New("database not open"))
+		return errors.TraceNew("database not open")
 	}
 
 	err := activeDatastoreDB.view(fn)
 	if err != nil {
-		err = common.ContextError(err)
+		err = errors.Trace(err)
 	}
 	return err
 }
@@ -125,12 +124,12 @@ func datastoreUpdate(fn func(tx *datastoreTx) error) error {
 	defer datastoreMutex.RUnlock()
 
 	if activeDatastoreDB == nil {
-		return common.ContextError(errors.New("database not open"))
+		return errors.TraceNew("database not open")
 	}
 
 	err := activeDatastoreDB.update(fn)
 	if err != nil {
-		err = common.ContextError(err)
+		err = errors.Trace(err)
 	}
 	return err
 }
@@ -155,8 +154,7 @@ func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExi
 	// so instead of skipping we fail with an error.
 	err := protocol.ValidateServerEntryFields(serverEntryFields)
 	if err != nil {
-		return common.ContextError(
-			fmt.Errorf("invalid server entry: %s", err))
+		return errors.Tracef("invalid server entry: %s", err)
 	}
 
 	// BoltDB implementation note:
@@ -225,17 +223,17 @@ func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExi
 
 		data, err := json.Marshal(serverEntryFields)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		err = serverEntries.put(serverEntryID, data)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		err = serverEntryTags.put(serverEntryTagBytes, serverEntryID)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		NoticeInfo("updated server %s", serverEntryFields.GetDiagnosticID())
@@ -243,7 +241,7 @@ func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExi
 		return nil
 	})
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -259,7 +257,7 @@ func StoreServerEntries(
 	for _, serverEntryFields := range serverEntries {
 		err := StoreServerEntry(serverEntryFields, replaceIfExists)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -282,7 +280,7 @@ func StreamingStoreServerEntries(
 	for {
 		serverEntry, err := serverEntries.Next()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		if serverEntry == nil {
@@ -292,7 +290,7 @@ func StreamingStoreServerEntries(
 
 		err = StoreServerEntry(serverEntry, replaceIfExists)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		n += 1
@@ -326,7 +324,7 @@ func PromoteServerEntry(config *Config, ipAddress string) error {
 		bucket = tx.bucket(datastoreKeyValueBucket)
 		err := bucket.put(datastoreAffinityServerEntryIDKey, serverEntryID)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		// Store the current server entry filter (e.g, region, etc.) that
@@ -336,14 +334,14 @@ func PromoteServerEntry(config *Config, ipAddress string) error {
 
 		currentFilter, err := makeServerEntryFilterValue(config)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		return bucket.put(datastoreLastServerEntryFilterKey, currentFilter)
 	})
 
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
@@ -361,7 +359,7 @@ func hasServerEntryFilterChanged(config *Config) (bool, error) {
 
 	currentFilter, err := makeServerEntryFilterValue(config)
 	if err != nil {
-		return false, common.ContextError(err)
+		return false, errors.Trace(err)
 	}
 
 	changed := false
@@ -379,7 +377,7 @@ func hasServerEntryFilterChanged(config *Config) (bool, error) {
 		return nil
 	})
 	if err != nil {
-		return false, common.ContextError(err)
+		return false, errors.Trace(err)
 	}
 
 	return changed, nil
@@ -419,7 +417,7 @@ func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) 
 
 	filterChanged, err := hasServerEntryFilterChanged(config)
 	if err != nil {
-		return false, nil, common.ContextError(err)
+		return false, nil, errors.Trace(err)
 	}
 
 	applyServerAffinity := !filterChanged
@@ -431,7 +429,7 @@ func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) 
 
 	err = iterator.reset(true)
 	if err != nil {
-		return false, nil, common.ContextError(err)
+		return false, nil, errors.Trace(err)
 	}
 
 	return applyServerAffinity, iterator, nil
@@ -452,7 +450,7 @@ func NewTacticsServerEntryIterator(config *Config) (*ServerEntryIterator, error)
 
 	err := iterator.reset(true)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return iterator, nil
@@ -464,7 +462,7 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 	serverEntry, err := protocol.DecodeServerEntry(
 		config.TargetServerEntry, config.loadTimestamp, protocol.SERVER_ENTRY_SOURCE_TARGET)
 	if err != nil {
-		return false, nil, common.ContextError(err)
+		return false, nil, errors.Trace(err)
 	}
 
 	if serverEntry.Tag == "" {
@@ -475,13 +473,13 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 	if isTactics {
 
 		if len(serverEntry.GetSupportedTacticsProtocols()) == 0 {
-			return false, nil, common.ContextError(errors.New("TargetServerEntry does not support tactics protocols"))
+			return false, nil, errors.TraceNew("TargetServerEntry does not support tactics protocols")
 		}
 
 	} else {
 
 		if config.EgressRegion != "" && serverEntry.Region != config.EgressRegion {
-			return false, nil, common.ContextError(errors.New("TargetServerEntry does not support EgressRegion"))
+			return false, nil, errors.TraceNew("TargetServerEntry does not support EgressRegion")
 		}
 
 		limitTunnelProtocols := config.GetClientParameters().Get().TunnelProtocols(parameters.LimitTunnelProtocols)
@@ -490,7 +488,7 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 			// excludeIntensive is handled higher up.
 			if len(serverEntry.GetSupportedProtocols(
 				config.UseUpstreamProxy(), limitTunnelProtocols, false)) == 0 {
-				return false, nil, common.ContextError(errors.New("TargetServerEntry does not support LimitTunnelProtocols"))
+				return false, nil, errors.TraceNew("TargetServerEntry does not support LimitTunnelProtocols")
 			}
 		}
 	}
@@ -625,7 +623,7 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 		return nil
 	})
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	iterator.serverEntryIDs = serverEntryIDs
@@ -691,13 +689,13 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 				serverEntry = nil
 				NoticeAlert(
 					"ServerEntryIterator.Next: json.Unmarshal failed: %s",
-					common.ContextError(err))
+					errors.Trace(err))
 			}
 
 			return nil
 		})
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		if serverEntry == nil {
@@ -736,7 +734,7 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 				var serverEntryFields protocol.ServerEntryFields
 				err := json.Unmarshal(value, &serverEntryFields)
 				if err != nil {
-					return common.ContextError(err)
+					return errors.Trace(err)
 				}
 
 				// As there is minor race condition between loading/checking serverEntry
@@ -757,17 +755,17 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 
 				jsonServerEntryFields, err := json.Marshal(serverEntryFields)
 				if err != nil {
-					return common.ContextError(err)
+					return errors.Trace(err)
 				}
 
 				serverEntries.put(serverEntryID, jsonServerEntryFields)
 				if err != nil {
-					return common.ContextError(err)
+					return errors.Trace(err)
 				}
 
 				serverEntryTags.put([]byte(serverEntryTag), serverEntryID)
 				if err != nil {
-					return common.ContextError(err)
+					return errors.Trace(err)
 				}
 
 				return nil
@@ -777,7 +775,7 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 				// Do not stop.
 				NoticeAlert(
 					"ServerEntryIterator.Next: update server entry failed: %s",
-					common.ContextError(err))
+					errors.Trace(err))
 			}
 		}
 
@@ -827,7 +825,7 @@ func PruneServerEntry(config *Config, serverEntryTag string) {
 	if err != nil {
 		NoticeAlert(
 			"PruneServerEntry failed: %s: %s",
-			serverEntryTag, common.ContextError(err))
+			serverEntryTag, errors.Trace(err))
 		return
 	}
 	NoticePruneServerEntry(serverEntryTag)
@@ -850,18 +848,18 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 
 		serverEntryID := serverEntryTags.get(serverEntryTagBytes)
 		if serverEntryID == nil {
-			return common.ContextError(errors.New("server entry tag not found"))
+			return errors.TraceNew("server entry tag not found")
 		}
 
 		serverEntryJson := serverEntries.get(serverEntryID)
 		if serverEntryJson == nil {
-			return common.ContextError(errors.New("server entry not found"))
+			return errors.TraceNew("server entry not found")
 		}
 
 		var serverEntry *protocol.ServerEntry
 		err := json.Unmarshal(serverEntryJson, &serverEntry)
 		if err != nil {
-			common.ContextError(err)
+			errors.Trace(err)
 		}
 
 		// Only prune sufficiently old server entries. This mitigates the case where
@@ -869,7 +867,7 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 		// being invalid/deleted.
 		serverEntryLocalTimestamp, err := time.Parse(time.RFC3339, serverEntry.LocalTimestamp)
 		if err != nil {
-			common.ContextError(err)
+			errors.Trace(err)
 		}
 		if serverEntryLocalTimestamp.Add(minimumAgeForPruning).After(time.Now()) {
 			return nil
@@ -883,21 +881,21 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 
 		err = serverEntryTags.delete(serverEntryTagBytes)
 		if err != nil {
-			common.ContextError(err)
+			errors.Trace(err)
 		}
 
 		if deleteServerEntry {
 
 			err = serverEntries.delete(serverEntryID)
 			if err != nil {
-				common.ContextError(err)
+				errors.Trace(err)
 			}
 
 			affinityServerEntryID := keyValues.get(datastoreAffinityServerEntryIDKey)
 			if 0 == bytes.Compare(affinityServerEntryID, serverEntryID) {
 				err = keyValues.delete(datastoreAffinityServerEntryIDKey)
 				if err != nil {
-					return common.ContextError(err)
+					return errors.Trace(err)
 				}
 			}
 
@@ -911,7 +909,7 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 					foundFirstMatch = true
 					err := dialParameters.delete(key)
 					if err != nil {
-						return common.ContextError(err)
+						return errors.Trace(err)
 					}
 				} else if foundFirstMatch {
 					break
@@ -931,7 +929,7 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 		if serverEntry.LocalSource == protocol.SERVER_ENTRY_SOURCE_EMBEDDED {
 			err = serverEntryTombstoneTags.put(serverEntryTagBytes, []byte{1})
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 		}
 
@@ -950,7 +948,7 @@ func scanServerEntries(scanner func(*protocol.ServerEntry)) error {
 			if err != nil {
 				// In case of data corruption or a bug causing this condition,
 				// do not stop iterating.
-				NoticeAlert("scanServerEntries: %s", common.ContextError(err))
+				NoticeAlert("scanServerEntries: %s", errors.Trace(err))
 				continue
 			}
 			scanner(serverEntry)
@@ -966,7 +964,7 @@ func scanServerEntries(scanner func(*protocol.ServerEntry)) error {
 	})
 
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -1073,20 +1071,20 @@ func SetSplitTunnelRoutes(region, etag string, data []byte) error {
 		bucket := tx.bucket(datastoreSplitTunnelRouteETagsBucket)
 		err := bucket.put([]byte(region), []byte(etag))
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		bucket = tx.bucket(datastoreSplitTunnelRouteDataBucket)
 		err = bucket.put([]byte(region), data)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
@@ -1104,7 +1102,7 @@ func GetSplitTunnelRoutesETag(region string) (string, error) {
 	})
 
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 	return etag, nil
 }
@@ -1127,7 +1125,7 @@ func GetSplitTunnelRoutesData(region string) ([]byte, error) {
 	})
 
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	return data, nil
 }
@@ -1141,13 +1139,13 @@ func SetUrlETag(url, etag string) error {
 		bucket := tx.bucket(datastoreUrlETagsBucket)
 		err := bucket.put([]byte(url), []byte(etag))
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		return nil
 	})
 
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
@@ -1165,7 +1163,7 @@ func GetUrlETag(url string) (string, error) {
 	})
 
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 	return etag, nil
 }
@@ -1177,13 +1175,13 @@ func SetKeyValue(key, value string) error {
 		bucket := tx.bucket(datastoreKeyValueBucket)
 		err := bucket.put([]byte(key), []byte(value))
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		return nil
 	})
 
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
@@ -1201,7 +1199,7 @@ func GetKeyValue(key string) (string, error) {
 	})
 
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 	return value, nil
 }
@@ -1238,7 +1236,7 @@ var persistentStatTypes = []string{
 func StorePersistentStat(config *Config, statType string, stat []byte) error {
 
 	if !common.Contains(persistentStatTypes, statType) {
-		return common.ContextError(fmt.Errorf("invalid persistent stat type: %s", statType))
+		return errors.Tracef("invalid persistent stat type: %s", statType)
 	}
 
 	maxStoreRecords := config.GetClientParameters().Get().Int(
@@ -1264,14 +1262,14 @@ func StorePersistentStat(config *Config, statType string, stat []byte) error {
 
 		err := bucket.put(stat, persistentStatStateUnreported)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -1365,7 +1363,7 @@ func TakeOutUnreportedPersistentStats(config *Config) (map[string][][]byte, erro
 			for _, key := range stats[statType] {
 				err := bucket.put(key, persistentStatStateReporting)
 				if err != nil {
-					return common.ContextError(err)
+					return errors.Trace(err)
 				}
 			}
 
@@ -1374,7 +1372,7 @@ func TakeOutUnreportedPersistentStats(config *Config) (map[string][][]byte, erro
 	})
 
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return stats, nil
@@ -1392,7 +1390,7 @@ func PutBackUnreportedPersistentStats(stats map[string][][]byte) error {
 			for _, key := range stats[statType] {
 				err := bucket.put(key, persistentStatStateUnreported)
 				if err != nil {
-					return common.ContextError(err)
+					return errors.Trace(err)
 				}
 			}
 		}
@@ -1401,7 +1399,7 @@ func PutBackUnreportedPersistentStats(stats map[string][][]byte) error {
 	})
 
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -1428,7 +1426,7 @@ func ClearReportedPersistentStats(stats map[string][][]byte) error {
 	})
 
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -1458,7 +1456,7 @@ func resetAllPersistentStatsToUnreported() error {
 			for _, key := range resetKeys {
 				err := bucket.put(key, persistentStatStateUnreported)
 				if err != nil {
-					return common.ContextError(err)
+					return errors.Trace(err)
 				}
 			}
 		}
@@ -1467,7 +1465,7 @@ func resetAllPersistentStatsToUnreported() error {
 	})
 
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -1504,7 +1502,7 @@ func DeleteSLOKs() error {
 	})
 
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -1521,13 +1519,13 @@ func SetSLOK(id, key []byte) (bool, error) {
 		duplicate = bucket.get(id) != nil
 		err := bucket.put([]byte(id), []byte(key))
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		return nil
 	})
 
 	if err != nil {
-		return false, common.ContextError(err)
+		return false, errors.Trace(err)
 	}
 
 	return duplicate, nil
@@ -1546,7 +1544,7 @@ func GetSLOK(id []byte) ([]byte, error) {
 	})
 
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return key, nil
@@ -1565,7 +1563,7 @@ func SetDialParameters(serverIPAddress, networkID string, dialParams *DialParame
 
 	data, err := json.Marshal(dialParams)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return setBucketValue(datastoreDialParametersBucket, key, data)
@@ -1579,7 +1577,7 @@ func GetDialParameters(serverIPAddress, networkID string) (*DialParameters, erro
 
 	data, err := getBucketValue(datastoreDialParametersBucket, key)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if data == nil {
@@ -1589,7 +1587,7 @@ func GetDialParameters(serverIPAddress, networkID string) (*DialParameters, erro
 	var dialParams *DialParameters
 	err = json.Unmarshal(data, &dialParams)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return dialParams, nil
@@ -1648,19 +1646,19 @@ func GetAffinityServerEntryAndDialParameters(
 
 		affinityServerEntryID := keyValues.get(datastoreAffinityServerEntryIDKey)
 		if affinityServerEntryID == nil {
-			return common.ContextError(errors.New("no affinity server available"))
+			return errors.TraceNew("no affinity server available")
 		}
 
 		serverEntryRecord := serverEntries.get(affinityServerEntryID)
 		if serverEntryRecord == nil {
-			return common.ContextError(errors.New("affinity server entry not found"))
+			return errors.TraceNew("affinity server entry not found")
 		}
 
 		err := json.Unmarshal(
 			serverEntryRecord,
 			&serverEntryFields)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		dialParamsKey := makeDialParametersKey(
@@ -1671,14 +1669,14 @@ func GetAffinityServerEntryAndDialParameters(
 		if dialParamsRecord != nil {
 			err := json.Unmarshal(dialParamsRecord, &dialParams)
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 		}
 
 		return nil
 	})
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	return serverEntryFields, dialParams, nil
@@ -1690,13 +1688,13 @@ func setBucketValue(bucket, key, value []byte) error {
 		bucket := tx.bucket(bucket)
 		err := bucket.put(key, value)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		return nil
 	})
 
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -1713,7 +1711,7 @@ func getBucketValue(bucket, key []byte) ([]byte, error) {
 	})
 
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return value, nil
@@ -1727,7 +1725,7 @@ func deleteBucketValue(bucket, key []byte) error {
 	})
 
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil

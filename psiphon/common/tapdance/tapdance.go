@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/armon/go-proxyproto"
 	refraction_networking_tapdance "github.com/refraction-networking/gotapdance/tapdance"
 )
@@ -70,7 +71,7 @@ func Listen(address string) (*Listener, error) {
 
 	tcpListener, err := net.Listen("tcp", address)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// Setting a timeout ensures that reading the proxy protocol
@@ -115,7 +116,7 @@ func (l *stationListener) Accept() (net.Conn, error) {
 		return nil, err
 	}
 	if stationRemoteAddr == nil {
-		return nil, common.ContextError(errors.New("missing station address"))
+		return nil, errors.TraceNew("missing station address")
 	}
 	return &stationConn{
 		Conn:              conn,
@@ -178,7 +179,7 @@ func newDialManager(
 func (manager *dialManager) dial(ctx context.Context, network, address string) (net.Conn, error) {
 
 	if network != "tcp" {
-		return nil, common.ContextError(fmt.Errorf("unsupported network: %s", network))
+		return nil, errors.Tracef("unsupported network: %s", network)
 	}
 
 	// The context for this dial is either:
@@ -195,7 +196,7 @@ func (manager *dialManager) dial(ctx context.Context, network, address string) (
 		// https://github.com/refraction-networking/gotapdance/blob/4d84655dad2e242b0af0459c31f687b12085dcca/tapdance/conn_raw.go#L263
 		deadline, ok := ctx.Deadline()
 		if !ok {
-			return nil, common.ContextError(fmt.Errorf("unexpected nil deadline"))
+			return nil, errors.Tracef("unexpected nil deadline")
 		}
 		var cancelFunc context.CancelFunc
 		ctx, cancelFunc = context.WithDeadline(manager.runCtx, deadline)
@@ -205,7 +206,7 @@ func (manager *dialManager) dial(ctx context.Context, network, address string) (
 
 	conn, err := manager.tcpDialer(ctx, network, address)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// Fail immediately if CloseWrite isn't available in the underlying dialed
@@ -214,7 +215,7 @@ func (manager *dialManager) dial(ctx context.Context, network, address string) (
 	// Limitation: if the underlying conn _also_ passes through CloseWrite, this
 	// check may be insufficient.
 	if _, ok := conn.(common.CloseWriter); !ok {
-		return nil, common.ContextError(errors.New("underlying conn is not a CloseWriter"))
+		return nil, errors.TraceNew("underlying conn is not a CloseWriter")
 	}
 
 	conn = &managedConn{
@@ -224,7 +225,7 @@ func (manager *dialManager) dial(ctx context.Context, network, address string) (
 
 	if !manager.conns.Add(conn) {
 		conn.Close()
-		return nil, common.ContextError(errors.New("already closed"))
+		return nil, errors.TraceNew("already closed")
 	}
 
 	return conn, nil
@@ -253,7 +254,7 @@ func (conn *managedConn) CloseWrite() error {
 	if closeWriter, ok := conn.Conn.(common.CloseWriter); ok {
 		return closeWriter.CloseWrite()
 	}
-	return common.ContextError(errors.New("underlying conn is not a CloseWriter"))
+	return errors.TraceNew("underlying conn is not a CloseWriter")
 }
 
 func (conn *managedConn) Close() error {
@@ -299,11 +300,11 @@ func Dial(
 
 	err := initTapdance(emitLogs, dataDirectory)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if _, ok := ctx.Deadline(); !ok {
-		return nil, common.ContextError(errors.New("dial context has no timeout"))
+		return nil, errors.TraceNew("dial context has no timeout")
 	}
 
 	manager := newDialManager(netDialer.DialContext)
@@ -335,7 +336,7 @@ func Dial(
 	close(dialComplete)
 	if err != nil {
 		manager.close()
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	manager.startUsingRunCtx()
@@ -363,7 +364,7 @@ func initTapdance(emitLogs bool, dataDirectory string) error {
 
 		err := os.MkdirAll(assetsDir, 0700)
 		if err != nil {
-			initErr = common.ContextError(err)
+			initErr = errors.Trace(err)
 			return
 		}
 
@@ -373,7 +374,7 @@ func initTapdance(emitLogs bool, dataDirectory string) error {
 			err = ioutil.WriteFile(clientConfFileName, getEmbeddedClientConf(), 0644)
 		}
 		if err != nil {
-			initErr = common.ContextError(err)
+			initErr = errors.Trace(err)
 			return
 		}
 

@@ -22,9 +22,9 @@ package protocol
 import (
 	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -43,17 +43,17 @@ func (profiles CustomTLSProfiles) Validate() error {
 	names := make(map[string]bool)
 	for _, p := range profiles {
 		if p.Name == "" {
-			return common.ContextError(fmt.Errorf("custom TLS profile missing name: %s", p.Name))
+			return errors.Tracef("custom TLS profile missing name: %s", p.Name)
 		}
 		if p.UTLSSpec == nil {
-			return common.ContextError(fmt.Errorf("custom TLS profile missing utls spec: %s", p.Name))
+			return errors.Tracef("custom TLS profile missing utls spec: %s", p.Name)
 		}
 		if common.Contains(SupportedTLSProfiles, p.Name) ||
 			common.Contains(legacyTLSProfiles, p.Name) {
-			return common.ContextError(fmt.Errorf("invalid custom TLS profile name: %s", p.Name))
+			return errors.Tracef("invalid custom TLS profile name: %s", p.Name)
 		}
 		if _, ok := names[p.Name]; ok {
-			return common.ContextError(fmt.Errorf("duplicate custom TLS profile name: %s", p.Name))
+			return errors.Tracef("duplicate custom TLS profile name: %s", p.Name)
 		}
 		names[p.Name] = true
 	}
@@ -80,7 +80,7 @@ func (profile *CustomTLSProfile) GetClientHelloSpec() (*utls.ClientHelloSpec, er
 		var err error
 		spec.Extensions[i], err = extension.GetUTLSExtension()
 		if err != nil {
-			return nil, common.ContextError(nil)
+			return nil, errors.Trace(nil)
 		}
 	}
 
@@ -123,7 +123,7 @@ func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 		var extension *utls.NPNExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, common.ContextError(nil)
+			return nil, errors.Trace(nil)
 		}
 		return extension, nil
 	case "SNI":
@@ -134,35 +134,35 @@ func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 		var extension *utls.SupportedCurvesExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, common.ContextError(nil)
+			return nil, errors.Trace(nil)
 		}
 		return extension, nil
 	case "SupportedPoints":
 		var extension *utls.SupportedPointsExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, common.ContextError(nil)
+			return nil, errors.Trace(nil)
 		}
 		return extension, nil
 	case "SignatureAlgorithms":
 		var extension *utls.SignatureAlgorithmsExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, common.ContextError(nil)
+			return nil, errors.Trace(nil)
 		}
 		return extension, nil
 	case "RenegotiationInfo":
 		var extension *utls.RenegotiationInfoExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, common.ContextError(nil)
+			return nil, errors.Trace(nil)
 		}
 		return extension, nil
 	case "ALPN":
 		var extension *utls.ALPNExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, common.ContextError(nil)
+			return nil, errors.Trace(nil)
 		}
 		return extension, nil
 	case "SCT":
@@ -173,7 +173,7 @@ func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 		var extension *utls.GenericExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, common.ContextError(nil)
+			return nil, errors.Trace(nil)
 		}
 		return extension, nil
 	case "ExtendedMasterSecret":
@@ -186,21 +186,21 @@ func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 		var extension *utls.KeyShareExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, common.ContextError(nil)
+			return nil, errors.Trace(nil)
 		}
 		return extension, nil
 	case "PSKKeyExchangeModes":
 		var extension *utls.PSKKeyExchangeModesExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, common.ContextError(nil)
+			return nil, errors.Trace(nil)
 		}
 		return extension, nil
 	case "SupportedVersions":
 		var extension *utls.SupportedVersionsExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, common.ContextError(nil)
+			return nil, errors.Trace(nil)
 		}
 		return extension, nil
 	case "ChannelID":
@@ -209,17 +209,17 @@ func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 		var extension *utls.FakeCertCompressionAlgsExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, common.ContextError(nil)
+			return nil, errors.Trace(nil)
 		}
 		return extension, nil
 	case "RecordSizeLimit":
 		var extension *utls.FakeRecordSizeLimitExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, common.ContextError(nil)
+			return nil, errors.Trace(nil)
 		}
 		return extension, nil
 	}
 
-	return nil, common.ContextError(fmt.Errorf("unknown utls extension: %s", e.Name))
+	return nil, errors.Tracef("unknown utls extension: %s", e.Name)
 }

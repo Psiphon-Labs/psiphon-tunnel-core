@@ -23,13 +23,11 @@ package marionette
 
 import (
 	"context"
-	"errors"
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
-
-var disabledError = errors.New("operation is not enabled")
 
 // Enabled indicates if Marionette functionality is enabled.
 func Enabled() bool {
@@ -44,12 +42,12 @@ type Listener struct {
 // Listen creates a new Marionette Listener. The address input should not
 // include a port number as that's defined in the Marionette format.
 func Listen(_, _ string) (*Listener, error) {
-	return nil, common.ContextError(disabledError)
+	return nil, errors.TraceNew("operation is not enabled")
 }
 
 // Dial establishes a new Marionette session and stream to the server
 // specified by address. The address input should not include a port number as
 // that's defined in the Marionette format.
 func Dial(_ context.Context, _ common.NetDialer, _ string, _ string) (net.Conn, error) {
-	return nil, common.ContextError(disabledError)
+	return nil, errors.TraceNew("operation is not enabled")
 }

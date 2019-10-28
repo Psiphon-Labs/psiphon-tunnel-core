@@ -22,7 +22,6 @@ package fragmentor
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -30,6 +29,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -239,7 +239,7 @@ func (c *Conn) Write(buffer []byte) (int, error) {
 	defer c.writeMutex.Unlock()
 
 	if c.fragmentPRNG == nil {
-		return 0, common.ContextError(errors.New("missing fragmentPRNG"))
+		return 0, errors.TraceNew("missing fragmentPRNG")
 	}
 
 	if c.bytesToFragment == -1 {
@@ -355,7 +355,7 @@ func (c *Conn) CloseWrite() error {
 	if closeWriter, ok := c.Conn.(common.CloseWriter); ok {
 		return closeWriter.CloseWrite()
 	}
-	return common.ContextError(errors.New("underlying conn is not a CloseWriter"))
+	return errors.TraceNew("underlying conn is not a CloseWriter")
 }
 
 func (c *Conn) Close() (err error) {

@@ -22,9 +22,9 @@ package protocol
 import (
 	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
@@ -79,7 +79,7 @@ type TunnelProtocols []string
 func (t TunnelProtocols) Validate() error {
 	for _, p := range t {
 		if !common.Contains(SupportedTunnelProtocols, p) {
-			return common.ContextError(fmt.Errorf("invalid tunnel protocol: %s", p))
+			return errors.Tracef("invalid tunnel protocol: %s", p)
 		}
 	}
 	return nil
@@ -274,7 +274,7 @@ func (profiles TLSProfiles) Validate() error {
 
 	for _, p := range profiles {
 		if !common.Contains(SupportedTLSProfiles, p) && !common.Contains(legacyTLSProfiles, p) {
-			return common.ContextError(fmt.Errorf("invalid TLS profile: %s", p))
+			return errors.Tracef("invalid TLS profile: %s", p)
 		}
 	}
 	return nil
@@ -313,7 +313,7 @@ type QUICVersions []string
 func (versions QUICVersions) Validate() error {
 	for _, v := range versions {
 		if !common.Contains(SupportedQUICVersions, v) {
-			return common.ContextError(fmt.Errorf("invalid QUIC version: %s", v))
+			return errors.Tracef("invalid QUIC version: %s", v)
 		}
 	}
 	return nil

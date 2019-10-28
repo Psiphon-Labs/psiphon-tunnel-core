@@ -25,7 +25,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
+	std_errors "errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -40,6 +40,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
@@ -92,7 +93,7 @@ func NewTunnelServer(
 
 	sshServer, err := newSSHServer(support, shutdownBroadcast)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return &TunnelServer{
@@ -180,7 +181,7 @@ func (server *TunnelServer) Run() error {
 			for _, existingListener := range listeners {
 				existingListener.Listener.Close()
 			}
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		tacticsListener := tactics.NewListener(
@@ -352,13 +353,13 @@ func newSSHServer(
 
 	privateKey, err := ssh.ParseRawPrivateKey([]byte(support.Config.SSHPrivateKey))
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// TODO: use cert (ssh.NewCertSigner) for anti-fingerprint?
 	signer, err := ssh.NewSignerFromKey(privateKey)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	var concurrentSSHHandshakes semaphore.Semaphore
@@ -491,7 +492,7 @@ func (sshServer *sshServer) runListener(
 
 		if err != nil {
 			select {
-			case listenerError <- common.ContextError(err):
+			case listenerError <- errors.Trace(err):
 			default:
 			}
 			return
@@ -519,7 +520,7 @@ func (sshServer *sshServer) runListener(
 				}
 
 				select {
-				case listenerError <- common.ContextError(err):
+				case listenerError <- errors.Trace(err):
 				default:
 				}
 				return
@@ -818,13 +819,13 @@ func (sshServer *sshServer) setClientHandshakeState(
 	sshServer.clientsMutex.Unlock()
 
 	if client == nil {
-		return nil, nil, common.ContextError(errors.New("unknown session ID"))
+		return nil, nil, errors.TraceNew("unknown session ID")
 	}
 
 	activeAuthorizationIDs, authorizedAccessTypes, err := client.setHandshakeState(
 		state, authorizations)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	return activeAuthorizationIDs, authorizedAccessTypes, nil
@@ -838,7 +839,7 @@ func (sshServer *sshServer) getClientHandshaked(
 	sshServer.clientsMutex.Unlock()
 
 	if client == nil {
-		return false, false, common.ContextError(errors.New("unknown session ID"))
+		return false, false, errors.TraceNew("unknown session ID")
 	}
 
 	completed, exhausted := client.getHandshaked()
@@ -855,7 +856,7 @@ func (sshServer *sshServer) updateClientAPIParameters(
 	sshServer.clientsMutex.Unlock()
 
 	if client == nil {
-		return common.ContextError(errors.New("unknown session ID"))
+		return errors.TraceNew("unknown session ID")
 	}
 
 	client.updateAPIParameters(apiParams)
@@ -896,7 +897,7 @@ func (sshServer *sshServer) expectClientDomainBytes(
 	sshServer.clientsMutex.Unlock()
 
 	if client == nil {
-		return false, common.ContextError(errors.New("unknown session ID"))
+		return false, errors.TraceNew("unknown session ID")
 	}
 
 	return client.expectDomainBytes(), nil
@@ -1170,7 +1171,7 @@ func (sshClient *sshClient) run(
 	var afterFunc *time.Timer
 	if sshClient.sshServer.support.Config.sshHandshakeTimeout > 0 {
 		afterFunc = time.AfterFunc(sshClient.sshServer.support.Config.sshHandshakeTimeout, func() {
-			resultChannel <- &sshNewServerConnResult{err: errors.New("ssh handshake timeout")}
+			resultChannel <- &sshNewServerConnResult{err: std_errors.New("ssh handshake timeout")}
 		})
 	}
 
@@ -1200,7 +1201,7 @@ func (sshClient *sshClient) run(
 				sshServerConfig.KEXPRNGSeed, err = protocol.DeriveSSHServerKEXPRNGSeed(
 					sshClient.sshServer.support.Config.ObfuscatedSSHKey)
 				if err != nil {
-					err = common.ContextError(err)
+					err = errors.Trace(err)
 				}
 			}
 		}
@@ -1218,7 +1219,7 @@ func (sshClient *sshClient) run(
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
 				nil, nil, nil)
 			if err != nil {
-				err = common.ContextError(err)
+				err = errors.Trace(err)
 			} else {
 				conn = result.obfuscatedSSHConn
 			}
@@ -1231,7 +1232,7 @@ func (sshClient *sshClient) run(
 				if fragmentorConn, ok := baseConn.(*fragmentor.Conn); ok {
 					fragmentorPRNG, err := result.obfuscatedSSHConn.GetDerivedPRNG("server-side-fragmentor")
 					if err != nil {
-						err = common.ContextError(err)
+						err = errors.Trace(err)
 					} else {
 						fragmentorConn.SetPRNG(fragmentorPRNG)
 					}
@@ -1243,7 +1244,7 @@ func (sshClient *sshClient) run(
 			result.sshConn, result.channels, result.requests, err =
 				ssh.NewServerConn(conn, sshServerConfig)
 			if err != nil {
-				err = common.ContextError(err)
+				err = errors.Trace(err)
 			}
 		}
 
@@ -1359,13 +1360,13 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 			sshPasswordPayload.SessionId = string(password[0:expectedSessionIDLength])
 			sshPasswordPayload.SshPassword = string(password[expectedSessionIDLength:])
 		} else {
-			return nil, common.ContextError(fmt.Errorf("invalid password payload for %q", conn.User()))
+			return nil, errors.Tracef("invalid password payload for %q", conn.User())
 		}
 	}
 
 	if !isHexDigits(sshClient.sshServer.support.Config, sshPasswordPayload.SessionId) ||
 		len(sshPasswordPayload.SessionId) != expectedSessionIDLength {
-		return nil, common.ContextError(fmt.Errorf("invalid session ID for %q", conn.User()))
+		return nil, errors.Tracef("invalid session ID for %q", conn.User())
 	}
 
 	userOk := (subtle.ConstantTimeCompare(
@@ -1375,7 +1376,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 		[]byte(sshPasswordPayload.SshPassword), []byte(sshClient.sshServer.support.Config.SSHPassword)) == 1)
 
 	if !userOk || !passwordOk {
-		return nil, common.ContextError(fmt.Errorf("invalid password for %q", conn.User()))
+		return nil, errors.Tracef("invalid password for %q", conn.User())
 	}
 
 	sessionID := sshPasswordPayload.SessionId
@@ -2213,7 +2214,7 @@ func (sshClient *sshClient) sendOSLRequest() error {
 	}
 	requestPayload, err := json.Marshal(oslRequest)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	ok, _, err := sshClient.sshConn.SendRequest(
@@ -2221,10 +2222,10 @@ func (sshClient *sshClient) sendOSLRequest() error {
 		true,
 		requestPayload)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	if !ok {
-		return common.ContextError(errors.New("client rejected request"))
+		return errors.TraceNew("client rejected request")
 	}
 
 	sshClient.clearOSLSeedPayload()
@@ -2271,7 +2272,7 @@ func (sshClient *sshClient) setHandshakeState(
 
 	// Client must only perform one handshake
 	if completed {
-		return nil, nil, common.ContextError(errors.New("handshake already completed"))
+		return nil, nil, errors.TraceNew("handshake already completed")
 	}
 
 	// Verify the authorizations submitted by the client. Verified, active
@@ -2926,7 +2927,7 @@ func (sshClient *sshClient) handleTCPChannel(
 		}
 	}
 	if err == nil && IP == nil {
-		err = errors.New("no IP address")
+		err = std_errors.New("no IP address")
 	}
 
 	resolveElapsedTime := monotime.Since(dialStartTime)

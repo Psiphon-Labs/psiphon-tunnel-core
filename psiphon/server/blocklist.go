@@ -21,7 +21,6 @@ package server
 
 import (
 	"encoding/csv"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -29,6 +28,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // Blocklist provides a fast lookup of IP addresses that are candidates for
@@ -77,7 +77,7 @@ func NewBlocklist(filename string) (*Blocklist, error) {
 
 			newData, err := loadBlocklistFromFile(filename)
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 
 			blocklist.data.Store(newData)
@@ -88,7 +88,7 @@ func NewBlocklist(filename string) (*Blocklist, error) {
 
 	_, err := blocklist.Reload()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return blocklist, nil
@@ -127,7 +127,7 @@ func loadBlocklistFromFile(filename string) (*blocklistData, error) {
 
 	file, err := os.Open(filename)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	defer file.Close()
 
@@ -143,18 +143,16 @@ func loadBlocklistFromFile(filename string) (*blocklistData, error) {
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		IPAddress := net.ParseIP(record[0])
 		if IPAddress == nil {
-			return nil, common.ContextError(
-				fmt.Errorf("invalid IP address: %s", record[0]))
+			return nil, errors.Tracef("invalid IP address: %s", record[0])
 		}
 		IPv4Address := IPAddress.To4()
 		if IPAddress == nil {
-			return nil, common.ContextError(
-				fmt.Errorf("invalid IPv4 address: %s", record[0]))
+			return nil, errors.Tracef("invalid IPv4 address: %s", record[0])
 		}
 
 		var key [net.IPv4len]byte

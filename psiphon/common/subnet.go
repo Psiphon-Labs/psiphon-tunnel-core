@@ -23,10 +23,11 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"net"
 	"sort"
 	"strings"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // SubnetLookup provides an efficient lookup for individual
@@ -42,7 +43,7 @@ func NewSubnetLookup(CIDRs []string) (SubnetLookup, error) {
 	for i, CIDR := range CIDRs {
 		_, network, err := net.ParseCIDR(CIDR)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		subnets[i] = *network
 	}
@@ -77,7 +78,7 @@ func NewSubnetLookupFromRoutes(routesData []byte) (SubnetLookup, error) {
 		subnets = append(subnets, net.IPNet{IP: ip.Mask(mask), Mask: mask})
 	}
 	if len(subnets) == 0 {
-		return nil, ContextError(errors.New("Routes data contains no networks"))
+		return nil, errors.TraceNew("Routes data contains no networks")
 	}
 
 	lookup := SubnetLookup(subnets)

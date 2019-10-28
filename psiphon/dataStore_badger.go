@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/options"
 )
@@ -58,7 +59,7 @@ func datastoreOpenDB(rootDataDirectory string) (*datastoreDB, error) {
 
 	err := os.MkdirAll(dbDirectory, 0700)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	opts := badger.DefaultOptions
@@ -77,7 +78,7 @@ func datastoreOpenDB(rootDataDirectory string) (*datastoreDB, error) {
 
 	db, err := badger.Open(opts)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	for {
@@ -98,7 +99,7 @@ func (db *datastoreDB) view(fn func(tx *datastoreTx) error) error {
 		func(tx *badger.Txn) error {
 			err := fn(&datastoreTx{badgerTx: tx})
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 			return nil
 		})
@@ -109,7 +110,7 @@ func (db *datastoreDB) update(fn func(tx *datastoreTx) error) error {
 		func(tx *badger.Txn) error {
 			err := fn(&datastoreTx{badgerTx: tx})
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 			return nil
 		})
@@ -128,7 +129,7 @@ func (tx *datastoreTx) clearBucket(name []byte) error {
 	for key := c.firstKey(); key != nil; key = c.nextKey() {
 		err := tx.badgerTx.Delete(key)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 	return nil
@@ -142,14 +143,14 @@ func (b *datastoreBucket) get(key []byte) []byte {
 			// The original datastore interface does not return an error from
 			// Get, so emit notice.
 			NoticeAlert("get failed: %s: %s",
-				string(keyWithPrefix), common.ContextError(err))
+				string(keyWithPrefix), errors.Trace(err))
 		}
 		return nil
 	}
 	value, err := item.Value()
 	if err != nil {
 		NoticeAlert("get failed: %s: %s",
-			string(keyWithPrefix), common.ContextError(err))
+			string(keyWithPrefix), errors.Trace(err))
 		return nil
 	}
 	return value
@@ -159,7 +160,7 @@ func (b *datastoreBucket) put(key, value []byte) error {
 	keyWithPrefix := append(b.name, key...)
 	err := b.tx.badgerTx.Set(keyWithPrefix, value)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
@@ -168,7 +169,7 @@ func (b *datastoreBucket) delete(key []byte) error {
 	keyWithPrefix := append(b.name, key...)
 	err := b.tx.badgerTx.Delete(keyWithPrefix)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
