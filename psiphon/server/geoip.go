@@ -205,7 +205,7 @@ func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
 		err := database.maxMindReader.Lookup(ip, &geoIPFields)
 		database.ReloadableFile.RUnlock()
 		if err != nil {
-			log.WithContextFields(LogFields{"error": err}).Warning("GeoIP lookup failed")
+			log.WithTraceFields(LogFields{"error": err}).Warning("GeoIP lookup failed")
 		}
 	}
 

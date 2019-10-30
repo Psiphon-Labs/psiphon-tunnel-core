@@ -1002,16 +1002,16 @@ func NoticeCommonLogger() common.Logger {
 type commonLogger struct {
 }
 
-func (logger *commonLogger) WithContext() common.LogContext {
-	return &commonLogContext{
-		context: stacktrace.GetParentFunctionName(),
+func (logger *commonLogger) WithTrace() common.LogTrace {
+	return &commonLogTrace{
+		trace: stacktrace.GetParentFunctionName(),
 	}
 }
 
-func (logger *commonLogger) WithContextFields(fields common.LogFields) common.LogContext {
-	return &commonLogContext{
-		context: stacktrace.GetParentFunctionName(),
-		fields:  fields,
+func (logger *commonLogger) WithTraceFields(fields common.LogFields) common.LogTrace {
+	return &commonLogTrace{
+		trace:  stacktrace.GetParentFunctionName(),
+		fields: fields,
 	}
 }
 
@@ -1035,12 +1035,12 @@ func listCommonFields(fields common.LogFields) []interface{} {
 	return fieldList
 }
 
-type commonLogContext struct {
-	context string
-	fields  common.LogFields
+type commonLogTrace struct {
+	trace  string
+	fields common.LogFields
 }
 
-func (context *commonLogContext) outputNotice(
+func (log *commonLogTrace) outputNotice(
 	noticeType string, args ...interface{}) {
 
 	singletonNoticeLogger.outputNotice(
@@ -1048,22 +1048,22 @@ func (context *commonLogContext) outputNotice(
 		append(
 			[]interface{}{
 				"message", fmt.Sprint(args...),
-				"context", context.context},
-			listCommonFields(context.fields)...)...)
+				"trace", log.trace},
+			listCommonFields(log.fields)...)...)
 }
 
-func (context *commonLogContext) Debug(args ...interface{}) {
+func (log *commonLogTrace) Debug(args ...interface{}) {
 	// Ignored.
 }
 
-func (context *commonLogContext) Info(args ...interface{}) {
-	context.outputNotice("Info", args...)
+func (log *commonLogTrace) Info(args ...interface{}) {
+	log.outputNotice("Info", args...)
 }
 
-func (context *commonLogContext) Warning(args ...interface{}) {
-	context.outputNotice("Alert", args...)
+func (log *commonLogTrace) Warning(args ...interface{}) {
+	log.outputNotice("Alert", args...)
 }
 
-func (context *commonLogContext) Error(args ...interface{}) {
-	context.outputNotice("Error", args...)
+func (log *commonLogTrace) Error(args ...interface{}) {
+	log.outputNotice("Error", args...)
 }

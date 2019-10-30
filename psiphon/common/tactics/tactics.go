@@ -968,7 +968,7 @@ func (server *Server) handleSpeedTestRequest(
 
 	_, err := ioutil.ReadAll(http.MaxBytesReader(w, r.Body, MAX_REQUEST_BODY_SIZE))
 	if err != nil {
-		server.logger.WithContextFields(
+		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to read request body")
 		common.TerminateHTTPConnection(w, r)
 		return
@@ -977,7 +977,7 @@ func (server *Server) handleSpeedTestRequest(
 	response, err := MakeSpeedTestResponse(
 		SPEED_TEST_PADDING_MIN_SIZE, SPEED_TEST_PADDING_MAX_SIZE)
 	if err != nil {
-		server.logger.WithContextFields(
+		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to make response")
 		common.TerminateHTTPConnection(w, r)
 		return
@@ -999,7 +999,7 @@ func (server *Server) handleTacticsRequest(
 
 	boxedRequest, err := ioutil.ReadAll(http.MaxBytesReader(w, r.Body, MAX_REQUEST_BODY_SIZE))
 	if err != nil {
-		server.logger.WithContextFields(
+		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to read request body")
 		common.TerminateHTTPConnection(w, r)
 		return
@@ -1014,7 +1014,7 @@ func (server *Server) handleTacticsRequest(
 		boxedRequest,
 		&apiParams)
 	if err != nil {
-		server.logger.WithContextFields(
+		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to unbox request")
 		common.TerminateHTTPConnection(w, r)
 		return
@@ -1022,7 +1022,7 @@ func (server *Server) handleTacticsRequest(
 
 	err = server.apiParameterValidator(apiParams)
 	if err != nil {
-		server.logger.WithContextFields(
+		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("invalid request parameters")
 		common.TerminateHTTPConnection(w, r)
 		return
@@ -1033,7 +1033,7 @@ func (server *Server) handleTacticsRequest(
 		err = errors.TraceNew("unexpected missing tactics payload")
 	}
 	if err != nil {
-		server.logger.WithContextFields(
+		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to get tactics")
 		common.TerminateHTTPConnection(w, r)
 		return
@@ -1049,7 +1049,7 @@ func (server *Server) handleTacticsRequest(
 		nil,
 		tacticsPayload)
 	if err != nil {
-		server.logger.WithContextFields(
+		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to box response")
 		common.TerminateHTTPConnection(w, r)
 		return
@@ -1115,7 +1115,7 @@ func (listener *Listener) Accept() (net.Conn, error) {
 
 		tactics, err := listener.server.getTactics(true, geoIPData, make(common.APIParameters))
 		if err != nil {
-			listener.server.logger.WithContextFields(
+			listener.server.logger.WithTraceFields(
 				common.LogFields{"error": err}).Warning("failed to get tactics for connection")
 			// If tactics is somehow misconfigured, keep handling connections.
 			// Other error cases that follow below take the same approach.
@@ -1162,7 +1162,7 @@ func (listener *Listener) Accept() (net.Conn, error) {
 		if listener.tunnelProtocol != protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
 			seed, err = prng.NewSeed()
 			if err != nil {
-				listener.server.logger.WithContextFields(
+				listener.server.logger.WithTraceFields(
 					common.LogFields{"error": err}).Warning("failed to seed fragmentor PRNG")
 				return conn, nil
 			}
@@ -1175,7 +1175,7 @@ func (listener *Listener) Accept() (net.Conn, error) {
 			conn = fragmentor.NewConn(
 				fragmentorConfig,
 				func(message string) {
-					listener.server.logger.WithContextFields(
+					listener.server.logger.WithTraceFields(
 						common.LogFields{"message": message}).Debug("Fragmentor")
 				},
 				conn)

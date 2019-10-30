@@ -280,7 +280,7 @@ func handshakeAPIRequestHandler(
 	// common API parameters and "handshake_completed" flag, this handshake
 	// log is mostly redundant and set to debug level.
 
-	log.WithContextFields(
+	log.WithTraceFields(
 		getRequestLogFields(
 			"",
 			geoIPData,

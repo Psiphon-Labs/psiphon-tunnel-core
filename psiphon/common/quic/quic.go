@@ -484,10 +484,10 @@ func (conn *loggingPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 		if err != nil && conn.logger != nil {
 			message := "ReadFrom failed"
 			if e, ok := err.(net.Error); ok && e.Temporary() {
-				conn.logger.WithContextFields(
+				conn.logger.WithTraceFields(
 					common.LogFields{"error": err}).Debug(message)
 			} else {
-				conn.logger.WithContextFields(
+				conn.logger.WithTraceFields(
 					common.LogFields{"error": err}).Warning(message)
 			}
 		}

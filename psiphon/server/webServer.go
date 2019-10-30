@@ -110,7 +110,7 @@ func RunWebServer(
 		return errors.Trace(err)
 	}
 
-	log.WithContextFields(
+	log.WithTraceFields(
 		LogFields{"localAddress": localAddress}).Info("starting")
 
 	err = nil
@@ -138,7 +138,7 @@ func RunWebServer(
 			}
 		}
 
-		log.WithContextFields(
+		log.WithTraceFields(
 			LogFields{"localAddress": localAddress}).Info("stopped")
 	}()
 
@@ -151,7 +151,7 @@ func RunWebServer(
 
 	waitGroup.Wait()
 
-	log.WithContextFields(
+	log.WithTraceFields(
 		LogFields{"localAddress": localAddress}).Info("exiting")
 
 	return err
@@ -247,7 +247,7 @@ func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("failed")
+		log.WithTraceFields(LogFields{"error": err}).Warning("failed")
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -278,7 +278,7 @@ func (webServer *webServer) connectedHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("failed")
+		log.WithTraceFields(LogFields{"error": err}).Warning("failed")
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -303,7 +303,7 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("failed")
+		log.WithTraceFields(LogFields{"error": err}).Warning("failed")
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -329,7 +329,7 @@ func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *
 	}
 
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("failed")
+		log.WithTraceFields(LogFields{"error": err}).Warning("failed")
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}

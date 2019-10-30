@@ -62,7 +62,7 @@ func runNetworkConfigCommand(
 	cmd := exec.Command(commandName, commandArgs...)
 	output, err := cmd.CombinedOutput()
 
-	logger.WithContextFields(common.LogFields{
+	logger.WithTraceFields(common.LogFields{
 		"command": commandName,
 		"args":    commandArgs,
 		"output":  string(output),

@@ -49,7 +49,7 @@ func (logger *testLogger) WithContext() LogContext {
 	return &testLoggerContext{}
 }
 
-func (logger *testLogger) WithContextFields(fields LogFields) LogContext {
+func (logger *testLogger) WithTraceFields(fields LogFields) LogContext {
 	return &testLoggerContext{}
 }
 

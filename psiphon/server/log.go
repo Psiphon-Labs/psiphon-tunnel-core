@@ -38,32 +38,32 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// ContextLogger adds context logging functionality to the
-// underlying logging packages.
-type ContextLogger struct {
+// TraceLogger adds single frame stack trace information to the underlying
+// logging facilities.
+type TraceLogger struct {
 	*logrus.Logger
 }
 
-// LogFields is an alias for the field struct in the
-// underlying logging package.
+// LogFields is an alias for the field struct in the underlying logging
+// package.
 type LogFields logrus.Fields
 
-// WithContext adds a "context" field containing the caller's
-// function name and source file line number; and "host_id" and
-// "build_rev" fields identifying this server and build.
-// Use this function when the log has no fields.
-func (logger *ContextLogger) WithContext() *logrus.Entry {
+// WithTrace adds a "trace" field containing the caller's function name
+// and source file line number; and "host_id" and "build_rev" fields
+// identifying this server and build. Use this function when the log has no
+// fields.
+func (logger *TraceLogger) WithTrace() *logrus.Entry {
 	return logger.WithFields(
 		logrus.Fields{
-			"context":   stacktrace.GetParentFunctionName(),
+			"trace":     stacktrace.GetParentFunctionName(),
 			"host_id":   logHostID,
 			"build_rev": logBuildRev,
 		})
 }
 
 func renameLogFields(fields LogFields) {
-	if _, ok := fields["context"]; ok {
-		fields["fields.context"] = fields["context"]
+	if _, ok := fields["trace"]; ok {
+		fields["fields.trace"] = fields["trace"]
 	}
 	if _, ok := fields["host_id"]; ok {
 		fields["fields.host_id"] = fields["host_id"]
@@ -73,15 +73,14 @@ func renameLogFields(fields LogFields) {
 	}
 }
 
-// WithContextFields adds a "context" field containing the caller's
-// function name and source file line number; and "host_id" and
-// "build_rev" fields identifying this server and build.
-// Use this function when the log has fields.
-// Note that any existing "context"/"host_id"/"build_rev" field will
-// be renamed to "field.<name>".
-func (logger *ContextLogger) WithContextFields(fields LogFields) *logrus.Entry {
+// WithTraceFields adds a "trace" field containing the caller's function name
+// and source file line number; and "host_id" and "build_rev" fields
+// identifying this server and build. Use this function when the log has
+// fields. Note that any existing "trace"/"host_id"/"build_rev" field will be
+// renamed to "field.<name>".
+func (logger *TraceLogger) WithTraceFields(fields LogFields) *logrus.Entry {
 	renameLogFields(fields)
-	fields["context"] = stacktrace.GetParentFunctionName()
+	fields["trace"] = stacktrace.GetParentFunctionName()
 	fields["host_id"] = logHostID
 	fields["build_rev"] = logBuildRev
 	return logger.WithFields(logrus.Fields(fields))
@@ -94,9 +93,9 @@ func (logger *ContextLogger) WithContextFields(fields LogFields) *logrus.Entry {
 // support API logs which have neither a natural message nor severity; and
 // omitting these values here makes it easier to ship these logs to existing
 // API log consumers.
-// Note that any existing "context"/"host_id"/"build_rev" field will
-// be renamed to "field.<name>".
-func (logger *ContextLogger) LogRawFieldsWithTimestamp(fields LogFields) {
+// Note that any existing "trace"/"host_id"/"build_rev" field will be renamed
+// to "field.<name>".
+func (logger *TraceLogger) LogRawFieldsWithTimestamp(fields LogFields) {
 	renameLogFields(fields)
 	fields["host_id"] = logHostID
 	fields["build_rev"] = logBuildRev
@@ -106,7 +105,7 @@ func (logger *ContextLogger) LogRawFieldsWithTimestamp(fields LogFields) {
 
 // LogPanicRecover calls LogRawFieldsWithTimestamp with standard fields
 // for logging recovered panics.
-func (logger *ContextLogger) LogPanicRecover(recoverValue interface{}, stack []byte) {
+func (logger *TraceLogger) LogPanicRecover(recoverValue interface{}, stack []byte) {
 	log.LogRawFieldsWithTimestamp(
 		LogFields{
 			"event_name":    "panic",
@@ -116,32 +115,32 @@ func (logger *ContextLogger) LogPanicRecover(recoverValue interface{}, stack []b
 }
 
 type commonLogger struct {
-	contextLogger *ContextLogger
+	traceLogger *TraceLogger
 }
 
-func (logger *commonLogger) WithContext() common.LogContext {
-	// Patch context to be correct parent
-	return logger.contextLogger.WithContext().WithField(
-		"context", stacktrace.GetParentFunctionName())
+func (logger *commonLogger) WithTrace() common.LogTrace {
+	// Patch trace to be correct parent
+	return logger.traceLogger.WithTrace().WithField(
+		"trace", stacktrace.GetParentFunctionName())
 }
 
-func (logger *commonLogger) WithContextFields(fields common.LogFields) common.LogContext {
-	// Patch context to be correct parent
-	return logger.contextLogger.WithContextFields(LogFields(fields)).WithField(
-		"context", stacktrace.GetParentFunctionName())
+func (logger *commonLogger) WithTraceFields(fields common.LogFields) common.LogTrace {
+	// Patch trace to be correct parent
+	return logger.traceLogger.WithTraceFields(LogFields(fields)).WithField(
+		"trace", stacktrace.GetParentFunctionName())
 }
 
 func (logger *commonLogger) LogMetric(metric string, fields common.LogFields) {
 	fields["event_name"] = metric
-	logger.contextLogger.LogRawFieldsWithTimestamp(LogFields(fields))
+	logger.traceLogger.LogRawFieldsWithTimestamp(LogFields(fields))
 }
 
-// CommonLogger wraps a ContextLogger instance with an interface
-// that conforms to common.Logger. This is used to make the ContextLogger
-// available to other packages that don't import the "server" package.
-func CommonLogger(contextLogger *ContextLogger) *commonLogger {
+// CommonLogger wraps a TraceLogger instance with an interface that conforms
+// to common.Logger. This is used to make the TraceLogger available to other
+// packages that don't import the "server" package.
+func CommonLogger(traceLogger *TraceLogger) *commonLogger {
 	return &commonLogger{
-		contextLogger: contextLogger,
+		traceLogger: traceLogger,
 	}
 }
 
@@ -226,7 +225,7 @@ func (f *CustomJSONFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	return append(serialized, '\n'), nil
 }
 
-var log *ContextLogger
+var log *TraceLogger
 var logHostID, logBuildRev string
 var initLogging sync.Once
 
@@ -289,7 +288,7 @@ func InitLogging(config *Config) (retErr error) {
 			logWriter = os.Stderr
 		}
 
-		log = &ContextLogger{
+		log = &TraceLogger{
 			&logrus.Logger{
 				Out:       logWriter,
 				Formatter: &CustomJSONFormatter{},
@@ -308,7 +307,7 @@ func init() {
 	// "http: TLS handshake error from <client-ip-addr>:<port>: [...]: i/o timeout"
 	go_log.SetOutput(ioutil.Discard)
 
-	log = &ContextLogger{
+	log = &TraceLogger{
 		&logrus.Logger{
 			Out:       os.Stderr,
 			Formatter: &CustomJSONFormatter{},

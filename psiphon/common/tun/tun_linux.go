@@ -235,7 +235,7 @@ func configureServerInterface(
 		"add", serverIPv6AddressCIDR)
 	if err != nil {
 		if config.AllowNoIPv6NetworkConfiguration {
-			config.Logger.WithContextFields(
+			config.Logger.WithTraceFields(
 				common.LogFields{
 					"error": err}).Warning(
 				"assign IPv6 address failed")
@@ -269,7 +269,7 @@ func configureServerInterface(
 		"net.ipv6.conf.all.forwarding=1")
 	if err != nil {
 		if config.AllowNoIPv6NetworkConfiguration {
-			config.Logger.WithContextFields(
+			config.Logger.WithTraceFields(
 				common.LogFields{
 					"error": err}).Warning(
 				"allow IPv6 forwarding failed")
@@ -306,7 +306,7 @@ func configureServerInterface(
 			"-j", "MASQUERADE")
 		if mode != "-D" && err != nil {
 			if config.AllowNoIPv6NetworkConfiguration {
-				config.Logger.WithContextFields(
+				config.Logger.WithTraceFields(
 					common.LogFields{
 						"error": err}).Warning(
 					"configure IPv6 masquerading failed")
@@ -351,7 +351,7 @@ func configureClientInterface(
 		"add", config.IPv6AddressCIDR)
 	if err != nil {
 		if config.AllowNoIPv6NetworkConfiguration {
-			config.Logger.WithContextFields(
+			config.Logger.WithTraceFields(
 				common.LogFields{
 					"error": err}).Warning(
 				"assign IPv6 address failed")
@@ -394,7 +394,7 @@ func configureClientInterface(
 			"dev", tunDeviceName)
 		if err != nil {
 			if config.AllowNoIPv6NetworkConfiguration {
-				config.Logger.WithContextFields(
+				config.Logger.WithTraceFields(
 					common.LogFields{
 						"error": err}).Warning("add IPv6 route failed")
 			} else {

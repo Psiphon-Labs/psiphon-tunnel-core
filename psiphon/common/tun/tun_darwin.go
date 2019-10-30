@@ -354,7 +354,7 @@ func configureServerInterface(
 
 	tempFile.Close()
 
-	config.Logger.WithContextFields(common.LogFields{
+	config.Logger.WithTraceFields(common.LogFields{
 		"content": pfConf,
 	}).Debug("pf.conf")
 

@@ -257,7 +257,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		break
 	}
 	if meekCookie == nil || len(meekCookie.Value) == 0 {
-		log.WithContext().Warning("missing meek cookie")
+		log.WithTrace().Warning("missing meek cookie")
 		common.TerminateHTTPConnection(responseWriter, request)
 		return
 	}
@@ -266,7 +266,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		for _, header := range server.support.Config.MeekProhibitedHeaders {
 			value := request.Header.Get(header)
 			if header != "" {
-				log.WithContextFields(LogFields{
+				log.WithTraceFields(LogFields{
 					"header": header,
 					"value":  value,
 				}).Warning("prohibited meek header")
@@ -290,7 +290,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	if err != nil {
 		// Debug since session cookie errors commonly occur during
 		// normal operation.
-		log.WithContextFields(LogFields{"error": err}).Debug("session lookup failed")
+		log.WithTraceFields(LogFields{"error": err}).Debug("session lookup failed")
 		common.TerminateHTTPConnection(responseWriter, request)
 		return
 	}
@@ -304,7 +304,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		handled := server.support.TacticsServer.HandleEndPoint(
 			endPoint, common.GeoIPData(geoIPData), responseWriter, request)
 		if !handled {
-			log.WithContextFields(LogFields{"endPoint": endPoint}).Info("unhandled endpoint")
+			log.WithTraceFields(LogFields{"endPoint": endPoint}).Info("unhandled endpoint")
 			common.TerminateHTTPConnection(responseWriter, request)
 		}
 		return
@@ -363,7 +363,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		if err != io.EOF {
 			// Debug since errors such as "i/o timeout" occur during normal operation;
 			// also, golang network error messages may contain client IP.
-			log.WithContextFields(LogFields{"error": err}).Debug("read request failed")
+			log.WithTraceFields(LogFields{"error": err}).Debug("read request failed")
 		}
 		common.TerminateHTTPConnection(responseWriter, request)
 
@@ -474,7 +474,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		if responseError != io.EOF {
 			// Debug since errors such as "i/o timeout" occur during normal operation;
 			// also, golang network error messages may contain client IP.
-			log.WithContextFields(LogFields{"error": responseError}).Debug("write response failed")
+			log.WithTraceFields(LogFields{"error": responseError}).Debug("write response failed")
 		}
 		common.TerminateHTTPConnection(responseWriter, request)
 
@@ -835,7 +835,7 @@ func (server *MeekServer) deleteExpiredSessions() {
 	}
 	deleteWaitGroup.Wait()
 
-	log.WithContextFields(
+	log.WithTraceFields(
 		LogFields{"elapsed time": monotime.Since(start)}).Debug("deleted expired sessions")
 }
 

@@ -704,7 +704,7 @@ func (logger *testLogger) WithContext() common.LogContext {
 	return &testLoggerContext{context: stacktrace.GetParentFunctionName()}
 }
 
-func (logger *testLogger) WithContextFields(fields common.LogFields) common.LogContext {
+func (logger *testLogger) WithTraceFields(fields common.LogFields) common.LogContext {
 	return &testLoggerContext{
 		context: stacktrace.GetParentFunctionName(),
 		fields:  fields,

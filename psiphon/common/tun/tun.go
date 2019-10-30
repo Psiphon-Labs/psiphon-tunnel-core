@@ -282,7 +282,7 @@ func NewServer(config *ServerConfig) (*Server, error) {
 // Start starts a server and returns with it running.
 func (server *Server) Start() {
 
-	server.config.Logger.WithContext().Info("starting")
+	server.config.Logger.WithTrace().Info("starting")
 
 	server.workers.Add(1)
 	go server.runSessionReaper()
@@ -297,7 +297,7 @@ func (server *Server) Start() {
 // Stop halts a running server.
 func (server *Server) Stop() {
 
-	server.config.Logger.WithContext().Info("stopping")
+	server.config.Logger.WithTrace().Info("stopping")
 
 	server.stopRunning()
 
@@ -322,7 +322,7 @@ func (server *Server) Stop() {
 
 	server.workers.Wait()
 
-	server.config.Logger.WithContext().Info("stopped")
+	server.config.Logger.WithTrace().Info("stopped")
 }
 
 // AllowedPortChecker is a function which returns true when it is
@@ -404,7 +404,7 @@ func (server *Server) ClientConnected(
 	default:
 	}
 
-	server.config.Logger.WithContextFields(
+	server.config.Logger.WithTraceFields(
 		common.LogFields{"sessionID": sessionID}).Debug("client connected")
 
 	MTU := getMTU(server.config.MTU)
@@ -480,7 +480,7 @@ func (server *Server) ClientDisconnected(sessionID string) {
 	session := server.getSession(sessionID)
 	if session != nil {
 
-		server.config.Logger.WithContextFields(
+		server.config.Logger.WithTraceFields(
 			common.LogFields{"sessionID": sessionID}).Debug("client disconnected")
 
 		server.interruptSession(session)
@@ -494,7 +494,7 @@ func (server *Server) getSession(sessionID string) *session {
 		if ok {
 			return s.(*session)
 		}
-		server.config.Logger.WithContext().Warning("unexpected missing session")
+		server.config.Logger.WithTrace().Warning("unexpected missing session")
 	}
 	return nil
 }
@@ -722,7 +722,7 @@ func (server *Server) runDeviceDownstream() {
 		}
 
 		if err != nil {
-			server.config.Logger.WithContextFields(
+			server.config.Logger.WithTraceFields(
 				common.LogFields{"error": err}).Warning("read device packet failed")
 			// May be temporary error condition, keep reading.
 			continue
@@ -826,7 +826,7 @@ func (server *Server) runClientUpstream(session *session) {
 		if err != nil {
 
 			// Debug since channel I/O errors occur during normal operation.
-			server.config.Logger.WithContextFields(
+			server.config.Logger.WithTraceFields(
 				common.LogFields{"error": err}).Debug("read channel packet failed")
 
 			// Tear down the session. Must be invoked asynchronously.
@@ -860,7 +860,7 @@ func (server *Server) runClientUpstream(session *session) {
 		err = server.device.WritePacket(readPacket)
 
 		if err != nil {
-			server.config.Logger.WithContextFields(
+			server.config.Logger.WithTraceFields(
 				common.LogFields{"error": err}).Warning("write device packet failed")
 			// May be temporary error condition, keep working. The packet is
 			// most likely dropped.
@@ -891,7 +891,7 @@ func (server *Server) runClientDownstream(session *session) {
 		if err != nil {
 
 			// Debug since channel I/O errors occur during normal operation.
-			server.config.Logger.WithContextFields(
+			server.config.Logger.WithTraceFields(
 				common.LogFields{"error": err}).Debug("write channel packets failed")
 
 			downstreamPackets.Replace(packetBuffer)
@@ -998,14 +998,14 @@ func (server *Server) resetRouting(IPv4Address, IPv6Address net.IP) {
 
 	err := resetNATTables(server.config, IPv4Address)
 	if err != nil {
-		server.config.Logger.WithContextFields(
+		server.config.Logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("reset IPv4 routing failed")
 
 	}
 
 	err = resetNATTables(server.config, IPv6Address)
 	if err != nil {
-		server.config.Logger.WithContextFields(
+		server.config.Logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("reset IPv6 routing failed")
 
 	}
@@ -1755,7 +1755,7 @@ func NewClient(config *ClientConfig) (*Client, error) {
 // Start starts a client and returns with it running.
 func (client *Client) Start() {
 
-	client.config.Logger.WithContext().Info("starting")
+	client.config.Logger.WithTrace().Info("starting")
 
 	client.workers.Add(1)
 	go func() {
@@ -1771,7 +1771,7 @@ func (client *Client) Start() {
 			}
 
 			if err != nil {
-				client.config.Logger.WithContextFields(
+				client.config.Logger.WithTraceFields(
 					common.LogFields{"error": err}).Info("read device packet failed")
 				// May be temporary error condition, keep working.
 				continue
@@ -1817,7 +1817,7 @@ func (client *Client) Start() {
 			client.upstreamPackets.Replace(packetBuffer)
 
 			if err != nil {
-				client.config.Logger.WithContextFields(
+				client.config.Logger.WithTraceFields(
 					common.LogFields{"error": err}).Info("write channel packets failed")
 				// May be temporary error condition, such as reconnecting the tunnel;
 				// keep working. The packets are most likely dropped.
@@ -1840,7 +1840,7 @@ func (client *Client) Start() {
 			}
 
 			if err != nil {
-				client.config.Logger.WithContextFields(
+				client.config.Logger.WithTraceFields(
 					common.LogFields{"error": err}).Info("read channel packet failed")
 				// May be temporary error condition, such as reconnecting the tunnel;
 				// keep working.
@@ -1858,7 +1858,7 @@ func (client *Client) Start() {
 			err = client.device.WritePacket(readPacket)
 
 			if err != nil {
-				client.config.Logger.WithContextFields(
+				client.config.Logger.WithTraceFields(
 					common.LogFields{"error": err}).Info("write device packet failed")
 				// May be temporary error condition, keep working. The packet is
 				// most likely dropped.
@@ -1871,7 +1871,7 @@ func (client *Client) Start() {
 // Stop halts a running client.
 func (client *Client) Stop() {
 
-	client.config.Logger.WithContext().Info("stopping")
+	client.config.Logger.WithTrace().Info("stopping")
 
 	client.stopRunning()
 	client.device.Close()
@@ -1882,7 +1882,7 @@ func (client *Client) Stop() {
 	client.metrics.checkpoint(
 		client.config.Logger, nil, "packet_metrics", packetMetricsAll)
 
-	client.config.Logger.WithContext().Info("stopped")
+	client.config.Logger.WithTrace().Info("stopped")
 }
 
 /*

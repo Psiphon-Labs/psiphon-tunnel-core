@@ -51,23 +51,23 @@ func RunServices(configJSON []byte) error {
 
 	config, err := LoadConfig(configJSON)
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Error("load config failed")
+		log.WithTraceFields(LogFields{"error": err}).Error("load config failed")
 		return errors.Trace(err)
 	}
 
 	err = InitLogging(config)
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Error("init logging failed")
+		log.WithTraceFields(LogFields{"error": err}).Error("init logging failed")
 		return errors.Trace(err)
 	}
 
 	supportServices, err := NewSupportServices(config)
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Error("init support services failed")
+		log.WithTraceFields(LogFields{"error": err}).Error("init support services failed")
 		return errors.Trace(err)
 	}
 
-	log.WithContextFields(*buildinfo.GetBuildInfo().ToMap()).Info("startup")
+	log.WithTraceFields(*buildinfo.GetBuildInfo().ToMap()).Info("startup")
 
 	waitGroup := new(sync.WaitGroup)
 	shutdownBroadcast := make(chan struct{})
@@ -75,7 +75,7 @@ func RunServices(configJSON []byte) error {
 
 	tunnelServer, err := NewTunnelServer(supportServices, shutdownBroadcast)
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Error("init tunnel server failed")
+		log.WithTraceFields(LogFields{"error": err}).Error("init tunnel server failed")
 		return errors.Trace(err)
 	}
 
@@ -93,7 +93,7 @@ func RunServices(configJSON []byte) error {
 			SessionIdleExpirySeconds:    config.PacketTunnelSessionIdleExpirySeconds,
 		})
 		if err != nil {
-			log.WithContextFields(LogFields{"error": err}).Error("init packet tunnel failed")
+			log.WithTraceFields(LogFields{"error": err}).Error("init packet tunnel failed")
 			return errors.Trace(err)
 		}
 
@@ -238,11 +238,11 @@ loop:
 			logServerLoad(tunnelServer)
 
 		case <-systemStopSignal:
-			log.WithContext().Info("shutdown by system")
+			log.WithTrace().Info("shutdown by system")
 			break loop
 
 		case err = <-errorChannel:
-			log.WithContextFields(LogFields{"error": err}).Error("service failed")
+			log.WithTraceFields(LogFields{"error": err}).Error("service failed")
 			break loop
 		}
 	}
@@ -301,7 +301,7 @@ func getRuntimeMetrics() LogFields {
 
 func outputProcessProfiles(config *Config, filenameSuffix string) {
 
-	log.WithContextFields(getRuntimeMetrics()).Info("runtime_metrics")
+	log.WithTraceFields(getRuntimeMetrics()).Info("runtime_metrics")
 
 	if config.ProcessProfileOutputDirectory != "" {
 		common.WriteRuntimeProfiles(
@@ -460,13 +460,13 @@ func (support *SupportServices) Reload() {
 		}
 
 		if err != nil {
-			log.WithContextFields(
+			log.WithTraceFields(
 				LogFields{
 					"reloader": reloader.LogDescription(),
 					"error":    err}).Error("reload failed")
 			// Keep running with previous state
 		} else {
-			log.WithContextFields(
+			log.WithTraceFields(
 				LogFields{
 					"reloader": reloader.LogDescription(),
 					"reloaded": reloaded}).Info("reload success")

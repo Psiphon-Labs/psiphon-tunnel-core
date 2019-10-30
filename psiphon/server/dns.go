@@ -89,7 +89,7 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 
 			dns.resolvers = resolvers
 
-			log.WithContextFields(
+			log.WithTraceFields(
 				LogFields{
 					"resolvers": resolvers,
 				}).Debug("loaded system DNS resolvers")
@@ -103,7 +103,7 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 			return nil, errors.Trace(err)
 		}
 
-		log.WithContextFields(
+		log.WithTraceFields(
 			LogFields{"err": err}).Info(
 			"failed to load system DNS resolver; using default")
 
@@ -162,7 +162,7 @@ func (dns *DNSResolver) reloadWhenStale() {
 
 			_, err := dns.Reload()
 			if err != nil {
-				log.WithContextFields(
+				log.WithTraceFields(
 					LogFields{"err": err}).Info(
 					"failed to reload system DNS resolver")
 			}

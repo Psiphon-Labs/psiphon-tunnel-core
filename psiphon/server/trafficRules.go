@@ -547,7 +547,7 @@ func (set *TrafficRulesSet) GetTrafficRules(
 	// TODO: faster lookup?
 	for _, filteredRules := range set.FilteredRules {
 
-		log.WithContextFields(LogFields{"filter": filteredRules.Filter}).Debug("filter check")
+		log.WithTraceFields(LogFields{"filter": filteredRules.Filter}).Debug("filter check")
 
 		if len(filteredRules.Filter.TunnelProtocols) > 0 {
 			if !common.Contains(filteredRules.Filter.TunnelProtocols, tunnelProtocol) {
@@ -629,7 +629,7 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			}
 		}
 
-		log.WithContextFields(LogFields{"filter": filteredRules.Filter}).Debug("filter match")
+		log.WithTraceFields(LogFields{"filter": filteredRules.Filter}).Debug("filter match")
 
 		// This is the first match. Override defaults using provided fields from selected rules, and return result.
 
@@ -713,7 +713,7 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		trafficRules.RateLimits.WriteUnthrottledBytes = new(int64)
 	}
 
-	log.WithContextFields(LogFields{"trafficRules": trafficRules}).Debug("selected traffic rules")
+	log.WithTraceFields(LogFields{"trafficRules": trafficRules}).Debug("selected traffic rules")
 
 	return trafficRules
 }

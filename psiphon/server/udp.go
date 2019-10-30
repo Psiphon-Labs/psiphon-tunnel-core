@@ -50,7 +50,7 @@ func (sshClient *sshClient) handleUDPChannel(newChannel ssh.NewChannel) {
 	sshChannel, requests, err := newChannel.Accept()
 	if err != nil {
 		if !isExpectedTunnelIOError(err) {
-			log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
+			log.WithTraceFields(LogFields{"error": err}).Warning("accept new channel failed")
 		}
 		return
 	}
@@ -97,7 +97,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 		if e := recover(); e != nil {
 			err := errors.Tracef(
 				"udpPortForwardMultiplexer panic: %s: %s", e, debug.Stack())
-			log.WithContextFields(LogFields{"error": err}).Warning("run failed")
+			log.WithTraceFields(LogFields{"error": err}).Warning("run failed")
 		}
 	}()
 
@@ -109,7 +109,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 		if err != nil {
 			if err != io.EOF {
 				// Debug since I/O errors occur during normal operation
-				log.WithContextFields(LogFields{"error": err}).Debug("readUdpgwMessage failed")
+				log.WithTraceFields(LogFields{"error": err}).Debug("readUdpgwMessage failed")
 			}
 			break
 		}
@@ -134,7 +134,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 			if 0 != bytes.Compare(portForward.remoteIP, message.remoteIP) ||
 				portForward.remotePort != message.remotePort {
 
-				log.WithContext().Warning("UDP port forward remote address mismatch")
+				log.WithTrace().Warning("UDP port forward remote address mismatch")
 				continue
 			}
 
@@ -168,7 +168,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 			// Can't defer sshClient.closedPortForward() here;
 			// relayDownstream will call sshClient.closedPortForward()
 
-			log.WithContextFields(
+			log.WithTraceFields(
 				LogFields{
 					"remoteAddr": fmt.Sprintf("%s:%d", dialIP.String(), dialPort),
 					"connID":     message.connID}).Debug("dialing")
@@ -182,7 +182,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 				mux.sshClient.sshServer.monitorPortForwardDialError(err)
 
 				// Note: Debug level, as logMessage may contain user traffic destination address information
-				log.WithContextFields(LogFields{"error": err}).Debug("DialUDP failed")
+				log.WithTraceFields(LogFields{"error": err}).Debug("DialUDP failed")
 				continue
 			}
 
@@ -211,7 +211,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 			if err != nil {
 				lruEntry.Remove()
 				mux.sshClient.closedPortForward(portForwardTypeUDP, 0, 0)
-				log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
+				log.WithTraceFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
 				continue
 			}
 
@@ -238,7 +238,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 		_, err = portForward.conn.Write(message.packet)
 		if err != nil {
 			// Debug since errors such as "write: operation not permitted" occur during normal operation
-			log.WithContextFields(LogFields{"error": err}).Debug("upstream UDP relay failed")
+			log.WithTraceFields(LogFields{"error": err}).Debug("upstream UDP relay failed")
 			// The port forward's goroutine will complete cleanup
 			portForward.conn.Close()
 		}
@@ -304,7 +304,7 @@ func (portForward *udpPortForward) relayDownstream() {
 		if err != nil {
 			if err != io.EOF {
 				// Debug since errors such as "use of closed network connection" occur during normal operation
-				log.WithContextFields(LogFields{"error": err}).Debug("downstream UDP relay failed")
+				log.WithTraceFields(LogFields{"error": err}).Debug("downstream UDP relay failed")
 			}
 			break
 		}
@@ -329,7 +329,7 @@ func (portForward *udpPortForward) relayDownstream() {
 		if err != nil {
 			// Close the channel, which will interrupt the main loop.
 			portForward.mux.sshChannel.Close()
-			log.WithContextFields(LogFields{"error": err}).Debug("downstream UDP relay failed")
+			log.WithTraceFields(LogFields{"error": err}).Debug("downstream UDP relay failed")
 			break
 		}
 
@@ -348,7 +348,7 @@ func (portForward *udpPortForward) relayDownstream() {
 	bytesDown := atomic.LoadInt64(&portForward.bytesDown)
 	portForward.mux.sshClient.closedPortForward(portForwardTypeUDP, bytesUp, bytesDown)
 
-	log.WithContextFields(
+	log.WithTraceFields(
 		LogFields{
 			"remoteAddr": fmt.Sprintf("%s:%d",
 				net.IP(portForward.remoteIP).String(), portForward.remotePort),

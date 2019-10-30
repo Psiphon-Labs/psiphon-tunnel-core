@@ -192,7 +192,7 @@ func (server *TunnelServer) Run() error {
 				return common.GeoIPData(support.GeoIPService.Lookup(IPAddress))
 			})
 
-		log.WithContextFields(
+		log.WithTraceFields(
 			LogFields{
 				"localAddress":   localAddress,
 				"tunnelProtocol": tunnelProtocol,
@@ -212,7 +212,7 @@ func (server *TunnelServer) Run() error {
 		go func(listener *sshListener) {
 			defer server.runWaitGroup.Done()
 
-			log.WithContextFields(
+			log.WithTraceFields(
 				LogFields{
 					"localAddress":   listener.localAddress,
 					"tunnelProtocol": listener.tunnelProtocol,
@@ -223,7 +223,7 @@ func (server *TunnelServer) Run() error {
 				server.listenerError,
 				listener.tunnelProtocol)
 
-			log.WithContextFields(
+			log.WithTraceFields(
 				LogFields{
 					"localAddress":   listener.localAddress,
 					"tunnelProtocol": listener.tunnelProtocol,
@@ -244,7 +244,7 @@ func (server *TunnelServer) Run() error {
 	server.sshServer.stopClients()
 	server.runWaitGroup.Wait()
 
-	log.WithContext().Info("stopped")
+	log.WithTrace().Info("stopped")
 
 	return err
 }
@@ -408,7 +408,7 @@ func (sshServer *sshServer) setEstablishTunnels(establish bool) {
 	}
 	atomic.StoreInt32(&sshServer.establishTunnels, establishFlag)
 
-	log.WithContextFields(
+	log.WithTraceFields(
 		LogFields{"establish": establish}).Info("establishing tunnels")
 }
 
@@ -436,7 +436,7 @@ func (sshServer *sshServer) runListener(
 		// span multiple TCP connections.
 
 		if !sshServer.getEstablishTunnels() {
-			log.WithContext().Debug("not establishing tunnels")
+			log.WithTrace().Debug("not establishing tunnels")
 			clientConn.Close()
 			return
 		}
@@ -451,7 +451,7 @@ func (sshServer *sshServer) runListener(
 		if clientTunnelProtocol != "" {
 
 			if !common.Contains(runningProtocols, clientTunnelProtocol) {
-				log.WithContextFields(
+				log.WithTraceFields(
 					LogFields{
 						"clientTunnelProtocol": clientTunnelProtocol}).
 					Warning("invalid client tunnel protocol")
@@ -514,7 +514,7 @@ func (sshServer *sshServer) runListener(
 
 			if err != nil {
 				if e, ok := err.(net.Error); ok && e.Temporary() {
-					log.WithContextFields(LogFields{"error": err}).Error("accept failed")
+					log.WithTraceFields(LogFields{"error": err}).Error("accept failed")
 					// Temporary error, keep running
 					continue
 				}
@@ -582,7 +582,7 @@ func (sshServer *sshServer) registerEstablishedClient(client *sshClient) bool {
 
 		// This case is expected to be common, and so logged at the lowest severity
 		// level.
-		log.WithContext().Debug(
+		log.WithTrace().Debug(
 			"stopping existing client with duplicate session ID")
 
 		existingClient.stop()
@@ -634,7 +634,7 @@ func (sshServer *sshServer) registerEstablishedClient(client *sshClient) bool {
 	if sshServer.clients[client.sessionID] != nil {
 		// As this is expected to be rare case, it's logged at a higher severity
 		// level.
-		log.WithContext().Warning(
+		log.WithTrace().Warning(
 			"aborting new client with duplicate session ID")
 		return false
 	}
@@ -962,7 +962,7 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 		if err != nil {
 			clientConn.Close()
 			// This is a debug log as the only possible error is context timeout.
-			log.WithContextFields(LogFields{"error": err}).Debug(
+			log.WithTraceFields(LogFields{"error": err}).Debug(
 				"acquire SSH handshake semaphore failed")
 			return
 		}
@@ -1001,7 +1001,7 @@ func (sshServer *sshServer) monitorPortForwardDialError(err error) {
 			opErr.Err == syscall.EMFILE ||
 			opErr.Err == syscall.ENFILE {
 
-			log.WithContextFields(
+			log.WithTraceFields(
 				LogFields{"error": opErr.Err}).Error(
 				"port forward dial failed due to unavailable resource")
 		}
@@ -1142,7 +1142,7 @@ func (sshClient *sshClient) run(
 	if err != nil {
 		conn.Close()
 		if !isExpectedTunnelIOError(err) {
-			log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
+			log.WithTraceFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
 		}
 		return
 	}
@@ -1273,7 +1273,7 @@ func (sshClient *sshClient) run(
 		// This is a Debug log due to noise. The handshake often fails due to I/O
 		// errors as clients frequently interrupt connections in progress when
 		// client-side load balancing completes a connection to a different server.
-		log.WithContextFields(LogFields{"error": result.err}).Debug("handshake failed")
+		log.WithTraceFields(LogFields{"error": result.err}).Debug("handshake failed")
 		return
 	}
 
@@ -1292,7 +1292,7 @@ func (sshClient *sshClient) run(
 
 	if !sshClient.sshServer.registerEstablishedClient(sshClient) {
 		conn.Close()
-		log.WithContext().Warning("register failed")
+		log.WithTrace().Warning("register failed")
 		return
 	}
 
@@ -1450,16 +1450,16 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 			now := int64(monotime.Now())
 			if atomic.CompareAndSwapInt64(&sshClient.sshServer.lastAuthLog, int64(lastAuthLog), now) {
 				count := atomic.SwapInt64(&sshClient.sshServer.authFailedCount, 0)
-				log.WithContextFields(
+				log.WithTraceFields(
 					LogFields{"lastError": err, "failedCount": count}).Warning("authentication failures")
 			}
 		}
 
-		log.WithContextFields(LogFields{"error": err, "method": method}).Debug("authentication failed")
+		log.WithTraceFields(LogFields{"error": err, "method": method}).Debug("authentication failed")
 
 	} else {
 
-		log.WithContextFields(LogFields{"error": err, "method": method}).Debug("authentication success")
+		log.WithTraceFields(LogFields{"error": err, "method": method}).Debug("authentication success")
 	}
 }
 
@@ -1601,12 +1601,12 @@ func (sshClient *sshClient) handleSSHRequests(requests <-chan *ssh.Request) {
 		if err == nil {
 			err = request.Reply(true, responsePayload)
 		} else {
-			log.WithContextFields(LogFields{"error": err}).Warning("request failed")
+			log.WithTraceFields(LogFields{"error": err}).Warning("request failed")
 			err = request.Reply(false, nil)
 		}
 		if err != nil {
 			if !isExpectedTunnelIOError(err) {
-				log.WithContextFields(LogFields{"error": err}).Warning("response failed")
+				log.WithTraceFields(LogFields{"error": err}).Warning("response failed")
 			}
 		}
 
@@ -1818,7 +1818,7 @@ func (sshClient *sshClient) handleNewRandomStreamChannel(
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
 		if !isExpectedTunnelIOError(err) {
-			log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
+			log.WithTraceFields(LogFields{"error": err}).Warning("accept new channel failed")
 		}
 		return
 	}
@@ -1836,7 +1836,7 @@ func (sshClient *sshClient) handleNewRandomStreamChannel(
 			received = int(n)
 			if err != nil {
 				if !isExpectedTunnelIOError(err) {
-					log.WithContextFields(LogFields{"error": err}).Warning("receive failed")
+					log.WithTraceFields(LogFields{"error": err}).Warning("receive failed")
 				}
 				// Fall through and record any bytes received...
 			}
@@ -1847,7 +1847,7 @@ func (sshClient *sshClient) handleNewRandomStreamChannel(
 			sent = int(n)
 			if err != nil {
 				if !isExpectedTunnelIOError(err) {
-					log.WithContextFields(LogFields{"error": err}).Warning("send failed")
+					log.WithTraceFields(LogFields{"error": err}).Warning("send failed")
 				}
 			}
 		}
@@ -1880,7 +1880,7 @@ func (sshClient *sshClient) handleNewPacketTunnelChannel(
 	packetTunnelChannel, requests, err := newChannel.Accept()
 	if err != nil {
 		if !isExpectedTunnelIOError(err) {
-			log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
+			log.WithTraceFields(LogFields{"error": err}).Warning("accept new channel failed")
 		}
 		return
 	}
@@ -1930,7 +1930,7 @@ func (sshClient *sshClient) handleNewPacketTunnelChannel(
 		flowActivityUpdaterMaker,
 		metricUpdater)
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("start packet tunnel client failed")
+		log.WithTraceFields(LogFields{"error": err}).Warning("start packet tunnel client failed")
 		sshClient.setPacketTunnelChannel(nil)
 	}
 }
@@ -2177,7 +2177,7 @@ func (sshClient *sshClient) runOSLSender() {
 				break
 			}
 			if !isExpectedTunnelIOError(err) {
-				log.WithContextFields(LogFields{"error": err}).Warning("sendOSLRequest failed")
+				log.WithTraceFields(LogFields{"error": err}).Warning("sendOSLRequest failed")
 			}
 
 			// If the request failed, retry after a delay (with exponential backoff)
@@ -2243,7 +2243,7 @@ func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessa
 	reason := ssh.Prohibited
 
 	// Note: Debug level, as logMessage may contain user traffic destination address information
-	log.WithContextFields(
+	log.WithTraceFields(
 		LogFields{
 			"channelType":  newChannel.ChannelType(),
 			"logMessage":   logMessage,
@@ -2300,7 +2300,7 @@ func (sshClient *sshClient) setHandshakeState(
 
 		// This sanity check mitigates malicious clients causing excess CPU use.
 		if i >= MAX_AUTHORIZATIONS {
-			log.WithContext().Warning("too many authorizations")
+			log.WithTrace().Warning("too many authorizations")
 			break
 		}
 
@@ -2309,7 +2309,7 @@ func (sshClient *sshClient) setHandshakeState(
 			authorization)
 
 		if err != nil {
-			log.WithContextFields(
+			log.WithTraceFields(
 				LogFields{"error": err}).Warning("verify authorization failed")
 			continue
 		}
@@ -2317,7 +2317,7 @@ func (sshClient *sshClient) setHandshakeState(
 		authorizationID := base64.StdEncoding.EncodeToString(verifiedAuthorization.ID)
 
 		if common.Contains(authorizedAccessTypes, verifiedAuthorization.AccessType) {
-			log.WithContextFields(
+			log.WithTraceFields(
 				LogFields{"accessType": verifiedAuthorization.AccessType}).Warning("duplicate authorization access type")
 			continue
 		}
@@ -2352,7 +2352,7 @@ func (sshClient *sshClient) setHandshakeState(
 		sessionID, ok := sshClient.sshServer.authorizationSessionIDs[authorizationID]
 		if ok && sessionID != sshClient.sessionID {
 
-			log.WithContextFields(
+			log.WithTraceFields(
 				LogFields{"authorizationID": authorizationID}).Warning("duplicate active authorization")
 
 			// Invoke asynchronously to avoid deadlocks.
@@ -2644,7 +2644,7 @@ func (sshClient *sshClient) isPortForwardPermitted(
 		}
 	}
 
-	log.WithContextFields(
+	log.WithTraceFields(
 		LogFields{
 			"type": portForwardType,
 			"port": port,
@@ -2809,7 +2809,7 @@ func (sshClient *sshClient) establishedPortForward(
 	if !sshClient.allocatePortForward(portForwardType) {
 
 		portForwardLRU.CloseOldest()
-		log.WithContext().Debug("closed LRU port forward")
+		log.WithTrace().Debug("closed LRU port forward")
 
 		state.availablePortForwardCond.L.Lock()
 		for !sshClient.allocatePortForward(portForwardType) {
@@ -2911,7 +2911,7 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	dialStartTime := monotime.Now()
 
-	log.WithContextFields(LogFields{"hostToConnect": hostToConnect}).Debug("resolving")
+	log.WithTraceFields(LogFields{"hostToConnect": hostToConnect}).Debug("resolving")
 
 	ctx, cancelCtx := context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
 	IPs, err := (&net.Resolver{}).LookupIPAddr(ctx, hostToConnect)
@@ -2966,7 +2966,7 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	remoteAddr := net.JoinHostPort(IP.String(), strconv.Itoa(portToConnect))
 
-	log.WithContextFields(LogFields{"remoteAddr": remoteAddr}).Debug("dialing")
+	log.WithTraceFields(LogFields{"remoteAddr": remoteAddr}).Debug("dialing")
 
 	ctx, cancelCtx = context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
 	fwdConn, err := (&net.Dialer{}).DialContext(ctx, "tcp", remoteAddr)
@@ -2992,7 +2992,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	fwdChannel, requests, err := newChannel.Accept()
 	if err != nil {
 		if !isExpectedTunnelIOError(err) {
-			log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
+			log.WithTraceFields(LogFields{"error": err}).Warning("accept new channel failed")
 		}
 		return
 	}
@@ -3044,13 +3044,13 @@ func (sshClient *sshClient) handleTCPChannel(
 		updater,
 		lruEntry)
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
+		log.WithTraceFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
 		return
 	}
 
 	// Relay channel to forwarded connection.
 
-	log.WithContextFields(LogFields{"remoteAddr": remoteAddr}).Debug("relaying")
+	log.WithTraceFields(LogFields{"remoteAddr": remoteAddr}).Debug("relaying")
 
 	// TODO: relay errors to fwdChannel.Stderr()?
 	relayWaitGroup := new(sync.WaitGroup)
@@ -3065,7 +3065,7 @@ func (sshClient *sshClient) handleTCPChannel(
 		atomic.AddInt64(&bytesDown, bytes)
 		if err != nil && err != io.EOF {
 			// Debug since errors such as "connection reset by peer" occur during normal operation
-			log.WithContextFields(LogFields{"error": err}).Debug("downstream TCP relay failed")
+			log.WithTraceFields(LogFields{"error": err}).Debug("downstream TCP relay failed")
 		}
 		// Interrupt upstream io.Copy when downstream is shutting down.
 		// TODO: this is done to quickly cleanup the port forward when
@@ -3077,7 +3077,7 @@ func (sshClient *sshClient) handleTCPChannel(
 		fwdConn, fwdChannel, make([]byte, SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE))
 	atomic.AddInt64(&bytesUp, bytes)
 	if err != nil && err != io.EOF {
-		log.WithContextFields(LogFields{"error": err}).Debug("upstream TCP relay failed")
+		log.WithTraceFields(LogFields{"error": err}).Debug("upstream TCP relay failed")
 	}
 	// Shutdown special case: fwdChannel will be closed and return EOF when
 	// the SSH connection is closed, but we need to explicitly close fwdConn
@@ -3087,7 +3087,7 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	relayWaitGroup.Wait()
 
-	log.WithContextFields(
+	log.WithTraceFields(
 		LogFields{
 			"remoteAddr": remoteAddr,
 			"bytesUp":    atomic.LoadInt64(&bytesUp),

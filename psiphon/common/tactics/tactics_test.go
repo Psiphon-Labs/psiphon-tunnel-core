@@ -851,7 +851,7 @@ func (l *testLogger) WithContext() common.LogContext {
 	return &testLoggerContext{context: stacktrace.GetParentFunctionName()}
 }
 
-func (l *testLogger) WithContextFields(fields common.LogFields) common.LogContext {
+func (l *testLogger) WithTraceFields(fields common.LogFields) common.LogContext {
 	return &testLoggerContext{
 		context: stacktrace.GetParentFunctionName(),
 		fields:  fields,
