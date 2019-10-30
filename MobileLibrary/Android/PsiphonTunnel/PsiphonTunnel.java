@@ -96,6 +96,7 @@ public class PsiphonTunnel {
         default public void onStartedWaitingForNetworkConnectivity() {}
         default public void onStoppedWaitingForNetworkConnectivity() {}
         default public void onActiveAuthorizationIDs(List<String> authorizations) {}
+        default public void onApplicationParameter(String key, Object value) {}
         default public void onExiting() {}
     }
 
@@ -326,9 +327,9 @@ public class PsiphonTunnel {
             Locale.setDefault(new Locale("en"));
             tunFd = vpnServiceBuilder
                             .setSession(mHostService.getAppName())
-                            .addAddress(mPrivateAddress.mIpAddress, mPrivateAddress.mPrefixLength)
+                            .addAddress(privateAddress.mIpAddress, privateAddress.mPrefixLength)
                             .addRoute("0.0.0.0", 0)
-                            .addRoute(mPrivateAddress.mSubnet, mPrivateAddress.mPrefixLength)
+                            .addRoute(privateAddress.mSubnet, privateAddress.mPrefixLength)
                             .establish();
         } catch(IllegalArgumentException e) {
             throw new Exception(errorMessage, e);
@@ -783,6 +784,10 @@ public class PsiphonTunnel {
                       enableUdpGwKeepalive();
                     }
                 }
+            } else if (noticeType.equals("ApplicationParameter")) {
+                mHostService.onApplicationParameter(
+                    notice.getJSONObject("data").getString("key"),
+                    notice.getJSONObject("data").get("value"));
             }
 
             if (diagnostic) {

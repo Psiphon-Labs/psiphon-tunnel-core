@@ -33,6 +33,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
 type noticeLogger struct {
@@ -825,6 +826,15 @@ func NoticeFragmentor(diagnosticID string, message string) {
 		"Fragmentor", noticeIsDiagnostic,
 		"diagnosticID", diagnosticID,
 		"message", message)
+}
+
+func NoticeApplicationParameters(keyValues parameters.KeyValues) {
+	for key, value := range keyValues {
+		singletonNoticeLogger.outputNotice(
+			"ApplicationParameter", 0,
+			"key", key,
+			"value", value)
+	}
 }
 
 type repetitiveNoticeState struct {

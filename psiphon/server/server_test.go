@@ -1810,7 +1810,12 @@ func paveTacticsConfigFile(
               "TunnelConnectTimeout" : "20s",
               "TunnelRateLimits" : {"WriteBytesPerSecond": 1000000},
               "TransformHostNameProbability" : 1.0,
-              "PickUserAgentProbability" : 1.0
+              "PickUserAgentProbability" : 1.0,
+              "ApplicationParameters" : {
+                "AppFlag1" : true,
+                "AppConfig1" : {"Option1" : "A", "Option2" : "B"},
+                "AppSwitches1" : [1, 2, 3, 4]
+              }
             }
           }
         }
