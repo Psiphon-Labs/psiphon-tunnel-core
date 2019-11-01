@@ -45,31 +45,31 @@ func (logger *testLogger) panic() {
 	panic("unexpected log call")
 }
 
-func (logger *testLogger) WithContext() LogContext {
-	return &testLoggerContext{}
+func (logger *testLogger) WithTrace() LogTrace {
+	return &testLoggerTrace{}
 }
 
-func (logger *testLogger) WithTraceFields(fields LogFields) LogContext {
-	return &testLoggerContext{}
+func (logger *testLogger) WithTraceFields(fields LogFields) LogTrace {
+	return &testLoggerTrace{}
 }
 
 func (logger *testLogger) LogMetric(metric string, fields LogFields) {
 	panic("unexpected log call")
 }
 
-type testLoggerContext struct {
+type testLoggerTrace struct {
 }
 
-func (context *testLoggerContext) Debug(args ...interface{}) {
+func (logger *testLoggerTrace) Debug(args ...interface{}) {
 }
 
-func (context *testLoggerContext) Info(args ...interface{}) {
+func (logger *testLoggerTrace) Info(args ...interface{}) {
 }
 
-func (context *testLoggerContext) Warning(args ...interface{}) {
+func (logger *testLoggerTrace) Warning(args ...interface{}) {
 	panic("unexpected log call")
 }
 
-func (context *testLoggerContext) Error(args ...interface{}) {
+func (logger *testLoggerTrace) Error(args ...interface{}) {
 	panic("unexpected log call")
 }
