@@ -23,13 +23,12 @@ package psiphon
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	std_errors "errors"
 	"net"
 	"os"
 	"syscall"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // LookupIP resolves a hostname. When BindToDevice is not required, it
@@ -51,7 +50,7 @@ func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, e
 		ips, err := bindLookupIP(ctx, host, dnsServer, config)
 		if err == nil {
 			if len(ips) == 0 {
-				err = errors.New("empty address list")
+				err = std_errors.New("empty address list")
 			} else {
 				return ips, err
 			}
@@ -77,7 +76,7 @@ func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, e
 	}
 
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	ips := make([]net.IP, len(addrs))
@@ -96,7 +95,7 @@ func bindLookupIP(
 	// config.DnsServerGetter.GetDnsServers() must return IP addresses
 	ipAddr := net.ParseIP(dnsServer)
 	if ipAddr == nil {
-		return nil, common.ContextError(errors.New("invalid IP address"))
+		return nil, errors.TraceNew("invalid IP address")
 	}
 
 	// When configured, attempt to synthesize an IPv6 address from
@@ -124,18 +123,18 @@ func bindLookupIP(
 		copy(ipv6[:], ipAddr.To16())
 		domain = syscall.AF_INET6
 	} else {
-		return nil, common.ContextError(errors.New("invalid IP address for DNS server"))
+		return nil, errors.TraceNew("invalid IP address for DNS server")
 	}
 
 	socketFd, err := syscall.Socket(domain, syscall.SOCK_DGRAM, 0)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	_, err = config.DeviceBinder.BindToDevice(socketFd)
 	if err != nil {
 		syscall.Close(socketFd)
-		return nil, common.ContextError(fmt.Errorf("BindToDevice failed with %s", err))
+		return nil, errors.Tracef("BindToDevice failed with %s", err)
 	}
 
 	// Connect socket to the server's IP address
@@ -149,7 +148,7 @@ func bindLookupIP(
 	}
 	if err != nil {
 		syscall.Close(socketFd)
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// Convert the syscall socket to a net.Conn, for use in the dns package
@@ -160,7 +159,7 @@ func bindLookupIP(
 	netConn, err := net.FileConn(file) // net.FileConn() dups socketFd
 	file.Close()                       // file.Close() closes socketFd
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	type resolveIPResult struct {
@@ -188,7 +187,7 @@ func bindLookupIP(
 	}
 
 	if result.err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return result.ips, nil

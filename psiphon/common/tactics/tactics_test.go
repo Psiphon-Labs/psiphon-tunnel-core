@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
 )
 
 func TestTactics(t *testing.T) {
@@ -847,12 +848,12 @@ func newTestLogger() *testLogger {
 }
 
 func (l *testLogger) WithContext() common.LogContext {
-	return &testLoggerContext{context: common.GetParentContext()}
+	return &testLoggerContext{context: stacktrace.GetParentFunctionName()}
 }
 
-func (l *testLogger) WithContextFields(fields common.LogFields) common.LogContext {
+func (l *testLogger) WithTraceFields(fields common.LogFields) common.LogContext {
 	return &testLoggerContext{
-		context: common.GetParentContext(),
+		context: stacktrace.GetParentFunctionName(),
 		fields:  fields,
 	}
 }

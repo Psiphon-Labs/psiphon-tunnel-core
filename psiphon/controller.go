@@ -25,7 +25,7 @@ package psiphon
 
 import (
 	"context"
-	"errors"
+	std_errors "errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -34,6 +34,7 @@ import (
 
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -85,7 +86,7 @@ type Controller struct {
 func NewController(config *Config) (controller *Controller, err error) {
 
 	if !config.IsCommitted() {
-		return nil, common.ContextError(errors.New("uncommitted config"))
+		return nil, errors.TraceNew("uncommitted config")
 	}
 
 	// Needed by regen, at least
@@ -147,7 +148,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 			Transport:         packetTunnelTransport,
 		})
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		controller.packetTunnelClient = packetTunnelClient
@@ -188,7 +189,7 @@ func (controller *Controller) Run(ctx context.Context) {
 			err = fmt.Errorf("no IPv4 address for interface %s", controller.config.ListenInterface)
 		}
 		if err != nil {
-			NoticeError("error getting listener IP: %s", err)
+			NoticeError("error getting listener IP: %s", errors.Trace(err))
 			return
 		}
 		listenIP = IPv4Address.String()
@@ -995,7 +996,7 @@ func (controller *Controller) Dial(
 
 	tunnel := controller.getNextActiveTunnel()
 	if tunnel == nil {
-		return nil, common.ContextError(errors.New("no active tunnels"))
+		return nil, errors.TraceNew("no active tunnels")
 	}
 
 	// Perform split tunnel classification when feature is enabled, and if the remote
@@ -1004,7 +1005,7 @@ func (controller *Controller) Dial(
 
 		host, _, err := net.SplitHostPort(remoteAddr)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		// Note: a possible optimization, when split tunnel is active and IsUntunneled performs
@@ -1020,7 +1021,7 @@ func (controller *Controller) Dial(
 
 	tunneledConn, err := tunnel.Dial(remoteAddr, alwaysTunnel, downstreamConn)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return tunneledConn, nil
@@ -1554,10 +1555,10 @@ func (controller *Controller) doFetchTactics(
 		// since NewTacticsServerEntryIterator should only return tactics-
 		// capable server entries and selectProtocol will select any tactics
 		// protocol.
-		err = errors.New("failed to make dial parameters")
+		err = std_errors.New("failed to make dial parameters")
 	}
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	NoticeRequestingTactics(dialParams)
@@ -1592,7 +1593,7 @@ func (controller *Controller) doFetchTactics(
 	meekConn, err := DialMeek(
 		ctx, dialParams.GetMeekConfig(), dialParams.GetDialConfig())
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	defer meekConn.Close()
 
@@ -1610,7 +1611,7 @@ func (controller *Controller) doFetchTactics(
 		serverEntry.TacticsRequestObfuscatedKey,
 		meekConn.RoundTrip)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	NoticeRequestedTactics(dialParams)

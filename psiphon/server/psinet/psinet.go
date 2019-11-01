@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 const (
@@ -92,7 +93,7 @@ func NewDatabase(filename string) (*Database, error) {
 			var newDatabase *Database
 			err := json.Unmarshal(fileContent, &newDatabase)
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 			// Note: an unmarshal directly into &database would fail
 			// to reset to zero value fields not present in the JSON.
@@ -108,7 +109,7 @@ func NewDatabase(filename string) (*Database, error) {
 
 	_, err := database.Reload()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return database, nil

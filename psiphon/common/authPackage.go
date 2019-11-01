@@ -30,11 +30,11 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"sync"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // AuthenticatedDataPackage is a JSON record containing some Psiphon data
@@ -53,12 +53,12 @@ func GenerateAuthenticatedDataPackageKeys() (string, string, error) {
 
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
-		return "", "", ContextError(err)
+		return "", "", errors.Trace(err)
 	}
 
 	publicKeyBytes, err := x509.MarshalPKIXPublicKey(rsaKey.Public())
 	if err != nil {
-		return "", "", ContextError(err)
+		return "", "", errors.Trace(err)
 	}
 
 	privateKeyBytes := x509.MarshalPKCS1PrivateKey(rsaKey)
@@ -82,11 +82,11 @@ func WriteAuthenticatedDataPackage(
 
 	derEncodedPrivateKey, err := base64.StdEncoding.DecodeString(signingPrivateKey)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	rsaPrivateKey, err := x509.ParsePKCS1PrivateKey(derEncodedPrivateKey)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	signature, err := rsa.SignPKCS1v15(
@@ -95,17 +95,17 @@ func WriteAuthenticatedDataPackage(
 		crypto.SHA256,
 		sha256sum(data))
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	packageJSON, err := json.Marshal(
 		&AuthenticatedDataPackage{
-			Data: data,
+			Data:                   data,
 			SigningPublicKeyDigest: sha256sum(signingPublicKey),
 			Signature:              signature,
 		})
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return Compress(packageJSON), nil
@@ -125,7 +125,7 @@ func ReadAuthenticatedDataPackage(
 	if isCompressed {
 		packageJSON, err = Decompress(dataPackage)
 		if err != nil {
-			return "", ContextError(err)
+			return "", errors.Trace(err)
 		}
 	} else {
 		packageJSON = dataPackage
@@ -134,27 +134,27 @@ func ReadAuthenticatedDataPackage(
 	var authenticatedDataPackage *AuthenticatedDataPackage
 	err = json.Unmarshal(packageJSON, &authenticatedDataPackage)
 	if err != nil {
-		return "", ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	derEncodedPublicKey, err := base64.StdEncoding.DecodeString(signingPublicKey)
 	if err != nil {
-		return "", ContextError(err)
+		return "", errors.Trace(err)
 	}
 	publicKey, err := x509.ParsePKIXPublicKey(derEncodedPublicKey)
 	if err != nil {
-		return "", ContextError(err)
+		return "", errors.Trace(err)
 	}
 	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
 	if !ok {
-		return "", ContextError(errors.New("unexpected signing public key type"))
+		return "", errors.TraceNew("unexpected signing public key type")
 	}
 
 	if 0 != bytes.Compare(
 		authenticatedDataPackage.SigningPublicKeyDigest,
 		sha256sum(signingPublicKey)) {
 
-		return "", ContextError(errors.New("unexpected signing public key digest"))
+		return "", errors.TraceNew("unexpected signing public key digest")
 	}
 
 	err = rsa.VerifyPKCS1v15(
@@ -163,7 +163,7 @@ func ReadAuthenticatedDataPackage(
 		sha256sum(authenticatedDataPackage.Data),
 		authenticatedDataPackage.Signature)
 	if err != nil {
-		return "", ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	return authenticatedDataPackage.Data, nil
@@ -196,12 +196,12 @@ func NewAuthenticatedDataPackageReader(
 
 		_, err := dataPackage.Seek(0, io.SeekStart)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		decompressor, err := zlib.NewReader(dataPackage)
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		// TODO: need to Close decompressor to ensure zlib checksum is verified?
 
@@ -214,11 +214,11 @@ func NewAuthenticatedDataPackageReader(
 		jsonReadBase64Value := func(value io.Reader) ([]byte, error) {
 			base64Value, err := ioutil.ReadAll(value)
 			if err != nil {
-				return nil, ContextError(err)
+				return nil, errors.Trace(err)
 			}
 			decodedValue, err := base64.StdEncoding.DecodeString(string(base64Value))
 			if err != nil {
-				return nil, ContextError(err)
+				return nil, errors.Trace(err)
 			}
 			return decodedValue, nil
 		}
@@ -231,7 +231,7 @@ func NewAuthenticatedDataPackageReader(
 
 					_, err := io.Copy(hash, value)
 					if err != nil {
-						return false, ContextError(err)
+						return false, errors.Trace(err)
 					}
 					return true, nil
 
@@ -248,19 +248,19 @@ func NewAuthenticatedDataPackageReader(
 			case "signingPublicKeyDigest":
 				jsonSigningPublicKey, err = jsonReadBase64Value(value)
 				if err != nil {
-					return false, ContextError(err)
+					return false, errors.Trace(err)
 				}
 				return true, nil
 
 			case "signature":
 				jsonSignature, err = jsonReadBase64Value(value)
 				if err != nil {
-					return false, ContextError(err)
+					return false, errors.Trace(err)
 				}
 				return true, nil
 			}
 
-			return false, ContextError(fmt.Errorf("unexpected key '%s'", key))
+			return false, errors.Tracef("unexpected key '%s'", key)
 		}
 
 		// Using a buffered reader to consume zlib output in batches
@@ -272,30 +272,30 @@ func NewAuthenticatedDataPackageReader(
 
 		err = jsonStreamer.Stream()
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		if pass == 0 {
 
 			if jsonSigningPublicKey == nil || jsonSignature == nil {
-				return nil, ContextError(errors.New("missing expected field"))
+				return nil, errors.TraceNew("missing expected field")
 			}
 
 			derEncodedPublicKey, err := base64.StdEncoding.DecodeString(signingPublicKey)
 			if err != nil {
-				return nil, ContextError(err)
+				return nil, errors.Trace(err)
 			}
 			publicKey, err := x509.ParsePKIXPublicKey(derEncodedPublicKey)
 			if err != nil {
-				return nil, ContextError(err)
+				return nil, errors.Trace(err)
 			}
 			rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
 			if !ok {
-				return nil, ContextError(errors.New("unexpected signing public key type"))
+				return nil, errors.TraceNew("unexpected signing public key type")
 			}
 
 			if 0 != bytes.Compare(jsonSigningPublicKey, sha256sum(signingPublicKey)) {
-				return nil, ContextError(errors.New("unexpected signing public key digest"))
+				return nil, errors.TraceNew("unexpected signing public key digest")
 			}
 
 			err = rsa.VerifyPKCS1v15(
@@ -304,13 +304,13 @@ func NewAuthenticatedDataPackageReader(
 				hash.Sum(nil),
 				jsonSignature)
 			if err != nil {
-				return nil, ContextError(err)
+				return nil, errors.Trace(err)
 			}
 
 		} else { // pass == 1
 
 			if jsonData == nil {
-				return nil, ContextError(errors.New("missing expected field"))
+				return nil, errors.TraceNew("missing expected field")
 			}
 
 			payload = jsonData
@@ -379,7 +379,7 @@ func (streamer *limitedJSONStreamer) Stream() error {
 				if b == '{' {
 					state = stateJSONSeekingKeyStart
 				} else if !isWhitespace(b) {
-					return ContextError(fmt.Errorf("unexpected character %#U while seeking object start", b))
+					return errors.Tracef("unexpected character %#U while seeking object start", b)
 				}
 
 			case stateJSONSeekingKeyStart:
@@ -387,12 +387,12 @@ func (streamer *limitedJSONStreamer) Stream() error {
 					state = stateJSONSeekingKeyEnd
 					keyBuffer.Reset()
 				} else if !isWhitespace(b) {
-					return ContextError(fmt.Errorf("unexpected character %#U while seeking key start", b))
+					return errors.Tracef("unexpected character %#U while seeking key start", b)
 				}
 
 			case stateJSONSeekingKeyEnd:
 				if b == '\\' {
-					return ContextError(errors.New("unsupported escaped character"))
+					return errors.TraceNew("unsupported escaped character")
 				} else if b == '"' {
 					state = stateJSONSeekingColon
 				} else {
@@ -403,7 +403,7 @@ func (streamer *limitedJSONStreamer) Stream() error {
 				if b == ':' {
 					state = stateJSONSeekingStringValueStart
 				} else if !isWhitespace(b) {
-					return ContextError(fmt.Errorf("unexpected character %#U while seeking colon", b))
+					return errors.Tracef("unexpected character %#U while seeking colon", b)
 				}
 
 			case stateJSONSeekingStringValueStart:
@@ -422,7 +422,7 @@ func (streamer *limitedJSONStreamer) Stream() error {
 
 					continueStreaming, err := streamer.handler(key, valueStreamer)
 					if err != nil {
-						return ContextError(err)
+						return errors.Trace(err)
 					}
 
 					// The handler may request that streaming halt at this point; no
@@ -435,7 +435,7 @@ func (streamer *limitedJSONStreamer) Stream() error {
 					state = stateJSONSeekingNextPair
 
 				} else if !isWhitespace(b) {
-					return ContextError(fmt.Errorf("unexpected character %#U while seeking value start", b))
+					return errors.Tracef("unexpected character %#U while seeking value start", b)
 				}
 
 			case stateJSONSeekingNextPair:
@@ -444,16 +444,16 @@ func (streamer *limitedJSONStreamer) Stream() error {
 				} else if b == '}' {
 					state = stateJSONObjectEnd
 				} else if !isWhitespace(b) {
-					return ContextError(fmt.Errorf("unexpected character %#U while seeking next name/value pair", b))
+					return errors.Tracef("unexpected character %#U while seeking next name/value pair", b)
 				}
 
 			case stateJSONObjectEnd:
 				if !isWhitespace(b) {
-					return ContextError(fmt.Errorf("unexpected character %#U after object end", b))
+					return errors.Tracef("unexpected character %#U after object end", b)
 				}
 
 			default:
-				return ContextError(errors.New("unexpected state"))
+				return errors.TraceNew("unexpected state")
 
 			}
 		}
@@ -461,11 +461,11 @@ func (streamer *limitedJSONStreamer) Stream() error {
 		if readErr != nil {
 			if readErr == io.EOF {
 				if state != stateJSONObjectEnd {
-					return ContextError(errors.New("unexpected EOF before object end"))
+					return errors.TraceNew("unexpected EOF before object end")
 				}
 				return nil
 			}
-			return ContextError(readErr)
+			return errors.Trace(readErr)
 		}
 	}
 }
@@ -509,7 +509,7 @@ func (streamer *limitedJSONValueStreamer) Read(p []byte) (int, error) {
 					if n == 1 && p[i] == 'n' {
 						p[i] = '\n'
 					} else {
-						err = ContextError(errors.New("unsupported escaped character"))
+						err = errors.TraceNew("unsupported escaped character")
 					}
 				}
 			}

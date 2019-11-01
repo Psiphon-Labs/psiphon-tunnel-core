@@ -22,10 +22,10 @@ package psiphon
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/secretbox"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
@@ -76,7 +76,7 @@ import (
 func ExportExchangePayload(config *Config) string {
 	payload, err := exportExchangePayload(config)
 	if err != nil {
-		NoticeAlert("ExportExchangePayload failed: %s", common.ContextError(err))
+		NoticeAlert("ExportExchangePayload failed: %s", errors.Trace(err))
 		return ""
 	}
 	return payload
@@ -99,7 +99,7 @@ func ExportExchangePayload(config *Config) string {
 func ImportExchangePayload(config *Config, encodedPayload string) bool {
 	err := importExchangePayload(config, encodedPayload)
 	if err != nil {
-		NoticeAlert("ImportExchangePayload failed: %s", common.ContextError(err))
+		NoticeAlert("ImportExchangePayload failed: %s", errors.Trace(err))
 		return false
 	}
 	return true
@@ -116,20 +116,20 @@ func exportExchangePayload(config *Config) (string, error) {
 
 	key, err := getExchangeObfuscationKey(config)
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	serverEntryFields, dialParams, err :=
 		GetAffinityServerEntryAndDialParameters(networkID)
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	// Fail if the server entry has no signature, as the exchange would be
 	// insecure. Given the mechanism where handshake will return a signed server
 	// entry to clients without one, this case is not expected to occur.
 	if !serverEntryFields.HasSignature() {
-		return "", common.ContextError(errors.New("export server entry not signed"))
+		return "", errors.TraceNew("export server entry not signed")
 	}
 
 	// RemoveUnsignedFields also removes potentially sensitive local fields, so
@@ -148,14 +148,14 @@ func exportExchangePayload(config *Config) (string, error) {
 
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	// A unique nonce is generated and included with the payload as the
 	// obfuscation keys is not single-use.
 	nonce, err := common.MakeSecureRandomBytes(24)
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	var secretboxNonce [24]byte
@@ -175,16 +175,16 @@ func importExchangePayload(config *Config, encodedPayload string) error {
 
 	key, err := getExchangeObfuscationKey(config)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	boxedPayload, err := base64.StdEncoding.DecodeString(encodedPayload)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	if len(boxedPayload) <= 24 {
-		return common.ContextError(errors.New("unexpected box length"))
+		return errors.TraceNew("unexpected box length")
 	}
 
 	var secretboxNonce [24]byte
@@ -194,13 +194,13 @@ func importExchangePayload(config *Config, encodedPayload string) error {
 	payloadJSON, ok := secretbox.Open(
 		nil, boxedPayload[24:], &secretboxNonce, &secretboxKey)
 	if !ok {
-		return common.ContextError(errors.New("unbox failed"))
+		return errors.TraceNew("unbox failed")
 	}
 
 	var payload *exchangePayload
 	err = json.Unmarshal(payloadJSON, &payload)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	// Explicitly strip any unsigned fields that should not be exchanged or
@@ -210,7 +210,7 @@ func importExchangePayload(config *Config, encodedPayload string) error {
 	err = payload.ServerEntryFields.VerifySignature(
 		config.ServerEntrySignaturePublicKey)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	payload.ServerEntryFields.SetLocalSource(
@@ -228,19 +228,19 @@ func importExchangePayload(config *Config, encodedPayload string) error {
 
 	err = StoreServerEntry(payload.ServerEntryFields, true)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = PromoteServerEntry(config, payload.ServerEntryFields.GetIPAddress())
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	if payload.ExchangedDialParameters != nil {
 
 		serverEntry, err := payload.ServerEntryFields.GetServerEntry()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		// Don't abort if Validate fails, as the current client may simply not
@@ -262,7 +262,7 @@ func importExchangePayload(config *Config, encodedPayload string) error {
 				networkID,
 				dialParams)
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 		}
 	}
@@ -273,10 +273,10 @@ func importExchangePayload(config *Config, encodedPayload string) error {
 func getExchangeObfuscationKey(config *Config) ([]byte, error) {
 	key, err := base64.StdEncoding.DecodeString(config.ExchangeObfuscationKey)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	if len(key) != 32 {
-		return nil, common.ContextError(errors.New("invalid key size"))
+		return nil, errors.TraceNew("invalid key size")
 	}
 	return key, nil
 }

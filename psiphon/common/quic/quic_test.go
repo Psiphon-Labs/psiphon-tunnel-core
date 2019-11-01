@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"golang.org/x/sync/errgroup"
 )
@@ -77,7 +78,7 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 
 			conn, err := listener.Accept()
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 
 			serverGroup.Go(func() error {
@@ -88,11 +89,11 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 					if err == io.EOF {
 						return nil
 					} else if err != nil {
-						return common.ContextError(err)
+						return errors.Trace(err)
 					}
 					_, err = conn.Write(b[:n])
 					if err != nil {
-						return common.ContextError(err)
+						return errors.Trace(err)
 					}
 				}
 			})
@@ -100,7 +101,7 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 
 		err := serverGroup.Wait()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		return nil
@@ -116,17 +117,17 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 
 			remoteAddr, err := net.ResolveUDPAddr("udp", serverAddress)
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 
 			packetConn, err := net.ListenPacket("udp4", "127.0.0.1:0")
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 
 			obfuscationPaddingSeed, err := prng.NewSeed()
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 
 			conn, err := Dial(
@@ -138,7 +139,7 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 				obfuscationKey,
 				obfuscationPaddingSeed)
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 
 			// Cancel should interrupt dialing only
@@ -157,7 +158,7 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 					if err == io.EOF {
 						break
 					} else if err != nil {
-						return common.ContextError(err)
+						return errors.Trace(err)
 					}
 				}
 				return nil
@@ -167,7 +168,7 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 				b := make([]byte, bytesToSend)
 				_, err := conn.Write(b)
 				if err != nil {
-					return common.ContextError(err)
+					return errors.Trace(err)
 				}
 				return nil
 			})

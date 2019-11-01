@@ -26,7 +26,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
@@ -102,7 +102,7 @@ func DownloadUpgrade(
 
 		request, err := http.NewRequest("HEAD", downloadURL, nil)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		request = request.WithContext(ctx)
@@ -114,13 +114,13 @@ func DownloadUpgrade(
 			err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
 		}
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		defer response.Body.Close()
 
 		currentClientVersion, err := strconv.Atoi(config.ClientVersion)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		// Note: if the header is missing, Header.Get returns "" and then
@@ -165,12 +165,12 @@ func DownloadUpgrade(
 	NoticeClientUpgradeDownloadedBytes(n)
 
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = os.Rename(downloadFilename, config.UpgradeDownloadFilename)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	NoticeClientUpgradeDownloaded(config.UpgradeDownloadFilename)

@@ -303,7 +303,7 @@ func storeServerEntries(
 
 		file, err := os.Open(embeddedServerEntryListFilename)
 		if err != nil {
-			return fmt.Errorf("error reading embedded server list file: %s", common.ContextError(err))
+			return fmt.Errorf("error reading embedded server list file: %s", err)
 		}
 		defer file.Close()
 
@@ -315,7 +315,7 @@ func storeServerEntries(
 				protocol.SERVER_ENTRY_SOURCE_EMBEDDED),
 			false)
 		if err != nil {
-			return fmt.Errorf("error storing embedded server list: %s", common.ContextError(err))
+			return fmt.Errorf("error storing embedded server list: %s", err)
 		}
 
 	} else {

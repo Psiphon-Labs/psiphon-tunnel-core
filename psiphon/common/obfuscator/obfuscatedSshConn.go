@@ -22,12 +22,13 @@ package obfuscator
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
+	std_errors "errors"
 	"io"
 	"io/ioutil"
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
@@ -137,7 +138,7 @@ func NewObfuscatedSSHConn(
 				MaxPadding:      maxPadding,
 			})
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		readDeobfuscate = obfuscator.ObfuscateServerToClient
 		writeObfuscate = obfuscator.ObfuscateClientToServer
@@ -157,7 +158,7 @@ func NewObfuscatedSSHConn(
 			// This may be terminated by a server-side connection establishment timeout.
 			io.Copy(ioutil.Discard, conn)
 
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		readDeobfuscate = obfuscator.ObfuscateClientToServer
 		writeObfuscate = obfuscator.ObfuscateServerToClient
@@ -166,7 +167,7 @@ func NewObfuscatedSSHConn(
 
 	paddingPRNG, err := obfuscator.GetDerivedPRNG("obfuscated-ssh-padding")
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return &ObfuscatedSSHConn{
@@ -220,7 +221,7 @@ func (conn *ObfuscatedSSHConn) Read(buffer []byte) (int, error) {
 	}
 	n, err := conn.readAndTransform(buffer)
 	if err != nil {
-		err = common.ContextError(err)
+		err = errors.Trace(err)
 	}
 	return n, err
 }
@@ -233,7 +234,7 @@ func (conn *ObfuscatedSSHConn) Write(buffer []byte) (int, error) {
 	}
 	err := conn.transformAndWrite(buffer)
 	if err != nil {
-		return 0, common.ContextError(err)
+		return 0, errors.Trace(err)
 	}
 	// Reports that we wrote all the bytes
 	// (although we may have buffered some or all)
@@ -291,7 +292,7 @@ func (conn *ObfuscatedSSHConn) readAndTransform(buffer []byte) (int, error) {
 				err := readSSHIdentificationLine(
 					conn.Conn, conn.readDeobfuscate, conn.readBuffer)
 				if err != nil {
-					return 0, common.ContextError(err)
+					return 0, errors.Trace(err)
 				}
 				if bytes.HasPrefix(conn.readBuffer.Bytes(), []byte("SSH-")) {
 					if bytes.Contains(conn.readBuffer.Bytes(), []byte("Ganymed")) {
@@ -310,7 +311,7 @@ func (conn *ObfuscatedSSHConn) readAndTransform(buffer []byte) (int, error) {
 			isMsgNewKeys, err := readSSHPacket(
 				conn.Conn, conn.readDeobfuscate, conn.readBuffer)
 			if err != nil {
-				return 0, common.ContextError(err)
+				return 0, errors.Trace(err)
 			}
 			if isMsgNewKeys {
 				nextState = OBFUSCATION_READ_STATE_FLUSH
@@ -321,7 +322,7 @@ func (conn *ObfuscatedSSHConn) readAndTransform(buffer []byte) (int, error) {
 		nextState = OBFUSCATION_READ_STATE_FINISHED
 
 	case OBFUSCATION_READ_STATE_FINISHED:
-		return 0, common.ContextError(errors.New("invalid read state"))
+		return 0, errors.TraceNew("invalid read state")
 	}
 
 	n, err := conn.readBuffer.Read(buffer)
@@ -329,7 +330,7 @@ func (conn *ObfuscatedSSHConn) readAndTransform(buffer []byte) (int, error) {
 		err = nil
 	}
 	if err != nil {
-		return n, common.ContextError(err)
+		return n, errors.Trace(err)
 	}
 	if conn.readBuffer.Len() == 0 {
 		conn.readState = nextState
@@ -388,7 +389,7 @@ func (conn *ObfuscatedSSHConn) transformAndWrite(buffer []byte) error {
 	if conn.writeState == OBFUSCATION_WRITE_STATE_CLIENT_SEND_SEED_MESSAGE {
 		_, err := conn.Conn.Write(conn.obfuscator.SendSeedMessage())
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		conn.writeState = OBFUSCATION_WRITE_STATE_IDENTIFICATION_LINE
 	} else if conn.writeState == OBFUSCATION_WRITE_STATE_SERVER_SEND_IDENTIFICATION_LINE_PADDING {
@@ -397,7 +398,7 @@ func (conn *ObfuscatedSSHConn) transformAndWrite(buffer []byte) error {
 		conn.writeObfuscate(padding)
 		_, err := conn.Conn.Write(padding)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		conn.writeState = OBFUSCATION_WRITE_STATE_IDENTIFICATION_LINE
 	}
@@ -425,14 +426,14 @@ func (conn *ObfuscatedSSHConn) transformAndWrite(buffer []byte) error {
 			conn.writeBuffer,
 			conn.transformBuffer)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		if hasMsgNewKeys {
 			conn.writeState = OBFUSCATION_WRITE_STATE_FINISHED
 		}
 
 	case OBFUSCATION_WRITE_STATE_FINISHED:
-		return common.ContextError(errors.New("invalid write state"))
+		return errors.TraceNew("invalid write state")
 	}
 
 	if conn.transformBuffer.Len() > 0 {
@@ -440,7 +441,7 @@ func (conn *ObfuscatedSSHConn) transformAndWrite(buffer []byte) error {
 		conn.writeObfuscate(sendData)
 		_, err := conn.Conn.Write(sendData)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -449,7 +450,7 @@ func (conn *ObfuscatedSSHConn) transformAndWrite(buffer []byte) error {
 			// After SSH_MSG_NEWKEYS, any remaining bytes are un-obfuscated
 			_, err := conn.Conn.Write(conn.writeBuffer.Bytes())
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 		}
 		// The buffer memory is no longer used
@@ -471,7 +472,7 @@ func readSSHIdentificationLine(
 	for i := 0; i < SSH_MAX_SERVER_LINE_LENGTH; i++ {
 		_, err := io.ReadFull(conn, oneByte[:])
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		deobfuscate(oneByte[:])
 		readBuffer.WriteByte(oneByte[0])
@@ -481,7 +482,7 @@ func readSSHIdentificationLine(
 		}
 	}
 	if !validLine {
-		return common.ContextError(errors.New("invalid identification line"))
+		return errors.TraceNew("invalid identification line")
 	}
 	return nil
 }
@@ -496,10 +497,10 @@ func readSSHPacket(
 	readBuffer.Grow(SSH_PACKET_PREFIX_LENGTH)
 	n, err := readBuffer.ReadFrom(io.LimitReader(conn, SSH_PACKET_PREFIX_LENGTH))
 	if err == nil && n != SSH_PACKET_PREFIX_LENGTH {
-		err = errors.New("unxpected number of bytes read")
+		err = std_errors.New("unxpected number of bytes read")
 	}
 	if err != nil {
-		return false, common.ContextError(err)
+		return false, errors.Trace(err)
 	}
 
 	prefix := readBuffer.Bytes()[prefixOffset : prefixOffset+SSH_PACKET_PREFIX_LENGTH]
@@ -507,17 +508,17 @@ func readSSHPacket(
 
 	_, _, payloadLength, messageLength, err := getSSHPacketPrefix(prefix)
 	if err != nil {
-		return false, common.ContextError(err)
+		return false, errors.Trace(err)
 	}
 
 	remainingReadLength := messageLength - SSH_PACKET_PREFIX_LENGTH
 	readBuffer.Grow(remainingReadLength)
 	n, err = readBuffer.ReadFrom(io.LimitReader(conn, int64(remainingReadLength)))
 	if err == nil && n != int64(remainingReadLength) {
-		err = errors.New("unxpected number of bytes read")
+		err = std_errors.New("unxpected number of bytes read")
 	}
 	if err != nil {
-		return false, common.ContextError(err)
+		return false, errors.Trace(err)
 	}
 
 	remainingBytes := readBuffer.Bytes()[prefixOffset+SSH_PACKET_PREFIX_LENGTH:]
@@ -589,7 +590,7 @@ func extractSSHPackets(
 		packetLength, paddingLength, payloadLength, messageLength, err := getSSHPacketPrefix(
 			writeBuffer.Bytes()[:SSH_PACKET_PREFIX_LENGTH])
 		if err != nil {
-			return false, common.ContextError(err)
+			return false, errors.Trace(err)
 		}
 
 		if writeBuffer.Len() < messageLength {
@@ -654,7 +655,7 @@ func getSSHPacketPrefix(buffer []byte) (int, int, int, int, error) {
 	packetLength := int(binary.BigEndian.Uint32(buffer[0 : SSH_PACKET_PREFIX_LENGTH-1]))
 
 	if packetLength < 1 || packetLength > SSH_MAX_PACKET_LENGTH {
-		return 0, 0, 0, 0, common.ContextError(errors.New("invalid SSH packet length"))
+		return 0, 0, 0, 0, errors.TraceNew("invalid SSH packet length")
 	}
 
 	paddingLength := int(buffer[SSH_PACKET_PREFIX_LENGTH-1])

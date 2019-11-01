@@ -20,8 +20,9 @@
 package common
 
 import (
-	"fmt"
 	"net"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // GetInterfaceIPAddresses takes an interface name, such as "eth0", and returns
@@ -34,12 +35,12 @@ func GetInterfaceIPAddresses(interfaceName string) (net.IP, net.IP, error) {
 
 	availableInterfaces, err := net.InterfaceByName(interfaceName)
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	addrs, err := availableInterfaces.Addrs()
 	if err != nil {
-		return nil, nil, ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	for _, addr := range addrs {
@@ -68,5 +69,5 @@ func GetInterfaceIPAddresses(interfaceName string) (net.IP, net.IP, error) {
 		return IPv4Address, IPv6Address, nil
 	}
 
-	return nil, nil, ContextError(fmt.Errorf("Could not find any IP address for interface %s", interfaceName))
+	return nil, nil, errors.Tracef("Could not find any IP address for interface %s", interfaceName)
 }

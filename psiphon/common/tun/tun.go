@@ -127,7 +127,6 @@ package tun
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -139,6 +138,7 @@ import (
 
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
@@ -263,7 +263,7 @@ func NewServer(config *ServerConfig) (*Server, error) {
 
 	device, err := NewServerDevice(config)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	runContext, stopRunning := context.WithCancel(context.Background())
@@ -282,7 +282,7 @@ func NewServer(config *ServerConfig) (*Server, error) {
 // Start starts a server and returns with it running.
 func (server *Server) Start() {
 
-	server.config.Logger.WithContext().Info("starting")
+	server.config.Logger.WithTrace().Info("starting")
 
 	server.workers.Add(1)
 	go server.runSessionReaper()
@@ -297,7 +297,7 @@ func (server *Server) Start() {
 // Stop halts a running server.
 func (server *Server) Stop() {
 
-	server.config.Logger.WithContext().Info("stopping")
+	server.config.Logger.WithTrace().Info("stopping")
 
 	server.stopRunning()
 
@@ -322,7 +322,7 @@ func (server *Server) Stop() {
 
 	server.workers.Wait()
 
-	server.config.Logger.WithContext().Info("stopped")
+	server.config.Logger.WithTrace().Info("stopped")
 }
 
 // AllowedPortChecker is a function which returns true when it is
@@ -400,11 +400,11 @@ func (server *Server) ClientConnected(
 
 	select {
 	case <-server.runContext.Done():
-		return common.ContextError(errors.New("server stopping"))
+		return errors.TraceNew("server stopping")
 	default:
 	}
 
-	server.config.Logger.WithContextFields(
+	server.config.Logger.WithTraceFields(
 		common.LogFields{"sessionID": sessionID}).Debug("client connected")
 
 	MTU := getMTU(server.config.MTU)
@@ -451,7 +451,7 @@ func (server *Server) ClientConnected(
 
 		err := server.allocateIndex(clientSession)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -480,7 +480,7 @@ func (server *Server) ClientDisconnected(sessionID string) {
 	session := server.getSession(sessionID)
 	if session != nil {
 
-		server.config.Logger.WithContextFields(
+		server.config.Logger.WithTraceFields(
 			common.LogFields{"sessionID": sessionID}).Debug("client disconnected")
 
 		server.interruptSession(session)
@@ -494,7 +494,7 @@ func (server *Server) getSession(sessionID string) *session {
 		if ok {
 			return s.(*session)
 		}
-		server.config.Logger.WithContext().Warning("unexpected missing session")
+		server.config.Logger.WithTrace().Warning("unexpected missing session")
 	}
 	return nil
 }
@@ -722,7 +722,7 @@ func (server *Server) runDeviceDownstream() {
 		}
 
 		if err != nil {
-			server.config.Logger.WithContextFields(
+			server.config.Logger.WithTraceFields(
 				common.LogFields{"error": err}).Warning("read device packet failed")
 			// May be temporary error condition, keep reading.
 			continue
@@ -826,7 +826,7 @@ func (server *Server) runClientUpstream(session *session) {
 		if err != nil {
 
 			// Debug since channel I/O errors occur during normal operation.
-			server.config.Logger.WithContextFields(
+			server.config.Logger.WithTraceFields(
 				common.LogFields{"error": err}).Debug("read channel packet failed")
 
 			// Tear down the session. Must be invoked asynchronously.
@@ -860,7 +860,7 @@ func (server *Server) runClientUpstream(session *session) {
 		err = server.device.WritePacket(readPacket)
 
 		if err != nil {
-			server.config.Logger.WithContextFields(
+			server.config.Logger.WithTraceFields(
 				common.LogFields{"error": err}).Warning("write device packet failed")
 			// May be temporary error condition, keep working. The packet is
 			// most likely dropped.
@@ -891,7 +891,7 @@ func (server *Server) runClientDownstream(session *session) {
 		if err != nil {
 
 			// Debug since channel I/O errors occur during normal operation.
-			server.config.Logger.WithContextFields(
+			server.config.Logger.WithTraceFields(
 				common.LogFields{"error": err}).Debug("write channel packets failed")
 
 			downstreamPackets.Replace(packetBuffer)
@@ -985,7 +985,7 @@ func (server *Server) allocateIndex(newSession *session) error {
 		return nil
 	}
 
-	return common.ContextError(errors.New("unallocated index not found"))
+	return errors.TraceNew("unallocated index not found")
 }
 
 func (server *Server) resetRouting(IPv4Address, IPv6Address net.IP) {
@@ -998,14 +998,14 @@ func (server *Server) resetRouting(IPv4Address, IPv6Address net.IP) {
 
 	err := resetNATTables(server.config, IPv4Address)
 	if err != nil {
-		server.config.Logger.WithContextFields(
+		server.config.Logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("reset IPv4 routing failed")
 
 	}
 
 	err = resetNATTables(server.config, IPv6Address)
 	if err != nil {
-		server.config.Logger.WithContextFields(
+		server.config.Logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("reset IPv6 routing failed")
 
 	}
@@ -1730,7 +1730,7 @@ func NewClient(config *ClientConfig) (*Client, error) {
 	}
 
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	upstreamPacketQueueSize := DEFAULT_UPSTREAM_PACKET_QUEUE_SIZE
@@ -1755,7 +1755,7 @@ func NewClient(config *ClientConfig) (*Client, error) {
 // Start starts a client and returns with it running.
 func (client *Client) Start() {
 
-	client.config.Logger.WithContext().Info("starting")
+	client.config.Logger.WithTrace().Info("starting")
 
 	client.workers.Add(1)
 	go func() {
@@ -1771,7 +1771,7 @@ func (client *Client) Start() {
 			}
 
 			if err != nil {
-				client.config.Logger.WithContextFields(
+				client.config.Logger.WithTraceFields(
 					common.LogFields{"error": err}).Info("read device packet failed")
 				// May be temporary error condition, keep working.
 				continue
@@ -1817,7 +1817,7 @@ func (client *Client) Start() {
 			client.upstreamPackets.Replace(packetBuffer)
 
 			if err != nil {
-				client.config.Logger.WithContextFields(
+				client.config.Logger.WithTraceFields(
 					common.LogFields{"error": err}).Info("write channel packets failed")
 				// May be temporary error condition, such as reconnecting the tunnel;
 				// keep working. The packets are most likely dropped.
@@ -1840,7 +1840,7 @@ func (client *Client) Start() {
 			}
 
 			if err != nil {
-				client.config.Logger.WithContextFields(
+				client.config.Logger.WithTraceFields(
 					common.LogFields{"error": err}).Info("read channel packet failed")
 				// May be temporary error condition, such as reconnecting the tunnel;
 				// keep working.
@@ -1858,7 +1858,7 @@ func (client *Client) Start() {
 			err = client.device.WritePacket(readPacket)
 
 			if err != nil {
-				client.config.Logger.WithContextFields(
+				client.config.Logger.WithTraceFields(
 					common.LogFields{"error": err}).Info("write device packet failed")
 				// May be temporary error condition, keep working. The packet is
 				// most likely dropped.
@@ -1871,7 +1871,7 @@ func (client *Client) Start() {
 // Stop halts a running client.
 func (client *Client) Stop() {
 
-	client.config.Logger.WithContext().Info("stopping")
+	client.config.Logger.WithTrace().Info("stopping")
 
 	client.stopRunning()
 	client.device.Close()
@@ -1882,7 +1882,7 @@ func (client *Client) Stop() {
 	client.metrics.checkpoint(
 		client.config.Logger, nil, "packet_metrics", packetMetricsAll)
 
-	client.config.Logger.WithContext().Info("stopped")
+	client.config.Logger.WithTrace().Info("stopped")
 }
 
 /*
@@ -2609,18 +2609,18 @@ func NewServerDevice(config *ServerConfig) (*Device, error) {
 
 	file, deviceName, err := OpenTunDevice("")
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	defer file.Close()
 
 	err = configureServerInterface(config, deviceName)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	nio, err := NewNonblockingIO(int(file.Fd()))
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return newDevice(
@@ -2635,19 +2635,19 @@ func NewClientDevice(config *ClientConfig) (*Device, error) {
 
 	file, deviceName, err := OpenTunDevice("")
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	defer file.Close()
 
 	err = configureClientInterface(
 		config, deviceName)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	nio, err := NewNonblockingIO(int(file.Fd()))
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return newDevice(
@@ -2674,7 +2674,7 @@ func NewClientDeviceFromFD(config *ClientConfig) (*Device, error) {
 
 	nio, err := NewNonblockingIO(config.TunFileDescriptor)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	MTU := getMTU(config.MTU)
@@ -2705,7 +2705,7 @@ func (device *Device) ReadPacket() ([]byte, error) {
 	// packet read operation.
 	offset, size, err := device.readTunPacket()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return device.inboundBuffer[offset : offset+size], nil
@@ -2724,7 +2724,7 @@ func (device *Device) WritePacket(packet []byte) error {
 	// packet write operation.
 	err := device.writeTunPacket(packet)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -2771,18 +2771,18 @@ func (channel *Channel) ReadPacket() ([]byte, error) {
 	header := channel.inboundBuffer[0:channelHeaderSize]
 	_, err := io.ReadFull(channel.transport, header)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	size := int(binary.BigEndian.Uint16(header))
 	if size > len(channel.inboundBuffer[channelHeaderSize:]) {
-		return nil, common.ContextError(fmt.Errorf("packet size exceeds MTU: %d", size))
+		return nil, errors.Tracef("packet size exceeds MTU: %d", size)
 	}
 
 	packet := channel.inboundBuffer[channelHeaderSize : channelHeaderSize+size]
 	_, err = io.ReadFull(channel.transport, packet)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return packet, nil
@@ -2815,7 +2815,7 @@ func (channel *Channel) WritePacket(packet []byte) error {
 	copy(channel.outboundBuffer[channelHeaderSize:], packet)
 	_, err := channel.transport.Write(channel.outboundBuffer[0 : channelHeaderSize+size])
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -2827,7 +2827,7 @@ func (channel *Channel) WritePacket(packet []byte) error {
 func (channel *Channel) WriteFramedPackets(packetBuffer []byte) error {
 	_, err := channel.transport.Write(packetBuffer)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }

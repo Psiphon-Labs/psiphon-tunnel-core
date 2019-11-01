@@ -22,8 +22,7 @@ package server
 import (
 	"crypto/subtle"
 	"encoding/json"
-	"errors"
-	"fmt"
+	std_errors "errors"
 	"net"
 	"regexp"
 	"runtime/debug"
@@ -32,6 +31,7 @@ import (
 	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 )
@@ -78,8 +78,8 @@ func sshAPIRequestHandler(
 	var params common.APIParameters
 	err := json.Unmarshal(requestPayload, &params)
 	if err != nil {
-		return nil, common.ContextError(
-			fmt.Errorf("invalid payload for request name: %s: %s", name, err))
+		return nil, errors.Tracef(
+			"invalid payload for request name: %s: %s", name, err)
 	}
 
 	return dispatchAPIRequestHandler(
@@ -111,7 +111,7 @@ func dispatchAPIRequestHandler(
 				panic(intentionalPanic)
 			} else {
 				log.LogPanicRecover(e, debug.Stack())
-				reterr = common.ContextError(errors.New("request handler panic"))
+				reterr = errors.TraceNew("request handler panic")
 			}
 		}
 	}()
@@ -139,22 +139,22 @@ func dispatchAPIRequestHandler(
 		if err == nil {
 			// Note: follows/duplicates baseRequestParams validation
 			if !isHexDigits(support.Config, sessionID) {
-				err = errors.New("invalid param: client_session_id")
+				err = std_errors.New("invalid param: client_session_id")
 			}
 		}
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		completed, exhausted, err := support.TunnelServer.GetClientHandshaked(sessionID)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		if !completed {
-			return nil, common.ContextError(errors.New("handshake not completed"))
+			return nil, errors.TraceNew("handshake not completed")
 		}
 		if exhausted {
-			return nil, common.ContextError(errors.New("exhausted after handshake"))
+			return nil, errors.TraceNew("exhausted after handshake")
 		}
 	}
 
@@ -169,7 +169,7 @@ func dispatchAPIRequestHandler(
 		return clientVerificationAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
 	}
 
-	return nil, common.ContextError(fmt.Errorf("invalid request name: %s", name))
+	return nil, errors.Tracef("invalid request name: %s", name)
 }
 
 var handshakeRequestParams = append(
@@ -195,7 +195,7 @@ func handshakeAPIRequestHandler(
 
 	err := validateRequestParams(support.Config, params, baseRequestParams)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	sessionID, _ := getStringRequestParam(params, "client_session_id")
@@ -209,7 +209,7 @@ func handshakeAPIRequestHandler(
 	if params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] != nil {
 		authorizations, err = getStringArrayRequestParam(params, protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -234,13 +234,13 @@ func handshakeAPIRequestHandler(
 		},
 		authorizations)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	tacticsPayload, err := support.TacticsServer.GetTacticsPayload(
 		common.GeoIPData(geoIPData), params)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	var marshaledTacticsPayload []byte
@@ -249,7 +249,7 @@ func handshakeAPIRequestHandler(
 
 		marshaledTacticsPayload, err = json.Marshal(tacticsPayload)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		// Log a metric when new tactics are issued. Logging here indicates that
@@ -280,7 +280,7 @@ func handshakeAPIRequestHandler(
 	// common API parameters and "handshake_completed" flag, this handshake
 	// log is mostly redundant and set to debug level.
 
-	log.WithContextFields(
+	log.WithTraceFields(
 		getRequestLogFields(
 			"",
 			geoIPData,
@@ -326,7 +326,7 @@ func handshakeAPIRequestHandler(
 
 	responsePayload, err := json.Marshal(handshakeResponse)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return responsePayload, nil
@@ -366,7 +366,7 @@ func connectedAPIRequestHandler(
 
 	err := validateRequestParams(support.Config, params, connectedRequestParams)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// Update, for server_tunnel logging, upstream fragmentor metrics, as the
@@ -381,7 +381,7 @@ func connectedAPIRequestHandler(
 	err = support.TunnelServer.UpdateClientAPIParameters(
 		sessionID, copyUpdateOnConnectedParams(params))
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	log.LogRawFieldsWithTimestamp(
@@ -401,7 +401,7 @@ func connectedAPIRequestHandler(
 
 	responsePayload, err := json.Marshal(connectedResponse)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return responsePayload, nil
@@ -448,14 +448,14 @@ func statusAPIRequestHandler(
 
 	err := validateRequestParams(support.Config, params, statusRequestParams)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	sessionID, _ := getStringRequestParam(params, "client_session_id")
 
 	statusData, err := getJSONObjectRequestParam(params, "statusData")
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// Logs are queued until the input is fully validated. Otherwise, stats
@@ -473,14 +473,14 @@ func statusAPIRequestHandler(
 	// report "(OTHER)" host_bytes when no regexes are set. Drop those stats.
 	domainBytesExpected, err := support.TunnelServer.ExpectClientDomainBytes(sessionID)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if domainBytesExpected && statusData["host_bytes"] != nil {
 
 		hostBytes, err := getMapStringInt64RequestParam(statusData, "host_bytes")
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		for domain, bytes := range hostBytes {
 
@@ -508,13 +508,13 @@ func statusAPIRequestHandler(
 
 		remoteServerListStats, err := getJSONObjectArrayRequestParam(statusData, "remote_server_list_stats")
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		for _, remoteServerListStat := range remoteServerListStats {
 
 			err := validateRequestParams(support.Config, remoteServerListStat, remoteServerListStatParams)
 			if err != nil {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 
 			// remote_server_list defaults to using the common params from the
@@ -548,7 +548,7 @@ func statusAPIRequestHandler(
 
 		failedTunnelStats, err := getJSONObjectArrayRequestParam(statusData, "failed_tunnel_stats")
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		for _, failedTunnelStat := range failedTunnelStats {
 
@@ -559,7 +559,7 @@ func statusAPIRequestHandler(
 
 			err := validateRequestParams(support.Config, failedTunnelStat, failedTunnelStatParams)
 			if err != nil {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 
 			failedTunnelFields := getRequestLogFields(
@@ -628,7 +628,7 @@ func statusAPIRequestHandler(
 
 	responsePayload, err := json.Marshal(statusResponse)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return responsePayload, nil
@@ -757,8 +757,7 @@ func validateRequestParams(
 			if expectedParam.flags&requestParamOptional != 0 {
 				continue
 			}
-			return common.ContextError(
-				fmt.Errorf("missing param: %s", expectedParam.name))
+			return errors.Tracef("missing param: %s", expectedParam.name)
 		}
 		var err error
 		switch {
@@ -777,7 +776,7 @@ func validateRequestParams(
 			err = validateStringRequestParam(config, expectedParam, value)
 		}
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -822,12 +821,10 @@ func validateStringRequestParam(
 
 	strValue, ok := value.(string)
 	if !ok {
-		return common.ContextError(
-			fmt.Errorf("unexpected string param type: %s", expectedParam.name))
+		return errors.Tracef("unexpected string param type: %s", expectedParam.name)
 	}
 	if !expectedParam.validator(config, strValue) {
-		return common.ContextError(
-			fmt.Errorf("invalid param: %s: %s", expectedParam.name, strValue))
+		return errors.Tracef("invalid param: %s: %s", expectedParam.name, strValue)
 	}
 	return nil
 }
@@ -839,13 +836,12 @@ func validateStringArrayRequestParam(
 
 	arrayValue, ok := value.([]interface{})
 	if !ok {
-		return common.ContextError(
-			fmt.Errorf("unexpected string param type: %s", expectedParam.name))
+		return errors.Tracef("unexpected string param type: %s", expectedParam.name)
 	}
 	for _, value := range arrayValue {
 		err := validateStringRequestParam(config, expectedParam, value)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 	return nil
@@ -1047,22 +1043,22 @@ func getOptionalStringRequestParam(params common.APIParameters, name string) (st
 
 func getStringRequestParam(params common.APIParameters, name string) (string, error) {
 	if params[name] == nil {
-		return "", common.ContextError(fmt.Errorf("missing param: %s", name))
+		return "", errors.Tracef("missing param: %s", name)
 	}
 	value, ok := params[name].(string)
 	if !ok {
-		return "", common.ContextError(fmt.Errorf("invalid param: %s", name))
+		return "", errors.Tracef("invalid param: %s", name)
 	}
 	return value, nil
 }
 
 func getInt64RequestParam(params common.APIParameters, name string) (int64, error) {
 	if params[name] == nil {
-		return 0, common.ContextError(fmt.Errorf("missing param: %s", name))
+		return 0, errors.Tracef("missing param: %s", name)
 	}
 	value, ok := params[name].(float64)
 	if !ok {
-		return 0, common.ContextError(fmt.Errorf("invalid param: %s", name))
+		return 0, errors.Tracef("invalid param: %s", name)
 	}
 	return int64(value), nil
 }
@@ -1070,7 +1066,7 @@ func getInt64RequestParam(params common.APIParameters, name string) (int64, erro
 func getPaddingSizeRequestParam(params common.APIParameters, name string) (int, error) {
 	value, err := getInt64RequestParam(params, name)
 	if err != nil {
-		return 0, common.ContextError(err)
+		return 0, errors.Trace(err)
 	}
 	if value < 0 {
 		value = 0
@@ -1083,23 +1079,23 @@ func getPaddingSizeRequestParam(params common.APIParameters, name string) (int, 
 
 func getJSONObjectRequestParam(params common.APIParameters, name string) (common.APIParameters, error) {
 	if params[name] == nil {
-		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
+		return nil, errors.Tracef("missing param: %s", name)
 	}
 	// Note: generic unmarshal of JSON produces map[string]interface{}, not common.APIParameters
 	value, ok := params[name].(map[string]interface{})
 	if !ok {
-		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
+		return nil, errors.Tracef("invalid param: %s", name)
 	}
 	return common.APIParameters(value), nil
 }
 
 func getJSONObjectArrayRequestParam(params common.APIParameters, name string) ([]common.APIParameters, error) {
 	if params[name] == nil {
-		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
+		return nil, errors.Tracef("missing param: %s", name)
 	}
 	value, ok := params[name].([]interface{})
 	if !ok {
-		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
+		return nil, errors.Tracef("invalid param: %s", name)
 	}
 
 	result := make([]common.APIParameters, len(value))
@@ -1107,7 +1103,7 @@ func getJSONObjectArrayRequestParam(params common.APIParameters, name string) ([
 		// Note: generic unmarshal of JSON produces map[string]interface{}, not common.APIParameters
 		resultItem, ok := item.(map[string]interface{})
 		if !ok {
-			return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
+			return nil, errors.Tracef("invalid param: %s", name)
 		}
 		result[i] = common.APIParameters(resultItem)
 	}
@@ -1117,19 +1113,19 @@ func getJSONObjectArrayRequestParam(params common.APIParameters, name string) ([
 
 func getMapStringInt64RequestParam(params common.APIParameters, name string) (map[string]int64, error) {
 	if params[name] == nil {
-		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
+		return nil, errors.Tracef("missing param: %s", name)
 	}
 	// TODO: can't use common.APIParameters type?
 	value, ok := params[name].(map[string]interface{})
 	if !ok {
-		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
+		return nil, errors.Tracef("invalid param: %s", name)
 	}
 
 	result := make(map[string]int64)
 	for k, v := range value {
 		numValue, ok := v.(float64)
 		if !ok {
-			return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
+			return nil, errors.Tracef("invalid param: %s", name)
 		}
 		result[k] = int64(numValue)
 	}
@@ -1139,18 +1135,18 @@ func getMapStringInt64RequestParam(params common.APIParameters, name string) (ma
 
 func getStringArrayRequestParam(params common.APIParameters, name string) ([]string, error) {
 	if params[name] == nil {
-		return nil, common.ContextError(fmt.Errorf("missing param: %s", name))
+		return nil, errors.Tracef("missing param: %s", name)
 	}
 	value, ok := params[name].([]interface{})
 	if !ok {
-		return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
+		return nil, errors.Tracef("invalid param: %s", name)
 	}
 
 	result := make([]string, len(value))
 	for i, v := range value {
 		strValue, ok := v.(string)
 		if !ok {
-			return nil, common.ContextError(fmt.Errorf("invalid param: %s", name))
+			return nil, errors.Tracef("invalid param: %s", name)
 		}
 		result[i] = strValue
 	}

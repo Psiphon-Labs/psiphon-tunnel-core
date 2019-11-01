@@ -25,7 +25,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -37,6 +36,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -68,7 +68,7 @@ type ServerContext struct {
 func MakeSessionId() (string, error) {
 	randomId, err := common.MakeSecureRandomBytes(protocol.PSIPHON_API_CLIENT_SESSION_ID_LENGTH)
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 	return hex.EncodeToString(randomId), nil
 }
@@ -87,7 +87,7 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 		var err error
 		psiphonHttpsClient, err = makePsiphonHttpsClient(tunnel)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -102,7 +102,7 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 
 	err := serverContext.doHandshakeRequest(ignoreRegexps)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return serverContext, nil
@@ -154,7 +154,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		err := tactics.SetTacticsAPIParameters(
 			serverContext.tunnel.config.clientParameters, GetTacticsStorer(), networkID, params)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -166,13 +166,13 @@ func (serverContext *ServerContext) doHandshakeRequest(
 
 		request, err := serverContext.makeSSHAPIRequestPayload(params)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		response, err = serverContext.tunnel.SendAPIRequest(
 			protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME, request)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 	} else {
@@ -182,7 +182,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		responseBody, err := serverContext.doGetRequest(
 			makeRequestUrl(serverContext.tunnel, "", "handshake", params))
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		// Skip legacy format lines and just parse the JSON config line
 		configLinePrefix := []byte("Config: ")
@@ -193,7 +193,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 			}
 		}
 		if len(response) == 0 {
-			return common.ContextError(errors.New("no config line found"))
+			return errors.TraceNew("no config line found")
 		}
 	}
 
@@ -204,7 +204,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	var handshakeResponse protocol.HandshakeResponse
 	err := json.Unmarshal(response, &handshakeResponse)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	serverContext.clientRegion = handshakeResponse.ClientRegion
@@ -222,7 +222,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 			common.TruncateTimestampToHour(handshakeResponse.ServerTimestamp),
 			protocol.SERVER_ENTRY_SOURCE_DISCOVERY)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		// Retain the original timestamp and source in the requestedMissingSignature
@@ -253,7 +253,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		serverEntries,
 		true)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	NoticeHomepages(handshakeResponse.Homepages)
@@ -288,7 +288,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		var payload *tactics.Payload
 		err := json.Unmarshal(handshakeResponse.TacticsPayload, &payload)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		// handshakeResponse.TacticsPayload may be "null", and payload
@@ -301,7 +301,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 				networkID,
 				payload)
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 
 			if tacticsRecord != nil &&
@@ -334,7 +334,7 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 
 	lastConnected, err := getLastConnected()
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	params["last_connected"] = lastConnected
@@ -348,13 +348,13 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 
 		request, err := serverContext.makeSSHAPIRequestPayload(params)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		response, err = serverContext.tunnel.SendAPIRequest(
 			protocol.PSIPHON_API_CONNECTED_REQUEST_NAME, request)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 	} else {
@@ -364,20 +364,20 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 		response, err = serverContext.doGetRequest(
 			makeRequestUrl(serverContext.tunnel, "", "connected", params))
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
 	var connectedResponse protocol.ConnectedResponse
 	err = json.Unmarshal(response, &connectedResponse)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = SetKeyValue(
 		datastoreLastConnectedKey, connectedResponse.ConnectedTimestamp)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -386,7 +386,7 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 func getLastConnected() (string, error) {
 	lastConnected, err := GetKeyValue(datastoreLastConnectedKey)
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 	if lastConnected == "" {
 		lastConnected = "None"
@@ -411,7 +411,7 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 		serverContext.tunnel.config,
 		tunnel.dialParams.ServerEntry.IpAddress)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	// Skip the request when there's no payload to send.
@@ -451,7 +451,7 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 		// the request but the client failed to receive the response.
 		putBackStatusRequestPayload(statusPayloadInfo)
 
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	confirmStatusRequestPayload(statusPayloadInfo)
@@ -459,7 +459,7 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 	var statusResponse protocol.StatusResponse
 	err = json.Unmarshal(response, &statusResponse)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	for _, serverEntryTag := range statusResponse.InvalidServerEntryTags {
@@ -510,7 +510,7 @@ func makeStatusRequestPayload(
 	persistentStats, err := TakeOutUnreportedPersistentStats(config)
 	if err != nil {
 		NoticeAlert(
-			"TakeOutUnreportedPersistentStats failed: %s", common.ContextError(err))
+			"TakeOutUnreportedPersistentStats failed: %s", errors.Trace(err))
 		persistentStats = nil
 		// Proceed with transferStats only
 	}
@@ -552,7 +552,7 @@ func makeStatusRequestPayload(
 		// Send the transfer stats and tunnel stats later
 		putBackStatusRequestPayload(payloadInfo)
 
-		return nil, nil, common.ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	return jsonPayload, payloadInfo, nil
@@ -566,7 +566,7 @@ func putBackStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 		// These persistent stats records won't be resent until after a
 		// datastore re-initialization.
 		NoticeAlert(
-			"PutBackUnreportedPersistentStats failed: %s", common.ContextError(err))
+			"PutBackUnreportedPersistentStats failed: %s", errors.Trace(err))
 	}
 }
 
@@ -575,7 +575,7 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 	if err != nil {
 		// These persistent stats records may be resent.
 		NoticeAlert(
-			"ClearReportedPersistentStats failed: %s", common.ContextError(err))
+			"ClearReportedPersistentStats failed: %s", errors.Trace(err))
 	}
 }
 
@@ -624,7 +624,7 @@ func RecordRemoteServerListStat(
 
 	remoteServerListStatJson, err := json.Marshal(params)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return StorePersistentStat(
@@ -646,7 +646,7 @@ func RecordFailedTunnelStat(
 
 	lastConnected, err := getLastConnected()
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	params := getBaseAPIParameters(config, dialParams)
@@ -665,7 +665,7 @@ func RecordFailedTunnelStat(
 
 	failedTunnelStatJson, err := json.Marshal(params)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return StorePersistentStat(
@@ -678,7 +678,7 @@ func (serverContext *ServerContext) doGetRequest(
 
 	request, err := http.NewRequest("GET", requestUrl, nil)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	request.Header.Set("User-Agent", MakePsiphonUserAgent(serverContext.tunnel.config))
@@ -690,12 +690,12 @@ func (serverContext *ServerContext) doGetRequest(
 	}
 	if err != nil {
 		// Trim this error since it may include long URLs
-		return nil, common.ContextError(TrimError(err))
+		return nil, errors.Trace(TrimError(err))
 	}
 	defer response.Body.Close()
 	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	return body, nil
 }
@@ -706,7 +706,7 @@ func (serverContext *ServerContext) doPostRequest(
 
 	request, err := http.NewRequest("POST", requestUrl, body)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	request.Header.Set("User-Agent", MakePsiphonUserAgent(serverContext.tunnel.config))
@@ -719,12 +719,12 @@ func (serverContext *ServerContext) doPostRequest(
 	}
 	if err != nil {
 		// Trim this error since it may include long URLs
-		return nil, common.ContextError(TrimError(err))
+		return nil, errors.Trace(TrimError(err))
 	}
 	defer response.Body.Close()
 	responseBody, err = ioutil.ReadAll(response.Body)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	return responseBody, nil
 }
@@ -734,7 +734,7 @@ func (serverContext *ServerContext) makeSSHAPIRequestPayload(
 	params common.APIParameters) ([]byte, error) {
 	jsonPayload, err := json.Marshal(params)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	return jsonPayload, nil
 }
@@ -965,7 +965,7 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 	certificate, err := DecodeCertificate(
 		tunnel.dialParams.ServerEntry.WebServerCertificate)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	tunneledDialer := func(_ context.Context, _, addr string) (conn net.Conn, err error) {
@@ -990,7 +990,7 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 			return dialer(context.Background(), network, addr)
 		},
 		Dial: func(network, addr string) (net.Conn, error) {
-			return nil, errors.New("HTTP not supported")
+			return nil, errors.TraceNew("HTTP not supported")
 		},
 	}
 
@@ -1007,7 +1007,7 @@ func HandleServerRequest(
 		return HandleOSLRequest(tunnelOwner, tunnel, payload)
 	}
 
-	return common.ContextError(fmt.Errorf("invalid request name: %s", name))
+	return errors.Tracef("invalid request name: %s", name)
 }
 
 func HandleOSLRequest(
@@ -1016,7 +1016,7 @@ func HandleOSLRequest(
 	var oslRequest protocol.OSLRequest
 	err := json.Unmarshal(payload, &oslRequest)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	if oslRequest.ClearLocalSLOKs {
@@ -1029,7 +1029,7 @@ func HandleOSLRequest(
 		duplicate, err := SetSLOK(slok.ID, slok.Key)
 		if err != nil {
 			// TODO: return error to trigger retry?
-			NoticeAlert("SetSLOK failed: %s", common.ContextError(err))
+			NoticeAlert("SetSLOK failed: %s", errors.Trace(err))
 		} else if !duplicate {
 			seededNewSLOK = true
 		}

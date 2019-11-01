@@ -24,14 +24,14 @@ package psiphon
 import (
 	"bytes"
 	"encoding/hex"
-	"errors"
+	std_errors "errors"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // datastoreDB is a simple filesystem-backed key/value store that implements
@@ -80,7 +80,7 @@ func datastoreOpenDB(rootDataDirectory string) (*datastoreDB, error) {
 	dataDirectory := filepath.Join(rootDataDirectory, "psiphon.filesdb")
 	err := os.MkdirAll(dataDirectory, 0700)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return &datastoreDB{
@@ -106,20 +106,20 @@ func (db *datastoreDB) readBuffer(filename string) (*bytes.Buffer, error) {
 	// Complete any partial put commit.
 	err := datastoreApplyCommit(filename)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	file, err := os.Open(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	defer file.Close()
 	buffer := db.getBuffer()
 	_, err = buffer.ReadFrom(file)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	return buffer, nil
 }
@@ -136,13 +136,13 @@ func (db *datastoreDB) view(fn func(tx *datastoreTx) error) error {
 	db.lock.RLock()
 	defer db.lock.RUnlock()
 	if db.closed {
-		return common.ContextError(errors.New("closed"))
+		return errors.TraceNew("closed")
 	}
 	tx := &datastoreTx{db: db}
 	defer tx.releaseBuffers()
 	err := fn(tx)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
@@ -151,13 +151,13 @@ func (db *datastoreDB) update(fn func(tx *datastoreTx) error) error {
 	db.lock.Lock()
 	defer db.lock.Unlock()
 	if db.closed {
-		return common.ContextError(errors.New("closed"))
+		return errors.TraceNew("closed")
 	}
 	tx := &datastoreTx{db: db, canUpdate: true}
 	defer tx.releaseBuffers()
 	err := fn(tx)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
@@ -169,7 +169,7 @@ func (tx *datastoreTx) bucket(name []byte) *datastoreBucket {
 		// The original datastore interface does not return an error from Bucket,
 		// so emit notice, and return zero-value bucket for which all
 		// operations will fail.
-		NoticeAlert("bucket failed: %s", common.ContextError(err))
+		NoticeAlert("bucket failed: %s", errors.Trace(err))
 		return &datastoreBucket{}
 	}
 	return &datastoreBucket{
@@ -182,7 +182,7 @@ func (tx *datastoreTx) clearBucket(name []byte) error {
 	bucketDirectory := filepath.Join(tx.db.dataDirectory, hex.EncodeToString(name))
 	err := os.RemoveAll(bucketDirectory)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
@@ -203,7 +203,7 @@ func (b *datastoreBucket) get(key []byte) []byte {
 	if err != nil {
 		// The original datastore interface does not return an error from Get,
 		// so emit notice.
-		NoticeAlert("get failed: %s", common.ContextError(err))
+		NoticeAlert("get failed: %s", errors.Trace(err))
 		return nil
 	}
 	if valueBuffer == nil {
@@ -215,10 +215,10 @@ func (b *datastoreBucket) get(key []byte) []byte {
 
 func (b *datastoreBucket) put(key, value []byte) error {
 	if b.tx == nil {
-		return common.ContextError(errors.New("bucket not found"))
+		return errors.TraceNew("bucket not found")
 	}
 	if !b.tx.canUpdate {
-		return common.ContextError(errors.New("non-update transaction"))
+		return errors.TraceNew("non-update transaction")
 	}
 
 	filename := filepath.Join(b.bucketDirectory, hex.EncodeToString(key))
@@ -226,24 +226,24 @@ func (b *datastoreBucket) put(key, value []byte) error {
 	// Complete any partial put commit.
 	err := datastoreApplyCommit(filename)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	putFilename := filename + ".put"
 	err = ioutil.WriteFile(putFilename, value, 0600)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	commitFilename := filename + ".commit"
 	err = os.Rename(putFilename, commitFilename)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = datastoreApplyCommit(filename)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -257,21 +257,21 @@ func datastoreApplyCommit(filename string) error {
 	// TODO: may not be sufficient atomic
 	err := os.Rename(commitFilename, filename)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
 
 func (b *datastoreBucket) delete(key []byte) error {
 	if b.tx == nil {
-		return common.ContextError(errors.New("bucket not found"))
+		return errors.TraceNew("bucket not found")
 	}
 	filename := filepath.Join(b.bucketDirectory, hex.EncodeToString(key))
 	filenames := []string{filename + ".put", filename + ".commit", filename}
 	for _, filename := range filenames {
 		err := os.Remove(filename)
 		if err != nil && !os.IsNotExist(err) {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 	return nil
@@ -286,7 +286,7 @@ func (b *datastoreBucket) cursor() *datastoreCursor {
 	}
 	fileInfos, err := ioutil.ReadDir(b.bucketDirectory)
 	if err != nil {
-		NoticeAlert("cursor failed: %s", common.ContextError(err))
+		NoticeAlert("cursor failed: %s", errors.Trace(err))
 		return &datastoreCursor{}
 	}
 	return &datastoreCursor{
@@ -333,7 +333,7 @@ func (c *datastoreCursor) currentKey() []byte {
 	}
 	key, err := hex.DecodeString(info.Name())
 	if err != nil {
-		NoticeAlert("cursor failed: %s", common.ContextError(err))
+		NoticeAlert("cursor failed: %s", errors.Trace(err))
 		return nil
 	}
 	return key
@@ -369,10 +369,10 @@ func (c *datastoreCursor) current() ([]byte, []byte) {
 	filename := filepath.Join(c.bucket.bucketDirectory, hex.EncodeToString(key))
 	valueBuffer, err := c.bucket.tx.db.readBuffer(filename)
 	if valueBuffer == nil {
-		err = errors.New("unexpected nil value")
+		err = std_errors.New("unexpected nil value")
 	}
 	if err != nil {
-		NoticeAlert("cursor failed: %s", common.ContextError(err))
+		NoticeAlert("cursor failed: %s", errors.Trace(err))
 		return nil, nil
 	}
 	c.lastBuffer = valueBuffer

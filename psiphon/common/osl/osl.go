@@ -39,7 +39,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
+	std_errors "errors"
 	"fmt"
 	"io"
 	"net"
@@ -53,6 +53,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/secretbox"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/sss"
 )
 
@@ -263,7 +264,7 @@ func NewConfig(filename string) (*Config, error) {
 		func(fileContent []byte, _ time.Time) error {
 			newConfig, err := LoadConfig(fileContent)
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 			// Modify actual traffic rules only after validation
 			config.Schemes = newConfig.Schemes
@@ -272,7 +273,7 @@ func NewConfig(filename string) (*Config, error) {
 
 	_, err := config.Reload()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return config, nil
@@ -285,7 +286,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	var config Config
 	err := json.Unmarshal(configJSON, &config)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	var previousEpoch time.Time
@@ -294,19 +295,19 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 
 		epoch, err := time.Parse(time.RFC3339, scheme.Epoch)
 		if err != nil {
-			return nil, common.ContextError(fmt.Errorf("invalid epoch format: %s", err))
+			return nil, errors.Tracef("invalid epoch format: %s", err)
 		}
 
 		if epoch.UTC() != epoch {
-			return nil, common.ContextError(errors.New("invalid epoch timezone"))
+			return nil, errors.TraceNew("invalid epoch timezone")
 		}
 
 		if epoch.Round(time.Duration(scheme.SeedPeriodNanoseconds)) != epoch {
-			return nil, common.ContextError(errors.New("invalid epoch period"))
+			return nil, errors.TraceNew("invalid epoch period")
 		}
 
 		if epoch.Before(previousEpoch) {
-			return nil, common.ContextError(errors.New("invalid epoch order"))
+			return nil, errors.TraceNew("invalid epoch order")
 		}
 
 		previousEpoch = epoch
@@ -316,34 +317,34 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		scheme.derivedSLOKCache = make(map[slokReference]*SLOK)
 
 		if len(scheme.MasterKey) != KEY_LENGTH_BYTES {
-			return nil, common.ContextError(errors.New("invalid master key"))
+			return nil, errors.TraceNew("invalid master key")
 		}
 
 		for index, seedSpec := range scheme.SeedSpecs {
 			if len(seedSpec.ID) != KEY_LENGTH_BYTES {
-				return nil, common.ContextError(errors.New("invalid seed spec ID"))
+				return nil, errors.TraceNew("invalid seed spec ID")
 			}
 
 			// TODO: check that subnets do not overlap, as required by SubnetLookup
 			subnetLookup, err := common.NewSubnetLookup(seedSpec.UpstreamSubnets)
 			if err != nil {
-				return nil, common.ContextError(fmt.Errorf("invalid upstream subnets: %s", err))
+				return nil, errors.Tracef("invalid upstream subnets: %s", err)
 			}
 
 			scheme.subnetLookups[index] = subnetLookup
 		}
 
 		if !isValidShamirSplit(len(scheme.SeedSpecs), scheme.SeedSpecThreshold) {
-			return nil, common.ContextError(errors.New("invalid seed spec key split"))
+			return nil, errors.TraceNew("invalid seed spec key split")
 		}
 
 		if len(scheme.SeedPeriodKeySplits) < 1 {
-			return nil, common.ContextError(errors.New("invalid seed period key split count"))
+			return nil, errors.TraceNew("invalid seed period key split count")
 		}
 
 		for _, keySplit := range scheme.SeedPeriodKeySplits {
 			if !isValidShamirSplit(keySplit.Total, keySplit.Threshold) {
-				return nil, common.ContextError(errors.New("invalid seed period key split"))
+				return nil, errors.TraceNew("invalid seed period key split")
 			}
 		}
 	}
@@ -825,7 +826,7 @@ func (config *Config) Pave(
 				fileKey, fileSpec, err := makeOSLFileSpec(
 					scheme, propagationChannelID, firstSLOKTime)
 				if err != nil {
-					return nil, common.ContextError(err)
+					return nil, errors.Trace(err)
 				}
 
 				hexEncodedOSLID := hex.EncodeToString(fileSpec.ID)
@@ -844,12 +845,12 @@ func (config *Config) Pave(
 						signingPublicKey,
 						signingPrivateKey)
 					if err != nil {
-						return nil, common.ContextError(err)
+						return nil, errors.Trace(err)
 					}
 
 					boxedServerEntries, err := box(fileKey, serverEntriesPackage)
 					if err != nil {
-						return nil, common.ContextError(err)
+						return nil, errors.Trace(err)
 					}
 
 					if !omitMD5Sums {
@@ -885,7 +886,7 @@ func (config *Config) Pave(
 
 	registryJSON, err := json.Marshal(registry)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	registryPackage, err := common.WriteAuthenticatedDataPackage(
@@ -893,7 +894,7 @@ func (config *Config) Pave(
 		signingPublicKey,
 		signingPrivateKey)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	paveFiles = append(paveFiles, &PaveFile{
@@ -912,7 +913,7 @@ func (config *Config) CurrentOSLIDs(schemeIndex int) (map[string]string, error) 
 	defer config.ReloadableFile.RUnlock()
 
 	if schemeIndex < 0 || schemeIndex >= len(config.Schemes) {
-		return nil, common.ContextError(errors.New("invalid scheme index"))
+		return nil, errors.TraceNew("invalid scheme index")
 	}
 
 	scheme := config.Schemes[schemeIndex]
@@ -924,7 +925,7 @@ func (config *Config) CurrentOSLIDs(schemeIndex int) (map[string]string, error) 
 	for _, propagationChannelID := range scheme.PropagationChannelIDs {
 		_, fileSpec, err := makeOSLFileSpec(scheme, propagationChannelID, oslTime)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		OSLIDs[propagationChannelID] = hex.EncodeToString(fileSpec.ID)
 	}
@@ -991,7 +992,7 @@ func makeOSLFileSpec(
 
 	keyMaterialReader, err := newSeededKeyMaterialReader(splitKeyMaterialSeed)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	keyShares, err := divideKey(
@@ -1002,7 +1003,7 @@ func makeOSLFileSpec(
 		propagationChannelID,
 		&firstSLOKTime)
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	fileSpec := &OSLFileSpec{
@@ -1031,7 +1032,7 @@ func divideKey(
 		keySplit.Threshold,
 		keyMaterialReader)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	var boxedShares [][]byte
@@ -1043,10 +1044,10 @@ func divideKey(
 
 		n, err := keyMaterialReader.Read(shareKey[:])
 		if err == nil && n != len(shareKey) {
-			err = errors.New("unexpected length")
+			err = std_errors.New("unexpected length")
 		}
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		if keySplitIndex > 0 {
@@ -1058,7 +1059,7 @@ func divideKey(
 				propagationChannelID,
 				nextSLOKTime)
 			if err != nil {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 			keyShares = append(keyShares, keyShare)
 		} else {
@@ -1069,7 +1070,7 @@ func divideKey(
 				propagationChannelID,
 				nextSLOKTime)
 			if err != nil {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 			keyShares = append(keyShares, keyShare)
 
@@ -1077,7 +1078,7 @@ func divideKey(
 		}
 		boxedShare, err := box(shareKey[:], share)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		boxedShares = append(boxedShares, boxedShare)
 	}
@@ -1106,7 +1107,7 @@ func divideKeyWithSeedSpecSLOKs(
 		scheme.SeedSpecThreshold,
 		keyMaterialReader)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	for index, seedSpec := range scheme.SeedSpecs {
@@ -1120,7 +1121,7 @@ func divideKeyWithSeedSpecSLOKs(
 
 		boxedShare, err := box(slok.Key, shares[index])
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		boxedShares = append(boxedShares, boxedShare)
 
@@ -1143,7 +1144,7 @@ func (keyShares *KeyShares) reassembleKey(lookup SLOKLookup, unboxKey bool) (boo
 	if (len(keyShares.SLOKIDs) > 0 && len(keyShares.KeyShares) > 0) ||
 		(len(keyShares.SLOKIDs) > 0 && len(keyShares.SLOKIDs) != len(keyShares.BoxedShares)) ||
 		(len(keyShares.KeyShares) > 0 && len(keyShares.KeyShares) != len(keyShares.BoxedShares)) {
-		return false, nil, common.ContextError(errors.New("unexpected KeyShares format"))
+		return false, nil, errors.TraceNew("unexpected KeyShares format")
 	}
 
 	shareCount := 0
@@ -1163,7 +1164,7 @@ func (keyShares *KeyShares) reassembleKey(lookup SLOKLookup, unboxKey bool) (boo
 			if unboxKey {
 				share, err := unbox(slokKey, keyShares.BoxedShares[i])
 				if err != nil {
-					return false, nil, common.ContextError(err)
+					return false, nil, errors.Trace(err)
 				}
 				shares[i] = share
 			}
@@ -1172,7 +1173,7 @@ func (keyShares *KeyShares) reassembleKey(lookup SLOKLookup, unboxKey bool) (boo
 		for i := 0; i < len(keyShares.KeyShares) && shareCount < keyShares.Threshold; i++ {
 			ok, key, err := keyShares.KeyShares[i].reassembleKey(lookup, unboxKey)
 			if err != nil {
-				return false, nil, common.ContextError(err)
+				return false, nil, errors.Trace(err)
 			}
 			if !ok {
 				continue
@@ -1181,7 +1182,7 @@ func (keyShares *KeyShares) reassembleKey(lookup SLOKLookup, unboxKey bool) (boo
 			if unboxKey {
 				share, err := unbox(key, keyShares.BoxedShares[i])
 				if err != nil {
-					return false, nil, common.ContextError(err)
+					return false, nil, errors.Trace(err)
 				}
 				shares[i] = share
 			}
@@ -1276,7 +1277,7 @@ func NewRegistryStreamer(
 	payloadReader, err := common.NewAuthenticatedDataPackageReader(
 		registryFileContent, signingPublicKey)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	base64Decoder := base64.NewDecoder(base64.StdEncoding, payloadReader)
@@ -1291,29 +1292,29 @@ func NewRegistryStreamer(
 
 	err = expectJSONDelimiter(jsonDecoder, "{")
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	token, err := jsonDecoder.Token()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	name, ok := token.(string)
 
 	if !ok {
-		return nil, common.ContextError(
+		return nil, errors.Trace(
 			fmt.Errorf("unexpected token type: %T", token))
 	}
 
 	if name != "FileSpecs" {
-		return nil, common.ContextError(
+		return nil, errors.Trace(
 			fmt.Errorf("unexpected field name: %s", name))
 	}
 
 	err = expectJSONDelimiter(jsonDecoder, "[")
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return &RegistryStreamer{
@@ -1334,12 +1335,12 @@ func (s *RegistryStreamer) Next() (*OSLFileSpec, error) {
 			var fileSpec OSLFileSpec
 			err := s.jsonDecoder.Decode(&fileSpec)
 			if err != nil {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 
 			ok, _, err := fileSpec.KeyShares.reassembleKey(s.lookup, false)
 			if err != nil {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 
 			if ok {
@@ -1351,19 +1352,19 @@ func (s *RegistryStreamer) Next() (*OSLFileSpec, error) {
 			// Expect the end of the FileSpecs array.
 			err := expectJSONDelimiter(s.jsonDecoder, "]")
 			if err != nil {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 
 			// Expect the end of the Registry object.
 			err = expectJSONDelimiter(s.jsonDecoder, "}")
 			if err != nil {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 
 			// Expect the end of the registry content.
 			_, err = s.jsonDecoder.Token()
 			if err != io.EOF {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 
 			return nil, nil
@@ -1374,19 +1375,17 @@ func (s *RegistryStreamer) Next() (*OSLFileSpec, error) {
 func expectJSONDelimiter(jsonDecoder *json.Decoder, delimiter string) error {
 	token, err := jsonDecoder.Token()
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	delim, ok := token.(json.Delim)
 
 	if !ok {
-		return common.ContextError(
-			fmt.Errorf("unexpected token type: %T", token))
+		return errors.Tracef("unexpected token type: %T", token)
 	}
 
 	if delim.String() != delimiter {
-		return common.ContextError(
-			fmt.Errorf("unexpected delimiter: %s", delim.String()))
+		return errors.Tracef("unexpected delimiter: %s", delim.String())
 	}
 
 	return nil
@@ -1401,14 +1400,14 @@ func NewOSLReader(
 
 	ok, fileKey, err := fileSpec.KeyShares.reassembleKey(lookup, true)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	if !ok {
-		return nil, common.ContextError(errors.New("unseeded OSL"))
+		return nil, errors.TraceNew("unseeded OSL")
 	}
 
 	if len(fileKey) != KEY_LENGTH_BYTES {
-		return nil, common.ContextError(errors.New("invalid key length"))
+		return nil, errors.TraceNew("invalid key length")
 	}
 
 	var nonce [24]byte
@@ -1417,7 +1416,7 @@ func NewOSLReader(
 
 	unboxer, err := secretbox.NewOpenReadSeeker(oslFileContent, &nonce, &key)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return common.NewAuthenticatedDataPackageReader(
@@ -1445,12 +1444,12 @@ func (z *zeroReader) Read(p []byte) (int, error) {
 func newSeededKeyMaterialReader(seed []byte) (io.Reader, error) {
 
 	if len(seed) != KEY_LENGTH_BYTES {
-		return nil, common.ContextError(errors.New("invalid key length"))
+		return nil, errors.TraceNew("invalid key length")
 	}
 
 	aesCipher, err := aes.NewCipher(seed)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	var iv [aes.BlockSize]byte
@@ -1490,7 +1489,7 @@ func shamirSplit(
 	randReader io.Reader) ([][]byte, error) {
 
 	if !isValidShamirSplit(total, threshold) {
-		return nil, common.ContextError(errors.New("invalid parameters"))
+		return nil, errors.TraceNew("invalid parameters")
 	}
 
 	if threshold == 1 {
@@ -1505,7 +1504,7 @@ func shamirSplit(
 	shareMap, err := sss.SplitUsingReader(
 		byte(total), byte(threshold), secret, randReader)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	shares := make([][]byte, total)
@@ -1542,7 +1541,7 @@ func shamirCombine(shares [][]byte) []byte {
 // each key is used to encrypt only one message.
 func box(key, plaintext []byte) ([]byte, error) {
 	if len(key) != KEY_LENGTH_BYTES {
-		return nil, common.ContextError(errors.New("invalid key length"))
+		return nil, errors.TraceNew("invalid key length")
 	}
 	var nonce [24]byte
 	var secretboxKey [KEY_LENGTH_BYTES]byte
@@ -1554,14 +1553,14 @@ func box(key, plaintext []byte) ([]byte, error) {
 // unbox is a helper wrapper for secretbox.Open
 func unbox(key, box []byte) ([]byte, error) {
 	if len(key) != KEY_LENGTH_BYTES {
-		return nil, common.ContextError(errors.New("invalid key length"))
+		return nil, errors.TraceNew("invalid key length")
 	}
 	var nonce [24]byte
 	var secretboxKey [KEY_LENGTH_BYTES]byte
 	copy(secretboxKey[:], key)
 	plaintext, ok := secretbox.Open(nil, box, &nonce, &secretboxKey)
 	if !ok {
-		return nil, common.ContextError(errors.New("unbox failed"))
+		return nil, errors.TraceNew("unbox failed")
 	}
 	return plaintext, nil
 }

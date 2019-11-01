@@ -33,7 +33,9 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
 )
 
 type noticeLogger struct {
@@ -158,7 +160,7 @@ func SetNoticeFiles(
 		singletonNoticeLogger.homepageFile, err = os.OpenFile(
 			homepageFilename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -170,12 +172,12 @@ func SetNoticeFiles(
 		singletonNoticeLogger.rotatingFile, err = os.OpenFile(
 			rotatingFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		fileInfo, err := singletonNoticeLogger.rotatingFile.Stat()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		if rotatingFileSize <= 0 {
@@ -235,7 +237,7 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 		// One scenario where this is useful is if the preceding Marshal fails due to
 		// bad data in the args. This has happened for a json.RawMessage field.
 		output = makeNoticeInternalError(
-			fmt.Sprintf("marshal notice failed: %s", common.ContextError(err)))
+			fmt.Sprintf("marshal notice failed: %s", errors.Trace(err)))
 	}
 
 	// Ensure direct server IPs are not exposed in notices. The "net" package,
@@ -296,23 +298,23 @@ func (nl *noticeLogger) outputNoticeToHomepageFile(noticeFlags uint32, output []
 	if (noticeFlags & noticeClearHomepages) != 0 {
 		err := nl.homepageFile.Truncate(0)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		_, err = nl.homepageFile.Seek(0, 0)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
 	_, err := nl.homepageFile.Write(output)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	if (noticeFlags & noticeSyncHomepages) != 0 {
 		err = nl.homepageFile.Sync()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -330,23 +332,23 @@ func (nl *noticeLogger) outputNoticeToRotatingFile(output []byte) error {
 
 		err := nl.rotatingFile.Sync()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		err = nl.rotatingFile.Close()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		err = os.Rename(nl.rotatingFilename, nl.rotatingOlderFilename)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		nl.rotatingFile, err = os.OpenFile(
 			nl.rotatingFilename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		nl.rotatingCurrentFileSize = 0
@@ -354,7 +356,7 @@ func (nl *noticeLogger) outputNoticeToRotatingFile(output []byte) error {
 
 	_, err := nl.rotatingFile.Write(output)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	nl.rotatingCurrentNoticeCount += 1
@@ -362,7 +364,7 @@ func (nl *noticeLogger) outputNoticeToRotatingFile(output []byte) error {
 		nl.rotatingCurrentNoticeCount = 0
 		err = nl.rotatingFile.Sync()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -709,7 +711,7 @@ func NoticeLocalProxyError(proxyType string, err error) {
 	// the root error that repeats (the full error often contains
 	// different specific values, e.g., local port numbers, but
 	// the same repeating root).
-	// Assumes error format of common.ContextError.
+	// Assumes error format of errors.Trace.
 	repetitionMessage := err.Error()
 	index := strings.LastIndex(repetitionMessage, ": ")
 	if index != -1 {
@@ -1000,16 +1002,16 @@ func NoticeCommonLogger() common.Logger {
 type commonLogger struct {
 }
 
-func (logger *commonLogger) WithContext() common.LogContext {
-	return &commonLogContext{
-		context: common.GetParentContext(),
+func (logger *commonLogger) WithTrace() common.LogTrace {
+	return &commonLogTrace{
+		trace: stacktrace.GetParentFunctionName(),
 	}
 }
 
-func (logger *commonLogger) WithContextFields(fields common.LogFields) common.LogContext {
-	return &commonLogContext{
-		context: common.GetParentContext(),
-		fields:  fields,
+func (logger *commonLogger) WithTraceFields(fields common.LogFields) common.LogTrace {
+	return &commonLogTrace{
+		trace:  stacktrace.GetParentFunctionName(),
+		fields: fields,
 	}
 }
 
@@ -1033,12 +1035,12 @@ func listCommonFields(fields common.LogFields) []interface{} {
 	return fieldList
 }
 
-type commonLogContext struct {
-	context string
-	fields  common.LogFields
+type commonLogTrace struct {
+	trace  string
+	fields common.LogFields
 }
 
-func (context *commonLogContext) outputNotice(
+func (log *commonLogTrace) outputNotice(
 	noticeType string, args ...interface{}) {
 
 	singletonNoticeLogger.outputNotice(
@@ -1046,22 +1048,22 @@ func (context *commonLogContext) outputNotice(
 		append(
 			[]interface{}{
 				"message", fmt.Sprint(args...),
-				"context", context.context},
-			listCommonFields(context.fields)...)...)
+				"trace", log.trace},
+			listCommonFields(log.fields)...)...)
 }
 
-func (context *commonLogContext) Debug(args ...interface{}) {
+func (log *commonLogTrace) Debug(args ...interface{}) {
 	// Ignored.
 }
 
-func (context *commonLogContext) Info(args ...interface{}) {
-	context.outputNotice("Info", args...)
+func (log *commonLogTrace) Info(args ...interface{}) {
+	log.outputNotice("Info", args...)
 }
 
-func (context *commonLogContext) Warning(args ...interface{}) {
-	context.outputNotice("Alert", args...)
+func (log *commonLogTrace) Warning(args ...interface{}) {
+	log.outputNotice("Alert", args...)
 }
 
-func (context *commonLogContext) Error(args ...interface{}) {
-	context.outputNotice("Error", args...)
+func (log *commonLogTrace) Error(args ...interface{}) {
+	log.outputNotice("Error", args...)
 }

@@ -58,9 +58,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/Yawning/chacha20"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/hkdf"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 const (
@@ -75,7 +75,7 @@ func NewSeed() (*Seed, error) {
 	seed := new(Seed)
 	_, err := crypto_rand.Read(seed[:])
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	return seed, nil
 }
@@ -90,7 +90,7 @@ func NewSaltedSeed(seed *Seed, salt string) (*Seed, error) {
 	_, err := io.ReadFull(
 		hkdf.New(sha256.New, seed[:], []byte(salt), nil), saltedSeed[:])
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	return saltedSeed, nil
 }
@@ -109,7 +109,7 @@ type PRNG struct {
 func NewPRNG() (*PRNG, error) {
 	seed, err := NewSeed()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	return NewPRNGWithSeed(seed), nil
 }
@@ -129,7 +129,7 @@ func NewPRNGWithSeed(seed *Seed) *PRNG {
 func NewPRNGWithSaltedSeed(seed *Seed, salt string) (*PRNG, error) {
 	saltedSeed, err := NewSaltedSeed(seed, salt)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	return NewPRNGWithSeed(saltedSeed), nil
 }
@@ -176,7 +176,7 @@ func (p *PRNG) rekey() {
 		// the only possible errors from chacha20.NewCipher invalid key or
 		// nonce size, and since we use the correct sizes, there should never
 		// be an error here. So panic in this unexpected case.
-		panic(common.ContextError(err))
+		panic(errors.Trace(err))
 	}
 
 	p.randomStreamRekeyCount += 1
@@ -325,6 +325,10 @@ func (p *PRNG) Base64String(byteLength int) string {
 }
 
 var p *PRNG
+
+func Read(b []byte) (int, error) {
+	return p.Read(b)
+}
 
 func Int63() int64 {
 	return p.Int63()

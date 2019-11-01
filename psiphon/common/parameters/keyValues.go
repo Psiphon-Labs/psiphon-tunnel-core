@@ -22,7 +22,7 @@ package parameters
 import (
 	"encoding/json"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // KeyValues represents a set of name/JSON pairs.
@@ -34,7 +34,7 @@ func (keyValues KeyValues) Validate() error {
 		var v interface{}
 		err := json.Unmarshal(value, &v)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 	return nil
