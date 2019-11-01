@@ -43,7 +43,6 @@ import (
 	"unsafe"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/ClientLibrary/clientlib"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
