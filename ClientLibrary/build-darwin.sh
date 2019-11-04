@@ -6,7 +6,7 @@ set -e -u -x
 if [ -z ${2+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$2"; fi
 
 # Modify this value as we use newer Go versions.
-GO_VERSION_REQUIRED="1.13.3"
+GO_VERSION_REQUIRED="1.13.4"
 
 BASE_DIR=$(cd "$(dirname "$0")" ; pwd -P)
 cd ${BASE_DIR}
