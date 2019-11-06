@@ -22,17 +22,16 @@
 package psiphon
 
 import (
-	"errors"
 	"net"
 	"syscall"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 func newUDPConn(domain int, config *DialConfig) (net.PacketConn, error) {
 
 	if config.DeviceBinder != nil {
-		return nil, common.ContextError(errors.New("newUDPConn with DeviceBinder not supported on this platform"))
+		return nil, errors.TraceNew("newUDPConn with DeviceBinder not supported on this platform")
 	}
 
 	network := "udp4"

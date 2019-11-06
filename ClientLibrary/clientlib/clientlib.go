@@ -22,13 +22,14 @@ package clientlib
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	std_errors "errors"
 	"fmt"
 	"path/filepath"
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
@@ -94,7 +95,7 @@ type NoticeEvent struct {
 }
 
 // ErrTimeout is returned when the tunnel connection attempt fails due to timeout
-var ErrTimeout = errors.New("clientlib: tunnel connection timeout")
+var ErrTimeout = std_errors.New("clientlib: tunnel connection timeout")
 
 // StartTunnel makes a Psiphon tunnel connection. It returns an error if the connection
 // was not successful. If the returned error is nil, the returned tunnel can be used
@@ -121,7 +122,7 @@ func StartTunnel(ctx context.Context,
 
 	config, err := psiphon.LoadConfig(configJSON)
 	if err != nil {
-		return nil, common.ContextErrorMsg(err, "failed to load config file")
+		return nil, errors.TraceMsg(err, "failed to load config file")
 	}
 
 	// Use params.DataRootDirectory to set related config values.
@@ -148,14 +149,14 @@ func StartTunnel(ctx context.Context,
 	// or attempting to connect.
 	err = config.Commit()
 	if err != nil {
-		return nil, common.ContextErrorMsg(err, "config.Commit failed")
+		return nil, errors.TraceMsg(err, "config.Commit failed")
 	}
 
 	// If supplied, apply the client parameters delta
 	if len(paramsDelta) > 0 {
 		err = config.SetClientParameters("", false, paramsDelta)
 		if err != nil {
-			return nil, common.ContextErrorMsg(
+			return nil, errors.TraceMsg(
 				err, fmt.Sprintf("SetClientParameters failed for delta: %v", paramsDelta))
 		}
 	}
@@ -163,13 +164,13 @@ func StartTunnel(ctx context.Context,
 	if config.EmitDiagnosticNotices && params.EmitDiagnosticNoticesToFiles {
 		err := psiphon.SetNoticeFiles("", filepath.Join(config.DataStoreDirectory, "diagnostics.log"), 0, 0)
 		if err != nil {
-			return nil, common.ContextErrorMsg(err, "failed to initialize diagnostic logging")
+			return nil, errors.TraceMsg(err, "failed to initialize diagnostic logging")
 		}
 	}
 
 	err = psiphon.OpenDataStore(config)
 	if err != nil {
-		return nil, common.ContextErrorMsg(err, "failed to open data store")
+		return nil, errors.TraceMsg(err, "failed to open data store")
 	}
 	// Make sure we close the datastore in case of error
 	defer func() {
@@ -184,12 +185,12 @@ func StartTunnel(ctx context.Context,
 		common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
 		protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
 	if err != nil {
-		return nil, common.ContextErrorMsg(err, "failed to decode server entry list")
+		return nil, errors.TraceMsg(err, "failed to decode server entry list")
 	}
 
 	err = psiphon.StoreServerEntries(config, serverEntries, false)
 	if err != nil {
-		return nil, common.ContextErrorMsg(err, "failed to store server entries")
+		return nil, errors.TraceMsg(err, "failed to store server entries")
 	}
 
 	// Will receive a value when the tunnel has successfully connected.
@@ -210,7 +211,7 @@ func StartTunnel(ctx context.Context,
 			if err != nil {
 				// This is unexpected and probably indicates something fatal has occurred.
 				// We'll interpret it as a connection error and abort.
-				err = common.ContextErrorMsg(err, "failed to unmarshal notice JSON")
+				err = errors.TraceMsg(err, "failed to unmarshal notice JSON")
 				select {
 				case errored <- err:
 				default:
@@ -249,7 +250,7 @@ func StartTunnel(ctx context.Context,
 	// Create the Psiphon controller
 	controller, err := psiphon.NewController(config)
 	if err != nil {
-		return nil, common.ContextErrorMsg(err, "psiphon.NewController failed")
+		return nil, errors.TraceMsg(err, "psiphon.NewController failed")
 	}
 
 	// Create a cancelable context that will be used for stopping the tunnel
@@ -265,7 +266,7 @@ func StartTunnel(ctx context.Context,
 		controller.Run(controllerCtx)
 
 		select {
-		case errored <- errors.New("controller.Run exited unexpectedly"):
+		case errored <- errors.TraceNew("controller.Run exited unexpectedly"):
 		default:
 		}
 	}()
@@ -279,7 +280,7 @@ func StartTunnel(ctx context.Context,
 		return nil, ErrTimeout
 	case err := <-errored:
 		tunnel.Stop()
-		return nil, common.ContextErrorMsg(err, "tunnel start produced error")
+		return nil, errors.TraceMsg(err, "tunnel start produced error")
 	}
 }
 

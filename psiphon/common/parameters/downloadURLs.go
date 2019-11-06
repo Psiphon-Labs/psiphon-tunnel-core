@@ -21,9 +21,8 @@ package parameters
 
 import (
 	"encoding/base64"
-	"fmt"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
@@ -63,14 +62,14 @@ func (d DownloadURLs) DecodeAndValidate() error {
 		}
 		decodedURL, err := base64.StdEncoding.DecodeString(downloadURL.URL)
 		if err != nil {
-			return common.ContextError(fmt.Errorf("failed to decode URL: %s", err))
+			return errors.Tracef("failed to decode URL: %s", err)
 		}
 
 		downloadURL.URL = string(decodedURL)
 	}
 
 	if !hasOnlyAfterZero {
-		return common.ContextError(fmt.Errorf("must be at least one DownloadURL with OnlyAfterAttempts = 0"))
+		return errors.Tracef("must be at least one DownloadURL with OnlyAfterAttempts = 0")
 	}
 
 	return nil

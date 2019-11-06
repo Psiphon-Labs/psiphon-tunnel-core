@@ -325,11 +325,17 @@ public class PsiphonTunnel {
         try {
             // Workaround for https://code.google.com/p/android/issues/detail?id=61096
             Locale.setDefault(new Locale("en"));
+
+            int mtu = VPN_INTERFACE_MTU;
+            String dnsResolver = privateAddress.mRouter;
+
             tunFd = vpnServiceBuilder
                             .setSession(mHostService.getAppName())
+                            .setMtu(mtu)
                             .addAddress(privateAddress.mIpAddress, privateAddress.mPrefixLength)
                             .addRoute("0.0.0.0", 0)
                             .addRoute(privateAddress.mSubnet, privateAddress.mPrefixLength)
+                            .addDnsServer(dnsResolver)
                             .establish();
         } catch(IllegalArgumentException e) {
             throw new Exception(errorMessage, e);

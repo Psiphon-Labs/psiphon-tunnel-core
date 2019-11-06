@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	tris "github.com/Psiphon-Labs/tls-tris"
 )
@@ -74,7 +75,7 @@ func RunWebServer(
 		[]byte(support.Config.WebServerCertificate),
 		[]byte(support.Config.WebServerPrivateKey))
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	tlsConfig := &tris.Config{
@@ -106,14 +107,14 @@ func RunWebServer(
 
 	listener, err := net.Listen("tcp", localAddress)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
-	log.WithContextFields(
+	log.WithTraceFields(
 		LogFields{"localAddress": localAddress}).Info("starting")
 
 	err = nil
-	errors := make(chan error)
+	errorChannel := make(chan error)
 	waitGroup := new(sync.WaitGroup)
 
 	waitGroup.Add(1)
@@ -131,26 +132,26 @@ func RunWebServer(
 		default:
 			if err != nil {
 				select {
-				case errors <- common.ContextError(err):
+				case errorChannel <- errors.Trace(err):
 				default:
 				}
 			}
 		}
 
-		log.WithContextFields(
+		log.WithTraceFields(
 			LogFields{"localAddress": localAddress}).Info("stopped")
 	}()
 
 	select {
 	case <-shutdownBroadcast:
-	case err = <-errors:
+	case err = <-errorChannel:
 	}
 
 	listener.Close()
 
 	waitGroup.Wait()
 
-	log.WithContextFields(
+	log.WithTraceFields(
 		LogFields{"localAddress": localAddress}).Info("exiting")
 
 	return err
@@ -188,7 +189,7 @@ func convertHTTPRequestToAPIRequest(
 				var arrayValue []interface{}
 				err := json.Unmarshal([]byte(value), &arrayValue)
 				if err != nil {
-					return nil, common.ContextError(err)
+					return nil, errors.Trace(err)
 				}
 				params[name] = arrayValue
 			} else {
@@ -203,14 +204,14 @@ func convertHTTPRequestToAPIRequest(
 		r.Body = http.MaxBytesReader(w, r.Body, MAX_API_PARAMS_SIZE)
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		var bodyParams map[string]interface{}
 
 		if len(body) != 0 {
 			err = json.Unmarshal(body, &bodyParams)
 			if err != nil {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 			params[requestBodyName] = bodyParams
 		}
@@ -246,7 +247,7 @@ func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("failed")
+		log.WithTraceFields(LogFields{"error": err}).Warning("failed")
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -277,7 +278,7 @@ func (webServer *webServer) connectedHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("failed")
+		log.WithTraceFields(LogFields{"error": err}).Warning("failed")
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -302,7 +303,7 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("failed")
+		log.WithTraceFields(LogFields{"error": err}).Warning("failed")
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -328,7 +329,7 @@ func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *
 	}
 
 	if err != nil {
-		log.WithContextFields(LogFields{"error": err}).Warning("failed")
+		log.WithTraceFields(LogFields{"error": err}).Warning("failed")
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}

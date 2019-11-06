@@ -20,19 +20,19 @@
 package common
 
 // Logger exposes a logging interface that's compatible with
-// psiphon/server.ContextLogger. This interface allows packages
+// psiphon/server.TraceLogger. This interface allows packages
 // to implement logging that will integrate with psiphon/server
 // without importing that package. Other implementations of
 // Logger may also be provided.
 type Logger interface {
-	WithContext() LogContext
-	WithContextFields(fields LogFields) LogContext
+	WithTrace() LogTrace
+	WithTraceFields(fields LogFields) LogTrace
 	LogMetric(metric string, fields LogFields)
 }
 
-// LogContext is interface-compatible with the return values from
-// psiphon/server.ContextLogger.WithContext/WithContextFields.
-type LogContext interface {
+// LogTrace is interface-compatible with the return values from
+// psiphon/server.TraceLogger.WitTrace/WithTraceFields.
+type LogTrace interface {
 	Debug(args ...interface{})
 	Info(args ...interface{})
 	Warning(args ...interface{})

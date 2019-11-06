@@ -22,13 +22,12 @@
 package tun
 
 import (
-	"errors"
 	"io"
 	"sync"
 	"sync/atomic"
 	"syscall"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/creack/goselect"
 )
 
@@ -65,7 +64,7 @@ func NewNonblockingIO(ioFD int) (*NonblockingIO, error) {
 
 	newFD, err := syscall.Dup(ioFD)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	init := func(fd int) error {
@@ -75,19 +74,19 @@ func NewNonblockingIO(ioFD int) (*NonblockingIO, error) {
 
 	err = init(newFD)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	var controlFDs [2]int
 	err = syscall.Pipe(controlFDs[:])
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	for _, fd := range controlFDs {
 		err = init(fd)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -121,14 +120,14 @@ func (nio *NonblockingIO) Read(p []byte) (int, error) {
 		if err == syscall.EINTR {
 			continue
 		} else if err != nil {
-			return 0, common.ContextError(err)
+			return 0, errors.Trace(err)
 		}
 		if nio.readFDSet.IsSet(uintptr(nio.controlFDs[0])) {
 			return 0, io.EOF
 		}
 		n, err := syscall.Read(nio.ioFD, p)
 		if err != nil && err != io.EOF {
-			return n, common.ContextError(err)
+			return n, errors.Trace(err)
 		}
 
 		if n == 0 && err == nil {
@@ -148,7 +147,7 @@ func (nio *NonblockingIO) Write(p []byte) (int, error) {
 	defer nio.writeMutex.Unlock()
 
 	if atomic.LoadInt32(&nio.closed) != 0 {
-		return 0, common.ContextError(errors.New("file already closed"))
+		return 0, errors.TraceNew("file already closed")
 	}
 
 	n := 0
@@ -166,15 +165,15 @@ func (nio *NonblockingIO) Write(p []byte) (int, error) {
 		if err == syscall.EINTR {
 			continue
 		} else if err != nil {
-			return 0, common.ContextError(err)
+			return 0, errors.Trace(err)
 		}
 		if nio.writeFDSets[0].IsSet(uintptr(nio.controlFDs[0])) {
-			return 0, common.ContextError(errors.New("file has closed"))
+			return 0, errors.TraceNew("file has closed")
 		}
 		m, err := syscall.Write(nio.ioFD, p)
 		n += m
 		if err != nil && err != syscall.EAGAIN && err != syscall.EWOULDBLOCK {
-			return n, common.ContextError(err)
+			return n, errors.Trace(err)
 		}
 		if n < t {
 			p = p[m:]
@@ -200,7 +199,7 @@ func (nio *NonblockingIO) Close() error {
 	var b [1]byte
 	_, err := syscall.Write(nio.controlFDs[1], b[:])
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	// Lock to ensure concurrent Read/Writes have

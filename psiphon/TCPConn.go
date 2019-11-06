@@ -21,12 +21,12 @@ package psiphon
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	std_errors "errors"
 	"net"
 	"sync/atomic"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 )
@@ -49,7 +49,7 @@ type TCPConn struct {
 func NewTCPDialer(config *DialConfig) Dialer {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		if network != "tcp" {
-			return nil, common.ContextError(fmt.Errorf("%s unsupported", network))
+			return nil, errors.Tracef("%s unsupported", network)
 		}
 		return DialTCP(ctx, addr, config)
 	}
@@ -69,7 +69,7 @@ func DialTCP(
 	}
 
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// Note: when an upstream proxy is used, we don't know what IP address
@@ -108,13 +108,13 @@ func proxiedTcpDial(
 		conn, err := tcpDial(ctx, addr, config)
 		if conn != nil {
 			if !interruptConns.Add(conn) {
-				err = errors.New("already interrupted")
+				err = std_errors.New("already interrupted")
 				conn.Close()
 				conn = nil
 			}
 		}
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		return conn, nil
 	}
@@ -156,7 +156,7 @@ func proxiedTcpDial(
 	}
 
 	if result.err != nil {
-		return nil, common.ContextError(result.err)
+		return nil, errors.Trace(result.err)
 	}
 
 	return result.conn, nil
@@ -183,12 +183,12 @@ func (conn *TCPConn) IsClosed() bool {
 func (conn *TCPConn) CloseWrite() (err error) {
 
 	if conn.IsClosed() {
-		return common.ContextError(errors.New("already closed"))
+		return errors.TraceNew("already closed")
 	}
 
 	tcpConn, ok := conn.Conn.(*net.TCPConn)
 	if !ok {
-		return common.ContextError(errors.New("conn is not a *net.TCPConn"))
+		return errors.TraceNew("conn is not a *net.TCPConn")
 	}
 
 	return tcpConn.CloseWrite()

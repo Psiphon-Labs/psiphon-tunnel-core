@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
 )
 
 func TestTactics(t *testing.T) {
@@ -846,14 +847,14 @@ func newTestLogger() *testLogger {
 	return &testLogger{}
 }
 
-func (l *testLogger) WithContext() common.LogContext {
-	return &testLoggerContext{context: common.GetParentContext()}
+func (l *testLogger) WithTrace() common.LogTrace {
+	return &testLoggerTrace{trace: stacktrace.GetParentFunctionName()}
 }
 
-func (l *testLogger) WithContextFields(fields common.LogFields) common.LogContext {
-	return &testLoggerContext{
-		context: common.GetParentContext(),
-		fields:  fields,
+func (l *testLogger) WithTraceFields(fields common.LogFields) common.LogTrace {
+	return &testLoggerTrace{
+		trace:  stacktrace.GetParentFunctionName(),
+		fields: fields,
 	}
 }
 
@@ -861,27 +862,27 @@ func (l *testLogger) LogMetric(metric string, fields common.LogFields) {
 	fmt.Printf("METRIC: %s: fields=%+v\n", metric, fields)
 }
 
-type testLoggerContext struct {
-	context string
-	fields  common.LogFields
+type testLoggerTrace struct {
+	trace  string
+	fields common.LogFields
 }
 
-func (l *testLoggerContext) log(priority, message string) {
-	fmt.Printf("%s: %s: %s fields=%+v\n", priority, l.context, message, l.fields)
+func (l *testLoggerTrace) log(priority, message string) {
+	fmt.Printf("%s: %s: %s fields=%+v\n", priority, l.trace, message, l.fields)
 }
 
-func (l *testLoggerContext) Debug(args ...interface{}) {
+func (l *testLoggerTrace) Debug(args ...interface{}) {
 	l.log("DEBUG", fmt.Sprint(args...))
 }
 
-func (l *testLoggerContext) Info(args ...interface{}) {
+func (l *testLoggerTrace) Info(args ...interface{}) {
 	l.log("INFO", fmt.Sprint(args...))
 }
 
-func (l *testLoggerContext) Warning(args ...interface{}) {
+func (l *testLoggerTrace) Warning(args ...interface{}) {
 	l.log("WARNING", fmt.Sprint(args...))
 }
 
-func (l *testLoggerContext) Error(args ...interface{}) {
+func (l *testLoggerTrace) Error(args ...interface{}) {
 	l.log("ERROR", fmt.Sprint(args...))
 }

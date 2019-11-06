@@ -20,15 +20,14 @@
 package psiphon
 
 import (
-	"errors"
 	"syscall"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 func setAdditionalSocketOptions(socketFd syscall.Handle) {
 }
 
 func bindToDeviceCallWrapper(deviceBinder DeviceBinder, socketFD syscall.Handle) error {
-	return common.ContextError(errors.New("DeviceBinder with syscall.Handle not supported"))
+	return errors.TraceNew("DeviceBinder with syscall.Handle not supported")
 }

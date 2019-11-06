@@ -24,7 +24,6 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -34,6 +33,7 @@ import (
 	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
@@ -550,10 +550,11 @@ type Config struct {
 	ReplayLaterRoundMoveToFrontProbability *float64
 	ReplayRetainFailedProbability          *float64
 
-	// NetworkLatencyMultiplierMin and NetworkLatencyMultiplierMax are for
-	// testing purposes.
-	NetworkLatencyMultiplierMin float64
-	NetworkLatencyMultiplierMax float64
+	// NetworkLatencyMultiplierMin and other NetworkLatencyMultiplier fields are
+	// for testing purposes.
+	NetworkLatencyMultiplierMin    float64
+	NetworkLatencyMultiplierMax    float64
+	NetworkLatencyMultiplierLambda float64
 
 	// UseOnlyCustomTLSProfiles and other TLS configuration fields are for
 	// testing purposes.
@@ -599,7 +600,7 @@ func LoadConfig(configJson []byte) (*Config, error) {
 	var config Config
 	err := json.Unmarshal(configJson, &config)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	config.loadTimestamp = common.TruncateTimestampToHour(
@@ -654,7 +655,7 @@ func (config *Config) Commit() error {
 	if config.DataStoreDirectory == "" {
 		wd, err := os.Getwd()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		config.DataStoreDirectory = wd
 	}
@@ -670,45 +671,41 @@ func (config *Config) Commit() error {
 	// Validate config fields.
 
 	if config.PropagationChannelId == "" {
-		return common.ContextError(
-			errors.New("propagation channel ID is missing from the configuration file"))
+		return errors.TraceNew("propagation channel ID is missing from the configuration file")
 	}
 	if config.SponsorId == "" {
-		return common.ContextError(
-			errors.New("sponsor ID is missing from the configuration file"))
+		return errors.TraceNew("sponsor ID is missing from the configuration file")
 	}
 
 	_, err := strconv.Atoi(config.ClientVersion)
 	if err != nil {
-		return common.ContextError(
-			fmt.Errorf("invalid client version: %s", err))
+		return errors.Tracef("invalid client version: %s", err)
 	}
 
 	if !common.Contains(
 		[]string{"", protocol.PSIPHON_SSH_API_PROTOCOL, protocol.PSIPHON_WEB_API_PROTOCOL},
 		config.TargetApiProtocol) {
 
-		return common.ContextError(
-			errors.New("invalid TargetApiProtocol"))
+		return errors.TraceNew("invalid TargetApiProtocol")
 	}
 
 	if !config.DisableRemoteServerListFetcher {
 
 		if config.RemoteServerListURLs != nil {
 			if config.RemoteServerListSignaturePublicKey == "" {
-				return common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
+				return errors.TraceNew("missing RemoteServerListSignaturePublicKey")
 			}
 			if config.RemoteServerListDownloadFilename == "" {
-				return common.ContextError(errors.New("missing RemoteServerListDownloadFilename"))
+				return errors.TraceNew("missing RemoteServerListDownloadFilename")
 			}
 		}
 
 		if config.ObfuscatedServerListRootURLs != nil {
 			if config.RemoteServerListSignaturePublicKey == "" {
-				return common.ContextError(errors.New("missing RemoteServerListSignaturePublicKey"))
+				return errors.TraceNew("missing RemoteServerListSignaturePublicKey")
 			}
 			if config.ObfuscatedServerListDownloadDirectory == "" {
-				return common.ContextError(errors.New("missing ObfuscatedServerListDownloadDirectory"))
+				return errors.TraceNew("missing ObfuscatedServerListDownloadDirectory")
 			}
 		}
 
@@ -716,26 +713,26 @@ func (config *Config) Commit() error {
 
 	if config.SplitTunnelRoutesURLFormat != "" {
 		if config.SplitTunnelRoutesSignaturePublicKey == "" {
-			return common.ContextError(errors.New("missing SplitTunnelRoutesSignaturePublicKey"))
+			return errors.TraceNew("missing SplitTunnelRoutesSignaturePublicKey")
 		}
 		if config.SplitTunnelDNSServer == "" {
-			return common.ContextError(errors.New("missing SplitTunnelDNSServer"))
+			return errors.TraceNew("missing SplitTunnelDNSServer")
 		}
 	}
 
 	if config.UpgradeDownloadURLs != nil {
 		if config.UpgradeDownloadClientVersionHeader == "" {
-			return common.ContextError(errors.New("missing UpgradeDownloadClientVersionHeader"))
+			return errors.TraceNew("missing UpgradeDownloadClientVersionHeader")
 		}
 		if config.UpgradeDownloadFilename == "" {
-			return common.ContextError(errors.New("missing UpgradeDownloadFilename"))
+			return errors.TraceNew("missing UpgradeDownloadFilename")
 		}
 	}
 
 	// This constraint is expected by logic in Controller.runTunnels().
 
 	if config.PacketTunnelTunFileDescriptor > 0 && config.TunnelPoolSize != 1 {
-		return common.ContextError(errors.New("packet tunnel mode requires TunnelPoolSize to be 1"))
+		return errors.TraceNew("packet tunnel mode requires TunnelPoolSize to be 1")
 	}
 
 	// SessionID must be PSIPHON_API_CLIENT_SESSION_ID_LENGTH lowercase hex-encoded bytes.
@@ -743,7 +740,7 @@ func (config *Config) Commit() error {
 	if config.SessionID == "" {
 		sessionID, err := MakeSessionId()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		config.SessionID = sessionID
 	}
@@ -752,7 +749,7 @@ func (config *Config) Commit() error {
 		-1 != strings.IndexFunc(config.SessionID, func(c rune) bool {
 			return !unicode.Is(unicode.ASCII_Hex_Digit, c) || unicode.IsUpper(c)
 		}) {
-		return common.ContextError(errors.New("invalid SessionID"))
+		return errors.TraceNew("invalid SessionID")
 	}
 
 	config.clientParameters, err = parameters.NewClientParameters(
@@ -760,20 +757,20 @@ func (config *Config) Commit() error {
 			NoticeAlert("ClientParameters getValue failed: %s", err)
 		})
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	if config.ObfuscatedSSHAlgorithms != nil &&
 		len(config.ObfuscatedSSHAlgorithms) != 4 {
 		// TODO: validate each algorithm?
-		return common.ContextError(errors.New("invalid ObfuscatedSSHAlgorithms"))
+		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
 	}
 
 	// clientParameters.Set will validate the config fields applied to parameters.
 
 	err = config.SetClientParameters("", false, nil)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	// Calculate and set the dial parameters hash. After this point, related
@@ -844,7 +841,7 @@ func (config *Config) SetClientParameters(tag string, skipOnError bool, applyPar
 
 	counts, err := config.clientParameters.Set(tag, skipOnError, setParameters...)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	NoticeInfo("applied %v parameters with tag '%s'", counts, tag)
@@ -852,9 +849,10 @@ func (config *Config) SetClientParameters(tag string, skipOnError bool, applyPar
 	// Emit certain individual parameter values for quick reference in diagnostics.
 	p := config.clientParameters.Get()
 	NoticeInfo(
-		"NetworkLatencyMultiplier Min/Max: %f/%f",
+		"NetworkLatencyMultiplier Min/Max/Lambda: %f/%f/%f",
 		p.Float(parameters.NetworkLatencyMultiplierMin),
-		p.Float(parameters.NetworkLatencyMultiplierMax))
+		p.Float(parameters.NetworkLatencyMultiplierMax),
+		p.Float(parameters.NetworkLatencyMultiplierLambda))
 
 	// Application Parameters are feature flags/config info, delivered as Client
 	// Parameters via tactics/etc., to be communicated to the outer application.
@@ -934,6 +932,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.NetworkLatencyMultiplierMax > 0.0 {
 		applyParameters[parameters.NetworkLatencyMultiplierMax] = config.NetworkLatencyMultiplierMax
+	}
+
+	if config.NetworkLatencyMultiplierLambda > 0.0 {
+		applyParameters[parameters.NetworkLatencyMultiplierLambda] = config.NetworkLatencyMultiplierLambda
 	}
 
 	if len(config.LimitTunnelProtocols) > 0 {

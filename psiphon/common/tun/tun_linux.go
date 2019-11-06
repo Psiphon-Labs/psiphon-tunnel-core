@@ -29,6 +29,7 @@ import (
 	"unsafe"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/syndtr/gocapability/capability"
 )
 
@@ -65,7 +66,7 @@ func OpenTunDevice(name string) (*os.File, string, error) {
 
 	file, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
 	if err != nil {
-		return nil, "", common.ContextError(err)
+		return nil, "", errors.Trace(err)
 	}
 
 	// Set CLOEXEC so file descriptor not leaked to network config command subprocesses
@@ -108,7 +109,7 @@ func OpenTunDevice(name string) (*os.File, string, error) {
 		uintptr(unsafe.Pointer(&ifReq)))
 	if errno != 0 {
 		file.Close()
-		return nil, "", common.ContextError(errno)
+		return nil, "", errors.Trace(errno)
 	}
 
 	deviceName := strings.Trim(string(ifReq.name[:]), "\x00")
@@ -123,7 +124,7 @@ func (device *Device) readTunPacket() (int, int, error) {
 
 	n, err := device.deviceIO.Read(device.inboundBuffer)
 	if err != nil {
-		return 0, 0, common.ContextError(err)
+		return 0, 0, errors.Trace(err)
 	}
 	return 0, n, nil
 }
@@ -134,7 +135,7 @@ func (device *Device) writeTunPacket(packet []byte) error {
 
 	_, err := device.deviceIO.Write(packet)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
@@ -153,7 +154,7 @@ func configureNetworkConfigSubprocessCapabilities() error {
 
 	cap, err := capability.NewPid(0)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	if cap.Get(capability.EFFECTIVE, capability.CAP_NET_ADMIN) {
@@ -162,7 +163,7 @@ func configureNetworkConfigSubprocessCapabilities() error {
 
 		err = cap.Apply(capability.AMBIENT)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -197,7 +198,7 @@ func resetNATTables(
 			return nil
 		}
 
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -211,7 +212,7 @@ func configureServerInterface(
 
 	IPv4Address, IPv4Netmask, err := splitIPMask(serverIPv4AddressCIDR)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = runNetworkConfigCommand(
@@ -223,7 +224,7 @@ func configureServerInterface(
 		"mtu", strconv.Itoa(getMTU(config.MTU)),
 		"up")
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = runNetworkConfigCommand(
@@ -234,12 +235,12 @@ func configureServerInterface(
 		"add", serverIPv6AddressCIDR)
 	if err != nil {
 		if config.AllowNoIPv6NetworkConfiguration {
-			config.Logger.WithContextFields(
+			config.Logger.WithTraceFields(
 				common.LogFields{
 					"error": err}).Warning(
 				"assign IPv6 address failed")
 		} else {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -258,7 +259,7 @@ func configureServerInterface(
 		"sysctl",
 		"net.ipv4.conf.all.forwarding=1")
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = runNetworkConfigCommand(
@@ -268,12 +269,12 @@ func configureServerInterface(
 		"net.ipv6.conf.all.forwarding=1")
 	if err != nil {
 		if config.AllowNoIPv6NetworkConfiguration {
-			config.Logger.WithContextFields(
+			config.Logger.WithTraceFields(
 				common.LogFields{
 					"error": err}).Warning(
 				"allow IPv6 forwarding failed")
 		} else {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -291,7 +292,7 @@ func configureServerInterface(
 			"-o", egressInterface,
 			"-j", "MASQUERADE")
 		if mode != "-D" && err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		err = runNetworkConfigCommand(
@@ -305,12 +306,12 @@ func configureServerInterface(
 			"-j", "MASQUERADE")
 		if mode != "-D" && err != nil {
 			if config.AllowNoIPv6NetworkConfiguration {
-				config.Logger.WithContextFields(
+				config.Logger.WithTraceFields(
 					common.LogFields{
 						"error": err}).Warning(
 					"configure IPv6 masquerading failed")
 			} else {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 		}
 	}
@@ -326,7 +327,7 @@ func configureClientInterface(
 
 	IPv4Address, IPv4Netmask, err := splitIPMask(config.IPv4AddressCIDR)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = runNetworkConfigCommand(
@@ -339,7 +340,7 @@ func configureClientInterface(
 		"mtu", strconv.Itoa(getMTU(config.MTU)),
 		"up")
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = runNetworkConfigCommand(
@@ -350,12 +351,12 @@ func configureClientInterface(
 		"add", config.IPv6AddressCIDR)
 	if err != nil {
 		if config.AllowNoIPv6NetworkConfiguration {
-			config.Logger.WithContextFields(
+			config.Logger.WithTraceFields(
 				common.LogFields{
 					"error": err}).Warning(
 				"assign IPv6 address failed")
 		} else {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -373,7 +374,7 @@ func configureClientInterface(
 			var err error
 			IP, _, err = net.ParseCIDR(destination)
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 		}
 		if IP.To4() != nil {
@@ -393,11 +394,11 @@ func configureClientInterface(
 			"dev", tunDeviceName)
 		if err != nil {
 			if config.AllowNoIPv6NetworkConfiguration {
-				config.Logger.WithContextFields(
+				config.Logger.WithTraceFields(
 					common.LogFields{
 						"error": err}).Warning("add IPv6 route failed")
 			} else {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 		}
 	}
@@ -409,7 +410,7 @@ func configureClientInterface(
 func BindToDevice(fd int, deviceName string) error {
 	err := syscall.BindToDevice(fd, deviceName)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
@@ -425,7 +426,7 @@ func fixBindToDevice(logger common.Logger, useSudo bool, tunDeviceName string) e
 		"sysctl",
 		"net.ipv4.conf.all.accept_local=1")
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = runNetworkConfigCommand(
@@ -434,7 +435,7 @@ func fixBindToDevice(logger common.Logger, useSudo bool, tunDeviceName string) e
 		"sysctl",
 		"net.ipv4.conf.all.rp_filter=0")
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = runNetworkConfigCommand(
@@ -443,7 +444,7 @@ func fixBindToDevice(logger common.Logger, useSudo bool, tunDeviceName string) e
 		"sysctl",
 		fmt.Sprintf("net.ipv4.conf.%s.rp_filter=0", tunDeviceName))
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil

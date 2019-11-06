@@ -22,13 +22,12 @@ package fragmentor
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"math/rand"
 	"net"
 	"testing"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -91,7 +90,7 @@ func TestFragmentor(t *testing.T) {
 
 		conn, err := listener.Accept()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		fragConn := NewConn(
 			NewDownstreamConfig(clientParameters.Get(), tunnelProtocol, nil),
@@ -104,25 +103,25 @@ func TestFragmentor(t *testing.T) {
 		for n < len(data) {
 			m, err := fragConn.Read(readData[n:])
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 			if m > maxWriteBytes && n+maxWriteBytes <= bytesToFragment {
-				return common.ContextError(fmt.Errorf("unexpected write size: %d, %d", m, n))
+				return errors.Tracef("unexpected write size: %d, %d", m, n)
 			}
 			n += m
 		}
 		if !bytes.Equal(data, readData) {
-			return common.ContextError(fmt.Errorf("data mismatch"))
+			return errors.Tracef("data mismatch")
 		}
 
 		PRNG, err := prng.NewPRNG()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		fragConn.SetPRNG(PRNG)
 		_, err = fragConn.Write(data)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		return nil
 	})
@@ -131,11 +130,11 @@ func TestFragmentor(t *testing.T) {
 
 		conn, err := net.Dial("tcp", address)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		seed, err := prng.NewSeed()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		fragConn := NewConn(
 			NewUpstreamConfig(clientParameters.Get(), tunnelProtocol, seed),
@@ -145,7 +144,7 @@ func TestFragmentor(t *testing.T) {
 
 		_, err = fragConn.Write(data)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 		t.Logf("%+v", fragConn.GetMetrics())
 
@@ -154,15 +153,15 @@ func TestFragmentor(t *testing.T) {
 		for n < len(data) {
 			m, err := fragConn.Read(readData[n:])
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 			if m > maxWriteBytes && n+maxWriteBytes <= bytesToFragment {
-				return common.ContextError(fmt.Errorf("unexpected write size: %d, %d", m, n))
+				return errors.Tracef("unexpected write size: %d, %d", m, n)
 			}
 			n += m
 		}
 		if !bytes.Equal(data, readData) {
-			return common.ContextError(fmt.Errorf("data mismatch"))
+			return errors.Tracef("data mismatch")
 		}
 		return nil
 	})

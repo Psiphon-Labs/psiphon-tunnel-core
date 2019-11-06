@@ -22,12 +22,11 @@
 package psiphon
 
 import (
-	"fmt"
 	"net"
 	"os"
 	"syscall"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 func newUDPConn(domain int, config *DialConfig) (net.PacketConn, error) {
@@ -36,7 +35,7 @@ func newUDPConn(domain int, config *DialConfig) (net.PacketConn, error) {
 
 	socketFD, err := syscall.Socket(domain, syscall.SOCK_DGRAM, 0)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	syscall.CloseOnExec(socketFD)
@@ -47,7 +46,7 @@ func newUDPConn(domain int, config *DialConfig) (net.PacketConn, error) {
 		err := bindToDeviceCallWrapper(config.DeviceBinder, socketFD)
 		if err != nil {
 			syscall.Close(socketFD)
-			return nil, common.ContextError(fmt.Errorf("BindToDevice failed: %s", err))
+			return nil, errors.Tracef("BindToDevice failed: %s", err)
 		}
 	}
 
@@ -59,7 +58,7 @@ func newUDPConn(domain int, config *DialConfig) (net.PacketConn, error) {
 	conn, err := net.FilePacketConn(file) // net.FilePackateConn() dups socketFD
 	file.Close()                          // file.Close() closes socketFD
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return conn, nil

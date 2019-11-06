@@ -28,12 +28,11 @@ package values
 import (
 	"bytes"
 	"encoding/gob"
-	"errors"
 	"strings"
 	"sync/atomic"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/secretbox"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
@@ -80,7 +79,7 @@ func (spec *ValueSpec) Obfuscate(
 	minPadding, maxPadding int) ([]byte, error) {
 
 	if len(obfuscationKey) != 32 {
-		return nil, common.ContextError(errors.New("invalid key length"))
+		return nil, errors.TraceNew("invalid key length")
 	}
 	var key [32]byte
 	copy(key[:], []byte(obfuscationKey))
@@ -90,7 +89,7 @@ func (spec *ValueSpec) Obfuscate(
 	var obfuscatedValueSpec bytes.Buffer
 	err := gob.NewEncoder(&obfuscatedValueSpec).Encode(spec)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return secretbox.Seal(

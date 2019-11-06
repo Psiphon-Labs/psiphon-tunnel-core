@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -67,7 +68,7 @@ func TestMarionette(t *testing.T) {
 
 			conn, err := listener.Accept()
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 
 			serverGroup.Go(func() error {
@@ -85,12 +86,12 @@ func TestMarionette(t *testing.T) {
 					atomic.AddInt64(&serverReceivedBytes, int64(n))
 					if err != nil {
 						fmt.Printf("Server read error: %s\n", err)
-						return common.ContextError(err)
+						return errors.Trace(err)
 					}
 					_, err = conn.Write(b[:n])
 					if err != nil {
 						fmt.Printf("Server write error: %s\n", err)
-						return common.ContextError(err)
+						return errors.Trace(err)
 					}
 				}
 				return nil
@@ -99,7 +100,7 @@ func TestMarionette(t *testing.T) {
 
 		err := serverGroup.Wait()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		return nil
@@ -115,7 +116,7 @@ func TestMarionette(t *testing.T) {
 
 			conn, err := Dial(ctx, &net.Dialer{}, format, serverAddress)
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 
 			var clientGroup errgroup.Group
@@ -137,7 +138,7 @@ func TestMarionette(t *testing.T) {
 						break
 					} else if err != nil {
 						fmt.Printf("Client read error: %s\n", err)
-						return common.ContextError(err)
+						return errors.Trace(err)
 					}
 				}
 				return nil
@@ -148,7 +149,7 @@ func TestMarionette(t *testing.T) {
 				_, err := conn.Write(b)
 				if err != nil {
 					fmt.Printf("Client write error: %s\n", err)
-					return common.ContextError(err)
+					return errors.Trace(err)
 				}
 				return nil
 			})

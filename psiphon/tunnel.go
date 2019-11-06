@@ -25,7 +25,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -36,6 +35,7 @@ import (
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
@@ -145,7 +145,7 @@ func ConnectTunnel(
 	// dialConn and monitoredConn are the same network connection.
 	dialResult, err := dialTunnel(ctx, config, dialParams)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// The tunnel is now connected
@@ -235,9 +235,9 @@ func (tunnel *Tunnel) Activate(
 		}
 
 		if result.err != nil {
-			return common.ContextError(
-				fmt.Errorf("error starting server context for %s: %s",
-					tunnel.dialParams.ServerEntry.GetDiagnosticID(), result.err))
+			return errors.Tracef(
+				"error starting server context for %s: %s",
+				tunnel.dialParams.ServerEntry.GetDiagnosticID(), result.err)
 		}
 
 		serverContext = result.serverContext
@@ -252,7 +252,7 @@ func (tunnel *Tunnel) Activate(
 	// In this case, abort here, to ensure that the operateTunnel goroutine
 	// will not be launched after Close is called.
 	if tunnel.isClosed {
-		return common.ContextError(errors.New("tunnel is closed"))
+		return errors.TraceNew("tunnel is closed")
 	}
 
 	tunnel.isActivated = true
@@ -352,11 +352,11 @@ func (tunnel *Tunnel) SendAPIRequest(
 		name, true, requestPayload)
 
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if !ok {
-		return nil, common.ContextError(errors.New("API request rejected"))
+		return nil, errors.TraceNew("API request rejected")
 	}
 
 	return responsePayload, nil
@@ -368,7 +368,7 @@ func (tunnel *Tunnel) Dial(
 	remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error) {
 
 	if !tunnel.IsActivated() {
-		return nil, common.ContextError(errors.New("tunnel is not activated"))
+		return nil, errors.TraceNew("tunnel is not activated")
 	}
 
 	type tunnelDialResult struct {
@@ -391,7 +391,7 @@ func (tunnel *Tunnel) Dial(
 	afterFunc := time.AfterFunc(
 		timeout,
 		func() {
-			resultChannel <- &tunnelDialResult{nil, errors.New("tunnel dial timeout")}
+			resultChannel <- &tunnelDialResult{nil, errors.TraceNew("tunnel dial timeout")}
 		})
 	defer afterFunc.Stop()
 
@@ -408,7 +408,7 @@ func (tunnel *Tunnel) Dial(
 		case tunnel.signalPortForwardFailure <- *new(struct{}):
 		default:
 		}
-		return nil, common.ContextError(result.err)
+		return nil, errors.Trace(result.err)
 	}
 
 	conn = &TunneledConn{
@@ -422,7 +422,7 @@ func (tunnel *Tunnel) Dial(
 func (tunnel *Tunnel) DialPacketTunnelChannel() (net.Conn, error) {
 
 	if !tunnel.IsActivated() {
-		return nil, common.ContextError(errors.New("tunnel is not activated"))
+		return nil, errors.TraceNew("tunnel is not activated")
 	}
 	channel, requests, err := tunnel.sshClient.OpenChannel(
 		protocol.PACKET_TUNNEL_CHANNEL_TYPE, nil)
@@ -433,7 +433,7 @@ func (tunnel *Tunnel) DialPacketTunnelChannel() (net.Conn, error) {
 		default:
 		}
 
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	go ssh.DiscardRequests(requests)
 
@@ -540,7 +540,7 @@ func dialTunnel(
 	// avoids notice noise.
 	err := ctx.Err()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	p := getCustomClientParameters(config, dialParams)
@@ -603,7 +603,7 @@ func dialTunnel(
 			dialParams.GetMeekConfig(),
 			dialParams.GetDialConfig())
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 	} else if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
@@ -613,7 +613,7 @@ func dialTunnel(
 			dialParams.DirectDialAddress,
 			dialParams.GetDialConfig())
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		dialConn, err = quic.Dial(
@@ -625,7 +625,7 @@ func dialTunnel(
 			dialParams.ServerEntry.SshObfuscatedKey,
 			dialParams.ObfuscatedQUICPaddingSeed)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 	} else if protocol.TunnelProtocolUsesMarionette(dialParams.TunnelProtocol) {
@@ -636,7 +636,7 @@ func dialTunnel(
 			dialParams.ServerEntry.MarionetteFormat,
 			dialParams.DirectDialAddress)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 	} else if protocol.TunnelProtocolUsesTapdance(dialParams.TunnelProtocol) {
@@ -648,7 +648,7 @@ func dialTunnel(
 			NewNetDialer(dialParams.GetDialConfig()),
 			dialParams.DirectDialAddress)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 	} else {
@@ -658,7 +658,7 @@ func dialTunnel(
 			dialParams.DirectDialAddress,
 			dialParams.GetDialConfig())
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -687,7 +687,7 @@ func dialTunnel(
 	// Activity monitoring is used to measure tunnel duration
 	monitoredConn, err := common.NewActivityMonitoredConn(dialConn, 0, false, nil, nil)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// Apply throttling (if configured)
@@ -706,7 +706,7 @@ func dialTunnel(
 			&obfuscatedSSHMinPadding,
 			&obfuscatedSSHMaxPadding)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		sshConn = obfuscatedSSHConn
 		dialParams.ObfuscatedSSHConnMetrics = obfuscatedSSHConn
@@ -716,12 +716,12 @@ func dialTunnel(
 	expectedPublicKey, err := base64.StdEncoding.DecodeString(
 		dialParams.ServerEntry.SshHostKey)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	sshCertChecker := &ssh.CertChecker{
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
 			if !bytes.Equal(expectedPublicKey, publicKey.Marshal()) {
-				return common.ContextError(errors.New("unexpected host public key"))
+				return errors.TraceNew("unexpected host public key")
 			}
 			return nil
 		},
@@ -735,7 +735,7 @@ func dialTunnel(
 
 	payload, err := json.Marshal(sshPasswordPayload)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	sshClientConfig := &ssh.ClientConfig{
@@ -772,7 +772,7 @@ func dialTunnel(
 			sshClientConfig.PeerKEXPRNGSeed, err = protocol.DeriveSSHServerKEXPRNGSeed(
 				dialParams.ServerEntry.SshObfuscatedKey)
 			if err != nil {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 		}
 	}
@@ -869,7 +869,7 @@ func dialTunnel(
 	}
 
 	if result.err != nil {
-		return nil, common.ContextError(result.err)
+		return nil, errors.Trace(result.err)
 	}
 
 	dialSucceeded = true
@@ -923,13 +923,13 @@ func performLivenessTest(
 
 	extraData, err := json.Marshal(request)
 	if err != nil {
-		return metrics, common.ContextError(err)
+		return metrics, errors.Trace(err)
 	}
 
 	channel, requests, err := sshClient.OpenChannel(
 		protocol.RANDOM_STREAM_CHANNEL_TYPE, extraData)
 	if err != nil {
-		return metrics, common.ContextError(err)
+		return metrics, errors.Trace(err)
 	}
 	defer channel.Close()
 
@@ -945,7 +945,7 @@ func performLivenessTest(
 		n, err := common.CopyNBuffer(channel, rand.Reader, int64(metrics.UpstreamBytes), buffer[:])
 		metrics.SentUpstreamBytes = int(n)
 		if err != nil {
-			return metrics, common.ContextError(err)
+			return metrics, errors.Trace(err)
 		}
 	}
 
@@ -953,7 +953,7 @@ func performLivenessTest(
 		n, err := common.CopyNBuffer(ioutil.Discard, channel, int64(metrics.DownstreamBytes), buffer[:])
 		metrics.ReceivedDownstreamBytes = int(n)
 		if err != nil {
-			return metrics, common.ContextError(err)
+			return metrics, errors.Trace(err)
 		}
 	}
 
@@ -1172,7 +1172,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			// Otherwise, probe with an SSH keep alive.
 
 			if tunnel.conn.IsClosed() {
-				err = errors.New("underlying conn is closed")
+				err = errors.TraceNew("underlying conn is closed")
 			} else {
 				p := tunnel.getCustomClientParameters()
 				inactivePeriod := p.Duration(parameters.SSHKeepAliveProbeInactivePeriod)
@@ -1255,7 +1255,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 	errChannel := make(chan error, 1)
 
 	afterFunc := time.AfterFunc(timeout, func() {
-		errChannel <- errors.New("timed out")
+		errChannel <- errors.TraceNew("timed out")
 	})
 	defer afterFunc.Stop()
 
@@ -1300,7 +1300,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 				request,
 				response)
 			if err != nil {
-				NoticeAlert("AddSpeedTestSample failed: %s", common.ContextError(err))
+				NoticeAlert("AddSpeedTestSample failed: %s", errors.Trace(err))
 			}
 		}
 	}()
@@ -1311,7 +1311,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 		tunnel.conn.Close()
 	}
 
-	return common.ContextError(err)
+	return errors.Trace(err)
 }
 
 // sendStats is a helper for sending session stats to the server.

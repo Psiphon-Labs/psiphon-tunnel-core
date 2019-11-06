@@ -23,7 +23,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
+	std_errors "errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -36,7 +36,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/dns"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 )
 
@@ -174,7 +174,7 @@ func (d *NetDialer) DialContext(ctx context.Context, network, address string) (n
 	case "tcp":
 		return d.dialTCP(ctx, "tcp", address)
 	default:
-		return nil, common.ContextError(fmt.Errorf("unsupported network: %s", network))
+		return nil, errors.Tracef("unsupported network: %s", network)
 	}
 }
 
@@ -196,8 +196,7 @@ func LocalProxyRelay(proxyType string, localConn, remoteConn net.Conn) {
 
 		_, err := io.Copy(localConn, remoteConn)
 		if err != nil && atomic.LoadInt32(&closing) != 1 {
-			err = fmt.Errorf("Relay failed: %s", common.ContextError(err))
-			NoticeLocalProxyError(proxyType, err)
+			NoticeLocalProxyError(proxyType, errors.TraceMsg(err, "Relay failed"))
 		}
 
 		// When the server closes a port forward, ex. due to idle timeout,
@@ -212,8 +211,7 @@ func LocalProxyRelay(proxyType string, localConn, remoteConn net.Conn) {
 
 	_, err := io.Copy(remoteConn, localConn)
 	if err != nil && atomic.LoadInt32(&closing) != 1 {
-		err = fmt.Errorf("Relay failed: %s", common.ContextError(err))
-		NoticeLocalProxyError(proxyType, err)
+		NoticeLocalProxyError(proxyType, errors.TraceMsg(err, "Relay failed"))
 	}
 
 	// When a local proxy peer connection closes, localConn.Read will return EOF.
@@ -276,7 +274,7 @@ func ResolveIP(host string, conn net.Conn) (addrs []net.IP, ttls []time.Duration
 	// Process the response
 	response, err := dnsConn.ReadMsg()
 	if err != nil {
-		return nil, nil, common.ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 	addrs = make([]net.IP, 0)
 	ttls = make([]time.Duration, 0)
@@ -364,7 +362,7 @@ func MakeTunneledHTTPClient(
 		rootCAs := x509.NewCertPool()
 		certData, err := ioutil.ReadFile(config.TrustedCACertificatesFilename)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		rootCAs.AppendCertsFromPEM(certData)
 		transport.TLSClientConfig = &tls.Config{RootCAs: rootCAs}
@@ -392,7 +390,7 @@ func MakeDownloadHTTPClient(
 		httpClient, err = MakeTunneledHTTPClient(
 			config, tunnel, skipVerify)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 	} else {
@@ -400,7 +398,7 @@ func MakeDownloadHTTPClient(
 		httpClient, err = MakeUntunneledHTTPClient(
 			ctx, config, untunneledDialConfig, nil, skipVerify)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -435,13 +433,13 @@ func ResumeDownload(
 
 	file, err := os.OpenFile(partialFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
-		return 0, "", common.ContextError(err)
+		return 0, "", errors.Trace(err)
 	}
 	defer file.Close()
 
 	fileInfo, err := file.Stat()
 	if err != nil {
-		return 0, "", common.ContextError(err)
+		return 0, "", errors.Trace(err)
 	}
 
 	// A partial download should have an ETag which is to be sent with the
@@ -471,14 +469,14 @@ func ResumeDownload(
 				NoticeAlert("reset partial download ETag failed: %s", tempErr)
 			}
 
-			return 0, "", common.ContextError(
-				fmt.Errorf("failed to load partial download ETag: %s", err))
+			return 0, "", errors.Tracef(
+				"failed to load partial download ETag: %s", err)
 		}
 	}
 
 	request, err := http.NewRequest("GET", downloadURL, nil)
 	if err != nil {
-		return 0, "", common.ContextError(err)
+		return 0, "", errors.Trace(err)
 	}
 
 	request = request.WithContext(ctx)
@@ -535,10 +533,10 @@ func ResumeDownload(
 		// Redact URL from "net/http" error message.
 		if !GetEmitNetworkParameters() {
 			errStr := err.Error()
-			err = errors.New(strings.Replace(errStr, downloadURL, "[redacted]", -1))
+			err = std_errors.New(strings.Replace(errStr, downloadURL, "[redacted]", -1))
 		}
 
-		return 0, "", common.ContextError(err)
+		return 0, "", errors.Trace(err)
 	}
 	defer response.Body.Close()
 
@@ -549,7 +547,7 @@ func ResumeDownload(
 		// simply failing and relying on the caller's retry schedule.
 		os.Remove(partialFilename)
 		os.Remove(partialETagFilename)
-		return 0, "", common.ContextError(errors.New("partial download ETag mismatch"))
+		return 0, "", errors.TraceNew("partial download ETag mismatch")
 
 	} else if response.StatusCode == http.StatusNotModified {
 		// This status code is possible in the "If-None-Match" case. Don't leave
@@ -572,14 +570,14 @@ func ResumeDownload(
 	// an error; the caller may use this to report partial download progress.
 
 	if err != nil {
-		return n, "", common.ContextError(err)
+		return n, "", errors.Trace(err)
 	}
 
 	// Ensure the file is flushed to disk. The deferred close
 	// will be a noop when this succeeds.
 	err = file.Close()
 	if err != nil {
-		return n, "", common.ContextError(err)
+		return n, "", errors.Trace(err)
 	}
 
 	// Remove if exists, to enable rename
@@ -587,7 +585,7 @@ func ResumeDownload(
 
 	err = os.Rename(partialFilename, downloadFilename)
 	if err != nil {
-		return n, "", common.ContextError(err)
+		return n, "", errors.Trace(err)
 	}
 
 	os.Remove(partialETagFilename)

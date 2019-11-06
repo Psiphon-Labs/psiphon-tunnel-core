@@ -50,7 +50,7 @@ func WriteRuntimeProfiles(
 		file, err := os.OpenFile(
 			filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0666)
 		if err != nil {
-			logger.WithContextFields(
+			logger.WithTraceFields(
 				LogFields{
 					"error":    err,
 					"fileName": filename}).Error("open profile file failed")
@@ -68,7 +68,7 @@ func WriteRuntimeProfiles(
 		err := pprof.Lookup(profileName).WriteTo(file, 1)
 		file.Close()
 		if err != nil {
-			logger.WithContextFields(
+			logger.WithTraceFields(
 				LogFields{
 					"error":       err,
 					"profileName": profileName}).Error("write profile failed")
@@ -91,15 +91,15 @@ func WriteRuntimeProfiles(
 	if cpuSampleDurationSeconds > 0 {
 		file := openProfileFile("cpu")
 		if file != nil {
-			logger.WithContext().Info("start cpu profiling")
+			logger.WithTrace().Info("start cpu profiling")
 			err := pprof.StartCPUProfile(file)
 			if err != nil {
-				logger.WithContextFields(
+				logger.WithTraceFields(
 					LogFields{"error": err}).Error("StartCPUProfile failed")
 			} else {
 				time.Sleep(time.Duration(cpuSampleDurationSeconds) * time.Second)
 				pprof.StopCPUProfile()
-				logger.WithContext().Info("end cpu profiling")
+				logger.WithTrace().Info("end cpu profiling")
 			}
 			file.Close()
 		}
@@ -109,13 +109,13 @@ func WriteRuntimeProfiles(
 	// https://golang.org/pkg/runtime/pprof/#Profile
 
 	if blockSampleDurationSeconds > 0 {
-		logger.WithContext().Info("start block/mutex profiling")
+		logger.WithTrace().Info("start block/mutex profiling")
 		runtime.SetBlockProfileRate(1)
 		runtime.SetMutexProfileFraction(1)
 		time.Sleep(time.Duration(blockSampleDurationSeconds) * time.Second)
 		runtime.SetBlockProfileRate(0)
 		runtime.SetMutexProfileFraction(0)
-		logger.WithContext().Info("end block/mutex profiling")
+		logger.WithTrace().Info("end block/mutex profiling")
 		writeProfile("block")
 		writeProfile("mutex")
 	}
