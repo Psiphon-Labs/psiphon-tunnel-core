@@ -251,7 +251,7 @@ var defaultClientParameters = map[string]struct {
 	NetworkLatencyMultiplier:       {value: 0.0, minimum: 1.0},
 	NetworkLatencyMultiplierMin:    {value: 1.0, minimum: 1.0},
 	NetworkLatencyMultiplierMax:    {value: 3.0, minimum: 1.0},
-	NetworkLatencyMultiplierLambda: {value: 2.0, minimum: 1.0},
+	NetworkLatencyMultiplierLambda: {value: 2.0, minimum: 0.001},
 
 	TacticsWaitPeriod:        {value: 10 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
 	TacticsRetryPeriod:       {value: 5 * time.Second, minimum: 1 * time.Millisecond},
