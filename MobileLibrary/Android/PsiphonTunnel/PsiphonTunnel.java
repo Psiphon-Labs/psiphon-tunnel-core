@@ -110,22 +110,32 @@ public class PsiphonTunnel {
     private AtomicBoolean mIsWaitingForNetworkConnectivity;
     private AtomicReference<String> mClientPlatformPrefix;
     private AtomicReference<String> mClientPlatformSuffix;
+    private final boolean mShouldRouteThroughTunnelAutomatically;
 
     // Only one PsiphonVpn instance may exist at a time, as the underlying
     // psi.Psi and tun2socks implementations each contain global state.
     private static PsiphonTunnel mPsiphonTunnel;
 
     public static synchronized PsiphonTunnel newPsiphonTunnel(HostService hostService) {
+        return newPsiphonTunnelImpl(hostService, true);
+    }
+
+    // The two argument override in case the host app wants to take control over calling routeThroughTunnel()
+    public static synchronized PsiphonTunnel newPsiphonTunnel(HostService hostService, boolean shouldRouteThroughTunnelAutomatically) {
+        return newPsiphonTunnelImpl(hostService, shouldRouteThroughTunnelAutomatically);
+    }
+
+    private static PsiphonTunnel newPsiphonTunnelImpl(HostService hostService, boolean shouldRouteThroughTunnelAutomatically) {
         if (mPsiphonTunnel != null) {
             mPsiphonTunnel.stop();
         }
         // Load the native go code embedded in psi.aar
         System.loadLibrary("gojni");
-        mPsiphonTunnel = new PsiphonTunnel(hostService);
+        mPsiphonTunnel = new PsiphonTunnel(hostService, shouldRouteThroughTunnelAutomatically);
         return mPsiphonTunnel;
     }
 
-    private PsiphonTunnel(HostService hostService) {
+    private PsiphonTunnel(HostService hostService, boolean shouldRouteThroughTunnelAutomatically) {
         mHostService = hostService;
         mVpnMode = new AtomicBoolean(false);
         mTunFd = new AtomicReference<ParcelFileDescriptor>();
@@ -134,6 +144,7 @@ public class PsiphonTunnel {
         mIsWaitingForNetworkConnectivity = new AtomicBoolean(false);
         mClientPlatformPrefix = new AtomicReference<String>("");
         mClientPlatformSuffix = new AtomicReference<String>("");
+        mShouldRouteThroughTunnelAutomatically = shouldRouteThroughTunnelAutomatically;
     }
 
     public Object clone() throws CloneNotSupportedException {
@@ -147,6 +158,10 @@ public class PsiphonTunnel {
     // To start, call in sequence: startRouting(), then startTunneling(). After startRouting()
     // succeeds, the caller must call stop() to clean up. These functions should not be called
     // concurrently. Do not call stop() while startRouting() or startTunneling() is in progress.
+    // In case the host application requests manual control of routing through tunnel by calling
+    // PsiphonTunnel.newPsiphonTunnel(HostService hostservice, shouldRouteThroughTunnelAutomatically = false)
+    // it should also call routeThroughTunnel() at some point, usually after receiving onConnected() callback,
+    // otherwise it will be called automatically.
 
     // Returns true when the VPN routing is established; returns false if the VPN could not
     // be started due to lack of prepare or revoked permissions (called should re-prepare and
@@ -157,6 +172,35 @@ public class PsiphonTunnel {
         // http://docs.oracle.com/javase/7/docs/api/java/lang/Runtime.html#loadLibrary%28java.lang.String%29
         System.loadLibrary("tun2socks");
         return startVpn();
+    }
+
+    // Starts routing traffic via tunnel by starting tun2socks if it is not running already.
+    // This will be called automatically right after tunnel gets connected in case the host application
+    // did not request a manual control over this functionality, see PsiphonTunnel.newPsiphonTunnel
+    public void routeThroughTunnel() {
+        if (!mRoutingThroughTunnel.compareAndSet(false, true)) {
+            return;
+        }
+        ParcelFileDescriptor tunFd = mTunFd.getAndSet(null);
+        if (tunFd == null) {
+            return;
+        }
+
+        String socksServerAddress = "127.0.0.1:" + Integer.toString(mLocalSocksProxyPort.get());
+        String udpgwServerAddress = "127.0.0.1:" + Integer.toString(UDPGW_SERVER_PORT);
+        startTun2Socks(
+                tunFd,
+                VPN_INTERFACE_MTU,
+                mPrivateAddress.mRouter,
+                VPN_INTERFACE_NETMASK,
+                socksServerAddress,
+                udpgwServerAddress,
+                true);
+
+        mHostService.onDiagnosticMessage("routing through tunnel");
+
+        // TODO: should double-check tunnel routing; see:
+        // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/1dc5e4257dca99790109f3bf374e8ab3a0ead4d7/Android/PsiphonAndroidLibrary/src/com/psiphon3/psiphonlibrary/TunnelCore.java?at=default#cl-779
     }
 
     // Throws an exception in error conditions. In the case of an exception, the routing
@@ -343,32 +387,6 @@ public class PsiphonTunnel {
 
     private void setLocalSocksProxyPort(int port) {
         mLocalSocksProxyPort.set(port);
-    }
-
-    private void routeThroughTunnel() {
-        if (!mRoutingThroughTunnel.compareAndSet(false, true)) {
-            return;
-        }
-        ParcelFileDescriptor tunFd = mTunFd.getAndSet(null);
-        if (tunFd == null) {
-            return;
-        }
-
-        String socksServerAddress = "127.0.0.1:" + Integer.toString(mLocalSocksProxyPort.get());
-        String udpgwServerAddress = "127.0.0.1:" + Integer.toString(UDPGW_SERVER_PORT);
-        startTun2Socks(
-                tunFd,
-                VPN_INTERFACE_MTU,
-                mPrivateAddress.mRouter,
-                VPN_INTERFACE_NETMASK,
-                socksServerAddress,
-                udpgwServerAddress,
-                true);
-
-        mHostService.onDiagnosticMessage("routing through tunnel");
-
-        // TODO: should double-check tunnel routing; see:
-        // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/1dc5e4257dca99790109f3bf374e8ab3a0ead4d7/Android/PsiphonAndroidLibrary/src/com/psiphon3/psiphonlibrary/TunnelCore.java?at=default#cl-779
     }
 
     private void stopVpn() {
@@ -671,7 +689,7 @@ public class PsiphonTunnel {
             if (noticeType.equals("Tunnels")) {
                 int count = notice.getJSONObject("data").getInt("count");
                 if (count > 0) {
-                    if (isVpnMode()) {
+                    if (isVpnMode() && mShouldRouteThroughTunnelAutomatically) {
                         routeThroughTunnel();
                     }
                     mHostService.onConnected();
