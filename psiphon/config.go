@@ -550,10 +550,11 @@ type Config struct {
 	ReplayLaterRoundMoveToFrontProbability *float64
 	ReplayRetainFailedProbability          *float64
 
-	// NetworkLatencyMultiplierMin and NetworkLatencyMultiplierMax are for
-	// testing purposes.
-	NetworkLatencyMultiplierMin float64
-	NetworkLatencyMultiplierMax float64
+	// NetworkLatencyMultiplierMin and other NetworkLatencyMultiplier fields are
+	// for testing purposes.
+	NetworkLatencyMultiplierMin    float64
+	NetworkLatencyMultiplierMax    float64
+	NetworkLatencyMultiplierLambda float64
 
 	// UseOnlyCustomTLSProfiles and other TLS configuration fields are for
 	// testing purposes.
@@ -931,6 +932,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.NetworkLatencyMultiplierMax > 0.0 {
 		applyParameters[parameters.NetworkLatencyMultiplierMax] = config.NetworkLatencyMultiplierMax
+	}
+
+	if config.NetworkLatencyMultiplierLambda > 0.0 {
+		applyParameters[parameters.NetworkLatencyMultiplierLambda] = config.NetworkLatencyMultiplierLambda
 	}
 
 	if len(config.LimitTunnelProtocols) > 0 {
