@@ -110,27 +110,32 @@ public class PsiphonTunnel {
     private AtomicBoolean mIsWaitingForNetworkConnectivity;
     private AtomicReference<String> mClientPlatformPrefix;
     private AtomicReference<String> mClientPlatformSuffix;
-
-    // mUsePacketTunnel specifies whether to use the packet
-    // tunnel instead of tun2socks; currently this is for
-    // testing only and is disabled.
-    private boolean mUsePacketTunnel = false;
+    private final boolean mShouldRouteThroughTunnelAutomatically;
 
     // Only one PsiphonVpn instance may exist at a time, as the underlying
     // psi.Psi and tun2socks implementations each contain global state.
     private static PsiphonTunnel mPsiphonTunnel;
 
     public static synchronized PsiphonTunnel newPsiphonTunnel(HostService hostService) {
+        return newPsiphonTunnelImpl(hostService, true);
+    }
+
+    // The two argument override in case the host app wants to take control over calling routeThroughTunnel()
+    public static synchronized PsiphonTunnel newPsiphonTunnel(HostService hostService, boolean shouldRouteThroughTunnelAutomatically) {
+        return newPsiphonTunnelImpl(hostService, shouldRouteThroughTunnelAutomatically);
+    }
+
+    private static PsiphonTunnel newPsiphonTunnelImpl(HostService hostService, boolean shouldRouteThroughTunnelAutomatically) {
         if (mPsiphonTunnel != null) {
             mPsiphonTunnel.stop();
         }
         // Load the native go code embedded in psi.aar
         System.loadLibrary("gojni");
-        mPsiphonTunnel = new PsiphonTunnel(hostService);
+        mPsiphonTunnel = new PsiphonTunnel(hostService, shouldRouteThroughTunnelAutomatically);
         return mPsiphonTunnel;
     }
 
-    private PsiphonTunnel(HostService hostService) {
+    private PsiphonTunnel(HostService hostService, boolean shouldRouteThroughTunnelAutomatically) {
         mHostService = hostService;
         mVpnMode = new AtomicBoolean(false);
         mTunFd = new AtomicReference<ParcelFileDescriptor>();
@@ -139,6 +144,7 @@ public class PsiphonTunnel {
         mIsWaitingForNetworkConnectivity = new AtomicBoolean(false);
         mClientPlatformPrefix = new AtomicReference<String>("");
         mClientPlatformSuffix = new AtomicReference<String>("");
+        mShouldRouteThroughTunnelAutomatically = shouldRouteThroughTunnelAutomatically;
     }
 
     public Object clone() throws CloneNotSupportedException {
@@ -152,20 +158,49 @@ public class PsiphonTunnel {
     // To start, call in sequence: startRouting(), then startTunneling(). After startRouting()
     // succeeds, the caller must call stop() to clean up. These functions should not be called
     // concurrently. Do not call stop() while startRouting() or startTunneling() is in progress.
+    // In case the host application requests manual control of routing through tunnel by calling
+    // PsiphonTunnel.newPsiphonTunnel(HostService hostservice, shouldRouteThroughTunnelAutomatically = false)
+    // it should also call routeThroughTunnel() at some point, usually after receiving onConnected() callback,
+    // otherwise it will be called automatically.
 
     // Returns true when the VPN routing is established; returns false if the VPN could not
     // be started due to lack of prepare or revoked permissions (called should re-prepare and
     // try again); throws exception for other error conditions.
     public synchronized boolean startRouting() throws Exception {
-
-        // Note: tun2socks is loaded even in mUsePacketTunnel mode,
-        // as disableUdpGwKeepalive will still be called.
-
         // Load tun2socks library embedded in the aar
         // If this method is called more than once with the same library name, the second and subsequent calls are ignored.
         // http://docs.oracle.com/javase/7/docs/api/java/lang/Runtime.html#loadLibrary%28java.lang.String%29
         System.loadLibrary("tun2socks");
         return startVpn();
+    }
+
+    // Starts routing traffic via tunnel by starting tun2socks if it is not running already.
+    // This will be called automatically right after tunnel gets connected in case the host application
+    // did not request a manual control over this functionality, see PsiphonTunnel.newPsiphonTunnel
+    public void routeThroughTunnel() {
+        if (!mRoutingThroughTunnel.compareAndSet(false, true)) {
+            return;
+        }
+        ParcelFileDescriptor tunFd = mTunFd.getAndSet(null);
+        if (tunFd == null) {
+            return;
+        }
+
+        String socksServerAddress = "127.0.0.1:" + Integer.toString(mLocalSocksProxyPort.get());
+        String udpgwServerAddress = "127.0.0.1:" + Integer.toString(UDPGW_SERVER_PORT);
+        startTun2Socks(
+                tunFd,
+                VPN_INTERFACE_MTU,
+                mPrivateAddress.mRouter,
+                VPN_INTERFACE_NETMASK,
+                socksServerAddress,
+                udpgwServerAddress,
+                true);
+
+        mHostService.onDiagnosticMessage("routing through tunnel");
+
+        // TODO: should double-check tunnel routing; see:
+        // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/1dc5e4257dca99790109f3bf374e8ab3a0ead4d7/Android/PsiphonAndroidLibrary/src/com/psiphon3/psiphonlibrary/TunnelCore.java?at=default#cl-779
     }
 
     // Throws an exception in error conditions. In the case of an exception, the routing
@@ -276,11 +311,6 @@ public class PsiphonTunnel {
             int mtu = VPN_INTERFACE_MTU;
             String dnsResolver = mPrivateAddress.mRouter;
 
-            if (mUsePacketTunnel) {
-                mtu = (int)Psi.getPacketTunnelMTU();
-                dnsResolver = Psi.getPacketTunnelDNSResolverIPv4Address();
-            }
-
             ParcelFileDescriptor tunFd =
                     ((VpnService.Builder) mHostService.newVpnServiceBuilder())
                             .setSession(mHostService.getAppName())
@@ -359,40 +389,8 @@ public class PsiphonTunnel {
         mLocalSocksProxyPort.set(port);
     }
 
-    private void routeThroughTunnel() {
-        if (!mRoutingThroughTunnel.compareAndSet(false, true)) {
-            return;
-        }
-
-        if (!mUsePacketTunnel) {
-            ParcelFileDescriptor tunFd = mTunFd.getAndSet(null);
-            if (tunFd == null) {
-                return;
-            }
-            String socksServerAddress = "127.0.0.1:" + Integer.toString(mLocalSocksProxyPort.get());
-            String udpgwServerAddress = "127.0.0.1:" + Integer.toString(UDPGW_SERVER_PORT);
-            startTun2Socks(
-                    tunFd,
-                    VPN_INTERFACE_MTU,
-                    mPrivateAddress.mRouter,
-                    VPN_INTERFACE_NETMASK,
-                    socksServerAddress,
-                    udpgwServerAddress,
-                    true);
-        }
-
-        mHostService.onDiagnosticMessage("routing through tunnel");
-
-        // TODO: should double-check tunnel routing; see:
-        // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/1dc5e4257dca99790109f3bf374e8ab3a0ead4d7/Android/PsiphonAndroidLibrary/src/com/psiphon3/psiphonlibrary/TunnelCore.java?at=default#cl-779
-    }
-
     private void stopVpn() {
-
-        if (!mUsePacketTunnel) {
-            stopTun2Socks();
-        }
-
+        stopTun2Socks();
         ParcelFileDescriptor tunFd = mTunFd.getAndSet(null);
         if (tunFd != null) {
             try {
@@ -572,35 +570,9 @@ public class PsiphonTunnel {
     private void startPsiphon(String embeddedServerEntries) throws Exception {
         stopPsiphon();
         mHostService.onDiagnosticMessage("starting Psiphon library");
-
-        // In packet tunnel mode, Psi.start will dup the tun file descriptor
-        // passed in via the config. So here we "check out" mTunFd, to ensure
-        // it can't be closed before it's duplicated. (This would only happen
-        // if stop() is called concurrently with startTunneling(), which should
-        // not be done -- this could also cause file descriptor issues in
-        // tun2socks mode. With the "check out", a closed and recycled file
-        // descriptor will not be copied; but a different race condition takes
-        // the place of that one: stop() may fail to close the tun fd. So the
-        // prohibition on concurrent calls remains.)
-        //
-        // In tun2socks mode, the ownership of the fd is transferred to tun2socks.
-        // In packet tunnel mode, tunnel code dups the fd and manages  that copy
-        // while PsiphonTunnel retains ownership of the original mTunFd copy. Both
-        // file descriptors must be closed to halt VpnService, and stop() does
-        // this.
-
-        ParcelFileDescriptor tunFd = null;
-        int fd = -1;
-        if (mUsePacketTunnel) {
-            tunFd = mTunFd.getAndSet(null);
-            if (tunFd != null) {
-                fd = tunFd.getFd();
-            }
-        }
-
         try {
             Psi.start(
-                    loadPsiphonConfig(mHostService.getContext(), fd),
+                    loadPsiphonConfig(mHostService.getContext()),
                     embeddedServerEntries,
                     "",
                     new PsiphonProviderShim(this),
@@ -609,12 +581,6 @@ public class PsiphonTunnel {
                     );
         } catch (java.lang.Exception e) {
             throw new Exception("failed to start Psiphon library", e);
-        } finally {
-
-            if (mUsePacketTunnel) {
-                mTunFd.getAndSet(tunFd);
-            }
-
         }
 
         mHostService.onDiagnosticMessage("Psiphon library started");
@@ -626,7 +592,7 @@ public class PsiphonTunnel {
         mHostService.onDiagnosticMessage("Psiphon library stopped");
     }
 
-    private String loadPsiphonConfig(Context context, int tunFd)
+    private String loadPsiphonConfig(Context context)
             throws IOException, JSONException {
 
         // Load settings from the raw resource JSON config file and
@@ -689,12 +655,6 @@ public class PsiphonTunnel {
 
         json.put("DeviceRegion", getDeviceRegion(mHostService.getContext()));
 
-        if (mUsePacketTunnel) {
-            json.put("PacketTunnelTunFileDescriptor", tunFd);
-            json.put("DisableLocalSocksProxy", true);
-            json.put("DisableLocalHTTPProxy", true);
-        }
-
         StringBuilder clientPlatform = new StringBuilder();
 
         String prefix = mClientPlatformPrefix.get();
@@ -729,7 +689,7 @@ public class PsiphonTunnel {
             if (noticeType.equals("Tunnels")) {
                 int count = notice.getJSONObject("data").getInt("count");
                 if (count > 0) {
-                    if (isVpnMode()) {
+                    if (isVpnMode() && mShouldRouteThroughTunnelAutomatically) {
                         routeThroughTunnel();
                     }
                     mHostService.onConnected();
