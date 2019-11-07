@@ -18,13 +18,19 @@ We use a slightly modified version of JiveAuthenticatingProtocol (https://github
 
 ### Challenges
 
-***NSURLProtocol is only partially supported by UIWebView (https://bugs.webkit.org/show_bug.cgi?id=138169) and in 
-some versions of iOS audio and video are fetched out of process in mediaserverd and therefore are
-not intercepted by NSURLProtocol.***
+***NSURLProtocol is only partially supported by UIWebView (https://bugs.webkit.org/show_bug.cgi?id=138169) and iOS,
+meaning that some network requests are made out of process and are consequently untunneled.***
+
+Below we address the exceptions we have encountered, but there may be more.
+
+### Untunneled Media
+
+***In some versions of iOS audio and video are fetched out of process in mediaserverd and therefore are not intercepted 
+by NSURLProtocol.***
 
 *In our limited testing iOS 9/10 leak and iOS 11 does not leak.*
 
-### Workarounds
+#### Workarounds
 
 ***It is worth noting that this fix is inexact and may not always work. If one has control over the HTML being rendered and resources being fetched with XHR it is preferable to alter 
 the media source URLs directly beforehand instead of relying on the javascript injection trick.***
@@ -59,6 +65,21 @@ CSP](https://github.com/Psiphon-Inc/endless/blob/b0c33b4bbd917467a849ad8c51a225c
 to include a nonce generated for our injected javascript, which is [included in the script tag](https://github.com/Psiphon-Inc/endless/blob/b0c33b4bbd917467a849ad8c51a225c2d4dab260/External/JiveAuthenticatingHTTPProtocol/JAHPAuthenticatingHTTPProtocol.m#L1276).
 
 *Requests to localhost (`127.0.0.1`) should be [excluded from being proxied](https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/MobileLibrary/iOS/SampleApps/TunneledWebView/External/JiveAuthenticatingHTTPProtocol/JAHPAuthenticatingHTTPProtocol.m#L283-L287) so the system does not attempt to proxy loading the rewritten URLs. They will be correctly proxied through PsiphonTunnel's reverse proxy.*
+
+### Untunneled OCSP Requests
+
+See "Online Certificate Status Protocol (OCSP) Leaks" in [../../USAGE.md](../../USAGE.md).
+
+### Untunneled WebRTC
+
+WebRTC in UIWebView does not follow NSURLProtocol and cannot be disabled without disabling JavaScript. If not disabled, 
+WebRTC will leak the untunneled client IP address and the WebRTC connection may be performed entirely outside of the
+tunnel.
+
+One solution would be to use a WebRTC library which allows setting a proxy; or allows all requests to be intercepted, and
+subsequently proxied, through NSURLProtocol.
+
+More details can be found in this issue: https://github.com/OnionBrowser/OnionBrowser/issues/117.
 
 ## Configuring, Building, Running
 
