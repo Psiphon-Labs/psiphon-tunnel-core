@@ -45,6 +45,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
@@ -1230,7 +1231,8 @@ func (sshClient *sshClient) run(
 			// is seeded before downstream bytes are written.
 			if err == nil && sshClient.tunnelProtocol == protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
 				if fragmentorConn, ok := baseConn.(*fragmentor.Conn); ok {
-					fragmentorPRNG, err := result.obfuscatedSSHConn.GetDerivedPRNG("server-side-fragmentor")
+					var fragmentorPRNG *prng.PRNG
+					fragmentorPRNG, err = result.obfuscatedSSHConn.GetDerivedPRNG("server-side-fragmentor")
 					if err != nil {
 						err = errors.Trace(err)
 					} else {
