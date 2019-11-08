@@ -114,8 +114,8 @@ type DialParameters struct {
 
 	DialDuration time.Duration `json:"-"`
 
-	dialConfig *DialConfig `json:"-"`
-	meekConfig *MeekConfig `json:"-"`
+	dialConfig *DialConfig
+	meekConfig *MeekConfig
 }
 
 // MakeDialParameters creates a new DialParameters for the candidate server
