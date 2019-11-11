@@ -10,6 +10,14 @@ an Android app. TunneledWebView proxies a WebView through the Psiphon tunnel.
 Caveats
 --------------------------------------------------------------------------------
 
+### i18n API Leaks Timezone
+
+The Internationalization API (i18n) provides websites, though a JavaScript API, with access to the timezone used by
+the user's browser (in this case WebView). This does not reveal the precise location of the user, but can be accurate
+enough to identify the city in which the user is located.
+
+The i18n API cannot be disabled without disabling JavaScript.
+
 ### Untunneled WebRTC
 
 WebRTC requests do not use the configured proxy settings of a WebView. JavaScript must be disabled in a WebView to

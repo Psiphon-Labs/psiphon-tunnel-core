@@ -16,7 +16,15 @@ We use a slightly modified version of JiveAuthenticatingProtocol (https://github
 
 ## *\*\* Caveats \*\*\*
 
-### Challenges
+### i18n API Leaks Timezone
+
+The Internationalization API (i18n) provides websites, though a JavaScript API, with access to the timezone used by
+the user's browser (in this case UIWebView). This does not reveal the precise location of the user, but can be accurate
+enough to identify the city in which the user is located.
+
+Like the "Untunneled WebRTC" issue mentioned below, the i18n API cannot be disabled without disabling JavaScript.         
+
+### NSURLProtocol Challenges
 
 ***NSURLProtocol is only partially supported by UIWebView (https://bugs.webkit.org/show_bug.cgi?id=138169) and iOS,
 meaning that some network requests are made out of process and are consequently untunneled.***
