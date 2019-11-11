@@ -7,6 +7,19 @@ Overview
 TunneledWebView is a sample app that demonstrates embedding the Psiphon Library in
 an Android app. TunneledWebView proxies a WebView through the Psiphon tunnel.
 
+Caveats
+--------------------------------------------------------------------------------
+
+### Untunneled WebRTC
+
+WebRTC requests do not use the configured proxy settings of a WebView. JavaScript must be disabled in a WebView to
+effectively disable WebRTC. If not disabled, WebRTC will leak the untunneled client IP address and the WebRTC connection
+may be performed entirely outside of the tunnel.
+
+One solution would be to use a WebRTC library which allows setting a proxy; or use 
+[Mozilla's GeckoView](https://wiki.mozilla.org/Mobile/GeckoView), which is a WebView alternative which allows disabling
+WebRTC.
+
 Integration
 --------------------------------------------------------------------------------
 
