@@ -436,7 +436,7 @@ func (set *TrafficRulesSet) initLookups() {
 
 	initTrafficRulesLookups(&set.DefaultRules)
 
-	for i, _ := range set.FilteredRules {
+	for i := range set.FilteredRules {
 		initTrafficRulesFilterLookups(&set.FilteredRules[i].Filter)
 		initTrafficRulesLookups(&set.FilteredRules[i].Rules)
 	}
@@ -722,7 +722,7 @@ func (rules *TrafficRules) AllowTCPPort(remoteIP net.IP, port int) bool {
 
 	if len(rules.DisallowTCPPorts) > 0 {
 		if rules.disallowTCPPortsLookup != nil {
-			if rules.disallowTCPPortsLookup[port] == true {
+			if rules.disallowTCPPortsLookup[port] {
 				return false
 			}
 		} else {
@@ -739,7 +739,7 @@ func (rules *TrafficRules) AllowTCPPort(remoteIP net.IP, port int) bool {
 	}
 
 	if rules.allowTCPPortsLookup != nil {
-		if rules.allowTCPPortsLookup[port] == true {
+		if rules.allowTCPPortsLookup[port] {
 			return true
 		}
 	} else {
@@ -757,7 +757,7 @@ func (rules *TrafficRules) AllowUDPPort(remoteIP net.IP, port int) bool {
 
 	if len(rules.DisallowUDPPorts) > 0 {
 		if rules.disallowUDPPortsLookup != nil {
-			if rules.disallowUDPPortsLookup[port] == true {
+			if rules.disallowUDPPortsLookup[port] {
 				return false
 			}
 		} else {
@@ -774,7 +774,7 @@ func (rules *TrafficRules) AllowUDPPort(remoteIP net.IP, port int) bool {
 	}
 
 	if rules.allowUDPPortsLookup != nil {
-		if rules.allowUDPPortsLookup[port] == true {
+		if rules.allowUDPPortsLookup[port] {
 			return true
 		}
 	} else {

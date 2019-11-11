@@ -1286,6 +1286,7 @@ func (session *session) startTrackingFlow(
 	}
 
 	var hostname string
+	//lint:ignore SA9003 intentionally empty branch
 	if ID.protocol == internetProtocolTCP {
 		// TODO: implement
 		// hostname = common.ExtractHostnameFromTCPFlow(applicationData)
@@ -2534,8 +2535,7 @@ func checksumAccumulate(data []byte, newData bool, accumulator *int32) {
 	// Assumes length of data is factor of 4.
 
 	for i := 0; i < len(data); i += 4 {
-		var word uint32
-		word = uint32(data[i+0])<<24 | uint32(data[i+1])<<16 | uint32(data[i+2])<<8 | uint32(data[i+3])
+		word := uint32(data[i+0])<<24 | uint32(data[i+1])<<16 | uint32(data[i+2])<<8 | uint32(data[i+3])
 		if newData {
 			*accumulator -= int32(word & 0xFFFF)
 			*accumulator -= int32(word >> 16)

@@ -131,7 +131,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 
 			// Verify that portForward remote address matches latest message
 
-			if 0 != bytes.Compare(portForward.remoteIP, message.remoteIP) ||
+			if !bytes.Equal(portForward.remoteIP, message.remoteIP) ||
 				portForward.remotePort != message.remotePort {
 
 				log.WithTrace().Warning("UDP port forward remote address mismatch")

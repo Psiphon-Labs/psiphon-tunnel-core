@@ -41,10 +41,6 @@ func TestWriteRuntimeProfiles(t *testing.T) {
 type testLogger struct {
 }
 
-func (logger *testLogger) panic() {
-	panic("unexpected log call")
-}
-
 func (logger *testLogger) WithTrace() LogTrace {
 	return &testLoggerTrace{}
 }

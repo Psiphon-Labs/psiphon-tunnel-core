@@ -739,6 +739,10 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("Reload failed: %s", err)
 	}
 
+	if !reloaded {
+		t.Fatalf("Server config failed to reload")
+	}
+
 	listenerTestCases := []struct {
 		description      string
 		geoIPLookup      func(string) common.GeoIPData

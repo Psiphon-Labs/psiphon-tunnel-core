@@ -374,7 +374,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 	// Set cookie before writing the response.
 
-	if session.meekProtocolVersion >= MEEK_PROTOCOL_VERSION_2 && session.sessionIDSent == false {
+	if session.meekProtocolVersion >= MEEK_PROTOCOL_VERSION_2 && !session.sessionIDSent {
 		// Replace the meek cookie with the session ID.
 		// SetCookie for the the session ID cookie is only set once, to reduce overhead. This
 		// session ID value replaces the original meek cookie value.
@@ -1324,7 +1324,7 @@ func (conn *meekConn) Write(buffer []byte) (int, error) {
 
 		// Wait for the buffer to be processed.
 		select {
-		case _ = <-conn.writeResult:
+		case <-conn.writeResult:
 			// The err from conn.writeResult comes from the
 			// io.MultiWriter used in pumpWrites, which writes
 			// to both the cached response and the HTTP response.

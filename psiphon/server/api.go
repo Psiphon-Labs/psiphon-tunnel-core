@@ -620,7 +620,7 @@ func statusAPIRequestHandler(
 	if len(invalidServerEntryTags) > 0 {
 		statusResponse.InvalidServerEntryTags = make([]string, len(invalidServerEntryTags))
 		i := 0
-		for tag, _ := range invalidServerEntryTags {
+		for tag := range invalidServerEntryTags {
 			statusResponse.InvalidServerEntryTags[i] = tag
 			i++
 		}
@@ -1261,7 +1261,7 @@ func isIPAddress(_ *Config, value string) bool {
 	return net.ParseIP(value) != nil
 }
 
-var isDomainRegex = regexp.MustCompile("[a-zA-Z\\d-]{1,63}$")
+var isDomainRegex = regexp.MustCompile(`[a-zA-Z\d-]{1,63}$`)
 
 func isDomain(_ *Config, value string) bool {
 
@@ -1303,7 +1303,7 @@ func isServerEntrySource(_ *Config, value string) bool {
 }
 
 var isISO8601DateRegex = regexp.MustCompile(
-	"(?P<year>[0-9]{4})-(?P<month>[0-9]{1,2})-(?P<day>[0-9]{1,2})T(?P<hour>[0-9]{2}):(?P<minute>[0-9]{2}):(?P<second>[0-9]{2})(\\.(?P<fraction>[0-9]+))?(?P<timezone>Z|(([-+])([0-9]{2}):([0-9]{2})))")
+	`(?P<year>[0-9]{4})-(?P<month>[0-9]{1,2})-(?P<day>[0-9]{1,2})T(?P<hour>[0-9]{2}):(?P<minute>[0-9]{2}):(?P<second>[0-9]{2})(\.(?P<fraction>[0-9]+))?(?P<timezone>Z|(([-+])([0-9]{2}):([0-9]{2})))`)
 
 func isISO8601Date(_ *Config, value string) bool {
 	return isISO8601DateRegex.Match([]byte(value))

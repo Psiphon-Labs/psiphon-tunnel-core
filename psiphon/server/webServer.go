@@ -39,9 +39,7 @@ import (
 const WEB_SERVER_IO_TIMEOUT = 10 * time.Second
 
 type webServer struct {
-	support      *SupportServices
-	tunnelServer *TunnelServer
-	serveMux     *http.ServeMux
+	support *SupportServices
 }
 
 // RunWebServer runs a web server which supports tunneled and untunneled
@@ -70,6 +68,7 @@ func RunWebServer(
 	serveMux.HandleFunc("/handshake", webServer.handshakeHandler)
 	serveMux.HandleFunc("/connected", webServer.connectedHandler)
 	serveMux.HandleFunc("/status", webServer.statusHandler)
+	serveMux.HandleFunc("/client_verification", webServer.clientVerificationHandler)
 
 	certificate, err := tris.X509KeyPair(
 		[]byte(support.Config.WebServerCertificate),
@@ -168,12 +167,14 @@ func convertHTTPRequestToAPIRequest(
 	params := make(common.APIParameters)
 
 	for name, values := range r.URL.Query() {
-		for _, value := range values {
 
-			// Limitations:
-			// - This is intended only to support params sent by legacy
-			//   clients; non-base array-type params are not converted.
-			// - Multiple values per name are ignored.
+		// Limitations:
+		// - This is intended only to support params sent by legacy
+		//   clients; non-base array-type params are not converted.
+		// - Only the first values per name is used.
+
+		if len(values) > 0 {
+			value := values[0]
 
 			// TODO: faster lookup?
 			isArray := false
@@ -196,7 +197,6 @@ func convertHTTPRequestToAPIRequest(
 				// All other query parameters are simple strings
 				params[name] = value
 			}
-			break
 		}
 	}
 

@@ -186,8 +186,8 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 					return
 				}
 
-				if 0 != bytes.Compare(sendChunk, receiveChunk) {
-					results <- fmt.Errorf("bytes.Compare failed")
+				if !bytes.Equal(sendChunk, receiveChunk) {
+					results <- fmt.Errorf("bytes.Equal failed")
 					return
 				}
 			}

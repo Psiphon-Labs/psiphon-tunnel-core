@@ -51,9 +51,13 @@ func newNTLMAuthenticator(username, password string) *NTLMHttpAuthenticator {
 
 func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response) error {
 	if a.state == NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE3_GENERATED {
-		return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
+		return proxyError(fmt.Errorf("authorization is not accepted by the proxy server"))
 	}
 	challenges, err := parseAuthChallenge(resp)
+	if err != nil {
+		// Already wrapped in proxyError
+		return err
+	}
 
 	challenge, ok := challenges["NTLM"]
 	if challenge == "" {
@@ -62,7 +66,7 @@ func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Respo
 		a.state = NTLM_HTTP_AUTH_STATE_RESPONSE_TYPE1_GENERATED
 	}
 	if !ok {
-		return proxyError(fmt.Errorf("Bad proxy response, no NTLM challenge for NTLMHttpAuthenticator"))
+		return proxyError(fmt.Errorf("bad proxy response, no NTLM challenge for NTLMHttpAuthenticator"))
 	}
 
 	var ntlmMsg []byte
@@ -72,7 +76,7 @@ func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Respo
 		return proxyError(err)
 	}
 	if a.state == NTLM_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
-		//generate TYPE 1 message
+		// Generate TYPE 1 message
 		negotiate, err := session.GenerateNegotiateMessage()
 		if err != nil {
 			return proxyError(err)
@@ -94,7 +98,7 @@ func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Respo
 		}
 		challengeBytes, err := base64.StdEncoding.DecodeString(challenge)
 		if err != nil {
-			return proxyError(fmt.Errorf("NTLM challeenge base 64 decoding: %v", err))
+			return proxyError(fmt.Errorf("NTLM challenge base 64 decoding: %v", err))
 		}
 		session.SetUserInfo(NTUser, a.password, NTDomain)
 		ntlmChallenge, err := ntlm.ParseChallengeMessage(challengeBytes)
@@ -112,7 +116,7 @@ func (a *NTLMHttpAuthenticator) Authenticate(req *http.Request, resp *http.Respo
 		return nil
 	}
 
-	return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
+	return proxyError(fmt.Errorf("authorization is not accepted by the proxy server"))
 }
 
 func (a *NTLMHttpAuthenticator) IsConnectionBased() bool {

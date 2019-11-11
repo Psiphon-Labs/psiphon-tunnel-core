@@ -964,13 +964,13 @@ func (controller *Controller) terminateAllTunnels() {
 func (controller *Controller) getNextActiveTunnel() (tunnel *Tunnel) {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
-	for i := len(controller.tunnels); i > 0; i-- {
-		tunnel = controller.tunnels[controller.nextTunnel]
-		controller.nextTunnel =
-			(controller.nextTunnel + 1) % len(controller.tunnels)
-		return tunnel
+	if len(controller.tunnels) == 0 {
+		return nil
 	}
-	return nil
+	tunnel = controller.tunnels[controller.nextTunnel]
+	controller.nextTunnel =
+		(controller.nextTunnel + 1) % len(controller.tunnels)
+	return tunnel
 }
 
 // isActiveTunnelServerEntry is used to check if there's already

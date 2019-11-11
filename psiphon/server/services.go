@@ -195,7 +195,7 @@ func RunServices(configJSON []byte) error {
 
 	// An OS signal triggers an orderly shutdown
 	systemStopSignal := make(chan os.Signal, 1)
-	signal.Notify(systemStopSignal, os.Interrupt, os.Kill, syscall.SIGTERM)
+	signal.Notify(systemStopSignal, os.Interrupt, syscall.SIGTERM)
 
 	// SIGUSR1 triggers a reload of support services
 	reloadSupportServicesSignal := make(chan os.Signal, 1)

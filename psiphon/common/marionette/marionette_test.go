@@ -75,7 +75,7 @@ func TestMarionette(t *testing.T) {
 					fmt.Printf("Start server conn.Close\n")
 					start := time.Now()
 					conn.Close()
-					fmt.Printf("Done server conn.Close: %s\n", time.Now().Sub(start))
+					fmt.Printf("Done server conn.Close: %s\n", time.Since(start))
 				}()
 				bytesFromClient := 0
 				b := make([]byte, 1024)
@@ -125,7 +125,7 @@ func TestMarionette(t *testing.T) {
 					fmt.Printf("Start client conn.Close\n")
 					start := time.Now()
 					conn.Close()
-					fmt.Printf("Done client conn.Close: %s\n", time.Now().Sub(start))
+					fmt.Printf("Done client conn.Close: %s\n", time.Since(start))
 				}()
 				b := make([]byte, 1024)
 				bytesRead := 0
@@ -167,7 +167,7 @@ func TestMarionette(t *testing.T) {
 	fmt.Printf("Start listener.Close\n")
 	start := time.Now()
 	listener.Close()
-	fmt.Printf("Done listener.Close: %s\n", time.Now().Sub(start))
+	fmt.Printf("Done listener.Close: %s\n", time.Since(start))
 
 	err = testGroup.Wait()
 	if err != nil {

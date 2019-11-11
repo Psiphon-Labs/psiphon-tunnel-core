@@ -111,7 +111,7 @@ func (conn *Conn) Read(buffer []byte) (n int, err error) {
 	n, err = conn.Conn.Read(buffer)
 
 	var hostname string
-	if 1 == atomic.LoadInt32(&conn.hostnameParsed) {
+	if atomic.LoadInt32(&conn.hostnameParsed) == 1 {
 		hostname = conn.hostname
 	} else {
 		hostname = ""

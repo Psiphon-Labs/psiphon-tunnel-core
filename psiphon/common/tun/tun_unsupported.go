@@ -46,35 +46,35 @@ func makeDeviceOutboundBuffer(_ int) []byte {
 }
 
 func OpenTunDevice(_ string) (*os.File, string, error) {
-	return nil, "", errors.Trace(unsupportedError)
+	return nil, "", errors.Trace(errUnsupportedor)
 }
 
 func (device *Device) readTunPacket() (int, int, error) {
-	return 0, 0, errors.Trace(unsupportedError)
+	return 0, 0, errors.Trace(errUnsupportedor)
 }
 
 func (device *Device) writeTunPacket(_ []byte) error {
-	return errors.Trace(unsupportedError)
+	return errors.Trace(errUnsupportedor)
 }
 
 func configureNetworkConfigSubprocessCapabilities() error {
-	return errors.Trace(unsupportedError)
+	return errors.Trace(errUnsupportedor)
 }
 
 func resetNATTables(_ *ServerConfig, _ net.IP) error {
-	return errors.Trace(unsupportedError)
+	return errors.Trace(errUnsupportedor)
 }
 
 func configureServerInterface(_ *ServerConfig, _ string) error {
-	return errors.Trace(unsupportedError)
+	return errors.Trace(errUnsupportedor)
 }
 
 func configureClientInterface(_ *ClientConfig, _ string) error {
-	return errors.Trace(unsupportedError)
+	return errors.Trace(errUnsupportedor)
 }
 
 func BindToDevice(_ int, _ string) error {
-	return errors.Trace(unsupportedError)
+	return errors.Trace(errUnsupportedor)
 }
 
 func fixBindToDevice(_ common.Logger, _ bool, _ string) error {
@@ -86,15 +86,15 @@ type NonblockingIO struct {
 }
 
 func NewNonblockingIO(ioFD int) (*NonblockingIO, error) {
-	return nil, errors.Trace(unsupportedError)
+	return nil, errors.Trace(errUnsupportedor)
 }
 
 func (nio *NonblockingIO) Read(p []byte) (int, error) {
-	return 0, errors.Trace(unsupportedError)
+	return 0, errors.Trace(errUnsupportedor)
 }
 
 func (nio *NonblockingIO) Write(p []byte) (int, error) {
-	return 0, errors.Trace(unsupportedError)
+	return 0, errors.Trace(errUnsupportedor)
 }
 
 func (nio *NonblockingIO) IsClosed() bool {
@@ -102,5 +102,5 @@ func (nio *NonblockingIO) IsClosed() bool {
 }
 
 func (nio *NonblockingIO) Close() error {
-	return errors.Trace(unsupportedError)
+	return errors.Trace(errUnsupportedor)
 }

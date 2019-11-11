@@ -2391,7 +2391,7 @@ func (sshClient *sshClient) setHandshakeState(
 		}
 
 		sshClient.stopTimer = time.AfterFunc(
-			stopTime.Sub(time.Now()),
+			time.Until(stopTime),
 			func() {
 				sshClient.stop()
 			})
@@ -2429,7 +2429,7 @@ func (sshClient *sshClient) getHandshaked() (bool, bool) {
 	//   could have changed in a hot reload since the handshake.
 
 	if completed &&
-		*sshClient.trafficRules.RateLimits.CloseAfterExhausted == true &&
+		*sshClient.trafficRules.RateLimits.CloseAfterExhausted &&
 		(*sshClient.trafficRules.RateLimits.ReadUnthrottledBytes == 0 ||
 			*sshClient.trafficRules.RateLimits.WriteUnthrottledBytes == 0) {
 

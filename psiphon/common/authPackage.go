@@ -150,7 +150,7 @@ func ReadAuthenticatedDataPackage(
 		return "", errors.TraceNew("unexpected signing public key type")
 	}
 
-	if 0 != bytes.Compare(
+	if !bytes.Equal(
 		authenticatedDataPackage.SigningPublicKeyDigest,
 		sha256sum(signingPublicKey)) {
 
@@ -294,7 +294,7 @@ func NewAuthenticatedDataPackageReader(
 				return nil, errors.TraceNew("unexpected signing public key type")
 			}
 
-			if 0 != bytes.Compare(jsonSigningPublicKey, sha256sum(signingPublicKey)) {
+			if !bytes.Equal(jsonSigningPublicKey, sha256sum(signingPublicKey)) {
 				return nil, errors.TraceNew("unexpected signing public key digest")
 			}
 
@@ -410,7 +410,7 @@ func (streamer *limitedJSONStreamer) Stream() error {
 				if b == '"' {
 					state = stateJSONSeekingStringValueEnd
 
-					key := string(keyBuffer.Bytes())
+					key := keyBuffer.String()
 
 					// Wrap the main reader in a reader that will read up to the end
 					// of the value and then EOF. The handler is expected to consume

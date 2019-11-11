@@ -103,7 +103,7 @@ func TestDuplicateSessionID(t *testing.T) {
 		defer serverWaitGroup.Done()
 		err := RunServices(serverConfigJSON)
 		if err != nil {
-			t.Fatalf("error running server: %s", err)
+			t.Errorf("error running server: %s", err)
 		}
 	}()
 

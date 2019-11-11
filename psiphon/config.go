@@ -791,7 +791,7 @@ func (config *Config) Commit() error {
 	// config.networkIDGetter and not the input/exported fields.
 
 	if config.DeviceBinder != nil {
-		config.deviceBinder = &loggingDeviceBinder{config.DeviceBinder}
+		config.deviceBinder = newLoggingDeviceBinder(config.DeviceBinder)
 	}
 
 	networkIDGetter := config.NetworkIDGetter
@@ -807,7 +807,7 @@ func (config *Config) Commit() error {
 		}
 	}
 
-	config.networkIDGetter = &loggingNetworkIDGetter{networkIDGetter}
+	config.networkIDGetter = newLoggingNetworkIDGetter(networkIDGetter)
 
 	config.committed = true
 
@@ -1155,11 +1155,11 @@ func (config *Config) setDialParametersHash() {
 
 	// Calculate and store a hash of the config values that may impact
 	// dial parameters. This hash is used as part of the dial parameters
-	// replay mechanism to detect when persisted dial parameters must
+	// replay mechanism to detect when persisted dial parameters should
 	// be discarded due to conflicting config changes.
 	//
 	// MD5 hash is used solely as a data checksum and not for any security
-	// purpose.
+	// purpose; serialization is not strictly unambiguous.
 
 	hash := md5.New()
 
@@ -1173,7 +1173,7 @@ func (config *Config) setDialParametersHash() {
 		for _, protocol := range config.InitialLimitTunnelProtocols {
 			hash.Write([]byte(protocol))
 		}
-		binary.Write(hash, binary.LittleEndian, config.InitialLimitTunnelProtocolsCandidateCount)
+		binary.Write(hash, binary.LittleEndian, int64(config.InitialLimitTunnelProtocolsCandidateCount))
 	}
 
 	if len(config.LimitTLSProfiles) > 0 {
@@ -1214,31 +1214,31 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.FragmentorMinTotalBytes != nil {
-		binary.Write(hash, binary.LittleEndian, *config.FragmentorMinTotalBytes)
+		binary.Write(hash, binary.LittleEndian, int64(*config.FragmentorMinTotalBytes))
 	}
 
 	if config.FragmentorMaxTotalBytes != nil {
-		binary.Write(hash, binary.LittleEndian, *config.FragmentorMaxTotalBytes)
+		binary.Write(hash, binary.LittleEndian, int64(*config.FragmentorMaxTotalBytes))
 	}
 
 	if config.FragmentorMinWriteBytes != nil {
-		binary.Write(hash, binary.LittleEndian, *config.FragmentorMinWriteBytes)
+		binary.Write(hash, binary.LittleEndian, int64(*config.FragmentorMinWriteBytes))
 	}
 
 	if config.FragmentorMaxWriteBytes != nil {
-		binary.Write(hash, binary.LittleEndian, *config.FragmentorMaxWriteBytes)
+		binary.Write(hash, binary.LittleEndian, int64(*config.FragmentorMaxWriteBytes))
 	}
 
 	if config.FragmentorMinDelayMicroseconds != nil {
-		binary.Write(hash, binary.LittleEndian, *config.FragmentorMinDelayMicroseconds)
+		binary.Write(hash, binary.LittleEndian, int64(*config.FragmentorMinDelayMicroseconds))
 	}
 
 	if config.FragmentorMaxDelayMicroseconds != nil {
-		binary.Write(hash, binary.LittleEndian, *config.FragmentorMaxDelayMicroseconds)
+		binary.Write(hash, binary.LittleEndian, int64(*config.FragmentorMaxDelayMicroseconds))
 	}
 
 	if config.MeekTrafficShapingProbability != nil {
-		binary.Write(hash, binary.LittleEndian, *config.MeekTrafficShapingProbability)
+		binary.Write(hash, binary.LittleEndian, int64(*config.MeekTrafficShapingProbability))
 	}
 
 	if len(config.MeekTrafficShapingLimitProtocols) > 0 {
@@ -1248,11 +1248,11 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.MeekMinLimitRequestPayloadLength != nil {
-		binary.Write(hash, binary.LittleEndian, *config.MeekMinLimitRequestPayloadLength)
+		binary.Write(hash, binary.LittleEndian, int64(*config.MeekMinLimitRequestPayloadLength))
 	}
 
 	if config.MeekMaxLimitRequestPayloadLength != nil {
-		binary.Write(hash, binary.LittleEndian, *config.MeekMaxLimitRequestPayloadLength)
+		binary.Write(hash, binary.LittleEndian, int64(*config.MeekMaxLimitRequestPayloadLength))
 	}
 
 	if config.MeekRedialTLSProbability != nil {
@@ -1260,27 +1260,48 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.ObfuscatedSSHMinPadding != nil {
-		binary.Write(hash, binary.LittleEndian, *config.ObfuscatedSSHMinPadding)
+		binary.Write(hash, binary.LittleEndian, int64(*config.ObfuscatedSSHMinPadding))
 	}
 
 	if config.ObfuscatedSSHMaxPadding != nil {
-		binary.Write(hash, binary.LittleEndian, *config.ObfuscatedSSHMaxPadding)
+		binary.Write(hash, binary.LittleEndian, int64(*config.ObfuscatedSSHMaxPadding))
 	}
 
 	if config.LivenessTestMinUpstreamBytes != nil {
-		binary.Write(hash, binary.LittleEndian, *config.LivenessTestMinUpstreamBytes)
+		binary.Write(hash, binary.LittleEndian, int64(*config.LivenessTestMinUpstreamBytes))
 	}
 
 	if config.LivenessTestMaxUpstreamBytes != nil {
-		binary.Write(hash, binary.LittleEndian, *config.LivenessTestMaxUpstreamBytes)
+		binary.Write(hash, binary.LittleEndian, int64(*config.LivenessTestMaxUpstreamBytes))
 	}
 
 	if config.LivenessTestMinDownstreamBytes != nil {
-		binary.Write(hash, binary.LittleEndian, *config.LivenessTestMinDownstreamBytes)
+		binary.Write(hash, binary.LittleEndian, int64(*config.LivenessTestMinDownstreamBytes))
 	}
 
 	if config.LivenessTestMaxDownstreamBytes != nil {
-		binary.Write(hash, binary.LittleEndian, *config.LivenessTestMaxDownstreamBytes)
+		binary.Write(hash, binary.LittleEndian, int64(*config.LivenessTestMaxDownstreamBytes))
+	}
+
+	binary.Write(hash, binary.LittleEndian, config.NetworkLatencyMultiplierMin)
+	binary.Write(hash, binary.LittleEndian, config.NetworkLatencyMultiplierMax)
+	binary.Write(hash, binary.LittleEndian, config.NetworkLatencyMultiplierLambda)
+
+	if config.UseOnlyCustomTLSProfiles != nil {
+		binary.Write(hash, binary.LittleEndian, *config.UseOnlyCustomTLSProfiles)
+	}
+
+	for _, customTLSProfile := range config.CustomTLSProfiles {
+		// Assumes consistent definition for a given profile name
+		hash.Write([]byte(customTLSProfile.Name))
+	}
+
+	if config.SelectRandomizedTLSProfileProbability != nil {
+		binary.Write(hash, binary.LittleEndian, *config.SelectRandomizedTLSProfileProbability)
+	}
+
+	if config.NoDefaultTLSSessionIDProbability != nil {
+		binary.Write(hash, binary.LittleEndian, *config.NoDefaultTLSSessionIDProbability)
 	}
 
 	config.dialParametersHash = hash.Sum(nil)

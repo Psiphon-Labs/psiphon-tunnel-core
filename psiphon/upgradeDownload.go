@@ -93,6 +93,9 @@ func DownloadUpgrade(
 		tunnel,
 		untunneledDialConfig,
 		skipVerify)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	// If no handshake version is supplied, make an initial HEAD request
 	// to get the current version from the version header.

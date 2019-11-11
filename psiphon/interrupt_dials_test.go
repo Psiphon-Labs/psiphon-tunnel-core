@@ -190,7 +190,7 @@ func runInterruptDials(
 
 	startWaiting := monotime.Now()
 
-	for _ = range addrs {
+	for range addrs {
 		<-dialTerminated
 	}
 
@@ -212,7 +212,7 @@ func runInterruptDials(
 func findGoroutines(t *testing.T, targets []string) bool {
 	n, _ := runtime.GoroutineProfile(nil)
 	r := make([]runtime.StackRecord, n)
-	n, _ = runtime.GoroutineProfile(r)
+	runtime.GoroutineProfile(r)
 	found := false
 	for _, g := range r {
 		stack := g.Stack()

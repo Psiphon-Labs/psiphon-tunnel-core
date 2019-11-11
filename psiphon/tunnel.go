@@ -908,7 +908,7 @@ func performLivenessTest(
 	metrics := new(livenessTestMetrics)
 
 	defer func(startTime monotime.Time) {
-		metrics.Duration = fmt.Sprintf("%s", monotime.Since(startTime))
+		metrics.Duration = monotime.Since(startTime).String()
 	}(monotime.Now())
 
 	PRNG := prng.NewPRNGWithSeed(livenessTestPRNGSeed)

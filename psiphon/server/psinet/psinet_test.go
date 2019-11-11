@@ -168,7 +168,9 @@ func TestDatabase(t *testing.T) {
 			ok := false
 			if len(regexes) == 1 && len(regexes[0]) == 2 {
 				regexValue, ok = regexes[0]["regex"]
-				replaceValue, ok = regexes[0]["replace"]
+				if ok {
+					replaceValue, ok = regexes[0]["replace"]
+				}
 			}
 			if !ok || regexValue != testCase.expectedRegexValue || replaceValue != testCase.expectedReplaceValue {
 				t.Fatalf("unexpected regexes: %+v", regexes)

@@ -229,7 +229,7 @@ func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string
 
 	sponsor, ok := db.Sponsors[sponsorID]
 	if !ok {
-		sponsor, _ = db.Sponsors[db.DefaultSponsorID]
+		sponsor = db.Sponsors[db.DefaultSponsorID]
 	}
 
 	if sponsor == nil {

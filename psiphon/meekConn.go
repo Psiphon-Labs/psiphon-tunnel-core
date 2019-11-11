@@ -1132,6 +1132,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		}
 
 		request, cancelFunc, err := meek.newRequest(
+			//lint:ignore SA1012 meek.newRequest expects/handles nil context
 			nil,
 			nil,
 			requestBody,
