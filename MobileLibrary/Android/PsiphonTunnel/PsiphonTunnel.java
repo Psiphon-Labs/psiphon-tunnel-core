@@ -569,6 +569,7 @@ public class PsiphonTunnel {
 
     private void startPsiphon(String embeddedServerEntries) throws Exception {
         stopPsiphon();
+        mIsWaitingForNetworkConnectivity.set(false);
         mHostService.onDiagnosticMessage("starting Psiphon library");
         try {
             Psi.start(
