@@ -31,7 +31,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -175,7 +174,7 @@ func TestDuplicateSessionID(t *testing.T) {
 		tunnel, err := psiphon.ConnectTunnel(
 			ctx,
 			clientConfig,
-			monotime.Now(),
+			time.Now(),
 			dialParams)
 		if err != nil {
 			t.Fatalf("ConnectTunnel failed: %s", err)

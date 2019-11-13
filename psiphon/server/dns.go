@@ -158,7 +158,7 @@ func (dns *DNSResolver) reloadWhenStale() {
 
 			// Unconditionally set last reload time. Even on failure only
 			// want to retry after another DNS_SYSTEM_CONFIG_RELOAD_PERIOD.
-			atomic.StoreInt64(&dns.lastReloadTime, time.Now().Unix())
+			atomic.StoreInt64(&dns.lastReloadTime, int64(monotime.Now()))
 
 			_, err := dns.Reload()
 			if err != nil {

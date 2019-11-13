@@ -27,7 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/Yawning/chacha20"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/hkdf"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -73,11 +72,11 @@ type ObfuscatedPacketConn struct {
 
 type peerMode struct {
 	isObfuscated   bool
-	lastPacketTime monotime.Time
+	lastPacketTime time.Time
 }
 
 func (p *peerMode) isStale() bool {
-	return monotime.Since(p.lastPacketTime) >= SERVER_IDLE_TIMEOUT
+	return time.Since(p.lastPacketTime) >= SERVER_IDLE_TIMEOUT
 }
 
 // NewObfuscatedPacketConn creates a new ObfuscatedPacketConn.
@@ -229,7 +228,7 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 				mode.isObfuscated = false
 			}
 			isObfuscated = mode.isObfuscated
-			mode.lastPacketTime = monotime.Now()
+			mode.lastPacketTime = time.Now()
 			conn.peerModesMutex.Unlock()
 
 		}

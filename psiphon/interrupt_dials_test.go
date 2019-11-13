@@ -29,7 +29,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
@@ -188,7 +187,7 @@ func runInterruptDials(
 		cancelFunc()
 	}
 
-	startWaiting := monotime.Now()
+	startWaiting := time.Now()
 
 	for range addrs {
 		<-dialTerminated
@@ -196,7 +195,7 @@ func runInterruptDials(
 
 	// Test: dial interrupt must complete quickly
 
-	interruptDuration := monotime.Since(startWaiting)
+	interruptDuration := time.Since(startWaiting)
 
 	if interruptDuration > 100*time.Millisecond {
 		t.Fatalf("interrupt duration too long: %s", interruptDuration)

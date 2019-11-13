@@ -25,8 +25,6 @@ import (
 	"testing"
 	"testing/iotest"
 	"time"
-
-	"github.com/Psiphon-Labs/goarista/monotime"
 )
 
 type dummyConn struct {
@@ -114,7 +112,7 @@ func TestActivityMonitoredConn(t *testing.T) {
 
 	realStartTime := time.Now().UTC()
 
-	monotonicStartTime := monotime.Now()
+	monotonicStartTime := time.Now()
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -144,7 +142,7 @@ func TestActivityMonitoredConn(t *testing.T) {
 		t.Fatalf("previous write failed to extend timeout")
 	}
 
-	lastSuccessfulReadTime := monotime.Now()
+	lastSuccessfulReadTime := time.Now()
 
 	time.Sleep(100 * time.Millisecond)
 

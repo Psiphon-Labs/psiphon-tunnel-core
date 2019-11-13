@@ -166,7 +166,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -1353,11 +1352,11 @@ func FetchTactics(
 			p.Int(parameters.SpeedTestPaddingMinBytes),
 			p.Int(parameters.SpeedTestPaddingMaxBytes))
 
-		startTime := monotime.Now()
+		startTime := time.Now()
 
 		response, err := roundTripper(ctx, SPEED_TEST_END_POINT, request)
 
-		elapsedTime := monotime.Since(startTime)
+		elapsedTime := time.Since(startTime)
 
 		if err != nil {
 			return nil, errors.Trace(err)
