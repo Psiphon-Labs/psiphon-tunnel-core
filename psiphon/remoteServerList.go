@@ -41,7 +41,7 @@ type RemoteServerListFetcher func(
 // config.RemoteServerListURLs. It validates its digital signature using the
 // public key config.RemoteServerListSignaturePublicKey and parses the
 // data field into ServerEntry records.
-// config.RemoteServerListDownloadFilename is the location to store the
+// config.GetRemoteServerListDownloadFilename() is the location to store the
 // download. As the download is resumed after failure, this filename must
 // be unique and persistent.
 func FetchCommonRemoteServerList(
@@ -71,7 +71,7 @@ func FetchCommonRemoteServerList(
 		canonicalURL,
 		skipVerify,
 		"",
-		config.RemoteServerListDownloadFilename)
+		config.GetRemoteServerListDownloadFilename())
 	if err != nil {
 		return errors.Tracef("failed to download common remote server list: %s", errors.Trace(err))
 	}
@@ -81,7 +81,7 @@ func FetchCommonRemoteServerList(
 		return nil
 	}
 
-	file, err := os.Open(config.RemoteServerListDownloadFilename)
+	file, err := os.Open(config.GetRemoteServerListDownloadFilename())
 	if err != nil {
 		return errors.Tracef("failed to open common remote server list: %s", errors.Trace(err))
 
@@ -124,8 +124,8 @@ func FetchCommonRemoteServerList(
 // individual download fails, the fetch proceeds if it can.
 // Authenticated package digital signatures are validated using the
 // public key config.RemoteServerListSignaturePublicKey.
-// config.ObfuscatedServerListDownloadDirectory is the location to store the
-// downloaded files. As  downloads are resumed after failure, this directory
+// config.GetObfuscatedServerListDownloadDirectory() is the location to store
+// the downloaded files. As  downloads are resumed after failure, this directory
 // must be unique and persistent.
 func FetchObfuscatedServerLists(
 	ctx context.Context,
@@ -146,7 +146,7 @@ func FetchObfuscatedServerLists(
 	downloadURL := osl.GetOSLRegistryURL(rootURL)
 	canonicalURL := osl.GetOSLRegistryURL(canonicalRootURL)
 
-	downloadFilename := osl.GetOSLRegistryFilename(config.ObfuscatedServerListDownloadDirectory)
+	downloadFilename := osl.GetOSLRegistryFilename(config.GetObfuscatedServerListDownloadDirectory())
 	cachedFilename := downloadFilename + ".cached"
 
 	// If the cached registry is not present, we need to download or resume downloading
@@ -239,7 +239,7 @@ func FetchObfuscatedServerLists(
 		}
 
 		downloadFilename := osl.GetOSLFilename(
-			config.ObfuscatedServerListDownloadDirectory, oslFileSpec.ID)
+			config.GetObfuscatedServerListDownloadDirectory(), oslFileSpec.ID)
 
 		downloadURL := osl.GetOSLFileURL(rootURL, oslFileSpec.ID)
 		canonicalURL := osl.GetOSLFileURL(canonicalRootURL, oslFileSpec.ID)

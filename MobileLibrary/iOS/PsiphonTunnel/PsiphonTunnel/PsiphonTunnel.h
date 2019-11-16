@@ -140,18 +140,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 - (NSString * _Nullable)getEmbeddedServerEntriesPath;
 
 /*!
-  Called when the tunnel is starting. If this method is implemented, it should return the path where a homepage
-  notices file is to be written. This path should be writable by the library.
- */
-- (NSString * _Nullable)getHomepageNoticesPath;
-
-/*!
-  Called when the tunnel is starting. If this method is implemented, it should return the path where a rotating
-  notice file set is to be written. path file should be writable by the library.
- */
-- (NSString * _Nullable)getRotatingNoticesPath;
-
-/*!
  Gets runtime errors info that may be useful for debugging.
  @param message  The diagnostic message string.
  @param timestamp RFC3339 encoded timestamp.
@@ -324,13 +312,47 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
 + (PsiphonTunnel * _Nonnull)newPsiphonTunnel:(id<TunneledAppDelegate> _Nonnull)tunneledAppDelegate;
 
 /*!
+Returns the default data root directory that is used by PsiphonTunnel if DataRootDirectory is not specified in the config returned by
+getPsiphonConfig.
+@param err Any error encountered while obtaining the default data root directory. If set, the return value should be ignored.
+@return  The default data root directory used by PsiphonTunnel.
+*/
++ (NSURL * _Nullable)defaultDataRootDirectoryWithError:(NSError * _Nullable * _Nonnull)err;
+
+/*!
+Returns the path where the homepage notices file will be created.
+@note    This file will only be created if UseNoticeFiles is set in the config returned by `getPsiphonConfig`.
+@param dataRootDirectory the configured data root directory. If DataRootDirectory is not specified in the config returned by
+getPsiphonConfig, then use `defaultDataRootDirectory`.
+@return  The file path at which the homepage file will be created.
+*/
++ (NSURL * _Nullable)homepageFilePath:(NSURL * _Nonnull)dataRootDirectory;
+
+/*!
+Returns the path where the notices file will be created. When the file is rotated it will be moved to `oldNoticesFilePath`.
+@note    This file will only be created if UseNoticeFiles is set in the config returned by `getPsiphonConfig`.
+@param dataRootDirectory the configured data root directory. If DataRootDirectory is not specified in the config returned by
+`getPsiphonConfig`, then use `defaultDataRootDirectory`.
+@return  The file path at which the notices file will be created.
+*/
++ (NSURL * _Nullable)noticesFilePath:(NSURL * _Nonnull)dataRootDirectory;
+
+/*!
+Returns the path where the rotated notices file will be created.
+@note    This file will only be created if UseNoticeFiles is set in the config returned by `getPsiphonConfig`.
+@param dataRootDirectory the configured data root directory. If DataRootDirectory is not specified in the config returned by
+`getPsiphonConfig`, then use `defaultDataRootDirectory`.
+@return  The file path at which the rotated notices file can be found once rotated.
+*/
++ (NSURL * _Nullable)olderNoticesFilePath:(NSURL * _Nonnull)dataRootDirectory;
+
+/*!
  Start connecting the PsiphonTunnel. Returns before connection is complete -- delegate callbacks (such as `onConnected` and `onConnectionStateChanged`) are used to indicate progress and state.
  @param ifNeeded  If TRUE, the tunnel will only be started if it's not already connected and healthy. If FALSE, the tunnel will be forced to stop and reconnect.
  @return TRUE if the connection start was successful, FALSE otherwise.
  Swift: @code func start(_ ifNeeded: Bool) -> Bool @endcode
  */
 - (BOOL)start:(BOOL)ifNeeded;
-
 
 /*!
  Reconnect a previously started PsiphonTunnel with the specified config changes.

@@ -69,7 +69,7 @@ func OpenDataStore(config *Config) error {
 		return errors.TraceNew("db already open")
 	}
 
-	newDB, err := datastoreOpenDB(config.DataStoreDirectory)
+	newDB, err := datastoreOpenDB(config.GetDataStoreDirectory())
 	if err != nil {
 		datastoreMutex.Unlock()
 		return errors.Trace(err)

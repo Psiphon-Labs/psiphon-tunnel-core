@@ -25,8 +25,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,25 +43,153 @@ import (
 
 const (
 	TUNNEL_POOL_SIZE = 1
+
+	// Filename constants.
+	// All relative to the configured DataRootDirectory.
+	HomepageFilename        = "homepage"
+	NoticesFilename         = "notices"
+	OldNoticesFilename      = "notices.1"
+	UpgradeDownloadFilename = "upgrade"
 )
 
 // Config is the Psiphon configuration specified by the application. This
 // configuration controls the behavior of the core tunnel functionality.
 //
 // To distinguish omitted timeout params from explicit 0 value timeout params,
-// corresponding fieldss are int pointers. nil means no value was supplied and
+// corresponding fields are int pointers. nil means no value was supplied and
 // to use the default; a non-nil pointer to 0 means no timeout.
 type Config struct {
+
+	// DataRootDirectory is the directory in which to store persistent files,
+	// which contain information such as server entries. By default, current
+	// working directory.
+	//
+	// Psiphon will assume full control of files under this directory. They may
+	// be deleted, moved or overwritten.
+	//
+	// Warning: If the datastore file,
+	// DataRootDirectory/datastore/DATA_STORE_FILENAME, exists but fails to open
+	// for any reason (checksum error, unexpected file format, etc.) it will be
+	// deleted in order to pave a new datastore and continue running.
+	DataRootDirectory string
+
+	// UseNoticeFiles configures notice files for writing. If set, homepages
+	// will be written to a file created at config.GetHomePageFilename()
+	// and notices will be written to a file created at
+	// config.GetNoticesFilename().
+	//
+	// The homepage file may be read after the Tunnels notice with count of 1.
+	//
+	// The value of UseNoticeFiles sets the size and frequency at which the
+	// notices file, config.GetNoticesFilename(), will be rotated. See the
+	// comment for UseNoticeFiles for more details. One rotated older file,
+	// config.GetOldNoticesFilename(), is retained.
+	//
+	// The notice files may be may be read at any time; and should be opened
+	// read-only for reading. Diagnostic notices are omitted from the notice
+	// files.
+	//
+	// See comment for setNoticeFiles in notice.go for further details.
+	UseNoticeFiles *UseNoticeFiles
+
+	// MigrateHompageNoticesFilename migrates a homepage file from the path
+	// previously configured with setNoticeFiles to the new path for homepage
+	// files under the data root directory. The file specified by this config
+	// value will be moved to config.GetHomePageFilename().
+	//
+	// If not set, no migration operation will be performed.
+	MigrateHompageNoticesFilename string
+
+	// MigrateRotatingNoticesFilename migrates notice files from the path
+	// previously configured with setNoticeFiles to the new path for notice
+	// files under the data root directory.
+	//
+	// MigrateRotatingNoticesFilename will be moved to
+	// config.GetNoticesFilename().
+	//
+	// MigrateRotatingNoticesFilename.1 will be moved to
+	// config.GetOldNoticesFilename().
+	//
+	// If not set, no migration operation will be performed.
+	MigrateRotatingNoticesFilename string
 
 	// DataStoreDirectory is the directory in which to store the persistent
 	// database, which contains information such as server entries. By
 	// default, current working directory.
 	//
-	// Warning: If the datastore file, DataStoreDirectory/DATA_STORE_FILENAME,
-	// exists but fails to open for any reason (checksum error, unexpected
-	// file format, etc.) it will be deleted in order to pave a new datastore
-	// and continue running.
+	// Deprecated:
+	// Use MigrateDataStoreDirectory. When MigrateDataStoreDirectory
+	// is set, this parameter is ignored.
+	//
+	// DataStoreDirectory has been subsumed by the new data root directory,
+	// which is configured with DataRootDirectory. If set, datastore files
+	// found in the specified directory will be moved under the data root
+	// directory.
 	DataStoreDirectory string
+
+	// MigrateDataStoreDirectory indicates the location of the datastore
+	// directory, as previously configured with the deprecated
+	// DataStoreDirectory config field. Datastore files found in the specified
+	// directory will be moved under the data root directory.
+	MigrateDataStoreDirectory string
+
+	// RemoteServerListDownloadFilename specifies a target filename for
+	// storing the remote server list download. Data is stored in co-located
+	// files (RemoteServerListDownloadFilename.part*) to allow for resumable
+	// downloading.
+	//
+	// Deprecated:
+	// Use MigrateRemoteServerListDownloadFilename. When
+	// MigrateRemoteServerListDownloadFilename is set, this parameter is
+	// ignored.
+	//
+	// If set, remote server list download files found at the specified path
+	// will be moved under the data root directory.
+	RemoteServerListDownloadFilename string
+
+	// MigrateRemoteServerListDownloadFilename indicates the location of
+	// remote server list download files. The remote server list files found at
+	// the specified path will be moved under the data root directory.
+	MigrateRemoteServerListDownloadFilename string
+
+	// ObfuscatedServerListDownloadDirectory specifies a target directory for
+	// storing the obfuscated remote server list downloads. Data is stored in
+	// co-located files (<OSL filename>.part*) to allow for resumable
+	// downloading.
+	//
+	// Deprecated:
+	// Use MigrateObfuscatedServerListDownloadDirectory. When
+	// MigrateObfuscatedServerListDownloadDirectory is set, this parameter is
+	// ignored.
+	//
+	// If set, obfuscated server list download files found at the specified path
+	// will be moved under the data root directory.
+	ObfuscatedServerListDownloadDirectory string
+
+	// MigrateObfuscatedServerListDownloadDirectory indicates the location of
+	// the obfuscated server list downloads directory, as previously configured
+	// with ObfuscatedServerListDownloadDirectory. Obfuscated server list
+	// download files found in the specified directory will be moved under the
+	// data root directory.
+	MigrateObfuscatedServerListDownloadDirectory string
+
+	// UpgradeDownloadFilename is the local target filename for an upgrade
+	// download. This parameter is required when UpgradeDownloadURLs (or
+	// UpgradeDownloadUrl) is specified. Data is stored in co-located files
+	// (UpgradeDownloadFilename.part*) to allow for resumable downloading.
+	//
+	// Deprecated:
+	// Use MigrateUpgradeDownloadFilename. When MigrateUpgradeDownloadFilename
+	// is set, this parameter is ignored.
+	//
+	// If set, upgrade download files found at the specified path will be moved
+	// under the data root directory.
+	UpgradeDownloadFilename string
+
+	// MigrateUpgradeDownloadFilename indicates the location of downloaded
+	// application upgrade files. Downloaded upgrade files found at the
+	// specified path will be moved under the data root directory.
+	MigrateUpgradeDownloadFilename string
 
 	// PropagationChannelId is a string identifier which indicates how the
 	// Psiphon client was distributed. This parameter is required. This value
@@ -313,12 +444,6 @@ type Config struct {
 	// DownloadURL must have OnlyAfterAttempts = 0.
 	RemoteServerListURLs parameters.DownloadURLs
 
-	// RemoteServerListDownloadFilename specifies a target filename for
-	// storing the remote server list download. Data is stored in co-located
-	// files (RemoteServerListDownloadFilename.part*) to allow for resumable
-	// downloading.
-	RemoteServerListDownloadFilename string
-
 	// RemoteServerListSignaturePublicKey specifies a public key that's used
 	// to authenticate the remote server list payload. This value is supplied
 	// by and depends on the Psiphon Network, and is typically embedded in the
@@ -350,12 +475,6 @@ type Config struct {
 	// with the same ETag. At least one DownloadURL must have
 	// OnlyAfterAttempts = 0.
 	ObfuscatedServerListRootURLs parameters.DownloadURLs
-
-	// ObfuscatedServerListDownloadDirectory specifies a target directory for
-	// storing the obfuscated remote server list downloads. Data is stored in
-	// co-located files (<OSL filename>.part*) to allow for resumable
-	// downloading.
-	ObfuscatedServerListDownloadDirectory string
 
 	// SplitTunnelRoutesURLFormat is a URL which specifies the location of a
 	// routes file to use for split tunnel mode. The URL must include a
@@ -405,12 +524,6 @@ type Config struct {
 	// UpgradeDownloadClientVersionHeader is required when UpgradeDownloadURLs
 	// is specified.
 	UpgradeDownloadClientVersionHeader string
-
-	// UpgradeDownloadFilename is the local target filename for an upgrade
-	// download. This parameter is required when UpgradeDownloadURLs (or
-	// UpgradeDownloadUrl) is specified. Data is stored in co-located files
-	// (UpgradeDownloadFilename.part*) to allow for resumable downloading.
-	UpgradeDownloadFilename string
 
 	// FetchUpgradeRetryPeriodMilliseconds specifies the delay before resuming
 	// a client upgrade download after a failure. If omitted, a default value
@@ -587,6 +700,18 @@ type Config struct {
 	loadTimestamp string
 }
 
+// Config field which specifies if notice files should be used and at which
+// frequency and size they should be rotated.
+//
+// If either RotatingFileSize or RotatingSyncFrequency are <= 0, default values
+// are used.
+//
+// See comment for setNoticeFiles in notice.go for further details.
+type UseNoticeFiles struct {
+	RotatingFileSize      int
+	RotatingSyncFrequency int
+}
+
 // LoadConfig parses a JSON format Psiphon config JSON string and returns a
 // Config struct populated with config values.
 //
@@ -650,14 +775,48 @@ func (config *Config) Commit() error {
 		config.LimitTunnelProtocols = []string{config.TunnelProtocol}
 	}
 
+	if config.DataStoreDirectory != "" && config.MigrateDataStoreDirectory == "" {
+		config.MigrateDataStoreDirectory = config.DataStoreDirectory
+	}
+
+	if config.RemoteServerListDownloadFilename != "" && config.MigrateRemoteServerListDownloadFilename == "" {
+		config.MigrateRemoteServerListDownloadFilename = config.RemoteServerListDownloadFilename
+	}
+
+	if config.ObfuscatedServerListDownloadDirectory != "" && config.MigrateObfuscatedServerListDownloadDirectory == "" {
+		config.MigrateObfuscatedServerListDownloadDirectory = config.ObfuscatedServerListDownloadDirectory
+	}
+
+	if config.UpgradeDownloadFilename != "" && config.MigrateUpgradeDownloadFilename == "" {
+		config.MigrateUpgradeDownloadFilename = config.UpgradeDownloadFilename
+	}
+
 	// Supply default values.
 
-	if config.DataStoreDirectory == "" {
+	if config.DataRootDirectory == "" {
 		wd, err := os.Getwd()
 		if err != nil {
 			return errors.Trace(err)
 		}
-		config.DataStoreDirectory = wd
+		config.DataRootDirectory = wd
+	}
+
+	// Create datastore directory.
+	dataStoreDirectoryPath := config.GetDataStoreDirectory()
+	if !common.FileExists(dataStoreDirectoryPath) {
+		err := os.Mkdir(dataStoreDirectoryPath, os.ModePerm)
+		if err != nil {
+			return errors.Tracef("failed to create datastore directory %s with error: %s", dataStoreDirectoryPath, err.Error())
+		}
+	}
+
+	// Create OSL directory.
+	oslDirectoryPath := config.GetObfuscatedServerListDownloadDirectory()
+	if !common.FileExists(oslDirectoryPath) {
+		err := os.Mkdir(oslDirectoryPath, os.ModePerm)
+		if err != nil {
+			return errors.Tracef("failed to create osl directory %s with error: %s", oslDirectoryPath, err.Error())
+		}
 	}
 
 	if config.ClientVersion == "" {
@@ -668,7 +827,83 @@ func (config *Config) Commit() error {
 		config.TunnelPoolSize = TUNNEL_POOL_SIZE
 	}
 
+	// Check if the migration from legacy config fields has already been
+	// completed. See the Migrate* config fields for more details.
+	migrationCompleteFilePath := filepath.Join(config.DataRootDirectory, "psiphon3_migration_complete")
+	needMigration := !common.FileExists(migrationCompleteFilePath)
+
+	// Collect notices to emit them after notice files are set
+	var noticeMigrationAlertMsgs []string
+	var noticeMigrationInfoMsgs []string
+
+	// Migrate notices first to ensure notice files are used for notices if
+	// UseNoticeFiles is set.
+	homepageFilePath := config.GetHomePageFilename()
+	noticesFilePath := config.GetNoticesFilename()
+
+	if needMigration {
+
+		noticeMigrationInfoMsgs = append(noticeMigrationInfoMsgs, "Config migration: need migration")
+
+		var noticeMigrations []common.FileMigration
+
+		if config.MigrateHompageNoticesFilename != "" {
+			noticeMigrations = append(noticeMigrations, common.FileMigration{
+				OldPath: config.MigrateHompageNoticesFilename,
+				NewPath: homepageFilePath,
+			})
+		}
+
+		if config.MigrateRotatingNoticesFilename != "" {
+			migrations := []common.FileMigration{
+				{
+					OldPath: config.MigrateRotatingNoticesFilename,
+					NewPath: noticesFilePath,
+					IsDir:   false,
+				},
+				{
+					OldPath: config.MigrateRotatingNoticesFilename + ".1",
+					NewPath: noticesFilePath + ".1",
+				},
+			}
+			noticeMigrations = append(noticeMigrations, migrations...)
+		}
+
+		for _, migration := range noticeMigrations {
+			err := common.DoFileMigration(migration)
+			if err != nil {
+				alertMsg := fmt.Sprintf("Config migration: %s", errors.Trace(err))
+				noticeMigrationAlertMsgs = append(noticeMigrationAlertMsgs, alertMsg)
+			} else {
+				infoMsg := fmt.Sprintf("Config migration: moved %s to %s", migration.OldPath, migration.NewPath)
+				noticeMigrationInfoMsgs = append(noticeMigrationInfoMsgs, infoMsg)
+			}
+		}
+	} else {
+		noticeMigrationInfoMsgs = append(noticeMigrationInfoMsgs, "Config migration: migration already completed")
+	}
+
+	if config.UseNoticeFiles != nil {
+		setNoticeFiles(
+			homepageFilePath,
+			noticesFilePath,
+			config.UseNoticeFiles.RotatingFileSize,
+			config.UseNoticeFiles.RotatingSyncFrequency)
+	}
+
+	// Emit notices now that notice files are set if configured
+	for _, msg := range noticeMigrationAlertMsgs {
+		NoticeAlert(msg)
+	}
+	for _, msg := range noticeMigrationInfoMsgs {
+		NoticeInfo(msg)
+	}
+
 	// Validate config fields.
+
+	if !common.FileExists(config.DataRootDirectory) {
+		return errors.Tracef("DataRootDirectory does not exist: %s", config.MigrateDataStoreDirectory)
+	}
 
 	if config.PropagationChannelId == "" {
 		return errors.TraceNew("propagation channel ID is missing from the configuration file")
@@ -695,20 +930,13 @@ func (config *Config) Commit() error {
 			if config.RemoteServerListSignaturePublicKey == "" {
 				return errors.TraceNew("missing RemoteServerListSignaturePublicKey")
 			}
-			if config.RemoteServerListDownloadFilename == "" {
-				return errors.TraceNew("missing RemoteServerListDownloadFilename")
-			}
 		}
 
 		if config.ObfuscatedServerListRootURLs != nil {
 			if config.RemoteServerListSignaturePublicKey == "" {
 				return errors.TraceNew("missing RemoteServerListSignaturePublicKey")
 			}
-			if config.ObfuscatedServerListDownloadDirectory == "" {
-				return errors.TraceNew("missing ObfuscatedServerListDownloadDirectory")
-			}
 		}
-
 	}
 
 	if config.SplitTunnelRoutesURLFormat != "" {
@@ -723,9 +951,6 @@ func (config *Config) Commit() error {
 	if config.UpgradeDownloadURLs != nil {
 		if config.UpgradeDownloadClientVersionHeader == "" {
 			return errors.TraceNew("missing UpgradeDownloadClientVersionHeader")
-		}
-		if config.UpgradeDownloadFilename == "" {
-			return errors.TraceNew("missing UpgradeDownloadFilename")
 		}
 	}
 
@@ -809,6 +1034,151 @@ func (config *Config) Commit() error {
 
 	config.networkIDGetter = &loggingNetworkIDGetter{networkIDGetter}
 
+	// Migrate from old config fields. This results in files being moved under
+	// a config specified data root directory.
+
+	// If unset, set MigrateDataStoreDirectory to the previous default value for
+	// DataStoreDirectory to ensure that datastore files are migrated.
+	if config.MigrateDataStoreDirectory == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return errors.Trace(err)
+		}
+		NoticeInfo("MigrateDataStoreDirectory unset, using working directory %s", wd)
+		config.MigrateDataStoreDirectory = wd
+	}
+
+	if needMigration {
+
+		// Migrate files under the data root directory
+
+		migrations := []common.FileMigration{
+			{
+				OldPath: filepath.Join(config.MigrateDataStoreDirectory, "psiphon.boltdb"),
+				NewPath: filepath.Join(dataStoreDirectoryPath, "psiphon.boltdb"),
+			},
+			{
+				OldPath: filepath.Join(config.MigrateDataStoreDirectory, "psiphon.boltdb.lock"),
+				NewPath: filepath.Join(dataStoreDirectoryPath, "psiphon.boltdb.lock"),
+			},
+			{
+				OldPath: filepath.Join(config.MigrateDataStoreDirectory, "tapdance"),
+				NewPath: filepath.Join(config.DataRootDirectory, "tapdance"),
+				IsDir:   true,
+			},
+		}
+
+		if config.MigrateRemoteServerListDownloadFilename != "" {
+
+			// Migrate remote server list files
+
+			oldRSLFilename := filepath.Base(config.MigrateRemoteServerListDownloadFilename)
+
+			rslFileRegex, err := regexp.Compile(`^` + oldRSLFilename + `(\.part.*)*$`)
+			if err != nil {
+				return errors.TraceMsg(err, "failed to compile regex for rsl files")
+			}
+
+			rslDir := filepath.Dir(config.MigrateRemoteServerListDownloadFilename)
+
+			files, err := ioutil.ReadDir(rslDir)
+			if err != nil {
+				NoticeAlert("Migration: failed to read directory %s with error %s", rslDir, err)
+			} else {
+				for _, file := range files {
+					if rslFileRegex.MatchString(file.Name()) {
+
+						oldFileSuffix := strings.TrimPrefix(file.Name(), oldRSLFilename)
+
+						fileMigration := common.FileMigration{
+							OldPath: filepath.Join(rslDir, file.Name()),
+							NewPath: config.GetRemoteServerListDownloadFilename() + oldFileSuffix,
+						}
+						migrations = append(migrations, fileMigration)
+					}
+				}
+			}
+		}
+
+		if config.MigrateObfuscatedServerListDownloadDirectory != "" {
+
+			// Migrate OSL registry file and downloads
+
+			oslFileRegex, err := regexp.Compile(`^osl-.+$`)
+			if err != nil {
+				return errors.TraceMsg(err, "failed to compile regex for osl files")
+			}
+
+			files, err := ioutil.ReadDir(config.MigrateObfuscatedServerListDownloadDirectory)
+			if err != nil {
+				NoticeAlert("Migration: failed to read directory %s with error %s", config.MigrateObfuscatedServerListDownloadDirectory, err)
+			} else {
+				for _, file := range files {
+					if oslFileRegex.MatchString(file.Name()) {
+						fileMigration := common.FileMigration{
+							OldPath: filepath.Join(config.MigrateObfuscatedServerListDownloadDirectory, file.Name()),
+							NewPath: filepath.Join(config.GetObfuscatedServerListDownloadDirectory(), file.Name()),
+						}
+						migrations = append(migrations, fileMigration)
+					}
+				}
+			}
+		}
+
+		if config.MigrateUpgradeDownloadFilename != "" {
+
+			// Migrate downloaded upgrade files
+
+			oldUpgradeDownloadFilename := filepath.Base(config.MigrateUpgradeDownloadFilename)
+
+			upgradeDownloadFileRegex, err := regexp.Compile(`^` + oldUpgradeDownloadFilename + `(\.part.*)*$`)
+			if err != nil {
+				return errors.TraceMsg(err, "failed to compile regex for upgrade files")
+			}
+
+			upgradeDownloadDir := filepath.Dir(config.MigrateUpgradeDownloadFilename)
+
+			files, err := ioutil.ReadDir(upgradeDownloadDir)
+			if err != nil {
+				NoticeAlert("Migration: failed to read directory %s with error %s", upgradeDownloadDir, err)
+			} else {
+
+				for _, file := range files {
+
+					if upgradeDownloadFileRegex.MatchString(file.Name()) {
+
+						oldFileSuffix := strings.TrimPrefix(file.Name(), oldUpgradeDownloadFilename)
+
+						fileMigration := common.FileMigration{
+							OldPath: filepath.Join(upgradeDownloadDir, file.Name()),
+							NewPath: config.GetUpgradeDownloadFilename() + oldFileSuffix,
+						}
+						migrations = append(migrations, fileMigration)
+					}
+				}
+			}
+		}
+
+		// Do migrations
+
+		for _, migration := range migrations {
+			err := common.DoFileMigration(migration)
+			if err != nil {
+				NoticeAlert("Config migration: %s", errors.Trace(err))
+			} else {
+				NoticeInfo("Config migration: moved %s to %s", migration.OldPath, migration.NewPath)
+			}
+		}
+
+		f, err := os.Create(migrationCompleteFilePath)
+		if err != nil {
+			NoticeAlert("Config migration: failed to create %s with error %s", migrationCompleteFilePath, errors.Trace(err))
+		} else {
+			NoticeInfo("Config migration: completed")
+			f.Close()
+		}
+	}
+
 	config.committed = true
 
 	return nil
@@ -889,6 +1259,58 @@ func (config *Config) GetAuthorizations() []string {
 	config.dynamicConfigMutex.Lock()
 	defer config.dynamicConfigMutex.Unlock()
 	return config.authorizations
+}
+
+// GetHomePageFilename the path where the homepage notices file will be created.
+func (config *Config) GetHomePageFilename() string {
+	return filepath.Join(config.DataRootDirectory, HomepageFilename)
+}
+
+// GetNoticesFilename returns the path where the notices file will be created.
+// When the file is rotated it will be moved to config.GetOldNoticesFilename().
+func (config *Config) GetNoticesFilename() string {
+	return filepath.Join(config.DataRootDirectory, NoticesFilename)
+}
+
+// GetOldNoticeFilename returns the path where the rotated notices file will be
+// created.
+func (config *Config) GetOldNoticesFilename() string {
+	return filepath.Join(config.DataRootDirectory, OldNoticesFilename)
+}
+
+// GetDataStoreDirectory returns the directory in which the persistent database
+// will be stored. Created in Config.Commit(). The persistent database contains
+// information such as server entries.
+func (config *Config) GetDataStoreDirectory() string {
+	return filepath.Join(config.DataRootDirectory, "datastore")
+}
+
+// GetObfuscatedServerListDownloadDirectory returns the directory in which
+// obfuscated remote server list downloads will be stored. Created in
+// Config.Commit().
+func (config *Config) GetObfuscatedServerListDownloadDirectory() string {
+	return filepath.Join(config.DataRootDirectory, "osl")
+}
+
+// GetRemoteServerListDownloadFilename returns the filename where the remote
+// server list download will be stored. Data is stored in co-located files
+// (RemoteServerListDownloadFilename.part*) to allow for resumable downloading.
+func (config *Config) GetRemoteServerListDownloadFilename() string {
+	return filepath.Join(config.DataRootDirectory, "remote_server_list")
+}
+
+// GetUpgradeDownloadFilename specifies the filename where upgrade downloads
+// will be stored. This filename is valid when UpgradeDownloadURLs
+// (or UpgradeDownloadUrl) is specified. Data is stored in co-located files
+// (UpgradeDownloadFilename.part*) to allow for resumable downloading.
+func (config *Config) GetUpgradeDownloadFilename() string {
+	return filepath.Join(config.DataRootDirectory, UpgradeDownloadFilename)
+}
+
+// GetTapdanceDirectory returns the directory under which tapdance will create
+// and manage files.
+func (config *Config) GetTapdanceDirectory() string {
+	return config.DataRootDirectory
 }
 
 // UseUpstreamProxy indicates if an upstream proxy has been

@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -49,21 +50,44 @@ type PsiphonProvider interface {
 	GetNetworkID() string
 }
 
-func SetNoticeFiles(
-	homepageFilename,
-	rotatingFilename string,
-	rotatingFileSize,
-	rotatingSyncFrequency int) error {
-
-	return psiphon.SetNoticeFiles(
-		homepageFilename,
-		rotatingFilename,
-		rotatingFileSize,
-		rotatingSyncFrequency)
-}
-
 func NoticeUserLog(message string) {
 	psiphon.NoticeUserLog(message)
+}
+
+// HomepageFilePath returns the path, relative to the configured data root
+// directory, where homepage files will be paved.
+//
+// Note: homepage files will only be paved if UseNoticeFiles is set in the
+// config passed to Start().
+func HomepageFilePath(rootDataDirectoryPath string) string {
+	return filepath.Join(rootDataDirectoryPath, psiphon.HomepageFilename)
+}
+
+// NoticesFilePath returns the path, relative to the configured data root
+// directory, where the notices file will be paved.
+//
+// Note: notices will only be paved if UseNoticeFiles is set in the config
+// passed to Start().
+func NoticesFilePath(rootDataDirectoryPath string) string {
+	return filepath.Join(rootDataDirectoryPath, psiphon.NoticesFilename)
+}
+
+// OldNoticesFilePath returns the path, relative to the configured data root
+// directory, where the notices file is moved to when file rotation occurs.
+//
+// Note: notices will only be paved if UseNoticeFiles is set in the config
+// passed to Start().
+func OldNoticesFilePath(rootDataDirectoryPath string) string {
+	return filepath.Join(rootDataDirectoryPath, psiphon.OldNoticesFilename)
+}
+
+// UpgradeDownloadFilePath returns the path, relative to the configured data
+// root directory, where the downloaded upgrade file will be paved.
+//
+// Note: upgrades will only be paved if UpgradeDownloadURLs is set in the config
+// passed to Start() and there are upgrades available.
+func UpgradeDownloadFilePath(rootDataDirectoryPath string) string {
+	return filepath.Join(rootDataDirectoryPath, psiphon.UpgradeDownloadFilename)
 }
 
 var controllerMutex sync.Mutex

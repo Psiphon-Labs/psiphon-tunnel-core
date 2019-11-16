@@ -48,7 +48,7 @@ func TestBoltResiliency(t *testing.T) {
 
 	clientConfigJSONTemplate := `
     {
-        "DataStoreDirectory" : "%s",
+        "DataRootDirectory" : "%s",
         "ClientPlatform" : "",
         "ClientVersion" : "0",
         "SponsorId" : "0",
@@ -190,7 +190,7 @@ func TestBoltResiliency(t *testing.T) {
 	}
 
 	truncateDataStore := func() {
-		filename := filepath.Join(testDataDirName, "psiphon.boltdb")
+		filename := filepath.Join(testDataDirName, "datastore", "psiphon.boltdb")
 		configFile, err := os.OpenFile(filename, os.O_RDWR, 0666)
 		if err != nil {
 			t.Fatalf("OpenFile failed: %s", err)

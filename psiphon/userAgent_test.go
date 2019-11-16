@@ -214,7 +214,7 @@ func attemptConnectionsWithUserAgent(
 
 	clientConfig.TargetServerEntry = string(encodedServerEntry)
 	clientConfig.TunnelProtocol = tunnelProtocol
-	clientConfig.DataStoreDirectory = testDataDirName
+	clientConfig.DataRootDirectory = testDataDirName
 
 	err = clientConfig.Commit()
 	if err != nil {

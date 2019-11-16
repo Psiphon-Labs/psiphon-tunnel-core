@@ -31,7 +31,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -485,9 +484,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	var modifyConfig map[string]interface{}
 	json.Unmarshal(configJSON, &modifyConfig)
-	modifyConfig["DataStoreDirectory"] = testDataDirName
-	modifyConfig["RemoteServerListDownloadFilename"] = filepath.Join(testDataDirName, "server_list_compressed")
-	modifyConfig["UpgradeDownloadFilename"] = filepath.Join(testDataDirName, "upgrade")
+	modifyConfig["DataRootDirectory"] = testDataDirName
 
 	if runConfig.protocol != "" {
 		modifyConfig["LimitTunnelProtocols"] = protocol.TunnelProtocols{runConfig.protocol}

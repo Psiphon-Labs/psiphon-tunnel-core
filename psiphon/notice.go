@@ -122,7 +122,7 @@ func SetNoticeWriter(writer io.Writer) {
 	singletonNoticeLogger.writer = writer
 }
 
-// SetNoticeFiles configures files for notice writing.
+// setNoticeFiles configures files for notice writing.
 //
 // - When homepageFilename is not "", homepages are written to the specified file
 //   and omitted from the writer. The file may be read after the Tunnels notice
@@ -140,10 +140,10 @@ func SetNoticeWriter(writer io.Writer) {
 // - If an error occurs when writing to a file, an InternalError notice is emitted to
 //   the writer.
 //
-// SetNoticeFiles closes open homepage or rotating files before applying the new
+// setNoticeFiles closes open homepage or rotating files before applying the new
 // configuration.
 //
-func SetNoticeFiles(
+func setNoticeFiles(
 	homepageFilename string,
 	rotatingFilename string,
 	rotatingFileSize int,
