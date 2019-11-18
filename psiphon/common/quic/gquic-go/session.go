@@ -545,6 +545,10 @@ runLoop:
 		}
 	}
 
+	// [Psiphon]
+	// Stop timer to immediately release resources
+	s.timer.Reset(time.Time{})
+
 	if err := s.handleCloseError(closeErr); err != nil {
 		s.logger.Infof("Handling close error failed: %s", err)
 	}

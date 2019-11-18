@@ -27,6 +27,8 @@ import (
 	"math/rand"
 	"os"
 	"testing"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 func TestAuthenticatedPackage(t *testing.T) {
@@ -219,12 +221,12 @@ func BenchmarkAuthenticatedPackage(b *testing.B) {
 func makeTempFile(data []byte) (string, error) {
 	file, err := ioutil.TempFile("", "authPackage_test")
 	if err != nil {
-		return "", ContextError(err)
+		return "", errors.Trace(err)
 	}
 	defer file.Close()
 	_, err = file.Write(data)
 	if err != nil {
-		return "", ContextError(err)
+		return "", errors.Trace(err)
 	}
 	return file.Name(), nil
 }

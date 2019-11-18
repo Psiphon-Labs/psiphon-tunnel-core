@@ -43,7 +43,7 @@ import (
 	"unsafe"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/ClientLibrary/clientlib"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 /*
@@ -73,8 +73,8 @@ type startResultCode int
 
 const (
 	startResultCodeSuccess    startResultCode = 0
-	startResultCodeTimeout                    = 1
-	startResultCodeOtherError                 = 2
+	startResultCodeTimeout    startResultCode = 1
+	startResultCodeOtherError startResultCode = 2
 )
 
 type startResult struct {
@@ -165,19 +165,19 @@ func PsiphonTunnelStart(cConfigJSON, cEmbeddedServerEntryList *C.char, cParams *
 	PsiphonTunnelStop()
 
 	if cConfigJSON == nil {
-		err := common.ContextError(fmt.Errorf("configJSON is required"))
+		err := errors.Tracef("configJSON is required")
 		managedStartResult = startErrorJSON(err)
 		return managedStartResult
 	}
 
 	if cParams == nil {
-		err := common.ContextError(fmt.Errorf("params is required"))
+		err := errors.Tracef("params is required")
 		managedStartResult = startErrorJSON(err)
 		return managedStartResult
 	}
 
 	if cParams.sizeofStruct != C.sizeof_struct_Parameters {
-		err := common.ContextError(fmt.Errorf("sizeofStruct does not match sizeof(Parameters)"))
+		err := errors.Tracef("sizeofStruct does not match sizeof(Parameters)")
 		managedStartResult = startErrorJSON(err)
 		return managedStartResult
 	}
@@ -236,7 +236,7 @@ func PsiphonTunnelStart(cConfigJSON, cEmbeddedServerEntryList *C.char, cParams *
 	// Success
 	managedStartResult = marshalStartResult(startResult{
 		Code:           startResultCodeSuccess,
-		ConnectTimeMS:  int64(time.Now().Sub(startTime) / time.Millisecond),
+		ConnectTimeMS:  int64(time.Since(startTime) / time.Millisecond),
 		HTTPProxyPort:  tunnel.HTTPProxyPort,
 		SOCKSProxyPort: tunnel.SOCKSProxyPort,
 	})
@@ -262,7 +262,7 @@ func PsiphonTunnelStop() {
 func marshalStartResult(result startResult) *C.char {
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
-		err = common.ContextErrorMsg(err, "json.Marshal failed")
+		err = errors.TraceMsg(err, "json.Marshal failed")
 		// Fail back to manually constructing the JSON
 		return C.CString(fmt.Sprintf("{\"Code\":%d, \"Error\": \"%s\"}",
 			startResultCodeOtherError, err.Error()))

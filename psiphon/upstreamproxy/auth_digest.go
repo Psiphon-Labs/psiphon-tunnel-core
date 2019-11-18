@@ -87,7 +87,7 @@ func (d *DigestHeaders) digestChecksum() {
 	var A1 string
 	switch d.Algorithm {
 	case "MD5":
-		//HA1=MD5(username:realm:password)
+		// HA1=MD5(username:realm:password)
 		A1 = fmt.Sprintf("%s:%s:%s", d.Username, d.Realm, d.Password)
 
 	case "MD5-sess":
@@ -95,12 +95,12 @@ func (d *DigestHeaders) digestChecksum() {
 		str := fmt.Sprintf("%s:%s:%s", d.Username, d.Realm, d.Password)
 		A1 = fmt.Sprintf("%s:%s:%s", h(str), d.Nonce, d.Cnonce)
 	default:
-		//token
+		// Token
 	}
 	if A1 == "" {
 		return
 	}
-	//HA1
+	// HA1
 	d.HA1 = h(A1)
 	// HA2
 	A2 := fmt.Sprintf("%s:%s", d.Method, d.Uri)
@@ -132,18 +132,18 @@ func h(data string) string {
 
 func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Response) error {
 	if a.state != DIGEST_HTTP_AUTH_STATE_CHALLENGE_RECEIVED {
-		return proxyError(fmt.Errorf("Authorization is not accepted by the proxy server"))
+		return proxyError(fmt.Errorf("authorization is not accepted by the proxy server"))
 	}
 	challenges, err := parseAuthChallenge(resp)
 	if err != nil {
-		//already wrapped in proxyError
+		// Already wrapped in proxyError
 		return err
 	}
 	challenge := challenges["Digest"]
 	if len(challenge) == 0 {
-		return proxyError(fmt.Errorf("Digest authentication challenge is empty"))
+		return proxyError(fmt.Errorf("digest authentication challenge is empty"))
 	}
-	//parse challenge
+	// Parse challenge
 	digestParams := map[string]string{}
 	for _, keyval := range strings.Split(challenge, ",") {
 		param := strings.SplitN(keyval, "=", 2)
@@ -153,7 +153,7 @@ func (a *DigestHttpAuthenticator) Authenticate(req *http.Request, resp *http.Res
 		digestParams[strings.Trim(param[0], "\" ")] = strings.Trim(param[1], "\" ")
 	}
 	if len(digestParams) == 0 {
-		return proxyError(fmt.Errorf("Digest authentication challenge is malformed"))
+		return proxyError(fmt.Errorf("digest authentication challenge is malformed"))
 	}
 
 	algorithm := digestParams["algorithm"]

@@ -22,8 +22,7 @@
 package psiphon
 
 import (
-	"errors"
-	"fmt"
+	std_errors "errors"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -31,7 +30,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/bolt"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 type datastoreDB struct {
@@ -92,7 +91,7 @@ func tryDatastoreOpenDB(rootDataDirectory string, reset bool) (retdb *datastoreD
 	defer func() {
 		if r := recover(); r != nil {
 			retdb = nil
-			reterr = common.ContextError(fmt.Errorf("panic: %v", r))
+			reterr = errors.Tracef("panic: %v", r)
 		}
 	}()
 	// End recovery preamble
@@ -106,7 +105,7 @@ func tryDatastoreOpenDB(rootDataDirectory string, reset bool) (retdb *datastoreD
 
 	newDB, err := bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// Run consistency checks on datastore and emit errors for diagnostics
@@ -116,7 +115,7 @@ func tryDatastoreOpenDB(rootDataDirectory string, reset bool) (retdb *datastoreD
 		return tx.SynchronousCheck()
 	})
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	err = newDB.Update(func(tx *bolt.Tx) error {
@@ -144,7 +143,7 @@ func tryDatastoreOpenDB(rootDataDirectory string, reset bool) (retdb *datastoreD
 		return nil
 	})
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// Cleanup obsolete buckets
@@ -166,13 +165,13 @@ func tryDatastoreOpenDB(rootDataDirectory string, reset bool) (retdb *datastoreD
 		return nil
 	})
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return &datastoreDB{boltDB: newDB}, nil
 }
 
-var errDatastoreFailed = errors.New("datastore has failed")
+var errDatastoreFailed = std_errors.New("datastore has failed")
 
 func (db *datastoreDB) isDatastoreFailed() bool {
 	return atomic.LoadInt32(&db.isFailed) == 1
@@ -180,8 +179,7 @@ func (db *datastoreDB) isDatastoreFailed() bool {
 
 func (db *datastoreDB) setDatastoreFailed(r interface{}) {
 	atomic.StoreInt32(&db.isFailed, 1)
-	NoticeAlert("Datastore failed: %s",
-		common.ContextError(fmt.Errorf("panic: %v", r)))
+	NoticeAlert("Datastore failed: %s", errors.Tracef("panic: %v", r))
 }
 
 func (db *datastoreDB) close() error {
@@ -225,7 +223,7 @@ func (db *datastoreDB) view(fn func(tx *datastoreTx) error) (reterr error) {
 		func(tx *bolt.Tx) error {
 			err := fn(&datastoreTx{db: db, boltTx: tx})
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 			return nil
 		})
@@ -251,7 +249,7 @@ func (db *datastoreDB) update(fn func(tx *datastoreTx) error) (reterr error) {
 		func(tx *bolt.Tx) error {
 			err := fn(&datastoreTx{db: db, boltTx: tx})
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 			return nil
 		})
@@ -294,11 +292,11 @@ func (tx *datastoreTx) clearBucket(name []byte) (reterr error) {
 
 	err := tx.boltTx.DeleteBucket(name)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	_, err = tx.boltTx.CreateBucket(name)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
@@ -340,7 +338,7 @@ func (b *datastoreBucket) put(key, value []byte) (reterr error) {
 
 	err := b.boltBucket.Put(key, value)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
@@ -363,7 +361,7 @@ func (b *datastoreBucket) delete(key []byte) (reterr error) {
 
 	err := b.boltBucket.Delete(key)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }

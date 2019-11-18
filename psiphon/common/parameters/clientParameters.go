@@ -54,13 +54,13 @@ package parameters
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"reflect"
 	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -222,6 +222,8 @@ const (
 	RecordRemoteServerListPersistentStatsProbability = "RecordRemoteServerListPersistentStatsProbability"
 	RecordFailedTunnelPersistentStatsProbability     = "RecordFailedTunnelPersistentStatsProbability"
 	ServerEntryMinimumAgeForPruning                  = "ServerEntryMinimumAgeForPruning"
+	ApplicationParametersProbability                 = "ApplicationParametersProbability"
+	ApplicationParameters                            = "ApplicationParameters"
 )
 
 const (
@@ -458,6 +460,9 @@ var defaultClientParameters = map[string]struct {
 	RecordFailedTunnelPersistentStatsProbability:     {value: 0.0, minimum: 0.0},
 
 	ServerEntryMinimumAgeForPruning: {value: 7 * 24 * time.Hour, minimum: 24 * time.Hour},
+
+	ApplicationParametersProbability: {value: 1.0, minimum: 0.0},
+	ApplicationParameters:            {value: KeyValues{}},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -488,7 +493,7 @@ func NewClientParameters(
 
 	_, err := clientParameters.Set("", false)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return clientParameters, nil
@@ -501,18 +506,18 @@ func makeDefaultParameters() (map[string]interface{}, error) {
 	for name, defaults := range defaultClientParameters {
 
 		if defaults.value == nil {
-			return nil, common.ContextError(fmt.Errorf("default parameter missing value: %s", name))
+			return nil, errors.Tracef("default parameter missing value: %s", name)
 		}
 
 		if defaults.minimum != nil &&
 			reflect.TypeOf(defaults.value) != reflect.TypeOf(defaults.minimum) {
 
-			return nil, common.ContextError(fmt.Errorf("default parameter value and minimum type mismatch: %s", name))
+			return nil, errors.Tracef("default parameter value and minimum type mismatch: %s", name)
 		}
 
 		_, isDuration := defaults.value.(time.Duration)
 		if defaults.flags&useNetworkLatencyMultiplier != 0 && !isDuration {
-			return nil, common.ContextError(fmt.Errorf("default non-duration parameter uses multipler: %s", name))
+			return nil, errors.Tracef("default non-duration parameter uses multipler: %s", name)
 		}
 
 		parameters[name] = defaults.value
@@ -544,7 +549,7 @@ func (p *ClientParameters) Set(
 
 	parameters, err := makeDefaultParameters()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	for i := 0; i < len(applyParameters); i++ {
@@ -558,7 +563,7 @@ func (p *ClientParameters) Set(
 				if skipOnError {
 					continue
 				}
-				return nil, common.ContextError(fmt.Errorf("unknown parameter: %s", name))
+				return nil, errors.Tracef("unknown parameter: %s", name)
 			}
 
 			// Accept strings such as "1h" for duration parameters.
@@ -590,7 +595,7 @@ func (p *ClientParameters) Set(
 				if skipOnError {
 					continue
 				}
-				return nil, common.ContextError(fmt.Errorf("unmarshal parameter %s failed: %s", name, err))
+				return nil, errors.Tracef("unmarshal parameter %s failed: %s", name, err)
 			}
 
 			newValue := newValuePtr.Elem().Interface()
@@ -607,7 +612,7 @@ func (p *ClientParameters) Set(
 					if skipOnError {
 						continue
 					}
-					return nil, common.ContextError(err)
+					return nil, errors.Trace(err)
 				}
 			case protocol.TunnelProtocols:
 				if skipOnError {
@@ -615,7 +620,7 @@ func (p *ClientParameters) Set(
 				} else {
 					err := v.Validate()
 					if err != nil {
-						return nil, common.ContextError(err)
+						return nil, errors.Trace(err)
 					}
 				}
 			case protocol.TLSProfiles:
@@ -624,7 +629,7 @@ func (p *ClientParameters) Set(
 				} else {
 					err := v.Validate()
 					if err != nil {
-						return nil, common.ContextError(err)
+						return nil, errors.Trace(err)
 					}
 				}
 			case protocol.QUICVersions:
@@ -633,7 +638,7 @@ func (p *ClientParameters) Set(
 				} else {
 					err := v.Validate()
 					if err != nil {
-						return nil, common.ContextError(err)
+						return nil, errors.Trace(err)
 					}
 				}
 			case protocol.CustomTLSProfiles:
@@ -642,7 +647,15 @@ func (p *ClientParameters) Set(
 					if skipOnError {
 						continue
 					}
-					return nil, common.ContextError(err)
+					return nil, errors.Trace(err)
+				}
+			case KeyValues:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
 				}
 			}
 
@@ -670,13 +683,13 @@ func (p *ClientParameters) Set(
 					if skipOnError {
 						continue
 					}
-					return nil, common.ContextError(fmt.Errorf("unexpected parameter with minimum: %s", name))
+					return nil, errors.Tracef("unexpected parameter with minimum: %s", name)
 				}
 				if !valid {
 					if skipOnError {
 						continue
 					}
-					return nil, common.ContextError(fmt.Errorf("parameter below minimum: %s", name))
+					return nil, errors.Tracef("parameter below minimum: %s", name)
 				}
 			}
 
@@ -762,8 +775,8 @@ func (p *clientParametersSnapshot) getValue(name string, target interface{}) {
 	value, ok := p.parameters[name]
 	if !ok {
 		if p.getValueLogger != nil {
-			p.getValueLogger(common.ContextError(fmt.Errorf(
-				"value %s not found", name)))
+			p.getValueLogger(errors.Tracef(
+				"value %s not found", name))
 		}
 		return
 	}
@@ -772,8 +785,8 @@ func (p *clientParametersSnapshot) getValue(name string, target interface{}) {
 
 	if reflect.PtrTo(valueType) != reflect.TypeOf(target) {
 		if p.getValueLogger != nil {
-			p.getValueLogger(common.ContextError(fmt.Errorf(
-				"value %s has unexpected type %s", name, valueType.Name())))
+			p.getValueLogger(errors.Tracef(
+				"value %s has unexpected type %s", name, valueType.Name()))
 		}
 		return
 	}
@@ -784,8 +797,8 @@ func (p *clientParametersSnapshot) getValue(name string, target interface{}) {
 	targetValue := reflect.ValueOf(target)
 
 	if targetValue.Kind() != reflect.Ptr {
-		p.getValueLogger(common.ContextError(fmt.Errorf(
-			"target for value %s is not pointer", name)))
+		p.getValueLogger(errors.Tracef(
+			"target for value %s is not pointer", name))
 		return
 	}
 
@@ -1018,4 +1031,11 @@ func (p ClientParametersAccessor) CustomTLSProfile(name string) *protocol.Custom
 		}
 	}
 	return nil
+}
+
+// KeyValues returns a KeyValues parameter value.
+func (p ClientParametersAccessor) KeyValues(name string) KeyValues {
+	value := KeyValues{}
+	p.snapshot.getValue(name, &value)
+	return value
 }

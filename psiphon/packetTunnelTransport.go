@@ -21,11 +21,10 @@ package psiphon
 
 import (
 	"context"
-	"errors"
 	"net"
 	"sync"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // PacketTunnelTransport is an integration layer that presents an io.ReadWriteCloser interface
@@ -69,7 +68,7 @@ func (p *PacketTunnelTransport) Read(data []byte) (int, error) {
 
 	channelConn, channelTunnel, err := p.getChannel()
 	if err != nil {
-		return 0, common.ContextError(err)
+		return 0, errors.Trace(err)
 	}
 
 	n, err := channelConn.Read(data)
@@ -84,7 +83,7 @@ func (p *PacketTunnelTransport) Read(data []byte) (int, error) {
 		p.failedChannel(channelConn, channelTunnel)
 	}
 
-	return n, common.ContextError(err)
+	return n, errors.Trace(err)
 }
 
 // Write implements the io.Writer interface. It uses the current transport channel
@@ -97,7 +96,7 @@ func (p *PacketTunnelTransport) Write(data []byte) (int, error) {
 
 	channelConn, channelTunnel, err := p.getChannel()
 	if err != nil {
-		return 0, common.ContextError(err)
+		return 0, errors.Trace(err)
 	}
 
 	n, err := channelConn.Write(data)
@@ -110,7 +109,7 @@ func (p *PacketTunnelTransport) Write(data []byte) (int, error) {
 		p.failedChannel(channelConn, channelTunnel)
 	}
 
-	return n, common.ContextError(err)
+	return n, errors.Trace(err)
 }
 
 // Close implements the io.Closer interface. Any underlying transport channel is
@@ -203,7 +202,7 @@ func (p *PacketTunnelTransport) getChannel() (net.Conn, *Tunnel, error) {
 
 		select {
 		case <-p.runCtx.Done():
-			return nil, nil, common.ContextError(errors.New("already closed"))
+			return nil, nil, errors.TraceNew("already closed")
 		default:
 		}
 

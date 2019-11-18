@@ -29,17 +29,19 @@ import PsiphonTunnel
     @objc public lazy var authURLSessionDelegate: OCSPAuthURLSessionDelegate =
         OCSPAuthURLSessionDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]:", $0)},
                                         ocspCache: self.ocspCache,
-                                        modifyOCSPURL:{
-                                            assert(self.httpProxyPort > 0)
-
-                                            let encodedTargetURL = URLEncode.encode($0.absoluteString)
-                                            let proxiedURLString = "http://127.0.0.1:\(self.httpProxyPort)/tunneled/\(encodedTargetURL!)"
-                                            let proxiedURL = URL.init(string: proxiedURLString)
-
-                                            print("[OCSP] Updated OCSP URL \($0) to \(proxiedURL!)")
-
-                                            return proxiedURL!},
-                                        session:nil)
+                                        // Unlike TunneledWebRequest we do not need to manually
+                                        // update the OCSP request to be proxied through the local
+                                        // HTTP proxy. Since JAHPAuthenticatingHTTPProtocol
+                                        // subclasses and registers itself with NSURLProtocol, all
+                                        // URL requests made manually (using the foundation
+                                        // framework) will be proxied automatically.
+                                        //
+                                        // Since the OCSPCache library makes requests using
+                                        // NSURLSessionDataTask, the OCSP requests will be proxied
+                                        // automatically.
+                                        modifyOCSPURL:nil,
+                                        session:nil,
+                                        timeout:10)
     
     @objc public class func sharedDelegate() -> AppDelegate {
         var delegate: AppDelegate?

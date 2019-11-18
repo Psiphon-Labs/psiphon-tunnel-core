@@ -77,7 +77,7 @@ func (c *dummyConn) RemoteAddr() net.Addr {
 }
 
 func (c *dummyConn) SetDeadline(t time.Time) error {
-	duration := t.Sub(time.Now())
+	duration := time.Until(t)
 	if c.timeout == nil {
 		c.timeout = time.NewTimer(duration)
 	} else {

@@ -23,13 +23,11 @@ package tapdance
 
 import (
 	"context"
-	"errors"
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
-
-var disabledError = errors.New("operation is not enabled")
 
 // Enabled indicates if Tapdance functionality is enabled.
 func Enabled() bool {
@@ -43,10 +41,10 @@ type Listener struct {
 
 // Listen creates a new Tapdance listener.
 func Listen(_ string) (*Listener, error) {
-	return nil, common.ContextError(disabledError)
+	return nil, errors.TraceNew("operation is not enabled")
 }
 
 // Dial establishes a new Tapdance session to a Tapdance station.
 func Dial(_ context.Context, _ bool, _ string, _ common.NetDialer, _ string) (net.Conn, error) {
-	return nil, common.ContextError(disabledError)
+	return nil, errors.TraceNew("operation is not enabled")
 }

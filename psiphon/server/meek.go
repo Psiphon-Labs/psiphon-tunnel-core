@@ -26,7 +26,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
+	std_errors "errors"
 	"hash/crc64"
 	"io"
 	"net"
@@ -41,6 +41,7 @@ import (
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -107,7 +108,7 @@ type MeekServer struct {
 	checksumTable     *crc64.Table
 	bufferPool        *CachedResponseBufferPool
 	rateLimitLock     sync.Mutex
-	rateLimitHistory  map[string][]monotime.Time
+	rateLimitHistory  map[string][]time.Time
 	rateLimitCount    int
 	rateLimitSignalGC chan struct{}
 }
@@ -143,7 +144,7 @@ func NewMeekServer(
 		sessions:          make(map[string]*meekSession),
 		checksumTable:     checksumTable,
 		bufferPool:        bufferPool,
-		rateLimitHistory:  make(map[string][]monotime.Time),
+		rateLimitHistory:  make(map[string][]time.Time),
 		rateLimitSignalGC: make(chan struct{}, 1),
 	}
 
@@ -151,7 +152,7 @@ func NewMeekServer(
 		tlsConfig, err := makeMeekTLSConfig(
 			support, isFronted, useObfuscatedSessionTickets)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		meekServer.tlsConfig = tlsConfig
 	}
@@ -256,7 +257,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		break
 	}
 	if meekCookie == nil || len(meekCookie.Value) == 0 {
-		log.WithContext().Warning("missing meek cookie")
+		log.WithTrace().Warning("missing meek cookie")
 		common.TerminateHTTPConnection(responseWriter, request)
 		return
 	}
@@ -265,7 +266,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		for _, header := range server.support.Config.MeekProhibitedHeaders {
 			value := request.Header.Get(header)
 			if header != "" {
-				log.WithContextFields(LogFields{
+				log.WithTraceFields(LogFields{
 					"header": header,
 					"value":  value,
 				}).Warning("prohibited meek header")
@@ -289,7 +290,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	if err != nil {
 		// Debug since session cookie errors commonly occur during
 		// normal operation.
-		log.WithContextFields(LogFields{"error": err}).Debug("session lookup failed")
+		log.WithTraceFields(LogFields{"error": err}).Debug("session lookup failed")
 		common.TerminateHTTPConnection(responseWriter, request)
 		return
 	}
@@ -303,7 +304,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		handled := server.support.TacticsServer.HandleEndPoint(
 			endPoint, common.GeoIPData(geoIPData), responseWriter, request)
 		if !handled {
-			log.WithContextFields(LogFields{"endPoint": endPoint}).Info("unhandled endpoint")
+			log.WithTraceFields(LogFields{"endPoint": endPoint}).Info("unhandled endpoint")
 			common.TerminateHTTPConnection(responseWriter, request)
 		}
 		return
@@ -362,7 +363,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		if err != io.EOF {
 			// Debug since errors such as "i/o timeout" occur during normal operation;
 			// also, golang network error messages may contain client IP.
-			log.WithContextFields(LogFields{"error": err}).Debug("read request failed")
+			log.WithTraceFields(LogFields{"error": err}).Debug("read request failed")
 		}
 		common.TerminateHTTPConnection(responseWriter, request)
 
@@ -373,7 +374,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 	// Set cookie before writing the response.
 
-	if session.meekProtocolVersion >= MEEK_PROTOCOL_VERSION_2 && session.sessionIDSent == false {
+	if session.meekProtocolVersion >= MEEK_PROTOCOL_VERSION_2 && !session.sessionIDSent {
 		// Replace the meek cookie with the session ID.
 		// SetCookie for the the session ID cookie is only set once, to reduce overhead. This
 		// session ID value replaces the original meek cookie value.
@@ -473,7 +474,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		if responseError != io.EOF {
 			// Debug since errors such as "i/o timeout" occur during normal operation;
 			// also, golang network error messages may contain client IP.
-			log.WithContextFields(LogFields{"error": responseError}).Debug("write response failed")
+			log.WithTraceFields(LogFields{"error": responseError}).Debug("write response failed")
 		}
 		common.TerminateHTTPConnection(responseWriter, request)
 
@@ -556,7 +557,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	}
 
 	if server.rateLimit(clientIP) {
-		return "", nil, "", "", common.ContextError(errors.New("rate limit exceeded"))
+		return "", nil, "", "", errors.TraceNew("rate limit exceeded")
 	}
 
 	// The session is new (or expired). Treat the cookie value as a new meek
@@ -564,7 +565,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 	payloadJSON, err := getMeekCookiePayload(server.support, meekCookie.Value)
 	if err != nil {
-		return "", nil, "", "", common.ContextError(err)
+		return "", nil, "", "", errors.Trace(err)
 	}
 
 	// Note: this meek server ignores legacy values PsiphonClientSessionId
@@ -573,7 +574,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 	err = json.Unmarshal(payloadJSON, &clientSessionData)
 	if err != nil {
-		return "", nil, "", "", common.ContextError(err)
+		return "", nil, "", "", errors.Trace(err)
 	}
 
 	// Handle endpoints before enforcing the GetEstablishTunnels check.
@@ -589,7 +590,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 	if server.support.TunnelServer != nil &&
 		!server.support.TunnelServer.GetEstablishTunnels() {
-		return "", nil, "", "", common.ContextError(errors.New("not establishing tunnels"))
+		return "", nil, "", "", errors.TraceNew("not establishing tunnels")
 	}
 
 	// Create a new session
@@ -638,7 +639,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	if clientSessionData.MeekProtocolVersion >= MEEK_PROTOCOL_VERSION_2 {
 		sessionID, err = makeMeekSessionID()
 		if err != nil {
-			return "", nil, "", "", common.ContextError(err)
+			return "", nil, "", "", errors.Trace(err)
 		}
 	}
 
@@ -683,19 +684,19 @@ func (server *MeekServer) rateLimit(clientIP string) bool {
 	limit := true
 	triggerGC := false
 
-	now := monotime.Now()
+	now := time.Now()
 	threshold := now.Add(-time.Duration(thresholdSeconds) * time.Second)
 
 	server.rateLimitLock.Lock()
 
 	history, ok := server.rateLimitHistory[clientIP]
 	if !ok || len(history) != historySize {
-		history = make([]monotime.Time, historySize)
+		history = make([]time.Time, historySize)
 		server.rateLimitHistory[clientIP] = history
 	}
 
 	for i := 0; i < len(history); i++ {
-		if history[i] == 0 || history[i].Before(threshold) {
+		if history[i].IsZero() || history[i].Before(threshold) {
 			limit = false
 		}
 		if i == len(history)-1 {
@@ -744,12 +745,12 @@ func (server *MeekServer) rateLimitWorker() {
 
 			server.rateLimitLock.Lock()
 
-			threshold := monotime.Now().Add(-time.Duration(thresholdSeconds) * time.Second)
+			threshold := time.Now().Add(-time.Duration(thresholdSeconds) * time.Second)
 
 			for key, history := range server.rateLimitHistory {
 				reap := true
 				for i := 0; i < len(history); i++ {
-					if history[i] != 0 && !history[i].Before(threshold) {
+					if !history[i].IsZero() && !history[i].Before(threshold) {
 						reap = false
 					}
 				}
@@ -760,7 +761,7 @@ func (server *MeekServer) rateLimitWorker() {
 
 			// Enable rate limit history map to be garbage collected when possible.
 			if len(server.rateLimitHistory) == 0 {
-				server.rateLimitHistory = make(map[string][]monotime.Time)
+				server.rateLimitHistory = make(map[string][]time.Time)
 			}
 
 			server.rateLimitLock.Unlock()
@@ -822,7 +823,7 @@ func (server *MeekServer) deleteExpiredSessions() {
 	}
 	server.sessionsLock.Unlock()
 
-	start := monotime.Now()
+	start := time.Now()
 
 	deleteWaitGroup := new(sync.WaitGroup)
 	for _, sessionID := range expiredSessionIDs {
@@ -834,8 +835,8 @@ func (server *MeekServer) deleteExpiredSessions() {
 	}
 	deleteWaitGroup.Wait()
 
-	log.WithContextFields(
-		LogFields{"elapsed time": monotime.Since(start)}).Debug("deleted expired sessions")
+	log.WithTraceFields(
+		LogFields{"elapsed time": time.Since(start)}).Debug("deleted expired sessions")
 }
 
 // httpConnStateCallback tracks open persistent HTTP/HTTPS connections to the
@@ -940,13 +941,13 @@ func makeMeekTLSConfig(
 
 	certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	tlsCertificate, err := tris.X509KeyPair(
 		[]byte(certificate), []byte(privateKey))
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// Vary the minimum version to frustrate scanning/fingerprinting of unfronted servers.
@@ -998,17 +999,17 @@ func makeMeekTLSConfig(
 		var obfuscatedSessionTicketKey [32]byte
 		key, err := hex.DecodeString(support.Config.MeekObfuscatedKey)
 		if err == nil && len(key) != 32 {
-			err = errors.New("invalid obfuscated session key length")
+			err = std_errors.New("invalid obfuscated session key length")
 		}
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		copy(obfuscatedSessionTicketKey[:], key)
 
 		var standardSessionTicketKey [32]byte
 		_, err = rand.Read(standardSessionTicketKey[:])
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		// Note: SessionTicketKey needs to be set, or else, it appears,
@@ -1028,7 +1029,7 @@ func makeMeekTLSConfig(
 func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte, error) {
 	decodedValue, err := base64.StdEncoding.DecodeString(cookieValue)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// The data consists of an obfuscated seed message prepended
@@ -1042,12 +1043,12 @@ func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte,
 		reader,
 		&obfuscator.ObfuscatorConfig{Keyword: support.Config.MeekObfuscatedKey})
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	offset, err := reader.Seek(0, 1)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	encryptedPayload := decodedValue[offset:]
 
@@ -1059,18 +1060,18 @@ func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte,
 	decodedPrivateKey, err := base64.StdEncoding.DecodeString(
 		support.Config.MeekCookieEncryptionPrivateKey)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	copy(privateKey[:], decodedPrivateKey)
 
 	if len(encryptedPayload) < 32 {
-		return nil, common.ContextError(errors.New("unexpected encrypted payload size"))
+		return nil, errors.TraceNew("unexpected encrypted payload size")
 	}
 	copy(ephemeralPublicKey[0:32], encryptedPayload[0:32])
 
 	payload, ok := box.Open(nil, encryptedPayload[32:], &nonce, &ephemeralPublicKey, &privateKey)
 	if !ok {
-		return nil, common.ContextError(errors.New("open box failed"))
+		return nil, errors.TraceNew("open box failed")
 	}
 
 	return payload, nil
@@ -1085,7 +1086,7 @@ func makeMeekSessionID() (string, error) {
 
 	sessionID, err := common.MakeSecureRandomBytes(size)
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	// Omit padding to maximize variable size space. To the client, the session
@@ -1175,7 +1176,7 @@ func (conn *meekConn) pumpReads(reader io.Reader) error {
 	n, err := readBuffer.ReadFrom(limitReader)
 
 	if err == nil && n == MEEK_MAX_REQUEST_PAYLOAD_LENGTH+1 {
-		err = errors.New("invalid request payload length")
+		err = std_errors.New("invalid request payload length")
 	}
 
 	// If the request read fails, don't relay the new data. This allows
@@ -1184,7 +1185,7 @@ func (conn *meekConn) pumpReads(reader io.Reader) error {
 	if err != nil {
 		readBuffer.Truncate(newDataOffset)
 		conn.replaceReadBuffer(readBuffer)
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	// Check if request payload checksum matches immediately
@@ -1211,7 +1212,7 @@ func (conn *meekConn) pumpReads(reader io.Reader) error {
 	return nil
 }
 
-var errMeekConnectionHasClosed = errors.New("meek connection has closed")
+var errMeekConnectionHasClosed = std_errors.New("meek connection has closed")
 
 // Read reads from the meekConn into buffer. Read blocks until
 // some data is read or the meekConn closes. Under the hood, it
@@ -1226,7 +1227,7 @@ func (conn *meekConn) Read(buffer []byte) (int, error) {
 	case readBuffer = <-conn.partialReadBuffer:
 	case readBuffer = <-conn.fullReadBuffer:
 	case <-conn.closeBroadcast:
-		return 0, common.ContextError(errMeekConnectionHasClosed)
+		return 0, errors.Trace(errMeekConnectionHasClosed)
 	}
 
 	n, err := readBuffer.Read(buffer)
@@ -1254,7 +1255,7 @@ func (conn *meekConn) replaceReadBuffer(readBuffer *bytes.Buffer) {
 // Note: channel scheme assumes only one concurrent call to pumpWrites
 func (conn *meekConn) pumpWrites(writer io.Writer) (int, error) {
 
-	startTime := monotime.Now()
+	startTime := time.Now()
 	timeout := time.NewTimer(MEEK_TURN_AROUND_TIMEOUT)
 	defer timeout.Stop()
 
@@ -1278,7 +1279,7 @@ func (conn *meekConn) pumpWrites(writer io.Writer) (int, error) {
 				// MEEK_MAX_REQUEST_PAYLOAD_LENGTH response bodies
 				return n, nil
 			}
-			totalElapsedTime := monotime.Since(startTime) / time.Millisecond
+			totalElapsedTime := time.Since(startTime) / time.Millisecond
 			if totalElapsedTime >= MEEK_EXTENDED_TURN_AROUND_TIMEOUT {
 				return n, nil
 			}
@@ -1286,7 +1287,7 @@ func (conn *meekConn) pumpWrites(writer io.Writer) (int, error) {
 		case <-timeout.C:
 			return n, nil
 		case <-conn.closeBroadcast:
-			return n, common.ContextError(errMeekConnectionHasClosed)
+			return n, errors.Trace(errMeekConnectionHasClosed)
 		}
 	}
 }
@@ -1318,12 +1319,12 @@ func (conn *meekConn) Write(buffer []byte) (int, error) {
 		select {
 		case conn.nextWriteBuffer <- chunk:
 		case <-conn.closeBroadcast:
-			return n, common.ContextError(errMeekConnectionHasClosed)
+			return n, errors.Trace(errMeekConnectionHasClosed)
 		}
 
 		// Wait for the buffer to be processed.
 		select {
-		case _ = <-conn.writeResult:
+		case <-conn.writeResult:
 			// The err from conn.writeResult comes from the
 			// io.MultiWriter used in pumpWrites, which writes
 			// to both the cached response and the HTTP response.
@@ -1339,7 +1340,7 @@ func (conn *meekConn) Write(buffer []byte) (int, error) {
 			//
 			// err is already logged in ServeHTTP.
 		case <-conn.closeBroadcast:
-			return n, common.ContextError(errMeekConnectionHasClosed)
+			return n, errors.Trace(errMeekConnectionHasClosed)
 		}
 		n += len(chunk)
 	}
@@ -1380,17 +1381,17 @@ func (conn *meekConn) SetDeadline(t time.Time) error {
 	if time.Now().Add(MEEK_MAX_SESSION_STALENESS).Before(t) {
 		return nil
 	}
-	return common.ContextError(errors.New("not supported"))
+	return errors.TraceNew("not supported")
 }
 
 // Stub implementation of net.Conn.SetReadDeadline
 func (conn *meekConn) SetReadDeadline(t time.Time) error {
-	return common.ContextError(errors.New("not supported"))
+	return errors.TraceNew("not supported")
 }
 
 // Stub implementation of net.Conn.SetWriteDeadline
 func (conn *meekConn) SetWriteDeadline(t time.Time) error {
-	return common.ContextError(errors.New("not supported"))
+	return errors.TraceNew("not supported")
 }
 
 // GetMetrics implements the common.MetricsSource interface. The metrics are

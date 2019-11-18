@@ -145,7 +145,7 @@ func TestCachedResponse(t *testing.T) {
 						if n != cachedResponseData.Len() || n > response.Available() {
 							t.Fatalf("cached response size mismatch for response %d", i)
 						}
-						if bytes.Compare(responseData[testCase.copyPosition:], cachedResponseData.Bytes()) != 0 {
+						if !bytes.Equal(responseData[testCase.copyPosition:], cachedResponseData.Bytes()) {
 							t.Fatalf("cached response data mismatch for response %d", i)
 						}
 					} else {
@@ -185,7 +185,8 @@ func TestMeekResiliency(t *testing.T) {
 			writeLen = min(writeLen, len(data)-sent)
 			_, err := conn.Write(data[sent : sent+writeLen])
 			if err != nil {
-				t.Fatalf("conn.Write failed: %s", err)
+				t.Errorf("conn.Write failed: %s", err)
+				return
 			}
 			sent += writeLen
 			fmt.Printf("%s sent %d/%d...\n", name, sent, len(data))
@@ -202,10 +203,11 @@ func TestMeekResiliency(t *testing.T) {
 			readLen = min(readLen, len(data)-received)
 			n, err := conn.Read(data[received : received+readLen])
 			if err != nil {
-				t.Fatalf("conn.Read failed: %s", err)
+				t.Errorf("conn.Read failed: %s", err)
+				return
 			}
 			received += n
-			if bytes.Compare(data[0:received], expectedData[0:received]) != 0 {
+			if !bytes.Equal(data[0:received], expectedData[0:received]) {
 				fmt.Printf("%s data check has failed...\n", name)
 				additionalInfo := ""
 				index := bytes.Index(expectedData, data[received-n:received])
@@ -214,8 +216,9 @@ func TestMeekResiliency(t *testing.T) {
 					additionalInfo = fmt.Sprintf(
 						" (last read of %d appears at %d)", n, index)
 				}
-				t.Fatalf("%s got unexpected data with %d/%d%s",
+				t.Errorf("%s got unexpected data with %d/%d%s",
 					name, received, len(expectedData), additionalInfo)
+				return
 			}
 			fmt.Printf("%s received %d/%d...\n", name, received, len(expectedData))
 		}
@@ -294,7 +297,7 @@ func TestMeekResiliency(t *testing.T) {
 		default:
 		}
 		if err != nil {
-			t.Fatalf("MeekServer.Run failed: %s", err)
+			t.Errorf("MeekServer.Run failed: %s", err)
 		}
 	}()
 
@@ -462,7 +465,7 @@ func TestMeekRateLimiter(t *testing.T) {
 		default:
 		}
 		if err != nil {
-			t.Fatalf("MeekServer.Run failed: %s", err)
+			t.Errorf("MeekServer.Run failed: %s", err)
 		}
 	}()
 

@@ -102,10 +102,12 @@ func TestNonblockingIO(t *testing.T) {
 					if isClosed() {
 						return
 					}
-					t.Fatalf("io.ReadFull failed: %s", err)
+					t.Errorf("io.ReadFull failed: %s", err)
+					return
 				}
-				if bytes.Compare(expectedData[:n], data[:n]) != 0 {
-					t.Fatalf("bytes.Compare failed")
+				if !bytes.Equal(expectedData[:n], data[:n]) {
+					t.Errorf("bytes.Equal failed")
+					return
 				}
 			}
 
@@ -116,7 +118,8 @@ func TestNonblockingIO(t *testing.T) {
 				n, err = r.Read(data)
 			}
 			if n != 0 || err != io.EOF {
-				t.Fatalf("expected io.EOF failed")
+				t.Errorf("expected io.EOF failed")
+				return
 			}
 		}
 
@@ -135,10 +138,12 @@ func TestNonblockingIO(t *testing.T) {
 					if isClosed() {
 						return
 					}
-					t.Fatalf("w.Write failed: %s", err)
+					t.Errorf("w.Write failed: %s", err)
+					return
 				}
 				if m != n {
-					t.Fatalf("w.Write failed: unexpected number of bytes written")
+					t.Errorf("w.Write failed: unexpected number of bytes written")
+					return
 				}
 			}
 		}

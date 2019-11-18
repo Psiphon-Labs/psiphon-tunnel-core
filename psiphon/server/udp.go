@@ -22,7 +22,6 @@ package server
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -32,6 +31,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // handleUDPChannel implements UDP port forwarding. A single UDP
@@ -50,7 +50,7 @@ func (sshClient *sshClient) handleUDPChannel(newChannel ssh.NewChannel) {
 	sshChannel, requests, err := newChannel.Accept()
 	if err != nil {
 		if !isExpectedTunnelIOError(err) {
-			log.WithContextFields(LogFields{"error": err}).Warning("accept new channel failed")
+			log.WithTraceFields(LogFields{"error": err}).Warning("accept new channel failed")
 		}
 		return
 	}
@@ -95,10 +95,9 @@ func (mux *udpPortForwardMultiplexer) run() {
 	// Note: this covers the run() goroutine only and not relayDownstream() goroutines.
 	defer func() {
 		if e := recover(); e != nil {
-			err := common.ContextError(
-				fmt.Errorf(
-					"udpPortForwardMultiplexer panic: %s: %s", e, debug.Stack()))
-			log.WithContextFields(LogFields{"error": err}).Warning("run failed")
+			err := errors.Tracef(
+				"udpPortForwardMultiplexer panic: %s: %s", e, debug.Stack())
+			log.WithTraceFields(LogFields{"error": err}).Warning("run failed")
 		}
 	}()
 
@@ -110,7 +109,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 		if err != nil {
 			if err != io.EOF {
 				// Debug since I/O errors occur during normal operation
-				log.WithContextFields(LogFields{"error": err}).Debug("readUdpgwMessage failed")
+				log.WithTraceFields(LogFields{"error": err}).Debug("readUdpgwMessage failed")
 			}
 			break
 		}
@@ -132,10 +131,10 @@ func (mux *udpPortForwardMultiplexer) run() {
 
 			// Verify that portForward remote address matches latest message
 
-			if 0 != bytes.Compare(portForward.remoteIP, message.remoteIP) ||
+			if !bytes.Equal(portForward.remoteIP, message.remoteIP) ||
 				portForward.remotePort != message.remotePort {
 
-				log.WithContext().Warning("UDP port forward remote address mismatch")
+				log.WithTrace().Warning("UDP port forward remote address mismatch")
 				continue
 			}
 
@@ -169,7 +168,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 			// Can't defer sshClient.closedPortForward() here;
 			// relayDownstream will call sshClient.closedPortForward()
 
-			log.WithContextFields(
+			log.WithTraceFields(
 				LogFields{
 					"remoteAddr": fmt.Sprintf("%s:%d", dialIP.String(), dialPort),
 					"connID":     message.connID}).Debug("dialing")
@@ -183,7 +182,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 				mux.sshClient.sshServer.monitorPortForwardDialError(err)
 
 				// Note: Debug level, as logMessage may contain user traffic destination address information
-				log.WithContextFields(LogFields{"error": err}).Debug("DialUDP failed")
+				log.WithTraceFields(LogFields{"error": err}).Debug("DialUDP failed")
 				continue
 			}
 
@@ -212,7 +211,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 			if err != nil {
 				lruEntry.Remove()
 				mux.sshClient.closedPortForward(portForwardTypeUDP, 0, 0)
-				log.WithContextFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
+				log.WithTraceFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
 				continue
 			}
 
@@ -239,7 +238,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 		_, err = portForward.conn.Write(message.packet)
 		if err != nil {
 			// Debug since errors such as "write: operation not permitted" occur during normal operation
-			log.WithContextFields(LogFields{"error": err}).Debug("upstream UDP relay failed")
+			log.WithTraceFields(LogFields{"error": err}).Debug("upstream UDP relay failed")
 			// The port forward's goroutine will complete cleanup
 			portForward.conn.Close()
 		}
@@ -305,7 +304,7 @@ func (portForward *udpPortForward) relayDownstream() {
 		if err != nil {
 			if err != io.EOF {
 				// Debug since errors such as "use of closed network connection" occur during normal operation
-				log.WithContextFields(LogFields{"error": err}).Debug("downstream UDP relay failed")
+				log.WithTraceFields(LogFields{"error": err}).Debug("downstream UDP relay failed")
 			}
 			break
 		}
@@ -330,7 +329,7 @@ func (portForward *udpPortForward) relayDownstream() {
 		if err != nil {
 			// Close the channel, which will interrupt the main loop.
 			portForward.mux.sshChannel.Close()
-			log.WithContextFields(LogFields{"error": err}).Debug("downstream UDP relay failed")
+			log.WithTraceFields(LogFields{"error": err}).Debug("downstream UDP relay failed")
 			break
 		}
 
@@ -349,7 +348,7 @@ func (portForward *udpPortForward) relayDownstream() {
 	bytesDown := atomic.LoadInt64(&portForward.bytesDown)
 	portForward.mux.sshClient.closedPortForward(portForwardTypeUDP, bytesUp, bytesDown)
 
-	log.WithContextFields(
+	log.WithTraceFields(
 		LogFields{
 			"remoteAddr": fmt.Sprintf("%s:%d",
 				net.IP(portForward.remoteIP).String(), portForward.remotePort),
@@ -393,7 +392,7 @@ func readUdpgwMessage(
 		_, err := io.ReadFull(reader, buffer[0:2])
 		if err != nil {
 			if err != io.EOF {
-				err = common.ContextError(err)
+				err = errors.Trace(err)
 			}
 			return nil, err
 		}
@@ -401,13 +400,13 @@ func readUdpgwMessage(
 		size := binary.LittleEndian.Uint16(buffer[0:2])
 
 		if size < 3 || int(size) > len(buffer)-2 {
-			return nil, common.ContextError(errors.New("invalid udpgw message size"))
+			return nil, errors.TraceNew("invalid udpgw message size")
 		}
 
 		_, err = io.ReadFull(reader, buffer[2:2+size])
 		if err != nil {
 			if err != io.EOF {
-				err = common.ContextError(err)
+				err = errors.Trace(err)
 			}
 			return nil, err
 		}
@@ -431,7 +430,7 @@ func readUdpgwMessage(
 		if flags&udpgwProtocolFlagIPv6 == udpgwProtocolFlagIPv6 {
 
 			if size < 21 {
-				return nil, common.ContextError(errors.New("invalid udpgw message size"))
+				return nil, errors.TraceNew("invalid udpgw message size")
 			}
 
 			remoteIP = make([]byte, 16)
@@ -443,7 +442,7 @@ func readUdpgwMessage(
 		} else {
 
 			if size < 9 {
-				return nil, common.ContextError(errors.New("invalid udpgw message size"))
+				return nil, errors.TraceNew("invalid udpgw message size")
 			}
 
 			remoteIP = make([]byte, 4)
@@ -480,7 +479,7 @@ func writeUdpgwPreamble(
 	buffer []byte) error {
 
 	if preambleSize != 7+len(remoteIP) {
-		return common.ContextError(errors.New("invalid udpgw preamble size"))
+		return errors.TraceNew("invalid udpgw preamble size")
 	}
 
 	size := uint16(preambleSize-2) + packetSize

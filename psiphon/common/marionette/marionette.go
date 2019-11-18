@@ -35,6 +35,7 @@ import (
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	redjack_marionette "github.com/redjack/marionette"
 	"github.com/redjack/marionette/mar"
 	_ "github.com/redjack/marionette/plugins"
@@ -62,17 +63,17 @@ func Listen(address, format string) (*Listener, error) {
 
 	data, err := mar.ReadFormat(format)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	doc, err := mar.Parse(redjack_marionette.PartyServer, data)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	listener, err := redjack_marionette.Listen(doc, address)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return &Listener{Listener: listener}, nil
@@ -89,12 +90,12 @@ func Dial(
 
 	data, err := mar.ReadFormat(format)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	doc, err := mar.Parse(redjack_marionette.PartyClient, data)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	streamSet := redjack_marionette.NewStreamSet()
@@ -106,7 +107,7 @@ func Dial(
 	err = dialer.Open()
 	if err != nil {
 		streamSet.Close()
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// dialer.Dial does not block on network I/O
@@ -114,7 +115,7 @@ func Dial(
 	if err != nil {
 		streamSet.Close()
 		dialer.Close()
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return &Conn{

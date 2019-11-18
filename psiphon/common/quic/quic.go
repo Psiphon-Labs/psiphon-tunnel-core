@@ -51,6 +51,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go"
@@ -71,7 +72,6 @@ var serverIdleTimeout = SERVER_IDLE_TIMEOUT
 // Listener is a net.Listener.
 type Listener struct {
 	gquic.Listener
-	logger common.Logger
 }
 
 // Listen creates a new Listener.
@@ -83,13 +83,13 @@ func Listen(
 	certificate, privateKey, err := common.GenerateWebServerCertificate(
 		values.GetHostName())
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	tlsCertificate, err := tls.X509KeyPair(
 		[]byte(certificate), []byte(privateKey))
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	tlsConfig := &tls.Config{
@@ -106,24 +106,24 @@ func Listen(
 
 	addr, err := net.ResolveUDPAddr("udp", address)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	udpConn, err := net.ListenUDP("udp", addr)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	seed, err := prng.NewSeed()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	var packetConn net.PacketConn
 	packetConn, err = NewObfuscatedPacketConn(
 		udpConn, true, obfuscationKey, seed)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// This wrapping must be outermost to ensure that all
@@ -133,12 +133,10 @@ func Listen(
 	quicListener, err := gquic.Listen(
 		packetConn, tlsConfig, quicConfig)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
-	return &Listener{
-		Listener: quicListener,
-	}, nil
+	return &Listener{Listener: quicListener}, nil
 }
 
 // Accept returns a net.Conn that wraps a single QUIC session and stream. The
@@ -149,7 +147,7 @@ func (listener *Listener) Accept() (net.Conn, error) {
 
 	session, err := listener.Listener.Accept()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return &Conn{
@@ -188,7 +186,7 @@ func Dial(
 	if negotiateQUICVersion != "" {
 		versionNumber, ok := supportedVersionNumbers[negotiateQUICVersion]
 		if !ok {
-			return nil, common.ContextError(fmt.Errorf("unsupported version: %s", negotiateQUICVersion))
+			return nil, errors.Tracef("unsupported version: %s", negotiateQUICVersion)
 		}
 		versions = []gquic.VersionNumber{versionNumber}
 	}
@@ -202,7 +200,7 @@ func Dial(
 
 	deadline, ok := ctx.Deadline()
 	if ok {
-		quicConfig.HandshakeTimeout = deadline.Sub(time.Now())
+		quicConfig.HandshakeTimeout = time.Until(deadline)
 	}
 
 	if negotiateQUICVersion == protocol.QUIC_VERSION_OBFUSCATED {
@@ -210,7 +208,7 @@ func Dial(
 		packetConn, err = NewObfuscatedPacketConn(
 			packetConn, false, obfuscationKey, obfuscationPaddingSeed)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -223,7 +221,7 @@ func Dial(
 		quicConfig)
 	if err != nil {
 		packetConn.Close()
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	type dialResult struct {
@@ -265,7 +263,7 @@ func Dial(
 
 	if err != nil {
 		packetConn.Close()
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return conn, nil
@@ -303,7 +301,7 @@ func (conn *Conn) doDeferredAcceptStream() error {
 	stream, err := conn.session.AcceptStream()
 	if err != nil {
 		conn.session.Close()
-		conn.acceptErr = common.ContextError(err)
+		conn.acceptErr = errors.Trace(err)
 		return conn.acceptErr
 	}
 
@@ -317,7 +315,7 @@ func (conn *Conn) Read(b []byte) (int, error) {
 	if conn.deferredAcceptStream {
 		err := conn.doDeferredAcceptStream()
 		if err != nil {
-			return 0, common.ContextError(err)
+			return 0, errors.Trace(err)
 		}
 	}
 
@@ -340,7 +338,7 @@ func (conn *Conn) Write(b []byte) (int, error) {
 	if conn.deferredAcceptStream {
 		err := conn.doDeferredAcceptStream()
 		if err != nil {
-			return 0, common.ContextError(err)
+			return 0, errors.Trace(err)
 		}
 	}
 
@@ -386,7 +384,7 @@ func (conn *Conn) SetDeadline(t time.Time) error {
 	if conn.deferredAcceptStream {
 		err := conn.doDeferredAcceptStream()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -398,7 +396,7 @@ func (conn *Conn) SetReadDeadline(t time.Time) error {
 	if conn.deferredAcceptStream {
 		err := conn.doDeferredAcceptStream()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -410,7 +408,7 @@ func (conn *Conn) SetWriteDeadline(t time.Time) error {
 	if conn.deferredAcceptStream {
 		err := conn.doDeferredAcceptStream()
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -483,10 +481,10 @@ func (conn *loggingPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 		if err != nil && conn.logger != nil {
 			message := "ReadFrom failed"
 			if e, ok := err.(net.Error); ok && e.Temporary() {
-				conn.logger.WithContextFields(
+				conn.logger.WithTraceFields(
 					common.LogFields{"error": err}).Debug(message)
 			} else {
-				conn.logger.WithContextFields(
+				conn.logger.WithTraceFields(
 					common.LogFields{"error": err}).Warning(message)
 			}
 		}
@@ -571,7 +569,7 @@ func (t *QUICTransporter) dialQUIC(
 	if t.negotiateQUICVersion != "" {
 		versionNumber, ok := supportedVersionNumbers[t.negotiateQUICVersion]
 		if !ok {
-			return nil, common.ContextError(fmt.Errorf("unsupported version: %s", t.negotiateQUICVersion))
+			return nil, errors.Tracef("unsupported version: %s", t.negotiateQUICVersion)
 		}
 		versions = []gquic.VersionNumber{versionNumber}
 	}
@@ -592,7 +590,7 @@ func (t *QUICTransporter) dialQUIC(
 
 	packetConn, remoteAddr, err := t.udpDialer(ctx)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	session, err := gquic.DialContext(
@@ -604,7 +602,7 @@ func (t *QUICTransporter) dialQUIC(
 		quicConfig)
 	if err != nil {
 		packetConn.Close()
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// We use gquic.DialContext as we must create our own UDP sockets to set

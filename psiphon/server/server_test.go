@@ -707,7 +707,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		err := RunServices(serverConfigJSON)
 		if err != nil {
 			// TODO: wrong goroutine for t.FatalNow()
-			t.Fatalf("error running server: %s", err)
+			t.Errorf("error running server: %s", err)
 		}
 	}()
 
@@ -729,7 +729,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		select {
 		case <-shutdownOk:
 		case <-shutdownTimeout.C:
-			t.Fatalf("server shutdown timeout exceeded")
+			t.Errorf("server shutdown timeout exceeded")
 		}
 	}
 
@@ -935,7 +935,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				homepageURL := payload["url"].(string)
 				if homepageURL != expectedHomepageURL {
 					// TODO: wrong goroutine for t.FatalNow()
-					t.Fatalf("unexpected homepage: %s", homepageURL)
+					t.Errorf("unexpected homepage: %s", homepageURL)
 				}
 				sendNotificationReceived(homepageReceived)
 
@@ -980,7 +980,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		select {
 		case <-shutdownOk:
 		case <-shutdownTimeout.C:
-			t.Fatalf("controller shutdown timeout exceeded")
+			t.Errorf("controller shutdown timeout exceeded")
 		}
 	}
 
@@ -1810,7 +1810,12 @@ func paveTacticsConfigFile(
               "TunnelConnectTimeout" : "20s",
               "TunnelRateLimits" : {"WriteBytesPerSecond": 1000000},
               "TransformHostNameProbability" : 1.0,
-              "PickUserAgentProbability" : 1.0
+              "PickUserAgentProbability" : 1.0,
+              "ApplicationParameters" : {
+                "AppFlag1" : true,
+                "AppConfig1" : {"Option1" : "A", "Option2" : "B"},
+                "AppSwitches1" : [1, 2, 3, 4]
+              }
             }
           }
         }

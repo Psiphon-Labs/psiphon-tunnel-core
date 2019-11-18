@@ -22,7 +22,6 @@ package server
 import (
 	"bufio"
 	"bytes"
-	"errors"
 	"math/rand"
 	"net"
 	"strings"
@@ -31,6 +30,7 @@ import (
 
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 const (
@@ -84,12 +84,12 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 			resolvers, err := parseResolveConf(fileContent)
 			if err != nil {
 				// On error, state remains the same
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 
 			dns.resolvers = resolvers
 
-			log.WithContextFields(
+			log.WithTraceFields(
 				LogFields{
 					"resolvers": resolvers,
 				}).Debug("loaded system DNS resolvers")
@@ -100,16 +100,16 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 	_, err := dns.Reload()
 	if err != nil {
 		if defaultResolver == "" {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
-		log.WithContextFields(
+		log.WithTraceFields(
 			LogFields{"err": err}).Info(
 			"failed to load system DNS resolver; using default")
 
 		resolver, err := parseResolver(defaultResolver)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		dns.resolvers = []net.IP{resolver}
@@ -158,11 +158,11 @@ func (dns *DNSResolver) reloadWhenStale() {
 
 			// Unconditionally set last reload time. Even on failure only
 			// want to retry after another DNS_SYSTEM_CONFIG_RELOAD_PERIOD.
-			atomic.StoreInt64(&dns.lastReloadTime, time.Now().Unix())
+			atomic.StoreInt64(&dns.lastReloadTime, int64(monotime.Now()))
 
 			_, err := dns.Reload()
 			if err != nil {
-				log.WithContextFields(
+				log.WithTraceFields(
 					LogFields{"err": err}).Info(
 					"failed to reload system DNS resolver")
 			}
@@ -223,11 +223,11 @@ func parseResolveConf(fileContent []byte) ([]net.IP, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if len(resolvers) == 0 {
-		return nil, common.ContextError(errors.New("no nameservers found"))
+		return nil, errors.TraceNew("no nameservers found")
 	}
 
 	return resolvers, nil
@@ -237,7 +237,7 @@ func parseResolver(resolver string) (net.IP, error) {
 
 	ipAddress := net.ParseIP(resolver)
 	if ipAddress == nil {
-		return nil, common.ContextError(errors.New("invalid IP address"))
+		return nil, errors.TraceNew("invalid IP address")
 	}
 
 	return ipAddress, nil

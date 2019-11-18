@@ -114,7 +114,7 @@ func TestAuthorization(t *testing.T) {
 		t.Fatalf("IssueAuthorization failed: %s", err)
 	}
 
-	verifiedAuth, err = VerifyAuthorization(keyRing, auth)
+	_, err = VerifyAuthorization(keyRing, auth)
 	// TODO: check error message?
 	if err == nil {
 		t.Fatalf("VerifyAuthorization unexpected success")
@@ -129,7 +129,7 @@ func TestAuthorization(t *testing.T) {
 		t.Fatalf("IssueAuthorization failed: %s", err)
 	}
 
-	verifiedAuth, err = VerifyAuthorization(keyRing, auth)
+	_, err = VerifyAuthorization(keyRing, auth)
 	// TODO: check error message?
 	if err == nil {
 		t.Fatalf("VerifyAuthorization unexpected success")
@@ -177,7 +177,7 @@ func TestAuthorization(t *testing.T) {
 
 	encodedSignedAuth := base64.StdEncoding.EncodeToString(marshaledSignedAuth)
 
-	verifiedAuth, err = VerifyAuthorization(keyRing, encodedSignedAuth)
+	_, err = VerifyAuthorization(keyRing, encodedSignedAuth)
 	// TODO: check error message?
 	if err == nil {
 		t.Fatalf("VerifyAuthorization unexpected success")

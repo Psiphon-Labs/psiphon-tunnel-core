@@ -159,7 +159,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -167,9 +166,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
@@ -403,12 +402,12 @@ func GenerateKeys() (encodedRequestPublicKey, encodedRequestPrivateKey, encodedO
 
 	requestPublicKey, requestPrivateKey, err := box.GenerateKey(rand.Reader)
 	if err != nil {
-		return "", "", "", common.ContextError(err)
+		return "", "", "", errors.Trace(err)
 	}
 
 	obfuscatedKey, err := common.MakeSecureRandomBytes(TACTICS_OBFUSCATED_KEY_SIZE)
 	if err != nil {
-		return "", "", "", common.ContextError(err)
+		return "", "", "", errors.Trace(err)
 	}
 
 	return base64.StdEncoding.EncodeToString(requestPublicKey[:]),
@@ -442,12 +441,12 @@ func NewServer(
 			var newServer Server
 			err := json.Unmarshal(fileContent, &newServer)
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 
 			err = newServer.Validate()
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 
 			// Modify actual traffic rules only after validation
@@ -466,7 +465,7 @@ func NewServer(
 
 	_, err := server.Reload()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return server, nil
@@ -479,13 +478,13 @@ func (server *Server) Validate() error {
 	if len(server.RequestPublicKey) == 0 {
 		if len(server.RequestPrivateKey) != 0 ||
 			len(server.RequestObfuscatedKey) != 0 {
-			return common.ContextError(errors.New("unexpected request key"))
+			return errors.TraceNew("unexpected request key")
 		}
 	} else {
 		if len(server.RequestPublicKey) != 32 ||
 			len(server.RequestPrivateKey) != 32 ||
 			len(server.RequestObfuscatedKey) != TACTICS_OBFUSCATED_KEY_SIZE {
-			return common.ContextError(errors.New("invalid request key"))
+			return errors.TraceNew("invalid request key")
 		}
 	}
 
@@ -497,13 +496,13 @@ func (server *Server) Validate() error {
 			var err error
 			d, err = time.ParseDuration(tactics.TTL)
 			if err != nil {
-				return common.ContextError(err)
+				return errors.Trace(err)
 			}
 		}
 
 		if d <= 0 {
 			if isDefault {
-				return common.ContextError(errors.New("invalid duration"))
+				return errors.TraceNew("invalid duration")
 			}
 			// For merging logic, Normalize any 0 duration to "".
 			tactics.TTL = ""
@@ -513,17 +512,17 @@ func (server *Server) Validate() error {
 			tactics.Probability < 0.0 ||
 			tactics.Probability > 1.0 {
 
-			return common.ContextError(errors.New("invalid probability"))
+			return errors.TraceNew("invalid probability")
 		}
 
 		clientParameters, err := parameters.NewClientParameters(nil)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		_, err = clientParameters.Set("", false, tactics.Parameters)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		return nil
@@ -536,13 +535,13 @@ func (server *Server) Validate() error {
 
 		if (r.AtLeast == nil && r.AtMost == nil) ||
 			((r.AtLeast != nil && r.AtMost != nil) && *r.AtLeast > *r.AtMost) {
-			return common.ContextError(errors.New("invalid range"))
+			return errors.TraceNew("invalid range")
 		}
 
 		switch r.Aggregation {
 		case AGGREGATION_MINIMUM, AGGREGATION_MAXIMUM, AGGREGATION_MEDIAN:
 		default:
-			return common.ContextError(errors.New("invalid aggregation"))
+			return errors.TraceNew("invalid aggregation")
 		}
 
 		return nil
@@ -550,7 +549,7 @@ func (server *Server) Validate() error {
 
 	err := validateTactics(&server.DefaultTactics, true)
 	if err != nil {
-		return common.ContextError(fmt.Errorf("invalid default tactics: %s", err))
+		return errors.Tracef("invalid default tactics: %s", err)
 	}
 
 	for i, filteredTactics := range server.FilteredTactics {
@@ -564,7 +563,7 @@ func (server *Server) Validate() error {
 		// TODO: validate Filter.APIParameters names are valid?
 
 		if err != nil {
-			return common.ContextError(fmt.Errorf("invalid filtered tactics %d: %s", i, err))
+			return errors.Tracef("invalid filtered tactics %d: %s", i, err)
 		}
 	}
 
@@ -621,7 +620,7 @@ func (server *Server) GetTacticsPayload(
 	// exposes the values.
 	tactics, err := server.getTactics(false, geoIPData, apiParams)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if tactics == nil {
@@ -630,7 +629,7 @@ func (server *Server) GetTacticsPayload(
 
 	marshaledTactics, err := json.Marshal(tactics)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// MD5 hash is used solely as a data checksum and not for any security purpose.
@@ -775,18 +774,18 @@ func (server *Server) getTactics(
 // TODO: refactor this copy of psiphon/server.getStringRequestParam into common?
 func getStringRequestParam(params common.APIParameters, name string) (string, error) {
 	if params[name] == nil {
-		return "", common.ContextError(fmt.Errorf("missing param: %s", name))
+		return "", errors.Tracef("missing param: %s", name)
 	}
 	value, ok := params[name].(string)
 	if !ok {
-		return "", common.ContextError(fmt.Errorf("invalid param: %s", name))
+		return "", errors.Tracef("invalid param: %s", name)
 	}
 	return value, nil
 }
 
 func getJSONRequestParam(params common.APIParameters, name string, value interface{}) error {
 	if params[name] == nil {
-		return common.ContextError(fmt.Errorf("missing param: %s", name))
+		return errors.Tracef("missing param: %s", name)
 	}
 
 	// Remarshal the parameter from common.APIParameters, as the initial API parameter
@@ -796,11 +795,11 @@ func getJSONRequestParam(params common.APIParameters, name string, value interfa
 
 	jsonValue, err := json.Marshal(params[name])
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	err = json.Unmarshal(jsonValue, value)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	return nil
 }
@@ -968,7 +967,7 @@ func (server *Server) handleSpeedTestRequest(
 
 	_, err := ioutil.ReadAll(http.MaxBytesReader(w, r.Body, MAX_REQUEST_BODY_SIZE))
 	if err != nil {
-		server.logger.WithContextFields(
+		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to read request body")
 		common.TerminateHTTPConnection(w, r)
 		return
@@ -977,7 +976,7 @@ func (server *Server) handleSpeedTestRequest(
 	response, err := MakeSpeedTestResponse(
 		SPEED_TEST_PADDING_MIN_SIZE, SPEED_TEST_PADDING_MAX_SIZE)
 	if err != nil {
-		server.logger.WithContextFields(
+		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to make response")
 		common.TerminateHTTPConnection(w, r)
 		return
@@ -999,7 +998,7 @@ func (server *Server) handleTacticsRequest(
 
 	boxedRequest, err := ioutil.ReadAll(http.MaxBytesReader(w, r.Body, MAX_REQUEST_BODY_SIZE))
 	if err != nil {
-		server.logger.WithContextFields(
+		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to read request body")
 		common.TerminateHTTPConnection(w, r)
 		return
@@ -1014,7 +1013,7 @@ func (server *Server) handleTacticsRequest(
 		boxedRequest,
 		&apiParams)
 	if err != nil {
-		server.logger.WithContextFields(
+		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to unbox request")
 		common.TerminateHTTPConnection(w, r)
 		return
@@ -1022,7 +1021,7 @@ func (server *Server) handleTacticsRequest(
 
 	err = server.apiParameterValidator(apiParams)
 	if err != nil {
-		server.logger.WithContextFields(
+		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("invalid request parameters")
 		common.TerminateHTTPConnection(w, r)
 		return
@@ -1030,10 +1029,10 @@ func (server *Server) handleTacticsRequest(
 
 	tacticsPayload, err := server.GetTacticsPayload(geoIPData, apiParams)
 	if err == nil && tacticsPayload == nil {
-		err = common.ContextError(errors.New("unexpected missing tactics payload"))
+		err = errors.TraceNew("unexpected missing tactics payload")
 	}
 	if err != nil {
-		server.logger.WithContextFields(
+		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to get tactics")
 		common.TerminateHTTPConnection(w, r)
 		return
@@ -1049,7 +1048,7 @@ func (server *Server) handleTacticsRequest(
 		nil,
 		tacticsPayload)
 	if err != nil {
-		server.logger.WithContextFields(
+		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to box response")
 		common.TerminateHTTPConnection(w, r)
 		return
@@ -1103,86 +1102,84 @@ func NewListener(
 // For retained connections, fragmentation is applied when specified by
 // tactics.
 func (listener *Listener) Accept() (net.Conn, error) {
-	for {
 
-		conn, err := listener.Listener.Accept()
-		if err != nil {
-			// Don't modify error from net.Listener
-			return nil, err
-		}
+	conn, err := listener.Listener.Accept()
+	if err != nil {
+		// Don't modify error from net.Listener
+		return nil, err
+	}
 
-		geoIPData := listener.geoIPLookup(common.IPAddressFromAddr(conn.RemoteAddr()))
+	geoIPData := listener.geoIPLookup(common.IPAddressFromAddr(conn.RemoteAddr()))
 
-		tactics, err := listener.server.getTactics(true, geoIPData, make(common.APIParameters))
-		if err != nil {
-			listener.server.logger.WithContextFields(
-				common.LogFields{"error": err}).Warning("failed to get tactics for connection")
-			// If tactics is somehow misconfigured, keep handling connections.
-			// Other error cases that follow below take the same approach.
-			return conn, nil
-		}
-
-		if tactics == nil {
-			// This server isn't configured with tactics.
-			return conn, nil
-		}
-
-		if !prng.FlipWeightedCoin(tactics.Probability) {
-			// Skip tactics with the configured probability.
-			return conn, nil
-		}
-
-		clientParameters, err := parameters.NewClientParameters(nil)
-		if err != nil {
-			return conn, nil
-		}
-
-		_, err = clientParameters.Set("", false, tactics.Parameters)
-		if err != nil {
-			return conn, nil
-		}
-
-		p := clientParameters.Get()
-
-		// Wrap the conn in a fragmentor.Conn, subject to tactics parameters.
-		//
-		// Limitation: this server-side fragmentation is not synchronized with
-		// client-side; where client-side will make a single coin flip to fragment
-		// or not fragment all TCP connections for a one meek session, the server
-		// will make a coin flip per connection.
-		//
-		// Delay seeding the fragmentor PRNG when we can derive a seed from the
-		// client's initial obfuscation message. This enables server-side replay
-		// of fragmentation when initiated by the client. Currently this is only
-		// supported for OSSH: SSH lacks the initial obfuscation message, and
-		// meek and other protocols transmit downstream data before the initial
-		// obfuscation message arrives.
-
-		var seed *prng.Seed
-		if listener.tunnelProtocol != protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
-			seed, err = prng.NewSeed()
-			if err != nil {
-				listener.server.logger.WithContextFields(
-					common.LogFields{"error": err}).Warning("failed to seed fragmentor PRNG")
-				return conn, nil
-			}
-		}
-
-		fragmentorConfig := fragmentor.NewDownstreamConfig(
-			p, listener.tunnelProtocol, seed)
-
-		if fragmentorConfig.MayFragment() {
-			conn = fragmentor.NewConn(
-				fragmentorConfig,
-				func(message string) {
-					listener.server.logger.WithContextFields(
-						common.LogFields{"message": message}).Debug("Fragmentor")
-				},
-				conn)
-		}
-
+	tactics, err := listener.server.getTactics(true, geoIPData, make(common.APIParameters))
+	if err != nil {
+		listener.server.logger.WithTraceFields(
+			common.LogFields{"error": err}).Warning("failed to get tactics for connection")
+		// If tactics is somehow misconfigured, keep handling connections.
+		// Other error cases that follow below take the same approach.
 		return conn, nil
 	}
+
+	if tactics == nil {
+		// This server isn't configured with tactics.
+		return conn, nil
+	}
+
+	if !prng.FlipWeightedCoin(tactics.Probability) {
+		// Skip tactics with the configured probability.
+		return conn, nil
+	}
+
+	clientParameters, err := parameters.NewClientParameters(nil)
+	if err != nil {
+		return conn, nil
+	}
+
+	_, err = clientParameters.Set("", false, tactics.Parameters)
+	if err != nil {
+		return conn, nil
+	}
+
+	p := clientParameters.Get()
+
+	// Wrap the conn in a fragmentor.Conn, subject to tactics parameters.
+	//
+	// Limitation: this server-side fragmentation is not synchronized with
+	// client-side; where client-side will make a single coin flip to fragment
+	// or not fragment all TCP connections for a one meek session, the server
+	// will make a coin flip per connection.
+	//
+	// Delay seeding the fragmentor PRNG when we can derive a seed from the
+	// client's initial obfuscation message. This enables server-side replay
+	// of fragmentation when initiated by the client. Currently this is only
+	// supported for OSSH: SSH lacks the initial obfuscation message, and
+	// meek and other protocols transmit downstream data before the initial
+	// obfuscation message arrives.
+
+	var seed *prng.Seed
+	if listener.tunnelProtocol != protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
+		seed, err = prng.NewSeed()
+		if err != nil {
+			listener.server.logger.WithTraceFields(
+				common.LogFields{"error": err}).Warning("failed to seed fragmentor PRNG")
+			return conn, nil
+		}
+	}
+
+	fragmentorConfig := fragmentor.NewDownstreamConfig(
+		p, listener.tunnelProtocol, seed)
+
+	if fragmentorConfig.MayFragment() {
+		conn = fragmentor.NewConn(
+			fragmentorConfig,
+			func(message string) {
+				listener.server.logger.WithTraceFields(
+					common.LogFields{"message": message}).Debug("Fragmentor")
+			},
+			conn)
+	}
+
+	return conn, nil
 }
 
 // RoundTripper performs a round trip to the specified endpoint, sending the
@@ -1218,12 +1215,12 @@ func SetTacticsAPIParameters(
 
 	record, err := getStoredTacticsRecord(storer, networkID)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	speedTestSamples, err := getSpeedTestSamples(storer, networkID)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	apiParams[STORED_TACTICS_TAG_PARAMETER_NAME] = record.Tag
@@ -1258,24 +1255,24 @@ func HandleTacticsPayload(
 	// - old and new tactics should both be valid
 
 	if payload == nil {
-		return nil, common.ContextError(errors.New("unexpected nil payload"))
+		return nil, errors.TraceNew("unexpected nil payload")
 	}
 
 	record, err := getStoredTacticsRecord(storer, networkID)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	err = applyTacticsPayload(storer, networkID, record, payload)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// TODO: if tags match, just set an expiry record, not the whole tactics record?
 
 	err = setStoredTacticsRecord(storer, networkID, record)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return record, nil
@@ -1291,7 +1288,7 @@ func UseStoredTactics(
 
 	record, err := getStoredTacticsRecord(storer, networkID)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if record.Tag != "" && record.Expiry.After(time.Now().UTC()) {
@@ -1338,12 +1335,12 @@ func FetchTactics(
 
 	record, err := getStoredTacticsRecord(storer, networkID)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	speedTestSamples, err := getSpeedTestSamples(storer, networkID)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// Perform a speed test when there are no samples.
@@ -1355,18 +1352,18 @@ func FetchTactics(
 			p.Int(parameters.SpeedTestPaddingMinBytes),
 			p.Int(parameters.SpeedTestPaddingMaxBytes))
 
-		startTime := monotime.Now()
+		startTime := time.Now()
 
 		response, err := roundTripper(ctx, SPEED_TEST_END_POINT, request)
 
-		elapsedTime := monotime.Since(startTime)
+		elapsedTime := time.Since(startTime)
 
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		if networkID != getNetworkID() {
-			return nil, common.ContextError(errors.New("network ID changed"))
+			return nil, errors.TraceNew("network ID changed")
 		}
 
 		err = AddSpeedTestSample(
@@ -1379,12 +1376,12 @@ func FetchTactics(
 			request,
 			response)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		speedTestSamples, err = getSpeedTestSamples(storer, networkID)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -1395,17 +1392,17 @@ func FetchTactics(
 
 	requestPublicKey, err := base64.StdEncoding.DecodeString(encodedRequestPublicKey)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	requestObfuscatedKey, err := base64.StdEncoding.DecodeString(encodedRequestObfuscatedKey)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	ephemeralPublicKey, ephemeralPrivateKey, err := box.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	boxedRequest, err := boxPayload(
@@ -1416,16 +1413,16 @@ func FetchTactics(
 		ephemeralPublicKey[:],
 		&apiParams)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	boxedResponse, err := roundTripper(ctx, TACTICS_END_POINT, boxedRequest)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if networkID != getNetworkID() {
-		return nil, common.ContextError(errors.New("network ID changed"))
+		return nil, errors.TraceNew("network ID changed")
 	}
 
 	// Process and store the response payload.
@@ -1440,17 +1437,17 @@ func FetchTactics(
 		boxedResponse,
 		&payload)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	err = applyTacticsPayload(storer, networkID, record, payload)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	err = setStoredTacticsRecord(storer, networkID, record)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return record, nil
@@ -1472,7 +1469,7 @@ func MakeSpeedTestResponse(minPadding, maxPadding int) ([]byte, error) {
 		err = fmt.Errorf("unexpected marshaled time size: %d", len(timestamp))
 	}
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	randomPadding := prng.Padding(minPadding, maxPadding)
@@ -1503,17 +1500,17 @@ func AddSpeedTestSample(
 	response []byte) error {
 
 	if len(response) < 1 {
-		return common.ContextError(errors.New("unexpected empty response"))
+		return errors.TraceNew("unexpected empty response")
 	}
 	timestampLength := int(response[0])
 	if len(response) < 1+timestampLength {
-		return common.ContextError(fmt.Errorf(
-			"unexpected response shorter than timestamp size %d", timestampLength))
+		return errors.Tracef(
+			"unexpected response shorter than timestamp size %d", timestampLength)
 	}
 	var timestamp time.Time
 	err := timestamp.UnmarshalBinary(response[1 : 1+timestampLength])
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	sample := SpeedTestSample{
@@ -1527,12 +1524,12 @@ func AddSpeedTestSample(
 
 	maxCount := clientParameters.Get().Int(parameters.SpeedTestMaxSampleCount)
 	if maxCount == 0 {
-		return common.ContextError(errors.New("speed test max sample count is 0"))
+		return errors.TraceNew("speed test max sample count is 0")
 	}
 
 	speedTestSamples, err := getSpeedTestSamples(storer, networkID)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	if speedTestSamples == nil {
@@ -1546,12 +1543,12 @@ func AddSpeedTestSample(
 
 	record, err := json.Marshal(speedTestSamples)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = storer.SetSpeedTestSamplesRecord(networkID, record)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -1562,7 +1559,7 @@ func getSpeedTestSamples(
 
 	record, err := storer.GetSpeedTestSamplesRecord(networkID)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if record == nil {
@@ -1572,7 +1569,7 @@ func getSpeedTestSamples(
 	var speedTestSamples []SpeedTestSample
 	err = json.Unmarshal(record, &speedTestSamples)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return speedTestSamples, nil
@@ -1583,7 +1580,7 @@ func getStoredTacticsRecord(
 
 	marshaledRecord, err := storer.GetTacticsRecord(networkID)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if marshaledRecord == nil {
@@ -1593,7 +1590,7 @@ func getStoredTacticsRecord(
 	var record *Record
 	err = json.Unmarshal(marshaledRecord, &record)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if record == nil {
@@ -1610,7 +1607,7 @@ func applyTacticsPayload(
 	payload *Payload) error {
 
 	if payload.Tag == "" {
-		return common.ContextError(errors.New("invalid tag"))
+		return errors.TraceNew("invalid tag")
 	}
 
 	// Replace the tactics data when the tags differ.
@@ -1620,21 +1617,21 @@ func applyTacticsPayload(
 		record.Tactics = Tactics{}
 		err := json.Unmarshal(payload.Tactics, &record.Tactics)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 	}
 
 	// Note: record.Tactics.TTL is validated by server
 	ttl, err := time.ParseDuration(record.Tactics.TTL)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	if ttl <= 0 {
-		return common.ContextError(errors.New("invalid TTL"))
+		return errors.TraceNew("invalid TTL")
 	}
 	if record.Tactics.Probability <= 0.0 {
-		return common.ContextError(errors.New("invalid probability"))
+		return errors.TraceNew("invalid probability")
 	}
 
 	// Set or extend the expiry.
@@ -1651,12 +1648,12 @@ func setStoredTacticsRecord(
 
 	marshaledRecord, err := json.Marshal(record)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	err = storer.SetTacticsRecord(networkID, marshaledRecord)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -1669,13 +1666,12 @@ func boxPayload(
 	if len(nonce) > 24 ||
 		len(peerPublicKey) != 32 ||
 		len(privateKey) != 32 {
-		return nil, common.ContextError(
-			errors.New("unexpected box key length"))
+		return nil, errors.TraceNew("unexpected box key length")
 	}
 
 	marshaledPayload, err := json.Marshal(payload)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	var nonceArray [24]byte
@@ -1697,7 +1693,7 @@ func boxPayload(
 	// TODO: replay tactics request padding?
 	paddingPRNGSeed, err := prng.NewSeed()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	maxPadding := TACTICS_PADDING_MAX_SIZE
@@ -1708,7 +1704,7 @@ func boxPayload(
 			PaddingPRNGSeed: paddingPRNGSeed,
 			MaxPadding:      &maxPadding})
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	obfuscatedBox := obfuscator.SendSeedMessage()
@@ -1728,8 +1724,7 @@ func unboxPayload(
 	if len(nonce) > 24 ||
 		(peerPublicKey != nil && len(peerPublicKey) != 32) ||
 		len(privateKey) != 32 {
-		return nil, common.ContextError(
-			errors.New("unexpected box key length"))
+		return nil, errors.TraceNew("unexpected box key length")
 	}
 
 	obfuscatedReader := bytes.NewReader(obfuscatedBoxedPayload[:])
@@ -1738,12 +1733,12 @@ func unboxPayload(
 		obfuscatedReader,
 		&obfuscator.ObfuscatorConfig{Keyword: string(obfuscatedKey)})
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	seedLen, err := obfuscatedReader.Seek(0, 1)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	boxedPayload := obfuscatedBoxedPayload[seedLen:]
@@ -1761,7 +1756,7 @@ func unboxPayload(
 		copy(peerPublicKeyArray[:], peerPublicKey)
 	} else {
 		if len(boxedPayload) < 32 {
-			return nil, common.ContextError(errors.New("unexpected box size"))
+			return nil, errors.TraceNew("unexpected box size")
 		}
 		bundledPeerPublicKey = boxedPayload[0:32]
 		copy(peerPublicKeyArray[:], bundledPeerPublicKey)
@@ -1770,12 +1765,12 @@ func unboxPayload(
 
 	marshaledPayload, ok := box.Open(nil, boxedPayload, &nonceArray, &peerPublicKeyArray, &privateKeyArray)
 	if !ok {
-		return nil, common.ContextError(errors.New("invalid box"))
+		return nil, errors.TraceNew("invalid box")
 	}
 
 	err = json.Unmarshal(marshaledPayload, payload)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return bundledPeerPublicKey, nil

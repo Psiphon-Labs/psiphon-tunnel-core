@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/goarista/monotime"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // NetDialer mimicks the net.Dialer interface.
@@ -266,7 +267,7 @@ func NewActivityMonitoredConn(
 	if inactivityTimeout > 0 {
 		err := conn.SetDeadline(time.Now().Add(inactivityTimeout))
 		if err != nil {
-			return nil, ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -309,7 +310,7 @@ func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 		if conn.inactivityTimeout > 0 {
 			err = conn.Conn.SetDeadline(time.Now().Add(conn.inactivityTimeout))
 			if err != nil {
-				return n, ContextError(err)
+				return n, errors.Trace(err)
 			}
 		}
 
@@ -338,7 +339,7 @@ func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 		if conn.inactivityTimeout > 0 {
 			err = conn.Conn.SetDeadline(time.Now().Add(conn.inactivityTimeout))
 			if err != nil {
-				return n, ContextError(err)
+				return n, errors.Trace(err)
 			}
 		}
 

@@ -23,15 +23,13 @@ import (
 	"bytes"
 	"compress/zlib"
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"math"
-	"runtime"
-	"strings"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/wildcard"
 )
 
@@ -107,10 +105,10 @@ func MakeSecureRandomBytes(length int) ([]byte, error) {
 	randomBytes := make([]byte, length)
 	n, err := rand.Read(randomBytes)
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	if n != length {
-		return nil, ContextError(errors.New("insufficient random bytes"))
+		return nil, errors.TraceNew("insufficient random bytes")
 	}
 	return randomBytes, nil
 }
@@ -132,45 +130,6 @@ func TruncateTimestampToHour(timestamp string) string {
 	return t.Truncate(1 * time.Hour).Format(time.RFC3339)
 }
 
-// getFunctionName is a helper that extracts a simple function name from
-// full name returned byruntime.Func.Name(). This is used to declutter
-// log messages containing function names.
-func getFunctionName(pc uintptr) string {
-	funcName := runtime.FuncForPC(pc).Name()
-	index := strings.LastIndex(funcName, "/")
-	if index != -1 {
-		funcName = funcName[index+1:]
-	}
-	return funcName
-}
-
-// GetParentContext returns the parent function name and source file
-// line number.
-func GetParentContext() string {
-	pc, _, line, _ := runtime.Caller(2)
-	return fmt.Sprintf("%s#%d", getFunctionName(pc), line)
-}
-
-// ContextError prefixes an error message with the current function
-// name and source file line number.
-func ContextError(err error) error {
-	if err == nil {
-		return nil
-	}
-	pc, _, line, _ := runtime.Caller(1)
-	return fmt.Errorf("%s#%d: %s", getFunctionName(pc), line, err)
-}
-
-// ContextErrorMsg works like ContextError, but adds a message string to
-// the error message.
-func ContextErrorMsg(err error, message string) error {
-	if err == nil {
-		return nil
-	}
-	pc, _, line, _ := runtime.Caller(1)
-	return fmt.Errorf("%s#%d: %s: %s", getFunctionName(pc), line, message, err)
-}
-
 // Compress returns zlib compressed data
 func Compress(data []byte) []byte {
 	var compressedData bytes.Buffer
@@ -184,12 +143,12 @@ func Compress(data []byte) []byte {
 func Decompress(data []byte) ([]byte, error) {
 	reader, err := zlib.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	uncompressedData, err := ioutil.ReadAll(reader)
 	reader.Close()
 	if err != nil {
-		return nil, ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	return uncompressedData, nil
 }

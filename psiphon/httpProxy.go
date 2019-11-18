@@ -23,7 +23,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/tls"
-	"errors"
+	std_errors "errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/grafov/m3u8"
 )
@@ -104,7 +105,7 @@ func NewHttpProxy(
 		if IsAddressInUseError(err) {
 			NoticeHttpProxyPortInUse(config.LocalHttpProxyPort)
 		}
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
@@ -235,7 +236,7 @@ func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *h
 		go func() {
 			err := proxy.httpConnectHandler(conn, request.URL.Host)
 			if err != nil {
-				NoticeAlert("%s", common.ContextError(err))
+				NoticeAlert("%s", errors.Trace(err))
 			}
 		}()
 	} else if request.URL.IsAbs() {
@@ -254,12 +255,12 @@ func (proxy *HttpProxy) httpConnectHandler(localConn net.Conn, target string) (e
 	// open connection for data which will never arrive.
 	remoteConn, err := proxy.tunneler.Dial(target, false, localConn)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	defer remoteConn.Close()
 	_, err = localConn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	LocalProxyRelay(_HTTP_PROXY_TYPE, localConn, remoteConn)
 	return nil
@@ -306,10 +307,10 @@ func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, requ
 		client = proxy.urlProxyDirectClient
 
 	default:
-		err = errors.New("missing origin URL")
+		err = std_errors.New("missing origin URL")
 	}
 	if err != nil {
-		NoticeAlert("%s", common.ContextError(FilterUrlError(err)))
+		NoticeAlert("%s", errors.Trace(FilterUrlError(err)))
 		forceClose(responseWriter)
 		return
 	}
@@ -317,7 +318,7 @@ func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, requ
 	// Origin URL must be well-formed, absolute, and have a scheme of "http" or "https"
 	originURL, err := url.ParseRequestURI(originURLString)
 	if err != nil {
-		NoticeAlert("%s", common.ContextError(FilterUrlError(err)))
+		NoticeAlert("%s", errors.Trace(FilterUrlError(err)))
 		forceClose(responseWriter)
 		return
 	}
@@ -366,7 +367,7 @@ func (conn *rewriteICYConn) Read(b []byte) (int, error) {
 		return n, err
 	}
 
-	if bytes.Compare(b[:3], []byte("ICY")) == 0 {
+	if bytes.Equal(b[:3], []byte("ICY")) {
 		atomic.StoreInt32(conn.isICY, 1)
 		protocol := "HTTP/1.0"
 		copy(b, []byte(protocol))
@@ -404,7 +405,7 @@ func (proxy *HttpProxy) makeRewriteICYClient() (*http.Client, *rewriteICYStatus)
 
 		conn, err := tunneledDialer(network, address)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		return &rewriteICYConn{
@@ -417,13 +418,13 @@ func (proxy *HttpProxy) makeRewriteICYClient() (*http.Client, *rewriteICYStatus)
 
 		conn, err := tunneledDialer(network, address)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		serverName, _, err := net.SplitHostPort(address)
 		if err != nil {
 			conn.Close()
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		tlsConn := tls.Client(conn, &tls.Config{ServerName: serverName})
@@ -432,7 +433,7 @@ func (proxy *HttpProxy) makeRewriteICYClient() (*http.Client, *rewriteICYStatus)
 
 		timeout := proxy.responseHeaderTimeout
 		afterFunc := time.AfterFunc(timeout, func() {
-			resultChannel <- errors.New("TLS handshake timeout")
+			resultChannel <- errors.TraceNew("TLS handshake timeout")
 		})
 		defer afterFunc.Stop()
 
@@ -443,13 +444,13 @@ func (proxy *HttpProxy) makeRewriteICYClient() (*http.Client, *rewriteICYStatus)
 		err = <-resultChannel
 		if err != nil {
 			conn.Close()
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		err = tlsConn.VerifyHostname(serverName)
 		if err != nil {
 			conn.Close()
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		return &rewriteICYConn{
@@ -496,31 +497,29 @@ func (proxy *HttpProxy) relayHTTPRequest(
 	}
 
 	if err != nil {
-		NoticeAlert("%s", common.ContextError(FilterUrlError(err)))
+		NoticeAlert("%s", errors.Trace(FilterUrlError(err)))
 		forceClose(responseWriter)
 		return
 	}
 
 	defer response.Body.Close()
 
-	if rewrites != nil {
-		// NOTE: Rewrite functions are responsible for leaving response.Body in
-		// a valid, readable state if there's no error.
+	// Note: Rewrite functions are responsible for leaving response.Body in
+	// a valid, readable state if there's no error.
 
-		for key := range rewrites {
-			var err error
+	for key := range rewrites {
+		var err error
 
-			switch key {
-			case "m3u8":
-				err = rewriteM3U8(proxy.listenIP, proxy.listenPort, response)
-			}
+		switch key {
+		case "m3u8":
+			err = rewriteM3U8(proxy.listenIP, proxy.listenPort, response)
+		}
 
-			if err != nil {
-				NoticeAlert("URL proxy rewrite failed for %s: %s", key, common.ContextError(err))
-				forceClose(responseWriter)
-				response.Body.Close()
-				return
-			}
+		if err != nil {
+			NoticeAlert("URL proxy rewrite failed for %s: %s", key, errors.Trace(err))
+			forceClose(responseWriter)
+			response.Body.Close()
+			return
 		}
 	}
 
@@ -561,21 +560,21 @@ func (proxy *HttpProxy) relayHTTPRequest(
 			response.StatusCode,
 			http.StatusText(response.StatusCode))
 		if err != nil {
-			NoticeAlert("write status line failed: %s", common.ContextError(err))
+			NoticeAlert("write status line failed: %s", errors.Trace(err))
 			conn.Close()
 			return
 		}
 
 		err = responseWriter.Header().Write(conn)
 		if err != nil {
-			NoticeAlert("write headers failed: %s", common.ContextError(err))
+			NoticeAlert("write headers failed: %s", errors.Trace(err))
 			conn.Close()
 			return
 		}
 
 		_, err = io.Copy(conn, response.Body)
 		if err != nil {
-			NoticeAlert("write body failed: %s", common.ContextError(err))
+			NoticeAlert("write body failed: %s", errors.Trace(err))
 			conn.Close()
 			return
 		}
@@ -587,7 +586,7 @@ func (proxy *HttpProxy) relayHTTPRequest(
 		responseWriter.WriteHeader(response.StatusCode)
 		_, err = io.Copy(responseWriter, response.Body)
 		if err != nil {
-			NoticeAlert("%s", common.ContextError(err))
+			NoticeAlert("%s", errors.Trace(err))
 			forceClose(responseWriter)
 			return
 		}
@@ -607,12 +606,12 @@ func forceClose(responseWriter http.ResponseWriter) {
 func hijack(responseWriter http.ResponseWriter) net.Conn {
 	hijacker, ok := responseWriter.(http.Hijacker)
 	if !ok {
-		NoticeAlert("%s", common.ContextError(errors.New("responseWriter is not an http.Hijacker")))
+		NoticeAlert("%s", errors.TraceNew("responseWriter is not an http.Hijacker"))
 		return nil
 	}
 	conn, _, err := hijacker.Hijack()
 	if err != nil {
-		NoticeAlert("%s", common.ContextError(fmt.Errorf("responseWriter hijack failed: %s", err)))
+		NoticeAlert("%s", errors.Tracef("responseWriter hijack failed: %s", err))
 		return nil
 	}
 	return conn
@@ -667,7 +666,7 @@ func (proxy *HttpProxy) serve() {
 	default:
 		if err != nil {
 			proxy.tunneler.SignalComponentFailure()
-			NoticeLocalProxyError(_HTTP_PROXY_TYPE, common.ContextError(err))
+			NoticeLocalProxyError(_HTTP_PROXY_TYPE, errors.Trace(err))
 		}
 	}
 	NoticeInfo("HTTP proxy stopped")
@@ -751,7 +750,7 @@ func rewriteM3U8(localHTTPProxyIP string, localHTTPProxyPort int, response *http
 
 		reader, err = gzip.NewReader(response.Body)
 		if err != nil {
-			return common.ContextError(err)
+			return errors.Trace(err)
 		}
 
 		// Unset Content-Encoding.
@@ -766,7 +765,7 @@ func rewriteM3U8(localHTTPProxyIP string, localHTTPProxyPort int, response *http
 	response.Body.Close()
 
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	p, listType, err := m3u8.Decode(*bytes.NewBuffer(contentBodyBytes), true)

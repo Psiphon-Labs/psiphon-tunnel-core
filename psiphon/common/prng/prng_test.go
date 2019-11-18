@@ -50,11 +50,11 @@ func TestSeed(t *testing.T) {
 		prng2.Read(bytes2)
 
 		zeroes := make([]byte, i)
-		if 0 == bytes.Compare(zeroes, bytes1) {
+		if bytes.Equal(zeroes, bytes1) {
 			t.Fatalf("unexpected zero bytes")
 		}
 
-		if 0 != bytes.Compare(bytes1, bytes2) {
+		if !bytes.Equal(bytes1, bytes2) {
 			t.Fatalf("unexpected different bytes")
 		}
 	}
@@ -82,11 +82,11 @@ func TestSeed(t *testing.T) {
 		bytes4 := make([]byte, i)
 		prng4.Read(bytes4)
 
-		if 0 == bytes.Compare(bytes1, bytes3) {
+		if bytes.Equal(bytes1, bytes3) {
 			t.Fatalf("unexpected identical bytes")
 		}
 
-		if 0 == bytes.Compare(bytes3, bytes4) {
+		if bytes.Equal(bytes3, bytes4) {
 			t.Fatalf("unexpected identical bytes")
 		}
 	}
@@ -373,6 +373,7 @@ func TestExpFloat64Range(t *testing.T) {
 	}
 }
 
+//lint:ignore U1000 intentionally unused
 func Disabled_TestRandomStreamLimit(t *testing.T) {
 
 	// This test takes up to ~2 minute to complete, so it's disabled by default.

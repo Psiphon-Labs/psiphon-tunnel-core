@@ -25,15 +25,15 @@ package psiphon
 
 import (
 	"context"
-	"errors"
+	std_errors "errors"
 	"fmt"
 	"math/rand"
 	"net"
 	"sync"
 	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -85,7 +85,7 @@ type Controller struct {
 func NewController(config *Config) (controller *Controller, err error) {
 
 	if !config.IsCommitted() {
-		return nil, common.ContextError(errors.New("uncommitted config"))
+		return nil, errors.TraceNew("uncommitted config")
 	}
 
 	// Needed by regen, at least
@@ -147,7 +147,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 			Transport:         packetTunnelTransport,
 		})
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		controller.packetTunnelClient = packetTunnelClient
@@ -188,7 +188,7 @@ func (controller *Controller) Run(ctx context.Context) {
 			err = fmt.Errorf("no IPv4 address for interface %s", controller.config.ListenInterface)
 		}
 		if err != nil {
-			NoticeError("error getting listener IP: %s", err)
+			NoticeError("error getting listener IP: %s", errors.Trace(err))
 			return
 		}
 		listenIP = IPv4Address.String()
@@ -345,7 +345,7 @@ func (controller *Controller) remoteServerListFetcher(
 
 	defer controller.runWaitGroup.Done()
 
-	var lastFetchTime monotime.Time
+	var lastFetchTime time.Time
 
 fetcherLoop:
 	for {
@@ -362,8 +362,8 @@ fetcherLoop:
 		stalePeriod := controller.config.GetClientParameters().Get().Duration(
 			parameters.FetchRemoteServerListStalePeriod)
 
-		if lastFetchTime != 0 &&
-			lastFetchTime.Add(stalePeriod).After(monotime.Now()) {
+		if !lastFetchTime.IsZero() &&
+			lastFetchTime.Add(stalePeriod).After(time.Now()) {
 			continue
 		}
 
@@ -389,7 +389,7 @@ fetcherLoop:
 				controller.untunneledDialConfig)
 
 			if err == nil {
-				lastFetchTime = monotime.Now()
+				lastFetchTime = time.Now()
 				break retryLoop
 			}
 
@@ -535,7 +535,7 @@ func (controller *Controller) startOrSignalConnectedReporter() {
 func (controller *Controller) upgradeDownloader() {
 	defer controller.runWaitGroup.Done()
 
-	var lastDownloadTime monotime.Time
+	var lastDownloadTime time.Time
 
 downloadLoop:
 	for {
@@ -553,8 +553,8 @@ downloadLoop:
 		// Unless handshake is explicitly advertizing a new version, skip
 		// checking entirely when a recent download was successful.
 		if handshakeVersion == "" &&
-			lastDownloadTime != 0 &&
-			lastDownloadTime.Add(stalePeriod).After(monotime.Now()) {
+			!lastDownloadTime.IsZero() &&
+			lastDownloadTime.Add(stalePeriod).After(time.Now()) {
 			continue
 		}
 
@@ -581,7 +581,7 @@ downloadLoop:
 				controller.untunneledDialConfig)
 
 			if err == nil {
-				lastDownloadTime = monotime.Now()
+				lastDownloadTime = time.Now()
 				break retryLoop
 			}
 
@@ -963,13 +963,13 @@ func (controller *Controller) terminateAllTunnels() {
 func (controller *Controller) getNextActiveTunnel() (tunnel *Tunnel) {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
-	for i := len(controller.tunnels); i > 0; i-- {
-		tunnel = controller.tunnels[controller.nextTunnel]
-		controller.nextTunnel =
-			(controller.nextTunnel + 1) % len(controller.tunnels)
-		return tunnel
+	if len(controller.tunnels) == 0 {
+		return nil
 	}
-	return nil
+	tunnel = controller.tunnels[controller.nextTunnel]
+	controller.nextTunnel =
+		(controller.nextTunnel + 1) % len(controller.tunnels)
+	return tunnel
 }
 
 // isActiveTunnelServerEntry is used to check if there's already
@@ -995,7 +995,7 @@ func (controller *Controller) Dial(
 
 	tunnel := controller.getNextActiveTunnel()
 	if tunnel == nil {
-		return nil, common.ContextError(errors.New("no active tunnels"))
+		return nil, errors.TraceNew("no active tunnels")
 	}
 
 	// Perform split tunnel classification when feature is enabled, and if the remote
@@ -1004,7 +1004,7 @@ func (controller *Controller) Dial(
 
 		host, _, err := net.SplitHostPort(remoteAddr)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		// Note: a possible optimization, when split tunnel is active and IsUntunneled performs
@@ -1020,7 +1020,7 @@ func (controller *Controller) Dial(
 
 	tunneledConn, err := tunnel.Dial(remoteAddr, alwaysTunnel, downstreamConn)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return tunneledConn, nil
@@ -1153,7 +1153,7 @@ func (p *protocolSelectionConstraints) selectProtocol(
 type candidateServerEntry struct {
 	serverEntry                *protocol.ServerEntry
 	isServerAffinityCandidate  bool
-	adjustedEstablishStartTime monotime.Time
+	adjustedEstablishStartTime time.Time
 }
 
 // startEstablishing creates a pool of worker goroutines which will
@@ -1554,10 +1554,10 @@ func (controller *Controller) doFetchTactics(
 		// since NewTacticsServerEntryIterator should only return tactics-
 		// capable server entries and selectProtocol will select any tactics
 		// protocol.
-		err = errors.New("failed to make dial parameters")
+		err = std_errors.New("failed to make dial parameters")
 	}
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	NoticeRequestingTactics(dialParams)
@@ -1592,7 +1592,7 @@ func (controller *Controller) doFetchTactics(
 	meekConn, err := DialMeek(
 		ctx, dialParams.GetMeekConfig(), dialParams.GetDialConfig())
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	defer meekConn.Close()
 
@@ -1610,7 +1610,7 @@ func (controller *Controller) doFetchTactics(
 		serverEntry.TacticsRequestObfuscatedKey,
 		meekConn.RoundTrip)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	NoticeRequestedTactics(dialParams)
@@ -1631,7 +1631,7 @@ func (controller *Controller) establishCandidateGenerator() {
 	// networkWaitDuration is the elapsed time spent waiting
 	// for network connectivity. This duration will be excluded
 	// from reported tunnel establishment duration.
-	establishStartTime := monotime.Now()
+	establishStartTime := time.Now()
 	var totalNetworkWaitDuration time.Duration
 
 	applyServerAffinity, iterator, err := NewServerEntryIterator(controller.config)
@@ -1683,19 +1683,19 @@ loop:
 		// If the first round ends with no connection, remote server
 		// list and upgrade checks are launched.
 
-		roundStartTime := monotime.Now()
+		roundStartTime := time.Now()
 		var roundNetworkWaitDuration time.Duration
 
 		// Send each iterator server entry to the establish workers
 		for {
 
-			networkWaitStartTime := monotime.Now()
+			networkWaitStartTime := time.Now()
 			if !WaitForNetworkConnectivity(
 				controller.establishCtx,
 				controller.config.NetworkConnectivityChecker) {
 				break loop
 			}
-			networkWaitDuration := monotime.Since(networkWaitStartTime)
+			networkWaitDuration := time.Since(networkWaitStartTime)
 			roundNetworkWaitDuration += networkWaitDuration
 			totalNetworkWaitDuration += networkWaitDuration
 
@@ -1743,7 +1743,7 @@ loop:
 			workTime := controller.config.GetClientParameters().Get().Duration(
 				parameters.EstablishTunnelWorkTime)
 
-			if roundStartTime.Add(-roundNetworkWaitDuration).Add(workTime).Before(monotime.Now()) {
+			if roundStartTime.Add(-roundNetworkWaitDuration).Add(workTime).Before(time.Now()) {
 				// Start over, after a brief pause, with a new shuffle of the server
 				// entries, and potentially some newly fetched server entries.
 				break

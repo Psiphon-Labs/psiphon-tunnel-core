@@ -32,13 +32,12 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
@@ -63,7 +62,7 @@ type secureFeedback struct {
 func encryptFeedback(diagnosticsJson, b64EncodedPublicKey string) ([]byte, error) {
 	publicKey, err := base64.StdEncoding.DecodeString(b64EncodedPublicKey)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	iv, encryptionKey, diagnosticsCiphertext, err := encryptAESCBC([]byte(diagnosticsJson))
@@ -94,7 +93,7 @@ func encryptFeedback(diagnosticsJson, b64EncodedPublicKey string) ([]byte, error
 
 	encryptedFeedback, err := json.Marshal(securedFeedback)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return encryptedFeedback, nil
@@ -106,11 +105,11 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 
 	config, err := LoadConfig([]byte(configJson))
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	err = config.Commit()
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	untunneledDialConfig := &DialConfig{
@@ -133,7 +132,7 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 	headerPieces := strings.Split(uploadServerHeaders, ": ")
 	// Only a single header is expected.
 	if len(headerPieces) != 2 {
-		return common.ContextError(errors.New("expected 2 header pieces, got: " + strconv.Itoa(len(headerPieces))))
+		return errors.Tracef("expected 2 header pieces, got: %d", len(headerPieces))
 	}
 
 	for i := 0; i < FEEDBACK_UPLOAD_MAX_RETRIES; i++ {
@@ -175,7 +174,7 @@ func uploadFeedback(
 
 	req, err := http.NewRequest("PUT", url, bytes.NewBuffer(feedbackData))
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	req.Header.Set("User-Agent", userAgent)
@@ -184,12 +183,12 @@ func uploadFeedback(
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return common.ContextError(errors.New("received HTTP status: " + resp.Status))
+		return errors.TraceNew("received HTTP status: " + resp.Status)
 	}
 
 	return nil
@@ -217,12 +216,12 @@ func encryptAESCBC(plaintext []byte) ([]byte, []byte, []byte, error) {
 
 	key, err := common.MakeSecureRandomBytes(aes.BlockSize)
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, errors.Trace(err)
 	}
 
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, nil, nil, common.ContextError(err)
+		return nil, nil, nil, errors.Trace(err)
 	}
 
 	mode := cipher.NewCBCEncrypter(block, iv)
@@ -235,16 +234,16 @@ func encryptAESCBC(plaintext []byte) ([]byte, []byte, []byte, error) {
 func encryptWithPublicKey(plaintext, publicKey []byte) ([]byte, error) {
 	parsedKey, err := x509.ParsePKIXPublicKey(publicKey)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	if rsaPubKey, ok := parsedKey.(*rsa.PublicKey); ok {
 		rsaEncryptOutput, err := rsa.EncryptOAEP(sha1.New(), rand.Reader, rsaPubKey, plaintext, nil)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		return rsaEncryptOutput, nil
 	}
-	return nil, common.ContextError(errors.New("feedback key is not an RSA public key"))
+	return nil, errors.TraceNew("feedback key is not an RSA public key")
 }
 
 // Generate HMAC for Encrypt-then-MAC paradigm.

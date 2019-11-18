@@ -28,7 +28,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -37,6 +36,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ed25519"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // ServerEntry represents a Psiphon server. It contains information
@@ -100,13 +100,13 @@ func (fields ServerEntryFields) GetServerEntry() (*ServerEntry, error) {
 
 	marshaledServerEntry, err := json.Marshal(fields)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	var serverEntry *ServerEntry
 	err = json.Unmarshal(marshaledServerEntry, &serverEntry)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return serverEntry, nil
@@ -302,12 +302,12 @@ func (fields ServerEntryFields) AddSignature(publicKey, privateKey string) error
 
 	marshaledFields, err := json.Marshal(copyFields)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	decodedPublicKey, err := base64.StdEncoding.DecodeString(publicKey)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	publicKeyDigest := sha256.Sum256(decodedPublicKey)
@@ -315,7 +315,7 @@ func (fields ServerEntryFields) AddSignature(publicKey, privateKey string) error
 
 	decodedPrivateKey, err := base64.StdEncoding.DecodeString(privateKey)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	signature := ed25519.Sign(decodedPrivateKey, marshaledFields)
@@ -333,7 +333,7 @@ func (fields ServerEntryFields) AddSignature(publicKey, privateKey string) error
 func (fields ServerEntryFields) VerifySignature(publicKey string) error {
 
 	if publicKey == "" {
-		return common.ContextError(errors.New("missing public key"))
+		return errors.TraceNew("missing public key")
 	}
 
 	// Make a copy so that removing unsigned fields will have no side effects
@@ -344,40 +344,40 @@ func (fields ServerEntryFields) VerifySignature(publicKey string) error {
 
 	signatureField, ok := copyFields["signature"]
 	if !ok {
-		return common.ContextError(errors.New("missing signature field"))
+		return errors.TraceNew("missing signature field")
 	}
 
 	signatureFieldStr, ok := signatureField.(string)
 	if !ok {
-		return common.ContextError(errors.New("invalid signature field"))
+		return errors.TraceNew("invalid signature field")
 	}
 
 	decodedSignatureField, err := base64.StdEncoding.DecodeString(signatureFieldStr)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	if len(decodedSignatureField) < signaturePublicKeyDigestSize {
-		return common.ContextError(errors.New("invalid signature field length"))
+		return errors.TraceNew("invalid signature field length")
 	}
 
 	publicKeyID := decodedSignatureField[:signaturePublicKeyDigestSize]
 	signature := decodedSignatureField[signaturePublicKeyDigestSize:]
 
 	if len(signature) != ed25519.SignatureSize {
-		return common.ContextError(errors.New("invalid signature length"))
+		return errors.TraceNew("invalid signature length")
 	}
 
 	decodedPublicKey, err := base64.StdEncoding.DecodeString(publicKey)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	publicKeyDigest := sha256.Sum256(decodedPublicKey)
 	expectedPublicKeyID := publicKeyDigest[:signaturePublicKeyDigestSize]
 
-	if bytes.Compare(expectedPublicKeyID, publicKeyID) != 0 {
-		return common.ContextError(errors.New("unexpected public key ID"))
+	if !bytes.Equal(expectedPublicKeyID, publicKeyID) {
+		return errors.TraceNew("unexpected public key ID")
 	}
 
 	copyFields.RemoveUnsignedFields()
@@ -386,11 +386,11 @@ func (fields ServerEntryFields) VerifySignature(publicKey string) error {
 
 	marshaledFields, err := json.Marshal(copyFields)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	if !ed25519.Verify(decodedPublicKey, marshaledFields, signature) {
-		return common.ContextError(errors.New("invalid signature"))
+		return errors.TraceNew("invalid signature")
 	}
 
 	return nil
@@ -404,7 +404,7 @@ func (fields ServerEntryFields) RemoveUnsignedFields() {
 	delete(fields, "localTimestamp")
 
 	// Only non-local, explicit tags are part of the signature
-	isLocalDerivedTag, _ := fields["isLocalDerivedTag"]
+	isLocalDerivedTag := fields["isLocalDerivedTag"]
 	isLocalDerivedTagBool, ok := isLocalDerivedTag.(bool)
 	if ok && isLocalDerivedTagBool {
 		delete(fields, "tag")
@@ -418,7 +418,7 @@ func NewServerEntrySignatureKeyPair() (string, string, error) {
 
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return "", "", common.ContextError(err)
+		return "", "", errors.Trace(err)
 	}
 
 	return base64.StdEncoding.EncodeToString(publicKey),
@@ -590,7 +590,7 @@ func encodeServerEntry(
 
 	serverEntryJSON, err := json.Marshal(serverEntry)
 	if err != nil {
-		return "", common.ContextError(err)
+		return "", errors.Trace(err)
 	}
 
 	// Legacy clients expect the space-delimited fields.
@@ -620,7 +620,7 @@ func DecodeServerEntry(
 	serverEntry := new(ServerEntry)
 	err := decodeServerEntry(encodedServerEntry, timestamp, serverEntrySource, serverEntry)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// NOTE: if the source JSON happens to have values in these fields, they get clobbered.
@@ -642,7 +642,7 @@ func DecodeServerEntryFields(
 	serverEntryFields := make(ServerEntryFields)
 	err := decodeServerEntry(encodedServerEntry, timestamp, serverEntrySource, &serverEntryFields)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// NOTE: if the source JSON happens to have values in these fields, they get clobbered.
@@ -662,18 +662,18 @@ func decodeServerEntry(
 
 	hexDecodedServerEntry, err := hex.DecodeString(encodedServerEntry)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	// Skip past legacy format (4 space delimited fields) and just parse the JSON config
 	fields := bytes.SplitN(hexDecodedServerEntry, []byte(" "), 5)
 	if len(fields) != 5 {
-		return common.ContextError(errors.New("invalid encoded server entry"))
+		return errors.TraceNew("invalid encoded server entry")
 	}
 
 	err = json.Unmarshal(fields[4], target)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -687,8 +687,7 @@ func ValidateServerEntryFields(serverEntryFields ServerEntryFields) error {
 
 	ipAddress := serverEntryFields.GetIPAddress()
 	if net.ParseIP(ipAddress) == nil {
-		return common.ContextError(
-			fmt.Errorf("server entry has invalid ipAddress: %s", ipAddress))
+		return errors.Tracef("server entry has invalid ipAddress: %s", ipAddress)
 	}
 
 	// TODO: validate more fields?
@@ -698,15 +697,13 @@ func ValidateServerEntryFields(serverEntryFields ServerEntryFields) error {
 	source := serverEntryFields.GetLocalSource()
 	if !common.Contains(
 		SupportedServerEntrySources, source) {
-		return common.ContextError(
-			fmt.Errorf("server entry has invalid source: %s", source))
+		return errors.Tracef("server entry has invalid source: %s", source)
 	}
 
 	timestamp := serverEntryFields.GetLocalTimestamp()
 	_, err := time.Parse(time.RFC3339, timestamp)
 	if err != nil {
-		return common.ContextError(
-			fmt.Errorf("server entry has invalid timestamp: %s", err))
+		return errors.Tracef("server entry has invalid timestamp: %s", err)
 	}
 
 	return nil
@@ -729,7 +726,7 @@ func DecodeServerEntryList(
 		// TODO: skip this entry and continue if can't decode?
 		serverEntryFields, err := DecodeServerEntryFields(encodedServerEntry, timestamp, serverEntrySource)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		if ValidateServerEntryFields(serverEntryFields) != nil {
@@ -779,7 +776,7 @@ func (decoder *StreamingServerEntryDecoder) Next() (ServerEntryFields, error) {
 
 	for {
 		if !decoder.scanner.Scan() {
-			return nil, common.ContextError(decoder.scanner.Err())
+			return nil, errors.Trace(decoder.scanner.Err())
 		}
 
 		// TODO: use scanner.Bytes which doesn't allocate, instead of scanner.Text
@@ -788,7 +785,7 @@ func (decoder *StreamingServerEntryDecoder) Next() (ServerEntryFields, error) {
 		serverEntryFields, err := DecodeServerEntryFields(
 			decoder.scanner.Text(), decoder.timestamp, decoder.serverEntrySource)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		if ValidateServerEntryFields(serverEntryFields) != nil {

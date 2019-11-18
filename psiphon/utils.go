@@ -22,7 +22,7 @@ package psiphon
 import (
 	"crypto/x509"
 	"encoding/base64"
-	"errors"
+	std_errors "errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -36,6 +36,8 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
 )
 
 // MakePsiphonUserAgent constructs a User-Agent value to use for web service
@@ -56,11 +58,11 @@ func MakePsiphonUserAgent(config *Config) string {
 func DecodeCertificate(encodedCertificate string) (certificate *x509.Certificate, err error) {
 	derEncodedCertificate, err := base64.StdEncoding.DecodeString(encodedCertificate)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	certificate, err = x509.ParseCertificate(derEncodedCertificate)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	return certificate, nil
 }
@@ -90,7 +92,7 @@ func TrimError(err error) error {
 	const MAX_LEN = 100
 	message := fmt.Sprintf("%s", err)
 	if len(message) > MAX_LEN {
-		return errors.New(message[:MAX_LEN/2] + "..." + message[len(message)-MAX_LEN/2:])
+		return std_errors.New(message[:MAX_LEN/2] + "..." + message[len(message)-MAX_LEN/2:])
 	}
 	return err
 }
@@ -104,7 +106,7 @@ func IsAddressInUseError(err error) bool {
 			}
 			// Special case for Windows (WSAEADDRINUSE = 10048)
 			if errno, ok := err.Err.(syscall.Errno); ok {
-				if 10048 == int(errno) {
+				if int(errno) == 10048 {
 					return true
 				}
 			}
@@ -160,7 +162,7 @@ func RedactNetError(err error) error {
 		return err
 	}
 
-	return errors.New("[redacted]" + errstr[index:])
+	return std_errors.New("[redacted]" + errstr[index:])
 }
 
 // SyncFileWriter wraps a file and exposes an io.Writer. At predefined
@@ -229,22 +231,22 @@ func (conn *channelConn) RemoteAddr() net.Addr {
 }
 
 func (conn *channelConn) SetDeadline(_ time.Time) error {
-	return common.ContextError(errors.New("unsupported"))
+	return errors.TraceNew("unsupported")
 }
 
 func (conn *channelConn) SetReadDeadline(_ time.Time) error {
-	return common.ContextError(errors.New("unsupported"))
+	return errors.TraceNew("unsupported")
 }
 
 func (conn *channelConn) SetWriteDeadline(_ time.Time) error {
-	return common.ContextError(errors.New("unsupported"))
+	return errors.TraceNew("unsupported")
 }
 
 func emitMemoryMetrics() {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	NoticeInfo("Memory metrics at %s: goroutines %d | objects %d | alloc %s | inuse %s | sys %s | cumulative %d %s",
-		common.GetParentContext(),
+		stacktrace.GetParentFunctionName(),
 		runtime.NumGoroutine(),
 		memStats.HeapObjects,
 		common.FormatByteCount(memStats.HeapAlloc),

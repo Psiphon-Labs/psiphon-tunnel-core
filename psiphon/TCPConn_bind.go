@@ -23,15 +23,13 @@ package psiphon
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"math/rand"
 	"net"
 	"os"
 	"strconv"
 	"syscall"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/creack/goselect"
 )
 
@@ -48,18 +46,18 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 	// Get the remote IP and port, resolving a domain name if necessary
 	host, strPort, err := net.SplitHostPort(addr)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	port, err := strconv.Atoi(strPort)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	ipAddrs, err := LookupIP(ctx, host, config)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	if len(ipAddrs) < 1 {
-		return nil, common.ContextError(errors.New("no IP address"))
+		return nil, errors.TraceNew("no IP address")
 	}
 
 	// When configured, attempt to synthesize IPv6 addresses from
@@ -98,7 +96,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 
 	permutedIndexes := rand.Perm(len(ipAddrs))
 
-	lastErr := errors.New("unknown error")
+	lastErr := errors.TraceNew("unknown error")
 
 	for _, index := range permutedIndexes {
 
@@ -117,7 +115,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 			copy(ipv6[:], ipAddr.To16())
 			domain = syscall.AF_INET6
 		} else {
-			lastErr = common.ContextError(errors.New("invalid IP address"))
+			lastErr = errors.TraceNew("invalid IP address")
 			continue
 		}
 		if domain == syscall.AF_INET {
@@ -130,7 +128,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 
 		socketFD, err := syscall.Socket(domain, syscall.SOCK_STREAM, 0)
 		if err != nil {
-			lastErr = common.ContextError(err)
+			lastErr = errors.Trace(err)
 			continue
 		}
 
@@ -142,7 +140,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 			_, err = config.DeviceBinder.BindToDevice(socketFD)
 			if err != nil {
 				syscall.Close(socketFD)
-				lastErr = common.ContextError(fmt.Errorf("BindToDevice failed with %s", err))
+				lastErr = errors.Tracef("BindToDevice failed with %s", err)
 				continue
 			}
 		}
@@ -152,7 +150,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 		err = syscall.SetNonblock(socketFD, true)
 		if err != nil {
 			syscall.Close(socketFD)
-			lastErr = common.ContextError(err)
+			lastErr = errors.Trace(err)
 			continue
 		}
 
@@ -160,7 +158,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 		if err != nil {
 			if errno, ok := err.(syscall.Errno); !ok || errno != syscall.EINPROGRESS {
 				syscall.Close(socketFD)
-				lastErr = common.ContextError(err)
+				lastErr = errors.Trace(err)
 				continue
 			}
 		}
@@ -172,7 +170,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 		err = syscall.Pipe(controlFDs[:])
 		if err != nil {
 			syscall.Close(socketFD)
-			lastErr = common.ContextError(err)
+			lastErr = errors.Trace(err)
 			continue
 
 		}
@@ -187,7 +185,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 
 		if err != nil {
 			syscall.Close(socketFD)
-			lastErr = common.ContextError(err)
+			lastErr = errors.Trace(err)
 			continue
 		}
 
@@ -208,7 +206,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 			err := goselect.Select(max+1, &readSet, &writeSet, nil, -1)
 
 			if err == nil && !writeSet.IsSet(uintptr(socketFD)) {
-				err = errors.New("interrupted")
+				err = errors.TraceNew("interrupted")
 			}
 
 			resultChannel <- err
@@ -235,17 +233,17 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 
 			if done {
 				// Skip retry as dial context has timed out of been canceled.
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 
-			lastErr = common.ContextError(err)
+			lastErr = errors.Trace(err)
 			continue
 		}
 
 		err = syscall.SetNonblock(socketFD, false)
 		if err != nil {
 			syscall.Close(socketFD)
-			lastErr = common.ContextError(err)
+			lastErr = errors.Trace(err)
 			continue
 		}
 
@@ -257,7 +255,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 		conn, err := net.FileConn(file) // net.FileConn() dups socketFD
 		file.Close()                    // file.Close() closes socketFD
 		if err != nil {
-			lastErr = common.ContextError(err)
+			lastErr = errors.Trace(err)
 			continue
 		}
 
@@ -274,7 +272,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 		// than try to mask the RemoteAddr issue.
 		if conn.RemoteAddr() == nil {
 			conn.Close()
-			return nil, common.ContextError(errors.New("RemoteAddr returns nil"))
+			return nil, errors.TraceNew("RemoteAddr returns nil")
 		}
 
 		return &TCPConn{Conn: conn}, nil

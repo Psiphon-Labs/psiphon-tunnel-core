@@ -26,6 +26,7 @@ import (
 	"os"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 const (
@@ -45,35 +46,35 @@ func makeDeviceOutboundBuffer(_ int) []byte {
 }
 
 func OpenTunDevice(_ string) (*os.File, string, error) {
-	return nil, "", common.ContextError(unsupportedError)
+	return nil, "", errors.Trace(errUnsupported)
 }
 
 func (device *Device) readTunPacket() (int, int, error) {
-	return 0, 0, common.ContextError(unsupportedError)
+	return 0, 0, errors.Trace(errUnsupported)
 }
 
 func (device *Device) writeTunPacket(_ []byte) error {
-	return common.ContextError(unsupportedError)
+	return errors.Trace(errUnsupported)
 }
 
 func configureNetworkConfigSubprocessCapabilities() error {
-	return common.ContextError(unsupportedError)
+	return errors.Trace(errUnsupported)
 }
 
 func resetNATTables(_ *ServerConfig, _ net.IP) error {
-	return common.ContextError(unsupportedError)
+	return errors.Trace(errUnsupported)
 }
 
 func configureServerInterface(_ *ServerConfig, _ string) error {
-	return common.ContextError(unsupportedError)
+	return errors.Trace(errUnsupported)
 }
 
 func configureClientInterface(_ *ClientConfig, _ string) error {
-	return common.ContextError(unsupportedError)
+	return errors.Trace(errUnsupported)
 }
 
 func BindToDevice(_ int, _ string) error {
-	return common.ContextError(unsupportedError)
+	return errors.Trace(errUnsupported)
 }
 
 func fixBindToDevice(_ common.Logger, _ bool, _ string) error {
@@ -85,15 +86,15 @@ type NonblockingIO struct {
 }
 
 func NewNonblockingIO(ioFD int) (*NonblockingIO, error) {
-	return nil, common.ContextError(unsupportedError)
+	return nil, errors.Trace(errUnsupported)
 }
 
 func (nio *NonblockingIO) Read(p []byte) (int, error) {
-	return 0, common.ContextError(unsupportedError)
+	return 0, errors.Trace(errUnsupported)
 }
 
 func (nio *NonblockingIO) Write(p []byte) (int, error) {
-	return 0, common.ContextError(unsupportedError)
+	return 0, errors.Trace(errUnsupported)
 }
 
 func (nio *NonblockingIO) IsClosed() bool {
@@ -101,5 +102,5 @@ func (nio *NonblockingIO) IsClosed() bool {
 }
 
 func (nio *NonblockingIO) Close() error {
-	return common.ContextError(unsupportedError)
+	return errors.Trace(errUnsupported)
 }

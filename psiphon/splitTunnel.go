@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -31,8 +30,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
@@ -80,7 +79,7 @@ type SplitTunnelClassifier struct {
 
 type classification struct {
 	isUntunneled bool
-	expiry       monotime.Time
+	expiry       time.Time
 }
 
 func NewSplitTunnelClassifier(config *Config, tunneler Tunneler) *SplitTunnelClassifier {
@@ -169,7 +168,7 @@ func (classifier *SplitTunnelClassifier) IsUntunneled(targetAddress string) bool
 	classifier.mutex.RLock()
 	cachedClassification, ok := classifier.cache[targetAddress]
 	classifier.mutex.RUnlock()
-	if ok && cachedClassification.expiry.After(monotime.Now()) {
+	if ok && cachedClassification.expiry.After(time.Now()) {
 		return cachedClassification.isUntunneled
 	}
 
@@ -179,7 +178,7 @@ func (classifier *SplitTunnelClassifier) IsUntunneled(targetAddress string) bool
 		NoticeAlert("failed to resolve address for split tunnel classification: %s", err)
 		return false
 	}
-	expiry := monotime.Now().Add(ttl)
+	expiry := time.Now().Add(ttl)
 
 	isUntunneled := classifier.ipAddressInRoutes(ipAddr)
 
@@ -235,14 +234,14 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	url := fmt.Sprintf(fetchRoutesUrlFormat, tunnel.serverContext.clientRegion)
 	request, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	request.Header.Set("User-Agent", classifier.userAgent)
 
 	etag, err := GetSplitTunnelRoutesETag(tunnel.serverContext.clientRegion)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	if etag != "" {
 		request.Header.Add("If-None-Match", etag)
@@ -273,7 +272,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
 	}
 	if err != nil {
-		NoticeAlert("failed to request split tunnel routes package: %s", common.ContextError(err))
+		NoticeAlert("failed to request split tunnel routes package: %s", errors.Trace(err))
 		useCachedRoutes = true
 	}
 
@@ -288,7 +287,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	if !useCachedRoutes {
 		routesDataPackage, err = ioutil.ReadAll(response.Body)
 		if err != nil {
-			NoticeAlert("failed to download split tunnel routes package: %s", common.ContextError(err))
+			NoticeAlert("failed to download split tunnel routes package: %s", errors.Trace(err))
 			useCachedRoutes = true
 		}
 	}
@@ -298,7 +297,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 		encodedRoutesData, err = common.ReadAuthenticatedDataPackage(
 			routesDataPackage, false, routesSignaturePublicKey)
 		if err != nil {
-			NoticeAlert("failed to read split tunnel routes package: %s", common.ContextError(err))
+			NoticeAlert("failed to read split tunnel routes package: %s", errors.Trace(err))
 			useCachedRoutes = true
 		}
 	}
@@ -307,7 +306,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	if !useCachedRoutes {
 		compressedRoutesData, err = base64.StdEncoding.DecodeString(encodedRoutesData)
 		if err != nil {
-			NoticeAlert("failed to decode split tunnel routes: %s", common.ContextError(err))
+			NoticeAlert("failed to decode split tunnel routes: %s", errors.Trace(err))
 			useCachedRoutes = true
 		}
 	}
@@ -319,7 +318,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 			zlibReader.Close()
 		}
 		if err != nil {
-			NoticeAlert("failed to decompress split tunnel routes: %s", common.ContextError(err))
+			NoticeAlert("failed to decompress split tunnel routes: %s", errors.Trace(err))
 			useCachedRoutes = true
 		}
 	}
@@ -329,7 +328,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 		if etag != "" {
 			err := SetSplitTunnelRoutes(tunnel.serverContext.clientRegion, etag, routesData)
 			if err != nil {
-				NoticeAlert("failed to cache split tunnel routes: %s", common.ContextError(err))
+				NoticeAlert("failed to cache split tunnel routes: %s", errors.Trace(err))
 				// Proceed with fetched data, even when we can't cache it
 			}
 		}
@@ -338,10 +337,10 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	if useCachedRoutes {
 		routesData, err = GetSplitTunnelRoutesData(tunnel.serverContext.clientRegion)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		if routesData == nil {
-			return nil, common.ContextError(errors.New("no cached routes"))
+			return nil, errors.TraceNew("no cached routes")
 		}
 	}
 
@@ -364,7 +363,7 @@ func (classifier *SplitTunnelClassifier) installRoutes(routesData []byte) (err e
 
 	classifier.routes, err = common.NewSubnetLookupFromRoutes(routesData)
 	if err != nil {
-		return common.ContextError(err)
+		return errors.Trace(err)
 	}
 
 	classifier.isRoutesSet = true
@@ -394,7 +393,7 @@ func tunneledLookupIP(
 	// dnsServerAddress must be an IP address
 	ipAddr = net.ParseIP(dnsServerAddress)
 	if ipAddr == nil {
-		return nil, 0, common.ContextError(errors.New("invalid IP address"))
+		return nil, 0, errors.TraceNew("invalid IP address")
 	}
 
 	// Dial's alwaysTunnel is set to true to ensure this connection
@@ -404,15 +403,15 @@ func tunneledLookupIP(
 	conn, err := dnsTunneler.Dial(fmt.Sprintf(
 		"%s:%d", dnsServerAddress, DNS_PORT), true, nil)
 	if err != nil {
-		return nil, 0, common.ContextError(err)
+		return nil, 0, errors.Trace(err)
 	}
 
 	ipAddrs, ttls, err := ResolveIP(host, conn)
 	if err != nil {
-		return nil, 0, common.ContextError(err)
+		return nil, 0, errors.Trace(err)
 	}
 	if len(ipAddrs) < 1 {
-		return nil, 0, common.ContextError(errors.New("no IP address"))
+		return nil, 0, errors.TraceNew("no IP address")
 	}
 
 	return ipAddrs[0], ttls[0], nil

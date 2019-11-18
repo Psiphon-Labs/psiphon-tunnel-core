@@ -26,6 +26,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 // Reloader represents a read-only, in-memory reloadable data object. For example,
@@ -127,13 +129,13 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 	// assume that the content is at least as fresh as the modification time.
 	fileInfo, err := os.Stat(filename)
 	if err != nil {
-		return false, ContextError(err)
+		return false, errors.Trace(err)
 	}
 	fileModTime := fileInfo.ModTime()
 
 	file, err := os.Open(filename)
 	if err != nil {
-		return false, ContextError(err)
+		return false, errors.Trace(err)
 	}
 	defer file.Close()
 
@@ -141,7 +143,7 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 
 	_, err = io.Copy(hash, file)
 	if err != nil {
-		return false, ContextError(err)
+		return false, errors.Trace(err)
 	}
 
 	checksum := hash.Sum64()
@@ -158,11 +160,11 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 	if reloadable.loadFileContent {
 		_, err = file.Seek(0, 0)
 		if err != nil {
-			return false, ContextError(err)
+			return false, errors.Trace(err)
 		}
 		content, err = ioutil.ReadAll(file)
 		if err != nil {
-			return false, ContextError(err)
+			return false, errors.Trace(err)
 		}
 	}
 
@@ -176,7 +178,7 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 
 	err = reloadable.reloadAction(content, fileModTime)
 	if err != nil {
-		return false, ContextError(err)
+		return false, errors.Trace(err)
 	}
 
 	reloadable.checksum = checksum

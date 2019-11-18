@@ -26,7 +26,6 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -38,10 +37,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/net/http2"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -249,7 +248,7 @@ func DialMeek(
 				meekConfig.DialAddress,
 				dialConfig)
 			if err != nil {
-				return nil, nil, common.ContextError(err)
+				return nil, nil, errors.Trace(err)
 			}
 			return packetConn, remoteAddr, nil
 		}
@@ -363,7 +362,7 @@ func DialMeek(
 		// As DialAddr is set in the CustomTLSConfig, no address is required here.
 		preConn, err := tlsDialer(ctx, "tcp", "")
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		cachedTLSDialer = newCachedTLSDialer(preConn, tlsDialer)
@@ -400,7 +399,7 @@ func DialMeek(
 
 			url, err := url.Parse(dialConfig.UpstreamProxyURL)
 			if err != nil {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 			proxyUrl = http.ProxyURL(url)
 
@@ -433,7 +432,7 @@ func DialMeek(
 			// Wrap transport with a transport that can perform HTTP proxy auth negotiation
 			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport, dialConfig.CustomHeaders)
 			if err != nil {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 		} else {
 			transport = httpTransport
@@ -449,7 +448,7 @@ func DialMeek(
 	if meekConfig.UseHTTPS {
 		host, _, err := net.SplitHostPort(meekConfig.DialAddress)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		additionalHeaders = map[string][]string{
 			"X-Psiphon-Fronting-Address": {host},
@@ -508,7 +507,7 @@ func DialMeek(
 				meekConfig.ClientTunnelProtocol,
 				"")
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		meek.cookie = cookie
@@ -669,7 +668,7 @@ func (meek *MeekConn) RoundTrip(
 	ctx context.Context, endPoint string, requestBody []byte) ([]byte, error) {
 
 	if !meek.roundTripperOnly {
-		return nil, common.ContextError(errors.New("operation unsupported"))
+		return nil, errors.TraceNew("operation unsupported")
 	}
 
 	cookie, _, _, err := makeMeekObfuscationValues(
@@ -680,7 +679,7 @@ func (meek *MeekConn) RoundTrip(
 		meek.clientTunnelProtocol,
 		endPoint)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	// Note:
@@ -699,7 +698,7 @@ func (meek *MeekConn) RoundTrip(
 	request, cancelFunc, err := meek.newRequest(
 		ctx, cookie, bytes.NewReader(requestBody), 0)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 	defer cancelFunc()
 
@@ -720,12 +719,12 @@ func (meek *MeekConn) RoundTrip(
 		}
 	}
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	responseBody, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	return responseBody, nil
@@ -735,10 +734,10 @@ func (meek *MeekConn) RoundTrip(
 // net.Conn Deadlines are ignored. net.Conn concurrency semantics are supported.
 func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
 	if meek.roundTripperOnly {
-		return 0, common.ContextError(errors.New("operation unsupported"))
+		return 0, errors.TraceNew("operation unsupported")
 	}
 	if meek.IsClosed() {
-		return 0, common.ContextError(errors.New("meek connection is closed"))
+		return 0, errors.TraceNew("meek connection is closed")
 	}
 	// Block until there is received data to consume
 	var receiveBuffer *bytes.Buffer
@@ -746,7 +745,7 @@ func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
 	case receiveBuffer = <-meek.partialReceiveBuffer:
 	case receiveBuffer = <-meek.fullReceiveBuffer:
 	case <-meek.runCtx.Done():
-		return 0, common.ContextError(errors.New("meek connection has closed"))
+		return 0, errors.TraceNew("meek connection has closed")
 	}
 	n, err = receiveBuffer.Read(buffer)
 	meek.replaceReceiveBuffer(receiveBuffer)
@@ -757,10 +756,10 @@ func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
 // net.Conn Deadlines are ignored. net.Conn concurrency semantics are supported.
 func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
 	if meek.roundTripperOnly {
-		return 0, common.ContextError(errors.New("operation unsupported"))
+		return 0, errors.TraceNew("operation unsupported")
 	}
 	if meek.IsClosed() {
-		return 0, common.ContextError(errors.New("meek connection is closed"))
+		return 0, errors.TraceNew("meek connection is closed")
 	}
 	// Repeats until all n bytes are written
 	n = len(buffer)
@@ -771,7 +770,7 @@ func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
 		case sendBuffer = <-meek.emptySendBuffer:
 		case sendBuffer = <-meek.partialSendBuffer:
 		case <-meek.runCtx.Done():
-			return 0, common.ContextError(errors.New("meek connection has closed"))
+			return 0, errors.TraceNew("meek connection has closed")
 		}
 		writeLen := meek.limitRequestPayloadLength - sendBuffer.Len()
 		if writeLen > 0 {
@@ -798,17 +797,17 @@ func (meek *MeekConn) RemoteAddr() net.Addr {
 
 // SetDeadline is a stub implementation of net.Conn.SetDeadline
 func (meek *MeekConn) SetDeadline(t time.Time) error {
-	return common.ContextError(errors.New("not supported"))
+	return errors.TraceNew("not supported")
 }
 
 // SetReadDeadline is a stub implementation of net.Conn.SetReadDeadline
 func (meek *MeekConn) SetReadDeadline(t time.Time) error {
-	return common.ContextError(errors.New("not supported"))
+	return errors.TraceNew("not supported")
 }
 
 // SetWriteDeadline is a stub implementation of net.Conn.SetWriteDeadline
 func (meek *MeekConn) SetWriteDeadline(t time.Time) error {
-	return common.ContextError(errors.New("not supported"))
+	return errors.TraceNew("not supported")
 }
 
 func (meek *MeekConn) replaceReceiveBuffer(receiveBuffer *bytes.Buffer) {
@@ -896,7 +895,7 @@ func (meek *MeekConn) relay() {
 				return
 			default:
 			}
-			NoticeAlert("%s", common.ContextError(err))
+			NoticeAlert("%s", errors.Trace(err))
 			go meek.Close()
 			return
 		}
@@ -1030,7 +1029,7 @@ func (meek *MeekConn) newRequest(
 	request, err := http.NewRequest("POST", meek.url.String(), body)
 	if err != nil {
 		cancelFunc()
-		return nil, nil, common.ContextError(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	request = request.WithContext(requestCtx)
@@ -1100,7 +1099,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 	retries := uint(0)
 
 	p := meek.getCustomClientParameters()
-	retryDeadline := monotime.Now().Add(p.Duration(parameters.MeekRoundTripRetryDeadline))
+	retryDeadline := time.Now().Add(p.Duration(parameters.MeekRoundTripRetryDeadline))
 	retryDelay := p.Duration(parameters.MeekRoundTripRetryMinDelay)
 	retryMaxDelay := p.Duration(parameters.MeekRoundTripRetryMaxDelay)
 	retryMultiplier := p.Float(parameters.MeekRoundTripRetryMultiplier)
@@ -1132,13 +1131,14 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		}
 
 		request, cancelFunc, err := meek.newRequest(
+			//lint:ignore SA1012 meek.newRequest expects/handles nil context
 			nil,
 			nil,
 			requestBody,
 			contentLength)
 		if err != nil {
 			// Don't retry when can't initialize a Request
-			return 0, common.ContextError(err)
+			return 0, errors.Trace(err)
 		}
 
 		expectedStatusCode := http.StatusOK
@@ -1164,7 +1164,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 				// done with it. MeekConn.Write will exit on Done and not hang
 				// awaiting sendBuffer.
 				sendBuffer = nil
-				return 0, common.ContextError(errors.New("meek connection has closed"))
+				return 0, errors.TraceNew("meek connection has closed")
 			}
 		}
 
@@ -1172,7 +1172,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			select {
 			case <-meek.runCtx.Done():
 				// Exit without retrying and without logging error.
-				return 0, common.ContextError(err)
+				return 0, errors.Trace(err)
 			default:
 			}
 			NoticeAlert("meek round trip failed: %s", err)
@@ -1187,10 +1187,9 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 
 				// Don't retry when the status code is incorrect
 				response.Body.Close()
-				return 0, common.ContextError(
-					fmt.Errorf(
-						"unexpected status code: %d instead of %d",
-						response.StatusCode, expectedStatusCode))
+				return 0, errors.Tracef(
+					"unexpected status code: %d instead of %d",
+					response.StatusCode, expectedStatusCode)
 			}
 
 			// Update meek session cookie
@@ -1242,11 +1241,11 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		// retry if time remains; when the next delay exceeds the time
 		// remaining until the deadline, do not retry.
 
-		now := monotime.Now()
+		now := time.Now()
 
 		if retries >= 1 &&
 			(now.After(retryDeadline) || retryDeadline.Sub(now) <= retryDelay) {
-			return 0, common.ContextError(err)
+			return 0, errors.Trace(err)
 		}
 		retries += 1
 
@@ -1256,7 +1255,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		case <-delayTimer.C:
 		case <-meek.runCtx.Done():
 			delayTimer.Stop()
-			return 0, common.ContextError(err)
+			return 0, errors.Trace(err)
 		}
 
 		// Increase the next delay, to back off and avoid excessive
@@ -1319,7 +1318,7 @@ func (meek *MeekConn) readPayload(
 		meek.replaceReceiveBuffer(receiveBuffer)
 		totalSize += n
 		if err != nil {
-			return totalSize, common.ContextError(err)
+			return totalSize, errors.Trace(err)
 		}
 		if n == 0 {
 			break
@@ -1367,7 +1366,7 @@ func makeMeekObfuscationValues(
 	}
 	serializedCookie, err := json.Marshal(cookieData)
 	if err != nil {
-		return nil, 0, 0, common.ContextError(err)
+		return nil, 0, 0, errors.Trace(err)
 	}
 
 	// Encrypt the JSON data
@@ -1381,12 +1380,12 @@ func makeMeekObfuscationValues(
 	var publicKey [32]byte
 	decodedPublicKey, err := base64.StdEncoding.DecodeString(meekCookieEncryptionPublicKey)
 	if err != nil {
-		return nil, 0, 0, common.ContextError(err)
+		return nil, 0, 0, errors.Trace(err)
 	}
 	copy(publicKey[:], decodedPublicKey)
 	ephemeralPublicKey, ephemeralPrivateKey, err := box.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, 0, 0, common.ContextError(err)
+		return nil, 0, 0, errors.Trace(err)
 	}
 	box := box.Seal(nil, serializedCookie, &nonce, &publicKey, ephemeralPrivateKey)
 	encryptedCookie := make([]byte, 32+len(box))
@@ -1402,7 +1401,7 @@ func makeMeekObfuscationValues(
 			PaddingPRNGSeed: meekObfuscatorPaddingPRNGSeed,
 			MaxPadding:      &maxPadding})
 	if err != nil {
-		return nil, 0, 0, common.ContextError(err)
+		return nil, 0, 0, errors.Trace(err)
 	}
 	obfuscatedCookie := obfuscator.SendSeedMessage()
 	seedLen := len(obfuscatedCookie)
@@ -1411,7 +1410,7 @@ func makeMeekObfuscationValues(
 
 	cookieNamePRNG, err := obfuscator.GetDerivedPRNG("meek-cookie-name")
 	if err != nil {
-		return nil, 0, 0, common.ContextError(err)
+		return nil, 0, 0, errors.Trace(err)
 	}
 
 	// Format the HTTP cookie
@@ -1436,7 +1435,7 @@ func makeMeekObfuscationValues(
 		limitRequestPayloadLengthPRNG, err := obfuscator.GetDerivedPRNG(
 			"meek-limit-request-payload-length")
 		if err != nil {
-			return nil, 0, 0, common.ContextError(err)
+			return nil, 0, 0, errors.Trace(err)
 		}
 
 		minLength := p.Int(parameters.MeekMinLimitRequestPayloadLength)

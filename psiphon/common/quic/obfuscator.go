@@ -21,17 +21,15 @@ package quic
 
 import (
 	"crypto/sha256"
-	"fmt"
 	"io"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/Yawning/chacha20"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/hkdf"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
@@ -74,11 +72,11 @@ type ObfuscatedPacketConn struct {
 
 type peerMode struct {
 	isObfuscated   bool
-	lastPacketTime monotime.Time
+	lastPacketTime time.Time
 }
 
 func (p *peerMode) isStale() bool {
-	return monotime.Since(p.lastPacketTime) >= SERVER_IDLE_TIMEOUT
+	return time.Since(p.lastPacketTime) >= SERVER_IDLE_TIMEOUT
 }
 
 // NewObfuscatedPacketConn creates a new ObfuscatedPacketConn.
@@ -91,7 +89,7 @@ func NewObfuscatedPacketConn(
 	// There is no replay of obfuscation "encryption", just padding.
 	nonceSeed, err := prng.NewSeed()
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	packetConn := &ObfuscatedPacketConn{
@@ -107,7 +105,7 @@ func NewObfuscatedPacketConn(
 	_, err = io.ReadFull(
 		hkdf.New(sha256.New, secret, salt, nil), packetConn.obfuscationKey[:])
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	if isServer {
@@ -215,8 +213,7 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 
 			// Without addr, the mode cannot be determined.
 			if addr == nil {
-				return n, addr, newTemporaryNetError(common.ContextError(
-					fmt.Errorf("missing addr")))
+				return n, addr, newTemporaryNetError(errors.Tracef("missing addr"))
 			}
 
 			conn.peerModesMutex.Lock()
@@ -231,7 +228,7 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 				mode.isObfuscated = false
 			}
 			isObfuscated = mode.isObfuscated
-			mode.lastPacketTime = monotime.Now()
+			mode.lastPacketTime = time.Now()
 			conn.peerModesMutex.Unlock()
 
 		}
@@ -242,20 +239,20 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			// avoids allocting a buffer.
 
 			if n < (NONCE_SIZE + 1) {
-				return n, addr, newTemporaryNetError(common.ContextError(
-					fmt.Errorf("unexpected obfuscated QUIC packet length: %d", n)))
+				return n, addr, newTemporaryNetError(errors.Tracef(
+					"unexpected obfuscated QUIC packet length: %d", n))
 			}
 
 			cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], p[0:NONCE_SIZE])
 			if err != nil {
-				return n, addr, common.ContextError(err)
+				return n, addr, errors.Trace(err)
 			}
 			cipher.XORKeyStream(p[NONCE_SIZE:], p[NONCE_SIZE:])
 
 			paddingLen := int(p[NONCE_SIZE])
 			if paddingLen > MAX_PADDING || paddingLen > n-(NONCE_SIZE+1) {
-				return n, addr, newTemporaryNetError(common.ContextError(
-					fmt.Errorf("unexpected padding length: %d, %d", paddingLen, n)))
+				return n, addr, newTemporaryNetError(errors.Tracef(
+					"unexpected padding length: %d, %d", paddingLen, n))
 			}
 
 			n -= (NONCE_SIZE + 1) + paddingLen
@@ -305,8 +302,8 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 		maxQUICPacketSize, maxObfuscatedPacketSize := getMaxPacketSizes(addr)
 
 		if n > maxQUICPacketSize {
-			return 0, newTemporaryNetError(common.ContextError(
-				fmt.Errorf("unexpected QUIC packet length: %d", n)))
+			return 0, newTemporaryNetError(errors.Tracef(
+				"unexpected QUIC packet length: %d", n))
 		}
 
 		// Note: escape analysis showed a local array escaping to the heap,
@@ -349,7 +346,7 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 
 			cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], nonce)
 			if err != nil {
-				return 0, common.ContextError(err)
+				return 0, errors.Trace(err)
 			}
 			packet := buffer[NONCE_SIZE:dataLen]
 			cipher.XORKeyStream(packet, packet)

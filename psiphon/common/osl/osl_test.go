@@ -401,7 +401,7 @@ func TestOSL(t *testing.T) {
 				if paveFile.Name != firstPaveFiles[index].Name {
 					t.Fatalf("Pave name mismatch")
 				}
-				if bytes.Compare(paveFile.Contents, firstPaveFiles[index].Contents) != 0 {
+				if !bytes.Equal(paveFile.Contents, firstPaveFiles[index].Contents) {
 					t.Fatalf("Pave content mismatch")
 				}
 			}

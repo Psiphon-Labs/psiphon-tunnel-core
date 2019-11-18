@@ -20,7 +20,6 @@
 package transferstats
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -40,9 +39,8 @@ var nextServerID = 0
 
 type StatsTestSuite struct {
 	suite.Suite
-	serverID            string
-	httpClient          *http.Client
-	httpClientNoRegexes *http.Client
+	serverID   string
+	httpClient *http.Client
 }
 
 func TestStatsTestSuite(t *testing.T) {
@@ -112,11 +110,6 @@ func (suite *StatsTestSuite) Test_TakeOutStatsForServer() {
 
 	payload = TakeOutStatsForServer(suite.serverID)
 	suite.NotNil(payload, "should receive valid payload for valid server ID")
-
-	payloadJSON, err := json.Marshal(payload)
-	var parsedJSON interface{}
-	err = json.Unmarshal(payloadJSON, &parsedJSON)
-	suite.Nil(err, "payload JSON should parse successfully")
 
 	// After we retrieve the stats for a server, they should be cleared out of the tracked stats
 	payload = TakeOutStatsForServer(suite.serverID)

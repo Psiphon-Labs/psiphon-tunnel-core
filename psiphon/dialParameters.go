@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -32,6 +31,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -114,8 +114,8 @@ type DialParameters struct {
 
 	DialDuration time.Duration `json:"-"`
 
-	dialConfig *DialConfig `json:"-"`
-	meekConfig *MeekConfig `json:"-"`
+	dialConfig *DialConfig
+	meekConfig *MeekConfig
 }
 
 // MakeDialParameters creates a new DialParameters for the candidate server
@@ -196,7 +196,7 @@ func MakeDialParameters(
 	if dialParams != nil &&
 		(ttl <= 0 ||
 			dialParams.LastUsedTimestamp.Before(currentTimestamp.Add(-ttl)) ||
-			bytes.Compare(dialParams.LastUsedConfigStateHash, configStateHash) != 0 ||
+			!bytes.Equal(dialParams.LastUsedConfigStateHash, configStateHash) ||
 			(dialParams.TLSProfile != "" &&
 				!common.Contains(protocol.SupportedTLSProfiles, dialParams.TLSProfile)) ||
 			(dialParams.QUICVersion != "" &&
@@ -322,19 +322,19 @@ func MakeDialParameters(
 		dialParams.SSHClientVersion = values.GetSSHClientVersion()
 		dialParams.SSHKEXSeed, err = prng.NewSeed()
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
 	if !isReplay || !replayObfuscatorPadding {
 		dialParams.ObfuscatorPaddingSeed, err = prng.NewSeed()
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 		if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
 			dialParams.MeekObfuscatorPaddingSeed, err = prng.NewSeed()
 			if err != nil {
-				return nil, common.ContextError(err)
+				return nil, errors.Trace(err)
 			}
 		}
 	}
@@ -342,7 +342,7 @@ func MakeDialParameters(
 	if !isReplay || !replayFragmentor {
 		dialParams.FragmentorSeed, err = prng.NewSeed()
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -361,7 +361,7 @@ func MakeDialParameters(
 
 		dialParams.RandomizedTLSProfileSeed, err = prng.NewSeed()
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -377,7 +377,7 @@ func MakeDialParameters(
 		utlsClientHelloID, utlsClientHelloSpec, err := getUTLSClientHelloID(
 			p, dialParams.TLSProfile)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 
 		if protocol.TLSProfileIsRandomized(dialParams.TLSProfile) {
@@ -388,7 +388,7 @@ func MakeDialParameters(
 		dialParams.TLSVersion, err = getClientHelloVersion(
 			utlsClientHelloID, utlsClientHelloSpec)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -398,7 +398,7 @@ func MakeDialParameters(
 		dialParams.MeekFrontingDialAddress, dialParams.MeekFrontingHost, err =
 			selectFrontingParameters(serverEntry)
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -445,7 +445,7 @@ func MakeDialParameters(
 
 		dialParams.ObfuscatedQUICPaddingSeed, err = prng.NewSeed()
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -454,14 +454,14 @@ func MakeDialParameters(
 		// TODO: initialize only when LivenessTestMaxUp/DownstreamBytes > 0?
 		dialParams.LivenessTestSeed, err = prng.NewSeed()
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
 	if !isReplay || !replayAPIRequestPadding {
 		dialParams.APIRequestPaddingSeed, err = prng.NewSeed()
 		if err != nil {
-			return nil, common.ContextError(err)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -530,8 +530,8 @@ func MakeDialParameters(
 		}
 
 	default:
-		return nil, common.ContextError(
-			fmt.Errorf("unknown tunnel protocol: %s", dialParams.TunnelProtocol))
+		return nil, errors.Tracef(
+			"unknown tunnel protocol: %s", dialParams.TunnelProtocol)
 
 	}
 
@@ -765,10 +765,10 @@ func NewExchangedDialParameters(dialParams *DialParameters) *ExchangedDialParame
 // and is compatible with the specified server entry.
 func (dialParams *ExchangedDialParameters) Validate(serverEntry *protocol.ServerEntry) error {
 	if !common.Contains(protocol.SupportedTunnelProtocols, dialParams.TunnelProtocol) {
-		return common.ContextError(fmt.Errorf("unknown tunnel protocol: %s", dialParams.TunnelProtocol))
+		return errors.Tracef("unknown tunnel protocol: %s", dialParams.TunnelProtocol)
 	}
 	if !serverEntry.SupportsProtocol(dialParams.TunnelProtocol) {
-		return common.ContextError(fmt.Errorf("unsupported tunnel protocol: %s", dialParams.TunnelProtocol))
+		return errors.Tracef("unsupported tunnel protocol: %s", dialParams.TunnelProtocol)
 	}
 	return nil
 }
@@ -838,7 +838,7 @@ func selectFrontingParameters(serverEntry *protocol.ServerEntry) (string, string
 		var err error
 		frontingDialHost, err = regen.Generate(serverEntry.MeekFrontingAddressesRegex)
 		if err != nil {
-			return "", "", common.ContextError(err)
+			return "", "", errors.Trace(err)
 		}
 
 	} else {
@@ -847,7 +847,7 @@ func selectFrontingParameters(serverEntry *protocol.ServerEntry) (string, string
 		// fronting-capable servers.
 
 		if len(serverEntry.MeekFrontingAddresses) == 0 {
-			return "", "", common.ContextError(errors.New("MeekFrontingAddresses is empty"))
+			return "", "", errors.TraceNew("MeekFrontingAddresses is empty")
 		}
 
 		index := prng.Intn(len(serverEntry.MeekFrontingAddresses))
@@ -928,11 +928,9 @@ func makeDialCustomHeaders(
 	}
 
 	additionalCustomHeaders := p.HTTPHeaders(parameters.AdditionalCustomHeaders)
-	if additionalCustomHeaders != nil {
-		for k, v := range additionalCustomHeaders {
-			dialCustomHeaders[k] = make([]string, len(v))
-			copy(dialCustomHeaders[k], v)
-		}
+	for k, v := range additionalCustomHeaders {
+		dialCustomHeaders[k] = make([]string, len(v))
+		copy(dialCustomHeaders[k], v)
 	}
 	return dialCustomHeaders
 }

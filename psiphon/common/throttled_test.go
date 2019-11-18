@@ -28,8 +28,6 @@ import (
 	"net/http"
 	"testing"
 	"time"
-
-	"github.com/Psiphon-Labs/goarista/monotime"
 )
 
 const (
@@ -129,7 +127,7 @@ func run(t *testing.T, rateLimits RateLimits) {
 	testData, _ := MakeSecureRandomBytes(testDataSize)
 	requestBody := bytes.NewReader(testData)
 
-	startTime := monotime.Now()
+	startTime := time.Now()
 
 	response, err := client.Post("http://"+serverAddress, "application/octet-stream", requestBody)
 	if err == nil && response.StatusCode != http.StatusOK {
@@ -143,9 +141,9 @@ func run(t *testing.T, rateLimits RateLimits) {
 
 	// Test: elapsed upload time must reflect rate limit
 
-	checkElapsedTime(t, testDataSize, rateLimits.WriteBytesPerSecond, monotime.Since(startTime))
+	checkElapsedTime(t, testDataSize, rateLimits.WriteBytesPerSecond, time.Since(startTime))
 
-	startTime = monotime.Now()
+	startTime = time.Now()
 
 	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
@@ -157,7 +155,7 @@ func run(t *testing.T, rateLimits RateLimits) {
 
 	// Test: elapsed download time must reflect rate limit
 
-	checkElapsedTime(t, testDataSize, rateLimits.ReadBytesPerSecond, monotime.Since(startTime))
+	checkElapsedTime(t, testDataSize, rateLimits.ReadBytesPerSecond, time.Since(startTime))
 }
 
 func checkElapsedTime(t *testing.T, dataSize int, rateLimit int64, duration time.Duration) {

@@ -31,10 +31,12 @@ import (
 	"os/signal"
 	"sort"
 	"sync"
+	"syscall"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
@@ -289,7 +291,7 @@ func main() {
 	}()
 
 	systemStopSignal := make(chan os.Signal, 1)
-	signal.Notify(systemStopSignal, os.Interrupt, os.Kill)
+	signal.Notify(systemStopSignal, os.Interrupt, syscall.SIGTERM)
 
 	// writeProfilesSignal is nil and non-functional on Windows
 	writeProfilesSignal := makeSIGUSR2Channel()
@@ -325,7 +327,7 @@ func configurePacketTunnel(
 
 	file, _, err := tun.OpenTunDevice(tunDevice)
 	if err != nil {
-		return nil, common.ContextError(err)
+		return nil, errors.Trace(err)
 	}
 
 	provider := &tunProvider{

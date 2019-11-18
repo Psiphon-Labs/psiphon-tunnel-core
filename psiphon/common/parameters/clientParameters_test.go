@@ -20,6 +20,7 @@
 package parameters
 
 import (
+	"encoding/json"
 	"net/http"
 	"reflect"
 	"testing"
@@ -101,6 +102,11 @@ func TestGetDefaultParameters(t *testing.T) {
 			}
 			if !reflect.DeepEqual(names, g) {
 				t.Fatalf("CustomTLSProfileNames returned %+v expected %+v", g, names)
+			}
+		case KeyValues:
+			g := p.Get().KeyValues(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("KeyValues returned %+v expected %+v", g, v)
 			}
 		default:
 			t.Fatalf("Unhandled default type: %s", name)
@@ -330,5 +336,69 @@ func TestCustomTLSProfiles(t *testing.T) {
 	profile = p.Get().CustomTLSProfile("Profile3")
 	if profile != nil {
 		t.Fatalf("Unexpected profile")
+	}
+}
+
+func TestApplicationParameters(t *testing.T) {
+
+	parametersJSON := []byte(`
+    {
+       "ApplicationParameters" : {
+         "AppFlag1" : true,
+         "AppConfig1" : {"Option1" : "A", "Option2" : "B"},
+         "AppSwitches1" : [1, 2, 3, 4]
+       }
+    }
+    `)
+
+	validators := map[string]func(v interface{}) bool{
+		"AppFlag1": func(v interface{}) bool { return reflect.DeepEqual(v, true) },
+		"AppConfig1": func(v interface{}) bool {
+			return reflect.DeepEqual(v, map[string]interface{}{"Option1": "A", "Option2": "B"})
+		},
+		"AppSwitches1": func(v interface{}) bool {
+			return reflect.DeepEqual(v, []interface{}{float64(1), float64(2), float64(3), float64(4)})
+		},
+	}
+
+	var applyParameters map[string]interface{}
+	err := json.Unmarshal(parametersJSON, &applyParameters)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %s", err)
+	}
+
+	p, err := NewClientParameters(nil)
+	if err != nil {
+		t.Fatalf("NewClientParameters failed: %s", err)
+	}
+
+	_, err = p.Set("", false, applyParameters)
+	if err != nil {
+		t.Fatalf("Set failed: %s", err)
+	}
+
+	keyValues := p.Get().KeyValues(ApplicationParameters)
+
+	if len(keyValues) != len(validators) {
+		t.Fatalf("Unexpected key value count")
+	}
+
+	for key, value := range keyValues {
+
+		validator, ok := validators[key]
+		if !ok {
+			t.Fatalf("Unexpected key: %s", key)
+		}
+
+		var unmarshaledValue interface{}
+		err := json.Unmarshal(value, &unmarshaledValue)
+		if err != nil {
+			t.Fatalf("Unmarshal failed: %s", err)
+		}
+
+		if !validator(unmarshaledValue) {
+			t.Fatalf("Invalid value: %s, %T: %+v",
+				key, unmarshaledValue, unmarshaledValue)
+		}
 	}
 }
