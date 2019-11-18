@@ -35,13 +35,17 @@ import (
 // TraceNew returns a new error with the given message, wrapped with the caller
 // stack frame information.
 func TraceNew(message string) error {
-	return Trace(fmt.Errorf("%s", message))
+	err := fmt.Errorf("%s", message)
+	pc, _, line, _ := runtime.Caller(1)
+	return fmt.Errorf("%s#%d: %w", stacktrace.GetFunctionName(pc), line, err)
 }
 
 // Tracef returns a new error with the given formatted message, wrapped with
 // the caller stack frame information.
 func Tracef(format string, args ...interface{}) error {
-	return Trace(fmt.Errorf(format, args...))
+	err := fmt.Errorf(format, args...)
+	pc, _, line, _ := runtime.Caller(1)
+	return fmt.Errorf("%s#%d: %w", stacktrace.GetFunctionName(pc), line, err)
 }
 
 // Trace wraps the given error with the caller stack frame information.

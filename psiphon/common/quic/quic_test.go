@@ -33,7 +33,7 @@ import (
 )
 
 func TestQUIC(t *testing.T) {
-	for negotiateQUICVersion, _ := range supportedVersionNumbers {
+	for negotiateQUICVersion := range supportedVersionNumbers {
 		t.Run(negotiateQUICVersion, func(t *testing.T) {
 			runQUIC(t, negotiateQUICVersion)
 		})

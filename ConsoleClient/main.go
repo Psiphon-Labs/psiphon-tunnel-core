@@ -31,6 +31,7 @@ import (
 	"os/signal"
 	"sort"
 	"sync"
+	"syscall"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -290,7 +291,7 @@ func main() {
 	}()
 
 	systemStopSignal := make(chan os.Signal, 1)
-	signal.Notify(systemStopSignal, os.Interrupt, os.Kill)
+	signal.Notify(systemStopSignal, os.Interrupt, syscall.SIGTERM)
 
 	// writeProfilesSignal is nil and non-functional on Windows
 	writeProfilesSignal := makeSIGUSR2Channel()

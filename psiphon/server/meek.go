@@ -108,7 +108,7 @@ type MeekServer struct {
 	checksumTable     *crc64.Table
 	bufferPool        *CachedResponseBufferPool
 	rateLimitLock     sync.Mutex
-	rateLimitHistory  map[string][]monotime.Time
+	rateLimitHistory  map[string][]time.Time
 	rateLimitCount    int
 	rateLimitSignalGC chan struct{}
 }
@@ -144,7 +144,7 @@ func NewMeekServer(
 		sessions:          make(map[string]*meekSession),
 		checksumTable:     checksumTable,
 		bufferPool:        bufferPool,
-		rateLimitHistory:  make(map[string][]monotime.Time),
+		rateLimitHistory:  make(map[string][]time.Time),
 		rateLimitSignalGC: make(chan struct{}, 1),
 	}
 
@@ -374,7 +374,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 	// Set cookie before writing the response.
 
-	if session.meekProtocolVersion >= MEEK_PROTOCOL_VERSION_2 && session.sessionIDSent == false {
+	if session.meekProtocolVersion >= MEEK_PROTOCOL_VERSION_2 && !session.sessionIDSent {
 		// Replace the meek cookie with the session ID.
 		// SetCookie for the the session ID cookie is only set once, to reduce overhead. This
 		// session ID value replaces the original meek cookie value.
@@ -684,19 +684,19 @@ func (server *MeekServer) rateLimit(clientIP string) bool {
 	limit := true
 	triggerGC := false
 
-	now := monotime.Now()
+	now := time.Now()
 	threshold := now.Add(-time.Duration(thresholdSeconds) * time.Second)
 
 	server.rateLimitLock.Lock()
 
 	history, ok := server.rateLimitHistory[clientIP]
 	if !ok || len(history) != historySize {
-		history = make([]monotime.Time, historySize)
+		history = make([]time.Time, historySize)
 		server.rateLimitHistory[clientIP] = history
 	}
 
 	for i := 0; i < len(history); i++ {
-		if history[i] == 0 || history[i].Before(threshold) {
+		if history[i].IsZero() || history[i].Before(threshold) {
 			limit = false
 		}
 		if i == len(history)-1 {
@@ -745,12 +745,12 @@ func (server *MeekServer) rateLimitWorker() {
 
 			server.rateLimitLock.Lock()
 
-			threshold := monotime.Now().Add(-time.Duration(thresholdSeconds) * time.Second)
+			threshold := time.Now().Add(-time.Duration(thresholdSeconds) * time.Second)
 
 			for key, history := range server.rateLimitHistory {
 				reap := true
 				for i := 0; i < len(history); i++ {
-					if history[i] != 0 && !history[i].Before(threshold) {
+					if !history[i].IsZero() && !history[i].Before(threshold) {
 						reap = false
 					}
 				}
@@ -761,7 +761,7 @@ func (server *MeekServer) rateLimitWorker() {
 
 			// Enable rate limit history map to be garbage collected when possible.
 			if len(server.rateLimitHistory) == 0 {
-				server.rateLimitHistory = make(map[string][]monotime.Time)
+				server.rateLimitHistory = make(map[string][]time.Time)
 			}
 
 			server.rateLimitLock.Unlock()
@@ -823,7 +823,7 @@ func (server *MeekServer) deleteExpiredSessions() {
 	}
 	server.sessionsLock.Unlock()
 
-	start := monotime.Now()
+	start := time.Now()
 
 	deleteWaitGroup := new(sync.WaitGroup)
 	for _, sessionID := range expiredSessionIDs {
@@ -836,7 +836,7 @@ func (server *MeekServer) deleteExpiredSessions() {
 	deleteWaitGroup.Wait()
 
 	log.WithTraceFields(
-		LogFields{"elapsed time": monotime.Since(start)}).Debug("deleted expired sessions")
+		LogFields{"elapsed time": time.Since(start)}).Debug("deleted expired sessions")
 }
 
 // httpConnStateCallback tracks open persistent HTTP/HTTPS connections to the
@@ -1255,7 +1255,7 @@ func (conn *meekConn) replaceReadBuffer(readBuffer *bytes.Buffer) {
 // Note: channel scheme assumes only one concurrent call to pumpWrites
 func (conn *meekConn) pumpWrites(writer io.Writer) (int, error) {
 
-	startTime := monotime.Now()
+	startTime := time.Now()
 	timeout := time.NewTimer(MEEK_TURN_AROUND_TIMEOUT)
 	defer timeout.Stop()
 
@@ -1279,7 +1279,7 @@ func (conn *meekConn) pumpWrites(writer io.Writer) (int, error) {
 				// MEEK_MAX_REQUEST_PAYLOAD_LENGTH response bodies
 				return n, nil
 			}
-			totalElapsedTime := monotime.Since(startTime) / time.Millisecond
+			totalElapsedTime := time.Since(startTime) / time.Millisecond
 			if totalElapsedTime >= MEEK_EXTENDED_TURN_AROUND_TIMEOUT {
 				return n, nil
 			}
@@ -1324,7 +1324,7 @@ func (conn *meekConn) Write(buffer []byte) (int, error) {
 
 		// Wait for the buffer to be processed.
 		select {
-		case _ = <-conn.writeResult:
+		case <-conn.writeResult:
 			// The err from conn.writeResult comes from the
 			// io.MultiWriter used in pumpWrites, which writes
 			// to both the cached response and the HTTP response.

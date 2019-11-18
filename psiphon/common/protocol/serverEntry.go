@@ -376,7 +376,7 @@ func (fields ServerEntryFields) VerifySignature(publicKey string) error {
 	publicKeyDigest := sha256.Sum256(decodedPublicKey)
 	expectedPublicKeyID := publicKeyDigest[:signaturePublicKeyDigestSize]
 
-	if bytes.Compare(expectedPublicKeyID, publicKeyID) != 0 {
+	if !bytes.Equal(expectedPublicKeyID, publicKeyID) {
 		return errors.TraceNew("unexpected public key ID")
 	}
 
@@ -404,7 +404,7 @@ func (fields ServerEntryFields) RemoveUnsignedFields() {
 	delete(fields, "localTimestamp")
 
 	// Only non-local, explicit tags are part of the signature
-	isLocalDerivedTag, _ := fields["isLocalDerivedTag"]
+	isLocalDerivedTag := fields["isLocalDerivedTag"]
 	isLocalDerivedTagBool, ok := isLocalDerivedTag.(bool)
 	if ok && isLocalDerivedTagBool {
 		delete(fields, "tag")

@@ -32,7 +32,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -97,9 +96,9 @@ type Tunnel struct {
 	stopOperate                context.CancelFunc
 	signalPortForwardFailure   chan struct{}
 	totalPortForwardFailures   int
-	adjustedEstablishStartTime monotime.Time
+	adjustedEstablishStartTime time.Time
 	establishDuration          time.Duration
-	establishedTime            monotime.Time
+	establishedTime            time.Time
 }
 
 // getCustomClientParameters helpers wrap the verbose function call chain
@@ -138,7 +137,7 @@ func getCustomClientParameters(
 func ConnectTunnel(
 	ctx context.Context,
 	config *Config,
-	adjustedEstablishStartTime monotime.Time,
+	adjustedEstablishStartTime time.Time,
 	dialParams *DialParameters) (*Tunnel, error) {
 
 	// Build transport layers and establish SSH connection. Note that
@@ -266,8 +265,8 @@ func (tunnel *Tunnel) Activate(
 	//
 	// This time period may include time spent unsuccessfully connecting to other
 	// servers. Time spent waiting for network connectivity is excluded.
-	tunnel.establishDuration = monotime.Since(tunnel.adjustedEstablishStartTime)
-	tunnel.establishedTime = monotime.Now()
+	tunnel.establishDuration = time.Since(tunnel.adjustedEstablishStartTime)
+	tunnel.establishedTime = time.Now()
 
 	// Use the Background context instead of the controller run context, as tunnels
 	// are terminated when the controller calls tunnel.Close.
@@ -582,9 +581,9 @@ func dialTunnel(
 	// Note: ensure DialDuration is set before calling any function which logs
 	// dial_duration.
 
-	startDialTime := monotime.Now()
+	startDialTime := time.Now()
 	defer func() {
-		dialParams.DialDuration = monotime.Since(startDialTime)
+		dialParams.DialDuration = time.Since(startDialTime)
 	}()
 
 	// Note: dialParams.MeekResolvedIPAddress isn't set until the dial begins,
@@ -907,9 +906,9 @@ func performLivenessTest(
 
 	metrics := new(livenessTestMetrics)
 
-	defer func(startTime monotime.Time) {
-		metrics.Duration = fmt.Sprintf("%s", monotime.Since(startTime))
-	}(monotime.Now())
+	defer func(startTime time.Time) {
+		metrics.Duration = time.Since(startTime).String()
+	}(time.Now())
 
 	PRNG := prng.NewPRNGWithSeed(livenessTestPRNGSeed)
 
@@ -1009,7 +1008,7 @@ func performLivenessTest(
 func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	defer tunnel.operateWaitGroup.Done()
 
-	now := monotime.Now()
+	now := time.Now()
 	lastBytesReceivedTime := now
 	lastTotalBytesTransferedTime := now
 	totalSent := int64(0)
@@ -1099,7 +1098,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 				tunnel.dialParams.ServerEntry.IpAddress)
 
 			if received > 0 {
-				lastBytesReceivedTime = monotime.Now()
+				lastBytesReceivedTime = time.Now()
 			}
 
 			totalSent += sent
@@ -1111,10 +1110,10 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			replayTargetDownstreamBytes := p.Int(parameters.ReplayTargetDownstreamBytes)
 			replayTargetTunnelDuration := p.Duration(parameters.ReplayTargetTunnelDuration)
 
-			if lastTotalBytesTransferedTime.Add(noticePeriod).Before(monotime.Now()) {
+			if lastTotalBytesTransferedTime.Add(noticePeriod).Before(time.Now()) {
 				NoticeTotalBytesTransferred(
 					tunnel.dialParams.ServerEntry.GetDiagnosticID(), totalSent, totalReceived)
-				lastTotalBytesTransferedTime = monotime.Now()
+				lastTotalBytesTransferedTime = time.Now()
 			}
 
 			// Only emit the frequent BytesTransferred notice when tunnel is not idle.
@@ -1135,7 +1134,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			if !setDialParamsSucceeded &&
 				totalSent >= int64(replayTargetUpstreamBytes) &&
 				totalReceived >= int64(replayTargetDownstreamBytes) &&
-				monotime.Since(tunnel.establishedTime) >= replayTargetTunnelDuration {
+				time.Since(tunnel.establishedTime) >= replayTargetTunnelDuration {
 
 				tunnel.dialParams.Succeeded()
 				setDialParamsSucceeded = true
@@ -1151,7 +1150,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		case <-sshKeepAliveTimer.C:
 			p := tunnel.getCustomClientParameters()
 			inactivePeriod := p.Duration(parameters.SSHKeepAlivePeriodicInactivePeriod)
-			if lastBytesReceivedTime.Add(inactivePeriod).Before(monotime.Now()) {
+			if lastBytesReceivedTime.Add(inactivePeriod).Before(time.Now()) {
 				timeout := p.Duration(parameters.SSHKeepAlivePeriodicTimeout)
 				select {
 				case signalSshKeepAlive <- timeout:
@@ -1176,7 +1175,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			} else {
 				p := tunnel.getCustomClientParameters()
 				inactivePeriod := p.Duration(parameters.SSHKeepAliveProbeInactivePeriod)
-				if lastBytesReceivedTime.Add(inactivePeriod).Before(monotime.Now()) {
+				if lastBytesReceivedTime.Add(inactivePeriod).Before(time.Now()) {
 					timeout := p.Duration(parameters.SSHKeepAliveProbeTimeout)
 					select {
 					case signalSshKeepAlive <- timeout:
@@ -1267,14 +1266,14 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 			p.Int(parameters.SSHKeepAlivePaddingMaxBytes))
 		p.Close()
 
-		startTime := monotime.Now()
+		startTime := time.Now()
 
 		// Note: reading a reply is important for last-received-time tunnel
 		// duration calculation.
 		requestOk, response, err := tunnel.sshClient.SendRequest(
 			"keepalive@openssh.com", true, request)
 
-		elapsedTime := monotime.Since(startTime)
+		elapsedTime := time.Since(startTime)
 
 		errChannel <- err
 

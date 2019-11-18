@@ -106,7 +106,7 @@ func IsAddressInUseError(err error) bool {
 			}
 			// Special case for Windows (WSAEADDRINUSE = 10048)
 			if errno, ok := err.Err.(syscall.Errno); ok {
-				if 10048 == int(errno) {
+				if int(errno) == 10048 {
 					return true
 				}
 			}

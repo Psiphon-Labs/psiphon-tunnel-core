@@ -63,7 +63,7 @@ func TestCompress(t *testing.T) {
 		t.Errorf("Uncompress failed: %s", err)
 	}
 
-	if bytes.Compare(originalData, decompressedData) != 0 {
+	if !bytes.Equal(originalData, decompressedData) {
 		t.Error("decompressed data doesn't match original data")
 	}
 }

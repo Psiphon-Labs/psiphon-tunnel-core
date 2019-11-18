@@ -72,7 +72,6 @@ var serverIdleTimeout = SERVER_IDLE_TIMEOUT
 // Listener is a net.Listener.
 type Listener struct {
 	gquic.Listener
-	logger common.Logger
 }
 
 // Listen creates a new Listener.
@@ -137,9 +136,7 @@ func Listen(
 		return nil, errors.Trace(err)
 	}
 
-	return &Listener{
-		Listener: quicListener,
-	}, nil
+	return &Listener{Listener: quicListener}, nil
 }
 
 // Accept returns a net.Conn that wraps a single QUIC session and stream. The
@@ -203,7 +200,7 @@ func Dial(
 
 	deadline, ok := ctx.Deadline()
 	if ok {
-		quicConfig.HandshakeTimeout = deadline.Sub(time.Now())
+		quicConfig.HandshakeTimeout = time.Until(deadline)
 	}
 
 	if negotiateQUICVersion == protocol.QUIC_VERSION_OBFUSCATED {

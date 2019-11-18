@@ -70,7 +70,7 @@ func TestReloader(t *testing.T) {
 		t.Fatalf("Unexpected non-reload")
 	}
 
-	if bytes.Compare(file.contents, initialContents) != 0 {
+	if !bytes.Equal(file.contents, initialContents) {
 		t.Fatalf("Unexpected contents")
 	}
 
@@ -85,7 +85,7 @@ func TestReloader(t *testing.T) {
 		t.Fatalf("Unexpected reload")
 	}
 
-	if bytes.Compare(file.contents, initialContents) != 0 {
+	if !bytes.Equal(file.contents, initialContents) {
 		t.Fatalf("Unexpected contents")
 	}
 
@@ -105,7 +105,7 @@ func TestReloader(t *testing.T) {
 		t.Fatalf("Unexpected non-reload")
 	}
 
-	if bytes.Compare(file.contents, modifiedContents) != 0 {
+	if !bytes.Equal(file.contents, modifiedContents) {
 		t.Fatalf("Unexpected contents")
 	}
 }

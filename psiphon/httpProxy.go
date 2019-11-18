@@ -367,7 +367,7 @@ func (conn *rewriteICYConn) Read(b []byte) (int, error) {
 		return n, err
 	}
 
-	if bytes.Compare(b[:3], []byte("ICY")) == 0 {
+	if bytes.Equal(b[:3], []byte("ICY")) {
 		atomic.StoreInt32(conn.isICY, 1)
 		protocol := "HTTP/1.0"
 		copy(b, []byte(protocol))
@@ -504,24 +504,22 @@ func (proxy *HttpProxy) relayHTTPRequest(
 
 	defer response.Body.Close()
 
-	if rewrites != nil {
-		// NOTE: Rewrite functions are responsible for leaving response.Body in
-		// a valid, readable state if there's no error.
+	// Note: Rewrite functions are responsible for leaving response.Body in
+	// a valid, readable state if there's no error.
 
-		for key := range rewrites {
-			var err error
+	for key := range rewrites {
+		var err error
 
-			switch key {
-			case "m3u8":
-				err = rewriteM3U8(proxy.listenIP, proxy.listenPort, response)
-			}
+		switch key {
+		case "m3u8":
+			err = rewriteM3U8(proxy.listenIP, proxy.listenPort, response)
+		}
 
-			if err != nil {
-				NoticeAlert("URL proxy rewrite failed for %s: %s", key, errors.Trace(err))
-				forceClose(responseWriter)
-				response.Body.Close()
-				return
-			}
+		if err != nil {
+			NoticeAlert("URL proxy rewrite failed for %s: %s", key, errors.Trace(err))
+			forceClose(responseWriter)
+			response.Body.Close()
+			return
 		}
 	}
 

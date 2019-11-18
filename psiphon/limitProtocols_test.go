@@ -60,7 +60,7 @@ func TestLimitTunnelProtocols(t *testing.T) {
 
 				connectingCount += 1
 
-				protocolField, _ := payload["protocol"]
+				protocolField := payload["protocol"]
 				protocol := protocolField.(string)
 
 				if common.Contains(initialLimitTunnelProtocols, protocol) {

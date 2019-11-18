@@ -114,8 +114,8 @@ type DialParameters struct {
 
 	DialDuration time.Duration `json:"-"`
 
-	dialConfig *DialConfig `json:"-"`
-	meekConfig *MeekConfig `json:"-"`
+	dialConfig *DialConfig
+	meekConfig *MeekConfig
 }
 
 // MakeDialParameters creates a new DialParameters for the candidate server
@@ -196,7 +196,7 @@ func MakeDialParameters(
 	if dialParams != nil &&
 		(ttl <= 0 ||
 			dialParams.LastUsedTimestamp.Before(currentTimestamp.Add(-ttl)) ||
-			bytes.Compare(dialParams.LastUsedConfigStateHash, configStateHash) != 0 ||
+			!bytes.Equal(dialParams.LastUsedConfigStateHash, configStateHash) ||
 			(dialParams.TLSProfile != "" &&
 				!common.Contains(protocol.SupportedTLSProfiles, dialParams.TLSProfile)) ||
 			(dialParams.QUICVersion != "" &&
@@ -928,11 +928,9 @@ func makeDialCustomHeaders(
 	}
 
 	additionalCustomHeaders := p.HTTPHeaders(parameters.AdditionalCustomHeaders)
-	if additionalCustomHeaders != nil {
-		for k, v := range additionalCustomHeaders {
-			dialCustomHeaders[k] = make([]string, len(v))
-			copy(dialCustomHeaders[k], v)
-		}
+	for k, v := range additionalCustomHeaders {
+		dialCustomHeaders[k] = make([]string, len(v))
+		copy(dialCustomHeaders[k], v)
 	}
 	return dialCustomHeaders
 }

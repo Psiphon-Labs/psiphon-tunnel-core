@@ -263,7 +263,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		if seed1 == nil {
 			return seed2 == nil
 		}
-		return bytes.Compare(seed1[:], seed2[:]) == 0
+		return bytes.Equal(seed1[:], seed2[:])
 	}
 
 	if replayDialParams.SelectedSSHClientVersion != dialParams.SelectedSSHClientVersion ||

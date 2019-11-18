@@ -45,6 +45,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
@@ -1230,7 +1231,8 @@ func (sshClient *sshClient) run(
 			// is seeded before downstream bytes are written.
 			if err == nil && sshClient.tunnelProtocol == protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
 				if fragmentorConn, ok := baseConn.(*fragmentor.Conn); ok {
-					fragmentorPRNG, err := result.obfuscatedSSHConn.GetDerivedPRNG("server-side-fragmentor")
+					var fragmentorPRNG *prng.PRNG
+					fragmentorPRNG, err = result.obfuscatedSSHConn.GetDerivedPRNG("server-side-fragmentor")
 					if err != nil {
 						err = errors.Trace(err)
 					} else {
@@ -1615,7 +1617,7 @@ func (sshClient *sshClient) handleSSHRequests(requests <-chan *ssh.Request) {
 }
 
 type newTCPPortForward struct {
-	enqueueTime   monotime.Time
+	enqueueTime   time.Time
 	hostToConnect string
 	portToConnect int
 	newChannel    ssh.NewChannel
@@ -1690,7 +1692,7 @@ func (sshClient *sshClient) handleTCPPortForwards(
 
 		remainingDialTimeout :=
 			time.Duration(sshClient.getDialTCPPortForwardTimeoutMilliseconds())*time.Millisecond -
-				monotime.Since(newPortForward.enqueueTime)
+				time.Since(newPortForward.enqueueTime)
 
 		if remainingDialTimeout <= 0 {
 			sshClient.updateQualityMetricsWithRejectedDialingLimit()
@@ -1711,13 +1713,13 @@ func (sshClient *sshClient) handleTCPPortForwards(
 		// to become available. This blocks all dequeing.
 
 		if sshClient.isTCPDialingPortForwardLimitExceeded() {
-			blockStartTime := monotime.Now()
+			blockStartTime := time.Now()
 			ctx, cancelCtx := context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
 			sshClient.setTCPPortForwardDialingAvailableSignal(cancelCtx)
 			<-ctx.Done()
 			sshClient.setTCPPortForwardDialingAvailableSignal(nil)
 			cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
-			remainingDialTimeout -= monotime.Since(blockStartTime)
+			remainingDialTimeout -= time.Since(blockStartTime)
 		}
 
 		if remainingDialTimeout <= 0 {
@@ -1983,7 +1985,7 @@ func (sshClient *sshClient) handleNewTCPPortForwardChannel(
 		// is immediately rejected.
 
 		tcpPortForward := &newTCPPortForward{
-			enqueueTime:   monotime.Now(),
+			enqueueTime:   time.Now(),
 			hostToConnect: directTcpipExtraData.HostToConnect,
 			portToConnect: int(directTcpipExtraData.PortToConnect),
 			newChannel:    newChannel,
@@ -2389,7 +2391,7 @@ func (sshClient *sshClient) setHandshakeState(
 		}
 
 		sshClient.stopTimer = time.AfterFunc(
-			stopTime.Sub(time.Now()),
+			time.Until(stopTime),
 			func() {
 				sshClient.stop()
 			})
@@ -2427,7 +2429,7 @@ func (sshClient *sshClient) getHandshaked() (bool, bool) {
 	//   could have changed in a hot reload since the handshake.
 
 	if completed &&
-		*sshClient.trafficRules.RateLimits.CloseAfterExhausted == true &&
+		*sshClient.trafficRules.RateLimits.CloseAfterExhausted &&
 		(*sshClient.trafficRules.RateLimits.ReadUnthrottledBytes == 0 ||
 			*sshClient.trafficRules.RateLimits.WriteUnthrottledBytes == 0) {
 
@@ -2909,7 +2911,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	// Contexts are used for cancellation (via sshClient.runCtx, which is cancelled
 	// when the client is stopping) and timeouts.
 
-	dialStartTime := monotime.Now()
+	dialStartTime := time.Now()
 
 	log.WithTraceFields(LogFields{"hostToConnect": hostToConnect}).Debug("resolving")
 
@@ -2930,7 +2932,7 @@ func (sshClient *sshClient) handleTCPChannel(
 		err = std_errors.New("no IP address")
 	}
 
-	resolveElapsedTime := monotime.Since(dialStartTime)
+	resolveElapsedTime := time.Since(dialStartTime)
 
 	if err != nil {
 
@@ -2973,7 +2975,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 
 	// Record port forward success or failure
-	sshClient.updateQualityMetricsWithDialResult(err == nil, monotime.Since(dialStartTime))
+	sshClient.updateQualityMetricsWithDialResult(err == nil, time.Since(dialStartTime))
 
 	if err != nil {
 

@@ -37,7 +37,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/net/http2"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
@@ -1100,7 +1099,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 	retries := uint(0)
 
 	p := meek.getCustomClientParameters()
-	retryDeadline := monotime.Now().Add(p.Duration(parameters.MeekRoundTripRetryDeadline))
+	retryDeadline := time.Now().Add(p.Duration(parameters.MeekRoundTripRetryDeadline))
 	retryDelay := p.Duration(parameters.MeekRoundTripRetryMinDelay)
 	retryMaxDelay := p.Duration(parameters.MeekRoundTripRetryMaxDelay)
 	retryMultiplier := p.Float(parameters.MeekRoundTripRetryMultiplier)
@@ -1132,6 +1131,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		}
 
 		request, cancelFunc, err := meek.newRequest(
+			//lint:ignore SA1012 meek.newRequest expects/handles nil context
 			nil,
 			nil,
 			requestBody,
@@ -1241,7 +1241,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		// retry if time remains; when the next delay exceeds the time
 		// remaining until the deadline, do not retry.
 
-		now := monotime.Now()
+		now := time.Now()
 
 		if retries >= 1 &&
 			(now.After(retryDeadline) || retryDeadline.Sub(now) <= retryDelay) {

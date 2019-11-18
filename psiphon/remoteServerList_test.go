@@ -303,7 +303,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 		err := server.RunServices(serverConfigJSON)
 		if err != nil {
 			// TODO: wrong goroutine for t.FatalNow()
-			t.Fatalf("error running server: %s", err)
+			t.Errorf("error running server: %s", err)
 		}
 	}()
 

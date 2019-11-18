@@ -183,7 +183,7 @@ func TestCustomTLSProfiles(t *testing.T) {
 		t.Fatalf("Missing raw ClientHello")
 	}
 
-	if bytes.Compare(conn1.HandshakeState.Hello.Raw, conn2.HandshakeState.Hello.Raw) != 0 {
+	if !bytes.Equal(conn1.HandshakeState.Hello.Raw, conn2.HandshakeState.Hello.Raw) {
 		t.Fatalf("Unidentical raw ClientHellos")
 	}
 }

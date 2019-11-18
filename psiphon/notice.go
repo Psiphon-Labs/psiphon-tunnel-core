@@ -162,6 +162,7 @@ func SetNoticeFiles(
 		if err != nil {
 			return errors.Trace(err)
 		}
+		singletonNoticeLogger.homepageFilename = homepageFilename
 	}
 
 	if rotatingFilename != "" {

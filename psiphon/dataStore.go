@@ -371,7 +371,7 @@ func hasServerEntryFilterChanged(config *Config) (bool, error) {
 		// When not found, previousFilter will be nil; ensures this
 		// results in "changed", even if currentFilter is len(0).
 		if previousFilter == nil ||
-			bytes.Compare(previousFilter, currentFilter) != 0 {
+			!bytes.Equal(previousFilter, currentFilter) {
 			changed = true
 		}
 		return nil
@@ -892,7 +892,7 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 			}
 
 			affinityServerEntryID := keyValues.get(datastoreAffinityServerEntryIDKey)
-			if 0 == bytes.Compare(affinityServerEntryID, serverEntryID) {
+			if bytes.Equal(affinityServerEntryID, serverEntryID) {
 				err = keyValues.delete(datastoreAffinityServerEntryIDKey)
 				if err != nil {
 					return errors.Trace(err)
@@ -1288,7 +1288,7 @@ func CountUnreportedPersistentStats() int {
 			bucket := tx.bucket([]byte(statType))
 			cursor := bucket.cursor()
 			for key, value := cursor.first(); key != nil; key, value = cursor.next() {
-				if 0 == bytes.Compare(value, persistentStatStateUnreported) {
+				if bytes.Equal(value, persistentStatStateUnreported) {
 					unreported++
 				}
 			}
@@ -1340,7 +1340,7 @@ func TakeOutUnreportedPersistentStats(config *Config) (map[string][][]byte, erro
 					continue
 				}
 
-				if 0 == bytes.Compare(value, persistentStatStateUnreported) {
+				if bytes.Equal(value, persistentStatStateUnreported) {
 					// Must make a copy as slice is only valid within transaction.
 					data := make([]byte, len(key))
 					copy(data, key)

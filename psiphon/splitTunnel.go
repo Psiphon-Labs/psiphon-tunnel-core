@@ -30,7 +30,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
@@ -80,7 +79,7 @@ type SplitTunnelClassifier struct {
 
 type classification struct {
 	isUntunneled bool
-	expiry       monotime.Time
+	expiry       time.Time
 }
 
 func NewSplitTunnelClassifier(config *Config, tunneler Tunneler) *SplitTunnelClassifier {
@@ -169,7 +168,7 @@ func (classifier *SplitTunnelClassifier) IsUntunneled(targetAddress string) bool
 	classifier.mutex.RLock()
 	cachedClassification, ok := classifier.cache[targetAddress]
 	classifier.mutex.RUnlock()
-	if ok && cachedClassification.expiry.After(monotime.Now()) {
+	if ok && cachedClassification.expiry.After(time.Now()) {
 		return cachedClassification.isUntunneled
 	}
 
@@ -179,7 +178,7 @@ func (classifier *SplitTunnelClassifier) IsUntunneled(targetAddress string) bool
 		NoticeAlert("failed to resolve address for split tunnel classification: %s", err)
 		return false
 	}
-	expiry := monotime.Now().Add(ttl)
+	expiry := time.Now().Add(ttl)
 
 	isUntunneled := classifier.ipAddressInRoutes(ipAddr)
 

@@ -233,7 +233,7 @@ func LocalProxyRelay(proxyType string, localConn, remoteConn net.Conn) {
 func WaitForNetworkConnectivity(
 	ctx context.Context, connectivityChecker NetworkConnectivityChecker) bool {
 
-	if connectivityChecker == nil || 1 == connectivityChecker.HasNetworkConnectivity() {
+	if connectivityChecker == nil || connectivityChecker.HasNetworkConnectivity() == 1 {
 		return true
 	}
 
@@ -243,7 +243,7 @@ func WaitForNetworkConnectivity(
 	defer ticker.Stop()
 
 	for {
-		if 1 == connectivityChecker.HasNetworkConnectivity() {
+		if connectivityChecker.HasNetworkConnectivity() == 1 {
 			return true
 		}
 

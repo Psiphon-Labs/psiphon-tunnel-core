@@ -140,11 +140,11 @@ func TestRewriteM3U8(t *testing.T) {
 
 		expectedBody, _ := ioutil.ReadFile(tt.expectedFilename)
 
-		if bytes.Compare(rewrittenBody, expectedBody) != 0 {
+		if !bytes.Equal(rewrittenBody, expectedBody) {
 			t.Errorf("rewriteM3U8 body mismatch for test %d", i)
 		}
 
-		if tt.expectedContentType != "" && strings.ToLower(response.Header.Get("Content-Type")) != strings.ToLower(tt.expectedContentType) {
+		if tt.expectedContentType != "" && !strings.EqualFold(response.Header.Get("Content-Type"), tt.expectedContentType) {
 			t.Errorf("rewriteM3U8 Content-Type mismatch for test %d: %s %s", i, tt.expectedContentType, response.Header.Get("Content-Type"))
 		}
 

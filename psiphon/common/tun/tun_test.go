@@ -186,8 +186,8 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 					return
 				}
 
-				if 0 != bytes.Compare(sendChunk, receiveChunk) {
-					results <- fmt.Errorf("bytes.Compare failed")
+				if !bytes.Equal(sendChunk, receiveChunk) {
+					results <- fmt.Errorf("bytes.Equal failed")
 					return
 				}
 			}
@@ -700,14 +700,14 @@ func newTestLogger(wantLastPacketMetrics bool) *testLogger {
 	}
 }
 
-func (logger *testLogger) WithContext() common.LogContext {
-	return &testLoggerContext{context: stacktrace.GetParentFunctionName()}
+func (logger *testLogger) WithTrace() common.LogTrace {
+	return &testLoggerTrace{trace: stacktrace.GetParentFunctionName()}
 }
 
-func (logger *testLogger) WithTraceFields(fields common.LogFields) common.LogContext {
-	return &testLoggerContext{
-		context: stacktrace.GetParentFunctionName(),
-		fields:  fields,
+func (logger *testLogger) WithTraceFields(fields common.LogFields) common.LogTrace {
+	return &testLoggerTrace{
+		trace:  stacktrace.GetParentFunctionName(),
+		fields: fields,
 	}
 }
 
@@ -739,36 +739,36 @@ func (logger *testLogger) getLastPacketMetrics() common.LogFields {
 	}
 }
 
-type testLoggerContext struct {
-	context string
-	fields  common.LogFields
+type testLoggerTrace struct {
+	trace  string
+	fields common.LogFields
 }
 
-func (context *testLoggerContext) log(priority, message string) {
+func (logger *testLoggerTrace) log(priority, message string) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	if len(context.fields) == 0 {
+	if len(logger.fields) == 0 {
 		fmt.Printf(
 			"[%s] %s: %s: %s\n",
-			now, priority, context.context, message)
+			now, priority, logger.trace, message)
 	} else {
 		fmt.Printf(
 			"[%s] %s: %s: %s %+v\n",
-			now, priority, context.context, message, context.fields)
+			now, priority, logger.trace, message, logger.fields)
 	}
 }
 
-func (context *testLoggerContext) Debug(args ...interface{}) {
-	context.log("DEBUG", fmt.Sprint(args...))
+func (logger *testLoggerTrace) Debug(args ...interface{}) {
+	logger.log("DEBUG", fmt.Sprint(args...))
 }
 
-func (context *testLoggerContext) Info(args ...interface{}) {
-	context.log("INFO", fmt.Sprint(args...))
+func (logger *testLoggerTrace) Info(args ...interface{}) {
+	logger.log("INFO", fmt.Sprint(args...))
 }
 
-func (context *testLoggerContext) Warning(args ...interface{}) {
-	context.log("WARNING", fmt.Sprint(args...))
+func (logger *testLoggerTrace) Warning(args ...interface{}) {
+	logger.log("WARNING", fmt.Sprint(args...))
 }
 
-func (context *testLoggerContext) Error(args ...interface{}) {
-	context.log("ERROR", fmt.Sprint(args...))
+func (logger *testLoggerTrace) Error(args ...interface{}) {
+	logger.log("ERROR", fmt.Sprint(args...))
 }

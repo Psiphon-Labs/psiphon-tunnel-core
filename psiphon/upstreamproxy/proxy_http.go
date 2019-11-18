@@ -92,7 +92,7 @@ func (hp *httpProxy) Dial(network, addr string) (net.Conn, error) {
 	}
 	err := pc.makeNewClientConn()
 	if err != nil {
-		//Already wrapped in proxyError
+		// Already wrapped in proxyError
 		return nil, err
 	}
 
@@ -100,31 +100,27 @@ handshakeLoop:
 	for {
 		err := pc.handshake(addr, hp.username, hp.password)
 		if err != nil {
-			//already wrapped in proxyError
+			// Already wrapped in proxyError
 			return nil, err
 		}
 		switch pc.authState {
 		case HTTP_AUTH_STATE_SUCCESS:
 			pc.hijackedConn, pc.staleReader = pc.httpClientConn.Hijack()
 			return pc, nil
-		case HTTP_AUTH_STATE_FAILURE:
-			//err already wrapped in proxyError
-			return nil, err
 		case HTTP_AUTH_STATE_CHALLENGED:
 			continue
 		default:
 			break handshakeLoop
 		}
 	}
-	return nil, proxyError(fmt.Errorf("Unknown handshake error"))
-
+	return nil, proxyError(fmt.Errorf("unknown handshake error in state %v", pc.authState))
 }
 
 type proxyConn struct {
 	dialFn         DialFunc
 	proxyAddr      string
 	customHeaders  http.Header
-	httpClientConn *httputil.ClientConn
+	httpClientConn *httputil.ClientConn //lint:ignore SA1019 httputil.ClientConn used for client-side hijack
 	hijackedConn   net.Conn
 	staleReader    *bufio.Reader
 	authResponse   *http.Response
@@ -139,7 +135,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	if err != nil {
 		pc.httpClientConn.Close()
 		pc.authState = HTTP_AUTH_STATE_FAILURE
-		return proxyError(fmt.Errorf("Failed to parse proxy address: %v", err))
+		return proxyError(fmt.Errorf("failed to parse proxy address: %v", err))
 	}
 	reqURL.Scheme = ""
 
@@ -147,7 +143,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 	if err != nil {
 		pc.httpClientConn.Close()
 		pc.authState = HTTP_AUTH_STATE_FAILURE
-		return proxyError(fmt.Errorf("Create proxy request: %v", err))
+		return proxyError(fmt.Errorf("create proxy request: %v", err))
 	}
 	req.Close = false
 	req.Header.Set("User-Agent", "")
@@ -172,14 +168,17 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 		err := pc.authenticator.Authenticate(req, pc.authResponse)
 		if err != nil {
 			pc.authState = HTTP_AUTH_STATE_FAILURE
-			//Already wrapped in proxyError
+			// Already wrapped in proxyError
 			return err
 		}
 	}
 
 	resp, err := pc.httpClientConn.Do(req)
 
-	if err != nil && err != httputil.ErrPersistEOF {
+	//lint:ignore SA1019 httputil.ClientConn used for client-side hijack
+	errPersistEOF := httputil.ErrPersistEOF
+
+	if err != nil && err != errPersistEOF {
 		pc.httpClientConn.Close()
 		pc.authState = HTTP_AUTH_STATE_FAILURE
 		return proxyError(fmt.Errorf("making proxy request: %v", err))
@@ -197,7 +196,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 			if authErr != nil {
 				pc.httpClientConn.Close()
 				pc.authState = HTTP_AUTH_STATE_FAILURE
-				//Already wrapped in proxyError
+				// Already wrapped in proxyError
 				return authErr
 			}
 		}
@@ -207,22 +206,22 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 		if username == "" {
 			pc.httpClientConn.Close()
 			pc.authState = HTTP_AUTH_STATE_FAILURE
-			return proxyError(fmt.Errorf("No username credentials provided for proxy auth"))
+			return proxyError(fmt.Errorf("ho username credentials provided for proxy auth"))
 		}
-		if err == httputil.ErrPersistEOF {
-			// the server may send Connection: close,
+		if err == errPersistEOF {
+			// The server may send Connection: close,
 			// at this point we just going to create a new
 			// ClientConn and continue the handshake
 			err = pc.makeNewClientConn()
 			if err != nil {
-				//Already wrapped in proxyError
+				// Already wrapped in proxyError
 				return err
 			}
 		}
 		return nil
 	}
 	pc.authState = HTTP_AUTH_STATE_FAILURE
-	return proxyError(fmt.Errorf("Handshake error: %v, response status: %s", err, resp.Status))
+	return proxyError(fmt.Errorf("handshake error: %v, response status: %s", err, resp.Status))
 }
 
 func (pc *proxyConn) makeNewClientConn() error {
@@ -233,6 +232,7 @@ func (pc *proxyConn) makeNewClientConn() error {
 	if err != nil {
 		return proxyError(fmt.Errorf("makeNewClientConn: %v", err))
 	}
+	//lint:ignore SA1019 httputil.ClientConn used for client-side hijack
 	pc.httpClientConn = httputil.NewClientConn(c, nil)
 	return nil
 }

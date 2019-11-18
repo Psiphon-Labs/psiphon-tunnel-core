@@ -176,7 +176,7 @@ func (a *node) equal(b node) bool {
 					return false
 				}
 				for i := range m {
-					if vNode[i].equal(m[i]) != true {
+					if !vNode[i].equal(m[i]) {
 						return false
 					}
 				}
@@ -393,9 +393,7 @@ func (a *MetricsLogStats) Sort() []MetricsLogModelStats {
 
 func (a *UnknownLogStats) Sort() []UnknownLogModelStats {
 	var s []UnknownLogModelStats
-	for _, v := range a.modelStats {
-		s = append(s, v)
-	}
+	s = append(s, a.modelStats...)
 
 	sort.Slice(s, func(i, j int) bool {
 		return s[j].Count > s[i].Count
@@ -506,7 +504,7 @@ func (l *LogStats) ParseLogLine(log string) error {
 			l.UnknownLogModels.modelStats = append(l.UnknownLogModels.modelStats, UnknownLogModelStats{LogModelStats{1}, *v})
 		}
 	default:
-		return fmt.Errorf("Unexpected model type of %v\n", reflect.TypeOf(v))
+		return fmt.Errorf("unexpected model type of %v", reflect.TypeOf(v))
 	}
 
 	return nil
@@ -523,7 +521,7 @@ func parseLogModel(s string) (LogModel, error) {
 	var m LogFields
 	err := json.Unmarshal([]byte(s), &m)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to parse log line into JSON: %s", err)
+		return nil, fmt.Errorf("failed to parse log line into JSON: %s", err)
 	}
 
 	var l LogModel
@@ -548,7 +546,7 @@ func parseLogModel(s string) (LogModel, error) {
 		case "error":
 			level = LOG_LEVEL_ERROR
 		default:
-			return nil, fmt.Errorf("Unexpected log level: %s\n", m["level"].(string))
+			return nil, fmt.Errorf("unexpected log level: %s", m["level"].(string))
 		}
 
 		var context *MessageLogContext

@@ -73,8 +73,8 @@ type startResultCode int
 
 const (
 	startResultCodeSuccess    startResultCode = 0
-	startResultCodeTimeout                    = 1
-	startResultCodeOtherError                 = 2
+	startResultCodeTimeout    startResultCode = 1
+	startResultCodeOtherError startResultCode = 2
 )
 
 type startResult struct {
@@ -236,7 +236,7 @@ func PsiphonTunnelStart(cConfigJSON, cEmbeddedServerEntryList *C.char, cParams *
 	// Success
 	managedStartResult = marshalStartResult(startResult{
 		Code:           startResultCodeSuccess,
-		ConnectTimeMS:  int64(time.Now().Sub(startTime) / time.Millisecond),
+		ConnectTimeMS:  int64(time.Since(startTime) / time.Millisecond),
 		HTTPProxyPort:  tunnel.HTTPProxyPort,
 		SOCKSProxyPort: tunnel.SOCKSProxyPort,
 	})
