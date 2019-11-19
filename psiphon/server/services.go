@@ -71,7 +71,7 @@ func RunServices(configJSON []byte) error {
 
 	waitGroup := new(sync.WaitGroup)
 	shutdownBroadcast := make(chan struct{})
-	errorChannel := make(chan error)
+	errorChannel := make(chan error, 1)
 
 	tunnelServer, err := NewTunnelServer(supportServices, shutdownBroadcast)
 	if err != nil {
