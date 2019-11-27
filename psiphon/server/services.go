@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -135,14 +136,14 @@ func RunServices(configJSON []byte) error {
 		waitGroup.Add(1)
 		go func() {
 			waitGroup.Done()
-			ticker := time.NewTicker(time.Duration(config.PeriodicGarbageCollectionSeconds) * time.Second)
+			ticker := time.NewTicker(config.periodicGarbageCollection)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-shutdownBroadcast:
 					return
 				case <-ticker.C:
-					runtime.GC()
+					debug.FreeOSMemory()
 				}
 			}
 		}()
