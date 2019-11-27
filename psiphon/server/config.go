@@ -57,6 +57,7 @@ const (
 	SSH_PASSWORD_BYTE_LENGTH             = 32
 	SSH_RSA_HOST_KEY_BITS                = 2048
 	SSH_OBFUSCATED_KEY_BYTE_LENGTH       = 32
+	PERIODIC_GARBAGE_COLLECTION          = 120 * time.Second
 )
 
 // Config specifies the configuration and behavior of a Psiphon
@@ -308,10 +309,11 @@ type Config struct {
 	// The default, 0 is no limit.
 	MaxConcurrentSSHHandshakes int
 
-	// PeriodicGarbageCollectionSeconds turns on periodic calls to runtime.GC,
-	// every specified number of seconds, to force garbage collection.
-	// The default, 0 is off.
-	PeriodicGarbageCollectionSeconds int
+	// PeriodicGarbageCollectionSeconds turns on periodic calls to
+	// debug.FreeOSMemory, every specified number of seconds, to force garbage
+	// collection and memory scavenging. Specify 0 to disable. The default is
+	// PERIODIC_GARBAGE_COLLECTION.
+	PeriodicGarbageCollectionSeconds *int
 
 	// AccessControlVerificationKeyRing is the access control authorization
 	// verification key ring used to verify signed authorizations presented
@@ -349,8 +351,9 @@ type Config struct {
 	// entries are stored on a Psiphon server.
 	OwnEncodedServerEntries map[string]string
 
-	sshBeginHandshakeTimeout time.Duration
-	sshHandshakeTimeout      time.Duration
+	sshBeginHandshakeTimeout  time.Duration
+	sshHandshakeTimeout       time.Duration
+	periodicGarbageCollection time.Duration
 }
 
 // RunWebServer indicates whether to run a web server component.
@@ -365,7 +368,7 @@ func (config *Config) RunLoadMonitor() bool {
 
 // RunPeriodicGarbageCollection indicates whether to run periodic garbage collection.
 func (config *Config) RunPeriodicGarbageCollection() bool {
-	return config.PeriodicGarbageCollectionSeconds > 0
+	return config.periodicGarbageCollection > 0
 }
 
 // GetOwnEncodedServerEntry returns one of the server's own server entries, as
@@ -483,6 +486,11 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		if net.ParseIP(config.DNSResolverIPAddress) == nil {
 			return nil, errors.Tracef("DNSResolverIPAddress is invalid")
 		}
+	}
+
+	config.periodicGarbageCollection = PERIODIC_GARBAGE_COLLECTION
+	if config.PeriodicGarbageCollectionSeconds != nil {
+		config.periodicGarbageCollection = time.Duration(*config.PeriodicGarbageCollectionSeconds) * time.Second
 	}
 
 	err = accesscontrol.ValidateVerificationKeyRing(&config.AccessControlVerificationKeyRing)
