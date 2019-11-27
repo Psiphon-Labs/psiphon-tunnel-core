@@ -35,37 +35,37 @@ const (
 	testDataSize  = 10 * 1024 * 1024 // 10 MB
 )
 
-func TestThrottledConn(t *testing.T) {
+func TestThrottledConnRates(t *testing.T) {
 
-	run(t, RateLimits{
+	runRateLimitsTest(t, RateLimits{
 		ReadUnthrottledBytes:  0,
 		ReadBytesPerSecond:    0,
 		WriteUnthrottledBytes: 0,
 		WriteBytesPerSecond:   0,
 	})
 
-	run(t, RateLimits{
+	runRateLimitsTest(t, RateLimits{
 		ReadUnthrottledBytes:  0,
 		ReadBytesPerSecond:    5 * 1024 * 1024,
 		WriteUnthrottledBytes: 0,
 		WriteBytesPerSecond:   5 * 1024 * 1024,
 	})
 
-	run(t, RateLimits{
+	runRateLimitsTest(t, RateLimits{
 		ReadUnthrottledBytes:  0,
 		ReadBytesPerSecond:    5 * 1024 * 1024,
 		WriteUnthrottledBytes: 0,
 		WriteBytesPerSecond:   1024 * 1024,
 	})
 
-	run(t, RateLimits{
+	runRateLimitsTest(t, RateLimits{
 		ReadUnthrottledBytes:  0,
 		ReadBytesPerSecond:    2 * 1024 * 1024,
 		WriteUnthrottledBytes: 0,
 		WriteBytesPerSecond:   2 * 1024 * 1024,
 	})
 
-	run(t, RateLimits{
+	runRateLimitsTest(t, RateLimits{
 		ReadUnthrottledBytes:  0,
 		ReadBytesPerSecond:    1024 * 1024,
 		WriteUnthrottledBytes: 0,
@@ -74,7 +74,7 @@ func TestThrottledConn(t *testing.T) {
 
 	// This test takes > 1 min to run, so disabled for now
 	/*
-		run(t, RateLimits{
+		runRateLimitsTest(t, RateLimits{
 			ReadUnthrottledBytes: 0,
 			ReadBytesPerSecond: 1024 * 1024 / 8,
 			WriteUnthrottledBytes:   0,
@@ -83,7 +83,7 @@ func TestThrottledConn(t *testing.T) {
 	*/
 }
 
-func run(t *testing.T, rateLimits RateLimits) {
+func runRateLimitsTest(t *testing.T, rateLimits RateLimits) {
 
 	// Run a local HTTP server which serves large chunks of data
 
@@ -192,4 +192,90 @@ func checkElapsedTime(t *testing.T, dataSize int, rateLimit int64, duration time
 	if duration > ceilingElapsedTime {
 		t.Errorf("unexpected duration: %s > %s", duration, ceilingElapsedTime)
 	}
+}
+
+func TestThrottledConnClose(t *testing.T) {
+
+	rateLimits := RateLimits{
+		ReadBytesPerSecond:  1,
+		WriteBytesPerSecond: 1,
+	}
+
+	n := 4
+	b := make([]byte, n+1)
+
+	throttledConn := NewThrottledConn(&testConn{}, rateLimits)
+
+	now := time.Now()
+	_, err := throttledConn.Read(b)
+	elapsed := time.Since(now)
+	if err != nil || elapsed < time.Duration(n)*time.Second {
+		t.Errorf("unexpected interrupted read: %s, %v", elapsed, err)
+	}
+
+	now = time.Now()
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		throttledConn.Close()
+	}()
+	_, err = throttledConn.Read(b)
+	elapsed = time.Since(now)
+	if elapsed > 1*time.Second {
+		t.Errorf("unexpected uninterrupted read: %s, %v", elapsed, err)
+	}
+
+	throttledConn = NewThrottledConn(&testConn{}, rateLimits)
+
+	now = time.Now()
+	_, err = throttledConn.Write(b)
+	elapsed = time.Since(now)
+	if err != nil || elapsed < time.Duration(n)*time.Second {
+		t.Errorf("unexpected interrupted write: %s, %v", elapsed, err)
+	}
+
+	now = time.Now()
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		throttledConn.Close()
+	}()
+	_, err = throttledConn.Write(b)
+	elapsed = time.Since(now)
+	if elapsed > 1*time.Second {
+		t.Errorf("unexpected uninterrupted write: %s, %v", elapsed, err)
+	}
+}
+
+type testConn struct {
+}
+
+func (conn *testConn) Read(b []byte) (n int, err error) {
+	return len(b), nil
+}
+
+func (conn *testConn) Write(b []byte) (n int, err error) {
+	return len(b), nil
+}
+
+func (conn *testConn) Close() error {
+	return nil
+}
+
+func (conn *testConn) LocalAddr() net.Addr {
+	return nil
+}
+
+func (conn *testConn) RemoteAddr() net.Addr {
+	return nil
+}
+
+func (conn *testConn) SetDeadline(t time.Time) error {
+	return nil
+}
+
+func (conn *testConn) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+func (conn *testConn) SetWriteDeadline(t time.Time) error {
+	return nil
 }

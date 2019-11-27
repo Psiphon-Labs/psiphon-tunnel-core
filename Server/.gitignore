@@ -1,5 +1,7 @@
 Server
 psiphond
 psiphond.config
+psiphond-osl.config
+psiphond-tactics.config
 psiphond-traffic-rules.config
 server-entry.dat
