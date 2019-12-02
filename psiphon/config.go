@@ -522,6 +522,8 @@ type Config struct {
 	// purposes.
 	MeekTrafficShapingProbability    *float64
 	MeekTrafficShapingLimitProtocols []string
+	MeekMinTLSPadding                *int
+	MeekMaxTLSPadding                *int
 	MeekMinLimitRequestPayloadLength *int
 	MeekMaxLimitRequestPayloadLength *int
 	MeekRedialTLSProbability         *float64
@@ -1062,6 +1064,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if len(config.MeekTrafficShapingLimitProtocols) > 0 {
 		applyParameters[parameters.MeekTrafficShapingLimitProtocols] = protocol.TunnelProtocols(config.MeekTrafficShapingLimitProtocols)
+	}
+
+	if config.MeekMinTLSPadding != nil {
+		applyParameters[parameters.MeekMinTLSPadding] = *config.MeekMinTLSPadding
+	}
+
+	if config.MeekMaxTLSPadding != nil {
+		applyParameters[parameters.MeekMaxTLSPadding] = *config.MeekMaxTLSPadding
 	}
 
 	if config.MeekMinLimitRequestPayloadLength != nil {

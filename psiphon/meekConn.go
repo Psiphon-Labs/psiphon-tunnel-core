@@ -162,6 +162,7 @@ type MeekConn struct {
 	additionalHeaders         http.Header
 	cookie                    *http.Cookie
 	cookieSize                int
+	tlsPadding                int
 	limitRequestPayloadLength int
 	redialTLSProbability      float64
 	cachedTLSDialer           *cachedTLSDialer
@@ -228,17 +229,47 @@ func DialMeek(
 		}
 	}()
 
+	meek = &MeekConn{
+		clientParameters:         meekConfig.ClientParameters,
+		networkLatencyMultiplier: meekConfig.NetworkLatencyMultiplier,
+		isClosed:                 false,
+		runCtx:                   runCtx,
+		stopRunning:              stopRunning,
+		relayWaitGroup:           new(sync.WaitGroup),
+		roundTripperOnly:         meekConfig.RoundTripperOnly,
+	}
+
+	if !meek.roundTripperOnly {
+
+		meek.cookie,
+			meek.tlsPadding,
+			meek.limitRequestPayloadLength,
+			meek.redialTLSProbability,
+			err =
+			makeMeekObfuscationValues(
+				meek.getCustomClientParameters(),
+				meekConfig.MeekCookieEncryptionPublicKey,
+				meekConfig.MeekObfuscatedKey,
+				meekConfig.MeekObfuscatorPaddingSeed,
+				meekConfig.ClientTunnelProtocol,
+				"")
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
 	// Configure transport: QUIC or HTTPS or HTTP
 
-	var isQUIC bool
-	var scheme string
-	var transport transporter
-	var additionalHeaders http.Header
-	var proxyUrl func(*http.Request) (*url.URL, error)
+	var (
+		scheme            string
+		transport         transporter
+		additionalHeaders http.Header
+		proxyUrl          func(*http.Request) (*url.URL, error)
+	)
 
 	if meekConfig.UseQUIC {
 
-		isQUIC = true
+		meek.isQUIC = true
 
 		scheme = "https"
 
@@ -311,6 +342,7 @@ func DialMeek(
 			TLSProfile:                    meekConfig.TLSProfile,
 			NoDefaultTLSSessionID:         &meekConfig.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed:      meekConfig.RandomizedTLSProfileSeed,
+			TLSPadding:                    meek.tlsPadding,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
 		}
 		tlsConfig.EnableClientSessionCache()
@@ -459,36 +491,10 @@ func DialMeek(
 		}
 	}
 
-	// The main loop of a MeekConn is run in the relay() goroutine.
-	// A MeekConn implements net.Conn concurrency semantics:
-	// "Multiple goroutines may invoke methods on a Conn simultaneously."
-	//
-	// Read() calls and relay() are synchronized by exchanging control of a single
-	// receiveBuffer (bytes.Buffer). This single buffer may be:
-	// - in the emptyReceiveBuffer channel when it is available and empty;
-	// - in the partialReadBuffer channel when it is available and contains data;
-	// - in the fullReadBuffer channel when it is available and full of data;
-	// - "checked out" by relay or Read when they are are writing to or reading from the
-	//   buffer, respectively.
-	// relay() will obtain the buffer from either the empty or partial channel but block when
-	// the buffer is full. Read will obtain the buffer from the partial or full channel when
-	// there is data to read but block when the buffer is empty.
-	// Write() calls and relay() are synchronized in a similar way, using a single
-	// sendBuffer.
-	meek = &MeekConn{
-		clientParameters:         meekConfig.ClientParameters,
-		networkLatencyMultiplier: meekConfig.NetworkLatencyMultiplier,
-		isQUIC:                   isQUIC,
-		url:                      url,
-		additionalHeaders:        additionalHeaders,
-		cachedTLSDialer:          cachedTLSDialer,
-		transport:                transport,
-		isClosed:                 false,
-		runCtx:                   runCtx,
-		stopRunning:              stopRunning,
-		relayWaitGroup:           new(sync.WaitGroup),
-		roundTripperOnly:         meekConfig.RoundTripperOnly,
-	}
+	meek.url = url
+	meek.additionalHeaders = additionalHeaders
+	meek.cachedTLSDialer = cachedTLSDialer
+	meek.transport = transport
 
 	// stopRunning and cachedTLSDialer will now be closed in meek.Close()
 	cleanupStopRunning = false
@@ -498,22 +504,22 @@ func DialMeek(
 	// go routine, only when running in relay mode.
 	if !meek.roundTripperOnly {
 
-		cookie, limitRequestPayloadLength, redialTLSProbability, err :=
-			makeMeekObfuscationValues(
-				meek.getCustomClientParameters(),
-				meekConfig.MeekCookieEncryptionPublicKey,
-				meekConfig.MeekObfuscatedKey,
-				meekConfig.MeekObfuscatorPaddingSeed,
-				meekConfig.ClientTunnelProtocol,
-				"")
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		meek.cookie = cookie
-		meek.cookieSize = len(cookie.Name) + len(cookie.Value)
-		meek.limitRequestPayloadLength = limitRequestPayloadLength
-		meek.redialTLSProbability = redialTLSProbability
+		// The main loop of a MeekConn is run in the relay() goroutine.
+		// A MeekConn implements net.Conn concurrency semantics:
+		// "Multiple goroutines may invoke methods on a Conn simultaneously."
+		//
+		// Read() calls and relay() are synchronized by exchanging control of a single
+		// receiveBuffer (bytes.Buffer). This single buffer may be:
+		// - in the emptyReceiveBuffer channel when it is available and empty;
+		// - in the partialReadBuffer channel when it is available and contains data;
+		// - in the fullReadBuffer channel when it is available and full of data;
+		// - "checked out" by relay or Read when they are are writing to or reading from the
+		//   buffer, respectively.
+		// relay() will obtain the buffer from either the empty or partial channel but block when
+		// the buffer is full. Read will obtain the buffer from the partial or full channel when
+		// there is data to read but block when the buffer is empty.
+		// Write() calls and relay() are synchronized in a similar way, using a single
+		// sendBuffer.
 
 		p := meek.getCustomClientParameters()
 		if p.Bool(parameters.MeekLimitBufferSizes) {
@@ -650,6 +656,7 @@ func (meek *MeekConn) IsClosed() bool {
 func (meek *MeekConn) GetMetrics() common.LogFields {
 	logFields := make(common.LogFields)
 	logFields["meek_cookie_size"] = meek.cookieSize
+	logFields["meek_tls_padding"] = meek.tlsPadding
 	logFields["meek_limit_request"] = meek.limitRequestPayloadLength
 	return logFields
 }
@@ -671,7 +678,7 @@ func (meek *MeekConn) RoundTrip(
 		return nil, errors.TraceNew("operation unsupported")
 	}
 
-	cookie, _, _, err := makeMeekObfuscationValues(
+	cookie, _, _, _, err := makeMeekObfuscationValues(
 		meek.getCustomClientParameters(),
 		meek.meekCookieEncryptionPublicKey,
 		meek.meekObfuscatedKey,
@@ -1355,6 +1362,7 @@ func makeMeekObfuscationValues(
 	endPoint string,
 
 ) (cookie *http.Cookie,
+	tlsPadding int,
 	limitRequestPayloadLength int,
 	redialTLSProbability float64,
 	err error) {
@@ -1366,7 +1374,7 @@ func makeMeekObfuscationValues(
 	}
 	serializedCookie, err := json.Marshal(cookieData)
 	if err != nil {
-		return nil, 0, 0, errors.Trace(err)
+		return nil, 0, 0, 0.0, errors.Trace(err)
 	}
 
 	// Encrypt the JSON data
@@ -1380,12 +1388,12 @@ func makeMeekObfuscationValues(
 	var publicKey [32]byte
 	decodedPublicKey, err := base64.StdEncoding.DecodeString(meekCookieEncryptionPublicKey)
 	if err != nil {
-		return nil, 0, 0, errors.Trace(err)
+		return nil, 0, 0, 0.0, errors.Trace(err)
 	}
 	copy(publicKey[:], decodedPublicKey)
 	ephemeralPublicKey, ephemeralPrivateKey, err := box.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, 0, 0, errors.Trace(err)
+		return nil, 0, 0, 0.0, errors.Trace(err)
 	}
 	box := box.Seal(nil, serializedCookie, &nonce, &publicKey, ephemeralPrivateKey)
 	encryptedCookie := make([]byte, 32+len(box))
@@ -1401,7 +1409,7 @@ func makeMeekObfuscationValues(
 			PaddingPRNGSeed: meekObfuscatorPaddingPRNGSeed,
 			MaxPadding:      &maxPadding})
 	if err != nil {
-		return nil, 0, 0, errors.Trace(err)
+		return nil, 0, 0, 0.0, errors.Trace(err)
 	}
 	obfuscatedCookie := obfuscator.SendSeedMessage()
 	seedLen := len(obfuscatedCookie)
@@ -1410,7 +1418,7 @@ func makeMeekObfuscationValues(
 
 	cookieNamePRNG, err := obfuscator.GetDerivedPRNG("meek-cookie-name")
 	if err != nil {
-		return nil, 0, 0, errors.Trace(err)
+		return nil, 0, 0, 0.0, errors.Trace(err)
 	}
 
 	// Format the HTTP cookie
@@ -1424,6 +1432,7 @@ func makeMeekObfuscationValues(
 		Name:  string(byte(A + letterIndex)),
 		Value: base64.StdEncoding.EncodeToString(obfuscatedCookie)}
 
+	tlsPadding = 0
 	limitRequestPayloadLength = MEEK_MAX_REQUEST_PAYLOAD_LENGTH
 	redialTLSProbability = 0.0
 
@@ -1435,7 +1444,7 @@ func makeMeekObfuscationValues(
 		limitRequestPayloadLengthPRNG, err := obfuscator.GetDerivedPRNG(
 			"meek-limit-request-payload-length")
 		if err != nil {
-			return nil, 0, 0, errors.Trace(err)
+			return nil, 0, 0, 0.0, errors.Trace(err)
 		}
 
 		minLength := p.Int(parameters.MeekMinLimitRequestPayloadLength)
@@ -1450,8 +1459,26 @@ func makeMeekObfuscationValues(
 		limitRequestPayloadLength = limitRequestPayloadLengthPRNG.Range(
 			minLength, maxLength)
 
+		minPadding := p.Int(parameters.MeekMinTLSPadding)
+		maxPadding := p.Int(parameters.MeekMaxTLSPadding)
+
+		// Maximum padding size per RFC 7685
+		if maxPadding > 65535 {
+			maxPadding = 65535
+		}
+
+		if maxPadding > 0 {
+			tlsPaddingPRNG, err := obfuscator.GetDerivedPRNG(
+				"meek-tls-padding")
+			if err != nil {
+				return nil, 0, 0, 0.0, errors.Trace(err)
+			}
+
+			tlsPadding = tlsPaddingPRNG.Range(minPadding, maxPadding)
+		}
+
 		redialTLSProbability = p.Float(parameters.MeekRedialTLSProbability)
 	}
 
-	return cookie, limitRequestPayloadLength, redialTLSProbability, nil
+	return cookie, tlsPadding, limitRequestPayloadLength, redialTLSProbability, nil
 }

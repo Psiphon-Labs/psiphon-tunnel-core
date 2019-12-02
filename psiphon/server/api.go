@@ -743,6 +743,7 @@ var baseRequestParams = []requestParamSpec{
 	{"upstream_ossh_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_cookie_size", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_limit_request", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"meek_tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
 }
 
