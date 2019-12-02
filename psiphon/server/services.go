@@ -68,7 +68,9 @@ func RunServices(configJSON []byte) error {
 		return errors.Trace(err)
 	}
 
-	log.WithTraceFields(*buildinfo.GetBuildInfo().ToMap()).Info("startup")
+	startupFields := buildinfo.GetBuildInfo().ToMap()
+	startupFields["GODEBUG"] = os.Getenv("GODEBUG")
+	log.WithTraceFields(startupFields).Info("startup")
 
 	waitGroup := new(sync.WaitGroup)
 	shutdownBroadcast := make(chan struct{})
