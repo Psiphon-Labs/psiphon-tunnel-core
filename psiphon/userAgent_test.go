@@ -23,7 +23,6 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -160,26 +159,20 @@ func attemptConnectionsWithUserAgent(
 
 	// create a server entry
 
-	serverIPaddress := ""
-	for _, interfaceName := range []string{"eth0", "en0"} {
-		var serverIPv4Address, serverIPv6Address net.IP
-		serverIPv4Address, serverIPv6Address, err = common.GetInterfaceIPAddresses(interfaceName)
-		if err == nil {
-			if serverIPv4Address != nil {
-				serverIPaddress = serverIPv4Address.String()
-			} else {
-				serverIPaddress = serverIPv6Address.String()
-			}
-			break
-		}
-	}
+	serverIPv4Address, serverIPv6Address, err := common.GetRoutableInterfaceIPAddresses()
 	if err != nil {
 		t.Fatalf("error getting server IP address: %s", err)
+	}
+	serverIPAddress := ""
+	if serverIPv4Address != nil {
+		serverIPAddress = serverIPv4Address.String()
+	} else {
+		serverIPAddress = serverIPv6Address.String()
 	}
 
 	_, _, _, _, encodedServerEntry, err := server.GenerateConfig(
 		&server.GenerateConfigParams{
-			ServerIPAddress:      serverIPaddress,
+			ServerIPAddress:      serverIPAddress,
 			EnableSSHAPIRequests: true,
 			WebServerPort:        8000,
 			TunnelProtocolPorts:  map[string]int{tunnelProtocol: 4000},
