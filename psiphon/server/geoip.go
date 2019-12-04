@@ -27,6 +27,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -50,6 +51,8 @@ type GeoIPData struct {
 	Country        string
 	City           string
 	ISP            string
+	ASN            string
+	ASO            string
 	DiscoveryValue int
 }
 
@@ -60,6 +63,8 @@ func NewGeoIPData() GeoIPData {
 		Country: GEOIP_UNKNOWN_VALUE,
 		City:    GEOIP_UNKNOWN_VALUE,
 		ISP:     GEOIP_UNKNOWN_VALUE,
+		ASN:     GEOIP_UNKNOWN_VALUE,
+		ASO:     GEOIP_UNKNOWN_VALUE,
 	}
 }
 
@@ -195,7 +200,11 @@ func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
 			Names map[string]string `maxminddb:"names"`
 		} `maxminddb:"city"`
 		ISP string `maxminddb:"isp"`
+		ASN int    `maxminddb:"autonomous_system_number"`
+		ASO string `maxminddb:"autonomous_system_organization"`
 	}
+
+	geoIPFields.ASN = -1
 
 	// Each database will populate geoIPFields with the values it contains. In the
 	// current MaxMind deployment, the City database populates Country and City and
@@ -220,6 +229,14 @@ func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
 
 	if geoIPFields.ISP != "" {
 		result.ISP = geoIPFields.ISP
+	}
+
+	if geoIPFields.ASN != -1 {
+		result.ASN = strconv.Itoa(geoIPFields.ASN)
+	}
+
+	if geoIPFields.ASO != "" {
+		result.ASO = geoIPFields.ASO
 	}
 
 	result.DiscoveryValue = calculateDiscoveryValue(
