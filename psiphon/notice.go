@@ -803,11 +803,13 @@ func NoticeNetworkID(networkID string) {
 }
 
 func NoticeLivenessTest(diagnosticID string, metrics *livenessTestMetrics, success bool) {
-	singletonNoticeLogger.outputNotice(
-		"LivenessTest", noticeIsDiagnostic,
-		"diagnosticID", diagnosticID,
-		"metrics", metrics,
-		"success", success)
+	if GetEmitNetworkParameters() {
+		singletonNoticeLogger.outputNotice(
+			"LivenessTest", noticeIsDiagnostic,
+			"diagnosticID", diagnosticID,
+			"metrics", metrics,
+			"success", success)
+	}
 }
 
 func NoticePruneServerEntry(serverEntryTag string) {
@@ -825,10 +827,12 @@ func NoticeEstablishTunnelTimeout(timeout time.Duration) {
 }
 
 func NoticeFragmentor(diagnosticID string, message string) {
-	singletonNoticeLogger.outputNotice(
-		"Fragmentor", noticeIsDiagnostic,
-		"diagnosticID", diagnosticID,
-		"message", message)
+	if GetEmitNetworkParameters() {
+		singletonNoticeLogger.outputNotice(
+			"Fragmentor", noticeIsDiagnostic,
+			"diagnosticID", diagnosticID,
+			"message", message)
+	}
 }
 
 func NoticeApplicationParameters(keyValues parameters.KeyValues) {
