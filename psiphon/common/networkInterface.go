@@ -73,7 +73,8 @@ func GetInterfaceIPAddresses(interfaceName string) (net.IP, net.IP, error) {
 }
 
 // GetRoutableInterfaceIPAddresses returns GetInterfaceIPAddresses values for
-// the first non-loopback, non-point-to-point network interface on the host.
+// the first non-loopback, non-point-to-point network interface on the host
+// that has an IP address.
 func GetRoutableInterfaceIPAddresses() (net.IP, net.IP, error) {
 
 	interfaces, err := net.Interfaces()
@@ -81,12 +82,17 @@ func GetRoutableInterfaceIPAddresses() (net.IP, net.IP, error) {
 		return nil, nil, errors.Trace(err)
 	}
 
-	for _, in := range interfaces {
+	for i, in := range interfaces {
 		if (in.Flags&net.FlagUp == 0) ||
 			(in.Flags&(net.FlagLoopback|net.FlagPointToPoint)) != 0 {
 			continue
 		}
-		return GetInterfaceIPAddresses(in.Name)
+		IPv4Address, IPv6Address, err := GetInterfaceIPAddresses(in.Name)
+		if err == nil {
+			return IPv4Address, IPv6Address, nil
+		} else if i == len(interfaces)-1 {
+			return nil, nil, errors.Trace(err)
+		}
 	}
 	return nil, nil, errors.TraceNew("no candidate interfaces found")
 }
