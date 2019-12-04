@@ -52,6 +52,7 @@ type GeoIPData struct {
 	City           string
 	ISP            string
 	ASN            string
+	ASO            string
 	DiscoveryValue int
 }
 
@@ -63,6 +64,7 @@ func NewGeoIPData() GeoIPData {
 		City:    GEOIP_UNKNOWN_VALUE,
 		ISP:     GEOIP_UNKNOWN_VALUE,
 		ASN:     GEOIP_UNKNOWN_VALUE,
+		ASO:     GEOIP_UNKNOWN_VALUE,
 	}
 }
 
@@ -199,6 +201,7 @@ func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
 		} `maxminddb:"city"`
 		ISP string `maxminddb:"isp"`
 		ASN int    `maxminddb:"autonomous_system_number"`
+		ASO string `maxminddb:"autonomous_system_organization"`
 	}
 
 	geoIPFields.ASN = -1
@@ -230,6 +233,10 @@ func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
 
 	if geoIPFields.ASN != -1 {
 		result.ASN = strconv.Itoa(geoIPFields.ASN)
+	}
+
+	if geoIPFields.ASO != "" {
+		result.ASO = geoIPFields.ASO
 	}
 
 	result.DiscoveryValue = calculateDiscoveryValue(

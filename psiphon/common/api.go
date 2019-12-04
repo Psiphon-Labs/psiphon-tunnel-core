@@ -34,6 +34,7 @@ type GeoIPData struct {
 	City           string
 	ISP            string
 	ASN            string
+	ASO            string
 	DiscoveryValue int
 }
 
