@@ -65,7 +65,7 @@ type BuildInfo struct {
 }
 
 // ToMap converts 'BuildInfo' struct to 'map[string]interface{}'
-func (bi *BuildInfo) ToMap() *map[string]interface{} {
+func (bi *BuildInfo) ToMap() map[string]interface{} {
 
 	var dependenciesMap map[string]interface{}
 	json.Unmarshal([]byte(bi.Dependencies), &dependenciesMap)
@@ -79,7 +79,7 @@ func (bi *BuildInfo) ToMap() *map[string]interface{} {
 		"valuesRev":    bi.ValuesRev,
 	}
 
-	return &buildInfoMap
+	return buildInfoMap
 }
 
 // GetBuildInfo returns an instance of the BuildInfo struct

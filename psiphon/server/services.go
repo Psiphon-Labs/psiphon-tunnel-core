@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -67,11 +68,13 @@ func RunServices(configJSON []byte) error {
 		return errors.Trace(err)
 	}
 
-	log.WithTraceFields(*buildinfo.GetBuildInfo().ToMap()).Info("startup")
+	startupFields := buildinfo.GetBuildInfo().ToMap()
+	startupFields["GODEBUG"] = os.Getenv("GODEBUG")
+	log.WithTraceFields(startupFields).Info("startup")
 
 	waitGroup := new(sync.WaitGroup)
 	shutdownBroadcast := make(chan struct{})
-	errorChannel := make(chan error)
+	errorChannel := make(chan error, 1)
 
 	tunnelServer, err := NewTunnelServer(supportServices, shutdownBroadcast)
 	if err != nil {
@@ -135,14 +138,14 @@ func RunServices(configJSON []byte) error {
 		waitGroup.Add(1)
 		go func() {
 			waitGroup.Done()
-			ticker := time.NewTicker(time.Duration(config.PeriodicGarbageCollectionSeconds) * time.Second)
+			ticker := time.NewTicker(config.periodicGarbageCollection)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-shutdownBroadcast:
 					return
 				case <-ticker.C:
-					runtime.GC()
+					debug.FreeOSMemory()
 				}
 			}
 		}()

@@ -14,6 +14,11 @@ export GO111MODULE=off
 # gomobile executable.
 PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/go/bin
 
+# $GOROOT/bin allows build automation to provide various Go versions dynamically.
+# As gomobile would be installed at $GOPATH/bin, there is minimal risk that
+# adding $GOROOT/bin will run an unexpected gomobile binary.
+PATH=$GOROOT/bin:$PATH
+
 BASE_DIR=$(cd "$(dirname "$0")" ; pwd -P)
 cd ${BASE_DIR}
 

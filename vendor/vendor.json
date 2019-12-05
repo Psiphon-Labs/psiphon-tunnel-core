@@ -41,26 +41,26 @@
 		{
 			"checksumSHA1": "fkgr70NoN6wYgBTWNjFWZscOnl0=",
 			"path": "github.com/Psiphon-Labs/net/http/httpguts",
-			"revision": "e0f44e7d5292e7852a15cd4d72e93b72fe6adbcd",
-			"revisionTime": "2019-10-09T14:42:56Z"
+			"revision": "f5d60dada7422b1edeee069489e23743e80a19b1",
+			"revisionTime": "2019-12-04T18:36:04Z"
 		},
 		{
 			"checksumSHA1": "uxFfTWdPthZx2w30RDBcecVb+90=",
 			"path": "github.com/Psiphon-Labs/net/http2",
-			"revision": "e0f44e7d5292e7852a15cd4d72e93b72fe6adbcd",
-			"revisionTime": "2019-10-09T14:42:56Z"
+			"revision": "f5d60dada7422b1edeee069489e23743e80a19b1",
+			"revisionTime": "2019-12-04T18:36:04Z"
 		},
 		{
 			"checksumSHA1": "goMbDSC+4RsA2gXuPW94lwemdKw=",
 			"path": "github.com/Psiphon-Labs/net/http2/hpack",
-			"revision": "e0f44e7d5292e7852a15cd4d72e93b72fe6adbcd",
-			"revisionTime": "2019-10-09T14:42:56Z"
+			"revision": "f5d60dada7422b1edeee069489e23743e80a19b1",
+			"revisionTime": "2019-12-04T18:36:04Z"
 		},
 		{
 			"checksumSHA1": "cE6ltQ1NTTI757Rpbp+uI6MnnC0=",
 			"path": "github.com/Psiphon-Labs/net/idna",
-			"revision": "e0f44e7d5292e7852a15cd4d72e93b72fe6adbcd",
-			"revisionTime": "2019-10-09T14:42:56Z"
+			"revision": "f5d60dada7422b1edeee069489e23743e80a19b1",
+			"revisionTime": "2019-12-04T18:36:04Z"
 		},
 		{
 			"checksumSHA1": "DmQc8vfP44VMUTIZJGM4WslOyk0=",
@@ -249,10 +249,10 @@
 			"revisionTime": "2018-02-01T23:52:37Z"
 		},
 		{
-			"checksumSHA1": "dqtKfXGotqkiYaS328PpWeusig8=",
+			"checksumSHA1": "z8MqG1rnemNMAoCpATKO9HpA0M8=",
 			"path": "github.com/juju/ratelimit",
-			"revision": "59fac5042749a5afb9af70e813da1dd5474f0167",
-			"revisionTime": "2017-10-26T09:04:26Z"
+			"revision": "f60b32039441cd828005f82f3a54aafd00bc9882",
+			"revisionTime": "2019-10-02T06:26:51Z"
 		},
 		{
 			"checksumSHA1": "gEjGS03N1eysvpQ+FCHTxPcbxXc=",
