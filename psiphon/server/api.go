@@ -868,6 +868,8 @@ func getRequestLogFields(
 	logFields["client_region"] = strings.Replace(geoIPData.Country, " ", "_", -1)
 	logFields["client_city"] = strings.Replace(geoIPData.City, " ", "_", -1)
 	logFields["client_isp"] = strings.Replace(geoIPData.ISP, " ", "_", -1)
+	logFields["client_asn"] = strings.Replace(geoIPData.ASN, " ", "_", -1)
+	logFields["client_aso"] = strings.Replace(geoIPData.ASO, " ", "_", -1)
 
 	if len(authorizedAccessTypes) > 0 {
 		logFields["authorized_access_types"] = authorizedAccessTypes

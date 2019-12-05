@@ -57,22 +57,15 @@ var mockWebServerPort = 8080
 func TestMain(m *testing.M) {
 	flag.Parse()
 
-	var err error
-	for _, interfaceName := range []string{"eth0", "en0"} {
-		var serverIPv4Address, serverIPv6Address net.IP
-		serverIPv4Address, serverIPv6Address, err = common.GetInterfaceIPAddresses(interfaceName)
-		if err == nil {
-			if serverIPv4Address != nil {
-				serverIPAddress = serverIPv4Address.String()
-			} else {
-				serverIPAddress = serverIPv6Address.String()
-			}
-			break
-		}
-	}
+	serverIPv4Address, serverIPv6Address, err := common.GetRoutableInterfaceIPAddresses()
 	if err != nil {
 		fmt.Printf("error getting server IP address: %s\n", err)
 		os.Exit(1)
+	}
+	if serverIPv4Address != nil {
+		serverIPAddress = serverIPv4Address.String()
+	} else {
+		serverIPAddress = serverIPv6Address.String()
 	}
 
 	testDataDirName, err = ioutil.TempDir("", "psiphon-server-test")
