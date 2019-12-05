@@ -87,7 +87,7 @@ func (c *Conn) serverHandshake() error {
 				return err
 			}
 		}
-		c.handshakeComplete = true
+		atomic.StoreUint32(&c.handshakeStatus, 1)
 		return nil
 	} else if isResume {
 		// The client has included a session ticket and so we do an abbreviated handshake.
@@ -145,7 +145,10 @@ func (c *Conn) serverHandshake() error {
 	}
 	c.phase = handshakeConfirmed
 	atomic.StoreInt32(&c.handshakeConfirmed, 1)
-	c.handshakeComplete = true
+
+	// [Psiphon]
+	// https://github.com/golang/go/commit/e5b13401c6b19f58a8439f1019a80fe540c0c687
+	atomic.StoreUint32(&c.handshakeStatus, 1)
 
 	return nil
 }
