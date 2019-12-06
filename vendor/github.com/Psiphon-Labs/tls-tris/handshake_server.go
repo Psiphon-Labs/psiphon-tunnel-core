@@ -211,6 +211,9 @@ Curves:
 		}
 	}
 
+	// [Psiphon]
+	hasSupportedPoints := false
+
 	// If present, the supported points extension must include uncompressed.
 	// Can be absent. This behavior mirrors BoringSSL.
 	if hs.clientHello.supportedPoints != nil {
@@ -225,6 +228,7 @@ Curves:
 			c.sendAlert(alertHandshakeFailure)
 			return false, errors.New("tls: client does not support uncompressed points")
 		}
+		hasSupportedPoints = true
 	}
 
 	foundCompression := false
@@ -272,6 +276,17 @@ Curves:
 			c.sendAlert(alertInternalError)
 			return false, err
 		}
+	}
+
+	// [Psiphon]
+	// https://github.com/golang/go/commit/02a5502ab8d862309aaec3c5ec293b57b913d01d
+	if hasSupportedPoints && c.vers < VersionTLS13 {
+		// Although omitting the ec_point_formats extension is permitted, some
+		// old OpenSSL versions will refuse to handshake if not present.
+		//
+		// Per RFC 4492, section 5.1.2, implementations MUST support the
+		// uncompressed point format. See golang.org/issue/31943.
+		hs.hello.supportedPoints = []uint8{pointFormatUncompressed}
 	}
 
 	if len(hs.clientHello.serverName) > 0 {

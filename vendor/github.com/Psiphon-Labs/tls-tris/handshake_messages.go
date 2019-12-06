@@ -1325,6 +1325,10 @@ type serverHelloMsg struct {
 
 	// RFC7627
 	extendedMSSupported bool
+
+	// [Psiphon]
+	// https://github.com/golang/go/commit/02a5502ab8d862309aaec3c5ec293b57b913d01d
+	supportedPoints []uint8
 }
 
 func (m *serverHelloMsg) equal(i interface{}) bool {
@@ -1359,7 +1363,10 @@ func (m *serverHelloMsg) equal(i interface{}) bool {
 		bytes.Equal(m.keyShare.data, m1.keyShare.data) &&
 		m.psk == m1.psk &&
 		m.pskIdentity == m1.pskIdentity &&
-		m.extendedMSSupported == m1.extendedMSSupported
+		m.extendedMSSupported == m1.extendedMSSupported &&
+
+		// [Psiphon]
+		bytes.Equal(m.supportedPoints, m1.supportedPoints)
 }
 
 func (m *serverHelloMsg) marshal() []byte {
@@ -1422,6 +1429,12 @@ func (m *serverHelloMsg) marshal() []byte {
 		numExtensions++
 	}
 
+	// [Psiphon]
+	if len(m.supportedPoints) > 0 {
+		extensionsLength += 1 + len(m.supportedPoints)
+		numExtensions++
+	}
+
 	if numExtensions > 0 {
 		extensionsLength += 4 * numExtensions
 		length += 2 + extensionsLength
@@ -1454,13 +1467,48 @@ func (m *serverHelloMsg) marshal() []byte {
 		z[1] = byte(extensionsLength)
 		z = z[2:]
 	}
-	if m.vers >= VersionTLS13 {
-		z[0] = byte(extensionSupportedVersions >> 8)
-		z[1] = byte(extensionSupportedVersions)
-		z[3] = 2
-		z[4] = uint8(m.vers >> 8)
-		z[5] = uint8(m.vers)
-		z = z[6:]
+
+	// [Psiphon]
+	// Reorder extensions to match OpenSSL order:
+	// https://github.com/openssl/openssl/blob/2a5385511051d33be8d2b20d7669d8b1862fe510/ssl/statem/extensions.c#L119
+
+	if m.secureRenegotiationSupported {
+		z[0] = byte(extensionRenegotiationInfo >> 8)
+		z[1] = byte(extensionRenegotiationInfo & 0xff)
+		z[2] = 0
+		z[3] = byte(len(m.secureRenegotiation) + 1)
+		z[4] = byte(len(m.secureRenegotiation))
+		z = z[5:]
+		copy(z, m.secureRenegotiation)
+		z = z[len(m.secureRenegotiation):]
+	}
+
+	// [Psiphon]
+	// https://github.com/golang/go/commit/02a5502ab8d862309aaec3c5ec293b57b913d01d
+	if len(m.supportedPoints) > 0 {
+		// http://tools.ietf.org/html/rfc4492#section-5.5.2
+		z[0] = byte(extensionSupportedPoints >> 8)
+		z[1] = byte(extensionSupportedPoints)
+		l := 1 + len(m.supportedPoints)
+		z[2] = byte(l >> 8)
+		z[3] = byte(l)
+		l--
+		z[4] = byte(l)
+		z = z[5:]
+		for _, pointFormat := range m.supportedPoints {
+			z[0] = pointFormat
+			z = z[1:]
+		}
+	}
+	if m.ticketSupported {
+		z[0] = byte(extensionSessionTicket >> 8)
+		z[1] = byte(extensionSessionTicket)
+		z = z[4:]
+	}
+	if m.ocspStapling {
+		z[0] = byte(extensionStatusRequest >> 8)
+		z[1] = byte(extensionStatusRequest)
+		z = z[4:]
 	}
 	if m.nextProtoNeg {
 		z[0] = byte(extensionNextProtoNeg >> 8)
@@ -1478,26 +1526,6 @@ func (m *serverHelloMsg) marshal() []byte {
 			copy(z[1:], []byte(v[0:l]))
 			z = z[1+l:]
 		}
-	}
-	if m.ocspStapling {
-		z[0] = byte(extensionStatusRequest >> 8)
-		z[1] = byte(extensionStatusRequest)
-		z = z[4:]
-	}
-	if m.ticketSupported {
-		z[0] = byte(extensionSessionTicket >> 8)
-		z[1] = byte(extensionSessionTicket)
-		z = z[4:]
-	}
-	if m.secureRenegotiationSupported {
-		z[0] = byte(extensionRenegotiationInfo >> 8)
-		z[1] = byte(extensionRenegotiationInfo & 0xff)
-		z[2] = 0
-		z[3] = byte(len(m.secureRenegotiation) + 1)
-		z[4] = byte(len(m.secureRenegotiation))
-		z = z[5:]
-		copy(z, m.secureRenegotiation)
-		z = z[len(m.secureRenegotiation):]
 	}
 	if alpnLen := len(m.alpnProtocol); alpnLen > 0 {
 		z[0] = byte(extensionALPN >> 8)
@@ -1530,6 +1558,18 @@ func (m *serverHelloMsg) marshal() []byte {
 			z = z[len(sct)+2:]
 		}
 	}
+	if m.extendedMSSupported {
+		binary.BigEndian.PutUint16(z, extensionEMS)
+		z = z[4:]
+	}
+	if m.vers >= VersionTLS13 {
+		z[0] = byte(extensionSupportedVersions >> 8)
+		z[1] = byte(extensionSupportedVersions)
+		z[3] = 2
+		z[4] = uint8(m.vers >> 8)
+		z[5] = uint8(m.vers)
+		z = z[6:]
+	}
 	if m.keyShare.group != 0 {
 		z[0] = uint8(extensionKeyShare >> 8)
 		z[1] = uint8(extensionKeyShare)
@@ -1552,10 +1592,6 @@ func (m *serverHelloMsg) marshal() []byte {
 		z[4] = byte(m.pskIdentity >> 8)
 		z[5] = byte(m.pskIdentity)
 		z = z[6:]
-	}
-	if m.extendedMSSupported {
-		binary.BigEndian.PutUint16(z, extensionEMS)
-		z = z[4:]
 	}
 
 	m.raw = x
@@ -1594,6 +1630,9 @@ func (m *serverHelloMsg) unmarshal(data []byte) alert {
 	m.psk = false
 	m.pskIdentity = 0
 	m.extendedMSSupported = false
+
+	// [Psiphon]
+	m.supportedPoints = nil
 
 	if len(data) == 0 {
 		// ServerHello is optionally followed by extension data
@@ -1737,6 +1776,19 @@ func (m *serverHelloMsg) unmarshal(data []byte) alert {
 			m.pskIdentity = uint16(data[0])<<8 | uint16(data[1])
 		case extensionEMS:
 			m.extendedMSSupported = true
+
+		// [Psiphon]
+		case extensionSupportedPoints:
+			// http://tools.ietf.org/html/rfc4492#section-5.5.2
+			if length < 1 {
+				return alertDecodeError
+			}
+			l := int(data[0])
+			if length != l+1 {
+				return alertDecodeError
+			}
+			m.supportedPoints = make([]uint8, l)
+			copy(m.supportedPoints, data[1:])
 		}
 		data = data[length:]
 	}
