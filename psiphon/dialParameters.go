@@ -90,6 +90,7 @@ type DialParameters struct {
 	MeekSNIServerName         string
 	MeekHostHeader            string
 	MeekObfuscatorPaddingSeed *prng.Seed
+	MeekTLSPaddingSize        int
 	MeekResolvedIPAddress     atomic.Value `json:"-"`
 
 	SelectedUserAgent bool
