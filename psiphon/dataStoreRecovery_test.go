@@ -190,7 +190,7 @@ func TestBoltResiliency(t *testing.T) {
 	}
 
 	truncateDataStore := func() {
-		filename := filepath.Join(testDataDirName, "datastore", "psiphon.boltdb")
+		filename := filepath.Join(testDataDirName, "ca.psiphon.PsiphonTunnel.tunnel-core", "datastore", "psiphon.boltdb")
 		configFile, err := os.OpenFile(filename, os.O_RDWR, 0666)
 		if err != nil {
 			t.Fatalf("OpenFile failed: %s", err)

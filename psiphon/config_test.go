@@ -389,84 +389,89 @@ func (suite *ConfigTestSuite) Test_LoadConfig_Migrate() {
 				Name: "data_root_directory",
 				Children: []FileTree{
 					{
-						Name: "ca.psiphon.PsiphonTunnel.tunnel-core_migration_complete",
+						Name: "non_tunnel_core_file_should_not_be_clobbered",
 					},
 					{
-						Name: "remote_server_list",
-					},
-					{
-						Name: "remote_server_list.part",
-					},
-					{
-						Name: "remote_server_list.part.etag",
-					},
-					{
-						Name: "datastore",
+						Name: "ca.psiphon.PsiphonTunnel.tunnel-core",
 						Children: []FileTree{
 							{
-								Name: "psiphon.boltdb",
+								Name: "migration_complete",
 							},
 							{
-								Name: "psiphon.boltdb.lock",
-							},
-						},
-					},
-					{
-						Name: "osl",
-						Children: []FileTree{
-							{
-								Name: "osl-registry",
+								Name: "remote_server_list",
 							},
 							{
-								Name: "osl-registry.cached",
+								Name: "remote_server_list.part",
 							},
 							{
-								Name: "osl-1",
+								Name: "remote_server_list.part.etag",
 							},
 							{
-								Name: "osl-1.part",
+								Name: "datastore",
+								Children: []FileTree{
+									{
+										Name: "psiphon.boltdb",
+									},
+									{
+										Name: "psiphon.boltdb.lock",
+									},
+								},
 							},
-						},
-					},
-					{
-						Name: "tapdance",
-						Children: []FileTree{
+							{
+								Name: "osl",
+								Children: []FileTree{
+									{
+										Name: "osl-registry",
+									},
+									{
+										Name: "osl-registry.cached",
+									},
+									{
+										Name: "osl-1",
+									},
+									{
+										Name: "osl-1.part",
+									},
+								},
+							},
 							{
 								Name: "tapdance",
 								Children: []FileTree{
 									{
-										Name: "file1",
-									},
-									{
-										Name: "file2",
+										Name: "tapdance",
+										Children: []FileTree{
+											{
+												Name: "file1",
+											},
+											{
+												Name: "file2",
+											},
+										},
 									},
 								},
 							},
+							{
+								Name: "upgrade",
+							},
+							{
+								Name: "upgrade.1234",
+							},
+							{
+								Name: "upgrade.1234.part",
+							},
+							{
+								Name: "upgrade.1234.part.etag",
+							},
+							{
+								Name: "notices",
+							},
+							{
+								Name: "notices.1",
+							},
+							{
+								Name: "homepage",
+							},
 						},
-					},
-					{
-						Name: "upgrade",
-					},
-					{
-						Name: "upgrade.1234",
-					},
-					{
-						Name: "upgrade.1234.part",
-					},
-					{
-						Name: "upgrade.1234.part.etag",
-					},
-					{
-						Name: "notices",
-					},
-					{
-						Name: "notices.1",
-					},
-					{
-						Name: "homepage",
-					},
-					{
-						Name: "non_tunnel_core_file_should_not_be_clobbered",
 					},
 				},
 			},

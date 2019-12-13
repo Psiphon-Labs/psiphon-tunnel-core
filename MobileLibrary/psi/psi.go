@@ -54,40 +54,46 @@ func NoticeUserLog(message string) {
 	psiphon.NoticeUserLog(message)
 }
 
-// HomepageFilePath returns the path, relative to the configured data root
-// directory, where homepage files will be paved.
+// HomepageFilePath returns the path where homepage files will be paved.
+//
+// rootDataDirectoryPath is the configured data root directory.
 //
 // Note: homepage files will only be paved if UseNoticeFiles is set in the
 // config passed to Start().
 func HomepageFilePath(rootDataDirectoryPath string) string {
-	return filepath.Join(rootDataDirectoryPath, psiphon.HomepageFilename)
+	return filepath.Join(rootDataDirectoryPath, psiphon.PsiphonDataDirectoryName, psiphon.HomepageFilename)
 }
 
-// NoticesFilePath returns the path, relative to the configured data root
-// directory, where the notices file will be paved.
+// NoticesFilePath returns the path where the notices file will be paved.
+//
+// rootDataDirectoryPath is the configured data root directory.
 //
 // Note: notices will only be paved if UseNoticeFiles is set in the config
 // passed to Start().
 func NoticesFilePath(rootDataDirectoryPath string) string {
-	return filepath.Join(rootDataDirectoryPath, psiphon.NoticesFilename)
+	return filepath.Join(rootDataDirectoryPath, psiphon.PsiphonDataDirectoryName, psiphon.NoticesFilename)
 }
 
-// OldNoticesFilePath returns the path, relative to the configured data root
-// directory, where the notices file is moved to when file rotation occurs.
+// OldNoticesFilePath returns the path where the notices file is moved to when
+// file rotation occurs.
+//
+// rootDataDirectoryPath is the configured data root directory.
 //
 // Note: notices will only be paved if UseNoticeFiles is set in the config
 // passed to Start().
 func OldNoticesFilePath(rootDataDirectoryPath string) string {
-	return filepath.Join(rootDataDirectoryPath, psiphon.OldNoticesFilename)
+	return filepath.Join(rootDataDirectoryPath, psiphon.PsiphonDataDirectoryName, psiphon.OldNoticesFilename)
 }
 
-// UpgradeDownloadFilePath returns the path, relative to the configured data
-// root directory, where the downloaded upgrade file will be paved.
+// UpgradeDownloadFilePath returns the path where the downloaded upgrade file
+// will be paved.
+//
+// rootDataDirectoryPath is the configured data root directory.
 //
 // Note: upgrades will only be paved if UpgradeDownloadURLs is set in the config
 // passed to Start() and there are upgrades available.
 func UpgradeDownloadFilePath(rootDataDirectoryPath string) string {
-	return filepath.Join(rootDataDirectoryPath, psiphon.UpgradeDownloadFilename)
+	return filepath.Join(rootDataDirectoryPath, psiphon.PsiphonDataDirectoryName, psiphon.UpgradeDownloadFilename)
 }
 
 var controllerMutex sync.Mutex

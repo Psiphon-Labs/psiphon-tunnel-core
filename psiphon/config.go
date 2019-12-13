@@ -44,8 +44,11 @@ import (
 const (
 	TUNNEL_POOL_SIZE = 1
 
-	// Filename constants.
-	// All relative to the configured DataRootDirectory.
+	// Psiphon data directory name, relative to config.DataRootDirectory.
+	// See config.GetPsiphonDataDirectory().
+	PsiphonDataDirectoryName = "ca.psiphon.PsiphonTunnel.tunnel-core"
+
+	// Filename constants, all relative to config.GetPsiphonDataDirectory().
 	HomepageFilename        = "homepage"
 	NoticesFilename         = "notices"
 	OldNoticesFilename      = "notices.1"
@@ -66,11 +69,6 @@ type Config struct {
 	//
 	// Psiphon will assume full control of files under this directory. They may
 	// be deleted, moved or overwritten.
-	//
-	// Warning: If the datastore file,
-	// DataRootDirectory/datastore/DATA_STORE_FILENAME, exists but fails to open
-	// for any reason (checksum error, unexpected file format, etc.) it will be
-	// deleted in order to pave a new datastore and continue running.
 	DataRootDirectory string
 
 	// UseNoticeFiles configures notice files for writing. If set, homepages
@@ -801,6 +799,15 @@ func (config *Config) Commit() error {
 		config.DataRootDirectory = wd
 	}
 
+	// Create root directory
+	rootDirectoryPath := config.GetPsiphonDataDirectory()
+	if !common.FileExists(rootDirectoryPath) {
+		err := os.Mkdir(rootDirectoryPath, os.ModePerm)
+		if err != nil {
+			return errors.Tracef("failed to create datastore directory %s with error: %s", rootDirectoryPath, err.Error())
+		}
+	}
+
 	// Create datastore directory.
 	dataStoreDirectoryPath := config.GetDataStoreDirectory()
 	if !common.FileExists(dataStoreDirectoryPath) {
@@ -838,7 +845,7 @@ func (config *Config) Commit() error {
 
 	// Check if the migration from legacy config fields has already been
 	// completed. See the Migrate* config fields for more details.
-	migrationCompleteFilePath := filepath.Join(config.DataRootDirectory, "ca.psiphon.PsiphonTunnel.tunnel-core_migration_complete")
+	migrationCompleteFilePath := filepath.Join(config.GetPsiphonDataDirectory(), "migration_complete")
 	needMigration := !common.FileExists(migrationCompleteFilePath)
 
 	// Collect notices to emit them after notice files are set
@@ -1265,42 +1272,52 @@ func (config *Config) GetAuthorizations() []string {
 	return config.authorizations
 }
 
+// GetPsiphonDataDirectory returns the directory under which all persistent
+// files should be stored. This directory is created under
+// config.DataRootDirectory. The motivation for an additional directory is that
+// config.DataRootDirectory defaults to the current working directory, which may
+// include non-tunnel-core files that should be excluded from directory-spanning
+// operations (e.g. excluding all tunnel-core files from backup).
+func (config *Config) GetPsiphonDataDirectory() string {
+	return filepath.Join(config.DataRootDirectory, PsiphonDataDirectoryName)
+}
+
 // GetHomePageFilename the path where the homepage notices file will be created.
 func (config *Config) GetHomePageFilename() string {
-	return filepath.Join(config.DataRootDirectory, HomepageFilename)
+	return filepath.Join(config.GetPsiphonDataDirectory(), HomepageFilename)
 }
 
 // GetNoticesFilename returns the path where the notices file will be created.
 // When the file is rotated it will be moved to config.GetOldNoticesFilename().
 func (config *Config) GetNoticesFilename() string {
-	return filepath.Join(config.DataRootDirectory, NoticesFilename)
+	return filepath.Join(config.GetPsiphonDataDirectory(), NoticesFilename)
 }
 
 // GetOldNoticeFilename returns the path where the rotated notices file will be
 // created.
 func (config *Config) GetOldNoticesFilename() string {
-	return filepath.Join(config.DataRootDirectory, OldNoticesFilename)
+	return filepath.Join(config.GetPsiphonDataDirectory(), OldNoticesFilename)
 }
 
 // GetDataStoreDirectory returns the directory in which the persistent database
 // will be stored. Created in Config.Commit(). The persistent database contains
 // information such as server entries.
 func (config *Config) GetDataStoreDirectory() string {
-	return filepath.Join(config.DataRootDirectory, "datastore")
+	return filepath.Join(config.GetPsiphonDataDirectory(), "datastore")
 }
 
 // GetObfuscatedServerListDownloadDirectory returns the directory in which
 // obfuscated remote server list downloads will be stored. Created in
 // Config.Commit().
 func (config *Config) GetObfuscatedServerListDownloadDirectory() string {
-	return filepath.Join(config.DataRootDirectory, "osl")
+	return filepath.Join(config.GetPsiphonDataDirectory(), "osl")
 }
 
 // GetRemoteServerListDownloadFilename returns the filename where the remote
 // server list download will be stored. Data is stored in co-located files
 // (RemoteServerListDownloadFilename.part*) to allow for resumable downloading.
 func (config *Config) GetRemoteServerListDownloadFilename() string {
-	return filepath.Join(config.DataRootDirectory, "remote_server_list")
+	return filepath.Join(config.GetPsiphonDataDirectory(), "remote_server_list")
 }
 
 // GetUpgradeDownloadFilename specifies the filename where upgrade downloads
@@ -1308,13 +1325,13 @@ func (config *Config) GetRemoteServerListDownloadFilename() string {
 // (or UpgradeDownloadUrl) is specified. Data is stored in co-located files
 // (UpgradeDownloadFilename.part*) to allow for resumable downloading.
 func (config *Config) GetUpgradeDownloadFilename() string {
-	return filepath.Join(config.DataRootDirectory, UpgradeDownloadFilename)
+	return filepath.Join(config.GetPsiphonDataDirectory(), UpgradeDownloadFilename)
 }
 
 // GetTapdanceDirectory returns the directory under which tapdance will create
 // and manage files.
 func (config *Config) GetTapdanceDirectory() string {
-	return filepath.Join(config.DataRootDirectory, "tapdance")
+	return filepath.Join(config.GetPsiphonDataDirectory(), "tapdance")
 }
 
 // UseUpstreamProxy indicates if an upstream proxy has been
