@@ -904,7 +904,7 @@ func (config *Config) Commit() error {
 	// Validate config fields.
 
 	if !common.FileExists(config.DataRootDirectory) {
-		return errors.Tracef("DataRootDirectory does not exist: %s", config.MigrateDataStoreDirectory)
+		return errors.Tracef("DataRootDirectory does not exist: %s", config.DataRootDirectory)
 	}
 
 	if config.PropagationChannelId == "" {
