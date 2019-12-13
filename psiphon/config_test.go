@@ -432,10 +432,15 @@ func (suite *ConfigTestSuite) Test_LoadConfig_Migrate() {
 						Name: "tapdance",
 						Children: []FileTree{
 							{
-								Name: "file1",
-							},
-							{
-								Name: "file2",
+								Name: "tapdance",
+								Children: []FileTree{
+									{
+										Name: "file1",
+									},
+									{
+										Name: "file2",
+									},
+								},
 							},
 						},
 					},

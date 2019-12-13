@@ -92,8 +92,6 @@ type Config struct {
 	// See comment for setNoticeFiles in notice.go for further details.
 	UseNoticeFiles *UseNoticeFiles
 
-
-
 	// PropagationChannelId is a string identifier which indicates how the
 	// Psiphon client was distributed. This parameter is required. This value
 	// is supplied by and depends on the Psiphon Network, and is typically
@@ -821,6 +819,15 @@ func (config *Config) Commit() error {
 		}
 	}
 
+	// Create tapdance directory
+	tapdanceDirectoryPath := config.GetTapdanceDirectory()
+	if !common.FileExists(tapdanceDirectoryPath) {
+		err := os.Mkdir(tapdanceDirectoryPath, os.ModePerm)
+		if err != nil {
+			return errors.Tracef("failed to create tapdance directory %s with error: %s", tapdanceDirectoryPath, err.Error())
+		}
+	}
+
 	if config.ClientVersion == "" {
 		config.ClientVersion = "0"
 	}
@@ -1065,7 +1072,7 @@ func (config *Config) Commit() error {
 			},
 			{
 				OldPath: filepath.Join(config.MigrateDataStoreDirectory, "tapdance"),
-				NewPath: filepath.Join(config.DataRootDirectory, "tapdance"),
+				NewPath: filepath.Join(config.GetTapdanceDirectory(), "tapdance"),
 				IsDir:   true,
 			},
 		}
@@ -1307,7 +1314,7 @@ func (config *Config) GetUpgradeDownloadFilename() string {
 // GetTapdanceDirectory returns the directory under which tapdance will create
 // and manage files.
 func (config *Config) GetTapdanceDirectory() string {
-	return config.DataRootDirectory
+	return filepath.Join(config.DataRootDirectory, "tapdance")
 }
 
 // UseUpstreamProxy indicates if an upstream proxy has been
