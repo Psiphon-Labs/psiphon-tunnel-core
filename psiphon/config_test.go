@@ -321,6 +321,15 @@ func (suite *ConfigTestSuite) Test_LoadConfig_Migrate() {
 				Name: oldUpgradeDownloadFilename,
 			},
 			{
+				Name: oldUpgradeDownloadFilename + ".1234",
+			},
+			{
+				Name: oldUpgradeDownloadFilename + ".1234.part",
+			},
+			{
+				Name: oldUpgradeDownloadFilename + ".1234.part.etag",
+			},
+			{
 				Name: "data_root_directory",
 				Children: []FileTree{
 					{
@@ -432,6 +441,15 @@ func (suite *ConfigTestSuite) Test_LoadConfig_Migrate() {
 					},
 					{
 						Name: "upgrade",
+					},
+					{
+						Name: "upgrade.1234",
+					},
+					{
+						Name: "upgrade.1234.part",
+					},
+					{
+						Name: "upgrade.1234.part.etag",
 					},
 					{
 						Name: "notices",

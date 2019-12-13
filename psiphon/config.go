@@ -1123,7 +1123,12 @@ func (config *Config) Commit() error {
 
 			oldUpgradeDownloadFilename := filepath.Base(config.MigrateUpgradeDownloadFilename)
 
-			upgradeDownloadFileRegex, err := regexp.Compile(`^` + oldUpgradeDownloadFilename + `(\.part.*)*$`)
+			// Create regex for:
+			// <old_upgrade_download_filename>
+			// <old_upgrade_download_filename>.<client_version_number>
+			// <old_upgrade_download_filename>.<client_version_number>.part
+			// <old_upgrade_download_filename>.<client_version_number>.part.etag
+			upgradeDownloadFileRegex, err := regexp.Compile(`^` + oldUpgradeDownloadFilename + `(\.\d+(\.part(\.etag)?)?)?$`)
 			if err != nil {
 				return errors.TraceMsg(err, "failed to compile regex for upgrade files")
 			}
