@@ -92,104 +92,7 @@ type Config struct {
 	// See comment for setNoticeFiles in notice.go for further details.
 	UseNoticeFiles *UseNoticeFiles
 
-	// MigrateHompageNoticesFilename migrates a homepage file from the path
-	// previously configured with setNoticeFiles to the new path for homepage
-	// files under the data root directory. The file specified by this config
-	// value will be moved to config.GetHomePageFilename().
-	//
-	// If not set, no migration operation will be performed.
-	MigrateHompageNoticesFilename string
 
-	// MigrateRotatingNoticesFilename migrates notice files from the path
-	// previously configured with setNoticeFiles to the new path for notice
-	// files under the data root directory.
-	//
-	// MigrateRotatingNoticesFilename will be moved to
-	// config.GetNoticesFilename().
-	//
-	// MigrateRotatingNoticesFilename.1 will be moved to
-	// config.GetOldNoticesFilename().
-	//
-	// If not set, no migration operation will be performed.
-	MigrateRotatingNoticesFilename string
-
-	// DataStoreDirectory is the directory in which to store the persistent
-	// database, which contains information such as server entries. By
-	// default, current working directory.
-	//
-	// Deprecated:
-	// Use MigrateDataStoreDirectory. When MigrateDataStoreDirectory
-	// is set, this parameter is ignored.
-	//
-	// DataStoreDirectory has been subsumed by the new data root directory,
-	// which is configured with DataRootDirectory. If set, datastore files
-	// found in the specified directory will be moved under the data root
-	// directory.
-	DataStoreDirectory string
-
-	// MigrateDataStoreDirectory indicates the location of the datastore
-	// directory, as previously configured with the deprecated
-	// DataStoreDirectory config field. Datastore files found in the specified
-	// directory will be moved under the data root directory.
-	MigrateDataStoreDirectory string
-
-	// RemoteServerListDownloadFilename specifies a target filename for
-	// storing the remote server list download. Data is stored in co-located
-	// files (RemoteServerListDownloadFilename.part*) to allow for resumable
-	// downloading.
-	//
-	// Deprecated:
-	// Use MigrateRemoteServerListDownloadFilename. When
-	// MigrateRemoteServerListDownloadFilename is set, this parameter is
-	// ignored.
-	//
-	// If set, remote server list download files found at the specified path
-	// will be moved under the data root directory.
-	RemoteServerListDownloadFilename string
-
-	// MigrateRemoteServerListDownloadFilename indicates the location of
-	// remote server list download files. The remote server list files found at
-	// the specified path will be moved under the data root directory.
-	MigrateRemoteServerListDownloadFilename string
-
-	// ObfuscatedServerListDownloadDirectory specifies a target directory for
-	// storing the obfuscated remote server list downloads. Data is stored in
-	// co-located files (<OSL filename>.part*) to allow for resumable
-	// downloading.
-	//
-	// Deprecated:
-	// Use MigrateObfuscatedServerListDownloadDirectory. When
-	// MigrateObfuscatedServerListDownloadDirectory is set, this parameter is
-	// ignored.
-	//
-	// If set, obfuscated server list download files found at the specified path
-	// will be moved under the data root directory.
-	ObfuscatedServerListDownloadDirectory string
-
-	// MigrateObfuscatedServerListDownloadDirectory indicates the location of
-	// the obfuscated server list downloads directory, as previously configured
-	// with ObfuscatedServerListDownloadDirectory. Obfuscated server list
-	// download files found in the specified directory will be moved under the
-	// data root directory.
-	MigrateObfuscatedServerListDownloadDirectory string
-
-	// UpgradeDownloadFilename is the local target filename for an upgrade
-	// download. This parameter is required when UpgradeDownloadURLs (or
-	// UpgradeDownloadUrl) is specified. Data is stored in co-located files
-	// (UpgradeDownloadFilename.part*) to allow for resumable downloading.
-	//
-	// Deprecated:
-	// Use MigrateUpgradeDownloadFilename. When MigrateUpgradeDownloadFilename
-	// is set, this parameter is ignored.
-	//
-	// If set, upgrade download files found at the specified path will be moved
-	// under the data root directory.
-	UpgradeDownloadFilename string
-
-	// MigrateUpgradeDownloadFilename indicates the location of downloaded
-	// application upgrade files. Downloaded upgrade files found at the
-	// specified path will be moved under the data root directory.
-	MigrateUpgradeDownloadFilename string
 
 	// PropagationChannelId is a string identifier which indicates how the
 	// Psiphon client was distributed. This parameter is required. This value
@@ -256,13 +159,6 @@ type Config struct {
 	// slow networks.
 	// When set, must be >= 1.0.
 	NetworkLatencyMultiplier float64
-
-	// TunnelProtocol indicates which protocol to use. For the default, "",
-	// all protocols are used.
-	//
-	// Deprecated: Use LimitTunnelProtocols. When LimitTunnelProtocols is not
-	// nil, this parameter is ignored.
-	TunnelProtocol string
 
 	// LimitTunnelProtocols indicates which protocols to use. Valid values
 	// include:
@@ -354,10 +250,6 @@ type Config struct {
 	// upstream proxy when specified by UpstreamProxyURL.
 	CustomHeaders http.Header
 
-	// Deprecated: Use CustomHeaders. When CustomHeaders is not nil, this
-	// parameter is ignored.
-	UpstreamProxyCustomHeaders http.Header
-
 	// NetworkConnectivityChecker is an interface that enables tunnel-core to
 	// call into the host application to check for network connectivity. See:
 	// NetworkConnectivityChecker doc.
@@ -427,15 +319,6 @@ type Config struct {
 	// speed test samples.
 	TargetApiProtocol string
 
-	// RemoteServerListUrl is a URL which specifies a location to fetch out-
-	// of-band server entries. This facility is used when a tunnel cannot be
-	// established to known servers. This value is supplied by and depends on
-	// the Psiphon Network, and is typically embedded in the client binary.
-	//
-	// Deprecated: Use RemoteServerListURLs. When RemoteServerListURLs is not
-	// nil, this parameter is ignored.
-	RemoteServerListUrl string
-
 	// RemoteServerListURLs is list of URLs which specify locations to fetch
 	// out-of-band server entries. This facility is used when a tunnel cannot
 	// be established to known servers. This value is supplied by and depends
@@ -458,15 +341,6 @@ type Config struct {
 	// resuming a remote server list download after a failure. If omitted, a
 	// default value is used. This value is typical overridden for testing.
 	FetchRemoteServerListRetryPeriodMilliseconds *int
-
-	// ObfuscatedServerListRootURL is a URL which specifies the root location
-	// from which to fetch obfuscated server list files. This value is
-	// supplied by and depends on the Psiphon Network, and is typically
-	// embedded in the client binary.
-	//
-	// Deprecated: Use ObfuscatedServerListRootURLs. When
-	// ObfuscatedServerListRootURLs is not nil, this parameter is ignored.
-	ObfuscatedServerListRootURL string
 
 	// ObfuscatedServerListRootURLs is a list of URLs which specify root
 	// locations from which to fetch obfuscated server list files. This value
@@ -496,16 +370,6 @@ type Config struct {
 	// forward target domain names to IP addresses for classification. The DNS
 	// server must support TCP requests.
 	SplitTunnelDNSServer string
-
-	// UpgradeDownloadUrl specifies a URL from which to download a host client
-	// upgrade file, when one is available. The core tunnel controller
-	// provides a resumable download facility which downloads this resource
-	// and emits a notice when complete. This value is supplied by and depends
-	// on the Psiphon Network, and is typically embedded in the client binary.
-	//
-	// Deprecated: Use UpgradeDownloadURLs. When UpgradeDownloadURLs is not
-	// nil, this parameter is ignored.
-	UpgradeDownloadUrl string
 
 	// UpgradeDownloadURLs is list of URLs which specify locations from which
 	// to download a host client upgrade file, when one is available. The core
@@ -678,6 +542,144 @@ type Config struct {
 
 	// ApplicationParameters is for testing purposes.
 	ApplicationParameters parameters.KeyValues
+
+	// MigrateHompageNoticesFilename migrates a homepage file from the path
+	// previously configured with setNoticeFiles to the new path for homepage
+	// files under the data root directory. The file specified by this config
+	// value will be moved to config.GetHomePageFilename().
+	//
+	// If not set, no migration operation will be performed.
+	MigrateHompageNoticesFilename string
+
+	// MigrateRotatingNoticesFilename migrates notice files from the path
+	// previously configured with setNoticeFiles to the new path for notice
+	// files under the data root directory.
+	//
+	// MigrateRotatingNoticesFilename will be moved to
+	// config.GetNoticesFilename().
+	//
+	// MigrateRotatingNoticesFilename.1 will be moved to
+	// config.GetOldNoticesFilename().
+	//
+	// If not set, no migration operation will be performed.
+	MigrateRotatingNoticesFilename string
+
+	// DataStoreDirectory is the directory in which to store the persistent
+	// database, which contains information such as server entries. By
+	// default, current working directory.
+	//
+	// Deprecated:
+	// Use MigrateDataStoreDirectory. When MigrateDataStoreDirectory
+	// is set, this parameter is ignored.
+	//
+	// DataStoreDirectory has been subsumed by the new data root directory,
+	// which is configured with DataRootDirectory. If set, datastore files
+	// found in the specified directory will be moved under the data root
+	// directory.
+	DataStoreDirectory string
+
+	// MigrateDataStoreDirectory indicates the location of the datastore
+	// directory, as previously configured with the deprecated
+	// DataStoreDirectory config field. Datastore files found in the specified
+	// directory will be moved under the data root directory.
+	MigrateDataStoreDirectory string
+
+	// RemoteServerListDownloadFilename specifies a target filename for
+	// storing the remote server list download. Data is stored in co-located
+	// files (RemoteServerListDownloadFilename.part*) to allow for resumable
+	// downloading.
+	//
+	// Deprecated:
+	// Use MigrateRemoteServerListDownloadFilename. When
+	// MigrateRemoteServerListDownloadFilename is set, this parameter is
+	// ignored.
+	//
+	// If set, remote server list download files found at the specified path
+	// will be moved under the data root directory.
+	RemoteServerListDownloadFilename string
+
+	// MigrateRemoteServerListDownloadFilename indicates the location of
+	// remote server list download files. The remote server list files found at
+	// the specified path will be moved under the data root directory.
+	MigrateRemoteServerListDownloadFilename string
+
+	// ObfuscatedServerListDownloadDirectory specifies a target directory for
+	// storing the obfuscated remote server list downloads. Data is stored in
+	// co-located files (<OSL filename>.part*) to allow for resumable
+	// downloading.
+	//
+	// Deprecated:
+	// Use MigrateObfuscatedServerListDownloadDirectory. When
+	// MigrateObfuscatedServerListDownloadDirectory is set, this parameter is
+	// ignored.
+	//
+	// If set, obfuscated server list download files found at the specified path
+	// will be moved under the data root directory.
+	ObfuscatedServerListDownloadDirectory string
+
+	// MigrateObfuscatedServerListDownloadDirectory indicates the location of
+	// the obfuscated server list downloads directory, as previously configured
+	// with ObfuscatedServerListDownloadDirectory. Obfuscated server list
+	// download files found in the specified directory will be moved under the
+	// data root directory.
+	MigrateObfuscatedServerListDownloadDirectory string
+
+	// UpgradeDownloadFilename is the local target filename for an upgrade
+	// download. This parameter is required when UpgradeDownloadURLs (or
+	// UpgradeDownloadUrl) is specified. Data is stored in co-located files
+	// (UpgradeDownloadFilename.part*) to allow for resumable downloading.
+	//
+	// Deprecated:
+	// Use MigrateUpgradeDownloadFilename. When MigrateUpgradeDownloadFilename
+	// is set, this parameter is ignored.
+	//
+	// If set, upgrade download files found at the specified path will be moved
+	// under the data root directory.
+	UpgradeDownloadFilename string
+
+	// MigrateUpgradeDownloadFilename indicates the location of downloaded
+	// application upgrade files. Downloaded upgrade files found at the
+	// specified path will be moved under the data root directory.
+	MigrateUpgradeDownloadFilename string
+
+	// TunnelProtocol indicates which protocol to use. For the default, "",
+	// all protocols are used.
+	//
+	// Deprecated: Use LimitTunnelProtocols. When LimitTunnelProtocols is not
+	// nil, this parameter is ignored.
+	TunnelProtocol string
+
+	// Deprecated: Use CustomHeaders. When CustomHeaders is not nil, this
+	// parameter is ignored.
+	UpstreamProxyCustomHeaders http.Header
+
+	// RemoteServerListUrl is a URL which specifies a location to fetch out-
+	// of-band server entries. This facility is used when a tunnel cannot be
+	// established to known servers. This value is supplied by and depends on
+	// the Psiphon Network, and is typically embedded in the client binary.
+	//
+	// Deprecated: Use RemoteServerListURLs. When RemoteServerListURLs is not
+	// nil, this parameter is ignored.
+	RemoteServerListUrl string
+
+	// ObfuscatedServerListRootURL is a URL which specifies the root location
+	// from which to fetch obfuscated server list files. This value is
+	// supplied by and depends on the Psiphon Network, and is typically
+	// embedded in the client binary.
+	//
+	// Deprecated: Use ObfuscatedServerListRootURLs. When
+	// ObfuscatedServerListRootURLs is not nil, this parameter is ignored.
+	ObfuscatedServerListRootURL string
+
+	// UpgradeDownloadUrl specifies a URL from which to download a host client
+	// upgrade file, when one is available. The core tunnel controller
+	// provides a resumable download facility which downloads this resource
+	// and emits a notice when complete. This value is supplied by and depends
+	// on the Psiphon Network, and is typically embedded in the client binary.
+	//
+	// Deprecated: Use UpgradeDownloadURLs. When UpgradeDownloadURLs is not
+	// nil, this parameter is ignored.
+	UpgradeDownloadUrl string
 
 	// clientParameters is the active ClientParameters with defaults, config
 	// values, and, optionally, tactics applied.
