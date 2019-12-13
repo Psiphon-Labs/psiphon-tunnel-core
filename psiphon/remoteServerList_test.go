@@ -208,8 +208,8 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 
 	config := Config{
 		DataRootDirectory:    testDataDirName,
-		PropagationChannelId: "ABCDEFGH",
-		SponsorId:            "12345678"}
+		PropagationChannelId: "0",
+		SponsorId:            "0"}
 	err = config.Commit()
 	if err != nil {
 		t.Fatalf("Error initializing config: %s", err)
