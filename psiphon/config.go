@@ -831,7 +831,7 @@ func (config *Config) Commit() error {
 
 	// Check if the migration from legacy config fields has already been
 	// completed. See the Migrate* config fields for more details.
-	migrationCompleteFilePath := filepath.Join(config.DataRootDirectory, "psiphon3_migration_complete")
+	migrationCompleteFilePath := filepath.Join(config.DataRootDirectory, "ca.psiphon.PsiphonTunnel.tunnel-core_migration_complete")
 	needMigration := !common.FileExists(migrationCompleteFilePath)
 
 	// Collect notices to emit them after notice files are set
@@ -1074,32 +1074,22 @@ func (config *Config) Commit() error {
 
 			// Migrate remote server list files
 
-			oldRSLFilename := filepath.Base(config.MigrateRemoteServerListDownloadFilename)
-
-			rslFileRegex, err := regexp.Compile(`^` + oldRSLFilename + `(\.part.*)*$`)
-			if err != nil {
-				return errors.TraceMsg(err, "failed to compile regex for rsl files")
+			rslMigrations := []common.FileMigration{
+				{
+					OldPath: config.MigrateRemoteServerListDownloadFilename,
+					NewPath: config.GetRemoteServerListDownloadFilename(),
+				},
+				{
+					OldPath: config.MigrateRemoteServerListDownloadFilename + ".part",
+					NewPath: config.GetRemoteServerListDownloadFilename() + ".part",
+				},
+				{
+					OldPath: config.MigrateRemoteServerListDownloadFilename + ".part.etag",
+					NewPath: config.GetRemoteServerListDownloadFilename() + ".part.etag",
+				},
 			}
 
-			rslDir := filepath.Dir(config.MigrateRemoteServerListDownloadFilename)
-
-			files, err := ioutil.ReadDir(rslDir)
-			if err != nil {
-				NoticeAlert("Migration: failed to read directory %s with error %s", rslDir, err)
-			} else {
-				for _, file := range files {
-					if rslFileRegex.MatchString(file.Name()) {
-
-						oldFileSuffix := strings.TrimPrefix(file.Name(), oldRSLFilename)
-
-						fileMigration := common.FileMigration{
-							OldPath: filepath.Join(rslDir, file.Name()),
-							NewPath: config.GetRemoteServerListDownloadFilename() + oldFileSuffix,
-						}
-						migrations = append(migrations, fileMigration)
-					}
-				}
-			}
+			migrations = append(migrations, rslMigrations...)
 		}
 
 		if config.MigrateObfuscatedServerListDownloadDirectory != "" {

@@ -292,15 +292,6 @@ func (suite *ConfigTestSuite) Test_LoadConfig_Migrate() {
 				Name: oldRemoteServerListname + ".part.etag",
 			},
 			{
-				Name: oldRemoteServerListname + ".part1",
-			},
-			{
-				Name: oldRemoteServerListname + ".part1.etag",
-			},
-			{
-				Name: oldRemoteServerListname + ".should_not_be_migrated",
-			},
-			{
 				Name: oldObfuscatedServerListDirectoryName,
 				Children: []FileTree{
 					{
@@ -389,7 +380,7 @@ func (suite *ConfigTestSuite) Test_LoadConfig_Migrate() {
 				Name: "data_root_directory",
 				Children: []FileTree{
 					{
-						Name: "psiphon3_migration_complete",
+						Name: "ca.psiphon.PsiphonTunnel.tunnel-core_migration_complete",
 					},
 					{
 						Name: "remote_server_list",
@@ -399,12 +390,6 @@ func (suite *ConfigTestSuite) Test_LoadConfig_Migrate() {
 					},
 					{
 						Name: "remote_server_list.part.etag",
-					},
-					{
-						Name: "remote_server_list.part1",
-					},
-					{
-						Name: "remote_server_list.part1.etag",
 					},
 					{
 						Name: "datastore",
@@ -469,9 +454,6 @@ func (suite *ConfigTestSuite) Test_LoadConfig_Migrate() {
 						Name: "non_tunnel_core_file_should_not_be_migrated",
 					},
 				},
-			},
-			{
-				Name: oldRemoteServerListname + ".should_not_be_migrated",
 			},
 			{
 				Name: oldObfuscatedServerListDirectoryName,
