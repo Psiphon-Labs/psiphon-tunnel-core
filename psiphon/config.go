@@ -544,6 +544,9 @@ type Config struct {
 	// files under the data root directory. The file specified by this config
 	// value will be moved to config.GetHomePageFilename().
 	//
+	// Note: see comment for config.Commit() for a description of how file
+	// migrations are performed.
+	//
 	// If not set, no migration operation will be performed.
 	MigrateHompageNoticesFilename string
 
@@ -556,6 +559,9 @@ type Config struct {
 	//
 	// MigrateRotatingNoticesFilename.1 will be moved to
 	// config.GetOldNoticesFilename().
+	//
+	// Note: see comment for config.Commit() for a description of how file
+	// migrations are performed.
 	//
 	// If not set, no migration operation will be performed.
 	MigrateRotatingNoticesFilename string
@@ -578,6 +584,9 @@ type Config struct {
 	// directory, as previously configured with the deprecated
 	// DataStoreDirectory config field. Datastore files found in the specified
 	// directory will be moved under the data root directory.
+	//
+	// Note: see comment for config.Commit() for a description of how file
+	// migrations are performed.
 	MigrateDataStoreDirectory string
 
 	// RemoteServerListDownloadFilename specifies a target filename for
@@ -597,6 +606,9 @@ type Config struct {
 	// MigrateRemoteServerListDownloadFilename indicates the location of
 	// remote server list download files. The remote server list files found at
 	// the specified path will be moved under the data root directory.
+	//
+	// Note: see comment for config.Commit() for a description of how file
+	// migrations are performed.
 	MigrateRemoteServerListDownloadFilename string
 
 	// ObfuscatedServerListDownloadDirectory specifies a target directory for
@@ -618,6 +630,9 @@ type Config struct {
 	// with ObfuscatedServerListDownloadDirectory. Obfuscated server list
 	// download files found in the specified directory will be moved under the
 	// data root directory.
+	//
+	// Note: see comment for config.Commit() for a description of how file
+	// migrations are performed.
 	MigrateObfuscatedServerListDownloadDirectory string
 
 	// UpgradeDownloadFilename is the local target filename for an upgrade
@@ -636,6 +651,9 @@ type Config struct {
 	// MigrateUpgradeDownloadFilename indicates the location of downloaded
 	// application upgrade files. Downloaded upgrade files found at the
 	// specified path will be moved under the data root directory.
+	//
+	// Note: see comment for config.Commit() for a description of how file
+	// migrations are performed.
 	MigrateUpgradeDownloadFilename string
 
 	// TunnelProtocol indicates which protocol to use. For the default, "",
@@ -741,6 +759,35 @@ func (config *Config) IsCommitted() bool {
 //
 // Config fields should not be set after calling Config, as any changes may
 // not be reflected in internal data structures.
+//
+// File migrations:
+// Config fields of the naming Migrate* (e.g. MigrateDataStoreDirectory) specify
+// a file migration operation which should be performed. These fields correspond
+// to deprecated fields, which previously could be used to specify where Psiphon
+// stored different sets of persistent files (e.g. MigrateDataStoreDirectory
+// corresponds to the deprecated field DataStoreDirectory).
+//
+// Psiphon now stores all persistent data under the configurable
+// DataRootDirectory (see Config.DataRootDirectory). The deprecated fields, and
+// corresponding Migrate* fields, are now used to specify the file or directory
+// path where, or under which, persistent files and directories created by
+// previous versions of Psiphon exist, so they can be moved under the
+// DataRootDirectory.
+//
+// For each migration operation:
+// - In the case of directories that could have defaulted to the current working
+//   directory, persistent files and directories created by Psiphon are
+//   precisely targeted to avoid moving files which were not created by Psiphon.
+// - If no file is found at the specified path, or an error is encountered while
+//   migrating the file, then an error is logged and execution continues
+//   normally.
+//
+// A sentinel file which signals that file migration has been completed, and
+// should not be attempted again, is created under DataRootDirectory after one
+// full pass through Commit(), regardless of whether file migration succeeds or
+// fails. It is better to not endlessly retry file migrations on each Commit()
+// because file system errors are expected to be rare and persistent files will
+// be re-populated over time.
 func (config *Config) Commit() error {
 
 	// Do SetEmitDiagnosticNotices first, to ensure config file errors are
