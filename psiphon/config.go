@@ -750,46 +750,14 @@ func (config *Config) Commit() error {
 			true, config.EmitDiagnosticNetworkParameters)
 	}
 
-	// Promote legacy fields.
-
-	if config.CustomHeaders == nil {
-		config.CustomHeaders = config.UpstreamProxyCustomHeaders
-		config.UpstreamProxyCustomHeaders = nil
-	}
-
-	if config.RemoteServerListUrl != "" && config.RemoteServerListURLs == nil {
-		config.RemoteServerListURLs = promoteLegacyDownloadURL(config.RemoteServerListUrl)
-	}
-
-	if config.ObfuscatedServerListRootURL != "" && config.ObfuscatedServerListRootURLs == nil {
-		config.ObfuscatedServerListRootURLs = promoteLegacyDownloadURL(config.ObfuscatedServerListRootURL)
-	}
-
-	if config.UpgradeDownloadUrl != "" && config.UpgradeDownloadURLs == nil {
-		config.UpgradeDownloadURLs = promoteLegacyDownloadURL(config.UpgradeDownloadUrl)
-	}
-
-	if config.TunnelProtocol != "" && len(config.LimitTunnelProtocols) == 0 {
-		config.LimitTunnelProtocols = []string{config.TunnelProtocol}
-	}
-
-	if config.DataStoreDirectory != "" && config.MigrateDataStoreDirectory == "" {
-		config.MigrateDataStoreDirectory = config.DataStoreDirectory
-	}
-
-	if config.RemoteServerListDownloadFilename != "" && config.MigrateRemoteServerListDownloadFilename == "" {
-		config.MigrateRemoteServerListDownloadFilename = config.RemoteServerListDownloadFilename
-	}
-
-	if config.ObfuscatedServerListDownloadDirectory != "" && config.MigrateObfuscatedServerListDownloadDirectory == "" {
-		config.MigrateObfuscatedServerListDownloadDirectory = config.ObfuscatedServerListDownloadDirectory
-	}
-
-	if config.UpgradeDownloadFilename != "" && config.MigrateUpgradeDownloadFilename == "" {
-		config.MigrateUpgradeDownloadFilename = config.UpgradeDownloadFilename
-	}
-
-	// Supply default values.
+	// Migrate and set notice files before any operations that may emit an
+	// error. This is to ensure config file errors are written to file when
+	// notice files are configured with config.UseNoticeFiles.
+	//
+	// Note:
+	// Errors encountered while configuring the data directory cannot be written
+	// to notice files. This is because notices files are created within the
+	// data directory.
 
 	if config.DataRootDirectory == "" {
 		wd, err := os.Getwd()
@@ -800,47 +768,12 @@ func (config *Config) Commit() error {
 	}
 
 	// Create root directory
-	rootDirectoryPath := config.GetPsiphonDataDirectory()
-	if !common.FileExists(rootDirectoryPath) {
-		err := os.Mkdir(rootDirectoryPath, os.ModePerm)
+	dataDirectoryPath := config.GetPsiphonDataDirectory()
+	if !common.FileExists(dataDirectoryPath) {
+		err := os.Mkdir(dataDirectoryPath, os.ModePerm)
 		if err != nil {
-			return errors.Tracef("failed to create datastore directory %s with error: %s", rootDirectoryPath, err.Error())
+			return errors.Tracef("failed to create datastore directory %s with error: %s", dataDirectoryPath, err.Error())
 		}
-	}
-
-	// Create datastore directory.
-	dataStoreDirectoryPath := config.GetDataStoreDirectory()
-	if !common.FileExists(dataStoreDirectoryPath) {
-		err := os.Mkdir(dataStoreDirectoryPath, os.ModePerm)
-		if err != nil {
-			return errors.Tracef("failed to create datastore directory %s with error: %s", dataStoreDirectoryPath, err.Error())
-		}
-	}
-
-	// Create OSL directory.
-	oslDirectoryPath := config.GetObfuscatedServerListDownloadDirectory()
-	if !common.FileExists(oslDirectoryPath) {
-		err := os.Mkdir(oslDirectoryPath, os.ModePerm)
-		if err != nil {
-			return errors.Tracef("failed to create osl directory %s with error: %s", oslDirectoryPath, err.Error())
-		}
-	}
-
-	// Create tapdance directory
-	tapdanceDirectoryPath := config.GetTapdanceDirectory()
-	if !common.FileExists(tapdanceDirectoryPath) {
-		err := os.Mkdir(tapdanceDirectoryPath, os.ModePerm)
-		if err != nil {
-			return errors.Tracef("failed to create tapdance directory %s with error: %s", tapdanceDirectoryPath, err.Error())
-		}
-	}
-
-	if config.ClientVersion == "" {
-		config.ClientVersion = "0"
-	}
-
-	if config.TunnelPoolSize == 0 {
-		config.TunnelPoolSize = TUNNEL_POOL_SIZE
 	}
 
 	// Check if the migration from legacy config fields has already been
@@ -913,6 +846,82 @@ func (config *Config) Commit() error {
 	}
 	for _, msg := range noticeMigrationInfoMsgs {
 		NoticeInfo(msg)
+	}
+
+	// Promote legacy fields.
+
+	if config.CustomHeaders == nil {
+		config.CustomHeaders = config.UpstreamProxyCustomHeaders
+		config.UpstreamProxyCustomHeaders = nil
+	}
+
+	if config.RemoteServerListUrl != "" && config.RemoteServerListURLs == nil {
+		config.RemoteServerListURLs = promoteLegacyDownloadURL(config.RemoteServerListUrl)
+	}
+
+	if config.ObfuscatedServerListRootURL != "" && config.ObfuscatedServerListRootURLs == nil {
+		config.ObfuscatedServerListRootURLs = promoteLegacyDownloadURL(config.ObfuscatedServerListRootURL)
+	}
+
+	if config.UpgradeDownloadUrl != "" && config.UpgradeDownloadURLs == nil {
+		config.UpgradeDownloadURLs = promoteLegacyDownloadURL(config.UpgradeDownloadUrl)
+	}
+
+	if config.TunnelProtocol != "" && len(config.LimitTunnelProtocols) == 0 {
+		config.LimitTunnelProtocols = []string{config.TunnelProtocol}
+	}
+
+	if config.DataStoreDirectory != "" && config.MigrateDataStoreDirectory == "" {
+		config.MigrateDataStoreDirectory = config.DataStoreDirectory
+	}
+
+	if config.RemoteServerListDownloadFilename != "" && config.MigrateRemoteServerListDownloadFilename == "" {
+		config.MigrateRemoteServerListDownloadFilename = config.RemoteServerListDownloadFilename
+	}
+
+	if config.ObfuscatedServerListDownloadDirectory != "" && config.MigrateObfuscatedServerListDownloadDirectory == "" {
+		config.MigrateObfuscatedServerListDownloadDirectory = config.ObfuscatedServerListDownloadDirectory
+	}
+
+	if config.UpgradeDownloadFilename != "" && config.MigrateUpgradeDownloadFilename == "" {
+		config.MigrateUpgradeDownloadFilename = config.UpgradeDownloadFilename
+	}
+
+	// Supply default values.
+
+	// Create datastore directory.
+	dataStoreDirectoryPath := config.GetDataStoreDirectory()
+	if !common.FileExists(dataStoreDirectoryPath) {
+		err := os.Mkdir(dataStoreDirectoryPath, os.ModePerm)
+		if err != nil {
+			return errors.Tracef("failed to create datastore directory %s with error: %s", dataStoreDirectoryPath, err.Error())
+		}
+	}
+
+	// Create OSL directory.
+	oslDirectoryPath := config.GetObfuscatedServerListDownloadDirectory()
+	if !common.FileExists(oslDirectoryPath) {
+		err := os.Mkdir(oslDirectoryPath, os.ModePerm)
+		if err != nil {
+			return errors.Tracef("failed to create osl directory %s with error: %s", oslDirectoryPath, err.Error())
+		}
+	}
+
+	// Create tapdance directory
+	tapdanceDirectoryPath := config.GetTapdanceDirectory()
+	if !common.FileExists(tapdanceDirectoryPath) {
+		err := os.Mkdir(tapdanceDirectoryPath, os.ModePerm)
+		if err != nil {
+			return errors.Tracef("failed to create tapdance directory %s with error: %s", tapdanceDirectoryPath, err.Error())
+		}
+	}
+
+	if config.ClientVersion == "" {
+		config.ClientVersion = "0"
+	}
+
+	if config.TunnelPoolSize == 0 {
+		config.TunnelPoolSize = TUNNEL_POOL_SIZE
 	}
 
 	// Validate config fields.
