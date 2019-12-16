@@ -839,31 +839,11 @@ func (config *Config) Commit() error {
 
 	if needMigration {
 
+		// Move notice files that exist at legacy file paths under the data root
+		// directory.
+
 		noticeMigrationInfoMsgs = append(noticeMigrationInfoMsgs, "Config migration: need migration")
-
-		var noticeMigrations []common.FileMigration
-
-		if config.MigrateHompageNoticesFilename != "" {
-			noticeMigrations = append(noticeMigrations, common.FileMigration{
-				OldPath: config.MigrateHompageNoticesFilename,
-				NewPath: homepageFilePath,
-			})
-		}
-
-		if config.MigrateRotatingNoticesFilename != "" {
-			migrations := []common.FileMigration{
-				{
-					OldPath: config.MigrateRotatingNoticesFilename,
-					NewPath: noticesFilePath,
-					IsDir:   false,
-				},
-				{
-					OldPath: config.MigrateRotatingNoticesFilename + ".1",
-					NewPath: noticesFilePath + ".1",
-				},
-			}
-			noticeMigrations = append(noticeMigrations, migrations...)
-		}
+		noticeMigrations := migrationsFromLegacyNoticeFilePaths(config)
 
 		for _, migration := range noticeMigrations {
 			err := common.DoFileMigration(migration)
@@ -1122,108 +1102,12 @@ func (config *Config) Commit() error {
 
 	if needMigration {
 
-		// Migrate files under the data root directory
+		// Move files that exist at legacy file paths under the data root
+		// directory.
 
-		migrations := []common.FileMigration{
-			{
-				OldPath: filepath.Join(config.MigrateDataStoreDirectory, "psiphon.boltdb"),
-				NewPath: filepath.Join(dataStoreDirectoryPath, "psiphon.boltdb"),
-			},
-			{
-				OldPath: filepath.Join(config.MigrateDataStoreDirectory, "psiphon.boltdb.lock"),
-				NewPath: filepath.Join(dataStoreDirectoryPath, "psiphon.boltdb.lock"),
-			},
-			{
-				OldPath: filepath.Join(config.MigrateDataStoreDirectory, "tapdance"),
-				NewPath: filepath.Join(config.GetTapdanceDirectory(), "tapdance"),
-				IsDir:   true,
-			},
-		}
-
-		if config.MigrateRemoteServerListDownloadFilename != "" {
-
-			// Migrate remote server list files
-
-			rslMigrations := []common.FileMigration{
-				{
-					OldPath: config.MigrateRemoteServerListDownloadFilename,
-					NewPath: config.GetRemoteServerListDownloadFilename(),
-				},
-				{
-					OldPath: config.MigrateRemoteServerListDownloadFilename + ".part",
-					NewPath: config.GetRemoteServerListDownloadFilename() + ".part",
-				},
-				{
-					OldPath: config.MigrateRemoteServerListDownloadFilename + ".part.etag",
-					NewPath: config.GetRemoteServerListDownloadFilename() + ".part.etag",
-				},
-			}
-
-			migrations = append(migrations, rslMigrations...)
-		}
-
-		if config.MigrateObfuscatedServerListDownloadDirectory != "" {
-
-			// Migrate OSL registry file and downloads
-
-			oslFileRegex, err := regexp.Compile(`^osl-.+$`)
-			if err != nil {
-				return errors.TraceMsg(err, "failed to compile regex for osl files")
-			}
-
-			files, err := ioutil.ReadDir(config.MigrateObfuscatedServerListDownloadDirectory)
-			if err != nil {
-				NoticeAlert("Migration: failed to read directory %s with error %s", config.MigrateObfuscatedServerListDownloadDirectory, err)
-			} else {
-				for _, file := range files {
-					if oslFileRegex.MatchString(file.Name()) {
-						fileMigration := common.FileMigration{
-							OldPath: filepath.Join(config.MigrateObfuscatedServerListDownloadDirectory, file.Name()),
-							NewPath: filepath.Join(config.GetObfuscatedServerListDownloadDirectory(), file.Name()),
-						}
-						migrations = append(migrations, fileMigration)
-					}
-				}
-			}
-		}
-
-		if config.MigrateUpgradeDownloadFilename != "" {
-
-			// Migrate downloaded upgrade files
-
-			oldUpgradeDownloadFilename := filepath.Base(config.MigrateUpgradeDownloadFilename)
-
-			// Create regex for:
-			// <old_upgrade_download_filename>
-			// <old_upgrade_download_filename>.<client_version_number>
-			// <old_upgrade_download_filename>.<client_version_number>.part
-			// <old_upgrade_download_filename>.<client_version_number>.part.etag
-			upgradeDownloadFileRegex, err := regexp.Compile(`^` + oldUpgradeDownloadFilename + `(\.\d+(\.part(\.etag)?)?)?$`)
-			if err != nil {
-				return errors.TraceMsg(err, "failed to compile regex for upgrade files")
-			}
-
-			upgradeDownloadDir := filepath.Dir(config.MigrateUpgradeDownloadFilename)
-
-			files, err := ioutil.ReadDir(upgradeDownloadDir)
-			if err != nil {
-				NoticeAlert("Migration: failed to read directory %s with error %s", upgradeDownloadDir, err)
-			} else {
-
-				for _, file := range files {
-
-					if upgradeDownloadFileRegex.MatchString(file.Name()) {
-
-						oldFileSuffix := strings.TrimPrefix(file.Name(), oldUpgradeDownloadFilename)
-
-						fileMigration := common.FileMigration{
-							OldPath: filepath.Join(upgradeDownloadDir, file.Name()),
-							NewPath: config.GetUpgradeDownloadFilename() + oldFileSuffix,
-						}
-						migrations = append(migrations, fileMigration)
-					}
-				}
-			}
+		migrations, err := migrationsFromLegacyFilePaths(config)
+		if err != nil {
+			return errors.Trace(err)
 		}
 
 		// Do migrations
@@ -1848,4 +1732,148 @@ func (n *loggingNetworkIDGetter) GetNetworkID() string {
 	NoticeNetworkID(logNetworkID)
 
 	return networkID
+}
+
+// migrationsFromLegacyNoticeFilePaths returns the file migrations which must be
+// performed to move notice files from legacy file paths, which were configured
+// with the legacy config fields HomepageNoticesFilename and
+// RotatingNoticesFilename, to the new file paths used by Psiphon which exist
+// under the data root directory.
+func migrationsFromLegacyNoticeFilePaths(config *Config) []common.FileMigration {
+	var noticeMigrations []common.FileMigration
+
+	if config.MigrateHompageNoticesFilename != "" {
+		noticeMigrations = append(noticeMigrations, common.FileMigration{
+			OldPath: config.MigrateHompageNoticesFilename,
+			NewPath: config.GetHomePageFilename(),
+		})
+	}
+
+	if config.MigrateRotatingNoticesFilename != "" {
+		migrations := []common.FileMigration{
+			{
+				OldPath: config.MigrateRotatingNoticesFilename,
+				NewPath: config.GetNoticesFilename(),
+				IsDir:   false,
+			},
+			{
+				OldPath: config.MigrateRotatingNoticesFilename + ".1",
+				NewPath: config.GetNoticesFilename() + ".1",
+			},
+		}
+		noticeMigrations = append(noticeMigrations, migrations...)
+	}
+
+	return noticeMigrations
+}
+
+// migrationsFromLegacyFilePaths returns the file migrations which must be
+// performed to move files from legacy file paths, which were configured with
+// legacy config fields, to the new file paths used by Psiphon which exist
+// under the data root directory.
+func migrationsFromLegacyFilePaths(config *Config) ([]common.FileMigration, error) {
+
+	migrations := []common.FileMigration{
+		{
+			OldPath: filepath.Join(config.MigrateDataStoreDirectory, "psiphon.boltdb"),
+			NewPath: filepath.Join(config.GetDataStoreDirectory(), "psiphon.boltdb"),
+		},
+		{
+			OldPath: filepath.Join(config.MigrateDataStoreDirectory, "psiphon.boltdb.lock"),
+			NewPath: filepath.Join(config.GetDataStoreDirectory(), "psiphon.boltdb.lock"),
+		},
+		{
+			OldPath: filepath.Join(config.MigrateDataStoreDirectory, "tapdance"),
+			NewPath: filepath.Join(config.GetTapdanceDirectory(), "tapdance"),
+			IsDir:   true,
+		},
+	}
+
+	if config.MigrateRemoteServerListDownloadFilename != "" {
+
+		// Migrate remote server list files
+
+		rslMigrations := []common.FileMigration{
+			{
+				OldPath: config.MigrateRemoteServerListDownloadFilename,
+				NewPath: config.GetRemoteServerListDownloadFilename(),
+			},
+			{
+				OldPath: config.MigrateRemoteServerListDownloadFilename + ".part",
+				NewPath: config.GetRemoteServerListDownloadFilename() + ".part",
+			},
+			{
+				OldPath: config.MigrateRemoteServerListDownloadFilename + ".part.etag",
+				NewPath: config.GetRemoteServerListDownloadFilename() + ".part.etag",
+			},
+		}
+
+		migrations = append(migrations, rslMigrations...)
+	}
+
+	if config.MigrateObfuscatedServerListDownloadDirectory != "" {
+
+		// Migrate OSL registry file and downloads
+
+		oslFileRegex, err := regexp.Compile(`^osl-.+$`)
+		if err != nil {
+			return nil, errors.TraceMsg(err, "failed to compile regex for osl files")
+		}
+
+		files, err := ioutil.ReadDir(config.MigrateObfuscatedServerListDownloadDirectory)
+		if err != nil {
+			NoticeAlert("Migration: failed to read directory %s with error %s", config.MigrateObfuscatedServerListDownloadDirectory, err)
+		} else {
+			for _, file := range files {
+				if oslFileRegex.MatchString(file.Name()) {
+					fileMigration := common.FileMigration{
+						OldPath: filepath.Join(config.MigrateObfuscatedServerListDownloadDirectory, file.Name()),
+						NewPath: filepath.Join(config.GetObfuscatedServerListDownloadDirectory(), file.Name()),
+					}
+					migrations = append(migrations, fileMigration)
+				}
+			}
+		}
+	}
+
+	if config.MigrateUpgradeDownloadFilename != "" {
+
+		// Migrate downloaded upgrade files
+
+		oldUpgradeDownloadFilename := filepath.Base(config.MigrateUpgradeDownloadFilename)
+
+		// Create regex for:
+		// <old_upgrade_download_filename>
+		// <old_upgrade_download_filename>.<client_version_number>
+		// <old_upgrade_download_filename>.<client_version_number>.part
+		// <old_upgrade_download_filename>.<client_version_number>.part.etag
+		upgradeDownloadFileRegex, err := regexp.Compile(`^` + oldUpgradeDownloadFilename + `(\.\d+(\.part(\.etag)?)?)?$`)
+		if err != nil {
+			return nil, errors.TraceMsg(err, "failed to compile regex for upgrade files")
+		}
+
+		upgradeDownloadDir := filepath.Dir(config.MigrateUpgradeDownloadFilename)
+
+		files, err := ioutil.ReadDir(upgradeDownloadDir)
+		if err != nil {
+			NoticeAlert("Migration: failed to read directory %s with error %s", upgradeDownloadDir, err)
+		} else {
+
+			for _, file := range files {
+
+				if upgradeDownloadFileRegex.MatchString(file.Name()) {
+
+					oldFileSuffix := strings.TrimPrefix(file.Name(), oldUpgradeDownloadFilename)
+
+					fileMigration := common.FileMigration{
+						OldPath: filepath.Join(upgradeDownloadDir, file.Name()),
+						NewPath: config.GetUpgradeDownloadFilename() + oldFileSuffix,
+					}
+					migrations = append(migrations, fileMigration)
+				}
+			}
+		}
+	}
+
+	return migrations, nil
 }
