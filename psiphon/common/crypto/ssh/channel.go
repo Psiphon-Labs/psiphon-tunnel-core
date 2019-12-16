@@ -20,16 +20,16 @@ const (
 	// the minimum.
 	channelMaxPacket = 1 << 15
 
-	// PSIPHON
-	// =======
+	// [Psiphon]
+	//
 	// Use getChannelWindowSize() instead of channelWindowSize.
 	//
 	// We follow OpenSSH here.
 	//channelWindowSize = 64 * channelMaxPacket
 )
 
-// PSIPHON
-// =======
+// [Psiphon]
+//
 // - Use a smaller initial/max channel window size.
 // - Testing with the full Psiphon stack shows that
 //   this smaller channel window size is more performant
@@ -477,8 +477,8 @@ func (ch *channel) handlePacket(packet []byte) error {
 		ch.remoteId = msg.MyID
 		ch.maxRemotePayload = msg.MaxPacketSize
 
-		// PSIPHON
-		// =======
+		// [Psiphon]
+		//
 		// - Use a smaller initial/max channel window size.
 		// - See comments above channelWindowSize definition.
 
@@ -569,6 +569,11 @@ func (ch *channel) Reject(reason RejectionReason, message string) error {
 		Language: "en",
 	}
 	ch.decided = true
+
+	// [Psiphon]
+	// Don't leave reference to channel in chanList
+	ch.mux.chanList.remove(ch.localId)
+
 	return ch.sendMessage(reject)
 }
 
