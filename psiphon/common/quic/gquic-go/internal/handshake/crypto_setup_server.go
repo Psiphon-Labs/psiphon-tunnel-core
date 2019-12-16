@@ -327,7 +327,6 @@ func (h *cryptoSetupServer) handleInchoateCHLO(sni string, chlo []byte, cryptoDa
 	replyMap := map[Tag][]byte{
 		TagSCFG: h.scfg.Get(),
 		TagSTK:  token,
-		TagSVID: []byte("quic-go"),
 	}
 
 	if h.acceptSTK(cryptoData[TagSTK]) {
