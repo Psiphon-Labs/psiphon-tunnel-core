@@ -72,6 +72,7 @@ type ObfuscatedPacketConn struct {
 
 type peerMode struct {
 	isObfuscated   bool
+	isIETF         bool
 	lastPacketTime time.Time
 }
 
@@ -111,7 +112,7 @@ func NewObfuscatedPacketConn(
 	if isServer {
 
 		packetConn.runWaitGroup = new(sync.WaitGroup)
-		packetConn.stopBroadcast = make(chan struct{}, 1)
+		packetConn.stopBroadcast = make(chan struct{})
 
 		// Reap stale peer mode information to reclaim memory.
 
@@ -177,6 +178,11 @@ func (e *temporaryNetError) Error() string {
 }
 
 func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
+	n, addr, _, err := conn.readFromWithType(p)
+	return n, addr, err
+}
+
+func (conn *ObfuscatedPacketConn) readFromWithType(p []byte) (int, net.Addr, bool, error) {
 
 	n, addr, err := conn.PacketConn.ReadFrom(p)
 
@@ -184,9 +190,19 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 	// a packet and an error, such as io.EOF.
 	// See: https://golang.org/pkg/net/#PacketConn.
 
-	if n > 0 {
+	// In client mode, obfuscation is always performed as the client knows it is
+	// using obfuscation. In server mode, DPI is performed to distinguish whether
+	// the QUIC packet for a new flow is obfuscated or not, and whether it's IETF
+	// or gQUIC. The isIETF return value is set only in server mode and is set
+	// only when the function returns no error.
 
-		isObfuscated := true
+	isObfuscated := true
+	var isIETF bool
+	var address string
+	var firstFlowPacket bool
+	var lastPacketTime time.Time
+
+	if n > 0 {
 
 		if conn.isServer {
 
@@ -209,28 +225,59 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			// termination QUIC packet? Will reclaim peerMode memory faster
 			// than relying on reaper.
 
-			isQUIC := isQUIC(p[:n])
+			lastPacketTime = time.Now()
+
+			// isIETF is not meaningful if not the first packet in a flow and is not
+			// meaningful when first packet is obfuscated. To correctly indicate isIETF
+			// when obfuscated, the isIETFQUICClientHello test is repeated after
+			// deobfuscating the packet.
+			var isQUIC bool
+			isQUIC, isIETF = isQUICClientHello(p[:n])
+
+			isObfuscated = !isQUIC
+
+			if isObfuscated && isIETF {
+				return n, addr, false, newTemporaryNetError(
+					errors.Tracef("unexpected isQUIC result"))
+			}
 
 			// Without addr, the mode cannot be determined.
 			if addr == nil {
-				return n, addr, newTemporaryNetError(errors.Tracef("missing addr"))
+				return n, addr, false, newTemporaryNetError(errors.Tracef("missing addr"))
 			}
 
 			conn.peerModesMutex.Lock()
-			address := addr.String()
+			address = addr.String()
 			mode, ok := conn.peerModes[address]
 			if !ok {
-				mode = &peerMode{isObfuscated: !isQUIC}
+				// This is a new flow.
+				mode = &peerMode{isObfuscated: isObfuscated, isIETF: isIETF}
 				conn.peerModes[address] = mode
-			} else if mode.isStale() {
-				mode.isObfuscated = !isQUIC
-			} else if mode.isObfuscated && isQUIC {
-				mode.isObfuscated = false
+				firstFlowPacket = true
+			} else if mode.isStale() ||
+				(isQUIC && (mode.isObfuscated || (mode.isIETF != isIETF))) {
+				// The address for this flow has been seen before, but either (1) it's
+				// stale and not yet reaped; or (2) the client has redialed and switched
+				// from obfuscated to non-obfuscated; or (3) the client has redialed and
+				// switched non-obfuscated gQUIC<-->IETF. These cases are treated like a
+				// new flow.
+				//
+				// Limitation: since the DPI doesn't detect QUIC in post-Hello
+				// non-obfuscated packets, some client redial cases are not identified as
+				// and handled like new flows and the QUIC session will fail. These cases
+				// include the client immediately redialing and switching from
+				// non-obfuscated to obfuscated or switching obfuscated gQUIC<-->IETF.
+				mode.isObfuscated = isObfuscated
+				mode.isIETF = isIETF
+				firstFlowPacket = true
+			} else {
+				isObfuscated = mode.isObfuscated
+				isIETF = mode.isIETF
 			}
-			isObfuscated = mode.isObfuscated
-			mode.lastPacketTime = time.Now()
-			conn.peerModesMutex.Unlock()
+			mode.lastPacketTime = lastPacketTime
 
+			isIETF = mode.isIETF
+			conn.peerModesMutex.Unlock()
 		}
 
 		if isObfuscated {
@@ -239,29 +286,48 @@ func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			// avoids allocting a buffer.
 
 			if n < (NONCE_SIZE + 1) {
-				return n, addr, newTemporaryNetError(errors.Tracef(
+				return n, addr, false, newTemporaryNetError(errors.Tracef(
 					"unexpected obfuscated QUIC packet length: %d", n))
 			}
 
 			cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], p[0:NONCE_SIZE])
 			if err != nil {
-				return n, addr, errors.Trace(err)
+				return n, addr, false, errors.Trace(err)
 			}
 			cipher.XORKeyStream(p[NONCE_SIZE:], p[NONCE_SIZE:])
 
 			paddingLen := int(p[NONCE_SIZE])
 			if paddingLen > MAX_PADDING || paddingLen > n-(NONCE_SIZE+1) {
-				return n, addr, newTemporaryNetError(errors.Tracef(
+				return n, addr, false, newTemporaryNetError(errors.Tracef(
 					"unexpected padding length: %d, %d", paddingLen, n))
 			}
 
 			n -= (NONCE_SIZE + 1) + paddingLen
 			copy(p[0:n], p[(NONCE_SIZE+1)+paddingLen:n+(NONCE_SIZE+1)+paddingLen])
+
+			if conn.isServer && firstFlowPacket {
+				isIETF = isIETFQUICClientHello(p[0:n])
+				conn.peerModesMutex.Lock()
+				mode, ok := conn.peerModes[address]
+
+				// There's a possible race condition between the two instances of locking
+				// peerModesMutex: the client might redial in the meantime. Check that the
+				// mode state is unchanged from when the lock was last held.
+				if !ok || mode.isObfuscated != true || mode.isIETF != false ||
+					mode.lastPacketTime != lastPacketTime {
+					conn.peerModesMutex.Unlock()
+					return n, addr, false, newTemporaryNetError(
+						errors.Tracef("unexpected peer mode"))
+				}
+
+				mode.isIETF = isIETF
+				conn.peerModesMutex.Unlock()
+			}
 		}
 	}
 
 	// Do not wrap any err returned by conn.PacketConn.ReadFrom.
-	return n, addr, err
+	return n, addr, isIETF, err
 }
 
 type obfuscatorBuffer struct {
@@ -294,7 +360,6 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 		mode, ok := conn.peerModes[address]
 		isObfuscated = ok && mode.isObfuscated
 		conn.peerModesMutex.Unlock()
-
 	}
 
 	if isObfuscated {
@@ -355,7 +420,8 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 
 			// Don't use obfuscation that looks like QUIC, or the
 			// peer will not treat this packet as obfuscated.
-			if !isQUIC(p) {
+			isQUIC, _ := isQUICClientHello(p)
+			if !isQUIC {
 				break
 			}
 		}
@@ -367,21 +433,32 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 	return n, err
 }
 
-func isQUIC(buffer []byte) bool {
+func isQUICClientHello(buffer []byte) (bool, bool) {
 
 	// As this function is called for every packet, it needs to be fast.
 	//
+	// As QUIC header parsing is complex, with many cases, we are not
+	// presently doing that, although this might improve accuracy as we should
+	// be able to identify the precise offset of indicators based on header
+	// values.
+
+	if isIETFQUICClientHello(buffer) {
+		return true, true
+	} else if isgQUICClientHello(buffer) {
+		return true, false
+	}
+
+	return false, false
+}
+
+func isgQUICClientHello(buffer []byte) bool {
+
 	// In all currently supported versions, the first client packet contains
 	// the "CHLO" tag at one of the following offsets. The offset can vary for
 	// a single version.
 	//
 	// Note that v44 does not include the "QUIC version" header field in its
 	// first client packet.
-	//
-	// As QUIC header parsing is complex, with many cases, we are not
-	// presently doing that, although this might improve accuracy as we should
-	// be able to identify the precise offset of "CHLO" based on header
-	// values.
 
 	if (len(buffer) >= 33 &&
 		buffer[29] == 'C' &&
@@ -403,4 +480,31 @@ func isQUIC(buffer []byte) bool {
 	}
 
 	return false
+}
+
+func isIETFQUICClientHello(buffer []byte) bool {
+
+	// https://tools.ietf.org/html/draft-ietf-quic-transport-23#section-17.2:
+	//
+	// Check 1st nibble of byte 0:
+	// 1... .... = Header Form: Long Header (1)
+	// .1.. .... = Fixed Bit: True
+	// ..00 .... = Packet Type: Initial (0)
+	//
+	// Then check bytes 1..4 for expected version number.
+
+	if len(buffer) < 5 {
+		return false
+	}
+
+	if buffer[0]>>4 != 0x0c {
+		return false
+	}
+
+	// IETF QUIC draft-24
+
+	return buffer[1] == 0xff &&
+		buffer[2] == 0 &&
+		buffer[3] == 0 &&
+		buffer[4] == 0x18
 }
