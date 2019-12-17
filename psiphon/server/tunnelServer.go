@@ -258,6 +258,12 @@ func (server *TunnelServer) GetLoadStats() (ProtocolStats, RegionStats) {
 	return server.sshServer.getLoadStats()
 }
 
+// GetEstablishedClientCount returns the number of currently established
+// clients.
+func (server *TunnelServer) GetEstablishedClientCount() int {
+	return server.sshServer.getEstablishedClientCount()
+}
+
 // ResetAllClientTrafficRules resets all established client traffic rules
 // to use the latest config and client properties. Any existing traffic
 // rule state is lost, including throttling state.
@@ -773,6 +779,13 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 	}
 
 	return protocolStats, regionStats
+}
+
+func (sshServer *sshServer) getEstablishedClientCount() int {
+	sshServer.clientsMutex.Lock()
+	defer sshServer.clientsMutex.Unlock()
+	establishedClients := len(sshServer.clients)
+	return establishedClients
 }
 
 func (sshServer *sshServer) resetAllClientTrafficRules() {
