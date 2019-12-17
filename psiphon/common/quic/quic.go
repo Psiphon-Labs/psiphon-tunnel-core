@@ -945,6 +945,7 @@ func (listener *muxListener) relayPackets() {
 				}
 			}
 			// TODO: propagate non-temporary errors to Accept?
+			listener.packets <- p
 			continue
 		}
 
