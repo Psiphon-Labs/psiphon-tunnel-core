@@ -31,6 +31,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -45,19 +46,20 @@ import (
 )
 
 const (
-	SERVER_CONFIG_FILENAME               = "psiphond.config"
-	SERVER_TRAFFIC_RULES_CONFIG_FILENAME = "psiphond-traffic-rules.config"
-	SERVER_OSL_CONFIG_FILENAME           = "psiphond-osl.config"
-	SERVER_TACTICS_CONFIG_FILENAME       = "psiphond-tactics.config"
-	SERVER_ENTRY_FILENAME                = "server-entry.dat"
-	DEFAULT_SERVER_IP_ADDRESS            = "127.0.0.1"
-	WEB_SERVER_SECRET_BYTE_LENGTH        = 32
-	DISCOVERY_VALUE_KEY_BYTE_LENGTH      = 32
-	SSH_USERNAME_SUFFIX_BYTE_LENGTH      = 8
-	SSH_PASSWORD_BYTE_LENGTH             = 32
-	SSH_RSA_HOST_KEY_BITS                = 2048
-	SSH_OBFUSCATED_KEY_BYTE_LENGTH       = 32
-	PERIODIC_GARBAGE_COLLECTION          = 120 * time.Second
+	SERVER_CONFIG_FILENAME                              = "psiphond.config"
+	SERVER_TRAFFIC_RULES_CONFIG_FILENAME                = "psiphond-traffic-rules.config"
+	SERVER_OSL_CONFIG_FILENAME                          = "psiphond-osl.config"
+	SERVER_TACTICS_CONFIG_FILENAME                      = "psiphond-tactics.config"
+	SERVER_ENTRY_FILENAME                               = "server-entry.dat"
+	DEFAULT_SERVER_IP_ADDRESS                           = "127.0.0.1"
+	WEB_SERVER_SECRET_BYTE_LENGTH                       = 32
+	DISCOVERY_VALUE_KEY_BYTE_LENGTH                     = 32
+	SSH_USERNAME_SUFFIX_BYTE_LENGTH                     = 8
+	SSH_PASSWORD_BYTE_LENGTH                            = 32
+	SSH_RSA_HOST_KEY_BITS                               = 2048
+	SSH_OBFUSCATED_KEY_BYTE_LENGTH                      = 32
+	PERIODIC_GARBAGE_COLLECTION                         = 120 * time.Second
+	STOP_ESTABLISH_TUNNELS_ESTABLISHED_CLIENT_THRESHOLD = 20
 )
 
 // Config specifies the configuration and behavior of a Psiphon
@@ -315,6 +317,15 @@ type Config struct {
 	// PERIODIC_GARBAGE_COLLECTION.
 	PeriodicGarbageCollectionSeconds *int
 
+	// StopEstablishTunnelsEstablishedClientThreshold sets the established client
+	// threshold for dumping profiles when SIGTSTP is signaled. When there are
+	// less than or equal to the threshold number of established clients,
+	// profiles are dumped to aid investigating unusual load limited states that
+	// occur when few clients are connected and load should be relatively low. A
+	// profile dump is attempted at most once per process lifetime, the first
+	// time the threshold is met. Disabled when < 0.
+	StopEstablishTunnelsEstablishedClientThreshold *int
+
 	// AccessControlVerificationKeyRing is the access control authorization
 	// verification key ring used to verify signed authorizations presented
 	// by clients. Verified, active (unexpired) access control types will be
@@ -351,9 +362,11 @@ type Config struct {
 	// entries are stored on a Psiphon server.
 	OwnEncodedServerEntries map[string]string
 
-	sshBeginHandshakeTimeout  time.Duration
-	sshHandshakeTimeout       time.Duration
-	periodicGarbageCollection time.Duration
+	sshBeginHandshakeTimeout                       time.Duration
+	sshHandshakeTimeout                            time.Duration
+	periodicGarbageCollection                      time.Duration
+	stopEstablishTunnelsEstablishedClientThreshold int
+	dumpProfilesOnStopEstablishTunnelsDone         int32
 }
 
 // RunWebServer indicates whether to run a web server component.
@@ -369,6 +382,20 @@ func (config *Config) RunLoadMonitor() bool {
 // RunPeriodicGarbageCollection indicates whether to run periodic garbage collection.
 func (config *Config) RunPeriodicGarbageCollection() bool {
 	return config.periodicGarbageCollection > 0
+}
+
+// DumpProfilesOnStopEstablishTunnels indicates whether dump profiles due to
+// an unexpectedly low number of established clients during high load.
+func (config *Config) DumpProfilesOnStopEstablishTunnels(establishedClientsCount int) bool {
+	if config.stopEstablishTunnelsEstablishedClientThreshold < 0 {
+		return false
+	}
+	if atomic.LoadInt32(&config.dumpProfilesOnStopEstablishTunnelsDone) != 0 {
+		return false
+	}
+	dump := (establishedClientsCount <= config.stopEstablishTunnelsEstablishedClientThreshold)
+	atomic.StoreInt32(&config.dumpProfilesOnStopEstablishTunnelsDone, 1)
+	return dump
 }
 
 // GetOwnEncodedServerEntry returns one of the server's own server entries, as
@@ -491,6 +518,11 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	config.periodicGarbageCollection = PERIODIC_GARBAGE_COLLECTION
 	if config.PeriodicGarbageCollectionSeconds != nil {
 		config.periodicGarbageCollection = time.Duration(*config.PeriodicGarbageCollectionSeconds) * time.Second
+	}
+
+	config.stopEstablishTunnelsEstablishedClientThreshold = STOP_ESTABLISH_TUNNELS_ESTABLISHED_CLIENT_THRESHOLD
+	if config.StopEstablishTunnelsEstablishedClientThreshold != nil {
+		config.stopEstablishTunnelsEstablishedClientThreshold = *config.StopEstablishTunnelsEstablishedClientThreshold
 	}
 
 	err = accesscontrol.ValidateVerificationKeyRing(&config.AccessControlVerificationKeyRing)
