@@ -358,6 +358,12 @@ func logServerLoad(server *TunnelServer) {
 	}
 }
 
+func logIrregularTunnel(geoIPData GeoIPData, tunnelError error) {
+	irregularTunnel := getRequestLogFields("irregular_tunnel", geoIPData, nil, nil, nil)
+	irregularTunnel["tunnel_error"] = tunnelError.Error()
+	log.LogRawFieldsWithTimestamp(irregularTunnel)
+}
+
 // SupportServices carries common and shared data components
 // across different server components. SupportServices implements a
 // hot reload of traffic rules, psinet database, and geo IP database

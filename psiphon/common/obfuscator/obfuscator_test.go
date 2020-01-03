@@ -47,6 +47,8 @@ func TestObfuscator(t *testing.T) {
 		Keyword:         keyword,
 		MaxPadding:      &maxPadding,
 		PaddingPRNGSeed: paddingPRNGSeed,
+		SeedHistory:     NewSeedHistory(),
+		IrregularLogger: func(err error) { t.Logf("IrregularLogger: %s", err) },
 	}
 
 	client, err := NewClientObfuscator(config)
@@ -79,6 +81,13 @@ func TestObfuscator(t *testing.T) {
 
 	if !bytes.Equal(serverMessage, b) {
 		t.Fatalf("unexpected client message")
+	}
+
+	// Test: duplicate obfuscation seed
+
+	server, err = NewServerObfuscator(bytes.NewReader(seedMessage), config)
+	if err == nil {
+		t.Fatalf("NewServerObfuscator unexpectedly succeeded")
 	}
 }
 
@@ -119,8 +128,11 @@ func TestObfuscatedSSHConn(t *testing.T) {
 		conn, err := listener.Accept()
 
 		if err == nil {
-			conn, err = NewObfuscatedSSHConn(
-				OBFUSCATION_CONN_MODE_SERVER, conn, keyword, nil, nil, nil)
+			conn, err = NewServerObfuscatedSSHConn(
+				conn,
+				keyword,
+				NewSeedHistory(),
+				func(err error) { t.Fatalf("IrregularLogger: %s", err) })
 		}
 
 		if err == nil {
@@ -150,8 +162,11 @@ func TestObfuscatedSSHConn(t *testing.T) {
 		}
 
 		if err == nil {
-			conn, err = NewObfuscatedSSHConn(
-				OBFUSCATION_CONN_MODE_CLIENT, conn, keyword, paddingPRNGSeed, nil, nil)
+			conn, err = NewClientObfuscatedSSHConn(
+				conn,
+				keyword,
+				paddingPRNGSeed,
+				nil, nil)
 		}
 
 		var KEXPRNGSeed *prng.Seed

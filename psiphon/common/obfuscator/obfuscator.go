@@ -59,11 +59,18 @@ type Obfuscator struct {
 	paddingPRNG          *prng.PRNG
 }
 
+// ObfuscatorConfig specifies an Obfuscator configuration.
 type ObfuscatorConfig struct {
 	Keyword         string
 	PaddingPRNGSeed *prng.Seed
 	MinPadding      *int
 	MaxPadding      *int
+
+	// SeedHistory and IrregularLogger are optional parameters used only by
+	// server obfuscators.
+
+	SeedHistory     *SeedHistory
+	IrregularLogger func(error)
 }
 
 // NewClientObfuscator creates a new Obfuscator, staging a seed message to be
@@ -268,6 +275,26 @@ func readSeedMessage(
 		return nil, nil, nil, errors.Trace(err)
 	}
 
+	// Irregular events that indicate an invalid client are logged via
+	// IrregularLogger. Note that event detection isn't infallible. For example,
+	// a man-in-the-middle may have manipulated the seed message sent by a valid
+	// client; or with a very small probability a valid client may generate a
+	// duplicate seed message.
+	//
+	//  Network I/O failures (e.g., failure to read the expected number of seed
+	//  message bytes) are not considered a reliable indicator of irregular
+	//  events.
+
+	if config.SeedHistory != nil {
+		if !config.SeedHistory.AddNew(seed) {
+			err := errors.TraceNew("duplicate obfuscation seed")
+			if config.IrregularLogger != nil {
+				config.IrregularLogger(err)
+			}
+			return nil, nil, nil, err
+		}
+	}
+
 	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(seed, config)
 	if err != nil {
 		return nil, nil, nil, errors.Trace(err)
@@ -299,11 +326,19 @@ func readSeedMessage(
 	}
 
 	if magicValue != OBFUSCATE_MAGIC_VALUE {
-		return nil, nil, nil, errors.TraceNew("invalid magic value")
+		err := errors.TraceNew("invalid magic value")
+		if config.IrregularLogger != nil {
+			config.IrregularLogger(err)
+		}
+		return nil, nil, nil, err
 	}
 
 	if paddingLength < 0 || paddingLength > OBFUSCATE_MAX_PADDING {
-		return nil, nil, nil, errors.TraceNew("invalid padding length")
+		err := errors.TraceNew("invalid padding length")
+		if config.IrregularLogger != nil {
+			config.IrregularLogger(err)
+		}
+		return nil, nil, nil, err
 	}
 
 	padding := make([]byte, paddingLength)

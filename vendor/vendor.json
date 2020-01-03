@@ -111,6 +111,14 @@
 			"revisionTime": "2017-03-28T20:00:08Z"
 		},
 		{
+			"checksumSHA1": "pgbqIkCTjigfQbzZhq0NCqGvVGs=",
+			"path": "github.com/cognusion/go-cache-lru",
+			"revision": "f73e2280ecea6386641f79a5148517ee83d0d184",
+			"revisionTime": "2017-04-19T14:26:35Z",
+			"version": "feature-lru",
+			"versionExact": "feature-lru"
+		},
+		{
 			"checksumSHA1": "bFj0ceSRvaFFCfmS4el1PjWhcgw=",
 			"path": "github.com/creack/goselect",
 			"revision": "1bd5ca702c6154bccc56ecd598932ee8b295cab2",
