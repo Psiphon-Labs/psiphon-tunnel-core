@@ -887,6 +887,12 @@ func selectQUICVersion(allowObfuscatedQUIC bool, p parameters.ClientParametersAc
 			continue
 		}
 
+		// Temporary: disallow IETF QUIC where OBFUSCATED is disallowed.
+		if !allowObfuscatedQUIC &&
+			quicVersion == protocol.QUIC_VERSION_IETF_DRAFT24 {
+			continue
+		}
+
 		quicVersions = append(quicVersions, quicVersion)
 	}
 

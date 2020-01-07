@@ -111,10 +111,32 @@ func (h *packetHandlerMap) close(e error) error {
 		}
 	}
 
+	// [Psiphon]
+	// Call h.server.setCloseError(e) outside of mutex to prevent deadlock
+	//
+	//    sync.(*RWMutex).Lock
+	//    [...]/lucas-clemente/quic-go.(*packetHandlerMap).CloseServer
+	//    [...]/lucas-clemente/quic-go.(*server).closeWithMutex
+	//    [...]/lucas-clemente/quic-go.(*server).closeWithError
+	//    [...]/lucas-clemente/quic-go.(*packetHandlerMap).close
+	//    [...]/lucas-clemente/quic-go.(*packetHandlerMap).listen
+	//
+	//    packetHandlerMap.CloseServer is attempting to lock the same mutex that
+	//    is already locked in packetHandlerMap.close, which deadlocks. As
+	//    packetHandlerMap and its mutex are used by all client sessions, this
+	//    effectively hangs the entire server.
+
+	var server unknownPacketHandler
 	if h.server != nil {
-		h.server.closeWithError(e)
+		server = h.server
 	}
+
 	h.mutex.Unlock()
+
+	if server != nil {
+		server.closeWithError(e)
+	}
+
 	wg.Wait()
 	return nil
 }
@@ -127,8 +149,14 @@ func (h *packetHandlerMap) listen() {
 		// If it does, we only read a truncated packet, which will then end up undecryptable
 		n, addr, err := h.conn.ReadFrom(data)
 		if err != nil {
-			h.close(err)
-			return
+
+			// [Psiphon]
+			// Do not unconditionally shutdown
+			if netErr, ok := err.(net.Error); !ok || !netErr.Temporary() {
+				h.close(err)
+				return
+			}
+
 		}
 		data = data[:n]
 
