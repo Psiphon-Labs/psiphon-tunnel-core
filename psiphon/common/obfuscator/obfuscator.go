@@ -281,9 +281,14 @@ func readSeedMessage(
 	// client; or with a very small probability a valid client may generate a
 	// duplicate seed message.
 	//
-	//  Network I/O failures (e.g., failure to read the expected number of seed
-	//  message bytes) are not considered a reliable indicator of irregular
-	//  events.
+	// Another false positive case: a retired server IP may be recycled and
+	// deployed with a new obfuscation key; legitimate clients may still attempt
+	// to connect using the old obfuscation key; this case is partically
+	// mitigated by the server entry pruning mechanism.
+	//
+	// Network I/O failures (e.g., failure to read the expected number of seed
+	// message bytes) are not considered a reliable indicator of irregular
+	// events.
 
 	if config.SeedHistory != nil {
 		if !config.SeedHistory.AddNew(seed) {
