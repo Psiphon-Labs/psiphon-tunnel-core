@@ -635,8 +635,10 @@ func (s *ietfQUICSession) isErrorIndicatingClosed(err error) bool {
 	if err == nil {
 		return false
 	}
+	errStr := err.Error()
 	// The target error is of type *qerr.QuicError, but is not exported.
-	return err.Error() == "Application error 0x0"
+	return errStr == "Application error 0x0" ||
+		errStr == "NO_ERROR: No recent network activity"
 }
 
 type gQUICListener struct {
