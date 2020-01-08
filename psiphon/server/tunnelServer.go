@@ -352,6 +352,7 @@ type sshServer struct {
 	oslSessionCache              *cache.Cache
 	authorizationSessionIDsMutex sync.Mutex
 	authorizationSessionIDs      map[string]string
+	obfuscatorSeedHistory        *obfuscator.SeedHistory
 }
 
 func newSSHServer(
@@ -397,6 +398,7 @@ func newSSHServer(
 		clients:                 make(map[string]*sshClient),
 		oslSessionCache:         oslSessionCache,
 		authorizationSessionIDs: make(map[string]string),
+		obfuscatorSeedHistory:   obfuscator.NewSeedHistory(),
 	}, nil
 }
 
@@ -1225,13 +1227,15 @@ func (sshClient *sshClient) run(
 		// Wrap the connection in an SSH deobfuscator when required.
 
 		if err == nil && protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
-			// Note: NewObfuscatedSSHConn blocks on network I/O
+
+			// Note: NewServerObfuscatedSSHConn blocks on network I/O
 			// TODO: ensure this won't block shutdown
-			result.obfuscatedSSHConn, err = obfuscator.NewObfuscatedSSHConn(
-				obfuscator.OBFUSCATION_CONN_MODE_SERVER,
+			result.obfuscatedSSHConn, err = obfuscator.NewServerObfuscatedSSHConn(
 				conn,
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
-				nil, nil, nil)
+				sshClient.sshServer.obfuscatorSeedHistory,
+				func(err error) { logIrregularTunnel(sshClient.geoIPData, err) })
+
 			if err != nil {
 				err = errors.Trace(err)
 			} else {

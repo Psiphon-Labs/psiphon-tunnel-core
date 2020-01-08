@@ -287,7 +287,8 @@ func DialMeek(
 		_, port, _ := net.SplitHostPort(meekConfig.DialAddress)
 		quicDialSNIAddress := fmt.Sprintf("%s:%s", meekConfig.SNIServerName, port)
 
-		transport = quic.NewQUICTransporter(
+		var err error
+		transport, err = quic.NewQUICTransporter(
 			ctx,
 			func(message string) {
 				NoticeInfo(message)
@@ -295,6 +296,9 @@ func DialMeek(
 			udpDialer,
 			quicDialSNIAddress,
 			meekConfig.QUICVersion)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 
 	} else if meekConfig.UseHTTPS {
 

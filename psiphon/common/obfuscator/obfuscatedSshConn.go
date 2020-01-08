@@ -117,12 +117,17 @@ const (
 // sequence. In OBFUSCATION_CONN_MODE_SERVER mode, the server obtains its PRNG
 // seed from the client's initial obfuscator message, resulting in the server
 // replaying its padding as well.
+//
+// seedHistory and irregularLogger are optional ObfuscatorConfig parameters
+// used only in OBFUSCATION_CONN_MODE_SERVER.
 func NewObfuscatedSSHConn(
 	mode ObfuscatedSSHConnMode,
 	conn net.Conn,
 	obfuscationKeyword string,
 	obfuscationPaddingPRNGSeed *prng.Seed,
-	minPadding, maxPadding *int) (*ObfuscatedSSHConn, error) {
+	minPadding, maxPadding *int,
+	seedHistory *SeedHistory,
+	irregularLogger func(error)) (*ObfuscatedSSHConn, error) {
 
 	var err error
 	var obfuscator *Obfuscator
@@ -147,7 +152,9 @@ func NewObfuscatedSSHConn(
 		// NewServerObfuscator reads a seed message from conn
 		obfuscator, err = NewServerObfuscator(
 			conn, &ObfuscatorConfig{
-				Keyword: obfuscationKeyword,
+				Keyword:         obfuscationKeyword,
+				SeedHistory:     seedHistory,
+				IrregularLogger: irregularLogger,
 			})
 		if err != nil {
 
@@ -184,6 +191,42 @@ func NewObfuscatedSSHConn(
 		paddingLength:   -1,
 		paddingPRNG:     paddingPRNG,
 	}, nil
+}
+
+// NewClientObfuscatedSSHConn creates a client ObfuscatedSSHConn. See
+// documentation in NewObfuscatedSSHConn.
+func NewClientObfuscatedSSHConn(
+	conn net.Conn,
+	obfuscationKeyword string,
+	obfuscationPaddingPRNGSeed *prng.Seed,
+	minPadding, maxPadding *int) (*ObfuscatedSSHConn, error) {
+
+	return NewObfuscatedSSHConn(
+		OBFUSCATION_CONN_MODE_CLIENT,
+		conn,
+		obfuscationKeyword,
+		obfuscationPaddingPRNGSeed,
+		minPadding, maxPadding,
+		nil,
+		nil)
+}
+
+// NewServerObfuscatedSSHConn creates a server ObfuscatedSSHConn. See
+// documentation in NewObfuscatedSSHConn.
+func NewServerObfuscatedSSHConn(
+	conn net.Conn,
+	obfuscationKeyword string,
+	seedHistory *SeedHistory,
+	irregularLogger func(error)) (*ObfuscatedSSHConn, error) {
+
+	return NewObfuscatedSSHConn(
+		OBFUSCATION_CONN_MODE_SERVER,
+		conn,
+		obfuscationKeyword,
+		nil,
+		nil, nil,
+		seedHistory,
+		irregularLogger)
 }
 
 // GetDerivedPRNG creates a new PRNG with a seed derived from the

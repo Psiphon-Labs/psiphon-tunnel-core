@@ -97,6 +97,8 @@ var expectedTunnelIOErrorSubstrings = []string{
 	"deadline exceeded",
 	"NetworkIdleTimeout",
 	"PeerGoingAway",
+	"Application error 0x0",
+	"No recent network activity",
 }
 
 // isExpectedTunnelIOError checks if the error indicates failure due to tunnel

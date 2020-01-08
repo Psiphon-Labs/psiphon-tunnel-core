@@ -697,8 +697,7 @@ func dialTunnel(
 	// Add obfuscated SSH layer
 	var sshConn net.Conn = throttledConn
 	if protocol.TunnelProtocolUsesObfuscatedSSH(dialParams.TunnelProtocol) {
-		obfuscatedSSHConn, err := obfuscator.NewObfuscatedSSHConn(
-			obfuscator.OBFUSCATION_CONN_MODE_CLIENT,
+		obfuscatedSSHConn, err := obfuscator.NewClientObfuscatedSSHConn(
 			throttledConn,
 			dialParams.ServerEntry.SshObfuscatedKey,
 			dialParams.ObfuscatorPaddingSeed,
