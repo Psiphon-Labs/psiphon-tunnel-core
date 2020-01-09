@@ -433,6 +433,9 @@ func (sshServer *sshServer) runListener(
 	listenerError chan<- error,
 	listenerTunnelProtocol string) {
 
+	_, listenerPortStr, _ := net.SplitHostPort(listener.Addr().String())
+	listenerPort, _ := strconv.Atoi(listenerPortStr)
+
 	runningProtocols := make([]string, 0)
 	for tunnelProtocol := range sshServer.support.Config.TunnelProtocolPorts {
 		runningProtocols = append(runningProtocols, tunnelProtocol)
@@ -474,8 +477,26 @@ func (sshServer *sshServer) runListener(
 			}
 		}
 
-		// process each client connection concurrently
-		go sshServer.handleClient(tunnelProtocol, clientConn)
+		// listenerTunnelProtocol indictes the tunnel protocol run by the listener.
+		// For direct protocols, this is also the client tunnel protocol. For
+		// fronted protocols, the client may use a different protocol to connect to
+		// the front and then only the front-to-Psiphon server will use the listener
+		// protocol.
+		//
+		// A fronted meek client, for example, reports its first hop protocol in
+		// protocol.MeekCookieData.ClientTunnelProtocol. Most metrics record this
+		// value as relay_protocol, since the first hop is the one subject to
+		// adversarial conditions. In some cases, such as irregular tunnels, there
+		// is no ClientTunnelProtocol value available and the listener tunnel
+		// protocol will be logged.
+		//
+		// Similarly, listenerPort indicates the listening port, which is the dialed
+		// port number for direct protocols; while, for fronted protocols, the
+		// client may dial a different port for its first hop.
+
+		// Process each client connection concurrently.
+		go sshServer.handleClient(
+			listenerTunnelProtocol, listenerPort, tunnelProtocol, clientConn)
 	}
 
 	// Note: when exiting due to a unrecoverable error, be sure
@@ -489,6 +510,8 @@ func (sshServer *sshServer) runListener(
 		meekServer, err := NewMeekServer(
 			sshServer.support,
 			listener,
+			listenerTunnelProtocol,
+			listenerPort,
 			protocol.TunnelProtocolUsesMeekHTTPS(listenerTunnelProtocol),
 			protocol.TunnelProtocolUsesFrontedMeek(listenerTunnelProtocol),
 			protocol.TunnelProtocolUsesObfuscatedSessionTickets(listenerTunnelProtocol),
@@ -932,7 +955,9 @@ func (sshServer *sshServer) stopClients() {
 	}
 }
 
-func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.Conn) {
+func (sshServer *sshServer) handleClient(
+	listenerTunnelProtocol string, listenerPort int,
+	tunnelProtocol string, clientConn net.Conn) {
 
 	// Calling clientConn.RemoteAddr at this point, before any Read calls,
 	// satisfies the constraint documented in tapdance.Listen.
@@ -988,7 +1013,8 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 		}
 	}
 
-	sshClient := newSshClient(sshServer, tunnelProtocol, geoIPData)
+	sshClient := newSshClient(
+		sshServer, listenerTunnelProtocol, listenerPort, tunnelProtocol, geoIPData)
 
 	// sshClient.run _must_ call onSSHHandshakeFinished to release the semaphore:
 	// in any error case; or, as soon as the SSH handshake phase has successfully
@@ -1027,6 +1053,8 @@ func (sshServer *sshServer) monitorPortForwardDialError(err error) {
 type sshClient struct {
 	sync.Mutex
 	sshServer                            *sshServer
+	listenerTunnelProtocol               string
+	listenerPort                         int
 	tunnelProtocol                       string
 	sshConn                              ssh.Conn
 	activityConn                         *common.ActivityMonitoredConn
@@ -1097,7 +1125,11 @@ type handshakeState struct {
 }
 
 func newSshClient(
-	sshServer *sshServer, tunnelProtocol string, geoIPData GeoIPData) *sshClient {
+	sshServer *sshServer,
+	listenerTunnelProtocol string,
+	listenerPort int,
+	tunnelProtocol string,
+	geoIPData GeoIPData) *sshClient {
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
 
@@ -1107,6 +1139,8 @@ func newSshClient(
 
 	client := &sshClient{
 		sshServer:              sshServer,
+		listenerTunnelProtocol: listenerTunnelProtocol,
+		listenerPort:           listenerPort,
 		tunnelProtocol:         tunnelProtocol,
 		geoIPData:              geoIPData,
 		isFirstTunnelInSession: true,
@@ -1234,7 +1268,13 @@ func (sshClient *sshClient) run(
 				conn,
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
 				sshClient.sshServer.obfuscatorSeedHistory,
-				func(err error) { logIrregularTunnel(sshClient.geoIPData, err) })
+				func(err error) {
+					logIrregularTunnel(
+						sshClient.listenerTunnelProtocol,
+						sshClient.listenerPort,
+						sshClient.geoIPData,
+						err)
+				})
 
 			if err != nil {
 				err = errors.Trace(err)

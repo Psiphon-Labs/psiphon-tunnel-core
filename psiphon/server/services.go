@@ -358,8 +358,15 @@ func logServerLoad(server *TunnelServer) {
 	}
 }
 
-func logIrregularTunnel(geoIPData GeoIPData, tunnelError error) {
+func logIrregularTunnel(
+	listenerTunnelProtocol string,
+	listenerPort int,
+	geoIPData GeoIPData,
+	tunnelError error) {
+
 	irregularTunnel := getRequestLogFields("irregular_tunnel", geoIPData, nil, nil, nil)
+	irregularTunnel["listener_protocol"] = listenerTunnelProtocol
+	irregularTunnel["listener_port_number"] = listenerPort
 	irregularTunnel["tunnel_error"] = tunnelError.Error()
 	log.LogRawFieldsWithTimestamp(irregularTunnel)
 }
