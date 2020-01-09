@@ -80,7 +80,7 @@ func (profile *CustomTLSProfile) GetClientHelloSpec() (*utls.ClientHelloSpec, er
 		var err error
 		spec.Extensions[i], err = extension.GetUTLSExtension()
 		if err != nil {
-			return nil, errors.Trace(nil)
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -95,7 +95,7 @@ func (profile *CustomTLSProfile) GetClientHelloSpec() (*utls.ClientHelloSpec, er
 // that utls.ClientHelloSpec cannot be directly marshaled with encoding/json
 // nor encoding/gob due to various type restrictions which
 // utls.ClientHelloSpec does not meet. Nor can we simply transmit a static,
-// raw ClientHello since concrete utls extension types must be instantiaed in
+// raw ClientHello since concrete utls extension types must be instantiated in
 // order for related functionality to be enabled.
 
 // UTLSSpec specifies a utls.ClientHelloSpec.
@@ -123,7 +123,7 @@ func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 		var extension *utls.NPNExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, errors.Trace(nil)
+			return nil, errors.Trace(err)
 		}
 		return extension, nil
 	case "SNI":
@@ -134,35 +134,35 @@ func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 		var extension *utls.SupportedCurvesExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, errors.Trace(nil)
+			return nil, errors.Trace(err)
 		}
 		return extension, nil
 	case "SupportedPoints":
 		var extension *utls.SupportedPointsExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, errors.Trace(nil)
+			return nil, errors.Trace(err)
 		}
 		return extension, nil
 	case "SignatureAlgorithms":
 		var extension *utls.SignatureAlgorithmsExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, errors.Trace(nil)
+			return nil, errors.Trace(err)
 		}
 		return extension, nil
 	case "RenegotiationInfo":
 		var extension *utls.RenegotiationInfoExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, errors.Trace(nil)
+			return nil, errors.Trace(err)
 		}
 		return extension, nil
 	case "ALPN":
 		var extension *utls.ALPNExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, errors.Trace(nil)
+			return nil, errors.Trace(err)
 		}
 		return extension, nil
 	case "SCT":
@@ -173,7 +173,7 @@ func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 		var extension *utls.GenericExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, errors.Trace(nil)
+			return nil, errors.Trace(err)
 		}
 		return extension, nil
 	case "ExtendedMasterSecret":
@@ -186,21 +186,21 @@ func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 		var extension *utls.KeyShareExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, errors.Trace(nil)
+			return nil, errors.Trace(err)
 		}
 		return extension, nil
 	case "PSKKeyExchangeModes":
 		var extension *utls.PSKKeyExchangeModesExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, errors.Trace(nil)
+			return nil, errors.Trace(err)
 		}
 		return extension, nil
 	case "SupportedVersions":
 		var extension *utls.SupportedVersionsExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, errors.Trace(nil)
+			return nil, errors.Trace(err)
 		}
 		return extension, nil
 	case "ChannelID":
@@ -209,14 +209,14 @@ func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 		var extension *utls.FakeCertCompressionAlgsExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, errors.Trace(nil)
+			return nil, errors.Trace(err)
 		}
 		return extension, nil
 	case "RecordSizeLimit":
 		var extension *utls.FakeRecordSizeLimitExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
-			return nil, errors.Trace(nil)
+			return nil, errors.Trace(err)
 		}
 		return extension, nil
 	}
