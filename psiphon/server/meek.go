@@ -97,27 +97,31 @@ const (
 // HTTP payload traffic for a given session into net.Conn conforming Read()s and Write()s via
 // the meekConn struct.
 type MeekServer struct {
-	support               *SupportServices
-	listener              net.Listener
-	tlsConfig             *tris.Config
-	obfuscatorSeedHistory *obfuscator.SeedHistory
-	clientHandler         func(clientTunnelProtocol string, clientConn net.Conn)
-	openConns             *common.Conns
-	stopBroadcast         <-chan struct{}
-	sessionsLock          sync.RWMutex
-	sessions              map[string]*meekSession
-	checksumTable         *crc64.Table
-	bufferPool            *CachedResponseBufferPool
-	rateLimitLock         sync.Mutex
-	rateLimitHistory      map[string][]time.Time
-	rateLimitCount        int
-	rateLimitSignalGC     chan struct{}
+	support                *SupportServices
+	listener               net.Listener
+	listenerTunnelProtocol string
+	listenerPort           int
+	tlsConfig              *tris.Config
+	obfuscatorSeedHistory  *obfuscator.SeedHistory
+	clientHandler          func(clientTunnelProtocol string, clientConn net.Conn)
+	openConns              *common.Conns
+	stopBroadcast          <-chan struct{}
+	sessionsLock           sync.RWMutex
+	sessions               map[string]*meekSession
+	checksumTable          *crc64.Table
+	bufferPool             *CachedResponseBufferPool
+	rateLimitLock          sync.Mutex
+	rateLimitHistory       map[string][]time.Time
+	rateLimitCount         int
+	rateLimitSignalGC      chan struct{}
 }
 
 // NewMeekServer initializes a new meek server.
 func NewMeekServer(
 	support *SupportServices,
 	listener net.Listener,
+	listenerTunnelProtocol string,
+	listenerPort int,
 	useTLS, isFronted, useObfuscatedSessionTickets bool,
 	clientHandler func(clientTunnelProtocol string, clientConn net.Conn),
 	stopBroadcast <-chan struct{}) (*MeekServer, error) {
@@ -137,17 +141,19 @@ func NewMeekServer(
 	bufferPool := NewCachedResponseBufferPool(bufferLength, bufferCount)
 
 	meekServer := &MeekServer{
-		support:               support,
-		listener:              listener,
-		obfuscatorSeedHistory: obfuscator.NewSeedHistory(),
-		clientHandler:         clientHandler,
-		openConns:             common.NewConns(),
-		stopBroadcast:         stopBroadcast,
-		sessions:              make(map[string]*meekSession),
-		checksumTable:         checksumTable,
-		bufferPool:            bufferPool,
-		rateLimitHistory:      make(map[string][]time.Time),
-		rateLimitSignalGC:     make(chan struct{}, 1),
+		support:                support,
+		listener:               listener,
+		listenerTunnelProtocol: listenerTunnelProtocol,
+		listenerPort:           listenerPort,
+		obfuscatorSeedHistory:  obfuscator.NewSeedHistory(),
+		clientHandler:          clientHandler,
+		openConns:              common.NewConns(),
+		stopBroadcast:          stopBroadcast,
+		sessions:               make(map[string]*meekSession),
+		checksumTable:          checksumTable,
+		bufferPool:             bufferPool,
+		rateLimitHistory:       make(map[string][]time.Time),
+		rateLimitSignalGC:      make(chan struct{}, 1),
 	}
 
 	if useTLS {
@@ -876,7 +882,10 @@ func (server *MeekServer) getMeekCookiePayload(
 			SeedHistory: server.obfuscatorSeedHistory,
 			IrregularLogger: func(err error) {
 				logIrregularTunnel(
-					server.support.GeoIPService.Lookup(clientIP), err)
+					server.listenerTunnelProtocol,
+					server.listenerPort,
+					server.support.GeoIPService.Lookup(clientIP),
+					err)
 			},
 		})
 	if err != nil {
