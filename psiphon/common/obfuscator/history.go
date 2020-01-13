@@ -138,7 +138,7 @@ func (h *SeedHistory) AddNew(clientIP string, seed []byte) (bool, *common.LogFie
 		"duplicate_elapsed_time_ms": int64(time.Since(previousTime.(time.Time)) / time.Millisecond),
 	}
 
-	previousClientIP, ok := s.seedToClientIP.Get(key)
+	previousClientIP, ok := h.seedToClientIP.Get(key)
 	if ok {
 		if clientIP == previousClientIP.(string) {
 			logFields["duplicate_client_ip"] = "equal"
