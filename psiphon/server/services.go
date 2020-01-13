@@ -359,16 +359,17 @@ func logServerLoad(server *TunnelServer) {
 }
 
 func logIrregularTunnel(
+	support *SupportServices,
 	listenerTunnelProtocol string,
 	listenerPort int,
-	geoIPData GeoIPData,
-	tunnelError error) {
+	clientIP string,
+	logFields LogFields) {
 
-	irregularTunnel := getRequestLogFields("irregular_tunnel", geoIPData, nil, nil, nil)
-	irregularTunnel["listener_protocol"] = listenerTunnelProtocol
-	irregularTunnel["listener_port_number"] = listenerPort
-	irregularTunnel["tunnel_error"] = tunnelError.Error()
-	log.LogRawFieldsWithTimestamp(irregularTunnel)
+	logFields["event_name"] = "irregular_tunnel"
+	logFields["listener_protocol"] = listenerTunnelProtocol
+	logFields["listener_port_number"] = listenerPort
+	support.GeoIPService.Lookup(clientIP).SetLogFields(logFields)
+	log.LogRawFieldsWithTimestamp(logFields)
 }
 
 // SupportServices carries common and shared data components

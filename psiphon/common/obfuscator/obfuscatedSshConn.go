@@ -127,7 +127,7 @@ func NewObfuscatedSSHConn(
 	obfuscationPaddingPRNGSeed *prng.Seed,
 	minPadding, maxPadding *int,
 	seedHistory *SeedHistory,
-	irregularLogger func(error)) (*ObfuscatedSSHConn, error) {
+	irregularLogger func(clientIP string, logFields common.LogFields)) (*ObfuscatedSSHConn, error) {
 
 	var err error
 	var obfuscator *Obfuscator
@@ -151,11 +151,13 @@ func NewObfuscatedSSHConn(
 	} else {
 		// NewServerObfuscator reads a seed message from conn
 		obfuscator, err = NewServerObfuscator(
-			conn, &ObfuscatorConfig{
+			&ObfuscatorConfig{
 				Keyword:         obfuscationKeyword,
 				SeedHistory:     seedHistory,
 				IrregularLogger: irregularLogger,
-			})
+			},
+			common.IPAddressFromAddr(conn.RemoteAddr()),
+			conn)
 		if err != nil {
 
 			// Obfuscated SSH protocol spec:
@@ -217,7 +219,7 @@ func NewServerObfuscatedSSHConn(
 	conn net.Conn,
 	obfuscationKeyword string,
 	seedHistory *SeedHistory,
-	irregularLogger func(error)) (*ObfuscatedSSHConn, error) {
+	irregularLogger func(clientIP string, logFields common.LogFields)) (*ObfuscatedSSHConn, error) {
 
 	return NewObfuscatedSSHConn(
 		OBFUSCATION_CONN_MODE_SERVER,

@@ -398,7 +398,7 @@ func newSSHServer(
 		clients:                 make(map[string]*sshClient),
 		oslSessionCache:         oslSessionCache,
 		authorizationSessionIDs: make(map[string]string),
-		obfuscatorSeedHistory:   obfuscator.NewSeedHistory(),
+		obfuscatorSeedHistory:   obfuscator.NewSeedHistory(nil),
 	}, nil
 }
 
@@ -433,8 +433,7 @@ func (sshServer *sshServer) runListener(
 	listenerError chan<- error,
 	listenerTunnelProtocol string) {
 
-	_, listenerPortStr, _ := net.SplitHostPort(listener.Addr().String())
-	listenerPort, _ := strconv.Atoi(listenerPortStr)
+	listenerPort := common.PortFromAddr(listener.Addr())
 
 	runningProtocols := make([]string, 0)
 	for tunnelProtocol := range sshServer.support.Config.TunnelProtocolPorts {
@@ -1268,12 +1267,13 @@ func (sshClient *sshClient) run(
 				conn,
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
 				sshClient.sshServer.obfuscatorSeedHistory,
-				func(err error) {
+				func(clientIP string, logFields common.LogFields) {
 					logIrregularTunnel(
+						sshClient.sshServer.support,
 						sshClient.listenerTunnelProtocol,
 						sshClient.listenerPort,
-						sshClient.geoIPData,
-						err)
+						clientIP,
+						LogFields(logFields))
 				})
 
 			if err != nil {
@@ -2131,7 +2131,7 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	logFields["session_id"] = sshClient.sessionID
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["start_time"] = sshClient.activityConn.GetStartTime()
-	logFields["duration"] = sshClient.activityConn.GetActiveDuration() / time.Millisecond
+	logFields["duration"] = int64(sshClient.activityConn.GetActiveDuration() / time.Millisecond)
 	logFields["bytes_up_tcp"] = sshClient.tcpTrafficState.bytesUp
 	logFields["bytes_down_tcp"] = sshClient.tcpTrafficState.bytesDown
 	logFields["peak_concurrent_dialing_port_forward_count_tcp"] = sshClient.tcpTrafficState.peakConcurrentDialingPortForwardCount

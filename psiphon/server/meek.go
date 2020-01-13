@@ -145,7 +145,7 @@ func NewMeekServer(
 		listener:               listener,
 		listenerTunnelProtocol: listenerTunnelProtocol,
 		listenerPort:           listenerPort,
-		obfuscatorSeedHistory:  obfuscator.NewSeedHistory(),
+		obfuscatorSeedHistory:  obfuscator.NewSeedHistory(nil),
 		clientHandler:          clientHandler,
 		openConns:              common.NewConns(),
 		stopBroadcast:          stopBroadcast,
@@ -876,18 +876,20 @@ func (server *MeekServer) getMeekCookiePayload(
 	reader := bytes.NewReader(decodedValue[:])
 
 	obfuscator, err := obfuscator.NewServerObfuscator(
-		reader,
 		&obfuscator.ObfuscatorConfig{
 			Keyword:     server.support.Config.MeekObfuscatedKey,
 			SeedHistory: server.obfuscatorSeedHistory,
-			IrregularLogger: func(err error) {
+			IrregularLogger: func(clientIP string, logFields common.LogFields) {
 				logIrregularTunnel(
+					server.support,
 					server.listenerTunnelProtocol,
 					server.listenerPort,
-					server.support.GeoIPService.Lookup(clientIP),
-					err)
+					clientIP,
+					LogFields(logFields))
 			},
-		})
+		},
+		clientIP,
+		reader)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
