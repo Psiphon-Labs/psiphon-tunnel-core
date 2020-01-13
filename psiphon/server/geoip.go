@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -66,6 +67,20 @@ func NewGeoIPData() GeoIPData {
 		ASN:     GEOIP_UNKNOWN_VALUE,
 		ASO:     GEOIP_UNKNOWN_VALUE,
 	}
+}
+
+// SetLogFields adds the GeoIPData fields to LogFields, following Psiphon
+// metric field name and format conventions.
+func (g GeoIPData) SetLogFields(logFields LogFields) {
+
+	// In psi_web, the space replacement was done to accommodate space
+	// delimited logging, which is no longer required; we retain the
+	// transformation so that stats aggregation isn't impacted.
+	logFields["client_region"] = strings.Replace(g.Country, " ", "_", -1)
+	logFields["client_city"] = strings.Replace(g.City, " ", "_", -1)
+	logFields["client_isp"] = strings.Replace(g.ISP, " ", "_", -1)
+	logFields["client_asn"] = strings.Replace(g.ASN, " ", "_", -1)
+	logFields["client_aso"] = strings.Replace(g.ASO, " ", "_", -1)
 }
 
 // GeoIPService implements GeoIP lookup and session/GeoIP caching.

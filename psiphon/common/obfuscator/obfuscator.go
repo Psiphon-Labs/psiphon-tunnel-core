@@ -70,7 +70,7 @@ type ObfuscatorConfig struct {
 	// server obfuscators.
 
 	SeedHistory     *SeedHistory
-	IrregularLogger func(error)
+	IrregularLogger func(clientIP string, logFields common.LogFields)
 }
 
 // NewClientObfuscator creates a new Obfuscator, staging a seed message to be
@@ -93,7 +93,7 @@ func NewClientObfuscator(
 		return nil, errors.Trace(err)
 	}
 
-	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(obfuscatorSeed, config)
+	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(config, obfuscatorSeed)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -141,11 +141,14 @@ func NewClientObfuscator(
 // ObfuscatorConfig.PaddingPRNGSeed is not used, as the server obtains a PRNG
 // seed from the client's initial obfuscator message; this scheme allows for
 // optional replay of the downstream obfuscator padding.
+//
+// The clientIP value is used by the SeedHistory, which retains client IP values
+// for a short time. See SeedHistory documentation.
 func NewServerObfuscator(
-	clientReader io.Reader, config *ObfuscatorConfig) (obfuscator *Obfuscator, err error) {
+	config *ObfuscatorConfig, clientIP string, clientReader io.Reader) (obfuscator *Obfuscator, err error) {
 
 	clientToServerCipher, serverToClientCipher, paddingPRNGSeed, err := readSeedMessage(
-		clientReader, config)
+		config, clientIP, clientReader)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -195,7 +198,7 @@ func (obfuscator *Obfuscator) ObfuscateServerToClient(buffer []byte) {
 }
 
 func initObfuscatorCiphers(
-	obfuscatorSeed []byte, config *ObfuscatorConfig) (*rc4.Cipher, *rc4.Cipher, error) {
+	config *ObfuscatorConfig, obfuscatorSeed []byte) (*rc4.Cipher, *rc4.Cipher, error) {
 
 	clientToServerKey, err := deriveKey(obfuscatorSeed, []byte(config.Keyword), []byte(OBFUSCATE_CLIENT_TO_SERVER_IV))
 	if err != nil {
@@ -267,7 +270,9 @@ func makeSeedMessage(
 }
 
 func readSeedMessage(
-	clientReader io.Reader, config *ObfuscatorConfig) (*rc4.Cipher, *rc4.Cipher, *prng.Seed, error) {
+	config *ObfuscatorConfig,
+	clientIP string,
+	clientReader io.Reader) (*rc4.Cipher, *rc4.Cipher, *prng.Seed, error) {
 
 	seed := make([]byte, OBFUSCATE_SEED_LENGTH)
 	_, err := io.ReadFull(clientReader, seed)
@@ -290,17 +295,26 @@ func readSeedMessage(
 	// message bytes) are not considered a reliable indicator of irregular
 	// events.
 
+	// To distinguish different cases, irregular tunnel logs should indicate
+	// which function called NewServerObfuscator.
+	errBackTrace := "obfuscator.NewServerObfuscator"
+
 	if config.SeedHistory != nil {
-		if !config.SeedHistory.AddNew(seed) {
-			err := errors.TraceNew("duplicate obfuscation seed")
+		ok, duplicateLogFields := config.SeedHistory.AddNew(clientIP, seed)
+		errStr := "duplicate obfuscation seed"
+		if duplicateLogFields != nil {
 			if config.IrregularLogger != nil {
-				config.IrregularLogger(err)
+				setIrregularTunnelErrorLogField(
+					*duplicateLogFields, errors.BackTraceNew(errBackTrace, errStr))
+				config.IrregularLogger(clientIP, *duplicateLogFields)
 			}
-			return nil, nil, nil, err
+		}
+		if !ok {
+			return nil, nil, nil, errors.TraceNew(errStr)
 		}
 	}
 
-	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(seed, config)
+	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(config, seed)
 	if err != nil {
 		return nil, nil, nil, errors.Trace(err)
 	}
@@ -330,20 +344,24 @@ func readSeedMessage(
 		return nil, nil, nil, errors.Trace(err)
 	}
 
+	errStr := ""
+
 	if magicValue != OBFUSCATE_MAGIC_VALUE {
-		err := errors.TraceNew("invalid magic value")
-		if config.IrregularLogger != nil {
-			config.IrregularLogger(err)
-		}
-		return nil, nil, nil, err
+		errStr = "invalid magic value"
 	}
 
-	if paddingLength < 0 || paddingLength > OBFUSCATE_MAX_PADDING {
-		err := errors.TraceNew("invalid padding length")
+	if errStr == "" && (paddingLength < 0 || paddingLength > OBFUSCATE_MAX_PADDING) {
+		errStr = "invalid padding length"
+	}
+
+	if errStr != "" {
 		if config.IrregularLogger != nil {
-			config.IrregularLogger(err)
+			errLogFields := make(common.LogFields)
+			setIrregularTunnelErrorLogField(
+				errLogFields, errors.BackTraceNew(errBackTrace, errStr))
+			config.IrregularLogger(clientIP, errLogFields)
 		}
-		return nil, nil, nil, err
+		return nil, nil, nil, errors.TraceNew(errStr)
 	}
 
 	padding := make([]byte, paddingLength)
@@ -374,4 +392,10 @@ func readSeedMessage(
 	}
 
 	return clientToServerCipher, serverToClientCipher, paddingPRNGSeed, nil
+}
+
+func setIrregularTunnelErrorLogField(
+	logFields common.LogFields, tunnelError error) {
+
+	logFields["tunnel_error"] = tunnelError
 }

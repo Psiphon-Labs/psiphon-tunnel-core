@@ -40,6 +40,14 @@ func TraceNew(message string) error {
 	return fmt.Errorf("%s#%d: %w", stacktrace.GetFunctionName(pc), line, err)
 }
 
+// BackTraceNew returns a new error with the given message, wrapped with the
+// caller stack frame information going back up the stack until the caller of
+// the specified function name is encountered.
+func BackTraceNew(backTraceFuncName, message string) error {
+	err := fmt.Errorf("%s", message)
+	return fmt.Errorf("%s%w", backTrace(backTraceFuncName), err)
+}
+
 // Tracef returns a new error with the given formatted message, wrapped with
 // the caller stack frame information.
 func Tracef(format string, args ...interface{}) error {
@@ -65,4 +73,26 @@ func TraceMsg(err error, message string) error {
 	}
 	pc, _, line, _ := runtime.Caller(1)
 	return fmt.Errorf("%s#%d: %s: %w", stacktrace.GetFunctionName(pc), line, message, err)
+}
+
+func backTrace(backTraceFuncName string) string {
+	stop := false
+	trace := ""
+	// Skip starts at 2, assuming backTrace is called as a helper function.
+	for n := 2; ; n++ {
+		pc, _, line, ok := runtime.Caller(n)
+		if !ok {
+			break
+		}
+		funcName := stacktrace.GetFunctionName(pc)
+		trace = fmt.Sprintf("%s#%d: ", funcName, line) + trace
+		if stop {
+			break
+		}
+		if funcName == backTraceFuncName {
+			// Stop after the _next_ function
+			stop = true
+		}
+	}
+	return trace
 }

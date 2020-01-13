@@ -1730,8 +1730,9 @@ func unboxPayload(
 	obfuscatedReader := bytes.NewReader(obfuscatedBoxedPayload[:])
 
 	obfuscator, err := obfuscator.NewServerObfuscator(
-		obfuscatedReader,
-		&obfuscator.ObfuscatorConfig{Keyword: string(obfuscatedKey)})
+		&obfuscator.ObfuscatorConfig{Keyword: string(obfuscatedKey)},
+		"",
+		obfuscatedReader)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
