@@ -65,7 +65,7 @@ func TestServerEntryExchange(t *testing.T) {
 		    {
                 "SponsorId" : "0",
                 "PropagationChannelId" : "0",
-		        "DataStoreDirectory" : "%s",
+		        "DataRootDirectory" : "%s",
 		        "ServerEntrySignaturePublicKey" : "%s",
 		        "ExchangeObfuscationKey" : "%s",
 		        "NetworkID" : "%s"

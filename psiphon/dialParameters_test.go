@@ -67,7 +67,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	clientConfig := &Config{
 		PropagationChannelId: "0",
 		SponsorId:            "0",
-		DataStoreDirectory:   testDataDirName,
+		DataRootDirectory:    testDataDirName,
 		NetworkIDGetter:      new(testNetworkGetter),
 	}
 

@@ -643,7 +643,7 @@ func dialTunnel(
 		dialConn, err = tapdance.Dial(
 			ctx,
 			config.EmitTapdanceLogs,
-			config.DataStoreDirectory,
+			config.GetTapdanceDirectory(),
 			NewNetDialer(dialParams.GetDialConfig()),
 			dialParams.DirectDialAddress)
 		if err != nil {

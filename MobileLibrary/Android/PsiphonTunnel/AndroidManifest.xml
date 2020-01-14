@@ -1,2 +1,4 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="ca.psiphon">
-<uses-sdk android:minSdkVersion="15"/></manifest>
+    <uses-sdk android:minSdkVersion="15"/>
+    <application android:fullBackupContent="@xml/ca_psiphon_psiphontunnel_backup_rules"/>
+</manifest>

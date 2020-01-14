@@ -22,9 +22,13 @@ package psiphon
 import (
 	"encoding/json"
 	"io/ioutil"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -39,6 +43,7 @@ type ConfigTestSuite struct {
 	confStubBlob      []byte
 	requiredFields    []string
 	nonRequiredFields []string
+	testDirectory     string
 }
 
 func (suite *ConfigTestSuite) SetupSuite() {
@@ -52,12 +57,41 @@ func (suite *ConfigTestSuite) SetupSuite() {
 
 	var obj map[string]interface{}
 	json.Unmarshal(suite.confStubBlob, &obj)
+
+	// Use a temporary directory for the data root directory so any artifacts
+	// created by config.Commit() can be cleaned up.
+
+	testDirectory, err := ioutil.TempDir("", "psiphon-config-test")
+	if err != nil {
+		suite.T().Fatalf("TempDir failed: %s\n", err)
+	}
+	suite.testDirectory = testDirectory
+	obj["DataRootDirectory"] = testDirectory
+
+	suite.confStubBlob, err = json.Marshal(obj)
+	if err != nil {
+		suite.T().Fatalf("Marshal failed: %s\n", err)
+	}
+
 	for k, v := range obj {
-		if v == "<placeholder>" {
+		if k == "DataRootDirectory" {
+			// skip
+		} else if v == "<placeholder>" {
 			suite.requiredFields = append(suite.requiredFields, k)
 		} else {
 			suite.nonRequiredFields = append(suite.nonRequiredFields, k)
 		}
+	}
+}
+
+func (suite *ConfigTestSuite) TearDownSuite() {
+	if common.FileExists(suite.testDirectory) {
+		err := os.RemoveAll(suite.testDirectory)
+		if err != nil {
+			suite.T().Fatalf("Failed to remove test directory %s: %s", suite.testDirectory, err.Error())
+		}
+	} else {
+		suite.T().Fatalf("Test directory not found: %s", suite.testDirectory)
 	}
 }
 
@@ -186,4 +220,386 @@ func (suite *ConfigTestSuite) Test_LoadConfig_GoodJson() {
 		err = config.Commit()
 	}
 	suite.Nil(err, "JSON with null for optional values should succeed")
+}
+
+// Test when migrating from old config fields results in filesystem changes.
+func (suite *ConfigTestSuite) Test_LoadConfig_Migrate() {
+
+	// This test needs its own temporary directory because a previous test may
+	// have paved the file which signals that migration has already been
+	// completed.
+	testDirectory, err := ioutil.TempDir("", "psiphon-config-migration-test")
+	if err != nil {
+		suite.T().Fatalf("TempDir failed: %s\n", err)
+	}
+
+	defer func() {
+		if common.FileExists(testDirectory) {
+			err := os.RemoveAll(testDirectory)
+			if err != nil {
+				suite.T().Fatalf("Failed to remove test directory %s: %s", testDirectory, err.Error())
+			}
+		}
+	}()
+
+	// Pre migration files and directories
+	oldDataStoreDirectory := filepath.Join(testDirectory, "datastore_old")
+	oldRemoteServerListname := "rsl"
+	oldObfuscatedServerListDirectoryName := "obfuscated_server_list"
+	oldObfuscatedServerListDirectory := filepath.Join(testDirectory, oldObfuscatedServerListDirectoryName)
+	oldUpgradeDownloadFilename := "upgrade"
+	oldRotatingNoticesFilename := "rotating_notices"
+	oldHomepageNoticeFilename := "homepage"
+
+	// Post migration data root directory
+	testDataRootDirectory := filepath.Join(testDirectory, "data_root_directory")
+
+	oldFileTree := FileTree{
+		Name: testDirectory,
+		Children: []FileTree{
+			{
+				Name: "datastore_old",
+				Children: []FileTree{
+					{
+						Name: "psiphon.boltdb",
+					},
+					{
+						Name: "psiphon.boltdb.lock",
+					},
+					{
+						Name: "tapdance",
+						Children: []FileTree{
+							{
+								Name: "file1",
+							},
+							{
+								Name: "file2",
+							},
+						},
+					},
+					{
+						Name: "non_tunnel_core_file_should_not_be_migrated",
+					},
+				},
+			},
+			{
+				Name: oldRemoteServerListname,
+			},
+			{
+				Name: oldRemoteServerListname + ".part",
+			},
+			{
+				Name: oldRemoteServerListname + ".part.etag",
+			},
+			{
+				Name: oldObfuscatedServerListDirectoryName,
+				Children: []FileTree{
+					{
+						Name: "osl-registry",
+					},
+					{
+						Name: "osl-registry.cached",
+					},
+					{
+						Name: "osl-1",
+					},
+					{
+						Name: "osl-1.part",
+					},
+				},
+			},
+			{
+				Name: oldRotatingNoticesFilename,
+			},
+			{
+				Name: oldRotatingNoticesFilename + ".1",
+			},
+			{
+				Name: oldHomepageNoticeFilename,
+			},
+			{
+				Name: oldUpgradeDownloadFilename,
+			},
+			{
+				Name: oldUpgradeDownloadFilename + ".1234",
+			},
+			{
+				Name: oldUpgradeDownloadFilename + ".1234.part",
+			},
+			{
+				Name: oldUpgradeDownloadFilename + ".1234.part.etag",
+			},
+			{
+				Name: "data_root_directory",
+				Children: []FileTree{
+					{
+						Name: "non_tunnel_core_file_should_not_be_clobbered",
+					},
+				},
+			},
+		},
+	}
+
+	// Write test files
+	traverseFileTree(func(tree FileTree, path string) {
+		if tree.Children == nil || len(tree.Children) == 0 {
+			if !common.FileExists(path) {
+				f, err := os.Create(path)
+				if err != nil {
+					suite.T().Fatalf("Failed to create test file %s with error: %s", path, err.Error())
+				}
+				f.Close()
+			}
+		} else {
+			if !common.FileExists(path) {
+				err := os.Mkdir(path, os.ModePerm)
+				if err != nil {
+					suite.T().Fatalf("Failed to create test directory %s with error: %s", path, err.Error())
+				}
+			}
+		}
+	}, "", oldFileTree)
+
+	// Create config with legacy config values
+	config := &Config{
+		DataRootDirectory:                            testDataRootDirectory,
+		MigrateRotatingNoticesFilename:               filepath.Join(testDirectory, oldRotatingNoticesFilename),
+		MigrateHompageNoticesFilename:                filepath.Join(testDirectory, oldHomepageNoticeFilename),
+		MigrateDataStoreDirectory:                    oldDataStoreDirectory,
+		PropagationChannelId:                         "ABCDEFGH",
+		SponsorId:                                    "12345678",
+		LocalSocksProxyPort:                          0,
+		LocalHttpProxyPort:                           0,
+		MigrateRemoteServerListDownloadFilename:      filepath.Join(testDirectory, oldRemoteServerListname),
+		MigrateObfuscatedServerListDownloadDirectory: oldObfuscatedServerListDirectory,
+		MigrateUpgradeDownloadFilename:               filepath.Join(testDirectory, oldUpgradeDownloadFilename),
+	}
+
+	// Commit config, this is where file migration happens
+	err = config.Commit()
+	if err != nil {
+		suite.T().Fatal("Error committing config:", err)
+		return
+	}
+
+	expectedNewTree := FileTree{
+		Name: testDirectory,
+		Children: []FileTree{
+			{
+				Name: "data_root_directory",
+				Children: []FileTree{
+					{
+						Name: "non_tunnel_core_file_should_not_be_clobbered",
+					},
+					{
+						Name: "ca.psiphon.PsiphonTunnel.tunnel-core",
+						Children: []FileTree{
+							{
+								Name: "migration_complete",
+							},
+							{
+								Name: "remote_server_list",
+							},
+							{
+								Name: "remote_server_list.part",
+							},
+							{
+								Name: "remote_server_list.part.etag",
+							},
+							{
+								Name: "datastore",
+								Children: []FileTree{
+									{
+										Name: "psiphon.boltdb",
+									},
+									{
+										Name: "psiphon.boltdb.lock",
+									},
+								},
+							},
+							{
+								Name: "osl",
+								Children: []FileTree{
+									{
+										Name: "osl-registry",
+									},
+									{
+										Name: "osl-registry.cached",
+									},
+									{
+										Name: "osl-1",
+									},
+									{
+										Name: "osl-1.part",
+									},
+								},
+							},
+							{
+								Name: "tapdance",
+								Children: []FileTree{
+									{
+										Name: "tapdance",
+										Children: []FileTree{
+											{
+												Name: "file1",
+											},
+											{
+												Name: "file2",
+											},
+										},
+									},
+								},
+							},
+							{
+								Name: "upgrade",
+							},
+							{
+								Name: "upgrade.1234",
+							},
+							{
+								Name: "upgrade.1234.part",
+							},
+							{
+								Name: "upgrade.1234.part.etag",
+							},
+							{
+								Name: "notices",
+							},
+							{
+								Name: "notices.1",
+							},
+							{
+								Name: "homepage",
+							},
+						},
+					},
+				},
+			},
+			{
+				Name: "datastore_old",
+				Children: []FileTree{
+					{
+						Name: "non_tunnel_core_file_should_not_be_migrated",
+					},
+				},
+			},
+			{
+				Name: oldObfuscatedServerListDirectoryName,
+			},
+		},
+	}
+
+	// Read the test directory into a file tree
+	testDirectoryTree, err := buildDirectoryTree("", testDirectory)
+	if err != nil {
+		suite.T().Fatal("Failed to build directory tree:", err)
+	}
+
+	// Enumerate the file paths, relative to the test directory,
+	// of each file in the test directory after migration.
+	testDirectoryFilePaths := make(map[string]int)
+	traverseFileTree(func(tree FileTree, path string) {
+		if val, ok := testDirectoryFilePaths[path]; ok {
+			testDirectoryFilePaths[path] = val + 1
+		} else {
+			testDirectoryFilePaths[path] = 1
+		}
+	}, "", *testDirectoryTree)
+
+	// Enumerate the file paths, relative to the test directory,
+	// of each file we expect to exist in the test directory tree
+	// after migration.
+	expectedTestDirectoryFilePaths := make(map[string]int)
+	traverseFileTree(func(tree FileTree, path string) {
+		if val, ok := expectedTestDirectoryFilePaths[path]; ok {
+			expectedTestDirectoryFilePaths[path] = val + 1
+		} else {
+			expectedTestDirectoryFilePaths[path] = 1
+		}
+	}, "", expectedNewTree)
+
+	// The set of expected file paths and set of actual  file paths should be
+	// identical.
+
+	for k, _ := range expectedTestDirectoryFilePaths {
+		_, ok := testDirectoryFilePaths[k]
+		if ok {
+			// Prevent redundant checks
+			delete(testDirectoryFilePaths, k)
+		} else {
+			suite.T().Errorf("Expected %s to exist in directory", k)
+		}
+	}
+
+	for k, _ := range testDirectoryFilePaths {
+		if _, ok := expectedTestDirectoryFilePaths[k]; !ok {
+			suite.T().Errorf("%s in directory but not expected", k)
+		}
+	}
+}
+
+// FileTree represents a file or directory in a file tree.
+// There is no need to distinguish between the two in our tests.
+type FileTree struct {
+	Name     string
+	Children []FileTree
+}
+
+// traverseFileTree traverses a file tree and emits the filepath of each node.
+//
+// For example:
+//
+//   a
+//   ├── b
+//   │   ├── 1
+//   │   └── 2
+//   └── c
+//       └── 3
+//
+// Will result in: ["a", "a/b", "a/b/1", "a/b/2", "a/c", "a/c/3"].
+func traverseFileTree(f func(node FileTree, nodePath string), basePath string, tree FileTree) {
+	filePath := filepath.Join(basePath, tree.Name)
+	f(tree, filePath)
+	if tree.Children == nil || len(tree.Children) == 0 {
+		return
+	}
+	for _, childTree := range tree.Children {
+		traverseFileTree(f, filePath, childTree)
+	}
+}
+
+// buildDirectoryTree creates a file tree, with the given directory as its root,
+// representing the directory structure that exists relative to the given directory.
+func buildDirectoryTree(basePath, directoryName string) (*FileTree, error) {
+
+	tree := &FileTree{
+		Name:     directoryName,
+		Children: nil,
+	}
+
+	dirPath := filepath.Join(basePath, directoryName)
+	files, err := ioutil.ReadDir(dirPath)
+	if err != nil {
+		return nil, errors.Tracef("Failed to read directory %s with error: %s", dirPath, err.Error())
+	}
+
+	if len(files) > 0 {
+		for _, file := range files {
+			if file.IsDir() {
+				filePath := filepath.Join(basePath, directoryName)
+				childTree, err := buildDirectoryTree(filePath, file.Name())
+				if err != nil {
+					return nil, err
+				}
+				tree.Children = append(tree.Children, *childTree)
+			} else {
+				tree.Children = append(tree.Children, FileTree{
+					Name:     file.Name(),
+					Children: nil,
+				})
+			}
+		}
+	}
+
+	return tree, nil
 }
