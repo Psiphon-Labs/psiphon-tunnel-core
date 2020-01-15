@@ -284,10 +284,29 @@ func checkDanglingGoroutines(
 			isExpected := false
 			for i := 0; i < len(stack); i++ {
 				funcNames[i] = getFunctionName(stack[i])
+
+				// The current goroutine won't have the same stack as in initGoroutines.
 				if strings.Contains(funcNames[i], "checkDanglingGoroutines") {
 					skip = true
 					break
 				}
+
+				// testing.T.Run runs the the test function, f, in another goroutine. f is
+				// the current goroutine, which captures initGoroutines.
+				// https://github.com/golang/go/blob/release-branch.go1.13/src/testing/testing.go#L960-L961:
+				//
+				//     go tRunner(t, f)
+				//     if !<-t.signal {
+				//     ...
+				//
+				// f may capture initGoroutines before or after testing.T.Run advances to
+				// the channel receive, so the stack of the testing.T.Run goroutine may or
+				// may not match initGoroutines. Skip it.
+				if strings.Contains(funcNames[i], "testing.(*T).Run") {
+					skip = true
+					break
+				}
+
 				for _, expected := range expectedDanglingGoroutines {
 					if strings.Contains(funcNames[i], expected) {
 						isExpected = true
