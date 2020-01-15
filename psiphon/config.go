@@ -633,6 +633,9 @@ type Config struct {
 	// download files found in the specified directory will be moved under the
 	// data root directory.
 	//
+	// Warning: if the directory is empty after obfuscated server
+	// list files are moved, then it will be deleted.
+	//
 	// Note: see comment for config.Commit() for a description of how file
 	// migrations are performed.
 	MigrateObfuscatedServerListDownloadDirectory string
@@ -1120,6 +1123,19 @@ func (config *Config) Commit() error {
 				NoticeAlert("Config migration: %s", errors.Trace(err))
 			} else {
 				NoticeInfo("Config migration: moved %s to %s", migration.OldPath, migration.NewPath)
+			}
+		}
+
+		// Remove OSL directory if empty
+		if config.MigrateObfuscatedServerListDownloadDirectory != "" {
+			files, err := ioutil.ReadDir(config.MigrateObfuscatedServerListDownloadDirectory)
+			if err != nil {
+				NoticeAlert("Error reading OSL directory %s: %s", config.MigrateObfuscatedServerListDownloadDirectory, errors.Trace(err))
+			} else if len(files) == 0 {
+				err := os.Remove(config.MigrateObfuscatedServerListDownloadDirectory)
+				if err != nil {
+					NoticeAlert("Error deleting empty OSL directory %s: %s", config.MigrateObfuscatedServerListDownloadDirectory, errors.Trace(err))
+				}
 			}
 		}
 
