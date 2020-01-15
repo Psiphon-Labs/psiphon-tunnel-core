@@ -40,6 +40,8 @@
 		66BDB0661DC26CCC0079384C /* SBJson4StreamWriterState.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0571DC26CCC0079384C /* SBJson4StreamWriterState.m */; };
 		66BDB0671DC26CCC0079384C /* SBJson4Writer.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BDB0581DC26CCC0079384C /* SBJson4Writer.h */; };
 		66BDB0681DC26CCC0079384C /* SBJson4Writer.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0591DC26CCC0079384C /* SBJson4Writer.m */; };
+		CE3D1DA523906003009A4AF6 /* Backups.h in Headers */ = {isa = PBXBuildFile; fileRef = CE3D1DA323906003009A4AF6 /* Backups.h */; };
+		CE3D1DA623906003009A4AF6 /* Backups.m in Sources */ = {isa = PBXBuildFile; fileRef = CE3D1DA423906003009A4AF6 /* Backups.m */; };
 		EFED7EBF1F587F6E0078980F /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = EFED7EBE1F587F6E0078980F /* libresolv.tbd */; };
 /* End PBXBuildFile section */
 
@@ -102,6 +104,8 @@
 		66BDB0571DC26CCC0079384C /* SBJson4StreamWriterState.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SBJson4StreamWriterState.m; sourceTree = "<group>"; };
 		66BDB0581DC26CCC0079384C /* SBJson4Writer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SBJson4Writer.h; sourceTree = "<group>"; };
 		66BDB0591DC26CCC0079384C /* SBJson4Writer.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SBJson4Writer.m; sourceTree = "<group>"; };
+		CE3D1DA323906003009A4AF6 /* Backups.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Backups.h; sourceTree = "<group>"; };
+		CE3D1DA423906003009A4AF6 /* Backups.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = Backups.m; sourceTree = "<group>"; };
 		EFED7EBE1F587F6E0078980F /* libresolv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libresolv.tbd; path = usr/lib/libresolv.tbd; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -183,9 +187,10 @@
 		66BDB0221DA6BFCC0079384C /* PsiphonTunnel */ = {
 			isa = PBXGroup;
 			children = (
+				CE3D1D9E239056E4009A4AF6 /* Files */,
 				66BAD3321E525FBC00CD06DE /* JailbreakCheck */,
-				662659241DD270E900872F6C /* Reachability */,
 				66BDB04A1DC26CCC0079384C /* json-framework */,
+				662659241DD270E900872F6C /* Reachability */,
 				66BDB0231DA6BFCC0079384C /* PsiphonTunnel.h */,
 				66BDB0431DA6C7DD0079384C /* PsiphonTunnel.m */,
 				66BDB0241DA6BFCC0079384C /* Info.plist */,
@@ -233,6 +238,15 @@
 			path = "json-framework";
 			sourceTree = "<group>";
 		};
+		CE3D1D9E239056E4009A4AF6 /* Files */ = {
+			isa = PBXGroup;
+			children = (
+				CE3D1DA323906003009A4AF6 /* Backups.h */,
+				CE3D1DA423906003009A4AF6 /* Backups.m */,
+			);
+			path = Files;
+			sourceTree = "<group>";
+		};
 		EFED7EBD1F587F6E0078980F /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -248,6 +262,7 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CE3D1DA523906003009A4AF6 /* Backups.h in Headers */,
 				6685BDCB1E2E882800F0E414 /* ref.h in Headers */,
 				66BAD3351E525FBC00CD06DE /* JailbreakCheck.h in Headers */,
 				4E89F7FF1E2ED3CE00005F4C /* LookupIPv6.h in Headers */,
@@ -335,6 +350,7 @@
 			developmentRegion = English;
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				English,
 				en,
 			);
 			mainGroup = 66BDB0161DA6BFCC0079384C;
@@ -399,6 +415,7 @@
 				66BDB0441DA6C7DD0079384C /* PsiphonTunnel.m in Sources */,
 				662659281DD270E900872F6C /* Reachability.m in Sources */,
 				66BDB0601DC26CCC0079384C /* SBJson4StreamParserState.m in Sources */,
+				CE3D1DA623906003009A4AF6 /* Backups.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

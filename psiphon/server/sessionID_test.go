@@ -125,7 +125,7 @@ func TestDuplicateSessionID(t *testing.T) {
 
 	clientConfigJSONTemplate := `
     {
-        "DataStoreDirectory" : "%s",
+        "DataRootDirectory" : "%s",
         "SponsorId" : "0",
         "PropagationChannelId" : "0",
         "SessionID" : "00000000000000000000000000000000"

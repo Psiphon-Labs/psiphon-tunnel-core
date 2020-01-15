@@ -276,6 +276,8 @@ func TestMeekResiliency(t *testing.T) {
 	server, err := NewMeekServer(
 		mockSupport,
 		listener,
+		"",
+		0,
 		useTLS,
 		isFronted,
 		useObfuscatedSessionTickets,
@@ -430,6 +432,8 @@ func TestMeekRateLimiter(t *testing.T) {
 	server, err := NewMeekServer(
 		mockSupport,
 		listener,
+		"",
+		0,
 		useTLS,
 		isFronted,
 		useObfuscatedSessionTickets,

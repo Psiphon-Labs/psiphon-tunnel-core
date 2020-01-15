@@ -743,6 +743,7 @@ var baseRequestParams = []requestParamSpec{
 	{"upstream_ossh_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_cookie_size", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_limit_request", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"meek_tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
 }
 
@@ -862,14 +863,7 @@ func getRequestLogFields(
 		logFields["event_name"] = eventName
 	}
 
-	// In psi_web, the space replacement was done to accommodate space
-	// delimited logging, which is no longer required; we retain the
-	// transformation so that stats aggregation isn't impacted.
-	logFields["client_region"] = strings.Replace(geoIPData.Country, " ", "_", -1)
-	logFields["client_city"] = strings.Replace(geoIPData.City, " ", "_", -1)
-	logFields["client_isp"] = strings.Replace(geoIPData.ISP, " ", "_", -1)
-	logFields["client_asn"] = strings.Replace(geoIPData.ASN, " ", "_", -1)
-	logFields["client_aso"] = strings.Replace(geoIPData.ASO, " ", "_", -1)
+	geoIPData.SetLogFields(logFields)
 
 	if len(authorizedAccessTypes) > 0 {
 		logFields["authorized_access_types"] = authorizedAccessTypes

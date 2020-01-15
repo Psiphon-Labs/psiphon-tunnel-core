@@ -24,6 +24,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -80,6 +81,19 @@ func IPAddressFromAddr(addr net.Addr) string {
 		}
 	}
 	return ipAddress
+}
+
+// PortFromAddr is a helper which extracts a port number from a net.Addr or
+// returns 0 if there is no port number.
+func PortFromAddr(addr net.Addr) int {
+	port := 0
+	if addr != nil {
+		_, portStr, err := net.SplitHostPort(addr.String())
+		if err == nil {
+			port, _ = strconv.Atoi(portStr)
+		}
+	}
+	return port
 }
 
 // Conns is a synchronized list of Conns that is used to coordinate

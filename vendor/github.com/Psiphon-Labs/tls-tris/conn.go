@@ -34,6 +34,14 @@ type Conn struct {
 	// confirmMutex is held by any read operation before handshakeConfirmed
 	confirmMutex sync.Mutex
 
+	// [Psiphon]
+	// https://github.com/golang/go/commit/e5b13401c6b19f58a8439f1019a80fe540c0c687
+	//
+	// handshakeStatus is 1 if the connection is currently transferring
+	// application data (i.e. is not currently processing a handshake).
+	// This field is only to be accessed with sync/atomic.
+	handshakeStatus uint32
+
 	// constant after handshake; protected by handshakeMutex
 	handshakeMutex sync.Mutex // handshakeMutex < in.Mutex, out.Mutex, errMutex
 	handshakeErr   error      // error resulting from handshake
@@ -42,9 +50,6 @@ type Conn struct {
 	vers           uint16     // TLS version
 	haveVers       bool       // version has been negotiated
 	config         *Config    // configuration passed to constructor
-	// handshakeComplete is true if the connection reached application data
-	// and it's equivalent to phase > handshakeRunning
-	handshakeComplete bool
 	// handshakes counts the number of handshakes performed on the
 	// connection so far. If renegotiation is disabled then this is either
 	// zero or one.
@@ -1241,7 +1246,7 @@ func (c *Conn) Write(b []byte) (int, error) {
 		return 0, err
 	}
 
-	if !c.handshakeComplete {
+	if !c.handshakeComplete() {
 		return 0, alertInternalError
 	}
 
@@ -1325,7 +1330,7 @@ func (c *Conn) handleRenegotiation(*helloRequestMsg) error {
 	defer c.handshakeMutex.Unlock()
 
 	c.phase = handshakeRunning
-	c.handshakeComplete = false
+	atomic.StoreUint32(&c.handshakeStatus, 0)
 	if c.handshakeErr = c.clientHandshake(); c.handshakeErr == nil {
 		c.handshakes++
 	}
@@ -1573,11 +1578,9 @@ func (c *Conn) Close() error {
 
 	var alertErr error
 
-	c.handshakeMutex.Lock()
-	if c.handshakeComplete {
+	if c.handshakeComplete() {
 		alertErr = c.closeNotify()
 	}
-	c.handshakeMutex.Unlock()
 
 	if err := c.conn.Close(); err != nil {
 		return err
@@ -1591,9 +1594,7 @@ var errEarlyCloseWrite = errors.New("tls: CloseWrite called before handshake com
 // called once the handshake has completed and does not call CloseWrite on the
 // underlying connection. Most callers should just use Close.
 func (c *Conn) CloseWrite() error {
-	c.handshakeMutex.Lock()
-	defer c.handshakeMutex.Unlock()
-	if !c.handshakeComplete {
+	if !c.handshakeComplete() {
 		return errEarlyCloseWrite
 	}
 
@@ -1625,7 +1626,7 @@ func (c *Conn) Handshake() error {
 	if err := c.handshakeErr; err != nil {
 		return err
 	}
-	if c.handshakeComplete {
+	if c.handshakeComplete() {
 		return nil
 	}
 
@@ -1634,7 +1635,7 @@ func (c *Conn) Handshake() error {
 
 	// The handshake cannot have completed when handshakeMutex was unlocked
 	// because this goroutine set handshakeCond.
-	if c.handshakeErr != nil || c.handshakeComplete {
+	if c.handshakeErr != nil || c.handshakeComplete() {
 		panic("handshake should not have been able to complete after handshakeCond was set")
 	}
 
@@ -1656,7 +1657,7 @@ func (c *Conn) Handshake() error {
 		c.flush()
 	}
 
-	if c.handshakeErr == nil && !c.handshakeComplete {
+	if c.handshakeErr == nil && !c.handshakeComplete() {
 		panic("handshake should have had a result.")
 	}
 
@@ -1669,10 +1670,10 @@ func (c *Conn) ConnectionState() ConnectionState {
 	defer c.handshakeMutex.Unlock()
 
 	var state ConnectionState
-	state.HandshakeComplete = c.handshakeComplete
+	state.HandshakeComplete = c.handshakeComplete()
 	state.ServerName = c.serverName
 
-	if c.handshakeComplete {
+	if state.HandshakeComplete {
 		state.ConnectionID = c.connID
 		state.ClientHello = c.clientHello
 		state.Version = c.vers
@@ -1721,11 +1722,15 @@ func (c *Conn) VerifyHostname(host string) error {
 	if !c.isClient {
 		return errors.New("tls: VerifyHostname called on TLS server connection")
 	}
-	if !c.handshakeComplete {
+	if !c.handshakeComplete() {
 		return errors.New("tls: handshake has not yet been performed")
 	}
 	if len(c.verifiedChains) == 0 {
 		return errors.New("tls: handshake did not verify certificate chain")
 	}
 	return c.peerCertificates[0].VerifyHostname(host)
+}
+
+func (c *Conn) handshakeComplete() bool {
+	return atomic.LoadUint32(&c.handshakeStatus) == 1
 }

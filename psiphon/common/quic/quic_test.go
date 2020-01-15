@@ -23,6 +23,8 @@ import (
 	"context"
 	"io"
 	"net"
+	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -41,6 +43,8 @@ func TestQUIC(t *testing.T) {
 }
 
 func runQUIC(t *testing.T, negotiateQUICVersion string) {
+
+	initGoroutines := getGoroutines()
 
 	clients := 10
 	bytesToSend := 1 << 20
@@ -204,4 +208,133 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 	if err == nil {
 		t.Error("unexpected Accept after Close")
 	}
+
+	// Check for unexpected dangling goroutines after shutdown.
+	//
+	// quic-go.packetHandlerMap.listen shutdown is async and some quic-go
+	// goroutines and/or timers dangle so this test makes allowances for these
+	// known dangling goroutinees.
+
+	expectedDanglingGoroutines := []string{
+		"quic-go.(*packetHandlerMap).Retire.func1",
+		"quic-go.(*packetHandlerMap).ReplaceWithClosed.func1",
+		"quic-go.(*packetHandlerMap).RetireResetToken.func1",
+		"gquic-go.(*packetHandlerMap).removeByConnectionIDAsString.func1",
+	}
+
+	sleepTime := 100 * time.Millisecond
+
+	// The longest expected dangling goroutine is in gquic-go and is launched by a timer
+	// that fires after ClosedSessionDeleteTimeout, which is 1m. Allow one extra second
+	// to ensure this period elapses and the time.AfterFunc runs.
+	//
+	// To avoid taking 1m to run this test every time, the dangling goroutine check exits
+	// early once no dangling goroutines are found. Note that this doesn't account for
+	// any timers still pending at the early exit time.
+	n := int((61 * time.Second) / sleepTime)
+
+	for i := 0; i < n; i++ {
+
+		// Sleep before making any checks, since quic-go.packetHandlerMap.listen
+		// shutdown is asynchronous.
+		time.Sleep(100 * time.Millisecond)
+
+		// After the full 61s, no dangling goroutines are expected.
+		if i == n-1 {
+			expectedDanglingGoroutines = []string{}
+		}
+
+		hasDangling, onlyExpectedDangling := checkDanglingGoroutines(
+			t, initGoroutines, expectedDanglingGoroutines)
+		if !hasDangling {
+			break
+		} else if !onlyExpectedDangling {
+			t.Fatalf("unexpected dangling goroutines")
+		}
+	}
+}
+
+func getGoroutines() []runtime.StackRecord {
+	n, _ := runtime.GoroutineProfile(nil)
+	r := make([]runtime.StackRecord, n)
+	runtime.GoroutineProfile(r)
+	return r
+}
+
+func checkDanglingGoroutines(
+	t *testing.T,
+	initGoroutines []runtime.StackRecord,
+	expectedDanglingGoroutines []string) (bool, bool) {
+
+	hasDangling := false
+	onlyExpectedDangling := true
+	current := getGoroutines()
+	for _, g := range current {
+		found := false
+		for _, h := range initGoroutines {
+			if g == h {
+				found = true
+				break
+			}
+		}
+		if !found {
+			stack := g.Stack()
+			funcNames := make([]string, len(stack))
+			skip := false
+			isExpected := false
+			for i := 0; i < len(stack); i++ {
+				funcNames[i] = getFunctionName(stack[i])
+
+				// The current goroutine won't have the same stack as in initGoroutines.
+				if strings.Contains(funcNames[i], "checkDanglingGoroutines") {
+					skip = true
+					break
+				}
+
+				// testing.T.Run runs the the test function, f, in another goroutine. f is
+				// the current goroutine, which captures initGoroutines.
+				// https://github.com/golang/go/blob/release-branch.go1.13/src/testing/testing.go#L960-L961:
+				//
+				//     go tRunner(t, f)
+				//     if !<-t.signal {
+				//     ...
+				//
+				// f may capture initGoroutines before or after testing.T.Run advances to
+				// the channel receive, so the stack of the testing.T.Run goroutine may or
+				// may not match initGoroutines. Skip it.
+				if strings.Contains(funcNames[i], "testing.(*T).Run") {
+					skip = true
+					break
+				}
+
+				for _, expected := range expectedDanglingGoroutines {
+					if strings.Contains(funcNames[i], expected) {
+						isExpected = true
+						break
+					}
+				}
+				if isExpected {
+					break
+				}
+			}
+			if !skip {
+				hasDangling = true
+				if !isExpected {
+					onlyExpectedDangling = false
+					s := strings.Join(funcNames, " <- ")
+					t.Logf("found unexpected dangling goroutine: %s", s)
+				}
+			}
+		}
+	}
+	return hasDangling, onlyExpectedDangling
+}
+
+func getFunctionName(pc uintptr) string {
+	funcName := runtime.FuncForPC(pc).Name()
+	index := strings.LastIndex(funcName, "/")
+	if index != -1 {
+		funcName = funcName[index+1:]
+	}
+	return funcName
 }

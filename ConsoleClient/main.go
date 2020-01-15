@@ -48,6 +48,9 @@ func main() {
 	var configFilename string
 	flag.StringVar(&configFilename, "config", "", "configuration input file")
 
+	var dataRootDirectory string
+	flag.StringVar(&dataRootDirectory, "dataRootDirectory", "", "directory where persistent files will be stored")
+
 	var embeddedServerEntryListFilename string
 	flag.StringVar(&embeddedServerEntryListFilename, "serverList", "", "embedded server entry list input file")
 
@@ -87,11 +90,9 @@ func main() {
 	var noticeFilename string
 	flag.StringVar(&noticeFilename, "notices", "", "notices output file (defaults to stderr)")
 
-	var homepageFilename string
-	flag.StringVar(&homepageFilename, "homepages", "", "homepages notices output file")
-
-	var rotatingFilename string
-	flag.StringVar(&rotatingFilename, "rotating", "", "rotating notices output file")
+	var useNoticeFiles bool
+	useNoticeFilesUsage := fmt.Sprintf("output homepage notices and rotating notices to <dataRootDirectory>/%s and <dataRootDirectory>/%s respectively", psiphon.HomepageFilename, psiphon.NoticesFilename)
+	flag.BoolVar(&useNoticeFiles, "useNoticeFiles", false, useNoticeFilesUsage)
 
 	var rotatingFileSize int
 	flag.IntVar(&rotatingFileSize, "rotatingFileSize", 1<<20, "rotating notices file size")
@@ -151,15 +152,6 @@ func main() {
 		noticeWriter = psiphon.NewNoticeConsoleRewriter(noticeWriter)
 	}
 	psiphon.SetNoticeWriter(noticeWriter)
-	err := psiphon.SetNoticeFiles(
-		homepageFilename,
-		rotatingFilename,
-		rotatingFileSize,
-		rotatingSyncFrequency)
-	if err != nil {
-		fmt.Printf("error initializing notice files: %s\n", err)
-		os.Exit(1)
-	}
 
 	// Handle required config file parameter
 
@@ -184,8 +176,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Set data root directory
+	if dataRootDirectory != "" {
+		config.DataRootDirectory = dataRootDirectory
+	}
+
 	if interfaceName != "" {
 		config.ListenInterface = interfaceName
+	}
+
+	// Configure notice files
+
+	if useNoticeFiles {
+		config.UseNoticeFiles = &psiphon.UseNoticeFiles{
+			RotatingFileSize:      rotatingFileSize,
+			RotatingSyncFrequency: rotatingSyncFrequency,
+		}
 	}
 
 	// Configure packet tunnel, including updating the config.
@@ -305,7 +311,7 @@ func main() {
 			profileSampleDurationSeconds := 5
 			common.WriteRuntimeProfiles(
 				psiphon.NoticeCommonLogger(),
-				config.DataStoreDirectory,
+				config.DataRootDirectory,
 				"",
 				profileSampleDurationSeconds,
 				profileSampleDurationSeconds)

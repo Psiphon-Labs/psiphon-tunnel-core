@@ -331,7 +331,10 @@ func (hs *clientHandshakeState) handshake() error {
 	c.didResume = isResume
 	c.phase = handshakeConfirmed
 	atomic.StoreInt32(&c.handshakeConfirmed, 1)
-	c.handshakeComplete = true
+
+	// [Psiphon]
+	// https://github.com/golang/go/commit/e5b13401c6b19f58a8439f1019a80fe540c0c687
+	atomic.StoreUint32(&c.handshakeStatus, 1)
 
 	return nil
 }

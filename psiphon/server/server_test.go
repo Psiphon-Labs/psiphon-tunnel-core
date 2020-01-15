@@ -128,6 +128,7 @@ func TestSSH(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
 		})
 }
 
@@ -146,6 +147,7 @@ func TestOSSH(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
 		})
 }
 
@@ -164,6 +166,7 @@ func TestFragmentedOSSH(t *testing.T) {
 			forceFragmenting:     true,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
 		})
 }
 
@@ -182,6 +185,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
 		})
 }
 
@@ -201,6 +205,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
 		})
 }
 
@@ -220,6 +225,7 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
 		})
 }
 
@@ -239,6 +245,7 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
 		})
 }
 
@@ -258,6 +265,7 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
 		})
 }
 
@@ -276,6 +284,7 @@ func TestQUICOSSH(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    false,
 		})
 }
 
@@ -297,6 +306,7 @@ func TestMarionetteOSSH(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    false,
 		})
 }
 
@@ -315,6 +325,7 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    false,
 		})
 }
 
@@ -333,6 +344,7 @@ func TestHotReload(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    false,
 		})
 }
 
@@ -351,6 +363,7 @@ func TestDefaultSponsorID(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    false,
 		})
 }
 
@@ -369,6 +382,7 @@ func TestDenyTrafficRules(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    false,
 		})
 }
 
@@ -387,6 +401,7 @@ func TestOmitAuthorization(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    false,
 		})
 }
 
@@ -405,6 +420,7 @@ func TestNoAuthorization(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    false,
 		})
 }
 
@@ -423,6 +439,7 @@ func TestUnusedAuthorization(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    false,
 		})
 }
 
@@ -441,6 +458,7 @@ func TestTCPOnlySLOK(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    false,
 		})
 }
 
@@ -459,6 +477,7 @@ func TestUDPOnlySLOK(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    false,
 		})
 }
 
@@ -477,6 +496,7 @@ func TestLivenessTest(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    true,
 			doPruneServerEntries: false,
+			doDanglingTCPConn:    false,
 		})
 }
 
@@ -495,6 +515,7 @@ func TestPruneServerEntries(t *testing.T) {
 			forceFragmenting:     false,
 			forceLivenessTest:    true,
 			doPruneServerEntries: true,
+			doDanglingTCPConn:    false,
 		})
 }
 
@@ -512,6 +533,7 @@ type runServerConfig struct {
 	forceFragmenting     bool
 	forceLivenessTest    bool
 	doPruneServerEntries bool
+	doDanglingTCPConn    bool
 }
 
 var (
@@ -573,12 +595,13 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		// Workaround for macOS firewall.
 		psiphonServerIPAddress = "127.0.0.1"
 	}
+	psiphonServerPort := 4000
 
 	generateConfigParams := &GenerateConfigParams{
 		ServerIPAddress:      psiphonServerIPAddress,
 		EnableSSHAPIRequests: runConfig.enableSSHAPIRequests,
 		WebServerPort:        8000,
-		TunnelProtocolPorts:  map[string]int{runConfig.tunnelProtocol: 4000},
+		TunnelProtocolPorts:  map[string]int{runConfig.tunnelProtocol: psiphonServerPort},
 	}
 
 	if protocol.TunnelProtocolUsesMarionette(runConfig.tunnelProtocol) {
@@ -1060,6 +1083,19 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			pruneServerEntriesNoticesEmitted,
 			timeoutSignal,
 			"prune server entries timeout exceeded")
+	}
+
+	if runConfig.doDanglingTCPConn {
+
+		// Test: client that has established TCP connection but not completed
+		// any handshakes must not block/delay server shutdown
+
+		danglingConn, err := net.Dial(
+			"tcp", net.JoinHostPort(psiphonServerIPAddress, strconv.Itoa(psiphonServerPort)))
+		if err != nil {
+			t.Fatalf("TCP dial failed: %s", err)
+		}
+		defer danglingConn.Close()
 	}
 
 	// Shutdown to ensure logs/notices are flushed

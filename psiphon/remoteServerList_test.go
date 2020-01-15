@@ -200,7 +200,16 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	// mock seeding SLOKs
 	//
 
-	err = OpenDataStore(&Config{DataStoreDirectory: testDataDirName})
+	config := Config{
+		DataRootDirectory:    testDataDirName,
+		PropagationChannelId: "0",
+		SponsorId:            "0"}
+	err = config.Commit()
+	if err != nil {
+		t.Fatalf("Error initializing config: %s", err)
+	}
+
+	err = OpenDataStore(&config)
 	if err != nil {
 		t.Fatalf("error initializing client datastore: %s", err)
 	}
@@ -240,7 +249,6 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 
 	// The common remote server list fetches will 404
 	remoteServerListURL := fmt.Sprintf("http://%s/server_list_compressed", remoteServerListHostAddresses[0])
-	remoteServerListDownloadFilename := filepath.Join(testDataDirName, "server_list_compressed")
 
 	obfuscatedServerListRootURLsJSONConfig := "["
 	obfuscatedServerListRootURLs := make([]string, len(remoteServerListHostAddresses))
@@ -286,8 +294,6 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 			httpServer.Close()
 		}
 	}()
-
-	obfuscatedServerListDownloadDirectory := testDataDirName
 
 	//
 	// run Psiphon server
@@ -371,7 +377,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	// Note: calling LoadConfig ensures all *int config fields are initialized
 	clientConfigJSONTemplate := `
     {
-        "DataStoreDirectory" : "%s",
+        "DataRootDirectory" : "%s",
         "ClientPlatform" : "",
         "ClientVersion" : "0",
         "SponsorId" : "0",
@@ -381,9 +387,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
         "FetchRemoteServerListRetryPeriodMilliseconds" : 250,
 		"RemoteServerListSignaturePublicKey" : "%s",
 		"RemoteServerListUrl" : "%s",
-		"RemoteServerListDownloadFilename" : "%s",
 		"ObfuscatedServerListRootURLs" : %s,
-		"ObfuscatedServerListDownloadDirectory" : "%s",
 		"UpstreamProxyUrl" : "%s"
     }`
 
@@ -392,9 +396,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 		testDataDirName,
 		signingPublicKey,
 		remoteServerListURL,
-		remoteServerListDownloadFilename,
 		obfuscatedServerListRootURLsJSONConfig,
-		obfuscatedServerListDownloadDirectory,
 		disruptorProxyURL)
 
 	clientConfig, err := LoadConfig([]byte(clientConfigJSON))

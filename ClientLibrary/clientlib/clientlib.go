@@ -127,10 +127,12 @@ func StartTunnel(ctx context.Context,
 
 	// Use params.DataRootDirectory to set related config values.
 	if params.DataRootDirectory != nil {
-		config.DataStoreDirectory = *params.DataRootDirectory
-		config.ObfuscatedServerListDownloadDirectory = *params.DataRootDirectory
+		config.DataRootDirectory = *params.DataRootDirectory
 
-		config.RemoteServerListDownloadFilename = filepath.Join(*params.DataRootDirectory, "server_list_compressed")
+		// Migrate old fields
+		config.MigrateDataStoreDirectory = *params.DataRootDirectory
+		config.MigrateObfuscatedServerListDownloadDirectory = *params.DataRootDirectory
+		config.MigrateRemoteServerListDownloadFilename = filepath.Join(*params.DataRootDirectory, "server_list_compressed")
 	}
 
 	if params.NetworkID != nil {
@@ -145,6 +147,13 @@ func StartTunnel(ctx context.Context,
 		config.EstablishTunnelTimeoutSeconds = params.EstablishTunnelTimeoutSeconds
 	} // else use the value in config
 
+	if config.UseNoticeFiles == nil && config.EmitDiagnosticNotices && params.EmitDiagnosticNoticesToFiles {
+		config.UseNoticeFiles = &psiphon.UseNoticeFiles{
+			RotatingFileSize:      0,
+			RotatingSyncFrequency: 0,
+		}
+	} // else use the value in the config
+
 	// config.Commit must be called before calling config.SetClientParameters
 	// or attempting to connect.
 	err = config.Commit()
@@ -158,13 +167,6 @@ func StartTunnel(ctx context.Context,
 		if err != nil {
 			return nil, errors.TraceMsg(
 				err, fmt.Sprintf("SetClientParameters failed for delta: %v", paramsDelta))
-		}
-	}
-
-	if config.EmitDiagnosticNotices && params.EmitDiagnosticNoticesToFiles {
-		err := psiphon.SetNoticeFiles("", filepath.Join(config.DataStoreDirectory, "diagnostics.log"), 0, 0)
-		if err != nil {
-			return nil, errors.TraceMsg(err, "failed to initialize diagnostic logging")
 		}
 	}
 

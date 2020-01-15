@@ -127,6 +127,11 @@ type CustomTLSConfig struct {
 	// optional replay of a particular randomized Client Hello.
 	RandomizedTLSProfileSeed *prng.Seed
 
+	// TLSPadding indicates whether to move or add a TLS padding extension to the
+	// front of the exension list and apply the specified padding length. Ignored
+	// when 0.
+	TLSPadding int
+
 	// TrustedCACertificatesFilename specifies a file containing trusted
 	// CA certs. See Config.TrustedCACertificatesFilename.
 	TrustedCACertificatesFilename string
@@ -573,6 +578,38 @@ func CustomTLSDial(
 				conn.Extensions[:deleteIndex], conn.Extensions[deleteIndex+1:]...)
 		}
 		needRemarshal = true
+	}
+
+	if config.TLSPadding > 0 {
+
+		tlsPadding := config.TLSPadding
+
+		// Maximum padding size per RFC 7685
+		if tlsPadding > 65535 {
+			tlsPadding = 65535
+		}
+
+		// Assumes only one PaddingExtension.
+		deleteIndex := -1
+		for index, extension := range conn.Extensions {
+			if _, ok := extension.(*utls.UtlsPaddingExtension); ok {
+				deleteIndex = index
+				break
+			}
+		}
+		if deleteIndex != -1 {
+			conn.Extensions = append(
+				conn.Extensions[:deleteIndex], conn.Extensions[deleteIndex+1:]...)
+		}
+
+		paddingExtension := &utls.UtlsPaddingExtension{
+			PaddingLen: tlsPadding,
+			WillPad:    true,
+		}
+		conn.Extensions = append([]utls.TLSExtension{paddingExtension}, conn.Extensions...)
+
+		needRemarshal = true
+
 	}
 
 	if needRemarshal {

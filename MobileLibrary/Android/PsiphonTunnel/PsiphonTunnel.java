@@ -135,6 +135,23 @@ public class PsiphonTunnel {
         return mPsiphonTunnel;
     }
 
+    // Returns default path where upgrade downloads will be paved. Only applicable if
+    // DataRootDirectory was not set in the outer config. If DataRootDirectory was set in the
+    // outer config, use getUpgradeDownloadFilePath with its value instead.
+    public static String getDefaultUpgradeDownloadFilePath(Context context) {
+        return Psi.upgradeDownloadFilePath(defaultDataRootDirectory(context).getAbsolutePath());
+    }
+
+    // Returns the path where upgrade downloads will be paved relative to the configured
+    // DataRootDirectory.
+    public static String getUpgradeDownloadFilePath(String dataRootDirectoryPath) {
+        return Psi.upgradeDownloadFilePath(dataRootDirectoryPath);
+    }
+
+    private static File defaultDataRootDirectory(Context context) {
+        return context.getFileStreamPath("ca.psiphon.PsiphonTunnel.tunnel-core");
+    }
+
     private PsiphonTunnel(HostService hostService, boolean shouldRouteThroughTunnelAutomatically) {
         mHostService = hostService;
         mVpnMode = new AtomicBoolean(false);
@@ -594,7 +611,7 @@ public class PsiphonTunnel {
     }
 
     private String loadPsiphonConfig(Context context)
-            throws IOException, JSONException {
+            throws IOException, JSONException, Exception {
 
         // Load settings from the raw resource JSON config file and
         // update as necessary. Then write JSON to disk for the Go client.
@@ -603,23 +620,31 @@ public class PsiphonTunnel {
         // On Android, this directory must be set to the app private storage area.
         // The Psiphon library won't be able to use its current working directory
         // and the standard temporary directories do not exist.
-        if (!json.has("DataStoreDirectory")) {
-            json.put("DataStoreDirectory", context.getFilesDir());
+        if (!json.has("DataRootDirectory")) {
+            File dataRootDirectory = defaultDataRootDirectory(context);
+            if (!dataRootDirectory.exists()) {
+                boolean created = dataRootDirectory.mkdir();
+                if (!created) {
+                    throw new Exception("failed to create data root directory: " + dataRootDirectory.getPath());
+                }
+            }
+            json.put("DataRootDirectory", defaultDataRootDirectory(context));
         }
 
+        // Migrate datastore files from legacy directory.
+        if (!json.has("DataStoreDirectory")) {
+            json.put("MigrateDataStoreDirectory", context.getFilesDir());
+        }
+
+        // Migrate remote server list downloads from legacy location.
         if (!json.has("RemoteServerListDownloadFilename")) {
             File remoteServerListDownload = new File(context.getFilesDir(), "remote_server_list");
-            json.put("RemoteServerListDownloadFilename", remoteServerListDownload.getAbsolutePath());
+            json.put("MigrateRemoteServerListDownloadFilename", remoteServerListDownload.getAbsolutePath());
         }
 
+        // Migrate obfuscated server list download files from legacy directory.
         File oslDownloadDir = new File(context.getFilesDir(), "osl");
-        if (!oslDownloadDir.exists()
-                && !oslDownloadDir.mkdirs()) {
-            // Failed to create osl directory
-            // TODO: proceed anyway?
-            throw new IOException("failed to create OSL download directory");
-        }
-        json.put("ObfuscatedServerListDownloadDirectory", oslDownloadDir.getAbsolutePath());
+        json.put("MigrateObfuscatedServerListDownloadDirectory", oslDownloadDir.getAbsolutePath());
 
         // Note: onConnecting/onConnected logic assumes 1 tunnel connection
         json.put("TunnelPoolSize", 1);

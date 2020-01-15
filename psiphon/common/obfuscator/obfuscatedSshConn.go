@@ -117,12 +117,17 @@ const (
 // sequence. In OBFUSCATION_CONN_MODE_SERVER mode, the server obtains its PRNG
 // seed from the client's initial obfuscator message, resulting in the server
 // replaying its padding as well.
+//
+// seedHistory and irregularLogger are optional ObfuscatorConfig parameters
+// used only in OBFUSCATION_CONN_MODE_SERVER.
 func NewObfuscatedSSHConn(
 	mode ObfuscatedSSHConnMode,
 	conn net.Conn,
 	obfuscationKeyword string,
 	obfuscationPaddingPRNGSeed *prng.Seed,
-	minPadding, maxPadding *int) (*ObfuscatedSSHConn, error) {
+	minPadding, maxPadding *int,
+	seedHistory *SeedHistory,
+	irregularLogger func(clientIP string, logFields common.LogFields)) (*ObfuscatedSSHConn, error) {
 
 	var err error
 	var obfuscator *Obfuscator
@@ -146,9 +151,13 @@ func NewObfuscatedSSHConn(
 	} else {
 		// NewServerObfuscator reads a seed message from conn
 		obfuscator, err = NewServerObfuscator(
-			conn, &ObfuscatorConfig{
-				Keyword: obfuscationKeyword,
-			})
+			&ObfuscatorConfig{
+				Keyword:         obfuscationKeyword,
+				SeedHistory:     seedHistory,
+				IrregularLogger: irregularLogger,
+			},
+			common.IPAddressFromAddr(conn.RemoteAddr()),
+			conn)
 		if err != nil {
 
 			// Obfuscated SSH protocol spec:
@@ -184,6 +193,42 @@ func NewObfuscatedSSHConn(
 		paddingLength:   -1,
 		paddingPRNG:     paddingPRNG,
 	}, nil
+}
+
+// NewClientObfuscatedSSHConn creates a client ObfuscatedSSHConn. See
+// documentation in NewObfuscatedSSHConn.
+func NewClientObfuscatedSSHConn(
+	conn net.Conn,
+	obfuscationKeyword string,
+	obfuscationPaddingPRNGSeed *prng.Seed,
+	minPadding, maxPadding *int) (*ObfuscatedSSHConn, error) {
+
+	return NewObfuscatedSSHConn(
+		OBFUSCATION_CONN_MODE_CLIENT,
+		conn,
+		obfuscationKeyword,
+		obfuscationPaddingPRNGSeed,
+		minPadding, maxPadding,
+		nil,
+		nil)
+}
+
+// NewServerObfuscatedSSHConn creates a server ObfuscatedSSHConn. See
+// documentation in NewObfuscatedSSHConn.
+func NewServerObfuscatedSSHConn(
+	conn net.Conn,
+	obfuscationKeyword string,
+	seedHistory *SeedHistory,
+	irregularLogger func(clientIP string, logFields common.LogFields)) (*ObfuscatedSSHConn, error) {
+
+	return NewObfuscatedSSHConn(
+		OBFUSCATION_CONN_MODE_SERVER,
+		conn,
+		obfuscationKeyword,
+		nil,
+		nil, nil,
+		seedHistory,
+		irregularLogger)
 }
 
 // GetDerivedPRNG creates a new PRNG with a seed derived from the

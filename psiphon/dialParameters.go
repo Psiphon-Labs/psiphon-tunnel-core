@@ -90,6 +90,7 @@ type DialParameters struct {
 	MeekSNIServerName         string
 	MeekHostHeader            string
 	MeekObfuscatorPaddingSeed *prng.Seed
+	MeekTLSPaddingSize        int
 	MeekResolvedIPAddress     atomic.Value `json:"-"`
 
 	SelectedUserAgent bool
@@ -883,6 +884,12 @@ func selectQUICVersion(allowObfuscatedQUIC bool, p parameters.ClientParametersAc
 
 		if !allowObfuscatedQUIC &&
 			protocol.QUICVersionIsObfuscated(quicVersion) {
+			continue
+		}
+
+		// Temporary: disallow IETF QUIC where OBFUSCATED is disallowed.
+		if !allowObfuscatedQUIC &&
+			quicVersion == protocol.QUIC_VERSION_IETF_DRAFT24 {
 			continue
 		}
 

@@ -185,6 +185,8 @@ const (
 	MeekRoundTripTimeout                             = "MeekRoundTripTimeout"
 	MeekTrafficShapingProbability                    = "MeekTrafficShapingProbability"
 	MeekTrafficShapingLimitProtocols                 = "MeekTrafficShapingLimitProtocols"
+	MeekMinTLSPadding                                = "MeekMinTLSPadding"
+	MeekMaxTLSPadding                                = "MeekMaxTLSPadding"
 	MeekMinLimitRequestPayloadLength                 = "MeekMinLimitRequestPayloadLength"
 	MeekMaxLimitRequestPayloadLength                 = "MeekMaxLimitRequestPayloadLength"
 	MeekRedialTLSProbability                         = "MeekRedialTLSProbability"
@@ -392,6 +394,8 @@ var defaultClientParameters = map[string]struct {
 	//
 	// MeekCookieMaxPadding cannot exceed common.OBFUSCATE_SEED_LENGTH.
 	//
+	// MeekMinTLSPadding/MeekMinTLSPadding are subject to TLS server limitations.
+	//
 	// MeekMinLimitRequestPayloadLength/MeekMaxLimitRequestPayloadLength
 	// cannot exceed server.MEEK_MAX_REQUEST_PAYLOAD_LENGTH.
 
@@ -417,6 +421,8 @@ var defaultClientParameters = map[string]struct {
 
 	MeekTrafficShapingProbability:    {value: 1.0, minimum: 0.0},
 	MeekTrafficShapingLimitProtocols: {value: protocol.TunnelProtocols{}},
+	MeekMinTLSPadding:                {value: 0, minimum: 0},
+	MeekMaxTLSPadding:                {value: 0, minimum: 0},
 	MeekMinLimitRequestPayloadLength: {value: 65536, minimum: 1},
 	MeekMaxLimitRequestPayloadLength: {value: 65536, minimum: 1},
 	MeekRedialTLSProbability:         {value: 0.0, minimum: 0.0},

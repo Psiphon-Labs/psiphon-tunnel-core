@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
@@ -43,10 +44,17 @@ func TestObfuscator(t *testing.T) {
 		t.Fatalf("prng.NewSeed failed: %s", err)
 	}
 
+	var irregularLogFields common.LogFields
+
 	config := &ObfuscatorConfig{
 		Keyword:         keyword,
 		MaxPadding:      &maxPadding,
 		PaddingPRNGSeed: paddingPRNGSeed,
+		SeedHistory:     NewSeedHistory(&SeedHistoryConfig{ClientIPTTL: 500 * time.Millisecond}),
+		IrregularLogger: func(_ string, logFields common.LogFields) {
+			irregularLogFields = logFields
+			t.Logf("IrregularLogger: %+v", logFields)
+		},
 	}
 
 	client, err := NewClientObfuscator(config)
@@ -56,7 +64,7 @@ func TestObfuscator(t *testing.T) {
 
 	seedMessage := client.SendSeedMessage()
 
-	server, err := NewServerObfuscator(bytes.NewReader(seedMessage), config)
+	server, err := NewServerObfuscator(config, "", bytes.NewReader(seedMessage))
 	if err != nil {
 		t.Fatalf("NewServerObfuscator failed: %s", err)
 	}
@@ -79,6 +87,60 @@ func TestObfuscator(t *testing.T) {
 
 	if !bytes.Equal(serverMessage, b) {
 		t.Fatalf("unexpected client message")
+	}
+
+	// Test: duplicate obfuscation seed cases
+
+	client, err = NewClientObfuscator(config)
+	if err != nil {
+		t.Fatalf("NewClientObfuscator failed: %s", err)
+	}
+
+	seedMessage = client.SendSeedMessage()
+
+	clientIP := "192.168.0.1"
+
+	_, err = NewServerObfuscator(config, clientIP, bytes.NewReader(seedMessage))
+	if err != nil {
+		t.Fatalf("NewServerObfuscator failed: %s", err)
+	}
+
+	irregularLogFields = nil
+
+	_, err = NewServerObfuscator(config, clientIP, bytes.NewReader(seedMessage))
+	if err != nil {
+		t.Fatalf("NewServerObfuscator failed: %s", err)
+	}
+
+	duplicateClientID := irregularLogFields["duplicate_client_ip"]
+	if duplicateClientID != "equal" {
+		t.Fatalf("Unexpected duplicate_client_ip: %s", duplicateClientID)
+	}
+
+	irregularLogFields = nil
+
+	_, err = NewServerObfuscator(config, "192.168.0.2", bytes.NewReader(seedMessage))
+	if err == nil {
+		t.Fatalf("NewServerObfuscator unexpectedly succeeded")
+	}
+
+	duplicateClientID = irregularLogFields["duplicate_client_ip"]
+	if duplicateClientID != "unequal" {
+		t.Fatalf("Unexpected duplicate_client_ip: %s", duplicateClientID)
+	}
+
+	time.Sleep(600 * time.Millisecond)
+
+	irregularLogFields = nil
+
+	_, err = NewServerObfuscator(config, clientIP, bytes.NewReader(seedMessage))
+	if err == nil {
+		t.Fatalf("NewServerObfuscator unexpectedly succeeded")
+	}
+
+	duplicateClientID = irregularLogFields["duplicate_client_ip"]
+	if duplicateClientID != "unknown" {
+		t.Fatalf("Unexpected duplicate_client_ip: %s", duplicateClientID)
 	}
 }
 
@@ -119,8 +181,13 @@ func TestObfuscatedSSHConn(t *testing.T) {
 		conn, err := listener.Accept()
 
 		if err == nil {
-			conn, err = NewObfuscatedSSHConn(
-				OBFUSCATION_CONN_MODE_SERVER, conn, keyword, nil, nil, nil)
+			conn, err = NewServerObfuscatedSSHConn(
+				conn,
+				keyword,
+				NewSeedHistory(nil),
+				func(_ string, logFields common.LogFields) {
+					t.Logf("IrregularLogger: %+v", logFields)
+				})
 		}
 
 		if err == nil {
@@ -150,8 +217,11 @@ func TestObfuscatedSSHConn(t *testing.T) {
 		}
 
 		if err == nil {
-			conn, err = NewObfuscatedSSHConn(
-				OBFUSCATION_CONN_MODE_CLIENT, conn, keyword, paddingPRNGSeed, nil, nil)
+			conn, err = NewClientObfuscatedSSHConn(
+				conn,
+				keyword,
+				paddingPRNGSeed,
+				nil, nil)
 		}
 
 		var KEXPRNGSeed *prng.Seed

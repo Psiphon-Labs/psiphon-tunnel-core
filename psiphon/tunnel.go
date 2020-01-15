@@ -643,7 +643,7 @@ func dialTunnel(
 		dialConn, err = tapdance.Dial(
 			ctx,
 			config.EmitTapdanceLogs,
-			config.DataStoreDirectory,
+			config.GetTapdanceDirectory(),
 			NewNetDialer(dialParams.GetDialConfig()),
 			dialParams.DirectDialAddress)
 		if err != nil {
@@ -697,8 +697,7 @@ func dialTunnel(
 	// Add obfuscated SSH layer
 	var sshConn net.Conn = throttledConn
 	if protocol.TunnelProtocolUsesObfuscatedSSH(dialParams.TunnelProtocol) {
-		obfuscatedSSHConn, err := obfuscator.NewObfuscatedSSHConn(
-			obfuscator.OBFUSCATION_CONN_MODE_CLIENT,
+		obfuscatedSSHConn, err := obfuscator.NewClientObfuscatedSSHConn(
 			throttledConn,
 			dialParams.ServerEntry.SshObfuscatedKey,
 			dialParams.ObfuscatorPaddingSeed,
@@ -1072,20 +1071,39 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	}()
 
 	requestsWaitGroup.Add(1)
-	signalSshKeepAlive := make(chan time.Duration)
+	signalPeriodicSshKeepAlive := make(chan time.Duration)
 	sshKeepAliveError := make(chan error, 1)
 	go func() {
 		defer requestsWaitGroup.Done()
-		isFirstKeepAlive := true
-		for timeout := range signalSshKeepAlive {
-			err := tunnel.sendSshKeepAlive(isFirstKeepAlive, timeout)
+		isFirstPeriodicKeepAlive := true
+		for timeout := range signalPeriodicSshKeepAlive {
+			err := tunnel.sendSshKeepAlive(isFirstPeriodicKeepAlive, timeout)
 			if err != nil {
 				select {
 				case sshKeepAliveError <- err:
 				default:
 				}
 			}
-			isFirstKeepAlive = false
+			isFirstPeriodicKeepAlive = false
+		}
+	}()
+
+	// Probe-type SSH keep alives have a distinct send worker and may be sent
+	// concurrently, to ensure a long period keep alive timeout doesn't delay
+	// failed tunnel detection.
+
+	requestsWaitGroup.Add(1)
+	signalProbeSshKeepAlive := make(chan time.Duration)
+	go func() {
+		defer requestsWaitGroup.Done()
+		for timeout := range signalProbeSshKeepAlive {
+			err := tunnel.sendSshKeepAlive(false, timeout)
+			if err != nil {
+				select {
+				case sshKeepAliveError <- err:
+				default:
+				}
+			}
 		}
 	}()
 
@@ -1153,7 +1171,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			if lastBytesReceivedTime.Add(inactivePeriod).Before(time.Now()) {
 				timeout := p.Duration(parameters.SSHKeepAlivePeriodicTimeout)
 				select {
-				case signalSshKeepAlive <- timeout:
+				case signalPeriodicSshKeepAlive <- timeout:
 				default:
 				}
 			}
@@ -1178,7 +1196,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 				if lastBytesReceivedTime.Add(inactivePeriod).Before(time.Now()) {
 					timeout := p.Duration(parameters.SSHKeepAliveProbeTimeout)
 					select {
-					case signalSshKeepAlive <- timeout:
+					case signalProbeSshKeepAlive <- timeout:
 					default:
 					}
 				}
@@ -1207,7 +1225,8 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		}
 	}
 
-	close(signalSshKeepAlive)
+	close(signalPeriodicSshKeepAlive)
+	close(signalProbeSshKeepAlive)
 	close(signalStatusRequest)
 	requestsWaitGroup.Wait()
 
@@ -1242,7 +1261,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 // on the specified SSH connections and returns true of the request succeeds
 // within a specified timeout. If the request fails, the associated conn is
 // closed, which will terminate the associated tunnel.
-func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Duration) error {
+func (tunnel *Tunnel) sendSshKeepAlive(isFirstPeriodicKeepAlive bool, timeout time.Duration) error {
 
 	// Note: there is no request context since SSH requests cannot be
 	// interrupted directly. Closing the tunnel will interrupt the request.
@@ -1278,14 +1297,14 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstKeepAlive bool, timeout time.Durat
 		errChannel <- err
 
 		// Record the keep alive round trip as a speed test sample. The first
-		// keep alive is always recorded, as many tunnels are short-lived and
-		// we want to ensure that some data is gathered. Subsequent keep
-		// alives are recorded with some configurable probability, which,
-		// considering that only the last SpeedTestMaxSampleCount samples are
-		// retained, enables tuning the sampling frequency.
+		// periodic keep alive is always recorded, as many tunnels are short-lived
+		// and we want to ensure that some data is gathered. Subsequent keep alives
+		// are recorded with some configurable probability, which, considering that
+		// only the last SpeedTestMaxSampleCount samples are retained, enables
+		// tuning the sampling frequency.
 
 		if err == nil && requestOk &&
-			(isFirstKeepAlive ||
+			(isFirstPeriodicKeepAlive ||
 				tunnel.getCustomClientParameters().WeightedCoinFlip(
 					parameters.SSHKeepAliveSpeedTestSampleProbability)) {
 

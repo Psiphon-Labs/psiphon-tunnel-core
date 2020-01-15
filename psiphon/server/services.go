@@ -224,6 +224,16 @@ loop:
 		case <-stopEstablishingTunnelsSignal:
 			tunnelServer.SetEstablishTunnels(false)
 
+			if config.DumpProfilesOnStopEstablishTunnels(
+				tunnelServer.GetEstablishedClientCount()) {
+
+				// Run the profile dump in a goroutine and don't block this loop. Shutdown
+				// doesn't wait for any running outputProcessProfiles to complete.
+				go func() {
+					outputProcessProfiles(supportServices.Config, "stop_establish_tunnels")
+				}()
+			}
+
 		case <-resumeEstablishingTunnelsSignal:
 			tunnelServer.SetEstablishTunnels(true)
 
@@ -251,8 +261,9 @@ loop:
 	}
 
 	// During any delayed or hung shutdown, periodically dump profiles to help
-	// diagnose the cause.
-	signalProfileDumperStop := make(chan struct{}, 1)
+	// diagnose the cause. Shutdown doesn't wait for any running
+	// outputProcessProfiles to complete.
+	signalProfileDumperStop := make(chan struct{})
 	go func() {
 		tickSeconds := 10
 		ticker := time.NewTicker(time.Duration(tickSeconds) * time.Second)
@@ -345,6 +356,20 @@ func logServerLoad(server *TunnelServer) {
 
 		log.LogRawFieldsWithTimestamp(serverLoad)
 	}
+}
+
+func logIrregularTunnel(
+	support *SupportServices,
+	listenerTunnelProtocol string,
+	listenerPort int,
+	clientIP string,
+	logFields LogFields) {
+
+	logFields["event_name"] = "irregular_tunnel"
+	logFields["listener_protocol"] = listenerTunnelProtocol
+	logFields["listener_port_number"] = listenerPort
+	support.GeoIPService.Lookup(clientIP).SetLogFields(logFields)
+	log.LogRawFieldsWithTimestamp(logFields)
 }
 
 // SupportServices carries common and shared data components

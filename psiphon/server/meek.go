@@ -97,26 +97,31 @@ const (
 // HTTP payload traffic for a given session into net.Conn conforming Read()s and Write()s via
 // the meekConn struct.
 type MeekServer struct {
-	support           *SupportServices
-	listener          net.Listener
-	tlsConfig         *tris.Config
-	clientHandler     func(clientTunnelProtocol string, clientConn net.Conn)
-	openConns         *common.Conns
-	stopBroadcast     <-chan struct{}
-	sessionsLock      sync.RWMutex
-	sessions          map[string]*meekSession
-	checksumTable     *crc64.Table
-	bufferPool        *CachedResponseBufferPool
-	rateLimitLock     sync.Mutex
-	rateLimitHistory  map[string][]time.Time
-	rateLimitCount    int
-	rateLimitSignalGC chan struct{}
+	support                *SupportServices
+	listener               net.Listener
+	listenerTunnelProtocol string
+	listenerPort           int
+	tlsConfig              *tris.Config
+	obfuscatorSeedHistory  *obfuscator.SeedHistory
+	clientHandler          func(clientTunnelProtocol string, clientConn net.Conn)
+	openConns              *common.Conns
+	stopBroadcast          <-chan struct{}
+	sessionsLock           sync.RWMutex
+	sessions               map[string]*meekSession
+	checksumTable          *crc64.Table
+	bufferPool             *CachedResponseBufferPool
+	rateLimitLock          sync.Mutex
+	rateLimitHistory       map[string][]time.Time
+	rateLimitCount         int
+	rateLimitSignalGC      chan struct{}
 }
 
 // NewMeekServer initializes a new meek server.
 func NewMeekServer(
 	support *SupportServices,
 	listener net.Listener,
+	listenerTunnelProtocol string,
+	listenerPort int,
 	useTLS, isFronted, useObfuscatedSessionTickets bool,
 	clientHandler func(clientTunnelProtocol string, clientConn net.Conn),
 	stopBroadcast <-chan struct{}) (*MeekServer, error) {
@@ -136,16 +141,19 @@ func NewMeekServer(
 	bufferPool := NewCachedResponseBufferPool(bufferLength, bufferCount)
 
 	meekServer := &MeekServer{
-		support:           support,
-		listener:          listener,
-		clientHandler:     clientHandler,
-		openConns:         common.NewConns(),
-		stopBroadcast:     stopBroadcast,
-		sessions:          make(map[string]*meekSession),
-		checksumTable:     checksumTable,
-		bufferPool:        bufferPool,
-		rateLimitHistory:  make(map[string][]time.Time),
-		rateLimitSignalGC: make(chan struct{}, 1),
+		support:                support,
+		listener:               listener,
+		listenerTunnelProtocol: listenerTunnelProtocol,
+		listenerPort:           listenerPort,
+		obfuscatorSeedHistory:  obfuscator.NewSeedHistory(nil),
+		clientHandler:          clientHandler,
+		openConns:              common.NewConns(),
+		stopBroadcast:          stopBroadcast,
+		sessions:               make(map[string]*meekSession),
+		checksumTable:          checksumTable,
+		bufferPool:             bufferPool,
+		rateLimitHistory:       make(map[string][]time.Time),
+		rateLimitSignalGC:      make(chan struct{}, 1),
 	}
 
 	if useTLS {
@@ -563,7 +571,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// The session is new (or expired). Treat the cookie value as a new meek
 	// cookie, extract the payload, and create a new session.
 
-	payloadJSON, err := getMeekCookiePayload(server.support, meekCookie.Value)
+	payloadJSON, err := server.getMeekCookiePayload(clientIP, meekCookie.Value)
 	if err != nil {
 		return "", nil, "", "", errors.Trace(err)
 	}
@@ -850,6 +858,73 @@ func (server *MeekServer) httpConnStateCallback(conn net.Conn, connState http.Co
 	}
 }
 
+// getMeekCookiePayload extracts the payload from a meek cookie. The cookie
+// payload is base64 encoded, obfuscated, and NaCl encrypted.
+func (server *MeekServer) getMeekCookiePayload(
+	clientIP string, cookieValue string) ([]byte, error) {
+
+	decodedValue, err := base64.StdEncoding.DecodeString(cookieValue)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// The data consists of an obfuscated seed message prepended
+	// to the obfuscated, encrypted payload. The server obfuscator
+	// will read the seed message, leaving the remaining encrypted
+	// data in the reader.
+
+	reader := bytes.NewReader(decodedValue[:])
+
+	obfuscator, err := obfuscator.NewServerObfuscator(
+		&obfuscator.ObfuscatorConfig{
+			Keyword:     server.support.Config.MeekObfuscatedKey,
+			SeedHistory: server.obfuscatorSeedHistory,
+			IrregularLogger: func(clientIP string, logFields common.LogFields) {
+				logIrregularTunnel(
+					server.support,
+					server.listenerTunnelProtocol,
+					server.listenerPort,
+					clientIP,
+					LogFields(logFields))
+			},
+		},
+		clientIP,
+		reader)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	offset, err := reader.Seek(0, 1)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	encryptedPayload := decodedValue[offset:]
+
+	obfuscator.ObfuscateClientToServer(encryptedPayload)
+
+	var nonce [24]byte
+	var privateKey, ephemeralPublicKey [32]byte
+
+	decodedPrivateKey, err := base64.StdEncoding.DecodeString(
+		server.support.Config.MeekCookieEncryptionPrivateKey)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	copy(privateKey[:], decodedPrivateKey)
+
+	if len(encryptedPayload) < 32 {
+		return nil, errors.TraceNew("unexpected encrypted payload size")
+	}
+	copy(ephemeralPublicKey[0:32], encryptedPayload[0:32])
+
+	payload, ok := box.Open(nil, encryptedPayload[32:], &nonce, &ephemeralPublicKey, &privateKey)
+	if !ok {
+		return nil, errors.TraceNew("open box failed")
+	}
+
+	return payload, nil
+}
+
 type meekSession struct {
 	// Note: 64-bit ints used with atomic operations are placed
 	// at the start of struct to ensure 64-bit alignment.
@@ -1022,59 +1097,6 @@ func makeMeekTLSConfig(
 	}
 
 	return config, nil
-}
-
-// getMeekCookiePayload extracts the payload from a meek cookie. The cookie
-// payload is base64 encoded, obfuscated, and NaCl encrypted.
-func getMeekCookiePayload(support *SupportServices, cookieValue string) ([]byte, error) {
-	decodedValue, err := base64.StdEncoding.DecodeString(cookieValue)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	// The data consists of an obfuscated seed message prepended
-	// to the obfuscated, encrypted payload. The server obfuscator
-	// will read the seed message, leaving the remaining encrypted
-	// data in the reader.
-
-	reader := bytes.NewReader(decodedValue[:])
-
-	obfuscator, err := obfuscator.NewServerObfuscator(
-		reader,
-		&obfuscator.ObfuscatorConfig{Keyword: support.Config.MeekObfuscatedKey})
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	offset, err := reader.Seek(0, 1)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	encryptedPayload := decodedValue[offset:]
-
-	obfuscator.ObfuscateClientToServer(encryptedPayload)
-
-	var nonce [24]byte
-	var privateKey, ephemeralPublicKey [32]byte
-
-	decodedPrivateKey, err := base64.StdEncoding.DecodeString(
-		support.Config.MeekCookieEncryptionPrivateKey)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	copy(privateKey[:], decodedPrivateKey)
-
-	if len(encryptedPayload) < 32 {
-		return nil, errors.TraceNew("unexpected encrypted payload size")
-	}
-	copy(ephemeralPublicKey[0:32], encryptedPayload[0:32])
-
-	payload, ok := box.Open(nil, encryptedPayload[32:], &nonce, &ephemeralPublicKey, &privateKey)
-	if !ok {
-		return nil, errors.TraceNew("open box failed")
-	}
-
-	return payload, nil
 }
 
 // makeMeekSessionID creates a new session ID. The variable size is intended to

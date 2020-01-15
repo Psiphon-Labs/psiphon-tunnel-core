@@ -258,6 +258,12 @@ func (server *TunnelServer) GetLoadStats() (ProtocolStats, RegionStats) {
 	return server.sshServer.getLoadStats()
 }
 
+// GetEstablishedClientCount returns the number of currently established
+// clients.
+func (server *TunnelServer) GetEstablishedClientCount() int {
+	return server.sshServer.getEstablishedClientCount()
+}
+
 // ResetAllClientTrafficRules resets all established client traffic rules
 // to use the latest config and client properties. Any existing traffic
 // rule state is lost, including throttling state.
@@ -346,6 +352,7 @@ type sshServer struct {
 	oslSessionCache              *cache.Cache
 	authorizationSessionIDsMutex sync.Mutex
 	authorizationSessionIDs      map[string]string
+	obfuscatorSeedHistory        *obfuscator.SeedHistory
 }
 
 func newSSHServer(
@@ -391,6 +398,7 @@ func newSSHServer(
 		clients:                 make(map[string]*sshClient),
 		oslSessionCache:         oslSessionCache,
 		authorizationSessionIDs: make(map[string]string),
+		obfuscatorSeedHistory:   obfuscator.NewSeedHistory(nil),
 	}, nil
 }
 
@@ -424,6 +432,8 @@ func (sshServer *sshServer) runListener(
 	listener net.Listener,
 	listenerError chan<- error,
 	listenerTunnelProtocol string) {
+
+	listenerPort := common.PortFromAddr(listener.Addr())
 
 	runningProtocols := make([]string, 0)
 	for tunnelProtocol := range sshServer.support.Config.TunnelProtocolPorts {
@@ -466,8 +476,26 @@ func (sshServer *sshServer) runListener(
 			}
 		}
 
-		// process each client connection concurrently
-		go sshServer.handleClient(tunnelProtocol, clientConn)
+		// listenerTunnelProtocol indictes the tunnel protocol run by the listener.
+		// For direct protocols, this is also the client tunnel protocol. For
+		// fronted protocols, the client may use a different protocol to connect to
+		// the front and then only the front-to-Psiphon server will use the listener
+		// protocol.
+		//
+		// A fronted meek client, for example, reports its first hop protocol in
+		// protocol.MeekCookieData.ClientTunnelProtocol. Most metrics record this
+		// value as relay_protocol, since the first hop is the one subject to
+		// adversarial conditions. In some cases, such as irregular tunnels, there
+		// is no ClientTunnelProtocol value available and the listener tunnel
+		// protocol will be logged.
+		//
+		// Similarly, listenerPort indicates the listening port, which is the dialed
+		// port number for direct protocols; while, for fronted protocols, the
+		// client may dial a different port for its first hop.
+
+		// Process each client connection concurrently.
+		go sshServer.handleClient(
+			listenerTunnelProtocol, listenerPort, tunnelProtocol, clientConn)
 	}
 
 	// Note: when exiting due to a unrecoverable error, be sure
@@ -481,6 +509,8 @@ func (sshServer *sshServer) runListener(
 		meekServer, err := NewMeekServer(
 			sshServer.support,
 			listener,
+			listenerTunnelProtocol,
+			listenerPort,
 			protocol.TunnelProtocolUsesMeekHTTPS(listenerTunnelProtocol),
 			protocol.TunnelProtocolUsesFrontedMeek(listenerTunnelProtocol),
 			protocol.TunnelProtocolUsesObfuscatedSessionTickets(listenerTunnelProtocol),
@@ -775,6 +805,13 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 	return protocolStats, regionStats
 }
 
+func (sshServer *sshServer) getEstablishedClientCount() int {
+	sshServer.clientsMutex.Lock()
+	defer sshServer.clientsMutex.Unlock()
+	establishedClients := len(sshServer.clients)
+	return establishedClients
+}
+
 func (sshServer *sshServer) resetAllClientTrafficRules() {
 
 	sshServer.clientsMutex.Lock()
@@ -917,7 +954,9 @@ func (sshServer *sshServer) stopClients() {
 	}
 }
 
-func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.Conn) {
+func (sshServer *sshServer) handleClient(
+	listenerTunnelProtocol string, listenerPort int,
+	tunnelProtocol string, clientConn net.Conn) {
 
 	// Calling clientConn.RemoteAddr at this point, before any Read calls,
 	// satisfies the constraint documented in tapdance.Listen.
@@ -973,7 +1012,8 @@ func (sshServer *sshServer) handleClient(tunnelProtocol string, clientConn net.C
 		}
 	}
 
-	sshClient := newSshClient(sshServer, tunnelProtocol, geoIPData)
+	sshClient := newSshClient(
+		sshServer, listenerTunnelProtocol, listenerPort, tunnelProtocol, geoIPData)
 
 	// sshClient.run _must_ call onSSHHandshakeFinished to release the semaphore:
 	// in any error case; or, as soon as the SSH handshake phase has successfully
@@ -1012,6 +1052,8 @@ func (sshServer *sshServer) monitorPortForwardDialError(err error) {
 type sshClient struct {
 	sync.Mutex
 	sshServer                            *sshServer
+	listenerTunnelProtocol               string
+	listenerPort                         int
 	tunnelProtocol                       string
 	sshConn                              ssh.Conn
 	activityConn                         *common.ActivityMonitoredConn
@@ -1082,7 +1124,11 @@ type handshakeState struct {
 }
 
 func newSshClient(
-	sshServer *sshServer, tunnelProtocol string, geoIPData GeoIPData) *sshClient {
+	sshServer *sshServer,
+	listenerTunnelProtocol string,
+	listenerPort int,
+	tunnelProtocol string,
+	geoIPData GeoIPData) *sshClient {
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
 
@@ -1092,6 +1138,8 @@ func newSshClient(
 
 	client := &sshClient{
 		sshServer:              sshServer,
+		listenerTunnelProtocol: listenerTunnelProtocol,
+		listenerPort:           listenerPort,
 		tunnelProtocol:         tunnelProtocol,
 		geoIPData:              geoIPData,
 		isFirstTunnelInSession: true,
@@ -1212,13 +1260,22 @@ func (sshClient *sshClient) run(
 		// Wrap the connection in an SSH deobfuscator when required.
 
 		if err == nil && protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
-			// Note: NewObfuscatedSSHConn blocks on network I/O
+
+			// Note: NewServerObfuscatedSSHConn blocks on network I/O
 			// TODO: ensure this won't block shutdown
-			result.obfuscatedSSHConn, err = obfuscator.NewObfuscatedSSHConn(
-				obfuscator.OBFUSCATION_CONN_MODE_SERVER,
+			result.obfuscatedSSHConn, err = obfuscator.NewServerObfuscatedSSHConn(
 				conn,
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
-				nil, nil, nil)
+				sshClient.sshServer.obfuscatorSeedHistory,
+				func(clientIP string, logFields common.LogFields) {
+					logIrregularTunnel(
+						sshClient.sshServer.support,
+						sshClient.listenerTunnelProtocol,
+						sshClient.listenerPort,
+						clientIP,
+						LogFields(logFields))
+				})
+
 			if err != nil {
 				err = errors.Trace(err)
 			} else {
@@ -2074,7 +2131,7 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	logFields["session_id"] = sshClient.sessionID
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["start_time"] = sshClient.activityConn.GetStartTime()
-	logFields["duration"] = sshClient.activityConn.GetActiveDuration() / time.Millisecond
+	logFields["duration"] = int64(sshClient.activityConn.GetActiveDuration() / time.Millisecond)
 	logFields["bytes_up_tcp"] = sshClient.tcpTrafficState.bytesUp
 	logFields["bytes_down_tcp"] = sshClient.tcpTrafficState.bytesDown
 	logFields["peak_concurrent_dialing_port_forward_count_tcp"] = sshClient.tcpTrafficState.peakConcurrentDialingPortForwardCount

@@ -63,10 +63,82 @@
 			"revisionTime": "2019-12-04T18:36:04Z"
 		},
 		{
-			"checksumSHA1": "DmQc8vfP44VMUTIZJGM4WslOyk0=",
+			"checksumSHA1": "U17xXbd9SGtoPeI5tDIkcJ8ybZs=",
+			"path": "github.com/Psiphon-Labs/quic-go",
+			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
+			"revisionTime": "2019-12-09T20:01:15Z"
+		},
+		{
+			"checksumSHA1": "VMJLFpeoJ56PTQxR0wEkkiQTr1s=",
+			"path": "github.com/Psiphon-Labs/quic-go/http3",
+			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
+			"revisionTime": "2019-12-09T20:01:15Z"
+		},
+		{
+			"checksumSHA1": "arNC0xzgLc4ZYyItIN7phkPKtek=",
+			"path": "github.com/Psiphon-Labs/quic-go/internal/ackhandler",
+			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
+			"revisionTime": "2019-12-09T20:01:15Z"
+		},
+		{
+			"checksumSHA1": "umHqolZ17yo8VoXycC9eRvlbkO8=",
+			"path": "github.com/Psiphon-Labs/quic-go/internal/congestion",
+			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
+			"revisionTime": "2019-12-09T20:01:15Z"
+		},
+		{
+			"checksumSHA1": "l2U3fJvz7V2qSonhmdu5jzjRiVA=",
+			"path": "github.com/Psiphon-Labs/quic-go/internal/flowcontrol",
+			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
+			"revisionTime": "2019-12-09T20:01:15Z"
+		},
+		{
+			"checksumSHA1": "+kFrUAIuBtByAQvoimG1qtAk7OA=",
+			"path": "github.com/Psiphon-Labs/quic-go/internal/handshake",
+			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
+			"revisionTime": "2019-12-09T20:01:15Z"
+		},
+		{
+			"checksumSHA1": "6yCbl48zYO+1YX3T36iPt+bwvsY=",
+			"path": "github.com/Psiphon-Labs/quic-go/internal/protocol",
+			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
+			"revisionTime": "2019-12-09T20:01:15Z"
+		},
+		{
+			"checksumSHA1": "RfG1431vMrJq9QLoTw82iqKM60I=",
+			"path": "github.com/Psiphon-Labs/quic-go/internal/qerr",
+			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
+			"revisionTime": "2019-12-09T20:01:15Z"
+		},
+		{
+			"checksumSHA1": "yE18mLWfFblPiprkNDVm/OZBksA=",
+			"path": "github.com/Psiphon-Labs/quic-go/internal/utils",
+			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
+			"revisionTime": "2019-12-09T20:01:15Z"
+		},
+		{
+			"checksumSHA1": "IHqcabVUhdoVAeaj7yxH1Khu3+o=",
+			"path": "github.com/Psiphon-Labs/quic-go/internal/wire",
+			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
+			"revisionTime": "2019-12-09T20:01:15Z"
+		},
+		{
+			"checksumSHA1": "GazFEGFAJrK5DThTfhgeVQSokeY=",
+			"path": "github.com/Psiphon-Labs/quic-go/quictrace",
+			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
+			"revisionTime": "2019-12-09T20:01:15Z"
+		},
+		{
+			"checksumSHA1": "UdV2crvbY4riGxH6tn0dNrT40b0=",
+			"path": "github.com/Psiphon-Labs/quic-go/quictrace/pb",
+			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
+			"revisionTime": "2019-12-09T20:01:15Z"
+		},
+		{
+			"checksumSHA1": "+lsQUKG+zIU9IxrQf5pJBSRE79Q=",
 			"path": "github.com/Psiphon-Labs/tls-tris",
-			"revision": "b5083341bf6cb581f3319c6dfbb39dd6ae3a97ea",
-			"revisionTime": "2019-03-21T17:45:24Z"
+			"revision": "78f52e6d62437fc594a15aafbd8c583d5eb48d46",
+			"revisionTime": "2019-12-06T19:09:01Z"
 		},
 		{
 			"checksumSHA1": "30PBqj9BW03KCVqASvLg3bR+xYc=",
@@ -109,6 +181,14 @@
 			"path": "github.com/cheekybits/genny/generic",
 			"revision": "9127e812e1e9e501ce899a18121d316ecb52e4ba",
 			"revisionTime": "2017-03-28T20:00:08Z"
+		},
+		{
+			"checksumSHA1": "pgbqIkCTjigfQbzZhq0NCqGvVGs=",
+			"path": "github.com/cognusion/go-cache-lru",
+			"revision": "f73e2280ecea6386641f79a5148517ee83d0d184",
+			"revisionTime": "2017-04-19T14:26:35Z",
+			"version": "feature-lru",
+			"versionExact": "feature-lru"
 		},
 		{
 			"checksumSHA1": "bFj0ceSRvaFFCfmS4el1PjWhcgw=",
@@ -259,6 +339,38 @@
 			"path": "github.com/kardianos/osext",
 			"revision": "ae77be60afb1dcacde03767a8c37337fad28ac14",
 			"revisionTime": "2017-05-10T13:15:34Z"
+		},
+		{
+			"checksumSHA1": "j4eMhpVKh7QbPBE/vZL+VxQwJT0=",
+			"path": "github.com/marten-seemann/chacha20",
+			"revision": "36564989294fee5f3957d3e3fbfc655e10786ec0",
+			"revisionTime": "2019-09-06T10:21:14Z",
+			"version": "v0.2.0",
+			"versionExact": "v0.2.0"
+		},
+		{
+			"checksumSHA1": "xJ/ZPgaoP3Gd5ETWGhqufsqptuw=",
+			"path": "github.com/marten-seemann/chacha20/internal/subtle",
+			"revision": "36564989294fee5f3957d3e3fbfc655e10786ec0",
+			"revisionTime": "2019-09-06T10:21:14Z",
+			"version": "v0.2.0",
+			"versionExact": "v0.2.0"
+		},
+		{
+			"checksumSHA1": "Urc++6mqm/jcr3SSL/MMN5v7Owk=",
+			"path": "github.com/marten-seemann/qpack",
+			"revision": "f8170edcec3367407e53d6cac6035f27ee18f88c",
+			"revisionTime": "2019-03-10T00:01:41Z",
+			"version": "v0.1.0",
+			"versionExact": "v0.1.0"
+		},
+		{
+			"checksumSHA1": "4V0MbPUnZeN+aaJyahMeZYQwrfg=",
+			"path": "github.com/marten-seemann/qtls",
+			"revision": "6f6c03202c2cd1f60588fc703c2d15d12721c44d",
+			"revisionTime": "2019-09-06T03:51:05Z",
+			"version": "v0.4.1",
+			"versionExact": "v0.4.1"
 		},
 		{
 			"checksumSHA1": "sY8sshVIEXnJgg3S6C5FcN33Vq4=",
@@ -560,6 +672,12 @@
 			"path": "golang.org/x/net/http/httpguts",
 			"revision": "8a410e7b638dca158bf9e766925842f6651ff828",
 			"revisionTime": "2018-08-25T16:15:26Z"
+		},
+		{
+			"checksumSHA1": "/hgsG8YqvtFvswVTkjno+ydy4kw=",
+			"path": "golang.org/x/net/http2/hpack",
+			"revision": "c0dbc17a35534bf2e581d7a942408dc936316da4",
+			"revisionTime": "2019-11-08T21:16:37Z"
 		},
 		{
 			"checksumSHA1": "1osdKBIU5mNqyQqiGmnutoTzdJA=",
