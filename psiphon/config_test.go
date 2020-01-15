@@ -222,9 +222,41 @@ func (suite *ConfigTestSuite) Test_LoadConfig_GoodJson() {
 	suite.Nil(err, "JSON with null for optional values should succeed")
 }
 
-// Test when migrating from old config fields results in filesystem changes.
 func (suite *ConfigTestSuite) Test_LoadConfig_Migrate() {
+	oslFiles := []FileTree{
+		{
+			Name: "osl-registry",
+		},
+		{
+			Name: "osl-registry.cached",
+		},
+		{
+			Name: "osl-1",
+		},
+		{
+			Name: "osl-1.part",
+		}}
 
+	nonOSLFile := FileTree{
+		Name: "should_not_be_deleted",
+		Children: []FileTree{
+			{
+				Name: "should_not_be_deleted",
+			},
+		},
+	}
+
+	// Test where OSL directory is not deleted after migration because
+	// it contains non-OSL files.
+	LoadConfigMigrateTest(append(oslFiles, nonOSLFile), &nonOSLFile, suite)
+
+	// Test where OSL directory is deleted after migration because it only
+	// contained OSL files.
+	LoadConfigMigrateTest(oslFiles, nil, suite)
+}
+
+// Test when migrating from old config fields results in filesystem changes.
+func LoadConfigMigrateTest(oslDirChildrenPreMigration []FileTree, oslDirChildrenPostMigration *FileTree, suite *ConfigTestSuite) {
 	// This test needs its own temporary directory because a previous test may
 	// have paved the file which signals that migration has already been
 	// completed.
@@ -292,21 +324,8 @@ func (suite *ConfigTestSuite) Test_LoadConfig_Migrate() {
 				Name: oldRemoteServerListname + ".part.etag",
 			},
 			{
-				Name: oldObfuscatedServerListDirectoryName,
-				Children: []FileTree{
-					{
-						Name: "osl-registry",
-					},
-					{
-						Name: "osl-registry.cached",
-					},
-					{
-						Name: "osl-1",
-					},
-					{
-						Name: "osl-1.part",
-					},
-				},
+				Name:     oldObfuscatedServerListDirectoryName,
+				Children: oslDirChildrenPreMigration,
 			},
 			{
 				Name: oldRotatingNoticesFilename,
@@ -483,10 +502,17 @@ func (suite *ConfigTestSuite) Test_LoadConfig_Migrate() {
 					},
 				},
 			},
-			{
-				Name: oldObfuscatedServerListDirectoryName,
-			},
 		},
+	}
+
+	// The OSL directory will have been deleted if it has no children after
+	// migration.
+	if oslDirChildrenPostMigration != nil {
+		oslDir := FileTree{
+			Name:     oldObfuscatedServerListDirectoryName,
+			Children: []FileTree{*oslDirChildrenPostMigration},
+		}
+		expectedNewTree.Children = append(expectedNewTree.Children, oslDir)
 	}
 
 	// Read the test directory into a file tree
