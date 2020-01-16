@@ -75,6 +75,8 @@ yes | cp -f PsiphonTunnel/libs/armeabi-v7a/libtun2socks.so build-tmp/psi/jni/arm
 yes | cp -f PsiphonTunnel/libs/arm64-v8a/libtun2socks.so build-tmp/psi/jni/arm64-v8a/libtun2socks.so
 yes | cp -f PsiphonTunnel/libs/x86/libtun2socks.so build-tmp/psi/jni/x86/libtun2socks.so
 yes | cp -f PsiphonTunnel/libs/x86_64/libtun2socks.so build-tmp/psi/jni/x86_64/libtun2socks.so
+mkdir -p build-tmp/psi/res/xml
+yes | cp -f PsiphonTunnel/ca_psiphon_psiphontunnel_backup_rules.xml build-tmp/psi/res/xml/ca_psiphon_psiphontunnel_backup_rules.xml
 
 javac -d build-tmp -bootclasspath $ANDROID_HOME/platforms/android-23/android.jar -source 1.8 -target 1.8 -classpath build-tmp/psi/classes.jar PsiphonTunnel/PsiphonTunnel.java
 if [ $? != 0 ]; then

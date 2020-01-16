@@ -34,7 +34,7 @@ import (
 //
 // While downloading/resuming, a temporary file is used. Once the download is complete,
 // a notice is issued and the upgrade is available at the destination specified in
-// config.UpgradeDownloadFilename.
+// config.GetUpgradeDownloadFilename().
 //
 // The upgrade download may be either tunneled or untunneled. As the untunneled case may
 // happen with no handshake request response, the downloader cannot rely on having the
@@ -43,14 +43,13 @@ import (
 // remote entity's UpgradeDownloadClientVersionHeader. A HEAD request is made to check the
 // version before proceeding with a full download.
 //
-// NOTE: This code does not check that any existing file at config.UpgradeDownloadFilename
+// NOTE: This code does not check that any existing file at config.GetUpgradeDownloadFilename()
 // is actually the version specified in handshakeVersion.
 //
-// TODO: This logic requires the outer client to *omit* config.UpgradeDownloadFilename
 // when there's already a downloaded upgrade pending. Because the outer client currently
 // handles the authenticated package phase, and because the outer client deletes the
-// intermediate files (including config.UpgradeDownloadFilename), if the outer client
-// does not omit config.UpgradeDownloadFilename then the new version will be downloaded
+// intermediate files (including config.GetUpgradeDownloadFilename()), if the outer client
+// does not omit config.GetUpgradeDownloadFilename() then the new version will be downloaded
 // repeatedly. Implement a new scheme where tunnel core does the authenticated package phase
 // and tracks the the output by version number so that (a) tunnel core knows when it's not
 // necessary to re-download; (b) newer upgrades will be downloaded even when an older
@@ -68,8 +67,8 @@ func DownloadUpgrade(
 
 	// Check if complete file already downloaded
 
-	if _, err := os.Stat(config.UpgradeDownloadFilename); err == nil {
-		NoticeClientUpgradeDownloaded(config.UpgradeDownloadFilename)
+	if _, err := os.Stat(config.GetUpgradeDownloadFilename()); err == nil {
+		NoticeClientUpgradeDownloaded(config.GetUpgradeDownloadFilename())
 		return nil
 	}
 
@@ -152,10 +151,10 @@ func DownloadUpgrade(
 	// Proceed with download
 
 	// An intermediate filename is used since the presence of
-	// config.UpgradeDownloadFilename indicates a completed download.
+	// config.GetUpgradeDownloadFilename() indicates a completed download.
 
 	downloadFilename := fmt.Sprintf(
-		"%s.%s", config.UpgradeDownloadFilename, availableClientVersion)
+		"%s.%s", config.GetUpgradeDownloadFilename(), availableClientVersion)
 
 	n, _, err := ResumeDownload(
 		ctx,
@@ -171,12 +170,12 @@ func DownloadUpgrade(
 		return errors.Trace(err)
 	}
 
-	err = os.Rename(downloadFilename, config.UpgradeDownloadFilename)
+	err = os.Rename(downloadFilename, config.GetUpgradeDownloadFilename())
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	NoticeClientUpgradeDownloaded(config.UpgradeDownloadFilename)
+	NoticeClientUpgradeDownloaded(config.GetUpgradeDownloadFilename())
 
 	return nil
 }

@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -99,9 +98,7 @@ func runMemoryTest(t *testing.T, testMode int) {
 	json.Unmarshal(configJSON, &modifyConfig)
 	modifyConfig["ClientVersion"] = "999999999"
 	modifyConfig["TunnelPoolSize"] = 1
-	modifyConfig["DataStoreDirectory"] = testDataDirName
-	modifyConfig["RemoteServerListDownloadFilename"] = filepath.Join(testDataDirName, "server_list_compressed")
-	modifyConfig["UpgradeDownloadFilename"] = filepath.Join(testDataDirName, "upgrade")
+	modifyConfig["DataRootDirectory"] = testDataDirName
 	modifyConfig["FetchRemoteServerListRetryPeriodMilliseconds"] = 250
 	modifyConfig["EstablishTunnelPausePeriodSeconds"] = 1
 	modifyConfig["ConnectionWorkerPoolSize"] = 10

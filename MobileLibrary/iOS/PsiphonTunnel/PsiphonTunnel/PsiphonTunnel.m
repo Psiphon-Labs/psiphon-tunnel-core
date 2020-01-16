@@ -26,6 +26,7 @@
 #import "LookupIPv6.h"
 #import "Psi-meta.h"
 #import "PsiphonTunnel.h"
+#import "Backups.h"
 #import "json-framework/SBJson4.h"
 #import "JailbreakCheck/JailbreakCheck.h"
 #import <ifaddrs.h>
@@ -34,6 +35,26 @@
 
 #define GOOGLE_DNS_1 @"8.8.4.4"
 #define GOOGLE_DNS_2 @"8.8.8.8"
+
+NSErrorDomain _Nonnull const PsiphonTunnelErrorDomain = @"com.psiphon3.ios.PsiphonTunnelErrorDomain";
+
+/// Error codes which can returned by PsiphonTunnel
+typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
+
+    /*!
+     * Unknown error.
+     */
+    PsiphonTunnelErrorCodeUnknown = -1,
+
+    /*!
+     * An error was encountered either obtaining the default library directory.
+     * @code
+     * // Underlying error will be set with more information
+     * [error.userInfo objectForKey:NSUnderlyingErrorKey]
+     * @endcode
+     */
+    PsiphonTunnelErrorCodeLibraryDirectoryError,
+};
 
 @interface PsiphonTunnel () <GoPsiPsiphonProvider>
 
@@ -70,7 +91,6 @@
     // Log timestamp formatter
     // Note: NSDateFormatter is threadsafe.
     NSDateFormatter *rfc3339Formatter;
-    
 }
 
 - (id)init {
@@ -115,6 +135,33 @@
 }
 
 #pragma mark - PsiphonTunnel public methods
+
+// See comment in header
++ (NSURL*)defaultDataRootDirectoryWithError:(NSError**)err {
+    *err = nil;
+
+    NSURL *libraryURL = [PsiphonTunnel libraryURLWithError:err];
+    if (*err != nil) {
+        return nil;
+    }
+    return [libraryURL URLByAppendingPathComponent:@"com.psiphon3.ios.PsiphonTunnel.tunnel-core"
+                                       isDirectory:YES];
+}
+
+// See comment in header
++ (NSURL*)homepageFilePath:(NSURL*)dataRootDirectory {
+    return [NSURL URLWithString:GoPsiHomepageFilePath(dataRootDirectory.path)];
+}
+
+// See comment in header
++ (NSURL*)noticesFilePath:(NSURL*)dataRootDirectory {
+    return [NSURL URLWithString:GoPsiNoticesFilePath(dataRootDirectory.path)];
+}
+
+// See comment in header
++ (NSURL*)olderNoticesFilePath:(NSURL*)dataRootDirectory {
+    return [NSURL URLWithString:GoPsiOldNoticesFilePath(dataRootDirectory.path)];
+}
 
 // See comment in header
 + (PsiphonTunnel * _Nonnull)newPsiphonTunnel:(id<TunneledAppDelegate> _Nonnull)tunneledAppDelegate {
@@ -195,13 +242,6 @@
 - (BOOL)start {
     @synchronized (PsiphonTunnel.self) {
 
-        // Initialize notice files for writing as early as possible, so all
-        // logMessages will be written, as NoticeUserLogs, to the rotating
-        // file when tunnel-core is managing diagnostics.
-        if ([self initNoticeFiles] == FALSE) {
-            return FALSE;
-        }
-
         [self stop];
 
         [self logMessage:@"Starting Psiphon library"];
@@ -275,48 +315,6 @@
         
         return TRUE;
     }
-}
-
-- (BOOL)initNoticeFiles {
-
-    __block NSString *homepageNoticesPath = @"";
-    if ([self.tunneledAppDelegate respondsToSelector:@selector(getHomepageNoticesPath)]) {
-        dispatch_sync(self->callbackQueue, ^{
-            homepageNoticesPath = [self.tunneledAppDelegate getHomepageNoticesPath];
-            if (homepageNoticesPath == nil) {
-                homepageNoticesPath = @"";
-            }
-        });
-    }
-
-    __block NSString *rotatingNoticesPath = @"";
-    if ([self.tunneledAppDelegate respondsToSelector:@selector(getRotatingNoticesPath)]) {
-        dispatch_sync(self->callbackQueue, ^{
-            rotatingNoticesPath = [self.tunneledAppDelegate getRotatingNoticesPath];
-            if (rotatingNoticesPath == nil) {
-                rotatingNoticesPath = @"";
-            }
-        });
-    }
-
-    if (rotatingNoticesPath.length > 0) {
-        atomic_store(&self->usingRotatingNotices, TRUE);
-    }
-
-    NSError *e = nil;
-    GoPsiSetNoticeFiles(
-        homepageNoticesPath,
-        rotatingNoticesPath,
-        0, // Use default rotating settings
-        0, // ...
-        &e);
-    if (e != nil) {
-        [self logMessage:[NSString stringWithFormat: @"Psiphon library initialize notices failed: %@", e.localizedDescription]];
-        [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
-        return FALSE;
-    }
-
-    return TRUE;
 }
 
 /*!
@@ -449,6 +447,28 @@
 
 #pragma mark - PsiphonTunnel logic implementation methods (private)
 
++ (NSURL*)libraryURLWithError:(NSError**)err {
+
+    *err = nil;
+
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+
+    NSError *urlForDirectoryError;
+    NSURL *libraryURL = [fileManager URLForDirectory:NSLibraryDirectory
+                                            inDomain:NSUserDomainMask
+                                   appropriateForURL:nil
+                                              create:NO
+                                               error:&urlForDirectoryError];
+
+    if (urlForDirectoryError != nil) {
+        *err = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                   code:PsiphonTunnelErrorCodeLibraryDirectoryError
+                               userInfo:@{NSUnderlyingErrorKey:urlForDirectoryError}];
+    }
+
+    return libraryURL;
+}
+
 /*!
  Build the config string for the tunnel.
  @returns String containing the JSON config. `nil` on error.
@@ -526,24 +546,72 @@
         config[@"EstablishTunnelTimeoutSeconds"] = [NSNumber numberWithInt:0];
     }
 
-    
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    NSError* err = nil;
-    NSURL *libraryURL = [fileManager URLForDirectory:NSLibraryDirectory inDomain:NSUserDomainMask appropriateForURL:nil create:YES error:&err];
-    
-    if (libraryURL == nil) {
-        [self logMessage:[NSString stringWithFormat: @"Unable to get Library URL: %@", err.localizedDescription]];
-        return nil;
+    //
+    // DataRootDirectory
+    //
+
+    NSError *err;
+
+    // Some clients will have a data directory that they'd prefer the Psiphon
+    // library use, but if not we'll default to the user Library directory.
+    //
+    // Note: this deprecates the "DataStoreDirectory" config field.
+    NSURL *defaultDataRootDirectoryURL = [PsiphonTunnel defaultDataRootDirectoryWithError:&err];
+    if (err != nil) {
+       [self logMessage:[NSString stringWithFormat:@"Unable to get defaultDataRootDirectoryURL: %@", err.localizedDescription]];
+       return nil;
     }
-    
+
+    if (config[@"DataRootDirectory"] == nil) {
+
+        NSFileManager *fileManager = [NSFileManager defaultManager];
+
+        [fileManager createDirectoryAtURL:defaultDataRootDirectoryURL
+              withIntermediateDirectories:YES
+                               attributes:nil
+                                    error:&err];
+        if (err != nil) {
+           [self logMessage:[NSString stringWithFormat: @"Unable to create defaultRootDirectoryURL '%@': %@", defaultDataRootDirectoryURL, err.localizedDescription]];
+           return nil;
+        }
+
+        config[@"DataRootDirectory"] = defaultDataRootDirectoryURL.path;
+    }
+    else {
+        [self logMessage:[NSString stringWithFormat:@"DataRootDirectory overridden from '%@' to '%@'", defaultDataRootDirectoryURL.path, config[@"DataRootDirectory"]]];
+    }
+
+    // Ensure that the configured data root directory is not backed up to iCloud or iTunes.
+    NSURL *dataRootDirectory = [NSURL fileURLWithPath:config[@"DataRootDirectory"]];
+
+    BOOL succeeded = [Backups excludeFileFromBackup:dataRootDirectory.path err:&err];
+    if (!succeeded) {
+        NSString *msg = [NSString stringWithFormat:@"Failed to exclude data root directory from backup: %@", err.localizedDescription];
+        [self logMessage:msg];
+    } else {
+        [self logMessage:@"Excluded data root directory from backup"];
+    }
+
     //
     // DataStoreDirectory
     //
-    
+
+    NSURL *libraryURL = [PsiphonTunnel libraryURLWithError:&err];
+    if (err != nil) {
+        [self logMessage:[NSString stringWithFormat: @"Unable to get Library URL: %@", err.localizedDescription]];
+        return nil;
+    }
+
     // Some clients will have a data directory that they'd prefer the Psiphon
     // library use, but if not we'll default to the user Library directory.
-    NSURL *defaultDataStoreDirectoryURL = [libraryURL URLByAppendingPathComponent:@"datastore" isDirectory:YES];
+    //
+    // Deprecated:
+    // Tunnel core now stores its files under a single data root directory, which can be configured.
+    // Setting the datastore directory allows tunnel core to migrate datastore files from the old
+    // directory structure to the new one; this can be done with either the deprecated config field
+    // "DataStoreDirectory" or the more explict new field "MigrateDataStoreDirectory".
+    NSURL *defaultDataStoreDirectoryURL = [libraryURL URLByAppendingPathComponent:@"datastore"
+                                                                      isDirectory:YES];
     
     if (defaultDataStoreDirectoryURL == nil) {
         [self logMessage:@"Unable to create defaultDataStoreDirectoryURL"];
@@ -551,22 +619,22 @@
     }
     
     if (config[@"DataStoreDirectory"] == nil) {
-        [fileManager createDirectoryAtURL:defaultDataStoreDirectoryURL withIntermediateDirectories:YES attributes:nil error:&err];
-        if (err != nil) {
-            [self logMessage:[NSString stringWithFormat: @"Unable to create defaultDataStoreDirectoryURL: %@", err.localizedDescription]];
-            return nil;
-        }
-        
-        config[@"DataStoreDirectory"] = [defaultDataStoreDirectoryURL path];
+        config[@"MigrateDataStoreDirectory"] = defaultDataStoreDirectoryURL.path;
     }
     else {
         [self logMessage:[NSString stringWithFormat: @"DataStoreDirectory overridden from '%@' to '%@'", [defaultDataStoreDirectoryURL path], config[@"DataStoreDirectory"]]];
     }
-    
+
     //
     // Remote Server List
     //
-    
+
+    // Deprecated:
+    // Tunnel core now stores its files under a single data root directory, which can be configured.
+    // Setting the remote server list download filename allows tunnel core to migrate remote server
+    // list download files to the new directory structure under the data root directory; this can be
+    // done with either the deprecated config field "RemoteServerListDownloadFilename" or the more
+    // explict new field "MigrateRemoteServerListDownloadFilename".
     NSString *defaultRemoteServerListFilename = [[libraryURL URLByAppendingPathComponent:@"remote_server_list" isDirectory:NO] path];
     if (defaultRemoteServerListFilename == nil) {
         [self logMessage:@"Unable to create defaultRemoteServerListFilename"];
@@ -574,7 +642,7 @@
     }
     
     if (config[@"RemoteServerListDownloadFilename"] == nil) {
-        config[@"RemoteServerListDownloadFilename"] = defaultRemoteServerListFilename;
+        config[@"MigrateRemoteServerListDownloadFilename"] = defaultRemoteServerListFilename;
     }
     else {
         [self logMessage:[NSString stringWithFormat: @"RemoteServerListDownloadFilename overridden from '%@' to '%@'", defaultRemoteServerListFilename, config[@"RemoteServerListDownloadFilename"]]];
@@ -590,21 +658,20 @@
     //
     // Obfuscated Server List
     //
-    
+
+    // Deprecated:
+    // Tunnel core now stores its files under a single data root directory, which can be configured.
+    // Setting the obfuscated server list download directory allows tunnel core to migrate
+    // obfuscated server list files from the old directory structure to the new one; this can be
+    // done with either the deprecated config field "ObfuscatedServerListDownloadDirectory" or the
+    // more explict new field "MigrateObfuscatedServerListDownloadDirectory".
     NSURL *defaultOSLDirectoryURL = [libraryURL URLByAppendingPathComponent:@"osl" isDirectory:YES];
     if (defaultOSLDirectoryURL == nil) {
         [self logMessage:@"Unable to create defaultOSLDirectory"];
         return nil;
     }
-    
     if (config[@"ObfuscatedServerListDownloadDirectory"] == nil) {
-        [fileManager createDirectoryAtURL:defaultOSLDirectoryURL withIntermediateDirectories:YES attributes:nil error:&err];
-        if (err != nil) {
-            [self logMessage:[NSString stringWithFormat: @"Unable to create defaultOSLDirectoryURL: %@", err.localizedDescription]];
-            return nil;
-        }
-        
-        config[@"ObfuscatedServerListDownloadDirectory"] = [defaultOSLDirectoryURL path];
+        config[@"MigrateObfuscatedServerListDownloadDirectory"] = defaultOSLDirectoryURL.path;
     }
     else {
         [self logMessage:[NSString stringWithFormat: @"ObfuscatedServerListDownloadDirectory overridden from '%@' to '%@'", [defaultOSLDirectoryURL path], config[@"ObfuscatedServerListDownloadDirectory"]]];
@@ -1189,7 +1256,6 @@
         dispatch_semaphore_signal(self->noticeHandlingSemaphore);
     });
 }
-
 
 #pragma mark - Helpers (private)
 
