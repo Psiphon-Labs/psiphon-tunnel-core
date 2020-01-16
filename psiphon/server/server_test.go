@@ -833,7 +833,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("error processing configuration file: %s", err)
 	}
 
-	clientConfig.DataStoreDirectory = testDataDirName
+	clientConfig.DataRootDirectory = testDataDirName
 
 	if !runConfig.doDefaultSponsorID {
 		clientConfig.SponsorId = sponsorID
@@ -914,7 +914,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	psiphon.DeleteSLOKs()
 
 	// Store prune server entry test server entries and failed tunnel records.
-	storePruneServerEntriesTest(t, runConfig, pruneServerEntryTestCases)
+	storePruneServerEntriesTest(
+		t, runConfig, testDataDirName, pruneServerEntryTestCases)
 
 	controller, err := psiphon.NewController(clientConfig)
 	if err != nil {
@@ -1139,7 +1140,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 
 	// Check that datastore had retained/pruned server entries as expected.
-	checkPruneServerEntriesTest(t, runConfig, pruneServerEntryTestCases)
+	checkPruneServerEntriesTest(t, runConfig, testDataDirName, pruneServerEntryTestCases)
 }
 
 func checkExpectedLogFields(runConfig *runServerConfig, fields map[string]interface{}) error {
@@ -1995,6 +1996,7 @@ func initializePruneServerEntriesTest(
 func storePruneServerEntriesTest(
 	t *testing.T,
 	runConfig *runServerConfig,
+	testDataDirName string,
 	pruneServerEntryTestCases []*pruneServerEntryTestCase) {
 
 	if !runConfig.doPruneServerEntries {
@@ -2009,7 +2011,14 @@ func storePruneServerEntriesTest(
 		}
 	}
 
-	clientConfig := &psiphon.Config{SponsorId: "0", PropagationChannelId: "0"}
+	clientConfig := &psiphon.Config{
+		SponsorId:            "0",
+		PropagationChannelId: "0",
+
+		// DataRootDirectory must to be set to avoid a migration in the current
+		// working directory.
+		DataRootDirectory: testDataDirName,
+	}
 	err := clientConfig.Commit()
 	if err != nil {
 		t.Fatalf("Commit failed: %s", err)
@@ -2072,13 +2081,21 @@ func storePruneServerEntriesTest(
 func checkPruneServerEntriesTest(
 	t *testing.T,
 	runConfig *runServerConfig,
+	testDataDirName string,
 	pruneServerEntryTestCases []*pruneServerEntryTestCase) {
 
 	if !runConfig.doPruneServerEntries {
 		return
 	}
 
-	clientConfig := &psiphon.Config{SponsorId: "0", PropagationChannelId: "0"}
+	clientConfig := &psiphon.Config{
+		SponsorId:            "0",
+		PropagationChannelId: "0",
+
+		// DataRootDirectory must to be set to avoid a migration in the current
+		// working directory.
+		DataRootDirectory: testDataDirName,
+	}
 	err := clientConfig.Commit()
 	if err != nil {
 		t.Fatalf("Commit failed: %s", err)
