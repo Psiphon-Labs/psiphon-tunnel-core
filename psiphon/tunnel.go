@@ -168,12 +168,13 @@ func ConnectTunnel(
 func (tunnel *Tunnel) Activate(
 	ctx context.Context, tunnelOwner TunnelOwner) (retErr error) {
 
-	// Ensure that, unless the context is cancelled, any replayed dial
+	// Ensure that, unless the base context is cancelled, any replayed dial
 	// parameters are cleared, no longer to be retried, if the tunnel fails to
 	// activate.
 	activationSucceeded := false
+	baseCtx := ctx
 	defer func() {
-		if !activationSucceeded && ctx.Err() == nil {
+		if !activationSucceeded && baseCtx.Err() == nil {
 			tunnel.dialParams.Failed(tunnel.config)
 			_ = RecordFailedTunnelStat(tunnel.config, tunnel.dialParams, retErr)
 		}
