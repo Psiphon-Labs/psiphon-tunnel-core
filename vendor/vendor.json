@@ -63,76 +63,76 @@
 			"revisionTime": "2019-12-04T18:36:04Z"
 		},
 		{
-			"checksumSHA1": "U17xXbd9SGtoPeI5tDIkcJ8ybZs=",
+			"checksumSHA1": "8MdwAjQlha5clFXwY1ayF4vNGAQ=",
 			"path": "github.com/Psiphon-Labs/quic-go",
-			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
-			"revisionTime": "2019-12-09T20:01:15Z"
+			"revision": "abf539ac596a6017b6eb8904f7342da8daab8df1",
+			"revisionTime": "2020-01-16T02:28:06Z"
 		},
 		{
 			"checksumSHA1": "VMJLFpeoJ56PTQxR0wEkkiQTr1s=",
 			"path": "github.com/Psiphon-Labs/quic-go/http3",
-			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
-			"revisionTime": "2019-12-09T20:01:15Z"
+			"revision": "abf539ac596a6017b6eb8904f7342da8daab8df1",
+			"revisionTime": "2020-01-16T02:28:06Z"
 		},
 		{
 			"checksumSHA1": "arNC0xzgLc4ZYyItIN7phkPKtek=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/ackhandler",
-			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
-			"revisionTime": "2019-12-09T20:01:15Z"
+			"revision": "abf539ac596a6017b6eb8904f7342da8daab8df1",
+			"revisionTime": "2020-01-16T02:28:06Z"
 		},
 		{
 			"checksumSHA1": "umHqolZ17yo8VoXycC9eRvlbkO8=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/congestion",
-			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
-			"revisionTime": "2019-12-09T20:01:15Z"
+			"revision": "abf539ac596a6017b6eb8904f7342da8daab8df1",
+			"revisionTime": "2020-01-16T02:28:06Z"
 		},
 		{
 			"checksumSHA1": "l2U3fJvz7V2qSonhmdu5jzjRiVA=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/flowcontrol",
-			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
-			"revisionTime": "2019-12-09T20:01:15Z"
+			"revision": "abf539ac596a6017b6eb8904f7342da8daab8df1",
+			"revisionTime": "2020-01-16T02:28:06Z"
 		},
 		{
 			"checksumSHA1": "+kFrUAIuBtByAQvoimG1qtAk7OA=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/handshake",
-			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
-			"revisionTime": "2019-12-09T20:01:15Z"
+			"revision": "abf539ac596a6017b6eb8904f7342da8daab8df1",
+			"revisionTime": "2020-01-16T02:28:06Z"
 		},
 		{
 			"checksumSHA1": "6yCbl48zYO+1YX3T36iPt+bwvsY=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/protocol",
-			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
-			"revisionTime": "2019-12-09T20:01:15Z"
+			"revision": "abf539ac596a6017b6eb8904f7342da8daab8df1",
+			"revisionTime": "2020-01-16T02:28:06Z"
 		},
 		{
 			"checksumSHA1": "RfG1431vMrJq9QLoTw82iqKM60I=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/qerr",
-			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
-			"revisionTime": "2019-12-09T20:01:15Z"
+			"revision": "abf539ac596a6017b6eb8904f7342da8daab8df1",
+			"revisionTime": "2020-01-16T02:28:06Z"
 		},
 		{
 			"checksumSHA1": "yE18mLWfFblPiprkNDVm/OZBksA=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/utils",
-			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
-			"revisionTime": "2019-12-09T20:01:15Z"
+			"revision": "abf539ac596a6017b6eb8904f7342da8daab8df1",
+			"revisionTime": "2020-01-16T02:28:06Z"
 		},
 		{
 			"checksumSHA1": "IHqcabVUhdoVAeaj7yxH1Khu3+o=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/wire",
-			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
-			"revisionTime": "2019-12-09T20:01:15Z"
+			"revision": "abf539ac596a6017b6eb8904f7342da8daab8df1",
+			"revisionTime": "2020-01-16T02:28:06Z"
 		},
 		{
 			"checksumSHA1": "GazFEGFAJrK5DThTfhgeVQSokeY=",
 			"path": "github.com/Psiphon-Labs/quic-go/quictrace",
-			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
-			"revisionTime": "2019-12-09T20:01:15Z"
+			"revision": "abf539ac596a6017b6eb8904f7342da8daab8df1",
+			"revisionTime": "2020-01-16T02:28:06Z"
 		},
 		{
 			"checksumSHA1": "UdV2crvbY4riGxH6tn0dNrT40b0=",
 			"path": "github.com/Psiphon-Labs/quic-go/quictrace/pb",
-			"revision": "bde3cbc937f9bb5eb7fb34ec82a5a530b39a43ca",
-			"revisionTime": "2019-12-09T20:01:15Z"
+			"revision": "abf539ac596a6017b6eb8904f7342da8daab8df1",
+			"revisionTime": "2020-01-16T02:28:06Z"
 		},
 		{
 			"checksumSHA1": "+lsQUKG+zIU9IxrQf5pJBSRE79Q=",
