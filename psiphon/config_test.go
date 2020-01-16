@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -120,7 +121,13 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 	var testObjJSON []byte
 
 	// JSON with none of our fields
-	config, err := LoadConfig([]byte(`{"f1": 11, "f2": "two"}`))
+	//
+	// DataRootDirectory must to be set to avoid a migration in the current
+	// working directory.
+	config, err := LoadConfig([]byte(
+		fmt.Sprintf(
+			`{"f1": 11, "f2": "two", "DataRootDirectory" : %s}`,
+			suite.testDirectory)))
 	if err == nil {
 		err = config.Commit()
 	}

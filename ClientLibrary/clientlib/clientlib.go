@@ -94,14 +94,14 @@ type NoticeEvent struct {
 	Timestamp string                 `json:"timestamp"`
 }
 
-// ErrTimeout is returned when the tunnel connection attempt fails due to timeout
-var ErrTimeout = std_errors.New("clientlib: tunnel connection timeout")
+// ErrTimeout is returned when the tunnel establishment attempt fails due to timeout
+var ErrTimeout = std_errors.New("clientlib: tunnel establishment timeout")
 
-// StartTunnel makes a Psiphon tunnel connection. It returns an error if the connection
+// StartTunnel establishes a Psiphon tunnel. It returns an error if the establishment
 // was not successful. If the returned error is nil, the returned tunnel can be used
 // to find out the proxy ports and subsequently stop the tunnel.
 //
-// ctx may be cancelable, if the caller wants to be able to interrupt the connection
+// ctx may be cancelable, if the caller wants to be able to interrupt the establishment
 // attempt, or context.Background().
 //
 // configJSON will be passed to psiphon.LoadConfig to configure the tunnel. Required.
