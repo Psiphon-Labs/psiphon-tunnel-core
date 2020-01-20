@@ -108,6 +108,13 @@ func TestGetDefaultParameters(t *testing.T) {
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("KeyValues returned %+v expected %+v", g, v)
 			}
+		case *BPFProgramSpec:
+			ok, name, rawInstructions := p.Get().BPFProgram(name)
+			if v != nil || ok || name != "" || rawInstructions != nil {
+				t.Fatalf(
+					"BPFProgramSpec returned %+v %+v %+v expected %+v",
+					ok, name, rawInstructions, v)
+			}
 		default:
 			t.Fatalf("Unhandled default type: %s", name)
 		}

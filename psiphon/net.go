@@ -38,6 +38,7 @@ import (
 	"github.com/Psiphon-Labs/dns"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
+	"golang.org/x/net/bpf"
 )
 
 const DNS_PORT = 53
@@ -66,6 +67,10 @@ type DialConfig struct {
 	// added to all plaintext HTTP requests and requests made through an HTTP
 	// upstream proxy when specified by UpstreamProxyURL.
 	CustomHeaders http.Header
+
+	// BPFProgramInstructions specifies a BPF program to attach to the dial
+	// socket before connecting.
+	BPFProgramInstructions []bpf.RawInstruction
 
 	// BindToDevice parameters are used to exclude connections and
 	// associated DNS requests from VPN routing.

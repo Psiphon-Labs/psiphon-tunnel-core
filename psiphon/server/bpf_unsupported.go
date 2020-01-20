@@ -1,5 +1,7 @@
+// +build !linux
+
 /*
- * Copyright (c) 2018, Psiphon Inc.
+ * Copyright (c) 2020, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -17,17 +19,17 @@
  *
  */
 
-package psiphon
+package server
 
 import (
-	"syscall"
+	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
-func setAdditionalSocketOptions(socketFd syscall.Handle) {
-}
+func newTCPListenerWithBPF(
+	_ *SupportServices, localAddress string) (net.Listener, string, error) {
 
-func bindToDeviceCallWrapper(deviceBinder DeviceBinder, socketFD syscall.Handle) error {
-	return errors.TraceNew("DeviceBinder with syscall.Handle not supported")
+	listener, err := net.Listen("tcp", localAddress)
+	return listener, "", errors.Trace(err)
 }

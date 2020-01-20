@@ -87,6 +87,14 @@ type TunnelServer struct {
 	sshServer         *sshServer
 }
 
+type sshListener struct {
+	net.Listener
+	localAddress   string
+	tunnelProtocol string
+	port           int
+	BPFProgramName string
+}
+
 // NewTunnelServer initializes a new tunnel server.
 func NewTunnelServer(
 	support *SupportServices,
@@ -127,12 +135,6 @@ func NewTunnelServer(
 // comment in sshClient.stop(). TODO: fully synchronized shutdown.
 func (server *TunnelServer) Run() error {
 
-	type sshListener struct {
-		net.Listener
-		localAddress   string
-		tunnelProtocol string
-	}
-
 	// TODO: should TunnelServer hold its own support pointer?
 	support := server.sshServer.support
 
@@ -147,6 +149,7 @@ func (server *TunnelServer) Run() error {
 			"%s:%d", support.Config.ServerIPAddress, listenPort)
 
 		var listener net.Listener
+		var BPFProgramName string
 		var err error
 
 		if protocol.TunnelProtocolUsesFrontedMeekQUIC(tunnelProtocol) {
@@ -169,13 +172,13 @@ func (server *TunnelServer) Run() error {
 				support.Config.ServerIPAddress,
 				support.Config.MarionetteFormat)
 
-		} else if protocol.TunnelProtocolUsesTapdance(tunnelProtocol) {
-
-			listener, err = tapdance.Listen(localAddress)
-
 		} else {
 
-			listener, err = net.Listen("tcp", localAddress)
+			listener, BPFProgramName, err = newTCPListenerWithBPF(support, localAddress)
+
+			if protocol.TunnelProtocolUsesTapdance(tunnelProtocol) {
+				listener, err = tapdance.Listen(listener)
+			}
 		}
 
 		if err != nil {
@@ -197,6 +200,7 @@ func (server *TunnelServer) Run() error {
 			LogFields{
 				"localAddress":   localAddress,
 				"tunnelProtocol": tunnelProtocol,
+				"BPFProgramName": BPFProgramName,
 			}).Info("listening")
 
 		listeners = append(
@@ -204,7 +208,9 @@ func (server *TunnelServer) Run() error {
 			&sshListener{
 				Listener:       tacticsListener,
 				localAddress:   localAddress,
+				port:           listenPort,
 				tunnelProtocol: tunnelProtocol,
+				BPFProgramName: BPFProgramName,
 			})
 	}
 
@@ -220,9 +226,8 @@ func (server *TunnelServer) Run() error {
 				}).Info("running")
 
 			server.sshServer.runListener(
-				listener.Listener,
-				server.listenerError,
-				listener.tunnelProtocol)
+				listener,
+				server.listenerError)
 
 			log.WithTraceFields(
 				LogFields{
@@ -328,9 +333,17 @@ func (server *TunnelServer) SetEstablishTunnels(establish bool) {
 	server.sshServer.setEstablishTunnels(establish)
 }
 
-// GetEstablishTunnels returns whether new tunnels may be established or not.
-func (server *TunnelServer) GetEstablishTunnels() bool {
-	return server.sshServer.getEstablishTunnels()
+// CheckEstablishTunnels returns whether new tunnels may be established or
+// not, and increments a metrics counter when establishment is disallowed.
+func (server *TunnelServer) CheckEstablishTunnels() bool {
+	return server.sshServer.checkEstablishTunnels()
+}
+
+// GetEstablishTunnelsMetrics returns whether tunnel establishment is
+// currently allowed and the number of tunnels rejected since due to not
+// establishing since the last GetEstablishTunnelsMetrics call.
+func (server *TunnelServer) GetEstablishTunnelsMetrics() (bool, int64) {
+	return server.sshServer.getEstablishTunnelsMetrics()
 }
 
 type sshServer struct {
@@ -339,6 +352,7 @@ type sshServer struct {
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	lastAuthLog                  int64
 	authFailedCount              int64
+	establishLimitedCount        int64
 	support                      *SupportServices
 	establishTunnels             int32
 	concurrentSSHHandshakes      semaphore.Semaphore
@@ -407,7 +421,7 @@ func (sshServer *sshServer) setEstablishTunnels(establish bool) {
 	// Do nothing when the setting is already correct. This avoids
 	// spurious log messages when setEstablishTunnels is called
 	// periodically with the same setting.
-	if establish == sshServer.getEstablishTunnels() {
+	if establish == (atomic.LoadInt32(&sshServer.establishTunnels) == 1) {
 		return
 	}
 
@@ -421,19 +435,23 @@ func (sshServer *sshServer) setEstablishTunnels(establish bool) {
 		LogFields{"establish": establish}).Info("establishing tunnels")
 }
 
-func (sshServer *sshServer) getEstablishTunnels() bool {
-	return atomic.LoadInt32(&sshServer.establishTunnels) == 1
+func (sshServer *sshServer) checkEstablishTunnels() bool {
+	establishTunnels := atomic.LoadInt32(&sshServer.establishTunnels) == 1
+	if !establishTunnels {
+		atomic.AddInt64(&sshServer.establishLimitedCount, 1)
+	}
+	return establishTunnels
+}
+
+func (sshServer *sshServer) getEstablishTunnelsMetrics() (bool, int64) {
+	return atomic.LoadInt32(&sshServer.establishTunnels) == 1,
+		atomic.SwapInt64(&sshServer.establishLimitedCount, 0)
 }
 
 // runListener is intended to run an a goroutine; it blocks
 // running a particular listener. If an unrecoverable error
 // occurs, it will send the error to the listenerError channel.
-func (sshServer *sshServer) runListener(
-	listener net.Listener,
-	listenerError chan<- error,
-	listenerTunnelProtocol string) {
-
-	listenerPort := common.PortFromAddr(listener.Addr())
+func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError chan<- error) {
 
 	runningProtocols := make([]string, 0)
 	for tunnelProtocol := range sshServer.support.Config.TunnelProtocolPorts {
@@ -446,7 +464,7 @@ func (sshServer *sshServer) runListener(
 		// listeners in all cases (e.g., meek) since SSH tunnels can
 		// span multiple TCP connections.
 
-		if !sshServer.getEstablishTunnels() {
+		if !sshServer.checkEstablishTunnels() {
 			log.WithTrace().Debug("not establishing tunnels")
 			clientConn.Close()
 			return
@@ -458,7 +476,7 @@ func (sshServer *sshServer) runListener(
 		// don't use any client-declared value. Only use the client's
 		// value, if present, in special cases where the listening port
 		// cannot distinguish the protocol.
-		tunnelProtocol := listenerTunnelProtocol
+		tunnelProtocol := sshListener.tunnelProtocol
 		if clientTunnelProtocol != "" {
 
 			if !common.Contains(runningProtocols, clientTunnelProtocol) {
@@ -476,11 +494,11 @@ func (sshServer *sshServer) runListener(
 			}
 		}
 
-		// listenerTunnelProtocol indictes the tunnel protocol run by the listener.
-		// For direct protocols, this is also the client tunnel protocol. For
-		// fronted protocols, the client may use a different protocol to connect to
-		// the front and then only the front-to-Psiphon server will use the listener
-		// protocol.
+		// sshListener.tunnelProtocol indictes the tunnel protocol run by the
+		// listener. For direct protocols, this is also the client tunnel protocol.
+		// For fronted protocols, the client may use a different protocol to connect
+		// to the front and then only the front-to-Psiphon server will use the
+		// listener protocol.
 		//
 		// A fronted meek client, for example, reports its first hop protocol in
 		// protocol.MeekCookieData.ClientTunnelProtocol. Most metrics record this
@@ -494,8 +512,7 @@ func (sshServer *sshServer) runListener(
 		// client may dial a different port for its first hop.
 
 		// Process each client connection concurrently.
-		go sshServer.handleClient(
-			listenerTunnelProtocol, listenerPort, tunnelProtocol, clientConn)
+		go sshServer.handleClient(sshListener, tunnelProtocol, clientConn)
 	}
 
 	// Note: when exiting due to a unrecoverable error, be sure
@@ -503,17 +520,17 @@ func (sshServer *sshServer) runListener(
 	// TunnelServer.Run will properly shut down instead of remaining
 	// running.
 
-	if protocol.TunnelProtocolUsesMeekHTTP(listenerTunnelProtocol) ||
-		protocol.TunnelProtocolUsesMeekHTTPS(listenerTunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTP(sshListener.tunnelProtocol) ||
+		protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol) {
 
 		meekServer, err := NewMeekServer(
 			sshServer.support,
-			listener,
-			listenerTunnelProtocol,
-			listenerPort,
-			protocol.TunnelProtocolUsesMeekHTTPS(listenerTunnelProtocol),
-			protocol.TunnelProtocolUsesFrontedMeek(listenerTunnelProtocol),
-			protocol.TunnelProtocolUsesObfuscatedSessionTickets(listenerTunnelProtocol),
+			sshListener.Listener,
+			sshListener.tunnelProtocol,
+			sshListener.port,
+			protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol),
+			protocol.TunnelProtocolUsesFrontedMeek(sshListener.tunnelProtocol),
+			protocol.TunnelProtocolUsesObfuscatedSessionTickets(sshListener.tunnelProtocol),
 			handleClient,
 			sshServer.shutdownBroadcast)
 
@@ -532,7 +549,7 @@ func (sshServer *sshServer) runListener(
 	} else {
 
 		for {
-			conn, err := listener.Accept()
+			conn, err := sshListener.Listener.Accept()
 
 			select {
 			case <-sshServer.shutdownBroadcast:
@@ -955,8 +972,7 @@ func (sshServer *sshServer) stopClients() {
 }
 
 func (sshServer *sshServer) handleClient(
-	listenerTunnelProtocol string, listenerPort int,
-	tunnelProtocol string, clientConn net.Conn) {
+	sshListener *sshListener, tunnelProtocol string, clientConn net.Conn) {
 
 	// Calling clientConn.RemoteAddr at this point, before any Read calls,
 	// satisfies the constraint documented in tapdance.Listen.
@@ -1013,7 +1029,10 @@ func (sshServer *sshServer) handleClient(
 	}
 
 	sshClient := newSshClient(
-		sshServer, listenerTunnelProtocol, listenerPort, tunnelProtocol, geoIPData)
+		sshServer,
+		sshListener,
+		tunnelProtocol,
+		geoIPData)
 
 	// sshClient.run _must_ call onSSHHandshakeFinished to release the semaphore:
 	// in any error case; or, as soon as the SSH handshake phase has successfully
@@ -1052,8 +1071,7 @@ func (sshServer *sshServer) monitorPortForwardDialError(err error) {
 type sshClient struct {
 	sync.Mutex
 	sshServer                            *sshServer
-	listenerTunnelProtocol               string
-	listenerPort                         int
+	sshListener                          *sshListener
 	tunnelProtocol                       string
 	sshConn                              ssh.Conn
 	activityConn                         *common.ActivityMonitoredConn
@@ -1125,8 +1143,7 @@ type handshakeState struct {
 
 func newSshClient(
 	sshServer *sshServer,
-	listenerTunnelProtocol string,
-	listenerPort int,
+	sshListener *sshListener,
 	tunnelProtocol string,
 	geoIPData GeoIPData) *sshClient {
 
@@ -1138,8 +1155,7 @@ func newSshClient(
 
 	client := &sshClient{
 		sshServer:              sshServer,
-		listenerTunnelProtocol: listenerTunnelProtocol,
-		listenerPort:           listenerPort,
+		sshListener:            sshListener,
 		tunnelProtocol:         tunnelProtocol,
 		geoIPData:              geoIPData,
 		isFirstTunnelInSession: true,
@@ -1270,8 +1286,8 @@ func (sshClient *sshClient) run(
 				func(clientIP string, logFields common.LogFields) {
 					logIrregularTunnel(
 						sshClient.sshServer.support,
-						sshClient.listenerTunnelProtocol,
-						sshClient.listenerPort,
+						sshClient.sshListener.tunnelProtocol,
+						sshClient.sshListener.port,
 						clientIP,
 						LogFields(logFields))
 				})
@@ -2128,6 +2144,7 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	// unconditionally, overwriting any value from handshake.
 	logFields["relay_protocol"] = sshClient.tunnelProtocol
 
+	logFields["server_bpf"] = sshClient.sshListener.BPFProgramName
 	logFields["session_id"] = sshClient.sessionID
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["start_time"] = sshClient.activityConn.GetStartTime()

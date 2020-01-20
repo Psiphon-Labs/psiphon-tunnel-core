@@ -335,7 +335,9 @@ func logServerLoad(server *TunnelServer) {
 
 	serverLoad["event_name"] = "server_load"
 
-	serverLoad["establish_tunnels"] = server.GetEstablishTunnels()
+	establishTunnels, establishLimitedCount := server.GetEstablishTunnelsMetrics()
+	serverLoad["establish_tunnels"] = establishTunnels
+	serverLoad["establish_tunnels_limited_count"] = establishLimitedCount
 
 	for protocol, stats := range protocolStats {
 		serverLoad[protocol] = stats

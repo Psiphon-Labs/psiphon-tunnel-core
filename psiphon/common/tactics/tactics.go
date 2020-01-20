@@ -618,7 +618,7 @@ func (server *Server) GetTacticsPayload(
 	// includeServerSideOnly is false: server-side only parameters are not
 	// used by the client, so including them wastes space and unnecessarily
 	// exposes the values.
-	tactics, err := server.getTactics(false, geoIPData, apiParams)
+	tactics, err := server.GetTactics(false, geoIPData, apiParams)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -668,7 +668,11 @@ func (server *Server) GetTacticsPayload(
 	return payload, nil
 }
 
-func (server *Server) getTactics(
+// GetTactics assembles and returns tactics data for a client with the
+// specified GeoIP, API parameter, and speed test attributes.
+//
+// The tactics return value may be nil.
+func (server *Server) GetTactics(
 	includeServerSideOnly bool,
 	geoIPData common.GeoIPData,
 	apiParams common.APIParameters) (*Tactics, error) {
@@ -1111,7 +1115,7 @@ func (listener *Listener) Accept() (net.Conn, error) {
 
 	geoIPData := listener.geoIPLookup(common.IPAddressFromAddr(conn.RemoteAddr()))
 
-	tactics, err := listener.server.getTactics(true, geoIPData, make(common.APIParameters))
+	tactics, err := listener.server.GetTactics(true, geoIPData, make(common.APIParameters))
 	if err != nil {
 		listener.server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to get tactics for connection")

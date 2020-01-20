@@ -745,6 +745,7 @@ var baseRequestParams = []requestParamSpec{
 	{"meek_limit_request", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
+	{"client_bpf", isAnyString, requestParamOptional},
 }
 
 func validateRequestParams(

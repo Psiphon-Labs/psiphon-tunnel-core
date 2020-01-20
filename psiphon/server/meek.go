@@ -585,7 +585,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 		return "", nil, "", "", errors.Trace(err)
 	}
 
-	// Handle endpoints before enforcing the GetEstablishTunnels check.
+	// Handle endpoints before enforcing CheckEstablishTunnels.
 	// Currently, endpoints are tactics requests, and we allow these to be
 	// handled by servers which would otherwise reject new tunnels.
 
@@ -597,7 +597,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// will not succeed, so creating a meek session just wastes resources.
 
 	if server.support.TunnelServer != nil &&
-		!server.support.TunnelServer.GetEstablishTunnels() {
+		!server.support.TunnelServer.CheckEstablishTunnels() {
 		return "", nil, "", "", errors.TraceNew("not establishing tunnels")
 	}
 
