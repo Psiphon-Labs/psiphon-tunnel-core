@@ -235,9 +235,7 @@ func (tunnel *Tunnel) Activate(
 		}
 
 		if result.err != nil {
-			return errors.Tracef(
-				"error starting server context for %s: %s",
-				tunnel.dialParams.ServerEntry.GetDiagnosticID(), result.err)
+			return errors.Trace(result.err)
 		}
 
 		serverContext = result.serverContext
