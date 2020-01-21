@@ -23,8 +23,12 @@ import (
 	"context"
 	"net"
 	"sync"
+	"sync/atomic"
+	"time"
 
+	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
 // PacketTunnelTransport is an integration layer that presents an io.ReadWriteCloser interface
@@ -32,6 +36,11 @@ import (
 // disconnect from and reconnect to the same or different Psiphon servers. PacketTunnelTransport
 // allows the Psiphon client to substitute new transport channels on-the-fly.
 type PacketTunnelTransport struct {
+	// Note: 64-bit ints used with atomic operations are placed
+	// at the start of struct to ensure 64-bit alignment.
+	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
+	readTimeout   int64
+	readDeadline  int64
 	runCtx        context.Context
 	stopRunning   context.CancelFunc
 	workers       *sync.WaitGroup
@@ -81,6 +90,12 @@ func (p *PacketTunnelTransport) Read(data []byte) (int, error) {
 		// channel.
 
 		p.failedChannel(channelConn, channelTunnel)
+
+	} else {
+
+		// Clear the read deadline now that a read has succeeded.
+		// See read deadline comment in Write.
+		atomic.StoreInt64(&p.readDeadline, 0)
 	}
 
 	return n, errors.Trace(err)
@@ -107,6 +122,61 @@ func (p *PacketTunnelTransport) Write(data []byte) (int, error) {
 		// is the case for ssh.Channel writes.
 
 		p.failedChannel(channelConn, channelTunnel)
+
+	} else {
+
+		// Set a read deadline: a successful read should occur within the deadline;
+		// otherwise an SSH keep alive probe is triggered to check the tunnel
+		// status.
+		//
+		// This scheme mirrors the tunnel dial port forward timeout mechanism
+		// present in port forward mode: for any port forwarded connection attempt,
+		// if there's a timeout before receiving a response from the server, an SSH
+		// keep alive probe is triggered to check the tunnel state. Unlike port
+		// forward mode, packet tunnel doesn't track tunneled connections (flows).
+		//
+		// Here, we deploy a heuristic based on the observation that, for most
+		// traffic, a packet sent from the client -- a PacketTunnelTransport.Write
+		// -- is followed by a packet received from the server -- a
+		// PacketTunnelTransport.Read. For example, a UDP DNS request followed by a
+		// response; or a TCP handshake sequence. The heuristic is to trigger an SSH
+		// keep alive probe when there is no Read within the timeout period after a
+		// Write. Any Read is sufficient to satisfy the deadline.
+		//
+		// To limit performance impact, we do not use, and continuously reset, a
+		// time.Timer; instead we record the deadline upon successful Write and
+		// check any set deadline during subsequent Writes. For the same reason, we
+		// do we use a time.Ticker to check the deadline. This means that this
+		// scheme depends on the host continuing to attempt to send packets in order
+		// to trigger the SSH keep alive.
+		//
+		// Access to readDeadline/readTimeout is not intended to be completely
+		// atomic.
+
+		readDeadline := monotime.Time(atomic.LoadInt64(&p.readDeadline))
+
+		if readDeadline > 0 {
+
+			if monotime.Now().After(readDeadline) {
+
+				select {
+				case channelTunnel.signalPortForwardFailure <- struct{}{}:
+				default:
+				}
+
+				// Clear the deadline now that a probe is triggered.
+				atomic.StoreInt64(&p.readDeadline, 0)
+			}
+
+			// Keep an existing deadline as set: subsequent writes attempts shouldn't
+			// extend the deadline.
+
+		} else {
+
+			readTimeout := time.Duration(atomic.LoadInt64(&p.readTimeout))
+			readDeadline := monotime.Now().Add(readTimeout)
+			atomic.StoreInt64(&p.readDeadline, int64(readDeadline))
+		}
 	}
 
 	return n, errors.Trace(err)
@@ -187,6 +257,15 @@ func (p *PacketTunnelTransport) setChannel(
 	p.channelTunnel = channelTunnel
 
 	p.channelMutex.Unlock()
+
+	// Initialize the read deadline mechanism using parameters associated with the
+	// new tunnel.
+	timeout := channelTunnel.config.
+		GetClientParameters().
+		GetCustom(channelTunnel.dialParams.NetworkLatencyMultiplier).
+		Duration(parameters.PacketTunnelReadTimeout)
+	atomic.StoreInt64(&p.readTimeout, int64(timeout))
+	atomic.StoreInt64(&p.readDeadline, 0)
 
 	p.channelReady.Broadcast()
 }
