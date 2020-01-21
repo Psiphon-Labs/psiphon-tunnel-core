@@ -65,7 +65,7 @@ type Listener struct {
 // RemoteAddr. RemoteAddr _must_ be called non-concurrently before calling Read
 // on accepted conns as the HAProxy proxy protocol header reading logic sets
 // SetReadDeadline and performs a Read.
-func Listen(address string) (*Listener, error) {
+func Listen(address string) (net.Listener, error) {
 
 	tcpListener, err := net.Listen("tcp", address)
 	if err != nil {

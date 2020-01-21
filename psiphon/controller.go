@@ -1084,7 +1084,11 @@ func (p *protocolSelectionConstraints) isInitialCandidate(
 	serverEntry *protocol.ServerEntry) bool {
 
 	return p.hasInitialProtocols() &&
-		len(serverEntry.GetSupportedProtocols(p.useUpstreamProxy, p.initialLimitProtocols, excludeIntensive)) > 0
+		len(serverEntry.GetSupportedProtocols(
+			conditionallyEnabledComponents{},
+			p.useUpstreamProxy,
+			p.initialLimitProtocols,
+			excludeIntensive)) > 0
 }
 
 func (p *protocolSelectionConstraints) isCandidate(
@@ -1092,7 +1096,11 @@ func (p *protocolSelectionConstraints) isCandidate(
 	serverEntry *protocol.ServerEntry) bool {
 
 	return len(p.limitProtocols) == 0 ||
-		len(serverEntry.GetSupportedProtocols(p.useUpstreamProxy, p.limitProtocols, excludeIntensive)) > 0
+		len(serverEntry.GetSupportedProtocols(
+			conditionallyEnabledComponents{},
+			p.useUpstreamProxy,
+			p.limitProtocols,
+			excludeIntensive)) > 0
 }
 
 func (p *protocolSelectionConstraints) canReplay(
@@ -1122,6 +1130,7 @@ func (p *protocolSelectionConstraints) supportedProtocols(
 	}
 
 	return serverEntry.GetSupportedProtocols(
+		conditionallyEnabledComponents{},
 		p.useUpstreamProxy,
 		limitProtocols,
 		excludeIntensive)

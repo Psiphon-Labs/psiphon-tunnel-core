@@ -40,6 +40,7 @@ import (
 	socks "github.com/Psiphon-Labs/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/elazarl/goproxy"
 )
 
@@ -419,6 +420,9 @@ func TestFrontedMeekFragmentor(t *testing.T) {
 }
 
 func TestQUIC(t *testing.T) {
+	if !quic.Enabled() {
+		t.Skip("QUIC is not enabled")
+	}
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
@@ -436,6 +440,9 @@ func TestQUIC(t *testing.T) {
 }
 
 func TestFrontedQUIC(t *testing.T) {
+	if !quic.Enabled() {
+		t.Skip("QUIC is not enabled")
+	}
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
