@@ -431,7 +431,7 @@ func (conn *signalConn) Read(p []byte) (n int, err error) {
 	if err != nil {
 		_ = conn.Conn.Close()
 		select {
-		case conn.ioErrorSignal <- *new(struct{}):
+		case conn.ioErrorSignal <- struct{}{}:
 		default:
 		}
 	}
@@ -443,7 +443,7 @@ func (conn *signalConn) Write(p []byte) (n int, err error) {
 	if err != nil {
 		_ = conn.Conn.Close()
 		select {
-		case conn.ioErrorSignal <- *new(struct{}):
+		case conn.ioErrorSignal <- struct{}{}:
 		default:
 		}
 	}

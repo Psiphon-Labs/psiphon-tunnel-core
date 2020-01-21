@@ -630,7 +630,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 						t.Fatalf("tunnel established unexpectedly")
 					} else {
 						select {
-						case tunnelEstablished <- *new(struct{}):
+						case tunnelEstablished <- struct{}{}:
 						default:
 						}
 					}
@@ -644,14 +644,14 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 			case "ClientUpgradeDownloaded":
 
 				select {
-				case upgradeDownloaded <- *new(struct{}):
+				case upgradeDownloaded <- struct{}{}:
 				default:
 				}
 
 			case "ClientIsLatestVersion":
 
 				select {
-				case confirmedLatestVersion <- *new(struct{}):
+				case confirmedLatestVersion <- struct{}{}:
 				default:
 				}
 
@@ -669,7 +669,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 				if url == config.RemoteServerListUrl {
 					t.Logf("RemoteServerListResourceDownloaded")
 					select {
-					case remoteServerListDownloaded <- *new(struct{}):
+					case remoteServerListDownloaded <- struct{}{}:
 					default:
 					}
 				}
@@ -699,7 +699,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		shutdownOk := make(chan struct{}, 1)
 		go func() {
 			controllerWaitGroup.Wait()
-			shutdownOk <- *new(struct{})
+			shutdownOk <- struct{}{}
 		}()
 
 		select {

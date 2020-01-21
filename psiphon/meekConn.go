@@ -989,7 +989,7 @@ func (r *readCloseSignaller) Read(p []byte) (int, error) {
 
 func (r *readCloseSignaller) Close() error {
 	select {
-	case r.closed <- *new(struct{}):
+	case r.closed <- struct{}{}:
 	default:
 	}
 	return nil

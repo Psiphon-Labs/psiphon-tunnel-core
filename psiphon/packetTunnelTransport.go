@@ -227,7 +227,7 @@ func (p *PacketTunnelTransport) failedChannel(
 	// yet in the failed state, trigger a probe.
 
 	select {
-	case channelTunnel.signalPortForwardFailure <- *new(struct{}):
+	case channelTunnel.signalPortForwardFailure <- struct{}{}:
 	default:
 	}
 

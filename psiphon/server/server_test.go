@@ -739,7 +739,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		shutdownOk := make(chan struct{}, 1)
 		go func() {
 			serverWaitGroup.Wait()
-			shutdownOk <- *new(struct{})
+			shutdownOk <- struct{}{}
 		}()
 
 		select {
@@ -991,7 +991,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		shutdownOk := make(chan struct{}, 1)
 		go func() {
 			controllerWaitGroup.Wait()
-			shutdownOk <- *new(struct{})
+			shutdownOk <- struct{}{}
 		}()
 
 		select {
@@ -1880,7 +1880,7 @@ func paveBlocklistFile(t *testing.T, blocklistFilename string) {
 
 func sendNotificationReceived(c chan<- struct{}) {
 	select {
-	case c <- *new(struct{}):
+	case c <- struct{}{}:
 	default:
 	}
 }
