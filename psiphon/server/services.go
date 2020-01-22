@@ -245,7 +245,7 @@ loop:
 			// available in case logServerLoad hangs (which has happened
 			// in the past due to a deadlock bug).
 			select {
-			case signalProcessProfiles <- *new(struct{}):
+			case signalProcessProfiles <- struct{}{}:
 			default:
 			}
 			logServerLoad(tunnelServer)

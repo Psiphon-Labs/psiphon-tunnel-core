@@ -45,6 +45,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	"golang.org/x/net/proxy"
@@ -270,6 +271,9 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 }
 
 func TestQUICOSSH(t *testing.T) {
+	if !quic.Enabled() {
+		t.Skip("QUIC is not enabled")
+	}
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "QUIC-OSSH",
@@ -739,7 +743,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		shutdownOk := make(chan struct{}, 1)
 		go func() {
 			serverWaitGroup.Wait()
-			shutdownOk <- *new(struct{})
+			shutdownOk <- struct{}{}
 		}()
 
 		select {
@@ -991,7 +995,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		shutdownOk := make(chan struct{}, 1)
 		go func() {
 			controllerWaitGroup.Wait()
-			shutdownOk <- *new(struct{})
+			shutdownOk <- struct{}{}
 		}()
 
 		select {
@@ -1880,7 +1884,7 @@ func paveBlocklistFile(t *testing.T, blocklistFilename string) {
 
 func sendNotificationReceived(c chan<- struct{}) {
 	select {
-	case c <- *new(struct{}):
+	case c <- struct{}{}:
 	default:
 	}
 }
