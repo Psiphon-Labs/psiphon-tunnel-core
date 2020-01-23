@@ -1,3 +1,5 @@
+// +build !DISABLE_QUIC
+
 /*
  * Copyright (c) 2018, Psiphon Inc.
  * All rights reserved.

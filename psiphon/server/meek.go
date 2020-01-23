@@ -728,7 +728,7 @@ func (server *MeekServer) rateLimit(clientIP string) bool {
 
 	if triggerGC {
 		select {
-		case server.rateLimitSignalGC <- *new(struct{}):
+		case server.rateLimitSignalGC <- struct{}{}:
 		default:
 		}
 	}

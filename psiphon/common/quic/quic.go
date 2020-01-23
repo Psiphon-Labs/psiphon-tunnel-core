@@ -1,3 +1,5 @@
+// +build !DISABLE_QUIC
+
 /*
  * Copyright (c) 2018, Psiphon Inc.
  * All rights reserved.
@@ -69,6 +71,11 @@ const (
 	CLIENT_IDLE_TIMEOUT      = 30 * time.Second
 )
 
+// Enabled indicates if QUIC functionality is enabled.
+func Enabled() bool {
+	return true
+}
+
 const ietfQUICDraft24VersionNumber = 0xff000018
 
 var supportedVersionNumbers = map[string]uint32{
@@ -103,7 +110,7 @@ type Listener struct {
 func Listen(
 	logger common.Logger,
 	address string,
-	obfuscationKey string) (*Listener, error) {
+	obfuscationKey string) (net.Listener, error) {
 
 	certificate, privateKey, err := common.GenerateWebServerCertificate(
 		values.GetHostName())

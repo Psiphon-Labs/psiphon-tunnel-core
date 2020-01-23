@@ -445,9 +445,18 @@ func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 	return common.Contains(serverEntry.Capabilities, requiredCapability)
 }
 
+// ConditionallyEnabledComponents defines an interface which can be queried to
+// determine which conditionally compiled protocol components are present.
+type ConditionallyEnabledComponents interface {
+	QUICEnabled() bool
+	MarionetteEnabled() bool
+	TapdanceEnabled() bool
+}
+
 // GetSupportedProtocols returns a list of tunnel protocols supported
 // by the ServerEntry's capabilities.
 func (serverEntry *ServerEntry) GetSupportedProtocols(
+	conditionallyEnabled ConditionallyEnabledComponents,
 	useUpstreamProxy bool,
 	limitTunnelProtocols []string,
 	excludeIntensive bool) []string {
@@ -473,6 +482,12 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 		}
 
 		if excludeIntensive && TunnelProtocolIsResourceIntensive(protocol) {
+			continue
+		}
+
+		if (TunnelProtocolUsesQUIC(protocol) && !conditionallyEnabled.QUICEnabled()) ||
+			(TunnelProtocolUsesMarionette(protocol) && !conditionallyEnabled.MarionetteEnabled()) ||
+			(TunnelProtocolUsesTapdance(protocol) && !conditionallyEnabled.TapdanceEnabled()) {
 			continue
 		}
 

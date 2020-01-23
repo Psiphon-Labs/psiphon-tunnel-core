@@ -39,16 +39,23 @@ type NetDialer interface {
 	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }
 
-// Closer defines the interface to a type, typically
-// a net.Conn, that can be closed.
+// Closer defines the interface to a type, typically a net.Conn, that can be
+// closed.
 type Closer interface {
 	IsClosed() bool
 }
 
-// CloseWriter defines the interface to a type, typically
-// a net.TCPConn, that implements CloseWrite.
+// CloseWriter defines the interface to a type, typically a net.TCPConn, that
+// implements CloseWrite.
 type CloseWriter interface {
 	CloseWrite() error
+}
+
+// IrregularIndicator defines the interface for a type, typically a net.Conn,
+// that detects and reports irregular conditions during initial network
+// connection establishment.
+type IrregularIndicator interface {
+	IrregularTunnelError() error
 }
 
 // TerminateHTTPConnection sends a 404 response to a client and also closes

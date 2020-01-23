@@ -40,6 +40,7 @@ import (
 	socks "github.com/Psiphon-Labs/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/elazarl/goproxy"
 )
 
@@ -419,6 +420,9 @@ func TestFrontedMeekFragmentor(t *testing.T) {
 }
 
 func TestQUIC(t *testing.T) {
+	if !quic.Enabled() {
+		t.Skip("QUIC is not enabled")
+	}
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
@@ -436,6 +440,9 @@ func TestQUIC(t *testing.T) {
 }
 
 func TestFrontedQUIC(t *testing.T) {
+	if !quic.Enabled() {
+		t.Skip("QUIC is not enabled")
+	}
 	controllerRun(t,
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
@@ -630,7 +637,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 						t.Fatalf("tunnel established unexpectedly")
 					} else {
 						select {
-						case tunnelEstablished <- *new(struct{}):
+						case tunnelEstablished <- struct{}{}:
 						default:
 						}
 					}
@@ -644,14 +651,14 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 			case "ClientUpgradeDownloaded":
 
 				select {
-				case upgradeDownloaded <- *new(struct{}):
+				case upgradeDownloaded <- struct{}{}:
 				default:
 				}
 
 			case "ClientIsLatestVersion":
 
 				select {
-				case confirmedLatestVersion <- *new(struct{}):
+				case confirmedLatestVersion <- struct{}{}:
 				default:
 				}
 
@@ -669,7 +676,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 				if url == config.RemoteServerListUrl {
 					t.Logf("RemoteServerListResourceDownloaded")
 					select {
-					case remoteServerListDownloaded <- *new(struct{}):
+					case remoteServerListDownloaded <- struct{}{}:
 					default:
 					}
 				}
@@ -699,7 +706,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		shutdownOk := make(chan struct{}, 1)
 		go func() {
 			controllerWaitGroup.Wait()
-			shutdownOk <- *new(struct{})
+			shutdownOk <- struct{}{}
 		}()
 
 		select {
