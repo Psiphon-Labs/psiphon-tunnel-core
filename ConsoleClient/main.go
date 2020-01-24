@@ -209,7 +209,7 @@ func main() {
 
 	// All config fields should be set before calling Commit.
 
-	err = config.Commit()
+	err = config.Commit(true)
 	if err != nil {
 		psiphon.SetEmitDiagnosticNotices(true, false)
 		psiphon.NoticeError("error loading configuration file: %s", err)

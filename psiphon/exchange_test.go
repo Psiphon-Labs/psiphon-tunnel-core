@@ -82,7 +82,7 @@ func TestServerEntryExchange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %s", err)
 	}
-	err = config.Commit()
+	err = config.Commit(false)
 	if err != nil {
 		t.Fatalf("Commit failed: %s", err)
 	}

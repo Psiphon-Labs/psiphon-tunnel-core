@@ -115,7 +115,7 @@ func runMemoryTest(t *testing.T, testMode int) {
 	if err != nil {
 		t.Fatalf("error processing configuration file: %s", err)
 	}
-	err = config.Commit()
+	err = config.Commit(false)
 	if err != nil {
 		t.Fatalf("error committing configuration file: %s", err)
 	}

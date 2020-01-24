@@ -765,7 +765,10 @@ func (config *Config) IsCommitted() bool {
 // Config fields should not be set after calling Config, as any changes may
 // not be reflected in internal data structures.
 //
-// File migrations:
+// If migrateFromLegacyFields is set to true, then an attempt to migrate from
+// legacy fields is made.
+//
+// Migration from legacy fields:
 // Config fields of the naming Migrate* (e.g. MigrateDataStoreDirectory) specify
 // a file migration operation which should be performed. These fields correspond
 // to deprecated fields, which previously could be used to specify where Psiphon
@@ -793,7 +796,7 @@ func (config *Config) IsCommitted() bool {
 // fails. It is better to not endlessly retry file migrations on each Commit()
 // because file system errors are expected to be rare and persistent files will
 // be re-populated over time.
-func (config *Config) Commit() error {
+func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 	// Do SetEmitDiagnosticNotices first, to ensure config file errors are
 	// emitted.
@@ -842,26 +845,28 @@ func (config *Config) Commit() error {
 	homepageFilePath := config.GetHomePageFilename()
 	noticesFilePath := config.GetNoticesFilename()
 
-	if needMigration {
+	if migrateFromLegacyFields {
+		if needMigration {
 
-		// Move notice files that exist at legacy file paths under the data root
-		// directory.
+			// Move notice files that exist at legacy file paths under the data root
+			// directory.
 
-		noticeMigrationInfoMsgs = append(noticeMigrationInfoMsgs, "Config migration: need migration")
-		noticeMigrations := migrationsFromLegacyNoticeFilePaths(config)
+			noticeMigrationInfoMsgs = append(noticeMigrationInfoMsgs, "Config migration: need migration")
+			noticeMigrations := migrationsFromLegacyNoticeFilePaths(config)
 
-		for _, migration := range noticeMigrations {
-			err := common.DoFileMigration(migration)
-			if err != nil {
-				alertMsg := fmt.Sprintf("Config migration: %s", errors.Trace(err))
-				noticeMigrationAlertMsgs = append(noticeMigrationAlertMsgs, alertMsg)
-			} else {
-				infoMsg := fmt.Sprintf("Config migration: moved %s to %s", migration.OldPath, migration.NewPath)
-				noticeMigrationInfoMsgs = append(noticeMigrationInfoMsgs, infoMsg)
+			for _, migration := range noticeMigrations {
+				err := common.DoFileMigration(migration)
+				if err != nil {
+					alertMsg := fmt.Sprintf("Config migration: %s", errors.Trace(err))
+					noticeMigrationAlertMsgs = append(noticeMigrationAlertMsgs, alertMsg)
+				} else {
+					infoMsg := fmt.Sprintf("Config migration: moved %s to %s", migration.OldPath, migration.NewPath)
+					noticeMigrationInfoMsgs = append(noticeMigrationInfoMsgs, infoMsg)
+				}
 			}
+		} else {
+			noticeMigrationInfoMsgs = append(noticeMigrationInfoMsgs, "Config migration: migration already completed")
 		}
-	} else {
-		noticeMigrationInfoMsgs = append(noticeMigrationInfoMsgs, "Config migration: migration already completed")
 	}
 
 	if config.UseNoticeFiles != nil {
@@ -1093,19 +1098,18 @@ func (config *Config) Commit() error {
 
 	// Migrate from old config fields. This results in files being moved under
 	// a config specified data root directory.
+	if migrateFromLegacyFields && needMigration {
 
-	// If unset, set MigrateDataStoreDirectory to the previous default value for
-	// DataStoreDirectory to ensure that datastore files are migrated.
-	if config.MigrateDataStoreDirectory == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return errors.Trace(err)
+		// If unset, set MigrateDataStoreDirectory to the previous default value for
+		// DataStoreDirectory to ensure that datastore files are migrated.
+		if config.MigrateDataStoreDirectory == "" {
+			wd, err := os.Getwd()
+			if err != nil {
+				return errors.Trace(err)
+			}
+			NoticeInfo("MigrateDataStoreDirectory unset, using working directory %s", wd)
+			config.MigrateDataStoreDirectory = wd
 		}
-		NoticeInfo("MigrateDataStoreDirectory unset, using working directory %s", wd)
-		config.MigrateDataStoreDirectory = wd
-	}
-
-	if needMigration {
 
 		// Move files that exist at legacy file paths under the data root
 		// directory.
