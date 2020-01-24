@@ -993,10 +993,11 @@ func (sshServer *sshServer) handleClient(
 				})
 			}
 			io.Copy(ioutil.Discard, clientConn)
+			clientConn.Close()
 			afterFunc.Stop()
-		}
 
-		return
+			return
+		}
 	}
 
 	geoIPData := sshServer.support.GeoIPService.Lookup(
