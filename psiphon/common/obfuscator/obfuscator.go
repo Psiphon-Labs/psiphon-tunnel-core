@@ -304,7 +304,7 @@ func readSeedMessage(
 		errStr := "duplicate obfuscation seed"
 		if duplicateLogFields != nil {
 			if config.IrregularLogger != nil {
-				setIrregularTunnelErrorLogField(
+				common.SetIrregularTunnelErrorLogField(
 					*duplicateLogFields, errors.BackTraceNew(errBackTrace, errStr))
 				config.IrregularLogger(clientIP, *duplicateLogFields)
 			}
@@ -357,7 +357,7 @@ func readSeedMessage(
 	if errStr != "" {
 		if config.IrregularLogger != nil {
 			errLogFields := make(common.LogFields)
-			setIrregularTunnelErrorLogField(
+			common.SetIrregularTunnelErrorLogField(
 				errLogFields, errors.BackTraceNew(errBackTrace, errStr))
 			config.IrregularLogger(clientIP, errLogFields)
 		}
@@ -392,10 +392,4 @@ func readSeedMessage(
 	}
 
 	return clientToServerCipher, serverToClientCipher, paddingPRNGSeed, nil
-}
-
-func setIrregularTunnelErrorLogField(
-	logFields common.LogFields, tunnelError error) {
-
-	logFields["tunnel_error"] = tunnelError
 }

@@ -204,7 +204,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 		DataRootDirectory:    testDataDirName,
 		PropagationChannelId: "0",
 		SponsorId:            "0"}
-	err = config.Commit()
+	err = config.Commit(false)
 	if err != nil {
 		t.Fatalf("Error initializing config: %s", err)
 	}
@@ -403,7 +403,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	if err != nil {
 		t.Fatalf("error processing configuration file: %s", err)
 	}
-	err = clientConfig.Commit()
+	err = clientConfig.Commit(false)
 	if err != nil {
 		t.Fatalf("error committing configuration file: %s", err)
 	}
@@ -430,7 +430,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 				printNotice = true
 				count := int(payload["count"].(float64))
 				if count == 1 {
-					tunnelEstablished <- *new(struct{})
+					tunnelEstablished <- struct{}{}
 				}
 			case "RemoteServerListResourceDownloadedBytes":
 				// TODO: check for resumed download for each URL

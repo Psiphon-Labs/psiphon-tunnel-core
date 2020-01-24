@@ -66,7 +66,7 @@ func TestBoltResiliency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %s", err)
 	}
-	err = clientConfig.Commit()
+	err = clientConfig.Commit(false)
 	if err != nil {
 		t.Fatalf("Commit failed: %s", err)
 	}
@@ -95,12 +95,12 @@ func TestBoltResiliency(t *testing.T) {
 					t.Fatalf("unexpected server entry count: %d", count)
 				}
 				select {
-				case noticeCandidateServers <- *new(struct{}):
+				case noticeCandidateServers <- struct{}{}:
 				default:
 				}
 			case "Exiting":
 				select {
-				case noticeExiting <- *new(struct{}):
+				case noticeExiting <- struct{}{}:
 				default:
 				}
 			case "Alert":
@@ -113,7 +113,7 @@ func TestBoltResiliency(t *testing.T) {
 				}
 				if channel != nil {
 					select {
-					case channel <- *new(struct{}):
+					case channel <- struct{}{}:
 					default:
 					}
 				}
@@ -127,7 +127,7 @@ func TestBoltResiliency(t *testing.T) {
 	drainNoticeChannel := func(channel chan struct{}) {
 		for {
 			select {
-			case channel <- *new(struct{}):
+			case channel <- struct{}{}:
 			default:
 				return
 			}

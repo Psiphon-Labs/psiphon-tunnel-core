@@ -107,7 +107,7 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 	if err != nil {
 		return errors.Trace(err)
 	}
-	err = config.Commit()
+	err = config.Commit(true)
 	if err != nil {
 		return errors.Trace(err)
 	}

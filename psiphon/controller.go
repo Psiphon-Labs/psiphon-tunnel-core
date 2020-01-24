@@ -328,7 +328,7 @@ func (controller *Controller) ImportExchangePayload(payload string) bool {
 	}
 
 	select {
-	case controller.signalRestartEstablishing <- *new(struct{}):
+	case controller.signalRestartEstablishing <- struct{}{}:
 	default:
 	}
 
@@ -509,7 +509,7 @@ func (controller *Controller) startOrSignalConnectedReporter() {
 		go controller.connectedReporter()
 	} else {
 		select {
-		case controller.signalReportConnected <- *new(struct{}):
+		case controller.signalReportConnected <- struct{}{}:
 		default:
 		}
 	}
@@ -820,7 +820,7 @@ loop:
 // fetch, as the new SLOK may be sufficient to access new OSLs.
 func (controller *Controller) SignalSeededNewSLOK() {
 	select {
-	case controller.signalFetchObfuscatedServerLists <- *new(struct{}):
+	case controller.signalFetchObfuscatedServerLists <- struct{}{}:
 	default:
 	}
 }
@@ -1046,7 +1046,7 @@ func (controller *Controller) triggerFetches() {
 	// TODO: synchronize the fetch response, so it can be incorporated
 	// into the server entry iterator as soon as available.
 	select {
-	case controller.signalFetchCommonRemoteServerList <- *new(struct{}):
+	case controller.signalFetchCommonRemoteServerList <- struct{}{}:
 	default:
 	}
 
@@ -1054,7 +1054,7 @@ func (controller *Controller) triggerFetches() {
 	// so that if one out of the common RLS and OSL set is large, it doesn't
 	// doesn't entirely block fetching the other.
 	select {
-	case controller.signalFetchObfuscatedServerLists <- *new(struct{}):
+	case controller.signalFetchObfuscatedServerLists <- struct{}{}:
 	default:
 	}
 
@@ -1084,7 +1084,11 @@ func (p *protocolSelectionConstraints) isInitialCandidate(
 	serverEntry *protocol.ServerEntry) bool {
 
 	return p.hasInitialProtocols() &&
-		len(serverEntry.GetSupportedProtocols(p.useUpstreamProxy, p.initialLimitProtocols, excludeIntensive)) > 0
+		len(serverEntry.GetSupportedProtocols(
+			conditionallyEnabledComponents{},
+			p.useUpstreamProxy,
+			p.initialLimitProtocols,
+			excludeIntensive)) > 0
 }
 
 func (p *protocolSelectionConstraints) isCandidate(
@@ -1092,7 +1096,11 @@ func (p *protocolSelectionConstraints) isCandidate(
 	serverEntry *protocol.ServerEntry) bool {
 
 	return len(p.limitProtocols) == 0 ||
-		len(serverEntry.GetSupportedProtocols(p.useUpstreamProxy, p.limitProtocols, excludeIntensive)) > 0
+		len(serverEntry.GetSupportedProtocols(
+			conditionallyEnabledComponents{},
+			p.useUpstreamProxy,
+			p.limitProtocols,
+			excludeIntensive)) > 0
 }
 
 func (p *protocolSelectionConstraints) canReplay(
@@ -1122,6 +1130,7 @@ func (p *protocolSelectionConstraints) supportedProtocols(
 	}
 
 	return serverEntry.GetSupportedProtocols(
+		conditionallyEnabledComponents{},
 		p.useUpstreamProxy,
 		limitProtocols,
 		excludeIntensive)

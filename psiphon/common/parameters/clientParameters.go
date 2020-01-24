@@ -123,6 +123,7 @@ const (
 	ObfuscatedSSHMaxPadding                          = "ObfuscatedSSHMaxPadding"
 	TunnelOperateShutdownTimeout                     = "TunnelOperateShutdownTimeout"
 	TunnelPortForwardDialTimeout                     = "TunnelPortForwardDialTimeout"
+	PacketTunnelReadTimeout                          = "PacketTunnelReadTimeout"
 	TunnelRateLimits                                 = "TunnelRateLimits"
 	AdditionalCustomHeaders                          = "AdditionalCustomHeaders"
 	SpeedTestPaddingMinBytes                         = "SpeedTestPaddingMinBytes"
@@ -279,6 +280,7 @@ var defaultClientParameters = map[string]struct {
 	IgnoreHandshakeStatsRegexps:              {value: false},
 	TunnelOperateShutdownTimeout:             {value: 1 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	TunnelPortForwardDialTimeout:             {value: 10 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
+	PacketTunnelReadTimeout:                  {value: 10 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	TunnelRateLimits:                         {value: common.RateLimits{}},
 
 	// PrioritizeTunnelProtocols parameters are obsoleted by InitialLimitTunnelProtocols.

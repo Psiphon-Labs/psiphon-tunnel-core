@@ -487,7 +487,10 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 			// At the ServerEntryIterator level, only limitTunnelProtocols is applied;
 			// excludeIntensive is handled higher up.
 			if len(serverEntry.GetSupportedProtocols(
-				config.UseUpstreamProxy(), limitTunnelProtocols, false)) == 0 {
+				conditionallyEnabledComponents{},
+				config.UseUpstreamProxy(),
+				limitTunnelProtocols,
+				false)) == 0 {
 				return false, nil, errors.TraceNew("TargetServerEntry does not support LimitTunnelProtocols")
 			}
 		}

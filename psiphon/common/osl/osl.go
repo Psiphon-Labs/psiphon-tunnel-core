@@ -495,7 +495,7 @@ func (state *ClientSeedState) sendIssueSLOKsSignal() {
 
 	if state.signalIssueSLOKs != nil {
 		select {
-		case state.signalIssueSLOKs <- *new(struct{}):
+		case state.signalIssueSLOKs <- struct{}{}:
 		default:
 		}
 	}

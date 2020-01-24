@@ -403,7 +403,7 @@ func (tunnel *Tunnel) Dial(
 	if result.err != nil {
 		// TODO: conditional on type of error or error message?
 		select {
-		case tunnel.signalPortForwardFailure <- *new(struct{}):
+		case tunnel.signalPortForwardFailure <- struct{}{}:
 		default:
 		}
 		return nil, errors.Trace(result.err)
@@ -427,7 +427,7 @@ func (tunnel *Tunnel) DialPacketTunnelChannel() (net.Conn, error) {
 	if err != nil {
 		// TODO: conditional on type of error or error message?
 		select {
-		case tunnel.signalPortForwardFailure <- *new(struct{}):
+		case tunnel.signalPortForwardFailure <- struct{}{}:
 		default:
 		}
 
@@ -488,7 +488,7 @@ func (conn *TunneledConn) Read(buffer []byte) (n int, err error) {
 		// has a sufficient buffer for the threshold number of reports.
 		// TODO: conditional on type of error or error message?
 		select {
-		case conn.tunnel.signalPortForwardFailure <- *new(struct{}):
+		case conn.tunnel.signalPortForwardFailure <- struct{}{}:
 		default:
 		}
 	}
@@ -500,7 +500,7 @@ func (conn *TunneledConn) Write(buffer []byte) (n int, err error) {
 	if err != nil && err != io.EOF {
 		// Same as TunneledConn.Read()
 		select {
-		case conn.tunnel.signalPortForwardFailure <- *new(struct{}):
+		case conn.tunnel.signalPortForwardFailure <- struct{}{}:
 		default:
 		}
 	}
@@ -1159,7 +1159,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 		case <-statsTimer.C:
 			select {
-			case signalStatusRequest <- *new(struct{}):
+			case signalStatusRequest <- struct{}{}:
 			default:
 			}
 			statsTimer.Reset(nextStatusRequestPeriod())

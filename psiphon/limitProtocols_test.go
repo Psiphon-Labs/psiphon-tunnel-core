@@ -109,7 +109,7 @@ func TestLimitTunnelProtocols(t *testing.T) {
 
 	clientConfig.DataRootDirectory = testDataDirName
 
-	err = clientConfig.Commit()
+	err = clientConfig.Commit(false)
 	if err != nil {
 		t.Fatalf("error committing configuration file: %s", err)
 	}

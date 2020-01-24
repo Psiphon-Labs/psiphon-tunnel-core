@@ -40,7 +40,7 @@ type Listener struct {
 }
 
 // Listen creates a new Tapdance listener.
-func Listen(_ net.Listener) (*Listener, error) {
+func Listen(_ net.Listener) (net.Listener, error) {
 	return nil, errors.TraceNew("operation is not enabled")
 }
 

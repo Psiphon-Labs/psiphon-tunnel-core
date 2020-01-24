@@ -59,7 +59,7 @@ type Listener struct {
 
 // Listen creates a new Marionette Listener. The address input should not
 // include a port number as the port is defined in the Marionette format.
-func Listen(address, format string) (*Listener, error) {
+func Listen(address, format string) (net.Listener, error) {
 
 	data, err := mar.ReadFormat(format)
 	if err != nil {

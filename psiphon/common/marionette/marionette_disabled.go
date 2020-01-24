@@ -41,7 +41,7 @@ type Listener struct {
 
 // Listen creates a new Marionette Listener. The address input should not
 // include a port number as that's defined in the Marionette format.
-func Listen(_, _ string) (*Listener, error) {
+func Listen(_, _ string) (net.Listener, error) {
 	return nil, errors.TraceNew("operation is not enabled")
 }
 
