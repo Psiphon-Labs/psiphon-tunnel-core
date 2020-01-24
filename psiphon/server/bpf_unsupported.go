@@ -27,6 +27,11 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
+// ServerBPFEnabled indicates if BPF functionality is enabled.
+func ServerBPFEnabled() bool {
+	return false
+}
+
 func newTCPListenerWithBPF(
 	_ *SupportServices, localAddress string) (net.Listener, string, error) {
 

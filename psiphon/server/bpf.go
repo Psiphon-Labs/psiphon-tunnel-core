@@ -36,6 +36,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// ServerBPFEnabled indicates if BPF functionality is enabled.
+func ServerBPFEnabled() bool {
+	return true
+}
+
 // newTCPListenerWithBPF creates a TCP net.Listener, optionally attaching
 // the BPF program specified by the tactics parameter BPFServerTCPProgram.
 func newTCPListenerWithBPF(
@@ -93,7 +98,7 @@ func getBPFProgram(support *SupportServices) (bool, string, []bpf.RawInstruction
 		return false, "", nil, errors.Trace(err)
 	}
 
-	if tactics != nil {
+	if tactics == nil {
 		// This server isn't configured with tactics.
 		return false, "", nil, nil
 	}

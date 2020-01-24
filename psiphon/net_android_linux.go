@@ -29,7 +29,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func supportsBPF() bool {
+func ClientBPFEnabled() bool {
 	return true
 }
 

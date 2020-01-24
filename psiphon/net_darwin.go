@@ -26,7 +26,7 @@ import (
 	"golang.org/x/net/bpf"
 )
 
-func supportsBPF() bool {
+func ClientBPFEnabled() bool {
 	return false
 }
 

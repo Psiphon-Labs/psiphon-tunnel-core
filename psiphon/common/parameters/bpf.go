@@ -75,134 +75,134 @@ func (s *BPFProgramSpec) Assemble() ([]bpf.RawInstruction, error) {
 // BPFInstructionSpec represents a golang.org/x/net/bpf.Instruction and can be
 // marshaled.
 type BPFInstructionSpec struct {
-	Name        string
-	Instruction json.RawMessage
+	Op   string
+	Args json.RawMessage
 }
 
 // GetInstruction coverts a BPFInstructionSpec to the equivilent
 // golang.org/x/net/bpf.Instruction.
 func (s *BPFInstructionSpec) GetInstruction() (bpf.Instruction, error) {
-	switch s.Name {
+	switch s.Op {
 	case "ALUOpConstant":
 		var instruction bpf.ALUOpConstant
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "ALUOpX":
 		var instruction bpf.ALUOpX
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "Jump":
 		var instruction bpf.Jump
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "JumpIf":
 		var instruction bpf.JumpIf
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "JumpIfX":
 		var instruction bpf.JumpIfX
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "LoadAbsolute":
 		var instruction bpf.LoadAbsolute
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "LoadConstant":
 		var instruction bpf.LoadConstant
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "LoadExtension":
 		var instruction bpf.LoadExtension
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "LoadIndirect":
 		var instruction bpf.LoadIndirect
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "LoadMemShift":
 		var instruction bpf.LoadMemShift
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "LoadScratch":
 		var instruction bpf.LoadScratch
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "NegateA":
 		var instruction bpf.NegateA
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "RetA":
 		var instruction bpf.RetA
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "RetConstant":
 		var instruction bpf.RetConstant
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "StoreScratch":
 		var instruction bpf.StoreScratch
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "TAX":
 		var instruction bpf.TAX
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	case "TXA":
 		var instruction bpf.TXA
-		err := json.Unmarshal(s.Instruction, &instruction)
+		err := json.Unmarshal(s.Args, &instruction)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return instruction, nil
 	}
 
-	return nil, errors.Tracef("unknown bpf instruction: %s", s.Name)
+	return nil, errors.Tracef("unknown bpf instruction: %s", s.Op)
 }

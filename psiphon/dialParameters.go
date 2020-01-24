@@ -324,7 +324,7 @@ func MakeDialParameters(
 	}
 
 	if (!isReplay || !replayBPF) &&
-		supportsBPF() &&
+		ClientBPFEnabled() &&
 		protocol.TunnelProtocolUsesTCP(dialParams.TunnelProtocol) {
 
 		if p.WeightedCoinFlip(parameters.BPFClientTCPProbability) {
