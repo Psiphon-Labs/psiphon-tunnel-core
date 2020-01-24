@@ -561,7 +561,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	}
 
 	// All config fields should be set before calling Commit.
-	err = config.Commit()
+	err = config.Commit(false)
 	if err != nil {
 		t.Fatalf("error committing configuration file: %s", err)
 	}

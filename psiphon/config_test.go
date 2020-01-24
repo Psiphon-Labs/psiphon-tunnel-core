@@ -104,7 +104,7 @@ func TestConfigTestSuite(t *testing.T) {
 func (suite *ConfigTestSuite) Test_LoadConfig_BasicGood() {
 	config, err := LoadConfig(suite.confStubBlob)
 	if err == nil {
-		err = config.Commit()
+		err = config.Commit(false)
 	}
 	suite.Nil(err, "a basic config should succeed")
 }
@@ -129,7 +129,7 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 			`{"f1": 11, "f2": "two", "DataRootDirectory" : %s}`,
 			suite.testDirectory)))
 	if err == nil {
-		err = config.Commit()
+		err = config.Commit(false)
 	}
 	suite.NotNil(err, "JSON with none of our fields should fail")
 
@@ -141,7 +141,7 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 		testObjJSON, _ = json.Marshal(testObj)
 		config, err = LoadConfig(testObjJSON)
 		if err == nil {
-			err = config.Commit()
+			err = config.Commit(false)
 		}
 		suite.NotNil(err, "JSON with one of our required fields missing should fail: %s", field)
 
@@ -151,7 +151,7 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 		testObjJSON, _ = json.Marshal(testObj)
 		config, err = LoadConfig(testObjJSON)
 		if err == nil {
-			err = config.Commit()
+			err = config.Commit(false)
 		}
 		suite.NotNil(err, "JSON with one of our required fields with the wrong type should fail: %s", field)
 
@@ -161,7 +161,7 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 		testObjJSON, _ = json.Marshal(testObj)
 		config, err = LoadConfig(testObjJSON)
 		if err == nil {
-			err = config.Commit()
+			err = config.Commit(false)
 		}
 		suite.NotNil(err, "JSON with one of our required fields set to null should fail: %s", field)
 
@@ -171,7 +171,7 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 		testObjJSON, _ = json.Marshal(testObj)
 		config, err = LoadConfig(testObjJSON)
 		if err == nil {
-			err = config.Commit()
+			err = config.Commit(false)
 		}
 		suite.NotNil(err, "JSON with one of our required fields set to an empty string should fail: %s", field)
 	}
@@ -184,7 +184,7 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BadJson() {
 		testObjJSON, _ = json.Marshal(testObj)
 		config, err = LoadConfig(testObjJSON)
 		if err == nil {
-			err = config.Commit()
+			err = config.Commit(false)
 		}
 		suite.NotNil(err, "JSON with one of our optional fields with the wrong type should fail: %s", field)
 	}
@@ -205,14 +205,14 @@ func (suite *ConfigTestSuite) Test_LoadConfig_GoodJson() {
 	testObjJSON, _ = json.Marshal(testObj)
 	config, err := LoadConfig(testObjJSON)
 	if err == nil {
-		err = config.Commit()
+		err = config.Commit(false)
 	}
 	suite.Nil(err, "JSON with good values for our required fields but no optional fields should succeed")
 
 	// Has all of our required fields, and all optional fields
 	config, err = LoadConfig(suite.confStubBlob)
 	if err == nil {
-		err = config.Commit()
+		err = config.Commit(false)
 	}
 	suite.Nil(err, "JSON with all good values for required and optional fields should succeed")
 
@@ -224,7 +224,7 @@ func (suite *ConfigTestSuite) Test_LoadConfig_GoodJson() {
 	testObjJSON, _ = json.Marshal(testObj)
 	config, err = LoadConfig(testObjJSON)
 	if err == nil {
-		err = config.Commit()
+		err = config.Commit(false)
 	}
 	suite.Nil(err, "JSON with null for optional values should succeed")
 }
@@ -402,7 +402,7 @@ func LoadConfigMigrateTest(oslDirChildrenPreMigration []FileTree, oslDirChildren
 	}
 
 	// Commit config, this is where file migration happens
-	err = config.Commit()
+	err = config.Commit(true)
 	if err != nil {
 		suite.T().Fatal("Error committing config:", err)
 		return

@@ -853,7 +853,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		clientConfig.Authorizations = []string{clientAuthorization}
 	}
 
-	err = clientConfig.Commit()
+	err = clientConfig.Commit(false)
 	if err != nil {
 		t.Fatalf("error committing configuration file: %s", err)
 	}
@@ -2023,7 +2023,7 @@ func storePruneServerEntriesTest(
 		// working directory.
 		DataRootDirectory: testDataDirName,
 	}
-	err := clientConfig.Commit()
+	err := clientConfig.Commit(false)
 	if err != nil {
 		t.Fatalf("Commit failed: %s", err)
 	}
@@ -2100,7 +2100,7 @@ func checkPruneServerEntriesTest(
 		// working directory.
 		DataRootDirectory: testDataDirName,
 	}
-	err := clientConfig.Commit()
+	err := clientConfig.Commit(false)
 	if err != nil {
 		t.Fatalf("Commit failed: %s", err)
 	}
