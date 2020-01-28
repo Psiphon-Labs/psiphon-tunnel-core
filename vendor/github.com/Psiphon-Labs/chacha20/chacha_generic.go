@@ -10,7 +10,7 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 
-	"github.com/marten-seemann/chacha20/internal/subtle"
+	"github.com/Psiphon-Labs/chacha20/internal/subtle"
 )
 
 // assert that *Cipher implements cipher.Stream
@@ -19,11 +19,12 @@ var _ cipher.Stream = (*Cipher)(nil)
 // Cipher is a stateful instance of ChaCha20 using a particular key
 // and nonce. A *Cipher implements the cipher.Stream interface.
 type Cipher struct {
-	key     [8]uint32
-	counter uint32 // incremented after each block
-	nonce   [3]uint32
-	buf     [bufSize]byte // buffer for unused keystream bytes
-	len     int           // number of unused keystream bytes at end of buf
+	key      [8]uint32
+	counter  uint32 // incremented after each block
+	overflow bool
+	nonce    [3]uint32
+	buf      [bufSize]byte // buffer for unused keystream bytes
+	len      int           // number of unused keystream bytes at end of buf
 }
 
 // New creates a new ChaCha20 stream cipher with the given key and nonce.
@@ -97,7 +98,12 @@ func (s *Cipher) XORKeyStream(dst, src []byte) {
 		return
 	}
 	if haveAsm {
-		if uint64(len(src))+uint64(s.counter)*64 > (1<<38)-64 {
+
+		// [Psiphon]
+		//
+		// Allow up to 2^32 blocks.
+
+		if uint64(len(src))+uint64(s.counter)*64 > (1 << 38) {
 			panic("chacha20: counter overflow")
 		}
 		s.xorKeyStreamAsm(dst, src)
@@ -120,6 +126,11 @@ func (s *Cipher) XORKeyStream(dst, src []byte) {
 	n := len(src)
 	src, dst = src[:n:n], dst[:n:n] // BCE hint
 	for i := 0; i < n; i += 64 {
+
+		if s.overflow {
+			panic("chacha20: counter overflow")
+		}
+
 		// calculate the remainder of the first round
 		s0, s4, s8, s12 := quarterRound(j0, s.key[0], s.key[4], s.counter)
 
@@ -164,7 +175,25 @@ func (s *Cipher) XORKeyStream(dst, src []byte) {
 		// increment the counter
 		s.counter += 1
 		if s.counter == 0 {
-			panic("chacha20: counter overflow")
+
+			// [Psiphon]
+			//
+			// Don't panic immediately, as the counter will wrap here when it's 2^31-1,
+			// and that's a valid value. Do panic after overflow is set and any further
+			// blocks are processed.
+			//
+			// https://tools.ietf.org/html/rfc7539#section-2.3.2: ChaCha20 "limits the
+			// use of a single (key,nonce) combination to 2^32 blocks".
+			//
+			// The 2^31-1 counter value occurs in practise in QUIC header protection,
+			// https://tools.ietf.org/html/draft-ietf-quic-tls-24#section-5.4.4, which
+			// initializes the counter using 4 bytes of sampled ciphertext.
+			//
+			// In OpenSSL, chacha20 will operate on 2^32 blocks before applying its
+			// overflow logic:
+			// https://github.com/openssl/openssl/blob/706457b7bda7fdbab426b8dce83b318908339da4/crypto/evp/e_chacha20_poly1305.c#L94-L104.
+
+			s.overflow = true
 		}
 
 		// pad to 64 bytes if needed
