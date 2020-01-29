@@ -66,7 +66,7 @@ func TestBoltResiliency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %s", err)
 	}
-	err = clientConfig.Commit()
+	err = clientConfig.Commit(false)
 	if err != nil {
 		t.Fatalf("Commit failed: %s", err)
 	}

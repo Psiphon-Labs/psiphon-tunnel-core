@@ -21,6 +21,18 @@
 			"revisionTime": "2019-07-31T17:17:12Z"
 		},
 		{
+			"checksumSHA1": "C5OwxfDa6nvLoxP3WBaCp7ufW60=",
+			"path": "github.com/Psiphon-Labs/chacha20",
+			"revision": "899a4be528633ecf678f45e4f6b177d0f89b9e7c",
+			"revisionTime": "2020-01-28T19:13:10Z"
+		},
+		{
+			"checksumSHA1": "zNTA9RmD/BcIWRfZWF/DIhULpK0=",
+			"path": "github.com/Psiphon-Labs/chacha20/internal/subtle",
+			"revision": "899a4be528633ecf678f45e4f6b177d0f89b9e7c",
+			"revisionTime": "2020-01-28T19:13:10Z"
+		},
+		{
 			"checksumSHA1": "d3DwsdacdFn1/KCG/2uPV1PwR3s=",
 			"path": "github.com/Psiphon-Labs/dns",
 			"revision": "d23cdaf67bbcca8cfb5d0ada3747b03a6cfd2da5",
@@ -65,8 +77,8 @@
 		{
 			"checksumSHA1": "8MdwAjQlha5clFXwY1ayF4vNGAQ=",
 			"path": "github.com/Psiphon-Labs/quic-go",
-			"revision": "abf539ac596a6017b6eb8904f7342da8daab8df1",
-			"revisionTime": "2020-01-16T02:28:06Z"
+			"revision": "738e15bfe6c3d7a0ccc91e2f237e5554ab6a35a6",
+			"revisionTime": "2020-01-28T19:39:28Z"
 		},
 		{
 			"checksumSHA1": "VMJLFpeoJ56PTQxR0wEkkiQTr1s=",
@@ -339,22 +351,6 @@
 			"path": "github.com/kardianos/osext",
 			"revision": "ae77be60afb1dcacde03767a8c37337fad28ac14",
 			"revisionTime": "2017-05-10T13:15:34Z"
-		},
-		{
-			"checksumSHA1": "j4eMhpVKh7QbPBE/vZL+VxQwJT0=",
-			"path": "github.com/marten-seemann/chacha20",
-			"revision": "36564989294fee5f3957d3e3fbfc655e10786ec0",
-			"revisionTime": "2019-09-06T10:21:14Z",
-			"version": "v0.2.0",
-			"versionExact": "v0.2.0"
-		},
-		{
-			"checksumSHA1": "xJ/ZPgaoP3Gd5ETWGhqufsqptuw=",
-			"path": "github.com/marten-seemann/chacha20/internal/subtle",
-			"revision": "36564989294fee5f3957d3e3fbfc655e10786ec0",
-			"revisionTime": "2019-09-06T10:21:14Z",
-			"version": "v0.2.0",
-			"versionExact": "v0.2.0"
 		},
 		{
 			"checksumSHA1": "Urc++6mqm/jcr3SSL/MMN5v7Owk=",

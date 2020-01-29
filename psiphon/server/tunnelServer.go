@@ -961,8 +961,47 @@ func (sshServer *sshServer) handleClient(
 	// Calling clientConn.RemoteAddr at this point, before any Read calls,
 	// satisfies the constraint documented in tapdance.Listen.
 
+	clientAddr := clientConn.RemoteAddr()
+
+	// Check if there were irregularities during the network connection
+	// establishment. When present, log and then behave as Obfuscated SSH does
+	// when the client fails to provide a valid seed message.
+	//
+	// One concrete irregular case is failure to send a PROXY protocol header for
+	// TAPDANCE-OSSH.
+
+	if indicator, ok := clientConn.(common.IrregularIndicator); ok {
+
+		tunnelErr := indicator.IrregularTunnelError()
+
+		if tunnelErr != nil {
+
+			logFields := make(common.LogFields)
+			common.SetIrregularTunnelErrorLogField(
+				logFields, errors.Trace(tunnelErr))
+			logIrregularTunnel(
+				sshServer.support,
+				listenerTunnelProtocol,
+				listenerPort,
+				common.IPAddressFromAddr(clientAddr),
+				LogFields(logFields))
+
+			var afterFunc *time.Timer
+			if sshServer.support.Config.sshHandshakeTimeout > 0 {
+				afterFunc = time.AfterFunc(sshServer.support.Config.sshHandshakeTimeout, func() {
+					clientConn.Close()
+				})
+			}
+			io.Copy(ioutil.Discard, clientConn)
+			clientConn.Close()
+			afterFunc.Stop()
+
+			return
+		}
+	}
+
 	geoIPData := sshServer.support.GeoIPService.Lookup(
-		common.IPAddressFromAddr(clientConn.RemoteAddr()))
+		common.IPAddressFromAddr(clientAddr))
 
 	sshServer.registerAcceptedClient(tunnelProtocol, geoIPData.Country)
 	defer sshServer.unregisterAcceptedClient(tunnelProtocol, geoIPData.Country)

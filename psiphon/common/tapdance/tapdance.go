@@ -117,8 +117,8 @@ func (l *stationListener) Accept() (net.Conn, error) {
 		return nil, errors.TraceNew("missing station address")
 	}
 	return &stationConn{
-		Conn:              conn,
-		stationRemoteAddr: stationRemoteAddr,
+		Conn:             conn,
+		stationIPAddress: common.IPAddressFromAddr(stationRemoteAddr),
 	}, nil
 }
 
@@ -132,13 +132,38 @@ func (l *stationListener) Addr() net.Addr {
 
 type stationConn struct {
 	net.Conn
-	stationRemoteAddr net.Addr
+	stationIPAddress string
+}
+
+// IrregularTunnelError implements the common.IrregularIndicator interface.
+func (c *stationConn) IrregularTunnelError() error {
+
+	// We expect a PROXY protocol header, but go-proxyproto does not produce an
+	// error if the "PROXY " prefix is absent; instead the connection will
+	// proceed. To detect this case, check if the go-proxyproto RemoteAddr IP
+	// address matches the underlying connection IP address. When these values
+	// match, there was no PROXY protocol header.
+	//
+	// Limitation: the values will match if there is a PROXY protocol header
+	// containing the same IP address as the underlying connection. This is not
+	// an expected case.
+
+	if common.IPAddressFromAddr(c.RemoteAddr()) == c.stationIPAddress {
+		return errors.TraceNew("unexpected station IP address")
+	}
+	return nil
 }
 
 // GetMetrics implements the common.MetricsSource interface.
 func (c *stationConn) GetMetrics() common.LogFields {
+
 	logFields := make(common.LogFields)
-	logFields["station_ip_address"] = common.IPAddressFromAddr(c.stationRemoteAddr)
+
+	// Ensure we don't log a potential non-station IP address.
+	if c.IrregularTunnelError() == nil {
+		logFields["station_ip_address"] = c.stationIPAddress
+	}
+
 	return logFields
 }
 
