@@ -156,7 +156,7 @@ func StartTunnel(ctx context.Context,
 
 	// config.Commit must be called before calling config.SetClientParameters
 	// or attempting to connect.
-	err = config.Commit()
+	err = config.Commit(true)
 	if err != nil {
 		return nil, errors.TraceMsg(err, "config.Commit failed")
 	}

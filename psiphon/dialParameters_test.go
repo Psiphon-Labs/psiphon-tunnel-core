@@ -71,7 +71,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		NetworkIDGetter:      new(testNetworkGetter),
 	}
 
-	err = clientConfig.Commit()
+	err = clientConfig.Commit(false)
 	if err != nil {
 		t.Fatalf("error committing configuration file: %s", err)
 	}

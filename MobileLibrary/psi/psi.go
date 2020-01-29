@@ -152,7 +152,7 @@ func Start(
 
 	// All config fields should be set before calling Commit.
 
-	err = config.Commit()
+	err = config.Commit(true)
 	if err != nil {
 		return fmt.Errorf("error committing configuration file: %s", err)
 	}
