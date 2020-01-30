@@ -716,6 +716,14 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 		stats["tcp_port_forward_failed_count"] = 0
 		stats["tcp_port_forward_failed_duration"] = 0
 		stats["tcp_port_forward_rejected_dialing_limit_count"] = 0
+		stats["tcp_ipv4_port_forward_dialed_count"] = 0
+		stats["tcp_ipv4_port_forward_dialed_duration"] = 0
+		stats["tcp_ipv4_port_forward_failed_count"] = 0
+		stats["tcp_ipv4_port_forward_failed_duration"] = 0
+		stats["tcp_ipv6_port_forward_dialed_count"] = 0
+		stats["tcp_ipv6_port_forward_dialed_duration"] = 0
+		stats["tcp_ipv6_port_forward_failed_count"] = 0
+		stats["tcp_ipv6_port_forward_failed_duration"] = 0
 		return stats
 	}
 
@@ -783,21 +791,45 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 			stat["udp_port_forwards"] += client.udpTrafficState.concurrentPortForwardCount
 			stat["total_udp_port_forwards"] += client.udpTrafficState.totalPortForwardCount
 
-			stat["tcp_port_forward_dialed_count"] += client.qualityMetrics.tcpPortForwardDialedCount
+			stat["tcp_port_forward_dialed_count"] += client.qualityMetrics.TCPPortForwardDialedCount
 			stat["tcp_port_forward_dialed_duration"] +=
-				int64(client.qualityMetrics.tcpPortForwardDialedDuration / time.Millisecond)
-			stat["tcp_port_forward_failed_count"] += client.qualityMetrics.tcpPortForwardFailedCount
+				int64(client.qualityMetrics.TCPPortForwardDialedDuration / time.Millisecond)
+			stat["tcp_port_forward_failed_count"] += client.qualityMetrics.TCPPortForwardFailedCount
 			stat["tcp_port_forward_failed_duration"] +=
-				int64(client.qualityMetrics.tcpPortForwardFailedDuration / time.Millisecond)
+				int64(client.qualityMetrics.TCPPortForwardFailedDuration / time.Millisecond)
 			stat["tcp_port_forward_rejected_dialing_limit_count"] +=
-				client.qualityMetrics.tcpPortForwardRejectedDialingLimitCount
+				client.qualityMetrics.TCPPortForwardRejectedDialingLimitCount
+
+			stat["tcp_ipv4_port_forward_dialed_count"] += client.qualityMetrics.TCPIPv4PortForwardDialedCount
+			stat["tcp_ipv4_port_forward_dialed_duration"] +=
+				int64(client.qualityMetrics.TCPIPv4PortForwardDialedDuration / time.Millisecond)
+			stat["tcp_ipv4_port_forward_failed_count"] += client.qualityMetrics.TCPIPv4PortForwardFailedCount
+			stat["tcp_ipv4_port_forward_failed_duration"] +=
+				int64(client.qualityMetrics.TCPIPv4PortForwardFailedDuration / time.Millisecond)
+
+			stat["tcp_ipv6_port_forward_dialed_count"] += client.qualityMetrics.TCPIPv6PortForwardDialedCount
+			stat["tcp_ipv6_port_forward_dialed_duration"] +=
+				int64(client.qualityMetrics.TCPIPv6PortForwardDialedDuration / time.Millisecond)
+			stat["tcp_ipv6_port_forward_failed_count"] += client.qualityMetrics.TCPIPv6PortForwardFailedCount
+			stat["tcp_ipv6_port_forward_failed_duration"] +=
+				int64(client.qualityMetrics.TCPIPv6PortForwardFailedDuration / time.Millisecond)
 		}
 
-		client.qualityMetrics.tcpPortForwardDialedCount = 0
-		client.qualityMetrics.tcpPortForwardDialedDuration = 0
-		client.qualityMetrics.tcpPortForwardFailedCount = 0
-		client.qualityMetrics.tcpPortForwardFailedDuration = 0
-		client.qualityMetrics.tcpPortForwardRejectedDialingLimitCount = 0
+		client.qualityMetrics.TCPPortForwardDialedCount = 0
+		client.qualityMetrics.TCPPortForwardDialedDuration = 0
+		client.qualityMetrics.TCPPortForwardFailedCount = 0
+		client.qualityMetrics.TCPPortForwardFailedDuration = 0
+		client.qualityMetrics.TCPPortForwardRejectedDialingLimitCount = 0
+
+		client.qualityMetrics.TCPIPv4PortForwardDialedCount = 0
+		client.qualityMetrics.TCPIPv4PortForwardDialedDuration = 0
+		client.qualityMetrics.TCPIPv4PortForwardFailedCount = 0
+		client.qualityMetrics.TCPIPv4PortForwardFailedDuration = 0
+
+		client.qualityMetrics.TCPIPv6PortForwardDialedCount = 0
+		client.qualityMetrics.TCPIPv6PortForwardDialedDuration = 0
+		client.qualityMetrics.TCPIPv6PortForwardFailedCount = 0
+		client.qualityMetrics.TCPIPv6PortForwardFailedDuration = 0
 
 		client.Unlock()
 	}
@@ -1146,11 +1178,19 @@ type randomStreamMetrics struct {
 // upstream link. These stats are recorded by each sshClient
 // and then reported and reset in sshServer.getLoadStats().
 type qualityMetrics struct {
-	tcpPortForwardDialedCount               int64
-	tcpPortForwardDialedDuration            time.Duration
-	tcpPortForwardFailedCount               int64
-	tcpPortForwardFailedDuration            time.Duration
-	tcpPortForwardRejectedDialingLimitCount int64
+	TCPPortForwardDialedCount               int64
+	TCPPortForwardDialedDuration            time.Duration
+	TCPPortForwardFailedCount               int64
+	TCPPortForwardFailedDuration            time.Duration
+	TCPPortForwardRejectedDialingLimitCount int64
+	TCPIPv4PortForwardDialedCount           int64
+	TCPIPv4PortForwardDialedDuration        time.Duration
+	TCPIPv4PortForwardFailedCount           int64
+	TCPIPv4PortForwardFailedDuration        time.Duration
+	TCPIPv6PortForwardDialedCount           int64
+	TCPIPv6PortForwardDialedDuration        time.Duration
+	TCPIPv6PortForwardFailedCount           int64
+	TCPIPv6PortForwardFailedDuration        time.Duration
 }
 
 type handshakeState struct {
@@ -2941,18 +2981,31 @@ func (sshClient *sshClient) closedPortForward(
 }
 
 func (sshClient *sshClient) updateQualityMetricsWithDialResult(
-	tcpPortForwardDialSuccess bool, dialDuration time.Duration) {
+	tcpPortForwardDialSuccess bool, dialDuration time.Duration, IP net.IP) {
 
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
 	if tcpPortForwardDialSuccess {
-		sshClient.qualityMetrics.tcpPortForwardDialedCount += 1
-		sshClient.qualityMetrics.tcpPortForwardDialedDuration += dialDuration
-
+		sshClient.qualityMetrics.TCPPortForwardDialedCount += 1
+		sshClient.qualityMetrics.TCPPortForwardDialedDuration += dialDuration
+		if IP.To4() != nil {
+			sshClient.qualityMetrics.TCPIPv4PortForwardDialedCount += 1
+			sshClient.qualityMetrics.TCPIPv4PortForwardDialedDuration += dialDuration
+		} else if IP != nil {
+			sshClient.qualityMetrics.TCPIPv6PortForwardDialedCount += 1
+			sshClient.qualityMetrics.TCPIPv6PortForwardDialedDuration += dialDuration
+		}
 	} else {
-		sshClient.qualityMetrics.tcpPortForwardFailedCount += 1
-		sshClient.qualityMetrics.tcpPortForwardFailedDuration += dialDuration
+		sshClient.qualityMetrics.TCPPortForwardFailedCount += 1
+		sshClient.qualityMetrics.TCPPortForwardFailedDuration += dialDuration
+		if IP.To4() != nil {
+			sshClient.qualityMetrics.TCPIPv4PortForwardFailedCount += 1
+			sshClient.qualityMetrics.TCPIPv4PortForwardFailedDuration += dialDuration
+		} else if IP != nil {
+			sshClient.qualityMetrics.TCPIPv6PortForwardFailedCount += 1
+			sshClient.qualityMetrics.TCPIPv6PortForwardFailedDuration += dialDuration
+		}
 	}
 }
 
@@ -2961,7 +3014,7 @@ func (sshClient *sshClient) updateQualityMetricsWithRejectedDialingLimit() {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
-	sshClient.qualityMetrics.tcpPortForwardRejectedDialingLimitCount += 1
+	sshClient.qualityMetrics.TCPPortForwardRejectedDialingLimitCount += 1
 }
 
 func (sshClient *sshClient) handleTCPChannel(
@@ -3015,8 +3068,10 @@ func (sshClient *sshClient) handleTCPChannel(
 	IPs, err := (&net.Resolver{}).LookupIPAddr(ctx, hostToConnect)
 	cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 
+	// IPv4 is preferred in case the host has limited IPv6 routing. IPv6 is
+	// selected and attempted only when there's no IPv4 option.
 	// TODO: shuffle list to try other IPs?
-	// TODO: IPv6 support
+
 	var IP net.IP
 	for _, ip := range IPs {
 		if ip.IP.To4() != nil {
@@ -3024,6 +3079,11 @@ func (sshClient *sshClient) handleTCPChannel(
 			break
 		}
 	}
+	if IP == nil && len(IPs) > 0 {
+		// If there are no IPv4 IPs, the first IP is IPv6.
+		IP = IPs[0].IP
+	}
+
 	if err == nil && IP == nil {
 		err = std_errors.New("no IP address")
 	}
@@ -3033,7 +3093,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	if err != nil {
 
 		// Record a port forward failure
-		sshClient.updateQualityMetricsWithDialResult(false, resolveElapsedTime)
+		sshClient.updateQualityMetricsWithDialResult(false, resolveElapsedTime, IP)
 
 		sshClient.rejectNewChannel(newChannel, fmt.Sprintf("LookupIP failed: %s", err))
 		return
@@ -3071,7 +3131,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 
 	// Record port forward success or failure
-	sshClient.updateQualityMetricsWithDialResult(err == nil, time.Since(dialStartTime))
+	sshClient.updateQualityMetricsWithDialResult(err == nil, time.Since(dialStartTime), IP)
 
 	if err != nil {
 
