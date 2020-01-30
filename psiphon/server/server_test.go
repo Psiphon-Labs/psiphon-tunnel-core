@@ -1874,7 +1874,8 @@ func paveTacticsConfigFile(
 
 func paveBlocklistFile(t *testing.T, blocklistFilename string) {
 
-	blocklistContent := "255.255.255.255,test-source,test-subject\n"
+	blocklistContent :=
+		"255.255.255.255,test-source,test-subject\n2001:db8:f75c::0951:58bc:ef22,test-source,test-subject\nexample.org,test-source,test-subject\n"
 
 	err := ioutil.WriteFile(blocklistFilename, []byte(blocklistContent), 0600)
 	if err != nil {

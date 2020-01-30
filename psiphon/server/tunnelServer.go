@@ -2271,7 +2271,7 @@ var blocklistHitsStatParams = []requestParamSpec{
 	{"last_connected", isLastConnected, requestParamOptional},
 }
 
-func (sshClient *sshClient) logBlocklistHits(remoteIP net.IP, tags []BlocklistTag) {
+func (sshClient *sshClient) logBlocklistHits(IP net.IP, domain string, tags []BlocklistTag) {
 
 	sshClient.Lock()
 
@@ -2289,7 +2289,12 @@ func (sshClient *sshClient) logBlocklistHits(remoteIP net.IP, tags []BlocklistTa
 	sshClient.Unlock()
 
 	for _, tag := range tags {
-		logFields["blocklist_ip_address"] = remoteIP.String()
+		if IP != nil {
+			logFields["blocklist_ip_address"] = IP.String()
+		}
+		if domain != "" {
+			logFields["blocklist_domain"] = domain
+		}
 		logFields["blocklist_source"] = tag.Source
 		logFields["blocklist_subject"] = tag.Subject
 
@@ -2752,9 +2757,9 @@ func (sshClient *sshClient) isPortForwardPermitted(
 	// cases, a blocklist entry won't be dialed in any case. However, no logs
 	// will be recorded.
 
-	tags := sshClient.sshServer.support.Blocklist.Lookup(remoteIP)
+	tags := sshClient.sshServer.support.Blocklist.LookupIP(remoteIP)
 	if len(tags) > 0 {
-		sshClient.logBlocklistHits(remoteIP, tags)
+		sshClient.logBlocklistHits(remoteIP, "", tags)
 		if sshClient.sshServer.support.Config.BlocklistActive {
 			return false
 		}
@@ -3052,13 +3057,40 @@ func (sshClient *sshClient) handleTCPChannel(
 		}
 	}
 
+	// Check the domain blocklist before dialing.
+	//
+	// The IP blocklist is checked in isPortForwardPermitted, which also provides
+	// IP blocklist checking for the packet tunnel code path. When hostToConnect
+	// is an IP address, the following hostname resolution step effectively
+	// performs no actions and next immediate step is the isPortForwardPermitted
+	// check.
+	//
+	// Limitation: at this time, only clients that send domains in hostToConnect
+	// are subject to domain blocklist checks. Both the udpgw and packet tunnel
+	// modes perform tunneled DNS and send only IPs in hostToConnect.
+
+	if !isWebServerPortForward &&
+		net.ParseIP(hostToConnect) == nil {
+
+		tags := sshClient.sshServer.support.Blocklist.LookupDomain(hostToConnect)
+		if len(tags) > 0 {
+			sshClient.logBlocklistHits(nil, hostToConnect, tags)
+			if sshClient.sshServer.support.Config.BlocklistActive {
+				// Note: not recording a port forward failure in this case
+				sshClient.rejectNewChannel(newChannel, "port forward not permitted")
+				return
+			}
+		}
+	}
+
 	// Dial the remote address.
 	//
-	// Hostname resolution is performed explicitly, as a separate step, as the target IP
-	// address is used for traffic rules (AllowSubnets) and OSL seed progress.
+	// Hostname resolution is performed explicitly, as a separate step, as the
+	// target IP address is used for traffic rules (AllowSubnets), OSL seed
+	// progress, and IP address blocklists.
 	//
-	// Contexts are used for cancellation (via sshClient.runCtx, which is cancelled
-	// when the client is stopping) and timeouts.
+	// Contexts are used for cancellation (via sshClient.runCtx, which is
+	// cancelled when the client is stopping) and timeouts.
 
 	dialStartTime := time.Now()
 
@@ -3113,9 +3145,7 @@ func (sshClient *sshClient) handleTCPChannel(
 			portForwardTypeTCP,
 			IP,
 			portToConnect) {
-
 		// Note: not recording a port forward failure in this case
-
 		sshClient.rejectNewChannel(newChannel, "port forward not permitted")
 		return
 	}
