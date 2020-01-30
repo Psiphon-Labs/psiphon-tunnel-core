@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Psiphon-Labs/dns"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
@@ -202,6 +203,10 @@ func loadBlocklistFromFile(filename string) (*blocklistData, error) {
 			}
 
 		} else {
+
+			if _, ok := dns.IsDomainName(record[0]); !ok {
+				return nil, errors.Tracef("invalid domain name: %s", record[0])
+			}
 
 			key := record[0]
 

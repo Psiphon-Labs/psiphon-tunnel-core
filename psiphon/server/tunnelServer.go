@@ -3057,7 +3057,7 @@ func (sshClient *sshClient) handleTCPChannel(
 		}
 	}
 
-	// Check the domain blocklist before dialing.
+	// Validate the domain name and check the domain blocklist before dialing.
 	//
 	// The IP blocklist is checked in isPortForwardPermitted, which also provides
 	// IP blocklist checking for the packet tunnel code path. When hostToConnect
@@ -3071,6 +3071,17 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	if !isWebServerPortForward &&
 		net.ParseIP(hostToConnect) == nil {
+
+		// We're not doing comprehensive validation, to avoid overhead per port
+		// forward. This is a simple sanity check to ensure we don't process
+		// blantantly invalid input.
+		//
+		// TODO: validate with dns.IsDomainName?
+		if len(hostToConnect) > 255 {
+			// Note: not recording a port forward failure in this case
+			sshClient.rejectNewChannel(newChannel, "invalid domain name")
+			return
+		}
 
 		tags := sshClient.sshServer.support.Blocklist.LookupDomain(hostToConnect)
 		if len(tags) > 0 {
