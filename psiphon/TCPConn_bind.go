@@ -136,6 +136,15 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 
 		setAdditionalSocketOptions(socketFD)
 
+		if config.BPFProgramInstructions != nil {
+			err = setSocketBPF(config.BPFProgramInstructions, socketFD)
+			if err != nil {
+				syscall.Close(socketFD)
+				lastErr = errors.Trace(err)
+				continue
+			}
+		}
+
 		if config.DeviceBinder != nil {
 			_, err = config.DeviceBinder.BindToDevice(socketFD)
 			if err != nil {

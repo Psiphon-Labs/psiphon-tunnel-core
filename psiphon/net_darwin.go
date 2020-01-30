@@ -21,13 +21,19 @@ package psiphon
 
 import (
 	"syscall"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"golang.org/x/net/bpf"
 )
+
+func ClientBPFEnabled() bool {
+	return false
+}
+
+func setSocketBPF(_ []bpf.RawInstruction, _ int) error {
+	return errors.TraceNew("BPF not supported")
+}
 
 func setAdditionalSocketOptions(socketFd int) {
 	syscall.SetsockoptInt(socketFd, syscall.SOL_SOCKET, syscall.SO_NOSIGPIPE, 1)
-}
-
-func bindToDeviceCallWrapper(deviceBinder DeviceBinder, socketFD int) error {
-	_, err := deviceBinder.BindToDevice(socketFD)
-	return err
 }

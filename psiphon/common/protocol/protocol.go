@@ -126,6 +126,13 @@ var SupportedServerEntrySources = TunnelProtocols{
 	SERVER_ENTRY_SOURCE_EXCHANGED,
 }
 
+func TunnelProtocolUsesTCP(protocol string) bool {
+	// Limitation: Marionette network protocol depends on its format configuration.
+	return protocol != TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH &&
+		protocol != TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH &&
+		protocol != TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH
+}
+
 func TunnelProtocolUsesSSH(protocol string) bool {
 	return true
 }
@@ -388,4 +395,9 @@ func DeriveSSHServerKEXPRNGSeed(obfuscatedKey string) (*prng.Seed, error) {
 func DeriveSSHServerVersionPRNGSeed(obfuscatedKey string) (*prng.Seed, error) {
 	seed := prng.Seed(sha256.Sum256([]byte(obfuscatedKey)))
 	return prng.NewSaltedSeed(&seed, "ssh-server-version")
+}
+
+func DeriveBPFServerProgramPRNGSeed(obfuscatedKey string) (*prng.Seed, error) {
+	seed := prng.Seed(sha256.Sum256([]byte(obfuscatedKey)))
+	return prng.NewSaltedSeed(&seed, "bpf-server-program")
 }

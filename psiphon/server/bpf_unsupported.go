@@ -1,7 +1,7 @@
-// +build !darwin,!android,!linux
+// +build !linux
 
 /*
- * Copyright (c) 2017, Psiphon Inc.
+ * Copyright (c) 2020, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,20 +19,22 @@
  *
  */
 
-package psiphon
+package server
 
 import (
+	"net"
+
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"golang.org/x/net/bpf"
 )
 
-func ClientBPFEnabled() bool {
+// ServerBPFEnabled indicates if BPF functionality is enabled.
+func ServerBPFEnabled() bool {
 	return false
 }
 
-func setSocketBPF(_ []bpf.RawInstruction, _ int) error {
-	return errors.TraceNew("BPF not supported")
-}
+func newTCPListenerWithBPF(
+	_ *SupportServices, localAddress string) (net.Listener, string, error) {
 
-func setAdditionalSocketOptions(_ int) {
+	listener, err := net.Listen("tcp", localAddress)
+	return listener, "", errors.Trace(err)
 }

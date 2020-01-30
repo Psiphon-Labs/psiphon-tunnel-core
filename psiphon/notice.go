@@ -441,6 +441,10 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 
 	if GetEmitNetworkParameters() {
 
+		if dialParams.BPFProgramName != "" {
+			args = append(args, "client_bpf", dialParams.BPFProgramName)
+		}
+
 		if dialParams.SelectedSSHClientVersion {
 			args = append(args, "SSHClientVersion", dialParams.SSHClientVersion)
 		}

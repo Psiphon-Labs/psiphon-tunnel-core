@@ -1125,7 +1125,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	select {
 	case logFields := <-serverConnectedLog:
-		err := checkExpectedLogFields(runConfig, logFields)
+		err := checkExpectedLogFields(runConfig, false, false, logFields)
 		if err != nil {
 			t.Fatalf("invalid server connected log fields: %s", err)
 		}
@@ -1133,9 +1133,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("missing server connected log")
 	}
 
+	expectClientBPFField := psiphon.ClientBPFEnabled() && doClientTactics
+	expectServerBPFField := ServerBPFEnabled() && doServerTactics
+
 	select {
 	case logFields := <-serverTunnelLog:
-		err := checkExpectedLogFields(runConfig, logFields)
+		err := checkExpectedLogFields(runConfig, expectClientBPFField, expectServerBPFField, logFields)
 		if err != nil {
 			t.Fatalf("invalid server tunnel log fields: %s", err)
 		}
@@ -1147,7 +1150,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	checkPruneServerEntriesTest(t, runConfig, testDataDirName, pruneServerEntryTestCases)
 }
 
-func checkExpectedLogFields(runConfig *runServerConfig, fields map[string]interface{}) error {
+func checkExpectedLogFields(
+	runConfig *runServerConfig,
+	expectClientBPFField bool,
+	expectServerBPFField bool,
+	fields map[string]interface{}) error {
 
 	// Limitations:
 	//
@@ -1300,6 +1307,24 @@ func checkExpectedLogFields(runConfig *runServerConfig, fields map[string]interf
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 				return fmt.Errorf("missing expected field '%s'", name)
 			}
+		}
+	}
+
+	if expectClientBPFField {
+		name := "client_bpf"
+		if fields[name] == nil {
+			return fmt.Errorf("missing expected field '%s'", name)
+		} else if fmt.Sprintf("%s", fields[name]) != "test-client-bpf" {
+			return fmt.Errorf("unexpected field value %s: '%s'", name, fields[name])
+		}
+	}
+
+	if expectServerBPFField {
+		name := "server_bpf"
+		if fields[name] == nil {
+			return fmt.Errorf("missing expected field '%s'", name)
+		} else if fmt.Sprintf("%s", fields[name]) != "test-server-bpf" {
+			return fmt.Errorf("unexpected field value %s: '%s'", name, fields[name])
 		}
 	}
 
@@ -1827,7 +1852,17 @@ func paveTacticsConfigFile(
           "LivenessTestMinUpstreamBytes" : %d,
           "LivenessTestMaxUpstreamBytes" : %d,
           "LivenessTestMinDownstreamBytes" : %d,
-          "LivenessTestMaxDownstreamBytes" : %d
+          "LivenessTestMaxDownstreamBytes" : %d,
+          "BPFServerTCPProgram": {
+            "Name" : "test-server-bpf",
+              "Instructions" : [
+                {"Op": "RetConstant", "Args": {"Val": 65535}}]},
+          "BPFServerTCPProbability" : 1.0,
+          "BPFClientTCPProgram": {
+            "Name" : "test-client-bpf",
+              "Instructions" : [
+                {"Op": "RetConstant", "Args": {"Val": 65535}}]},
+          "BPFClientTCPProbability" : 1.0
         }
       },
       "FilteredTactics" : [
