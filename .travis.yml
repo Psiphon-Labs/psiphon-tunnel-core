@@ -7,8 +7,6 @@ addons:
   apt_packages:
     - libx11-dev
     - libgles2-mesa-dev
-install:
-- go get -t -d -v ./...
 script:
 - cd psiphon
 - go test -race -v ./common

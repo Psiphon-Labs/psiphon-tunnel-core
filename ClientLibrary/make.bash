@@ -59,12 +59,6 @@ build_for_android () {
   TARGET_OS=android
   OUTPUT_DIR="${BUILD_DIR}/${TARGET_OS}"
 
-  echo "...Getting project dependencies (via go get) for Android."
-  GOOS=android go get -d -v -tags "${BUILD_TAGS}" ./...
-  if [ $? != 0 ]; then
-    echo "....'go get' failed, exiting"
-    exit $?
-  fi
   prepare_build android
 
   TARGET_ARCH=arm
@@ -90,12 +84,6 @@ build_for_linux () {
   TARGET_OS=linux
   OUTPUT_DIR="${BUILD_DIR}/${TARGET_OS}"
 
-  echo "...Getting project dependencies (via go get) for Linux."
-  GOOS=linux go get -d -v -tags "${BUILD_TAGS}" ./...
-  if [ $? != 0 ]; then
-    echo "....'go get' failed, exiting"
-    exit $?
-  fi
   prepare_build linux
 
   TARGET_ARCH=386
@@ -115,12 +103,6 @@ build_for_windows () {
   TARGET_OS=windows
   OUTPUT_DIR="${BUILD_DIR}/${TARGET_OS}"
 
-  echo "...Getting project dependencies (via go get) for Windows."
-  GOOS=windows go get -d -v -tags "${BUILD_TAGS}" ./...
-  if [ $? != 0 ]; then
-    echo "....'go get' failed, exiting"
-    exit $?
-  fi
   prepare_build windows
 
   TARGET_ARCH=386

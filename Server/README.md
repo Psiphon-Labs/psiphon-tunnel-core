@@ -10,6 +10,5 @@ Prerequisites:
  - Go 1.13 or later
 
 Build Steps:
- - Get dependencies: `go get -d -v ./...`
  - Build: `go build -o psiphond main.go` (will generate a binary named `psiphond` for Linux/OSX  or `psiphond.exe` for Windows)
 

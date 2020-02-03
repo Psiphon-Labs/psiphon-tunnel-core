@@ -49,14 +49,6 @@ prepare_build () {
 }
 
 build_for_linux () {
-  echo "Getting project dependencies (via go get) for Linux. Parameter is: '$1'"
-  GOOS=linux GOARCH=amd64 go get -d -v -tags "${BUILD_TAGS}" ./...
-  prepare_build linux
-  if [ $? != 0 ]; then
-    echo "...'go get' failed, exiting"
-    exit $?
-  fi
-
   GOOS=linux GOARCH=amd64 go build -v -x -tags "${BUILD_TAGS}" -ldflags "$LDFLAGS" -o psiphond
   if [ $? != 0 ]; then
     echo "...'go build' failed, exiting"

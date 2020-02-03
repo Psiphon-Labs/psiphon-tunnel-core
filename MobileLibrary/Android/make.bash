@@ -13,16 +13,6 @@ if [ -z ${1+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$1"; fi
 # At this time, gomobile doesn't support modules
 export GO111MODULE=off
 
-# Don't use '-u' to force updates because the docker builds always pull
-# the latest versions. Outside of Docker, be aware that these dependencies
-# will not be overridden w/ new versions if they already exist in $GOPATH
-
-GOOS=android go get -d -v -tags "${BUILD_TAGS}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
-if [ $? != 0 ]; then
-  echo "..'go get -d -v github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon' failed, exiting"
-  exit $?
-fi
-
 BUILDINFOFILE="psiphon-tunnel-core_buildinfo.txt"
 BUILDDATE=$(date --iso-8601=seconds)
 BUILDREPO=$(git config --get remote.origin.url)

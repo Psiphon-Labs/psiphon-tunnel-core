@@ -104,13 +104,6 @@ if [[ ${GO_VERSION} != ${GO_VERSION_REQUIRED} ]]; then
   exit 1
 fi
 
-# Don't use -u, because this path points to our local repo, and we don't want it overridden.
-go get -d -v -tags "${BUILD_TAGS}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
-if [[ $? != 0 ]]; then
-  echo "FAILURE: go get -d -v -tags "${BUILD_TAGS}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
-  exit 1
-fi
-
 #
 # Get and install gomobile, using our pinned revision
 #

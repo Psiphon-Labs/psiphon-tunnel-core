@@ -106,13 +106,6 @@ build_for_ios () {
   IOS_BUILD_DIR="${BUILD_DIR}/ios"
   rm -rf "${IOS_BUILD_DIR}"
 
-  echo "...Getting project dependencies (via go get) for iOS."
-  cd ${BASE_DIR}
-  GOOS=darwin go get -d -v -tags "${BUILD_TAGS}" ./...
-  if [ $? != 0 ]; then
-    echo "....'go get' failed, exiting"
-    exit $?
-  fi
   prepare_build darwin
 
   curl https://raw.githubusercontent.com/golang/go/master/misc/ios/clangwrap.sh -o ${TEMP_DIR}/clangwrap.sh
@@ -137,13 +130,6 @@ build_for_macos () {
   MACOS_BUILD_DIR="${BUILD_DIR}/macos"
   rm -rf "${MACOS_BUILD_DIR}"
 
-  echo "...Getting project dependencies (via go get) for MacOS"
-  cd ${BASE_DIR}
-  GOOS=darwin go get -d -v -tags "${BUILD_TAGS}" ./...
-  if [ $? != 0 ]; then
-    echo "....'go get' failed, exiting"
-    exit $?
-  fi
   prepare_build darwin
 
   # i386 is deprecated for macOS and does not link
