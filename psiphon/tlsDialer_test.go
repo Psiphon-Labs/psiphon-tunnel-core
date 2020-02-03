@@ -134,6 +134,7 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 		}
 
 		success := 0
+		tlsVersions := []string{}
 		for i := 0; i < repeats; i++ {
 
 			tlsConfig := &CustomTLSConfig{
@@ -151,6 +152,20 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 			if err != nil {
 				t.Logf("%s: %s\n", tlsProfile, err)
 			} else {
+
+				tlsVersion := ""
+				version := conn.(*utls.UConn).ConnectionState().Version
+				if version == utls.VersionTLS12 {
+					tlsVersion = "TLS 1.2"
+				} else if version == utls.VersionTLS13 {
+					tlsVersion = "TLS 1.3"
+				} else {
+					t.Fatalf("Unexpected TLS version: %v", version)
+				}
+				if !common.Contains(tlsVersions, tlsVersion) {
+					tlsVersions = append(tlsVersions, tlsVersion)
+				}
+
 				conn.Close()
 				success += 1
 			}
@@ -160,7 +175,10 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 			time.Sleep(100 * time.Millisecond)
 		}
 
-		result := fmt.Sprintf("%s: %d/%d successful\n", tlsProfile, success, repeats)
+		result := fmt.Sprintf(
+			"%s: %d/%d successful; negotiated TLS versions: %v\n",
+			tlsProfile, success, repeats, tlsVersions)
+
 		if success == repeats {
 			t.Logf(result)
 		} else {
