@@ -49,6 +49,7 @@ prepare_build () {
 }
 
 build_for_linux () {
+  prepare_build linux
   GOOS=linux GOARCH=amd64 go build -v -x -tags "${BUILD_TAGS}" -ldflags "$LDFLAGS" -o psiphond
   if [ $? != 0 ]; then
     echo "...'go build' failed, exiting"
