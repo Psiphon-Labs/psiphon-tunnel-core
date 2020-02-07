@@ -1791,6 +1791,10 @@ loop:
 		// case, we're only trying to connect to a specific server entry; and, the
 		// iterator will complete immediately since there is only one candidate,
 		// triggering fetches unnecessarily.
+		//
+		// TODO: in standard iterator case, should we wait for all candidates to
+		// _complete_ before triggering fetches? Currently, the iterator loop
+		// exits with one round of candidates in flight.
 		if controller.config.TargetServerEntry == "" {
 			controller.triggerFetches()
 		}
