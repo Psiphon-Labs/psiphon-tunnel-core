@@ -1786,7 +1786,14 @@ loop:
 
 		// Trigger RSL, OSL, and upgrade checks after failing to establish a
 		// tunnel in the first round.
-		controller.triggerFetches()
+		//
+		// No fetches are triggered when TargetServerEntry is specified. In that
+		// case, we're only trying to connect to a specific server entry; and, the
+		// iterator will complete immediately since there is only one candidate,
+		// triggering fetches unnecessarily.
+		if controller.config.TargetServerEntry == "" {
+			controller.triggerFetches()
+		}
 
 		// After a complete iteration of candidate servers, pause before iterating again.
 		// This helps avoid some busy wait loop conditions, and also allows some time for
