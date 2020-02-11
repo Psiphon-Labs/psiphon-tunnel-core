@@ -7,9 +7,8 @@ Functionality is based on the [legacy server stack](https://bitbucket.org/psipho
 
 ### Build
 Prerequisites:
- - Go 1.9 or later
+ - Go 1.13 or later
 
 Build Steps:
- - Get dependencies: `go get -d -v ./...`
  - Build: `go build -o psiphond main.go` (will generate a binary named `psiphond` for Linux/OSX  or `psiphond.exe` for Windows)
 

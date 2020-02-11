@@ -57,7 +57,7 @@ type Listener struct {
 	net.Listener
 }
 
-// Listen creates a new Tapdance listener.
+// Listen creates a new Tapdance listener on top of an existing TCP listener.
 //
 // The Tapdance station will send the original client address via the HAProxy
 // proxy protocol v1, https://www.haproxy.org/download/1.8/doc/proxy-protocol.txt.
@@ -65,12 +65,7 @@ type Listener struct {
 // RemoteAddr. RemoteAddr _must_ be called non-concurrently before calling Read
 // on accepted conns as the HAProxy proxy protocol header reading logic sets
 // SetReadDeadline and performs a Read.
-func Listen(address string) (net.Listener, error) {
-
-	tcpListener, err := net.Listen("tcp", address)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+func Listen(tcpListener net.Listener) (net.Listener, error) {
 
 	// Setting a timeout ensures that reading the proxy protocol
 	// header completes or times out and RemoteAddr will not block. See:

@@ -37,7 +37,7 @@ When that command completes, the compiled `.aar` files (suitable for use in an A
 ##### Prerequisites:
 
  - The `build-essential` package (on Debian based systems - or its equivalent for your platform)
- - Go 1.9 or later
+ - Go 1.13 or later
  - Full JDK
  - Android NDK
  - Android SDK

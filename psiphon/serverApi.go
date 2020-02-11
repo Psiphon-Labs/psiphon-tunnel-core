@@ -795,6 +795,10 @@ func getBaseAPIParameters(
 		params["device_region"] = config.DeviceRegion
 	}
 
+	if dialParams.BPFProgramName != "" {
+		params["client_bpf"] = dialParams.BPFProgramName
+	}
+
 	if dialParams.SelectedSSHClientVersion {
 		params["ssh_client_version"] = dialParams.SSHClientVersion
 	}

@@ -42,8 +42,10 @@ func TestBlocklist(t *testing.T) {
 
 	filename := filepath.Join(testDataDirName, "blocklist")
 
-	hit := net.ParseIP("0.0.0.0")
-	miss := net.ParseIP("255.255.255.255")
+	hitIPv4 := net.ParseIP("0.0.0.0")
+	hitIPv6 := net.ParseIP("2001:db8:f75c::0951:58bc:ef22")
+	hitDomain := "example.org"
+	missIPv4 := net.ParseIP("255.255.255.255")
 	sources := []string{"source1", "source2", "source3", "source4", "source4"}
 	subjects := []string{"subject1", "subject2", "subject3", "subject4", "subject4"}
 	hitPresent := []int{0, 1}
@@ -60,18 +62,31 @@ func TestBlocklist(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Fprintf failed: %s", err)
 		}
+		hitIPv4Index := -1
+		hitIPv6Index := -1
+		hitDomainIndex := -1
+		if common.ContainsInt(hitPresent, i) {
+			indices := prng.Perm(entriesPerSource)
+			hitIPv4Index = indices[0] - 1
+			hitIPv6Index = indices[1] - 1
+			hitDomainIndex = indices[2] - 1
+		}
 		for j := 0; j < entriesPerSource; j++ {
-			var IPAddress string
-			if j == entriesPerSource/2 && common.ContainsInt(hitPresent, i) {
-				IPAddress = hit.String()
+			var address string
+			if j == hitIPv4Index {
+				address = hitIPv4.String()
+			} else if j == hitIPv6Index {
+				address = hitIPv6.String()
+			} else if j == hitDomainIndex {
+				address = hitDomain
 			} else {
-				IPAddress = fmt.Sprintf(
+				address = fmt.Sprintf(
 					"%d.%d.%d.%d",
 					prng.Range(1, 254), prng.Range(1, 254),
 					prng.Range(1, 254), prng.Range(1, 254))
 			}
 			_, err := fmt.Fprintf(file, "%s,%s,%s\n",
-				IPAddress, sources[i], subjects[i])
+				address, sources[i], subjects[i])
 			if err != nil {
 				t.Fatalf("Fprintf failed: %s", err)
 			}
@@ -85,7 +100,36 @@ func TestBlocklist(t *testing.T) {
 		t.Fatalf("NewBlocklist failed: %s", err)
 	}
 
-	tags := b.Lookup(hit)
+	for _, hitIP := range []net.IP{hitIPv4, hitIPv6} {
+
+		tags := b.LookupIP(hitIP)
+
+		if tags == nil {
+			t.Fatalf("unexpected miss")
+		}
+
+		if len(tags) != len(hitPresent) {
+			t.Fatalf("unexpected hit tag count")
+		}
+
+		for _, tag := range tags {
+			sourceFound := false
+			subjectFound := false
+			for _, i := range hitPresent {
+				if tag.Source == sources[i] {
+					sourceFound = true
+				}
+				if tag.Subject == subjects[i] {
+					subjectFound = true
+				}
+			}
+			if !sourceFound || !subjectFound {
+				t.Fatalf("unexpected hit tag")
+			}
+		}
+	}
+
+	tags := b.LookupDomain(hitDomain)
 
 	if tags == nil {
 		t.Fatalf("unexpected miss")
@@ -95,23 +139,7 @@ func TestBlocklist(t *testing.T) {
 		t.Fatalf("unexpected hit tag count")
 	}
 
-	for _, tag := range tags {
-		sourceFound := false
-		subjectFound := false
-		for _, i := range hitPresent {
-			if tag.Source == sources[i] {
-				sourceFound = true
-			}
-			if tag.Subject == subjects[i] {
-				subjectFound = true
-			}
-		}
-		if !sourceFound || !subjectFound {
-			t.Fatalf("unexpected hit tag")
-		}
-	}
-
-	if b.Lookup(miss) != nil {
+	if b.LookupIP(missIPv4) != nil {
 		t.Fatalf("unexpected hit")
 	}
 
@@ -131,7 +159,7 @@ func TestBlocklist(t *testing.T) {
 	start := time.Now()
 
 	for i := 0; i < numIterations; i++ {
-		_ = b.Lookup(lookups[i%numLookups])
+		_ = b.LookupIP(lookups[i%numLookups])
 	}
 
 	t.Logf(

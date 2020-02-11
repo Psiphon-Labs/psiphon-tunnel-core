@@ -87,6 +87,14 @@ type TunnelServer struct {
 	sshServer         *sshServer
 }
 
+type sshListener struct {
+	net.Listener
+	localAddress   string
+	tunnelProtocol string
+	port           int
+	BPFProgramName string
+}
+
 // NewTunnelServer initializes a new tunnel server.
 func NewTunnelServer(
 	support *SupportServices,
@@ -127,12 +135,6 @@ func NewTunnelServer(
 // comment in sshClient.stop(). TODO: fully synchronized shutdown.
 func (server *TunnelServer) Run() error {
 
-	type sshListener struct {
-		net.Listener
-		localAddress   string
-		tunnelProtocol string
-	}
-
 	// TODO: should TunnelServer hold its own support pointer?
 	support := server.sshServer.support
 
@@ -147,6 +149,7 @@ func (server *TunnelServer) Run() error {
 			"%s:%d", support.Config.ServerIPAddress, listenPort)
 
 		var listener net.Listener
+		var BPFProgramName string
 		var err error
 
 		if protocol.TunnelProtocolUsesFrontedMeekQUIC(tunnelProtocol) {
@@ -169,13 +172,13 @@ func (server *TunnelServer) Run() error {
 				support.Config.ServerIPAddress,
 				support.Config.MarionetteFormat)
 
-		} else if protocol.TunnelProtocolUsesTapdance(tunnelProtocol) {
-
-			listener, err = tapdance.Listen(localAddress)
-
 		} else {
 
-			listener, err = net.Listen("tcp", localAddress)
+			listener, BPFProgramName, err = newTCPListenerWithBPF(support, localAddress)
+
+			if protocol.TunnelProtocolUsesTapdance(tunnelProtocol) {
+				listener, err = tapdance.Listen(listener)
+			}
 		}
 
 		if err != nil {
@@ -197,6 +200,7 @@ func (server *TunnelServer) Run() error {
 			LogFields{
 				"localAddress":   localAddress,
 				"tunnelProtocol": tunnelProtocol,
+				"BPFProgramName": BPFProgramName,
 			}).Info("listening")
 
 		listeners = append(
@@ -204,7 +208,9 @@ func (server *TunnelServer) Run() error {
 			&sshListener{
 				Listener:       tacticsListener,
 				localAddress:   localAddress,
+				port:           listenPort,
 				tunnelProtocol: tunnelProtocol,
+				BPFProgramName: BPFProgramName,
 			})
 	}
 
@@ -220,9 +226,8 @@ func (server *TunnelServer) Run() error {
 				}).Info("running")
 
 			server.sshServer.runListener(
-				listener.Listener,
-				server.listenerError,
-				listener.tunnelProtocol)
+				listener,
+				server.listenerError)
 
 			log.WithTraceFields(
 				LogFields{
@@ -328,9 +333,17 @@ func (server *TunnelServer) SetEstablishTunnels(establish bool) {
 	server.sshServer.setEstablishTunnels(establish)
 }
 
-// GetEstablishTunnels returns whether new tunnels may be established or not.
-func (server *TunnelServer) GetEstablishTunnels() bool {
-	return server.sshServer.getEstablishTunnels()
+// CheckEstablishTunnels returns whether new tunnels may be established or
+// not, and increments a metrics counter when establishment is disallowed.
+func (server *TunnelServer) CheckEstablishTunnels() bool {
+	return server.sshServer.checkEstablishTunnels()
+}
+
+// GetEstablishTunnelsMetrics returns whether tunnel establishment is
+// currently allowed and the number of tunnels rejected since due to not
+// establishing since the last GetEstablishTunnelsMetrics call.
+func (server *TunnelServer) GetEstablishTunnelsMetrics() (bool, int64) {
+	return server.sshServer.getEstablishTunnelsMetrics()
 }
 
 type sshServer struct {
@@ -339,6 +352,7 @@ type sshServer struct {
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	lastAuthLog                  int64
 	authFailedCount              int64
+	establishLimitedCount        int64
 	support                      *SupportServices
 	establishTunnels             int32
 	concurrentSSHHandshakes      semaphore.Semaphore
@@ -407,7 +421,7 @@ func (sshServer *sshServer) setEstablishTunnels(establish bool) {
 	// Do nothing when the setting is already correct. This avoids
 	// spurious log messages when setEstablishTunnels is called
 	// periodically with the same setting.
-	if establish == sshServer.getEstablishTunnels() {
+	if establish == (atomic.LoadInt32(&sshServer.establishTunnels) == 1) {
 		return
 	}
 
@@ -421,19 +435,23 @@ func (sshServer *sshServer) setEstablishTunnels(establish bool) {
 		LogFields{"establish": establish}).Info("establishing tunnels")
 }
 
-func (sshServer *sshServer) getEstablishTunnels() bool {
-	return atomic.LoadInt32(&sshServer.establishTunnels) == 1
+func (sshServer *sshServer) checkEstablishTunnels() bool {
+	establishTunnels := atomic.LoadInt32(&sshServer.establishTunnels) == 1
+	if !establishTunnels {
+		atomic.AddInt64(&sshServer.establishLimitedCount, 1)
+	}
+	return establishTunnels
+}
+
+func (sshServer *sshServer) getEstablishTunnelsMetrics() (bool, int64) {
+	return atomic.LoadInt32(&sshServer.establishTunnels) == 1,
+		atomic.SwapInt64(&sshServer.establishLimitedCount, 0)
 }
 
 // runListener is intended to run an a goroutine; it blocks
 // running a particular listener. If an unrecoverable error
 // occurs, it will send the error to the listenerError channel.
-func (sshServer *sshServer) runListener(
-	listener net.Listener,
-	listenerError chan<- error,
-	listenerTunnelProtocol string) {
-
-	listenerPort := common.PortFromAddr(listener.Addr())
+func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError chan<- error) {
 
 	runningProtocols := make([]string, 0)
 	for tunnelProtocol := range sshServer.support.Config.TunnelProtocolPorts {
@@ -446,7 +464,7 @@ func (sshServer *sshServer) runListener(
 		// listeners in all cases (e.g., meek) since SSH tunnels can
 		// span multiple TCP connections.
 
-		if !sshServer.getEstablishTunnels() {
+		if !sshServer.checkEstablishTunnels() {
 			log.WithTrace().Debug("not establishing tunnels")
 			clientConn.Close()
 			return
@@ -458,7 +476,7 @@ func (sshServer *sshServer) runListener(
 		// don't use any client-declared value. Only use the client's
 		// value, if present, in special cases where the listening port
 		// cannot distinguish the protocol.
-		tunnelProtocol := listenerTunnelProtocol
+		tunnelProtocol := sshListener.tunnelProtocol
 		if clientTunnelProtocol != "" {
 
 			if !common.Contains(runningProtocols, clientTunnelProtocol) {
@@ -476,11 +494,11 @@ func (sshServer *sshServer) runListener(
 			}
 		}
 
-		// listenerTunnelProtocol indictes the tunnel protocol run by the listener.
-		// For direct protocols, this is also the client tunnel protocol. For
-		// fronted protocols, the client may use a different protocol to connect to
-		// the front and then only the front-to-Psiphon server will use the listener
-		// protocol.
+		// sshListener.tunnelProtocol indictes the tunnel protocol run by the
+		// listener. For direct protocols, this is also the client tunnel protocol.
+		// For fronted protocols, the client may use a different protocol to connect
+		// to the front and then only the front-to-Psiphon server will use the
+		// listener protocol.
 		//
 		// A fronted meek client, for example, reports its first hop protocol in
 		// protocol.MeekCookieData.ClientTunnelProtocol. Most metrics record this
@@ -494,8 +512,7 @@ func (sshServer *sshServer) runListener(
 		// client may dial a different port for its first hop.
 
 		// Process each client connection concurrently.
-		go sshServer.handleClient(
-			listenerTunnelProtocol, listenerPort, tunnelProtocol, clientConn)
+		go sshServer.handleClient(sshListener, tunnelProtocol, clientConn)
 	}
 
 	// Note: when exiting due to a unrecoverable error, be sure
@@ -503,17 +520,17 @@ func (sshServer *sshServer) runListener(
 	// TunnelServer.Run will properly shut down instead of remaining
 	// running.
 
-	if protocol.TunnelProtocolUsesMeekHTTP(listenerTunnelProtocol) ||
-		protocol.TunnelProtocolUsesMeekHTTPS(listenerTunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTP(sshListener.tunnelProtocol) ||
+		protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol) {
 
 		meekServer, err := NewMeekServer(
 			sshServer.support,
-			listener,
-			listenerTunnelProtocol,
-			listenerPort,
-			protocol.TunnelProtocolUsesMeekHTTPS(listenerTunnelProtocol),
-			protocol.TunnelProtocolUsesFrontedMeek(listenerTunnelProtocol),
-			protocol.TunnelProtocolUsesObfuscatedSessionTickets(listenerTunnelProtocol),
+			sshListener.Listener,
+			sshListener.tunnelProtocol,
+			sshListener.port,
+			protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol),
+			protocol.TunnelProtocolUsesFrontedMeek(sshListener.tunnelProtocol),
+			protocol.TunnelProtocolUsesObfuscatedSessionTickets(sshListener.tunnelProtocol),
 			handleClient,
 			sshServer.shutdownBroadcast)
 
@@ -532,7 +549,7 @@ func (sshServer *sshServer) runListener(
 	} else {
 
 		for {
-			conn, err := listener.Accept()
+			conn, err := sshListener.Listener.Accept()
 
 			select {
 			case <-sshServer.shutdownBroadcast:
@@ -716,6 +733,14 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 		stats["tcp_port_forward_failed_count"] = 0
 		stats["tcp_port_forward_failed_duration"] = 0
 		stats["tcp_port_forward_rejected_dialing_limit_count"] = 0
+		stats["tcp_ipv4_port_forward_dialed_count"] = 0
+		stats["tcp_ipv4_port_forward_dialed_duration"] = 0
+		stats["tcp_ipv4_port_forward_failed_count"] = 0
+		stats["tcp_ipv4_port_forward_failed_duration"] = 0
+		stats["tcp_ipv6_port_forward_dialed_count"] = 0
+		stats["tcp_ipv6_port_forward_dialed_duration"] = 0
+		stats["tcp_ipv6_port_forward_failed_count"] = 0
+		stats["tcp_ipv6_port_forward_failed_duration"] = 0
 		return stats
 	}
 
@@ -783,21 +808,45 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 			stat["udp_port_forwards"] += client.udpTrafficState.concurrentPortForwardCount
 			stat["total_udp_port_forwards"] += client.udpTrafficState.totalPortForwardCount
 
-			stat["tcp_port_forward_dialed_count"] += client.qualityMetrics.tcpPortForwardDialedCount
+			stat["tcp_port_forward_dialed_count"] += client.qualityMetrics.TCPPortForwardDialedCount
 			stat["tcp_port_forward_dialed_duration"] +=
-				int64(client.qualityMetrics.tcpPortForwardDialedDuration / time.Millisecond)
-			stat["tcp_port_forward_failed_count"] += client.qualityMetrics.tcpPortForwardFailedCount
+				int64(client.qualityMetrics.TCPPortForwardDialedDuration / time.Millisecond)
+			stat["tcp_port_forward_failed_count"] += client.qualityMetrics.TCPPortForwardFailedCount
 			stat["tcp_port_forward_failed_duration"] +=
-				int64(client.qualityMetrics.tcpPortForwardFailedDuration / time.Millisecond)
+				int64(client.qualityMetrics.TCPPortForwardFailedDuration / time.Millisecond)
 			stat["tcp_port_forward_rejected_dialing_limit_count"] +=
-				client.qualityMetrics.tcpPortForwardRejectedDialingLimitCount
+				client.qualityMetrics.TCPPortForwardRejectedDialingLimitCount
+
+			stat["tcp_ipv4_port_forward_dialed_count"] += client.qualityMetrics.TCPIPv4PortForwardDialedCount
+			stat["tcp_ipv4_port_forward_dialed_duration"] +=
+				int64(client.qualityMetrics.TCPIPv4PortForwardDialedDuration / time.Millisecond)
+			stat["tcp_ipv4_port_forward_failed_count"] += client.qualityMetrics.TCPIPv4PortForwardFailedCount
+			stat["tcp_ipv4_port_forward_failed_duration"] +=
+				int64(client.qualityMetrics.TCPIPv4PortForwardFailedDuration / time.Millisecond)
+
+			stat["tcp_ipv6_port_forward_dialed_count"] += client.qualityMetrics.TCPIPv6PortForwardDialedCount
+			stat["tcp_ipv6_port_forward_dialed_duration"] +=
+				int64(client.qualityMetrics.TCPIPv6PortForwardDialedDuration / time.Millisecond)
+			stat["tcp_ipv6_port_forward_failed_count"] += client.qualityMetrics.TCPIPv6PortForwardFailedCount
+			stat["tcp_ipv6_port_forward_failed_duration"] +=
+				int64(client.qualityMetrics.TCPIPv6PortForwardFailedDuration / time.Millisecond)
 		}
 
-		client.qualityMetrics.tcpPortForwardDialedCount = 0
-		client.qualityMetrics.tcpPortForwardDialedDuration = 0
-		client.qualityMetrics.tcpPortForwardFailedCount = 0
-		client.qualityMetrics.tcpPortForwardFailedDuration = 0
-		client.qualityMetrics.tcpPortForwardRejectedDialingLimitCount = 0
+		client.qualityMetrics.TCPPortForwardDialedCount = 0
+		client.qualityMetrics.TCPPortForwardDialedDuration = 0
+		client.qualityMetrics.TCPPortForwardFailedCount = 0
+		client.qualityMetrics.TCPPortForwardFailedDuration = 0
+		client.qualityMetrics.TCPPortForwardRejectedDialingLimitCount = 0
+
+		client.qualityMetrics.TCPIPv4PortForwardDialedCount = 0
+		client.qualityMetrics.TCPIPv4PortForwardDialedDuration = 0
+		client.qualityMetrics.TCPIPv4PortForwardFailedCount = 0
+		client.qualityMetrics.TCPIPv4PortForwardFailedDuration = 0
+
+		client.qualityMetrics.TCPIPv6PortForwardDialedCount = 0
+		client.qualityMetrics.TCPIPv6PortForwardDialedDuration = 0
+		client.qualityMetrics.TCPIPv6PortForwardFailedCount = 0
+		client.qualityMetrics.TCPIPv6PortForwardFailedDuration = 0
 
 		client.Unlock()
 	}
@@ -955,8 +1004,7 @@ func (sshServer *sshServer) stopClients() {
 }
 
 func (sshServer *sshServer) handleClient(
-	listenerTunnelProtocol string, listenerPort int,
-	tunnelProtocol string, clientConn net.Conn) {
+	sshListener *sshListener, tunnelProtocol string, clientConn net.Conn) {
 
 	// Calling clientConn.RemoteAddr at this point, before any Read calls,
 	// satisfies the constraint documented in tapdance.Listen.
@@ -981,8 +1029,8 @@ func (sshServer *sshServer) handleClient(
 				logFields, errors.Trace(tunnelErr))
 			logIrregularTunnel(
 				sshServer.support,
-				listenerTunnelProtocol,
-				listenerPort,
+				sshListener.tunnelProtocol,
+				sshListener.port,
 				common.IPAddressFromAddr(clientAddr),
 				LogFields(logFields))
 
@@ -1052,7 +1100,10 @@ func (sshServer *sshServer) handleClient(
 	}
 
 	sshClient := newSshClient(
-		sshServer, listenerTunnelProtocol, listenerPort, tunnelProtocol, geoIPData)
+		sshServer,
+		sshListener,
+		tunnelProtocol,
+		geoIPData)
 
 	// sshClient.run _must_ call onSSHHandshakeFinished to release the semaphore:
 	// in any error case; or, as soon as the SSH handshake phase has successfully
@@ -1091,8 +1142,7 @@ func (sshServer *sshServer) monitorPortForwardDialError(err error) {
 type sshClient struct {
 	sync.Mutex
 	sshServer                            *sshServer
-	listenerTunnelProtocol               string
-	listenerPort                         int
+	sshListener                          *sshListener
 	tunnelProtocol                       string
 	sshConn                              ssh.Conn
 	activityConn                         *common.ActivityMonitoredConn
@@ -1146,11 +1196,19 @@ type randomStreamMetrics struct {
 // upstream link. These stats are recorded by each sshClient
 // and then reported and reset in sshServer.getLoadStats().
 type qualityMetrics struct {
-	tcpPortForwardDialedCount               int64
-	tcpPortForwardDialedDuration            time.Duration
-	tcpPortForwardFailedCount               int64
-	tcpPortForwardFailedDuration            time.Duration
-	tcpPortForwardRejectedDialingLimitCount int64
+	TCPPortForwardDialedCount               int64
+	TCPPortForwardDialedDuration            time.Duration
+	TCPPortForwardFailedCount               int64
+	TCPPortForwardFailedDuration            time.Duration
+	TCPPortForwardRejectedDialingLimitCount int64
+	TCPIPv4PortForwardDialedCount           int64
+	TCPIPv4PortForwardDialedDuration        time.Duration
+	TCPIPv4PortForwardFailedCount           int64
+	TCPIPv4PortForwardFailedDuration        time.Duration
+	TCPIPv6PortForwardDialedCount           int64
+	TCPIPv6PortForwardDialedDuration        time.Duration
+	TCPIPv6PortForwardFailedCount           int64
+	TCPIPv6PortForwardFailedDuration        time.Duration
 }
 
 type handshakeState struct {
@@ -1164,8 +1222,7 @@ type handshakeState struct {
 
 func newSshClient(
 	sshServer *sshServer,
-	listenerTunnelProtocol string,
-	listenerPort int,
+	sshListener *sshListener,
 	tunnelProtocol string,
 	geoIPData GeoIPData) *sshClient {
 
@@ -1177,8 +1234,7 @@ func newSshClient(
 
 	client := &sshClient{
 		sshServer:              sshServer,
-		listenerTunnelProtocol: listenerTunnelProtocol,
-		listenerPort:           listenerPort,
+		sshListener:            sshListener,
 		tunnelProtocol:         tunnelProtocol,
 		geoIPData:              geoIPData,
 		isFirstTunnelInSession: true,
@@ -1309,8 +1365,8 @@ func (sshClient *sshClient) run(
 				func(clientIP string, logFields common.LogFields) {
 					logIrregularTunnel(
 						sshClient.sshServer.support,
-						sshClient.listenerTunnelProtocol,
-						sshClient.listenerPort,
+						sshClient.sshListener.tunnelProtocol,
+						sshClient.sshListener.port,
 						clientIP,
 						LogFields(logFields))
 				})
@@ -2167,6 +2223,7 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	// unconditionally, overwriting any value from handshake.
 	logFields["relay_protocol"] = sshClient.tunnelProtocol
 
+	logFields["server_bpf"] = sshClient.sshListener.BPFProgramName
 	logFields["session_id"] = sshClient.sessionID
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["start_time"] = sshClient.activityConn.GetStartTime()
@@ -2231,7 +2288,7 @@ var blocklistHitsStatParams = []requestParamSpec{
 	{"last_connected", isLastConnected, requestParamOptional},
 }
 
-func (sshClient *sshClient) logBlocklistHits(remoteIP net.IP, tags []BlocklistTag) {
+func (sshClient *sshClient) logBlocklistHits(IP net.IP, domain string, tags []BlocklistTag) {
 
 	sshClient.Lock()
 
@@ -2249,7 +2306,12 @@ func (sshClient *sshClient) logBlocklistHits(remoteIP net.IP, tags []BlocklistTa
 	sshClient.Unlock()
 
 	for _, tag := range tags {
-		logFields["blocklist_ip_address"] = remoteIP.String()
+		if IP != nil {
+			logFields["blocklist_ip_address"] = IP.String()
+		}
+		if domain != "" {
+			logFields["blocklist_domain"] = domain
+		}
 		logFields["blocklist_source"] = tag.Source
 		logFields["blocklist_subject"] = tag.Subject
 
@@ -2712,9 +2774,9 @@ func (sshClient *sshClient) isPortForwardPermitted(
 	// cases, a blocklist entry won't be dialed in any case. However, no logs
 	// will be recorded.
 
-	tags := sshClient.sshServer.support.Blocklist.Lookup(remoteIP)
+	tags := sshClient.sshServer.support.Blocklist.LookupIP(remoteIP)
 	if len(tags) > 0 {
-		sshClient.logBlocklistHits(remoteIP, tags)
+		sshClient.logBlocklistHits(remoteIP, "", tags)
 		if sshClient.sshServer.support.Config.BlocklistActive {
 			return false
 		}
@@ -2941,18 +3003,31 @@ func (sshClient *sshClient) closedPortForward(
 }
 
 func (sshClient *sshClient) updateQualityMetricsWithDialResult(
-	tcpPortForwardDialSuccess bool, dialDuration time.Duration) {
+	tcpPortForwardDialSuccess bool, dialDuration time.Duration, IP net.IP) {
 
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
 	if tcpPortForwardDialSuccess {
-		sshClient.qualityMetrics.tcpPortForwardDialedCount += 1
-		sshClient.qualityMetrics.tcpPortForwardDialedDuration += dialDuration
-
+		sshClient.qualityMetrics.TCPPortForwardDialedCount += 1
+		sshClient.qualityMetrics.TCPPortForwardDialedDuration += dialDuration
+		if IP.To4() != nil {
+			sshClient.qualityMetrics.TCPIPv4PortForwardDialedCount += 1
+			sshClient.qualityMetrics.TCPIPv4PortForwardDialedDuration += dialDuration
+		} else if IP != nil {
+			sshClient.qualityMetrics.TCPIPv6PortForwardDialedCount += 1
+			sshClient.qualityMetrics.TCPIPv6PortForwardDialedDuration += dialDuration
+		}
 	} else {
-		sshClient.qualityMetrics.tcpPortForwardFailedCount += 1
-		sshClient.qualityMetrics.tcpPortForwardFailedDuration += dialDuration
+		sshClient.qualityMetrics.TCPPortForwardFailedCount += 1
+		sshClient.qualityMetrics.TCPPortForwardFailedDuration += dialDuration
+		if IP.To4() != nil {
+			sshClient.qualityMetrics.TCPIPv4PortForwardFailedCount += 1
+			sshClient.qualityMetrics.TCPIPv4PortForwardFailedDuration += dialDuration
+		} else if IP != nil {
+			sshClient.qualityMetrics.TCPIPv6PortForwardFailedCount += 1
+			sshClient.qualityMetrics.TCPIPv6PortForwardFailedDuration += dialDuration
+		}
 	}
 }
 
@@ -2961,7 +3036,7 @@ func (sshClient *sshClient) updateQualityMetricsWithRejectedDialingLimit() {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
-	sshClient.qualityMetrics.tcpPortForwardRejectedDialingLimitCount += 1
+	sshClient.qualityMetrics.TCPPortForwardRejectedDialingLimitCount += 1
 }
 
 func (sshClient *sshClient) handleTCPChannel(
@@ -2999,13 +3074,51 @@ func (sshClient *sshClient) handleTCPChannel(
 		}
 	}
 
+	// Validate the domain name and check the domain blocklist before dialing.
+	//
+	// The IP blocklist is checked in isPortForwardPermitted, which also provides
+	// IP blocklist checking for the packet tunnel code path. When hostToConnect
+	// is an IP address, the following hostname resolution step effectively
+	// performs no actions and next immediate step is the isPortForwardPermitted
+	// check.
+	//
+	// Limitation: at this time, only clients that send domains in hostToConnect
+	// are subject to domain blocklist checks. Both the udpgw and packet tunnel
+	// modes perform tunneled DNS and send only IPs in hostToConnect.
+
+	if !isWebServerPortForward &&
+		net.ParseIP(hostToConnect) == nil {
+
+		// We're not doing comprehensive validation, to avoid overhead per port
+		// forward. This is a simple sanity check to ensure we don't process
+		// blantantly invalid input.
+		//
+		// TODO: validate with dns.IsDomainName?
+		if len(hostToConnect) > 255 {
+			// Note: not recording a port forward failure in this case
+			sshClient.rejectNewChannel(newChannel, "invalid domain name")
+			return
+		}
+
+		tags := sshClient.sshServer.support.Blocklist.LookupDomain(hostToConnect)
+		if len(tags) > 0 {
+			sshClient.logBlocklistHits(nil, hostToConnect, tags)
+			if sshClient.sshServer.support.Config.BlocklistActive {
+				// Note: not recording a port forward failure in this case
+				sshClient.rejectNewChannel(newChannel, "port forward not permitted")
+				return
+			}
+		}
+	}
+
 	// Dial the remote address.
 	//
-	// Hostname resolution is performed explicitly, as a separate step, as the target IP
-	// address is used for traffic rules (AllowSubnets) and OSL seed progress.
+	// Hostname resolution is performed explicitly, as a separate step, as the
+	// target IP address is used for traffic rules (AllowSubnets), OSL seed
+	// progress, and IP address blocklists.
 	//
-	// Contexts are used for cancellation (via sshClient.runCtx, which is cancelled
-	// when the client is stopping) and timeouts.
+	// Contexts are used for cancellation (via sshClient.runCtx, which is
+	// cancelled when the client is stopping) and timeouts.
 
 	dialStartTime := time.Now()
 
@@ -3015,8 +3128,10 @@ func (sshClient *sshClient) handleTCPChannel(
 	IPs, err := (&net.Resolver{}).LookupIPAddr(ctx, hostToConnect)
 	cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 
+	// IPv4 is preferred in case the host has limited IPv6 routing. IPv6 is
+	// selected and attempted only when there's no IPv4 option.
 	// TODO: shuffle list to try other IPs?
-	// TODO: IPv6 support
+
 	var IP net.IP
 	for _, ip := range IPs {
 		if ip.IP.To4() != nil {
@@ -3024,6 +3139,11 @@ func (sshClient *sshClient) handleTCPChannel(
 			break
 		}
 	}
+	if IP == nil && len(IPs) > 0 {
+		// If there are no IPv4 IPs, the first IP is IPv6.
+		IP = IPs[0].IP
+	}
+
 	if err == nil && IP == nil {
 		err = std_errors.New("no IP address")
 	}
@@ -3033,7 +3153,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	if err != nil {
 
 		// Record a port forward failure
-		sshClient.updateQualityMetricsWithDialResult(false, resolveElapsedTime)
+		sshClient.updateQualityMetricsWithDialResult(false, resolveElapsedTime, IP)
 
 		sshClient.rejectNewChannel(newChannel, fmt.Sprintf("LookupIP failed: %s", err))
 		return
@@ -3053,9 +3173,7 @@ func (sshClient *sshClient) handleTCPChannel(
 			portForwardTypeTCP,
 			IP,
 			portToConnect) {
-
 		// Note: not recording a port forward failure in this case
-
 		sshClient.rejectNewChannel(newChannel, "port forward not permitted")
 		return
 	}
@@ -3071,7 +3189,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 
 	// Record port forward success or failure
-	sshClient.updateQualityMetricsWithDialResult(err == nil, time.Since(dialStartTime))
+	sshClient.updateQualityMetricsWithDialResult(err == nil, time.Since(dialStartTime), IP)
 
 	if err != nil {
 
