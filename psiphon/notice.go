@@ -35,6 +35,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
 )
 
@@ -846,6 +847,14 @@ func NoticeApplicationParameters(keyValues parameters.KeyValues) {
 			"key", key,
 			"value", value)
 	}
+}
+
+// NoticeServerAlert reports server alerts. Each distinct server alert is
+// reported at most once per session.
+func NoticeServerAlert(alert protocol.AlertRequest) {
+	outputRepetitiveNotice(
+		"ServerAlert", fmt.Sprintf("%+v", alert), 0,
+		"ServerAlert", noticeIsDiagnostic, "reason", alert.Reason, "subject", alert.Subject)
 }
 
 type repetitiveNoticeState struct {

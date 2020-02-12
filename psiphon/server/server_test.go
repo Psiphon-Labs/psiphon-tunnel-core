@@ -926,13 +926,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("error creating client controller: %s", err)
 	}
 
+	connectedServer := make(chan struct{}, 1)
 	tunnelsEstablished := make(chan struct{}, 1)
 	homepageReceived := make(chan struct{}, 1)
 	slokSeeded := make(chan struct{}, 1)
-	clientConnectedNotice := make(chan map[string]interface{}, 1)
 
 	numPruneNotices := 0
 	pruneServerEntriesNoticesEmitted := make(chan struct{}, 1)
+
+	serverAlertDisallowedNoticesEmitted := make(chan struct{}, 1)
 
 	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
@@ -945,6 +947,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			}
 
 			switch noticeType {
+
+			case "ConnectedServer":
+				sendNotificationReceived(connectedServer)
 
 			case "Tunnels":
 				count := int(payload["count"].(float64))
@@ -969,10 +974,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 					sendNotificationReceived(pruneServerEntriesNoticesEmitted)
 				}
 
-			case "ConnectedServer":
-				select {
-				case clientConnectedNotice <- payload:
-				default:
+			case "ServerAlert":
+				reason := payload["reason"].(string)
+				if reason == protocol.PSIPHON_API_ALERT_DISALLOWED_TRAFFIC {
+					sendNotificationReceived(serverAlertDisallowedNoticesEmitted)
 				}
 			}
 		}))
@@ -1022,7 +1027,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		close(timeoutSignal)
 	}()
 
-	waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel establish timeout exceeded")
+	waitOnNotification(t, connectedServer, timeoutSignal, "connected server timeout exceeded")
+	waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel established timeout exceeded")
 	waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
 
 	expectTrafficFailure := runConfig.denyTrafficRules || (runConfig.omitAuthorization && runConfig.requireAuthorization)
@@ -1064,17 +1070,24 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
-	// Test: await SLOK payload
+	// Test: await SLOK payload or server alert notice
+
+	time.Sleep(1 * time.Second)
 
 	if !expectTrafficFailure {
 
-		time.Sleep(1 * time.Second)
 		waitOnNotification(t, slokSeeded, timeoutSignal, "SLOK seeded timeout exceeded")
 
 		numSLOKs := psiphon.CountSLOKs()
 		if numSLOKs != expectedNumSLOKs {
 			t.Fatalf("unexpected number of SLOKs: %d", numSLOKs)
 		}
+
+	} else {
+
+		// Note: in expectTrafficFailure case, timeoutSignal may have already fired.
+
+		waitOnNotification(t, serverAlertDisallowedNoticesEmitted, nil, "")
 	}
 
 	// Test: await expected prune server entry notices
@@ -1082,12 +1095,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Note: will take up to PsiphonAPIStatusRequestShortPeriodMax to emit.
 
 	if expectedNumPruneNotices > 0 {
-
-		waitOnNotification(
-			t,
-			pruneServerEntriesNoticesEmitted,
-			timeoutSignal,
-			"prune server entries timeout exceeded")
+		waitOnNotification(t, pruneServerEntriesNoticesEmitted, nil, "")
 	}
 
 	if runConfig.doDanglingTCPConn {
@@ -1110,18 +1118,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	stopServer()
 	stopServer = nil
 
+	// Test: all expected server logs were emitted
+
 	// TODO: stops should be fully synchronous, but, intermittently,
 	// server_tunnel fails to appear ("missing server tunnel log")
 	// without this delay.
 	time.Sleep(100 * time.Millisecond)
-
-	// Test: all expected logs/notices were emitted
-
-	select {
-	case <-clientConnectedNotice:
-	default:
-		t.Fatalf("missing client connected notice")
-	}
 
 	select {
 	case logFields := <-serverConnectedLog:
@@ -1926,10 +1928,14 @@ func sendNotificationReceived(c chan<- struct{}) {
 }
 
 func waitOnNotification(t *testing.T, c, timeoutSignal <-chan struct{}, timeoutMessage string) {
-	select {
-	case <-c:
-	case <-timeoutSignal:
-		t.Fatalf(timeoutMessage)
+	if timeoutSignal == nil {
+		<-c
+	} else {
+		select {
+		case <-c:
+		case <-timeoutSignal:
+			t.Fatalf(timeoutMessage)
+		}
 	}
 }
 

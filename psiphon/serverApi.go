@@ -1009,6 +1009,8 @@ func HandleServerRequest(
 	switch name {
 	case protocol.PSIPHON_API_OSL_REQUEST_NAME:
 		return HandleOSLRequest(tunnelOwner, tunnel, payload)
+	case protocol.PSIPHON_API_ALERT_REQUEST_NAME:
+		return HandleAlertRequest(tunnelOwner, tunnel, payload)
 	}
 
 	return errors.Tracef("invalid request name: %s", name)
@@ -1046,6 +1048,20 @@ func HandleOSLRequest(
 	if seededNewSLOK {
 		tunnelOwner.SignalSeededNewSLOK()
 	}
+
+	return nil
+}
+
+func HandleAlertRequest(
+	tunnelOwner TunnelOwner, tunnel *Tunnel, payload []byte) error {
+
+	var alertRequest protocol.AlertRequest
+	err := json.Unmarshal(payload, &alertRequest)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	NoticeServerAlert(alertRequest)
 
 	return nil
 }
