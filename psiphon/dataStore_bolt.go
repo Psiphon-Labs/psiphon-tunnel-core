@@ -65,7 +65,7 @@ func datastoreOpenDB(rootDataDirectory string) (*datastoreDB, error) {
 			break
 		}
 
-		NoticeAlert("tryDatastoreOpenDB failed: %s", err)
+		NoticeWarning("tryDatastoreOpenDB failed: %s", err)
 
 		// The datastore file may be corrupt, so, in subsequent iterations, set the
 		// "reset" flag and attempt to delete the file and try again.
@@ -99,7 +99,7 @@ func tryDatastoreOpenDB(rootDataDirectory string, reset bool) (retdb *datastoreD
 	filename := filepath.Join(rootDataDirectory, "psiphon.boltdb")
 
 	if reset {
-		NoticeAlert("tryDatastoreOpenDB: reset")
+		NoticeWarning("tryDatastoreOpenDB: reset")
 		os.Remove(filename)
 	}
 
@@ -157,7 +157,7 @@ func tryDatastoreOpenDB(rootDataDirectory string, reset bool) (retdb *datastoreD
 			if tx.Bucket(obsoleteBucket) != nil {
 				err := tx.DeleteBucket(obsoleteBucket)
 				if err != nil {
-					NoticeAlert("DeleteBucket %s error: %s", obsoleteBucket, err)
+					NoticeWarning("DeleteBucket %s error: %s", obsoleteBucket, err)
 					// Continue, since this is not fatal
 				}
 			}
@@ -179,7 +179,7 @@ func (db *datastoreDB) isDatastoreFailed() bool {
 
 func (db *datastoreDB) setDatastoreFailed(r interface{}) {
 	atomic.StoreInt32(&db.isFailed, 1)
-	NoticeAlert("Datastore failed: %s", errors.Tracef("panic: %v", r))
+	NoticeWarning("Datastore failed: %s", errors.Tracef("panic: %v", r))
 }
 
 func (db *datastoreDB) close() error {

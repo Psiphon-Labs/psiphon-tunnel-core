@@ -320,7 +320,7 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 
 		err := tunnel.sshClient.Wait()
 		if err != nil {
-			NoticeAlert("close tunnel ssh error: %s", err)
+			NoticeWarning("close tunnel ssh error: %s", err)
 		}
 	}
 }
@@ -466,7 +466,7 @@ func (tunnel *Tunnel) wrapWithTransferStats(conn net.Conn) net.Conn {
 // SignalComponentFailure notifies the tunnel that an associated component has failed.
 // This will terminate the tunnel.
 func (tunnel *Tunnel) SignalComponentFailure() {
-	NoticeAlert("tunnel received component failure signal")
+	NoticeWarning("tunnel received component failure signal")
 	tunnel.Close(false)
 }
 
@@ -671,7 +671,7 @@ func dialTunnel(
 
 	// If dialConn is not a Closer, tunnel failure detection may be slower
 	if _, ok := dialConn.(common.Closer); !ok {
-		NoticeAlert("tunnel.dialTunnel: dialConn is not a Closer")
+		NoticeWarning("tunnel.dialTunnel: dialConn is not a Closer")
 	}
 
 	cleanupConn := dialConn
@@ -1213,7 +1213,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 				if err == nil {
 					serverRequest.Reply(true, nil)
 				} else {
-					NoticeAlert("HandleServerRequest for %s failed: %s", serverRequest.Type, err)
+					NoticeWarning("HandleServerRequest for %s failed: %s", serverRequest.Type, err)
 					serverRequest.Reply(false, nil)
 
 				}
@@ -1250,7 +1250,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		sendStats(tunnel)
 
 	} else {
-		NoticeAlert("operate tunnel error for %s: %s",
+		NoticeWarning("operate tunnel error for %s: %s",
 			tunnel.dialParams.ServerEntry.GetDiagnosticID(), err)
 		tunnelOwner.SignalTunnelFailure(tunnel)
 	}
@@ -1317,7 +1317,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstPeriodicKeepAlive bool, timeout ti
 				request,
 				response)
 			if err != nil {
-				NoticeAlert("AddSpeedTestSample failed: %s", errors.Trace(err))
+				NoticeWarning("AddSpeedTestSample failed: %s", errors.Trace(err))
 			}
 		}
 	}()
@@ -1346,7 +1346,7 @@ func sendStats(tunnel *Tunnel) bool {
 
 	err := tunnel.serverContext.DoStatusRequest(tunnel)
 	if err != nil {
-		NoticeAlert("DoStatusRequest failed for %s: %s",
+		NoticeWarning("DoStatusRequest failed for %s: %s",
 			tunnel.dialParams.ServerEntry.GetDiagnosticID(), err)
 	}
 

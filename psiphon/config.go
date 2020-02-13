@@ -879,7 +879,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 	// Emit notices now that notice files are set if configured
 	for _, msg := range noticeMigrationAlertMsgs {
-		NoticeAlert(msg)
+		NoticeWarning(msg)
 	}
 	for _, msg := range noticeMigrationInfoMsgs {
 		NoticeInfo(msg)
@@ -1041,7 +1041,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 	config.clientParameters, err = parameters.NewClientParameters(
 		func(err error) {
-			NoticeAlert("ClientParameters getValue failed: %s", err)
+			NoticeWarning("ClientParameters getValue failed: %s", err)
 		})
 	if err != nil {
 		return errors.Trace(err)
@@ -1124,7 +1124,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		for _, migration := range migrations {
 			err := common.DoFileMigration(migration)
 			if err != nil {
-				NoticeAlert("Config migration: %s", errors.Trace(err))
+				NoticeWarning("Config migration: %s", errors.Trace(err))
 			} else {
 				NoticeInfo("Config migration: moved %s to %s", migration.OldPath, migration.NewPath)
 			}
@@ -1134,18 +1134,18 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		if config.MigrateObfuscatedServerListDownloadDirectory != "" {
 			files, err := ioutil.ReadDir(config.MigrateObfuscatedServerListDownloadDirectory)
 			if err != nil {
-				NoticeAlert("Error reading OSL directory %s: %s", config.MigrateObfuscatedServerListDownloadDirectory, errors.Trace(err))
+				NoticeWarning("Error reading OSL directory %s: %s", config.MigrateObfuscatedServerListDownloadDirectory, errors.Trace(err))
 			} else if len(files) == 0 {
 				err := os.Remove(config.MigrateObfuscatedServerListDownloadDirectory)
 				if err != nil {
-					NoticeAlert("Error deleting empty OSL directory %s: %s", config.MigrateObfuscatedServerListDownloadDirectory, errors.Trace(err))
+					NoticeWarning("Error deleting empty OSL directory %s: %s", config.MigrateObfuscatedServerListDownloadDirectory, errors.Trace(err))
 				}
 			}
 		}
 
 		f, err := os.Create(migrationCompleteFilePath)
 		if err != nil {
-			NoticeAlert("Config migration: failed to create %s with error %s", migrationCompleteFilePath, errors.Trace(err))
+			NoticeWarning("Config migration: failed to create %s with error %s", migrationCompleteFilePath, errors.Trace(err))
 		} else {
 			NoticeInfo("Config migration: completed")
 			f.Close()
@@ -1873,7 +1873,7 @@ func migrationsFromLegacyFilePaths(config *Config) ([]common.FileMigration, erro
 
 		files, err := ioutil.ReadDir(config.MigrateObfuscatedServerListDownloadDirectory)
 		if err != nil {
-			NoticeAlert("Migration: failed to read directory %s with error %s", config.MigrateObfuscatedServerListDownloadDirectory, err)
+			NoticeWarning("Migration: failed to read directory %s with error %s", config.MigrateObfuscatedServerListDownloadDirectory, err)
 		} else {
 			for _, file := range files {
 				if oslFileRegex.MatchString(file.Name()) {
@@ -1907,7 +1907,7 @@ func migrationsFromLegacyFilePaths(config *Config) ([]common.FileMigration, erro
 
 		files, err := ioutil.ReadDir(upgradeDownloadDir)
 		if err != nil {
-			NoticeAlert("Migration: failed to read directory %s with error %s", upgradeDownloadDir, err)
+			NoticeWarning("Migration: failed to read directory %s with error %s", upgradeDownloadDir, err)
 		} else {
 
 			for _, file := range files {

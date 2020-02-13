@@ -96,7 +96,7 @@ func CloseDataStore() {
 
 	err := activeDatastoreDB.close()
 	if err != nil {
-		NoticeAlert("failed to close database: %s", errors.Trace(err))
+		NoticeWarning("failed to close database: %s", errors.Trace(err))
 	}
 
 	activeDatastoreDB = nil
@@ -315,7 +315,7 @@ func PromoteServerEntry(config *Config, ipAddress string) error {
 		bucket := tx.bucket(datastoreServerEntriesBucket)
 		data := bucket.get(serverEntryID)
 		if data == nil {
-			NoticeAlert(
+			NoticeWarning(
 				"PromoteServerEntry: ignoring unknown server entry: %s",
 				ipAddress)
 			return nil
@@ -690,7 +690,7 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 				// In case of data corruption or a bug causing this condition,
 				// do not stop iterating.
 				serverEntry = nil
-				NoticeAlert(
+				NoticeWarning(
 					"ServerEntryIterator.Next: json.Unmarshal failed: %s",
 					errors.Trace(err))
 			}
@@ -704,7 +704,7 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 		if serverEntry == nil {
 			// In case of data corruption or a bug causing this condition,
 			// do not stop iterating.
-			NoticeAlert("ServerEntryIterator.Next: unexpected missing server entry")
+			NoticeWarning("ServerEntryIterator.Next: unexpected missing server entry")
 			continue
 		}
 
@@ -776,7 +776,7 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 
 			if err != nil {
 				// Do not stop.
-				NoticeAlert(
+				NoticeWarning(
 					"ServerEntryIterator.Next: update server entry failed: %s",
 					errors.Trace(err))
 			}
@@ -826,7 +826,7 @@ func MakeCompatibleServerEntry(serverEntry *protocol.ServerEntry) *protocol.Serv
 func PruneServerEntry(config *Config, serverEntryTag string) {
 	err := pruneServerEntry(config, serverEntryTag)
 	if err != nil {
-		NoticeAlert(
+		NoticeWarning(
 			"PruneServerEntry failed: %s: %s",
 			serverEntryTag, errors.Trace(err))
 		return
@@ -951,7 +951,7 @@ func scanServerEntries(scanner func(*protocol.ServerEntry)) error {
 			if err != nil {
 				// In case of data corruption or a bug causing this condition,
 				// do not stop iterating.
-				NoticeAlert("scanServerEntries: %s", errors.Trace(err))
+				NoticeWarning("scanServerEntries: %s", errors.Trace(err))
 				continue
 			}
 			scanner(serverEntry)
@@ -981,7 +981,7 @@ func CountServerEntries() int {
 	})
 
 	if err != nil {
-		NoticeAlert("CountServerEntries failed: %s", err)
+		NoticeWarning("CountServerEntries failed: %s", err)
 		return 0
 	}
 
@@ -1016,7 +1016,7 @@ func CountServerEntriesWithConstraints(
 	})
 
 	if err != nil {
-		NoticeAlert("CountServerEntriesWithConstraints failed: %s", err)
+		NoticeWarning("CountServerEntriesWithConstraints failed: %s", err)
 		return 0, 0
 	}
 
@@ -1049,7 +1049,7 @@ func ReportAvailableRegions(config *Config, constraints *protocolSelectionConstr
 	})
 
 	if err != nil {
-		NoticeAlert("ReportAvailableRegions failed: %s", err)
+		NoticeWarning("ReportAvailableRegions failed: %s", err)
 		return
 	}
 
@@ -1301,7 +1301,7 @@ func CountUnreportedPersistentStats() int {
 	})
 
 	if err != nil {
-		NoticeAlert("CountUnreportedPersistentStats failed: %s", err)
+		NoticeWarning("CountUnreportedPersistentStats failed: %s", err)
 		return 0
 	}
 
@@ -1336,7 +1336,7 @@ func TakeOutUnreportedPersistentStats(config *Config) (map[string][][]byte, erro
 				var jsonData interface{}
 				err := json.Unmarshal(key, &jsonData)
 				if err != nil {
-					NoticeAlert(
+					NoticeWarning(
 						"Invalid key in TakeOutUnreportedPersistentStats: %s: %s",
 						string(key), err)
 					bucket.delete(key)
@@ -1490,7 +1490,7 @@ func CountSLOKs() int {
 	})
 
 	if err != nil {
-		NoticeAlert("CountSLOKs failed: %s", err)
+		NoticeWarning("CountSLOKs failed: %s", err)
 		return 0
 	}
 

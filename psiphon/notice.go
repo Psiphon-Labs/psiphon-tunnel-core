@@ -380,10 +380,10 @@ func NoticeInfo(format string, args ...interface{}) {
 		"message", fmt.Sprintf(format, args...))
 }
 
-// NoticeAlert is an alert message; typically a recoverable error condition
-func NoticeAlert(format string, args ...interface{}) {
+// NoticeWarning is a warning message; typically a recoverable error condition
+func NoticeWarning(format string, args ...interface{}) {
 	singletonNoticeLogger.outputNotice(
-		"Alert", noticeIsDiagnostic,
+		"Warning", noticeIsDiagnostic,
 		"message", fmt.Sprintf(format, args...))
 }
 
