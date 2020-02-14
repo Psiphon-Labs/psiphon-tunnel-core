@@ -848,6 +848,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.LocalSocksProxyPort = localSOCKSProxyPort
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
 	clientConfig.EmitSLOKs = true
+	clientConfig.EmitServerAlerts = true
 
 	if !runConfig.omitAuthorization {
 		clientConfig.Authorizations = []string{clientAuthorization}

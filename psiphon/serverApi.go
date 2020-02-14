@@ -1061,7 +1061,9 @@ func HandleAlertRequest(
 		return errors.Trace(err)
 	}
 
-	NoticeServerAlert(alertRequest)
+	if tunnel.config.EmitServerAlerts {
+		NoticeServerAlert(alertRequest)
+	}
 
 	return nil
 }
