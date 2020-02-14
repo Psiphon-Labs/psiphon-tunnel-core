@@ -97,6 +97,7 @@ public class PsiphonTunnel {
         default public void onStoppedWaitingForNetworkConnectivity() {}
         default public void onActiveAuthorizationIDs(List<String> authorizations) {}
         default public void onApplicationParameter(String key, Object value) {}
+        default public void onServerAlert(String reason, String subject) {}
         default public void onExiting() {}
     }
 
@@ -780,6 +781,10 @@ public class PsiphonTunnel {
                 mHostService.onApplicationParameter(
                     notice.getJSONObject("data").getString("key"),
                     notice.getJSONObject("data").get("value"));
+            } else if (noticeType.equals("ServerAlert")) {
+                mHostService.onServerAlert(
+                    notice.getJSONObject("data").getString("reason"),
+                    notice.getJSONObject("data").getString("subject"));
             }
 
             if (diagnostic) {
