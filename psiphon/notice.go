@@ -102,15 +102,12 @@ func GetEmitNetworkParameters() bool {
 //
 // Notices are encoded in JSON. Here's an example:
 //
-// {"data":{"message":"shutdown operate tunnel"},"noticeType":"Info","showUser":false,"timestamp":"2006-01-02T15:04:05.999999999Z07:00"}
+// {"data":{"message":"shutdown operate tunnel"},"noticeType":"Info","timestamp":"2006-01-02T15:04:05.999999999Z07:00"}
 //
 // All notices have the following fields:
 // - "noticeType": the type of notice, which indicates the meaning of the notice along with what's in the data payload.
 // - "data": additional structured data payload. For example, the "ListeningSocksProxyPort" notice type has a "port" integer
 // data in its payload.
-// - "showUser": whether the information should be displayed to the user. For example, this flag is set for "SocksProxyPortInUse"
-// as the user should be informed that their configured choice of listening port could not be used. Core clients should
-// anticipate that the core will add additional "showUser"=true notices in the future and emit at least the raw notice.
 // - "timestamp": UTC timezone, RFC3339Milli format timestamp for notice event
 //
 // See the Notice* functions for details on each notice meaning and payload.
@@ -202,11 +199,10 @@ func setNoticeFiles(
 }
 
 const (
-	noticeShowUser       = 1
-	noticeIsDiagnostic   = 2
-	noticeIsHomepage     = 4
-	noticeClearHomepages = 8
-	noticeSyncHomepages  = 16
+	noticeIsDiagnostic   = 1
+	noticeIsHomepage     = 2
+	noticeClearHomepages = 4
+	noticeSyncHomepages  = 8
 )
 
 // outputNotice encodes a notice in JSON and writes it to the output writer.
@@ -219,7 +215,6 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 	obj := make(map[string]interface{})
 	noticeData := make(map[string]interface{})
 	obj["noticeType"] = noticeType
-	obj["showUser"] = (noticeFlags&noticeShowUser != 0)
 	obj["data"] = noticeData
 	obj["timestamp"] = time.Now().UTC().Format(common.RFC3339Milli)
 	for i := 0; i < len(args)-1; i += 2 {
@@ -290,7 +285,7 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 // A NoticeInteralError handler must not call a Notice function.
 func makeNoticeInternalError(errorMessage string) []byte {
 	// Format an Alert Notice (_without_ using json.Marshal, since that can fail)
-	alertNoticeFormat := "{\"noticeType\":\"InternalError\",\"showUser\":false,\"timestamp\":\"%s\",\"data\":{\"message\":\"%s\"}}\n"
+	alertNoticeFormat := "{\"noticeType\":\"InternalError\",\"timestamp\":\"%s\",\"data\":{\"message\":\"%s\"}}\n"
 	return []byte(fmt.Sprintf(alertNoticeFormat, time.Now().UTC().Format(common.RFC3339Milli), errorMessage))
 
 }
@@ -561,8 +556,8 @@ func NoticeActiveTunnel(diagnosticID, protocol string, isTCS bool) {
 // NoticeSocksProxyPortInUse is a failure to use the configured LocalSocksProxyPort
 func NoticeSocksProxyPortInUse(port int) {
 	singletonNoticeLogger.outputNotice(
-		"SocksProxyPortInUse",
-		noticeShowUser, "port", port)
+		"SocksProxyPortInUse", 0,
+		"port", port)
 }
 
 // NoticeListeningSocksProxyPort is the selected port for the listening local SOCKS proxy
@@ -575,7 +570,7 @@ func NoticeListeningSocksProxyPort(port int) {
 // NoticeHttpProxyPortInUse is a failure to use the configured LocalHttpProxyPort
 func NoticeHttpProxyPortInUse(port int) {
 	singletonNoticeLogger.outputNotice(
-		"HttpProxyPortInUse", noticeShowUser,
+		"HttpProxyPortInUse", 0,
 		"port", port)
 }
 
@@ -652,14 +647,14 @@ func NoticeSessionId(sessionId string) {
 //
 func NoticeUntunneled(address string) {
 	singletonNoticeLogger.outputNotice(
-		"Untunneled", noticeShowUser,
+		"Untunneled", 0,
 		"address", address)
 }
 
 // NoticeSplitTunnelRegion reports that split tunnel is on for the given region.
 func NoticeSplitTunnelRegion(region string) {
 	singletonNoticeLogger.outputNotice(
-		"SplitTunnelRegion", noticeShowUser,
+		"SplitTunnelRegion", 0,
 		"region", region)
 }
 
@@ -667,7 +662,7 @@ func NoticeSplitTunnelRegion(region string) {
 // user may have input, for example, an incorrect address or incorrect credentials.
 func NoticeUpstreamProxyError(err error) {
 	singletonNoticeLogger.outputNotice(
-		"UpstreamProxyError", noticeShowUser,
+		"UpstreamProxyError", 0,
 		"message", err.Error())
 }
 
@@ -827,7 +822,7 @@ func NoticePruneServerEntry(serverEntryTag string) {
 // duration was exceeded.
 func NoticeEstablishTunnelTimeout(timeout time.Duration) {
 	singletonNoticeLogger.outputNotice(
-		"EstablishTunnelTimeout", noticeShowUser,
+		"EstablishTunnelTimeout", 0,
 		"timeout", timeout)
 }
 
