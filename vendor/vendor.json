@@ -604,10 +604,10 @@
 			"revisionTime": "2019-02-05T21:23:42Z"
 		},
 		{
-			"checksumSHA1": "1ezNasqd516o9HG59beqc5s+2Ro=",
+			"checksumSHA1": "doZpjkzTAPKKLXeKMJZfIL0T5Nw=",
 			"path": "golang.org/x/crypto/cryptobyte",
-			"revision": "a1f597ede03a7bef967a422b5b3a5bd08805a01e",
-			"revisionTime": "2019-02-05T21:23:42Z"
+			"revision": "1d94cc7ab1c630336ab82ccb9c9cda72a875c382",
+			"revisionTime": "2020-02-12T18:29:22Z"
 		},
 		{
 			"checksumSHA1": "YEoV2AiZZPDuF7pMVzDt7buS9gc=",
