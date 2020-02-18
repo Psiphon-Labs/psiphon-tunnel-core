@@ -169,7 +169,7 @@ func (tx *datastoreTx) bucket(name []byte) *datastoreBucket {
 		// The original datastore interface does not return an error from Bucket,
 		// so emit notice, and return zero-value bucket for which all
 		// operations will fail.
-		NoticeAlert("bucket failed: %s", errors.Trace(err))
+		NoticeWarning("bucket failed: %s", errors.Trace(err))
 		return &datastoreBucket{}
 	}
 	return &datastoreBucket{
@@ -203,7 +203,7 @@ func (b *datastoreBucket) get(key []byte) []byte {
 	if err != nil {
 		// The original datastore interface does not return an error from Get,
 		// so emit notice.
-		NoticeAlert("get failed: %s", errors.Trace(err))
+		NoticeWarning("get failed: %s", errors.Trace(err))
 		return nil
 	}
 	if valueBuffer == nil {
@@ -286,7 +286,7 @@ func (b *datastoreBucket) cursor() *datastoreCursor {
 	}
 	fileInfos, err := ioutil.ReadDir(b.bucketDirectory)
 	if err != nil {
-		NoticeAlert("cursor failed: %s", errors.Trace(err))
+		NoticeWarning("cursor failed: %s", errors.Trace(err))
 		return &datastoreCursor{}
 	}
 	return &datastoreCursor{
@@ -328,12 +328,12 @@ func (c *datastoreCursor) currentKey() []byte {
 	}
 	info := c.fileInfos[c.index]
 	if info.IsDir() {
-		NoticeAlert("cursor failed: unexpected dir")
+		NoticeWarning("cursor failed: unexpected dir")
 		return nil
 	}
 	key, err := hex.DecodeString(info.Name())
 	if err != nil {
-		NoticeAlert("cursor failed: %s", errors.Trace(err))
+		NoticeWarning("cursor failed: %s", errors.Trace(err))
 		return nil
 	}
 	return key
@@ -372,7 +372,7 @@ func (c *datastoreCursor) current() ([]byte, []byte) {
 		err = std_errors.New("unexpected nil value")
 	}
 	if err != nil {
-		NoticeAlert("cursor failed: %s", errors.Trace(err))
+		NoticeWarning("cursor failed: %s", errors.Trace(err))
 		return nil, nil
 	}
 	c.lastBuffer = valueBuffer

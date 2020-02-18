@@ -62,7 +62,7 @@ func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, e
 		}
 
 		if GetEmitNetworkParameters() {
-			NoticeAlert("retry resolve host %s: %s", host, err)
+			NoticeWarning("retry resolve host %s: %s", host, err)
 		}
 
 		return bindLookupIP(ctx, host, dnsServer, config)

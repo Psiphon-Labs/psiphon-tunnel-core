@@ -70,6 +70,7 @@ const (
 	MAX_AUTHORIZATIONS                    = 16
 	PRE_HANDSHAKE_RANDOM_STREAM_MAX_COUNT = 1
 	RANDOM_STREAM_MAX_BYTES               = 10485760
+	ALERT_REQUEST_QUEUE_BUFFER_SIZE       = 16
 )
 
 // TunnelServer is the main server that accepts Psiphon client
@@ -1169,6 +1170,8 @@ type sshClient struct {
 	stopTimer                            *time.Timer
 	preHandshakeRandomStreamMetrics      randomStreamMetrics
 	postHandshakeRandomStreamMetrics     randomStreamMetrics
+	sendAlertRequests                    chan protocol.AlertRequest
+	sentAlertRequests                    map[protocol.AlertRequest]bool
 }
 
 type trafficState struct {
@@ -1243,6 +1246,8 @@ func newSshClient(
 		runCtx:                 runCtx,
 		stopRunning:            stopRunning,
 		stopped:                make(chan struct{}),
+		sendAlertRequests:      make(chan protocol.AlertRequest, ALERT_REQUEST_QUEUE_BUFFER_SIZE),
+		sentAlertRequests:      make(map[protocol.AlertRequest]bool),
 	}
 
 	client.tcpTrafficState.availablePortForwardCond = sync.NewCond(new(sync.Mutex))
@@ -1653,13 +1658,20 @@ func (sshClient *sshClient) runTunnel(
 		sshClient.handleSSHRequests(requests)
 	}()
 
-	// Start OSL sender
+	// Start request senders
 
 	if sshClient.supportsServerRequests {
+
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
 			sshClient.runOSLSender()
+		}()
+
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			sshClient.runAlertSender()
 		}()
 	}
 
@@ -2393,6 +2405,70 @@ func (sshClient *sshClient) sendOSLRequest() error {
 	return nil
 }
 
+// runAlertSender dequeues and sends alert requests to the client. As these
+// alerts are informational, there is no retry logic and no SSH client
+// acknowledgement (wantReply) is requested. This worker scheme allows
+// nonconcurrent components including udpgw and packet tunnel to enqueue
+// alerts without blocking their traffic processing.
+func (sshClient *sshClient) runAlertSender() {
+	for {
+		select {
+		case <-sshClient.runCtx.Done():
+			return
+
+		case request := <-sshClient.sendAlertRequests:
+			payload, err := json.Marshal(request)
+			if err != nil {
+				log.WithTraceFields(LogFields{"error": err}).Warning("Marshal failed")
+				break
+			}
+			_, _, err = sshClient.sshConn.SendRequest(
+				protocol.PSIPHON_API_ALERT_REQUEST_NAME,
+				false,
+				payload)
+			if err != nil && !isExpectedTunnelIOError(err) {
+				log.WithTraceFields(LogFields{"error": err}).Warning("SendRequest failed")
+				break
+			}
+			sshClient.Lock()
+			sshClient.sentAlertRequests[request] = true
+			sshClient.Unlock()
+		}
+	}
+}
+
+// enqueueAlertRequest enqueues an alert request to be sent to the client.
+// Only one request is sent per tunnel per protocol.AlertRequest value;
+// subsequent alerts with the same value are dropped. enqueueAlertRequest will
+// not block until the queue exceeds ALERT_REQUEST_QUEUE_BUFFER_SIZE.
+func (sshClient *sshClient) enqueueAlertRequest(request protocol.AlertRequest) {
+	sshClient.Lock()
+	if sshClient.sentAlertRequests[request] {
+		sshClient.Unlock()
+		return
+	}
+	sshClient.Unlock()
+	select {
+	case <-sshClient.runCtx.Done():
+	case sshClient.sendAlertRequests <- request:
+	}
+}
+
+func (sshClient *sshClient) enqueueDisallowedTrafficAlertRequest() {
+	sshClient.enqueueAlertRequest(protocol.AlertRequest{
+		Reason: protocol.PSIPHON_API_ALERT_DISALLOWED_TRAFFIC,
+	})
+}
+
+func (sshClient *sshClient) enqueueUnsafeTrafficAlertRequest(tags []BlocklistTag) {
+	for _, tag := range tags {
+		sshClient.enqueueAlertRequest(protocol.AlertRequest{
+			Reason:  protocol.PSIPHON_API_ALERT_UNSAFE_TRAFFIC,
+			Subject: tag.Subject,
+		})
+	}
+}
+
 func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessage string) {
 
 	// We always return the reject reason "Prohibited":
@@ -2776,33 +2852,49 @@ func (sshClient *sshClient) isPortForwardPermitted(
 
 	tags := sshClient.sshServer.support.Blocklist.LookupIP(remoteIP)
 	if len(tags) > 0 {
+
 		sshClient.logBlocklistHits(remoteIP, "", tags)
+
 		if sshClient.sshServer.support.Config.BlocklistActive {
+			// Actively alert and block
+			sshClient.enqueueUnsafeTrafficAlertRequest(tags)
 			return false
 		}
 	}
 
 	// Don't lock before calling logBlocklistHits.
+	// Unlock before calling enqueueDisallowedTrafficAlertRequest/log.
+
 	sshClient.Lock()
-	defer sshClient.Unlock()
+
+	allowed := true
 
 	// Client must complete handshake before port forwards are permitted.
 	if !sshClient.handshakeState.completed {
-		return false
+		allowed = false
 	}
 
-	// Traffic rules checks.
-
-	switch portForwardType {
-	case portForwardTypeTCP:
-		if sshClient.trafficRules.AllowTCPPort(remoteIP, port) {
-			return true
-		}
-	case portForwardTypeUDP:
-		if sshClient.trafficRules.AllowUDPPort(remoteIP, port) {
-			return true
+	if allowed {
+		// Traffic rules checks.
+		switch portForwardType {
+		case portForwardTypeTCP:
+			if !sshClient.trafficRules.AllowTCPPort(remoteIP, port) {
+				allowed = false
+			}
+		case portForwardTypeUDP:
+			if !sshClient.trafficRules.AllowUDPPort(remoteIP, port) {
+				allowed = false
+			}
 		}
 	}
+
+	sshClient.Unlock()
+
+	if allowed {
+		return true
+	}
+
+	sshClient.enqueueDisallowedTrafficAlertRequest()
 
 	log.WithTraceFields(
 		LogFields{
@@ -3102,9 +3194,13 @@ func (sshClient *sshClient) handleTCPChannel(
 
 		tags := sshClient.sshServer.support.Blocklist.LookupDomain(hostToConnect)
 		if len(tags) > 0 {
+
 			sshClient.logBlocklistHits(nil, hostToConnect, tags)
+
 			if sshClient.sshServer.support.Config.BlocklistActive {
+				// Actively alert and block
 				// Note: not recording a port forward failure in this case
+				sshClient.enqueueUnsafeTrafficAlertRequest(tags)
 				sshClient.rejectNewChannel(newChannel, "port forward not permitted")
 				return
 			}

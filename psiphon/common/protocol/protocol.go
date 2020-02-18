@@ -59,6 +59,10 @@ const (
 	PSIPHON_API_CONNECTED_REQUEST_NAME = "psiphon-connected"
 	PSIPHON_API_STATUS_REQUEST_NAME    = "psiphon-status"
 	PSIPHON_API_OSL_REQUEST_NAME       = "psiphon-osl"
+	PSIPHON_API_ALERT_REQUEST_NAME     = "psiphon-alert"
+
+	PSIPHON_API_ALERT_DISALLOWED_TRAFFIC = "disallowed-traffic"
+	PSIPHON_API_ALERT_UNSAFE_TRAFFIC     = "unsafe-traffic"
 
 	// PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME may still be used by older Android clients
 	PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME = "psiphon-client-verification"
@@ -382,6 +386,11 @@ type MeekCookieData struct {
 type RandomStreamRequest struct {
 	UpstreamBytes   int `json:"u"`
 	DownstreamBytes int `json:"d"`
+}
+
+type AlertRequest struct {
+	Reason  string `json:"reason"`
+	Subject string `json:"subject"`
 }
 
 func DeriveSSHServerKEXPRNGSeed(obfuscatedKey string) (*prng.Seed, error) {

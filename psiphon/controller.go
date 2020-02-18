@@ -197,7 +197,7 @@ func (controller *Controller) Run(ctx context.Context) {
 	if !controller.config.DisableLocalSocksProxy {
 		socksProxy, err := NewSocksProxy(controller.config, controller, listenIP)
 		if err != nil {
-			NoticeAlert("error initializing local SOCKS proxy: %s", err)
+			NoticeWarning("error initializing local SOCKS proxy: %s", err)
 			return
 		}
 		defer socksProxy.Close()
@@ -206,7 +206,7 @@ func (controller *Controller) Run(ctx context.Context) {
 	if !controller.config.DisableLocalHTTPProxy {
 		httpProxy, err := NewHttpProxy(controller.config, controller, listenIP)
 		if err != nil {
-			NoticeAlert("error initializing local HTTP proxy: %s", err)
+			NoticeWarning("error initializing local HTTP proxy: %s", err)
 			return
 		}
 		defer httpProxy.Close()
@@ -275,7 +275,7 @@ func (controller *Controller) Run(ctx context.Context) {
 // SignalComponentFailure notifies the controller that an associated component has failed.
 // This will terminate the controller.
 func (controller *Controller) SignalComponentFailure() {
-	NoticeAlert("controller shutdown due to component failure")
+	NoticeWarning("controller shutdown due to component failure")
 	controller.stopRunning()
 }
 
@@ -393,7 +393,7 @@ fetcherLoop:
 				break retryLoop
 			}
 
-			NoticeAlert("failed to fetch %s remote server list: %s", name, err)
+			NoticeWarning("failed to fetch %s remote server list: %s", name, err)
 
 			retryPeriod := controller.config.GetClientParameters().Get().Duration(
 				parameters.FetchRemoteServerListRetryPeriod)
@@ -461,7 +461,7 @@ loop:
 			if err == nil {
 				reported = true
 			} else {
-				NoticeAlert("failed to make connected request: %s", err)
+				NoticeWarning("failed to make connected request: %s", err)
 			}
 		}
 
@@ -585,7 +585,7 @@ downloadLoop:
 				break retryLoop
 			}
 
-			NoticeAlert("failed to download upgrade: %s", err)
+			NoticeWarning("failed to download upgrade: %s", err)
 
 			timeout := controller.config.GetClientParameters().Get().Duration(
 				parameters.FetchUpgradeRetryPeriod)
@@ -643,7 +643,7 @@ loop:
 			}
 
 		case failedTunnel := <-controller.failedTunnels:
-			NoticeAlert("tunnel failed: %s", failedTunnel.dialParams.ServerEntry.GetDiagnosticID())
+			NoticeWarning("tunnel failed: %s", failedTunnel.dialParams.ServerEntry.GetDiagnosticID())
 			controller.terminateTunnel(failedTunnel)
 
 			// Clear the reference to this tunnel before calling startEstablishing,
@@ -698,7 +698,7 @@ loop:
 				err := connectedTunnel.Activate(controller.runCtx, controller)
 
 				if err != nil {
-					NoticeAlert("failed to activate %s: %s",
+					NoticeWarning("failed to activate %s: %s",
 						connectedTunnel.dialParams.ServerEntry.GetDiagnosticID(), err)
 					discardTunnel = true
 				} else {
@@ -706,7 +706,7 @@ loop:
 					// calls registerTunnel -- and after checking numTunnels; so failure is not
 					// expected.
 					if !controller.registerTunnel(connectedTunnel) {
-						NoticeAlert("failed to register %s: %s",
+						NoticeWarning("failed to register %s: %s",
 							connectedTunnel.dialParams.ServerEntry.GetDiagnosticID(), err)
 						discardTunnel = true
 					}
@@ -866,7 +866,7 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 		if activeTunnel.dialParams.ServerEntry.IpAddress ==
 			tunnel.dialParams.ServerEntry.IpAddress {
 
-			NoticeAlert("duplicate tunnel: %s", tunnel.dialParams.ServerEntry.GetDiagnosticID())
+			NoticeWarning("duplicate tunnel: %s", tunnel.dialParams.ServerEntry.GetDiagnosticID())
 			return false
 		}
 	}
@@ -1338,7 +1338,7 @@ func (controller *Controller) launchEstablishing() {
 				controller.protocolSelectionConstraints,
 				initialCount,
 				count)
-			NoticeAlert("skipping initial limit tunnel protocols")
+			NoticeWarning("skipping initial limit tunnel protocols")
 			controller.protocolSelectionConstraints.initialLimitProtocolsCandidateCount = 0
 
 			// Since we were unable to satisfy the InitialLimitTunnelProtocols
@@ -1437,7 +1437,7 @@ func (controller *Controller) getTactics(done chan struct{}) {
 		GetTacticsStorer(),
 		controller.config.GetNetworkID())
 	if err != nil {
-		NoticeAlert("get stored tactics failed: %s", err)
+		NoticeWarning("get stored tactics failed: %s", err)
 
 		// The error will be due to a local datastore problem.
 		// While we could proceed with the tactics request, this
@@ -1450,7 +1450,7 @@ func (controller *Controller) getTactics(done chan struct{}) {
 		iterator, err := NewTacticsServerEntryIterator(
 			controller.config)
 		if err != nil {
-			NoticeAlert("tactics iterator failed: %s", err)
+			NoticeWarning("tactics iterator failed: %s", err)
 			return
 		}
 		defer iterator.Close()
@@ -1465,13 +1465,13 @@ func (controller *Controller) getTactics(done chan struct{}) {
 
 			serverEntry, err := iterator.Next()
 			if err != nil {
-				NoticeAlert("tactics iterator failed: %s", err)
+				NoticeWarning("tactics iterator failed: %s", err)
 				return
 			}
 
 			if serverEntry == nil {
 				if iteration == 0 {
-					NoticeAlert("tactics request skipped: no capable servers")
+					NoticeWarning("tactics request skipped: no capable servers")
 					return
 				}
 
@@ -1484,7 +1484,7 @@ func (controller *Controller) getTactics(done chan struct{}) {
 				break
 			}
 
-			NoticeAlert("tactics request failed: %s", err)
+			NoticeWarning("tactics request failed: %s", err)
 
 			// On error, proceed with a retry, as the error is likely
 			// due to a network failure.
@@ -1516,7 +1516,7 @@ func (controller *Controller) getTactics(done chan struct{}) {
 		err := controller.config.SetClientParameters(
 			tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
 		if err != nil {
-			NoticeAlert("apply tactics failed: %s", err)
+			NoticeWarning("apply tactics failed: %s", err)
 
 			// The error will be due to invalid tactics values from
 			// the server. When ApplyClientParameters fails, all
@@ -1645,7 +1645,7 @@ func (controller *Controller) establishCandidateGenerator() {
 
 	applyServerAffinity, iterator, err := NewServerEntryIterator(controller.config)
 	if err != nil {
-		NoticeAlert("failed to iterate over candidates: %s", err)
+		NoticeWarning("failed to iterate over candidates: %s", err)
 		controller.SignalComponentFailure()
 		return
 	}
@@ -1710,7 +1710,7 @@ loop:
 
 			serverEntry, err := iterator.Next()
 			if err != nil {
-				NoticeAlert("failed to get next candidate: %s", err)
+				NoticeWarning("failed to get next candidate: %s", err)
 				controller.SignalComponentFailure()
 				break loop
 			}
@@ -1786,7 +1786,18 @@ loop:
 
 		// Trigger RSL, OSL, and upgrade checks after failing to establish a
 		// tunnel in the first round.
-		controller.triggerFetches()
+		//
+		// No fetches are triggered when TargetServerEntry is specified. In that
+		// case, we're only trying to connect to a specific server entry; and, the
+		// iterator will complete immediately since there is only one candidate,
+		// triggering fetches unnecessarily.
+		//
+		// TODO: in standard iterator case, should we wait for all candidates to
+		// _complete_ before triggering fetches? Currently, the iterator loop
+		// exits with one round of candidates in flight.
+		if controller.config.TargetServerEntry == "" {
+			controller.triggerFetches()
+		}
 
 		// After a complete iteration of candidate servers, pause before iterating again.
 		// This helps avoid some busy wait loop conditions, and also allows some time for

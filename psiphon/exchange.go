@@ -76,7 +76,7 @@ import (
 func ExportExchangePayload(config *Config) string {
 	payload, err := exportExchangePayload(config)
 	if err != nil {
-		NoticeAlert("ExportExchangePayload failed: %s", errors.Trace(err))
+		NoticeWarning("ExportExchangePayload failed: %s", errors.Trace(err))
 		return ""
 	}
 	return payload
@@ -99,7 +99,7 @@ func ExportExchangePayload(config *Config) string {
 func ImportExchangePayload(config *Config, encodedPayload string) bool {
 	err := importExchangePayload(config, encodedPayload)
 	if err != nil {
-		NoticeAlert("ImportExchangePayload failed: %s", errors.Trace(err))
+		NoticeWarning("ImportExchangePayload failed: %s", errors.Trace(err))
 		return false
 	}
 	return true

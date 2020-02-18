@@ -241,7 +241,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		err = protocol.ValidateServerEntryFields(serverEntryFields)
 		if err != nil {
 			// Skip this entry and continue with the next one
-			NoticeAlert("invalid handshake server entry: %s", err)
+			NoticeWarning("invalid handshake server entry: %s", err)
 			continue
 		}
 
@@ -273,7 +273,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 			handshakeResponse.HttpsRequestRegexes)
 
 		for _, notice := range regexpsNotices {
-			NoticeAlert(notice)
+			NoticeWarning(notice)
 		}
 	}
 
@@ -509,7 +509,7 @@ func makeStatusRequestPayload(
 
 	persistentStats, err := TakeOutUnreportedPersistentStats(config)
 	if err != nil {
-		NoticeAlert(
+		NoticeWarning(
 			"TakeOutUnreportedPersistentStats failed: %s", errors.Trace(err))
 		persistentStats = nil
 		// Proceed with transferStats only
@@ -565,7 +565,7 @@ func putBackStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 	if err != nil {
 		// These persistent stats records won't be resent until after a
 		// datastore re-initialization.
-		NoticeAlert(
+		NoticeWarning(
 			"PutBackUnreportedPersistentStats failed: %s", errors.Trace(err))
 	}
 }
@@ -574,7 +574,7 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 	err := ClearReportedPersistentStats(payloadInfo.persistentStats)
 	if err != nil {
 		// These persistent stats records may be resent.
-		NoticeAlert(
+		NoticeWarning(
 			"ClearReportedPersistentStats failed: %s", errors.Trace(err))
 	}
 }
@@ -1009,6 +1009,8 @@ func HandleServerRequest(
 	switch name {
 	case protocol.PSIPHON_API_OSL_REQUEST_NAME:
 		return HandleOSLRequest(tunnelOwner, tunnel, payload)
+	case protocol.PSIPHON_API_ALERT_REQUEST_NAME:
+		return HandleAlertRequest(tunnelOwner, tunnel, payload)
 	}
 
 	return errors.Tracef("invalid request name: %s", name)
@@ -1033,7 +1035,7 @@ func HandleOSLRequest(
 		duplicate, err := SetSLOK(slok.ID, slok.Key)
 		if err != nil {
 			// TODO: return error to trigger retry?
-			NoticeAlert("SetSLOK failed: %s", errors.Trace(err))
+			NoticeWarning("SetSLOK failed: %s", errors.Trace(err))
 		} else if !duplicate {
 			seededNewSLOK = true
 		}
@@ -1045,6 +1047,22 @@ func HandleOSLRequest(
 
 	if seededNewSLOK {
 		tunnelOwner.SignalSeededNewSLOK()
+	}
+
+	return nil
+}
+
+func HandleAlertRequest(
+	tunnelOwner TunnelOwner, tunnel *Tunnel, payload []byte) error {
+
+	var alertRequest protocol.AlertRequest
+	err := json.Unmarshal(payload, &alertRequest)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if tunnel.config.EmitServerAlerts {
+		NoticeServerAlert(alertRequest)
 	}
 
 	return nil

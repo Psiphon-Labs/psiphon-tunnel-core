@@ -171,7 +171,7 @@ func MakeDialParameters(
 
 	dialParams, err := GetDialParameters(serverEntry.IpAddress, networkID)
 	if err != nil {
-		NoticeAlert("GetDialParameters failed: %s", err)
+		NoticeWarning("GetDialParameters failed: %s", err)
 		dialParams = nil
 		// Proceed, without existing dial parameters.
 	}
@@ -213,7 +213,7 @@ func MakeDialParameters(
 
 		err = DeleteDialParameters(serverEntry.IpAddress, networkID)
 		if err != nil {
-			NoticeAlert("DeleteDialParameters failed: %s", err)
+			NoticeWarning("DeleteDialParameters failed: %s", err)
 		}
 		dialParams = nil
 	}
@@ -693,7 +693,7 @@ func (dialParams *DialParameters) Succeeded() {
 	NoticeInfo("Set dial parameters for %s", dialParams.ServerEntry.GetDiagnosticID())
 	err := SetDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID, dialParams)
 	if err != nil {
-		NoticeAlert("SetDialParameters failed: %s", err)
+		NoticeWarning("SetDialParameters failed: %s", err)
 	}
 }
 
@@ -718,7 +718,7 @@ func (dialParams *DialParameters) Failed(config *Config) {
 		NoticeInfo("Delete dial parameters for %s", dialParams.ServerEntry.GetDiagnosticID())
 		err := DeleteDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID)
 		if err != nil {
-			NoticeAlert("DeleteDialParameters failed: %s", err)
+			NoticeWarning("DeleteDialParameters failed: %s", err)
 		}
 	}
 }
