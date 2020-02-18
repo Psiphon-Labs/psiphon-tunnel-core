@@ -43,7 +43,7 @@ func newUDPConn(domain int, config *DialConfig) (net.PacketConn, error) {
 	setAdditionalSocketOptions(socketFD)
 
 	if config.DeviceBinder != nil {
-		err := bindToDeviceCallWrapper(config.DeviceBinder, socketFD)
+		_, err = config.DeviceBinder.BindToDevice(socketFD)
 		if err != nil {
 			syscall.Close(socketFD)
 			return nil, errors.Tracef("BindToDevice failed: %s", err)

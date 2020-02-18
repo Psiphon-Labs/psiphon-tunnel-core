@@ -64,6 +64,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"golang.org/x/net/bpf"
 )
 
 const (
@@ -202,6 +203,7 @@ const (
 	ReplayTargetUpstreamBytes                        = "ReplayTargetUpstreamBytes"
 	ReplayTargetDownstreamBytes                      = "ReplayTargetDownstreamBytes"
 	ReplayTargetTunnelDuration                       = "ReplayTargetTunnelDuration"
+	ReplayBPF                                        = "ReplayBPF"
 	ReplaySSH                                        = "ReplaySSH"
 	ReplayObfuscatorPadding                          = "ReplayObfuscatorPadding"
 	ReplayFragmentor                                 = "ReplayFragmentor"
@@ -227,6 +229,10 @@ const (
 	ServerEntryMinimumAgeForPruning                  = "ServerEntryMinimumAgeForPruning"
 	ApplicationParametersProbability                 = "ApplicationParametersProbability"
 	ApplicationParameters                            = "ApplicationParameters"
+	BPFServerTCPProgram                              = "BPFServerTCPProgram"
+	BPFServerTCPProbability                          = "BPFServerTCPProbability"
+	BPFClientTCPProgram                              = "BPFClientTCPProgram"
+	BPFClientTCPProbability                          = "BPFClientTCPProbability"
 )
 
 const (
@@ -442,6 +448,7 @@ var defaultClientParameters = map[string]struct {
 	ReplayTargetUpstreamBytes:              {value: 0, minimum: 0},
 	ReplayTargetDownstreamBytes:            {value: 0, minimum: 0},
 	ReplayTargetTunnelDuration:             {value: 1 * time.Second, minimum: time.Duration(0)},
+	ReplayBPF:                              {value: true},
 	ReplaySSH:                              {value: true},
 	ReplayObfuscatorPadding:                {value: true},
 	ReplayFragmentor:                       {value: true},
@@ -471,6 +478,11 @@ var defaultClientParameters = map[string]struct {
 
 	ApplicationParametersProbability: {value: 1.0, minimum: 0.0},
 	ApplicationParameters:            {value: KeyValues{}},
+
+	BPFServerTCPProgram:     {value: (*BPFProgramSpec)(nil)},
+	BPFServerTCPProbability: {value: 0.5, minimum: 0.0},
+	BPFClientTCPProgram:     {value: (*BPFProgramSpec)(nil)},
+	BPFClientTCPProbability: {value: 0.5, minimum: 0.0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -664,6 +676,16 @@ func (p *ClientParameters) Set(
 						continue
 					}
 					return nil, errors.Trace(err)
+				}
+			case *BPFProgramSpec:
+				if v != nil {
+					err := v.Validate()
+					if err != nil {
+						if skipOnError {
+							continue
+						}
+						return nil, errors.Trace(err)
+					}
 				}
 			}
 
@@ -1046,4 +1068,18 @@ func (p ClientParametersAccessor) KeyValues(name string) KeyValues {
 	value := KeyValues{}
 	p.snapshot.getValue(name, &value)
 	return value
+}
+
+// BPFProgram returns an assembled BPF program corresponding to a
+// BPFProgramSpec parameter value. Returns nil in the case of any empty
+// program.
+func (p ClientParametersAccessor) BPFProgram(name string) (bool, string, []bpf.RawInstruction) {
+	var value *BPFProgramSpec
+	p.snapshot.getValue(name, &value)
+	if value == nil {
+		return false, "", nil
+	}
+	// Validation checks that Assemble is successful.
+	rawInstructions, _ := value.Assemble()
+	return true, value.Name, rawInstructions
 }

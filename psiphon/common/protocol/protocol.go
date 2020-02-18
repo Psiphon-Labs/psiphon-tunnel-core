@@ -59,6 +59,10 @@ const (
 	PSIPHON_API_CONNECTED_REQUEST_NAME = "psiphon-connected"
 	PSIPHON_API_STATUS_REQUEST_NAME    = "psiphon-status"
 	PSIPHON_API_OSL_REQUEST_NAME       = "psiphon-osl"
+	PSIPHON_API_ALERT_REQUEST_NAME     = "psiphon-alert"
+
+	PSIPHON_API_ALERT_DISALLOWED_TRAFFIC = "disallowed-traffic"
+	PSIPHON_API_ALERT_UNSAFE_TRAFFIC     = "unsafe-traffic"
 
 	// PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME may still be used by older Android clients
 	PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME = "psiphon-client-verification"
@@ -124,6 +128,13 @@ var SupportedServerEntrySources = TunnelProtocols{
 	SERVER_ENTRY_SOURCE_TARGET,
 	SERVER_ENTRY_SOURCE_OBFUSCATED,
 	SERVER_ENTRY_SOURCE_EXCHANGED,
+}
+
+func TunnelProtocolUsesTCP(protocol string) bool {
+	// Limitation: Marionette network protocol depends on its format configuration.
+	return protocol != TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH &&
+		protocol != TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH &&
+		protocol != TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH
 }
 
 func TunnelProtocolUsesSSH(protocol string) bool {
@@ -377,6 +388,11 @@ type RandomStreamRequest struct {
 	DownstreamBytes int `json:"d"`
 }
 
+type AlertRequest struct {
+	Reason  string `json:"reason"`
+	Subject string `json:"subject"`
+}
+
 func DeriveSSHServerKEXPRNGSeed(obfuscatedKey string) (*prng.Seed, error) {
 	// By convention, the obfuscatedKey will often be a hex-encoded 32 byte value,
 	// but this isn't strictly required or validated, so we use SHA256 to map the
@@ -388,4 +404,9 @@ func DeriveSSHServerKEXPRNGSeed(obfuscatedKey string) (*prng.Seed, error) {
 func DeriveSSHServerVersionPRNGSeed(obfuscatedKey string) (*prng.Seed, error) {
 	seed := prng.Seed(sha256.Sum256([]byte(obfuscatedKey)))
 	return prng.NewSaltedSeed(&seed, "ssh-server-version")
+}
+
+func DeriveBPFServerProgramPRNGSeed(obfuscatedKey string) (*prng.Seed, error) {
+	seed := prng.Seed(sha256.Sum256([]byte(obfuscatedKey)))
+	return prng.NewSaltedSeed(&seed, "bpf-server-program")
 }

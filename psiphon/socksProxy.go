@@ -134,7 +134,7 @@ loop:
 		default:
 		}
 		if err != nil {
-			NoticeAlert("SOCKS proxy accept error: %s", err)
+			NoticeWarning("SOCKS proxy accept error: %s", err)
 			if e, ok := err.(net.Error); ok && e.Temporary() {
 				// Temporary error, keep running
 				continue

@@ -39,6 +39,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	utls "github.com/refraction-networking/utls"
 	regen "github.com/zach-klippenstein/goregen"
+	"golang.org/x/net/bpf"
 )
 
 // DialParameters represents a selected protocol and all the related selected
@@ -74,6 +75,9 @@ type DialParameters struct {
 	DialPortNumber                 string
 	UpstreamProxyType              string   `json:"-"`
 	UpstreamProxyCustomHeaderNames []string `json:"-"`
+
+	BPFProgramName         string
+	BPFProgramInstructions []bpf.RawInstruction
 
 	SelectedSSHClientVersion bool
 	SSHClientVersion         string
@@ -149,6 +153,7 @@ func MakeDialParameters(
 	p := config.GetClientParameters().Get()
 
 	ttl := p.Duration(parameters.ReplayDialParametersTTL)
+	replayBPF := p.Bool(parameters.ReplayBPF)
 	replaySSH := p.Bool(parameters.ReplaySSH)
 	replayObfuscatorPadding := p.Bool(parameters.ReplayObfuscatorPadding)
 	replayFragmentor := p.Bool(parameters.ReplayFragmentor)
@@ -166,7 +171,7 @@ func MakeDialParameters(
 
 	dialParams, err := GetDialParameters(serverEntry.IpAddress, networkID)
 	if err != nil {
-		NoticeAlert("GetDialParameters failed: %s", err)
+		NoticeWarning("GetDialParameters failed: %s", err)
 		dialParams = nil
 		// Proceed, without existing dial parameters.
 	}
@@ -208,7 +213,7 @@ func MakeDialParameters(
 
 		err = DeleteDialParameters(serverEntry.IpAddress, networkID)
 		if err != nil {
-			NoticeAlert("DeleteDialParameters failed: %s", err)
+			NoticeWarning("DeleteDialParameters failed: %s", err)
 		}
 		dialParams = nil
 	}
@@ -316,6 +321,21 @@ func MakeDialParameters(
 		}
 
 		dialParams.TunnelProtocol = selectedProtocol
+	}
+
+	if (!isReplay || !replayBPF) &&
+		ClientBPFEnabled() &&
+		protocol.TunnelProtocolUsesTCP(dialParams.TunnelProtocol) {
+
+		if p.WeightedCoinFlip(parameters.BPFClientTCPProbability) {
+			dialParams.BPFProgramName = ""
+			dialParams.BPFProgramInstructions = nil
+			ok, name, rawInstructions := p.BPFProgram(parameters.BPFClientTCPProgram)
+			if ok {
+				dialParams.BPFProgramName = name
+				dialParams.BPFProgramInstructions = rawInstructions
+			}
+		}
 	}
 
 	if !isReplay || !replaySSH {
@@ -603,6 +623,7 @@ func MakeDialParameters(
 		DiagnosticID:                  serverEntry.GetDiagnosticID(),
 		UpstreamProxyURL:              config.UpstreamProxyURL,
 		CustomHeaders:                 dialCustomHeaders,
+		BPFProgramInstructions:        dialParams.BPFProgramInstructions,
 		DeviceBinder:                  config.deviceBinder,
 		DnsServerGetter:               config.DnsServerGetter,
 		IPv6Synthesizer:               config.IPv6Synthesizer,
@@ -672,7 +693,7 @@ func (dialParams *DialParameters) Succeeded() {
 	NoticeInfo("Set dial parameters for %s", dialParams.ServerEntry.GetDiagnosticID())
 	err := SetDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID, dialParams)
 	if err != nil {
-		NoticeAlert("SetDialParameters failed: %s", err)
+		NoticeWarning("SetDialParameters failed: %s", err)
 	}
 }
 
@@ -697,7 +718,7 @@ func (dialParams *DialParameters) Failed(config *Config) {
 		NoticeInfo("Delete dial parameters for %s", dialParams.ServerEntry.GetDiagnosticID())
 		err := DeleteDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID)
 		if err != nil {
-			NoticeAlert("DeleteDialParameters failed: %s", err)
+			NoticeWarning("DeleteDialParameters failed: %s", err)
 		}
 	}
 }

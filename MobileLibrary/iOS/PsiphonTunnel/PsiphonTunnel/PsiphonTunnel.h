@@ -296,6 +296,14 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
  */
 - (void)onActiveAuthorizationIDs:(NSArray * _Nonnull)authorizations;
 
+/*!
+ Called when tunnel-core receives an alert from the server.
+ @param reason The reason for the alert.
+ @param subject Additional context or classification of the reason; blank for none.
+ Swift: @code func onServerAlert(_ reason: String, _ subject: String) @endcode
+ */
+- (void)onServerAlert:(NSString * _Nonnull)reason :(NSString * _Nonnull)subject;
+
 @end
 
 /*!

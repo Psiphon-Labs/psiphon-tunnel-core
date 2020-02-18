@@ -53,12 +53,6 @@ if [ ! -d bin ]; then
 fi
 
 build_for_windows () {
-  echo "...Getting project dependencies (via go get) for Windows"
-  GOOS=windows go get -d -v -tags "${BUILD_TAGS}" ./...
-  if [ $? != 0 ]; then
-    echo "....'go get' failed, exiting"
-    exit $?
-  fi
   prepare_build windows
 
   echo "...Building windows-i686"
@@ -94,12 +88,6 @@ build_for_windows () {
 }
 
 build_for_linux () {
-  echo "Getting project dependencies (via go get) for Linux"
-  GOOS=linux go get -d -v -tags "${BUILD_TAGS}" ./...
-  if [ $? != 0 ]; then
-    echo "...'go get' failed, exiting"
-    exit $?
-  fi
   prepare_build linux
 
   echo "...Building linux-i686"
@@ -141,12 +129,6 @@ build_for_linux () {
 }
 
 build_for_osx () {
-  echo "Getting project dependencies (via go get) for OSX"
-  GOOS=darwin go get -d -v -tags "${BUILD_TAGS}" ./...
-  if [ $? != 0 ]; then
-    echo "..'go get' failed, exiting"
-    exit $?
-  fi
   prepare_build darwin
 
   echo "Building darwin-x86_64..."

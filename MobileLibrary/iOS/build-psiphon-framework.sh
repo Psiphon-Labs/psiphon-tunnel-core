@@ -5,7 +5,7 @@ set -e -u -x
 if [ -z ${1+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$1"; fi
 
 # Modify this value as we use newer Go versions.
-GO_VERSION_REQUIRED="1.13.4"
+GO_VERSION_REQUIRED="1.13.7"
 
 # At this time, gomobile doesn't support modules
 export GO111MODULE=off
@@ -101,13 +101,6 @@ function strip_architectures() {
 GO_VERSION=$(go version | sed -E -n 's/.*go([0-9]\.[0-9]+(\.[0-9]+)?).*/\1/p')
 if [[ ${GO_VERSION} != ${GO_VERSION_REQUIRED} ]]; then
   echo "FAILURE: go version mismatch; require ${GO_VERSION_REQUIRED}; got ${GO_VERSION}"
-  exit 1
-fi
-
-# Don't use -u, because this path points to our local repo, and we don't want it overridden.
-go get -d -v -tags "${BUILD_TAGS}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
-if [[ $? != 0 ]]; then
-  echo "FAILURE: go get -d -v -tags "${BUILD_TAGS}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi"
   exit 1
 fi
 

@@ -390,10 +390,6 @@ type Config struct {
 	// is used. This value is typical overridden for testing.
 	FetchUpgradeRetryPeriodMilliseconds *int
 
-	// EmitBytesTransferred indicates whether to emit periodic notices showing
-	// bytes sent and received.
-	EmitBytesTransferred bool
-
 	// TrustedCACertificatesFilename specifies a file containing trusted CA
 	// certs. When set, this toggles use of the trusted CA certs, specified in
 	// TrustedCACertificatesFilename, for tunneled TLS connections that expect
@@ -430,13 +426,25 @@ type Config struct {
 	// distributed or displayed to users. Default is off.
 	EmitDiagnosticNetworkParameters bool
 
-	// RateLimits specify throttling configuration for the tunnel.
-	RateLimits common.RateLimits
+	// EmitBytesTransferred indicates whether to emit periodic notices showing
+	// bytes sent and received.
+	EmitBytesTransferred bool
 
 	// EmitSLOKs indicates whether to emit notices for each seeded SLOK. As
 	// this could reveal user browsing activity, it's intended for debugging
 	// and testing only.
 	EmitSLOKs bool
+
+	// EmitTapdanceLogs indicates whether to emit gotapdance log messages
+	// to stdout. Note that gotapdance log messages do not conform to the
+	// Notice format standard. Default is off.
+	EmitTapdanceLogs bool
+
+	// EmitServerAlerts indicates whether to emit notices for server alerts.
+	EmitServerAlerts bool
+
+	// RateLimits specify throttling configuration for the tunnel.
+	RateLimits common.RateLimits
 
 	// PacketTunnelTunDeviceFileDescriptor specifies a tun device file
 	// descriptor to use for running a packet tunnel. When this value is > 0,
@@ -471,11 +479,6 @@ type Config struct {
 	// obfuscate server info exchanges between clients.
 	// Required for the exchange functionality.
 	ExchangeObfuscationKey string
-
-	// EmitTapdanceLogs indicates whether to emit gotapdance log messages
-	// to stdout. Note that gotapdance log messages do not conform to the
-	// Notice format standard. Default is off.
-	EmitTapdanceLogs bool
 
 	// TransformHostNameProbability is for testing purposes.
 	TransformHostNameProbability *float64
@@ -879,7 +882,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 	// Emit notices now that notice files are set if configured
 	for _, msg := range noticeMigrationAlertMsgs {
-		NoticeAlert(msg)
+		NoticeWarning(msg)
 	}
 	for _, msg := range noticeMigrationInfoMsgs {
 		NoticeInfo(msg)
@@ -1041,7 +1044,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 	config.clientParameters, err = parameters.NewClientParameters(
 		func(err error) {
-			NoticeAlert("ClientParameters getValue failed: %s", err)
+			NoticeWarning("ClientParameters getValue failed: %s", err)
 		})
 	if err != nil {
 		return errors.Trace(err)
@@ -1124,7 +1127,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		for _, migration := range migrations {
 			err := common.DoFileMigration(migration)
 			if err != nil {
-				NoticeAlert("Config migration: %s", errors.Trace(err))
+				NoticeWarning("Config migration: %s", errors.Trace(err))
 			} else {
 				NoticeInfo("Config migration: moved %s to %s", migration.OldPath, migration.NewPath)
 			}
@@ -1134,18 +1137,18 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		if config.MigrateObfuscatedServerListDownloadDirectory != "" {
 			files, err := ioutil.ReadDir(config.MigrateObfuscatedServerListDownloadDirectory)
 			if err != nil {
-				NoticeAlert("Error reading OSL directory %s: %s", config.MigrateObfuscatedServerListDownloadDirectory, errors.Trace(err))
+				NoticeWarning("Error reading OSL directory %s: %s", config.MigrateObfuscatedServerListDownloadDirectory, errors.Trace(err))
 			} else if len(files) == 0 {
 				err := os.Remove(config.MigrateObfuscatedServerListDownloadDirectory)
 				if err != nil {
-					NoticeAlert("Error deleting empty OSL directory %s: %s", config.MigrateObfuscatedServerListDownloadDirectory, errors.Trace(err))
+					NoticeWarning("Error deleting empty OSL directory %s: %s", config.MigrateObfuscatedServerListDownloadDirectory, errors.Trace(err))
 				}
 			}
 		}
 
 		f, err := os.Create(migrationCompleteFilePath)
 		if err != nil {
-			NoticeAlert("Config migration: failed to create %s with error %s", migrationCompleteFilePath, errors.Trace(err))
+			NoticeWarning("Config migration: failed to create %s with error %s", migrationCompleteFilePath, errors.Trace(err))
 		} else {
 			NoticeInfo("Config migration: completed")
 			f.Close()
@@ -1873,7 +1876,7 @@ func migrationsFromLegacyFilePaths(config *Config) ([]common.FileMigration, erro
 
 		files, err := ioutil.ReadDir(config.MigrateObfuscatedServerListDownloadDirectory)
 		if err != nil {
-			NoticeAlert("Migration: failed to read directory %s with error %s", config.MigrateObfuscatedServerListDownloadDirectory, err)
+			NoticeWarning("Migration: failed to read directory %s with error %s", config.MigrateObfuscatedServerListDownloadDirectory, err)
 		} else {
 			for _, file := range files {
 				if oslFileRegex.MatchString(file.Name()) {
@@ -1907,7 +1910,7 @@ func migrationsFromLegacyFilePaths(config *Config) ([]common.FileMigration, erro
 
 		files, err := ioutil.ReadDir(upgradeDownloadDir)
 		if err != nil {
-			NoticeAlert("Migration: failed to read directory %s with error %s", upgradeDownloadDir, err)
+			NoticeWarning("Migration: failed to read directory %s with error %s", upgradeDownloadDir, err)
 		} else {
 
 			for _, file := range files {

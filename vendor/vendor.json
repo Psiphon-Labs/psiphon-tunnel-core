@@ -658,6 +658,12 @@
 			"revisionTime": "2019-02-05T21:23:42Z"
 		},
 		{
+			"checksumSHA1": "4rZ8D9GLDvy+6S940nMs75DvyfA=",
+			"path": "golang.org/x/net/bpf",
+			"revision": "6afb5195e5aab057fda82e27171243402346b0ad",
+			"revisionTime": "2020-01-14T15:53:21Z"
+		},
+		{
 			"checksumSHA1": "GtamqiJoL7PGHsN454AoffBFMa8=",
 			"path": "golang.org/x/net/context",
 			"revision": "1e491301e022f8f977054da4c2d852decd59571f",

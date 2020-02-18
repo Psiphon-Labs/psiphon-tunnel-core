@@ -1001,6 +1001,20 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             });
         }
     }
+    else if ([noticeType isEqualToString:@"ServerAlert"]) {
+        id reason = [notice valueForKeyPath:@"data.reason"];
+        id subject = [notice valueForKeyPath:@"data.subject"];
+        if (![reason isKindOfClass:[NSString class]] || ![subject isKindOfClass:[NSString class]]) {
+            [self logMessage:[NSString stringWithFormat: @"ServerAlert notice missing data.reason or data.subject: %@", noticeJSON]];
+            return;
+        }
+
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onServerAlert::)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onServerAlert:reason:subject];
+            });
+        }
+    }
 
     else if ([noticeType isEqualToString:@"InternalError"]) {
         internalError = TRUE;
