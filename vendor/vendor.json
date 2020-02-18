@@ -646,6 +646,12 @@
 			"revisionTime": "2019-02-05T21:23:42Z"
 		},
 		{
+			"checksumSHA1": "yQNckVsxPX36aYbCk1ftg2w9ufw=",
+			"path": "golang.org/x/crypto/salsa20/salsa",
+			"revision": "1d94cc7ab1c630336ab82ccb9c9cda72a875c382",
+			"revisionTime": "2020-02-12T18:29:22Z"
+		},
+		{
 			"checksumSHA1": "ErY5gBdoI6rIwCTYUjSZGGlCF7s=",
 			"path": "golang.org/x/crypto/sha3",
 			"revision": "094676da4a83be5288d281081bba63a173ce6772",
