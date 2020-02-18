@@ -36,8 +36,8 @@ package secretbox // import "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon
 
 import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/internal/subtle"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/poly1305"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/salsa20/salsa"
+	"golang.org/x/crypto/poly1305"
+	"golang.org/x/crypto/salsa20/salsa"
 )
 
 // Overhead is the number of bytes of overhead when boxing a message.
