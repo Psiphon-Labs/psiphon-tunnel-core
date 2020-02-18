@@ -136,7 +136,7 @@ func DownloadUpgrade(
 			// return an error so that we don't go into a rapid retry loop making
 			// ineffective HEAD requests (the client may still signal an upgrade
 			// download later in the session).
-			NoticeAlert(
+			NoticeWarning(
 				"failed to download upgrade: invalid %s header value %s: %s",
 				clientVersionHeader, availableClientVersion, err)
 			return nil

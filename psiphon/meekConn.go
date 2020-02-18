@@ -906,7 +906,7 @@ func (meek *MeekConn) relay() {
 				return
 			default:
 			}
-			NoticeAlert("%s", errors.Trace(err))
+			NoticeWarning("%s", errors.Trace(err))
 			go meek.Close()
 			return
 		}
@@ -1186,7 +1186,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 				return 0, errors.Trace(err)
 			default:
 			}
-			NoticeAlert("meek round trip failed: %s", err)
+			NoticeWarning("meek round trip failed: %s", err)
 			// ...continue to retry
 		}
 
@@ -1236,7 +1236,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			receivedPayloadSize += readPayloadSize
 
 			if err != nil {
-				NoticeAlert("meek read payload failed: %s", err)
+				NoticeWarning("meek read payload failed: %s", err)
 				// ...continue to retry
 			} else {
 				// Round trip completed successfully

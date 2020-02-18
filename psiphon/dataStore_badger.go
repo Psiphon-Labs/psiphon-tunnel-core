@@ -141,14 +141,14 @@ func (b *datastoreBucket) get(key []byte) []byte {
 		if err != badger.ErrKeyNotFound {
 			// The original datastore interface does not return an error from
 			// Get, so emit notice.
-			NoticeAlert("get failed: %s: %s",
+			NoticeWarning("get failed: %s: %s",
 				string(keyWithPrefix), errors.Trace(err))
 		}
 		return nil
 	}
 	value, err := item.Value()
 	if err != nil {
-		NoticeAlert("get failed: %s: %s",
+		NoticeWarning("get failed: %s: %s",
 			string(keyWithPrefix), errors.Trace(err))
 		return nil
 	}

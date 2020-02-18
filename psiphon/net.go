@@ -466,12 +466,12 @@ func ResumeDownload(
 
 			tempErr := os.Remove(partialFilename)
 			if tempErr != nil && !os.IsNotExist(tempErr) {
-				NoticeAlert("reset partial download failed: %s", tempErr)
+				NoticeWarning("reset partial download failed: %s", tempErr)
 			}
 
 			tempErr = os.Remove(partialETagFilename)
 			if tempErr != nil && !os.IsNotExist(tempErr) {
-				NoticeAlert("reset partial download ETag failed: %s", tempErr)
+				NoticeWarning("reset partial download ETag failed: %s", tempErr)
 			}
 
 			return 0, "", errors.Tracef(

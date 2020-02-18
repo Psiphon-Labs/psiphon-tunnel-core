@@ -223,7 +223,7 @@ func (p *PacketTunnelTransport) UseTunnel(tunnel *Tunnel) {
 			// Note: DialPacketTunnelChannel will signal a probe on failure,
 			// so it's not necessary to do so here.
 
-			NoticeAlert("dial packet tunnel channel failed : %s", err)
+			NoticeWarning("dial packet tunnel channel failed : %s", err)
 			// TODO: retry?
 			return
 		}

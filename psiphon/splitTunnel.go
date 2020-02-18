@@ -175,7 +175,7 @@ func (classifier *SplitTunnelClassifier) IsUntunneled(targetAddress string) bool
 	ipAddr, ttl, err := tunneledLookupIP(
 		dnsServerAddress, classifier.dnsTunneler, targetAddress)
 	if err != nil {
-		NoticeAlert("failed to resolve address for split tunnel classification: %s", err)
+		NoticeWarning("failed to resolve address for split tunnel classification: %s", err)
 		return false
 	}
 	expiry := time.Now().Add(ttl)
@@ -206,13 +206,13 @@ func (classifier *SplitTunnelClassifier) setRoutes(tunnel *Tunnel) {
 
 	routesData, err := classifier.getRoutes(tunnel)
 	if err != nil {
-		NoticeAlert("failed to get split tunnel routes: %s", err)
+		NoticeWarning("failed to get split tunnel routes: %s", err)
 		return
 	}
 
 	err = classifier.installRoutes(routesData)
 	if err != nil {
-		NoticeAlert("failed to install split tunnel routes: %s", err)
+		NoticeWarning("failed to install split tunnel routes: %s", err)
 		return
 	}
 
@@ -272,7 +272,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 		err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
 	}
 	if err != nil {
-		NoticeAlert("failed to request split tunnel routes package: %s", errors.Trace(err))
+		NoticeWarning("failed to request split tunnel routes package: %s", errors.Trace(err))
 		useCachedRoutes = true
 	}
 
@@ -287,7 +287,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	if !useCachedRoutes {
 		routesDataPackage, err = ioutil.ReadAll(response.Body)
 		if err != nil {
-			NoticeAlert("failed to download split tunnel routes package: %s", errors.Trace(err))
+			NoticeWarning("failed to download split tunnel routes package: %s", errors.Trace(err))
 			useCachedRoutes = true
 		}
 	}
@@ -297,7 +297,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 		encodedRoutesData, err = common.ReadAuthenticatedDataPackage(
 			routesDataPackage, false, routesSignaturePublicKey)
 		if err != nil {
-			NoticeAlert("failed to read split tunnel routes package: %s", errors.Trace(err))
+			NoticeWarning("failed to read split tunnel routes package: %s", errors.Trace(err))
 			useCachedRoutes = true
 		}
 	}
@@ -306,7 +306,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 	if !useCachedRoutes {
 		compressedRoutesData, err = base64.StdEncoding.DecodeString(encodedRoutesData)
 		if err != nil {
-			NoticeAlert("failed to decode split tunnel routes: %s", errors.Trace(err))
+			NoticeWarning("failed to decode split tunnel routes: %s", errors.Trace(err))
 			useCachedRoutes = true
 		}
 	}
@@ -318,7 +318,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 			zlibReader.Close()
 		}
 		if err != nil {
-			NoticeAlert("failed to decompress split tunnel routes: %s", errors.Trace(err))
+			NoticeWarning("failed to decompress split tunnel routes: %s", errors.Trace(err))
 			useCachedRoutes = true
 		}
 	}
@@ -328,7 +328,7 @@ func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData [
 		if etag != "" {
 			err := SetSplitTunnelRoutes(tunnel.serverContext.clientRegion, etag, routesData)
 			if err != nil {
-				NoticeAlert("failed to cache split tunnel routes: %s", errors.Trace(err))
+				NoticeWarning("failed to cache split tunnel routes: %s", errors.Trace(err))
 				// Proceed with fetched data, even when we can't cache it
 			}
 		}
