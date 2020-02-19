@@ -421,6 +421,7 @@ var remoteServerListStatParams = []requestParamSpec{
 	{"client_platform", isAnyString, requestParamOptional},
 	{"client_build_rev", isAnyString, requestParamOptional},
 	{"client_download_timestamp", isISO8601Date, 0},
+	{"tunneled", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"url", isAnyString, 0},
 	{"etag", isAnyString, 0},
 }

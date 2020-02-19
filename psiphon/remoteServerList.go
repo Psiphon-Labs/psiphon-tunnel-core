@@ -393,7 +393,7 @@ func downloadRemoteServerListFile(
 	// MakeDownloadHttpClient will select either a tunneled
 	// or untunneled configuration.
 
-	httpClient, err := MakeDownloadHTTPClient(
+	httpClient, tunneled, err := MakeDownloadHTTPClient(
 		ctx,
 		config,
 		tunnel,
@@ -423,7 +423,7 @@ func downloadRemoteServerListFile(
 
 	NoticeRemoteServerListResourceDownloaded(sourceURL)
 
-	_ = RecordRemoteServerListStat(config, sourceURL, responseETag)
+	_ = RecordRemoteServerListStat(config, tunneled, sourceURL, responseETag)
 
 	return responseETag, nil
 }

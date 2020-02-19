@@ -602,7 +602,7 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 // processes a status request but the client fails to receive
 // the response.
 func RecordRemoteServerListStat(
-	config *Config, url, etag string) error {
+	config *Config, tunneled bool, url, etag string) error {
 
 	if !config.GetClientParameters().Get().WeightedCoinFlip(
 		parameters.RecordRemoteServerListPersistentStatsProbability) {
@@ -619,6 +619,11 @@ func RecordRemoteServerListStat(
 	params["client_build_rev"] = buildinfo.GetBuildInfo().BuildRev
 
 	params["client_download_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
+	tunneledStr := "0"
+	if tunneled {
+		tunneledStr = "1"
+	}
+	params["tunneled"] = tunneledStr
 	params["url"] = url
 	params["etag"] = etag
 
