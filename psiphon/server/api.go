@@ -424,6 +424,7 @@ var remoteServerListStatParams = []requestParamSpec{
 	{"tunneled", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"url", isAnyString, 0},
 	{"etag", isAnyString, 0},
+	{"authenticated", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
 var failedTunnelStatParams = append(
