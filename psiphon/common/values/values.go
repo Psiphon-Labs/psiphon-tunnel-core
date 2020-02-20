@@ -31,9 +31,9 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/secretbox"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 // ValueSpec specifies a value selection space.

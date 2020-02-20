@@ -32,10 +32,10 @@ chunk size.
 
 This package is interoperable with NaCl: https://nacl.cr.yp.to/secretbox.html.
 */
-package secretbox // import "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/secretbox"
+package secretbox // import "golang.org/x/crypto/nacl/secretbox"
 
 import (
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/internal/subtle"
+	"golang.org/x/crypto/internal/subtle"
 	"golang.org/x/crypto/poly1305"
 	"golang.org/x/crypto/salsa20/salsa"
 )

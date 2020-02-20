@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"crypto/dsa"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/base64"
@@ -25,7 +26,6 @@ import (
 	"math/big"
 	"sync"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ed25519"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 )
 

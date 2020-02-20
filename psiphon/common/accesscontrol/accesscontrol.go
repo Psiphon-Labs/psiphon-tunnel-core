@@ -46,6 +46,7 @@
 package accesscontrol
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -55,9 +56,8 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ed25519"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/hkdf"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"golang.org/x/crypto/hkdf"
 )
 
 const (
