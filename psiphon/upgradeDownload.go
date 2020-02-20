@@ -86,7 +86,7 @@ func DownloadUpgrade(
 
 	downloadURL, _, skipVerify := urls.Select(attempt)
 
-	httpClient, err := MakeDownloadHTTPClient(
+	httpClient, _, err := MakeDownloadHTTPClient(
 		ctx,
 		config,
 		tunnel,

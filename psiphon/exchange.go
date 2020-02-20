@@ -24,9 +24,9 @@ import (
 	"encoding/json"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/secretbox"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 // ExportExchangePayload creates a payload for client-to-client server
