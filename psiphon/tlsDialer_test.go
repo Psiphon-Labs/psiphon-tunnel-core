@@ -128,7 +128,7 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 
 	for _, tlsProfile := range profiles {
 
-		repeats := 1
+		repeats := 2
 		if protocol.TLSProfileIsRandomized(tlsProfile) {
 			repeats = 20
 		}
@@ -137,12 +137,19 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 		tlsVersions := []string{}
 		for i := 0; i < repeats; i++ {
 
+			transformHostname := i%2 == 0
+
 			tlsConfig := &CustomTLSConfig{
 				ClientParameters: clientParameters,
 				Dial:             dialer,
-				UseDialAddrSNI:   true,
 				SkipVerify:       true,
 				TLSProfile:       tlsProfile,
+			}
+
+			if transformHostname {
+				tlsConfig.SNIServerName = values.GetHostName()
+			} else {
+				tlsConfig.UseDialAddrSNI = true
 			}
 
 			ctx, cancelFunc := context.WithTimeout(context.Background(), 5*time.Second)
@@ -150,7 +157,8 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 			conn, err := CustomTLSDial(ctx, "tcp", address, tlsConfig)
 
 			if err != nil {
-				t.Logf("%s: %s\n", tlsProfile, err)
+				t.Logf("%s (transformHostname: %v): %s\n",
+					tlsProfile, transformHostname, err)
 			} else {
 
 				tlsVersion := ""
