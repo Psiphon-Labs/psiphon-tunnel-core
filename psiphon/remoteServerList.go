@@ -78,7 +78,7 @@ func FetchCommonRemoteServerList(
 
 	authenticatedDownload := false
 	if downloadStatRecorder != nil {
-		defer downloadStatRecorder(authenticatedDownload)
+		defer func() { downloadStatRecorder(authenticatedDownload) }()
 	}
 
 	// When the resource is unchanged, skip.
@@ -196,7 +196,7 @@ func FetchObfuscatedServerLists(
 
 	authenticatedDownload := false
 	if downloadStatRecorder != nil {
-		defer downloadStatRecorder(authenticatedDownload)
+		defer func() { downloadStatRecorder(authenticatedDownload) }()
 	}
 
 	if newETag != "" {
@@ -352,7 +352,7 @@ func downloadOSLFileSpec(
 
 	authenticatedDownload := false
 	if downloadStatRecorder != nil {
-		defer downloadStatRecorder(authenticatedDownload)
+		defer func() { downloadStatRecorder(authenticatedDownload) }()
 	}
 
 	// When the resource is unchanged, skip.
