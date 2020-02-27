@@ -924,7 +924,7 @@ func selectQUICVersion(
 			continue
 		}
 
-		if !isFronted &&
+		if isFronted &&
 			protocol.QUICVersionIsObfuscated(quicVersion) {
 			continue
 		}
