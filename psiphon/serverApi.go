@@ -825,6 +825,10 @@ func getBaseAPIParameters(
 		params["upstream_proxy_custom_header_names"] = dialParams.UpstreamProxyCustomHeaderNames
 	}
 
+	if dialParams.FrontingProviderID != "" {
+		params["fronting_provider_id"] = dialParams.FrontingProviderID
+	}
+
 	if dialParams.MeekDialAddress != "" {
 		params["meek_dial_address"] = dialParams.MeekDialAddress
 	}

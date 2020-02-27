@@ -87,6 +87,8 @@ type DialParameters struct {
 
 	FragmentorSeed *prng.Seed
 
+	FrontingProviderID string
+
 	MeekFrontingDialAddress   string
 	MeekFrontingHost          string
 	MeekDialAddress           string
@@ -370,8 +372,10 @@ func MakeDialParameters(
 	if (!isReplay || !replayTLSProfile) &&
 		protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) {
 
+		isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol)
+
 		dialParams.SelectedTLSProfile = true
-		dialParams.TLSProfile = SelectTLSProfile(p)
+		dialParams.TLSProfile = SelectTLSProfile(isFronted, serverEntry.FrontingProviderID, p)
 		dialParams.NoDefaultTLSSessionID = p.WeightedCoinFlip(
 			parameters.NoDefaultTLSSessionIDProbability)
 	}
@@ -416,6 +420,8 @@ func MakeDialParameters(
 	if (!isReplay || !replayFronting) &&
 		protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) {
 
+		dialParams.FrontingProviderID = serverEntry.FrontingProviderID
+
 		dialParams.MeekFrontingDialAddress, dialParams.MeekFrontingHost, err =
 			selectFrontingParameters(serverEntry)
 		if err != nil {
@@ -457,8 +463,8 @@ func MakeDialParameters(
 	if (!isReplay || !replayQUICVersion) &&
 		protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
 
-		allowObfuscatedQUIC := !protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol)
-		dialParams.QUICVersion = selectQUICVersion(allowObfuscatedQUIC, p)
+		isFronted := protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol)
+		dialParams.QUICVersion = selectQUICVersion(isFronted, serverEntry.FrontingProviderID, p)
 	}
 
 	if (!isReplay || !replayObfuscatedQUIC) &&
@@ -890,9 +896,24 @@ func selectFrontingParameters(serverEntry *protocol.ServerEntry) (string, string
 	return frontingDialHost, frontingHost, nil
 }
 
-func selectQUICVersion(allowObfuscatedQUIC bool, p parameters.ClientParametersAccessor) string {
+func selectQUICVersion(
+	isFronted bool,
+	frontingProviderID string,
+	p parameters.ClientParametersAccessor) string {
 
 	limitQUICVersions := p.QUICVersions(parameters.LimitQUICVersions)
+
+	var disableQUICVersions protocol.QUICVersions
+
+	if isFronted {
+		if frontingProviderID == "" {
+			// Legacy server entry case
+			disableQUICVersions = protocol.QUICVersions{protocol.QUIC_VERSION_IETF_DRAFT24}
+		} else {
+			disableQUICVersions = p.LabeledQUICVersions(
+				parameters.DisableFrontingProviderQUICVersions, frontingProviderID)
+		}
+	}
 
 	quicVersions := make([]string, 0)
 
@@ -903,14 +924,12 @@ func selectQUICVersion(allowObfuscatedQUIC bool, p parameters.ClientParametersAc
 			continue
 		}
 
-		if !allowObfuscatedQUIC &&
+		if !isFronted &&
 			protocol.QUICVersionIsObfuscated(quicVersion) {
 			continue
 		}
 
-		// Temporary: disallow IETF QUIC where OBFUSCATED is disallowed.
-		if !allowObfuscatedQUIC &&
-			quicVersion == protocol.QUIC_VERSION_IETF_DRAFT24 {
+		if common.Contains(disableQUICVersions, quicVersion) {
 			continue
 		}
 

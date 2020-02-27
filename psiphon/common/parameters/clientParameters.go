@@ -101,8 +101,10 @@ const (
 	CustomTLSProfiles                                = "CustomTLSProfiles"
 	SelectRandomizedTLSProfileProbability            = "SelectRandomizedTLSProfileProbability"
 	NoDefaultTLSSessionIDProbability                 = "NoDefaultTLSSessionIDProbability"
+	DisableFrontingProviderTLSProfiles               = "DisableFrontingProviderTLSProfiles"
 	LimitQUICVersionsProbability                     = "LimitQUICVersionsProbability"
 	LimitQUICVersions                                = "LimitQUICVersions"
+	DisableFrontingProviderQUICVersions              = "DisableFrontingProviderQUICVersions"
 	FragmentorProbability                            = "FragmentorProbability"
 	FragmentorLimitProtocols                         = "FragmentorLimitProtocols"
 	FragmentorMinTotalBytes                          = "FragmentorMinTotalBytes"
@@ -302,9 +304,11 @@ var defaultClientParameters = map[string]struct {
 	CustomTLSProfiles:                     {value: protocol.CustomTLSProfiles{}},
 	SelectRandomizedTLSProfileProbability: {value: 0.25, minimum: 0.0},
 	NoDefaultTLSSessionIDProbability:      {value: 0.5, minimum: 0.0},
+	DisableFrontingProviderTLSProfiles:    {value: protocol.LabeledTLSProfiles{}},
 
-	LimitQUICVersionsProbability: {value: 1.0, minimum: 0.0},
-	LimitQUICVersions:            {value: protocol.QUICVersions{}},
+	LimitQUICVersionsProbability:        {value: 1.0, minimum: 0.0},
+	LimitQUICVersions:                   {value: protocol.QUICVersions{}},
+	DisableFrontingProviderQUICVersions: {value: protocol.LabeledQUICVersions{}},
 
 	FragmentorProbability:              {value: 0.5, minimum: 0.0},
 	FragmentorLimitProtocols:           {value: protocol.TunnelProtocols{}},
@@ -572,6 +576,24 @@ func (p *ClientParameters) Set(
 		return nil, errors.Trace(err)
 	}
 
+	// Special case: TLSProfiles/LabeledTLSProfiles may reference CustomTLSProfiles names.
+	// Inspect the CustomTLSProfiles parameter and extract its names. Do not
+	// call Get().CustomTLSProfilesNames() as CustomTLSProfiles may not yet be
+	// validated.
+
+	var customTLSProfileNames []string
+
+	customTLSProfilesValue := parameters[CustomTLSProfiles]
+	for i := 0; i < len(applyParameters); i++ {
+		customTLSProfilesValue = applyParameters[i][CustomTLSProfiles]
+	}
+	if customTLSProfiles, ok := customTLSProfilesValue.(protocol.CustomTLSProfiles); ok {
+		customTLSProfileNames := make([]string, len(customTLSProfiles))
+		for i := 0; i < len(customTLSProfiles); i++ {
+			customTLSProfileNames[i] = customTLSProfiles[i].Name
+		}
+	}
+
 	for i := 0; i < len(applyParameters); i++ {
 
 		count := 0
@@ -645,6 +667,25 @@ func (p *ClientParameters) Set(
 				}
 			case protocol.TLSProfiles:
 				if skipOnError {
+					newValue = v.PruneInvalid(customTLSProfileNames)
+				} else {
+					err := v.Validate(customTLSProfileNames)
+					if err != nil {
+						return nil, errors.Trace(err)
+					}
+				}
+			case protocol.LabeledTLSProfiles:
+
+				if skipOnError {
+					newValue = v.PruneInvalid(customTLSProfileNames)
+				} else {
+					err := v.Validate(customTLSProfileNames)
+					if err != nil {
+						return nil, errors.Trace(err)
+					}
+				}
+			case protocol.QUICVersions:
+				if skipOnError {
 					newValue = v.PruneInvalid()
 				} else {
 					err := v.Validate()
@@ -652,7 +693,7 @@ func (p *ClientParameters) Set(
 						return nil, errors.Trace(err)
 					}
 				}
-			case protocol.QUICVersions:
+			case protocol.LabeledQUICVersions:
 				if skipOnError {
 					newValue = v.PruneInvalid()
 				} else {
@@ -984,6 +1025,15 @@ func (p ClientParametersAccessor) TLSProfiles(name string) protocol.TLSProfiles 
 	return value
 }
 
+// LabeledTLSProfiles returns a protocol.TLSProfiles parameter value
+// corresponding to the specified labeled set and label value. The return
+// value is nil when no set is found.
+func (p ClientParametersAccessor) LabeledTLSProfiles(name, label string) protocol.TLSProfiles {
+	var value protocol.LabeledTLSProfiles
+	p.snapshot.getValue(name, &value)
+	return value[label]
+}
+
 // QUICVersions returns a protocol.QUICVersions parameter value.
 // If there is a corresponding Probability value, a weighted coin flip
 // will be performed and, depending on the result, the value or the
@@ -1011,6 +1061,15 @@ func (p ClientParametersAccessor) QUICVersions(name string) protocol.QUICVersion
 	value := protocol.QUICVersions{}
 	p.snapshot.getValue(name, &value)
 	return value
+}
+
+// LabeledQUICVersions returns a protocol.QUICVersions parameter value
+// corresponding to the specified labeled set and label value. The return
+// value is nil when no set is found.
+func (p ClientParametersAccessor) LabeledQUICVersions(name, label string) protocol.QUICVersions {
+	var value protocol.LabeledQUICVersions
+	p.snapshot.getValue(name, &value)
+	return value[label]
 }
 
 // DownloadURLs returns a DownloadURLs parameter value.

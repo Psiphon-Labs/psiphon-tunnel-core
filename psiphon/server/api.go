@@ -716,6 +716,7 @@ var baseRequestParams = []requestParamSpec{
 	{"ssh_client_version", isAnyString, requestParamOptional},
 	{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
 	{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
+	{"fronting_provider_id", isAnyString, requestParamOptional | requestParamLogOnlyForFrontedMeek},
 	{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
 	{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
 	{"meek_sni_server_name", isDomain, requestParamOptional},
