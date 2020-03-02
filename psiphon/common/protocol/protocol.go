@@ -281,24 +281,47 @@ func TLSProfileIsRandomized(tlsProfile string) bool {
 
 type TLSProfiles []string
 
-func (profiles TLSProfiles) Validate() error {
+func (profiles TLSProfiles) Validate(customTLSProfiles []string) error {
 
 	for _, p := range profiles {
-		if !common.Contains(SupportedTLSProfiles, p) && !common.Contains(legacyTLSProfiles, p) {
+		if !common.Contains(SupportedTLSProfiles, p) &&
+			!common.Contains(customTLSProfiles, p) &&
+			!common.Contains(legacyTLSProfiles, p) {
 			return errors.Tracef("invalid TLS profile: %s", p)
 		}
 	}
 	return nil
 }
 
-func (profiles TLSProfiles) PruneInvalid() TLSProfiles {
+func (profiles TLSProfiles) PruneInvalid(customTLSProfiles []string) TLSProfiles {
 	q := make(TLSProfiles, 0)
 	for _, p := range profiles {
-		if common.Contains(SupportedTLSProfiles, p) {
+		if common.Contains(SupportedTLSProfiles, p) ||
+			common.Contains(customTLSProfiles, p) {
 			q = append(q, p)
 		}
 	}
 	return q
+}
+
+type LabeledTLSProfiles map[string]TLSProfiles
+
+func (labeledProfiles LabeledTLSProfiles) Validate(customTLSProfiles []string) error {
+	for _, profiles := range labeledProfiles {
+		err := profiles.Validate(customTLSProfiles)
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+	return nil
+}
+
+func (labeledProfiles LabeledTLSProfiles) PruneInvalid(customTLSProfiles []string) LabeledTLSProfiles {
+	l := make(LabeledTLSProfiles)
+	for label, profiles := range labeledProfiles {
+		l[label] = profiles.PruneInvalid(customTLSProfiles)
+	}
+	return l
 }
 
 const (
@@ -340,6 +363,26 @@ func (versions QUICVersions) PruneInvalid() QUICVersions {
 		}
 	}
 	return u
+}
+
+type LabeledQUICVersions map[string]QUICVersions
+
+func (labeledVersions LabeledQUICVersions) Validate() error {
+	for _, versions := range labeledVersions {
+		err := versions.Validate()
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+	return nil
+}
+
+func (labeledVersions LabeledQUICVersions) PruneInvalid() LabeledQUICVersions {
+	l := make(LabeledQUICVersions)
+	for label, versions := range labeledVersions {
+		l[label] = versions.PruneInvalid()
+	}
+	return l
 }
 
 type HandshakeResponse struct {

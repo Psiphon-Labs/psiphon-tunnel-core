@@ -107,13 +107,15 @@ type CustomTLSConfig struct {
 	// specified certificate. SNI is disbled when this is set.
 	VerifyLegacyCertificate *x509.Certificate
 
-	// TLSProfile specifies a particular indistinguishable TLS profile to use
-	// for the TLS dial. When TLSProfile is "", a profile is selected at
-	// random. Setting TLSProfile allows the caller to pin the selection so
-	// all TLS connections in a certain context (e.g. a single meek
-	// connection) use a consistent value. The value should be selected by
-	// calling SelectTLSProfile, which will pick a value at random, subject to
+	// TLSProfile specifies a particular indistinguishable TLS profile to use for
+	// the TLS dial. Setting TLSProfile allows the caller to pin the selection so
+	// all TLS connections in a certain context (e.g. a single meek connection)
+	// use a consistent value. The value should be selected by calling
+	// SelectTLSProfile, which will pick a value at random, subject to
 	// compatibility constraints.
+	//
+	// When TLSProfile is "", a profile is selected at random and
+	// DisableFrontingProviderTLSProfiles is ignored.
 	TLSProfile string
 
 	// NoDefaultTLSSessionID specifies whether to set a TLS session ID by
@@ -154,6 +156,8 @@ func (config *CustomTLSConfig) EnableClientSessionCache() {
 
 // SelectTLSProfile picks a TLS profile at random from the available candidates.
 func SelectTLSProfile(
+	isFronted bool,
+	frontingProviderID string,
 	p parameters.ClientParametersAccessor) string {
 
 	// Two TLS profile lists are constructed, subject to limit constraints:
@@ -169,11 +173,29 @@ func SelectTLSProfile(
 	// UseOnlyCustomTLSProfiles may be used to disable all stock TLS profiles and
 	// use only CustomTLSProfiles; UseOnlyCustomTLSProfiles is ignored if
 	// CustomTLSProfiles is empty.
+	//
+	// For fronted servers, DisableFrontingProviderTLSProfiles may be used
+	// to disable TLS profiles which are incompatible with the TLS stack used
+	// by the front. For example, if a utls parrot doesn't fully support all
+	// of the capabilities in the ClientHello. Unlike the LimitTLSProfiles case,
+	// DisableFrontingProviderTLSProfiles may disable CustomTLSProfiles.
 
 	limitTLSProfiles := p.TLSProfiles(parameters.LimitTLSProfiles)
+	var disableTLSProfiles protocol.TLSProfiles
+
+	if isFronted && frontingProviderID != "" {
+		disableTLSProfiles = p.LabeledTLSProfiles(
+			parameters.DisableFrontingProviderTLSProfiles, frontingProviderID)
+	}
 
 	randomizedTLSProfiles := make([]string, 0)
-	parrotTLSProfiles := p.CustomTLSProfileNames()
+	parrotTLSProfiles := make([]string, 0)
+
+	for _, tlsProfile := range p.CustomTLSProfileNames() {
+		if !common.Contains(disableTLSProfiles, tlsProfile) {
+			parrotTLSProfiles = append(parrotTLSProfiles, tlsProfile)
+		}
+	}
 
 	useOnlyCustomTLSProfiles := p.Bool(parameters.UseOnlyCustomTLSProfiles)
 	if useOnlyCustomTLSProfiles && len(parrotTLSProfiles) == 0 {
@@ -185,6 +207,10 @@ func SelectTLSProfile(
 
 			if len(limitTLSProfiles) > 0 &&
 				!common.Contains(limitTLSProfiles, tlsProfile) {
+				continue
+			}
+
+			if common.Contains(disableTLSProfiles, tlsProfile) {
 				continue
 			}
 
@@ -359,7 +385,7 @@ func CustomTLSDial(
 	selectedTLSProfile := config.TLSProfile
 
 	if selectedTLSProfile == "" {
-		selectedTLSProfile = SelectTLSProfile(p)
+		selectedTLSProfile = SelectTLSProfile(false, "", p)
 	}
 
 	tlsConfigInsecureSkipVerify := false

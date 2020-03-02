@@ -59,6 +59,7 @@ type ServerEntry struct {
 	SshObfuscatedKey              string   `json:"sshObfuscatedKey"`
 	Capabilities                  []string `json:"capabilities"`
 	Region                        string   `json:"region"`
+	FrontingProviderID            string   `json:"frontingProviderID"`
 	MeekServerPort                int      `json:"meekServerPort"`
 	MeekCookieEncryptionPublicKey string   `json:"meekCookieEncryptionPublicKey"`
 	MeekObfuscatedKey             string   `json:"meekObfuscatedKey"`

@@ -54,16 +54,32 @@ func TestTunnelProtocolValidation(t *testing.T) {
 
 func TestTLSProfileValidation(t *testing.T) {
 
-	err := SupportedTLSProfiles.Validate()
+	// Test: valid profiles
+
+	err := SupportedTLSProfiles.Validate(nil)
 	if err != nil {
 		t.Errorf("unexpected Validate error: %s", err)
 	}
 
-	invalidProfiles := TLSProfiles{"OSSH", "INVALID-PROTOCOL"}
-	err = invalidProfiles.Validate()
+	// Test: invalid profile
+
+	profiles := TLSProfiles{TLS_PROFILE_RANDOMIZED, "INVALID-TLS-PROFILE"}
+	err = profiles.Validate(nil)
 	if err == nil {
 		t.Errorf("unexpected Validate success")
 	}
+
+	// Test: valid custom profile
+
+	customProfiles := []string{"CUSTOM-TLS-PROFILE"}
+
+	profiles = TLSProfiles{TLS_PROFILE_RANDOMIZED, "CUSTOM-TLS-PROFILE"}
+	err = profiles.Validate(customProfiles)
+	if err != nil {
+		t.Errorf("unexpected Validate error: %s", err)
+	}
+
+	// Test: prune invalid profiles
 
 	pruneProfiles := make(TLSProfiles, 0)
 	for i, p := range SupportedTLSProfiles {
@@ -72,9 +88,19 @@ func TestTLSProfileValidation(t *testing.T) {
 	}
 	pruneProfiles = append(pruneProfiles, fmt.Sprintf("INVALID-PROFILE-%d", len(SupportedTLSProfiles)))
 
-	prunedProfiles := pruneProfiles.PruneInvalid()
+	prunedProfiles := pruneProfiles.PruneInvalid(nil)
 
 	if !reflect.DeepEqual(prunedProfiles, SupportedTLSProfiles) {
 		t.Errorf("unexpected %+v != %+v", prunedProfiles, SupportedTLSProfiles)
+	}
+
+	// Test: don't prune valid custom profiles
+
+	pruneProfiles = TLSProfiles{TLS_PROFILE_RANDOMIZED, "CUSTOM-TLS-PROFILE"}
+
+	prunedProfiles = pruneProfiles.PruneInvalid(customProfiles)
+
+	if !reflect.DeepEqual(prunedProfiles, pruneProfiles) {
+		t.Errorf("unexpected %+v != %+v", prunedProfiles, pruneProfiles)
 	}
 }
