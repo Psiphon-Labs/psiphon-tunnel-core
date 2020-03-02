@@ -1373,7 +1373,7 @@ loop:
 		tunnel.conn.Close()
 
 		if continuousNetworkConnectivity {
-			RecordFailedTunnelStat(tunnel.config, tunnel.dialParams, err)
+			_ = RecordFailedTunnelStat(tunnel.config, tunnel.dialParams, err)
 		}
 	}
 
