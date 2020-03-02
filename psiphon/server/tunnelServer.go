@@ -3369,10 +3369,10 @@ func (sshClient *sshClient) handleTCPChannel(
 	relayWaitGroup.Add(1)
 	go func() {
 		defer relayWaitGroup.Done()
-		// io.Copy allocates a 32K temporary buffer, and each port forward relay uses
-		// two of these buffers; using io.CopyBuffer with a smaller buffer reduces the
-		// overall memory footprint.
-		bytes, err := io.CopyBuffer(
+		// io.Copy allocates a 32K temporary buffer, and each port forward relay
+		// uses two of these buffers; using common.CopyBuffer with a smaller buffer
+		// reduces the overall memory footprint.
+		bytes, err := common.CopyBuffer(
 			fwdChannel, fwdConn, make([]byte, SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE))
 		atomic.AddInt64(&bytesDown, bytes)
 		if err != nil && err != io.EOF {
@@ -3385,7 +3385,7 @@ func (sshClient *sshClient) handleTCPChannel(
 		// be flowing?
 		fwdChannel.Close()
 	}()
-	bytes, err := io.CopyBuffer(
+	bytes, err := common.CopyBuffer(
 		fwdConn, fwdChannel, make([]byte, SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE))
 	atomic.AddInt64(&bytesUp, bytes)
 	if err != nil && err != io.EOF {
