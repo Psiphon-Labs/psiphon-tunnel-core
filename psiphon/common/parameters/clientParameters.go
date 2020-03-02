@@ -584,7 +584,7 @@ func (p *ClientParameters) Set(
 	var customTLSProfileNames []string
 
 	customTLSProfilesValue := parameters[CustomTLSProfiles]
-	for i := len(applyParameters) - 1; i >= 0; i++ {
+	for i := len(applyParameters) - 1; i >= 0; i-- {
 		if v := applyParameters[i][CustomTLSProfiles]; v != nil {
 			customTLSProfilesValue = v
 			break
