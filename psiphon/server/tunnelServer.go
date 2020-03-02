@@ -817,6 +817,10 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 				int64(client.qualityMetrics.TCPPortForwardFailedDuration / time.Millisecond)
 			stat["tcp_port_forward_rejected_dialing_limit_count"] +=
 				client.qualityMetrics.TCPPortForwardRejectedDialingLimitCount
+			stat["tcp_port_forward_rejected_disallowed_count"] +=
+				client.qualityMetrics.TCPPortForwardRejectedDisallowedCount
+			stat["udp_port_forward_rejected_disallowed_count"] +=
+				client.qualityMetrics.UDPPortForwardRejectedDisallowedCount
 
 			stat["tcp_ipv4_port_forward_dialed_count"] += client.qualityMetrics.TCPIPv4PortForwardDialedCount
 			stat["tcp_ipv4_port_forward_dialed_duration"] +=
@@ -838,6 +842,8 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 		client.qualityMetrics.TCPPortForwardFailedCount = 0
 		client.qualityMetrics.TCPPortForwardFailedDuration = 0
 		client.qualityMetrics.TCPPortForwardRejectedDialingLimitCount = 0
+		client.qualityMetrics.TCPPortForwardRejectedDisallowedCount = 0
+		client.qualityMetrics.UDPPortForwardRejectedDisallowedCount = 0
 
 		client.qualityMetrics.TCPIPv4PortForwardDialedCount = 0
 		client.qualityMetrics.TCPIPv4PortForwardDialedDuration = 0
@@ -1204,6 +1210,8 @@ type qualityMetrics struct {
 	TCPPortForwardFailedCount               int64
 	TCPPortForwardFailedDuration            time.Duration
 	TCPPortForwardRejectedDialingLimitCount int64
+	TCPPortForwardRejectedDisallowedCount   int64
+	UDPPortForwardRejectedDisallowedCount   int64
 	TCPIPv4PortForwardDialedCount           int64
 	TCPIPv4PortForwardDialedDuration        time.Duration
 	TCPIPv4PortForwardFailedCount           int64
@@ -2894,6 +2902,13 @@ func (sshClient *sshClient) isPortForwardPermitted(
 		return true
 	}
 
+	switch portForwardType {
+	case portForwardTypeTCP:
+		sshClient.updateQualityMetricsWithTCPRejectedDisallowed()
+	case portForwardTypeUDP:
+		sshClient.updateQualityMetricsWithUDPRejectedDisallowed()
+	}
+
 	sshClient.enqueueDisallowedTrafficAlertRequest()
 
 	log.WithTraceFields(
@@ -3129,6 +3144,22 @@ func (sshClient *sshClient) updateQualityMetricsWithRejectedDialingLimit() {
 	defer sshClient.Unlock()
 
 	sshClient.qualityMetrics.TCPPortForwardRejectedDialingLimitCount += 1
+}
+
+func (sshClient *sshClient) updateQualityMetricsWithTCPRejectedDisallowed() {
+
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	sshClient.qualityMetrics.TCPPortForwardRejectedDisallowedCount += 1
+}
+
+func (sshClient *sshClient) updateQualityMetricsWithUDPRejectedDisallowed() {
+
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	sshClient.qualityMetrics.UDPPortForwardRejectedDisallowedCount += 1
 }
 
 func (sshClient *sshClient) handleTCPChannel(
