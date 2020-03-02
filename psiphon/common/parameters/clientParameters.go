@@ -140,6 +140,7 @@ const (
 	SSHKeepAlivePeriodicInactivePeriod               = "SSHKeepAlivePeriodicInactivePeriod"
 	SSHKeepAliveProbeTimeout                         = "SSHKeepAliveProbeTimeout"
 	SSHKeepAliveProbeInactivePeriod                  = "SSHKeepAliveProbeInactivePeriod"
+	SSHKeepAliveNetworkConnectivityPollingPeriod     = "SSHKeepAliveNetworkConnectivityPollingPeriod"
 	HTTPProxyOriginServerTimeout                     = "HTTPProxyOriginServerTimeout"
 	HTTPProxyMaxIdleConnectionsPerHost               = "HTTPProxyMaxIdleConnectionsPerHost"
 	FetchRemoteServerListTimeout                     = "FetchRemoteServerListTimeout"
@@ -351,15 +352,16 @@ var defaultClientParameters = map[string]struct {
 	// The Psiphon server times out inactive tunnels after 5 minutes, so this
 	// is a soft max for SSHKeepAlivePeriodMax.
 
-	SSHKeepAliveSpeedTestSampleProbability: {value: 0.5, minimum: 0.0},
-	SSHKeepAlivePaddingMinBytes:            {value: 0, minimum: 0},
-	SSHKeepAlivePaddingMaxBytes:            {value: 256, minimum: 0},
-	SSHKeepAlivePeriodMin:                  {value: 1 * time.Minute, minimum: 1 * time.Second},
-	SSHKeepAlivePeriodMax:                  {value: 2 * time.Minute, minimum: 1 * time.Second},
-	SSHKeepAlivePeriodicTimeout:            {value: 30 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
-	SSHKeepAlivePeriodicInactivePeriod:     {value: 10 * time.Second, minimum: 1 * time.Second},
-	SSHKeepAliveProbeTimeout:               {value: 5 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
-	SSHKeepAliveProbeInactivePeriod:        {value: 10 * time.Second, minimum: 1 * time.Second},
+	SSHKeepAliveSpeedTestSampleProbability:       {value: 0.5, minimum: 0.0},
+	SSHKeepAlivePaddingMinBytes:                  {value: 0, minimum: 0},
+	SSHKeepAlivePaddingMaxBytes:                  {value: 256, minimum: 0},
+	SSHKeepAlivePeriodMin:                        {value: 1 * time.Minute, minimum: 1 * time.Second},
+	SSHKeepAlivePeriodMax:                        {value: 2 * time.Minute, minimum: 1 * time.Second},
+	SSHKeepAlivePeriodicTimeout:                  {value: 30 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
+	SSHKeepAlivePeriodicInactivePeriod:           {value: 10 * time.Second, minimum: 1 * time.Second},
+	SSHKeepAliveProbeTimeout:                     {value: 5 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
+	SSHKeepAliveProbeInactivePeriod:              {value: 10 * time.Second, minimum: 1 * time.Second},
+	SSHKeepAliveNetworkConnectivityPollingPeriod: {value: 500 * time.Millisecond, minimum: 1 * time.Millisecond},
 
 	HTTPProxyOriginServerTimeout:       {value: 15 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	HTTPProxyMaxIdleConnectionsPerHost: {value: 50, minimum: 0},
