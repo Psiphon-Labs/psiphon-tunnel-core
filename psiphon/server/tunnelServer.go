@@ -2596,8 +2596,17 @@ func (sshClient *sshClient) setHandshakeState(
 		sessionID, ok := sshClient.sshServer.authorizationSessionIDs[authorizationID]
 		if ok && sessionID != sshClient.sessionID {
 
-			log.WithTraceFields(
-				LogFields{"authorizationID": authorizationID}).Warning("duplicate active authorization")
+			logFields := LogFields{
+				"event_name":                 "irregular_tunnel",
+				"tunnel_error":               "duplicate active authorization",
+				"duplicate_authorization_id": authorizationID,
+			}
+			sshClient.geoIPData.SetLogFields(logFields)
+			duplicateGeoIPData := sshClient.sshServer.support.GeoIPService.GetSessionCache(sessionID)
+			if duplicateGeoIPData != sshClient.geoIPData {
+				duplicateGeoIPData.SetLogFieldsWithPrefix("duplicate_authentication_", logFields)
+			}
+			log.LogRawFieldsWithTimestamp(logFields)
 
 			// Invoke asynchronously to avoid deadlocks.
 			// TODO: invoke only once for each distinct sessionID?
