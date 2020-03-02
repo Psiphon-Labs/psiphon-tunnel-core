@@ -296,7 +296,7 @@ func TestSelectTLSProfile(t *testing.T) {
 
 	frontingProviderID := "frontingProviderID"
 
-	clientParameters = makeCustomTLSProfilesClientParameters(t, true, frontingProviderID)
+	clientParameters = makeCustomTLSProfilesClientParameters(t, false, frontingProviderID)
 	disableTLSProfiles := clientParameters.Get().LabeledTLSProfiles(
 		parameters.DisableFrontingProviderTLSProfiles, frontingProviderID)
 

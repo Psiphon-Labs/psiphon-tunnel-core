@@ -584,11 +584,14 @@ func (p *ClientParameters) Set(
 	var customTLSProfileNames []string
 
 	customTLSProfilesValue := parameters[CustomTLSProfiles]
-	for i := 0; i < len(applyParameters); i++ {
-		customTLSProfilesValue = applyParameters[i][CustomTLSProfiles]
+	for i := len(applyParameters) - 1; i >= 0; i++ {
+		if v := applyParameters[i][CustomTLSProfiles]; v != nil {
+			customTLSProfilesValue = v
+			break
+		}
 	}
 	if customTLSProfiles, ok := customTLSProfilesValue.(protocol.CustomTLSProfiles); ok {
-		customTLSProfileNames := make([]string, len(customTLSProfiles))
+		customTLSProfileNames = make([]string, len(customTLSProfiles))
 		for i := 0; i < len(customTLSProfiles); i++ {
 			customTLSProfileNames[i] = customTLSProfiles[i].Name
 		}
