@@ -72,15 +72,19 @@ func NewGeoIPData() GeoIPData {
 // SetLogFields adds the GeoIPData fields to LogFields, following Psiphon
 // metric field name and format conventions.
 func (g GeoIPData) SetLogFields(logFields LogFields) {
+	g.SetLogFieldsWithPrefix("", logFields)
+}
+
+func (g GeoIPData) SetLogFieldsWithPrefix(prefix string, logFields LogFields) {
 
 	// In psi_web, the space replacement was done to accommodate space
 	// delimited logging, which is no longer required; we retain the
 	// transformation so that stats aggregation isn't impacted.
-	logFields["client_region"] = strings.Replace(g.Country, " ", "_", -1)
-	logFields["client_city"] = strings.Replace(g.City, " ", "_", -1)
-	logFields["client_isp"] = strings.Replace(g.ISP, " ", "_", -1)
-	logFields["client_asn"] = strings.Replace(g.ASN, " ", "_", -1)
-	logFields["client_aso"] = strings.Replace(g.ASO, " ", "_", -1)
+	logFields[prefix+"client_region"] = strings.Replace(g.Country, " ", "_", -1)
+	logFields[prefix+"client_city"] = strings.Replace(g.City, " ", "_", -1)
+	logFields[prefix+"client_isp"] = strings.Replace(g.ISP, " ", "_", -1)
+	logFields[prefix+"client_asn"] = strings.Replace(g.ASN, " ", "_", -1)
+	logFields[prefix+"client_aso"] = strings.Replace(g.ASO, " ", "_", -1)
 }
 
 // GeoIPService implements GeoIP lookup and session/GeoIP caching.

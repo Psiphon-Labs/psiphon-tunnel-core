@@ -664,14 +664,14 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 func (server *MeekServer) rateLimit(clientIP string) bool {
 
-	historySize, thresholdSeconds, regions, ISPs, GCTriggerCount, _ :=
+	historySize, thresholdSeconds, regions, ISPs, cities, GCTriggerCount, _ :=
 		server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
 
 	if historySize == 0 {
 		return false
 	}
 
-	if len(regions) > 0 || len(ISPs) > 0 {
+	if len(regions) > 0 || len(ISPs) > 0 || len(cities) > 0 {
 
 		// TODO: avoid redundant GeoIP lookups?
 		geoIPData := server.support.GeoIPService.Lookup(clientIP)
@@ -684,6 +684,12 @@ func (server *MeekServer) rateLimit(clientIP string) bool {
 
 		if len(ISPs) > 0 {
 			if !common.Contains(ISPs, geoIPData.ISP) {
+				return false
+			}
+		}
+
+		if len(cities) > 0 {
+			if !common.Contains(cities, geoIPData.City) {
 				return false
 			}
 		}
@@ -738,7 +744,7 @@ func (server *MeekServer) rateLimit(clientIP string) bool {
 
 func (server *MeekServer) rateLimitWorker() {
 
-	_, _, _, _, _, reapFrequencySeconds :=
+	_, _, _, _, _, _, reapFrequencySeconds :=
 		server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
 
 	timer := time.NewTimer(time.Duration(reapFrequencySeconds) * time.Second)
@@ -748,7 +754,7 @@ func (server *MeekServer) rateLimitWorker() {
 		select {
 		case <-timer.C:
 
-			_, thresholdSeconds, _, _, _, reapFrequencySeconds :=
+			_, thresholdSeconds, _, _, _, _, reapFrequencySeconds :=
 				server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
 
 			server.rateLimitLock.Lock()
