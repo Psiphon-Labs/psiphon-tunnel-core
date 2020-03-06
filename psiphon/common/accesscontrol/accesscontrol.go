@@ -164,23 +164,25 @@ func ValidateSigningKey(signingKey *SigningKey) error {
 // from the seed without revealing the original value. The authorization
 // ID is to be used to mitigate malicious authorization reuse/sharing.
 //
-// The return value is a base64-encoded, serialized JSON representation
-// of the signed authorization that can be passed to VerifyAuthorization.
+// The first return value is a base64-encoded, serialized JSON representation
+// of the signed authorization that can be passed to VerifyAuthorization. The
+// second return value is the base64-encoded unique ID of the signed
+// authorization returned in the first value.
 func IssueAuthorization(
 	signingKey *SigningKey,
 	seedAuthorizationID []byte,
-	expires time.Time) (string, error) {
+	expires time.Time) (string, string, error) {
 
 	err := ValidateSigningKey(signingKey)
 	if err != nil {
-		return "", errors.Trace(err)
+		return "", "", errors.Trace(err)
 	}
 
 	hkdf := hkdf.New(sha256.New, signingKey.AuthorizationIDKey, nil, seedAuthorizationID)
 	ID := make([]byte, authorizationIDLength)
 	_, err = io.ReadFull(hkdf, ID)
 	if err != nil {
-		return "", errors.Trace(err)
+		return "", "", errors.Trace(err)
 	}
 
 	auth := Authorization{
@@ -191,7 +193,7 @@ func IssueAuthorization(
 
 	authJSON, err := json.Marshal(auth)
 	if err != nil {
-		return "", errors.Trace(err)
+		return "", "", errors.Trace(err)
 	}
 
 	signature := ed25519.Sign(signingKey.PrivateKey, authJSON)
@@ -204,12 +206,13 @@ func IssueAuthorization(
 
 	signedAuthJSON, err := json.Marshal(signedAuth)
 	if err != nil {
-		return "", errors.Trace(err)
+		return "", "", errors.Trace(err)
 	}
 
 	encodedSignedAuth := base64.StdEncoding.EncodeToString(signedAuthJSON)
+	encodedAuthID := base64.StdEncoding.EncodeToString(ID)
 
-	return encodedSignedAuth, nil
+	return encodedSignedAuth, encodedAuthID, nil
 }
 
 // VerificationKeyRing is a set of verification keys to be deployed

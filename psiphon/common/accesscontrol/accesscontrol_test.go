@@ -89,7 +89,7 @@ func TestAuthorization(t *testing.T) {
 
 	expires := time.Now().Add(10 * time.Second)
 
-	auth, err := IssueAuthorization(correctSigningKey, id, expires)
+	auth, _, err := IssueAuthorization(correctSigningKey, id, expires)
 	if err != nil {
 		t.Fatalf("IssueAuthorization failed: %s", err)
 	}
@@ -109,7 +109,7 @@ func TestAuthorization(t *testing.T) {
 
 	expires = time.Now().Add(-10 * time.Second)
 
-	auth, err = IssueAuthorization(correctSigningKey, id, expires)
+	auth, _, err = IssueAuthorization(correctSigningKey, id, expires)
 	if err != nil {
 		t.Fatalf("IssueAuthorization failed: %s", err)
 	}
@@ -124,7 +124,7 @@ func TestAuthorization(t *testing.T) {
 
 	expires = time.Now().Add(10 * time.Second)
 
-	auth, err = IssueAuthorization(invalidSigningKey, id, expires)
+	auth, _, err = IssueAuthorization(invalidSigningKey, id, expires)
 	if err != nil {
 		t.Fatalf("IssueAuthorization failed: %s", err)
 	}
@@ -139,7 +139,7 @@ func TestAuthorization(t *testing.T) {
 
 	expires = time.Now().Add(10 * time.Second)
 
-	auth, err = IssueAuthorization(otherSigningKey, id, expires)
+	auth, _, err = IssueAuthorization(otherSigningKey, id, expires)
 	if err != nil {
 		t.Fatalf("IssueAuthorization failed: %s", err)
 	}
