@@ -1163,7 +1163,7 @@ func checkExpectedLogFields(
 	//
 	// - client_build_rev not set in test build (see common/buildinfo.go)
 	// - egress_region, upstream_proxy_type, upstream_proxy_custom_header_names not exercised in test
-	// - meek_dial_ip_address/meek_resolved_ip_address only logged for FRONTED meek protocols
+	// - fronting_provider_id/meek_dial_ip_address/meek_resolved_ip_address only logged for FRONTED meek protocols
 
 	for _, name := range []string{
 		"session_id",

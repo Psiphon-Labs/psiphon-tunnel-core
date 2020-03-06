@@ -1262,13 +1262,30 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 // closed, which will terminate the associated tunnel.
 func (tunnel *Tunnel) sendSshKeepAlive(isFirstPeriodicKeepAlive bool, timeout time.Duration) error {
 
-	// Note: there is no request context since SSH requests cannot be
-	// interrupted directly. Closing the tunnel will interrupt the request.
-	// A timeout is set to unblock this function, but the goroutine may
-	// not exit until the tunnel is closed.
+	p := tunnel.getCustomClientParameters()
+
+	// Random padding to frustrate fingerprinting.
+	request := prng.Padding(
+		p.Int(parameters.SSHKeepAlivePaddingMinBytes),
+		p.Int(parameters.SSHKeepAlivePaddingMaxBytes))
+
+	speedTestSample := isFirstPeriodicKeepAlive
+	if !speedTestSample {
+		speedTestSample = p.WeightedCoinFlip(
+			parameters.SSHKeepAliveSpeedTestSampleProbability)
+	}
+
+	networkConnectivityPollPeriod := p.Duration(
+		parameters.SSHKeepAliveNetworkConnectivityPollingPeriod)
+
+	p.Close()
+
+	// Note: there is no request context since SSH requests cannot be interrupted
+	// directly. Closing the tunnel will interrupt the request. A timeout is set
+	// to unblock this function, but the goroutine may not exit until the tunnel
+	// is closed.
 
 	// Use a buffer of 1 as there are two senders and only one guaranteed receive.
-
 	errChannel := make(chan error, 1)
 
 	afterFunc := time.AfterFunc(timeout, func() {
@@ -1277,12 +1294,6 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstPeriodicKeepAlive bool, timeout ti
 	defer afterFunc.Stop()
 
 	go func() {
-		// Random padding to frustrate fingerprinting.
-		p := tunnel.getCustomClientParameters()
-		request := prng.Padding(
-			p.Int(parameters.SSHKeepAlivePaddingMinBytes),
-			p.Int(parameters.SSHKeepAlivePaddingMaxBytes))
-		p.Close()
 
 		startTime := time.Now()
 
@@ -1302,10 +1313,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstPeriodicKeepAlive bool, timeout ti
 		// only the last SpeedTestMaxSampleCount samples are retained, enables
 		// tuning the sampling frequency.
 
-		if err == nil && requestOk &&
-			(isFirstPeriodicKeepAlive ||
-				tunnel.getCustomClientParameters().WeightedCoinFlip(
-					parameters.SSHKeepAliveSpeedTestSampleProbability)) {
+		if err == nil && requestOk && speedTestSample {
 
 			err = tactics.AddSpeedTestSample(
 				tunnel.config.GetClientParameters(),
@@ -1322,13 +1330,54 @@ func (tunnel *Tunnel) sendSshKeepAlive(isFirstPeriodicKeepAlive bool, timeout ti
 		}
 	}()
 
-	err := <-errChannel
+	// While awaiting the response, poll the network connectivity state. If there
+	// is network connectivity, on the same network, for the entire duration of
+	// the keep alive request and the request fails, record a failed tunnel
+	// event.
+	//
+	// The network connectivity heuristic is intended to reduce the number of
+	// failed tunnels reported due to routine situations such as varying mobile
+	// network conditions. The polling may produce false positives if the network
+	// goes down and up between polling periods, or changes to a new network and
+	// back to the previous network between polling periods.
+	//
+	// For platforms that don't provide a NetworkConnectivityChecker, it is
+	// assumed that there is network connectivity.
+
+	ticker := time.NewTicker(networkConnectivityPollPeriod)
+	defer ticker.Stop()
+	continuousNetworkConnectivity := true
+	networkID := tunnel.config.GetNetworkID()
+
+	var err error
+loop:
+	for {
+		select {
+		case err = <-errChannel:
+			break loop
+		case <-ticker.C:
+			connectivityChecker := tunnel.config.NetworkConnectivityChecker
+			if (connectivityChecker != nil &&
+				connectivityChecker.HasNetworkConnectivity() != 1) ||
+				(networkID != tunnel.config.GetNetworkID()) {
+
+				continuousNetworkConnectivity = false
+			}
+		}
+	}
+
+	err = errors.Trace(err)
+
 	if err != nil {
 		tunnel.sshClient.Close()
 		tunnel.conn.Close()
+
+		if continuousNetworkConnectivity {
+			_ = RecordFailedTunnelStat(tunnel.config, tunnel.dialParams, err)
+		}
 	}
 
-	return errors.Trace(err)
+	return err
 }
 
 // sendStats is a helper for sending session stats to the server.

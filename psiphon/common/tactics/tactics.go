@@ -167,13 +167,13 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/nacl/box"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"golang.org/x/crypto/nacl/box"
 )
 
 // TACTICS_PADDING_MAX_SIZE is used by the client as well as the server. This
@@ -269,6 +269,9 @@ type Filter struct {
 	// ISPs specifies a list of GeoIP ISPs the client must match.
 	ISPs []string
 
+	// Cities specifies a list of GeoIP Cities the client must match.
+	Cities []string
+
 	// APIParameters specifies API, e.g. handshake, parameter names and
 	// a list of values, one of which must be specified to match this
 	// filter. Only scalar string API parameters may be filtered.
@@ -281,6 +284,7 @@ type Filter struct {
 
 	regionLookup map[string]bool
 	ispLookup    map[string]bool
+	cityLookup   map[string]bool
 }
 
 // Range is a filter field which specifies that the aggregation of
@@ -594,6 +598,13 @@ func (server *Server) initLookups() {
 			}
 		}
 
+		if len(filteredTactics.Filter.Cities) >= stringLookupThreshold {
+			filteredTactics.Filter.cityLookup = make(map[string]bool)
+			for _, city := range filteredTactics.Filter.Cities {
+				filteredTactics.Filter.cityLookup[city] = true
+			}
+		}
+
 		// TODO: add lookups for APIParameters?
 		// Not expected to be long lists of values.
 	}
@@ -710,6 +721,18 @@ func (server *Server) GetTactics(
 				}
 			} else {
 				if !common.Contains(filteredTactics.Filter.ISPs, geoIPData.ISP) {
+					continue
+				}
+			}
+		}
+
+		if len(filteredTactics.Filter.Cities) > 0 {
+			if filteredTactics.Filter.cityLookup != nil {
+				if !filteredTactics.Filter.cityLookup[geoIPData.City] {
+					continue
+				}
+			} else {
+				if !common.Contains(filteredTactics.Filter.Cities, geoIPData.City) {
 					continue
 				}
 			}

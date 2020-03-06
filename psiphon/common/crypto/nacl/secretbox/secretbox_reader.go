@@ -29,8 +29,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/poly1305"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/salsa20/salsa"
+	"golang.org/x/crypto/poly1305"
+	"golang.org/x/crypto/salsa20/salsa"
 )
 
 // NewOpenReadSeeker is a streaming variant of Open.

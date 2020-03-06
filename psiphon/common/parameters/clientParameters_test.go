@@ -74,10 +74,24 @@ func TestGetDefaultParameters(t *testing.T) {
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("TLSProfiles returned %+v expected %+v", g, v)
 			}
+		case protocol.LabeledTLSProfiles:
+			for label, profiles := range v {
+				g := p.Get().LabeledTLSProfiles(name, label)
+				if !reflect.DeepEqual(profiles, g) {
+					t.Fatalf("LabeledTLSProfiles returned %+v expected %+v", g, profiles)
+				}
+			}
 		case protocol.QUICVersions:
 			g := p.Get().QUICVersions(name)
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("QUICVersions returned %+v expected %+v", g, v)
+			}
+		case protocol.LabeledQUICVersions:
+			for label, versions := range v {
+				g := p.Get().LabeledTLSProfiles(name, label)
+				if !reflect.DeepEqual(versions, g) {
+					t.Fatalf("LabeledQUICVersions returned %+v expected %+v", g, versions)
+				}
 			}
 		case DownloadURLs:
 			g := p.Get().DownloadURLs(name)
@@ -302,6 +316,57 @@ func TestLimitTunnelProtocolProbability(t *testing.T) {
 
 	if matchCount < 250 || matchCount > 750 {
 		t.Fatalf("Unexpected probability result: %d", matchCount)
+	}
+}
+
+func TestLabeledLists(t *testing.T) {
+	p, err := NewClientParameters(nil)
+	if err != nil {
+		t.Fatalf("NewClientParameters failed: %s", err)
+	}
+
+	tlsProfiles := make(protocol.TLSProfiles, 0)
+	for i, tlsProfile := range protocol.SupportedTLSProfiles {
+		if i%2 == 0 {
+			tlsProfiles = append(tlsProfiles, tlsProfile)
+		}
+	}
+
+	quicVersions := make(protocol.QUICVersions, 0)
+	for i, quicVersion := range protocol.SupportedQUICVersions {
+		if i%2 == 0 {
+			quicVersions = append(quicVersions, quicVersion)
+		}
+	}
+
+	applyParameters := map[string]interface{}{
+		"DisableFrontingProviderTLSProfiles":  protocol.LabeledTLSProfiles{"validLabel": tlsProfiles},
+		"DisableFrontingProviderQUICVersions": protocol.LabeledQUICVersions{"validLabel": quicVersions},
+	}
+
+	_, err = p.Set("", false, applyParameters)
+	if err != nil {
+		t.Fatalf("Set failed: %s", err)
+	}
+
+	disableTLSProfiles := p.Get().LabeledTLSProfiles(DisableFrontingProviderTLSProfiles, "validLabel")
+	if !reflect.DeepEqual(disableTLSProfiles, tlsProfiles) {
+		t.Fatalf("LabeledTLSProfiles returned %+v expected %+v", disableTLSProfiles, tlsProfiles)
+	}
+
+	disableTLSProfiles = p.Get().LabeledTLSProfiles(DisableFrontingProviderTLSProfiles, "invalidLabel")
+	if disableTLSProfiles != nil {
+		t.Fatalf("LabeledTLSProfiles returned unexpected non-empty list %+v", disableTLSProfiles)
+	}
+
+	disableQUICVersions := p.Get().LabeledQUICVersions(DisableFrontingProviderQUICVersions, "validLabel")
+	if !reflect.DeepEqual(disableQUICVersions, quicVersions) {
+		t.Fatalf("LabeledQUICVersions returned %+v expected %+v", disableQUICVersions, quicVersions)
+	}
+
+	disableQUICVersions = p.Get().LabeledQUICVersions(DisableFrontingProviderQUICVersions, "invalidLabel")
+	if disableQUICVersions != nil {
+		t.Fatalf("LabeledQUICVersions returned unexpected non-empty list %+v", disableQUICVersions)
 	}
 }
 

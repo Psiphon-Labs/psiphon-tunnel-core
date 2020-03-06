@@ -421,8 +421,10 @@ var remoteServerListStatParams = []requestParamSpec{
 	{"client_platform", isAnyString, requestParamOptional},
 	{"client_build_rev", isAnyString, requestParamOptional},
 	{"client_download_timestamp", isISO8601Date, 0},
+	{"tunneled", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"url", isAnyString, 0},
 	{"etag", isAnyString, 0},
+	{"authenticated", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
 var failedTunnelStatParams = append(
@@ -714,6 +716,7 @@ var baseRequestParams = []requestParamSpec{
 	{"ssh_client_version", isAnyString, requestParamOptional},
 	{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
 	{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
+	{"fronting_provider_id", isAnyString, requestParamOptional},
 	{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
 	{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
 	{"meek_sni_server_name", isDomain, requestParamOptional},

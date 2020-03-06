@@ -9,6 +9,7 @@ import (
 	"crypto"
 	"crypto/dsa"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/md5"
 	"crypto/rsa"
@@ -23,8 +24,6 @@ import (
 	"io"
 	"math/big"
 	"strings"
-
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ed25519"
 )
 
 // These constants represent the algorithm names for key types supported by this

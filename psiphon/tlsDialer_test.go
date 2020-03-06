@@ -121,14 +121,14 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 		return d.DialContext(ctx, network, address)
 	}
 
-	clientParameters := makeCustomTLSProfilesClientParameters(t, false)
+	clientParameters := makeCustomTLSProfilesClientParameters(t, false, "")
 
 	profiles := append([]string(nil), protocol.SupportedTLSProfiles...)
 	profiles = append(profiles, clientParameters.Get().CustomTLSProfileNames()...)
 
 	for _, tlsProfile := range profiles {
 
-		repeats := 1
+		repeats := 2
 		if protocol.TLSProfileIsRandomized(tlsProfile) {
 			repeats = 20
 		}
@@ -137,12 +137,19 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 		tlsVersions := []string{}
 		for i := 0; i < repeats; i++ {
 
+			transformHostname := i%2 == 0
+
 			tlsConfig := &CustomTLSConfig{
 				ClientParameters: clientParameters,
 				Dial:             dialer,
-				UseDialAddrSNI:   true,
 				SkipVerify:       true,
 				TLSProfile:       tlsProfile,
+			}
+
+			if transformHostname {
+				tlsConfig.SNIServerName = values.GetHostName()
+			} else {
+				tlsConfig.UseDialAddrSNI = true
 			}
 
 			ctx, cancelFunc := context.WithTimeout(context.Background(), 5*time.Second)
@@ -150,7 +157,8 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 			conn, err := CustomTLSDial(ctx, "tcp", address, tlsConfig)
 
 			if err != nil {
-				t.Logf("%s: %s\n", tlsProfile, err)
+				t.Logf("%s (transformHostname: %v): %s\n",
+					tlsProfile, transformHostname, err)
 			} else {
 
 				tlsVersion := ""
@@ -189,7 +197,7 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 
 func TestSelectTLSProfile(t *testing.T) {
 
-	clientParameters := makeCustomTLSProfilesClientParameters(t, false)
+	clientParameters := makeCustomTLSProfilesClientParameters(t, false, "")
 
 	profiles := append([]string(nil), protocol.SupportedTLSProfiles...)
 	profiles = append(profiles, clientParameters.Get().CustomTLSProfileNames()...)
@@ -199,7 +207,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	numSelections := 10000
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(clientParameters.Get())
+		profile := SelectTLSProfile(false, "", clientParameters.Get())
 		selected[profile] += 1
 	}
 
@@ -274,13 +282,32 @@ func TestSelectTLSProfile(t *testing.T) {
 
 	// Only custom TLS profiles should be selected
 
-	clientParameters = makeCustomTLSProfilesClientParameters(t, true)
+	clientParameters = makeCustomTLSProfilesClientParameters(t, true, "")
 	customTLSProfileNames := clientParameters.Get().CustomTLSProfileNames()
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(clientParameters.Get())
+		profile := SelectTLSProfile(false, "", clientParameters.Get())
 		if !common.Contains(customTLSProfileNames, profile) {
 			t.Errorf("unexpected non-custom TLS profile selected")
+		}
+	}
+
+	// Disabled TLS profiles should not be selected
+
+	frontingProviderID := "frontingProviderID"
+
+	clientParameters = makeCustomTLSProfilesClientParameters(t, false, frontingProviderID)
+	disableTLSProfiles := clientParameters.Get().LabeledTLSProfiles(
+		parameters.DisableFrontingProviderTLSProfiles, frontingProviderID)
+
+	if len(disableTLSProfiles) < 1 {
+		t.Errorf("unexpected disabled TLS profiles count")
+	}
+
+	for i := 0; i < numSelections; i++ {
+		profile := SelectTLSProfile(true, frontingProviderID, clientParameters.Get())
+		if common.Contains(disableTLSProfiles, profile) {
+			t.Errorf("unexpected disabled TLS profile selected")
 		}
 	}
 }
@@ -294,7 +321,7 @@ func BenchmarkRandomizedGetClientHelloVersion(b *testing.B) {
 }
 
 func makeCustomTLSProfilesClientParameters(
-	t *testing.T, useOnlyCustomTLSProfiles bool) *parameters.ClientParameters {
+	t *testing.T, useOnlyCustomTLSProfiles bool, frontingProviderID string) *parameters.ClientParameters {
 
 	clientParameters, err := parameters.NewClientParameters(nil)
 	if err != nil {
@@ -341,6 +368,20 @@ func makeCustomTLSProfilesClientParameters(
 
 	applyParameters[parameters.UseOnlyCustomTLSProfiles] = useOnlyCustomTLSProfiles
 	applyParameters[parameters.CustomTLSProfiles] = customTLSProfiles
+
+	if frontingProviderID != "" {
+		tlsProfiles := make(protocol.TLSProfiles, 0)
+		tlsProfiles = append(tlsProfiles, "CustomProfile")
+		for i, tlsProfile := range protocol.SupportedTLSProfiles {
+			if i%2 == 0 {
+				tlsProfiles = append(tlsProfiles, tlsProfile)
+			}
+		}
+		disabledTLSProfiles := make(protocol.LabeledTLSProfiles)
+		disabledTLSProfiles[frontingProviderID] = tlsProfiles
+
+		applyParameters[parameters.DisableFrontingProviderTLSProfiles] = disabledTLSProfiles
+	}
 
 	_, err = clientParameters.Set("", false, applyParameters)
 	if err != nil {

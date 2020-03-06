@@ -385,17 +385,19 @@ func MakeDownloadHTTPClient(
 	config *Config,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
-	skipVerify bool) (*http.Client, error) {
+	skipVerify bool) (*http.Client, bool, error) {
 
 	var httpClient *http.Client
 	var err error
 
-	if tunnel != nil {
+	tunneled := tunnel != nil
+
+	if tunneled {
 
 		httpClient, err = MakeTunneledHTTPClient(
 			config, tunnel, skipVerify)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, false, errors.Trace(err)
 		}
 
 	} else {
@@ -403,11 +405,11 @@ func MakeDownloadHTTPClient(
 		httpClient, err = MakeUntunneledHTTPClient(
 			ctx, config, untunneledDialConfig, nil, skipVerify)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, false, errors.Trace(err)
 		}
 	}
 
-	return httpClient, nil
+	return httpClient, tunneled, nil
 }
 
 // ResumeDownload is a reusable helper that downloads requestUrl via the

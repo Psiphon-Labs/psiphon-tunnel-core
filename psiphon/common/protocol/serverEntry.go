@@ -22,6 +22,7 @@ package protocol
 import (
 	"bufio"
 	"bytes"
+	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -35,7 +36,6 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ed25519"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
@@ -59,6 +59,7 @@ type ServerEntry struct {
 	SshObfuscatedKey              string   `json:"sshObfuscatedKey"`
 	Capabilities                  []string `json:"capabilities"`
 	Region                        string   `json:"region"`
+	FrontingProviderID            string   `json:"frontingProviderID"`
 	MeekServerPort                int      `json:"meekServerPort"`
 	MeekCookieEncryptionPublicKey string   `json:"meekCookieEncryptionPublicKey"`
 	MeekObfuscatedKey             string   `json:"meekObfuscatedKey"`

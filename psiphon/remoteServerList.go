@@ -61,7 +61,7 @@ func FetchCommonRemoteServerList(
 
 	downloadURL, canonicalURL, skipVerify := urls.Select(attempt)
 
-	newETag, err := downloadRemoteServerListFile(
+	newETag, downloadStatRecorder, err := downloadRemoteServerListFile(
 		ctx,
 		config,
 		tunnel,
@@ -74,6 +74,11 @@ func FetchCommonRemoteServerList(
 		config.GetRemoteServerListDownloadFilename())
 	if err != nil {
 		return errors.Tracef("failed to download common remote server list: %s", errors.Trace(err))
+	}
+
+	authenticatedDownload := false
+	if downloadStatRecorder != nil {
+		defer func() { downloadStatRecorder(authenticatedDownload) }()
 	}
 
 	// When the resource is unchanged, skip.
@@ -93,6 +98,9 @@ func FetchCommonRemoteServerList(
 	if err != nil {
 		return errors.Tracef("failed to read remote server list: %s", errors.Trace(err))
 	}
+
+	// NewAuthenticatedDataPackageReader authenticates the file before returning.
+	authenticatedDownload = true
 
 	err = StreamingStoreServerEntries(
 		config,
@@ -169,7 +177,7 @@ func FetchObfuscatedServerLists(
 	updateCache := false
 	registryFilename := cachedFilename
 
-	newETag, err := downloadRemoteServerListFile(
+	newETag, downloadStatRecorder, err := downloadRemoteServerListFile(
 		ctx,
 		config,
 		tunnel,
@@ -184,7 +192,14 @@ func FetchObfuscatedServerLists(
 		failed = true
 		NoticeWarning("failed to download obfuscated server list registry: %s", errors.Trace(err))
 		// Proceed with any existing cached OSL registry.
-	} else if newETag != "" {
+	}
+
+	authenticatedDownload := false
+	if downloadStatRecorder != nil {
+		defer func() { downloadStatRecorder(authenticatedDownload) }()
+	}
+
+	if newETag != "" {
 		updateCache = true
 		registryFilename = downloadFilename
 	}
@@ -217,6 +232,8 @@ func FetchObfuscatedServerLists(
 		return errors.Tracef("failed to read obfuscated server list registry: %s", errors.Trace(err))
 	}
 
+	authenticatedDownload = true
+
 	// NewRegistryStreamer authenticates the downloaded registry, so now it would be
 	// ok to update the cache. However, we defer that until after processing so we
 	// can close the file first before copying it, avoiding related complications on
@@ -238,90 +255,27 @@ func FetchObfuscatedServerLists(
 			break
 		}
 
-		downloadFilename := osl.GetOSLFilename(
-			config.GetObfuscatedServerListDownloadDirectory(), oslFileSpec.ID)
-
-		downloadURL := osl.GetOSLFileURL(rootURL, oslFileSpec.ID)
-		canonicalURL := osl.GetOSLFileURL(canonicalRootURL, oslFileSpec.ID)
-
-		hexID := hex.EncodeToString(oslFileSpec.ID)
-
-		// Note: the MD5 checksum step assumes the remote server list host's ETag uses MD5
-		// with a hex encoding. If this is not the case, the sourceETag should be left blank.
-		sourceETag := fmt.Sprintf("\"%s\"", hex.EncodeToString(oslFileSpec.MD5Sum))
-
-		newETag, err := downloadRemoteServerListFile(
+		if !downloadOSLFileSpec(
 			ctx,
 			config,
 			tunnel,
 			untunneledDialConfig,
 			downloadTimeout,
-			downloadURL,
-			canonicalURL,
+			rootURL,
+			canonicalRootURL,
 			skipVerify,
-			sourceETag,
-			downloadFilename)
-		if err != nil {
-			failed = true
-			NoticeWarning("failed to download obfuscated server list file (%s): %s", hexID, errors.Trace(err))
-			continue
-		}
-
-		// When the resource is unchanged, skip.
-		if newETag == "" {
-			continue
-		}
-
-		file, err := os.Open(downloadFilename)
-		if err != nil {
-			failed = true
-			NoticeWarning("failed to open obfuscated server list file (%s): %s", hexID, errors.Trace(err))
-			continue
-		}
-		// Note: don't defer file.Close() since we're in a loop
-
-		serverListPayloadReader, err := osl.NewOSLReader(
-			file,
-			oslFileSpec,
+			publicKey,
 			lookupSLOKs,
-			publicKey)
-		if err != nil {
-			file.Close()
+			oslFileSpec) {
+
+			// downloadOSLFileSpec emits notices with failure information. In the case
+			// of a failure, set the retry flag but continue to process other OSL file
+			// specs.
 			failed = true
-			NoticeWarning("failed to read obfuscated server list file (%s): %s", hexID, errors.Trace(err))
-			continue
 		}
 
-		err = StreamingStoreServerEntries(
-			config,
-			protocol.NewStreamingServerEntryDecoder(
-				serverListPayloadReader,
-				common.GetCurrentTimestamp(),
-				protocol.SERVER_ENTRY_SOURCE_OBFUSCATED),
-			true)
-		if err != nil {
-			file.Close()
-			failed = true
-			NoticeWarning("failed to store obfuscated server list file (%s): %s", hexID, errors.Trace(err))
-			continue
-		}
-
-		// Now that the server entries are successfully imported, store the response
-		// ETag so we won't re-download this same data again.
-		err = SetUrlETag(canonicalURL, newETag)
-		if err != nil {
-			file.Close()
-			NoticeWarning("failed to set ETag for obfuscated server list file (%s): %s", hexID, errors.Trace(err))
-			continue
-			// This fetch is still reported as a success, even if we can't store the ETag
-		}
-
-		file.Close()
-
-		// Clear the reference to this OSL file streamer and immediately run
-		// a garbage collection to reclaim its memory before processing the
-		// next file.
-		serverListPayloadReader = nil
+		// Run a garbage collection to reclaim memory from the downloadOSLFileSpec
+		// operation before processing the next file.
 		DoGarbageCollection()
 	}
 
@@ -352,12 +306,115 @@ func FetchObfuscatedServerLists(
 	return nil
 }
 
-// downloadRemoteServerListFile downloads the source URL to
-// the destination file, performing a resumable download. When
-// the download completes and the file content has changed, the
-// new resource ETag is returned. Otherwise, blank is returned.
-// The caller is responsible for calling SetUrlETag once the file
-// content has been validated.
+// downloadOSLFileSpec downloads, authenticates, and imports the OSL specified
+// by oslFileSpec. The return value indicates whether the operation succeeded.
+// Failure information is emitted in notices.
+func downloadOSLFileSpec(
+	ctx context.Context,
+	config *Config,
+	tunnel *Tunnel,
+	untunneledDialConfig *DialConfig,
+	downloadTimeout time.Duration,
+	rootURL string,
+	canonicalRootURL string,
+	skipVerify bool,
+	publicKey string,
+	lookupSLOKs func(slokID []byte) []byte,
+	oslFileSpec *osl.OSLFileSpec) bool {
+
+	downloadFilename := osl.GetOSLFilename(
+		config.GetObfuscatedServerListDownloadDirectory(), oslFileSpec.ID)
+
+	downloadURL := osl.GetOSLFileURL(rootURL, oslFileSpec.ID)
+	canonicalURL := osl.GetOSLFileURL(canonicalRootURL, oslFileSpec.ID)
+
+	hexID := hex.EncodeToString(oslFileSpec.ID)
+
+	// Note: the MD5 checksum step assumes the remote server list host's ETag uses MD5
+	// with a hex encoding. If this is not the case, the sourceETag should be left blank.
+	sourceETag := fmt.Sprintf("\"%s\"", hex.EncodeToString(oslFileSpec.MD5Sum))
+
+	newETag, downloadStatRecorder, err := downloadRemoteServerListFile(
+		ctx,
+		config,
+		tunnel,
+		untunneledDialConfig,
+		downloadTimeout,
+		downloadURL,
+		canonicalURL,
+		skipVerify,
+		sourceETag,
+		downloadFilename)
+	if err != nil {
+		NoticeWarning("failed to download obfuscated server list file (%s): %s", hexID, errors.Trace(err))
+		return false
+	}
+
+	authenticatedDownload := false
+	if downloadStatRecorder != nil {
+		defer func() { downloadStatRecorder(authenticatedDownload) }()
+	}
+
+	// When the resource is unchanged, skip.
+	if newETag == "" {
+		return true
+	}
+
+	file, err := os.Open(downloadFilename)
+	if err != nil {
+		NoticeWarning("failed to open obfuscated server list file (%s): %s", hexID, errors.Trace(err))
+		return false
+	}
+	defer file.Close()
+
+	serverListPayloadReader, err := osl.NewOSLReader(
+		file,
+		oslFileSpec,
+		lookupSLOKs,
+		publicKey)
+	if err != nil {
+		NoticeWarning("failed to read obfuscated server list file (%s): %s", hexID, errors.Trace(err))
+		return false
+	}
+
+	// NewOSLReader authenticates the file before returning.
+	authenticatedDownload = true
+
+	err = StreamingStoreServerEntries(
+		config,
+		protocol.NewStreamingServerEntryDecoder(
+			serverListPayloadReader,
+			common.GetCurrentTimestamp(),
+			protocol.SERVER_ENTRY_SOURCE_OBFUSCATED),
+		true)
+	if err != nil {
+		NoticeWarning("failed to store obfuscated server list file (%s): %s", hexID, errors.Trace(err))
+		return false
+	}
+
+	// Now that the server entries are successfully imported, store the response
+	// ETag so we won't re-download this same data again.
+	err = SetUrlETag(canonicalURL, newETag)
+	if err != nil {
+		NoticeWarning("failed to set ETag for obfuscated server list file (%s): %s", hexID, errors.Trace(err))
+		// This fetch is still reported as a success, even if we can't store the ETag
+		return true
+	}
+
+	return true
+}
+
+// downloadRemoteServerListFile downloads the source URL to the destination
+// file, performing a resumable download. When the download completes and the
+// file content has changed, the new resource ETag is returned. Otherwise,
+// blank is returned. The caller is responsible for calling SetUrlETag once
+// the file content has been validated.
+//
+// The downloadStatReporter return value is a function that will invoke
+// RecordRemoteServerListStat to record a remote server list download event.
+// The caller must call this function if the return value is not nil,
+// providing a boolean argument indicating whether the download was
+// successfully authenticated.
 func downloadRemoteServerListFile(
 	ctx context.Context,
 	config *Config,
@@ -368,13 +425,13 @@ func downloadRemoteServerListFile(
 	canonicalURL string,
 	skipVerify bool,
 	sourceETag string,
-	destinationFilename string) (string, error) {
+	destinationFilename string) (string, func(bool), error) {
 
 	// All download URLs with the same canonicalURL
 	// must have the same entity and ETag.
 	lastETag, err := GetUrlETag(canonicalURL)
 	if err != nil {
-		return "", errors.Trace(err)
+		return "", nil, errors.Trace(err)
 	}
 
 	// sourceETag, when specified, is prior knowledge of the
@@ -383,7 +440,7 @@ func downloadRemoteServerListFile(
 	// values stored in the registry.
 	if lastETag != "" && sourceETag == lastETag {
 		// TODO: notice?
-		return "", nil
+		return "", nil, nil
 	}
 
 	var cancelFunc context.CancelFunc
@@ -393,14 +450,14 @@ func downloadRemoteServerListFile(
 	// MakeDownloadHttpClient will select either a tunneled
 	// or untunneled configuration.
 
-	httpClient, err := MakeDownloadHTTPClient(
+	httpClient, tunneled, err := MakeDownloadHTTPClient(
 		ctx,
 		config,
 		tunnel,
 		untunneledDialConfig,
 		skipVerify)
 	if err != nil {
-		return "", errors.Trace(err)
+		return "", nil, errors.Trace(err)
 	}
 
 	n, responseETag, err := ResumeDownload(
@@ -414,16 +471,19 @@ func downloadRemoteServerListFile(
 	NoticeRemoteServerListResourceDownloadedBytes(sourceURL, n)
 
 	if err != nil {
-		return "", errors.Trace(err)
+		return "", nil, errors.Trace(err)
 	}
 
 	if responseETag == lastETag {
-		return "", nil
+		return "", nil, nil
 	}
 
 	NoticeRemoteServerListResourceDownloaded(sourceURL)
 
-	_ = RecordRemoteServerListStat(config, sourceURL, responseETag)
+	downloadStatRecorder := func(authenticated bool) {
+		_ = RecordRemoteServerListStat(
+			config, tunneled, sourceURL, responseETag, authenticated)
+	}
 
-	return responseETag, nil
+	return responseETag, downloadStatRecorder, nil
 }

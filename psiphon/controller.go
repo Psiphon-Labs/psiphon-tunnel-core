@@ -1683,17 +1683,28 @@ loop:
 			initialCount,
 			count)
 
-		// A "round" consists of a new shuffle of the server entries
-		// and attempted connections up to the end of the server entry
-		// list, or parameters.EstablishTunnelWorkTime elapsed. Time
-		// spent waiting for network connectivity is excluded from
-		// round elapsed time.
+		// A "round" consists of a new shuffle of the server entries and attempted
+		// connections up to the end of the server entry iterator, or
+		// parameters.EstablishTunnelWorkTime elapsed. Time spent waiting for
+		// network connectivity is excluded from round elapsed time.
 		//
-		// If the first round ends with no connection, remote server
-		// list and upgrade checks are launched.
+		// After a round, if parameters.EstablishTunnelWorkTime has elapsed in total
+		// with no tunnel established, remote server list and upgrade checks are
+		// triggered.
+		//
+		// A complete server entry iteration does not trigger fetches since it's
+		// possible to have fewer than parameters.ConnectionWorkerPoolSize
+		// candidates, in which case rounds end instantly due to the complete server
+		// entry iteration. An exception is made for an empty server entry iterator;
+		// in that case fetches may be triggered immediately.
 
 		roundStartTime := time.Now()
 		var roundNetworkWaitDuration time.Duration
+
+		workTime := controller.config.GetClientParameters().Get().Duration(
+			parameters.EstablishTunnelWorkTime)
+
+		candidateServerEntryCount := 0
 
 		// Send each iterator server entry to the establish workers
 		for {
@@ -1716,6 +1727,7 @@ loop:
 			}
 			if serverEntry == nil {
 				// Completed this iteration
+				NoticeInfo("completed server entry iteration")
 				break
 			}
 
@@ -1723,6 +1735,8 @@ loop:
 				!serverEntry.SupportsSSHAPIRequests() {
 				continue
 			}
+
+			candidateServerEntryCount += 1
 
 			// adjustedEstablishStartTime is establishStartTime shifted
 			// to exclude time spent waiting for network connectivity.
@@ -1749,10 +1763,7 @@ loop:
 				break loop
 			}
 
-			workTime := controller.config.GetClientParameters().Get().Duration(
-				parameters.EstablishTunnelWorkTime)
-
-			if roundStartTime.Add(-roundNetworkWaitDuration).Add(workTime).Before(time.Now()) {
+			if time.Since(roundStartTime)-roundNetworkWaitDuration > workTime {
 				// Start over, after a brief pause, with a new shuffle of the server
 				// entries, and potentially some newly fetched server entries.
 				break
@@ -1785,17 +1796,21 @@ loop:
 		iterator.Close()
 
 		// Trigger RSL, OSL, and upgrade checks after failing to establish a
-		// tunnel in the first round.
+		// tunnel within parameters.EstablishTunnelWorkTime, or if there are
+		// no server entries present.
+		//
+		// While the trigger is made after each round,
+		// parameter.FetchRemoteServerListStalePeriod will limit the actual
+		// frequency of fetches. Continuing to trigger allows for very long running
+		// establishments to perhaps eventually succeed.
 		//
 		// No fetches are triggered when TargetServerEntry is specified. In that
-		// case, we're only trying to connect to a specific server entry; and, the
-		// iterator will complete immediately since there is only one candidate,
-		// triggering fetches unnecessarily.
-		//
-		// TODO: in standard iterator case, should we wait for all candidates to
-		// _complete_ before triggering fetches? Currently, the iterator loop
-		// exits with one round of candidates in flight.
-		if controller.config.TargetServerEntry == "" {
+		// case, we're only trying to connect to a specific server entry.
+
+		if (candidateServerEntryCount == 0 ||
+			time.Since(establishStartTime)-totalNetworkWaitDuration > workTime) &&
+			controller.config.TargetServerEntry == "" {
+
 			controller.triggerFetches()
 		}
 

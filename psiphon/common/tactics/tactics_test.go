@@ -101,7 +101,9 @@ func TestTactics(t *testing.T) {
         },
         {
           "Filter" : {
-            "Regions": ["R7"]
+            "Regions": ["R7"],
+            "ISPs": ["I1"],
+            "Cities": ["C1"]
           },
           "Tactics" : {
             "Parameters" : {
@@ -135,8 +137,18 @@ func TestTactics(t *testing.T) {
 	expectedApplyCount := 3
 
 	listenerProtocol := "OSSH"
-	listenerFragmentedGeoIP := func(string) common.GeoIPData { return common.GeoIPData{Country: "R7"} }
-	listenerUnfragmentedGeoIP := func(string) common.GeoIPData { return common.GeoIPData{Country: "R8"} }
+	listenerFragmentedGeoIP := func(string) common.GeoIPData {
+		return common.GeoIPData{Country: "R7", ISP: "I1", City: "C1"}
+	}
+	listenerUnfragmentedGeoIPWrongRegion := func(string) common.GeoIPData {
+		return common.GeoIPData{Country: "R8", ISP: "I1", City: "C1"}
+	}
+	listenerUnfragmentedGeoIPWrongISP := func(string) common.GeoIPData {
+		return common.GeoIPData{Country: "R7", ISP: "I2", City: "C1"}
+	}
+	listenerUnfragmentedGeoIPWrongCity := func(string) common.GeoIPData {
+		return common.GeoIPData{Country: "R7", ISP: "I1", City: "C2"}
+	}
 
 	tacticsConfig := fmt.Sprintf(
 		tacticsConfigTemplate,
@@ -754,8 +766,18 @@ func TestTactics(t *testing.T) {
 			true,
 		},
 		{
-			"unfragmented",
-			listenerUnfragmentedGeoIP,
+			"unfragmented-region",
+			listenerUnfragmentedGeoIPWrongRegion,
+			false,
+		},
+		{
+			"unfragmented-ISP",
+			listenerUnfragmentedGeoIPWrongISP,
+			false,
+		},
+		{
+			"unfragmented-city",
+			listenerUnfragmentedGeoIPWrongCity,
 			false,
 		},
 	}

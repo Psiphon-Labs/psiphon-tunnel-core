@@ -1795,7 +1795,7 @@ func (client *Client) Start() {
 			// Instead of immediately writing to the channel, the
 			// packet is enqueued, which has the effect of batching
 			// up IP packets into a single channel packet (for Psiphon,
-			// and SSH packet) to minimize overhead and, as benchmarked,
+			// an SSH packet) to minimize overhead and, as benchmarked,
 			// improve throughput.
 			// Packet will be dropped if queue is full.
 
