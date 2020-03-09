@@ -89,9 +89,41 @@ func TestAuthorization(t *testing.T) {
 
 	expires := time.Now().Add(10 * time.Second)
 
-	auth, _, err := IssueAuthorization(correctSigningKey, id, expires)
+	auth, issuedID, err := IssueAuthorization(correctSigningKey, id, expires)
 	if err != nil {
 		t.Fatalf("IssueAuthorization failed: %s", err)
+	}
+
+	// Decode the signed authorization and check that the auth ID in the JSON
+	// matches the one returned by IssueAuthorization.
+
+	decodedAuthorization, err := base64.StdEncoding.DecodeString(auth)
+	if err != nil {
+		t.Fatalf("DecodeString failed: %s", err)
+	}
+
+	type partialSignedAuthorization struct {
+		Authorization json.RawMessage
+	}
+	var partialSignedAuth partialSignedAuthorization
+	err = json.Unmarshal(decodedAuthorization, &partialSignedAuth)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %s", err)
+	}
+
+	var unmarshaledAuth map[string]interface{}
+	err = json.Unmarshal(partialSignedAuth.Authorization, &unmarshaledAuth)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %s", err)
+	}
+
+	authID, ok := unmarshaledAuth["ID"].(string)
+	if !ok {
+		t.Fatalf("Failed to find auth ID in unmarshaled auth: %s", unmarshaledAuth)
+	}
+
+	if string(authID) != base64.StdEncoding.EncodeToString(issuedID) {
+		t.Fatalf("Expected auth ID in signed auth (%s) to match that returned by IssueAuthorization (%s)", string(authID), base64.StdEncoding.EncodeToString(issuedID))
 	}
 
 	fmt.Printf("encoded authorization length: %d\n", len(auth))
