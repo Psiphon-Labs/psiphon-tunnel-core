@@ -562,7 +562,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	var authorizationID [32]byte
 
-	clientAuthorization, err := accesscontrol.IssueAuthorization(
+	clientAuthorization, _, err := accesscontrol.IssueAuthorization(
 		accessControlSigningKey,
 		authorizationID[:],
 		time.Now().Add(1*time.Hour))
