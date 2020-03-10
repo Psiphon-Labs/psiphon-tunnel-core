@@ -680,8 +680,12 @@ func RecordFailedTunnelStat(
 		params["liveness_test_downstream_bytes"] = strconv.Itoa(livenessTestMetrics.DownstreamBytes)
 		params["liveness_test_received_downstream_bytes"] = strconv.Itoa(livenessTestMetrics.ReceivedDownstreamBytes)
 	}
-	params["bytes_up"] = fmt.Sprintf("%d", bytesUp)
-	params["bytes_down"] = fmt.Sprintf("%d", bytesDown)
+	if bytesUp >= 0 {
+		params["bytes_up"] = fmt.Sprintf("%d", bytesUp)
+	}
+	if bytesDown >= 0 {
+		params["bytes_down"] = fmt.Sprintf("%d", bytesDown)
+	}
 
 	// Ensure direct server IPs are not exposed in logs. The "net" package, and
 	// possibly other 3rd party packages, will include destination addresses in

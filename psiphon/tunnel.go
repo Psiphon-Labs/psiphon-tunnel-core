@@ -183,8 +183,8 @@ func (tunnel *Tunnel) Activate(
 				tunnel.config,
 				tunnel.dialParams,
 				tunnel.livenessTestMetrics,
-				0,
-				0,
+				-1,
+				-1,
 				retErr)
 		}
 	}()
@@ -579,8 +579,8 @@ func dialTunnel(
 				config,
 				dialParams,
 				failedTunnelLivenessTestMetrics,
-				0,
-				0,
+				-1,
+				-1,
 				retErr)
 		}
 	}()
