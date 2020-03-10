@@ -55,11 +55,11 @@ func TestDatabase(t *testing.T) {
                 "mobile_home_pages": {
                     "CLIENT-REGION" : [{
                         "region" : "CLIENT-REGION",
-                        "url" : "MOBILE-HOME-PAGE-URL?client_region=XX"
+                        "url" : "MOBILE-HOME-PAGE-URL?client_region=XX&client_asn=XX"
                      }],
                     "None" : [{
                         "region" : "None",
-                        "url" : "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=XX"
+                        "url" : "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=XX&client_asn=XX"
                      }]
                 },
                 "https_request_regexes" : [{
@@ -109,22 +109,23 @@ func TestDatabase(t *testing.T) {
 	homePageTestCases := []struct {
 		sponsorID    string
 		clientRegion string
+		clientASN    string
 		isMobile     bool
 		expectedURL  string
 	}{
-		{"SPONSOR-ID", "CLIENT-REGION", false, "HOME-PAGE-URL?client_region=CLIENT-REGION"},
-		{"SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", false, "DEFAULT-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION"},
-		{"SPONSOR-ID", "CLIENT-REGION", true, "MOBILE-HOME-PAGE-URL?client_region=CLIENT-REGION"},
-		{"SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", true, "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION"},
-		{"UNCONFIGURED-SPONSOR-ID", "CLIENT-REGION", false, "HOME-PAGE-URL?client_region=CLIENT-REGION"},
-		{"UNCONFIGURED-SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", false, "DEFAULT-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION"},
-		{"UNCONFIGURED-SPONSOR-ID", "CLIENT-REGION", true, "MOBILE-HOME-PAGE-URL?client_region=CLIENT-REGION"},
-		{"UNCONFIGURED-SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", true, "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION"},
+		{"SPONSOR-ID", "CLIENT-REGION", "65535", false, "HOME-PAGE-URL?client_region=CLIENT-REGION"},
+		{"SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", "65535", false, "DEFAULT-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION"},
+		{"SPONSOR-ID", "CLIENT-REGION", "65535", true, "MOBILE-HOME-PAGE-URL?client_region=CLIENT-REGION&client_asn=65535"},
+		{"SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", "65535", true, "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION&client_asn=65535"},
+		{"UNCONFIGURED-SPONSOR-ID", "CLIENT-REGION", "65535", false, "HOME-PAGE-URL?client_region=CLIENT-REGION"},
+		{"UNCONFIGURED-SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", "65535", false, "DEFAULT-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION"},
+		{"UNCONFIGURED-SPONSOR-ID", "CLIENT-REGION", "65535", true, "MOBILE-HOME-PAGE-URL?client_region=CLIENT-REGION&client_asn=65535"},
+		{"UNCONFIGURED-SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", "65535", true, "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION&client_asn=65535"},
 	}
 
 	for _, testCase := range homePageTestCases {
 		t.Run(fmt.Sprintf("%+v", testCase), func(t *testing.T) {
-			homepages := db.GetHomepages(testCase.sponsorID, testCase.clientRegion, testCase.isMobile)
+			homepages := db.GetHomepages(testCase.sponsorID, testCase.clientRegion, testCase.clientASN, testCase.isMobile)
 			if len(homepages) != 1 || homepages[0] != testCase.expectedURL {
 				t.Fatalf("unexpected home page: %+v", homepages)
 			}

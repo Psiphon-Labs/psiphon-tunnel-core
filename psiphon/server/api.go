@@ -312,7 +312,7 @@ func handshakeAPIRequestHandler(
 
 	handshakeResponse := protocol.HandshakeResponse{
 		SSHSessionID:           sessionID,
-		Homepages:              db.GetRandomizedHomepages(sponsorID, geoIPData.Country, isMobile),
+		Homepages:              db.GetRandomizedHomepages(sponsorID, geoIPData.Country, geoIPData.ASN, isMobile),
 		UpgradeClientVersion:   db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
 		PageViewRegexes:        make([]map[string]string, 0),
 		HttpsRequestRegexes:    httpsRequestRegexes,

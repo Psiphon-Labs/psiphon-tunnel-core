@@ -117,8 +117,10 @@ func NewDatabase(filename string) (*Database, error) {
 
 // GetRandomizedHomepages returns a randomly ordered list of home pages
 // for the specified sponsor, region, and platform.
-func (db *Database) GetRandomizedHomepages(sponsorID, clientRegion string, isMobilePlatform bool) []string {
-	homepages := db.GetHomepages(sponsorID, clientRegion, isMobilePlatform)
+func (db *Database) GetRandomizedHomepages(
+	sponsorID, clientRegion, clientASN string, isMobilePlatform bool) []string {
+
+	homepages := db.GetHomepages(sponsorID, clientRegion, clientASN, isMobilePlatform)
 	if len(homepages) > 1 {
 		shuffledHomepages := make([]string, len(homepages))
 		perm := rand.Perm(len(homepages))
@@ -132,7 +134,9 @@ func (db *Database) GetRandomizedHomepages(sponsorID, clientRegion string, isMob
 
 // GetHomepages returns a list of home pages for the specified sponsor,
 // region, and platform.
-func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatform bool) []string {
+func (db *Database) GetHomepages(
+	sponsorID, clientRegion, clientASN string, isMobilePlatform bool) []string {
+
 	db.ReloadableFile.RLock()
 	defer db.ReloadableFile.RUnlock()
 
@@ -163,7 +167,8 @@ func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatfor
 	homePagesByRegion, ok := homePages[clientRegion]
 	if ok {
 		for _, homePage := range homePagesByRegion {
-			sponsorHomePages = append(sponsorHomePages, strings.Replace(homePage.URL, "client_region=XX", "client_region="+clientRegion, 1))
+			sponsorHomePages = append(
+				sponsorHomePages, homepageQueryParameterSubstitution(homePage.URL, clientRegion, clientASN))
 		}
 	}
 
@@ -173,12 +178,21 @@ func (db *Database) GetHomepages(sponsorID, clientRegion string, isMobilePlatfor
 		if ok {
 			for _, homePage := range defaultHomePages {
 				// client_region query parameter substitution
-				sponsorHomePages = append(sponsorHomePages, strings.Replace(homePage.URL, "client_region=XX", "client_region="+clientRegion, 1))
+				sponsorHomePages = append(
+					sponsorHomePages, homepageQueryParameterSubstitution(homePage.URL, clientRegion, clientASN))
 			}
 		}
 	}
 
 	return sponsorHomePages
+}
+
+func homepageQueryParameterSubstitution(
+	url, clientRegion, clientASN string) string {
+
+	return strings.Replace(
+		strings.Replace(url, "client_region=XX", "client_region="+clientRegion, 1),
+		"client_asn=XX", "client_asn="+clientASN, 1)
 }
 
 // GetUpgradeClientVersion returns a new client version when an upgrade is
