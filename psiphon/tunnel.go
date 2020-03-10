@@ -901,10 +901,11 @@ func dialTunnel(
 	// (and also bypasses throttling).
 
 	return &dialResult{
-			dialConn:      dialConn,
-			monitoredConn: monitoredConn,
-			sshClient:     result.sshClient,
-			sshRequests:   result.sshRequests},
+			dialConn:            dialConn,
+			monitoredConn:       monitoredConn,
+			sshClient:           result.sshClient,
+			sshRequests:         result.sshRequests,
+			livenessTestMetrics: result.livenessTestMetrics},
 		nil
 }
 
