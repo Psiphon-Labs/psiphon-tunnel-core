@@ -734,6 +734,8 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 		stats["tcp_port_forward_failed_count"] = 0
 		stats["tcp_port_forward_failed_duration"] = 0
 		stats["tcp_port_forward_rejected_dialing_limit_count"] = 0
+		stats["tcp_port_forward_rejected_disallowed_count"] = 0
+		stats["udp_port_forward_rejected_disallowed_count"] = 0
 		stats["tcp_ipv4_port_forward_dialed_count"] = 0
 		stats["tcp_ipv4_port_forward_dialed_duration"] = 0
 		stats["tcp_ipv4_port_forward_failed_count"] = 0
@@ -817,6 +819,10 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 				int64(client.qualityMetrics.TCPPortForwardFailedDuration / time.Millisecond)
 			stat["tcp_port_forward_rejected_dialing_limit_count"] +=
 				client.qualityMetrics.TCPPortForwardRejectedDialingLimitCount
+			stat["tcp_port_forward_rejected_disallowed_count"] +=
+				client.qualityMetrics.TCPPortForwardRejectedDisallowedCount
+			stat["udp_port_forward_rejected_disallowed_count"] +=
+				client.qualityMetrics.UDPPortForwardRejectedDisallowedCount
 
 			stat["tcp_ipv4_port_forward_dialed_count"] += client.qualityMetrics.TCPIPv4PortForwardDialedCount
 			stat["tcp_ipv4_port_forward_dialed_duration"] +=
@@ -838,6 +844,8 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 		client.qualityMetrics.TCPPortForwardFailedCount = 0
 		client.qualityMetrics.TCPPortForwardFailedDuration = 0
 		client.qualityMetrics.TCPPortForwardRejectedDialingLimitCount = 0
+		client.qualityMetrics.TCPPortForwardRejectedDisallowedCount = 0
+		client.qualityMetrics.UDPPortForwardRejectedDisallowedCount = 0
 
 		client.qualityMetrics.TCPIPv4PortForwardDialedCount = 0
 		client.qualityMetrics.TCPIPv4PortForwardDialedDuration = 0
@@ -1204,6 +1212,8 @@ type qualityMetrics struct {
 	TCPPortForwardFailedCount               int64
 	TCPPortForwardFailedDuration            time.Duration
 	TCPPortForwardRejectedDialingLimitCount int64
+	TCPPortForwardRejectedDisallowedCount   int64
+	UDPPortForwardRejectedDisallowedCount   int64
 	TCPIPv4PortForwardDialedCount           int64
 	TCPIPv4PortForwardDialedDuration        time.Duration
 	TCPIPv4PortForwardFailedCount           int64
@@ -2588,8 +2598,17 @@ func (sshClient *sshClient) setHandshakeState(
 		sessionID, ok := sshClient.sshServer.authorizationSessionIDs[authorizationID]
 		if ok && sessionID != sshClient.sessionID {
 
-			log.WithTraceFields(
-				LogFields{"authorizationID": authorizationID}).Warning("duplicate active authorization")
+			logFields := LogFields{
+				"event_name":                 "irregular_tunnel",
+				"tunnel_error":               "duplicate active authorization",
+				"duplicate_authorization_id": authorizationID,
+			}
+			sshClient.geoIPData.SetLogFields(logFields)
+			duplicateGeoIPData := sshClient.sshServer.support.GeoIPService.GetSessionCache(sessionID)
+			if duplicateGeoIPData != sshClient.geoIPData {
+				duplicateGeoIPData.SetLogFieldsWithPrefix("duplicate_authentication_", logFields)
+			}
+			log.LogRawFieldsWithTimestamp(logFields)
 
 			// Invoke asynchronously to avoid deadlocks.
 			// TODO: invoke only once for each distinct sessionID?
@@ -2894,6 +2913,13 @@ func (sshClient *sshClient) isPortForwardPermitted(
 		return true
 	}
 
+	switch portForwardType {
+	case portForwardTypeTCP:
+		sshClient.updateQualityMetricsWithTCPRejectedDisallowed()
+	case portForwardTypeUDP:
+		sshClient.updateQualityMetricsWithUDPRejectedDisallowed()
+	}
+
 	sshClient.enqueueDisallowedTrafficAlertRequest()
 
 	log.WithTraceFields(
@@ -3129,6 +3155,22 @@ func (sshClient *sshClient) updateQualityMetricsWithRejectedDialingLimit() {
 	defer sshClient.Unlock()
 
 	sshClient.qualityMetrics.TCPPortForwardRejectedDialingLimitCount += 1
+}
+
+func (sshClient *sshClient) updateQualityMetricsWithTCPRejectedDisallowed() {
+
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	sshClient.qualityMetrics.TCPPortForwardRejectedDisallowedCount += 1
+}
+
+func (sshClient *sshClient) updateQualityMetricsWithUDPRejectedDisallowed() {
+
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	sshClient.qualityMetrics.UDPPortForwardRejectedDisallowedCount += 1
 }
 
 func (sshClient *sshClient) handleTCPChannel(
@@ -3369,10 +3411,10 @@ func (sshClient *sshClient) handleTCPChannel(
 	relayWaitGroup.Add(1)
 	go func() {
 		defer relayWaitGroup.Done()
-		// io.Copy allocates a 32K temporary buffer, and each port forward relay uses
-		// two of these buffers; using io.CopyBuffer with a smaller buffer reduces the
-		// overall memory footprint.
-		bytes, err := io.CopyBuffer(
+		// io.Copy allocates a 32K temporary buffer, and each port forward relay
+		// uses two of these buffers; using common.CopyBuffer with a smaller buffer
+		// reduces the overall memory footprint.
+		bytes, err := common.CopyBuffer(
 			fwdChannel, fwdConn, make([]byte, SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE))
 		atomic.AddInt64(&bytesDown, bytes)
 		if err != nil && err != io.EOF {
@@ -3385,7 +3427,7 @@ func (sshClient *sshClient) handleTCPChannel(
 		// be flowing?
 		fwdChannel.Close()
 	}()
-	bytes, err := io.CopyBuffer(
+	bytes, err := common.CopyBuffer(
 		fwdConn, fwdChannel, make([]byte, SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE))
 	atomic.AddInt64(&bytesUp, bytes)
 	if err != nil && err != io.EOF {

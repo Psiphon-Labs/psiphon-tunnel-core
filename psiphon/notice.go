@@ -453,6 +453,10 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 			args = append(args, "upstreamProxyCustomHeaderNames", strings.Join(dialParams.UpstreamProxyCustomHeaderNames, ","))
 		}
 
+		if dialParams.FrontingProviderID != "" {
+			args = append(args, "frontingProviderID", dialParams.FrontingProviderID)
+		}
+
 		if dialParams.MeekDialAddress != "" {
 			args = append(args, "meekDialAddress", dialParams.MeekDialAddress)
 		}

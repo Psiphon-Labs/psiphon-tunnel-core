@@ -71,7 +71,7 @@ type TrafficRulesSet struct {
 	// not any meek request for an existing session, if the
 	// MeekRateLimiterHistorySize requests occur in
 	// MeekRateLimiterThresholdSeconds. The scope of rate limiting may be
-	// limited using LimitMeekRateLimiterRegions and LimitMeekRateLimiterISPs.
+	// limited using LimitMeekRateLimiterRegions/ISPs/Cities.
 	//
 	// Hot reloading a new history size will result in existing history being
 	// truncated.
@@ -92,6 +92,12 @@ type TrafficRulesSet struct {
 	// ISPs. When omitted or empty, meek rate limiting, if configured,
 	// is applied to all client ISPs.
 	MeekRateLimiterISPs []string
+
+	// MeekRateLimiterCities, if set, limits application of the meek
+	// late-stage rate limiter to clients in the specified list of GeoIP
+	// cities. When omitted or empty, meek rate limiting, if configured,
+	// is applied to all client cities.
+	MeekRateLimiterCities []string
 
 	// MeekRateLimiterGarbageCollectionTriggerCount specifies the number of
 	// rate limit events after which garbage collection is manually triggered
@@ -125,6 +131,10 @@ type TrafficRulesFilter struct {
 	// match this filter. When omitted or empty, any client ISP matches.
 	ISPs []string
 
+	// Cities is a list of cities that the client must geolocate to in order to
+	// match this filter. When omitted or empty, any client city matches.
+	Cities []string
+
 	// APIProtocol specifies whether the client must use the SSH
 	// API protocol (when "ssh") or the web API protocol (when "web").
 	// When omitted or blank, any API protocol matches.
@@ -149,6 +159,7 @@ type TrafficRulesFilter struct {
 
 	regionLookup map[string]bool
 	ispLookup    map[string]bool
+	cityLookup   map[string]bool
 }
 
 // TrafficRules specify the limits placed on client traffic.
@@ -290,6 +301,7 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 			set.MeekRateLimiterThresholdSeconds = newSet.MeekRateLimiterThresholdSeconds
 			set.MeekRateLimiterRegions = newSet.MeekRateLimiterRegions
 			set.MeekRateLimiterISPs = newSet.MeekRateLimiterISPs
+			set.MeekRateLimiterCities = newSet.MeekRateLimiterCities
 			set.MeekRateLimiterGarbageCollectionTriggerCount = newSet.MeekRateLimiterGarbageCollectionTriggerCount
 			set.MeekRateLimiterReapHistoryFrequencySeconds = newSet.MeekRateLimiterReapHistoryFrequencySeconds
 			set.DefaultRules = newSet.DefaultRules
@@ -430,6 +442,13 @@ func (set *TrafficRulesSet) initLookups() {
 			filter.ispLookup = make(map[string]bool)
 			for _, ISP := range filter.ISPs {
 				filter.ispLookup[ISP] = true
+			}
+		}
+
+		if len(filter.Cities) >= stringLookupThreshold {
+			filter.cityLookup = make(map[string]bool)
+			for _, city := range filter.Cities {
+				filter.cityLookup[city] = true
 			}
 		}
 	}
@@ -574,6 +593,18 @@ func (set *TrafficRulesSet) GetTrafficRules(
 				}
 			} else {
 				if !common.Contains(filteredRules.Filter.ISPs, geoIPData.ISP) {
+					continue
+				}
+			}
+		}
+
+		if len(filteredRules.Filter.Cities) > 0 {
+			if filteredRules.Filter.cityLookup != nil {
+				if !filteredRules.Filter.cityLookup[geoIPData.City] {
+					continue
+				}
+			} else {
+				if !common.Contains(filteredRules.Filter.Cities, geoIPData.City) {
 					continue
 				}
 			}
@@ -803,7 +834,7 @@ func (rules *TrafficRules) allowSubnet(remoteIP net.IP) bool {
 
 // GetMeekRateLimiterConfig gets a snapshot of the meek rate limiter
 // configuration values.
-func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (int, int, []string, []string, int, int) {
+func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (int, int, []string, []string, []string, int, int) {
 
 	set.ReloadableFile.RLock()
 	defer set.ReloadableFile.RUnlock()
@@ -823,6 +854,7 @@ func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (int, int, []string, []st
 		set.MeekRateLimiterThresholdSeconds,
 		set.MeekRateLimiterRegions,
 		set.MeekRateLimiterISPs,
+		set.MeekRateLimiterCities,
 		GCTriggerCount,
 		reapFrequencySeconds
 }

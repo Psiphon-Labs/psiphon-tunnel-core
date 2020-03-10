@@ -562,7 +562,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	var authorizationID [32]byte
 
-	clientAuthorization, err := accesscontrol.IssueAuthorization(
+	clientAuthorization, _, err := accesscontrol.IssueAuthorization(
 		accessControlSigningKey,
 		authorizationID[:],
 		time.Now().Add(1*time.Hour))
@@ -1163,7 +1163,7 @@ func checkExpectedLogFields(
 	//
 	// - client_build_rev not set in test build (see common/buildinfo.go)
 	// - egress_region, upstream_proxy_type, upstream_proxy_custom_header_names not exercised in test
-	// - meek_dial_ip_address/meek_resolved_ip_address only logged for FRONTED meek protocols
+	// - fronting_provider_id/meek_dial_ip_address/meek_resolved_ip_address only logged for FRONTED meek protocols
 
 	for _, name := range []string{
 		"session_id",
@@ -2115,7 +2115,7 @@ func storePruneServerEntriesTest(
 		}
 
 		err = psiphon.RecordFailedTunnelStat(
-			clientConfig, dialParams, errors.New("test error"))
+			clientConfig, dialParams, nil, 0, 0, errors.New("test error"))
 		if err != nil {
 			t.Fatalf("RecordFailedTunnelStat failed: %s", err)
 		}

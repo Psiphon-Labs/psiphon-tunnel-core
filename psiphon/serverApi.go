@@ -651,7 +651,12 @@ func RecordRemoteServerListStat(
 // This uses the same reporting facility, with the same caveats, as
 // RecordRemoteServerListStat.
 func RecordFailedTunnelStat(
-	config *Config, dialParams *DialParameters, tunnelErr error) error {
+	config *Config,
+	dialParams *DialParameters,
+	livenessTestMetrics *livenessTestMetrics,
+	bytesUp int64,
+	bytesDown int64,
+	tunnelErr error) error {
 
 	if !config.GetClientParameters().Get().WeightedCoinFlip(
 		parameters.RecordFailedTunnelPersistentStatsProbability) {
@@ -669,6 +674,18 @@ func RecordFailedTunnelStat(
 	params["server_entry_tag"] = dialParams.ServerEntry.Tag
 	params["last_connected"] = lastConnected
 	params["client_failed_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
+	if livenessTestMetrics != nil {
+		params["liveness_test_upstream_bytes"] = strconv.Itoa(livenessTestMetrics.UpstreamBytes)
+		params["liveness_test_sent_upstream_bytes"] = strconv.Itoa(livenessTestMetrics.SentUpstreamBytes)
+		params["liveness_test_downstream_bytes"] = strconv.Itoa(livenessTestMetrics.DownstreamBytes)
+		params["liveness_test_received_downstream_bytes"] = strconv.Itoa(livenessTestMetrics.ReceivedDownstreamBytes)
+	}
+	if bytesUp >= 0 {
+		params["bytes_up"] = fmt.Sprintf("%d", bytesUp)
+	}
+	if bytesDown >= 0 {
+		params["bytes_down"] = fmt.Sprintf("%d", bytesDown)
+	}
 
 	// Ensure direct server IPs are not exposed in logs. The "net" package, and
 	// possibly other 3rd party packages, will include destination addresses in
@@ -823,6 +840,10 @@ func getBaseAPIParameters(
 
 	if dialParams.UpstreamProxyCustomHeaderNames != nil {
 		params["upstream_proxy_custom_header_names"] = dialParams.UpstreamProxyCustomHeaderNames
+	}
+
+	if dialParams.FrontingProviderID != "" {
+		params["fronting_provider_id"] = dialParams.FrontingProviderID
 	}
 
 	if dialParams.MeekDialAddress != "" {

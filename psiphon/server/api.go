@@ -433,6 +433,12 @@ var failedTunnelStatParams = append(
 		{"session_id", isHexDigits, 0},
 		{"last_connected", isLastConnected, 0},
 		{"client_failed_timestamp", isISO8601Date, 0},
+		{"liveness_test_upstream_bytes", isIntString, requestParamOptional},
+		{"liveness_test_sent_upstream_bytes", isIntString, requestParamOptional},
+		{"liveness_test_downstream_bytes", isIntString, requestParamOptional},
+		{"liveness_test_received_downstream_bytes", isIntString, requestParamOptional},
+		{"bytes_up", isIntString, requestParamOptional},
+		{"bytes_down", isIntString, requestParamOptional},
 		{"tunnel_error", isAnyString, 0}},
 	baseRequestParams...)
 
@@ -716,6 +722,7 @@ var baseRequestParams = []requestParamSpec{
 	{"ssh_client_version", isAnyString, requestParamOptional},
 	{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
 	{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
+	{"fronting_provider_id", isAnyString, requestParamOptional},
 	{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
 	{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
 	{"meek_sni_server_name", isDomain, requestParamOptional},

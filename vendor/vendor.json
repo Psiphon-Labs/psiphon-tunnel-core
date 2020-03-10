@@ -75,10 +75,10 @@
 			"revisionTime": "2019-12-04T18:36:04Z"
 		},
 		{
-			"checksumSHA1": "8MdwAjQlha5clFXwY1ayF4vNGAQ=",
+			"checksumSHA1": "atufb9edlfrNCDiyupCgjjRRQ10=",
 			"path": "github.com/Psiphon-Labs/quic-go",
-			"revision": "738e15bfe6c3d7a0ccc91e2f237e5554ab6a35a6",
-			"revisionTime": "2020-01-28T19:39:28Z"
+			"revision": "474e74c89fab6c1356b6653b9e1de707b4e4ef8b",
+			"revisionTime": "2020-03-06T19:33:10Z"
 		},
 		{
 			"checksumSHA1": "VMJLFpeoJ56PTQxR0wEkkiQTr1s=",
