@@ -433,6 +433,12 @@ var failedTunnelStatParams = append(
 		{"session_id", isHexDigits, 0},
 		{"last_connected", isLastConnected, 0},
 		{"client_failed_timestamp", isISO8601Date, 0},
+		{"liveness_test_upstream_bytes", isIntString, requestParamOptional},
+		{"liveness_test_sent_upstream_bytes", isIntString, requestParamOptional},
+		{"liveness_test_downstream_bytes", isIntString, requestParamOptional},
+		{"liveness_test_received_downstream_bytes", isIntString, requestParamOptional},
+		{"bytes_up", isIntString, requestParamOptional},
+		{"bytes_down", isIntString, requestParamOptional},
 		{"tunnel_error", isAnyString, 0}},
 	baseRequestParams...)
 

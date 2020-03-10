@@ -2115,7 +2115,7 @@ func storePruneServerEntriesTest(
 		}
 
 		err = psiphon.RecordFailedTunnelStat(
-			clientConfig, dialParams, errors.New("test error"))
+			clientConfig, dialParams, nil, 0, 0, errors.New("test error"))
 		if err != nil {
 			t.Fatalf("RecordFailedTunnelStat failed: %s", err)
 		}
