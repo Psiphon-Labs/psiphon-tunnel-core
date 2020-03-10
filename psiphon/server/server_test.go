@@ -562,7 +562,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	var authorizationID [32]byte
 
-	clientAuthorization, err := accesscontrol.IssueAuthorization(
+	clientAuthorization, _, err := accesscontrol.IssueAuthorization(
 		accessControlSigningKey,
 		authorizationID[:],
 		time.Now().Add(1*time.Hour))
@@ -2115,7 +2115,7 @@ func storePruneServerEntriesTest(
 		}
 
 		err = psiphon.RecordFailedTunnelStat(
-			clientConfig, dialParams, errors.New("test error"))
+			clientConfig, dialParams, nil, 0, 0, errors.New("test error"))
 		if err != nil {
 			t.Fatalf("RecordFailedTunnelStat failed: %s", err)
 		}

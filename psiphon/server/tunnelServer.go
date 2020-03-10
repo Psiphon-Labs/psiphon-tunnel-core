@@ -734,6 +734,8 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 		stats["tcp_port_forward_failed_count"] = 0
 		stats["tcp_port_forward_failed_duration"] = 0
 		stats["tcp_port_forward_rejected_dialing_limit_count"] = 0
+		stats["tcp_port_forward_rejected_disallowed_count"] = 0
+		stats["udp_port_forward_rejected_disallowed_count"] = 0
 		stats["tcp_ipv4_port_forward_dialed_count"] = 0
 		stats["tcp_ipv4_port_forward_dialed_duration"] = 0
 		stats["tcp_ipv4_port_forward_failed_count"] = 0
