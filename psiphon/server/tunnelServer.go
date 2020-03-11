@@ -2245,7 +2245,9 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	// unconditionally, overwriting any value from handshake.
 	logFields["relay_protocol"] = sshClient.tunnelProtocol
 
-	logFields["server_bpf"] = sshClient.sshListener.BPFProgramName
+	if sshClient.sshListener.BPFProgramName != "" {
+		logFields["server_bpf"] = sshClient.sshListener.BPFProgramName
+	}
 	logFields["session_id"] = sshClient.sessionID
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["start_time"] = sshClient.activityConn.GetStartTime()

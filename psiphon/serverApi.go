@@ -621,6 +621,9 @@ func RecordRemoteServerListStat(
 	params["client_version"] = config.ClientVersion
 	params["client_platform"] = config.ClientPlatform
 	params["client_build_rev"] = buildinfo.GetBuildInfo().BuildRev
+	if config.DeviceRegion != "" {
+		params["device_region"] = config.DeviceRegion
+	}
 
 	params["client_download_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
 	tunneledStr := "0"

@@ -414,17 +414,34 @@ var statusRequestParams = append(
 	baseRequestParams...)
 
 var remoteServerListStatParams = []requestParamSpec{
-	{"session_id", isHexDigits, requestParamOptional},
-	{"propagation_channel_id", isHexDigits, requestParamOptional},
-	{"sponsor_id", isHexDigits, requestParamOptional},
-	{"client_version", isAnyString, requestParamOptional},
-	{"client_platform", isAnyString, requestParamOptional},
+	{"session_id", isHexDigits, 0},
+	{"propagation_channel_id", isHexDigits, 0},
+	{"sponsor_id", isHexDigits, 0},
+	{"client_version", isIntString, requestParamLogStringAsInt},
+	{"client_platform", isAnyString, 0},
 	{"client_build_rev", isAnyString, requestParamOptional},
+	{"device_region", isAnyString, requestParamOptional},
 	{"client_download_timestamp", isISO8601Date, 0},
 	{"tunneled", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"url", isAnyString, 0},
 	{"etag", isAnyString, 0},
 	{"authenticated", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+}
+
+// Backwards compatibility case: legacy clients do not include these fields in
+// the remote_server_list_stats entries. Use the values from the outer status
+// request as an approximation (these values reflect the client at persistent
+// stat shipping time, which may differ from the client at persistent stat
+// recording time). Note that all but client_build_rev and device_region are
+// required fields.
+var remoteServerListStatBackwardsCompatibilityParamNames = []string{
+	"session_id",
+	"propagation_channel_id",
+	"sponsor_id",
+	"client_version",
+	"client_platform",
+	"client_build_rev",
+	"device_region",
 }
 
 var failedTunnelStatParams = append(
@@ -520,23 +537,25 @@ func statusAPIRequestHandler(
 		}
 		for _, remoteServerListStat := range remoteServerListStats {
 
+			for _, name := range remoteServerListStatBackwardsCompatibilityParamNames {
+				if _, ok := remoteServerListStat[name]; !ok {
+					if field, ok := params[name]; ok {
+						remoteServerListStat[name] = field
+					}
+				}
+			}
+
 			err := validateRequestParams(support.Config, remoteServerListStat, remoteServerListStatParams)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
 
-			// remote_server_list defaults to using the common params from the
-			// outer statusRequestParams
 			remoteServerListFields := getRequestLogFields(
 				"remote_server_list",
 				geoIPData,
 				authorizedAccessTypes,
-				params,
-				statusRequestParams)
-
-			for name, value := range remoteServerListStat {
-				remoteServerListFields[name] = value
-			}
+				remoteServerListStat,
+				remoteServerListStatParams)
 
 			logQueue = append(logQueue, remoteServerListFields)
 		}
