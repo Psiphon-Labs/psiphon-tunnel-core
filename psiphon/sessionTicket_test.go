@@ -77,12 +77,17 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 	}
 
 	serverConfig := &tris.Config{
-		Certificates:     []tris.Certificate{*certificate},
-		NextProtos:       []string{"http/1.1"},
-		MinVersion:       utls.VersionTLS12,
-		SessionTicketKey: obfuscatedSessionTicketSharedSecret,
+		Certificates:                []tris.Certificate{*certificate},
+		NextProtos:                  []string{"http/1.1"},
+		MinVersion:                  utls.VersionTLS12,
+		UseExtendedMasterSecret:     true,
+		UseObfuscatedSessionTickets: true,
 	}
 
+	// Note: SessionTicketKey needs to be set, or else, it appears,
+	// tris.Config.serverInit() will clobber the value set by
+	// SetSessionTicketKeys.
+	serverConfig.SessionTicketKey = obfuscatedSessionTicketSharedSecret
 	serverConfig.SetSessionTicketKeys([][32]byte{
 		standardSessionTicketKey, obfuscatedSessionTicketSharedSecret})
 

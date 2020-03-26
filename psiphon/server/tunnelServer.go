@@ -1033,15 +1033,13 @@ func (sshServer *sshServer) handleClient(
 
 		if tunnelErr != nil {
 
-			logFields := make(common.LogFields)
-			common.SetIrregularTunnelErrorLogField(
-				logFields, errors.Trace(tunnelErr))
 			logIrregularTunnel(
 				sshServer.support,
 				sshListener.tunnelProtocol,
 				sshListener.port,
 				common.IPAddressFromAddr(clientAddr),
-				LogFields(logFields))
+				errors.Trace(tunnelErr),
+				nil)
 
 			var afterFunc *time.Timer
 			if sshServer.support.Config.sshHandshakeTimeout > 0 {
@@ -1377,12 +1375,13 @@ func (sshClient *sshClient) run(
 				conn,
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
 				sshClient.sshServer.obfuscatorSeedHistory,
-				func(clientIP string, logFields common.LogFields) {
+				func(clientIP string, err error, logFields common.LogFields) {
 					logIrregularTunnel(
 						sshClient.sshServer.support,
 						sshClient.sshListener.tunnelProtocol,
 						sshClient.sshListener.port,
 						clientIP,
+						errors.Trace(err),
 						LogFields(logFields))
 				})
 

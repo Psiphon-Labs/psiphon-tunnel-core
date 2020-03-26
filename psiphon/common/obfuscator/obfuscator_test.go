@@ -51,7 +51,11 @@ func TestObfuscator(t *testing.T) {
 		MaxPadding:      &maxPadding,
 		PaddingPRNGSeed: paddingPRNGSeed,
 		SeedHistory:     NewSeedHistory(&SeedHistoryConfig{ClientIPTTL: 500 * time.Millisecond}),
-		IrregularLogger: func(_ string, logFields common.LogFields) {
+		IrregularLogger: func(_ string, err error, logFields common.LogFields) {
+			if logFields == nil {
+				logFields = make(common.LogFields)
+			}
+			logFields["tunnel_error"] = err.Error()
 			irregularLogFields = logFields
 			t.Logf("IrregularLogger: %+v", logFields)
 		},
@@ -185,8 +189,8 @@ func TestObfuscatedSSHConn(t *testing.T) {
 				conn,
 				keyword,
 				NewSeedHistory(nil),
-				func(_ string, logFields common.LogFields) {
-					t.Logf("IrregularLogger: %+v", logFields)
+				func(_ string, err error, logFields common.LogFields) {
+					t.Logf("IrregularLogger: %s %+v", err, logFields)
 				})
 		}
 

@@ -104,12 +104,9 @@ func GetStringSlice(value interface{}) ([]string, bool) {
 // crypto/rand.Read.
 func MakeSecureRandomBytes(length int) ([]byte, error) {
 	randomBytes := make([]byte, length)
-	n, err := rand.Read(randomBytes)
+	_, err := rand.Read(randomBytes)
 	if err != nil {
 		return nil, errors.Trace(err)
-	}
-	if n != length {
-		return nil, errors.TraceNew("insufficient random bytes")
 	}
 	return randomBytes, nil
 }

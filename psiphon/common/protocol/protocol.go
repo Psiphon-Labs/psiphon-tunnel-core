@@ -211,6 +211,11 @@ func TunnelProtocolIsCompatibleWithFragmentor(protocol string) bool {
 		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP
 }
 
+func TunnelProtocolSupportsPassthrough(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
+}
+
 func UseClientTunnelProtocol(
 	clientProtocol string,
 	serverProtocols TunnelProtocols) bool {

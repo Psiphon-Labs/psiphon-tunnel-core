@@ -142,6 +142,11 @@ type CustomTLSConfig struct {
 	// using the specified key.
 	ObfuscatedSessionTicketKey string
 
+	// PassthroughMessage, when specified, is a 32 byte value that is sent in the
+	// ClientHello random value field. The value should be generated using
+	// obfuscator.MakeTLSPassthroughMessage.
+	PassthroughMessage []byte
+
 	clientSessionCache utls.ClientSessionCache
 }
 
@@ -484,6 +489,11 @@ func CustomTLSDial(
 
 	conn.SetSessionCache(clientSessionCache)
 
+	// TODO: can conn.SetClientRandom be made to take effect if called here? In
+	// testing, the random value appears to be overwritten. As is, the overhead
+	// of needRemarshal is now always required to handle
+	// config.PassthroughMessage.
+
 	// Build handshake state in advance to obtain the TLS version, which is used
 	// to determine whether the following customizations may be applied. Don't use
 	// getClientHelloVersion, since that may incur additional overhead.
@@ -636,6 +646,15 @@ func CustomTLSDial(
 
 		needRemarshal = true
 
+	}
+
+	if config.PassthroughMessage != nil {
+		err := conn.SetClientRandom(config.PassthroughMessage)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		needRemarshal = true
 	}
 
 	if needRemarshal {

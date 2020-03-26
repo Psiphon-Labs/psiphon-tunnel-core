@@ -900,6 +900,20 @@ func peekAlert(b *block) error {
 // sendAlert sends a TLS alert message.
 // c.out.Mutex <= L.
 func (c *Conn) sendAlertLocked(err alert) error {
+
+	// [Psiphon]
+	// Do not send TLS alerts before the passthrough state is determined.
+	// Otherwise, an invalid client would receive non-passthrough traffic.
+	//
+	// Limitation: ClientHello-related alerts to legitimate clients are not sent.
+	// This changes the nature of errors that such clients may report when their
+	// TLS handshake fails. This change in behavior is only visible to legitimate
+	// clients.
+	if c.config.PassthroughAddress != "" &&
+		c.conn.(*recorderConn).IsRecording() {
+		return nil
+	}
+
 	switch err {
 	case alertNoRenegotiation, alertCloseNotify:
 		c.tmp[0] = alertLevelWarning
