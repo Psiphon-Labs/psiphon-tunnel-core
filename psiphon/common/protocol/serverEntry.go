@@ -439,11 +439,28 @@ func GetTacticsCapability(protocol string) string {
 	return GetCapability(protocol) + "-TACTICS"
 }
 
+// hasCapability indicates if the server entry has the specified capability.
+//
+// Any internal "PASSTHROUGH" componant in the server entry's capabilities is
+// ignored. The PASSTHROUGH component is used to mask protocols which are
+// running the passthrough mechanism from older clients which do not implement
+// the passthrough message. Older clients will treat these capabilities as
+// unknown protocols and skip them.
+func (serverEntry *ServerEntry) hasCapability(requiredCapability string) bool {
+	for _, capability := range serverEntry.Capabilities {
+		capability = strings.ReplaceAll(capability, "-PASSTHROUGH", "")
+		if capability == requiredCapability {
+			return true
+		}
+	}
+	return false
+}
+
 // SupportsProtocol returns true if and only if the ServerEntry has
 // the necessary capability to support the specified tunnel protocol.
 func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 	requiredCapability := GetCapability(protocol)
-	return common.Contains(serverEntry.Capabilities, requiredCapability)
+	return serverEntry.hasCapability(requiredCapability)
 }
 
 // ConditionallyEnabledComponents defines an interface which can be queried to
@@ -514,7 +531,7 @@ func (serverEntry *ServerEntry) GetSupportedTacticsProtocols() []string {
 		}
 
 		requiredCapability := GetTacticsCapability(protocol)
-		if !common.Contains(serverEntry.Capabilities, requiredCapability) {
+		if !serverEntry.hasCapability(requiredCapability) {
 			continue
 		}
 
@@ -527,12 +544,12 @@ func (serverEntry *ServerEntry) GetSupportedTacticsProtocols() []string {
 // SupportsSSHAPIRequests returns true when the server supports
 // SSH API requests.
 func (serverEntry *ServerEntry) SupportsSSHAPIRequests() bool {
-	return common.Contains(serverEntry.Capabilities, CAPABILITY_SSH_API_REQUESTS)
+	return serverEntry.hasCapability(CAPABILITY_SSH_API_REQUESTS)
 }
 
 func (serverEntry *ServerEntry) GetUntunneledWebRequestPorts() []string {
 	ports := make([]string, 0)
-	if common.Contains(serverEntry.Capabilities, CAPABILITY_UNTUNNELED_WEB_API_REQUESTS) {
+	if serverEntry.hasCapability(CAPABILITY_UNTUNNELED_WEB_API_REQUESTS) {
 		// Server-side configuration quirk: there's a port forward from
 		// port 443 to the web server, which we can try, except on servers
 		// running FRONTED_MEEK, which listens on port 443.
