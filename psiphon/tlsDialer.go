@@ -161,6 +161,7 @@ func (config *CustomTLSConfig) EnableClientSessionCache() {
 
 // SelectTLSProfile picks a TLS profile at random from the available candidates.
 func SelectTLSProfile(
+	requireTLS12SessionTickets bool,
 	isFronted bool,
 	frontingProviderID string,
 	p parameters.ClientParametersAccessor) string {
@@ -216,6 +217,18 @@ func SelectTLSProfile(
 			}
 
 			if common.Contains(disableTLSProfiles, tlsProfile) {
+				continue
+			}
+
+			// requireTLS12SessionTickets is specified for
+			// UNFRONTED-MEEK-SESSION-TICKET-OSSH, a protocol which depends on using
+			// obfuscated session tickets to ensure that the server doesn't send its
+			// certificate in the TLS handshake. TLS 1.2 profiles which omit session
+			// tickets should not be selected. As TLS 1.3 encrypts the server
+			// certificate message, there's no exclusion for TLS 1.3.
+
+			if requireTLS12SessionTickets &&
+				protocol.TLS12ProfileOmitsSessionTickets(tlsProfile) {
 				continue
 			}
 
@@ -390,7 +403,7 @@ func CustomTLSDial(
 	selectedTLSProfile := config.TLSProfile
 
 	if selectedTLSProfile == "" {
-		selectedTLSProfile = SelectTLSProfile(false, "", p)
+		selectedTLSProfile = SelectTLSProfile(false, false, "", p)
 	}
 
 	tlsConfigInsecureSkipVerify := false

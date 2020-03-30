@@ -211,6 +211,10 @@ func TunnelProtocolIsCompatibleWithFragmentor(protocol string) bool {
 		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP
 }
 
+func TunnelProtocolRequiresTLS12SessionTickets(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
+}
+
 func TunnelProtocolSupportsPassthrough(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
@@ -282,6 +286,14 @@ var legacyTLSProfiles = TLSProfiles{
 
 func TLSProfileIsRandomized(tlsProfile string) bool {
 	return tlsProfile == TLS_PROFILE_RANDOMIZED
+}
+
+func TLS12ProfileOmitsSessionTickets(tlsProfile string) bool {
+	if tlsProfile == TLS_PROFILE_IOS_111 ||
+		tlsProfile == TLS_PROFILE_IOS_121 {
+		return true
+	}
+	return false
 }
 
 type TLSProfiles []string
