@@ -141,6 +141,7 @@ const (
 	SSHKeepAliveProbeTimeout                         = "SSHKeepAliveProbeTimeout"
 	SSHKeepAliveProbeInactivePeriod                  = "SSHKeepAliveProbeInactivePeriod"
 	SSHKeepAliveNetworkConnectivityPollingPeriod     = "SSHKeepAliveNetworkConnectivityPollingPeriod"
+	SSHKeepAliveResetOnFailureProbability            = "SSHKeepAliveResetOnFailureProbability"
 	HTTPProxyOriginServerTimeout                     = "HTTPProxyOriginServerTimeout"
 	HTTPProxyMaxIdleConnectionsPerHost               = "HTTPProxyMaxIdleConnectionsPerHost"
 	FetchRemoteServerListTimeout                     = "FetchRemoteServerListTimeout"
@@ -362,6 +363,7 @@ var defaultClientParameters = map[string]struct {
 	SSHKeepAliveProbeTimeout:                     {value: 5 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	SSHKeepAliveProbeInactivePeriod:              {value: 10 * time.Second, minimum: 1 * time.Second},
 	SSHKeepAliveNetworkConnectivityPollingPeriod: {value: 500 * time.Millisecond, minimum: 1 * time.Millisecond},
+	SSHKeepAliveResetOnFailureProbability:        {value: 0.0, minimum: 0.0},
 
 	HTTPProxyOriginServerTimeout:       {value: 15 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	HTTPProxyMaxIdleConnectionsPerHost: {value: 50, minimum: 0},
