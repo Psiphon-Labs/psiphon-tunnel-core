@@ -986,13 +986,16 @@ func getRequestLogFields(
 				// client_platform.
 				if expectedParam.name == "client_platform" {
 					index := -1
-					if strings.HasPrefix(strValue, "iOS") {
+					clientPlatform := strValue
+					if strings.HasPrefix(clientPlatform, "iOS") {
 						index = 3
-					} else if strings.HasPrefix(strValue, "Android") {
+					} else if strings.HasPrefix(clientPlatform, "Android") {
 						index = 2
+						clientPlatform = strings.TrimSuffix(clientPlatform, "_playstore")
+						clientPlatform = strings.TrimSuffix(clientPlatform, "_rooted")
 					}
 					if index > 0 {
-						components := strings.Split(strValue, "_")
+						components := strings.Split(clientPlatform, "_")
 						if index < len(components) {
 							logFields["client_app_id"] = components[index]
 						}
