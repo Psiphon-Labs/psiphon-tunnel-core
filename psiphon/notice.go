@@ -433,6 +433,7 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 		"protocol", dialParams.TunnelProtocol,
 		"isReplay", dialParams.IsReplay,
 		"candidateNumber", dialParams.CandidateNumber,
+		"networkType", dialParams.GetNetworkType(),
 	}
 
 	if GetEmitNetworkParameters() {

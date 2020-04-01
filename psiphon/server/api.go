@@ -774,6 +774,7 @@ var baseRequestParams = []requestParamSpec{
 	{"meek_tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
 	{"client_bpf", isAnyString, requestParamOptional},
+	{"network_type", isAnyString, requestParamOptional},
 }
 
 func validateRequestParams(
@@ -980,6 +981,24 @@ func getRequestLogFields(
 				// the field in this case.
 
 			default:
+
+				// Add a distinct app ID field when the value is present in
+				// client_platform.
+				if expectedParam.name == "client_platform" {
+					index := -1
+					if strings.HasPrefix(strValue, "iOS") {
+						index = 3
+					} else if strings.HasPrefix(strValue, "Android") {
+						index = 2
+					}
+					if index > 0 {
+						components := strings.Split(strValue, "_")
+						if index < len(components) {
+							logFields["client_app_id"] = components[index]
+						}
+					}
+				}
+
 				if expectedParam.flags&requestParamLogStringAsInt != 0 {
 					intValue, _ := strconv.Atoi(strValue)
 					logFields[expectedParam.name] = intValue

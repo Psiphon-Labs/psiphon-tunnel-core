@@ -27,6 +27,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -691,6 +692,25 @@ func (dialParams *DialParameters) GetDialConfig() *DialConfig {
 
 func (dialParams *DialParameters) GetMeekConfig() *MeekConfig {
 	return dialParams.meekConfig
+}
+
+// GetNetworkType returns a network type name, suitable for metrics, which is
+// derived from the network ID.
+func (dialParams *DialParameters) GetNetworkType() string {
+
+	// Unlike the logic in loggingNetworkIDGetter.GetNetworkID, we don't take the
+	// arbitrary text before the first "-" since some platforms without network
+	// detection support stub in random values to enable tactics. Instead we
+	// check for and use the common network type prefixes currently used in
+	// NetworkIDGetter implementations.
+
+	if strings.HasPrefix(dialParams.NetworkID, "WIFI") {
+		return "WIFI"
+	}
+	if strings.HasPrefix(dialParams.NetworkID, "MOBILE") {
+		return "MOBILE"
+	}
+	return "UNKNOWN"
 }
 
 func (dialParams *DialParameters) Succeeded() {

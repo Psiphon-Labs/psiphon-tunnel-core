@@ -821,6 +821,7 @@ func getBaseAPIParameters(
 	params["client_platform"] = config.ClientPlatform
 	params["client_build_rev"] = buildinfo.GetBuildInfo().BuildRev
 	params["tunnel_whole_device"] = strconv.Itoa(config.TunnelWholeDevice)
+	params["network_type"] = dialParams.GetNetworkType()
 
 	// The following parameters may be blank and must
 	// not be sent to the server if blank.

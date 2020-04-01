@@ -543,6 +543,8 @@ type runServerConfig struct {
 var (
 	testSSHClientVersions = []string{"SSH-2.0-A", "SSH-2.0-B", "SSH-2.0-C"}
 	testUserAgents        = []string{"ua1", "ua2", "ua3"}
+	testNetworkType       = "WIFI"
+	testAppID             = "com.test.app"
 )
 
 func runServer(t *testing.T, runConfig *runServerConfig) {
@@ -806,10 +808,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	localSOCKSProxyPort := 1081
 	localHTTPProxyPort := 8081
 
-	// Use a distinct prefix for network ID for each test run to
+	// Use a distinct suffix for network ID for each test run to
 	// ensure tactics from different runs don't apply; this is
 	// a workaround for the singleton datastore.
-	jsonNetworkID := fmt.Sprintf(`,"NetworkID" : "%s-%s"`, time.Now().String(), "NETWORK1")
+	jsonNetworkID := fmt.Sprintf(`,"NetworkID" : "WIFI-%s"`, time.Now().String())
 
 	jsonLimitTLSProfiles := ""
 	if runConfig.tlsProfile != "" {
@@ -818,7 +820,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	clientConfigJSON := fmt.Sprintf(`
     {
-        "ClientPlatform" : "Windows",
+        "ClientPlatform" : "Android_10_%s",
         "ClientVersion" : "0",
         "SponsorId" : "0",
         "PropagationChannelId" : "0",
@@ -830,7 +832,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "LimitTunnelProtocols" : ["%s"]
         %s
         %s
-    }`, numTunnels, runConfig.tunnelProtocol, jsonLimitTLSProfiles, jsonNetworkID)
+    }`, testAppID, numTunnels, runConfig.tunnelProtocol, jsonLimitTLSProfiles, jsonNetworkID)
 
 	clientConfig, err := psiphon.LoadConfig([]byte(clientConfigJSON))
 	if err != nil {
@@ -1184,13 +1186,15 @@ func checkExpectedLogFields(
 		"dial_duration",
 		"candidate_number",
 		"network_latency_multiplier",
+		"network_type",
+		"client_app_id",
 	} {
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
 		}
 	}
 
-	if fields["relay_protocol"] != runConfig.tunnelProtocol {
+	if fields["relay_protocol"].(string) != runConfig.tunnelProtocol {
 		return fmt.Errorf("unexpected relay_protocol '%s'", fields["relay_protocol"])
 	}
 
@@ -1329,6 +1333,14 @@ func checkExpectedLogFields(
 		} else if fmt.Sprintf("%s", fields[name]) != "test-server-bpf" {
 			return fmt.Errorf("unexpected field value %s: '%s'", name, fields[name])
 		}
+	}
+
+	if fields["network_type"].(string) != testNetworkType {
+		return fmt.Errorf("unexpected network_type '%s'", fields["network_type"])
+	}
+
+	if fields["client_app_id"].(string) != testAppID {
+		return fmt.Errorf("unexpected client_app_id '%s'", fields["client_app_id"])
 	}
 
 	return nil
