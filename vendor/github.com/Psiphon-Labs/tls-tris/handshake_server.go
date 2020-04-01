@@ -5,6 +5,7 @@
 package tls
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rsa"
@@ -13,7 +14,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"sync/atomic"
+	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 )
 
 // serverHandshakeState contains details of a server handshake in progress.
@@ -62,6 +67,132 @@ func (c *Conn) serverHandshake() error {
 	c.in.traceErr = hs.traceErr
 	c.out.traceErr = hs.traceErr
 	isResume, err := hs.readClientHello()
+
+	// [Psiphon]
+	// The ClientHello with the passthrough message is now available. Route the
+	// client to passthrough based on message inspection. This code assumes the
+	// client TCP conn has been wrapped with recordingConn, which has recorded
+	// all bytes sent by the client, which will be replayed, byte-for-byte, to
+	// the passthrough; as a result, passthrough clients will perform their TLS
+	// handshake with the passthrough target, receive its certificate, and in the
+	// case of HTTPS, receive the passthrough target's HTTP responses.
+	//
+	// Passthrough is also triggered if readClientHello fails. E.g., on other
+	// invalid input cases including "tls: handshake message of length..." or if
+	// the ClientHello is otherwise invalid. This ensures that clients sending
+	// random data will be relayed to the passthrough and not receive a
+	// distinguishing error response.
+	//
+	// The `tls` API performs handshakes on demand. E.g., the first call to
+	// tls.Conn.Read will perform a handshake if it's not yet been performed.
+	// Consumers such as `http` may call Read and then Close. To minimize code
+	// changes, in the passthrough case the ownership of Conn.conn, the client
+	// TCP conn, is transferred to the passthrough relay and a closedConn is
+	// substituted for Conn.conn. This allows the remaining `tls` code paths to
+	// continue reference a net.Conn, albiet one that is closed, so Reads and
+	// Writes will fail.
+
+	if c.config.PassthroughAddress != "" {
+
+		doPassthrough := false
+
+		if err != nil {
+			doPassthrough = true
+			err = fmt.Errorf("passthrough: %s", err)
+		}
+
+		if !doPassthrough {
+			if !obfuscator.VerifyTLSPassthroughMessage(
+				c.config.PassthroughKey, hs.clientHello.random) {
+
+				// Legitimate, older clients that don't use passthrough messages will hit
+				// this case. Reduce false positive event logs with this heuristic: if
+				// isResume, the client sent a valid session ticket, so either the client
+				// sent a valid obfuscated session ticket proving knowledge of the
+				// obfuscation key, or the client previously connected and obtained a
+				// server-issued session ticket (this latter case shouldn't happen as the
+				// passthough message is now required for all connections; but isResume
+				// doesn't strictly mean the session ticket was _obfuscated_).
+				c.config.PassthroughLogInvalidMessage(
+					c.conn.RemoteAddr().String())
+
+				doPassthrough = true
+				err = errors.New("passthrough: invalid client random")
+			}
+		}
+
+		if !doPassthrough {
+			if !c.config.PassthroughHistoryAddNew(
+				c.conn.RemoteAddr().String(), hs.clientHello.random) {
+
+				doPassthrough = true
+				err = errors.New("passthrough: duplicate client random")
+			}
+		}
+
+		if doPassthrough {
+
+			// When performing passthrough, we must exit at the "return err" below.
+			// This is a failsafe to ensure err is always set.
+			if err == nil {
+				err = errors.New("passthrough: missing error")
+			}
+
+			passthroughReadBuffer := c.conn.(*recorderConn).GetReadBuffer().Bytes()
+
+			// Modifying c.conn directly is safe only because Conn.Handshake, which
+			// calls Conn.serverHandshake, is holding c.handshakeMutex and c.in locks,
+			// and because of the serial nature of c.conn access during the handshake
+			// sequence.
+			conn := c.conn
+			c.conn = newClosedConn(conn)
+
+			go func() {
+
+				// Perform the passthrough relay.
+				//
+				// Limitations:
+				//
+				// - The local TCP stack may differ from passthrough target in a
+				//   detectable way.
+				//
+				// - There may be detectable timing characteristics due to the network hop
+				//   to the passthrough target.
+				//
+				// - Application-level socket operations may produce detectable
+				//   differences (e.g., CloseWrite/FIN).
+				//
+				// - The dial to the passthrough, or other upstream network operations,
+				//   may fail. These errors are not logged.
+				//
+				// - There's no timeout on the passthrough dial and no time limit on the
+				//   passthrough relay so that the invalid client can't detect a timeout
+				//   shorter than the passthrough target; this may cause additional load.
+
+				defer conn.Close()
+
+				passthroughConn, err := net.Dial("tcp", c.config.PassthroughAddress)
+				if err != nil {
+					return
+				}
+				_, err = passthroughConn.Write(passthroughReadBuffer)
+				if err != nil {
+					return
+				}
+
+				// Allow garbage collection.
+				passthroughReadBuffer = nil
+
+				go func() {
+					_, _ = io.Copy(passthroughConn, conn)
+					passthroughConn.Close()
+				}()
+				_, _ = io.Copy(conn, passthroughConn)
+			}()
+
+		}
+	}
+
 	if err != nil {
 		return err
 	}
@@ -151,6 +282,96 @@ func (c *Conn) serverHandshake() error {
 	atomic.StoreUint32(&c.handshakeStatus, 1)
 
 	return nil
+}
+
+// [Psiphon]
+// recorderConn is a net.Conn which records all bytes read from the wrapped
+// conn until GetReadBuffer is called, which returns the buffered bytes and
+// stops recording. This is used to replay, byte-for-byte, the bytes sent by a
+// client when switching to passthrough.
+//
+// recorderConn operations are not safe for concurrent use and intended only
+// to be used in the initial phase of the TLS handshake, where the order of
+// operations is deterministic.
+type recorderConn struct {
+	net.Conn
+	readBuffer *bytes.Buffer
+}
+
+func newRecorderConn(conn net.Conn) *recorderConn {
+	return &recorderConn{
+		Conn:       conn,
+		readBuffer: new(bytes.Buffer),
+	}
+}
+
+func (c *recorderConn) Read(p []byte) (n int, err error) {
+	n, err = c.Conn.Read(p)
+	if n > 0 && c.readBuffer != nil {
+		_, _ = c.readBuffer.Write(p[:n])
+	}
+	return n, err
+}
+
+func (c *recorderConn) GetReadBuffer() *bytes.Buffer {
+	b := c.readBuffer
+	c.readBuffer = nil
+	return b
+}
+
+func (c *recorderConn) IsRecording() bool {
+	return c.readBuffer != nil
+}
+
+// [Psiphon]
+// closedConn is a net.Conn which behaves as if it were closed: all reads and
+// writes fail. This is used when switching to passthrough mode: ownership of
+// the invalid client conn is taken by the passthrough relay and a closedConn
+// replaces the network conn used by the local TLS server code path.
+type closedConn struct {
+	localAddr  net.Addr
+	remoteAddr net.Addr
+}
+
+var closedClosedError = errors.New("closed")
+
+func newClosedConn(conn net.Conn) *closedConn {
+	return &closedConn{
+		localAddr:  conn.LocalAddr(),
+		remoteAddr: conn.RemoteAddr(),
+	}
+}
+
+func (c *closedConn) Read(_ []byte) (int, error) {
+	return 0, closedClosedError
+}
+
+func (c *closedConn) Write(_ []byte) (int, error) {
+	return 0, closedClosedError
+}
+
+func (c *closedConn) Close() error {
+	return nil
+}
+
+func (c *closedConn) LocalAddr() net.Addr {
+	return c.localAddr
+}
+
+func (c *closedConn) RemoteAddr() net.Addr {
+	return c.remoteAddr
+}
+
+func (c *closedConn) SetDeadline(_ time.Time) error {
+	return closedClosedError
+}
+
+func (c *closedConn) SetReadDeadline(_ time.Time) error {
+	return closedClosedError
+}
+
+func (c *closedConn) SetWriteDeadline(_ time.Time) error {
+	return closedClosedError
 }
 
 // readClientHello reads a ClientHello message from the client and decides
@@ -427,9 +648,17 @@ func (hs *serverHandshakeState) checkForResumption() bool {
 		return false
 	}
 
-	// Do not resume connections where client support for EMS has changed
-	if (hs.clientHello.extendedMSSupported && c.config.UseExtendedMasterSecret) != hs.sessionState.usedEMS {
-		return false
+	// [Psiphon]
+	// When using obfuscated session tickets, the client-generated session ticket
+	// state never uses EMS. ClientHellos vary in EMS support. So, in this mode,
+	// skip this check to ensure the obfuscated session tickets are not
+	// rejected.
+	if !c.config.UseObfuscatedSessionTickets {
+
+		// Do not resume connections where client support for EMS has changed
+		if (hs.clientHello.extendedMSSupported && c.config.UseExtendedMasterSecret) != hs.sessionState.usedEMS {
+			return false
+		}
 	}
 
 	cipherSuiteOk := false

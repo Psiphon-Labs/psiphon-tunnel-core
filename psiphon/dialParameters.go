@@ -372,10 +372,14 @@ func MakeDialParameters(
 	if (!isReplay || !replayTLSProfile) &&
 		protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) {
 
-		isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol)
-
 		dialParams.SelectedTLSProfile = true
-		dialParams.TLSProfile = SelectTLSProfile(isFronted, serverEntry.FrontingProviderID, p)
+
+		requireTLS12SessionTickets := protocol.TunnelProtocolRequiresTLS12SessionTickets(
+			dialParams.TunnelProtocol)
+		isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol)
+		dialParams.TLSProfile = SelectTLSProfile(
+			requireTLS12SessionTickets, isFronted, serverEntry.FrontingProviderID, p)
+
 		dialParams.NoDefaultTLSSessionID = p.WeightedCoinFlip(
 			parameters.NoDefaultTLSSessionIDProbability)
 	}

@@ -355,6 +355,18 @@ func DialMeek(
 			tlsConfig.ObfuscatedSessionTicketKey = meekConfig.MeekObfuscatedKey
 		}
 
+		// As the passthrough message is unique and indistinguisbale from a normal
+		// TLS client random value, we set it unconditionally and not just for
+		// protocols which may support passthrough (even for those protocols,
+		// clients don't know which servers are configured to use it).
+
+		passthroughMessage, err := obfuscator.MakeTLSPassthroughMessage(
+			meekConfig.MeekObfuscatedKey)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		tlsConfig.PassthroughMessage = passthroughMessage
+
 		tlsDialer := NewCustomTLSDialer(tlsConfig)
 
 		// Pre-dial one TLS connection in order to inspect the negotiated

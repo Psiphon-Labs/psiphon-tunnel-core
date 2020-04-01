@@ -1310,6 +1310,9 @@ func (tunnel *Tunnel) sendSshKeepAlive(
 	networkConnectivityPollPeriod := p.Duration(
 		parameters.SSHKeepAliveNetworkConnectivityPollingPeriod)
 
+	resetOnFailure := p.WeightedCoinFlip(
+		parameters.SSHKeepAliveResetOnFailureProbability)
+
 	p.Close()
 
 	// Note: there is no request context since SSH requests cannot be interrupted
@@ -1408,6 +1411,7 @@ loop:
 		tunnel.conn.Close()
 
 		if continuousNetworkConnectivity {
+
 			_ = RecordFailedTunnelStat(
 				tunnel.config,
 				tunnel.dialParams,
@@ -1415,6 +1419,25 @@ loop:
 				bytesUp,
 				bytesDown,
 				err)
+
+			// SSHKeepAliveResetOnFailureProbability is set when a late-lifecycle
+			// impaired protocol attack is suspected. With the given probability, reset
+			// server affinity and replay parameters for this server to avoid
+			// continuously reconnecting to the server and/or using the same protocol
+			// and dial parameters.
+
+			if resetOnFailure {
+				NoticeInfo("Delete dial parameters for %s", tunnel.dialParams.ServerEntry.GetDiagnosticID())
+				err := DeleteDialParameters(tunnel.dialParams.ServerEntry.IpAddress, tunnel.dialParams.NetworkID)
+				if err != nil {
+					NoticeWarning("DeleteDialParameters failed: %s", err)
+				}
+				NoticeInfo("Delete server affinity for %s", tunnel.dialParams.ServerEntry.GetDiagnosticID())
+				err = DeleteServerEntryAffinity(tunnel.dialParams.ServerEntry.IpAddress)
+				if err != nil {
+					NoticeWarning("DeleteServerEntryAffinity failed: %s", err)
+				}
+			}
 		}
 	}
 
