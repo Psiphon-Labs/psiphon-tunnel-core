@@ -224,7 +224,7 @@ func handshakeAPIRequestHandler(
 	// TODO: in the case of SSH API requests, the actual sshClient could
 	// be passed in and used here. The session ID lookup is only strictly
 	// necessary to support web API requests.
-	activeAuthorizationIDs, authorizedAccessTypes, err := support.TunnelServer.SetClientHandshakeState(
+	clientHandshakeStateInfo, err := support.TunnelServer.SetClientHandshakeState(
 		sessionID,
 		handshakeState{
 			completed:         true,
@@ -261,7 +261,7 @@ func handshakeAPIRequestHandler(
 			logFields := getRequestLogFields(
 				tactics.TACTICS_METRIC_EVENT_NAME,
 				geoIPData,
-				authorizedAccessTypes,
+				clientHandshakeStateInfo.AuthorizedAccessTypes,
 				params,
 				handshakeRequestParams)
 
@@ -284,7 +284,7 @@ func handshakeAPIRequestHandler(
 		getRequestLogFields(
 			"",
 			geoIPData,
-			authorizedAccessTypes,
+			clientHandshakeStateInfo.AuthorizedAccessTypes,
 			params,
 			baseRequestParams)).Debug("handshake")
 
@@ -311,17 +311,19 @@ func handshakeAPIRequestHandler(
 	}
 
 	handshakeResponse := protocol.HandshakeResponse{
-		SSHSessionID:           sessionID,
-		Homepages:              db.GetRandomizedHomepages(sponsorID, geoIPData.Country, geoIPData.ASN, isMobile),
-		UpgradeClientVersion:   db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
-		PageViewRegexes:        make([]map[string]string, 0),
-		HttpsRequestRegexes:    httpsRequestRegexes,
-		EncodedServerList:      encodedServerList,
-		ClientRegion:           geoIPData.Country,
-		ServerTimestamp:        common.GetCurrentTimestamp(),
-		ActiveAuthorizationIDs: activeAuthorizationIDs,
-		TacticsPayload:         marshaledTacticsPayload,
-		Padding:                strings.Repeat(" ", pad_response),
+		SSHSessionID:             sessionID,
+		Homepages:                db.GetRandomizedHomepages(sponsorID, geoIPData.Country, geoIPData.ASN, isMobile),
+		UpgradeClientVersion:     db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
+		PageViewRegexes:          make([]map[string]string, 0),
+		HttpsRequestRegexes:      httpsRequestRegexes,
+		EncodedServerList:        encodedServerList,
+		ClientRegion:             geoIPData.Country,
+		ServerTimestamp:          common.GetCurrentTimestamp(),
+		ActiveAuthorizationIDs:   clientHandshakeStateInfo.ActiveAuthorizationIDs,
+		TacticsPayload:           marshaledTacticsPayload,
+		UpstreamBytesPerSecond:   clientHandshakeStateInfo.UpstreamBytesPerSecond,
+		DownstreamBytesPerSecond: clientHandshakeStateInfo.DownstreamBytesPerSecond,
+		Padding:                  strings.Repeat(" ", pad_response),
 	}
 
 	responsePayload, err := json.Marshal(handshakeResponse)

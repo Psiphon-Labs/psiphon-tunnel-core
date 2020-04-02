@@ -795,6 +795,20 @@ func NoticeActiveAuthorizationIDs(activeAuthorizationIDs []string) {
 		"IDs", activeAuthorizationIDs)
 }
 
+// NoticeTrafficRateLimits reports the tunnel traffic rate limits in place for
+// this client, as reported by the server at the start of the tunnel. Values
+// of 0 indicate no limit. Values of -1 indicate that the server did not
+// report rate limits.
+//
+// Limitation: any rate limit changes during the lifetime of the tunnel are
+// not reported.
+func NoticeTrafficRateLimits(upstreamBytesPerSecond, downstreamBytesPerSecond int64) {
+	singletonNoticeLogger.outputNotice(
+		"TrafficRateLimits", 0,
+		"upstreamBytesPerSecond", upstreamBytesPerSecond,
+		"downstreamBytesPerSecond", downstreamBytesPerSecond)
+}
+
 func NoticeBindToDevice(deviceInfo string) {
 	outputRepetitiveNotice(
 		"BindToDevice", deviceInfo, 0,

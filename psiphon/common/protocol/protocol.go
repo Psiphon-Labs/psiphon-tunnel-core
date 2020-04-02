@@ -403,17 +403,19 @@ func (labeledVersions LabeledQUICVersions) PruneInvalid() LabeledQUICVersions {
 }
 
 type HandshakeResponse struct {
-	SSHSessionID           string              `json:"ssh_session_id"`
-	Homepages              []string            `json:"homepages"`
-	UpgradeClientVersion   string              `json:"upgrade_client_version"`
-	PageViewRegexes        []map[string]string `json:"page_view_regexes"`
-	HttpsRequestRegexes    []map[string]string `json:"https_request_regexes"`
-	EncodedServerList      []string            `json:"encoded_server_list"`
-	ClientRegion           string              `json:"client_region"`
-	ServerTimestamp        string              `json:"server_timestamp"`
-	ActiveAuthorizationIDs []string            `json:"active_authorization_ids"`
-	TacticsPayload         json.RawMessage     `json:"tactics_payload"`
-	Padding                string              `json:"padding"`
+	SSHSessionID             string              `json:"ssh_session_id"`
+	Homepages                []string            `json:"homepages"`
+	UpgradeClientVersion     string              `json:"upgrade_client_version"`
+	PageViewRegexes          []map[string]string `json:"page_view_regexes"`
+	HttpsRequestRegexes      []map[string]string `json:"https_request_regexes"`
+	EncodedServerList        []string            `json:"encoded_server_list"`
+	ClientRegion             string              `json:"client_region"`
+	ServerTimestamp          string              `json:"server_timestamp"`
+	ActiveAuthorizationIDs   []string            `json:"active_authorization_ids"`
+	TacticsPayload           json.RawMessage     `json:"tactics_payload"`
+	UpstreamBytesPerSecond   int64               `json:"upstream_bytes_per_second"`
+	DownstreamBytesPerSecond int64               `json:"downstream_bytes_per_second"`
+	Padding                  string              `json:"padding"`
 }
 
 type ConnectedResponse struct {
