@@ -205,6 +205,10 @@ func handshakeAPIRequestHandler(
 	isMobile := isMobileClientPlatform(clientPlatform)
 	normalizedPlatform := normalizeClientPlatform(clientPlatform)
 
+	// establishedTunnelCount is used in traffic rule selection. When omitted by
+	// the client, a value of 0 will be used.
+	establishedTunnelCount, _ := getOptionalIntRequestParam(params, "established_tunnel_count")
+
 	var authorizations []string
 	if params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] != nil {
 		authorizations, err = getStringArrayRequestParam(params, protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS)
@@ -224,13 +228,14 @@ func handshakeAPIRequestHandler(
 	// TODO: in the case of SSH API requests, the actual sshClient could
 	// be passed in and used here. The session ID lookup is only strictly
 	// necessary to support web API requests.
-	clientHandshakeStateInfo, err := support.TunnelServer.SetClientHandshakeState(
+	handshakeStateInfo, err := support.TunnelServer.SetClientHandshakeState(
 		sessionID,
 		handshakeState{
-			completed:         true,
-			apiProtocol:       apiProtocol,
-			apiParams:         copyBaseRequestParams(params),
-			expectDomainBytes: len(httpsRequestRegexes) > 0,
+			completed:              true,
+			apiProtocol:            apiProtocol,
+			apiParams:              copyBaseRequestParams(params),
+			expectDomainBytes:      len(httpsRequestRegexes) > 0,
+			establishedTunnelCount: establishedTunnelCount,
 		},
 		authorizations)
 	if err != nil {
@@ -261,7 +266,7 @@ func handshakeAPIRequestHandler(
 			logFields := getRequestLogFields(
 				tactics.TACTICS_METRIC_EVENT_NAME,
 				geoIPData,
-				clientHandshakeStateInfo.AuthorizedAccessTypes,
+				handshakeStateInfo.authorizedAccessTypes,
 				params,
 				handshakeRequestParams)
 
@@ -284,7 +289,7 @@ func handshakeAPIRequestHandler(
 		getRequestLogFields(
 			"",
 			geoIPData,
-			clientHandshakeStateInfo.AuthorizedAccessTypes,
+			handshakeStateInfo.authorizedAccessTypes,
 			params,
 			baseRequestParams)).Debug("handshake")
 
@@ -319,10 +324,10 @@ func handshakeAPIRequestHandler(
 		EncodedServerList:        encodedServerList,
 		ClientRegion:             geoIPData.Country,
 		ServerTimestamp:          common.GetCurrentTimestamp(),
-		ActiveAuthorizationIDs:   clientHandshakeStateInfo.ActiveAuthorizationIDs,
+		ActiveAuthorizationIDs:   handshakeStateInfo.activeAuthorizationIDs,
 		TacticsPayload:           marshaledTacticsPayload,
-		UpstreamBytesPerSecond:   clientHandshakeStateInfo.UpstreamBytesPerSecond,
-		DownstreamBytesPerSecond: clientHandshakeStateInfo.DownstreamBytesPerSecond,
+		UpstreamBytesPerSecond:   handshakeStateInfo.upstreamBytesPerSecond,
+		DownstreamBytesPerSecond: handshakeStateInfo.downstreamBytesPerSecond,
 		Padding:                  strings.Repeat(" ", pad_response),
 	}
 
@@ -770,6 +775,7 @@ var baseRequestParams = []requestParamSpec{
 	{"egress_region", isRegionCode, requestParamOptional},
 	{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"established_tunnel_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"upstream_ossh_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_cookie_size", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_limit_request", isIntString, requestParamOptional | requestParamLogStringAsInt},
@@ -1099,6 +1105,17 @@ func getStringRequestParam(params common.APIParameters, name string) (string, er
 		return "", errors.Tracef("invalid param: %s", name)
 	}
 	return value, nil
+}
+
+func getOptionalIntRequestParam(params common.APIParameters, name string) (int, bool) {
+	if params[name] == nil {
+		return 0, false
+	}
+	value, ok := params[name].(float64)
+	if !ok {
+		return 0, false
+	}
+	return int(value), true
 }
 
 func getInt64RequestParam(params common.APIParameters, name string) (int64, error) {

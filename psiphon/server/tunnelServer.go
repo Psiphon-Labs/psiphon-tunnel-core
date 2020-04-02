@@ -284,13 +284,6 @@ func (server *TunnelServer) ResetAllClientOSLConfigs() {
 	server.sshServer.resetAllClientOSLConfigs()
 }
 
-type ClientHandshakeStateInfo struct {
-	ActiveAuthorizationIDs   []string
-	AuthorizedAccessTypes    []string
-	UpstreamBytesPerSecond   int64
-	DownstreamBytesPerSecond int64
-}
-
 // SetClientHandshakeState sets the handshake state -- that it completed and
 // what parameters were passed -- in sshClient. This state is used for allowing
 // port forwards and for future traffic rule selection. SetClientHandshakeState
@@ -307,7 +300,7 @@ type ClientHandshakeStateInfo struct {
 func (server *TunnelServer) SetClientHandshakeState(
 	sessionID string,
 	state handshakeState,
-	authorizations []string) (*ClientHandshakeStateInfo, error) {
+	authorizations []string) (*handshakeStateInfo, error) {
 
 	return server.sshServer.setClientHandshakeState(sessionID, state, authorizations)
 }
@@ -917,7 +910,7 @@ func (sshServer *sshServer) resetAllClientOSLConfigs() {
 func (sshServer *sshServer) setClientHandshakeState(
 	sessionID string,
 	state handshakeState,
-	authorizations []string) (*ClientHandshakeStateInfo, error) {
+	authorizations []string) (*handshakeStateInfo, error) {
 
 	sshServer.clientsMutex.Lock()
 	client := sshServer.clients[sessionID]
@@ -927,13 +920,13 @@ func (sshServer *sshServer) setClientHandshakeState(
 		return nil, errors.TraceNew("unknown session ID")
 	}
 
-	clientHandshakeStateInfo, err := client.setHandshakeState(
+	handshakeStateInfo, err := client.setHandshakeState(
 		state, authorizations)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	return clientHandshakeStateInfo, nil
+	return handshakeStateInfo, nil
 }
 
 func (sshServer *sshServer) getClientHandshaked(
@@ -1232,12 +1225,20 @@ type qualityMetrics struct {
 }
 
 type handshakeState struct {
-	completed             bool
-	apiProtocol           string
-	apiParams             common.APIParameters
-	authorizedAccessTypes []string
-	authorizationsRevoked bool
-	expectDomainBytes     bool
+	completed              bool
+	apiProtocol            string
+	apiParams              common.APIParameters
+	authorizedAccessTypes  []string
+	authorizationsRevoked  bool
+	expectDomainBytes      bool
+	establishedTunnelCount int
+}
+
+type handshakeStateInfo struct {
+	activeAuthorizationIDs   []string
+	authorizedAccessTypes    []string
+	upstreamBytesPerSecond   int64
+	downstreamBytesPerSecond int64
 }
 
 func newSshClient(
@@ -2517,7 +2518,7 @@ func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessa
 // sshClient.stop().
 func (sshClient *sshClient) setHandshakeState(
 	state handshakeState,
-	authorizations []string) (*ClientHandshakeStateInfo, error) {
+	authorizations []string) (*handshakeStateInfo, error) {
 
 	sshClient.Lock()
 	completed := sshClient.handshakeState.completed
@@ -2666,11 +2667,11 @@ func (sshClient *sshClient) setHandshakeState(
 
 	sshClient.setOSLConfig()
 
-	return &ClientHandshakeStateInfo{
-		ActiveAuthorizationIDs:   authorizationIDs,
-		AuthorizedAccessTypes:    authorizedAccessTypes,
-		UpstreamBytesPerSecond:   upstreamBytesPerSecond,
-		DownstreamBytesPerSecond: downstreamBytesPerSecond,
+	return &handshakeStateInfo{
+		activeAuthorizationIDs:   authorizationIDs,
+		authorizedAccessTypes:    authorizedAccessTypes,
+		upstreamBytesPerSecond:   upstreamBytesPerSecond,
+		downstreamBytesPerSecond: downstreamBytesPerSecond,
 	}, nil
 }
 
@@ -2738,8 +2739,11 @@ func (sshClient *sshClient) setTrafficRules() (int64, int64) {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
+	isFirstTunnelInSession := sshClient.isFirstTunnelInSession &&
+		sshClient.handshakeState.establishedTunnelCount == 0
+
 	sshClient.trafficRules = sshClient.sshServer.support.TrafficRulesSet.GetTrafficRules(
-		sshClient.isFirstTunnelInSession,
+		isFirstTunnelInSession,
 		sshClient.tunnelProtocol,
 		sshClient.geoIPData,
 		sshClient.handshakeState)

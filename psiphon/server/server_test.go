@@ -1185,6 +1185,7 @@ func checkExpectedLogFields(
 		"is_replay",
 		"dial_duration",
 		"candidate_number",
+		"established_tunnel_count",
 		"network_latency_multiplier",
 		"network_type",
 		"client_app_id",
@@ -2121,6 +2122,7 @@ func storePruneServerEntriesTest(
 			},
 			serverEntry,
 			false,
+			0,
 			0)
 		if err != nil {
 			t.Fatalf("MakeDialParameters failed: %s", err)
