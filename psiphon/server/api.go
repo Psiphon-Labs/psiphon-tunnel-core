@@ -207,7 +207,7 @@ func handshakeAPIRequestHandler(
 
 	// establishedTunnelCount is used in traffic rule selection. When omitted by
 	// the client, a value of 0 will be used.
-	establishedTunnelCount, _ := getOptionalIntRequestParam(params, "established_tunnel_count")
+	establishedTunnelCount, _ := getIntStringRequestParam(params, "established_tunnel_count")
 
 	var authorizations []string
 	if params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] != nil {
@@ -1107,30 +1107,23 @@ func getStringRequestParam(params common.APIParameters, name string) (string, er
 	return value, nil
 }
 
-func getOptionalIntRequestParam(params common.APIParameters, name string) (int, bool) {
-	if params[name] == nil {
-		return 0, false
-	}
-	value, ok := params[name].(float64)
-	if !ok {
-		return 0, false
-	}
-	return int(value), true
-}
-
-func getInt64RequestParam(params common.APIParameters, name string) (int64, error) {
+func getIntStringRequestParam(params common.APIParameters, name string) (int, error) {
 	if params[name] == nil {
 		return 0, errors.Tracef("missing param: %s", name)
 	}
-	value, ok := params[name].(float64)
+	valueStr, ok := params[name].(string)
 	if !ok {
 		return 0, errors.Tracef("invalid param: %s", name)
 	}
-	return int64(value), nil
+	value, err := strconv.Atoi(valueStr)
+	if !ok {
+		return 0, errors.Trace(err)
+	}
+	return value, nil
 }
 
 func getPaddingSizeRequestParam(params common.APIParameters, name string) (int, error) {
-	value, err := getInt64RequestParam(params, name)
+	value, err := getIntStringRequestParam(params, name)
 	if err != nil {
 		return 0, errors.Trace(err)
 	}
