@@ -30,6 +30,7 @@ import (
 	"math/rand"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -67,6 +68,7 @@ type Controller struct {
 	establishCtx                            context.Context
 	stopEstablish                           context.CancelFunc
 	establishWaitGroup                      *sync.WaitGroup
+	establishedTunnelsCount                 int32
 	candidateServerEntries                  chan *candidateServerEntry
 	untunneledDialConfig                    *DialConfig
 	splitTunnelClassifier                   *SplitTunnelClassifier
@@ -730,6 +732,8 @@ loop:
 				// Skip the rest of this case
 				break
 			}
+
+			atomic.AddInt32(&controller.establishedTunnelsCount, 1)
 
 			NoticeActiveTunnel(
 				connectedTunnel.dialParams.ServerEntry.GetDiagnosticID(),
@@ -1556,6 +1560,7 @@ func (controller *Controller) doFetchTactics(
 		selectProtocol,
 		serverEntry,
 		true,
+		0,
 		0)
 	if dialParams == nil {
 		// MakeDialParameters may return nil, nil when the server entry can't
@@ -1924,7 +1929,8 @@ loop:
 			selectProtocol,
 			candidateServerEntry.serverEntry,
 			false,
-			controller.establishConnectTunnelCount)
+			controller.establishConnectTunnelCount,
+			int(atomic.LoadInt32(&controller.establishedTunnelsCount)))
 		if dialParams == nil || err != nil {
 
 			controller.concurrentEstablishTunnelsMutex.Unlock()

@@ -205,6 +205,10 @@ func handshakeAPIRequestHandler(
 	isMobile := isMobileClientPlatform(clientPlatform)
 	normalizedPlatform := normalizeClientPlatform(clientPlatform)
 
+	// establishedTunnelsCount is used in traffic rule selection. When omitted by
+	// the client, a value of 0 will be used.
+	establishedTunnelsCount, _ := getIntStringRequestParam(params, "established_tunnels_count")
+
 	var authorizations []string
 	if params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] != nil {
 		authorizations, err = getStringArrayRequestParam(params, protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS)
@@ -224,13 +228,14 @@ func handshakeAPIRequestHandler(
 	// TODO: in the case of SSH API requests, the actual sshClient could
 	// be passed in and used here. The session ID lookup is only strictly
 	// necessary to support web API requests.
-	activeAuthorizationIDs, authorizedAccessTypes, err := support.TunnelServer.SetClientHandshakeState(
+	handshakeStateInfo, err := support.TunnelServer.SetClientHandshakeState(
 		sessionID,
 		handshakeState{
-			completed:         true,
-			apiProtocol:       apiProtocol,
-			apiParams:         copyBaseRequestParams(params),
-			expectDomainBytes: len(httpsRequestRegexes) > 0,
+			completed:               true,
+			apiProtocol:             apiProtocol,
+			apiParams:               copyBaseRequestParams(params),
+			expectDomainBytes:       len(httpsRequestRegexes) > 0,
+			establishedTunnelsCount: establishedTunnelsCount,
 		},
 		authorizations)
 	if err != nil {
@@ -261,7 +266,7 @@ func handshakeAPIRequestHandler(
 			logFields := getRequestLogFields(
 				tactics.TACTICS_METRIC_EVENT_NAME,
 				geoIPData,
-				authorizedAccessTypes,
+				handshakeStateInfo.authorizedAccessTypes,
 				params,
 				handshakeRequestParams)
 
@@ -284,7 +289,7 @@ func handshakeAPIRequestHandler(
 		getRequestLogFields(
 			"",
 			geoIPData,
-			authorizedAccessTypes,
+			handshakeStateInfo.authorizedAccessTypes,
 			params,
 			baseRequestParams)).Debug("handshake")
 
@@ -311,17 +316,19 @@ func handshakeAPIRequestHandler(
 	}
 
 	handshakeResponse := protocol.HandshakeResponse{
-		SSHSessionID:           sessionID,
-		Homepages:              db.GetRandomizedHomepages(sponsorID, geoIPData.Country, geoIPData.ASN, isMobile),
-		UpgradeClientVersion:   db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
-		PageViewRegexes:        make([]map[string]string, 0),
-		HttpsRequestRegexes:    httpsRequestRegexes,
-		EncodedServerList:      encodedServerList,
-		ClientRegion:           geoIPData.Country,
-		ServerTimestamp:        common.GetCurrentTimestamp(),
-		ActiveAuthorizationIDs: activeAuthorizationIDs,
-		TacticsPayload:         marshaledTacticsPayload,
-		Padding:                strings.Repeat(" ", pad_response),
+		SSHSessionID:             sessionID,
+		Homepages:                db.GetRandomizedHomepages(sponsorID, geoIPData.Country, geoIPData.ASN, isMobile),
+		UpgradeClientVersion:     db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
+		PageViewRegexes:          make([]map[string]string, 0),
+		HttpsRequestRegexes:      httpsRequestRegexes,
+		EncodedServerList:        encodedServerList,
+		ClientRegion:             geoIPData.Country,
+		ServerTimestamp:          common.GetCurrentTimestamp(),
+		ActiveAuthorizationIDs:   handshakeStateInfo.activeAuthorizationIDs,
+		TacticsPayload:           marshaledTacticsPayload,
+		UpstreamBytesPerSecond:   handshakeStateInfo.upstreamBytesPerSecond,
+		DownstreamBytesPerSecond: handshakeStateInfo.downstreamBytesPerSecond,
+		Padding:                  strings.Repeat(" ", pad_response),
 	}
 
 	responsePayload, err := json.Marshal(handshakeResponse)
@@ -768,12 +775,14 @@ var baseRequestParams = []requestParamSpec{
 	{"egress_region", isRegionCode, requestParamOptional},
 	{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"established_tunnels_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"upstream_ossh_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_cookie_size", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_limit_request", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
 	{"client_bpf", isAnyString, requestParamOptional},
+	{"network_type", isAnyString, requestParamOptional},
 }
 
 func validateRequestParams(
@@ -980,6 +989,27 @@ func getRequestLogFields(
 				// the field in this case.
 
 			default:
+
+				// Add a distinct app ID field when the value is present in
+				// client_platform.
+				if expectedParam.name == "client_platform" {
+					index := -1
+					clientPlatform := strValue
+					if strings.HasPrefix(clientPlatform, "iOS") {
+						index = 3
+					} else if strings.HasPrefix(clientPlatform, "Android") {
+						index = 2
+						clientPlatform = strings.TrimSuffix(clientPlatform, "_playstore")
+						clientPlatform = strings.TrimSuffix(clientPlatform, "_rooted")
+					}
+					if index > 0 {
+						components := strings.Split(clientPlatform, "_")
+						if index < len(components) {
+							logFields["client_app_id"] = components[index]
+						}
+					}
+				}
+
 				if expectedParam.flags&requestParamLogStringAsInt != 0 {
 					intValue, _ := strconv.Atoi(strValue)
 					logFields[expectedParam.name] = intValue
@@ -1077,19 +1107,23 @@ func getStringRequestParam(params common.APIParameters, name string) (string, er
 	return value, nil
 }
 
-func getInt64RequestParam(params common.APIParameters, name string) (int64, error) {
+func getIntStringRequestParam(params common.APIParameters, name string) (int, error) {
 	if params[name] == nil {
 		return 0, errors.Tracef("missing param: %s", name)
 	}
-	value, ok := params[name].(float64)
+	valueStr, ok := params[name].(string)
 	if !ok {
 		return 0, errors.Tracef("invalid param: %s", name)
 	}
-	return int64(value), nil
+	value, err := strconv.Atoi(valueStr)
+	if !ok {
+		return 0, errors.Trace(err)
+	}
+	return value, nil
 }
 
 func getPaddingSizeRequestParam(params common.APIParameters, name string) (int, error) {
-	value, err := getInt64RequestParam(params, name)
+	value, err := getIntStringRequestParam(params, name)
 	if err != nil {
 		return 0, errors.Trace(err)
 	}

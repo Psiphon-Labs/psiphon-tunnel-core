@@ -293,12 +293,14 @@ func (server *TunnelServer) ResetAllClientOSLConfigs() {
 //
 // The authorizations received from the client handshake are verified and the
 // resulting list of authorized access types are applied to the client's tunnel
-// and traffic rules. A list of active authorization IDs and authorized access
-// types is returned for responding to the client and logging.
+// and traffic rules.
+//
+// A list of active authorization IDs, authorized access types, and traffic
+// rate limits are returned for responding to the client and logging.
 func (server *TunnelServer) SetClientHandshakeState(
 	sessionID string,
 	state handshakeState,
-	authorizations []string) ([]string, []string, error) {
+	authorizations []string) (*handshakeStateInfo, error) {
 
 	return server.sshServer.setClientHandshakeState(sessionID, state, authorizations)
 }
@@ -908,23 +910,23 @@ func (sshServer *sshServer) resetAllClientOSLConfigs() {
 func (sshServer *sshServer) setClientHandshakeState(
 	sessionID string,
 	state handshakeState,
-	authorizations []string) ([]string, []string, error) {
+	authorizations []string) (*handshakeStateInfo, error) {
 
 	sshServer.clientsMutex.Lock()
 	client := sshServer.clients[sessionID]
 	sshServer.clientsMutex.Unlock()
 
 	if client == nil {
-		return nil, nil, errors.TraceNew("unknown session ID")
+		return nil, errors.TraceNew("unknown session ID")
 	}
 
-	activeAuthorizationIDs, authorizedAccessTypes, err := client.setHandshakeState(
+	handshakeStateInfo, err := client.setHandshakeState(
 		state, authorizations)
 	if err != nil {
-		return nil, nil, errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 
-	return activeAuthorizationIDs, authorizedAccessTypes, nil
+	return handshakeStateInfo, nil
 }
 
 func (sshServer *sshServer) getClientHandshaked(
@@ -1033,15 +1035,13 @@ func (sshServer *sshServer) handleClient(
 
 		if tunnelErr != nil {
 
-			logFields := make(common.LogFields)
-			common.SetIrregularTunnelErrorLogField(
-				logFields, errors.Trace(tunnelErr))
 			logIrregularTunnel(
 				sshServer.support,
 				sshListener.tunnelProtocol,
 				sshListener.port,
 				common.IPAddressFromAddr(clientAddr),
-				LogFields(logFields))
+				errors.Trace(tunnelErr),
+				nil)
 
 			var afterFunc *time.Timer
 			if sshServer.support.Config.sshHandshakeTimeout > 0 {
@@ -1225,12 +1225,20 @@ type qualityMetrics struct {
 }
 
 type handshakeState struct {
-	completed             bool
-	apiProtocol           string
-	apiParams             common.APIParameters
-	authorizedAccessTypes []string
-	authorizationsRevoked bool
-	expectDomainBytes     bool
+	completed               bool
+	apiProtocol             string
+	apiParams               common.APIParameters
+	authorizedAccessTypes   []string
+	authorizationsRevoked   bool
+	expectDomainBytes       bool
+	establishedTunnelsCount int
+}
+
+type handshakeStateInfo struct {
+	activeAuthorizationIDs   []string
+	authorizedAccessTypes    []string
+	upstreamBytesPerSecond   int64
+	downstreamBytesPerSecond int64
 }
 
 func newSshClient(
@@ -1377,12 +1385,13 @@ func (sshClient *sshClient) run(
 				conn,
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
 				sshClient.sshServer.obfuscatorSeedHistory,
-				func(clientIP string, logFields common.LogFields) {
+				func(clientIP string, err error, logFields common.LogFields) {
 					logIrregularTunnel(
 						sshClient.sshServer.support,
 						sshClient.sshListener.tunnelProtocol,
 						sshClient.sshListener.port,
 						clientIP,
+						errors.Trace(err),
 						LogFields(logFields))
 				})
 
@@ -2509,7 +2518,7 @@ func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessa
 // sshClient.stop().
 func (sshClient *sshClient) setHandshakeState(
 	state handshakeState,
-	authorizations []string) ([]string, []string, error) {
+	authorizations []string) (*handshakeStateInfo, error) {
 
 	sshClient.Lock()
 	completed := sshClient.handshakeState.completed
@@ -2520,7 +2529,7 @@ func (sshClient *sshClient) setHandshakeState(
 
 	// Client must only perform one handshake
 	if completed {
-		return nil, nil, errors.TraceNew("handshake already completed")
+		return nil, errors.TraceNew("handshake already completed")
 	}
 
 	// Verify the authorizations submitted by the client. Verified, active
@@ -2654,10 +2663,16 @@ func (sshClient *sshClient) setHandshakeState(
 		sshClient.Unlock()
 	}
 
-	sshClient.setTrafficRules()
+	upstreamBytesPerSecond, downstreamBytesPerSecond := sshClient.setTrafficRules()
+
 	sshClient.setOSLConfig()
 
-	return authorizationIDs, authorizedAccessTypes, nil
+	return &handshakeStateInfo{
+		activeAuthorizationIDs:   authorizationIDs,
+		authorizedAccessTypes:    authorizedAccessTypes,
+		upstreamBytesPerSecond:   upstreamBytesPerSecond,
+		downstreamBytesPerSecond: downstreamBytesPerSecond,
+	}, nil
 }
 
 // getHandshaked returns whether the client has completed a handshake API
@@ -2720,12 +2735,15 @@ func (sshClient *sshClient) expectDomainBytes() bool {
 // setTrafficRules resets the client's traffic rules based on the latest server config
 // and client properties. As sshClient.trafficRules may be reset by a concurrent
 // goroutine, trafficRules must only be accessed within the sshClient mutex.
-func (sshClient *sshClient) setTrafficRules() {
+func (sshClient *sshClient) setTrafficRules() (int64, int64) {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
+	isFirstTunnelInSession := sshClient.isFirstTunnelInSession &&
+		sshClient.handshakeState.establishedTunnelsCount == 0
+
 	sshClient.trafficRules = sshClient.sshServer.support.TrafficRulesSet.GetTrafficRules(
-		sshClient.isFirstTunnelInSession,
+		isFirstTunnelInSession,
 		sshClient.tunnelProtocol,
 		sshClient.geoIPData,
 		sshClient.handshakeState)
@@ -2735,6 +2753,9 @@ func (sshClient *sshClient) setTrafficRules() {
 		sshClient.throttledConn.SetLimits(
 			sshClient.trafficRules.RateLimits.CommonRateLimits())
 	}
+
+	return *sshClient.trafficRules.RateLimits.ReadBytesPerSecond,
+		*sshClient.trafficRules.RateLimits.WriteBytesPerSecond
 }
 
 // setOSLConfig resets the client's OSL seed state based on the latest OSL config

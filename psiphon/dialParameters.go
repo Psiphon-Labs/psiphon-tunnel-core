@@ -27,6 +27,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -57,10 +58,11 @@ import (
 //
 // DialParameters is not safe for concurrent use.
 type DialParameters struct {
-	ServerEntry     *protocol.ServerEntry `json:"-"`
-	NetworkID       string                `json:"-"`
-	IsReplay        bool                  `json:"-"`
-	CandidateNumber int                   `json:"-"`
+	ServerEntry             *protocol.ServerEntry `json:"-"`
+	NetworkID               string                `json:"-"`
+	IsReplay                bool                  `json:"-"`
+	CandidateNumber         int                   `json:"-"`
+	EstablishedTunnelsCount int                   `json:"-"`
 
 	IsExchanged bool
 
@@ -148,7 +150,8 @@ func MakeDialParameters(
 	selectProtocol func(serverEntry *protocol.ServerEntry) (string, bool),
 	serverEntry *protocol.ServerEntry,
 	isTactics bool,
-	candidateNumber int) (*DialParameters, error) {
+	candidateNumber int,
+	establishedTunnelsCount int) (*DialParameters, error) {
 
 	networkID := config.GetNetworkID()
 
@@ -266,6 +269,7 @@ func MakeDialParameters(
 	dialParams.NetworkID = networkID
 	dialParams.IsReplay = isReplay
 	dialParams.CandidateNumber = candidateNumber
+	dialParams.EstablishedTunnelsCount = establishedTunnelsCount
 
 	// Even when replaying, LastUsedTimestamp is updated to extend the TTL of
 	// replayed dial parameters which will be updated in the datastore upon
@@ -372,10 +376,14 @@ func MakeDialParameters(
 	if (!isReplay || !replayTLSProfile) &&
 		protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) {
 
-		isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol)
-
 		dialParams.SelectedTLSProfile = true
-		dialParams.TLSProfile = SelectTLSProfile(isFronted, serverEntry.FrontingProviderID, p)
+
+		requireTLS12SessionTickets := protocol.TunnelProtocolRequiresTLS12SessionTickets(
+			dialParams.TunnelProtocol)
+		isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol)
+		dialParams.TLSProfile = SelectTLSProfile(
+			requireTLS12SessionTickets, isFronted, serverEntry.FrontingProviderID, p)
+
 		dialParams.NoDefaultTLSSessionID = p.WeightedCoinFlip(
 			parameters.NoDefaultTLSSessionIDProbability)
 	}
@@ -687,6 +695,25 @@ func (dialParams *DialParameters) GetDialConfig() *DialConfig {
 
 func (dialParams *DialParameters) GetMeekConfig() *MeekConfig {
 	return dialParams.meekConfig
+}
+
+// GetNetworkType returns a network type name, suitable for metrics, which is
+// derived from the network ID.
+func (dialParams *DialParameters) GetNetworkType() string {
+
+	// Unlike the logic in loggingNetworkIDGetter.GetNetworkID, we don't take the
+	// arbitrary text before the first "-" since some platforms without network
+	// detection support stub in random values to enable tactics. Instead we
+	// check for and use the common network type prefixes currently used in
+	// NetworkIDGetter implementations.
+
+	if strings.HasPrefix(dialParams.NetworkID, "WIFI") {
+		return "WIFI"
+	}
+	if strings.HasPrefix(dialParams.NetworkID, "MOBILE") {
+		return "MOBILE"
+	}
+	return "UNKNOWN"
 }
 
 func (dialParams *DialParameters) Succeeded() {

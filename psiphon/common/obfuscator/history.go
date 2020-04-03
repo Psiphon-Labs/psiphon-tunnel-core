@@ -107,13 +107,18 @@ func NewSeedHistory(config *SeedHistoryConfig) *SeedHistory {
 }
 
 // AddNew adds a new seed value to the history. If the seed value is already
-// in the history, and an expected case such as a meek retry is ruled out,
-// AddNew returns false.
+// in the history, and an expected case such as a meek retry is ruled out (or
+// strictMode is on), AddNew returns false.
 //
 // When a duplicate seed is found, a common.LogFields instance is returned,
 // populated with event data. Log fields may be returned in either the false
 // or true case.
-func (h *SeedHistory) AddNew(clientIP string, seed []byte) (bool, *common.LogFields) {
+func (h *SeedHistory) AddNew(
+	strictMode bool,
+	clientIP string,
+	seedType string,
+	seed []byte) (bool, *common.LogFields) {
+
 	key := string(seed)
 
 	// Limitation: go-cache-lru does not currently support atomically setting if
@@ -135,6 +140,7 @@ func (h *SeedHistory) AddNew(clientIP string, seed []byte) (bool, *common.LogFie
 
 	logFields := common.LogFields{
 		"duplicate_seed":            hex.EncodeToString(seed),
+		"duplicate_seed_type":       seedType,
 		"duplicate_elapsed_time_ms": int64(time.Since(previousTime.(time.Time)) / time.Millisecond),
 	}
 
@@ -142,7 +148,7 @@ func (h *SeedHistory) AddNew(clientIP string, seed []byte) (bool, *common.LogFie
 	if ok {
 		if clientIP == previousClientIP.(string) {
 			logFields["duplicate_client_ip"] = "equal"
-			return true, &logFields
+			return !strictMode, &logFields
 		} else {
 			logFields["duplicate_client_ip"] = "unequal"
 			return false, &logFields

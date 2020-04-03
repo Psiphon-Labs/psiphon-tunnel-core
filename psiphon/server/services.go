@@ -365,12 +365,18 @@ func logIrregularTunnel(
 	listenerTunnelProtocol string,
 	listenerPort int,
 	clientIP string,
+	tunnelError error,
 	logFields LogFields) {
+
+	if logFields == nil {
+		logFields = make(LogFields)
+	}
 
 	logFields["event_name"] = "irregular_tunnel"
 	logFields["listener_protocol"] = listenerTunnelProtocol
 	logFields["listener_port_number"] = listenerPort
 	support.GeoIPService.Lookup(clientIP).SetLogFields(logFields)
+	logFields["tunnel_error"] = tunnelError.Error()
 	log.LogRawFieldsWithTimestamp(logFields)
 }
 

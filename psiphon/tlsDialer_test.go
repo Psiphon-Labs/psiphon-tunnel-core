@@ -207,7 +207,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	numSelections := 10000
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(false, "", clientParameters.Get())
+		profile := SelectTLSProfile(false, false, "", clientParameters.Get())
 		selected[profile] += 1
 	}
 
@@ -286,7 +286,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	customTLSProfileNames := clientParameters.Get().CustomTLSProfileNames()
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(false, "", clientParameters.Get())
+		profile := SelectTLSProfile(false, false, "", clientParameters.Get())
 		if !common.Contains(customTLSProfileNames, profile) {
 			t.Errorf("unexpected non-custom TLS profile selected")
 		}
@@ -305,9 +305,18 @@ func TestSelectTLSProfile(t *testing.T) {
 	}
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(true, frontingProviderID, clientParameters.Get())
+		profile := SelectTLSProfile(false, true, frontingProviderID, clientParameters.Get())
 		if common.Contains(disableTLSProfiles, profile) {
 			t.Errorf("unexpected disabled TLS profile selected")
+		}
+	}
+
+	// Session ticket incapable TLS 1.2 profiles should not be selected
+
+	for i := 0; i < numSelections; i++ {
+		profile := SelectTLSProfile(true, false, "", clientParameters.Get())
+		if protocol.TLS12ProfileOmitsSessionTickets(profile) {
+			t.Errorf("unexpected session ticket incapable TLS profile selected")
 		}
 	}
 }

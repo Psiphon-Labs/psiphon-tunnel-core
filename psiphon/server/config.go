@@ -136,12 +136,21 @@ type Config struct {
 	// protocols include:
 	// "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
 	// "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH",
-	// "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH", "MARIONETTE-OSSH", and
-	// "TAPDANCE-OSSH".
+	// ""FRONTED-MEEK-QUIC-OSSH" FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH",
+	// ""MARIONETTE-OSSH", and TAPDANCE-OSSH".
 	//
 	// In the case of "MARIONETTE-OSSH" the port value is ignored and must be
 	// set to 0. The port value specified in the Marionette format is used.
 	TunnelProtocolPorts map[string]int
+
+	// TunnelProtocolPassthroughAddresses specifies passthrough addresses to be
+	// used for tunnel protocols configured in  TunnelProtocolPorts. Passthrough
+	// is a probing defense which relays all network traffic between a client and
+	// the passthrough target when the client fails anti-probing tests.
+	//
+	// TunnelProtocolPassthroughAddresses is supported for:
+	// "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH".
+	TunnelProtocolPassthroughAddresses map[string]string
 
 	// SSHPrivateKey is the SSH host key. The same key is used for
 	// all protocols, run by this server instance, which use SSH.
@@ -476,6 +485,19 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 				return nil, errors.Tracef(
 					"Tunnel protocol %s port is specified in format, not TunnelProtocolPorts",
 					tunnelProtocol)
+			}
+		}
+	}
+
+	for tunnelProtocol, address := range config.TunnelProtocolPassthroughAddresses {
+		if !protocol.TunnelProtocolSupportsPassthrough(tunnelProtocol) {
+			return nil, errors.Tracef("Passthrough unsupported tunnel protocol: %s", tunnelProtocol)
+		}
+		if _, _, err := net.SplitHostPort(address); err != nil {
+			if err != nil {
+				return nil, errors.Tracef(
+					"Tunnel protocol %s passthrough address %s invalid: %s",
+					tunnelProtocol, address, err)
 			}
 		}
 	}
