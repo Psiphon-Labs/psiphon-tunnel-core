@@ -942,7 +942,7 @@ func getBaseAPIParameters(
 
 	params["candidate_number"] = strconv.Itoa(dialParams.CandidateNumber)
 
-	params["established_tunnel_count"] = strconv.Itoa(dialParams.EstablishedTunnelCount)
+	params["established_tunnels_count"] = strconv.Itoa(dialParams.EstablishedTunnelsCount)
 
 	if dialParams.NetworkLatencyMultiplier != 0.0 {
 		params["network_latency_multiplier"] =

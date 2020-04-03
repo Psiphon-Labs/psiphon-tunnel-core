@@ -205,9 +205,9 @@ func handshakeAPIRequestHandler(
 	isMobile := isMobileClientPlatform(clientPlatform)
 	normalizedPlatform := normalizeClientPlatform(clientPlatform)
 
-	// establishedTunnelCount is used in traffic rule selection. When omitted by
+	// establishedTunnelsCount is used in traffic rule selection. When omitted by
 	// the client, a value of 0 will be used.
-	establishedTunnelCount, _ := getIntStringRequestParam(params, "established_tunnel_count")
+	establishedTunnelsCount, _ := getIntStringRequestParam(params, "established_tunnels_count")
 
 	var authorizations []string
 	if params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] != nil {
@@ -231,11 +231,11 @@ func handshakeAPIRequestHandler(
 	handshakeStateInfo, err := support.TunnelServer.SetClientHandshakeState(
 		sessionID,
 		handshakeState{
-			completed:              true,
-			apiProtocol:            apiProtocol,
-			apiParams:              copyBaseRequestParams(params),
-			expectDomainBytes:      len(httpsRequestRegexes) > 0,
-			establishedTunnelCount: establishedTunnelCount,
+			completed:               true,
+			apiProtocol:             apiProtocol,
+			apiParams:               copyBaseRequestParams(params),
+			expectDomainBytes:       len(httpsRequestRegexes) > 0,
+			establishedTunnelsCount: establishedTunnelsCount,
 		},
 		authorizations)
 	if err != nil {
@@ -775,7 +775,7 @@ var baseRequestParams = []requestParamSpec{
 	{"egress_region", isRegionCode, requestParamOptional},
 	{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"established_tunnel_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"established_tunnels_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"upstream_ossh_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_cookie_size", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_limit_request", isIntString, requestParamOptional | requestParamLogStringAsInt},

@@ -58,11 +58,11 @@ import (
 //
 // DialParameters is not safe for concurrent use.
 type DialParameters struct {
-	ServerEntry            *protocol.ServerEntry `json:"-"`
-	NetworkID              string                `json:"-"`
-	IsReplay               bool                  `json:"-"`
-	CandidateNumber        int                   `json:"-"`
-	EstablishedTunnelCount int                   `json:"-"`
+	ServerEntry             *protocol.ServerEntry `json:"-"`
+	NetworkID               string                `json:"-"`
+	IsReplay                bool                  `json:"-"`
+	CandidateNumber         int                   `json:"-"`
+	EstablishedTunnelsCount int                   `json:"-"`
 
 	IsExchanged bool
 
@@ -151,7 +151,7 @@ func MakeDialParameters(
 	serverEntry *protocol.ServerEntry,
 	isTactics bool,
 	candidateNumber int,
-	establishedTunnelCount int) (*DialParameters, error) {
+	establishedTunnelsCount int) (*DialParameters, error) {
 
 	networkID := config.GetNetworkID()
 
@@ -269,7 +269,7 @@ func MakeDialParameters(
 	dialParams.NetworkID = networkID
 	dialParams.IsReplay = isReplay
 	dialParams.CandidateNumber = candidateNumber
-	dialParams.EstablishedTunnelCount = establishedTunnelCount
+	dialParams.EstablishedTunnelsCount = establishedTunnelsCount
 
 	// Even when replaying, LastUsedTimestamp is updated to extend the TTL of
 	// replayed dial parameters which will be updated in the datastore upon

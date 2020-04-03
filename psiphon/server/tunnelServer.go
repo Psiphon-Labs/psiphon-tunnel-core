@@ -1225,13 +1225,13 @@ type qualityMetrics struct {
 }
 
 type handshakeState struct {
-	completed              bool
-	apiProtocol            string
-	apiParams              common.APIParameters
-	authorizedAccessTypes  []string
-	authorizationsRevoked  bool
-	expectDomainBytes      bool
-	establishedTunnelCount int
+	completed               bool
+	apiProtocol             string
+	apiParams               common.APIParameters
+	authorizedAccessTypes   []string
+	authorizationsRevoked   bool
+	expectDomainBytes       bool
+	establishedTunnelsCount int
 }
 
 type handshakeStateInfo struct {
@@ -2740,7 +2740,7 @@ func (sshClient *sshClient) setTrafficRules() (int64, int64) {
 	defer sshClient.Unlock()
 
 	isFirstTunnelInSession := sshClient.isFirstTunnelInSession &&
-		sshClient.handshakeState.establishedTunnelCount == 0
+		sshClient.handshakeState.establishedTunnelsCount == 0
 
 	sshClient.trafficRules = sshClient.sshServer.support.TrafficRulesSet.GetTrafficRules(
 		isFirstTunnelInSession,

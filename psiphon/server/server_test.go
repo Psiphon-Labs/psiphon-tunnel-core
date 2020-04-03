@@ -1185,7 +1185,7 @@ func checkExpectedLogFields(
 		"is_replay",
 		"dial_duration",
 		"candidate_number",
-		"established_tunnel_count",
+		"established_tunnels_count",
 		"network_latency_multiplier",
 		"network_type",
 		"client_app_id",

@@ -68,7 +68,7 @@ type Controller struct {
 	establishCtx                            context.Context
 	stopEstablish                           context.CancelFunc
 	establishWaitGroup                      *sync.WaitGroup
-	establishedTunnelCount                  int32
+	establishedTunnelsCount                 int32
 	candidateServerEntries                  chan *candidateServerEntry
 	untunneledDialConfig                    *DialConfig
 	splitTunnelClassifier                   *SplitTunnelClassifier
@@ -733,7 +733,7 @@ loop:
 				break
 			}
 
-			atomic.AddInt32(&controller.establishedTunnelCount, 1)
+			atomic.AddInt32(&controller.establishedTunnelsCount, 1)
 
 			NoticeActiveTunnel(
 				connectedTunnel.dialParams.ServerEntry.GetDiagnosticID(),
@@ -1930,7 +1930,7 @@ loop:
 			candidateServerEntry.serverEntry,
 			false,
 			controller.establishConnectTunnelCount,
-			int(atomic.LoadInt32(&controller.establishedTunnelCount)))
+			int(atomic.LoadInt32(&controller.establishedTunnelsCount)))
 		if dialParams == nil || err != nil {
 
 			controller.concurrentEstablishTunnelsMutex.Unlock()
