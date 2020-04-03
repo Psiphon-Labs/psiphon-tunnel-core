@@ -968,7 +968,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             [self logMessage:[NSString stringWithFormat: @"BytesTransferred notice missing data.sent or data.received: %@", noticeJSON]];
             return;
         }
-        
+
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onBytesTransferred::)]) {
             dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onBytesTransferred:[sent longLongValue]:[received longLongValue]];
@@ -998,6 +998,20 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onActiveAuthorizationIDs:)]) {
             dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onActiveAuthorizationIDs:authorizations];
+            });
+        }
+    }
+    else if ([noticeType isEqualToString:@"TrafficRateLimits"]) {
+        id upstreamBytesPerSecond = [notice valueForKeyPath:@"data.upstreamBytesPerSecond"];
+        id downstreamBytesPerSecond = [notice valueForKeyPath:@"data.downstreamBytesPerSecond"];
+        if (![upstreamBytesPerSecond isKindOfClass:[NSNumber class]] || ![downstreamBytesPerSecond isKindOfClass:[NSNumber class]]) {
+            [self logMessage:[NSString stringWithFormat: @"TrafficRateLimits notice missing data.upstreamBytesPerSecond or data.downstreamBytesPerSecond: %@", noticeJSON]];
+            return;
+        }
+
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onTrafficRateLimits::)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onTrafficRateLimits:[upstreamBytesPerSecond longLongValue]:[downstreamBytesPerSecond longLongValue]];
             });
         }
     }
