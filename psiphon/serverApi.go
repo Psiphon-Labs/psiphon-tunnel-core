@@ -202,6 +202,12 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	// - 'ssh_session_id' is ignored; client session ID is used instead
 
 	var handshakeResponse protocol.HandshakeResponse
+
+	// Initialize these fields to distinguish between psiphond omitting values in
+	// the response and the zero value, which means unlimited rate.
+	handshakeResponse.UpstreamBytesPerSecond = -1
+	handshakeResponse.DownstreamBytesPerSecond = -1
+
 	err := json.Unmarshal(response, &handshakeResponse)
 	if err != nil {
 		return errors.Trace(err)
@@ -281,6 +287,9 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	NoticeServerTimestamp(serverContext.serverHandshakeTimestamp)
 
 	NoticeActiveAuthorizationIDs(handshakeResponse.ActiveAuthorizationIDs)
+
+	NoticeTrafficRateLimits(
+		handshakeResponse.UpstreamBytesPerSecond, handshakeResponse.DownstreamBytesPerSecond)
 
 	if doTactics && handshakeResponse.TacticsPayload != nil &&
 		networkID == serverContext.tunnel.config.GetNetworkID() {
@@ -621,6 +630,9 @@ func RecordRemoteServerListStat(
 	params["client_version"] = config.ClientVersion
 	params["client_platform"] = config.ClientPlatform
 	params["client_build_rev"] = buildinfo.GetBuildInfo().BuildRev
+	if config.DeviceRegion != "" {
+		params["device_region"] = config.DeviceRegion
+	}
 
 	params["client_download_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
 	tunneledStr := "0"
@@ -818,6 +830,7 @@ func getBaseAPIParameters(
 	params["client_platform"] = config.ClientPlatform
 	params["client_build_rev"] = buildinfo.GetBuildInfo().BuildRev
 	params["tunnel_whole_device"] = strconv.Itoa(config.TunnelWholeDevice)
+	params["network_type"] = dialParams.GetNetworkType()
 
 	// The following parameters may be blank and must
 	// not be sent to the server if blank.
@@ -928,6 +941,8 @@ func getBaseAPIParameters(
 	params["dial_duration"] = fmt.Sprintf("%d", dialParams.DialDuration/1000000)
 
 	params["candidate_number"] = strconv.Itoa(dialParams.CandidateNumber)
+
+	params["established_tunnels_count"] = strconv.Itoa(dialParams.EstablishedTunnelsCount)
 
 	if dialParams.NetworkLatencyMultiplier != 0.0 {
 		params["network_latency_multiplier"] =

@@ -29,6 +29,14 @@ import (
 // The configuration config must be non-nil and must include
 // at least one certificate or else set GetCertificate.
 func Server(conn net.Conn, config *Config) *Conn {
+
+	// [Psiphon]
+	// Initialize traffic recording to facilitate playback in the case of
+	// passthrough.
+	if config.PassthroughAddress != "" {
+		conn = newRecorderConn(conn)
+	}
+
 	return &Conn{conn: conn, config: config}
 }
 

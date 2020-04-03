@@ -238,9 +238,15 @@ func SetDynamicConfig(newSponsorID, newAuthorizationsList string) {
 	defer controllerMutex.Unlock()
 
 	if controller != nil {
+
+		var authorizations []string
+		if len(newAuthorizationsList) > 0 {
+			authorizations = strings.Split(newAuthorizationsList, " ")
+		}
+
 		controller.SetDynamicConfig(
 			newSponsorID,
-			strings.Split(newAuthorizationsList, " "))
+			authorizations)
 	}
 }
 

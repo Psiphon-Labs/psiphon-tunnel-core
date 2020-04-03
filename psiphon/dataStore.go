@@ -337,7 +337,43 @@ func PromoteServerEntry(config *Config, ipAddress string) error {
 			return errors.Trace(err)
 		}
 
-		return bucket.put(datastoreLastServerEntryFilterKey, currentFilter)
+		err = bucket.put(datastoreLastServerEntryFilterKey, currentFilter)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return nil
+}
+
+// DeleteServerEntryAffinity clears server affinity if set to the specified
+// server.
+func DeleteServerEntryAffinity(ipAddress string) error {
+	err := datastoreUpdate(func(tx *datastoreTx) error {
+
+		serverEntryID := []byte(ipAddress)
+
+		bucket := tx.bucket(datastoreKeyValueBucket)
+
+		affinityServerEntryID := bucket.get(datastoreAffinityServerEntryIDKey)
+
+		if bytes.Equal(affinityServerEntryID, serverEntryID) {
+			err := bucket.delete(datastoreAffinityServerEntryIDKey)
+			if err != nil {
+				return errors.Trace(err)
+			}
+			err = bucket.delete(datastoreLastServerEntryFilterKey)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		}
+
+		return nil
 	})
 
 	if err != nil {
@@ -897,6 +933,10 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 			affinityServerEntryID := keyValues.get(datastoreAffinityServerEntryIDKey)
 			if bytes.Equal(affinityServerEntryID, serverEntryID) {
 				err = keyValues.delete(datastoreAffinityServerEntryIDKey)
+				if err != nil {
+					return errors.Trace(err)
+				}
+				err = keyValues.delete(datastoreLastServerEntryFilterKey)
 				if err != nil {
 					return errors.Trace(err)
 				}

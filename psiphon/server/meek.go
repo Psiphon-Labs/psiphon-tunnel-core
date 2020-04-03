@@ -101,6 +101,7 @@ type MeekServer struct {
 	listener               net.Listener
 	listenerTunnelProtocol string
 	listenerPort           int
+	passthroughAddress     string
 	tlsConfig              *tris.Config
 	obfuscatorSeedHistory  *obfuscator.SeedHistory
 	clientHandler          func(clientTunnelProtocol string, clientConn net.Conn)
@@ -140,11 +141,14 @@ func NewMeekServer(
 
 	bufferPool := NewCachedResponseBufferPool(bufferLength, bufferCount)
 
+	passthroughAddress := support.Config.TunnelProtocolPassthroughAddresses[listenerTunnelProtocol]
+
 	meekServer := &MeekServer{
 		support:                support,
 		listener:               listener,
 		listenerTunnelProtocol: listenerTunnelProtocol,
 		listenerPort:           listenerPort,
+		passthroughAddress:     passthroughAddress,
 		obfuscatorSeedHistory:  obfuscator.NewSeedHistory(nil),
 		clientHandler:          clientHandler,
 		openConns:              common.NewConns(),
@@ -157,8 +161,8 @@ func NewMeekServer(
 	}
 
 	if useTLS {
-		tlsConfig, err := makeMeekTLSConfig(
-			support, isFronted, useObfuscatedSessionTickets)
+		tlsConfig, err := meekServer.makeMeekTLSConfig(
+			isFronted, useObfuscatedSessionTickets)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -885,12 +889,13 @@ func (server *MeekServer) getMeekCookiePayload(
 		&obfuscator.ObfuscatorConfig{
 			Keyword:     server.support.Config.MeekObfuscatedKey,
 			SeedHistory: server.obfuscatorSeedHistory,
-			IrregularLogger: func(clientIP string, logFields common.LogFields) {
+			IrregularLogger: func(clientIP string, err error, logFields common.LogFields) {
 				logIrregularTunnel(
 					server.support,
 					server.listenerTunnelProtocol,
 					server.listenerPort,
 					clientIP,
+					errors.Trace(err),
 					LogFields(logFields))
 			},
 		},
@@ -929,6 +934,162 @@ func (server *MeekServer) getMeekCookiePayload(
 	}
 
 	return payload, nil
+}
+
+// makeMeekTLSConfig creates a TLS config for a meek HTTPS listener.
+// Currently, this config is optimized for fronted meek where the nature
+// of the connection is non-circumvention; it's optimized for performance
+// assuming the peer is an uncensored CDN.
+func (server *MeekServer) makeMeekTLSConfig(
+	isFronted bool, useObfuscatedSessionTickets bool) (*tris.Config, error) {
+
+	certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	tlsCertificate, err := tris.X509KeyPair(
+		[]byte(certificate), []byte(privateKey))
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// Vary the minimum version to frustrate scanning/fingerprinting of unfronted servers.
+	// Limitation: like the certificate, this value changes on restart.
+	minVersionCandidates := []uint16{tris.VersionTLS10, tris.VersionTLS11, tris.VersionTLS12}
+	minVersion := minVersionCandidates[prng.Intn(len(minVersionCandidates))]
+
+	config := &tris.Config{
+		Certificates:            []tris.Certificate{tlsCertificate},
+		NextProtos:              []string{"http/1.1"},
+		MinVersion:              minVersion,
+		UseExtendedMasterSecret: true,
+	}
+
+	if isFronted {
+		// This is a reordering of the supported CipherSuites in golang 1.6[*]. Non-ephemeral key
+		// CipherSuites greatly reduce server load, and we try to select these since the meek
+		// protocol is providing obfuscation, not privacy/integrity (this is provided by the
+		// tunneled SSH), so we don't benefit from the perfect forward secrecy property provided
+		// by ephemeral key CipherSuites.
+		// https://github.com/golang/go/blob/1cb3044c9fcd88e1557eca1bf35845a4108bc1db/src/crypto/tls/cipher_suites.go#L75
+		//
+		// This optimization is applied only when there's a CDN in front of the meek server; in
+		// unfronted cases we prefer a more natural TLS handshake.
+		//
+		// [*] the list has since been updated, removing CipherSuites using RC4 and 3DES.
+		config.CipherSuites = []uint16{
+			tris.TLS_RSA_WITH_AES_128_GCM_SHA256,
+			tris.TLS_RSA_WITH_AES_256_GCM_SHA384,
+			tris.TLS_RSA_WITH_AES_128_CBC_SHA,
+			tris.TLS_RSA_WITH_AES_256_CBC_SHA,
+			tris.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tris.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tris.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tris.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tris.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+			tris.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+			tris.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			tris.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+		}
+		config.PreferServerCipherSuites = true
+	}
+
+	if useObfuscatedSessionTickets {
+
+		// See obfuscated session ticket overview
+		// in NewObfuscatedClientSessionCache.
+
+		config.UseObfuscatedSessionTickets = true
+
+		var obfuscatedSessionTicketKey [32]byte
+		key, err := hex.DecodeString(server.support.Config.MeekObfuscatedKey)
+		if err == nil && len(key) != 32 {
+			err = std_errors.New("invalid obfuscated session key length")
+		}
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		copy(obfuscatedSessionTicketKey[:], key)
+
+		var standardSessionTicketKey [32]byte
+		_, err = rand.Read(standardSessionTicketKey[:])
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		// Note: SessionTicketKey needs to be set, or else, it appears,
+		// tris.Config.serverInit() will clobber the value set by
+		// SetSessionTicketKeys.
+		config.SessionTicketKey = obfuscatedSessionTicketKey
+		config.SetSessionTicketKeys([][32]byte{
+			standardSessionTicketKey,
+			obfuscatedSessionTicketKey})
+	}
+
+	// When configured, initialize passthrough mode, an anti-probing defense.
+	// Clients must prove knowledge of the obfuscated key via a message sent in
+	// the TLS ClientHello random field.
+	//
+	// When clients fail to provide a valid message, the client connection is
+	// relayed to the designated passthrough address, typically another web site.
+	// The entire flow is relayed, including the original ClientHello, so the
+	// client will perform a TLS handshake with the passthrough target.
+	//
+	// Irregular events are logged for invalid client activity.
+
+	if server.passthroughAddress != "" {
+
+		config.PassthroughAddress = server.passthroughAddress
+
+		passthroughKey, err := obfuscator.DeriveTLSPassthroughKey(
+			server.support.Config.MeekObfuscatedKey)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		config.PassthroughKey = passthroughKey
+
+		config.PassthroughLogInvalidMessage = func(
+			clientIP string) {
+
+			logIrregularTunnel(
+				server.support,
+				server.listenerTunnelProtocol,
+				server.listenerPort,
+				clientIP,
+				errors.TraceNew("invalid passthrough message"),
+				nil)
+		}
+
+		config.PassthroughHistoryAddNew = func(
+			clientIP string,
+			clientRandom []byte) bool {
+
+			// strictMode is true as, unlike with meek cookies, legitimate meek clients
+			// never retry TLS connections using a previous random value.
+
+			ok, logFields := server.obfuscatorSeedHistory.AddNew(
+				true,
+				clientIP,
+				"client-random",
+				clientRandom)
+
+			if logFields != nil {
+				logIrregularTunnel(
+					server.support,
+					server.listenerTunnelProtocol,
+					server.listenerPort,
+					clientIP,
+					errors.TraceNew("duplicate passthrough message"),
+					LogFields(*logFields))
+			}
+
+			return ok
+		}
+	}
+
+	return config, nil
 }
 
 type meekSession struct {
@@ -1010,99 +1171,6 @@ func (session *meekSession) GetMetrics() common.LogFields {
 	logFields["meek_peak_cached_response_hit_size"] = atomic.LoadInt64(&session.metricPeakCachedResponseHitSize)
 	logFields["meek_cached_response_miss_position"] = atomic.LoadInt64(&session.metricCachedResponseMissPosition)
 	return logFields
-}
-
-// makeMeekTLSConfig creates a TLS config for a meek HTTPS listener.
-// Currently, this config is optimized for fronted meek where the nature
-// of the connection is non-circumvention; it's optimized for performance
-// assuming the peer is an uncensored CDN.
-func makeMeekTLSConfig(
-	support *SupportServices,
-	isFronted, useObfuscatedSessionTickets bool) (*tris.Config, error) {
-
-	certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	tlsCertificate, err := tris.X509KeyPair(
-		[]byte(certificate), []byte(privateKey))
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	// Vary the minimum version to frustrate scanning/fingerprinting of unfronted servers.
-	// Limitation: like the certificate, this value changes on restart.
-	minVersionCandidates := []uint16{tris.VersionTLS10, tris.VersionTLS11, tris.VersionTLS12}
-	minVersion := minVersionCandidates[prng.Intn(len(minVersionCandidates))]
-
-	config := &tris.Config{
-		Certificates:            []tris.Certificate{tlsCertificate},
-		NextProtos:              []string{"http/1.1"},
-		MinVersion:              minVersion,
-		UseExtendedMasterSecret: true,
-	}
-
-	if isFronted {
-		// This is a reordering of the supported CipherSuites in golang 1.6[*]. Non-ephemeral key
-		// CipherSuites greatly reduce server load, and we try to select these since the meek
-		// protocol is providing obfuscation, not privacy/integrity (this is provided by the
-		// tunneled SSH), so we don't benefit from the perfect forward secrecy property provided
-		// by ephemeral key CipherSuites.
-		// https://github.com/golang/go/blob/1cb3044c9fcd88e1557eca1bf35845a4108bc1db/src/crypto/tls/cipher_suites.go#L75
-		//
-		// This optimization is applied only when there's a CDN in front of the meek server; in
-		// unfronted cases we prefer a more natural TLS handshake.
-		//
-		// [*] the list has since been updated, removing CipherSuites using RC4 and 3DES.
-		config.CipherSuites = []uint16{
-			tris.TLS_RSA_WITH_AES_128_GCM_SHA256,
-			tris.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			tris.TLS_RSA_WITH_AES_128_CBC_SHA,
-			tris.TLS_RSA_WITH_AES_256_CBC_SHA,
-			tris.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tris.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tris.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tris.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tris.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-			tris.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
-			tris.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-			tris.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
-		}
-		config.PreferServerCipherSuites = true
-	}
-
-	if useObfuscatedSessionTickets {
-
-		// See obfuscated session ticket overview
-		// in NewObfuscatedClientSessionCache.
-
-		var obfuscatedSessionTicketKey [32]byte
-		key, err := hex.DecodeString(support.Config.MeekObfuscatedKey)
-		if err == nil && len(key) != 32 {
-			err = std_errors.New("invalid obfuscated session key length")
-		}
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		copy(obfuscatedSessionTicketKey[:], key)
-
-		var standardSessionTicketKey [32]byte
-		_, err = rand.Read(standardSessionTicketKey[:])
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		// Note: SessionTicketKey needs to be set, or else, it appears,
-		// tris.Config.serverInit() will clobber the value set by
-		// SetSessionTicketKeys.
-		config.SessionTicketKey = obfuscatedSessionTicketKey
-		config.SetSessionTicketKeys([][32]byte{
-			standardSessionTicketKey,
-			obfuscatedSessionTicketKey})
-	}
-
-	return config, nil
 }
 
 // makeMeekSessionID creates a new session ID. The variable size is intended to
@@ -1427,5 +1495,9 @@ func (conn *meekConn) SetWriteDeadline(t time.Time) error {
 // MetricsSource.GetMetrics, has a pointer only to this conn, so it calls
 // through to the session.
 func (conn *meekConn) GetMetrics() common.LogFields {
-	return conn.meekSession.GetMetrics()
+	logFields := conn.meekSession.GetMetrics()
+	if conn.meekServer.passthroughAddress != "" {
+		logFields["passthrough_address"] = conn.meekServer.passthroughAddress
+	}
+	return logFields
 }

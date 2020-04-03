@@ -69,8 +69,9 @@ type ObfuscatorConfig struct {
 	// SeedHistory and IrregularLogger are optional parameters used only by
 	// server obfuscators.
 
-	SeedHistory     *SeedHistory
-	IrregularLogger func(clientIP string, logFields common.LogFields)
+	SeedHistory       *SeedHistory
+	StrictHistoryMode bool
+	IrregularLogger   func(clientIP string, err error, logFields common.LogFields)
 }
 
 // NewClientObfuscator creates a new Obfuscator, staging a seed message to be
@@ -300,13 +301,15 @@ func readSeedMessage(
 	errBackTrace := "obfuscator.NewServerObfuscator"
 
 	if config.SeedHistory != nil {
-		ok, duplicateLogFields := config.SeedHistory.AddNew(clientIP, seed)
+		ok, duplicateLogFields := config.SeedHistory.AddNew(
+			config.StrictHistoryMode, clientIP, "obfuscator-seed", seed)
 		errStr := "duplicate obfuscation seed"
 		if duplicateLogFields != nil {
 			if config.IrregularLogger != nil {
-				common.SetIrregularTunnelErrorLogField(
-					*duplicateLogFields, errors.BackTraceNew(errBackTrace, errStr))
-				config.IrregularLogger(clientIP, *duplicateLogFields)
+				config.IrregularLogger(
+					clientIP,
+					errors.BackTraceNew(errBackTrace, errStr),
+					*duplicateLogFields)
 			}
 		}
 		if !ok {
@@ -356,10 +359,10 @@ func readSeedMessage(
 
 	if errStr != "" {
 		if config.IrregularLogger != nil {
-			errLogFields := make(common.LogFields)
-			common.SetIrregularTunnelErrorLogField(
-				errLogFields, errors.BackTraceNew(errBackTrace, errStr))
-			config.IrregularLogger(clientIP, errLogFields)
+			config.IrregularLogger(
+				clientIP,
+				errors.BackTraceNew(errBackTrace, errStr),
+				nil)
 		}
 		return nil, nil, nil, errors.TraceNew(errStr)
 	}

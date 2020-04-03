@@ -96,6 +96,7 @@ public class PsiphonTunnel {
         default public void onStartedWaitingForNetworkConnectivity() {}
         default public void onStoppedWaitingForNetworkConnectivity() {}
         default public void onActiveAuthorizationIDs(List<String> authorizations) {}
+        default public void onTrafficRateLimits(long upstreamBytesPerSecond, long downstreamBytesPerSecond) {}
         default public void onApplicationParameter(String key, Object value) {}
         default public void onServerAlert(String reason, String subject) {}
         default public void onExiting() {}
@@ -760,13 +761,17 @@ public class PsiphonTunnel {
                 diagnostic = false;
                 JSONObject data = notice.getJSONObject("data");
                 mHostService.onBytesTransferred(data.getLong("sent"), data.getLong("received"));
-            }  else if (noticeType.equals("ActiveAuthorizationIDs")) {
+            } else if (noticeType.equals("ActiveAuthorizationIDs")) {
                 JSONArray activeAuthorizationIDs = notice.getJSONObject("data").getJSONArray("IDs");
                 ArrayList<String> authorizations = new ArrayList<String>();
                 for (int i=0; i<activeAuthorizationIDs.length(); i++) {
                     authorizations.add(activeAuthorizationIDs.getString(i));
                 }
                 mHostService.onActiveAuthorizationIDs(authorizations);
+            } else if (noticeType.equals("TrafficRateLimits")) {
+                JSONObject data = notice.getJSONObject("data");
+                mHostService.onTrafficRateLimits(
+                    data.getLong("upstreamBytesPerSecond"), data.getLong("downstreamBytesPerSecond"));
             } else if (noticeType.equals("Exiting")) {
                 mHostService.onExiting();
             } else if (noticeType.equals("ActiveTunnel")) {

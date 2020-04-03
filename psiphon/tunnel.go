@@ -101,6 +101,7 @@ type Tunnel struct {
 	adjustedEstablishStartTime time.Time
 	establishDuration          time.Duration
 	establishedTime            time.Time
+	handledSSHKeepAliveFailure int32
 }
 
 // getCustomClientParameters helpers wrap the verbose function call chain
@@ -1211,9 +1212,13 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 				tunnel.dialParams.ServerEntry.GetDiagnosticID(),
 				tunnel.totalPortForwardFailures)
 
-			// If the underlying Conn has closed (meek and other plugin protocols may close
-			// themselves in certain error conditions), the tunnel has certainly failed.
-			// Otherwise, probe with an SSH keep alive.
+			// If the underlying Conn has closed (meek and other plugin protocols may
+			// close themselves in certain error conditions), the tunnel has certainly
+			// failed. Otherwise, probe with an SSH keep alive.
+			//
+			// TODO: the IsClosed case omits the failed tunnel logging and reset
+			// actions performed by sendSshKeepAlive. Should self-closing protocols
+			// perform these actions themselves?
 
 			if tunnel.conn.IsClosed() {
 				err = errors.TraceNew("underlying conn is closed")
@@ -1309,6 +1314,9 @@ func (tunnel *Tunnel) sendSshKeepAlive(
 
 	networkConnectivityPollPeriod := p.Duration(
 		parameters.SSHKeepAliveNetworkConnectivityPollingPeriod)
+
+	resetOnFailure := p.WeightedCoinFlip(
+		parameters.SSHKeepAliveResetOnFailureProbability)
 
 	p.Close()
 
@@ -1407,7 +1415,25 @@ loop:
 		tunnel.sshClient.Close()
 		tunnel.conn.Close()
 
-		if continuousNetworkConnectivity {
+		// Don't perform log or reset actions when the keep alive may have been
+		// interrupted due to shutdown.
+
+		isShutdown := false
+		select {
+		case <-tunnel.operateCtx.Done():
+			isShutdown = true
+		default:
+		}
+
+		// Ensure that at most one of the two SSH keep alive workers (periodic and
+		// probe) perform the log and reset actions.
+
+		wasHandled := atomic.CompareAndSwapInt32(&tunnel.handledSSHKeepAliveFailure, 0, 1)
+
+		if continuousNetworkConnectivity &&
+			!isShutdown &&
+			!wasHandled {
+
 			_ = RecordFailedTunnelStat(
 				tunnel.config,
 				tunnel.dialParams,
@@ -1415,6 +1441,25 @@ loop:
 				bytesUp,
 				bytesDown,
 				err)
+
+			// SSHKeepAliveResetOnFailureProbability is set when a late-lifecycle
+			// impaired protocol attack is suspected. With the given probability, reset
+			// server affinity and replay parameters for this server to avoid
+			// continuously reconnecting to the server and/or using the same protocol
+			// and dial parameters.
+
+			if resetOnFailure {
+				NoticeInfo("Delete dial parameters for %s", tunnel.dialParams.ServerEntry.GetDiagnosticID())
+				err := DeleteDialParameters(tunnel.dialParams.ServerEntry.IpAddress, tunnel.dialParams.NetworkID)
+				if err != nil {
+					NoticeWarning("DeleteDialParameters failed: %s", err)
+				}
+				NoticeInfo("Delete server affinity for %s", tunnel.dialParams.ServerEntry.GetDiagnosticID())
+				err = DeleteServerEntryAffinity(tunnel.dialParams.ServerEntry.IpAddress)
+				if err != nil {
+					NoticeWarning("DeleteServerEntryAffinity failed: %s", err)
+				}
+			}
 		}
 	}
 

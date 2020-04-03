@@ -297,6 +297,14 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
 - (void)onActiveAuthorizationIDs:(NSArray * _Nonnull)authorizations;
 
 /*!
+ Called when tunnel-core receives traffic rate limit information in the handshake
+ @param upstreamBytesPerSecond  upstream rate limit; 0 for no limit
+ @param downstreamBytesPerSecond  downstream rate limit; 0 for no limit
+ Swift: @code func onTrafficRateLimits(_ upstreamBytesPerSecond: Int64, _ downstreamBytesPerSecond: Int64) @endcode
+ */
+- (void)onTrafficRateLimits:(int64_t)upstreamBytesPerSecond :(int64_t)downstreamBytesPerSecond;
+
+/*!
  Called when tunnel-core receives an alert from the server.
  @param reason The reason for the alert.
  @param subject Additional context or classification of the reason; blank for none.

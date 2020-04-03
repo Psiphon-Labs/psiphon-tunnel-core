@@ -50,9 +50,3 @@ type MetricsSource interface {
 	// metrics from the MetricsSource
 	GetMetrics() LogFields
 }
-
-func SetIrregularTunnelErrorLogField(
-	logFields LogFields, tunnelError error) {
-
-	logFields["tunnel_error"] = tunnelError
-}
