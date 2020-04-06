@@ -697,11 +697,17 @@ func readSocks4aConnect(r *bufio.Reader) (req SocksRequest, err error) {
 	}
 	req.Username = string(usernameBytes[:len(usernameBytes)-1])
 
-	req.Args, err = parseClientParameters(req.Username)
-	if err != nil {
-		err = newTemporaryNetError("readSocks4aConnect: Failed to parse client parameters: %s", err.Error())
-		return
-	}
+	// [Psiphon]
+	// Since we don't need pluggable transport parameters and prefer enabling clients to proxy,
+	// don't parse or validate username/password as PT args.
+	/*
+		req.Args, err = parseClientParameters(req.Username)
+		if err != nil {
+			err = newTemporaryNetError("readSocks4aConnect: Failed to parse client parameters: %s", err.Error())
+			return
+		}
+	*/
+	// [Psiphon]
 
 	var host string
 	if rawHostIP[0] == 0 && rawHostIP[1] == 0 && rawHostIP[2] == 0 && rawHostIP[3] != 0 {
