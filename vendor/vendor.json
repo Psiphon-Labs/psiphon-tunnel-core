@@ -544,6 +544,12 @@
 			"revisionTime": "2017-07-04T07:02:18Z"
 		},
 		{
+			"checksumSHA1": "6uuI14UtHlM3Ymj2nGUo/HyNweM=",
+			"path": "github.com/wader/filtertransport",
+			"revision": "bdd9e61eee7804e94ceb927c896b59920345c6e4",
+			"revisionTime": "2020-03-16T22:15:34Z"
+		},
+		{
 			"checksumSHA1": "0Gpx49mdQXAyAQkFPePuDsRhESI=",
 			"path": "github.com/zach-klippenstein/goregen",
 			"revision": "795b5e3961ea1912fde60af417ad85e86acc0d6a",

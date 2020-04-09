@@ -102,6 +102,7 @@ Psiphon Tunnel Core uses:
 * [lucas-clemente/quic-go](https://github.com/lucas-clemente/quic-go)
 * [cloudflare/tls-tris](https://github.com/cloudflare/tls-tris)
 * [Yawning/chacha20](https://github.com/Yawning/chacha20)
+* [wader/filtertransport](https://github.com/wader/filtertransport)
 
 Licensing
 --------------------------------------------------------------------------------
