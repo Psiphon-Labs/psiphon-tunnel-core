@@ -726,7 +726,7 @@ func NoticeLocalProxyError(proxyType string, err error) {
 	}
 
 	outputRepetitiveNotice(
-		"LocalProxyError"+proxyType, repetitionMessage, 1,
+		"LocalProxyError-"+proxyType, repetitionMessage, 1,
 		"LocalProxyError", noticeIsDiagnostic,
 		"message", err.Error())
 }
@@ -867,8 +867,12 @@ func NoticeApplicationParameters(keyValues parameters.KeyValues) {
 // NoticeServerAlert reports server alerts. Each distinct server alert is
 // reported at most once per session.
 func NoticeServerAlert(alert protocol.AlertRequest) {
+
+	// This key ensures that each distinct server alert will appear, not repeat,
+	// and not interfere with other alerts appearing.
+	repetitionKey := fmt.Sprintf("ServerAlert-%+v", alert)
 	outputRepetitiveNotice(
-		"ServerAlert", fmt.Sprintf("%+v", alert), 0,
+		repetitionKey, "", 0,
 		"ServerAlert", noticeIsDiagnostic, "reason", alert.Reason, "subject", alert.Subject)
 }
 
@@ -891,20 +895,22 @@ func outputRepetitiveNotice(
 	repetitiveNoticeMutex.Lock()
 	defer repetitiveNoticeMutex.Unlock()
 
-	state, ok := repetitiveNoticeStates[repetitionKey]
-	if !ok {
+	state, keyFound := repetitiveNoticeStates[repetitionKey]
+	if !keyFound {
 		state = new(repetitiveNoticeState)
 		repetitiveNoticeStates[repetitionKey] = state
 	}
 
 	emit := true
-	if repetitionMessage != state.message {
-		state.message = repetitionMessage
-		state.repeats = 0
-	} else {
-		state.repeats += 1
-		if state.repeats > repeatLimit {
-			emit = false
+	if keyFound {
+		if repetitionMessage != state.message {
+			state.message = repetitionMessage
+			state.repeats = 0
+		} else {
+			state.repeats += 1
+			if state.repeats > repeatLimit {
+				emit = false
+			}
 		}
 	}
 

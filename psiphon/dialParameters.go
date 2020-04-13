@@ -520,9 +520,14 @@ func MakeDialParameters(
 	case protocol.TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH:
 		dialParams.MeekDialAddress = fmt.Sprintf("%s:443", dialParams.MeekFrontingDialAddress)
 		dialParams.MeekHostHeader = dialParams.MeekFrontingHost
-		if !dialParams.MeekTransformedHostName {
+		if serverEntry.MeekFrontingDisableSNI {
+			dialParams.MeekSNIServerName = ""
+			// When SNI is omitted, the transformed host name is not used.
+			dialParams.MeekTransformedHostName = false
+		} else if !dialParams.MeekTransformedHostName {
 			dialParams.MeekSNIServerName = dialParams.MeekFrontingDialAddress
 		}
+
 	case protocol.TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH:
 		// Note: port comes from marionnete "format"
 		dialParams.DirectDialAddress = serverEntry.IpAddress
@@ -532,6 +537,8 @@ func MakeDialParameters(
 		dialParams.MeekHostHeader = dialParams.MeekFrontingHost
 		if serverEntry.MeekFrontingDisableSNI {
 			dialParams.MeekSNIServerName = ""
+			// When SNI is omitted, the transformed host name is not used.
+			dialParams.MeekTransformedHostName = false
 		} else if !dialParams.MeekTransformedHostName {
 			dialParams.MeekSNIServerName = dialParams.MeekFrontingDialAddress
 		}
@@ -539,6 +546,8 @@ func MakeDialParameters(
 	case protocol.TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
 		dialParams.MeekDialAddress = fmt.Sprintf("%s:80", dialParams.MeekFrontingDialAddress)
 		dialParams.MeekHostHeader = dialParams.MeekFrontingHost
+		// For FRONTED HTTP, the Host header cannot be transformed.
+		dialParams.MeekTransformedHostName = false
 
 	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 		dialParams.MeekDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.MeekServerPort)

@@ -45,10 +45,10 @@
 			"revisionTime": "2016-08-25T06:51:56Z"
 		},
 		{
-			"checksumSHA1": "Ve6jaI7ogHtTWq8QoTJxQpEaGuQ=",
+			"checksumSHA1": "iMZt2Rw0uicop75ZL/vi9r5/gKA=",
 			"path": "github.com/Psiphon-Labs/goptlib",
-			"revision": "18963be5f9c52609b1dd6960d1370d34e63fc3fb",
-			"revisionTime": "2018-04-26T17:24:40Z"
+			"revision": "c0e32a7a3464402b8b0f772794f621e6cd7fdd1e",
+			"revisionTime": "2020-04-06T16:51:25Z"
 		},
 		{
 			"checksumSHA1": "fkgr70NoN6wYgBTWNjFWZscOnl0=",
@@ -542,6 +542,12 @@
 			"path": "github.com/syndtr/gocapability/capability",
 			"revision": "db04d3cc01c8b54962a58ec7e491717d06cfcc16",
 			"revisionTime": "2017-07-04T07:02:18Z"
+		},
+		{
+			"checksumSHA1": "6uuI14UtHlM3Ymj2nGUo/HyNweM=",
+			"path": "github.com/wader/filtertransport",
+			"revision": "bdd9e61eee7804e94ceb927c896b59920345c6e4",
+			"revisionTime": "2020-03-16T22:15:34Z"
 		},
 		{
 			"checksumSHA1": "0Gpx49mdQXAyAQkFPePuDsRhESI=",

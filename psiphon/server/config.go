@@ -360,6 +360,10 @@ type Config struct {
 	// addition to logging events.
 	BlocklistActive bool
 
+	// AllowBogons disables port forward bogon checks. This should be used only
+	// for testing.
+	AllowBogons bool
+
 	// OwnEncodedServerEntries is a list of the server's own encoded server
 	// entries, idenfified by server entry tag. These values are used in the
 	// handshake API to update clients that don't yet have a signed copy of these

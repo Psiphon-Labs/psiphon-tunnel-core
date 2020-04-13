@@ -2879,9 +2879,15 @@ func (sshClient *sshClient) isPortForwardPermitted(
 	remoteIP net.IP,
 	port int) bool {
 
-	// Disallow connection to loopback. This is a failsafe. The server
-	// should be run on a host with correctly configured firewall rules.
-	if remoteIP.IsLoopback() {
+	// Disallow connection to bogons.
+	//
+	// As a security measure, this is a failsafe. The server should be run on a
+	// host with correctly configured firewall rules.
+	//
+	// This check also avoids spurious disallowed traffic alerts for destinations
+	// that are impossible to reach.
+
+	if !sshClient.sshServer.support.Config.AllowBogons && IsBogon(remoteIP) {
 		return false
 	}
 
